@@ -20,7 +20,7 @@ Who simulates the game world's bodies?
 
 - **A) The hmsc host sim** — `framework/v8_bindings_physics_lab.zig` (`__hmsc_physics_step`,
   `__hmsc_register_heightfield`): domain-specific, heightfield-aware, packed-f32
-  buffer once per frame. LIVE — drives hmsc today via `cart/hmsc/state/hostPhysics.ts`.
+  buffer once per frame. LIVE — drives hmsc today via `cart/hmsc-int/state/hostPhysics.ts`.
 - **B) Bullet** — `framework/phys/physics3d.zig` + C shim: general rigid bodies,
   raycast, 8 worlds × 256 bodies. DORMANT — wired to nothing; heightfield stubbed null.
 - **C) Verlet-in-cart** — `cart/head_lab/ragdoll.ts`: 15 particles / 24 constraints,
@@ -40,7 +40,7 @@ One figure stack for every human in the game.
   sculptable Globe parts, generated/sculpted `.hed` faces, 25 named bones,
   box hitboxes, full clothing/accessories, Verlet ragdoll, semantic anchors.
   Consumers: planet_run, ragdoll_lab, combat_lab, pathing_lab.
-- **B) hmsc humanoid** — `cart/hmsc/render3d/humanoid/`: fixed primitive parts,
+- **B) hmsc humanoid** — `cart/hmsc-int/render3d/humanoid/`: fixed primitive parts,
   baked face decals, 6 capsule damage zones, palette recolors, no physics.
   Consumers: hmsc, hmsc_scale_lab, hmsc_massive_map_lab.
 - **C) The combat_lab hybrid** — head_lab geometry/bones/ragdoll + hmsc's
@@ -89,7 +89,7 @@ ANSWER: We want C performance, with D and A harmonized. the A system is what we 
 - **A) Host A\*** — `framework/game/pathing.zig` via `v8_bindings_game_pathing.zig` (`__path_*`/`__game_pathing_*`; captured out of `v8_bindings_pathing.zig` 2026-06-05) +
   `runtime/pathing.ts` (pre-calculated-until-disrupted) + `runtime/motion.ts`
   (deterministic plans). Proven in pathing_lab with full road grammar.
-- **B) hmsc's current JS pathing** — `cart/hmsc/world/pathing.ts`
+- **B) hmsc's current JS pathing** — `cart/hmsc-int/world/pathing.ts`
   (movementCostForCell per A* node, JS-side).
 
 Consensus lean: A becomes THE traffic backend; the lane-discipline JS
@@ -142,7 +142,7 @@ CONFIRM (y/n): so idk yet. I do know I want to have the game loop be a set amoun
 ### Q9. Chance / hit-% engine
 - **A) scape's** — `cart/scape/systems/chance.ts`: multiplier `ChanceBreakdown`
   (legible WHY-is-it-33%), weapon RangeProfile, tile LoS w/ glass windows.
-- **B) hmsc's** — `cart/hmsc/npc/systems/chance.ts`: `hitChance({rangeMeters,
+- **B) hmsc's** — `cart/hmsc-int/npc/systems/chance.ts`: `hitChance({rangeMeters,
   coverFraction,…})`; combat_lab built the missing `coverFractionOf` producer.
 - **C) The documented hybrid** — scape's breakdown surface + hmsc/combat_lab's
   cover-fraction input. Ground-truth-vs-display-warp law stays either way.
@@ -157,7 +157,7 @@ ANSWER: hybrid, and we need to lab this extensively
   styles/roles registries, DSL channels (wheels/steer/brake). Consumer: pathing_lab.
 - **B) ragdoll_lab's CarMeshes** — `cart/ragdoll_lab/car.tsx` + separate CAR_HALF
   collision constants. One consumer (itself).
-- **C) hmsc's structure cars** — `cart/hmsc/render3d/structures/Car.tsx` + `HMSC_SCALE.car`.
+- **C) hmsc's structure cars** — `cart/hmsc-int/render3d/structures/Car.tsx` + `HMSC_SCALE.car`.
 
 Consensus lean: A is the vehicle module; B/C consume or retire.
 
@@ -559,7 +559,7 @@ with bake-once discipline.
    loop-shapes lab joins the SHOW-ME queue; until it rules, the ground floor's
    loop API stays deliberately MINIMAL so nothing is preempted.
 4. **Scale: the WORLD SCALE IS SET. 1 tile = 1 meter.** Player collider = 1.65m
-   (verified: `HMSC_SCALE.playerCapsuleHeightMeters`, `cart/hmsc/world/scale.ts:8`);
+   (verified: `HMSC_SCALE.playerCapsuleHeightMeters`, `cart/hmsc-int/world/scale.ts:8`);
    the 2.04m in the scale labs is the VISUAL head-top (stylized-tall) — collider
    and visual are different layers, both canonical. Vehicle scale/quality is
    ongoing work against this fixed contract, not a blocker.

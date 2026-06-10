@@ -14,8 +14,9 @@
 // Absolute children take raw PIXELS (the engine resolves no % left/top —
 // memory abs_left_top_no_percent), which is exactly what the doc stores.
 
-import { Box, Image, Text } from '@reactjit/primitives';
+import { Box, Effect, Image, Text } from '@reactjit/primitives';
 import type { DecalAlign, DecalDoc, DecalNode } from './decal';
+import { shaderSpec } from './shaders';
 
 function alignItems(align: DecalAlign | undefined): 'flex-start' | 'center' | 'flex-end' {
   return align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start';
@@ -23,6 +24,7 @@ function alignItems(align: DecalAlign | undefined): 'flex-start' | 'center' | 'f
 
 function DecalNodeView(props: { node: DecalNode; sx: number; sy: number }) {
   const { node, sx, sy } = props;
+  if (node.hidden) return null;
   const frame = {
     position: 'absolute' as const,
     left: node.x * sx,
@@ -32,16 +34,23 @@ function DecalNodeView(props: { node: DecalNode; sx: number; sy: number }) {
     opacity: node.opacity ?? 1,
   };
   if (node.kind === 'rect') {
+    const spec = node.fillShaderId ? shaderSpec(node.fillShaderId) : undefined;
+    const fill = spec && node.fillData ? (
+      <Effect shader={spec.shader} data={node.fillData} style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%' }} />
+    ) : null;
     return (
       <Box
         style={{
           ...frame,
-          backgroundColor: node.bg || '#00000000',
+          backgroundColor: fill ? '#00000000' : node.bg || '#00000000',
           borderRadius: (node.borderRadius ?? 0) * Math.min(sx, sy),
           borderWidth: (node.borderWidth ?? 0) * Math.min(sx, sy),
           borderColor: node.borderColor ?? '#00000000',
+          overflow: fill ? 'hidden' : undefined,
         }}
-      />
+      >
+        {fill}
+      </Box>
     );
   }
   if (node.kind === 'image') {

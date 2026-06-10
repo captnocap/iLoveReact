@@ -13,10 +13,10 @@
 import { memo } from 'react';
 import { Box, Scene3D } from '@reactjit/primitives';
 import { IsometricCamera } from '@reactjit/cameras';
-import type { GameState } from '../hmsc/design';
-import { WorldStatics } from '../hmsc/render3d/GameWorld3D';
-import { TileSurfaceCaptures } from '../hmsc/render3d/tileSurface';
-import { buildHmscSky } from '../hmsc/render3d/sky';
+import type { GameState } from '../hmsc-int/design';
+import { WorldStatics } from '../hmsc-int/render3d/GameWorld3D';
+import { TileSurfaceCaptures } from '../hmsc-int/render3d/tileSurface';
+import { buildHmscSky } from '../hmsc-int/render3d/sky';
 
 // Where the iso camera looks + how far out it orbits. Centre defaults to the
 // world middle; the caller drives target/yaw/dist so the preview can follow the

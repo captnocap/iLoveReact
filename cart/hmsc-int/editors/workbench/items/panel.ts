@@ -7,6 +7,7 @@ import { PAINT_EDITOR_TUNING, type SculptMode } from '../../characters/paintKit'
 import { ITEM_DRAFT_DEFAULTS } from '../../items/bake';
 import { VOXEL_BLOCKOUT_TUNING } from '../../voxels/stream';
 import { GAME_ITEMS } from '../../../game/items';
+import type { ItemRepresentation } from '../../items/stream';
 import {
   gameItemRosterId, streamItemRosterId, WORKING_ITEM_ROSTER_ID,
   ITEM_KNOBS, VOXEL_FACES, VOXEL_KINDS, VOXEL_PALETTE, itemWorkbenchStore,
@@ -21,6 +22,7 @@ export const ITEM_LENSES: LensSpec[] = [
 
 const SCULPT_MODES: SculptMode[] = ['raise', 'lower', 'flatten', 'smooth'];
 const VOXEL_TOOLS: VoxelTool[] = ['build', 'mine'];
+const REPRESENTATIONS: ItemRepresentation[] = ['globe', 'voxel-surface', 'voxel-mesh'];
 
 function sourceLabel(s: ItemStore): string {
   return s.draft.source
@@ -40,6 +42,26 @@ function groupLabel(s: ItemStore): string {
 
 export function itemPanel(s: ItemStore): PanelSpec {
   const groups: PanelSpec['groups'] = [];
+  const registry = s.selectedRegistryItem();
+  if (registry) {
+    groups.push({
+      title: 'IDENTITY',
+      fields: [
+        { k: 'name', t: 'val', get: () => registry.label },
+        { k: 'status', t: 'val', get: () => `registry item · ${registry.scaleStatus} scale` },
+        { k: 'source', t: 'val', get: () => `${registry.id} · GAME_ITEMS` },
+      ],
+    });
+    groups.push({
+      title: 'ITEM SHAPE',
+      fields: [
+        { k: 'parts', t: 'val', get: () => `${registry.parts.length}` },
+        { k: 'note', t: 'val', get: () => registry.note },
+      ],
+    });
+    return { groups };
+  }
+
   groups.push({
     title: 'IDENTITY',
     fields: [
@@ -52,6 +74,7 @@ export function itemPanel(s: ItemStore): PanelSpec {
   groups.push({
     title: 'ITEM SHAPE',
     fields: [
+      { k: 'representation', t: 'enum', opts: REPRESENTATIONS, get: () => s.draft.representation, set: (v) => s.setRepresentation(v as ItemRepresentation) },
       { k: 'base radius', t: 'num', ...ITEM_KNOBS.radius, get: () => s.draft.radius, set: (v) => s.setRadius(v) },
       { k: 'depth amount', t: 'num', ...ITEM_KNOBS.amount, get: () => s.draft.amount, set: (v) => s.setAmount(v) },
       { k: 'color', t: 'color', opts: ITEM_DRAFT_DEFAULTS.colors.slice(), get: () => s.draft.color, set: (v) => s.setColor(v) },
@@ -111,7 +134,10 @@ function rosterDoors(s: ItemStore) {
       return authored ? streamItemRosterId(authored) : rows[0]?.id;
     },
     onPick: (id: string) => s.loadFromRoster(id),
-    select: () => s,
+    select: (id?: string) => {
+      if (id && s.selectedRosterId() !== id) s.loadFromRoster(id, { history: false });
+      return s;
+    },
     subscribe: (fn: () => void) => s.subscribe(fn),
   };
 }

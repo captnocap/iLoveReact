@@ -17,7 +17,7 @@
 // reconciler in sight). The pane holds one in a ref and drives it from input.
 
 import { GAME_CAMERA, type PieceRay, type Rect, type Solved, type Vec3 } from './game';
-import { HMSC_SCALE } from '../hmsc/world/scale';
+import { HMSC_SCALE } from './world/scale';
 
 const ISO_YAW_START = 45;      // true-iso opens looking at tile CORNERS, not faces
 export const ISO_FOV = 22;     // narrow → flattens perspective toward orthographic

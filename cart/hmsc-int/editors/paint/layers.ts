@@ -20,6 +20,7 @@ import {
   decodeBinaryMask, decodeGrid, encodeBinaryMask, encodeGrid, type RleGrid,
 } from '@reactjit/workspace/rle';
 import { PAINT_TUNING } from './tuning';
+import { normalizePaintBrushSettings, type PaintBrushSettings } from './brushKinds';
 import type { ClickPoint } from './backends/types';
 import type { CustomSurface, PaintBlendMode, SurfaceId } from './surfaces';
 
@@ -39,6 +40,12 @@ export type PaintLayerConfig = {
   dim: number;
 };
 
+export type PaintLayerImage = {
+  path: string;
+  name: string;
+  dims: { w: number; h: number } | null;
+};
+
 /** One layer's metadata. Mask bytes live on the GPU under the two paintable
  *  ids the surface derives from `id` (see paintableIdsFor). */
 export type PaintLayer = {
@@ -46,6 +53,7 @@ export type PaintLayer = {
   name: string;
   groupName: string | null;
   config: PaintLayerConfig;
+  image: PaintLayerImage | null;
   /** smart-select click history that drives `base` (empty = brush-only) */
   clicks: ClickPoint[];
 };
@@ -61,6 +69,7 @@ export type PaintClipping = {
   baseBytes: Uint8Array | null;
   brushBytes: Uint8Array | null;
   config: PaintLayerConfig;
+  image: PaintLayerImage | null;
   clicks: ClickPoint[];
   sourceName: string;
 };
@@ -173,14 +182,98 @@ export function cloneLayerConfig(c: PaintLayerConfig): PaintLayerConfig {
   return { ...c, colors: c.colors.slice() };
 }
 
+export function cloneLayerImage(image: PaintLayerImage | null | undefined): PaintLayerImage | null {
+  if (!image || typeof image.path !== 'string' || image.path.length === 0) return null;
+  const dims = image.dims && Number.isFinite(image.dims.w) && Number.isFinite(image.dims.h)
+    ? { w: image.dims.w, h: image.dims.h }
+    : null;
+  return { path: image.path, name: image.name || image.path.split('/').pop() || 'image', dims };
+}
+
 export function makeLayer(seed: PaintLookDefaults, ordinal: number, name?: string): PaintLayer {
   return {
     id: mintLayerId(),
     name: name ?? `Layer ${ordinal + 1}`,
     groupName: null,
     config: defaultLayerConfig(seed, ordinal),
+    image: null,
     clicks: [],
   };
+}
+
+export type PaintLayerControl =
+  | 'select'
+  | 'visibility'
+  | 'duplicate'
+  | 'move-up'
+  | 'move-down'
+  | 'merge-down'
+  | 'cut'
+  | 'delete';
+
+export const PAINT_LAYER_CONTROLS: readonly PaintLayerControl[] = Object.freeze([
+  'select',
+  'visibility',
+  'duplicate',
+  'move-up',
+  'move-down',
+  'merge-down',
+  'cut',
+  'delete',
+]);
+
+/** Every row in the paint stack is an operable layer row. Animation-authored
+ *  rows such as mouth/eyes may arrive with a group name, but grouping is not
+ *  a weaker layer kind and must not drop the layer controls. */
+export function controlsForPaintLayer(_layer: Pick<PaintLayer, 'id' | 'name' | 'groupName'>): readonly PaintLayerControl[] {
+  return PAINT_LAYER_CONTROLS;
+}
+
+export type PaintLayerActionTarget = {
+  layers: PaintLayer[];
+  setActiveLayer: (i: number) => void;
+  toggleLayerMute: (i: number) => void;
+  duplicateLayer: (i: number) => void;
+  moveLayer: (i: number, dir: -1 | 1) => void;
+  moveLayerById?: (id: string, dir: -1 | 1) => void;
+  mergeLayer: (i: number) => void;
+  cutLayer: (i: number) => void;
+  deleteLayer: (i: number) => void;
+};
+
+export function paintLayerDisplayOrder(s: Pick<PaintLayerActionTarget, 'layers'>): number[] {
+  return s.layers.map((_, k) => s.layers.length - 1 - k);
+}
+
+export function paintLayerActionEnabled(s: Pick<PaintLayerActionTarget, 'layers'>, index: number, action: PaintLayerControl): boolean {
+  const canTarget = index >= 0 && index < s.layers.length;
+  if (!canTarget && action !== 'select') return false;
+  switch (action) {
+    case 'move-up': return index < s.layers.length - 1;
+    case 'move-down': return index > 0;
+    case 'merge-down': return index > 0;
+    default: return canTarget || action === 'select';
+  }
+}
+
+export function runPaintLayerAction(s: PaintLayerActionTarget, index: number, action: PaintLayerControl, layerId?: string): void {
+  if (!paintLayerActionEnabled(s, index, action)) return;
+  switch (action) {
+    case 'select': s.setActiveLayer(index); return;
+    case 'visibility': s.toggleLayerMute(index); return;
+    case 'duplicate': s.duplicateLayer(index); return;
+    case 'move-up':
+      if (layerId && s.moveLayerById) s.moveLayerById(layerId, 1);
+      else s.moveLayer(index, 1);
+      return;
+    case 'move-down':
+      if (layerId && s.moveLayerById) s.moveLayerById(layerId, -1);
+      else s.moveLayer(index, -1);
+      return;
+    case 'merge-down': s.mergeLayer(index); return;
+    case 'cut': s.cutLayer(index); return;
+    case 'delete': s.deleteLayer(index); return;
+  }
 }
 
 /** Stack reorder (swap i and its neighbor). Returns the same array when the
@@ -190,6 +283,28 @@ export function moveLayerInStack<T>(stack: T[], i: number, dir: -1 | 1): T[] {
   if (i < 0 || i >= stack.length || j < 0 || j >= stack.length) return stack;
   const next = stack.slice();
   [next[i], next[j]] = [next[j], next[i]];
+  return next;
+}
+
+/** Idempotent anchored move. The layer crosses one specific neighbor, so if a
+ *  functional state updater is replayed against its own output, the second pass
+ *  sees the layer already on the requested side and returns the same stack. */
+export function moveLayerAcrossNeighbor<T extends { id: string }>(
+  stack: T[],
+  id: string,
+  dir: -1 | 1,
+  neighborId: string,
+): T[] {
+  const i = stack.findIndex((l) => l.id === id);
+  const j = stack.findIndex((l) => l.id === neighborId);
+  if (i < 0 || j < 0 || i === j) return stack;
+  if (dir === 1 && i === j + 1) return stack;
+  if (dir === -1 && i === j - 1) return stack;
+  const next = stack.slice();
+  const [layer] = next.splice(i, 1);
+  const anchor = next.findIndex((l) => l.id === neighborId);
+  if (anchor < 0) return stack;
+  next.splice(dir === 1 ? anchor + 1 : anchor, 0, layer);
   return next;
 }
 
@@ -210,6 +325,8 @@ export type PaintDocLayer = {
   name: string;
   groupName: string | null;
   config: PaintLayerConfig;
+  /** optional bitmap layer source; rendered as a normal stack layer */
+  image?: PaintLayerImage | null;
   /** binary RLE of the smart base (null = empty) */
   base: RleGrid | null;
   /** value-grid RLE of the 3-state override (null = untouched) */
@@ -228,6 +345,8 @@ export type PaintDocument = {
   tool: PaintTool;
   mode: PaintMode;
   brushPx: number;
+  /** Optional in v1 documents; old saves omit it and fall back to hard round. */
+  brush?: PaintBrushSettings;
   defaults: PaintLookDefaults;
   customSurfaces: CustomSurface[];
   /** Optional in v1 documents; old saves omit it and fall back to P2 tuning. */
@@ -261,6 +380,7 @@ export type BuildPaintDocumentArgs = {
   tool: PaintTool;
   mode: PaintMode;
   brushPx: number;
+  brush?: PaintBrushSettings;
   defaults: PaintLookDefaults;
   customSurfaces: CustomSurface[];
   backendTunables?: PaintBackendTunables;
@@ -277,6 +397,7 @@ export function buildPaintDocument(args: BuildPaintDocumentArgs): PaintDocument 
       name: l.name,
       groupName: l.groupName,
       config: cloneLayerConfig(l.config),
+      image: cloneLayerImage(l.image),
       base: l.base && w > 0 && h > 0 ? encodeBinaryMask(l.base, w, h) : null,
       brush: l.brush && w > 0 && h > 0 && brushHasContent(l.brush) ? encodeBrush(l.brush, w, h) : null,
       clicks: l.clicks.map((c) => ({ x: c.x, y: c.y, label: c.label })),
@@ -285,6 +406,7 @@ export function buildPaintDocument(args: BuildPaintDocumentArgs): PaintDocument 
     tool: args.tool,
     mode: args.mode,
     brushPx: args.brushPx,
+    brush: normalizePaintBrushSettings(args.brush),
     defaults: { ...args.defaults, colors: args.defaults.colors.slice() },
     customSurfaces: args.customSurfaces.map((cs) => ({ ...cs })),
     backendTunables: args.backendTunables ? { ...args.backendTunables } : undefined,
@@ -298,6 +420,7 @@ export function parsePaintDocument(text: string): PaintDocument | null {
   if (!doc.dims || typeof doc.dims.w !== 'number' || typeof doc.dims.h !== 'number') return null;
   if (!Array.isArray(doc.layers)) doc.layers = [];
   if (typeof doc.activeLayer !== 'number') doc.activeLayer = doc.layers.length > 0 ? 0 : -1;
+  doc.brush = normalizePaintBrushSettings(doc.brush);
   return doc as PaintDocument;
 }
 
@@ -314,6 +437,7 @@ export function inflatePaintDocument(doc: PaintDocument): PaintLayerBytes[] {
     name: l.name,
     groupName: l.groupName ?? null,
     config: cloneLayerConfig(l.config),
+    image: cloneLayerImage(l.image),
     base: l.base ? decodeBinaryMask(l.base) : null,
     brush: l.brush ? decodeBrush(l.brush) : null,
     clicks: (l.clicks ?? []).map((c) => ({ x: c.x, y: c.y, label: c.label })),

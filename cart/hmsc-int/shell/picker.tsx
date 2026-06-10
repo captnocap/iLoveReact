@@ -11,7 +11,7 @@
 // `pick` field/chooser; exactly one implementation in the app.
 
 import { useState } from 'react';
-import { Box, Pressable, ScrollView, Text } from '@reactjit/primitives';
+import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { C, accentFor } from './workbench.cls';
 
 export type PickOption = { id: string; label: string; group?: string };
@@ -49,39 +49,57 @@ export function PickerChooser(props: {
   const groups = groupOptions(shown);
 
   return (
-    <Box style={{ width: '100%', flexDirection: 'column', gap: 4, borderWidth: 1, borderColor: accentFor('borderFocus'), borderRadius: 6, backgroundColor: accentFor('bgElevated'), padding: 6 }}>
-      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-        <C.RailSearchInput text={query} onChangeText={setQuery} placeholder="search…" />
+    <Box style={{ width: '100%', maxWidth: '100%', minWidth: 0, flexDirection: 'column', gap: 4, borderWidth: 1, borderColor: accentFor('borderFocus'), borderRadius: 6, backgroundColor: accentFor('bgElevated'), padding: 6, overflow: 'hidden' }}>
+      <Box style={{ width: '100%', minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="search…"
+          style={{ flexGrow: 1, minWidth: 0, paddingLeft: 8, paddingTop: 4, paddingBottom: 4, borderWidth: 1, borderColor: accentFor('controlBorder'), borderRadius: 4, backgroundColor: accentFor('controlBg'), color: accentFor('text'), fontSize: 11 }}
+        />
         <Pressable onPress={props.onClose} style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2 }}>
           <Text fontSize={11} color={accentFor('textDim')} style={{ fontWeight: 800 }}>✕</Text>
         </Pressable>
       </Box>
       <ScrollView showScrollbar style={{ width: '100%', maxHeight: 220, minHeight: 0 }}>
-        <Box style={{ flexDirection: 'column', gap: 5, paddingBottom: 4 }}>
+        <Box style={{ width: '100%', minWidth: 0, flexDirection: 'column', gap: 5, paddingBottom: 4 }}>
           {props.clearLabel ? (
-            <C.FieldEnumWrap>
-              <C.EnumCell onPress={() => props.onPick(null)}>
-                <C.EnumCellText>{`(${props.clearLabel})`}</C.EnumCellText>
-              </C.EnumCell>
-            </C.FieldEnumWrap>
+            <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3, rowGap: 3, maxWidth: '100%' }}>
+              <Pressable
+                onPress={() => props.onPick(null)}
+                style={{ maxWidth: '100%', paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 3, borderWidth: 1, borderColor: accentFor('controlBorder'), backgroundColor: accentFor('controlBg') }}
+              >
+                <Text fontSize={9} color={accentFor('textDim')} style={{ fontFamily: 'monospace', fontWeight: 700 }} numberOfLines={1}>{`(${props.clearLabel})`}</Text>
+              </Pressable>
+            </Box>
           ) : null}
           {groups.map(({ group, options }) => (
-            <Box key={group} style={{ flexDirection: 'column', gap: 2 }}>
+            <Box key={group} style={{ width: '100%', minWidth: 0, flexDirection: 'column', gap: 2 }}>
               <Text fontSize={9} color={accentFor('textFaint')} style={{ fontFamily: 'monospace', fontWeight: 800, letterSpacing: 1 }}>
                 {`${group.toUpperCase()} · ${options.length}`}
               </Text>
-              <C.FieldEnumWrap>
+              <Box style={{ width: '100%', minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: 3, rowGap: 3 }}>
                 {options.map((o) => {
                   const on = o.id === props.current;
-                  const Cell = on ? C.EnumCellOn : C.EnumCell;
-                  const T = on ? C.EnumCellTextOn : C.EnumCellText;
                   return (
-                    <Cell key={o.id} onPress={() => props.onPick(o.id)}>
-                      <T>{o.label}</T>
-                    </Cell>
+                    <Pressable
+                      key={o.id}
+                      onPress={() => props.onPick(o.id)}
+                      style={{
+                        maxWidth: '100%',
+                        paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3,
+                        borderRadius: 3, borderWidth: 1,
+                        borderColor: on ? accentFor('primary') : accentFor('controlBorder'),
+                        backgroundColor: on ? accentFor('segActiveBg') : accentFor('controlBg'),
+                      }}
+                    >
+                      <Text fontSize={9} color={on ? accentFor('segActiveText') : accentFor('textDim')} style={{ fontFamily: 'monospace', fontWeight: 700 }} numberOfLines={1}>
+                        {o.label}
+                      </Text>
+                    </Pressable>
                   );
                 })}
-              </C.FieldEnumWrap>
+              </Box>
             </Box>
           ))}
           {groups.length === 0 ? (

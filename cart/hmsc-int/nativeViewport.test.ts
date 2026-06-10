@@ -82,6 +82,17 @@ test('IsoPreview uses native FreeFly drive, not a JS animation-frame camera loop
   assert(!source.includes('target={target}'), 'JS-computed target must not drive the renderer');
 });
 
+test('IsoAuthor uses native render drive; IsoStage solve stays semantic only', () => {
+  const source = read('cart/hmsc-int/IsoAuthor.tsx');
+  assert(source.includes('<Scene3D.Camera nativeCamera ref={cameraRef}'), 'renderer-consumed camera node must opt into nativeCamera');
+  assert(source.includes('GAME_NATIVE_CAMERA.forNode(nodeId)'), 'surface must engage the node-scoped native controller with the real node id');
+  assert(source.includes('stage.nativeOrbitParams()'), 'iso rig params must be transported into the native controller');
+  assert(source.includes('ctl.setSmoothing(0)'), 'authoring camera should not trail cursor pan/zoom');
+  assert(!source.includes('position={cam.pos}'), 'JS-solved camera position must not drive the renderer');
+  assert(!source.includes('target={cam.target}'), 'JS-solved camera target must not drive the renderer');
+  assert(!source.includes('const cam = stage.solve()'), 'stage solve must not be rerendered as live camera props');
+});
+
 test('lab scaffold has no placeholder JS camera solve', () => {
   const source = read('cart/hmsc-int/labs/_scaffold.tsx');
   assert(!source.includes('GAME_CAMERA'), 'dead scaffold must not import the camera door for a placeholder solve');

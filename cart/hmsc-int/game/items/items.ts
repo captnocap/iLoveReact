@@ -38,6 +38,8 @@ export const ITEM_GEOMETRIES = {
   // ITEMSCULPT-0606: the sculpted-item surface — /items bakes a voxel
   // blockout into a Globe displacement field and saves ONE 'globe' part
   globe: EngineGeometry.Globe,
+  // GLOBEAB-0607: faithful voxel-authored item surface, exposed-face greedy mesh.
+  voxelMesh: EngineGeometry.VoxelMesh,
   blade: ITEM_CUSTOM_GEOMETRIES.blade,
   sail: ITEM_CUSTOM_GEOMETRIES.sail,
   boatHull: ITEM_CUSTOM_GEOMETRIES.boatHull,

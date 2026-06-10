@@ -6,9 +6,9 @@ import { useEffect, useRef, useState } from 'react';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
-import { PlayerFigure } from './hmsc/render3d/PlayerFigure';
-import { HumanoidFaceCaptures } from './hmsc/render3d/humanoid';
-import { HMSC_SCALE } from './hmsc/world/scale';
+import { PlayerFigure } from './hmsc-int/render3d/PlayerFigure';
+import { HumanoidFaceCaptures } from './hmsc-int/render3d/humanoid';
+import { HMSC_SCALE } from './hmsc-int/world/scale';
 
 const PLAYER_CAPSULE_HEIGHT = HMSC_SCALE.playerCapsuleHeightMeters;
 const PLAYER_RADIUS = HMSC_SCALE.playerCapsuleRadiusMeters;

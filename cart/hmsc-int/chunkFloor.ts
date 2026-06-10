@@ -12,7 +12,7 @@
 // stroke never regenerates the height mesh and a height stroke never re-bakes the
 // texture.
 
-import type { Landform } from '../hmsc/design';
+import type { Landform } from './design';
 import { CHUNK_TILES, chunkKey, type Chunk, type ChunkKey } from './chunks';
 import { encodeTileMap } from './tileData';
 import { roadRibbonSegments, type RoadStroke } from './roadData';

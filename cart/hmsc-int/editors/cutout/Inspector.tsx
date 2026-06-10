@@ -16,7 +16,7 @@ import { Box, Col, Pressable, Row, ScrollView, Text, TextInput } from '@reactjit
 import { Icon } from '@reactjit/icons/Icon';
 import { GAME_CHROME } from '@game';
 import {
-  PaintQuad, PAINT,
+  PaintLayerStrip, PaintQuad, PAINT,
   type PaintEditorState, type PaintBlendMode, type SurfaceId,
 } from '../paint';
 import { useRouteTwigState } from '../twigs';
@@ -71,7 +71,6 @@ export function CutoutInspector(props: {
   edited: boolean;
   lastSavedAt: number | null;
   onNewCanvas: (w: number, h: number) => void;
-  onLoadImage: (path: string) => void;
   onOpenEffectModal: () => void;
   /** fill the parent box (the model-preview stack wraps the inspector in a
    *  sized column; rows stretch it for free, columns don't) */
@@ -136,7 +135,7 @@ export function CutoutInspector(props: {
         </Box>
       </Pressable>
 
-      <LayersPanel s={s} height={layersHeight} />
+      <PaintLayerStrip s={s} height={layersHeight} />
 
       {resizing ? (
         <Pressable
@@ -210,7 +209,7 @@ function ToolTab(props: {
           })}
         </Row>
         {!props.srcPath ? (
-          <Text style={{ color: T.dim, fontSize: 10 }}>smart select needs an image source — load one in the Source tab</Text>
+          <Text style={{ color: T.dim, fontSize: 10 }}>smart select needs an image source — use open image or drop a file</Text>
         ) : null}
 
         {props.backendChoice === 'sam' && props.samAvailable ? (
@@ -369,12 +368,10 @@ function SourceTab(props: {
   textureId?: string | null;
   lastSavedAt: number | null;
   onNewCanvas: (w: number, h: number) => void;
-  onLoadImage: (path: string) => void;
 }) {
   const { s } = props;
   const [w, setW] = useState(String(s.dims.w));
   const [h, setH] = useState(String(s.dims.h));
-  const [path, setPath] = useState(props.srcPath ?? '');
   const applySize = () => props.onNewCanvas(Number(w), Number(h));
   return (
     <>
@@ -412,24 +409,6 @@ function SourceTab(props: {
         </Row>
       </Block>
 
-      <Block title="Load image">
-        <TextInput
-          value={path}
-          onChangeText={setPath}
-          onSubmit={() => props.onLoadImage(path)}
-          onSubmitEditing={() => props.onLoadImage(path)}
-          placeholder="/path/to/image.png"
-          style={{
-            height: 26, fontSize: 11, color: T.ink, backgroundColor: T.control,
-            borderWidth: 1, borderColor: T.frame, borderRadius: 5, paddingHorizontal: 8,
-          }}
-        />
-        <Row style={{ gap: 6, alignItems: 'center' }}>
-          <Chip label="load" color="cyan" onPress={() => props.onLoadImage(path)} />
-          <Text style={{ color: T.dim, fontSize: 10 }}>or drop a file anywhere</Text>
-        </Row>
-      </Block>
-
       {props.lastSavedAt ? (
         <Block title="Last saved">
           <Text style={{ color: T.good, fontSize: 10 }}>{formatSaveAge(props.lastSavedAt)} ago · on the cutout stream</Text>
@@ -451,153 +430,6 @@ function SizeInput({ value, onChange, onSubmit }: { value: string; onChange: (v:
         borderWidth: 1, borderColor: T.frame, borderRadius: 5, paddingHorizontal: 6,
       }}
     />
-  );
-}
-
-// ── LAYERS panel — rows with silhouette, rename, visibility; action bar ──────
-
-function LayersPanel({ s, height }: { s: PaintEditorState; height: number }) {
-  const i = s.activeLayer;
-  const canTarget = i >= 0 && i < s.layers.length;
-  return (
-    <Col style={{ height, minHeight: 0, backgroundColor: T.page }}>
-      <Row style={{ paddingHorizontal: 10, paddingVertical: 6, alignItems: 'center', gap: 6 }}>
-        <Text style={{ color: T.dim, fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>
-          {`LAYERS${s.layers.length ? ` (${s.layers.length})` : ''}`}
-        </Text>
-        <Box style={{ flexGrow: 1 }} />
-        {s.clipboard ? <Chip label="paste" color="dim" onPress={s.pasteLayer} /> : null}
-      </Row>
-      <ScrollView style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
-        <Col style={{ paddingHorizontal: 10, paddingBottom: 8, gap: 5 }}>
-          {s.layers.length === 0 ? (
-            <Text style={{ color: T.dim, fontSize: 10 }}>No layers — paint or smart-select a region.</Text>
-          ) : null}
-          {/* LAYERFLIP-0606 (user: "layers that are actually above on the
-              image are below in the list"): the DATA stack stays bottom-up
-              (index 0 composites first); the LIST renders top-of-image at
-              the top — the universal convention. Display order only. */}
-          {s.layers.map((_, k) => {
-            const idx = s.layers.length - 1 - k;
-            return <LayerRow key={s.layers[idx].id} s={s} index={idx} />;
-          })}
-        </Col>
-      </ScrollView>
-      <Row style={{
-        height: 30, paddingHorizontal: 8, alignItems: 'center', gap: 6,
-        borderTopWidth: 1, borderColor: T.frame, backgroundColor: T.panelSolid,
-      }}>
-        <LayerAction icon="Plus" label="Add layer" onPress={() => s.addLayer()} />
-        <LayerAction icon="Copy" label="Duplicate layer" disabled={!canTarget} onPress={() => s.duplicateLayer(i)} />
-        {/* LAYERFLIP-0606: with top-of-image rendered at the top of the list,
-            visual UP = toward the END of the bottom-up data stack (+1) and
-            DOWN = toward index 0. Merge-down already merges into i-1 — the
-            layer now VISUALLY below the active row — so it stays as-is. */}
-        <LayerAction icon="ArrowUp" label="Move layer up" disabled={!canTarget} onPress={() => s.moveLayer(i, 1)} />
-        <LayerAction icon="ArrowDown" label="Move layer down" disabled={!canTarget} onPress={() => s.moveLayer(i, -1)} />
-        <LayerAction icon="Merge" label="Merge down" disabled={!canTarget} onPress={() => s.mergeLayer(i)} />
-        <LayerAction icon="Scissors" label="Cut layer to clipboard" disabled={!canTarget} onPress={() => s.cutLayer(i)} />
-        <Box style={{ flexGrow: 1 }} />
-        <LayerAction icon="Trash2" label="Delete layer" disabled={!canTarget} danger onPress={() => s.deleteLayer(i)} />
-      </Row>
-    </Col>
-  );
-}
-
-function LayerRow({ s, index }: { s: PaintEditorState; index: number }) {
-  const layer = s.layers[index];
-  const active = index === s.activeLayer;
-  const [renaming, setRenaming] = useState(false);
-  const surfaceLabel = PAINT.isBuiltinSurface(layer.config.mode)
-    ? PAINT.maskSurfaceLabel(layer.config.mode)
-    : (s.customSurfaces.find((c) => c.id === layer.config.mode)?.label ?? 'Custom FX');
-  return (
-    <Pressable onPress={() => s.setActiveLayer(index)}>
-      <Row style={{
-        gap: 7, alignItems: 'center', padding: 6, borderRadius: 5,
-        backgroundColor: active ? T.controlAlt : T.control,
-        borderWidth: 1, borderColor: active ? T.accent : T.frame,
-        opacity: layer.config.muted ? 0.55 : 1,
-      }}>
-        <Box style={{ width: 3, height: 30, borderRadius: 2, backgroundColor: active ? T.accent : T.frame }} />
-        {/* the layer's REAL silhouette — its live mask textures through its
-            own surface (texture mode), not a generic swatch */}
-        <Box style={{
-          width: INSPECTOR.rowPreview.w, height: INSPECTOR.rowPreview.h,
-          borderRadius: 4, overflow: 'hidden', position: 'relative',
-          backgroundColor: T.page, borderWidth: 1, borderColor: T.frame,
-        }}>
-          <PaintQuad
-            paintableId={s.baseIdOf(layer)}
-            overrideId={s.brushIdOf(layer)}
-            worldW={INSPECTOR.rowPreview.w}
-            worldH={INSPECTOR.rowPreview.h}
-            mode={layer.config.mode}
-            customSurfaces={s.customSurfaces}
-            colors={layer.config.colors}
-            dim={1}
-          />
-        </Box>
-        <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, gap: 1 }}>
-          {renaming ? (
-            <TextInput
-              value={layer.name}
-              onChangeText={(v: string) => s.setLayerName(index, v)}
-              onSubmit={() => setRenaming(false)}
-              onSubmitEditing={() => setRenaming(false)}
-              style={{
-                height: 18, fontSize: 11, color: T.ink, backgroundColor: T.page,
-                borderWidth: 1, borderColor: T.accent, borderRadius: 3, paddingHorizontal: 4,
-              }}
-            />
-          ) : (
-            <Row style={{ gap: 5, alignItems: 'center' }}>
-              <Text style={{ color: active ? T.ink : T.dim, fontSize: 11, fontWeight: '700', flexGrow: 1 }} numberOfLines={1}>
-                {layer.name}
-              </Text>
-              <Pressable onPress={() => setRenaming(true)} tooltip="Rename layer">
-                <Icon name="Pencil" size={10} color={T.dim} />
-              </Pressable>
-            </Row>
-          )}
-          <Row style={{ gap: 5, alignItems: 'center' }}>
-            <Text style={{ color: T.dim, fontSize: 9 }} numberOfLines={1}>{surfaceLabel}</Text>
-            {layer.groupName ? (
-              <Box style={{ paddingHorizontal: 4, borderRadius: 3, borderWidth: 1, borderColor: T.frame }}>
-                <Text style={{ color: T.dim, fontSize: 8, fontWeight: '800' }} numberOfLines={1}>{layer.groupName}</Text>
-              </Box>
-            ) : null}
-            {layer.clicks.length > 0 ? (
-              <Text style={{ color: T.dim, fontSize: 8 }}>{`${layer.clicks.length}c`}</Text>
-            ) : null}
-          </Row>
-        </Col>
-        <Pressable onPress={() => s.toggleLayerMute(index)} tooltip={layer.config.muted ? 'Show layer' : 'Hide layer'}>
-          <Box style={{
-            width: 22, height: 22, borderRadius: 4, alignItems: 'center', justifyContent: 'center',
-            backgroundColor: layer.config.muted ? T.page : T.controlAlt,
-            borderWidth: 1, borderColor: T.frame,
-          }}>
-            <Icon name={layer.config.muted ? 'EyeOff' : 'Eye'} size={11} color={T.dim} />
-          </Box>
-        </Pressable>
-      </Row>
-    </Pressable>
-  );
-}
-
-function LayerAction(props: { icon: string; label: string; disabled?: boolean; danger?: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={() => { if (!props.disabled) props.onPress(); }} tooltip={props.label}>
-      <Box style={{
-        width: 24, height: 22, borderRadius: 4, alignItems: 'center', justifyContent: 'center',
-        backgroundColor: props.danger ? '#301822' : T.control,
-        borderWidth: 1, borderColor: T.frame,
-        opacity: props.disabled ? 0.4 : 1,
-      }}>
-        <Icon name={props.icon} size={12} color={props.danger ? T.bad : T.dim} />
-      </Box>
-    </Pressable>
   );
 }
 

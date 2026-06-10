@@ -10,7 +10,7 @@ import { Box, Col, Pressable, Row, Scene3D, Text } from '@reactjit/runtime/primi
 import * as Geometry from '@reactjit/geometries';
 import { OrbitCamera } from '@reactjit/cameras';
 import { parseAnimationDsl, sampleAnimationTimeline, type SampledAction } from '../animationDsl';
-import { AutoGlass, Glass } from '../hmsc/render3d/materials';
+import { AutoGlass, Glass } from '../hmsc-int/render3d/materials';
 
 const BG = '#0a1019';
 const INK = '#e8eef8';

@@ -73,4 +73,13 @@ test('the ruled build hotkeys lead the palette: 1 floor, 2 wall, 3 ramp, 4 roof'
   assert(source.includes('1 floor · 2 wall · 3 ramp · 4 roof'), 'the help line must teach the ruled keys');
 });
 
+test('PREFABSELECT-0606: Select mode has no placement ghost, only piece selection overlay', () => {
+  const source = read('cart/hmsc-int/editors/play/PlayRoute.tsx');
+  assert(source.includes("const showPlacementGhost = inBuild && buildAction === 'place'"), 'placement ghost must be place-mode only');
+  assert(source.includes("const showSelectionOverlay = inBuild && buildAction === 'select'"), 'piece hover/select overlay must be select-mode only');
+  assert(source.includes('{showPlacementGhost && snapTarget &&'), 'the snap cube must share the placement ghost gate');
+  assert(source.includes('{showPlacementGhost && ghostShapes.map'), 'ghost piece meshes must share the placement ghost gate');
+  assert(source.includes('targetId={showSelectionOverlay ? snapTarget?.targetPieceId ?? null : null}'), 'piece hover highlight must be the select-mode visual language');
+});
+
 finish('build-viewport');

@@ -19,6 +19,7 @@ import { GAME_ANIMATION } from '../../../game/animation';
 import { GAME_CHROME } from '../../../game/chrome';
 import { HED_ANIM_FRAMES, type HedAnimation } from '../../../game/figure/hed';
 import { buildRigFrame } from '../../../game/figure/rig';
+import { GAME_TELEMETRY } from '../../../game/telemetry';
 import { PAINT_EDITOR_TUNING } from '../../characters/paintKit';
 import { HeldItemMeshes, PartMeshes } from '../../characters/preview';
 import { useSculptCamera } from '../../sculptCamera';
@@ -28,6 +29,16 @@ import type { CharacterStore } from './store';
 const { Chip, Knob, LabEnvironment } = GAME_CHROME;
 const T = GAME_CHROME.tokens.color;
 const TUNE = PAINT_EDITOR_TUNING;
+const gDressedPerf: any = globalThis;
+
+function perfNow(): number {
+  const perf = (globalThis as any).performance;
+  return typeof perf?.now === 'function' ? perf.now() : Date.now();
+}
+
+function recordStage(label: string, fields: Record<string, unknown> = {}): void {
+  GAME_TELEMETRY.recordDiagnostic('churn', label, fields);
+}
 
 export function DressedStage(props: {
   store: CharacterStore;
@@ -40,9 +51,19 @@ export function DressedStage(props: {
   /** the status strip's idle hint */
   idleHint: string;
 }) {
+  const renderT0 = perfNow();
   const s = props.store;
   const [, setTick] = useState(0);
   useEffect(() => s.subscribe(() => setTick((t) => t + 1)), [s]);
+  useEffect(() => {
+    const sw = gDressedPerf.__hmsc_workbench_source_switch;
+    const routeStart = gDressedPerf.__hmsc_workbench_route_start;
+    recordStage('dressedStage.mounted', {
+      context: props.animate ? 'animation' : 'clothing',
+      fromSwitchMs: sw?.to === (props.animate ? 'animation' : 'clothing') ? perfNow() - sw.ms : 0,
+      fromRouteMs: typeof routeStart === 'number' ? perfNow() - routeStart : 0,
+    });
+  }, [props.animate]);
 
   const draft = s.draft;
   const v = s.view;
@@ -91,15 +112,39 @@ export function DressedStage(props: {
       : animFrame % HED_ANIM_FRAMES[activeAnim]
     : 0;
 
+  const figureRenderT0 = perfNow();
   const fr = useFigureRender(s, { anim: activeAnim, phase });
+  const figureRenderMs = perfNow() - figureRenderT0;
 
   // ── the dressed rig (parity S6) — mesh + attachOutfit, the phase-1 doors ──
   const bodyPhase = props.animate ? (v.scriptPlaying ? scriptFrame / 20 : v.bodyRigAnim ? rigFrame / 24 : 0) : 0;
   const rig = useMemo(
-    () => buildRigFrame(draft.bodyShape, draft.bodyPose, bodyPhase, scriptActions, draft.clothing, draft.clothingSkin, draft.accessories, draft.bottoms),
+    () => {
+      const t0 = perfNow();
+      const next = buildRigFrame(draft.bodyShape, draft.bodyPose, bodyPhase, scriptActions, draft.clothing, draft.clothingSkin, draft.accessories, draft.bottoms);
+      const dt = perfNow() - t0;
+      GAME_TELEMETRY.recordDiagnostic('figure', 'dressedStage.buildRigFrame', {
+        context: props.animate ? 'animation' : 'clothing',
+        buildMs: dt,
+        assemblyCount: next.assembly.length,
+        anatomyCount: next.anatomy.length,
+        clothingCount: next.clothing.length,
+      });
+      return next;
+    },
     [draft.bodyShape, draft.bodyPose, bodyPhase, scriptActions, draft.clothing, draft.clothingSkin, draft.accessories, draft.bottoms],
   );
+  const sculptedT0 = perfNow();
   const sculpted = s.sculptedItems();
+  const sculptedMs = perfNow() - sculptedT0;
+  recordStage('dressedStage.render', {
+    context: props.animate ? 'animation' : 'clothing',
+    figureRenderMs,
+    sculptedMs,
+    totalBeforeJsxMs: perfNow() - renderT0,
+    sculptedCount: sculpted.length,
+    clothingCount: rig.clothing.length,
+  });
 
   // ── camera: the shared sculpt rig on this context's OWN twig keys (F3) ────
   const viewRect = useRef({ x: 0, y: 0, width: 1, height: 1 });

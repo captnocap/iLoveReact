@@ -30,6 +30,7 @@ function wipeScratch(): void {
 function blockout(blocks: Array<[number, number, number]>, dims = { w: 8, d: 8, h: 8 }): VoxelBlockoutDoc {
   return {
     dims,
+    cellSizeMeters: 0.1,
     blocks: blocks.map(([x, y, z], i) => ({ id: 1000 + i, x, y, z, kind: 'wall' as const })),
   };
 }
@@ -72,7 +73,7 @@ test('the bake is deterministic and shaped right: cube → bounded flat-ish fiel
   assertEqual(a.grid.length, GRID_W * GRID_H, 'the field is the sculpt grid');
   assertEqual(a.misses, 0, 'the centroid sits inside a solid cube — every ray hits');
   assert(a.grid.every((v) => v >= -1 && v <= 1), 'the field stays in the signed sculpt range');
-  assert(a.radius > 1 && a.radius < 3, `the base radius is the cube's mean extent (got ${a.radius})`);
+  assert(a.radius > 0.1 && a.radius < 0.3, `the base radius is the cube's mean extent in meters (got ${a.radius})`);
   // flat-ish: a cube's face/corner extents differ by less than the radius —
   // the steps arrive as soft bumps for the sculpt to flatten, not spikes
   let lo = Infinity, hi = -Infinity;
@@ -83,7 +84,7 @@ test('the bake is deterministic and shaped right: cube → bounded flat-ish fiel
   assert(hi - lo < a.radius, `the cube's field spread stays under the base radius (${(hi - lo).toFixed(2)} < ${a.radius.toFixed(2)})`);
   // symmetric mass → symmetric field across the front meridian
   const left = cellToward(1, 0, 0), right = cellToward(-1, 0, 0);
-  assertClose(extentAt(a, left.gx, left.gy), extentAt(a, right.gx, right.gy), 0.3, 'a centered cube bakes symmetric flanks');
+  assertClose(extentAt(a, left.gx, left.gy), extentAt(a, right.gx, right.gy), 0.03, 'a centered cube bakes symmetric flanks');
 });
 
 test('off-center mass shifts the field: the arm side reaches farther', () => {
@@ -93,7 +94,7 @@ test('off-center mass shifts the field: the arm side reaches farther', () => {
   const away = cellToward(-1, 0, 0);
   const armR = extentAt(a, toArm.gx, toArm.gy);
   const awayR = extentAt(a, away.gx, away.gy);
-  assert(armR > awayR + 0.5, `the +X arm reads farther than the bare −X flank (${armR.toFixed(2)} vs ${awayR.toFixed(2)})`);
+  assert(armR > awayR + 0.05, `the +X arm reads farther than the bare −X flank (${armR.toFixed(2)} vs ${awayR.toFixed(2)})`);
   // the documented star-shape limit, asserted as REAL: the centroid sits
   // pulled toward the arm (x≈0.6), so a straight-up ray passes beside the
   // x=0 column and the wrap can't see its top — concave/off-axis features
@@ -107,7 +108,17 @@ test('amount never bakes dead: a single block still sculpts', () => {
   const T = ITEM_BAKE_TUNING;
   assert(a.amount >= T.amountMin, 'the absolute amount floor holds');
   assert(a.amount >= a.radius * T.amountMinFracOfRadius - 1e-9, 'the radius-fraction floor holds');
-  assert(a.radius > 0.3 && a.radius < 1.2, `one cube bakes a sub-meter item (got ${a.radius})`);
+  assert(a.radius > 0.03 && a.radius < 0.12, `one 10cm cube bakes an item-sized primitive (got ${a.radius})`);
+});
+
+test('voxel cell size scales the baked Globe in real meters', () => {
+  const cells: Array<[number, number, number]> = [[0, 1, 0], [1, 1, 0], [2, 1, 0]];
+  const meter = bakeBlockoutToGlobe({ ...blockout(cells), cellSizeMeters: 1 })!;
+  const tenCm = bakeBlockoutToGlobe({ ...blockout(cells), cellSizeMeters: 0.1 })!;
+  assertClose(tenCm.radius, meter.radius * 0.1, 1e-9, 'radius follows cell size exactly');
+  assertClose(tenCm.amount, meter.amount * 0.1, 1e-9, 'sculpt amount follows cell size exactly');
+  const toX = cellToward(1, 0, 0);
+  assertClose(extentAt(tenCm, toX.gx, toX.gy), extentAt(meter, toX.gx, toX.gy) * 0.1, 1e-9, 'surface extents are cell-size scaled');
 });
 
 test('compose on one truth: a grab stamp moves the baked surface, and only there', () => {
@@ -144,7 +155,7 @@ test('the registry door: a sculpted item IS an ItemDefinition the renderer resol
     kind: 'sculpted-item', version: 1, name: 'smoothed crate',
     radius: 0.8, amount: 0.4, cols: GRID_W, rows: GRID_H,
     grid: emptyItemGrid(), color: ITEM_DRAFT_DEFAULTS.color,
-    source: { blocks: 9, dims: { w: 5, d: 6, h: 7 } },
+    source: { blocks: 9, dims: { w: 5, d: 6, h: 7 }, cellSizeMeters: 0.1 },
   };
   const def = sculptedItemDefinition('itm-test', doc);
   assertEqual(def.id, 'itm-test', 'the stream id is the item id');

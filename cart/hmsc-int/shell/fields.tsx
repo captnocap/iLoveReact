@@ -11,11 +11,12 @@
 // demonstrates). After any set() the renderer calls onEdit() so the frame
 // re-reads every get() — sources stay poll-free.
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Box, Pressable, Text } from '@reactjit/primitives';
 import { C, accentFor } from './workbench.cls';
 import { colorRangeCells, type ColorRange } from './colorRange';
 import { PickerChooser, type PickOption } from './picker';
+import { ColorWheel } from '../editors/paint/ColorWheel';
 
 export type { PickOption };
 
@@ -36,7 +37,7 @@ export type FieldSpec =
   | { k: string; t: 'act'; tone?: string; run(): void }
   // color gains a palette (opts = quick-pick presets) and a RANGE
   // (SKINRANGE-0606: a full gradient grid — any tone reachable, presets on top)
-  | { k: string; t: 'color'; get(): string; opts?: string[]; set?(v: string): void; range?: ColorRange }
+  | { k: string; t: 'color'; get(): string; opts?: string[]; set?(v: string): void; range?: ColorRange; wheel?: boolean }
   // pick (req_0184, the chip-wall verdict): ONE compact control — the current
   // value's label — that opens THE shared chooser (shell/picker.tsx:
   // searchable, grouped, counted). For any roster-sized option set (the
@@ -61,10 +62,30 @@ export function panelFieldCount(spec: PanelSpec): number {
 
 // group accents cycle the studio status palette (the wireframe's rhythm)
 const ACCENTS = ['primary', 'info', 'warning', 'success', 'error', 'accentTeal'];
-const SLIDER_TRACK_W = 60;
+const SLIDER_TRACK_W = 124;
+const SLIDER_GUTTER = 7;
+const SLIDER_KNOB_W = 14;
+const NUM_INPUT_W = 66;
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
+}
+
+function stepDigits(step: number): number {
+  const s = String(step);
+  if (!s.includes('.')) return 0;
+  return s.split('.')[1]?.length ?? 0;
+}
+
+function snapNum(f: Extract<FieldSpec, { t: 'num' }>, raw: number): number {
+  const step = Number.isFinite(f.step) && f.step > 0 ? f.step : 1;
+  const snapped = f.min + Math.round((raw - f.min) / step) * step;
+  const digits = Math.min(6, Math.max(f.precision, stepDigits(step)));
+  return Number(clamp(snapped, f.min, f.max).toFixed(digits));
+}
+
+function formatNum(f: Extract<FieldSpec, { t: 'num' }>, v: number): string {
+  return v.toFixed(Math.max(0, f.precision));
 }
 
 // ── the typed controls (studio.cls vocabulary, no new classes) ────────────────
@@ -81,17 +102,68 @@ function BoolField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'bool' }>; onEdit
 }
 
 function NumField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'num' }>; onEdit: () => void }) {
-  const step = (dir: -1 | 1) => {
-    f.set(clamp(f.get() + f.step * dir, f.min, f.max));
+  const value = f.get();
+  const [draft, setDraft] = useState(formatNum(f, value));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!editing) setDraft(formatNum(f, f.get()));
+  }, [editing, f, value]);
+  const commit = (raw: number) => {
+    const next = snapNum(f, raw);
+    f.set(next);
+    setDraft(formatNum(f, next));
     onEdit();
+  };
+  const commitDraft = () => {
+    const next = Number(draft);
+    setEditing(false);
+    if (Number.isFinite(next)) commit(next);
+    else setDraft(formatNum(f, f.get()));
+  };
+  const typeDraft = (v: string) => {
+    setEditing(true);
+    setDraft(v);
+    const next = Number(v);
+    if (Number.isFinite(next)) commit(next);
   };
   return (
     <>
-      <C.Stepper>
-        <C.StepperBtn onPress={() => step(-1)}><C.StepperBtnText>−</C.StepperBtnText></C.StepperBtn>
-        <C.StepperValue>{f.get().toFixed(f.precision)}</C.StepperValue>
-        <C.StepperBtn onPress={() => step(1)}><C.StepperBtnText>+</C.StepperBtnText></C.StepperBtn>
-      </C.Stepper>
+      <Box style={{ flexDirection: 'column', gap: 4, width: SLIDER_TRACK_W }}>
+        <C.PromptInput
+          value={draft}
+          onMouseDown={() => setEditing(true)}
+          onChangeText={typeDraft}
+          onBlur={commitDraft}
+          onSubmit={commitDraft}
+          onSubmitEditing={commitDraft}
+          fontSize={11}
+          style={{
+            width: NUM_INPUT_W,
+            flexGrow: 0,
+            paddingLeft: 6,
+            paddingRight: 6,
+            paddingTop: 3,
+            paddingBottom: 3,
+            fontFamily: 'monospace',
+            fontWeight: 800,
+            color: Number.isFinite(Number(draft)) ? accentFor('text') : accentFor('error'),
+          }}
+        />
+        <WorkbenchSlider
+          value={value}
+          min={f.min}
+          max={f.max}
+          show={(v) => formatNum(f, snapNum(f, v))}
+          onChange={(v) => {
+            const next = snapNum(f, v);
+            f.set(next);
+            setDraft(formatNum(f, next));
+          }}
+          onCommit={onEdit}
+          commitOnRelease
+          showValue={false}
+        />
+      </Box>
       {f.reset ? (
         f.reset.isDefault() ? (
           <C.FieldValue>default</C.FieldValue>
@@ -121,9 +193,11 @@ export function WorkbenchSlider(props: {
   toTrack?: (v: number) => number;
   fromTrack?: (t: number) => number;
   tooltip?: string;
+  showValue?: boolean;
 }) {
   const rectRef = useRef<{ x: number; width: number } | null>(null);
   const [drag, setDrag] = useState<number | null>(null); // preview value while dragging
+  const [capturing, setCapturing] = useState(false);
   const dragRef = useRef<number | null>(null);
   const draggingRef = useRef(false);
   const toTrack = props.toTrack ?? ((v: number) => (props.max > props.min ? (v - props.min) / (props.max - props.min) : 0));
@@ -141,39 +215,50 @@ export function WorkbenchSlider(props: {
       props.onCommit?.();
     }
   };
+  const finishDrag = (px?: number) => {
+    if (typeof px === 'number' && Number.isFinite(px)) preview(px);
+    draggingRef.current = false;
+    setCapturing(false);
+    const final = dragRef.current;
+    if (props.commitOnRelease && final !== null) {
+      props.onChange(final);
+      props.onCommit?.();
+    }
+    dragRef.current = null;
+    setDrag(null);
+  };
   const v = drag ?? props.value;
   const frac = clamp(toTrack(v), 0, 1);
+  const fillW = Math.round(frac * (SLIDER_TRACK_W - SLIDER_GUTTER * 2));
+  const knobX = Math.round(SLIDER_GUTTER + frac * (SLIDER_TRACK_W - SLIDER_GUTTER * 2 - SLIDER_KNOB_W));
   return (
     <>
       <Pressable
         tooltip={props.tooltip}
-        onMouseDown={(p: any) => { draggingRef.current = true; preview(p.x); }}
+        onMouseDown={(p: any) => {
+          draggingRef.current = true;
+          setCapturing(true);
+          preview(p.x);
+        }}
         onMouseMove={(p: any) => { if (draggingRef.current) preview(p.x); }}
-        onMouseUp={() => {
-          draggingRef.current = false;
-          const final = dragRef.current;
-          if (final === null) return;
-          props.onChange(final);
-          dragRef.current = null;
-          setDrag(null);
-          props.onCommit?.();
-        }}
-        onMouseLeave={() => {
-          draggingRef.current = false;
-          if (props.commitOnRelease) {
-            dragRef.current = null;
-            setDrag(null);
-          }
-        }}
+        onMouseUp={(p: any) => finishDrag(Number(p?.x ?? NaN))}
       >
         <Box onLayout={(r: any) => { rectRef.current = { x: r.x, width: r.width }; }}>
           <C.SliderTrack>
-            <C.SliderFill style={{ width: Math.round(frac * SLIDER_TRACK_W) }} />
-            <C.SliderKnob style={{ left: Math.round(frac * (SLIDER_TRACK_W - 10)) }} />
+            <C.SliderFill style={{ width: Math.max(3, fillW) }} />
+            <C.SliderKnob style={{ left: knobX }} />
           </C.SliderTrack>
         </Box>
       </Pressable>
-      <C.SliderValue>{props.show(v)}</C.SliderValue>
+      {capturing ? (
+        <Pressable
+          onMouseMove={(p: any) => { if (draggingRef.current) preview(Number(p?.x ?? 0)); }}
+          onMouseUp={(p: any) => finishDrag(Number(p?.x ?? NaN))}
+          onMouseLeave={(p: any) => finishDrag(Number(p?.x ?? NaN))}
+          style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, zIndex: 99999, backgroundColor: 'rgba(0,0,0,0.001)' }}
+        />
+      ) : null}
+      {props.showValue === false ? null : <C.SliderValue>{props.show(v)}</C.SliderValue>}
     </>
   );
 }
@@ -207,6 +292,9 @@ function TextField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'text' }>; onEdit
 function ColorField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'color' }>; onEdit: () => void }) {
   const cur = f.get();
   const pick = (c: string) => { f.set!(c); onEdit(); };
+  if (f.set && f.wheel) {
+    return <ColorWheel value={cur || '#000000'} onChange={pick} size={112} />;
+  }
   if (f.set && (f.opts || f.range)) {
     return (
       <Box style={{ flexDirection: 'column', gap: 4 }}>
@@ -280,9 +368,9 @@ function PickField({ f, path, onEdit }: { f: Extract<FieldSpec, { t: 'pick' }>; 
     ? (f.clearLabel ? `(${f.clearLabel})` : '—')
     : f.show?.(cur) ?? f.opts().find((o) => o.id === cur)?.label ?? cur;
   return (
-    <Box style={{ flexDirection: 'column', gap: 4, ...(open ? { width: '100%' } : {}) }}>
-      <C.Chip onPress={() => { openPickPath = open ? null : path; onEdit(); }}>
-        <C.ChipLabel color={cur === null ? accentFor('textFaint') : undefined}>{`${label} ${open ? '▴' : '▾'}`}</C.ChipLabel>
+    <Box style={{ flexDirection: 'column', gap: 4, minWidth: 0, maxWidth: '100%', ...(open ? { width: '100%' } : {}) }}>
+      <C.Chip style={{ maxWidth: '100%', minWidth: 0 }} onPress={() => { openPickPath = open ? null : path; onEdit(); }}>
+        <C.ChipLabel color={cur === null ? accentFor('textFaint') : undefined} numberOfLines={1}>{`${label} ${open ? '▴' : '▾'}`}</C.ChipLabel>
       </C.Chip>
       {open ? (
         <PickerChooser
@@ -328,6 +416,14 @@ function FieldCell({ f, path, wide, onEdit }: { f: FieldSpec; path: string; wide
   }
   // an OPEN pick takes the full strip width so the chooser reads wide
   const open = f.t === 'pick' && openPickPath === path;
+  if (open) {
+    return (
+      <C.Field style={{ width: '100%', maxWidth: '100%', minWidth: 0, borderRightWidth: 0, flexDirection: 'column', alignItems: 'stretch', gap: 5 }}>
+        <C.FieldLabel>{f.k}</C.FieldLabel>
+        <PickField f={f} path={path} onEdit={onEdit} />
+      </C.Field>
+    );
+  }
   const fieldStyle = wide || open ? { ...(wide ? ROW_FIELD : {}), ...(open ? { width: '100%' } : {}) } : undefined;
   return (
     <C.Field style={fieldStyle}>

@@ -22,8 +22,8 @@
 // GAP(W-2): the raw WGSL sources sit with the world-render fills in
 // cart/hmsc/render3d (tileFill prelude + per-surface fills); they move when the
 // world render lane is captured.
-import { ROAD_TILE_SHADER } from '../../../hmsc/render3d/roadTileFill';
-import { FILL_SHADER } from '../../../hmsc/render3d/fillShader';
+import { ROAD_TILE_SHADER } from '../../render3d/roadTileFill';
+import { FILL_SHADER } from '../../render3d/fillShader';
 
 export interface ShaderParam {
   key: string;

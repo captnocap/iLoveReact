@@ -7,7 +7,7 @@ docs/game/DECISIONS.md (V4, V17-TRIAGE, P2, P3, P4). Shape: docs/game/STRUCTURE.
 ## Mission
 The first system capture: REWRITE the kind registries (tiles, props, NPCs,
 roles, landforms) fresh into `cart/hmsc-int/game/kinds/`, to the constitution's
-bar. The existing files (`cart/hmsc/world/tileKinds.ts` and siblings) are
+bar. The existing files (`cart/hmsc-int/world/tileKinds.ts` and siblings) are
 BEHAVIOR REFERENCES — read them, do not move or import them.
 
 ## Rules that bind this work

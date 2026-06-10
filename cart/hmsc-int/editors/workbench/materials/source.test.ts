@@ -23,6 +23,17 @@ const SPEC: ShaderSpec = {
   buildData: (variant, base, overlay) => [variant, base.seed ?? 4, overlay.wear ?? 0],
 };
 
+const FILL_SPEC: ShaderSpec = {
+  id: 'a-concrete',
+  label: 'Concrete',
+  group: 'Walls & Masonry',
+  blurb: 'test effect fill',
+  shader: 'fill-wgsl',
+  base: [{ key: 'seed', label: 'Seed', default: 12, min: 0, max: 100, step: 1, integer: true }],
+  variants: [{ id: 'v0', label: 'Take 1', value: 0, params: [] }],
+  buildData: (variant, base) => [1, variant, base.seed ?? 12, 3, 0],
+};
+
 function memoryTwig(): { twig: MaterialTwigAdapter; raw: Record<string, unknown> } {
   const raw: Record<string, unknown> = {};
   return {
@@ -53,7 +64,7 @@ function rig() {
   const events: any[] = [];
   const twigs = memoryTwig();
   const store = createMaterialStore({
-    recipes: () => [SPEC],
+    recipes: () => [SPEC, FILL_SPEC],
     reactTextures: () => [{ id: 'facade', label: 'Facade', kind: 'react' }],
     stored: () => stored,
     saveShader: (label, shaderId, data) => {
@@ -71,6 +82,7 @@ function rig() {
       const i = stored.findIndex((m) => m.id === id);
       if (i >= 0) stored.splice(i, 1);
     },
+    pickImage: () => 'file:///tmp/decal%20source.png',
     session: { commit: (event, label) => events.push({ event, label }) },
     twig: twigs.twig,
   });
@@ -127,22 +139,45 @@ test('compose mode adds layers, moves the selected node, materializes, and reope
   store.moveComposeNode(nodeId, 5, 7);
   assertEqual(store.composeDoc.nodes[0].x, emptyDecalDoc().width / 4 + 5, 'stage drag writes node x');
   assertEqual(store.composeDoc.nodes[0].y, emptyDecalDoc().height / 4 + 7, 'stage drag writes node y');
+  store.resizeComposeNode(nodeId, 'se', 20, 10);
+  assertEqual(store.composeDoc.nodes[0].w, emptyDecalDoc().width / 2 + 20, 'stage resize writes node width');
+  assertEqual(store.composeDoc.nodes[0].h, emptyDecalDoc().height / 2 + 10, 'stage resize writes node height');
+  store.resizeComposeNode(nodeId, 'w', 9999, 0);
+  assertEqual(store.composeDoc.nodes[0].w, 1, 'resize clamps to the minimum width');
+  assertEqual(store.composeDoc.nodes[0].x, emptyDecalDoc().width / 4 + 5 + emptyDecalDoc().width / 2 + 20 - 1, 'west resize keeps the east edge pinned when clamped');
+  panel = store.panel(store.select('decal:new'));
+  (field(panel, 'NODE PROPERTIES', 'effect fill') as Extract<FieldSpec, { t: 'pick' }>).set(FILL_SPEC.id);
+  assertEqual((store.composeDoc.nodes[0] as any).fillShaderId, FILL_SPEC.id, 'rect node can use a material effect fill');
+  assertEqual(JSON.stringify((store.composeDoc.nodes[0] as any).fillData), JSON.stringify([1, 0, 12, 3, 0]), 'effect fill stores frozen shader data');
+  panel = store.panel(store.select('decal:new'));
+  (field(panel, 'COMPOSE', '+ image') as Extract<FieldSpec, { t: 'act' }>).run();
+  const image = store.composeDoc.nodes.find((n) => n.kind === 'image');
+  assert(image !== undefined && image.kind === 'image', 'image node added through panel action');
+  assertEqual(image.src, '/tmp/decal source.png', 'image add opens picker and cleans the selected path');
+  store.selectComposeNode(image.id);
+  panel = store.panel(store.select('decal:new'));
+  (field(panel, 'NODE PROPERTIES', 'pick file…') as Extract<FieldSpec, { t: 'act' }>).run();
+  assertEqual((store.composeDoc.nodes.find((n) => n.id === image.id) as any).src, '/tmp/decal source.png', 'image node exposes the same picker from properties');
   store.actions(store.select('decal:new')).find((a) => a.id === 'materialize-decal')!.run();
   const saved = stored.find((m) => m.id === 'custom:poster-a');
   assert(!!saved?.decal, 'stored decal was created');
   assertEqual(saved!.decal!.version, DECAL_DOC_VERSION, 'decal doc rides the stored material');
   assertEqual(events[0].event.kind, 'materialized', 'materials stream got decal materialized event');
-  assertEqual((twigs['/compose:doc'] as any).nodes.length, 1, 'compose draft twig carries the doc');
+  assertEqual((twigs['/compose:doc'] as any).nodes.length, 2, 'compose draft twig carries the doc');
 
   store.pick('decal:custom:poster-a');
   assertEqual(store.composeEditingId, 'custom:poster-a', 'saved decal row reopens for update');
-  assertEqual(store.composeDoc.nodes.length, 1, 'reopened decal keeps its layers');
-
-  panel = store.panel(store.select('decal:custom:poster-a'));
-  (field(panel, 'LAYERS · 1', 'selected') as Extract<FieldSpec, { t: 'enum' }>).set(store.composeDoc.nodes[0].id);
-  panel = store.panel(store.select('decal:custom:poster-a'));
-  (field(panel, 'LAYERS · 1', 'remove') as Extract<FieldSpec, { t: 'act' }>).run();
-  assertEqual(store.composeDoc.nodes.length, 0, 'layer removal is panel-owned');
+  assertEqual(store.composeDoc.nodes.length, 2, 'reopened decal keeps its layers');
+  const reopenedId = store.composeDoc.nodes[0].id;
+  store.selectComposeNode(reopenedId);
+  store.renameComposeNode(reopenedId, 'front rect');
+  assertEqual(store.composeDoc.nodes[0].name, 'front rect', 'compose layers can be renamed through the shared strip');
+  store.toggleComposeNodeHidden(reopenedId);
+  assertEqual(store.composeDoc.nodes[0].hidden, true, 'compose layers can be hidden through the shared strip');
+  store.moveComposeNodeLayer(reopenedId, 1);
+  assertEqual(store.composeDoc.nodes[1].id, reopenedId, 'compose layers can move forward through the shared strip');
+  store.removeComposeNode(reopenedId);
+  assertEqual(store.composeDoc.nodes.length, 1, 'compose layers can be removed through the shared strip');
 });
 
 test('stored material remove deletes only that record and records a removal event', () => {

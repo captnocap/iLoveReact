@@ -6,9 +6,9 @@
 // this cell" and "what skin is on each face now"; skin resolution itself stays in
 // cart/hmsc/world/buildings.ts (one home, no re-implementation).
 
-import type { Building, BuildingFaceRole, BuildingSkin } from '../hmsc/design';
-import { BUILDING_FACE_ROLES, buildingFootprint, buildingRoleSkin } from '../hmsc/world/buildings';
-import { BUILDING_SKIN_NAMES } from '../hmsc/render3d/buildingSkins';
+import type { Building, BuildingFaceRole, BuildingSkin } from '../hmsc-int/design';
+import { BUILDING_FACE_ROLES, buildingFootprint, buildingRoleSkin } from '../hmsc-int/world/buildings';
+import { BUILDING_SKIN_NAMES } from '../hmsc-int/render3d/buildingSkins';
 
 export type FaceSkins = Record<BuildingFaceRole, BuildingSkin>;
 

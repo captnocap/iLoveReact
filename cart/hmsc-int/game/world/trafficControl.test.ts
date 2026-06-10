@@ -7,7 +7,7 @@
 
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 import { TILE_KIND_INDEX } from '../kinds';
-import { TRAFFIC_SIGNAL_CYCLE } from '../../../hmsc/world/traffic';
+import { TRAFFIC_SIGNAL_CYCLE } from '../../world/traffic';
 import type { PaintedGrid } from './navPublish';
 import {
   associateTrafficControls, controlApproach, findJunctionBoxes, junctionEntryDelay,

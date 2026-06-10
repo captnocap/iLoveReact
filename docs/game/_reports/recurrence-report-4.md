@@ -81,7 +81,7 @@ Cases where a file's name or directory misleads about live-vs-dead, lab-vs-produ
 
 ### 2.1 `framework/v8_bindings_physics_lab.zig` contains the LIVE production HMSC physics — GOLD STANDARD
 Docs: `physics3d.md`, `physics_lab.md`, `combat_lab.md`, `hmsc.md`.
-The file named for a *lab* hosts `__hmsc_physics_step`, `__hmsc_register_heightfield`, `__hmsc_clear_heightfields` — the real game physics backend consumed by `cart/hmsc/state/hostPhysics.ts`. `physics_lab.md`: "the host side has since grown into the **real hmsc physics backend** … this lab is the proving ground that file graduated from." The lab's own `__physics_lab_*` fns cohabit but are a different (stateful) API.
+The file named for a *lab* hosts `__hmsc_physics_step`, `__hmsc_register_heightfield`, `__hmsc_clear_heightfields` — the real game physics backend consumed by `cart/hmsc-int/state/hostPhysics.ts`. `physics_lab.md`: "the host side has since grown into the **real hmsc physics backend** … this lab is the proving ground that file graduated from." The lab's own `__physics_lab_*` fns cohabit but are a different (stateful) API.
 
 ### 2.2 `framework/phys/physics3d.zig` looks like serious framework physics but is fully DORMANT
 Doc: `physics3d.md` (entire doc). Fully implemented Bullet 3.25 integration, **wired to nothing** — `build.zig` never compiles the shim, no Node fields, no JS primitive, no host fn registered. Its own header comment describes `<3D.Physics>` and `Node.physics3d_world_id` that **do not exist** (stale Smith-era aspiration). The one collider hmsc needed (heightfield) is the one case stubbed `null`. Recommendation in the doc: rename `bullet3d_dormant.zig` or delete all three files.
@@ -93,7 +93,7 @@ Docs: `animation_lab.md`, `input_bench.md`. `framework/v8_bindings_input_bench.z
 Docs: `cutout.md` (8 `_old` files: `state_old.ts`, `session_old.ts`, `Editor_old.tsx`, `Inspector_old.tsx`), `input_bench.md` (`index_old.tsx`, `backend_lua_old.tsx`), `head_lab.md` (predates kit extraction). Not imported by the active path but same directory, same base names — a reader grepping by name can land on dead code. The docs are explicit these are reference-only.
 
 ### 2.5 Orphaned near-duplicate scenes with no consumer
-Docs: `hmsc_scale_lab.md` (`cart/hmsc/labs/ScaleLabScene.tsx` is a near-verbatim copy of the standalone `hmsc_scale_lab.tsx`, already drifted — purple line at 2.45m vs 2.04m, zero importers), `scape.md` (`ui/Wheel.tsx` — but documented-intentional, recorded in PROGRESS.md). The scale-scene orphan is the dangerous one (silent value drift, no canonical owner).
+Docs: `hmsc_scale_lab.md` (`cart/hmsc-int/labs/ScaleLabScene.tsx` is a near-verbatim copy of the standalone `hmsc_scale_lab.tsx`, already drifted — purple line at 2.45m vs 2.04m, zero importers), `scape.md` (`ui/Wheel.tsx` — but documented-intentional, recorded in PROGRESS.md). The scale-scene orphan is the dangerous one (silent value drift, no canonical owner).
 
 ### 2.6 `useLuaWorker.ts` is "not a React hook despite its name"
 Doc: `input_bench.md` explicit: "is not a React hook despite its name. It exports an imperative `luaWorker` object." The `use*` prefix lies about it being a hook.
@@ -114,7 +114,7 @@ Docs: `pixel_icon_demo.md` (the entire vestigial Canvas editor — `canvasScreen
 ### 3.1 TWO humanoid/figure systems — the biggest convergence candidate
 Docs: `ragdoll_lab.md` (most explicit), `combat_lab.md`, `planet_run.md`, `hmsc.md`, `hmsc_scale_lab.md`, `bodylab.md`, `head_lab.md`, `camera_lab.md`, `animation_lab.md`, `input_bench.md`.
 - **head_lab figure stack** (`cart/head_lab/`: sculptable Globe parts, `.hed` faces, 25 named bones, box hitboxes, clothing system, Verlet ragdoll) — used by `ragdoll_lab`, `combat_lab`, `pathing_lab`, `planet_run`, `head_lab`.
-- **hmsc humanoid** (`cart/hmsc/render3d/humanoid/`: fixed primitive parts, baked face decals, 6 capsule hit zones, palette recolor, no physics) — used by `hmsc`, its labs, `hmsc_scale_lab`, `hmsc_massive_map_lab`.
+- **hmsc humanoid** (`cart/hmsc-int/render3d/humanoid/`: fixed primitive parts, baked face decals, 6 capsule hit zones, palette recolor, no physics) — used by `hmsc`, its labs, `hmsc_scale_lab`, `hmsc_massive_map_lab`.
 - **Third + fourth variants**: `bodylab`'s primitive-cluster `HumanoidFigure`/`solveHumanoid` (its own `drivePose`/`BodyProportions`); `camera_lab`/`animation_lab`/`input_bench` each carry an inline 18-part `HUMANOID` array (input_bench's is "copied from camera_lab"); the registry's single-baked `Geometry.Humanoid` (used only by `camera_lab` for contrast).
 - **The smoking gun** (`ragdoll_lab.md`, `combat_lab.md`): the SAME six-region locational-damage model with reversed naming — ragdoll_lab `lArm/rArm/lLeg/rLeg` vs hmsc `DamageZone armL/armR/legL/legR`. `combat_lab` already bridges them via `boneZone()` renaming head_lab hitboxes into hmsc's `ZONE_DAMAGE` vocabulary — "the convergence move ragdoll_lab predicted," but half-done.
 - **Consolidation winner**: undecided in the docs. The hmsc humanoid is "solve once → mesh AND hitbox from same joints" (cleaner contract, `hmsc_scale_lab.md`); the head_lab kit is richer (sculpt, faces, clothing, ragdoll). `combat_lab` is the active merge site.
@@ -221,7 +221,7 @@ Docs: `head_lab.md` (`anchorsFromSkeleton` — `face_grab accepts grab_face/cove
 6. **Refresh `hmsc_massive_map_lab` stale caps** (8192/4096 → live 65536/32768) or read them from telemetry (§4.1).
 
 ### Deletions / orphan reconciliation
-7. **Reconcile `cart/hmsc/labs/ScaleLabScene.tsx`** — delete it or make it the shared source the standalone cart imports; it has already drifted (2.45 vs 2.04m) (§2.5, §4.2).
+7. **Reconcile `cart/hmsc-int/labs/ScaleLabScene.tsx`** — delete it or make it the shared source the standalone cart imports; it has already drifted (2.45 vs 2.04m) (§2.5, §4.2).
 8. **Delete the dead Canvas editor in `pixel_icon_demo`** and the dead `ChunkGround/ChunkRoads/BuildingMesh` trio in `hmsc_massive_map_lab` (both duplicate live recipes, drift hazards) (§2.9).
 9. **Audit `_old` files** (`cutout` ×8, `input_bench` ×2) — keep as breadcrumbs but ensure no active import; consider a `_archive/` subfolder so name-grep can't mislead (§2.4).
 

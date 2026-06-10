@@ -22,22 +22,22 @@ import type {
   WorldSurfaceRegion,
   Zone,
   ZoneFlag,
-} from '../hmsc/design';
+} from '../hmsc-int/design';
 import {
   createInitialGameState,
   readStoredGameState,
   saveGameState,
-} from '../hmsc/state/gameState';
-import { addBuildingToWorld, removeBuildingFromWorld } from '../hmsc/world/interiors';
-import { resolveBuildingPlacement } from '../hmsc/world/buildingPlacement';
-import { buildingKindDefinition } from '../hmsc/world/buildingKinds';
-import { buildingFootprint } from '../hmsc/world/buildings';
-import { placeProp, removeProp, propFootprint } from '../hmsc/world/props';
-import { addZone, removeZone } from '../hmsc/world/zones';
-import { addSurfaceRegion } from '../hmsc/world/grid';
-import { propKindDefinition } from '../hmsc/world/propKinds';
-import { nextUniqueId } from '../hmsc/world/idgen';
-import { rectsOverlap } from '../hmsc/world/rects';
+} from '../hmsc-int/state/gameState';
+import { addBuildingToWorld, removeBuildingFromWorld } from '../hmsc-int/world/interiors';
+import { resolveBuildingPlacement } from '../hmsc-int/world/buildingPlacement';
+import { buildingKindDefinition } from '../hmsc-int/world/buildingKinds';
+import { buildingFootprint } from '../hmsc-int/world/buildings';
+import { placeProp, removeProp, propFootprint } from '../hmsc-int/world/props';
+import { addZone, removeZone } from '../hmsc-int/world/zones';
+import { addSurfaceRegion } from '../hmsc-int/world/grid';
+import { propKindDefinition } from '../hmsc-int/world/propKinds';
+import { nextUniqueId } from '../hmsc-int/world/idgen';
+import { rectsOverlap } from '../hmsc-int/world/rects';
 
 // The editor always works on the same GameState shape the game uses. Load the
 // authored world if one exists, else a fresh demo world — identical to the game's

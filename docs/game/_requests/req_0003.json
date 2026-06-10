@@ -3,6 +3,36 @@
   "at": "2026-06-06T04:31:45.801Z",
   "origin": "supervisor-relay",
   "text": "uh im not sure at what point i would want to say it but the painter has a paint shaders method, and we have all these shader materials, but neither of them are speaking the same language. the paintable shaders are completely decoupled from the game materials, which is something to address, at the right time.",
-  "status": "open",
-  "captureMode": "manual"
+  "status": "done",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-07T10:48:04.321Z",
+      "actor": "worker",
+      "kind": "state",
+      "from": "new",
+      "to": "doing",
+      "text": "WBSTEP7 materials source completed; resolving with source commit next."
+    },
+    {
+      "at": "2026-06-07T10:48:04.330Z",
+      "actor": "worker",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-08T06:46:14.726Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done",
+      "text": "materials/skins unification landed (materials source 5a38b578c); user-confirmed downstream"
+    }
+  ],
+  "resolution": "WBSTEP7 makes MATERIAL the authored material door: shader recipes, stored game materials, React textures, and decals are unified in the workbench material source, while PAINT remains the one agnostic painter and material targets route back through that stored-material door. Downstream consumers now mount the material-owned chooser contract instead of growing parallel texture paths. Source commit: 5a38b578c.",
+  "shas": [
+    "5a38b578c"
+  ],
+  "resolvedAt": "2026-06-07T10:48:04.330Z"
 }

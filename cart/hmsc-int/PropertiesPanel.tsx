@@ -17,12 +17,12 @@
 
 import { useMemo, useState } from 'react';
 import { Box, ScrollView, Text, Graph, Pressable, StaticSurface } from '@reactjit/primitives';
-import type { Building, BuildingSkin, GameState, TileKind, WorldProp } from '../hmsc/design';
-import { tileKindDefinition } from '../hmsc/world/tileKinds';
-import { tileAltitudeAtWorldPosition, type TileAltitudeSample } from '../hmsc/world/tileAltitude';
-import { buildingKindDefinition } from '../hmsc/world/buildingKinds';
-import { propKindDefinition } from '../hmsc/world/propKinds';
-import { buildingSkinFacade } from '../hmsc/render3d/buildingSkins';
+import type { Building, BuildingSkin, GameState, TileKind, WorldProp } from './design';
+import { tileKindDefinition } from './world/tileKinds';
+import { tileAltitudeAtWorldPosition, type TileAltitudeSample } from './world/tileAltitude';
+import { buildingKindDefinition } from './world/buildingKinds';
+import { propKindDefinition } from './world/propKinds';
+import { buildingSkinFacade } from './render3d/buildingSkins';
 import { FACE_ROLES, SKIN_NAMES, currentFaceSkins } from './buildingEditor';
 import { cellAddress } from './address';
 import { C, accentFor } from './studio.cls';
@@ -53,7 +53,9 @@ const clampN = (n: number, lo?: number, hi?: number) =>
   Math.max(lo ?? -Infinity, Math.min(hi ?? Infinity, n));
 
 const NEUTRAL_PERCEPTION = { high: 0 };
-const TRACK_W = 60;
+const TRACK_W = 124;
+const TRACK_GUTTER = 7;
+const KNOB_W = 14;
 const PROPERTIES_SCROLL_STYLE = { flexGrow: 1, height: '100%' };
 const PROPERTIES_SCROLL_CONTENT_STYLE = { paddingBottom: 14 };
 
@@ -70,12 +72,14 @@ const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
 // scalar 0–1 bar (pixel widths — % on an absolute fill isn't resolved by layout)
 function ScalarView({ v }: { v: number }) {
-  const fw = Math.round(TRACK_W * clamp01(v));
+  const innerW = TRACK_W - TRACK_GUTTER * 2;
+  const fw = Math.round(innerW * clamp01(v));
+  const knobX = Math.round(TRACK_GUTTER + clamp01(v) * (innerW - KNOB_W));
   return (
     <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       <C.SliderTrack>
-        <C.SliderFill style={{ width: fw }} />
-        <C.SliderKnob style={{ left: Math.max(0, fw - 5) }} />
+        <C.SliderFill style={{ width: Math.max(3, fw) }} />
+        <C.SliderKnob style={{ left: knobX }} />
       </C.SliderTrack>
       <C.SliderValue>{v.toFixed(2)}</C.SliderValue>
     </Box>

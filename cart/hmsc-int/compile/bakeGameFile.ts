@@ -21,7 +21,7 @@
 import { loadEditorWorld } from '../editorWorld';
 import { createHmscMapfile } from '../packageMap';
 import { sceneEnvironmentFromSky } from './sceneEnv';
-import { buildHmscSky } from '../../hmsc/render3d/sky';
+import { buildHmscSky } from '../render3d/sky';
 import { deserializeMap } from '../mapStore';
 import { floorsFromEditorWorld, type ChunkFloor } from '../chunkFloor';
 import { bytesToBase64 } from '@reactjit/workspace';

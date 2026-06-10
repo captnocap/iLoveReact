@@ -15,8 +15,8 @@
 // on day one (same sizes/colors the game already uses — one source, no dup). New
 // bespoke assets (a prompted parking garage, a custom statue) append here.
 
-import { BUILDING_KINDS, buildingKindDefinition } from '../hmsc/world/buildingKinds';
-import { PROP_KINDS, propKindDefinition } from '../hmsc/world/propKinds';
+import { BUILDING_KINDS, buildingKindDefinition } from '../hmsc-int/world/buildingKinds';
+import { PROP_KINDS, propKindDefinition } from '../hmsc-int/world/propKinds';
 
 export type AssetCategory = 'building' | 'prop' | 'structure' | 'custom';
 

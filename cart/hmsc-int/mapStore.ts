@@ -26,7 +26,7 @@
 // off the paint hot path.
 
 import { encodeGrid, decodeGrid, type RleGrid } from '@reactjit/workspace';
-import { TILE_KINDS } from '../hmsc/world/tileKinds';
+import { TILE_KINDS } from './world/tileKinds';
 import {
   chunkKey,
   makeChunk,

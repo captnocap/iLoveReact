@@ -35,7 +35,32 @@ const FULL_WIRE: Record<string, unknown> = {
     app_tick_us: 140,
     pre_paint_us: 230,
     post_frame_us: 17,
+    gc_ns: 700,
+    gc_count: 3,
+    gc_type: 1,
+    present_us: 1900,
+    bridge_us: 140,
     frame_number: 9001,
+  }),
+  // history depth n → a frame snapshot; depth 2 is the worst (8000us) so the
+  // latch-by-total-time path has a distinct frame to find.
+  __tel_frame_at: (n: number) => ({
+    fps: 240,
+    tick_us: 300,
+    layout_us: 120,
+    paint_us: 800,
+    gpu_us: 2900,
+    frame_total_us: n === 2 ? 8000 : 4200,
+    event_us: 11,
+    app_tick_us: 140,
+    pre_paint_us: 230,
+    post_frame_us: 17,
+    gc_ns: n === 2 ? 6_500_000 : 700,
+    gc_count: n === 2 ? 1 : 3,
+    gc_type: n === 2 ? 4 : 1,
+    present_us: 1900,
+    bridge_us: 140,
+    frame_number: 9001 - n,
   }),
   __tel_host_flush: () => ({
     queued_batches: 0,
@@ -114,7 +139,31 @@ test('readFrame normalizes the wire snake_case into the FrameRecord vocabulary',
     assertEqual(frame!.appTickUs, 140, 'app_tick_us → appTickUs');
     assertEqual(frame!.prePaintUs, 230, 'pre_paint_us → prePaintUs');
     assertEqual(frame!.postFrameUs, 17, 'post_frame_us → postFrameUs');
+    assertEqual(frame!.gcNs, 700, 'gc_ns → gcNs (nanoseconds, sub-µs honest)');
+    assertEqual(frame!.gcCount, 3, 'gc_count → gcCount (invocation count)');
+    assertEqual(frame!.presentUs, 1900, 'present_us → presentUs');
+    assertEqual(frame!.bridgeUs, 140, 'bridge_us → bridgeUs');
     assertEqual(frame!.frameNumber, 9001, 'frame_number → frameNumber');
+  });
+});
+
+test('readFrameAt + findSpikeFrameRecord latch the worst frame by its total time, not a stale index', () => {
+  withHost(FULL_WIRE, () => {
+    const at0 = GAME_TELEMETRY.readFrameAt(0);
+    assert(at0 != null && at0!.totalUs === 4200, 'depth 0 is the current frame');
+    // The worst frame (8000us) is at depth 2 — matched by total time even though
+    // the ring may have drifted since the tape was sampled.
+    const spike = GAME_TELEMETRY.findSpikeFrameRecord(8000, 8);
+    assert(spike != null, 'the worst frame is found in the ring');
+    assertEqual(spike!.totalUs, 8000, 'matched by total time, not index 0');
+    assertEqual(spike!.gcNs, 6_500_000, 'the LATCHED spike frame carries ITS buckets, not the current frame');
+  });
+});
+
+test('readFrameAt is null when the host fn is absent (older host falls back to current frame)', () => {
+  withHost({ ...FULL_WIRE, __tel_frame_at: undefined }, () => {
+    assertEqual(GAME_TELEMETRY.readFrameAt(0), null, 'no __tel_frame_at → null, never throws');
+    assertEqual(GAME_TELEMETRY.findSpikeFrameRecord(8000, 8), null, 'no host fn → null, caller uses current frame');
   });
 });
 
@@ -222,7 +271,12 @@ test('under minHistorySamples the baseline is meaningless — never a spike', ()
 // 6250us. These records sit well above that with one dominant phase.
 
 function caughtRecord(patch: Partial<FrameRecord>): FrameRecord {
-  return { fps: 240, tickUs: 100, layoutUs: 100, paintUs: 100, gpuUs: 100, totalUs: 20000, frameNumber: 1, ...patch };
+  return {
+    fps: 240, tickUs: 100, layoutUs: 100, paintUs: 100, gpuUs: 100, totalUs: 20000, frameNumber: 1,
+    eventUs: 0, appTickUs: 0, prePaintUs: 0, postFrameUs: 0,
+    gcNs: 0, gcCount: 0, gcType: 0, presentUs: 0, bridgeUs: 0,
+    ...patch,
+  };
 }
 
 test('a node/glyph/mesh swing names CONTENT SWAP above everything else', () => {
@@ -245,20 +299,70 @@ test('paint-dominant caught frame: hash flip → REPAINT / CAPTURE RE-BAKE, stil
   assert(still.includes('CAPTURE RE-BAKE') && !still.includes('REPAINT /'), `paint + same hash (got: ${still})`);
 });
 
-test('gpu-dominant with idle CPU and still draw calls is the vsync wait, not a stall', () => {
-  const record = caughtRecord({ gpuUs: 18000 });
-  const idle = GAME_TELEMETRY.classifySpike(record, { scene3d_draw_calls: 10 }, { scene3d_draw_calls: 10 });
-  assert(idle.includes('VSYNC / PRESENT WAIT'), `idle gpu phase is the refresh cap (got: ${idle})`);
-  const real = GAME_TELEMETRY.classifySpike(record, { scene3d_draw_calls: 10 }, { scene3d_draw_calls: 18 });
-  assert(real.includes('GPU DRAW/UPLOAD'), `a draw-call swing makes it real GPU work (got: ${real})`);
+test('gpu-dominant: a MEASURED present wait is the vsync cap; little present wait is real GPU work', () => {
+  // present_us dominates the gpu phase → vblank-capped idle, not a stall.
+  const idleRec = caughtRecord({ gpuUs: 18000, presentUs: 17000 });
+  const idle = GAME_TELEMETRY.classifySpike(idleRec, { scene3d_draw_calls: 10 }, { scene3d_draw_calls: 10 });
+  assert(idle.includes('VSYNC / PRESENT WAIT'), `measured present wait is the refresh cap (got: ${idle})`);
+  // present_us tiny → the gpu time was real encode/upload/draw work.
+  const realRec = caughtRecord({ gpuUs: 18000, presentUs: 800 });
+  const real = GAME_TELEMETRY.classifySpike(realRec, { scene3d_draw_calls: 10 }, { scene3d_draw_calls: 18 });
+  assert(real.includes('GPU DRAW/UPLOAD'), `low present wait makes it real GPU work (got: ${real})`);
   assert(real.includes('+8'), `the verdict carries the signed draw-call delta (got: ${real})`);
 });
 
-test('tick-dominant caught frame names TICK; a dead-still counter set names GC / NATIVE', () => {
+test('V8 GC is named definitively, with type AND fire-count, whenever its measured pause dominates', () => {
+  // GC measured frame-wide can dominate even a tick-attributed frame. 11.3ms = 11_300_000ns.
+  const gc = GAME_TELEMETRY.classifySpike(
+    caughtRecord({ tickUs: 18000, totalUs: 20000, gcNs: 11_300_000, gcCount: 1, gcType: 4 }),
+    { total: 5 }, { total: 5 },
+  );
+  assert(gc.includes('V8 GC'), `a big measured GC pause is named (got: ${gc})`);
+  assert(gc.includes('mark-sweep'), `the GC type is decoded from the bitmask (got: ${gc})`);
+  assert(gc.includes('11.30ms'), `the measured GC ms is in the verdict (got: ${gc})`);
+  assert(gc.includes('×1'), `the fire-count is in the verdict (got: ${gc})`);
+});
+
+test('GC is sub-µs honest and never value-ambiguous: tiny fired vs never fired are distinct', () => {
+  // 700ns total across 3 scavenges must NOT floor to "0us" — it reads "700ns ×3"
+  // (ns precision below 1µs; even more honest than the illustrative "0.7µs").
+  const tiny = GAME_TELEMETRY.gcLabel(700, 3, 1);
+  assert(tiny.includes('700ns') && tiny.includes('×3') && tiny.includes('scavenge'),
+    `a sub-µs GC shows ns with its count, not "0us" (got: ${tiny})`);
+  // And just above 1µs it crosses to µs-with-decimal, e.g. "0.7µs"-style.
+  assert(GAME_TELEMETRY.gcLabel(1_700, 2, 1).includes('1.7µs'),
+    'just over 1µs reads in µs with a decimal');
+  // Zero invocations is a SEPARATE, explicit state — the binding produced nothing.
+  const dead = GAME_TELEMETRY.gcLabel(0, 0, 0);
+  assert(dead.includes('×0') && dead.includes('never fired'),
+    `a 0-count GC says "never fired", not a misleading 0-time (got: ${dead})`);
+  // formatGcTime crosses the units honestly.
+  assertEqual(GAME_TELEMETRY.formatGcTime(420), '420ns', 'ns below 1µs');
+  assertEqual(GAME_TELEMETRY.formatGcTime(1_500), '1.5µs', 'µs with a decimal');
+  assertEqual(GAME_TELEMETRY.formatGcTime(2_000_000), '2.00ms', 'ms above 1ms');
+});
+
+test('outside-render time is attributed to its MEASURED cause, never "GC / native, one of three"', () => {
+  // bridge dominates the outside-render bucket → NATIVE BRIDGE, definitively.
+  const bridge = GAME_TELEMETRY.classifySpike(
+    caughtRecord({ totalUs: 20000, tickUs: 100, layoutUs: 100, paintUs: 100, gpuUs: 100, bridgeUs: 15000 }),
+    { total: 5 }, { total: 5 },
+  );
+  assert(bridge.includes('NATIVE BRIDGE'), `bridge-dominated other is named bridge (got: ${bridge})`);
+  assert(!bridge.includes('GC / NATIVE'), `the old multiple-choice guess is gone (got: ${bridge})`);
+  // No measured contributor → its own explicit UNATTRIBUTED bucket (native).
+  const native = GAME_TELEMETRY.classifySpike(
+    caughtRecord({ totalUs: 20000, tickUs: 100, layoutUs: 100, paintUs: 100, gpuUs: 100, bridgeUs: 0 }),
+    { total: 5 }, { total: 5 },
+  );
+  assert(native.includes('UNATTRIBUTED'), `unbridged native other is explicit, not folded into a cause (got: ${native})`);
+});
+
+test('tick-dominant caught frame still names TICK; a dead-still null-record set reports ~0 timers', () => {
   const tick = GAME_TELEMETRY.classifySpike(caughtRecord({ tickUs: 18000 }), { total: 5 }, { total: 5 });
   assert(tick.includes('TICK'), `tick-dominant (got: ${tick})`);
   const ghost = GAME_TELEMETRY.classifySpike(null, { total: 5, glyph_count: 9, frame_hash: 1 }, { total: 5, glyph_count: 9, frame_hash: 1 });
-  assert(ghost.includes('GC / NATIVE'), `nothing moved (got: ${ghost})`);
+  assert(ghost.includes('boundary timer read'), `nothing moved + no record → measured-but-zero, not a guess (got: ${ghost})`);
 });
 
 test('an uncaught hash flip alone names REPAINT (buffer re-upload)', () => {
@@ -288,6 +392,23 @@ test('a spike report carries verdict, magnitude, deltas, the hash callout, and t
   assert(text.includes('tape (ms, newest first): 5.3 4.2 4.2 4.2'), 'the flight-recorder tape in ms');
 });
 
+test('GAP-2: a latched report shows the SPIKE frame buckets and labels them latched', () => {
+  const lines = GAME_TELEMETRY.buildSpikeReport({
+    historyNewestFirstUs: [8000, 4167, 4167, 4167],
+    baselineUs: 4167,
+    worstUs: 8000,
+    calmCounters: { total: 5 },
+    spikeCounters: { total: 5 },
+    counterFrameCaught: false, // current-frame owner counters are stale...
+    latched: true, // ...but we latched the actual worst frame from the ring
+    record: caughtRecord({ totalUs: 8000, tickUs: 100, gpuUs: 100, gcNs: 6_500_000, gcCount: 1, gcType: 4 }),
+  });
+  const text = lines.join('\n');
+  assert(text.includes('SPIKE FRAME CAUGHT (latched from host ring)'), `the report says it latched the spike frame (got: ${text})`);
+  assert(text.includes('V8 GC 6.50ms'), `the breakdown shows the SPIKE frame's GC, not a recovered 0 (got: ${text})`);
+  assert(!text.includes('SPIKE IN HOST TAPE'), `latched buckets mean we no longer disclaim the whole report (got: ${text})`);
+});
+
 test('a report with nothing moved says so instead of printing an empty delta list', () => {
   const lines = GAME_TELEMETRY.buildSpikeReport({
     historyNewestFirstUs: [5263, 4167],
@@ -297,7 +418,7 @@ test('a report with nothing moved says so instead of printing an empty delta lis
     spikeCounters: { total: 5 },
     record: null,
   });
-  assert(lines.join('\n').includes('nothing in our counters moved'), 'the dead-still case is named');
+  assert(lines.join('\n').includes('nothing in our draw counters moved'), 'the dead-still case is named');
 });
 
 test('a recovered-frame report does not attribute stale counter deltas to the spike', () => {

@@ -11,14 +11,14 @@
 
 import { useRef, useState } from 'react';
 import { Box, Effect, Pressable, Text } from '@reactjit/primitives';
-import type { GameState } from '../hmsc/design';
-import { tileKindDefinition } from '../hmsc/world/tileKinds';
-import { worldMarkers } from '../hmsc/world/worldView';
-import { roadFootprint } from '../hmsc/world/roads';
-import { junctionFootprint } from '../hmsc/world/roadJunctions';
-import { HMSC_ROAD_SCALE } from '../hmsc/world/roadProfile';
-import { TILE_FILL_WGSL, tileFillMaterialId, tileFillVariant } from '../hmsc/render3d/tileFill';
-import { hexToRgb01 } from '../hmsc/world/placeables';
+import type { GameState } from '../hmsc-int/design';
+import { tileKindDefinition } from '../hmsc-int/world/tileKinds';
+import { worldMarkers } from '../hmsc-int/world/worldView';
+import { roadFootprint } from '../hmsc-int/world/roads';
+import { junctionFootprint } from '../hmsc-int/world/roadJunctions';
+import { HMSC_ROAD_SCALE } from '../hmsc-int/world/roadProfile';
+import { TILE_FILL_WGSL, tileFillMaterialId, tileFillVariant } from '../hmsc-int/render3d/tileFill';
+import { hexToRgb01 } from '../hmsc-int/world/placeables';
 
 export const MIN_PIXELS_PER_TILE = 1.5;
 export const MAX_PIXELS_PER_TILE = 48;

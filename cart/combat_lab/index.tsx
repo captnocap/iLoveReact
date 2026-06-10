@@ -82,14 +82,14 @@ import { generateFace, hedDepthGrid } from '../head_lab/hed';
 import { buildPartRender, CharacterCaptures, FigureMeshes, type PartRender } from '../head_lab/figureRender';
 
 // hmsc's combat math + camera — the systems under test, from the game itself.
-import { hitChance, rollHit, rollZone } from '../hmsc/npc/systems/chance';
-import { zoneDamage } from '../hmsc/npc/systems/damage';
-import { npcKindDefinition } from '../hmsc/npc/kinds';
-import { ZONE_DAMAGE } from '../hmsc/render3d/humanoid/hitbox';
-import type { DamageZone } from '../hmsc/render3d/humanoid/skeleton';
-import type { NpcKind } from '../hmsc/design';
-import { HMSC_GAMEPLAY_CAMERA, clampCameraValue, angleDeltaDegrees } from '../hmsc/gameplay/camera';
-import { TILE_KIND_DEFINITIONS, type TileKind } from '../hmsc/world/tileKinds';
+import { hitChance, rollHit, rollZone } from '../hmsc-int/npc/systems/chance';
+import { zoneDamage } from '../hmsc-int/npc/systems/damage';
+import { npcKindDefinition } from '../hmsc-int/npc/kinds';
+import { ZONE_DAMAGE } from '../hmsc-int/render3d/humanoid/hitbox';
+import type { DamageZone } from '../hmsc-int/render3d/humanoid/skeleton';
+import type { NpcKind } from '../hmsc-int/design';
+import { HMSC_GAMEPLAY_CAMERA, clampCameraValue, angleDeltaDegrees } from '../hmsc-int/gameplay/camera';
+import { TILE_KIND_DEFINITIONS, type TileKind } from '../hmsc-int/world/tileKinds';
 
 const BG = '#0b1018';
 const INK = '#e8eef8';

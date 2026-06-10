@@ -18,6 +18,7 @@
 import { useMemo, useState } from 'react';
 import { Box, Col, Effect, Pressable, Row, ScrollView, Text } from '@reactjit/primitives';
 import { paramDefaults, type ShaderParam, type ShaderSpec } from '@game/textures/shaders';
+import { WorkbenchSlider } from './shell/fields';
 
 interface Material { name: string; data: number[] }
 
@@ -32,19 +33,11 @@ function snap(p: ShaderParam, v: number): number {
   return p.integer ? Math.round(clamped) : Math.round(clamped * 1000) / 1000;
 }
 
-// One labeled slider. Drag down/move/up all on the SAME node (pointer-capture
-// rule); onLayout gives the track rect to map x → value.
+// One labeled slider. The chrome is the shared Workbench slider so shader
+// tuning does not drift back to tiny route-local tracks.
 function ParamSlider(props: { param: ShaderParam; value: number; onChange: (v: number) => void }) {
   const { param, value } = props;
-  const [rect, setRect] = useState<{ x: number; width: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
   const range = param.max - param.min;
-  const pct = range <= 0 ? 0 : Math.max(0, Math.min(1, (value - param.min) / range));
-  const fromX = (sx: number) => {
-    if (!rect || rect.width <= 0) return;
-    const raw = (sx - rect.x) / rect.width;
-    props.onChange(snap(param, param.min + Math.max(0, Math.min(1, raw)) * range));
-  };
   return (
     <Col style={{ gap: 4 }}>
       <Row style={{ alignItems: 'center', gap: 6 }}>
@@ -52,17 +45,16 @@ function ParamSlider(props: { param: ShaderParam; value: number; onChange: (v: n
         <Box style={{ flexGrow: 1 }} />
         <Text fontSize={10} color="#e2e8f0" style={{ fontFamily: 'monospace', fontWeight: 800 }}>{fmt(param, value)}</Text>
       </Row>
-      <Pressable
-        onMouseDown={(p: any) => { setDragging(true); fromX(p.x); }}
-        onMouseMove={(p: any) => { if (dragging) fromX(p.x); }}
-        onMouseUp={() => setDragging(false)}
-      >
-        <Box onLayout={(r: any) => setRect({ x: r.x, width: r.width })} style={{ height: 20, borderRadius: 5, backgroundColor: '#0b1424', borderWidth: 1, borderColor: '#1e293b', position: 'relative', justifyContent: 'center' }}>
-          <Box style={{ position: 'absolute', left: 6, right: 6, top: 9, height: 2, borderRadius: 1, backgroundColor: '#334155' }} />
-          <Box style={{ position: 'absolute', left: 6, top: 9, width: Math.max(2, Math.round((rect ? rect.width - 12 : 100) * pct)), height: 2, borderRadius: 1, backgroundColor: '#38bdf8' }} />
-          <Box style={{ position: 'absolute', left: 2 + Math.round((rect ? rect.width - 16 : 100) * pct), top: 3, width: 14, height: 14, borderRadius: 7, backgroundColor: '#38bdf8', borderWidth: 2, borderColor: '#0a111d' }} />
-        </Box>
-      </Pressable>
+      <WorkbenchSlider
+        value={value}
+        min={param.min}
+        max={param.max}
+        show={(v) => fmt(param, v)}
+        onChange={(v) => props.onChange(snap(param, v))}
+        toTrack={(v) => range <= 0 ? 0 : (v - param.min) / range}
+        fromTrack={(t) => snap(param, param.min + t * range)}
+        tooltip={`${param.label} ${fmt(param, value)}`}
+      />
     </Col>
   );
 }

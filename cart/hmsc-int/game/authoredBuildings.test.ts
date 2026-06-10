@@ -1,4 +1,4 @@
-import { createInitialGameState, reviveGameState } from '../../hmsc/state/gameState';
+import { createInitialGameState, reviveGameState } from '../state/gameState';
 import { worldStream } from './world/stream';
 import { assert, assertEqual, finish, test } from './_testkit';
 

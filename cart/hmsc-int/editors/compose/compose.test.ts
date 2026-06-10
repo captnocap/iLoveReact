@@ -24,7 +24,7 @@ function sampleDoc(): DecalDoc {
     height: 256,
     bg: '#0b1320',
     nodes: [
-      { id: 'r1', kind: 'rect', x: 32, y: 32, w: 448, h: 192, bg: '#2563eb', borderRadius: 12, borderWidth: 4, borderColor: '#f8fafc', opacity: 0.9 },
+      { id: 'r1', kind: 'rect', x: 32, y: 32, w: 448, h: 192, bg: '#2563eb', fillShaderId: 'a-concrete', fillData: [1, 0, 12, 3, 0], borderRadius: 12, borderWidth: 4, borderColor: '#f8fafc', opacity: 0.9 },
       { id: 't1', kind: 'text', x: 64, y: 96, w: 384, h: 64, text: 'EAT AT JOES', color: '#f8fafc', fontSize: 48, fontWeight: 800, fontFamily: 'monospace', letterSpacing: 2, align: 'center' },
       { id: 'i1', kind: 'image', x: 400, y: 40, w: 64, h: 64, src: 'cart/hmsc-int/assets/logo.png' },
     ],
@@ -83,6 +83,8 @@ test('values clamp at the boundary, not downstream', () => {
 
 test('emptyDecalDoc and every size preset validate', () => {
   assert(validateDecalDoc(emptyDecalDoc()) !== null, 'the empty doc is a valid doc');
+  const wall = DECAL_SIZE_PRESETS.find((p) => p.label === 'wall fit 3m 768×768');
+  assert(wall?.width === 768 && wall.height === 768, 'wall-fit preset maps a 3m wall face to 256 px/m');
   for (const p of DECAL_SIZE_PRESETS) {
     assert(validateDecalDoc(emptyDecalDoc(p.width, p.height)) !== null, `preset ${p.label} yields a valid doc`);
   }

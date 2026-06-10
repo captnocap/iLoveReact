@@ -4,7 +4,7 @@
 // action all read/write through this boundary.
 
 import type { ActionSpec, RosterRow } from '../../../shell/Workbench';
-import type { FieldSpec, PanelSpec } from '../../../shell/fields';
+import type { FieldSpec, PanelSpec, PickOption } from '../../../shell/fields';
 import type { LensSpec } from '../../../shell/stage';
 import {
   DECAL_SIZE_PRESETS,
@@ -14,7 +14,7 @@ import {
   type DecalDoc,
   type DecalNode,
 } from '../../../game/textures/decal';
-import { paramDefaults, type ShaderParam, type ShaderSpec } from '../../../game/textures/shaders';
+import { defaultShaderData, paramDefaults, type ShaderParam, type ShaderSpec } from '../../../game/textures/shaders';
 import type { MaterialsEvent } from '../../materials/stream';
 
 export type MaterialLens = 'preview' | 'shader' | 'compose';
@@ -50,6 +50,7 @@ export type MaterialWorkbenchDeps = {
   saveShader(label: string, shaderId: string, data: number[]): StoredMaterialSummary;
   saveDecal(label: string, doc: DecalDoc, existingId?: string): StoredMaterialSummary | null;
   remove(id: string): void;
+  pickImage?(): string | null | Promise<string | null>;
   session?: MaterialSession | null;
   twig?: boolean | MaterialTwigAdapter;
 };
@@ -67,13 +68,18 @@ export type MaterialSubject = {
 };
 
 type BankedMaterial = { name: string; shaderId: string; data: number[] };
+export type ComposeResizeHandle = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw';
 
 const TEXTURE_ROUTE = '/textures';
 const COMPOSE_ROUTE = '/compose';
-const PALETTE = ['#f8fafc', '#0b1320', '#111827', '#dc2626', '#ea580c', '#f59e0b', '#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#db2777', '#a16207'];
 const FONT_FAMILIES = ['default', 'sans-serif', 'serif', 'monospace', 'noto', 'arial', 'inter', 'roboto'];
 const FONT_WEIGHTS = ['400', '600', '700', '800', '900'];
 const ALIGN_OPTS: DecalAlign[] = ['left', 'center', 'right'];
+const MIN_NODE_SIZE = 1;
+
+function isEffectFillSpec(spec: ShaderSpec): boolean {
+  return /^[a-j]-/.test(spec.id);
+}
 
 function snapParam(p: ShaderParam, v: number): number {
   const stepped = Math.round(v / p.step) * p.step;
@@ -105,6 +111,38 @@ function parseWeight(v: string): number {
   return Number.isFinite(n) ? n : 400;
 }
 
+function cleanPickedPath(raw: string): string {
+  let p = raw.trim().replace(/^['"]+|['"]+$/g, '').trim();
+  if (p.startsWith('file://')) p = decodeURIComponent(p.slice('file://'.length));
+  return p;
+}
+
+function resizeNodePatch(node: DecalNode, handle: ComposeResizeHandle, dx: number, dy: number): Pick<DecalNode, 'x' | 'y' | 'w' | 'h'> {
+  let x = node.x;
+  let y = node.y;
+  let w = node.w;
+  let h = node.h;
+  if (handle.includes('e')) w += dx;
+  if (handle.includes('s')) h += dy;
+  if (handle.includes('w')) {
+    x += dx;
+    w -= dx;
+  }
+  if (handle.includes('n')) {
+    y += dy;
+    h -= dy;
+  }
+  if (w < MIN_NODE_SIZE) {
+    if (handle.includes('w')) x = node.x + node.w - MIN_NODE_SIZE;
+    w = MIN_NODE_SIZE;
+  }
+  if (h < MIN_NODE_SIZE) {
+    if (handle.includes('n')) y = node.y + node.h - MIN_NODE_SIZE;
+    h = MIN_NODE_SIZE;
+  }
+  return { x, y, w, h };
+}
+
 export interface MaterialStore {
   subscribe(fn: () => void): () => void;
   listRows(): RosterRow[];
@@ -127,6 +165,12 @@ export interface MaterialStore {
   currentShaderData(): number[] | null;
   selectComposeNode(id: string | null): void;
   moveComposeNode(id: string, dx: number, dy: number): void;
+  resizeComposeNode(id: string, handle: ComposeResizeHandle, dx: number, dy: number): void;
+  renameComposeNode(id: string, name: string): void;
+  toggleComposeNodeHidden(id: string): void;
+  duplicateComposeNode(id: string): void;
+  removeComposeNode(id: string): void;
+  moveComposeNodeLayer(id: string, dir: 1 | -1): void;
 }
 
 export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore {
@@ -202,6 +246,10 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
   };
 
   const customRows = () => deps.stored();
+  const effectFillOptions = (): PickOption[] => recipes()
+    .filter(isEffectFillSpec)
+    .map((spec) => ({ id: spec.id, label: spec.label, group: spec.group }));
+  const effectFillLabel = (id: string): string => recipes().find((spec) => spec.id === id)?.label ?? id;
   const resolveRow = (rowId: string): MaterialRow | null => {
     if (rowId.startsWith('recipe:')) {
       const id = rowId.slice('recipe:'.length);
@@ -292,6 +340,24 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
     writeCompose();
     emit();
   };
+  const pickImageForNode = (id: string) => {
+    const apply = (raw: string | null) => {
+      if (!raw) return;
+      patchNode(id, { src: cleanPickedPath(raw) } as Partial<DecalNode>);
+    };
+    const picked = deps.pickImage?.();
+    if (!picked) return;
+    if (typeof (picked as Promise<string | null>).then === 'function') {
+      void (picked as Promise<string | null>).then(apply);
+    } else {
+      apply(picked as string);
+    }
+  };
+  const addImageNode = () => {
+    const node: DecalNode = { id: mintNodeId(composeDoc, 'image'), kind: 'image', x: composeDoc.width / 4, y: composeDoc.height / 4, w: composeDoc.width / 2, h: composeDoc.height / 2, src: '' };
+    addNode(node);
+    pickImageForNode(node.id);
+  };
 
   const materializeShader = () => {
     const spec = currentSpec();
@@ -376,20 +442,8 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
     { k: 'new decal', t: 'act', tone: 'success', run: () => { openDecal(null); emit(); } },
     { k: '+ rect', t: 'act', run: () => addNode({ id: mintNodeId(composeDoc, 'rect'), kind: 'rect', x: composeDoc.width / 4, y: composeDoc.height / 4, w: composeDoc.width / 2, h: composeDoc.height / 2, bg: '#2563eb', borderRadius: 8 }) },
     { k: '+ text', t: 'act', run: () => addNode({ id: mintNodeId(composeDoc, 'text'), kind: 'text', x: composeDoc.width / 8, y: composeDoc.height / 3, w: (composeDoc.width * 3) / 4, h: composeDoc.height / 3, text: 'BILLBOARD', color: '#f8fafc', fontSize: Math.round(composeDoc.height / 4), fontWeight: 800, align: 'center' }) },
-    { k: '+ image', t: 'act', run: () => addNode({ id: mintNodeId(composeDoc, 'image'), kind: 'image', x: composeDoc.width / 4, y: composeDoc.height / 4, w: composeDoc.width / 2, h: composeDoc.height / 2, src: '' }) },
+    { k: '+ image', t: 'act', run: addImageNode },
   ];
-
-  const layerFields = (): FieldSpec[] => {
-    const ids = composeDoc.nodes.map((n) => n.id);
-    const opts = ids.length ? ids : ['none'];
-    return [
-      { k: 'selected', t: 'enum', opts, get: () => selectedNodeId ?? 'none', set: (v) => { selectedNodeId = v === 'none' ? null : v; } },
-      { k: 'duplicate', t: 'act', run: () => { if (selectedNodeId) duplicateNode(selectedNodeId); } },
-      { k: 'front', t: 'act', run: () => { if (selectedNodeId) reorderNode(selectedNodeId, 1); } },
-      { k: 'back', t: 'act', run: () => { if (selectedNodeId) reorderNode(selectedNodeId, -1); } },
-      { k: 'remove', t: 'act', tone: 'error', run: () => { if (selectedNodeId) removeNode(selectedNodeId); } },
-    ];
-  };
 
   const canvasOrNodeFields = (): FieldSpec[] => {
     const selected = selectedNodeId ? composeDoc.nodes.find((n) => n.id === selectedNodeId) ?? null : null;
@@ -397,7 +451,7 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
       return [
         { k: 'width', t: 'num', min: 8, max: 4096, step: 8, precision: 0, get: () => composeDoc.width, set: (v) => patchDoc({ width: Math.max(8, Math.round(v)) }) },
         { k: 'height', t: 'num', min: 8, max: 4096, step: 8, precision: 0, get: () => composeDoc.height, set: (v) => patchDoc({ height: Math.max(8, Math.round(v)) }) },
-        { k: 'bg', t: 'color', opts: PALETTE, get: () => composeDoc.bg, set: (v) => patchDoc({ bg: v }) },
+        { k: 'bg', t: 'color', wheel: true, get: () => composeDoc.bg, set: (v) => patchDoc({ bg: v }) },
       ];
     }
     const baseFields: FieldSpec[] = [
@@ -409,15 +463,26 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
     ];
     if (selected.kind === 'rect') {
       baseFields.push(
-        { k: 'fill', t: 'color', opts: PALETTE, get: () => selected.bg, set: (v) => patchNode(selected.id, { bg: v }) },
+        { k: 'flat fill', t: 'color', wheel: true, get: () => selected.bg, set: (v) => patchNode(selected.id, { bg: v }) },
+        {
+          k: 'effect fill', t: 'pick',
+          get: () => selected.fillShaderId ?? null,
+          opts: effectFillOptions,
+          show: effectFillLabel,
+          clearLabel: 'flat color',
+          set: (id) => {
+            const spec = id ? recipes().find((s) => s.id === id) : null;
+            patchNode(selected.id, spec ? { fillShaderId: spec.id, fillData: defaultShaderData(spec) } : { fillShaderId: undefined, fillData: undefined });
+          },
+        },
         { k: 'radius', t: 'num', min: 0, max: 128, step: 1, precision: 0, get: () => selected.borderRadius ?? 0, set: (v) => patchNode(selected.id, { borderRadius: v }) },
         { k: 'border', t: 'num', min: 0, max: 32, step: 1, precision: 0, get: () => selected.borderWidth ?? 0, set: (v) => patchNode(selected.id, { borderWidth: v }) },
-        { k: 'b.color', t: 'color', opts: PALETTE, get: () => selected.borderColor ?? '', set: (v) => patchNode(selected.id, { borderColor: v }) },
+        { k: 'b.color', t: 'color', wheel: true, get: () => selected.borderColor ?? '#000000', set: (v) => patchNode(selected.id, { borderColor: v }) },
       );
     } else if (selected.kind === 'text') {
       baseFields.push(
         { k: 'text', t: 'text', width: 166, get: () => selected.text, set: (v) => patchNode(selected.id, { text: v }) },
-        { k: 'color', t: 'color', opts: PALETTE, get: () => selected.color, set: (v) => patchNode(selected.id, { color: v }) },
+        { k: 'color', t: 'color', wheel: true, get: () => selected.color, set: (v) => patchNode(selected.id, { color: v }) },
         { k: 'size', t: 'num', min: 6, max: 320, step: 1, precision: 0, get: () => selected.fontSize, set: (v) => patchNode(selected.id, { fontSize: v }) },
         { k: 'tracking', t: 'num', min: -4, max: 32, step: 0.5, precision: 1, get: () => selected.letterSpacing ?? 0, set: (v) => patchNode(selected.id, { letterSpacing: v }) },
         { k: 'weight', t: 'enum', opts: FONT_WEIGHTS, get: () => String(selected.fontWeight ?? 400), set: (v) => patchNode(selected.id, { fontWeight: parseWeight(v) }) },
@@ -426,6 +491,7 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
       );
     } else {
       baseFields.push(
+        { k: 'pick file…', t: 'act', run: () => pickImageForNode(selected.id) },
         { k: 'src', t: 'text', width: 174, get: () => selected.src, set: (v) => patchNode(selected.id, { src: v }) },
         { k: 'radius', t: 'num', min: 0, max: 128, step: 1, precision: 0, get: () => selected.borderRadius ?? 0, set: (v) => patchNode(selected.id, { borderRadius: v }) },
       );
@@ -523,8 +589,7 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
 
       if (row.kind === 'decal' || lens === 'compose') {
         groups.push({ title: 'COMPOSE', fields: composeFields() });
-        groups.push({ title: `LAYERS · ${composeDoc.nodes.length}`, fields: layerFields() });
-        groups.push({ title: selectedNodeId ? 'NODE PROPERTIES' : 'CANVAS', fields: canvasOrNodeFields() });
+        groups.push({ title: selectedNodeId ? 'NODE PROPERTIES' : 'CANVAS', layout: 'rows', fields: canvasOrNodeFields() });
       }
 
       return { groups };
@@ -561,6 +626,23 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
       if (!node) return;
       patchNode(id, { x: node.x + dx, y: node.y + dy });
     },
+    resizeComposeNode(id, handle, dx, dy) {
+      const node = composeDoc.nodes.find((n) => n.id === id);
+      if (!node) return;
+      patchNode(id, resizeNodePatch(node, handle, dx, dy));
+    },
+    renameComposeNode(id, name) {
+      const clean = name.trim();
+      patchNode(id, { name: clean || undefined } as Partial<DecalNode>);
+    },
+    toggleComposeNodeHidden(id) {
+      const node = composeDoc.nodes.find((n) => n.id === id);
+      if (!node) return;
+      patchNode(id, { hidden: node.hidden ? undefined : true } as Partial<DecalNode>);
+    },
+    duplicateComposeNode: duplicateNode,
+    removeComposeNode: removeNode,
+    moveComposeNodeLayer: reorderNode,
   };
 
   return api;

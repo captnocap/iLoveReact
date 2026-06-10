@@ -22,8 +22,8 @@
 // Emits the game-file as the same {gamefile, assets} base64 envelope bakeGameFile
 // uses, so `rjit game play/shot --massive` can capture it.
 
-import { createInitialGameState } from '../../hmsc/state/gameState';
-import { buildHmscSky } from '../../hmsc/render3d/sky';
+import { createInitialGameState } from '../state/gameState';
+import { buildHmscSky } from '../render3d/sky';
 import { sceneEnvironmentFromSky } from './sceneEnv';
 import { createHmscMapfile } from '../packageMap';
 import { INSTANCE_STRIDE, INSTANCE_SHAPE_BOX, encodeInstanceLump } from './worldGeometry';
@@ -160,11 +160,18 @@ function withInstances(container: Uint8Array, instances: Uint8Array): Uint8Array
   if (!findLump(records, MAP_LUMP.INSTANCES)) {
     throw new Error('massive bake: createHmscMapfile produced no INSTANCES lump to swap');
   }
-  const lumps: LumpInput[] = records.map((r) => ({
-    type: r.type,
-    encoding: r.encoding,
-    data: r.type === MAP_LUMP.INSTANCES ? instances : r.data,
-  }));
+  // Drop the COLLIDERS lump: it reflects createHmscMapfile's (default) placed
+  // pieces, not the massive instances we swap in here. Without it the loader
+  // falls back to deriving colliders from the massive instance buffer (with the
+  // spatial windowing the --massive scale lab needs). PHYSICS_CONFIG stays — the
+  // player tuning/speed is map-independent.
+  const lumps: LumpInput[] = records
+    .filter((r) => r.type !== MAP_LUMP.COLLIDERS)
+    .map((r) => ({
+      type: r.type,
+      encoding: r.encoding,
+      data: r.type === MAP_LUMP.INSTANCES ? instances : r.data,
+    }));
   return writeLumpContainer(lumps);
 }
 

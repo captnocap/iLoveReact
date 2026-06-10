@@ -16,11 +16,11 @@ import * as Geometry from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { GAME_CAMERA, GAME_NATIVE_CAMERA } from './game';
 import type { PlacedBuildPiece } from './game';
-import type { Building, TileKind, WorldProp } from '../hmsc/design';
-import { Building3D } from '../hmsc/render3d/Building';
-import { BuildingFacades } from '../hmsc/render3d/BuildingFacades';
-import { Prop } from '../hmsc/render3d/Prop';
-import { tileKindDefinition } from '../hmsc/world/tileKinds';
+import type { Building, TileKind, WorldProp } from './design';
+import { Building3D } from './render3d/Building';
+import { BuildingFacades } from './render3d/BuildingFacades';
+import { Prop } from './render3d/Prop';
+import { tileKindDefinition } from './world/tileKinds';
 import { PlacedPieceMeshes } from './editors/build/pieceMeshes';
 
 const ORBIT_SPEED = 0.4; // degrees per cursor pixel

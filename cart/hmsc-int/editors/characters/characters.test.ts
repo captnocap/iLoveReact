@@ -23,7 +23,7 @@ import { createSessionLog } from '../sessions';
 // the same)
 import { createStrokeEngine } from '../paint/strokes';
 import { globeSurface } from '@reactjit/geometries';
-import { DEPTH_OVERLAY_WGSL, GREATER_POINTS, PAINT_EDITOR_TUNING, SCULPT_CANVAS, SCULPT_CELL_PX, bytesFromGrid, depthHintData, depthHintGrid, depthOverlayData, editorPartParams, gridFromBytes, gridNodeAt, sculptDabSnap, sculptEffectiveRadiusPx, sculptEngineBrushPx, withNodeValue } from './paintKit';
+import { DEPTH_OVERLAY_WGSL, GREATER_POINTS, PAINT_EDITOR_TUNING, SCULPT_CANVAS, SCULPT_CELL_PX, bytesFromGrid, depthHintData, depthHintGrid, depthOverlayData, editorPartParams, gridFromBytes, gridNodeAt, gridNodeFromSurfaceHit, sculptDabSnap, sculptEffectiveRadiusPx, sculptEngineBrushPx, withNodeValue } from './paintKit';
 import {
   GRAB_TUNING, applyGrabStamp, buildGrabClouds, cellUv, grabDragAxis, grabInstancesFor, grabPointWorld, gridDeltaFor,
   gridOverlayParams, pickGrab, screenAxisFor, stampRadiusUv, type GrabHit,
@@ -482,6 +482,12 @@ test('grid nodes: click→node mapping, one-cell value edits, greater points sit
   assertClose(n.u, (n.gx + 0.5) / GW, 1e-9, 'center u');
   assertClose(n.v, (n.gy + 0.5) / GH, 1e-9, 'center v');
   assertEqual(gridNodeAt(n.u, n.v).idx, n.idx, 'center → the same node (round-trip)');
+  const from3d = gridNodeFromSurfaceHit({ gx: n.gx, gy: n.gy });
+  assertEqual(from3d.idx, n.idx, 'SCULPTPICK: 3D hit selects the same grid node as a canvas click');
+  const ring = depthOverlayData({ hover: null, brushPx: 16, mode: 'raise', mirror: false, selected: from3d });
+  assertEqual(ring[7], 1, 'SCULPTPICK: selected 3D node lights the grid ring');
+  assertClose(ring[8], n.u, 1e-9, 'SCULPTPICK: ring u is the node center');
+  assertClose(ring[9], n.v, 1e-9, 'SCULPTPICK: ring v is the node center');
   // the value edit: pure, clamped, exactly one cell moves
   const grid = new Array(GW * GH).fill(0);
   const out = withNodeValue(grid, n.idx, 1.7);

@@ -395,6 +395,29 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
     setStatus(`material saved · ${record.id} — assignable in /textures and on faces/tiles`);
   };
 
+  const materializeCurrent = (nameOverride?: string): string | null => {
+    const mask = painterApi.current?.composeExportMask() ?? null;
+    if (!mask || !deps.materialize) { setStatus('nothing to materialize'); return null; }
+    const asset = extractCutout({
+      name: (nameOverride ?? work.name).trim() || 'painted material',
+      dims: work.dims,
+      mask,
+      srcPath: work.srcPath,
+      textureId: work.textureId,
+      colors: painterApi.current?.lookColors(),
+      docId: work.docId,
+    });
+    if (!asset) { setStatus('nothing selected — paint the material first'); return null; }
+    const record = deps.materialize(asset.name, STENCIL_RECIPE_ID, stencilDataFromAsset(asset));
+    deps.session?.note?.(`materialized · ${asset.name} → ${record.id}`);
+    edited = false;
+    libRev += 1;
+    lastSavedAt = Date.now();
+    setStatus(`material saved · ${record.id} — ready for building faces`);
+    emit();
+    return record.id;
+  };
+
   const removeEntry = (id: string, target: 'document' | 'cutout', name: string) => {
     if (!deps.session) return;
     deps.session.commit({ kind: 'removed', id, target }, `remove ${target} · ${name}`);
@@ -472,7 +495,7 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
     rename, commitName,
     onDirty, flushDraft,
     undo, redo,
-    saveCurrent, extractCurrent, materializeAsset, removeEntry,
+    saveCurrent, extractCurrent, materializeAsset, materializeCurrent, removeEntry,
     setStatus,
   };
 }

@@ -103,11 +103,11 @@ classifier({
   ToggleKnob:     { type: 'Box', style: { width: 10, height: 10, borderRadius: 5, backgroundColor: 'theme:offKnob', position: 'absolute', top: 1, left: 1 } },
   ToggleKnobOn:   { type: 'Box', style: { width: 10, height: 10, borderRadius: 5, backgroundColor: 'theme:success', position: 'absolute', top: 1, left: 11 } },
 
-  // slider (0–1 scalar) — the fill IS the read
-  SliderTrack: { type: 'Box', style: { width: 60, height: 6, borderRadius: 3, backgroundColor: 'theme:track', position: 'relative' } },
-  SliderFill:  { type: 'Box', style: { height: 6, borderRadius: 3, backgroundColor: 'theme:primary', position: 'absolute', left: 0, top: 0 } },
-  SliderKnob:  { type: 'Box', style: { width: 10, height: 10, borderRadius: 5, backgroundColor: 'theme:knob', position: 'absolute', top: -2 } },
-  SliderValue: { type: 'Text', fontSize: 'theme:fontMd', color: 'theme:valText', style: { fontFamily: MONO, fontWeight: 700, minWidth: 30, textAlign: 'right' } },
+  // slider (0–1 scalar) — readable enough for panel work, not a 60px hairline
+  SliderTrack: { type: 'Box', style: { width: 124, height: 20, borderRadius: 5, backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', position: 'relative' } },
+  SliderFill:  { type: 'Box', style: { height: 4, borderRadius: 2, backgroundColor: 'theme:primary', position: 'absolute', left: 7, top: 8 } },
+  SliderKnob:  { type: 'Box', style: { width: 14, height: 14, borderRadius: 7, backgroundColor: 'theme:knob', borderWidth: 'theme:borderThin', borderColor: 'theme:bg', position: 'absolute', top: 3 } },
+  SliderValue: { type: 'Text', fontSize: 'theme:fontMd', color: 'theme:valText', style: { fontFamily: MONO, fontWeight: 700, minWidth: 36, textAlign: 'right' } },
 
   // stepper (multiplier / cost / meters)
   Stepper:     { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg' } },

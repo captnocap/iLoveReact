@@ -155,7 +155,9 @@ skeleton.
 ## The Order of Work
 
 1. **Format + content-addressing + native host render.** ✅ (done — RJMP/`.rjpkg`,
-   sha256 vocab, the native loader rendering the world.)
+   sha256 vocab, the native loader rendering the world. The in-editor compiled
+   preview is a `WorldLoader` host primitive around that same loader, not a
+   second React-authored scene.)
 2. **Logic-stream execution.** Turn `stream_logic` (verbs/rules as data) into the
    running systems — the discrete tier executing natively. The render→run step.
 3. **The continuous + discrete tiers wired by events.** Physics/anim per-frame;

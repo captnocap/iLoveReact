@@ -1,8 +1,8 @@
 // editors/cutout/ToolRail.tsx — the reference app's left tool palette,
 // ported faithfully (USER VERDICT CUTOUTQOL2-0605: "no icons on the tools,
 // no brush size sliding bar"): square ICON tiles with tooltips for every
-// tool and mask action, the draggable brush-size slider with detents +
-// nudge buttons + px readout, and the live color slots + palette. Route
+// tool and mask action, the Workbench/studio brush-size slider + px readout,
+// and the live color slots + palette. Route
 // chrome over the shared painter's state — the engine is consumed, never
 // forked (PaintToolRail stays the generic chrome-kit for other embedders).
 //
@@ -10,10 +10,10 @@
 // color slots) + cart/cutout/components/TopBar.tsx BrushSlider (read, never
 // imported).
 
-import { useState } from 'react';
 import { Box, Col, Pressable, Row, Text } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { GAME_CHROME } from '@game';
+import { WorkbenchSlider } from '../../shell/fields';
 import { ColorWheel, PAINT, type PaintEditorState } from '../paint';
 import type { PaintMode, PaintTool } from '../paint';
 
@@ -30,8 +30,6 @@ const RAIL = Object.freeze({
   slotW: 35,
   slotH: 42,
   swatch: 17,
-  sliderTrack: 96,
-  nudge: 22,
 } as const);
 
 const TOOLS: { id: PaintTool; label: string; icon: string }[] = [
@@ -176,114 +174,29 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
   );
 }
 
-// ── THE one rail slider (SCULPTKIT-0606) ─────────────────────────────────────
-// The reference TopBar interaction, generalized: continuous drag on a mapped
-// track (toTrack/fromTrack — log for the paint ladder, linear for sculpt
-// ranges), tick marks, +/- nudges, and a live value readout. Every slider on
-// a stage surface IS this component (§8: one kit, no lookalikes); BrushSlider
-// below stays the paint-ladder instantiation.
-
-export function RailSlider(props: {
-  value: number;
-  onChange: (v: number) => void;
-  /** value ↔ 0..1 track mapping (quantization is fromTrack's job) */
-  toTrack: (v: number) => number;
-  fromTrack: (t: number) => number;
-  /** tick values rendered on the track */
-  ticks?: number[];
-  readout: string;
-  tooltip?: string;
-  nudge?: { dec: () => void; inc: () => void; canDec: boolean; canInc: boolean };
-}) {
-  const [rect, setRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const trackInset = 8;
-  const span = RAIL.sliderTrack - trackInset * 2;
-  const pct = Math.max(0, Math.min(1, props.toTrack(props.value)));
-  const updateFromX = (x: number) => {
-    if (!rect || rect.width <= 0) return;
-    const t = (x - rect.x - trackInset) / Math.max(1, rect.width - trackInset * 2);
-    props.onChange(props.fromTrack(Math.max(0, Math.min(1, t))));
-  };
-  return (
-    <Col style={{ gap: 4, alignItems: 'center' }}>
-      <Row style={{ gap: 6, alignItems: 'center' }}>
-        {props.nudge ? <NudgeButton label="-" disabled={!props.nudge.canDec} onPress={props.nudge.dec} /> : null}
-        <Pressable
-          tooltip={props.tooltip ?? props.readout}
-          onMouseDown={(p: any) => { setDragging(true); updateFromX(p.x); }}
-          onMouseMove={(p: any) => { if (dragging) updateFromX(p.x); }}
-          onMouseUp={() => setDragging(false)}
-          onMouseLeave={() => setDragging(false)}
-        >
-          <Box
-            onLayout={(r: any) => setRect(r)}
-            style={{
-              width: RAIL.sliderTrack, height: 28, borderRadius: 5,
-              backgroundColor: T.page, borderWidth: 1, borderColor: T.frame,
-              justifyContent: 'center', position: 'relative',
-            }}
-          >
-            <Box style={{ position: 'absolute', left: trackInset, right: trackInset, top: 13, height: 2, borderRadius: 1, backgroundColor: T.frame }} />
-            <Box style={{ position: 'absolute', left: trackInset, top: 13, width: Math.max(2, Math.round(span * pct)), height: 2, borderRadius: 1, backgroundColor: T.accent }} />
-            {(props.ticks ?? []).map((tv) => (
-              <Box
-                key={tv}
-                style={{
-                  position: 'absolute',
-                  left: trackInset + Math.round(span * Math.max(0, Math.min(1, props.toTrack(tv)))),
-                  top: 11, width: 1, height: 6,
-                  backgroundColor: tv <= props.value ? T.accent : T.frame,
-                }}
-              />
-            ))}
-            <Box style={{
-              position: 'absolute',
-              left: trackInset - 6 + Math.round(span * pct),
-              top: 6, width: 12, height: 16, borderRadius: 6,
-              backgroundColor: T.accent, borderWidth: 2, borderColor: T.ink,
-            }} />
-          </Box>
-        </Pressable>
-        {props.nudge ? <NudgeButton label="+" disabled={!props.nudge.canInc} onPress={props.nudge.inc} /> : null}
-      </Row>
-      <Text style={{ color: T.ink, fontSize: 10, fontWeight: '800' }}>{props.readout}</Text>
-    </Col>
-  );
-}
-
 // ── the brush-size slider (the reference TopBar interaction) ─────────────────
-// The paint ladder over RailSlider: log-mapped track (strokes.ts
+// The paint ladder over the Workbench/studio slider: log-mapped track (strokes.ts
 // brushTrackToPx — the low end is fine-grained for tattoo lines), the
 // brushSizes ladder as ticks, [/] stepping the ladder.
 
 export function BrushSlider({ value, onChange }: { value: number; onChange: (px: number) => void }) {
   const sizes = PAINT.tuning.brushSizes;
-  // nearest ladder detent for the nudge buttons ([/] keys use the same rule)
-  let index = 0;
-  for (let i = 0; i < sizes.length; i++) {
-    if (Math.abs(sizes[i] - value) < Math.abs(sizes[index] - value)) index = i;
-  }
-  const step = (delta: number) => {
-    const next = Math.max(0, Math.min(sizes.length - 1, index + delta));
-    onChange(sizes[next]);
-  };
   return (
-    <RailSlider
+    <WorkbenchSlider
       value={value}
+      min={sizes[0]}
+      max={sizes[sizes.length - 1]}
+      show={(v) => `${v}px`}
       onChange={onChange}
       toTrack={(v) => PAINT.brushPxToTrack(v)}
       fromTrack={(t) => PAINT.brushTrackToPx(t)}
-      ticks={sizes as unknown as number[]}
-      readout={`${value}px`}
-      tooltip={`${value}px brush — drag (1–${sizes[sizes.length - 1]}px), or [ and ] to step`}
-      nudge={{ dec: () => step(-1), inc: () => step(1), canDec: value > sizes[0], canInc: value < sizes[sizes.length - 1] }}
+      tooltip={`${value}px brush — drag the studio slider, or [ and ] to step`}
     />
   );
 }
 
-/** SCULPTKIT-0606: the linear instantiation — sculpt ranges (brush px,
- *  strength, passes, node value) ride the SAME track. Quantizes to step. */
+/** Linear adapter for sculpt ranges. The chrome is the Workbench/studio slider;
+ *  this wrapper only applies range quantization for old call sites. */
 export function LinearRailSlider(props: {
   value: number; min: number; max: number; step: number;
   onChange: (v: number) => void;
@@ -296,25 +209,17 @@ export function LinearRailSlider(props: {
     const fixed = Number(snapped.toFixed(4));
     return Math.max(min, Math.min(max, fixed));
   };
-  const ticks: number[] = [];
-  const count = Math.round((max - min) / step);
-  if (count <= 24) for (let i = 0; i <= count; i++) ticks.push(Number((min + i * step).toFixed(4)));
   const fmt = props.format ?? ((v: number) => String(v));
   return (
-    <RailSlider
+    <WorkbenchSlider
       value={props.value}
+      min={min}
+      max={max}
+      show={fmt}
       onChange={(v) => props.onChange(quant(v))}
       toTrack={(v) => (v - min) / (max - min)}
       fromTrack={(t) => quant(min + t * (max - min))}
-      ticks={ticks}
-      readout={fmt(props.value)}
       tooltip={props.tooltip}
-      nudge={{
-        dec: () => props.onChange(quant(props.value - step)),
-        inc: () => props.onChange(quant(props.value + step)),
-        canDec: props.value > min,
-        canInc: props.value < max,
-      }}
     />
   );
 }
@@ -377,20 +282,6 @@ function ColorSlot(props: {
         }} />
         <Text style={{ color: props.active ? T.accent : T.dim, fontSize: 9, fontWeight: '800' }}>{props.label}</Text>
       </Col>
-    </Pressable>
-  );
-}
-
-function NudgeButton({ label, disabled, onPress }: { label: string; disabled: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={() => { if (!disabled) onPress(); }}>
-      <Box style={{
-        width: RAIL.nudge, height: 24, borderRadius: 5,
-        backgroundColor: T.control, borderWidth: 1, borderColor: T.frame,
-        opacity: disabled ? 0.45 : 1, alignItems: 'center', justifyContent: 'center',
-      }}>
-        <Text style={{ color: T.dim, fontSize: 12, fontWeight: '900' }}>{label}</Text>
-      </Box>
     </Pressable>
   );
 }

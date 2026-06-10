@@ -26,15 +26,20 @@ import {
   type GraySource,
 } from './strokes';
 import {
-  activeAfterDelete, buildPaintDocument, cloneLayerConfig, effectiveMask,
+  activeAfterDelete, buildPaintDocument, cloneLayerConfig, cloneLayerImage, effectiveMask,
   inflatePaintDocument, invertIntoBase, makeLayer, mergeIntoBase,
-  moveLayerInStack, overrideBandValue, paintableIdsFor, scaleMask, unionMasks,
+  moveLayerAcrossNeighbor, overrideBandValue, paintableIdsFor, scaleMask, unionMasks,
   type PaintClipping, type PaintDocument, type PaintLayer,
   type PaintLayerBytes, type PaintLayerConfig, type PaintLookDefaults,
   type PaintMode, type PaintTool,
 } from './layers';
 import { createPaintHistory } from './history';
 import { addCustomSurface as addCustomSurfaceOp, SLOT_DEFAULTS, type CustomSurface, type PaintBlendMode, type SurfaceId } from './surfaces';
+import {
+  DEFAULT_PAINT_BRUSH_SETTINGS, PAINT_BRUSH_KIND_IDS,
+  normalizePaintBrushSettings,
+  type PaintBrushKind, type PaintBrushSettings,
+} from './brushKinds';
 import type { BackendOpts, ClickLabel, ClickPoint, SelectionBackend } from './backends/types';
 import { useRouteTwigState } from '../twigs';
 
@@ -85,11 +90,15 @@ export interface PaintEditorState {
   tool: PaintTool;
   mode: PaintMode;
   brushPx: number;
+  brush: PaintBrushSettings;
   mirror: boolean;
   activeColorSlot: number;
   setTool: (t: PaintTool) => void;
   setMode: (m: PaintMode) => void;
   setBrushPx: (n: number) => void;
+  setBrushKind: (kind: PaintBrushKind) => void;
+  setBrushSettings: (patch: Partial<PaintBrushSettings>) => void;
+  setBrushPreset: (preset: PaintBrushSettings) => void;
   setMirror: (on: boolean) => void;
   setActiveColorSlot: (i: number) => void;
   stepBrush: (dir: -1 | 1) => void;
@@ -127,10 +136,12 @@ export interface PaintEditorState {
   maskVersion: number;
   baseIdOf: (layer: PaintLayer) => string;
   brushIdOf: (layer: PaintLayer) => string;
-  addLayer: () => number;
-  deleteLayer: (i: number) => void;
+	  addLayer: () => number;
+	  addImageLayer: (path: string, name: string, dims?: Dims | null) => number;
+	  deleteLayer: (i: number) => void;
   duplicateLayer: (i: number) => void;
   moveLayer: (i: number, dir: -1 | 1) => void;
+  moveLayerById: (id: string, dir: -1 | 1) => void;
   mergeLayer: (i: number) => void;
   toggleLayerMute: (i: number) => void;
   setLayerName: (i: number, name: string) => void;
@@ -183,6 +194,8 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   const [tool, setTool] = useRouteTwigState<PaintTool>(twigRoute, 'tool', 'brush');
   const [mode, setMode] = useRouteTwigState<PaintMode>(twigRoute, 'mode', 'erase');
   const [brushPx, setBrushPx] = useRouteTwigState(twigRoute, 'brushPx', PAINT_TUNING.brushDefaultPx);
+  const [brushRaw, setBrushRaw] = useRouteTwigState<PaintBrushSettings>(twigRoute, 'brush', DEFAULT_PAINT_BRUSH_SETTINGS);
+  const brush = normalizePaintBrushSettings(brushRaw);
   const [mirror, setMirror] = useRouteTwigState(twigRoute, 'mirror', !!opts.mirror);
   const [activeColorSlot, setActiveColorSlotState] = useRouteTwigState(twigRoute, 'activeColorSlot', 0);
   const [lassoPoints, setLassoPoints] = useState<LassoPoint[]>([]);
@@ -193,13 +206,35 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   const toolRef = useRef(tool); toolRef.current = tool;
   const modeRef = useRef(mode); modeRef.current = mode;
   const brushPxRef = useRef(brushPx); brushPxRef.current = brushPx;
+  const brushRef = useRef<PaintBrushSettings>(brush); brushRef.current = brush;
   const mirrorRef = useRef(mirror); mirrorRef.current = mirror;
   const lassoRef = useRef(lassoPoints); lassoRef.current = lassoPoints;
 
   // ── layer stack ─────────────────────────────────────────────────────────────
   const [layers, setLayersState] = useState<PaintLayer[]>([]);
   const layersRef = useRef<PaintLayer[]>([]);
-  const setLayers = (next: PaintLayer[]) => { layersRef.current = next; setLayersState(next); };
+  const layerSig = (arr: PaintLayer[]) => arr.map((l) => l.id).join(',');
+  const traceLayerSet = (reason: string, input: PaintLayer[], output: PaintLayer[]) => {
+    if (!reason.startsWith('moveLayer')) return;
+    console.log(`[PAINTLAYERS-0606] setter ${reason} input=[${layerSig(input)}] output=[${layerSig(output)}] count ${input.length}->${output.length}`);
+  };
+  const setLayers = (next: PaintLayer[] | ((prev: PaintLayer[]) => PaintLayer[]), reason = 'setLayers'): PaintLayer[] => {
+    if (typeof next !== 'function') {
+      layersRef.current = next;
+      setLayersState(next);
+      return next;
+    }
+    const optimisticPrev = layersRef.current;
+    const optimisticNext = next(optimisticPrev);
+    layersRef.current = optimisticNext;
+    setLayersState((prev) => {
+      const output = prev === optimisticPrev ? optimisticNext : next(prev);
+      layersRef.current = output;
+      traceLayerSet(reason, prev, output);
+      return output;
+    });
+    return optimisticNext;
+  };
   const [activeLayer, setActiveLayerState] = useRouteTwigState(twigRoute, 'activeLayer', -1);
   const activeLayerRef = useRef(-1);
   const setActiveLayer = (i: number) => {
@@ -293,6 +328,19 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     return i >= 0 && i < arr.length ? arr[i] : null;
   };
 
+  const bytesHaveContent = (bytes: Uint8Array | null): boolean => {
+    if (!bytes) return false;
+    for (let i = 0; i < bytes.length; i++) if (bytes[i] !== 0) return true;
+    return false;
+  };
+
+  const layerHasContent = (layer: PaintLayer): boolean => {
+    if (layer.image) return true;
+    if (layer.clicks.length > 0) return true;
+    const p = ids(layer);
+    return bytesHaveContent(paintableOps(p.baseId).readback()) || bytesHaveContent(paintableOps(p.brushId).readback());
+  };
+
   const ensureActiveLayer = (): PaintLayer => {
     let layer = activeLayerObj();
     if (layer) return layer;
@@ -350,6 +398,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
       tool: toolRef.current,
       mode: modeRef.current,
       brushPx: brushPxRef.current,
+      brush: brushRef.current,
       defaults: defaultsRef.current,
       customSurfaces: customSurfacesRef.current,
       backendTunables: { floodFuzz, floodRejectFrac, samThreshold, samMaskIdx },
@@ -363,7 +412,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
       const p = paintableIdsFor(idPrefix, l.id);
       if (l.base && l.base.length > 0) pendingUploadsRef.current.set(p.baseId, scaleMask(l.base));
       if (l.brush && l.brush.length > 0) pendingUploadsRef.current.set(p.brushId, l.brush);
-      return { id: l.id, name: l.name, groupName: l.groupName, config: l.config, clicks: l.clicks };
+	      return { id: l.id, name: l.name, groupName: l.groupName, config: l.config, image: l.image, clicks: l.clicks };
     });
     setLayers(restored);
     if (preserveTwig) {
@@ -373,6 +422,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
       setTool(doc.tool ?? 'brush');
       setMode(doc.mode ?? 'erase');
       setBrushPx(doc.brushPx ?? PAINT_TUNING.brushDefaultPx);
+      setBrushRaw(normalizePaintBrushSettings(doc.brush));
       if (doc.defaults) setDefaults({ ...doc.defaults, colors: doc.defaults.colors.slice() });
     }
     if (doc.backendTunables) {
@@ -456,8 +506,13 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     // these strokes.
     const value = overrideBandValue(modeRef.current);
     const op = paintableOps(brushIdOf(layer));
-    for (const d of dabs) op.circle(d.x, d.y, d.radius, value);
-    dabCountRef.current += dabs.length;
+    const b = brushRef.current;
+    const kind = PAINT_BRUSH_KIND_IDS[b.kind] ?? PAINT_BRUSH_KIND_IDS.round;
+    const angle = b.angleDeg * Math.PI / 180;
+    for (const d of dabs) {
+      dabCountRef.current += 1;
+      op.brush(d.x, d.y, d.radius, value, kind, angle, b.aspect, b.hardness, b.flow, b.scatter, dabCountRef.current * 17.17);
+    }
     bumpThrottled();
   };
 
@@ -470,7 +525,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
       commitSnapshot(pendingStrokeUndoRef.current);
       touchDocument();
       const layer = activeLayerObj();
-      noteEdit(`${toolRef.current} stroke · ${modeRef.current} · ${brushPxRef.current}px · ${layer?.name ?? 'layer'}`);
+      noteEdit(`${toolRef.current} stroke · ${modeRef.current} · ${brushRef.current.kind} · ${brushPxRef.current}px · ${layer?.name ?? 'layer'}`);
     }
     pendingStrokeUndoRef.current = null;
   };
@@ -636,6 +691,27 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     return next.length - 1;
   };
 
+  const addImageLayer = (path: string, name: string, imageDims?: Dims | null) => {
+    const clean = path.trim();
+    if (!clean) return activeLayerRef.current;
+    commit();
+    const current = layersRef.current;
+    const baseStack = current.length === 1 && !layerHasContent(current[0]) ? [] : current.slice();
+    const imgName = name.trim() || clean.split('/').pop() || 'image';
+    const imageLayer = makeLayer(defaultsRef.current, baseStack.length, imgName);
+    imageLayer.groupName = 'image';
+    imageLayer.image = cloneLayerImage({ path: clean, name: imgName, dims: imageDims ?? null });
+    const paintLayer = makeLayer(defaultsRef.current, baseStack.length + 1, `Paint over ${imgName}`);
+    const next = baseStack.concat([imageLayer, paintLayer]);
+    setLayers(next);
+    setActiveLayer(next.length - 1);
+    bump();
+    touchDocument();
+    setStatus(`opened image layer · ${imgName}`);
+    noteEdit(`open image layer · ${imgName}`);
+    return next.length - 1;
+  };
+
   const deleteLayer = (i: number) => {
     const cur = layersRef.current;
     if (i < 0 || i >= cur.length) return;
@@ -661,9 +737,11 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     const sp = ids(src);
     const base = paintableOps(sp.baseId).readback();
     const brush = paintableOps(sp.brushId).readback();
-    const dup = makeLayer(defaultsRef.current, cur.length, `${src.name} copy`);
-    dup.config = cloneLayerConfig(src.config);
-    dup.clicks = src.clicks.map((c) => ({ ...c }));
+	    const dup = makeLayer(defaultsRef.current, cur.length, `${src.name} copy`);
+	    dup.config = cloneLayerConfig(src.config);
+	    dup.groupName = src.groupName;
+	    dup.image = cloneLayerImage(src.image);
+	    dup.clicks = src.clicks.map((c) => ({ ...c }));
     const dp = ids(dup);
     if (base) pendingUploadsRef.current.set(dp.baseId, base);
     if (brush) pendingUploadsRef.current.set(dp.brushId, brush);
@@ -677,19 +755,28 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     noteEdit(`duplicate layer · ${src.name}`);
   };
 
-  const moveLayer = (i: number, dir: -1 | 1) => {
+  const moveLayerById = (id: string, dir: -1 | 1) => {
     const cur = layersRef.current;
-    const next = moveLayerInStack(cur, i, dir);
-    if (next === cur) return;
+    const from = cur.findIndex((l) => l.id === id);
+    if (from < 0 || from + dir < 0 || from + dir >= cur.length) return;
+    const neighborId = cur[from + dir].id;
+    const activeId = cur[activeLayerRef.current]?.id ?? null;
     commit();
-    setLayers(next);
-    const j = i + dir;
-    if (activeLayerRef.current === i) setActiveLayer(j);
-    else if (activeLayerRef.current === j) setActiveLayer(i);
+    const next = setLayers((prev) => {
+      return moveLayerAcrossNeighbor(prev, id, dir, neighborId);
+    }, `moveLayerById:${id}:${dir}:over:${neighborId}`);
+    if (next === cur) return;
+    if (activeId) setActiveLayer(next.findIndex((l) => l.id === activeId));
     bump();
     touchDocument();
     setStatus('moved layer');
     noteEdit('move layer');
+  };
+
+  const moveLayer = (i: number, dir: -1 | 1) => {
+    const id = layersRef.current[i]?.id;
+    if (!id) return;
+    moveLayerById(id, dir);
   };
 
   const mergeLayer = (i: number) => {
@@ -823,8 +910,9 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     setClipboard({
       baseBytes: paintableOps(p.baseId).readback(),
       brushBytes: paintableOps(p.brushId).readback(),
-      config: cloneLayerConfig(src.config),
-      clicks: src.clicks.map((c) => ({ ...c })),
+	      config: cloneLayerConfig(src.config),
+	      image: cloneLayerImage(src.image),
+	      clicks: src.clicks.map((c) => ({ ...c })),
       sourceName: src.name,
     });
     setStatus(`copied · ${src.name}`);
@@ -833,10 +921,11 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     const clip = clipboard;
     if (!clip) { setStatus('clipboard empty'); return; }
     commit();
-    const layer = makeLayer(defaultsRef.current, layersRef.current.length, `${clip.sourceName} (pasted)`);
-    layer.config = cloneLayerConfig(clip.config);
-    layer.config.muted = false;
-    layer.clicks = clip.clicks.map((c) => ({ ...c }));
+	    const layer = makeLayer(defaultsRef.current, layersRef.current.length, `${clip.sourceName} (pasted)`);
+	    layer.config = cloneLayerConfig(clip.config);
+	    layer.config.muted = false;
+	    layer.image = cloneLayerImage(clip.image);
+	    layer.clicks = clip.clicks.map((c) => ({ ...c }));
     const p = ids(layer);
     if (clip.baseBytes) pendingUploadsRef.current.set(p.baseId, clip.baseBytes);
     if (clip.brushBytes) pendingUploadsRef.current.set(p.brushId, clip.brushBytes);
@@ -916,6 +1005,13 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     const next = sizes[Math.max(0, Math.min(sizes.length - 1, idx + dir))];
     setBrushPx(next);
   };
+  const setBrushSettings = (patch: Partial<PaintBrushSettings>) => {
+    setBrushRaw(normalizePaintBrushSettings({ ...brushRef.current, ...patch }));
+  };
+  const setBrushKind = (kind: PaintBrushKind) => setBrushSettings({ kind });
+  const setBrushPreset = (preset: PaintBrushSettings) => {
+    setBrushRaw(normalizePaintBrushSettings(preset));
+  };
   const setActiveColorSlot = (i: number) => {
     setActiveColorSlotState(Math.max(0, Math.min(SLOT_DEFAULTS.length - 1, Math.round(i))));
   };
@@ -928,9 +1024,9 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     srcPath,
     status,
     smartBusy,
-    tool, mode, brushPx, mirror, activeColorSlot,
+    tool, mode, brushPx, brush, mirror, activeColorSlot,
     setTool: (t) => { if (t === 'smart' && !smartAvailable) return; setTool(t); },
-    setMode, setBrushPx, setMirror, setActiveColorSlot, stepBrush,
+    setMode, setBrushPx, setBrushKind, setBrushSettings, setBrushPreset, setMirror, setActiveColorSlot, stepBrush,
     beginStroke, paintAtSource, endStroke,
     lassoPoints, addLassoPoint, commitLasso, clearLasso,
     smartAvailable,
@@ -943,7 +1039,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     samMaskIdx, setSamMaskIdx,
     layers, activeLayer, setActiveLayer, maskVersion,
     baseIdOf, brushIdOf,
-    addLayer, deleteLayer, duplicateLayer, moveLayer, mergeLayer,
+	    addLayer, addImageLayer, deleteLayer, duplicateLayer, moveLayer, moveLayerById, mergeLayer,
     toggleLayerMute, setLayerName, setLayerGroup,
     clearMask, invertMask,
     defaults,

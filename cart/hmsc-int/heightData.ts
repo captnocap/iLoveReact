@@ -70,7 +70,7 @@ export interface StampOpts {
 }
 
 // Profile value at normalized distance t (0..1) for a unit peak.
-function brushProfile(profile: BrushProfile, t: number): number {
+export function brushProfile(profile: BrushProfile, t: number): number {
   switch (profile) {
     case 'flat': return 1;
     case 'dome': return Math.sqrt(Math.max(0, 1 - t * t));
@@ -154,6 +154,168 @@ export function stampRamp(f: HeightField, cix: number, ciy: number, opts: RampSt
       f.z[jy * f.cols + jx] = clampHeight(z0 + (z1 - z0) * Math.max(0, Math.min(1, t)));
     }
   }
+}
+
+export interface SlopeStampOpts {
+  startZ: number;
+  endZ: number;
+  runM: number;
+  distanceM: number;
+  radiusM: number;
+  shape: BrushShape;
+  profile: BrushProfile;
+  erase?: boolean;
+}
+
+export interface SlopeSegmentStampOpts {
+  startZ: number;
+  endZ: number;
+  runM: number;
+  distanceStartM: number;
+  radiusM: number;
+  profile: BrushProfile;
+  erase?: boolean;
+}
+
+export interface SmoothStampOpts {
+  radiusM: number;
+  shape: BrushShape;
+  profile: BrushProfile;
+  strength: number;
+}
+
+export function slopeHeightAtDistance(opts: Pick<SlopeStampOpts, 'startZ' | 'endZ' | 'runM'>, distanceM: number): number {
+  const runM = Math.max(DOT_M, Math.abs(opts.runM));
+  const t = Math.max(0, Math.min(1, distanceM / runM));
+  return clampHeight(opts.startZ + (opts.endZ - opts.startZ) * t);
+}
+
+// A freehand slope brush: each stamp uses the normal brush footprint, but the target
+// height is driven by cumulative stroke distance. This makes a grade that can follow
+// a curved path around terrain instead of being locked to one rectangular ramp.
+export function stampSlopeBrush(f: HeightField, cix: number, ciy: number, opts: SlopeStampOpts): void {
+  stampBrush(f, cix, ciy, {
+    centerZ: slopeHeightAtDistance(opts, Math.max(0, opts.distanceM)),
+    radiusM: opts.radiusM,
+    shape: opts.shape,
+    profile: opts.profile,
+    erase: opts.erase,
+  });
+}
+
+function applySignedTarget(f: HeightField, idx: number, target: number): void {
+  if (target >= 0) f.z[idx] = Math.max(f.z[idx], target);
+  else f.z[idx] = Math.min(f.z[idx], target);
+}
+
+// Fill a continuous slope ribbon between two sample-space points. Unlike
+// stampSlopeBrush, this computes each height sample's distance by projecting onto
+// the stroke segment, so a fast drag makes one smooth grade instead of a staircase
+// of overlapping brush footprints.
+export function stampSlopeSegment(
+  f: HeightField,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  opts: SlopeSegmentStampOpts,
+): boolean {
+  const radiusM = Math.max(DOT_M, opts.radiusM);
+  const radiusSamples = radiusM / DOT_M;
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const lenM = Math.sqrt(len2) * DOT_M;
+  const minX = Math.max(0, Math.floor(Math.min(ax, bx) - radiusSamples - 1));
+  const maxX = Math.min(f.cols - 1, Math.ceil(Math.max(ax, bx) + radiusSamples + 1));
+  const minY = Math.max(0, Math.floor(Math.min(ay, by) - radiusSamples - 1));
+  const maxY = Math.min(f.rows - 1, Math.ceil(Math.max(ay, by) + radiusSamples + 1));
+  let touched = false;
+
+  for (let jy = minY; jy <= maxY; jy++) {
+    for (let jx = minX; jx <= maxX; jx++) {
+      const rawT = len2 <= 1e-9 ? 0 : ((jx - ax) * dx + (jy - ay) * dy) / len2;
+      const t = Math.max(0, Math.min(1, rawT));
+      const cx = ax + dx * t, cy = ay + dy * t;
+      const acrossM = Math.hypot(jx - cx, jy - cy) * DOT_M;
+      if (acrossM > radiusM) continue;
+      const idx = jy * f.cols + jx;
+      if (opts.erase) { f.z[idx] = 0; touched = true; continue; }
+
+      const centerZ = slopeHeightAtDistance(opts, opts.distanceStartM + lenM * t);
+      const mag = Math.abs(centerZ) * brushProfile(opts.profile, acrossM / radiusM);
+      if (mag <= 0) continue;
+      applySignedTarget(f, idx, (centerZ >= 0 ? 1 : -1) * Math.min(mag, HEIGHT_LIMIT));
+      touched = true;
+    }
+  }
+
+  return touched;
+}
+
+function det3(
+  a00: number, a01: number, a02: number,
+  a10: number, a11: number, a12: number,
+  a20: number, a21: number, a22: number,
+): number {
+  return a00 * (a11 * a22 - a12 * a21)
+    - a01 * (a10 * a22 - a12 * a20)
+    + a02 * (a10 * a21 - a11 * a20);
+}
+
+// Smooth/level a footprint toward its local best-fit plane. A plain average would
+// flatten ramps; fitting z = ax+by+c preserves the broad slope while erasing ridges,
+// spikes, and sample-to-sample chatter inside the brush.
+export function stampSmoothBrush(f: HeightField, cix: number, ciy: number, opts: SmoothStampOpts): boolean {
+  const radiusM = Math.max(DOT_M, opts.radiusM);
+  const rd = Math.max(1, Math.ceil(radiusM / DOT_M));
+  const strength = Math.max(0, Math.min(1, opts.strength));
+  if (strength <= 0) return false;
+
+  let sw = 0, sx = 0, sy = 0, sz = 0;
+  let sxx = 0, sxy = 0, syy = 0, sxz = 0, syz = 0;
+  for (let dy = -rd; dy <= rd; dy++) {
+    const jy = ciy + dy;
+    if (jy < 0 || jy >= f.rows) continue;
+    for (let dx = -rd; dx <= rd; dx++) {
+      const jx = cix + dx;
+      if (jx < 0 || jx >= f.cols) continue;
+      const dm = footprintDistance(opts.shape, dx, dy) * DOT_M;
+      if (dm > radiusM) continue;
+      const w = Math.max(0.001, brushProfile(opts.profile, dm / radiusM));
+      const x = dx * DOT_M, y = dy * DOT_M, z = f.z[jy * f.cols + jx];
+      sw += w; sx += w * x; sy += w * y; sz += w * z;
+      sxx += w * x * x; sxy += w * x * y; syy += w * y * y;
+      sxz += w * x * z; syz += w * y * z;
+    }
+  }
+  if (sw <= 0) return false;
+
+  const det = det3(sxx, sxy, sx, sxy, syy, sy, sx, sy, sw);
+  let a = 0, b = 0, c = sz / sw;
+  if (Math.abs(det) > 1e-9) {
+    a = det3(sxz, sxy, sx, syz, syy, sy, sz, sy, sw) / det;
+    b = det3(sxx, sxz, sx, sxy, syz, sy, sx, sz, sw) / det;
+    c = det3(sxx, sxy, sxz, sxy, syy, syz, sx, sy, sz) / det;
+  }
+
+  let touched = false;
+  for (let dy = -rd; dy <= rd; dy++) {
+    const jy = ciy + dy;
+    if (jy < 0 || jy >= f.rows) continue;
+    for (let dx = -rd; dx <= rd; dx++) {
+      const jx = cix + dx;
+      if (jx < 0 || jx >= f.cols) continue;
+      const dm = footprintDistance(opts.shape, dx, dy) * DOT_M;
+      if (dm > radiusM) continue;
+      const falloff = brushProfile(opts.profile, dm / radiusM);
+      if (falloff <= 0) continue;
+      const idx = jy * f.cols + jx;
+      const target = clampHeight(a * dx * DOT_M + b * dy * DOT_M + c);
+      f.z[idx] = clampHeight(f.z[idx] + (target - f.z[idx]) * strength * falloff);
+      touched = true;
+    }
+  }
+  return touched;
 }
 
 // Encode for the Effect storage buffer: header [cols, rows, visRef, tilesX,

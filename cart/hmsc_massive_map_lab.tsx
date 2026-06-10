@@ -8,9 +8,9 @@ import { useTelemetry } from '@reactjit/hooks/useTelemetry';
 import { set as setClipboard } from '@reactjit/hooks/clipboard';
 import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
-import { PlayerFigure } from './hmsc/render3d/PlayerFigure';
-import { HumanoidFaceCaptures } from './hmsc/render3d/humanoid';
-import { HMSC_SCALE } from './hmsc/world/scale';
+import { PlayerFigure } from './hmsc-int/render3d/PlayerFigure';
+import { HumanoidFaceCaptures } from './hmsc-int/render3d/humanoid';
+import { HMSC_SCALE } from './hmsc-int/world/scale';
 
 type Vec3 = [number, number, number];
 type CameraState = {

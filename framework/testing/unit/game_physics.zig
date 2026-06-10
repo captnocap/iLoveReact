@@ -13,7 +13,7 @@ const movement = physics.movement;
 
 // ── input-buffer builder ─────────────────────────────────────────────
 // Packs the 25-float header + entities + rects the way cart JS
-// (cart/hmsc/state/hostPhysics.ts) does.
+// (cart/hmsc-int/state/hostPhysics.ts) does.
 
 const H = physics.INPUT_HEADER_FLOATS;
 

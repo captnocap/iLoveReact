@@ -254,7 +254,7 @@ export const vehicle_lab: DocIndex = {
       name: 'Glass',
       purpose: ['vehicle', 'rendering'],
       kind: 'utility',
-      sourceFile: 'cart/hmsc/render3d/materials.ts',
+      sourceFile: 'cart/hmsc-int/render3d/materials.ts',
       description:
         'HMSC material helper returning a material object combining render props (color, opacity) with future gameplay props (breakable, health). SIDE_GLASS uses Glass({ color:#1f3441, opacity:0.42, health:18 }).',
       consumers: ['vehicle_lab'],
@@ -264,7 +264,7 @@ export const vehicle_lab: DocIndex = {
       name: 'AutoGlass',
       purpose: ['vehicle', 'rendering'],
       kind: 'utility',
-      sourceFile: 'cart/hmsc/render3d/materials.ts',
+      sourceFile: 'cart/hmsc-int/render3d/materials.ts',
       description: 'HMSC material helper for auto glass; GLASS uses AutoGlass({ opacity: 0.48 }). Carries dormant breakable/health metadata.',
       consumers: ['vehicle_lab'],
       status: 'live',

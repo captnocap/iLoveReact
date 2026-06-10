@@ -19,18 +19,18 @@ import type {
   WorldSurfaceRegion,
   Zone,
   ZoneFlag,
-} from '../hmsc/design';
+} from './design';
 import {
   createInitialGameState,
   readStoredGameState,
   saveGameState,
-} from '../hmsc/state/gameState';
-import { landformGroundTopAt } from '../hmsc/world/landforms';
-import { placeProp, removeProp, propFootprint } from '../hmsc/world/props';
-import { addZone, removeZone } from '../hmsc/world/zones';
-import { addSurfaceRegion, placeCell } from '../hmsc/world/grid';
-import { propKindDefinition } from '../hmsc/world/propKinds';
-import { nextUniqueId } from '../hmsc/world/idgen';
+} from './state/gameState';
+import { landformGroundTopAt } from './world/landforms';
+import { placeProp, removeProp, propFootprint } from './world/props';
+import { addZone, removeZone } from './world/zones';
+import { addSurfaceRegion, placeCell } from './world/grid';
+import { propKindDefinition } from './world/propKinds';
+import { nextUniqueId } from './world/idgen';
 import { writeHmscPackageFromState } from './packageMap';
 
 // The editor always works on the same GameState shape the game uses. Load the

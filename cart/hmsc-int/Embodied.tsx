@@ -59,14 +59,14 @@ import { GAME_CAMERA, GAME_FIGURE, GAME_INPUT, GAME_KINDS, GAME_LOOP, GAME_NATIV
 import type { CollisionRect, OrientedCollisionRect, WorldGridState } from '@game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '@game/figure/render';
 import { LIVE_FLOOR_PROBE, liveFloorRecoveryDecision } from './embodiedLiveFloor';
-import type { GameState, Vec3 } from '../hmsc/design'; // GAP: the editor GameState type retires when hmsc becomes compile/'s output (V15)
-import { WorldStatics } from '../hmsc/render3d/GameWorld3D'; // GAP(W-2) awaiting world render
-import { TileSurfaceCaptures } from '../hmsc/render3d/tileSurface'; // GAP(W-2)
-import { RoadSurfaceCaptures } from '../hmsc/render3d/Road'; // GAP(W-2)
-import { RoadJunctionCaptures } from '../hmsc/render3d/RoadJunctions'; // GAP(W-2)
-import { LandformSurfaceCaptures } from '../hmsc/render3d/Landform'; // GAP(W-2)
-import { PropSurfaceCaptures } from '../hmsc/render3d/PropCaptures'; // GAP(W-2)
-import { hmscSkyBackgroundColor } from '../hmsc/render3d/sky'; // GAP(W-3) awaiting game sky
+import type { GameState, Vec3 } from './design'; // GAP: the editor GameState type retires when hmsc becomes compile/'s output (V15)
+import { WorldStatics } from './render3d/GameWorld3D'; // GAP(W-2) awaiting world render
+import { TileSurfaceCaptures } from './render3d/tileSurface'; // GAP(W-2)
+import { RoadSurfaceCaptures } from './render3d/Road'; // GAP(W-2)
+import { RoadJunctionCaptures } from './render3d/RoadJunctions'; // GAP(W-2)
+import { LandformSurfaceCaptures } from './render3d/Landform'; // GAP(W-2)
+import { PropSurfaceCaptures } from './render3d/PropCaptures'; // GAP(W-2)
+import { hmscSkyBackgroundColor } from './render3d/sky'; // GAP(W-3) awaiting game sky
 
 const DEG = Math.PI / 180;
 

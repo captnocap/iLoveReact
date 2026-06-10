@@ -1,7 +1,7 @@
 # effect_fills cart inventory
 
 Source cart: `cart/effect_fills/` (`index.tsx` 370 lines + `cart.json` + `CATALOG.md`)
-Load-bearing dependency: `cart/hmsc/render3d/fillShader.ts` (1653 lines — the actual shader)
+Load-bearing dependency: `cart/hmsc-int/render3d/fillShader.ts` (1653 lines — the actual shader)
 
 Reviewed: 2026-06-04
 
@@ -18,8 +18,8 @@ The cart itself is nearly stateless (one `useState` for the quality grade). The 
 - `cart/effect_fills/index.tsx`: the gallery — board/material tables, the seed-spread formulas, swatch grid, quality toggle.
 - `cart/effect_fills/cart.json`: manifest (window 1120×860 + a description that doubles as the board map).
 - `cart/effect_fills/CATALOG.md`: the eval document — ID scheme, per-swatch scape3d target tables, the two texture-integration paths, pull priorities, open questions. **Documentation as a first-class cart artifact** — the only cart in this series shipping its own catalog doc.
-- `cart/hmsc/render3d/fillShader.ts`: **the canonical WGSL**. One exported template string: ~30 shared noise/pattern helpers (`rand`, `fbm`, `snoise`, `speckle`, `line_near`, `vertical_drips`, `blotch`, `crack_field`, `segment_mark`, `neon_grime`, …), then ~58 material functions (`road`, `brick`, `mold_wall`, `blade_steel`, `neon_tube`, `crt_screen`, `cash_stack`, `blood_pool`, `fogged_mirror`, `stained_glass`, `asphalt`, `plank_deck`, …), a per-board `quality_pass` finisher, and an `fs_main` dispatch chain. The header is explicit about ownership: *authored in effect_fills, canonical copy lives game-side* because the game's texture catalog registers these looks — "exactly one copy of the WGSL."
-- `cart/hmsc/render3d/textureShaders.ts`: the game-side consumer — wraps every board material into a `ShaderSpec` (named, range-bounded, draggable params; "never a bare data[] of magic numbers") for the texture-studio Materialize pipeline.
+- `cart/hmsc-int/render3d/fillShader.ts`: **the canonical WGSL**. One exported template string: ~30 shared noise/pattern helpers (`rand`, `fbm`, `snoise`, `speckle`, `line_near`, `vertical_drips`, `blotch`, `crack_field`, `segment_mark`, `neon_grime`, …), then ~58 material functions (`road`, `brick`, `mold_wall`, `blade_steel`, `neon_tube`, `crt_screen`, `cash_stack`, `blood_pool`, `fogged_mirror`, `stained_glass`, `asphalt`, `plank_deck`, …), a per-board `quality_pass` finisher, and an `fs_main` dispatch chain. The header is explicit about ownership: *authored in effect_fills, canonical copy lives game-side* because the game's texture catalog registers these looks — "exactly one copy of the WGSL."
+- `cart/hmsc-int/render3d/textureShaders.ts`: the game-side consumer — wraps every board material into a `ShaderSpec` (named, range-bounded, draggable params; "never a bare data[] of magic numbers") for the texture-studio Materialize pipeline.
 - `runtime/primitives.tsx`: `Effect` (the one user-WGSL surface; `data` → `effectData` → storage buffer `D`), `ScrollView` (`showScrollbar`), Box/Col/Row/Text/Pressable.
 - `v8_app.zig`: Effect prelude — provides the `U` uniforms the shader reads (`U.time`, `U.size_w`, `U.size_h`) and binds `D` at `@group(0) @binding(1)`.
 
@@ -95,7 +95,7 @@ Detail grade / quality: `D[3]` ∈ {PSX, PS2, Preview, Std, Max} — runtime fin
 
 Dream pole / squalor pole: The TONE.md duality the boards serve — E is the lit Drive/Miami register (bloom, no grime), B/D/F the condemned register (mold, lint, rot); enforced per-board in `quality_pass`.
 
-FILL_SHADER: The single canonical WGSL fragment in `cart/hmsc/render3d/fillShader.ts` containing every material function; imported by both the eval cart and the game catalog.
+FILL_SHADER: The single canonical WGSL fragment in `cart/hmsc-int/render3d/fillShader.ts` containing every material function; imported by both the eval cart and the game catalog.
 
 fillSpec / ShaderSpec: textureShaders.ts's named, slider-bounded wrapper of one board material (seed + grade base params, per-variant seedShift) whose `buildData` re-emits the 5-float contract.
 

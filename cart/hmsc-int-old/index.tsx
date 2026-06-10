@@ -8,14 +8,14 @@ import type {
   PropKind,
   TileKind,
   ZoneFlag,
-} from '../hmsc/design';
-import { BUILDING_KINDS, buildingKindDefinition } from '../hmsc/world/buildingKinds';
-import { PROP_KINDS, propKindDefinition } from '../hmsc/world/propKinds';
-import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
-import { ZONE_FLAGS } from '../hmsc/world/zones';
-import { tileKindAtCell } from '../hmsc/world/grid';
-import { setBuildingFaceSkin } from '../hmsc/world/buildings';
-import { swatchColorForId } from '../hmsc/world/placeables';
+} from '../hmsc-int/design';
+import { BUILDING_KINDS, buildingKindDefinition } from '../hmsc-int/world/buildingKinds';
+import { PROP_KINDS, propKindDefinition } from '../hmsc-int/world/propKinds';
+import { TILE_KINDS, tileKindDefinition } from '../hmsc-int/world/tileKinds';
+import { ZONE_FLAGS } from '../hmsc-int/world/zones';
+import { tileKindAtCell } from '../hmsc-int/world/grid';
+import { setBuildingFaceSkin } from '../hmsc-int/world/buildings';
+import { swatchColorForId } from '../hmsc-int/world/placeables';
 import {
   loadEditorWorld,
   compileEditorWorld,

@@ -7,9 +7,10 @@ import { workbenchShortcutHandlers } from '../../../shell/Workbench';
 import { itemSourceCore, itemPanel, field } from './panel';
 import { GAME_ITEMS } from '../../../game/items';
 import { createItemStore, draftFromItemDoc, draftToItemDoc, gameItemRosterId, streamItemRosterId, VOXEL_FACES, WORKING_ITEM_ROSTER_ID, type ItemStoreDeps } from './store';
-import { bakeBlockoutToGlobe, emptyItemGrid } from '../../items/bake';
+import { bakeBlockoutToGlobe, emptyItemGrid, itemVoxelMeshParams, itemVoxelShapeFromBlockout } from '../../items/bake';
 import type { ItemsStreamState } from '../../items/stream';
 import { VOXEL_BLOCKOUT_TUNING, type VoxelsStreamState } from '../../voxels/stream';
+import * as Geometry from '@reactjit/geometries';
 
 type Rec = {
   itemCommits: Array<{ e: any; label: string }>;
@@ -98,6 +99,34 @@ test('ITEMSGONE-0606: legacy/stream/working name collisions keep distinct roster
   assert(blockoutRows.some((r) => r.id === streamItemRosterId('itm-blockout')), 'stream row uses the namespaced stream id');
 });
 
+test('ITEMLENS-0607: remembered roster row rebinds every lens to the selected item', () => {
+  const { deps } = fakeDeps(false);
+  const store = createItemStore({ ...deps, itemSession: null });
+  const src = itemSourceCore(store);
+
+  store.openVoxelBlockout();
+  store.addPreviewBlock();
+  store.traceLensBinding('page-load', store.selectedRosterId(), store.view.lens);
+  assertEqual(store.lensBoundItemId('sculpt'), WORKING_ITEM_ROSTER_ID, 'page load blockout binds sculpt to the working item');
+
+  const tv = gameItemRosterId('tv');
+  src.select!(tv);
+  store.traceLensBinding('click-tv', tv, store.view.lens);
+  assertEqual(store.selectedRegistryItem()?.id, 'tv', 'select(row) replays the remembered TV row into the store');
+  assertEqual(store.lensBoundItemId('item'), tv, 'ITEM lens binds to TV');
+
+  src.onLens!(store, 'sculpt');
+  assertEqual(store.lensBoundItemId('sculpt'), tv, 'SCULPT lens still binds to TV, not the stale blockout');
+  src.onLens!(store, 'voxel');
+  assertEqual(store.lensBoundItemId('voxel'), tv, 'VOXEL lens still binds to TV, not the stale blockout');
+  src.onLens!(store, 'sculpt');
+  assertEqual(store.lensBoundItemId('sculpt'), tv, 'returning to SCULPT still binds to TV');
+
+  const spec = itemPanel(store);
+  assertEqual((field(spec, 'IDENTITY', 'name') as any).get(), 'TV', 'panel identity follows TV');
+  assertEqual((field(spec, 'IDENTITY', 'source') as any).get(), 'tv · GAME_ITEMS', 'panel source no longer reports the old blockout');
+});
+
 test('ITEMSGONE-0606: built-in GAME_ITEMS are visible when the items stream is empty', () => {
   const { deps, rec } = fakeDeps(false);
   const store = createItemStore(deps);
@@ -181,6 +210,7 @@ test('item panel fields cover name, shape, sculpt, and voxel blockout controls',
   const store = createItemStore(deps);
   const spec = itemPanel(store);
   assertEqual(spec.groups.map((g) => g.title).join('|'), 'IDENTITY|ITEM SHAPE|SCULPT|VOXEL BLOCKOUT', 'all groups are present');
+  assert(((field(spec, 'ITEM SHAPE', 'representation') as any).opts as string[]).includes('voxel-mesh'), 'A/B representation toggle includes the real voxel mesh path');
   assert(field(spec, 'ITEM SHAPE', 'color'), 'color field is present');
   assert(((field(spec, 'SCULPT', 'mode') as any).opts as string[]).includes('smooth'), 'item sculpt exposes the character-kit smooth mode');
   assert(!field(spec, 'SCULPT', 'import voxel'), 'auto-flow removes the manual voxel import step');
@@ -243,6 +273,59 @@ test('AUTOFLOW-0606: voxel edits immediately bake into the sculpt draft', () => 
   assertEqual(store.view.lens, 'sculpt', 'switching to sculpt is only a view change');
   assertEqual(store.draft.source?.blocks, 1, 'sculpt sees the same already-baked blockout');
   assert(rec.itemCommits.some((c) => c.label === 'autosave · blockout item'), 'auto-baked content autosaves');
+});
+
+test('GLOBEAB-0607: one authored blockout carries both voxel comparison representations through save/load', () => {
+  const { deps, rec, items } = fakeDeps(false);
+  const store = createItemStore(deps);
+  store.addPreviewBlock();
+  assertEqual(store.draft.representation, 'voxel-surface', 'auto-flow defaults the comparison to surface displacement, not the melted Globe');
+  assertEqual(store.draft.voxelShape?.blocks.length, 1, 'the same blockout is stored as a voxel shape payload');
+  assert((store.draft.voxelShape?.mesh.quads ?? 0) > 0, 'voxel shape stores exposed-face mesh stats');
+  assert(!!store.itemVoxelMeshParams, 'the stage can render the voxel-surface comparison');
+
+  store.setRepresentation('voxel-mesh');
+  assertEqual(store.draft.representation, 'voxel-mesh', 'the same item toggles to the real voxel mesh representation');
+  store.saveToRoster();
+  const savedId = store.draftId!;
+  assertEqual(items.items[savedId].representation, 'voxel-mesh', 'selected comparison path persists in ItemShapeDoc');
+  assertEqual(items.items[savedId].voxelShape?.mesh.vertices, store.draft.voxelShape?.mesh.vertices, 'real voxelMesh payload persists through save');
+
+  const restored = createItemStore({ ...deps, itemSession: null });
+  restored.loadFromRoster(streamItemRosterId(savedId), { history: false });
+  assertEqual(restored.draft.representation, 'voxel-mesh', 'reload restores the selected comparison path');
+  assertEqual(restored.draft.voxelShape?.blocks.length, 1, 'reload restores the voxel mesh block payload');
+  assert(rec.itemCommits.some((c) => c.e.id === savedId), 'save wrote the comparison item');
+});
+
+test('GLOBEAB-0607: voxelMesh keeps the authored tower dimensions on the same blockout', () => {
+  const blocks = [
+    ...Array.from({ length: 5 * 6 }, (_, i) => ({ id: 1000 + i, x: i % 5, y: 1, z: Math.floor(i / 5), kind: 'wall' as const })),
+    ...Array.from({ length: 5 }, (_, i) => ({ id: 2000 + i, x: 2, y: 2 + i, z: 2, kind: 'wall' as const })),
+    ...Array.from({ length: 3 * 3 }, (_, i) => ({ id: 3000 + i, x: 1 + (i % 3), y: 7, z: 1 + Math.floor(i / 3), kind: 'trim' as const })),
+  ];
+  const doc = { dims: { w: 5, d: 6, h: 7 }, cellSizeMeters: 0.1, blocks };
+  const shape = itemVoxelShapeFromBlockout(doc)!;
+  const globe = bakeBlockoutToGlobe(doc)!;
+  const params = itemVoxelMeshParams({ amount: globe.amount, grid: globe.grid, voxelShape: shape })!;
+  const stats = Geometry.voxelMeshStats(params);
+  const geom = Geometry.VoxelMesh.generate(params);
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < geom.positions.length; i += 8) {
+    minX = Math.min(minX, geom.positions[i]!); maxX = Math.max(maxX, geom.positions[i]!);
+    minY = Math.min(minY, geom.positions[i + 1]!); maxY = Math.max(maxY, geom.positions[i + 1]!);
+    minZ = Math.min(minZ, geom.positions[i + 2]!); maxZ = Math.max(maxZ, geom.positions[i + 2]!);
+  }
+  console.log(`[GLOBEAB-0607] towerMesh quads=${stats.quads} vertices=${geom.count} size=${stats.bounds.size.map((n) => n.toFixed(2)).join('x')} globeRadius=${globe.radius.toFixed(3)}`);
+
+  assertClose(stats.bounds.size[0], 0.5, 1e-9, 'tower width remains five 10cm cells');
+  assertClose(stats.bounds.size[1], 0.7, 1e-9, 'tower height remains seven 10cm levels');
+  assertClose(stats.bounds.size[2], 0.6, 1e-9, 'tower depth remains six 10cm cells');
+  assertClose(maxX - minX, 0.5, 0.01, 'generated mesh vertices preserve the tower width');
+  assertClose(maxY - minY, 0.7, 0.01, 'generated mesh vertices preserve the tower height');
+  assertClose(maxZ - minZ, 0.6, 0.01, 'generated mesh vertices preserve the tower depth');
+  assert(geom.count >= stats.quads * 6, 'the rendered geometry is the exposed-face mesh, not a single Globe part');
 });
 
 test('AUTOFLOW-0606: voxel rebake preserves sculpt grid detail as a delta', () => {

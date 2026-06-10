@@ -8,14 +8,15 @@
 // same stream the build route and the game boot read; error captured (the
 // census store-unavailable convention; the roster still lists the static
 // seeds read-only-ish when the store is down — commits just don't land).
-// Materials come from THE texture registry (game/textures): allTextures for
-// the picker, textureById for the existence gate — the skin vocabulary IS
-// the material system, by construction.
+// Materials come from THE texture catalog: assignable recipes, React textures,
+// and stored materials for the picker; textureById for the existence gate. The
+// skin vocabulary IS the material system, by construction.
 
 import { editorChannel } from '../../store';
 import { editorSessions, type RouteSession } from '../../sessions';
 import { worldStream, type WorldEvent, type WorldStreamState } from '../../../game/world/stream';
-import { allTextures, textureById } from '../../../game/textures/registry';
+import { textureById } from '../../../game/textures/registry';
+import { assignableMaterialCatalog } from '../materials/catalog';
 import { createBuildingsStore, type BuildingsStore } from './store';
 
 let live: BuildingsStore | null = null;
@@ -39,7 +40,7 @@ export function buildingsWorkbenchStore(): BuildingsStore {
     session,
     error,
     validMaterial: (id: string) => textureById(id) !== undefined,
-    materials: () => allTextures().map((t) => ({ id: t.id, label: t.label })),
+    materials: () => assignableMaterialCatalog(),
   });
   return live;
 }

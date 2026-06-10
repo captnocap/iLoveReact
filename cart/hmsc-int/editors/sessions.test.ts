@@ -172,4 +172,31 @@ test('a commit re-materializes snapshots; a note does not need to', () => {
   assertEqual(sessionsSnap!.state.sessions['ses-i'].commits.length, 1, 'with the commit history in it');
 });
 
+test('live deferred snapshots keep placement commits off the frame and coalesce the flush', () => {
+  wipeScratch();
+  const queue: Array<() => void> = [];
+  const store = openStore(ROOT);
+  const log = createSessionLog(store, {
+    snapshotMode: 'defer',
+    scheduleSnapshot: (fn) => { queue.push(fn); return queue.length; },
+  });
+  const world = store.defineStream(WORLD);
+  const ses = log.open('/build', world, 'ses-placefreeze');
+
+  ses.commit({ kind: 'cellPlaced', tile: 'floor-a' }, 'placed floor-a');
+  ses.commit({ kind: 'cellPlaced', tile: 'floor-b' }, 'placed floor-b');
+
+  assertEqual(queue.length, 1, 'rapid placement commits share one deferred snapshot task');
+  assertEqual(world.state().placed.join('|'), 'floor-a|floor-b', 'the authored world updates synchronously');
+  assertEqual(store.loadSnapshot<World>('world'), null, 'the snapshot write is not inside the placement commit');
+
+  queue.shift()!();
+  const snap = store.loadSnapshot<World>('world');
+  assert(snap !== null, 'the deferred task materializes the concern snapshot');
+  assertEqual(snap!.state.placed.join('|'), 'floor-a|floor-b', 'the deferred snapshot carries every coalesced placement');
+  const sessionsSnap = store.loadSnapshot<SessionsState>('sessions');
+  assert(sessionsSnap !== null, 'the session snapshot flushes with the concern stream');
+  assertEqual(sessionsSnap!.state.sessions['ses-placefreeze'].commits.length, 2, 'both placement commits are in the coalesced flush');
+});
+
 finish('editors/sessions');

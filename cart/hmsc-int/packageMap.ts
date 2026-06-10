@@ -1,7 +1,7 @@
 // packageMap.ts — hmsc-int Compile transcode to the platform package shape.
 
-import type { GameState, GridCell, TileKind } from '../hmsc/design';
-import { surfaceRegionAtCell } from '../hmsc/world/grid';
+import type { GameState, GridCell, TileKind } from './design';
+import { surfaceRegionAtCell } from './world/grid';
 import {
   MAP_LUMP,
   base64ToBytes,

@@ -3,7 +3,7 @@
   "at": "2026-06-06T06:22:43.308Z",
   "origin": "supervisor-relay",
   "text": "UserPromptSubmit hook (failed) / error: hook returned invalid user prompt submit JSON output",
-  "status": "resolved",
+  "status": "done",
   "sessionId": "159435dc-74b2-4e0e-9c32-2dff9bacc5d1",
   "captureMode": "manual",
   "resolvedAt": "2026-06-06T06:22:43.316Z",

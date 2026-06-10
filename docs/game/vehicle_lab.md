@@ -17,7 +17,7 @@ This lab fits the same pattern as the head/animation/game labs: author simple se
 - `cart/vehicle_lab/cart.json`: cart manifest and launch size.
 - `cart/vehicle_lab/index.tsx`: cart entry, exported vehicle data types, procedural vehicle generation, semantic mesh and hitbox builder, animation sampling hookup, damage controls, gas tank controls, and 3D scene UI.
 - `cart/animationDsl.ts`: shared timeline parser and sampler used by this cart's vehicle pose system.
-- `cart/hmsc/render3d/materials.ts`: shared material helpers used for auto glass and side glass.
+- `cart/hmsc-int/render3d/materials.ts`: shared material helpers used for auto glass and side glass.
 - `runtime/primitives.tsx`: provides `Box`, `Row`, `Col`, `Text`, `Pressable`, and `Scene3D`; also maps `Scene3D.Mesh` material opacity into the host transparent render pass.
 - `runtime/cameras/index.tsx`: provides `OrbitCamera`, which resolves to a `Scene3D.Camera`.
 - `runtime/geometries/index.ts`: provides `Geometry.Box`, `Geometry.Cylinder`, and `Geometry.Sphere` generator definitions consumed by `Scene3D.Mesh`.
@@ -229,7 +229,7 @@ Material helpers:
 - `SIDE_GLASS` uses `Glass({ color: '#1f3441', opacity: 0.42, health: 18 })`.
 - `HEADLIGHT`, `TAILLIGHT`, and `GAS_PORT` are local material objects carrying color, opacity, breakable, and health fields.
 
-In `cart/hmsc/render3d/materials.ts`, `Glass` and `AutoGlass` return material objects that combine render properties (`color`, `opacity`) with future gameplay properties (`breakable`, `health`). In `runtime/primitives.tsx:540-546`, `Scene3D.Mesh` reads object material opacity and forwards alpha below 1 through the transparent render path.
+In `cart/hmsc-int/render3d/materials.ts`, `Glass` and `AutoGlass` return material objects that combine render properties (`color`, `opacity`) with future gameplay properties (`breakable`, `health`). In `runtime/primitives.tsx:540-546`, `Scene3D.Mesh` reads object material opacity and forwards alpha below 1 through the transparent render path.
 
 The `breakable` and `health` fields are metadata for future systems. In this cart they are authored and carried with the surface, but no damage simulation consumes them yet.
 

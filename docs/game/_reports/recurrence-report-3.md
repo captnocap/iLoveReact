@@ -103,7 +103,7 @@ The lie compounds: the file's name says "lab," its *stateful* `__physics_lab_*` 
 Sits in a serious `framework/phys/` path, ~320 lines + a C++ Bullet shim, fully implemented — and wired to nothing. Its own header comment describes `<3D.Physics>` and `Node.physics3d_world_id` that **do not exist**.
 Confirmed by: `physics3d.md` ("fully implemented and completely disconnected … Nothing imports `phys/physics3d.zig`"; "doc-comment drift as a trap"). The one collider it never implemented (heightfield) is exactly the one hmsc needed — which is why the game grew its own sim instead.
 
-### 2.3 `cart/hmsc/labs/ScaleLabScene.tsx` — name implies the live scale lab; it's an orphan copy that has already drifted
+### 2.3 `cart/hmsc-int/labs/ScaleLabScene.tsx` — name implies the live scale lab; it's an orphan copy that has already drifted
 A near-verbatim duplicate of `cart/hmsc_scale_lab.tsx`'s scene, **imported by nothing**, and already divergent (purple height line at `PLAYER_VISUAL_TOTAL_HEIGHT` 2.45m vs the cart's `PLAYER_VISUAL_HEAD_TOP` 2.04m).
 Confirmed by: `hmsc_scale_lab.md`. Note `hmsc.md` lists `labs/ScaleLabScene.tsx` as a real in-cart lab scene — so the two docs disagree on whether it's live (see §4.1).
 
@@ -167,7 +167,7 @@ Box-per-cell `PixelIcon` (editor, needs hit targets) vs shader-quad `ShaderPixel
 
 ### 3.6 The `FILL_SHADER` two-copy seed-coefficient invariant
 `fillData`'s per-board seed-spread formulas are duplicated as `seedCoef` in `textureShaders.ts`; drift silently invalidates the eval. Plus eight near-identical `*Column` components and three copies of the material/variant naming tables.
-Docs: `effect_fills.md`. Also the WGSL itself is "authored in effect_fills, canonical copy lives game-side" (`cart/hmsc/render3d/fillShader.ts`) — a deliberate one-copy rule that the seed tables violate.
+Docs: `effect_fills.md`. Also the WGSL itself is "authored in effect_fills, canonical copy lives game-side" (`cart/hmsc-int/render3d/fillShader.ts`) — a deliberate one-copy rule that the seed tables violate.
 
 ### 3.7 The hand-rolled `screenRay` / view-basis duplication (3 bodies)
 `voxel_stack_demo`'s `screenRay`, `runtime/cameras/unproject.ts`'s `unprojectGround` internal basis, and scape3d's original `projection.ts` all build the same camera inverse. The registry only exports ground-plane picking.
@@ -191,7 +191,7 @@ Acknowledged compat façade. Docs: `scape.md`.
 
 ## 4. Cross-Doc Contradictions
 
-### 4.1 Is `cart/hmsc/labs/ScaleLabScene.tsx` live or orphaned?
+### 4.1 Is `cart/hmsc-int/labs/ScaleLabScene.tsx` live or orphaned?
 - `hmsc.md` lists it as a real in-cart lab scene ("Scene3D lab for physical scale … Uses `HMSC_SCALE`").
 - `hmsc_scale_lab.md` says it is "a near-verbatim **orphaned** copy … **nothing imports it**" and already drifted.
 The hmsc.md inventory documents it as part of the cart structure; the scale-lab audit (which specifically grepped consumers) says it's dead. The lab scene may be *registered* in `labDefinitions.ts` but its *Scene* component unreferenced, or hmsc.md over-trusted the directory listing. Either way the two docs give opposite live/dead verdicts.
@@ -258,7 +258,7 @@ Stride-9 `[pos, scale, rgb]` instanced draw per kind. `voxel_stack_demo.md` flag
 ### Renames / honest-status splits (highest value — these mislead agents)
 1. **Split `framework/v8_bindings_physics_lab.zig`** into honest `framework/v8_bindings_hmsc_physics.zig` (the live `__hmsc_*` step + heightfields) and `framework/v8_bindings_physics_lab.zig` (the stateful `__physics_lab_*` toy). The name currently hides the game's entire physics backend. (`physics_lab.md`, `physics3d.md`, `hmsc.md`)
 2. **Mark `framework/phys/physics3d.zig` DORMANT loudly** at the top of all three files (`.zig`/`.h`/`.cpp`), and **fix or delete its lying header comment** about `<3D.Physics>`/`Node.physics3d_world_id`. Rename to `bullet3d_dormant.zig` or commit to deleting the trio — a user decision, but the status must be loud either way. (`physics3d.md`)
-3. **Delete or canonicalize `cart/hmsc/labs/ScaleLabScene.tsx`** — it's an already-drifted orphan and two docs disagree on whether it's live. Make it import the standalone cart's scene, or remove it. (`hmsc_scale_lab.md`, `hmsc.md`)
+3. **Delete or canonicalize `cart/hmsc-int/labs/ScaleLabScene.tsx`** — it's an already-drifted orphan and two docs disagree on whether it's live. Make it import the standalone cart's scene, or remove it. (`hmsc_scale_lab.md`, `hmsc.md`)
 4. **Rename `framework/v8_bindings_input_bench.zig`'s `__input_bench_*`** or at least add a comment that animation_lab's *drive mode* depends on it — it's not just a benchmark. (`animation_lab.md`, `input_bench.md`)
 5. **Update `cart/hmsc-int/AGENTS.md`** `MapCanvas.tsx` → `PaintCanvas.tsx`. (`hmsc-int.md`)
 6. **Fix `cart/ragdoll_lab/car.tsx`'s header** (it falsely claims pathing_lab fleets it). (`ragdoll_lab.md`, `pathing_lab.md`)

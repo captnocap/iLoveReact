@@ -42,9 +42,10 @@ studio.cls `Hud*` tokens; feel numbers in `EmbodiedHud.tsx` `HUD_TUNING` (P2).
   solved with the substrate's `PLAYER_CAMERA`), GAME_INPUT (builder keys),
   GAME_CHROME, editors/sessions.
 - `snap.ts` — crosshair→snap-target resolution, pure (P4: `snap.test.ts`,
-  11 cases). The catalog entry's OWN snap mode decides (grid/edge/surface/
-  free — registry data); nearest of piece-face vs ground wins; top faces
-  stack storeys; side faces place beside at the hit piece's base.
+  18 cases). The catalog entry's OWN snap mode decides (grid/edge/surface/
+  free — registry data); nearest of piece-face vs ground wins; top faces stack
+  on that piece's top, and edge walls stand on a floor/roof only from the
+  actual top face, not from the side face or adjacent ground.
 - `commits.test.ts` — the session contract on a real scratch store (P4, 3
   cases): one placement = ONE labeled commit on the WORLD channel; a prefab
   stamp is ONE commit landing N semantic pieces; an undo point steps
@@ -138,4 +139,43 @@ the RAW hit (no snap at all). Fix in snap.ts: `modulePitch()` — a piece whose
 size is a clean grid multiple snaps at its OWN module pitch (3m plates have
 ONE lattice; walls' edge lines land on plate edges, never mid-plate);
 sub-module pieces (props, poles) and 'free' mode ride the 1m substrate.
-Tests updated to the new law + nudge-immunity cases (11/11).
+FLOORGAP-0606 follow-up: a floor snapped from another floor's edge stays on
+the same base plane when the snapped footprint is adjacent, while true footprint
+overlap still stacks. Tests pin exact shared-edge coordinates, not epsilon
+closeness.
+
+## REQ-0452 (2026-06-10): wall-on-floor requires the floor top face
+
+USER VERDICT: "i need it to only be on top of the floor" because the old
+side-face and beside-floor ground anchors made wall placement mismatch. Edge
+walls still use the catalog edge lattice, but a floor/roof top anchor now only
+comes from targeting that plate's top face. Hitting the plate side or the
+ground next to its perimeter yields no floor-top wall placement.
+
+## REQ-0466 (2026-06-10): wall thickness follows floor support
+
+USER DRAWING: the wall line was right, but the wall body was centered on that
+line, leaving a half-depth overhang off a one-sided floor edge. The fix keeps
+the authored edge line unchanged and normalizes the physical band from support:
+one floor/roof side puts the full wall thickness on that plate; floor/roof on
+both sides splits the thickness across the shared seam; no plate support keeps
+the old centered freestanding wall. Render boxes, live colliders, camera
+occluders, and raycast targeting all read the same `placed.depthSpan` result.
+
+## REQ-0470 (2026-06-10): wall-to-wall edge snap survives top-face-only floors
+
+Regression from REQ-0452/0466: edge snap from an existing wall face could resolve
+as a next-storey placement because all piece faces fed the edge resolver the
+piece top. The law is narrower: floor/roof side faces are not wall-on-floor
+anchors, but wall side/end faces are still valid wall-to-wall snap targets and
+keep the target wall's base Y. Only actual top faces stack.
+
+## REQ-0471 (2026-06-10): wall-face snap uses authored wall geometry
+
+Follow-up regression: wall-face edge snap still derived orientation from the raw
+physical hit point. After REQ-0466 the wall body can sit on one side of its
+authored line, so raw face hits no longer reliably identify wall endpoints or
+which side the user is aiming from. Edge snap now has a wall-specific face path:
+end-cap hits extend the wall collinearly, side-face hits near an endpoint turn
+the corner on the aimed side, and side-face hits away from endpoints stay on the
+same authored wall line. Floor/roof side faces remain blocked for wall-on-floor.

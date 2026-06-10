@@ -21,6 +21,16 @@ export type CommandOutcome = {
   ok: boolean;
   /** console lines (error text when ok is false) */
   output: string[];
+  /** session effect requested by a command; currently used by the colon console's :clear */
+  clearTranscript?: boolean;
+  /** diagnostic commands can return script-visible output without drawing it in the live console overlay */
+  suppressTranscript?: boolean;
+};
+
+export type CommandRunResult = string[] | void | {
+  output?: string[];
+  clearTranscript?: boolean;
+  suppressTranscript?: boolean;
 };
 
 export type CommandSpec<Ctx> = {
@@ -30,7 +40,7 @@ export type CommandSpec<Ctx> = {
   usage: string;
   summary: string;
   /** output lines (or nothing); throw to fail the command */
-  run: (ctx: Ctx, args: string[]) => string[] | void;
+  run: (ctx: Ctx, args: string[]) => CommandRunResult;
 };
 
 export type ScriptResult = {
@@ -73,8 +83,14 @@ export function createCommandRegistry<Ctx>(): CommandRegistry<Ctx> {
       return { ok: false, output: [`error: unknown command "${tokens[0]}" (try: help)`] };
     }
     try {
-      const output = spec.run(ctx, tokens.slice(1));
-      return { ok: true, output: output ?? [] };
+      const result = spec.run(ctx, tokens.slice(1));
+      if (Array.isArray(result) || result == null) return { ok: true, output: result ?? [] };
+      return {
+        ok: true,
+        output: result.output ?? [],
+        clearTranscript: result.clearTranscript === true,
+        suppressTranscript: result.suppressTranscript === true,
+      };
     } catch (error: any) {
       return { ok: false, output: [`error: ${error?.message ?? String(error)}`] };
     }

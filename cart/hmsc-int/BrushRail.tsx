@@ -1,7 +1,7 @@
 import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
-import type { TileKind, ZoneFlag } from '../hmsc/design';
-import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
-import { ZONE_FLAGS } from '../hmsc/world/zones';
+import type { TileKind, ZoneFlag } from './design';
+import { TILE_KINDS, tileKindDefinition } from './world/tileKinds';
+import { ZONE_FLAGS } from './world/zones';
 import { HEIGHT_LIMIT, type BrushProfile } from './heightData';
 import type { BrushMode, BrushShape } from './brush';
 import { ChipGrid, MiniStepper, RailLabel, RailSlider, SizeSlider, Swatch, ToolBtn, RAIL_CELL } from './railAtoms';
@@ -9,7 +9,7 @@ import type { ZoneDef } from './zoneData';
 
 type BrushLayer = 'paint' | 'height' | 'zone';
 type Tool = 'pointer' | 'brush' | 'eraser';
-type HeightMode = 'brush' | 'ramp';
+type HeightMode = 'brush' | 'ramp' | 'slope' | 'smooth';
 
 export type BrushRailSettings = {
   size: number;
@@ -23,6 +23,7 @@ export type BrushRailSettings = {
   rampWide: number;
   rampLong: number;
   rampAngle: number;
+  smoothStrength: number;
 };
 
 const SIZE_MIN = 0, SIZE_MAX = 40;
@@ -38,11 +39,13 @@ function wrapAngle(deg: number): number {
   return ((Math.round(deg) % 360) + 360) % 360;
 }
 
-const FOOTPRINTS: { id: BrushShape | 'ramp'; label: string; hint: string }[] = [
+const FOOTPRINTS: { id: BrushShape | 'ramp' | 'slope' | 'smooth'; label: string; hint: string }[] = [
   { id: 'circle', label: 'circle', hint: 'o' },
   { id: 'square', label: 'square', hint: '[]' },
   { id: 'diamond', label: 'diamond', hint: '<>' },
   { id: 'ramp', label: 'ramp', hint: '/' },
+  { id: 'slope', label: 'slope', hint: '~' },
+  { id: 'smooth', label: 'smooth', hint: 's' },
 ];
 
 const PROFILES: { id: BrushProfile; label: string; hint: string }[] = [
@@ -98,6 +101,41 @@ function RampSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<Bru
   );
 }
 
+function SlopeSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void }) {
+  const b = props.brush;
+  const set = props.onPatch;
+  return (
+    <Box style={{ gap: 5 }}>
+      <RailLabel text="slope" />
+      <ChipGrid items={PROFILES} value={b.profile} onPick={(profile) => set({ profile: profile as BrushProfile })} />
+      <MiniStepper label="start" value={b.rampMin.toFixed(1)} onDec={() => set({ rampMin: clamp(b.rampMin - Z_STEP, -HEIGHT_LIMIT, HEIGHT_LIMIT) })} onInc={() => set({ rampMin: clamp(b.rampMin + Z_STEP, -HEIGHT_LIMIT, HEIGHT_LIMIT) })} />
+      <MiniStepper label="end" value={b.rampMax.toFixed(1)} onDec={() => set({ rampMax: clamp(b.rampMax - Z_STEP, -HEIGHT_LIMIT, HEIGHT_LIMIT) })} onInc={() => set({ rampMax: clamp(b.rampMax + Z_STEP, -HEIGHT_LIMIT, HEIGHT_LIMIT) })} />
+    </Box>
+  );
+}
+
+function SmoothSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void }) {
+  const b = props.brush;
+  const set = props.onPatch;
+  return (
+    <Box style={{ gap: 5 }}>
+      <RailLabel text="smooth" />
+      <ChipGrid items={PROFILES} value={b.profile} onPick={(profile) => set({ profile: profile as BrushProfile })} />
+      <RailSlider
+        label="strength"
+        value={b.smoothStrength}
+        min={0.05}
+        max={1}
+        step={0.05}
+        valueText="fit"
+        formatDraft={(n) => n.toFixed(2)}
+        inputWidth={42}
+        onValue={(smoothStrength) => set({ smoothStrength: clamp(smoothStrength, 0.05, 1) })}
+      />
+    </Box>
+  );
+}
+
 function HeightSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void; onClear: () => void }) {
   const b = props.brush;
   const dim = b.mode === 'erase';
@@ -105,6 +143,10 @@ function HeightSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<B
     <Box style={{ gap: 6 }}>
       {b.heightMode === 'ramp' ? (
         <RampSection brush={b} onPatch={props.onPatch} />
+      ) : b.heightMode === 'slope' ? (
+        <SlopeSection brush={b} onPatch={props.onPatch} />
+      ) : b.heightMode === 'smooth' ? (
+        <SmoothSection brush={b} onPatch={props.onPatch} />
       ) : (
         <>
           <RailLabel text="profile" />
@@ -191,10 +233,12 @@ export function BrushRail(props: {
   onDeleteZone: (i: number) => void;
 }) {
   const b = props.brush;
-  const shapeItems = props.layer === 'height' ? FOOTPRINTS : FOOTPRINTS.filter((it) => it.id !== 'ramp');
-  const shapeValue = props.layer === 'height' && b.heightMode === 'ramp' ? 'ramp' : b.shape;
+  const shapeItems = props.layer === 'height' ? FOOTPRINTS : FOOTPRINTS.filter((it) => it.id !== 'ramp' && it.id !== 'slope' && it.id !== 'smooth');
+  const shapeValue = props.layer === 'height' && b.heightMode === 'ramp' ? 'ramp' : props.layer === 'height' && b.heightMode === 'slope' ? 'slope' : props.layer === 'height' && b.heightMode === 'smooth' ? 'smooth' : b.shape;
   const onShape = (id: string) => {
     if (id === 'ramp') props.onBrushChange({ heightMode: 'ramp', mode: 'paint' });
+    else if (id === 'slope') props.onBrushChange({ heightMode: 'slope', mode: 'paint' });
+    else if (id === 'smooth') props.onBrushChange({ heightMode: 'smooth', mode: 'paint' });
     else props.onBrushChange({ shape: id as BrushShape, heightMode: 'brush' });
     if (props.layer !== 'height') props.onTool('brush');
   };

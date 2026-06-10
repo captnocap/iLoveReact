@@ -4,8 +4,8 @@
 // player-drive loop reads to fire onEnter/onExit triggers. So a painted zone is the
 // editor twin of the game's Zone: name + flags (+ a colour, for authoring).
 
-import { hexToRgb01 } from '../hmsc/world/placeables';
-import type { ZoneFlag } from '../hmsc/design';
+import { hexToRgb01 } from './world/placeables';
+import type { ZoneFlag } from './design';
 
 // Authoring swatch palette for new zones (distinct from tile colours).
 export const ZONE_COLORS = ['#a78bfa', '#f472b6', '#fb923c', '#34d399', '#60a5fa', '#facc15', '#f87171', '#22d3ee'];

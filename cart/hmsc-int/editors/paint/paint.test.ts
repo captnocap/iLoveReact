@@ -15,13 +15,16 @@ import {
 } from './strokes';
 import {
   activeAfterDelete, buildPaintDocument, defaultLayerConfig, effectiveMask,
-  inflatePaintDocument, invertIntoBase, makeLayer, mergeIntoBase, mintLayerId,
-  moveLayerInStack, overrideBandValue, paintableIdsFor, parsePaintDocument,
+  controlsForPaintLayer, inflatePaintDocument, invertIntoBase, makeLayer,
+  mergeIntoBase, mintLayerId, moveLayerAcrossNeighbor, moveLayerInStack, overrideBandValue,
+  paintLayerActionEnabled, PAINT_LAYER_CONTROLS, paintableIdsFor, parsePaintDocument,
+  runPaintLayerAction,
   scaleMask, serializePaintDocument, unionMasks,
   type PaintDocument, type PaintLayerBytes, type PaintLookDefaults,
 } from './layers';
 import { createPaintHistory } from './history';
 import { hexToHsv, hsvToHex, isFullHexColor, isHexColor, normalizeHexColor } from './colors';
+import { PAINT_BRUSH_PRESETS } from './brushKinds';
 import {
   addCustomSurface, adoptSurface, buildCellShader, buildTextureShader,
   hexToRgb01, inflateSurface, MASK_SURFACES, NUM_COLOR_SLOTS,
@@ -238,6 +241,102 @@ test('stack ops: move swaps neighbors, delete re-targets the active index', () =
   assertEqual(activeAfterDelete(1, 2, 2), 1, 'active below the deletion holds');
 });
 
+test('layer reorder moves one slot and never changes layer count', () => {
+  const stack = ['base', 'mouth', 'eyes'].map((name, i) => ({ id: name, name: name.toUpperCase(), ordinal: i }));
+  const movedUp = moveLayerInStack(stack, 1, 1);
+  assertEqual(movedUp.length, stack.length, 'move-up keeps the exact layer count');
+  assertEqual(movedUp.map((l) => l.id).join(','), 'base,eyes,mouth', 'mouth moved one slot up in the bottom-up stack');
+  assertEqual(new Set(movedUp.map((l) => l.id)).size, stack.length, 'move-up did not duplicate any layer id');
+  const movedDown = moveLayerInStack(movedUp, 1, -1);
+  assertEqual(movedDown.length, stack.length, 'move-down keeps the exact layer count');
+  assertEqual(movedDown.map((l) => l.id).join(','), 'eyes,base,mouth', 'eyes moved one slot down in the bottom-up stack');
+  assertEqual(new Set(movedDown.map((l) => l.id)).size, stack.length, 'move-down did not duplicate any layer id');
+});
+
+test('layer reorder updater is idempotent when replayed against its own output', () => {
+  const stack = ['base', 'mouth', 'eyes', 'brow'].map((name, i) => ({ id: name, name: name.toUpperCase(), ordinal: i }));
+  const before = stack.map((l) => l.id).join(',');
+  const once = moveLayerAcrossNeighbor(stack, 'mouth', 1, 'eyes');
+  const afterOnce = once.map((l) => l.id).join(',');
+  const twice = moveLayerAcrossNeighbor(once, 'mouth', 1, 'eyes');
+  const afterTwice = twice.map((l) => l.id).join(',');
+  console.log(`[PAINTLAYERS-0606] setter replay input=[${before}] once=[${afterOnce}] twice=[${afterTwice}] count ${stack.length}->${once.length}->${twice.length}`);
+  assertEqual(afterOnce, 'base,eyes,mouth,brow', 'one updater moves mouth across eyes');
+  assertEqual(afterTwice, afterOnce, 'replayed updater is a no-op after the anchored move already landed');
+  assertEqual(twice.length, stack.length, 'replayed updater keeps the exact layer count');
+  assertEqual(new Set(twice.map((l) => l.id)).size, stack.length, 'replayed updater does not duplicate any layer id');
+});
+
+test('animation-authored layers expose the same control set as painted layers', () => {
+  const painted = makeLayer(DEFAULTS, 0, 'Painted mask');
+  const mouth = { ...makeLayer(DEFAULTS, 1, 'mouth'), id: 'mouth', groupName: 'animation' };
+  const eyes = { ...makeLayer(DEFAULTS, 2, 'eyes'), id: 'eyes', groupName: 'animation' };
+  const expected = PAINT_LAYER_CONTROLS.join(',');
+  assertEqual(controlsForPaintLayer(painted).join(','), expected, 'painted layer controls are the baseline');
+  assertEqual(controlsForPaintLayer(mouth).join(','), expected, 'mouth animation layer gets the full layer controls');
+  assertEqual(controlsForPaintLayer(eyes).join(','), expected, 'eyes animation layer gets the full layer controls');
+  for (const required of ['select', 'visibility', 'duplicate', 'move-up', 'move-down', 'merge-down', 'cut', 'delete']) {
+    assert(controlsForPaintLayer(mouth).includes(required as any), `animation layer exposes ${required}`);
+  }
+});
+
+test('shared layer strip actions move layers without duplicating them', () => {
+  let layers = ['base', 'mouth', 'eyes'].map((name, i) => ({ ...makeLayer(DEFAULTS, i, name), id: name }));
+  const calls: string[] = [];
+  const names = () => layers.map((l) => l.id).join(',');
+  const s: any = {
+    get layers() { return layers; },
+    activeLayer: 1,
+    setActiveLayer(i: number) { calls.push(`select:${i}`); },
+    toggleLayerMute(i: number) { calls.push(`visibility:${i}`); },
+    duplicateLayer(i: number) {
+      calls.push(`duplicate:${i}`);
+      layers.splice(i + 1, 0, { ...layers[i], id: `${layers[i].id}-copy` });
+    },
+    moveLayer(i: number, dir: -1 | 1) {
+      const before = names();
+      layers = moveLayerInStack(layers, i, dir);
+      const after = names();
+      calls.push(`move:${i}:${dir}:${before}->${after}`);
+    },
+    moveLayerById(id: string, dir: -1 | 1) {
+      const before = names();
+      const i = layers.findIndex((l) => l.id === id);
+      layers = moveLayerInStack(layers, i, dir);
+      const after = names();
+      calls.push(`moveId:${id}:${dir}:${before}->${after}`);
+    },
+    mergeLayer(i: number) { calls.push(`merge:${i}`); },
+    cutLayer(i: number) { calls.push(`cut:${i}`); },
+    deleteLayer(i: number) { calls.push(`delete:${i}`); },
+  };
+
+  const beforeUp = names();
+  runPaintLayerAction(s, 1, 'move-up', 'mouth');
+  const afterUp = names();
+  console.log(`[PAINTLAYERS-0606] sculpt-paint-strip move-up before=[${beforeUp}] after=[${afterUp}] count=${layers.length}`);
+  assertEqual(afterUp, 'base,eyes,mouth', 'up arrow dispatches id-targeted moveLayer(+1), not duplicateLayer');
+  assertEqual(layers.length, 3, 'up arrow keeps layer count');
+  assert(!calls.some((c) => c.startsWith('duplicate:')), 'up arrow never calls duplicateLayer');
+  assert(!paintLayerActionEnabled(s, 2, 'move-up'), 'top visual layer disables move-up');
+
+  const beforeDown = names();
+  runPaintLayerAction(s, 2, 'move-down', 'mouth');
+  const afterDown = names();
+  console.log(`[PAINTLAYERS-0606] sculpt-paint-strip move-down before=[${beforeDown}] after=[${afterDown}] count=${layers.length}`);
+  assertEqual(afterDown, 'base,mouth,eyes', 'down arrow dispatches id-targeted moveLayer(-1), not duplicateLayer');
+  assertEqual(layers.length, 3, 'down arrow keeps layer count');
+  assert(!calls.some((c) => c.startsWith('duplicate:')), 'down arrow never calls duplicateLayer');
+  assert(!paintLayerActionEnabled(s, 0, 'move-down'), 'bottom visual layer disables move-down');
+
+  const staleIndexBefore = names();
+  runPaintLayerAction(s, 1, 'move-up', 'mouth');
+  const staleIndexAfter = names();
+  console.log(`[PAINTLAYERS-0606] stale rendered index=1 id=mouth before=[${staleIndexBefore}] after=[${staleIndexAfter}] count=${layers.length}`);
+  assertEqual(staleIndexAfter, 'base,eyes,mouth', 'stale rendered index still moves the clicked layer id, not the current occupant');
+  assertEqual(layers.length, 3, 'stale rendered index keeps layer count');
+});
+
 test('layer ids are unique and paintable ids are prefix-namespaced', () => {
   const ids = new Set(Array.from({ length: 50 }, () => mintLayerId()));
   assertEqual(ids.size, 50, '50 mints, 50 distinct ids');
@@ -263,6 +362,7 @@ test('document round-trip: layers, masks, clicks and look survive RLE + JSON', (
   const doc = buildPaintDocument({
     dims: { w, h }, layers: [bytes], activeLayer: 0,
     tool: 'brush', mode: 'erase', brushPx: 32,
+    brush: { ...PAINT_BRUSH_PRESETS.find((p) => p.kind === 'angle')!, angleDeg: -42, flow: 0.7 },
     defaults: DEFAULTS, customSurfaces: [],
     backendTunables: { floodFuzz: 27, floodRejectFrac: 0.08, samThreshold: 3, samMaskIdx: 2 },
   });
@@ -279,7 +379,37 @@ test('document round-trip: layers, masks, clicks and look survive RLE + JSON', (
   assertEqual(rb[20], 128, 'force-keep byte survives (value-grid RLE)');
   assertEqual(rb[30], 255, 'force-remove byte survives');
   assertEqual(rb[0], 0, 'untouched stays untouched');
+  assertEqual(parsed!.brush?.kind, 'angle', 'brush kind survives document snapshots');
+  assertEqual(parsed!.brush?.angleDeg, -42, 'brush angle survives document snapshots');
+  assertEqual(parsed!.brush?.flow, 0.7, 'brush flow survives document snapshots');
   assertEqual(parsed!.backendTunables?.samMaskIdx, 2, 'smart tunables survive undo/document snapshots');
+});
+
+test('document round-trip: image layers survive as ordinary stack layers', () => {
+  const w = 8, h = 8;
+  const image = makeLayer(DEFAULTS, 0, 'reference face');
+  image.groupName = 'image';
+  image.image = { path: '/tmp/reference-face.png', name: 'reference face', dims: { w: 320, h: 200 } };
+  const stroke = makeLayer(DEFAULTS, 1, 'paint over reference');
+  const base = new Uint8Array(w * h);
+  base[9] = 255;
+  const doc = buildPaintDocument({
+    dims: { w, h },
+    layers: [
+      { ...image, base: null, brush: null },
+      { ...stroke, base, brush: null },
+    ],
+    activeLayer: 1, tool: 'brush', mode: 'erase', brushPx: 8,
+    defaults: DEFAULTS, customSurfaces: [],
+  });
+  const parsed = parsePaintDocument(serializePaintDocument(doc));
+  assert(!!parsed, 'serialized image-layer document parses');
+  const inflated = inflatePaintDocument(parsed!);
+  assertEqual(inflated.length, 2, 'image layer and paint layer both restore');
+  assertEqual(inflated[0].image?.path, '/tmp/reference-face.png', 'image path rides the layer');
+  assertEqual(inflated[0].groupName, 'image', 'image layer keeps normal layer metadata');
+  assertEqual(inflated[1].name, 'paint over reference', 'paint layer order above image survives');
+  assert(!!inflated[1].base && inflated[1].base[9] > 0, 'stroke mask survives above image');
 });
 
 test('an untouched brush channel is skipped, not persisted as zeros', () => {

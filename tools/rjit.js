@@ -7070,7 +7070,7 @@ ${IMPORTS_MARKER}`).replace(
     const bundleOut = `${packageDir}/bundle.js`;
     const bundle2 = bundleCart({
       rjitHome,
-      cartEntry: `${root}/cart/hmsc/index.tsx`,
+      cartEntry: `${root}/cart/hmsc-int/gameShell.tsx`,
       outFile: bundleOut,
       mode: "cartridge"
     });

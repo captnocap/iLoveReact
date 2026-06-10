@@ -25,6 +25,8 @@ export type DecalAlign = 'left' | 'center' | 'right';
 
 export type DecalRectNode = {
   id: string;
+  name?: string;
+  hidden?: boolean;
   kind: 'rect';
   x: number;
   y: number;
@@ -35,11 +37,17 @@ export type DecalRectNode = {
   borderRadius?: number;
   borderWidth?: number;
   borderColor?: string;
+  /** optional material effect fill: shader id from game/textures/shaders */
+  fillShaderId?: string;
+  /** frozen shader recipe data[] for fillShaderId */
+  fillData?: number[];
   opacity?: number;
 };
 
 export type DecalTextNode = {
   id: string;
+  name?: string;
+  hidden?: boolean;
   kind: 'text';
   x: number;
   y: number;
@@ -60,6 +68,8 @@ export type DecalTextNode = {
 
 export type DecalImageNode = {
   id: string;
+  name?: string;
+  hidden?: boolean;
   kind: 'image';
   x: number;
   y: number;
@@ -87,6 +97,7 @@ export type DecalDoc = {
 /** Texture-friendly canvas presets (billboards leading — the user's ask). */
 export const DECAL_SIZE_PRESETS: { label: string; width: number; height: number }[] = [
   { label: 'billboard 512×256', width: 512, height: 256 },
+  { label: 'wall fit 3m 768×768', width: 768, height: 768 },
   { label: 'wide 1024×256', width: 1024, height: 256 },
   { label: 'square 512×512', width: 512, height: 512 },
   { label: 'poster 256×512', width: 256, height: 512 },
@@ -111,6 +122,17 @@ function str(v: unknown): string | null {
   return typeof v === 'string' ? v : null;
 }
 
+function numArray(v: unknown, maxLen: number): number[] | null {
+  if (!Array.isArray(v) || v.length > maxLen) return null;
+  const out: number[] = [];
+  for (const x of v) {
+    const n = Number(x);
+    if (!Number.isFinite(n)) return null;
+    out.push(n);
+  }
+  return out;
+}
+
 const MAX_DIM = 4096;
 const MAX_NODES = 256;
 
@@ -122,16 +144,23 @@ function validateNode(raw: any): DecalNode | null {
   const w = num(raw.w, 1, MAX_DIM);
   const h = num(raw.h, 1, MAX_DIM);
   if (id === null || x === null || y === null || w === null || h === null) return null;
-  const base = { id, x, y, w, h };
+  const name = raw.name === undefined ? undefined : str(raw.name);
+  if (name === null) return null;
+  const base = { id, name, hidden: raw.hidden === true ? true : undefined, x, y, w, h };
   const opacity = num(raw.opacity, 0, 1) ?? undefined;
   if (raw.kind === 'rect') {
     const bg = str(raw.bg);
     if (bg === null) return null;
+    const fillShaderId = raw.fillShaderId === undefined ? undefined : str(raw.fillShaderId);
+    const fillData = raw.fillData === undefined ? undefined : numArray(raw.fillData, 64);
+    if (fillShaderId === null || fillData === null) return null;
     return {
       ...base, kind: 'rect', bg,
       borderRadius: num(raw.borderRadius, 0, MAX_DIM) ?? undefined,
       borderWidth: num(raw.borderWidth, 0, 256) ?? undefined,
       borderColor: str(raw.borderColor) ?? undefined,
+      fillShaderId,
+      fillData,
       opacity,
     };
   }

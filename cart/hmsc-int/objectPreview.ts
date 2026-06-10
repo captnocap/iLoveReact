@@ -3,7 +3,7 @@
 // cart's top-left "in focus" panel (so a selected placement inspects correctly).
 
 import { emptyEditorWorld, placeWorldProp, fillTiles } from './editorWorld';
-import type { Building, GameState, TileKind, WorldProp } from '../hmsc/design';
+import type { Building, GameState, TileKind, WorldProp } from './design';
 import type { Focus } from './PropertiesPanel';
 
 // 'embedded' is the wall/door/bush profile group — built exactly like a tile

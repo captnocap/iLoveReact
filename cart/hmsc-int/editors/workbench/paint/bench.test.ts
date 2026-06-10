@@ -1,6 +1,6 @@
 // bench.test.ts — P4 behavior tests for the AGNOSTIC paint bench
-// (AGNOSTICPAINT-0606): target-open round-trip PER FAMILY (blank / image /
-// material / figure-part / vehicle-part / document / cutout) and MATERIALIZE
+// (AGNOSTICPAINT-0606): target-open round-trip PER FAMILY (blank / material /
+// figure-part / vehicle-part / document / cutout) and MATERIALIZE
 // routing per consumer (figure → characters channel + char adopt; vehicle →
 // vehicles channel; cutout asset → the material door; else → the library).
 // Headless: recorders stand in for every wire; the fake library channel
@@ -18,21 +18,41 @@ import { draftToDocument } from '../../characters/draft';
 import { generateCharacterDraft } from '../../characters/generate';
 import { applyBodyPaint } from '../../../game/figure/body';
 
-// a tiny real PaintDocument: one layer, left half of an 8×4 canvas painted
-function paintedDoc(): PaintDocument {
+function solidLayer(id: string, name: string, w: number, h: number): PaintDocument['layers'][number] {
+  return {
+    id, name, groupName: null,
+    config: { mode: 'solid', blend: 'normal', hueOffset: 0, phaseOffset: 0, muted: false, colors: ['#ff0000'], dim: 1 },
+    base: { w, h, rows: Array.from({ length: h }, () => [[Math.max(1, Math.floor(w / 2)), 1], [Math.max(0, w - Math.floor(w / 2)), 0]]) },
+    brush: null, clicks: [],
+  } as PaintDocument['layers'][number];
+}
+
+function imageLayer(path: string, name: string, w: number, h: number): PaintDocument['layers'][number] {
+  return {
+    id: 'img', name, groupName: 'image',
+    config: { mode: 'solid', blend: 'normal', hueOffset: 0, phaseOffset: 0, muted: false, colors: ['#ffffff'], dim: 1 },
+    image: { path, name, dims: { w, h } },
+    base: null, brush: null, clicks: [],
+  } as PaintDocument['layers'][number];
+}
+
+function paintDocWithLayers(w: number, h: number, layers: PaintDocument['layers']): PaintDocument {
   return {
     kind: PAINT_DOC_KIND, version: PAINT_DOC_VERSION,
-    dims: { w: 8, h: 4 },
-    layers: [{
-      id: 'A', name: 'A', groupName: null,
-      config: { mode: 'rainbow', blend: 'normal', hueOffset: 0, phaseOffset: 0, muted: false, colors: ['#ff0000'], dim: 0.85 },
-      base: { w: 8, h: 4, rows: [[[4, 1], [4, 0]], [[4, 1], [4, 0]], [[4, 1], [4, 0]], [[4, 1], [4, 0]]] },
-      brush: null, clicks: [],
-    }],
-    activeLayer: 0, tool: 'brush', mode: 'erase', brushPx: 8,
-    defaults: { mode: 'rainbow', colors: ['#ffffff'], hueOffset: 0, phaseOffset: 0, dim: 0.85 },
+    dims: { w, h }, layers,
+    activeLayer: layers.length - 1, tool: 'brush', mode: 'erase', brushPx: 8,
+    defaults: { mode: 'solid', colors: ['#ffffff'], hueOffset: 0, phaseOffset: 0, dim: 1 },
     customSurfaces: [],
   } as unknown as PaintDocument;
+}
+
+// a tiny real PaintDocument: one layer, left half of an 8×4 canvas painted
+function paintedDoc(): PaintDocument {
+  const w = 8, h = 4;
+  return paintDocWithLayers(w, h, [{
+    ...solidLayer('A', 'A', w, h),
+    config: { mode: 'rainbow', blend: 'normal', hueOffset: 0, phaseOffset: 0, muted: false, colors: ['#ff0000'], dim: 0.85 },
+  }]);
 }
 
 type Rec = {
@@ -44,7 +64,7 @@ type Rec = {
   notes: string[];
 };
 
-function rig(opts?: { bookSeed?: (book: CutoutDraftBook) => CutoutDraftBook; noFigures?: boolean }) {
+function rig(opts?: { bookSeed?: (book: CutoutDraftBook) => CutoutDraftBook; noFigures?: boolean; identify?: (path: string) => Promise<{ w: number; h: number } | null> }) {
   const rec: Rec = { lib: [], fig: [], veh: [], mat: [], adopt: [], notes: [] };
   let libState: CutoutStreamState = cutoutStream.initial();
   const figDoc = draftToDocument(generateCharacterDraft(7), 'alpha');
@@ -69,7 +89,7 @@ function rig(opts?: { bookSeed?: (book: CutoutDraftBook) => CutoutDraftBook; noF
     textureById: (id) => (id === 'brick' ? { id, label: 'Brick' } : null),
     catalogs: () => ({ materials: [{ id: 'custom:x', label: 'X' }], recipes: [{ id: 'brick', label: 'Brick' }] }),
     charAdopt: (docId) => rec.adopt.push({ docId }),
-    identify: null,
+    identify: opts?.identify ?? null,
     grayLoad: null,
     book: { read: () => book, write: (b) => { book = b; } },
     draftMs: 0,
@@ -89,6 +109,9 @@ function rig(opts?: { bookSeed?: (book: CutoutDraftBook) => CutoutDraftBook; noF
       return mask;
     },
     lookColors: () => ['#ff0000'],
+    addImageLayer: () => 0,
+    undo: () => {},
+    redo: () => {},
   };
   store.painterApi.current = api;
   return { store, rec, figures, vehicles, getBook: () => book, lib: () => libState };
@@ -176,6 +199,46 @@ test('MATERIALIZE routing: library save → extract → materialize → the mate
   assert(store.work.docId !== asset.id && store.work.initial !== null, 'a cutout opens as a fresh document with its layers');
 });
 
+test('IMGLAYER: open image adds a layer on the current target; paint above it saves and reopens in order', async () => {
+  let doc = paintDocWithLayers(16, 16, []);
+  const { store, rec } = rig({ identify: async () => ({ w: 16, h: 16 }) });
+  store.open({ kind: 'blank', w: 16, h: 16 });
+  const originalTarget = store.work.docId;
+  store.painterApi.current = {
+    buildDocument: () => doc,
+    composeExportMask: () => new Uint8Array(16 * 16),
+    lookColors: () => ['#ffffff'],
+    addImageLayer: (path, name, dims) => {
+      doc = paintDocWithLayers(16, 16, [
+        imageLayer(path, name, dims.w, dims.h),
+        { ...solidLayer('stroke', 'Paint over reference', 16, 16), base: null },
+      ]);
+      return 1;
+    },
+    undo: () => {},
+    redo: () => {},
+  };
+  await store.openImage('file:///tmp/reference%20face.png');
+  assertEqual(store.work.docId, originalTarget, 'opening an image keeps the current paint target');
+  assertEqual(store.work.srcPath, null, 'the image is not promoted to the target srcPath');
+
+  doc = paintDocWithLayers(16, 16, [
+    doc.layers[0],
+    solidLayer('stroke', 'Paint over reference', 16, 16),
+  ]);
+  store.onDirty();
+  store.saveCurrent();
+
+  const saved = rec.lib.find((r) => r.e.kind === 'saved')?.e;
+  assert(!!saved, 'the normal save path receives the document');
+  assertEqual(saved.doc.layers.length, 2, 'image layer + paint layer both persisted');
+  assertEqual(saved.doc.layers[0].image?.path, '/tmp/reference face.png', 'image layer path persists in the layer');
+  assertEqual(saved.doc.layers[1].name, 'Paint over reference', 'paint layer remains above the image');
+  assert(store.open({ kind: 'document', id: saved.id }), 'saved document reopens');
+  assertEqual(store.work.initial?.layers[0].image?.path, '/tmp/reference face.png', 'reload restores the image layer');
+  assertEqual(store.work.initial?.layers[1].name, 'Paint over reference', 'reload restores the stroke layer above');
+});
+
 test('roster row encoding round-trips every family', () => {
   const partFor = () => 'torso';
   const cases: PaintTarget[] = [
@@ -249,6 +312,9 @@ test('DRAFTHOLE: an empty painter can NEVER clobber a painted slot (the user\'s 
     buildDocument: () => ({ ...realDoc, layers: [] } as PaintDocument),
     composeExportMask: () => null,
     lookColors: () => [],
+    addImageLayer: () => 0,
+    undo: () => {},
+    redo: () => {},
   } as PainterApi;
   store.onDirty();
   const slot = getBook().slots[key];
@@ -273,7 +339,7 @@ test('DRAFTHOLE: a vanished model keeps its binding through the degrade — the 
   assert(!!healed.work.initial && healed.work.initial.layers.length > 0, 'nothing was lost across the whole episode');
 });
 
-test('IMGOPEN: every ingest door shares one path cleaner — quotes, file://, whitespace', () => {
+test('IMGOPEN: picker and drop share one path cleaner — quotes, file://, whitespace', () => {
   assertEqual(cleanImagePath('  /home/u/pic.png  '), '/home/u/pic.png', 'whitespace trims');
   assertEqual(cleanImagePath('"/home/u/my pic.png"'), '/home/u/my pic.png', 'shell quotes strip');
   assertEqual(cleanImagePath("'/home/u/pic.png'"), '/home/u/pic.png', 'single quotes strip');

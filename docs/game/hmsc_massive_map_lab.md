@@ -2,7 +2,7 @@
 
 **Cart file:** `cart/hmsc_massive_map_lab.tsx` (single file, ~780 lines)
 **Ship:** `./scripts/ship hmsc_massive_map_lab`
-**Imports from the hmsc game:** `cart/hmsc/render3d/PlayerFigure.tsx`, `cart/hmsc/render3d/humanoid/face.tsx` (`HumanoidFaceCaptures`), `cart/hmsc/world/scale.ts` (`HMSC_SCALE`)
+**Imports from the hmsc game:** `cart/hmsc-int/render3d/PlayerFigure.tsx`, `cart/hmsc-int/render3d/humanoid/face.tsx` (`HumanoidFaceCaptures`), `cart/hmsc-int/world/scale.ts` (`HMSC_SCALE`)
 
 ## What it is, in one sentence
 
@@ -57,7 +57,7 @@ The panel cross-checks **host fps (Zig-measured) vs "raf fps" (JS-loop-measured)
 
 ## Player figure integration
 
-`<PlayerFigure position={focus} yawDegrees animationSeconds={Date.now()/1000} moving={false}>` — the shared hmsc humanoid (skeleton/pose/palette in `cart/hmsc/render3d/humanoid/`), same model as the game and every NPC. Per its contract, the cart also mounts `<HumanoidFaceCaptures />` (`humanoid/face.tsx:218`) as a 2D sibling of the Scene3D — the offscreen StaticSurface bakes whose keys the figure's head decal samples (the same StaticSurface→textureKey bridge documented in `docs/game/billboard_demo.md`). `animationSeconds` only advances when something re-renders — fine here since the figure never `moving`.
+`<PlayerFigure position={focus} yawDegrees animationSeconds={Date.now()/1000} moving={false}>` — the shared hmsc humanoid (skeleton/pose/palette in `cart/hmsc-int/render3d/humanoid/`), same model as the game and every NPC. Per its contract, the cart also mounts `<HumanoidFaceCaptures />` (`humanoid/face.tsx:218`) as a 2D sibling of the Scene3D — the offscreen StaticSurface bakes whose keys the figure's head decal samples (the same StaticSurface→textureKey bridge documented in `docs/game/billboard_demo.md`). `animationSeconds` only advances when something re-renders — fine here since the figure never `moving`.
 
 ## What this cart does NOT use
 

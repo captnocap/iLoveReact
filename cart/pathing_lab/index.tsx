@@ -39,8 +39,8 @@ import { buildPartRender, CharacterCaptures, FigureMeshes, type PartRender } fro
 import { buildVehicle, geometryFor, makeVehicle, VEHICLE_STYLES, type VehicleDoc } from '../vehicle_lab/index';
 import type { SampledAction } from '../animationDsl';
 import { measurePath, planMotion, sampleMotion, slicePoints, type MotionPlan, type MotionProfile } from '@reactjit/runtime/motion';
-import { TILE_KINDS, tileKindDefinition, type TileKind } from '../hmsc/world/tileKinds';
-import { TRAFFIC_SIGNAL_CYCLE, trafficClockSeconds } from '../hmsc/world/traffic';
+import { TILE_KINDS, tileKindDefinition, type TileKind } from '../hmsc-int/world/tileKinds';
+import { TRAFFIC_SIGNAL_CYCLE, trafficClockSeconds } from '../hmsc-int/world/traffic';
 import {
   publishPathGrid, setPathProfile, setPathFlows, PATH_FLOW, findPath, fillPathRect, pathDisrupted, pathGeneration,
   type Path, type PathPoint,

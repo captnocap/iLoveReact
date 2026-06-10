@@ -28,7 +28,7 @@ import type { PerceptionState } from '../design';
 import { skinCapturePx, skinGridCols, skinGridFloors } from './buildingSkins';
 // The legacy renderer reads the captured ground floor's registry — the same
 // direction the V15 compile contract points (hmsc consumes hmsc-int's output).
-import { TextureCapture, textureById } from '../../hmsc-int/game/textures/registry';
+import { TextureCapture, textureById } from '../game/textures/registry';
 
 export type Vec3 = [number, number, number];
 

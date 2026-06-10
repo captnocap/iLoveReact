@@ -177,10 +177,13 @@ const CAMERA_OCCLUSION_RECT_FLOATS = RECT_FLOATS + 1;
 const CAMERA_OCCLUSION_ORIENTED_FLOATS = ORIENTED_FLOATS + 1;
 const CAMERA_OCCLUSION_MAX_HITS = 64;
 
-/** Host hard caps — exceeding one is a caller bug, surfaced at the boundary. */
+/** Host hard caps — exceeding one is a caller bug, surfaced at the boundary.
+ *  Must mirror framework/game/physics.zig (MAX_RECTS / MAX_ORIENTED / MAX_ENTITIES).
+ *  rects raised to 16384: a built-out city overran 4096, dropping the tail of
+ *  recently-placed structures' colliders (walk-through walls). */
 export const PHYSICS_LIMITS = Object.freeze({
   bodies: 128,
-  rects: 4096,
+  rects: 16384,
   orientedRects: 256,
 });
 

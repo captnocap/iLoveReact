@@ -23,7 +23,7 @@
 //   and derives distance/height from (radius * factor + base) — so the framing
 //   tracks the world while the ANGLE/FOV/reach stay authored data.
 
-import type { HmscSky } from '../../hmsc/render3d/sky';
+import type { HmscSky } from '../render3d/sky';
 
 export const SCENE_ENV_VERSION = 1;
 export const SCENE_ENV_FLOATS = 35;

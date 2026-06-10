@@ -97,7 +97,7 @@ Docs: physics_lab, physics3d, combat_lab, hmsc (consumes `__hmsc_physics_step` v
 Named like serious framework physics (Bullet 3.25 rigid bodies); **wired to nothing** — never compiled in `build.zig`, no Node fields, no JS primitive, no host fn. Its own header comment describes `<3D.Physics>` and `Node.physics3d_world_id` that **do not exist** (Smith-era aspirational drift). The one collider hmsc needed — heightfield — is the one case it stubs to `null`.
 Docs: physics3d (entire doc), ragdoll_lab + head_lab (cite it as the dead module justifying Verlet-in-cart).
 
-### 2.3 `cart/hmsc/labs/ScaleLabScene.tsx` — orphaned near-verbatim copy, already drifted
+### 2.3 `cart/hmsc-int/labs/ScaleLabScene.tsx` — orphaned near-verbatim copy, already drifted
 A `*Scene.tsx` in hmsc's `labs/` re-implements the whole `hmsc_scale_lab` cart scene (MeterBlock/HeightLine/RulerTick/DoorFrame…), **imported by nothing**, and has already drifted (purple height line uses `PLAYER_VISUAL_TOTAL_HEIGHT 2.45m` where the cart uses `PLAYER_VISUAL_HEAD_TOP 2.04m`). Same name, same shapes, divergent values, no canonical owner.
 Docs: hmsc_scale_lab (the find), hmsc (lists `labs/ScaleLabScene.tsx` as live).
 
@@ -188,7 +188,7 @@ Because `Scene3D` has no parent/child transform nesting, multiple carts hand-rol
 Docs: physics_lab, game_item_gallery, animation_lab, ragdoll_lab.
 
 ### 3.10 fillShader.ts canonical-copy-but-authored-elsewhere
-`cart/hmsc/render3d/fillShader.ts` is the canonical WGSL but authored in `effect_fills`; the board/material **seed coefficients are duplicated** (`fillData` in effect_fills vs `seedCoef` in textureShaders.ts) as a two-copy hand-synced invariant. Material-name tables exist in 3 copies (index.tsx, textureShaders.ts FILL_BOARDS, CATALOG.md).
+`cart/hmsc-int/render3d/fillShader.ts` is the canonical WGSL but authored in `effect_fills`; the board/material **seed coefficients are duplicated** (`fillData` in effect_fills vs `seedCoef` in textureShaders.ts) as a two-copy hand-synced invariant. Material-name tables exist in 3 copies (index.tsx, textureShaders.ts FILL_BOARDS, CATALOG.md).
 Docs: effect_fills, hmsc.
 
 ---
@@ -282,7 +282,7 @@ Renames, extractions, taxonomy fixes, and loud-status-comment additions. Ordered
 2. **Mark `framework/phys/physics3d.zig` DORMANT loudly** — top-of-file banner `// DORMANT: never compiled, never wired. The header below describing <3D.Physics>/Node.physics3d_world_id is Smith-era fiction — those do not exist.` Or rename to `bullet3d_dormant.zig`. Delete-vs-keep is a user decision; either way the aspirational header comment must go. (physics3d)
 3. **Rename `cart/hmsc-int/MapCanvas.tsx` reference in its own `AGENTS.md`** to `PaintCanvas.tsx` (the file already renamed; the contract lags). (hmsc-int)
 4. **Add a loud "LIVE PRODUCTION, despite the name" comment** to `v8_bindings_input_bench.zig`'s movement integrator and `__bench_now_us`, since animation_lab/physics_lab depend on them as production. (animation_lab, input_bench, physics_lab)
-5. **Reconcile the `ScaleLabScene.tsx` orphan**: either delete `cart/hmsc/labs/ScaleLabScene.tsx` or make it the single shared scene `hmsc_scale_lab.tsx` imports — it has already drifted (2.04 vs 2.45). (hmsc_scale_lab, hmsc)
+5. **Reconcile the `ScaleLabScene.tsx` orphan**: either delete `cart/hmsc-int/labs/ScaleLabScene.tsx` or make it the single shared scene `hmsc_scale_lab.tsx` imports — it has already drifted (2.04 vs 2.45). (hmsc_scale_lab, hmsc)
 6. **Fix or delete stale comments**: ragdoll_lab `car.tsx` header ("pathing_lab drives fleets"), pixel_icon_gallery's y-inversion header + SCALES "1/2/3/4", massive_map_lab's `meshCap 8192`/`nodeIndexCap 4096` panel labels. (ragdoll_lab, pixel_icon_gallery, hmsc_massive_map_lab)
 
 ### Extractions (kill duplication)

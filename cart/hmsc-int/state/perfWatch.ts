@@ -90,7 +90,32 @@ type FrameRecord = {
   gpuUs: number;
   totalUs: number;
   frameNumber: number;
+  // Outside-render attribution, measured host-side at real boundaries (see
+  // framework/v8_gc_shim.cpp, gpu.zig present timing, v8_runtime bridge timing).
+  // These let the classifier name the ONE cause instead of guessing GC/native.
+  gcNs: number; // V8 GC wall-time this frame in NANOSECONDS (sub-µs honest)
+  gcCount: number; // GC invocations this frame — 0 means the GC never fired (vs tiny)
+  gcType: number; // GCType bitmask: 1 scavenge, 2 minor-ms, 4 mark-sweep, 8 incremental, 16 weak
+  presentUs: number; // vsync/present wait — a subset of gpuUs
+  bridgeUs: number; // Zig→JS crossings (app tick + events) — lives in `other`
 };
+
+function frameRecordFrom(f: any): FrameRecord {
+  return {
+    fps: Number(f.fps) || 0,
+    tickUs: Number(f.tick_us) || 0,
+    layoutUs: Number(f.layout_us) || 0,
+    paintUs: Number(f.paint_us) || 0,
+    gpuUs: Number(f.gpu_us) || 0,
+    totalUs: Number(f.frame_total_us) || 0,
+    frameNumber: Number(f.frame_number) || 0,
+    gcNs: Number(f.gc_ns) || 0,
+    gcCount: Number(f.gc_count) || 0,
+    gcType: Number(f.gc_type) || 0,
+    presentUs: Number(f.present_us) || 0,
+    bridgeUs: Number(f.bridge_us) || 0,
+  };
+}
 
 function readFrameRecord(): FrameRecord | null {
   const fn = hostFn('__tel_frame');
@@ -98,18 +123,46 @@ function readFrameRecord(): FrameRecord | null {
   try {
     const f = fn();
     if (!f) return null;
-    return {
-      fps: Number(f.fps) || 0,
-      tickUs: Number(f.tick_us) || 0,
-      layoutUs: Number(f.layout_us) || 0,
-      paintUs: Number(f.paint_us) || 0,
-      gpuUs: Number(f.gpu_us) || 0,
-      totalUs: Number(f.frame_total_us) || 0,
-      frameNumber: Number(f.frame_number) || 0,
-    };
+    return frameRecordFrom(f);
   } catch {
     return null;
   }
+}
+
+// GAP-2: read the FULL frame record for history depth n (0 = current, newest
+// first — same indexing as __tel_history). Lets flush() pull the SPIKE frame's
+// latched buckets instead of the recovered current frame. null past the ring or
+// when the host fn isn't registered (older host → caller falls back to current).
+function readFrameRecordAt(n: number): FrameRecord | null {
+  const fn = hostFn('__tel_frame_at');
+  if (!fn) return null;
+  try {
+    const f = fn(n);
+    if (!f) return null;
+    return frameRecordFrom(f);
+  } catch {
+    return null;
+  }
+}
+
+// GAP-2: find the LATCHED snapshot of the worst frame, matched by its total time
+// rather than a raw ring index. The host ring (per-frame buckets) advances a few
+// frames between when the tape was sampled and now (host ~240Hz, JS tick ~60Hz),
+// so an index would drift. The worst frame's total_us is a fingerprint that's
+// still in the ring (120 frames ≈ 0.5s; flush runs within ~16ms), so we scan and
+// match it — that frame's gc/present/bridge are exactly what fired during it.
+// Returns null when the host fn is absent (older host) → caller uses current.
+function findSpikeFrameRecord(worstUs: number, depth: number): FrameRecord | null {
+  if (!hostFn('__tel_frame_at')) return null;
+  const target = Math.round(worstUs);
+  let nearest: FrameRecord | null = null;
+  for (let n = 0; n <= depth; n++) {
+    const r = readFrameRecordAt(n);
+    if (!r) break; // past the ring's filled range
+    if (Math.round(r.totalUs) === target) return r; // exact spike frame
+    if (!nearest || r.totalUs > nearest.totalUs) nearest = r; // best-effort fallback
+  }
+  return nearest;
 }
 
 // Flat snapshot of the counters worth diffing across a spike. Everything here
@@ -169,6 +222,55 @@ function us(value: number): string {
   return value >= 1000 ? `${(value / 1000).toFixed(2)}ms` : `${value.toFixed(0)}us`;
 }
 
+// Decode V8's GCType bitmask into the human name. A single GC reports one bit;
+// the host records the type of the GC whose pause it timed.
+function gcTypeName(t: number): string {
+  if (t & 4) return 'mark-sweep'; // kGCTypeMarkSweepCompact — the expensive full GC
+  if (t & 8) return 'incremental'; // kGCTypeIncrementalMarking
+  if (t & 2) return 'minor mark-sweep'; // kGCTypeMinorMarkSweep
+  if (t & 1) return 'scavenge'; // kGCTypeScavenge — cheap young-gen
+  if (t & 16) return 'weak-callbacks'; // kGCTypeProcessWeakCallbacks
+  return 'unknown';
+}
+
+// GC time, kept sub-µs honest: nanoseconds for a tiny scavenge, µs / ms as it
+// grows. A floored-to-µs "0us" is the value-ambiguity we are removing.
+function formatGcTime(gcNs: number): string {
+  if (gcNs >= 1_000_000) return `${(gcNs / 1_000_000).toFixed(2)}ms`;
+  if (gcNs >= 1_000) return `${(gcNs / 1_000).toFixed(1)}µs`;
+  return `${Math.round(gcNs)}ns`;
+}
+
+// The GC bucket label. The count is the disambiguator: "×0, never fired" means
+// the binding produced nothing (chase the registration); "×3" means it fired
+// and the time — however tiny — is real.
+function gcLabel(gcNs: number, gcCount: number, gcType: number): string {
+  if (gcCount <= 0) return 'V8 GC — (×0, never fired)';
+  return `V8 GC ${formatGcTime(gcNs)} (${gcTypeName(gcType)} ×${gcCount})`;
+}
+
+// Name the single largest measured contributor to the outside-render ("other")
+// time. No guessing: GC is measured at V8's callbacks, bridge at the Zig→JS
+// boundary, and whatever neither covers is reported as its own explicit
+// UNATTRIBUTED bucket (genuinely native: terminal/PTY/physics/scheduling).
+function attributeOutside(gcNs: number, gcCount: number, gcType: number, bridgeUs: number, unattributedUs: number): string {
+  const gcUs = gcNs / 1000;
+  const candidates: Array<[string, number]> = [
+    [gcLabel(gcNs, gcCount, gcType), gcUs],
+    [`NATIVE BRIDGE ${us(bridgeUs)} — Zig→JS app tick / event dispatch`, bridgeUs],
+    [`UNATTRIBUTED ${us(unattributedUs)} — native (terminal/PTY/physics/scheduling); not GC, not bridge, not present`, unattributedUs],
+  ];
+  candidates.sort((a, b) => b[1] - a[1]);
+  const [label, val] = candidates[0];
+  if (val <= 0) {
+    // Everything measured read ~0. Still distinguish "GC fired but tiny" from
+    // "GC never fired" so the reader knows the binding is alive.
+    const gcNote = gcCount > 0 ? ` (GC fired ${formatGcTime(gcNs)} ×${gcCount})` : '';
+    return `WHAT FIRED: outside-render time but every boundary timer read ~0 — sub-microsecond scheduling jitter, nothing actionable.${gcNote}`;
+  }
+  return `WHAT FIRED: ${label}.`;
+}
+
 // ── Classify ─────────────────────────────────────────────────────────────
 // Turn the phase breakdown + counter deltas into ONE plain-English verdict of
 // what kind of event the spike was, so the report names the cause instead of
@@ -190,9 +292,20 @@ function classifySpike(record: FrameRecord | null, calm: Counters, spike: Counte
   // Phase dominance is only trustworthy when __tel_frame actually carries the
   // spike frame (not a recovered post-spike read).
   const caught = record != null && record.totalUs > baselineForCaught(record);
+  // Outside-render ("other") time and its MEASURED components. bridgeUs (Zig→JS)
+  // is the one measured timer that lives in `other`; GC is frame-wide; present
+  // is inside the gpu phase. unattributedUs is whatever the bridge timer doesn't
+  // cover — genuinely native (terminal/PTY/physics/scheduling).
+  const otherUs = record ? Math.max(0, record.totalUs - (record.tickUs + record.layoutUs + record.paintUs + record.gpuUs)) : 0;
+  const gcNs = record?.gcNs ?? 0;
+  const gcUs = gcNs / 1000;
+  const gcCount = record?.gcCount ?? 0;
+  const gcType = record?.gcType ?? 0;
+  const presentUs = record?.presentUs ?? 0;
+  const bridgeUs = record?.bridgeUs ?? 0;
+  const unattributedUs = Math.max(0, otherUs - bridgeUs);
   let dominant = 'unknown';
   if (record) {
-    const otherUs = Math.max(0, record.totalUs - (record.tickUs + record.layoutUs + record.paintUs + record.gpuUs));
     const phases: Array<[string, number]> = [
       ['paint', record.paintUs], ['gpu', record.gpuUs], ['tick', record.tickUs],
       ['layout', record.layoutUs], ['other', otherUs],
@@ -214,28 +327,41 @@ function classifySpike(record: FrameRecord | null, calm: Counters, spike: Counte
       ? 'WHAT FIRED: REPAINT / CAPTURE RE-BAKE — paint-dominant with the 2D hash flipped → a StaticSurface re-rendered its shader and/or the draw buffer re-uploaded.'
       : 'WHAT FIRED: CAPTURE RE-BAKE — heavy CPU paint with NO tree/hash change → a StaticSurface re-rendered its shader (its captured subtree got re-stamped).';
   }
+  // V8 GC is measured frame-wide at the isolate's prologue/epilogue callbacks,
+  // so it can inflate ANY phase (a GC during __jsTick lands in `other`; during a
+  // reconcile commit it lands in tick). If the measured pause is a big slice of
+  // the frame, name it definitively with type — this is the headline the user
+  // wanted ("V8 GC 11.3ms (mark-sweep)") instead of guessing.
+  if (record && gcCount > 0 && gcUs > 1500 && gcUs >= record.totalUs * 0.4) {
+    const pct = ((100 * gcUs) / Math.max(1, record.totalUs)).toFixed(0);
+    return `WHAT FIRED: ${gcLabel(gcNs, gcCount, gcType)} — measured at V8's GC prologue/epilogue callbacks; ${pct}% of the frame was this pause.`;
+  }
   if (caught && dominant === 'gpu') {
-    // The gpu phase is the present/vsync WAIT, not GPU compute. If the CPU
-    // phases are tiny, this is just the frame capped at the display refresh
-    // (≈16.6ms at 60Hz, ≈4.2ms at 240Hz) — idle, not a stall. Only call it real
-    // GPU work when draw calls actually moved.
-    const cpuUs = record ? record.tickUs + record.layoutUs + record.paintUs : 0;
-    if (cpuUs < 1500 && drawSwing < 3) {
-      return 'WHAT FIRED: VSYNC / PRESENT WAIT — gpu-phase = waiting for the display vblank with ~no CPU work. This is the refresh cap (60Hz→16.6ms, 240Hz→4.2ms), not a stall. Expected on a 60Hz monitor.';
+    // present_us is the MEASURED swapchain acquire+present wait (a subset of the
+    // gpu phase). If it accounts for most of the gpu phase, the frame was simply
+    // vblank-capped (idle), not stalled. Otherwise the gpu time was real
+    // encode/upload/draw work.
+    const presentDominant = presentUs >= record!.gpuUs * 0.6;
+    const computeUs = Math.max(0, record!.gpuUs - presentUs);
+    if (presentDominant) {
+      return `WHAT FIRED: VSYNC / PRESENT WAIT ${us(presentUs)} — measured wait on swapchain acquire + present (display vblank). Not a stall; the frame was idle-capped at the refresh rate (${computeUs > 0 ? `${us(computeUs)} actual GPU work` : 'no GPU work'}).`;
     }
-    return `WHAT FIRED: GPU DRAW/UPLOAD — gpu-phase bound${drawSwing ? ` (draw calls ${delta('scene3d_draw_calls') >= 0 ? '+' : ''}${delta('scene3d_draw_calls')})` : ''}.`;
+    return `WHAT FIRED: GPU DRAW/UPLOAD ${us(computeUs)} compute + ${us(presentUs)} present wait${drawSwing ? ` (draw calls ${delta('scene3d_draw_calls') >= 0 ? '+' : ''}${delta('scene3d_draw_calls')})` : ''}.`;
   }
   if (caught && dominant === 'tick') {
     return 'WHAT FIRED: TICK — JS reconcile / game logic dominated this frame, not rendering.';
   }
   if (caught && dominant === 'other') {
-    return 'WHAT FIRED: GC / NATIVE — time outside every render phase (V8 GC, vsync wait, or native bridge). Not our draw tree.';
+    // No more "GC / native / vsync — could be one of three." Each is measured;
+    // name the largest, with an explicit UNATTRIBUTED bucket for what's left.
+    return attributeOutside(gcNs, gcCount, gcType, bridgeUs, unattributedUs);
   }
   if (hashFlipped) {
     return 'WHAT FIRED: REPAINT — 2D draw data changed (hash flip) with no tree change → full 2D buffer re-upload from an inline-prop / animated-value churn.';
   }
   if (nodeSwing === 0 && glyphSwing === 0 && !hashFlipped) {
-    return 'WHAT FIRED: GC / NATIVE — nothing in our counters moved → V8 GC / native / driver hitch, not our JS or draw tree.';
+    // Nothing in our draw counters moved — but we MEASURED where the time went.
+    return attributeOutside(gcNs, gcCount, gcType, bridgeUs, unattributedUs);
   }
   return 'WHAT FIRED: UNCLEAR — spike likely already recovered; trust the deltas below over the phase line.';
 }
@@ -249,7 +375,12 @@ function baselineForCaught(record: FrameRecord): number {
 // One spike → one multi-line report on the console. The shape is built to be
 // scanned top-to-bottom: what fired, how bad, which phase, what moved, the tape.
 function flush(history: number[], baselineUs: number, worstUs: number, calm: Counters): void {
-  const record = readFrameRecord();
+  // GAP-2: prefer the LATCHED snapshot of the actual worst frame (its buckets
+  // are what fired during the spike), falling back to the current frame only
+  // when the host can't supply it (older host / rolled off the ring).
+  const spikeFrame = findSpikeFrameRecord(worstUs, Math.min(history.length + 8, 120));
+  const record = spikeFrame ?? readFrameRecord();
+  const latched = spikeFrame != null;
   const spikeCounters = readCounters();
 
   const lines: string[] = [];
@@ -263,20 +394,28 @@ function flush(history: number[], baselineUs: number, worstUs: number, calm: Cou
   if (record) {
     const known = record.tickUs + record.layoutUs + record.paintUs + record.gpuUs;
     const other = Math.max(0, record.totalUs - known);
-    // Is `record` actually the spike frame, or did we read after it recovered?
-    // __tel_frame only carries the latest frame, so label which we caught and,
-    // when caught, name the dominant phase (paint = CPU raster / atlas rebuild;
-    // gpu = buffer upload/draw).
-    const caughtSpike = record.totalUs > baselineUs * 1.5;
+    // With the latched frame we KNOW we have the spike frame (matched by total
+    // time in the host ring). Without it, we fell back to the recovered current
+    // frame and say so. Name the dominant phase either way.
     const dominant = record.paintUs >= record.gpuUs ? 'paint (CPU raster / atlas)' : 'gpu (upload/draw)';
     lines.push(
-      caughtSpike
-        ? `SPIKE FRAME CAUGHT — dominant phase: ${dominant}`
-        : 'spike already recovered; phases below are a post-spike frame (worst frame came from the tape)',
+      latched
+        ? `SPIKE FRAME CAUGHT (latched from host ring) — dominant phase: ${dominant}`
+        : 'spike already recovered; phases below are the post-spike current frame (host latch unavailable)',
     );
     lines.push(
-      `latest frame phases: tick ${us(record.tickUs)}  layout ${us(record.layoutUs)}  ` +
+      `${latched ? 'spike' : 'current'} frame phases: tick ${us(record.tickUs)}  layout ${us(record.layoutUs)}  ` +
         `paint ${us(record.paintUs)}  gpu ${us(record.gpuUs)}  other ${us(other)}  (total ${us(record.totalUs)})`,
+    );
+    // Outside-render breakdown, each MEASURED at its real boundary (not inferred
+    // by subtraction). The buckets sum honestly: bridge + unattributed ≈ other
+    // (present is inside the gpu phase, GC is frame-wide and may overlap any).
+    const unattributed = Math.max(0, other - record.bridgeUs);
+    lines.push(
+      `outside-render attribution: ${gcLabel(record.gcNs, record.gcCount, record.gcType)} (frame-wide)  |  ` +
+        `present/vsync ${us(record.presentUs)} (within gpu)  |  ` +
+        `bridge ${us(record.bridgeUs)} (Zig→JS, within other)  |  ` +
+        `unattributed ${us(unattributed)} (native, within other)`,
     );
   }
 
@@ -298,7 +437,7 @@ function flush(history: number[], baselineUs: number, worstUs: number, calm: Cou
       lines.push('  ^ frame_hash flipped → 2D draw data changed → full GPU re-upload (a React commit / StaticSurface rebake landed this frame).');
     }
   } else {
-    lines.push('changed across spike: nothing in our counters moved → GC / native / GPU-driver hitch, not our JS or draw tree.');
+    lines.push('changed across spike: nothing in our draw counters moved — see the outside-render attribution line above for the measured cause (GC / present / bridge / native).');
   }
 
   // Flight-recorder tape: recent frame times newest-first, in ms, so the shape

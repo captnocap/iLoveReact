@@ -159,6 +159,16 @@ half-depth to the outer face. L-corners and T-junctions are covered in
 `placed.test.ts`: raw placed bounds log the 0.125m sliver, joined bands close
 the outer faces exactly, and standalone floor/wall placement stays unchanged.
 
+## REQ-0472 (2026-06-10): supported wall joins stop at the real intersection
+
+USER DRAWING: after wall thickness started sitting fully on a one-sided floor,
+the old join extender still assumed the perpendicular wall was centered on its
+authored line. That pushed the joined run 0.125m past the second intersection
+face. Fix: wall join limits now read the perpendicular wall's actual
+`placedPieceDepthSpan` in world space. Unsupported centered walls still extend
+to close REQ-0109 notches; floor-supported one-sided walls stop at the real
+supported face. Covered by `REQ-0472` in `placed.test.ts`.
+
 ## SMARTSEL-0605 (2026-06-05): one click grabs the connected shape
 
 USER ASK: select many pieces, save the whole shape as one prefab, plus a

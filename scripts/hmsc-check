@@ -19,7 +19,7 @@ cd "$ROOT"
 mkdir -p "$ROOT/.cache"
 OUT="$ROOT/.cache/hmsc-world-check.js"
 
-"$ROOT/tools/esbuild" cart/hmsc/tools/runWorldScript.ts \
+"$ROOT/tools/esbuild" cart/hmsc-int/tools/runWorldScript.ts \
   --bundle --format=iife --platform=neutral --target=es2022 \
   --outfile="$OUT" --log-level=warning
 

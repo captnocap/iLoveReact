@@ -11,7 +11,7 @@
 // Key = `${cat}:${kind}` (e.g. 'building:parkingGarage', 'prop:streetSign'); value
 // = a partId → textureId map (the same render3d/parts.tsx shape an instance carries).
 
-import { hmscStoreGet, hmscStoreSet } from '../hmsc/state/gameState';
+import { hmscStoreGet, hmscStoreSet } from './state/gameState';
 import { busOn, busEmit } from '@reactjit/hooks/useIFTTT';
 import { useEffect, useState } from 'react';
 

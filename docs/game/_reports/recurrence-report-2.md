@@ -123,7 +123,7 @@ Cases where a filename or directory placement misleads a future reader about liv
 
 ### 2.1 `framework/v8_bindings_physics_lab.zig` is the LIVE production physics backend (GOLD STANDARD)
 
-The filename reads as throwaway lab glue. It actually contains **the live hmsc physics backend**: `__hmsc_physics_step`, `__hmsc_register_heightfield`, `__hmsc_clear_heightfields`, `__hmsc_spike_trace` — consumed in production by `cart/hmsc/state/hostPhysics.ts`. The lab-specific fns (`__physics_lab_*`) are a minority cohabitant. `physics_lab.md` states it outright: "`framework/v8_bindings_physics_lab.zig` ... has since grown into the **real hmsc physics backend**." `physics3d.md` confirms it as "what actually does 3D physics in the game today." `hmsc.md` lists these host fns as load-bearing. **Recommendation in §6.**
+The filename reads as throwaway lab glue. It actually contains **the live hmsc physics backend**: `__hmsc_physics_step`, `__hmsc_register_heightfield`, `__hmsc_clear_heightfields`, `__hmsc_spike_trace` — consumed in production by `cart/hmsc-int/state/hostPhysics.ts`. The lab-specific fns (`__physics_lab_*`) are a minority cohabitant. `physics_lab.md` states it outright: "`framework/v8_bindings_physics_lab.zig` ... has since grown into the **real hmsc physics backend**." `physics3d.md` confirms it as "what actually does 3D physics in the game today." `hmsc.md` lists these host fns as load-bearing. **Recommendation in §6.**
 
 ### 2.2 `framework/phys/physics3d.zig` looks like serious framework physics but is fully DORMANT
 
@@ -135,7 +135,7 @@ The directory placement (`framework/phys/`) and name imply the canonical 3D phys
 
 Named for input benchmarking, but `animation_lab.md` documents the cart driving its **drive-mode movement** through `__input_bench_*` host fns ("Input bench: Zig-side WASD movement backend originally from input benchmarking, reused here for drive mode"). A reader would assume it's only the input_bench cart's harness; it's a general movement integrator. Lower severity (it really is also the bench backend) but the name hides a second consumer.
 
-### 2.4 `cart/hmsc/labs/ScaleLabScene.tsx` — an orphaned, drifted near-copy presenting as a live scene
+### 2.4 `cart/hmsc-int/labs/ScaleLabScene.tsx` — an orphaned, drifted near-copy presenting as a live scene
 
 `hmsc_scale_lab.md` flags it: a near-verbatim copy of the standalone `hmsc_scale_lab.tsx` scene, offset for embedding, **imported by nothing** (grep: zero consumers), and already drifted (purple height line uses `PLAYER_VISUAL_TOTAL_HEIGHT` 2.45m where the cart uses `PLAYER_VISUAL_HEAD_TOP` 2.04m). Its `labs/` placement implies it's the in-game scale lab; it's dead code with a divergent constant.
 
@@ -166,7 +166,7 @@ Several carts keep `_old` snapshots in-tree, not imported by the active path: `c
 
 This is the single biggest convergence candidate in the corpus (every figure-drawing doc flags it).
 
-1. **hmsc's `cart/hmsc/render3d/humanoid/`** — fixed primitive parts, baked face decals, 6 **capsule** hit zones, palette recolors, NO physics. `drivePose`/`solveHumanoid`/`Figure`. Used by: hmsc game, hmsc_scale_lab, hmsc_massive_map_lab, combat_lab (damage table). Docs: `hmsc.md`, `hmsc_scale_lab.md`, `hmsc_massive_map_lab.md`.
+1. **hmsc's `cart/hmsc-int/render3d/humanoid/`** — fixed primitive parts, baked face decals, 6 **capsule** hit zones, palette recolors, NO physics. `drivePose`/`solveHumanoid`/`Figure`. Used by: hmsc game, hmsc_scale_lab, hmsc_massive_map_lab, combat_lab (damage table). Docs: `hmsc.md`, `hmsc_scale_lab.md`, `hmsc_massive_map_lab.md`.
 2. **head_lab's `cart/head_lab/parts.ts` + `figureRender.tsx`** — sculptable Globe parts, `.hed` faces, 25 named bones, oriented-**box** hitboxes, full clothing/accessory system, Verlet ragdoll. `buildSkeleton`/`buildRigFrameFromBones`/`FigureMeshes`. Used by: head_lab, planet_run, ragdoll_lab, combat_lab, pathing_lab. Docs: `head_lab.md`, `ragdoll_lab.md`, `planet_run.md`, `pathing_lab.md`, `combat_lab.md`.
 3. **bodylab's `cart/bodylab/humanoid.tsx`** — its own `drivePose`/`solveHumanoid`/`HumanoidFigure` (same names as #1, different file) plus near-identical math helpers (`rotateY`/`rotateX`/`orient`/`segmentPose`). Doc: `bodylab.md`.
 4. **The inline/copied parts-array figures** — `animation_lab.tsx` (inline `AnimatedFigure` + `poseFor` + `segmentPose`), `camera_lab.tsx` (`HUMANOID` 18-part array), `input_bench/scene.tsx` (`Figure` "humanoid part table copied from camera_lab"). Plus `Geometry.Humanoid` (the single baked registry mesh) used only by camera_lab. Docs: `animation_lab.md`, `camera_lab.md`, `input_bench.md`.
@@ -261,7 +261,7 @@ Capabilities living in exactly one cart that closely follow a recurring shape an
 1. **Split `framework/v8_bindings_physics_lab.zig`.** Move the production `__hmsc_*` host fns into `framework/v8_bindings_hmsc_physics.zig` (honest: this is the live game backend) and leave only the `__physics_lab_*` cohabitant in a renamed `v8_bindings_physics_lab.zig` (honestly a lab toy). Cited gold-standard fix; `physics3d.md` + `physics_lab.md` + `hmsc.md` all describe the conflation.
 2. **Mark `framework/phys/physics3d.zig` DORMANT loudly, or rename it `bullet3d_dormant.zig`.** Add a loud top-of-file status banner ("WIRED TO NOTHING — see docs/game/physics3d.md") and delete the aspirational `<3D.Physics>`/`Node.physics3d_world_id` header comment that describes nonexistent wiring. `physics3d.md` lays out the full decision (revive vs delete) — that's a user call, but the loud-status comment is unconditional.
 3. **Rename or alias `v8_bindings_input_bench.zig`'s movement role.** At minimum a header note that `__input_bench_*` is the reused drive-movement integrator for animation_lab, not just the bench (`animation_lab.md`).
-4. **Reconcile `cart/hmsc/labs/ScaleLabScene.tsx`** — delete the orphan or make it the shared source both `hmsc_scale_lab.tsx` and any in-game embed import (`hmsc_scale_lab.md`), eliminating the 2.45m/2.04m disagreement.
+4. **Reconcile `cart/hmsc-int/labs/ScaleLabScene.tsx`** — delete the orphan or make it the shared source both `hmsc_scale_lab.tsx` and any in-game embed import (`hmsc_scale_lab.md`), eliminating the 2.45m/2.04m disagreement.
 5. **Fix `hmsc-int/AGENTS.md`** to name `PaintCanvas.tsx` (not `MapCanvas.tsx`) and **`ragdoll_lab/car.tsx`'s** stale "pathing_lab drives fleets" header (`hmsc-int.md`, `ragdoll_lab.md`).
 
 ### Extractions (kill the parallel systems of §3)

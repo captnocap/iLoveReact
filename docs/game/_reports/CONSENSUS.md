@@ -7,7 +7,7 @@
 ## TIER 1 — UNANIMOUS (5/5). This is the work queue.
 
 ### A. The physics naming inversion (the human-confirmed gold standard) — 5/5
-`framework/v8_bindings_physics_lab.zig` contains the LIVE hmsc physics backend (`__hmsc_physics_step`, `__hmsc_register_heightfield`, `__hmsc_clear_heightfields`, consumed by `cart/hmsc/state/hostPhysics.ts`); `framework/phys/physics3d.zig` is fully-implemented Bullet wired to NOTHING, with a header describing `<3D.Physics>`/`Node.physics3d_world_id` that don't exist. All five reports independently sharpened the same irony: **the heightfield collider hmsc needed is the one case physics3d stubbed `null` while the "lab" file implemented it first-class.**
+`framework/v8_bindings_physics_lab.zig` contains the LIVE hmsc physics backend (`__hmsc_physics_step`, `__hmsc_register_heightfield`, `__hmsc_clear_heightfields`, consumed by `cart/hmsc-int/state/hostPhysics.ts`); `framework/phys/physics3d.zig` is fully-implemented Bullet wired to NOTHING, with a header describing `<3D.Physics>`/`Node.physics3d_world_id` that don't exist. All five reports independently sharpened the same irony: **the heightfield collider hmsc needed is the one case physics3d stubbed `null` while the "lab" file implemented it first-class.**
 **Fix (all 5 agree):** split the bindings — `v8_bindings_hmsc_physics.zig` (live) vs the lab toy; mark physics3d DORMANT loudly (or rename `bullet3d_dormant.zig`) and delete its lying header; record that Verlet-in-cart (`head_lab/ragdoll.ts`) is the de-facto 3D physics so a future effort chooses consciously.
 
 ### B. The humanoid duplication — 5/5, with the same smoking gun in all five
@@ -40,7 +40,7 @@ These are the shapes to consolidate around — the user's "most reoccurring = mo
 
 ### D. Unanimous secondary naming/placement lies — 5/5 each
 - `v8_bindings_input_bench.zig` — "bench" file is animation_lab's LIVE drive-mode movement integrator (+ `__bench_now_us`, the preferred µs clock). Needs a loud "LIVE PRODUCTION" header.
-- `cart/hmsc/labs/ScaleLabScene.tsx` — orphaned near-verbatim copy, zero importers, already drifted (purple line 2.45m vs the live cart's 2.04m). Delete or canonicalize.
+- `cart/hmsc-int/labs/ScaleLabScene.tsx` — orphaned near-verbatim copy, zero importers, already drifted (purple line 2.45m vs the live cart's 2.04m). Delete or canonicalize.
 - `cart/ragdoll_lab/car.tsx` header — claims "pathing_lab drives fleets"; pathing_lab uses vehicle_lab. One consumer.
 - `cart/hmsc-int/AGENTS.md` — names `MapCanvas.tsx`, file is now `PaintCanvas.tsx` (drift inside the contract meant to prevent drift).
 - Dead-but-live-looking code: massive_map_lab's `ChunkGround/ChunkRoads/BuildingMesh` trio (zero JSX usage, duplicates the live batch recipe), pixel_icon_demo's vestigial Canvas editor.

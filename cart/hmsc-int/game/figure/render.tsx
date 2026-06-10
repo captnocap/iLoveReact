@@ -19,7 +19,7 @@
 // world yaw is exactly "rotate each position about Y, add yawDeg to each ry".
 
 import { memo, useMemo } from 'react';
-import { Box, Scene3D, StaticSurface } from '@reactjit/runtime/primitives';
+import { Box, Scene3D, StaticSurface } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { PAINT_TARGET_NO_PART_FALLBACK, PART_IDS, paintTargetForInstance, paintTargetPart, type PaintTargetId, type PartId } from './shapes';
 import { partGlobeParams } from './bake';

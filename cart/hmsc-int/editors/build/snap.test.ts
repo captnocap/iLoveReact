@@ -173,7 +173,42 @@ test('a top face stacks the next storey', () => {
   assertClose(target!.placement.y, WALL_SIZE.heightMeters, 1e-6, 'the new base is the face top — storey two');
 });
 
-test('edge snap on a side face uses the same top anchor as a top face', () => {
+test('edge snap from a wall side face keeps the wall base level', () => {
+  const wall = placed('wall.concrete.common', 1.5, 0, { y: FLOOR_SIZE.heightMeters, yawDegrees: 0 });
+  const ray = { origin: { x: 1.5, y: 1.2, z: -1 }, dir: norm(0, 0, 1) };
+  const target = resolveSnapTarget(snapInput({ ray, pieces: [wall], snap: 'edge' }));
+  assert(!!target, 'the wall side face resolves');
+  assertEqual(target!.surface, 'pieceFace', 'the target is the existing wall');
+  assertClose(target!.placement.y, wall.y, 1e-9, 'side-face wall snap stays on the same floor, not the next storey');
+  assertEqual(target!.placement.yawDegrees, 0, 'the new wall keeps the side-face run direction');
+});
+
+test('REQ-0471: wall side-face snap near an endpoint turns the corner on the aimed side', () => {
+  const floor = placed('floor.concrete.common', 1.5, 1.5);
+  const wall = placed('wall.concrete.common', 1.5, 0, { y: FLOOR_SIZE.heightMeters, yawDegrees: 0 });
+  const ray = { origin: { x: 2.95, y: 1.2, z: -1 }, dir: norm(0, 0, 1) };
+  const target = resolveSnapTarget(snapInput({ ray, pieces: [floor, wall], snap: 'edge' }));
+  assert(!!target, 'the supported wall side face resolves');
+  assertEqual(target!.surface, 'pieceFace', 'the existing wall owns the snap');
+  assertClose(target!.placement.x, 3, 1e-9, 'the new wall line locks to the existing wall endpoint');
+  assertClose(target!.placement.z, -1.5, 1e-9, 'the wall extends on the side the crosshair is aiming from');
+  assertClose(target!.placement.y, wall.y, 1e-9, 'the corner stays on the same floor');
+  assertEqual(target!.placement.yawDegrees, 90, 'the new wall turns perpendicular at the endpoint');
+});
+
+test('REQ-0471: wall end-cap snap extends the wall in the same line', () => {
+  const wall = placed('wall.concrete.common', 1.5, 0, { y: FLOOR_SIZE.heightMeters, yawDegrees: 0 });
+  const ray = { origin: { x: 4, y: 1.2, z: 0 }, dir: norm(-1, 0, 0) };
+  const target = resolveSnapTarget(snapInput({ ray, pieces: [wall], snap: 'edge' }));
+  assert(!!target, 'the wall end face resolves');
+  assertEqual(target!.surface, 'pieceFace', 'the existing wall owns the snap');
+  assertClose(target!.placement.x, 4.5, 1e-9, 'the next wall centers beyond the hit end');
+  assertClose(target!.placement.z, wall.z, 1e-9, 'the authored wall line stays continuous');
+  assertClose(target!.placement.y, wall.y, 1e-9, 'the extension stays on the same floor');
+  assertEqual(target!.placement.yawDegrees, 0, 'the wall keeps its run direction');
+});
+
+test('edge snap only uses a floor top face as the wall-on-floor anchor', () => {
   const floor = placed('floor.concrete.common', 0, 0, { z: 4, y: 3 });
   const topRay = { origin: { x: 1.4, y: 6, z: 3.9 }, dir: norm(0, -1, 0.05) };
   const top = resolveSnapTarget(snapInput({ ray: topRay, pieces: [floor], snap: 'edge' }));
@@ -182,23 +217,15 @@ test('edge snap on a side face uses the same top anchor as a top face', () => {
 
   const ray = { origin: { x: 1.4, y: 3.1, z: 0 }, dir: norm(0, 0, 1) };
   const side = resolveSnapTarget(snapInput({ ray, pieces: [floor], snap: 'edge' }));
-  assert(!!side, 'the side face resolves');
-  assertClose(side!.placement.y, top!.placement.y, 1e-9, 'side face cannot produce the old base anchor');
-  assertClose(side!.placement.y, 3 + FLOOR_SIZE.heightMeters, 1e-9, 'wall stands on the floor top perimeter');
-  assertEqual(side!.placement.yawDegrees, 0, 'the wall still runs along the targeted floor edge');
+  assertEqual(side, null, 'the side face is not an alternate wall-on-floor anchor');
 });
 
-test('edge snap from a ground hit beside a floor perimeter still anchors on the floor top', () => {
+test('edge snap from ground beside a floor perimeter does not create a wall-on-floor placement', () => {
   const floorY = 2;
   const floor = placed('floor.concrete.common', 1.5, 1.5, { y: floorY });
   const ray = { origin: { x: 3.05, y: 4, z: 1.4 }, dir: norm(0, -1, 0) };
   const target = resolveSnapTarget(snapInput({ ray, pieces: [floor], snap: 'edge' }));
-  assert(!!target, 'a target resolves');
-  assertEqual(target!.surface, 'ground', 'this reproduces the live path: raw hit is ground beside the floor');
-  assertClose(target!.placement.x, 3, 1e-9, 'the wall line snaps onto the floor perimeter');
-  assertClose(target!.placement.z, 1.5, 1e-9, 'the run center stays on the floor edge span');
-  assertClose(target!.placement.y, floorY + FLOOR_SIZE.heightMeters, 1e-9, 'ground-to-edge snap uses the floor top anchor, not world ground');
-  assertEqual(target!.placement.yawDegrees, 90, 'the wall runs along the targeted floor edge');
+  assertEqual(target, null, 'beside-floor ground is not an alternate way to place a wall on that floor');
 });
 
 test('REQ-0107: a catalog-sized floor accepts a wall on its top edge without resizing or rejection', () => {

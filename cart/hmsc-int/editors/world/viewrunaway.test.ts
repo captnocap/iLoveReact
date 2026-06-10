@@ -1,4 +1,4 @@
-import { CANVAS_PAN_SPEED, canvasPanDriftForHeldKeys, effectiveCanvasPanDrift } from '../../PaintCanvas';
+import { CANVAS_PAN_FOCUS_LOCK_KEY, CANVAS_PAN_SPEED, canvasPanDriftForHeldKeys, canvasPanOwnsWasd, effectiveCanvasPanDrift, isCanvasPanFocusLockKey } from '../../PaintCanvas';
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 
 test('VIEWRUNAWAY-0607: stale canvas drift cannot keep the host camera moving', () => {
@@ -19,6 +19,16 @@ test('VIEWRUNAWAY-0607: stale canvas drift cannot keep the host camera moving', 
   assert(!orphanedByHotReload.active, 'hot-reload/orphaned drift does not keep moving');
   assert(!hiddenByRouteOverlay.active, 'a mounted editor hidden behind another route cannot drift');
   assertClose(graphUnitsPerSecondAtUserZoom, 5384.615, 0.01, 'the reported runaway magnitude matches engine-side drift at zoom 0.13');
+});
+
+test('F8 locks the painter as the WASD owner even when host focus is stuck on canvas chrome', () => {
+  const locked = effectiveCanvasPanDrift(canvasPanDriftForHeldKeys(['a']), 1, canvasPanOwnsWasd(false, true));
+  const unlocked = effectiveCanvasPanDrift(canvasPanDriftForHeldKeys(['a']), 1, canvasPanOwnsWasd(false, false));
+
+  assert(isCanvasPanFocusLockKey('F8'), 'the global painter pan lock accepts host key names case-insensitively');
+  assertEqual(CANVAS_PAN_FOCUS_LOCK_KEY, 'f8', 'the pan lock key is stable for the editor shell');
+  assert(locked.active, 'a locked painter continues receiving WASD without click focus');
+  assert(!unlocked.active, 'unlocked painter still obeys the normal quad focus owner');
 });
 
 finish('editors/world/viewrunaway');

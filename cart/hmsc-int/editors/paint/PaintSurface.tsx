@@ -14,7 +14,7 @@
 // imported).
 
 import { useMemo, useRef, useState } from 'react';
-import { Box, Canvas, Effect, Image, Paintable, Pressable, Row, Text } from '@reactjit/runtime/primitives';
+import { Box, Canvas, Effect, Graph, Image, Paintable, Pressable, Row, Text } from '@reactjit/runtime/primitives';
 import { callHost } from '@reactjit/runtime/ffi';
 import { GAME_CHROME } from '../../game/chrome';
 import { PAINT_TUNING } from './tuning';
@@ -31,6 +31,9 @@ type Rect = { x: number; y: number; width: number; height: number };
 type ToolCursor = {
   x: number; y: number; radius: number;
   kind: 'brush' | 'smart' | 'lasso' | 'refine';
+  brushKind?: string;
+  angleDeg?: number;
+  aspect?: number;
   /** the active paint color (slot 0) — fills the ring in paint mode */
   color?: string | null;
   /** screen-x of the mirror twin ring when mirror painting is on */
@@ -108,6 +111,7 @@ export function PaintSurface({ s, style, underlay }: { s: PaintEditorState; styl
   const [cursor, setCursor] = useState<ToolCursor | null>(null);
   const drawing = useRef(false);
   const lastCursorBump = useRef(0);
+  const hasVisibleImageLayer = s.layers.some((layer) => !layer.config.muted && !!layer.image);
 
   const toSource = (px: number, py: number) => {
     if (!rect) return null;
@@ -163,6 +167,9 @@ export function PaintSurface({ s, style, underlay }: { s: PaintEditorState; styl
     setCursor({
       x: localX, y: localY, radius,
       kind: s.tool === 'refine' ? 'refine' : 'brush',
+      brushKind: s.brush.kind,
+      angleDeg: s.brush.angleDeg,
+      aspect: s.brush.aspect,
       color: s.mode === 'erase' ? slot0 : null,
       mirrorX,
     });
@@ -192,7 +199,7 @@ export function PaintSurface({ s, style, underlay }: { s: PaintEditorState; styl
             <Image source={s.srcPath} style={{ width: s.dims.w, height: s.dims.h }} />
           ) : underlay ? (
             underlay
-          ) : (
+          ) : hasVisibleImageLayer ? null : (
             <BlankSurface w={s.dims.w} h={s.dims.h} />
           )}
           {/* One full-res texture pair per layer, mounted for EVERY layer
@@ -206,7 +213,10 @@ export function PaintSurface({ s, style, underlay }: { s: PaintEditorState; styl
             <Paintable key={`brush:${layer.id}`} id={s.brushIdOf(layer)} w={s.dims.w} h={s.dims.h} />
           ))}
           {s.layers.map((layer) => (
-            layer.config.muted ? null : (
+            layer.config.muted ? null : [
+              layer.image ? (
+                <Image key={`img:${layer.id}`} source={layer.image.path} style={{ width: s.dims.w, height: s.dims.h }} />
+              ) : null,
               <PaintQuad
                 key={`q:${layer.id}`}
                 paintableId={s.baseIdOf(layer)}
@@ -220,8 +230,8 @@ export function PaintSurface({ s, style, underlay }: { s: PaintEditorState; styl
                 dim={layer.config.dim}
                 colors={layer.config.colors}
                 blend={layer.config.blend ?? 'normal'}
-              />
-            )
+              />,
+            ]
           ))}
           <ClickMarkers s={s} />
           <LassoPreview s={s} />
@@ -321,27 +331,88 @@ function BrushCursor({ cursor, mode }: { cursor: ToolCursor; mode: string }) {
   // will paint — the active slot-0 color at low alpha.
   const fill = (mode === 'erase' ? withAlpha(cursor.color, '2e') : null)
     ?? (mode === 'erase' ? '#ff9f431f' : '#34d3991f');
-  const ring = (cx: number, twin: boolean) => (
-    <Box key={twin ? 'twin' : 'ring'} style={{
-      position: 'absolute',
-      left: cx - cursor.radius,
-      top: cursor.y - cursor.radius,
-      width: cursor.radius * 2,
-      height: cursor.radius * 2,
-      borderRadius: cursor.radius,
-      borderWidth: 1,
-      borderColor: color,
-      backgroundColor: fill,
-      zIndex: 8,
-      opacity: twin ? 0.55 : 1,
-    }} />
-  );
+  const ring = (cx: number, twin: boolean) => {
+    const aspect = Math.max(0.2, cursor.aspect ?? 1);
+    const extent = cursor.radius * Math.max(1, aspect) + 3;
+    const box = extent * 2;
+    const d = brushCursorPath(box / 2, box / 2, cursor.radius, cursor.brushKind ?? 'round', aspect, cursor.angleDeg ?? 0);
+    return (
+      <Box key={twin ? 'twin' : 'ring'} style={{
+        position: 'absolute',
+        left: cx - extent,
+        top: cursor.y - extent,
+        width: box,
+        height: box,
+        zIndex: 8,
+        opacity: twin ? 0.55 : 1,
+      }}>
+        <Graph style={{ width: box, height: box }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
+          <Graph.Path d={d} fill={fill} stroke={color} strokeWidth={1} />
+        </Graph>
+      </Box>
+    );
+  };
   return (
     <>
       {ring(cursor.x, false)}
       {typeof cursor.mirrorX === 'number' ? ring(cursor.mirrorX, true) : null}
     </>
   );
+}
+
+function rot(x: number, y: number, cx: number, cy: number, deg: number): [number, number] {
+  const a = deg * Math.PI / 180;
+  const ca = Math.cos(a), sa = Math.sin(a);
+  const dx = x - cx, dy = y - cy;
+  return [cx + dx * ca - dy * sa, cy + dx * sa + dy * ca];
+}
+
+function polyPath(points: Array<[number, number]>): string {
+  const [first, ...rest] = points;
+  return `M ${first[0]} ${first[1]}${rest.map((p) => ` L ${p[0]} ${p[1]}`).join('')} Z`;
+}
+
+function cursorEllipse(cx: number, cy: number, rx: number, ry: number, deg: number, n = 28): string {
+  const pts: Array<[number, number]> = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / n * Math.PI * 2;
+    pts.push(rot(cx + Math.cos(t) * rx, cy + Math.sin(t) * ry, cx, cy, deg));
+  }
+  return polyPath(pts);
+}
+
+function cursorRect(cx: number, cy: number, w: number, h: number, deg: number, skew = 0): string {
+  const pts: Array<[number, number]> = [
+    [cx - w / 2 + skew, cy - h / 2],
+    [cx + w / 2 + skew, cy - h / 2],
+    [cx + w / 2 - skew, cy + h / 2],
+    [cx - w / 2 - skew, cy + h / 2],
+  ].map((p) => rot(p[0], p[1], cx, cy, deg));
+  return polyPath(pts);
+}
+
+function brushCursorPath(cx: number, cy: number, r: number, kind: string, aspect: number, angleDeg: number): string {
+  switch (kind) {
+    case 'square':
+      return cursorRect(cx, cy, r * 2 * aspect, r * 2, angleDeg);
+    case 'flat':
+      return cursorRect(cx, cy, r * 2 * Math.max(aspect, 1.6), r * 0.84, angleDeg);
+    case 'angle':
+      return cursorRect(cx, cy, r * 2 * Math.max(aspect, 1.5), r * 0.92, angleDeg, r * 0.38);
+    case 'knife':
+      return cursorRect(cx, cy, r * 2 * Math.max(aspect, 2.8), r * 0.44, angleDeg, r * 0.18);
+    case 'filbert':
+      return cursorEllipse(cx, cy, r * Math.max(aspect, 1.15), r * 0.62, angleDeg);
+    case 'rake':
+    case 'fan':
+    case 'dry':
+      return cursorEllipse(cx, cy, r * Math.max(aspect, 1.3), r, angleDeg);
+    case 'soft':
+    case 'spray':
+    case 'round':
+    default:
+      return cursorEllipse(cx, cy, r, r, angleDeg);
+  }
 }
 
 function PaintHud({ s }: { s: PaintEditorState }) {

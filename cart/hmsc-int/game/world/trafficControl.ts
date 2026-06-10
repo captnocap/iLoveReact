@@ -26,7 +26,7 @@
 // SAME cycle the lamp render glows with, so a planned wait matches what the
 // player sees lit. Pure CPU, time always a parameter (P4: trafficControl.test).
 
-import { TRAFFIC_SIGNAL_CYCLE } from '../../../hmsc/world/traffic';
+import { TRAFFIC_SIGNAL_CYCLE } from '../../world/traffic';
 import { planMotion, measurePath, sampleMotion, slicePoints, type MotionPlan, type MotionProfile, type MotionSample } from '@reactjit/motion';
 import { TILE_KIND_INDEX } from '../kinds';
 import type { PaintedGrid } from './navPublish';

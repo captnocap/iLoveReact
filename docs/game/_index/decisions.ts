@@ -35,7 +35,7 @@ export const DECISIONS: Decision[] = [
     ruling: 'The head_lab kit is THE figure stack, outright (ragdoll.ts per V1: behavior reference only — its implementation is not kept). Damage zones spell lArm/rArm/lLeg/rLeg (head_lab). Hit volumes are head_lab\'s oriented boxes. AMENDED: head_lab is the AUTHORING system — models are COMPILED (baked) into the host; the per-frame JS evaluation path (buildRigFrame, dyn-geometry, on-the-fly face bakes) is editor/lab preview ONLY, never the game path.',
     detail: 'The seeded generators stay — "the variety of life is the right shape"; the bake preserves variety (documents/seeds in, compiled population out). hmsc\'s render3d/humanoid retires; bodylab\'s third solver and the inline parts-arrays (animation_lab/camera_lab/input_bench) are deleted.',
     keywords: ['player model', 'humanoid', 'figure', 'character', 'head_lab', 'hmsc humanoid', 'damage zones', 'hitbox', 'armL', 'lArm', 'capsules', 'boxes', 'bake', 'baked', 'hed', 'body document', 'face', 'clothing', 'variety'],
-    retires: ['cart/hmsc/render3d/humanoid/', 'cart/bodylab solveHumanoid', 'inline HUMANOID parts arrays in animation_lab/camera_lab/input_bench'],
+    retires: ['cart/hmsc-int/render3d/humanoid/', 'cart/bodylab solveHumanoid', 'inline HUMANOID parts arrays in animation_lab/camera_lab/input_bench'],
     cites: ['cart/head_lab/parts.ts', 'cart/head_lab/figureRender.tsx', 'cart/head_lab/hed.ts'],
   },
   {
@@ -49,7 +49,7 @@ export const DECISIONS: Decision[] = [
     id: 'V4', name: 'World: the tile system IS the system — juiced to Vice City scale', status: 'ruled',
     ruling: 'hmsc\'s tile-kind model is the gameplay substrate — "the tile system IS the system". Rendering must reach instanced-batch performance harmonized with the bake direction: target is a game map the size of GTA Vice City. Authoring stays tiles; rendering gets juiced until that map runs.',
     keywords: ['world', 'tiles', 'tile system', 'map', 'vice city', 'scale', 'instancing', 'instances', 'bake', 'rendering', 'world gen', 'chunks', 'city'],
-    cites: ['cart/hmsc/world/tileKinds.ts', 'cart/hmsc_massive_map_lab.tsx (instancing proof)'],
+    cites: ['cart/hmsc-int/world/tileKinds.ts', 'cart/hmsc_massive_map_lab.tsx (instancing proof)'],
   },
   {
     id: 'V5', name: 'Pathing/NPC: deterministic-until-game-state-change', status: 'ruled',
@@ -79,13 +79,13 @@ export const DECISIONS: Decision[] = [
     id: 'V9', name: 'Chance engine: the hybrid — scape surface + hmsc cover input', status: 'ruled',
     ruling: 'One chance engine: scape\'s ChanceBreakdown legibility (WHY is it 33%) + hmsc/combat_lab\'s coverFraction input. Ground-truth-vs-display-warp law intact. Needs a dedicated lab for extensive tuning before it\'s trusted.',
     keywords: ['chance', 'hit chance', 'odds', 'percent', 'cover', 'coverFraction', 'breakdown', 'range profile', 'line of sight', 'los'],
-    cites: ['cart/scape/systems/chance.ts', 'cart/hmsc/npc/systems/chance.ts', 'cart/combat_lab (coverFractionOf)'],
+    cites: ['cart/scape/systems/chance.ts', 'cart/hmsc-int/npc/systems/chance.ts', 'cart/combat_lab (coverFractionOf)'],
   },
   {
     id: 'V10', name: 'Vehicle: vehicle_lab is the source', status: 'ruled',
     ruling: 'vehicle_lab\'s VehicleDoc + buildVehicle + semantic VehiclePartId rig is the vehicle module — "this is where our models are coming from like head_lab". Scale not yet verified; many cars need work (ongoing, against the fixed 1-tile=1m contract). CarMeshes and the hmsc structure cars retire into it.',
     keywords: ['vehicle', 'car', 'cars', 'sedan', 'buildVehicle', 'VehicleDoc', 'wheels', 'driving'],
-    retires: ['cart/ragdoll_lab/car.tsx CarMeshes', 'cart/hmsc/render3d/structures/Car.tsx'],
+    retires: ['cart/ragdoll_lab/car.tsx CarMeshes', 'cart/hmsc-int/render3d/structures/Car.tsx'],
     cites: ['cart/vehicle_lab/'],
   },
   {
@@ -199,9 +199,9 @@ export const DECISIONS: Decision[] = [
   },
   {
     id: 'R4', name: 'SCALE CONTRACT: 1 tile = 1 meter; player collider 1.65m, visual head-top ~2.04m', status: 'ruled',
-    ruling: 'The world scale is SET: 1 tile = 1 meter. Player collider height = 1.65m (HMSC_SCALE.playerCapsuleHeightMeters, cart/hmsc/world/scale.ts:8). The ~2.04m in the scale labs is the VISUAL head-top (stylized-tall) — collider and visual are different layers, BOTH canonical; do not conflate them.',
+    ruling: 'The world scale is SET: 1 tile = 1 meter. Player collider height = 1.65m (HMSC_SCALE.playerCapsuleHeightMeters, cart/hmsc-int/world/scale.ts:8). The ~2.04m in the scale labs is the VISUAL head-top (stylized-tall) — collider and visual are different layers, BOTH canonical; do not conflate them.',
     keywords: ['scale', 'meter', 'tile size', 'player height', '1.65', '2.04', 'collider', 'capsule', 'world scale', 'units'],
-    cites: ['cart/hmsc/world/scale.ts'],
+    cites: ['cart/hmsc-int/world/scale.ts'],
   },
   {
     id: 'R6', name: 'RLE/determinism is a gameplay-WIDE design value', status: 'ruled',

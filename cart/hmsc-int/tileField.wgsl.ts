@@ -10,4 +10,4 @@
 // roadRibbonSection rides along (ROADCURVE-0610): the optional analytic-road
 // section appended after the cells, shared by the 2D chunk quads and the 3D
 // drape capture so roads curve identically in both views.
-export { HEIGHTFIELD_TILE_SHADER as TILE_FIELD_WGSL, roadRibbonSection } from '../hmsc/render3d/heightfieldSurface';
+export { HEIGHTFIELD_TILE_SHADER as TILE_FIELD_WGSL, roadRibbonSection } from './render3d/heightfieldSurface';

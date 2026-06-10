@@ -20,12 +20,27 @@
 // meaning the same thing.
 
 import { captureFrame } from '@reactjit/capture';
-import { GAME_KINDS, mountainTrailheadPoint, tileKindDefinition, isTileKind, tileKindNamesForConsole, propKindNamesForConsole } from '../kinds';
+import {
+  GAME_KINDS,
+  mountainTrailheadPoint,
+  tileKindDefinition,
+  isTileKind,
+  tileKindNamesForConsole,
+  isPropKind,
+  propKindDefinition,
+  propKindNamesForConsole,
+  landformKindDefinition,
+  landformSurfaceTop,
+  type PropKind,
+} from '../kinds';
 import { GAME_PERCEPTION } from '../perception';
 import { GAME_TELEMETRY, type DiagnosticChannel } from '../telemetry';
 import { GAME_WORLD, type GridCell, type LandformPlacement, type PlacedCell, type WorldSurfaceRegion } from '../world';
 import { parseCommandValue } from './parser';
 import type { CommandRegistry } from './index';
+import { buildingKindDefinition, buildingKindHeightMeters, buildingKindNamesForConsole, isBuildingKind } from '../../world/buildingKinds';
+import { HMSC_SCALE } from '../../world/scale';
+import { defineColonConsoleCommands, type ColonConsoleDiagnostics } from './colonConsole';
 
 // ── P2: every behavior-affecting number is table data, never a buried constant.
 // Values carried verbatim from the reference's state/defaults.ts + render3d/sky.ts.
@@ -163,10 +178,33 @@ export type GameCommandState = {
     surfaceRegions: WorldSurfaceRegion[];
     placedCells: Record<string, PlacedCell>;
     landforms: LandformPlacement[];
+    buildings?: WorldAuditBuilding[];
+    props?: WorldAuditProp[];
   };
   events: { nextSerial: number; recent: GameEvent[] };
   nextEntitySerial: number;
   __commandPersistence?: CommandPersistence;
+  __consoleDiagnostics?: ColonConsoleDiagnostics;
+};
+
+type WorldAuditBuilding = {
+  id: string;
+  kind: string;
+  label?: string;
+  x: number;
+  y?: number;
+  z: number;
+  widthTiles: number;
+  depthTiles: number;
+  enclosure?: 'sealed' | 'hollow' | 'interior';
+};
+
+type WorldAuditProp = {
+  id: string;
+  kind: string;
+  x: number;
+  y?: number;
+  z: number;
 };
 
 export function createGameCommandState(): GameCommandState {
@@ -219,6 +257,30 @@ function switchArg(raw: string | undefined, name: string): boolean {
 function toggleArg(raw: string | undefined, current: boolean, name: string): boolean {
   if (raw == null || raw === '' || raw === 'toggle') return !current;
   return switchArg(raw, name);
+}
+
+function setHostSpikeTrace(enabled: boolean): void {
+  const host = globalThis as Record<string, unknown>;
+  const trace = host.__hmsc_spike_trace;
+  if (typeof trace === 'function') (trace as (enabled: number) => void)(enabled ? 1 : 0);
+}
+
+function setReconChurnTrace(enabled: boolean): boolean {
+  const host = globalThis as Record<string, unknown>;
+  const set = host.__RECON_CHURN_SET;
+  if (typeof set === 'function') return (set as (enabled: boolean) => boolean)(enabled);
+  host.__RECON_CHURN_TRACE = enabled;
+  return enabled;
+}
+
+function reconChurnTraceEnabled(): boolean {
+  const host = globalThis as Record<string, unknown>;
+  const status = host.__RECON_CHURN_STATUS;
+  if (typeof status === 'function') {
+    const result = (status as () => { enabled?: unknown })();
+    return result?.enabled === true;
+  }
+  return host.__RECON_CHURN_TRACE === true;
 }
 
 function normalizeSkyHour(hour: number): number {
@@ -372,6 +434,261 @@ function tileNoiseLine(): string {
     .join(' ');
 }
 
+type PlacementSeverity = 'error' | 'warn' | 'info';
+type Rect = { minX: number; minZ: number; maxX: number; maxZ: number };
+type PlacementIssue = { severity: PlacementSeverity; code: string; message: string };
+type PlacementSubject = {
+  layer: 'building' | 'prop' | 'landform';
+  id: string;
+  label: string;
+  footprint: Rect;
+  heightMeters: number;
+  solid: boolean;
+  enterable: boolean;
+};
+
+function rectCenter(rect: Rect): { x: number; z: number } {
+  return { x: (rect.minX + rect.maxX) / 2, z: (rect.minZ + rect.maxZ) / 2 };
+}
+
+function samplePlacementCells(footprint: Rect): GridCell[] {
+  const c = rectCenter(footprint);
+  const inset = 0.5;
+  const points: Array<[number, number]> = [
+    [c.x, c.z],
+    [footprint.minX + inset, footprint.minZ + inset],
+    [footprint.maxX - inset, footprint.minZ + inset],
+    [footprint.minX + inset, footprint.maxZ - inset],
+    [footprint.maxX - inset, footprint.maxZ - inset],
+  ];
+  const seen = new Set<string>();
+  const cells: GridCell[] = [];
+  for (const [x, z] of points) {
+    const cell = { x: Math.floor(x), y: 0, z: Math.floor(z) };
+    const key = `${cell.x},${cell.z}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cells.push(cell);
+  }
+  return cells;
+}
+
+function buildingPreviewSubject(args: string[]): PlacementSubject {
+  const kind = args[0];
+  if (!isBuildingKind(kind)) throw new Error(`unknown building kind ${kind}; expected one of ${buildingKindNamesForConsole()}`);
+  const x = numberArg(args[1], 'x');
+  const z = numberArg(args[2], 'z');
+  const def = buildingKindDefinition(kind);
+  const widthTiles = args[3] != null ? numberArg(args[3], 'width') : def.defaultWidthTiles;
+  const depthTiles = args[4] != null ? numberArg(args[4], 'depth') : def.defaultDepthTiles;
+  return {
+    layer: 'building',
+    id: '__preview__',
+    label: def.label,
+    footprint: { minX: x, minZ: z, maxX: x + widthTiles, maxZ: z + depthTiles },
+    heightMeters: buildingKindHeightMeters(kind),
+    solid: true,
+    enterable: def.defaultEnclosure === 'hollow' || def.defaultEnclosure === 'interior',
+  };
+}
+
+function propPreviewSubject(args: string[]): PlacementSubject {
+  const kind = args[0];
+  if (!isPropKind(kind)) throw new Error(`unknown prop kind ${kind}; expected one of ${propKindNamesForConsole()}`);
+  const x = numberArg(args[1], 'x');
+  const z = numberArg(args[2], 'z');
+  const def = propKindDefinition(kind as PropKind);
+  const radius = Math.max(def.footprintRadiusMeters, 0.25);
+  return {
+    layer: 'prop',
+    id: '__preview__',
+    label: def.label,
+    footprint: { minX: x - radius, minZ: z - radius, maxX: x + radius, maxZ: z + radius },
+    heightMeters: def.heightMeters,
+    solid: def.solid,
+    enterable: false,
+  };
+}
+
+function buildingPlacementSubject(building: WorldAuditBuilding): PlacementSubject {
+  if (!isBuildingKind(building.kind)) throw new Error(`unknown building kind ${building.kind}; expected one of ${buildingKindNamesForConsole()}`);
+  const def = buildingKindDefinition(building.kind);
+  return {
+    layer: 'building',
+    id: building.id,
+    label: building.label || def.label,
+    footprint: {
+      minX: building.x,
+      minZ: building.z,
+      maxX: building.x + building.widthTiles,
+      maxZ: building.z + building.depthTiles,
+    },
+    heightMeters: buildingKindHeightMeters(building.kind),
+    solid: true,
+    enterable: (building.enclosure ?? def.defaultEnclosure) === 'hollow' || (building.enclosure ?? def.defaultEnclosure) === 'interior',
+  };
+}
+
+function propPlacementSubject(prop: WorldAuditProp): PlacementSubject {
+  if (!isPropKind(prop.kind)) throw new Error(`unknown prop kind ${prop.kind}; expected one of ${propKindNamesForConsole()}`);
+  const def = propKindDefinition(prop.kind);
+  const radius = Math.max(def.footprintRadiusMeters, 0.25);
+  return {
+    layer: 'prop',
+    id: prop.id,
+    label: def.label,
+    footprint: { minX: prop.x - radius, minZ: prop.z - radius, maxX: prop.x + radius, maxZ: prop.z + radius },
+    heightMeters: def.heightMeters,
+    solid: def.solid,
+    enterable: false,
+  };
+}
+
+function landformSubject(lf: LandformPlacement): PlacementSubject {
+  const def = landformKindDefinition(lf.kind);
+  const radius = def.footprintRadius(lf.params, lf.field);
+  return {
+    layer: 'landform',
+    id: lf.id,
+    label: lf.label,
+    footprint: { minX: lf.centerX - radius, minZ: lf.centerZ - radius, maxX: lf.centerX + radius, maxZ: lf.centerZ + radius },
+    heightMeters: landformSurfaceTop(lf, lf.centerX, lf.centerZ) - lf.baseY,
+    solid: false,
+    enterable: false,
+  };
+}
+
+function subjectsForAudit(game: GameCommandState): PlacementSubject[] {
+  return [
+    ...(game.world.buildings ?? []).map(buildingPlacementSubject),
+    ...(game.world.props ?? []).map(propPlacementSubject),
+    ...game.world.landforms.map(landformSubject),
+  ];
+}
+
+function findSubjectById(game: GameCommandState, id: string): PlacementSubject | undefined {
+  const building = (game.world.buildings ?? []).find((b) => b.id === id);
+  if (building) return buildingPlacementSubject(building);
+  const prop = (game.world.props ?? []).find((p) => p.id === id);
+  if (prop) return propPlacementSubject(prop);
+  const landform = game.world.landforms.find((lf) => lf.id === id);
+  return landform ? landformSubject(landform) : undefined;
+}
+
+function tileUnderRule(game: GameCommandState, subject: PlacementSubject): PlacementIssue[] {
+  const issues: PlacementIssue[] = [];
+  let anyGround = false;
+  const roadCells: string[] = [];
+  let onWater = false;
+  for (const cell of samplePlacementCells(subject.footprint)) {
+    const kind = GAME_WORLD.tileKindAtCell(game.world, cell);
+    if (!kind) continue;
+    anyGround = true;
+    const surface = tileKindDefinition(kind).surface.material;
+    if (surface === 'water') onWater = true;
+    if (surface === 'road') roadCells.push(`${cell.x},${cell.z}`);
+  }
+  if (onWater) {
+    issues.push({ severity: 'error', code: 'on-water', message: `${subject.label} sits on/over water — it'll float or sink.` });
+  }
+  if (!anyGround) {
+    issues.push({ severity: 'warn', code: 'over-void', message: `${subject.label} has no ground tile under it — it hangs over the void (lay a surface first).` });
+  }
+  if (subject.solid && roadCells.length > 0) {
+    issues.push({
+      severity: 'warn',
+      code: 'on-road',
+      message: `${subject.label} sits on a road tile (${roadCells.join(' ')}) — it blocks the driving lane. Move it onto the sidewalk/lot.`,
+    });
+  }
+  return issues;
+}
+
+function scaleVsPlayerRule(_game: GameCommandState, subject: PlacementSubject): PlacementIssue[] {
+  if (subject.layer !== 'building') return [];
+  const issues: PlacementIssue[] = [];
+  const person = HMSC_SCALE.visualHumanMaxMeters;
+  const door = HMSC_SCALE.doorHeightMeters;
+  const h = subject.heightMeters;
+  if (subject.enterable && h < door) {
+    issues.push({
+      severity: 'error',
+      code: 'too-short-to-enter',
+      message: `${subject.label} is ${h.toFixed(1)} m tall but a doorway needs ${door.toFixed(1)} m — too short to walk into. Add a storey.`,
+    });
+  } else if (h < person + 0.1) {
+    issues.push({
+      severity: 'warn',
+      code: 'shorter-than-player',
+      message: `${subject.label} is only ${h.toFixed(1)} m tall — shorter than the ~${person.toFixed(1)} m player. It'll read as a crate, not a building.`,
+    });
+  }
+  const span = Math.min(subject.footprint.maxX - subject.footprint.minX, subject.footprint.maxZ - subject.footprint.minZ);
+  if (span > 0 && span < 4 && h > span * 6) {
+    issues.push({
+      severity: 'info',
+      code: 'thin-tower',
+      message: `${subject.label} is ${h.toFixed(1)} m tall on a ${span.toFixed(1)} m base — a very thin sliver; widen the footprint or it looks like a pole.`,
+    });
+  }
+  return issues;
+}
+
+function roadDistanceRule(_game: GameCommandState, subject: PlacementSubject): PlacementIssue[] {
+  if (subject.layer !== 'building') return [];
+  return [{ severity: 'info', code: 'no-roads', message: `${subject.label}: the world has no roads yet, so "near a street" can't be checked.` }];
+}
+
+function checkPlacement(game: GameCommandState, subject: PlacementSubject): PlacementIssue[] {
+  const order: Record<PlacementSeverity, number> = { error: 0, warn: 1, info: 2 };
+  return [
+    ...tileUnderRule(game, subject),
+    ...scaleVsPlayerRule(game, subject),
+    ...roadDistanceRule(game, subject),
+  ].sort((a, b) => order[a.severity] - order[b.severity]);
+}
+
+const PLACEMENT_SEVERITY_GLYPH: Record<PlacementSeverity, string> = { error: '✗', warn: '⚠', info: '·' };
+
+function formatPlacementIssues(issues: PlacementIssue[]): string[] {
+  return issues.map((issue) => `${PLACEMENT_SEVERITY_GLYPH[issue.severity]} ${issue.message}`);
+}
+
+function runValidateCommand(game: GameCommandState, args: string[]): string[] {
+  if (args[0] === 'building' || args[0] === 'prop') {
+    const subject = args[0] === 'building' ? buildingPreviewSubject(args.slice(1)) : propPreviewSubject(args.slice(1));
+    const issues = checkPlacement(game, subject);
+    return [
+      `preview ${subject.label} @ [${subject.footprint.minX},${subject.footprint.minZ}]: ${issues.length ? `${issues.length} issue(s)` : 'all clear'}`,
+      ...formatPlacementIssues(issues),
+    ];
+  }
+  if (args.length === 1) {
+    const subject = findSubjectById(game, args[0]);
+    if (!subject) throw new Error(`no building/prop/landform with id ${args[0]}`);
+    const issues = checkPlacement(game, subject);
+    return [
+      `${subject.id} (${subject.label}): ${issues.length ? `${issues.length} issue(s)` : 'all clear'}`,
+      ...formatPlacementIssues(issues),
+    ];
+  }
+  const subjects = subjectsForAudit(game);
+  if (subjects.length === 0) return ['nothing placed to validate'];
+  const lines: string[] = [];
+  let total = 0;
+  let flagged = 0;
+  for (const subject of subjects) {
+    const issues = checkPlacement(game, subject);
+    if (issues.length === 0) continue;
+    flagged += 1;
+    total += issues.length;
+    lines.push(`${subject.id} (${subject.label}):`);
+    for (const line of formatPlacementIssues(issues)) lines.push(`  ${line}`);
+  }
+  if (total === 0) return [`all ${subjects.length} placed things look fine`];
+  return [`${total} issue(s) across ${flagged}/${subjects.length} placed things:`, ...lines];
+}
+
 // ── the loud not-yet boundary ──
 
 /**
@@ -389,7 +706,6 @@ export const NOT_YET_CAPTURED: Record<string, string[]> = {
   // world landform instances (V4): CAPTURED — wv_mountain runs for real
   // over world.landforms + the kinds registry's trailhead helper.
   'world zones': ['wv_zone'],
-  'placement validation (placementCheck)': ['wv_validate'],
   'lab scenes (V13 labs-route integration with the game world)': ['lab_list', 'lab_spawn', 'lab_exit'],
   'input contract data (GAME_INPUT is transport-only today, V7)': ['gv_controls'],
 };
@@ -414,6 +730,7 @@ function notYetCaptured(command: string): never {
  * keep their extra fields; gv_reset only resets the command-state slice).
  */
 export function defineGameCommands<C extends GameCommandState>(registry: CommandRegistry<C>): void {
+  defineColonConsoleCommands(registry);
   const define = registry.define;
 
   define({
@@ -561,14 +878,59 @@ export function defineGameCommands<C extends GameCommandState>(registry: Command
 
   define({
     name: 'gv_perflog',
-    usage: 'gv_perflog [0|1|toggle]',
-    summary: 'Compatibility alias: toggle the spike recorder diagnostics channel.',
+    usage: 'gv_perflog [0|1|2|toggle] [spikeRatio] [minJumpMs]',
+    summary: 'Compatibility alias: toggle the spike recorder; 2 also enables host-side frame trace.',
     run: (_game, args) => {
       const current = GAME_TELEMETRY.diagnosticChannelEnabled('spikes');
-      const enabled = args[0] == null ? !current : switchArg(args[0], 'perflog');
+      const hostTrace = args[0] === '2';
+      const enabled = hostTrace ? true : toggleArg(args[0], current, 'perflog');
+      setHostSpikeTrace(hostTrace);
+      if (args[1] != null) {
+        const spikeRatio = numberArg(args[1], 'spikeRatio');
+        if (spikeRatio <= 1) throw new Error('spikeRatio must be greater than 1');
+        GAME_TELEMETRY.configureSpikeWatch({ spikeRatio });
+      }
+      if (args[2] != null) {
+        const minJumpMs = numberArg(args[2], 'minJumpMs');
+        if (minJumpMs < 0) throw new Error('minJumpMs must be >= 0');
+        GAME_TELEMETRY.configureSpikeWatch({ minJumpUs: minJumpMs * 1000 });
+      }
       GAME_TELEMETRY.setDiagnosticChannel('spikes', enabled);
       if (enabled) GAME_TELEMETRY.startSpikeWatch();
-      return [`spikes = ${enabled ? 'on' : 'off'}`, `path = ${GAME_TELEMETRY.tuning.diagnostics.logPath}`];
+      else GAME_TELEMETRY.stopSpikeWatch();
+      return {
+        suppressTranscript: true,
+        output: [
+          `${GAME_TELEMETRY.spikeWatchStatusLine(enabled)}${hostTrace ? '  + host-trace ON' : ''}`,
+          enabled
+            ? `spikes flush to the dev terminal — go idle and watch for GAME PERF SPIKE blocks${hostTrace ? ' and [host-spike] lines (host ground truth)' : ''}.`
+            : 'recorder stopped (host-trace off).',
+          `path = ${GAME_TELEMETRY.tuning.diagnostics.logPath}`,
+        ],
+      };
+    },
+  });
+
+  define({
+    name: 'gv_churntrace',
+    usage: 'gv_churntrace [1|0|toggle]',
+    summary: 'Arm UIFLAP owner tracing: spike reports include React component/source/text/font-size churn candidates.',
+    run: (_game, args) => {
+      const enabled = toggleArg(args[0], reconChurnTraceEnabled(), 'churntrace');
+      setReconChurnTrace(enabled);
+      GAME_TELEMETRY.setDiagnosticChannel('spikes', enabled);
+      if (enabled) GAME_TELEMETRY.startSpikeWatch();
+      else GAME_TELEMETRY.stopSpikeWatch();
+      return {
+        suppressTranscript: true,
+        output: [
+          `recon churn owner trace = ${enabled ? 'on' : 'off'}`,
+          `spike recorder = ${enabled ? 'on' : 'off'}`,
+          enabled
+            ? 'next CONTENT SWAP / GLYPH RASTERIZE spike will print component/source/text/font-size candidates in the GAME PERF SPIKE block.'
+            : 'owner trace stopped.',
+        ],
+      };
     },
   });
 
@@ -1064,14 +1426,19 @@ export function defineGameCommands<C extends GameCommandState>(registry: Command
     },
   });
   notYet('wv_zone', 'wv_zone [name x z w d [flags...]] | wv_zone remove <id>', 'List zones, or define/remove a named area.');
-  notYet('wv_validate', 'wv_validate | wv_validate <id> | wv_validate building <kind> <x> <z> [w d] | wv_validate prop <kind> <x> <z>', 'Audit placed things (or preview one) for bad tile/scale/spacing.');
+  define({
+    name: 'wv_validate',
+    usage: 'wv_validate | wv_validate <id> | wv_validate building <kind> <x> <z> [w d] | wv_validate prop <kind> <x> <z>',
+    summary: 'Audit placed things (or preview one) for bad tile/scale/spacing.',
+    run: (game, args) => runValidateCommand(game, args),
+  });
 }
 
 /** Every command name the vocabulary registers — the capture's contract. */
 export const GAME_COMMAND_NAMES: string[] = [
   'cmd_help', 'cmd_cheats', 'log',
   'lab_list', 'lab_spawn', 'lab_exit',
-  'gv_controls', 'gv_debug_hud', 'gv_perflog', 'gv_noise',
+  'gv_controls', 'gv_debug_hud', 'gv_perflog', 'gv_churntrace', 'gv_noise',
   'gv_sky', 'gv_time', 'gv_daycycle', 'gv_weather', 'gv_view',
   'gv_events', 'gv_emit', 'gv_state', 'gv_config', 'gv_save', 'gv_load', 'gv_reset',
   'gv_scene', 'gv_set',

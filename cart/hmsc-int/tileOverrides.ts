@@ -12,8 +12,8 @@
 // the map payload (see index.tsx); it's the "per-instance overrides" the mapStore
 // header flagged as a later feature.
 
-import type { TileKind } from '../hmsc/design';
-import { tileKindDefinition } from '../hmsc/world/tileKinds';
+import type { TileKind } from './design';
+import { tileKindDefinition } from './world/tileKinds';
 
 // A selected cell: global cell coords (gx,gz across chunks) + the kind painted
 // there (null = empty), captured at click time so the panel can show baselines.

@@ -29,8 +29,8 @@ export async function pickImageFile(title = 'Pick an image'): Promise<string | n
 }
 
 // (the path cleaner lives in workbench/paint/store.ts cleanImagePath —
-// INSIDE openImage, so picker/drop/typed-field all get it for free, and the
-// headless P4 suite can pin it without pulling this module's host doors)
+// INSIDE openImage, so picker/drop share it, and the headless P4 suite can
+// pin it without pulling this module's host doors)
 
 /** Native pixel dimensions of an image file (null = unreadable/not an image). */
 export async function identifyImage(path: string): Promise<Dims | null> {

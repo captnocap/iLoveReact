@@ -96,7 +96,7 @@ export const game_world: DocIndex = {
       purpose: ['world_gen'],
       description:
         'The reference\'s occupancy test is walkability AND no-building-blocks; buildings are an uncaptured lane, so only canPathThroughCell (the honest half) shipped. Porting code that relied on canOccupyWorldPosition must add the building check when that lane lands or it will walk through walls.',
-      evidence: ['cart/hmsc/world/grid.ts:219', 'cart/hmsc-int/game/world/CAPTURE.md'],
+      evidence: ['cart/hmsc-int/world/grid.ts:219', 'cart/hmsc-int/game/world/CAPTURE.md'],
       severity: 'low',
     },
   ],

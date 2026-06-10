@@ -4,7 +4,7 @@
 // and pre-road snapshots (no roads field) load clean.
 
 import { assert, assertEqual, finish, test } from './game/_testkit';
-import { TILE_KINDS } from '../hmsc/world/tileKinds';
+import { TILE_KINDS } from './world/tileKinds';
 import { serializeMap, deserializeMap, emptyMap } from './mapStore';
 import { cellKey, type RoadStroke } from './roadData';
 

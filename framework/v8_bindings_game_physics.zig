@@ -4,7 +4,7 @@
 //! host-fn wall time into the snapshot.
 //!
 //! Host fn names are preserved from the physics_lab era so existing cart JS
-//! (cart/hmsc/state/hostPhysics.ts, terrainColliders.ts, commands/registry.ts)
+//! (cart/hmsc-int/state/hostPhysics.ts, terrainColliders.ts, commands/registry.ts)
 //! keeps working unchanged; each gets an honest __game_physics_* alias for
 //! new callers (V18: honest capability names).
 //!

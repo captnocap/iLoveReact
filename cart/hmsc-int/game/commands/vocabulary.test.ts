@@ -25,10 +25,10 @@ function freshConsole(): { registry: CommandRegistry<GameCommandState>; game: Ga
   return { registry, game: createGameCommandState() };
 }
 
-test('all 49 command names are registered — the script language plus diagnostics control is complete', () => {
+test('all 50 game command names are registered — the script language plus diagnostics control is complete', () => {
   const { registry } = freshConsole();
   const registered = new Set(registry.list().map((spec) => spec.name));
-  assertEqual(GAME_COMMAND_NAMES.length, 49, 'the captured vocabulary is 49 names after PERFLOG-0605');
+  assertEqual(GAME_COMMAND_NAMES.length, 50, 'the captured vocabulary is 50 names after UIFLAP owner tracing');
   for (const name of GAME_COMMAND_NAMES) {
     assert(registered.has(name), `${name} must be registered`);
   }
@@ -37,8 +37,8 @@ test('all 49 command names are registered — the script language plus diagnosti
 test('every not-yet command fails LOUDLY, never silently (the capture boundary)', () => {
   const { registry, game } = freshConsole();
   const pending = Object.values(NOT_YET_CAPTURED).flat();
-  assert(pending.length >= 15, 'the pending list covers the uncaptured systems');
-  for (const flipped of ['gv_noise', 'gv_save', 'gv_load', 'wv_place', 'wv_fill', 'wv_remove', 'wv_trigger', 'pv_respawn', 'gv_perflog', 'log']) {
+  assert(pending.length >= 14, 'the pending list covers the uncaptured systems');
+  for (const flipped of ['gv_noise', 'gv_save', 'gv_load', 'wv_place', 'wv_fill', 'wv_remove', 'wv_trigger', 'pv_respawn', 'gv_perflog', 'log', 'wv_validate']) {
     assert(!pending.includes(flipped), `${flipped} has a captured owner and must not stay in the pending list`);
   }
   for (const name of pending) {
@@ -80,14 +80,81 @@ test('log command toggles diagnostics channels live and dump writes a snapshot',
   assert(overhead.output.join('\n').includes('perCallNs ='), 'overhead report must expose the all-off branch cost');
 });
 
-test('gv_perflog is a compatibility alias onto the spike diagnostics channel', () => {
+test('gv_perflog matches the reference spike recorder modes, including host trace level 2', () => {
   const { registry, game } = freshConsole();
-  const on = registry.run(game, 'gv_perflog 1');
-  assertEqual(on.ok, true, 'gv_perflog must no longer be a not-yet stub');
-  assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled('spikes'), true, 'gv_perflog 1 enables spikes');
-  const off = registry.run(game, 'gv_perflog 0');
-  assertEqual(off.ok, true, 'gv_perflog 0 must run');
-  assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled('spikes'), false, 'gv_perflog 0 disables spikes');
+  const host = globalThis as Record<string, unknown>;
+  const previousTrace = host.__hmsc_spike_trace;
+  const hostTraceCalls: number[] = [];
+  host.__hmsc_spike_trace = (enabled: number) => hostTraceCalls.push(enabled);
+  try {
+    const level2 = registry.run(game, 'gv_perflog 2 1.4 2.5');
+    assertEqual(level2.ok, true, 'gv_perflog 2 must run');
+    assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled('spikes'), true, 'gv_perflog 2 forces spikes on');
+    assertEqual(hostTraceCalls[0], 1, 'gv_perflog 2 enables the host-side spike trace');
+    const level2Text = level2.output.join('\n');
+    assert(level2Text.includes('+ host-trace ON'), 'mode 2 must announce host trace');
+    assert(level2Text.includes('spikeRatio 1.4'), 'mode 2 must carry spikeRatio tuning');
+    assert(level2Text.includes('minJump 2.50ms'), 'mode 2 must carry minJumpMs tuning');
+    assertEqual(level2.suppressTranscript, true, 'gv_perflog must not seed the live console with diagnostic text churn');
+
+    const on = registry.run(game, 'gv_perflog 1');
+    assertEqual(on.ok, true, 'gv_perflog 1 must run');
+    assertEqual(hostTraceCalls[1], 0, 'gv_perflog 1 turns host trace off like the reference');
+    assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled('spikes'), true, 'gv_perflog 1 keeps spikes enabled');
+    const off = registry.run(game, 'gv_perflog 0');
+    assertEqual(off.ok, true, 'gv_perflog 0 must run');
+    assertEqual(hostTraceCalls[2], 0, 'gv_perflog 0 leaves host trace off');
+    assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled('spikes'), false, 'gv_perflog 0 disables spikes');
+
+    const badRatio = registry.run(game, 'gv_perflog 2 1');
+    assertEqual(badRatio.ok, false, 'spikeRatio must keep the reference lower bound');
+    assert(badRatio.output[0].includes('spikeRatio must be greater than 1'), 'bad ratio failure must name the bound');
+    const badJump = registry.run(game, 'gv_perflog 2 1.2 -1');
+    assertEqual(badJump.ok, false, 'minJumpMs must keep the reference lower bound');
+    assert(badJump.output[0].includes('minJumpMs must be >= 0'), 'bad minJump failure must name the bound');
+  } finally {
+    GAME_TELEMETRY.stopSpikeWatch();
+    GAME_TELEMETRY.setDiagnosticChannel('spikes', false);
+    GAME_TELEMETRY.configureSpikeWatch({
+      spikeRatio: GAME_TELEMETRY.tuning.spike.spikeRatio,
+      minJumpUs: GAME_TELEMETRY.tuning.spike.minJumpUs,
+      cooldownMs: GAME_TELEMETRY.tuning.spike.cooldownMs,
+      recorderFrames: GAME_TELEMETRY.tuning.spike.recorderFrames,
+      historyFrames: GAME_TELEMETRY.tuning.spike.historyFrames,
+    });
+    if (previousTrace === undefined) delete host.__hmsc_spike_trace;
+    else host.__hmsc_spike_trace = previousTrace;
+  }
+});
+
+test('gv_churntrace arms the live UIFLAP owner trace and spike recorder together', () => {
+  const { registry, game } = freshConsole();
+  const host = globalThis as Record<string, unknown>;
+  const previousSet = host.__RECON_CHURN_SET;
+  const previousStatus = host.__RECON_CHURN_STATUS;
+  let traceEnabled = false;
+  host.__RECON_CHURN_SET = (enabled: boolean) => { traceEnabled = enabled; return enabled; };
+  host.__RECON_CHURN_STATUS = () => ({ enabled: traceEnabled, recent: 0 });
+  try {
+    const on = registry.run(game, 'gv_churntrace 1');
+    assertEqual(on.ok, true, 'gv_churntrace 1 must run');
+    assertEqual(traceEnabled, true, 'gv_churntrace 1 enables the reconciler owner trace');
+    assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled('spikes'), true, 'gv_churntrace 1 enables spike reports');
+    assert(on.output.join('\n').includes('component/source/text/font-size'), 'the command must explain the next spike payload');
+    assertEqual(on.suppressTranscript, true, 'gv_churntrace must not render its own diagnostic prose into the measured scene');
+
+    const off = registry.run(game, 'gv_churntrace 0');
+    assertEqual(off.ok, true, 'gv_churntrace 0 must run');
+    assertEqual(traceEnabled, false, 'gv_churntrace 0 disables the reconciler owner trace');
+    assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled('spikes'), false, 'gv_churntrace 0 stops the spike recorder it armed');
+  } finally {
+    GAME_TELEMETRY.stopSpikeWatch();
+    GAME_TELEMETRY.setDiagnosticChannel('spikes', false);
+    if (previousSet === undefined) delete host.__RECON_CHURN_SET;
+    else host.__RECON_CHURN_SET = previousSet;
+    if (previousStatus === undefined) delete host.__RECON_CHURN_STATUS;
+    else host.__RECON_CHURN_STATUS = previousStatus;
+  }
 });
 
 test('wv_prop is partial: kind table answers, placement fails loud', () => {
@@ -128,8 +195,12 @@ test('noclip is cheat-gated; disabling cheats revokes it (reference behavior)', 
   assertEqual(denied.ok, false, 'noclip without cheats must fail');
   assert(denied.output[0].includes('cmd_cheats 1 required'), 'the gate must name its key');
   registry.run(game, 'cmd_cheats 1');
+  game.player.physics.velocity = { x: 3, y: -2, z: 1 };
+  game.player.physics.grounded = true;
   assertEqual(registry.run(game, 'pv_noclip 1').ok, true, 'noclip with cheats must work');
   assertEqual(game.player.noclip, true, 'the flag must set');
+  assertEqual(game.player.physics.velocity.x, 0, 'enabling noclip zeroes velocity');
+  assertEqual(game.player.physics.grounded, false, 'enabling noclip makes the player ungrounded');
   registry.run(game, 'cmd_cheats 0');
   assertEqual(game.player.noclip, false, 'disabling cheats must clear noclip');
 });
@@ -257,10 +328,7 @@ test('gv_save and gv_load require a mounted persistence door and restore the com
 test('cmd_help teaches the whole surface, including pending commands', () => {
   const { registry, game } = freshConsole();
   const help = registry.run(game, 'cmd_help');
-  // 49 command names + the bare `help` alias (registered for the player —
-  // the unknown-command hint says "try: help", so help must exist) + `shot`
-  // (SELFSHOT-0606 frame self-capture).
-  assertEqual(help.output.length, 51, 'help lists every registered command');
+  assertEqual(help.output.length, registry.list().length, 'help lists every registered command');
   const one = registry.run(game, 'cmd_help wv_road');
   assertEqual(one.ok, true, 'help on a pending command still teaches its usage');
   assert(one.output[1].includes('usage: wv_road'), 'the usage line must print');
@@ -319,6 +387,50 @@ test('wv_mountain lists landform instances and drops the player at the trailhead
   assertClose(game.player.position.z, 148, 1e-6, 'trailhead radius = baseRadius');
   assertClose(game.player.position.y, 0.05, 1e-9, 'the drop-in lift is the named tuning value');
   assertEqual(registry.run(game, 'wv_mountain trailhead nope').ok, false, 'an unknown id fails loud');
+});
+
+test('CONPORT-B wv_validate audits captured placements and previews building/prop modes', () => {
+  const { registry, game } = freshConsole();
+  const empty = registry.run(game, 'wv_validate');
+  assertEqual(empty.ok, true, 'bare validate runs on an empty world');
+  assertEqual(empty.output[0], 'nothing placed to validate', 'empty audit mirrors the reference');
+
+  game.world.landforms.push({
+    id: 'mountain_a', kind: 'mountain', label: 'Mount Test',
+    centerX: 100, centerZ: 100, baseY: 0,
+    params: { baseRadius: 48, peak: 30, trailStartAngle: Math.PI / 2 },
+    createdByCommand: 'test',
+  });
+  const one = registry.run(game, 'wv_validate mountain_a');
+  assertEqual(one.ok, true, 'single-id audit runs');
+  assert(one.output[0].startsWith('mountain_a (Mount Test):'), 'single-id audit labels the subject');
+  assert(one.output.join('\n').includes('over the void'), 'single-id audit runs tile-under validation');
+
+  const all = registry.run(game, 'wv_validate');
+  assertEqual(all.ok, true, 'whole-world audit runs');
+  assert(all.output[0].includes('issue(s) across 1/1 placed things'), 'whole-world audit summarizes flagged subjects');
+  assert(all.output.join('\n').includes('mountain_a (Mount Test):'), 'whole-world audit lists the flagged id');
+
+  const prop = registry.run(game, 'wv_validate prop bush 3 4');
+  assertEqual(prop.ok, true, 'prop preview mode runs');
+  assert(prop.output[0].startsWith('preview Bush @ [1.8,2.8]:'), 'prop preview uses the kind footprint');
+
+  const building = registry.run(game, 'wv_validate building house 10 20');
+  assertEqual(building.ok, true, 'building preview mode runs');
+  assert(building.output[0].startsWith('preview House @ [10,20]:'), 'building preview uses the default footprint');
+
+  game.world.buildings = [{ id: 'building_a', kind: 'house', label: 'Placed House', x: 1, z: 2, widthTiles: 6, depthTiles: 5 }];
+  game.world.props = [{ id: 'prop_a', kind: 'rock', x: 4, z: 5 }];
+  const placedBuilding = registry.run(game, 'wv_validate building_a');
+  assertEqual(placedBuilding.ok, true, 'placed building id audit runs when the layer is present');
+  assert(placedBuilding.output[0].startsWith('building_a (Placed House):'), 'placed building id audit labels the subject');
+  const placedProp = registry.run(game, 'wv_validate prop_a');
+  assertEqual(placedProp.ok, true, 'placed prop id audit runs when the layer is present');
+  assert(placedProp.output[0].startsWith('prop_a (Rock):'), 'placed prop id audit labels the subject');
+
+  const missing = registry.run(game, 'wv_validate no_such_id');
+  assertEqual(missing.ok, false, 'unknown id fails loud');
+  assert(missing.output[0].includes('no building/prop/landform with id no_such_id'), 'unknown id keeps reference wording');
 });
 
 test('a verify script over captured commands runs green end to end (V19)', () => {

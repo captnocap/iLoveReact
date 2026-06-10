@@ -4,9 +4,9 @@
 // reading a storage buffer (same architecture as the heightfield). The place layer
 // renders the same map READ-ONLY as the ground under object placements.
 
-import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
-import { hexToRgb01 } from '../hmsc/world/placeables';
-import type { TileKind } from '../hmsc/design';
+import { TILE_KINDS, tileKindDefinition } from './world/tileKinds';
+import { hexToRgb01 } from './world/placeables';
+import type { TileKind } from './design';
 
 // Linear-ish RGB for every tile kind, indexed by TILE_KINDS order — shipped in
 // the Effect buffer so the shader maps a cell's index → colour with no JS per cell.

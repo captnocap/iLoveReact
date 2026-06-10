@@ -12,10 +12,10 @@ import {
   lastPointerPath,
   type SessionEnvelope,
 } from '@reactjit/workspace';
-import type { BuildingFaceRole, BuildingSkin, GameState } from '../hmsc/design';
+import type { BuildingFaceRole, BuildingSkin, GameState } from './design';
 import { applyFaceSkin } from './buildingEditor';
 import { compileEditorWorld, emptyEditorWorld, placeMarker, placeWorldProp } from './editorWorld';
-import { cellCenterToWorld, cellKey as gridCellKey } from '../hmsc/world/grid';
+import { cellCenterToWorld, cellKey as gridCellKey } from './world/grid';
 import { type ChunkFloor, floorsFromEditorWorld, floorsToLandforms } from './chunkFloor';
 import { IsoPreview, type PreviewCamera, type PreviewCameraApi } from './IsoPreview';
 import { IsoAuthor } from './IsoAuthor';
@@ -33,7 +33,7 @@ import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog
 import { listMaps, uniqueMapName, sanitizeMapName, mapExists, deleteMap } from './projects';
 import { TILE_UNITS, HEIGHT_LIMIT } from './heightData';
 import { CHUNK_TILES } from './chunks';
-import type { TileKind } from '../hmsc/design';
+import type { TileKind } from './design';
 import {
   cellKey, serializeOverrides, deserializeOverrides,
   type SelCell, type OverrideStore, type OverrideValue, type OverrideSnap,

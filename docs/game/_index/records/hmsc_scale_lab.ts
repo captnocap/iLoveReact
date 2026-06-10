@@ -7,7 +7,7 @@ export const hmsc_scale_lab: DocIndex = {
   purpose: ['rendering', 'character', 'geometry', 'camera', 'debug', 'texture_bake'],
   loc: 300,
   summary:
-    'A measurement instrument (not a game) that renders the HMSC player figure inside a 3D scale room so a human can visually verify that every world metric in cart/hmsc/world/scale.ts agrees with the player’s painted body.',
+    'A measurement instrument (not a game) that renders the HMSC player figure inside a 3D scale room so a human can visually verify that every world metric in cart/hmsc-int/world/scale.ts agrees with the player’s painted body.',
   interfaces: [
     {
       name: 'HmscScaleLab',
@@ -103,21 +103,21 @@ export const hmsc_scale_lab: DocIndex = {
       name: 'HMSC_SCALE',
       purpose: ['world_gen', 'physics', 'building', 'vehicle'],
       kind: 'data_model',
-      sourceFile: 'cart/hmsc/world/scale.ts',
+      sourceFile: 'cart/hmsc-int/world/scale.ts',
       description:
         'The world-metric contract object: 1 tile = 1m; capsule 1.65m×0.34r, step 0.35m, door 1×2.4m, story 3m, car/bus/room dimensions. Single source of truth; this lab reads 9 fields as its checker.',
       consumers: [
-        'cart/hmsc/world/buildings.ts',
-        'cart/hmsc/world/structures.ts',
-        'cart/hmsc/world/interiors.ts',
-        'cart/hmsc/world/propKinds.ts',
-        'cart/hmsc/world/placementCheck.ts',
-        'cart/hmsc/world/roadProfile.ts',
-        'cart/hmsc/world/buildingKinds.ts',
-        'cart/hmsc/world/grid.ts',
-        'cart/hmsc/render3d/GameWorld3D.tsx',
-        'cart/hmsc/render3d/Building.tsx',
-        'cart/hmsc/state/defaults.ts',
+        'cart/hmsc-int/world/buildings.ts',
+        'cart/hmsc-int/world/structures.ts',
+        'cart/hmsc-int/world/interiors.ts',
+        'cart/hmsc-int/world/propKinds.ts',
+        'cart/hmsc-int/world/placementCheck.ts',
+        'cart/hmsc-int/world/roadProfile.ts',
+        'cart/hmsc-int/world/buildingKinds.ts',
+        'cart/hmsc-int/world/grid.ts',
+        'cart/hmsc-int/render3d/GameWorld3D.tsx',
+        'cart/hmsc-int/render3d/Building.tsx',
+        'cart/hmsc-int/state/defaults.ts',
         'cart/hmsc_massive_map_lab.tsx',
         'cart/hmsc_scale_lab.tsx',
       ],
@@ -127,7 +127,7 @@ export const hmsc_scale_lab: DocIndex = {
       name: 'PlayerFigure',
       purpose: ['character', 'rendering'],
       kind: 'component',
-      sourceFile: 'cart/hmsc/render3d/PlayerFigure.tsx',
+      sourceFile: 'cart/hmsc-int/render3d/PlayerFigure.tsx',
       description:
         '23-line thin wrapper: gait pose (drivePose) → skeleton solve (solveHumanoid with PLAYER_FACE_KEY) → <Figure rig palette={PLAYER_PALETTE} marker>. Its header comment is the contract that any mount must also mount HumanoidFaceCaptures.',
       dependsOn: ['drivePose', 'solveHumanoid', 'Figure', 'PLAYER_PALETTE', 'PLAYER_FACE_KEY'],
@@ -138,7 +138,7 @@ export const hmsc_scale_lab: DocIndex = {
       name: 'solveHumanoid',
       purpose: ['character', 'geometry', 'math', 'damage'],
       kind: 'utility',
-      sourceFile: 'cart/hmsc/render3d/humanoid/skeleton.ts',
+      sourceFile: 'cart/hmsc-int/render3d/humanoid/skeleton.ts',
       description:
         'Solves a pose into world-space joints and emits BOTH render parts (rig.parts) and hit capsules (rig.zones) from the same joints — mesh and hitbox can never drift. Plain JS trig (rotateY/rotateX/segmentPose).',
       consumers: ['PlayerFigure'],
@@ -148,7 +148,7 @@ export const hmsc_scale_lab: DocIndex = {
       name: 'drivePose',
       purpose: ['animation', 'character'],
       kind: 'utility',
-      sourceFile: 'cart/hmsc/render3d/humanoid/pose.ts',
+      sourceFile: 'cart/hmsc-int/render3d/humanoid/pose.ts',
       description:
         'drivePose(seconds, moving, running) — the one gait. This lab passes (0,false,false) so only the idle branch runs; the figure is a statue.',
       consumers: ['PlayerFigure'],
@@ -158,7 +158,7 @@ export const hmsc_scale_lab: DocIndex = {
       name: 'Figure',
       purpose: ['character', 'rendering', 'texture_bake'],
       kind: 'component',
-      sourceFile: 'cart/hmsc/render3d/humanoid/Figure.tsx',
+      sourceFile: 'cart/hmsc-int/render3d/humanoid/Figure.tsx',
       description:
         'The ONE humanoid renderer — maps rig.parts to <Scene3D.Mesh>, resolving each part’s MaterialSlot through a palette; draws the teal marker when passed; renders any textured part white so the bake reads true (line 29).',
       dependsOn: ['solveHumanoid'],
@@ -168,7 +168,7 @@ export const hmsc_scale_lab: DocIndex = {
       name: 'PLAYER_PALETTE',
       purpose: ['character', 'color'],
       kind: 'registry',
-      sourceFile: 'cart/hmsc/render3d/humanoid/palette.ts',
+      sourceFile: 'cart/hmsc-int/render3d/humanoid/palette.ts',
       description:
         'Slot→hex color map for the player. NPC palettes (NPC_PALETTES) live in the same file, used here only indirectly via the face pool.',
       status: 'live',
@@ -177,8 +177,8 @@ export const hmsc_scale_lab: DocIndex = {
       name: 'HumanoidFaceCaptures',
       purpose: ['character', 'texture_bake', 'rendering'],
       kind: 'component',
-      sourceFile: 'cart/hmsc/render3d/humanoid/face.tsx',
-      codeRef: 'cart/hmsc/render3d/humanoid/face.tsx:218',
+      sourceFile: 'cart/hmsc-int/render3d/humanoid/face.tsx',
+      codeRef: 'cart/hmsc-int/render3d/humanoid/face.tsx:218',
       description:
         'The baked face decal pool: player + all 4×6 NPC palette×feature combos as StaticSurface nodes parked at left:-99999, each a 96px composition of plain Boxes. Bakes once (static identities); StaticSurface→textureKey feeds the Head decal.',
       emits: ['PLAYER_FACE_KEY'],
@@ -189,7 +189,7 @@ export const hmsc_scale_lab: DocIndex = {
       name: 'PLAYER_FACE_KEY',
       purpose: ['character', 'texture_bake'],
       kind: 'utility',
-      sourceFile: 'cart/hmsc/render3d/humanoid/face.tsx',
+      sourceFile: 'cart/hmsc-int/render3d/humanoid/face.tsx',
       description:
         'The face texture key passed into solveHumanoid to swap the head part to Geometry.Head and resolve the baked player face texture.',
       status: 'live',
@@ -358,9 +358,9 @@ export const hmsc_scale_lab: DocIndex = {
       name: 'ScaleLabScene.tsx orphan duplicate',
       purpose: ['maintenance', 'rendering'],
       description:
-        'cart/hmsc/labs/ScaleLabScene.tsx is a near-verbatim orphaned copy of this cart’s scene (re-implements MeterBlock/HeightLine/RulerTick/DoorFrame/capsule/ground/height lines, offset by labX/labZ). Nothing imports it (grep finds zero consumers) and it has already drifted.',
+        'cart/hmsc-int/labs/ScaleLabScene.tsx is a near-verbatim orphaned copy of this cart’s scene (re-implements MeterBlock/HeightLine/RulerTick/DoorFrame/capsule/ground/height lines, offset by labX/labZ). Nothing imports it (grep finds zero consumers) and it has already drifted.',
       evidence: [
-        'cart/hmsc/labs/ScaleLabScene.tsx purple height line uses PLAYER_VISUAL_TOTAL_HEIGHT (2.45m) where the cart draws it at PLAYER_VISUAL_HEAD_TOP (2.04m)',
+        'cart/hmsc-int/labs/ScaleLabScene.tsx purple height line uses PLAYER_VISUAL_TOTAL_HEIGHT (2.45m) where the cart draws it at PLAYER_VISUAL_HEAD_TOP (2.04m)',
       ],
       fix: 'Make it the shared "scale reference scene" module both the standalone cart and any in-game embed import, or delete the orphan.',
       severity: 'high',
@@ -417,7 +417,7 @@ export const hmsc_scale_lab: DocIndex = {
       purpose: ['texture_bake', 'character', 'maintenance'],
       description:
         'The invariant "any mount drawing the figure must also mount HumanoidFaceCaptures next to its Scene3D" is documented only in a comment in PlayerFigure.tsx:15–17; omit it and faces fail to resolve.',
-      evidence: ['cart/hmsc/render3d/PlayerFigure.tsx:15–17'],
+      evidence: ['cart/hmsc-int/render3d/PlayerFigure.tsx:15–17'],
       fix: 'Promote to a documented glossary-level invariant.',
       severity: 'medium',
     },

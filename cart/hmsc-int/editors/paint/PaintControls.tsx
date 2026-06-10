@@ -12,9 +12,13 @@ import { Box, Col, Pressable, Row, ScrollView, Text } from '@reactjit/runtime/pr
 import { GAME_CHROME } from '../../game/chrome';
 import { PAINT_TUNING } from './tuning';
 import { MASK_SURFACES, maskSurfaceLabel, NUM_COLOR_SLOTS, PAINT_BLEND_MODES, SLOT_LABELS } from './surfaces';
+import { PAINT_BRUSH_PRESETS } from './brushKinds';
 import type { PaintTool, PaintMode } from './layers';
 import type { PaintEditorState } from './usePaintEditor';
 import { PaintSurface } from './PaintSurface';
+import { PaintLayerStrip } from './LayerStrip';
+
+export { PaintLayerStrip } from './LayerStrip';
 
 const { Chip, Knob } = GAME_CHROME;
 const T = GAME_CHROME.tokens.color;
@@ -40,6 +44,11 @@ const KNOBS = {
   reject: { min: 0.01, max: 0.2, step: 0.01, precision: 2 },
   samThreshold: { min: -8, max: 8, step: 1, precision: 0 },
   samMask: { min: 0, max: 2, step: 1, precision: 0 },
+  angle: { min: -180, max: 180, step: 5, precision: 0 },
+  aspect: { min: 0.2, max: 8, step: 0.1, precision: 1 },
+  hardness: { min: 0, max: 1, step: 0.05, precision: 2 },
+  flow: { min: 0.02, max: 1, step: 0.05, precision: 2 },
+  scatter: { min: 0, max: 3, step: 0.05, precision: 2 },
 };
 
 export function PaintToolRail({ s }: { s: PaintEditorState }) {
@@ -73,10 +82,26 @@ export function PaintToolRail({ s }: { s: PaintEditorState }) {
       </Row>
       <Text style={{ color: T.dim, fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>BRUSH</Text>
       <Row style={{ gap: 6, flexWrap: 'wrap' }}>
+        {PAINT_BRUSH_PRESETS.map((preset) => (
+          <Chip
+            key={preset.label}
+            label={preset.label}
+            active={s.brush.kind === preset.kind}
+            color="cyan"
+            onPress={() => s.setBrushPreset(preset)}
+          />
+        ))}
+      </Row>
+      <Row style={{ gap: 6, flexWrap: 'wrap' }}>
         {PAINT_TUNING.brushSizes.map((px) => (
           <Chip key={px} label={`${px}`} active={s.brushPx === px} color="dim" onPress={() => s.setBrushPx(px)} />
         ))}
       </Row>
+      <Knob label="angle" value={s.brush.angleDeg} spec={KNOBS.angle} onChange={(v) => s.setBrushSettings({ angleDeg: v })} />
+      <Knob label="aspect" value={s.brush.aspect} spec={KNOBS.aspect} onChange={(v) => s.setBrushSettings({ aspect: v })} />
+      <Knob label="hard" value={s.brush.hardness} spec={KNOBS.hardness} onChange={(v) => s.setBrushSettings({ hardness: v })} />
+      <Knob label="flow" value={s.brush.flow} spec={KNOBS.flow} onChange={(v) => s.setBrushSettings({ flow: v })} />
+      <Knob label="scatter" value={s.brush.scatter} spec={KNOBS.scatter} onChange={(v) => s.setBrushSettings({ scatter: v })} />
       <Text style={{ color: T.dim, fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>COLOR</Text>
       <Row style={{ gap: 6 }}>
         {SLOT_LABELS.slice(0, NUM_COLOR_SLOTS).map((label, i) => (
@@ -96,55 +121,6 @@ export function PaintToolRail({ s }: { s: PaintEditorState }) {
         ))}
       </Row>
     </Col>
-  );
-}
-
-export function PaintLayerStrip({ s }: { s: PaintEditorState }) {
-  return (
-    <Col style={{ gap: 6 }}>
-      <Row style={{ gap: 6, alignItems: 'center' }}>
-        <Text style={{ color: T.dim, fontSize: 10, fontWeight: '800', letterSpacing: 1, flexGrow: 1 }}>LAYERS</Text>
-        <Chip label="+ add" color="good" onPress={() => s.addLayer()} />
-        <Chip label="paste" color="dim" onPress={s.pasteLayer} />
-      </Row>
-      <ScrollView style={{ maxHeight: 220 }}>
-        <Col style={{ gap: 4 }}>
-          {s.layers.map((layer, i) => {
-            const active = i === s.activeLayer;
-            return (
-              <Pressable key={layer.id} onPress={() => s.setActiveLayer(i)}>
-                <Row style={{
-                  gap: 6, alignItems: 'center',
-                  paddingHorizontal: 8, paddingVertical: 5,
-                  borderRadius: 5, borderWidth: 1,
-                  borderColor: active ? T.accent : T.frame,
-                  backgroundColor: active ? T.controlAlt : T.control,
-                }}>
-                  <Box style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: layer.config.muted ? T.dim : T.good }} />
-                  <Text style={{ color: active ? T.ink : T.dim, fontSize: 11, flexGrow: 1 }} numberOfLines={1}>
-                    {layer.name}{layer.groupName ? ` · ${layer.groupName}` : ''}
-                  </Text>
-                  <MiniAction label={layer.config.muted ? 'show' : 'hide'} onPress={() => s.toggleLayerMute(i)} />
-                  <MiniAction label="dup" onPress={() => s.duplicateLayer(i)} />
-                  <MiniAction label="↑" onPress={() => s.moveLayer(i, 1)} />
-                  <MiniAction label="↓" onPress={() => s.moveLayer(i, -1)} />
-                  <MiniAction label="merge" onPress={() => s.mergeLayer(i)} />
-                  <MiniAction label="✕" tone={T.bad} onPress={() => s.deleteLayer(i)} />
-                </Row>
-              </Pressable>
-            );
-          })}
-        </Col>
-      </ScrollView>
-    </Col>
-  );
-}
-
-function MiniAction({ label, onPress, tone }: { label: string; onPress: () => void; tone?: string }) {
-  return (
-    <Pressable onPress={onPress}>
-      <Text style={{ color: tone ?? T.dim, fontSize: 10, paddingHorizontal: 2 }}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -217,7 +193,9 @@ export function PaintEditor({ s, style }: { s: PaintEditorState; style?: Record<
         backgroundColor: T.panelSolid,
         borderRightWidth: 1, borderColor: T.frame,
       }}>
-        <PaintToolRail s={s} />
+        <ScrollView showScrollbar style={{ flexGrow: 1 }}>
+          <PaintToolRail s={s} />
+        </ScrollView>
       </Col>
       <PaintSurface s={s} />
       <Col style={{

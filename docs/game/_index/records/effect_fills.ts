@@ -23,8 +23,8 @@ export const effect_fills: DocIndex = {
       name: 'FILL_SHADER',
       purpose: ['shader', 'texture_bake'],
       kind: 'shader',
-      sourceFile: 'cart/hmsc/render3d/fillShader.ts',
-      codeRef: 'cart/hmsc/render3d/fillShader.ts:1566',
+      sourceFile: 'cart/hmsc-int/render3d/fillShader.ts',
+      codeRef: 'cart/hmsc-int/render3d/fillShader.ts:1566',
       description:
         'The canonical WGSL mega-shader (1653 lines): ~30 shared noise/pattern helpers, ~58 material functions, a per-board quality_pass finisher, and an fs_main dispatch chain reading the 5 floats. Header is explicit: exactly one copy of the WGSL, canonical copy lives game-side. fs_main at line 1566.',
       consumers: ['effect_fills', 'textureShaders.ts'],
@@ -45,7 +45,7 @@ export const effect_fills: DocIndex = {
       name: 'Fill parameter contract (D[0..4])',
       purpose: ['shader', 'format'],
       kind: 'data_model',
-      sourceFile: 'cart/hmsc/render3d/fillShader.ts',
+      sourceFile: 'cart/hmsc-int/render3d/fillShader.ts',
       description:
         'The load-bearing 5-float layout: D[0] materialId, D[1] variant (0|1|2), D[2] seed, D[3] quality (0 PSX..4 Max), D[4] board (0..7=A..H). Crosses as effectData into the storage buffer D.',
       status: 'live',
@@ -54,8 +54,8 @@ export const effect_fills: DocIndex = {
       name: 'quality_pass',
       purpose: ['shader', 'rendering'],
       kind: 'shader',
-      sourceFile: 'cart/hmsc/render3d/fillShader.ts',
-      codeRef: 'cart/hmsc/render3d/fillShader.ts:1505',
+      sourceFile: 'cart/hmsc-int/render3d/fillShader.ts',
+      codeRef: 'cart/hmsc-int/render3d/fillShader.ts:1505',
       description:
         'The unifying post-pass: above Preview adds fbm grain/flecks/scratches scaled by q; below applies the retro register (ordered dither, color quantization, desaturation, banding). Each board gets a tone-specific grade (B/F mold+lint, E bloom/no grime, G frost-bloom, H aggregate fleck) — the TONE duality enforced in the post-pass.',
       status: 'live',
@@ -64,7 +64,7 @@ export const effect_fills: DocIndex = {
       name: 'Material function',
       purpose: ['shader'],
       kind: 'shader',
-      sourceFile: 'cart/hmsc/render3d/fillShader.ts',
+      sourceFile: 'cart/hmsc-int/render3d/fillShader.ts',
       description:
         'A pure WGSL (uv, px, variant, seed) -> vec3f look builder; ~58 exist (road, brick, mold_wall, neon_tube, crt_screen, cash_stack, blood_pool, stained_glass, asphalt, ...) composed from the shared helper set; variant branches within a material.',
       status: 'live',
@@ -73,8 +73,8 @@ export const effect_fills: DocIndex = {
       name: 'textureShaders.ts (FILL_SPECS / fillSpec)',
       purpose: ['shader', 'texture_bake', 'asset_pipeline'],
       kind: 'registry',
-      sourceFile: 'cart/hmsc/render3d/textureShaders.ts',
-      codeRef: 'cart/hmsc/render3d/textureShaders.ts:237',
+      sourceFile: 'cart/hmsc-int/render3d/textureShaders.ts',
+      codeRef: 'cart/hmsc-int/render3d/textureShaders.ts:237',
       description:
         'The game-side consumer: fillSpec() (line 237) wraps each board material into a ShaderSpec with named range-bounded draggable params (seed + grade base, per-variant seedShift) and a buildData re-emitting the 5-float layout. FILL_SPECS = FILL_BOARDS.flatMap(...) registers all ~58 materials for the texture-studio Materialize pipeline.',
       dependsOn: ['FILL_SHADER', 'FILL_BOARDS'],
@@ -85,7 +85,7 @@ export const effect_fills: DocIndex = {
       name: 'FILL_BOARDS',
       purpose: ['shader', 'format'],
       kind: 'registry',
-      sourceFile: 'cart/hmsc/render3d/textureShaders.ts',
+      sourceFile: 'cart/hmsc-int/render3d/textureShaders.ts',
       description:
         'Game-side board table carrying per-board material names and seedCoef (the seed-spread prime coefficients duplicated from fillData) so the game specs reproduce the exact authored swatches.',
       status: 'live',
@@ -142,7 +142,7 @@ export const effect_fills: DocIndex = {
       purpose: ['shader', 'rendering'],
       description:
         'One WGSL / one pipeline for the whole material library, selection by uniform data (D[]) instead of shader swaps. Same family as ShaderPixelIcon palette-lookup, scaled to 58 materials.',
-      examples: ['effect_fills', 'cart/hmsc/render3d/fillShader.ts'],
+      examples: ['effect_fills', 'cart/hmsc-int/render3d/fillShader.ts'],
       status: 'recurring',
     },
     {
@@ -220,7 +220,7 @@ export const effect_fills: DocIndex = {
       purpose: ['texture_bake', 'rendering'],
       description:
         'Materials reading U.time (water, grass, neon-tube buzz, CRT roll/static, embers) require the live StaticSurface->textureKey path; baking them once freezes the animation. CATALOG marks exactly these as Live?.',
-      evidence: ['effect_fills.md Glossary: Live fill', 'cart/hmsc/render3d/fillShader.ts'],
+      evidence: ['effect_fills.md Glossary: Live fill', 'cart/hmsc-int/render3d/fillShader.ts'],
       severity: 'medium',
     },
     {
@@ -243,7 +243,7 @@ export const effect_fills: DocIndex = {
       name: 'Shader ownership: canonical copy is game-side, not the cart',
       purpose: ['shader', 'maintenance'],
       description:
-        'FILL_SHADER is authored in effect_fills but its canonical home is cart/hmsc/render3d/fillShader.ts because the game texture catalog registers these looks; the header insists on exactly one copy. Editing a stray copy would diverge the eval from the game.',
+        'FILL_SHADER is authored in effect_fills but its canonical home is cart/hmsc-int/render3d/fillShader.ts because the game texture catalog registers these looks; the header insists on exactly one copy. Editing a stray copy would diverge the eval from the game.',
       evidence: ['effect_fills.md: "authored in effect_fills, canonical copy lives game-side ... exactly one copy of the WGSL"'],
       severity: 'medium',
     },

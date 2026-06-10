@@ -47,7 +47,7 @@ import type {
   BuildFaceSkin, BuildFaceSlot, BuildMaterial, BuildPieceDef, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingsStreamState, PieceRay,
   PlacedBuildPiece, WallEdit, WorldEvent, WorldStreamState,
 } from '@game';
-import type { GameState } from '../../../hmsc/design'; // GAP: retires when hmsc becomes compile/'s output (V15)
+import type { GameState } from '../../design'; // GAP: retires when hmsc becomes compile/'s output (V15)
 import {
   EmbodiedCaptures, EmbodiedMouseSurface, EmbodiedScene, PLAYER_CAMERA,
   groundColumnTop, normalizeYawDegrees, readEmbodiedCameraNode, useEmbodiedPlayer, worldGridOf,

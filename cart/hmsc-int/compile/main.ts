@@ -18,6 +18,8 @@
 
 import { openStreamStore } from '../data';
 import { GAME_COMMANDS, GAME_LOOP, GAME_PATHING, GAME_PHYSICS, type GameCommandState } from '../game';
+import { createInitialGameState } from '../state/gameState';
+import { createHmscMapfile, factsFromGameState, factsFromMapfile } from '../packageMap';
 
 declare const globalThis: any;
 
@@ -34,6 +36,13 @@ type HeadlessGame = ReturnType<typeof GAME_COMMANDS.createGameState> & {
 
 type SavedCommandState = GameCommandState | null;
 type CommandSaveEvent = { type: 'saved'; state: GameCommandState };
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    return Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b)));
+  });
+}
 
 function buildRegistry() {
   const registry = GAME_COMMANDS.createRegistry<HeadlessGame>();
@@ -83,6 +92,27 @@ function buildRegistry() {
     run: (game) => [
       `booted=${game.booted ? 1 : 0} tick=${game.tick} events=${game.events.recent.length} entities=${Object.keys(game.world.spawnedEntities).length}`,
     ],
+  });
+
+  registry.define({
+    name: 'map_roundtrip',
+    usage: 'map_roundtrip',
+    summary: 'compile the boot world to mapfile and assert equivalent facts',
+    run: () => {
+      const bootState = createInitialGameState();
+      const bootFacts = factsFromGameState(bootState);
+      const mapFacts = factsFromMapfile(createHmscMapfile(bootState));
+      const bootJson = canonicalJson(bootFacts);
+      const mapJson = canonicalJson(mapFacts);
+      if (bootJson !== mapJson) {
+        throw new Error(`mapfile facts differ boot=${bootJson} map=${mapJson}`);
+      }
+      return [
+        `map_roundtrip session=${mapFacts.sessionName} layout=${mapFacts.layoutKey}`,
+        `map_roundtrip counts regions=${mapFacts.surfaceRegions} placed=${mapFacts.placedCells} props=${mapFacts.props} zones=${mapFacts.zones.length}`,
+        `map_roundtrip samples tiles=${mapFacts.tileSamples.join(',')} heights=${mapFacts.heightSamples.join(',')}`,
+      ];
+    },
   });
 
   // `help` is the vocabulary's now (defineGameCommands registers the bare

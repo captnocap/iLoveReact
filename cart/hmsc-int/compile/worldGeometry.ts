@@ -23,12 +23,12 @@
 // each axis (only ry / yaw is used); scale is the full box size. shapeId 0 is
 // the shared box; shapeId 1 is the shared ramp slab mesh.
 
-import type { GameState, PropKind, BuildingKind, TileKind, WorldProp } from '../../hmsc/design';
-import { propKindDefinition } from '../../hmsc/world/propKinds';
-import { solveRoadCrossSection } from '../../hmsc/world/roadProfile';
-import { tileKindDefinition } from '../../hmsc/world/tileKinds';
+import type { GameState, PropKind, BuildingKind, TileKind, WorldProp } from '../design';
+import { propKindDefinition } from '../world/propKinds';
+import { solveRoadCrossSection } from '../world/roadProfile';
+import { tileKindDefinition } from '../world/tileKinds';
 import { CHUNK_TILES } from '../chunks';
-import { heightfieldTexelColor, roadRibbonSection } from '../../hmsc/render3d/heightfieldSurface';
+import { heightfieldTexelColor, roadRibbonSection } from '../render3d/heightfieldSurface';
 import type { ChunkFloor } from '../chunkFloor';
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
@@ -545,6 +545,354 @@ function propParts(prop: WorldProp): PropPartSpec[] {
         cylinder8([0, 0.42 * s, -0.15 * s], 0.055 * s, 0.14 * s, cap, [90, 0, 0]),
         cylinder8([0.15 * s, 0.46 * s, 0], 0.05 * s, 0.12 * s, cap, [0, 0, 90]),
         cylinder8([-0.15 * s, 0.46 * s, 0], 0.05 * s, 0.12 * s, cap, [0, 0, 90]),
+      ];
+    }
+    // ── trees (mirror hmsc-int/render3d/props/Tree.tsx) ───────────────────
+    case 'treeOak': {
+      const h = def.heightMeters;
+      const r = def.footprintRadiusMeters;
+      const c = h * 0.32;
+      const bark: Color = [0x5c / 255, 0x46 / 255, 0x31 / 255];
+      const dark: Color = [0x1f / 255, 0x4a / 255, 0x20 / 255];
+      const mid: Color = [0x2f / 255, 0x6b / 255, 0x2f / 255];
+      const light: Color = [0x43 / 255, 0x88 / 255, 0x3a / 255];
+      return [
+        cylinder8([0, h * 0.24, 0], r, h * 0.48, bark),
+        sphere([0, h * 0.66, 0], [c * 2, c * 1.7, c * 2], mid),
+        sphere([c * 0.7, h * 0.58, c * 0.25], [c * 1.3, c * 1.1, c * 1.3], dark),
+        sphere([-c * 0.65, h * 0.6, -c * 0.3], [c * 1.2, c, c * 1.2], light),
+        sphere([c * 0.15, h * 0.62, -c * 0.7], [c * 1.1, c, c * 1.1], dark),
+        sphere([-c * 0.2, h * 0.6, c * 0.68], [c * 1.1, c * 0.96, c * 1.1], light),
+        sphere([0, h * 0.84, 0], [c * 1.1, c * 0.9, c * 1.1], mid),
+      ];
+    }
+    case 'treePine': {
+      const h = def.heightMeters;
+      const r = def.footprintRadiusMeters;
+      const barkDark: Color = [0x4a / 255, 0x38 / 255, 0x26 / 255];
+      const pineDark: Color = [0x1d / 255, 0x3d / 255, 0x24 / 255];
+      const pineMid: Color = [0x26 / 255, 0x51 / 255, 0x2e / 255];
+      const parts: PropPartSpec[] = [cylinder8([0, h * 0.16, 0], r, h * 0.32, barkDark)];
+      // No cone instance shape — each canopy tier is two stacked cylinders.
+      const tiers: [number, number, number, Color][] = [
+        [h * 0.38, h * 0.21, h * 0.36, pineDark],
+        [h * 0.6, h * 0.165, h * 0.32, pineMid],
+        [h * 0.82, h * 0.115, h * 0.3, pineDark],
+      ];
+      for (const [y, tierR, tierH, color] of tiers) {
+        parts.push(cylinder8([0, y - tierH * 0.2, 0], tierR * 0.85, tierH * 0.55, color));
+        parts.push(cylinder8([0, y + tierH * 0.18, 0], tierR * 0.5, tierH * 0.55, color));
+      }
+      return parts;
+    }
+    case 'treeBirch': {
+      const h = def.heightMeters;
+      const r = def.footprintRadiusMeters;
+      const c = h * 0.22;
+      const pale: Color = [0xd8 / 255, 0xd4 / 255, 0xc8 / 255];
+      const barkDark: Color = [0x4a / 255, 0x38 / 255, 0x26 / 255];
+      const leafPale: Color = [0x6a / 255, 0xa8 / 255, 0x4f / 255];
+      const leafLight: Color = [0x43 / 255, 0x88 / 255, 0x3a / 255];
+      return [
+        cylinder8([0, h * 0.31, 0], r, h * 0.62, pale),
+        box([0, h * 0.18, 0], [r * 2.1, h * 0.025, r * 2.1], barkDark),
+        box([0, h * 0.34, 0], [r * 2.1, h * 0.025, r * 2.1], barkDark, [0, 30, 0]),
+        box([0, h * 0.5, 0], [r * 2.1, h * 0.025, r * 2.1], barkDark, [0, 60, 0]),
+        sphere([0, h * 0.74, 0], [c * 2, c * 2.3, c * 2], leafPale),
+        sphere([c * 0.55, h * 0.68, c * 0.3], [c * 1.2, c * 1.4, c * 1.2], leafLight),
+        sphere([-c * 0.5, h * 0.7, -c * 0.35], [c * 1.1, c * 1.3, c * 1.1], leafPale),
+      ];
+    }
+    case 'treeCypress': {
+      const h = def.heightMeters;
+      const r = def.footprintRadiusMeters;
+      const barkDark: Color = [0x4a / 255, 0x38 / 255, 0x26 / 255];
+      const pineDark: Color = [0x1d / 255, 0x3d / 255, 0x24 / 255];
+      const pineMid: Color = [0x26 / 255, 0x51 / 255, 0x2e / 255];
+      return [
+        cylinder8([0, h * 0.07, 0], r * 0.6, h * 0.14, barkDark),
+        sphere([0, h * 0.5, 0], [h * 0.26, h * 0.84, h * 0.26], pineDark),
+        sphere([h * 0.04, h * 0.4, -h * 0.03], [h * 0.22, h * 0.6, h * 0.22], pineMid),
+        sphere([0, h * 0.78, 0], [h * 0.18, h * 0.44, h * 0.18], pineMid),
+      ];
+    }
+    case 'treePalm': {
+      const h = def.heightMeters;
+      const r = def.footprintRadiusMeters;
+      const bark: Color = [0x5c / 255, 0x46 / 255, 0x31 / 255];
+      const barkDark: Color = [0x4a / 255, 0x38 / 255, 0x26 / 255];
+      const frondColor: Color = [0x3a / 255, 0x7d / 255, 0x36 / 255];
+      const pineMid: Color = [0x26 / 255, 0x51 / 255, 0x2e / 255];
+      const lean = h * 0.18;
+      const segH = (h * 0.92) / 4;
+      const parts: PropPartSpec[] = [];
+      for (let i = 0; i < 4; i += 1) {
+        const t = i / 4;
+        parts.push(cylinder8([lean * (t + 0.125), segH * (i + 0.5), 0], r * (1 - t * 0.35), segH * 1.1, i % 2 === 0 ? bark : barkDark));
+      }
+      const frondLength = h * 0.34;
+      for (let i = 0; i < 7; i += 1) {
+        const a = (i / 7) * 360;
+        const rad = a * Math.PI / 180;
+        const reach = frondLength * 0.55;
+        parts.push({
+          shape: 'sphere',
+          local: [lean + Math.cos(rad) * reach, h * 0.9, Math.sin(rad) * reach],
+          size: [frondLength * 2, h * 0.05, frondLength * 0.44],
+          color: frondColor,
+          rotation: [0, -a, 0],
+        });
+      }
+      parts.push(sphere([lean, h * 0.92, 0], [h * 0.12, h * 0.1, h * 0.12], pineMid));
+      parts.push(sphere([lean + h * 0.035, h * 0.885, h * 0.02], [h * 0.056, h * 0.056, h * 0.056], barkDark));
+      parts.push(sphere([lean - h * 0.03, h * 0.885, -h * 0.025], [h * 0.056, h * 0.056, h * 0.056], barkDark));
+      return parts;
+    }
+    case 'treeDead': {
+      const h = def.heightMeters;
+      const r = def.footprintRadiusMeters;
+      const wood: Color = [0x6e / 255, 0x5d / 255, 0x4b / 255];
+      const barkDark: Color = [0x4a / 255, 0x38 / 255, 0x26 / 255];
+      const parts: PropPartSpec[] = [cylinder8([0, h * 0.46, 0], r, h * 0.92, wood)];
+      const branches: [number, number, number, number][] = [
+        [h * 0.55, 20, 55, h * 0.4],
+        [h * 0.68, 150, 48, h * 0.34],
+        [h * 0.78, 265, 40, h * 0.3],
+        [h * 0.88, 80, 25, h * 0.24],
+      ];
+      branches.forEach(([y, angle, tilt, length], index) => {
+        const rad = angle * Math.PI / 180;
+        const tiltRad = tilt * Math.PI / 180;
+        const reach = (length / 2) * Math.sin(tiltRad);
+        parts.push(cylinder8(
+          [Math.cos(rad) * reach, y + (length / 2) * Math.cos(tiltRad), Math.sin(rad) * reach],
+          r * 0.32, length, index % 2 === 0 ? wood : barkDark,
+          [Math.sin(rad) * tilt, 0, -Math.cos(rad) * tilt],
+        ));
+      });
+      return parts;
+    }
+    // ── rock forms (mirror hmsc-int/render3d/props/Rock.tsx) ──────────────
+    case 'boulder': case 'rockFlat': case 'rockSpire': case 'rockMossy': case 'rockPile': {
+      const h = def.heightMeters;
+      const r = def.footprintRadiusMeters;
+      const stone: Color = [0x6b / 255, 0x70 / 255, 0x79 / 255];
+      const stoneDark: Color = [0x52 / 255, 0x56 / 255, 0x5d / 255];
+      const stoneLight: Color = [0x82 / 255, 0x86 / 255, 0x8d / 255];
+      const moss: Color = [0x3f / 255, 0x6b / 255, 0x33 / 255];
+      const mossLight: Color = [0x55 / 255, 0x8a / 255, 0x42 / 255];
+      // [x, y, z, radius, squash, color]
+      const recipes: Record<string, [number, number, number, number, number, Color][]> = {
+        boulder: [
+          [0, h * 0.45, 0, r * 0.92, 0.92, stone],
+          [r * 0.45, h * 0.3, -r * 0.3, r * 0.6, 0.8, stoneDark],
+          [-r * 0.5, h * 0.28, r * 0.35, r * 0.55, 0.75, stoneLight],
+          [-r * 0.12, h * 0.68, -r * 0.2, r * 0.5, 0.8, stoneDark],
+          [r * 0.2, h * 0.6, r * 0.4, r * 0.42, 0.72, stoneLight],
+        ],
+        rockFlat: [
+          [0, h * 0.5, 0, r * 0.98, 0.5, stone],
+          [r * 0.35, h * 0.55, r * 0.25, r * 0.6, 0.5, stoneLight],
+          [-r * 0.4, h * 0.45, -r * 0.2, r * 0.62, 0.48, stoneDark],
+        ],
+        rockSpire: [
+          [0, h * 0.2, 0, r * 0.95, 1.1, stoneDark],
+          [r * 0.06, h * 0.5, -r * 0.04, r * 0.72, 1.4, stone],
+          [-r * 0.05, h * 0.78, r * 0.05, r * 0.48, 1.5, stoneLight],
+          [r * 0.03, h * 0.94, 0, r * 0.26, 1.3, stone],
+        ],
+        rockMossy: [
+          [0, h * 0.42, 0, r * 0.95, 0.78, stone],
+          [r * 0.5, h * 0.3, -r * 0.35, r * 0.62, 0.72, stoneDark],
+          [-r * 0.48, h * 0.26, r * 0.4, r * 0.58, 0.7, stoneLight],
+          [0, h * 0.62, 0, r * 0.72, 0.4, moss],
+          [r * 0.42, h * 0.5, -r * 0.28, r * 0.42, 0.36, mossLight],
+          [-r * 0.35, h * 0.46, r * 0.3, r * 0.38, 0.34, moss],
+        ],
+        rockPile: [
+          [0, h * 0.5, 0, r * 0.5, 0.85, stone],
+          [r * 0.55, h * 0.3, r * 0.2, r * 0.38, 0.8, stoneDark],
+          [-r * 0.5, h * 0.32, -r * 0.25, r * 0.4, 0.78, stoneLight],
+          [r * 0.2, h * 0.28, -r * 0.55, r * 0.34, 0.75, stone],
+          [-r * 0.25, h * 0.26, r * 0.55, r * 0.32, 0.72, stoneDark],
+          [r * 0.6, h * 0.22, -r * 0.35, r * 0.26, 0.7, stoneLight],
+          [-r * 0.65, h * 0.2, r * 0.1, r * 0.24, 0.68, stone],
+        ],
+      };
+      return recipes[prop.kind].map(([x, y, z, radius, squash, color]) =>
+        sphere([x, y, z], [radius * 2, radius * 2 * squash, radius * 2], color));
+    }
+    // ── balls (mirror hmsc-int/render3d/props/Ball.tsx) ───────────────────
+    case 'ballBeach': {
+      const R = def.footprintRadiusMeters;
+      return [
+        sphere([0, R, 0], [R * 2, R * 2, R * 2], [0xf4 / 255, 0xf1 / 255, 0xe8 / 255]),
+        cylinder16([0, R, 0], R * 1.02, R * 0.36, [0xe0 / 255, 0x45 / 255, 0x2f / 255]),
+        cylinder16([0, R, 0], R * 1.02, R * 0.36, [0x2f / 255, 0x6f / 255, 0xe0 / 255], [90, 0, 0]),
+      ];
+    }
+    case 'ballSoccer': {
+      const R = def.footprintRadiusMeters;
+      const patch: Color = [0x1c / 255, 0x1c / 255, 0x20 / 255];
+      const parts: PropPartSpec[] = [sphere([0, R, 0], [R * 2, R * 2, R * 2], [0xf0 / 255, 0xf0 / 255, 0xee / 255])];
+      const spots: [number, number][] = [[0, 65], [80, 20], [160, 45], [240, 15], [320, 40]];
+      for (const [azimuth, elevation] of spots) {
+        const a = azimuth * Math.PI / 180;
+        const e = elevation * Math.PI / 180;
+        parts.push(sphere(
+          [Math.cos(e) * Math.cos(a) * R * 0.86, R + Math.sin(e) * R * 0.86, Math.cos(e) * Math.sin(a) * R * 0.86],
+          [R * 0.6, R * 0.6, R * 0.6], patch,
+        ));
+      }
+      return parts;
+    }
+    case 'ballBasketball': {
+      const R = def.footprintRadiusMeters;
+      const seam: Color = [0x2a / 255, 0x1c / 255, 0x12 / 255];
+      return [
+        sphere([0, R, 0], [R * 2, R * 2, R * 2], [0xd3 / 255, 0x72 / 255, 0x2c / 255]),
+        cylinder16([0, R, 0], R * 1.01, R * 0.07, seam),
+        cylinder16([0, R, 0], R * 1.01, R * 0.07, seam, [90, 0, 0]),
+        cylinder16([0, R, 0], R * 1.01, R * 0.07, seam, [90, 90, 0]),
+      ];
+    }
+    // ── wall decor (mirror hmsc-int/render3d/props/WallDecor.tsx) ─────────
+    case 'wallPainting': {
+      const frame: Color = [0x3d / 255, 0x2b / 255, 0x1c / 255];
+      const frameLight: Color = [0x5a / 255, 0x41 / 255, 0x28 / 255];
+      return [
+        box([0, 1.5, -0.03], [1.25, 0.95, 0.05], frame),
+        box([0, 1.5, -0.055], [1.15, 0.85, 0.02], frameLight),
+        box([0, 1.66, -0.065], [1.05, 0.43, 0.01], [0x7f / 255, 0xb2 / 255, 0xd8 / 255]),
+        box([0, 1.29, -0.065], [1.05, 0.33, 0.01], [0x5d / 255, 0x8a / 255, 0x4a / 255]),
+        box([0.3, 1.7, -0.072], [0.16, 0.16, 0.005], [0xf2 / 255, 0xd2 / 255, 0x7a / 255]),
+      ];
+    }
+    case 'ledLight': {
+      const mount: Color = [0x2a / 255, 0x2d / 255, 0x33 / 255];
+      return [
+        box([0, 2.3, -0.03], [0.1, 0.06, 0.06], mount),
+        box([0, 0.9, -0.03], [0.1, 0.06, 0.06], mount),
+        cylinder8([0, 1.6, -0.07], 0.045, 1.4, [0x5f / 255, 0xf2 / 255, 1]),
+      ];
+    }
+    // ── furniture (mirror hmsc-int/render3d/props/Furniture.tsx) ──────────
+    case 'chair': {
+      const wood: Color = [0x8a / 255, 0x62 / 255, 0x40 / 255];
+      const woodDark: Color = [0x6b / 255, 0x4a / 255, 0x2e / 255];
+      return [
+        box([0.2, 0.225, 0.2], [0.05, 0.45, 0.05], woodDark),
+        box([-0.2, 0.225, 0.2], [0.05, 0.45, 0.05], woodDark),
+        box([0.2, 0.225, -0.2], [0.05, 0.45, 0.05], woodDark),
+        box([-0.2, 0.225, -0.2], [0.05, 0.45, 0.05], woodDark),
+        box([0, 0.45, 0], [0.5, 0.06, 0.5], wood),
+        box([0, 0.72, 0.23], [0.5, 0.5, 0.05], wood, [-6, 0, 0]),
+      ];
+    }
+    case 'couch': {
+      const w = def.footprintRadiusMeters * 2;
+      const woodDark: Color = [0x6b / 255, 0x4a / 255, 0x2e / 255];
+      const cushion: Color = [0x7d / 255, 0x4f / 255, 0x43 / 255];
+      const cushionLight: Color = [0x96 / 255, 0x60 / 255, 0x4f / 255];
+      return [
+        box([0, 0.18, 0], [w, 0.3, 0.85], woodDark),
+        box([-w * 0.225, 0.4, -0.05], [w * 0.42, 0.16, 0.7], cushion),
+        box([w * 0.225, 0.4, -0.05], [w * 0.42, 0.16, 0.7], cushionLight),
+        box([0, 0.55, 0.34], [w, 0.6, 0.22], cushion, [-4, 0, 0]),
+        box([-w * 0.46, 0.45, 0], [w * 0.09, 0.55, 0.8], cushionLight),
+        box([w * 0.46, 0.45, 0], [w * 0.09, 0.55, 0.8], cushionLight),
+      ];
+    }
+    case 'table': {
+      const half = def.footprintRadiusMeters - 0.08;
+      const topY = def.heightMeters - 0.04;
+      const wood: Color = [0x8a / 255, 0x62 / 255, 0x40 / 255];
+      const woodDark: Color = [0x6b / 255, 0x4a / 255, 0x2e / 255];
+      return [
+        box([half, topY / 2, half], [0.07, topY, 0.07], woodDark),
+        box([-half, topY / 2, half], [0.07, topY, 0.07], woodDark),
+        box([half, topY / 2, -half], [0.07, topY, 0.07], woodDark),
+        box([-half, topY / 2, -half], [0.07, topY, 0.07], woodDark),
+        box([0, topY + 0.02, 0], [def.footprintRadiusMeters * 2, 0.06, def.footprintRadiusMeters * 2], wood),
+      ];
+    }
+    case 'floorLamp': {
+      const h = def.heightMeters;
+      const metal: Color = [0x3a / 255, 0x3f / 255, 0x46 / 255];
+      return [
+        cylinder16([0, 0.02, 0], 0.17, 0.04, metal),
+        cylinder8([0, (h - 0.34) / 2 + 0.04, 0], 0.022, h - 0.34, metal),
+        sphere([0, h - 0.26, 0], [0.14, 0.14, 0.14], [1, 0xe9 / 255, 0xa8 / 255]),
+        cylinder16([0, h - 0.15, 0], 0.21, 0.3, [0xe8 / 255, 0xd9 / 255, 0xb0 / 255]),
+      ];
+    }
+    case 'bench': {
+      const w = def.footprintRadiusMeters * 2;
+      const wood: Color = [0x8a / 255, 0x62 / 255, 0x40 / 255];
+      const woodDark: Color = [0x6b / 255, 0x4a / 255, 0x2e / 255];
+      const metal: Color = [0x3a / 255, 0x3f / 255, 0x46 / 255];
+      return [
+        box([-w * 0.44, 0.225, 0], [0.06, 0.45, 0.5], metal),
+        box([w * 0.44, 0.225, 0], [0.06, 0.45, 0.5], metal),
+        box([0, 0.45, -0.14], [w, 0.04, 0.13], wood),
+        box([0, 0.45, 0.02], [w, 0.04, 0.13], woodDark),
+        box([0, 0.45, 0.18], [w, 0.04, 0.13], wood),
+        box([0, 0.69, 0.26], [w, 0.12, 0.04], wood, [-12, 0, 0]),
+        box([0, 0.83, 0.29], [w, 0.12, 0.04], woodDark, [-12, 0, 0]),
+      ];
+    }
+    // ── street furniture (mirror render3d/props/StreetFurniture.tsx) ──────
+    case 'trafficCone': {
+      const h = def.heightMeters;
+      const orange: Color = [0xe8 / 255, 0x68 / 255, 0x2a / 255];
+      return [
+        box([0, h * 0.03, 0], [def.footprintRadiusMeters * 2, h * 0.06, def.footprintRadiusMeters * 2], orange),
+        // No cone instance shape — three stacked cylinders narrowing upward.
+        cylinder8([0, h * 0.26, 0], h * 0.185, h * 0.4, orange),
+        cylinder8([0, h * 0.57, 0], h * 0.12, h * 0.34, orange),
+        cylinder8([0, h * 0.83, 0], h * 0.064, h * 0.26, orange),
+        cylinder8([0, h * 0.52, 0], h * 0.15, h * 0.11, [0xf2 / 255, 0xef / 255, 0xe8 / 255]),
+      ];
+    }
+    case 'barrier': {
+      const w = def.footprintRadiusMeters * 2;
+      const h = def.heightMeters;
+      const concrete: Color = [0x9a / 255, 0x9a / 255, 0x92 / 255];
+      const concreteDark: Color = [0x82 / 255, 0x82 / 255, 0x7a / 255];
+      return [
+        box([0, h * 0.14, 0], [w, h * 0.28, 0.6], concreteDark),
+        box([0, h * 0.47, 0], [w, h * 0.42, 0.4], concrete),
+        box([0, h * 0.85, 0], [w, h * 0.3, 0.24], concrete),
+        box([-w * 0.3, h * 0.1, 0], [0.18, h * 0.12, 0.62], concreteDark),
+        box([w * 0.3, h * 0.1, 0], [0.18, h * 0.12, 0.62], concreteDark),
+      ];
+    }
+    case 'trashCan': {
+      const h = def.heightMeters;
+      const r = def.footprintRadiusMeters;
+      const body: Color = [0x3f / 255, 0x57 / 255, 0x47 / 255];
+      const dark: Color = [0x32 / 255, 0x46 / 255, 0x3a / 255];
+      return [
+        cylinder16([0, h * 0.41, 0], r * 0.92, h * 0.78, body),
+        cylinder16([0, h * 0.82, 0], r, h * 0.05, dark),
+        sphere([0, h * 0.84, 0], [r * 2, h * 0.45, r * 2], dark),
+        box([0, h * 0.86, -r * 0.7], [r * 1.1, h * 0.16, 0.02], body, [18, 0, 0]),
+      ];
+    }
+    case 'planter': {
+      const h = def.heightMeters;
+      const half = def.footprintRadiusMeters;
+      const boxH = h * 0.7;
+      const leafMid: Color = [0x2f / 255, 0x6b / 255, 0x2f / 255];
+      const leafLight: Color = [0x43 / 255, 0x88 / 255, 0x3a / 255];
+      return [
+        box([0, boxH / 2, 0], [half * 2, boxH, half * 2], [0xa8 / 255, 0x59 / 255, 0x3a / 255]),
+        box([0, boxH, 0], [half * 1.8, h * 0.06, half * 1.8], [0x3e / 255, 0x2f / 255, 0x22 / 255]),
+        sphere([-half * 0.4, boxH + h * 0.18, -half * 0.2], [half * 0.8, h * 0.56, half * 0.8], leafMid),
+        sphere([half * 0.35, boxH + h * 0.14, half * 0.25], [half * 0.76, h * 0.48, half * 0.76], leafLight),
+        sphere([0, boxH + h * 0.22, 0], [half * 0.84, h * 0.6, half * 0.84], leafMid),
+        sphere([-half * 0.45, boxH + h * 0.38, half * 0.15], [h * 0.12, h * 0.12, h * 0.12], [0xd6 / 255, 0x5d / 255, 0x8a / 255]),
+        sphere([half * 0.4, boxH + h * 0.34, -half * 0.2], [h * 0.11, h * 0.11, h * 0.11], [0xe8 / 255, 0xc8 / 255, 0x4a / 255]),
       ];
     }
     default: {

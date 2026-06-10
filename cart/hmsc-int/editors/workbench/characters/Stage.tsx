@@ -37,7 +37,7 @@ import { PAINT } from '../../paint';
 import * as Geometry from '@reactjit/geometries';
 import {
   DEPTH_OVERLAY_WGSL, GREATER_POINTS, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, depthOverlayData, gridFromBytes,
-  gridNodeAt, reliefBytesFromGrid, sculptDabSnap, sculptEngineBrushPx, sculptModeValue, withNodeValue,
+  gridNodeAt, gridNodeFromSurfaceHit, reliefBytesFromGrid, sculptDabSnap, sculptEngineBrushPx, sculptModeValue, withNodeValue,
   type GridNode,
 } from '../../characters/paintKit';
 import { useRouteTwigState } from '../../twigs';
@@ -142,9 +142,15 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   // routes canvas clicks to selection (twigged: a mode survives the reload),
   // the selected node fine-tunes through ONE slider riding the grid truth
   const [nodesMode, setNodesMode] = useRouteTwigState<boolean>('/characters', 'nodesMode', false);
-  const [selNode, setSelNode] = useState<GridNode | null>(null);
+  const [selNode, setSelNode] = useRouteTwigState<GridNode | null>('/characters', 'selectedNode', null);
   const nodeGestureRef = useRef(false); // one undo entry per node-edit gesture
-  useEffect(() => { setSelNode(null); nodeGestureRef.current = false; }, [selPart]);
+  const prevSelPartRef = useRef(selPart);
+  useEffect(() => {
+    if (prevSelPartRef.current === selPart) return;
+    prevSelPartRef.current = selPart;
+    setSelNode(null);
+    nodeGestureRef.current = false;
+  }, [selPart, setSelNode]);
   // the brush footprint (Q3) + the display-mode trigger: chunky while the
   // brush is OVER THE CANVAS or mid-stroke; smooth the moment the cursor
   // leaves it — WITHOUT leaving the page (USER: "this never resolves to
@@ -478,6 +484,12 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   const startGrab = (hit: GrabHit, instances: GrabInstance[], e: any) => {
     // grabbing a part in figure view selects it (C3 — two views, one truth)
     if (view === 'figure' && hit.part !== selPart) s.setSelPart(hit.part);
+    // SCULPTPICK-0606: a 3D node click selects the same grid cell
+    // immediately, before any pull distance exists.
+    if (lens === 'sculpt') {
+      setSelNode(gridNodeFromSurfaceHit(hit));
+      nodeGestureRef.current = false;
+    }
     const inst = instances[hit.instanceIndex];
     const r = viewRect.current;
     const axisWorld = grabDragAxis(hit, partParamsFor(hit.part), inst);
@@ -602,7 +614,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
           scale={0.045}
         />
       ))}
-      {nodesMode && selNode ? (
+      {selNode ? (
         <Scene3D.Mesh
           geometry={Geometry.Sphere}
           params={{ radius: 1, segments: 12, rings: 8 }}
@@ -669,7 +681,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
 
   // ── the SCULPT rail (SCULPTKIT-0606, USER VERDICT): the painter rail's
   // OWN language — IconTile verbs with mode tints, SectionLabels, dividers,
-  // and the ONE RailSlider track for every range (steppers are dead). The
+  // and the ONE Workbench/studio slider for every range (steppers are dead). The
   // chrome laws hold: every tile grid's width DIVIDES its set size (no wrap
   // orphans), sections render only when the context consumes them, and no
   // control appears twice on the surface (mirror's sculpt home is HERE —
@@ -833,7 +845,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
         shader={DEPTH_OVERLAY_WGSL}
         data={depthOverlayData({
           hover: brushHover, brushPx: v.brush, mode: v.sculptMode, mirror: v.mirror,
-          selected: nodesMode && selNode ? { u: selNode.u, v: selNode.v } : null,
+          selected: selNode ? { u: selNode.u, v: selNode.v } : null,
         })}
         textures={[paints[selPart].id, relief.id]}
         style={{ position: 'absolute', left: 0, top: 0, width: CW, height: CH }}
@@ -919,7 +931,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
         <Paintable id={relief.id} w={GRID_W} h={GRID_H} />
       </Box>
       <FigureCaptures store={s} r={fr} />
-      <GrabGridCapture hover={grabHover} mirror={v.mirror} />
+      <GrabGridCapture hover={grabHover} selected={selNode} mirror={v.mirror} />
     </Col>
   );
 }

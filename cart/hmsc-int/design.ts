@@ -394,7 +394,38 @@ export type PropKind =
   | 'payphone'
   | 'dumpster'
   | 'mailbox'
-  | 'fence';
+  | 'fence'
+  // street furniture
+  | 'trafficCone'
+  | 'barrier'
+  | 'trashCan'
+  | 'bench'
+  | 'planter'
+  // trees (trunk-sized collision; canopy is visual)
+  | 'treeOak'
+  | 'treePine'
+  | 'treeBirch'
+  | 'treeCypress'
+  | 'treePalm'
+  | 'treeDead'
+  // rock forms beyond the small/medium/large trio
+  | 'boulder'
+  | 'rockFlat'
+  | 'rockSpire'
+  | 'rockMossy'
+  | 'rockPile'
+  // balls — solid colliders the player bumps
+  | 'ballBeach'
+  | 'ballSoccer'
+  | 'ballBasketball'
+  // wall-mounted decor (anchor at the wall base, decor hangs at height)
+  | 'wallPainting'
+  | 'ledLight'
+  // furniture
+  | 'chair'
+  | 'couch'
+  | 'table'
+  | 'floorLamp';
 
 // A traffic-control prop tells an approaching vehicle to stop, slow, or go. A
 // stop sign is always 'stop'; a traffic light cycles through all three. The

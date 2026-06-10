@@ -32,8 +32,11 @@ log all on
 log overhead 1000000
 log dump verify.commands
 log all off
+gv_perflog 2 1.2 0.75
 gv_perflog 1
 gv_perflog 0
+gv_churntrace 1
+gv_churntrace 0
 
 # entity vocabulary (spawn tuning tables)
 ev_spawn crate 12 -7 3

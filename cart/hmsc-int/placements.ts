@@ -5,10 +5,10 @@
 // Footprint / colour / label are resolved from the SAME kind registries the rest
 // of the editor uses, so a placement reads consistently with the preview + props.
 
-import { buildingKindDefinition } from '../hmsc/world/buildingKinds';
-import { propKindDefinition } from '../hmsc/world/propKinds';
-import { tileKindDefinition } from '../hmsc/world/tileKinds';
-import type { Building, TileKind } from '../hmsc/design';
+import { buildingKindDefinition } from './world/buildingKinds';
+import { propKindDefinition } from './world/propKinds';
+import { tileKindDefinition } from './world/tileKinds';
+import type { Building, TileKind } from './design';
 import { TILE_UNITS } from './heightData';
 import { CHUNK_TILES } from './chunks';
 

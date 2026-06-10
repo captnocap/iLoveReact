@@ -11,8 +11,9 @@
 //   2. the catalog entry's OWN snap mode (grid/edge/surface/free — registry
 //      data, never a mode the route invents) quantizes the hit onto the 1m
 //      substrate (R4: the grid is the snap substrate, not the object model);
-//   3. piece faces stack: a hit piece places on its top surface. Edge-snap
-//      walls have ONE anchor: the floor/top perimeter, never the side face base.
+//   3. piece faces stack from actual top faces. Edge-snap walls may stand on a
+//      floor/roof top, but only when the crosshair is on that top face; side
+//      faces and beside-floor ground hits are not alternate wall anchors.
 //
 // All numbers are SNAP_TUNING rows (P2) — the route exposes them on its
 // tuning surface; nothing here is buried.
@@ -31,6 +32,8 @@ export type SnapTuning = {
   surfaceSnapMeters: number;
   /** how close an edge line must be to a floor/roof perimeter to inherit its top Y */
   edgeAnchorToleranceMeters: number;
+  /** wall-face edge snap: how close to a wall endpoint a side-face hit turns the corner */
+  wallEndpointSnapMeters: number;
 };
 
 export const SNAP_TUNING_DEFAULTS: SnapTuning = {
@@ -39,6 +42,7 @@ export const SNAP_TUNING_DEFAULTS: SnapTuning = {
   gridMeters: 1,
   surfaceSnapMeters: 0.5,
   edgeAnchorToleranceMeters: 0.02,
+  wallEndpointSnapMeters: 0.5,
 };
 
 export type SnapTarget = {
@@ -72,6 +76,12 @@ const DEG = Math.PI / 180;
 
 function normalizeYaw(yawDegrees: number): number {
   return ((yawDegrees % 360) + 360) % 360;
+}
+
+function quarterTurns(yawDegrees: number): number | null {
+  const yaw = normalizeYaw(yawDegrees);
+  const quarter = Math.round(yaw / 90) % 4;
+  return Math.abs(yaw - quarter * 90) < 1e-6 || Math.abs(yaw - 360) < 1e-6 ? quarter : null;
 }
 
 /** March the ray until it dips under the ground column, then bisect — the
@@ -187,6 +197,56 @@ function topAnchorYAtEdge(
   return top;
 }
 
+function isTopFace(normal: { x: number; y: number; z: number } | undefined): boolean {
+  return !!normal && normal.y > 0.5;
+}
+
+function wallEdgeSnapFromWallFace(
+  piece: PlacedBuildPiece,
+  hit: { x: number; y: number; z: number },
+  normal: { x: number; y: number; z: number },
+  baseY: number,
+  linePitch: number,
+  endpointSnapMeters: number,
+): { x: number; y: number; z: number; yawDegrees: number } | null {
+  const def = GAME_BUILD.catalog.get(piece.pieceId);
+  if (def.kind !== 'wall' || def.snap !== 'edge') return null;
+  const quarter = quarterTurns(piece.yawDegrees);
+  if (quarter === null) return null;
+  const axis = quarter % 2 === 0 ? 'x' : 'z';
+  const line = axis === 'x' ? piece.z : piece.x;
+  const runCenter = axis === 'x' ? piece.x : piece.z;
+  const runHit = axis === 'x' ? hit.x : hit.z;
+  const sideHit = axis === 'x' ? hit.z : hit.x;
+  const normalAlong = axis === 'x' ? normal.x : normal.z;
+  const normalSide = axis === 'x' ? normal.z : normal.x;
+  const runMin = runCenter - def.size.widthMeters / 2;
+  const runMax = runCenter + def.size.widthMeters / 2;
+  const nearestEnd = Math.abs(runHit - runMin) <= Math.abs(runHit - runMax) ? runMin : runMax;
+
+  if (Math.abs(normalAlong) > 0.5) {
+    const sign = normalAlong > 0 ? 1 : -1;
+    return axis === 'x'
+      ? { x: nearestEnd + sign * linePitch / 2, y: baseY, z: line, yawDegrees: 0 }
+      : { x: line, y: baseY, z: nearestEnd + sign * linePitch / 2, yawDegrees: 90 };
+  }
+
+  if (Math.abs(runHit - nearestEnd) <= endpointSnapMeters) {
+    const sideOffset = sideHit - line;
+    const sideSign = Math.abs(sideOffset) > 1e-6
+      ? (sideOffset > 0 ? 1 : -1)
+      : (normalSide >= 0 ? 1 : -1);
+    return axis === 'x'
+      ? { x: nearestEnd, y: baseY, z: line + sideSign * linePitch / 2, yawDegrees: 90 }
+      : { x: line + sideSign * linePitch / 2, y: baseY, z: nearestEnd, yawDegrees: 0 };
+  }
+
+  const center = snapToCellCenter(runHit, linePitch);
+  return axis === 'x'
+    ? { x: center, y: baseY, z: line, yawDegrees: 0 }
+    : { x: line, y: baseY, z: center, yawDegrees: 90 };
+}
+
 /** The snap pitch a piece tiles at (GRIDSNAP-0605, the user's verdict: too
  *  many sub-module positions "make something slightly off set from everything
  *  else"). A piece whose size is a CLEAN multiple of the grid is a module —
@@ -220,7 +280,7 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
   let baseY: number;
   if (onFace) {
     const hitBounds = GAME_BUILD.placed.bounds(pieceHit!.piece);
-    baseY = hitBounds.topY;
+    baseY = isTopFace(pieceHit!.normal) ? hitBounds.topY : hitBounds.baseY;
   } else {
     baseY = hit.y;
   }
@@ -253,26 +313,36 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
       return { ...common, placement: { x, y, z, yawDegrees: yaw } };
     }
     case 'edge': {
+      if (onFace && isTopAnchorPlate(pieceHit!.piece) && !isTopFace(pieceHit!.normal)) return null;
       // the nearer MODULE line owns the wall: a wall bounds the plates it
       // walls in, so its line lattice is the wall's own module pitch (3m
       // walls land on plate edges, never mid-plate near-misses), and the run
       // centers along the same pitch
       const linePitch = modulePitch(input.size.widthMeters, grid);
+      if (onFace && !isTopFace(pieceHit!.normal)) {
+        const wallFacePlacement = wallEdgeSnapFromWallFace(
+          pieceHit!.piece,
+          hit,
+          pieceHit!.normal,
+          baseY,
+          linePitch,
+          tuning.wallEndpointSnapMeters,
+        );
+        if (wallFacePlacement) return { ...common, placement: wallFacePlacement };
+      }
       const lineX = Math.round(hit.x / linePitch) * linePitch;
       const lineZ = Math.round(hit.z / linePitch) * linePitch;
       const onXLine = Math.abs(hit.x - lineX) <= Math.abs(hit.z - lineZ);
       if (onXLine) {
         // plane at x = lineX, running along z (the turned frame)
         const z = snapToCellCenter(hit.z, linePitch);
-        const y = common.surface === 'ground'
-          ? topAnchorYAtEdge(input.pieces, 'x', lineX, z, tuning.edgeAnchorToleranceMeters) ?? input.groundTopAt(lineX, z)
-          : baseY;
+        if (common.surface === 'ground' && topAnchorYAtEdge(input.pieces, 'x', lineX, z, tuning.edgeAnchorToleranceMeters) !== null) return null;
+        const y = common.surface === 'ground' ? input.groundTopAt(lineX, z) : baseY;
         return { ...common, placement: { x: lineX, y, z, yawDegrees: 90 } };
       }
       const x = snapToCellCenter(hit.x, linePitch);
-      const y = common.surface === 'ground'
-        ? topAnchorYAtEdge(input.pieces, 'z', lineZ, x, tuning.edgeAnchorToleranceMeters) ?? input.groundTopAt(x, lineZ)
-        : baseY;
+      if (common.surface === 'ground' && topAnchorYAtEdge(input.pieces, 'z', lineZ, x, tuning.edgeAnchorToleranceMeters) !== null) return null;
+      const y = common.surface === 'ground' ? input.groundTopAt(x, lineZ) : baseY;
       return { ...common, placement: { x, y, z: lineZ, yawDegrees: 0 } };
     }
     case 'surface': {

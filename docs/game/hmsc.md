@@ -17,11 +17,11 @@ The prime architecture is:
 
 ## Manifest and cart shell
 
-`cart/hmsc/cart.json`
+`cart/hmsc-int/cart.json`
 
 - Declares cart name `HMSC`, description `Hitman Shitcity blank game shell with command console.`, and a default 1280x800 window.
 
-`cart/hmsc/AGENTS.md`
+`cart/hmsc-int/AGENTS.md`
 
 - Local working contract for this cart.
 - States that the cart ships with `./tools/rjit ship hmsc`.
@@ -35,23 +35,23 @@ The prime architecture is:
 - Notes that 1 grid tile equals 1 meter.
 - Notes that textured boxes with `textureKey` must name `texturedFaces`.
 
-`cart/hmsc/README.md`
+`cart/hmsc-int/README.md`
 
 - Human orientation document for the cart.
 - Lists the command taxonomy, state model, scale model, sky controls, input contract, tile texture keys, building system, and event bus rules.
 - Calls out the split between HMSC and `cart/hmsc-int`, where internal map tooling belongs.
 
-`cart/hmsc/PROGRESS.md`
+`cart/hmsc-int/PROGRESS.md`
 
 - Progress log for the HMSC cart.
 - Tracks already-completed systems such as events, labs, map/world authoring work, and rendering improvements.
 
-`cart/hmsc/WORLD_AUTHORING_PLAN.md`
+`cart/hmsc-int/WORLD_AUTHORING_PLAN.md`
 
 - Planning document for the world authoring path.
 - Mentions shared localstore, map tree, zone authoring, copy/export flows, and the event bus as the intended integration spine.
 
-`cart/hmsc/index.tsx`
+`cart/hmsc-int/gameShell.tsx`
 
 - Composition root for the game cart.
 - Creates initial state with `readStoredGameState() ?? createInitialGameState()`.
@@ -69,7 +69,7 @@ The prime architecture is:
 
 ## Core state contract
 
-`cart/hmsc/design.ts`
+`cart/hmsc-int/design.ts`
 
 - Defines `HMSC_STATE_SCHEMA_VERSION`, autosave interval, live sync interval, grid cell size, and chunk span.
 - Defines primitive data shapes: `Vec3`, `GridCell`.
@@ -85,14 +85,14 @@ The prime architecture is:
 - Defines prop kinds, traffic signal phase, landform fields, road profiles, road segments, junctions, zones, config objects, command state, and command handler types.
 - The file is type-only plus constants. It does not call host functions.
 
-`cart/hmsc/state/defaults.ts`
+`cart/hmsc-int/state/defaults.ts`
 
 - Stores gameplay defaults and tuning numbers.
 - Defines default player speeds, health, heat, money, event log limit, console event limit, sky settings, view/draw radius, fog defaults, and physics defaults.
 - Defines drive constants such as movement deadzone, max frame step, noclip floor, entity radii, and burst counts.
 - This is the main place where tuning values should live before they become runtime `GameState.config` values.
 
-`cart/hmsc/state/gameState.ts`
+`cart/hmsc-int/state/gameState.ts`
 
 - Owns save/load, hot reload mirror, live player publish, and initial seed world construction.
 - Uses a namespaced local store first: `globalThis.__localstoreGet('hmsc', key)` and `globalThis.__localstoreSet('hmsc', key, value)`.
@@ -106,7 +106,7 @@ The prime architecture is:
 - Revives old saved state into the current schema, rejects future schemas, merges defaults, repairs missing fields, and handles layout-key mismatch.
 - Does not use browser storage. Persistence is host-backed.
 
-`cart/hmsc/state/driveInScreens.ts`
+`cart/hmsc-int/state/driveInScreens.ts`
 
 - Session-only singleton store for drive-in video source paths.
 - Exposes `getDriveInSource`, `setDriveInSource`, `subscribeDriveInSources`, and `useDriveInSources`.
@@ -114,14 +114,14 @@ The prime architecture is:
 
 ## Command system
 
-`cart/hmsc/commands/parser.ts`
+`cart/hmsc-int/commands/parser.ts`
 
 - Tokenizes command lines.
 - Supports whitespace splitting plus single and double quoted strings.
 - Parses JSON-ish values for commands: booleans, null, numbers, JSON objects, JSON arrays, and raw strings.
 - Pure JavaScript. No host calls.
 
-`cart/hmsc/commands/registry.ts`
+`cart/hmsc-int/commands/registry.ts`
 
 - Source of truth for HMSC commands.
 - Defines helpers for command success/failure, number parsing, boolean switches, toggles, sky args, path read/write, spawn helpers, and placement validation.
@@ -183,7 +183,7 @@ Commands present in the registry:
 
 ## Events and story rules
 
-`cart/hmsc/events/gameEvents.ts`
+`cart/hmsc-int/events/gameEvents.ts`
 
 - Defines the HMSC event log and host/event-bus publishing path.
 - `recordGameEvent` appends a JSON-safe event to `GameState.events.recent`.
@@ -198,7 +198,7 @@ Commands present in the registry:
 - Uses `busEmit` from `@reactjit/hooks/useIFTTT`.
 - Uses `hostEventBus.emit` from `@reactjit/hooks/useIFTTT`.
 
-`cart/hmsc/events/useHmscEventRules.ts`
+`cart/hmsc-int/events/useHmscEventRules.ts`
 
 - Installs story rules with `useIFTTT`.
 - Listens to `hmsc:event:lab.entered`.
@@ -209,7 +209,7 @@ Commands present in the registry:
 
 ## Gameplay loop and input
 
-`cart/hmsc/gameplay/HmscGameplayRig.tsx`
+`cart/hmsc-int/gameplay/HmscGameplayRig.tsx`
 
 - Main playable surface wrapper.
 - Renders Scene3D, sky, world, player, HUD, debug HUD, lab children, crosshair, interaction prompt, focus hint, and all offscreen texture captures.
@@ -225,13 +225,13 @@ Commands present in the registry:
 - Computes yaw/pitch with smoothing and clamping in JavaScript.
 - Does not use DOM mouse APIs.
 
-`cart/hmsc/gameplay/camera.ts`
+`cart/hmsc-int/gameplay/camera.ts`
 
 - Stores third-person camera constants.
 - Defines sensitivity, smoothing, frame clamp, pitch clamp, distance, height, target height, pitch target factor, fov, aim shoulder shift, and aim fov.
 - Exports value clamp helpers and degree-angle delta helper.
 
-`cart/hmsc/input/controlContract.ts`
+`cart/hmsc-int/input/controlContract.ts`
 
 - Defines the canonical control action ids.
 - Documents implemented and reserved controls.
@@ -239,7 +239,7 @@ Commands present in the registry:
 - Reserved: primary action variants, reload, quick menu, crouch.
 - Exposes `inputBindingsForConsole()` for `gv_controls`.
 
-`cart/hmsc/state/usePlayerDrive.ts`
+`cart/hmsc-int/state/usePlayerDrive.ts`
 
 - React hook that drives player movement.
 - Reads key events through `busOn('__keydown')` and `busOn('__keyup')`.
@@ -257,7 +257,7 @@ Commands present in the registry:
 - Handles zone enter/exit events and optional zone commands.
 - Suppresses cell triggers in labs; triggers run in `boot.console` and interiors.
 
-`cart/hmsc/state/useBuildingInteract.ts`
+`cart/hmsc-int/state/useBuildingInteract.ts`
 
 - React hook for nearby building and drive-in interactions.
 - Resolves interior building doors and returns a prompt with `wv_enter <id>`.
@@ -268,7 +268,7 @@ Commands present in the registry:
 - Listens to E/F with `busOn('__keydown')`.
 - Sends normal interactions through `runCommandLine`.
 
-`cart/hmsc/state/hostPhysics.ts`
+`cart/hmsc-int/state/hostPhysics.ts`
 
 - Host physics bridge and JavaScript packing layer.
 - Calls `globalThis.__hmsc_physics_step(inputFloat32Array)`.
@@ -281,7 +281,7 @@ Commands present in the registry:
 - Supports oriented building collision when building yaw is non-zero.
 - Defines movement surface rules from tile kind below player.
 
-`cart/hmsc/state/terrainColliders.ts`
+`cart/hmsc-int/state/terrainColliders.ts`
 
 - Registers heightfield colliders with the host.
 - Calls `globalThis.__hmsc_clear_heightfields()` before registering the current set when available.
@@ -290,7 +290,7 @@ Commands present in the registry:
 - Registers parking-garage ramp/deck collider data for garage structures.
 - No-ops cleanly if host functions are missing.
 
-`cart/hmsc/state/perfWatch.ts`
+`cart/hmsc-int/state/perfWatch.ts`
 
 - Diagnostic spike flight recorder toggled by `gv_perflog`.
 - Reads host telemetry through `globalThis.__tel_history`, `__tel_frame`, `__tel_gpu`, `__tel_nodes`, and `__tel_input`.
@@ -301,13 +301,13 @@ Commands present in the registry:
 
 ## World model
 
-`cart/hmsc/world/scale.ts`
+`cart/hmsc-int/world/scale.ts`
 
 - Defines physical scale constants.
 - Establishes the key rule: 1 tile equals 1 meter.
 - Defines player capsule height/radius, visual human min/max, door width/height, story height, car size, lane dimensions, and step height.
 
-`cart/hmsc/world/grid.ts`
+`cart/hmsc-int/world/grid.ts`
 
 - Core grid/world query layer.
 - Converts between continuous world coordinates and grid cells.
@@ -321,7 +321,7 @@ Commands present in the registry:
 - Checks pathability and occupancy.
 - Provides visible/nearby placed-cell helpers.
 
-`cart/hmsc/world/tileKinds.ts`
+`cart/hmsc-int/world/tileKinds.ts`
 
 - Registry of tile metadata.
 - Defines pathing, cover, door, visibility, traversal, NPC, surface, render, and altitude metadata for each tile kind.
@@ -329,41 +329,41 @@ Commands present in the registry:
 - Exports tile-kind validation and console listing helpers.
 - This is where the meaning of `road`, `door`, `bush`, `save`, and directional lanes lives.
 
-`cart/hmsc/world/tileTextureKeys.ts`
+`cart/hmsc-int/world/tileTextureKeys.ts`
 
 - Maps `TileKind` values to texture keys.
 - Road-like lane, junction, and crosswalk kinds share `hmsc.tile.road`.
 - This file is the stable contract for tile material keys.
 
-`cart/hmsc/world/surfaceHeights.ts`
+`cart/hmsc-int/world/surfaceHeights.ts`
 
 - Defines visual/physics top heights for surface regions and placed cells.
 - Keeps surface region mesh top slightly sunk where needed to avoid visual artifacts.
 
-`cart/hmsc/world/tileAltitude.ts`
+`cart/hmsc-int/world/tileAltitude.ts`
 
 - Samples altitude and tile source for a cell, especially when landform heightfields affect surface height.
 - Distinguishes base, surface, follows-heightfield, and offset facts.
 
-`cart/hmsc/world/terrain.ts`
+`cart/hmsc-int/world/terrain.ts`
 
 - Generic heightfield bake helpers.
 - Produces terrain field and collider data from height samples.
 - Pure data code, no React.
 
-`cart/hmsc/world/rects.ts`
+`cart/hmsc-int/world/rects.ts`
 
 - Shared XZ rectangle math.
 - Defines `Rect`, `rectsOverlap`, `rectGap`, and `rectCenter`.
 - Used by placement and collision validation.
 
-`cart/hmsc/world/idgen.ts`
+`cart/hmsc-int/world/idgen.ts`
 
 - Collision-proof sequential id allocator.
 - `nextUniqueId(prefix, existing)` finds the first non-live id instead of using list length.
 - Prevents duplicate ids after removing an object.
 
-`cart/hmsc/world/noiseModel.ts`
+`cart/hmsc-int/world/noiseModel.ts`
 
 - Defines surface noise materials and multipliers.
 - Defines movement noise modes: creep/walk, jog, sprint, jump/land, mantle/climb.
@@ -371,20 +371,20 @@ Commands present in the registry:
 - Provides console formatting helpers for `gv_noise`.
 - Uses JavaScript math only.
 
-`cart/hmsc/world/pathing.ts`
+`cart/hmsc-int/world/pathing.ts`
 
 - A* grid pathfinding over HMSC tile kinds.
 - Supports `pedestrian`, `runner`, and `vehicle` agents.
 - Uses tile pathing/traversal/NPC metadata to compute movement cost.
 - Returns a grid-cell path or empty array.
 
-`cart/hmsc/world/zones.ts`
+`cart/hmsc-int/world/zones.ts`
 
 - Defines zone flags and zone mutations.
 - Supports adding/removing zones, querying zones at cells/world positions, and picking the active smallest containing zone.
 - Current availability logic is placeholder true.
 
-`cart/hmsc/world/traffic.ts`
+`cart/hmsc-int/world/traffic.ts`
 
 - Defines traffic signal cycle timing.
 - Uses `globalThis.performance?.now?.()` fallback to `Date.now()`.
@@ -393,7 +393,7 @@ Commands present in the registry:
 - Finds vehicle approach signals ahead of travel direction.
 - Returns whether a vehicle should yield.
 
-`cart/hmsc/world/placeables.ts`
+`cart/hmsc-int/world/placeables.ts`
 
 - Shared registry for authorable things used by painter/map/tree tooling.
 - Defines layers: tile, zone, building, road, prop, mountain.
@@ -401,14 +401,14 @@ Commands present in the registry:
 - Centralizes swatch colors.
 - Converts hex colors to RGB floats for map/minimap shaders.
 
-`cart/hmsc/world/worldTree.ts`
+`cart/hmsc-int/world/worldTree.ts`
 
 - Derived read model for the authored world.
 - Summarizes surface regions as chunks with base tile kind, sparse overrides, zones, and buildings.
 - Produces world totals and optional staged paint totals.
 - Not a storage shape.
 
-`cart/hmsc/world/worldView.ts`
+`cart/hmsc-int/world/worldView.ts`
 
 - Shared map/minimap landmark read model.
 - Provides `worldMarkers(state)`.
@@ -416,7 +416,7 @@ Commands present in the registry:
 - Uses zone flag color rules.
 - Lets in-game HUD and internal map tooling read the same landmark data.
 
-`cart/hmsc/world/placementCheck.ts`
+`cart/hmsc-int/world/placementCheck.ts`
 
 - Non-blocking placement audit system.
 - Normalizes buildings, props, and landforms into `PlacementSubject`.
@@ -426,20 +426,20 @@ Commands present in the registry:
 
 ## Roads, buildings, props, landforms
 
-`cart/hmsc/world/roadProfile.ts`
+`cart/hmsc-int/world/roadProfile.ts`
 
 - Defines road scale constants and default profile.
 - Computes cross-section widths for lanes, bike lanes, sidewalks, centerlines, curbs, and markings.
 - Exports road width helpers.
 
-`cart/hmsc/world/roads.ts`
+`cart/hmsc-int/world/roads.ts`
 
 - Defines road footprint and road top height.
 - Resolves road band kind at world positions.
 - Builds road physics bands.
 - Places/removes road segments.
 
-`cart/hmsc/world/roadJunctions.ts`
+`cart/hmsc-int/world/roadJunctions.ts`
 
 - Defines intersection and cul-de-sac footprints.
 - Computes junction top height.
@@ -447,7 +447,7 @@ Commands present in the registry:
 - Builds junction physics bands.
 - Places/removes junctions.
 
-`cart/hmsc/world/buildingKinds.ts`
+`cart/hmsc-int/world/buildingKinds.ts`
 
 - Pure building kind registry.
 - Defines normal box buildings and open custom structures.
@@ -455,7 +455,7 @@ Commands present in the registry:
 - Stores default footprint, storeys, wall tile kind, default enclosure, default skin, facade color, and structure model.
 - Exports validation and console listing helpers.
 
-`cart/hmsc/world/buildings.ts`
+`cart/hmsc-int/world/buildings.ts`
 
 - Building geometry and collision data.
 - Computes footprints, heights, top, door center, door front cells, and door front point.
@@ -467,7 +467,7 @@ Commands present in the registry:
 - Computes camera collision against box buildings.
 - Places/removes buildings and sets face skins.
 
-`cart/hmsc/world/buildingPlacement.ts`
+`cart/hmsc-int/world/buildingPlacement.ts`
 
 - Hard placement policy for buildings.
 - Rejects overlapping buildings.
@@ -476,7 +476,7 @@ Commands present in the registry:
 - Auto-snaps `doorSide` toward the nearest road.
 - `force` bypasses those rules.
 
-`cart/hmsc/world/interiors.ts`
+`cart/hmsc-int/world/interiors.ts`
 
 - Interior world swap system.
 - Creates generated interior spaces for buildings with `enclosure: 'interior'`.
@@ -485,19 +485,19 @@ Commands present in the registry:
 - `enterBuildingInterior` pushes the outer world to `suspendedSpaces` and replaces `state.world`.
 - `leaveCurrentInterior` pops the previous world and returns to `boot.console`.
 
-`cart/hmsc/world/propKinds.ts`
+`cart/hmsc-int/world/propKinds.ts`
 
 - Prop kind registry.
 - Defines labels, solidity, footprint radius, height, tile kind, and traffic-control role.
 - Props include rocks, hydrants, street signs, street lights, bush variants, stop signs, traffic lights, payphones, dumpsters, mailboxes, and fences.
 
-`cart/hmsc/world/props.ts`
+`cart/hmsc-int/world/props.ts`
 
 - Prop footprint, top height, physics rect, picking, placement, removal, and signal override helpers.
 - Bushes can be non-solid.
 - Fence footprints account for yaw.
 
-`cart/hmsc/world/structures.ts`
+`cart/hmsc-int/world/structures.ts`
 
 - JSX-free layout descriptions for open structures.
 - Defines parking garage, gas station, used car lot, and drive-in specs.
@@ -505,18 +505,18 @@ Commands present in the registry:
 - Defines drive-in screen texture keys and booth interaction points.
 - Builds collision solids for open structures so render and physics share the same layout facts.
 
-`cart/hmsc/world/landforms/index.ts`
+`cart/hmsc-int/world/landforms/index.ts`
 
 - Imports and registers landform kinds.
 - Re-exports the landform registry.
 
-`cart/hmsc/world/landforms/registry.ts`
+`cart/hmsc-int/world/landforms/registry.ts`
 
 - Defines `LandformKindDef`.
 - Registers and looks up landform kinds.
 - Computes heightfields, colliders, top height, tile kind, water kind, camera hits, and mutations.
 
-`cart/hmsc/world/landforms/kinds.ts`
+`cart/hmsc-int/world/landforms/kinds.ts`
 
 - Registers built-in landforms.
 - `hills`: rolling summed-cosine terrain.
@@ -527,18 +527,18 @@ Commands present in the registry:
 
 ## NPC subsystem
 
-`cart/hmsc/npc/index.ts`
+`cart/hmsc-int/npc/index.ts`
 
 - Barrel export for NPC kind, faction, role, spawn, chance, and damage systems.
 - Defines the intended axes: kind is what an NPC is, faction is who it fights, role is what it means to the player.
 
-`cart/hmsc/npc/kinds.ts`
+`cart/hmsc-int/npc/kinds.ts`
 
 - Registry of closed NPC kinds: civilian, paramedic, thug, police.
 - Stores max health, walk/run speed, default faction, combat ability, weapon damage, and perception.
 - Perception includes vision range, field of view, hearing acuity, and reaction time.
 
-`cart/hmsc/npc/factions.ts`
+`cart/hmsc-int/npc/factions.ts`
 
 - Faction regard matrix.
 - Factions: civilian, gang, police.
@@ -546,28 +546,28 @@ Commands present in the registry:
 - Regard values: hostile, wary, neutral, friendly.
 - `isHostileTo` returns true only for hostile regard.
 
-`cart/hmsc/npc/roles.ts`
+`cart/hmsc-int/npc/roles.ts`
 
 - Open role registry.
 - Roles include none, personOfInterest, target, informant, witness, contact.
 - Role metadata includes HUD marker color token, hostile-on-sight override, objective flag, and interactions.
 - Unknown roles fall back to `none`.
 
-`cart/hmsc/npc/spawn.ts`
+`cart/hmsc-int/npc/spawn.ts`
 
 - Pure NPC factory and world mutation helpers.
 - `createNpc` builds an `NpcState` from kind defaults plus id, position, optional faction, role, yaw, and source command.
 - Adds stable gait phase offset by id so groups do not animate in lockstep.
 - `addNpcToWorld`, `removeNpcFromWorld`, and `npcAt` mutate/read the `world.npcs` map immutably.
 
-`cart/hmsc/npc/systems/chance.ts`
+`cart/hmsc-int/npc/systems/chance.ts`
 
 - Probabilistic hit model for NPC-to-player and NPC-to-NPC shots.
 - Computes hit chance from range, cover fraction, target crouch, and shooter skill.
 - Uses `Math.random` by default for `rollHit` and `rollZone`, but accepts injected RNG functions.
 - Chooses landed shot zone from weighted damage zones.
 
-`cart/hmsc/npc/systems/damage.ts`
+`cart/hmsc-int/npc/systems/damage.ts`
 
 - Applies resolved damage to NPC state.
 - Joins two paths: geometric player aim hits and probabilistic zone shots.
@@ -576,26 +576,26 @@ Commands present in the registry:
 
 ## Labs
 
-`cart/hmsc/labs/labDefinitions.ts`
+`cart/hmsc-int/labs/labDefinitions.ts`
 
 - Defines in-cart labs: `scale`, `textures`, and `aim`.
 - Each lab has a name, label, scene step, spawn position/yaw, and exit position/yaw.
 - Provides validation and scene-step lookup helpers.
 
-`cart/hmsc/labs/ScaleLabScene.tsx`
+`cart/hmsc-int/labs/ScaleLabScene.tsx`
 
 - Scene3D lab for physical scale.
 - Renders player capsule, blocks, ledges, door frame, height lines, and ruler ticks.
 - Uses `HMSC_SCALE`.
 - JavaScript/React only, no host functions.
 
-`cart/hmsc/labs/TextureLabScene.tsx`
+`cart/hmsc-int/labs/TextureLabScene.tsx`
 
 - Scene3D material board for tile textures.
 - Renders panels using texture keys from `HMSC_TILE_TEXTURE_KEYS`.
 - Uses `textureKey` on `Scene3D.Mesh`.
 
-`cart/hmsc/labs/AimLabScene.tsx`
+`cart/hmsc-int/labs/AimLabScene.tsx`
 
 - Scene3D aim lab with bottles and target selection.
 - Computes an aim ray in JavaScript from gameplay camera context.
@@ -604,14 +604,14 @@ Commands present in the registry:
 
 ## UI and diagnostics
 
-`cart/hmsc/ui/Console.tsx`
+`cart/hmsc-int/ui/Console.tsx`
 
 - Console panel UI.
 - Renders quick-command buttons, command history, and `TextInput`.
 - On submit calls the parent `onSubmitCommand`.
 - Quick commands include help, HUD, sky/time/weather, lab commands, player location, cheats/noclip, state, save, and reset.
 
-`cart/hmsc/render/Hud.tsx`
+`cart/hmsc-int/render/Hud.tsx`
 
 - GTA-style HUD overlay.
 - Renders clock, money, armor, health, wanted stars, inventory item, minimap, and zone name flash.
@@ -621,14 +621,14 @@ Commands present in the registry:
 - Uses `performance.now()` fallback to `Date.now()`.
 - Listens to `hmsc:event:zone.entered` with `busOn`.
 
-`cart/hmsc/render/DebugHud.tsx`
+`cart/hmsc-int/render/DebugHud.tsx`
 
 - Debug overlay for frame, render, input, player, camera, and world stats.
 - Uses `useTelemetry` hook for fps, frame, gpu, nodes, and input data.
 - Shows host physics microseconds from the drive loop.
 - Reads movement surface from `movementSurfaceForPlayer`.
 
-`cart/hmsc/tools/runWorldScript.ts`
+`cart/hmsc-int/tools/runWorldScript.ts`
 
 - Headless seed-world placement auditor.
 - Creates initial state and runs placement validation over seed buildings, props, and landforms.
@@ -638,7 +638,7 @@ Commands present in the registry:
 
 ## 3D renderer
 
-`cart/hmsc/render3d/GameWorld3D.tsx`
+`cart/hmsc-int/render3d/GameWorld3D.tsx`
 
 - Main world renderer.
 - Renders skybox, lights, floor regions, roads, junctions, placed cells, props, buildings, facades, part-textured faces, landforms, player, and scene children.
@@ -647,19 +647,19 @@ Commands present in the registry:
 - Uses `Scene3D.Camera`, `Scene3D.Fog`, `Scene3D.Skybox`, and `Scene3D.Mesh`.
 - Surface region floors are textured top-face slabs using `floorTextureKey(region.id)`.
 
-`cart/hmsc/render3d/sky.ts`
+`cart/hmsc-int/render3d/sky.ts`
 
 - Pure sky model.
 - Defines named hours and weather presets.
 - Computes zenith, horizon, sun color, sun direction, ambient, directional light, fog, and background colors from hour, weather, and gloom.
 - No host calls.
 
-`cart/hmsc/render3d/materials.ts`
+`cart/hmsc-int/render3d/materials.ts`
 
 - Small material object factory layer.
 - Defines `Glass`, `AutoGlass`, and `Storefront` material presets with transparency/breakable-style metadata.
 
-`cart/hmsc/render3d/Building.tsx`
+`cart/hmsc-int/render3d/Building.tsx`
 
 - Renders one placed building.
 - Box buildings draw walls from the same `buildingBoxes` data used by physics.
@@ -667,13 +667,13 @@ Commands present in the registry:
 - Open structures dispatch to custom structure components through `buildingCustomModel`.
 - Also renders `BuildingWindows`.
 
-`cart/hmsc/render3d/BuildingWindows.tsx`
+`cart/hmsc-int/render3d/BuildingWindows.tsx`
 
 - Adds glass panes to box buildings based on building skins, floors, and faces.
 - Uses `Glass` material.
 - Pure render logic.
 
-`cart/hmsc/render3d/BuildingFacades.tsx`
+`cart/hmsc-int/render3d/BuildingFacades.tsx`
 
 - Legacy per-face building skin renderer.
 - Adds thin textured panels over box building walls and roof.
@@ -682,58 +682,58 @@ Commands present in the registry:
 - Captures one StaticSurface per distinct `(skin, cols, floors)` bucket.
 - Uses `StaticSurface` plus React facade UI from `buildingSkins.tsx`.
 
-`cart/hmsc/render3d/buildingSkins.tsx`
+`cart/hmsc-int/render3d/buildingSkins.tsx`
 
 - Defines 2D React facade skin renderers.
 - Skins include office, residential, retail, industrial, internetCafe, gunShop, and mall.
 - `plain` means no facade texture.
 - Exposes grid sizing and texture-key helpers.
 
-`cart/hmsc/render3d/buildingTransform.ts`
+`cart/hmsc-int/render3d/buildingTransform.ts`
 
 - Shared yaw/position helpers for buildings.
 - Computes building yaw, center, rotated points around center, part placement, and anchored yaw.
 
-`cart/hmsc/render3d/buildingModels.tsx`
+`cart/hmsc-int/render3d/buildingModels.tsx`
 
 - Dispatches open building kinds to custom model components.
 - Maps parking garage, gas station, used car lot, and drive-in to their render components.
 
-`cart/hmsc/render3d/structures/Car.tsx`
+`cart/hmsc-int/render3d/structures/Car.tsx`
 
 - Reusable car model for open structures.
 - Builds a stylized car from Scene3D primitives.
 - Uses deterministic color choice from structure data, not `Math.random`.
 
-`cart/hmsc/render3d/structures/ParkingGarage.tsx`
+`cart/hmsc-int/render3d/structures/ParkingGarage.tsx`
 
 - Renders parking garage structure.
 - Uses `parkingGarageSpec` and `parkingGarageField`.
 - Exports `parkingGarageParts` for the part-texture system.
 - Uses heightfield mesh, deck, pillars, parapets, stripes, and cars.
 
-`cart/hmsc/render3d/structures/GasStation.tsx`
+`cart/hmsc-int/render3d/structures/GasStation.tsx`
 
 - Renders gas station structure.
 - Uses `gasStationSpec`.
 - Exports `gasStationParts`.
 - Draws canopy, store, pumps, signs, glass, and pillars.
 
-`cart/hmsc/render3d/structures/UsedCarLot.tsx`
+`cart/hmsc-int/render3d/structures/UsedCarLot.tsx`
 
 - Renders used car lot structure.
 - Uses `usedCarLotSpec`.
 - Exports `usedCarLotParts`.
 - Draws kiosk, sign, pennants, cables, and cars.
 
-`cart/hmsc/render3d/structures/DriveIn.tsx`
+`cart/hmsc-int/render3d/structures/DriveIn.tsx`
 
 - Renders drive-in structure.
 - Uses `driveInSpec` and `driveInScreenTextureKey`.
 - Exports `driveInParts`.
 - Draws screen wall, booth, marquee, poles, and live screen panel.
 
-`cart/hmsc/render3d/driveInScreen.tsx`
+`cart/hmsc-int/render3d/driveInScreen.tsx`
 
 - Offscreen capture path for drive-in screen textures.
 - Uses `Video` primitive when a source is selected.
@@ -741,20 +741,20 @@ Commands present in the registry:
 - Refreshes approximately 30 fps with `requestAnimationFrame` fallback to `setTimeout`.
 - Reads current source through `getDriveInSource` and `useDriveInSources`.
 
-`cart/hmsc/render3d/Road.tsx`
+`cart/hmsc-int/render3d/Road.tsx`
 
 - Renders each road as one textured slab.
 - Top face samples a road texture captured from WGSL.
 - Uses `RoadSurfaceCaptures` to mount one `StaticSurface` per road.
 - Road slab top matches the host physics road top.
 
-`cart/hmsc/render3d/RoadJunctions.tsx`
+`cart/hmsc-int/render3d/RoadJunctions.tsx`
 
 - Renders intersections and cul-de-sacs as single textured slabs.
 - Uses WGSL captures for intersection/cul-de-sac markings.
 - Junction top is slightly above road slabs so markings cover overlaps.
 
-`cart/hmsc/render3d/Landform.tsx`
+`cart/hmsc-int/render3d/Landform.tsx`
 
 - Renders each landform as a `Geometry.Heightfield`.
 - Uses the same landform heightfield source that collider registration uses.
@@ -763,7 +763,7 @@ Commands present in the registry:
 - Estate decor adds road ribbon mesh.
 - Mounts natural, painted, water, and road-ribbon StaticSurface captures.
 
-`cart/hmsc/render3d/heightfieldSurface.tsx`
+`cart/hmsc-int/render3d/heightfieldSurface.tsx`
 
 - Captures per-cell tile paint for field-backed heightfields.
 - Builds palette data from tile definitions and placeable colors.
@@ -796,56 +796,56 @@ Commands present in the registry:
   stamped tile-kind colour; walkability is unaffected (the flat chunk's whole
   collider plane is independent of which cells render).
 
-`cart/hmsc/render3d/tileSurface.tsx`
+`cart/hmsc-int/render3d/tileSurface.tsx`
 
 - Captures texture maps for rectangular surface regions.
 - Defines `floorTextureKey(regionId)`.
 - Uses WGSL Effect plus StaticSurface.
 - Stabilizes data/style identities to avoid rebakes during camera/player frames.
 
-`cart/hmsc/render3d/tileFill.ts`
+`cart/hmsc-int/render3d/tileFill.ts`
 
 - WGSL tile fill shader and material/variant ids for tile kinds.
 - Provides procedural base textures for tile surfaces.
 
-`cart/hmsc/render3d/roadFill.ts`
+`cart/hmsc-int/render3d/roadFill.ts`
 
 - WGSL road cross-section shader.
 - Packs road profile data.
 - Provides `roadTextureKey` and capture dimension helpers.
 
-`cart/hmsc/render3d/roadTileFill.ts`
+`cart/hmsc-int/render3d/roadTileFill.ts`
 
 - Shader layer for road-tile-style fill.
 - Extends tile fill with lane/marking colors.
 
-`cart/hmsc/render3d/junctionFill.ts`
+`cart/hmsc-int/render3d/junctionFill.ts`
 
 - WGSL shaders and data packing for intersections and cul-de-sacs.
 - Provides `junctionTextureKey`.
 
-`cart/hmsc/render3d/landformFill.ts`
+`cart/hmsc-int/render3d/landformFill.ts`
 
 - WGSL natural-blend shader for parametric landforms.
 - Packs landform kind/material/style data.
 - Provides `landformTextureKey` and capture dimension helpers.
 
-`cart/hmsc/render3d/waterFill.ts`
+`cart/hmsc-int/render3d/waterFill.ts`
 
 - WGSL water texture shader.
 - Provides `waterTextureKey`.
 
-`cart/hmsc/render3d/roadRibbon.ts`
+`cart/hmsc-int/render3d/roadRibbon.ts`
 
 - Mesh definition and WGSL texture capture for landform road ribbons.
 - Used by estate landforms.
 
-`cart/hmsc/render3d/fillShader.ts`
+`cart/hmsc-int/render3d/fillShader.ts`
 
 - Large shared WGSL fill shader catalog used by texture recipes.
 - Provides procedural material logic used by `game/textures/shaders.ts`.
 
-`cart/hmsc-int/game/textures/shaders.ts` (MOVED — was `cart/hmsc/render3d/textureShaders.ts`, TEXPORT-0606: the texture pipeline lives behind hmsc-int's `game/textures` door now; raw WGSL sources `roadTileFill`/`fillShader` stay here with the W-2 fills)
+`cart/hmsc-int/game/textures/shaders.ts` (MOVED — was `cart/hmsc-int/render3d/textureShaders.ts`, TEXPORT-0606: the texture pipeline lives behind hmsc-int's `game/textures` door now; raw WGSL sources `roadTileFill`/`fillShader` stay here with the W-2 fills)
 
 - Texture recipe catalog.
 - Defines shader params, variants, defaults, and groups.
@@ -858,7 +858,7 @@ Commands present in the registry:
   form tunes a full tile of fill color.
 - Exports `HMSC_SHADERS`, `shaderSpec`, and `shaderGroups`.
 
-`cart/hmsc-int/game/textures/registry.tsx` (MOVED — was `cart/hmsc/render3d/textures.tsx`, TEXPORT-0606)
+`cart/hmsc-int/game/textures/registry.tsx` (MOVED — was `cart/hmsc-int/render3d/textures.tsx`, TEXPORT-0606)
 
 - Unified texture registry.
 - Treats shader textures and React facade textures as one concept: a texture id that bakes to a StaticSurface and is sampled by `textureKey`.
@@ -866,7 +866,7 @@ Commands present in the registry:
 - Exports `TextureCapture`, `TEXTURE_REGISTRY`, `TEXTURE_IDS`, `allTextures`, and `textureById`.
 - The legacy consumer `render3d/parts.tsx` imports it from hmsc-int (the V15 compile direction).
 
-`cart/hmsc-int/game/textures/materials.ts` (MOVED — was `cart/hmsc/render3d/customTextures.ts`, TEXPORT-0606; export names, `custom:` ids, and the store key unchanged)
+`cart/hmsc-int/game/textures/materials.ts` (MOVED — was `cart/hmsc-int/render3d/customTextures.ts`, TEXPORT-0606; export names, `custom:` ids, and the store key unchanged)
 
 - Stored material layer for editor-authored textures.
 - Reads/writes through `hmscStoreGet` and `hmscStoreSet`, which ultimately use host localstore/store functions.
@@ -874,7 +874,7 @@ Commands present in the registry:
 - Subscribes with `busOn`.
 - Stores records as `{id,label,shaderId,data}`.
 
-`cart/hmsc/render3d/parts.tsx`
+`cart/hmsc-int/render3d/parts.tsx`
 
 - General part-texture system.
 - Defines `Part`: stable id, label, geometry, params, world position, rotation, scale, material, textured faces, texture grid, default texture key, and overlay flag.
@@ -882,55 +882,55 @@ Commands present in the registry:
 - `PartTextureCaptures` bakes one texture per distinct `(textureId, cols, floors)` bucket.
 - This is the more general replacement/extension for box-only face skins.
 
-`cart/hmsc/render3d/buildingParts.ts`
+`cart/hmsc-int/render3d/buildingParts.ts`
 
 - Converts buildings into texturable `Part[]`.
 - Box buildings produce front/back/left/right/top panels.
 - Open structures delegate to structure-specific part exporters.
 - Folds legacy per-face `skin` into part-texture ids for backwards compatibility.
 
-`cart/hmsc/render3d/propParts.ts`
+`cart/hmsc-int/render3d/propParts.ts`
 
 - Converts props into texturable `Part[]`.
 - Currently only street signs expose texturable parts.
 
-`cart/hmsc/render3d/PartCaptures.tsx`
+`cart/hmsc-int/render3d/PartCaptures.tsx`
 
 - Mounts part texture captures for all building/prop part textures used in the world.
 - Renders additive textured face panels for box buildings when `Building.partTextures` is present.
 
-`cart/hmsc/render3d/Prop.tsx`
+`cart/hmsc-int/render3d/Prop.tsx`
 
 - Dispatches prop kind to prop model component.
 - Handles rock variants, hydrants, signs, lights, bushes, stop signs, traffic lights, payphones, dumpsters, mailboxes, and fences.
 
-`cart/hmsc/render3d/PropCaptures.tsx`
+`cart/hmsc-int/render3d/PropCaptures.tsx`
 
 - Mounts prop-specific StaticSurface captures.
 - Currently includes the street sign face capture.
 
-`cart/hmsc/render3d/props/place.ts`
+`cart/hmsc-int/render3d/props/place.ts`
 
 - Shared prop transform math.
 - Adds vectors, rotates local coordinates by yaw, gets prop base, and places local points.
 
-`cart/hmsc/render3d/props/signFace.tsx`
+`cart/hmsc-int/render3d/props/signFace.tsx`
 
 - 2D React texture for the street sign face.
 - Defines `STREET_SIGN_TEXTURE_KEY`.
 - Draws sign plate with Box/Text primitives.
 
-`cart/hmsc/render3d/props/StreetSign.tsx`
+`cart/hmsc-int/render3d/props/StreetSign.tsx`
 
 - Renders street sign model.
 - Exports `streetSignParts` for part texturing.
 - Uses `TexturedParts` and a default sign-face texture key.
 
-`cart/hmsc/render3d/props/StopSign.tsx`
+`cart/hmsc-int/render3d/props/StopSign.tsx`
 
 - Renders stop sign model with pole and octagonal sign.
 
-`cart/hmsc/render3d/props/TrafficLight.tsx`
+`cart/hmsc-int/render3d/props/TrafficLight.tsx`
 
 - Renders traffic light.
 - Uses `trafficClockSeconds` and `trafficSignalPhase`.
@@ -940,76 +940,76 @@ Commands present in the registry:
   direction IS the approach `world/traffic.ts` gates. The compiled-geometry
   mirror lives in `cart/hmsc-int/compile/worldGeometry.ts`.
 
-`cart/hmsc/render3d/props/StreetLight.tsx`
+`cart/hmsc-int/render3d/props/StreetLight.tsx`
 
 - Renders street light model.
 
-`cart/hmsc/render3d/props/FireHydrant.tsx`
+`cart/hmsc-int/render3d/props/FireHydrant.tsx`
 
 - Renders fire hydrant model.
 
-`cart/hmsc/render3d/props/Payphone.tsx`
+`cart/hmsc-int/render3d/props/Payphone.tsx`
 
 - Renders payphone model.
 
-`cart/hmsc/render3d/props/Dumpster.tsx`
+`cart/hmsc-int/render3d/props/Dumpster.tsx`
 
 - Renders dumpster model.
 
-`cart/hmsc/render3d/props/Mailbox.tsx`
+`cart/hmsc-int/render3d/props/Mailbox.tsx`
 
 - Renders mailbox model.
 
-`cart/hmsc/render3d/props/Fence.tsx`
+`cart/hmsc-int/render3d/props/Fence.tsx`
 
 - Renders fence segment model.
 
-`cart/hmsc/render3d/props/Rock.tsx`
+`cart/hmsc-int/render3d/props/Rock.tsx`
 
 - Renders rock/boulder variants.
 
-`cart/hmsc/render3d/props/Bush.tsx`
+`cart/hmsc-int/render3d/props/Bush.tsx`
 
 - Renders bush variants from deterministic blob layout.
 
-`cart/hmsc/render3d/PlayerFigure.tsx`
+`cart/hmsc-int/render3d/PlayerFigure.tsx`
 
 - Renders player humanoid by solving a humanoid rig from movement state.
 - Uses `drivePose`, `solveHumanoid`, `Figure`, `PLAYER_PALETTE`, and `PLAYER_FACE_KEY`.
 
-`cart/hmsc/render3d/NpcFigure.tsx`
+`cart/hmsc-int/render3d/NpcFigure.tsx`
 
 - Renders NPC humanoids from NPC drive data.
 - Solves an NPC rig and uses `npcPalette` and `npcFaceKey`.
 
-`cart/hmsc/render3d/humanoid/index.ts`
+`cart/hmsc-int/render3d/humanoid/index.ts`
 
 - Barrel export for humanoid pose, skeleton, figure, palette, face, and hitbox systems.
 
-`cart/hmsc/render3d/humanoid/pose.ts`
+`cart/hmsc-int/render3d/humanoid/pose.ts`
 
 - Defines humanoid pose values.
 - `drivePose(animationSeconds, moving, running)` computes gait animation.
 
-`cart/hmsc/render3d/humanoid/skeleton.ts`
+`cart/hmsc-int/render3d/humanoid/skeleton.ts`
 
 - Single source of truth for humanoid mesh parts and hit capsules.
 - Solves body pose into render parts, damage-zone capsules, and eye point.
 - Supports optional face texture key on the head.
 - Keeps hitboxes and rendered body aligned because both come from the same solve.
 
-`cart/hmsc/render3d/humanoid/Figure.tsx`
+`cart/hmsc-int/render3d/humanoid/Figure.tsx`
 
 - Renders a solved humanoid rig.
 - Maps rig material slots to a palette.
 - Uses `Scene3D.Mesh` primitives.
 
-`cart/hmsc/render3d/humanoid/palette.ts`
+`cart/hmsc-int/render3d/humanoid/palette.ts`
 
 - Defines player and NPC palettes.
 - Hashes NPC id to a stable palette.
 
-`cart/hmsc/render3d/humanoid/face.tsx`
+`cart/hmsc-int/render3d/humanoid/face.tsx`
 
 - 2D React face texture system.
 - Bakes face presets through StaticSurface.
@@ -1017,7 +1017,7 @@ Commands present in the registry:
 - Bakes all NPC palette/feature combinations so each `npcFaceKey(id)` exists.
 - Uses ReactJIT `Image`, `Render`, and `StaticSurface`, not browser image APIs.
 
-`cart/hmsc/render3d/humanoid/hitbox.ts`
+`cart/hmsc-int/render3d/humanoid/hitbox.ts`
 
 - Geometric raycast path for player aim against NPC humanoids.
 - Ray-tests solved rig capsules and returns nearest hit zone.

@@ -36,6 +36,7 @@ import {
   mergeIntoBase, mintLayerId, moveLayerInStack, overrideBandValue,
   paintableIdsFor, parsePaintDocument, scaleMask, serializePaintDocument,
   unionMasks, PAINT_DOC_KIND, PAINT_DOC_VERSION,
+  controlsForPaintLayer, PAINT_LAYER_CONTROLS,
 } from './layers';
 import { createPaintHistory } from './history';
 import {
@@ -68,6 +69,7 @@ export const PAINT = Object.freeze({
   effectiveMask, scaleMask, unionMasks, invertIntoBase, mergeIntoBase,
   overrideBandValue, defaultLayerConfig, cloneLayerConfig, makeLayer,
   mintLayerId, paintableIdsFor, moveLayerInStack, activeAfterDelete,
+  controlsForPaintLayer, PAINT_LAYER_CONTROLS,
   // documents
   buildPaintDocument, parsePaintDocument, serializePaintDocument,
   inflatePaintDocument, PAINT_DOC_KIND, PAINT_DOC_VERSION,
@@ -98,10 +100,16 @@ export {
 export type {
   PaintLayer, PaintLayerBytes, PaintLayerConfig, PaintLookDefaults,
   PaintClipping, PaintDocument, PaintDocLayer, PaintMode, PaintTool,
+  PaintLayerControl,
 } from './layers';
 export type {
   CustomSurface, MaskSurface, PaintBlendMode, Surface, SurfaceId,
 } from './surfaces';
+export {
+  DEFAULT_PAINT_BRUSH_SETTINGS, PAINT_BRUSH_KIND_IDS, PAINT_BRUSH_PRESETS,
+  normalizePaintBrushSettings,
+} from './brushKinds';
+export type { PaintBrushKind, PaintBrushSettings } from './brushKinds';
 export type { Dab, GraySource, StrokeEngine, StrokeEngineOpts, VectorStroke, Run } from './strokes';
 export type { PaintHistory, PaintHistoryOpts, SnapshotBuilder } from './history';
 export type {

@@ -28,7 +28,7 @@
 // ("the tile system IS the system"); strokes are authoring metadata that ride
 // the map snapshot beside it.
 
-import type { TileKind } from '../hmsc/design';
+import type { TileKind } from './design';
 
 // ── the authored objects ─────────────────────────────────────────────────────
 

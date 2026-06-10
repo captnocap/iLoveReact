@@ -114,6 +114,14 @@ test('a figure-sized subject frames inside the zoom knob range', () => {
   assertClose(o.target[1], 1.0, 1e-6, 'framed at mid-figure, not the floor');
 });
 
+test('ITEMCAMERA-0606: item-scale subjects can zoom closer than the character floor', () => {
+  const itemClamp = { minDist: TUNE.itemCamera.zoom.min, maxDist: TUNE.itemCamera.zoom.max };
+  const tinyItem = cloudBounds([cloud([[-0.05, 1.15, -0.05], [0.05, 1.25, 0.05]])])!;
+  const o = frameOrbit(tinyItem, [0, 1.2, 0], LOOK, FOV, TUNE.frame.margin, itemClamp, 0.65);
+  assert(o.dist < TUNE.knobs.zoom.min, `item framing distance ${o.dist} must sit below the character zoom floor ${TUNE.knobs.zoom.min}`);
+  assert(o.dist >= TUNE.itemCamera.zoom.min, 'item framing still respects the item zoom floor');
+});
+
 test('engagement (CAMBIND-0606): one full-state sequence per rig — a rebind is never partial, never just orbit', () => {
   const calls: string[] = [];
   const ctl: SculptEngageCtl = {

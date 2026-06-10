@@ -16,22 +16,24 @@
 // items would need a marching-cubes skin + a new pick parameterization
 // (rejected for now: weeks of new surface area vs zero reuse).
 //
-// Pure math, headless-testable. Voxel units are METERS (the /voxels grid is
-// the 1m³ authoring substrate), so a baked item is real-scale by construction
-// — the V11 scale audit still owns the verdict (scaleStatus stays 'unaudited').
+// Pure math, headless-testable. Voxel coordinates are cell indices; each
+// blockout carries cellSizeMeters so item authoring can use 10cm cells while
+// older/building-scale docs can still say 1m explicitly.
 
 import type { GlobeParams } from '@reactjit/geometries';
+import { voxelMeshStats, type VoxelMeshParams } from '@reactjit/geometries';
 import type { ItemDefinition } from '../../game/items';
-import type { VoxelBlockoutDoc } from '../voxels/stream';
+import { normalizeVoxelCellSizeMeters, type VoxelBlockoutDoc } from '../voxels/stream';
 import { PAINT_EDITOR_TUNING } from '../characters/paintKit';
+import type { ItemRepresentation, ItemVoxelShapeDoc } from './stream';
 
 const GRID_W = PAINT_EDITOR_TUNING.grid.width;
 const GRID_H = PAINT_EDITOR_TUNING.grid.height;
 const PI = Math.PI;
 
 export const ITEM_BAKE_TUNING = Object.freeze({
-  /** ray-march step, meters (¼ voxel: fine enough that a face never skips) */
-  stepMeters: 0.25,
+  /** ray-march step, in authored cells (¼ cell: fine enough that a face never skips) */
+  stepCells: 0.25,
   /** half a step rides on every hit — the march finds the LAST occupied
    *  sample, so the surface sits mid-step beyond it on average */
   hitBias: 0.125,
@@ -42,7 +44,7 @@ export const ITEM_BAKE_TUNING = Object.freeze({
    *  hasGrid needs amount ≠ 0 and the drag axis length IS the amount) */
   amountMinFracOfRadius: 0.45,
   /** absolute amount floor, meters */
-  amountMin: 0.12,
+  amountMin: 0.01,
   /** a ray that hits nothing (centroid outside the occupancy on that side)
    *  sits at this fraction of the smallest hit — close to the core, honest
    *  about "there is nothing out there" without cratering to zero */
@@ -66,6 +68,26 @@ export type ItemGlobeBake = {
   misses: number;
 };
 
+export function itemVoxelShapeFromBlockout(doc: VoxelBlockoutDoc | null): ItemVoxelShapeDoc | null {
+  const blocks = doc?.blocks ?? [];
+  if (blocks.length === 0) return null;
+  const cellSizeMeters = normalizeVoxelCellSizeMeters(doc?.cellSizeMeters);
+  const params: VoxelMeshParams = { blocks, cellSizeMeters };
+  const stats = voxelMeshStats(params);
+  return {
+    kind: 'voxel-shape',
+    version: 1,
+    dims: { ...(doc?.dims ?? { w: 1, d: 1, h: 1 }) },
+    cellSizeMeters,
+    blocks: blocks.map((b) => ({ id: b.id, x: b.x, y: b.y, z: b.z, kind: b.kind })),
+    mesh: {
+      quads: stats.quads,
+      vertices: stats.vertices,
+      bounds: { size: [stats.bounds.size[0], stats.bounds.size[1], stats.bounds.size[2]] },
+    },
+  };
+}
+
 export function emptyItemGrid(): number[] {
   return new Array(GRID_W * GRID_H).fill(0);
 }
@@ -76,9 +98,8 @@ export function emptyItemGrid(): number[] {
  * the same field. Returns null for an empty blockout.
  *
  * Conventions pinned to the rest of the stack:
- *  - a block at integer (x,y,z) is a unit cube spanning ±0.5 on each axis
- *    (exactly how /voxels renders and picks them), so the cell containing a
- *    world point is Math.round per axis;
+ *  - a block at integer (x,y,z) is a cell cube spanning ±0.5 cell on each
+ *    axis, then scaled by doc.cellSizeMeters for real item dimensions;
  *  - (u,v) → direction matches Globe.ts base(): theta = π·v from +Y,
  *    phi = π/2 − 2π·u, dir = [sinθ·cosφ, cosθ, sinθ·sinφ] — the baked field
  *    reads on the mesh exactly where the march looked.
@@ -87,6 +108,7 @@ export function bakeBlockoutToGlobe(doc: VoxelBlockoutDoc | null): ItemGlobeBake
   const blocks = doc?.blocks ?? [];
   if (blocks.length === 0) return null;
   const T = ITEM_BAKE_TUNING;
+  const cellSizeMeters = normalizeVoxelCellSizeMeters(doc?.cellSizeMeters);
 
   const occupied = new Set(blocks.map((b) => `${b.x}:${b.y}:${b.z}`));
   let cx = 0, cy = 0, cz = 0;
@@ -99,7 +121,7 @@ export function bakeBlockoutToGlobe(doc: VoxelBlockoutDoc | null): ItemGlobeBake
     const d = Math.hypot(b.x - cx, b.y - cy, b.z - cz);
     if (d > maxR) maxR = d;
   }
-  maxR += Math.sqrt(3) / 2 + T.stepMeters;
+  maxR += Math.sqrt(3) / 2 + T.stepCells;
 
   const r = new Array(GRID_W * GRID_H).fill(-1);
   let hits = 0;
@@ -114,7 +136,7 @@ export function bakeBlockoutToGlobe(doc: VoxelBlockoutDoc | null): ItemGlobeBake
       const dx = st * Math.cos(phi), dy = ct, dz = st * Math.sin(phi);
       // LAST occupied sample = the outer hull (interior gaps don't truncate)
       let last = -1;
-      for (let s = 0; s <= maxR; s += T.stepMeters) {
+      for (let s = 0; s <= maxR; s += T.stepCells) {
         const px = Math.round(cx + dx * s);
         const py = Math.round(cy + dy * s);
         const pz = Math.round(cz + dz * s);
@@ -134,14 +156,16 @@ export function bakeBlockoutToGlobe(doc: VoxelBlockoutDoc | null): ItemGlobeBake
   const missR = Math.max(minHit * ITEM_BAKE_TUNING.missFrac, 0.1);
   for (let i = 0; i < r.length; i++) if (r[i] < 0) r[i] = missR;
 
+  const scaled = r.map((v) => v * cellSizeMeters);
+
   // base radius = the mean extent; amount covers the deviation with headroom
   let sum = 0;
-  for (const v of r) sum += v;
-  const radius = sum / r.length;
+  for (const v of scaled) sum += v;
+  const radius = sum / scaled.length;
   let dev = 0;
-  for (const v of r) dev = Math.max(dev, Math.abs(v - radius));
+  for (const v of scaled) dev = Math.max(dev, Math.abs(v - radius));
   const amount = Math.max(dev * T.amountHeadroom, radius * T.amountMinFracOfRadius, T.amountMin);
-  const grid = r.map((v) => Math.max(-1, Math.min(1, (v - radius) / amount)));
+  const grid = scaled.map((v) => Math.max(-1, Math.min(1, (v - radius) / amount)));
   return { radius, amount, grid, hits, misses };
 }
 
@@ -173,6 +197,26 @@ export function itemGlobeParams(item: { radius: number; amount: number; grid: nu
   };
 }
 
+export function itemVoxelMeshParams(item: { amount: number; grid: number[]; voxelShape?: ItemVoxelShapeDoc | null }): VoxelMeshParams | null {
+  if (!item.voxelShape || item.voxelShape.blocks.length === 0) return null;
+  const base = bakeBlockoutToGlobe({
+    dims: item.voxelShape.dims,
+    cellSizeMeters: item.voxelShape.cellSizeMeters,
+    blocks: item.voxelShape.blocks,
+  });
+  const displace = base && base.grid.length === item.grid.length
+    ? item.grid.map((v, i) => Math.max(-1, Math.min(1, v - base.grid[i]!)))
+    : item.grid;
+  return {
+    blocks: item.voxelShape.blocks,
+    cellSizeMeters: item.voxelShape.cellSizeMeters,
+    displace,
+    dCols: GRID_W,
+    dRows: GRID_H,
+    amount: item.amount,
+  };
+}
+
 // ── registry door (V11): a sculpted item AS an ItemDefinition ────────────────
 
 /** A saved sculpted item, shaped for game/items consumers (held/dropped
@@ -182,8 +226,10 @@ export function itemGlobeParams(item: { radius: number; amount: number; grid: nu
  *  mandatory scale audit is the user's verdict, not the tool's. */
 export function sculptedItemDefinition(
   id: string,
-  doc: { name: string; radius: number; amount: number; grid: number[]; color: string },
+  doc: { name: string; radius: number; amount: number; grid: number[]; color: string; representation?: ItemRepresentation; voxelShape?: ItemVoxelShapeDoc | null },
 ): ItemDefinition {
+  const voxelParams = itemVoxelMeshParams(doc);
+  const voxelPart = voxelParams && doc.representation !== 'globe';
   return {
     id,
     label: doc.name,
@@ -191,7 +237,12 @@ export function sculptedItemDefinition(
     note: 'sculpted in /items from a voxel blockout',
     scaleStatus: 'unaudited',
     heldScale: 1,
-    parts: [{
+    parts: [voxelPart ? {
+      geometry: 'voxelMesh',
+      params: voxelParams as Record<string, unknown>,
+      material: doc.color,
+      position: [0, 0, 0],
+    } : {
       geometry: 'globe',
       params: itemGlobeParams(doc) as Record<string, unknown>,
       material: doc.color,

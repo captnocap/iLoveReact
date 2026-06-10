@@ -33,11 +33,13 @@
 // orbitDown only when the press misses the mesh), and the Scene3D.Camera
 // node itself (render it with cameraRef + bootCam).
 //
-// Tuning rides PAINT_EDITOR_TUNING.orbit/.fly/.knobs.zoom — ONE hand-feel
-// for every sculpt surface, by construction. CAMSENS-0606: the feel numbers
-// are /settings tunables (paintKit registers the sculpt-camera cluster), and
-// the first look-drag per rig logs its measured px-in → °-out ratio to the
-// dev terminal — the sensitivity claim stays checkable, never theorized.
+// Tuning rides PAINT_EDITOR_TUNING.orbit/.fly plus a consumer-supplied zoom
+// range (default: knobs.zoom). ITEMCAMERA-0606 keeps the RIG shared while
+// letting item-scale surfaces use item-scale distance/near values. CAMSENS-
+// 0606: the feel numbers are /settings tunables (paintKit registers the
+// sculpt-camera cluster), and the first look-drag per rig logs its measured
+// px-in → °-out ratio to the dev terminal — the sensitivity claim stays
+// checkable, never theorized.
 
 import { useEffect, useRef, useState } from 'react';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
@@ -87,6 +89,9 @@ export type SculptCameraOpts = {
    *  "part/model switched" signal — e.g. `part:${selPart}:${epoch}`).
    *  Mount framing happens regardless; this drives the in-session switches. */
   focusKey?: string;
+  /** distance range for this subject scale. Character surfaces omit this and
+   *  use the canonical character zoom range; item surfaces pass itemCamera. */
+  zoom?: { min: number; max: number; step: number; precision?: number };
   defaults: SculptCameraDefaults;
 };
 
@@ -100,6 +105,8 @@ export type SculptCamera = {
   zoomTo: (d: number) => void;
   /** knob reflection constant: knob value = zoomReflect − dist (bigger = closer) */
   zoomReflect: number;
+  /** the range the current surface's zoom knob and wheel consume */
+  zoomSpec: { min: number; max: number; step: number; precision?: number };
   /** the ACTIVE rig solved from the JS shadow (fly reads the host pose back)
    *  — the pick camera IS the rendered camera, even mid-flight */
   solvedCam: () => Solved;
@@ -120,6 +127,7 @@ export type SculptCamera = {
 
 export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
   const { route, defaults } = opts;
+  const zoomSpec = opts.zoom ?? TUNE.knobs.zoom;
   // zoom is a KNOB (param-rate); yaw/pitch live in lookRef — drag deltas ride
   // the native controller (V23), never React state
   const [dist, setDist] = useRouteTwigState(route, 'orbitDistance', defaults.dist);
@@ -163,7 +171,7 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
   // machinery stays untouched: mid-session mode flips still resume their pose.
   const focusNow = () => {
     const bounds = opts.subjectBounds?.() ?? null;
-    const clampTo = { minDist: TUNE.knobs.zoom.min, maxDist: TUNE.knobs.zoom.max };
+    const clampTo = { minDist: zoomSpec.min, maxDist: zoomSpec.max };
     const o = frameOrbit(bounds, center, defaults.look, 45, TUNE.frame.margin, clampTo, defaults.dist);
     // the orbit shadow adopts the framed pose in full (pan = the bounds
     // center's offset from the view center, so camTarget() IS the subject)
@@ -401,7 +409,7 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
     });
   };
 
-  const zoomTo = (d: number) => setDist(clamp(d, TUNE.knobs.zoom.min, TUNE.knobs.zoom.max));
+  const zoomTo = (d: number) => setDist(clamp(d, zoomSpec.min, zoomSpec.max));
 
   // ── the wheel: dolly + zoom-to-cursor (GRABNAV-0605) ──────────────────────
   // Rides the raw onScroll fallback (events.zig hitTestScroll). Wheel IN
@@ -429,7 +437,7 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
       return;
     }
     const target = camTarget();
-    const next = clamp(dist - notches * TUNE.knobs.zoom.step, TUNE.knobs.zoom.min, TUNE.knobs.zoom.max);
+    const next = clamp(dist - notches * zoomSpec.step, zoomSpec.min, zoomSpec.max);
     if (next < dist) {
       const sx = Number(e?.x ?? 0), sy = Number(e?.y ?? 0);
       const cam = solvedCam();
@@ -461,7 +469,8 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
     setCamMode,
     dist,
     zoomTo,
-    zoomReflect: TUNE.knobs.zoom.min + TUNE.knobs.zoom.max,
+    zoomReflect: zoomSpec.min + zoomSpec.max,
+    zoomSpec,
     solvedCam,
     camTarget,
     orbitDown,

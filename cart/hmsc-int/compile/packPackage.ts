@@ -1,6 +1,6 @@
 // packPackage.ts — helper bundled by `rjit pack hmsc`.
 
-import { createInitialGameState } from '../../hmsc/state/gameState';
+import { createInitialGameState } from '../state/gameState';
 import { bytesToBase64 } from '@reactjit/workspace';
 import { createHmscMapfile, hmscManifest } from '../packageMap';
 

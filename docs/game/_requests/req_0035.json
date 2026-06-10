@@ -3,7 +3,7 @@
   "at": "2026-06-06T06:03:46.495Z",
   "origin": "supervisor-relay",
   "text": "ogd damnit so i was gas lit. the camera is fucked. in any model view except for the head u cant do shit",
-  "status": "resolved",
+  "status": "done",
   "captureMode": "manual",
   "resolvedAt": "2026-06-06T06:14:58.338Z",
   "resolution": "CAMBIND-0606, commit c3a461ed5 — and this resolution SUPERSEDES req_0031's (which recorded 'false alarm, camera works'; the truth was head-only worked — the user was gaslit by testing the mount-time view; the ledger's append-only law forbids rewriting req_0031 itself, so the correction lives here). The user's own diagnosis was exactly right: the camera controller bound ONCE on mount to that moment's camera node; the workbench stage reparents its 3D viewport on every lens/tab switch, remounting the camera node with a new id — the controller kept driving the DEAD node and the view froze on every view except the mount-time one (head), until a hot update remounted the stage and accidentally re-bound. Fixed at the shared seam (editors/sculptCamera.ts — zero workbench-file edits, survives the pending lens restructure): engagement now FOLLOWS THE NODE ID, checked after every render, re-binding through one pure full-state sequence (sculptFraming.applySculptEngagement: mode + pose + smoothing + axes — never partial) with the user's pose kept and 'camera re-bound -> node N' logged; boot framing fires on first engage only. All three sculpt surfaces (workbench stage, /characters, /items) ride it. P4 8/8 pins the sequence; SELFSHOT proof /tmp/cambind-workbench.png shows the stage framed through the bound controller. JS-only — hot reload delivers it without a rebuild.",

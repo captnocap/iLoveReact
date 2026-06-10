@@ -9,6 +9,7 @@ import { busOn } from '@reactjit/hooks/useIFTTT';
 import type { WorkbenchSource } from '../../../shell/Workbench';
 import { TexturePreview } from '../../../TexturePreview';
 import { DecalSurface } from '../../../game/textures/decalRender';
+import type { DecalNode } from '../../../game/textures/decal';
 import { TEXTURE_REGISTRY, textureById } from '../../../game/textures/registry';
 import { HMSC_SHADERS, defaultShaderData } from '../../../game/textures/shaders';
 import { loadCustomTextures, removeCustomTexture, saveCustomTexture, saveDecalTexture } from '../../../game/textures/materials';
@@ -17,8 +18,11 @@ import { editorChannel } from '../../store';
 import { editorSessions, type RouteSession } from '../../sessions';
 import { materialsStream, type MaterialsEvent } from '../../materials/stream';
 import { readRouteTwigState, writeRouteTwigState } from '../../twigs';
+import { pickImageFile } from '../../cutout/sources';
+import { LayerStackStrip, type LayerStripAction } from '../../paint/LayerStrip';
 import {
   createMaterialStore,
+  type ComposeResizeHandle,
   type MaterialLens,
   type MaterialStore,
   type MaterialSubject,
@@ -30,6 +34,42 @@ const COMPOSE_STAGE = {
   maxScale: 1.6,
   billboardMeters: 5,
 } as const;
+
+type ComposeDrag =
+  | { kind: 'move'; id: string }
+  | { kind: 'resize'; id: string; handle: ComposeResizeHandle };
+
+const COMPOSE_RESIZE_HANDLES: { id: ComposeResizeHandle; x: 0 | 0.5 | 1; y: 0 | 0.5 | 1 }[] = [
+  { id: 'nw', x: 0, y: 0 },
+  { id: 'n', x: 0.5, y: 0 },
+  { id: 'ne', x: 1, y: 0 },
+  { id: 'e', x: 1, y: 0.5 },
+  { id: 'se', x: 1, y: 1 },
+  { id: 's', x: 0.5, y: 1 },
+  { id: 'sw', x: 0, y: 1 },
+  { id: 'w', x: 0, y: 0.5 },
+];
+
+function composeLayerName(node: DecalNode, index: number): string {
+  return node.name ?? `${node.kind} ${index + 1}`;
+}
+
+function composeLayerMeta(node: DecalNode): string {
+  if (node.kind === 'rect') return node.fillShaderId ? `effect · ${node.fillShaderId}` : 'rect · flat fill';
+  if (node.kind === 'text') return `text · ${node.text || 'empty'}`;
+  return node.src ? `image · ${node.src.split('/').pop()}` : 'image · no source';
+}
+
+function composeLayerPreview(node: DecalNode) {
+  const previewNode = { ...node, x: 0, y: 0, hidden: undefined } as DecalNode;
+  return (
+    <DecalSurface
+      doc={{ version: 1, width: Math.max(1, node.w), height: Math.max(1, node.h), bg: '#00000000', nodes: [previewNode] }}
+      width={34}
+      height={24}
+    />
+  );
+}
 
 let liveStore: MaterialStore | null = null;
 
@@ -59,6 +99,7 @@ function materialWorkbenchStore(): MaterialStore {
     saveShader: (label, shaderId, data) => saveCustomTexture(label, shaderId, data),
     saveDecal: (label, doc, existingId) => saveDecalTexture(label, doc, existingId),
     remove: (id) => removeCustomTexture(id),
+    pickImage: () => pickImageFile('Pick decal image'),
     session,
     twig: liveTwigAdapter(),
   });
@@ -153,7 +194,8 @@ function ComposeStage(props: { store: MaterialStore }) {
   const s = props.store;
   const doc = s.composeDoc;
   const selectedId = s.composeSelectedId;
-  const dragRef = useRef<string | null>(null);
+  const selectedNode = selectedId ? doc.nodes.find((n) => n.id === selectedId) ?? null : null;
+  const dragRef = useRef<ComposeDrag | null>(null);
   const scaleRef = useRef(1);
   const [stageBox, setStageBox] = useState({ w: 1, h: 1 });
   const scale = Math.min(
@@ -166,53 +208,110 @@ function ComposeStage(props: { store: MaterialStore }) {
   const stageH = doc.height * scaleRef.current;
   const billboardH = (COMPOSE_STAGE.billboardMeters * doc.height) / doc.width;
   const endDrag = () => { dragRef.current = null; };
+  const layerRows = doc.nodes.map((n, i) => ({ node: n, index: i })).reverse().map(({ node, index }) => ({
+    id: node.id,
+    name: composeLayerName(node, index),
+    meta: composeLayerMeta(node),
+    active: selectedId === node.id,
+    muted: !!node.hidden,
+    preview: composeLayerPreview(node),
+    canMoveUp: index < doc.nodes.length - 1,
+    canMoveDown: index > 0,
+  }));
+  const onLayerAction = (id: string, action: LayerStripAction) => {
+    if (action === 'visibility') s.toggleComposeNodeHidden(id);
+    else if (action === 'duplicate') s.duplicateComposeNode(id);
+    else if (action === 'move-up') s.moveComposeNodeLayer(id, 1);
+    else if (action === 'move-down') s.moveComposeNodeLayer(id, -1);
+    else if (action === 'delete') s.removeComposeNode(id);
+  };
 
   useEffect(() => busOn('system:cursor:move', (e: any) => {
-    const id = dragRef.current;
-    if (!id) return;
+    const drag = dragRef.current;
+    if (!drag) return;
     const scaleNow = scaleRef.current || 1;
     const dx = Number(e?.dx ?? 0) / scaleNow;
     const dy = Number(e?.dy ?? 0) / scaleNow;
-    if (dx !== 0 || dy !== 0) s.moveComposeNode(id, dx, dy);
+    if (dx === 0 && dy === 0) return;
+    if (drag.kind === 'move') s.moveComposeNode(drag.id, dx, dy);
+    else s.resizeComposeNode(drag.id, drag.handle, dx, dy);
   }), [s]);
 
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: accentFor('bg') }} onMouseUp={endDrag}>
-      <Box
-        onLayout={(lr: any) => {
-          const w = Math.max(1, Number(lr?.width ?? 1));
-          const h = Math.max(1, Number(lr?.height ?? 1));
-          setStageBox((p) => (p.w === w && p.h === h ? p : { w, h }));
-        }}
-        style={{ flexGrow: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', position: 'relative' }}
-      >
-        <Pressable onPress={() => s.selectComposeNode(null)} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }} />
-        <Box style={{ width: stageW, height: stageH, borderWidth: 1, borderColor: accentFor('border') }}>
-          <DecalSurface doc={doc} width={stageW} height={stageH} />
-          <Box style={{ position: 'absolute', left: 0, top: 0, width: stageW, height: stageH }}>
-            {doc.nodes.map((n) => (
-              <Pressable
-                key={n.id}
-                onMouseDown={() => { s.selectComposeNode(n.id); dragRef.current = n.id; }}
-                onMouseUp={endDrag}
-                style={{
-                  position: 'absolute',
-                  left: n.x * scaleRef.current,
-                  top: n.y * scaleRef.current,
-                  width: Math.max(6, n.w * scaleRef.current),
-                  height: Math.max(6, n.h * scaleRef.current),
-                  backgroundColor: '#00000001',
-                  borderWidth: selectedId === n.id ? 1 : 0,
-                  borderColor: accentFor('primary'),
-                }}
-              />
-            ))}
+      <Row style={{ flexGrow: 1, minHeight: 0 }}>
+        <Box
+          onLayout={(lr: any) => {
+            const w = Math.max(1, Number(lr?.width ?? 1));
+            const h = Math.max(1, Number(lr?.height ?? 1));
+            setStageBox((p) => (p.w === w && p.h === h ? p : { w, h }));
+          }}
+          style={{ flexGrow: 1, minWidth: 0, minHeight: 0, alignItems: 'center', justifyContent: 'center', position: 'relative' }}
+        >
+          <Pressable onPress={() => s.selectComposeNode(null)} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }} />
+          <Box style={{ width: stageW, height: stageH, borderWidth: 1, borderColor: accentFor('border') }}>
+            <DecalSurface doc={doc} width={stageW} height={stageH} />
+            <Box style={{ position: 'absolute', left: 0, top: 0, width: stageW, height: stageH }}>
+              {doc.nodes.map((n) => (
+                <Pressable
+                  key={n.id}
+                  onMouseDown={() => { s.selectComposeNode(n.id); dragRef.current = { kind: 'move', id: n.id }; }}
+                  onMouseUp={endDrag}
+                  style={{
+                    position: 'absolute',
+                    left: n.x * scaleRef.current,
+                    top: n.y * scaleRef.current,
+                    width: Math.max(6, n.w * scaleRef.current),
+                    height: Math.max(6, n.h * scaleRef.current),
+                    backgroundColor: '#00000001',
+                    borderWidth: selectedId === n.id ? 1 : 0,
+                    borderColor: accentFor('primary'),
+                  }}
+                />
+              ))}
+              {selectedNode ? COMPOSE_RESIZE_HANDLES.map((h) => {
+                const handleSize = 10;
+                const left = (selectedNode.x + selectedNode.w * h.x) * scaleRef.current - handleSize / 2;
+                const top = (selectedNode.y + selectedNode.h * h.y) * scaleRef.current - handleSize / 2;
+                return (
+                  <Pressable
+                    key={`resize-${h.id}`}
+                    onMouseDown={() => {
+                      s.selectComposeNode(selectedNode.id);
+                      dragRef.current = { kind: 'resize', id: selectedNode.id, handle: h.id };
+                    }}
+                    onMouseUp={endDrag}
+                    style={{
+                      position: 'absolute',
+                      left,
+                      top,
+                      width: handleSize,
+                      height: handleSize,
+                      borderRadius: 2,
+                      borderWidth: 1,
+                      borderColor: '#f8fafc',
+                      backgroundColor: accentFor('primary'),
+                    }}
+                  />
+                );
+              }) : null}
+            </Box>
           </Box>
+          <Text fontSize={9} color={accentFor('textFaint')} style={{ fontFamily: 'monospace', marginTop: 6 }}>
+            {`${doc.width}x${doc.height} · drag to move · handles resize`}
+          </Text>
         </Box>
-        <Text fontSize={9} color={accentFor('textFaint')} style={{ fontFamily: 'monospace', marginTop: 6 }}>
-          {`${doc.width}x${doc.height} · drag to move · click to select`}
-        </Text>
-      </Box>
+        <Box style={{ width: 330, height: '100%', minHeight: 0, borderLeftWidth: 1, borderLeftColor: accentFor('border'), backgroundColor: '#05080f', padding: 10 }}>
+          <LayerStackStrip
+            rows={layerRows}
+            height="100%"
+            emptyText="No layers - add a rect, text, or image."
+            onSelect={(id) => s.selectComposeNode(id)}
+            onRename={(id, name) => s.renameComposeNode(id, name)}
+            onAction={onLayerAction}
+          />
+        </Box>
+      </Row>
       {s.show3d ? (
         <Box style={{ height: 210, flexShrink: 0, borderTopWidth: 1, borderTopColor: accentFor('border') }}>
           <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a0f18" showGrid={false} showAxes={false}>

@@ -2,11 +2,11 @@ import { memo, useMemo } from 'react';
 import { Effect, StaticSurface } from '@reactjit/primitives';
 // GAP(V15): the PerceptionState type rides the legacy design module until hmsc
 // becomes compile/'s output.
-import type { PerceptionState } from '../../../hmsc/design';
+import type { PerceptionState } from '../../design';
 // GAP(buildings): the React facade catalog stays with the legacy building
 // renderer — these REACT_TEXTURES entries retire WITH the hand-coded buildings
 // (the V24 build mode replaces them); only the import path keeps them alive.
-import { BUILDING_SKINS, type BuildingSkin, skinCapturePx } from '../../../hmsc/render3d/buildingSkins';
+import { BUILDING_SKINS, type BuildingSkin, skinCapturePx } from '../../render3d/buildingSkins';
 import { HMSC_SHADERS, defaultShaderData, shaderSpec } from './shaders';
 import { type CustomTexture, loadCustomTextures } from './materials';
 import { DecalSurface } from './decalRender';
@@ -32,6 +32,8 @@ import { DecalSurface } from './decalRender';
 export type TextureRenderCtx = {
   widthMeters: number;
   heightMeters: number;
+  widthPx?: number;
+  heightPx?: number;
   cols: number;
   floors: number;
   perception: PerceptionState;
@@ -94,7 +96,7 @@ function customTextureDef(t: CustomTexture): TextureDef | null {
       source: {
         kind: 'react',
         render: (ctx: TextureRenderCtx) => (
-          <DecalSurface doc={doc} width={skinCapturePx(ctx.cols)} height={skinCapturePx(ctx.floors)} />
+          <DecalSurface doc={doc} width={ctx.widthPx ?? skinCapturePx(ctx.cols)} height={ctx.heightPx ?? skinCapturePx(ctx.floors)} />
         ),
       },
     };
@@ -157,6 +159,8 @@ export const TextureCapture = memo(function TextureCapture(props: {
     return def.source.render({
       widthMeters: props.cols * 3,
       heightMeters: props.floors * 3,
+      widthPx: props.widthPx,
+      heightPx: props.heightPx,
       cols: props.cols,
       floors: props.floors,
       perception: props.perception,

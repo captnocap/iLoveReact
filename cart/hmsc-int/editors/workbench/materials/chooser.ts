@@ -5,7 +5,8 @@
 
 import type { PickOption } from '../../../shell/fields';
 
-export type MaterialChoice = { id: string; label: string };
+export type MaterialSource = 'recipe' | 'react' | 'stored' | 'stored-decal';
+export type MaterialChoice = { id: string; label: string; group?: string; source?: MaterialSource };
 
 /** Material ids group by their family prefix (`a-`, `b-`, ...). Unprefixed ids
  *  such as facades, road, and stored decals pool under `misc`. */
@@ -16,7 +17,7 @@ export function materialFamily(id: string): string {
 }
 
 export function materialPickOptions(materials: Iterable<MaterialChoice>): PickOption[] {
-  return [...materials].map((m) => ({ id: m.id, label: m.label, group: materialFamily(m.id) }));
+  return [...materials].map((m) => ({ id: m.id, label: m.label, group: m.group ?? materialFamily(m.id) }));
 }
 
 export function materialLabel(materials: Iterable<MaterialChoice>, id: string): string {

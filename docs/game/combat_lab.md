@@ -29,13 +29,13 @@ head_lab figure stack (same imports as ragdoll_lab — see `docs/game/ragdoll_la
 
 hmsc systems under test (the game's own modules, imported across the cart boundary):
 
-- `cart/hmsc/npc/systems/chance.ts`: the probabilistic path's ground truth. `hitChance({rangeMeters, coverFraction, targetCrouched, shooterSkill})` → skill sets the base (0.35–0.95), range bleeds it (full <4m, ~0 by 40m), cover cuts up to 80%, crouched ×0.7. `rollHit`, `rollZone` (torso 0.5, legs 0.12×2, arms 0.09×2, head 0.08 — the AI aims center mass). Header rule: any "perceived odds" display warps *this*, never recomputes (the scape perception-split law, restated).
-- `cart/hmsc/npc/systems/damage.ts`: `zoneDamage(baseDamage, zone)` = base × `ZONE_DAMAGE[zone]`. The file is the declared join point of the two shot paths — one health subtraction, death decided in one place.
-- `cart/hmsc/npc/kinds.ts`: the kind registry — per-kind health/speeds/faction/`canFight`/`weaponDamage` and the `NpcPerceptionProfile` (vision range/FoV, hearing acuity, reactionSeconds). Includes the lab-driven `paramedic` kind. The cart's bots read all stats from here.
-- `cart/hmsc/render3d/humanoid/hitbox.ts`: `ZONE_DAMAGE` (head ×2.5, torso ×1, arms ×0.55, legs ×0.7) — **the hmsc humanoid's table applied to head_lab hitboxes** (see convergence note below).
-- `cart/hmsc/render3d/humanoid/skeleton.ts`: the `DamageZone` type (`head|torso|armL|armR|legL|legR`).
-- `cart/hmsc/gameplay/camera.ts`: `HMSC_GAMEPLAY_CAMERA` (every mouse-look/follow-cam constant: 0.0032 rad/px yaw, smoothing 24/s, follow dist 5.9m / height 3.05m, aim shoulder shift 0.62m, FoVs) + `clampCameraValue` + `angleDeltaDegrees` (shortest-arc yaw smoothing).
-- `cart/hmsc/world/tileKinds.ts`: `TILE_KIND_DEFINITIONS` — each floor patch is a real tile kind; its `npc.noise` (road 0.7, mud 0.15–0.25…) scales footstep carry AND its `render.color` paints the patch. One definition drives both what you see and what bots hear.
+- `cart/hmsc-int/npc/systems/chance.ts`: the probabilistic path's ground truth. `hitChance({rangeMeters, coverFraction, targetCrouched, shooterSkill})` → skill sets the base (0.35–0.95), range bleeds it (full <4m, ~0 by 40m), cover cuts up to 80%, crouched ×0.7. `rollHit`, `rollZone` (torso 0.5, legs 0.12×2, arms 0.09×2, head 0.08 — the AI aims center mass). Header rule: any "perceived odds" display warps *this*, never recomputes (the scape perception-split law, restated).
+- `cart/hmsc-int/npc/systems/damage.ts`: `zoneDamage(baseDamage, zone)` = base × `ZONE_DAMAGE[zone]`. The file is the declared join point of the two shot paths — one health subtraction, death decided in one place.
+- `cart/hmsc-int/npc/kinds.ts`: the kind registry — per-kind health/speeds/faction/`canFight`/`weaponDamage` and the `NpcPerceptionProfile` (vision range/FoV, hearing acuity, reactionSeconds). Includes the lab-driven `paramedic` kind. The cart's bots read all stats from here.
+- `cart/hmsc-int/render3d/humanoid/hitbox.ts`: `ZONE_DAMAGE` (head ×2.5, torso ×1, arms ×0.55, legs ×0.7) — **the hmsc humanoid's table applied to head_lab hitboxes** (see convergence note below).
+- `cart/hmsc-int/render3d/humanoid/skeleton.ts`: the `DamageZone` type (`head|torso|armL|armR|legL|legR`).
+- `cart/hmsc-int/gameplay/camera.ts`: `HMSC_GAMEPLAY_CAMERA` (every mouse-look/follow-cam constant: 0.0032 rad/px yaw, smoothing 24/s, follow dist 5.9m / height 3.05m, aim shoulder shift 0.62m, FoVs) + `clampCameraValue` + `angleDeltaDegrees` (shortest-arc yaw smoothing).
+- `cart/hmsc-int/world/tileKinds.ts`: `TILE_KIND_DEFINITIONS` — each floor patch is a real tile kind; its `npc.noise` (road 0.7, mud 0.15–0.25…) scales footstep carry AND its `render.color` paints the patch. One definition drives both what you see and what bots hear.
 
 Runtime/host:
 

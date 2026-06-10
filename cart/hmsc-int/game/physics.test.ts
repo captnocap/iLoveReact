@@ -91,6 +91,7 @@ function installFakeHost(): void {
 
 function removeFakeHost(): void {
   delete globalThis.__game_physics_step;
+  delete globalThis.__game_physics_step_into;
   delete globalThis.__game_physics_camera_occlusion;
   delete globalThis.__game_physics_camera_occlusion_configure;
   delete globalThis.__game_physics_camera_occlusion_distance;
@@ -234,6 +235,59 @@ test('tuning, surface, and solids arrive on the wire the host reads', () => {
   const orientedAt = rectAt + 9;
   assertClose(wire[orientedAt + 8], 1.5, 1e-5, 'oriented rect floor must carry through');
   assertClose(wire[orientedAt + 11], 0.7, 1e-5, 'oriented rect yaw must carry through');
+});
+
+test('steady physics steps reuse the input wire scratch buffer', () => {
+  installFakeHost();
+  const rects = Array.from({ length: 16 }, (_, i) => ({
+    minX: i,
+    minZ: i,
+    maxX: i + 1,
+    maxZ: i + 1,
+    topMeters: 1,
+    blocksPlayer: true,
+    friction: 0.3,
+    restitution: 0.5,
+  }));
+  GAME_PHYSICS.step(stepInput({ rects }));
+  const firstWire = lastWire;
+  assert(firstWire !== null, 'host receives first scratch wire');
+  GAME_PHYSICS.step(stepInput({ rects }));
+  assert(lastWire === firstWire, 'same-size step reuses the same Float32Array');
+  GAME_PHYSICS.step(stepInput({ rects: rects.slice(0, 4) }));
+  assert(lastWire === firstWire, 'smaller steady step reuses the same Float32Array capacity');
+});
+
+test('allocation-free host step writes into the reused output scratch buffer', () => {
+  removeFakeHost();
+  let lastInput: Float32Array | null = null;
+  let lastOutput: Float32Array | null = null;
+  globalThis.__game_physics_step_into = (wire: Float32Array, out: Float32Array): number => {
+    lastInput = wire;
+    lastOutput = out;
+    const dt = wire[0];
+    const gravity = wire[14];
+    const vy = wire[9] - gravity * dt;
+    out[0] = 321;
+    out[1] = wire[5];
+    out[2] = wire[6] + vy * dt;
+    out[3] = wire[7];
+    out[4] = wire[8];
+    out[5] = vy;
+    out[6] = wire[10];
+    out[7] = 0;
+    out[8] = 0;
+    return 9;
+  };
+  const first = GAME_PHYSICS.step(stepInput());
+  const firstInput = lastInput;
+  const firstOutput = lastOutput;
+  assert(first !== null, 'step_into returns a result');
+  assertClose(first!.hostMicroseconds, 321, 1e-5, 'step_into host telemetry round-trips');
+  GAME_PHYSICS.step(stepInput());
+  assert(lastInput === firstInput, 'step_into reuses the input scratch Float32Array');
+  assert(lastOutput === firstOutput, 'step_into reuses the output scratch Float32Array');
+  removeFakeHost();
 });
 
 function installFloorEdgeHost(): void {

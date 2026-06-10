@@ -21,7 +21,7 @@
 
 // GAP(V15): the shared-store wires still live with the legacy game state module;
 // they move when hmsc becomes compile/'s output.
-import { hmscStoreGet, hmscStoreSet } from '../../../hmsc/state/gameState';
+import { hmscStoreGet, hmscStoreSet } from '../../state/gameState';
 import { busOn, busEmit } from '@reactjit/hooks/useIFTTT';
 import { useEffect, useState } from 'react';
 import { validateDecalDoc, type DecalDoc } from './decal';

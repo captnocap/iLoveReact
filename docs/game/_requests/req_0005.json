@@ -3,7 +3,7 @@
   "at": "2026-06-06T04:34:49.786Z",
   "origin": "session:159435dc",
   "text": "SUPERVISOR — REQLEDGER-0606 addendum 2, USER ASK verbatim: \"have them also make it do the same thing with codex https://developers.openai.com/codex/hooks\"\n\nExtend the hook auto-capture to CODEX panes: read that docs page (WebFetch) and wire the Codex CLI's hook system the same way you wired Claude's — prompt-submit equivalent captures the user's literal text + session key into the same ledger via your existing hook-mode CLI; turn-end/stop equivalent does the unresolved-asks nudge if Codex's hook vocabulary supports it (if it lacks a stop-equivalent, say so honestly in CAPTURE and wire what exists — partial mechanical capture beats none). Hook scripts = real files under tools/ beside the Claude ones (shared logic, thin per-CLI adapters — no second implementation of the ledger write path). Config lands wherever Codex expects it in this repo (their docs say where — likely a config.toml or similar; additive, do not disturb existing codex settings beyond the hook block). Test with fabricated payloads against a scratch root like you did for Claude. Log this ask in the ledger first (it is itself a req), resolve on landing. Explicit paths, docs/REQUESTS.md + _index record updated same commit, verify green.\n",
-  "status": "resolved",
+  "status": "done",
   "sessionId": "159435dc-74b2-4e0e-9c32-2dff9bacc5d1",
   "captureMode": "hook",
   "resolvedAt": "2026-06-06T04:40:23.644Z",

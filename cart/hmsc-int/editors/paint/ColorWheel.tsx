@@ -136,7 +136,7 @@ export function ColorWheel(props: {
   const valueX = Math.round(hsv.v * size) - COLOR_WHEEL.valueMarker / 2;
 
   return (
-    <Col style={{ gap: 6, alignItems: 'center', position: 'relative', opacity: props.disabled ? 0.45 : 1, ...(props.style ?? {}) }}>
+    <Col style={{ gap: 5, alignItems: 'center', position: 'relative', opacity: props.disabled ? 0.45 : 1, ...(props.style ?? {}) }}>
       <Box style={{ width: size, height: size, position: 'relative' }}>
         <Pressable
           tooltip="Color wheel"

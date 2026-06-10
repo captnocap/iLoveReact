@@ -230,7 +230,7 @@ export const pathing_lab: DocIndex = {
       name: 'tileKinds',
       purpose: ['world_gen', 'pathing'],
       kind: 'registry',
-      sourceFile: 'cart/hmsc/world/tileKinds',
+      sourceFile: 'cart/hmsc-int/world/tileKinds',
       description:
         'hmsc tile-kind registry (tileKindDefinition().render, allowedModes, walkCost/vehicleCost/movementCost) that the lab authors the grid in and derives render strips and cost profiles from.',
       consumers: ['cart/pathing_lab/index.tsx'],
@@ -240,7 +240,7 @@ export const pathing_lab: DocIndex = {
       name: 'traffic (trafficClockSeconds / TRAFFIC_SIGNAL_CYCLE)',
       purpose: ['vehicle', 'world_gen'],
       kind: 'module',
-      sourceFile: 'cart/hmsc/world/traffic',
+      sourceFile: 'cart/hmsc-int/world/traffic',
       description:
         'hmsc traffic clock + signal cycle (trafficClockSeconds, TRAFFIC_SIGNAL_CYCLE, signalPhaseOffsetSeconds) shared by the lab signals and the cars yield check so lamps and yielding read the same phase.',
       consumers: ['cart/pathing_lab/index.tsx'],

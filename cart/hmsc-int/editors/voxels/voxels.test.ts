@@ -3,7 +3,7 @@
 // and round-trips author → stream → snapshot through a real on-disk store.
 
 import { openStore } from '../../data';
-import { voxelsStream, type VoxelBlockoutDoc, type VoxelsStreamState } from './stream';
+import { VOXEL_BLOCKOUT_TUNING, voxelsStream, type VoxelBlockoutDoc, type VoxelsStreamState } from './stream';
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 
 declare const globalThis: any;
@@ -20,6 +20,7 @@ function wipeScratch(): void {
 function blockout(n: number): VoxelBlockoutDoc {
   return {
     dims: { w: 5, d: 6, h: 7 },
+    cellSizeMeters: VOXEL_BLOCKOUT_TUNING.defaultCellSizeMeters,
     blocks: Array.from({ length: n }, (_, i) => ({ id: 1000 + i, x: i % 5, y: 1, z: Math.floor(i / 5), kind: 'wall' as const })),
   };
 }
@@ -30,8 +31,11 @@ test('the working blockout materializes: authored replaces, additions tolerated 
   state = voxelsStream.apply(state, { kind: 'authored', doc: blockout(3) });
   state = voxelsStream.apply(state, { kind: 'authored', doc: blockout(7) });
   assertEqual(state.doc!.blocks.length, 7, 'the latest authored doc IS the blockout');
+  assertEqual(state.doc!.cellSizeMeters, VOXEL_BLOCKOUT_TUNING.defaultCellSizeMeters, 'the cell size is part of the materialized blockout');
+  state = voxelsStream.apply(state, { kind: 'authored', doc: { ...blockout(1), cellSizeMeters: 999 } });
+  assertEqual(state.doc!.cellSizeMeters, VOXEL_BLOCKOUT_TUNING.maxCellSizeMeters, 'cell size normalizes at the stream boundary');
   const same = voxelsStream.apply(state, { kind: 'mirrorTool', axis: 'x' } as any);
-  assertEqual(same.doc!.blocks.length, 7, 'a future event kind passes through untouched');
+  assertEqual(same.doc!.blocks.length, 1, 'a future event kind passes through untouched');
 });
 
 test('round-trip: autosave → stream → snapshot → restore identical', () => {

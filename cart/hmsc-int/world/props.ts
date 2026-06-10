@@ -11,22 +11,31 @@ export type PropFootprint = { minX: number; minZ: number; maxX: number; maxZ: nu
 // The collision footprint of a solid prop, sized by its kind's radius.
 // Non-solid props return null — there is nothing to bump.
 //
-// Fences are a special case: they are long thin segments (spanning along local X),
-// so their axis-aligned bounding box depends on yaw. A square would block a 2.7 m
-// slab around a 0.08 m thick panel — the player would be stopped walking parallel
-// to the fence. The AABB of a rotated rectangle gives a thin box that follows the
-// actual mesh.
+// Segment props (fence, jersey barrier, bench, couch) are a special case: they
+// are long thin shapes spanning along local X, so their axis-aligned bounding
+// box depends on yaw. A square would block a wide slab around a thin panel —
+// the player would be stopped walking parallel to the fence. The AABB of a
+// rotated rectangle gives a thin box that follows the actual mesh. The value
+// is the segment's half-THICKNESS in meters (its local-Z half-extent).
+const SEGMENT_HALF_THICKNESS: Partial<Record<WorldProp['kind'], number>> = {
+  fence: 0.08,
+  barrier: 0.3,
+  bench: 0.28,
+  couch: 0.45,
+};
+
 export function propFootprint(prop: WorldProp): PropFootprint | null {
   const def = propKindDefinition(prop.kind);
   if (!def.solid || def.footprintRadiusMeters <= 0) return null;
   const r = def.footprintRadiusMeters;
-  if (prop.kind !== 'fence') {
+  const segmentHalfThick = SEGMENT_HALF_THICKNESS[prop.kind];
+  if (segmentHalfThick === undefined) {
     return { minX: prop.x - r, minZ: prop.z - r, maxX: prop.x + r, maxZ: prop.z + r };
   }
-  // Fence: long thin segment. halfSpan = the segment half-width (along local X);
-  // halfThick = the post diameter (~0.08 m). The AABB of a rotated rectangle.
+  // Long thin segment. halfSpan = the segment half-width (along local X);
+  // halfThick = its half-thickness. The AABB of a rotated rectangle.
   const halfSpan = r;
-  const halfThick = 0.08;
+  const halfThick = segmentHalfThick;
   const yaw = prop.yawDegrees * Math.PI / 180;
   const c = Math.abs(Math.cos(yaw));
   const s = Math.abs(Math.sin(yaw));

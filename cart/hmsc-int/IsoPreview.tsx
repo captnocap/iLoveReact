@@ -18,11 +18,12 @@ import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
 import { Heightfield } from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
-import type { GameState } from '../hmsc/design';
-import { WorldStatics } from '../hmsc/render3d/GameWorld3D';
-import { LandformSurfaceCaptures } from '../hmsc/render3d/Landform';
-import { PropSurfaceCaptures } from '../hmsc/render3d/PropCaptures';
+import type { GameState } from './design';
+import { WorldStatics } from './render3d/GameWorld3D';
+import { LandformSurfaceCaptures } from './render3d/Landform';
+import { PropSurfaceCaptures } from './render3d/PropCaptures';
 import { GAME_CAMERA, GAME_NATIVE_CAMERA } from './game';
+import { CHUNK_TILES } from './chunks';
 import { useChurn } from './perfLog';
 
 type Vec3 = [number, number, number];

@@ -9,6 +9,22 @@
 // future consumer fold it the same way.
 
 import type { StreamDef } from '../../data';
+import type { VoxelBlockKind, VoxelBlockSnap } from '../voxels/stream';
+
+export type ItemRepresentation = 'globe' | 'voxel-surface' | 'voxel-mesh';
+
+export type ItemVoxelShapeDoc = {
+  kind: 'voxel-shape';
+  version: 1;
+  dims: { w: number; d: number; h: number };
+  cellSizeMeters: number;
+  blocks: Array<Pick<VoxelBlockSnap, 'id' | 'x' | 'y' | 'z'> & { kind: VoxelBlockKind }>;
+  mesh: {
+    quads: number;
+    vertices: number;
+    bounds: { size: [number, number, number] };
+  };
+};
 
 export type SculptedItemDoc = {
   kind: 'sculpted-item';
@@ -26,7 +42,11 @@ export type SculptedItemDoc = {
   /** flat surface color (#rrggbb) */
   color: string;
   /** the blockout this was baked from (null = sculpted from the blank sphere) */
-  source: { blocks: number; dims: { w: number; d: number; h: number } } | null;
+  source: { blocks: number; dims: { w: number; d: number; h: number }; cellSizeMeters?: number } | null;
+  /** GLOBEAB-0607: comparison mode for the same authored item. Missing = old Globe docs. */
+  representation?: ItemRepresentation;
+  /** Real voxel mesh payload for the non-Globe comparison paths. */
+  voxelShape?: ItemVoxelShapeDoc | null;
   metadata?: { title?: string };
 };
 

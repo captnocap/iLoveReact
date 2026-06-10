@@ -15,8 +15,8 @@ import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { GAME_BUILD, GAME_TELEMETRY } from '@game';
 import type { BuildFaceSkin, BuildMaterial, BuildSkinSet, PlacedBuildPiece, WallEdit } from '@game';
-import type { WorldProp } from '../../../hmsc/design';
-import { Prop } from '../../../hmsc/render3d/Prop';
+import type { WorldProp } from '../../design';
+import { Prop } from '../../render3d/Prop';
 import { BUILD_UI, CAMERA_OCCLUSION_TUNING } from './buildUi';
 import { markPlaceFreezeProbe, perfMs, warnPlaceFreeze, type PlaceFreezeProbe } from './placeFreezeProbe';
 

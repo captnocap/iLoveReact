@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Box, Col, Effect, Pressable, Row, ScrollView, Text } from '@reactjit/primitives';
-import { FILL_SHADER } from '../hmsc/render3d/fillShader';
+import { FILL_SHADER } from '../hmsc-int/render3d/fillShader';
 
 const SWATCH = 125;
 const VARIANTS = [0, 1, 2] as const;

@@ -105,7 +105,29 @@ function propMaterial(kind: PropKind): BuildMaterial {
     case 'bushLarge':
     case 'bushLow':
     case 'bushSparse':
+    case 'treeOak':
+    case 'treePine':
+    case 'treeBirch':
+    case 'treeCypress':
+    case 'treePalm':
+    case 'treeDead':
+    case 'planter':
+    case 'chair':
+    case 'couch':
+    case 'table':
+    case 'bench':
+    case 'wallPainting':
       return 'wood';
+    case 'rock':
+    case 'rockLarge':
+    case 'rockSmall':
+    case 'boulder':
+    case 'rockFlat':
+    case 'rockSpire':
+    case 'rockMossy':
+    case 'rockPile':
+    case 'barrier':
+      return 'concrete';
     default:
       return 'metal';
   }
@@ -116,12 +138,30 @@ function propCover(kind: PropKind): BuildGameplayTags['cover'] {
     case 'dumpster':
     case 'rockLarge':
     case 'fence':
+    case 'boulder':
+    case 'rockSpire':
+    case 'barrier':
       return 'high';
     case 'rock':
     case 'rockSmall':
     case 'fireHydrant':
     case 'payphone':
     case 'mailbox':
+    case 'rockFlat':
+    case 'rockMossy':
+    case 'rockPile':
+    case 'trashCan':
+    case 'bench':
+    case 'planter':
+    case 'chair':
+    case 'couch':
+    case 'table':
+    case 'treeOak':
+    case 'treePine':
+    case 'treeBirch':
+    case 'treeCypress':
+    case 'treePalm':
+    case 'treeDead':
       return 'low';
     default:
       return 'none';
@@ -137,6 +177,13 @@ const PROP_DEPTH_OVERRIDES: Partial<Record<PropKind, number>> = {
   stopSign: 0.24,
   trafficLight: 0.46,
   fence: 0.08,
+  // segment props span local X; their depth is the thin axis
+  barrier: 0.6,
+  bench: 0.56,
+  couch: 0.9,
+  // wall decor sits flush against its wall
+  wallPainting: 0.16,
+  ledLight: 0.12,
 };
 
 function propCatalogEntry(kind: PropKind): BuildPieceDef {

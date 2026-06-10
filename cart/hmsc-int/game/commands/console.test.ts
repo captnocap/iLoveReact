@@ -27,6 +27,38 @@ function freshSession(opts?: Parameters<typeof createConsoleSession>[2]): {
   return { session: createConsoleSession(registry, game, opts), game, registry };
 }
 
+function installColonDiagnostics(game: GameCommandState): { nodes: any[]; highlighted: number[] } {
+  const nodes: any[] = [
+    {
+      id: 0, type: 'Root', computed: { x: 0, y: 0, w: 800, h: 600 }, style: { backgroundColor: '#000000' }, props: {},
+      children: [],
+    },
+    {
+      id: 1, type: 'Box', computed: { x: 10, y: 20, w: 120, h: 40 }, style: { width: 120, backgroundColor: '#111111' }, props: { label: 'panel' },
+      hasHandlers: true, children: [],
+    },
+    {
+      id: 2, type: 'Text', computed: { x: 12, y: 22, w: 80, h: 18 }, style: { color: '#ffffff' }, props: { text: 'hello console' },
+      children: [],
+    },
+  ];
+  nodes[0].children = [nodes[1], nodes[2]];
+  const highlighted: number[] = [];
+  game.__consoleDiagnostics = {
+    tree: {
+      getTree: () => nodes[0],
+      getNodes: () => nodes,
+      setStyle: (id, prop, value) => { nodes[id].style[prop] = value; },
+      markDirty: () => { nodes[0].dirty = true; },
+      highlight: (id) => { highlighted.push(id); },
+    },
+    inspector: { getPerfData: () => ({ fps: 60, layoutMs: 1.25, paintMs: 2.5, nodeCount: nodes.length }) },
+    lua: { eval: (code) => (code === '1 + 2' ? 3 : code) },
+    env: { bridge: 'QuickJS (native)', mode: 'test', loveVersion: '11.5', window: { width: 800, height: 600 }, historyCount: 7 },
+  };
+  return { nodes, highlighted };
+}
+
 function type(session: ConsoleSession, text: string): void {
   for (const ch of text) {
     if (ch === ' ') session.handleKey({ key: 'space' });
@@ -175,6 +207,18 @@ test('empty/whitespace submits are no-ops (no transcript noise)', () => {
   assertEqual(session.transcript().length, 0, 'nothing echoed');
 });
 
+test('suppressTranscript commands run without drawing input or output', () => {
+  const { session, registry } = freshSession();
+  registry.define({
+    name: 'diag_silent',
+    usage: 'diag_silent',
+    summary: 'diagnostic self-noise guard',
+    run: () => ({ suppressTranscript: true, output: ['terminal-only diagnostic detail'] }),
+  });
+  session.submit('diag_silent');
+  assertEqual(session.transcript().length, 0, 'diagnostic commands can avoid console text churn');
+});
+
 test('help produces the FULL registered inventory, generated from the registry, not-yet stubs marked (USER BUG: bare help did not exist)', () => {
   const { session, registry } = freshSession();
   session.submit('help');
@@ -215,6 +259,57 @@ test('unknown command suggests help — and help now EXISTS (the self-recommendi
   assertEqual(registry.run(game, 'help').ok, true, 'and help actually runs');
 });
 
+test('CONPORT-B watch/unwatch/watches are live console-session verbs', () => {
+  const { session } = freshSession();
+  session.submit(':watch 1 + 2');
+  session.submit(':watch lua 1 + 2');
+  session.update(0.5);
+  session.submit(':watches');
+  const text = session.transcript().map((l) => l.text).join('\n');
+  assert(text.includes('Watch #1 (JS): 1 + 2'), 'JS watch announces its expression');
+  assert(text.includes('Watch #2 (Lua): 1 + 2'), 'Lua watch announces its expression');
+  assert(text.includes('[1] (js) 1 + 2 = 3'), 'JS watch evaluates live');
+  assert(text.includes('[2] (lua) 1 + 2 = n/a'), 'Lua watch stays explicit when no Lua bridge is mounted');
+  assertEqual(session.watches().length, 2, 'both watches are tracked for the overlay');
+  session.submit(':unwatch 1');
+  assertEqual(session.watches().length, 1, 'unwatch removes by 1-based index');
+  assert(session.transcript().some((l) => l.text === 'Removed watch #1: 1 + 2'), 'unwatch names the removed expression');
+});
+
+test('CONPORT-B record/stop/play/macros replay through the real console submit path', () => {
+  const { session, game } = freshSession();
+  session.submit(':macros');
+  assert(session.transcript().some((l) => l.text.includes('No macros saved')), 'bare macro list teaches record');
+  session.submit(':record warp');
+  session.submit('pv_teleport 2 3 4');
+  session.submit(':stop');
+  assert(session.transcript().some((l) => l.text === "Saved macro 'warp' (1 commands)"), 'stop saves the recorded command count');
+  session.submit(':macros');
+  assert(session.transcript().some((l) => l.text === '  warp (1 commands)'), 'macros lists the saved macro');
+  game.player.position = { x: 0, y: 0, z: 0 };
+  session.submit(':play warp');
+  assertEqual(game.player.position.x, 2, 'play re-dispatches the recorded teleport command');
+  assertEqual(game.player.position.z, 3, 'recorded z lands');
+  assertEqual(game.player.position.y, 4, 'recorded y lands');
+});
+
+test('CONPORT-B template/templates print the reference boilerplate inventory', () => {
+  const { session } = freshSession();
+  session.submit(':templates');
+  let text = session.transcript().map((l) => l.text).join('\n');
+  assert(text.includes('Available templates:'), 'templates prints a heading');
+  assert(text.includes('  box          Basic Box component'), 'templates uses padded sorted rows');
+  assert(text.includes('Use :template <name> to view code'), 'templates teaches the detail command');
+  session.submit(':template box');
+  text = session.transcript().map((l) => l.text).join('\n');
+  assert(text.includes('Basic Box component:'), 'template prints the template description');
+  assert(text.includes("  <Box style={{ width: '100%', height: '100%', backgroundColor: '#1e1e2e' }}>"), 'template prints indented code lines');
+  session.submit(':template no_such_template');
+  text = session.transcript().map((l) => l.text).join('\n');
+  assert(text.includes('Unknown template: no_such_template'), 'unknown templates fail loud');
+  assert(text.includes('Available: box, card, catppuccin, flexrow, grid, pressable, scrollview'), 'unknown template prints sorted choices');
+});
+
 test('PageUp/PageDown scroll the transcript; a submit snaps back to the tail', () => {
   const { session } = freshSession();
   pressToggle(session);
@@ -234,6 +329,66 @@ test('PageUp/PageDown scroll the transcript; a submit snaps back to the tail', (
   for (let i = 0; i < 50; i += 1) session.handleKey({ key: 'pageup' });
   assert(session.scrollOffset() < session.transcript().length, 'scrollback clamps inside the transcript');
   assert(session.visibleTail(5).length > 0, 'the view never goes empty');
+});
+
+test('part-A colon console diagnostics run through the live session surface', () => {
+  const { session, game } = freshSession({ maxTranscriptLines: 160 });
+  const diag = installColonDiagnostics(game);
+
+  session.submit(':help');
+  assert(session.transcript().some((l) => l.text === 'Console commands:'), ':help prints the reference colon help');
+  assert(session.transcript().some((l) => l.text.includes(':style <id> <prop> <val>')), ':help includes style semantics');
+
+  session.submit(':tree');
+  assert(session.transcript().some((l) => l.text.includes('Root: 800x600  |  3 nodes')), ':tree summarizes the root');
+
+  session.submit(':nodes 1');
+  assert(session.transcript().some((l) => l.text.includes('Box  #1')), ':nodes inspects by id');
+  assert(session.transcript().some((l) => l.text.includes('style.width: 120')), ':nodes dumps styles');
+
+  session.submit(':perf');
+  assert(session.transcript().some((l) => l.text.includes('FPS: 60  |  Layout: 1.3ms')), ':perf reads inspector data');
+
+  session.submit(':find type:Text');
+  assert(session.transcript().some((l) => l.text.includes('Found 1 nodes matching')), ':find counts matches');
+  assert(session.transcript().some((l) => l.text.includes('#2 Text')), ':find lists matched nodes');
+
+  session.submit(':style 1 width 200');
+  assertEqual(diag.nodes[1].style.width, 200, ':style mutates the node style');
+  assertEqual(diag.nodes[0].dirty, true, ':style marks the tree dirty');
+  assert(session.transcript().some((l) => l.text.includes('Set #1 style.width: 120 -> 200')), ':style reports old and new values');
+
+  session.submit(':lua 1 + 2');
+  assert(session.transcript().some((l) => l.text === '3'), ':lua prints evaluator result');
+
+  session.submit(':dump 0');
+  assert(session.transcript().some((l) => l.text.includes('Root #0  800x600')), ':dump prints the subtree root');
+  assert(session.transcript().some((l) => l.text.includes('Text #2  80x18 "hello console"')), ':dump prints descendants');
+
+  session.submit(':highlight 1');
+  assertEqual(diag.highlighted[0], 1, ':highlight reaches the diagnostics hook');
+  assert(session.transcript().some((l) => l.text.includes('Highlighting #1 for 1.5s')), ':highlight reports duration');
+
+  session.submit(':measure hello 20');
+  assert(session.transcript().some((l) => l.text.includes('Text: "hello" at 20px ->')), ':measure prints dimensions');
+
+  session.submit(':env');
+  assert(session.transcript().some((l) => l.text.includes('Bridge: QuickJS (native)')), ':env reports bridge');
+  assert(session.transcript().some((l) => l.text.includes('Window: 800x600')), ':env reports window');
+
+  session.submit(':log');
+  assert(session.transcript().some((l) => l.text === 'Debug log channels:'), ':log lists channels');
+  session.submit(':log frame on');
+  assert(session.transcript().some((l) => l.text.includes('frame: ON')), ':log channel on works');
+  session.submit(':log frame off');
+  assert(session.transcript().some((l) => l.text.includes('frame: OFF')), ':log channel off works');
+  session.submit(':log all');
+  assert(session.transcript().some((l) => l.text.includes('All channels enabled')), ':log all enables');
+  session.submit(':log none');
+  assert(session.transcript().some((l) => l.text.includes('All channels disabled')), ':log none disables');
+
+  session.submit(':clear');
+  assertEqual(session.transcript().length, 0, ':clear clears the console transcript');
 });
 
 finish('game/commands/console');

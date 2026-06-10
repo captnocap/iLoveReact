@@ -31,7 +31,38 @@ export type PropKind =
   | 'payphone'
   | 'dumpster'
   | 'mailbox'
-  | 'fence';
+  | 'fence'
+  // street furniture
+  | 'trafficCone'
+  | 'barrier'
+  | 'trashCan'
+  | 'bench'
+  | 'planter'
+  // trees (trunk-sized collision; canopy is visual)
+  | 'treeOak'
+  | 'treePine'
+  | 'treeBirch'
+  | 'treeCypress'
+  | 'treePalm'
+  | 'treeDead'
+  // rock forms beyond the small/medium/large trio
+  | 'boulder'
+  | 'rockFlat'
+  | 'rockSpire'
+  | 'rockMossy'
+  | 'rockPile'
+  // balls — solid colliders the player bumps
+  | 'ballBeach'
+  | 'ballSoccer'
+  | 'ballBasketball'
+  // wall-mounted decor (anchor at the wall base, decor hangs at height)
+  | 'wallPainting'
+  | 'ledLight'
+  // furniture
+  | 'chair'
+  | 'couch'
+  | 'table'
+  | 'floorLamp';
 
 // How a prop governs vehicle traffic. 'none' props are scenery; 'stopSign' is
 // always a hard stop; 'signal' free-runs a green→caution→stop cycle (the
@@ -213,6 +244,255 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // A 2.5m segment; footprintRadius sizes the collision square.
     footprintRadiusMeters: 1.35,
     heightMeters: 1.25,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+
+  // ── street furniture ──────────────────────────────────────────────────────
+  trafficCone: {
+    kind: 'trafficCone',
+    label: 'Traffic Cone',
+    solid: true,
+    footprintRadiusMeters: 0.18,
+    heightMeters: 0.7,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  barrier: {
+    kind: 'barrier',
+    label: 'Jersey Barrier',
+    // A concrete road segment, long like a fence — gets the same yaw-aware
+    // thin AABB treatment in the world props layer.
+    solid: true,
+    footprintRadiusMeters: 1.0,
+    heightMeters: 1.05,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  trashCan: {
+    kind: 'trashCan',
+    label: 'Trash Can',
+    solid: true,
+    footprintRadiusMeters: 0.3,
+    heightMeters: 1.0,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  bench: {
+    kind: 'bench',
+    label: 'Park Bench',
+    // Long like a fence segment — yaw-aware thin AABB in the world props layer.
+    solid: true,
+    footprintRadiusMeters: 0.8,
+    heightMeters: 0.85,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  planter: {
+    kind: 'planter',
+    label: 'Planter',
+    solid: true,
+    footprintRadiusMeters: 0.5,
+    heightMeters: 0.6,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+
+  // ── trees ──────────────────────────────────────────────────────────────────
+  // footprintRadius is the TRUNK, not the canopy — you bump the trunk and walk
+  // under the foliage edge, like every GTA tree. Heights follow the R4
+  // stylized-tall contract (scale verticals UP against the ~2m player).
+  treeOak: {
+    kind: 'treeOak',
+    label: 'Oak Tree',
+    solid: true,
+    footprintRadiusMeters: 0.35,
+    heightMeters: 7,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  treePine: {
+    kind: 'treePine',
+    label: 'Pine Tree',
+    solid: true,
+    footprintRadiusMeters: 0.3,
+    heightMeters: 9,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  treeBirch: {
+    kind: 'treeBirch',
+    label: 'Birch Tree',
+    solid: true,
+    footprintRadiusMeters: 0.18,
+    heightMeters: 6,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  treeCypress: {
+    kind: 'treeCypress',
+    label: 'Cypress Tree',
+    solid: true,
+    footprintRadiusMeters: 0.3,
+    heightMeters: 7.5,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  treePalm: {
+    kind: 'treePalm',
+    label: 'Palm Tree',
+    solid: true,
+    footprintRadiusMeters: 0.22,
+    heightMeters: 6.5,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  treeDead: {
+    kind: 'treeDead',
+    label: 'Dead Tree',
+    solid: true,
+    footprintRadiusMeters: 0.25,
+    heightMeters: 5,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+
+  // ── rock forms ─────────────────────────────────────────────────────────────
+  boulder: {
+    kind: 'boulder',
+    label: 'Boulder',
+    solid: true,
+    footprintRadiusMeters: 1.6,
+    heightMeters: 2.6,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  rockFlat: {
+    kind: 'rockFlat',
+    label: 'Flat Rock',
+    solid: true,
+    footprintRadiusMeters: 0.9,
+    heightMeters: 0.45,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  rockSpire: {
+    kind: 'rockSpire',
+    label: 'Rock Spire',
+    solid: true,
+    footprintRadiusMeters: 0.5,
+    heightMeters: 2.4,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  rockMossy: {
+    kind: 'rockMossy',
+    label: 'Mossy Rock',
+    solid: true,
+    footprintRadiusMeters: 0.6,
+    heightMeters: 0.85,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  rockPile: {
+    kind: 'rockPile',
+    label: 'Rock Pile',
+    solid: true,
+    footprintRadiusMeters: 0.8,
+    heightMeters: 0.7,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+
+  // ── balls ──────────────────────────────────────────────────────────────────
+  // Solid: they get a host-physics blocking rect like every obstacle, so the
+  // player collides with them. (Rolling/kick dynamics is a separate system —
+  // props are static world geometry today.)
+  ballBeach: {
+    kind: 'ballBeach',
+    label: 'Beach Ball',
+    solid: true,
+    footprintRadiusMeters: 0.4,
+    heightMeters: 0.8,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  ballSoccer: {
+    kind: 'ballSoccer',
+    label: 'Soccer Ball',
+    solid: true,
+    footprintRadiusMeters: 0.11,
+    heightMeters: 0.22,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  ballBasketball: {
+    kind: 'ballBasketball',
+    label: 'Basketball',
+    solid: true,
+    footprintRadiusMeters: 0.12,
+    heightMeters: 0.24,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+
+  // ── wall decor ─────────────────────────────────────────────────────────────
+  // Anchored at the wall base; the decor hangs at height in the model. The
+  // thin solid footprint sits flush against the wall it mounts on.
+  wallPainting: {
+    kind: 'wallPainting',
+    label: 'Wall Painting',
+    solid: true,
+    footprintRadiusMeters: 0.08,
+    heightMeters: 2.1,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  ledLight: {
+    kind: 'ledLight',
+    label: 'LED Light',
+    solid: true,
+    footprintRadiusMeters: 0.06,
+    heightMeters: 2.4,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+
+  // ── furniture ──────────────────────────────────────────────────────────────
+  chair: {
+    kind: 'chair',
+    label: 'Chair',
+    solid: true,
+    footprintRadiusMeters: 0.3,
+    heightMeters: 0.95,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  couch: {
+    kind: 'couch',
+    label: 'Couch',
+    // Long like a fence segment — yaw-aware thin AABB in the world props layer.
+    solid: true,
+    footprintRadiusMeters: 0.95,
+    heightMeters: 0.85,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  table: {
+    kind: 'table',
+    label: 'Table',
+    solid: true,
+    footprintRadiusMeters: 0.6,
+    heightMeters: 0.78,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  floorLamp: {
+    kind: 'floorLamp',
+    label: 'Floor Lamp',
+    solid: true,
+    footprintRadiusMeters: 0.2,
+    heightMeters: 1.7,
     tileKind: 'wall',
     trafficControl: 'none',
   },
