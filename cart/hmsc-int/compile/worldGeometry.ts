@@ -31,6 +31,7 @@ import type { ChunkFloor } from '../chunkFloor';
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
 import { shaderSpec, defaultShaderData } from '@game/textures/shaders';
+import { textBytes } from '@reactjit/workspace';
 
 export const INSTANCE_STRIDE = 13;
 export const INSTANCE_SHAPE_BOX = 0;
@@ -699,8 +700,9 @@ export function encodeMaterialRefs(refs: Uint32Array): Uint8Array {
  *  float count | f32[data]. The host runs each shader at load to a 1-tile
  *  texture and samples it on the referencing faces. */
 export function encodeMaterials(materials: readonly MaterialAsset[]): Uint8Array {
-  const enc = new TextEncoder();
-  const sources = materials.map((m) => enc.encode(m.wgsl));
+  // textBytes is the workspace's headless-safe utf8 encoder (the v8cli bake has
+  // no TextEncoder; it falls back to encodeURIComponent). WGSL is ASCII anyway.
+  const sources = materials.map((m) => textBytes(m.wgsl));
   let bytes = 4;
   for (let i = 0; i < materials.length; i += 1) {
     bytes += 4 + sources[i].byteLength + 4 + materials[i].data.length * 4;
