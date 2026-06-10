@@ -41,7 +41,7 @@ import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import {
   GAME_BUILD, GAME_CAMERA, GAME_CHROME, GAME_COMMANDS, GAME_FIGURE, GAME_INPUT,
-  GAME_ITEMS, GAME_LOOP, GAME_PHYSICS, GAME_TELEMETRY, GAME_WORLD, cameraOcclusionResponse, piecesForMap, worldStream,
+  GAME_ITEMS, GAME_LOOP, GAME_PHYSICS, GAME_TELEMETRY, GAME_WORLD, cameraOcclusionResponse, pieceMutationMapName, piecesForMap, worldStream,
 } from '@game';
 import type {
   BuildFaceSkin, BuildFaceSlot, BuildMaterial, BuildPieceDef, BuildPieceKind, BuildPrefabDef, BuildSkinSet, PieceRay,
@@ -73,6 +73,8 @@ import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, type VisualShape
 const DEG = Math.PI / 180;
 
 export type PlayMode = 'test' | 'build';
+
+const WORLD_STREAM_REV_POLL_MS = 250;
 
 // ── TEST-mode presentation: the console overlay (route chrome; the SESSION is
 //    captured — GAME_COMMANDS.createConsoleSession owns toggle/dispatch). ─────
@@ -363,6 +365,17 @@ export function PlayRoute(props: {
   // The stream's materialized state IS the placed-piece truth; rev bumps
   // after each commit and the route re-reads — no second copy anywhere.
   const [piecesRev, setPiecesRev] = useState(0);
+  useEffect(() => {
+    if (!build.channel) return undefined;
+    let lastLength = build.channel.length();
+    const timer = setInterval(() => {
+      const nextLength = build.channel?.length() ?? lastLength;
+      if (nextLength === lastLength) return;
+      lastLength = nextLength;
+      setPiecesRev((r) => r + 1);
+    }, WORLD_STREAM_REV_POLL_MS);
+    return () => clearInterval(timer);
+  }, [build.channel]);
   const placeFreezeTraceEnabled = envFlag('HMSC_INT_PLACEFREEZE_TRACE') || envFlag('HMSC_INT_PLACEFREEZE_ONCE');
   const placeFreezeProbeRef = useRef<PlaceFreezeProbe | null>(null);
   const streamState: WorldStreamState | null = useMemo(() => {
@@ -921,6 +934,105 @@ export function PlayRoute(props: {
     const targetY = p.y + CAMERA_OCCLUSION_TUNING.playerTargetHeightMeters;
     const desiredRay = crosshairRayRef.current();
     const camera = desiredRay.origin;
+    // Does this owner stand between the lens and the player as a sight blocker?
+    // Walls and roofs (ceilings) always do; a ramp does UNLESS it's the floor the
+    // player is standing on. The floor under your feet must never fade.
+    const classifyOccluder = (ownerId: string) => {
+      const meta = ownerId ? cameraOccluderOwnersRef.current[ownerId] : null;
+      const kind = meta?.kind ?? 'unknown';
+      const isPlayerGround = kind === 'ramp' && meta ? isPlayerStandingOnRamp(p, meta.piece) : false;
+      const occludes = kind === 'wall' || kind === 'roof' || (kind === 'ramp' && !isPlayerGround);
+      return { meta, kind, isPlayerGround, occludes };
+    };
+    // Preferred path: the FULL occluder list along camera→player. The nearest
+    // still drives the distance pull-in (tuck the lens just past the first wall);
+    // every OTHER wall/roof on the segment fades so the player stays visible in an
+    // enclosed room — the single-nearest result could only ever fade one piece,
+    // which is why interiors went blind. Null when the host isn't rebuilt yet →
+    // fall through to the legacy single-hit + array-fed paths unchanged.
+    const hits = GAME_PHYSICS.cameraOcclusionConfiguredHits(
+      camera.x,
+      camera.y,
+      camera.z,
+      p.x,
+      targetY,
+      p.z,
+      CAMERA_OCCLUSION_TUNING.sweepRadiusMeters,
+      CAMERA_OCCLUSION_TUNING.maxHits,
+    );
+    if (hits !== null) {
+      const hitDistance = hits.nearestTargetDistanceMeters;
+      const nearestOwnerIndex = hits.nearestOwnerIndex;
+      const nearestOwnerId = nearestOwnerIndex > 0 ? occluders.ownerIds[nearestOwnerIndex - 1] ?? '' : '';
+      const nearest = classifyOccluder(nearestOwnerId);
+      const nextDistance = hitDistance > 0 && nearest.occludes
+        ? Math.max(
+          CAMERA_OCCLUSION_TUNING.minDistanceMeters,
+          Math.min(PLAYER_CAMERA.distanceMeters, hitDistance - CAMERA_OCCLUSION_TUNING.skinOffsetMeters),
+        )
+        : PLAYER_CAMERA.distanceMeters;
+      applyCameraDistanceConstraint(nextDistance);
+      // The pull-in tucks the lens just past the NEAREST occluder, so it stops
+      // blocking — unless we pinned at min distance (the room is tighter than the
+      // camera can pull, so the nearest wall is still in front and must fade too).
+      const pinnedAtMin = nextDistance <= CAMERA_OCCLUSION_TUNING.minDistanceMeters + 0.001;
+      const fadeIds: string[] = [];
+      for (const ownerIndex of hits.ownerIndices) {
+        const ownerId = ownerIndex > 0 ? occluders.ownerIds[ownerIndex - 1] ?? '' : '';
+        if (!ownerId) continue;
+        if (!classifyOccluder(ownerId).occludes) continue;
+        if (ownerIndex === nearestOwnerIndex && !pinnedAtMin) continue; // cleared by the pull-in
+        fadeIds.push(ownerId);
+      }
+      setResidualOcclusionIds(fadeIds);
+      const ignored = hitDistance > 0 && !nearest.occludes;
+      const hitRole = hitDistance <= 0 ? 'none' : nearest.isPlayerGround ? 'player-ground' : 'between-barrier';
+      const diagnostic = cameraOcclusionDiagnosticLastRef.current;
+      if (
+        diagnostic.source !== 'configured-hits'
+        || Math.abs(diagnostic.distance - nextDistance) >= 0.001
+        || Math.abs(diagnostic.hitDistance - hitDistance) >= 0.001
+        || diagnostic.nearestOwnerIndex !== nearestOwnerIndex
+        || diagnostic.ownerId !== nearestOwnerId
+        || diagnostic.ownerKind !== nearest.kind
+        || diagnostic.hitRole !== hitRole
+        || diagnostic.ignored !== ignored
+        || diagnostic.hits !== fadeIds.length
+        || diagnostic.rects !== occluders.rects.length
+        || diagnostic.orientedRects !== occluders.orientedRects.length
+      ) {
+        diagnostic.source = 'configured-hits';
+        diagnostic.distance = nextDistance;
+        diagnostic.hitDistance = hitDistance;
+        diagnostic.nearestOwnerIndex = nearestOwnerIndex;
+        diagnostic.hits = fadeIds.length;
+        diagnostic.rects = occluders.rects.length;
+        diagnostic.orientedRects = occluders.orientedRects.length;
+        diagnostic.ownerId = nearestOwnerId;
+        diagnostic.ownerKind = nearest.kind;
+        diagnostic.hitRole = hitRole;
+        diagnostic.ignored = ignored;
+        GAME_TELEMETRY.recordDiagnostic('camera', 'cameraOcclusion.changed', {
+          hits: hits.ownerIndices.length,
+          fades: fadeIds.length,
+          hostUs: hits.hostMicroseconds,
+          safeDistance: nextDistance,
+          nearestTargetDistance: hitDistance,
+          nearestOwnerIndex,
+          ownerId: nearestOwnerId,
+          pieceId: nearest.meta?.pieceId ?? '',
+          ownerKind: nearest.kind,
+          hitRole,
+          hitIsPlayerGround: nearest.isPlayerGround,
+          ignored,
+          pinnedAtMin,
+          rects: occluders.rects.length,
+          orientedRects: occluders.orientedRects.length,
+          cameraSource: 'desired-orbit-configured-hits',
+        });
+      }
+      return;
+    }
     const hit = GAME_PHYSICS.cameraOcclusionConfiguredHit(
       camera.x,
       camera.y,
@@ -1089,10 +1201,13 @@ export function PlayRoute(props: {
   const scopedBuildEvent = (event: WorldEvent): WorldEvent => {
     switch (event.kind) {
       case 'piecePlaced':
-      case 'pieceRemoved':
-      case 'pieceEditSet':
       case 'prefabStamped':
         return { ...event, mapName: props.mapName } as WorldEvent;
+      case 'pieceRemoved':
+      case 'pieceEditSet': {
+        const mapName = pieceMutationMapName(streamState, props.mapName, props.legacyPieceMapName, event.id);
+        return mapName ? ({ ...event, mapName } as WorldEvent) : event;
+      }
       default:
         return event;
     }

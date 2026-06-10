@@ -195,12 +195,40 @@ let liveStepProbePrinted = false;
 let missingStepProbePrinted = false;
 let heightfieldProbeCount = 0;
 let missingHeightfieldRegisterPrinted = false;
+let stepWireScratch: Float32Array | null = null;
+let stepWireScratchFloats = 0;
+let stepOutputScratch: Float32Array | null = null;
+let lastStepWireAllocatedBytes = 0;
+let lastStepOutputAllocatedBytes = 0;
+let cachedStepIntoRaw: unknown = undefined;
+let cachedStepIntoHost: HostFn<(input: Float32Array, output: Float32Array) => number | null> | null = null;
+let cachedStepRaw: unknown = undefined;
+let cachedLegacyStepRaw: unknown = undefined;
+let cachedStepHost: HostFn<(input: Float32Array) => ArrayBuffer | null> | null = null;
+
+function hostStepIntoFn(): HostFn<(input: Float32Array, output: Float32Array) => number | null> | null {
+  const honest = globalThis.__game_physics_step_into;
+  if (honest === cachedStepIntoRaw) return cachedStepIntoHost;
+  cachedStepIntoRaw = honest;
+  cachedStepIntoHost = typeof honest === 'function' ? { fn: honest, name: '__game_physics_step_into' } : null;
+  return cachedStepIntoHost;
+}
 
 function hostStepFn(): HostFn<(input: Float32Array) => ArrayBuffer | null> | null {
   const honest = globalThis.__game_physics_step;
-  if (typeof honest === 'function') return { fn: honest, name: '__game_physics_step' };
   const legacy = globalThis.__hmsc_physics_step;
-  if (typeof legacy === 'function') return { fn: legacy, name: '__hmsc_physics_step' };
+  if (honest === cachedStepRaw && legacy === cachedLegacyStepRaw) return cachedStepHost;
+  cachedStepRaw = honest;
+  cachedLegacyStepRaw = legacy;
+  if (typeof honest === 'function') {
+    cachedStepHost = { fn: honest, name: '__game_physics_step' };
+    return cachedStepHost;
+  }
+  if (typeof legacy === 'function') {
+    cachedStepHost = { fn: legacy, name: '__hmsc_physics_step' };
+    return cachedStepHost;
+  }
+  cachedStepHost = null;
   if (!missingStepProbePrinted) {
     missingStepProbePrinted = true;
     console.warn('[game-physics live] no host step fn', {
@@ -235,9 +263,15 @@ function hostCameraOcclusionHitFn(): HostFn<(cx: number, cy: number, cz: number,
   return null;
 }
 
+function hostCameraOcclusionHitsFn(): HostFn<(cx: number, cy: number, cz: number, tx: number, ty: number, tz: number, radius: number, maxHits: number) => ArrayBuffer | null> | null {
+  const honest = globalThis.__game_physics_camera_occlusion_hits;
+  if (typeof honest === 'function') return { fn: honest, name: '__game_physics_camera_occlusion_hits' };
+  return null;
+}
+
 /** True when the host physics bindings are compiled into this binary. */
 export function physicsHostReady(): boolean {
-  return hostStepFn() !== null;
+  return hostStepIntoFn() !== null || hostStepFn() !== null;
 }
 
 function packRect(out: number[], rect: CollisionRect): void {
@@ -272,14 +306,37 @@ function writeRect(out: Float32Array, at: number, rect: CollisionRect): number {
   return at;
 }
 
+function stepWire(floats: number): Float32Array {
+  if (!stepWireScratch || stepWireScratchFloats < floats) {
+    stepWireScratch = new Float32Array(floats);
+    stepWireScratchFloats = floats;
+    lastStepWireAllocatedBytes = stepWireScratch.byteLength;
+    return stepWireScratch;
+  }
+  lastStepWireAllocatedBytes = 0;
+  return stepWireScratch;
+}
+
+function stepOutputWire(): Float32Array {
+  const floats = OUTPUT_HEADER_FLOATS + PHYSICS_LIMITS.bodies * BODY_FLOATS;
+  if (!stepOutputScratch) {
+    stepOutputScratch = new Float32Array(floats);
+    lastStepOutputAllocatedBytes = stepOutputScratch.byteLength;
+    return stepOutputScratch;
+  }
+  lastStepOutputAllocatedBytes = 0;
+  return stepOutputScratch;
+}
+
 /**
  * One host physics step: player movement + gravity + body sim + collision
  * against the supplied solids. Returns null when the host bindings are not
  * compiled in (the cart still runs; nothing is solid).
  */
 export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
-  const stepHost = hostStepFn();
-  if (!stepHost) return null;
+  const stepIntoHost = hostStepIntoFn();
+  const stepHost = stepIntoHost ? null : hostStepFn();
+  if (!stepIntoHost && !stepHost) return null;
 
   const bodies = input.bodies ?? [];
   const rects = input.rects ?? [];
@@ -294,9 +351,9 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
     throw new Error(`stepPhysics: ${oriented.length} oriented rects exceeds the host cap of ${PHYSICS_LIMITS.orientedRects}`);
   }
 
-  const wire = new Float32Array(
-    INPUT_HEADER_FLOATS + bodies.length * BODY_FLOATS + rects.length * RECT_FLOATS + oriented.length * ORIENTED_FLOATS,
-  );
+  const requiredFloats = INPUT_HEADER_FLOATS + bodies.length * BODY_FLOATS + rects.length * RECT_FLOATS + oriented.length * ORIENTED_FLOATS;
+  const wire = stepWire(requiredFloats);
+  const allocatedBytes = lastStepWireAllocatedBytes;
   const { player, surface, tuning } = input;
   wire[0] = input.dtSeconds;
   wire[1] = input.intentX;
@@ -335,23 +392,22 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
     wire[at++] = body.radiusMeters;
     wire[at++] = body.restitution;
   }
-  const rectFloats: number[] = [];
-  for (const rect of rects) packRect(rectFloats, rect);
-  wire.set(rectFloats, at);
-  at += rectFloats.length;
-  const orientedFloats: number[] = [];
+  for (const rect of rects) at = writeRect(wire, at, rect);
   for (const rect of oriented) {
-    packRect(orientedFloats, rect);
-    orientedFloats.push(rect.pivotX, rect.pivotZ, rect.yawRadians);
+    at = writeRect(wire, at, rect);
+    wire[at++] = rect.pivotX;
+    wire[at++] = rect.pivotZ;
+    wire[at++] = rect.yawRadians;
   }
-  wire.set(orientedFloats, at);
 
   if (!liveStepProbePrinted) {
     liveStepProbePrinted = true;
     console.warn('[game-physics live] step wire', {
-      fn: stepHost.name,
+      fn: (stepIntoHost ?? stepHost!).name,
       headerFloats: INPUT_HEADER_FLOATS,
-      wireFloats: wire.length,
+      wireFloats: requiredFloats,
+      scratchFloats: wire.length,
+      allocatedBytes,
       dt: wire[0],
       player: { x: wire[5], y: wire[6], z: wire[7], vx: wire[8], vy: wire[9], vz: wire[10] },
       slot11WalkableGrace: wire[11],
@@ -365,12 +421,26 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
     });
   }
 
-  const buffer = stepHost.fn(wire);
-  if (!buffer || typeof (buffer as any).byteLength !== 'number') return null;
-  const out = new Float32Array(buffer);
-  if (out.length < OUTPUT_HEADER_FLOATS) return null;
+  let out: Float32Array;
+  let outLength = 0;
+  let outputAllocatedBytes = 0;
+  if (stepIntoHost) {
+    const output = stepOutputWire();
+    outputAllocatedBytes = lastStepOutputAllocatedBytes;
+    const writtenFloats = stepIntoHost.fn(wire, output);
+    if (typeof writtenFloats !== 'number' || !Number.isFinite(writtenFloats)) return null;
+    out = output;
+    outLength = Math.max(0, Math.min(output.length, Math.floor(writtenFloats)));
+  } else {
+    const buffer = stepHost!.fn(wire);
+    if (!buffer || typeof (buffer as any).byteLength !== 'number') return null;
+    out = new Float32Array(buffer);
+    outLength = out.length;
+    outputAllocatedBytes = out.byteLength;
+  }
+  if (outLength < OUTPUT_HEADER_FLOATS) return null;
   const bodyCount = Math.min(bodies.length, Math.max(0, Math.floor(out[8] || 0)));
-  if (out.length < OUTPUT_HEADER_FLOATS + bodyCount * BODY_FLOATS) return null;
+  if (outLength < OUTPUT_HEADER_FLOATS + bodyCount * BODY_FLOATS) return null;
 
   const steppedBodies: SteppedBody[] = new Array(bodyCount);
   let read = OUTPUT_HEADER_FLOATS;
@@ -397,12 +467,16 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
     bodies: bodies.length,
     rects: rects.length,
     orientedRects: oriented.length,
-    inputBytes: wire.byteLength,
-    outputBytes: out.byteLength,
+    inputBytes: requiredFloats * 4,
+    outputBytes: outLength * 4,
+    stepWireAllocatedBytes: allocatedBytes,
+    stepWireScratchBytes: wire.byteLength,
+    stepOutputAllocatedBytes: outputAllocatedBytes,
   });
-  GAME_TELEMETRY.recordDiagnostic('bridge', '__game_physics_step', {
-    args: 1,
-    payloadBytes: wire.byteLength + out.byteLength,
+  GAME_TELEMETRY.recordDiagnostic('bridge', stepIntoHost?.name ?? stepHost!.name, {
+    args: stepIntoHost ? 2 : 1,
+    payloadBytes: requiredFloats * 4 + outLength * 4,
+    allocatedBytes: allocatedBytes + outputAllocatedBytes,
   });
   return result;
 }
@@ -582,6 +656,64 @@ export function cameraOcclusionConfiguredHit(
 }
 
 /**
+ * The configured-scene query, full list: EVERY occluder owner the camera→target
+ * segment crosses, not just the nearest. Same stored-scene fast path as
+ * `cameraOcclusionConfiguredHit` (no per-frame array repacking) but returns the
+ * complete `ownerIndices` so the interior camera can fade ALL walls/ceiling
+ * pieces between the lens and the player — the single-nearest result can only
+ * fade one, which leaves you blind inside an enclosed room. Returns null when
+ * the host binding is absent (host not yet rebuilt) so callers fall back to the
+ * single-hit path.
+ */
+export function cameraOcclusionConfiguredHits(
+  cameraX: number,
+  cameraY: number,
+  cameraZ: number,
+  targetX: number,
+  targetY: number,
+  targetZ: number,
+  radiusMeters: number,
+  maxHits: number,
+): CameraOcclusionResult | null {
+  const host = hostCameraOcclusionHitsFn();
+  if (!host) return null;
+  const radius = Math.max(0, Number.isFinite(radiusMeters) ? radiusMeters : 0);
+  const hits = Math.max(1, Math.min(CAMERA_OCCLUSION_MAX_HITS, Math.floor(Number.isFinite(maxHits) ? maxHits : CAMERA_OCCLUSION_MAX_HITS)));
+  const buffer = host.fn(cameraX, cameraY, cameraZ, targetX, targetY, targetZ, radius, hits);
+  if (!buffer || typeof (buffer as any).byteLength !== 'number') return null;
+  const out = new Float32Array(buffer);
+  if (out.length < 4) return null;
+  const hitCount = Math.max(0, Math.min(hits, Math.floor(out[1] || 0), out.length - 4));
+  const ownerIndices: number[] = [];
+  for (let i = 0; i < hitCount; i += 1) {
+    const owner = Math.floor(out[4 + i] || 0);
+    if (owner > 0) ownerIndices.push(owner);
+  }
+  if (GAME_TELEMETRY.diagnosticChannelEnabled('physics')) {
+    GAME_TELEMETRY.recordDiagnostic('physics', 'cameraOcclusion.hits', {
+      hostUs: out[0] || 0,
+      hits: ownerIndices.length,
+      nearestTargetDistanceMeters: out[2] || 0,
+      nearestOwnerIndex: Math.floor(out[3] || 0),
+      radiusMeters: radius,
+      outputBytes: out.byteLength,
+    });
+  }
+  if (GAME_TELEMETRY.diagnosticChannelEnabled('bridge')) {
+    GAME_TELEMETRY.recordDiagnostic('bridge', host.name, {
+      args: 8,
+      payloadBytes: out.byteLength,
+    });
+  }
+  return {
+    hostMicroseconds: out[0] || 0,
+    ownerIndices,
+    nearestTargetDistanceMeters: Math.max(0, out[2] || 0),
+    nearestOwnerIndex: Math.floor(out[3] || 0),
+  };
+}
+
+/**
  * Register (or replace) one heightfield terrain collider. No-op when the host
  * bindings are missing — terrain just isn't solid until the host carries them.
  */
@@ -664,6 +796,7 @@ export const GAME_PHYSICS = Object.freeze({
   cameraOcclusion,
   configureCameraOcclusion,
   cameraOcclusionConfiguredHit,
+  cameraOcclusionConfiguredHits,
   cameraOcclusionDistance,
   registerHeightfield,
   clearHeightfields,

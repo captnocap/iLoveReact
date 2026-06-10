@@ -524,6 +524,89 @@ pub fn cameraOcclusionConfiguredHitOutput(
     return g_camera_occlusion[0..CAMERA_OCCLUSION_OUTPUT_FLOATS];
 }
 
+/// Full-list variant of the configured hit: scans the stored occluder scene and
+/// returns EVERY owner whose band the camera→target segment crosses (not just the
+/// nearest), in the same output dialect as `cameraOcclusion`
+/// ([_, count, nearestTargetDistance, nearestOwner, owner0, owner1, ...]). The
+/// interior third-person camera fades all of these so the player stays visible
+/// inside a building; the nearest still drives the distance pull-in. Reuses the
+/// same per-hit machinery (`addCameraOcclusionHit`) as the array-fed scan.
+pub fn cameraOcclusionConfiguredHits(
+    camera_x: f32,
+    camera_y: f32,
+    camera_z: f32,
+    target_x: f32,
+    target_y: f32,
+    target_z: f32,
+    sweep_radius: f32,
+    requested_hits: usize,
+) ?[]f32 {
+    clearCameraOcclusionOutput();
+    const dx = target_x - camera_x;
+    const dy = target_y - camera_y;
+    const dz = target_z - camera_z;
+    if (!std.math.isFinite(dx) or !std.math.isFinite(dy) or !std.math.isFinite(dz)) return null;
+    const segment_len = @sqrt(dx * dx + dy * dy + dz * dz);
+    if (segment_len <= 0.0001) return g_camera_occlusion[0..CAMERA_OCCLUSION_OUTPUT_FLOATS];
+    const max_hits = @min(MAX_CAMERA_OCCLUSION_HITS, if (requested_hits == 0) MAX_CAMERA_OCCLUSION_HITS else requested_hits);
+    const radius = if (std.math.isFinite(sweep_radius)) @max(@as(f32, 0), sweep_radius) else 0;
+
+    var r: usize = 0;
+    while (r < g_camera_occlusion_rect_count) : (r += 1) {
+        const at = r * CAMERA_OCCLUSION_RECT_FLOATS;
+        if (cameraOcclusionRectValue(at + 5) <= 0.5) continue;
+        if (segmentAabbEntryT(
+            camera_x,
+            camera_y,
+            camera_z,
+            dx,
+            dy,
+            dz,
+            cameraOcclusionRectValue(at) - radius,
+            bandFloor(cameraOcclusionRectValue(at + 8)) - radius,
+            cameraOcclusionRectValue(at + 1) - radius,
+            cameraOcclusionRectValue(at + 2) + radius,
+            cameraOcclusionRectValue(at + 4) + radius,
+            cameraOcclusionRectValue(at + 3) + radius,
+        )) |entry_t| {
+            addCameraOcclusionHit(cameraOcclusionRectValue(at + RECT_FLOATS), max_hits, entry_t, segment_len);
+        }
+    }
+
+    var o: usize = 0;
+    while (o < g_camera_occlusion_oriented_count) : (o += 1) {
+        const at = o * CAMERA_OCCLUSION_ORIENTED_FLOATS;
+        if (cameraOcclusionOrientedValue(at + 5) <= 0.5) continue;
+        const yaw = cameraOcclusionOrientedValue(at + 11);
+        const cs = @cos(yaw);
+        const sn = @sin(yaw);
+        var lo_x: f32 = undefined;
+        var lo_z: f32 = undefined;
+        var lt_x: f32 = undefined;
+        var lt_z: f32 = undefined;
+        worldToLocal(camera_x, camera_z, cameraOcclusionOrientedValue(at + 9), cameraOcclusionOrientedValue(at + 10), cs, sn, &lo_x, &lo_z);
+        worldToLocal(target_x, target_z, cameraOcclusionOrientedValue(at + 9), cameraOcclusionOrientedValue(at + 10), cs, sn, &lt_x, &lt_z);
+        if (segmentAabbEntryT(
+            lo_x,
+            camera_y,
+            lo_z,
+            lt_x - lo_x,
+            dy,
+            lt_z - lo_z,
+            cameraOcclusionOrientedValue(at) - radius,
+            bandFloor(cameraOcclusionOrientedValue(at + 8)) - radius,
+            cameraOcclusionOrientedValue(at + 1) - radius,
+            cameraOcclusionOrientedValue(at + 2) + radius,
+            cameraOcclusionOrientedValue(at + 4) + radius,
+            cameraOcclusionOrientedValue(at + 3) + radius,
+        )) |entry_t| {
+            addCameraOcclusionHit(cameraOcclusionOrientedValue(at + ORIENTED_FLOATS), max_hits, entry_t, segment_len);
+        }
+    }
+
+    return g_camera_occlusion[0..CAMERA_OCCLUSION_OUTPUT_FLOATS];
+}
+
 pub fn cameraOcclusionConfiguredDistance(
     camera_x: f32,
     camera_y: f32,

@@ -10,6 +10,9 @@
 //!
 //!   __hmsc_physics_step(inputFloat32Array) -> Float32 ArrayBuffer snapshot
 //!     alias: __game_physics_step
+//!   __game_physics_step_into(inputFloat32Array, outputFloat32Array) -> writtenFloatCount
+//!     Allocation-free hot-path form; writes the same snapshot into caller-owned
+//!     output storage.
 //!   __hmsc_register_heightfield(id, originX, originZ, cell, cols, rows,
 //!       baseY, walkCos, samplesFloat32Array, yaw?, pivotX?, pivotZ?)
 //!     alias: __game_physics_register_heightfield
@@ -17,6 +20,17 @@
 //!     alias: __game_physics_clear_heightfields
 //!   __hmsc_spike_trace(on)   — engine per-frame spike logger toggle; rides
 //!     along because hmsc's gv_perflog flips it next to the physics step.
+//!   __game_physics_camera_occlusion(inputFloat32Array) -> Float32 ArrayBuffer
+//!     Camera→player segment query against wall-class rects; output is
+//!     [hostUs, hitCount, nearestTargetDistance, nearestOwnerId, ownerId...].
+//!   __game_physics_camera_occlusion_configure(inputFloat32Array)
+//!     Uploads the static wall-class rect set for allocation-free per-frame
+//!     distance queries.
+//!   __game_physics_camera_occlusion_distance(cx,cy,cz, tx,ty,tz, radius) -> f64
+//!     Scalar hot-path query over the configured rect set; 0 means no hit.
+//!   __game_physics_camera_occlusion_hit(cx,cy,cz, tx,ty,tz, radius) -> Float32 ArrayBuffer
+//!     Owner-aware hot-path query over the configured rect set:
+//!     [hostUs, nearestTargetDistance, nearestOwnerId].
 //!
 //! Gated ingredient (V18): registered only when the metafile gate flips
 //! -Dhas-game-physics (see sdk/dependency-registry.json `game-physics` and
@@ -55,8 +69,29 @@ fn argBytes(info: v8.FunctionCallbackInfo, idx: u32) ?[]const u8 {
     return base_bytes[byte_off .. byte_off + byte_len];
 }
 
+fn argBytesMut(info: v8.FunctionCallbackInfo, idx: u32) ?[]u8 {
+    if (idx >= info.length()) return null;
+    const value = info.getArg(idx);
+    if (!value.isArrayBufferView()) return null;
+    const view: v8.ArrayBufferView = .{ .handle = @ptrCast(value.handle) };
+    const byte_len = view.getByteLength();
+    if (byte_len == 0) return &[_]u8{};
+    const byte_off = view.getByteOffset();
+    const ab = view.getBuffer();
+    var shared = ab.getBackingStore();
+    defer v8.BackingStore.sharedPtrReset(&shared);
+    const bs = v8.BackingStore.sharedPtrGet(&shared);
+    const base = bs.getData() orelse return null;
+    const base_bytes: [*]u8 = @ptrCast(base);
+    return base_bytes[byte_off .. byte_off + byte_len];
+}
+
 fn setReturnNull(info: v8.FunctionCallbackInfo) void {
     info.getReturnValue().set(info.getIsolate().initNull());
+}
+
+fn setReturnF64(info: v8.FunctionCallbackInfo, value: f64) void {
+    info.getReturnValue().set(v8.Number.init(info.getIsolate(), value));
 }
 
 fn noopBackingStoreDeleter(_: ?*anyopaque, _: usize, _: ?*anyopaque) callconv(.c) void {}
@@ -99,6 +134,124 @@ fn hostPhysicsStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     const input_ptr: [*]const f32 = @ptrCast(@alignCast(bytes.ptr));
     const input = input_ptr[0 .. bytes.len / @sizeOf(f32)];
     const snapshot = game_physics.step(input) orelse {
+        setReturnNull(info);
+        return;
+    };
+    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs() - t0)) / 1000.0);
+    setReturnF32Buffer(info, snapshot);
+}
+
+fn hostPhysicsStepInto(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const t0 = nowNs();
+    const input_bytes = argBytes(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const output_bytes = argBytesMut(info, 1) orelse {
+        setReturnNull(info);
+        return;
+    };
+    if (input_bytes.len < game_physics.INPUT_HEADER_FLOATS * @sizeOf(f32)) {
+        setReturnNull(info);
+        return;
+    }
+    const input_ptr: [*]const f32 = @ptrCast(@alignCast(input_bytes.ptr));
+    const input = input_ptr[0 .. input_bytes.len / @sizeOf(f32)];
+    const snapshot = game_physics.step(input) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const snapshot_bytes = std.mem.sliceAsBytes(snapshot);
+    if (output_bytes.len < snapshot_bytes.len) {
+        setReturnNull(info);
+        return;
+    }
+    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs() - t0)) / 1000.0);
+    @memcpy(output_bytes[0..snapshot_bytes.len], snapshot_bytes);
+    setReturnF64(info, @floatFromInt(snapshot.len));
+}
+
+fn hostCameraOcclusion(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const t0 = nowNs();
+    const bytes = argBytes(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    if (bytes.len < game_physics.CAMERA_OCCLUSION_HEADER_FLOATS * @sizeOf(f32)) {
+        setReturnNull(info);
+        return;
+    }
+    const input_ptr: [*]const f32 = @ptrCast(@alignCast(bytes.ptr));
+    const input = input_ptr[0 .. bytes.len / @sizeOf(f32)];
+    const snapshot = game_physics.cameraOcclusion(input) orelse {
+        setReturnNull(info);
+        return;
+    };
+    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs() - t0)) / 1000.0);
+    setReturnF32Buffer(info, snapshot);
+}
+
+fn hostCameraOcclusionConfigure(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    defer setReturnNull(info);
+    const bytes = argBytes(info, 0) orelse return;
+    if (bytes.len < 2 * @sizeOf(f32)) return;
+    const input_ptr: [*]const f32 = @ptrCast(@alignCast(bytes.ptr));
+    const input = input_ptr[0 .. bytes.len / @sizeOf(f32)];
+    _ = game_physics.configureCameraOcclusion(input);
+}
+
+fn hostCameraOcclusionDistance(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const distance = game_physics.cameraOcclusionConfiguredDistance(
+        @floatCast(argToF64(info, 0) orelse 0),
+        @floatCast(argToF64(info, 1) orelse 0),
+        @floatCast(argToF64(info, 2) orelse 0),
+        @floatCast(argToF64(info, 3) orelse 0),
+        @floatCast(argToF64(info, 4) orelse 0),
+        @floatCast(argToF64(info, 5) orelse 0),
+        @floatCast(argToF64(info, 6) orelse 0),
+    ) orelse {
+        setReturnNull(info);
+        return;
+    };
+    setReturnF64(info, distance);
+}
+
+fn hostCameraOcclusionHit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const t0 = nowNs();
+    const snapshot = game_physics.cameraOcclusionConfiguredHitOutput(
+        @floatCast(argToF64(info, 0) orelse 0),
+        @floatCast(argToF64(info, 1) orelse 0),
+        @floatCast(argToF64(info, 2) orelse 0),
+        @floatCast(argToF64(info, 3) orelse 0),
+        @floatCast(argToF64(info, 4) orelse 0),
+        @floatCast(argToF64(info, 5) orelse 0),
+        @floatCast(argToF64(info, 6) orelse 0),
+    ) orelse {
+        setReturnNull(info);
+        return;
+    };
+    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs() - t0)) / 1000.0);
+    setReturnF32Buffer(info, snapshot);
+}
+
+fn hostCameraOcclusionHits(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const t0 = nowNs();
+    const snapshot = game_physics.cameraOcclusionConfiguredHits(
+        @floatCast(argToF64(info, 0) orelse 0),
+        @floatCast(argToF64(info, 1) orelse 0),
+        @floatCast(argToF64(info, 2) orelse 0),
+        @floatCast(argToF64(info, 3) orelse 0),
+        @floatCast(argToF64(info, 4) orelse 0),
+        @floatCast(argToF64(info, 5) orelse 0),
+        @floatCast(argToF64(info, 6) orelse 0),
+        @intFromFloat(@max(0.0, argToF64(info, 7) orelse 0)),
+    ) orelse {
         setReturnNull(info);
         return;
     };
@@ -157,6 +310,12 @@ pub fn registerGamePhysics(_: anytype) void {
     v8_runtime.registerHostFn("__hmsc_spike_trace", hostSpikeTrace);
     // Honest aliases (V18) — same callbacks, capability-named.
     v8_runtime.registerHostFn("__game_physics_step", hostPhysicsStep);
+    v8_runtime.registerHostFn("__game_physics_step_into", hostPhysicsStepInto);
     v8_runtime.registerHostFn("__game_physics_register_heightfield", hostRegisterHeightfield);
     v8_runtime.registerHostFn("__game_physics_clear_heightfields", hostClearHeightfields);
+    v8_runtime.registerHostFn("__game_physics_camera_occlusion", hostCameraOcclusion);
+    v8_runtime.registerHostFn("__game_physics_camera_occlusion_configure", hostCameraOcclusionConfigure);
+    v8_runtime.registerHostFn("__game_physics_camera_occlusion_distance", hostCameraOcclusionDistance);
+    v8_runtime.registerHostFn("__game_physics_camera_occlusion_hit", hostCameraOcclusionHit);
+    v8_runtime.registerHostFn("__game_physics_camera_occlusion_hits", hostCameraOcclusionHits);
 }

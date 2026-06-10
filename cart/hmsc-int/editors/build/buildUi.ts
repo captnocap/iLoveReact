@@ -35,7 +35,10 @@ export const BUILD_UI = {
 } as const;
 
 export const CAMERA_OCCLUSION_TUNING = {
-  residualOpacity: 0.62,
+  // Faded walls/ceiling stack between the lens and the player inside a building,
+  // so each layer must read as clearly see-through (62% opaque hid the player
+  // behind two layers). Live-tunable via the 'play-camera-occlusion' table.
+  residualOpacity: 0.34,
   maxHits: 24,
   sweepRadiusMeters: 0.08,
   playerTargetHeightMeters: PLAYER_CAMERA.targetHeightMeters,
