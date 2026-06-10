@@ -184,9 +184,21 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
-  const [wholeBuilding, setWholeBuilding] = useState(true);
+  // Default to SINGLE-piece select so you can always grab one piece even when it touches
+  // others (the toggle below flips the default; Shift/Alt inverts it for one click). A
+  // whole-building select buried single-piece editing — req_0459.
+  const [wholeBuilding, setWholeBuilding] = useState(false);
   const wholeBuildingRef = useRef(wholeBuilding);
   wholeBuildingRef.current = wholeBuilding;
+  // Shift/Alt held? Mouse events carry no modifier flags here, so track it off the key
+  // bus (which does) and read it at click time to invert the select scope.
+  const modHeldRef = useRef(false);
+  useEffect(() => {
+    const upd = (e: any) => { modHeldRef.current = !!(e?.shiftKey || e?.altKey); };
+    const offD = busOn('__keydown', upd);
+    const offU = busOn('__keyup', upd);
+    return () => { offD(); offU(); };
+  }, []);
   // An in-progress move drag: the world (dx,dz) the selection is being dragged by on
   // the active level's plane, or null when not moving. Drives the move ghost; the
   // selection re-places (remove+place) on mouse-up.
@@ -320,7 +332,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // Hit-test the DRAWN (terrain-lifted) pieces so a click lands on what's on screen.
     const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), displayPiecesRef.current, ISO_SNAP_TUNING.reachMeters);
     if (!hit) { setSelectedIds(new Set()); return; }
-    setSelectedIds(wholeBuildingRef.current ? GAME_BUILD.placed.connected(hit.piece.id, displayPiecesRef.current) : new Set([hit.piece.id]));
+    // The toggle sets the default scope; Shift/Alt inverts it for this click. So a single
+    // piece is always one click away (even touching others), and the whole building is one
+    // modifier away — no need to flip the toggle to edit one piece.
+    const whole = wholeBuildingRef.current !== modHeldRef.current;
+    setSelectedIds(whole ? GAME_BUILD.placed.connected(hit.piece.id, displayPiecesRef.current) : new Set([hit.piece.id]));
   };
   // Remove every selected piece (one pieceRemoved each, the SAME event F2's X commits).
   const deleteSelected = () => {
@@ -582,7 +598,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
           <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{`F${level}`}</Text>
         </Box>
         <IsoBtn label="▲" title="Floor up a storey" onPress={() => { stage.raiseLevel(); redraw(); saveCamera(); }} />
-        <IsoBtn label={wholeBuilding ? '▦' : '▪'} title={wholeBuilding ? 'Select: whole building (click → one piece)' : 'Select: one piece (click → whole building)'} onPress={() => setWholeBuilding((v) => !v)} />
+        <IsoBtn label={wholeBuilding ? '▦' : '▪'} title={wholeBuilding ? 'Select: whole building · Shift-click = one piece' : 'Select: one piece · Shift-click = whole building'} onPress={() => setWholeBuilding((v) => !v)} />
         {selectedIds.size > 0 ? (
           <>
             <IsoBtn label="⧉" title="Clone selection" onPress={cloneSelected} />
@@ -598,8 +614,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         {armed
           ? `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place · drag rotate · WASD pan · scroll zoom · R · Esc`
           : selectedIds.size > 0
-            ? `${selectedIds.size} selected · drag to move · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'}`
-            : 'WASD pan · drag rotate · scroll zoom · F recenter · click to select · pick below to build'}
+            ? `${selectedIds.size} selected · drag to move · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
+            : `WASD pan · drag rotate · scroll zoom · F recenter · click = ${wholeBuilding ? 'building, shift = piece' : 'piece, shift = building'} · pick below to build`}
       </Text>
       {/* what's in the map — the "junk" is the real placed pieces + world props (the
           same content F2/the game shows); ones off the painted chunk float over sky */}
