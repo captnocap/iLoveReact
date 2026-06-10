@@ -10,7 +10,7 @@
 
 import { Box, Pressable, ScrollView, Text } from '@reactjit/primitives';
 import { MiniStepper, RailLabel, ToolBtn } from './railAtoms';
-import { clampProfile, isOneWay, profileLabel, roadWidthTiles, type RoadProfile, type RoadStroke } from './roadData';
+import { clampProfile, isOneWay, profileLabel, ROAD_SPEED_PRESETS, roadWidthTiles, type RoadProfile, type RoadStroke } from './roadData';
 import type { Tool } from './PaintCanvas';
 
 export function RoadRail(props: {
@@ -69,6 +69,29 @@ export function RoadRail(props: {
         <Box style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: p.sidewalks ? '#86efac' : '#334155' }} />
         <Text fontSize={9} color={p.sidewalks ? '#e2e8f0' : '#64748b'}>sidewalks (2-tile ring)</Text>
       </Pressable>
+      {/* speed limit (ROADSPEED-0610): preset chips + a fine stepper. The
+          STROKE carries it (tiles are shared kinds) — selecting a road
+          live-edits that road, like the lane steppers. */}
+      <Box style={{ flexDirection: 'row', gap: 4 }}>
+        {(Object.entries(ROAD_SPEED_PRESETS) as Array<[string, number]>).map(([name, kph]) => {
+          const active = p.speedLimitKph === kph;
+          return (
+            <Pressable
+              key={name}
+              onPress={() => props.onProfile({ speedLimitKph: kph })}
+              style={{ flexGrow: 1, alignItems: 'center', paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: active ? '#facc15' : '#334155', backgroundColor: active ? '#2b2410' : '#0f1a2e' }}
+            >
+              <Text fontSize={9} color={active ? '#facc15' : '#94a3b8'}>{`${name} ${kph}`}</Text>
+            </Pressable>
+          );
+        })}
+      </Box>
+      <MiniStepper
+        label="speed limit (km/h)"
+        value={String(p.speedLimitKph ?? '')}
+        onDec={() => props.onProfile({ speedLimitKph: (p.speedLimitKph ?? 50) - 5 })}
+        onInc={() => props.onProfile({ speedLimitKph: (p.speedLimitKph ?? 50) + 5 })}
+      />
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <Text fontSize={9} color="#94a3b8" style={{ fontFamily: 'monospace' }}>{profileLabel(p)}</Text>
         {isOneWay(p) ? <Text fontSize={8} color="#f59e0b" style={{ fontWeight: 700 }}>ONE-WAY</Text> : null}

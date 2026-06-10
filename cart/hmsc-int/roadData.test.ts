@@ -4,12 +4,12 @@
 // with no median, junction boxes + zebra bands where strokes cross. Pure CPU,
 // runs under tools/v8cli (see game/_testkit.ts header for the bundle+run line).
 
-import { assert, assertEqual, finish, test } from './game/_testkit';
+import { assert, assertClose, assertEqual, finish, test } from './game/_testkit';
 import {
   applyMergeGesture, carriagewayTiles, cellKey, clampProfile, crossSection,
   filletPoints, isOneWay, laneGuides, planRoads, profileLabel, ribbonExtents,
-  roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd,
-  splitStroke, strokeChevrons,
+  roadMotionProfile, roadRibbonSegments, roadWidthTiles, snapToCenterline,
+  snapToRoadEnd, speedLimitAtPoint, speedLimitMps, splitStroke, strokeChevrons,
   type RoadPlan, type RoadStroke,
 } from './roadData';
 import { roadRibbonSection } from './tileField.wgsl';
@@ -96,9 +96,30 @@ test('crossSection one-way width centres around the stroke', () => {
   assertEqual(offs.join(','), '-1,0,1', 'W=3 centres as -1..1');
 });
 
-test('profileLabel reads like the rail chip', () => {
-  assertEqual(profileLabel({ lanesF: 1, lanesB: 1, sidewalks: true }), '1+1 ·11w +walk', 'two-way');
-  assertEqual(profileLabel({ lanesF: 2, lanesB: 0, sidewalks: false }), '2→ ·6w', 'one-way forward');
+test('profileLabel reads like the rail chip (speed limit rides it — ROADSPEED-0610)', () => {
+  assertEqual(profileLabel({ lanesF: 1, lanesB: 1, sidewalks: true }), '1+1 ·11w +walk ·50', 'two-way defaults to city');
+  assertEqual(profileLabel({ lanesF: 2, lanesB: 0, sidewalks: false, speedLimitKph: 90 }), '2→ ·6w ·90', 'one-way rural');
+});
+
+test('speed limits (ROADSPEED-0610): the stroke carries them, the route obeys the strictest', () => {
+  const city = road('city', [[0, 10], [40, 10]], 1, 1, true);
+  const rural = { ...road('rural', [[0, 40], [40, 40]], 1, 1, false), profile: { lanesF: 1, lanesB: 1, sidewalks: false, speedLimitKph: 90 } };
+  assertEqual(clampProfile({ lanesF: 1, lanesB: 1, sidewalks: true }).speedLimitKph, 50, 'absent → the city preset');
+  assertEqual(clampProfile({ lanesF: 1, lanesB: 1, sidewalks: true, speedLimitKph: 999 }).speedLimitKph, 130, 'clamped to the ceiling');
+  assertEqual(Math.round(speedLimitMps(rural.profile) * 3.6), 90, 'kph→mps round-trips');
+  // point lookup: on the rural carriageway = 90, on the city = 50, off-road = null
+  assertEqual(speedLimitAtPoint([city, rural], 20, 40), 90 / 3.6, 'on the rural stroke');
+  assertEqual(speedLimitAtPoint([city, rural], 20, 10), 50 / 3.6, 'on the city stroke');
+  assertEqual(speedLimitAtPoint([city, rural], 20, 25), null, 'between roads = off-road');
+  // the motion consumer: a route along the rural road keeps 25 m/s capped at
+  // 90 kph; passing through the city road binds to the strictest limit
+  const base = { maxSpeed: 40, accel: 4, decel: 6 };
+  const ruralOnly = roadMotionProfile(base, [city, rural], [[2, 40], [38, 40]]);
+  assertClose(ruralOnly.maxSpeed, 90 / 3.6, 0.001, 'the rural route drives the rural limit');
+  const mixed = roadMotionProfile(base, [city, rural], [[2, 40], [2, 10], [38, 10]]);
+  assertClose(mixed.maxSpeed, 50 / 3.6, 0.001, 'touching the city road binds the strictest limit');
+  const jalopy = roadMotionProfile({ maxSpeed: 8, accel: 4, decel: 6 }, [city, rural], [[2, 40], [38, 40]]);
+  assertEqual(jalopy.maxSpeed, 8, 'limits clamp DOWN, never up');
 });
 
 test('continuing a road from its endpoint is ONE road — no phantom junction at the seam', () => {

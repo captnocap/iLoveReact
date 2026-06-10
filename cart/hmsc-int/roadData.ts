@@ -39,6 +39,11 @@ export interface RoadProfile {
   lanesB: number;
   /** The locked 2-tile sidewalk ring on both outer edges. */
   sidewalks: boolean;
+  /** Speed limit in km/h (ROADSPEED-0610, req_0554: city vs rural). The
+   *  STROKE is the carrier — stamped tiles are shared kinds and cannot hold
+   *  it. Optional so pre-speed strokes stay valid; clampProfile normalizes
+   *  absent → the city preset. */
+  speedLimitKph?: number;
 }
 
 /** Global integer cell coords — the SelCell convention (chunk cx covers gx ∈ [cx·120, cx·120+119]). */
@@ -64,12 +69,28 @@ export const CROSSWALK_DEPTH = 2;
 
 export const MAX_LANES_PER_SIDE = 3;
 
+/** Speed presets (ROADSPEED-0610): pick one in the rail, tune per stroke. */
+export const ROAD_SPEED_PRESETS = { city: 50, rural: 90 } as const;
+export const SPEED_LIMIT_MIN_KPH = 10;
+export const SPEED_LIMIT_MAX_KPH = 130;
+
+function clampSpeedLimit(kph: number | undefined): number {
+  const v = Number.isFinite(kph) ? Math.round(kph! / 5) * 5 : ROAD_SPEED_PRESETS.city;
+  return Math.max(SPEED_LIMIT_MIN_KPH, Math.min(SPEED_LIMIT_MAX_KPH, v));
+}
+
 export function clampProfile(p: RoadProfile): RoadProfile {
   const lanesF = Math.max(0, Math.min(MAX_LANES_PER_SIDE, Math.round(p.lanesF)));
   const lanesB = Math.max(0, Math.min(MAX_LANES_PER_SIDE, Math.round(p.lanesB)));
+  const speedLimitKph = clampSpeedLimit(p.speedLimitKph);
   // A road with no lanes at all is not a road; keep one forward lane.
-  if (lanesF === 0 && lanesB === 0) return { lanesF: 1, lanesB: 0, sidewalks: !!p.sidewalks };
-  return { lanesF, lanesB, sidewalks: !!p.sidewalks };
+  if (lanesF === 0 && lanesB === 0) return { lanesF: 1, lanesB: 0, sidewalks: !!p.sidewalks, speedLimitKph };
+  return { lanesF, lanesB, sidewalks: !!p.sidewalks, speedLimitKph };
+}
+
+/** The clamped limit in m/s — what motion planning consumes. */
+export function speedLimitMps(p: RoadProfile): number {
+  return clampSpeedLimit(p.speedLimitKph) / 3.6;
 }
 
 export function isOneWay(p: RoadProfile): boolean {
@@ -431,13 +452,13 @@ export function roadRibbonSegments(
   return out;
 }
 
-/** Short profile blurb for the rail list: "1+1 ·7w", "2→ ·6w +walk". */
+/** Short profile blurb for the rail list: "1+1 ·7w ·50", "2→ ·6w +walk ·90". */
 export function profileLabel(p: RoadProfile): string {
   const c = clampProfile(p);
   const lanes = isOneWay(c)
     ? `${Math.max(c.lanesF, c.lanesB)}${c.lanesF > 0 ? '→' : '←'}`
     : `${c.lanesF}+${c.lanesB}`;
-  return `${lanes} ·${roadWidthTiles(c)}w${c.sidewalks ? ' +walk' : ''}`;
+  return `${lanes} ·${roadWidthTiles(c)}w${c.sidewalks ? ' +walk' : ''} ·${c.speedLimitKph}`;
 }
 
 /**
@@ -459,6 +480,74 @@ export function laneGuides(p: RoadProfile): { off: number; flow: 'forward' | 'ba
     for (let i = 0; i < n; i++) out.push({ off: left + i * LANE_TILES + half, flow });
   }
   return out;
+}
+
+// ── speed limits along a route (ROADSPEED-0610, req_0554) ───────────────────
+// The stroke carries the limit; the lookup answers "which stroke's lane am I
+// on" by distance to the FILLETED centerline (the geometry the ribbon renders
+// and traffic will drive), within that stroke's carriageway extents.
+
+/** The governing stroke at a world point: nearest filleted centerline whose
+ *  carriageway band covers the point. null off-road. */
+export function strokeAtPoint(strokes: RoadStroke[], gx: number, gz: number): RoadStroke | null {
+  let best: { r: RoadStroke; d: number } | null = null;
+  for (const r of strokes) {
+    if (r.points.length < 2) continue;
+    const ext = ribbonExtents(r.profile);
+    const reach = Math.max(ext.rightExt, ext.leftExt);
+    const pts = filletPoints(r.points, ROAD_FILLET_TILES);
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i]!, b = pts[i + 1]!;
+      const abx = b.gx - a.gx, abz = b.gz - a.gz;
+      const len2 = abx * abx + abz * abz;
+      const t = len2 ? Math.max(0, Math.min(1, ((gx - a.gx) * abx + (gz - a.gz) * abz) / len2)) : 0;
+      const d = Math.hypot(gx - (a.gx + abx * t), gz - (a.gz + abz * t));
+      if (d <= reach && (!best || d < best.d)) best = { r, d };
+    }
+  }
+  return best?.r ?? null;
+}
+
+/** The limit (m/s) governing a world point, or null off-road. */
+export function speedLimitAtPoint(strokes: RoadStroke[], gx: number, gz: number): number | null {
+  const r = strokeAtPoint(strokes, gx, gz);
+  return r ? speedLimitMps(r.profile) : null;
+}
+
+/** The STRICTEST limit (m/s) along a route — sampled at every vertex plus
+ *  ~3-cell intervals so a brief pass through a slow road still binds. null
+ *  when no sample touches a road. */
+export function routeSpeedLimitMps(strokes: RoadStroke[], points: readonly [number, number][]): number | null {
+  let strictest: number | null = null;
+  const sampleAt = (x: number, z: number) => {
+    const v = speedLimitAtPoint(strokes, x, z);
+    if (v !== null && (strictest === null || v < strictest)) strictest = v;
+  };
+  for (let i = 0; i < points.length; i++) {
+    sampleAt(points[i]![0], points[i]![1]);
+    if (i + 1 < points.length) {
+      const len = Math.hypot(points[i + 1]![0] - points[i]![0], points[i + 1]![1] - points[i]![1]);
+      const steps = Math.floor(len / 3);
+      for (let s = 1; s <= steps; s++) {
+        const t = s / (steps + 1);
+        sampleAt(points[i]![0] + (points[i + 1]![0] - points[i]![0]) * t, points[i]![1] + (points[i + 1]![1] - points[i]![1]) * t);
+      }
+    }
+  }
+  return strictest;
+}
+
+/** THE MOTION CONSUMER: a driving profile obeying the route's strictest
+ *  limit — maxSpeed clamps down, never up (a 30 km/h jalopy stays a jalopy
+ *  on the highway). Off-road routes keep the base profile. */
+export function roadMotionProfile<T extends { maxSpeed: number }>(
+  base: T,
+  strokes: RoadStroke[],
+  points: readonly [number, number][],
+): T {
+  const limit = routeSpeedLimitMps(strokes, points);
+  if (limit === null || limit >= base.maxSpeed) return base;
+  return { ...base, maxSpeed: limit };
 }
 
 /** Every stroke's two endpoints — the wire connect points the editor marks. */

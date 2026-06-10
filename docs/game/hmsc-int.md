@@ -1421,6 +1421,18 @@ lanes = a one-way road and MUST show direction markers.
   saved legend like the tile grids). Chunk tiles save COMPOSITED (what you
   see); pre-road snapshots load clean. `roadStore.test.ts` (3 cases) pins the
   round-trip + legend degradation.
+- SPEED LIMITS (ROADSPEED-0610, req_0554) — `RoadProfile.speedLimitKph`; the
+  STROKE is the carrier (stamped tiles are shared kinds and cannot hold it).
+  `ROAD_SPEED_PRESETS` city 50 / rural 90 as rail chips + a 5-km/h stepper
+  in RoadRail; `clampProfile` normalizes absent → city and clamps 10..130;
+  the label reads `1+1 ·11w +walk ·50`. Pre-speed saves load clean (the
+  field defaults). Lookups: `strokeAtPoint`/`speedLimitAtPoint` (distance to
+  the FILLETED centerline within the carriageway's ribbon extents) and
+  `routeSpeedLimitMps` (strictest along a sampled route). THE MOTION
+  CONSUMER: `roadMotionProfile(base, strokes, points)` clamps a driving
+  profile's `maxSpeed` DOWN to the route's strictest limit (never up) —
+  feed it to planMotion/planMotionWithStops and the schedule obeys the
+  posted speed. roadData.test.ts covers point/route/jalopy cases.
 - Known seams: cells over not-yet-added chunks skip the stamp and catch up on
   the next restamp; manual paint UNDER a road footprint is reclaimed by the
   next restamp; the road LOOK is still the kind colors — the per-tile material

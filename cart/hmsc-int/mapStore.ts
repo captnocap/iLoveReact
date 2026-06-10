@@ -136,6 +136,7 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
       ...(p.spawnId ? { spawnId: p.spawnId } : {}),
     })),
     chunks,
+    // profile spreads whole so new fields (speedLimitKph, …) ride automatically
     ...(world.roads?.length ? { roads: world.roads.map((r) => ({ id: r.id, points: r.points.map((pt) => ({ ...pt })), profile: { ...r.profile } })) } : {}),
     ...(roadUnder.length ? { roadUnder } : {}),
   };
@@ -209,7 +210,13 @@ export function deserializeMap(snap: MapSnapshot): EditorWorld {
     .map((r) => ({
       id: r.id,
       points: r.points.map((p) => ({ gx: Math.round(p.gx), gz: Math.round(p.gz) })),
-      profile: { lanesF: r.profile.lanesF, lanesB: r.profile.lanesB, sidewalks: !!r.profile.sidewalks },
+      profile: {
+        lanesF: r.profile.lanesF,
+        lanesB: r.profile.lanesB,
+        sidewalks: !!r.profile.sidewalks,
+        // ROADSPEED-0610: absent on pre-speed saves — clampProfile defaults it
+        ...(Number.isFinite(r.profile.speedLimitKph) ? { speedLimitKph: r.profile.speedLimitKph } : {}),
+      },
     }));
   const roadUnder = new Map<string, number>();
   for (const entry of snap.roadUnder ?? []) {
