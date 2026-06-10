@@ -68,7 +68,7 @@ import {
   triggerCellAtWorldPosition,
 } from './spawn';
 import { authoredWorldFromRecord, AUTHORED_WORLD_STORE, loadAuthoredWorld, readAuthoredWorldRaw } from './authored';
-import { worldStream } from './stream';
+import { legacyGlobalPieces, pieceMutationMapName, piecesForMap, worldStream } from './stream';
 
 export {
   addSurfaceRegion,
@@ -125,8 +125,32 @@ export {
 export type { RespawnPoint, SaveStepResult, TriggerStepResult } from './spawn';
 export { authoredWorldFromRecord, AUTHORED_WORLD_STORE, loadAuthoredWorld, readAuthoredWorldRaw } from './authored';
 export type { AuthoredWorld } from './authored';
-export { worldStream } from './stream';
+export { legacyGlobalPieces, pieceMutationMapName, piecesForMap, worldStream } from './stream';
 export type { PiecePlacement, WorldEvent, WorldStreamState } from './stream';
+// buildings own their history (req_0512/req_0513): defs + instance references
+// on their own V20 stream; derived back into the one pieces view.
+export {
+  buildingDefFromPieces,
+  buildingMutationMapName,
+  buildingPieceInstanceId,
+  buildingPieceLocalIndex,
+  buildingPiecesForMap,
+  buildingsStream,
+  instancesForMap,
+  isBuildingsEvent,
+  mintBuildingDefId,
+  partitionBuildingSelection,
+  reconcileBuildingInstances,
+  withBuildingPieces,
+} from './buildings';
+export type {
+  BuildEditEvent,
+  BuildingCapture,
+  BuildingInstance,
+  BuildingSelectionPartition,
+  BuildingsEvent,
+  BuildingsStreamState,
+} from './buildings';
 
 // The V14/V17 ground-floor handle. One object, the whole substrate.
 export const GAME_WORLD = Object.freeze({

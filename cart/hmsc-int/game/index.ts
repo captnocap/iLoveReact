@@ -72,6 +72,30 @@ export type { CommandOutcome, CommandRegistry, CommandSpec, ScriptResult } from 
 // line was missing; consumers were reaching it only via GAME_COMMANDS' ctx).
 export { GAME_WORLD, legacyGlobalPieces, pieceMutationMapName, piecesForMap, worldStream } from './world';
 export type { GridCell, LandformPlacement, PiecePlacement, PlacedCell, WorldEvent, WorldGridState, WorldStreamState, WorldSurfaceRegion } from './world';
+// buildings own their history (req_0512/req_0513): the 'buildings' stream —
+// defs + instance references, derived back into the ONE pieces view.
+export {
+  buildingDefFromPieces,
+  buildingMutationMapName,
+  buildingPieceInstanceId,
+  buildingPieceLocalIndex,
+  buildingPiecesForMap,
+  buildingsStream,
+  instancesForMap,
+  isBuildingsEvent,
+  mintBuildingDefId,
+  partitionBuildingSelection,
+  reconcileBuildingInstances,
+  withBuildingPieces,
+} from './world';
+export type {
+  BuildEditEvent,
+  BuildingCapture,
+  BuildingInstance,
+  BuildingSelectionPartition,
+  BuildingsEvent,
+  BuildingsStreamState,
+} from './world';
 
 // The V24 building piece grammar: piece kinds + bake contracts, the WallEdit
 // vocabulary, the catalog (P2), prefabs (decompose to semantic pieces), and

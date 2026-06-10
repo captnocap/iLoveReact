@@ -235,6 +235,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/world/buildings.ts (buildings own their history)',
+      purpose: ['world_gen', 'building', 'persistence', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/world/buildings.ts',
+      description:
+        'req_0512→req_0513 slice 1 (2026-06-10), the USER\'S PROPOSAL made law: "give buildings their own branch of history rather than storing as a global state. and then the building itself can just say \'i am here at this position\'". A NEW V20 stream `buildings` (new feature = new stream; its own domain DB beside `world`): `defs` = BuildingDefs (the same BuildPrefabDef family) GLOBAL/shared across maps per the multi-map ruling; `instancesByMap` = per-map {id, defId, x, y, z, yawDegrees} references — V29\'s defs+placement-references shape applied at AUTHORING time, V28\'s buildings[]. Events: buildingDefined / buildingPlaced (materializer mints bld_<n> per map, replay-deterministic) / buildingMoved {id,x,z,yawDegrees?} — a whole-building move is ONE event, never the 358-event remove+place storm — / buildingRemoved (the def survives; a building\'s branch is its event subsequence over the one total log). COMPATIBILITY CONTRACT: world pieces are DERIVED — withBuildingPieces = loose pieces ⊕ stampPrefabPieces per instance with DETERMINISTIC ids (bld:<instId>:<localIdx>; stampId bld:<instId> = one flat-pad lift group), so EVERY consumer (IsoAuthor, F2/PlayRoute, footprints, colliders, compile bakeGameFile) keeps reading the ONE pieces view — the bake sees through instances (V24), no second render path. Per-instance derivation caches keep piece object identity across unrelated folds (renderer caches survive); a buildings-free map returns the base array identity (zero hot-path tax). Doors: buildingDefFromPieces (capture validates BEFORE commit — never half-commits), partitionBuildingSelection (whole/partial/loose; partial-building ops refused loudly until slice 2), reconcileBuildingInstances (Ctrl+Z appends REVERSE events on the branch — V20: shared history is never rewound; pose reconstructed exactly, rotation included), buildingMutationMapName (the pieceMutationMapName twin). IsoAuthor: ⌂+ promotes a selection (buildingDefined+buildingPlaced+remove originals, ONE batch, visually seamless), the tower tool births a building, whole-instance move/clone/delete emit single building events; the shell routes BuildEditEvent by kind to the right channel (isBuildingsEvent). Deferred: slice 2 piece-scoped building edits (FacePainter paint on a promoted building currently no-ops), slice 3 per-building timeline UI, slice 4 compile consuming instances natively (V29 references). 15 P4 meaning-tests green (buildings.test.ts).',
+      dependsOn: ['game/world/stream.ts (the world stream)', 'game/build (the V24 grammar)', 'data/index.ts (the V20 store)', 'editors/sessions.ts (route-scoped session history)'],
+      status: 'live',
+    },
+    {
       name: 'editors/tunables.ts (THE P2 tunables registry)',
       purpose: ['maintenance', 'persistence', 'ui'],
       kind: 'module',

@@ -119,7 +119,7 @@ test('umbrella manifest routes streams to separate domain databases', () => {
   assertEqual(manifest.domains.world.path, 'domains/world', 'world domain is located by the master manifest');
   assertEqual(manifest.domains.items.path, 'domains/items', 'items domain is located by the master manifest');
   assertEqual(Object.keys(manifest.domains).sort().join(','),
-    'activities,assist3d,characters,clothing-variants,cutout,items,materials,missions,sessions,tuning,vehicles,voxels,world',
+    'activities,assist3d,buildings,characters,clothing-variants,cutout,items,materials,missions,sessions,tuning,vehicles,voxels,world',
     'the master manifest predeclares every editor stream domain');
   assert(written.some((p) => p.endsWith('domains/world/snapshots/world.snapshot.json')), 'world snapshot lands under the world domain');
   assert(written.some((p) => p.endsWith('domains/items/snapshots/items.snapshot.json')), 'items snapshot lands under the items domain');

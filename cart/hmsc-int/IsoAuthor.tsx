@@ -16,8 +16,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
-import { GAME_BUILD, GAME_NATIVE_CAMERA } from './game';
-import type { BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
+import { GAME_BUILD, GAME_NATIVE_CAMERA, buildingDefFromPieces, buildingPieceInstanceId, partitionBuildingSelection } from './game';
+import type { BuildEditEvent, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingInstance, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
 import { resolveSnapTarget, modulePitch, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes } from './editors/build/pieceMeshes';
 import { perfMs, warnPlaceFreeze } from './editors/build/placeFreezeProbe';
@@ -111,14 +111,20 @@ export interface IsoAuthorProps {
   // The world to draw UNDER the pieces (terrain + props), same GameState the inspect
   // pane renders — preview==game.
   state: GameState;
-  // The standing pieces (the cart's materialized worldStream truth) + the commit the
-  // cart already funnels F2 placements through. This pane is just another caller.
+  // The standing pieces (the cart's materialized worldStream truth ⊕ derived
+  // building stamps) + the commit the cart already funnels F2 placements
+  // through. This pane is just another caller. Events may target the world OR
+  // the buildings channel (req_0513) — the shell routes by kind.
   pieces: readonly PlacedBuildPiece[];
-  onCommit: (event: WorldEvent, label: string) => void;
+  onCommit: (event: BuildEditEvent, label: string) => void;
   // Batch commit: many events as ONE undoable action with ONE store snapshot. Bulk ops
   // (move/clone/delete a whole building) use this so they don't freeze the editor with
   // a snapshot per piece. Absent (older host) → the pane falls back to per-event onCommit.
-  onCommitMany?: (items: ReadonlyArray<{ event: WorldEvent; label: string }>) => void;
+  onCommitMany?: (items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => void;
+  // This map's building INSTANCES (req_0513): id → {defId, position, yaw}. A
+  // whole-instance selection moves/clones/deletes as ONE event on the
+  // building's own history branch instead of a remove+place storm.
+  buildings?: Readonly<Record<string, BuildingInstance>>;
   // The FULL prefab list — built-ins AND the user-captured (stream) prefabs the cart
   // already merges for F2. The rail shows these; absent = built-ins only.
   prefabs?: readonly BuildPrefabDef[];
@@ -135,11 +141,15 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // Commit many events as ONE undoable action (one store snapshot) when the host offers
   // it; else fall back to per-event onCommit. Move/clone/delete-building route through
   // this so a big building doesn't freeze on a snapshot-per-piece.
-  const commitBatch = useCallback((items: ReadonlyArray<{ event: WorldEvent; label: string }>) => {
+  const commitBatch = useCallback((items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => {
     if (!items.length) return;
     if (props.onCommitMany) props.onCommitMany(items);
     else for (const it of items) onCommit(it.event, it.label);
   }, [props.onCommitMany, onCommit]);
+  // Live building instances, read at event time through a ref (the Pressable
+  // stale-closure discipline every handler here follows).
+  const buildingsRef = useRef(props.buildings);
+  buildingsRef.current = props.buildings;
   const prefabs = props.prefabs ?? GAME_BUILD.prefabs.ids.map((id) => GAME_BUILD.prefabs.get(id));
   // Prefab def by id (built-in + stream), for the ghost/stamp/label — a stream prefab
   // isn't in GAME_BUILD.prefabs, so look it up here. A ref too: placeAt runs from an
@@ -303,6 +313,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // A pieces change from ANY source clears the overlays (undo, co-session);
   // the deferred batch still applies, so the world stays consistent.
   const [pendingMove, setPendingMove] = useState<ReadonlySet<string> | null>(null);
+  // The selection's lifted pieces at move-commit time: the solid confirm ghost
+  // renders from this snapshot. A moved BUILDING keeps its derived ids
+  // (req_0513), so the live displayPieces already hold the NEW pose during the
+  // catch-up frame — rendering the ghost from them would double-shift it.
+  const pendingMoveSnapRef = useRef<readonly PlacedBuildPiece[]>([]);
   const [pendingPaint, setPendingPaint] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<ReadonlySet<string> | null>(null);
   const pendingAny = pendingMove !== null || pendingPaint || pendingDelete !== null;
@@ -460,29 +475,36 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   }, [placeGroundAt]);
   const computePaintRef = useRef(computePaint);
   computePaintRef.current = computePaint;
-  // Commit a tower (req_0478): the full hollow shell — perimeter walls stacked
-  // towerFloors high + a flat roof cap over the footprint — as ONE stamp (one
-  // undo step, one flat-pad lift group, one building under select/move/clone).
+  // Commit a tower (req_0478 → req_0513): the full hollow shell — perimeter
+  // walls stacked towerFloors high + a flat roof cap. A tower BIRTHS A
+  // BUILDING: instead of N piecePlaced events it commits ONE def + ONE
+  // instance on the buildings channel — the building owns its history from
+  // its first moment, and a later move is one buildingMoved event.
   const commitTower = (start: { x: number; z: number }, end: { x: number; z: number }) => {
     const floors = Math.max(TOWER_MIN_FLOORS, Math.min(TOWER_MAX_FLOORS, towerFloorsRef.current));
     const ring = towerRing(start, end);
     const baseY = placeGroundAt(((ring.x0 + ring.x1 + 1) / 2) * ring.pitch, ((ring.z0 + ring.z1 + 1) / 2) * ring.pitch);
     const wallH = GAME_BUILD.catalog.get(TOWER_WALL_ID).size.heightMeters;
-    const stampId = `tower-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
-    const placements: (Paint & { stampId: string })[] = [];
+    const placements: Paint[] = [];
     for (let f = 0; f < floors; f += 1) {
-      for (const c of ring.cells) placements.push({ pieceId: TOWER_WALL_ID, x: c.x, y: baseY + f * wallH, z: c.z, yawDegrees: c.yaw, stampId });
+      for (const c of ring.cells) placements.push({ pieceId: TOWER_WALL_ID, x: c.x, y: baseY + f * wallH, z: c.z, yawDegrees: c.yaw });
     }
     for (let cx = ring.x0; cx <= ring.x1; cx += 1) {
       for (let cz = ring.z0; cz <= ring.z1; cz += 1) {
-        placements.push({ pieceId: TOWER_ROOF_ID, x: ring.center(cx), y: baseY + floors * wallH, z: ring.center(cz), yawDegrees: 0, stampId });
+        placements.push({ pieceId: TOWER_ROOF_ID, x: ring.center(cx), y: baseY + floors * wallH, z: ring.center(cz), yawDegrees: 0 });
       }
     }
     const valid = placements.filter((p) => GAME_BUILD.placed.validatePlacement(p).length === 0);
     if (!valid.length) return;
     const w = ring.x1 - ring.x0 + 1;
     const d = ring.z1 - ring.z0 + 1;
-    commitBatch(valid.map((p) => ({ event: { kind: 'piecePlaced', placement: p } as WorldEvent, label: `tower ${w}×${d}×${floors}F` })));
+    const label = `Tower ${w}×${d}×${floors}F`;
+    const capture = buildingDefFromPieces(label, valid);
+    if (!capture) return;
+    commitBatch([
+      { event: { kind: 'buildingDefined', def: capture.def } as BuildEditEvent, label: `defined ${label}` },
+      { event: { kind: 'buildingPlaced', defId: capture.def.id, x: capture.origin.x, y: capture.origin.y, z: capture.origin.z, yawDegrees: 0 } as BuildEditEvent, label: `tower ${w}×${d}×${floors}F` },
+    ]);
   };
 
   // Pointer. A DRAG rotates the view (yaw from horizontal motion — WASD does the
@@ -679,33 +701,94 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     setSelectedIds(whole ? GAME_BUILD.placed.connected(hit.piece.id, displayPiecesRef.current) : new Set([hit.piece.id]));
   };
   // Remove every selected piece (one pieceRemoved each, the SAME event F2's X
-  // commits). Optimistic (req_0511): the pieces vanish from the render THIS
-  // frame; the store batch lands a tick later behind the confirming pill.
+  // commits). A whole-building selection (req_0513) deletes as ONE
+  // buildingRemoved on the building's own branch; a PARTIAL building
+  // selection is skipped loudly — piece-scoped building edits are slice 2,
+  // and a half-deleted instance must never be faked with no-op events.
+  // Optimistic (req_0511): the pieces vanish from the render THIS frame; the
+  // store batch lands a tick later behind the confirming pill.
   const deleteSelected = () => {
-    const ids = [...selectedIdsRef.current];
-    if (!ids.length) return;
-    setPendingDelete(new Set(ids));
+    const idSet = selectedIdsRef.current;
+    if (!idSet.size) return;
+    const { wholeInstances, partialInstances, loosePieceIds } = partitionBuildingSelection(idSet, piecesRef.current);
+    if (partialInstances.length) console.warn(`[iso-author] delete skipped ${partialInstances.length} partially-selected building(s) — select the whole building (▦ or shift-click)`);
+    const events: Array<{ event: BuildEditEvent; label: string }> = [
+      ...wholeInstances.map((instId) => ({ event: { kind: 'buildingRemoved', id: instId } as BuildEditEvent, label: `removed building ${instId}` })),
+      ...loosePieceIds.map((id) => ({ event: { kind: 'pieceRemoved', id } as BuildEditEvent, label: `removed ${id}` })),
+    ];
+    if (!events.length) return;
+    const whole = new Set(wholeInstances);
+    const hide = new Set(loosePieceIds);
+    for (const p of piecesRef.current) {
+      const inst = buildingPieceInstanceId(p.id);
+      if (inst && whole.has(inst)) hide.add(p.id);
+    }
+    setPendingDelete(hide);
     setSelectedIds(new Set());
-    commitPerfRef.current = { t0: perfMs(), label: `delete (${ids.length} pieces)` };
-    setTimeout(() => {
-      commitBatch(ids.map((id) => ({ event: { kind: 'pieceRemoved', id } as WorldEvent, label: `removed ${id}` })));
-    }, 0);
+    commitPerfRef.current = { t0: perfMs(), label: `delete (${hide.size} pieces, ${wholeInstances.length} buildings)` };
+    setTimeout(() => { commitBatch(events); }, 0);
   };
-  // Duplicate the selection beside itself: re-emit piecePlaced for each piece, shifted
-  // clear along +x by the selection's own width (the stream mints fresh ids).
+  // Duplicate the selection beside itself, shifted clear along +x by the
+  // selection's own width. A whole BUILDING clones as ONE buildingPlaced of
+  // the same def (req_0513 — the copy is its own instance, its own history
+  // branch); everything else re-emits piecePlaced (the stream mints fresh ids).
   const cloneSelected = () => {
     const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
     if (!sel.length) return;
     let minX = Infinity, maxX = -Infinity;
     for (const p of sel) { const b = GAME_BUILD.placed.bounds(p); minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX); }
     const dx = (maxX - minX) + state.world.cellSizeMeters;
+    const { wholeInstances } = partitionBuildingSelection(selectedIdsRef.current, piecesRef.current);
+    const whole = new Set(wholeInstances);
+    const events: Array<{ event: BuildEditEvent; label: string }> = [];
+    for (const instId of wholeInstances) {
+      const inst = buildingsRef.current?.[instId];
+      if (!inst) continue;
+      events.push({ event: { kind: 'buildingPlaced', defId: inst.defId, x: inst.x + dx, y: inst.y, z: inst.z, yawDegrees: inst.yawDegrees }, label: `cloned building ${instId}` });
+    }
     // Spread the whole piece (minus the stream-minted id) so each copy keeps its per-face
     // skin/materials and any wall edit — only the X position shifts. Give the WHOLE clone
     // one fresh stampId: that makes the copy its own independent building (so it gets the
     // flat-pad terrain lift as a unit) instead of a phantom member of the original's stamp.
     // One batch → one undo step, one snapshot.
     const cloneStampId = `clone-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
-    commitBatch(sel.map((p) => { const { id, ...rest } = p; return { event: { kind: 'piecePlaced', placement: { ...rest, x: p.x + dx, stampId: cloneStampId } } as WorldEvent, label: `cloned ${p.pieceId}` }; }));
+    for (const p of sel) {
+      const inst = buildingPieceInstanceId(p.id);
+      if (inst && whole.has(inst)) continue; // cloned above as one instance
+      const { id, ...rest } = p;
+      events.push({ event: { kind: 'piecePlaced', placement: { ...rest, x: p.x + dx, stampId: cloneStampId } }, label: `cloned ${p.pieceId}` });
+    }
+    commitBatch(events);
+  };
+  // PROMOTE (req_0513, slice 1): capture the selected loose pieces into a
+  // BuildingDef + ONE placed instance, then remove the originals — one batch,
+  // one undo step. The derived stamp reproduces the pieces exactly (same
+  // positions, skins, edits), so the swap is visually seamless; from here on
+  // the building owns its history and a move is ONE event.
+  const promoteSelectionToBuilding = () => {
+    const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
+    if (!sel.length) return;
+    if (sel.some((p) => buildingPieceInstanceId(p.id) !== null)) {
+      console.warn('[iso-author] promote skipped — the selection already contains a building');
+      return;
+    }
+    const count = Object.keys(buildingsRef.current ?? {}).length;
+    const capture = buildingDefFromPieces(`Building ${count + 1}`, sel);
+    if (!capture) {
+      console.warn('[iso-author] promote refused — the capture would not validate as a building def');
+      return;
+    }
+    commitPerfRef.current = { t0: perfMs(), label: `promote (${sel.length} pieces)` };
+    setSelectedIds(new Set());
+    // No optimistic hide: the instance's derived pieces land at the originals'
+    // exact poses, so the one-fold swap is invisible.
+    setTimeout(() => {
+      commitBatch([
+        { event: { kind: 'buildingDefined', def: capture.def }, label: `defined ${capture.def.label}` },
+        { event: { kind: 'buildingPlaced', defId: capture.def.id, x: capture.origin.x, y: capture.origin.y, z: capture.origin.z, yawDegrees: 0 }, label: `promoted ${sel.length} pieces → ${capture.def.label}` },
+        ...sel.map((p) => ({ event: { kind: 'pieceRemoved', id: p.id } as BuildEditEvent, label: `promoted ${p.id}` })),
+      ]);
+    }, 0);
   };
   // The default name offered in the save prompt: the next free "Custom N".
   const nextCustomName = () => `Custom ${prefabs.filter((d) => /^Custom\b/.test(d.label)).length + 1}`;
@@ -724,35 +807,58 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     onCommit({ kind: 'prefabDefined', def }, `saved prefab ${label}`);
   };
   // Commit a finished move drag: shift every selected piece by the dragged world delta.
-  // There's no pieceMoved event (that'd touch the shared stream + F2 + compile) — a move
-  // IS a remove of the old id + a place at the new spot, the SAME two events delete/clone
-  // already emit. Validate all destinations FIRST (intrinsic checks; not collision) and
-  // abort the whole move if any is refused, so a building never lands half-shifted. The
-  // selection re-keys to fresh stream ids, so the old highlight just clears.
+  // A whole BUILDING moves as ONE buildingMoved event on its own history
+  // branch (req_0513 — the user's "i am here at this position": no 358-event
+  // remove+place storm, and the derived pieces keep their deterministic ids).
+  // LOOSE pieces keep the remove+place pair (no pieceMoved event — that'd
+  // touch the shared stream + F2 + compile). Validate all loose destinations
+  // FIRST (intrinsic checks; not collision) and abort the whole move if any is
+  // refused, so a building never lands half-shifted. A PARTIALLY-selected
+  // building aborts the move loudly: tearing pieces off an instance is a
+  // slice-2 edit, and faking it with no-op events would corrupt the world.
   const commitMove = () => {
     const delta = moveDeltaRef.current;
     if (!delta || (Math.abs(delta.dx) < 1e-3 && Math.abs(delta.dz) < 1e-3)) { setMoveDelta(null); return; }
     const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
     if (!sel.length) { setMoveDelta(null); return; }
+    const { wholeInstances, partialInstances, loosePieceIds } = partitionBuildingSelection(selectedIdsRef.current, piecesRef.current);
+    if (partialInstances.length) {
+      console.warn(`[iso-author] move aborted — ${partialInstances.length} building(s) only partially selected; select the whole building (▦ or shift-click)`);
+      setMoveDelta(null);
+      return;
+    }
+    const events: Array<{ event: BuildEditEvent; label: string }> = [];
+    for (const instId of wholeInstances) {
+      const inst = buildingsRef.current?.[instId];
+      if (!inst) { setMoveDelta(null); return; } // instance vanished under us — abort whole
+      events.push({ event: { kind: 'buildingMoved', id: instId, x: inst.x + delta.dx, z: inst.z + delta.dz }, label: `moved building ${instId}` });
+    }
     // Spread the WHOLE piece (minus the stream-minted id) into the new placement so the
-    // moved instance keeps its per-face skin/materials, wall edit, and prefab grouping —
+    // moved piece keeps its per-face skin/materials, wall edit, and prefab grouping —
     // only x/z shift. (The earlier slice copied just pieceId/pose, which stripped every
     // face material on move.)
-    const moves = sel.map((p) => { const { id, ...rest } = p; return { id, placement: { ...rest, x: p.x + delta.dx, z: p.z + delta.dz } }; });
+    const looseSet = new Set(loosePieceIds);
+    const loose = sel.filter((p) => looseSet.has(p.id));
+    const moves = loose.map((p) => { const { id, ...rest } = p; return { id, placement: { ...rest, x: p.x + delta.dx, z: p.z + delta.dz } }; });
     if (moves.some((m) => GAME_BUILD.placed.validatePlacement(m.placement).length > 0)) { setMoveDelta(null); return; }
     // OPTIMISTIC (req_0511): release costs nothing — the move ghost (already
     // mounted) turns SOLID at the new spot, the originals hide, and the store
     // batch runs a tick later. moveDelta intentionally STAYS set so the ghost
     // keeps rendering; the [pieces] effect clears it when the world catches up.
-    commitPerfRef.current = { t0: perfMs(), label: `move commit (${sel.length} pieces)` };
+    // The ghost renders from a SNAPSHOT of the selection (a moved building
+    // keeps its derived ids, so the live displayPieces would double-shift it
+    // for the catch-up frame).
+    commitPerfRef.current = { t0: perfMs(), label: `move commit (${sel.length} pieces, ${wholeInstances.length} buildings)` };
+    pendingMoveSnapRef.current = displayPiecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
     setPendingMove(new Set(sel.map((p) => p.id)));
     setSelectedIds(new Set());
-    // One batch: all removes then all places (the SAME two events delete/clone emit) →
-    // one undo step, one store snapshot, so moving a whole building doesn't freeze.
+    // One batch: building moves + (all removes then all places) → one undo
+    // step, one store snapshot, so moving a whole building doesn't freeze.
     setTimeout(() => {
       commitBatch([
-        ...moves.map((m) => ({ event: { kind: 'pieceRemoved', id: m.id } as WorldEvent, label: `moved ${m.id}` })),
-        ...moves.map((m) => ({ event: { kind: 'piecePlaced', placement: m.placement } as WorldEvent, label: `moved ${m.placement.pieceId}` })),
+        ...events,
+        ...moves.map((m) => ({ event: { kind: 'pieceRemoved', id: m.id } as BuildEditEvent, label: `moved ${m.id}` })),
+        ...moves.map((m) => ({ event: { kind: 'piecePlaced', placement: m.placement } as BuildEditEvent, label: `moved ${m.placement.pieceId}` })),
       ]);
     }, 0);
   };
@@ -924,8 +1030,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (!moveDelta) return null;
     const ids = pendingMove ?? selectedIds;
     // Preview from the DRAWN (terrain-lifted) pieces so the ghost rides the terrain where
-    // the building currently stands; the committed move re-lifts at the drop spot.
-    const sel = displayPieces.filter((p) => ids.has(p.id));
+    // the building currently stands; the committed move re-lifts at the drop spot. After
+    // release the ghost reads the commit-time SNAPSHOT (see pendingMoveSnapRef).
+    const sel = pendingMove !== null ? pendingMoveSnapRef.current : displayPieces.filter((p) => ids.has(p.id));
     if (!sel.length) return null;
     // Carry skin + edit so the solid pending look matches the real building.
     const moved = sel.map((p) => ({ pieceId: p.pieceId, x: p.x + moveDelta.dx, y: p.y, z: p.z + moveDelta.dz, yawDegrees: p.yawDegrees, skin: p.skin, edit: p.edit }));
@@ -1091,6 +1198,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         {selectedIds.size > 0 ? (
           <>
             <IsoBtn label="⊞" title="Save selection as a prefab" onPress={() => setPrefabNameDraft(nextCustomName())} />
+            <IsoBtn label="⌂+" title="Promote selection to a BUILDING — it owns its history; moves become one event" onPress={promoteSelectionToBuilding} />
             <IsoBtn label="⧉" title="Clone selection" onPress={cloneSelected} />
             <IsoBtn label="✕" title="Delete selection (Del)" onPress={deleteSelected} />
           </>

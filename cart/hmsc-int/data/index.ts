@@ -178,6 +178,7 @@ const STORE_DOMAINS_DIR = 'domains';
 export const EDITOR_STORE_STREAMS = Object.freeze([
   'activities',
   'assist3d',
+  'buildings',
   'characters',
   'clothing-variants',
   'cutout',

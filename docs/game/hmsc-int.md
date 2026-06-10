@@ -630,6 +630,36 @@ capture (`prefabFromPieces`/`mintPrefabId`), and the strict authoring
 boundary (`validatePlacement` — the stream materializer stays tolerant).
 Numbers in `PLACED_TUNING` (P2). 21 P4 meaning-tests green (`placed.test.ts`).
 
+**Buildings own their history (`game/world/buildings.ts`, req_0512→req_0513,
+2026-06-10):** the USER'S PROPOSAL made law — "give buildings their own
+branch of history rather than storing as a global state. and then the
+building itself can just say 'i am here at this position'". A NEW V20 stream
+`buildings` (V20: new feature = new stream; its own domain DB) holds
+`defs` (BuildingDefs = the same `BuildPrefabDef` family, GLOBAL/shared
+across maps per the multi-map ruling) + `instancesByMap` (per-map
+`{id, defId, x, y, z, yawDegrees}` references — V29's defs+references shape
+at AUTHORING time; V28's `buildings[]`). Events: `buildingDefined` /
+`buildingPlaced` (materializer mints `bld_<n>` per map, replay-deterministic)
+/ `buildingMoved {id,x,z,yawDegrees?}` — a whole-building move is ONE event,
+never a remove+place storm — / `buildingRemoved` (the def survives; a
+building's branch is its event subsequence over the one total log). THE
+COMPATIBILITY CONTRACT: world pieces are DERIVED — `withBuildingPieces` =
+loose pieces ⊕ `stampPrefabPieces` per instance with DETERMINISTIC ids
+(`bld:<instId>:<localIdx>`, stampId `bld:<instId>` = one flat-pad lift
+group), so every consumer (iso pane, F2/PlayRoute, footprints, colliders,
+compile `bakeGameFile`) keeps reading the ONE pieces view; the bake sees
+through instances (V24). Per-instance derivation caches preserve piece
+object identity across unrelated folds (renderer caches survive). Authoring
+doors: `buildingDefFromPieces` (capture validates BEFORE commit),
+`partitionBuildingSelection` (whole/partial/loose — partial building ops are
+refused loudly, slice 2), `reconcileBuildingInstances` (Ctrl+Z appends
+REVERSE events on the branch — V20: history is never rewound). IsoAuthor:
+the ⌂+ button promotes a selection (define+place+remove originals, ONE
+batch), the tower tool births a building, whole-instance move/clone/delete
+emit single building events. Slices 2–4 (piece-scoped building edits,
+per-building timeline UI, compile consuming instances natively) deferred.
+15 P4 meaning-tests green (`buildings.test.ts`).
+
 ## editors/build/ — Creative Build mode, /build (V24, 2026-06-05)
 
 The user builds the map WHILE PLAYING (BUILDMODE-0605): Fortnite-Creative

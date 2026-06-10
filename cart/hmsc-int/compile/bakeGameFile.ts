@@ -30,7 +30,7 @@ import { sha256Hex } from '@reactjit/workspace/sha256';
 import { lastPointerPath, sessionPathFor } from '@reactjit/workspace';
 import { readFile } from '@reactjit/hooks/fs';
 import { openStreamStore } from '../data';
-import { worldStream, piecesForMap } from '@game';
+import { buildingsStream, worldStream, piecesForMap, withBuildingPieces } from '@game';
 import type { PlacedBuildPiece } from '@game';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './playerModel';
 
@@ -69,8 +69,23 @@ function readPlacedPieces(stem: string | null): PlacedBuildPiece[] {
   try {
     const store = openStreamStore(EDITOR_DATA_ROOT, 'world');
     const world = store.defineStream(worldStream);
-    const pieces = piecesForMap(world.state(), stem ?? '', { legacyMapName: null });
-    warn(`[bake] read ${pieces.length} placed pieces (scoped to map=${stem ?? '<none>'})`);
+    // buildings (req_0513): the compile SEES THROUGH instances — derived
+    // stamps merge into the same pieces view (V24's bake contract; native
+    // instance consumption is slice 4 / V29 references). Tolerant: an older
+    // store with no buildings domain bakes loose pieces alone.
+    let buildingPieces: PlacedBuildPiece[] = [];
+    try {
+      const bstore = openStreamStore(EDITOR_DATA_ROOT, 'buildings');
+      const buildings = bstore.defineStream(buildingsStream);
+      buildingPieces = withBuildingPieces([], buildings.state(), stem ?? '');
+    } catch (error: any) {
+      warn(`[bake] no buildings stream (ok on older stores): ${String(error?.message ?? error)}`);
+    }
+    const pieces = [
+      ...piecesForMap(world.state(), stem ?? '', { legacyMapName: null }),
+      ...buildingPieces,
+    ];
+    warn(`[bake] read ${pieces.length} placed pieces (${buildingPieces.length} from buildings; scoped to map=${stem ?? '<none>'})`);
     return pieces;
   } catch (error: any) {
     warn(`[bake] could not read placed pieces from the world stream: ${String(error?.message ?? error)}`);

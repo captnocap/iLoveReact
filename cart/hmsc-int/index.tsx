@@ -52,6 +52,7 @@ import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
 import { editorTunables, tuningStream } from './editors/tunables';
 import { GAME_BUILD, pieceMutationMapName, piecesForMap, worldStream, type BuildPrefabDef, type PlacedBuildPiece, type WorldEvent, type WorldStreamState } from './game';
+import { buildingMutationMapName, buildingPieceInstanceId, buildingsStream, instancesForMap, isBuildingsEvent, partitionBuildingSelection, reconcileBuildingInstances, withBuildingPieces, type BuildEditEvent, type BuildingsEvent, type BuildingsStreamState } from './game';
 import { graphToBuildWorld, mapBuildFootprints, mapBuildPlaceable } from './mapBuildPlacements';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
@@ -169,6 +170,7 @@ const DEFAULT_BRUSH: BrushSettings = {
   rampWide: 4,
   rampLong: 12,
   rampAngle: 0,
+  smoothStrength: 0.45,
 };
 
 function clampNum(n: unknown, lo: number, hi: number, fallback: number): number {
@@ -188,12 +190,13 @@ function normalizeBrushSettings(value: Partial<BrushSettings> | undefined): Brus
     centerZ: clampNum(v.centerZ, -HEIGHT_LIMIT, HEIGHT_LIMIT, DEFAULT_BRUSH.centerZ),
     profile: profile === 'flat' || profile === 'dome' ? profile : DEFAULT_BRUSH.profile,
     shape: shape === 'square' || shape === 'diamond' ? shape : DEFAULT_BRUSH.shape,
-    heightMode: v.heightMode === 'ramp' ? 'ramp' : DEFAULT_BRUSH.heightMode,
+    heightMode: v.heightMode === 'ramp' || v.heightMode === 'slope' || v.heightMode === 'smooth' ? v.heightMode : DEFAULT_BRUSH.heightMode,
     rampMin: clampNum(v.rampMin, -HEIGHT_LIMIT, HEIGHT_LIMIT, DEFAULT_BRUSH.rampMin),
     rampMax: clampNum(v.rampMax, -HEIGHT_LIMIT, HEIGHT_LIMIT, DEFAULT_BRUSH.rampMax),
     rampWide: clampNum(v.rampWide, 1, 120, DEFAULT_BRUSH.rampWide),
     rampLong: clampNum(v.rampLong, 1, 120, DEFAULT_BRUSH.rampLong),
     rampAngle: clampNum(v.rampAngle, 0, 359, DEFAULT_BRUSH.rampAngle),
+    smoothStrength: clampNum(v.smoothStrength, 0.05, 1, DEFAULT_BRUSH.smoothStrength),
   };
 }
 
@@ -533,6 +536,26 @@ function EditorShell() {
   }, [worldChannel]);
   useEffect(() => () => worldSession?.close(), [worldSession]);
 
+  // ── The buildings channel (req_0512/req_0513): buildings OWN their history.
+  // A second concern stream beside 'world' (V20: new feature = new stream) —
+  // defs + instance references whose derived pieces merge into buildPieces
+  // below. Building events route here; loose-piece events stay on 'world'.
+  const buildingsChannel = useMemo(() => {
+    try {
+      return editorChannel(buildingsStream);
+    } catch {
+      return null;
+    }
+  }, []);
+  const buildingsSession = useMemo(() => {
+    try {
+      return buildingsChannel ? editorSessions().open('/', buildingsChannel) : null;
+    } catch {
+      return null;
+    }
+  }, [buildingsChannel]);
+  useEffect(() => () => buildingsSession?.close(), [buildingsSession]);
+
   // ── The P2 tunables boot fold (editors/tunables.ts) ───────────────────────────
   // Persisted knob edits (the V20 'tuning' stream's override map) fold back over
   // the registered code defaults once per process, at shell mount — so a value
@@ -585,6 +608,7 @@ function EditorShell() {
   }, [logEvent]);
 
   const streamState: WorldStreamState | null = worldChannel ? worldChannel.state() : null;
+  const buildingsState: BuildingsStreamState | null = buildingsChannel ? buildingsChannel.state() : null;
   void mapBuildRev; // revision tick: forces this component to re-read worldChannel.state().
   const buildingPrefabs: BuildPrefabDef[] = (() => {
     const removed = new Set(streamState?.removedPrefabs ?? []);
@@ -593,7 +617,14 @@ function EditorShell() {
     for (const def of Object.values(streamState?.prefabs ?? {})) merged[def.id] = def;
     return Object.values(merged).filter((def) => !removed.has(def.id)).sort((a, b) => a.label.localeCompare(b.label));
   })();
-  const buildPieces = piecesForMap(streamState, ws.stem, { legacyMapName: legacyPieceMapName });
+  // The ONE pieces view (req_0513): loose world pieces ⊕ derived building
+  // stamps. Memoized so the merged array identity is stable between renders —
+  // pieceGridOf/liftToTerrain/mapBuildFootprints all cache on array identity.
+  const buildPieces = useMemo(
+    () => withBuildingPieces(piecesForMap(streamState, ws.stem, { legacyMapName: legacyPieceMapName }), buildingsState, ws.stem),
+    [streamState, buildingsState, ws.stem, legacyPieceMapName],
+  );
+  const buildingInstances = useMemo(() => instancesForMap(buildingsState, ws.stem), [buildingsState, ws.stem]);
   buildPiecesRef.current = buildPieces; // feed the current pieces into buildPayload's snapshot
   const buildFootprints = mapBuildFootprints(buildPieces);
 
@@ -720,7 +751,7 @@ function EditorShell() {
   // Tag a build event with the map it belongs to (places/stamps go to the active
   // stem; removes/edits resolve the owning map from the existing piece). Shared by the
   // single and batch commit paths so they scope identically.
-  const scopeBuildEvent = useCallback((event: WorldEvent): WorldEvent => {
+  const scopeBuildEvent = useCallback((event: BuildEditEvent): BuildEditEvent => {
     switch (event.kind) {
       case 'piecePlaced':
       case 'prefabStamped':
@@ -731,34 +762,63 @@ function EditorShell() {
         const mapName = pieceMutationMapName(streamState, ws.stem, legacyPieceMapName, event.id);
         return mapName ? ({ ...event, mapName } as WorldEvent) : event;
       }
+      // buildings (req_0513): instances are per-map; defs are shared globals
+      // (buildingDefined carries no map scope by design).
+      case 'buildingPlaced':
+        return { ...event, mapName: ws.stem } as BuildingsEvent;
+      case 'buildingMoved':
+      case 'buildingRemoved': {
+        const mapName = buildingMutationMapName(buildingsState, ws.stem, event.id);
+        return mapName ? ({ ...event, mapName } as BuildingsEvent) : event;
+      }
       default:
         return event;
     }
-  }, [ws.stem, streamState, legacyPieceMapName]);
+  }, [ws.stem, streamState, buildingsState, legacyPieceMapName]);
 
-  const commitBuildEvent = useCallback((event: WorldEvent, label: string) => {
-    if (!worldSession) return false;
-    snapshotForUndo(); // record the pre-edit state so Ctrl+Z reverts this build edit
-    worldSession.commit(scopeBuildEvent(event), label);
+  const commitBuildEvent = useCallback((event: BuildEditEvent, label: string) => {
+    const scoped = scopeBuildEvent(event);
+    if (isBuildingsEvent(scoped)) {
+      if (!buildingsSession) return false;
+      snapshotForUndo();
+      buildingsSession.commit(scoped, label);
+    } else {
+      if (!worldSession) return false;
+      snapshotForUndo(); // record the pre-edit state so Ctrl+Z reverts this build edit
+      worldSession.commit(scoped, label);
+    }
     setMapBuildRev((r) => r + 1);
     return true;
-  }, [worldSession, scopeBuildEvent, snapshotForUndo]);
+  }, [worldSession, buildingsSession, scopeBuildEvent, snapshotForUndo]);
 
   // MANY build events as ONE undoable action: snapshot once, append every event with a
   // SINGLE store snapshot pass (RouteSession.commitMany), bump once. Without this a
   // bulk op (move/clone/delete a 352-piece building = hundreds of events) re-materialized
   // the whole store per event and froze the editor — and undo would step one piece at a
   // time. Falls back to a per-event loop if the session predates commitMany.
-  const commitBuildEvents = useCallback((items: ReadonlyArray<{ event: WorldEvent; label: string }>) => {
-    if (!worldSession || !items.length) return false;
-    snapshotForUndo();
+  // Building events route to their OWN channel (req_0513): the batch splits by
+  // stream, buildings first (a promote defines/places before its loose pieces
+  // are removed), and the deferred snapshot pass coalesces both into one flush.
+  const commitBuildEvents = useCallback((items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => {
+    if (!items.length) return false;
     const scoped = items.map((it) => ({ event: scopeBuildEvent(it.event), label: it.label }));
-    const many = (worldSession as { commitMany?: (xs: typeof scoped) => unknown }).commitMany;
-    if (typeof many === 'function') many.call(worldSession, scoped);
-    else for (const s of scoped) worldSession.commit(s.event, s.label);
+    const bld = scoped.filter((it): it is { event: BuildingsEvent; label: string } => isBuildingsEvent(it.event));
+    const wrl = scoped.filter((it): it is { event: WorldEvent; label: string } => !isBuildingsEvent(it.event));
+    if ((bld.length > 0 && !buildingsSession) || (wrl.length > 0 && !worldSession)) return false;
+    snapshotForUndo();
+    if (bld.length > 0 && buildingsSession) {
+      const many = (buildingsSession as { commitMany?: (xs: typeof bld) => unknown }).commitMany;
+      if (typeof many === 'function') many.call(buildingsSession, bld);
+      else for (const s of bld) buildingsSession.commit(s.event, s.label);
+    }
+    if (wrl.length > 0 && worldSession) {
+      const many = (worldSession as { commitMany?: (xs: typeof wrl) => unknown }).commitMany;
+      if (typeof many === 'function') many.call(worldSession, wrl);
+      else for (const s of wrl) worldSession.commit(s.event, s.label);
+    }
     setMapBuildRev((r) => r + 1);
     return true;
-  }, [worldSession, scopeBuildEvent, snapshotForUndo]);
+  }, [worldSession, buildingsSession, scopeBuildEvent, snapshotForUndo]);
 
   // The apply-side of build undo, refreshed each render so applyPayload (empty-dep) can
   // call the latest through reconcileBuildUndoRef. On a 'history' apply only: diff the
@@ -767,16 +827,35 @@ function EditorShell() {
   // Does NOT snapshotForUndo — an undo must not itself record an undo step.
   reconcileBuildUndoRef.current = (target, reason) => {
     if (reason !== 'history' || !worldSession || !Array.isArray(target)) return;
-    const current = piecesForMap(streamState, ws.stem, { legacyMapName: legacyPieceMapName });
-    const { removes, places } = reconcileBuildPieces(current, target);
-    if (!removes.length && !places.length) return;
+    const current = withBuildingPieces(
+      piecesForMap(streamState, ws.stem, { legacyMapName: legacyPieceMapName }),
+      buildingsState,
+      ws.stem,
+    );
+    // LOOSE pieces reconcile by value (place/remove); BUILDING instances get
+    // REVERSE events on their own branch (req_0513 — V20: undo APPENDS, the
+    // shared history is never rewound). Derived `bld:` pieces must never leak
+    // into the loose diff: a moved building would otherwise re-place its old
+    // stamp as loose duplicates.
+    const isLoose = (p: PlacedBuildPiece) => buildingPieceInstanceId(p.id) === null;
+    const { removes, places } = reconcileBuildPieces(current.filter(isLoose), target.filter(isLoose));
+    const buildingEvents = reconcileBuildingInstances(current, target, buildingsState, ws.stem);
+    if (!removes.length && !places.length && !buildingEvents.length) return;
+    if (buildingEvents.length && buildingsSession) {
+      const scoped = buildingEvents.map((event) => ({ event: scopeBuildEvent(event) as BuildingsEvent, label: 'undo: building' }));
+      const many = (buildingsSession as { commitMany?: (xs: typeof scoped) => unknown }).commitMany;
+      if (typeof many === 'function') many.call(buildingsSession, scoped);
+      else for (const e of scoped) buildingsSession.commit(e.event, e.label);
+    }
     const events = [
-      ...removes.map((id) => ({ event: scopeBuildEvent({ kind: 'pieceRemoved', id }), label: 'undo: remove piece' })),
-      ...places.map((placement) => ({ event: scopeBuildEvent({ kind: 'piecePlaced', placement }), label: 'undo: place piece' })),
+      ...removes.map((id) => ({ event: scopeBuildEvent({ kind: 'pieceRemoved', id }) as WorldEvent, label: 'undo: remove piece' })),
+      ...places.map((placement) => ({ event: scopeBuildEvent({ kind: 'piecePlaced', placement }) as WorldEvent, label: 'undo: place piece' })),
     ];
-    const many = (worldSession as { commitMany?: (xs: typeof events) => unknown }).commitMany;
-    if (typeof many === 'function') many.call(worldSession, events);
-    else for (const e of events) worldSession.commit(e.event, e.label);
+    if (events.length) {
+      const many = (worldSession as { commitMany?: (xs: typeof events) => unknown }).commitMany;
+      if (typeof many === 'function') many.call(worldSession, events);
+      else for (const e of events) worldSession.commit(e.event, e.label);
+    }
     setMapBuildRev((r) => r + 1);
   };
 
@@ -877,8 +956,14 @@ function EditorShell() {
     const fp = buildFootprintsRef.current.find((p) => p.id === id);
     if (!fp) return;
     // ONE batch (one snapshot, one undo step) — deleting a big building was N per-piece
-    // commits, each re-materializing the store.
-    commitBuildEvents(fp.pieceIds.map((pieceId) => ({ event: { kind: 'pieceRemoved', id: pieceId } as WorldEvent, label: `${ws.stem}: object: removed ${fp.label}` })));
+    // commits, each re-materializing the store. A footprint over a BUILDING
+    // INSTANCE (req_0513) deletes by ONE buildingRemoved on its own branch;
+    // loose pieces keep the per-piece removes.
+    const { wholeInstances, loosePieceIds } = partitionBuildingSelection(new Set(fp.pieceIds), buildPiecesRef.current);
+    commitBuildEvents([
+      ...wholeInstances.map((instId) => ({ event: { kind: 'buildingRemoved', id: instId } as BuildEditEvent, label: `${ws.stem}: object: removed ${fp.label}` })),
+      ...loosePieceIds.map((pieceId) => ({ event: { kind: 'pieceRemoved', id: pieceId } as BuildEditEvent, label: `${ws.stem}: object: removed ${fp.label}` })),
+    ]);
     logEvent({ cat: 'object', text: `removed ${fp.label}` });
     setSelBuildId((s) => (s === id ? null : s));
   }, [commitBuildEvents, ws.stem, logEvent]);
@@ -1044,16 +1129,6 @@ function EditorShell() {
   const [wbFamily, setWbFamily] = useState<WorkbenchFamily>(currentWorkbenchFamily());
   useEffect(() => subscribeWorkbenchFamily(setWbFamily), []);
   const activeRoute = route.path === '/workbench' ? (wbFamily === 'settings' ? 'workbench-settings' : 'workbench-assets') : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : route.path === '/compiled' ? 'compiled' : 'editor';
-  const [editorPanesMounted, setEditorPanesMounted] = useState(activeRoute === 'editor');
-  useEffect(() => {
-    if (activeRoute === 'editor') setEditorPanesMounted(true);
-  }, [activeRoute]);
-  // VIEWRUNAWAY-0605: the editor stays MOUNTED under route overlays, but it
-  // must go input-DEAF there — the key bus is global, so a WASD walk in
-  // /build was also driving the buried canvas's drift (700px/s ÷ zoom for
-  // minutes = the million-unit saved views). Quad focus only exists AT the
-  // editor; losing it clears held keys + drift via the existing focus-loss
-  // machinery in each quad.
   const atEditor = activeRoute === 'editor';
 
   // Churn probe: which cart-level state drove this whole-cart re-render? During a
@@ -1090,7 +1165,7 @@ function EditorShell() {
         compileStatus={compileStatus}
       />
       <Box style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}>
-        {editorPanesMounted ? (
+        {atEditor ? (
           <QuadSplit
             fx={fx}
             fy={fy}
@@ -1146,6 +1221,7 @@ function EditorShell() {
                   key={`${ws.stem}#${worldEpoch}`}
                   state={previewWorld}
                   pieces={buildPieces}
+                  buildings={buildingInstances}
                   prefabs={buildingPrefabs}
                   onCommit={commitBuildEvent}
                   onCommitMany={commitBuildEvents}
@@ -1158,7 +1234,8 @@ function EditorShell() {
         ) : null}
 
         {/* Route surfaces live inside the shell body, so the chrome remains the
-            one navigation shell and the editor stays mounted underneath. */}
+            one navigation shell. The editor panes unmount off-route; the
+            workspace/session layer owns durable world and view state. */}
         <Route path="/assist3d">{() => <Assist3DRoute />}</Route>
         {/* The embodied game surface (editors/play/, PLAYFOLD-0605): /test +
             /build folded into ONE route — mode is PlayRoute's own state,

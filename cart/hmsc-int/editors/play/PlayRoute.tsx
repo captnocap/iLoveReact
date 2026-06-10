@@ -41,10 +41,10 @@ import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import {
   GAME_BUILD, GAME_CAMERA, GAME_CHROME, GAME_COMMANDS, GAME_FIGURE, GAME_INPUT,
-  GAME_ITEMS, GAME_LOOP, GAME_PHYSICS, GAME_TELEMETRY, GAME_WORLD, cameraOcclusionResponse, pieceMutationMapName, piecesForMap, worldStream,
+  GAME_ITEMS, GAME_LOOP, GAME_PHYSICS, GAME_TELEMETRY, GAME_WORLD, buildingsStream, cameraOcclusionResponse, pieceMutationMapName, piecesForMap, withBuildingPieces, worldStream,
 } from '@game';
 import type {
-  BuildFaceSkin, BuildFaceSlot, BuildMaterial, BuildPieceDef, BuildPieceKind, BuildPrefabDef, BuildSkinSet, PieceRay,
+  BuildFaceSkin, BuildFaceSlot, BuildMaterial, BuildPieceDef, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingsStreamState, PieceRay,
   PlacedBuildPiece, WallEdit, WorldEvent, WorldStreamState,
 } from '@game';
 import type { GameState } from '../../../hmsc/design'; // GAP: retires when hmsc becomes compile/'s output (V15)
@@ -372,9 +372,17 @@ export function PlayRoute(props: {
   const build = useMemo(() => {
     try {
       const channel = editorChannel(worldStream);
-      return { channel, session: editorSessions().open('/build', channel) as RouteSession<WorldEvent>, error: null as string | null };
+      // buildings (req_0513): the derived-stamp side of the pieces view; F2
+      // commits stay on the world channel, this surface only READS instances.
+      let buildings: { state: () => BuildingsStreamState; length: () => number } | null = null;
+      try {
+        buildings = editorChannel(buildingsStream);
+      } catch {
+        buildings = null;
+      }
+      return { channel, buildings, session: editorSessions().open('/build', channel) as RouteSession<WorldEvent>, error: null as string | null };
     } catch (error: any) {
-      return { channel: null, session: null, error: String(error?.message ?? error) };
+      return { channel: null, buildings: null, session: null, error: String(error?.message ?? error) };
     }
   }, []);
   useEffect(() => () => build.session?.close(), [build]);
@@ -384,15 +392,18 @@ export function PlayRoute(props: {
   const [piecesRev, setPiecesRev] = useState(0);
   useEffect(() => {
     if (!build.channel) return undefined;
-    let lastLength = build.channel.length();
+    // the combined log length: a building event must re-derive the pieces view
+    // exactly like a world event does (req_0513).
+    const combined = () => (build.channel?.length() ?? 0) + (build.buildings?.length() ?? 0);
+    let lastLength = combined();
     const timer = setInterval(() => {
-      const nextLength = build.channel?.length() ?? lastLength;
+      const nextLength = combined();
       if (nextLength === lastLength) return;
       lastLength = nextLength;
       setPiecesRev((r) => r + 1);
     }, WORLD_STREAM_REV_POLL_MS);
     return () => clearInterval(timer);
-  }, [build.channel]);
+  }, [build.channel, build.buildings]);
   const placeFreezeTraceEnabled = envFlag('HMSC_INT_PLACEFREEZE_TRACE') || envFlag('HMSC_INT_PLACEFREEZE_ONCE');
   const placeFreezeProbeRef = useRef<PlaceFreezeProbe | null>(null);
   const streamState: WorldStreamState | null = useMemo(() => {
@@ -406,12 +417,22 @@ export function PlayRoute(props: {
     });
     return state;
   }, [build, piecesRev, props.mapName]);
+  const buildingsState: BuildingsStreamState | null = useMemo(
+    () => (build.buildings ? build.buildings.state() : null),
+    [build, piecesRev],
+  );
   const pieces = useMemo(() => {
     const t0 = perfMs();
-    const next = piecesForMap(streamState, props.mapName, { legacyMapName: props.legacyPieceMapName });
+    // loose world pieces ⊕ derived building stamps — the ONE pieces view
+    // (req_0513), identical to the iso pane's and the compile's.
+    const next = withBuildingPieces(
+      piecesForMap(streamState, props.mapName, { legacyMapName: props.legacyPieceMapName }),
+      buildingsState,
+      props.mapName,
+    );
     markPlaceFreezeProbe(placeFreezeProbeRef.current, 'piecesForMap', { pieces: next.length, ms: perfMs() - t0 });
     return next;
-  }, [streamState, props.mapName, props.legacyPieceMapName]);
+  }, [streamState, buildingsState, props.mapName, props.legacyPieceMapName]);
   // Flat-pad terrain lift (req_0444): the SAME idempotent transform the build pane and
   // compile use, so a building walked in F2 stands on the painted terrain exactly as it
   // does in the editor and the shipped game. Render, colliders, and camera occluders read
@@ -1409,12 +1430,12 @@ export function PlayRoute(props: {
     if (!snapTarget) return [];
     const p = snapTarget.placement;
     if (armedPrefab) {
-      return GAME_BUILD.placed
-        .stamp(armedPrefab, { x: p.x, y: p.y, z: p.z }, p.yawDegrees)
-        .flatMap((piece, index) => pieceVisualShapes(piece, `ghost.${index}`));
+      const stamped = GAME_BUILD.placed.stamp(armedPrefab, { x: p.x, y: p.y, z: p.z }, p.yawDegrees);
+      const supportPieces = [...piecesRef.current, ...stamped.map((piece, index) => ({ id: `ghost.${index}`, ...piece }))];
+      return stamped.flatMap((piece, index) => pieceVisualShapes(piece, `ghost.${index}`, supportPieces));
     }
     if (armedDef) {
-      return pieceVisualShapes({ pieceId: armedDef.id, x: p.x, y: p.y, z: p.z, yawDegrees: p.yawDegrees }, 'ghost');
+      return pieceVisualShapes({ pieceId: armedDef.id, x: p.x, y: p.y, z: p.z, yawDegrees: p.yawDegrees }, 'ghost', piecesRef.current);
     }
     return [];
   }, [snapTarget, armedDef, armedPrefab]);
