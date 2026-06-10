@@ -14,6 +14,7 @@ const v8rt = @import("framework/v8_runtime.zig");
 const cli_bindings = @import("framework/v8_bindings_cli.zig");
 const fs_bindings = @import("framework/v8_bindings_fs.zig");
 const sqlite_bindings = @import("framework/v8_bindings_sqlite.zig");
+const localstore_bindings = @import("framework/v8_bindings_localstore.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -67,6 +68,11 @@ pub fn main() !void {
     // sqlite-backed (STOREDB-0606) — the tests need the same surface the
     // cart host has.
     sqlite_bindings.registerSqlite({});
+    // __localstore* over the SAME localstore.db the editor host writes — lets a
+    // headless script (the rjit game bake compile pipeline) read editor state
+    // like custom Materialized materials. Best-effort: empty store if unopenable.
+    localstore_bindings.initStore();
+    localstore_bindings.registerLocalstore({});
     // SIGINT/SIGTERM/SIGHUP → kill tracked children before exiting. Prevents
     // Ctrl-C on scripts/dev from orphaning the esbuild watch child.
     cli_bindings.installSignalHandlers();

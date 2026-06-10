@@ -31,6 +31,7 @@ import type { ChunkFloor } from '../chunkFloor';
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
 import { shaderSpec, defaultShaderData } from '@game/textures/shaders';
+import { loadCustomTextures, type CustomTexture } from '@game/textures/materials';
 import { textBytes } from '@reactjit/workspace';
 
 export const INSTANCE_STRIDE = 13;
@@ -44,9 +45,31 @@ export const INSTANCE_SHAPE_RAMP = 1;
 // host materializes at load (run the shader → a 1-tile texture → sample the
 // face). The geometry stream stays flat color; a PARALLEL per-row material index
 // (0 = none) references the vocab, so the instance stride and all physics/spawn
-// code are untouched. Only built-in shader recipes resolve in the headless bake
-// (shaders.ts is React-free); 'custom:' Materialized looks fall back to color.
+// code are untouched. Both built-in shader-catalog ids AND 'custom:' Materialized
+// SHADER looks resolve in the headless bake (the custom store is plain localstore;
+// loadCustomTextures is React-free). Decal/react-source customs still fall back to
+// flat color — those have no WGSL to ship (the captured-pixel tail).
 export type MaterialAsset = { key: string; wgsl: string; data: number[] };
+
+// A material id → its shader recipe (WGSL + frozen data). Built-in catalog ids
+// resolve via shaderSpec; 'custom:' ids resolve through the studio's saved
+// materials (a base shaderId + a frozen data snapshot). Cached: loadCustom
+// Textures reads the store once.
+let customByIdCache: Map<string, CustomTexture> | null = null;
+function customById(id: string): CustomTexture | undefined {
+  if (!customByIdCache) customByIdCache = new Map(loadCustomTextures().map((t) => [t.id, t]));
+  return customByIdCache.get(id);
+}
+function resolveMaterialShader(id: string): { wgsl: string; data: number[] } | null {
+  const builtin = shaderSpec(id);
+  if (builtin) return { wgsl: builtin.shader, data: defaultShaderData(builtin) };
+  const custom = customById(id);
+  if (custom?.shaderId !== undefined && custom.data !== undefined) {
+    const spec = shaderSpec(custom.shaderId);
+    if (spec) return { wgsl: spec.shader, data: custom.data }; // frozen tuned data
+  }
+  return null; // decal/react custom — no WGSL to ship; keep the flat color
+}
 
 // One geometry-build accumulator: the packed instance rows PLUS a parallel
 // material index per row (interned vocab). They grow in lockstep — every push
@@ -67,14 +90,13 @@ function newBuild(): Build {
 // react material the headless bake can't resolve — those keep their flat color).
 function internMaterial(b: Build, skin: BuildFaceSkin | undefined): number {
   if (!skin || skin.kind !== 'material') return 0;
-  const spec = shaderSpec(skin.id);
-  if (!spec) return 0; // custom/react material — not resolvable headless yet
-  const data = defaultShaderData(spec);
-  const key = `${skin.id}|${data.join(',')}`;
+  const resolved = resolveMaterialShader(skin.id);
+  if (!resolved) return 0; // decal/react material — keep the flat color
+  const key = `${skin.id}|${resolved.data.join(',')}`;
   const existing = b.index.get(key);
   if (existing !== undefined) return existing;
   const slot = b.vocab.length + 1;
-  b.vocab.push({ key, wgsl: spec.shader, data });
+  b.vocab.push({ key, wgsl: resolved.wgsl, data: resolved.data });
   b.index.set(key, slot);
   return slot;
 }
