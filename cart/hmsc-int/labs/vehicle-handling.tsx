@@ -23,6 +23,7 @@ const ACCENT = '#38bdf8';
 const BOX = { width: 1, height: 1, depth: 1 };
 const GROUND = 240; // a wide pad so there is room to actually open it up
 const RAD = 180 / Math.PI;
+const ORBIT_SPEED = 0.4; // degrees of camera orbit per pixel of drag
 
 const STYLE = GAME_VEHICLE.tables.styles;
 
@@ -77,14 +78,31 @@ export default function VehicleHandling() {
   const tuningRef = useRef(tuning);
   tuningRef.current = tuning;
   const camDistRef = useRef(9);
+  // User-controlled orbit, like the player camera: drag spins yaw/pitch around
+  // the car; the target follows the car each frame. yaw 0 sits BEHIND the car's
+  // initial heading (orbitalEye places the eye on -Z at yaw 0, and the car
+  // drives +Z at heading 0 — so forward is away from the camera).
+  const lookRef = useRef({ yaw: 0, pitch: 18 });
+  const draggingRef = useRef(false);
   const cameraRef = useRef<any>(null);
   const camCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
   const [frame, setFrame] = useState<{ car: CarState; speed: number; slip: number; gear: 'D' | 'R' | 'N' }>(() => ({ car: carRef.current, speed: 0, slip: 0, gear: 'N' }));
 
   const resetCar = () => {
     carRef.current = GAME_DRIVING.makeState(0, 0, 0);
+    lookRef.current = { yaw: 0, pitch: 18 }; // recenter the camera behind the car
     setFrame({ car: carRef.current, speed: 0, slip: 0, gear: 'N' });
   };
+
+  // Drag anywhere on the pad to orbit the camera around the car (player-style).
+  // Host-global cursor deltas (no per-node move handler → no capture gaps); a
+  // no-op unless a press is active on the input layer.
+  useEffect(() => GAME_INPUT.onCursorMove((e) => {
+    if (!draggingRef.current) return;
+    const l = lookRef.current;
+    l.yaw -= Number(e?.dx ?? 0) * ORBIT_SPEED;
+    l.pitch = clamp(l.pitch - Number(e?.dy ?? 0) * ORBIT_SPEED, 4, 82);
+  }), []);
 
   useEffect(() => {
     const keys = GAME_INPUT.createKeyState();
@@ -103,8 +121,9 @@ export default function VehicleHandling() {
       };
       const telem = GAME_DRIVING.step(carRef.current, input, tuningRef.current, dt);
 
-      // V23 native chase cam: send rig params, host owns the per-frame solve +
-      // smoothing. Bind lazily once the camera node has an id (ModelViewer).
+      // V23 native orbit cam: send rig params (target follows the car, yaw/pitch
+      // are user-dragged), host owns the per-frame solve + smoothing. Bind
+      // lazily once the camera node has an id (ModelViewer pattern).
       if (!camCtlRef.current) {
         const nodeId = Number(cameraRef.current?.id ?? 0);
         if (nodeId) {
@@ -116,8 +135,8 @@ export default function VehicleHandling() {
       const car = carRef.current;
       camCtlRef.current?.setOrbit({
         target: [car.x, 0.8, car.z],
-        yaw: car.heading * RAD + 180, // sit behind the nose
-        pitch: 17,
+        yaw: lookRef.current.yaw,
+        pitch: lookRef.current.pitch,
         distance: camDistRef.current,
         fov: 52,
       });
@@ -197,6 +216,7 @@ export default function VehicleHandling() {
         </Pressable>
         <Text style={{ color: DIM, fontSize: 10 }}>W/↑ throttle · S/↓ brake+reverse</Text>
         <Text style={{ color: DIM, fontSize: 10 }}>A/D steer · Space handbrake (drift)</Text>
+        <Text style={{ color: DIM, fontSize: 10 }}>drag to orbit · scroll to zoom</Text>
       </Col>
 
       {/* ── right: the test pad ────────────────────────────────────────────── */}
@@ -215,6 +235,18 @@ export default function VehicleHandling() {
             <Scene3D.Mesh key={m.key} geometry={m.geometry} params={m.params} position={m.position} rotation={m.rotation} scale={m.scale} material={m.material} />
           ))}
         </Scene3D>
+
+        {/* Transparent input layer: drag orbits the camera, scroll dollies it.
+            Below the HUD so the readout stays visible (ModelViewer pattern). */}
+        <Pressable
+          onMouseDown={() => { draggingRef.current = true; }}
+          onMouseUp={() => { draggingRef.current = false; }}
+          onScroll={(p: any) => {
+            const dz = Number(p?.deltaY ?? 0);
+            if (dz) camDistRef.current = clamp(camDistRef.current * (dz > 0 ? 0.9 : 1.111), 4, 20);
+          }}
+          style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000000' }}
+        />
 
         {/* HUD: the driving readout */}
         <Box style={{ position: 'absolute', left: 16, bottom: 16, flexDirection: 'row', alignItems: 'flex-end' }}>

@@ -90,13 +90,13 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n
  *  moderate power. Labs override individual knobs from here. */
 export function defaultTuning(wheelBase: number): CarTuning {
   return {
-    enginePower: 11,
+    enginePower: 14,
     brakePower: 20,
     reversePower: 6,
     topSpeed: 30,
     reverseTopSpeed: 8,
-    drag: 0.0026,
-    rollResist: 0.9,
+    drag: 0.0008,
+    rollResist: 0.4,
     maxSteer: 0.62,
     steerSpeed: 6,
     grip: 7.5,
@@ -129,9 +129,11 @@ export function stepCar(s: CarState, input: CarInput, t: CarTuning, dt: number):
   }
   vf = clamp(vf, -t.reverseTopSpeed, t.topSpeed);
 
-  // Resistance: linear roll-off + quadratic air drag.
+  // Resistance: linear roll-off + quadratic air drag (both per-second → ·step).
+  // Kept gentle on purpose: terminal speed stays above topSpeed so the clamp
+  // above is the REAL cap and the topSpeed knob actually bites.
   vf -= vf * t.rollResist * step;
-  vf -= vf * Math.abs(vf) * t.drag;
+  vf -= vf * Math.abs(vf) * t.drag * step;
 
   // Lateral grip bleeds sideways velocity — low grip lets the tail step out.
   const grip = input.handbrake ? t.handbrakeGrip : t.grip;
