@@ -109,7 +109,7 @@ export function RoadRail(props: {
       </Pressable>
       {props.wires ? (
         <Text fontSize={7} color="#64748b" style={{ fontFamily: 'monospace' }}>
-          {'cyan □ = connect point (clicks snap)\ngreen wire = with draw · red = opposing'}
+          {'cyan □ = connect point (clicks snap)\ngreen wire = east/south flow · red = west/north'}
         </Text>
       ) : null}
 

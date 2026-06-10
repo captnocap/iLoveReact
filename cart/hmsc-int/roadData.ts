@@ -550,6 +550,19 @@ export function roadMotionProfile<T extends { maxSpeed: number }>(
   return { ...base, maxSpeed: limit };
 }
 
+/** Wire-colour canonicalization (WIRECOLOR-0610): true when the stroke's net
+ *  direction points NEGATIVE on its dominant axis. Lane wires colour by flow
+ *  vs the CANONICAL direction (east/south positive), not the draw direction —
+ *  so the two halves of a road drawn outward from a junction read one
+ *  continuous colour instead of flipping at the seam (the user's report: the
+ *  flip LOOKED like wrong-way traffic when the lanes were actually correct). */
+export function strokeWireFlip(points: RoadPoint[]): boolean {
+  if (points.length < 2) return false;
+  const dx = points[points.length - 1]!.gx - points[0]!.gx;
+  const dz = points[points.length - 1]!.gz - points[0]!.gz;
+  return Math.abs(dx) >= Math.abs(dz) ? dx < 0 : dz < 0;
+}
+
 /** Every stroke's two endpoints — the wire connect points the editor marks. */
 export function strokeEndpoints(strokes: RoadStroke[]): RoadPoint[] {
   const out: RoadPoint[] = [];

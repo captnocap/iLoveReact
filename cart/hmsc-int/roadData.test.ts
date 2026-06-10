@@ -9,7 +9,7 @@ import {
   applyMergeGesture, carriagewayTiles, cellKey, clampProfile, crossSection,
   filletPoints, isOneWay, laneGuides, planRoads, profileLabel, ribbonExtents,
   roadMotionProfile, roadRibbonSegments, roadWidthTiles, snapToCenterline,
-  snapToRoadEnd, speedLimitAtPoint, speedLimitMps, splitStroke, strokeChevrons,
+  snapToRoadEnd, speedLimitAtPoint, speedLimitMps, splitStroke, strokeChevrons, strokeWireFlip,
   type RoadPlan, type RoadStroke,
 } from './roadData';
 import { roadRibbonSection } from './tileField.wgsl';
@@ -294,6 +294,17 @@ test('roadRibbonSegments emits chunk-local 8-float segments and filters far chun
   assertEqual(segs[0], 10.5, 'chunk-local cell-centre x');
   assertEqual(segs[1], 10.5, 'chunk-local cell-centre z');
   assertEqual(roadRibbonSegments([r], 5, 5, 120).length, 0, 'a far chunk gets no segments');
+});
+
+test('strokeWireFlip canonicalizes wire colours — opposite-drawn halves read as one road (WIRECOLOR-0610)', () => {
+  // the user's intersection: r_2 drawn eastward, r_4 drawn westward from the
+  // same junction — physically one road, but draw-relative colours flipped
+  // at the seam and READ as wrong-way traffic. Canonical = positive on the
+  // dominant axis, so exactly one of the pair flips its display colours.
+  assertEqual(strokeWireFlip([{ gx: 18, gz: 543 }, { gx: 95, gz: 542 }]), false, 'eastward = canonical');
+  assertEqual(strokeWireFlip([{ gx: 18, gz: 543 }, { gx: 3, gz: 543 }]), true, 'westward flips');
+  assertEqual(strokeWireFlip([{ gx: 18, gz: 584 }, { gx: 18, gz: 543 }]), true, 'northward flips');
+  assertEqual(strokeWireFlip([{ gx: 18, gz: 543 }, { gx: 18, gz: 584 }]), false, 'southward = canonical');
 });
 
 test('roadRibbonSection always emits the segN header — empty = explicit 0, never omission (GHOSTROAD-0610)', () => {

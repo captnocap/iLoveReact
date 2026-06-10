@@ -34,7 +34,7 @@ import { BrushRail, type BrushRailSettings } from './BrushRail';
 import { LayerBtn, MiniStepper, ToolBtn } from './railAtoms';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
-import { applyMergeGesture, clampProfile, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
+import { applyMergeGesture, clampProfile, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, strokeWireFlip, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
 import { RoadRail } from './RoadRail';
 import { ChunkSurface } from './ChunkSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
@@ -1748,13 +1748,17 @@ export function PaintCanvas(props: {
               <Box style={{ width: '100%', height: '100%', borderRadius: 99, backgroundColor: color }} />
             </Canvas.Node>
           )) : [];
-          // Lane wires: one dotted line per LANE (green = with draw direction,
-          // red = opposing) so lanes line up / merge across strokes by eye.
+          // Lane wires: one dotted line per LANE so lanes line up / merge
+          // across strokes by eye. Colours are CANONICAL (WIRECOLOR-0610):
+          // green = east/south flow, red = west/north — NOT draw-relative, so
+          // a road's two halves drawn outward from a junction read one
+          // continuous colour instead of flipping at the seam.
           if (showRoadWires) {
+            const flip = strokeWireFlip(r.points);
             for (const [i, d] of laneWireDots(r, 3).entries()) {
               nodes.push(
                 <Canvas.Node key={`rl_${r.id}_${i}`} gx={cellGraph(d.x)} gy={cellGraph(d.z)} gw={TILE_UNITS * 0.22} gh={TILE_UNITS * 0.22}>
-                  <Box style={{ width: '100%', height: '100%', borderRadius: 99, backgroundColor: d.flow === 'forward' ? '#86efac88' : '#f8717188' }} />
+                  <Box style={{ width: '100%', height: '100%', borderRadius: 99, backgroundColor: (d.flow === 'forward') !== flip ? '#86efac88' : '#f8717188' }} />
                 </Canvas.Node>,
               );
             }
