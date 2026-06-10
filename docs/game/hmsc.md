@@ -768,6 +768,11 @@ Commands present in the registry:
 - Captures per-cell tile paint for field-backed heightfields.
 - Builds palette data from tile definitions and placeable colors.
 - Uses WGSL Effect into StaticSurface.
+- `roadRibbonSection` (shared by the editor's 2D chunk quads) ALWAYS emits its
+  5-float header, segN=0 when empty (GHOSTROAD-0610): the Effect GPU data
+  buffer never shrinks and the shader gates on `arrayLength`, so an omitted
+  section left the previous ribbon alive in the buffer tail — deleted roads
+  kept rendering as ghosts.
 
 `cart/hmsc/render3d/tileSurface.tsx`
 

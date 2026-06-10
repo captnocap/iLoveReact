@@ -132,8 +132,8 @@ export const HEIGHTFIELD_TILE_PALETTE: [number, number, number][] =
 
 // Encode a landform's per-cell tile grid for the shader buffer. `roads` is the
 // optional analytic ribbon section (8 floats per segment — see the shader
-// comment); absent = the section is omitted and the shader's length guard
-// skips the pass, so pre-road data renders exactly as before.
+// comment); absent = a segN=0 header rides along so a re-upload of the same
+// buffer turns the pass OFF (see roadRibbonSection's GHOSTROAD-0610 note).
 export function heightfieldTileData(tiles: { cols: number; rows: number; idx: number[] }, roads?: number[]): number[] {
   const out: number[] = [tiles.cols, tiles.rows, HEIGHTFIELD_TILE_PALETTE.length];
   for (const c of HEIGHTFIELD_TILE_PALETTE) out.push(c[0], c[1], c[2]);
@@ -146,16 +146,25 @@ export function heightfieldTileData(tiles: { cols: number; rows: number; idx: nu
  *  medianIdx, segs…]) appended after the cells — shared by the 3D drape capture
  *  AND the editor's 2D chunk quads (both run HEIGHTFIELD_TILE_SHADER). The lane
  *  block (laneNorth..laneWest) is contiguous in TILE_KINDS, so one start index
- *  covers all four. Empty input = empty section. */
+ *  covers all four.
+ *
+ *  The header is ALWAYS emitted, with segN=0 when there are no segments
+ *  (GHOSTROAD-0610): the Effect data buffer only ever GROWS
+ *  (framework/gpu/effects.zig recreates on capacity shortfall, never on
+ *  shrink) and the shader's guard is arrayLength(&D) — the bind-group
+ *  CAPACITY. Encoding "no roads" by omitting the section left the PREVIOUS
+ *  section alive in the buffer tail, so a deleted road kept rendering as a
+ *  ghost ribbon while the menu and state were correctly empty. An explicit
+ *  segN=0 overwrites the slot and turns the pass off. */
 export function roadRibbonSection(roads?: number[]): number[] {
-  if (!roads || roads.length < 8) return [];
+  const segs = roads && roads.length >= 8 ? roads : [];
   return [
-    Math.floor(roads.length / 8),
+    Math.floor(segs.length / 8),
     TILE_KINDS.indexOf('crosswalk'),
     TILE_KINDS.indexOf('junction'),
     TILE_KINDS.indexOf('laneNorth'),
     TILE_KINDS.indexOf('median'),
-    ...roads,
+    ...segs,
   ];
 }
 

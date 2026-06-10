@@ -793,7 +793,7 @@ export const hmsc: DocIndex = {
       purpose: ['texture_bake', 'shader'],
       kind: 'component',
       sourceFile: 'cart/hmsc/render3d/heightfieldSurface.tsx',
-      description: 'Captures per-cell tile paint for field-backed heightfields, building palette data from tile definitions and placeable colors via WGSL Effect into StaticSurface.',
+      description: 'Captures per-cell tile paint for field-backed heightfields, building palette data from tile definitions and placeable colors via WGSL Effect into StaticSurface. roadRibbonSection (shared with the editor 2D chunk quads) always emits its 5-float header — segN=0 when empty (GHOSTROAD-0610) — because the Effect GPU data buffer never shrinks and the shader gates on arrayLength; section-by-omission left deleted roads rendering as ghost ribbons.',
       status: 'live',
     },
     {
@@ -1101,6 +1101,15 @@ export const hmsc: DocIndex = {
     },
   ],
   hazards: [
+    {
+      name: 'Effect GPU data buffer never shrinks — optional trailing sections must be explicit',
+      purpose: ['rendering', 'shader'],
+      description:
+        'framework/gpu/effects.zig recreates the Effect storage buffer only when capacity is short; a SHORTER data upload leaves the old tail bytes alive, and WGSL arrayLength(&D) reports bind-group CAPACITY, not logical length. Any "optional section appended after the cells" encoded by OMISSION resurrects its previous contents when removed — deleted roads kept rendering as ghost ribbons (GHOSTROAD-0610). Optional sections must always write an explicit count/flag header (segN=0) to overwrite the slot.',
+      evidence: ['heightfieldSurface.tsx roadRibbonSection: always-emitted 5-float header', 'framework/gpu/effects.zig: gpu_data_capacity_floats grows only'],
+      fix: 'Encode optional trailing shader sections with an always-present header whose count field can be 0; never encode emptiness by omitting the section.',
+      severity: 'high',
+    },
     {
       name: 'Namespaced localstore vs generic store fallback drift',
       purpose: ['persistence', 'host_bridge'],

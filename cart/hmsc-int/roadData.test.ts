@@ -12,6 +12,7 @@ import {
   splitStroke, strokeChevrons,
   type RoadPlan, type RoadStroke,
 } from './roadData';
+import { roadRibbonSection } from './tileField.wgsl';
 
 const at = (plan: RoadPlan, gx: number, gz: number) => plan.get(cellKey(gx, gz));
 
@@ -272,6 +273,19 @@ test('roadRibbonSegments emits chunk-local 8-float segments and filters far chun
   assertEqual(segs[0], 10.5, 'chunk-local cell-centre x');
   assertEqual(segs[1], 10.5, 'chunk-local cell-centre z');
   assertEqual(roadRibbonSegments([r], 5, 5, 120).length, 0, 'a far chunk gets no segments');
+});
+
+test('roadRibbonSection always emits the segN header — empty = explicit 0, never omission (GHOSTROAD-0610)', () => {
+  // The Effect GPU data buffer never shrinks (framework/gpu/effects.zig) and
+  // the shader gates on arrayLength (capacity). An omitted section leaves the
+  // PREVIOUS section alive in the buffer tail — deleted roads kept rendering
+  // as ghost ribbons. The encoder must overwrite the slot with segN=0.
+  assertEqual(roadRibbonSection(undefined).length, 5, 'no roads still writes the 5-float header');
+  assertEqual(roadRibbonSection(undefined)[0], 0, 'segN=0 turns the ribbon pass off');
+  assertEqual(roadRibbonSection([])[0], 0, 'empty segs = segN 0');
+  const one = roadRibbonSection([1, 2, 3, 4, 5, 6, 7, 8]);
+  assertEqual(one[0], 1, 'one segment counted');
+  assertEqual(one.length, 5 + 8, 'header + 8 floats');
 });
 
 finish('roadData');
