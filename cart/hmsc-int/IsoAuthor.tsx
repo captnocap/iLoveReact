@@ -773,15 +773,29 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     let handle: any = 0;
     let last = G.performance?.now?.() ?? 0;
     let alive = true;
+    // Stall-warn aggregation (req_0507): a sustained slow window (e.g. the dev
+    // watcher re-bundling during a burst of agent file saves) printed one line
+    // PER FRAME and flooded the console. Aggregate to at most one line per
+    // second: count + worst gap in the window — same signal, readable.
+    let stallWindowAt = 0;
+    let stallCount = 0;
+    let stallMax = 0;
     const tick = () => {
       if (!alive) return;
       const now = G.performance?.now?.() ?? last + 16;
       // Frame-stall watchdog (req_0502): this loop reschedules itself every
       // frame, so a long gap between ticks IS a main-thread stall — JS work we
       // haven't probed, or the host frame choking — exactly the time the
-      // commit probes can't see. One line per stall, with what it followed.
+      // commit probes can't see.
       if (now - last > 150) {
-        console.warn(`[DRAGDRAW] frame stall ms=${(now - last).toFixed(0)}${commitPerfRef.current ? ` after=${commitPerfRef.current.label}` : ''}`);
+        stallCount += 1;
+        if (now - last > stallMax) stallMax = now - last;
+        if (now - stallWindowAt > 1000) {
+          console.warn(`[DRAGDRAW] frame stall${stallCount > 1 ? `s ×${stallCount}` : ''} max=${stallMax.toFixed(0)}ms${commitPerfRef.current ? ` after=${commitPerfRef.current.label}` : ''}`);
+          stallWindowAt = now;
+          stallCount = 0;
+          stallMax = 0;
+        }
       }
       const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
       last = now;
