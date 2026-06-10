@@ -239,7 +239,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       d.turned = true;
       if (d.mode === 'move') {
         const g = stage.groundPoint(p.x, p.y, rectRef.current);
-        if (g) setMoveDelta({ dx: g.x - d.gx0, dz: g.z - d.gz0 });
+        // Snap the drag delta to whole grid cells so a moved piece stays grid-locked —
+        // the pieces start grid-aligned, so a whole-cell shift keeps them aligned and
+        // anything built onto them lines up. cellSizeMeters is the build grid pitch.
+        if (g) {
+          const cs = state.world.cellSizeMeters || 1;
+          setMoveDelta({ dx: Math.round((g.x - d.gx0) / cs) * cs, dz: Math.round((g.z - d.gz0) / cs) * cs });
+        }
       } else {
         stage.rotateBy((p.x - d.x) * 0.3); // horizontal drag → yaw
         d.x = p.x;
