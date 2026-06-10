@@ -141,7 +141,7 @@ export { GAME_FIGURE, charactersStream, bakeBodyDocument, applyBodyPaint } from 
 export type { BodyDocument, BakedFigure, CharactersEvent, CharactersStreamState } from './figure';
 export { GAME_VEHICLE, vehiclesStream, applyVehiclePaint } from './vehicle';
 export type { VehicleDoc, VehiclePartId, VehicleStyleId, VehicleRoleId, VehiclePoseId, DamageLevel, VehicleBuild, VehiclesEvent, VehiclesStreamState } from './vehicle';
-export { GAME_DRIVING, makeCarState, defaultTuning, stepCar } from './driving';
+export { GAME_DRIVING, makeCarState, defaultTuning, stepCar, rightCar } from './driving';
 export type { CarState, CarTuning, CarInput, CarTelemetry } from './driving';
 export { GAME_ITEMS } from './items';
 export { GAME_ANIMATION } from './animation';

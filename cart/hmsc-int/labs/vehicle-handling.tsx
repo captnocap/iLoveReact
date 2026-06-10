@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   GAME_DRIVING, GAME_VEHICLE, GAME_INPUT, GAME_LOOP, GAME_NATIVE_CAMERA,
   type CarState, type CarTuning, type VehicleDoc, type VehicleStyleId,
+  type DamageLevel, type VehiclePartId,
 } from '@game';
 import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
@@ -51,6 +52,18 @@ function docForStyle(style: VehicleStyleId, role: VehicleDoc['role']): VehicleDo
 /** wheelbase ≈ 58% of overall length — feeds the bicycle model's turn radius. */
 const wheelBaseOf = (style: VehicleStyleId) => STYLE[style].length * 0.58;
 
+// A rollover bangs up the cabin, glass and the panels that hit the deck — this
+// is what the body damage states were built for (req_0558). Each flip escalates
+// those parts one level (capped at 3 = broken).
+const FLIP_PARTS: VehiclePartId[] = ['cabin', 'windshield', 'driver_side', 'passenger_side', 'rear', 'hood', 'body'];
+function bumpFlipDamage(doc: VehicleDoc): VehicleDoc {
+  const damage = { ...doc.damage };
+  for (const part of FLIP_PARTS) {
+    damage[part] = Math.min(3, (damage[part] ?? 0) + 1) as DamageLevel;
+  }
+  return { ...doc, damage };
+}
+
 function geometryFor(kind: 'box' | 'cylinder' | 'sphere') {
   return kind === 'cylinder' ? Geometry.Cylinder : kind === 'sphere' ? Geometry.Sphere : Geometry.Box;
 }
@@ -65,14 +78,17 @@ const CONES: Array<[number, number]> = [
 export default function VehicleHandling() {
   const [pick, setPick] = useState(0);
   const sel = DRIVABLE[pick];
-  const doc = useMemo(() => docForStyle(sel.style, sel.role), [sel.style, sel.role]);
+  // doc is STATE (not memo) so a rollover can escalate its damage in place.
+  const [doc, setDoc] = useState<VehicleDoc>(() => docForStyle(sel.style, sel.role));
   const build = useMemo(() => GAME_VEHICLE.build(doc), [doc]);
 
-  const [tuning, setTuning] = useState<CarTuning>(() => GAME_DRIVING.defaultTuning(wheelBaseOf(sel.style)));
-  // When the body changes, keep the dialed feel but adopt the new wheelbase.
+  const [tuning, setTuning] = useState<CarTuning>(() => GAME_DRIVING.defaultTuning(wheelBaseOf(sel.style), STYLE[sel.style].width));
+  // New body → fresh (undamaged) doc, and adopt its wheelbase + track width
+  // while keeping the dialed feel.
   useEffect(() => {
-    setTuning((t) => ({ ...t, wheelBase: wheelBaseOf(sel.style) }));
-  }, [sel.style]);
+    setDoc(docForStyle(sel.style, sel.role));
+    setTuning((t) => ({ ...t, wheelBase: wheelBaseOf(sel.style), trackWidth: STYLE[sel.style].width }));
+  }, [sel.style, sel.role]);
 
   // The live driving state + frame readout. The car/tuning live in refs the
   // frame loop reads; React state carries only what the scene/HUD render.
@@ -94,8 +110,10 @@ export default function VehicleHandling() {
   const resetCar = () => {
     carRef.current = GAME_DRIVING.makeState(0, 0, 0);
     offsetRef.current = { yaw: 0, pitch: 0 }; // snap the camera back behind the car
+    setDoc(docForStyle(sel.style, sel.role)); // fresh, undamaged body
     setFrame({ car: carRef.current, speed: 0, slip: 0, gear: 'N' });
   };
+  const rightCar = () => { GAME_DRIVING.right(carRef.current); }; // flip back onto its wheels in place
 
   // Drag anywhere on the pad to PEEK around — it adds to the look offset, which
   // the frame loop eases back to center. Host-global cursor deltas (no per-node
@@ -125,7 +143,10 @@ export default function VehicleHandling() {
         handbrake: keys.isDown('space'),
         footBrake: keys.shift(), // Shift = firm brake to a stop (no reverse)
       };
+      if (keys.isDown('r')) GAME_DRIVING.right(carRef.current); // R rights an upset car
       const telem = GAME_DRIVING.step(carRef.current, input, tuningRef.current, dt);
+      // A rollover bangs up the body — this is what the damage states are for.
+      if (telem.justFlipped) setDoc(bumpFlipDamage);
 
       // V23 native orbit cam: send rig params (target follows the car, yaw/pitch
       // are user-dragged), host owns the per-frame solve + smoothing. Bind
@@ -163,27 +184,43 @@ export default function VehicleHandling() {
     };
   }, []);
 
-  // World-place every body mesh by the car's pose. The build's nose sits at
-  // local -Z, so the assembly yaw is heading + 180°. Front wheels add the
-  // steer angle; all wheels add a roll from the odometer (the spokes show it).
+  // World-place every body mesh by the car's full pose: body ROLL about the
+  // length (Z) axis, PITCH about the lateral (X) axis, then YAW about Y (the
+  // build's nose is at local -Z, so assembly yaw = heading + 180°), then the
+  // car's position. A rolled body is lifted so its low side rests on the deck
+  // instead of sinking through it. Front wheels add steer; all wheels spin by
+  // the odometer (the spokes show it).
   const meshes = useMemo(() => {
     const car = frame.car;
     const phi = car.heading + Math.PI;
-    const c = Math.cos(phi), s = Math.sin(phi);
-    const phiDeg = phi * RAD;
+    const cy = Math.cos(phi), sy = Math.sin(phi);
+    const cr = Math.cos(car.roll), sr = Math.sin(car.roll);
+    const cp = Math.cos(car.pitch), sp = Math.sin(car.pitch);
+    const phiDeg = phi * RAD, rollDeg = car.roll * RAD, pitchDeg = car.pitch * RAD;
     const steerDeg = car.steer * RAD;
-    const rollDeg = (car.odometer / STYLE[sel.style].wheelR) * RAD;
+    const wheelSpinDeg = (car.odometer / STYLE[sel.style].wheelR) * RAD;
+    const lift = Math.abs(sr) * STYLE[sel.style].width * 0.5;
     return build.meshes.map((m, i) => {
       const [lx, ly, lz] = m.position;
       const [rx, ry, rz] = m.rotation ?? [0, 0, 0];
       const isWheel = m.id.includes('wheel');
       const isFront = m.id === 'front_left_wheel' || m.id === 'front_right_wheel';
+      // roll about Z
+      const x1 = lx * cr - ly * sr, y1 = lx * sr + ly * cr;
+      // pitch about X
+      const y2 = y1 * cp - lz * sp, z2 = y1 * sp + lz * cp;
+      // yaw about Y
+      const x3 = x1 * cy + z2 * sy, z3 = -x1 * sy + z2 * cy;
       return {
         key: `${m.id}.${i}`,
         geometry: geometryFor(m.kind),
         params: m.params,
-        position: [lx * c + lz * s + car.x, ly, -lx * s + lz * c + car.z] as [number, number, number],
-        rotation: [rx + (isWheel ? rollDeg : 0), ry + phiDeg + (isFront ? steerDeg : 0), rz] as [number, number, number],
+        position: [car.x + x3, y2 + lift, car.z + z3] as [number, number, number],
+        rotation: [
+          rx + pitchDeg + (isWheel ? wheelSpinDeg : 0),
+          ry + phiDeg + (isFront ? steerDeg : 0),
+          rz + rollDeg,
+        ] as [number, number, number],
         scale: m.scale,
         material: m.material,
       };
@@ -217,17 +254,28 @@ export default function VehicleHandling() {
         <Knob label="grip" value={tuning.grip} step={0.5} min={0.5} max={16} onSet={(v) => setTuning((t) => ({ ...t, grip: v }))} />
         <Knob label="cornering" value={tuning.corneringDrag} step={0.1} min={0} max={3} onSet={(v) => setTuning((t) => ({ ...t, corneringDrag: v }))} />
         <Knob label="steer" value={tuning.maxSteer} step={0.04} min={0.15} max={1} onSet={(v) => setTuning((t) => ({ ...t, maxSteer: v }))} unit="rad" />
-        <Knob label="drag" value={tuning.drag} step={0.0005} min={0} max={0.02} onSet={(v) => setTuning((t) => ({ ...t, drag: v }))} digits={4} />
+        <Knob label="steer spd" value={tuning.steerSpeed} step={0.2} min={1} max={12} onSet={(v) => setTuning((t) => ({ ...t, steerSpeed: v }))} />
+
+        <Text style={{ color: DIM, fontSize: 10, marginTop: 8, marginBottom: 4 }}>WEIGHT / ROLLOVER</Text>
+        <Knob label="cg height" value={tuning.cgHeight} step={0.05} min={0.4} max={1.8} onSet={(v) => setTuning((t) => ({ ...t, cgHeight: v }))} />
+        <Knob label="lat g" value={tuning.maxLatG} step={0.05} min={0.5} max={2} onSet={(v) => setTuning((t) => ({ ...t, maxLatG: v }))} />
         <Knob label="cam dist" value={camDistRef.current} step={0.5} min={4} max={20} onSet={(v) => { camDistRef.current = clamp(v, 4, 20); }} />
 
         <Box style={{ flexGrow: 1 }} />
-        <Pressable onPress={resetCar}>
-          <Box style={{ padding: 8, borderRadius: 6, backgroundColor: '#16345a', alignItems: 'center', marginBottom: 8 }}>
-            <Text style={{ color: ACCENT, fontSize: 12 }}>reset car</Text>
-          </Box>
-        </Pressable>
+        <Row style={{ marginBottom: 8 }}>
+          <Pressable onPress={rightCar} style={{ flexGrow: 1, marginRight: 6 }}>
+            <Box style={{ padding: 8, borderRadius: 6, backgroundColor: '#243a14', alignItems: 'center' }}>
+              <Text style={{ color: '#a3e635', fontSize: 12 }}>right car (R)</Text>
+            </Box>
+          </Pressable>
+          <Pressable onPress={resetCar} style={{ flexGrow: 1 }}>
+            <Box style={{ padding: 8, borderRadius: 6, backgroundColor: '#16345a', alignItems: 'center' }}>
+              <Text style={{ color: ACCENT, fontSize: 12 }}>reset car</Text>
+            </Box>
+          </Pressable>
+        </Row>
         <Text style={{ color: DIM, fontSize: 10 }}>W/↑ throttle · S/↓ brake+reverse</Text>
-        <Text style={{ color: DIM, fontSize: 10 }}>Shift brake (stop) · Space handbrake (drift)</Text>
+        <Text style={{ color: DIM, fontSize: 10 }}>Shift brake · Space handbrake · R right</Text>
         <Text style={{ color: DIM, fontSize: 10 }}>A/D steer · drag to look · scroll to zoom</Text>
       </Col>
 
@@ -269,8 +317,18 @@ export default function VehicleHandling() {
           <Box style={{ padding: 10, borderRadius: 8, backgroundColor: 'rgba(8,14,24,0.78)' }}>
             <Text style={{ color: frame.gear === 'R' ? '#f87171' : ACCENT, fontSize: 16, fontFamily: 'monospace' }}>{`gear ${frame.gear}`}</Text>
             <Text style={{ color: Math.abs(frame.slip) > 0.35 ? '#fbbf24' : DIM, fontSize: 11, fontFamily: 'monospace' }}>{`slip ${(frame.slip * RAD).toFixed(0)}°`}</Text>
+            <Text style={{ color: Math.abs(frame.car.roll) > 0.5 ? '#fb923c' : DIM, fontSize: 11, fontFamily: 'monospace' }}>{`roll ${(frame.car.roll * RAD).toFixed(0)}°`}</Text>
           </Box>
         </Box>
+
+        {/* Rollover banner — flipped cars need righting (R) */}
+        {frame.car.flipped ? (
+          <Box style={{ position: 'absolute', left: 0, right: 0, top: 18, alignItems: 'center' }}>
+            <Box style={{ paddingLeft: 16, paddingRight: 16, paddingTop: 8, paddingBottom: 8, borderRadius: 8, backgroundColor: 'rgba(120,20,20,0.82)' }}>
+              <Text style={{ color: '#fee2e2', fontSize: 14, fontFamily: 'monospace' }}>FLIPPED — press R to right it</Text>
+            </Box>
+          </Box>
+        ) : null}
       </Box>
     </Row>
   );
