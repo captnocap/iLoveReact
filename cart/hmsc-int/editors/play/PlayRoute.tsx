@@ -412,6 +412,14 @@ export function PlayRoute(props: {
     markPlaceFreezeProbe(placeFreezeProbeRef.current, 'piecesForMap', { pieces: next.length, ms: perfMs() - t0 });
     return next;
   }, [streamState, props.mapName, props.legacyPieceMapName]);
+  // Flat-pad terrain lift (req_0444): the SAME idempotent transform the build pane and
+  // compile use, so a building walked in F2 stands on the painted terrain exactly as it
+  // does in the editor and the shipped game. Render, colliders, and camera occluders read
+  // the LIFTED set; the crosshair edit path keeps the raw `pieces`/piecesRef.
+  const liftedPieces = useMemo(
+    () => GAME_BUILD.placed.liftToTerrain(pieces, (x, z) => groundColumnTop(state.world as Parameters<typeof groundColumnTop>[0], x, z)),
+    [pieces, state.world],
+  );
   const placedSkinTextureIds = useMemo(() => {
     const ids = new Set<string>();
     for (const piece of pieces) skinTextureIdsFromSet(piece.skin, ids);
@@ -419,17 +427,17 @@ export function PlayRoute(props: {
   }, [pieces]);
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
-  const cameraOccluders = useMemo(() => GAME_BUILD.placed.cameraOccluders(pieces), [pieces]);
+  const cameraOccluders = useMemo(() => GAME_BUILD.placed.cameraOccluders(liftedPieces), [liftedPieces]);
   const cameraOccludersRef = useRef(cameraOccluders);
   cameraOccludersRef.current = cameraOccluders;
   const cameraOccluderOwners = useMemo(() => {
     const owners: Record<string, { pieceId: string; kind: BuildPieceKind; piece: PlacedBuildPiece }> = {};
-    for (const piece of pieces) {
+    for (const piece of liftedPieces) {
       const def = GAME_BUILD.catalog.get(piece.pieceId);
       if (def) owners[piece.id] = { pieceId: piece.pieceId, kind: def.kind, piece };
     }
     return owners;
-  }, [pieces]);
+  }, [liftedPieces]);
   const cameraOccluderOwnersRef = useRef(cameraOccluderOwners);
   cameraOccluderOwnersRef.current = cameraOccluderOwners;
   useEffect(() => {
@@ -469,7 +477,7 @@ export function PlayRoute(props: {
   // call time through modeRef (the substrate reads options per frame).
   const worldExtras = useMemo<EmbodiedWorldExtras>(() => {
     const collidersT0 = perfMs();
-    const solids = GAME_BUILD.placed.colliders(pieces);
+    const solids = GAME_BUILD.placed.colliders(liftedPieces);
     const collidersMs = perfMs() - collidersT0;
     GAME_TELEMETRY.recordDiagnostic('physics', 'placement.colliders', {
       pieces: pieces.length,
@@ -482,7 +490,7 @@ export function PlayRoute(props: {
       solids,
       registerHeightfields: (worldBake) => {
         const rampsT0 = perfMs();
-        const ramps = GAME_BUILD.placed.ramps(pieces, worldBake.fields.length);
+        const ramps = GAME_BUILD.placed.ramps(liftedPieces, worldBake.fields.length);
         const rampsMs = perfMs() - rampsT0;
         const registerT0 = perfMs();
         let registered = 0;
@@ -523,7 +531,7 @@ export function PlayRoute(props: {
         if (registered < ramps.length) console.warn(`[play] ${ramps.length - registered} ramp slopes past the heightfield slots`);
       },
     };
-  }, [pieces]);
+  }, [liftedPieces]);
   const [floorEdgeGrace, setFloorEdgeGrace] = useRouteTwigState(
     '/build',
     'floorEdgeGraceMeters',
@@ -1475,7 +1483,7 @@ export function PlayRoute(props: {
       <EmbodiedScene embodied={embodied}>
         {/* the standing pieces — the world stream's materialized truth, in
             BOTH modes (solid in both; the toggle exists to walk what you built) */}
-        <PlacedPieceMeshes pieces={pieces} markedIds={markedIds} targetId={showSelectionOverlay ? snapTarget?.targetPieceId ?? null : null} occludedIds={occludedPieceIds} placeFreezeProbe={placeFreezeProbeRef.current} />
+        <PlacedPieceMeshes pieces={liftedPieces} markedIds={markedIds} targetId={showSelectionOverlay ? snapTarget?.targetPieceId ?? null : null} occludedIds={occludedPieceIds} placeFreezeProbe={placeFreezeProbeRef.current} />
         {/* the snap indicator + placement ghost are PLACE-mode language only.
             Select mode keeps the hover/selected piece highlights above. */}
         {showPlacementGhost && snapTarget && (
