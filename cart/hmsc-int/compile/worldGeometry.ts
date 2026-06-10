@@ -34,6 +34,7 @@ import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
 import { shaderSpec, defaultShaderData } from '@game/textures/shaders';
 import { loadCustomTextures, type CustomTexture } from '@game/textures/materials';
+import { BUILTIN_DECALS } from '@game/textures/builtinDecals';
 import { packDecalDoc } from './decalPack';
 import { textBytes } from '@reactjit/workspace';
 
@@ -99,14 +100,18 @@ function resolveMaterialShader(id: string): { wgsl: string; data: number[] } | n
   return null; // decal/react custom — no WGSL to ship (decals resolve as pixels below)
 }
 
-// A DECAL custom's packed recipe (DECALRECIPE-0610): the validated DecalDoc
-// straight off the stored record, lowered to the flat binary the loader
-// rasterizes (./decalPack). Null when the record isn't a decal. No editor
-// dependency, no staleness — the doc on the record IS the source of truth.
+// A DECAL's packed recipe (DECALRECIPE-0610): the validated DecalDoc lowered
+// to the flat binary the loader rasterizes (./decalPack). Custom records win
+// (the /compose-authored library); BUILT-IN docs (FACADEDECAL-0610 — the
+// transcribed React facades, e.g. internetCafe) resolve next, so facade-
+// skinned faces compile instead of dropping flat. Null when the id is
+// neither. No editor dependency, no staleness — the doc IS the source.
 function resolveMaterialDoc(id: string): Uint8Array | null {
   const custom = customById(id);
-  if (!custom?.decal) return null;
-  return packDecalDoc(custom.decal, id);
+  if (custom?.decal) return packDecalDoc(custom.decal, id);
+  const builtin = BUILTIN_DECALS[id];
+  if (builtin) return packDecalDoc(builtin, id);
+  return null;
 }
 
 // One geometry-build accumulator: the packed instance rows PLUS a parallel

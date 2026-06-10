@@ -5,6 +5,7 @@
 import { assert, assertClose, assertEqual, finish, test, withHost } from '../game/_testkit';
 import type { PlacedBuildPiece } from '@game';
 import { emptyDecalDoc } from '../game/textures/decal';
+import { BUILTIN_DECALS } from '../game/textures/builtinDecals';
 import { packDecalDoc } from './decalPack';
 import {
   buildWorldInstances,
@@ -121,6 +122,30 @@ test('decal materials ship their packed RECIPE in the MATERIALS lump tail', () =
 test('materials without docs encode with no tail (the pre-decal byte layout)', () => {
   const lump = encodeMaterials([{ key: 'flat:glass', wgsl: '', data: [], opacity: 0.3 }]);
   assertEqual(lump.byteLength, 4 + 12, 'count + one empty-recipe material, nothing appended');
+});
+
+test('react-facade skins resolve through the BUILT-IN decal table (FACADEDECAL-0610)', () => {
+  // No custom store at all — the transcribed internetCafe facade must still
+  // ship as a packed recipe instead of dropping the face to flat color.
+  const piece: PlacedBuildPiece = {
+    id: 'w3',
+    pieceId: 'wall.concrete.common',
+    x: 0,
+    y: 0,
+    z: 0,
+    yawDegrees: 0,
+    skin: { front: { kind: 'material', id: 'internetCafe' } },
+  };
+  withHost({ __localstoreGet: () => null }, () => {
+    const built = buildWorldInstances({} as any, [piece], []);
+    assertEqual(built.materials.length, 1, 'the facade interned as one material');
+    assert(built.materials[0].doc !== undefined, 'the material carries the transcribed doc');
+    assertEqual(
+      built.materials[0].doc!.byteLength,
+      packDecalDoc(BUILTIN_DECALS.internetCafe, 'internetCafe').byteLength,
+      'the interned doc is the builtin transcription',
+    );
+  });
 });
 
 test('a FLAT road-bearing floor renders through the textured heightfield path, not box slabs (RIBBONBAKE-0610)', () => {
