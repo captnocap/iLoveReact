@@ -14,7 +14,7 @@
 // Two shader families:
 //   • ROAD — the game's own layered road-tile shader (asphalt base + marking
 //     overlays), imported from the W-2 render lane's roadTileFill.ts.
-//   • THE FILL BOARDS — the effect_fills evaluation boards (A–I), one mega-WGSL
+//   • THE FILL BOARDS — the effect_fills evaluation boards (A–J), one mega-WGSL
 //     (the W-2 lane's fillShader.ts) whose D[] selects [materialId, variant,
 //     seed, quality, board]. Each board material becomes one spec with its three
 //     authored takes as variants and seed/detail-grade as the tunable base.
@@ -178,7 +178,7 @@ const CUTOUT_STENCIL: ShaderSpec = {
   },
 };
 
-// ── The fill boards (effect_fills A–I) ───────────────────────────────────────
+// ── The fill boards (effect_fills A–J) ───────────────────────────────────────
 // D = [materialId, variant, seed, quality, board]. Each material's default seed
 // follows the board's spread formula (coefA·materialId + coefB·variant + coefC),
 // matching the evaluation cart's swatches exactly at variant 0; the seed is then
@@ -305,6 +305,19 @@ const FILL_BOARDS: FillBoard[] = [
       { slug: 'brick-apartment', name: 'Brick Apartment', variants: ['Red Brick', 'Buff Brick', 'Sooted Grey'] },
       { slug: 'brick-fire-escape', name: 'Brick + Fire Escape', variants: ['Black Iron', 'Rust', 'Worn Grey'] },
       { slug: 'brick-shopfront', name: 'Brick Shopfront', variants: ['Green Awning', 'Red Awning', 'Blue Awning'] },
+      { slug: 'brick-entrance', name: 'Brick Entrance', variants: ['Stoop', 'Recessed', 'Double Door'] },
+      { slug: 'brick-rollshutter', name: 'Roll Shutter', variants: ['Plain', 'Tagged', 'Graffitied'] },
+      { slug: 'brick-bodega', name: 'Bodega Front', variants: ['Bodega', 'Laundromat', 'Diner'] },
+    ],
+  },
+  {
+    board: 9, letter: 'J', title: 'Wall Props', seedCoef: [59, 37, 421],
+    materials: [
+      { slug: 'wall-flag', name: 'Hanging Flag', variants: ['Red', 'Blue & Gold', 'Green'] },
+      { slug: 'wall-plants', name: 'Wall Plants', variants: ['Window Box', 'Hanging Vines', 'Ivy Climb'] },
+      { slug: 'wall-billboard', name: 'Billboard', variants: ['Poster', 'Faded', 'Torn'] },
+      { slug: 'wall-sign', name: 'Projecting Sign', variants: ['Blade', 'Neon', 'Shingle'] },
+      { slug: 'wall-ac', name: 'AC & Vents', variants: ['Window AC', 'Vent Grille', 'Conduit'] },
     ],
   },
 ];

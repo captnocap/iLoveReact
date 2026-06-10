@@ -15,7 +15,7 @@
 //   D[3] quality      0 PSX · 1 PS2 · 2 Preview · 3 Std · 4 Max
 //   D[4] board        0 A/Environment · 1 B/Condemned · 2 C/Props · 3 D/NeonRot
 //                     4 E/NeonSurface · 5 F/Contraband · 6 G/Liminal · 7 H/SecondPass
-//                     8 I/Facades
+//                     8 I/Facades · 9 J/WallProps
 
 export const FILL_SHADER = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
@@ -1677,6 +1677,291 @@ fn brick_shopfront(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   return sat3(col);
 }
 
+fn brick_entrance(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Residential building entryway: a stone-surround door with a transom light,
+  // an upper-floor window above, a coach lamp beside the door. variant 0 stoop
+  // (stone steps), 1 recessed dark reveal, 2 glazed double door.
+  var col = brick_wall(uv, px, vec3f(0.42, 0.13, 0.085), vec3f(0.78, 0.30, 0.17), vec3f(0.56, 0.54, 0.49), seed);
+  let aa = 0.007;
+  // Stone surround around the entrance, then the recessed reveal inside it.
+  let surround = rect_mask(uv, 0.28, 0.72, 0.0, 0.50, aa);
+  col = mix(col, vec3f(0.66, 0.63, 0.57), surround);
+  let reveal = rect_mask(uv, 0.34, 0.66, 0.0, 0.46, aa);
+  var reveal_c = vec3f(0.22, 0.18, 0.16);
+  if (variant > 0.5 && variant < 1.5) { reveal_c = vec3f(0.07, 0.06, 0.07); }
+  col = mix(col, reveal_c, reveal);
+  // Door leaf with two recessed panels.
+  var door = vec3f(0.34, 0.16, 0.10);
+  if (variant > 0.5 && variant < 1.5) { door = vec3f(0.12, 0.11, 0.12); }
+  else if (variant >= 1.5) { door = vec3f(0.16, 0.18, 0.22); }
+  let door_mask = rect_mask(uv, 0.37, 0.63, 0.02, 0.40, aa);
+  let dx = (uv.x - 0.37) / 0.26;
+  let dy = (uv.y - 0.02) / 0.38;
+  let panel_line = max(1.0 - smoothstep(0.020, 0.040, abs(dx - 0.5)), 1.0 - smoothstep(0.020, 0.040, abs(dy - 0.5)));
+  var doorcol = mix(door, door * 0.6, panel_line);
+  if (variant >= 1.5) {
+    // Glazed double door: warm interior behind the glass, central mullion.
+    doorcol = mix(doorcol, vec3f(0.86, 0.69, 0.40), 0.5);
+    doorcol = mix(doorcol, vec3f(0.14, 0.13, 0.12), 1.0 - smoothstep(0.010, 0.020, abs(dx - 0.5)));
+  }
+  col = mix(col, doorcol, door_mask);
+  // Brass knob.
+  let knob = 1.0 - smoothstep(0.008, 0.014, length(uv - vec2f(0.60, 0.20)));
+  col = mix(col, vec3f(0.85, 0.74, 0.35), knob * (1.0 - step(1.5, variant)));
+  // Transom light above the door.
+  let transom = rect_mask(uv, 0.37, 0.63, 0.41, 0.455, aa);
+  col = mix(col, vec3f(0.92, 0.76, 0.42), transom);
+  // Stone steps (stoop variant).
+  if (variant < 0.5) {
+    let step1 = rect_mask(uv, 0.26, 0.74, 0.0, 0.022, aa);
+    let step2 = rect_mask(uv, 0.29, 0.71, 0.022, 0.045, aa);
+    col = mix(col, vec3f(0.60, 0.57, 0.52), max(step1, step2));
+  }
+  // Coach lamp glow beside the door.
+  let lamp = 1.0 - smoothstep(0.0, 0.03, length((uv - vec2f(0.30, 0.42)) * vec2f(1.0, 1.2)));
+  col = col + vec3f(0.55, 0.42, 0.20) * lamp;
+  // Upper-floor window, mapped into the band above the entrance.
+  let g = vec2f((uv.x - 0.30) / 0.40, (uv.y - 0.60) / 0.34);
+  let w = paint_window(g, 1.0, seed);
+  col = mix(col, w.rgb, w.a);
+  return sat3(col);
+}
+
+fn brick_rollshutter(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Closed storefront: a corrugated roll-down shutter in the ground-floor bay,
+  // side rails, a lintel above. variant 0 plain, 1 tagged, 2 heavily graffitied.
+  var col = brick_wall(uv, px, vec3f(0.40, 0.13, 0.085), vec3f(0.74, 0.29, 0.17), vec3f(0.55, 0.53, 0.48), seed);
+  let sh = rect_mask(uv, 0.10, 0.90, 0.0, 0.70, 0.006);
+  let rib = 0.5 + 0.5 * sin(uv.y * 90.0);
+  var shutter = mix(vec3f(0.30, 0.31, 0.33), vec3f(0.50, 0.51, 0.53), rib);
+  if (variant >= 0.5) {
+    let tag1 = blotch(uv, vec2f(0.40, 0.40), 0.13, vec2f(1.2, 1.6), seed);
+    let tag2 = blotch(uv, vec2f(0.62, 0.34), 0.10, vec2f(1.4, 1.0), seed + 5.0);
+    shutter = mix(shutter, vec3f(0.90, 0.18, 0.44), tag1 * 0.7);
+    shutter = mix(shutter, vec3f(0.20, 0.82, 0.55), tag2 * 0.6);
+  }
+  if (variant >= 1.5) {
+    let tag3 = blotch(uv, vec2f(0.30, 0.30), 0.11, vec2f(1.0, 1.3), seed + 9.0);
+    let scrawl = line_near(snoise(uv.x * 9.0 + seed, uv.y * 9.0 - seed), 0.020);
+    shutter = mix(shutter, vec3f(0.96, 0.82, 0.16), tag3 * 0.7);
+    shutter = mix(shutter, vec3f(0.05, 0.05, 0.06), scrawl * 0.5);
+  }
+  let rail = max(1.0 - smoothstep(0.0, 0.018, abs(uv.x - 0.10)), 1.0 - smoothstep(0.0, 0.018, abs(uv.x - 0.90)));
+  shutter = mix(shutter, vec3f(0.16, 0.16, 0.18), sat(rail));
+  col = mix(col, shutter, sh);
+  let lintel = rect_mask(uv, 0.08, 0.92, 0.70, 0.76, 0.006);
+  col = mix(col, vec3f(0.50, 0.48, 0.44), lintel);
+  return sat3(col);
+}
+
+fn brick_bodega(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Open corner-store front: barred plate glass, a side entry door, a striped
+  // awning, and a neon sign bar above. variant 0 bodega (red), 1 laundromat
+  // (blue), 2 diner (yellow/green).
+  var col = brick_wall(uv, px, vec3f(0.40, 0.13, 0.085), vec3f(0.74, 0.29, 0.17), vec3f(0.55, 0.53, 0.48), seed);
+  var awn = vec3f(0.70, 0.16, 0.16);
+  var neon = vec3f(0.98, 0.22, 0.30);
+  if (variant > 0.5 && variant < 1.5) { awn = vec3f(0.12, 0.36, 0.66); neon = vec3f(0.30, 0.70, 0.98); }
+  else if (variant >= 1.5) { awn = vec3f(0.80, 0.72, 0.18); neon = vec3f(0.24, 0.95, 0.55); }
+  // Shop window glass with a warm interior.
+  let glass = rect_mask(uv, 0.12, 0.64, 0.08, 0.60, 0.006);
+  let refl = smoothstep(0.0, 1.0, (uv.y - 0.08) / 0.52);
+  var pane = mix(vec3f(0.06, 0.09, 0.12), vec3f(0.14, 0.20, 0.25), refl);
+  pane = mix(pane, vec3f(0.85, 0.70, 0.38), (1.0 - refl) * 0.40);
+  col = mix(col, pane, glass);
+  // Security bars over the glass.
+  let bars = (1.0 - smoothstep(0.004, 0.009, abs(fract(uv.x * 18.0) - 0.5))) * glass;
+  col = mix(col, vec3f(0.10, 0.10, 0.11), bars * 0.8);
+  // Side entry door with its own glass light.
+  let door = rect_mask(uv, 0.68, 0.88, 0.0, 0.62, 0.006);
+  col = mix(col, vec3f(0.16, 0.15, 0.16), door);
+  let doorglass = rect_mask(uv, 0.70, 0.86, 0.30, 0.58, 0.006);
+  col = mix(col, mix(vec3f(0.10, 0.13, 0.16), vec3f(0.80, 0.66, 0.36), 0.4), doorglass);
+  // Striped awning across the storefront.
+  let aw = rect_mask(uv, 0.08, 0.92, 0.64, 0.78, 0.006);
+  let stripe = step(0.5, fract(uv.x * 12.0));
+  col = mix(col, mix(awn, vec3f(0.92, 0.90, 0.85), stripe * 0.8), aw);
+  // Dark sign board + a buzzing neon bar (stand-in for the shop name).
+  let signbg = rect_mask(uv, 0.28, 0.72, 0.80, 0.92, 0.006);
+  col = mix(col, vec3f(0.05, 0.05, 0.06), signbg);
+  let buzz = 0.8 + 0.2 * sin(U.time * 30.0 + seed);
+  let neonline = (1.0 - smoothstep(0.006, 0.014, abs(uv.y - 0.86))) * step(0.32, uv.x) * step(uv.x, 0.68);
+  col = col + neon * neonline * buzz;
+  col = col + neon * signbg * exp(-abs(uv.y - 0.86) * 26.0) * 0.18;
+  return sat3(col);
+}
+
+// ── Board J / Wall Props — things mounted on or hung off the apartment wall ────
+// Claude's contribution. The user wants attachable street-furniture: flags,
+// greenery, billboards, projecting signs, AC units. Each tile renders its own
+// brick (apartment) background so it composites as one opaque face; apply it to a
+// single face where the prop should sit. Tiling stays seamless via the shared
+// brick_facade / brick_wall backgrounds.
+
+// Procedural leaf cover: 0 outside the canopy, 1 inside, soft ragged edge.
+fn leaf_cover(p: vec2f, density: f32, seed: f32) -> f32 {
+  let n = fbm(p.x * 14.0 + seed, p.y * 14.0 - seed, 5.0) * 0.5 + 0.5;
+  return smoothstep(density, density + 0.12, n);
+}
+// Mottled foliage colour — dark leaf shadow up to bright sunlit green.
+fn leaf_color(p: vec2f, seed: f32) -> vec3f {
+  let n = fbm(p.x * 22.0 + seed, p.y * 22.0, 4.0) * 0.5 + 0.5;
+  let fleck = rand(floor(p * 40.0) + seed);
+  return mix(vec3f(0.06, 0.22, 0.07), vec3f(0.30, 0.56, 0.16), n * 0.7 + fleck * 0.3);
+}
+
+fn wall_flag(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Apartment wall with a striped banner hung from a wall bracket, swaying.
+  var col = brick_facade(uv, px, 0.0, seed);
+  // Bracket arm.
+  let arm = (1.0 - smoothstep(0.0, 0.012, abs(uv.y - 0.88))) * step(0.18, uv.x) * step(uv.x, 0.42);
+  col = mix(col, vec3f(0.10, 0.10, 0.11), arm);
+  // Banner cloth: a vertical sway shifts the x-sample with height.
+  let sway = sin(uv.y * 5.0 + U.time * 1.5 + seed) * 0.015 * smoothstep(0.88, 0.30, uv.y);
+  let bx = uv.x + sway;
+  let banner = step(0.20, bx) * step(bx, 0.40) * step(0.30, uv.y) * step(uv.y, 0.86);
+  var c1 = vec3f(0.80, 0.16, 0.18);
+  var c2 = vec3f(0.92, 0.90, 0.86);
+  if (variant > 0.5 && variant < 1.5) { c1 = vec3f(0.10, 0.28, 0.62); c2 = vec3f(0.95, 0.82, 0.25); }
+  else if (variant >= 1.5) { c1 = vec3f(0.10, 0.45, 0.25); c2 = vec3f(0.88, 0.84, 0.30); }
+  let stripe = step(0.5, fract(uv.y * 9.0));
+  var bcol = mix(c1, c2, stripe * 0.5);
+  let midx = (bx - 0.20) / 0.20;
+  let emblem = 1.0 - smoothstep(0.050, 0.065, length(vec2f(bx, uv.y) - vec2f(0.30, 0.66)));
+  bcol = mix(bcol, c2, emblem);
+  bcol = bcol * (0.85 + 0.15 * sin(midx * 6.2831 + sway * 30.0)); // cloth fold shading
+  col = mix(col, bcol, banner);
+  // Fringe of tassels along the bottom edge.
+  let fringe = step(0.20, bx) * step(bx, 0.40) * (1.0 - smoothstep(0.0, 0.012, abs(uv.y - 0.30))) * step(0.5, fract(bx * 30.0));
+  col = mix(col, c2, fringe);
+  return sat3(col);
+}
+
+fn wall_plants(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Greenery on the apartment face. variant 0 window boxes, 1 hanging vines,
+  // 2 climbing ivy.
+  var col = brick_facade(uv, px, 0.0, seed);
+  if (variant < 0.5) {
+    let box = max(rect_mask(uv, 0.30, 0.70, 0.280, 0.345, 0.005), rect_mask(uv, 0.30, 0.70, 0.780, 0.845, 0.005));
+    let canopy = max(rect_mask(uv, 0.28, 0.72, 0.345, 0.47, 0.02), rect_mask(uv, 0.28, 0.72, 0.845, 0.97, 0.02));
+    let drape = max(rect_mask(uv, 0.30, 0.70, 0.24, 0.345, 0.02), rect_mask(uv, 0.30, 0.70, 0.74, 0.845, 0.02));
+    let fol = leaf_cover(uv, 0.45, seed) * max(canopy, drape);
+    col = mix(col, vec3f(0.26, 0.18, 0.11), box);
+    col = mix(col, leaf_color(uv, seed), fol);
+    let flower = speckle(px, 6.0, seed, 0.93) * fol;
+    col = mix(col, vec3f(0.95, 0.55, 0.65), flower * 0.8);
+  } else if (variant < 1.5) {
+    let vine = leaf_cover(vec2f(uv.x, uv.y * 0.6), 0.50 - smoothstep(0.30, 1.0, uv.y) * 0.18, seed) * smoothstep(0.30, 1.0, uv.y);
+    col = mix(col, leaf_color(uv, seed + 3.0), vine);
+  } else {
+    let dense = smoothstep(1.4, 0.2, uv.x + uv.y);
+    let ivy = leaf_cover(uv, 0.52 - dense * 0.25, seed) * dense;
+    col = mix(col, leaf_color(uv, seed + 7.0), ivy);
+  }
+  return sat3(col);
+}
+
+fn wall_billboard(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Big framed billboard bolted to the brick, lit by a top light bar. variant 0
+  // fresh poster, 1 sun-faded, 2 torn (peeling to brick).
+  let brick_lo = vec3f(0.40, 0.13, 0.085);
+  let brick_hi = vec3f(0.70, 0.28, 0.16);
+  let brick_m = vec3f(0.52, 0.50, 0.46);
+  var col = brick_wall(uv, px, brick_lo, brick_hi, brick_m, seed);
+  let frame = rect_mask(uv, 0.06, 0.94, 0.16, 0.88, 0.006);
+  let panel = rect_mask(uv, 0.08, 0.92, 0.18, 0.86, 0.006);
+  col = mix(col, vec3f(0.12, 0.12, 0.13), frame);
+  // Poster: a bold geometric ad — diagonal split, a sun disc, a headline band.
+  let u = uv - vec2f(0.5, 0.52);
+  var poster = mix(vec3f(0.95, 0.30, 0.20), vec3f(0.15, 0.20, 0.55), smoothstep(-0.3, 0.3, u.x + u.y));
+  let disc = 1.0 - smoothstep(0.12, 0.16, length(u * vec2f(1.2, 1.0)));
+  poster = mix(poster, vec3f(0.98, 0.85, 0.20), disc);
+  let head = rect_mask(uv, 0.14, 0.86, 0.30, 0.40, 0.006);
+  poster = mix(poster, vec3f(0.05, 0.05, 0.07), head);
+  let headtext = rect_mask(uv, 0.18, 0.82, 0.33, 0.37, 0.004) * step(0.5, fract(uv.x * 26.0));
+  poster = mix(poster, vec3f(0.95, 0.92, 0.85), headtext);
+  if (variant > 0.5 && variant < 1.5) {
+    let l = dot(poster, vec3f(0.333, 0.333, 0.333));
+    poster = mix(poster, vec3f(l * 1.1 + 0.10), 0.55);
+  }
+  col = mix(col, poster, panel);
+  if (variant >= 1.5) {
+    let tear = smoothstep(0.46, 0.60, fbm(uv.x * 4.0 + seed, uv.y * 4.0, 4.0) * 0.5 + 0.5) * panel * step(0.55, uv.x);
+    col = mix(col, brick_wall(uv, px, brick_lo, brick_hi, brick_m, seed), tear);
+  }
+  // Top flood-light bar.
+  let lights = (1.0 - smoothstep(0.0, 0.010, abs(uv.y - 0.90))) * step(0.12, uv.x) * step(uv.x, 0.88) * step(0.5, fract(uv.x * 12.0));
+  col = col + vec3f(0.70, 0.65, 0.50) * lights;
+  // Support struts below.
+  let strut = max(1.0 - smoothstep(0.0, 0.012, abs(uv.x - 0.30)), 1.0 - smoothstep(0.0, 0.012, abs(uv.x - 0.70))) * (1.0 - step(0.16, uv.y));
+  col = mix(col, vec3f(0.14, 0.14, 0.15), strut);
+  return sat3(col);
+}
+
+fn wall_sign(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // A sign mounted to the apartment wall. variant 0 painted blade sign, 1 vertical
+  // neon sign, 2 hanging wooden shingle.
+  var col = brick_facade(uv, px, 0.0, seed);
+  if (variant > 0.5 && variant < 1.5) {
+    let box = rect_mask(uv, 0.16, 0.34, 0.10, 0.82, 0.006);
+    col = mix(col, vec3f(0.05, 0.05, 0.07), box);
+    let neon = vec3f(0.98, 0.24, 0.52);
+    let row = fract(uv.y * 7.0);
+    let letter = (1.0 - smoothstep(0.18, 0.30, abs(row - 0.5))) * step(0.20, uv.x) * step(uv.x, 0.30) * box;
+    let cx = 1.0 - smoothstep(0.0, 0.06, abs(uv.x - 0.25));
+    let buzz = 0.85 + 0.15 * sin(U.time * 28.0 + seed);
+    col = col + neon * letter * cx * buzz;
+    col = col + neon * box * exp(-abs(uv.x - 0.25) * 16.0) * 0.22;
+    let bracket = (1.0 - smoothstep(0.0, 0.010, abs(uv.y - 0.78))) * step(0.34, uv.x) * step(uv.x, 0.42);
+    col = mix(col, vec3f(0.10, 0.10, 0.11), bracket);
+  } else {
+    var board = vec3f(0.16, 0.30, 0.42);
+    if (variant >= 1.5) { board = vec3f(0.34, 0.20, 0.10); }
+    let arm = (1.0 - smoothstep(0.0, 0.012, abs(uv.y - 0.84))) * step(0.20, uv.x) * step(uv.x, 0.40);
+    col = mix(col, vec3f(0.10, 0.10, 0.11), arm);
+    let link = max(1.0 - smoothstep(0.0, 0.006, abs(uv.x - 0.26)), 1.0 - smoothstep(0.0, 0.006, abs(uv.x - 0.40))) * step(0.74, uv.y) * step(uv.y, 0.84);
+    col = mix(col, vec3f(0.12, 0.12, 0.13), link);
+    let sign = rect_mask(uv, 0.18, 0.48, 0.52, 0.74, 0.006);
+    col = mix(col, board, sign);
+    let border = sign * (1.0 - rect_mask(uv, 0.20, 0.46, 0.54, 0.72, 0.006));
+    col = mix(col, vec3f(0.86, 0.80, 0.55), border * 0.8);
+    let txt = rect_mask(uv, 0.23, 0.43, 0.60, 0.66, 0.006) * step(0.5, fract(uv.x * 22.0));
+    col = mix(col, vec3f(0.90, 0.86, 0.62), txt * 0.9);
+  }
+  return sat3(col);
+}
+
+fn wall_ac(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Apartment-wall mechanicals: window AC units, an exhaust vent, or a conduit +
+  // meter run. variant 0 window AC, 1 vent grille, 2 conduit & meter.
+  var col = brick_facade(uv, px, 0.0, seed);
+  if (variant < 0.5) {
+    let ac = max(rect_mask(uv, 0.36, 0.64, 0.22, 0.34, 0.006), rect_mask(uv, 0.36, 0.64, 0.72, 0.84, 0.006));
+    col = mix(col, vec3f(0.78, 0.78, 0.74), ac);
+    let grille = (1.0 - smoothstep(0.004, 0.009, abs(fract(uv.y * 60.0) - 0.5))) * ac;
+    col = mix(col, vec3f(0.55, 0.55, 0.52), grille * 0.6);
+    let drip = vertical_drips(uv, seed, 1.0) * smoothstep(0.0, 0.20, uv.y) * (1.0 - smoothstep(0.34, 0.40, uv.y));
+    col = mix(col, vec3f(0.30, 0.22, 0.14), drip * 0.4);
+  } else if (variant < 1.5) {
+    let vent = rect_mask(uv, 0.38, 0.62, 0.42, 0.64, 0.006);
+    col = mix(col, vec3f(0.30, 0.30, 0.32), vent);
+    let louver = (1.0 - smoothstep(0.010, 0.020, abs(fract(uv.y * 22.0) - 0.5))) * vent;
+    col = mix(col, vec3f(0.12, 0.12, 0.13), louver * 0.7);
+    let soot = smoothstep(0.64, 0.95, uv.y) * (1.0 - smoothstep(0.0, 0.18, abs(uv.x - 0.5))) * (fbm(uv.x * 8.0, uv.y * 8.0 + seed, 4.0) * 0.5 + 0.5);
+    col = mix(col, vec3f(0.05, 0.05, 0.05), soot * 0.5);
+  } else {
+    let pipe = max(1.0 - smoothstep(0.006, 0.012, abs(uv.x - 0.30)), 1.0 - smoothstep(0.006, 0.012, abs(uv.x - 0.345)));
+    col = mix(col, vec3f(0.30, 0.30, 0.33), pipe);
+    let mbox = rect_mask(uv, 0.50, 0.66, 0.40, 0.62, 0.006);
+    col = mix(col, vec3f(0.55, 0.55, 0.50), mbox);
+    let dial = (1.0 - smoothstep(0.0, 0.04, length(uv - vec2f(0.58, 0.51)))) * mbox;
+    col = mix(col, vec3f(0.85, 0.85, 0.80), dial);
+    let run = (1.0 - smoothstep(0.006, 0.012, abs(uv.y - 0.62))) * step(0.30, uv.x) * step(uv.x, 0.58);
+    col = mix(col, vec3f(0.28, 0.28, 0.30), run);
+  }
+  return sat3(col);
+}
+
 fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, board: f32) -> vec3f {
   let raw_q = clamp(quality, 0.0, 4.0);
   let q = clamp(raw_q - 2.0, 0.0, 2.0);
@@ -1726,10 +2011,15 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     out_col = mix(out_col, vec3f(0.022, 0.024, 0.020), smoothstep(0.55 - q * 0.04, 0.88, coarse) * (0.08 + q * 0.06));
     out_col = out_col + vec3f((fine - 0.5) * (0.012 + q * 0.018));
   }
-  if (board > 7.5) {
+  if (board > 7.5 && board < 8.5) {
     // Board I facades — keep the brick crisp and the painted windows clean; only
     // a whisper of soot in the lows so the masonry doesn't read as plastic.
     out_col = mix(out_col, vec3f(0.030, 0.028, 0.024), smoothstep(0.62 - q * 0.04, 0.94, coarse) * (0.06 + q * 0.05));
+  }
+  if (board > 8.5) {
+    // Board J wall props — same crisp brick treatment; the neon/lit props supply
+    // their own glow, so add only the faintest soot and leave the highs alone.
+    out_col = mix(out_col, vec3f(0.030, 0.028, 0.024), smoothstep(0.64 - q * 0.04, 0.94, coarse) * (0.05 + q * 0.04));
   }
   if (retro > 0.001) {
     let dither_cell = floor(px / (1.0 + retro));
@@ -1823,10 +2113,19 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     else if (material == 4) { col = deep_water(uv, px, variant, seed); }
     else if (material == 5) { col = turf(uv, px, variant, seed); }
     else { col = plank_deck(uv, px, variant, seed); }
-  } else {
+  } else if (board < 8.5) {
     if (material == 0) { col = brick_facade(uv, px, variant, seed); }
     else if (material == 1) { col = brick_fire_escape(uv, px, variant, seed); }
-    else { col = brick_shopfront(uv, px, variant, seed); }
+    else if (material == 2) { col = brick_shopfront(uv, px, variant, seed); }
+    else if (material == 3) { col = brick_entrance(uv, px, variant, seed); }
+    else if (material == 4) { col = brick_rollshutter(uv, px, variant, seed); }
+    else { col = brick_bodega(uv, px, variant, seed); }
+  } else {
+    if (material == 0) { col = wall_flag(uv, px, variant, seed); }
+    else if (material == 1) { col = wall_plants(uv, px, variant, seed); }
+    else if (material == 2) { col = wall_billboard(uv, px, variant, seed); }
+    else if (material == 3) { col = wall_sign(uv, px, variant, seed); }
+    else { col = wall_ac(uv, px, variant, seed); }
   }
 
   let vignette = 1.0 - smoothstep(0.20, 0.88, length(uv - vec2f(0.5, 0.5)));

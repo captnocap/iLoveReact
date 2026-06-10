@@ -90,11 +90,25 @@ const ALT_MATERIALS = [
   { id: 6, name: 'Plank Deck' },
 ] as const;
 
-// Board I / Facades — Claude's apartment-brick wall faces with painted-in windows (board id 8).
+// Board I / Facades — Claude's apartment-brick wall faces: windows, entryways,
+// storefronts (board id 8).
 const FACADE_MATERIALS = [
   { id: 0, name: 'Brick Apartment' },
   { id: 1, name: 'Brick + Fire Escape' },
   { id: 2, name: 'Brick Shopfront' },
+  { id: 3, name: 'Brick Entrance' },
+  { id: 4, name: 'Roll Shutter' },
+  { id: 5, name: 'Bodega Front' },
+] as const;
+
+// Board J / Wall Props — Claude's mounted street-furniture: flags, plants,
+// billboards, signs, AC units (board id 9).
+const WALLPROP_MATERIALS = [
+  { id: 0, name: 'Hanging Flag' },
+  { id: 1, name: 'Wall Plants' },
+  { id: 2, name: 'Billboard' },
+  { id: 3, name: 'Projecting Sign' },
+  { id: 4, name: 'AC & Vents' },
 ] as const;
 
 const QUALITY_GRADES = [
@@ -105,7 +119,7 @@ const QUALITY_GRADES = [
   { id: 4, label: 'Max', note: 'extra detail' },
 ] as const;
 type QualityGrade = typeof QUALITY_GRADES[number]['id'];
-type BoardId = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+type BoardId = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 
 function fillData(materialId: number, variant: number, quality: QualityGrade, board: BoardId): number[] {
@@ -125,7 +139,9 @@ function fillData(materialId: number, variant: number, quality: QualityGrade, bo
                 ? materialId * 43.0 + variant * 27.0 + 271.0
                 : board === 7
                   ? materialId * 47.0 + variant * 29.0 + 313.0
-                  : materialId * 53.0 + variant * 31.0 + 367.0;
+                  : board === 8
+                    ? materialId * 53.0 + variant * 31.0 + 367.0
+                    : materialId * 59.0 + variant * 37.0 + 421.0;
   return [materialId, variant, seed, quality, board];
 }
 
@@ -249,6 +265,17 @@ function FacadeColumn({ material, quality }: { material: typeof FACADE_MATERIALS
       <Text style={{ fontSize: 13, color: '#d8e2ef', fontWeight: '700' }}>{material.name}</Text>
       {VARIANTS.map((variant) => (
         <Swatch key={`i-${material.id}-${variant}`} data={fillData(material.id, variant, quality, 8)} idLabel={swatchId('I', material.id, variant)} />
+      ))}
+    </Col>
+  );
+}
+
+function WallPropColumn({ material, quality }: { material: typeof WALLPROP_MATERIALS[number]; quality: QualityGrade }) {
+  return (
+    <Col style={{ width: SWATCH, gap: 10 }}>
+      <Text style={{ fontSize: 13, color: '#d8e2ef', fontWeight: '700' }}>{material.name}</Text>
+      {VARIANTS.map((variant) => (
+        <Swatch key={`j-${material.id}-${variant}`} data={fillData(material.id, variant, quality, 9)} idLabel={swatchId('J', material.id, variant)} />
       ))}
     </Col>
   );
@@ -384,10 +411,19 @@ export default function EffectFills() {
           </Col>
 
           <Col style={{ gap: 18 }}>
-            <BoardHeader title="Board I / Facades — Claude" subtitle="I01-I09: brick apartment, brick + fire escape, brick shopfront — painted-in windows so a stack of wall faces reads as an apartment block" />
+            <BoardHeader title="Board I / Facades — Claude" subtitle="I01-I18: brick apartment, fire escape, shopfront, entrance, roll shutter, bodega — painted-in windows/doors so a stack of wall faces reads as a building" />
             <Row style={{ gap: 18, alignItems: 'flex-start' }}>
               {FACADE_MATERIALS.map((material) => (
                 <FacadeColumn key={material.id} material={material} quality={quality} />
+              ))}
+            </Row>
+          </Col>
+
+          <Col style={{ gap: 18 }}>
+            <BoardHeader title="Board J / Wall Props — Claude" subtitle="J01-J15: hanging flag, wall plants, billboard, projecting sign, AC & vents — street furniture mounted on the apartment face, each over its own brick background" />
+            <Row style={{ gap: 18, alignItems: 'flex-start' }}>
+              {WALLPROP_MATERIALS.map((material) => (
+                <WallPropColumn key={material.id} material={material} quality={quality} />
               ))}
             </Row>
           </Col>
