@@ -123,6 +123,7 @@ export default function VehicleHandling() {
         // screen-left under this camera, so left keys send positive steer).
         steer: (keys.isDown('a') || keys.isDown('left') ? 1 : 0) + (keys.isDown('d') || keys.isDown('right') ? -1 : 0),
         handbrake: keys.isDown('space'),
+        footBrake: keys.shift(), // Shift = firm brake to a stop (no reverse)
       };
       const telem = GAME_DRIVING.step(carRef.current, input, tuningRef.current, dt);
 
@@ -226,8 +227,8 @@ export default function VehicleHandling() {
           </Box>
         </Pressable>
         <Text style={{ color: DIM, fontSize: 10 }}>W/↑ throttle · S/↓ brake+reverse</Text>
-        <Text style={{ color: DIM, fontSize: 10 }}>A/D steer · Space handbrake (drift)</Text>
-        <Text style={{ color: DIM, fontSize: 10 }}>drag to orbit · scroll to zoom</Text>
+        <Text style={{ color: DIM, fontSize: 10 }}>Shift brake (stop) · Space handbrake (drift)</Text>
+        <Text style={{ color: DIM, fontSize: 10 }}>A/D steer · drag to look · scroll to zoom</Text>
       </Col>
 
       {/* ── right: the test pad ────────────────────────────────────────────── */}

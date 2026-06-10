@@ -71,6 +71,9 @@ export type CarInput = {
   /** -1..1 — negative steers left. */
   steer: number;
   handbrake: boolean;
+  /** firm foot brake: decelerates to a STOP from either direction and holds —
+   *  never reverses (the difference from `brake`). Optional/back-compatible. */
+  footBrake?: boolean;
 };
 
 export type CarTelemetry = {
@@ -131,6 +134,11 @@ export function stepCar(s: CarState, input: CarInput, t: CarTuning, dt: number):
     } else {
       vf -= input.brake * t.reversePower * step; // rolling/stopped → reverse
     }
+  }
+  // Foot brake: firm decel to a stop from either direction, never reverses.
+  if (input.footBrake) {
+    const decel = t.brakePower * 1.4 * step;
+    vf = vf > 0 ? Math.max(0, vf - decel) : Math.min(0, vf + decel);
   }
   vf = clamp(vf, -t.reverseTopSpeed, t.topSpeed);
 

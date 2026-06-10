@@ -24,7 +24,8 @@ vehicle body around a cone-slalom test pad and dial its handling live:
   the turn radius, so the fire truck turns wide and the sports car turns tight.
 
 Controls: **W/↑** throttle · **S/↓** brake then reverse · **A/D** (or ←/→)
-steer · **Space** handbrake. HUD: km/h, gear (D/R/N), slip angle.
+steer · **Shift** foot brake (firm stop, no reverse) · **Space** handbrake
+(drift, cuts grip). HUD: km/h, gear (D/R/N), slip angle.
 
 The camera is an **auto-centering chase cam**: it trails behind the car's
 heading, drag adds a peek offset that eases back to center (so you stay
