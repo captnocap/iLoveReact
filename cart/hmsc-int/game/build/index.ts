@@ -94,6 +94,7 @@ export {
   mintPrefabId,
   prefabFromPieces,
   validatePlacement,
+  liftBuildingsToTerrain,
 } from './placed';
 export type {
   PieceBounds,
@@ -189,6 +190,7 @@ import {
   mintPrefabId,
   prefabFromPieces,
   validatePlacement,
+  liftBuildingsToTerrain,
 } from './placed';
 
 // The V14/V17 ground-floor handle: `import { GAME_BUILD } from '@game'`.
@@ -264,5 +266,8 @@ export const GAME_BUILD = {
     mintPrefabId,
     prefabFromPieces,
     validatePlacement,
+    /** flat-pad terrain lift (req_0444): a stamped building rides the terrain under
+     *  its footprint as one level pad — pure/idempotent, applied at render+collide+compile */
+    liftToTerrain: liftBuildingsToTerrain,
   },
 } as const;

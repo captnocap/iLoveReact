@@ -61,6 +61,10 @@ export type PlacedBuildPiece = {
   skin?: BuildSkinSet;
   /** prefab stamp group id, when this piece came from one prefabStamped event */
   stampId?: string;
+  /** source prefab id for stamped pieces, so type-skin edits can refresh live instances */
+  prefabId?: string;
+  /** source piece index inside the prefab definition */
+  prefabPieceIndex?: number;
 };
 
 // ── P2 tuning: every behavior-affecting number is table data ─────────────────
@@ -775,7 +779,7 @@ export function stampPrefabPieces(
   // R(+yaw), the SAME frame raycastPieces/placedPieceColliders rotate a
   // piece's own body with — composition turn and piece spin must agree or
   // a turned stamp pulls its walls off its corners
-  return prefab.pieces.map((piece) => {
+  return prefab.pieces.map((piece, index) => {
     const kind = catalogEntry(piece.pieceId).kind;
     const skin: BuildSkinSet = {};
     for (const slot of BUILD_FACE_SLOTS) {
@@ -790,6 +794,8 @@ export function stampPrefabPieces(
       yawDegrees: normalizeYaw(piece.yawDegrees + yawDegrees),
       ...(piece.edit !== undefined ? { edit: piece.edit } : {}),
       ...(Object.keys(skin).length > 0 ? { skin } : {}),
+      prefabId: prefab.id,
+      prefabPieceIndex: index,
     };
   });
 }
@@ -846,6 +852,41 @@ export function prefabFromPieces(
 
 /** Boundary validation for a to-be-appended placement (the stream materializer
  *  is tolerant by contract; the AUTHORING side validates before it appends). */
+// Flat-pad terrain lift (USER RULING req_0444: "sit on a flat pad"). A building (a
+// prefab-stamp group, keyed by stampId) is lifted as ONE rigid pad so its lowest piece
+// sits on the terrain height under the group's footprint centre — paint a hill and the
+// building rides up with it, staying level (it never warps or tilts). PURE and
+// IDEMPOTENT: it reads the stored (terrain-agnostic) y and returns lifted copies, so it
+// can be applied at every consumption site (editor render, F2 collide, compile) without
+// the editor and game ever drifting, and re-applying it is a no-op (a lifted group's min
+// already equals the terrain, so the next offset is 0). Stored data is never mutated, so
+// editing a building reads the raw y and this re-lifts the result — no double-lift.
+//
+// Loose pieces (no stampId — single placements) keep their authored y: those are placed
+// directly on the picked ground, and grouping them would need a connected-components pass
+// every frame. Only stamped buildings get the pad.
+export function liftBuildingsToTerrain<T extends PlacedBuildPiece>(
+  pieces: readonly T[],
+  terrainAt: (x: number, z: number) => number,
+): T[] {
+  const groups = new Map<string, T[]>();
+  const loose: T[] = [];
+  for (const p of pieces) {
+    if (p.stampId) { const g = groups.get(p.stampId); if (g) g.push(p); else groups.set(p.stampId, [p]); }
+    else loose.push(p);
+  }
+  const out: T[] = [];
+  for (const g of groups.values()) {
+    let sx = 0, sz = 0, minY = Infinity;
+    for (const p of g) { sx += p.x; sz += p.z; if (p.y < minY) minY = p.y; }
+    const offset = terrainAt(sx / g.length, sz / g.length) - minY;
+    if (Math.abs(offset) < 1e-6) { for (const p of g) out.push(p); }
+    else for (const p of g) out.push({ ...p, y: p.y + offset });
+  }
+  for (const p of loose) out.push(p);
+  return out;
+}
+
 export function validatePlacement(placement: Omit<PlacedBuildPiece, 'id'>): string[] {
   const problems: string[] = [];
   if (!isCatalogId(placement.pieceId)) {

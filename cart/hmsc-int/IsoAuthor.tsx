@@ -139,6 +139,15 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     () => props.groundTopAt ?? ((x, z) => groundColumnTop(worldGrid, x, z)),
     [props.groundTopAt, worldGrid],
   );
+  // What the pane DRAWS and HIT-TESTS: stamped buildings lifted onto the terrain under
+  // their footprint (flat pad, req_0444) via the shared idempotent helper the game and
+  // compile also use — so the build pane shows pieces exactly where they'll stand, and
+  // re-paints the lift when you paint height. Edits keep the RAW `pieces` (piecesRef
+  // below): a move/clone commits terrain-agnostic y and the lift re-applies at the new
+  // spot — no double-lift, no editor-vs-game drift.
+  const displayPieces = useMemo(() => GAME_BUILD.placed.liftToTerrain(pieces, groundTopAt), [pieces, groundTopAt]);
+  const displayPiecesRef = useRef(displayPieces);
+  displayPiecesRef.current = displayPieces;
 
   // The camera controller, seeded centred on what's already built. Pose lives in the
   // ref; a tick forces the Scene3D.Camera to re-read the solved pose on pan/zoom/turn.
@@ -235,7 +244,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // Grab a selected piece to move it: only when unarmed (armed = place mode) and the
     // press raycasts onto a piece already in the selection. Anything else → rotate.
     if (!armedRef.current && selectedIdsRef.current.size) {
-      const hit = GAME_BUILD.placed.raycast(stage.pieceRay(p.x, p.y, rectRef.current), piecesRef.current, ISO_SNAP_TUNING.reachMeters);
+      // raycast the DRAWN (terrain-lifted) pieces so the grab matches what's on screen
+      const hit = GAME_BUILD.placed.raycast(stage.pieceRay(p.x, p.y, rectRef.current), displayPiecesRef.current, ISO_SNAP_TUNING.reachMeters);
       if (hit && selectedIdsRef.current.has(hit.piece.id)) {
         const g = stage.groundPoint(p.x, p.y, rectRef.current);
         if (g) { mode = 'move'; gx0 = g.x; gz0 = g.z; }
@@ -307,9 +317,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // Select the piece under the cursor (raycast the standing pieces) — the whole
   // connected building, or a single piece. Empty click clears.
   const selectAt = (sx: number, sy: number) => {
-    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), piecesRef.current, ISO_SNAP_TUNING.reachMeters);
+    // Hit-test the DRAWN (terrain-lifted) pieces so a click lands on what's on screen.
+    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), displayPiecesRef.current, ISO_SNAP_TUNING.reachMeters);
     if (!hit) { setSelectedIds(new Set()); return; }
-    setSelectedIds(wholeBuildingRef.current ? GAME_BUILD.placed.connected(hit.piece.id, piecesRef.current) : new Set([hit.piece.id]));
+    setSelectedIds(wholeBuildingRef.current ? GAME_BUILD.placed.connected(hit.piece.id, displayPiecesRef.current) : new Set([hit.piece.id]));
   };
   // Remove every selected piece (one pieceRemoved each, the SAME event F2's X commits).
   const deleteSelected = () => {
@@ -327,10 +338,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     for (const p of sel) { const b = GAME_BUILD.placed.bounds(p); minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX); }
     const dx = (maxX - minX) + state.world.cellSizeMeters;
     // Spread the whole piece (minus the stream-minted id) so each copy keeps its per-face
-    // skin/materials and any wall edit — only the X position shifts. Drop the stamp
-    // grouping so a clone is an independent piece, not a phantom member of the original's
-    // prefab stamp. One batch → one undo step, one snapshot.
-    commitBatch(sel.map((p) => { const { id, stampId, ...rest } = p; return { event: { kind: 'piecePlaced', placement: { ...rest, x: p.x + dx } } as WorldEvent, label: `cloned ${p.pieceId}` }; }));
+    // skin/materials and any wall edit — only the X position shifts. Give the WHOLE clone
+    // one fresh stampId: that makes the copy its own independent building (so it gets the
+    // flat-pad terrain lift as a unit) instead of a phantom member of the original's stamp.
+    // One batch → one undo step, one snapshot.
+    const cloneStampId = `clone-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+    commitBatch(sel.map((p) => { const { id, ...rest } = p; return { event: { kind: 'piecePlaced', placement: { ...rest, x: p.x + dx, stampId: cloneStampId } } as WorldEvent, label: `cloned ${p.pieceId}` }; }));
   };
   // Commit a finished move drag: shift every selected piece by the dragged world delta.
   // There's no pieceMoved event (that'd touch the shared stream + F2 + compile) — a move
@@ -457,7 +470,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // same ghost language placement uses, so a move reads like a re-place.
   const moveGhostMeshes = useMemo(() => {
     if (!moveDelta) return null;
-    const sel = pieces.filter((p) => selectedIds.has(p.id));
+    // Preview from the DRAWN (terrain-lifted) pieces so the ghost rides the terrain where
+    // the building currently stands; the committed move re-lifts at the drop spot.
+    const sel = displayPieces.filter((p) => selectedIds.has(p.id));
     if (!sel.length) return null;
     const moved = sel.map((p) => ({ pieceId: p.pieceId, x: p.x + moveDelta.dx, y: p.y, z: p.z + moveDelta.dz, yawDegrees: p.yawDegrees }));
     const blocked = moved.some((m) => GAME_BUILD.placed.validatePlacement(m as any).length > 0);
@@ -465,7 +480,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     return moved.flatMap((m, i) => pieceVisualShapes(m, `isoMove${i}`).map((shape) => (
       <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
     )));
-  }, [moveDelta, pieces, selectedIds]);
+  }, [moveDelta, displayPieces, selectedIds]);
 
   const noIds = useMemo(() => new Set<string>(), []);
 
@@ -476,9 +491,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const occludedIds = useMemo(() => {
     const cut = (level + 1) * METERS_PER_LEVEL - 0.01;
     const s = new Set<string>();
-    for (const p of pieces) if (p.y >= cut) s.add(p.id);
+    for (const p of displayPieces) if (p.y >= cut) s.add(p.id);
     return s;
-  }, [pieces, level]);
+  }, [displayPieces, level]);
 
   // Memoize the STATIC scene content — the world meshes (terrain/landforms/props) and
   // the texture-capture mounts — so a camera-only redraw doesn't re-run and reconcile
@@ -525,7 +540,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         <IsoGrid centerX={stage.pose.centerX} centerZ={stage.pose.centerZ} level={level} distance={stage.distance()} />
         {/* the standing city — the SAME renderer F2 uses; selection highlighted,
             floors above the active level faded (cut-away) so you see the interior */}
-        <PlacedPieceMeshes pieces={pieces} markedIds={selectedIds} targetId={null} occludedIds={occludedIds} />
+        <PlacedPieceMeshes pieces={displayPieces} markedIds={selectedIds} targetId={null} occludedIds={occludedIds} />
         {ghostMeshes}
         {moveGhostMeshes}
       </Scene3D>

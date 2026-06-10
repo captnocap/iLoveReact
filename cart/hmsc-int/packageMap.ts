@@ -20,10 +20,26 @@ import {
 } from '@reactjit/workspace';
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
 import { buildWorldInstances, encodeFloorHeightfields, encodeInstanceLump, encodeMaterialRefs, encodeMaterials } from './compile/worldGeometry';
+import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, type BakedPhysicsConfig } from './compile/worldColliders';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './compile/playerModel';
 import type { ChunkFloor } from './chunkFloor';
-import type { PlacedBuildPiece } from '@game';
+import { GAME_BUILD, GAME_WORLD, type PlacedBuildPiece } from '@game';
+
+// Terrain top (metres) under a world point — the SAME column the editor's
+// groundColumnTop computes (surface-region tops + landform field), replicated here so
+// the compile doesn't pull the React editor module. Buildings bake onto THIS so the
+// shipped game stands them exactly where the build pane drew them (req_0444 flat pad).
+function compileTerrainTopAt(world: GameState['world'], x: number, z: number): number {
+  let top = 0;
+  const c = world.cellSizeMeters;
+  for (const r of world.surfaceRegions) {
+    if (x >= r.x * c && x <= (r.x + r.width) * c && z >= r.z * c && z <= (r.z + r.depth) * c) {
+      top = Math.max(top, GAME_WORLD.surfaceRegionTopMeters(r as Parameters<typeof GAME_WORLD.surfaceRegionTopMeters>[0], c));
+    }
+  }
+  return Math.max(top, GAME_WORLD.landformGroundTopAt(world as Parameters<typeof GAME_WORLD.landformGroundTopAt>[0], x, z) ?? top);
+}
 
 export const DEFAULT_HMSC_PACKAGE_DIR = 'cart/hmsc-int/exports/hmsc.rjpkg';
 export const DEFAULT_HMSC_MAP_NAME = 'city';
@@ -174,14 +190,55 @@ export function createHmscMapfile(
     landforms: state.world.landforms,
   };
 
+  // Flat-pad terrain lift (req_0444): stamp-grouped buildings bake onto the terrain
+  // under their footprint, the SAME idempotent transform the build pane draws with — so
+  // the shipped game stands every building exactly where the editor showed it. Applied
+  // ONCE here so BOTH the render geometry and the physics colliders below use the lifted
+  // positions (see-it == walk-it). Loose single pieces keep their authored y.
+  const liftedPieces = GAME_BUILD.placed.liftToTerrain(pieces, (x, z) => compileTerrainTopAt(state.world, x, z));
+
   // The authored world's 3D geometry: the placed pieces (structures) PLUS the
   // painted floor (the user's real ground, from chunk tile fields). The piece
   // count rides in the lump so the loader frames the camera on the structures.
-  const geometry = buildWorldInstances(state, pieces, floors);
+  const geometry = buildWorldInstances(state, liftedPieces, floors);
   const instances = encodeInstanceLump(geometry.instances, geometry.pieces);
   const materials = encodeMaterials(geometry.materials);
   const materialRefs = encodeMaterialRefs(geometry.materialRefs);
   const heightfields = encodeFloorHeightfields(floors);
+
+  // The AUTHORED physics colliders — the same +-join-aware solids the editor's
+  // play view steps against (placedPieceColliders / placedPieceRamps), so a "+"
+  // wall collides where it looks instead of where the render boxes happened to
+  // land — PLUS one collision heightfield per FLAT painted chunk, so the painted
+  // ground travels as a handful of heightfields instead of thousands of per-cell
+  // rects (which blew the host rect cap). Field slots start after the relief
+  // heightfields the HEIGHTFIELDS lump owns. See compile/worldColliders.ts.
+  const colliders = encodeCollidersLump(buildBakedColliders(liftedPieces, floors, floors.length));
+  // The player physics config the editor play view uses (state.config.physics +
+  // the active player's walk/run speed), baked so the shipped game moves and
+  // collides identically instead of re-declaring constants in world_loader.zig.
+  const ph = state.config.physics;
+  const physicsConfig: BakedPhysicsConfig = {
+    tuning: {
+      gravityMetersPerSecondSquared: ph.gravityMetersPerSecondSquared,
+      jumpSpeedMetersPerSecond: ph.jumpSpeedMetersPerSecond,
+      playerCapsuleRadiusMeters: ph.playerCapsuleRadiusMeters,
+      playerCapsuleHeightMeters: ph.playerCapsuleHeightMeters,
+      playerStepHeightMeters: ph.playerStepHeightMeters,
+      wallRestitution: ph.wallRestitution,
+      bodyRestitution: ph.bodyRestitution,
+      walkableRectSidePushGraceMeters: 0.08,
+    },
+    // Flat surface baseline; per-tile surface feel (movementSurfaceForPlayer) is
+    // a /test refinement not yet carried into the shipped path.
+    accelerationMultiplier: 1.0,
+    surfaceFriction: 0.2,
+    surfaceRestitution: 0.0,
+    walkSpeedMetersPerSecond: state.player.walkSpeedMetersPerSecond,
+    runSpeedMetersPerSecond: state.player.runSpeedMetersPerSecond,
+  };
+  const physics = encodePhysicsConfigLump(physicsConfig);
+
   const includePlayerLumps = opts.includePlayerLumps ?? true;
   const playerModelData = includePlayerLumps ? buildDefaultPlayerModel() : null;
   const playerModel = playerModelData ? encodePlayerModelLump(playerModelData) : null;
@@ -206,6 +263,10 @@ export function createHmscMapfile(
     // loader reads this instead of hardcoding the look (compile/sceneEnv.ts).
     { type: MAP_LUMP.ENVIRONMENT, encoding: 'raw', data: encodeEnvironmentLump(env) },
     { type: MAP_LUMP.HEIGHTFIELDS, encoding: 'raw', data: heightfields },
+    // The authored physics solids + player config (see above) — the loader steps
+    // against THESE, not a guess re-derived from the render boxes.
+    { type: MAP_LUMP.COLLIDERS, encoding: 'raw', data: colliders },
+    { type: MAP_LUMP.PHYSICS_CONFIG, encoding: 'raw', data: physics },
   ];
   if (playerModel) {
     // The compiled player figure from @game/figure. Runtime movement changes
