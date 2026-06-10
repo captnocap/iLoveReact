@@ -119,7 +119,9 @@ export default function VehicleHandling() {
       const input = {
         throttle: keys.isDown('w') || keys.isDown('up') ? 1 : 0,
         brake: keys.isDown('s') || keys.isDown('down') ? 1 : 0,
-        steer: (keys.isDown('a') || keys.isDown('left') ? -1 : 0) + (keys.isDown('d') || keys.isDown('right') ? 1 : 0),
+        // A/← steers left on screen, D/→ right (the model's heading-increase is
+        // screen-left under this camera, so left keys send positive steer).
+        steer: (keys.isDown('a') || keys.isDown('left') ? 1 : 0) + (keys.isDown('d') || keys.isDown('right') ? -1 : 0),
         handbrake: keys.isDown('space'),
       };
       const telem = GAME_DRIVING.step(carRef.current, input, tuningRef.current, dt);
