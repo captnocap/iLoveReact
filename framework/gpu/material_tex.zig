@@ -14,6 +14,7 @@
 //! 3D pipeline already knows how to sample.
 
 const std = @import("std");
+const wgpu = @import("wgpu");
 const effects = @import("effects.zig");
 const gpu = @import("gpu.zig");
 
@@ -27,4 +28,45 @@ pub fn materialize(key: []const u8, wgsl: []const u8, data: ?[]const f32, size: 
     const hash = std.hash.Wyhash.hash(0, key);
     const view = effects.renderShaderToTexture(hash, wgsl, data, size) orelse return false;
     return gpu.installStaticSurfaceView(key, view, size, size);
+}
+
+/// Upload editor-baked PIXELS (RGBA, tight w*4 rows) as the surface keyed
+/// `key` — the decal half of the material door (DECALPIX-0610): a decal has
+/// no WGSL recipe to run, so the loader installs the pixels the editor baked
+/// by execution. Same install path as materialize(), so a mesh with
+/// `scene3d_tex_key == key` samples it identically. The texture lives for the
+/// process (the same lifetime materialized shader instances have).
+pub fn materializePixels(key: []const u8, rgba: []const u8, w: u32, h: u32) bool {
+    if (w == 0 or h == 0 or rgba.len != @as(usize, w) * @as(usize, h) * 4) return false;
+    const device = gpu.getDevice() orelse return false;
+    const queue = gpu.getQueue() orelse return false;
+    const tex = device.createTexture(&.{
+        .label = wgpu.StringView.fromSlice("decal_pixels"),
+        .size = .{ .width = w, .height = h, .depth_or_array_layers = 1 },
+        .mip_level_count = 1,
+        .sample_count = 1,
+        .dimension = .@"2d",
+        // Explicit RGBA: the payload's channel order is fixed by the readback
+        // door (gpu.readbackStaticSurface swizzles to RGBA) — independent of
+        // either app's swapchain format.
+        .format = .rgba8_unorm,
+        .usage = wgpu.TextureUsages.texture_binding | wgpu.TextureUsages.copy_dst,
+    }) orelse return false;
+    queue.writeTexture(
+        &.{ .texture = tex, .mip_level = 0, .origin = .{ .x = 0, .y = 0, .z = 0 }, .aspect = .all },
+        rgba.ptr,
+        rgba.len,
+        &.{ .offset = 0, .bytes_per_row = w * 4, .rows_per_image = h },
+        &.{ .width = w, .height = h, .depth_or_array_layers = 1 },
+    );
+    const view = tex.createView(null) orelse {
+        tex.release();
+        return false;
+    };
+    if (!gpu.installStaticSurfaceView(key, view, w, h)) {
+        view.release();
+        tex.release();
+        return false;
+    }
+    return true;
 }

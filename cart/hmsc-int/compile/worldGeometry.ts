@@ -33,6 +33,7 @@ import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
 import { shaderSpec, defaultShaderData } from '@game/textures/shaders';
 import { loadCustomTextures, type CustomTexture } from '@game/textures/materials';
+import { decalDocHash, decalPixelsRle } from '@game/textures/decalPixels';
 import { textBytes } from '@reactjit/workspace';
 
 export const INSTANCE_STRIDE = 13;
@@ -42,7 +43,7 @@ export const INSTANCE_SHAPE_CYLINDER8 = 2;
 export const INSTANCE_SHAPE_CYLINDER16 = 3;
 export const INSTANCE_SHAPE_SPHERE = 4;
 
-// ── materials: ship the SHADER (the formula), referenced — never baked pixels ─
+// ── materials: ship the SHADER (the formula) — pixels only when there IS no formula ─
 // GUIDING_LIGHT: procedural content travels as its recipe. A face whose skin is
 // a {kind:'material'} carries a WGSL shader + its data[] params; we intern each
 // DISTINCT (shader, data) once (content-addressed by its key) into a vocab the
@@ -51,12 +52,25 @@ export const INSTANCE_SHAPE_SPHERE = 4;
 // (0 = none) references the vocab, so the instance stride and all physics/spawn
 // code are untouched. Both built-in shader-catalog ids AND 'custom:' Materialized
 // SHADER looks resolve in the headless bake (the custom store is plain localstore;
-// loadCustomTextures is React-free). Decal/react-source customs still fall back to
-// flat color — those have no WGSL to ship (the captured-pixel tail).
+// loadCustomTextures is React-free).
+// DECAL customs are the exception that proves the rule (DECALPIX-0610): a decal
+// is AUTHORED content with no formula the loader could re-run, so V29's
+// bake-by-execution applies — the EDITOR rendered it once and stored the pixels
+// on the record (materials.ts `pixels`, captured by DecalPixelBaker); the bake
+// ships that RLE payload in the MATERIALS lump's pixel tail and the loader
+// uploads it as the face texture. A decal record with no baked pixels yet still
+// falls back to flat color (warned — open the editor once to bake).
 // A material the host materializes at load. `wgsl` is the shader recipe (empty
 // for a TRANSLUCENT FLAT material like glass — no shader, just a tint + alpha the
 // loader renders through the transparent pass). `opacity` < 1 marks translucency.
-export type MaterialAsset = { key: string; wgsl: string; data: number[]; opacity: number };
+// `pixels` (decals) is the editor-baked texture: pixel-PackBits RLE of w×h RGBA.
+export type MaterialAsset = {
+  key: string;
+  wgsl: string;
+  data: number[];
+  opacity: number;
+  pixels?: { w: number; h: number; rle: Uint8Array };
+};
 
 // Translucent base materials — their look is an ALPHA, not a texture (glass/
 // chainlink are see-through, not procedural). Mirrors pieceMeshes MATERIAL_LOOK
@@ -81,7 +95,31 @@ function resolveMaterialShader(id: string): { wgsl: string; data: number[] } | n
     const spec = shaderSpec(custom.shaderId);
     if (spec) return { wgsl: spec.shader, data: custom.data }; // frozen tuned data
   }
-  return null; // decal/react custom — no WGSL to ship; keep the flat color
+  return null; // decal/react custom — no WGSL to ship (decals resolve as pixels below)
+}
+
+// A DECAL custom's editor-baked pixels (DECALPIX-0610): the RLE payload the
+// DecalPixelBaker stored on the record, decoded from its base64 transport.
+// Null when the record isn't a decal or hasn't been baked yet (the editor
+// bakes on its next boot; until then the face keeps its flat color, warned).
+// Stale pixels (the doc changed since the bake) still ship — the old look
+// beats a blank wall — with a breadcrumb in the bake output.
+function resolveMaterialPixels(id: string): { w: number; h: number; rle: Uint8Array; docHash: string } | null {
+  const custom = customById(id);
+  if (!custom?.decal) return null;
+  if (!custom.pixels) {
+    console.warn(`[materials] decal ${id} has no baked pixels yet — open the editor once to bake; face ships flat color`);
+    return null;
+  }
+  const rle = decalPixelsRle(custom.pixels);
+  if (!rle) {
+    console.warn(`[materials] decal ${id} pixel payload is corrupt — face ships flat color`);
+    return null;
+  }
+  if (custom.pixels.docHash !== decalDocHash(custom.decal)) {
+    console.warn(`[materials] decal ${id} pixels are STALE (doc edited since bake) — shipping the previous look`);
+  }
+  return { w: custom.pixels.w, h: custom.pixels.h, rle, docHash: custom.pixels.docHash };
 }
 
 // One geometry-build accumulator: the packed instance rows PLUS a parallel
@@ -99,17 +137,29 @@ function newBuild(): Build {
 }
 
 // Resolve a {kind:'material'} skin to its shipped recipe and intern it; return
-// the 1-based vocab slot, or 0 when it can't travel (color skins, or a custom/
-// react material the headless bake can't resolve — those keep their flat color).
+// the 1-based vocab slot, or 0 when it can't travel (color skins, or a react/
+// unbaked-decal material the headless bake can't resolve — those keep their
+// flat color). Shader recipes win; a decal's editor-baked pixels are the
+// no-formula path (DECALPIX-0610).
 function internMaterial(b: Build, skin: BuildFaceSkin | undefined): number {
   if (!skin || skin.kind !== 'material') return 0;
   const resolved = resolveMaterialShader(skin.id);
-  if (!resolved) return 0; // decal/react material — keep the flat color
-  const key = `${skin.id}|${resolved.data.join(',')}`;
+  if (resolved) {
+    const key = `${skin.id}|${resolved.data.join(',')}`;
+    const existing = b.index.get(key);
+    if (existing !== undefined) return existing;
+    const slot = b.vocab.length + 1;
+    b.vocab.push({ key, wgsl: resolved.wgsl, data: resolved.data, opacity: 1 });
+    b.index.set(key, slot);
+    return slot;
+  }
+  const pixels = resolveMaterialPixels(skin.id);
+  if (!pixels) return 0; // react material / unbaked decal — keep the flat color
+  const key = `pix:${skin.id}|${pixels.docHash}`;
   const existing = b.index.get(key);
   if (existing !== undefined) return existing;
   const slot = b.vocab.length + 1;
-  b.vocab.push({ key, wgsl: resolved.wgsl, data: resolved.data, opacity: 1 });
+  b.vocab.push({ key, wgsl: '', data: [], opacity: 1, pixels: { w: pixels.w, h: pixels.h, rle: pixels.rle } });
   b.index.set(key, slot);
   return slot;
 }
@@ -974,24 +1024,40 @@ export function encodeMaterialRefs(refs: Uint32Array): Uint8Array {
   return out;
 }
 
-/** Encode the materials vocab lump — the SHIPPED RECIPES, not pixels:
- *  u32 count, then per material: u32 wgsl byte length | wgsl utf8 | u32 data
- *  float count | f32[data] | f32 opacity. The host runs each shader at load to a
- *  1-tile texture and samples it on the referencing faces; an empty wgsl with
- *  opacity<1 is a translucent flat material (glass) the host renders see-through. */
+/** The MATERIALS lump's pixel-tail magic ('PIXS' LE) — see encodeMaterials. */
+export const MATERIALS_PIXEL_TAIL_MAGIC = 0x53584950;
+
+/** Encode the materials vocab lump. The body ships RECIPES: u32 count, then
+ *  per material: u32 wgsl byte length | wgsl utf8 | u32 data float count |
+ *  f32[data] | f32 opacity. The host runs each shader at load to a 1-tile
+ *  texture and samples it on the referencing faces; an empty wgsl with
+ *  opacity<1 is a translucent flat material (glass) the host renders
+ *  see-through.
+ *  DECAL PIXEL TAIL (DECALPIX-0610, appended only when a material carries
+ *  editor-baked pixels — older payloads parse unchanged): u32 'PIXS' magic |
+ *  u32 entryCount, then per entry: u32 materialIndex (0-based) | u32 w |
+ *  u32 h | u32 rleByteLen | pixel-PackBits RGBA bytes (decalPixels.ts; the
+ *  loader decodes and uploads — constructor.zig decodeMaterials). */
 export function encodeMaterials(materials: readonly MaterialAsset[]): Uint8Array {
   // Bake breadcrumb (captured by the Compile button via 2>&1) so the user can SEE
   // what the data carries — separating "is glass in the gamefile" from "does the
   // loader render it". console.warn → stderr → the bake's merged output.
   const translucent = materials.filter((m) => m.opacity < 1).length;
   const shaders = materials.filter((m) => m.wgsl.length > 0).length;
-  console.warn(`[materials] baked ${materials.length} material(s): ${shaders} shader, ${translucent} translucent`);
+  const decals = materials.filter((m) => m.pixels).length;
+  console.warn(`[materials] baked ${materials.length} material(s): ${shaders} shader, ${translucent} translucent, ${decals} decal-pixel`);
   // textBytes is the workspace's headless-safe utf8 encoder (the v8cli bake has
   // no TextEncoder; it falls back to encodeURIComponent). WGSL is ASCII anyway.
   const sources = materials.map((m) => textBytes(m.wgsl));
   let bytes = 4;
   for (let i = 0; i < materials.length; i += 1) {
     bytes += 4 + sources[i].byteLength + 4 + materials[i].data.length * 4 + 4;
+  }
+  if (decals > 0) {
+    bytes += 8; // tail magic + entry count
+    for (const m of materials) {
+      if (m.pixels) bytes += 16 + m.pixels.rle.byteLength;
+    }
   }
   const out = new Uint8Array(bytes);
   const view = new DataView(out.buffer);
@@ -1005,6 +1071,19 @@ export function encodeMaterials(materials: readonly MaterialAsset[]): Uint8Array
     view.setUint32(at, data.length, true); at += 4;
     for (let k = 0; k < data.length; k += 1) { view.setFloat32(at, data[k], true); at += 4; }
     view.setFloat32(at, materials[i].opacity, true); at += 4;
+  }
+  if (decals > 0) {
+    view.setUint32(at, MATERIALS_PIXEL_TAIL_MAGIC, true); at += 4;
+    view.setUint32(at, decals, true); at += 4;
+    for (let i = 0; i < materials.length; i += 1) {
+      const pixels = materials[i].pixels;
+      if (!pixels) continue;
+      view.setUint32(at, i, true); at += 4;
+      view.setUint32(at, pixels.w, true); at += 4;
+      view.setUint32(at, pixels.h, true); at += 4;
+      view.setUint32(at, pixels.rle.byteLength, true); at += 4;
+      out.set(pixels.rle, at); at += pixels.rle.byteLength;
+    }
   }
   return out;
 }

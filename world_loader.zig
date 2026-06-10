@@ -562,7 +562,10 @@ fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_c
             .boxes = boxes,
             .count = count,
             .key = key,
-            .translucent = materials[built].wgsl.len == 0,
+            // Translucent flat (glass) = NO look to materialize at all. A
+            // decal material also has empty wgsl but carries baked PIXELS —
+            // it draws in the textured batch like any shader material.
+            .translucent = materials[built].wgsl.len == 0 and materials[built].pixels.len == 0,
             .opacity = materials[built].opacity,
         };
     }
@@ -1542,19 +1545,27 @@ pub const Runtime = struct {
         try self.build();
     }
 
-    /// Run each face material's SHADER into its texture and install it under the
-    /// batch key (idempotent; needs gpu up, so it runs at first render not build).
-    /// A material that fails to materialize leaves its faces on the fallback color.
+    /// Run each face material's SHADER into its texture — or upload its
+    /// editor-baked DECAL PIXELS (DECALPIX-0610) — and install it under the
+    /// batch key (idempotent; needs gpu up, so it runs at first render not
+    /// build). A material that fails to materialize leaves its faces on the
+    /// fallback color.
     fn ensureMaterials(self: *Runtime) void {
         if (self.materials_ready) return;
         self.materials_ready = true;
         for (self.scene.materials, 0..) |m, i| {
+            var buf: [32]u8 = undefined;
+            const key = std.fmt.bufPrint(&buf, "wmat-{d}", .{i}) catch continue;
+            // Decal materials carry pixels instead of a recipe — upload them.
+            if (m.pixels.len > 0) {
+                if (!material_tex.materializePixels(key, m.pixels, m.pix_w, m.pix_h))
+                    log.print("[loader] decal material {d} pixels not installed — faces show fallback color\n", .{i});
+                continue;
+            }
             // Translucent flat materials (glass: empty wgsl) have no shader to run —
             // they render through the transparent pass with the row's own color.
             // Feeding "" to the shader pipeline would crash wgpu, so skip them.
             if (m.wgsl.len == 0) continue;
-            var buf: [32]u8 = undefined;
-            const key = std.fmt.bufPrint(&buf, "wmat-{d}", .{i}) catch continue;
             if (!material_tex.materialize(key, m.wgsl, m.data, MATERIAL_TILE_PX))
                 log.print("[loader] material {d} not materialized — faces show fallback color\n", .{i});
         }

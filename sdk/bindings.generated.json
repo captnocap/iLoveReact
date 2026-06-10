@@ -17,6 +17,10 @@
           "zig": "hostLoadFileToBuffer"
         },
         {
+          "js": "__hostUploadFloatBuffer",
+          "zig": "hostUploadFloatBuffer"
+        },
+        {
           "js": "__hostReleaseFileBuffer",
           "zig": "hostReleaseFileBuffer"
         },
@@ -517,8 +521,20 @@
           "zig": "fsRead"
         },
         {
+          "js": "__fs_read_base64",
+          "zig": "fsReadBase64"
+        },
+        {
+          "js": "__fs_read_rjmp_entities",
+          "zig": "fsReadRjmpEntities"
+        },
+        {
           "js": "__fs_write",
           "zig": "fsWrite"
+        },
+        {
+          "js": "__fs_write_base64_atomic",
+          "zig": "fsWriteBase64Atomic"
         },
         {
           "js": "__fs_scandir",
@@ -617,6 +633,10 @@
         {
           "js": "__tel_frame",
           "zig": "telFrameCb"
+        },
+        {
+          "js": "__tel_frame_at",
+          "zig": "telFrameAtCb"
         },
         {
           "js": "__tel_host_flush",
@@ -2476,12 +2496,36 @@
           "zig": "hostPhysicsStep"
         },
         {
+          "js": "__game_physics_step_into",
+          "zig": "hostPhysicsStepInto"
+        },
+        {
           "js": "__game_physics_register_heightfield",
           "zig": "hostRegisterHeightfield"
         },
         {
           "js": "__game_physics_clear_heightfields",
           "zig": "hostClearHeightfields"
+        },
+        {
+          "js": "__game_physics_camera_occlusion",
+          "zig": "hostCameraOcclusion"
+        },
+        {
+          "js": "__game_physics_camera_occlusion_configure",
+          "zig": "hostCameraOcclusionConfigure"
+        },
+        {
+          "js": "__game_physics_camera_occlusion_distance",
+          "zig": "hostCameraOcclusionDistance"
+        },
+        {
+          "js": "__game_physics_camera_occlusion_hit",
+          "zig": "hostCameraOcclusionHit"
+        },
+        {
+          "js": "__game_physics_camera_occlusion_hits",
+          "zig": "hostCameraOcclusionHits"
         }
       ]
     },
@@ -2622,6 +2666,14 @@
           "zig": "hostSetMoveAxesNode"
         },
         {
+          "js": "__game_camera_set_distance_constraint",
+          "zig": "hostSetDistanceConstraint"
+        },
+        {
+          "js": "__game_camera_set_distance_constraint_node",
+          "zig": "hostSetDistanceConstraintNode"
+        },
+        {
           "js": "__game_camera_get_freefly_node",
           "zig": "hostGetFreeFlyNode"
         },
@@ -2651,6 +2703,27 @@
         }
       ]
     },
+    "compiled_world": {
+      "required": false,
+      "module": "framework/v8_bindings_compiled_world.zig",
+      "registerFn": "registerCompiledWorld",
+      "grepPrefix": "__compiled_world_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__compiled_world_mount",
+          "zig": "hostMount"
+        },
+        {
+          "js": "__compiled_world_unmount",
+          "zig": "hostUnmount"
+        },
+        {
+          "js": "__compiled_world_status",
+          "zig": "hostStatus"
+        }
+      ]
+    },
     "capture": {
       "required": false,
       "module": "framework/v8_bindings_capture.zig",
@@ -2661,6 +2734,10 @@
         {
           "js": "__capture_frame",
           "zig": "captureFrame"
+        },
+        {
+          "js": "__capture_surface_pixels",
+          "zig": "surfaceReadback"
         }
       ]
     }

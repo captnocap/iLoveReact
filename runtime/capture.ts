@@ -21,3 +21,24 @@ export function captureFrame(path: string): boolean {
   if (!path) return false;
   return callHost<boolean>('__capture_frame', false, path);
 }
+
+/** A captured StaticSurface's pixels, read back from the GPU. `width`/`height`
+ *  are the TEXTURE's dimensions (the engine may capture at a DPI multiple of
+ *  the node's logical size); `rgba` is tight width*4-byte rows. */
+export type SurfacePixels = { width: number; height: number; rgba: Uint8Array };
+
+/** Read a captured `<StaticSurface staticKey>` back to pixels (DECALPIX-0610:
+ *  the decal pixel bake — the editor executes authored content once and ships
+ *  the pixels). Null until the surface has actually captured — mount it, give
+ *  the engine a frame or two, and poll. Blocks on the GPU copy, so this is a
+ *  save/bake-point door, never a per-frame one. */
+export function readSurfacePixels(staticKey: string): SurfacePixels | null {
+  if (!staticKey) return null;
+  const raw = callHost<Uint8Array | null>('__capture_surface_pixels', null, staticKey);
+  if (!raw || raw.length < 8) return null;
+  const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+  const width = view.getUint32(0, true);
+  const height = view.getUint32(4, true);
+  if (width === 0 || height === 0 || raw.length !== 8 + width * height * 4) return null;
+  return { width, height, rgba: raw.subarray(8) };
+}

@@ -584,6 +584,31 @@ hmsc-int (the V15 compile direction). GAP edges marked at the import sites
 editor and the V24 piece/voxel-item texture slots land on this door. Full
 lineage table: `game/textures/CAPTURE.md`.
 
+DECALPIX-0610 (2026-06-10, USER ASK req_0566 "inside of the compiled game
+output i am not getting these to show up"): decals now reach the COMPILED
+game. A decal has no WGSL recipe, so the headless bake used to drop
+decal-skinned faces to flat color (the documented captured-pixel-tail gap in
+compile/worldGeometry.ts) — V29 bake-by-execution closes it. `decalPixels.ts`
+= the payload model (pixel-PackBits RLE over RGBA + FNV-1a `docHash`
+staleness key, boundary validator); `DecalPixelBaker.tsx` (mounted in the
+EditorShell root) renders any stale saved decal into an offscreen
+StaticSurface, reads it back via the host door `__capture_surface_pixels`
+(v8_bindings_capture.zig → gpu.readbackStaticSurface — always RGBA,
+self-describing w/h) and persists `pixels` on the material record
+(`saveDecalPixels`, re-save keeps stale pixels until the re-bake lands).
+The bake (compile/worldGeometry.ts `internMaterial`) resolves decal customs
+to their stored RLE and ships them in the MATERIALS lump's optional 'PIXS'
+tail (encodeMaterials; older payloads parse unchanged); the no-V8 loader
+(framework/world/constructor.zig `decodeMaterialPixelTail` →
+material_tex.materializePixels) uploads them under the same `wmat-<i>` key
+shader materials use — textured batch, whitened rows, streaming protos, all
+shared. A decal saved but never re-opened in the editor bakes flat color
+with a `[materials]` warning naming it (open the editor once; the baker
+backfills every stale record automatically). P4: `decalPixels.test.ts`
+(7 cases: codec round-trips, malformed-stream rejection, payload pack/
+validate, hash staleness) + `worldGeometry.test.ts` (the PIXS tail layout +
+the no-pixels no-tail byte-compat case).
+
 ## game/build/ — the building piece grammar (V24 capture, 2026-06-04)
 
 The V24 ruling's data layer ("Author by semantic piece. Bake by gameplay

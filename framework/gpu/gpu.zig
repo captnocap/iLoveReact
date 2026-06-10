@@ -936,7 +936,9 @@ fn ensureStaticEntry(key: []const u8, hash: u64, key_len: usize, width: u32, hei
         .sample_count = 1,
         .dimension = .@"2d",
         .format = g_format,
-        .usage = wgpu.TextureUsages.render_attachment | wgpu.TextureUsages.texture_binding,
+        // copy_src: readbackStaticSurface (the decal pixel bake) copies the
+        // captured texture back to bytes — same surface, one extra usage bit.
+        .usage = wgpu.TextureUsages.render_attachment | wgpu.TextureUsages.texture_binding | wgpu.TextureUsages.copy_src,
     }) orelse return null;
     const view = tex.createView(null) orelse {
         tex.release();
@@ -1102,6 +1104,104 @@ pub fn installStaticSurfaceView(key: []const u8, view: *wgpu.TextureView, width:
     entry.borrowed = true;
     entry.ready = true;
     return true;
+}
+
+/// Read a CAPTURED static surface's pixels back to CPU bytes (the decal
+/// pixel bake, DECALPIX-0610). Returns one page_allocator allocation laid out
+/// [w: u32 LE][h: u32 LE][RGBA, tight w*4 rows] — self-describing because the
+/// texture may be a DPI multiple of the node's logical size. Caller frees.
+/// Null until the surface has actually captured (entry.ready), for borrowed
+/// views (materialized shaders own their textures), or when the GPU is down.
+/// Blocks on the copy + map — call from save/bake points only.
+pub fn readbackStaticSurface(key: []const u8) ?[]u8 {
+    const idx = findStaticEntry(staticKeyHash(key), key.len) orelse return null;
+    const entry = &g_static_entries[idx];
+    if (!entry.ready or entry.borrowed) return null;
+    const tex = entry.texture orelse return null;
+    const device = g_device orelse return null;
+    const queue = g_queue orelse return null;
+    const w = entry.width;
+    const h = entry.height;
+    if (w == 0 or h == 0) return null;
+
+    // wgpu requires 256-byte-aligned rows on texture→buffer copies.
+    const ALIGN: u32 = 256;
+    const padded_row: u32 = ((w * 4 + ALIGN - 1) / ALIGN) * ALIGN;
+    const total: usize = @as(usize, padded_row) * @as(usize, h);
+
+    const buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("static_surface_readback"),
+        .size = total,
+        .usage = wgpu.BufferUsages.copy_dst | wgpu.BufferUsages.map_read,
+        .mapped_at_creation = 0,
+    }) orelse return null;
+    defer buf.release();
+
+    const encoder = device.createCommandEncoder(&.{
+        .label = wgpu.StringView.fromSlice("static_surface_readback_cmd"),
+    }) orelse return null;
+    encoder.copyTextureToBuffer(
+        &.{ .texture = tex, .mip_level = 0, .origin = .{ .x = 0, .y = 0, .z = 0 }, .aspect = .all },
+        &.{ .buffer = buf, .layout = .{ .offset = 0, .bytes_per_row = padded_row, .rows_per_image = h } },
+        &.{ .width = w, .height = h, .depth_or_array_layers = 1 },
+    );
+    const cmd = encoder.finish(&.{
+        .label = wgpu.StringView.fromSlice("static_surface_readback_finish"),
+    }) orelse {
+        encoder.release();
+        return null;
+    };
+    encoder.release();
+    queue.submit(&.{cmd});
+    cmd.release();
+
+    var done: bool = false;
+    const cb_struct = struct {
+        fn cb(status: wgpu.MapAsyncStatus, _: wgpu.StringView, userdata1: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+            _ = status;
+            const done_ptr: *bool = @ptrCast(@alignCast(userdata1.?));
+            done_ptr.* = true;
+        }
+    };
+    _ = buf.mapAsync(wgpu.MapModes.read, 0, total, .{ .callback = cb_struct.cb, .userdata1 = @ptrCast(&done) });
+    while (!done) {
+        _ = device.poll(true, null);
+    }
+
+    const mapped_ptr = buf.getConstMappedRange(0, total) orelse return null;
+    const out = std.heap.page_allocator.alloc(u8, 8 + @as(usize, w) * @as(usize, h) * 4) catch {
+        buf.unmap();
+        return null;
+    };
+    std.mem.writeInt(u32, out[0..4], w, .little);
+    std.mem.writeInt(u32, out[4..8], h, .little);
+    // Strip row padding; swizzle to RGBA when the surface format is BGRA so
+    // the stored payload has ONE channel order no matter the backend.
+    const swap_rb = g_format == .bgra8_unorm or g_format == .bgra8_unorm_srgb;
+    const mapped: [*]const u8 = @ptrCast(mapped_ptr);
+    var row: u32 = 0;
+    while (row < h) : (row += 1) {
+        const src_off: usize = @as(usize, row) * @as(usize, padded_row);
+        const dst_off: usize = 8 + @as(usize, row) * @as(usize, w) * 4;
+        var col: usize = 0;
+        while (col < w) : (col += 1) {
+            const si = src_off + col * 4;
+            const di = dst_off + col * 4;
+            if (swap_rb) {
+                out[di + 0] = mapped[si + 2];
+                out[di + 1] = mapped[si + 1];
+                out[di + 2] = mapped[si + 0];
+                out[di + 3] = mapped[si + 3];
+            } else {
+                out[di + 0] = mapped[si + 0];
+                out[di + 1] = mapped[si + 1];
+                out[di + 2] = mapped[si + 2];
+                out[di + 3] = mapped[si + 3];
+            }
+        }
+    }
+    buf.unmap();
+    return out;
 }
 
 pub fn beginStaticSurfaceCapture(key: []const u8, x: f32, y: f32, width_f: f32, height_f: f32, opacity: f32, intro_frames: u16, scale_f: f32) ?StaticSurfaceToken {

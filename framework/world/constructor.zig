@@ -184,8 +184,10 @@ fn decodeEnvironment(data: []const u8) SceneEnv {
 /// streams compose.
 /// A face material shipped as its RECIPE (GUIDING_LIGHT): a WGSL shader source
 /// plus its data[] params. The loader runs it once at load to a 1-tile texture
-/// (via a StaticSurface+Effect node) and samples it on the referencing faces —
-/// never baked pixels. See compile/worldGeometry.ts (encodeMaterials).
+/// (via a StaticSurface+Effect node) and samples it on the referencing faces.
+/// DECALS (DECALPIX-0610) are the no-formula case: authored content the editor
+/// baked by execution — `pixels` is the decoded w×h RGBA the loader uploads
+/// instead of running a shader. See compile/worldGeometry.ts (encodeMaterials).
 pub const Material = struct {
     wgsl: []u8,
     data: []f32,
@@ -193,10 +195,16 @@ pub const Material = struct {
     /// translucent look (glass/chainlink) the loader renders see-through using
     /// the referencing rows' own color; with a shader it tints the texture.
     opacity: f32 = 1,
+    /// Editor-baked decal pixels (RGBA, tight pix_w*4 rows) — empty for shader
+    /// and flat materials. Decoded from the lump's pixel-PackBits tail.
+    pixels: []u8 = &.{},
+    pix_w: u32 = 0,
+    pix_h: u32 = 0,
 
     pub fn deinit(self: Material, allocator: std.mem.Allocator) void {
         allocator.free(self.wgsl);
         allocator.free(self.data);
+        if (self.pixels.len > 0) allocator.free(self.pixels);
     }
 };
 
@@ -673,8 +681,97 @@ fn decodePhysicsConfig(data: []const u8) Error!PhysicsConfig {
     };
 }
 
+/// Max decal pixel texture side the loader will allocate (mirrors the TS
+/// codec's MAX_PIXEL_DIM — a corrupt header can't ask for a 4GB upload).
+const MAX_DECAL_PIXEL_DIM: u32 = 4096;
+
+/// Decode one pixel-PackBits stream (compile/.../decalPixels.ts) to tight RGBA
+/// bytes. Control byte n: n < 128 → (n+1) literal pixels follow; n >= 128 →
+/// the one pixel that follows repeats (256-n) times. Null on any malformation
+/// (truncated stream, count mismatch) — the caller degrades to pixel-less.
+fn decodePixelRle(allocator: std.mem.Allocator, rle: []const u8, pixel_count: usize) ?[]u8 {
+    const out = allocator.alloc(u8, pixel_count * 4) catch return null;
+    var at: usize = 0;
+    var emitted: usize = 0;
+    while (emitted < pixel_count) {
+        if (at >= rle.len) {
+            allocator.free(out);
+            return null;
+        }
+        const control = rle[at];
+        at += 1;
+        if (control >= 128) {
+            const run: usize = 256 - @as(usize, control);
+            if (at + 4 > rle.len or emitted + run > pixel_count) {
+                allocator.free(out);
+                return null;
+            }
+            var k: usize = 0;
+            while (k < run) : (k += 1) {
+                const di = (emitted + k) * 4;
+                out[di + 0] = rle[at + 0];
+                out[di + 1] = rle[at + 1];
+                out[di + 2] = rle[at + 2];
+                out[di + 3] = rle[at + 3];
+            }
+            at += 4;
+            emitted += run;
+        } else {
+            const lit: usize = @as(usize, control) + 1;
+            if (at + lit * 4 > rle.len or emitted + lit > pixel_count) {
+                allocator.free(out);
+                return null;
+            }
+            @memcpy(out[emitted * 4 ..][0 .. lit * 4], rle[at..][0 .. lit * 4]);
+            at += lit * 4;
+            emitted += lit;
+        }
+    }
+    if (at != rle.len) {
+        allocator.free(out);
+        return null;
+    }
+    return out;
+}
+
+/// Parse the optional DECAL PIXEL TAIL (DECALPIX-0610): u32 'PIXS' magic |
+/// u32 entryCount | per entry: u32 materialIndex | u32 w | u32 h | u32 rleLen |
+/// rle bytes. Attaches decoded RGBA to the referenced materials. Defensive by
+/// design: any inconsistency stops the tail parse and leaves the remaining
+/// materials pixel-less (their faces fall back to flat color) — a decal
+/// payload problem never fails the whole map construct.
+fn decodeMaterialPixelTail(allocator: std.mem.Allocator, data: []const u8, start: usize, materials: []Material) void {
+    var at = start;
+    if (at + 8 > data.len) return;
+    if (std.mem.readInt(u32, data[at..][0..4], .little) != 0x53584950) return; // 'PIXS'
+    at += 4;
+    const entries = std.mem.readInt(u32, data[at..][0..4], .little);
+    at += 4;
+    var n: u32 = 0;
+    while (n < entries) : (n += 1) {
+        if (at + 16 > data.len) return;
+        const mat_index = std.mem.readInt(u32, data[at..][0..4], .little);
+        const w = std.mem.readInt(u32, data[at + 4 ..][0..4], .little);
+        const h = std.mem.readInt(u32, data[at + 8 ..][0..4], .little);
+        const rle_len = std.mem.readInt(u32, data[at + 12 ..][0..4], .little);
+        at += 16;
+        if (at + rle_len > data.len) return;
+        const rle = data[at .. at + rle_len];
+        at += rle_len;
+        if (mat_index >= materials.len) continue;
+        if (w == 0 or h == 0 or w > MAX_DECAL_PIXEL_DIM or h > MAX_DECAL_PIXEL_DIM) continue;
+        const m = &materials[mat_index];
+        if (m.pixels.len > 0) continue; // duplicate entry — first one wins
+        const rgba = decodePixelRle(allocator, rle, @as(usize, w) * @as(usize, h)) orelse continue;
+        m.pixels = rgba;
+        m.pix_w = w;
+        m.pix_h = h;
+    }
+}
+
 /// Decode the MATERIALS lump (u32 count, then per material: u32 wgsl byte len |
-/// wgsl utf8 | u32 data float count | f32[data]). A malformed lump yields an
+/// wgsl utf8 | u32 data float count | f32[data]), plus the optional decal
+/// pixel tail (decodeMaterialPixelTail above). A malformed lump yields an
 /// empty vocab (faces fall back to their flat color) rather than aborting.
 fn decodeMaterials(allocator: std.mem.Allocator, data: []const u8) Error![]Material {
     if (data.len < 4) return try allocator.alloc(Material, 0);
@@ -716,6 +813,7 @@ fn decodeMaterials(allocator: std.mem.Allocator, data: []const u8) Error![]Mater
         at += 4;
         out[built] = .{ .wgsl = wgsl, .data = params, .opacity = opacity };
     }
+    decodeMaterialPixelTail(allocator, data, at, out);
     return out;
 }
 

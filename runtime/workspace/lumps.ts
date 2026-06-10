@@ -50,14 +50,34 @@ export const MAP_LUMP = {
   // Scene3D heightfield primitive so gpu/3d.zig owns the triangulation.
   HEIGHTFIELDS: 11,
   // Material vocab: the SHADERS that skin faces, shipped as recipes (WGSL +
-  // data[] params), content-addressed and deduped — never baked pixels. The
-  // host runs each at load to a 1-tile texture. See compile/worldGeometry.ts
-  // (encodeMaterials). GUIDING_LIGHT: procedural content travels as its formula.
+  // data[] params), content-addressed and deduped. The host runs each at load
+  // to a 1-tile texture. See compile/worldGeometry.ts (encodeMaterials).
+  // GUIDING_LIGHT: procedural content travels as its formula. DECALS are the
+  // no-formula case (DECALPIX-0610): authored content the editor baked by
+  // execution (V29) — their pixels ride an optional RLE tail of this lump.
   MATERIALS: 12,
   // Per-instance-row material reference (u32 count | u32[count]); 1-based index
   // into MATERIALS, 0 = flat color. Parallel to INSTANCES rows — the loader
   // reads them in lockstep and renders material rows as textured faces.
   MATERIAL_REFS: 13,
+  // Authored physics colliders — the SAME semantic solids the editor's play
+  // view steps against (placedPieceColliders / placedPieceRamps), NOT a guess
+  // re-derived from the render boxes. Carries the wall-join, door-opening,
+  // half-height and ramp-trim meaning, so a "+" wall collides exactly where it
+  // looks. Layout: u32 version | u32 rectCount | f32[rectCount*9] (host wire
+  // order: minX,minZ,maxX,maxZ,top,solid,friction,restitution,floor) |
+  // u32 orientedCount | f32[orientedCount*12] (the 9 + pivotX,pivotZ,yawRad) |
+  // u32 rampCount | per ramp: f32 originX,originZ,cellSize | u32 cols,rows |
+  // f32 baseY,walkCos,yawRad,pivotX,pivotZ | f32[cols*rows] heights.
+  // Absent → loader falls back to deriving colliders from the instance buffer.
+  COLLIDERS: 14,
+  // Player physics tuning + locomotion speeds, baked so the shipped game feels
+  // identical to the editor's play view instead of re-declaring constants in
+  // world_loader.zig. Layout: u32 version | f32[13]: gravity, jumpSpeed,
+  // playerRadius, playerHeight, stepHeight, wallRestitution, bodyRestitution,
+  // walkableSidePushGrace, accelMultiplier, surfaceFriction, surfaceRestitution,
+  // walkSpeed, runSpeed. Absent → loader keeps its built-in defaults.
+  PHYSICS_CONFIG: 15,
 } as const;
 
 export type LumpInput = {

@@ -5,6 +5,7 @@ declare global {
   // core (framework/v8_bindings_core.zig)
   function __getInputTextForNode(...args: unknown[]): unknown;
   function __hostLoadFileToBuffer(...args: unknown[]): unknown;
+  function __hostUploadFloatBuffer(...args: unknown[]): unknown;
   function __hostReleaseFileBuffer(...args: unknown[]): unknown;
   function __hostLog(...args: unknown[]): unknown;
   function __js_eval(...args: unknown[]): unknown;
@@ -128,7 +129,10 @@ declare global {
 
   // fs (framework/v8_bindings_fs.zig)
   function __fs_read(...args: unknown[]): unknown;
+  function __fs_read_base64(...args: unknown[]): unknown;
+  function __fs_read_rjmp_entities(...args: unknown[]): unknown;
   function __fs_write(...args: unknown[]): unknown;
+  function __fs_write_base64_atomic(...args: unknown[]): unknown;
   function __fs_scandir(...args: unknown[]): unknown;
   function __fs_deletefile(...args: unknown[]): unknown;
   function __fs_readfile(...args: unknown[]): unknown;
@@ -153,6 +157,7 @@ declare global {
   function getPaintUs(...args: unknown[]): unknown;
   function getTickUs(...args: unknown[]): unknown;
   function __tel_frame(...args: unknown[]): unknown;
+  function __tel_frame_at(...args: unknown[]): unknown;
   function __tel_host_flush(...args: unknown[]): unknown;
   function __tel_gpu(...args: unknown[]): unknown;
   function __tel_nodes(...args: unknown[]): unknown;
@@ -611,8 +616,14 @@ declare global {
   function __hmsc_clear_heightfields(...args: unknown[]): unknown;
   function __hmsc_spike_trace(...args: unknown[]): unknown;
   function __game_physics_step(...args: unknown[]): unknown;
+  function __game_physics_step_into(...args: unknown[]): unknown;
   function __game_physics_register_heightfield(...args: unknown[]): unknown;
   function __game_physics_clear_heightfields(...args: unknown[]): unknown;
+  function __game_physics_camera_occlusion(...args: unknown[]): unknown;
+  function __game_physics_camera_occlusion_configure(...args: unknown[]): unknown;
+  function __game_physics_camera_occlusion_distance(...args: unknown[]): unknown;
+  function __game_physics_camera_occlusion_hit(...args: unknown[]): unknown;
+  function __game_physics_camera_occlusion_hits(...args: unknown[]): unknown;
 
   // game_pathing (framework/v8_bindings_game_pathing.zig)
   function __path_set_grid(...args: unknown[]): unknown;
@@ -647,6 +658,8 @@ declare global {
   function __game_camera_set_freefly_node(...args: unknown[]): unknown;
   function __game_camera_set_move_axes(...args: unknown[]): unknown;
   function __game_camera_set_move_axes_node(...args: unknown[]): unknown;
+  function __game_camera_set_distance_constraint(...args: unknown[]): unknown;
+  function __game_camera_set_distance_constraint_node(...args: unknown[]): unknown;
   function __game_camera_get_freefly_node(...args: unknown[]): unknown;
   function __game_camera_set_input_deltas(...args: unknown[]): unknown;
   function __game_camera_set_input_deltas_node(...args: unknown[]): unknown;
@@ -655,8 +668,14 @@ declare global {
   function __game_camera_active_node(...args: unknown[]): unknown;
   function __game_camera_probe(...args: unknown[]): unknown;
 
+  // compiled_world (framework/v8_bindings_compiled_world.zig)
+  function __compiled_world_mount(...args: unknown[]): unknown;
+  function __compiled_world_unmount(...args: unknown[]): unknown;
+  function __compiled_world_status(...args: unknown[]): unknown;
+
   // capture (framework/v8_bindings_capture.zig)
   function __capture_frame(...args: unknown[]): unknown;
+  function __capture_surface_pixels(...args: unknown[]): unknown;
 
 }
 
