@@ -600,7 +600,14 @@ export function PlayRoute(props: {
     if (!saved) return;
     const current = playerRef.current;
     const groundY = groundColumnTop(worldGrid, saved.x, saved.z);
-    const restoredY = saved.y < groundY - props.state.config.physics.playerCapsuleHeightMeters ? groundY : saved.y;
+    // ANY below-ground restore snaps to the live floor (req_0521). The old
+    // guard tolerated up to a full capsule height of burial — so a pose saved
+    // BEFORE the terrain was painted up restored the player ~1m inside the
+    // ground, below the heightfield top where no collider can catch them, and
+    // they fell through the world on every load. Terrain is the world's
+    // minimum: nothing legitimate stands under groundColumnTop, so the only
+    // slack left is float noise.
+    const restoredY = saved.y < groundY - 0.05 ? groundY : saved.y;
     if (restoredY !== saved.y) {
       console.warn('[play] restored player pose was below the live floor; snapping to ground', {
         savedY: saved.y,
