@@ -18,7 +18,7 @@ import * as Geometry from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { GAME_BUILD } from './game';
 import type { BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
-import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
+import { resolveSnapTarget, modulePitch, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes } from './editors/build/pieceMeshes';
 import { BUILD_UI } from './editors/build/buildUi';
 import { IsoStage, METERS_PER_LEVEL, type IsoPose } from './isoStage';
@@ -205,6 +205,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const [moveDelta, setMoveDelta] = useState<{ dx: number; dz: number } | null>(null);
   const moveDeltaRef = useRef(moveDelta);
   moveDeltaRef.current = moveDelta;
+  // An in-progress drag-paint: the placements a wall LINE or floor RECT would drop,
+  // previewed as ghosts and batch-placed on mouse-up. null when not painting.
+  type Paint = { pieceId: string; x: number; y: number; z: number; yawDegrees: number };
+  const [paintCells, setPaintCells] = useState<Paint[] | null>(null);
+  const paintCellsRef = useRef(paintCells);
+  paintCellsRef.current = paintCells;
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 800, height: 600 });
@@ -234,6 +240,54 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   resolveAtRef.current = resolveAt;
   const ghostKeyRef = useRef('');
 
+  // Drag-to-build (req_0463): an armed WALL paints a straight line of walls along the
+  // drag's dominant axis; an armed FLOOR fills the dragged rectangle with floor tiles.
+  // The cell math mirrors resolveSnapTarget exactly (3m module pitch: floors on cell
+  // centres, walls run-centred on cells and line-snapped to the 3m edges, yaw 0 along x /
+  // 90 along z) so drag-placed pieces land identically to click-placed ones. All cells
+  // share ONE base y (terrain under the centroid) so the row/rect reads as a flat pad —
+  // matching what liftBuildingsToTerrain does to it after placement.
+  const PAINT_MAX_SPAN = 64; // cells per axis — a giant drag can't spawn thousands of pieces
+  const paintKindOf = (a: Armed): 'wall' | 'floor' | null => {
+    if (!a || a.kind !== 'piece') return null;
+    const k = GAME_BUILD.catalog.get(a.id).kind;
+    return k === 'wall' || k === 'floor' ? k : null;
+  };
+  const computePaint = useCallback((a: Armed, start: { x: number; z: number }, end: { x: number; z: number }): Paint[] => {
+    const kind = paintKindOf(a);
+    if (!kind || !a || a.kind !== 'piece') return [];
+    const def = GAME_BUILD.catalog.get(a.id);
+    const pitch = modulePitch(def.size.widthMeters, 1);
+    const cellOf = (v: number) => Math.floor(v / pitch);
+    const center = (c: number) => (c + 0.5) * pitch;
+    const range = (a0: number, b0: number): [number, number] => { const lo = Math.min(a0, b0), hi = Math.max(a0, b0); return [lo, Math.min(hi, lo + PAINT_MAX_SPAN - 1)]; };
+    const cells: { x: number; z: number; yaw: number }[] = [];
+    if (kind === 'floor') {
+      const [x0, x1] = range(cellOf(start.x), cellOf(end.x));
+      const [z0, z1] = range(cellOf(start.z), cellOf(end.z));
+      for (let cx = x0; cx <= x1; cx += 1) for (let cz = z0; cz <= z1; cz += 1) cells.push({ x: center(cx), z: center(cz), yaw: 0 });
+    } else {
+      // wall: the longer drag axis is the run; the short axis pins to the nearest 3m edge
+      const dx = Math.abs(end.x - start.x), dz = Math.abs(end.z - start.z);
+      if (dx >= dz) {
+        const lineZ = Math.round(start.z / pitch) * pitch;
+        const [c0, c1] = range(cellOf(start.x), cellOf(end.x));
+        for (let cx = c0; cx <= c1; cx += 1) cells.push({ x: center(cx), z: lineZ, yaw: 0 });
+      } else {
+        const lineX = Math.round(start.x / pitch) * pitch;
+        const [c0, c1] = range(cellOf(start.z), cellOf(end.z));
+        for (let cz = c0; cz <= c1; cz += 1) cells.push({ x: lineX, z: center(cz), yaw: 90 });
+      }
+    }
+    if (!cells.length) return [];
+    let sx = 0, sz = 0;
+    for (const c of cells) { sx += c.x; sz += c.z; }
+    const y = groundTopAt(sx / cells.length, sz / cells.length); // one flat-pad base
+    return cells.map((c) => ({ pieceId: def.id, x: c.x, y, z: c.z, yawDegrees: c.yaw }));
+  }, [groundTopAt]);
+  const computePaintRef = useRef(computePaint);
+  computePaintRef.current = computePaint;
+
   // Pointer. A DRAG rotates the view (yaw from horizontal motion — WASD does the
   // panning). A CLICK (no drag) acts at the cursor: place the armed piece, or select
   // the piece under it. Place/select fire on mouse-UP so a rotate-drag never drops a
@@ -242,7 +296,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // on empty ground), or MOVE the selection (when the press lands on an
   // already-selected piece and nothing's armed). gx0/gz0 hold the down point on the
   // active plane so a move tracks the cursor's world delta, not pixels.
-  const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean; mode: 'rotate' | 'move'; gx0: number; gz0: number } | null>(null);
+  const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean; mode: 'rotate' | 'move' | 'paint'; gx0: number; gz0: number } | null>(null);
   const local = (e: any): { x: number; y: number } => {
     const r = rectRef.current;
     return { x: Number(e?.x ?? 0) - r.x, y: Number(e?.y ?? 0) - r.y };
@@ -251,12 +305,15 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const onDown = (e: any) => {
     props.onFocus?.();
     const p = local(e);
-    let mode: 'rotate' | 'move' = 'rotate';
+    let mode: 'rotate' | 'move' | 'paint' = 'rotate';
     let gx0 = 0, gz0 = 0;
-    // Grab a selected piece to move it: only when unarmed (armed = place mode) and the
-    // press raycasts onto a piece already in the selection. Anything else → rotate.
-    if (!armedRef.current && selectedIdsRef.current.size) {
-      // raycast the DRAWN (terrain-lifted) pieces so the grab matches what's on screen
+    if (armedRef.current && paintKindOf(armedRef.current)) {
+      // armed with a wall/floor → a drag PAINTS a line/rect; record the start ground point
+      const g = stage.groundPoint(p.x, p.y, rectRef.current);
+      if (g) { mode = 'paint'; gx0 = g.x; gz0 = g.z; }
+    } else if (!armedRef.current && selectedIdsRef.current.size) {
+      // Grab a selected piece to move it: the press raycasts onto a piece already in the
+      // selection (drawn/lifted pieces so the grab matches the screen). Else → rotate.
       const hit = GAME_BUILD.placed.raycast(stage.pieceRay(p.x, p.y, rectRef.current), displayPiecesRef.current, ISO_SNAP_TUNING.reachMeters);
       if (hit && selectedIdsRef.current.has(hit.piece.id)) {
         const g = stage.groundPoint(p.x, p.y, rectRef.current);
@@ -271,7 +328,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const d = dragRef.current;
     if (d && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
       d.turned = true;
-      if (d.mode === 'move') {
+      if (d.mode === 'paint') {
+        const g = stage.groundPoint(p.x, p.y, rectRef.current);
+        if (g) setPaintCells(computePaintRef.current(armedRef.current, { x: d.gx0, z: d.gz0 }, g));
+      } else if (d.mode === 'move') {
         const g = stage.groundPoint(p.x, p.y, rectRef.current);
         // Snap the drag delta to whole grid cells so a moved piece stays grid-locked —
         // the pieces start grid-aligned, so a whole-cell shift keeps them aligned and
@@ -295,6 +355,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (!d) return;
     if (d.turned) {
       if (d.mode === 'move') commitMove();
+      else if (d.mode === 'paint') commitPaint();
       else saveCamera(); // a rotate settled — persist the new yaw
       return;
     }
@@ -387,6 +448,19 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     ]);
     setSelectedIds(new Set());
   };
+  // Commit a finished drag-paint: drop the previewed wall line / floor rect as ONE batch
+  // (one undo step, one snapshot). Skip any cell the validator refuses so a partial run
+  // still lands the valid pieces.
+  const commitPaint = () => {
+    const cells = paintCellsRef.current;
+    setPaintCells(null);
+    if (!cells || !cells.length) return;
+    const valid = cells.filter((c) => GAME_BUILD.placed.validatePlacement(c).length === 0);
+    if (!valid.length) return;
+    const a = armedRef.current;
+    const label = a && a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id).label : 'piece';
+    commitBatch(valid.map((c) => ({ event: { kind: 'piecePlaced', placement: c } as WorldEvent, label: `painted ${label}` })));
+  };
 
   // Latest delete/clone closures, so the once-mounted key listener always calls the
   // current ones (they read live refs + the current onCommit).
@@ -466,6 +540,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const ghostMeshes = useMemo(() => {
     const a = armedRef.current;
     if (!a || !snap) return null;
+    if (paintCells && paintCells.length) return null; // the paint line/rect ghost owns the preview
     const yaw = snap.placement.yawDegrees;
     // A prefab previews ALL of its stamped pieces; a single piece previews itself. The
     // prefab def spans built-in + stream (prefabById); bail if it's somehow unknown.
@@ -479,7 +554,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     return previews.flatMap((p, i) => pieceVisualShapes(p, `isoGhost${i}`).map((shape) => (
       <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
     )));
-  }, [snap, armed, prefabById]);
+  }, [snap, armed, prefabById, paintCells]);
 
   // The move preview: the selected pieces drawn translucent at the dragged offset while
   // a move drag is live, tinted blocked-red if any destination fails validation — the
@@ -497,6 +572,18 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
     )));
   }, [moveDelta, displayPieces, selectedIds]);
+
+  // The drag-paint preview: every wall in the line / floor in the rect drawn translucent,
+  // each tinted blocked-red if the validator refuses it.
+  const paintGhostMeshes = useMemo(() => {
+    if (!paintCells || !paintCells.length) return null;
+    return paintCells.flatMap((c, i) => {
+      const color = GAME_BUILD.placed.validatePlacement(c).length > 0 ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
+      return pieceVisualShapes(c, `isoPaint${i}`).map((shape) => (
+        <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
+      ));
+    });
+  }, [paintCells]);
 
   const noIds = useMemo(() => new Set<string>(), []);
 
@@ -559,6 +646,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         <PlacedPieceMeshes pieces={displayPieces} markedIds={selectedIds} targetId={null} occludedIds={occludedIds} />
         {ghostMeshes}
         {moveGhostMeshes}
+        {paintGhostMeshes}
       </Scene3D>
 
       {/* pointer capture (near-transparent so it's hittable). onScroll rides the raw
@@ -612,7 +700,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
 
       <Text fontSize={9} color={props.focused ? '#7dd3fc' : '#475569'} style={{ fontFamily: 'monospace', position: 'absolute', left: 8, top: 34 }}>
         {armed
-          ? `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place · drag rotate · WASD pan · scroll zoom · R · Esc`
+          ? `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · Esc`
           : selectedIds.size > 0
             ? `${selectedIds.size} selected · drag to move · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
             : `WASD pan · drag rotate · scroll zoom · F recenter · click = ${wholeBuilding ? 'building, shift = piece' : 'piece, shift = building'} · pick below to build`}
