@@ -31,6 +31,7 @@
 // same split roster.ts uses.
 
 import type { LogPosition, Store, StreamDef, StreamHandle } from '../data';
+import { appendProbe, resetAppendProbe } from '../data';
 import { GAME_TELEMETRY } from '../game/telemetry';
 import { editorStore } from './store';
 
@@ -246,14 +247,22 @@ export function createSessionLog(store: Store, options: SessionLogOptions = {}):
         if (!items.length) return null;
         const t0 = perfMs();
         let pos: LogPosition | null = null;
+        let channelMs = 0;
+        let markerMs = 0;
         // ONE write transaction per touched DB for the whole batch
-        // (PLACEPERF-0610): per-event appends each paid their own
-        // BEGIN/COMMIT (~1ms each, ×2 per item: event + marker) — a
-        // 358-event move was 841ms of transaction overhead alone.
+        // (PLACEPERF-0610), and the FULL cost story (req_0492): channel vs
+        // marker appends timed separately, and the data layer's appendProbe
+        // splits each append into seq-read / stringify / insert / fold so
+        // the warn line names where a slow batch actually spends.
+        resetAppendProbe();
         store.batch(() => {
           for (const item of items) {
+            const a0 = perfMs();
             const at = channel.append(item.event);
+            channelMs += perfMs() - a0;
+            const m0 = perfMs();
             pos = stream.append({ kind: 'committed', session, channel: channel.name, label: item.label, at: at.globalSeq });
+            markerMs += perfMs() - m0;
           }
         });
         // ONE snapshot pass for the whole batch — the per-commit cost that stalled.
@@ -264,10 +273,21 @@ export function createSessionLog(store: Store, options: SessionLogOptions = {}):
           channel: channel.name,
           count: items.length,
           mode: snapshotMode,
+          channelMs,
+          markerMs,
+          seqMs: appendProbe.seqMs,
+          jsonMs: appendProbe.jsonMs,
+          insertMs: appendProbe.insertMs,
+          foldMs: appendProbe.foldMs,
           totalMs,
         });
         if (totalMs >= 16) {
-          console.warn(`[PLACEFREEZE] session.commitMany route=${route} channel=${channel.name} count=${items.length} mode=${snapshotMode} totalMs=${totalMs.toFixed(2)}`);
+          console.warn(
+            `[PLACEFREEZE] session.commitMany route=${route} channel=${channel.name} count=${items.length} mode=${snapshotMode}`
+            + ` channelMs=${channelMs.toFixed(2)} markerMs=${markerMs.toFixed(2)}`
+            + ` | seqMs=${appendProbe.seqMs.toFixed(2)} jsonMs=${appendProbe.jsonMs.toFixed(2)} insertMs=${appendProbe.insertMs.toFixed(2)} foldMs=${appendProbe.foldMs.toFixed(2)}`
+            + ` totalMs=${totalMs.toFixed(2)}`,
+          );
         }
         return pos;
       },

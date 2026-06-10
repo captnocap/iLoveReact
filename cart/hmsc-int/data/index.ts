@@ -157,6 +157,21 @@ export type StoreManifest = {
 
 type StoredEvent = { seq: number; at: number; event: unknown };
 
+// ── PLACEPERF-0610: per-append cost breakdown ────────────────────────────────
+// Accumulated across every append (all stores) so a batched commit can print
+// where its time actually went: seq allocation (the MAX(seq) read), the
+// INSERT, the in-memory fold (the stream's apply), and the record stringify.
+// A caller resets, runs its batch, then reads — single-threaded JS makes the
+// shared counters safe.
+export const appendProbe = { seqMs: 0, insertMs: 0, foldMs: 0, jsonMs: 0, count: 0 };
+export function resetAppendProbe(): void {
+  appendProbe.seqMs = 0;
+  appendProbe.insertMs = 0;
+  appendProbe.foldMs = 0;
+  appendProbe.jsonMs = 0;
+  appendProbe.count = 0;
+}
+
 const STREAM_NAME_SHAPE = /^[a-z][a-z0-9-]*$/;
 const STORE_MANIFEST = 'manifest.json';
 const STORE_DOMAINS_DIR = 'domains';
@@ -426,6 +441,12 @@ export function openStore(rootDir: string): Store {
     record TEXT NOT NULL
   )`);
   sqlExec(db, 'CREATE INDEX IF NOT EXISTS events_stream ON events(stream, id)');
+  // PLACEPERF-0610: seq allocation reads MAX(seq) on EVERY append; without
+  // this index that is a full table scan — on a long-lived world log it was
+  // ~1-3ms per append, ×716 for a 358-event move (≈ the whole 900ms stall,
+  // and why batching the transactions alone didn't dent it). Indexed, MAX is
+  // a B-tree rightmost lookup.
+  sqlExec(db, 'CREATE INDEX IF NOT EXISTS events_seq ON events(seq)');
   sqlExec(db, `CREATE TABLE IF NOT EXISTS ingested_files(
     path TEXT PRIMARY KEY,
     records INTEGER NOT NULL,
@@ -687,18 +708,27 @@ export function openStore(rootDir: string): Store {
         } else {
           beginImmediate();
         }
+        const seqT0 = perfMs();
         const next = sqlQuery<{ next: number }>(db, 'SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM events');
+        appendProbe.seqMs += perfMs() - seqT0;
         const seq = next.length > 0 && typeof next[0].next === 'number' ? next[0].next : globalSeq + 1;
         const record: StoredEvent = { seq, at: nowMs(), event };
+        const jsonT0 = perfMs();
         const line = JSON.stringify(record);
+        appendProbe.jsonMs += perfMs() - jsonT0;
+        const insertT0 = perfMs();
         if (!sqlExec(db, 'INSERT INTO events(seq, stream, at, record) VALUES (?, ?, ?, ?)', [seq, def.name, record.at, line])) {
           if (batchDepth === 0) sqlExec(db, 'ROLLBACK');
           throw new Error(`data store: append to "${def.name}" failed on ${dbPath}`);
         }
         if (batchDepth === 0) commitOrThrow(`append to "${def.name}"`);
+        appendProbe.insertMs += perfMs() - insertT0;
         globalSeq = seq;
         open.events.push(record);
+        const foldT0 = perfMs();
         open.current = open.def.apply(open.current, event, record.seq);
+        appendProbe.foldMs += perfMs() - foldT0;
+        appendProbe.count += 1;
         GAME_TELEMETRY.recordDiagnostic('worldStream', 'append', {
           stream: def.name,
           seq: record.seq,
