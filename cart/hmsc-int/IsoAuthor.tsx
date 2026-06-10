@@ -308,6 +308,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // ride __bench_now_us on a different epoch).
   const lastInputAtRef = useRef(0);
   const markInput = () => { lastInputAtRef.current = (globalThis as any).performance?.now?.() ?? 0; };
+  // When the orphaned-gesture watchdog (req_0517, in the focus loop below)
+  // first saw the button UP while dragRef was still set. 0 = not suspicious.
+  const orphanSinceRef = useRef(0);
   // ── Optimistic edits (req_0511: "the user interface had 0 delay, and
   // everything just resolves its whole scene graph behind the scenes") ─────
   // Release costs nothing: the drag ghost (already mounted, stable keys)
@@ -558,6 +561,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     }
     dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false, mode, gx0, gz0 };
     paintSigRef.current = '';
+    orphanSinceRef.current = 0;
+    // ANY fresh gesture retires a stale (non-confirming) paint preview
+    // (req_0517): a preview whose drag got orphaned must never outlive the
+    // next press — it suppresses the hover ghost while it stands.
+    if (mode !== 'paint' && paintCellsRef.current && !pendingPaint) setPaintCells(null);
     if (mode === 'paint') {
       const now = perfMs();
       dragPerfRef.current = {
@@ -977,6 +985,37 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       }
       const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
       last = now;
+      // Orphaned-gesture watchdog (req_0517: a giant stale paint ghost sat
+      // where the user dragged earlier, suppressing the real one-tile hover
+      // ghost — "the behavior of the placement tool pre placement is being a
+      // pain"). The engine pointer-captures the drag to this pane, but a few
+      // release paths eat the dispatch BEFORE capture fires (render-surface
+      // forwarding, chrome drag, an off-window release) — the pane never
+      // hears mouse-up, so dragRef + paintCells/moveDelta stay stuck and the
+      // [pieces] effect refuses to clear them (it must not clear a LIVE
+      // drag). The engine still flips its button state FIRST on every
+      // BUTTON_UP, so getMouseDown() is reliable truth: a drag whose button
+      // has read UP for ~250ms is orphaned — CANCEL it (never commit; a
+      // release this pane never saw must not place pieces).
+      if (dragRef.current) {
+        const buttonDown = Number(G.getMouseDown?.() ?? 1) !== 0;
+        if (buttonDown) {
+          orphanSinceRef.current = 0;
+        } else if (!orphanSinceRef.current) {
+          orphanSinceRef.current = now;
+        } else if (now - orphanSinceRef.current > 250) {
+          orphanSinceRef.current = 0;
+          dragRef.current = null;
+          dragPerfRef.current = null;
+          towerDragRef.current = null;
+          paintSigRef.current = '';
+          setPaintCells(null);
+          setMoveDelta(null);
+          console.warn('[iso-author] drag canceled — its release never reached this pane (req_0517)');
+        }
+      } else {
+        orphanSinceRef.current = 0;
+      }
       const forward = (held.w ? 1 : 0) - (held.s ? 1 : 0);
       const strafe = (held.d ? 1 : 0) - (held.a ? 1 : 0);
       if (forward || strafe) {
