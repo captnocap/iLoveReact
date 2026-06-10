@@ -607,6 +607,96 @@ pub fn cameraOcclusionConfiguredHits(
     return g_camera_occlusion[0..CAMERA_OCCLUSION_OUTPUT_FLOATS];
 }
 
+/// Spring-arm distance for a third-person camera, queried against the SAME
+/// packed collider buffer the physics step consumes (`step_input`). The no-V8
+/// compiled-game loader has no V8 occlusion door, so it reuses this to collide
+/// its camera with the authored walls exactly like the editor's JS spring-arm.
+/// Rects start at INPUT_HEADER_FLOATS (the loader builds no entity section),
+/// oriented rects follow. Returns the distance from `pivot` to the nearest solid
+/// the camera→pivot segment crosses (0 = clear); the caller pulls the eye in to
+/// `nearest - skin`.
+pub fn cameraOcclusionStepColliders(
+    step_input: []const f32,
+    rect_count: usize,
+    oriented_count: usize,
+    cam_x: f32,
+    cam_y: f32,
+    cam_z: f32,
+    pivot_x: f32,
+    pivot_y: f32,
+    pivot_z: f32,
+    sweep_radius: f32,
+) f32 {
+    const dx = pivot_x - cam_x;
+    const dy = pivot_y - cam_y;
+    const dz = pivot_z - cam_z;
+    if (!std.math.isFinite(dx) or !std.math.isFinite(dy) or !std.math.isFinite(dz)) return 0;
+    const segment_len = @sqrt(dx * dx + dy * dy + dz * dz);
+    if (segment_len <= 0.0001) return 0;
+    const radius = if (std.math.isFinite(sweep_radius)) @max(@as(f32, 0), sweep_radius) else 0;
+    const rect_base = INPUT_HEADER_FLOATS;
+    const oriented_base = rect_base + rect_count * RECT_FLOATS;
+    if (step_input.len < oriented_base + oriented_count * ORIENTED_FLOATS) return 0;
+    var nearest: f32 = 0;
+
+    var r: usize = 0;
+    while (r < rect_count) : (r += 1) {
+        const at = rect_base + r * RECT_FLOATS;
+        if (step_input[at + 5] <= 0.5) continue; // solid only
+        if (segmentAabbEntryT(
+            cam_x,
+            cam_y,
+            cam_z,
+            dx,
+            dy,
+            dz,
+            step_input[at] - radius,
+            bandFloor(step_input[at + 8]) - radius,
+            step_input[at + 1] - radius,
+            step_input[at + 2] + radius,
+            step_input[at + 4] + radius,
+            step_input[at + 3] + radius,
+        )) |entry_t| {
+            const target_distance = segment_len * (1.0 - clamp(entry_t, 0, 1));
+            if (nearest <= 0 or target_distance > nearest) nearest = target_distance;
+        }
+    }
+
+    var o: usize = 0;
+    while (o < oriented_count) : (o += 1) {
+        const at = oriented_base + o * ORIENTED_FLOATS;
+        if (step_input[at + 5] <= 0.5) continue;
+        const yaw = step_input[at + 11];
+        const cs = @cos(yaw);
+        const sn = @sin(yaw);
+        var lo_x: f32 = undefined;
+        var lo_z: f32 = undefined;
+        var lt_x: f32 = undefined;
+        var lt_z: f32 = undefined;
+        worldToLocal(cam_x, cam_z, step_input[at + 9], step_input[at + 10], cs, sn, &lo_x, &lo_z);
+        worldToLocal(pivot_x, pivot_z, step_input[at + 9], step_input[at + 10], cs, sn, &lt_x, &lt_z);
+        if (segmentAabbEntryT(
+            lo_x,
+            cam_y,
+            lo_z,
+            lt_x - lo_x,
+            dy,
+            lt_z - lo_z,
+            step_input[at] - radius,
+            bandFloor(step_input[at + 8]) - radius,
+            step_input[at + 1] - radius,
+            step_input[at + 2] + radius,
+            step_input[at + 4] + radius,
+            step_input[at + 3] + radius,
+        )) |entry_t| {
+            const target_distance = segment_len * (1.0 - clamp(entry_t, 0, 1));
+            if (nearest <= 0 or target_distance > nearest) nearest = target_distance;
+        }
+    }
+
+    return nearest;
+}
+
 pub fn cameraOcclusionConfiguredDistance(
     camera_x: f32,
     camera_y: f32,

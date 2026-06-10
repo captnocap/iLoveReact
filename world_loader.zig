@@ -71,6 +71,12 @@ const AIM_LOOK_AHEAD_METERS: f32 = 12.0;
 const AIM_MIN_PITCH_DEGREES: f32 = -1.15 * 180.0 / std.math.pi;
 const AIM_MAX_PITCH_DEGREES: f32 = 1.0 * 180.0 / std.math.pi;
 const AIM_FOV_DEGREES: f32 = 47.0;
+// Camera-collision spring-arm (parity with the editor's play-camera-occlusion
+// tuning): when a wall/roof sits between the eye and the player-side pivot, pull
+// the eye in to the wall's near side instead of clipping through it.
+const CAMERA_SPRING_MIN_DISTANCE_METERS: f32 = 0.7;
+const CAMERA_SPRING_SKIN_METERS: f32 = 0.14;
+const CAMERA_SPRING_SWEEP_RADIUS_METERS: f32 = 0.08;
 const PLAYER_WALK_SPEED_METERS_PER_SECOND: f32 = 4.5;
 const PLAYER_RUN_SPEED_METERS_PER_SECOND: f32 = 8.0;
 const PLAYER_RADIUS_METERS: f32 = 0.42;
@@ -356,6 +362,8 @@ const MaterialBatch = struct {
     boxes: []f32,
     count: u32,
     key: []u8,
+    translucent: bool,
+    opacity: f32,
 
     pub fn deinit(self: MaterialBatch, allocator: std.mem.Allocator) void {
         allocator.free(self.boxes);
@@ -416,7 +424,10 @@ fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_c
         const b = row * stride;
         const start = lists[ref - 1].items.len;
         try lists[ref - 1].appendSlice(allocator, insts[b .. b + stride]);
-        if (color_off + 2 < stride) {
+        // A SHADER material samples a texture → force white so the row's tint
+        // doesn't multiply into it. A TRANSLUCENT flat material (glass) has no
+        // texture and KEEPS its tint — that color IS the glass look.
+        if (materials[ref - 1].wgsl.len > 0 and color_off + 2 < stride) {
             lists[ref - 1].items[start + color_off + 0] = 1;
             lists[ref - 1].items[start + color_off + 1] = 1;
             lists[ref - 1].items[start + color_off + 2] = 1;
@@ -434,7 +445,13 @@ fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_c
         errdefer allocator.free(key);
         const count: u32 = @intCast(lists[built].items.len / stride);
         const boxes = try lists[built].toOwnedSlice(allocator);
-        batches[built] = .{ .boxes = boxes, .count = count, .key = key };
+        batches[built] = .{
+            .boxes = boxes,
+            .count = count,
+            .key = key,
+            .translucent = materials[built].wgsl.len == 0,
+            .opacity = materials[built].opacity,
+        };
     }
     return batches;
 }
@@ -541,10 +558,8 @@ fn rectFloats(insts: []const f32, row: usize, stride: usize, solid: bool) [game_
 fn orientedFloats(insts: []const f32, row: usize, stride: usize, solid: bool) [game_physics.ORIENTED_FLOATS]f32 {
     const r = rectFloats(insts, row, stride, solid);
     return .{
-        r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8],
-        insts[row * stride + 0],
-        insts[row * stride + 2],
-        instanceYawRadians(insts, row, stride),
+        r[0],                    r[1],                    r[2],                                   r[3], r[4], r[5], r[6], r[7], r[8],
+        insts[row * stride + 0], insts[row * stride + 2], instanceYawRadians(insts, row, stride),
     };
 }
 
@@ -609,6 +624,27 @@ fn registerSceneHeightfield(field: constructor.HeightfieldMesh, slot: usize) boo
     }, sample_bytes);
 }
 
+/// Register a baked ramp/stair slope (placedPieceRamps) as a host heightfield
+/// collider — the authored slope the editor walks up, not an instance guess.
+fn registerColliderField(field: constructor.ColliderField, slot: usize) bool {
+    const count = @as(usize, field.cols) * @as(usize, field.rows);
+    if (count == 0 or count > game_physics.HF_MAX_SAMPLES) return false;
+    const sample_bytes = std.mem.sliceAsBytes(field.heights[0..count]);
+    return game_physics.registerHeightfield(.{
+        .id = slot,
+        .origin_x = field.origin_x,
+        .origin_z = field.origin_z,
+        .cell = field.cell,
+        .cols = field.cols,
+        .rows = field.rows,
+        .base_y = field.base_y,
+        .walk_cos = field.walk_cos,
+        .yaw = field.yaw,
+        .pivot_x = field.pivot_x,
+        .pivot_z = field.pivot_z,
+    }, sample_bytes);
+}
+
 fn maxAbsHeight(heights: []const f32) f32 {
     var max_abs: f32 = 0;
     for (heights) |height| max_abs = @max(max_abs, @abs(height));
@@ -633,6 +669,79 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
             clipped_rows += 1;
         }
     }
+
+    // AUTHORED colliders present → step against THEM (the editor's +-join-aware
+    // wall / floor / ramp solids), not a guess re-derived from the render boxes.
+    // The painted-floor heightfields above already collide; here we add the
+    // baked ramp slopes and hand the rects/oriented straight to the step (they
+    // are already packed in host wire order). Absent → fall through to the
+    // instance-derived path below (pre-lump bakes).
+    if (scene.baked_colliders) |bc| {
+        for (bc.ramps) |ramp| {
+            if (heightfield_count < game_physics.MAX_HEIGHTFIELDS and registerColliderField(ramp, heightfield_count)) {
+                heightfield_count += 1;
+            } else {
+                clipped_rows += 1;
+            }
+        }
+        // The baked solids ARE the authored PIECES (walls/floors/pillars) — copy
+        // them in host wire order. Clamp to the host caps (step @min-clamps the
+        // counts; copying past the cap would slide the oriented slice into rect
+        // data). A normal authored map is far under the caps.
+        const kept_rects = @min(@as(usize, bc.rect_count), game_physics.MAX_RECTS);
+        const kept_oriented = @min(@as(usize, bc.oriented_count), game_physics.MAX_ORIENTED);
+        clipped_rows += (@as(usize, bc.rect_count) - kept_rects) + (@as(usize, bc.oriented_count) - kept_oriented);
+        try rects.appendSlice(allocator, bc.rects[0 .. kept_rects * game_physics.RECT_FLOATS]);
+        rect_count = kept_rects;
+
+        try oriented.appendSlice(allocator, bc.oriented[0 .. kept_oriented * game_physics.ORIENTED_FLOATS]);
+        oriented_count = kept_oriented;
+
+        // The PAINTED GROUND now travels as heightfields (flat chunks in the
+        // baked fields above, relief chunks in the HEIGHTFIELDS lump), so we do
+        // NOT rasterize its render-box rows into per-cell rects — that was what
+        // blew the host rect cap and forced spatial windowing (which discards
+        // these baked colliders) on even a small map. We only walk the PIECE rows
+        // (< piece_count): a built floor PLATE is a short, non-solid instance, so
+        // derive a walkable rect for it as a belt-and-suspenders to its baked
+        // collider — that keeps the 3rd-floor floor you fell through solid even if
+        // its baked band is off. Piece solids (walls) and piece ramps are skipped
+        // here; the baked +-join colliders and baked ramp slopes own them.
+        const piece_rows: usize = @min(@as(usize, scene.piece_count), @as(usize, inst_count));
+        var row: usize = 0;
+        while (row < piece_rows) : (row += 1) {
+            if (isRampInstance(insts, row, stride)) continue; // baked ramp slope
+            const scale_base: usize = if (stride >= 12) 6 else 3;
+            const b = row * stride;
+            const sx = @abs(insts[b + scale_base + 0]);
+            const sy = @abs(insts[b + scale_base + 1]);
+            const sz = @abs(insts[b + scale_base + 2]);
+            if (sx <= 0.001 or sy <= 0.001 or sz <= 0.001) continue;
+            if (sy > PHYSICS_SOLID_HEIGHT_METERS) continue; // a wall — baked +-join collider
+            if (@abs(instanceYawRadians(insts, row, stride)) > 0.0001) continue; // free-yaw floor plate: baked only
+            if (rect_count >= game_physics.MAX_RECTS) {
+                clipped_rows += 1;
+                continue;
+            }
+            try appendPhysicsRect(allocator, &rects, insts, row, stride, false);
+            rect_count += 1;
+        }
+
+        const values = try allocator.alloc(f32, game_physics.INPUT_HEADER_FLOATS + rects.items.len + oriented.items.len);
+        @memset(values, 0);
+        @memcpy(values[game_physics.INPUT_HEADER_FLOATS .. game_physics.INPUT_HEADER_FLOATS + rects.items.len], rects.items);
+        @memcpy(values[game_physics.INPUT_HEADER_FLOATS + rects.items.len ..], oriented.items);
+        rects.deinit(allocator);
+        oriented.deinit(allocator);
+        return .{
+            .values = values,
+            .rect_count = rect_count,
+            .oriented_count = oriented_count,
+            .heightfield_count = heightfield_count,
+            .clipped_rows = clipped_rows,
+        };
+    }
+
     // Two passes so WALKABLE FLOORS win the collider cap over solid walls. A
     // huge world (the --massive scale lab) has far more instances than MAX_RECTS;
     // if buildings (which lead the buffer) fill the cap first, the ground gets
@@ -802,7 +911,7 @@ fn buildSpatialGrid(allocator: std.mem.Allocator, insts: []const f32, inst_count
     return .{ .cell = cell, .min_x = min_x, .min_z = min_z, .cols = cols, .rows = rows, .starts = starts, .items = items, .always = always };
 }
 
-fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: f32, intent: game_physics.movement.Direction, speed: f32, jump_down: bool) void {
+fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: f32, intent: game_physics.movement.Direction, speed: f32, jump_down: bool, cfg: ?constructor.PhysicsConfig) void {
     if (colliders.values.len < game_physics.INPUT_HEADER_FLOATS) return;
     const input = colliders.values;
     input[0] = dt;
@@ -816,19 +925,22 @@ fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: f32,
     input[8] = player.vx;
     input[9] = player.vy;
     input[10] = player.vz;
-    input[11] = WALKABLE_SIDE_PUSH_GRACE_METERS;
+    // Slots 11–23 are the player tuning. With a baked PHYSICS_CONFIG lump they
+    // come from the editor's own config (so the shipped game feels identical);
+    // without it they fall back to the loader's built-in constants.
+    input[11] = if (cfg) |cf| cf.walkable_side_push_grace else WALKABLE_SIDE_PUSH_GRACE_METERS;
     input[12] = 0;
     input[13] = @floatFromInt(colliders.rect_count);
-    input[14] = PLAYER_GRAVITY_METERS_PER_SECOND2;
-    input[15] = PLAYER_JUMP_SPEED_METERS_PER_SECOND;
-    input[16] = PLAYER_RADIUS_METERS;
-    input[17] = PLAYER_HEIGHT_METERS;
-    input[18] = PLAYER_WALL_RESTITUTION;
-    input[19] = 0;
-    input[20] = PLAYER_STEP_HEIGHT_METERS;
-    input[21] = PLAYER_ACCELERATION_MULTIPLIER;
-    input[22] = PLAYER_SURFACE_FRICTION;
-    input[23] = PLAYER_SURFACE_RESTITUTION;
+    input[14] = if (cfg) |cf| cf.gravity else PLAYER_GRAVITY_METERS_PER_SECOND2;
+    input[15] = if (cfg) |cf| cf.jump_speed else PLAYER_JUMP_SPEED_METERS_PER_SECOND;
+    input[16] = if (cfg) |cf| cf.player_radius else PLAYER_RADIUS_METERS;
+    input[17] = if (cfg) |cf| cf.player_height else PLAYER_HEIGHT_METERS;
+    input[18] = if (cfg) |cf| cf.wall_restitution else PLAYER_WALL_RESTITUTION;
+    input[19] = if (cfg) |cf| cf.body_restitution else 0;
+    input[20] = if (cfg) |cf| cf.step_height else PLAYER_STEP_HEIGHT_METERS;
+    input[21] = if (cfg) |cf| cf.accel_mult else PLAYER_ACCELERATION_MULTIPLIER;
+    input[22] = if (cfg) |cf| cf.surface_friction else PLAYER_SURFACE_FRICTION;
+    input[23] = if (cfg) |cf| cf.surface_restitution else PLAYER_SURFACE_RESTITUTION;
     input[24] = @floatFromInt(colliders.oriented_count);
 
     const out = game_physics.step(input) orelse return;
@@ -936,6 +1048,9 @@ const CameraSolve = struct {
     pos: Vec3,
     target: Vec3,
     fov: f32,
+    /// The player-side anchor the eye sits back from — the spring-arm casts
+    /// pivot→pos against the walls and pulls the eye in to the wall's near side.
+    pivot: Vec3,
 };
 
 const PitchLimits = struct {
@@ -969,6 +1084,7 @@ fn solveAimCamera(player: PlayerState, yaw_degrees: f32, orbit_pitch_degrees: f3
             .z = pivot.z + fwd.z * AIM_LOOK_AHEAD_METERS,
         },
         .fov = AIM_FOV_DEGREES,
+        .pivot = pivot,
     };
 }
 
@@ -979,11 +1095,45 @@ fn desiredCamera(cam: CameraState, player: PlayerState) CameraSolve {
         .pos = orbitEye(target, cam.yaw_degrees, cam.pitch_degrees, CAMERA_DISTANCE_METERS),
         .target = target,
         .fov = CAMERA_FOV_DEGREES,
+        .pivot = target,
     };
 }
 
-fn updateCameraNode(camera_node: *Node, cam: *CameraState, player: PlayerState, dt: f32) void {
-    const want = desiredCamera(cam.*, player);
+/// Pull the desired eye in to the near side of any wall/roof between it and the
+/// pivot (the compiled-game spring-arm — parity with the editor's JS one).
+fn springArmEye(want: CameraSolve, maybe_colliders: ?PhysicsColliders) Vec3 {
+    const colliders = maybe_colliders orelse return want.pos;
+    if (colliders.rect_count == 0 and colliders.oriented_count == 0) return want.pos;
+    const dxp = want.pos.x - want.pivot.x;
+    const dyp = want.pos.y - want.pivot.y;
+    const dzp = want.pos.z - want.pivot.z;
+    const base = @sqrt(dxp * dxp + dyp * dyp + dzp * dzp);
+    if (base <= 0.0001) return want.pos;
+    const nearest = game_physics.cameraOcclusionStepColliders(
+        colliders.values,
+        colliders.rect_count,
+        colliders.oriented_count,
+        want.pos.x,
+        want.pos.y,
+        want.pos.z,
+        want.pivot.x,
+        want.pivot.y,
+        want.pivot.z,
+        CAMERA_SPRING_SWEEP_RADIUS_METERS,
+    );
+    if (nearest <= 0) return want.pos;
+    const safe = clamp(nearest - CAMERA_SPRING_SKIN_METERS, CAMERA_SPRING_MIN_DISTANCE_METERS, base);
+    const k = safe / base;
+    return .{
+        .x = want.pivot.x + dxp * k,
+        .y = want.pivot.y + dyp * k,
+        .z = want.pivot.z + dzp * k,
+    };
+}
+
+fn updateCameraNode(camera_node: *Node, cam: *CameraState, player: PlayerState, colliders: ?PhysicsColliders, dt: f32) void {
+    var want = desiredCamera(cam.*, player);
+    want.pos = springArmEye(want, colliders);
     if (!cam.initialized or dt <= 0 or CAMERA_SMOOTHING_PER_SECOND <= 0) {
         cam.current_pos = want.pos;
         cam.current_target = want.target;
@@ -1178,6 +1328,10 @@ pub const Runtime = struct {
         if (self.materials_ready) return;
         self.materials_ready = true;
         for (self.scene.materials, 0..) |m, i| {
+            // Translucent flat materials (glass: empty wgsl) have no shader to run —
+            // they render through the transparent pass with the row's own color.
+            // Feeding "" to the shader pipeline would crash wgpu, so skip them.
+            if (m.wgsl.len == 0) continue;
             var buf: [32]u8 = undefined;
             const key = std.fmt.bufPrint(&buf, "wmat-{d}", .{i}) catch continue;
             if (!material_tex.materialize(key, m.wgsl, m.data, MATERIAL_TILE_PX))
@@ -1387,11 +1541,39 @@ pub const Runtime = struct {
             .scene3d_instance_static = true,
         });
 
-        // One TEXTURED instanced box batch per material: the same unit cube +
-        // instanced draw, but sampling the materialized shader via scene3d_tex_key
-        // (resolved once ensureMaterials runs at first render). Shares the interned
-        // "box" geometry — verts ride along so it stands alone if box_count is 0.
+        // Per material: a SHADER material draws as one TEXTURED instanced box batch
+        // (sampling the materialized shader via scene3d_tex_key, resolved once
+        // ensureMaterials runs). A TRANSLUCENT flat material (glass) has no texture
+        // and can't go through the opaque instanced pass — emit each of its rows as
+        // an individual see-through mesh (scene3d_color_a) so the transparent pass
+        // (single meshes, sorted far→near) draws it. Both share the interned "box".
+        var translucent_meshes: u32 = 0;
         for (self.material_batches) |batch| {
+            if (batch.translucent) {
+                var r: usize = 0;
+                while (r < batch.count) : (r += 1) {
+                    const o = @as(usize, r) * self.stride;
+                    try self.kid_list.append(self.allocator, .{
+                        .scene3d_mesh = true,
+                        .scene3d_geom_key = "box",
+                        .scene3d_vertices = self.cube[0..],
+                        .scene3d_vert_count = 36,
+                        .scene3d_pos_x = batch.boxes[o + 0],
+                        .scene3d_pos_y = batch.boxes[o + 1],
+                        .scene3d_pos_z = batch.boxes[o + 2],
+                        .scene3d_rot_y = batch.boxes[o + 4],
+                        .scene3d_scale_x = batch.boxes[o + 6],
+                        .scene3d_scale_y = batch.boxes[o + 7],
+                        .scene3d_scale_z = batch.boxes[o + 8],
+                        .scene3d_color_r = batch.boxes[o + 9],
+                        .scene3d_color_g = batch.boxes[o + 10],
+                        .scene3d_color_b = batch.boxes[o + 11],
+                        .scene3d_color_a = batch.opacity,
+                    });
+                    translucent_meshes += 1;
+                }
+                continue;
+            }
             try self.kid_list.append(self.allocator, .{
                 .scene3d_mesh = batch.count > 0,
                 .scene3d_geom_key = "box",
@@ -1404,10 +1586,10 @@ pub const Runtime = struct {
                 .scene3d_tex_key = batch.key,
             });
         }
-        if (self.scene.materials.len > 0) log.print("[loader] {d} face material(s) → {d} textured batch(es)\n", .{ self.scene.materials.len, self.material_batches.len });
+        if (self.scene.materials.len > 0) log.print("[loader] {d} face material(s) → {d} batch(es), {d} translucent meshes\n", .{ self.scene.materials.len, self.material_batches.len, translucent_meshes });
 
         self.root = .{ .children = self.kid_list.items };
-        updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, 0);
+        updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, if (self.has_physics_colliders) self.physics_colliders else null, 0);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, false, false, false);
         self.last_ns = nowNs();
     }
@@ -1550,17 +1732,22 @@ pub const Runtime = struct {
         if (keyDown(SCAN_D)) strafe += 1;
         const intent = game_physics.movement.wasdDirection(forward, strafe, self.camera.yaw_degrees * std.math.pi / 180.0);
         const run_down = keyDown(SCAN_LSHIFT);
-        const speed: f32 = if (run_down) PLAYER_RUN_SPEED_METERS_PER_SECOND else PLAYER_WALK_SPEED_METERS_PER_SECOND;
+        // Locomotion speed from the baked PHYSICS_CONFIG (the editor's walk/run),
+        // falling back to the loader's built-in constants for pre-lump bakes.
+        const cfg = self.scene.physics_config;
+        const walk_speed = if (cfg) |cf| cf.walk_speed else PLAYER_WALK_SPEED_METERS_PER_SECOND;
+        const run_speed = if (cfg) |cf| cf.run_speed else PLAYER_RUN_SPEED_METERS_PER_SECOND;
+        const speed: f32 = if (run_down) run_speed else walk_speed;
         // Refresh the near-field collider window around the player (huge maps only).
         // Cheap — it touches only the spanning list + the cells around the player.
         if (self.windowed) self.rebuildWindow(self.player.x, self.player.z);
-        runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE));
+        runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE), cfg);
         if (self.camera.aiming) self.player.yaw = self.camera.yaw_degrees * std.math.pi / 180.0;
         const moving = @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001;
         const airborne = !self.player.grounded or @abs(self.player.vy) > 0.05;
         updatePlayerAnimationClock(&self.player, dt, moving, run_down, airborne);
 
-        updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, dt);
+        updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, if (self.has_physics_colliders) self.physics_colliders else null, dt);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
         self.frame += 1;
     }
