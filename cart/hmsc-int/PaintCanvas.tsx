@@ -34,7 +34,7 @@ import { BrushRail, type BrushRailSettings } from './BrushRail';
 import { LayerBtn, MiniStepper, ToolBtn } from './railAtoms';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
-import { applyMergeGesture, clampProfile, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, strokeWireFlip, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
+import { applyMergeGesture, clampProfile, laneFlowArrows, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, strokeWireFlip, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
 import { RoadRail } from './RoadRail';
 import { ChunkSurface } from './ChunkSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
@@ -1126,6 +1126,9 @@ export function PaintCanvas(props: {
   // The wire view (req_0528): dotted centerlines + endpoint connect-squares
   // over every committed stroke, so new roads continue the existing network.
   const [showRoadWires, setShowRoadWires] = useState(true);
+  // Per-lane flow arrows (FLOWARROWS-0610, user ask): glyphs pointing each
+  // lane's ACTUAL travel direction — the disambiguator colours can't be.
+  const [showFlowArrows, setShowFlowArrows] = useState(true);
   const roadsRef = useRef(roads);
   roadsRef.current = roads;
   const roadDraftRef = useRef(roadDraft);
@@ -1763,6 +1766,21 @@ export function PaintCanvas(props: {
               );
             }
           }
+          // Per-lane flow arrows (FLOWARROWS-0610): a glyph every few tiles on
+          // each lane, pointing the lane's TRUE travel direction. Colour
+          // matches the canonical wire legend so both views tell one story.
+          if (showFlowArrows) {
+            const flip = strokeWireFlip(r.points);
+            for (const [i, ar] of laneFlowArrows(r, 5).entries()) {
+              nodes.push(
+                <Canvas.Node key={`ra_${r.id}_${i}`} gx={cellGraph(ar.x)} gy={cellGraph(ar.z)} gw={TILE_UNITS * 1.7} gh={TILE_UNITS * 1.7}>
+                  <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', borderRadius: 99, backgroundColor: '#0b132066' }}>
+                    <Text fontSize={11} color={(ar.flow === 'forward') !== flip ? '#86efac' : '#f87171'} style={{ fontWeight: 900 }}>{ar.glyph}</Text>
+                  </Box>
+                </Canvas.Node>,
+              );
+            }
+          }
           if (isOneWay(r.profile)) {
             for (const [i, ch] of roadChevrons(r).entries()) {
               nodes.push(
@@ -1937,6 +1955,8 @@ export function PaintCanvas(props: {
             onDelete={deleteRoad}
             wires={showRoadWires}
             onWires={setShowRoadWires}
+            arrows={showFlowArrows}
+            onArrows={setShowFlowArrows}
           />
         ) : null}
       </Box>

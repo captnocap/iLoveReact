@@ -31,6 +31,9 @@ export function RoadRail(props: {
   /** the wire view: dotted centerlines + per-lane wires + endpoint squares */
   wires: boolean;
   onWires: (on: boolean) => void;
+  /** per-lane flow arrows (FLOWARROWS-0610): glyphs pointing actual travel */
+  arrows: boolean;
+  onArrows: (on: boolean) => void;
 }) {
   const p = clampProfile(props.profile);
   const drawing = props.tool !== 'pointer';
@@ -112,6 +115,13 @@ export function RoadRail(props: {
           {'cyan □ = connect point (clicks snap)\ngreen wire = east/south flow · red = west/north'}
         </Text>
       ) : null}
+      <Pressable
+        onPress={() => props.onArrows(!props.arrows)}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4, paddingBottom: 4, paddingLeft: 6, paddingRight: 6, borderRadius: 4, borderWidth: 1, borderColor: props.arrows ? '#86efac' : '#334155', backgroundColor: '#0f1a2e' }}
+      >
+        <Box style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: props.arrows ? '#86efac' : '#334155' }} />
+        <Text fontSize={9} color={props.arrows ? '#e2e8f0' : '#64748b'}>flow arrows (per lane)</Text>
+      </Pressable>
 
       {drawing ? (
         <Box style={{ gap: 4 }}>

@@ -550,6 +550,44 @@ export function roadMotionProfile<T extends { maxSpeed: number }>(
   return { ...base, maxSpeed: limit };
 }
 
+/** Per-LANE flow arrows (FLOWARROWS-0610, user ask): one glyph every
+ *  `everyTiles` along each lane's centerline, pointing the lane's ACTUAL
+ *  travel direction — colours can't say "which way", arrows can. ASCII
+ *  glyphs by dominant axis (the roadChevrons convention; fillets make short
+ *  near-diagonal segments where the dominant axis is an honest rounding). */
+export function laneFlowArrows(r: RoadStroke, everyTiles: number): { x: number; z: number; glyph: string; flow: 'forward' | 'backward' }[] {
+  const guides = laneGuides(r.profile);
+  const out: { x: number; z: number; glyph: string; flow: 'forward' | 'backward' }[] = [];
+  for (let i = 0; i + 1 < r.points.length; i++) {
+    const a = r.points[i]!, b = r.points[i + 1]!;
+    const dx = b.gx - a.gx, dz = b.gz - a.gz;
+    const len = Math.hypot(dx, dz);
+    if (!len) continue;
+    const dir = Math.abs(dx) >= Math.abs(dz) ? { dx: Math.sign(dx), dz: 0 } : { dx: 0, dz: Math.sign(dz) };
+    const right = { dx: -dir.dz, dz: dir.dx };
+    const n = Math.max(1, Math.round(len / everyTiles));
+    for (const g of guides) {
+      // the lane's true travel vector: with the segment for forward lanes,
+      // against it for opposing ones
+      const fx = g.flow === 'forward' ? dx : -dx;
+      const fz = g.flow === 'forward' ? dz : -dz;
+      const glyph = Math.abs(fx) >= Math.abs(fz) ? (fx > 0 ? '>' : '<') : (fz > 0 ? 'v' : '^');
+      // midpoints of n slots — arrows stay off the segment ends so junction
+      // seams and connect squares keep their breathing room
+      for (let s = 0; s < n; s++) {
+        const t = (s + 0.5) / n;
+        out.push({
+          x: a.gx + dx * t + right.dx * g.off,
+          z: a.gz + dz * t + right.dz * g.off,
+          glyph,
+          flow: g.flow,
+        });
+      }
+    }
+  }
+  return out;
+}
+
 /** Wire-colour canonicalization (WIRECOLOR-0610): true when the stroke's net
  *  direction points NEGATIVE on its dominant axis. Lane wires colour by flow
  *  vs the CANONICAL direction (east/south positive), not the draw direction —

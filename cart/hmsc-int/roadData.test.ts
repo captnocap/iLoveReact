@@ -9,7 +9,7 @@ import {
   applyMergeGesture, carriagewayTiles, cellKey, clampProfile, crossSection,
   filletPoints, isOneWay, laneGuides, planRoads, profileLabel, ribbonExtents,
   roadMotionProfile, roadRibbonSegments, roadWidthTiles, snapToCenterline,
-  snapToRoadEnd, speedLimitAtPoint, speedLimitMps, splitStroke, strokeChevrons, strokeWireFlip,
+  laneFlowArrows, snapToRoadEnd, speedLimitAtPoint, speedLimitMps, splitStroke, strokeChevrons, strokeWireFlip,
   type RoadPlan, type RoadStroke,
 } from './roadData';
 import { roadRibbonSection } from './tileField.wgsl';
@@ -294,6 +294,27 @@ test('roadRibbonSegments emits chunk-local 8-float segments and filters far chun
   assertEqual(segs[0], 10.5, 'chunk-local cell-centre x');
   assertEqual(segs[1], 10.5, 'chunk-local cell-centre z');
   assertEqual(roadRibbonSegments([r], 5, 5, 120).length, 0, 'a far chunk gets no segments');
+});
+
+test('laneFlowArrows point each lane its TRUE travel direction (FLOWARROWS-0610)', () => {
+  // an eastbound-drawn two-way: forward lanes (south side, right of draw)
+  // point >, opposing lanes (north side) point <
+  const east = road('e', [[0, 10], [20, 10]], 1, 1, false);
+  const eastArrows = laneFlowArrows(east, 5);
+  assert(eastArrows.length > 0, 'arrows emitted');
+  for (const a of eastArrows) {
+    assertEqual(a.glyph, a.z > 10 ? '>' : '<', `south lane drives east, north lane west (z=${a.z})`);
+  }
+  // the user's vertical road drawn NORTHWARD: right-hand traffic puts the
+  // northbound (forward) lanes EAST of the centerline — arrows say what
+  // colours can't
+  const north = road('n', [[18, 584], [18, 543]], 1, 1, false);
+  for (const a of laneFlowArrows(north, 5)) {
+    assertEqual(a.glyph, a.x > 18 ? '^' : 'v', `east lane drives north, west lane south (x=${a.x})`);
+  }
+  // one-way: every lane points the same way
+  const oneWay = road('o', [[0, 10], [20, 10]], 2, 0, false);
+  for (const a of laneFlowArrows(oneWay, 5)) assertEqual(a.glyph, '>', 'one-way lanes all point with the flow');
 });
 
 test('strokeWireFlip canonicalizes wire colours — opposite-drawn halves read as one road (WIRECOLOR-0610)', () => {
