@@ -20,9 +20,11 @@ import {
   BUILD_CATALOG_IDS,
   WALL_EDITS,
   buildKindContract,
+  carriesMicroGrid,
   catalogEntry,
   describeFaceSkin,
   faceSlotLabels,
+  FLOOR_DEFAULT_CELL_KIND,
   skinKindOrder,
   BUILD_FACE_SLOTS,
   type BuildFaceSkin,
@@ -32,7 +34,8 @@ import {
   type BuildPrefabDef,
   type WallEdit,
 } from '../../../game/build';
-import type { BuildingsStore, SkinSlotTarget } from './store';
+import { PAINTABLE_TILE_KINDS, tileKindDefinition, type TileKind } from '../../../game/kinds';
+import type { BuildingPaintTarget, BuildingSkinScope, BuildingsStore, SkinSlotTarget } from './store';
 
 // quick-pick swatches for the color rows (colors are local; material choices
 // come through the MATERIAL source chooser contract).
@@ -64,6 +67,27 @@ function pieceAcceptsEdit(pieceId: string): boolean {
   return buildKindContract(catalogEntry(pieceId).kind).edits === 'wall';
 }
 
+function sameSkin(a: BuildFaceSkin | null, b: BuildFaceSkin | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.kind !== b.kind) return false;
+  return a.kind === 'color' ? a.value === (b as { value: string }).value : a.id === (b as { id: string }).id;
+}
+
+function targetSkin(target: SkinSlotTarget, read: (slot: BuildFaceSlot) => BuildFaceSkin | null): BuildFaceSkin | null {
+  if (target !== 'all') return read(target);
+  const [first, ...rest] = BUILD_FACE_SLOTS.map(read);
+  return rest.every((skin) => sameSkin(first, skin)) ? first : null;
+}
+
+function sameScope(a: BuildingSkinScope, b: BuildingSkinScope): boolean {
+  if (a.kind !== b.kind) return false;
+  return a.kind === 'type' ? a.pieceKind === (b as { pieceKind: BuildPieceKind }).pieceKind : a.index === (b as { index: number }).index;
+}
+
+function sameTarget(a: BuildingPaintTarget | null, b: BuildingPaintTarget): boolean {
+  return !!a && a.buildingId === b.buildingId && a.slot === b.slot && sameScope(a.scope, b.scope);
+}
+
 // ── pick options (req_0184: the chooser replaces every roster chip wall) ────
 
 export function materialPickOptions(store: BuildingsStore): PickOption[] {
@@ -91,62 +115,85 @@ export function catalogPickOptions(): PickOption[] {
  *  ONE skin, so setting a color replaces a material and vice versa */
 function skinRows(
   store: BuildingsStore,
+  id: string,
+  scope: BuildingSkinScope,
   label: (slot: SkinSlotTarget) => string,
   read: (slot: BuildFaceSlot) => BuildFaceSkin | null,
   write: (target: SkinSlotTarget, skin: BuildFaceSkin | null) => void,
+  onMaterialTarget?: (target: BuildingPaintTarget) => void,
+  onPaintTarget?: (target: BuildingPaintTarget) => void,
 ): FieldSpec[] {
   const materials = materialPickOptions(store);
   const showMaterial = (mid: string) => materialLabel(materials, mid);
-  const fields: FieldSpec[] = [];
-  // THE one-action row: all faces, one color / one material
-  fields.push({
-    k: label('all'),
-    t: 'color',
-    get: () => {
-      const [a, b, c] = BUILD_FACE_SLOTS.map(read);
-      const same = a && b && c && a.kind === 'color' && b.kind === 'color' && c.kind === 'color' && a.value === b.value && b.value === c.value;
-      return same ? (a as { value: string }).value : '';
-    },
-    opts: BUILDING_PALETTE,
-    set: (v: string) => write('all', { kind: 'color', value: v }),
+  const active = () => store.skinTarget(id, scope);
+  const activeSkin = () => targetSkin(active(), read);
+  const activeLabel = () => label(active());
+  const activeMaterial = () => {
+    const skin = activeSkin();
+    return skin?.kind === 'material' ? skin.id : null;
+  };
+  const makeTarget = (): BuildingPaintTarget => ({
+    buildingId: id,
+    scope,
+    slot: active(),
+    label: activeLabel(),
+    materialId: activeMaterial(),
   });
-  fields.push({
-    k: `${label('all')} material`,
-    t: 'pick',
-    get: () => {
-      const [a, b, c] = BUILD_FACE_SLOTS.map(read);
-      const same = a && b && c && a.kind === 'material' && b.kind === 'material' && c.kind === 'material' && a.id === b.id && b.id === c.id;
-      return same ? (a as { id: string }).id : null;
-    },
-    opts: () => materialPickOptions(store),
-    show: showMaterial,
-    clearLabel: 'bare',
-    set: (v: string | null) => write('all', v === null ? null : { kind: 'material', id: v }),
-  });
-  for (const slot of BUILD_FACE_SLOTS) {
-    const cur = () => read(slot);
-    fields.push({
-      k: label(slot),
-      t: 'color',
-      get: () => { const s = cur(); return s?.kind === 'color' ? s.value : ''; },
-      opts: BUILDING_PALETTE,
-      set: (v: string) => write(slot, { kind: 'color', value: v }),
-    });
-    fields.push({
-      k: `${label(slot)} material`,
+  return [
+    {
+      k: 'target',
       t: 'pick',
-      get: () => { const s = cur(); return s?.kind === 'material' ? s.id : null; },
-      opts: () => materialPickOptions(store),
-      show: showMaterial,
-      clearLabel: 'bare',
-      set: (v: string | null) => write(slot, v === null ? null : { kind: 'material', id: v }),
-    });
-  }
-  fields.push({ k: 'clear', t: 'act', tone: 'warning', run: () => write('all', null) });
-  return fields;
+      get: () => active(),
+      opts: () => (['all', ...BUILD_FACE_SLOTS] as SkinSlotTarget[]).map((slot) => ({ id: slot, label: label(slot), group: 'faces' })),
+      show: (slot) => label(slot as SkinSlotTarget),
+      set: (v: string | null) => { if (v) store.setSkinTarget(id, scope, v as SkinSlotTarget); },
+    },
+    {
+      k: 'color',
+      t: 'color',
+      get: () => { const skin = activeSkin(); return skin?.kind === 'color' ? skin.value : ''; },
+      opts: BUILDING_PALETTE,
+      set: (v: string) => write(active(), { kind: 'color', value: v }),
+    },
+    {
+      k: 'material',
+      t: 'val',
+      get: () => {
+        const id = activeMaterial();
+        return id ? showMaterial(id) : 'bare';
+      },
+    },
+    {
+      k: 'browse material',
+      t: 'act',
+      tone: 'info',
+      run: () => onMaterialTarget?.(makeTarget()),
+    },
+    {
+      k: 'paint target',
+      t: 'act',
+      tone: 'success',
+      run: () => onPaintTarget?.(makeTarget()),
+    },
+    {
+      k: 'clear target',
+      t: 'act',
+      tone: 'warning',
+      run: () => {
+        const target = makeTarget();
+        write(target.slot, null);
+        if (sameTarget(store.paintTarget(), target)) store.setPaintTarget({ ...target, materialId: null });
+      },
+    },
+  ];
 }
 
-export function buildingsPanel(store: BuildingsStore, id: string): PanelSpec {
+export function buildingsPanel(
+  store: BuildingsStore,
+  id: string,
+  onMaterialTarget?: (target: BuildingPaintTarget) => void,
+  onPaintTarget?: (target: BuildingPaintTarget) => void,
+): PanelSpec {
   const def = store.building(id);
   if (!def) return { groups: [{ title: 'BUILDING', fields: [{ k: 'status', t: 'val', get: () => store.error() ?? 'unknown building' }] }] };
 
@@ -157,6 +204,7 @@ export function buildingsPanel(store: BuildingsStore, id: string): PanelSpec {
   const armed = store.armedDelete() === id;
   groups.push({
     title: 'BUILDING',
+    layout: 'rows',
     fields: [
       { k: 'name', t: 'text', get: () => store.building(id)?.label ?? '', set: (v: string) => store.renameBuilding(id, v) },
       { k: 'pieces', t: 'val', get: () => `${store.building(id)?.pieces.length ?? 0}` },
@@ -188,11 +236,16 @@ export function buildingsPanel(store: BuildingsStore, id: string): PanelSpec {
     const labels = faceSlotLabels(kind);
     groups.push({
       title: `${kind.toUpperCase()}S · GLOBAL`,
+      layout: 'rows',
       fields: skinRows(
         store,
+        id,
+        { kind: 'type', pieceKind: kind },
         (slot) => (slot === 'all' ? 'all faces' : labels[slot]),
         (slot) => store.building(id)?.skins?.[kind]?.[slot] ?? null,
         (target, skin) => store.setTypeSkin(id, kind, target, skin),
+        onMaterialTarget,
+        onPaintTarget,
       ),
     });
   }
@@ -215,10 +268,11 @@ export function buildingsPanel(store: BuildingsStore, id: string): PanelSpec {
     });
     groups.push({
       title: `PIECE ${pieceLabel(def, sel).toUpperCase()}`,
+      layout: 'rows',
       fields: [
         {
           // the catalog swap as a pick, grouped by kind (no id chip wall)
-          k: 'piece', t: 'pick',
+          k: 'piece type', t: 'pick',
           get: () => piece().pieceId,
           opts: () => catalogPickOptions(),
           show: (v: string) => catalogEntry(v).label,
@@ -238,13 +292,40 @@ export function buildingsPanel(store: BuildingsStore, id: string): PanelSpec {
         })),
         ...skinRows(
           store,
+          id,
+          { kind: 'piece', index: sel },
           (slot) => (slot === 'all' ? 'override all' : `override ${labels[slot]}`),
           (slot) => piece().skin?.[slot] ?? null,
           (target, skin) => store.setPieceSkin(id, sel, target, skin),
+          onMaterialTarget,
+          onPaintTarget,
         ),
         { k: 'remove piece', t: 'act', tone: 'error', run: () => store.removePiece(id, sel) },
       ],
     });
+
+    // ── FLOOR CELLS (MICROGRID-0610): the 3×3 cell painter — col 3 EDITS ─────
+    // Nine compass rows (row-major, iz south), each a pick over the paintable
+    // tile kinds; clearing returns the cell to the material default (which the
+    // chip shows, so "default" is never a mystery). Writes go through
+    // setFloorCell via the store — the SAME cells the nav bake paths.
+    if (carriesMicroGrid(kind())) {
+      const defaultKind = () => FLOOR_DEFAULT_CELL_KIND[catalogEntry(piece().pieceId).material];
+      const cellLabels = ['nw', 'n', 'ne', 'w', 'centre', 'e', 'sw', 's', 'se'];
+      groups.push({
+        title: 'FLOOR CELLS · 3×3',
+        layout: 'rows',
+        fields: cellLabels.map((label, i): FieldSpec => ({
+          k: label,
+          t: 'pick',
+          get: () => piece().cells?.[i] ?? null,
+          opts: () => PAINTABLE_TILE_KINDS.map((k) => ({ id: k, label: tileKindDefinition(k).label, group: 'tiles' })),
+          show: (v: string) => tileKindDefinition(v as TileKind).label,
+          clearLabel: `default (${tileKindDefinition(defaultKind()).label})`,
+          set: (v: string | null) => store.setPieceFloorCell(id, sel, i, (v as TileKind | null)),
+        })),
+      });
+    }
   }
 
   return { groups };
@@ -270,14 +351,26 @@ export type PieceRender = {
   edit?: string;
   faces: Record<BuildFaceSlot, FaceLook>;
   selected: boolean;
+  /** MICROGRID-0610: a floor's authored 3×3 cells (null = material default) —
+   *  the stage tints the authored ones so painting is visible as it happens */
+  cells?: (TileKind | null)[];
 };
+export type BuildingSkinPreview = { target: BuildingPaintTarget; textureId: string };
 
 function lookOf(skin: BuildFaceSkin | null, bare: string): FaceLook {
   if (!skin) return { color: bare };
   return skin.kind === 'color' ? { color: skin.value } : { textureId: skin.id };
 }
 
-export function buildingRender(store: BuildingsStore, id: string): PieceRender[] {
+function previewApplies(preview: BuildingSkinPreview | undefined, id: string, index: number, kind: BuildPieceKind, slot: BuildFaceSlot): boolean {
+  if (!preview || preview.target.buildingId !== id) return false;
+  if (preview.target.slot !== 'all' && preview.target.slot !== slot) return false;
+  const scope = preview.target.scope;
+  if (scope.kind === 'piece') return scope.index === index;
+  return scope.pieceKind === kind;
+}
+
+export function buildingRender(store: BuildingsStore, id: string, preview?: BuildingSkinPreview): PieceRender[] {
   const def = store.building(id);
   if (!def) return [];
   const sel = store.selectedPiece(id);
@@ -285,7 +378,11 @@ export function buildingRender(store: BuildingsStore, id: string): PieceRender[]
     const row = catalogEntry(piece.pieceId);
     const bare = BARE_MATERIAL_COLORS[row.material];
     const faces = {} as Record<BuildFaceSlot, FaceLook>;
-    for (const slot of BUILD_FACE_SLOTS) faces[slot] = lookOf(store.resolved(id, index, slot).skin, bare);
+    for (const slot of BUILD_FACE_SLOTS) {
+      faces[slot] = previewApplies(preview, id, index, row.kind, slot)
+        ? { textureId: preview!.textureId }
+        : lookOf(store.resolved(id, index, slot).skin, bare);
+    }
     return {
       index,
       kind: row.kind,
@@ -294,6 +391,7 @@ export function buildingRender(store: BuildingsStore, id: string): PieceRender[]
       edit: piece.edit,
       faces,
       selected: index === sel,
+      ...(piece.cells ? { cells: piece.cells } : {}),
     };
   });
 }

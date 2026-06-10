@@ -17,6 +17,7 @@
 // here assumes a camera or interaction mode.
 
 import { catalogEntry, effectiveTags, isCatalogId, type BuildPieceDef, type BuildTheme } from './catalog';
+import { isTileKind } from '../kinds';
 import { BUILD_KIND_CONTRACTS, type BuildGameplayTags } from './pieces';
 import { isWallEdit, type WallEdit } from './edits';
 import { skinSetProblems, type BuildSkinSet, type BuildTypeSkins } from './skins';
@@ -37,6 +38,11 @@ export type PrefabPiece = {
   // OVERRIDE — beats the def-level type global. Rides the piece itself so
   // structure edits (swap/remove/add) never detach a skin from its piece.
   skin?: BuildSkinSet;
+  // MICROGRID-0610 (addition; older defs stay valid): a FLOOR's authored 3×3
+  // micro-cells — 9 row-major tile kinds, null = the material default (see
+  // game/build/microGrid). Rides the piece so the stamp carries it into
+  // every placed instance; meaningful on floors only.
+  cells?: (import('../kinds').TileKind | null)[];
 };
 
 export type BuildPrefabDef = {
@@ -138,6 +144,19 @@ export function validatePrefab(prefab: BuildPrefabDef): string[] {
     // BUILDSKIN-0606: override shape (material EXISTENCE is the editor
     // boundary's check — the registry lives React-side)
     problems.push(...skinSetProblems(piece.skin, `${prefab.id}[${index}].skin`));
+    // MICROGRID-0610: authored micro-cells are a floor thing, exactly 9,
+    // each null or a known tile kind (the ONE kind registry).
+    if (piece.cells !== undefined) {
+      if (catalogEntry(piece.pieceId).kind !== 'floor') {
+        problems.push(`${prefab.id}[${index}]: cells on a non-floor piece`);
+      } else if (!Array.isArray(piece.cells) || piece.cells.length !== 9) {
+        problems.push(`${prefab.id}[${index}]: cells must be 9 row-major entries`);
+      } else {
+        for (const [ci, cell] of piece.cells.entries()) {
+          if (cell !== null && !isTileKind(cell)) problems.push(`${prefab.id}[${index}].cells[${ci}]: unknown tile kind '${cell}'`);
+        }
+      }
+    }
   }
   if (prefab.skins !== undefined) {
     for (const kind of Object.keys(prefab.skins)) {

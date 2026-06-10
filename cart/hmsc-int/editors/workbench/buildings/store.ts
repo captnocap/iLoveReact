@@ -21,9 +21,12 @@
 import {
   BUILD_PREFAB_DEFINITIONS,
   catalogEntry,
+  faceSlotLabels,
+  FLOOR_GRID,
   isCatalogId,
   isWallEdit,
   resolveFaceSkin,
+  setFloorCell,
   skinAllSlots,
   validatePrefab,
   type BuildFaceSkin,
@@ -31,11 +34,13 @@ import {
   type BuildPieceKind,
   type BuildPrefabDef,
   type BuildSkinSet,
+  type FloorCell,
   type PrefabPiece,
   type ResolvedFaceSkin,
   type WallEdit,
 } from '../../../game/build';
 import type { WorldEvent, WorldStreamState } from '../../../game/world/stream';
+import type { MaterialChoice } from '../materials/chooser';
 
 export type BuildingsSession = {
   commit(event: WorldEvent, label: string): void;
@@ -50,13 +55,24 @@ export type BuildingsStoreDeps = {
   /** does this id resolve in THE texture registry? (live: textureById) */
   validMaterial(id: string): boolean;
   /** the registry's assignable materials, for the panel's picker */
-  materials(): Array<{ id: string; label: string }>;
+  materials(): MaterialChoice[];
 };
 
 export type BuildingRow = { id: string; label: string; pieceCount: number };
 
 /** 'all' = every slot in one action (the user's "all walls → green") */
 export type SkinSlotTarget = BuildFaceSlot | 'all';
+export type BuildingsLens = 'model' | 'materials' | 'paint';
+export type BuildingSkinScope =
+  | { kind: 'type'; pieceKind: BuildPieceKind }
+  | { kind: 'piece'; index: number };
+export type BuildingPaintTarget = {
+  buildingId: string;
+  scope: BuildingSkinScope;
+  slot: SkinSlotTarget;
+  label: string;
+  materialId: string | null;
+};
 
 export type BuildingsStore = {
   deps: BuildingsStoreDeps;
@@ -69,10 +85,26 @@ export type BuildingsStore = {
   setPieceSkin(id: string, index: number, target: SkinSlotTarget, skin: BuildFaceSkin | null): void;
   /** piece override > type global > bare — with provenance */
   resolved(id: string, index: number, slot: BuildFaceSlot): ResolvedFaceSkin;
+  /** compact panel view state: which face row a type/piece skin group edits */
+  skinTarget(id: string, scope: BuildingSkinScope): SkinSlotTarget;
+  setSkinTarget(id: string, scope: BuildingSkinScope, target: SkinSlotTarget): void;
+  /** a paint lens target selected from the panel */
+  paintTarget(): BuildingPaintTarget | null;
+  setPaintTarget(target: BuildingPaintTarget | null): void;
+  setPaintTargetSlot(slot: SkinSlotTarget): void;
+  setPaintTargetSkin(target: BuildingPaintTarget, skin: BuildFaceSkin | null): void;
+  applyPaintTargetSkin(skin: BuildFaceSkin | null): boolean;
+  /** stage click: selection + active face + material browser target move together */
+  selectPieceTarget(id: string, index: number, slot: BuildFaceSlot): void;
+  lens(): BuildingsLens;
+  setLens(lens: BuildingsLens): void;
   // ── structure (nothing is immutable) ───────────────────────────────────────
   swapPiece(id: string, index: number, pieceId: string): void;
   setPieceEdit(id: string, index: number, edit: WallEdit | null): void;
   setPiecePlacement(id: string, index: number, patch: Partial<Pick<PrefabPiece, 'x' | 'y' | 'z' | 'yawDegrees'>>): void;
+  /** MICROGRID-0610: paint one of a floor piece's 3×3 cells (row-major 0..8;
+   *  null = back to the material default; all-default drops the field) */
+  setPieceFloorCell(id: string, index: number, cellIndex: number, kind: FloorCell): void;
   removePiece(id: string, index: number): void;
   addPiece(id: string, pieceId: string): void;
   renameBuilding(id: string, label: string): void;
@@ -98,6 +130,11 @@ function describeSkin(skin: BuildFaceSkin | null): string {
 export function createBuildingsStore(deps: BuildingsStoreDeps): BuildingsStore {
   // ephemeral view state: the piece the panel's override section edits
   const selection: Record<string, number> = {};
+  const skinTargets: Record<string, SkinSlotTarget> = {};
+  const localPrefabs: Record<string, BuildPrefabDef> = {};
+  const localRemoved = new Set<string>();
+  let paintTarget: BuildingPaintTarget | null = null;
+  let lens: BuildingsLens = 'model';
   // req_0184 addendum: the two-step delete's armed id — any other mutation
   // or selection change disarms (a destructive verb never fires by surprise)
   let armed: string | null = null;
@@ -111,12 +148,16 @@ export function createBuildingsStore(deps: BuildingsStoreDeps): BuildingsStore {
   const merged = (): Record<string, BuildPrefabDef> => {
     const world = deps.world();
     const removed = new Set(world?.removedPrefabs ?? []);
-    const all = { ...BUILD_PREFAB_DEFINITIONS, ...(world?.prefabs ?? {}) };
+    for (const id of localRemoved) removed.add(id);
+    const all = { ...BUILD_PREFAB_DEFINITIONS, ...(world?.prefabs ?? {}), ...localPrefabs };
     for (const id of removed) delete all[id]; // tombstones beat seeds AND copies
     return all;
   };
 
   const building = (id: string): BuildPrefabDef | null => merged()[id] ?? null;
+
+  const scopeKey = (id: string, scope: BuildingSkinScope): string =>
+    scope.kind === 'type' ? `${id}/type/${scope.pieceKind}` : `${id}/piece/${scope.index}`;
 
   const must = (id: string): BuildPrefabDef => {
     const def = building(id);
@@ -141,6 +182,8 @@ export function createBuildingsStore(deps: BuildingsStoreDeps): BuildingsStore {
     const problems = validatePrefab(def);
     if (problems.length > 0) throw new Error(`buildings: refusing a malformed def — ${problems[0]}`);
     deps.session?.commit({ kind: 'prefabDefined', def }, label);
+    localPrefabs[def.id] = def;
+    localRemoved.delete(def.id);
     armed = null; // any edit disarms a pending delete
     notify();
   };
@@ -154,6 +197,60 @@ export function createBuildingsStore(deps: BuildingsStoreDeps): BuildingsStore {
     if (skin === null) delete next[target];
     else next[target] = skin;
     return Object.keys(next).length > 0 ? next : undefined;
+  };
+
+  const sameSkin = (a: BuildFaceSkin | null, b: BuildFaceSkin | null): boolean => {
+    if (a === null || b === null) return a === b;
+    if (a.kind !== b.kind) return false;
+    return a.kind === 'color' ? a.value === (b as { value: string }).value : a.id === (b as { id: string }).id;
+  };
+
+  const scopedSkin = (id: string, scope: BuildingSkinScope, slot: BuildFaceSlot): BuildFaceSkin | null => {
+    const def = must(id);
+    if (scope.kind === 'type') return def.skins?.[scope.pieceKind]?.[slot] ?? null;
+    return mustPiece(def, scope.index).skin?.[slot] ?? null;
+  };
+
+  const targetSkin = (id: string, scope: BuildingSkinScope, target: SkinSlotTarget): BuildFaceSkin | null => {
+    if (target !== 'all') return scopedSkin(id, scope, target);
+    const [first, ...rest] = (['front', 'back', 'sides'] as BuildFaceSlot[]).map((slot) => scopedSkin(id, scope, slot));
+    return rest.every((skin) => sameSkin(first, skin)) ? first : null;
+  };
+
+  const targetLabel = (id: string, scope: BuildingSkinScope, target: SkinSlotTarget): string => {
+    const kind = scope.kind === 'type' ? scope.pieceKind : catalogEntry(mustPiece(must(id), scope.index).pieceId).kind;
+    const labels = faceSlotLabels(kind);
+    if (scope.kind === 'type') return target === 'all' ? 'all faces' : labels[target];
+    return target === 'all' ? 'override all' : `override ${labels[target]}`;
+  };
+
+  const normalizedTarget = (target: BuildingPaintTarget): BuildingPaintTarget => {
+    const skin = targetSkin(target.buildingId, target.scope, target.slot);
+    return {
+      ...target,
+      label: targetLabel(target.buildingId, target.scope, target.slot),
+      materialId: skin?.kind === 'material' ? skin.id : null,
+    };
+  };
+
+  const writeTargetSkin = (target: BuildingPaintTarget, skin: BuildFaceSkin | null): void => {
+    checkSkin(skin);
+    const def = must(target.buildingId);
+    if (target.scope.kind === 'type') {
+      const skins = { ...(def.skins ?? {}) };
+      const nextSet = withSlots(skins[target.scope.pieceKind], target.slot, skin);
+      if (nextSet === undefined) delete skins[target.scope.pieceKind];
+      else skins[target.scope.pieceKind] = nextSet;
+      redefine({ ...def, skins: Object.keys(skins).length > 0 ? skins : undefined },
+        `${def.label}: ${target.label} → ${describeSkin(skin)}`);
+      return;
+    }
+    const piece = mustPiece(def, target.scope.index);
+    const nextSkin = withSlots(piece.skin, target.slot, skin);
+    const pieces = [...def.pieces];
+    pieces[target.scope.index] = { ...piece, skin: nextSkin };
+    if (nextSkin === undefined) delete (pieces[target.scope.index] as any).skin;
+    redefine({ ...def, pieces }, `${def.label}: ${target.label} → ${describeSkin(skin)}`);
   };
 
   return {
@@ -195,6 +292,65 @@ export function createBuildingsStore(deps: BuildingsStoreDeps): BuildingsStore {
       const piece = mustPiece(def, index);
       return resolveFaceSkin(def.skins, catalogEntry(piece.pieceId).kind, piece.skin, slot);
     },
+    skinTarget(id, scope): SkinSlotTarget {
+      return skinTargets[scopeKey(id, scope)] ?? 'all';
+    },
+    setSkinTarget(id, scope, target): void {
+      skinTargets[scopeKey(id, scope)] = target;
+      armed = null;
+      notify();
+    },
+    paintTarget: () => paintTarget,
+    setPaintTarget(target): void {
+      if (target) skinTargets[scopeKey(target.buildingId, target.scope)] = target.slot;
+      paintTarget = target ? normalizedTarget(target) : null;
+      armed = null;
+      notify();
+    },
+    setPaintTargetSlot(slot): void {
+      if (!paintTarget) return;
+      const target = { ...paintTarget, slot };
+      skinTargets[scopeKey(target.buildingId, target.scope)] = slot;
+      paintTarget = normalizedTarget(target);
+      armed = null;
+      notify();
+    },
+    setPaintTargetSkin(target, skin): void {
+      writeTargetSkin(target, skin);
+      skinTargets[scopeKey(target.buildingId, target.scope)] = target.slot;
+      paintTarget = { ...target, materialId: skin?.kind === 'material' ? skin.id : null };
+      notify();
+    },
+    applyPaintTargetSkin(skin): boolean {
+      if (!paintTarget) return false;
+      const target = paintTarget;
+      writeTargetSkin(target, skin);
+      skinTargets[scopeKey(target.buildingId, target.scope)] = target.slot;
+      paintTarget = { ...target, materialId: skin?.kind === 'material' ? skin.id : null };
+      notify();
+      return true;
+    },
+    selectPieceTarget(id, index, slot): void {
+      const def = must(id);
+      mustPiece(def, index);
+      const scope: BuildingSkinScope = { kind: 'piece', index };
+      selection[id] = index;
+      skinTargets[scopeKey(id, scope)] = slot;
+      paintTarget = normalizedTarget({
+        buildingId: id,
+        scope,
+        slot,
+        label: '',
+        materialId: null,
+      });
+      armed = null;
+      notify();
+    },
+    lens: () => lens,
+    setLens(next): void {
+      lens = next;
+      notify();
+    },
 
     swapPiece(id, index, pieceId): void {
       if (!isCatalogId(pieceId)) throw new Error(`buildings: unknown catalog piece '${pieceId}'`);
@@ -225,6 +381,21 @@ export function createBuildingsStore(deps: BuildingsStoreDeps): BuildingsStore {
       const pieces = [...def.pieces];
       pieces[index] = { ...piece, ...patch };
       redefine({ ...def, pieces }, `${def.label}: piece #${index} moved`);
+    },
+
+    setPieceFloorCell(id, index, cellIndex, kind): void {
+      const def = must(id);
+      const piece = mustPiece(def, index);
+      if (catalogEntry(piece.pieceId).kind !== 'floor') throw new Error('buildings: cells live on floor pieces only');
+      const next = setFloorCell(piece.cells, cellIndex % FLOOR_GRID, Math.floor(cellIndex / FLOOR_GRID), kind);
+      const pieces = [...def.pieces];
+      // all-default collapses back to "no cells field" — older defs stay the
+      // canonical shape and the nav bake's material-default path covers them
+      const allDefault = next.every((c) => c === null);
+      pieces[index] = { ...piece };
+      if (allDefault) delete pieces[index].cells;
+      else pieces[index].cells = next;
+      redefine({ ...def, pieces }, `${def.label}: piece #${index} cell ${cellIndex} → ${kind ?? 'default'}`);
     },
 
     removePiece(id, index): void {
@@ -266,6 +437,10 @@ export function createBuildingsStore(deps: BuildingsStoreDeps): BuildingsStore {
       deps.session?.commit({ kind: 'prefabRemoved', id }, `− building ${def.label} (${def.pieces.length} pieces)`);
       armed = null;
       delete selection[id]; // the only other state keyed by building id
+      delete localPrefabs[id];
+      localRemoved.add(id);
+      for (const key of Object.keys(skinTargets)) if (key.startsWith(`${id}/`)) delete skinTargets[key];
+      if (paintTarget?.buildingId === id) paintTarget = null;
       notify();
       return true;
     },

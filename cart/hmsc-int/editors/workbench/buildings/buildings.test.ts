@@ -17,7 +17,7 @@
 // Headless per the characters.test.ts bundling law: store.ts/panel.ts + the
 // game/build vocabulary only (never source.tsx/Stage.tsx — the React half).
 
-import { assert, assertEqual, assertThrows, finish, test } from '../../../game/_testkit';
+import { assert, assertClose, assertEqual, assertThrows, finish, test } from '../../../game/_testkit';
 import { worldStream, type WorldStreamState } from '../../../game/world/stream';
 import {
   faceSlotLabels,
@@ -32,6 +32,7 @@ import {
   catalogPickOptions, materialPickOptions, piecePickOptions,
 } from './panel';
 import { materialFamily } from '../materials/chooser';
+import { stageFaceSlotFromNormal, stageQuarterNormal } from './stageMath';
 
 const GREEN: BuildFaceSkin = { kind: 'color', value: '#16a34a' };
 const RED: BuildFaceSkin = { kind: 'color', value: '#dc2626' };
@@ -54,11 +55,24 @@ function fixture(): { store: BuildingsStore; labels: string[]; state: () => Worl
     error: null,
     validMaterial: (id) => id === 'mat.asphalt' || id === 'brickRed',
     materials: () => [
-      { id: 'mat.asphalt', label: 'Asphalt' },
+      { id: 'mat.asphalt', label: 'Asphalt', group: 'HMSC · Game', source: 'recipe' },
       { id: 'brickRed', label: 'Brick Red' },
     ],
   });
   return { store, labels, state: () => state };
+}
+
+function sessionlessFixture(): BuildingsStore {
+  return createBuildingsStore({
+    world: () => worldStream.initial(),
+    session: null,
+    error: null,
+    validMaterial: (id) => id === 'mat.asphalt' || id === 'brickRed',
+    materials: () => [
+      { id: 'mat.asphalt', label: 'Asphalt', group: 'HMSC · Game', source: 'recipe' },
+      { id: 'brickRed', label: 'Brick Red' },
+    ],
+  });
 }
 
 // ── the roster: a saved prefab IS a building type ────────────────────────────
@@ -196,8 +210,8 @@ test('the panel generates: type-global groups for kinds present (quartet first) 
   const pieceGroup = withPiece.groups[withPiece.groups.length - 1];
   assert(pieceGroup.title.startsWith('PIECE #1'), 'the selected piece gets its own group');
   const fieldKeys = pieceGroup.fields.map((f) => f.k);
-  assert(fieldKeys.includes('piece') && fieldKeys.includes('cutout') && fieldKeys.includes('remove piece'), 'swap/cutout/remove all in the one edit surface');
-  assert(fieldKeys.includes('front =') && fieldKeys.includes('override front'), 'resolved provenance + override rows per major face');
+  assert(fieldKeys.includes('piece type') && fieldKeys.includes('cutout') && fieldKeys.includes('remove piece'), 'swap/cutout/remove all in the one edit surface');
+  assert(fieldKeys.includes('front =') && fieldKeys.includes('target') && fieldKeys.includes('paint target'), 'resolved provenance + compact paint target controls');
 });
 
 test('ROOFAFFORD-0607: no-edit piece kinds render no cutout affordance', () => {
@@ -225,13 +239,15 @@ test('resolution is pure vocabulary: resolveFaceSkin orders piece > type > none'
 
 // ── req_0184 fixes: the pick folds (no chip walls) + DELETE building ─────────
 
-test('pick folds: materials group by family, pieces by type with counts, catalog by kind', () => {
+test('pick folds: materials keep catalog groups, pieces by type with counts, catalog by kind', () => {
   const { store } = fixture();
   assertEqual(materialFamily('a-concrete'), 'a-family', 'a- prefix groups');
   assertEqual(materialFamily('office'), 'misc', 'unprefixed pools under misc');
   const mats = materialPickOptions(store);
   assertEqual(mats.length, 2, 'one option per registry material');
   assertEqual(mats[0].label, 'Asphalt', 'labels ride along');
+  assertEqual(mats[0].group, 'HMSC · Game', 'catalog material groups ride along');
+  assertEqual(mats[1].group, 'misc', 'ids without catalog groups still fall back to family grouping');
   const pieces = piecePickOptions(store.building(MOTEL)!);
   assertEqual(pieces.filter((p) => p.group === 'walls').length, 4, 'walls · 4 (the grouped counts the user asked for)');
   assertEqual(pieces.filter((p) => p.group === 'floors').length, 1, 'floors · 1');
@@ -241,11 +257,151 @@ test('pick folds: materials group by family, pieces by type with counts, catalog
   // the panel rows are PICKS now, never option-dump enums
   const spec = buildingsPanel(store, MOTEL);
   const wallGroup = spec.groups.find((g) => g.title === 'WALLS · GLOBAL')!;
-  const matField = wallGroup.fields.find((f) => f.k === 'all faces material') as any;
-  assertEqual(matField.t, 'pick', 'material rows are compact picks');
-  assertEqual(matField.opts().length, 2, 'the chooser carries the registry');
+  const matField = wallGroup.fields.find((f) => f.k === 'material') as any;
+  assertEqual(matField.t, 'val', 'material is a readout, not an inline catalog dropdown');
+  assertEqual(matField.get(), 'bare', 'bare reads without opening a picker');
+  const browseField = wallGroup.fields.find((f) => f.k === 'browse material') as any;
+  assertEqual(browseField.t, 'act', 'material browsing is a stage action, not a narrow panel picker');
+  const targetField = wallGroup.fields.find((f) => f.k === 'target') as any;
+  assertEqual(targetField.t, 'pick', 'face target is one compact picker');
+  assertEqual(targetField.show('front'), 'front', 'target labels come from the face vocabulary');
   const selector = spec.groups[0].fields.find((f) => f.k === 'edit') as any;
   assertEqual(selector.t, 'pick', 'the piece selector is a pick (grouped chooser, one chip collapsed)');
+});
+
+test('paint target handoff: a compact face target can receive the materialized paint', () => {
+  const { store } = fixture();
+  let opened = 0;
+  const spec = buildingsPanel(store, MOTEL, null, (target) => {
+    opened += 1;
+    store.setPaintTarget(target);
+    store.setLens('paint');
+  });
+  const wallGroup = spec.groups.find((g) => g.title === 'WALLS · GLOBAL')!;
+  const targetField = wallGroup.fields.find((f) => f.k === 'target') as any;
+  targetField.set('front');
+  const paintField = wallGroup.fields.find((f) => f.k === 'paint target') as any;
+  paintField.run();
+  assertEqual(opened, 1, 'one panel action opens the painter');
+  const target = store.paintTarget();
+  assert(target !== null, 'the target is retained for the paint lens apply action');
+  assertEqual(store.lens(), 'paint', 'opening a paint target switches the source lens');
+  assertEqual(target!.slot, 'front', 'the active face target rides the handoff');
+  store.setPaintTargetSkin(target!, { kind: 'material', id: 'mat.asphalt' });
+  const resolved = store.resolved(MOTEL, 1, 'front');
+  assertEqual(resolved.skin?.kind === 'material' ? resolved.skin.id : '', 'mat.asphalt', 'the materialized paint applies through the normal skin path');
+});
+
+test('material browse handoff: existing materials open as a wide source lens target', () => {
+  const { store } = fixture();
+  const spec = buildingsPanel(store, MOTEL, (target) => {
+    store.setPaintTarget(target);
+    store.setLens('materials');
+  });
+  const wallGroup = spec.groups.find((g) => g.title === 'WALLS · GLOBAL')!;
+  const targetField = wallGroup.fields.find((f) => f.k === 'target') as any;
+  targetField.set('sides');
+  const browse = wallGroup.fields.find((f) => f.k === 'browse material') as any;
+  browse.run();
+  assertEqual(store.lens(), 'materials', 'browse material opens the wide material lens');
+  assertEqual(store.paintTarget()?.slot, 'sides', 'the chosen face target is retained');
+  store.setPaintTargetSkin(store.paintTarget()!, { kind: 'material', id: 'brickRed' });
+  assertEqual(store.resolved(MOTEL, 1, 'sides').skin?.kind === 'material' ? store.resolved(MOTEL, 1, 'sides').skin!.id : '', 'brickRed', 'material browser applies through the skin path');
+});
+
+test('stage face selection repoints a stale material browser target to the clicked piece face', () => {
+  const { store } = fixture();
+  store.setTypeSkin(MOTEL, 'roof', 'front', { kind: 'material', id: 'brickRed' });
+  store.setPaintTarget({
+    buildingId: MOTEL,
+    scope: { kind: 'type', pieceKind: 'roof' },
+    slot: 'front',
+    label: 'top',
+    materialId: 'brickRed',
+  });
+  store.selectPieceTarget(MOTEL, 1, 'front');
+  assertEqual(store.selectedPiece(MOTEL), 1, 'the clicked wall piece is selected');
+  assertEqual(store.skinTarget(MOTEL, { kind: 'piece', index: 1 }), 'front', 'the active piece face follows the click');
+  assertEqual(store.paintTarget()?.scope.kind, 'piece', 'the material browser no longer points at the stale roof global');
+  assertEqual(store.paintTarget()?.slot, 'front', 'the material browser target follows the clicked face');
+  store.setPaintTargetSkin(store.paintTarget()!, { kind: 'material', id: 'mat.asphalt' });
+  assertEqual(store.resolved(MOTEL, 1, 'front').skin?.kind === 'material' ? store.resolved(MOTEL, 1, 'front').skin!.id : '', 'mat.asphalt', 'applying now edits the wall face');
+  assertEqual(store.resolved(MOTEL, 5, 'front').skin?.kind === 'material' ? store.resolved(MOTEL, 5, 'front').skin!.id : '', 'brickRed', 'the roof keeps its previous material');
+});
+
+test('material apply uses the current target, not a stale render target', () => {
+  const { store } = fixture();
+  store.setPaintTarget({
+    buildingId: MOTEL,
+    scope: { kind: 'type', pieceKind: 'roof' },
+    slot: 'front',
+    label: 'top',
+    materialId: null,
+  });
+  const stale = store.paintTarget();
+  assertEqual(stale?.scope.kind, 'type', 'opened on a type-global target');
+  store.selectPieceTarget(MOTEL, 1, 'front');
+  assertEqual(store.paintTarget()?.scope.kind, 'piece', 'clicking the stage moved the active target');
+  assertEqual(store.applyPaintTargetSkin({ kind: 'material', id: 'mat.asphalt' }), true, 'apply succeeds against the active target');
+  assertEqual(store.resolved(MOTEL, 1, 'front').skin?.kind === 'material' ? store.resolved(MOTEL, 1, 'front').skin!.id : '', 'mat.asphalt', 'the clicked piece face receives the material');
+  assertEqual(store.resolved(MOTEL, 5, 'front').skin, null, 'the stale roof target is left alone');
+});
+
+test('material browser target can switch faces and keep the selected material ready to apply', () => {
+  const { store } = fixture();
+  store.selectPieceTarget(MOTEL, 1, 'front');
+  store.setPaintTargetSlot('back');
+  assertEqual(store.skinTarget(MOTEL, { kind: 'piece', index: 1 }), 'back', 'face chip retargets the selected piece group');
+  assertEqual(store.paintTarget()?.label, 'override back', 'the browser label follows the face chip');
+  store.setPaintTargetSkin(store.paintTarget()!, { kind: 'material', id: 'brickRed' });
+  assertEqual(store.resolved(MOTEL, 1, 'back').skin?.kind === 'material' ? store.resolved(MOTEL, 1, 'back').skin!.id : '', 'brickRed', 'apply writes the retargeted back face');
+  assertEqual(store.resolved(MOTEL, 1, 'front').skin, null, 'the previous front face stays untouched');
+});
+
+test('material apply updates the visible building even when the session is unavailable', () => {
+  const store = sessionlessFixture();
+  store.selectPieceTarget(MOTEL, 1, 'front');
+  store.setPaintTargetSkin(store.paintTarget()!, { kind: 'material', id: 'mat.asphalt' });
+  assertEqual(store.resolved(MOTEL, 1, 'front').skin?.kind === 'material' ? store.resolved(MOTEL, 1, 'front').skin!.id : '', 'mat.asphalt', 'local optimistic prefab carries the edit immediately');
+  assertEqual(buildingRender(store, MOTEL)[1].faces.front.textureId, 'mat.asphalt', 'stage render reads the locally updated prefab');
+});
+
+test('material preview paints the building render without committing until apply', () => {
+  const { store } = fixture();
+  const target = { buildingId: MOTEL, scope: { kind: 'type' as const, pieceKind: 'wall' as const }, slot: 'front' as const, label: 'front', materialId: null };
+  const preview = buildingRender(store, MOTEL, { target, textureId: 'mat.asphalt' });
+  assertEqual(preview[1].faces.front.textureId, 'mat.asphalt', 'the preview material is visible on the target face');
+  assertEqual(preview[1].faces.back.textureId ?? '', '', 'non-target faces are left alone');
+  assertEqual(store.resolved(MOTEL, 1, 'front').skin, null, 'preview does not write the prefab');
+});
+
+test('stage face math: turned wall render slabs match raycast face slots', () => {
+  const front = stageQuarterNormal(90);
+  assertClose(front.nx, -1, 1e-6, 'yaw 90 front slab follows build-system +yaw');
+  assertClose(front.nz, 0, 1e-6, 'yaw 90 front slab sits on the -X face');
+  const wall = { kind: 'wall', yawDegrees: 90 };
+  assertEqual(stageFaceSlotFromNormal(wall as any, { x: -1, y: 0, z: 0 }), 'front', 'clicking that visible side targets the same front slot');
+  assertEqual(stageFaceSlotFromNormal(wall as any, { x: 1, y: 0, z: 0 }), 'back', 'the opposite side targets back');
+});
+
+test('clear target clears the saved skin and the active material target state', () => {
+  const { store } = fixture();
+  const spec = buildingsPanel(store, MOTEL, (target) => {
+    store.setPaintTarget(target);
+    store.setLens('materials');
+  });
+  const wallGroup = spec.groups.find((g) => g.title === 'WALLS · GLOBAL')!;
+  const targetField = wallGroup.fields.find((f) => f.k === 'target') as any;
+  targetField.set('front');
+  const browse = wallGroup.fields.find((f) => f.k === 'browse material') as any;
+  browse.run();
+  store.setPaintTargetSkin(store.paintTarget()!, { kind: 'material', id: 'mat.asphalt' });
+  assertEqual(store.paintTarget()?.materialId, 'mat.asphalt', 'active target tracks the applied material');
+  const refreshed = buildingsPanel(store, MOTEL, (target) => store.setPaintTarget(target));
+  const clear = refreshed.groups.find((g) => g.title === 'WALLS · GLOBAL')!.fields.find((f) => f.k === 'clear target') as any;
+  clear.run();
+  assertEqual(store.resolved(MOTEL, 1, 'front').skin, null, 'the saved face material is cleared');
+  assertEqual(store.paintTarget()?.materialId, null, 'the material browser target no longer previews the cleared material');
 });
 
 test('DELETE building is two-step: arm (nothing committed) → confirm (prefabRemoved lands)', () => {
@@ -281,6 +437,33 @@ test('the arm disarms on any other action; a re-defined id revives; a tombstoned
   const revived = worldStream.apply(state(), { kind: 'prefabDefined', def: { id: MOTEL, label: 'Motel Reborn', theme: 'motel', pieces: [{ pieceId: 'wall.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0 }] } });
   assert(!(revived.removedPrefabs ?? []).includes(MOTEL), 'a later prefabDefined lifts the tombstone');
   assertEqual(revived.prefabs[MOTEL].label, 'Motel Reborn', 'and the new meaning stands');
+});
+
+test('the floor cell painter (MICROGRID-0610): paint a cell, see it stamp, clear back to default', () => {
+  const { store, state } = fixture();
+  const def = store.building(MOTEL)!;
+  const floorIndex = def.pieces.findIndex((p) => p.pieceId.startsWith('floor.'));
+  assert(floorIndex >= 0, 'the motel seed has a floor');
+  // paint the centre cell → the def commits with 9 entries, centre authored
+  store.setPieceFloorCell(MOTEL, floorIndex, 4, 'bush');
+  const cells = store.building(MOTEL)!.pieces[floorIndex].cells!;
+  assertEqual(cells.length, 9, 'always the full 9');
+  assertEqual(cells[4], 'bush', 'centre authored');
+  assertEqual(cells[0], null, 'others stay default');
+  assert(validatePrefab(store.building(MOTEL)!).length === 0, 'the painted def stays valid');
+  // the stamp carries the cells into every placed instance
+  const stamped = worldStream.apply(state(), { kind: 'prefabStamped', prefabId: MOTEL, origin: { x: 10, y: 0, z: 10 }, yawDegrees: 90 });
+  const placedFloor = stamped.pieces.find((p) => p.pieceId.startsWith('floor.'));
+  assertEqual(placedFloor?.cells?.[4], 'bush', 'the stamp carries authored cells');
+  // the stage render exposes them (col 4 demonstrates)
+  const render = buildingRender(store, MOTEL);
+  assertEqual(render[floorIndex].cells?.[4], 'bush', 'PieceRender carries cells');
+  // clearing the only authored cell drops the field entirely
+  store.setPieceFloorCell(MOTEL, floorIndex, 4, null);
+  assertEqual(store.building(MOTEL)!.pieces[floorIndex].cells, undefined, 'all-default collapses the field');
+  // cells on a non-floor refuse
+  const wallIndex = store.building(MOTEL)!.pieces.findIndex((p) => p.pieceId.startsWith('wall.'));
+  assertThrows(() => store.setPieceFloorCell(MOTEL, wallIndex, 0, 'bush'), 'cells live on floor pieces only');
 });
 
 finish('workbench/buildings');

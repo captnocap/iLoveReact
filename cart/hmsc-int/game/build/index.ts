@@ -109,6 +109,19 @@ export type {
   WallEnds,
 } from './placed';
 
+// MICROGRID-0610: the floor 3×3 micro-grid — the editor's cell painter and
+// the nav bake both speak this surface.
+export {
+  carriesMicroGrid,
+  FLOOR_CELL_COUNT,
+  FLOOR_DEFAULT_CELL_KIND,
+  FLOOR_GRID,
+  floorCellRects,
+  resolveFloorCells,
+  setFloorCell,
+} from './microGrid';
+export type { FloorCell, FloorCellRect } from './microGrid';
+
 export {
   WORLD_MARKER_TYPES,
   ROOM_ROLES,

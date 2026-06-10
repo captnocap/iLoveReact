@@ -1471,7 +1471,17 @@ carries a 3×3 grid of paintable tile kinds — the nav substrate stays uniform
   change. Raising MAX_CELLS host-side restores whole-map publish with no
   JS change. On GAME_WORLD (`publishNavGrid`/`navProfiles`). P4:
   navPublish.test.ts (7).
-- NOT yet wired: a find()/route consumer (NPC walkers/traffic), the editor
-  cell-painter UI on floors, road decks (lane kinds on lifted floors —
-  elevation modes), multi-level surface nav, the host MAX_CELLS raise
-  (heap-allocated grids) for whole-map 0.5m publish.
+- THE CELL PAINTER (MICROGRID-0610, editor half): the buildings workbench's
+  col-3 panel grows a `FLOOR CELLS · 3×3` group when the selected piece is a
+  floor — nine compass rows (nw…se, row-major, iz south), each a pick over
+  PAINTABLE_TILE_KINDS whose clear chip reads `default (<material kind>)`.
+  Writes go through `store.setPieceFloorCell` → `setFloorCell` (all-default
+  collapses the field) → ONE `prefabDefined` commit on the world channel —
+  the same stream the game boots. `PrefabPiece.cells` (validated: floors
+  only, exactly 9, known kinds) carries through `stampPrefabPieces` into
+  every placed instance, so the nav bake paths what the painter painted.
+  Col 4 demonstrates: authored cells tint their ninth of the plate, proud of
+  the top slab, quarter-turn-matched to floorCellRects.
+- NOT yet wired: a find()/route consumer (NPC walkers/traffic), road decks
+  (lane kinds on lifted floors — elevation modes), multi-level surface nav,
+  the host MAX_CELLS raise (heap-allocated grids) for whole-map 0.5m publish.

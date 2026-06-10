@@ -14,15 +14,17 @@
 // slab samples it by textureKey — THE texture registry, no parallel path.
 // Pieces author in 90° steps, so face normals ride the quarter turn.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { GAME_CAMERA, type Solved } from '../../../game/camera';
 import { GAME_NATIVE_CAMERA } from '../../../game/nativeCamera';
 import { raycastPieces, faceSlotLabels, describeFaceSkin, BUILD_FACE_SLOTS } from '../../../game/build';
+import { tileKindDefinition } from '../../../game/kinds';
 import { TextureCapture } from '../../../game/textures/registry';
 import { accentFor } from '../../../shell/workbench.cls';
-import { buildingRender, stageTextureIds, type PieceRender } from './panel';
+import { buildingRender, stageTextureIds, type BuildingSkinPreview, type PieceRender } from './panel';
+import { isBuildPlate, stageFaceSlotFromNormal, stageQuarterNormal } from './stageMath';
 import type { BuildingsStore } from './store';
 
 type Vec3 = [number, number, number];
@@ -34,19 +36,8 @@ const LIFT = 0.012; // proud of the core so the slab wins the depth test
 const TEX_PX = 256;
 
 function clamp(n: number, lo: number, hi: number): number { return Math.max(lo, Math.min(hi, n)); }
-
-/** quarter-turn unit normal of the piece's FRONT (yaw 0 faces +Z; positive
- *  yaw swings toward +X — the hmsc frame) */
-function quarterNormal(yawDegrees: number): { nx: number; nz: number; odd: boolean } {
-  const q = ((Math.round(yawDegrees / 90) % 4) + 4) % 4;
-  if (q === 0) return { nx: 0, nz: 1, odd: false };
-  if (q === 1) return { nx: 1, nz: 0, odd: true };
-  if (q === 2) return { nx: 0, nz: -1, odd: false };
-  return { nx: -1, nz: 0, odd: true };
-}
-
-function isPlate(kind: string): boolean {
-  return kind === 'floor' || kind === 'roof' || kind === 'ramp' || kind === 'stairs';
+function frameKey(frame: { target: Vec3; dist: number }): string {
+  return `${frame.target.map((n) => n.toFixed(3)).join(',')}:${frame.dist.toFixed(3)}`;
 }
 
 function faceProps(look: { color?: string; textureId?: string }): { color: string; textureKey?: string } {
@@ -58,11 +49,11 @@ function PieceMeshes({ p }: { p: PieceRender }) {
   const w = p.size.widthMeters;
   const h = p.size.heightMeters;
   const d = p.size.depthMeters;
-  const { nx, nz, odd } = quarterNormal(p.yawDegrees);
+  const { nx, nz, odd } = stageQuarterNormal(p.yawDegrees);
   const cx = p.x;
   const cy = p.y + h / 2;
   const cz = p.z;
-  const plate = isPlate(p.kind);
+  const plate = isBuildPlate(p.kind);
   // core dims follow the quarter turn (no Mesh rotation — true-placed slabs)
   const core: Vec3 = odd ? [d, h, w] : [w, h, d];
   const sides = faceProps(p.faces.sides);
@@ -82,6 +73,31 @@ function PieceMeshes({ p }: { p: PieceRender }) {
       <Scene3D.Mesh key="bottom" geometry={Geometry.Box} params={{ width: dims[0], height: dims[1], depth: dims[2] }}
         position={[cx, p.y - LIFT, cz]} color={back.color} textureKey={back.textureKey} />,
     );
+    // MICROGRID-0610: authored micro-cells tint their ninth of the plate, proud
+    // of the top slab — the cell painter's edits demonstrate here as they land.
+    // Quarter-turn matches game/build/microGrid floorCellRects.
+    if (p.cells) {
+      const q = ((Math.round(p.yawDegrees / 90) % 4) + 4) % 4;
+      const cw = w / 3;
+      const cd = d / 3;
+      for (let i = 0; i < 9; i++) {
+        const kind = p.cells[i];
+        if (!kind) continue;
+        const ix = i % 3;
+        const iz = Math.floor(i / 3);
+        const lx = (ix + 0.5) * cw - w / 2;
+        const lz = (iz + 0.5) * cd - d / 2;
+        const rx = q === 0 ? lx : q === 1 ? -lz : q === 2 ? -lx : lz;
+        const rz = q === 0 ? lz : q === 1 ? lx : q === 2 ? -lz : -lx;
+        const cdims: Vec3 = q % 2 === 0 ? [cw - 0.08, SLAB, cd - 0.08] : [cd - 0.08, SLAB, cw - 0.08];
+        meshes.push(
+          <Scene3D.Mesh key={`cell${i}`} geometry={Geometry.Box}
+            params={{ width: cdims[0], height: cdims[1], depth: cdims[2] }}
+            position={[cx + rx, p.y + h + LIFT * 2.5, cz + rz]}
+            color={tileKindDefinition(kind).render.color} />,
+        );
+      }
+    }
   } else {
     const dims: Vec3 = odd ? [SLAB, h, w] : [w, h, SLAB];
     const off = d / 2 + LIFT;
@@ -114,9 +130,9 @@ function PieceMeshes({ p }: { p: PieceRender }) {
   return <>{meshes}</>;
 }
 
-export function BuildingStage(props: { store: BuildingsStore; buildingId: string }) {
+export function BuildingStage(props: { store: BuildingsStore; buildingId: string; preview?: BuildingSkinPreview }) {
   const { store, buildingId } = props;
-  const pieces = buildingRender(store, buildingId);
+  const pieces = buildingRender(store, buildingId, props.preview);
   const textureIds = stageTextureIds(pieces);
 
   // ── the ObjectInspect3D orbit wire (engage once, params at change rate) ────
@@ -129,27 +145,36 @@ export function BuildingStage(props: { store: BuildingsStore; buildingId: string
 
   const frame = useMemo(() => {
     if (pieces.length === 0) return { target: [0, 1.5, 0] as Vec3, dist: 12 };
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, maxY = 0;
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, minY = Infinity, maxY = -Infinity;
     for (const p of pieces) {
-      minX = Math.min(minX, p.x - p.size.widthMeters / 2);
-      maxX = Math.max(maxX, p.x + p.size.widthMeters / 2);
-      minZ = Math.min(minZ, p.z - p.size.widthMeters / 2);
-      maxZ = Math.max(maxZ, p.z + p.size.widthMeters / 2);
+      const odd = stageQuarterNormal(p.yawDegrees).odd;
+      const width = odd ? p.size.depthMeters : p.size.widthMeters;
+      const depth = odd ? p.size.widthMeters : p.size.depthMeters;
+      minX = Math.min(minX, p.x - width / 2);
+      maxX = Math.max(maxX, p.x + width / 2);
+      minZ = Math.min(minZ, p.z - depth / 2);
+      maxZ = Math.max(maxZ, p.z + depth / 2);
+      minY = Math.min(minY, p.y);
       maxY = Math.max(maxY, p.y + p.size.heightMeters);
     }
-    const radius = Math.max(maxX - minX, maxZ - minZ, maxY) / 2 + 2;
+    const spanX = maxX - minX;
+    const spanY = maxY - minY;
+    const spanZ = maxZ - minZ;
+    const radius = Math.max(spanX, spanZ, spanY) / 2 + 2;
     return {
-      target: [(minX + maxX) / 2, maxY / 2, (minZ + maxZ) / 2] as Vec3,
+      target: [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2] as Vec3,
       dist: Math.max(8, radius * 2.4),
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- frame follows the building, not per-edit identity
-  }, [buildingId, pieces.length]);
+  }, [pieces]);
+  const frameSig = frameKey(frame);
 
-  const solveShadow = (): Solved =>
+  const solveWithDist = (dist: number): Solved =>
     GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
-      target: frame.target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, dist: distRef.current, fov: 42,
+      target: frame.target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, dist, fov: 42,
     });
-  const [bootCam] = useState(() => solveShadow());
+  const solveShadow = (): Solved => solveWithDist(distRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- solve from the current frame signature
+  const bootCam = useMemo(() => solveWithDist(frame.dist), [frameSig]);
 
   const sendOrbit = () => {
     ctlRef.current?.setOrbit({
@@ -173,8 +198,8 @@ export function BuildingStage(props: { store: BuildingsStore; buildingId: string
   useEffect(() => {
     distRef.current = frame.dist;
     sendOrbit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reframe on building switch
-  }, [buildingId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reframe on building/frame changes
+  }, [frameSig]);
 
   const onDown = (e: any) => { dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0), moved: 0 }; };
   const onMove = (e: any) => {
@@ -202,7 +227,12 @@ export function BuildingStage(props: { store: BuildingsStore; buildingId: string
       x: p.x, y: p.y, z: p.z, yawDegrees: p.yawDegrees,
     }));
     const hit = raycastPieces({ origin: { x: ray.origin[0], y: ray.origin[1], z: ray.origin[2] }, dir: { x: ray.dir[0], y: ray.dir[1], z: ray.dir[2] } }, placedLike, 500);
-    store.selectPiece(buildingId, hit ? Number(hit.piece.id) : -1);
+    if (!hit) {
+      store.selectPiece(buildingId, -1);
+      return;
+    }
+    const index = Number(hit.piece.id);
+    store.selectPieceTarget(buildingId, index, stageFaceSlotFromNormal(pieces[index], hit.normal));
   };
   const onWheel = (e: any) => {
     const dy = Number(e?.deltaY ?? 0);
@@ -218,6 +248,7 @@ export function BuildingStage(props: { store: BuildingsStore; buildingId: string
         return `${labels[slot]}: ${describeFaceSkin(store.resolved(buildingId, sel, slot))}`;
       }).join('  ·  ')
     : 'click a piece to override its faces · drag orbit · wheel zoom';
+  const previewCaption = props.preview ? `previewing ${props.preview.textureId} on ${props.preview.target.label}` : null;
 
   return (
     <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: 'column' }}>
@@ -245,7 +276,7 @@ export function BuildingStage(props: { store: BuildingsStore; buildingId: string
         </Scene3D>
       </Pressable>
       <Box style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 7 }}>
-        <Text fontSize={9} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>{caption}</Text>
+        <Text fontSize={9} color={previewCaption ? accentFor('primary') : accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>{previewCaption ?? caption}</Text>
       </Box>
     </Box>
   );

@@ -1014,6 +1014,10 @@ export function stampPrefabPieces(
       yawDegrees: normalizeYaw(piece.yawDegrees + yawDegrees),
       ...(piece.edit !== undefined ? { edit: piece.edit } : {}),
       ...(Object.keys(skin).length > 0 ? { skin } : {}),
+      // MICROGRID-0610: a floor's authored 3×3 cells ride the stamp — the
+      // placed piece's composed yaw (just above) is what floorCellRects
+      // rotates them by, so cells turn with the building.
+      ...(piece.cells !== undefined ? { cells: piece.cells } : {}),
       prefabId: prefab.id,
       prefabPieceIndex: index,
     };
