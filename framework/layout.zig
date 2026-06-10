@@ -541,6 +541,10 @@ pub const Node = struct {
     // restage/upload. For world geometry that never moves (the no-V8 loader's
     // baked city). Only set this when scene3d_instance_data is stable + immutable.
     scene3d_instance_static: bool = false,
+    // First row of the sub-range a STATIC node draws from its (shared) upload.
+    // Streaming emits many nodes over one instance_data array, each drawing
+    // [first, first+count) — the whole array uploads once regardless.
+    scene3d_instance_first: u32 = 0,
     // Physics 2D — inline in the 2D tree, driven by framework/physics2d.zig
     physics_world_id: u8 = 0, // multi-physics-world instance index (0..MAX_PHYSICS_WORLDS-1)
     physics_world: bool = false, // true = Physics.World container

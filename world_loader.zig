@@ -31,6 +31,7 @@ const material_tex = @import("framework/gpu/material_tex.zig");
 const layout = @import("framework/layout.zig");
 const Node = layout.Node;
 const constructor = @import("framework/world/constructor.zig");
+const streaming = @import("framework/world/streaming.zig");
 const game_physics = @import("framework/game/physics.zig");
 
 // Resolution of each materialized shader's 1-tile texture (the shader's canvas
@@ -406,11 +407,26 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     };
 }
 
+/// Force every row's tint to white: a SHADER material samples a texture, and the
+/// row's color would multiply into it. Applied at the DRAW arrays' final home —
+/// the monolithic batch, or the streaming world's sorted copy (after the LOD
+/// shell has already accumulated the original colors). A TRANSLUCENT flat
+/// material (glass) is never whitened — that tint IS the glass look.
+fn whitenRows(rows: []f32, stride: usize) void {
+    const color_off: usize = if (stride >= 12) 9 else 6;
+    var b: usize = 0;
+    while (b + stride <= rows.len) : (b += stride) {
+        rows[b + color_off + 0] = 1;
+        rows[b + color_off + 1] = 1;
+        rows[b + color_off + 2] = 1;
+    }
+}
+
 // Partition the material-referencing rows into one instanced batch per material
 // slot (the shaders themselves are run later, at first render — gpu isn't ready
-// at build time). The instance color is forced to white so the sampled shader
-// shows untinted (the bake leaves the fallback color on the row for hosts that
-// can't materialize). Empty when the map has no materials.
+// at build time). Rows keep their authored fallback color here; the caller
+// whitens whichever array actually draws (whitenRows above), so the streaming
+// LOD shell can read the real colors first. Empty when the map has no materials.
 fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, materials: []const constructor.Material, material_refs: []const u32) ![]MaterialBatch {
     const mat_count = materials.len;
     if (mat_count == 0 or material_refs.len == 0) return try allocator.alloc(MaterialBatch, 0);
@@ -419,22 +435,12 @@ fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_c
     for (lists) |*l| l.* = .{};
     defer for (lists) |*l| l.deinit(allocator);
 
-    const color_off: usize = if (stride >= 12) 9 else 3;
     var row: usize = 0;
     while (row < @as(usize, @intCast(inst_count))) : (row += 1) {
         const ref = if (row < material_refs.len) material_refs[row] else 0;
         if (ref == 0 or ref > mat_count) continue;
         const b = row * stride;
-        const start = lists[ref - 1].items.len;
         try lists[ref - 1].appendSlice(allocator, insts[b .. b + stride]);
-        // A SHADER material samples a texture → force white so the row's tint
-        // doesn't multiply into it. A TRANSLUCENT flat material (glass) has no
-        // texture and KEEPS its tint — that color IS the glass look.
-        if (materials[ref - 1].wgsl.len > 0 and color_off + 2 < stride) {
-            lists[ref - 1].items[start + color_off + 0] = 1;
-            lists[ref - 1].items[start + color_off + 1] = 1;
-            lists[ref - 1].items[start + color_off + 2] = 1;
-        }
     }
 
     var batches = try allocator.alloc(MaterialBatch, mat_count);
@@ -966,17 +972,49 @@ fn sceneTerrainTopAt(fields: []const constructor.HeightfieldMesh, x: f32, z: f32
 }
 
 fn chooseSpawn(insts: []const f32, inst_count: u32, piece_count: u32, stride: usize, bounds: Bounds) Vec3 {
-    const wanted_x = bounds.cx;
-    const wanted_z = bounds.cz;
+    // Spawn at the CITY, not the geometric centre of every road stripe on the
+    // map (req_0526): when authored pieces exist, their bbox centre is where
+    // the user's content is — the all-instance centre landed on a bare road
+    // line hundreds of meters from anything built.
+    var wanted_x = bounds.cx;
+    var wanted_z = bounds.cz;
+    if (piece_count > 0) {
+        var min_px: f32 = std.math.floatMax(f32);
+        var max_px: f32 = -std.math.floatMax(f32);
+        var min_pz: f32 = std.math.floatMax(f32);
+        var max_pz: f32 = -std.math.floatMax(f32);
+        var pr: usize = 0;
+        const pieces_end: usize = @min(@as(usize, @intCast(piece_count)), @as(usize, @intCast(inst_count)));
+        while (pr < pieces_end) : (pr += 1) {
+            const pb = pr * stride;
+            min_px = @min(min_px, insts[pb + 0]);
+            max_px = @max(max_px, insts[pb + 0]);
+            min_pz = @min(min_pz, insts[pb + 2]);
+            max_pz = @max(max_pz, insts[pb + 2]);
+        }
+        if (min_px <= max_px) {
+            wanted_x = (min_px + max_px) * 0.5;
+            wanted_z = (min_pz + max_pz) * 0.5;
+        }
+    }
     var best_row: ?usize = null;
     var best_dist2: f32 = std.math.floatMax(f32);
     const total_rows: usize = @intCast(inst_count);
-    var row: usize = @min(@as(usize, @intCast(piece_count)), total_rows);
+    // ALL rows, pieces included (req_0526): this map's only non-piece flat rows
+    // are 1m road stripes — the real standable floors ARE the authored piece
+    // plates. Spawning on the city's own floor beats a stripe in the void.
+    var row: usize = 0;
     while (row < total_rows) : (row += 1) {
         const b = row * stride;
         const scale_base: usize = if (stride >= 12) 6 else 3;
+        const sx = @abs(insts[b + scale_base + 0]);
         const sy = @abs(insts[b + scale_base + 1]);
+        const sz = @abs(insts[b + scale_base + 2]);
         if (sy > 0.75) continue;
+        // A REAL floor, not a paint stripe (req_0526): the nearest flat row to
+        // the centre was a 61×1m road line — a body can't reliably stand on a
+        // 1m-wide strip, and there may be no other ground around it at all.
+        if (sx < 2.0 or sz < 2.0) continue;
         const dx = insts[b + 0] - wanted_x;
         const dz = insts[b + 2] - wanted_z;
         const d2 = dx * dx + dz * dz;
@@ -1271,6 +1309,41 @@ fn updatePlayerAnimationClock(player: *PlayerState, dt: f32, moving: bool, runni
     }
 }
 
+// ── world content streaming (req_0524, V30 applied to the render plane) ─────
+// The GTA 3/VC/SA-era residency model: full-detail geometry streams in around
+// the player by RADIUS (promotion instant, demotion hysteretic), draws are
+// culled by sight (frustum now; the Compile-precomputed VIS lump shares the
+// seam), and a derived LOD shell keeps the whole skyline visible for cheap.
+// Draw distance (camera far + fog) is unchanged — this governs what is drawn
+// at full detail, not how far the camera sees. framework/world/streaming.zig
+// owns the partition/LOD/draw-set logic; here we feed it the draw batches and
+// turn its ranges into sub-range static draws (scene3d_instance_first).
+const STREAM_CELL_METERS: f32 = 64.0; // same granularity as the collider grid
+const STREAM_DETAIL_RADIUS_METERS: f32 = 240.0;
+
+const StreamMode = enum { off, auto, force };
+
+fn streamModeFromEnv() StreamMode {
+    const s = std.posix.getenv("RJIT_STREAM") orelse return .auto;
+    if (s.len == 0) return .auto;
+    if (std.mem.eql(u8, s, "0") or std.ascii.eqlIgnoreCase(s, "off")) return .off;
+    return .force;
+}
+
+fn streamRadiusFromEnv() f32 {
+    const s = std.posix.getenv("RJIT_STREAM_RADIUS") orelse return STREAM_DETAIL_RADIUS_METERS;
+    const v = std.fmt.parseFloat(f32, s) catch return STREAM_DETAIL_RADIUS_METERS;
+    return clamp(v, 64.0, 4096.0);
+}
+
+/// What a streamed family draws as: the shared geometry + texture every range
+/// node of that family carries. Indexes align with streaming.World.families.
+const StreamProto = struct {
+    geom_key: []const u8,
+    verts: []const f32,
+    tex_key: ?[]const u8,
+};
+
 pub const Runtime = struct {
     allocator: std.mem.Allocator,
     node_id: u32 = 0,
@@ -1302,6 +1375,15 @@ pub const Runtime = struct {
     camera: CameraState = undefined,
     last_ns: i64 = 0,
     frame: u32 = 0,
+    // Content streaming (engaged when the world outgrows the detail radius):
+    // per-frame draw-node tail rebuilt from the streaming world's ranges.
+    stream: ?streaming.World = null,
+    stream_protos: std.ArrayList(StreamProto) = .{},
+    stream_radius: f32 = STREAM_DETAIL_RADIUS_METERS,
+    stream_tail_start: usize = 0,
+    stream_draw_count: usize = 0,
+    stream_logged: bool = false,
+    last_aspect: f32 = @as(f32, WIN_W) / @as(f32, WIN_H),
 
     pub fn create(allocator: std.mem.Allocator, path: []const u8, store_dir: []const u8, node_id: u32) !*Runtime {
         const self = try allocator.create(Runtime);
@@ -1369,6 +1451,8 @@ pub const Runtime = struct {
             self.allocator.free(self.material_batches);
         }
         self.kid_list.deinit(self.allocator);
+        if (self.stream) |*w| w.deinit(self.allocator);
+        self.stream_protos.deinit(self.allocator);
         if (self.has_shape_batches) self.shape_batches.deinit(self.allocator);
         if (self.has_physics_colliders) self.physics_colliders.deinit(self.allocator);
         if (self.grid) |g| g.deinit(self.allocator);
@@ -1424,16 +1508,36 @@ pub const Runtime = struct {
         // thru the world when trying to just load it"). Clamp the spawn to the
         // terrain surface, then drop in from a small clearance so an imprecise
         // sample still settles ONTO the ground instead of inside it.
-        if (sceneTerrainTopAt(self.scene.heightfields, spawn.x, spawn.z)) |terrain_top| {
-            if (terrain_top > spawn.y) spawn.y = terrain_top;
+        const terrain_top = sceneTerrainTopAt(self.scene.heightfields, spawn.x, spawn.z);
+        if (terrain_top) |top| {
+            if (top > spawn.y) spawn.y = top;
         }
         spawn.y += SPAWN_DROP_CLEARANCE_METERS;
+        log.print("[loader] spawn x={d:.2} y={d:.2} z={d:.2} (terrain={d:.2} fields={d})\n", .{
+            spawn.x, spawn.y, spawn.z, terrain_top orelse -999, self.scene.heightfields.len,
+        });
         self.player = .{
             .x = spawn.x,
             .y = spawn.y,
             .z = spawn.z,
             .yaw = authored_yaw,
         };
+        {
+            // probe: every instance row whose footprint covers the spawn column
+            var row: usize = 0;
+            const total: usize = @intCast(self.inst_count);
+            while (row < total) : (row += 1) {
+                if (!instanceCovers(self.insts, row, self.stride, spawn.x, spawn.z)) continue;
+                const sb: usize = if (self.stride >= 12) 6 else 3;
+                const b = row * self.stride;
+                log.print("[loader] spawn-col row={d} piece={} pos=({d:.1},{d:.2},{d:.1}) scale=({d:.1},{d:.2},{d:.1}) yaw={d:.2}\n", .{
+                    row, row < @as(usize, @intCast(self.piece_count)),
+                    self.insts[b + 0], self.insts[b + 1], self.insts[b + 2],
+                    self.insts[b + sb + 0], self.insts[b + sb + 1], self.insts[b + sb + 2],
+                    instanceYawRadians(self.insts, row, self.stride),
+                });
+            }
+        }
         // The static collider set overflowed MAX_RECTS (a huge --massive map): switch
         // to SPATIAL WINDOWING so collision follows the player and the whole world is
         // solid in the near field. Build the grid, widen the physics input buffer to
@@ -1467,6 +1571,35 @@ pub const Runtime = struct {
         // The shaders run at first render (gpu isn't up yet); the nodes carry the
         // material key now so scene3d samples it once it's materialized.
         self.material_batches = try buildMaterialBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.materials, self.scene.material_refs);
+
+        // ── content streaming gate (req_0524) ── engage when the world's extent
+        // outgrows the detail radius (auto), or RJIT_STREAM=1 forces it; tiny
+        // maps keep the exact monolithic path. RJIT_STREAM=0 kills it. Setup
+        // failure leaves stream null and the monolithic path takes over.
+        self.stream_radius = streamRadiusFromEnv();
+        const full_bounds = instanceBounds(self.insts, self.inst_count, self.stride);
+        const want_stream = switch (streamModeFromEnv()) {
+            .off => false,
+            .force => self.inst_count > 0,
+            .auto => full_bounds.radius > self.stream_radius,
+        };
+        if (want_stream) self.setupStreaming() catch |err| {
+            log.print("[loader] streaming setup FAILED ({any}) — monolithic draws\n", .{err});
+        };
+        // Whichever array DRAWS a shader material must wear white (the sampled
+        // texture would multiply with the row tint): the streaming world's
+        // sorted copies, or the monolithic batch arrays. The streaming LOD
+        // shell accumulated the REAL colors before this — distant buildings
+        // keep their look. Translucent (glass) batches always keep their tint.
+        if (self.stream) |*w| {
+            for (self.stream_protos.items, 0..) |proto, fi| {
+                if (proto.tex_key != null) whitenRows(w.families[fi].rows, w.families[fi].stride);
+            }
+        } else {
+            for (self.material_batches) |batch| {
+                if (!batch.translucent) whitenRows(batch.boxes, self.stride);
+            }
+        }
 
         try self.kid_list.append(self.allocator, .{
             .scene3d_camera = true,
@@ -1552,33 +1685,39 @@ pub const Runtime = struct {
         // flag them so the host uploads each ONCE and redraws from the retained
         // instance buffer with no per-frame restage/upload. This is what makes a
         // 776k-instance city render flat-out: the world is data, the camera moves.
-        try self.kid_list.append(self.allocator, .{
-            .scene3d_mesh = self.shape_batches.box_count > 0,
-            .scene3d_geom_key = "box",
-            .scene3d_vertices = self.cube[0..],
-            .scene3d_vert_count = 36,
-            .scene3d_instance_data = self.shape_batches.boxes,
-            .scene3d_instance_count = self.shape_batches.box_count,
-            .scene3d_instance_stride = @intCast(self.stride),
-            .scene3d_instance_static = true,
-        });
-        try self.kid_list.append(self.allocator, .{
-            .scene3d_mesh = self.shape_batches.ramp_count > 0,
-            .scene3d_geom_key = "ramp-slab",
-            .scene3d_vertices = self.ramp_slab[0..],
-            .scene3d_vert_count = 36,
-            .scene3d_instance_data = self.shape_batches.ramps,
-            .scene3d_instance_count = self.shape_batches.ramp_count,
-            .scene3d_instance_stride = @intCast(self.stride),
-            .scene3d_instance_static = true,
-        });
+        // STREAMING replaces these two monolithic draws (and the instanced
+        // material batches below) with per-chunk sub-range draws of the same
+        // one-time upload, rebuilt each frame by refreshStreamNodes.
+        if (self.stream == null) {
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.box_count > 0,
+                .scene3d_geom_key = "box",
+                .scene3d_vertices = self.cube[0..],
+                .scene3d_vert_count = 36,
+                .scene3d_instance_data = self.shape_batches.boxes,
+                .scene3d_instance_count = self.shape_batches.box_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.ramp_count > 0,
+                .scene3d_geom_key = "ramp-slab",
+                .scene3d_vertices = self.ramp_slab[0..],
+                .scene3d_vert_count = 36,
+                .scene3d_instance_data = self.shape_batches.ramps,
+                .scene3d_instance_count = self.shape_batches.ramp_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
+        }
 
         // Per material: a SHADER material draws as one TEXTURED instanced box batch
         // (sampling the materialized shader via scene3d_tex_key, resolved once
         // ensureMaterials runs). A TRANSLUCENT flat material (glass) has no texture
         // and can't go through the opaque instanced pass — emit each of its rows as
         // an individual see-through mesh (scene3d_color_a) so the transparent pass
-        // (single meshes, sorted far→near) draws it. Both share the interned "box".
+        // (single meshes, sorted far→near) draws it; those stay OUT of streaming
+        // (sparse, already distance-culled). Both share the interned "box".
         var translucent_meshes: u32 = 0;
         for (self.material_batches) |batch| {
             if (batch.translucent) {
@@ -1606,6 +1745,7 @@ pub const Runtime = struct {
                 }
                 continue;
             }
+            if (self.stream != null) continue; // streamed: drawn as per-chunk ranges
             try self.kid_list.append(self.allocator, .{
                 .scene3d_mesh = batch.count > 0,
                 .scene3d_geom_key = "box",
@@ -1620,10 +1760,118 @@ pub const Runtime = struct {
         }
         if (self.scene.materials.len > 0) log.print("[loader] {d} face material(s) → {d} batch(es), {d} translucent meshes\n", .{ self.scene.materials.len, self.material_batches.len, translucent_meshes });
 
+        // The streamed draw tail begins after every static-prefix node above;
+        // refreshStreamNodes truncates back to here each frame. Capacity is
+        // reserved once so the per-frame rebuild never allocates.
+        if (self.stream) |*w| {
+            self.stream_tail_start = self.kid_list.items.len;
+            try self.kid_list.ensureUnusedCapacity(self.allocator, w.draws.len);
+        }
+
         self.root = .{ .children = self.kid_list.items };
         updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, if (self.has_physics_colliders) self.physics_colliders else null, 0);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, false, false, false);
+        // Seed the bubble at spawn and assemble the first draw tail — the very
+        // first rendered frame already streams (the camera was just solved).
+        self.refreshStreamNodes();
         self.last_ns = nowNs();
+    }
+
+    /// Feed the draw batches through the streaming partitioner
+    /// (framework/world/streaming.zig). On success the monolithic world nodes
+    /// are not emitted; refreshStreamNodes rebuilds the draw tail every frame.
+    /// Leaves self.stream null (and says so) when the world isn't worth
+    /// chunking; any failure falls back to monolithic draws.
+    fn setupStreaming(self: *Runtime) !void {
+        var fams: std.ArrayList(streaming.FamilyRows) = .{};
+        defer fams.deinit(self.allocator);
+        errdefer self.stream_protos.clearAndFree(self.allocator);
+
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.boxes, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "box", .verts = self.cube[0..], .tex_key = null });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.ramps, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "ramp-slab", .verts = self.ramp_slab[0..], .tex_key = null });
+        for (self.material_batches) |batch| {
+            if (batch.translucent or batch.count == 0) continue;
+            try fams.append(self.allocator, .{ .rows = batch.boxes, .stride = @intCast(self.stride) });
+            try self.stream_protos.append(self.allocator, .{ .geom_key = "box", .verts = self.cube[0..], .tex_key = batch.key });
+        }
+        var total_rows: u64 = 0;
+        for (fams.items) |fam| total_rows += fam.rows.len / fam.stride;
+        // The LOD shell shares the retained static buffer with the detail rows —
+        // budget it from what's left so the upload can never overflow.
+        const lod_budget: u32 = if (total_rows < scene3d.MAX_STATIC_INSTANCES)
+            @intCast(scene3d.MAX_STATIC_INSTANCES - total_rows)
+        else
+            0;
+
+        var world = try streaming.build(self.allocator, fams.items, STREAM_CELL_METERS, lod_budget);
+        const s = world.stats;
+        if (s.occupied_chunks < 4) {
+            // A world this small sits inside the detail bubble whole — one
+            // monolithic draw is strictly better.
+            world.deinit(self.allocator);
+            self.stream_protos.clearAndFree(self.allocator);
+            log.print("[loader] streaming skipped — only {d} occupied chunk(s)\n", .{s.occupied_chunks});
+            return;
+        }
+        self.stream = world;
+        log.print("[loader] streaming ON — grid {d}x{d} ({d} occupied chunks), {d} local + {d} spanning rows, lod shell {d} rows, detail radius {d:.0}m (cell {d:.0}m)\n", .{
+            world.cols, world.rows, s.occupied_chunks, s.local_rows, s.spanning_rows, s.lod_rows, self.stream_radius, world.cell,
+        });
+        if (s.lod_truncated_chunks > 0) {
+            log.print("[loader] streaming LOD budget clipped {d} chunk(s) — far field thins there\n", .{s.lod_truncated_chunks});
+        }
+    }
+
+    /// Rebuild the per-frame draw tail: detail ranges for the resident bubble
+    /// around the player, LOD-shell ranges for the visible rest of the city.
+    /// Allocation-free (capacity reserved at build; the streaming world merges
+    /// and caps its draw list).
+    fn refreshStreamNodes(self: *Runtime) void {
+        const w = if (self.stream) |*world| world else return;
+        w.updateResidency(self.player.x, self.player.z, self.stream_radius);
+        const draws = w.assembleDraws(.{
+            .pos = .{ self.camera.current_pos.x, self.camera.current_pos.y, self.camera.current_pos.z },
+            .look = .{ self.camera.current_target.x, self.camera.current_target.y, self.camera.current_target.z },
+            .fov_degrees = self.camera.current_fov,
+            .aspect = self.last_aspect,
+            .far = self.camera.far,
+        });
+        self.kid_list.shrinkRetainingCapacity(self.stream_tail_start);
+        for (draws) |d| {
+            if (d.range.count == 0) continue;
+            const fam = if (d.lod) &w.lod else &w.families[d.family];
+            const proto: StreamProto = if (d.lod)
+                .{ .geom_key = "box", .verts = self.cube[0..], .tex_key = null }
+            else
+                self.stream_protos.items[d.family];
+            self.kid_list.appendAssumeCapacity(.{
+                .scene3d_mesh = true,
+                .scene3d_geom_key = proto.geom_key,
+                .scene3d_vertices = proto.verts,
+                .scene3d_vert_count = 36,
+                .scene3d_instance_data = fam.rows,
+                .scene3d_instance_count = d.range.count,
+                .scene3d_instance_first = d.range.first,
+                .scene3d_instance_stride = fam.stride,
+                .scene3d_instance_static = true,
+                .scene3d_tex_key = proto.tex_key,
+            });
+        }
+        self.stream_draw_count = self.kid_list.items.len - self.stream_tail_start;
+        self.root.children = self.kid_list.items;
+        if (!self.stream_logged) {
+            self.stream_logged = true;
+            var detail_rows: u64 = 0;
+            var lod_rows: u64 = 0;
+            for (draws) |d| {
+                if (d.lod) lod_rows += d.range.count else detail_rows += d.range.count;
+            }
+            log.print("[loader] streaming first frame — {d} draws: {d} detail + {d} lod shell instances (of {d} total rows)\n", .{
+                self.stream_draw_count, detail_rows, lod_rows, w.stats.local_rows + w.stats.spanning_rows,
+            });
+        }
     }
 
     fn pollStandaloneEvents(self: *Runtime, running: *bool) void {
@@ -1698,6 +1946,25 @@ pub const Runtime = struct {
         }
     }
 
+    /// One square shell of window cells at Chebyshev distance `ring` from the
+    /// player's cell — the unit of the nearest-first cap policy (req_0526).
+    fn emitWindowRing(self: *Runtime, grid: *const SpatialGrid, pcx: i32, pcz: i32, ring: i32, want_solid: bool, values: []f32, oriented_tmp: []f32, rc: *usize, oc: *usize, hf: *usize, clipped: *usize) void {
+        var czi = pcz - ring;
+        while (czi <= pcz + ring) : (czi += 1) {
+            if (czi < 0 or czi >= grid.rows) continue;
+            var cxi = pcx - ring;
+            while (cxi <= pcx + ring) : (cxi += 1) {
+                if (cxi < 0 or cxi >= grid.cols) continue;
+                if (@max(@abs(cxi - pcx), @abs(czi - pcz)) != ring) continue; // shell only — inner rings already emitted
+                const cellv: usize = @intCast(czi * grid.cols + cxi);
+                var k = grid.starts[cellv];
+                while (k < grid.starts[cellv + 1]) : (k += 1) {
+                    self.emitRowCollider(grid.items[k], want_solid, values, oriented_tmp, rc, oc, hf, clipped);
+                }
+            }
+        }
+    }
+
     /// Rebuild the player's near-field collider set from the spatial grid: the
     /// always list (world-spanning floors/walls) plus every local instance in the
     /// window of cells around (center_x, center_z). Floors-first so the ground always
@@ -1719,27 +1986,23 @@ pub const Runtime = struct {
         }
 
         const pc = grid.cellXZ(center_x, center_z);
-        const lo_x = @max(0, pc.cx - COLLIDER_WINDOW_CELLS);
-        const hi_x = @min(grid.cols - 1, pc.cx + COLLIDER_WINDOW_CELLS);
-        const lo_z = @max(0, pc.cz - COLLIDER_WINDOW_CELLS);
-        const hi_z = @min(grid.rows - 1, pc.cz + COLLIDER_WINDOW_CELLS);
 
         var pass: usize = 0;
         while (pass < 2) : (pass += 1) {
             const want_solid = pass == 1;
-            // spanning instances (ground slab / road strips) collide everywhere
+            // NEAREST GEOMETRY WINS THE CAP (req_0526): the window over a dense
+            // city holds MORE floors than MAX_RECTS, and the old raw lo→hi scan
+            // let far cells fill the cap before the cell the player STANDS IN —
+            // zero floor under their feet, a guaranteed fall through the world.
+            // Emission order per pass: rings 0–1 (the ground underfoot), then
+            // the spanning list (world-sized slabs/roads — the base ground),
+            // then the outer rings. The cap now drops only the FAR field.
+            self.emitWindowRing(&grid, pc.cx, pc.cz, 0, want_solid, values, oriented_tmp[0..], &rc, &oc, &hf, &clipped);
+            self.emitWindowRing(&grid, pc.cx, pc.cz, 1, want_solid, values, oriented_tmp[0..], &rc, &oc, &hf, &clipped);
             for (grid.always) |row| self.emitRowCollider(row, want_solid, values, oriented_tmp[0..], &rc, &oc, &hf, &clipped);
-            // local instances in the window of cells around the player
-            var czi = lo_z;
-            while (czi <= hi_z) : (czi += 1) {
-                var cxi = lo_x;
-                while (cxi <= hi_x) : (cxi += 1) {
-                    const cellv: usize = @intCast(czi * grid.cols + cxi);
-                    var k = grid.starts[cellv];
-                    while (k < grid.starts[cellv + 1]) : (k += 1) {
-                        self.emitRowCollider(grid.items[k], want_solid, values, oriented_tmp[0..], &rc, &oc, &hf, &clipped);
-                    }
-                }
+            var ring: i32 = 2;
+            while (ring <= COLLIDER_WINDOW_CELLS) : (ring += 1) {
+                self.emitWindowRing(&grid, pc.cx, pc.cz, ring, want_solid, values, oriented_tmp[0..], &rc, &oc, &hf, &clipped);
             }
         }
         // oriented rects sit right after the actual rects in the physics input layout.
@@ -1781,6 +2044,9 @@ pub const Runtime = struct {
 
         updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, if (self.has_physics_colliders) self.physics_colliders else null, dt);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
+        // Re-stream the world around wherever the player ended up this step
+        // (uses the camera solved just above for sight culling).
+        self.refreshStreamNodes();
         self.frame += 1;
     }
 
@@ -1790,6 +2056,13 @@ pub const Runtime = struct {
     }
 
     pub fn statusAlloc(self: *const Runtime, allocator: std.mem.Allocator) ![]u8 {
+        if (self.stream) |*w| {
+            return std.fmt.allocPrint(
+                allocator,
+                "loaded {d} instances ({d} pieces), {d} player mesh groups; streaming {d}x{d} grid ({d} occupied), lod {d} rows, {d} draws",
+                .{ self.inst_count, self.piece_count, self.scene.player_model.len, w.cols, w.rows, w.stats.occupied_chunks, w.stats.lod_rows, self.stream_draw_count },
+            );
+        }
         return std.fmt.allocPrint(
             allocator,
             "loaded {d} instances ({d} pieces), {d} player mesh groups",
@@ -1853,6 +2126,7 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
         log.print("[loader] embedded mount/render failed for node {d}: {any}\n", .{ node.id, err });
         return false;
     };
+    runtime.last_aspect = w / @max(h, 1); // streaming's sight culling needs the real pane shape
     runtime.stepNow();
     runtime.ensureMaterials();
     return scene3d.render(&runtime.root, x, y, w, h, opacity);
@@ -1920,6 +2194,22 @@ pub fn main() !void {
     while (running) {
         runtime.pollStandaloneEvents(&running);
         runtime.stepNow();
+        if (screenshotting and runtime.frame % 30 == 0) {
+            // what does the LIVE physics set hold under the player's column?
+            var covering: usize = 0;
+            var best_top: f32 = -1.0e9;
+            var ri: usize = 0;
+            while (ri < runtime.physics_colliders.rect_count) : (ri += 1) {
+                const r = runtime.physics_colliders.values[game_physics.INPUT_HEADER_FLOATS + ri * game_physics.RECT_FLOATS ..][0..game_physics.RECT_FLOATS];
+                if (runtime.player.x >= r[0] and runtime.player.z >= r[1] and runtime.player.x <= r[2] and runtime.player.z <= r[3]) {
+                    covering += 1;
+                    if (r[4] > best_top) best_top = r[4];
+                }
+            }
+            log.print("[loader] f{d} player y={d:.3} vy={d:.3} grounded={} rects={d} underCol={d} underTop={d:.2}\n", .{
+                runtime.frame, runtime.player.y, runtime.player.vy, runtime.player.grounded, runtime.physics_colliders.rect_count, covering, best_top,
+            });
+        }
         runtime.ensureMaterials();
         _ = scene3d.render(&runtime.root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
         gpu.frame(0.52, 0.62, 0.74); // sky-ish clear so the ground reads against it
@@ -1930,5 +2220,7 @@ pub fn main() !void {
             c.SDL_Delay(16); // ~60fps cap so a static scene doesn't spin the CPU
         }
     }
-    log.print("[loader] done after {d} frames\n", .{runtime.frame});
+    log.print("[loader] done after {d} frames — player x={d:.2} y={d:.2} z={d:.2} vy={d:.2} grounded={}\n", .{
+        runtime.frame, runtime.player.x, runtime.player.y, runtime.player.z, runtime.player.vy, runtime.player.grounded,
+    });
 }

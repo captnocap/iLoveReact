@@ -185,7 +185,7 @@ var g_inst_scratch: [MAX_INSTANCES]InstanceData = undefined;
 // the camera lives in per-frame SceneUniforms), so a cached instance still tracks the
 // camera. Lazily created (80 MB at the 512-block max), so carts with no static batch
 // reserve nothing.
-const MAX_STATIC_INSTANCES: u32 = 1048576;
+pub const MAX_STATIC_INSTANCES: u32 = 1048576; // pub: the world loader budgets its LOD shell against this
 const STATIC_INST_CACHE_LEN: usize = 64;
 const StaticInstEntry = struct { key: usize = 0, count: u32 = 0, offset: u64 = 0, used: bool = false };
 var g_static_inst_buf: ?*wgpu.Buffer = null;
@@ -1160,14 +1160,20 @@ const StaticInstDraw = struct { offset: u64, count: u32 };
 /// upload streams through g_inst_scratch in MAX_INSTANCES-sized chunks so the
 /// staging window stays small. Returns null when the batch is malformed, the cache
 /// is full, or capacity is exhausted; the caller falls back to the dynamic path.
-fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, icount: u32, stride: u32) ?StaticInstDraw {
+///
+/// The WHOLE array uploads (count = idata.len / stride), not the node's draw
+/// count: many nodes may draw sub-ranges of one shared upload (world streaming's
+/// per-chunk draws via scene3d_instance_first) and all resolve to this one entry.
+fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, stride: u32) ?StaticInstDraw {
+    if (stride < 9 or idata.len < stride) return null;
+    const icount: u32 = @intCast(idata.len / @as(usize, stride));
     const key = @intFromPtr(idata.ptr);
     var i: usize = 0;
     while (i < g_static_inst_cache_len) : (i += 1) {
         const e = g_static_inst_cache[i];
         if (e.used and e.key == key and e.count == icount) return .{ .offset = e.offset, .count = e.count };
     }
-    if (stride < 9 or icount == 0 or idata.len < @as(usize, icount) * stride) return null;
+    if (icount == 0) return null;
     if (g_static_inst_cache_len >= STATIC_INST_CACHE_LEN) return null;
     if (g_static_inst_buf == null) {
         g_static_inst_buf = device.createBuffer(&.{
@@ -1515,19 +1521,25 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         // STATIC FAST PATH: a node flagged scene3d_instance_static is uploaded once
         // to g_static_inst_buf and redrawn straight from it — no per-frame restage or
         // upload. Each static batch is its own draw (not merged), which is exactly
-        // the loader's static world (one box batch + one ramp batch). Falls through
+        // the loader's static world (one box batch + one ramp batch). Many nodes may
+        // share one upload and draw sub-ranges of it (scene3d_instance_first +
+        // scene3d_instance_count — world streaming's per-chunk draws). Falls through
         // to the dynamic path if the retained buffer is full.
         const leader = &scene_node.children[midx[gi]];
         if (leader.scene3d_instance_static) {
             if (leader.scene3d_instance_data) |idata| {
-                if (resolveStaticInstances(device, queue, idata, leader.scene3d_instance_count, leader.scene3d_instance_stride)) |sd| {
+                if (resolveStaticInstances(device, queue, idata, leader.scene3d_instance_stride)) |sd| {
                     mvisited[gi] = true;
-                    if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
-                    pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, @as(u64, group_slot.count) * @sizeOf(Vertex));
-                    pass.setVertexBuffer(1, g_static_inst_buf.?, sd.offset, @as(u64, sd.count) * @sizeOf(InstanceData));
-                    pass.draw(group_slot.count, sd.count, 0, 0);
-                    g_telemetry.draw_calls += 1;
-                    g_telemetry.instances += sd.count;
+                    const first: u32 = @min(leader.scene3d_instance_first, sd.count);
+                    const count: u32 = @min(leader.scene3d_instance_count, sd.count - first);
+                    if (count > 0) {
+                        if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
+                        pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, @as(u64, group_slot.count) * @sizeOf(Vertex));
+                        pass.setVertexBuffer(1, g_static_inst_buf.?, sd.offset + @as(u64, first) * @sizeOf(InstanceData), @as(u64, count) * @sizeOf(InstanceData));
+                        pass.draw(group_slot.count, count, 0, 0);
+                        g_telemetry.draw_calls += 1;
+                        g_telemetry.instances += count;
+                    }
                     continue;
                 }
             }
