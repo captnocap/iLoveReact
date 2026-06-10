@@ -511,8 +511,16 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         onScroll={(e: any) => {
           const d = Number(e?.deltaY ?? 0);
           if (!d) return;
-          const p = local(e);
-          stage.zoomToCursor(p.x, p.y, d > 0 ? 1.15 : 1 / 1.15, rectRef.current);
+          // The scroll event carries scrollX/scrollY/deltaX/deltaY — NOT x/y — so
+          // local(e) would read 0 for the cursor and anchor the zoom at a far
+          // off-screen pixel (the view lurched up-left by a huge amount). Read the
+          // real cursor from the engine like the ghost poll does; fall back to the
+          // pane centre so a zoom with no cursor info still behaves.
+          const G: any = globalThis;
+          const r = rectRef.current;
+          const mx = Number(G.getMouseX?.() ?? (r.x + r.width / 2));
+          const my = Number(G.getMouseY?.() ?? (r.y + r.height / 2));
+          stage.zoomToCursor(mx - r.x, my - r.y, d > 0 ? 1.15 : 1 / 1.15, r);
           redraw();
           saveCamera();
         }}
