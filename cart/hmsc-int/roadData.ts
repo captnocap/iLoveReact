@@ -395,3 +395,75 @@ export function snapToRoadEnd(strokes: RoadStroke[], p: RoadPoint, radius: numbe
   }
   return best ? { gx: best.gx, gz: best.gz } : null;
 }
+
+// ── mid-stroke connections (req_0529: "where do I click to merge?") ─────────
+// A connection point doesn't have to be an endpoint: clicking ON a road's
+// centerline snaps to it, and committing a stroke that ENDS there SPLITS the
+// underlying road at that point — the split seam stays one continuous road
+// (parallel axes never box), and the two halves become independently
+// re-profileable (widen the downstream half = the lane merge).
+
+export type CenterlineHit = {
+  strokeId: string;
+  /** the snapped cell ON the centerline */
+  point: RoadPoint;
+  /** true when the hit is NOT one of the stroke's endpoints (a split is needed) */
+  midSpan: boolean;
+};
+
+/** Nearest point on any stroke's centerline within `radius` cells, or null. */
+export function snapToCenterline(strokes: RoadStroke[], p: RoadPoint, radius: number): CenterlineHit | null {
+  let best: { r: RoadStroke; d: number; x: number; z: number } | null = null;
+  for (const r of strokes) {
+    for (let i = 0; i + 1 < r.points.length; i++) {
+      const a = r.points[i]!, b = r.points[i + 1]!;
+      const abx = b.gx - a.gx, abz = b.gz - a.gz;
+      const len2 = abx * abx + abz * abz;
+      const t = len2 ? Math.max(0, Math.min(1, ((p.gx - a.gx) * abx + (p.gz - a.gz) * abz) / len2)) : 0;
+      const x = a.gx + abx * t, z = a.gz + abz * t;
+      const d = Math.hypot(p.gx - x, p.gz - z);
+      if (!best || d < best.d) best = { r, d, x, z };
+    }
+  }
+  if (!best || best.d > radius) return null;
+  const point = { gx: Math.round(best.x), gz: Math.round(best.z) };
+  const first = best.r.points[0]!;
+  const last = best.r.points[best.r.points.length - 1]!;
+  const midSpan = !(first.gx === point.gx && first.gz === point.gz) && !(last.gx === point.gx && last.gz === point.gz);
+  return { strokeId: best.r.id, point, midSpan };
+}
+
+/**
+ * Split a stroke at a point on (or near) its centerline into two strokes that
+ * share that point. Profiles copy to both halves — re-profile either after.
+ * Null when the point sits on an endpoint (nothing to split) or a half would
+ * degenerate.
+ */
+export function splitStroke(stroke: RoadStroke, at: RoadPoint, idA: string, idB: string): [RoadStroke, RoadStroke] | null {
+  const pts = stroke.points;
+  let bestSeg = -1, bestD = Infinity;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i]!, b = pts[i + 1]!;
+    const abx = b.gx - a.gx, abz = b.gz - a.gz;
+    const len2 = abx * abx + abz * abz;
+    const t = len2 ? Math.max(0, Math.min(1, ((at.gx - a.gx) * abx + (at.gz - a.gz) * abz) / len2)) : 0;
+    const d = Math.hypot(at.gx - (a.gx + abx * t), at.gz - (a.gz + abz * t));
+    if (d < bestD) { bestD = d; bestSeg = i; }
+  }
+  if (bestSeg < 0) return null;
+  const dedupe = (list: RoadPoint[]): RoadPoint[] => {
+    const out: RoadPoint[] = [];
+    for (const p of list) {
+      const last = out[out.length - 1];
+      if (!last || last.gx !== p.gx || last.gz !== p.gz) out.push({ gx: p.gx, gz: p.gz });
+    }
+    return out;
+  };
+  const a = dedupe([...pts.slice(0, bestSeg + 1), at]);
+  const b = dedupe([at, ...pts.slice(bestSeg + 1)]);
+  if (a.length < 2 || b.length < 2) return null;
+  return [
+    { id: idA, points: a, profile: { ...stroke.profile } },
+    { id: idB, points: b, profile: { ...stroke.profile } },
+  ];
+}

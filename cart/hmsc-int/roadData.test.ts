@@ -7,7 +7,8 @@
 import { assert, assertEqual, finish, test } from './game/_testkit';
 import {
   carriagewayTiles, cellKey, clampProfile, crossSection, isOneWay, laneGuides,
-  planRoads, profileLabel, roadWidthTiles, snapToRoadEnd, strokeChevrons,
+  planRoads, profileLabel, roadWidthTiles, snapToCenterline, snapToRoadEnd,
+  splitStroke, strokeChevrons,
   type RoadPlan, type RoadStroke,
 } from './roadData';
 
@@ -143,6 +144,39 @@ test('snapToRoadEnd snaps a nearby click to the stroke endpoint, never a far one
   const near = snapToRoadEnd([a], { gx: 17, gz: 11 }, 2.5);
   assert(!!near && near.gx === 15 && near.gz === 10, 'click within radius lands exactly on the endpoint');
   assertEqual(snapToRoadEnd([a], { gx: 25, gz: 10 }, 2.5), null, 'click past the radius stays free');
+});
+
+test('snapToCenterline lands mid-span clicks on the wire and flags them for a split', () => {
+  const a = road('a', [[0, 10], [30, 10]], 3, 1, false);
+  const mid = snapToCenterline([a], { gx: 15, gz: 11 }, 2);
+  assert(!!mid && mid.point.gx === 15 && mid.point.gz === 10, 'click beside the wire snaps onto it');
+  assert(!!mid && mid.midSpan, 'a mid-span hit needs a split');
+  const end = snapToCenterline([a], { gx: 30, gz: 11 }, 2);
+  assert(!!end && !end.midSpan, 'a hit at the endpoint never splits');
+  assertEqual(snapToCenterline([a], { gx: 15, gz: 20 }, 2), null, 'far clicks stay free');
+});
+
+test('splitStroke makes two halves sharing the point, profiles copied', () => {
+  const a = road('a', [[0, 10], [30, 10]], 3, 1, true);
+  const halves = splitStroke(a, { gx: 15, gz: 10 }, 'r_8', 'r_9');
+  assert(!!halves, 'mid-span split succeeds');
+  const [h1, h2] = halves!;
+  assertEqual(h1.points[h1.points.length - 1]!.gx, 15, 'first half ends at the split');
+  assertEqual(h2.points[0]!.gx, 15, 'second half starts at the split');
+  assertEqual(h1.profile.lanesF, 3, 'profile copies to both halves');
+  assert(h1.profile.sidewalks && h2.profile.sidewalks, 'sidewalk flag copies');
+
+  // The split halves replan as ONE continuous road (the parallel-seam rule).
+  const plan = planRoads(halves!);
+  let junctions = 0;
+  for (const kind of plan.values()) if (kind === 'junction') junctions += 1;
+  assertEqual(junctions, 0, 'a split road never boxes at its own seam');
+  assertEqual(at(plan, 15, 10), 'median', 'centerline continuous through the split');
+});
+
+test('splitStroke at an endpoint degenerates to null', () => {
+  const a = road('a', [[0, 10], [30, 10]], 1, 1, false);
+  assertEqual(splitStroke(a, { gx: 0, gz: 10 }, 'x', 'y'), null, 'no empty half');
 });
 
 finish('roadData');

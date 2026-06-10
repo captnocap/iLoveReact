@@ -33,7 +33,7 @@ import { BrushRail, type BrushRailSettings } from './BrushRail';
 import { LayerBtn, MiniStepper, ToolBtn } from './railAtoms';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
-import { clampProfile, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadWidthTiles, snapToRoadEnd, strokeEndpoints, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
+import { clampProfile, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
 import { RoadRail } from './RoadRail';
 import { ChunkSurface } from './ChunkSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
@@ -1123,15 +1123,46 @@ export function PaintCanvas(props: {
     if (pts.length < 2) return;
     roadSeq.current += 1;
     const stroke: RoadStroke = { id: `r_${roadSeq.current}`, points: [...pts], profile: clampProfile(roadProfileRef.current) };
+    // Mid-stroke connections (req_0529): a draft END landing on another road's
+    // centerline mid-span SPLITS that road there — the seam stays one
+    // continuous road (parallel axes never box) and each half re-profiles
+    // independently (widen the downstream half = the lane merge).
+    let next = [...roadsRef.current];
+    for (const end of [pts[0]!, pts[pts.length - 1]!]) {
+      const hit = snapToCenterline(next, end, 0.6);
+      if (!hit?.midSpan) continue;
+      const idx = next.findIndex((r) => r.id === hit.strokeId);
+      if (idx < 0) continue;
+      roadSeq.current += 1;
+      const idA = `r_${roadSeq.current}`;
+      roadSeq.current += 1;
+      const idB = `r_${roadSeq.current}`;
+      const halves = splitStroke(next[idx]!, hit.point, idA, idB);
+      if (halves) next.splice(idx, 1, ...halves);
+    }
     setRoadDraft([]);
     setSelRoadId(stroke.id);
-    restampRoads([...roadsRef.current, stroke], `road ${profileLabel(stroke.profile)}`);
+    restampRoads([...next, stroke], `road ${profileLabel(stroke.profile)}`);
   };
   const cancelRoadDraft = () => setRoadDraft([]);
   const undoRoadPoint = () => setRoadDraft((d) => d.slice(0, -1));
   const deleteRoad = (id: string) => {
     setSelRoadId((s) => (s === id ? null : s));
     restampRoads(roadsRef.current.filter((r) => r.id !== id), 'removed road');
+  };
+  // The rail's steppers edit the SELECTED road live (restamp) when one is
+  // selected; otherwise they shape the draft profile for the next stroke.
+  const selRoad = roads.find((r) => r.id === selRoadId) ?? null;
+  const editActiveProfile = (patch: Partial<RoadProfile>) => {
+    if (selRoad) {
+      const next = roadsRef.current.map((r) =>
+        r.id === selRoad.id ? { ...r, profile: clampProfile({ ...r.profile, ...patch }) } : r,
+      );
+      const changed = next.find((r) => r.id === selRoad.id)!;
+      restampRoads(next, `road reprofiled ${profileLabel(changed.profile)}`);
+    } else {
+      setRoadProfile((p) => clampProfile({ ...p, ...patch }));
+    }
   };
   const commitRoadDraftRef = useRef(commitRoadDraft);
   commitRoadDraftRef.current = commitRoadDraft;
@@ -1394,11 +1425,13 @@ export function PaintCanvas(props: {
       return;
     }
     if (!c) return;
-    // Snap to a nearby stroke endpoint (within 2.5 cells) so a new road
-    // CONTINUES the network exactly — the axis-crossing junction rule then
-    // reads the shared seam as one continuous road, not a box.
+    // Snap order: a nearby stroke ENDPOINT (2.5 cells) continues the network;
+    // failing that, a nearby CENTERLINE (1.5 cells) lands the point ON the
+    // wire — committing a stroke that ends there splits the road at that spot.
     const raw: RoadPoint = { gx: c.gCellX, gz: c.gCellZ };
-    const pt = snapToRoadEnd(roadsRef.current, raw, 2.5) ?? raw;
+    const pt = snapToRoadEnd(roadsRef.current, raw, 2.5)
+      ?? snapToCenterline(roadsRef.current, raw, 1.5)?.point
+      ?? raw;
     setRoadDraft((d) => {
       const last = d[d.length - 1];
       if (last && last.gx === pt.gx && last.gz === pt.gz) return d;
@@ -1788,8 +1821,9 @@ export function PaintCanvas(props: {
           <RoadRail
             tool={tool}
             onTool={props.onTool}
-            profile={roadProfile}
-            onProfile={(patch) => setRoadProfile((p) => clampProfile({ ...p, ...patch }))}
+            profile={selRoad ? selRoad.profile : roadProfile}
+            onProfile={editActiveProfile}
+            editingLabel={selRoad ? `Road ${roads.indexOf(selRoad) + 1}` : null}
             draftCount={roadDraft.length}
             onFinish={commitRoadDraft}
             onCancel={cancelRoadDraft}

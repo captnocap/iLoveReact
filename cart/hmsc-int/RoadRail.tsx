@@ -18,6 +18,8 @@ export function RoadRail(props: {
   onTool: (t: Tool) => void;
   profile: RoadProfile;
   onProfile: (patch: Partial<RoadProfile>) => void;
+  /** non-null = the steppers are LIVE-editing this selected road, not the draft */
+  editingLabel: string | null;
   draftCount: number;
   onFinish: () => void;
   onCancel: () => void;
@@ -42,6 +44,12 @@ export function RoadRail(props: {
       </Box>
 
       <RailLabel text="PROFILE" />
+      {props.editingLabel ? (
+        <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: '#f8fafc', backgroundColor: '#1e293b' }}>
+          <Box style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#f59e0b' }} />
+          <Text fontSize={8} color="#f8fafc" style={{ fontWeight: 700 }}>{`editing ${props.editingLabel} (live)`}</Text>
+        </Box>
+      ) : null}
       <MiniStepper
         label="lanes → (with draw)"
         value={String(p.lanesF)}
