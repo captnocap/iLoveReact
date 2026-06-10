@@ -51,7 +51,8 @@ import { accentFor } from '../studio.cls';
 import { useAssistScene } from '../assist3d/useAssistScene';
 import { AssistMeshViewer } from '../assist3d/AssistMeshViewer';
 import { round, type MeshSpec } from '../assist3d/scene';
-import type { BuildPrefabDef } from '@game';
+import { GAME_BUILD } from '@game';
+import type { BuildPrefabDef, DecomposedPiece, PlacedBuildPiece } from '@game';
 
 type Cat = 'building' | 'prop' | 'marker' | 'tile' | 'embedded' | 'texture' | 'assistant';
 type Sel = { cat: Cat; kind: string };
@@ -87,6 +88,61 @@ function buildPreview(sel: Sel, partTextures?: Record<string, string>): Preview 
   }
   const def = propKindDefinition(sel.kind as typeof PROP_KINDS[number]);
   return { ...ow, baseDist: clamp(def.heightMeters * 4 + 4, 5, 30), targetY: def.heightMeters * 0.5 };
+}
+
+// ── Building prefab → inspectable view ───────────────────────────────────────
+// A prefab DECOMPOSES to its semantic pieces (no opaque blobs). We stamp it to
+// real placed pieces (the same record F2/iso edit), recentre on the union
+// envelope so the orbit camera frames the whole composition, and hand back the
+// decomposition for the data panel.
+type PrefabView = { pieces: PlacedBuildPiece[]; decomposed: DecomposedPiece[]; baseDist: number; targetY: number };
+
+function buildPrefabView(prefab: BuildPrefabDef): PrefabView {
+  const stamped = GAME_BUILD.placed
+    .stamp(prefab, { x: 0, y: 0, z: 0 }, 0)
+    .map((p, i) => ({ ...p, id: `prefab-view-${i}` } as PlacedBuildPiece));
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, topY = 0;
+  for (const piece of stamped) {
+    const b = GAME_BUILD.placed.bounds(piece);
+    minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX);
+    minZ = Math.min(minZ, b.minZ); maxZ = Math.max(maxZ, b.maxZ);
+    topY = Math.max(topY, b.topY);
+  }
+  if (!isFinite(minX)) { minX = 0; maxX = 0; minZ = 0; maxZ = 0; }
+  const cx = (minX + maxX) / 2;
+  const cz = (minZ + maxZ) / 2;
+  // Uniform translation preserves relative placement → wall joins still resolve.
+  const pieces = stamped.map((p) => ({ ...p, x: p.x - cx, z: p.z - cz }));
+  const radius = Math.max(maxX - minX, maxZ - minZ, topY, 4) * 0.5;
+  return { pieces, decomposed: GAME_BUILD.prefabs.decompose(prefab), baseDist: clamp(radius * 3.2 + 6, 8, 60), targetY: topY * 0.45 };
+}
+
+// The building's DATA: theme, piece count, and the decomposed semantic pieces
+// (catalog label · kind/material · cutout edit · local grid cell). This is the
+// see-through — a placed motel is still walls/doors/floor to every consumer.
+function PrefabInfo(props: { prefab: BuildPrefabDef; decomposed: DecomposedPiece[] }) {
+  const { prefab, decomposed } = props;
+  return (
+    <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: accentFor('bg') }}>
+      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 9, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: accentFor('border') }}>
+        <Text fontSize={10} color={accentFor('textDim')} style={{ fontFamily: 'monospace', fontWeight: 700 }}>theme</Text>
+        <Text fontSize={10} color={accentFor('text')} style={{ fontFamily: 'monospace' }}>{prefab.theme}</Text>
+        <Box style={{ flexGrow: 1 }} />
+        <Text fontSize={10} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>{`${decomposed.length} pieces`}</Text>
+      </Box>
+      <ScrollView style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }} contentContainerStyle={{ paddingTop: 4, paddingBottom: 8 }}>
+        {decomposed.map((piece, i) => (
+          <Box key={`${piece.pieceId}-${i}`} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 3, paddingBottom: 3 }}>
+            <Text fontSize={11} color={accentFor('text')} style={{ fontFamily: 'monospace' }}>{piece.def.label}</Text>
+            <Text fontSize={9} color={accentFor('textDim')} style={{ fontFamily: 'monospace' }}>{`${piece.def.kind}·${piece.def.material}`}</Text>
+            {piece.edit ? <Text fontSize={9} color={accentFor('primary')} style={{ fontFamily: 'monospace' }}>{piece.edit}</Text> : null}
+            <Box style={{ flexGrow: 1 }} />
+            <Text fontSize={9} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>{`(${piece.x},${piece.z})${piece.yawDegrees ? ` ${piece.yawDegrees}°` : ''}`}</Text>
+          </Box>
+        ))}
+      </ScrollView>
+    </Box>
+  );
 }
 
 // ── Popovers (open upward from the foot) ─────────────────────────────────────
@@ -242,6 +298,8 @@ export function ObjectsTab(props: {
     [kindTex, sel.cat, sel.kind],
   );
   const pv = useMemo(() => ((isTexture || isAssist || isBuildingPrefab) ? null : buildPreview(sel, inspectedTextures)), [isTexture, isAssist, isBuildingPrefab, sel.cat, sel.kind, inspectedTextures]);
+  // The decomposed 3D view of the inspected building prefab (its semantic pieces).
+  const prefabView = useMemo(() => (buildingPrefab ? buildPrefabView(buildingPrefab) : null), [buildingPrefab]);
 
   // The inspected object's pickable parts (for the selected-part label) + the
   // texture currently on the selected part.
@@ -264,20 +322,27 @@ export function ObjectsTab(props: {
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: accentFor('bg'), position: 'relative' }}>
       {/* viewer (+ properties for placeable/tile kinds), full width */}
       {isBuildingPrefab ? (
-        <Box style={{ flexGrow: 1, minHeight: 0, padding: 14, gap: 10, backgroundColor: accentFor('bg') }}>
-          <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Box style={{ width: 16, height: 16, borderRadius: 3, backgroundColor: '#38bdf8', borderWidth: 1, borderColor: accentFor('border') }} />
-            <Text fontSize={13} color={accentFor('text')} style={{ fontWeight: 'bold' }}>{buildingPrefab?.label ?? sel.kind}</Text>
+        buildingPrefab && prefabView ? (
+          // A building inspects like any object: the decomposed pieces in the
+          // orbit viewer (the + drops the prefab), its data in the panel below.
+          <>
+            <Box style={{ flexGrow: 1, flexBasis: 0, minHeight: 0, borderBottomWidth: 1, borderBottomColor: accentFor('border') }}>
+              <ModelViewer
+                pieces={prefabView.pieces} baseDist={prefabView.baseDist} targetY={prefabView.targetY}
+                onAdd={() => place('building', buildingPrefab.id)}
+              />
+            </Box>
+            <Box style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
+              <PrefabInfo prefab={buildingPrefab} decomposed={prefabView.decomposed} />
+            </Box>
+          </>
+        ) : (
+          <Box style={{ flexGrow: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <Text fontSize={11} color={accentFor('textDim')} style={{ fontFamily: 'monospace', textAlign: 'center' }}>
+              {(props.buildingPrefabs?.length ?? 0) === 0 ? 'No saved buildings yet — author one in the build pane and clone it into a prefab.' : 'Pick a building from the list below.'}
+            </Text>
           </Box>
-          <Text fontSize={10} color={accentFor('textDim')} style={{ fontFamily: 'monospace' }}>{`${buildingPrefab?.pieces.length ?? 0} semantic pieces`}</Text>
-          <Box style={{ flexGrow: 1 }} />
-          {buildingPrefab ? (
-            <Pressable onPress={() => place('building', buildingPrefab.id)} style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderWidth: 1, borderColor: accentFor('success'), backgroundColor: '#0f3d2e' }}>
-              <Text fontSize={12} color="#86efac" style={{ fontWeight: 800 }}>+</Text>
-              <Text fontSize={10} color="#bbf7d0" style={{ fontFamily: 'monospace', fontWeight: 700 }}>place</Text>
-            </Pressable>
-          ) : null}
-        </Box>
+        )
       ) : isTexture ? (
         spec ? (
           <Box style={{ flexGrow: 1, minHeight: 0 }}><ShaderLab spec={spec} /></Box>

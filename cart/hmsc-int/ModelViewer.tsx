@@ -15,14 +15,20 @@ import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { GAME_CAMERA, GAME_NATIVE_CAMERA } from './game';
+import type { PlacedBuildPiece } from './game';
 import type { Building, TileKind, WorldProp } from '../hmsc/design';
 import { Building3D } from '../hmsc/render3d/Building';
 import { BuildingFacades } from '../hmsc/render3d/BuildingFacades';
 import { Prop } from '../hmsc/render3d/Prop';
 import { tileKindDefinition } from '../hmsc/world/tileKinds';
+import { PlacedPieceMeshes } from './editors/build/pieceMeshes';
 
 const ORBIT_SPEED = 0.4; // degrees per cursor pixel
 const ZOOM_STEP = 1.1;
+
+// V24 prefabs inspect as their decomposed pieces — the studio viewer just draws
+// the standing composition (no selection / occlusion state).
+const NO_IDS: ReadonlySet<string> = new Set();
 
 function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
 
@@ -32,7 +38,7 @@ function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min
 // `facades` (default true) bakes the storefront skin onto the walls — skip it
 // for tiny thumbnails (massing alone differentiates kinds, and a per-chip facade
 // capture is the expensive part / unreadable at that size).
-export function ModelScene(props: { building?: Building; prop?: WorldProp; tile?: TileKind; facades?: boolean }) {
+export function ModelScene(props: { building?: Building; prop?: WorldProp; tile?: TileKind; pieces?: readonly PlacedBuildPiece[]; facades?: boolean }) {
   return (
     <>
       {/* studio lighting, no fog — read flat + fully lit */}
@@ -42,6 +48,11 @@ export function ModelScene(props: { building?: Building; prop?: WorldProp; tile?
       {props.building ? <Building3D building={props.building} /> : null}
       {props.building && props.facades !== false ? <BuildingFacades buildings={[props.building]} /> : null}
       {props.prop ? <Prop prop={props.prop} /> : null}
+      {/* V24 prefab: its decomposed pieces, drawn by the one PlacedPieceMeshes
+          renderer F2/iso also use (change a wall's look there, it changes here). */}
+      {props.pieces && props.pieces.length > 0 ? (
+        <PlacedPieceMeshes pieces={props.pieces} markedIds={NO_IDS} targetId={null} occludedIds={NO_IDS} />
+      ) : null}
       {props.tile ? ((() => {
         const h = Math.max(0.3, tileKindDefinition(props.tile).render.heightMeters);
         return <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 8, height: h, depth: 8 }} color={tileKindDefinition(props.tile).render.color} position={[0, h / 2, 0]} />;
@@ -54,6 +65,7 @@ export function ModelViewer(props: {
   building?: Building;
   prop?: WorldProp;
   tile?: TileKind;
+  pieces?: readonly PlacedBuildPiece[];
   baseDist: number;
   targetY: number;
   background?: string;
@@ -126,7 +138,7 @@ export function ModelViewer(props: {
     <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={props.background ?? '#0e1622'} showGrid showAxes={false}>
         <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} />
-        <ModelScene building={props.building} prop={props.prop} tile={props.tile} />
+        <ModelScene building={props.building} prop={props.prop} tile={props.tile} pieces={props.pieces} />
       </Scene3D>
 
       {/* Transparent input layer over the scene: drag orbits, wheel zooms. */}
