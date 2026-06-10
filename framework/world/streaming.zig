@@ -90,7 +90,15 @@ const LOD_HEIGHT_LADDER = [_]f32{ 2, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96 };
 // dropped_draws, never silent) — it must not widen a range across unwanted
 // rows: bridged rows duplicate the other tier's geometry coplanar (the
 // req_0537 face-eater).
-pub const MAX_DRAWS: u32 = 4096;
+//
+// Sized generously (req_0548: contiguous-only merging fragments more, and a
+// DENSE city multiplies ranges across every material family). The scratch
+// itself is cheap (16 B/draw) and small worlds allocate min(actual, this)
+// anyway; the true ceilings past this number are gpu/3d.zig's per-scene mesh
+// collection (MAX_SCENE_MESHES = 32768 children) and per-frame encode cost —
+// if this cap ever warns, the next move is distance-priority eviction of far
+// LOD ranges, not a bigger constant.
+pub const MAX_DRAWS: u32 = 16384;
 
 pub const World = struct {
     allocator: std.mem.Allocator,
