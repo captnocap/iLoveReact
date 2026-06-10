@@ -730,6 +730,53 @@ pub fn cameraOcclusionStepColliders(
     return if (clear < 0) 0 else clear;
 }
 
+/// Spring-arm against the terrain/ramp HEIGHTFIELDS (a separate collider type
+/// from the rect buffer — sampled, not box-tested). Marches the camera→pivot
+/// segment and returns the distance from the pivot at which the terrain first
+/// rises into the line of sight (0 = clear) — catching both a hill that blocks
+/// the view and the eye sitting inside a slope. The caller takes the min of this
+/// and the wall/roof result, then pulls the eye to `cap - skin`.
+pub fn cameraOcclusionHeightfields(
+    cam_x: f32,
+    cam_y: f32,
+    cam_z: f32,
+    pivot_x: f32,
+    pivot_y: f32,
+    pivot_z: f32,
+    sweep_radius: f32,
+) f32 {
+    var any = false;
+    for (&g_heightfields) |*hf| {
+        if (hf.active) {
+            any = true;
+            break;
+        }
+    }
+    if (!any) return 0;
+    const dx = cam_x - pivot_x;
+    const dy = cam_y - pivot_y;
+    const dz = cam_z - pivot_z;
+    if (!std.math.isFinite(dx) or !std.math.isFinite(dy) or !std.math.isFinite(dz)) return 0;
+    const segment_len = @sqrt(dx * dx + dy * dy + dz * dz);
+    if (segment_len <= 0.0001) return 0;
+    const margin = if (std.math.isFinite(sweep_radius)) @max(@as(f32, 0), sweep_radius) else 0;
+    // Bounded march from the pivot OUTWARD toward the eye: the first sample whose
+    // terrain rises to within `margin` of the segment caps the eye there. Smooth
+    // terrain won't slip between ~0.5 m samples; the count is clamped [8, 64].
+    const steps_f = @max(@as(f32, 8), @min(@as(f32, 64), segment_len / 0.5));
+    const steps: usize = @intFromFloat(steps_f);
+    var i: usize = 1;
+    while (i <= steps) : (i += 1) {
+        const s = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(steps)); // 0 at pivot → 1 at eye
+        const sx = pivot_x + dx * s;
+        const sy = pivot_y + dy * s;
+        const sz = pivot_z + dz * s;
+        const surf = heightfieldSurfaceAt(sx, sz) orelse continue;
+        if (surf.height + margin >= sy) return segment_len * s;
+    }
+    return 0;
+}
+
 pub fn cameraOcclusionConfiguredDistance(
     camera_x: f32,
     camera_y: f32,

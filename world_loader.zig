@@ -697,35 +697,16 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
         try oriented.appendSlice(allocator, bc.oriented[0 .. kept_oriented * game_physics.ORIENTED_FLOATS]);
         oriented_count = kept_oriented;
 
-        // The PAINTED GROUND now travels as heightfields (flat chunks in the
-        // baked fields above, relief chunks in the HEIGHTFIELDS lump), so we do
-        // NOT rasterize its render-box rows into per-cell rects — that was what
-        // blew the host rect cap and forced spatial windowing (which discards
-        // these baked colliders) on even a small map. We only walk the PIECE rows
-        // (< piece_count): a built floor PLATE is a short, non-solid instance, so
-        // derive a walkable rect for it as a belt-and-suspenders to its baked
-        // collider — that keeps the 3rd-floor floor you fell through solid even if
-        // its baked band is off. Piece solids (walls) and piece ramps are skipped
-        // here; the baked +-join colliders and baked ramp slopes own them.
-        const piece_rows: usize = @min(@as(usize, scene.piece_count), @as(usize, inst_count));
-        var row: usize = 0;
-        while (row < piece_rows) : (row += 1) {
-            if (isRampInstance(insts, row, stride)) continue; // baked ramp slope
-            const scale_base: usize = if (stride >= 12) 6 else 3;
-            const b = row * stride;
-            const sx = @abs(insts[b + scale_base + 0]);
-            const sy = @abs(insts[b + scale_base + 1]);
-            const sz = @abs(insts[b + scale_base + 2]);
-            if (sx <= 0.001 or sy <= 0.001 or sz <= 0.001) continue;
-            if (sy > PHYSICS_SOLID_HEIGHT_METERS) continue; // a wall — baked +-join collider
-            if (@abs(instanceYawRadians(insts, row, stride)) > 0.0001) continue; // free-yaw floor plate: baked only
-            if (rect_count >= game_physics.MAX_RECTS) {
-                clipped_rows += 1;
-                continue;
-            }
-            try appendPhysicsRect(allocator, &rects, insts, row, stride, false);
-            rect_count += 1;
-        }
+        // We DON'T derive any colliders from the render instances here — exactly
+        // like /test, the pieces collide ONLY through the baked colliders above
+        // and the painted ground through the heightfields. This matters: a piece
+        // floor's BAKED rect is banded (floor = piece.y, so you walk UNDER a
+        // raised floor), whereas an instance-derived walkable rect is solid to the
+        // ground (floor = −∞) and, being too tall to step onto, side-pushes the
+        // player below it — an invisible wall under upper floors. Letting the
+        // banded baked collider own the floor is what keeps it standable from
+        // above AND passable from below. (Heightfields above handle the ground;
+        // baked rects/oriented handle every authored piece.)
 
         const values = try allocator.alloc(f32, game_physics.INPUT_HEADER_FLOATS + rects.items.len + oriented.items.len);
         @memset(values, 0);
@@ -1102,17 +1083,32 @@ fn desiredCamera(cam: CameraState, player: PlayerState) CameraSolve {
 /// Pull the desired eye in to the near side of any wall/roof between it and the
 /// pivot (the compiled-game spring-arm — parity with the editor's JS one).
 fn springArmEye(want: CameraSolve, maybe_colliders: ?PhysicsColliders) Vec3 {
-    const colliders = maybe_colliders orelse return want.pos;
-    if (colliders.rect_count == 0 and colliders.oriented_count == 0) return want.pos;
     const dxp = want.pos.x - want.pivot.x;
     const dyp = want.pos.y - want.pivot.y;
     const dzp = want.pos.z - want.pivot.z;
     const base = @sqrt(dxp * dxp + dyp * dyp + dzp * dzp);
     if (base <= 0.0001) return want.pos;
-    const nearest = game_physics.cameraOcclusionStepColliders(
-        colliders.values,
-        colliders.rect_count,
-        colliders.oriented_count,
+    // The eye must clear BOTH the wall/roof boxes AND the terrain/ramp
+    // heightfields (a separate collider type) — take the most restrictive cap.
+    var cap: f32 = -1;
+    if (maybe_colliders) |colliders| {
+        if (colliders.rect_count != 0 or colliders.oriented_count != 0) {
+            const wall = game_physics.cameraOcclusionStepColliders(
+                colliders.values,
+                colliders.rect_count,
+                colliders.oriented_count,
+                want.pos.x,
+                want.pos.y,
+                want.pos.z,
+                want.pivot.x,
+                want.pivot.y,
+                want.pivot.z,
+                CAMERA_SPRING_SWEEP_RADIUS_METERS,
+            );
+            if (wall > 0) cap = wall;
+        }
+    }
+    const terrain = game_physics.cameraOcclusionHeightfields(
         want.pos.x,
         want.pos.y,
         want.pos.z,
@@ -1121,8 +1117,9 @@ fn springArmEye(want: CameraSolve, maybe_colliders: ?PhysicsColliders) Vec3 {
         want.pivot.z,
         CAMERA_SPRING_SWEEP_RADIUS_METERS,
     );
-    if (nearest <= 0) return want.pos;
-    const safe = clamp(nearest - CAMERA_SPRING_SKIN_METERS, CAMERA_SPRING_MIN_DISTANCE_METERS, base);
+    if (terrain > 0 and (cap < 0 or terrain < cap)) cap = terrain;
+    if (cap < 0) return want.pos;
+    const safe = clamp(cap - CAMERA_SPRING_SKIN_METERS, CAMERA_SPRING_MIN_DISTANCE_METERS, base);
     const k = safe / base;
     return .{
         .x = want.pivot.x + dxp * k,
