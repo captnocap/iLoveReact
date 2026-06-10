@@ -604,14 +604,21 @@ function IsoBtn(props: { label: string; onPress: () => void; title?: string }) {
 // a blizzard of lines (the count stays bounded at ~2·HALF_LINES per axis). The cell
 // step stays a "nice" 1 tile = 1 m multiple, so the grid always lands on real cells.
 // (Scene3D's showGrid prop is a no-op — the grid IS these thin line boxes.)
-const GRID_HALF_LINES = 28;            // lines each side of centre → ~114 boxes total, bounded
+const GRID_HALF_LINES = 56;            // lines each side of centre → ~226 boxes total, bounded
 const GRID_NICE_STEPS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 const GRID_MINOR = '#3c5575';
 const GRID_MAJOR = '#7da0cf';
-// The cell size (tiles) for the current eye distance: cover ~0.65× the distance each
-// way at HALF_LINES lines, snapped up to a nice 1·2·4·8… multiple so cells stay whole.
+// The cell size (tiles) for the current eye distance. Cover only the VISIBLE ground
+// (≈0.31× the eye distance each way at this fov) — NOT a big multiple of it — so the
+// grid HOLDS the true 1-tile pitch through the entire building-zoom range: a wall on a
+// tile line reads as on the line at every zoom you'd actually place at (down to ~zoom
+// 0.5). It only coarsens to 2/4/8… cells when you pull WAY out to survey a district,
+// where single cells aren't placeable anyway. (The prior tuning coarsened to 4-tile
+// cells at DEFAULT zoom, so 1-tile-snapped pieces sat between the grid lines — the
+// "aligned zoomed-in, off-grid zoomed-out" bug.) Steps stay nice 1·2·4·8 multiples of
+// the 1 tile = 1 m grid, so the lines always fall on real cell boundaries.
 function gridStepFor(distanceMeters: number): number {
-  const raw = Math.max(20, distanceMeters * 0.65) / GRID_HALF_LINES;
+  const raw = Math.max(6, distanceMeters * 0.31) / GRID_HALF_LINES;
   for (const s of GRID_NICE_STEPS) if (s >= raw) return s;
   return GRID_NICE_STEPS[GRID_NICE_STEPS.length - 1];
 }
