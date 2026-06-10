@@ -1,0 +1,30 @@
+{
+  "id": "req_0553",
+  "at": "2026-06-10T15:00:23.804Z",
+  "origin": "codex:019eb1f8",
+  "text": "are there two different dumpsters ? or i think i found it. so look here. this is  the compiled route dumpster: [Image #1] and this is the test route dumpster: [Image #2] this test route has shape to it that the compiled route lacks, and t hat also shows up on the stop sign also, and bushes",
+  "status": "review",
+  "sessionId": "019eb1f8-e8a2-7c03-8782-7c9e91ef893f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T15:00:34.265Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T15:06:43.560Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the compiled route prop mismatch by extending the no-V8 instance stream and world_loader renderer beyond box/ramp rows. The compiler now emits prop parts as boxes, 8/16-sided cylinders, and spheres with full rx/ry/rz rotation, so dumpster lids keep their slope, stop signs bake as octagonal disks on poles, and bushes/rocks bake as clumped sphere parts instead of cuboids. The loader now batches and renders those shape ids in both monolithic and streaming paths. Verified with the hmsc-int bundle, direct world_loader ReleaseFast build, and tools/rjit game verify.",
+  "shas": [
+    "deb9d4aa0"
+  ],
+  "resolvedAt": "2026-06-10T15:06:43.560Z"
+}
