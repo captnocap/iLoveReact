@@ -31,6 +31,7 @@
 // same split roster.ts uses.
 
 import type { LogPosition, Store, StreamDef, StreamHandle } from '../data';
+import { GAME_TELEMETRY } from '../game/telemetry';
 import { editorStore } from './store';
 
 export type SessionsEvent =
@@ -70,31 +71,24 @@ export const sessionsStream: StreamDef<SessionsState, SessionsEvent> = Object.fr
     switch (event?.kind) {
       case 'opened': {
         if (event.session in state.sessions) return state; // replays can't fork a session
-        const record: SessionRecord = {
+        state.sessions[event.session] = {
           id: event.session, route: event.route, channel: event.channel,
           openedSeq: seq, closedSeq: null, commits: [],
         };
-        return {
-          sessions: { ...state.sessions, [event.session]: record },
-          order: [...state.order, event.session],
-        };
+        state.order.push(event.session);
+        return state;
       }
       case 'committed': {
         const open = state.sessions[event.session];
         if (!open) return state; // a marker without its session is future noise, not a crash
-        const commit: SessionCommit = { seq, at: event.at ?? null, label: event.label };
-        return {
-          ...state,
-          sessions: { ...state.sessions, [event.session]: { ...open, commits: [...open.commits, commit] } },
-        };
+        open.commits.push({ seq, at: event.at ?? null, label: event.label });
+        return state;
       }
       case 'closed': {
         const open = state.sessions[event.session];
         if (!open) return state;
-        return {
-          ...state,
-          sessions: { ...state.sessions, [event.session]: { ...open, closedSeq: seq } },
-        };
+        open.closedSeq = seq;
+        return state;
       }
       default:
         // Unknown kinds from the future MUST pass through untouched (V20
@@ -114,6 +108,12 @@ export type RouteSession<Event> = {
    *  roster.ts invariant: snapshots are never stale relative to the last
    *  save). Returns the marker's position — the interaction's undo point. */
   commit: (event: Event, label: string) => LogPosition;
+  /** MANY content events as ONE batch: append every event + its marker, then
+   *  materialize snapshots ONCE at the end. Per-event commit() re-materializes
+   *  the whole store on every call, so a 352-piece building move (704 events)
+   *  stalls the editor; this folds it into a single snapshot pass. Returns the
+   *  last marker position, or null for an empty batch. */
+  commitMany: (items: ReadonlyArray<{ event: Event; label: string }>) => LogPosition | null;
   /** an interaction whose content isn't event-sourced yet: marker only, no
    *  snapshot churn (no content changed). Still an undo-chain position. */
   note: (label: string) => LogPosition;
@@ -132,6 +132,28 @@ export type SessionLog = {
   undoPoint: () => number;
 };
 
+export type SessionLogOptions = {
+  /** Live build interactions keep the append durable now, then materialize
+   *  snapshots off the frame. Tests and non-live callers default to sync. */
+  snapshotMode?: 'sync' | 'defer';
+  scheduleSnapshot?: (fn: () => void) => unknown;
+};
+
+function perfMs(): number {
+  const host = globalThis as any;
+  if (typeof host.__bench_now_us === 'function') {
+    const us = Number(host.__bench_now_us());
+    if (Number.isFinite(us)) return us / 1000;
+  }
+  const perf = (globalThis as any).performance;
+  return typeof perf?.now === 'function' ? perf.now() : Date.now();
+}
+
+function defaultSnapshotScheduler(fn: () => void): unknown {
+  const timer = (globalThis as any).setTimeout;
+  return typeof timer === 'function' ? timer(fn, 0) : fn();
+}
+
 /** Mint a session id: time-sortable, collision-safe at route-visit rate
  *  (the mintCharacterId idiom). */
 export function mintSessionId(route: string): string {
@@ -139,8 +161,51 @@ export function mintSessionId(route: string): string {
   return `ses-${stem}-${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffff).toString(36)}`;
 }
 
-export function createSessionLog(store: Store): SessionLog {
+export function createSessionLog(store: Store, options: SessionLogOptions = {}): SessionLog {
   const stream: StreamHandle<SessionsState, SessionsEvent> = store.defineStream(sessionsStream);
+  const snapshotMode = options.snapshotMode ?? 'sync';
+  const scheduleSnapshot = options.scheduleSnapshot ?? defaultSnapshotScheduler;
+  let snapshotPending = false;
+  let snapshotToken = 0;
+
+  const materializeNow = (reason: string, scheduledAtMs: number | null = null): void => {
+    snapshotPending = false;
+    snapshotToken += 1;
+    const t0 = perfMs();
+    const written = store.materializeSnapshots();
+    const ms = perfMs() - t0;
+    const delayMs = scheduledAtMs == null ? 0 : Math.max(0, t0 - scheduledAtMs);
+    GAME_TELEMETRY.recordDiagnostic('worldStream', 'session.snapshot.flush', {
+      reason,
+      mode: snapshotMode,
+      streams: written.length,
+      delayMs,
+      ms,
+    });
+    if (ms >= 16) {
+      console.warn(`[PLACEFREEZE] snapshot flush reason=${reason} mode=${snapshotMode} streams=${written.length} delayMs=${delayMs.toFixed(2)} ms=${ms.toFixed(2)}`);
+    }
+  };
+
+  const materializeAfterCommit = (reason: string): void => {
+    if (snapshotMode === 'sync') {
+      materializeNow(reason);
+      return;
+    }
+    if (snapshotPending) {
+      GAME_TELEMETRY.recordDiagnostic('worldStream', 'session.snapshot.coalesced', { reason, mode: snapshotMode });
+      return;
+    }
+    snapshotPending = true;
+    const token = snapshotToken + 1;
+    snapshotToken = token;
+    const scheduledAtMs = perfMs();
+    GAME_TELEMETRY.recordDiagnostic('worldStream', 'session.snapshot.schedule', { reason, mode: snapshotMode });
+    scheduleSnapshot(() => {
+      if (!snapshotPending || snapshotToken !== token) return;
+      materializeNow(reason, scheduledAtMs);
+    });
+  };
 
   const open = <State, Event>(route: string, channel: StreamHandle<State, Event>, id?: string): RouteSession<Event> => {
     const session = id ?? mintSessionId(route);
@@ -151,9 +216,53 @@ export function createSessionLog(store: Store): SessionLog {
       route,
       channel: channel.name,
       commit: (event: Event, label: string): LogPosition => {
+        const t0 = perfMs();
+        const appendT0 = perfMs();
         const at = channel.append(event);
+        const appendMs = perfMs() - appendT0;
+        const markerT0 = perfMs();
         const pos = stream.append({ kind: 'committed', session, channel: channel.name, label, at: at.globalSeq });
-        store.materializeSnapshots();
+        const markerMs = perfMs() - markerT0;
+        const scheduleT0 = perfMs();
+        materializeAfterCommit('commit');
+        const scheduleMs = perfMs() - scheduleT0;
+        const totalMs = perfMs() - t0;
+        GAME_TELEMETRY.recordDiagnostic('worldStream', 'session.commit', {
+          route,
+          channel: channel.name,
+          label,
+          mode: snapshotMode,
+          appendMs,
+          markerMs,
+          snapshotScheduleMs: scheduleMs,
+          totalMs,
+        });
+        if (totalMs >= 16) {
+          console.warn(`[PLACEFREEZE] session.commit route=${route} channel=${channel.name} mode=${snapshotMode} appendMs=${appendMs.toFixed(2)} markerMs=${markerMs.toFixed(2)} snapshotScheduleMs=${scheduleMs.toFixed(2)} totalMs=${totalMs.toFixed(2)}`);
+        }
+        return pos;
+      },
+      commitMany: (items: ReadonlyArray<{ event: Event; label: string }>): LogPosition | null => {
+        if (!items.length) return null;
+        const t0 = perfMs();
+        let pos: LogPosition | null = null;
+        for (const item of items) {
+          const at = channel.append(item.event);
+          pos = stream.append({ kind: 'committed', session, channel: channel.name, label: item.label, at: at.globalSeq });
+        }
+        // ONE snapshot pass for the whole batch — the per-commit cost that stalled.
+        materializeAfterCommit('commitMany');
+        const totalMs = perfMs() - t0;
+        GAME_TELEMETRY.recordDiagnostic('worldStream', 'session.commitMany', {
+          route,
+          channel: channel.name,
+          count: items.length,
+          mode: snapshotMode,
+          totalMs,
+        });
+        if (totalMs >= 16) {
+          console.warn(`[PLACEFREEZE] session.commitMany route=${route} channel=${channel.name} count=${items.length} mode=${snapshotMode} totalMs=${totalMs.toFixed(2)}`);
+        }
         return pos;
       },
       note: (label: string): LogPosition =>
@@ -162,7 +271,7 @@ export function createSessionLog(store: Store): SessionLog {
         if (closed) return;
         closed = true;
         stream.append({ kind: 'closed', session });
-        store.materializeSnapshots();
+        materializeNow('close');
       },
     };
   };
@@ -184,6 +293,6 @@ let live: SessionLog | null = null;
 
 /** The LIVE session log on the tool's one store — route code only (never tests). */
 export function editorSessions(): SessionLog {
-  if (!live) live = createSessionLog(editorStore());
+  if (!live) live = createSessionLog(editorStore(), { snapshotMode: 'defer' });
   return live;
 }
