@@ -47,7 +47,7 @@ export interface ShaderVariant {
 export interface ShaderSpec {
   id: string;
   label: string;
-  group: string; // catalog rail grouping ('HMSC · Game', 'E · Neon Surface', …)
+  group: string; // catalog rail category by purpose ('Walls & Masonry', 'Wall Props', …)
   blurb: string;
   shader: string; // the real WGSL string — single source, no copies
   base: ShaderParam[]; // shared across every variant
@@ -75,7 +75,7 @@ export function defaultShaderData(spec: ShaderSpec): number[] {
 const ROAD: ShaderSpec = {
   id: 'road',
   label: 'Road',
-  group: 'HMSC · Game',
+  group: 'Ground & Roads',
   blurb: 'One road tile: shared asphalt base + the lane/centerline/bike overlay.',
   shader: ROAD_TILE_SHADER,
   base: [
@@ -152,7 +152,7 @@ const STENCIL_SLIDER_GRID = 8; // the slider form's full-tile grid (all cells se
 const CUTOUT_STENCIL: ShaderSpec = {
   id: 'cutout-stencil',
   label: 'Cutout Stencil',
-  group: 'HMSC · Game',
+  group: 'Stencils',
   blurb: 'A shape painted in the cutout painter (/cutout), frozen as a stencil: fill color inside the shape, background or transparency outside. Materialize real shapes from /cutout; the sliders here tune a full tile.',
   shader: CUTOUT_STENCIL_SHADER,
   base: [
@@ -191,8 +191,8 @@ const FILL_SEED_MAX = 500; // every board formula lands well under this
 type FillMaterial = { slug: string; name: string; variants: [string, string, string] };
 type FillBoard = {
   board: number;            // D[4]
-  letter: string;           // catalog/board letter (A–H)
-  title: string;            // board name for the group label
+  letter: string;           // effect_fills demo board letter — drives the stable material id only
+  title: string;            // effect_fills demo board name (origin batch; the editor groups by purpose, not this)
   seedCoef: [number, number, number]; // [perMaterial, perVariant, offset]
   materials: FillMaterial[]; // index = materialId (D[0])
 };
@@ -322,14 +322,78 @@ const FILL_BOARDS: FillBoard[] = [
   },
 ];
 
+// ── Editor categories ─────────────────────────────────────────────────────────
+// The catalog rail groups materials by PURPOSE — what a world-builder is actually
+// reaching for (ground, walls, facades, props…) — NOT by the effect_fills demo's
+// authoring batches. The old "A · Environment" / "H · Second Pass" letter boards
+// only ever made sense inside that standalone eval cart; carried into the editor
+// they were noise (a material's batch letter tells a builder nothing about where
+// it goes). `letter`/`board` still drive the stable material id and the demo's
+// swatch layout; the editor's grouping is its own concern, keyed by slug below.
+const TEXTURE_CATEGORIES = [
+  'Ground & Roads',
+  'Walls & Masonry',
+  'Building Facades',
+  'Wall Props',
+  'Floors & Interiors',
+  'Surfaces & Glass',
+  'Cloth & Materials',
+  'Objects & Clutter',
+  'Stencils',
+] as const;
+type TextureCategory = typeof TEXTURE_CATEGORIES[number];
+
+const CATEGORY_BY_SLUG: Record<string, TextureCategory> = {
+  // Ground & Roads — what you walk and drive on.
+  road: 'Ground & Roads', asphalt: 'Ground & Roads', sidewalk: 'Ground & Roads',
+  sand: 'Ground & Roads', dune: 'Ground & Roads', water: 'Ground & Roads',
+  'deep-water': 'Ground & Roads', grass: 'Ground & Roads', turf: 'Ground & Roads',
+  // Walls & Masonry — bare exterior wall surfaces.
+  brick: 'Walls & Masonry', concrete: 'Walls & Masonry', 'stone-wall': 'Walls & Masonry',
+  'stucco-facade': 'Walls & Masonry', 'neon-stucco': 'Walls & Masonry',
+  'mold-wall': 'Walls & Masonry', 'peel-paint': 'Walls & Masonry',
+  'mildew-brick': 'Walls & Masonry', 'rot-siding': 'Walls & Masonry', 'rust-sheet': 'Walls & Masonry',
+  // Building Facades — wall faces with windows/doors/storefronts painted in.
+  'brick-apartment': 'Building Facades', 'brick-fire-escape': 'Building Facades',
+  'brick-shopfront': 'Building Facades', 'brick-entrance': 'Building Facades',
+  'brick-rollshutter': 'Building Facades', 'brick-bodega': 'Building Facades',
+  // Wall Props — street furniture mounted on a wall face.
+  'wall-flag': 'Wall Props', 'wall-plants': 'Wall Props', 'wall-billboard': 'Wall Props',
+  'wall-sign': 'Wall Props', 'wall-ac': 'Wall Props',
+  // Floors & Interiors — indoor floor/ceiling/wall coverings.
+  linoleum: 'Floors & Interiors', 'bath-tile': 'Floors & Interiors', 'pool-tile': 'Floors & Interiors',
+  'peel-wallpaper': 'Floors & Interiors', 'motel-carpet': 'Floors & Interiors',
+  'rotten-rug': 'Floors & Interiors', 'pdx-carpet': 'Floors & Interiors',
+  'booth-vinyl': 'Floors & Interiors', 'drop-ceiling': 'Floors & Interiors',
+  'plank-deck': 'Floors & Interiors', 'moss-carpet': 'Floors & Interiors',
+  // Surfaces & Glass — glossy/reflective/lit surfaces and foliage canopy.
+  'neon-tube': 'Surfaces & Glass', 'sunset-sky': 'Surfaces & Glass', 'wet-asphalt': 'Surfaces & Glass',
+  'car-paint': 'Surfaces & Glass', 'crt-screen': 'Surfaces & Glass', 'palm-canopy': 'Surfaces & Glass',
+  'fogged-mirror': 'Surfaces & Glass', 'salt-flat': 'Surfaces & Glass',
+  'tarnished-silver': 'Surfaces & Glass', 'ice-sheet': 'Surfaces & Glass',
+  'charcoal-bed': 'Surfaces & Glass', 'stained-glass': 'Surfaces & Glass',
+  // Cloth & Materials — prop/wearable substances.
+  'blade-steel': 'Cloth & Materials', gunmetal: 'Cloth & Materials', 'grip-polymer': 'Cloth & Materials',
+  leather: 'Cloth & Materials', denim: 'Cloth & Materials', fabric: 'Cloth & Materials',
+  skin: 'Cloth & Materials', wood: 'Cloth & Materials',
+  // Objects & Clutter — discrete game-objects / set dressing.
+  'cash-stack': 'Objects & Clutter', 'product-baggie': 'Objects & Clutter',
+  'blood-pool': 'Objects & Clutter', evidence: 'Objects & Clutter', refuse: 'Objects & Clutter',
+  corkboard: 'Objects & Clutter', substance: 'Objects & Clutter',
+};
+
+export function textureCategory(slug: string): TextureCategory {
+  return CATEGORY_BY_SLUG[slug] ?? 'Objects & Clutter';
+}
+
 function fillSpec(b: FillBoard, materialId: number, m: FillMaterial): ShaderSpec {
   const [perMaterial, perVariant, offset] = b.seedCoef;
   const defaultSeed = perMaterial * materialId + offset; // variant-0 swatch seed
   return {
     id: `${b.letter.toLowerCase()}-${m.slug}`,
     label: m.name,
-    group: `${b.letter} · ${b.title}`,
-    blurb: `${b.title} board: ${m.name.toLowerCase()} — three authored takes, seed + detail grade tunable.`,
+    group: textureCategory(m.slug),
+    blurb: `${m.name} — three authored takes, seed + detail grade tunable.`,
     shader: FILL_SHADER,
     base: [
       { key: 'seed', label: 'Seed', default: defaultSeed, min: 0, max: FILL_SEED_MAX, step: 1, integer: true },
@@ -368,12 +432,17 @@ export function shaderSpec(id: string): ShaderSpec | undefined {
   return HMSC_SHADERS.find((s) => s.id === id);
 }
 
-// Group order for catalog rails: the game's own shaders first, then the boards.
+// Group order for catalog rails: the purpose categories in their declared order
+// (TEXTURE_CATEGORIES), with any stragglers appended in first-seen order.
 export function shaderGroups(): { group: string; specs: ShaderSpec[] }[] {
   const out: { group: string; specs: ShaderSpec[] }[] = [];
   for (const spec of HMSC_SHADERS) {
     const g = out.find((x) => x.group === spec.group);
     if (g) g.specs.push(spec); else out.push({ group: spec.group, specs: [spec] });
   }
-  return out;
+  const rank = (group: string) => {
+    const i = (TEXTURE_CATEGORIES as readonly string[]).indexOf(group);
+    return i === -1 ? TEXTURE_CATEGORIES.length : i;
+  };
+  return out.sort((a, b) => rank(a.group) - rank(b.group));
 }
