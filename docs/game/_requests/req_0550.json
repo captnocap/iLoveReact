@@ -1,0 +1,30 @@
+{
+  "id": "req_0550",
+  "at": "2026-06-10T14:40:42.565Z",
+  "origin": "codex:019eb1f8",
+  "text": "also i dont see things like signs in the prop list or similar",
+  "status": "review",
+  "sessionId": "019eb1f8-e8a2-7c03-8782-7c9e91ef893f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:40:50.413Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T14:46:47.519Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Expanded the hmsc-int build prop palette from the prop registry instead of three hardcoded rows, so signs and street furniture such as street sign, stop sign, street light, traffic light, payphone, mailbox, fence, rocks, bushes, hydrant, and dumpster all appear as prop build entries. Verified with tools/rjit game verify, hmsc-int cart bundle, and git diff --check.",
+  "shas": [
+    "1f8fa044c"
+  ],
+  "resolvedAt": "2026-06-10T14:46:47.519Z"
+}

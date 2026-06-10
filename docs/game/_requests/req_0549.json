@@ -1,0 +1,30 @@
+{
+  "id": "req_0549",
+  "at": "2026-06-10T14:39:40.735Z",
+  "origin": "codex:019eb1f8",
+  "text": "inside of the iso3d world editor in hmsc-int there are props. but the props are just rendering as basic blocks, and not the actual prop. can u solve that problem. for instance the dumpster/garbage is just a small block",
+  "status": "review",
+  "sessionId": "019eb1f8-e8a2-7c03-8782-7c9e91ef893f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:39:46.240Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T14:46:47.476Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed hmsc-int build props so placed prop catalog rows render through the canonical hmsc Prop component instead of the generic build-piece box path. Compiled/no-V8 geometry now bakes prop rows through prop-aware multi-part geometry, including a recognizable dumpster, with fallback sizing still coming from the prop registry. Verified with tools/rjit game verify, hmsc-int cart bundle, and git diff --check.",
+  "shas": [
+    "1f8fa044c"
+  ],
+  "resolvedAt": "2026-06-10T14:46:47.476Z"
+}
