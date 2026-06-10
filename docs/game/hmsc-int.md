@@ -1454,6 +1454,24 @@ carries a 3×3 grid of paintable tile kinds — the nav substrate stays uniform
   out until the multi-level surface-nav lane. Exposed on GAME_WORLD
   (`bakeNavGrid`/`navKindAt`). P4: navGrid.test.ts (8 cases incl. the
   dresser-derivation rule and the door-stays-open law).
-- NOT yet wired: the live publish (play boot calling bakeNavGrid →
-  publishGrid per map), the editor cell-painter UI on floors, road decks
-  (lane kinds on lifted floors — elevation modes), multi-level surface nav.
+- `game/world/navPublish.ts` — THE LIVE PUBLISH (NAVLIVE-0610): the active
+  map (painted heightfield landform `field.tiles` + placed pieces) →
+  `bakeNavGrid` → `GAME_PATHING.publishGrid`, with the kind-table
+  derivations riding every publish: `navFlowTable` (per-kind PATH_FLOW codes
+  from each kind's `flow`), `navClassTable` (junction/crosswalk — the
+  lane-discipline opt-in), `navProfileCosts` (walker = npc.walkCost,
+  vehicle = npc.vehicleCost; non-traversable ships -1). NAV_PROFILES
+  {walker:0, vehicle:1}; the vehicle profile sets laneOffset 1 /
+  againstFlow 8 / crossFlow 2. THE HOST CAP: pathing.zig MAX_CELLS = 16384
+  (mirrored as PATHING_GRID_LIMITS) holds ~64×64m at the ruled 0.5m cells —
+  ONE painted chunk needs 57,600 — so over-cap maps publish a square WINDOW
+  centred on the player (reported in NavPublishResult.windowed, never
+  silent); PlayRoute re-anchors the window when the player leaves its
+  central half (1s poll) and re-publishes on worldGrid/pieces identity
+  change. Raising MAX_CELLS host-side restores whole-map publish with no
+  JS change. On GAME_WORLD (`publishNavGrid`/`navProfiles`). P4:
+  navPublish.test.ts (7).
+- NOT yet wired: a find()/route consumer (NPC walkers/traffic), the editor
+  cell-painter UI on floors, road decks (lane kinds on lifted floors —
+  elevation modes), multi-level surface nav, the host MAX_CELLS raise
+  (heap-allocated grids) for whole-map 0.5m publish.

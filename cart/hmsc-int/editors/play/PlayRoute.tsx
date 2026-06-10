@@ -41,7 +41,7 @@ import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import {
   GAME_BUILD, GAME_CAMERA, GAME_CHROME, GAME_COMMANDS, GAME_FIGURE, GAME_INPUT,
-  GAME_ITEMS, GAME_LOOP, GAME_PHYSICS, GAME_TELEMETRY, GAME_WORLD, buildingsStream, cameraOcclusionResponse, pieceMutationMapName, piecesForMap, withBuildingPieces, worldStream,
+  GAME_ITEMS, GAME_LOOP, GAME_PATHING, GAME_PHYSICS, GAME_TELEMETRY, GAME_WORLD, buildingsStream, cameraOcclusionResponse, pieceMutationMapName, piecesForMap, withBuildingPieces, worldStream,
 } from '@game';
 import type {
   BuildFaceSkin, BuildFaceSlot, BuildMaterial, BuildPieceDef, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingsStreamState, PieceRay,
@@ -433,14 +433,17 @@ export function PlayRoute(props: {
     markPlaceFreezeProbe(placeFreezeProbeRef.current, 'piecesForMap', { pieces: next.length, ms: perfMs() - t0 });
     return next;
   }, [streamState, buildingsState, props.mapName, props.legacyPieceMapName]);
-  // Flat-pad terrain lift (req_0444): the SAME idempotent transform the build pane and
-  // compile use, so a building walked in F2 stands on the painted terrain exactly as it
-  // does in the editor and the shipped game. Render, colliders, and camera occluders read
-  // the LIFTED set; the crosshair edit path keeps the raw `pieces`/piecesRef.
-  const liftedPieces = useMemo(
-    () => GAME_BUILD.placed.liftToTerrain(pieces, (x, z) => groundColumnTop(state.world as Parameters<typeof groundColumnTop>[0], x, z)),
-    [pieces, state.world],
-  );
+  // Flat-pad terrain lift (req_0444) is DISABLED here on purpose. It was wired to
+  // `state.world`, but that reference was the WorldStreamState (no `.world`), so the
+  // lift silently ran on `undefined` → NaN → a harmless no-op since it landed.
+  // `props.state` is the STATIC GameState: it carries no painted terrain (that lives
+  // in the build stream), so groundColumnTop returns 0 under every building and
+  // liftToTerrain would DROP them onto y=0 — up to ~48m — desyncing where you stand
+  // from where things collide (walk-through-walls / fall-through-floors). Buildings
+  // are authored where the user placed them, so F2 renders+collides them THERE.
+  // Proper terrain-padding in F2 needs the live painted world (the embodied
+  // worldGrid, available below) — a separate change, tracked, not faked here.
+  const liftedPieces = pieces;
   const placedSkinTextureIds = useMemo(() => {
     const ids = new Set<string>();
     for (const piece of pieces) skinTextureIdsFromSet(piece.skin, ids);
@@ -583,6 +586,49 @@ export function PlayRoute(props: {
     playerJitProbe: diagnosticBuildWalk,
   });
   const { player, playerRef, lookRef, rig, figureOffset, pointerWire, worldGrid } = embodied;
+
+  // ── THE LIVE NAV PUBLISH (NAVLIVE-0610) ────────────────────────────────────
+  // The same world the player walks (painted landform tiles + placed pieces)
+  // bakes to the host path grid — GAME_PATHING.publishGrid's first live
+  // producer. Flows/classes/profiles ride along from the kind registry, so
+  // routes get lane discipline the moment this lands. Re-publishes when the
+  // world changes (worldGrid identity = the authored map, liftedPieces = the
+  // build streams); when the map exceeds the host grid cap the publish
+  // windows around the player and the interval below FOLLOWS — leaving the
+  // central half of the window re-anchors it (full republish: the host cap
+  // makes updateCells moot for a moving window).
+  const navPublishRef = useRef<ReturnType<typeof GAME_WORLD.publishNavGrid> | null>(null);
+  const republishNav = useCallback(() => {
+    if (!GAME_PATHING.hostReady()) return;
+    const t0 = perfMs();
+    const p = playerRef.current;
+    const result = GAME_WORLD.publishNavGrid({
+      landforms: worldGrid.landforms,
+      pieces: liftedPieces,
+      center: [p.x, p.z],
+    });
+    navPublishRef.current = result;
+    GAME_TELEMETRY.recordDiagnostic('physics', 'nav.publish', {
+      generation: result.generation,
+      cols: result.cols,
+      rows: result.rows,
+      windowed: result.windowed,
+      pieces: liftedPieces.length,
+      ms: perfMs() - t0,
+    });
+  }, [worldGrid, liftedPieces, playerRef]);
+  useEffect(() => { republishNav(); }, [republishNav]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const pub = navPublishRef.current;
+      if (!pub || !pub.windowed || !pub.center || pub.generation === 0) return;
+      const p = playerRef.current;
+      const half = (pub.cols * pub.cellSize) / 2;
+      if (Math.abs(p.x - pub.center[0]) > half / 2 || Math.abs(p.z - pub.center[1]) > half / 2) republishNav();
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [republishNav, playerRef]);
+
   const flushPlayerPose = () => {
     const next = capturePlayerPoseTwig(playerRef.current, lookRef.current);
     if (!playerPoseTwigChanged(next, lastSavedPlayerPoseRef.current)) return;

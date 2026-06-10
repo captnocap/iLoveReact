@@ -70,6 +70,7 @@ import {
 import { authoredWorldFromRecord, AUTHORED_WORLD_STORE, loadAuthoredWorld, readAuthoredWorldRaw } from './authored';
 import { legacyGlobalPieces, pieceMutationMapName, piecesForMap, worldStream } from './stream';
 import { bakeNavGrid, navKindAt } from './navGrid';
+import { NAV_PROFILES, publishNavGrid } from './navPublish';
 
 export {
   addSurfaceRegion,
@@ -133,6 +134,20 @@ export type { PiecePlacement, WorldEvent, WorldStreamState } from './stream';
 // GAME_PATHING.publishGrid.
 export { bakeNavGrid, navKindAt, NAV_TUNING } from './navGrid';
 export type { NavGrid } from './navGrid';
+// The LIVE publish (NAVLIVE-0610): active map → bakeNavGrid → host A*, with
+// flows/classes/profiles derived from the kind registry. Windows around the
+// anchor when the map exceeds the host grid cap (reported, never silent).
+export {
+  clipPaintedGrid,
+  navClassTable,
+  navFlowTable,
+  navProfileCosts,
+  NAV_PROFILES,
+  paintedGridFromLandforms,
+  PATHING_GRID_LIMITS,
+  publishNavGrid,
+} from './navPublish';
+export type { NavPublishResult, PaintedGrid } from './navPublish';
 // buildings own their history (req_0512/req_0513): defs + instance references
 // on their own V20 stream; derived back into the one pieces view.
 export {
@@ -193,6 +208,9 @@ export const GAME_WORLD = Object.freeze({
   // the nav bake (world → host path grid; pair with GAME_PATHING.publishGrid)
   bakeNavGrid,
   navKindAt,
+  // the live publish (active map → host A*; NAV_PROFILES.walker/vehicle)
+  publishNavGrid,
+  navProfiles: NAV_PROFILES,
   // physics adapter
   collisionRects: worldCollisionRects,
   heightfields: worldHeightfields,

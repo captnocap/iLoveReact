@@ -33,7 +33,16 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/game/world/navGrid.ts',
       description:
-        'MICROGRID-0610 (user-ruled req_0518): a floor IS 3×3 tiles; PlacedBuildPiece.cells carries 9 authored tile kinds (null = FLOOR_DEFAULT_CELL_KIND by material; resolveFloorCells/floorCellRects quarter-turn aware). bakeNavGrid is the FIRST producer for GAME_PATHING.publishGrid: one pure fold of painted 1m tiles (upsampled) + ground-level floor micro-cells + placedPieceColliders blocking, at 0.5m nav cells so a boundary wall blocks only the quarter-strips its slab covers (a per-cell grid cannot express a blocked edge). Door openings stay open with NO special case (collider bands already split); ramps/stairs stamp walkable links and are excluded from blocking (their bands ARE the slope); props block by DERIVATION (the dresser rule — move it, cells free); elevated pieces gate out until surface-nav. On GAME_WORLD. P4 navGrid.test.ts (8). NOT wired yet: live publish at play boot, the floor cell-painter UI, road decks, multi-level.',
+        'MICROGRID-0610 (user-ruled req_0518): a floor IS 3×3 tiles; PlacedBuildPiece.cells carries 9 authored tile kinds (null = FLOOR_DEFAULT_CELL_KIND by material; resolveFloorCells/floorCellRects quarter-turn aware). bakeNavGrid is the FIRST producer for GAME_PATHING.publishGrid: one pure fold of painted 1m tiles (upsampled) + ground-level floor micro-cells + placedPieceColliders blocking, at 0.5m nav cells so a boundary wall blocks only the quarter-strips its slab covers (a per-cell grid cannot express a blocked edge). Door openings stay open with NO special case (collider bands already split); ramps/stairs stamp walkable links and are excluded from blocking (their bands ARE the slope); props block by DERIVATION (the dresser rule — move it, cells free); elevated pieces gate out until surface-nav. On GAME_WORLD. P4 navGrid.test.ts (8). NOT wired yet: the floor cell-painter UI, road decks, multi-level.',
+      status: 'live',
+    },
+    {
+      name: 'game/world/navPublish.ts (THE LIVE NAV PUBLISH)',
+      purpose: ['ai_edit', 'game_loop', 'host_bridge'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/world/navPublish.ts',
+      description:
+        'NAVLIVE-0610: the live half of the nav bake — the active map (painted heightfield landform field.tiles + placed pieces) folds through bakeNavGrid and publishes to the host A* with the kind-table derivations riding along: navFlowTable (PATH_FLOW codes from each kind flow), navClassTable (junction/crosswalk = the lane-discipline opt-in), navProfileCosts (walker npc.walkCost / vehicle npc.vehicleCost, non-traversable -1). NAV_PROFILES {walker:0, vehicle:1}; vehicle sets laneOffset 1, againstFlow 8, crossFlow 2. THE HOST CAP: pathing.zig MAX_CELLS=16384 (mirrored PATHING_GRID_LIMITS) holds ~64×64m at the ruled 0.5m cells, so over-cap maps publish a square WINDOW centred on the player — reported in NavPublishResult.windowed, never silent; PlayRoute re-anchors when the player leaves the central half (1s poll) and re-publishes on worldGrid/pieces identity change. Raising MAX_CELLS host-side restores whole-map publish with no JS change. On GAME_WORLD (publishNavGrid/navProfiles). P4 navPublish.test.ts (7). NOT wired yet: a find() route consumer (NPC walkers / traffic).',
       status: 'live',
     },
     {
