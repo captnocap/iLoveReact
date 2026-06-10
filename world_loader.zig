@@ -27,10 +27,15 @@ const c = @import("framework/c.zig").imports;
 const gpu = @import("framework/gpu/gpu.zig");
 const capture = @import("framework/gpu/capture.zig");
 const scene3d = @import("framework/gpu/3d.zig");
+const material_tex = @import("framework/gpu/material_tex.zig");
 const layout = @import("framework/layout.zig");
 const Node = layout.Node;
 const constructor = @import("framework/world/constructor.zig");
 const game_physics = @import("framework/game/physics.zig");
+
+// Resolution of each materialized shader's 1-tile texture (the shader's canvas
+// is exactly one 1m tile; the face sampler REPEATS it across the surface).
+const MATERIAL_TILE_PX: u32 = 256;
 
 const WIN_W: c_int = 800;
 const WIN_H: c_int = 600;
@@ -344,7 +349,25 @@ const ShapeBatches = struct {
     }
 };
 
-fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize) !ShapeBatches {
+// One textured draw: the instance rows that wear material slot N, plus the key
+// the materialized shader is installed under (scene3d_tex_key). One instanced
+// mesh node per batch — the flat (material-less) rows stay in ShapeBatches.
+const MaterialBatch = struct {
+    boxes: []f32,
+    count: u32,
+    key: []u8,
+
+    pub fn deinit(self: MaterialBatch, allocator: std.mem.Allocator) void {
+        allocator.free(self.boxes);
+        allocator.free(self.key);
+    }
+};
+
+// Rows referencing a material (material_refs[row] != 0) are drawn TEXTURED in
+// their own per-material batch, so they're skipped here — the flat instanced
+// batch is the material-less remainder. `material_refs` may be empty (no
+// materials), in which case nothing is skipped.
+fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, material_refs: []const u32) !ShapeBatches {
     var boxes: std.ArrayList(f32) = .{};
     errdefer boxes.deinit(allocator);
     var ramps: std.ArrayList(f32) = .{};
@@ -353,6 +376,7 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     var ramp_count: u32 = 0;
     var row: usize = 0;
     while (row < @as(usize, @intCast(inst_count))) : (row += 1) {
+        if (row < material_refs.len and material_refs[row] != 0) continue; // textured batch
         const b = row * stride;
         const src = insts[b .. b + stride];
         if (isRampInstance(insts, row, stride)) {
@@ -369,6 +393,50 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         .ramps = try ramps.toOwnedSlice(allocator),
         .ramp_count = ramp_count,
     };
+}
+
+// Partition the material-referencing rows into one instanced batch per material
+// slot (the shaders themselves are run later, at first render — gpu isn't ready
+// at build time). The instance color is forced to white so the sampled shader
+// shows untinted (the bake leaves the fallback color on the row for hosts that
+// can't materialize). Empty when the map has no materials.
+fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, materials: []const constructor.Material, material_refs: []const u32) ![]MaterialBatch {
+    const mat_count = materials.len;
+    if (mat_count == 0 or material_refs.len == 0) return try allocator.alloc(MaterialBatch, 0);
+    var lists = try allocator.alloc(std.ArrayList(f32), mat_count);
+    defer allocator.free(lists);
+    for (lists) |*l| l.* = .{};
+    defer for (lists) |*l| l.deinit(allocator);
+
+    const color_off: usize = if (stride >= 12) 9 else 3;
+    var row: usize = 0;
+    while (row < @as(usize, @intCast(inst_count))) : (row += 1) {
+        const ref = if (row < material_refs.len) material_refs[row] else 0;
+        if (ref == 0 or ref > mat_count) continue;
+        const b = row * stride;
+        const start = lists[ref - 1].items.len;
+        try lists[ref - 1].appendSlice(allocator, insts[b .. b + stride]);
+        if (color_off + 2 < stride) {
+            lists[ref - 1].items[start + color_off + 0] = 1;
+            lists[ref - 1].items[start + color_off + 1] = 1;
+            lists[ref - 1].items[start + color_off + 2] = 1;
+        }
+    }
+
+    var batches = try allocator.alloc(MaterialBatch, mat_count);
+    var built: usize = 0;
+    errdefer {
+        for (batches[0..built]) |batch| batch.deinit(allocator);
+        allocator.free(batches);
+    }
+    while (built < mat_count) : (built += 1) {
+        const key = try std.fmt.allocPrint(allocator, "wmat-{d}", .{built});
+        errdefer allocator.free(key);
+        const count: u32 = @intCast(lists[built].items.len / stride);
+        const boxes = try lists[built].toOwnedSlice(allocator);
+        batches[built] = .{ .boxes = boxes, .count = count, .key = key };
+    }
+    return batches;
 }
 
 const Bounds = struct {
@@ -1050,6 +1118,10 @@ pub const Runtime = struct {
     ramp_slab: [36 * 8]f32 = undefined,
     shape_batches: ShapeBatches = undefined,
     has_shape_batches: bool = false,
+    // Per-material textured batches (geometry built at construct; the shaders are
+    // run into textures lazily by ensureMaterials at first render, once gpu is up).
+    material_batches: []MaterialBatch = &.{},
+    materials_ready: bool = false,
     player_geom_keys: std.ArrayList([]u8) = .{},
     kid_list: std.ArrayList(Node) = .{},
     root: Node = .{},
@@ -1099,9 +1171,27 @@ pub const Runtime = struct {
         try self.build();
     }
 
+    /// Run each face material's SHADER into its texture and install it under the
+    /// batch key (idempotent; needs gpu up, so it runs at first render not build).
+    /// A material that fails to materialize leaves its faces on the fallback color.
+    fn ensureMaterials(self: *Runtime) void {
+        if (self.materials_ready) return;
+        self.materials_ready = true;
+        for (self.scene.materials, 0..) |m, i| {
+            var buf: [32]u8 = undefined;
+            const key = std.fmt.bufPrint(&buf, "wmat-{d}", .{i}) catch continue;
+            if (!material_tex.materialize(key, m.wgsl, m.data, MATERIAL_TILE_PX))
+                log.print("[loader] material {d} not materialized — faces show fallback color\n", .{i});
+        }
+    }
+
     pub fn deinit(self: *Runtime) void {
         for (self.player_geom_keys.items) |key| self.allocator.free(key);
         self.player_geom_keys.deinit(self.allocator);
+        if (self.material_batches.len > 0) {
+            for (self.material_batches) |batch| batch.deinit(self.allocator);
+            self.allocator.free(self.material_batches);
+        }
         self.kid_list.deinit(self.allocator);
         if (self.has_shape_batches) self.shape_batches.deinit(self.allocator);
         if (self.has_physics_colliders) self.physics_colliders.deinit(self.allocator);
@@ -1185,8 +1275,12 @@ pub const Runtime = struct {
         };
         self.cube = buildCube();
         self.ramp_slab = buildRampSlab();
-        self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride);
+        self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.material_refs);
         self.has_shape_batches = true;
+        // The textured remainder: rows wearing a material, partitioned per slot.
+        // The shaders run at first render (gpu isn't up yet); the nodes carry the
+        // material key now so scene3d samples it once it's materialized.
+        self.material_batches = try buildMaterialBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.materials, self.scene.material_refs);
 
         try self.kid_list.append(self.allocator, .{
             .scene3d_camera = true,
@@ -1292,6 +1386,25 @@ pub const Runtime = struct {
             .scene3d_instance_stride = @intCast(self.stride),
             .scene3d_instance_static = true,
         });
+
+        // One TEXTURED instanced box batch per material: the same unit cube +
+        // instanced draw, but sampling the materialized shader via scene3d_tex_key
+        // (resolved once ensureMaterials runs at first render). Shares the interned
+        // "box" geometry — verts ride along so it stands alone if box_count is 0.
+        for (self.material_batches) |batch| {
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = batch.count > 0,
+                .scene3d_geom_key = "box",
+                .scene3d_vertices = self.cube[0..],
+                .scene3d_vert_count = 36,
+                .scene3d_instance_data = batch.boxes,
+                .scene3d_instance_count = batch.count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+                .scene3d_tex_key = batch.key,
+            });
+        }
+        if (self.scene.materials.len > 0) log.print("[loader] {d} face material(s) → {d} textured batch(es)\n", .{ self.scene.materials.len, self.material_batches.len });
 
         self.root = .{ .children = self.kid_list.items };
         updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, 0);
@@ -1522,6 +1635,7 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
         return false;
     };
     runtime.stepNow();
+    runtime.ensureMaterials();
     return scene3d.render(&runtime.root, x, y, w, h, opacity);
 }
 
@@ -1587,6 +1701,7 @@ pub fn main() !void {
     while (running) {
         runtime.pollStandaloneEvents(&running);
         runtime.stepNow();
+        runtime.ensureMaterials();
         _ = scene3d.render(&runtime.root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
         gpu.frame(0.52, 0.62, 0.74); // sky-ish clear so the ground reads against it
 

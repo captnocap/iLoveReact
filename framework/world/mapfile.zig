@@ -31,6 +31,11 @@ pub const LumpType = struct {
     pub const player_animation: u32 = 10;
     /// Baked regular-grid terrain heightfields.
     pub const heightfields: u32 = 11;
+    /// Material vocab: face shaders shipped as recipes (WGSL + data[]); the host
+    /// materializes them at load. See compile/worldGeometry.ts (encodeMaterials).
+    pub const materials: u32 = 12;
+    /// Per-instance-row material reference (1-based into materials; 0 = none).
+    pub const material_refs: u32 = 13;
 };
 
 pub const Lump = struct {

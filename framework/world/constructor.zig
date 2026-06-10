@@ -176,6 +176,20 @@ fn decodeEnvironment(data: []const u8) SceneEnv {
 /// floats per row (12 = pos3/rot3/scale3/color3). Empty when the game-file
 /// carries no instance lump (e.g. the codec round-trip fixture). Grows as more
 /// streams compose.
+/// A face material shipped as its RECIPE (GUIDING_LIGHT): a WGSL shader source
+/// plus its data[] params. The loader runs it once at load to a 1-tile texture
+/// (via a StaticSurface+Effect node) and samples it on the referencing faces —
+/// never baked pixels. See compile/worldGeometry.ts (encodeMaterials).
+pub const Material = struct {
+    wgsl: []u8,
+    data: []f32,
+
+    pub fn deinit(self: Material, allocator: std.mem.Allocator) void {
+        allocator.free(self.wgsl);
+        allocator.free(self.data);
+    }
+};
+
 pub const Scene = struct {
     width: u32,
     height: u32,
@@ -184,6 +198,12 @@ pub const Scene = struct {
     instance_count: u32,
     instance_stride: u32,
     has_instance_lump: bool,
+    /// Face material vocab (the shipped shader recipes). Empty when nothing is
+    /// material-skinned.
+    materials: []Material,
+    /// Per-instance-row material reference: 1-based into `materials` (0 = flat
+    /// color). Parallel to instance rows; empty when the lump is absent.
+    material_refs: []u32,
     /// The first `piece_count` instance rows are the PLACED PIECES (the city's
     /// structures); the rest are the painted ground. Lets the loader frame the
     /// camera on the city, not the whole 240m ground plane.
@@ -207,6 +227,9 @@ pub const Scene = struct {
         self.player_animation.deinit(allocator);
         for (self.heightfields) |field| field.deinit(allocator);
         allocator.free(self.heightfields);
+        for (self.materials) |material| material.deinit(allocator);
+        allocator.free(self.materials);
+        allocator.free(self.material_refs);
     }
 };
 
@@ -454,6 +477,55 @@ fn decodeHeightfields(allocator: std.mem.Allocator, data: []const u8) Error![]He
     return fields;
 }
 
+/// Decode the MATERIALS lump (u32 count, then per material: u32 wgsl byte len |
+/// wgsl utf8 | u32 data float count | f32[data]). A malformed lump yields an
+/// empty vocab (faces fall back to their flat color) rather than aborting.
+fn decodeMaterials(allocator: std.mem.Allocator, data: []const u8) Error![]Material {
+    if (data.len < 4) return try allocator.alloc(Material, 0);
+    const count = std.mem.readInt(u32, data[0..4], .little);
+    var out = try allocator.alloc(Material, count);
+    var built: usize = 0;
+    errdefer {
+        for (out[0..built]) |m| m.deinit(allocator);
+        allocator.free(out);
+    }
+    var at: usize = 4;
+    while (built < count) : (built += 1) {
+        if (at + 4 > data.len) return Error.BadHeightfields;
+        const wgsl_len = std.mem.readInt(u32, data[at..][0..4], .little);
+        at += 4;
+        if (at + wgsl_len > data.len) return Error.BadHeightfields;
+        const wgsl = try allocator.dupe(u8, data[at .. at + wgsl_len]);
+        errdefer allocator.free(wgsl);
+        at += wgsl_len;
+        if (at + 4 > data.len) {
+            allocator.free(wgsl);
+            return Error.BadHeightfields;
+        }
+        const data_len = std.mem.readInt(u32, data[at..][0..4], .little);
+        at += 4;
+        if (at + @as(usize, data_len) * 4 > data.len) {
+            allocator.free(wgsl);
+            return Error.BadHeightfields;
+        }
+        const params = try allocator.alloc(f32, data_len);
+        for (0..data_len) |i| params[i] = readF32(data, at + i * 4);
+        at += @as(usize, data_len) * 4;
+        out[built] = .{ .wgsl = wgsl, .data = params };
+    }
+    return out;
+}
+
+/// Decode the MATERIAL_REFS lump (u32 count | u32[count]). Empty when absent.
+fn decodeMaterialRefs(allocator: std.mem.Allocator, data: []const u8) Error![]u32 {
+    if (data.len < 4) return try allocator.alloc(u32, 0);
+    const count = std.mem.readInt(u32, data[0..4], .little);
+    if (4 + @as(usize, count) * 4 > data.len) return try allocator.alloc(u32, 0);
+    const out = try allocator.alloc(u32, count);
+    for (0..count) |i| out[i] = std.mem.readInt(u32, data[4 + i * 4 ..][0..4], .little);
+    return out;
+}
+
 fn streamReferences(stream: gamefile.Stream, key: u32) bool {
     for (stream.refs) |ref| {
         if (ref == key) return true;
@@ -526,6 +598,21 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     else
         try allocator.alloc(HeightfieldMesh, 0);
 
+    // Face materials: the shipped shader recipes + the per-row reference into
+    // them (both optional — absent on a map with no material-skinned faces).
+    const materials = if (mapfile.findLump(map_lumps, mapfile.LumpType.materials)) |lump|
+        try decodeMaterials(allocator, lump.data)
+    else
+        try allocator.alloc(Material, 0);
+    errdefer {
+        for (materials) |m| m.deinit(allocator);
+        allocator.free(materials);
+    }
+    const material_refs = if (mapfile.findLump(map_lumps, mapfile.LumpType.material_refs)) |lump|
+        try decodeMaterialRefs(allocator, lump.data)
+    else
+        try allocator.alloc(u32, 0);
+
     // grid.values ownership transfers to the Scene; do not deinit grid.
     return .{
         .width = grid.width,
@@ -540,5 +627,7 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .player_model = player_model,
         .player_animation = player_animation,
         .heightfields = heightfields,
+        .materials = materials,
+        .material_refs = material_refs,
     };
 }

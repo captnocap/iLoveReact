@@ -192,6 +192,10 @@ const Instance = struct {
     render_fn: ?RenderFn = null, // custom render path
     shader_desc: ?GpuShaderDesc = null, // optional GPU path for custom effects
     node_key: usize = 0, // stable identity for custom effects
+    // Node-less keyed identity: a material shader materialized via
+    // renderShaderToTexture (no React node drives it). node_key holds the
+    // content-hash key; this flag disambiguates from pointer-derived node keys.
+    is_material: bool = false,
     name: ?[]const u8 = null, // user-assigned name for referencing as fill source
 
     // Registry path state
@@ -1345,6 +1349,42 @@ fn createCustomInstance(node: *const Node) ?*Instance {
     };
     instance_count += 1;
     return inst;
+}
+
+/// Get-or-create the node-less instance for a materialized shader, keyed by a
+/// content hash (no React node drives it).
+fn ensureMaterialInstance(key_hash: u64) ?*Instance {
+    const nk: usize = @intCast(key_hash);
+    var i: usize = 0;
+    while (i < instance_count) : (i += 1) {
+        if (instances[i].is_material and instances[i].node_key == nk) return &instances[i];
+    }
+    if (instance_count >= MAX_INSTANCES) return null;
+    const inst = &instances[instance_count];
+    inst.* = .{ .active = true, .is_material = true, .node_key = nk };
+    instance_count += 1;
+    return inst;
+}
+
+/// Materialize a SHADER (raw WGSL + `data[]` storage params) into a GPU texture
+/// STANDALONE — outside the paint loop, callable at load. Reuses the custom-
+/// effect GPU path (compile → size → render); `renderGpu` owns its command
+/// encoder so no frame is required. Returns the rendered texture's view (effects
+/// retains ownership, cached by `key_hash` for the host's lifetime). The shared
+/// shader→texture primitive (gpu/material_tex.zig) wraps this with the surface
+/// install so 3D faces sample it via scene3d_tex_key.
+pub fn renderShaderToTexture(key_hash: u64, wgsl: []const u8, data: ?[]const f32, size: u32) ?*wgpu.TextureView {
+    const inst = ensureMaterialInstance(key_hash) orelse return null;
+    inst.active = true;
+    inst.backend = .gpu;
+    inst.last_painted_frame = g_effect_frame;
+    inst.shader_desc = .{ .wgsl = wgsl };
+    inst.gpu_data_pending = data;
+    inst.setDisplaySize(@floatFromInt(size), @floatFromInt(size));
+    if (!ensureGpuSize(inst, size, size)) return null;
+    if (!ensureGpuPipeline(inst)) return null;
+    if (!renderGpu(inst)) return null;
+    return inst.texture_view;
 }
 
 fn findInstanceByName(effect_name: []const u8) ?*Instance {

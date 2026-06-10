@@ -785,6 +785,11 @@ const StaticSurfaceEntry = struct {
     is_filter: bool = false,
     filter_uniform_buf: ?*wgpu.Buffer = null,
     filter_bind_group: ?*wgpu.BindGroup = null,
+    // BORROWED view: an externally-owned texture (a materialized shader from
+    // effects) installed via installStaticSurfaceView. This entry samples it but
+    // never frees it — its owner does. Only the sampler / 3D bind group below
+    // are this entry's to release.
+    borrowed: bool = false,
 };
 
 const StaticSurfaceCapture = struct {
@@ -858,14 +863,20 @@ fn releaseStaticResources(entry: *StaticSurfaceEntry) void {
     if (entry.bind_group_3d) |bg| bg.release();
     if (entry.bind_group) |bg| bg.release();
     if (entry.sampler) |sampler| sampler.release();
-    if (entry.view) |view| view.release();
-    if (entry.texture) |texture| texture.release();
+    // A borrowed view/texture is owned elsewhere (effects' material instance) —
+    // free only the resources this entry created (sampler + bind groups above).
+    if (!entry.borrowed) {
+        if (entry.view) |view| view.release();
+        if (entry.texture) |texture| texture.release();
+    }
     entry.filter_bind_group = null;
     entry.filter_uniform_buf = null;
+    entry.bind_group_3d = null;
     entry.bind_group = null;
     entry.sampler = null;
     entry.view = null;
     entry.texture = null;
+    entry.borrowed = false;
     entry.ready = false;
 }
 
@@ -1049,6 +1060,50 @@ pub fn staticSurfaceBindGroup3D(key: []const u8) ?*wgpu.BindGroup {
     return entry.bind_group_3d;
 }
 
+/// Install an externally-owned texture `view` as the StaticSurface keyed `key`,
+/// so a 3D mesh with scene3d_tex_key=key samples it (via staticSurfaceBindGroup3D
+/// above). The view is BORROWED — its owner (effects' materialized shader) frees
+/// it; this entry only owns the sampler + the lazily-built 3D bind group. The
+/// sampler REPEATS so a 1-tile material look tiles across a face. This is the
+/// install half of the shared shader→texture primitive (gpu/material_tex.zig).
+pub fn installStaticSurfaceView(key: []const u8, view: *wgpu.TextureView, width: u32, height: u32) bool {
+    const device = g_device orelse return false;
+    const hash = staticKeyHash(key);
+    const key_len = key.len;
+    const idx = findStaticEntry(hash, key_len) orelse blk: {
+        for (g_static_entries[0..], 0..) |entry, i| {
+            if (!entry.active) {
+                g_static_entries[i] = .{ .key_hash = hash, .key_len = key_len, .active = true };
+                break :blk i;
+            }
+        }
+        return false; // pool full
+    };
+    const entry = &g_static_entries[idx];
+    if (entry.borrowed and entry.view == view and entry.sampler != null) return true; // already installed
+    releaseStaticResources(entry);
+    entry.key_hash = hash;
+    entry.key_len = key_len;
+    const sample_len = @min(key_len, entry.key_sample.len);
+    @memset(&entry.key_sample, 0);
+    if (sample_len > 0) @memcpy(entry.key_sample[0..sample_len], key[0..sample_len]);
+    entry.key_sample_len = @intCast(sample_len);
+    entry.width = width;
+    entry.height = height;
+    entry.active = true;
+    const sampler = device.createSampler(&.{
+        .address_mode_u = .repeat,
+        .address_mode_v = .repeat,
+        .mag_filter = .linear,
+        .min_filter = .linear,
+    }) orelse return false;
+    entry.view = view; // borrowed
+    entry.sampler = sampler;
+    entry.borrowed = true;
+    entry.ready = true;
+    return true;
+}
+
 pub fn beginStaticSurfaceCapture(key: []const u8, x: f32, y: f32, width_f: f32, height_f: f32, opacity: f32, intro_frames: u16, scale_f: f32) ?StaticSurfaceToken {
     const width = staticDim(width_f, scale_f);
     const height = staticDim(height_f, scale_f);
@@ -1207,6 +1262,17 @@ var g_force_full_upload: bool = true;
 
 const DRAIN_INTERVAL: u64 = 36000; // ~10 minutes at 60fps
 var g_frame_counter: u64 = 0;
+
+// Per-frame present/vsync wait (swapchain acquire + present). Reset at the top
+// of frame(), accumulated around the two blocking calls. Read by telemetry
+// after frame() returns. The spikewatch reports this as the real vblank wait.
+var g_present_wait_us: u64 = 0;
+
+/// Microseconds spent this frame waiting on the compositor (swapchain acquire +
+/// present). A subset of gpu_us. Valid after frame() returns for the frame.
+pub fn presentWaitUs() u64 {
+    return g_present_wait_us;
+}
 
 /// Combined hash from all pipelines for dirty checking.
 fn frameDataHash() u64 {
@@ -1837,6 +1903,12 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     if (g_frame_counter % DRAIN_INTERVAL == 0) drainMemory();
     filters.frameReset();
 
+    // Reset the per-frame present/vsync-wait accumulator. We time the two points
+    // where the compositor can block us — swapchain acquire and present — so the
+    // spikewatch reports the real vblank wait instead of inferring it from a
+    // small CPU phase. (This wait is a subset of gpu_us, not of "other".)
+    g_present_wait_us = 0;
+
     // Acquire the render-target view: the swapchain's current texture in
     // windowed mode, or the persistent offscreen texture in KMS mode (which
     // is read back and scanned out via DRM after the frame).
@@ -1846,7 +1918,9 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     const view: *wgpu.TextureView = blk: {
         if (g_kms) break :blk g_offscreen_view orelse return;
         const surface = g_surface orelse return;
+        const acquire_t0 = std.time.microTimestamp();
         surface.getCurrentTexture(&surface_texture);
+        g_present_wait_us += @intCast(@max(0, std.time.microTimestamp() - acquire_t0));
         if (surface_texture.status != .success_optimal and surface_texture.status != .success_suboptimal) {
             if (surface_texture.texture) |t| t.release();
             if (g_width > 0 and g_height > 0) configureSurface(g_width, g_height);
@@ -2090,7 +2164,11 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         // No swapchain — read back the offscreen texture and scan it out via DRM.
         presentKms();
     } else if (!is_web) {
-        if (g_surface) |s| _ = s.present();
+        if (g_surface) |s| {
+            const present_t0 = std.time.microTimestamp();
+            _ = s.present();
+            g_present_wait_us += @intCast(@max(0, std.time.microTimestamp() - present_t0));
+        }
     }
 
     // Release deferred 3D render targets after image compositing, before reset
