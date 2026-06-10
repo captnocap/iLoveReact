@@ -10,10 +10,10 @@
 //! encoded data -> stateless engine -> rendered 3D frame, no JS.
 //!
 //! The world's geometry rides as a packed instance buffer (the INSTANCES map
-//! lump): every authored object — region, road, prop, building, landform — is
-//! one box instance. The host expands the whole batch with a single interned
-//! unit-cube geometry and one instanced draw. 3D is the ONLY path — there is no
-//! 2D tile grid and no flag to gate it.
+//! lump): authored objects lower to keyed primitive instances. Boxes are the
+//! common path; ramps, cylinders, and spheres carry semantic prop/build shapes
+//! without reintroducing JS. 3D is the ONLY path — there is no 2D tile grid and
+//! no flag to gate it.
 //!
 //! Build:
 //!   zig build app -Dapp-name=world_loader -Dapp-source=world_loader.zig \
@@ -49,6 +49,9 @@ const MAX_FRAMES: u32 = 600;
 const INSTANCE_STRIDE: usize = 12;
 const SHAPE_BOX: f32 = 0;
 const SHAPE_RAMP: f32 = 1;
+const SHAPE_CYLINDER8: f32 = 2;
+const SHAPE_CYLINDER16: f32 = 3;
+const SHAPE_SPHERE: f32 = 4;
 const SCAN_A: usize = 4;
 const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
@@ -325,6 +328,73 @@ fn buildRampSlab() [36 * 8]f32 {
     return out;
 }
 
+fn spherePos(radius: f32, theta: f32, phi: f32) [3]f32 {
+    const st = @sin(theta);
+    return .{ radius * st * @cos(phi), radius * @cos(theta), radius * st * @sin(phi) };
+}
+
+fn sphereNormal(theta: f32, phi: f32) [3]f32 {
+    const st = @sin(theta);
+    return .{ st * @cos(phi), @cos(theta), st * @sin(phi) };
+}
+
+fn sphereUv(n: [3]f32) [2]f32 {
+    return .{ (n[0] + 1.0) * 0.5, (1.0 - n[1]) * 0.5 };
+}
+
+fn buildUnitSphere(comptime segments: usize, comptime rings: usize) [segments * rings * 6 * 8]f32 {
+    var out: [segments * rings * 6 * 8]f32 = undefined;
+    var idx: usize = 0;
+    var i: usize = 0;
+    while (i < rings) : (i += 1) {
+        const t1 = std.math.pi * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(rings));
+        const t2 = std.math.pi * @as(f32, @floatFromInt(i + 1)) / @as(f32, @floatFromInt(rings));
+        var j: usize = 0;
+        while (j < segments) : (j += 1) {
+            const p1 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(segments));
+            const p2 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j + 1)) / @as(f32, @floatFromInt(segments));
+            const a = spherePos(0.5, t1, p1);
+            const b = spherePos(0.5, t1, p2);
+            const c0 = spherePos(0.5, t2, p2);
+            const d = spherePos(0.5, t2, p1);
+            const na = sphereNormal(t1, p1);
+            const nb = sphereNormal(t1, p2);
+            const nc = sphereNormal(t2, p2);
+            const nd = sphereNormal(t2, p1);
+            pushTri(out[0..], &idx, a, c0, d, na, sphereUv(na), sphereUv(nc), sphereUv(nd));
+            pushTri(out[0..], &idx, a, b, c0, na, sphereUv(na), sphereUv(nb), sphereUv(nc));
+        }
+    }
+    return out;
+}
+
+fn buildUnitCylinder(comptime segments: usize) [segments * 12 * 8]f32 {
+    var out: [segments * 12 * 8]f32 = undefined;
+    var idx: usize = 0;
+    const radius: f32 = 0.5;
+    const hy: f32 = 0.5;
+    var j: usize = 0;
+    while (j < segments) : (j += 1) {
+        const a1 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(segments));
+        const a2 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j + 1)) / @as(f32, @floatFromInt(segments));
+        const c1 = @cos(a1);
+        const s1 = @sin(a1);
+        const c2 = @cos(a2);
+        const s2 = @sin(a2);
+        const a = [3]f32{ radius * c1, -hy, radius * s1 };
+        const b = [3]f32{ radius * c2, -hy, radius * s2 };
+        const c0 = [3]f32{ radius * c2, hy, radius * s2 };
+        const d = [3]f32{ radius * c1, hy, radius * s1 };
+        const n1 = [3]f32{ c1, 0, s1 };
+        const n2 = [3]f32{ c2, 0, s2 };
+        pushTri(out[0..], &idx, a, d, c0, n1, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 1 });
+        pushTri(out[0..], &idx, a, c0, b, n2, .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 });
+        pushTri(out[0..], &idx, .{ 0, hy, 0 }, c0, d, .{ 0, 1, 0 }, .{ 0.5, 0.5 }, .{ 1, 1 }, .{ 0, 1 });
+        pushTri(out[0..], &idx, .{ 0, -hy, 0 }, a, b, .{ 0, -1, 0 }, .{ 0.5, 0.5 }, .{ 0, 0 }, .{ 1, 0 });
+    }
+    return out;
+}
+
 /// Fallback geometry for a game-file with no instance buffer: extrude each
 /// non-null tile into one box instance (stride 9: pos3/scale3/color3). Heap-
 /// owned; the caller frees it after the frame loop.
@@ -352,10 +422,19 @@ const ShapeBatches = struct {
     box_count: u32,
     ramps: []f32,
     ramp_count: u32,
+    cylinder8s: []f32,
+    cylinder8_count: u32,
+    cylinder16s: []f32,
+    cylinder16_count: u32,
+    spheres: []f32,
+    sphere_count: u32,
 
     pub fn deinit(self: ShapeBatches, allocator: std.mem.Allocator) void {
         allocator.free(self.boxes);
         allocator.free(self.ramps);
+        allocator.free(self.cylinder8s);
+        allocator.free(self.cylinder16s);
+        allocator.free(self.spheres);
     }
 };
 
@@ -384,16 +463,35 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     errdefer boxes.deinit(allocator);
     var ramps: std.ArrayList(f32) = .{};
     errdefer ramps.deinit(allocator);
+    var cylinder8s: std.ArrayList(f32) = .{};
+    errdefer cylinder8s.deinit(allocator);
+    var cylinder16s: std.ArrayList(f32) = .{};
+    errdefer cylinder16s.deinit(allocator);
+    var spheres: std.ArrayList(f32) = .{};
+    errdefer spheres.deinit(allocator);
     var box_count: u32 = 0;
     var ramp_count: u32 = 0;
+    var cylinder8_count: u32 = 0;
+    var cylinder16_count: u32 = 0;
+    var sphere_count: u32 = 0;
     var row: usize = 0;
     while (row < @as(usize, @intCast(inst_count))) : (row += 1) {
         if (row < material_refs.len and material_refs[row] != 0) continue; // textured batch
         const b = row * stride;
         const src = insts[b .. b + stride];
-        if (isRampInstance(insts, row, stride)) {
+        const shape = instanceShapeId(insts, row, stride);
+        if (@abs(shape - SHAPE_RAMP) < 0.5) {
             try ramps.appendSlice(allocator, src);
             ramp_count += 1;
+        } else if (@abs(shape - SHAPE_CYLINDER8) < 0.5) {
+            try cylinder8s.appendSlice(allocator, src);
+            cylinder8_count += 1;
+        } else if (@abs(shape - SHAPE_CYLINDER16) < 0.5) {
+            try cylinder16s.appendSlice(allocator, src);
+            cylinder16_count += 1;
+        } else if (@abs(shape - SHAPE_SPHERE) < 0.5) {
+            try spheres.appendSlice(allocator, src);
+            sphere_count += 1;
         } else {
             try boxes.appendSlice(allocator, src);
             box_count += 1;
@@ -404,6 +502,12 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         .box_count = box_count,
         .ramps = try ramps.toOwnedSlice(allocator),
         .ramp_count = ramp_count,
+        .cylinder8s = try cylinder8s.toOwnedSlice(allocator),
+        .cylinder8_count = cylinder8_count,
+        .cylinder16s = try cylinder16s.toOwnedSlice(allocator),
+        .cylinder16_count = cylinder16_count,
+        .spheres = try spheres.toOwnedSlice(allocator),
+        .sphere_count = sphere_count,
     };
 }
 
@@ -1355,12 +1459,24 @@ pub const Runtime = struct {
     piece_count: u32 = 0,
     physics_colliders: PhysicsColliders = undefined,
     has_physics_colliders: bool = false,
+    // The CAMERA spring-arm always steps against the FULL baked authored wall/roof
+    // colliders, never the per-frame windowed/instance-derived physics set. On a
+    // huge map (spatial windowing ON) the physics set is re-derived from render
+    // instances and capped (MAX_ORIENTED=256), which silently DROPS yawed building
+    // walls near the player — the camera then buries inside a building it can't see.
+    // Keeping a dedicated unclamped baked buffer for the camera means "see myself
+    // against the building" works at any world scale (req_0407/0420). Null on a
+    // pre-lump bake (no baked_colliders) — the camera falls back to physics_colliders.
+    camera_colliders: ?PhysicsColliders = null,
     // Spatial collider windowing: enabled only when the full collider set overflows
     // MAX_RECTS (a huge --massive map), so normal maps keep their static full set.
     windowed: bool = false,
     grid: ?SpatialGrid = null,
     cube: [36 * 8]f32 = undefined,
     ramp_slab: [36 * 8]f32 = undefined,
+    cylinder8: [8 * 12 * 8]f32 = undefined,
+    cylinder16: [16 * 12 * 8]f32 = undefined,
+    sphere: [12 * 8 * 6 * 8]f32 = undefined,
     shape_batches: ShapeBatches = undefined,
     has_shape_batches: bool = false,
     // Per-material textured batches (geometry built at construct; the shaders are
@@ -1456,6 +1572,7 @@ pub const Runtime = struct {
         self.stream_protos.deinit(self.allocator);
         if (self.has_shape_batches) self.shape_batches.deinit(self.allocator);
         if (self.has_physics_colliders) self.physics_colliders.deinit(self.allocator);
+        if (self.camera_colliders) |cam_cols| cam_cols.deinit(self.allocator);
         if (self.grid) |g| g.deinit(self.allocator);
         if (self.fallback) |f| self.allocator.free(f);
         self.scene.deinit(self.allocator);
@@ -1486,6 +1603,28 @@ pub const Runtime = struct {
         log.print("[loader] built {d} physics rects + {d} oriented physics rects + {d} heightfields\n", .{ self.physics_colliders.rect_count, self.physics_colliders.oriented_count, self.physics_colliders.heightfield_count });
         if (self.physics_colliders.clipped_rows > 0) {
             log.print("[loader] physics collider cap clipped {d} rendered instance rows\n", .{self.physics_colliders.clipped_rows});
+        }
+        // The camera's own collider set: the FULL baked authored rects/oriented,
+        // unclamped, packed in cameraOcclusionStepColliders wire order. Built once
+        // and queried every frame by springArmEye regardless of physics windowing,
+        // so a yawed building wall the windowed physics set drops is still seen by
+        // the spring-arm and the eye is pushed to the player's side of it.
+        if (self.scene.baked_colliders) |bc| {
+            const rect_floats = bc.rects.len;
+            const oriented_floats = bc.oriented.len;
+            if (self.allocator.alloc(f32, game_physics.INPUT_HEADER_FLOATS + rect_floats + oriented_floats)) |buf| {
+                @memset(buf, 0);
+                @memcpy(buf[game_physics.INPUT_HEADER_FLOATS .. game_physics.INPUT_HEADER_FLOATS + rect_floats], bc.rects);
+                @memcpy(buf[game_physics.INPUT_HEADER_FLOATS + rect_floats ..], bc.oriented);
+                self.camera_colliders = .{
+                    .values = buf,
+                    .rect_count = @intCast(bc.rect_count),
+                    .oriented_count = @intCast(bc.oriented_count),
+                    .heightfield_count = 0,
+                    .clipped_rows = 0,
+                };
+                log.print("[loader] camera spring-arm collider set: {d} baked rects + {d} oriented (full, unclamped)\n", .{ bc.rect_count, bc.oriented_count });
+            } else |_| {}
         }
 
         const env = self.scene.env;
@@ -1532,9 +1671,10 @@ pub const Runtime = struct {
                 const sb: usize = if (self.stride >= 12) 6 else 3;
                 const b = row * self.stride;
                 log.print("[loader] spawn-col row={d} piece={} pos=({d:.1},{d:.2},{d:.1}) scale=({d:.1},{d:.2},{d:.1}) yaw={d:.2}\n", .{
-                    row, row < @as(usize, @intCast(self.piece_count)),
-                    self.insts[b + 0], self.insts[b + 1], self.insts[b + 2],
-                    self.insts[b + sb + 0], self.insts[b + sb + 1], self.insts[b + sb + 2],
+                    row,                                              row < @as(usize, @intCast(self.piece_count)),
+                    self.insts[b + 0],                                self.insts[b + 1],
+                    self.insts[b + 2],                                self.insts[b + sb + 0],
+                    self.insts[b + sb + 1],                           self.insts[b + sb + 2],
                     instanceYawRadians(self.insts, row, self.stride),
                 });
             }
@@ -1566,6 +1706,9 @@ pub const Runtime = struct {
         };
         self.cube = buildCube();
         self.ramp_slab = buildRampSlab();
+        self.cylinder8 = buildUnitCylinder(8);
+        self.cylinder16 = buildUnitCylinder(16);
+        self.sphere = buildUnitSphere(12, 8);
         self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.material_refs);
         self.has_shape_batches = true;
         // The textured remainder: rows wearing a material, partitioned per slot.
@@ -1710,6 +1853,36 @@ pub const Runtime = struct {
                 .scene3d_instance_stride = @intCast(self.stride),
                 .scene3d_instance_static = true,
             });
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.cylinder8_count > 0,
+                .scene3d_geom_key = "cylinder8",
+                .scene3d_vertices = self.cylinder8[0..],
+                .scene3d_vert_count = 8 * 12,
+                .scene3d_instance_data = self.shape_batches.cylinder8s,
+                .scene3d_instance_count = self.shape_batches.cylinder8_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.cylinder16_count > 0,
+                .scene3d_geom_key = "cylinder16",
+                .scene3d_vertices = self.cylinder16[0..],
+                .scene3d_vert_count = 16 * 12,
+                .scene3d_instance_data = self.shape_batches.cylinder16s,
+                .scene3d_instance_count = self.shape_batches.cylinder16_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.sphere_count > 0,
+                .scene3d_geom_key = "sphere12x8",
+                .scene3d_vertices = self.sphere[0..],
+                .scene3d_vert_count = 12 * 8 * 6,
+                .scene3d_instance_data = self.shape_batches.spheres,
+                .scene3d_instance_count = self.shape_batches.sphere_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
         }
 
         // Per material: a SHADER material draws as one TEXTURED instanced box batch
@@ -1770,7 +1943,7 @@ pub const Runtime = struct {
         }
 
         self.root = .{ .children = self.kid_list.items };
-        updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, if (self.has_physics_colliders) self.physics_colliders else null, 0);
+        updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, self.cameraColliderSet(), 0);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, false, false, false);
         // Seed the bubble at spawn and assemble the first draw tail — the very
         // first rendered frame already streams (the camera was just solved).
@@ -1792,6 +1965,12 @@ pub const Runtime = struct {
         try self.stream_protos.append(self.allocator, .{ .geom_key = "box", .verts = self.cube[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.ramps, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "ramp-slab", .verts = self.ramp_slab[0..], .tex_key = null });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.cylinder8s, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "cylinder8", .verts = self.cylinder8[0..], .tex_key = null });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.cylinder16s, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "cylinder16", .verts = self.cylinder16[0..], .tex_key = null });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.spheres, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "sphere12x8", .verts = self.sphere[0..], .tex_key = null });
         for (self.material_batches) |batch| {
             if (batch.translucent or batch.count == 0) continue;
             try fams.append(self.allocator, .{ .rows = batch.boxes, .stride = @intCast(self.stride) });
@@ -2019,6 +2198,16 @@ pub const Runtime = struct {
         self.physics_colliders.clipped_rows = clipped;
     }
 
+    /// The collider set the camera spring-arm steps against: the FULL baked
+    /// authored walls when we have them (so the eye is pushed out of every
+    /// authored building regardless of the per-frame physics windowing), else
+    /// the live physics set (pre-lump bakes have no baked colliders).
+    fn cameraColliderSet(self: *const Runtime) ?PhysicsColliders {
+        if (self.camera_colliders) |cam_cols| return cam_cols;
+        if (self.has_physics_colliders) return self.physics_colliders;
+        return null;
+    }
+
     pub fn stepNow(self: *Runtime) void {
         const ns = nowNs();
         const dt = clamp(@as(f32, @floatFromInt(ns - self.last_ns)) / 1_000_000_000.0, 0.001, 0.05);
@@ -2047,7 +2236,7 @@ pub const Runtime = struct {
         const airborne = !self.player.grounded or @abs(self.player.vy) > 0.05;
         updatePlayerAnimationClock(&self.player, dt, moving, run_down, airborne);
 
-        updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, if (self.has_physics_colliders) self.physics_colliders else null, dt);
+        updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, self.cameraColliderSet(), dt);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
         // Re-stream the world around wherever the player ended up this step
         // (uses the camera solved just above for sight culling).
