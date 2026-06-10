@@ -8,7 +8,10 @@ import { emptyDecalDoc } from '../game/textures/decal';
 import { packDecalDoc } from './decalPack';
 import {
   buildWorldInstances,
+  encodeFloorHeightfields,
   encodeMaterials,
+  floorHasRoadRibbon,
+  floorNeedsHeightfieldRender,
   INSTANCE_SHAPE_BOX,
   INSTANCE_STRIDE,
   MATERIALS_DOC_TAIL_MAGIC,
@@ -118,6 +121,27 @@ test('decal materials ship their packed RECIPE in the MATERIALS lump tail', () =
 test('materials without docs encode with no tail (the pre-decal byte layout)', () => {
   const lump = encodeMaterials([{ key: 'flat:glass', wgsl: '', data: [], opacity: 0.3 }]);
   assertEqual(lump.byteLength, 4 + 12, 'count + one empty-recipe material, nothing appended');
+});
+
+test('a FLAT road-bearing floor renders through the textured heightfield path, not box slabs (RIBBONBAKE-0610)', () => {
+  // A flat chunk (no height relief) carrying a road ribbon: the editor draws the
+  // analytic ribbon, so the compiled game must too — by shipping a textured
+  // heightfield quad rather than per-cell flat box slabs (which can only show the
+  // blocky stamped tile colours). This pins the routing predicate + lump count.
+  const cols = 8;
+  const tileData = [cols, cols, 1, 0.4, 0.4, 0.4];
+  for (let i = 0; i < cols * cols; i += 1) tileData.push(0);
+  const flatNoRoad = { cx: 0, cz: 0, tileData, heights: [0, 0, 0, 0], hcols: 2, hrows: 2, hver: 1 };
+  // 8 floats = one ribbon segment (ax az bx bz rExt lExt twoWay phase).
+  const flatRoad = { ...flatNoRoad, roads: [4.5, 0, 4.5, 8, 3.5, 3.5, 1, 3.5] };
+
+  assert(!floorNeedsHeightfieldRender(flatNoRoad), 'a flat floor with no road stays on the box-slab path');
+  assert(floorHasRoadRibbon(flatRoad), 'a floor carrying at least one ribbon segment reports a road');
+  assert(floorNeedsHeightfieldRender(flatRoad), 'a flat road floor routes to the textured heightfield path');
+
+  const lump = encodeFloorHeightfields([flatNoRoad, flatRoad]);
+  const view = new DataView(lump.buffer);
+  assertEqual(view.getUint32(4, true), 1, 'only the road-bearing flat chunk emits a heightfield render record');
 });
 
 finish('compile/world-geometry');

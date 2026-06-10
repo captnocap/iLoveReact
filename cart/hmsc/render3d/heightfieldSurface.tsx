@@ -134,6 +134,115 @@ export const HEIGHTFIELD_TILE_SHADER = `
 }
 `;
 
+function smoothstep01(e0: number, e1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+}
+
+// CPU MIRROR of HEIGHTFIELD_TILE_SHADER's fragment function (RIBBONBAKE-0610).
+// The compiled game ships a BAKED floor texture — it cannot run this Effect at
+// load — so the editor's LIVE ribbon and the game's baked floor only match if
+// the SAME fragment logic produces both. This walks the exact array the shader
+// reads (heightfieldTileData(tiles, roads) — or its prefix-compatible twin
+// [...encodeTileMap output, ...roadRibbonSection(roads)]); (u,v) ∈ [0,1] is the
+// texel UV. Returns linear rgb. KEEP IN LOCKSTEP WITH THE WGSL ABOVE — any edit
+// to the shader's ribbon/curb math must land here too, or the game drifts from
+// the editor again (the very bug this closes).
+export function heightfieldTexelColor(data: number[], u: number, v: number): [number, number, number] {
+  const cols = data[0] | 0;
+  const rows = data[1] | 0;
+  const pal = data[2] | 0;
+  const cellBase = 3 + pal * 3;
+
+  const cxi = Math.max(0, Math.min(cols - 1, Math.floor(u * cols)));
+  const cyi = Math.max(0, Math.min(rows - 1, Math.floor(v * rows)));
+  const kind = data[cellBase + cyi * cols + cxi] | 0;
+
+  const px = u * cols;
+  const py = v * rows;
+  const edge = Math.max(Math.abs(px - Math.floor(px) - 0.5), Math.abs(py - Math.floor(py) - 0.5));
+
+  let r: number;
+  let g: number;
+  let b: number;
+  if (kind < 0) {
+    const gg = smoothstep01(0.46, 0.5, edge) * 0.07;
+    r = 0.05 + gg; g = 0.07 + gg; b = 0.1 + gg;
+  } else {
+    const pbase = 3 + kind * 3;
+    const shade = 1 + (0.78 - 1) * smoothstep01(0.44, 0.5, edge);
+    r = data[pbase] * shade; g = data[pbase + 1] * shade; b = data[pbase + 2] * shade;
+  }
+
+  const cellEnd = cellBase + rows * cols;
+  if (cellEnd + 5 <= data.length) {
+    const segN = data[cellEnd] | 0;
+    const cwIdx = data[cellEnd + 1] | 0;
+    const jIdx = data[cellEnd + 2] | 0;
+    const laneIdx = data[cellEnd + 3] | 0;
+    const medIdx = data[cellEnd + 4] | 0;
+    if (segN > 0 && kind !== cwIdx) {
+      let bestD = 1e9;
+      let signedD = 0;
+      let rExt = 0;
+      let lExt = 0;
+      let twoWay = 0;
+      let phase = 0;
+      let along = 0;
+      for (let s = 0; s < segN; s += 1) {
+        const b0 = cellEnd + 5 + s * 8;
+        const ax = data[b0];
+        const az = data[b0 + 1];
+        const abx = data[b0 + 2] - ax;
+        const abz = data[b0 + 3] - az;
+        const len2 = abx * abx + abz * abz;
+        let t = 0;
+        if (len2 > 1e-6) t = Math.max(0, Math.min(1, ((px - ax) * abx + (py - az) * abz) / len2));
+        const qx = ax + abx * t;
+        const qz = az + abz * t;
+        const d = Math.hypot(px - qx, py - qz);
+        if (d < bestD) {
+          bestD = d;
+          const rl = Math.hypot(abx, abz) || 1;
+          signedD = (px - qx) * (-abz / rl) + (py - qz) * (abx / rl);
+          rExt = data[b0 + 4];
+          lExt = data[b0 + 5];
+          twoWay = data[b0 + 6];
+          phase = data[b0 + 7];
+          along = t * Math.sqrt(len2);
+        }
+      }
+      const overshoot2 = bestD * bestD - signedD * signedD;
+      if (bestD < 1e8 && signedD < rExt && signedD > -lExt && overshoot2 < 0.25) {
+        let cr = 0.118;
+        let cg = 0.129;
+        let cb = 0.157;
+        const ad = Math.abs(signedD);
+        if (kind !== jIdx) {
+          if (twoWay > 0.5 && Math.abs(ad - 0.17) < 0.07) { cr = 0.76; cg = 0.6; cb = 0.11; }
+          const k = Math.floor((ad - phase) / 3 + 0.5);
+          const boundary = phase + k * 3;
+          const maxExt = Math.max(rExt, lExt);
+          if (k >= 0 && Math.abs(ad - boundary) < 0.06 && boundary < maxExt - 1 && (boundary > 0.3 || phase < 0.1)) {
+            const af = along / 6;
+            if (af - Math.floor(af) < 0.5) { cr = 0.82; cg = 0.84; cb = 0.86; }
+          }
+          const extHere = signedD >= 0 ? rExt : lExt;
+          if (extHere - ad < 0.28 && extHere - ad > 0.14) { cr = 0.82; cg = 0.84; cb = 0.86; }
+        }
+        r = cr; g = cg; b = cb;
+      } else {
+        const isLane = kind >= laneIdx && kind < laneIdx + 4;
+        if (isLane || kind === jIdx || kind === medIdx) {
+          const shade2 = 1 + (0.9 - 1) * smoothstep01(0.44, 0.5, edge);
+          r = 0.33 * shade2; g = 0.36 * shade2; b = 0.41 * shade2;
+        }
+      }
+    }
+  }
+  return [r, g, b];
+}
+
 // Linear RGB per tile kind, indexed by TILE_KINDS order — the same palette the
 // editor ships, recomputed here so the shader maps a cell index → colour with no
 // per-cell JS. Shared by the game render and (re-exported) the editor.

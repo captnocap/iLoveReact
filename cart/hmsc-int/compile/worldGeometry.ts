@@ -28,6 +28,7 @@ import { propKindDefinition } from '../../hmsc/world/propKinds';
 import { solveRoadCrossSection } from '../../hmsc/world/roadProfile';
 import { tileKindDefinition } from '../../hmsc/world/tileKinds';
 import { CHUNK_TILES } from '../chunks';
+import { heightfieldTexelColor, roadRibbonSection } from '../../hmsc/render3d/heightfieldSurface';
 import type { ChunkFloor } from '../chunkFloor';
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
@@ -563,6 +564,26 @@ export function floorHasRelief(f: ChunkFloor): boolean {
   return max - min > 0.001;
 }
 
+/** A chunk carries a road ribbon when roadRibbonSegments emitted ≥1 segment
+ *  (8 floats each) for it. */
+export function floorHasRoadRibbon(f: ChunkFloor): boolean {
+  return !!(f.roads && f.roads.length >= 8);
+}
+
+/** Floors that render through the textured HEIGHTFIELD path rather than flat
+ *  per-cell box slabs (RIBBONBAKE-0610): relief floors (always have) PLUS flat
+ *  floors carrying a road ribbon — the box-slab path can only flat-fill a cell
+ *  with its tile-kind colour, so the analytic ribbon (smooth band, lane lines,
+ *  median, concrete shoulders) is lost and the compiled game shows blocky
+ *  stamped tiles where the editor shows a road. Routing those chunks to the
+ *  textured quad makes the game match the editor (the texture baker runs the
+ *  same fragment logic via heightfieldTexelColor). Collision is unaffected — a
+ *  flat chunk's collider is the whole-chunk plane (worldColliders.flatChunkField),
+ *  independent of which cells render. */
+export function floorNeedsHeightfieldRender(f: ChunkFloor): boolean {
+  return floorHasRelief(f) || floorHasRoadRibbon(f);
+}
+
 function floorSurfaceColor(f: ChunkFloor): Color {
   const tcols = f.tileData[0] | 0;
   const trows = f.tileData[1] | 0;
@@ -596,25 +617,20 @@ function heightfieldTextureSize(f: ChunkFloor): { width: number; height: number;
 function heightfieldTextureBytes(f: ChunkFloor): Uint8Array {
   const { width, height } = heightfieldTextureSize(f);
   if (width <= 0 || height <= 0) return new Uint8Array(0);
-  const tcols = f.tileData[0] | 0;
-  const trows = f.tileData[1] | 0;
-  const palCount = f.tileData[2] | 0;
-  const palBase = 3;
-  const idxBase = 3 + palCount * 3;
+  // Bake through the SAME fragment logic the editor's live shader runs: f.tileData
+  // ([cols, rows, palCount, palette…, cell idx…]) is prefix-compatible with the
+  // shader's data array; appending the ribbon section (header + segs) gives
+  // heightfieldTexelColor everything it needs, so the baked texture is pixel-for-
+  // pixel what the editor draws (RIBBONBAKE-0610). The texture is 4px/tile — the
+  // same resolution as the editor's HeightfieldSurfaceCapture — so even the lane
+  // lines and median land identically.
+  const data = [...f.tileData, ...roadRibbonSection(f.roads)];
   const out = new Uint8Array(width * height * 4);
   for (let y = 0; y < height; y += 1) {
-    const cy = Math.min(trows - 1, Math.max(0, Math.floor((y / height) * trows)));
+    const v = (y + 0.5) / height;
     for (let x = 0; x < width; x += 1) {
-      const cx = Math.min(tcols - 1, Math.max(0, Math.floor((x / width) * tcols)));
-      const kind = f.tileData[idxBase + cy * tcols + cx] | 0;
-      let r = 0.05;
-      let g = 0.07;
-      let b = 0.10;
-      if (kind >= 0 && kind < palCount) {
-        r = f.tileData[palBase + kind * 3 + 0] ?? r;
-        g = f.tileData[palBase + kind * 3 + 1] ?? g;
-        b = f.tileData[palBase + kind * 3 + 2] ?? b;
-      }
+      const u = (x + 0.5) / width;
+      const [r, g, b] = heightfieldTexelColor(data, u, v);
       const o = (y * width + x) * 4;
       out[o + 0] = Math.max(0, Math.min(255, Math.round(r * 255)));
       out[o + 1] = Math.max(0, Math.min(255, Math.round(g * 255)));
@@ -882,7 +898,7 @@ function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number
 function pushPaintedFloors(build: Build, floors: readonly ChunkFloor[]): number {
   let emitted = 0;
   for (const f of floors) {
-    if (floorHasRelief(f)) continue;
+    if (floorNeedsHeightfieldRender(f)) continue; // road/relief chunks ship as textured heightfield quads
     const tcols = f.tileData[0] | 0;
     const trows = f.tileData[1] | 0;
     const palCount = f.tileData[2] | 0;
@@ -927,7 +943,7 @@ function pushPaintedFloors(build: Build, floors: readonly ChunkFloor[]): number 
 }
 
 export function encodeFloorHeightfields(floors: readonly ChunkFloor[]): Uint8Array {
-  const fields = floors.filter(floorHasRelief);
+  const fields = floors.filter(floorNeedsHeightfieldRender);
   let bytes = 8;
   for (const f of fields) {
     const count = Math.max(0, f.hcols | 0) * Math.max(0, f.hrows | 0);

@@ -783,6 +783,18 @@ Commands present in the registry:
   squares the polyline ends while interior joints stay covered by the neighbour
   segment, whose perpendicular foot is the nearer point and wins selection with
   zero overshoot.
+- `heightfieldTexelColor` is the CPU MIRROR of `HEIGHTFIELD_TILE_SHADER`'s
+  fragment function (RIBBONBAKE-0610): the compiled game ships a BAKED floor
+  texture (it can't run the Effect at load), so the editor's live ribbon and the
+  game's floor only match if the same logic produces both. The compile baker
+  (`worldGeometry.heightfieldTextureBytes`) walks it over `[...tileData,
+  ...roadRibbonSection(roads)]` at 4px/tile — the editor capture's resolution —
+  so the textures are pixel-identical. Edit the WGSL and you MUST edit this in
+  lockstep or the game drifts from the editor again. The compile routes
+  road-bearing FLAT chunks (not just relief) through this textured heightfield
+  quad instead of flat-colour box slabs, since slabs can only show the blocky
+  stamped tile-kind colour; walkability is unaffected (the flat chunk's whole
+  collider plane is independent of which cells render).
 
 `cart/hmsc/render3d/tileSurface.tsx`
 
