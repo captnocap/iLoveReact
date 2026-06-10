@@ -175,7 +175,7 @@ function figureYawForCameraYaw(cameraYawDegrees: number): number {
 // is what every GAME_WORLD call takes. W-1 CLOSED: colliders, ground heights,
 // and footing all flow from the door now. Buildings/props collision stays
 // with its own lane ('buildings + interiors' in NOT_YET_CAPTURED).
-function worldGridOf(state: GameState): WorldGridState {
+export function worldGridOf(state: GameState): WorldGridState {
   return {
     cellSizeMeters: state.world.cellSizeMeters,
     surfaceRegions: state.world.surfaceRegions as unknown as WorldGridState['surfaceRegions'],

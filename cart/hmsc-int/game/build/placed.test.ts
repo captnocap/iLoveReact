@@ -19,6 +19,7 @@ import {
   raycastPieces,
   stampPrefabPieces,
   validatePlacement,
+  liftPropsToTerrain,
   type PlacedBuildPiece,
 } from './placed';
 import { catalogEntry } from './catalog';
@@ -94,6 +95,17 @@ test('no-collision pieces contribute nothing solid', () => {
     placed('trim.cornice.downtown', 5, 5),
   ]);
   assertEqual(rects.length + orientedRects.length, 0, 'bush and trim have no collision mass');
+});
+
+test('REQ-0582: build props rest on heightfield terrain without moving structural pieces', () => {
+  const prop = placed('prop.rock', 2, 4);
+  const floor = placed('floor.concrete.common', 2, 4);
+  const upperProp = placed('prop.fireHydrant', 6, 6, { y: 8 });
+  const lifted = liftPropsToTerrain([prop, floor, upperProp], (x, z) => (x === 2 && z === 4 ? 6 : 1));
+
+  assertClose(lifted[0].y, 6, 1e-9, 'the prop base rises to the heightfield top at its anchor');
+  assertClose(lifted[1].y, 0, 1e-9, 'a floor/building piece is not changed by the prop lift');
+  assertClose(lifted[2].y, 8, 1e-9, 'an already elevated prop is not pushed down to terrain');
 });
 
 test('a turned wall blocks across the other axis (quarter turns stay plain rects)', () => {

@@ -97,6 +97,7 @@ export {
   prefabFromPieces,
   validatePlacement,
   liftBuildingsToTerrain,
+  liftPropsToTerrain,
 } from './placed';
 export type {
   PieceBounds,
@@ -210,6 +211,7 @@ import {
   prefabFromPieces,
   validatePlacement,
   liftBuildingsToTerrain,
+  liftPropsToTerrain,
 } from './placed';
 
 // The V14/V17 ground-floor handle: `import { GAME_BUILD } from '@game'`.
@@ -291,5 +293,7 @@ export const GAME_BUILD = {
     /** flat-pad terrain lift (req_0444): a stamped building rides the terrain under
      *  its footprint as one level pad — pure/idempotent, applied at render+collide+compile */
     liftToTerrain: liftBuildingsToTerrain,
+    /** prop terrain lift: free-standing props rest on the live heightfield at their anchor */
+    liftPropsToTerrain,
   },
 } as const;

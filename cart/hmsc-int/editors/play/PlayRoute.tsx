@@ -50,7 +50,7 @@ import type {
 import type { GameState } from '../../../hmsc/design'; // GAP: retires when hmsc becomes compile/'s output (V15)
 import {
   EmbodiedCaptures, EmbodiedMouseSurface, EmbodiedScene, PLAYER_CAMERA,
-  groundColumnTop, normalizeYawDegrees, readEmbodiedCameraNode, useEmbodiedPlayer,
+  groundColumnTop, normalizeYawDegrees, readEmbodiedCameraNode, useEmbodiedPlayer, worldGridOf,
   type EmbodiedWorldExtras, type PlayerPose,
 } from '../../Embodied';
 import { EmbodiedHud, HUD_TUNING, type HudCompassMarker, type HudFeedEntry, type HudSlotDef } from '../../EmbodiedHud';
@@ -433,24 +433,22 @@ export function PlayRoute(props: {
     markPlaceFreezeProbe(placeFreezeProbeRef.current, 'piecesForMap', { pieces: next.length, ms: perfMs() - t0 });
     return next;
   }, [streamState, buildingsState, props.mapName, props.legacyPieceMapName]);
-  // Flat-pad terrain lift (req_0444) is DISABLED here on purpose. It was wired to
-  // `state.world`, but that reference was the WorldStreamState (no `.world`), so the
-  // lift silently ran on `undefined` → NaN → a harmless no-op since it landed.
-  // `props.state` is the STATIC GameState: it carries no painted terrain (that lives
-  // in the build stream), so groundColumnTop returns 0 under every building and
-  // liftToTerrain would DROP them onto y=0 — up to ~48m — desyncing where you stand
-  // from where things collide (walk-through-walls / fall-through-floors). Buildings
-  // are authored where the user placed them, so F2 renders+collides them THERE.
-  // Proper terrain-padding in F2 needs the live painted world (the embodied
-  // worldGrid, available below) — a separate change, tracked, not faked here.
-  const liftedPieces = pieces;
+  const placementWorldGrid = useMemo(() => worldGridOf(props.state), [props.state]);
+  // Props are free-standing objects: if a heightfield rises under a stored y=0
+  // prop, render/collision/selection use the live terrain top at that anchor.
+  // Structural pieces keep their authored y; the broader flat-pad building lift
+  // remains separate from this prop-specific fix.
+  const liftedPieces = useMemo(
+    () => GAME_BUILD.placed.liftPropsToTerrain(pieces, (x, z) => groundColumnTop(placementWorldGrid, x, z)),
+    [pieces, placementWorldGrid],
+  );
   const placedSkinTextureIds = useMemo(() => {
     const ids = new Set<string>();
     for (const piece of pieces) skinTextureIdsFromSet(piece.skin, ids);
     return [...ids].sort();
   }, [pieces]);
-  const piecesRef = useRef(pieces);
-  piecesRef.current = pieces;
+  const piecesRef = useRef(liftedPieces);
+  piecesRef.current = liftedPieces;
   const cameraOccluders = useMemo(() => GAME_BUILD.placed.cameraOccluders(liftedPieces), [liftedPieces]);
   const cameraOccludersRef = useRef(cameraOccluders);
   cameraOccludersRef.current = cameraOccluders;

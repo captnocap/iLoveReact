@@ -1159,6 +1159,32 @@ export function liftBuildingsToTerrain<T extends PlacedBuildPiece>(
   return out;
 }
 
+// Build-catalog props are free/surface objects, not structural pads. They rest on
+// the raw terrain at their own anchor so a hydrant/rock/bush placed before a
+// heightfield edit does not stay buried at y=0 and lose its render/collider.
+// Unlike liftBuildingsToTerrain this is per-prop only: walls/floors/buildings keep
+// their authored y until the broader flat-pad terrain-lift lane is explicitly on.
+export function liftPropsToTerrain<T extends PlacedBuildPiece>(
+  pieces: readonly T[],
+  terrainAt: (x: number, z: number) => number | undefined,
+): T[] {
+  const out: T[] = [];
+  for (const piece of pieces) {
+    const def = placedPieceDef(piece);
+    if (def.kind !== 'prop') {
+      out.push(piece);
+      continue;
+    }
+    const y = terrainAt(piece.x, piece.z);
+    if (!Number.isFinite(y) || y! <= piece.y + 1e-6) {
+      out.push(piece);
+      continue;
+    }
+    out.push({ ...piece, y: y! });
+  }
+  return out;
+}
+
 export function validatePlacement(placement: Omit<PlacedBuildPiece, 'id'>): string[] {
   const problems: string[] = [];
   if (!isCatalogId(placement.pieceId)) {
