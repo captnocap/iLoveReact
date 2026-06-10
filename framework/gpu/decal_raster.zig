@@ -320,6 +320,26 @@ pub fn rasterize(allocator: std.mem.Allocator, doc: []const u8) ?Raster {
     }
     if (r.at != doc.len) return fail(allocator, out); // trailing garbage = malformed
 
+    // Match the loader cube's UV orientation (DECALFLIP-0610): the world
+    // box's authored face samples the material texture 180°-rotated relative
+    // to this raster's top-left origin — invisible for the (rotation-
+    // agnostic) shader materials that calibrated it, mirrored-and-upside-down
+    // for text. A 180° rotation is exactly a pixel-order reversal.
+    {
+        var lo: usize = 0;
+        var hi: usize = out.len - 4;
+        while (lo < hi) : ({
+            lo += 4;
+            hi -= 4;
+        }) {
+            inline for (0..4) |k| {
+                const t = out[lo + k];
+                out[lo + k] = out[hi + k];
+                out[hi + k] = t;
+            }
+        }
+    }
+
     return .{ .rgba = out, .w = ow, .h = oh };
 }
 
