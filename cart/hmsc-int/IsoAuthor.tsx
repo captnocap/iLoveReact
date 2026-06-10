@@ -422,6 +422,21 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const cloneStampId = `clone-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
     commitBatch(sel.map((p) => { const { id, ...rest } = p; return { event: { kind: 'piecePlaced', placement: { ...rest, x: p.x + dx, stampId: cloneStampId } } as WorldEvent, label: `cloned ${p.pieceId}` }; }));
   };
+  // Save the current selection as a reusable PREFAB (USER ASK): build an origin-relative
+  // BuildPrefabDef from the selected pieces (prefabFromPieces keeps each piece's skin +
+  // wall edit) and register it with a prefabDefined event — the SAME stream the cart
+  // merges into the prefabs rail, so it shows up there immediately to stamp again. Named
+  // "Custom N" (no inline text input here); rename later via the prefab tools if needed.
+  const saveSelectionAsPrefab = () => {
+    const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
+    if (!sel.length) return;
+    const n = prefabs.filter((d) => /^Custom\b/.test(d.label)).length + 1;
+    const label = `Custom ${n}`;
+    const id = GAME_BUILD.placed.mintPrefabId(label);
+    const theme = GAME_BUILD.catalog.get(sel[0].pieceId).theme;
+    const def = GAME_BUILD.placed.prefabFromPieces(id, label, theme, sel);
+    onCommit({ kind: 'prefabDefined', def }, `saved prefab ${label}`);
+  };
   // Commit a finished move drag: shift every selected piece by the dragged world delta.
   // There's no pieceMoved event (that'd touch the shared stream + F2 + compile) — a move
   // IS a remove of the old id + a place at the new spot, the SAME two events delete/clone
@@ -689,6 +704,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         <IsoBtn label={wholeBuilding ? '▦' : '▪'} title={wholeBuilding ? 'Select: whole building · Shift-click = one piece' : 'Select: one piece · Shift-click = whole building'} onPress={() => setWholeBuilding((v) => !v)} />
         {selectedIds.size > 0 ? (
           <>
+            <IsoBtn label="⊞" title="Save selection as a prefab" onPress={saveSelectionAsPrefab} />
             <IsoBtn label="⧉" title="Clone selection" onPress={cloneSelected} />
             <IsoBtn label="✕" title="Delete selection (Del)" onPress={deleteSelected} />
           </>
