@@ -23,7 +23,9 @@ const ACCENT = '#38bdf8';
 const BOX = { width: 1, height: 1, depth: 1 };
 const GROUND = 240; // a wide pad so there is room to actually open it up
 const RAD = 180 / Math.PI;
-const ORBIT_SPEED = 0.4; // degrees of camera orbit per pixel of drag
+const ORBIT_SPEED = 0.4; // degrees of camera peek per pixel of drag
+const REST_PITCH = 18; // the chase cam's resting elevation
+const RECENTER_RATE = 1.7; // how fast the peek offset eases back behind the car (1/s)
 
 const STYLE = GAME_VEHICLE.tables.styles;
 
@@ -78,11 +80,12 @@ export default function VehicleHandling() {
   const tuningRef = useRef(tuning);
   tuningRef.current = tuning;
   const camDistRef = useRef(9);
-  // User-controlled orbit, like the player camera: drag spins yaw/pitch around
-  // the car; the target follows the car each frame. yaw 0 sits BEHIND the car's
-  // initial heading (orbitalEye places the eye on -Z at yaw 0, and the car
-  // drives +Z at heading 0 — so forward is away from the camera).
-  const lookRef = useRef({ yaw: 0, pitch: 18 });
+  // Auto-centering chase cam (GTA-style): the camera trails BEHIND the car's
+  // heading (base yaw = heading; orbitalEye sits the eye on -Z at yaw 0 and the
+  // car drives +Z at heading 0, so "behind" = heading). Drag only adds a peek
+  // OFFSET that eases back to zero, so you always end up oriented behind the
+  // car instead of disoriented mid-turn.
+  const offsetRef = useRef({ yaw: 0, pitch: 0 });
   const draggingRef = useRef(false);
   const cameraRef = useRef<any>(null);
   const camCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
@@ -90,18 +93,18 @@ export default function VehicleHandling() {
 
   const resetCar = () => {
     carRef.current = GAME_DRIVING.makeState(0, 0, 0);
-    lookRef.current = { yaw: 0, pitch: 18 }; // recenter the camera behind the car
+    offsetRef.current = { yaw: 0, pitch: 0 }; // snap the camera back behind the car
     setFrame({ car: carRef.current, speed: 0, slip: 0, gear: 'N' });
   };
 
-  // Drag anywhere on the pad to orbit the camera around the car (player-style).
-  // Host-global cursor deltas (no per-node move handler → no capture gaps); a
-  // no-op unless a press is active on the input layer.
+  // Drag anywhere on the pad to PEEK around — it adds to the look offset, which
+  // the frame loop eases back to center. Host-global cursor deltas (no per-node
+  // move handler → no capture gaps); a no-op unless a press is active.
   useEffect(() => GAME_INPUT.onCursorMove((e) => {
     if (!draggingRef.current) return;
-    const l = lookRef.current;
-    l.yaw -= Number(e?.dx ?? 0) * ORBIT_SPEED;
-    l.pitch = clamp(l.pitch - Number(e?.dy ?? 0) * ORBIT_SPEED, 4, 82);
+    const o = offsetRef.current;
+    o.yaw = clamp(o.yaw - Number(e?.dx ?? 0) * ORBIT_SPEED, -150, 150);
+    o.pitch = clamp(o.pitch - Number(e?.dy ?? 0) * ORBIT_SPEED, -14, 62);
   }), []);
 
   useEffect(() => {
@@ -133,10 +136,15 @@ export default function VehicleHandling() {
         }
       }
       const car = carRef.current;
+      // Ease the peek offset back to center, then trail behind the heading.
+      const decay = Math.exp(-RECENTER_RATE * Math.min(dt, 0.05));
+      const o = offsetRef.current;
+      o.yaw *= decay;
+      o.pitch *= decay;
       camCtlRef.current?.setOrbit({
         target: [car.x, 0.8, car.z],
-        yaw: lookRef.current.yaw,
-        pitch: lookRef.current.pitch,
+        yaw: car.heading * RAD + o.yaw,
+        pitch: clamp(REST_PITCH + o.pitch, 4, 82),
         distance: camDistRef.current,
         fov: 52,
       });
@@ -204,6 +212,7 @@ export default function VehicleHandling() {
         <Knob label="top speed" value={tuning.topSpeed} step={2} min={6} max={90} onSet={(v) => setTuning((t) => ({ ...t, topSpeed: v }))} unit="m/s" />
         <Knob label="brake" value={tuning.brakePower} step={1} min={4} max={50} onSet={(v) => setTuning((t) => ({ ...t, brakePower: v }))} />
         <Knob label="grip" value={tuning.grip} step={0.5} min={0.5} max={16} onSet={(v) => setTuning((t) => ({ ...t, grip: v }))} />
+        <Knob label="cornering" value={tuning.corneringDrag} step={0.1} min={0} max={3} onSet={(v) => setTuning((t) => ({ ...t, corneringDrag: v }))} />
         <Knob label="steer" value={tuning.maxSteer} step={0.04} min={0.15} max={1} onSet={(v) => setTuning((t) => ({ ...t, maxSteer: v }))} unit="rad" />
         <Knob label="drag" value={tuning.drag} step={0.0005} min={0} max={0.02} onSet={(v) => setTuning((t) => ({ ...t, drag: v }))} digits={4} />
         <Knob label="cam dist" value={camDistRef.current} step={0.5} min={4} max={20} onSet={(v) => { camDistRef.current = clamp(v, 4, 20); }} />

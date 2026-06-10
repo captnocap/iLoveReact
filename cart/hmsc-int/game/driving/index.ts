@@ -40,6 +40,10 @@ export type CarTuning = {
   grip: number;
   /** Lateral grip while the handbrake is held (intentionally low → slides). */
   handbrakeGrip: number;
+  /** Tire scrub: how much hard cornering bleeds forward speed (1/s at full
+   *  lock). 0 = hold top speed through any turn (full-speed donuts); higher =
+   *  the car washes off speed the tighter you turn. */
+  corneringDrag: number;
   /** Front-to-rear axle distance (m). Longer = wider turning circle. */
   wheelBase: number;
 };
@@ -101,6 +105,7 @@ export function defaultTuning(wheelBase: number): CarTuning {
     steerSpeed: 6,
     grip: 7.5,
     handbrakeGrip: 1.1,
+    corneringDrag: 0.55,
     wheelBase,
   };
 }
@@ -145,6 +150,12 @@ export function stepCar(s: CarState, input: CarInput, t: CarTuning, dt: number):
   s.steer += (targetSteer - s.steer) * clamp(t.steerSpeed * step, 0, 1);
   const angularVel = (vf / t.wheelBase) * Math.tan(s.steer);
   s.heading += angularVel * step;
+
+  // Tire scrub: cornering bleeds forward speed, scaled by how hard the wheels
+  // are turned (fraction of full lock). Without this you hold top speed around
+  // any radius — full-speed donuts. Always toward 0, never reverses the car.
+  const steerFrac = Math.abs(s.steer) / Math.max(0.001, t.maxSteer);
+  vf -= vf * steerFrac * t.corneringDrag * step;
 
   // Recompose world velocity from the updated frame and integrate position.
   const nfx = Math.sin(s.heading);

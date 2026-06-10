@@ -13,15 +13,22 @@ body, `GAME_INPUT` keys, the `GAME_LOOP` frame clock, and the V23 native chase
 camera (`GAME_NATIVE_CAMERA`, orbit mode behind the nose). You drive a real
 vehicle body around a cone-slalom test pad and dial its handling live:
 
-- **engine / top speed / brake** — longitudinal feel.
+- **engine / top speed / brake** — longitudinal feel. top speed is a hard cap
+  (the engine over-powers it; the clamp is the limiter).
 - **grip** — lateral traction. High = railed; low + handbrake = the tail steps
   out and the slip readout climbs.
+- **cornering** — tire scrub: how much hard turning bleeds forward speed.
+  0 = full-speed donuts; higher = the car washes off speed mid-turn.
 - **steer** — max front-wheel angle. **drag** — high-speed falloff.
 - **body** picks the `GAME_VEHICLE` style; the wheelbase (≈58% of length) feeds
   the turn radius, so the fire truck turns wide and the sports car turns tight.
 
 Controls: **W/↑** throttle · **S/↓** brake then reverse · **A/D** (or ←/→)
 steer · **Space** handbrake. HUD: km/h, gear (D/R/N), slip angle.
+
+The camera is an **auto-centering chase cam**: it trails behind the car's
+heading, drag adds a peek offset that eases back to center (so you stay
+oriented), scroll dollies the distance.
 
 `GAME_DRIVING` is cart-side on purpose — per DECISIONS V1 physics is ONE
 host-side system, and this lab is where the SHAPE of driving feel is found
