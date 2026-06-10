@@ -290,11 +290,35 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // commitPaint → the standing pieces actually re-rendered (JS side): the
   // "release-to-standing" latency the user perceives as placement time.
   const commitPerfRef = useRef<{ t0: number; label: string } | null>(null);
+  // ── Optimistic edits (req_0511: "the user interface had 0 delay, and
+  // everything just resolves its whole scene graph behind the scenes") ─────
+  // Release costs nothing: the drag ghost (already mounted, stable keys)
+  // turns SOLID in place, the originals hide, and the store batch + scene
+  // re-derivation run a tick later behind a "confirming…" pill. When the
+  // standing pieces reflect the change, the overlay drops — the ghost nodes
+  // were the building all along, so confirm is a prop swap, not a remount.
+  // pendingMove: the ids being moved (hidden from the standing render) — the
+  // move ghost holds the building at its new spot meanwhile. pendingPaint:
+  // the painted cells stay rendered (solid) until the real pieces land.
+  // A pieces change from ANY source clears the overlays (undo, co-session);
+  // the deferred batch still applies, so the world stays consistent.
+  const [pendingMove, setPendingMove] = useState<ReadonlySet<string> | null>(null);
+  const [pendingPaint, setPendingPaint] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<ReadonlySet<string> | null>(null);
+  const pendingAny = pendingMove !== null || pendingPaint || pendingDelete !== null;
   useEffect(() => {
     const c = commitPerfRef.current;
-    if (!c) return;
-    commitPerfRef.current = null;
-    console.warn(`[DRAGDRAW] ${c.label} -> standing ms=${(perfMs() - c.t0).toFixed(1)} pieces=${pieces.length}`);
+    if (c) {
+      commitPerfRef.current = null;
+      console.warn(`[DRAGDRAW] ${c.label} -> standing ms=${(perfMs() - c.t0).toFixed(1)} pieces=${pieces.length}`);
+    }
+    // The standing world caught up — drop the optimistic overlays.
+    setPendingMove((p) => (p ? null : p));
+    setPendingPaint((p) => (p ? false : p));
+    setPendingDelete((p) => (p ? null : p));
+    setMoveDelta((d) => (d && !dragRef.current ? null : d));
+    if (!dragRef.current) { setPaintCells((c2) => (c2 ? null : c2)); paintSigRef.current = ''; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pieces]);
   // Render+commit latency for each paint-ghost update (effects run after commit,
   // so this captures the React render + reconcile + host mutation flush).
@@ -483,7 +507,15 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (armedRef.current && paintKindOf(armedRef.current)) {
       // armed with a wall/floor → a drag PAINTS a line/rect; record the start ground point
       const g = stage.groundPoint(p.x, p.y, rectRef.current);
-      if (g) { mode = 'paint'; gx0 = g.x; gz0 = g.z; }
+      if (g) {
+        mode = 'paint';
+        gx0 = g.x;
+        gz0 = g.z;
+        // A new paint gesture retires any optimistic overlay still confirming —
+        // else the fresh ghost would inherit the solid pendingPaint look.
+        setPendingPaint(false);
+        setPaintCells(null);
+      }
     } else if (!armedRef.current && selectedIdsRef.current.size) {
       // Grab a selected piece to move it: the press raycasts onto a piece already in the
       // selection (VISIBLE drawn pieces so the grab matches the screen). Else → rotate.
@@ -646,12 +678,18 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const whole = wholeBuildingRef.current !== modHeldRef.current;
     setSelectedIds(whole ? GAME_BUILD.placed.connected(hit.piece.id, displayPiecesRef.current) : new Set([hit.piece.id]));
   };
-  // Remove every selected piece (one pieceRemoved each, the SAME event F2's X commits).
+  // Remove every selected piece (one pieceRemoved each, the SAME event F2's X
+  // commits). Optimistic (req_0511): the pieces vanish from the render THIS
+  // frame; the store batch lands a tick later behind the confirming pill.
   const deleteSelected = () => {
     const ids = [...selectedIdsRef.current];
     if (!ids.length) return;
-    commitBatch(ids.map((id) => ({ event: { kind: 'pieceRemoved', id } as WorldEvent, label: `removed ${id}` })));
+    setPendingDelete(new Set(ids));
     setSelectedIds(new Set());
+    commitPerfRef.current = { t0: perfMs(), label: `delete (${ids.length} pieces)` };
+    setTimeout(() => {
+      commitBatch(ids.map((id) => ({ event: { kind: 'pieceRemoved', id } as WorldEvent, label: `removed ${id}` })));
+    }, 0);
   };
   // Duplicate the selection beside itself: re-emit piecePlaced for each piece, shifted
   // clear along +x by the selection's own width (the stream mints fresh ids).
@@ -693,49 +731,63 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // selection re-keys to fresh stream ids, so the old highlight just clears.
   const commitMove = () => {
     const delta = moveDeltaRef.current;
-    setMoveDelta(null);
-    if (!delta || (Math.abs(delta.dx) < 1e-3 && Math.abs(delta.dz) < 1e-3)) return;
+    if (!delta || (Math.abs(delta.dx) < 1e-3 && Math.abs(delta.dz) < 1e-3)) { setMoveDelta(null); return; }
     const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
-    if (!sel.length) return;
+    if (!sel.length) { setMoveDelta(null); return; }
     // Spread the WHOLE piece (minus the stream-minted id) into the new placement so the
     // moved instance keeps its per-face skin/materials, wall edit, and prefab grouping —
     // only x/z shift. (The earlier slice copied just pieceId/pose, which stripped every
     // face material on move.)
     const moves = sel.map((p) => { const { id, ...rest } = p; return { id, placement: { ...rest, x: p.x + delta.dx, z: p.z + delta.dz } }; });
-    if (moves.some((m) => GAME_BUILD.placed.validatePlacement(m.placement).length > 0)) return;
-    // Release-to-standing latency for MOVES too (req_0502 — the user stopwatched
-    // a move at 3s while the commit probes read ~120ms; this brackets the gap).
+    if (moves.some((m) => GAME_BUILD.placed.validatePlacement(m.placement).length > 0)) { setMoveDelta(null); return; }
+    // OPTIMISTIC (req_0511): release costs nothing — the move ghost (already
+    // mounted) turns SOLID at the new spot, the originals hide, and the store
+    // batch runs a tick later. moveDelta intentionally STAYS set so the ghost
+    // keeps rendering; the [pieces] effect clears it when the world catches up.
     commitPerfRef.current = { t0: perfMs(), label: `move commit (${sel.length} pieces)` };
+    setPendingMove(new Set(sel.map((p) => p.id)));
+    setSelectedIds(new Set());
     // One batch: all removes then all places (the SAME two events delete/clone emit) →
     // one undo step, one store snapshot, so moving a whole building doesn't freeze.
-    commitBatch([
-      ...moves.map((m) => ({ event: { kind: 'pieceRemoved', id: m.id } as WorldEvent, label: `moved ${m.id}` })),
-      ...moves.map((m) => ({ event: { kind: 'piecePlaced', placement: m.placement } as WorldEvent, label: `moved ${m.placement.pieceId}` })),
-    ]);
-    setSelectedIds(new Set());
+    setTimeout(() => {
+      commitBatch([
+        ...moves.map((m) => ({ event: { kind: 'pieceRemoved', id: m.id } as WorldEvent, label: `moved ${m.id}` })),
+        ...moves.map((m) => ({ event: { kind: 'piecePlaced', placement: m.placement } as WorldEvent, label: `moved ${m.placement.pieceId}` })),
+      ]);
+    }, 0);
   };
   // Commit a finished drag-paint: drop the previewed wall line / floor rect as ONE batch
   // (one undo step, one snapshot). Skip any cell the validator refuses so a partial run
-  // still lands the valid pieces.
+  // still lands the valid pieces. OPTIMISTIC (req_0511): the painted cells stay
+  // rendered (the ghost turns solid via pendingPaint) until the real pieces land.
   const commitPaint = () => {
     const cells = paintCellsRef.current;
-    setPaintCells(null);
     const a = armedRef.current;
     // Release-to-standing latency: the commitPerf effect prints when the pieces
     // prop reflects the commit (store snapshot + stream materialize + re-render).
     commitPerfRef.current = { t0: perfMs(), label: a?.kind === 'tower' ? 'tower commit' : 'paint commit' };
     if (a?.kind === 'tower') {
-      // The preview showed the ground ring; commit the FULL shell from the drag corners.
+      // The preview showed the ground ring; commit the FULL shell from the drag
+      // corners. The ring stays as the optimistic overlay while the shell lands.
       const rect = towerDragRef.current;
       towerDragRef.current = null;
-      if (rect) commitTower(rect.start, rect.end);
+      if (rect) {
+        setPendingPaint(true);
+        setTimeout(() => commitTower(rect.start, rect.end), 0);
+      } else {
+        setPaintCells(null);
+        commitPerfRef.current = null;
+      }
       return;
     }
-    if (!cells || !cells.length) { commitPerfRef.current = null; return; }
+    if (!cells || !cells.length) { setPaintCells(null); commitPerfRef.current = null; return; }
     const valid = cells.filter((c) => GAME_BUILD.placed.validatePlacement(c).length === 0);
-    if (!valid.length) { commitPerfRef.current = null; return; }
+    if (!valid.length) { setPaintCells(null); commitPerfRef.current = null; return; }
     const label = a && a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id).label : 'piece';
-    commitBatch(valid.map((c) => ({ event: { kind: 'piecePlaced', placement: c } as WorldEvent, label: `painted ${label}` })));
+    setPendingPaint(true);
+    setTimeout(() => {
+      commitBatch(valid.map((c) => ({ event: { kind: 'piecePlaced', placement: c } as WorldEvent, label: `painted ${label}` })));
+    }, 0);
   };
   // Latest delete/clone closures, so the once-mounted key listener always calls the
   // current ones (they read live refs + the current onCommit).
@@ -865,39 +917,48 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
 
   // The move preview: the selected pieces drawn translucent at the dragged offset while
   // a move drag is live, tinted blocked-red if any destination fails validation — the
-  // same ghost language placement uses, so a move reads like a re-place.
+  // same ghost language placement uses, so a move reads like a re-place. After release
+  // (pendingMove) the SAME ghost nodes turn SOLID with their real skins — they ARE the
+  // building until the standing world catches up, so confirm is a prop swap.
   const moveGhostMeshes = useMemo(() => {
     if (!moveDelta) return null;
+    const ids = pendingMove ?? selectedIds;
     // Preview from the DRAWN (terrain-lifted) pieces so the ghost rides the terrain where
     // the building currently stands; the committed move re-lifts at the drop spot.
-    const sel = displayPieces.filter((p) => selectedIds.has(p.id));
+    const sel = displayPieces.filter((p) => ids.has(p.id));
     if (!sel.length) return null;
-    const moved = sel.map((p) => ({ pieceId: p.pieceId, x: p.x + moveDelta.dx, y: p.y, z: p.z + moveDelta.dz, yawDegrees: p.yawDegrees }));
-    const blocked = moved.some((m) => GAME_BUILD.placed.validatePlacement(m as any).length > 0);
-    const color = blocked ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
+    // Carry skin + edit so the solid pending look matches the real building.
+    const moved = sel.map((p) => ({ pieceId: p.pieceId, x: p.x + moveDelta.dx, y: p.y, z: p.z + moveDelta.dz, yawDegrees: p.yawDegrees, skin: p.skin, edit: p.edit }));
+    const solid = pendingMove !== null;
+    const blocked = !solid && moved.some((m) => GAME_BUILD.placed.validatePlacement(m as any).length > 0);
+    const color = solid ? undefined : blocked ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
+    const opacity = solid ? undefined : BUILD_UI.ghostOpacity;
     const supportPieces = [
-      ...displayPieces.filter((p) => !selectedIds.has(p.id)),
+      ...displayPieces.filter((p) => !ids.has(p.id)),
       ...moved.map((m, i) => ({ id: `isoMove${i}`, ...m })),
     ];
     return moved.flatMap((m, i) => pieceVisualShapes(m, `isoMove${i}`, supportPieces).map((shape) => (
-      <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
+      <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={opacity} />
     )));
-  }, [moveDelta, displayPieces, selectedIds]);
+  }, [moveDelta, displayPieces, selectedIds, pendingMove]);
 
   // The drag-paint preview: every wall in the line / floor in the rect drawn translucent,
-  // each tinted blocked-red if the validator refuses it.
+  // each tinted blocked-red if the validator refuses it. After release (pendingPaint)
+  // the SAME ghost cells turn SOLID with their real catalog look — the wall reads as
+  // placed instantly while the store batch lands behind the confirming pill.
   const paintGhostMeshes = useMemo(() => {
     if (!paintCells || !paintCells.length) return null;
     const t0 = perfMs();
+    const solid = pendingPaint;
     // ONE support array shared by every cell (PLACEPERF-0610): pieceGridOf caches
     // the spatial grid on the pieces ARRAY identity, so building this inside the
     // flatMap (a fresh array per cell) forced an O(N) grid rebuild per cell, per
     // mouse-move — the drag-draw lag. Hoisted, all cells share one cached grid.
     const supportPieces = [...displayPieces, ...paintCells.map((p, j) => ({ id: `isoPaint${j}`, ...p }))];
     const ghosts = paintCells.flatMap((c, i) => {
-      const color = GAME_BUILD.placed.validatePlacement(c).length > 0 ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
+      const color = solid ? undefined : GAME_BUILD.placed.validatePlacement(c).length > 0 ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
       return pieceVisualShapes(c, `isoPaint${i}`, supportPieces).map((shape) => (
-        <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
+        <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={solid ? undefined : BUILD_UI.ghostOpacity} />
       ));
     });
     const ghostMs = perfMs() - t0;
@@ -908,7 +969,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       if (ghostMs > perf.ghostMax) perf.ghostMax = ghostMs;
     }
     return ghosts;
-  }, [paintCells, displayPieces]);
+  }, [paintCells, displayPieces, pendingPaint]);
 
   const noIds = useMemo(() => new Set<string>(), []);
 
@@ -921,9 +982,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // pick from this same visible list, so you can't grab what you can't see.
   const visiblePieces = useMemo(() => {
     const cut = (level + 1) * METERS_PER_LEVEL - 0.01;
-    const visible = displayPieces.filter((p) => p.y < cut);
+    // Optimistic edits also hide here: a pending move's ORIGINALS vanish (the
+    // solid ghost holds the building at its new spot), a pending delete's
+    // pieces vanish this frame — both before the store batch lands.
+    const visible = displayPieces.filter((p) => p.y < cut && !pendingMove?.has(p.id) && !pendingDelete?.has(p.id));
     return visible.length === displayPieces.length ? displayPieces : visible;
-  }, [displayPieces, level]);
+  }, [displayPieces, level, pendingMove, pendingDelete]);
   const visiblePiecesRef = useRef(visiblePieces);
   visiblePiecesRef.current = visiblePieces;
 
@@ -1002,6 +1066,14 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         }}
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
       />
+
+      {/* ── confirming pill (req_0511): an optimistic edit is resolving behind
+          the scenes — the user is never in a delayed state, this just says so */}
+      {pendingAny ? (
+        <Box style={{ position: 'absolute', left: 8, top: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: '#3a2f12ee', borderWidth: 1, borderColor: '#a16207' }}>
+          <Text fontSize={9} color="#fbbf24" style={{ fontFamily: 'monospace' }}>confirming…</Text>
+        </Box>
+      ) : null}
 
       {/* ── Sims control cluster (top-right): rotate · zoom · floor ────────── */}
       <Box style={{ position: 'absolute', right: 8, top: 8, flexDirection: 'row', gap: 4 }}>
