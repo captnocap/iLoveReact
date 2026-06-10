@@ -46,19 +46,24 @@ export function TrafficLight(props: { prop: WorldProp }) {
   }, []);
 
   const lamps = lampColors(trafficSignalPhase(props.prop, trafficClockSeconds()));
-  const lensZ = -armReach - 0.17;
+  // TRAFFIC-HEAD-0610 (user report): the head used to hang at the arm's tip
+  // FACING ALONG the arm — a quarter turn off a real mast-arm light. The arm
+  // now cantilevers sideways (+X) over the road while the lamps keep facing
+  // -Z at yaw 0 — the SAME facing world/traffic.ts gates the lane by, so what
+  // the lamp looks at IS the approach it governs.
+  const lensZ = -0.17;
   return (
     <>
-      {/* Foundation, pole, cantilever arm */}
+      {/* Foundation, pole, cantilever arm (sideways, over the road) */}
       <Scene3D.Mesh geometry={Geometry.Cylinder} params={{ radius: 0.24, height: 0.34, segments: 12 }} material={POLE_DARK} position={at(props.prop, [0, 0.17, 0])} />
       <Scene3D.Mesh geometry={Geometry.Cylinder} params={{ radius: 0.1, height: height - 0.34, segments: 12 }} material={POLE} position={at(props.prop, [0, (height - 0.34) / 2 + 0.34, 0])} />
-      <Scene3D.Mesh geometry={Geometry.Cylinder} params={{ radius: 0.06, height: armReach, segments: 8 }} material={POLE} position={at(props.prop, [0, height - 0.25, -armReach / 2])} rotation={[90, yaw, 0]} />
-      {/* Signal head housing */}
-      <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 0.36, height: 1.12, depth: 0.3 }} material={HOUSING} position={at(props.prop, [0, height - 0.85, -armReach])} rotation={[0, yaw, 0]} />
-      {/* Three lamp lenses on the front face */}
-      <Scene3D.Mesh geometry={Geometry.Cylinder} params={{ radius: 0.13, height: 0.07, segments: 14 }} material={lamps.red} position={at(props.prop, [0, height - 0.5, lensZ])} rotation={[90, yaw, 0]} />
-      <Scene3D.Mesh geometry={Geometry.Cylinder} params={{ radius: 0.13, height: 0.07, segments: 14 }} material={lamps.yellow} position={at(props.prop, [0, height - 0.85, lensZ])} rotation={[90, yaw, 0]} />
-      <Scene3D.Mesh geometry={Geometry.Cylinder} params={{ radius: 0.13, height: 0.07, segments: 14 }} material={lamps.green} position={at(props.prop, [0, height - 1.2, lensZ])} rotation={[90, yaw, 0]} />
+      <Scene3D.Mesh geometry={Geometry.Cylinder} params={{ radius: 0.06, height: armReach, segments: 8 }} material={POLE} position={at(props.prop, [armReach / 2, height - 0.25, 0])} rotation={[90, yaw + 90, 0]} />
+      {/* Signal head housing, hung from the arm's end */}
+      <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 0.36, height: 1.12, depth: 0.3 }} material={HOUSING} position={at(props.prop, [armReach, height - 0.85, 0])} rotation={[0, yaw, 0]} />
+      {/* Three lamp lenses on the front face (-Z at yaw 0 — the governed lane) */}
+      <Scene3D.Mesh geometry={Geometry.Cylinder} params={{ radius: 0.13, height: 0.07, segments: 14 }} material={lamps.red} position={at(props.prop, [armReach, height - 0.5, lensZ])} rotation={[90, yaw, 0]} />
+      <Scene3D.Mesh geometry={Geometry.Cylinder} params={{ radius: 0.13, height: 0.07, segments: 14 }} material={lamps.yellow} position={at(props.prop, [armReach, height - 0.85, lensZ])} rotation={[90, yaw, 0]} />
+      <Scene3D.Mesh geometry={Geometry.Cylinder} params={{ radius: 0.13, height: 0.07, segments: 14 }} material={lamps.green} position={at(props.prop, [armReach, height - 1.2, lensZ])} rotation={[90, yaw, 0]} />
     </>
   );
 }

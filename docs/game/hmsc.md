@@ -913,6 +913,10 @@ Commands present in the registry:
 - Renders traffic light.
 - Uses `trafficClockSeconds` and `trafficSignalPhase`.
 - Refreshes display with `setInterval` every 250 ms.
+- TRAFFIC-HEAD-0610 (user report): the mast arm cantilevers sideways (+X)
+  with the lamp head at its end facing -Z at yaw 0 — the lamp's look
+  direction IS the approach `world/traffic.ts` gates. The compiled-geometry
+  mirror lives in `cart/hmsc-int/compile/worldGeometry.ts`.
 
 `cart/hmsc/render3d/props/StreetLight.tsx`
 

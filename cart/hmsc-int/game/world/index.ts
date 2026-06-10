@@ -71,6 +71,7 @@ import { authoredWorldFromRecord, AUTHORED_WORLD_STORE, loadAuthoredWorld, readA
 import { legacyGlobalPieces, pieceMutationMapName, piecesForMap, worldStream } from './stream';
 import { bakeNavGrid, navKindAt } from './navGrid';
 import { NAV_PROFILES, publishNavGrid } from './navPublish';
+import { associateTrafficControls, findJunctionBoxes, planMotionWithStops, sampleMotionWithStops } from './trafficControl';
 
 export {
   addSurfaceRegion,
@@ -148,6 +149,32 @@ export {
   publishNavGrid,
 } from './navPublish';
 export type { NavPublishResult, PaintedGrid } from './navPublish';
+// Right-of-way (TRAFFICGATE-0610, req_0554): junction boxes from the painted
+// grid, control props govern the approach they face against, and the gate
+// lands at PLAN TIME — planMotionWithStops splits the deterministic schedule
+// at controlled stop lines (the grammar: runtime gates the box, never the
+// path graph).
+export {
+  associateTrafficControls,
+  controlApproach,
+  findJunctionBoxes,
+  junctionEntryDelay,
+  planMotionWithStops,
+  sampleMotionWithStops,
+  secondsUntilGreen,
+  signalAxisPhase,
+  stopLineCrossings,
+  TRAFFIC_TUNING,
+} from './trafficControl';
+export type {
+  ApproachDir,
+  ControlledJunction,
+  JunctionBox,
+  JunctionControl,
+  PlacedTrafficControl,
+  SignalPhase,
+  StoppedMotion,
+} from './trafficControl';
 // buildings own their history (req_0512/req_0513): defs + instance references
 // on their own V20 stream; derived back into the one pieces view.
 export {
@@ -211,6 +238,13 @@ export const GAME_WORLD = Object.freeze({
   // the live publish (active map → host A*; NAV_PROFILES.walker/vehicle)
   publishNavGrid,
   navProfiles: NAV_PROFILES,
+  // right-of-way (req_0554): boxes + control association + plan-time stops
+  traffic: {
+    findJunctionBoxes,
+    associate: associateTrafficControls,
+    planWithStops: planMotionWithStops,
+    sampleWithStops: sampleMotionWithStops,
+  },
   // physics adapter
   collisionRects: worldCollisionRects,
   heightfields: worldHeightfields,

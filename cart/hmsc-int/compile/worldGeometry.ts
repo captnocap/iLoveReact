@@ -436,14 +436,18 @@ function propParts(prop: WorldProp): PropPartSpec[] {
       box([0, def.heightMeters - 0.12, -1.15], [0.22, 0.12, 0.4], [0.29, 0.31, 0.34]),
       box([0, def.heightMeters - 0.19, -1.15], [0.16, 0.04, 0.3], [1, 0.95, 0.76]),
     ];
+    // TRAFFIC-HEAD-0610 (user report): the arm cantilevers SIDEWAYS (+X) over
+    // the road; the head hangs at its end with the lamps facing -Z at yaw 0 —
+    // the same facing world/traffic.ts gates the lane by. Mirrors the live
+    // model (hmsc/render3d/props/TrafficLight.tsx).
     case 'trafficLight': return [
       cylinder16([0, 0.17, 0], 0.24, 0.34, [0.14, 0.15, 0.17]),
       cylinder16([0, (def.heightMeters - 0.34) / 2 + 0.34, 0], 0.1, def.heightMeters - 0.34, [0.2, 0.22, 0.24]),
-      cylinder8([0, def.heightMeters - 0.25, -0.7], 0.06, 1.4, [0.2, 0.22, 0.24], [90, 0, 0]),
-      box([0, def.heightMeters - 0.85, -1.4], [0.36, 1.12, 0.3], [0.1, 0.11, 0.12]),
-      cylinder16([0, def.heightMeters - 0.5, -1.57], 0.13, 0.07, [1, 0.23, 0.19], [90, 0, 0]),
-      cylinder16([0, def.heightMeters - 0.85, -1.57], 0.13, 0.07, [1, 0.82, 0.23], [90, 0, 0]),
-      cylinder16([0, def.heightMeters - 1.2, -1.57], 0.13, 0.07, [0.21, 0.84, 0.36], [90, 0, 0]),
+      cylinder8([0.7, def.heightMeters - 0.25, 0], 0.06, 1.4, [0.2, 0.22, 0.24], [0, 0, 90]),
+      box([1.4, def.heightMeters - 0.85, 0], [0.36, 1.12, 0.3], [0.1, 0.11, 0.12]),
+      cylinder16([1.4, def.heightMeters - 0.5, -0.17], 0.13, 0.07, [1, 0.23, 0.19], [90, 0, 0]),
+      cylinder16([1.4, def.heightMeters - 0.85, -0.17], 0.13, 0.07, [1, 0.82, 0.23], [90, 0, 0]),
+      cylinder16([1.4, def.heightMeters - 1.2, -0.17], 0.13, 0.07, [0.21, 0.84, 0.36], [90, 0, 0]),
     ];
     case 'payphone': {
       const s = def.heightMeters / 1.45;

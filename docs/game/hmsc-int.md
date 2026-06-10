@@ -1482,6 +1482,21 @@ carries a 3×3 grid of paintable tile kinds — the nav substrate stays uniform
   every placed instance, so the nav bake paths what the painter painted.
   Col 4 demonstrates: authored cells tint their ninth of the plate, proud of
   the top slab, quarter-turn-matched to floorCellRects.
-- NOT yet wired: a find()/route consumer (NPC walkers/traffic), road decks
-  (lane kinds on lifted floors — elevation modes), multi-level surface nav,
-  the host MAX_CELLS raise (heap-allocated grids) for whole-map 0.5m publish.
+- `game/world/trafficControl.ts` — RIGHT-OF-WAY (TRAFFICGATE-0610,
+  req_0554): the locked grammar says signals gate the box at RUNTIME, never
+  in the path graph, so nothing here touches kinds/costs/A*. `findJunctionBoxes`
+  flood-fills the painted grid's 'junction' cells into boxes;
+  `associateTrafficControls` attaches each placed stopSign/trafficLight to
+  its nearest box (≤12m), governing the approach it faces against (yaw 0
+  faces -Z — the hmsc/world/traffic.ts convention, kept exactly);
+  `planMotionWithStops` splits the deterministic schedule at controlled
+  stop lines (box + the 2-deep crosswalk band): a stop sign ends its leg AT
+  REST on the line (plans end at rest — the full stop falls out) and holds
+  1.5s; a signal holds until its axis' next green on the SAME
+  TRAFFIC_SIGNAL_CYCLE the lamp render glows with — green at arrival never
+  splits. `sampleMotionWithStops` stays a pure function of t (V5). On
+  GAME_WORLD.traffic. P4: trafficControl.test.ts (8).
+- NOT yet wired: a find()/route consumer (NPC walkers/traffic — the gate is
+  ready for the first driver), road decks (lane kinds on lifted floors —
+  elevation modes), multi-level surface nav, the host MAX_CELLS raise
+  (heap-allocated grids) for whole-map 0.5m publish.
