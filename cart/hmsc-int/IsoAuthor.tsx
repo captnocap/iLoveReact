@@ -17,7 +17,8 @@ import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { GAME_BUILD, GAME_NATIVE_CAMERA } from './game';
-import type { BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
+import type { BuildFaceSkin, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
+import { allTextures } from './game/textures/registry';
 import { resolveSnapTarget, modulePitch, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes } from './editors/build/pieceMeshes';
 import { BUILD_UI } from './editors/build/buildUi';
@@ -78,9 +79,52 @@ function skinTextureIds(pieces: readonly PlacedBuildPiece[]): string[] {
   return [...ids].sort();
 }
 
-// What's armed to place: a single catalog PIECE, or a PREFAB (a named composition that
-// stamps into many pieces). null = nothing armed (pan/select mode).
-type Armed = { kind: 'piece' | 'prefab'; id: string } | null;
+// What's armed to place: a single catalog PIECE, a PREFAB (a named composition that
+// stamps into many pieces), or the TOWER tool (req_0478: drag a footprint → a hollow
+// multi-storey shell). null = nothing armed (pan/select mode).
+type Armed = { kind: 'piece' | 'prefab'; id: string } | { kind: 'tower' } | null;
+
+// ── Tower tool (req_0478): skyscrapers without laying every storey by hand ───
+// Drag a footprint rectangle → a HOLLOW shell: perimeter walls stacked N floors
+// high + a flat roof cap, committed as ONE stamp (one flat-pad lift, one
+// building under select/move/clone). Walls are oriented so every FRONT slot
+// faces OUTWARD (N=yaw0, E=90, S=180, W=270) — the shell is a clean 6-face box
+// for the face painter: 4 exterior sides + roof + interior.
+const TOWER_WALL_ID = 'wall.concrete.common';
+const TOWER_ROOF_ID = 'roof.flat.common';
+const TOWER_MAX_SPAN = 16; // footprint cells per axis (48m at the 3m pitch)
+const TOWER_MIN_FLOORS = 1;
+const TOWER_MAX_FLOORS = 30;
+
+// ── Face painter (req_0478): a selection is a box in space with 6 faces ──────
+// N/E/S/W paint each piece's EXTERIOR-facing major slot on that side of the
+// selection (exterior = the front/back slot pointing away from the selection's
+// centre), Top paints plate tops, In paints every interior-facing slot. The
+// brush is a color or a registry material.
+type FaceId = 'N' | 'E' | 'S' | 'W' | 'top' | 'in';
+const FACE_BUTTONS: { id: FaceId; label: string; title: string }[] = [
+  { id: 'N', label: 'N', title: 'Paint the north-facing exterior' },
+  { id: 'E', label: 'E', title: 'Paint the east-facing exterior' },
+  { id: 'S', label: 'S', title: 'Paint the south-facing exterior' },
+  { id: 'W', label: 'W', title: 'Paint the west-facing exterior' },
+  { id: 'top', label: 'Top', title: 'Paint floor/roof plate tops' },
+  { id: 'in', label: 'In', title: 'Paint every interior-facing side' },
+];
+const BRUSH_SWATCHES = [
+  '#d8cdb8', '#9aa3ad', '#8a4a3a', '#506a85', '#2d3b4e', '#c8b06a',
+  '#7a8b6f', '#e0e5ea', '#1a1d24', '#8a6a45', '#b04a3a', '#3a6b8a',
+];
+/** front (+v) world direction per quarter yaw — matches localOffset(0,1,yaw) */
+function frontDirOf(quarter: number): { dx: number; dz: number } {
+  return quarter === 0 ? { dx: 0, dz: 1 } : quarter === 1 ? { dx: 1, dz: 0 } : quarter === 2 ? { dx: 0, dz: -1 } : { dx: -1, dz: 0 };
+}
+
+/** the same tool armed twice = a toggle-off (rail chips re-click to disarm) */
+function sameArmed(cur: Armed, next: NonNullable<Armed>): boolean {
+  if (!cur || cur.kind !== next.kind) return false;
+  if (cur.kind === 'tower' || next.kind === 'tower') return true;
+  return cur.id === next.id;
+}
 
 export interface IsoAuthorProps {
   // The world to draw UNDER the pieces (terrain + props), same GameState the inspect
@@ -244,6 +288,21 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 800, height: 600 });
+  // Tower tool (req_0478): how many storeys a committed tower stacks, and the live
+  // drag's footprint corners (the paint preview shows only the ground ring; the commit
+  // expands the full shell from these corners).
+  const [towerFloors, setTowerFloors] = useState(8);
+  const towerFloorsRef = useRef(towerFloors);
+  towerFloorsRef.current = towerFloors;
+  const towerDragRef = useRef<{ start: { x: number; z: number }; end: { x: number; z: number } } | null>(null);
+  // Face painter (req_0478): the brush every face button applies.
+  const [faceBrush, setFaceBrush] = useState<BuildFaceSkin>({ kind: 'color', value: '#d8cdb8' });
+  const faceBrushRef = useRef(faceBrush);
+  faceBrushRef.current = faceBrush;
+  // Registry materials for the brush cycler (built-in + Materialized customs; read at
+  // mount — a material stored mid-session appears after the next reload).
+  const brushMaterials = useMemo(() => allTextures(), []);
+  const [brushMatIdx, setBrushMatIdx] = useState(0);
 
   // Placement ground for the ACTIVE floor: terrain at level 0, else the flat slab at the
   // active level's elevation — so raising a floor (▲) drops pieces ON that floor instead
@@ -260,9 +319,14 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const a = armedRef.current;
     if (!a) return null;
     // A piece snaps by its own catalog rule (walls edge-snap, etc.); a prefab drops on
-    // the grid by its origin — exactly how F2's place() picks snap/size.
-    const snap = a.kind === 'prefab' ? 'grid' : GAME_BUILD.catalog.get(a.id).snap;
-    const size = a.kind === 'prefab' ? { widthMeters: 1, heightMeters: 3, depthMeters: 1 } : GAME_BUILD.catalog.get(a.id).size;
+    // the grid by its origin — exactly how F2's place() picks snap/size. The tower tool
+    // grid-snaps a wall-module footprint (a click drops a 1×1-cell tower).
+    const snap = a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id).snap : 'grid';
+    const size = a.kind === 'piece'
+      ? GAME_BUILD.catalog.get(a.id).size
+      : a.kind === 'tower'
+        ? GAME_BUILD.catalog.get(TOWER_WALL_ID).size
+        : { widthMeters: 1, heightMeters: 3, depthMeters: 1 };
     return resolveSnapTarget({
       ray: stage.pieceRay(sx, sy, rectRef.current),
       pieces: piecesRef.current,
@@ -287,14 +351,45 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // share ONE base y (terrain under the centroid) so the row/rect reads as a flat pad —
   // matching what liftBuildingsToTerrain does to it after placement.
   const PAINT_MAX_SPAN = 64; // cells per axis — a giant drag can't spawn thousands of pieces
-  const paintKindOf = (a: Armed): 'wall' | 'floor' | null => {
-    if (!a || a.kind !== 'piece') return null;
+  const paintKindOf = (a: Armed): 'wall' | 'floor' | 'tower' | null => {
+    if (!a) return null;
+    if (a.kind === 'tower') return 'tower';
+    if (a.kind !== 'piece') return null;
     const k = GAME_BUILD.catalog.get(a.id).kind;
     return k === 'wall' || k === 'floor' ? k : null;
   };
+  // The tower footprint's perimeter as wall cells, every FRONT facing outward —
+  // shared by the drag preview (ground ring only) and the commit (all storeys).
+  const towerRing = (start: { x: number; z: number }, end: { x: number; z: number }) => {
+    const pitch = modulePitch(GAME_BUILD.catalog.get(TOWER_WALL_ID).size.widthMeters, 1);
+    const cellOf = (v: number) => Math.floor(v / pitch);
+    const center = (c: number) => (c + 0.5) * pitch;
+    const span = (a0: number, b0: number): [number, number] => { const lo = Math.min(a0, b0), hi = Math.max(a0, b0); return [lo, Math.min(hi, lo + TOWER_MAX_SPAN - 1)]; };
+    const [x0, x1] = span(cellOf(start.x), cellOf(end.x));
+    const [z0, z1] = span(cellOf(start.z), cellOf(end.z));
+    const cells: { x: number; z: number; yaw: number }[] = [];
+    for (let cx = x0; cx <= x1; cx += 1) {
+      cells.push({ x: center(cx), z: z0 * pitch, yaw: 180 });       // south face, front out (−z)
+      cells.push({ x: center(cx), z: (z1 + 1) * pitch, yaw: 0 });   // north face, front out (+z)
+    }
+    for (let cz = z0; cz <= z1; cz += 1) {
+      cells.push({ x: x0 * pitch, z: center(cz), yaw: 270 });       // west face, front out (−x)
+      cells.push({ x: (x1 + 1) * pitch, z: center(cz), yaw: 90 });  // east face, front out (+x)
+    }
+    return { cells, x0, x1, z0, z1, pitch, center };
+  };
   const computePaint = useCallback((a: Armed, start: { x: number; z: number }, end: { x: number; z: number }): Paint[] => {
     const kind = paintKindOf(a);
-    if (!kind || !a || a.kind !== 'piece') return [];
+    if (!kind || !a) return [];
+    if (kind === 'tower') {
+      // Preview the GROUND RING only (a 16-cell × 30-floor shell would re-ghost
+      // thousands of meshes per mouse-move); the commit stacks the full storeys.
+      towerDragRef.current = { start, end };
+      const ring = towerRing(start, end);
+      const y = placeGroundAt(((ring.x0 + ring.x1 + 1) / 2) * ring.pitch, ((ring.z0 + ring.z1 + 1) / 2) * ring.pitch);
+      return ring.cells.map((c) => ({ pieceId: TOWER_WALL_ID, x: c.x, y, z: c.z, yawDegrees: c.yaw }));
+    }
+    if (a.kind !== 'piece') return [];
     const def = GAME_BUILD.catalog.get(a.id);
     const pitch = modulePitch(def.size.widthMeters, 1);
     const cellOf = (v: number) => Math.floor(v / pitch);
@@ -326,6 +421,30 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   }, [placeGroundAt]);
   const computePaintRef = useRef(computePaint);
   computePaintRef.current = computePaint;
+  // Commit a tower (req_0478): the full hollow shell — perimeter walls stacked
+  // towerFloors high + a flat roof cap over the footprint — as ONE stamp (one
+  // undo step, one flat-pad lift group, one building under select/move/clone).
+  const commitTower = (start: { x: number; z: number }, end: { x: number; z: number }) => {
+    const floors = Math.max(TOWER_MIN_FLOORS, Math.min(TOWER_MAX_FLOORS, towerFloorsRef.current));
+    const ring = towerRing(start, end);
+    const baseY = placeGroundAt(((ring.x0 + ring.x1 + 1) / 2) * ring.pitch, ((ring.z0 + ring.z1 + 1) / 2) * ring.pitch);
+    const wallH = GAME_BUILD.catalog.get(TOWER_WALL_ID).size.heightMeters;
+    const stampId = `tower-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const placements: (Paint & { stampId: string })[] = [];
+    for (let f = 0; f < floors; f += 1) {
+      for (const c of ring.cells) placements.push({ pieceId: TOWER_WALL_ID, x: c.x, y: baseY + f * wallH, z: c.z, yawDegrees: c.yaw, stampId });
+    }
+    for (let cx = ring.x0; cx <= ring.x1; cx += 1) {
+      for (let cz = ring.z0; cz <= ring.z1; cz += 1) {
+        placements.push({ pieceId: TOWER_ROOF_ID, x: ring.center(cx), y: baseY + floors * wallH, z: ring.center(cz), yawDegrees: 0, stampId });
+      }
+    }
+    const valid = placements.filter((p) => GAME_BUILD.placed.validatePlacement(p).length === 0);
+    if (!valid.length) return;
+    const w = ring.x1 - ring.x0 + 1;
+    const d = ring.z1 - ring.z0 + 1;
+    commitBatch(valid.map((p) => ({ event: { kind: 'piecePlaced', placement: p } as WorldEvent, label: `tower ${w}×${d}×${floors}F` })));
+  };
 
   // Pointer. A DRAG rotates the view (yaw from horizontal motion — WASD does the
   // panning). A CLICK (no drag) acts at the cursor: place the armed piece, or select
@@ -411,6 +530,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const a = armedRef.current;
     if (!a) return;
     const at = `${t.placement.x.toFixed(1)},${t.placement.z.toFixed(1)}`;
+    if (a.kind === 'tower') {
+      // A click (no drag) drops the smallest tower: a 1×1-cell footprint shell.
+      const p = { x: t.placement.x, z: t.placement.z };
+      commitTower(p, p);
+      return;
+    }
     if (a.kind === 'prefab') {
       // A prefab commits ONE prefabStamped event; the stream decomposes it into its
       // pieces — the SAME path F2's place() takes for a prefab. The def lookup spans
@@ -509,12 +634,59 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const commitPaint = () => {
     const cells = paintCellsRef.current;
     setPaintCells(null);
+    const a = armedRef.current;
+    if (a?.kind === 'tower') {
+      // The preview showed the ground ring; commit the FULL shell from the drag corners.
+      const rect = towerDragRef.current;
+      towerDragRef.current = null;
+      if (rect) commitTower(rect.start, rect.end);
+      return;
+    }
     if (!cells || !cells.length) return;
     const valid = cells.filter((c) => GAME_BUILD.placed.validatePlacement(c).length === 0);
     if (!valid.length) return;
-    const a = armedRef.current;
     const label = a && a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id).label : 'piece';
     commitBatch(valid.map((c) => ({ event: { kind: 'piecePlaced', placement: c } as WorldEvent, label: `painted ${label}` })));
+  };
+  // Face painter (req_0478): apply the brush to ONE world-facing side of the
+  // selection. A selection is a box in space with 6 faces — N/E/S/W set each
+  // piece's exterior-facing major slot on that side (exterior = the front/back
+  // slot pointing AWAY from the selection's centre, so it works on towers and
+  // hand-built shells alike), Top sets plate tops, In sets every interior-facing
+  // slot. Commits pieceSkinSet events — ids stay stable, so the selection
+  // survives and you can paint face after face without re-selecting.
+  const paintFace = (face: FaceId) => {
+    const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
+    if (!sel.length) return;
+    let cx = 0, cz = 0;
+    for (const p of sel) { cx += p.x; cz += p.z; }
+    cx /= sel.length; cz /= sel.length;
+    const brush = faceBrushRef.current;
+    const items: { event: WorldEvent; label: string }[] = [];
+    for (const p of sel) {
+      const kind = GAME_BUILD.catalog.get(p.pieceId).kind;
+      const plate = kind === 'floor' || kind === 'roof' || kind === 'ramp' || kind === 'stairs';
+      let slot: BuildFaceSlot | null = null;
+      if (plate) {
+        slot = face === 'top' ? 'front' : face === 'in' ? 'back' : null;
+      } else if (face !== 'top') {
+        const yaw = ((p.yawDegrees % 360) + 360) % 360;
+        const quarter = Math.round(yaw / 90) % 4;
+        if (Math.abs(yaw - quarter * 90) > 1e-6 && Math.abs(yaw - 360) > 1e-6) continue; // free-yaw: no cardinal face
+        const front = frontDirOf(quarter);
+        const outward = front.dx * (p.x - cx) + front.dz * (p.z - cz) >= 0; // front faces away from the centre?
+        if (face === 'in') {
+          slot = outward ? 'back' : 'front';
+        } else {
+          const ext = outward ? front : { dx: -front.dx, dz: -front.dz };
+          const onFace = face === 'N' ? ext.dz > 0.5 : face === 'S' ? ext.dz < -0.5 : face === 'E' ? ext.dx > 0.5 : ext.dx < -0.5;
+          if (onFace) slot = outward ? 'front' : 'back';
+        }
+      }
+      if (!slot) continue;
+      items.push({ event: { kind: 'pieceSkinSet', id: p.id, skin: { [slot]: brush } } as WorldEvent, label: `painted ${face} face` });
+    }
+    if (items.length) commitBatch(items);
   };
 
   // Latest delete/clone closures, so the once-mounted key listener always calls the
@@ -595,6 +767,14 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const a = armedRef.current;
     if (!a || !snap) return null;
     if (paintCells && paintCells.length) return null; // the paint line/rect ghost owns the preview
+    if (a.kind === 'tower') {
+      // Hover-preview ONE wall module at the snapped cell (the full ring ghosts
+      // on drag via the paint preview; a whole-shell hover ghost would thrash).
+      const w = { pieceId: TOWER_WALL_ID, x: snap.placement.x, y: snap.placement.y, z: snap.placement.z, yawDegrees: 0 };
+      return pieceVisualShapes(w, 'isoGhostTower', [{ id: 'isoGhostTower', ...w }]).map((shape) => (
+        <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={BUILD_UI.ghostColor} opacityOverride={BUILD_UI.ghostOpacity} />
+      ));
+    }
     const yaw = snap.placement.yawDegrees;
     // A prefab previews ALL of its stamped pieces; a single piece previews itself. The
     // prefab def spans built-in + stream (prefabById); bail if it's somehow unknown.
@@ -756,14 +936,61 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         ) : null}
       </Box>
 
+      {/* ── tower floors (req_0478): how high the next dragged tower stacks ── */}
+      {armed?.kind === 'tower' ? (
+        <Box style={{ position: 'absolute', right: 8, top: 36, flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+          <IsoBtn label="−" title="Fewer floors" onPress={() => setTowerFloors((n) => Math.max(TOWER_MIN_FLOORS, n - 1))} />
+          <Box style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 4, paddingBottom: 4, backgroundColor: BUILD_UI.panelBg, borderRadius: 4 }}>
+            <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{`${towerFloors} floors`}</Text>
+          </Box>
+          <IsoBtn label="+" title="More floors" onPress={() => setTowerFloors((n) => Math.min(TOWER_MAX_FLOORS, n + 1))} />
+        </Box>
+      ) : null}
+
+      {/* ── face painter (req_0478): paint the selection's 6 faces ──────────── */}
+      {selectedIds.size > 0 && !armed ? (
+        <Box style={{ position: 'absolute', right: 8, top: 36, backgroundColor: '#0b1220fa', borderWidth: 1, borderColor: '#1e3a5f', borderRadius: 6, padding: 6, gap: 5, width: 196 }}>
+          <Text fontSize={9} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>PAINT FACES — click a side</Text>
+          <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
+            {FACE_BUTTONS.map((f) => (
+              <Pressable key={f.id} onPress={() => paintFace(f.id)} hoverable tooltip={f.title}>
+                <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: '#3a4f6b', backgroundColor: '#16233a' }}>
+                  <Text fontSize={10} color="#dbe6f3" style={{ fontFamily: 'monospace' }}>{f.label}</Text>
+                </Box>
+              </Pressable>
+            ))}
+          </Box>
+          <Box style={{ flexDirection: 'row', gap: 3, flexWrap: 'wrap' }}>
+            {BRUSH_SWATCHES.map((c) => (
+              <Pressable key={c} onPress={() => setFaceBrush({ kind: 'color', value: c })}>
+                <Box style={{ width: 13, height: 13, borderRadius: 3, backgroundColor: c, borderWidth: faceBrush.kind === 'color' && faceBrush.value === c ? 2 : 1, borderColor: faceBrush.kind === 'color' && faceBrush.value === c ? '#7dd3fc' : '#3a4f6b' }} />
+              </Pressable>
+            ))}
+          </Box>
+          {brushMaterials.length > 0 ? (
+            <Box style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+              <IsoBtn label="◀" title="Previous material" onPress={() => setBrushMatIdx((i) => { const n = (i - 1 + brushMaterials.length) % brushMaterials.length; setFaceBrush({ kind: 'material', id: brushMaterials[n].id }); return n; })} />
+              <Pressable onPress={() => setFaceBrush({ kind: 'material', id: brushMaterials[brushMatIdx].id })} style={{ flexGrow: 1 }}>
+                <Box style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, backgroundColor: '#16233a', borderColor: faceBrush.kind === 'material' && faceBrush.id === brushMaterials[brushMatIdx].id ? '#7dd3fc' : '#3a4f6b' }}>
+                  <Text fontSize={9} color={faceBrush.kind === 'material' ? '#eaf4ff' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{brushMaterials[brushMatIdx].label}</Text>
+                </Box>
+              </Pressable>
+              <IsoBtn label="▶" title="Next material" onPress={() => setBrushMatIdx((i) => { const n = (i + 1) % brushMaterials.length; setFaceBrush({ kind: 'material', id: brushMaterials[n].id }); return n; })} />
+            </Box>
+          ) : null}
+        </Box>
+      ) : null}
+
       {/* ── catalog rail (bottom): pick a piece to place ───────────────────── */}
-      <CatalogRail prefabs={prefabs} armed={armed} onArm={(a) => { setArmed((cur) => (cur && cur.id === a.id && cur.kind === a.kind ? null : a)); setSelectedIds(new Set()); }} />
+      <CatalogRail prefabs={prefabs} armed={armed} onArm={(a) => { setArmed((cur) => (sameArmed(cur, a) ? null : a)); setSelectedIds(new Set()); }} />
 
       <Text fontSize={9} color={props.focused ? '#7dd3fc' : '#475569'} style={{ fontFamily: 'monospace', position: 'absolute', left: 8, top: 34 }}>
         {armed
-          ? `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · Esc`
+          ? armed.kind === 'tower'
+            ? `tower: drag the footprint · ${towerFloors} floors (+/− top right) · hollow shell + roof, one building · Esc`
+            : `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · Esc`
           : selectedIds.size > 0
-            ? `${selectedIds.size} selected · drag to move · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
+            ? `${selectedIds.size} selected · drag to move · paint faces (top right) · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
             : `WASD pan · drag rotate · scroll zoom · F recenter · click = ${wholeBuilding ? 'building, shift = piece' : 'piece, shift = building'} · pick below to build`}
       </Text>
       {/* what's in the map — the "junk" is the real placed pieces + world props (the
@@ -885,7 +1112,7 @@ const IsoGrid = memo(function IsoGrid(props: { centerX: number; centerZ: number;
 // SAME BUILD_CATALOG the F2 palette reads.
 type RailTab = BuildPieceKind | 'prefabs';
 const RAIL_TABS: RailTab[] = [...PALETTE_KINDS, 'prefabs'];
-const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: readonly BuildPrefabDef[]; onArm: (a: { kind: 'piece' | 'prefab'; id: string }) => void }) {
+const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: readonly BuildPrefabDef[]; onArm: (a: NonNullable<Armed>) => void }) {
   const [tab, setTab] = useState<RailTab>('wall');
   // 'prefabs' lists the named compositions (stamp → many pieces) — the FULL list the cart
   // passes (built-in + user-captured stream prefabs); every other tab lists that kind's
@@ -895,6 +1122,8 @@ const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: re
     [tab, props.prefabs],
   );
   const armKind: 'piece' | 'prefab' = tab === 'prefabs' ? 'prefab' : 'piece';
+  const armedId = props.armed && props.armed.kind !== 'tower' ? props.armed.id : null;
+  const towerArmed = props.armed?.kind === 'tower';
   return (
     <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 8, backgroundColor: '#0b1220fa', borderRadius: 6, borderWidth: 1, borderColor: '#1e3a5f', padding: 8, gap: 6 }}>
       <Text fontSize={10} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
@@ -908,12 +1137,18 @@ const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: re
             </Box>
           </Pressable>
         ))}
+        {/* the TOWER tool (req_0478) — not a catalog kind, a whole-shell drag tool */}
+        <Pressable onPress={() => props.onArm({ kind: 'tower' })}>
+          <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: towerArmed ? '#7dd3fc' : '#7c5a1e', backgroundColor: towerArmed ? '#1d4ed8' : '#4a3a12' }}>
+            <Text fontSize={11} color={towerArmed ? '#ffffff' : '#f0d9a8'} style={{ fontFamily: 'monospace' }}>🏙 tower</Text>
+          </Box>
+        </Pressable>
       </Box>
       <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
         {entries.map((def) => (
           <Pressable key={def.id} onPress={() => props.onArm({ kind: armKind, id: def.id })}>
-            <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: props.armed?.id === def.id ? '#7dd3fc' : '#3a4f6b', backgroundColor: props.armed?.id === def.id ? '#1d4ed8' : '#16233a' }}>
-              <Text fontSize={11} color={props.armed?.id === def.id ? '#ffffff' : '#dbe6f3'} style={{ fontFamily: 'monospace' }}>{def.label}</Text>
+            <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: armedId === def.id ? '#7dd3fc' : '#3a4f6b', backgroundColor: armedId === def.id ? '#1d4ed8' : '#16233a' }}>
+              <Text fontSize={11} color={armedId === def.id ? '#ffffff' : '#dbe6f3'} style={{ fontFamily: 'monospace' }}>{def.label}</Text>
             </Box>
           </Pressable>
         ))}

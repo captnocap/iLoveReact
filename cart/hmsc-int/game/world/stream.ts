@@ -35,12 +35,17 @@ import {
 } from './grid';
 import type { TileKind } from '../kinds';
 import {
+  BUILD_FACE_SLOTS,
   BUILD_PREFAB_DEFINITIONS,
   isCatalogId,
   isWallEdit,
+  resolveFaceSkin,
+  catalogEntry,
   placedPieceAcceptsEdits,
+  skinSetProblems,
   stampPrefabPieces,
   validatePrefab,
+  type BuildSkinSet,
   type BuildPrefabDef,
   type PlacedBuildPiece,
   type WallEdit,
@@ -84,6 +89,10 @@ export type WorldEvent =
   | { kind: 'piecePlaced'; placement: PiecePlacement; mapName?: string }
   | { kind: 'pieceRemoved'; id: string; mapName?: string }
   | { kind: 'pieceEditSet'; id: string; edit: WallEdit; mapName?: string }
+  // TOWERSKIN-0610 (addition): per-face paint on a STANDING piece — set slots
+  // MERGE onto the piece's skin. Mirrors pieceEditSet so the id stays stable
+  // (the editor's selection survives painting face after face).
+  | { kind: 'pieceSkinSet'; id: string; skin: BuildSkinSet; mapName?: string }
   | { kind: 'prefabDefined'; def: BuildPrefabDef }
   // BUILDSKIN req_0184 addendum (addition): delete a building TYPE — drops
   // the def + tombstones the id (a same-id static seed stays gone); placed
@@ -111,6 +120,20 @@ export function piecesForMap(
 
 export function legacyGlobalPieces(state: WorldStreamState | null | undefined): PlacedBuildPiece[] {
   return state?.pieces ?? [];
+}
+
+export function pieceMutationMapName(
+  state: WorldStreamState | null | undefined,
+  mapName: string,
+  legacyMapName: string | null | undefined,
+  pieceId: string,
+): string | undefined {
+  const map = eventMapName({ mapName });
+  if (!map) return undefined;
+  if ((state?.piecesByMap?.[map] ?? []).some((piece) => piece.id === pieceId)) return map;
+  const legacyMap = eventMapName({ mapName: legacyMapName ?? undefined });
+  if (legacyMap === map && (state?.pieces ?? []).some((piece) => piece.id === pieceId)) return undefined;
+  return map;
 }
 
 /** Mint ids and append placements — the one piece-adding step both
@@ -144,6 +167,42 @@ function nextPieceSeq(state: WorldStreamState, mapName?: string): number {
   const map = eventMapName({ mapName });
   if (map) return Math.max(state.pieceSeqByMap?.[map] ?? 0, state.pieceSeq ?? 0) + 1;
   return state.pieceSeq + 1;
+}
+
+function resolvedSkinForPrefabPiece(def: BuildPrefabDef, index: number): BuildSkinSet | undefined {
+  const piece = def.pieces[index];
+  if (!piece) return undefined;
+  const kind = catalogEntry(piece.pieceId).kind;
+  const skin: BuildSkinSet = {};
+  for (const slot of BUILD_FACE_SLOTS) {
+    const resolved = resolveFaceSkin(def.skins, kind, piece.skin, slot).skin;
+    if (resolved) skin[slot] = resolved;
+  }
+  return Object.keys(skin).length > 0 ? skin : undefined;
+}
+
+function refreshPrefabSkins(pieces: PlacedBuildPiece[], def: BuildPrefabDef): PlacedBuildPiece[] {
+  let changed = false;
+  const next = pieces.map((piece) => {
+    if (piece.prefabId !== def.id || piece.prefabPieceIndex === undefined) return piece;
+    const skin = resolvedSkinForPrefabPiece(def, piece.prefabPieceIndex);
+    changed = true;
+    if (skin) return { ...piece, skin };
+    const { skin: _oldSkin, ...bare } = piece;
+    return bare;
+  });
+  return changed ? next : pieces;
+}
+
+function refreshPrefabSkinsByMap(piecesByMap: Record<string, PlacedBuildPiece[]>, def: BuildPrefabDef): Record<string, PlacedBuildPiece[]> {
+  let changed = false;
+  const next: Record<string, PlacedBuildPiece[]> = {};
+  for (const [map, pieces] of Object.entries(piecesByMap ?? {})) {
+    const refreshed = refreshPrefabSkins(pieces, def);
+    next[map] = refreshed;
+    if (refreshed !== pieces) changed = true;
+  }
+  return changed ? next : piecesByMap;
 }
 
 export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freeze({
@@ -208,11 +267,28 @@ export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freez
         if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
         return { ...state, pieces };
       }
+      case 'pieceSkinSet': {
+        // TOWERSKIN-0610: per-face paint on a standing piece. Set slots MERGE
+        // onto the existing skin (paint the front, the back stays); invalid
+        // skin shapes are refused here like every other malformed event.
+        if (skinSetProblems(event.skin, 'pieceSkinSet').length > 0) return state;
+        if (Object.keys(event.skin).length === 0) return state;
+        const map = eventMapName(event);
+        const source = map ? (state.piecesByMap?.[map] ?? []) : state.pieces;
+        const index = source.findIndex((piece) => piece.id === event.id);
+        if (index < 0) return state;
+        const pieces = [...source];
+        pieces[index] = { ...pieces[index], skin: { ...(pieces[index].skin ?? {}), ...event.skin } };
+        if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
+        return { ...state, pieces };
+      }
       case 'prefabDefined': {
         if (!event.def || typeof event.def.id !== 'string' || validatePrefab(event.def).length > 0) return state;
         return {
           ...state,
           prefabs: { ...state.prefabs, [event.def.id]: event.def },
+          pieces: refreshPrefabSkins(state.pieces, event.def),
+          piecesByMap: refreshPrefabSkinsByMap(state.piecesByMap ?? {}, event.def),
           // re-defining a deleted id revives it (the tombstone lifts)
           removedPrefabs: (state.removedPrefabs ?? []).filter((id) => id !== event.def.id),
         };

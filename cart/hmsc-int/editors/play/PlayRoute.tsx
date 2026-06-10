@@ -1102,7 +1102,8 @@ export function PlayRoute(props: {
       case 'prefabStamped':
         return { ...event, mapName: props.mapName } as WorldEvent;
       case 'pieceRemoved':
-      case 'pieceEditSet': {
+      case 'pieceEditSet':
+      case 'pieceSkinSet': {
         const mapName = pieceMutationMapName(streamState, props.mapName, props.legacyPieceMapName, event.id);
         return mapName ? ({ ...event, mapName } as WorldEvent) : event;
       }

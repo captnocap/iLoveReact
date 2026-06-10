@@ -11,6 +11,7 @@ import {
   pieceBounds,
   placedPieceCameraOccluders,
   placedPieceColliders,
+  placedPieceDepthSpan,
   placedPieceRamps,
   placedPieceTags,
   prefabFromPieces,
@@ -22,7 +23,7 @@ import {
 } from './placed';
 import { catalogEntry } from './catalog';
 import { decomposePrefab, prefabDefinition, validatePrefab } from './prefabs';
-import { legacyGlobalPieces, piecesForMap, worldStream, type WorldEvent, type WorldStreamState } from '../world/stream';
+import { legacyGlobalPieces, pieceMutationMapName, piecesForMap, worldStream, type WorldEvent, type WorldStreamState } from '../world/stream';
 
 let nextId = 0;
 function placed(pieceId: string, x: number, z: number, over: Partial<PlacedBuildPiece> = {}): PlacedBuildPiece {
@@ -125,6 +126,55 @@ test('REQ-0107: floor and wall pieces keep catalog extents; flushness is origin 
   assertEqual(vBounds.maxZ - vBounds.minZ, wallSize.widthMeters, 'vertical wall keeps catalog run width');
   assertEqual(hSolo.maxX - hSolo.minX, wallSize.widthMeters, 'standalone horizontal collision keeps catalog run width');
   assertEqual(vSolo.maxZ - vSolo.minZ, wallSize.widthMeters, 'standalone vertical collision keeps catalog run width');
+});
+
+test('REQ-0466: one-sided floor support puts the whole wall thickness on the floor top', () => {
+  const floor = placed('floor.concrete.common', 1.5, 1.5);
+  const north = placed('wall.concrete.common', 1.5, 0, { y: 0.2, yawDegrees: 0 });
+  const south = placed('wall.concrete.common', 1.5, 3, { y: 0.2, yawDegrees: 0 });
+  const northSpan = placedPieceDepthSpan(north, [floor, north]);
+  const southSpan = placedPieceDepthSpan(south, [floor, south]);
+  assertClose(northSpan.minV, 0, 1e-9, 'north edge wall starts at the floor edge line');
+  assertClose(northSpan.maxV, 0.25, 1e-9, 'north edge wall thickness sits onto the floor');
+  assertClose(southSpan.minV, -0.25, 1e-9, 'south edge wall thickness sits back onto the floor');
+  assertClose(southSpan.maxV, 0, 1e-9, 'south edge wall ends at the floor edge line');
+
+  const [floorRect, northRect, southRect] = placedPieceColliders([floor, north, south]).rects;
+  void floorRect;
+  assertClose(northRect.minZ, 0, 1e-9, 'north wall has no outside overhang');
+  assertClose(northRect.maxZ, 0.25, 1e-9, 'north wall sits inside the floor footprint');
+  assertClose(southRect.minZ, 2.75, 1e-9, 'south wall sits inside the floor footprint');
+  assertClose(southRect.maxZ, 3, 1e-9, 'south wall has no outside overhang');
+});
+
+test('REQ-0466: a wall between two floor plates splits its thickness across the seam', () => {
+  const left = placed('floor.concrete.common', 1.5, 1.5);
+  const right = placed('floor.concrete.common', 1.5, 4.5);
+  const wall = placed('wall.concrete.common', 1.5, 3, { y: 0.2, yawDegrees: 0 });
+  const span = placedPieceDepthSpan(wall, [left, right, wall]);
+  assertClose(span.minV, -0.125, 1e-9, 'one floor supports the back half');
+  assertClose(span.maxV, 0.125, 1e-9, 'the other floor supports the front half');
+  const rect = placedPieceColliders([left, right, wall]).rects[2];
+  assertClose(rect.minZ, 2.875, 1e-9, 'shared-seam wall keeps a half-depth on one side');
+  assertClose(rect.maxZ, 3.125, 1e-9, 'shared-seam wall keeps a half-depth on the other side');
+});
+
+test('REQ-0466: unsupported ground walls keep the old centered thickness', () => {
+  const wall = placed('wall.concrete.common', 1.5, 3, { yawDegrees: 0 });
+  const span = placedPieceDepthSpan(wall, [wall]);
+  assertClose(span.minV, -0.125, 1e-9, 'freestanding wall keeps centered back half');
+  assertClose(span.maxV, 0.125, 1e-9, 'freestanding wall keeps centered front half');
+});
+
+test('REQ-0472: floor-supported wall joins stop at the supported intersection face', () => {
+  const floor = placed('floor.concrete.common', 1.5, 1.5);
+  const horizontal = placed('wall.concrete.common', 1.5, 0, { y: 0.2, yawDegrees: 0 });
+  const vertical = placed('wall.concrete.common', 3, 1.5, { y: 0.2, yawDegrees: 90 });
+  const [, hRect, vRect] = placedPieceColliders([floor, horizontal, vertical]).rects;
+  assertClose(vRect.maxX, 3, 1e-9, 'the supported vertical wall far face sits on its authored edge');
+  assertClose(hRect.maxX, vRect.maxX, 1e-9, 'the horizontal wall stops at that intersection, with no post-intersection overhang');
+  assertClose(hRect.maxZ, 0.25, 1e-9, 'the horizontal wall thickness still sits fully on the floor');
+  assertClose(vRect.minZ, 0, 1e-9, 'the vertical wall still reaches the horizontal wall face');
 });
 
 test('REQ-0109: L wall corners close the endpoint-to-side outer faces exactly', () => {
@@ -377,6 +427,24 @@ test('PROJSCOPE-0606 live repair: the legacy global pool remains visible only to
   assertEqual(legacyGlobalPieces(state).length, 1, 'the legacy pool remains intact and unmigrated');
 });
 
+test('REQ-0410: build-mode piece mutations target the visible pool, including legacy owner pieces', () => {
+  let state = worldStream.initial();
+  state = worldStream.apply(state, { kind: 'piecePlaced', placement: { pieceId: 'wall.concrete.common', x: 1, y: 0, z: 1, yawDegrees: 0 } });
+  state = worldStream.apply(state, { kind: 'piecePlaced', mapName: 'default-map', placement: { pieceId: 'floor.concrete.common', x: 4, y: 0, z: 4, yawDegrees: 0 } });
+
+  const [legacyPiece, scopedPiece] = piecesForMap(state, 'default-map', { legacyMapName: 'default-map' });
+  assertEqual(pieceMutationMapName(state, 'default-map', 'default-map', legacyPiece.id), undefined, 'legacy owner edits use the legacy global stream');
+  assertEqual(pieceMutationMapName(state, 'default-map', 'default-map', scopedPiece.id), 'default-map', 'scoped edits stay in the map stream');
+
+  const legacyMutationMap = pieceMutationMapName(state, 'default-map', 'default-map', legacyPiece.id);
+  state = worldStream.apply(state, legacyMutationMap ? { kind: 'pieceRemoved', id: legacyPiece.id, mapName: legacyMutationMap } : { kind: 'pieceRemoved', id: legacyPiece.id });
+  assertEqual(piecesForMap(state, 'default-map', { legacyMapName: 'default-map' }).map((p) => p.id).join(','), scopedPiece.id, 'X removes the legacy-visible target too');
+
+  const scopedMutationMap = pieceMutationMapName(state, 'default-map', 'default-map', scopedPiece.id);
+  state = worldStream.apply(state, scopedMutationMap ? { kind: 'pieceRemoved', id: scopedPiece.id, mapName: scopedMutationMap } : { kind: 'pieceRemoved', id: scopedPiece.id });
+  assertEqual(piecesForMap(state, 'default-map', { legacyMapName: 'default-map' }).length, 0, 'X still removes normal map-scoped targets');
+});
+
 test('HOTRESTORE-0606: hot restore consumes the same map scope filter as fresh mount', () => {
   let state = worldStream.initial();
   state = worldStream.apply(state, { kind: 'piecePlaced', placement: { pieceId: 'wall.concrete.common', x: 1, y: 0, z: 1, yawDegrees: 0 } });
@@ -428,6 +496,41 @@ test('a prefab stamp carries resolved face skins with the window edit into place
   assertEqual(wall.skin?.front?.kind === 'material' ? wall.skin.front.id : '', 'd-neon-stucco', 'the material id survives placement');
   assertEqual(wall.skin?.back?.kind === 'color' ? wall.skin.back.value : '', '#f8fafc', 'the back color survives placement');
   assertEqual(wall.skin?.sides?.kind === 'color' ? wall.skin.sides.value : '', '#111827', 'the side color survives placement');
+});
+
+test('a prefab skin edit refreshes already stamped test-route pieces', () => {
+  const base = {
+    id: 'prefab.liveSkinnedWall',
+    label: 'Live Skinned Wall',
+    theme: 'common' as const,
+    pieces: [
+      { pieceId: 'wall.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0 },
+    ],
+  };
+  let state = worldStream.initial();
+  state = worldStream.apply(state, { kind: 'prefabDefined', def: base });
+  state = worldStream.apply(state, { kind: 'prefabStamped', mapName: 'test-map', prefabId: base.id, origin: { x: 10, y: 0, z: 10 }, yawDegrees: 0 });
+  assertEqual(piecesForMap(state, 'test-map')[0].skin, undefined, 'the first stamp starts bare');
+
+  state = worldStream.apply(state, {
+    kind: 'prefabDefined',
+    def: {
+      ...base,
+      skins: {
+        wall: {
+          front: { kind: 'color', value: '#dc2626' },
+          back: { kind: 'color', value: '#16a34a' },
+          sides: { kind: 'color', value: '#2563eb' },
+        },
+      },
+    },
+  });
+
+  const wall = piecesForMap(state, 'test-map')[0];
+  assertEqual(wall.prefabId, base.id, 'the placed copy remembers its building type');
+  assertEqual(wall.skin?.front?.kind === 'color' ? wall.skin.front.value : '', '#dc2626', 'front skin refreshed on the placed piece');
+  assertEqual(wall.skin?.back?.kind === 'color' ? wall.skin.back.value : '', '#16a34a', 'back skin refreshed on the placed piece');
+  assertEqual(wall.skin?.sides?.kind === 'color' ? wall.skin.sides.value : '', '#2563eb', 'side skin refreshed on the placed piece');
 });
 
 test('a world-saved prefab joins the registry family and stamps by id', () => {
@@ -494,6 +597,28 @@ test('the materializer is tolerant; the authoring boundary is strict', () => {
   assertEqual(state.pieces.length, 0, 'foreign noise places nothing and crashes nothing');
   assert(validatePlacement({ pieceId: 'wall.that.never.was', x: 0, y: 0, z: 0, yawDegrees: 0 }).length > 0, 'the route-side validator names the problem before append');
   assert(validatePlacement({ pieceId: 'floor.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0, edit: 'door' }).length > 0, 'edits on editless kinds are refused at the boundary');
+});
+
+// ── TOWERSKIN-0610: per-face paint on a standing piece ───────────────────────
+
+test('pieceSkinSet paints one face of a STANDING piece — id stable, other slots kept', () => {
+  let state = fold([
+    { kind: 'piecePlaced', placement: { pieceId: 'wall.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0 } },
+  ]);
+  const id = state.pieces[0].id;
+  state = worldStream.apply(state, { kind: 'pieceSkinSet', id, skin: { front: { kind: 'color', value: '#aa3311' } } });
+  assertEqual(state.pieces[0].id, id, 'painting never re-mints the id (selection survives)');
+  assertEqual(JSON.stringify(state.pieces[0].skin?.front), '{"kind":"color","value":"#aa3311"}', 'the painted face landed');
+  // a second face MERGES — the first stays
+  state = worldStream.apply(state, { kind: 'pieceSkinSet', id, skin: { back: { kind: 'material', id: 'a-brick' } } });
+  assertEqual(JSON.stringify(state.pieces[0].skin?.front), '{"kind":"color","value":"#aa3311"}', 'painting the back keeps the front');
+  assertEqual(JSON.stringify(state.pieces[0].skin?.back), '{"kind":"material","id":"a-brick"}', 'the second face landed');
+  // malformed skins and unknown ids are refused like every malformed event
+  const before = state;
+  state = worldStream.apply(state, { kind: 'pieceSkinSet', id, skin: { front: { kind: 'color', value: 'red' } } as never });
+  assertEqual(state, before, 'a non-#rrggbb color is refused at the materializer');
+  state = worldStream.apply(state, { kind: 'pieceSkinSet', id: 'bp_nope', skin: { front: { kind: 'color', value: '#112233' } } });
+  assertEqual(state, before, 'an unknown id paints nothing and crashes nothing');
 });
 
 // ── RAMPFOOT-0605: the ramp owns footing in its footprint ────────────────────

@@ -726,7 +726,8 @@ function EditorShell() {
       case 'prefabStamped':
         return { ...event, mapName: ws.stem } as WorldEvent;
       case 'pieceRemoved':
-      case 'pieceEditSet': {
+      case 'pieceEditSet':
+      case 'pieceSkinSet': {
         const mapName = pieceMutationMapName(streamState, ws.stem, legacyPieceMapName, event.id);
         return mapName ? ({ ...event, mapName } as WorldEvent) : event;
       }

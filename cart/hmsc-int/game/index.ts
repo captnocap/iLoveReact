@@ -21,8 +21,17 @@
 // their capture lane rewrites the system in behind them — the import line is
 // already correct; only what's behind the door grows.
 
-export { GAME_PHYSICS, PHYSICS_LIMITS, physicsHostReady, registerHeightfield, clearHeightfields, stepPhysics } from './physics';
+export {
+  GAME_PHYSICS, PHYSICS_LIMITS, cameraOcclusion, cameraOcclusionConfiguredHit,
+  cameraOcclusionDistance, configureCameraOcclusion, physicsHostReady, registerHeightfield,
+  clearHeightfields, stepPhysics,
+} from './physics';
 export type {
+  CameraOcclusionConfiguredHit,
+  CameraOcclusionInput,
+  CameraOcclusionOrientedRect,
+  CameraOcclusionRect,
+  CameraOcclusionResult,
   CollisionRect,
   Heightfield,
   OrientedCollisionRect,
@@ -34,6 +43,9 @@ export type {
   SurfaceFeel,
   Vec3,
 } from './physics';
+
+export { cameraOcclusionResponse } from './cameraOcclusion';
+export type { CameraOcclusionResponse, CameraOcclusionResponseTuning } from './cameraOcclusion';
 
 export { GAME_PATHING, pathingHostReady } from './pathing';
 export type { MotionPlan, MotionProfile, MotionSample, Path, PathPoint } from './pathing';
@@ -58,7 +70,7 @@ export type { CommandOutcome, CommandRegistry, CommandSpec, ScriptResult } from 
 
 // The world grid substrate (V4 capture — landed behind ./world but the door
 // line was missing; consumers were reaching it only via GAME_COMMANDS' ctx).
-export { GAME_WORLD, worldStream } from './world';
+export { GAME_WORLD, legacyGlobalPieces, pieceMutationMapName, piecesForMap, worldStream } from './world';
 export type { GridCell, LandformPlacement, PiecePlacement, PlacedCell, WorldEvent, WorldGridState, WorldStreamState, WorldSurfaceRegion } from './world';
 
 // The V24 building piece grammar: piece kinds + bake contracts, the WallEdit
@@ -68,12 +80,15 @@ export type { GridCell, LandformPlacement, PiecePlacement, PlacedCell, WorldEven
 export { GAME_BUILD } from './build';
 export type {
   BakePromise,
+  BuildFaceSkin,
+  BuildFaceSlot,
   BuildGameplayTags,
   BuildKindContract,
   BuildMaterial,
   BuildPieceDef,
   BuildPieceKind,
   BuildPrefabDef,
+  BuildSkinSet,
   BuildSnapMode,
   BuildTheme,
   DecomposedPiece,
@@ -93,9 +108,9 @@ export type {
 export {
   validatePaintedOverlay, paintedOverlayHasContent,
   figurePaintTextureKey, vehiclePaintTextureKey,
-  packPaintedLayerData, PAINTED_LAYER_WGSL,
+  packPaintedLayerData, packPaintedLookData, PAINTED_LAYER_WGSL,
 } from './painted';
-export type { PaintedOverlay, PaintedOverlayLayer } from './painted';
+export type { PaintedOverlay, PaintedOverlayLayer, PaintedLayerLook } from './painted';
 
 // ── capture-pending doors (V17: the import line is already the right one) ──
 export { GAME_FIGURE, charactersStream, bakeBodyDocument, applyBodyPaint } from './figure';
