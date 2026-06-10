@@ -300,6 +300,14 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // commitPaint → the standing pieces actually re-rendered (JS side): the
   // "release-to-standing" latency the user perceives as placement time.
   const commitPerfRef = useRef<{ t0: number; label: string } | null>(null);
+  // When the user last touched this pane (req_0516): the stall watchdog uses
+  // it to tell INTERACTION stalls (drag/commit windows — the lag the user
+  // feels) from IDLE stalls (external machine load: agent builds, the dev
+  // watcher re-bundling, a verify suite — real starvation, but NOT drag lag).
+  // Same clock as the watchdog tick (performance.now), NOT perfMs (which may
+  // ride __bench_now_us on a different epoch).
+  const lastInputAtRef = useRef(0);
+  const markInput = () => { lastInputAtRef.current = (globalThis as any).performance?.now?.() ?? 0; };
   // ── Optimistic edits (req_0511: "the user interface had 0 delay, and
   // everything just resolves its whole scene graph behind the scenes") ─────
   // Release costs nothing: the drag ghost (already mounted, stable keys)
@@ -523,6 +531,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
 
   const onDown = (e: any) => {
     props.onFocus?.();
+    markInput();
     const p = local(e);
     let mode: 'rotate' | 'move' | 'paint' = 'rotate';
     let gx0 = 0, gz0 = 0;
@@ -560,6 +569,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (armedRef.current) setSnap(resolveAt(p.x, p.y));
   };
   const onMove = (e: any) => {
+    markInput();
     const p = local(e);
     const d = dragRef.current;
     if (d && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
@@ -626,6 +636,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (armedRef.current) setSnap(resolveAt(p.x, p.y));
   };
   const onUp = () => {
+    markInput();
     const d = dragRef.current;
     dragRef.current = null;
     if (!d) return;
@@ -905,6 +916,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   useEffect(() => {
     if (!props.focused) return;
     const off = busOn('__keydown', (e: any) => {
+      lastInputAtRef.current = (globalThis as any).performance?.now?.() ?? 0;
       const k = String(e?.key ?? '').toLowerCase();
       if (k === 'r') setGhostYaw((y) => (y + 90) % 360);
       else if (k === 'escape') { setArmed(null); setSelectedIds(new Set()); }
@@ -923,7 +935,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (!props.focused) return;
     const held: Record<string, boolean> = {};
     const key = (e: any): string => { const k = String(e?.key ?? '').toLowerCase(); return ARROW_TO_WASD[k] ?? k; };
-    const offD = busOn('__keydown', (e: any) => { const k = key(e); if (MOVE_KEYS.has(k)) held[k] = true; });
+    const offD = busOn('__keydown', (e: any) => { const k = key(e); if (MOVE_KEYS.has(k)) { held[k] = true; lastInputAtRef.current = G.performance?.now?.() ?? 0; } });
     const offU = busOn('__keyup', (e: any) => { const k = key(e); if (MOVE_KEYS.has(k)) { held[k] = false; keyActionsRef.current.saveCamera(); } });
     const G: any = globalThis;
     const sched = G.requestAnimationFrame ? G.requestAnimationFrame.bind(G) : (fn: any) => setTimeout(fn, 16);
@@ -945,11 +957,19 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       // frame, so a long gap between ticks IS a main-thread stall — JS work we
       // haven't probed, or the host frame choking — exactly the time the
       // commit probes can't see.
+      // IDLE vs INTERACTION (req_0516, USER: "why does this fire when im
+      // doing nothing at all?"): the loop ticks even when the user is idle,
+      // so EXTERNAL machine load (agent-side builds/verify suites, the dev
+      // watcher re-bundling) also lands here — real starvation, but NOT the
+      // user's drag. Stalls outside an interaction window (no drag, no
+      // pending commit, no input for 3s) say so on the line and report at
+      // most once per 10s; interaction stalls keep req_0507's 1/s cadence.
       if (now - last > 150) {
+        const idle = !dragRef.current && !commitPerfRef.current && now - lastInputAtRef.current > 3000;
         stallCount += 1;
         if (now - last > stallMax) stallMax = now - last;
-        if (now - stallWindowAt > 1000) {
-          console.warn(`[DRAGDRAW] frame stall${stallCount > 1 ? `s ×${stallCount}` : ''} max=${stallMax.toFixed(0)}ms${commitPerfRef.current ? ` after=${commitPerfRef.current.label}` : ''}`);
+        if (now - stallWindowAt > (idle ? 10000 : 1000)) {
+          console.warn(`[DRAGDRAW] frame stall${stallCount > 1 ? `s ×${stallCount}` : ''} max=${stallMax.toFixed(0)}ms${commitPerfRef.current ? ` after=${commitPerfRef.current.label}` : ''}${idle ? ' (idle — external load on this machine, e.g. builds/bundler; not your editing)' : ''}`);
           stallWindowAt = now;
           stallCount = 0;
           stallMax = 0;
@@ -1156,6 +1176,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         onMouseMove={onMove}
         onMouseUp={onUp}
         onScroll={(e: any) => {
+          markInput();
           const d = Number(e?.deltaY ?? 0);
           if (!d) return;
           // The scroll event carries scrollX/scrollY/deltaX/deltaY — NOT x/y — so
