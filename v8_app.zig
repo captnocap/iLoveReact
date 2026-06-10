@@ -98,6 +98,9 @@ const world_loader = if (!HEADLESS and @hasDecl(build_options, "has_compiled_wor
     pub fn unmount(_: u32) void {}
 };
 const latches = @import("framework/state/latches.zig");
+// Pure string assembly (no GPU deps) — the ONE Effect shader assembler, shared
+// with the no-V8 material path (framework/gpu/effects.renderShaderToTexture).
+const effect_assemble = @import("framework/gpu/effect_assemble.zig");
 const animations = if (HEADLESS) struct {
     pub fn clearAll() void {}
     pub fn tickAll(_: anytype) void {}
@@ -128,6 +131,9 @@ const prepared_input = @import("framework/state/prepared_input.zig");
 const v8_runtime = @import("framework/v8_runtime.zig");
 const v8_bindings_core = if (HEADLESS) struct {
     pub fn contentStoreGet(_: anytype) ?[]const u8 {
+        return null;
+    }
+    pub fn contentStoreTake(_: anytype) ?[]u8 {
         return null;
     }
 } else @import("framework/v8_bindings_core.zig");
@@ -253,6 +259,7 @@ var g_node_id_by_input_slot: [input.MAX_INPUTS]u32 = [_]u32{0} ** input.MAX_INPU
 // context, reinit, and re-eval the new bundle. React state resets on reload
 // in phase 1; phase 2 will use LuaJIT hotstate atoms to preserve it.
 const DEV_MODE = if (@hasDecl(build_options, "dev_mode")) build_options.dev_mode else false;
+const DEV_BUILD_ID = if (@hasDecl(build_options, "dev_build_id")) build_options.dev_build_id else "unknown";
 const CUSTOM_CHROME_MODE = if (@hasDecl(build_options, "custom_chrome")) build_options.custom_chrome else false;
 const BORDERLESS_MODE = DEV_MODE or CUSTOM_CHROME_MODE;
 const DEV_BUNDLE_PATH = "bundle.js";
@@ -1990,6 +1997,22 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                     }
                 }
             }
+        } else if (std.mem.eql(u8, k, "scene3dVerticesHandle")) {
+            if (jsonInt(v)) |i| {
+                if (i > 0 and i < std.math.maxInt(u32)) {
+                    if (contentStoreTake(@intCast(i))) |bytes| {
+                        defer std.heap.c_allocator.free(bytes);
+                        if (bytes.len > 0 and bytes.len <= (1 << 28) and bytes.len % @sizeOf(f32) == 0) {
+                            const len = bytes.len / @sizeOf(f32);
+                            const buf = g_alloc.alloc(f32, len) catch null;
+                            if (buf) |out| {
+                                @memcpy(std.mem.sliceAsBytes(out), bytes);
+                                node.scene3d_vertices = out;
+                            }
+                        }
+                    }
+                }
+            }
         } else if (std.mem.eql(u8, k, "scene3dVertCount")) {
             if (jsonInt(v)) |i| node.scene3d_vert_count = if (i > 0 and i < (1 << 22)) @intCast(i) else 0;
         } else if (std.mem.eql(u8, k, "scene3dBoundsRadius")) {
@@ -2271,7 +2294,7 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             // shared math library (snoise, fbm, hsv2rgb, hsl2rgb, …)
             // before the user code so every cart sees the same surface.
             if (v == .string) {
-                if (assembleEffectShader(v.string)) |wgsl| {
+                if (effect_assemble.assemble(g_alloc, v.string)) |wgsl| {
                     node.effect_shader = .{ .wgsl = wgsl };
                 }
             }
@@ -2339,60 +2362,9 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
     }
 }
 
-// WGSL header: uniforms + fullscreen-triangle vertex shader. Matches the
-// GpuUniforms layout in framework/effects.zig and the `vs_main`/`fs_main`
-// entry points renderGpu expects.
-const EFFECT_WGSL_HEADER: []const u8 =
-    \\struct Uniforms {
-    \\  size_w: f32,
-    \\  size_h: f32,
-    \\  time: f32,
-    \\  dt: f32,
-    \\  frame: f32,
-    \\  mouse_x: f32,
-    \\  mouse_y: f32,
-    \\  mouse_inside: f32,
-    \\};
-    \\@group(0) @binding(0) var<uniform> U: Uniforms;
-    \\
-    \\struct VsOut {
-    \\  @builtin(position) pos: vec4f,
-    \\  @location(0) uv: vec2f,
-    \\};
-    \\
-    \\@vertex fn vs_main(@builtin(vertex_index) i: u32) -> VsOut {
-    \\  let positions = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
-    \\  // UV's Y is inverted relative to framebuffer: the image shader
-    \\  // (framework/gpu/shaders.zig image_wgsl) samples with `uv.y = 1 - corner.y`
-    \\  // to compensate for CPU-path flipRowsInPlace. To get the same top-down
-    \\  // display for shader-written textures, we map framebuffer y=0 → uv.y=1
-    \\  // (user's "bottom"), so that texture row 0 holds "bottom content" and the
-    \\  // image shader's flip displays "top content" at screen top.
-    \\  let uvs = array<vec2f, 3>(vec2f(0.0, 0.0), vec2f(2.0, 0.0), vec2f(0.0, 2.0));
-    \\  var out: VsOut;
-    \\  out.pos = vec4f(positions[i], 0.0, 1.0);
-    \\  out.uv = uvs[i];
-    \\  return out;
-    \\}
-    \\
-;
-
-const EFFECT_WGSL_MATH: []const u8 = @embedFile("framework/gpu/effect_math.wgsl");
-
-fn assembleEffectShader(user_wgsl: []const u8) ?[]const u8 {
-    const total = EFFECT_WGSL_HEADER.len + EFFECT_WGSL_MATH.len + user_wgsl.len + 2;
-    const out = g_alloc.alloc(u8, total) catch return null;
-    var i: usize = 0;
-    @memcpy(out[i .. i + EFFECT_WGSL_HEADER.len], EFFECT_WGSL_HEADER);
-    i += EFFECT_WGSL_HEADER.len;
-    @memcpy(out[i .. i + EFFECT_WGSL_MATH.len], EFFECT_WGSL_MATH);
-    i += EFFECT_WGSL_MATH.len;
-    out[i] = '\n';
-    i += 1;
-    @memcpy(out[i .. i + user_wgsl.len], user_wgsl);
-    i += user_wgsl.len;
-    return out[0..i];
-}
+// The Effect shader header + math prelude + assembleEffectShader moved to the
+// shared framework/gpu/effect_assemble.zig (imported above as `effect_assemble`)
+// so the V8 host and the no-V8 material path assemble shaders identically.
 
 // Called by effects.renderCpuNow when a node has node.effect_render pointing
 // at us. `ctx.user_data` carries the React fiber id (set on the Instance as
@@ -2774,6 +2746,10 @@ fn applyCommandBatch(json_bytes: []const u8) void {
 
 fn contentStoreGet(id: u32) ?[]const u8 {
     return v8_bindings_core.contentStoreGet(id);
+}
+
+fn contentStoreTake(id: u32) ?[]u8 {
+    return v8_bindings_core.contentStoreTake(id);
 }
 
 fn drainPendingFlushes() void {
@@ -3426,12 +3402,45 @@ fn switchToTab(idx: usize) void {
 /// Pull any pending IPC push messages and act on them. Called each tick.
 fn processIncomingPushes() void {
     while (dev_ipc.takeNext()) |msg| {
-        const idx = upsertTab(msg.name, msg.bundle) catch |e| {
-            std.log.warn("[dev] upsertTab failed: {}", .{e});
-            continue;
-        };
-        switchToTab(idx);
+        switch (msg) {
+            .push => |push| {
+                const idx = upsertTab(push.name, push.bundle) catch |e| {
+                    std.log.warn("[dev] upsertTab failed: {}", .{e});
+                    continue;
+                };
+                switchToTab(idx);
+            },
+            .notice => |notice| {
+                emitDevNotice(notice.json);
+                g_alloc.free(notice.json);
+            },
+        }
     }
+}
+
+fn emitDevNotice(json: []const u8) void {
+    var parsed = std.json.parseFromSlice(std.json.Value, g_alloc, json, .{}) catch |e| {
+        std.log.warn("[dev] notice JSON parse failed: {}", .{e});
+        return;
+    };
+    defer parsed.deinit();
+
+    const canonical = std.json.Stringify.valueAlloc(g_alloc, parsed.value, .{}) catch |e| {
+        std.log.warn("[dev] notice JSON stringify failed: {}", .{e});
+        return;
+    };
+    defer g_alloc.free(canonical);
+
+    const script = std.fmt.allocPrint(
+        g_alloc,
+        "(function(){{var f=globalThis.__ffiEmit;if(typeof f==='function')f('system:notification',{s});}})();",
+        .{canonical},
+    ) catch |e| {
+        std.log.warn("[dev] notice script alloc failed: {}", .{e});
+        return;
+    };
+    defer g_alloc.free(script);
+    _ = v8_runtime.evalScriptChecked(script);
 }
 
 // ── init / tick ─────────────────────────────────────────────────
@@ -4015,6 +4024,7 @@ pub fn main() !void {
         // uses when it later frees them via upsertTab. Cross-allocator free is
         // UB — this caller caused the SIGSEGV on re-push (2026-04-19 fix).
         dev_ipc.setAllocator(g_alloc);
+        dev_ipc.setBuildId(DEV_BUILD_ID);
         dev_ipc.start();
 
         std.log.info("[dev] dev mode — watching bundle.js ({d} bytes), IPC @ {s}", .{ g_dev_bundle_buf.len, dev_ipc.SOCKET_PATH });

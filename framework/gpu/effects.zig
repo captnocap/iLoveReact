@@ -33,6 +33,10 @@ pub const GpuShaderDesc = effect_shader.GpuShaderDesc;
 const Node = layout.Node;
 const page_alloc = std.heap.page_allocator;
 
+// The Effect shader assembly (header + math + recipe) lives in its own pure
+// module so the V8 host and the no-V8 material path share ONE implementation.
+const effect_assemble = @import("effect_assemble.zig");
+
 // ════════════════════════════════════════════════════════════════════════
 // Legacy registry interface (kept for backward compat)
 // ════════════════════════════════════════════════════════════════════════
@@ -1375,15 +1379,22 @@ fn ensureMaterialInstance(key_hash: u64) ?*Instance {
 /// install so 3D faces sample it via scene3d_tex_key.
 pub fn renderShaderToTexture(key_hash: u64, wgsl: []const u8, data: ?[]const f32, size: u32) ?*wgpu.TextureView {
     const inst = ensureMaterialInstance(key_hash) orelse return null;
+    // The shipped recipe is the fragment body; assemble it with the SAME fixed
+    // header + math prelude the V8 host injects (U/VsOut/vs_main/fbm/…), so the
+    // material shader compiles identically here. Freed after the pipeline
+    // compiles it (createShaderModule copies the source; renderGpu draws from the
+    // cached pipeline, not shader_desc).
+    const full = effect_assemble.assemble(page_alloc, wgsl) orelse return null;
+    defer page_alloc.free(full);
     inst.active = true;
     inst.backend = .gpu;
     inst.last_painted_frame = g_effect_frame;
-    inst.shader_desc = .{ .wgsl = wgsl };
+    inst.shader_desc = .{ .wgsl = full };
     inst.gpu_data_pending = data;
     inst.setDisplaySize(@floatFromInt(size), @floatFromInt(size));
-    if (!ensureGpuSize(inst, size, size)) return null;
-    if (!ensureGpuPipeline(inst)) return null;
-    if (!renderGpu(inst)) return null;
+    const ok = ensureGpuSize(inst, size, size) and ensureGpuPipeline(inst) and renderGpu(inst);
+    inst.shader_desc = null; // `full` is freed on return; the pipeline is already built
+    if (!ok) return null;
     return inst.texture_view;
 }
 
