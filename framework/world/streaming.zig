@@ -61,7 +61,10 @@ pub const BuildStats = struct {
     local_rows: u32 = 0,
     spanning_rows: u32 = 0,
     lod_rows: u32 = 0,
-    /// Occupied chunks that got NO LOD box because the row budget ran out.
+    /// The ladder rung that fit the budget: rows shorter than this vanish at
+    /// distance (small maps: 2m; massive cities: only the skyline survives).
+    lod_min_height: f32 = 0,
+    /// Occupied chunks that got NO LOD rows because the row budget ran out.
     /// Never silent: the loader logs this.
     lod_truncated_chunks: u32 = 0,
 };
@@ -69,17 +72,24 @@ pub const BuildStats = struct {
 // Demotion radius = promotion radius × this (V30: promotion instant, demotion
 // hysteretic) so a player skirting the boundary doesn't thrash chunk residency.
 const DEMOTE_FACTOR: f32 = 1.15;
-// Merge draw ranges separated by at most this many rows: redrawing a few culled
-// rows is cheaper than another draw call.
-const MERGE_GAP_ROWS: u32 = 256;
-// LOD boxes nest slightly INSIDE the detail geometry they stand in for, so the
-// crossfade ring (both drawn) can never z-fight: detail fully occludes its LOD.
-const LOD_SHRINK: f32 = 0.96;
-// Quadrant clusters shorter than this synthesize no LOD box — curbs and props
-// vanish at distance, exactly like the era being copied; buildings remain.
-const LOD_MIN_HEIGHT: f32 = 2.0;
-// Hard cap on per-frame draws; overflow degrades gracefully by merging the
-// remainder of a family into one oversized (still correct) range.
+// Per-model draw distance, the era's actual rule: a chunk holding H meters of
+// content promotes at max(detail_radius, H × this) — an 80m tower wears its
+// materials from ~480m out, while props keep the base bubble. The user-caught
+// failure (req_0537): a huge textured face going flat at a distance where you
+// can still read every brick.
+pub const PROMOTE_PER_HEIGHT_METER: f32 = 6.0;
+// Minimum row heights the far shell may keep, smallest rung first. The shell
+// copies REAL rows verbatim (no merging — merged union boxes invented phantom
+// buildings in gaps and swallowed recessed faces, req_0537), so the only
+// degree of freedom is which rows survive at distance: the smallest rung whose
+// surviving rows fit the budget wins. Small maps keep everything ≥ 2m; a
+// massive city auto-raises the bar until only the skyline remains — small
+// stuff vanishing far away is exactly the reference era's behavior.
+const LOD_HEIGHT_LADDER = [_]f32{ 2, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96 };
+// Hard cap on per-frame draws. Overflow DROPS the remaining ranges (counted in
+// dropped_draws, never silent) — it must not widen a range across unwanted
+// rows: bridged rows duplicate the other tier's geometry coplanar (the
+// req_0537 face-eater).
 pub const MAX_DRAWS: u32 = 4096;
 
 pub const World = struct {
@@ -108,6 +118,8 @@ pub const World = struct {
     visible: []bool,
     draws: []Draw,
     draw_len: usize = 0,
+    /// Ranges dropped by the MAX_DRAWS cap last frame (the loader warns once).
+    dropped_draws: usize = 0,
 
     pub fn deinit(self: *World, allocator: std.mem.Allocator) void {
         for (self.families) |*family| family.deinit(allocator);
@@ -133,19 +145,22 @@ pub const World = struct {
     }
 
     /// Detail residency around the player: promote any occupied chunk whose
-    /// footprint touches `radius`, demote only past radius × DEMOTE_FACTOR.
+    /// footprint touches its effective radius, demote only past × DEMOTE_FACTOR.
+    /// The effective radius grows with the chunk's content height (per-model
+    /// draw distance): tall textured buildings promote from far away, props
+    /// keep the base bubble.
     pub fn updateResidency(self: *World, player_x: f32, player_z: f32, radius: f32) void {
-        const promote2 = radius * radius;
-        const demote_r = radius * DEMOTE_FACTOR;
-        const demote2 = demote_r * demote_r;
         const n = self.chunkCount();
         var i: usize = 0;
         while (i < n) : (i += 1) {
             if (!self.occupied[i]) continue;
+            const content_height = self.bounds_max[i][1] - self.bounds_min[i][1];
+            const promote = @max(radius, content_height * PROMOTE_PER_HEIGHT_METER);
+            const demote = promote * DEMOTE_FACTOR;
             const d2 = self.chunkDist2(i, player_x, player_z);
-            if (d2 <= promote2) {
+            if (d2 <= promote * promote) {
                 self.resident[i] = true;
-            } else if (d2 > demote2) {
+            } else if (d2 > demote * demote) {
                 self.resident[i] = false;
             }
         }
@@ -169,6 +184,7 @@ pub const World = struct {
     /// is valid until the next call.
     pub fn assembleDraws(self: *World, cam: Camera) []const Draw {
         self.draw_len = 0;
+        self.dropped_draws = 0;
         self.computeVisibility(cam);
 
         var fi: u32 = 0;
@@ -182,15 +198,21 @@ pub const World = struct {
     }
 
     fn pushDraw(self: *World, draw: Draw) void {
-        if (self.draw_len >= self.draws.len) return;
+        if (self.draw_len >= self.draws.len) {
+            self.dropped_draws += 1;
+            return;
+        }
         self.draws[self.draw_len] = draw;
         self.draw_len += 1;
     }
 
     /// Walk a family's chunk ranges in grid order, keep the wanted ones
     /// (detail: resident ∧ visible; LOD: ¬resident ∧ visible), and coalesce
-    /// runs separated by ≤ MERGE_GAP_ROWS. On draw-list overflow the remainder
-    /// merges into one oversized range — more GPU work, never missing geometry.
+    /// runs that are CONTIGUOUS — ranges stay contiguous across empty cells,
+    /// so sparse worlds still collapse to few draws. Never bridge across an
+    /// occupied-but-unwanted chunk's rows: those rows duplicate the other
+    /// tier's geometry coplanar (a bridged LOD box over a resident building
+    /// was the req_0537 face-eater). Overflow drops ranges into dropped_draws.
     fn emitChunkRanges(self: *World, fi: u32, family: *const Family, lod: bool) void {
         var pending: ?Range = null;
         const n = self.chunkCount();
@@ -201,15 +223,9 @@ pub const World = struct {
             const wanted = if (lod) (!self.resident[i] and self.visible[i]) else (self.resident[i] and self.visible[i]);
             if (!wanted) continue;
             if (pending) |*p| {
-                if (r.first <= p.first + p.count + MERGE_GAP_ROWS) {
-                    p.count = (r.first + r.count) - p.first;
+                if (r.first == p.first + p.count) {
+                    p.count += r.count;
                     continue;
-                }
-                if (self.draw_len + 1 >= self.draws.len) {
-                    // Overflow: swallow everything left in one range.
-                    p.count = lastRowEnd(family, n) - p.first;
-                    self.pushDraw(.{ .family = fi, .range = p.*, .lod = lod });
-                    return;
                 }
                 self.pushDraw(.{ .family = fi, .range = p.*, .lod = lod });
             }
@@ -429,7 +445,7 @@ pub fn build(
         if (o) stats.occupied_chunks += 1;
     }
 
-    var lod = try buildLodShell(allocator, out_families, occupied, chunk_count, min_x, min_z, cell, cols, lod_max_rows, &stats);
+    var lod = try buildLodShell(allocator, out_families, occupied, chunk_count, lod_max_rows, &stats);
     errdefer lod.deinit(allocator);
 
     const resident = try allocator.alloc(bool, chunk_count);
@@ -491,52 +507,68 @@ fn growBounds(bmin: *[3]f32, bmax: *[3]f32, rows: []const f32, row: usize, strid
     }
 }
 
-const LodAccum = struct {
-    min: [3]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) },
-    max: [3]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32), -std.math.floatMax(f32) },
-    color: [3]f32 = .{ 0, 0, 0 },
-    weight: f32 = 0,
-    any: bool = false,
-
-    fn add(self: *LodAccum, rows: []const f32, row: usize, stride: u32) void {
-        const b = row * stride;
-        const sb = scaleBase(stride);
-        const cb = colorBase(stride);
-        var axis: usize = 0;
-        while (axis < 3) : (axis += 1) {
-            const half = @abs(rows[b + sb + axis]) * 0.5;
-            self.min[axis] = @min(self.min[axis], rows[b + axis] - half);
-            self.max[axis] = @max(self.max[axis], rows[b + axis] + half);
-        }
-        const w = @max(0.001, @abs(rows[b + sb + 0]) * @abs(rows[b + sb + 1]) * @abs(rows[b + sb + 2]));
-        self.color[0] += rows[b + cb + 0] * w;
-        self.color[1] += rows[b + cb + 1] * w;
-        self.color[2] += rows[b + cb + 2] * w;
-        self.weight += w;
-        self.any = true;
-    }
-};
-
 const LOD_STRIDE: u32 = 12;
 
-/// The far shell: per occupied chunk, up to 4 quadrant boxes (1 when the budget
-/// is tight) merging that chunk's local rows — extents fused, colors volume-
-/// weighted, the whole box shrunk to nest inside the real geometry. This is the
-/// "LOD city" of the reference era, derived instead of hand-modeled.
+fn rowHeight(rows: []const f32, row: usize, stride: u32) f32 {
+    return @abs(rows[row * stride + scaleBase(stride) + 1]);
+}
+
+/// Copy one source row into the LOD shell verbatim (normalized to stride 12:
+/// pos3 rot3 scale3 color3; the optional shape id drops — a far ramp reads as
+/// its slab box). Copies happen BEFORE the loader whitens shader-material
+/// rows, so a brick building keeps its brick fallback color at any distance.
+fn appendLodRow(allocator: std.mem.Allocator, list: *std.ArrayList(f32), rows: []const f32, row: usize, stride: u32) !void {
+    const b = row * stride;
+    const sb = scaleBase(stride);
+    const cb = colorBase(stride);
+    const has_rot = stride >= 12;
+    try list.appendSlice(allocator, &[LOD_STRIDE]f32{
+        rows[b + 0],
+        rows[b + 1],
+        rows[b + 2],
+        if (has_rot) rows[b + 3] else 0,
+        if (has_rot) rows[b + 4] else 0,
+        if (has_rot) rows[b + 5] else 0,
+        rows[b + sb + 0],
+        rows[b + sb + 1],
+        rows[b + sb + 2],
+        rows[b + cb + 0],
+        rows[b + cb + 1],
+        rows[b + cb + 2],
+    });
+}
+
+/// The far shell: VERBATIM copies of the tallest real rows, per chunk. A far
+/// building is its own exact box wearing its own color — nothing merges, so
+/// nothing phantom can appear in a gap and no stand-in can swallow a recessed
+/// face (both user-caught, req_0537). The height ladder decides which rows
+/// survive at distance: the smallest rung whose survivors fit `lod_max_rows`.
+/// Short rows (curbs, road paint, props) simply vanish far away, exactly like
+/// the reference era; with a roomy budget everything ≥ 2m persists.
 fn buildLodShell(
     allocator: std.mem.Allocator,
     families: []const Family,
     occupied: []const bool,
     chunk_count: usize,
-    min_x: f32,
-    min_z: f32,
-    cell: f32,
-    cols: u32,
     lod_max_rows: u32,
     stats: *BuildStats,
 ) !Family {
-    const quads_fit = @as(u64, stats.occupied_chunks) * 4 <= lod_max_rows;
-    const boxes_per_chunk: u32 = if (quads_fit) 4 else 1;
+    // One histogram pass: surviving-row count per ladder rung.
+    var survivors = [_]u64{0} ** LOD_HEIGHT_LADDER.len;
+    for (families) |family| {
+        const total = family.rows.len / family.stride;
+        var row: usize = family.always.count;
+        while (row < total) : (row += 1) {
+            const h = rowHeight(family.rows, row, family.stride);
+            for (LOD_HEIGHT_LADDER, 0..) |min_h, li| {
+                if (h >= min_h) survivors[li] += 1;
+            }
+        }
+    }
+    var rung: usize = 0;
+    while (rung + 1 < LOD_HEIGHT_LADDER.len and survivors[rung] > lod_max_rows) rung += 1;
+    const min_height = LOD_HEIGHT_LADDER[rung];
+    stats.lod_min_height = min_height;
 
     var rows_list: std.ArrayList(f32) = .{};
     errdefer rows_list.deinit(allocator);
@@ -548,50 +580,24 @@ fn buildLodShell(
         const first: u32 = @intCast(rows_list.items.len / LOD_STRIDE);
         ranges[ci] = .{ .first = first, .count = 0 };
         if (!occupied[ci]) continue;
-        if (first + boxes_per_chunk > lod_max_rows) {
-            stats.lod_truncated_chunks += 1;
-            continue;
-        }
-        const cx = ci % @as(usize, cols);
-        const cz = ci / @as(usize, cols);
-        const mid_x = min_x + (@as(f32, @floatFromInt(cx)) + 0.5) * cell;
-        const mid_z = min_z + (@as(f32, @floatFromInt(cz)) + 0.5) * cell;
-
-        var accums: [4]LodAccum = .{ .{}, .{}, .{}, .{} };
+        var emitted: u32 = 0;
+        var truncated = false;
         for (families) |family| {
             const r = family.ranges[ci];
             var k: u32 = 0;
             while (k < r.count) : (k += 1) {
                 const row = @as(usize, r.first + k);
-                var quad: usize = 0;
-                if (boxes_per_chunk == 4) {
-                    const b = row * family.stride;
-                    const east = family.rows[b + 0] >= mid_x;
-                    const south = family.rows[b + 2] >= mid_z;
-                    quad = (@as(usize, @intFromBool(south)) << 1) | @intFromBool(east);
+                if (rowHeight(family.rows, row, family.stride) < min_height) continue;
+                if (first + emitted >= lod_max_rows) {
+                    truncated = true;
+                    break;
                 }
-                accums[quad].add(family.rows, row, family.stride);
+                try appendLodRow(allocator, &rows_list, family.rows, row, family.stride);
+                emitted += 1;
             }
+            if (truncated) break;
         }
-        var emitted: u32 = 0;
-        for (accums[0..boxes_per_chunk]) |acc| {
-            if (!acc.any) continue;
-            if (acc.max[1] - acc.min[1] < LOD_MIN_HEIGHT) continue;
-            const inv_w = 1.0 / @max(acc.weight, 0.001);
-            try rows_list.appendSlice(allocator, &[LOD_STRIDE]f32{
-                (acc.min[0] + acc.max[0]) * 0.5,
-                (acc.min[1] + acc.max[1]) * 0.5,
-                (acc.min[2] + acc.max[2]) * 0.5,
-                0, 0, 0,
-                (acc.max[0] - acc.min[0]) * LOD_SHRINK,
-                (acc.max[1] - acc.min[1]) * LOD_SHRINK,
-                (acc.max[2] - acc.min[2]) * LOD_SHRINK,
-                acc.color[0] * inv_w,
-                acc.color[1] * inv_w,
-                acc.color[2] * inv_w,
-            });
-            emitted += 1;
-        }
+        if (truncated) stats.lod_truncated_chunks += 1;
         ranges[ci].count = emitted;
     }
     stats.lod_rows = @intCast(rows_list.items.len / LOD_STRIDE);
@@ -601,9 +607,4 @@ fn buildLodShell(
         .always = .{ .first = 0, .count = 0 },
         .ranges = ranges,
     };
-}
-
-fn lastRowEnd(family: *const Family, chunk_count: usize) u32 {
-    _ = chunk_count;
-    return @intCast(family.rows.len / family.stride);
 }

@@ -1383,6 +1383,7 @@ pub const Runtime = struct {
     stream_tail_start: usize = 0,
     stream_draw_count: usize = 0,
     stream_logged: bool = false,
+    stream_drop_warned: bool = false,
     last_aspect: f32 = @as(f32, WIN_W) / @as(f32, WIN_H),
 
     pub fn create(allocator: std.mem.Allocator, path: []const u8, store_dir: []const u8, node_id: u32) !*Runtime {
@@ -1816,8 +1817,8 @@ pub const Runtime = struct {
             return;
         }
         self.stream = world;
-        log.print("[loader] streaming ON — grid {d}x{d} ({d} occupied chunks), {d} local + {d} spanning rows, lod shell {d} rows, detail radius {d:.0}m (cell {d:.0}m)\n", .{
-            world.cols, world.rows, s.occupied_chunks, s.local_rows, s.spanning_rows, s.lod_rows, self.stream_radius, world.cell,
+        log.print("[loader] streaming ON — grid {d}x{d} ({d} occupied chunks), {d} local + {d} spanning rows, lod shell {d} rows (≥{d:.0}m verbatim), detail radius {d:.0}m (cell {d:.0}m)\n", .{
+            world.cols, world.rows, s.occupied_chunks, s.local_rows, s.spanning_rows, s.lod_rows, s.lod_min_height, self.stream_radius, world.cell,
         });
         if (s.lod_truncated_chunks > 0) {
             log.print("[loader] streaming LOD budget clipped {d} chunk(s) — far field thins there\n", .{s.lod_truncated_chunks});
@@ -1861,6 +1862,10 @@ pub const Runtime = struct {
         }
         self.stream_draw_count = self.kid_list.items.len - self.stream_tail_start;
         self.root.children = self.kid_list.items;
+        if (w.dropped_draws > 0 and !self.stream_drop_warned) {
+            self.stream_drop_warned = true;
+            log.print("[loader] streaming draw cap hit — {d} range(s) dropped this frame (far field thins; raise MAX_DRAWS if persistent)\n", .{w.dropped_draws});
+        }
         if (!self.stream_logged) {
             self.stream_logged = true;
             var detail_rows: u64 = 0;
