@@ -33,7 +33,7 @@ import { BrushRail, type BrushRailSettings } from './BrushRail';
 import { LayerBtn, MiniStepper, ToolBtn } from './railAtoms';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
-import { applyMergeGesture, clampProfile, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
+import { applyMergeGesture, clampProfile, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
 import { RoadRail } from './RoadRail';
 import { ChunkSurface } from './ChunkSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
@@ -112,6 +112,7 @@ const SIZE_MIN = 0, SIZE_MAX = 40;
 const REGION_SYNC_MS = 320;
 
 export const CANVAS_PAN_SPEED = 700; // px/s while a direction key is held
+export const CANVAS_PAN_FOCUS_LOCK_KEY = 'f8';
 type CanvasPanDrift = { x: number; y: number };
 export type EffectiveCanvasPanDrift = CanvasPanDrift & { active: boolean };
 
@@ -133,6 +134,14 @@ export function canvasPanDriftForHeldKeys(keys: Iterable<string>, wasdFocused = 
 export function effectiveCanvasPanDrift(drift: CanvasPanDrift, heldKeyCount: number, wasdFocused: boolean): EffectiveCanvasPanDrift {
   if (!wasdFocused || heldKeyCount <= 0 || (drift.x === 0 && drift.y === 0)) return ZERO_CANVAS_DRIFT;
   return { x: drift.x, y: drift.y, active: true };
+}
+
+export function isCanvasPanFocusLockKey(key: unknown): boolean {
+  return String(key ?? '').toLowerCase() === CANVAS_PAN_FOCUS_LOCK_KEY;
+}
+
+export function canvasPanOwnsWasd(wasdFocused: boolean, focusLocked: boolean): boolean {
+  return wasdFocused || focusLocked;
 }
 
 function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
@@ -598,11 +607,16 @@ export function PaintCanvas(props: {
   // anywhere (zone-name input, notes pane) so typing never pans; blur clears so
   // alt-tab can't strand a drift.
   const [drift, setDrift] = useState<CanvasPanDrift>({ x: 0, y: 0 });
+  const [panFocusLocked, setPanFocusLocked] = useState(false);
   const driftRef = useRef<CanvasPanDrift>({ x: 0, y: 0 });
   const heldKeys = useRef<Set<string>>(new Set());
   const recomputeDriftRef = useRef<() => void>(() => {});
   const wasdFocusedRef = useRef(false);
-  wasdFocusedRef.current = !!props.wasdFocused;
+  const panFocusLockedRef = useRef(false);
+  const panFocusLockKeyDownRef = useRef(false);
+  const canvasOwnsWasd = canvasPanOwnsWasd(!!props.wasdFocused, panFocusLocked);
+  wasdFocusedRef.current = canvasOwnsWasd;
+  panFocusLockedRef.current = panFocusLocked;
   const setPanDrift = useCallback((next: CanvasPanDrift) => {
     driftRef.current = next;
     setDrift(next);
@@ -612,26 +626,41 @@ export function PaintCanvas(props: {
     heldKeys.current.clear();
     setPanDrift({ x: 0, y: 0 });
   }, [setPanDrift]);
+  const togglePanFocusLock = useCallback(() => {
+    const next = !panFocusLockedRef.current;
+    panFocusLockedRef.current = next;
+    setPanFocusLocked(next);
+    if (next) props.onWasdFocus?.();
+    else clearPanDrift();
+  }, [clearPanDrift, props.onWasdFocus]);
   // Ctrl-held state — mouse events carry no modifier flags, so track it off the key
   // bus (every key event reports the live modifier mask). Drives ctrl-click select.
   const ctrlHeldRef = useRef(false);
   const placeBrushKeyRef = useRef<{ enabled: boolean; rotate: (delta: number) => void }>({ enabled: false, rotate: () => {} });
   // Lost focus (another quad claimed WASD) → drop held keys so the pan stops at once.
   useEffect(() => {
-    if (!props.wasdFocused) clearPanDrift();
-  }, [props.wasdFocused, clearPanDrift]);
+    if (!canvasOwnsWasd) clearPanDrift();
+  }, [canvasOwnsWasd, clearPanDrift]);
   useEffect(() => {
     const recompute = () => {
       setPanDrift(canvasPanDriftForHeldKeys(heldKeys.current));
     };
     recomputeDriftRef.current = recompute;
     const textFocused = () => {
+      if (panFocusLockedRef.current) return false;
       const t = callHost<{ focused_id?: number } | null>('__tel_input', null);
       return !!t && Number(t.focused_id ?? -1) >= 0;
     };
     const onDown = (ev: any) => {
       if (typeof ev?.ctrlKey === 'boolean') ctrlHeldRef.current = ev.ctrlKey || ev.metaKey;
       const k = String(ev?.key ?? '').toLowerCase();
+      if (isCanvasPanFocusLockKey(k) && !ev?.ctrlKey && !ev?.altKey && !ev?.metaKey) {
+        if (!panFocusLockKeyDownRef.current) {
+          panFocusLockKeyDownRef.current = true;
+          togglePanFocusLock();
+        }
+        return;
+      }
       if (placeBrushKeyRef.current.enabled && !ev?.ctrlKey && !ev?.altKey && !ev?.metaKey && (k === 'r' || k === 'e' || k === 'q')) {
         if (!textFocused()) placeBrushKeyRef.current.rotate(k === 'q' ? -ROT_STEP : ROT_STEP);
         return;
@@ -644,6 +673,10 @@ export function PaintCanvas(props: {
     const onUp = (ev: any) => {
       if (typeof ev?.ctrlKey === 'boolean') ctrlHeldRef.current = ev.ctrlKey || ev.metaKey;
       const k = String(ev?.key ?? '').toLowerCase();
+      if (isCanvasPanFocusLockKey(k)) {
+        panFocusLockKeyDownRef.current = false;
+        return;
+      }
       if (heldKeys.current.delete(k)) recompute();
     };
     const clear = () => { clearPanDrift(); };
@@ -651,7 +684,7 @@ export function PaintCanvas(props: {
     const offUp = busOn('__keyup', onUp);
     const offBlur = busOn('system:blur', clear);
     return () => { offDown(); offUp(); offBlur(); clear(); };
-  }, [clearPanDrift, setPanDrift]);
+  }, [clearPanDrift, setPanDrift, togglePanFocusLock]);
   // Claim WASD focus on a click anywhere in the canvas working area.
   const claimWasd = props.onWasdFocus;
 
@@ -694,6 +727,26 @@ export function PaintCanvas(props: {
   const tileCache = useRef<Map<ChunkKey, number[]>>(new Map());
   const heightCache = useRef<Map<ChunkKey, number[]>>(new Map());
   const heightVer = useRef<Map<ChunkKey, number>>(new Map()); // bumps per re-downsample → host slot overwrite
+  // Analytic ribbon segments per chunk (ROADCURVE-0610): recomputed only when
+  // a road changed (per-entry rev vs roadsRev), and kept IDENTITY-STABLE when a
+  // chunk's clipped content comes out unchanged — so a road edit re-bakes only
+  // the chunks the road actually crosses. ONE getter serves both consumers:
+  // buildFloors (the 3D drape capture) and the ChunkSurface quads (the 2D
+  // canvas) — both run the same shader, so roads curve identically in both.
+  const roadSegCache = useRef<Map<ChunkKey, { rev: number; segs: number[] }>>(new Map());
+  const roadsRev = useRef(1);
+  const ribbonSegsFor = (cx: number, cz: number): number[] => {
+    const k = chunkKey(cx, cz);
+    const hit = roadSegCache.current.get(k);
+    if (hit && hit.rev === roadsRev.current) return hit.segs;
+    const segs = roadRibbonSegments(roadsRef.current, cx, cz, CHUNK_TILES);
+    const same = hit && hit.segs.length === segs.length && hit.segs.every((v, i) => v === segs[i]);
+    const keep = same ? hit!.segs : segs;
+    roadSegCache.current.set(k, { rev: roadsRev.current, segs: keep });
+    return keep;
+  };
+  const ribbonSegsForRef = useRef(ribbonSegsFor);
+  ribbonSegsForRef.current = ribbonSegsFor;
   const regionSyncPending = useRef(false);
   const buildFloors = useCallback((): ChunkFloor[] => {
     const t0 = (globalThis as any).performance?.now?.() ?? 0;
@@ -714,7 +767,8 @@ export function PaintCanvas(props: {
         heightDirty.current.delete(k);
         heightEnc++;
       }
-      out.push({ cx: c.cx, cz: c.cz, tileData: tileCache.current.get(k)!, heights: heightCache.current.get(k)!, hcols: CHUNK_FLOOR_HF_RES, hrows: CHUNK_FLOOR_HF_RES, hver: heightVer.current.get(k) ?? 0 });
+      const segs = ribbonSegsForRef.current(c.cx, c.cz);
+      out.push({ cx: c.cx, cz: c.cz, tileData: tileCache.current.get(k)!, heights: heightCache.current.get(k)!, hcols: CHUNK_FLOOR_HF_RES, hrows: CHUNK_FLOOR_HF_RES, hver: heightVer.current.get(k) ?? 0, ...(segs.length ? { roads: segs } : {}) });
     }
     const dt = ((globalThis as any).performance?.now?.() ?? 0) - t0;
     plog('buildFloors', `focused=${focused} tileEncoded=${tileEnc} heightEncoded=${heightEnc} took ${dt.toFixed(2)}ms`);
@@ -1114,6 +1168,7 @@ export function PaintCanvas(props: {
       writeWorldCell(gx, gz, tileKindIndex(kind), touched);
     }
     setRoads(next);
+    roadsRev.current += 1; // ribbon segs recompute (identity-stable per chunk)
     for (const k of touched) touchChunk(k);
     scheduleRegionSync();
     notifyEdit({ cat: 'road', text: noteText });
@@ -1568,7 +1623,7 @@ export function PaintCanvas(props: {
   // refs so the interval set up once on mount never goes stale on tool/layer change).
   onBrushRef.current = isRampTool ? updateRamp : onBrush;
   updateCursorRef.current = updateCursor;
-  const canvasDrift = effectiveCanvasPanDrift(drift, heldKeys.current.size, !!props.wasdFocused);
+  const canvasDrift = effectiveCanvasPanDrift(drift, heldKeys.current.size, canvasOwnsWasd);
   driftActiveRef.current = canvasDrift.active;
   brushShownRef.current = showBrush;
 
@@ -1577,7 +1632,7 @@ export function PaintCanvas(props: {
   // it (e.g. focus/zones/drift/select) — naming which is the lead.
   useChurn('PaintCanvas', {
     focus, chunkRev, zones, drift, tool, tile, layer, place,
-    selCells: props.select?.cells, brushSize, centerZ, activeBrushMode, brushShape, heightMode, smoothStrength, wasdFocused: props.wasdFocused,
+    selCells: props.select?.cells, brushSize, centerZ, activeBrushMode, brushShape, heightMode, smoothStrength, wasdFocused: props.wasdFocused, panFocusLocked,
     roads, roadDraft, roadProfile, selRoadId,
   });
 
@@ -1609,6 +1664,7 @@ export function PaintCanvas(props: {
             chunk={c}
             layer={layer}
             zones={zones}
+            roads={ribbonSegsFor(c.cx, c.cz)}
             register={registerTouch}
             unregister={unregisterTouch}
           />

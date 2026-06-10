@@ -15,7 +15,7 @@ import { Canvas, Effect } from '@reactjit/primitives';
 import { TILE_UNITS, encodeField } from './heightData';
 import { HEIGHT_TILE_VIEW_WGSL } from './heightTileView.wgsl';
 import { encodeTileMap } from './tileData';
-import { TILE_FIELD_WGSL } from './tileField.wgsl';
+import { TILE_FIELD_WGSL, roadRibbonSection } from './tileField.wgsl';
 import { encodeZoneSection, type ZoneDef } from './zoneData';
 import { ZONE_VIEW_WGSL } from './zoneView.wgsl';
 import { usePaintedField } from './usePaintedField';
@@ -35,10 +35,14 @@ function ChunkSurfaceImpl(props: {
   chunk: Chunk;
   layer: Layer;
   zones: ZoneDef[];
+  // Analytic road-ribbon segments over this chunk (ROADCURVE-0610) — identity-
+  // stable from the parent's per-chunk cache, so memo skips unchanged chunks.
+  // Only the tile-ground shader reads it; height/zone own the after-cells slot.
+  roads?: number[];
   register: (key: string, touch: () => void) => void;
   unregister: (key: string) => void;
 }) {
-  const { chunk, layer, zones, register, unregister } = props;
+  const { chunk, layer, zones, roads, register, unregister } = props;
   const key = chunkKey(chunk.cx, chunk.cz);
   // One chunk re-rendering per painted stroke is EXPECTED (the one you drew on, via
   // usePaintedField). Many lines, or a chunk you didn't touch, is the fan-out bug.
@@ -53,7 +57,7 @@ function ChunkSurfaceImpl(props: {
       ? [...encodeTileMap(chunk.tiles), ...Array.from(encodeField(chunk.height))]
       : layer === 'zone'
         ? [...encodeTileMap(chunk.tiles), ...encodeZoneSection(chunk.zones, zones)]
-        : encodeTileMap(chunk.tiles); // paint + place: the tile ground
+        : [...encodeTileMap(chunk.tiles), ...roadRibbonSection(roads)]; // paint/place/road: tile ground + analytic roads
     // [mapgone-probe MAPGONE2-0605] encode-layer count — stays until the user confirms
     {
       const header = 3 + (enc[2] ?? 0) * 3;
@@ -70,7 +74,7 @@ function ChunkSurfaceImpl(props: {
       console.warn(`[mapgone] ChunkSurface ${key} layer=${layer} encLen=${enc.length} painted=${painted} cellHist=[${top}] palette[0..3]=${enc.slice(3, 12).map((v) => v.toFixed(2)).join(',')}`);
     }
     return enc;
-  }, [layer, zones]);
+  }, [layer, zones, roads]);
 
   // Expose this chunk's flush to the parent brush; drop it when unfocused/unmounted.
   useEffect(() => {

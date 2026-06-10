@@ -15,6 +15,14 @@ import { hexToRgb01 } from '../world/placeables';
 // [2]paletteCount, then paletteCount*3 palette rgb floats, then rows*cols cell
 // indices (-1 = empty). (WGSL: no unary +, no backticks in comments.)
 
+// After the cell grid, an OPTIONAL road-ribbon section (ROADCURVE-0610):
+// [segCount, crosswalkKindIdx, junctionKindIdx, then segCount*8 floats —
+// ax az bx bz rightExt leftExt twoWay phase, in cell space]. The ribbon paints
+// the carriageway ANALYTICALLY from distance to the filleted centerline, so
+// curves are sub-tile smooth at the capture's full resolution; the 1m tile
+// stamps underneath keep carrying gameplay. Crosswalk cells keep their tile
+// look (the zebra is a rectangular band — cells render it fine); junction
+// cells take plain asphalt (no markings through the box).
 export const HEIGHTFIELD_TILE_SHADER = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
 
@@ -31,14 +39,73 @@ export const HEIGHTFIELD_TILE_SHADER = `
   let gf = abs(fract(in.uv * vec2f(f32(cols), f32(rows))) - vec2f(0.5));
   let edge = max(gf.x, gf.y);
 
+  var rgb = vec3f(0.0);
   if (kind < 0) {
     let g = smoothstep(0.46, 0.5, edge) * 0.07;
-    return vec4f(0.05 + g, 0.07 + g, 0.10 + g, 1.0);
+    rgb = vec3f(0.05 + g, 0.07 + g, 0.10 + g);
+  } else {
+    let pbase = 3 + kind * 3;
+    let col = vec3f(D[pbase], D[pbase + 1], D[pbase + 2]);
+    let shade = mix(1.0, 0.78, smoothstep(0.44, 0.5, edge));
+    rgb = col * shade;
   }
-  let pbase = 3 + kind * 3;
-  let col = vec3f(D[pbase], D[pbase + 1], D[pbase + 2]);
-  let shade = mix(1.0, 0.78, smoothstep(0.44, 0.5, edge));
-  return vec4f(col * shade, 1.0);
+
+  let cellEnd = cellBase + rows * cols;
+  let total = i32(arrayLength(&D));
+  if (cellEnd + 3 <= total) {
+    let segN = i32(D[cellEnd]);
+    let cwIdx = i32(D[cellEnd + 1]);
+    let jIdx = i32(D[cellEnd + 2]);
+    if (segN > 0 && kind != cwIdx) {
+      let p = in.uv * vec2f(f32(cols), f32(rows));
+      var bestD = 1e9;
+      var signedD = 0.0;
+      var rExt = 0.0;
+      var lExt = 0.0;
+      var twoWay = 0.0;
+      var phase = 0.0;
+      var along = 0.0;
+      for (var s = 0; s < segN; s = s + 1) {
+        let b0 = cellEnd + 3 + s * 8;
+        let a = vec2f(D[b0], D[b0 + 1]);
+        let b = vec2f(D[b0 + 2], D[b0 + 3]);
+        let ab = b - a;
+        let len2 = dot(ab, ab);
+        var t = 0.0;
+        if (len2 > 0.000001) { t = clamp(dot(p - a, ab) / len2, 0.0, 1.0); }
+        let q = a + ab * t;
+        let d = distance(p, q);
+        if (d < bestD) {
+          bestD = d;
+          let ru = normalize(vec2f(0.0 - ab.y, ab.x));
+          signedD = dot(p - q, ru);
+          rExt = D[b0 + 4];
+          lExt = D[b0 + 5];
+          twoWay = D[b0 + 6];
+          phase = D[b0 + 7];
+          along = t * sqrt(len2);
+        }
+      }
+      if (bestD < 1e8 && signedD < rExt && signedD > (0.0 - lExt)) {
+        var road = vec3f(0.118, 0.129, 0.157);
+        let ad = abs(signedD);
+        if (kind != jIdx) {
+          if (twoWay > 0.5 && abs(ad - 0.17) < 0.07) { road = vec3f(0.76, 0.60, 0.11); }
+          let rel = ad - phase;
+          let k = floor(rel / 3.0 + 0.5);
+          let boundary = phase + k * 3.0;
+          let maxExt = max(rExt, lExt);
+          if (k >= 0.0 && abs(ad - boundary) < 0.06 && boundary < maxExt - 1.0 && (boundary > 0.3 || phase < 0.1)) {
+            if (fract(along / 6.0) < 0.5) { road = vec3f(0.82, 0.84, 0.86); }
+          }
+          let extHere = select(lExt, rExt, signedD >= 0.0);
+          if (extHere - ad < 0.28 && extHere - ad > 0.14) { road = vec3f(0.82, 0.84, 0.86); }
+        }
+        rgb = road;
+      }
+    }
+  }
+  return vec4f(rgb, 1.0);
 }
 `;
 
@@ -48,12 +115,24 @@ export const HEIGHTFIELD_TILE_SHADER = `
 export const HEIGHTFIELD_TILE_PALETTE: [number, number, number][] =
   TILE_KINDS.map((k) => hexToRgb01(tileKindDefinition(k).render.color));
 
-// Encode a landform's per-cell tile grid for the shader buffer.
-export function heightfieldTileData(tiles: { cols: number; rows: number; idx: number[] }): number[] {
+// Encode a landform's per-cell tile grid for the shader buffer. `roads` is the
+// optional analytic ribbon section (8 floats per segment — see the shader
+// comment); absent = the section is omitted and the shader's length guard
+// skips the pass, so pre-road data renders exactly as before.
+export function heightfieldTileData(tiles: { cols: number; rows: number; idx: number[] }, roads?: number[]): number[] {
   const out: number[] = [tiles.cols, tiles.rows, HEIGHTFIELD_TILE_PALETTE.length];
   for (const c of HEIGHTFIELD_TILE_PALETTE) out.push(c[0], c[1], c[2]);
   for (let i = 0; i < tiles.idx.length; i += 1) out.push(tiles.idx[i]);
+  out.push(...roadRibbonSection(roads));
   return out;
+}
+
+/** The ribbon section ([segN, crosswalkIdx, junctionIdx, segs…]) appended after
+ *  the cells — shared by the 3D drape capture AND the editor's 2D chunk quads
+ *  (both run HEIGHTFIELD_TILE_SHADER). Empty input = empty section. */
+export function roadRibbonSection(roads?: number[]): number[] {
+  if (!roads || roads.length < 8) return [];
+  return [Math.floor(roads.length / 8), TILE_KINDS.indexOf('crosswalk'), TILE_KINDS.indexOf('junction'), ...roads];
 }
 
 export function heightfieldTextureKey(landformId: string): string {
@@ -75,8 +154,9 @@ function captureDimension(tiles: { cols: number; rows: number }): number {
 // (the static_surface_inline_props_rebake trap).
 const HeightfieldSurfaceCapture = memo(function HeightfieldSurfaceCapture(props: { landform: Landform }) {
   const tiles = props.landform.field?.tiles;
+  const roads = props.landform.field?.roads;
   const px = captureDimension(tiles ?? { cols: 1, rows: 1 });
-  const data = useMemo(() => (tiles ? heightfieldTileData(tiles) : [1, 1, 0, -1]), [tiles]);
+  const data = useMemo(() => (tiles ? heightfieldTileData(tiles, roads) : [1, 1, 0, -1]), [tiles, roads]);
   const surfaceStyle = useMemo(
     () => ({ position: 'absolute' as const, left: -99999, top: 0, width: px, height: px }),
     [px],

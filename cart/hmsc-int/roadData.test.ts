@@ -7,8 +7,9 @@
 import { assert, assertEqual, finish, test } from './game/_testkit';
 import {
   applyMergeGesture, carriagewayTiles, cellKey, clampProfile, crossSection,
-  isOneWay, laneGuides, planRoads, profileLabel, roadWidthTiles,
-  snapToCenterline, snapToRoadEnd, splitStroke, strokeChevrons,
+  filletPoints, isOneWay, laneGuides, planRoads, profileLabel, ribbonExtents,
+  roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd,
+  splitStroke, strokeChevrons,
   type RoadPlan, type RoadStroke,
 } from './roadData';
 
@@ -232,6 +233,45 @@ test('the merge gesture ignores two-way drafts and free-standing ends', () => {
     null,
     'a draft not ending along a road is just a road',
   );
+});
+
+test('filletPoints rounds corners into arcs, leaves straights and endpoints alone', () => {
+  const corner = [{ gx: 0, gz: 20 }, { gx: 20, gz: 20 }, { gx: 20, gz: 0 }];
+  const arc = filletPoints(corner, 5);
+  assert(arc.length > 4, 'the corner becomes arc samples');
+  assertEqual(arc[0]!.gx, 0, 'first endpoint preserved');
+  assertEqual(arc[arc.length - 1]!.gz, 0, 'last endpoint preserved');
+  assert(!arc.some((p) => p.gx === 20 && p.gz === 20), 'the sharp corner vertex is gone');
+  // every arc sample cuts INSIDE the corner
+  for (const p of arc) assert(p.gx <= 20 && p.gz <= 20.0001, 'arc stays inside the bend');
+
+  const straight = [{ gx: 0, gz: 10 }, { gx: 10, gz: 10 }, { gx: 20, gz: 10 }];
+  assertEqual(filletPoints(straight, 5).length, 3, 'collinear points pass through');
+  // and the stamped plan actually cuts the corner: the cell just inside the
+  // bend (on the chord) is carriageway even though both straight legs miss it.
+  const plan = planRoads([{ id: 'c', points: corner, profile: { lanesF: 1, lanesB: 1, sidewalks: false } }]);
+  const chord = plan.get(cellKey(17, 17));
+  assert(chord !== undefined && chord !== 'sidewalk', `the arc chord cell is road (got ${String(chord)})`);
+});
+
+test('ribbonExtents match the stamped cross-section widths', () => {
+  const tw = ribbonExtents({ lanesF: 3, lanesB: 1, sidewalks: true });
+  assertEqual(tw.rightExt, 9.5, '3 forward lanes + half median');
+  assertEqual(tw.leftExt, 3.5, '1 opposing lane + half median');
+  assertEqual(tw.twoWay, 1, 'two-way flag');
+  const ow = ribbonExtents({ lanesF: 2, lanesB: 0, sidewalks: false });
+  assertEqual(ow.rightExt, 3, 'one-way 2-lane centres ±3');
+  assertEqual(ow.phase, 0, 'even lane count divides at the centre');
+});
+
+test('roadRibbonSegments emits chunk-local 8-float segments and filters far chunks', () => {
+  const r: RoadStroke = { id: 'r', points: [{ gx: 10, gz: 10 }, { gx: 40, gz: 10 }], profile: { lanesF: 1, lanesB: 1, sidewalks: false } };
+  const segs = roadRibbonSegments([r], 0, 0, 120);
+  assertEqual(segs.length % 8, 0, '8 floats per segment');
+  assert(segs.length >= 8, 'the road crosses chunk (0,0)');
+  assertEqual(segs[0], 10.5, 'chunk-local cell-centre x');
+  assertEqual(segs[1], 10.5, 'chunk-local cell-centre z');
+  assertEqual(roadRibbonSegments([r], 5, 5, 120).length, 0, 'a far chunk gets no segments');
 });
 
 finish('roadData');

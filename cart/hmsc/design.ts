@@ -442,6 +442,12 @@ export type LandformField = {
   cell: number;
   heights: number[];
   tiles?: { cols: number; rows: number; idx: number[] };
+  // Analytic road ribbon segments over this landform (ROADCURVE-0610), in the
+  // tile grid's cell space: 8 floats per segment (ax az bx bz rightExt leftExt
+  // twoWay phase — see hmsc-int/roadData roadRibbonSegments). The drape shader
+  // paints asphalt + markings from distance-to-centerline, so road curves stay
+  // smooth at any zoom while the 1m tile stamps keep carrying the gameplay.
+  roads?: number[];
 };
 
 // A placed landform — the registry-driven terrain layer (world/landforms). Pure

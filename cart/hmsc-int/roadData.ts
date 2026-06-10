@@ -128,6 +128,42 @@ function rightOf(dir: Dir): Dir {
 // A centerline cell with the travel direction through it.
 type CenterCell = { gx: number; gz: number; dir: Dir };
 
+// ── corner fillets (ROADCURVE-0610) ─────────────────────────────────────────
+// Authored points stay the editable wire; CURVES are derived. Every interior
+// vertex becomes a quadratic-bezier arc (radius clamped to half its shorter
+// neighbour segment), and BOTH the tile stamp and the analytic ribbon render
+// rasterize the same filleted polyline — what you stamp is what you see.
+
+export const ROAD_FILLET_TILES = 5;
+
+export function filletPoints(points: RoadPoint[], radius: number): RoadPoint[] {
+  if (points.length < 3 || radius <= 0) return points;
+  const out: RoadPoint[] = [points[0]!];
+  for (let i = 1; i + 1 < points.length; i++) {
+    const a = points[i - 1]!, v = points[i]!, b = points[i + 1]!;
+    const d1 = Math.hypot(v.gx - a.gx, v.gz - a.gz);
+    const d2 = Math.hypot(b.gx - v.gx, b.gz - v.gz);
+    const r = Math.min(radius, d1 * 0.45, d2 * 0.45);
+    if (r < 0.75 || d1 === 0 || d2 === 0) { out.push(v); continue; }
+    const u1 = { x: (v.gx - a.gx) / d1, z: (v.gz - a.gz) / d1 };
+    const u2 = { x: (b.gx - v.gx) / d2, z: (b.gz - v.gz) / d2 };
+    if (u1.x * u2.x + u1.z * u2.z > 0.985) { out.push(v); continue; } // straight-through
+    const p1 = { gx: v.gx - u1.x * r, gz: v.gz - u1.z * r };
+    const p2 = { gx: v.gx + u2.x * r, gz: v.gz + u2.z * r };
+    const samples = Math.max(4, Math.ceil(r * 1.5));
+    for (let s = 0; s <= samples; s++) {
+      const t = s / samples;
+      const omt = 1 - t;
+      out.push({
+        gx: omt * omt * p1.gx + 2 * omt * t * v.gx + t * t * p2.gx,
+        gz: omt * omt * p1.gz + 2 * omt * t * v.gz + t * t * p2.gz,
+      });
+    }
+  }
+  out.push(points[points.length - 1]!);
+  return out;
+}
+
 // Rasterize the polyline to ordered, deduped centerline cells. Sampling at
 // quarter-cell steps guarantees 8-connected coverage on any diagonal.
 export function rasterizeCenterline(points: RoadPoint[]): CenterCell[] {
@@ -138,7 +174,7 @@ export function rasterizeCenterline(points: RoadPoint[]): CenterCell[] {
     const b = points[i + 1]!;
     const dir = segmentDir(a, b);
     if (!dir) continue;
-    const steps = Math.max(Math.abs(b.gx - a.gx), Math.abs(b.gz - a.gz)) * 4;
+    const steps = Math.max(1, Math.ceil(Math.max(Math.abs(b.gx - a.gx), Math.abs(b.gz - a.gz)) * 4));
     for (let s = 0; s <= steps; s++) {
       const t = s / Math.max(1, steps);
       const gx = Math.round(a.gx + (b.gx - a.gx) * t);
@@ -215,7 +251,9 @@ type StrokeRaster = {
 function rasterizeStroke(stroke: RoadStroke): StrokeRaster {
   const profile = clampProfile(stroke.profile);
   const xs = crossSection(profile);
-  const center = rasterizeCenterline(stroke.points);
+  // Stamp the FILLETED polyline — corners rasterize as arcs, and the analytic
+  // ribbon render walks the same curve, so look and gameplay agree.
+  const center = rasterizeCenterline(filletPoints(stroke.points, ROAD_FILLET_TILES));
   const carriage = new Map<string, TileKind>();
   const walk = new Set<string>();
   const rank = new Map<string, number>();
@@ -333,6 +371,62 @@ export function strokeChevrons(stroke: RoadStroke): { gx: number; gz: number; an
       gz: (a.gz + b.gz) / 2,
       angleDeg: (Math.atan2((b.gz - a.gz) * flip, (b.gx - a.gx) * flip) * 180) / Math.PI,
     });
+  }
+  return out;
+}
+
+// ── the analytic ribbon (ROADCURVE-0610) ────────────────────────────────────
+// The stroke IS the perfect curve; the tile stamp is just its 1m rasterization
+// for gameplay. The LOOK renders analytically: per-chunk segment lists feed the
+// terrain-drape shader, which paints asphalt/markings from the distance to the
+// filleted centerline — sub-tile sharp at the capture's full resolution.
+
+/** Cross-section extents relative to the draw direction's RIGHT vector. */
+export function ribbonExtents(p: RoadProfile): { rightExt: number; leftExt: number; twoWay: number; phase: number } {
+  const c = clampProfile(p);
+  if (c.lanesF > 0 && c.lanesB > 0) {
+    // Median half-tile each side; lane-divider boundaries start at 0.5+3 = 3.5.
+    return { rightExt: 0.5 + LANE_TILES * c.lanesF, leftExt: 0.5 + LANE_TILES * c.lanesB, twoWay: 1, phase: 3.5 };
+  }
+  const n = Math.max(c.lanesF, c.lanesB);
+  const half = (LANE_TILES * n) / 2;
+  // One-way centres on the stroke; divider boundaries depend on lane parity.
+  return { rightExt: half, leftExt: half, twoWay: 0, phase: n % 2 === 1 ? 1.5 : 0 };
+}
+
+/** Floats per ribbon segment: ax az bx bz rightExt leftExt twoWay phase. */
+export const RIBBON_SEG_FLOATS = 8;
+
+/**
+ * The chunk-local ribbon segment list for the drape shader: the filleted
+ * centerline of every stroke, in CELL space relative to chunk (cx,cz) (cell
+ * centres at +0.5), filtered to segments whose band can touch the chunk.
+ */
+export function roadRibbonSegments(
+  strokes: RoadStroke[],
+  chunkCx: number,
+  chunkCz: number,
+  chunkTiles: number,
+  maxSegs = 160,
+): number[] {
+  const out: number[] = [];
+  let count = 0;
+  for (const r of strokes) {
+    if (r.points.length < 2) continue;
+    const ext = ribbonExtents(r.profile);
+    const m = Math.max(ext.rightExt, ext.leftExt) + 1.5;
+    const pts = filletPoints(r.points, ROAD_FILLET_TILES);
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const ax = pts[i]!.gx - chunkCx * chunkTiles + 0.5;
+      const az = pts[i]!.gz - chunkCz * chunkTiles + 0.5;
+      const bx = pts[i + 1]!.gx - chunkCx * chunkTiles + 0.5;
+      const bz = pts[i + 1]!.gz - chunkCz * chunkTiles + 0.5;
+      if (Math.max(ax, bx) < -m || Math.min(ax, bx) > chunkTiles + m) continue;
+      if (Math.max(az, bz) < -m || Math.min(az, bz) > chunkTiles + m) continue;
+      if (count >= maxSegs) return out; // silently capped — log upstream if hit
+      out.push(ax, az, bx, bz, ext.rightExt, ext.leftExt, ext.twoWay, ext.phase);
+      count++;
+    }
   }
   return out;
 }
