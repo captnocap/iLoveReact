@@ -110,16 +110,36 @@ export class IsoStage {
     this.pose.zoom = clamp(this.pose.zoom * factor, MIN_ZOOM, MAX_ZOOM);
   }
 
+  // The cursor's world point on the active level's flat plane (analytic ray/plane
+  // intersection), in tiles. Distance-independent on purpose: the marching
+  // unprojectGround caps its ray at MAX_T≈400m, but the iso eye sits BASE_DIST/zoom
+  // (up to ~750m at MIN_ZOOM) from the target, so a zoomed-out cursor ray never
+  // reaches the ground and the march bails to cam.target — which made zoom-to-cursor
+  // jump the centre to the middle of nowhere. A plane solve has no range limit and
+  // is exact for the "keep this point under the cursor" anchor (terrain height under
+  // the pointer is irrelevant to a horizontal pan delta). Returns null only if the
+  // ray is parallel to the plane or the plane sits behind the eye.
+  groundPoint(sx: number, sy: number, rect: Rect): { x: number; z: number } | null {
+    const r = GAME_CAMERA.screenRay(sx, sy, rect, this.solve());
+    const dy = r.dir[1];
+    if (Math.abs(dy) < 1e-6) return null;
+    const t = (this.levelElevation() - r.origin[1]) / dy;
+    if (t <= 0) return null;
+    return { x: r.origin[0] + t * r.dir[0], z: r.origin[2] + t * r.dir[2] };
+  }
+
   // Zoom toward the cursor (map/Sims behaviour): keep the ground point under the
   // pointer fixed while the distance changes, instead of diving at the screen
-  // centre. Unproject the cursor before and after the zoom and shift centre by the
-  // difference — so "point at a building and roll in" brings THAT building closer.
+  // centre. Solve the cursor's plane point before and after the zoom and shift centre
+  // by the difference — so "point at a building and roll in" brings THAT building
+  // closer. If either solve fails (degenerate ray), zoom in place rather than jump.
   zoomToCursor(sx: number, sy: number, factor: number, rect: Rect): void {
-    const before = GAME_CAMERA.unprojectGround(sx, sy, rect, this.solve(), this.levelHeightSampler());
+    const before = this.groundPoint(sx, sy, rect);
     this.zoomBy(factor);
-    const after = GAME_CAMERA.unprojectGround(sx, sy, rect, this.solve(), this.levelHeightSampler());
+    const after = this.groundPoint(sx, sy, rect);
+    if (!before || !after) return;
     this.pose.centerX += before.x - after.x;
-    this.pose.centerZ += before.y - after.y;
+    this.pose.centerZ += before.z - after.z;
   }
 
   // Metres the eye sits from the target at the current zoom — the pan loop scales
@@ -154,17 +174,17 @@ export class IsoStage {
     this.setLevel(this.pose.level - 1);
   }
 
-  // "Grab the map" pan: unproject the cursor's previous and current screen points to
-  // the active level, and shift the centre so the grabbed world point stays under
-  // the cursor. Rig-agnostic and trig-free — it reuses unprojectGround, so it stays
-  // exact through every rotation and zoom (no per-facing sign juggling).
+  // "Grab the map" pan: solve the cursor's previous and current plane points and shift
+  // the centre so the grabbed world point stays under the cursor. Rig-agnostic and
+  // trig-free — it rides the same analytic groundPoint as zoomToCursor, so it stays
+  // exact through every rotation and zoom (no per-facing sign juggling) and never
+  // suffers the marched-ray range cap. No-op if either solve is degenerate.
   dragPan(prevX: number, prevY: number, curX: number, curY: number, rect: Rect): void {
-    const cam = this.solve();
-    const heightAt = this.levelHeightSampler();
-    const a = GAME_CAMERA.unprojectGround(prevX, prevY, rect, cam, heightAt);
-    const b = GAME_CAMERA.unprojectGround(curX, curY, rect, cam, heightAt);
+    const a = this.groundPoint(prevX, prevY, rect);
+    const b = this.groundPoint(curX, curY, rect);
+    if (!a || !b) return;
     this.pose.centerX += a.x - b.x;
-    this.pose.centerZ += a.y - b.y;
+    this.pose.centerZ += a.z - b.z;
   }
 
   // Screen pixel -> world cell on the active level. Level 0 follows painted terrain;

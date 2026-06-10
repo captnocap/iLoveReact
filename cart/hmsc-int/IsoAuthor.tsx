@@ -21,7 +21,8 @@ import type { BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, Place
 import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes } from './editors/build/pieceMeshes';
 import { BUILD_UI } from './editors/build/buildUi';
-import { IsoStage, METERS_PER_LEVEL } from './isoStage';
+import { IsoStage, METERS_PER_LEVEL, type IsoPose } from './isoStage';
+import { readRouteTwigState, writeRouteTwigState } from './editors/twigs';
 import type { GameState } from '../hmsc/design';
 import { WorldStatics } from '../hmsc/render3d/GameWorld3D';
 import { LandformSurfaceCaptures } from '../hmsc/render3d/Landform';
@@ -39,6 +40,14 @@ const ISO_SNAP_TUNING = { ...SNAP_TUNING_DEFAULTS, reachMeters: 600, groundMarch
 // The build palette, ruled-hotkey order first (floor, wall, ramp, roof), then the
 // rest — same kinds F2's palette leads with. Each tab lists its catalog entries.
 const PALETTE_KINDS: BuildPieceKind[] = ['floor', 'wall', 'ramp', 'roof', 'stairs', 'pillar', 'prop'];
+
+// Route id the iso camera pose persists under (editors/twigs) so a hot reload — which
+// remounts this component and reconstructs the IsoStage — restores where you were
+// looking instead of snapping back to the content centroid. One global pose across
+// maps (the pane isn't passed a map stem); the ⌂/F recenter fixes it in one click if
+// you open a different map and the saved pose points somewhere stale.
+const ISO_ROUTE = '/iso-build';
+const ISO_CAM_TWIG = 'camera';
 
 const MOVE_KEYS = new Set(['w', 'a', 's', 'd']);
 const ARROW_TO_WASD: Record<string, string> = { arrowup: 'w', arrowdown: 's', arrowleft: 'a', arrowright: 'd' };
@@ -123,14 +132,23 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // ref; a tick forces the Scene3D.Camera to re-read the solved pose on pan/zoom/turn.
   const stageRef = useRef<IsoStage | null>(null);
   if (!stageRef.current) {
-    const [cx, cz] = contentCenter(pieces);
-    stageRef.current = new IsoStage({ centerX: cx, centerZ: cz, zoom: 1, level: 0 }, groundTopAt);
+    // Restore the persisted pose across a hot reload; else open centred on what's built.
+    const saved = readRouteTwigState<Partial<IsoPose> | null>(ISO_ROUTE, ISO_CAM_TWIG, null);
+    if (saved && Number.isFinite(saved.centerX) && Number.isFinite(saved.centerZ)) {
+      stageRef.current = new IsoStage(saved, groundTopAt);
+    } else {
+      const [cx, cz] = contentCenter(pieces);
+      stageRef.current = new IsoStage({ centerX: cx, centerZ: cz, zoom: 1, level: 0 }, groundTopAt);
+    }
   }
   const stage = stageRef.current;
   useEffect(() => { stage.setHeightSampler(groundTopAt); }, [stage, groundTopAt]);
   const [, bump] = useState(0);
   const redraw = useCallback(() => bump((n) => (n + 1) & 0xffff), []);
-  const recenter = useCallback(() => { const [cx, cz] = contentCenter(piecesRef.current); stage.centerOn(cx, cz); redraw(); }, [stage, redraw]);
+  // Persist the camera pose at REST points (drag/key release, wheel, button) — never
+  // per frame — so a hot reload resumes the view. sculptCamera keeps the same discipline.
+  const saveCamera = useCallback(() => { writeRouteTwigState(ISO_ROUTE, ISO_CAM_TWIG, { ...stage.pose }); }, [stage]);
+  const recenter = useCallback(() => { const [cx, cz] = contentCenter(piecesRef.current); stage.centerOn(cx, cz); redraw(); saveCamera(); }, [stage, redraw, saveCamera]);
 
   const [armed, setArmed] = useState<Armed>(null);
   const armedRef = useRef<Armed>(armed);
@@ -148,6 +166,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const [wholeBuilding, setWholeBuilding] = useState(true);
   const wholeBuildingRef = useRef(wholeBuilding);
   wholeBuildingRef.current = wholeBuilding;
+  // An in-progress move drag: the world (dx,dz) the selection is being dragged by on
+  // the active level's plane, or null when not moving. Drives the move ghost; the
+  // selection re-places (remove+place) on mouse-up.
+  const [moveDelta, setMoveDelta] = useState<{ dx: number; dz: number } | null>(null);
+  const moveDeltaRef = useRef(moveDelta);
+  moveDeltaRef.current = moveDelta;
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 800, height: 600 });
@@ -181,7 +205,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // panning). A CLICK (no drag) acts at the cursor: place the armed piece, or select
   // the piece under it. Place/select fire on mouse-UP so a rotate-drag never drops a
   // piece; click vs drag is told by travel (>4px = a turn).
-  const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean } | null>(null);
+  // A drag is one of two gestures, fixed at mouse-down: ROTATE the view (the default,
+  // on empty ground), or MOVE the selection (when the press lands on an
+  // already-selected piece and nothing's armed). gx0/gz0 hold the down point on the
+  // active plane so a move tracks the cursor's world delta, not pixels.
+  const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean; mode: 'rotate' | 'move'; gx0: number; gz0: number } | null>(null);
   const local = (e: any): { x: number; y: number } => {
     const r = rectRef.current;
     return { x: Number(e?.x ?? 0) - r.x, y: Number(e?.y ?? 0) - r.y };
@@ -190,7 +218,18 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const onDown = (e: any) => {
     props.onFocus?.();
     const p = local(e);
-    dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false };
+    let mode: 'rotate' | 'move' = 'rotate';
+    let gx0 = 0, gz0 = 0;
+    // Grab a selected piece to move it: only when unarmed (armed = place mode) and the
+    // press raycasts onto a piece already in the selection. Anything else → rotate.
+    if (!armedRef.current && selectedIdsRef.current.size) {
+      const hit = GAME_BUILD.placed.raycast(stage.pieceRay(p.x, p.y, rectRef.current), piecesRef.current, ISO_SNAP_TUNING.reachMeters);
+      if (hit && selectedIdsRef.current.has(hit.piece.id)) {
+        const g = stage.groundPoint(p.x, p.y, rectRef.current);
+        if (g) { mode = 'move'; gx0 = g.x; gz0 = g.z; }
+      }
+    }
+    dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false, mode, gx0, gz0 };
     if (armedRef.current) setSnap(resolveAt(p.x, p.y));
   };
   const onMove = (e: any) => {
@@ -198,9 +237,14 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const d = dragRef.current;
     if (d && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
       d.turned = true;
-      stage.rotateBy((p.x - d.x) * 0.3); // horizontal drag → yaw
-      d.x = p.x;
-      redraw();
+      if (d.mode === 'move') {
+        const g = stage.groundPoint(p.x, p.y, rectRef.current);
+        if (g) setMoveDelta({ dx: g.x - d.gx0, dz: g.z - d.gz0 });
+      } else {
+        stage.rotateBy((p.x - d.x) * 0.3); // horizontal drag → yaw
+        d.x = p.x;
+        redraw();
+      }
       return;
     }
     if (armedRef.current) setSnap(resolveAt(p.x, p.y));
@@ -208,7 +252,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const onUp = () => {
     const d = dragRef.current;
     dragRef.current = null;
-    if (!d || d.turned) return; // a rotate, not a click
+    if (!d) return;
+    if (d.turned) {
+      if (d.mode === 'move') commitMove();
+      else saveCamera(); // a rotate settled — persist the new yaw
+      return;
+    }
+    // No travel → a click: place the armed piece, or (re)select under the cursor.
     if (armedRef.current) {
       const t = resolveAt(d.x0, d.y0);
       if (t) { setSnap(t); placeAt(t); }
@@ -262,11 +312,29 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       onCommit({ kind: 'piecePlaced', placement: { pieceId: p.pieceId, x: p.x + dx, y: p.y, z: p.z, yawDegrees: p.yawDegrees } }, `cloned ${p.pieceId}`);
     }
   };
+  // Commit a finished move drag: shift every selected piece by the dragged world delta.
+  // There's no pieceMoved event (that'd touch the shared stream + F2 + compile) — a move
+  // IS a remove of the old id + a place at the new spot, the SAME two events delete/clone
+  // already emit. Validate all destinations FIRST (intrinsic checks; not collision) and
+  // abort the whole move if any is refused, so a building never lands half-shifted. The
+  // selection re-keys to fresh stream ids, so the old highlight just clears.
+  const commitMove = () => {
+    const delta = moveDeltaRef.current;
+    setMoveDelta(null);
+    if (!delta || (Math.abs(delta.dx) < 1e-3 && Math.abs(delta.dz) < 1e-3)) return;
+    const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
+    if (!sel.length) return;
+    const moves = sel.map((p) => ({ id: p.id, placement: { pieceId: p.pieceId, x: p.x + delta.dx, y: p.y, z: p.z + delta.dz, yawDegrees: p.yawDegrees } }));
+    if (moves.some((m) => GAME_BUILD.placed.validatePlacement(m.placement).length > 0)) return;
+    for (const m of moves) onCommit({ kind: 'pieceRemoved', id: m.id }, `moved ${m.id}`);
+    for (const m of moves) onCommit({ kind: 'piecePlaced', placement: m.placement }, `moved ${m.placement.pieceId}`);
+    setSelectedIds(new Set());
+  };
 
   // Latest delete/clone closures, so the once-mounted key listener always calls the
   // current ones (they read live refs + the current onCommit).
-  const keyActionsRef = useRef({ deleteSelected, cloneSelected, recenter });
-  keyActionsRef.current = { deleteSelected, cloneSelected, recenter };
+  const keyActionsRef = useRef({ deleteSelected, cloneSelected, recenter, saveCamera });
+  keyActionsRef.current = { deleteSelected, cloneSelected, recenter, saveCamera };
 
   // Keys (while focused): R rotates the ghost, Q/E turn the view, Delete/Backspace
   // removes the selection, Esc disarms / clears the selection.
@@ -276,8 +344,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       const k = String(e?.key ?? '').toLowerCase();
       if (k === 'r') setGhostYaw((y) => (y + 90) % 360);
       else if (k === 'escape') { setArmed(null); setSelectedIds(new Set()); }
-      else if (k === 'q') { stage.rotate(-1); redraw(); }
-      else if (k === 'e') { stage.rotate(1); redraw(); }
+      else if (k === 'q') { stage.rotate(-1); redraw(); keyActionsRef.current.saveCamera(); }
+      else if (k === 'e') { stage.rotate(1); redraw(); keyActionsRef.current.saveCamera(); }
       else if (k === 'f' || k === 'home') keyActionsRef.current.recenter();
       else if (k === 'delete' || k === 'backspace') keyActionsRef.current.deleteSelected();
     });
@@ -292,7 +360,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const held: Record<string, boolean> = {};
     const key = (e: any): string => { const k = String(e?.key ?? '').toLowerCase(); return ARROW_TO_WASD[k] ?? k; };
     const offD = busOn('__keydown', (e: any) => { const k = key(e); if (MOVE_KEYS.has(k)) held[k] = true; });
-    const offU = busOn('__keyup', (e: any) => { const k = key(e); if (MOVE_KEYS.has(k)) held[k] = false; });
+    const offU = busOn('__keyup', (e: any) => { const k = key(e); if (MOVE_KEYS.has(k)) { held[k] = false; keyActionsRef.current.saveCamera(); } });
     const G: any = globalThis;
     const sched = G.requestAnimationFrame ? G.requestAnimationFrame.bind(G) : (fn: any) => setTimeout(fn, 16);
     const cancel = G.cancelAnimationFrame ? G.cancelAnimationFrame.bind(G) : clearTimeout;
@@ -356,6 +424,21 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     )));
   }, [snap, armed, prefabById]);
 
+  // The move preview: the selected pieces drawn translucent at the dragged offset while
+  // a move drag is live, tinted blocked-red if any destination fails validation — the
+  // same ghost language placement uses, so a move reads like a re-place.
+  const moveGhostMeshes = useMemo(() => {
+    if (!moveDelta) return null;
+    const sel = pieces.filter((p) => selectedIds.has(p.id));
+    if (!sel.length) return null;
+    const moved = sel.map((p) => ({ pieceId: p.pieceId, x: p.x + moveDelta.dx, y: p.y, z: p.z + moveDelta.dz, yawDegrees: p.yawDegrees }));
+    const blocked = moved.some((m) => GAME_BUILD.placed.validatePlacement(m as any).length > 0);
+    const color = blocked ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
+    return moved.flatMap((m, i) => pieceVisualShapes(m, `isoMove${i}`).map((shape) => (
+      <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
+    )));
+  }, [moveDelta, pieces, selectedIds]);
+
   const noIds = useMemo(() => new Set<string>(), []);
 
   // Cut-away walls: fade every piece that sits ABOVE the active floor so you can see
@@ -401,6 +484,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
             floors above the active level faded (cut-away) so you see the interior */}
         <PlacedPieceMeshes pieces={pieces} markedIds={selectedIds} targetId={null} occludedIds={occludedIds} />
         {ghostMeshes}
+        {moveGhostMeshes}
       </Scene3D>
 
       {/* pointer capture (near-transparent so it's hittable). onScroll rides the raw
@@ -415,27 +499,28 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
           const p = local(e);
           stage.zoomToCursor(p.x, p.y, d > 0 ? 1.15 : 1 / 1.15, rectRef.current);
           redraw();
+          saveCamera();
         }}
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
       />
 
       {/* ── Sims control cluster (top-right): rotate · zoom · floor ────────── */}
       <Box style={{ position: 'absolute', right: 8, top: 8, flexDirection: 'row', gap: 4 }}>
-        <IsoBtn label="⌂" onPress={recenter} />
-        <IsoBtn label="⟲" onPress={() => { stage.rotate(-1); redraw(); }} />
-        <IsoBtn label="⟳" onPress={() => { stage.rotate(1); redraw(); }} />
-        <IsoBtn label="−" onPress={() => { stage.zoomBy(1 / 1.25); redraw(); }} />
-        <IsoBtn label="+" onPress={() => { stage.zoomBy(1.25); redraw(); }} />
-        <IsoBtn label="▼" onPress={() => { stage.lowerLevel(); redraw(); }} />
+        <IsoBtn label="⌂" title="Recenter on what's built (F)" onPress={recenter} />
+        <IsoBtn label="⟲" title="Rotate view 90° left (Q)" onPress={() => { stage.rotate(-1); redraw(); saveCamera(); }} />
+        <IsoBtn label="⟳" title="Rotate view 90° right (E)" onPress={() => { stage.rotate(1); redraw(); saveCamera(); }} />
+        <IsoBtn label="−" title="Zoom out" onPress={() => { stage.zoomBy(1 / 1.25); redraw(); saveCamera(); }} />
+        <IsoBtn label="+" title="Zoom in" onPress={() => { stage.zoomBy(1.25); redraw(); saveCamera(); }} />
+        <IsoBtn label="▼" title="Floor down a storey" onPress={() => { stage.lowerLevel(); redraw(); saveCamera(); }} />
         <Box style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 4, paddingBottom: 4, backgroundColor: BUILD_UI.panelBg, borderRadius: 4 }}>
           <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{`F${level}`}</Text>
         </Box>
-        <IsoBtn label="▲" onPress={() => { stage.raiseLevel(); redraw(); }} />
-        <IsoBtn label={wholeBuilding ? '▦' : '▪'} onPress={() => setWholeBuilding((v) => !v)} />
+        <IsoBtn label="▲" title="Floor up a storey" onPress={() => { stage.raiseLevel(); redraw(); saveCamera(); }} />
+        <IsoBtn label={wholeBuilding ? '▦' : '▪'} title={wholeBuilding ? 'Select: whole building (click → one piece)' : 'Select: one piece (click → whole building)'} onPress={() => setWholeBuilding((v) => !v)} />
         {selectedIds.size > 0 ? (
           <>
-            <IsoBtn label="⧉" onPress={cloneSelected} />
-            <IsoBtn label="✕" onPress={deleteSelected} />
+            <IsoBtn label="⧉" title="Clone selection" onPress={cloneSelected} />
+            <IsoBtn label="✕" title="Delete selection (Del)" onPress={deleteSelected} />
           </>
         ) : null}
       </Box>
@@ -447,7 +532,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         {armed
           ? `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place · drag rotate · WASD pan · scroll zoom · R · Esc`
           : selectedIds.size > 0
-            ? `${selectedIds.size} selected · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'}`
+            ? `${selectedIds.size} selected · drag to move · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'}`
             : 'WASD pan · drag rotate · scroll zoom · F recenter · click to select · pick below to build'}
       </Text>
       {/* what's in the map — the "junk" is the real placed pieces + world props (the
@@ -459,9 +544,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   );
 });
 
-function IsoBtn(props: { label: string; onPress: () => void }) {
+function IsoBtn(props: { label: string; onPress: () => void; title?: string }) {
+  // The icons are cryptic, so each carries a hover tooltip — the engine-native one
+  // (hoverable + tooltip, painted by framework/tooltip.zig as an overlay), the same
+  // door cart/testing_carts/tooltip_test.tsx exercises. No layout shift here: the
+  // cluster is an absolutely-positioned overlay, and the tooltip paints over the scene.
   return (
-    <Pressable onPress={props.onPress}>
+    <Pressable onPress={props.onPress} hoverable={props.title ? true : undefined} tooltip={props.title}>
       <Box style={{ width: 26, height: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: BUILD_UI.panelBg, borderRadius: 4 }}>
         <Text fontSize={12} color="#cbd5e1">{props.label}</Text>
       </Box>
