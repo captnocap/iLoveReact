@@ -17,7 +17,7 @@ import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { GAME_BUILD } from './game';
-import type { BuildPieceKind, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
+import type { BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
 import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes } from './editors/build/pieceMeshes';
 import { BUILD_UI } from './editors/build/buildUi';
@@ -26,6 +26,7 @@ import type { GameState } from '../hmsc/design';
 import { WorldStatics } from '../hmsc/render3d/GameWorld3D';
 import { LandformSurfaceCaptures } from '../hmsc/render3d/Landform';
 import { PropSurfaceCaptures } from '../hmsc/render3d/PropCaptures';
+import { TextureCapture } from './game/textures/registry';
 import { groundColumnTop } from './Embodied';
 import { CHUNK_TILES } from './chunks';
 
@@ -51,6 +52,23 @@ function contentCenter(pieces: readonly PlacedBuildPiece[]): [number, number] {
   return [sx / pieces.length, sz / pieces.length];
 }
 
+// The material-skin texture ids the placed pieces reference — the SAME set F2 derives
+// (skinTextureIdsFromSet) to mount each skin's TextureCapture. Without these mounts,
+// nothing binds the `bldskin:<id>` texture a skinned piece points at and it renders
+// flat, so the applied material "disappears" in this pane.
+function skinTextureIds(pieces: readonly PlacedBuildPiece[]): string[] {
+  const ids = new Set<string>();
+  for (const p of pieces) {
+    const set = p.skin as BuildSkinSet | undefined;
+    if (!set) continue;
+    for (const slot of GAME_BUILD.skins.slots as readonly BuildFaceSlot[]) {
+      const skin = set[slot];
+      if (skin?.kind === 'material') ids.add(skin.id);
+    }
+  }
+  return [...ids].sort();
+}
+
 // What's armed to place: a single catalog PIECE, or a PREFAB (a named composition that
 // stamps into many pieces). null = nothing armed (pan/select mode).
 type Armed = { kind: 'piece' | 'prefab'; id: string } | null;
@@ -63,6 +81,9 @@ export interface IsoAuthorProps {
   // cart already funnels F2 placements through. This pane is just another caller.
   pieces: readonly PlacedBuildPiece[];
   onCommit: (event: WorldEvent, label: string) => void;
+  // The FULL prefab list — built-ins AND the user-captured (stream) prefabs the cart
+  // already merges for F2. The rail shows these; absent = built-ins only.
+  prefabs?: readonly BuildPrefabDef[];
   // World (x,z) -> ground height (m). Level-0 picks follow it; absent = flat ground.
   groundTopAt?: (x: number, z: number) => number;
   // WASD/key focus is owned by the cart (shared across panes); true = this pane
@@ -73,6 +94,15 @@ export interface IsoAuthorProps {
 
 export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const { state, pieces, onCommit } = props;
+  const prefabs = props.prefabs ?? GAME_BUILD.prefabs.ids.map((id) => GAME_BUILD.prefabs.get(id));
+  // Prefab def by id (built-in + stream), for the ghost/stamp/label — a stream prefab
+  // isn't in GAME_BUILD.prefabs, so look it up here. A ref too: placeAt runs from an
+  // event closure that mustn't capture a stale list.
+  const prefabById = useMemo(() => new Map(prefabs.map((d) => [d.id, d])), [prefabs]);
+  const prefabByIdRef = useRef(prefabById);
+  prefabByIdRef.current = prefabById;
+  // Mount each placed skin's material TextureCapture so skinned pieces actually wear it.
+  const skinIds = useMemo(() => skinTextureIds(pieces), [pieces]);
   // Terrain-following picks: snap against the SAME groundColumnTop F2 uses (painted
   // landform tops, regardless of the cursor's y), so level-0 placements drape over
   // painted hills exactly as F2's do. The WorldGridState is the thin {regions,cells,
@@ -193,8 +223,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const at = `${t.placement.x.toFixed(1)},${t.placement.z.toFixed(1)}`;
     if (a.kind === 'prefab') {
       // A prefab commits ONE prefabStamped event; the stream decomposes it into its
-      // pieces — the SAME path F2's place() takes for a prefab.
-      const def = GAME_BUILD.prefabs.get(a.id);
+      // pieces — the SAME path F2's place() takes for a prefab. The def lookup spans
+      // built-in AND stream prefabs.
+      const def = prefabByIdRef.current.get(a.id);
+      if (!def) return;
       onCommit({ kind: 'prefabStamped', prefabId: a.id, origin: { x: t.placement.x, y: t.placement.y, z: t.placement.z }, yawDegrees: t.placement.yawDegrees }, `stamped ${def.label} @ ${at}`);
       return;
     }
@@ -310,16 +342,19 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const a = armedRef.current;
     if (!a || !snap) return null;
     const yaw = snap.placement.yawDegrees;
-    // A prefab previews ALL of its stamped pieces; a single piece previews itself.
-    const previews = a.kind === 'prefab'
-      ? GAME_BUILD.placed.stamp(GAME_BUILD.prefabs.get(a.id), { x: snap.placement.x, y: snap.placement.y, z: snap.placement.z }, yaw)
+    // A prefab previews ALL of its stamped pieces; a single piece previews itself. The
+    // prefab def spans built-in + stream (prefabById); bail if it's somehow unknown.
+    const prefabDef = a.kind === 'prefab' ? prefabById.get(a.id) : null;
+    if (a.kind === 'prefab' && !prefabDef) return null;
+    const previews = prefabDef
+      ? GAME_BUILD.placed.stamp(prefabDef, { x: snap.placement.x, y: snap.placement.y, z: snap.placement.z }, yaw)
       : [{ pieceId: a.id, x: snap.placement.x, y: snap.placement.y, z: snap.placement.z, yawDegrees: yaw }];
     const blocked = a.kind === 'piece' && GAME_BUILD.placed.validatePlacement(previews[0] as any).length > 0;
     const color = blocked ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
     return previews.flatMap((p, i) => pieceVisualShapes(p, `isoGhost${i}`).map((shape) => (
       <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
     )));
-  }, [snap, armed]);
+  }, [snap, armed, prefabById]);
 
   const noIds = useMemo(() => new Set<string>(), []);
 
@@ -341,6 +376,20 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     >
       <LandformSurfaceCaptures landforms={state.world.landforms ?? []} />
       <PropSurfaceCaptures props={state.world.props} />
+      {/* bind each placed skin's material texture (the SAME staticKey the renderer's
+          textureKey points at) so skinned pieces wear their material — F2 does this. */}
+      {skinIds.map((id) => (
+        <TextureCapture
+          key={id}
+          textureId={id}
+          staticKey={`bldskin:${id}`}
+          widthPx={BUILD_UI.buildingSkinTexturePx}
+          heightPx={BUILD_UI.buildingSkinTexturePx}
+          cols={1}
+          floors={1}
+          perception={state.player.perception}
+        />
+      ))}
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showAxes={false}>
         <Scene3D.Camera position={cam.pos} target={cam.target} fov={cam.fov} far={FAR_CLIP} />
         <Scene3D.Fog enabled={false} />
@@ -392,11 +441,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       </Box>
 
       {/* ── catalog rail (bottom): pick a piece to place ───────────────────── */}
-      <CatalogRail armed={armed} onArm={(a) => { setArmed((cur) => (cur && cur.id === a.id && cur.kind === a.kind ? null : a)); setSelectedIds(new Set()); }} />
+      <CatalogRail prefabs={prefabs} armed={armed} onArm={(a) => { setArmed((cur) => (cur && cur.id === a.id && cur.kind === a.kind ? null : a)); setSelectedIds(new Set()); }} />
 
       <Text fontSize={9} color={props.focused ? '#7dd3fc' : '#475569'} style={{ fontFamily: 'monospace', position: 'absolute', left: 8, top: 34 }}>
         {armed
-          ? `place: ${(armed.kind === 'prefab' ? GAME_BUILD.prefabs.get(armed.id) : GAME_BUILD.catalog.get(armed.id)).label} · click to place · drag rotate · WASD pan · scroll zoom · R · Esc`
+          ? `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place · drag rotate · WASD pan · scroll zoom · R · Esc`
           : selectedIds.size > 0
             ? `${selectedIds.size} selected · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'}`
             : 'WASD pan · drag rotate · scroll zoom · F recenter · click to select · pick below to build'}
@@ -463,13 +512,14 @@ const IsoGrid = memo(function IsoGrid(props: { centerX: number; centerZ: number;
 // SAME BUILD_CATALOG the F2 palette reads.
 type RailTab = BuildPieceKind | 'prefabs';
 const RAIL_TABS: RailTab[] = [...PALETTE_KINDS, 'prefabs'];
-const CatalogRail = memo(function CatalogRail(props: { armed: Armed; onArm: (a: { kind: 'piece' | 'prefab'; id: string }) => void }) {
+const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: readonly BuildPrefabDef[]; onArm: (a: { kind: 'piece' | 'prefab'; id: string }) => void }) {
   const [tab, setTab] = useState<RailTab>('wall');
-  // 'prefabs' lists the named compositions (stamp → many pieces); every other tab lists
-  // that kind's catalog pieces. Both feed the SAME rail, fed by the SAME GAME_BUILD.
+  // 'prefabs' lists the named compositions (stamp → many pieces) — the FULL list the cart
+  // passes (built-in + user-captured stream prefabs); every other tab lists that kind's
+  // catalog pieces. Both feed the SAME rail, fed by the SAME GAME_BUILD.
   const entries = useMemo<{ id: string; label: string }[]>(
-    () => (tab === 'prefabs' ? Object.values(GAME_BUILD.prefabs.definitions).map((d) => ({ id: d.id, label: d.label })) : GAME_BUILD.catalog.byKind(tab)),
-    [tab],
+    () => (tab === 'prefabs' ? props.prefabs.map((d) => ({ id: d.id, label: d.label })) : GAME_BUILD.catalog.byKind(tab)),
+    [tab, props.prefabs],
   );
   const armKind: 'piece' | 'prefab' = tab === 'prefabs' ? 'prefab' : 'piece';
   return (
