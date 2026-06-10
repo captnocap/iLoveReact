@@ -6,8 +6,8 @@
 
 import { assert, assertEqual, finish, test } from './game/_testkit';
 import {
-  carriagewayTiles, cellKey, clampProfile, crossSection, isOneWay, planRoads,
-  profileLabel, roadWidthTiles, strokeChevrons,
+  carriagewayTiles, cellKey, clampProfile, crossSection, isOneWay, laneGuides,
+  planRoads, profileLabel, roadWidthTiles, snapToRoadEnd, strokeChevrons,
   type RoadPlan, type RoadStroke,
 } from './roadData';
 
@@ -96,6 +96,53 @@ test('crossSection one-way width centres around the stroke', () => {
 test('profileLabel reads like the rail chip', () => {
   assertEqual(profileLabel({ lanesF: 1, lanesB: 1, sidewalks: true }), '1+1 ·11w +walk', 'two-way');
   assertEqual(profileLabel({ lanesF: 2, lanesB: 0, sidewalks: false }), '2→ ·6w', 'one-way forward');
+});
+
+test('continuing a road from its endpoint is ONE road — no phantom junction at the seam', () => {
+  const a = road('a', [[0, 10], [15, 10]], 1, 1, true);
+  const b = road('b', [[15, 10], [30, 10]], 1, 1, true);
+  const plan = planRoads([a, b]);
+  let junctions = 0, crosswalks = 0;
+  for (const kind of plan.values()) {
+    if (kind === 'junction') junctions += 1;
+    if (kind === 'crosswalk') crosswalks += 1;
+  }
+  assertEqual(junctions, 0, 'parallel overlap never boxes');
+  assertEqual(crosswalks, 0, 'no zebras mid-road');
+  assertEqual(at(plan, 15, 10), 'median', 'the seam reads as continuous centerline');
+  assertEqual(at(plan, 15, 11), 'laneEast', 'lanes flow straight through the seam');
+});
+
+test('head-on parallel overlap also stays box-free; crossing axes still box', () => {
+  const a = road('a', [[0, 10], [20, 10]], 1, 1, false);
+  const headOn = road('b', [[30, 10], [15, 10]], 1, 1, false);
+  let junctions = 0;
+  for (const kind of planRoads([a, headOn]).values()) if (kind === 'junction') junctions += 1;
+  assertEqual(junctions, 0, 'two roads drawn toward each other merge, never box');
+
+  const tee = road('c', [[15, 10], [15, 30]], 1, 1, false);
+  let teeJunctions = 0;
+  for (const kind of planRoads([a, tee]).values()) if (kind === 'junction') teeJunctions += 1;
+  assert(teeJunctions > 0, 'a T (crossing axes) still forms the box');
+});
+
+test('laneGuides put each lane wire at its 3-tile group centre', () => {
+  const twoWay = laneGuides({ lanesF: 2, lanesB: 1, sidewalks: false });
+  assertEqual(
+    twoWay.map((g) => `${g.flow[0]}${g.off}`).join(','),
+    'f2,f5,b-2',
+    'forward lanes at +2/+5, opposing at -2',
+  );
+  const oneWay = laneGuides({ lanesF: 1, lanesB: 0, sidewalks: false });
+  assertEqual(oneWay.length, 1, 'one lane, one wire');
+  assertEqual(oneWay[0]!.off, 0, 'single one-way lane centres on the stroke');
+});
+
+test('snapToRoadEnd snaps a nearby click to the stroke endpoint, never a far one', () => {
+  const a = road('a', [[0, 10], [15, 10]], 1, 1, false);
+  const near = snapToRoadEnd([a], { gx: 17, gz: 11 }, 2.5);
+  assert(!!near && near.gx === 15 && near.gz === 10, 'click within radius lands exactly on the endpoint');
+  assertEqual(snapToRoadEnd([a], { gx: 25, gz: 10 }, 2.5), null, 'click past the radius stays free');
 });
 
 finish('roadData');

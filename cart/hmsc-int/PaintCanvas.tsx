@@ -33,7 +33,7 @@ import { BrushRail, type BrushRailSettings } from './BrushRail';
 import { LayerBtn, MiniStepper, ToolBtn } from './railAtoms';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
-import { clampProfile, parseCellKey, planRoads, profileLabel, isOneWay, roadWidthTiles, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
+import { clampProfile, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadWidthTiles, snapToRoadEnd, strokeEndpoints, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
 import { RoadRail } from './RoadRail';
 import { ChunkSurface } from './ChunkSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
@@ -164,6 +164,33 @@ function roadDots(points: RoadPoint[], everyTiles: number): { x: number; z: numb
     if (len === 0) continue;
     const n = Math.max(1, Math.round(len / everyTiles));
     for (let s = 0; s <= n; s++) out.push({ x: a.gx + (b.gx - a.gx) * (s / n), z: a.gz + (b.gz - a.gz) * (s / n) });
+  }
+  return out;
+}
+
+// Per-LANE wire dots (req_0528): each lane's centre offset from the stroke,
+// sampled along every segment with that segment's quantized right vector —
+// the same math the stamp uses, so the wire sits exactly on the lane it marks.
+function laneWireDots(r: RoadStroke, everyTiles: number): { x: number; z: number; flow: 'forward' | 'backward' }[] {
+  const guides = laneGuides(r.profile);
+  const out: { x: number; z: number; flow: 'forward' | 'backward' }[] = [];
+  for (let i = 0; i + 1 < r.points.length; i++) {
+    const a = r.points[i]!, b = r.points[i + 1]!;
+    const dx = b.gx - a.gx, dz = b.gz - a.gz;
+    const len = Math.hypot(dx, dz);
+    if (!len) continue;
+    const dir = Math.abs(dx) >= Math.abs(dz) ? { dx: Math.sign(dx), dz: 0 } : { dx: 0, dz: Math.sign(dz) };
+    const right = { dx: -dir.dz, dz: dir.dx };
+    const n = Math.max(1, Math.round(len / everyTiles));
+    for (const g of guides) {
+      for (let s = 0; s <= n; s++) {
+        out.push({
+          x: a.gx + dx * (s / n) + right.dx * g.off,
+          z: a.gz + dz * (s / n) + right.dz * g.off,
+          flow: g.flow,
+        });
+      }
+    }
   }
   return out;
 }
@@ -1041,6 +1068,9 @@ export function PaintCanvas(props: {
   const [roadDraft, setRoadDraft] = useState<RoadPoint[]>([]);
   const [roadProfile, setRoadProfile] = useState<RoadProfile>({ lanesF: 1, lanesB: 1, sidewalks: true });
   const [selRoadId, setSelRoadId] = useState<string | null>(null);
+  // The wire view (req_0528): dotted centerlines + endpoint connect-squares
+  // over every committed stroke, so new roads continue the existing network.
+  const [showRoadWires, setShowRoadWires] = useState(true);
   const roadsRef = useRef(roads);
   roadsRef.current = roads;
   const roadDraftRef = useRef(roadDraft);
@@ -1364,7 +1394,11 @@ export function PaintCanvas(props: {
       return;
     }
     if (!c) return;
-    const pt: RoadPoint = { gx: c.gCellX, gz: c.gCellZ };
+    // Snap to a nearby stroke endpoint (within 2.5 cells) so a new road
+    // CONTINUES the network exactly — the axis-crossing junction rule then
+    // reads the shared seam as one continuous road, not a box.
+    const raw: RoadPoint = { gx: c.gCellX, gz: c.gCellZ };
+    const pt = snapToRoadEnd(roadsRef.current, raw, 2.5) ?? raw;
     setRoadDraft((d) => {
       const last = d[d.length - 1];
       if (last && last.gx === pt.gx && last.gz === pt.gz) return d;
@@ -1577,11 +1611,22 @@ export function PaintCanvas(props: {
         {layer === 'road' ? roads.flatMap((r) => {
           const sel = r.id === selRoadId;
           const color = sel ? '#f8fafc' : '#fbbf24cc';
-          const nodes = roadDots(r.points, 2).map((d, i) => (
+          const nodes = showRoadWires ? roadDots(r.points, 2).map((d, i) => (
             <Canvas.Node key={`rd_${r.id}_${i}`} gx={cellGraph(d.x)} gy={cellGraph(d.z)} gw={TILE_UNITS * (sel ? 0.5 : 0.35)} gh={TILE_UNITS * (sel ? 0.5 : 0.35)}>
               <Box style={{ width: '100%', height: '100%', borderRadius: 99, backgroundColor: color }} />
             </Canvas.Node>
-          ));
+          )) : [];
+          // Lane wires: one dotted line per LANE (green = with draw direction,
+          // red = opposing) so lanes line up / merge across strokes by eye.
+          if (showRoadWires) {
+            for (const [i, d] of laneWireDots(r, 3).entries()) {
+              nodes.push(
+                <Canvas.Node key={`rl_${r.id}_${i}`} gx={cellGraph(d.x)} gy={cellGraph(d.z)} gw={TILE_UNITS * 0.22} gh={TILE_UNITS * 0.22}>
+                  <Box style={{ width: '100%', height: '100%', borderRadius: 99, backgroundColor: d.flow === 'forward' ? '#86efac88' : '#f8717188' }} />
+                </Canvas.Node>,
+              );
+            }
+          }
           if (isOneWay(r.profile)) {
             for (const [i, ch] of roadChevrons(r).entries()) {
               nodes.push(
@@ -1595,6 +1640,13 @@ export function PaintCanvas(props: {
           }
           return nodes;
         }) : null}
+        {/* Endpoint connect-squares: where a click snaps (2.5-cell radius) to
+            continue the network. Cyan so they read apart from the amber wires. */}
+        {layer === 'road' && showRoadWires ? strokeEndpoints(roads).map((e, i) => (
+          <Canvas.Node key={`rend_${i}`} gx={cellGraph(e.gx)} gy={cellGraph(e.gz)} gw={TILE_UNITS * 1.4} gh={TILE_UNITS * 1.4}>
+            <Box style={{ width: '100%', height: '100%', borderRadius: 3, borderWidth: 2, borderColor: '#22d3ee', backgroundColor: '#0e2a33cc' }} />
+          </Canvas.Node>
+        )) : null}
         {layer === 'road' && roadDraft.length >= 2 ? roadDots(roadDraft, 1.5).map((d, i) => (
           <Canvas.Node key={`rdraft_${i}`} gx={cellGraph(d.x)} gy={cellGraph(d.z)} gw={TILE_UNITS * 0.3} gh={TILE_UNITS * 0.3}>
             <Box style={{ width: '100%', height: '100%', borderRadius: 99, backgroundColor: '#86efacdd' }} />
@@ -1746,6 +1798,8 @@ export function PaintCanvas(props: {
             selId={selRoadId}
             onSelect={setSelRoadId}
             onDelete={deleteRoad}
+            wires={showRoadWires}
+            onWires={setShowRoadWires}
           />
         ) : null}
       </Box>

@@ -26,6 +26,9 @@ export function RoadRail(props: {
   selId: string | null;
   onSelect: (id: string | null) => void;
   onDelete: (id: string) => void;
+  /** the wire view: dotted centerlines + per-lane wires + endpoint squares */
+  wires: boolean;
+  onWires: (on: boolean) => void;
 }) {
   const p = clampProfile(props.profile);
   const drawing = props.tool !== 'pointer';
@@ -65,6 +68,19 @@ export function RoadRail(props: {
       <Text fontSize={7} color="#64748b" style={{ fontFamily: 'monospace' }}>
         {`a lane is 3 tiles · total ${roadWidthTiles(p)} tiles wide`}
       </Text>
+
+      <Pressable
+        onPress={() => props.onWires(!props.wires)}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4, paddingBottom: 4, paddingLeft: 6, paddingRight: 6, borderRadius: 4, borderWidth: 1, borderColor: props.wires ? '#22d3ee' : '#334155', backgroundColor: '#0f1a2e' }}
+      >
+        <Box style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: props.wires ? '#22d3ee' : '#334155' }} />
+        <Text fontSize={9} color={props.wires ? '#e2e8f0' : '#64748b'}>wires (centerline + lanes)</Text>
+      </Pressable>
+      {props.wires ? (
+        <Text fontSize={7} color="#64748b" style={{ fontFamily: 'monospace' }}>
+          {'cyan □ = connect point (clicks snap)\ngreen wire = with draw · red = opposing'}
+        </Text>
+      ) : null}
 
       {drawing ? (
         <Box style={{ gap: 4 }}>

@@ -193,6 +193,13 @@ export function crossSection(profile: RoadProfile): CrossSection {
 
 // Per-stroke rasterization: carriageway cells (lane/median) and sidewalk cells,
 // plus the ordered centerline (junction/crosswalk passes need the order).
+// Travel-axis bits per carriageway cell — the junction discriminator. A
+// junction needs CROSSING traffic; two parallel strokes (a road continued
+// end-to-end from an existing one, or drawn head-on) overlap without crossing
+// and must read as ONE continuous road, never a phantom junction + zebras.
+const AXIS_X = 1;
+const AXIS_Z = 2;
+
 type StrokeRaster = {
   stroke: RoadStroke;
   center: CenterCell[];
@@ -201,6 +208,8 @@ type StrokeRaster = {
   walk: Set<string>;
   /** cell → |offset| that produced it (the corner tiebreak) */
   rank: Map<string, number>;
+  /** cell → travel-axis bits (AXIS_X / AXIS_Z) along this stroke */
+  axes: Map<string, number>;
 };
 
 function rasterizeStroke(stroke: RoadStroke): StrokeRaster {
@@ -210,13 +219,16 @@ function rasterizeStroke(stroke: RoadStroke): StrokeRaster {
   const carriage = new Map<string, TileKind>();
   const walk = new Set<string>();
   const rank = new Map<string, number>();
+  const axes = new Map<string, number>();
 
   for (const c of center) {
     const r = rightOf(c.dir);
+    const axis = c.dir.dx !== 0 ? AXIS_X : AXIS_Z;
     for (const col of xs.carriage) {
       const gx = c.gx + r.dx * col.off;
       const gz = c.gz + r.dz * col.off;
       const k = cellKey(gx, gz);
+      axes.set(k, (axes.get(k) ?? 0) | axis);
       const score = Math.abs(col.off);
       const prev = rank.get(k);
       if (prev !== undefined && prev <= score) continue;
@@ -240,7 +252,7 @@ function rasterizeStroke(stroke: RoadStroke): StrokeRaster {
       walk.add(k);
     }
   }
-  return { stroke, center, carriage, walk, rank };
+  return { stroke, center, carriage, walk, rank, axes };
 }
 
 /**
@@ -259,11 +271,21 @@ export function planRoads(strokes: RoadStroke[]): RoadPlan {
   for (const r of rasters) for (const k of r.walk) plan.set(k, 'sidewalk');
   for (const r of rasters) for (const [k, kind] of r.carriage) plan.set(k, kind);
 
-  // 2) junction boxes: cells covered by ≥2 strokes' carriageways.
+  // 2) junction boxes: cells covered by ≥2 strokes' carriageways whose travel
+  //    axes CROSS. Parallel overlap (a road continued from an endpoint, or two
+  //    roads drawn head-on) is one continuous road — later stroke wins, no box.
   const junction = new Set<string>();
   const cover = new Map<string, number>();
-  for (const r of rasters) for (const k of r.carriage.keys()) cover.set(k, (cover.get(k) ?? 0) + 1);
-  for (const [k, n] of cover) if (n >= 2) junction.add(k);
+  const coverAxes = new Map<string, number>();
+  for (const r of rasters) {
+    for (const [k, m] of r.axes) {
+      cover.set(k, (cover.get(k) ?? 0) + 1);
+      coverAxes.set(k, (coverAxes.get(k) ?? 0) | m);
+    }
+  }
+  for (const [k, n] of cover) {
+    if (n >= 2 && coverAxes.get(k) === (AXIS_X | AXIS_Z)) junction.add(k);
+  }
   for (const k of junction) plan.set(k, 'junction');
 
   // 3) crosswalk bands: walking each stroke's centerline in draw order, the
@@ -322,4 +344,54 @@ export function profileLabel(p: RoadProfile): string {
     ? `${Math.max(c.lanesF, c.lanesB)}${c.lanesF > 0 ? '→' : '←'}`
     : `${c.lanesF}+${c.lanesB}`;
   return `${lanes} ·${roadWidthTiles(c)}w${c.sidewalks ? ' +walk' : ''}`;
+}
+
+/**
+ * The centre offset of every LANE in the cross-section (multiples of the right
+ * vector) with its flow — the editor's lane wires (req_0528: seeing each lane's
+ * own line makes merging lanes between roads easy).
+ */
+export function laneGuides(p: RoadProfile): { off: number; flow: 'forward' | 'backward' }[] {
+  const c = clampProfile(p);
+  const out: { off: number; flow: 'forward' | 'backward' }[] = [];
+  const half = (LANE_TILES - 1) / 2;
+  if (c.lanesF > 0 && c.lanesB > 0) {
+    for (let i = 0; i < c.lanesF; i++) out.push({ off: 1 + i * LANE_TILES + half, flow: 'forward' });
+    for (let i = 0; i < c.lanesB; i++) out.push({ off: -(1 + i * LANE_TILES + half), flow: 'backward' });
+  } else {
+    const n = Math.max(c.lanesF, c.lanesB);
+    const flow = c.lanesF > 0 ? 'forward' : 'backward';
+    const left = -Math.floor((LANE_TILES * n - 1) / 2);
+    for (let i = 0; i < n; i++) out.push({ off: left + i * LANE_TILES + half, flow });
+  }
+  return out;
+}
+
+/** Every stroke's two endpoints — the wire connect points the editor marks. */
+export function strokeEndpoints(strokes: RoadStroke[]): RoadPoint[] {
+  const out: RoadPoint[] = [];
+  for (const r of strokes) {
+    if (!r.points.length) continue;
+    out.push(r.points[0]!);
+    if (r.points.length > 1) out.push(r.points[r.points.length - 1]!);
+  }
+  return out;
+}
+
+/**
+ * Snap a clicked cell to the nearest stroke endpoint within `radius` cells —
+ * how a new road CONTINUES an existing one into a connected network (the
+ * axis-crossing junction rule reads the shared seam as one road, not a box).
+ */
+export function snapToRoadEnd(strokes: RoadStroke[], p: RoadPoint, radius: number): RoadPoint | null {
+  let best: RoadPoint | null = null;
+  let bestD = radius;
+  for (const e of strokeEndpoints(strokes)) {
+    const d = Math.hypot(e.gx - p.gx, e.gz - p.gz);
+    if (d <= bestD) {
+      bestD = d;
+      best = e;
+    }
+  }
+  return best ? { gx: best.gx, gz: best.gz } : null;
 }
