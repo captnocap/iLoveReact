@@ -467,11 +467,17 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     return s;
   }, [pieces, level]);
 
-  return (
-    <Box
-      onLayout={(lr: any) => { rectRef.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
-      style={{ width: '100%', height: '100%', position: 'relative' }}
-    >
+  // Memoize the STATIC scene content — the world meshes (terrain/landforms/props) and
+  // the texture-capture mounts — so a camera-only redraw doesn't re-run and reconcile
+  // the whole world every tick. Drag-rotate fires a redraw per mouse-move; without this
+  // a 360° spin re-built the entire terrain/landform/prop tree dozens of times a second
+  // and choked. Only a real world/skin change rebuilds these; camera + grid + pieces +
+  // ghost stay live below.
+  const worldStatics = useMemo(() => (
+    <WorldStatics world={state.world} skyConfig={state.config.sky} />
+  ), [state.world, state.config.sky]);
+  const sceneCaptures = useMemo(() => (
+    <>
       <LandformSurfaceCaptures landforms={state.world.landforms ?? []} />
       <PropSurfaceCaptures props={state.world.props} />
       {/* bind each placed skin's material texture (the SAME staticKey the renderer's
@@ -488,10 +494,19 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
           perception={state.player.perception}
         />
       ))}
+    </>
+  ), [state.world.landforms, state.world.props, skinIds, state.player.perception]);
+
+  return (
+    <Box
+      onLayout={(lr: any) => { rectRef.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
+      style={{ width: '100%', height: '100%', position: 'relative' }}
+    >
+      {sceneCaptures}
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showAxes={false}>
         <Scene3D.Camera position={cam.pos} target={cam.target} fov={cam.fov} far={FAR_CLIP} />
         <Scene3D.Fog enabled={false} />
-        <WorldStatics world={state.world} skyConfig={state.config.sky} />
+        {worldStatics}
         {/* the build grid on the active floor (Scene3D's showGrid is a no-op — we draw
             our own tile lines, world-anchored, following the camera) */}
         <IsoGrid centerX={stage.pose.centerX} centerZ={stage.pose.centerZ} level={level} distance={stage.distance()} />
