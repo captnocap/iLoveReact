@@ -14,6 +14,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
+import * as Geometry from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { GAME_BUILD } from './game';
 import type { BuildPieceKind, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
@@ -299,10 +300,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
       <LandformSurfaceCaptures landforms={state.world.landforms ?? []} />
       <PropSurfaceCaptures props={state.world.props} />
-      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showGrid showAxes={false}>
+      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showAxes={false}>
         <Scene3D.Camera position={cam.pos} target={cam.target} fov={cam.fov} far={FAR_CLIP} />
         <Scene3D.Fog enabled={false} />
         <WorldStatics world={state.world} skyConfig={state.config.sky} />
+        {/* the build grid on the active floor (Scene3D's showGrid is a no-op — we draw
+            our own tile lines, world-anchored, following the camera) */}
+        <IsoGrid centerX={stage.pose.centerX} centerZ={stage.pose.centerZ} level={level} />
         {/* the standing city — the SAME renderer F2 uses; selection highlighted,
             floors above the active level faded (cut-away) so you see the interior */}
         <PlacedPieceMeshes pieces={pieces} markedIds={selectedIds} targetId={null} occludedIds={occludedIds} />
@@ -375,6 +379,38 @@ function IsoBtn(props: { label: string; onPress: () => void }) {
   );
 }
 
+// The build grid: tile lines on the active floor, world-anchored, recentred in coarse
+// steps so a pan doesn't churn the mesh list every frame and a zoomed-out view doesn't
+// spawn thousands of lines. (Scene3D's showGrid prop is a no-op — nothing in the
+// framework draws it — so the grid IS these thin line boxes.) Major line every 8 tiles.
+const GRID_SNAP = 4;     // recentre only when the view crosses this many tiles
+const GRID_RADIUS = 26;  // tiles each way — a comfortable build patch (~52m)
+const IsoGrid = memo(function IsoGrid(props: { centerX: number; centerZ: number; level: number }) {
+  const cx = Math.round(props.centerX / GRID_SNAP) * GRID_SNAP;
+  const cz = Math.round(props.centerZ / GRID_SNAP) * GRID_SNAP;
+  const y = props.level * METERS_PER_LEVEL + 0.02; // hair above the floor so it reads
+  const span = GRID_RADIUS * 2;
+  const lines: any[] = [];
+  for (let i = -GRID_RADIUS; i <= GRID_RADIUS; i += 1) {
+    const majorX = (cx + i) % 8 === 0;
+    lines.push(
+      <Scene3D.Mesh key={`gx${i}`} geometry={Geometry.Box} params={{ width: 1, height: 1, depth: 1 }}
+        scale={[majorX ? 0.06 : 0.03, 0.02, span]} position={[cx + i, y, cz]}
+        material={{ color: majorX ? '#42597a' : '#26374d', opacity: 0.55 }} />,
+    );
+    const majorZ = (cz + i) % 8 === 0;
+    lines.push(
+      <Scene3D.Mesh key={`gz${i}`} geometry={Geometry.Box} params={{ width: 1, height: 1, depth: 1 }}
+        scale={[span, 0.02, majorZ ? 0.06 : 0.03]} position={[cx, y, cz + i]}
+        material={{ color: majorZ ? '#42597a' : '#26374d', opacity: 0.55 }} />,
+    );
+  }
+  return <>{lines}</>;
+}, (p, n) =>
+  Math.round(p.centerX / GRID_SNAP) === Math.round(n.centerX / GRID_SNAP)
+  && Math.round(p.centerZ / GRID_SNAP) === Math.round(n.centerZ / GRID_SNAP)
+  && p.level === n.level);
+
 // The bottom build palette. A row of kind tabs (floor/wall/ramp/...) and, under the
 // active tab, that kind's catalog entries as chips — the Sims bottom bar, fed by the
 // SAME BUILD_CATALOG the F2 palette reads.
@@ -382,21 +418,24 @@ const CatalogRail = memo(function CatalogRail(props: { armed: Armed; onArm: (id:
   const [kind, setKind] = useState<BuildPieceKind>('wall');
   const entries = useMemo(() => GAME_BUILD.catalog.byKind(kind), [kind]);
   return (
-    <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 8, backgroundColor: BUILD_UI.panelBg, borderRadius: 6, padding: 6, gap: 5 }}>
+    <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 8, backgroundColor: '#0b1220fa', borderRadius: 6, borderWidth: 1, borderColor: '#1e3a5f', padding: 8, gap: 6 }}>
+      <Text fontSize={10} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+        {`PIECES — ${kind} (${entries.length}) · click one, then click the ground`}
+      </Text>
       <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
         {PALETTE_KINDS.map((k) => (
           <Pressable key={k} onPress={() => setKind(k)}>
-            <Box style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: k === kind ? '#1d4ed8' : '#1e293b' }}>
-              <Text fontSize={10} color={k === kind ? '#e0f2fe' : '#94a3b8'} style={{ fontFamily: 'monospace' }}>{k}</Text>
+            <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, backgroundColor: k === kind ? '#2563eb' : '#1e293b' }}>
+              <Text fontSize={11} color={k === kind ? '#eaf4ff' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{k}</Text>
             </Box>
           </Pressable>
         ))}
       </Box>
-      <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
+      <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
         {entries.map((def) => (
           <Pressable key={def.id} onPress={() => props.onArm(def.id)}>
-            <Box style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: props.armed?.id === def.id ? '#38bdf8' : '#334155', backgroundColor: props.armed?.id === def.id ? '#0c4a6e' : '#0f172a' }}>
-              <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{def.label}</Text>
+            <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: props.armed?.id === def.id ? '#7dd3fc' : '#3a4f6b', backgroundColor: props.armed?.id === def.id ? '#1d4ed8' : '#16233a' }}>
+              <Text fontSize={11} color={props.armed?.id === def.id ? '#ffffff' : '#dbe6f3'} style={{ fontFamily: 'monospace' }}>{def.label}</Text>
             </Box>
           </Pressable>
         ))}
