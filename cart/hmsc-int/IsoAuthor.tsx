@@ -267,6 +267,40 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // The last painted cell-set signature — onMove skips the setPaintCells (and the
   // whole re-render behind it) when the drag is still over the same cells.
   const paintSigRef = useRef('');
+  // ── DRAGDRAW profiler (req_0485): the user feels the DRAG lag but the only
+  // number printed was the commit-time visualBoxes — nothing measured the drawing
+  // itself. This accumulates the whole drag and prints ONE summary line on
+  // release, always (not >16ms-gated): per-move event GAPS (a choked engine
+  // delays mouse events, so gapMax exposes native frame stalls JS timers can't
+  // see directly), the cell recompute cost, the ghost rebuild cost, and the
+  // JS render+commit latency behind each setPaintCells.
+  type DragPerf = {
+    t0: number; lastMoveT: number; moves: number; updates: number; cells: number;
+    gapTotal: number; gapMax: number;
+    computeTotal: number; computeMax: number;
+    ghostTotal: number; ghostMax: number;
+    renderTotal: number; renderMax: number; pendingRenderT0: number;
+  };
+  const dragPerfRef = useRef<DragPerf | null>(null);
+  // commitPaint → the standing pieces actually re-rendered (JS side): the
+  // "release-to-standing" latency the user perceives as placement time.
+  const commitPerfRef = useRef<{ t0: number; label: string } | null>(null);
+  useEffect(() => {
+    const c = commitPerfRef.current;
+    if (!c) return;
+    commitPerfRef.current = null;
+    console.warn(`[DRAGDRAW] ${c.label} -> standing ms=${(perfMs() - c.t0).toFixed(1)} pieces=${pieces.length}`);
+  }, [pieces]);
+  // Render+commit latency for each paint-ghost update (effects run after commit,
+  // so this captures the React render + reconcile + host mutation flush).
+  useEffect(() => {
+    const d = dragPerfRef.current;
+    if (!d || !d.pendingRenderT0) return;
+    const ms = perfMs() - d.pendingRenderT0;
+    d.pendingRenderT0 = 0;
+    d.renderTotal += ms;
+    if (ms > d.renderMax) d.renderMax = ms;
+  }, [paintCells]);
   // The save-as-prefab naming prompt: null = closed, else the draft name being typed.
   const [prefabNameDraft, setPrefabNameDraft] = useState<string | null>(null);
   const piecesRef = useRef(pieces);
@@ -456,6 +490,14 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     }
     dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false, mode, gx0, gz0 };
     paintSigRef.current = '';
+    if (mode === 'paint') {
+      const now = perfMs();
+      dragPerfRef.current = {
+        t0: now, lastMoveT: now, moves: 0, updates: 0, cells: 0,
+        gapTotal: 0, gapMax: 0, computeTotal: 0, computeMax: 0,
+        ghostTotal: 0, ghostMax: 0, renderTotal: 0, renderMax: 0, pendingRenderT0: 0,
+      };
+    }
     if (armedRef.current) setSnap(resolveAt(p.x, p.y));
   };
   const onMove = (e: any) => {
@@ -464,6 +506,15 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (d && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
       d.turned = true;
       if (d.mode === 'paint') {
+        const perf = dragPerfRef.current;
+        const now = perfMs();
+        if (perf) {
+          const gap = now - perf.lastMoveT;
+          perf.lastMoveT = now;
+          perf.moves += 1;
+          perf.gapTotal += gap;
+          if (gap > perf.gapMax) perf.gapMax = gap;
+        }
         const g = stage.groundPoint(p.x, p.y, rectRef.current);
         if (g) {
           // Re-render the paint ghosts ONLY when the dragged-to CELL SET changes
@@ -474,11 +525,21 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
           // uniquely names a line/rect/ring, so same cells → no state change.
           const t0 = perfMs();
           const cells = computePaintRef.current(armedRef.current, { x: d.gx0, z: d.gz0 }, g);
+          const computeMs = perfMs() - t0;
           const head = cells[0];
           const tail = cells[cells.length - 1];
           const sig = head ? `${cells.length}|${head.x},${head.y},${head.z},${head.yawDegrees}|${tail.x},${tail.z}` : '';
-          warnPlaceFreeze('paintCompute', { cells: cells.length, ms: perfMs() - t0 });
-          if (sig !== paintSigRef.current) { paintSigRef.current = sig; setPaintCells(cells); }
+          warnPlaceFreeze('paintCompute', { cells: cells.length, ms: computeMs });
+          if (perf) {
+            perf.computeTotal += computeMs;
+            if (computeMs > perf.computeMax) perf.computeMax = computeMs;
+            perf.cells = cells.length;
+          }
+          if (sig !== paintSigRef.current) {
+            paintSigRef.current = sig;
+            if (perf) { perf.updates += 1; perf.pendingRenderT0 = perfMs(); }
+            setPaintCells(cells);
+          }
         }
       } else if (d.mode === 'move') {
         const g = stage.groundPoint(p.x, p.y, rectRef.current);
@@ -502,6 +563,22 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const d = dragRef.current;
     dragRef.current = null;
     if (!d) return;
+    // The drag-draw summary — printed for EVERY paint drag (the proof line, not
+    // >16ms-gated). gapMax is the longest stall between mouse events: when the
+    // engine's frame chokes, events arrive late, so this is where native lag
+    // shows up even though JS-side compute/render read low.
+    const perf = dragPerfRef.current;
+    dragPerfRef.current = null;
+    if (perf && d.mode === 'paint' && perf.moves > 0) {
+      const avg = (total: number, n: number) => (n > 0 ? (total / n).toFixed(1) : '0');
+      console.warn(
+        `[DRAGDRAW] drag ms=${(perfMs() - perf.t0).toFixed(0)} moves=${perf.moves} updates=${perf.updates} cells=${perf.cells}`
+        + ` | gap avg=${avg(perf.gapTotal, perf.moves)} max=${perf.gapMax.toFixed(1)}`
+        + ` | compute avg=${avg(perf.computeTotal, perf.moves)} max=${perf.computeMax.toFixed(1)}`
+        + ` | ghost avg=${avg(perf.ghostTotal, perf.updates)} max=${perf.ghostMax.toFixed(1)}`
+        + ` | render avg=${avg(perf.renderTotal, perf.updates)} max=${perf.renderMax.toFixed(1)}`,
+      );
+    }
     if (d.turned) {
       if (d.mode === 'move') commitMove();
       else if (d.mode === 'paint') commitPaint();
@@ -626,6 +703,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const cells = paintCellsRef.current;
     setPaintCells(null);
     const a = armedRef.current;
+    // Release-to-standing latency: the commitPerf effect prints when the pieces
+    // prop reflects the commit (store snapshot + stream materialize + re-render).
+    commitPerfRef.current = { t0: perfMs(), label: a?.kind === 'tower' ? 'tower commit' : 'paint commit' };
     if (a?.kind === 'tower') {
       // The preview showed the ground ring; commit the FULL shell from the drag corners.
       const rect = towerDragRef.current;
@@ -633,9 +713,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       if (rect) commitTower(rect.start, rect.end);
       return;
     }
-    if (!cells || !cells.length) return;
+    if (!cells || !cells.length) { commitPerfRef.current = null; return; }
     const valid = cells.filter((c) => GAME_BUILD.placed.validatePlacement(c).length === 0);
-    if (!valid.length) return;
+    if (!valid.length) { commitPerfRef.current = null; return; }
     const label = a && a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id).label : 'piece';
     commitBatch(valid.map((c) => ({ event: { kind: 'piecePlaced', placement: c } as WorldEvent, label: `painted ${label}` })));
   };
@@ -781,7 +861,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
       ));
     });
-    warnPlaceFreeze('paintGhost', { cells: paintCells.length, pieces: displayPieces.length, ms: perfMs() - t0 });
+    const ghostMs = perfMs() - t0;
+    warnPlaceFreeze('paintGhost', { cells: paintCells.length, pieces: displayPieces.length, ms: ghostMs });
+    const perf = dragPerfRef.current;
+    if (perf) {
+      perf.ghostTotal += ghostMs;
+      if (ghostMs > perf.ghostMax) perf.ghostMax = ghostMs;
+    }
     return ghosts;
   }, [paintCells, displayPieces]);
 

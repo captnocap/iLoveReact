@@ -199,14 +199,29 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
     if (items.length) { commitRef.current(items); pushRecent(b); }
   };
 
-  const pickMaterial = (id: string) => setBrush({ kind: 'material', id });
+  // Picking a swatch PAINTS the whole selection immediately (every slot — the
+  // Sims expectation: click a material, see it on the building; one undo step).
+  // The face buttons then refine a single side with the same brush.
+  const pickBrush = (b: BuildFaceSkin) => {
+    setBrush(b);
+    const sel = selRef.current;
+    if (!sel.length) return;
+    const items = sel.map((p) => ({
+      event: { kind: 'pieceSkinSet', id: p.id, skin: { front: b, back: b, sides: b } } as WorldEvent,
+      label: 'painted piece',
+    }));
+    commitRef.current(items);
+    pushRecent(b);
+  };
+
+  const pickMaterial = (id: string) => pickBrush({ kind: 'material', id });
 
   const brushLabel = brush.kind === 'color' ? brush.value : (materialById.get(brush.id)?.label ?? brush.id);
 
   return (
     <Box style={{ position: 'absolute', right: 8, top: 36, backgroundColor: '#0b1220fa', borderWidth: 1, borderColor: '#1e3a5f', borderRadius: 6, padding: 8, gap: 6, width: 248 }}>
       <Text fontSize={9} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-        {`PAINT FACES — ${selPieces.length} piece${selPieces.length === 1 ? '' : 's'} · click a side`}
+        {`PAINT — ${selPieces.length} piece${selPieces.length === 1 ? '' : 's'} · a swatch paints it all · a side refines`}
       </Text>
 
       {/* faces: big targets, each with a dot of what that face currently wears */}
@@ -256,7 +271,7 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         <Box style={{ flexDirection: 'row', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
           <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>RECENT</Text>
           {recent.map((b) => (
-            <Pressable key={matKey(b)} onPress={() => setBrush(b)} hoverable tooltip={b.kind === 'color' ? b.value : (materialById.get(b.id)?.label ?? b.id)}>
+            <Pressable key={matKey(b)} onPress={() => pickBrush(b)} hoverable tooltip={b.kind === 'color' ? b.value : (materialById.get(b.id)?.label ?? b.id)}>
               {b.kind === 'color' ? (
                 <Box style={{ width: 14, height: 14, borderRadius: 3, backgroundColor: b.value, borderWidth: 1, borderColor: '#3a4f6b' }} />
               ) : (
@@ -272,14 +287,14 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
       {/* colors: the fixed swatches + any #rrggbb you type */}
       <Box style={{ flexDirection: 'row', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
         {BRUSH_SWATCHES.map((c) => (
-          <Pressable key={c} onPress={() => setBrush({ kind: 'color', value: c })}>
+          <Pressable key={c} onPress={() => pickBrush({ kind: 'color', value: c })}>
             <Box style={{ width: 14, height: 14, borderRadius: 3, backgroundColor: c, borderWidth: brush.kind === 'color' && brush.value === c ? 2 : 1, borderColor: brush.kind === 'color' && brush.value === c ? '#7dd3fc' : '#3a4f6b' }} />
           </Pressable>
         ))}
         <TextInput
           text={hexDraft}
           placeholder="#rrggbb"
-          onChangeText={(v: string) => { setHexDraft(v); if (/^#[0-9a-fA-F]{6}$/.test(v)) setBrush({ kind: 'color', value: v }); }}
+          onChangeText={(v: string) => { setHexDraft(v); if (/^#[0-9a-fA-F]{6}$/.test(v)) pickBrush({ kind: 'color', value: v }); }}
           style={{ width: 66, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: hexDraft.length === 0 ? '#27364a' : hexValid ? '#34d399' : '#b04a3a', borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
         />
       </Box>
