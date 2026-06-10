@@ -122,6 +122,14 @@ export type QuarantinedRecord = {
 
 export type Store = {
   defineStream: <State, Event>(def: StreamDef<State, Event>) => StreamHandle<State, Event>;
+  /** Run fn with every append inside folded into ONE write transaction per
+   *  touched DB — the batched-commit door (PLACEPERF-0610: a 358-event
+   *  commitMany was 716 BEGIN/COMMIT round-trips ≈ 841ms; batched it is one
+   *  COMMIT per touched domain). Transactions begin lazily on first write, so
+   *  untouched domains never take a lock. fn throwing rolls the batch back —
+   *  note the in-memory fold has already applied the batch's earlier events
+   *  then (divergence until next boot); an SQL failure mid-batch is loud. */
+  batch: <T>(fn: () => T) => T;
   /** the current undo-chain position — pass back to stateAt to time-travel */
   undoPoint: () => number;
   /** write data/snapshots/<name>.snapshot.json for EVERY registered stream */
@@ -308,6 +316,15 @@ export function openWorkspaceStore(rootDir: string): Store {
   return {
     defineStream: <State, Event>(def: StreamDef<State, Event>): StreamHandle<State, Event> =>
       storeForStream(def.name).defineStream(def),
+    batch: <T,>(fn: () => T): T => {
+      // Nest fn inside every cached domain store's batch — domain transactions
+      // begin LAZILY on first write, so only the domains the batch actually
+      // touches take a lock (a commitMany touches its channel + sessions).
+      // A domain store opened mid-batch falls back to per-append commits.
+      const list = [...stores.values()];
+      const run = (i: number): T => (i >= list.length ? fn() : list[i].batch(() => run(i + 1)));
+      return run(0);
+    },
     undoPoint: (): number => {
       let seq = 0;
       for (const store of stores.values()) seq = Math.max(seq, store.undoPoint());
@@ -432,6 +449,34 @@ export function openStore(rootDir: string): Store {
     if (!sqlExec(db, 'COMMIT')) {
       sqlExec(db, 'ROLLBACK');
       throw new Error(`data store: ${what} failed to commit on ${dbPath}`);
+    }
+  };
+
+  // ── batched appends (PLACEPERF-0610) ────────────────────────────────────────
+  // Inside batch(fn), appends share ONE write transaction: the first write
+  // does BEGIN IMMEDIATE, batch() commits at the end (or rolls back when fn
+  // throws). Per-append BEGIN/COMMIT was ~1ms each — a 358-event commitMany
+  // paid it 716× (event + session marker). The lock begins LAZILY so a batch
+  // that never writes this domain never blocks other writers on it.
+  let batchDepth = 0;
+  let batchTouched = false;
+  const batch = <T,>(fn: () => T): T => {
+    batchDepth += 1;
+    let ok = false;
+    try {
+      const result = fn();
+      ok = true;
+      return result;
+    } finally {
+      batchDepth -= 1;
+      if (batchDepth === 0 && batchTouched) {
+        batchTouched = false;
+        if (ok) commitOrThrow('batched append');
+        else {
+          sqlExec(db, 'ROLLBACK');
+          console.warn(`data store: batch rolled back on ${dbPath} — in-memory fold may be ahead of disk until next boot`);
+        }
+      }
     }
   };
 
@@ -633,17 +678,24 @@ export function openStore(rootDir: string): Store {
       append: (event: Event): LogPosition => {
         // The whole point of the DB backing: seq allocation + insert happen
         // under ONE write lock, so concurrent app instances serialize and
-        // the chain stays total — no duplicate seqs, no torn records.
-        beginImmediate();
+        // the chain stays total — no duplicate seqs, no torn records. Inside
+        // a batch() the transaction is shared: the first write begins it,
+        // batch() commits it — the MAX(seq) read sees this connection's own
+        // uncommitted inserts, so seqs stay dense within the batch.
+        if (batchDepth > 0) {
+          if (!batchTouched) { beginImmediate(); batchTouched = true; }
+        } else {
+          beginImmediate();
+        }
         const next = sqlQuery<{ next: number }>(db, 'SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM events');
         const seq = next.length > 0 && typeof next[0].next === 'number' ? next[0].next : globalSeq + 1;
         const record: StoredEvent = { seq, at: nowMs(), event };
         const line = JSON.stringify(record);
         if (!sqlExec(db, 'INSERT INTO events(seq, stream, at, record) VALUES (?, ?, ?, ?)', [seq, def.name, record.at, line])) {
-          sqlExec(db, 'ROLLBACK');
+          if (batchDepth === 0) sqlExec(db, 'ROLLBACK');
           throw new Error(`data store: append to "${def.name}" failed on ${dbPath}`);
         }
-        commitOrThrow(`append to "${def.name}"`);
+        if (batchDepth === 0) commitOrThrow(`append to "${def.name}"`);
         globalSeq = seq;
         open.events.push(record);
         open.current = open.def.apply(open.current, event, record.seq);
@@ -663,6 +715,7 @@ export function openStore(rootDir: string): Store {
 
   return {
     defineStream,
+    batch,
     undoPoint: () => globalSeq,
     materializeSnapshots: (): string[] => {
       const batchT0 = perfMs();

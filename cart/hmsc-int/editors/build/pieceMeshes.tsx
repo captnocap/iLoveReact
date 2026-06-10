@@ -387,18 +387,22 @@ const PlacedPieceMesh = memo(function PlacedPieceMesh(props: {
   && prev.occluded === next.occluded
   && prev.joinKey === next.joinKey);
 
-export const PlacedPieceMeshes = memo(function PlacedPieceMeshes(props: {
-  pieces: readonly PlacedBuildPiece[];
-  markedIds: ReadonlySet<string>;
-  targetId: string | null;
-  occludedIds: ReadonlySet<string>;
-  placeFreezeProbe?: PlaceFreezeProbe | null;
-}) {
-  const boxesT0 = perfMs();
+// The join-signature pass over the whole piece array, cached on the ARRAY
+// IDENTITY (PLACEPERF-0610): every render of PlacedPieceMeshes used to redo it
+// (43ms at ~4.8k pieces), and a single commit re-renders several times
+// (selection clear, occlusion recompute, snapshot tick…) — the user saw six
+// 43ms visualBoxes lines per move. Pieces arrays are immutable (the stream
+// materializes a fresh array per change), so identity is the correct key.
+const joinKeysCache = new WeakMap<readonly PlacedBuildPiece[], { joinKeys: Map<string, string>; boxes: number; ms: number }>();
+
+function joinKeysOf(pieces: readonly PlacedBuildPiece[]): { joinKeys: Map<string, string>; boxes: number; ms: number; cached: boolean } {
+  const hit = joinKeysCache.get(pieces);
+  if (hit) return { ...hit, cached: true };
+  const t0 = perfMs();
   const joinKeys = new Map<string, string>();
   let boxes = 0;
-  for (const piece of props.pieces) {
-    const signature = wallJoinSignature(piece, props.pieces);
+  for (const piece of pieces) {
+    const signature = wallJoinSignature(piece, pieces);
     if (signature) {
       joinKeys.set(piece.id, signature);
       boxes += signature.split('|').length;
@@ -407,14 +411,29 @@ export const PlacedPieceMeshes = memo(function PlacedPieceMeshes(props: {
       boxes += def.kind === 'stairs' ? BUILD_UI.stairVisualSteps : 1;
     }
   }
-  const boxesMs = perfMs() - boxesT0;
+  const entry = { joinKeys, boxes, ms: perfMs() - t0 };
+  joinKeysCache.set(pieces, entry);
+  return { ...entry, cached: false };
+}
+
+export const PlacedPieceMeshes = memo(function PlacedPieceMeshes(props: {
+  pieces: readonly PlacedBuildPiece[];
+  markedIds: ReadonlySet<string>;
+  targetId: string | null;
+  occludedIds: ReadonlySet<string>;
+  placeFreezeProbe?: PlaceFreezeProbe | null;
+}) {
+  const { joinKeys, boxes, ms: boxesMs, cached } = joinKeysOf(props.pieces);
   GAME_TELEMETRY.recordDiagnostic('draw', 'placement.visualBoxes', {
     pieces: props.pieces.length,
     boxes,
     ms: boxesMs,
+    cached,
   });
-  markPlaceFreezeProbe(props.placeFreezeProbe, 'visualBoxes', { pieces: props.pieces.length, boxes, ms: boxesMs });
-  warnPlaceFreeze('visualBoxes', { pieces: props.pieces.length, boxes, ms: boxesMs });
+  markPlaceFreezeProbe(props.placeFreezeProbe, 'visualBoxes', { pieces: props.pieces.length, boxes, ms: boxesMs, cached });
+  // Only a real (uncached) pass warns — a cache hit costs ~nothing regardless
+  // of what the original pass cost.
+  if (!cached) warnPlaceFreeze('visualBoxes', { pieces: props.pieces.length, boxes, ms: boxesMs });
   return (
     <>
       {props.pieces.map((piece) => (

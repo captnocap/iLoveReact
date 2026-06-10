@@ -246,10 +246,16 @@ export function createSessionLog(store: Store, options: SessionLogOptions = {}):
         if (!items.length) return null;
         const t0 = perfMs();
         let pos: LogPosition | null = null;
-        for (const item of items) {
-          const at = channel.append(item.event);
-          pos = stream.append({ kind: 'committed', session, channel: channel.name, label: item.label, at: at.globalSeq });
-        }
+        // ONE write transaction per touched DB for the whole batch
+        // (PLACEPERF-0610): per-event appends each paid their own
+        // BEGIN/COMMIT (~1ms each, ×2 per item: event + marker) — a
+        // 358-event move was 841ms of transaction overhead alone.
+        store.batch(() => {
+          for (const item of items) {
+            const at = channel.append(item.event);
+            pos = stream.append({ kind: 'committed', session, channel: channel.name, label: item.label, at: at.globalSeq });
+          }
+        });
         // ONE snapshot pass for the whole batch — the per-commit cost that stalled.
         materializeAfterCommit('commitMany');
         const totalMs = perfMs() - t0;
