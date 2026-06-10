@@ -290,6 +290,15 @@ fn pushTri(out: []f32, idx: *usize, a: [3]f32, b: [3]f32, c0: [3]f32, n: [3]f32,
     pushVertex(out, idx, c0, n, uvc);
 }
 
+/// Per-vertex normals — curved surfaces (sphere, cylinder barrel) shade
+/// SMOOTH like the editor's geometry registry; one shared normal facets them
+/// (SMOOTHPROP-0610: compiled bushes read as cut gems next to /test's).
+fn pushTriSmooth(out: []f32, idx: *usize, a: [3]f32, b: [3]f32, c0: [3]f32, na: [3]f32, nb: [3]f32, nc: [3]f32, uva: [2]f32, uvb: [2]f32, uvc: [2]f32) void {
+    pushVertex(out, idx, a, na, uva);
+    pushVertex(out, idx, b, nb, uvb);
+    pushVertex(out, idx, c0, nc, uvc);
+}
+
 fn pushFace(out: []f32, idx: *usize, a: [3]f32, b: [3]f32, c0: [3]f32, d: [3]f32, n: [3]f32) void {
     pushTri(out, idx, a, b, c0, n, .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 });
     pushTri(out, idx, a, c0, d, n, .{ 0, 0 }, .{ 1, 1 }, .{ 0, 1 });
@@ -362,8 +371,8 @@ fn buildUnitSphere(comptime segments: usize, comptime rings: usize) [segments * 
             const nb = sphereNormal(t1, p2);
             const nc = sphereNormal(t2, p2);
             const nd = sphereNormal(t2, p1);
-            pushTri(out[0..], &idx, a, c0, d, na, sphereUv(na), sphereUv(nc), sphereUv(nd));
-            pushTri(out[0..], &idx, a, b, c0, na, sphereUv(na), sphereUv(nb), sphereUv(nc));
+            pushTriSmooth(out[0..], &idx, a, c0, d, na, nc, nd, sphereUv(na), sphereUv(nc), sphereUv(nd));
+            pushTriSmooth(out[0..], &idx, a, b, c0, na, nb, nc, sphereUv(na), sphereUv(nb), sphereUv(nc));
         }
     }
     return out;
@@ -388,8 +397,9 @@ fn buildUnitCylinder(comptime segments: usize) [segments * 12 * 8]f32 {
         const d = [3]f32{ radius * c1, hy, radius * s1 };
         const n1 = [3]f32{ c1, 0, s1 };
         const n2 = [3]f32{ c2, 0, s2 };
-        pushTri(out[0..], &idx, a, d, c0, n1, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 1 });
-        pushTri(out[0..], &idx, a, c0, b, n2, .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 });
+        // Barrel quads share rim normals across segments (smooth); caps stay flat.
+        pushTriSmooth(out[0..], &idx, a, d, c0, n1, n1, n2, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 1 });
+        pushTriSmooth(out[0..], &idx, a, c0, b, n1, n2, n2, .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 });
         pushTri(out[0..], &idx, .{ 0, hy, 0 }, c0, d, .{ 0, 1, 0 }, .{ 0.5, 0.5 }, .{ 1, 1 }, .{ 0, 1 });
         pushTri(out[0..], &idx, .{ 0, -hy, 0 }, a, b, .{ 0, -1, 0 }, .{ 0.5, 0.5 }, .{ 0, 0 }, .{ 1, 0 });
     }

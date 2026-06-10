@@ -521,6 +521,26 @@ function propParts(prop: WorldProp): PropPartSpec[] {
         box([0, (def.heightMeters - 0.14 * s) / 2 + 0.06 * s, 0], [halfSpan * 2, def.heightMeters - 0.14 * s, 0.02 * s], [0.69, 0.72, 0.77]),
       ];
     }
+    case 'fireHydrant': {
+      // Mirrors the live model (hmsc/render3d/props/FireHydrant.tsx): base
+      // flange, barrel, squashed-sphere dome, bonnet + cap nut (the live
+      // cone reads as a small cylinder here — no cone instance shape),
+      // front pumper nozzle, two side outlets. Prop yaw rides propRotation.
+      const s = def.heightMeters / 0.78;
+      const red: Color = [0xc2 / 255, 0x36 / 255, 0x2f / 255];
+      const redDark: Color = [0x9c / 255, 0x2a / 255, 0x25 / 255];
+      const cap: Color = [0xc9 / 255, 0xcc / 255, 0xd1 / 255];
+      return [
+        cylinder16([0, 0.03 * s, 0], 0.2 * s, 0.06 * s, redDark),
+        cylinder16([0, 0.31 * s, 0], 0.13 * s, 0.46 * s, red),
+        sphere([0, 0.56 * s, 0], [0.31 * s, 0.217 * s, 0.31 * s], red),
+        cylinder8([0, 0.67 * s, 0], 0.075 * s, 0.1 * s, redDark),
+        cylinder8([0, 0.75 * s, 0], 0.07 * s, 0.08 * s, cap),
+        cylinder8([0, 0.42 * s, -0.15 * s], 0.055 * s, 0.14 * s, cap, [90, 0, 0]),
+        cylinder8([0.15 * s, 0.46 * s, 0], 0.05 * s, 0.12 * s, cap, [0, 0, 90]),
+        cylinder8([-0.15 * s, 0.46 * s, 0], 0.05 * s, 0.12 * s, cap, [0, 0, 90]),
+      ];
+    }
     default: {
       const box = PROP_BOX[prop.kind] ?? [def.footprintRadiusMeters * 2, def.heightMeters, def.footprintRadiusMeters * 2];
       return [{ shape: 'box', local: [0, box[1] / 2, 0], size: box, color: propColor(prop.kind) }];
