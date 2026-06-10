@@ -77,9 +77,22 @@ export function mapBuildPlaceable(prefab: BuildPrefabDef, rotation = 0): MapBuil
   };
 }
 
+// Footprint grouping cached on the pieces ARRAY identity (PLACEPERF-0610, the
+// same invariant the spatial grid and join-signature caches key on): the shell
+// recomputes footprints on EVERY render, and the grouping walks connectivity —
+// uncached at ~4.9k pieces this re-ran a multi-second pass per render (the
+// post-move "stopwatch" stall, req_0502). The old inner lookup was also
+// O(N) `pieces.find` per member id — now an id map.
+const footprintsCache = new WeakMap<readonly PlacedBuildPiece[], MapBuildFootprint[]>();
+
 export function mapBuildFootprints(pieces: readonly PlacedBuildPiece[]): MapBuildFootprint[] {
+  const cached = footprintsCache.get(pieces);
+  if (cached) return cached;
+  const t0 = (globalThis as any).__bench_now_us ? Number((globalThis as any).__bench_now_us()) / 1000 : Date.now();
   const out: MapBuildFootprint[] = [];
   const seen = new Set<string>();
+  const byId = new Map<string, PlacedBuildPiece>();
+  for (const piece of pieces) byId.set(piece.id, piece);
   const byStamp = new Map<string, PlacedBuildPiece[]>();
   for (const piece of pieces) {
     if (!piece.stampId) continue;
@@ -95,9 +108,12 @@ export function mapBuildFootprints(pieces: readonly PlacedBuildPiece[]): MapBuil
     if (seen.has(seed.id)) continue;
     const ids = [...GAME_BUILD.placed.connected(seed.id, pieces)].sort();
     for (const id of ids) seen.add(id);
-    const group = ids.map((id) => pieces.find((piece) => piece.id === id)).filter((piece): piece is PlacedBuildPiece => !!piece);
+    const group = ids.map((id) => byId.get(id)).filter((piece): piece is PlacedBuildPiece => !!piece);
     if (group.length) out.push(footprintFromGroup(ids[0], group.length === 1 ? GAME_BUILD.catalog.get(group[0].pieceId).label : `Building ${out.length + 1}`, group));
   }
+  footprintsCache.set(pieces, out);
+  const ms = ((globalThis as any).__bench_now_us ? Number((globalThis as any).__bench_now_us()) / 1000 : Date.now()) - t0;
+  if (ms >= 16) console.warn(`[PLACEFREEZE] mapFootprints pieces=${pieces.length} groups=${out.length} ms=${ms.toFixed(2)}`);
   return out;
 }
 

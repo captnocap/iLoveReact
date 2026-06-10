@@ -173,7 +173,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // re-paints the lift when you paint height. Edits keep the RAW `pieces` (piecesRef
   // below): a move/clone commits terrain-agnostic y and the lift re-applies at the new
   // spot — no double-lift, no editor-vs-game drift.
-  const displayPieces = useMemo(() => GAME_BUILD.placed.liftToTerrain(pieces, groundTopAt), [pieces, groundTopAt]);
+  const displayPieces = useMemo(() => {
+    const t0 = perfMs();
+    const lifted = GAME_BUILD.placed.liftToTerrain(pieces, groundTopAt);
+    warnPlaceFreeze('liftToTerrain', { pieces: pieces.length, ms: perfMs() - t0 });
+    return lifted;
+  }, [pieces, groundTopAt]);
   const displayPiecesRef = useRef(displayPieces);
   displayPiecesRef.current = displayPieces;
 
@@ -688,6 +693,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // face material on move.)
     const moves = sel.map((p) => { const { id, ...rest } = p; return { id, placement: { ...rest, x: p.x + delta.dx, z: p.z + delta.dz } }; });
     if (moves.some((m) => GAME_BUILD.placed.validatePlacement(m.placement).length > 0)) return;
+    // Release-to-standing latency for MOVES too (req_0502 — the user stopwatched
+    // a move at 3s while the commit probes read ~120ms; this brackets the gap).
+    commitPerfRef.current = { t0: perfMs(), label: `move commit (${sel.length} pieces)` };
     // One batch: all removes then all places (the SAME two events delete/clone emit) →
     // one undo step, one store snapshot, so moving a whole building doesn't freeze.
     commitBatch([
@@ -758,6 +766,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const tick = () => {
       if (!alive) return;
       const now = G.performance?.now?.() ?? last + 16;
+      // Frame-stall watchdog (req_0502): this loop reschedules itself every
+      // frame, so a long gap between ticks IS a main-thread stall — JS work we
+      // haven't probed, or the host frame choking — exactly the time the
+      // commit probes can't see. One line per stall, with what it followed.
+      if (now - last > 150) {
+        console.warn(`[DRAGDRAW] frame stall ms=${(now - last).toFixed(0)}${commitPerfRef.current ? ` after=${commitPerfRef.current.label}` : ''}`);
+      }
       const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
       last = now;
       const forward = (held.w ? 1 : 0) - (held.s ? 1 : 0);
