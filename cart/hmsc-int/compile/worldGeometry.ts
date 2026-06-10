@@ -9,8 +9,9 @@
 //     walls/floors/pillars the /test play view renders as the city's structures.
 //     A "Building 1" prefab is N placed pieces; a tower is stacked wall/pillar
 //     pieces. These are the towers the user sees in /test — the loader MUST show
-//     parity. Each placed piece becomes ONE box instance using the SAME catalog
-//     size + material the play view's pieceVisualShapes uses.
+//     parity. Skinned walls and plates become the SAME core + face-slab boxes
+//     that the play view's pieceVisualShapes emits, so per-face authored skins do
+//     not collapse to a single front face in the no-V8 loader.
 //
 // Most objects become one instance: a (position, rotation, scale, color) row in
 // a packed Float32Array. Stairs decompose into the same stepped boxes /test uses;
@@ -28,22 +29,67 @@ import { tileKindDefinition } from '../../hmsc/world/tileKinds';
 import { CHUNK_TILES } from '../chunks';
 import type { ChunkFloor } from '../chunkFloor';
 import { GAME_BUILD } from '@game';
-import type { BuildMaterial, PlacedBuildPiece } from '@game';
+import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
+import { shaderSpec, defaultShaderData } from '@game/textures/shaders';
 
 export const INSTANCE_STRIDE = 13;
 export const INSTANCE_SHAPE_BOX = 0;
 export const INSTANCE_SHAPE_RAMP = 1;
+
+// ── materials: ship the SHADER (the formula), referenced — never baked pixels ─
+// GUIDING_LIGHT: procedural content travels as its recipe. A face whose skin is
+// a {kind:'material'} carries a WGSL shader + its data[] params; we intern each
+// DISTINCT (shader, data) once (content-addressed by its key) into a vocab the
+// host materializes at load (run the shader → a 1-tile texture → sample the
+// face). The geometry stream stays flat color; a PARALLEL per-row material index
+// (0 = none) references the vocab, so the instance stride and all physics/spawn
+// code are untouched. Only built-in shader recipes resolve in the headless bake
+// (shaders.ts is React-free); 'custom:' Materialized looks fall back to color.
+export type MaterialAsset = { key: string; wgsl: string; data: number[] };
+
+// One geometry-build accumulator: the packed instance rows PLUS a parallel
+// material index per row (interned vocab). They grow in lockstep — every push
+// appends exactly one row and one material ref.
+type Build = {
+  inst: number[];
+  mats: number[];
+  vocab: MaterialAsset[];
+  index: Map<string, number>; // material key → 1-based vocab slot (0 = none)
+};
+
+function newBuild(): Build {
+  return { inst: [], mats: [], vocab: [], index: new Map() };
+}
+
+// Resolve a {kind:'material'} skin to its shipped recipe and intern it; return
+// the 1-based vocab slot, or 0 when it can't travel (color skins, or a custom/
+// react material the headless bake can't resolve — those keep their flat color).
+function internMaterial(b: Build, skin: BuildFaceSkin | undefined): number {
+  if (!skin || skin.kind !== 'material') return 0;
+  const spec = shaderSpec(skin.id);
+  if (!spec) return 0; // custom/react material — not resolvable headless yet
+  const data = defaultShaderData(spec);
+  const key = `${skin.id}|${data.join(',')}`;
+  const existing = b.index.get(key);
+  if (existing !== undefined) return existing;
+  const slot = b.vocab.length + 1;
+  b.vocab.push({ key, wgsl: spec.shader, data });
+  b.index.set(key, slot);
+  return slot;
+}
 const HEIGHTFIELD_LUMP_VERSION = 2;
 const HEIGHTFIELD_RECORD_FLOATS = 10;
 const HEIGHTFIELD_TEXTURE_PIXELS_PER_TILE = 4;
 const HEIGHTFIELD_TEXTURE_MAX_PX = 512;
 const STAIR_VISUAL_STEPS = 4; // Matches BUILD_UI.stairVisualSteps in /test.
+const BUILD_FACE_SLAB_THICKNESS_METERS = 0.02; // Matches BUILD_UI.faceSlabThicknessMeters.
+const BUILD_FACE_SLAB_LIFT_METERS = 0.012; // Matches BUILD_UI.faceSlabLiftMeters.
 const DEG = Math.PI / 180;
 
 type Color = readonly [number, number, number];
 
 function pushBox(
-  out: number[],
+  b: Build,
   cx: number,
   cy: number,
   cz: number,
@@ -52,12 +98,14 @@ function pushBox(
   sz: number,
   color: Color,
   yawDegrees = 0,
+  material = 0,
 ): void {
-  out.push(cx, cy, cz, 0, yawDegrees, 0, sx, sy, sz, color[0], color[1], color[2], INSTANCE_SHAPE_BOX);
+  b.inst.push(cx, cy, cz, 0, yawDegrees, 0, sx, sy, sz, color[0], color[1], color[2], INSTANCE_SHAPE_BOX);
+  b.mats.push(material);
 }
 
 function pushRamp(
-  out: number[],
+  b: Build,
   x: number,
   y: number,
   z: number,
@@ -66,8 +114,10 @@ function pushRamp(
   depth: number,
   color: Color,
   yawDegrees = 0,
+  material = 0,
 ): void {
-  out.push(x, y + height / 2, z, 0, yawDegrees, 0, width, height, depth, color[0], color[1], color[2], INSTANCE_SHAPE_RAMP);
+  b.inst.push(x, y + height / 2, z, 0, yawDegrees, 0, width, height, depth, color[0], color[1], color[2], INSTANCE_SHAPE_RAMP);
+  b.mats.push(material);
 }
 
 function localOffset(u: number, v: number, yawDegrees: number): { dx: number; dz: number } {
@@ -77,7 +127,7 @@ function localOffset(u: number, v: number, yawDegrees: number): { dx: number; dz
 }
 
 function pushStairs(
-  out: number[],
+  b: Build,
   x: number,
   y: number,
   z: number,
@@ -86,12 +136,13 @@ function pushStairs(
   depth: number,
   color: Color,
   yawDegrees = 0,
+  material = 0,
 ): number {
   for (let i = 0; i < STAIR_VISUAL_STEPS; i += 1) {
     const v = (-depth / 2) + ((i + 0.5) / STAIR_VISUAL_STEPS) * depth;
     const stepHeight = ((i + 1) / STAIR_VISUAL_STEPS) * height;
     const { dx, dz } = localOffset(0, v, yawDegrees);
-    pushBox(out, x + dx, y + stepHeight / 2, z + dz, width, stepHeight, depth / STAIR_VISUAL_STEPS, color, yawDegrees);
+    pushBox(b, x + dx, y + stepHeight / 2, z + dz, width, stepHeight, depth / STAIR_VISUAL_STEPS, color, yawDegrees, material);
   }
   return STAIR_VISUAL_STEPS;
 }
@@ -100,6 +151,15 @@ function hexColor(hex: string): Color {
   const h = hex.replace('#', '');
   const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
   return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255];
+}
+
+function skinColor(skin: BuildFaceSkin | undefined, fallback: Color): Color {
+  if (!skin) return fallback;
+  if (skin.kind === 'color') return hexColor(skin.value);
+  // The current instance lump carries color but not texture assets. Keep
+  // material-skinned face slabs present and visibly assigned; the texture stream
+  // can replace this fallback when skins RLE lands.
+  return fallback;
 }
 
 // ── colors ────────────────────────────────────────────────────────────────
@@ -289,20 +349,20 @@ const MATERIAL_COLOR: Record<BuildMaterial, Color> = {
 
 /** Extrude the GameState's painted world layers into box instances (the ground
  *  the editor preview shows: regions/roads/junctions/landforms/props). */
-function pushWorldLayers(out: number[], state: GameState): void {
+function pushWorldLayers(b: Build, state: GameState): void {
   const world = state.world;
 
   // Surface regions — flat colored ground slabs over their footprint.
   for (const region of world.surfaceRegions) {
     const w = Math.max(1, region.width);
     const d = Math.max(1, region.depth);
-    pushBox(out, region.x + w / 2, region.y + 0.1, region.z + d / 2, w, 0.2, d, tileColor(region.kind));
+    pushBox(b, region.x + w / 2, region.y + 0.1, region.z + d / 2, w, 0.2, d, tileColor(region.kind));
   }
 
   // Placed single cells — small raised tiles with their own identity.
   for (const placed of Object.values(world.placedCells)) {
     const cell = placed.cell;
-    pushBox(out, cell.x + 0.5, (cell.y ?? 0) + 0.2, cell.z + 0.5, 0.9, 0.4, 0.9, tileColor(placed.kind));
+    pushBox(b, cell.x + 0.5, (cell.y ?? 0) + 0.2, cell.z + 0.5, 0.9, 0.4, 0.9, tileColor(placed.kind));
   }
 
   // Roads — asphalt slabs sized to their cross-section, run along their axis.
@@ -311,9 +371,9 @@ function pushWorldLayers(out: number[], state: GameState): void {
     const width = Math.max(2, solveRoadCrossSection(road.profile).totalWidthMeters);
     const length = Math.max(1, road.lengthTiles);
     if (road.orientation === 'northSouth') {
-      pushBox(out, road.x + width / 2, road.y + 0.075, road.z + length / 2, width, 0.15, length, roadColor);
+      pushBox(b, road.x + width / 2, road.y + 0.075, road.z + length / 2, width, 0.15, length, roadColor);
     } else {
-      pushBox(out, road.x + length / 2, road.y + 0.075, road.z + width / 2, length, 0.15, width, roadColor);
+      pushBox(b, road.x + length / 2, road.y + 0.075, road.z + width / 2, length, 0.15, width, roadColor);
     }
   }
 
@@ -322,10 +382,10 @@ function pushWorldLayers(out: number[], state: GameState): void {
   for (const junction of world.junctions) {
     if (junction.kind === 'intersection') {
       const w = Math.max(2, solveRoadCrossSection(junction.profile).totalWidthMeters);
-      pushBox(out, junction.x + w / 2, junction.y + 0.08, junction.z + w / 2, w, 0.16, w, junctionColor);
+      pushBox(b, junction.x + w / 2, junction.y + 0.08, junction.z + w / 2, w, 0.16, w, junctionColor);
     } else {
       const r = Math.max(1, junction.bulbRadiusTiles);
-      pushBox(out, junction.centerX, junction.y + 0.08, junction.centerZ, r * 2, 0.16, r * 2, junctionColor);
+      pushBox(b, junction.centerX, junction.y + 0.08, junction.centerZ, r * 2, 0.16, r * 2, junctionColor);
     }
   }
 
@@ -340,21 +400,88 @@ function pushWorldLayers(out: number[], state: GameState): void {
     const w = Math.max(1, building.widthTiles);
     const d = Math.max(1, building.depthTiles);
     const h = BUILDING_HEIGHT[building.kind] ?? 5;
-    pushBox(out, building.x + w / 2, building.y + h / 2, building.z + d / 2, w, h, d, buildingColor(building.kind), building.yawDegrees ?? 0);
+    pushBox(b, building.x + w / 2, building.y + h / 2, building.z + d / 2, w, h, d, buildingColor(building.kind), building.yawDegrees ?? 0);
   }
 
   // Props — small raised boxes, sized + colored by kind.
   for (const prop of world.props) {
     const box = PROP_BOX[prop.kind] ?? [0.8, 1.0, 0.8];
-    pushBox(out, prop.x, (prop.y ?? 0) + box[1] / 2, prop.z, box[0], box[1], box[2], propColor(prop.kind), prop.yawDegrees ?? 0);
+    pushBox(b, prop.x, (prop.y ?? 0) + box[1] / 2, prop.z, box[0], box[1], box[2], propColor(prop.kind), prop.yawDegrees ?? 0);
   }
 }
 
+function pushPieceBox(
+  b: Build,
+  piece: PlacedBuildPiece,
+  u: number,
+  v: number,
+  baseY: number,
+  width: number,
+  height: number,
+  depth: number,
+  color: Color,
+  material = 0,
+): void {
+  const { dx, dz } = localOffset(u, v, piece.yawDegrees);
+  pushBox(
+    b,
+    piece.x + dx,
+    baseY + height / 2,
+    piece.z + dz,
+    width,
+    height,
+    depth,
+    color,
+    piece.yawDegrees,
+    material,
+  );
+}
+
+function isHorizontalSkinPiece(kind: string): boolean {
+  return kind === 'floor' || kind === 'roof';
+}
+
+// Each face carries EITHER a material (the shader travels, interned) OR a flat
+// color (a {kind:'color'} swatch, or the piece's fallback). A material face is
+// still emitted with `fallback` as its color so a host without the materials
+// vocab degrades to the base look instead of going invisible.
+function pushSkinnedWallOrPlate(b: Build, piece: PlacedBuildPiece, fallback: Color): number {
+  const def = GAME_BUILD.catalog.get(piece.pieceId);
+  const size = def.size;
+  const sides = skinColor(piece.skin?.sides, fallback);
+  const front = skinColor(piece.skin?.front, fallback);
+  const back = skinColor(piece.skin?.back, fallback);
+  const sidesMat = internMaterial(b, piece.skin?.sides);
+  const frontMat = internMaterial(b, piece.skin?.front);
+  const backMat = internMaterial(b, piece.skin?.back);
+  const slab = BUILD_FACE_SLAB_THICKNESS_METERS;
+  const lift = BUILD_FACE_SLAB_LIFT_METERS;
+
+  if (isHorizontalSkinPiece(def.kind)) {
+    const coreHeight = Math.max(0.01, size.heightMeters - lift * 2);
+    pushPieceBox(b, piece, 0, 0, piece.y + lift, size.widthMeters, coreHeight, size.depthMeters, sides, sidesMat);
+    pushPieceBox(b, piece, 0, 0, piece.y + size.heightMeters + lift - slab / 2, size.widthMeters, slab, size.depthMeters, front, frontMat);
+    pushPieceBox(b, piece, 0, 0, piece.y - lift - slab / 2, size.widthMeters, slab, size.depthMeters, back, backMat);
+    return 3;
+  }
+
+  if (GAME_BUILD.kinds.get(def.kind).edits === 'wall') {
+    const frontV = size.depthMeters / 2 + lift;
+    const backV = -size.depthMeters / 2 - lift;
+    pushPieceBox(b, piece, 0, 0, piece.y, size.widthMeters, size.heightMeters, size.depthMeters, sides, sidesMat);
+    pushPieceBox(b, piece, 0, frontV, piece.y, size.widthMeters, size.heightMeters, slab, front, frontMat);
+    pushPieceBox(b, piece, 0, backV, piece.y, size.widthMeters, size.heightMeters, slab, back, backMat);
+    return 3;
+  }
+
+  return 0;
+}
+
 /** Extrude the BUILD stream's PLACED PIECES into box instances — the city's
- *  structures (walls/floors/pillars/towers/prefabs). One box per piece, at the
- *  catalog size + material the /test play view renders, rotated by the piece
- *  yaw. This is the parity-with-/test path. */
-function pushPlacedPieces(out: number[], pieces: readonly PlacedBuildPiece[]): number {
+ *  structures (walls/floors/pillars/towers/prefabs). Wall and plate pieces emit
+ *  the same core + face-slab boxes as /test so per-face skins survive the bake;
+ *  simple pieces remain one body box. This is the parity-with-/test path. */
+function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number {
   let emitted = 0;
   for (const piece of pieces) {
     let def;
@@ -365,22 +492,30 @@ function pushPlacedPieces(out: number[], pieces: readonly PlacedBuildPiece[]): n
     }
     const color = MATERIAL_COLOR[def.material] ?? [0.62, 0.64, 0.68];
     const size = def.size;
+    const skinnedBoxes = pushSkinnedWallOrPlate(b, piece, color);
+    if (skinnedBoxes > 0) {
+      emitted += skinnedBoxes;
+      continue;
+    }
     if (def.kind === 'ramp') {
       // Match /test: ramps render as the real inclined slab geometry and
       // collide as a slope heightfield, not as a bounding box.
-      pushRamp(out, piece.x, piece.y, piece.z, size.widthMeters, size.heightMeters, size.depthMeters, color, piece.yawDegrees);
+      pushRamp(b, piece.x, piece.y, piece.z, size.widthMeters, size.heightMeters, size.depthMeters, color, piece.yawDegrees);
       emitted += 1;
       continue;
     }
     if (def.kind === 'stairs') {
       // Match /test: stairs are visually distinct stepped boxes, while their
       // collision remains the walkable slope heightfield.
-      emitted += pushStairs(out, piece.x, piece.y, piece.z, size.widthMeters, size.heightMeters, size.depthMeters, color, piece.yawDegrees);
+      emitted += pushStairs(b, piece.x, piece.y, piece.z, size.widthMeters, size.heightMeters, size.depthMeters, color, piece.yawDegrees);
       continue;
     }
     // The play view's body box: center (x, y + h/2, z), full catalog size, yaw.
+    // A non-wall single body (pillar/post/column) takes its material from the
+    // 'sides' slot — the whole box wears one look.
+    const bodyMat = internMaterial(b, piece.skin?.sides);
     pushBox(
-      out,
+      b,
       piece.x,
       piece.y + size.heightMeters / 2,
       piece.z,
@@ -389,6 +524,7 @@ function pushPlacedPieces(out: number[], pieces: readonly PlacedBuildPiece[]): n
       size.depthMeters,
       color,
       piece.yawDegrees,
+      bodyMat,
     );
     emitted += 1;
   }
@@ -405,7 +541,7 @@ function pushPlacedPieces(out: number[], pieces: readonly PlacedBuildPiece[]): n
  *  tiles. Height is sampled from the chunk's height grid so a painted hill drapes
  *  too. This is the live ground (read from the map session payload), NOT the demo
  *  surfaceRegions. */
-function pushPaintedFloors(out: number[], floors: readonly ChunkFloor[]): number {
+function pushPaintedFloors(build: Build, floors: readonly ChunkFloor[]): number {
   let emitted = 0;
   for (const f of floors) {
     if (floorHasRelief(f)) continue;
@@ -443,7 +579,7 @@ function pushPaintedFloors(out: number[], floors: readonly ChunkFloor[]): number
         const cz = originZ + (j + 0.5) * tileWorld;
         const w = (i1 - i) * tileWorld;
         const y = heightAt(cx, cz);
-        pushBox(out, cx, y + 0.05, cz, w, 0.1, tileWorld, [r, g, b]);
+        pushBox(build, cx, y + 0.05, cz, w, 0.1, tileWorld, [r, g, b]);
         emitted += 1;
         i = i1;
       }
@@ -507,6 +643,12 @@ export type WorldInstanceResult = {
   instances: Float32Array;
   total: number;
   pieces: number;
+  /** Per-instance-row material slot (1-based into `materials`; 0 = flat color).
+   *  Length === total; parallel to the instance rows. */
+  materialRefs: Uint32Array;
+  /** The content-addressed material vocab the host materializes at load: each a
+   *  WGSL shader + its data[] params. Empty when nothing is material-skinned. */
+  materials: MaterialAsset[];
 };
 
 /** Build the packed instance buffer for the authored world.
@@ -528,15 +670,54 @@ export function buildWorldInstances(
   floors: readonly ChunkFloor[] = [],
   opts: { includeGroundLayers?: boolean } = {},
 ): WorldInstanceResult {
-  const out: number[] = [];
-  const pieceCount = pushPlacedPieces(out, pieces);
-  pushPaintedFloors(out, floors);
-  if (opts.includeGroundLayers) pushWorldLayers(out, state);
+  const b = newBuild();
+  const pieceCount = pushPlacedPieces(b, pieces);
+  pushPaintedFloors(b, floors);
+  if (opts.includeGroundLayers) pushWorldLayers(b, state);
   return {
-    instances: new Float32Array(out),
-    total: Math.floor(out.length / INSTANCE_STRIDE),
+    instances: new Float32Array(b.inst),
+    total: Math.floor(b.inst.length / INSTANCE_STRIDE),
     pieces: pieceCount,
+    materialRefs: Uint32Array.from(b.mats),
+    materials: b.vocab,
   };
+}
+
+/** Encode the material-reference lump: u32 count | u32[count] (one 1-based
+ *  material slot per instance row, 0 = flat color). Parallel to the instance
+ *  lump's rows — the loader reads them in lockstep. */
+export function encodeMaterialRefs(refs: Uint32Array): Uint8Array {
+  const out = new Uint8Array(4 + refs.length * 4);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, refs.length, true);
+  for (let i = 0; i < refs.length; i += 1) view.setUint32(4 + i * 4, refs[i], true);
+  return out;
+}
+
+/** Encode the materials vocab lump — the SHIPPED RECIPES, not pixels:
+ *  u32 count, then per material: u32 wgsl byte length | wgsl utf8 | u32 data
+ *  float count | f32[data]. The host runs each shader at load to a 1-tile
+ *  texture and samples it on the referencing faces. */
+export function encodeMaterials(materials: readonly MaterialAsset[]): Uint8Array {
+  const enc = new TextEncoder();
+  const sources = materials.map((m) => enc.encode(m.wgsl));
+  let bytes = 4;
+  for (let i = 0; i < materials.length; i += 1) {
+    bytes += 4 + sources[i].byteLength + 4 + materials[i].data.length * 4;
+  }
+  const out = new Uint8Array(bytes);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, materials.length, true);
+  let at = 4;
+  for (let i = 0; i < materials.length; i += 1) {
+    const src = sources[i];
+    view.setUint32(at, src.byteLength, true); at += 4;
+    out.set(src, at); at += src.byteLength;
+    const data = materials[i].data;
+    view.setUint32(at, data.length, true); at += 4;
+    for (let k = 0; k < data.length; k += 1) { view.setFloat32(at, data[k], true); at += 4; }
+  }
+  return out;
 }
 
 /** Encode the instance buffer as a map lump payload:

@@ -49,6 +49,15 @@ export const MAP_LUMP = {
   // grid plus placement/material metadata; the loader hands it to the native
   // Scene3D heightfield primitive so gpu/3d.zig owns the triangulation.
   HEIGHTFIELDS: 11,
+  // Material vocab: the SHADERS that skin faces, shipped as recipes (WGSL +
+  // data[] params), content-addressed and deduped — never baked pixels. The
+  // host runs each at load to a 1-tile texture. See compile/worldGeometry.ts
+  // (encodeMaterials). GUIDING_LIGHT: procedural content travels as its formula.
+  MATERIALS: 12,
+  // Per-instance-row material reference (u32 count | u32[count]); 1-based index
+  // into MATERIALS, 0 = flat color. Parallel to INSTANCES rows — the loader
+  // reads them in lockstep and renders material rows as textured faces.
+  MATERIAL_REFS: 13,
 } as const;
 
 export type LumpInput = {
