@@ -20,7 +20,8 @@ export type EditCategory =
   | 'chunk'   // adding a chunk to the map
   | 'object'  // placements: add / move / rotate / clone / remove / lock
   | 'camera'  // the 3D preview free-fly camera
-  | 'map';    // map lifecycle: open / new / rename / delete
+  | 'map'     // map lifecycle: open / new / rename / delete
+  | 'road';   // road strokes: draw / edit / delete (ROADSTROKE-0610)
 
 // What an edit site emits. The cart stamps the time when it lands in the log.
 export interface EditNote {
@@ -40,6 +41,7 @@ export const CAT_COLOR: Record<EditCategory, string> = {
   object: '#f472b6',
   camera: '#7dd3fc',
   map: '#94a3b8',
+  road: '#f59e0b',
 };
 
 // Short uppercase tag shown beside each row.
@@ -51,6 +53,7 @@ export const CAT_TAG: Record<EditCategory, string> = {
   object: 'OBJ',
   camera: 'CAM',
   map: 'MAP',
+  road: 'ROAD',
 };
 
 export function relTime(t: number, now: number): string {

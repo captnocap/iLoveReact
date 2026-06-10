@@ -36,6 +36,7 @@ import {
 } from './chunks';
 import { type ZoneDef } from './zoneData';
 import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } from './placements';
+import { cellKey, type RoadStroke } from './roadData';
 
 // Height quantization: heights are metres in ±HEIGHT_LIMIT. 0.01m steps are
 // imperceptible on the coarse preview mesh and keep the value a small integer
@@ -78,6 +79,13 @@ export interface MapSnapshot {
   /** Object placements (thin references; visuals re-resolved on load). */
   placements: PlacementSnap[];
   chunks: ChunkSnap[];
+  /** Road strokes (ROADSTROKE-0610) — the authored centerline+profile objects.
+   *  The chunk tile grids are saved COMPOSITED (road stamps included, exactly
+   *  what the editor shows); the undercoat below is what re-editing restores. */
+  roads?: RoadStroke[];
+  /** Road undercoat: [gx, gz, priorLegendIdx] per road-stamped cell — the tile
+   *  index (into tileLegend, -1 = empty) each cell held before the stamp. */
+  roadUnder?: [number, number, number][];
 }
 
 export interface EditorWorld {
@@ -85,6 +93,10 @@ export interface EditorWorld {
   zones: ZoneDef[];
   focus: Set<ChunkKey>;
   placements: Placement[];
+  /** Road strokes (optional — pre-road worlds and worlds without roads omit them). */
+  roads?: RoadStroke[];
+  /** cellKey("gx,gz") → the tile index the cell held before the road stamp. */
+  roadUnder?: Map<string, number>;
 }
 
 // ── Encode ─────────────────────────────────────────────────────────────────
@@ -104,6 +116,16 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
       zones: encodeGrid(Array.from(c.zones.idx), c.zones.cols, c.zones.rows),
     });
   }
+  // Road undercoat: cellKey → prior index. Values are CURRENT global indices,
+  // which is exactly the legend this snapshot writes — remapped by name on load
+  // like the tile grids.
+  const roadUnder: [number, number, number][] = [];
+  if (world.roadUnder) {
+    for (const [key, prior] of world.roadUnder) {
+      const i = key.indexOf(',');
+      roadUnder.push([Number(key.slice(0, i)), Number(key.slice(i + 1)), prior]);
+    }
+  }
   return {
     v: 1,
     tileLegend: [...TILE_KINDS],
@@ -114,6 +136,8 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
       ...(p.spawnId ? { spawnId: p.spawnId } : {}),
     })),
     chunks,
+    ...(world.roads?.length ? { roads: world.roads.map((r) => ({ id: r.id, points: r.points.map((pt) => ({ ...pt })), profile: { ...r.profile } })) } : {}),
+    ...(roadUnder.length ? { roadUnder } : {}),
   };
 }
 
@@ -178,14 +202,30 @@ export function deserializeMap(snap: MapSnapshot): EditorWorld {
   const focusKeys = (snap.focus ?? []).filter((k) => chunks.has(k));
   const focus = new Set<ChunkKey>(focusKeys.length ? focusKeys : Array.from(chunks.keys()));
 
-  return { chunks, zones, focus, placements };
+  // Road strokes ride the snapshot as plain data; the undercoat's prior indices
+  // remap through the same saved-legend table the tile grids use.
+  const roads: RoadStroke[] = (snap.roads ?? [])
+    .filter((r) => r && Array.isArray(r.points) && r.points.length >= 2 && r.profile)
+    .map((r) => ({
+      id: r.id,
+      points: r.points.map((p) => ({ gx: Math.round(p.gx), gz: Math.round(p.gz) })),
+      profile: { lanesF: r.profile.lanesF, lanesB: r.profile.lanesB, sidewalks: !!r.profile.sidewalks },
+    }));
+  const roadUnder = new Map<string, number>();
+  for (const entry of snap.roadUnder ?? []) {
+    if (!Array.isArray(entry) || entry.length < 3) continue;
+    const [gx, gz, prior] = entry;
+    roadUnder.set(cellKey(gx, gz), prior == null || prior < 0 ? -1 : (remap[prior] ?? -1));
+  }
+
+  return { chunks, zones, focus, placements, roads, roadUnder };
 }
 
 // A fresh, blank map: one seed chunk (a0), focused, nothing painted.
 export function emptyMap(): EditorWorld {
   const chunks = new Map<ChunkKey, Chunk>();
   chunks.set(chunkKey(0, 0), makeChunk(0, 0));
-  return { chunks, zones: [], focus: new Set([chunkKey(0, 0)]), placements: [] };
+  return { chunks, zones: [], focus: new Set([chunkKey(0, 0)]), placements: [], roads: [], roadUnder: new Map() };
 }
 
 // The graph-space centre of everything painted — where the canvas should look

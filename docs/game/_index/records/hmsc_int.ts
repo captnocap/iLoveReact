@@ -19,6 +19,15 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'roadData.ts (the road-stroke planner) + the ROAD paint layer',
+      purpose: ['world_gen', 'ui'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/roadData.ts',
+      description:
+        'ROADSTROKE-0610: roads are authored as STROKES (centerline points + per-side profile), never tile-by-tile. planRoads() is the PURE compiler: user-ruled 3-tile lanes flowing with/against the draw direction (right-hand traffic), the NEW flow-neutral `median` kind between opposing groups (vehicleCost 6 closes the wrong-way-loophole; appended LAST in both kind registries), 2-tile sidewalk rings, junction boxes at carriageway overlaps, 2-deep crosswalk bands outside each leg. PaintCanvas ROAD layer + RoadRail.tsx author it (brush lays points, Enter stamps, pointer selects, one-way strokes show flow chevrons); stamping is DESTRUCTIVE into the chunk tile grids with an UNDERCOAT (cell→prior index) so edits/deletes restore the paint beneath (global restamp per change). Persistence: MapSnapshot.roads + roadUnder (legend-remapped by name). P4: roadData.test.ts (9) + roadStore.test.ts (3). Next slices: per-tile material stamping, elevation modes (grade/deck/approach strips/tunnel hole-mask).',
+      status: 'live',
+    },
+    {
       name: 'compile/main.ts + rjit game compile/verify',
       purpose: ['scripting', 'maintenance', 'persistence'],
       kind: 'module',

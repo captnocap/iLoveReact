@@ -42,6 +42,11 @@ export type TileKind =
   // halt BEFORE the crosswalk band, and a walker on the zebra owns the road
   // regardless of the light.
   | 'crosswalk'
+  // The double-yellow centerline strip between opposing lane groups. Walkable
+  // (jaywalking) but expensive for vehicles ALONG it — crossing one cell to
+  // turn is cheap in absolute terms, driving lengthwise down the middle is
+  // not (the flow-less-drivable wrong-way loophole, priced out per cell).
+  | 'median'
   | 'mud'
   | 'sand'
   | 'wall'

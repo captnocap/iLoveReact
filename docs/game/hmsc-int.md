@@ -1381,3 +1381,49 @@ died; sculpt stays in /characters.
 - `/vehicles`: viewport renders painted panels; `texture` row deep-links.
 - Surfaced seams in editors/cutout/CAPTURE.md (model-target draft gap,
   cell-grid bake fidelity, compile-side bake follow-up).
+
+## The road layer — the stroke painter (ROADSTROKE-0610, 2026-06-10)
+
+Roads are authored as STROKES, never tile-by-tile (V24's law applied to roads:
+the 1m grid is the snap substrate, not the authored object model). The user's
+2026-06-10 rulings: **a lane is 3 tiles**; lane count is per side; a side at 0
+lanes = a one-way road and MUST show direction markers.
+
+- `roadData.ts` — the model + the PURE planner. `RoadStroke` = centerline
+  points (global cell coords, the SelCell convention) + `RoadProfile`
+  (`lanesF`/`lanesB` per side, `sidewalks`). `planRoads(strokes)` →
+  `Map<cellKey, TileKind>`: 3-tile lane groups flowing with/against the draw
+  direction (right-hand traffic — forward lanes sit RIGHT of the centerline),
+  a 1-tile `median` between opposing groups (two-way only), the locked 2-tile
+  sidewalk ring, `junction` boxes where two strokes' carriageways overlap, and
+  2-deep `crosswalk` bands across each leg just outside the box. Pure CPU —
+  `roadData.test.ts` (9 cases) pins the whole grammar.
+- `median` tile kind — NEW, appended LAST in both registries
+  (`cart/hmsc/world/tileKinds.ts` + `game/kinds/tiles.ts`; index order stays
+  locked). Walkable (jaywalking) but `vehicleCost 6.0` prices out driving
+  ALONG the centerline — the per-cell tax that closes the flow-less-drivable
+  wrong-way loophole a neutral center tile would open. Flow-neutral.
+- `PaintCanvas.tsx` ROAD layer — brush tool lays centerline points (click;
+  Enter stamps, Esc cancels), pointer selects a stroke (point-to-segment
+  distance ≤ half width + 1), `RoadRail.tsx` is the left rail (per-side lane
+  steppers, sidewalk toggle, stamp/cancel/undo-point, stroke list + delete).
+  Overlay affordances are Canvas.Node DOTS (no rotation, any angle renders) +
+  ASCII flow chevrons on one-way strokes. Stamping is DESTRUCTIVE into the
+  chunk tile grids — the grid stays the single runtime truth ("the tile system
+  IS the system"); host pathing, the preview drape, and the compile see plain
+  painted tiles with zero new plumbing.
+- The UNDERCOAT — `roadUnder: Map<cellKey, priorIndex>` records what every
+  stamped cell held before. Any stroke change does a GLOBAL restamp (restore
+  all → replan all → stamp all; junctions depend on every stroke). Editing or
+  deleting a road restores the paint beneath it.
+- Persistence (`mapStore.ts`) — `MapSnapshot.roads` (strokes verbatim) +
+  `MapSnapshot.roadUnder` (`[gx, gz, legendIdx]`, remapped by NAME through the
+  saved legend like the tile grids). Chunk tiles save COMPOSITED (what you
+  see); pre-road snapshots load clean. `roadStore.test.ts` (3 cases) pins the
+  round-trip + legend degradation.
+- Known seams: cells over not-yet-added chunks skip the stamp and catch up on
+  the next restamp; manual paint UNDER a road footprint is reclaimed by the
+  next restamp; the road LOOK is still the kind colors — the per-tile material
+  stamping (yellow/white overlays from game/textures' road decomposition) and
+  the elevation modes (grade / deck / approach strips / tunnel hole-mask) are
+  the next slices (see project_road_grammar memory: the agreed full design).

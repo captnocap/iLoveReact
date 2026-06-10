@@ -51,7 +51,10 @@ export type TileKind =
   | 'laneEast'
   | 'laneWest'
   | 'junction'
-  | 'crosswalk';
+  | 'crosswalk'
+  // The double-yellow centerline strip between opposing lane groups (stamped
+  // by the road-stroke painter). Appended last — kind indices stay stable.
+  | 'median';
 
 // How a tile kind is allowed to enter the world — the registry is several
 // things in one list, and this is what tells them apart:
@@ -566,6 +569,27 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
     surface: { ...ROAD_SURFACE, friction: 0.19 },
     render: { color: '#3a4250', heightMeters: 0.085, textureKey: TEX.road },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  // The double-yellow centerline. Walkable (jaywalking is legal pathing) but
+  // vehicleCost prices out driving ALONG it: crossing one cell to turn adds ~6,
+  // driving 100m down the middle adds ~600 vs ~60 on a lane — the per-cell tax
+  // that closes the flow-less-drivable wrong-way loophole a cheap neutral
+  // center tile would open. Flow-neutral by design (it is the boundary, not a
+  // lane), so the host flow table ignores it.
+  median: {
+    kind: 'median',
+    placement: 'surface',
+    label: 'Median (centerline)',
+    flow: 'none',
+    pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.3, runCost: 1.35, vehicleCost: 6.0, preferredByVehicles: false, noise: 0.7 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
+    surface: ROAD_SURFACE,
+    render: { color: '#46431f', heightMeters: 0.085, textureKey: TEX.road },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
 };

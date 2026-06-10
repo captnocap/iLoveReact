@@ -453,6 +453,26 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     render: { color: '#3a4250', heightMeters: 0.085, textureKey: HMSC_TILE_TEXTURE_KEYS.road },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
+  // The double-yellow centerline strip between opposing lane groups (stamped by
+  // the road-stroke painter, ROADSTROKE-0610). Walkable — jaywalking across is
+  // legal pathing — but vehicleCost prices out driving ALONG it: crossing one
+  // cell to turn adds ~6, driving 100m down the middle adds ~600 vs ~60 on a
+  // lane. That per-cell tax closes the flow-less-drivable wrong-way loophole
+  // a cheap neutral center tile would open.
+  median: {
+    kind: 'median',
+    placement: 'surface',
+    label: 'Median (centerline)',
+    pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.3, runCost: 1.35, vehicleCost: 6.0, preferredByVehicles: false, cover: 'none', noise: 0.7 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
+    surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.18, lateralGrip: 0.92, restitution: 0.84 },
+    render: { color: '#46431f', heightMeters: 0.085, textureKey: HMSC_TILE_TEXTURE_KEYS.median },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
 };
 
 export const TILE_KINDS = Object.keys(TILE_KIND_DEFINITIONS) as TileKind[];

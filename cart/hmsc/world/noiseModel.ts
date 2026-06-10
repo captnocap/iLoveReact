@@ -101,6 +101,7 @@ export const TILE_KIND_NOISE_MATERIALS: Record<TileKind, SurfaceNoiseMaterial> =
   laneWest: 'concrete',
   junction: 'concrete',
   crosswalk: 'concrete',
+  median: 'concrete',
 };
 
 export type ContinuousNoiseRange = {
