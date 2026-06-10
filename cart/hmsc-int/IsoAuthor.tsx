@@ -13,10 +13,10 @@
 // crosshair. Place a wall here, it stands in F2 and in the game.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
+import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
-import { GAME_BUILD } from './game';
+import { GAME_BUILD, GAME_NATIVE_CAMERA } from './game';
 import type { BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
 import { resolveSnapTarget, modulePitch, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes } from './editors/build/pieceMeshes';
@@ -150,7 +150,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   displayPiecesRef.current = displayPieces;
 
   // The camera controller, seeded centred on what's already built. Pose lives in the
-  // ref; a tick forces the Scene3D.Camera to re-read the solved pose on pan/zoom/turn.
+  // ref; JS keeps semantic picking math, while the renderer camera is V23 native.
   const stageRef = useRef<IsoStage | null>(null);
   if (!stageRef.current) {
     // Restore the persisted pose across a hot reload; else open centred on what's built.
@@ -164,8 +164,33 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   }
   const stage = stageRef.current;
   useEffect(() => { stage.setHeightSampler(groundTopAt); }, [stage, groundTopAt]);
+  const cameraRef = useRef<any>(null);
+  const cameraCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
+  const pushNativeCamera = useCallback(() => {
+    cameraCtlRef.current?.setOrbit(stage.nativeOrbitParams());
+  }, [stage]);
+  const bootCam = useRef(stage.solve()).current;
+  useEffect(() => {
+    const nodeId = Number(cameraRef.current?.id ?? 0);
+    if (!nodeId) {
+      console.warn('[iso-author] native camera not engaged — camera node id unavailable');
+      return;
+    }
+    const ctl = GAME_NATIVE_CAMERA.forNode(nodeId);
+    cameraCtlRef.current = ctl;
+    ctl.setMode('orbit');
+    ctl.setSmoothing(0);
+    ctl.setOrbit(stage.nativeOrbitParams());
+    return () => {
+      cameraCtlRef.current = null;
+      ctl.disable();
+    };
+  }, [stage]);
   const [, bump] = useState(0);
-  const redraw = useCallback(() => bump((n) => (n + 1) & 0xffff), []);
+  const redraw = useCallback(() => {
+    pushNativeCamera();
+    bump((n) => (n + 1) & 0xffff);
+  }, [pushNativeCamera]);
   // Persist the camera pose at REST points (drag/key release, wheel, button) — never
   // per frame — so a hot reload resumes the view. sculptCamera keeps the same discipline.
   const saveCamera = useCallback(() => { writeRouteTwigState(ISO_ROUTE, ISO_CAM_TWIG, { ...stage.pose }); }, [stage]);
@@ -211,9 +236,20 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const [paintCells, setPaintCells] = useState<Paint[] | null>(null);
   const paintCellsRef = useRef(paintCells);
   paintCellsRef.current = paintCells;
+  // The save-as-prefab naming prompt: null = closed, else the draft name being typed.
+  const [prefabNameDraft, setPrefabNameDraft] = useState<string | null>(null);
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 800, height: 600 });
+
+  // Placement ground for the ACTIVE floor: terrain at level 0, else the flat slab at the
+  // active level's elevation — so raising a floor (▲) drops pieces ON that floor instead
+  // of always on the ground. Reads the live pose level, matching the camera target the
+  // cursor ray is aimed at (stage.solve targets the same elevation).
+  const placeGroundAt = useCallback((x: number, z: number): number => {
+    const level = stage.pose.level;
+    return level > 0 ? level * METERS_PER_LEVEL : groundTopAt(x, z);
+  }, [stage, groundTopAt]);
 
   // Resolve the cursor to a snap target with the SAME inputs F2 uses (the armed
   // catalog entry's snap mode + size, the ghost yaw, the standing pieces).
@@ -227,13 +263,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     return resolveSnapTarget({
       ray: stage.pieceRay(sx, sy, rectRef.current),
       pieces: piecesRef.current,
-      groundTopAt,
+      groundTopAt: placeGroundAt, // active-floor aware → upper-floor placement lands up there
       snap,
       size,
       yawDegrees: ghostYawRef.current,
       tuning: ISO_SNAP_TUNING,
     });
-  }, [stage, groundTopAt]);
+  }, [stage, placeGroundAt]);
   // The per-frame ghost poll (below) reads the latest resolveAt through this ref, so it
   // never snaps against a stale world/terrain after a paint edit.
   const resolveAtRef = useRef(resolveAt);
@@ -282,9 +318,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (!cells.length) return [];
     let sx = 0, sz = 0;
     for (const c of cells) { sx += c.x; sz += c.z; }
-    const y = groundTopAt(sx / cells.length, sz / cells.length); // one flat-pad base
+    const y = placeGroundAt(sx / cells.length, sz / cells.length); // one flat-pad base on the active floor
     return cells.map((c) => ({ pieceId: def.id, x: c.x, y, z: c.z, yawDegrees: c.yaw }));
-  }, [groundTopAt]);
+  }, [placeGroundAt]);
   const computePaintRef = useRef(computePaint);
   computePaintRef.current = computePaint;
 
@@ -343,7 +379,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       } else {
         stage.rotateBy((p.x - d.x) * 0.3); // horizontal drag → yaw
         d.x = p.x;
-        redraw();
+        pushNativeCamera();
       }
       return;
     }
@@ -422,16 +458,17 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const cloneStampId = `clone-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
     commitBatch(sel.map((p) => { const { id, ...rest } = p; return { event: { kind: 'piecePlaced', placement: { ...rest, x: p.x + dx, stampId: cloneStampId } } as WorldEvent, label: `cloned ${p.pieceId}` }; }));
   };
+  // The default name offered in the save prompt: the next free "Custom N".
+  const nextCustomName = () => `Custom ${prefabs.filter((d) => /^Custom\b/.test(d.label)).length + 1}`;
   // Save the current selection as a reusable PREFAB (USER ASK): build an origin-relative
   // BuildPrefabDef from the selected pieces (prefabFromPieces keeps each piece's skin +
   // wall edit) and register it with a prefabDefined event — the SAME stream the cart
-  // merges into the prefabs rail, so it shows up there immediately to stamp again. Named
-  // "Custom N" (no inline text input here); rename later via the prefab tools if needed.
-  const saveSelectionAsPrefab = () => {
+  // merges into the prefabs rail, so it shows up there immediately to stamp again. The
+  // name comes from the save prompt (falls back to "Custom N" if left blank).
+  const saveSelectionAsPrefab = (name: string) => {
     const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
     if (!sel.length) return;
-    const n = prefabs.filter((d) => /^Custom\b/.test(d.label)).length + 1;
-    const label = `Custom ${n}`;
+    const label = name.trim() || nextCustomName();
     const id = GAME_BUILD.placed.mintPrefabId(label);
     const theme = GAME_BUILD.catalog.get(sel[0].pieceId).theme;
     const def = GAME_BUILD.placed.prefabFromPieces(id, label, theme, sel);
@@ -490,13 +527,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       const k = String(e?.key ?? '').toLowerCase();
       if (k === 'r') setGhostYaw((y) => (y + 90) % 360);
       else if (k === 'escape') { setArmed(null); setSelectedIds(new Set()); }
-      else if (k === 'q') { stage.rotate(-1); redraw(); keyActionsRef.current.saveCamera(); }
-      else if (k === 'e') { stage.rotate(1); redraw(); keyActionsRef.current.saveCamera(); }
+      else if (k === 'q') { stage.rotate(-1); pushNativeCamera(); keyActionsRef.current.saveCamera(); }
+      else if (k === 'e') { stage.rotate(1); pushNativeCamera(); keyActionsRef.current.saveCamera(); }
       else if (k === 'f' || k === 'home') keyActionsRef.current.recenter();
       else if (k === 'delete' || k === 'backspace') keyActionsRef.current.deleteSelected();
     });
     return off;
-  }, [props.focused, stage, redraw]);
+  }, [props.focused, stage, pushNativeCamera]);
 
   // WASD / arrow keys slide the view across the ground (held-key pan loop). Speed
   // scales with the eye distance so a keystroke crosses the same fraction of the view
@@ -547,7 +584,6 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     return () => { alive = false; cancel(handle); offD(); offU(); };
   }, [props.focused, stage, redraw]);
 
-  const cam = stage.solve();
   const level = stage.pose.level;
 
   // The placement ghost: the armed piece drawn translucent at the snapped pose,
@@ -566,10 +602,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       : [{ pieceId: a.id, x: snap.placement.x, y: snap.placement.y, z: snap.placement.z, yawDegrees: yaw }];
     const blocked = a.kind === 'piece' && GAME_BUILD.placed.validatePlacement(previews[0] as any).length > 0;
     const color = blocked ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
-    return previews.flatMap((p, i) => pieceVisualShapes(p, `isoGhost${i}`).map((shape) => (
+    const supportPieces = [...displayPieces, ...previews.map((p, i) => ({ id: `isoGhost${i}`, ...p }))];
+    return previews.flatMap((p, i) => pieceVisualShapes(p, `isoGhost${i}`, supportPieces).map((shape) => (
       <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
     )));
-  }, [snap, armed, prefabById, paintCells]);
+  }, [snap, armed, prefabById, paintCells, displayPieces]);
 
   // The move preview: the selected pieces drawn translucent at the dragged offset while
   // a move drag is live, tinted blocked-red if any destination fails validation — the
@@ -583,7 +620,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const moved = sel.map((p) => ({ pieceId: p.pieceId, x: p.x + moveDelta.dx, y: p.y, z: p.z + moveDelta.dz, yawDegrees: p.yawDegrees }));
     const blocked = moved.some((m) => GAME_BUILD.placed.validatePlacement(m as any).length > 0);
     const color = blocked ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
-    return moved.flatMap((m, i) => pieceVisualShapes(m, `isoMove${i}`).map((shape) => (
+    const supportPieces = [
+      ...displayPieces.filter((p) => !selectedIds.has(p.id)),
+      ...moved.map((m, i) => ({ id: `isoMove${i}`, ...m })),
+    ];
+    return moved.flatMap((m, i) => pieceVisualShapes(m, `isoMove${i}`, supportPieces).map((shape) => (
       <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
     )));
   }, [moveDelta, displayPieces, selectedIds]);
@@ -594,11 +635,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (!paintCells || !paintCells.length) return null;
     return paintCells.flatMap((c, i) => {
       const color = GAME_BUILD.placed.validatePlacement(c).length > 0 ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
-      return pieceVisualShapes(c, `isoPaint${i}`).map((shape) => (
+      const supportPieces = [...displayPieces, ...paintCells.map((p, j) => ({ id: `isoPaint${j}`, ...p }))];
+      return pieceVisualShapes(c, `isoPaint${i}`, supportPieces).map((shape) => (
         <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
       ));
     });
-  }, [paintCells]);
+  }, [paintCells, displayPieces]);
 
   const noIds = useMemo(() => new Set<string>(), []);
 
@@ -650,7 +692,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     >
       {sceneCaptures}
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showAxes={false}>
-        <Scene3D.Camera position={cam.pos} target={cam.target} fov={cam.fov} far={FAR_CLIP} />
+        <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} far={FAR_CLIP} />
         <Scene3D.Fog enabled={false} />
         {worldStatics}
         {/* the build grid on the active floor (Scene3D's showGrid is a no-op — we draw
@@ -692,8 +734,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       {/* ── Sims control cluster (top-right): rotate · zoom · floor ────────── */}
       <Box style={{ position: 'absolute', right: 8, top: 8, flexDirection: 'row', gap: 4 }}>
         <IsoBtn label="⌂" title="Recenter on what's built (F)" onPress={recenter} />
-        <IsoBtn label="⟲" title="Rotate view 90° left (Q)" onPress={() => { stage.rotate(-1); redraw(); saveCamera(); }} />
-        <IsoBtn label="⟳" title="Rotate view 90° right (E)" onPress={() => { stage.rotate(1); redraw(); saveCamera(); }} />
+        <IsoBtn label="⟲" title="Rotate view 90° left (Q)" onPress={() => { stage.rotate(-1); pushNativeCamera(); saveCamera(); }} />
+        <IsoBtn label="⟳" title="Rotate view 90° right (E)" onPress={() => { stage.rotate(1); pushNativeCamera(); saveCamera(); }} />
         <IsoBtn label="−" title="Zoom out" onPress={() => { stage.zoomBy(1 / 1.25); redraw(); saveCamera(); }} />
         <IsoBtn label="+" title="Zoom in" onPress={() => { stage.zoomBy(1.25); redraw(); saveCamera(); }} />
         <IsoBtn label="▼" title="Floor down a storey" onPress={() => { stage.lowerLevel(); redraw(); saveCamera(); }} />
@@ -704,7 +746,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         <IsoBtn label={wholeBuilding ? '▦' : '▪'} title={wholeBuilding ? 'Select: whole building · Shift-click = one piece' : 'Select: one piece · Shift-click = whole building'} onPress={() => setWholeBuilding((v) => !v)} />
         {selectedIds.size > 0 ? (
           <>
-            <IsoBtn label="⊞" title="Save selection as a prefab" onPress={saveSelectionAsPrefab} />
+            <IsoBtn label="⊞" title="Save selection as a prefab" onPress={() => setPrefabNameDraft(nextCustomName())} />
             <IsoBtn label="⧉" title="Clone selection" onPress={cloneSelected} />
             <IsoBtn label="✕" title="Delete selection (Del)" onPress={deleteSelected} />
           </>
@@ -726,6 +768,33 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace', position: 'absolute', left: 8, top: 48 }}>
         {`${pieces.length} pieces · ${state.world.props?.length ?? 0} props`}
       </Text>
+
+      {/* Save-as-prefab name prompt — rendered as the root's LAST child (full-area
+          overlay) so it sits on top and owns clicks while open. */}
+      {prefabNameDraft !== null ? (
+        <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000099' }}>
+          <Box style={{ width: 300, backgroundColor: '#0b1220', borderWidth: 1, borderColor: '#1e3a5f', borderRadius: 8, padding: 14, gap: 10 }}>
+            <Text fontSize={12} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>Name this prefab</Text>
+            <TextInput
+              text={prefabNameDraft}
+              onChangeText={(v: string) => setPrefabNameDraft(v)}
+              style={{ backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: '#27364a', borderRadius: 4, paddingLeft: 8, paddingRight: 8, paddingTop: 6, paddingBottom: 6, color: '#e2e8f0', fontSize: 13, fontFamily: 'monospace' }}
+            />
+            <Box style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
+              <Pressable onPress={() => setPrefabNameDraft(null)}>
+                <Box style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 5, backgroundColor: '#1e293b' }}>
+                  <Text fontSize={11} color="#a8b6c8" style={{ fontFamily: 'monospace' }}>Cancel</Text>
+                </Box>
+              </Pressable>
+              <Pressable onPress={() => { saveSelectionAsPrefab(prefabNameDraft); setPrefabNameDraft(null); }}>
+                <Box style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 5, backgroundColor: '#2563eb' }}>
+                  <Text fontSize={11} color="#eaf4ff" style={{ fontFamily: 'monospace' }}>Save prefab</Text>
+                </Box>
+              </Pressable>
+            </Box>
+          </Box>
+        </Box>
+      ) : null}
     </Box>
   );
 });

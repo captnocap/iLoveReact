@@ -20,10 +20,11 @@ import { GAME_CAMERA, type PieceRay, type Rect, type Solved, type Vec3 } from '.
 import { HMSC_SCALE } from '../hmsc/world/scale';
 
 const ISO_YAW_START = 45;      // true-iso opens looking at tile CORNERS, not faces
-const ISO_FOV = 22;            // narrow → flattens perspective toward orthographic
+export const ISO_FOV = 22;     // narrow → flattens perspective toward orthographic
 const BASE_DIST = 90;          // metres from target at zoom 1 (a chunk is 120m)
 const MIN_ZOOM = 0.12;         // far out — survey a whole district
 const MAX_ZOOM = 10;           // close in — detail a single wall
+export const ISO_PITCH = 35.264; // true isometric elevation: atan(1/sqrt(2))
 
 // One floor level == one storey == one F2 build-mode wall. This is NOT a number we
 // pick: it IS the build catalog's WALL_SIZE.heightMeters, which is the storey module
@@ -79,8 +80,8 @@ export class IsoStage {
     return this.pose.level * METERS_PER_LEVEL;
   }
 
-  // {pos,target,fov} for <Scene3D.Camera>. The target rides the active level so
-  // rotating and zooming keep the edited floor centred under the cursor.
+  // Semantic solve for boot-frame parity and picking. The rendered author viewport
+  // is native-driven via nativeOrbitParams(), not per-frame JS camera props.
   solve(): Solved {
     const dist = BASE_DIST / clamp(this.pose.zoom, MIN_ZOOM, MAX_ZOOM);
     const target: Vec3 = [this.pose.centerX, this.levelElevation(), this.pose.centerZ];
@@ -90,6 +91,17 @@ export class IsoStage {
       dist,
       fov: ISO_FOV,
     });
+  }
+
+  nativeOrbitParams(): { target: Vec3; yaw: number; pitch: number; distance: number; fov: number; zoom: number } {
+    return {
+      target: [this.pose.centerX, this.levelElevation(), this.pose.centerZ],
+      yaw: this.yawDegrees(),
+      pitch: ISO_PITCH,
+      distance: this.distance(),
+      fov: ISO_FOV,
+      zoom: 1,
+    };
   }
 
   // Rotate the whole view 90° (the ⟲⟳ buttons / Q·E). Snaps to the nearest iso detent

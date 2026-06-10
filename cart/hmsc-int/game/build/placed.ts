@@ -157,6 +157,8 @@ export type PieceBounds = {
   topY: number;
 };
 
+export type PlacedPieceDepthSpan = { minV: number; maxV: number };
+
 /** Axis-aligned world envelope of a placed piece (exact for quarter-turn yaw,
  *  the rotated envelope otherwise). */
 export function pieceBounds(piece: PlacedBuildPiece): PieceBounds {
@@ -256,6 +258,9 @@ export function raycastPieces(
   let best: PieceHit | null = null;
   for (const piece of pieces) {
     const size = placedPieceDef(piece).size;
+    const depthSpan = placedPieceDepthSpan(piece, pieces);
+    const depthCenter = (depthSpan.minV + depthSpan.maxV) / 2;
+    const depthSize = depthSpan.maxV - depthSpan.minV;
     const yawRadians = piece.yawDegrees * DEG;
     const cos = Math.cos(-yawRadians);
     const sin = Math.sin(-yawRadians);
@@ -265,11 +270,11 @@ export function raycastPieces(
     const relZ = ray.origin.z - piece.z;
     const ox = relX * cos - relZ * sin;
     const oy = ray.origin.y - centerY;
-    const oz = relX * sin + relZ * cos;
+    const oz = relX * sin + relZ * cos - depthCenter;
     const dx = ray.dir.x * cos - ray.dir.z * sin;
     const dy = ray.dir.y;
     const dz = ray.dir.x * sin + ray.dir.z * cos;
-    const half = [size.widthMeters / 2, size.heightMeters / 2, size.depthMeters / 2];
+    const half = [size.widthMeters / 2, size.heightMeters / 2, depthSize / 2];
     const origin = [ox, oy, oz];
     const dir = [dx, dy, dz];
     // slab test
@@ -366,6 +371,52 @@ function wallRunFrame(piece: PlacedBuildPiece, def: BuildPieceDef): WallRunFrame
     baseY: piece.y,
     topY: piece.y + size.heightMeters,
   };
+}
+
+function centeredDepthSpan(size: BuildPieceDef['size']): PlacedPieceDepthSpan {
+  return { minV: -size.depthMeters / 2, maxV: size.depthMeters / 2 };
+}
+
+function isSupportPlate(kind: BuildPieceKind): boolean {
+  return kind === 'floor' || kind === 'roof';
+}
+
+/** The wall line is the authored edge; the wall body may sit to either side of
+ *  that line. If one floor/roof supports the wall, put the full thickness on
+ *  that plate. If plates exist on both sides, split the thickness across the
+ *  seam. With no support, keep freestanding walls centered on their line. */
+export function placedPieceDepthSpan(piece: PlacedBuildPiece, pieces: readonly PlacedBuildPiece[] = [piece]): PlacedPieceDepthSpan {
+  const def = placedPieceDef(piece);
+  if (def.kind !== 'wall' || def.snap !== 'edge') return centeredDepthSpan(def.size);
+  const self = wallRunFrame(piece, def);
+  if (!self) return centeredDepthSpan(def.size);
+  const tolerance = PLACED_TUNING.wallJoinToleranceMeters;
+  const vAxis = localOffset(0, 1, piece.yawDegrees);
+  let positive = false;
+  let negative = false;
+  for (const other of pieces) {
+    if (other.id === piece.id) continue;
+    const otherDef = placedPieceDef(other);
+    if (!isSupportPlate(otherDef.kind)) continue;
+    const b = pieceBounds(other);
+    if (Math.abs(b.topY - piece.y) > tolerance) continue;
+    const onEdge = self.axis === 'x'
+      ? (Math.abs(self.line - b.minZ) <= tolerance || Math.abs(self.line - b.maxZ) <= tolerance)
+      : (Math.abs(self.line - b.minX) <= tolerance || Math.abs(self.line - b.maxX) <= tolerance);
+    if (!onEdge) continue;
+    const withinRun = self.axis === 'x'
+      ? rangesOverlap(self.runMin, self.runMax, b.minX, b.maxX, tolerance)
+      : rangesOverlap(self.runMin, self.runMax, b.minZ, b.maxZ, tolerance);
+    if (!withinRun) continue;
+    const cx = (b.minX + b.maxX) / 2;
+    const cz = (b.minZ + b.maxZ) / 2;
+    const side = (cx - piece.x) * vAxis.dx + (cz - piece.z) * vAxis.dz;
+    if (side > tolerance) positive = true;
+    else if (side < -tolerance) negative = true;
+  }
+  if (positive && !negative) return { minV: 0, maxV: def.size.depthMeters };
+  if (negative && !positive) return { minV: -def.size.depthMeters, maxV: 0 };
+  return centeredDepthSpan(def.size);
 }
 
 function rangesOverlap(a0: number, a1: number, b0: number, b1: number, tolerance: number): boolean {
@@ -496,6 +547,12 @@ function localRectToAxisRect(piece: PlacedBuildPiece, local: LocalPlanRect): Pla
   return { minX, maxX, minZ, maxZ };
 }
 
+function signedRange(center: number, minLocal: number, maxLocal: number, sign: number): { min: number; max: number } {
+  const a = center + minLocal * sign;
+  const b = center + maxLocal * sign;
+  return { min: Math.min(a, b), max: Math.max(a, b) };
+}
+
 function pushStairBoundaryRects(
   rects: CollisionRect[],
   orientedRects: OrientedCollisionRect[],
@@ -618,9 +675,8 @@ export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): Place
       continue;
     }
     if (!placedPieceTags(piece).collision) continue;
-    const size = def.size;
-    const halfD = size.depthMeters / 2;
     const quarter = quarterTurns(piece.yawDegrees);
+    const depthSpan = placedPieceDepthSpan(piece, pieces);
     for (const band of placedPieceBands(piece, pieces)) {
       const base = {
         topMeters: band.top,
@@ -630,15 +686,20 @@ export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): Place
         restitution: PLACED_TUNING.pieceRestitution,
       };
       if (quarter !== null) {
-        // band [u0,u1] runs along local width; quarter turns map it onto x or z
+        // band [u0,u1] runs along local width; quarter turns map it onto x or z.
+        // Keep the legacy run-axis mapping because wall-join extension relies on
+        // it; only the perpendicular depth span shifts for floor support.
         const centerU = (band.u0 + band.u1) / 2;
         const halfU = (band.u1 - band.u0) / 2;
         const along = quarter % 2 === 0 ? 'x' : 'z';
         const flip = quarter === 2 || quarter === 3 ? -1 : 1;
         const cu = centerU * flip;
+        const vAxis = localOffset(0, 1, piece.yawDegrees);
+        const depthX = signedRange(piece.x, depthSpan.minV, depthSpan.maxV, vAxis.dx);
+        const depthZ = signedRange(piece.z, depthSpan.minV, depthSpan.maxV, vAxis.dz);
         let rect: CollisionRect | null = along === 'x'
-          ? { ...base, minX: piece.x + cu - halfU, maxX: piece.x + cu + halfU, minZ: piece.z - halfD, maxZ: piece.z + halfD }
-          : { ...base, minX: piece.x - halfD, maxX: piece.x + halfD, minZ: piece.z + cu - halfU, maxZ: piece.z + cu + halfU };
+          ? { ...base, minX: piece.x + cu - halfU, maxX: piece.x + cu + halfU, minZ: depthZ.min, maxZ: depthZ.max }
+          : { ...base, minX: depthX.min, maxX: depthX.max, minZ: piece.z + cu - halfU, maxZ: piece.z + cu + halfU };
         // RAMPFOOT-0605: the ramp owns footing in its footprint — trim the
         // band where it coexists with a slope (band base below the ramp top;
         // an upper-storey wall whose base IS the crest blocks legitimately)
@@ -655,8 +716,8 @@ export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): Place
           ...base,
           minX: piece.x + band.u0,
           maxX: piece.x + band.u1,
-          minZ: piece.z - halfD,
-          maxZ: piece.z + halfD,
+          minZ: piece.z + depthSpan.minV,
+          maxZ: piece.z + depthSpan.maxV,
           pivotX: piece.x,
           pivotZ: piece.z,
           yawRadians: piece.yawDegrees * DEG,
@@ -683,9 +744,8 @@ export function placedPieceCameraOccluders(pieces: readonly PlacedBuildPiece[]):
     if (def.kind !== 'wall' && def.kind !== 'roof') continue;
     if (!tags.collision || (!tags.blocksSight && def.kind !== 'roof')) continue;
     const ownerIndex = ownerIds.push(piece.id);
-    const size = def.size;
-    const halfD = size.depthMeters / 2;
     const quarter = quarterTurns(piece.yawDegrees);
+    const depthSpan = placedPieceDepthSpan(piece, pieces);
     for (const band of placedPieceBands(piece, pieces)) {
       const base = {
         topMeters: band.top,
@@ -701,16 +761,19 @@ export function placedPieceCameraOccluders(pieces: readonly PlacedBuildPiece[]):
         const along = quarter % 2 === 0 ? 'x' : 'z';
         const flip = quarter === 2 || quarter === 3 ? -1 : 1;
         const cu = centerU * flip;
+        const vAxis = localOffset(0, 1, piece.yawDegrees);
+        const depthX = signedRange(piece.x, depthSpan.minV, depthSpan.maxV, vAxis.dx);
+        const depthZ = signedRange(piece.z, depthSpan.minV, depthSpan.maxV, vAxis.dz);
         rects.push(along === 'x'
-          ? { ...base, minX: piece.x + cu - halfU, maxX: piece.x + cu + halfU, minZ: piece.z - halfD, maxZ: piece.z + halfD }
-          : { ...base, minX: piece.x - halfD, maxX: piece.x + halfD, minZ: piece.z + cu - halfU, maxZ: piece.z + cu + halfU });
+          ? { ...base, minX: piece.x + cu - halfU, maxX: piece.x + cu + halfU, minZ: depthZ.min, maxZ: depthZ.max }
+          : { ...base, minX: depthX.min, maxX: depthX.max, minZ: piece.z + cu - halfU, maxZ: piece.z + cu + halfU });
       } else {
         orientedRects.push({
           ...base,
           minX: piece.x + band.u0,
           maxX: piece.x + band.u1,
-          minZ: piece.z - halfD,
-          maxZ: piece.z + halfD,
+          minZ: piece.z + depthSpan.minV,
+          maxZ: piece.z + depthSpan.maxV,
           pivotX: piece.x,
           pivotZ: piece.z,
           yawRadians: piece.yawDegrees * DEG,
@@ -899,7 +962,13 @@ export function liftBuildingsToTerrain<T extends PlacedBuildPiece>(
     let sx = 0, sz = 0, minY = Infinity;
     for (const p of g) { sx += p.x; sz += p.z; if (p.y < minY) minY = p.y; }
     const offset = terrainAt(sx / g.length, sz / g.length) - minY;
-    if (Math.abs(offset) < 1e-6) { for (const p of g) out.push(p); }
+    // ONLY lift UP onto the terrain, never push a group DOWN. A ground building under a
+    // painted hill (its base below the new terrain) rises onto it; a piece authored on an
+    // UPPER FLOOR (its base above terrain → negative offset) must NOT be dropped to the
+    // ground — that's the "place on floor 2 and it falls to the bottom" bug. A whole
+    // building's upper floors still ride up because the offset is keyed on the GROUND
+    // floor (the group's min y), so the lift is positive and the upper pieces come along.
+    if (offset <= 1e-6) { for (const p of g) out.push(p); }
     else for (const p of g) out.push({ ...p, y: p.y + offset });
   }
   return out;
