@@ -49,7 +49,16 @@ export const INSTANCE_SHAPE_RAMP = 1;
 // SHADER looks resolve in the headless bake (the custom store is plain localstore;
 // loadCustomTextures is React-free). Decal/react-source customs still fall back to
 // flat color — those have no WGSL to ship (the captured-pixel tail).
-export type MaterialAsset = { key: string; wgsl: string; data: number[] };
+// A material the host materializes at load. `wgsl` is the shader recipe (empty
+// for a TRANSLUCENT FLAT material like glass — no shader, just a tint + alpha the
+// loader renders through the transparent pass). `opacity` < 1 marks translucency.
+export type MaterialAsset = { key: string; wgsl: string; data: number[]; opacity: number };
+
+// Translucent base materials — their look is an ALPHA, not a texture (glass/
+// chainlink are see-through, not procedural). Mirrors pieceMeshes MATERIAL_LOOK
+// opacity. A face on one of these (with no shader skin) ships a flat translucent
+// material so the loader renders it see-through instead of as an opaque box.
+const MATERIAL_ALPHA: Partial<Record<BuildMaterial, number>> = { glass: 0.3, chainlink: 0.45 };
 
 // A material id → its shader recipe (WGSL + frozen data). Built-in catalog ids
 // resolve via shaderSpec; 'custom:' ids resolve through the studio's saved
@@ -96,9 +105,30 @@ function internMaterial(b: Build, skin: BuildFaceSkin | undefined): number {
   const existing = b.index.get(key);
   if (existing !== undefined) return existing;
   const slot = b.vocab.length + 1;
-  b.vocab.push({ key, wgsl: resolved.wgsl, data: resolved.data });
+  b.vocab.push({ key, wgsl: resolved.wgsl, data: resolved.data, opacity: 1 });
   b.index.set(key, slot);
   return slot;
+}
+
+// Intern a TRANSLUCENT FLAT material for a base BuildMaterial (glass/chainlink) —
+// no shader, just an alpha; the row keeps its own MATERIAL_COLOR tint. Returns 0
+// for opaque materials (they stay in the flat instanced batch).
+function internTranslucent(b: Build, material: BuildMaterial): number {
+  const opacity = MATERIAL_ALPHA[material];
+  if (opacity === undefined) return 0;
+  const key = `flat:${material}`;
+  const existing = b.index.get(key);
+  if (existing !== undefined) return existing;
+  const slot = b.vocab.length + 1;
+  b.vocab.push({ key, wgsl: '', data: [], opacity });
+  b.index.set(key, slot);
+  return slot;
+}
+
+// The material slot a face wears: a shader skin wins (textured), else the base
+// material's translucency (glass → see-through), else 0 (opaque flat color).
+function faceMaterial(b: Build, skin: BuildFaceSkin | undefined, baseMaterial: BuildMaterial): number {
+  return internMaterial(b, skin) || internTranslucent(b, baseMaterial);
 }
 const HEIGHTFIELD_LUMP_VERSION = 2;
 const HEIGHTFIELD_RECORD_FLOATS = 10;
@@ -251,7 +281,7 @@ function propColor(kind: PropKind | string): Color {
   }
 }
 
-function floorHasRelief(f: ChunkFloor): boolean {
+export function floorHasRelief(f: ChunkFloor): boolean {
   if (!f.heights || f.heights.length < Math.max(1, f.hcols) * Math.max(1, f.hrows)) return false;
   let min = Infinity;
   let max = -Infinity;
@@ -474,9 +504,9 @@ function pushSkinnedWallOrPlate(b: Build, piece: PlacedBuildPiece, fallback: Col
   const sides = skinColor(piece.skin?.sides, fallback);
   const front = skinColor(piece.skin?.front, fallback);
   const back = skinColor(piece.skin?.back, fallback);
-  const sidesMat = internMaterial(b, piece.skin?.sides);
-  const frontMat = internMaterial(b, piece.skin?.front);
-  const backMat = internMaterial(b, piece.skin?.back);
+  const sidesMat = faceMaterial(b, piece.skin?.sides, def.material);
+  const frontMat = faceMaterial(b, piece.skin?.front, def.material);
+  const backMat = faceMaterial(b, piece.skin?.back, def.material);
   const slab = BUILD_FACE_SLAB_THICKNESS_METERS;
   const lift = BUILD_FACE_SLAB_LIFT_METERS;
 
@@ -536,7 +566,7 @@ function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number
     // The play view's body box: center (x, y + h/2, z), full catalog size, yaw.
     // A non-wall single body (pillar/post/column) takes its material from the
     // 'sides' slot — the whole box wears one look.
-    const bodyMat = internMaterial(b, piece.skin?.sides);
+    const bodyMat = faceMaterial(b, piece.skin?.sides, def.material);
     pushBox(
       b,
       piece.x,
@@ -719,15 +749,16 @@ export function encodeMaterialRefs(refs: Uint32Array): Uint8Array {
 
 /** Encode the materials vocab lump — the SHIPPED RECIPES, not pixels:
  *  u32 count, then per material: u32 wgsl byte length | wgsl utf8 | u32 data
- *  float count | f32[data]. The host runs each shader at load to a 1-tile
- *  texture and samples it on the referencing faces. */
+ *  float count | f32[data] | f32 opacity. The host runs each shader at load to a
+ *  1-tile texture and samples it on the referencing faces; an empty wgsl with
+ *  opacity<1 is a translucent flat material (glass) the host renders see-through. */
 export function encodeMaterials(materials: readonly MaterialAsset[]): Uint8Array {
   // textBytes is the workspace's headless-safe utf8 encoder (the v8cli bake has
   // no TextEncoder; it falls back to encodeURIComponent). WGSL is ASCII anyway.
   const sources = materials.map((m) => textBytes(m.wgsl));
   let bytes = 4;
   for (let i = 0; i < materials.length; i += 1) {
-    bytes += 4 + sources[i].byteLength + 4 + materials[i].data.length * 4;
+    bytes += 4 + sources[i].byteLength + 4 + materials[i].data.length * 4 + 4;
   }
   const out = new Uint8Array(bytes);
   const view = new DataView(out.buffer);
@@ -740,6 +771,7 @@ export function encodeMaterials(materials: readonly MaterialAsset[]): Uint8Array
     const data = materials[i].data;
     view.setUint32(at, data.length, true); at += 4;
     for (let k = 0; k < data.length; k += 1) { view.setFloat32(at, data[k], true); at += 4; }
+    view.setFloat32(at, materials[i].opacity, true); at += 4;
   }
   return out;
 }

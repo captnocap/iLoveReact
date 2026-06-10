@@ -18,7 +18,13 @@ pub const Error = gamefile.Error || error{
     UnsupportedTileEncoding,
     BadPlayerModel,
     BadHeightfields,
+    BadColliders,
+    BadPhysicsConfig,
 };
+
+const COLLIDERS_VERSION: u32 = 1;
+const PHYSICS_CONFIG_VERSION: u32 = 1;
+const PHYSICS_CONFIG_FLOATS: usize = 13;
 
 const SCENE_ENV_VERSION: u32 = 1;
 const SCENE_ENV_FLOATS: usize = 35;
@@ -183,11 +189,80 @@ fn decodeEnvironment(data: []const u8) SceneEnv {
 pub const Material = struct {
     wgsl: []u8,
     data: []f32,
+    /// < 1 marks a TRANSLUCENT material. With an empty `wgsl` it's a flat
+    /// translucent look (glass/chainlink) the loader renders see-through using
+    /// the referencing rows' own color; with a shader it tints the texture.
+    opacity: f32 = 1,
 
     pub fn deinit(self: Material, allocator: std.mem.Allocator) void {
         allocator.free(self.wgsl);
         allocator.free(self.data);
     }
+};
+
+/// Host wire widths (mirror framework/game/physics.zig RECT_FLOATS/ORIENTED_FLOATS
+/// + hmsc-int/game/physics.ts writeRect): a blocking rect is 9 floats, an
+/// oriented rect is those 9 + pivotX, pivotZ, yawRadians. The COLLIDERS lump
+/// already packs them in this order, so the loader memcpys them straight into
+/// the physics step input behind the header.
+pub const COLLIDER_RECT_FLOATS: usize = 9;
+pub const COLLIDER_ORIENTED_FLOATS: usize = 12;
+
+/// One baked ramp/stair slope collider — registered as a host heightfield (the
+/// ramp's render geometry rides the instance buffer; this is collision only).
+pub const ColliderField = struct {
+    origin_x: f32,
+    origin_z: f32,
+    cell: f32,
+    cols: u32,
+    rows: u32,
+    base_y: f32,
+    walk_cos: f32,
+    yaw: f32,
+    pivot_x: f32,
+    pivot_z: f32,
+    heights: []f32,
+
+    pub fn deinit(self: ColliderField, allocator: std.mem.Allocator) void {
+        allocator.free(self.heights);
+    }
+};
+
+/// The AUTHORED physics solids the COLLIDERS lump ships — the same +-join-aware
+/// bands the editor's play view steps against, NOT a guess re-derived from the
+/// render boxes. `rects`/`oriented` are flat, already in host wire order.
+pub const BakedColliders = struct {
+    rects: []f32,
+    rect_count: u32,
+    oriented: []f32,
+    oriented_count: u32,
+    ramps: []ColliderField,
+
+    pub fn deinit(self: BakedColliders, allocator: std.mem.Allocator) void {
+        allocator.free(self.rects);
+        allocator.free(self.oriented);
+        for (self.ramps) |ramp| ramp.deinit(allocator);
+        allocator.free(self.ramps);
+    }
+};
+
+/// Player physics tuning + walk/run speeds from the PHYSICS_CONFIG lump, so the
+/// shipped game moves and collides exactly like the editor play view instead of
+/// world_loader.zig re-declaring its own constants.
+pub const PhysicsConfig = struct {
+    gravity: f32,
+    jump_speed: f32,
+    player_radius: f32,
+    player_height: f32,
+    step_height: f32,
+    wall_restitution: f32,
+    body_restitution: f32,
+    walkable_side_push_grace: f32,
+    accel_mult: f32,
+    surface_friction: f32,
+    surface_restitution: f32,
+    walk_speed: f32,
+    run_speed: f32,
 };
 
 pub const Scene = struct {
@@ -218,6 +293,13 @@ pub const Scene = struct {
     /// Regular-grid terrain heightfields. The loader hands these to the native
     /// Scene3D heightfield primitive so gpu/3d.zig owns the triangulation.
     heightfields: []HeightfieldMesh,
+    /// The AUTHORED physics solids (placedPieceColliders / placedPieceRamps),
+    /// when the COLLIDERS lump is present. null → the loader falls back to
+    /// deriving colliders from the render instance buffer (pre-lump bakes).
+    baked_colliders: ?BakedColliders,
+    /// Player tuning + walk/run speed from the PHYSICS_CONFIG lump. null → the
+    /// loader keeps its built-in defaults (pre-lump bakes).
+    physics_config: ?PhysicsConfig,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
@@ -230,6 +312,7 @@ pub const Scene = struct {
         for (self.materials) |material| material.deinit(allocator);
         allocator.free(self.materials);
         allocator.free(self.material_refs);
+        if (self.baked_colliders) |bc| bc.deinit(allocator);
     }
 };
 
@@ -477,6 +560,119 @@ fn decodeHeightfields(allocator: std.mem.Allocator, data: []const u8) Error![]He
     return fields;
 }
 
+/// Decode the COLLIDERS lump — the authored physics solids in host wire order
+/// (see runtime/workspace/lumps.ts COLLIDERS). Layout:
+///   u32 version | u32 rectCount | f32[rectCount*9] |
+///   u32 orientedCount | f32[orientedCount*12] |
+///   u32 rampCount | per ramp: f32 originX,originZ,cellSize | u32 cols,rows |
+///   f32 baseY,walkCos,yawRad,pivotX,pivotZ | f32[cols*rows] heights.
+fn decodeColliders(allocator: std.mem.Allocator, data: []const u8) Error!BakedColliders {
+    if (data.len < 12) return Error.BadColliders;
+    if (std.mem.readInt(u32, data[0..4], .little) != COLLIDERS_VERSION) return Error.BadColliders;
+    var at: usize = 4;
+
+    const rect_count = std.mem.readInt(u32, data[at..][0..4], .little);
+    at += 4;
+    const rect_floats = std.math.mul(usize, rect_count, COLLIDER_RECT_FLOATS) catch return Error.BadColliders;
+    if (at + rect_floats * 4 > data.len) return Error.BadColliders;
+    const rects = try allocator.alloc(f32, rect_floats);
+    errdefer allocator.free(rects);
+    for (rects, 0..) |*v, i| v.* = readF32(data, at + i * 4);
+    at += rect_floats * 4;
+
+    if (at + 4 > data.len) return Error.BadColliders;
+    const oriented_count = std.mem.readInt(u32, data[at..][0..4], .little);
+    at += 4;
+    const oriented_floats = std.math.mul(usize, oriented_count, COLLIDER_ORIENTED_FLOATS) catch return Error.BadColliders;
+    if (at + oriented_floats * 4 > data.len) return Error.BadColliders;
+    const oriented = try allocator.alloc(f32, oriented_floats);
+    errdefer allocator.free(oriented);
+    for (oriented, 0..) |*v, i| v.* = readF32(data, at + i * 4);
+    at += oriented_floats * 4;
+
+    if (at + 4 > data.len) return Error.BadColliders;
+    const ramp_count = std.mem.readInt(u32, data[at..][0..4], .little);
+    at += 4;
+    var ramps = try allocator.alloc(ColliderField, ramp_count);
+    var ramp_initialized: usize = 0;
+    errdefer {
+        for (ramps[0..ramp_initialized]) |ramp| ramp.deinit(allocator);
+        allocator.free(ramps);
+    }
+    var r: usize = 0;
+    while (r < ramp_count) : (r += 1) {
+        // 3 f32 + 2 u32 + 5 f32 = 10 scalars before the height grid.
+        if (at + 10 * 4 > data.len) return Error.BadColliders;
+        const origin_x = readF32(data, at + 0);
+        const origin_z = readF32(data, at + 4);
+        const cell = readF32(data, at + 8);
+        const cols = std.mem.readInt(u32, data[at + 12 ..][0..4], .little);
+        const rows = std.mem.readInt(u32, data[at + 16 ..][0..4], .little);
+        const base_y = readF32(data, at + 20);
+        const walk_cos = readF32(data, at + 24);
+        const yaw = readF32(data, at + 28);
+        const pivot_x = readF32(data, at + 32);
+        const pivot_z = readF32(data, at + 36);
+        at += 10 * 4;
+        if (cols < 2 or rows < 2) return Error.BadColliders;
+        const samples = std.math.mul(usize, @as(usize, cols), @as(usize, rows)) catch return Error.BadColliders;
+        if (at + samples * 4 > data.len) return Error.BadColliders;
+        const heights = try allocator.alloc(f32, samples);
+        errdefer allocator.free(heights);
+        for (heights, 0..) |*v, i| v.* = readF32(data, at + i * 4);
+        at += samples * 4;
+        ramps[r] = .{
+            .origin_x = origin_x,
+            .origin_z = origin_z,
+            .cell = cell,
+            .cols = cols,
+            .rows = rows,
+            .base_y = base_y,
+            .walk_cos = walk_cos,
+            .yaw = yaw,
+            .pivot_x = pivot_x,
+            .pivot_z = pivot_z,
+            .heights = heights,
+        };
+        ramp_initialized += 1;
+    }
+
+    return .{
+        .rects = rects,
+        .rect_count = rect_count,
+        .oriented = oriented,
+        .oriented_count = oriented_count,
+        .ramps = ramps,
+    };
+}
+
+/// Decode the PHYSICS_CONFIG lump (u32 version | f32[13]); see
+/// runtime/workspace/lumps.ts PHYSICS_CONFIG for the field order.
+fn decodePhysicsConfig(data: []const u8) Error!PhysicsConfig {
+    if (data.len < 4 + PHYSICS_CONFIG_FLOATS * 4) return Error.BadPhysicsConfig;
+    if (std.mem.readInt(u32, data[0..4], .little) != PHYSICS_CONFIG_VERSION) return Error.BadPhysicsConfig;
+    const f = struct {
+        fn at(d: []const u8, i: usize) f32 {
+            return readF32(d, 4 + i * 4);
+        }
+    }.at;
+    return .{
+        .gravity = f(data, 0),
+        .jump_speed = f(data, 1),
+        .player_radius = f(data, 2),
+        .player_height = f(data, 3),
+        .step_height = f(data, 4),
+        .wall_restitution = f(data, 5),
+        .body_restitution = f(data, 6),
+        .walkable_side_push_grace = f(data, 7),
+        .accel_mult = f(data, 8),
+        .surface_friction = f(data, 9),
+        .surface_restitution = f(data, 10),
+        .walk_speed = f(data, 11),
+        .run_speed = f(data, 12),
+    };
+}
+
 /// Decode the MATERIALS lump (u32 count, then per material: u32 wgsl byte len |
 /// wgsl utf8 | u32 data float count | f32[data]). A malformed lump yields an
 /// empty vocab (faces fall back to their flat color) rather than aborting.
@@ -511,7 +707,14 @@ fn decodeMaterials(allocator: std.mem.Allocator, data: []const u8) Error![]Mater
         const params = try allocator.alloc(f32, data_len);
         for (0..data_len) |i| params[i] = readF32(data, at + i * 4);
         at += @as(usize, data_len) * 4;
-        out[built] = .{ .wgsl = wgsl, .data = params };
+        if (at + 4 > data.len) {
+            allocator.free(params);
+            allocator.free(wgsl);
+            return Error.BadHeightfields;
+        }
+        const opacity = readF32(data, at);
+        at += 4;
+        out[built] = .{ .wgsl = wgsl, .data = params, .opacity = opacity };
     }
     return out;
 }
@@ -612,6 +815,25 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         try decodeMaterialRefs(allocator, lump.data)
     else
         try allocator.alloc(u32, 0);
+    errdefer allocator.free(material_refs);
+    errdefer {
+        for (heightfields) |field| field.deinit(allocator);
+        allocator.free(heightfields);
+    }
+
+    // The AUTHORED physics solids + player config (optional — absent in pre-lump
+    // bakes and the codec round-trip fixture, present in the real editor bake).
+    // When present the loader steps against THESE instead of guessing colliders
+    // from the render boxes; absent, it falls back to the instance-derived path.
+    const baked_colliders: ?BakedColliders = if (mapfile.findLump(map_lumps, mapfile.LumpType.colliders)) |lump|
+        try decodeColliders(allocator, lump.data)
+    else
+        null;
+    errdefer if (baked_colliders) |bc| bc.deinit(allocator);
+    const physics_config: ?PhysicsConfig = if (mapfile.findLump(map_lumps, mapfile.LumpType.physics_config)) |lump|
+        try decodePhysicsConfig(lump.data)
+    else
+        null;
 
     // grid.values ownership transfers to the Scene; do not deinit grid.
     return .{
@@ -629,5 +851,7 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .heightfields = heightfields,
         .materials = materials,
         .material_refs = material_refs,
+        .baked_colliders = baked_colliders,
+        .physics_config = physics_config,
     };
 }
