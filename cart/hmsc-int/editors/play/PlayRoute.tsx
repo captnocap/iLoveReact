@@ -101,17 +101,34 @@ editorTunables().register({
 });
 // CAMERA_OCCLUSION_TUNING moved to ../build/buildUi (imported above). Its
 // live-tuning registration stays here, mutating the same imported object.
+// How STRONG the wall/roof push-in is — every spring-arm knob, live from the
+// settings menu (write-through to the imported table; updateCameraOcclusion
+// reads it next frame). The fade knobs are gone with the fade.
 editorTunables().register({
   system: 'play-camera-occlusion', route: '/test', table: CAMERA_OCCLUSION_TUNING,
   specs: {
-    residualOpacity: { label: 'residual wall alpha', min: 0.1, max: 1, step: 0.01, precision: 2 },
-    maxHits: { label: 'wall hit cap', min: 1, max: 64, step: 1, precision: 0 },
-    sweepRadiusMeters: { label: 'ray radius m', min: 0, max: 0.5, step: 0.01, precision: 2 },
-    playerTargetHeightMeters: { label: 'target height m', min: 0.2, max: 2.4, step: 0.05, precision: 2 },
-    minDistanceMeters: { label: 'min camera m', min: 0.7, max: 4, step: 0.05, precision: 2 },
-    skinOffsetMeters: { label: 'wall skin m', min: 0.02, max: 0.5, step: 0.01, precision: 2 },
-    pullSmoothingPerSecond: { label: 'pull smoothing', min: 1, max: 80, step: 1, precision: 0 },
+    minDistanceMeters: { label: 'min camera m (push-in floor)', min: 0.3, max: 6, step: 0.05, precision: 2 },
+    skinOffsetMeters: { label: 'wall gap m', min: 0.02, max: 0.5, step: 0.01, precision: 2 },
+    pullSmoothingPerSecond: { label: 'push-in speed', min: 1, max: 80, step: 1, precision: 0 },
+    sweepRadiusMeters: { label: 'probe thickness m', min: 0, max: 0.5, step: 0.01, precision: 2 },
     rampGroundToleranceMeters: { label: 'ramp ground tol m', min: 0.05, max: 0.8, step: 0.01, precision: 2 },
+  },
+});
+// The base camera FEEL — how far back it sits, fov, look sensitivity, pitch
+// limits. PLAYER_CAMERA is a live table (Embodied dropped its `as const`);
+// distance/fov/target need the host re-pushed on edit, which onFrame does when
+// the tunables revision moves (pitch limits + sensitivity are read live in
+// applyLook already).
+editorTunables().register({
+  system: 'play-camera-feel', route: '/test', table: PLAYER_CAMERA,
+  specs: {
+    distanceMeters: { label: 'camera distance m', min: 2, max: 16, step: 0.05, precision: 2 },
+    fovDegrees: { label: 'field of view', min: 30, max: 90, step: 1, precision: 0 },
+    targetHeightMeters: { label: 'look height m', min: 0.5, max: 2.5, step: 0.05, precision: 2 },
+    minPitchDegrees: { label: 'pitch down limit', min: -45, max: 20, step: 1, precision: 0 },
+    maxPitchDegrees: { label: 'pitch up limit', min: 20, max: 89, step: 1, precision: 0 },
+    yawDegreesPerPixel: { label: 'look sensitivity X', min: 0.02, max: 1, step: 0.01, precision: 2 },
+    pitchDegreesPerPixel: { label: 'look sensitivity Y', min: 0.02, max: 1, step: 0.01, precision: 2 },
   },
 });
 const BUILD_KEYS = {
@@ -421,6 +438,10 @@ export function PlayRoute(props: {
   const [occludedPieceIds, setOccludedPieceIds] = useState<ReadonlySet<string>>(() => new Set());
   const occludedPieceKeyRef = useRef('');
   const cameraConstraintLastRef = useRef({ nodeId: 0, distance: Number.NaN, minDistance: Number.NaN, smoothing: Number.NaN });
+  // A 'play-camera-feel' knob edit bumps the tunables revision; re-push the rig
+  // params so the new distance/fov/look-height land live (normal play sends them
+  // on pose change only). -1 forces the first frame to sync.
+  const cameraFeelRevRef = useRef(-1);
   const cameraOcclusionDiagnosticLastRef = useRef({
     distance: Number.NaN,
     hitDistance: Number.NaN,
@@ -924,6 +945,13 @@ export function PlayRoute(props: {
   };
 
   const updateCameraOcclusion = () => {
+    // Live camera-feel: if a tunable changed, re-push the rig params so a
+    // distance/fov/look-height edit applies this frame.
+    const rev = editorTunables().revision();
+    if (rev !== cameraFeelRevRef.current) {
+      cameraFeelRevRef.current = rev;
+      embodied.resendCameraParams();
+    }
     const occluders = cameraOccludersRef.current;
     // The spring-arm follows whichever rig is LIVE (walk Orbit / ADS Aim): cast
     // from the player-side pivot out to that rig's natural eye, and PUSH the eye

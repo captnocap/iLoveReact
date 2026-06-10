@@ -76,6 +76,11 @@ const DEG = Math.PI / 180;
 // promote to the figure tuning table when the P2 tuning surface lands.
 // PLAYER_CAMERA is exported: build's crosshair ray must solve with the SAME
 // values the renderer-consumed camera was parameterized with.
+// NOT `as const`: every leaf is a P2 tunable (registered as 'play-camera-feel'
+// in PlayRoute) so the camera's whole feel — how far back it sits, fov, look
+// sensitivity, pitch limits — is dialable live from the settings menu. The
+// registry writes THROUGH this object; desiredCamera()/applyLook read it fresh
+// each frame, and a knob edit re-sends the rig params to the host controller.
 export const PLAYER_CAMERA = {
   distanceMeters: 7.65,
   initialPitchDegrees: 17.8,
@@ -85,7 +90,7 @@ export const PLAYER_CAMERA = {
   fovDegrees: 52,
   yawDegreesPerPixel: 0.28,
   pitchDegreesPerPixel: 0.22,
-} as const;
+};
 const GAIT = {
   walkCyclesPerSecond: 1.6,
   runCyclesPerSecond: 2.3,
@@ -271,6 +276,10 @@ export type Embodied = {
    *  whichever rig is live — querying the orbit eye while aiming is why the aim
    *  camera clipped walls. */
   desiredCamera: () => { eye: Vec3; pivot: Vec3; baseDistance: number; aiming: boolean };
+  /** Re-push the active rig's params (distance/fov/target) to the host controller.
+   *  Routes call this when a 'play-camera-feel' tunable changes so a knob edit
+   *  lands live — normal play sends params on pose change only. */
+  resendCameraParams: () => void;
   /** back to the authored spawn (the Drop-in button) */
   resetPlayer: () => void;
 };
@@ -1079,6 +1088,12 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
     };
   };
 
+  // Push the active rig's CURRENT params to the host (distance/fov/target read
+  // fresh from PLAYER_CAMERA). Routes call this on a 'play-camera-feel' knob
+  // edit so the new feel applies the same frame instead of waiting for the next
+  // pose change.
+  const resendCameraParams = () => sendCameraRef.current(playerRef.current);
+
   return {
     worldGrid,
     player,
@@ -1099,6 +1114,7 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
     adoptPose,
     setCameraDistanceConstraint,
     desiredCamera,
+    resendCameraParams,
     resetPlayer,
   };
 }
