@@ -1062,6 +1062,15 @@ pub fn update(dt: f32) void {
     var i: usize = 0;
     while (i < instance_count) {
         const inst = &instances[i];
+        // Material instances (renderShaderToTexture) are painted ONCE at load and
+        // never again — their texture is BORROWED by a StaticSurface a 3D mesh
+        // samples for the whole run. Reaping them on the idle sweep destroys that
+        // texture out from under the bind group ("Texture 'effect' destroyed" on
+        // the next render pass). They live until cart teardown (deinitAll).
+        if (inst.is_material) {
+            i += 1;
+            continue;
+        }
         const idle = g_effect_frame -% inst.last_painted_frame;
         if (idle > STALE_INSTANCE_GRACE) {
             dropInstance(i);
