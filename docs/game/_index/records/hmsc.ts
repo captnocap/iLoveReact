@@ -793,7 +793,7 @@ export const hmsc: DocIndex = {
       purpose: ['texture_bake', 'shader'],
       kind: 'component',
       sourceFile: 'cart/hmsc/render3d/heightfieldSurface.tsx',
-      description: 'Captures per-cell tile paint for field-backed heightfields, building palette data from tile definitions and placeable colors via WGSL Effect into StaticSurface. roadRibbonSection (shared with the editor 2D chunk quads) always emits its 5-float header — segN=0 when empty (GHOSTROAD-0610) — because the Effect GPU data buffer never shrinks and the shader gates on arrayLength; section-by-omission left deleted roads rendering as ghost ribbons.',
+      description: 'Captures per-cell tile paint for field-backed heightfields, building palette data from tile definitions and placeable colors via WGSL Effect into StaticSurface. roadRibbonSection (shared with the editor 2D chunk quads) always emits its 5-float header — segN=0 when empty (GHOSTROAD-0610) — because the Effect GPU data buffer never shrinks and the shader gates on arrayLength; section-by-omission left deleted roads rendering as ghost ribbons. The band inside-test also guards longitudinal overshoot (RIBBONCAP-0610): signedD is only the perpendicular component, so a fragment past a segment endpoint read signedD≈0 and painted an INFINITE strip past the last point to the chunk edge (the "massive road on a tiny paint" bug); bestD²-signedD² is the squared longitudinal distance and capping it squares the ends while interior joints stay covered by the neighbour segment.',
       status: 'live',
     },
     {

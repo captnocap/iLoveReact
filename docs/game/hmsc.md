@@ -773,6 +773,16 @@ Commands present in the registry:
   buffer never shrinks and the shader gates on `arrayLength`, so an omitted
   section left the previous ribbon alive in the buffer tail — deleted roads
   kept rendering as ghosts.
+- The ribbon band's `inside` test guards LONGITUDINAL overshoot (RIBBONCAP-0610):
+  `signedD` is only the perpendicular component, so a fragment past a segment's
+  endpoint (`t` clamped, `p-q` running along the axis) reads `signedD≈0` and used
+  to pass the band test — painting an INFINITE strip past the last point to the
+  chunk edge (the "massive road on a tiny paint" report; arrows were absent on it
+  because they only mark `r.points`). `bestD²-signedD²` is the squared
+  longitudinal distance (0 on the segment interior, >0 once clamped); capping it
+  squares the polyline ends while interior joints stay covered by the neighbour
+  segment, whose perpendicular foot is the nearer point and wins selection with
+  zero overshoot.
 
 `cart/hmsc/render3d/tileSurface.tsx`
 

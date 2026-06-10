@@ -91,7 +91,17 @@ export const HEIGHTFIELD_TILE_SHADER = `
           along = t * sqrt(len2);
         }
       }
-      let inside = bestD < 1e8 && signedD < rExt && signedD > (0.0 - lExt);
+      // Longitudinal overshoot guard (RIBBONCAP-0610): signedD is only the
+      // PERPENDICULAR component, so a fragment past a segment's endpoint (q
+      // clamped to the end, p-q running ALONG the axis) reads signedD~=0 and
+      // would pass the band test — painting an INFINITE strip past the last
+      // point (the user's "massive road on a tiny paint"). bestD^2 - signedD^2
+      // is the squared longitudinal distance: 0 on the segment interior, >0
+      // once clamped to an endpoint. Cap it to square the polyline ends;
+      // interior joints stay covered by the neighbour (its perpendicular foot
+      // is the nearer point, so it wins selection with zero overshoot).
+      let overshoot2 = bestD * bestD - signedD * signedD;
+      let inside = bestD < 1e8 && signedD < rExt && signedD > (0.0 - lExt) && overshoot2 < 0.25;
       if (inside) {
         var road = vec3f(0.118, 0.129, 0.157);
         let ad = abs(signedD);
