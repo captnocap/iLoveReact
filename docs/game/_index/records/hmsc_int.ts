@@ -28,6 +28,15 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/build/microGrid.ts + game/world/navGrid.ts (the floor 3×3 micro-grid + THE NAV BAKE)',
+      purpose: ['ai_edit', 'world_gen', 'game_loop'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/world/navGrid.ts',
+      description:
+        'MICROGRID-0610 (user-ruled req_0518): a floor IS 3×3 tiles; PlacedBuildPiece.cells carries 9 authored tile kinds (null = FLOOR_DEFAULT_CELL_KIND by material; resolveFloorCells/floorCellRects quarter-turn aware). bakeNavGrid is the FIRST producer for GAME_PATHING.publishGrid: one pure fold of painted 1m tiles (upsampled) + ground-level floor micro-cells + placedPieceColliders blocking, at 0.5m nav cells so a boundary wall blocks only the quarter-strips its slab covers (a per-cell grid cannot express a blocked edge). Door openings stay open with NO special case (collider bands already split); ramps/stairs stamp walkable links and are excluded from blocking (their bands ARE the slope); props block by DERIVATION (the dresser rule — move it, cells free); elevated pieces gate out until surface-nav. On GAME_WORLD. P4 navGrid.test.ts (8). NOT wired yet: live publish at play boot, the floor cell-painter UI, road decks, multi-level.',
+      status: 'live',
+    },
+    {
       name: 'compile/main.ts + rjit game compile/verify',
       purpose: ['scripting', 'maintenance', 'persistence'],
       kind: 'module',

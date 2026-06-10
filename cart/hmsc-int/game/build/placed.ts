@@ -65,6 +65,10 @@ export type PlacedBuildPiece = {
   prefabId?: string;
   /** source piece index inside the prefab definition */
   prefabPieceIndex?: number;
+  /** FLOOR 3×3 micro-grid (MICROGRID-0610): 9 row-major authored cell kinds,
+   *  null = the material default. Floor-family kinds only; absent = a bare
+   *  floor. See game/build/microGrid.ts for semantics + resolution. */
+  cells?: (import('../kinds').TileKind | null)[];
 };
 
 // ── P2 tuning: every behavior-affecting number is table data ─────────────────

@@ -69,6 +69,7 @@ import {
 } from './spawn';
 import { authoredWorldFromRecord, AUTHORED_WORLD_STORE, loadAuthoredWorld, readAuthoredWorldRaw } from './authored';
 import { legacyGlobalPieces, pieceMutationMapName, piecesForMap, worldStream } from './stream';
+import { bakeNavGrid, navKindAt } from './navGrid';
 
 export {
   addSurfaceRegion,
@@ -127,6 +128,11 @@ export { authoredWorldFromRecord, AUTHORED_WORLD_STORE, loadAuthoredWorld, readA
 export type { AuthoredWorld } from './authored';
 export { legacyGlobalPieces, pieceMutationMapName, piecesForMap, worldStream } from './stream';
 export type { PiecePlacement, WorldEvent, WorldStreamState } from './stream';
+// The nav bake (MICROGRID-0610): painted ground + floor micro-cells + piece
+// colliders → the publishGrid-ready kind grid. The first producer for
+// GAME_PATHING.publishGrid.
+export { bakeNavGrid, navKindAt, NAV_TUNING } from './navGrid';
+export type { NavGrid } from './navGrid';
 // buildings own their history (req_0512/req_0513): defs + instance references
 // on their own V20 stream; derived back into the one pieces view.
 export {
@@ -184,6 +190,9 @@ export const GAME_WORLD = Object.freeze({
   landformWalkableTopAt,
   landformFootingKindAt,
   landformWaterKindAt,
+  // the nav bake (world → host path grid; pair with GAME_PATHING.publishGrid)
+  bakeNavGrid,
+  navKindAt,
   // physics adapter
   collisionRects: worldCollisionRects,
   heightfields: worldHeightfields,

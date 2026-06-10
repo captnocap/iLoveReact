@@ -1427,3 +1427,33 @@ lanes = a one-way road and MUST show direction markers.
   stamping (yellow/white overlays from game/textures' road decomposition) and
   the elevation modes (grade / deck / approach strips / tunnel hole-mask) are
   the next slices (see project_road_grammar memory: the agreed full design).
+
+## The floor micro-grid + the nav bake (MICROGRID-0610, 2026-06-10)
+
+USER-RULED (req_0518): a floor piece IS exactly 3×3 tiles, and every floor
+carries a 3×3 grid of paintable tile kinds — the nav substrate stays uniform
+1m cells whether ground or lifted.
+
+- `game/build/microGrid.ts` — the cell model. `PlacedBuildPiece.cells` = 9
+  row-major authored kinds (null = the material default,
+  `FLOOR_DEFAULT_CELL_KIND` by catalog material). `resolveFloorCells` /
+  `floorCellRects` (quarter-turn aware) / `setFloorCell` (pure write). Cells
+  use the ONE tile-kind registry — no second vocabulary. Prop occupancy is
+  NOT stored: it derives from the prop's collider, so moving the dresser
+  frees the cells.
+- `game/world/navGrid.ts` — THE NAV BAKE: the first producer for
+  GAME_PATHING.publishGrid (which had a typed wire and zero callers). One
+  pure fold: painted 1m tiles (upsampled; unpainted = caller's emptyKind) +
+  ground-level floor micro-cells + `placedPieceColliders` blocking. Nav cells
+  are 0.5m (NAV_TUNING) — a per-cell grid can't express a blocked EDGE, so at
+  0.5m a boundary wall blocks only the two quarter-strips its slab covers
+  instead of eating a meter off both rooms. Door/arch/garage openings need NO
+  special case (collider bands are already split around them). Ramps/stairs
+  stamp walkable link footprints and are EXCLUDED from the blocking pass
+  (their collider bands ARE the slope). Elevated pieces (y > 0.5m) are gated
+  out until the multi-level surface-nav lane. Exposed on GAME_WORLD
+  (`bakeNavGrid`/`navKindAt`). P4: navGrid.test.ts (8 cases incl. the
+  dresser-derivation rule and the door-stays-open law).
+- NOT yet wired: the live publish (play boot calling bakeNavGrid →
+  publishGrid per map), the editor cell-painter UI on floors, road decks
+  (lane kinds on lifted floors — elevation modes), multi-level surface nav.
