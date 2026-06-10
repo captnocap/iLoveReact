@@ -16,13 +16,16 @@ import { hexToRgb01 } from '../world/placeables';
 // indices (-1 = empty). (WGSL: no unary +, no backticks in comments.)
 
 // After the cell grid, an OPTIONAL road-ribbon section (ROADCURVE-0610):
-// [segCount, crosswalkKindIdx, junctionKindIdx, then segCount*8 floats —
-// ax az bx bz rightExt leftExt twoWay phase, in cell space]. The ribbon paints
-// the carriageway ANALYTICALLY from distance to the filleted centerline, so
-// curves are sub-tile smooth at the capture's full resolution; the 1m tile
-// stamps underneath keep carrying gameplay. Crosswalk cells keep their tile
-// look (the zebra is a rectangular band — cells render it fine); junction
-// cells take plain asphalt (no markings through the box).
+// [segCount, crosswalkKindIdx, junctionKindIdx, laneStartKindIdx, medianKindIdx,
+// then segCount*8 floats — ax az bx bz rightExt leftExt twoWay phase, in cell
+// space]. The ribbon paints the carriageway ANALYTICALLY from distance to the
+// filleted centerline, so curves are sub-tile smooth at the capture's full
+// resolution; the 1m tile stamps underneath keep carrying gameplay. Crosswalk
+// cells keep their tile look (the zebra is a rectangular band — cells render it
+// fine); junction cells take plain asphalt (no markings through the box).
+// Road-STAMPED cells that fall OUTSIDE the analytic band (the rasterization
+// staircase at curves) render as a concrete curb apron instead of raw asphalt
+// tiles — the gameplay stamp stays, the blocky edge disappears.
 export const HEIGHTFIELD_TILE_SHADER = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
 
@@ -52,10 +55,12 @@ export const HEIGHTFIELD_TILE_SHADER = `
 
   let cellEnd = cellBase + rows * cols;
   let total = i32(arrayLength(&D));
-  if (cellEnd + 3 <= total) {
+  if (cellEnd + 5 <= total) {
     let segN = i32(D[cellEnd]);
     let cwIdx = i32(D[cellEnd + 1]);
     let jIdx = i32(D[cellEnd + 2]);
+    let laneIdx = i32(D[cellEnd + 3]);
+    let medIdx = i32(D[cellEnd + 4]);
     if (segN > 0 && kind != cwIdx) {
       let p = in.uv * vec2f(f32(cols), f32(rows));
       var bestD = 1e9;
@@ -66,7 +71,7 @@ export const HEIGHTFIELD_TILE_SHADER = `
       var phase = 0.0;
       var along = 0.0;
       for (var s = 0; s < segN; s = s + 1) {
-        let b0 = cellEnd + 3 + s * 8;
+        let b0 = cellEnd + 5 + s * 8;
         let a = vec2f(D[b0], D[b0 + 1]);
         let b = vec2f(D[b0 + 2], D[b0 + 3]);
         let ab = b - a;
@@ -86,7 +91,8 @@ export const HEIGHTFIELD_TILE_SHADER = `
           along = t * sqrt(len2);
         }
       }
-      if (bestD < 1e8 && signedD < rExt && signedD > (0.0 - lExt)) {
+      let inside = bestD < 1e8 && signedD < rExt && signedD > (0.0 - lExt);
+      if (inside) {
         var road = vec3f(0.118, 0.129, 0.157);
         let ad = abs(signedD);
         if (kind != jIdx) {
@@ -102,6 +108,15 @@ export const HEIGHTFIELD_TILE_SHADER = `
           if (extHere - ad < 0.28 && extHere - ad > 0.14) { road = vec3f(0.82, 0.84, 0.86); }
         }
         rgb = road;
+      } else {
+        // The curb apron: a road-stamped cell (lane / median / junction) whose
+        // fragment lies outside the analytic band is the stamp staircase at a
+        // curve — render it as concrete shoulder, not blocky asphalt tiles.
+        let isLane = kind >= laneIdx && kind < laneIdx + 4;
+        if (isLane || kind == jIdx || kind == medIdx) {
+          let shade2 = mix(1.0, 0.9, smoothstep(0.44, 0.5, edge));
+          rgb = vec3f(0.33, 0.36, 0.41) * shade2;
+        }
       }
     }
   }
@@ -127,12 +142,21 @@ export function heightfieldTileData(tiles: { cols: number; rows: number; idx: nu
   return out;
 }
 
-/** The ribbon section ([segN, crosswalkIdx, junctionIdx, segs…]) appended after
- *  the cells — shared by the 3D drape capture AND the editor's 2D chunk quads
- *  (both run HEIGHTFIELD_TILE_SHADER). Empty input = empty section. */
+/** The ribbon section ([segN, crosswalkIdx, junctionIdx, laneStartIdx,
+ *  medianIdx, segs…]) appended after the cells — shared by the 3D drape capture
+ *  AND the editor's 2D chunk quads (both run HEIGHTFIELD_TILE_SHADER). The lane
+ *  block (laneNorth..laneWest) is contiguous in TILE_KINDS, so one start index
+ *  covers all four. Empty input = empty section. */
 export function roadRibbonSection(roads?: number[]): number[] {
   if (!roads || roads.length < 8) return [];
-  return [Math.floor(roads.length / 8), TILE_KINDS.indexOf('crosswalk'), TILE_KINDS.indexOf('junction'), ...roads];
+  return [
+    Math.floor(roads.length / 8),
+    TILE_KINDS.indexOf('crosswalk'),
+    TILE_KINDS.indexOf('junction'),
+    TILE_KINDS.indexOf('laneNorth'),
+    TILE_KINDS.indexOf('median'),
+    ...roads,
+  ];
 }
 
 export function heightfieldTextureKey(landformId: string): string {
