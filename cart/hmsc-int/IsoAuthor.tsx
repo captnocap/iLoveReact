@@ -136,6 +136,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       tuning: ISO_SNAP_TUNING,
     });
   }, [stage, groundTopAt]);
+  // The per-frame ghost poll (below) reads the latest resolveAt through this ref, so it
+  // never snaps against a stale world/terrain after a paint edit.
+  const resolveAtRef = useRef(resolveAt);
+  resolveAtRef.current = resolveAt;
+  const ghostKeyRef = useRef('');
 
   // Pointer. A DRAG rotates the view (yaw from horizontal motion — WASD does the
   // panning). A CLICK (no drag) acts at the cursor: place the armed piece, or select
@@ -261,6 +266,22 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         stage.nudge(forward * speed * dt, strafe * speed * dt);
         redraw();
       }
+      // Hover ghost: while a piece is armed, the translucent preview follows the cursor.
+      // The host fires NO passive move events (on_mouse_move only during a drag), so we
+      // poll getMouseX/Y here. Only when the cursor is over this pane, and only re-snap
+      // when the target CELL changes, so the ghost doesn't thrash a re-render every frame.
+      if (armedRef.current) {
+        const mx = Number(G.getMouseX?.() ?? -1);
+        const my = Number(G.getMouseY?.() ?? -1);
+        const r = rectRef.current;
+        const lx = mx - r.x;
+        const ly = my - r.y;
+        if (lx >= 0 && ly >= 0 && lx <= r.width && ly <= r.height) {
+          const t = resolveAtRef.current(lx, ly);
+          const k = t ? `${t.placement.x.toFixed(2)},${t.placement.y.toFixed(2)},${t.placement.z.toFixed(2)},${t.placement.yawDegrees}` : '';
+          if (k !== ghostKeyRef.current) { ghostKeyRef.current = k; setSnap(t); }
+        }
+      }
       handle = sched(tick);
     };
     handle = sched(tick);
@@ -297,7 +318,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   }, [pieces, level]);
 
   return (
-    <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <Box
+      onLayout={(lr: any) => { rectRef.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
+      style={{ width: '100%', height: '100%', position: 'relative' }}
+    >
       <LandformSurfaceCaptures landforms={state.world.landforms ?? []} />
       <PropSurfaceCaptures props={state.world.props} />
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showAxes={false}>
