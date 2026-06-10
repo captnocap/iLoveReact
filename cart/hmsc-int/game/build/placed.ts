@@ -502,12 +502,33 @@ function wallDepthWorldRangeAlong(piece: PlacedBuildPiece, axis: 'x' | 'z', piec
   return { min: Math.min(va, vb), max: Math.max(va, vb) };
 }
 
-function wallJoinRunLimits(piece: PlacedBuildPiece, def: BuildPieceDef, pieces: readonly PlacedBuildPiece[]): { minU: number; maxU: number } {
+/** A corner join at one end of a wall's run (CORNERSEAM-0610): a perpendicular
+ *  wall meets this end with its run entirely on ONE side, leaving the opposite
+ *  side an exposed (convex) corner. `outerV` is that exposed side as a local
+ *  ±v sign — the face slab on that side is the one the renderer miters. A
+ *  T-junction (runs on both sides) exposes nothing and reports null. */
+export type WallEndJoin = { outerV: 1 | -1 };
+export type WallEnds = { axis: 'x' | 'z' | null; minU: WallEndJoin | null; maxU: WallEndJoin | null };
+const NO_WALL_ENDS: WallEnds = { axis: null, minU: null, maxU: null };
+
+function wallJoinRunLimits(
+  piece: PlacedBuildPiece,
+  def: BuildPieceDef,
+  pieces: readonly PlacedBuildPiece[],
+): { minU: number; maxU: number; ends: WallEnds } {
   const self = wallRunFrame(piece, def);
-  if (!self) return { minU: -def.size.widthMeters / 2, maxU: def.size.widthMeters / 2 };
+  if (!self) return { minU: -def.size.widthMeters / 2, maxU: def.size.widthMeters / 2, ends: NO_WALL_ENDS };
   const tolerance = PLACED_TUNING.wallJoinToleranceMeters;
-  let runMin = self.runMin;
-  let runMax = self.runMax;
+  // Per world end: did a perpendicular wall join, and which side(s) of this
+  // wall's line does its run occupy (one side = corner, both = T-junction).
+  const sideTol = PLACED_TUNING.touchToleranceMeters;
+  let extMin = self.runMin, extMax = self.runMax;
+  let minJoined = false, minPos = false, minNeg = false;
+  let maxJoined = false, maxPos = false, maxNeg = false;
+  // An end a COLLINEAR same-line wall reaches and passes (or meets flush) is a
+  // CONTINUATION, not a corner: the neighbor owns the geometry beyond, so
+  // extending/mitering there would double it (coplanar slabs → z-fight).
+  let minOwned = false, maxOwned = false;
   // Grid-local candidates (PLACEPERF-0610): a joining perpendicular wall's
   // body contains one of this wall's run ENDPOINTS — query around both.
   const margin = 0.5;
@@ -520,20 +541,61 @@ function wallJoinRunLimits(piece: PlacedBuildPiece, def: BuildPieceDef, pieces: 
     if (other.id === piece.id) continue;
     const otherDef = placedPieceDef(other);
     const candidate = wallRunFrame(other, otherDef);
-    if (!candidate || candidate.axis === self.axis) continue;
+    if (!candidate) continue;
     if (!rangesOverlap(self.baseY, self.topY, candidate.baseY, candidate.topY, tolerance)) continue;
+    if (candidate.axis === self.axis) {
+      if (Math.abs(candidate.line - self.line) > tolerance) continue;
+      if (candidate.runMax >= self.runMin - tolerance && candidate.runMin < self.runMin - sideTol) minOwned = true;
+      if (candidate.runMin <= self.runMax + tolerance && candidate.runMax > self.runMax + sideTol) maxOwned = true;
+      continue;
+    }
     const candidateDepth = wallDepthWorldRangeAlong(other, self.axis, pieces);
     if (Math.abs(candidate.line - self.runMin) <= tolerance && candidate.runMin <= self.line + tolerance && candidate.runMax >= self.line - tolerance) {
-      runMin = Math.min(runMin, candidateDepth.min);
+      extMin = Math.min(extMin, candidateDepth.min);
+      minJoined = true;
+      if (candidate.runMin >= self.line - sideTol) minPos = true;
+      else if (candidate.runMax <= self.line + sideTol) minNeg = true;
+      else { minPos = true; minNeg = true; } // straddles the line: a T
     }
     if (Math.abs(candidate.line - self.runMax) <= tolerance && candidate.runMin <= self.line + tolerance && candidate.runMax >= self.line - tolerance) {
-      runMax = Math.max(runMax, candidateDepth.max);
+      extMax = Math.max(extMax, candidateDepth.max);
+      maxJoined = true;
+      if (candidate.runMin >= self.line - sideTol) maxPos = true;
+      else if (candidate.runMax <= self.line + sideTol) maxNeg = true;
+      else { maxPos = true; maxNeg = true; }
     }
   }
-  const flip = self.quarter === 2 || self.quarter === 3 ? -1 : 1;
+  const runMin = minOwned ? self.runMin : extMin;
+  const runMax = maxOwned ? self.runMax : extMax;
+  // World side of the joining run → local ±v: project world +side onto the
+  // piece's +v axis (its perpendicular world component). The exposed corner is
+  // the OPPOSITE side of the joining run.
+  const vAxis = localOffset(0, 1, piece.yawDegrees);
+  const vComp = self.axis === 'x' ? vAxis.dz : vAxis.dx;
+  const endJoin = (joined: boolean, pos: boolean, neg: boolean): WallEndJoin | null => {
+    if (!joined || pos === neg) return null; // nothing joins, or a T — no exposed corner
+    const joinV = (pos ? 1 : -1) * (vComp >= 0 ? 1 : -1);
+    return { outerV: joinV > 0 ? -1 : 1 };
+  };
+  const minEnd = minOwned ? null : endJoin(minJoined, minPos, minNeg);
+  const maxEnd = maxOwned ? null : endJoin(maxJoined, maxPos, maxNeg);
+  // World run → local u. localOffset maps +u to the world NEGATIVE axis
+  // direction for quarters 1 (yaw 90 → −z) and 2 (yaw 180 → −x); the world
+  // ends swap under that mirror. (Was `quarter 2 || 3` — REQ_0474: yaw-90/270
+  // walls grew their corner extension at the EMPTY end and left the joint
+  // open, the "gap at the corner + overhang past the corner" screenshots.)
+  const flip = self.quarter === 1 || self.quarter === 2 ? -1 : 1;
   return flip > 0
-    ? { minU: runMin - self.center, maxU: runMax - self.center }
-    : { minU: self.center - runMax, maxU: self.center - runMin };
+    ? { minU: runMin - self.center, maxU: runMax - self.center, ends: { axis: self.axis, minU: minEnd, maxU: maxEnd } }
+    : { minU: self.center - runMax, maxU: self.center - runMin, ends: { axis: self.axis, minU: maxEnd, maxU: minEnd } };
+}
+
+/** Per-end corner joins of an edge-snapped wall (renderer input for the slab
+ *  miter that closes the corner pocket). Non-wall/free-yaw pieces: all null. */
+export function placedPieceWallEnds(piece: PlacedBuildPiece, pieces: readonly PlacedBuildPiece[] = [piece]): WallEnds {
+  const def = placedPieceDef(piece);
+  if (def.kind !== 'wall' || def.snap !== 'edge') return NO_WALL_ENDS;
+  return wallJoinRunLimits(piece, def, pieces).ends;
 }
 
 export function placedPieceBands(piece: PlacedBuildPiece, pieces: readonly PlacedBuildPiece[] = [piece]): PlacedPieceBand[] {
@@ -775,12 +837,14 @@ export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): Place
       };
       if (quarter !== null) {
         // band [u0,u1] runs along local width; quarter turns map it onto x or z.
-        // Keep the legacy run-axis mapping because wall-join extension relies on
-        // it; only the perpendicular depth span shifts for floor support.
+        // The u→world sign MUST match localOffset (+u → −z at q1, −x at q2):
+        // REQ_0474 — this used to mirror q2|q3 while the band builder mirrored
+        // the same way, two wrongs canceling for collision while the renderer
+        // (which maps through localOffset) showed extensions at the wrong end.
         const centerU = (band.u0 + band.u1) / 2;
         const halfU = (band.u1 - band.u0) / 2;
         const along = quarter % 2 === 0 ? 'x' : 'z';
-        const flip = quarter === 2 || quarter === 3 ? -1 : 1;
+        const flip = quarter === 1 || quarter === 2 ? -1 : 1;
         const cu = centerU * flip;
         const vAxis = localOffset(0, 1, piece.yawDegrees);
         const depthX = signedRange(piece.x, depthSpan.minV, depthSpan.maxV, vAxis.dx);
@@ -847,7 +911,8 @@ export function placedPieceCameraOccluders(pieces: readonly PlacedBuildPiece[]):
         const centerU = (band.u0 + band.u1) / 2;
         const halfU = (band.u1 - band.u0) / 2;
         const along = quarter % 2 === 0 ? 'x' : 'z';
-        const flip = quarter === 2 || quarter === 3 ? -1 : 1;
+        // u→world sign matches localOffset (REQ_0474, same as colliders above)
+        const flip = quarter === 1 || quarter === 2 ? -1 : 1;
         const cu = centerU * flip;
         const vAxis = localOffset(0, 1, piece.yawDegrees);
         const depthX = signedRange(piece.x, depthSpan.minV, depthSpan.maxV, vAxis.dx);

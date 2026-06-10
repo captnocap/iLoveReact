@@ -84,6 +84,8 @@ export {
   placedPieceTags,
   placedPieceAcceptsEdits,
   placedPieceBands,
+  placedPieceDepthSpan,
+  placedPieceWallEnds,
   pieceBounds,
   connectedPieceIds,
   raycastPieces,
@@ -103,6 +105,8 @@ export type {
   PlacedBuildPiece,
   PlacedPieceCameraOccluders,
   PlacedPieceColliders,
+  WallEndJoin,
+  WallEnds,
 } from './placed';
 
 export {
@@ -180,6 +184,8 @@ import {
   placedPieceTags,
   placedPieceAcceptsEdits,
   placedPieceBands,
+  placedPieceDepthSpan,
+  placedPieceWallEnds,
   pieceBounds,
   connectedPieceIds,
   raycastPieces,
@@ -255,6 +261,9 @@ export const GAME_BUILD = {
     tags: placedPieceTags,
     acceptsEdits: placedPieceAcceptsEdits,
     bands: placedPieceBands,
+    depthSpan: placedPieceDepthSpan,
+    /** CORNERSEAM-0610: per-end corner joins (renderer slab-miter input) */
+    wallEnds: placedPieceWallEnds,
     bounds: pieceBounds,
     /** SMARTSEL-0605: the connected shape under one click */
     connected: connectedPieceIds,

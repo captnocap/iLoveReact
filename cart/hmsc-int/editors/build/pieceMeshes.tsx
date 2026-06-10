@@ -115,6 +115,10 @@ function visualLook(skin: BuildFaceSkin | undefined, fallback: string): { color:
   return { color: '#ffffff', textureKey: `bldskin:${skin.id}` };
 }
 
+function isHorizontalSkinPiece(kind: string): boolean {
+  return kind === 'floor' || kind === 'roof';
+}
+
 export function pieceVisualShapes(
   piece: { pieceId: string; x: number; y: number; z: number; yawDegrees: number; edit?: WallEdit; skin?: BuildSkinSet },
   key: string,
@@ -127,6 +131,9 @@ export function pieceVisualShapes(
   const back = visualLook(piece.skin?.back, look.color);
   const size = def.size;
   const yaw = piece.yawDegrees;
+  const depthSpan = GAME_BUILD.placed.depthSpan({ id: key, ...piece }, pieces);
+  const depthCenter = (depthSpan.minV + depthSpan.maxV) / 2;
+  const depthSize = depthSpan.maxV - depthSpan.minV;
   const box = (
     k: string,
     u: number,
@@ -201,24 +208,44 @@ export function pieceVisualShapes(
     const shapes: VisualShape[] = [];
     const slab = BUILD_UI.faceSlabThicknessMeters;
     const lift = BUILD_UI.faceSlabLiftMeters;
-    const frontV = size.depthMeters / 2 + lift;
-    const backV = -size.depthMeters / 2 - lift;
+    const frontV = depthSpan.maxV + lift;
+    const backV = depthSpan.minV - lift;
     const isWindowOpening = edit === 'window' || edit === 'doubleWindow' || edit === 'brokenWindow';
     const hasGlassPane = edit === 'window' || edit === 'doubleWindow';
     const openingW = edit === 'doubleWindow' ? BUILD_UI.doubleWindowCutoutWidthMeters : BUILD_UI.editCutoutWidthMeters;
     const openingH = BUILD_UI.editCutoutHeightMeters;
     const openingBottom = piece.y + size.heightMeters * 0.55 - openingH / 2;
     const openingTop = openingBottom + openingH;
-    const addWallBox = (label: string, u: number, baseY: number, w: number, h: number): void => {
-      if (w <= 0.001 || h <= 0.001) return;
-      shapes.push(box(`${label}.core`, u, 0, baseY, w, h, size.depthMeters, sides));
-      shapes.push(box(`${label}.front`, u, frontV, baseY, w, h, slab, front));
-      shapes.push(box(`${label}.back`, u, backV, baseY, w, h, slab, back));
+    // CORNERSEAM-0610: miter the face slabs where two walls corner. The core
+    // bodies already close (run limits extend through the joining wall), but
+    // each slab floats `lift` proud of its core, leaving an open vertical
+    // pocket at the convex corner. Closure: the x-axis wall's outer slab runs
+    // THROUGH to the joining wall's slab outer surface; the z-axis wall's
+    // BUTTS into the through slab's inner surface. One through + one butt =
+    // pocket filled, end caps meet edge-to-edge, no coplanar faces to z-fight.
+    const bands = GAME_BUILD.placed.bands(piece as PlacedBuildPiece, pieces);
+    const ends = GAME_BUILD.placed.wallEnds(piece as PlacedBuildPiece, pieces);
+    const cornerExt = ends.axis === 'x' ? lift + slab / 2 : Math.max(0, lift - slab / 2);
+    const wallMinU = bands.length > 0 ? bands[0].u0 : 0;
+    const wallMaxU = bands.length > 0 ? bands[bands.length - 1].u1 : 0;
+    const slabU0 = (u0: number, vSign: 1 | -1): number =>
+      u0 === wallMinU && ends.minU?.outerV === vSign ? u0 - cornerExt : u0;
+    const slabU1 = (u1: number, vSign: 1 | -1): number =>
+      u1 === wallMaxU && ends.maxU?.outerV === vSign ? u1 + cornerExt : u1;
+    const addWallBox = (label: string, u0: number, u1: number, baseY: number, h: number): void => {
+      if (u1 - u0 <= 0.001 || h <= 0.001) return;
+      shapes.push(box(`${label}.core`, (u0 + u1) / 2, depthCenter, baseY, u1 - u0, h, depthSize, sides));
+      const f0 = slabU0(u0, 1);
+      const f1 = slabU1(u1, 1);
+      shapes.push(box(`${label}.front`, (f0 + f1) / 2, frontV, baseY, f1 - f0, h, slab, front));
+      const b0 = slabU0(u0, -1);
+      const b1 = slabU1(u1, -1);
+      shapes.push(box(`${label}.back`, (b0 + b1) / 2, backV, baseY, b1 - b0, h, slab, back));
     };
-    for (const [index, band] of GAME_BUILD.placed.bands(piece as PlacedBuildPiece, pieces).entries()) {
+    for (const [index, band] of bands.entries()) {
       const label = `band${index}`;
       if (!isWindowOpening) {
-        addWallBox(label, (band.u0 + band.u1) / 2, piece.y, band.u1 - band.u0, band.top - piece.y);
+        addWallBox(label, band.u0, band.u1, piece.y, band.top - piece.y);
         continue;
       }
       const holeU0 = -openingW / 2;
@@ -227,20 +254,20 @@ export function pieceVisualShapes(
       const leftU1 = Math.min(band.u1, holeU0);
       const rightU0 = Math.max(band.u0, holeU1);
       const rightU1 = band.u1;
-      addWallBox(`${label}.leftJamb`, (leftU0 + leftU1) / 2, piece.y, leftU1 - leftU0, band.top - piece.y);
-      addWallBox(`${label}.rightJamb`, (rightU0 + rightU1) / 2, piece.y, rightU1 - rightU0, band.top - piece.y);
+      addWallBox(`${label}.leftJamb`, leftU0, leftU1, piece.y, band.top - piece.y);
+      addWallBox(`${label}.rightJamb`, rightU0, rightU1, piece.y, band.top - piece.y);
       const midU0 = Math.max(band.u0, holeU0);
       const midU1 = Math.min(band.u1, holeU1);
       if (midU1 > midU0) {
-        addWallBox(`${label}.sill`, (midU0 + midU1) / 2, piece.y, midU1 - midU0, Math.max(0, openingBottom - piece.y));
-        addWallBox(`${label}.header`, (midU0 + midU1) / 2, openingTop, midU1 - midU0, Math.max(0, band.top - openingTop));
+        addWallBox(`${label}.sill`, midU0, midU1, piece.y, Math.max(0, openingBottom - piece.y));
+        addWallBox(`${label}.header`, midU0, midU1, openingTop, Math.max(0, band.top - openingTop));
       }
     }
     if (hasGlassPane) {
       shapes.push(box(
         'glassPane',
         0,
-        0,
+        depthCenter,
         openingBottom,
         openingW,
         openingH,
@@ -254,10 +281,21 @@ export function pieceVisualShapes(
       const eh = low ? BUILD_UI.editCutoutLowHeightMeters : BUILD_UI.editCutoutHeightMeters;
       const ey = low ? piece.y + eh / 2 : piece.y + size.heightMeters * 0.55;
       const opacity = SIGHTLINE_EDIT_OPACITY[edit];
-      shapes.push(box('edit', 0, 0, ey - eh / 2, BUILD_UI.editCutoutWidthMeters, eh, size.depthMeters + 0.06, { color: '#0c1018' }, opacity));
+      shapes.push(box('edit', 0, depthCenter, ey - eh / 2, BUILD_UI.editCutoutWidthMeters, eh, depthSize + 0.06, { color: '#0c1018' }, opacity));
     }
     return shapes;
   }
+  if (isHorizontalSkinPiece(def.kind)) {
+    const slab = BUILD_UI.faceSlabThicknessMeters;
+    const lift = BUILD_UI.faceSlabLiftMeters;
+    const coreHeight = Math.max(0.01, size.heightMeters - lift * 2);
+    return [
+      box('edges', 0, 0, piece.y + lift, size.widthMeters, coreHeight, size.depthMeters, sides),
+      box('top', 0, 0, piece.y + size.heightMeters + lift - slab / 2, size.widthMeters, slab, size.depthMeters, front),
+      box('bottom', 0, 0, piece.y - lift - slab / 2, size.widthMeters, slab, size.depthMeters, back),
+    ];
+  }
+
   return [box('body', 0, 0, piece.y, size.widthMeters, size.heightMeters, size.depthMeters, front)];
 }
 
@@ -304,9 +342,13 @@ export function VisualShapeMesh(props: { shape: VisualShape; colorOverride?: str
 function wallJoinSignature(piece: PlacedBuildPiece, pieces: readonly PlacedBuildPiece[]): string {
   const def = GAME_BUILD.catalog.get(piece.pieceId);
   if (GAME_BUILD.kinds.get(def.kind).edits !== 'wall') return '';
+  // End-corner state rides the digest (CORNERSEAM-0610): a neighbor can change
+  // only the slab miter (not the bands), and the memo must still re-render.
+  const ends = GAME_BUILD.placed.wallEnds(piece, pieces);
+  const endsKey = `#${ends.minU?.outerV ?? 0}:${ends.maxU?.outerV ?? 0}`;
   return GAME_BUILD.placed.bands(piece, pieces)
     .map((band) => `${band.u0.toFixed(3)}:${band.u1.toFixed(3)}:${band.top.toFixed(3)}`)
-    .join('|');
+    .join('|') + endsKey;
 }
 
 const PlacedPieceMesh = memo(function PlacedPieceMesh(props: {
