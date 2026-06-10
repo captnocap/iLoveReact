@@ -1530,6 +1530,27 @@ export function PaintCanvas(props: {
           />
         ))}
 
+        {/* Placement ghosts (req_0527): on every layer EXCEPT place (where the
+            real interactive nodes live), placements + build pieces render as dim
+            outlines so painting/roads/zoning/height never happen blind to where
+            the buildings are. Non-interactive — the active layer's overlay owns
+            all clicks; these are landmarks only. Drawn first so every authoring
+            affordance (selection, road dots, drafts) paints above them. */}
+        {layer !== 'place' ? place.items.map((p) => (
+          <Canvas.Node key={`ghost_${p.id}`} gx={p.gx} gy={p.gy} gw={p.footW * TILE_UNITS} gh={p.footD * TILE_UNITS}>
+            <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: `${p.color}77`, backgroundColor: `${p.color}14`, transform: { rotate: p.rotation } }}>
+              <Text fontSize={7} color={`${p.color}bb`} style={{ fontWeight: 700 }}>{p.label}</Text>
+            </Box>
+          </Canvas.Node>
+        )) : null}
+        {layer !== 'place' ? (place.buildItems ?? []).map((p) => (
+          <Canvas.Node key={`ghostb_${p.id}`} gx={p.gx} gy={p.gy} gw={p.footW * TILE_UNITS} gh={p.footD * TILE_UNITS}>
+            <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: `${p.color}66`, backgroundColor: `${p.color}0f` }}>
+              <Text fontSize={6} color={`${p.color}aa`} style={{ fontWeight: 700, fontFamily: 'monospace' }}>{p.label}</Text>
+            </Box>
+          </Canvas.Node>
+        )) : null}
+
         {/* Selection highlight — one thin outline Canvas.Node per SELECTED cell
             (bounded by the selection, never per-tile). Non-interactive: the select
             overlay (sibling, on top) owns the clicks. */}
