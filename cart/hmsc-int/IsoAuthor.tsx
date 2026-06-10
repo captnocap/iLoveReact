@@ -51,7 +51,9 @@ function contentCenter(pieces: readonly PlacedBuildPiece[]): [number, number] {
   return [sx / pieces.length, sz / pieces.length];
 }
 
-type Armed = { id: string } | null;
+// What's armed to place: a single catalog PIECE, or a PREFAB (a named composition that
+// stamps into many pieces). null = nothing armed (pan/select mode).
+type Armed = { kind: 'piece' | 'prefab'; id: string } | null;
 
 export interface IsoAuthorProps {
   // The world to draw UNDER the pieces (terrain + props), same GameState the inspect
@@ -125,13 +127,16 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const resolveAt = useCallback((sx: number, sy: number): SnapTarget | null => {
     const a = armedRef.current;
     if (!a) return null;
-    const def = GAME_BUILD.catalog.get(a.id);
+    // A piece snaps by its own catalog rule (walls edge-snap, etc.); a prefab drops on
+    // the grid by its origin — exactly how F2's place() picks snap/size.
+    const snap = a.kind === 'prefab' ? 'grid' : GAME_BUILD.catalog.get(a.id).snap;
+    const size = a.kind === 'prefab' ? { widthMeters: 1, heightMeters: 3, depthMeters: 1 } : GAME_BUILD.catalog.get(a.id).size;
     return resolveSnapTarget({
       ray: stage.pieceRay(sx, sy, rectRef.current),
       pieces: piecesRef.current,
       groundTopAt,
-      snap: def.snap,
-      size: def.size,
+      snap,
+      size,
       yawDegrees: ghostYawRef.current,
       tuning: ISO_SNAP_TUNING,
     });
@@ -185,10 +190,18 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const placeAt = (t: SnapTarget) => {
     const a = armedRef.current;
     if (!a) return;
+    const at = `${t.placement.x.toFixed(1)},${t.placement.z.toFixed(1)}`;
+    if (a.kind === 'prefab') {
+      // A prefab commits ONE prefabStamped event; the stream decomposes it into its
+      // pieces — the SAME path F2's place() takes for a prefab.
+      const def = GAME_BUILD.prefabs.get(a.id);
+      onCommit({ kind: 'prefabStamped', prefabId: a.id, origin: { x: t.placement.x, y: t.placement.y, z: t.placement.z }, yawDegrees: t.placement.yawDegrees }, `stamped ${def.label} @ ${at}`);
+      return;
+    }
     const def = GAME_BUILD.catalog.get(a.id);
     const placement = { pieceId: def.id, x: t.placement.x, y: t.placement.y, z: t.placement.z, yawDegrees: t.placement.yawDegrees };
     if (GAME_BUILD.placed.validatePlacement(placement).length > 0) return;
-    onCommit({ kind: 'piecePlaced', placement }, `placed ${def.label} @ ${t.placement.x.toFixed(1)},${t.placement.z.toFixed(1)}`);
+    onCommit({ kind: 'piecePlaced', placement }, `placed ${def.label} @ ${at}`);
   };
 
   // Select the piece under the cursor (raycast the standing pieces) — the whole
@@ -296,12 +309,16 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const ghostMeshes = useMemo(() => {
     const a = armedRef.current;
     if (!a || !snap) return null;
-    const placement = { pieceId: a.id, x: snap.placement.x, y: snap.placement.y, z: snap.placement.z, yawDegrees: snap.placement.yawDegrees };
-    const blocked = GAME_BUILD.placed.validatePlacement(placement).length > 0;
+    const yaw = snap.placement.yawDegrees;
+    // A prefab previews ALL of its stamped pieces; a single piece previews itself.
+    const previews = a.kind === 'prefab'
+      ? GAME_BUILD.placed.stamp(GAME_BUILD.prefabs.get(a.id), { x: snap.placement.x, y: snap.placement.y, z: snap.placement.z }, yaw)
+      : [{ pieceId: a.id, x: snap.placement.x, y: snap.placement.y, z: snap.placement.z, yawDegrees: yaw }];
+    const blocked = a.kind === 'piece' && GAME_BUILD.placed.validatePlacement(previews[0] as any).length > 0;
     const color = blocked ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
-    return pieceVisualShapes(placement, 'isoGhost').map((shape) => (
+    return previews.flatMap((p, i) => pieceVisualShapes(p, `isoGhost${i}`).map((shape) => (
       <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
-    ));
+    )));
   }, [snap, armed]);
 
   const noIds = useMemo(() => new Set<string>(), []);
@@ -375,11 +392,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       </Box>
 
       {/* ── catalog rail (bottom): pick a piece to place ───────────────────── */}
-      <CatalogRail armed={armed} onArm={(id) => { setArmed((cur) => (cur?.id === id ? null : { id })); setSelectedIds(new Set()); }} />
+      <CatalogRail armed={armed} onArm={(a) => { setArmed((cur) => (cur && cur.id === a.id && cur.kind === a.kind ? null : a)); setSelectedIds(new Set()); }} />
 
       <Text fontSize={9} color={props.focused ? '#7dd3fc' : '#475569'} style={{ fontFamily: 'monospace', position: 'absolute', left: 8, top: 34 }}>
         {armed
-          ? `place: ${GAME_BUILD.catalog.get(armed.id).label} · click to place · drag rotate · WASD pan · scroll zoom · R · Esc`
+          ? `place: ${(armed.kind === 'prefab' ? GAME_BUILD.prefabs.get(armed.id) : GAME_BUILD.catalog.get(armed.id)).label} · click to place · drag rotate · WASD pan · scroll zoom · R · Esc`
           : selectedIds.size > 0
             ? `${selectedIds.size} selected · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'}`
             : 'WASD pan · drag rotate · scroll zoom · F recenter · click to select · pick below to build'}
@@ -407,57 +424,71 @@ function IsoBtn(props: { label: string; onPress: () => void }) {
 // steps so a pan doesn't churn the mesh list every frame and a zoomed-out view doesn't
 // spawn thousands of lines. (Scene3D's showGrid prop is a no-op — nothing in the
 // framework draws it — so the grid IS these thin line boxes.) Major line every 8 tiles.
-const GRID_SNAP = 4;     // recentre only when the view crosses this many tiles
-const GRID_RADIUS = 26;  // tiles each way — a comfortable build patch (~52m)
+// Recentre every SINGLE tile (not every 4) so the patch glides with the camera instead
+// of jumping in big steps — the line keys are stable, so a tile-cross just UPDATEs
+// positions, no churn. Lines are thick and bright (minor + a bold major every 8 tiles)
+// so the grid reads clearly instead of as faint hairlines.
+const GRID_SNAP = 1;
+const GRID_RADIUS = 26;  // tiles each way (~52m patch)
+const GRID_MINOR = '#3c5575';
+const GRID_MAJOR = '#7da0cf';
 const IsoGrid = memo(function IsoGrid(props: { centerX: number; centerZ: number; level: number }) {
-  const cx = Math.round(props.centerX / GRID_SNAP) * GRID_SNAP;
-  const cz = Math.round(props.centerZ / GRID_SNAP) * GRID_SNAP;
-  const y = props.level * METERS_PER_LEVEL + 0.02; // hair above the floor so it reads
+  const cx = Math.round(props.centerX);
+  const cz = Math.round(props.centerZ);
+  const y = props.level * METERS_PER_LEVEL + 0.04; // above the floor so it never z-fights
   const span = GRID_RADIUS * 2;
   const lines: any[] = [];
   for (let i = -GRID_RADIUS; i <= GRID_RADIUS; i += 1) {
     const majorX = (cx + i) % 8 === 0;
     lines.push(
       <Scene3D.Mesh key={`gx${i}`} geometry={Geometry.Box} params={{ width: 1, height: 1, depth: 1 }}
-        scale={[majorX ? 0.06 : 0.03, 0.02, span]} position={[cx + i, y, cz]}
-        material={{ color: majorX ? '#42597a' : '#26374d', opacity: 0.55 }} />,
+        scale={[majorX ? 0.22 : 0.08, 0.05, span]} position={[cx + i, y, cz]}
+        material={{ color: majorX ? GRID_MAJOR : GRID_MINOR, opacity: majorX ? 0.9 : 0.7 }} />,
     );
     const majorZ = (cz + i) % 8 === 0;
     lines.push(
       <Scene3D.Mesh key={`gz${i}`} geometry={Geometry.Box} params={{ width: 1, height: 1, depth: 1 }}
-        scale={[span, 0.02, majorZ ? 0.06 : 0.03]} position={[cx, y, cz + i]}
-        material={{ color: majorZ ? '#42597a' : '#26374d', opacity: 0.55 }} />,
+        scale={[span, 0.05, majorZ ? 0.22 : 0.08]} position={[cx, y, cz + i]}
+        material={{ color: majorZ ? GRID_MAJOR : GRID_MINOR, opacity: majorZ ? 0.9 : 0.7 }} />,
     );
   }
   return <>{lines}</>;
 }, (p, n) =>
-  Math.round(p.centerX / GRID_SNAP) === Math.round(n.centerX / GRID_SNAP)
-  && Math.round(p.centerZ / GRID_SNAP) === Math.round(n.centerZ / GRID_SNAP)
+  Math.round(p.centerX) === Math.round(n.centerX)
+  && Math.round(p.centerZ) === Math.round(n.centerZ)
   && p.level === n.level);
 
 // The bottom build palette. A row of kind tabs (floor/wall/ramp/...) and, under the
 // active tab, that kind's catalog entries as chips — the Sims bottom bar, fed by the
 // SAME BUILD_CATALOG the F2 palette reads.
-const CatalogRail = memo(function CatalogRail(props: { armed: Armed; onArm: (id: string) => void }) {
-  const [kind, setKind] = useState<BuildPieceKind>('wall');
-  const entries = useMemo(() => GAME_BUILD.catalog.byKind(kind), [kind]);
+type RailTab = BuildPieceKind | 'prefabs';
+const RAIL_TABS: RailTab[] = [...PALETTE_KINDS, 'prefabs'];
+const CatalogRail = memo(function CatalogRail(props: { armed: Armed; onArm: (a: { kind: 'piece' | 'prefab'; id: string }) => void }) {
+  const [tab, setTab] = useState<RailTab>('wall');
+  // 'prefabs' lists the named compositions (stamp → many pieces); every other tab lists
+  // that kind's catalog pieces. Both feed the SAME rail, fed by the SAME GAME_BUILD.
+  const entries = useMemo<{ id: string; label: string }[]>(
+    () => (tab === 'prefabs' ? GAME_BUILD.prefabs.definitions.map((d) => ({ id: d.id, label: d.label })) : GAME_BUILD.catalog.byKind(tab)),
+    [tab],
+  );
+  const armKind: 'piece' | 'prefab' = tab === 'prefabs' ? 'prefab' : 'piece';
   return (
     <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 8, backgroundColor: '#0b1220fa', borderRadius: 6, borderWidth: 1, borderColor: '#1e3a5f', padding: 8, gap: 6 }}>
       <Text fontSize={10} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-        {`PIECES — ${kind} (${entries.length}) · click one, then click the ground`}
+        {`${tab === 'prefabs' ? 'PREFABS' : 'PIECES'} — ${tab} (${entries.length}) · click one, then click the ground`}
       </Text>
       <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
-        {PALETTE_KINDS.map((k) => (
-          <Pressable key={k} onPress={() => setKind(k)}>
-            <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, backgroundColor: k === kind ? '#2563eb' : '#1e293b' }}>
-              <Text fontSize={11} color={k === kind ? '#eaf4ff' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{k}</Text>
+        {RAIL_TABS.map((k) => (
+          <Pressable key={k} onPress={() => setTab(k)}>
+            <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, backgroundColor: k === tab ? '#2563eb' : (k === 'prefabs' ? '#3b2a5e' : '#1e293b') }}>
+              <Text fontSize={11} color={k === tab ? '#eaf4ff' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{k}</Text>
             </Box>
           </Pressable>
         ))}
       </Box>
       <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
         {entries.map((def) => (
-          <Pressable key={def.id} onPress={() => props.onArm(def.id)}>
+          <Pressable key={def.id} onPress={() => props.onArm({ kind: armKind, id: def.id })}>
             <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: props.armed?.id === def.id ? '#7dd3fc' : '#3a4f6b', backgroundColor: props.armed?.id === def.id ? '#1d4ed8' : '#16233a' }}>
               <Text fontSize={11} color={props.armed?.id === def.id ? '#ffffff' : '#dbe6f3'} style={{ fontFamily: 'monospace' }}>{def.label}</Text>
             </Box>
