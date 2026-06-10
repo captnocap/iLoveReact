@@ -260,6 +260,32 @@ fn segmentAabbEntryT(
     return clamp(t0, 0, 1);
 }
 
+/// The segment's [entry, exit] fractions through the AABB (camera→pivot order,
+/// so entry is the camera-facing face and exit is the pivot-facing face). The
+/// spring-arm needs the EXIT: a wall is a box with thickness, so pulling to the
+/// entry leaves the camera inside the wall — pull past the exit to clear it.
+fn segmentAabbSpan(
+    ox: f32,
+    oy: f32,
+    oz: f32,
+    dx: f32,
+    dy: f32,
+    dz: f32,
+    min_x: f32,
+    min_y: f32,
+    min_z: f32,
+    max_x: f32,
+    max_y: f32,
+    max_z: f32,
+) ?[2]f32 {
+    var t0: f32 = 0;
+    var t1: f32 = 1;
+    if (!segmentSlabAxis(ox, dx, min_x, max_x, &t0, &t1)) return null;
+    if (!segmentSlabAxis(oy, dy, min_y, max_y, &t0, &t1)) return null;
+    if (!segmentSlabAxis(oz, dz, min_z, max_z, &t0, &t1)) return null;
+    return .{ clamp(t0, 0, 1), clamp(t1, 0, 1) };
+}
+
 fn addCameraOcclusionHit(owner: f32, max_hits: usize, entry_t: f32, segment_len: f32) void {
     if (owner <= 0) return;
     const target_distance = segment_len * (1.0 - clamp(entry_t, 0, 1));
@@ -612,9 +638,10 @@ pub fn cameraOcclusionConfiguredHits(
 /// compiled-game loader has no V8 occlusion door, so it reuses this to collide
 /// its camera with the authored walls exactly like the editor's JS spring-arm.
 /// Rects start at INPUT_HEADER_FLOATS (the loader builds no entity section),
-/// oriented rects follow. Returns the distance from `pivot` to the nearest solid
-/// the camera→pivot segment crosses (0 = clear); the caller pulls the eye in to
-/// `nearest - skin`.
+/// oriented rects follow. Returns the distance from `pivot` to the nearest wall's
+/// PIVOT-FACING face (its far side, accounting for box thickness) — i.e. the
+/// farthest the eye may sit and still be clear of every wall (0 = clear). The
+/// caller pulls the eye in to `result - skin`.
 pub fn cameraOcclusionStepColliders(
     step_input: []const f32,
     rect_count: usize,
@@ -637,13 +664,19 @@ pub fn cameraOcclusionStepColliders(
     const rect_base = INPUT_HEADER_FLOATS;
     const oriented_base = rect_base + rect_count * RECT_FLOATS;
     if (step_input.len < oriented_base + oriented_count * ORIENTED_FLOATS) return 0;
-    var nearest: f32 = 0;
+    // The eye is clear of EVERY wall on the segment when it sits closer to the
+    // pivot than the nearest wall's pivot-facing (exit) face. A wall is a box
+    // with thickness, so we take the EXIT (span[1]), not the entry — pulling to
+    // the entry leaves the eye inside the wall box (clipping its inner half).
+    // Aggregate by the SMALLEST inner-face distance so a wall near the player
+    // wins over the outer shell.
+    var clear: f32 = -1;
 
     var r: usize = 0;
     while (r < rect_count) : (r += 1) {
         const at = rect_base + r * RECT_FLOATS;
         if (step_input[at + 5] <= 0.5) continue; // solid only
-        if (segmentAabbEntryT(
+        if (segmentAabbSpan(
             cam_x,
             cam_y,
             cam_z,
@@ -656,9 +689,9 @@ pub fn cameraOcclusionStepColliders(
             step_input[at + 2] + radius,
             step_input[at + 4] + radius,
             step_input[at + 3] + radius,
-        )) |entry_t| {
-            const target_distance = segment_len * (1.0 - clamp(entry_t, 0, 1));
-            if (nearest <= 0 or target_distance > nearest) nearest = target_distance;
+        )) |span| {
+            const inner_face = segment_len * (1.0 - span[1]);
+            if (clear < 0 or inner_face < clear) clear = inner_face;
         }
     }
 
@@ -675,7 +708,7 @@ pub fn cameraOcclusionStepColliders(
         var lt_z: f32 = undefined;
         worldToLocal(cam_x, cam_z, step_input[at + 9], step_input[at + 10], cs, sn, &lo_x, &lo_z);
         worldToLocal(pivot_x, pivot_z, step_input[at + 9], step_input[at + 10], cs, sn, &lt_x, &lt_z);
-        if (segmentAabbEntryT(
+        if (segmentAabbSpan(
             lo_x,
             cam_y,
             lo_z,
@@ -688,13 +721,13 @@ pub fn cameraOcclusionStepColliders(
             step_input[at + 2] + radius,
             step_input[at + 4] + radius,
             step_input[at + 3] + radius,
-        )) |entry_t| {
-            const target_distance = segment_len * (1.0 - clamp(entry_t, 0, 1));
-            if (nearest <= 0 or target_distance > nearest) nearest = target_distance;
+        )) |span| {
+            const inner_face = segment_len * (1.0 - span[1]);
+            if (clear < 0 or inner_face < clear) clear = inner_face;
         }
     }
 
-    return nearest;
+    return if (clear < 0) 0 else clear;
 }
 
 pub fn cameraOcclusionConfiguredDistance(
