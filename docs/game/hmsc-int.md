@@ -1433,12 +1433,25 @@ lanes = a one-way road and MUST show direction markers.
   profile's `maxSpeed` DOWN to the route's strictest limit (never up) —
   feed it to planMotion/planMotionWithStops and the schedule obeys the
   posted speed. roadData.test.ts covers point/route/jalopy cases.
+- GRADE MODE (ROADGRADE-0610) — the first elevation slice. `roadGrade.ts`:
+  every restamp smooths the painted heightfield under each stroke's bed —
+  the centerline samples CURRENT terrain at 1-tile steps, a ~12-tile moving
+  average irons potholes while keeping real climbs, the band takes the
+  profile height curb-to-curb (zero crossfall), and a 3-tile smoothstep
+  feather blends the shoulders back to terrain. Pure
+  (`strokeGradeProfile` + `gradeHeightField` over the editor HeightField
+  samples); PaintCanvas.restampRoads runs it after stamping and marks
+  heightDirty so the 3D mirror + colliders follow. Idempotent once graded;
+  deleting a road leaves its earthworks (Ctrl+Z restores heights through
+  the map snapshot). P4: roadGrade.test.ts (4).
 - Known seams: cells over not-yet-added chunks skip the stamp and catch up on
   the next restamp; manual paint UNDER a road footprint is reclaimed by the
-  next restamp; the road LOOK is still the kind colors — the per-tile material
-  stamping (yellow/white overlays from game/textures' road decomposition) and
-  the elevation modes (grade / deck / approach strips / tunnel hole-mask) are
-  the next slices (see project_road_grammar memory: the agreed full design).
+  next restamp; grade recomputes globally per stamp (bbox-clipped per chunk —
+  watch restamp cost on very large networks); the road LOOK is still the kind
+  colors — the per-tile material stamping (yellow/white overlays from
+  game/textures' road decomposition) and the remaining elevation modes
+  (deck / approach strips / tunnel hole-mask) are the next slices (see
+  project_road_grammar memory: the agreed full design).
 
 ## The floor micro-grid + the nav bake (MICROGRID-0610, 2026-06-10)
 

@@ -27,7 +27,8 @@ import { columnLabel } from './address';
 import { CHUNK_FLOOR_HF_RES, downsampleChunkFloorHeights, type ChunkFloor } from './chunkFloor';
 import type { TileKind } from '../hmsc/design';
 import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
-import { TILE_UNITS, DOT_M, HEIGHT_LIMIT, stampBrush, stampRamp, stampSlopeSegment, brushProfile, clearField, type BrushProfile } from './heightData';
+import { TILE_UNITS, DOT_M, DOTS_PER_TILE, HEIGHT_LIMIT, stampBrush, stampRamp, stampSlopeSegment, brushProfile, clearField, type BrushProfile } from './heightData';
+import { gradeHeightField, strokeGradeProfile } from './roadGrade';
 import { footprintDistance, forEachFootprintCell, type BrushMode, type BrushShape } from './brush';
 import { BrushRail, type BrushRailSettings } from './BrushRail';
 import { LayerBtn, MiniStepper, ToolBtn } from './railAtoms';
@@ -1166,6 +1167,31 @@ export function PaintCanvas(props: {
       if (cur === null) continue;
       under.set(key, cur);
       writeWorldCell(gx, gz, tileKindIndex(kind), touched);
+    }
+    // GRADE MODE (ROADGRADE-0610): the road's earthworks — every stroke
+    // smooths the painted heightfield under its bed (zero crossfall, the
+    // longitudinal profile irons potholes, a feather blends the shoulders).
+    // Idempotent once graded; Ctrl+Z restores heights like any height edit.
+    const readWorldHeight = (x: number, z: number): number | null => {
+      const cx = Math.floor(x / CHUNK_TILES), cz = Math.floor(z / CHUNK_TILES);
+      const ch = chunks.get(chunkKey(cx, cz));
+      if (!ch) return null;
+      const jx = Math.round((x - cx * CHUNK_TILES) * DOTS_PER_TILE);
+      const jz = Math.round((z - cz * CHUNK_TILES) * DOTS_PER_TILE);
+      if (jx < 0 || jz < 0 || jx >= ch.height.cols || jz >= ch.height.rows) return null;
+      return ch.height.z[jz * ch.height.cols + jx]!;
+    };
+    const gradeProfiles = next
+      .map((r) => strokeGradeProfile(r, readWorldHeight))
+      .filter((p): p is NonNullable<typeof p> => p !== null);
+    if (gradeProfiles.length) {
+      for (const ch of chunks.values()) {
+        const k = chunkKey(ch.cx, ch.cz);
+        if (gradeHeightField({ profiles: gradeProfiles, field: ch.height, chunkCx: ch.cx, chunkCz: ch.cz, chunkTiles: CHUNK_TILES })) {
+          touched.add(k);
+          heightDirty.current.add(k);
+        }
+      }
     }
     setRoads(next);
     roadsRev.current += 1; // ribbon segs recompute (identity-stable per chunk)
