@@ -28,6 +28,7 @@ const gpu = @import("framework/gpu/gpu.zig");
 const capture = @import("framework/gpu/capture.zig");
 const scene3d = @import("framework/gpu/3d.zig");
 const material_tex = @import("framework/gpu/material_tex.zig");
+const decal_raster = @import("framework/gpu/decal_raster.zig");
 const layout = @import("framework/layout.zig");
 const Node = layout.Node;
 const constructor = @import("framework/world/constructor.zig");
@@ -563,9 +564,9 @@ fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_c
             .count = count,
             .key = key,
             // Translucent flat (glass) = NO look to materialize at all. A
-            // decal material also has empty wgsl but carries baked PIXELS —
+            // decal material also has empty wgsl but carries its packed DOC —
             // it draws in the textured batch like any shader material.
-            .translucent = materials[built].wgsl.len == 0 and materials[built].pixels.len == 0,
+            .translucent = materials[built].wgsl.len == 0 and materials[built].decal_doc.len == 0,
             .opacity = materials[built].opacity,
         };
     }
@@ -1545,10 +1546,11 @@ pub const Runtime = struct {
         try self.build();
     }
 
-    /// Run each face material's SHADER into its texture — or upload its
-    /// editor-baked DECAL PIXELS (DECALPIX-0610) — and install it under the
-    /// batch key (idempotent; needs gpu up, so it runs at first render not
-    /// build). A material that fails to materialize leaves its faces on the
+    /// Run each face material's RECIPE into its texture — a SHADER runs on
+    /// the GPU, a DECAL DOC rasterizes on the CPU (DECALRECIPE-0610,
+    /// gpu/decal_raster.zig) — and install it under the batch key
+    /// (idempotent; needs gpu up, so it runs at first render not build).
+    /// A material that fails to materialize leaves its faces on the
     /// fallback color.
     fn ensureMaterials(self: *Runtime) void {
         if (self.materials_ready) return;
@@ -1556,10 +1558,15 @@ pub const Runtime = struct {
         for (self.scene.materials, 0..) |m, i| {
             var buf: [32]u8 = undefined;
             const key = std.fmt.bufPrint(&buf, "wmat-{d}", .{i}) catch continue;
-            // Decal materials carry pixels instead of a recipe — upload them.
-            if (m.pixels.len > 0) {
-                if (!material_tex.materializePixels(key, m.pixels, m.pix_w, m.pix_h))
-                    log.print("[loader] decal material {d} pixels not installed — faces show fallback color\n", .{i});
+            // Decal materials carry their packed doc — rasterize + upload.
+            if (m.decal_doc.len > 0) {
+                if (decal_raster.rasterize(self.allocator, m.decal_doc)) |raster| {
+                    defer self.allocator.free(raster.rgba);
+                    if (!material_tex.materializePixels(key, raster.rgba, raster.w, raster.h))
+                        log.print("[loader] decal material {d} not installed — faces show fallback color\n", .{i});
+                } else {
+                    log.print("[loader] decal material {d} doc malformed — faces show fallback color\n", .{i});
+                }
                 continue;
             }
             // Translucent flat materials (glass: empty wgsl) have no shader to run —

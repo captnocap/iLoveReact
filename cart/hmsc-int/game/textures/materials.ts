@@ -25,7 +25,6 @@ import { hmscStoreGet, hmscStoreSet } from '../../../hmsc/state/gameState';
 import { busOn, busEmit } from '@reactjit/hooks/useIFTTT';
 import { useEffect, useState } from 'react';
 import { validateDecalDoc, type DecalDoc } from './decal';
-import { validateDecalPixels, type DecalPixels } from './decalPixels';
 
 const STORE_KEY = 'custom-textures';
 const CHANGED = 'hmsc:custom-textures-changed';
@@ -37,13 +36,10 @@ export type CustomTexture = {
   shaderId?: string;
   /** SHADER source: the frozen buildData snapshot */
   data?: number[];
-  /** DECAL source: the composed Box/Text/Image document (re-editable) */
+  /** DECAL source: the composed Box/Text/Image document (re-editable).
+   *  The doc IS what the compiled game ships (DECALRECIPE-0610 — the bake
+   *  packs it; the loader rasterizes it at load). */
   decal?: DecalDoc;
-  /** DECAL source: pixels baked by the editor (DECALPIX-0610, bake-by-
-   *  execution) — what the compiled game ships, since a decal has no WGSL
-   *  recipe. Derived cache: stale whenever pixels.docHash no longer matches
-   *  the doc (the DecalPixelBaker re-captures); the doc stays the source. */
-  pixels?: DecalPixels;
 };
 
 export function loadCustomTextures(): CustomTexture[] {
@@ -60,11 +56,9 @@ export function loadCustomTextures(): CustomTexture[] {
         out.push({ id: t.id, label: t.label, shaderId: t.shaderId, data: t.data });
         continue;
       }
-      // decal record — boundary-validated; a corrupt doc drops the record.
-      // Baked pixels ride along when present (a corrupt payload degrades to
-      // pixel-less, never a dropped decal — the baker just re-captures).
+      // decal record — boundary-validated; a corrupt doc drops the record
       const doc = validateDecalDoc(t.decal);
-      if (doc) out.push({ id: t.id, label: t.label, decal: doc, pixels: validateDecalPixels(t.pixels) });
+      if (doc) out.push({ id: t.id, label: t.label, decal: doc });
     }
     return out;
   } catch {
@@ -109,10 +103,7 @@ export function saveDecalTexture(label: string, doc: DecalDoc, existingId?: stri
   const list = loadCustomTextures();
   const existing = existingId ? list.find((t) => t.id === existingId && t.decal) : undefined;
   if (existing) {
-    // Keep the previous bake's pixels (likely stale now — the DecalPixelBaker
-    // re-captures on the hash mismatch) so a compile between save and re-bake
-    // ships the old look instead of dropping to flat color.
-    const record: CustomTexture = { id: existing.id, label: label.trim() || existing.label, decal: valid, pixels: existing.pixels };
+    const record: CustomTexture = { id: existing.id, label: label.trim() || existing.label, decal: valid };
     write(list.map((t) => (t.id === existing.id ? record : t)));
     return record;
   }
@@ -120,16 +111,6 @@ export function saveDecalTexture(label: string, doc: DecalDoc, existingId?: stri
   const record: CustomTexture = { id, label: label.trim() || id, decal: valid };
   write([...list, record]);
   return record;
-}
-
-// Attach freshly-captured pixels to a stored decal (DECALPIX-0610). Called by
-// the DecalPixelBaker after __surface_readback; a no-op for ids that aren't
-// decal records. Emits the same CHANGED bus event — the baker's staleness
-// check (docHash) makes the resulting re-entry idle, never a loop.
-export function saveDecalPixels(id: string, pixels: DecalPixels): void {
-  const list = loadCustomTextures();
-  if (!list.some((t) => t.id === id && t.decal)) return;
-  write(list.map((t) => (t.id === id && t.decal ? { ...t, pixels } : t)));
 }
 
 export function removeCustomTexture(id: string): void {

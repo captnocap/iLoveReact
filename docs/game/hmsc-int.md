@@ -584,46 +584,41 @@ hmsc-int (the V15 compile direction). GAP edges marked at the import sites
 editor and the V24 piece/voxel-item texture slots land on this door. Full
 lineage table: `game/textures/CAPTURE.md`.
 
-DECALPIX-0610 (2026-06-10, USER ASK req_0566 "inside of the compiled game
-output i am not getting these to show up"): decals now reach the COMPILED
-game. A decal has no WGSL recipe, so the headless bake used to drop
-decal-skinned faces to flat color (the documented captured-pixel-tail gap in
-compile/worldGeometry.ts) — V29 bake-by-execution closes it.
-`DecalPixelBaker.tsx` (mounted in the EditorShell root) renders any stale
-saved decal into an offscreen StaticSurface, reads it back via the host door
-`__capture_surface_pixels` (v8_bindings_capture.zig →
-gpu.readbackStaticSurface — always RGBA, self-describing w/h), writes the
-pixels to disk, and persists a tiny `{w,h,docHash,file}` payload on the
-material record (`saveDecalPixels`; re-save keeps stale pixels until the
-re-bake lands). The bake (compile/worldGeometry.ts `internMaterial`)
-resolves decal customs by loading the file and ships the pixels in the
-MATERIALS lump's optional 'PIXS' tail (pixel-PackBits RLE; encodeMaterials —
-older payloads parse unchanged); the no-V8 loader
-(framework/world/constructor.zig `decodeMaterialPixelTail` →
-material_tex.materializePixels) uploads them under the same `wmat-<i>` key
-shader materials use — textured batch, whitened rows, streaming protos, all
-shared. A decal saved but never re-opened in the editor bakes flat color
-with a `[materials]` warning naming it (open the editor once; the baker
-backfills every stale record automatically).
-
-DECALPIXFILE-0610 (req_0569 "my terminal is just getting spammed" +
-req_0572, same day): the first cut stored the RLE INLINE on the record —
-but the shared localstore caps VALUES at 8KB (storage/localstore.zig
-MAX_VALUE, fixed-width records; hostLocalstoreSet swallows the failure), so
-the ~50KB+ payloads NEVER persisted: the baker re-baked forever (alternating
-terminal spam) and the compile correctly found nothing. Pixels now live as
-FILES under `cart/hmsc-int/data/decal-pixels/<id>.json` (gitignored derived
-cache), in the repo's established rows-of-runs pixel JSON (USER: "if you
-need a format look here → cart/pixel_icons/" — `{width, height, palette,
-rows}` with `[count,value]` runs, null = transparent, '#rrggbbaa' for
-alpha), readable by both the editor host and the v8cli bake through plain
-`__fs_read`. The baker now VERIFIES the store round-trip after every save
-and parks the record with one console.error instead of spinning (never
-trust a save you didn't read back — hostLocalstoreSet is `catch {}`). P4:
-`decalPixels.test.ts` (9 cases: both codecs' round-trips + malformed-input
-rejection, fs-door store/load, refused-write park path, hash staleness) +
-`worldGeometry.test.ts` (the PIXS tail layout + the no-pixels no-tail
-byte-compat case).
+DECALRECIPE-0610 (2026-06-10, USER ASK req_0566 "inside of the compiled
+game output i am not getting these to show up" → req_0574/req_0577 "lets
+follow the guiding light"): decals reach the COMPILED game as their RECIPE.
+A decal's recipe is its DecalDoc — a declarative ~1KB document — so the
+bake ships THE DOC and the loader rasterizes it once at load, exactly the
+shape shader materials already use (materialize-at-load). The lowering:
+`compile/decalPack.ts` packs the validated doc to flat binary (header
+w/h/bg + per-node records; CSS hex resolved to RGBA bytes at PACK time,
+hidden nodes dropped, shader-fill rects substitute their flat color with a
+warn — the WGSL fill and image-node payloads are the marked bake-lever
+tail, image payloads ride the content-addressed asset store next);
+`internMaterial` interns one doc per decal id and `encodeMaterials` ships
+an optional 'DOCS' tail (older payloads parse unchanged). The no-V8 loader
+(constructor.zig `decodeMaterialDocTail` → `framework/gpu/decal_raster.zig`)
+parses + CPU-rasterizes at load — rounded-rect SDF fills/borders, FreeType
+text (lazy TextEngine.initHeadless, weight≥600 → bold face, align/
+letterSpacing honored, uniform scale capped at 1024px) — and uploads via
+`material_tex.materializePixels` under the same `wmat-<i>` key shader
+materials use: textured batch, whitened rows, streaming protos, all shared.
+Pure data → data: no editor dependency, no pixel cache, headless-green
+always. HISTORY (same day, superseded): the first cut baked pixels in the
+editor (`__capture_surface_pixels` readback — the door remains as a general
+capability) and shipped them in a 'PIXS' tail; it hit the localstore's 8KB
+value cap (storage/localstore.zig MAX_VALUE; hostLocalstoreSet swallows
+failures — never store blobs in store values) and was then ruled product-
+not-recipe against GUIDING_LIGHT and replaced wholesale — the
+DecalPixelBaker/pixel-file layer is deleted. GOTCHA found during proof:
+world_loader's `log` is `std.debug` (stderr) but framework modules'
+diag/log `.info` is BUS-ONLY — invisible in the standalone loader; the
+rasterizer's diagnostics use `log.warn` (warns always reach stderr). P4:
+`decalPack.test.ts` (5 cases pinning the byte layout, color resolution,
+hidden-drop, shader-fill substitute) + `worldGeometry.test.ts` (DOCS tail
+framing + no-docs no-tail byte-compat); proof: `rjit game shot` GREEN with
+"2 decal recipe(s)" baked and both real docs parsed end-to-end by the
+loader (the image-skip warns fire per decal).
 
 ## game/build/ — the building piece grammar (V24 capture, 2026-06-04)
 

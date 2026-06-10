@@ -5,13 +5,13 @@
 import { assert, assertClose, assertEqual, finish, test, withHost } from '../game/_testkit';
 import type { PlacedBuildPiece } from '@game';
 import { emptyDecalDoc } from '../game/textures/decal';
-import { decalDocHash, decalPixelsFilePath, encodeDecalPixelFile } from '../game/textures/decalPixels';
+import { packDecalDoc } from './decalPack';
 import {
   buildWorldInstances,
   encodeMaterials,
   INSTANCE_SHAPE_BOX,
   INSTANCE_STRIDE,
-  MATERIALS_PIXEL_TAIL_MAGIC,
+  MATERIALS_DOC_TAIL_MAGIC,
 } from './worldGeometry';
 
 function row(values: Float32Array, index: number): number[] {
@@ -71,19 +71,15 @@ test('compiled floors preserve top, bottom, and edge face skins', () => {
   assertColor(row(built.instances, 2), [51 / 255, 51 / 255, 51 / 255], 'bottom slab');
 });
 
-test('decal materials ship their editor-baked pixels in the MATERIALS lump tail', () => {
-  // A saved decal custom whose record points at its on-disk pixel JSON —
-  // exactly what the DecalPixelBaker persists (DECALPIX/DECALPIXFILE-0610;
-  // the record stays under the localstore's 8KB value cap). 8×8 is the
-  // smallest doc validateDecalDoc admits (it clamps smaller) — the hash must
-  // be computed over the SAME validated doc the bake reloads.
+test('decal materials ship their packed RECIPE in the MATERIALS lump tail', () => {
+  // A saved decal custom straight off the shared 'hmsc' localstore — the
+  // record's DecalDoc IS what ships (DECALRECIPE-0610: store the recipe, not
+  // the product; no editor bake, no fs dependency). 8×8 is the smallest doc
+  // validateDecalDoc admits (it clamps smaller).
   const doc = emptyDecalDoc(8, 8);
-  const rgba = new Uint8Array(8 * 8 * 4);
-  for (let i = 0; i < 64; i += 1) rgba.set([i * 3 & 255, 255 - i, 40, 255], i * 4);
-  const pixelFile = encodeDecalPixelFile(8, 8, rgba);
-  const payload = { w: 8, h: 8, docHash: decalDocHash(doc), file: decalPixelsFilePath('custom:netcafe') };
+  doc.nodes.push({ id: 't', kind: 'text', x: 0, y: 0, w: 8, h: 8, text: 'NC', color: '#ffffff', fontSize: 6 });
   const stored = JSON.stringify([
-    { id: 'custom:netcafe', label: 'NET CAFE', decal: doc, pixels: payload },
+    { id: 'custom:netcafe', label: 'NET CAFE', decal: doc },
   ]);
   const piece: PlacedBuildPiece = {
     id: 'w2',
@@ -97,30 +93,29 @@ test('decal materials ship their editor-baked pixels in the MATERIALS lump tail'
 
   withHost({
     __localstoreGet: (_ns: string, key: string) => (key === 'custom-textures' ? stored : null),
-    __fs_read: (path: string) => (path === payload.file ? pixelFile : null),
   }, () => {
     const built = buildWorldInstances({} as any, [piece], []);
     assertEqual(built.materials.length, 1, 'the decal interned as one material');
-    assert(built.materials[0].pixels !== undefined, 'the material carries pixels, not a recipe');
+    assert(built.materials[0].doc !== undefined, 'the material carries the packed doc — the recipe');
     assertEqual(built.materials[0].wgsl, '', 'no WGSL for a decal');
     assert(built.materialRefs.some((r) => r === 1), 'a face row references the decal slot');
+    const packed = packDecalDoc(doc, 'custom:netcafe');
+    assertEqual(built.materials[0].doc!.byteLength, packed.byteLength, 'the interned doc is the packDecalDoc lowering');
 
     const lump = encodeMaterials(built.materials);
     const view = new DataView(lump.buffer, lump.byteOffset, lump.byteLength);
     assertEqual(view.getUint32(0, true), 1, 'one material in the body');
-    // Body of one pixel material: empty wgsl (4) + empty data (4) + opacity (4).
+    // Body of one doc material: empty wgsl (4) + empty data (4) + opacity (4).
     const tailAt = 4 + 12;
-    assertEqual(view.getUint32(tailAt, true), MATERIALS_PIXEL_TAIL_MAGIC, 'PIXS tail magic follows the body');
-    assertEqual(view.getUint32(tailAt + 4, true), 1, 'one pixel entry');
+    assertEqual(view.getUint32(tailAt, true), MATERIALS_DOC_TAIL_MAGIC, 'DOCS tail magic follows the body');
+    assertEqual(view.getUint32(tailAt + 4, true), 1, 'one doc entry');
     assertEqual(view.getUint32(tailAt + 8, true), 0, 'entry references material 0');
-    assertEqual(view.getUint32(tailAt + 12, true), 8, 'pixel width');
-    assertEqual(view.getUint32(tailAt + 16, true), 8, 'pixel height');
-    const rleLen = view.getUint32(tailAt + 20, true);
-    assertEqual(tailAt + 24 + rleLen, lump.byteLength, 'tail is the end of the lump');
+    assertEqual(view.getUint32(tailAt + 12, true), packed.byteLength, 'doc byte length');
+    assertEqual(tailAt + 16 + packed.byteLength, lump.byteLength, 'tail is the end of the lump');
   });
 });
 
-test('materials without pixels encode with no tail (the pre-decal byte layout)', () => {
+test('materials without docs encode with no tail (the pre-decal byte layout)', () => {
   const lump = encodeMaterials([{ key: 'flat:glass', wgsl: '', data: [], opacity: 0.3 }]);
   assertEqual(lump.byteLength, 4 + 12, 'count + one empty-recipe material, nothing appended');
 });

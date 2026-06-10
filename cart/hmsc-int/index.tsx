@@ -29,7 +29,6 @@ import { useKindTextures, kindTexturesFor } from './kindTextures';
 import { serializeMap, deserializeMap, emptyMap, hasAuthoredMapContent, paintedCenter, isSaneView2d, viewRunawayLogKey, type MapSnapshot, type EditorWorld } from './mapStore';
 import { Chrome, MapsMenu, EventLog } from './shell/chrome';
 import { NotificationOverlayHost } from './shell/notifications';
-import { DecalPixelBaker } from './DecalPixelBaker';
 import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog';
 import { listMaps, uniqueMapName, sanitizeMapName, mapExists, deleteMap } from './projects';
 import { TILE_UNITS, HEIGHT_LIMIT } from './heightData';
@@ -1272,11 +1271,6 @@ function EditorShell() {
       ) : null}
 
       <NotificationOverlayHost simulateRebuildNotice={route.path === '/__rebuild-notify'} />
-
-      {/* Decal pixel bake (DECALPIX-0610): renders saved decals offscreen and
-          persists their pixels so the COMPILED game ships them — the shipped
-          path for materials with no WGSL recipe. Offscreen; never hit-tests. */}
-      <DecalPixelBaker />
     </Box>
   );
 }

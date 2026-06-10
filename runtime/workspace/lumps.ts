@@ -49,12 +49,12 @@ export const MAP_LUMP = {
   // grid plus placement/material metadata; the loader hands it to the native
   // Scene3D heightfield primitive so gpu/3d.zig owns the triangulation.
   HEIGHTFIELDS: 11,
-  // Material vocab: the SHADERS that skin faces, shipped as recipes (WGSL +
-  // data[] params), content-addressed and deduped. The host runs each at load
-  // to a 1-tile texture. See compile/worldGeometry.ts (encodeMaterials).
-  // GUIDING_LIGHT: procedural content travels as its formula. DECALS are the
-  // no-formula case (DECALPIX-0610): authored content the editor baked by
-  // execution (V29) — their pixels ride an optional RLE tail of this lump.
+  // Material vocab: the looks that skin faces, shipped as RECIPES and run by
+  // the host once at load — SHADERS as WGSL + data[] params, DECALS as their
+  // packed DecalDoc (an optional 'DOCS' tail of this lump; the loader
+  // rasterizes it — DECALRECIPE-0610). See compile/worldGeometry.ts
+  // (encodeMaterials) + compile/decalPack.ts. GUIDING_LIGHT: store the
+  // recipe, never the rendered product.
   MATERIALS: 12,
   // Per-instance-row material reference (u32 count | u32[count]); 1-based index
   // into MATERIALS, 0 = flat color. Parallel to INSTANCES rows — the loader

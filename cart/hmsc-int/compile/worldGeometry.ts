@@ -33,7 +33,7 @@ import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
 import { shaderSpec, defaultShaderData } from '@game/textures/shaders';
 import { loadCustomTextures, type CustomTexture } from '@game/textures/materials';
-import { decalDocHash, encodePixelRle, loadDecalPixelsRgba } from '@game/textures/decalPixels';
+import { packDecalDoc } from './decalPack';
 import { textBytes } from '@reactjit/workspace';
 
 export const INSTANCE_STRIDE = 13;
@@ -53,23 +53,23 @@ export const INSTANCE_SHAPE_SPHERE = 4;
 // code are untouched. Both built-in shader-catalog ids AND 'custom:' Materialized
 // SHADER looks resolve in the headless bake (the custom store is plain localstore;
 // loadCustomTextures is React-free).
-// DECAL customs are the exception that proves the rule (DECALPIX-0610): a decal
-// is AUTHORED content with no formula the loader could re-run, so V29's
-// bake-by-execution applies — the EDITOR rendered it once and stored the pixels
-// on the record (materials.ts `pixels`, captured by DecalPixelBaker); the bake
-// ships that RLE payload in the MATERIALS lump's pixel tail and the loader
-// uploads it as the face texture. A decal record with no baked pixels yet still
-// falls back to flat color (warned — open the editor once to bake).
+// DECAL customs ship the same way (DECALRECIPE-0610, GUIDING_LIGHT "store the
+// recipe, not the product"): a decal's recipe is its DecalDoc — a declarative
+// ~1KB document of rects/text/image refs — packed flat by ./decalPack and
+// rasterized ONCE at load by the host's fixed systems (rounded-rect fills,
+// FreeType glyphs — framework/gpu/decal_raster.zig), exactly as shaders are
+// materialized. Pure data → data: no editor bake, no pixel cache, headless
+// green always.
 // A material the host materializes at load. `wgsl` is the shader recipe (empty
 // for a TRANSLUCENT FLAT material like glass — no shader, just a tint + alpha the
 // loader renders through the transparent pass). `opacity` < 1 marks translucency.
-// `pixels` (decals) is the editor-baked texture: pixel-PackBits RLE of w×h RGBA.
+// `doc` (decals) is the packed DecalDoc recipe the loader rasterizes.
 export type MaterialAsset = {
   key: string;
   wgsl: string;
   data: number[];
   opacity: number;
-  pixels?: { w: number; h: number; rle: Uint8Array };
+  doc?: Uint8Array;
 };
 
 // Translucent base materials — their look is an ALPHA, not a texture (glass/
@@ -98,30 +98,14 @@ function resolveMaterialShader(id: string): { wgsl: string; data: number[] } | n
   return null; // decal/react custom — no WGSL to ship (decals resolve as pixels below)
 }
 
-// A DECAL custom's editor-baked pixels (DECALPIX-0610): the rows-of-runs
-// pixel JSON the DecalPixelBaker wrote on disk (DECALPIXFILE-0610 — the
-// record carries only {w,h,docHash,file}; the localstore caps values at 8KB),
-// loaded and re-encoded as the lump's PackBits stream. Null when the record
-// isn't a decal or hasn't been baked yet (the editor bakes on its next boot;
-// until then the face keeps its flat color, warned). Stale pixels (the doc
-// changed since the bake) still ship — the old look beats a blank wall —
-// with a breadcrumb in the bake output.
-function resolveMaterialPixels(id: string): { w: number; h: number; rle: Uint8Array; docHash: string } | null {
+// A DECAL custom's packed recipe (DECALRECIPE-0610): the validated DecalDoc
+// straight off the stored record, lowered to the flat binary the loader
+// rasterizes (./decalPack). Null when the record isn't a decal. No editor
+// dependency, no staleness — the doc on the record IS the source of truth.
+function resolveMaterialDoc(id: string): Uint8Array | null {
   const custom = customById(id);
   if (!custom?.decal) return null;
-  if (!custom.pixels) {
-    console.warn(`[materials] decal ${id} has no baked pixels yet — open the editor once to bake; face ships flat color`);
-    return null;
-  }
-  const rgba = loadDecalPixelsRgba(custom.pixels);
-  if (!rgba) {
-    console.warn(`[materials] decal ${id} pixel file missing/corrupt (${custom.pixels.file}) — face ships flat color`);
-    return null;
-  }
-  if (custom.pixels.docHash !== decalDocHash(custom.decal)) {
-    console.warn(`[materials] decal ${id} pixels are STALE (doc edited since bake) — shipping the previous look`);
-  }
-  return { w: custom.pixels.w, h: custom.pixels.h, rle: encodePixelRle(rgba), docHash: custom.pixels.docHash };
+  return packDecalDoc(custom.decal, id);
 }
 
 // One geometry-build accumulator: the packed instance rows PLUS a parallel
@@ -139,10 +123,10 @@ function newBuild(): Build {
 }
 
 // Resolve a {kind:'material'} skin to its shipped recipe and intern it; return
-// the 1-based vocab slot, or 0 when it can't travel (color skins, or a react/
-// unbaked-decal material the headless bake can't resolve — those keep their
-// flat color). Shader recipes win; a decal's editor-baked pixels are the
-// no-formula path (DECALPIX-0610).
+// the 1-based vocab slot, or 0 when it can't travel (color skins, or a
+// react-facade material the headless bake can't resolve — those keep their
+// flat color). Shader recipes win; a decal ships its packed DecalDoc
+// (DECALRECIPE-0610) for the loader to rasterize at load.
 function internMaterial(b: Build, skin: BuildFaceSkin | undefined): number {
   if (!skin || skin.kind !== 'material') return 0;
   const resolved = resolveMaterialShader(skin.id);
@@ -155,13 +139,15 @@ function internMaterial(b: Build, skin: BuildFaceSkin | undefined): number {
     b.index.set(key, slot);
     return slot;
   }
-  const pixels = resolveMaterialPixels(skin.id);
-  if (!pixels) return 0; // react material / unbaked decal — keep the flat color
-  const key = `pix:${skin.id}|${pixels.docHash}`;
+  // Intern-check BEFORE packing — the doc key is the id alone, so the pack
+  // (and its follow-up warnings) runs once per decal, not once per face.
+  const key = `doc:${skin.id}`;
   const existing = b.index.get(key);
   if (existing !== undefined) return existing;
+  const doc = resolveMaterialDoc(skin.id);
+  if (!doc) return 0; // react-facade material — keeps the flat color
   const slot = b.vocab.length + 1;
-  b.vocab.push({ key, wgsl: '', data: [], opacity: 1, pixels: { w: pixels.w, h: pixels.h, rle: pixels.rle } });
+  b.vocab.push({ key, wgsl: '', data: [], opacity: 1, doc });
   b.index.set(key, slot);
   return slot;
 }
@@ -1026,8 +1012,8 @@ export function encodeMaterialRefs(refs: Uint32Array): Uint8Array {
   return out;
 }
 
-/** The MATERIALS lump's pixel-tail magic ('PIXS' LE) — see encodeMaterials. */
-export const MATERIALS_PIXEL_TAIL_MAGIC = 0x53584950;
+/** The MATERIALS lump's decal-doc tail magic ('DOCS' LE) — see encodeMaterials. */
+export const MATERIALS_DOC_TAIL_MAGIC = 0x53434f44;
 
 /** Encode the materials vocab lump. The body ships RECIPES: u32 count, then
  *  per material: u32 wgsl byte length | wgsl utf8 | u32 data float count |
@@ -1035,19 +1021,19 @@ export const MATERIALS_PIXEL_TAIL_MAGIC = 0x53584950;
  *  texture and samples it on the referencing faces; an empty wgsl with
  *  opacity<1 is a translucent flat material (glass) the host renders
  *  see-through.
- *  DECAL PIXEL TAIL (DECALPIX-0610, appended only when a material carries
- *  editor-baked pixels — older payloads parse unchanged): u32 'PIXS' magic |
- *  u32 entryCount, then per entry: u32 materialIndex (0-based) | u32 w |
- *  u32 h | u32 rleByteLen | pixel-PackBits RGBA bytes (decalPixels.ts; the
- *  loader decodes and uploads — constructor.zig decodeMaterials). */
+ *  DECAL DOC TAIL (DECALRECIPE-0610, appended only when a material carries a
+ *  packed DecalDoc — older payloads parse unchanged): u32 'DOCS' magic |
+ *  u32 entryCount, then per entry: u32 materialIndex (0-based) |
+ *  u32 docByteLen | the packed recipe (./decalPack layout; the loader
+ *  rasterizes it at load — framework/gpu/decal_raster.zig). */
 export function encodeMaterials(materials: readonly MaterialAsset[]): Uint8Array {
   // Bake breadcrumb (captured by the Compile button via 2>&1) so the user can SEE
   // what the data carries — separating "is glass in the gamefile" from "does the
   // loader render it". console.warn → stderr → the bake's merged output.
   const translucent = materials.filter((m) => m.opacity < 1).length;
   const shaders = materials.filter((m) => m.wgsl.length > 0).length;
-  const decals = materials.filter((m) => m.pixels).length;
-  console.warn(`[materials] baked ${materials.length} material(s): ${shaders} shader, ${translucent} translucent, ${decals} decal-pixel`);
+  const decals = materials.filter((m) => m.doc).length;
+  console.warn(`[materials] baked ${materials.length} material(s): ${shaders} shader, ${translucent} translucent, ${decals} decal recipe(s)`);
   // textBytes is the workspace's headless-safe utf8 encoder (the v8cli bake has
   // no TextEncoder; it falls back to encodeURIComponent). WGSL is ASCII anyway.
   const sources = materials.map((m) => textBytes(m.wgsl));
@@ -1058,7 +1044,7 @@ export function encodeMaterials(materials: readonly MaterialAsset[]): Uint8Array
   if (decals > 0) {
     bytes += 8; // tail magic + entry count
     for (const m of materials) {
-      if (m.pixels) bytes += 16 + m.pixels.rle.byteLength;
+      if (m.doc) bytes += 8 + m.doc.byteLength;
     }
   }
   const out = new Uint8Array(bytes);
@@ -1075,16 +1061,14 @@ export function encodeMaterials(materials: readonly MaterialAsset[]): Uint8Array
     view.setFloat32(at, materials[i].opacity, true); at += 4;
   }
   if (decals > 0) {
-    view.setUint32(at, MATERIALS_PIXEL_TAIL_MAGIC, true); at += 4;
+    view.setUint32(at, MATERIALS_DOC_TAIL_MAGIC, true); at += 4;
     view.setUint32(at, decals, true); at += 4;
     for (let i = 0; i < materials.length; i += 1) {
-      const pixels = materials[i].pixels;
-      if (!pixels) continue;
+      const doc = materials[i].doc;
+      if (!doc) continue;
       view.setUint32(at, i, true); at += 4;
-      view.setUint32(at, pixels.w, true); at += 4;
-      view.setUint32(at, pixels.h, true); at += 4;
-      view.setUint32(at, pixels.rle.byteLength, true); at += 4;
-      out.set(pixels.rle, at); at += pixels.rle.byteLength;
+      view.setUint32(at, doc.byteLength, true); at += 4;
+      out.set(doc, at); at += doc.byteLength;
     }
   }
   return out;
