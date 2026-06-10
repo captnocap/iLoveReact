@@ -6,10 +6,13 @@
 // "NET CAFE" walls arriving as blank red boxes in `rjit game play`). V29's
 // bake-by-execution answers it: the EDITOR is the one place that can render a
 // DecalDoc, so the editor renders each saved decal ONCE into an offscreen
-// StaticSurface, reads the pixels back (__surface_readback), and persists them
-// on the material record (materials.ts `pixels`). From there the normal
-// headless bake ships them in the MATERIALS lump and world_loader uploads
-// them — decals arrive exactly like the other materials already do.
+// StaticSurface, reads the pixels back (__capture_surface_pixels), writes the
+// pixels as a rows-of-runs JSON FILE (decalPixels.ts storeDecalPixels — the
+// localstore caps values at 8KB, so blobs go to disk; req_0569), and persists
+// the tiny {w,h,docHash,file} payload on the material record. From there the
+// normal headless bake ships the file's pixels in the MATERIALS lump and
+// world_loader uploads them — decals arrive exactly like the other materials
+// already do.
 //
 // Mounted once in the EditorShell root. Render-nothing-visible: it works
 // through one offscreen capture at a time (left: -99999 — the TextureCapture
@@ -21,8 +24,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { StaticSurface } from '@reactjit/primitives';
 import { readSurfacePixels } from '@reactjit/capture';
-import { saveDecalPixels, useCustomTextures, type CustomTexture } from './game/textures/materials';
-import { decalDocHash, packDecalPixels } from './game/textures/decalPixels';
+import { loadCustomTextures, saveDecalPixels, useCustomTextures, type CustomTexture } from './game/textures/materials';
+import { decalDocHash, storeDecalPixels } from './game/textures/decalPixels';
 import { DecalSurface } from './game/textures/decalRender';
 
 const BAKE_KEY_PREFIX = 'decal-pixbake:';
@@ -63,21 +66,34 @@ export function DecalPixelBaker() {
     const key = `${BAKE_KEY_PREFIX}${id}`;
     let polls = 0;
     let timer: any = null;
+    const park = (why: string) => {
+      console.error(`[decal-bake] ${id} parked: ${why} — will retry when the doc changes`);
+      parked.current.add(`${id}:${hash}`);
+      bump((n) => n + 1); // re-render so the find() skips the parked record
+    };
     const tryRead = () => {
       const pixels = readSurfacePixels(key);
       if (pixels) {
-        const payload = packDecalPixels(doc, pixels.width, pixels.height, pixels.rgba);
-        if (payload) {
-          console.warn(`[decal-bake] ${id} baked ${pixels.width}x${pixels.height} (${payload.data.length}b stored)`);
-          saveDecalPixels(id, payload); // CHANGED bus advances to the next stale record
+        const payload = storeDecalPixels(id, doc, pixels.width, pixels.height, pixels.rgba);
+        if (!payload) {
+          park('pixel file write failed (fs door refused)');
           return;
         }
+        saveDecalPixels(id, payload);
+        // VERIFY the store round-trip (req_0569: an oversized value once
+        // failed hostLocalstoreSet SILENTLY and the baker spun forever —
+        // never trust a save you didn't read back).
+        const persisted = loadCustomTextures().find((t) => t.id === id)?.pixels;
+        if (persisted?.docHash !== hash) {
+          park('store did not persist the payload (localstore write failed?)');
+          return;
+        }
+        console.warn(`[decal-bake] ${id} baked ${pixels.width}x${pixels.height} → ${payload.file}`);
+        return; // CHANGED bus advances to the next stale record
       }
       polls += 1;
       if (polls >= MAX_POLLS) {
-        console.warn(`[decal-bake] ${id} did not read back after ${MAX_POLLS} tries — parked until the doc changes`);
-        parked.current.add(`${id}:${hash}`);
-        bump((n) => n + 1); // re-render so the find() skips the parked record
+        park(`did not read back after ${MAX_POLLS} tries`);
         return;
       }
       timer = setTimeout(tryRead, POLL_MS);

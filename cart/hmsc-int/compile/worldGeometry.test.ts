@@ -5,7 +5,7 @@
 import { assert, assertClose, assertEqual, finish, test, withHost } from '../game/_testkit';
 import type { PlacedBuildPiece } from '@game';
 import { emptyDecalDoc } from '../game/textures/decal';
-import { packDecalPixels } from '../game/textures/decalPixels';
+import { decalDocHash, decalPixelsFilePath, encodeDecalPixelFile } from '../game/textures/decalPixels';
 import {
   buildWorldInstances,
   encodeMaterials,
@@ -72,15 +72,16 @@ test('compiled floors preserve top, bottom, and edge face skins', () => {
 });
 
 test('decal materials ship their editor-baked pixels in the MATERIALS lump tail', () => {
-  // A saved decal custom with baked pixels in the shared 'hmsc' localstore —
-  // exactly what the DecalPixelBaker persists (DECALPIX-0610). 8×8 is the
+  // A saved decal custom whose record points at its on-disk pixel JSON —
+  // exactly what the DecalPixelBaker persists (DECALPIX/DECALPIXFILE-0610;
+  // the record stays under the localstore's 8KB value cap). 8×8 is the
   // smallest doc validateDecalDoc admits (it clamps smaller) — the hash must
   // be computed over the SAME validated doc the bake reloads.
   const doc = emptyDecalDoc(8, 8);
   const rgba = new Uint8Array(8 * 8 * 4);
   for (let i = 0; i < 64; i += 1) rgba.set([i * 3 & 255, 255 - i, 40, 255], i * 4);
-  const payload = packDecalPixels(doc, 8, 8, rgba);
-  assert(payload !== null, 'capture packs');
+  const pixelFile = encodeDecalPixelFile(8, 8, rgba);
+  const payload = { w: 8, h: 8, docHash: decalDocHash(doc), file: decalPixelsFilePath('custom:netcafe') };
   const stored = JSON.stringify([
     { id: 'custom:netcafe', label: 'NET CAFE', decal: doc, pixels: payload },
   ]);
@@ -94,7 +95,10 @@ test('decal materials ship their editor-baked pixels in the MATERIALS lump tail'
     skin: { front: { kind: 'material', id: 'custom:netcafe' } },
   };
 
-  withHost({ __localstoreGet: (_ns: string, key: string) => (key === 'custom-textures' ? stored : null) }, () => {
+  withHost({
+    __localstoreGet: (_ns: string, key: string) => (key === 'custom-textures' ? stored : null),
+    __fs_read: (path: string) => (path === payload.file ? pixelFile : null),
+  }, () => {
     const built = buildWorldInstances({} as any, [piece], []);
     assertEqual(built.materials.length, 1, 'the decal interned as one material');
     assert(built.materials[0].pixels !== undefined, 'the material carries pixels, not a recipe');

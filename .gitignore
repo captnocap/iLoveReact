@@ -327,3 +327,6 @@ cart/hmsc-int/data/streams/
 cart/hmsc-int/data/snapshots/
 cart/hmsc-int/data/domains/*/streams/
 cart/hmsc-int/data/domains/*/snapshots/
+# Editor-baked decal pixel files (DECALPIXFILE-0610) — derived cache the
+# DecalPixelBaker regenerates from the stored DecalDocs; never git's.
+cart/hmsc-int/data/decal-pixels/

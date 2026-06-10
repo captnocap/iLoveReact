@@ -33,7 +33,7 @@ import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
 import { shaderSpec, defaultShaderData } from '@game/textures/shaders';
 import { loadCustomTextures, type CustomTexture } from '@game/textures/materials';
-import { decalDocHash, decalPixelsRle } from '@game/textures/decalPixels';
+import { decalDocHash, encodePixelRle, loadDecalPixelsRgba } from '@game/textures/decalPixels';
 import { textBytes } from '@reactjit/workspace';
 
 export const INSTANCE_STRIDE = 13;
@@ -98,12 +98,14 @@ function resolveMaterialShader(id: string): { wgsl: string; data: number[] } | n
   return null; // decal/react custom — no WGSL to ship (decals resolve as pixels below)
 }
 
-// A DECAL custom's editor-baked pixels (DECALPIX-0610): the RLE payload the
-// DecalPixelBaker stored on the record, decoded from its base64 transport.
-// Null when the record isn't a decal or hasn't been baked yet (the editor
-// bakes on its next boot; until then the face keeps its flat color, warned).
-// Stale pixels (the doc changed since the bake) still ship — the old look
-// beats a blank wall — with a breadcrumb in the bake output.
+// A DECAL custom's editor-baked pixels (DECALPIX-0610): the rows-of-runs
+// pixel JSON the DecalPixelBaker wrote on disk (DECALPIXFILE-0610 — the
+// record carries only {w,h,docHash,file}; the localstore caps values at 8KB),
+// loaded and re-encoded as the lump's PackBits stream. Null when the record
+// isn't a decal or hasn't been baked yet (the editor bakes on its next boot;
+// until then the face keeps its flat color, warned). Stale pixels (the doc
+// changed since the bake) still ship — the old look beats a blank wall —
+// with a breadcrumb in the bake output.
 function resolveMaterialPixels(id: string): { w: number; h: number; rle: Uint8Array; docHash: string } | null {
   const custom = customById(id);
   if (!custom?.decal) return null;
@@ -111,15 +113,15 @@ function resolveMaterialPixels(id: string): { w: number; h: number; rle: Uint8Ar
     console.warn(`[materials] decal ${id} has no baked pixels yet — open the editor once to bake; face ships flat color`);
     return null;
   }
-  const rle = decalPixelsRle(custom.pixels);
-  if (!rle) {
-    console.warn(`[materials] decal ${id} pixel payload is corrupt — face ships flat color`);
+  const rgba = loadDecalPixelsRgba(custom.pixels);
+  if (!rgba) {
+    console.warn(`[materials] decal ${id} pixel file missing/corrupt (${custom.pixels.file}) — face ships flat color`);
     return null;
   }
   if (custom.pixels.docHash !== decalDocHash(custom.decal)) {
     console.warn(`[materials] decal ${id} pixels are STALE (doc edited since bake) — shipping the previous look`);
   }
-  return { w: custom.pixels.w, h: custom.pixels.h, rle, docHash: custom.pixels.docHash };
+  return { w: custom.pixels.w, h: custom.pixels.h, rle: encodePixelRle(rgba), docHash: custom.pixels.docHash };
 }
 
 // One geometry-build accumulator: the packed instance rows PLUS a parallel
