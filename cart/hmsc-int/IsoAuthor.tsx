@@ -90,6 +90,10 @@ export interface IsoAuthorProps {
   // cart already funnels F2 placements through. This pane is just another caller.
   pieces: readonly PlacedBuildPiece[];
   onCommit: (event: WorldEvent, label: string) => void;
+  // Batch commit: many events as ONE undoable action with ONE store snapshot. Bulk ops
+  // (move/clone/delete a whole building) use this so they don't freeze the editor with
+  // a snapshot per piece. Absent (older host) → the pane falls back to per-event onCommit.
+  onCommitMany?: (items: ReadonlyArray<{ event: WorldEvent; label: string }>) => void;
   // The FULL prefab list — built-ins AND the user-captured (stream) prefabs the cart
   // already merges for F2. The rail shows these; absent = built-ins only.
   prefabs?: readonly BuildPrefabDef[];
@@ -103,6 +107,14 @@ export interface IsoAuthorProps {
 
 export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const { state, pieces, onCommit } = props;
+  // Commit many events as ONE undoable action (one store snapshot) when the host offers
+  // it; else fall back to per-event onCommit. Move/clone/delete-building route through
+  // this so a big building doesn't freeze on a snapshot-per-piece.
+  const commitBatch = useCallback((items: ReadonlyArray<{ event: WorldEvent; label: string }>) => {
+    if (!items.length) return;
+    if (props.onCommitMany) props.onCommitMany(items);
+    else for (const it of items) onCommit(it.event, it.label);
+  }, [props.onCommitMany, onCommit]);
   const prefabs = props.prefabs ?? GAME_BUILD.prefabs.ids.map((id) => GAME_BUILD.prefabs.get(id));
   // Prefab def by id (built-in + stream), for the ghost/stamp/label — a stream prefab
   // isn't in GAME_BUILD.prefabs, so look it up here. A ref too: placeAt runs from an
@@ -303,7 +315,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const deleteSelected = () => {
     const ids = [...selectedIdsRef.current];
     if (!ids.length) return;
-    for (const id of ids) onCommit({ kind: 'pieceRemoved', id }, `removed ${id}`);
+    commitBatch(ids.map((id) => ({ event: { kind: 'pieceRemoved', id } as WorldEvent, label: `removed ${id}` })));
     setSelectedIds(new Set());
   };
   // Duplicate the selection beside itself: re-emit piecePlaced for each piece, shifted
@@ -314,14 +326,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     let minX = Infinity, maxX = -Infinity;
     for (const p of sel) { const b = GAME_BUILD.placed.bounds(p); minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX); }
     const dx = (maxX - minX) + state.world.cellSizeMeters;
-    for (const p of sel) {
-      // Spread the whole piece (minus the stream-minted id) so the copy keeps its
-      // per-face skin/materials and any wall edit — only the X position shifts. Drop
-      // the stamp grouping so a clone is an independent piece, not a phantom member of
-      // the original's prefab stamp.
-      const { id, stampId, ...rest } = p;
-      onCommit({ kind: 'piecePlaced', placement: { ...rest, x: p.x + dx } }, `cloned ${p.pieceId}`);
-    }
+    // Spread the whole piece (minus the stream-minted id) so each copy keeps its per-face
+    // skin/materials and any wall edit — only the X position shifts. Drop the stamp
+    // grouping so a clone is an independent piece, not a phantom member of the original's
+    // prefab stamp. One batch → one undo step, one snapshot.
+    commitBatch(sel.map((p) => { const { id, stampId, ...rest } = p; return { event: { kind: 'piecePlaced', placement: { ...rest, x: p.x + dx } } as WorldEvent, label: `cloned ${p.pieceId}` }; }));
   };
   // Commit a finished move drag: shift every selected piece by the dragged world delta.
   // There's no pieceMoved event (that'd touch the shared stream + F2 + compile) — a move
@@ -341,8 +350,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // face material on move.)
     const moves = sel.map((p) => { const { id, ...rest } = p; return { id, placement: { ...rest, x: p.x + delta.dx, z: p.z + delta.dz } }; });
     if (moves.some((m) => GAME_BUILD.placed.validatePlacement(m.placement).length > 0)) return;
-    for (const m of moves) onCommit({ kind: 'pieceRemoved', id: m.id }, `moved ${m.id}`);
-    for (const m of moves) onCommit({ kind: 'piecePlaced', placement: m.placement }, `moved ${m.placement.pieceId}`);
+    // One batch: all removes then all places (the SAME two events delete/clone emit) →
+    // one undo step, one store snapshot, so moving a whole building doesn't freeze.
+    commitBatch([
+      ...moves.map((m) => ({ event: { kind: 'pieceRemoved', id: m.id } as WorldEvent, label: `moved ${m.id}` })),
+      ...moves.map((m) => ({ event: { kind: 'piecePlaced', placement: m.placement } as WorldEvent, label: `moved ${m.placement.pieceId}` })),
+    ]);
     setSelectedIds(new Set());
   };
 

@@ -51,7 +51,7 @@ import { LABS } from './labs';
 import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
 import { editorTunables, tuningStream } from './editors/tunables';
-import { GAME_BUILD, piecesForMap, worldStream, type BuildPrefabDef, type WorldEvent, type WorldStreamState } from './game';
+import { GAME_BUILD, pieceMutationMapName, piecesForMap, worldStream, type BuildPrefabDef, type PlacedBuildPiece, type WorldEvent, type WorldStreamState } from './game';
 import { graphToBuildWorld, mapBuildFootprints, mapBuildPlaceable } from './mapBuildPlacements';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
@@ -102,6 +102,50 @@ interface MapPayload {
   view2d?: CanvasView2D;               // the 2D canvas camera (MAPGONE2-0605:
                                        // unrestored, every remount snapped the
                                        // viewport to the lattice origin)
+  pieces?: PlacedBuildPiece[];         // this map's build pieces AS OF the snapshot —
+                                       // carried so Ctrl+Z reverts building edits;
+                                       // only read on a 'history' apply (undo/redo),
+                                       // inert on restore (the live worldStream wins)
+}
+
+// A build piece's VALUE identity (everything but its stream-minted id), so undo can
+// reconcile by value: replaying history mints fresh ids, so the snapshot's pieces never
+// match the live ones by id — only by what they ARE (kind, pose, edit, material skin).
+function pieceValueKey(p: Omit<PlacedBuildPiece, 'id'>): string {
+  return `${p.pieceId}|${p.x}|${p.y}|${p.z}|${p.yawDegrees}|${p.edit ?? ''}|${p.skin ? JSON.stringify(p.skin) : ''}`;
+}
+
+// The minimal place/remove set to turn `current` into `target` (both this-map pieces),
+// matched as multisets by value key — so an undo only touches the pieces that actually
+// differ, leaving the rest of the map alone. removes carry live ids; places carry the
+// target piece data minus its id (the stream mints a new one on replay).
+function reconcileBuildPieces(
+  current: readonly PlacedBuildPiece[],
+  target: readonly PlacedBuildPiece[],
+): { removes: string[]; places: Omit<PlacedBuildPiece, 'id'>[] } {
+  const curByKey = new Map<string, string[]>();
+  for (const p of current) {
+    const k = pieceValueKey(p);
+    const ids = curByKey.get(k);
+    if (ids) ids.push(p.id); else curByKey.set(k, [p.id]);
+  }
+  const tgtByKey = new Map<string, PlacedBuildPiece[]>();
+  for (const p of target) {
+    const k = pieceValueKey(p);
+    const ps = tgtByKey.get(k);
+    if (ps) ps.push(p); else tgtByKey.set(k, [p]);
+  }
+  const removes: string[] = [];
+  for (const [k, ids] of curByKey) {
+    const keep = tgtByKey.get(k)?.length ?? 0;
+    for (let i = keep; i < ids.length; i += 1) removes.push(ids[i]);
+  }
+  const places: Omit<PlacedBuildPiece, 'id'>[] = [];
+  for (const [k, ps] of tgtByKey) {
+    const have = curByKey.get(k)?.length ?? 0;
+    for (let i = have; i < ps.length; i += 1) { const { id, ...rest } = ps[i]; places.push(rest); }
+  }
+  return { removes, places };
 }
 
 function clampFrac(f: number): number {
@@ -291,11 +335,6 @@ function EditorShell() {
 
   const placeSeq = useRef(0);
   const [placements, setPlacements] = useState<Placement[]>([]);
-  // The bottom-right 3D pane has two modes: 'inspect' (FreeFly walk-around, good for
-  // a sense of size on foot) and 'build' (the Sims-style iso authoring view, good for
-  // laying out / customizing at scale). USER RULING req_0390: build mode is for doing
-  // anything at scale; on-foot is for checking the feel.
-  const [previewMode, setPreviewMode] = useState<'inspect' | 'build'>('inspect');
   const [selPlaceId, setSelPlaceId] = useState<string | null>(() => initial.sel ?? null);
   const [selBuildId, setSelBuildId] = useState<string | null>(null);
   const [activePlaceable, setActivePlaceable] = useState<{ cat: PlaceCat; kind: string; label: string; color: string; footW: number; footD: number; rotation: number } | null>(null);
@@ -342,6 +381,13 @@ function EditorShell() {
     setWorldRev((r) => r + 1);
   }, [selCells]);
 
+  // Build-piece undo wiring (set further down, once worldSession/streamState exist).
+  // buildPiecesRef feeds the current pieces into buildPayload (defined before they're
+  // computed); reconcileBuildUndoRef carries the apply-side reconcile so applyPayload
+  // (empty-dep, ref-driven) can revert build edits on Ctrl+Z without a circular dep.
+  const buildPiecesRef = useRef<PlacedBuildPiece[]>([]);
+  const reconcileBuildUndoRef = useRef<(target: PlacedBuildPiece[] | undefined, reason?: 'restore' | 'history') => void>(() => {});
+
   // ── Persistence: build / apply the whole map payload ──────────────────────────
   const buildPayload = useCallback((): MapPayload | null => {
     const api = paintApiRef.current;
@@ -363,7 +409,7 @@ function EditorShell() {
     } else if (view2d) {
       lastViewRunawayWarn.current = null;
     }
-    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides), brush: brushRef.current, view2d };
+    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides), brush: brushRef.current, view2d, pieces: buildPiecesRef.current };
   }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, selPlaceId, wasdQuad, overrides]);
 
   const applyPayload = useCallback((env: SessionEnvelope<MapPayload>, reason?: 'restore' | 'history') => {
@@ -419,6 +465,11 @@ function EditorShell() {
     console.warn(`[mapgone] applyPayload: view2d=${p.view2d ? (savedSane ? 'saved' : 'saved-INSANE') : 'absent'} → seedView=${applyTwig && restoredView ? `${restoredView.x.toFixed(0)},${restoredView.y.toFixed(0)}@${restoredView.zoom.toFixed(2)}` : applyTwig ? 'host default' : 'preserved (history apply)'}`);
     setSeedWorld(w);
     setWorldEpoch((e) => e + 1);
+    // Build pieces ride the worldStream, not the map payload — so an undo/redo (history)
+    // reverts them by appending the compensating place/remove events to reach the
+    // snapshot's piece set. Only on 'history'; a restore/map-switch leaves the live
+    // stream alone. (No-op until the wiring below is set this render.)
+    reconcileBuildUndoRef.current(p.pieces, reason);
   }, []);
 
   const ws = useWorkspace<MapPayload>({
@@ -539,6 +590,7 @@ function EditorShell() {
     return Object.values(merged).filter((def) => !removed.has(def.id)).sort((a, b) => a.label.localeCompare(b.label));
   })();
   const buildPieces = piecesForMap(streamState, ws.stem, { legacyMapName: legacyPieceMapName });
+  buildPiecesRef.current = buildPieces; // feed the current pieces into buildPayload's snapshot
   const buildFootprints = mapBuildFootprints(buildPieces);
 
   // PaintCanvas reports each edit with a semantic note (or none for silent edits like
@@ -661,23 +713,67 @@ function EditorShell() {
   const labelOf = (id: string) => placementsRef.current.find((p) => p.id === id)?.label ?? 'object';
   const buildingLabelOf = (id: string) => buildFootprintsRef.current.find((p) => p.id === id)?.label ?? 'building';
 
+  // Tag a build event with the map it belongs to (places/stamps go to the active
+  // stem; removes/edits resolve the owning map from the existing piece). Shared by the
+  // single and batch commit paths so they scope identically.
+  const scopeBuildEvent = useCallback((event: WorldEvent): WorldEvent => {
+    switch (event.kind) {
+      case 'piecePlaced':
+      case 'prefabStamped':
+        return { ...event, mapName: ws.stem } as WorldEvent;
+      case 'pieceRemoved':
+      case 'pieceEditSet': {
+        const mapName = pieceMutationMapName(streamState, ws.stem, legacyPieceMapName, event.id);
+        return mapName ? ({ ...event, mapName } as WorldEvent) : event;
+      }
+      default:
+        return event;
+    }
+  }, [ws.stem, streamState, legacyPieceMapName]);
+
   const commitBuildEvent = useCallback((event: WorldEvent, label: string) => {
     if (!worldSession) return false;
-    const scoped = (() => {
-      switch (event.kind) {
-        case 'piecePlaced':
-        case 'pieceRemoved':
-        case 'pieceEditSet':
-        case 'prefabStamped':
-          return { ...event, mapName: ws.stem } as WorldEvent;
-        default:
-          return event;
-      }
-    })();
-    worldSession.commit(scoped, label);
+    snapshotForUndo(); // record the pre-edit state so Ctrl+Z reverts this build edit
+    worldSession.commit(scopeBuildEvent(event), label);
     setMapBuildRev((r) => r + 1);
     return true;
-  }, [worldSession, ws.stem]);
+  }, [worldSession, scopeBuildEvent, snapshotForUndo]);
+
+  // MANY build events as ONE undoable action: snapshot once, append every event with a
+  // SINGLE store snapshot pass (RouteSession.commitMany), bump once. Without this a
+  // bulk op (move/clone/delete a 352-piece building = hundreds of events) re-materialized
+  // the whole store per event and froze the editor — and undo would step one piece at a
+  // time. Falls back to a per-event loop if the session predates commitMany.
+  const commitBuildEvents = useCallback((items: ReadonlyArray<{ event: WorldEvent; label: string }>) => {
+    if (!worldSession || !items.length) return false;
+    snapshotForUndo();
+    const scoped = items.map((it) => ({ event: scopeBuildEvent(it.event), label: it.label }));
+    const many = (worldSession as { commitMany?: (xs: typeof scoped) => unknown }).commitMany;
+    if (typeof many === 'function') many.call(worldSession, scoped);
+    else for (const s of scoped) worldSession.commit(s.event, s.label);
+    setMapBuildRev((r) => r + 1);
+    return true;
+  }, [worldSession, scopeBuildEvent, snapshotForUndo]);
+
+  // The apply-side of build undo, refreshed each render so applyPayload (empty-dep) can
+  // call the latest through reconcileBuildUndoRef. On a 'history' apply only: diff the
+  // live pieces against the snapshot's and append the compensating place/remove events
+  // (one batch, one snapshot) so the worldStream returns to the snapshot's piece set.
+  // Does NOT snapshotForUndo — an undo must not itself record an undo step.
+  reconcileBuildUndoRef.current = (target, reason) => {
+    if (reason !== 'history' || !worldSession || !Array.isArray(target)) return;
+    const current = piecesForMap(streamState, ws.stem, { legacyMapName: legacyPieceMapName });
+    const { removes, places } = reconcileBuildPieces(current, target);
+    if (!removes.length && !places.length) return;
+    const events = [
+      ...removes.map((id) => ({ event: scopeBuildEvent({ kind: 'pieceRemoved', id }), label: 'undo: remove piece' })),
+      ...places.map((placement) => ({ event: scopeBuildEvent({ kind: 'piecePlaced', placement }), label: 'undo: place piece' })),
+    ];
+    const many = (worldSession as { commitMany?: (xs: typeof events) => unknown }).commitMany;
+    if (typeof many === 'function') many.call(worldSession, events);
+    else for (const e of events) worldSession.commit(e.event, e.label);
+    setMapBuildRev((r) => r + 1);
+  };
 
   const armPlaceable = useCallback((cat: PlaceCat, kind: string) => {
     if (cat === 'building') {
@@ -775,10 +871,12 @@ function EditorShell() {
   const removeBuildPlacement = useCallback((id: string) => {
     const fp = buildFootprintsRef.current.find((p) => p.id === id);
     if (!fp) return;
-    for (const pieceId of fp.pieceIds) commitBuildEvent({ kind: 'pieceRemoved', id: pieceId }, `${ws.stem}: object: removed ${fp.label}`);
+    // ONE batch (one snapshot, one undo step) — deleting a big building was N per-piece
+    // commits, each re-materializing the store.
+    commitBuildEvents(fp.pieceIds.map((pieceId) => ({ event: { kind: 'pieceRemoved', id: pieceId } as WorldEvent, label: `${ws.stem}: object: removed ${fp.label}` })));
     logEvent({ cat: 'object', text: `removed ${fp.label}` });
     setSelBuildId((s) => (s === id ? null : s));
-  }, [commitBuildEvent, ws.stem, logEvent]);
+  }, [commitBuildEvents, ws.stem, logEvent]);
   const clonePlacement = useCallback((id: string) => {
     snapshotForUndo(); // pre-clone
     logEvent({ cat: 'object', text: `cloned ${labelOf(id)}` });
@@ -1022,39 +1120,20 @@ function EditorShell() {
               />
             }
             bottomRight={
-              <Pane label={previewMode === 'build' ? 'build' : 'preview'}>
-                <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
-                  {previewMode === 'build' ? (
-                    <IsoAuthor
-                      key={`${ws.stem}#${worldEpoch}`}
-                      state={previewWorld}
-                      pieces={buildPieces}
-                      onCommit={commitBuildEvent}
-                      focused={atEditor && wasdQuad === 'preview'}
-                      onFocus={focusPreview}
-                    />
-                  ) : (
-                    <IsoPreview
-                      key={`${ws.stem}#${worldEpoch}`}
-                      state={previewWorld}
-                      wasdFocused={atEditor && wasdQuad === 'preview'}
-                      onWasdFocus={focusPreview}
-                      initialCamera={seedCam}
-                      cameraApiRef={camApiRef}
-                      onCameraSettle={onCameraSettle}
-                    />
-                  )}
-                  {/* pane chrome: flip between on-foot inspect and iso build authoring */}
-                  <Box style={{ position: 'absolute', left: 8, top: 8, flexDirection: 'row', gap: 4 }}>
-                    {(['inspect', 'build'] as const).map((m) => (
-                      <Pressable key={m} onPress={() => setPreviewMode(m)}>
-                        <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: previewMode === m ? '#1d4ed8' : '#1e293bcc' }}>
-                          <Text fontSize={10} color={previewMode === m ? '#e0f2fe' : '#94a3b8'} style={{ fontFamily: 'monospace' }}>{m}</Text>
-                        </Box>
-                      </Pressable>
-                    ))}
-                  </Box>
-                </Box>
+              // Build-only: the on-foot 'inspect' (FreeFly) view is retired here — the
+              // iso authoring view is the bottom-right pane (USER req_0424). On-foot lives
+              // on the /test route (F1/F2).
+              <Pane label="build">
+                <IsoAuthor
+                  key={`${ws.stem}#${worldEpoch}`}
+                  state={previewWorld}
+                  pieces={buildPieces}
+                  prefabs={buildingPrefabs}
+                  onCommit={commitBuildEvent}
+                  onCommitMany={commitBuildEvents}
+                  focused={atEditor && wasdQuad === 'preview'}
+                  onFocus={focusPreview}
+                />
               </Pane>
             }
           />
