@@ -553,7 +553,14 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         // anything built onto them lines up. cellSizeMeters is the build grid pitch.
         if (g) {
           const cs = state.world.cellSizeMeters || 1;
-          setMoveDelta({ dx: Math.round((g.x - d.gx0) / cs) * cs, dz: Math.round((g.z - d.gz0) / cs) * cs });
+          const dx = Math.round((g.x - d.gx0) / cs) * cs;
+          const dz = Math.round((g.z - d.gz0) / cs) * cs;
+          // Only update when the SNAPPED delta actually changes (req_0503):
+          // a fresh {dx,dz} per raw mouse event re-rendered the whole pane +
+          // rebuilt the 179-piece move ghost even while the drag sat inside
+          // one cell — the same no-op-update class the paint drag had.
+          const cur = moveDeltaRef.current;
+          if (!cur || cur.dx !== dx || cur.dz !== dz) setMoveDelta({ dx, dz });
         }
       } else {
         stage.rotateBy((p.x - d.x) * 0.3); // horizontal drag → yaw
