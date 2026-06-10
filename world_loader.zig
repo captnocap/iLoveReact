@@ -2048,7 +2048,13 @@ pub const Runtime = struct {
                 .scene3d_mesh = true,
                 .scene3d_geom_key = proto.geom_key,
                 .scene3d_vertices = proto.verts,
-                .scene3d_vert_count = 36,
+                // The proto's OWN vertex count (8 floats per vert) — a box is
+                // 36 but sphere/cylinder families are not; the hardcoded 36
+                // here drew only a sphere's first polar ring (bushes rendered
+                // as flat leaf shards) and three of a cylinder's eight
+                // segments (props lost their backs) once prop shapes joined
+                // the streamed families (BUSHFLAT-0610).
+                .scene3d_vert_count = @intCast(proto.verts.len / 8),
                 .scene3d_instance_data = fam.rows,
                 .scene3d_instance_count = d.range.count,
                 .scene3d_instance_first = d.range.first,
