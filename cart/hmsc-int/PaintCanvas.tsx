@@ -178,33 +178,6 @@ function roadDots(points: RoadPoint[], everyTiles: number): { x: number; z: numb
   return out;
 }
 
-// Per-LANE wire dots (req_0528): each lane's centre offset from the stroke,
-// sampled along every segment with that segment's quantized right vector —
-// the same math the stamp uses, so the wire sits exactly on the lane it marks.
-function laneWireDots(r: RoadStroke, everyTiles: number): { x: number; z: number; flow: 'forward' | 'backward' }[] {
-  const guides = laneGuides(r.profile);
-  const out: { x: number; z: number; flow: 'forward' | 'backward' }[] = [];
-  for (let i = 0; i + 1 < r.points.length; i++) {
-    const a = r.points[i]!, b = r.points[i + 1]!;
-    const dx = b.gx - a.gx, dz = b.gz - a.gz;
-    const len = Math.hypot(dx, dz);
-    if (!len) continue;
-    const dir = Math.abs(dx) >= Math.abs(dz) ? { dx: Math.sign(dx), dz: 0 } : { dx: 0, dz: Math.sign(dz) };
-    const right = { dx: -dir.dz, dz: dir.dx };
-    const n = Math.max(1, Math.round(len / everyTiles));
-    for (const g of guides) {
-      for (let s = 0; s <= n; s++) {
-        out.push({
-          x: a.gx + dx * (s / n) + right.dx * g.off,
-          z: a.gz + dz * (s / n) + right.dz * g.off,
-          flow: g.flow,
-        });
-      }
-    }
-  }
-  return out;
-}
-
 // One-way direction markers: an ASCII chevron per segment midpoint, pointed
 // along the traffic flow (flipped when the forward side is the disabled one).
 function roadChevrons(r: RoadStroke): { gx: number; gz: number; glyph: string }[] {
@@ -223,6 +196,37 @@ function roadChevrons(r: RoadStroke): { gx: number; gz: number; glyph: string }[
 // Global cell → graph centre (the selection-highlight formula: chunk (cx,cz) is
 // CENTRED at cx·PATCH, so cell g sits at (g − CHUNK_TILES/2 + 0.5)·TILE_UNITS).
 const cellGraph = (g: number): number => (g - CHUNK_TILES / 2 + 0.5) * TILE_UNITS;
+
+// Road authoring wires as POLYLINE paths, not per-dot Canvas.Nodes (OVERFLOW-0610):
+// a long road's wire dots numbered in the hundreds, and with flow arrows ALSO on
+// the road overlay blew past the host's 512-children-per-container cap
+// (layout_refactor MAX_CHILDREN), which SILENTLY drops the overflow — so both
+// overlays vanished. One Canvas.Path per stroke/lane is ~3 nodes total and scales
+// to any road length. Coords are baked into the SVG `d` in graph space.
+function roadCenterPathD(points: RoadPoint[]): string {
+  if (points.length < 2) return '';
+  let d = `M ${cellGraph(points[0]!.gx)} ${cellGraph(points[0]!.gz)}`;
+  for (let i = 1; i < points.length; i += 1) d += ` L ${cellGraph(points[i]!.gx)} ${cellGraph(points[i]!.gz)}`;
+  return d;
+}
+// One lane's wire: each segment offset by THAT segment's axis-quantized right
+// vector (the same math the stamp + laneFlowArrows use), emitted as an independent
+// M/L subpath so corners don't smear between differing right vectors.
+function laneWirePathD(points: RoadPoint[], off: number): string {
+  let d = '';
+  for (let i = 0; i + 1 < points.length; i += 1) {
+    const a = points[i]!;
+    const b = points[i + 1]!;
+    const dx = b.gx - a.gx;
+    const dz = b.gz - a.gz;
+    if (!Math.hypot(dx, dz)) continue;
+    const dir = Math.abs(dx) >= Math.abs(dz) ? { dx: Math.sign(dx), dz: 0 } : { dx: 0, dz: Math.sign(dz) };
+    const rx = -dir.dz;
+    const rz = dir.dx;
+    d += `M ${cellGraph(a.gx + rx * off)} ${cellGraph(a.gz + rz * off)} L ${cellGraph(b.gx + rx * off)} ${cellGraph(b.gz + rz * off)} `;
+  }
+  return d;
+}
 
 function brushVisSame(a: BrushVis, b: BrushVis): boolean {
   if (a === b) return true;
@@ -1746,23 +1750,22 @@ export function PaintCanvas(props: {
         {layer === 'road' ? roads.flatMap((r) => {
           const sel = r.id === selRoadId;
           const color = sel ? '#f8fafc' : '#fbbf24cc';
-          const nodes = showRoadWires ? roadDots(r.points, 2).map((d, i) => (
-            <Canvas.Node key={`rd_${r.id}_${i}`} gx={cellGraph(d.x)} gy={cellGraph(d.z)} gw={TILE_UNITS * (sel ? 0.5 : 0.35)} gh={TILE_UNITS * (sel ? 0.5 : 0.35)}>
-              <Box style={{ width: '100%', height: '100%', borderRadius: 99, backgroundColor: color }} />
-            </Canvas.Node>
-          )) : [];
-          // Lane wires: one dotted line per LANE so lanes line up / merge
-          // across strokes by eye. Colours are CANONICAL (WIRECOLOR-0610):
-          // green = east/south flow, red = west/north — NOT draw-relative, so
-          // a road's two halves drawn outward from a junction read one
-          // continuous colour instead of flipping at the seam.
+          const nodes: any[] = [];
+          // Centerline + per-LANE wires as POLYLINES (one Canvas.Path each), so
+          // lanes line up / merge across strokes by eye. Colours are CANONICAL
+          // (WIRECOLOR-0610): green = east/south flow, red = west/north — NOT
+          // draw-relative, so a road's two halves drawn outward from a junction
+          // read one continuous colour instead of flipping at the seam. Paths,
+          // not per-dot nodes (OVERFLOW-0610): a long road with arrows ALSO on
+          // used to overflow the 512-children cap and drop the whole overlay.
           if (showRoadWires) {
+            nodes.push(
+              <Canvas.Path key={`rd_${r.id}`} d={roadCenterPathD(r.points)} stroke={color} strokeWidth={TILE_UNITS * (sel ? 0.42 : 0.3)} fill="none" />,
+            );
             const flip = strokeWireFlip(r.points);
-            for (const [i, d] of laneWireDots(r, 3).entries()) {
+            for (const [li, g] of laneGuides(r.profile).entries()) {
               nodes.push(
-                <Canvas.Node key={`rl_${r.id}_${i}`} gx={cellGraph(d.x)} gy={cellGraph(d.z)} gw={TILE_UNITS * 0.22} gh={TILE_UNITS * 0.22}>
-                  <Box style={{ width: '100%', height: '100%', borderRadius: 99, backgroundColor: (d.flow === 'forward') !== flip ? '#86efac88' : '#f8717188' }} />
-                </Canvas.Node>,
+                <Canvas.Path key={`rl_${r.id}_${li}`} d={laneWirePathD(r.points, g.off)} stroke={(g.flow === 'forward') !== flip ? '#86efac88' : '#f8717188'} strokeWidth={TILE_UNITS * 0.2} fill="none" />,
               );
             }
           }
