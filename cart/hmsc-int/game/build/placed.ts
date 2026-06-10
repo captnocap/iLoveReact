@@ -852,38 +852,56 @@ export function prefabFromPieces(
 
 /** Boundary validation for a to-be-appended placement (the stream materializer
  *  is tolerant by contract; the AUTHORING side validates before it appends). */
-// Flat-pad terrain lift (USER RULING req_0444: "sit on a flat pad"). A building (a
-// prefab-stamp group, keyed by stampId) is lifted as ONE rigid pad so its lowest piece
-// sits on the terrain height under the group's footprint centre — paint a hill and the
-// building rides up with it, staying level (it never warps or tilts). PURE and
-// IDEMPOTENT: it reads the stored (terrain-agnostic) y and returns lifted copies, so it
-// can be applied at every consumption site (editor render, F2 collide, compile) without
-// the editor and game ever drifting, and re-applying it is a no-op (a lifted group's min
-// already equals the terrain, so the next offset is 0). Stored data is never mutated, so
-// editing a building reads the raw y and this re-lifts the result — no double-lift.
+// Flat-pad terrain lift (USER RULING req_0444: "sit on a flat pad"). A building is
+// lifted as ONE rigid pad so its lowest piece sits on the terrain height under the
+// group's footprint centre — paint a hill and the building rides up with it, staying
+// level (it never warps or tilts). PURE and IDEMPOTENT: it reads the stored
+// (terrain-agnostic) y and returns lifted copies, so it can be applied at every
+// consumption site (editor render, F2 collide, compile) without the editor and game ever
+// drifting, and re-applying it is a no-op (a lifted group's min already equals the
+// terrain, so the next offset is 0). Stored data is never mutated, so editing a building
+// reads the raw y and this re-lifts the result — no double-lift.
 //
-// Loose pieces (no stampId — single placements) keep their authored y: those are placed
-// directly on the picked ground, and grouping them would need a connected-components pass
-// every frame. Only stamped buildings get the pad.
+// A "building" is a GROUP: prefab pieces group by stampId; hand-built pieces (no stampId)
+// group by CONNECTED COMPONENT (bounds-touching, the same adjacency "smart select" uses),
+// so a structure you laid out piece-by-piece flat-pads exactly like a prefab and a lone
+// piece sits on the ground under it. The component pass is O(loose²) bounds-touch but
+// runs only when pieces/terrain change (callers memoize), which is fine at editor scale.
 export function liftBuildingsToTerrain<T extends PlacedBuildPiece>(
   pieces: readonly T[],
   terrainAt: (x: number, z: number) => number,
 ): T[] {
-  const groups = new Map<string, T[]>();
+  const groups: T[][] = [];
+  const stamped = new Map<string, T[]>();
   const loose: T[] = [];
   for (const p of pieces) {
-    if (p.stampId) { const g = groups.get(p.stampId); if (g) g.push(p); else groups.set(p.stampId, [p]); }
+    if (p.stampId) { const g = stamped.get(p.stampId); if (g) g.push(p); else stamped.set(p.stampId, [p]); }
     else loose.push(p);
   }
+  for (const g of stamped.values()) groups.push(g);
+  // Union loose pieces into connected structures (union-find over bounds-touch).
+  if (loose.length) {
+    const bounds = loose.map((p) => pieceBounds(p));
+    const parent = loose.map((_, i) => i);
+    const find = (i: number): number => { let r = i; while (parent[r] !== r) r = parent[r]; while (parent[i] !== r) { const n = parent[i]; parent[i] = r; i = n; } return r; };
+    const tol = PLACED_TUNING.touchToleranceMeters;
+    for (let i = 0; i < loose.length; i += 1) {
+      for (let j = i + 1; j < loose.length; j += 1) {
+        if (boundsTouch(bounds[i], bounds[j], tol)) parent[find(i)] = find(j);
+      }
+    }
+    const byRoot = new Map<number, T[]>();
+    for (let i = 0; i < loose.length; i += 1) { const r = find(i); const g = byRoot.get(r); if (g) g.push(loose[i]); else byRoot.set(r, [loose[i]]); }
+    for (const g of byRoot.values()) groups.push(g);
+  }
   const out: T[] = [];
-  for (const g of groups.values()) {
+  for (const g of groups) {
     let sx = 0, sz = 0, minY = Infinity;
     for (const p of g) { sx += p.x; sz += p.z; if (p.y < minY) minY = p.y; }
     const offset = terrainAt(sx / g.length, sz / g.length) - minY;
     if (Math.abs(offset) < 1e-6) { for (const p of g) out.push(p); }
     else for (const p of g) out.push({ ...p, y: p.y + offset });
   }
-  for (const p of loose) out.push(p);
   return out;
 }
 
