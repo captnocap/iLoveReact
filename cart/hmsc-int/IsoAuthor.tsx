@@ -17,10 +17,11 @@ import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { GAME_BUILD, GAME_NATIVE_CAMERA } from './game';
-import type { BuildFaceSkin, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
-import { allTextures } from './game/textures/registry';
+import type { BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
 import { resolveSnapTarget, modulePitch, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes } from './editors/build/pieceMeshes';
+import { perfMs, warnPlaceFreeze } from './editors/build/placeFreezeProbe';
+import { FacePainter } from './editors/build/FacePainter';
 import { BUILD_UI } from './editors/build/buildUi';
 import { IsoStage, METERS_PER_LEVEL, type IsoPose } from './isoStage';
 import { readRouteTwigState, writeRouteTwigState } from './editors/twigs';
@@ -96,28 +97,8 @@ const TOWER_MAX_SPAN = 16; // footprint cells per axis (48m at the 3m pitch)
 const TOWER_MIN_FLOORS = 1;
 const TOWER_MAX_FLOORS = 30;
 
-// ── Face painter (req_0478): a selection is a box in space with 6 faces ──────
-// N/E/S/W paint each piece's EXTERIOR-facing major slot on that side of the
-// selection (exterior = the front/back slot pointing away from the selection's
-// centre), Top paints plate tops, In paints every interior-facing slot. The
-// brush is a color or a registry material.
-type FaceId = 'N' | 'E' | 'S' | 'W' | 'top' | 'in';
-const FACE_BUTTONS: { id: FaceId; label: string; title: string }[] = [
-  { id: 'N', label: 'N', title: 'Paint the north-facing exterior' },
-  { id: 'E', label: 'E', title: 'Paint the east-facing exterior' },
-  { id: 'S', label: 'S', title: 'Paint the south-facing exterior' },
-  { id: 'W', label: 'W', title: 'Paint the west-facing exterior' },
-  { id: 'top', label: 'Top', title: 'Paint floor/roof plate tops' },
-  { id: 'in', label: 'In', title: 'Paint every interior-facing side' },
-];
-const BRUSH_SWATCHES = [
-  '#d8cdb8', '#9aa3ad', '#8a4a3a', '#506a85', '#2d3b4e', '#c8b06a',
-  '#7a8b6f', '#e0e5ea', '#1a1d24', '#8a6a45', '#b04a3a', '#3a6b8a',
-];
-/** front (+v) world direction per quarter yaw — matches localOffset(0,1,yaw) */
-function frontDirOf(quarter: number): { dx: number; dz: number } {
-  return quarter === 0 ? { dx: 0, dz: 1 } : quarter === 1 ? { dx: 1, dz: 0 } : quarter === 2 ? { dx: 0, dz: -1 } : { dx: -1, dz: 0 };
-}
+// The face painter (req_0478 → req_0483) lives in ./editors/build/FacePainter —
+// the selection's 6-face paint panel, mounted below when a selection exists.
 
 /** the same tool armed twice = a toggle-off (rail chips re-click to disarm) */
 function sameArmed(cur: Armed, next: NonNullable<Armed>): boolean {
@@ -283,6 +264,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const [paintCells, setPaintCells] = useState<Paint[] | null>(null);
   const paintCellsRef = useRef(paintCells);
   paintCellsRef.current = paintCells;
+  // The last painted cell-set signature — onMove skips the setPaintCells (and the
+  // whole re-render behind it) when the drag is still over the same cells.
+  const paintSigRef = useRef('');
   // The save-as-prefab naming prompt: null = closed, else the draft name being typed.
   const [prefabNameDraft, setPrefabNameDraft] = useState<string | null>(null);
   const piecesRef = useRef(pieces);
@@ -295,14 +279,6 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const towerFloorsRef = useRef(towerFloors);
   towerFloorsRef.current = towerFloors;
   const towerDragRef = useRef<{ start: { x: number; z: number }; end: { x: number; z: number } } | null>(null);
-  // Face painter (req_0478): the brush every face button applies.
-  const [faceBrush, setFaceBrush] = useState<BuildFaceSkin>({ kind: 'color', value: '#d8cdb8' });
-  const faceBrushRef = useRef(faceBrush);
-  faceBrushRef.current = faceBrush;
-  // Registry materials for the brush cycler (built-in + Materialized customs; read at
-  // mount — a material stored mid-session appears after the next reload).
-  const brushMaterials = useMemo(() => allTextures(), []);
-  const [brushMatIdx, setBrushMatIdx] = useState(0);
 
   // Placement ground for the ACTIVE floor: terrain at level 0, else the flat slab at the
   // active level's elevation — so raising a floor (▲) drops pieces ON that floor instead
@@ -479,6 +455,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       }
     }
     dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false, mode, gx0, gz0 };
+    paintSigRef.current = '';
     if (armedRef.current) setSnap(resolveAt(p.x, p.y));
   };
   const onMove = (e: any) => {
@@ -488,7 +465,21 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       d.turned = true;
       if (d.mode === 'paint') {
         const g = stage.groundPoint(p.x, p.y, rectRef.current);
-        if (g) setPaintCells(computePaintRef.current(armedRef.current, { x: d.gx0, z: d.gz0 }, g));
+        if (g) {
+          // Re-render the paint ghosts ONLY when the dragged-to CELL SET changes
+          // (the hover ghost's ghostKeyRef discipline, applied to the paint drag):
+          // raw mouse-moves inside the same cell used to push a fresh cells array
+          // every event → a full re-render + ghost rebuild per move — the rest of
+          // the drag-draw lag. The signature (count + first/last cell + base y)
+          // uniquely names a line/rect/ring, so same cells → no state change.
+          const t0 = perfMs();
+          const cells = computePaintRef.current(armedRef.current, { x: d.gx0, z: d.gz0 }, g);
+          const head = cells[0];
+          const tail = cells[cells.length - 1];
+          const sig = head ? `${cells.length}|${head.x},${head.y},${head.z},${head.yawDegrees}|${tail.x},${tail.z}` : '';
+          warnPlaceFreeze('paintCompute', { cells: cells.length, ms: perfMs() - t0 });
+          if (sig !== paintSigRef.current) { paintSigRef.current = sig; setPaintCells(cells); }
+        }
       } else if (d.mode === 'move') {
         const g = stage.groundPoint(p.x, p.y, rectRef.current);
         // Snap the drag delta to whole grid cells so a moved piece stays grid-locked —
@@ -648,47 +639,6 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const label = a && a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id).label : 'piece';
     commitBatch(valid.map((c) => ({ event: { kind: 'piecePlaced', placement: c } as WorldEvent, label: `painted ${label}` })));
   };
-  // Face painter (req_0478): apply the brush to ONE world-facing side of the
-  // selection. A selection is a box in space with 6 faces — N/E/S/W set each
-  // piece's exterior-facing major slot on that side (exterior = the front/back
-  // slot pointing AWAY from the selection's centre, so it works on towers and
-  // hand-built shells alike), Top sets plate tops, In sets every interior-facing
-  // slot. Commits pieceSkinSet events — ids stay stable, so the selection
-  // survives and you can paint face after face without re-selecting.
-  const paintFace = (face: FaceId) => {
-    const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
-    if (!sel.length) return;
-    let cx = 0, cz = 0;
-    for (const p of sel) { cx += p.x; cz += p.z; }
-    cx /= sel.length; cz /= sel.length;
-    const brush = faceBrushRef.current;
-    const items: { event: WorldEvent; label: string }[] = [];
-    for (const p of sel) {
-      const kind = GAME_BUILD.catalog.get(p.pieceId).kind;
-      const plate = kind === 'floor' || kind === 'roof' || kind === 'ramp' || kind === 'stairs';
-      let slot: BuildFaceSlot | null = null;
-      if (plate) {
-        slot = face === 'top' ? 'front' : face === 'in' ? 'back' : null;
-      } else if (face !== 'top') {
-        const yaw = ((p.yawDegrees % 360) + 360) % 360;
-        const quarter = Math.round(yaw / 90) % 4;
-        if (Math.abs(yaw - quarter * 90) > 1e-6 && Math.abs(yaw - 360) > 1e-6) continue; // free-yaw: no cardinal face
-        const front = frontDirOf(quarter);
-        const outward = front.dx * (p.x - cx) + front.dz * (p.z - cz) >= 0; // front faces away from the centre?
-        if (face === 'in') {
-          slot = outward ? 'back' : 'front';
-        } else {
-          const ext = outward ? front : { dx: -front.dx, dz: -front.dz };
-          const onFace = face === 'N' ? ext.dz > 0.5 : face === 'S' ? ext.dz < -0.5 : face === 'E' ? ext.dx > 0.5 : ext.dx < -0.5;
-          if (onFace) slot = outward ? 'front' : 'back';
-        }
-      }
-      if (!slot) continue;
-      items.push({ event: { kind: 'pieceSkinSet', id: p.id, skin: { [slot]: brush } } as WorldEvent, label: `painted ${face} face` });
-    }
-    if (items.length) commitBatch(items);
-  };
-
   // Latest delete/clone closures, so the once-mounted key listener always calls the
   // current ones (they read live refs + the current onCommit).
   const keyActionsRef = useRef({ deleteSelected, cloneSelected, recenter, saveCamera });
@@ -741,7 +691,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       // The host fires NO passive move events (on_mouse_move only during a drag), so we
       // poll getMouseX/Y here. Only when the cursor is over this pane, and only re-snap
       // when the target CELL changes, so the ghost doesn't thrash a re-render every frame.
-      if (armedRef.current) {
+      // Not during a live paint drag: the paint ghosts own the preview there, and
+      // this per-frame resolve + setSnap was re-rendering the whole pane every
+      // frame UNDER the drag — part of the drag-draw lag.
+      if (armedRef.current && dragRef.current?.mode !== 'paint') {
         const mx = Number(G.getMouseX?.() ?? -1);
         const my = Number(G.getMouseY?.() ?? -1);
         const r = rectRef.current;
@@ -816,13 +769,20 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // each tinted blocked-red if the validator refuses it.
   const paintGhostMeshes = useMemo(() => {
     if (!paintCells || !paintCells.length) return null;
-    return paintCells.flatMap((c, i) => {
+    const t0 = perfMs();
+    // ONE support array shared by every cell (PLACEPERF-0610): pieceGridOf caches
+    // the spatial grid on the pieces ARRAY identity, so building this inside the
+    // flatMap (a fresh array per cell) forced an O(N) grid rebuild per cell, per
+    // mouse-move — the drag-draw lag. Hoisted, all cells share one cached grid.
+    const supportPieces = [...displayPieces, ...paintCells.map((p, j) => ({ id: `isoPaint${j}`, ...p }))];
+    const ghosts = paintCells.flatMap((c, i) => {
       const color = GAME_BUILD.placed.validatePlacement(c).length > 0 ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
-      const supportPieces = [...displayPieces, ...paintCells.map((p, j) => ({ id: `isoPaint${j}`, ...p }))];
       return pieceVisualShapes(c, `isoPaint${i}`, supportPieces).map((shape) => (
         <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
       ));
     });
+    warnPlaceFreeze('paintGhost', { cells: paintCells.length, pieces: displayPieces.length, ms: perfMs() - t0 });
+    return ghosts;
   }, [paintCells, displayPieces]);
 
   const noIds = useMemo(() => new Set<string>(), []);
@@ -947,38 +907,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         </Box>
       ) : null}
 
-      {/* ── face painter (req_0478): paint the selection's 6 faces ──────────── */}
+      {/* ── face painter (req_0478 → req_0483): paint the selection's 6 faces —
+          the panel module owns the brush, material navigation, and slot math ── */}
       {selectedIds.size > 0 && !armed ? (
-        <Box style={{ position: 'absolute', right: 8, top: 36, backgroundColor: '#0b1220fa', borderWidth: 1, borderColor: '#1e3a5f', borderRadius: 6, padding: 6, gap: 5, width: 196 }}>
-          <Text fontSize={9} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>PAINT FACES — click a side</Text>
-          <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
-            {FACE_BUTTONS.map((f) => (
-              <Pressable key={f.id} onPress={() => paintFace(f.id)} hoverable tooltip={f.title}>
-                <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: '#3a4f6b', backgroundColor: '#16233a' }}>
-                  <Text fontSize={10} color="#dbe6f3" style={{ fontFamily: 'monospace' }}>{f.label}</Text>
-                </Box>
-              </Pressable>
-            ))}
-          </Box>
-          <Box style={{ flexDirection: 'row', gap: 3, flexWrap: 'wrap' }}>
-            {BRUSH_SWATCHES.map((c) => (
-              <Pressable key={c} onPress={() => setFaceBrush({ kind: 'color', value: c })}>
-                <Box style={{ width: 13, height: 13, borderRadius: 3, backgroundColor: c, borderWidth: faceBrush.kind === 'color' && faceBrush.value === c ? 2 : 1, borderColor: faceBrush.kind === 'color' && faceBrush.value === c ? '#7dd3fc' : '#3a4f6b' }} />
-              </Pressable>
-            ))}
-          </Box>
-          {brushMaterials.length > 0 ? (
-            <Box style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
-              <IsoBtn label="◀" title="Previous material" onPress={() => setBrushMatIdx((i) => { const n = (i - 1 + brushMaterials.length) % brushMaterials.length; setFaceBrush({ kind: 'material', id: brushMaterials[n].id }); return n; })} />
-              <Pressable onPress={() => setFaceBrush({ kind: 'material', id: brushMaterials[brushMatIdx].id })} style={{ flexGrow: 1 }}>
-                <Box style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, backgroundColor: '#16233a', borderColor: faceBrush.kind === 'material' && faceBrush.id === brushMaterials[brushMatIdx].id ? '#7dd3fc' : '#3a4f6b' }}>
-                  <Text fontSize={9} color={faceBrush.kind === 'material' ? '#eaf4ff' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{brushMaterials[brushMatIdx].label}</Text>
-                </Box>
-              </Pressable>
-              <IsoBtn label="▶" title="Next material" onPress={() => setBrushMatIdx((i) => { const n = (i + 1) % brushMaterials.length; setFaceBrush({ kind: 'material', id: brushMaterials[n].id }); return n; })} />
-            </Box>
-          ) : null}
-        </Box>
+        <FacePainter pieces={pieces} selectedIds={selectedIds} commitBatch={commitBatch} />
       ) : null}
 
       {/* ── catalog rail (bottom): pick a piece to place ───────────────────── */}
@@ -1137,10 +1069,13 @@ const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: re
             </Box>
           </Pressable>
         ))}
-        {/* the TOWER tool (req_0478) — not a catalog kind, a whole-shell drag tool */}
+        {/* the TOWER tool (req_0478) — not a catalog kind, a whole-shell drag tool.
+            Box metrics match the kind tabs exactly (no border, same padding) — the
+            extra border + the emoji glyph's leading advance read as a weird left
+            padding (req_0483); the gold background alone marks it special. */}
         <Pressable onPress={() => props.onArm({ kind: 'tower' })}>
-          <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: towerArmed ? '#7dd3fc' : '#7c5a1e', backgroundColor: towerArmed ? '#1d4ed8' : '#4a3a12' }}>
-            <Text fontSize={11} color={towerArmed ? '#ffffff' : '#f0d9a8'} style={{ fontFamily: 'monospace' }}>🏙 tower</Text>
+          <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, backgroundColor: towerArmed ? '#1d4ed8' : '#4a3a12' }}>
+            <Text fontSize={11} color={towerArmed ? '#ffffff' : '#f0d9a8'} style={{ fontFamily: 'monospace' }}>tower</Text>
           </Box>
         </Pressable>
       </Box>
