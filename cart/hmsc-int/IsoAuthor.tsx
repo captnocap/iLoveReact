@@ -494,7 +494,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         <WorldStatics world={state.world} skyConfig={state.config.sky} />
         {/* the build grid on the active floor (Scene3D's showGrid is a no-op — we draw
             our own tile lines, world-anchored, following the camera) */}
-        <IsoGrid centerX={stage.pose.centerX} centerZ={stage.pose.centerZ} level={level} />
+        <IsoGrid centerX={stage.pose.centerX} centerZ={stage.pose.centerZ} level={level} distance={stage.distance()} />
         {/* the standing city — the SAME renderer F2 uses; selection highlighted,
             floors above the active level faded (cut-away) so you see the interior */}
         <PlacedPieceMeshes pieces={pieces} markedIds={selectedIds} targetId={null} occludedIds={occludedIds} />
@@ -581,43 +581,62 @@ function IsoBtn(props: { label: string; onPress: () => void; title?: string }) {
   );
 }
 
-// The build grid: tile lines on the active floor, world-anchored, recentred in coarse
-// steps so a pan doesn't churn the mesh list every frame and a zoomed-out view doesn't
-// spawn thousands of lines. (Scene3D's showGrid prop is a no-op — nothing in the
-// framework draws it — so the grid IS these thin line boxes.) Major line every 8 tiles.
-// Recentre every SINGLE tile (not every 4) so the patch glides with the camera instead
-// of jumping in big steps — the line keys are stable, so a tile-cross just UPDATEs
-// positions, no churn. Lines are thick and bright (minor + a bold major every 8 tiles)
-// so the grid reads clearly instead of as faint hairlines.
-const GRID_SNAP = 1;
-const GRID_RADIUS = 26;  // tiles each way (~52m patch)
+// The build grid: lines on the active floor, world-anchored. ADAPTIVE LOD — a fixed
+// 26-tile patch vanished to a speck when zoomed out over the big map (and the thin
+// lines went sub-pixel). Instead the cell SIZE, the coverage, and the line THICKNESS
+// all scale with the eye distance, so the grid always fills the view and reads clearly:
+// zoomed in you get 1-tile cells, zoomed out you get coarse 8/16/32-tile cells, never
+// a blizzard of lines (the count stays bounded at ~2·HALF_LINES per axis). The cell
+// step stays a "nice" 1 tile = 1 m multiple, so the grid always lands on real cells.
+// (Scene3D's showGrid prop is a no-op — the grid IS these thin line boxes.)
+const GRID_HALF_LINES = 28;            // lines each side of centre → ~114 boxes total, bounded
+const GRID_NICE_STEPS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 const GRID_MINOR = '#3c5575';
 const GRID_MAJOR = '#7da0cf';
-const IsoGrid = memo(function IsoGrid(props: { centerX: number; centerZ: number; level: number }) {
-  const cx = Math.round(props.centerX);
-  const cz = Math.round(props.centerZ);
+// The cell size (tiles) for the current eye distance: cover ~0.65× the distance each
+// way at HALF_LINES lines, snapped up to a nice 1·2·4·8… multiple so cells stay whole.
+function gridStepFor(distanceMeters: number): number {
+  const raw = Math.max(20, distanceMeters * 0.65) / GRID_HALF_LINES;
+  for (const s of GRID_NICE_STEPS) if (s >= raw) return s;
+  return GRID_NICE_STEPS[GRID_NICE_STEPS.length - 1];
+}
+const IsoGrid = memo(function IsoGrid(props: { centerX: number; centerZ: number; level: number; distance: number }) {
+  const step = gridStepFor(props.distance);
+  // snap the centre to the cell step so lines stay world-anchored (a multiple of step)
+  // and don't shimmer as you pan — a sub-step pan is just a position UPDATE, no rebuild.
+  const cx = Math.round(props.centerX / step) * step;
+  const cz = Math.round(props.centerZ / step) * step;
   const y = props.level * METERS_PER_LEVEL + 0.04; // above the floor so it never z-fights
-  const span = GRID_RADIUS * 2;
+  const span = GRID_HALF_LINES * step * 2;          // full extent each axis (world units)
+  const majorEvery = step * 8;                       // a bold line every 8 cells of this LOD
+  const minorT = 0.08 * step;                        // thickness scales with cell size so
+  const majorT = 0.22 * step;                        // lines never go sub-pixel when zoomed out
   const lines: any[] = [];
-  for (let i = -GRID_RADIUS; i <= GRID_RADIUS; i += 1) {
-    const majorX = (cx + i) % 8 === 0;
+  for (let k = -GRID_HALF_LINES; k <= GRID_HALF_LINES; k += 1) {
+    const wx = cx + k * step;
+    const majorX = Math.round(wx) % majorEvery === 0;
     lines.push(
-      <Scene3D.Mesh key={`gx${i}`} geometry={Geometry.Box} params={{ width: 1, height: 1, depth: 1 }}
-        scale={[majorX ? 0.22 : 0.08, 0.05, span]} position={[cx + i, y, cz]}
+      <Scene3D.Mesh key={`gx${k}`} geometry={Geometry.Box} params={{ width: 1, height: 1, depth: 1 }}
+        scale={[majorX ? majorT : minorT, 0.05, span]} position={[wx, y, cz]}
         material={{ color: majorX ? GRID_MAJOR : GRID_MINOR, opacity: majorX ? 0.9 : 0.7 }} />,
     );
-    const majorZ = (cz + i) % 8 === 0;
+    const wz = cz + k * step;
+    const majorZ = Math.round(wz) % majorEvery === 0;
     lines.push(
-      <Scene3D.Mesh key={`gz${i}`} geometry={Geometry.Box} params={{ width: 1, height: 1, depth: 1 }}
-        scale={[span, 0.05, majorZ ? 0.22 : 0.08]} position={[cx, y, cz + i]}
+      <Scene3D.Mesh key={`gz${k}`} geometry={Geometry.Box} params={{ width: 1, height: 1, depth: 1 }}
+        scale={[span, 0.05, majorZ ? majorT : minorT]} position={[cx, y, wz]}
         material={{ color: majorZ ? GRID_MAJOR : GRID_MINOR, opacity: majorZ ? 0.9 : 0.7 }} />,
     );
   }
   return <>{lines}</>;
-}, (p, n) =>
-  Math.round(p.centerX) === Math.round(n.centerX)
-  && Math.round(p.centerZ) === Math.round(n.centerZ)
-  && p.level === n.level);
+}, (p, n) => {
+  // rebuild only when the LOD step changes or the snapped centre moves a whole cell
+  const sp = gridStepFor(p.distance), sn = gridStepFor(n.distance);
+  return sp === sn
+    && Math.round(p.centerX / sp) === Math.round(n.centerX / sn)
+    && Math.round(p.centerZ / sp) === Math.round(n.centerZ / sn)
+    && p.level === n.level;
+});
 
 // The bottom build palette. A row of kind tabs (floor/wall/ramp/...) and, under the
 // active tab, that kind's catalog entries as chips — the Sims bottom bar, fed by the
