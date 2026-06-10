@@ -104,7 +104,7 @@ editorTunables().register({
 editorTunables().register({
   system: 'play-camera-occlusion', route: '/test', table: CAMERA_OCCLUSION_TUNING,
   specs: {
-    residualOpacity: { label: 'residual wall alpha', min: 0.4, max: 1, step: 0.01, precision: 2 },
+    residualOpacity: { label: 'residual wall alpha', min: 0.1, max: 1, step: 0.01, precision: 2 },
     maxHits: { label: 'wall hit cap', min: 1, max: 64, step: 1, precision: 0 },
     sweepRadiusMeters: { label: 'ray radius m', min: 0, max: 0.5, step: 0.01, precision: 2 },
     playerTargetHeightMeters: { label: 'target height m', min: 0.2, max: 2.4, step: 0.05, precision: 2 },
