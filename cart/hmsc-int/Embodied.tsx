@@ -119,6 +119,11 @@ export type PlayerPose = {
   running: boolean;
   /** walk-cycle phase in cycles (buildSkeleton's gait clock) */
   gaitPhase: number;
+  /** PROPUSE-0610: pinned to a seat prop — the figure plays the skeleton's
+   *  sit/lay posture action and the movement step is skipped until movement
+   *  or jump stands the player up. Set via adoptPose by the route's interact
+   *  layer (E on a chair/bed); undefined = free. */
+  posture?: 'sit' | 'lay';
 };
 
 // Surface feel under the player: the door's footing resolution
@@ -323,7 +328,7 @@ type PlayerJitFrame = {
   camera: EmbodiedCameraSample;
   animation: { pose: 'walk' | 'stand'; gaitPhase: number };
   correction: {
-    kind: 'none' | 'noclip-bypass' | 'live-floor-recovery' | 'host-step' | 'js-fallback' | 'idle-stop';
+    kind: 'none' | 'noclip-bypass' | 'live-floor-recovery' | 'host-step' | 'js-fallback' | 'idle-stop' | 'seated';
     reason?: string;
     registered?: boolean;
     fromY?: number;
@@ -580,7 +585,18 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
   // quantized gait path made body/clothing transforms update at ~19Hz while
   // the root offset moved at frame cadence; that read as PLAYERJIT-0605.
   const pose: 'walk' | 'stand' = player.moving ? 'walk' : 'stand';
-  const rig = useMemo(() => GAME_FIGURE.buildRigFrame('neutral', pose, player.gaitPhase), [pose, player.gaitPhase]);
+  // PROPUSE-0610: a seated/lying player rides the skeleton's posture actions
+  // (sit/lay on body) over the stand pose — the same action channel the
+  // animation DSL drives, so the figure folds correctly with no new pose id.
+  const rig = useMemo(
+    () => GAME_FIGURE.buildRigFrame(
+      'neutral',
+      player.posture ? 'stand' : pose,
+      player.gaitPhase,
+      player.posture ? [{ target: 'body', action: player.posture, phase: 1, weight: 1 }] : [],
+    ),
+    [pose, player.gaitPhase, player.posture],
+  );
   const figureOffset = useMemo<[number, number, number]>(() => [player.x, player.y, player.z], [player.x, player.y, player.z]);
 
   useEffect(() => {
@@ -743,6 +759,49 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
           GAME_TELEMETRY.setDiagnosticChannel('camera', false);
         }
       };
+      // SEATED (PROPUSE-0610): the pose is pinned to its seat prop; movement
+      // or jump stands the player up (and the normal step resumes next
+      // frame). While seated the WORLD keeps stepping — an intent-less step
+      // whose player result is discarded keeps kicked balls rolling.
+      if (prev.posture) {
+        if (moving || jumpDown) {
+          const stood: PlayerPose = { ...prev, posture: undefined };
+          playerRef.current = stood;
+          setPlayer(stood);
+          sendCameraRef.current(stood);
+        } else {
+          const bodiesDoor = optionsRef.current.worldExtras?.bodies;
+          const seatedBodies = bodiesDoor?.get();
+          if (GAME_PHYSICS.hostReady() && bodiesDoor && seatedBodies && seatedBodies.length > 0) {
+            const idle = GAME_PHYSICS.step({
+              dtSeconds: dt,
+              intentX: 0,
+              intentZ: 0,
+              speedMetersPerSecond: 0,
+              jumpDown: false,
+              player: {
+                position: { x: prev.x, y: prev.y, z: prev.z },
+                velocity: { x: 0, y: 0, z: 0 },
+                yawDegrees: prev.yaw,
+              },
+              surface: {
+                accelerationMultiplier: FALLBACK_SURFACE.accelerationMultiplier,
+                friction: FALLBACK_SURFACE.friction,
+                restitution: FALLBACK_SURFACE.restitution,
+              },
+              tuning: physicsTuning,
+              bodies: seatedBodies,
+              rects: solids.rects,
+              orientedRects: solids.orientedRects,
+            });
+            if (idle && idle.bodies.length > 0) bodiesDoor.commit(idle.bodies);
+          }
+          recordProbeFrame({ kind: 'seated' });
+          optionsRef.current.onFrame?.();
+          handle = GAME_LOOP.scheduleFrame(loop);
+          return;
+        }
+      }
       // Reference pv_noclip behavior: cheats gate in the console command;
       // movement bypasses collision/ground resolution, Space flies up, C/Ctrl
       // flies down, velocity is zeroed, and the player is never grounded.

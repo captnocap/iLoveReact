@@ -159,7 +159,9 @@ export const INPUT_BINDINGS: readonly InputBinding[] = [
   { action: 'strafeRight', keys: ['d'], label: 'Strafe right', playerIntent: 'Sidestep screen-right.', availability: 'implemented' },
   { action: 'run', modifier: 'shift', label: 'Run', playerIntent: 'Move at the run speed while the movement vector is active.', availability: 'implemented' },
   { action: 'jump', keys: ['space'], label: 'Jump / mantle', playerIntent: 'Jump when grounded, or mantle when a valid ledge is detected.', availability: 'implemented' },
-  { action: 'interact', keys: ['e', 'f'], label: 'Interact', playerIntent: 'Use the closest valid world interaction.', availability: 'reserved' },
+  // PROPUSE-0610: live — the play route's interact layer (sit on seats,
+  // search containers) consumes the E/F edge each frame.
+  { action: 'interact', keys: ['e', 'f'], label: 'Interact', playerIntent: 'Use the closest valid world interaction.', availability: 'implemented' },
   { action: 'reload', keys: ['r'], label: 'Reload', playerIntent: 'Reload the equipped item when that item supports ammo.', availability: 'reserved' },
   { action: 'quickMenu', keys: ['q', 'tab'], label: 'Item wheel / phone / quick menu', playerIntent: 'Open the quick inventory or phone surface.', availability: 'reserved' },
   { action: 'crouch', keys: ['c'], modifier: 'ctrl', label: 'Crouch', playerIntent: 'Lower stance and reduce movement/noise profile.', availability: 'reserved' },

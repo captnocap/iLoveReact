@@ -69,7 +69,7 @@ import { TextureCapture } from '../../game/textures/registry';
 import { BUILD_UI, CAMERA_OCCLUSION_TUNING } from '../build/buildUi';
 import { perfMs, warnPlaceFreeze, startPlaceFreezeProbe, markPlaceFreezeProbe, type PlaceFreezeProbe } from '../build/placeFreezeProbe';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, type VisualShape } from '../build/pieceMeshes';
-import { propDynamics } from '../../world/propKinds';
+import { propContainer, propDynamics, propSeat } from '../../world/propKinds';
 import { Prop } from '../../render3d/Prop';
 
 // ── KICKPROP-0610: a placed dynamic prop's live body state ──────────────────
@@ -85,6 +85,47 @@ type DynamicPropBodyState = {
   position: { x: number; y: number; z: number };
   velocity: { x: number; y: number; z: number };
 };
+
+// ── PROPUSE-0610 live slice: the interact overlay (prompt / loading bar) ─────
+// Bottom-center, test mode only: the "E — search the Fridge" prompt, the
+// search loading bar (container.searchSeconds), and the result notice. Pure
+// presentation — the route's interact frame drives the three states.
+function InteractOverlay(props: {
+  prompt: string | null;
+  bar: { label: string; progress: number } | null;
+  notice: string | null;
+}) {
+  if (!props.prompt && !props.bar && !props.notice) return null;
+  return (
+    <Box debugName="InteractOverlay" style={{ position: 'absolute', left: 0, bottom: 96, width: '100%', alignItems: 'center', gap: 6 }}>
+      {props.bar && (
+        <Box style={{ width: 260, gap: 4, alignItems: 'center' }}>
+          <Text fontSize={11} color="#e2e8f0" style={{ fontWeight: 700 }}>{`Searching the ${props.bar.label}…`}</Text>
+          <Box style={{ width: 260, height: 10, borderRadius: 5, backgroundColor: '#0f1a2ecc', borderWidth: 1, borderColor: '#334155' }}>
+            <Box style={{ width: Math.max(4, Math.round(258 * props.bar.progress)), height: 8, borderRadius: 4, backgroundColor: '#38bdf8', marginLeft: 1, marginTop: 1 }} />
+          </Box>
+        </Box>
+      )}
+      {!props.bar && props.prompt && (
+        <Box style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#0f1a2ecc', borderWidth: 1, borderColor: '#334155' }}>
+          <Text fontSize={11} color="#e2e8f0" style={{ fontWeight: 700 }}>{props.prompt}</Text>
+        </Box>
+      )}
+      {props.notice && (
+        <Box style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#172554cc' }}>
+          <Text fontSize={10} color="#bfdbfe">{props.notice}</Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+// What the interact frame found in reach this frame (the E target).
+type InteractTarget =
+  | { kind: 'seat'; pieceId: string; label: string; pose: 'sit' | 'lay'; x: number; y: number; z: number; yawDegrees: number }
+  | { kind: 'container'; pieceId: string; label: string; locked: boolean; searched: boolean; searchSeconds: number; lootCategory: string };
+
+const INTERACT_REACH_METERS = 2.2;
 
 // The live layer for kicked-around props: renders each dynamic body's prop
 // model at its current physics position. `rev` is the publish signal — it only
@@ -490,6 +531,32 @@ export function PlayRoute(props: {
   }, [pieces]);
   const piecesRef = useRef(liftedPieces);
   piecesRef.current = liftedPieces;
+  // ── PROPUSE-0610 live slice: E to sit / lie down / search ─────────────────
+  // The interact frame (run from the embodied per-frame hook, test mode only):
+  // finds the nearest seat/container prop in reach, shows the prompt, and on
+  // the E edge either pins the player to the seat (PlayerPose.posture — the
+  // figure plays the skeleton's sit/lay action) or runs the container's
+  // loading-bar search. Searches are session-local until the item system
+  // lands (lootCategory names the slot it will fill).
+  const interactKeysRef = useRef<ReturnType<typeof GAME_INPUT.createKeyState> | null>(null);
+  useEffect(() => {
+    const keys = GAME_INPUT.createKeyState();
+    interactKeysRef.current = keys;
+    return () => {
+      interactKeysRef.current = null;
+      keys.dispose();
+    };
+  }, []);
+  const interactPrevDownRef = useRef(false);
+  const searchedContainersRef = useRef<Set<string>>(new Set());
+  const searchRef = useRef<{ pieceId: string; label: string; lootCategory: string; startedAtMs: number; seconds: number; anchorX: number; anchorZ: number } | null>(null);
+  const [interactPrompt, setInteractPrompt] = useState<string | null>(null);
+  const interactPromptRef = useRef<string | null>(null);
+  const [searchBar, setSearchBar] = useState<{ label: string; progress: number } | null>(null);
+  const [interactNotice, setInteractNotice] = useState<string | null>(null);
+  const interactNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interactFrameRef = useRef<() => void>(() => undefined);
+
   // ── KICKPROP-0610: dynamic prop bodies (balls, cones, cans) ──────────────
   // A placed dynamic prop leaves the static collider set (placed.colliders
   // skips it) and lives here as a host sphere body: Embodied hands the list
@@ -690,6 +757,7 @@ export function PlayRoute(props: {
     }),
     onFrame: () => {
       updateCameraOcclusionRef.current();
+      interactFrameRef.current();
       if (modeRef.current !== 'build') return;
       refreshSnapRef.current();
       buildFrameRef.current();
@@ -698,6 +766,136 @@ export function PlayRoute(props: {
     playerJitProbe: diagnosticBuildWalk,
   });
   const { player, playerRef, lookRef, rig, figureOffset, pointerWire, worldGrid } = embodied;
+
+  // The interact frame (PROPUSE-0610) — reassigned per render so it reads the
+  // live embodied/world refs; the embodied loop calls it through the ref.
+  interactFrameRef.current = () => {
+    const setPromptIfChanged = (next: string | null) => {
+      if (next !== interactPromptRef.current) {
+        interactPromptRef.current = next;
+        setInteractPrompt(next);
+      }
+    };
+    const postNotice = (text: string) => {
+      setInteractNotice(text);
+      if (interactNoticeTimerRef.current) clearTimeout(interactNoticeTimerRef.current);
+      interactNoticeTimerRef.current = setTimeout(() => setInteractNotice(null), 3200);
+    };
+    if (modeRef.current !== 'test') {
+      if (searchRef.current) { searchRef.current = null; setSearchBar(null); }
+      setPromptIfChanged(null);
+      return;
+    }
+    const typing = gameConsole.session.isOpen();
+    const now = perfMs();
+    const pose = playerRef.current;
+    // 1. advance / cancel / finish an active search
+    const active = searchRef.current;
+    if (active) {
+      const movedAway = Math.hypot(pose.x - active.anchorX, pose.z - active.anchorZ) > 0.35;
+      const t = (now - active.startedAtMs) / 1000;
+      if (movedAway || typing) {
+        searchRef.current = null;
+        setSearchBar(null);
+        if (movedAway) postNotice('Search interrupted');
+      } else if (t >= active.seconds) {
+        searchedContainersRef.current.add(active.pieceId);
+        searchRef.current = null;
+        setSearchBar(null);
+        postNotice(`Searched the ${active.label} — empty for now (${active.lootCategory} loot lands with the item system)`);
+      } else {
+        setSearchBar({ label: active.label, progress: Math.min(1, t / active.seconds) });
+      }
+    }
+    // 2. resolve the nearest interactable in reach
+    let prompt: string | null = null;
+    let target: InteractTarget | null = null;
+    if (pose.posture) {
+      prompt = 'WASD / Space — stand up';
+    } else if (!searchRef.current && !typing) {
+      let bestDistance = INTERACT_REACH_METERS;
+      let best: { piece: PlacedBuildPiece; label: string; seat: ReturnType<typeof propSeat>; container: ReturnType<typeof propContainer> } | null = null;
+      for (const piece of piecesRef.current) {
+        const def = GAME_BUILD.catalog.get(piece.pieceId);
+        if (def.kind !== 'prop' || !def.propKind) continue;
+        const seat = propSeat(def.propKind);
+        const container = propContainer(def.propKind);
+        if (!seat && !container) continue;
+        if (Math.abs(piece.y - pose.y) > 2.5) continue;
+        const distance = Math.hypot(piece.x - pose.x, piece.z - pose.z);
+        if (distance > bestDistance) continue;
+        bestDistance = distance;
+        best = { piece, label: def.label, seat, container };
+      }
+      if (best && best.container) {
+        const searched = searchedContainersRef.current.has(best.piece.id);
+        const locked = best.container.access !== 'open';
+        target = {
+          kind: 'container',
+          pieceId: best.piece.id,
+          label: best.label,
+          locked,
+          searched,
+          searchSeconds: best.container.searchSeconds,
+          lootCategory: best.container.lootCategory,
+        };
+        prompt = searched ? `${best.label} — already searched` : locked ? `${best.label} — locked (needs a key)` : `E — search the ${best.label}`;
+      } else if (best && best.seat) {
+        target = {
+          kind: 'seat',
+          pieceId: best.piece.id,
+          label: best.label,
+          pose: best.seat.pose,
+          x: best.piece.x,
+          y: best.piece.y,
+          z: best.piece.z,
+          yawDegrees: best.piece.yawDegrees,
+        };
+        prompt = `E — ${best.seat.pose === 'lay' ? 'lie down on' : 'sit on'} the ${best.label}`;
+      }
+    }
+    setPromptIfChanged(prompt);
+    // 3. the E edge
+    const keys = interactKeysRef.current;
+    const down = keys != null && !typing && GAME_INPUT.actionDown(keys, 'interact');
+    const pressed = down && !interactPrevDownRef.current;
+    interactPrevDownRef.current = down;
+    if (!pressed || !target || searchRef.current || pose.posture) return;
+    if (target.kind === 'container') {
+      if (target.searched) {
+        postNotice('Nothing left in there');
+      } else if (target.locked) {
+        postNotice(`The ${target.label} is locked — needs a key`);
+      } else {
+        searchRef.current = {
+          pieceId: target.pieceId,
+          label: target.label,
+          lootCategory: target.lootCategory,
+          startedAtMs: now,
+          seconds: target.searchSeconds,
+          anchorX: pose.x,
+          anchorZ: pose.z,
+        };
+        setSearchBar({ label: target.label, progress: 0 });
+      }
+      return;
+    }
+    // seat: pin the pose to the prop; the embodied loop owns standing up
+    embodied.adoptPose({
+      ...pose,
+      x: target.x,
+      y: target.y,
+      z: target.z,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      yaw: target.yawDegrees,
+      moving: false,
+      running: false,
+      grounded: true,
+      posture: target.pose,
+    });
+  };
 
   // ── THE LIVE NAV PUBLISH (NAVLIVE-0610) ────────────────────────────────────
   // The same world the player walks (painted landform tiles + placed pieces)
@@ -1703,6 +1901,9 @@ export function PlayRoute(props: {
       )}
 
       <EmbodiedMouseSurface embodied={embodied} />
+
+      {/* PROPUSE-0610: the interact prompt / search bar / result notice (test mode) */}
+      {!inBuild && <InteractOverlay prompt={interactPrompt} bar={searchBar} notice={interactNotice} />}
 
       {/* THE GAME HUD (HUD-0605 — Fortnite-verbatim layout, USER ruling) —
           build mode only. The blueprint selection (the ruled 1/2/3/4
