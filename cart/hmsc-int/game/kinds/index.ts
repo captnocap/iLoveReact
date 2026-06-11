@@ -44,11 +44,18 @@ export {
   PROP_KIND_DEFINITIONS,
   PROP_KINDS,
   isPropKind,
+  propContainer,
+  propCoverClass,
   propDynamics,
   propKindDefinition,
   propKindNamesForConsole,
+  propMount,
+  propSeat,
 } from './props';
-export type { PropDynamics, PropKind, PropKindDefinition, PropTrafficControl } from './props';
+export type {
+  PropContainer, PropContainerAccess, PropCoverClass, PropDynamics, PropKind,
+  PropKindDefinition, PropLootCategory, PropMount, PropSeat, PropTrafficControl,
+} from './props';
 
 export {
   NPC_KIND_DEFINITIONS,

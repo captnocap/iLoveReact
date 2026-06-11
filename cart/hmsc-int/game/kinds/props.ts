@@ -107,6 +107,13 @@ export type PropKindDefinition = {
   // becomes a host physics sphere the player kicks around by running into it
   // (KICKPROP-0610). Dynamic props contribute NO static blocking rect.
   dynamics?: PropDynamics;
+  // PROPUSE-0610: the interaction bundle (all optional — plain scenery omits
+  // everything). See the types below; helpers propMount/propSeat/propContainer/
+  // propCoverClass resolve defaults.
+  mount?: PropMount;
+  seat?: PropSeat;
+  container?: PropContainer;
+  coverClass?: PropCoverClass;
 };
 
 /** The dynamic-body recipe for a kickable prop (host sphere body). */
@@ -120,6 +127,75 @@ export type PropDynamics = {
 /** The dynamics recipe for a kind, or null for static scenery. */
 export function propDynamics(kind: PropKind): PropDynamics | null {
   return PROP_KIND_DEFINITIONS[kind].dynamics ?? null;
+}
+
+// ── PROPUSE-0610: the interaction bundle — what a prop IS to gameplay ────────
+// The user's taxonomy, as data: containers can be searched, seats can be sat
+// in, soft cover hides you, hard cover blocks bullets/LoS, trash/utility
+// objects hold junk, appliances hold category-appropriate loot. Street objects
+// already affect movement through collision + dynamics; their perception hooks
+// (noise on bump, light pools) ride the tile bundle and the perception system
+// when those integrate. ITEMS ARE NOT BUILT YET — lootCategory names the slot
+// the item system fills next; the schema (capacity, spawn rate, access) is
+// authored NOW so containers don't need a second pass.
+
+/** Where a prop may be placed: on the ground, on a piece's top face (a
+ *  computer on a table), or against a wall (paintings, mirrors, LED strips). */
+export type PropMount = 'floor' | 'surface' | 'wall';
+
+/** A sit/lay anchor, resolved against the figure skeleton's posture actions
+ *  ('sit' / 'lay' on body/torso — game/figure/skeleton.ts already poses them). */
+export type PropSeat = {
+  pose: 'sit' | 'lay';
+  /** where the pelvis lands, meters above the prop's ground anchor */
+  seatHeightMeters: number;
+  /** how many figures fit (chair 1, couch/bench 3, double bed 2) */
+  capacity: number;
+};
+
+/** The loot slot a container fills when the item system lands (next in line). */
+export type PropLootCategory = 'junk' | 'kitchen' | 'bathroom' | 'clothing' | 'office' | 'valuables' | 'tools';
+
+/** Can it be opened at all? 'locked' = pickable/forceable; 'keyed' = needs its key (safes, mailboxes). */
+export type PropContainerAccess = 'open' | 'locked' | 'keyed';
+
+/** A searchable container. Searching is a simple loading bar (searchSeconds). */
+export type PropContainer = {
+  lootCategory: PropLootCategory;
+  /** item slots */
+  capacity: number;
+  /** 0..1 chance per slot to spawn filled */
+  spawnFillChance: number;
+  /** the search loading bar, in seconds */
+  searchSeconds: number;
+  access: PropContainerAccess;
+};
+
+/** How a prop reads to combat/stealth: soft = conceals you (shoot-through),
+ *  hard = blocks bullets and line of sight. Feeds the coverFraction/exposure
+ *  contracts (game/chance.ts, game/perception.ts). */
+export type PropCoverClass = 'none' | 'soft' | 'hard';
+
+export function propMount(kind: PropKind): PropMount {
+  return PROP_KIND_DEFINITIONS[kind].mount ?? 'floor';
+}
+
+export function propSeat(kind: PropKind): PropSeat | null {
+  return PROP_KIND_DEFINITIONS[kind].seat ?? null;
+}
+
+export function propContainer(kind: PropKind): PropContainer | null {
+  return PROP_KIND_DEFINITIONS[kind].container ?? null;
+}
+
+/** Authored class wins; otherwise derive: foliage conceals (soft), a solid
+ *  prop at least chest height blocks (hard), everything else is open air. */
+export function propCoverClass(kind: PropKind): PropCoverClass {
+  const def = PROP_KIND_DEFINITIONS[kind];
+  if (def.coverClass) return def.coverClass;
+  if (def.tileKind === 'bush') return 'soft';
+  if (def.solid && def.heightMeters >= 0.9) return 'hard';
+  return 'none';
 }
 
 export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
@@ -259,6 +335,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 1.35,
     tileKind: 'wall',
     trafficControl: 'none',
+    container: { lootCategory: 'junk', capacity: 6, spawnFillChance: 0.7, searchSeconds: 4, access: 'open' },
   },
   mailbox: {
     kind: 'mailbox',
@@ -268,6 +345,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 1.35,
     tileKind: 'wall',
     trafficControl: 'none',
+    container: { lootCategory: 'office', capacity: 2, spawnFillChance: 0.4, searchSeconds: 2, access: 'locked' },
+    coverClass: 'soft',
   },
   fence: {
     kind: 'fence',
@@ -310,6 +389,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 1.0,
     tileKind: 'wall',
     trafficControl: 'none',
+    container: { lootCategory: 'junk', capacity: 3, spawnFillChance: 0.6, searchSeconds: 2.5, access: 'open' },
+    coverClass: 'soft',
     dynamics: { bodyRadiusMeters: 0.38, restitution: 0.22 },
   },
   bench: {
@@ -321,6 +402,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.85,
     tileKind: 'wall',
     trafficControl: 'none',
+    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 3 },
+    coverClass: 'soft',
   },
   planter: {
     kind: 'planter',
@@ -330,6 +413,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.6,
     tileKind: 'wall',
     trafficControl: 'none',
+    coverClass: 'soft',
   },
 
   // ── trees ──────────────────────────────────────────────────────────────────
@@ -484,6 +568,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 2.1,
     tileKind: 'wall',
     trafficControl: 'none',
+    mount: 'wall',
+    coverClass: 'none',
   },
   ledLight: {
     kind: 'ledLight',
@@ -493,6 +579,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 2.4,
     tileKind: 'wall',
     trafficControl: 'none',
+    mount: 'wall',
+    coverClass: 'none',
   },
 
   // ── furniture ──────────────────────────────────────────────────────────────
@@ -504,6 +592,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.95,
     tileKind: 'wall',
     trafficControl: 'none',
+    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 1 },
+    coverClass: 'soft',
   },
   couch: {
     kind: 'couch',
@@ -514,6 +604,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.85,
     tileKind: 'wall',
     trafficControl: 'none',
+    seat: { pose: 'sit', seatHeightMeters: 0.4, capacity: 3 },
+    coverClass: 'soft',
   },
   table: {
     kind: 'table',
@@ -523,6 +615,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.78,
     tileKind: 'wall',
     trafficControl: 'none',
+    coverClass: 'soft',
   },
   floorLamp: {
     kind: 'floorLamp',
@@ -532,6 +625,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 1.7,
     tileKind: 'wall',
     trafficControl: 'none',
+    coverClass: 'none',
   },
   // Colored chair variants — same body as 'chair', painted by kind.
   chairRed: {
@@ -542,6 +636,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.95,
     tileKind: 'wall',
     trafficControl: 'none',
+    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 1 },
+    coverClass: 'soft',
   },
   chairBlue: {
     kind: 'chairBlue',
@@ -551,6 +647,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.95,
     tileKind: 'wall',
     trafficControl: 'none',
+    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 1 },
+    coverClass: 'soft',
   },
   chairGreen: {
     kind: 'chairGreen',
@@ -560,6 +658,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.95,
     tileKind: 'wall',
     trafficControl: 'none',
+    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 1 },
+    coverClass: 'soft',
   },
 
   // ── household (bedroom / kitchen / bathroom) ───────────────────────────────
@@ -572,6 +672,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.9,
     tileKind: 'wall',
     trafficControl: 'none',
+    seat: { pose: 'lay', seatHeightMeters: 0.48, capacity: 1 },
+    coverClass: 'soft',
   },
   bedDouble: {
     kind: 'bedDouble',
@@ -582,6 +684,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.95,
     tileKind: 'wall',
     trafficControl: 'none',
+    seat: { pose: 'lay', seatHeightMeters: 0.48, capacity: 2 },
+    coverClass: 'soft',
   },
   cupboard: {
     kind: 'cupboard',
@@ -592,6 +696,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 1.9,
     tileKind: 'wall',
     trafficControl: 'none',
+    container: { lootCategory: 'clothing', capacity: 4, spawnFillChance: 0.6, searchSeconds: 3, access: 'open' },
   },
   mirror: {
     kind: 'mirror',
@@ -602,6 +707,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 1.9,
     tileKind: 'wall',
     trafficControl: 'none',
+    mount: 'wall',
+    coverClass: 'none',
   },
   sink: {
     kind: 'sink',
@@ -611,6 +718,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.9,
     tileKind: 'wall',
     trafficControl: 'none',
+    container: { lootCategory: 'bathroom', capacity: 2, spawnFillChance: 0.3, searchSeconds: 2, access: 'open' },
+    coverClass: 'soft',
   },
   oven: {
     kind: 'oven',
@@ -620,6 +729,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.95,
     tileKind: 'wall',
     trafficControl: 'none',
+    container: { lootCategory: 'kitchen', capacity: 2, spawnFillChance: 0.35, searchSeconds: 2.5, access: 'open' },
   },
   fridge: {
     kind: 'fridge',
@@ -629,6 +739,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 1.9,
     tileKind: 'wall',
     trafficControl: 'none',
+    container: { lootCategory: 'kitchen', capacity: 5, spawnFillChance: 0.7, searchSeconds: 3, access: 'open' },
   },
   computer: {
     kind: 'computer',
@@ -639,6 +750,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.55,
     tileKind: 'wall',
     trafficControl: 'none',
+    container: { lootCategory: 'office', capacity: 1, spawnFillChance: 0.5, searchSeconds: 3, access: 'open' },
+    mount: 'surface',
   },
 
   // ── utility + sport ────────────────────────────────────────────────────────

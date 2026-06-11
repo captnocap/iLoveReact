@@ -7,6 +7,11 @@ import {
   isPropKind,
   propKindDefinition,
   type PropKind,
+  propContainer,
+  propCoverClass,
+  propDynamics,
+  propMount,
+  propSeat,
 } from './props';
 import { assert, assertEqual, finish, test } from '../_testkit';
 
@@ -74,6 +79,76 @@ test('isPropKind accepts every kind and rejects strangers', () => {
   assert(!isPropKind('tree'), 'no tree prop kind');
   assert(!isPropKind(''), 'empty string is not a kind');
   assertEqual(PROP_KINDS.length, Object.keys(PROP_KIND_DEFINITIONS).length, 'kind list covers the table');
+});
+
+// ── PROPUSE-0610: the interaction bundle ─────────────────────────────────────
+
+test('seats: chairs sit 1, sofas/benches sit 3, beds lay — heights land on the prop', () => {
+  const sitters: [PropKind, 'sit' | 'lay', number][] = [
+    ['chair', 'sit', 1], ['chairRed', 'sit', 1], ['chairBlue', 'sit', 1], ['chairGreen', 'sit', 1],
+    ['couch', 'sit', 3], ['bench', 'sit', 3],
+    ['bedSingle', 'lay', 1], ['bedDouble', 'lay', 2],
+  ];
+  for (const [kind, pose, capacity] of sitters) {
+    const seat = propSeat(kind);
+    assert(seat !== null, `${kind} is sittable`);
+    assertEqual(seat!.pose, pose, `${kind} pose`);
+    assertEqual(seat!.capacity, capacity, `${kind} capacity`);
+    assert(seat!.seatHeightMeters > 0 && seat!.seatHeightMeters <= def(kind).heightMeters, `${kind} seat height on the prop`);
+  }
+  assertEqual(propSeat('table'), null, 'a table is not a seat');
+});
+
+test('containers: junk in trash/dumpsters, category loot in appliances, sane knobs', () => {
+  const expected: [PropKind, string, string][] = [
+    ['trashCan', 'junk', 'open'], ['dumpster', 'junk', 'open'],
+    ['fridge', 'kitchen', 'open'], ['oven', 'kitchen', 'open'],
+    ['cupboard', 'clothing', 'open'], ['sink', 'bathroom', 'open'],
+    ['mailbox', 'office', 'locked'], ['computer', 'office', 'open'],
+  ];
+  for (const [kind, category, access] of expected) {
+    const container = propContainer(kind);
+    assert(container !== null, `${kind} is searchable`);
+    assertEqual(container!.lootCategory, category, `${kind} loot category`);
+    assertEqual(container!.access, access, `${kind} access`);
+    assert(container!.capacity >= 1, `${kind} holds at least one slot`);
+    assert(container!.spawnFillChance >= 0 && container!.spawnFillChance <= 1, `${kind} fill chance is a probability`);
+    assert(container!.searchSeconds > 0, `${kind} search bar runs`);
+  }
+  assertEqual(propContainer('rock'), null, 'a rock is not searchable');
+});
+
+test('cover classes: foliage and furniture conceal, walls of metal block, decor is air', () => {
+  assertEqual(propCoverClass('bush'), 'soft', 'a bush conceals');
+  assertEqual(propCoverClass('couch'), 'soft', 'a couch conceals but does not stop bullets');
+  assertEqual(propCoverClass('dumpster'), 'hard', 'a dumpster blocks');
+  assertEqual(propCoverClass('barrier'), 'hard', 'a jersey barrier blocks');
+  assertEqual(propCoverClass('boulder'), 'hard', 'a boulder blocks');
+  assertEqual(propCoverClass('fridge'), 'hard', 'a fridge blocks');
+  assertEqual(propCoverClass('ballSoccer'), 'none', 'a soccer ball is not cover');
+  assertEqual(propCoverClass('wallPainting'), 'none', 'a painting is not cover');
+  assertEqual(propCoverClass('mirror'), 'none', 'a mirror is not cover');
+  assertEqual(propCoverClass('trafficCone'), 'none', 'a cone is not cover');
+});
+
+test('mounts: wall decor hangs, the computer sits on surfaces, the rest stand on the floor', () => {
+  for (const k of ['wallPainting', 'ledLight', 'mirror'] as PropKind[]) {
+    assertEqual(propMount(k), 'wall', `${k} mounts on walls`);
+  }
+  assertEqual(propMount('computer'), 'surface', 'a computer sits on a surface');
+  assertEqual(propMount('chair'), 'floor', 'a chair stands on the floor');
+  assertEqual(propMount('ballBeach'), 'floor', 'a ball rests on the floor');
+});
+
+test('dynamics: balls bounce, cones and cans shove; scenery stays static', () => {
+  for (const k of ['ballBeach', 'ballSoccer', 'ballBasketball', 'trafficCone', 'trashCan'] as PropKind[]) {
+    const dynamics = propDynamics(k);
+    assert(dynamics !== null, `${k} is kickable`);
+    assert(dynamics!.bodyRadiusMeters > 0, `${k} body radius positive`);
+    assert(dynamics!.restitution >= 0 && dynamics!.restitution <= 1, `${k} restitution in range`);
+  }
+  assert((propDynamics('ballBasketball')?.restitution ?? 0) > (propDynamics('trafficCone')?.restitution ?? 1), 'balls bounce more than cones');
+  assertEqual(propDynamics('fridge'), null, 'a fridge does not get kicked around');
 });
 
 finish('kinds/props');
