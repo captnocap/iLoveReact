@@ -17,6 +17,7 @@
 
 import { useMemo, useState } from 'react';
 import { Box, ScrollView, Text, Graph, Pressable, StaticSurface } from '@reactjit/primitives';
+import { PanelGroups, type FieldSpec, type PanelSpec } from './shell/fields';
 import type { Building, BuildingSkin, GameState, TileKind, WorldProp } from './design';
 import { tileKindDefinition } from './world/tileKinds';
 import { tileAltitudeAtWorldPosition, type TileAltitudeSample } from './world/tileAltitude';
@@ -39,23 +40,18 @@ export type Focus =
 
 type Role = typeof FACE_ROLES[number];
 
-type Ctl = 'bool' | 'scalar' | 'num' | 'text' | 'color';
-// A row is read-only unless it carries an `edit` prop — then its value is the
-// effective (override-or-default) value and the control becomes interactive,
-// writing an override across the whole selection. `overridden` accents it.
-type Row = { label: string; ctl: Ctl; value: unknown; edit?: OverridableProp; overridden?: boolean };
-type Group = { title: string; accent: string; rows: Row[] };
-// Threaded into Field when a tile (or group) is in focus: apply / clear an override
-// on the whole selection. Absent → the panel is read-only (building / prop focus).
+// PROPSFOLD-0610 (structure review §5.2): the data strip renders through THE
+// field renderer (shell/fields.tsx PanelGroups) — this file only EMITS a
+// PanelSpec. The bespoke hero band (radar, gauges, face-skin thumbs) stays.
+// Editable tile-override rows became real num fields (entry + slider, the L2
+// law) with the reset rider as the clear-to-default affordance; the hand-
+// rolled Row/Field/Stepper layer is gone.
+
+// Threaded into the spec builder when a tile (or group) is in focus: apply /
+// clear an override on the whole selection. Absent → read-only inspector.
 type EditCtx = { onSet: (path: string, value: OverrideValue) => void; onClear: (path: string) => void };
 
-const clampN = (n: number, lo?: number, hi?: number) =>
-  Math.max(lo ?? -Infinity, Math.min(hi ?? Infinity, n));
-
 const NEUTRAL_PERCEPTION = { high: 0 };
-const TRACK_W = 124;
-const TRACK_GUTTER = 7;
-const KNOB_W = 14;
 const PROPERTIES_SCROLL_STYLE = { flexGrow: 1, height: '100%' };
 const PROPERTIES_SCROLL_CONTENT_STYLE = { paddingBottom: 14 };
 
@@ -69,22 +65,6 @@ function fmt(v: unknown): string {
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
 // ── Indicator vizzes (live in the header banner) ────────────────────────────
-
-// scalar 0–1 bar (pixel widths — % on an absolute fill isn't resolved by layout)
-function ScalarView({ v }: { v: number }) {
-  const innerW = TRACK_W - TRACK_GUTTER * 2;
-  const fw = Math.round(innerW * clamp01(v));
-  const knobX = Math.round(TRACK_GUTTER + clamp01(v) * (innerW - KNOB_W));
-  return (
-    <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-      <C.SliderTrack>
-        <C.SliderFill style={{ width: Math.max(3, fw) }} />
-        <C.SliderKnob style={{ left: knobX }} />
-      </C.SliderTrack>
-      <C.SliderValue>{v.toFixed(2)}</C.SliderValue>
-    </Box>
-  );
-}
 
 // opacity → literal translucency over a checker
 function OpacityViz({ v }: { v: number }) {
@@ -226,92 +206,16 @@ function Indicator({ label, children }: { label: string; children: any }) {
   );
 }
 
-// ── Strip controls ───────────────────────────────────────────────────────────
-
-function ToggleView({ on }: { on: boolean }) {
-  const Track = on ? C.ToggleTrackOn : C.ToggleTrack;
-  const Knob = on ? C.ToggleKnobOn : C.ToggleKnob;
-  return <Track><Knob /></Track>;
-}
+// ── Strip helpers (the strip itself is shell/fields.tsx — the one renderer) ──
 
 // `color` is game DATA (a real tile/material colour), not UI chrome — legit literal.
 function Swatch({ color, size = 20 }: { color: string; size?: number }) {
   return <C.ChipSwatch style={{ width: size, height: size, backgroundColor: color }} />;
 }
 
-// The clear-to-default ✕ — only when an override is live on the row.
-function ClearOverride({ onPress }: { onPress: () => void }) {
-  return <C.ClearBtn onPress={onPress}><C.ClearBtnText>✕</C.ClearBtnText></C.ClearBtn>;
-}
-
-// An editable numeric / scalar — the sheet's existing Stepper, accented when set.
-function EditNum({ row, edit }: { row: Row; edit: EditCtx }) {
-  const p = row.edit!;
-  const cur = Number(row.value);
-  const has = Number.isFinite(cur);
-  const Root = row.overridden ? C.StepperOn : C.Stepper;
-  const Val = row.overridden ? C.StepperValueOn : C.StepperValue;
-  const set = (d: number) => edit.onSet(p.path, clampN(Number(((has ? cur : 0) + d).toFixed(4)), p.min, p.max));
-  return (
-    <Root>
-      <C.StepperBtn onPress={() => set(-(p.step ?? 0.1))}><C.StepperBtnText>−</C.StepperBtnText></C.StepperBtn>
-      <Val>{has ? cur.toFixed(2) : '—'}</Val>
-      <C.StepperBtn onPress={() => set(p.step ?? 0.1)}><C.StepperBtnText>+</C.StepperBtnText></C.StepperBtn>
-    </Root>
-  );
-}
-
-function Field({ row, edit }: { row: Row; edit?: EditCtx }) {
-  // Editable (a tile/group is in focus and this property is overridable).
-  if (edit && row.edit) {
-    const p = row.edit;
-    const control = p.ctl === 'bool'
-      ? <Pressable onPress={() => edit.onSet(p.path, !row.value)}><ToggleView on={!!row.value} /></Pressable>
-      : <EditNum row={row} edit={edit} />;
-    return (
-      <C.Field>
-        <C.FieldLabel>{row.label}</C.FieldLabel>
-        {control}
-        {row.overridden ? <ClearOverride onPress={() => edit.onClear(p.path)} /> : null}
-      </C.Field>
-    );
-  }
-  // Read-only.
-  const ctl =
-    row.ctl === 'bool' ? <ToggleView on={!!row.value} />
-    : row.ctl === 'scalar' ? <ScalarView v={Number(row.value)} />
-    : row.ctl === 'color' ? (
-        <>
-          <Swatch color={String(row.value)} size={16} />
-          <C.FieldValue>{String(row.value)}</C.FieldValue>
-        </>
-      )
-    : row.ctl === 'num' ? <C.FieldValueNum>{fmt(row.value)}</C.FieldValueNum>
-    : <C.FieldValue>{fmt(row.value)}</C.FieldValue>;
-  return (
-    <C.Field>
-      <C.FieldLabel>{row.label}</C.FieldLabel>
-      {ctl}
-    </C.Field>
-  );
-}
-
-function GroupView({ group, edit }: { group: Group; edit?: EditCtx }) {
-  if (!group.rows.length) return null;
-  const accent = accentFor(group.accent);
-  return (
-    <C.Group>
-      <C.GroupHead>
-        <C.GroupAccentBar style={{ backgroundColor: accent }} />
-        <C.GroupTitle color={accent}>{group.title}</C.GroupTitle>
-        <C.GroupRule />
-        <C.GroupCount>{String(group.rows.length)}</C.GroupCount>
-      </C.GroupHead>
-      <C.FieldStrip>
-        {group.rows.map((r) => <Field key={r.label} row={r} edit={edit} />)}
-      </C.FieldStrip>
-    </C.Group>
-  );
+/** read-only value row */
+function V(label: string, value: unknown): FieldSpec {
+  return { k: label, t: 'val', get: () => fmt(value) };
 }
 
 // ── Header banner — identity + the consolidated visual indicators ────────────
@@ -388,12 +292,13 @@ function SkinPickerPopover(props: { building: Building; role: Role; onPick: (ski
 // format never changes (that was already right). `edit`/`group` make the
 // overridable rows editable and show the effective (override-or-default) value;
 // without them it's the read-only kind inspector (the active-paint-tile fallback).
-function TileBody({ tile, cell, world, edit, group }: {
+function TileBody({ tile, cell, world, edit, group, onEdit }: {
   tile: TileKind;
   cell?: { x: number; z: number };
   world?: GameState;
   edit?: EditCtx;
   group?: { count: number; breakdown: string; cells: SelCell[]; overrides: OverrideStore };
+  onEdit: () => void;
 }) {
   const def = tileKindDefinition(tile);
   const altitude = summarizeAltitude(
@@ -412,77 +317,92 @@ function TileBody({ tile, cell, world, edit, group }: {
   };
   // A finite reading for the header gauges (they can't render "mixed").
   const gv = (path: string, dflt: number) => { const v = Number(eff(path, dflt).value); return Number.isFinite(v) ? v : dflt; };
-  // Row builder: editable iff a cell/group is in focus AND the path is overridable.
-  const R = (label: string, ctl: Ctl, dflt: unknown, path?: string): Row => {
+  // Field builder: editable iff a cell/group is in focus AND the path is in the
+  // OVERRIDABLE table — then it is a REAL field through the one renderer
+  // (num = entry + slider per L2; the reset rider is the clear-to-default).
+  const F = (label: string, dflt: unknown, path?: string): FieldSpec => {
     if (edit && path && byPath.has(path)) {
       const p = byPath.get(path)!;
       const e = eff(path, dflt as OverrideValue);
-      return { label, ctl: p.ctl, value: e.value, edit: p, overridden: e.overridden };
+      const reset = { hint: fmt(dflt), isDefault: () => !e.overridden, run: () => edit.onClear(p.path) };
+      if (p.ctl === 'bool') {
+        return { k: label, t: 'bool', get: () => !!e.value, set: (v: boolean) => edit.onSet(p.path, v), reset };
+      }
+      const step = p.step ?? 0.1;
+      const fallback = Number(dflt);
+      return {
+        k: label, t: 'num',
+        min: p.min ?? 0, max: p.max ?? 1, step,
+        precision: step >= 1 ? 0 : step >= 0.1 ? 1 : 2,
+        get: () => { const v = Number(e.value); return Number.isFinite(v) ? v : fallback; },
+        set: (v: number) => edit.onSet(p.path, v),
+        reset,
+      };
     }
-    return { label, ctl, value: dflt };
+    return V(label, dflt);
   };
 
-  const groups: Group[] = [
-    { title: 'PATHING', accent: 'info', rows: [
-      R('walkable', 'bool', def.pathing.walkable, 'pathing.walkable'),
-      R('moveCost', 'num', def.pathing.movementCost, 'pathing.movementCost'),
-      R('blocksLoS', 'bool', def.pathing.blocksLineOfSight, 'pathing.blocksLineOfSight'),
+  const spec: PanelSpec = { groups: [
+    { title: 'PATHING', fields: [
+      F('walkable', def.pathing.walkable, 'pathing.walkable'),
+      F('moveCost', def.pathing.movementCost, 'pathing.movementCost'),
+      F('blocksLoS', def.pathing.blocksLineOfSight, 'pathing.blocksLineOfSight'),
     ] },
-    { title: 'COVER', accent: 'error', rows: [
-      R('height', 'text', def.cover.height),
-      R('protection', 'scalar', def.cover.protection, 'cover.protection'),
-      R('conceal', 'scalar', def.cover.concealment, 'cover.concealment'),
-      R('shootOver', 'bool', def.cover.shootOver),
-      R('leanAround', 'bool', def.cover.leanAround),
-      R('crouchReq', 'bool', def.cover.crouchRequired),
+    { title: 'COVER', fields: [
+      F('height', def.cover.height),
+      F('protection', def.cover.protection, 'cover.protection'),
+      F('conceal', def.cover.concealment, 'cover.concealment'),
+      F('shootOver', def.cover.shootOver),
+      F('leanAround', def.cover.leanAround),
+      F('crouchReq', def.cover.crouchRequired),
     ] },
-    { title: 'VISIBILITY', accent: 'accentTeal', rows: [
-      R('opacity', 'num', def.visibility.opacity, 'visibility.opacity'),
-      R('conceal', 'scalar', def.visibility.concealment),
-      R('lightThru', 'num', def.visibility.lightTransmission, 'visibility.lightTransmission'),
-      R('soundOcc', 'scalar', def.visibility.soundOcclusion),
-      R('blocksLoS', 'bool', def.visibility.blocksLineOfSight),
+    { title: 'VISIBILITY', fields: [
+      F('opacity', def.visibility.opacity, 'visibility.opacity'),
+      F('conceal', def.visibility.concealment),
+      F('lightThru', def.visibility.lightTransmission, 'visibility.lightTransmission'),
+      F('soundOcc', def.visibility.soundOcclusion),
+      F('blocksLoS', def.visibility.blocksLineOfSight),
     ] },
-    { title: 'TRAVERSAL', accent: 'info', rows: [
-      R('modes', 'text', def.traversal.allowedModes),
-      R('width', 'text', def.traversal.width),
-      R('stepUpM', 'num', def.traversal.maxStepUpMeters),
-      R('clearM', 'num', def.traversal.minClearanceMeters),
-      R('slopeLim°', 'num', def.traversal.slopeLimitDegrees),
-      R('crouch', 'bool', def.traversal.requiresCrouch),
-      R('mantle', 'bool', def.traversal.requiresMantle),
-      R('vehGrip×', 'num', def.traversal.vehicleGripMultiplier),
+    { title: 'TRAVERSAL', fields: [
+      F('modes', def.traversal.allowedModes),
+      F('width', def.traversal.width),
+      F('stepUpM', def.traversal.maxStepUpMeters),
+      F('clearM', def.traversal.minClearanceMeters),
+      F('slopeLim°', def.traversal.slopeLimitDegrees),
+      F('crouch', def.traversal.requiresCrouch),
+      F('mantle', def.traversal.requiresMantle),
+      F('vehGrip×', def.traversal.vehicleGripMultiplier),
     ] },
-    { title: 'SURFACE', accent: 'warning', rows: [
-      R('material', 'text', def.surface.material),
-      R('walk×', 'num', def.surface.walkSpeedMultiplier, 'surface.walkSpeedMultiplier'),
-      R('run×', 'num', def.surface.runSpeedMultiplier, 'surface.runSpeedMultiplier'),
-      R('veh×', 'num', def.surface.vehicleSpeedMultiplier, 'surface.vehicleSpeedMultiplier'),
-      R('accel×', 'num', def.surface.accelerationMultiplier),
-      R('friction', 'num', def.surface.friction, 'surface.friction'),
-      R('latGrip', 'scalar', def.surface.lateralGrip, 'surface.lateralGrip'),
-      R('restitution', 'scalar', def.surface.restitution, 'surface.restitution'),
+    { title: 'SURFACE', fields: [
+      F('material', def.surface.material),
+      F('walk×', def.surface.walkSpeedMultiplier, 'surface.walkSpeedMultiplier'),
+      F('run×', def.surface.runSpeedMultiplier, 'surface.runSpeedMultiplier'),
+      F('veh×', def.surface.vehicleSpeedMultiplier, 'surface.vehicleSpeedMultiplier'),
+      F('accel×', def.surface.accelerationMultiplier),
+      F('friction', def.surface.friction, 'surface.friction'),
+      F('latGrip', def.surface.lateralGrip, 'surface.lateralGrip'),
+      F('restitution', def.surface.restitution, 'surface.restitution'),
     ] },
-    { title: 'ALTITUDE', accent: 'info', rows: [
-      R('sample', 'text', def.altitude.sample),
-      R('followsHF', 'bool', def.altitude.followsHeightfield),
-      R('offsetM', 'num', def.altitude.surfaceOffsetMeters),
+    { title: 'ALTITUDE', fields: [
+      F('sample', def.altitude.sample),
+      F('followsHF', def.altitude.followsHeightfield),
+      F('offsetM', def.altitude.surfaceOffsetMeters),
       ...(altitude ? [
-        R('source', 'text', altitude.source),
-        R('meshY', 'text', altitudeRange(altitude, 'baseMeters')),
-        R('tileY', 'text', altitudeRange(altitude, 'surfaceMeters')),
+        F('source', altitude.source),
+        F('meshY', altitudeRange(altitude, 'baseMeters')),
+        F('tileY', altitudeRange(altitude, 'surfaceMeters')),
       ] : []),
     ] },
-    { title: 'NPC', accent: 'success', rows: [
-      R('traversable', 'bool', def.npc.traversable),
-      R('walkCost', 'num', def.npc.walkCost),
-      R('runCost', 'num', def.npc.runCost),
-      R('vehCost', 'num', def.npc.vehicleCost),
-      R('vehPref', 'bool', def.npc.preferredByVehicles),
-      R('cover', 'text', def.npc.cover),
-      R('noise', 'scalar', def.npc.noise),
+    { title: 'NPC', fields: [
+      F('traversable', def.npc.traversable),
+      F('walkCost', def.npc.walkCost),
+      F('runCost', def.npc.runCost),
+      F('vehCost', def.npc.vehicleCost),
+      F('vehPref', def.npc.preferredByVehicles),
+      F('cover', def.npc.cover),
+      F('noise', def.npc.noise),
     ] },
-  ];
+  ] };
   const radarAxes = [
     { label: 'fric', v: gv('surface.friction', def.surface.friction) },
     { label: 'grip', v: gv('surface.lateralGrip', def.surface.lateralGrip) },
@@ -508,40 +428,32 @@ function TileBody({ tile, cell, world, edit, group }: {
         <Indicator label="lightThru"><LightViz v={gv('visibility.lightTransmission', def.visibility.lightTransmission)} /></Indicator>
         <Indicator label="friction"><FrictionGauge v={gv('surface.friction', def.surface.friction)} /></Indicator>
       </HeaderBar>
-      {groups.map((g) => <GroupView key={g.title} group={g} edit={edit} />)}
+      <PanelGroups spec={spec} onEdit={onEdit} />
     </Box>
   );
 }
 
-function BuildingBody(props: { building: Building; onSetFace?: (id: string, role: Role, skin: BuildingSkin) => void }) {
+function BuildingBody(props: { building: Building; onSetFace?: (id: string, role: Role, skin: BuildingSkin) => void; onEdit: () => void }) {
   const b = props.building;
   const def = buildingKindDefinition(b.kind);
   const faces = currentFaceSkins(b);
   const [picking, setPicking] = useState<Role | null>(null);
-  const groups: Group[] = [
-    { title: 'IDENTITY', accent: 'primary', rows: [
-      { label: 'id', ctl: 'text', value: b.id },
-      { label: 'kind', ctl: 'text', value: b.kind },
-      { label: 'label', ctl: 'text', value: b.label },
-      { label: 'enclosure', ctl: 'text', value: b.enclosure },
-      { label: 'doorSide', ctl: 'text', value: b.doorSide },
-      { label: 'interiorId', ctl: 'text', value: b.interiorId },
-      { label: 'by', ctl: 'text', value: b.createdByCommand },
+  const spec: PanelSpec = { groups: [
+    { title: 'IDENTITY', fields: [
+      V('id', b.id), V('kind', b.kind), V('label', b.label), V('enclosure', b.enclosure),
+      V('doorSide', b.doorSide), V('interiorId', b.interiorId), V('by', b.createdByCommand),
     ] },
-    { title: 'FOOTPRINT', accent: 'info', rows: [
-      { label: 'at', ctl: 'text', value: cellAddress(Math.round(b.x), Math.round(b.z)) },
-      { label: 'x,y,z', ctl: 'text', value: `${fmt(b.x)}, ${fmt(b.y)}, ${fmt(b.z)}` },
-      { label: 'width', ctl: 'text', value: `${fmt(b.widthTiles)}m` },
-      { label: 'depth', ctl: 'text', value: `${fmt(b.depthTiles)}m` },
+    { title: 'FOOTPRINT', fields: [
+      V('at', cellAddress(Math.round(b.x), Math.round(b.z))),
+      V('x,y,z', `${fmt(b.x)}, ${fmt(b.y)}, ${fmt(b.z)}`),
+      V('width', `${fmt(b.widthTiles)}m`),
+      V('depth', `${fmt(b.depthTiles)}m`),
     ] },
-    { title: 'KIND DEFAULTS', accent: 'warning', rows: [
-      { label: 'structure', ctl: 'text', value: def.structureModel },
-      { label: 'storeys', ctl: 'num', value: def.storeys },
-      { label: 'wallTile', ctl: 'text', value: def.wallTileKind },
-      { label: 'defEnclose', ctl: 'text', value: def.defaultEnclosure },
-      { label: 'default w×d', ctl: 'text', value: `${fmt(def.defaultWidthTiles)}×${fmt(def.defaultDepthTiles)}` },
+    { title: 'KIND DEFAULTS', fields: [
+      V('structure', def.structureModel), V('storeys', def.storeys), V('wallTile', def.wallTileKind),
+      V('defEnclose', def.defaultEnclosure), V('default w×d', `${fmt(def.defaultWidthTiles)}×${fmt(def.defaultDepthTiles)}`),
     ] },
-  ];
+  ] };
   return (
     <Box style={{ position: 'relative' }}>
       <HeaderBar kind="BUILDING" title={def.label} sub={b.id}>
@@ -552,7 +464,7 @@ function BuildingBody(props: { building: Building; onSetFace?: (id: string, role
           </Indicator>
         ))}
       </HeaderBar>
-      {groups.map((g) => <GroupView key={g.title} group={g} />)}
+      <PanelGroups spec={spec} onEdit={props.onEdit} />
       {picking !== null ? (
         <SkinPickerPopover
           building={b} role={picking}
@@ -564,37 +476,34 @@ function BuildingBody(props: { building: Building; onSetFace?: (id: string, role
   );
 }
 
-function PropBody({ prop }: { prop: WorldProp }) {
+function PropBody({ prop, onEdit }: { prop: WorldProp; onEdit: () => void }) {
   const p = prop;
   const def = propKindDefinition(p.kind);
   const propColor = tileKindDefinition(def.tileKind).render.color;
-  const groups: Group[] = [
-    { title: 'IDENTITY', accent: 'primary', rows: [
-      { label: 'id', ctl: 'text', value: p.id },
-      { label: 'kind', ctl: 'text', value: p.kind },
-      { label: 'label', ctl: 'text', value: def.label },
-      { label: 'by', ctl: 'text', value: p.createdByCommand },
+  const spec: PanelSpec = { groups: [
+    { title: 'IDENTITY', fields: [
+      V('id', p.id), V('kind', p.kind), V('label', def.label), V('by', p.createdByCommand),
     ] },
-    { title: 'PLACEMENT', accent: 'info', rows: [
-      { label: 'at', ctl: 'text', value: cellAddress(Math.round(p.x), Math.round(p.z)) },
-      { label: 'x,y,z', ctl: 'text', value: `${fmt(p.x)}, ${fmt(p.y)}, ${fmt(p.z)}` },
-      { label: 'yaw°', ctl: 'num', value: p.yawDegrees },
-      { label: 'signal', ctl: 'text', value: p.signalOverride },
+    { title: 'PLACEMENT', fields: [
+      V('at', cellAddress(Math.round(p.x), Math.round(p.z))),
+      V('x,y,z', `${fmt(p.x)}, ${fmt(p.y)}, ${fmt(p.z)}`),
+      V('yaw°', p.yawDegrees),
+      V('signal', p.signalOverride),
     ] },
-    { title: 'KIND', accent: 'warning', rows: [
-      { label: 'solid', ctl: 'bool', value: def.solid },
-      { label: 'footprintR', ctl: 'text', value: `${fmt(def.footprintRadiusMeters)}m` },
-      { label: 'borrowsTile', ctl: 'text', value: def.tileKind },
-      { label: 'traffic', ctl: 'text', value: def.trafficControl },
+    { title: 'KIND', fields: [
+      V('solid', def.solid),
+      V('footprintR', `${fmt(def.footprintRadiusMeters)}m`),
+      V('borrowsTile', def.tileKind),
+      V('traffic', def.trafficControl),
     ] },
-  ];
+  ] };
   return (
     <Box>
       <HeaderBar kind="OBJECT" title={def.label} sub={`${p.id} · borrows ${def.tileKind}`}>
         <Indicator label="tile"><Swatch color={propColor} size={34} /></Indicator>
         <Indicator label="height"><HeightViz m={def.heightMeters} /></Indicator>
       </HeaderBar>
-      {groups.map((g) => <GroupView key={g.title} group={g} />)}
+      <PanelGroups spec={spec} onEdit={onEdit} />
     </Box>
   );
 }
@@ -695,12 +604,16 @@ export function PropertiesPanel(props: {
   onClearOverride?: (path: string) => void;
 }) {
   const { focus, world } = props;
+  // PanelGroups' controls read through get()/set() closures; onEdit is the
+  // re-render tick after a write (the Workbench's own idiom).
+  const [, setRev] = useState(0);
+  const onEdit = () => setRev((r) => r + 1);
 
   let body: React.ReactNode;
   if (!focus) {
     body = <Empty />;
   } else if (focus.kind === 'tile') {
-    body = <TileBody tile={focus.tile} cell={focus.cell} world={world} />;
+    body = <TileBody tile={focus.tile} cell={focus.cell} world={world} onEdit={onEdit} />;
   } else if (focus.kind === 'tiles') {
     const cells = focus.cells;
     if (!cells.length || !props.overrides || !props.onOverride || !props.onClearOverride) {
@@ -717,6 +630,7 @@ export function PropertiesPanel(props: {
           world={world}
           edit={{ onSet: props.onOverride, onClear: props.onClearOverride }}
           group={{ count: cells.length, breakdown: kindBreakdown(cells), cells, overrides: props.overrides }}
+          onEdit={onEdit}
         />
       );
     }
@@ -724,7 +638,7 @@ export function PropertiesPanel(props: {
     body = <HeaderBar kind="BUILDING" title="legacy layer removed" sub={focus.id} />;
   } else {
     const p = world.world.props.find((x) => x.id === focus.id);
-    body = p ? <PropBody prop={p} /> : <HeaderBar kind="OBJECT" title="missing" sub={focus.id} />;
+    body = p ? <PropBody prop={p} onEdit={onEdit} /> : <HeaderBar kind="OBJECT" title="missing" sub={focus.id} />;
   }
 
   return (

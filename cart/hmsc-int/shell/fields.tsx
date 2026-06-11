@@ -22,7 +22,9 @@ export type { PickOption };
 
 export type FieldSpec =
   | { k: string; t: 'val'; get(): string }
-  | { k: string; t: 'bool'; get(): boolean; set(v: boolean): void }
+  // bool carries the same optional reset rider as num (PROPSFOLD-0610: the
+  // in-focus tile overrides need clear-to-default on toggles too). Additive.
+  | { k: string; t: 'bool'; get(): boolean; set(v: boolean): void; reset?: { hint: string; isDefault(): boolean; run(): void } }
   // num gains an optional reset affordance (WBSET9-0606, the /settings ↺
   // parity): non-default values show a reset chip carrying the default's
   // formatted hint; at-default values show a dim marker. Additive — every
@@ -95,9 +97,20 @@ function BoolField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'bool' }>; onEdit
   const Track = on ? C.ToggleTrackOn : C.ToggleTrack;
   const Knob = on ? C.ToggleKnobOn : C.ToggleKnob;
   return (
-    <Pressable onPress={() => { f.set(!f.get()); onEdit(); }}>
-      <Track><Knob /></Track>
-    </Pressable>
+    <>
+      <Pressable onPress={() => { f.set(!f.get()); onEdit(); }}>
+        <Track><Knob /></Track>
+      </Pressable>
+      {f.reset ? (
+        f.reset.isDefault() ? (
+          <C.FieldValue>default</C.FieldValue>
+        ) : (
+          <C.Chip onPress={() => { f.reset!.run(); onEdit(); }}>
+            <C.ChipLabel color={accentFor('warning')}>{`↺ ${f.reset.hint}`}</C.ChipLabel>
+          </C.Chip>
+        )
+      ) : null}
+    </>
   );
 }
 
