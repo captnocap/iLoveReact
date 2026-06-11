@@ -60,7 +60,12 @@ export type TileKind =
   // own spawn (you save here, you reappear THERE). Authored in hmsc-int's MARKERS
   // palette, lowered to placedCells on compile.
   | 'spawn'
-  | 'save';
+  | 'save'
+  // Living ground (GRASSTILE-0611, req_0642 "bush tiles but no grass tiles").
+  // Appended at the END — both tile tables ship kind INDICES in their own key
+  // order, so new kinds never enter the middle.
+  | 'grass'
+  | 'grassDry';
 
 // Altered-perception channel. Drives how building skins (and later other
 // surfaces) reinterpret themselves — e.g. being high scrambling facade text or

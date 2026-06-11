@@ -14,6 +14,7 @@ import { ObjectsTab } from './tabs/ObjectsTab';
 import { NotesTab } from './tabs/NotesTab';
 import { ChatTab } from './tabs/ChatTab';
 import type { PlaceCat } from './placements';
+import type { ScatterBrushId } from './game/kinds/scatter';
 import type { BuildPrefabDef } from '@game';
 
 // SET retired (SETFOLD-0610, review §5.1/L4): the chrome's SETTINGS door →
@@ -54,12 +55,13 @@ export function RightPanel(props: {
   onPlace: (cat: 'building' | 'prop' | 'marker', kind: string) => void;
   activePlaceable?: { cat: PlaceCat; kind: string } | null;
   onArmPlaceable?: (cat: PlaceCat, kind: string) => void;
+  onArmScatter?: (id: ScatterBrushId) => void;
 }) {
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'row', backgroundColor: '#0b1320' }}>
       {/* Active tab content */}
       <Box style={{ flexGrow: 1, minWidth: 0, height: '100%' }}>
-        {props.tab === 'objects' ? <ObjectsTab buildingPrefabs={props.buildingPrefabs} onPlace={props.onPlace} activePlaceable={props.activePlaceable} onArmPlaceable={props.onArmPlaceable} /> : null}
+        {props.tab === 'objects' ? <ObjectsTab buildingPrefabs={props.buildingPrefabs} onPlace={props.onPlace} activePlaceable={props.activePlaceable} onArmPlaceable={props.onArmPlaceable} onArmScatter={props.onArmScatter} /> : null}
         {props.tab === 'notes' ? <NotesTab notes={props.notes} onNotes={props.onNotes} /> : null}
         {props.tab === 'chat' ? <ChatTab /> : null}
       </Box>

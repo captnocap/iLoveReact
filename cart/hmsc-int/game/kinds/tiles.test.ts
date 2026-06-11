@@ -169,7 +169,7 @@ test('embedded = wall/door/bush; gameplay = spawn/save; every kind in exactly on
 test('TILE_KINDS index order is locked (host pathing ships kind indices)', () => {
   assertEqual(
     TILE_KINDS.join(','),
-    'water,road,asphalt,sidewalk,mud,sand,wall,door,bush,marker,spawn,save,laneNorth,laneSouth,laneEast,laneWest,junction,crosswalk,median',
+    'water,road,asphalt,sidewalk,mud,sand,wall,door,bush,marker,spawn,save,laneNorth,laneSouth,laneEast,laneWest,junction,crosswalk,median,grass,grassDry',
     'TILE_KINDS order',
   );
   for (const k of TILE_KINDS) {
@@ -201,7 +201,10 @@ test('every kind has a complete, sane profile', () => {
 
 test('isTileKind accepts every kind and rejects strangers', () => {
   for (const k of TILE_KINDS) assert(isTileKind(k), `isTileKind(${k})`);
-  assert(!isTileKind('grass'), 'no grass kind (sand is the soft-ground stand-in)');
+  // GRASSTILE-0611 (req_0642): grass became a REAL paintable surface — the
+  // old "sand is the soft-ground stand-in" note is history.
+  assert(isTileKind('grass'), 'grass is a kind now');
+  assert(!isTileKind('lava'), 'strangers rejected');
   assert(!isTileKind(''), 'empty string is not a kind');
 });
 

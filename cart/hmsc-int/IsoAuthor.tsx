@@ -23,7 +23,7 @@ import { perfMs, warnPlaceFreeze } from './editors/build/placeFreezeProbe';
 import { FacePainter } from './editors/build/FacePainter';
 import { BUILD_UI } from './editors/build/buildUi';
 import { IsoStage, METERS_PER_LEVEL, type IsoPose } from './isoStage';
-import { readRouteTwigState, writeRouteTwigState } from './editors/twigs';
+import { readRouteTwigState, writeRouteTwigState, useRouteTwigState } from './editors/twigs';
 import { useEditorControls, useHeldModifiers } from './editors/useEditorControls';
 import type { GameState } from './design';
 import { WorldStatics } from './render3d/GameWorld3D';
@@ -1497,11 +1497,14 @@ const IsoGrid = memo(function IsoGrid(props: { centerX: number; centerZ: number;
 type RailTab = BuildPieceKind | 'prefabs';
 const RAIL_TABS: RailTab[] = [...PALETTE_KINDS, 'prefabs'];
 const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: readonly BuildPrefabDef[]; onArm: (a: NonNullable<Armed>) => void }) {
-  const [tab, setTab] = useState<RailTab>('wall');
+  // TWIGS (req_0643 "annoying have it reset"): the rail's tab + prop shelf are
+  // route twig state, so a hot reload restores the menu where you left it —
+  // the TWIGSWEEP-0610 rule, applied here.
+  const [tab, setTab] = useRouteTwigState<RailTab>(ISO_ROUTE, 'railTab', 'wall');
   // The prop tab is SHELVED (PROPSHELF-0611, req_0636): ~100 kinds as one flat
   // button wall was unusable, so a second chip row picks a registry category
   // (game/kinds/props PROP_CATEGORIES) and only that shelf's pieces list.
-  const [propShelf, setPropShelf] = useState<PropCategory>('street');
+  const [propShelf, setPropShelf] = useRouteTwigState<PropCategory>(ISO_ROUTE, 'railShelf', 'street');
   // 'prefabs' lists the named compositions (stamp → many pieces) — the FULL list the cart
   // passes (built-in + user-captured stream prefabs); every other tab lists that kind's
   // catalog pieces. Both feed the SAME rail, fed by the SAME GAME_BUILD.

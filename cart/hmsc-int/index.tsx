@@ -258,7 +258,7 @@ function EditorShell() {
     commitBuildEvent, commitBuildEvents, snapshotForUndo, snapshotForUndoCoalesced,
     logEvent, logCoalesced, setLayer, setTool, setTab,
   });
-  const { place, activePlaceable, armPlaceable, placeObject, setFaceTexture } = placementsApi;
+  const { place, activePlaceable, armPlaceable, armScatter, placeObject, setFaceTexture } = placementsApi;
 
   // PaintCanvas reports each edit with a semantic note (or none for silent edits like
   // focus toggles): trip the autosave + log the note. Stable for the memoized canvas.
@@ -408,6 +408,7 @@ function EditorShell() {
                 onPlace={placeObject}
                 activePlaceable={activePlaceable}
                 onArmPlaceable={armPlaceable}
+                onArmScatter={armScatter}
               />
             }
             bottomLeft={

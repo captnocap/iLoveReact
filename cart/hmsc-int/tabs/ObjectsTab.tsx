@@ -35,6 +35,7 @@ import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitive
 import { Icon } from '@reactjit/icons/Icon';
 import type { TileKind } from '../design';
 import { PROP_KINDS, propKindDefinition } from '../game/kinds/props';
+import { SCATTER_BRUSHES, SCATTER_BRUSH_IDS, isScatterBrushId, type ScatterBrushId } from '../game/kinds/scatter';
 import { EMBEDDED_TILE_KINDS, GAMEPLAY_TILE_KINDS, PAINTABLE_TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { buildObjectWorld, type ObjectWorld } from '../objectPreview';
 import { ModelViewer } from '../ModelViewer';
@@ -55,7 +56,7 @@ import { round, type MeshSpec } from '../assist3d/scene';
 import { GAME_BUILD } from '@game';
 import type { BuildPrefabDef, DecomposedPiece, PlacedBuildPiece } from '@game';
 
-type Cat = 'building' | 'prop' | 'marker' | 'tile' | 'embedded' | 'texture' | 'assistant';
+type Cat = 'building' | 'prop' | 'scatter' | 'marker' | 'tile' | 'embedded' | 'texture' | 'assistant';
 type Sel = { cat: Cat; kind: string };
 type Group = { cat: Cat; title: string; items: { kind: string; label: string }[] };
 
@@ -65,6 +66,9 @@ function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min
 // items are live (driven by the watched scene.json).
 const STATIC_GROUPS: Group[] = [
   { cat: 'prop', title: 'OBJECTS', items: PROP_KINDS.map((k) => ({ kind: k, label: propKindDefinition(k).label })) },
+  // SCATTERBRUSH-0611 (req_0642): procedural nature brushes — arm one and
+  // PAINT; the stroke rolls a weighted grass/tree/rock mix per tile.
+  { cat: 'scatter', title: 'SCATTER BRUSHES', items: SCATTER_BRUSH_IDS.map((id) => ({ kind: id, label: SCATTER_BRUSHES[id].label })) },
   // MARKERS — gameplay cells you PLACE one at a time (spawn / save), not paint.
   // Placeable (the + drops one), and the save↔spawn link is set on the placed
   // marker in the canvas place-rail.
@@ -315,6 +319,7 @@ export function ObjectsTab(props: {
   onPlace?: (cat: 'building' | 'prop' | 'marker', kind: string) => void;
   activePlaceable?: { cat: 'building' | 'prop' | 'marker'; kind: string } | null;
   onArmPlaceable?: (cat: 'building' | 'prop' | 'marker', kind: string) => void;
+  onArmScatter?: (id: ScatterBrushId) => void;
 }) {
   const firstBuilding = props.buildingPrefabs?.[0]?.id;
   // TWIGSWEEP-0610 (structure review §4): every selection/disclosure here is a
@@ -367,7 +372,9 @@ export function ObjectsTab(props: {
     () => (sel.cat === 'prop' ? kindTexturesFor(sel.cat, sel.kind) : undefined),
     [kindTex, sel.cat, sel.kind],
   );
-  const pv = useMemo(() => ((isTexture || isAssist || isBuildingPrefab) ? null : buildPreview(sel, inspectedTextures)), [isTexture, isAssist, isBuildingPrefab, sel.cat, sel.kind, inspectedTextures]);
+  const isScatter = sel.cat === 'scatter';
+  const scatterBrush = isScatter && isScatterBrushId(sel.kind) ? SCATTER_BRUSHES[sel.kind] : undefined;
+  const pv = useMemo(() => ((isTexture || isAssist || isBuildingPrefab || isScatter) ? null : buildPreview(sel, inspectedTextures)), [isTexture, isAssist, isBuildingPrefab, isScatter, sel.cat, sel.kind, inspectedTextures]);
   // The decomposed 3D view of the inspected building prefab (its semantic pieces).
   const prefabView = useMemo(() => (buildingPrefab ? buildPrefabView(buildingPrefab) : null), [buildingPrefab]);
 
@@ -379,7 +386,10 @@ export function ObjectsTab(props: {
   const applyTexture = (textureId: string | null) => { if (selPart) setKindTexture(sel.cat, sel.kind, selPart, textureId); setTexOpen(false); };
 
   const palGroup = groupOf(palCat);
-  const arm = (cat: Cat, kind: string) => { if (isPlaceable(cat)) props.onArmPlaceable?.(cat as 'building' | 'prop' | 'marker', kind); };
+  const arm = (cat: Cat, kind: string) => {
+    if (cat === 'scatter') { if (isScatterBrushId(kind)) props.onArmScatter?.(kind); return; }
+    if (isPlaceable(cat)) props.onArmPlaceable?.(cat as 'building' | 'prop' | 'marker', kind);
+  };
   const inspect = (cat: Cat, kind: string) => { setSel({ cat, kind }); setPalCat(cat); setCatOpen(false); setItemOpen(false); setSelPart(null); setTexOpen(false); arm(cat, kind); };
   const place = (cat: Cat, kind: string) => { if (isPlaceable(cat)) { arm(cat, kind); props.onPlace?.(cat as 'building' | 'prop' | 'marker', kind); } };
   const pickCat = (c: Cat) => { setPalCat(c); setCatOpen(false); setItemOpen(true); };
@@ -419,6 +429,23 @@ export function ObjectsTab(props: {
         ) : texDef ? (
           <TexturePreview def={texDef} />
         ) : null
+      ) : isScatter ? (
+        <Box style={{ flexGrow: 1, minHeight: 0, padding: 16, gap: 8 }}>
+          <Text fontSize={12} color={accentFor('text')} style={{ fontFamily: 'monospace', fontWeight: 700 }}>{scatterBrush?.label ?? 'Scatter brush'}</Text>
+          <Text fontSize={10} color={accentFor('textDim')} style={{ fontFamily: 'monospace' }}>
+            {'Procedural nature brush — it is ARMED: paint the map and it rolls the mix below per tile. Re-painting the same ground never double-fills.'}
+          </Text>
+          {scatterBrush ? (
+            <Box style={{ gap: 3 }}>
+              <Text fontSize={10} color={accentFor('textDim')} style={{ fontFamily: 'monospace', fontWeight: 700 }}>{`density ${(scatterBrush.density * 100).toFixed(0)}% of painted tiles`}</Text>
+              {scatterBrush.entries.map((e) => (
+                <Text key={e.kind} fontSize={10} color={accentFor('text')} style={{ fontFamily: 'monospace' }}>
+                  {`· ${propKindDefinition(e.kind).label}  ×${e.weight}`}
+                </Text>
+              ))}
+            </Box>
+          ) : null}
+        </Box>
       ) : isAssist ? (
         assistMesh ? (
           <>

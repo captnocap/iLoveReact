@@ -473,6 +473,35 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     render: { color: '#46431f', heightMeters: 0.085, textureKey: HMSC_TILE_TEXTURE_KEYS.median },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
+  // ── living ground (GRASSTILE-0611, req_0642) — appended LAST, indices stable ─
+  grass: {
+    kind: 'grass',
+    placement: 'surface',
+    label: 'Grass',
+    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.9, preferredByVehicles: false, cover: 'none', noise: 0.2 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.12, lightTransmission: 0.97, soundOcclusion: 0.04 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
+    render: { color: '#3f7d33', heightMeters: 0.06, textureKey: HMSC_TILE_TEXTURE_KEYS.grass },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  grassDry: {
+    kind: 'grassDry',
+    placement: 'surface',
+    label: 'Dry Grass',
+    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.8, preferredByVehicles: false, cover: 'none', noise: 0.28 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.1, lightTransmission: 0.97, soundOcclusion: 0.04 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.55 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.96, runSpeedMultiplier: 0.94, vehicleSpeedMultiplier: 0.55, accelerationMultiplier: 0.72, friction: 0.58, lateralGrip: 0.62, restitution: 0.2 },
+    render: { color: '#8a9a4a', heightMeters: 0.06, textureKey: HMSC_TILE_TEXTURE_KEYS.grassDry },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
 };
 
 export const TILE_KINDS = Object.keys(TILE_KIND_DEFINITIONS) as TileKind[];

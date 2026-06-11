@@ -9,6 +9,7 @@ import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefO
 import type { BuildingFaceRole, BuildingSkin } from '../../design';
 import { applyFaceSkin } from '../../buildingEditor';
 import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } from '../../placements';
+import { SCATTER_BRUSHES, type ScatterBrushId } from '../../game/kinds/scatter';
 import { graphToBuildWorld, mapBuildFootprints, mapBuildPlaceable } from '../../mapBuildPlacements';
 import { partitionBuildingSelection, type BuildEditEvent, type BuildPrefabDef, type PlacedBuildPiece } from '../../game';
 import { TILE_UNITS } from '../../heightData';
@@ -16,7 +17,12 @@ import type { EditNote } from '../../editLog';
 import type { Tool, Layer } from '../../PaintCanvas';
 import type { TabId } from '../../RightPanel';
 
-export type ActivePlaceable = { cat: PlaceCat; kind: string; label: string; color: string; footW: number; footD: number; rotation: number } | null;
+export type ActivePlaceable = {
+  cat: PlaceCat; kind: string; label: string; color: string; footW: number; footD: number; rotation: number;
+  /** SCATTERBRUSH-0611: armed as a procedural nature brush — the stroke rolls
+   *  weighted prop placements per tile instead of stamping `kind` directly. */
+  scatter?: ScatterBrushId;
+} | null;
 
 export function usePlacements(opts: {
   placements: Placement[];
@@ -75,6 +81,17 @@ export function usePlacements(opts: {
     setTool('brush');
     setTab('objects');
   }, [buildingPrefabs, setLayer, setTool, setTab]);
+
+  // Arm a procedural nature brush (SCATTERBRUSH-0611): rides the same armed-
+  // placeable channel, so the painter's place stroke, ghost, and Esc-to-clear
+  // all just work; the stroke branches on `scatter` to roll the mix.
+  const armScatter = useCallback((id: ScatterBrushId) => {
+    const def = SCATTER_BRUSHES[id];
+    setActivePlaceable({ cat: 'prop', kind: def.entries[0].kind, label: def.label, color: def.color, footW: 1, footD: 1, rotation: 0, scatter: id });
+    setLayer('place');
+    setTool('brush');
+    setTab('objects');
+  }, [setLayer, setTool, setTab]);
 
   const rotatePlaceBrush = useCallback((delta: number) => {
     setActivePlaceable((prev) => prev ? { ...prev, rotation: ((prev.rotation + delta) % 360 + 360) % 360 } : prev);
@@ -210,5 +227,5 @@ export function usePlacements(opts: {
     onDeleteBuild: removeBuildPlacement,
   }), [placements, selPlaceId, activePlaceable, buildFootprints, selBuildId, setSelPlaceId, setSelBuildId, armPlaceable, rotatePlaceBrush, paintObjectAt, movePlacement, updatePlacement, clonePlacement, removePlacement, removeBuildPlacement]);
 
-  return { place, activePlaceable, armPlaceable, placeObject, setFaceTexture };
+  return { place, activePlaceable, armPlaceable, armScatter, placeObject, setFaceTexture };
 }

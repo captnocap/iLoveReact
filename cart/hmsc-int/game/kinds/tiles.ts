@@ -54,7 +54,11 @@ export type TileKind =
   | 'crosswalk'
   // The double-yellow centerline strip between opposing lane groups (stamped
   // by the road-stroke painter). Appended last — kind indices stay stable.
-  | 'median';
+  | 'median'
+  // Living ground (GRASSTILE-0611, req_0642): paintable lawn/meadow surfaces —
+  // the user had bush (an embedded foliage profile) but no grass GROUND.
+  | 'grass'
+  | 'grassDry';
 
 // How a tile kind is allowed to enter the world — the registry is several
 // things in one list, and this is what tells them apart:
@@ -301,6 +305,7 @@ const TEX = {
   marker: 'hmsc.tile.marker',
   spawn: 'hmsc.tile.spawn',
   save: 'hmsc.tile.save',
+  grass: 'hmsc.tile.grass',
 } as const;
 
 const ROAD_SURFACE: TileSurfaceProfile = {
@@ -590,6 +595,40 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
     surface: ROAD_SURFACE,
     render: { color: '#46431f', heightMeters: 0.085, textureKey: TEX.road },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  // ── living ground (GRASSTILE-0611, req_0642) — appended LAST, indices stable ─
+  // Quiet underfoot (the perception system's footstep-noise floor), slightly
+  // slow, bad for cars; thin concealment — standing in a LAWN hides nothing
+  // (hiding is the bush/grassTall PROP's job, not the ground's).
+  grass: {
+    kind: 'grass',
+    placement: 'surface',
+    label: 'Grass',
+    flow: 'none',
+    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.9, preferredByVehicles: false, noise: 0.2 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.12, lightTransmission: 0.97, soundOcclusion: 0.04 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
+    render: { color: '#3f7d33', heightMeters: 0.06, textureKey: TEX.grass },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  grassDry: {
+    kind: 'grassDry',
+    placement: 'surface',
+    label: 'Dry Grass',
+    flow: 'none',
+    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.8, preferredByVehicles: false, noise: 0.28 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.1, lightTransmission: 0.97, soundOcclusion: 0.04 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.55 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.96, runSpeedMultiplier: 0.94, vehicleSpeedMultiplier: 0.55, accelerationMultiplier: 0.72, friction: 0.58, lateralGrip: 0.62, restitution: 0.2 },
+    render: { color: '#8a9a4a', heightMeters: 0.06, textureKey: TEX.grass },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
 };

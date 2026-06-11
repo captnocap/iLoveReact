@@ -22,4 +22,6 @@ export const HMSC_TILE_TEXTURE_KEYS = {
   junction: 'hmsc.tile.road',
   crosswalk: 'hmsc.tile.road',
   median: 'hmsc.tile.road',
+  grass: 'hmsc.tile.grass',
+  grassDry: 'hmsc.tile.grass',
 } satisfies Record<TileKind, string>;

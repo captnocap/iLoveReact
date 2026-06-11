@@ -44,6 +44,7 @@ import type { PainterEmphasis } from './painterSurface';
 import { resolvePainterBehavior } from './painterBehavior';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
 import { placementCellRect, type Placement, type PlaceCat } from './placements';
+import { SCATTER_BRUSHES, scatterRollAt, type ScatterBrushId } from './game/kinds/scatter';
 import type { MapBuildFootprint } from './mapBuildPlacements';
 import type { EditorWorld } from './mapStore';
 import type { SelCell } from './tileOverrides';
@@ -87,7 +88,7 @@ export interface PaintCanvasApi {
 export interface PlaceProps {
   items: Placement[];
   selId: string | null;
-  active: { cat: PlaceCat; kind: string; label: string; color: string; footW: number; footD: number; rotation: number } | null;
+  active: { cat: PlaceCat; kind: string; label: string; color: string; footW: number; footD: number; rotation: number; scatter?: ScatterBrushId } | null;
   buildItems?: MapBuildFootprint[];
   buildSelId?: string | null;
   onSelect: (id: string | null) => void;
@@ -1222,6 +1223,7 @@ export function PaintCanvas(props: {
   // at input samples, deduped per tile, exactly the pre-table behavior).
   const stampObjectAt = (gx0: number, gy0: number) => {
     if (!place.active) return;
+    if (place.active.scatter) return scatterStampAt(gx0, gy0);
     const c = resolveCell(gx0, gy0);
     if (!c) return;
     const gx = c.cgx, gy = c.cgy;
@@ -1230,6 +1232,37 @@ export function PaintCanvas(props: {
     heightStamped.current.add(stampKey);
     strokeStats.current.stamps++;
     place.onPaintAt(place.active.cat, place.active.kind, gx, gy, place.active.rotation);
+  };
+  // SCATTERBRUSH-0611 (req_0642): the armed scatter brush rolls weighted prop
+  // placements over the brush footprint. The roll is deterministic per tile
+  // (game/kinds/scatter.ts) and tiles already holding a prop are skipped, so
+  // re-painting the same ground is a no-op — never a double-density pileup.
+  const scatterStampAt = (gx0: number, gy0: number) => {
+    const active = place.active;
+    if (!active?.scatter) return;
+    const brush = SCATTER_BRUSHES[active.scatter];
+    const c = resolveCell(gx0, gy0);
+    if (!c) return;
+    const occupied = new Set<string>();
+    for (const p of place.items) {
+      if (p.cat === 'prop') occupied.add(`${Math.round(p.gx / TILE_UNITS)}:${Math.round(p.gy / TILE_UNITS)}`);
+    }
+    forEachFootprintCell(
+      paintRef.current.shape,
+      paintRef.current.size,
+      Math.round(c.cgx / TILE_UNITS),
+      Math.round(c.cgy / TILE_UNITS),
+      (tx, tz) => {
+        const stampKey = `scatter:${tx}:${tz}`;
+        if (heightStamped.current.has(stampKey)) return;
+        heightStamped.current.add(stampKey);
+        if (occupied.has(`${tx}:${tz}`)) return;
+        const roll = scatterRollAt(brush, tx, tz);
+        if (!roll) return;
+        strokeStats.current.stamps++;
+        place.onPaintAt('prop', roll.kind, tx * TILE_UNITS, tz * TILE_UNITS, roll.rotation);
+      },
+    );
   };
   // Erase-everywhere: on the Object target the eraser deletes any UNLOCKED
   // placement whose footprint rect intersects the brush footprint (rect-to-point

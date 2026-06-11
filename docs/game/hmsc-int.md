@@ -113,6 +113,26 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
   swing PENDULUM physics (needs constrained bodies; today's entity bodies
   are free spheres) and apple-tree DROP spawning + throw/eat (the item
   system's slice) — both recorded in the registry comments.
+- **GRASSTILE-0611 (req_0642)** — `grass` + `grassDry` are REAL paintable
+  surface tile kinds (the user had bush — an embedded foliage profile — but
+  no grass GROUND). Appended at the END of BOTH tile tables
+  (`game/kinds/tiles.ts` AND the live editor twin `world/tileKinds.ts` —
+  each ships kind indices in its own key order, so append-only) + the
+  `design.ts` union + `tileTextureKeys`. Quiet underfoot (noise 0.2), thin
+  concealment (a LAWN hides nothing — hiding is the bush/grassTall prop's
+  job), bad for cars. The old tiles.test assertion "no grass kind (sand is
+  the soft-ground stand-in)" flipped to its opposite.
+- **SCATTERBRUSH-0611 (req_0642)** — procedural nature brushes:
+  `game/kinds/scatter.ts` is a P2 table of weighted prop mixes (meadow /
+  forest / rocky) + a pure DETERMINISTIC per-tile roll (hash of brush+tile →
+  fill/kind/yaw), so repainting the same ground never double-fills; the
+  painter also skips tiles already holding a prop. Armed from the OBJECTS
+  tab's SCATTER BRUSHES group (`armScatter` in usePlacements rides the
+  armed-placeable channel); the place stroke rolls over the brush footprint
+  and stamps ORDINARY `cat:'prop'` placements — erase/move/select/compile
+  unchanged. `scatter.test.ts` (4 P4 cases: real kinds, static-only,
+  determinism, fill-rate ≈ density). The iso CatalogRail's tab + prop shelf
+  also became route TWIGS (req_0643) so hot reloads stop resetting the menu.
 
 **game/commands/ — the console vocabulary (capture wave, 2026-06-05)**
 - `game/commands/vocabulary.ts` — hmsc's 49-command console vocabulary (`cmd_/lab_/gv_/pv_/ev_/wv_` plus V27 `log`) REWRITTEN fresh onto the skeleton's mutable-ctx conventions (`cart/hmsc-int/commands/registry.ts` stays an untouched behavior reference). All 49 names register so the V19 script language is complete: captured commands run against command state + `COMMAND_TUNING`/`SKY_NAMED_HOURS`/`SKY_WEATHER_PRESETS` P2 tables + `GAME_KINDS`, `GAME_PERCEPTION`, V20 persistence, and V27 `GAME_TELEMETRY` diagnostics control (`log status`, `log all on|off|toggle`, `log <channel> on|off|toggle`, `log dump`, `log overhead`, `gv_perflog` as `spikes` alias). `wv_prop` is partial (kinds listing real, placement world-owned), and 14 explicit NOT-YET stubs FAIL LOUDLY (`system not captured yet: <owner>`; `NOT_YET_CAPTURED` exports the per-owner hand-off lists — roads/traffic/buildings/interiors/zones/validation, lab scenes, input contract). Dot-path state shape (`player.physics.velocity`, `config.sky.hour`) preserved so saved scripts keep meaning. `vocabulary.test.ts` (21 P4 cases) + `compile/verify/commands.cmds`; `rjit game verify` GREEN. `CAPTURE.md` records the boundary, dropped pieces, and surfaced ambiguities. SELFSHOT-0606 (2026-06-06, USER RULING "dont look at the system") adds `shot [path]` beside the captured names: the console captures the app's OWN rendered frame to a PNG through the `captureFrame` door (`@reactjit/capture` → `__capture_frame` → `framework/gpu/capture.zig` swapchain readback — desktop/X11 capture of the user's system is BANNED, CLAUDE.md "Screenshots"); headless boots degrade gracefully ("unavailable", never fake success); the CLI sibling is `rjit shot <cart> [--route /r]`.
