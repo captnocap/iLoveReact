@@ -21,6 +21,7 @@ import { IsoPreview, type PreviewCamera, type PreviewCameraApi } from './IsoPrev
 import { IsoAuthor } from './IsoAuthor';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas, type Tool, type Layer, type PaintCanvasApi, type BrushSettings, type CanvasView2D } from './PaintCanvas';
+import type { PainterChannels } from './TargetDock';
 import { PropertiesPanel, type Focus } from './PropertiesPanel';
 import { RightPanel, type TabId } from './RightPanel';
 import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } from './placements';
@@ -103,6 +104,8 @@ interface MapPayload {
   view2d?: CanvasView2D;               // the 2D canvas camera (MAPGONE2-0605:
                                        // unrestored, every remount snapped the
                                        // viewport to the lattice origin)
+  channels?: PainterChannels;          // painter channel visibility (PAINTER-0610);
+                                       // absent key = visible, absent field = all on
   pieces?: PlacedBuildPiece[];         // this map's build pieces AS OF the snapshot —
                                        // carried so Ctrl+Z reverts building edits;
                                        // only read on a 'history' apply (undo/redo),
@@ -298,6 +301,10 @@ function EditorShell() {
   const [tool, setTool] = useState<Tool>(() => initial.tool ?? 'pointer');
   const [tile, setTile] = useState<TileKind>(() => initial.tile ?? 'sidewalk');
   const [layer, setLayer] = useState<Layer>(() => initial.layer ?? 'paint');
+  // Channel visibility (PAINTER-0610): which inactive painter channels stay
+  // visible as dim landmarks. Absent key = visible; persisted per map.
+  const [channels, setChannels] = useState<PainterChannels>(() => initial.channels ?? {});
+  const toggleChannel = useCallback((l: Layer) => setChannels((c) => ({ ...c, [l]: c[l] === false })), []);
   const [tab, setTab] = useState<TabId>(() => initial.tab ?? 'objects');
   const [notes, setNotes] = useState<string>(() => initial.notes ?? '');
   const [showGrid, setShowGrid] = useState<boolean>(() => initial.showGrid ?? true);
@@ -412,8 +419,8 @@ function EditorShell() {
     } else if (view2d) {
       lastViewRunawayWarn.current = null;
     }
-    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides), brush: brushRef.current, view2d, pieces: buildPiecesRef.current };
-  }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, selPlaceId, wasdQuad, overrides]);
+    return { fx, fy, yaw, tool, tile, layer, channels, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides), brush: brushRef.current, view2d, pieces: buildPiecesRef.current };
+  }, [fx, fy, yaw, tool, tile, layer, channels, tab, notes, showGrid, placements, selPlaceId, wasdQuad, overrides]);
 
   const applyPayload = useCallback((env: SessionEnvelope<MapPayload>, reason?: 'restore' | 'history') => {
     const p = env.payload;
@@ -424,6 +431,7 @@ function EditorShell() {
     if (applyTwig && p.tool) setTool(p.tool);
     if (applyTwig && p.tile) setTile(p.tile);
     if (applyTwig && p.layer) setLayer(p.layer);
+    if (applyTwig) setChannels(p.channels ?? {});
     if (applyTwig && p.tab) setTab(p.tab);
     if (typeof p.notes === 'string') setNotes(p.notes);
     if (applyTwig && typeof p.showGrid === 'boolean') setShowGrid(p.showGrid);
@@ -480,7 +488,7 @@ function EditorShell() {
     version: VERSION,
     buildPayload,
     applyPayload,
-    deps: [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, worldRev, selPlaceId, wasdQuad, viewRev, overrides, brush],
+    deps: [fx, fy, yaw, tool, tile, layer, channels, tab, notes, showGrid, placements, worldRev, selPlaceId, wasdQuad, viewRev, overrides, brush],
   });
 
   // Undo history: snapshot the PRE-edit state at the START of each undoable action
@@ -1201,6 +1209,8 @@ function EditorShell() {
                 onTile={setTile}
                 layer={layer}
                 onLayer={setLayer}
+                channels={channels}
+                onToggleChannel={toggleChannel}
                 brush={brush}
                 onBrushChange={updateBrush}
                 place={place}

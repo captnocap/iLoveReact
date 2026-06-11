@@ -31,8 +31,8 @@ import { TILE_UNITS, DOT_M, DOTS_PER_TILE, HEIGHT_LIMIT, stampBrush, stampRamp, 
 import { gradeHeightField, strokeGradeProfile } from './roadGrade';
 import { footprintDistance, forEachFootprintCell, type BrushMode, type BrushShape } from './brush';
 import type { BrushRailSettings } from './BrushRail';
-import { LayerBtn } from './railAtoms';
 import { PainterRail } from './PainterRail';
+import { TargetDock, channelVisible, type PainterChannels } from './TargetDock';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
 import { applyMergeGesture, clampProfile, laneFlowArrows, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, strokeWireFlip, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
@@ -148,6 +148,8 @@ export function canvasPanOwnsWasd(wasdFocused: boolean, focusLocked: boolean): b
 }
 
 function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
+
+const NO_CHANNELS: PainterChannels = {}; // stable identity for the all-visible default
 
 const HIDDEN_CURSOR_STYLE = { position: 'absolute', left: -10000, top: -10000, width: 0, height: 0, borderWidth: 0, backgroundColor: '#00000000' };
 const HIDDEN_CURSOR_PIP_STYLE = { position: 'absolute', left: 0, top: 0, width: 0, height: 0, backgroundColor: '#00000000' };
@@ -405,6 +407,12 @@ export function PaintCanvas(props: {
   onTile: (k: TileKind) => void;
   layer: Layer;
   onLayer: (l: Layer) => void;
+  // Channel visibility (PAINTER-0610): which INACTIVE channels stay visible as
+  // dim landmarks (shader emphasis + ghost/wire overlays). Owned by the cart so
+  // it persists per map; absent = everything visible. The active target always
+  // renders full-strength regardless.
+  channels?: PainterChannels;
+  onToggleChannel?: (l: Layer) => void;
   brush: BrushSettings;
   onBrushChange: (patch: Partial<BrushSettings>) => void;
   place: PlaceProps;
@@ -450,6 +458,7 @@ export function PaintCanvas(props: {
   };
 }) {
   const { tool, tile, layer, place } = props;
+  const channels = props.channels ?? NO_CHANNELS;
   const grid = props.showGrid !== false;
   const selPlacement = place.items.find((p) => p.id === place.selId) ?? null;
   const selBuildPlacement = place.buildItems?.find((p) => p.id === place.buildSelId) ?? null;
@@ -680,14 +689,15 @@ export function PaintCanvas(props: {
   const allChunks = useMemo(() => Array.from(chunks.values()), [chunks, chunkRev]);
   const focusedChunks = allChunks.filter((c) => focus.has(chunkKey(c.cx, c.cz)));
   // Per-channel emphasis for the combined chunk shader (PAINTER-0610): the active
-  // target reads full strength, the rest stay visible as dim landmarks — roads are
-  // world content so the ribbon renders full whenever shown. Identity-stable
-  // (useMemo): ChunkSurface is memo'd and its encode re-runs on emphasis change.
+  // target reads full strength, visible inactive channels stay as dim landmarks,
+  // eye-off channels go dark — except roads, world content, which render full
+  // whenever shown. Identity-stable (useMemo): ChunkSurface is memo'd and its
+  // encode re-runs on emphasis change.
   const emphasis = useMemo<PainterEmphasis>(() => ({
-    road: 1,
-    height: layer === 'height' ? 1 : 0.3,
-    zone: layer === 'zone' ? 1 : 0.25,
-  }), [layer]);
+    road: layer === 'road' || channelVisible(channels, 'road') ? 1 : 0,
+    height: layer === 'height' ? 1 : channelVisible(channels, 'height') ? 0.3 : 0,
+    zone: layer === 'zone' ? 1 : channelVisible(channels, 'zone') ? 0.25 : 0,
+  }), [layer, channels]);
   // [mapgone-probe MAPGONE2-0605] surface gate — stays until the user confirms
   useEffect(() => {
     console.warn(`[mapgone] PaintCanvas mount: seed=${props.initialWorld ? 'initialWorld' : 'blank'} chunks=${chunks.size} focus=${focus.size} focusedChunks=${focusedChunks.length} layer=${layer}`);
@@ -1610,7 +1620,7 @@ export function PaintCanvas(props: {
   // re-render while you paint. A line here mid-stroke means a prop/state churned
   // it (e.g. focus/zones/drift/select) — naming which is the lead.
   useChurn('PaintCanvas', {
-    focus, chunkRev, zones, drift, tool, tile, layer, place,
+    focus, chunkRev, zones, drift, tool, tile, layer, channels, place,
     selCells: props.select?.cells, brushSize, centerZ, activeBrushMode, brushShape, heightMode, smoothStrength, wasdFocused: props.wasdFocused, panFocusLocked,
     roads, roadDraft, roadProfile, selRoadId,
   });
@@ -1649,20 +1659,21 @@ export function PaintCanvas(props: {
           />
         ))}
 
-        {/* Placement ghosts (req_0527): on every layer EXCEPT place (where the
+        {/* Placement ghosts (req_0527): on every target EXCEPT object (where the
             real interactive nodes live), placements + build pieces render as dim
             outlines so painting/roads/zoning/height never happen blind to where
-            the buildings are. Non-interactive — the active layer's overlay owns
-            all clicks; these are landmarks only. Drawn first so every authoring
-            affordance (selection, road dots, drafts) paints above them. */}
-        {layer !== 'place' ? place.items.map((p) => (
+            the buildings are — unless the object channel's eye is off. Non-
+            interactive — the painter overlay owns all clicks; these are landmarks
+            only. Drawn first so every authoring affordance (selection, road dots,
+            drafts) paints above them. */}
+        {layer !== 'place' && channelVisible(channels, 'place') ? place.items.map((p) => (
           <Canvas.Node key={`ghost_${p.id}`} gx={p.gx} gy={p.gy} gw={p.footW * TILE_UNITS} gh={p.footD * TILE_UNITS}>
             <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: `${p.color}77`, backgroundColor: `${p.color}14`, transform: { rotate: p.rotation } }}>
               <Text fontSize={7} color={`${p.color}bb`} style={{ fontWeight: 700 }}>{p.label}</Text>
             </Box>
           </Canvas.Node>
         )) : null}
-        {layer !== 'place' ? (place.buildItems ?? []).map((p) => (
+        {layer !== 'place' && channelVisible(channels, 'place') ? (place.buildItems ?? []).map((p) => (
           <Canvas.Node key={`ghostb_${p.id}`} gx={p.gx} gy={p.gy} gw={p.footW * TILE_UNITS} gh={p.footD * TILE_UNITS}>
             <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: `${p.color}66`, backgroundColor: `${p.color}0f` }}>
               <Text fontSize={6} color={`${p.color}aa`} style={{ fontWeight: 700, fontFamily: 'monospace' }}>{p.label}</Text>
@@ -1688,14 +1699,17 @@ export function PaintCanvas(props: {
         })}
 
         {/* Road overlay (ROADSTROKE-0610): the stamped tiles already paint the
-            road itself — these nodes are the AUTHORING affordances: a dotted
-            centerline per stroke (white when selected), one-way flow chevrons,
-            and the live draft in green. Dots, not lines: no rotation, so any
-            segment angle renders clean. Non-interactive; the road overlay
-            Pressable (sibling, below) owns the clicks. */}
-        {layer === 'road' ? roads.flatMap((r) => {
+            road itself — these nodes are the AUTHORING affordances. With the
+            painter channels (PAINTER-0610) the WIRES stay visible as dim
+            landmarks from every target while the road channel's eye is on (or a
+            road is selected); the per-node glyphs — flow arrows, one-way
+            chevrons, endpoints, draft dots — mount only when Road is the ACTIVE
+            target, so an idle channel can't crowd the 512-children cap
+            (OVERFLOW-0610). Non-interactive; the painter overlay owns clicks. */}
+        {showRoadWires && (layer === 'road' || selRoad || channelVisible(channels, 'road')) ? roads.flatMap((r) => {
           const sel = r.id === selRoadId;
-          const color = sel ? '#f8fafc' : '#fbbf24cc';
+          const dimWire = layer !== 'road' && !sel; // landmark, not the working channel
+          const color = sel ? '#f8fafc' : dimWire ? '#fbbf2455' : '#fbbf24cc';
           const nodes: any[] = [];
           // Centerline + per-LANE wires as POLYLINES (one Canvas.Path each), so
           // lanes line up / merge across strokes by eye. Colours are CANONICAL
@@ -1704,17 +1718,19 @@ export function PaintCanvas(props: {
           // read one continuous colour instead of flipping at the seam. Paths,
           // not per-dot nodes (OVERFLOW-0610): a long road with arrows ALSO on
           // used to overflow the 512-children cap and drop the whole overlay.
-          if (showRoadWires) {
+          nodes.push(
+            <Canvas.Path key={`rd_${r.id}`} d={roadCenterPathD(r.points)} stroke={color} strokeWidth={TILE_UNITS * (sel ? 0.42 : 0.3)} fill="none" />,
+          );
+          const flip = strokeWireFlip(r.points);
+          for (const [li, g] of laneGuides(r.profile).entries()) {
             nodes.push(
-              <Canvas.Path key={`rd_${r.id}`} d={roadCenterPathD(r.points)} stroke={color} strokeWidth={TILE_UNITS * (sel ? 0.42 : 0.3)} fill="none" />,
+              <Canvas.Path key={`rl_${r.id}_${li}`} d={laneWirePathD(r.points, g.off)} stroke={(g.flow === 'forward') !== flip ? (dimWire ? '#86efac33' : '#86efac88') : (dimWire ? '#f8717133' : '#f8717188')} strokeWidth={TILE_UNITS * 0.2} fill="none" />,
             );
-            const flip = strokeWireFlip(r.points);
-            for (const [li, g] of laneGuides(r.profile).entries()) {
-              nodes.push(
-                <Canvas.Path key={`rl_${r.id}_${li}`} d={laneWirePathD(r.points, g.off)} stroke={(g.flow === 'forward') !== flip ? '#86efac88' : '#f8717188'} strokeWidth={TILE_UNITS * 0.2} fill="none" />,
-              );
-            }
           }
+          return nodes;
+        }) : null}
+        {layer === 'road' ? roads.flatMap((r) => {
+          const nodes: any[] = [];
           // Per-lane flow arrows (FLOWARROWS-0610): a glyph every few tiles on
           // each lane, pointing the lane's TRUE travel direction. Colour
           // matches the canonical wire legend so both views tell one story.
@@ -1908,13 +1924,11 @@ export function PaintCanvas(props: {
       {/* Right edge: chunk focus gutter (thin dock, keeps the centre clear). */}
       <ChunkGutter chunks={allChunks} focus={focus} onToggle={toggleFocus} onAll={focusAll} onNone={focusNone} />
 
-      {/* Bottom: layer switch, inset left of the gutter so they never overlap. */}
-      <Box style={{ position: 'absolute', right: GUTTER_W + 8, bottom: 8, flexDirection: 'row', gap: 4, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#1e293b', borderRadius: 6, padding: 4 }}>
-        <LayerBtn label="PAINT" color="#86efac" active={layer === 'paint'} onPress={() => props.onLayer('paint')} />
-        <LayerBtn label="ROAD" color="#f59e0b" active={layer === 'road'} onPress={() => props.onLayer('road')} />
-        <LayerBtn label="HEIGHT" color="#fbbf24" active={layer === 'height'} onPress={() => props.onLayer('height')} />
-        <LayerBtn label="PLACE" color="#a78bfa" active={layer === 'place'} onPress={() => props.onLayer('place')} />
-        <LayerBtn label="ZONE" color="#22d3ee" active={layer === 'zone'} onPress={() => props.onLayer('zone')} />
+      {/* Bottom: the channel dock (PAINTER-0610) — click a chip to make that
+          target active, its eye to show/hide the channel as a dim landmark.
+          Inset left of the gutter so they never overlap. */}
+      <Box style={{ position: 'absolute', right: GUTTER_W + 8, bottom: 8, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#1e293b', borderRadius: 6, padding: 4 }}>
+        <TargetDock layer={layer} onLayer={props.onLayer} channels={channels} onToggleChannel={props.onToggleChannel ?? (() => {})} />
       </Box>
     </Box>
   );
