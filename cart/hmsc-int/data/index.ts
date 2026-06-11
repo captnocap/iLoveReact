@@ -11,6 +11,11 @@
 //     rewrites the log.
 //   - The game/compile loads SNAPSHOTS (data/snapshots/<name>.snapshot.json,
 //     a materialized view stamped with its globalSeq), never the history.
+//   - SNAPBOOT-0610: the TOOL boots the same way — defineStream reads the
+//     snapshot and replays only the tail (seq > snapshot.globalSeq), guarded
+//     by the snapshot's folded-event count against the DB. Boot cost is
+//     O(tail), not O(everything you have ever done); the full log is never
+//     resident (stateAt pages history in from the DB on demand).
 //   - THE SNAPSHOT SYSTEM GROWS WITH EVERY STREAM: defineStream() demands the
 //     materializer (initial + apply) in the same registration — a stream
 //     without snapshot support cannot be expressed.
@@ -134,8 +139,10 @@ export type Store = {
   undoPoint: () => number;
   /** write data/snapshots/<name>.snapshot.json for EVERY registered stream */
   materializeSnapshots: () => string[];
-  /** read one materialized view (what the game/compile consumes) */
-  loadSnapshot: <State>(name: string) => { name: string; globalSeq: number; state: State } | null;
+  /** read one materialized view (what the game/compile consumes; `events` =
+   *  how many stream events the state folded — the SNAPBOOT seam guard,
+   *  absent on pre-SNAPBOOT snapshots) */
+  loadSnapshot: <State>(name: string) => { name: string; globalSeq: number; events?: number; state: State } | null;
   /** the explicit backup story: dump every stream to <name>.jsonl + manifest in destDir */
   exportBackup: (destDir: string) => string[];
   /** every corrupt record skipped while reading this store's history —
@@ -448,6 +455,11 @@ export function openStore(rootDir: string): Store {
   // and why batching the transactions alone didn't dent it). Indexed, MAX is
   // a B-tree rightmost lookup.
   sqlExec(db, 'CREATE INDEX IF NOT EXISTS events_seq ON events(seq)');
+  // SNAPBOOT-0610 (structure review §1/§9.1): boot reads two seq-scoped shapes
+  // per stream — "COUNT WHERE stream AND seq <= G" (the snapshot seam guard)
+  // and "WHERE stream AND seq > G" (the tail). This covering index makes both
+  // index-range reads instead of O(full stream) row fetches.
+  sqlExec(db, 'CREATE INDEX IF NOT EXISTS events_stream_seq ON events(stream, seq, id)');
   sqlExec(db, `CREATE TABLE IF NOT EXISTS ingested_files(
     path TEXT PRIMARY KEY,
     records INTEGER NOT NULL,
@@ -605,9 +617,12 @@ export function openStore(rootDir: string): Store {
 
   type OpenStream = {
     def: StreamDef<any, any>;
-    events: StoredEvent[];
-    /** memoized fold of `events` (rebuilt after every append — appends are
-     *  edit-rate, folds are cheap relative to the disk write beside them) */
+    /** events folded into `current` so far (snapshot base + boot tail +
+     *  appends). SNAPBOOT-0610: the full log is NOT resident anymore — boot
+     *  cost stopped being O(everything you have ever done), and the heap
+     *  stopped carrying every event of every opened stream. History pages in
+     *  from the DB only on the cold stateAt() path. */
+    count: number;
     current: any;
   };
   const streams = new Map<string, OpenStream>();
@@ -630,11 +645,39 @@ export function openStore(rootDir: string): Store {
     totalMs: perfMs() - openT0,
   });
 
+  /** tolerant row→event parse shared by the boot tail and the stateAt cold
+   *  path: skip + quarantine + log, fold what survives (the V20 boundary law,
+   *  backing-independent). */
+  const parseRow = (streamName: string, row: { id: number; record: string }): StoredEvent | null => {
+    try {
+      return JSON.parse(row.record) as StoredEvent;
+    } catch {
+      quarantined.push({ path: `${dbPath}#${streamName}`, line: row.id, raw: row.record, trailing: false });
+      console.warn(`data store: CORRUPT RECORD skipped + quarantined at ${dbPath}#${streamName} row ${row.id} (fold continues with every valid record)`);
+      GAME_TELEMETRY.recordDiagnostic('worldStream', 'quarantine', {
+        path: `${dbPath}#${streamName}`,
+        line: row.id,
+        bytes: row.record.length,
+        trailing: false,
+      });
+      return null;
+    }
+  };
+
+  /** the undo time machine — a COLD path now (SNAPBOOT-0610): the full log is
+   *  no longer resident, so "state AS OF seq" pages the history in from the
+   *  DB and refolds. History is immutable, so this is always the truth even
+   *  when the live `current` was booted from a snapshot. */
   const foldUpTo = (open: OpenStream, maxSeq: number): any => {
     let state = open.def.initial();
-    for (const record of open.events) {
-      if (record.seq > maxSeq) break;
-      state = open.def.apply(state, record.event, record.seq);
+    const rows = sqlQuery<{ id: number; record: string }>(
+      db,
+      'SELECT id, record FROM events WHERE stream = ? AND seq <= ? ORDER BY id',
+      [open.def.name, maxSeq],
+    );
+    for (const row of rows) {
+      const record = parseRow(open.def.name, row);
+      if (record) state = open.def.apply(state, record.event, record.seq);
     }
     return state;
   };
@@ -651,46 +694,77 @@ export function openStore(rootDir: string): Store {
       throw new Error(`defineStream: stream "${def.name}" is already registered`);
     }
 
+    // ── SNAPBOOT-0610 (structure review §1/§9.1): boot = snapshot + tail ────
+    // V20 already says it for the game ("what the game LOADS is not the
+    // history… the snapshot is for the game"); the tool's own boot gets the
+    // same deal. Read the materialized view, then replay ONLY events past its
+    // seam (seq > snapshot.globalSeq) — never the full history. The seam is
+    // GUARDED: the snapshot carries the event count it folded, and the DB must
+    // agree (COUNT WHERE seq <= snapshot.globalSeq) or the snapshot is stale —
+    // e.g. a legacy archive ingested AFTER it was written — and the boot falls
+    // back to the full replay (tolerance law: never throw, never trust a seam
+    // that doesn't check out). Pre-SNAPBOOT snapshots lack the count and take
+    // the fallback once; the next materialize writes the new shape.
     const loadT0 = perfMs();
-    const queryT0 = perfMs();
-    const rows = sqlQuery<{ id: number; record: string }>(db, 'SELECT id, record FROM events WHERE stream = ? ORDER BY id', [def.name]);
-    const queryMs = perfMs() - queryT0;
-    const events: StoredEvent[] = [];
-    let bytes = 0;
-    const parseT0 = perfMs();
-    for (const row of rows) {
-      bytes += row.record.length;
-      try {
-        events.push(JSON.parse(row.record) as StoredEvent);
-      } catch {
-        // A damaged row would be a DB-level fault, but the tolerance law is
-        // backing-independent: skip + quarantine + log, fold what survives.
-        quarantined.push({ path: `${dbPath}#${def.name}`, line: row.id, raw: row.record, trailing: false });
-        console.warn(`data store: CORRUPT RECORD skipped + quarantined at ${dbPath}#${def.name} row ${row.id} (fold continues with every valid record)`);
-        GAME_TELEMETRY.recordDiagnostic('worldStream', 'quarantine', {
-          path: `${dbPath}#${def.name}`,
-          line: row.id,
-          bytes: row.record.length,
-          trailing: false,
-        });
+    const snapT0 = perfMs();
+    let base: { globalSeq: number; events: number; state: any } | null = null;
+    let baseRejected: string | null = null;
+    try {
+      const text = host.__fs_read(`${snapshotsDir}/${def.name}.snapshot.json`);
+      if (typeof text === 'string' && text !== '') {
+        const parsed = JSON.parse(text) as { name?: string; globalSeq?: number; events?: number; state?: any };
+        if (parsed?.name === def.name && typeof parsed.globalSeq === 'number' && typeof parsed.events === 'number') {
+          base = { globalSeq: parsed.globalSeq, events: parsed.events, state: parsed.state };
+        } else if (parsed?.name === def.name) {
+          baseRejected = 'pre-SNAPBOOT shape (no events count)';
+        } else {
+          baseRejected = 'name mismatch';
+        }
+      }
+    } catch {
+      baseRejected = 'unreadable snapshot';
+    }
+    if (base) {
+      const counted = sqlQuery<{ n: number | null }>(db, 'SELECT COUNT(*) AS n FROM events WHERE stream = ? AND seq <= ?', [def.name, base.globalSeq]);
+      const inDb = counted.length > 0 && typeof counted[0].n === 'number' ? counted[0].n : -1;
+      if (inDb !== base.events) {
+        baseRejected = `seam mismatch (snapshot folded ${base.events}, DB holds ${inDb} up to seq ${base.globalSeq})`;
+        base = null;
       }
     }
-    const parseMs = perfMs() - parseT0;
-    for (const record of events) {
+    if (baseRejected) {
+      console.warn(`data store: snapshot boot for "${def.name}" fell back to full replay — ${baseRejected}`);
+    }
+    const snapMs = perfMs() - snapT0;
+    const queryT0 = perfMs();
+    const rows = base
+      ? sqlQuery<{ id: number; record: string }>(db, 'SELECT id, record FROM events WHERE stream = ? AND seq > ? ORDER BY id', [def.name, base.globalSeq])
+      : sqlQuery<{ id: number; record: string }>(db, 'SELECT id, record FROM events WHERE stream = ? ORDER BY id', [def.name]);
+    const queryMs = perfMs() - queryT0;
+    let bytes = 0;
+    let current = base ? base.state : def.initial();
+    let tail = 0;
+    const foldT0 = perfMs();
+    for (const row of rows) {
+      bytes += row.record.length;
+      const record = parseRow(def.name, row);
+      if (!record) continue;
+      current = def.apply(current, record.event, record.seq);
+      tail += 1;
       if (record.seq > globalSeq) globalSeq = record.seq;
     }
-    const open: OpenStream = { def, events, current: undefined };
-    const foldT0 = perfMs();
-    open.current = foldUpTo(open, Number.MAX_SAFE_INTEGER);
     const foldMs = perfMs() - foldT0;
+    const open: OpenStream = { def, count: (base ? base.events : 0) + tail, current };
     streams.set(def.name, open);
     GAME_TELEMETRY.recordDiagnostic('worldStream', 'defineStream.load', {
       stream: def.name,
-      events: events.length,
+      events: open.count,
+      snapshotSeq: base ? base.globalSeq : null,
+      tail,
       rows: rows.length,
       bytes,
+      snapMs,
       queryMs,
-      parseMs,
       foldMs,
       totalMs: perfMs() - loadT0,
     });
@@ -725,7 +799,7 @@ export function openStore(rootDir: string): Store {
         if (batchDepth === 0) commitOrThrow(`append to "${def.name}"`);
         appendProbe.insertMs += perfMs() - insertT0;
         globalSeq = seq;
-        open.events.push(record);
+        open.count += 1;
         const foldT0 = perfMs();
         open.current = open.def.apply(open.current, event, record.seq);
         appendProbe.foldMs += perfMs() - foldT0;
@@ -734,13 +808,13 @@ export function openStore(rootDir: string): Store {
           stream: def.name,
           seq: record.seq,
           eventBytes: line.length,
-          events: open.events.length,
+          events: open.count,
         });
-        return { globalSeq: record.seq, stream: def.name, index: open.events.length - 1 };
+        return { globalSeq: record.seq, stream: def.name, index: open.count - 1 };
       },
       state: () => open.current as State,
       stateAt: (seq: number) => foldUpTo(open, seq) as State,
-      length: () => open.events.length,
+      length: () => open.count,
     };
   };
 
@@ -755,7 +829,11 @@ export function openStore(rootDir: string): Store {
       for (const [name, open] of streams) {
         const path = `${snapshotsDir}/${name}.snapshot.json`;
         const stringifyT0 = perfMs();
-        const text = JSON.stringify({ name, globalSeq, state: open.current });
+        // `events` is the SNAPBOOT seam guard: how many of this stream's
+        // events this state folded. Boot verifies the DB agrees before
+        // trusting the snapshot (schema evolution by addition — old readers
+        // ignore it, old snapshots without it take the full-replay fallback).
+        const text = JSON.stringify({ name, globalSeq, events: open.count, state: open.current });
         const stringifyMs = perfMs() - stringifyT0;
         const writeT0 = perfMs();
         host.__fs_write(path, text);
@@ -798,9 +876,9 @@ export function openStore(rootDir: string): Store {
         GAME_TELEMETRY.recordDiagnostic('worldStream', 'backup.copy', {
           stream: name,
           bytes: text.length,
-          events: open.events.length,
+          events: open.count,
         });
-        manifest[name] = open.events.length;
+        manifest[name] = open.count;
         copied.push(dest);
       }
       const manifestPath = `${destDir}/manifest.json`;

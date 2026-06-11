@@ -370,4 +370,59 @@ test('two writer PROCESSES hammering one stream: zero corruption, total order pr
   assertEqual(store.quarantine().length, 0, 'zero corruption under concurrency');
 });
 
+test('SNAPBOOT: a reopen boots from the snapshot + tail, never the full history', () => {
+  wipeScratch();
+  const store = openStore(ROOT);
+  const world = store.defineStream(WORLD);
+  world.append({ place: 'road' });
+  world.append({ place: 'house' });
+  store.materializeSnapshots();
+  const checkpoint = store.undoPoint();
+  world.append({ place: 'tower' }); // the tail — appended AFTER the snapshot
+  // Direct proof the snapshot is the boot base (not a full replay that merely
+  // matches): plant a sentinel in the snapshot's state. A snapshot+tail boot
+  // shows the sentinel + the tail; a full replay would show the log only.
+  const snapPath = `${ROOT}/snapshots/world.snapshot.json`;
+  const snap = JSON.parse(globalThis.__fs_read(snapPath));
+  globalThis.__fs_write(snapPath, JSON.stringify({ ...snap, state: { placed: ['SENTINEL', 'house'] } }));
+  const rebooted = openStore(ROOT).defineStream(WORLD);
+  assertEqual(rebooted.state().placed.join(','), 'SENTINEL,house,tower',
+    'boot must fold the TAIL onto the SNAPSHOT state, not refold the log');
+  assertEqual(rebooted.length(), 3, 'length counts snapshot-folded events + the tail');
+  assertEqual(rebooted.stateAt(checkpoint).placed.join(','), 'road,house',
+    'the undo time machine pages the REAL history from the DB — snapshot boot never warps stateAt');
+});
+
+test('SNAPBOOT seam guard: a snapshot the DB disagrees with falls back to full replay', () => {
+  // The stale-snapshot hazard: events with seq <= snapshot.globalSeq landing
+  // AFTER the snapshot was written (e.g. a legacy archive ingested late).
+  // The folded-event count catches it; boot must take the full-replay road.
+  const snapPath = `${ROOT}/snapshots/world.snapshot.json`;
+  const snap = JSON.parse(globalThis.__fs_read(snapPath));
+  globalThis.__fs_write(snapPath, JSON.stringify({ ...snap, events: snap.events + 1, state: { placed: ['SENTINEL'] } }));
+  const rebooted = openStore(ROOT).defineStream(WORLD);
+  assertEqual(rebooted.state().placed.join(','), 'road,house,tower',
+    'a seam mismatch must reject the snapshot and refold the whole log');
+  assertEqual(rebooted.length(), 3, 'the fallback counts the real log');
+});
+
+test('SNAPBOOT tolerates pre-SNAPBOOT and damaged snapshots (full replay, never a throw)', () => {
+  const snapPath = `${ROOT}/snapshots/world.snapshot.json`;
+  const snap = JSON.parse(globalThis.__fs_read(snapPath));
+  // the old shape: no `events` count — unverifiable seam, full replay once
+  globalThis.__fs_write(snapPath, JSON.stringify({ name: snap.name, globalSeq: snap.globalSeq, state: { placed: ['SENTINEL'] } }));
+  const oldShape = openStore(ROOT).defineStream(WORLD);
+  assertEqual(oldShape.state().placed.join(','), 'road,house,tower', 'a pre-SNAPBOOT snapshot takes the fallback');
+  // damaged bytes — tolerance law: warn + fallback, never throw
+  globalThis.__fs_write(snapPath, '{"name":"world","globa');
+  const damaged = openStore(ROOT).defineStream(WORLD);
+  assertEqual(damaged.state().placed.join(','), 'road,house,tower', 'a damaged snapshot takes the fallback');
+  // and the next materialize writes the verifiable shape again
+  const store = openStore(ROOT);
+  store.defineStream(WORLD);
+  store.materializeSnapshots();
+  const rewritten = JSON.parse(globalThis.__fs_read(snapPath));
+  assertEqual(rewritten.events, 3, 'materialize stamps the folded-event count (the seam guard)');
+});
+
 finish('data/store');
