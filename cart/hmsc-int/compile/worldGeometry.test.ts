@@ -7,6 +7,8 @@ import type { PlacedBuildPiece } from '@game';
 import { emptyDecalDoc } from '../game/textures/decal';
 import { BUILTIN_DECALS } from '../game/textures/builtinDecals';
 import { packDecalDoc } from './decalPack';
+import { createDecalAssetSink, DECAL_IMAGE_ASSET_KEY_BASE } from './decalAssets';
+import { bytesToBase64 } from '@reactjit/workspace';
 import {
   buildWorldInstances,
   encodeFloorHeightfields,
@@ -16,6 +18,7 @@ import {
   INSTANCE_SHAPE_BOX,
   INSTANCE_STRIDE,
   MATERIALS_DOC_TAIL_MAGIC,
+  resetCustomTextureCache,
 } from './worldGeometry';
 
 function row(values: Float32Array, index: number): number[] {
@@ -167,6 +170,39 @@ test('a FLAT road-bearing floor renders through the textured heightfield path, n
   const lump = encodeFloorHeightfields([flatNoRoad, flatRoad]);
   const view = new DataView(lump.buffer);
   assertEqual(view.getUint32(4, true), 1, 'only the road-bearing flat chunk emits a heightfield render record');
+});
+
+test('decal image nodes ship content-addressed assets; the packed doc references the key (DECALIMG-0610)', () => {
+  // The custom-texture table cached for the earlier decal tests — drop it so
+  // this test's stubbed store (with the poster decal) is what resolves.
+  resetCustomTextureCache();
+  const doc = emptyDecalDoc(8, 8);
+  doc.nodes.push({ id: 'img', kind: 'image', x: 0, y: 0, w: 8, h: 8, src: 'images/poster.png' });
+  const stored = JSON.stringify([{ id: 'custom:poster', label: 'POSTER', decal: doc }]);
+  const piece: PlacedBuildPiece = {
+    id: 'w4',
+    pieceId: 'wall.concrete.common',
+    x: 0,
+    y: 0,
+    z: 0,
+    yawDegrees: 0,
+    skin: { front: { kind: 'material', id: 'custom:poster' } },
+  };
+  const content = Uint8Array.from([1, 2, 3, 4, 5]);
+  const sink = createDecalAssetSink((path) => (path === 'images/poster.png' ? bytesToBase64(content) : null));
+  withHost({
+    __localstoreGet: (_ns: string, key: string) => (key === 'custom-textures' ? stored : null),
+  }, () => {
+    const built = buildWorldInstances({} as any, [piece], [], { decalAssets: sink });
+    assertEqual(built.materials.length, 1, 'the decal interned as one material');
+    assertEqual(sink.assets.length, 1, 'the image interned as one content-addressed asset');
+    assertEqual(sink.assets[0].key, DECAL_IMAGE_ASSET_KEY_BASE, 'keys start at the decal-image base');
+    const packed = built.materials[0].doc!;
+    const v = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
+    // image record after the doc header (10) + kind (1) + 5×f32 (20): u32 assetKey
+    assertEqual(v.getUint32(10 + 1 + 20, true), DECAL_IMAGE_ASSET_KEY_BASE, 'the packed doc references the manifest key');
+  });
+  resetCustomTextureCache(); // leave no poster table behind for later tests
 });
 
 finish('compile/world-geometry');

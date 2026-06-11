@@ -36,6 +36,7 @@ import { shaderSpec, defaultShaderData } from '@game/textures/shaders';
 import { loadCustomTextures, type CustomTexture } from '@game/textures/materials';
 import { BUILTIN_DECALS } from '@game/textures/builtinDecals';
 import { packDecalDoc } from './decalPack';
+import type { DecalAssetSink } from './decalAssets';
 import { textBytes } from '@reactjit/workspace';
 
 export const INSTANCE_STRIDE = 13;
@@ -89,6 +90,11 @@ function customById(id: string): CustomTexture | undefined {
   if (!customByIdCache) customByIdCache = new Map(loadCustomTextures().map((t) => [t.id, t]));
   return customByIdCache.get(id);
 }
+/** Test seam: the custom-texture table caches for the process (the bake is
+ *  one-shot); sequential tests re-stub the localstore, so let them drop it. */
+export function resetCustomTextureCache(): void {
+  customByIdCache = null;
+}
 function resolveMaterialShader(id: string): { wgsl: string; data: number[] } | null {
   const builtin = shaderSpec(id);
   if (builtin) return { wgsl: builtin.shader, data: defaultShaderData(builtin) };
@@ -106,11 +112,11 @@ function resolveMaterialShader(id: string): { wgsl: string; data: number[] } | n
 // transcribed React facades, e.g. internetCafe) resolve next, so facade-
 // skinned faces compile instead of dropping flat. Null when the id is
 // neither. No editor dependency, no staleness — the doc IS the source.
-function resolveMaterialDoc(id: string): Uint8Array | null {
+function resolveMaterialDoc(id: string, assets: DecalAssetSink | undefined): Uint8Array | null {
   const custom = customById(id);
-  if (custom?.decal) return packDecalDoc(custom.decal, id);
+  if (custom?.decal) return packDecalDoc(custom.decal, id, assets);
   const builtin = BUILTIN_DECALS[id];
-  if (builtin) return packDecalDoc(builtin, id);
+  if (builtin) return packDecalDoc(builtin, id, assets);
   return null;
 }
 
@@ -122,10 +128,13 @@ type Build = {
   mats: number[];
   vocab: MaterialAsset[];
   index: Map<string, number>; // material key → 1-based vocab slot (0 = none)
+  /** the bake's content-addressed image collector (DECALIMG-0610) — absent on
+   *  paths that can't ship assets (decal image nodes then pack key 0) */
+  assets?: DecalAssetSink;
 };
 
-function newBuild(): Build {
-  return { inst: [], mats: [], vocab: [], index: new Map() };
+function newBuild(assets?: DecalAssetSink): Build {
+  return { inst: [], mats: [], vocab: [], index: new Map(), assets };
 }
 
 // Resolve a {kind:'material'} skin to its shipped recipe and intern it; return
@@ -150,7 +159,7 @@ function internMaterial(b: Build, skin: BuildFaceSkin | undefined): number {
   const key = `doc:${skin.id}`;
   const existing = b.index.get(key);
   if (existing !== undefined) return existing;
-  const doc = resolveMaterialDoc(skin.id);
+  const doc = resolveMaterialDoc(skin.id, b.assets);
   if (!doc) return 0; // react-facade material — keeps the flat color
   const slot = b.vocab.length + 1;
   b.vocab.push({ key, wgsl: '', data: [], opacity: 1, doc });
@@ -1528,9 +1537,9 @@ export function buildWorldInstances(
   state: GameState,
   pieces: readonly PlacedBuildPiece[] = [],
   floors: readonly ChunkFloor[] = [],
-  opts: { includeGroundLayers?: boolean } = {},
+  opts: { includeGroundLayers?: boolean; decalAssets?: DecalAssetSink } = {},
 ): WorldInstanceResult {
-  const b = newBuild();
+  const b = newBuild(opts.decalAssets);
   const pieceCount = pushPlacedPieces(b, pieces);
   pushPaintedFloors(b, floors);
   if (opts.includeGroundLayers) pushWorldLayers(b, state);

@@ -33,9 +33,12 @@ import { openStreamStore } from '../data';
 import { buildingsStream, worldStream, piecesForMap, withBuildingPieces } from '@game';
 import type { PlacedBuildPiece } from '@game';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './playerModel';
+import { ASSET_KIND_DECAL_IMAGE, createDecalAssetSink } from './decalAssets';
 
 const CART = 'hmsc-int';
 const EDITOR_DATA_ROOT = 'cart/hmsc-int/data';
+// Asset keys: player range 2001/2002; decal images count up from 3001
+// (decalAssets.ts DECAL_IMAGE_ASSET_KEY_BASE).
 const PLAYER_MODEL_ASSET_KEY = 2001;
 const PLAYER_ANIMATION_ASSET_KEY = 2002;
 const ASSET_KIND_PLAYER_MODEL = 9;
@@ -122,7 +125,14 @@ const floors = readPaintedFloors(stem);
 // game's WorldStatics lights the scene with, so the loader's lighting/sky match.
 const sky = buildHmscSky(state.config.sky.hour, state.config.sky.weather, state.config.sky.gloom);
 const env = sceneEnvironmentFromSky(sky);
-const mapContainer = createHmscMapfile(state, pieces, floors, env, { includePlayerLumps: false });
+// Decal image payloads (DECALIMG-0610, req_0592): the materials intern reads
+// each image file ONCE (sha256-deduped) while the mapfile builds; the keys land
+// in the packed docs, the bytes ship below as content-addressed assets.
+const decalAssets = createDecalAssetSink();
+const mapContainer = createHmscMapfile(state, pieces, floors, env, { includePlayerLumps: false, decalAssets });
+for (const asset of decalAssets.assets) {
+  warn(`[bake] prepared decal image asset ${asset.hashHex} (${asset.bytes.byteLength} bytes, key ${asset.key}, src '${asset.src}')`);
+}
 const playerModelData = buildDefaultPlayerModel();
 const playerModel = encodePlayerModelLump(playerModelData);
 const playerAnimation = encodePlayerAnimationLump(buildDefaultPlayerAnimation(playerModelData.groups.length));
@@ -134,11 +144,18 @@ warn(`[bake] prepared player animation asset ${playerAnimationHash} (${playerAni
 
 const file = writeGameFile({
   logic: { refs: [], data: new Uint8Array(0) },
-  map: { refs: [PLAYER_MODEL_ASSET_KEY, PLAYER_ANIMATION_ASSET_KEY], data: mapContainer },
+  map: {
+    // The map stream's data (the MATERIALS lump's packed docs) references the
+    // decal image keys, so they belong in its declared refs — the loader's
+    // installAndValidate gate resolves every one against the manifest.
+    refs: [PLAYER_MODEL_ASSET_KEY, PLAYER_ANIMATION_ASSET_KEY, ...decalAssets.assets.map((a) => a.key)],
+    data: mapContainer,
+  },
   skins: { refs: [], data: new Uint8Array(0) },
   assets: [
     { key: PLAYER_MODEL_ASSET_KEY, kind: ASSET_KIND_PLAYER_MODEL, bytes: playerModel, embed: false },
     { key: PLAYER_ANIMATION_ASSET_KEY, kind: ASSET_KIND_PLAYER_ANIMATION, bytes: playerAnimation, embed: false },
+    ...decalAssets.assets.map((a) => ({ key: a.key, kind: ASSET_KIND_DECAL_IMAGE, bytes: a.bytes, embed: false })),
   ],
 });
 
@@ -148,5 +165,6 @@ emit(JSON.stringify({
   assets: [
     { hash: playerModelHash, base64: bytesToBase64(playerModel), bytes: playerModel.byteLength },
     { hash: playerAnimationHash, base64: bytesToBase64(playerAnimation), bytes: playerAnimation.byteLength },
+    ...decalAssets.assets.map((a) => ({ hash: a.hashHex, base64: bytesToBase64(a.bytes), bytes: a.bytes.byteLength })),
   ],
 }));

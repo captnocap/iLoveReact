@@ -1565,12 +1565,25 @@ pub const Runtime = struct {
     fn ensureMaterials(self: *Runtime) void {
         if (self.materials_ready) return;
         self.materials_ready = true;
+        // The content-addressed image payloads decal docs reference by key
+        // (DECALIMG-0610) — constructor read them from the store; hand the
+        // rasterizer its own view of the table (gpu/ stays world/-free).
+        var images: []decal_raster.ImageAsset = &.{};
+        defer if (images.len > 0) self.allocator.free(images);
+        if (self.scene.decal_assets.len > 0) {
+            if (self.allocator.alloc(decal_raster.ImageAsset, self.scene.decal_assets.len)) |buf| {
+                for (self.scene.decal_assets, 0..) |asset, k| buf[k] = .{ .key = asset.key, .bytes = asset.bytes };
+                images = buf;
+            } else |_| {
+                log.print("[loader] OOM mapping {d} decal image asset(s) — image nodes skip\n", .{self.scene.decal_assets.len});
+            }
+        }
         for (self.scene.materials, 0..) |m, i| {
             var buf: [32]u8 = undefined;
             const key = std.fmt.bufPrint(&buf, "wmat-{d}", .{i}) catch continue;
             // Decal materials carry their packed doc — rasterize + upload.
             if (m.decal_doc.len > 0) {
-                if (decal_raster.rasterize(self.allocator, m.decal_doc)) |raster| {
+                if (decal_raster.rasterize(self.allocator, m.decal_doc, images)) |raster| {
                     defer self.allocator.free(raster.rgba);
                     if (!material_tex.materializePixels(key, raster.rgba, raster.w, raster.h))
                         log.print("[loader] decal material {d} not installed — faces show fallback color\n", .{i});

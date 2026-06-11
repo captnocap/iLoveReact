@@ -20,6 +20,7 @@ import {
 } from '@reactjit/workspace';
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
 import { buildWorldInstances, encodeFloorHeightfields, encodeInstanceLump, encodeMaterialRefs, encodeMaterials } from './compile/worldGeometry';
+import type { DecalAssetSink } from './compile/decalAssets';
 import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, type BakedPhysicsConfig } from './compile/worldColliders';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './compile/playerModel';
@@ -174,7 +175,7 @@ export function createHmscMapfile(
   pieces: readonly PlacedBuildPiece[] = [],
   floors: readonly ChunkFloor[] = [],
   env: SceneEnvironment = DEFAULT_SCENE_ENVIRONMENT,
-  opts: { includePlayerLumps?: boolean } = {},
+  opts: { includePlayerLumps?: boolean; decalAssets?: DecalAssetSink } = {},
 ): Uint8Array {
   const bounds = mapBounds(state);
   const strings = stringTable(state);
@@ -200,7 +201,9 @@ export function createHmscMapfile(
   // The authored world's 3D geometry: the placed pieces (structures) PLUS the
   // painted floor (the user's real ground, from chunk tile fields). The piece
   // count rides in the lump so the loader frames the camera on the structures.
-  const geometry = buildWorldInstances(state, liftedPieces, floors);
+  // `decalAssets` (DECALIMG-0610) collects decal image payloads as content-
+  // addressed assets while the materials intern — the gamefile bake ships them.
+  const geometry = buildWorldInstances(state, liftedPieces, floors, { decalAssets: opts.decalAssets });
   const instances = encodeInstanceLump(geometry.instances, geometry.pieces);
   const materials = encodeMaterials(geometry.materials);
   const materialRefs = encodeMaterialRefs(geometry.materialRefs);

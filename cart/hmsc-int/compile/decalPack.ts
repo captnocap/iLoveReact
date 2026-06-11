@@ -23,11 +23,15 @@
 //     rect:  fill RGBA | f32 borderRadius | f32 borderWidth | border RGBA
 //     text:  color RGBA | f32 fontSize | u16 fontWeight | u8 align (0 l|1 c|2 r)
 //            | f32 letterSpacing | u16 textByteLen | utf8 bytes
-//     image: u16 srcByteLen | utf8 bytes   (v1: the loader logs + skips —
-//            image payloads ride the content-addressed asset store next)
+//     image: u32 assetKey | f32 borderRadius | u16 srcByteLen | utf8 bytes
+//            (DECALIMG-0610: assetKey references the gamefile's content-
+//            addressed manifest — ./decalAssets.ts interns the file bytes at
+//            pack time; 0 = nothing shipped, the loader warns + skips. The
+//            src string stays for diagnostics only.)
 
 import { textBytes } from '@reactjit/workspace';
 import type { DecalDoc, DecalNode } from '@game/textures/decal';
+import type { DecalAssetSink } from './decalAssets';
 
 export const DECAL_NODE_RECT = 0;
 export const DECAL_NODE_TEXT = 1;
@@ -72,6 +76,7 @@ class ByteWriter {
 
   u8(v: number): void { this.chunks.push(v & 255); }
   u16(v: number): void { this.chunks.push(v & 255, (v >>> 8) & 255); }
+  u32(v: number): void { this.chunks.push(v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255); }
   f32(v: number): void {
     const buf = new ArrayBuffer(4);
     new DataView(buf).setFloat32(0, v, true);
@@ -84,7 +89,7 @@ class ByteWriter {
 }
 
 /** Pack one VISIBLE node, or null for kinds the artifact drops (hidden). */
-function packNode(w: ByteWriter, node: DecalNode, decalId: string): void {
+function packNode(w: ByteWriter, node: DecalNode, decalId: string, assets: DecalAssetSink | undefined): void {
   w.u8(node.kind === 'rect' ? DECAL_NODE_RECT : node.kind === 'text' ? DECAL_NODE_TEXT : DECAL_NODE_IMAGE);
   w.f32(node.x);
   w.f32(node.y);
@@ -117,21 +122,36 @@ function packNode(w: ByteWriter, node: DecalNode, decalId: string): void {
     w.bytes(utf8.subarray(0, 0xffff));
     return;
   }
+  // Image (DECALIMG-0610): the file bytes ride the content-addressed asset
+  // store; the record carries only the manifest KEY. Key 0 = nothing shipped
+  // (empty src / unreadable file / no sink on this bake path) — the loader
+  // warns + skips that node, never fails.
+  let assetKey = 0;
+  if (!node.src) {
+    console.warn(`[decal-pack] ${decalId}: image node ${node.id} has an empty src — nothing to ship (re-pick the image in /compose)`);
+  } else if (!assets) {
+    console.warn(`[decal-pack] ${decalId}: image node ${node.id} ('${node.src}') — this bake path ships no asset vocabulary, image skipped`);
+  } else {
+    assetKey = assets.internImage(node.src, `${decalId}: image node ${node.id}`);
+  }
+  w.u32(assetKey);
+  w.f32(node.borderRadius ?? 0);
   const src = textBytes(node.src);
-  console.warn(`[decal-pack] ${decalId}: image node ${node.id} ('${node.src}') — compiled rasterizer skips images in v1 (content-addressed asset ride is the marked follow-up)`);
   w.u16(Math.min(src.length, 0xffff));
   w.bytes(src.subarray(0, 0xffff));
 }
 
 /** A validated DecalDoc → the packed recipe the MATERIALS lump ships. Hidden
- *  nodes drop here (a bake-time decision, not a runtime branch). */
-export function packDecalDoc(doc: DecalDoc, decalId: string): Uint8Array {
+ *  nodes drop here (a bake-time decision, not a runtime branch). `assets` is
+ *  the bake's content-addressed image collector (./decalAssets.ts) — omitted
+ *  on paths that can't ship assets (image nodes then pack key 0). */
+export function packDecalDoc(doc: DecalDoc, decalId: string, assets?: DecalAssetSink): Uint8Array {
   const w = new ByteWriter();
   w.u16(doc.width);
   w.u16(doc.height);
   w.rgba(packColor(doc.bg));
   const visible = doc.nodes.filter((n) => !n.hidden);
   w.u16(visible.length);
-  for (const node of visible) packNode(w, node, decalId);
+  for (const node of visible) packNode(w, node, decalId, assets);
   return w.done();
 }

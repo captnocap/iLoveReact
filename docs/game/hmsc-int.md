@@ -593,8 +593,8 @@ shape shader materials already use (materialize-at-load). The lowering:
 `compile/decalPack.ts` packs the validated doc to flat binary (header
 w/h/bg + per-node records; CSS hex resolved to RGBA bytes at PACK time,
 hidden nodes dropped, shader-fill rects substitute their flat color with a
-warn — the WGSL fill and image-node payloads are the marked bake-lever
-tail, image payloads ride the content-addressed asset store next);
+warn — the WGSL fill is the marked bake-lever tail; image nodes ship via
+the content-addressed asset store, DECALIMG-0610 below);
 `internMaterial` interns one doc per decal id and `encodeMaterials` ships
 an optional 'DOCS' tail (older payloads parse unchanged). The no-V8 loader
 (constructor.zig `decodeMaterialDocTail` → `framework/gpu/decal_raster.zig`)
@@ -619,6 +619,47 @@ hidden-drop, shader-fill substitute) + `worldGeometry.test.ts` (DOCS tail
 framing + no-docs no-tail byte-compat); proof: `rjit game shot` GREEN with
 "2 decal recipe(s)" baked and both real docs parsed end-to-end by the
 loader (the image-skip warns fire per decal).
+
+DECALIMG-0610 (2026-06-10, USER ASK req_0592 "ok and so images? whats the
+point of me being able to add an image if i cant ship it in the game"):
+decal IMAGE nodes render in the compiled game — the BYTES ride the
+gamefile's content-addressed asset vocabulary (V29); the doc stays the
+recipe, the image is the honest captured-content tail, stored once by hash
+and referenced. Bake: `compile/decalAssets.ts` is the image sink
+(`createDecalAssetSink`) — `packDecalDoc` interns each visible image node's
+FILE (read cwd-relative via `readFileBase64`, the SAME path the editor's
+Image primitive loads, so what previewed is what ships; sha256 is the
+address, identical content dedupes to ONE asset; keys count up from 3001,
+manifest kind 11, 8MB file cap) and the image record now packs the manifest
+KEY: `u32 assetKey | f32 borderRadius | u16 srcByteLen | src` (src is
+diagnostics only; key 0 = nothing shipped — empty src / unreadable /
+oversized, warned per decal+node, NEVER a failed bake). The sink threads
+`buildWorldInstances` → `createHmscMapfile` → `bakeGameFile.ts`, which
+ships each asset as a manifest entry + tape-envelope payload (embed:false —
+the player-model precedent; `installGameFileEnvelope` writes them into the
+content store) and declares the keys in map.refs so `installAndValidate`
+resolves every one before construct. Loader: `constructor.zig` reads every
+kind-11 manifest asset from the content store into `Scene.decal_assets`
+(`DecalAsset{key, bytes}`; a read failure skips, never fails construct);
+world_loader maps them to `decal_raster.ImageAsset` and
+`rasterize(alloc, doc, images)` NODE_IMAGE stbi-decodes the payload
+(4096px decoded-side cap) and bilinear-blits into the node rect with the
+SAME rounded-rect SDF coverage rect fills use (borderRadius + opacity
+honored), before the global 180° flip — so orientation matches every other
+node. Degradation is total at every layer: key 0 / missing payload /
+undecodable / oversized → one warn + a skipped node; the rest of the doc
+still rasterizes. P4: `decalAssets.test.ts` (2 cases: intern/sequential
+keys/content-dedupe/src-cache + missing/empty/invalid/oversized→0),
+`decalPack.test.ts` (now 6: image record layout pinned, sink-less key 0,
+sink intern + context + empty-src bypass), `worldGeometry.test.ts` (now 7:
+a doc with an image node ships one asset + the packed doc references its
+key; adds the `resetCustomTextureCache` test seam for the module-level
+custom-texture cache). Proof: a synthetic gamefile (real PNG embedded as a
+kind-11 blob, built with the production writers) rendered the image ON the
+box face in the headless loader — rounded corners visible, zero skip
+warns; `rjit game shot` stays GREEN on the real world (the user's two
+saved decals carry EMPTY-src image nodes, which now warn actionably:
+re-pick the image in /compose).
 
 ## game/build/ — the building piece grammar (V24 capture, 2026-06-04)
 

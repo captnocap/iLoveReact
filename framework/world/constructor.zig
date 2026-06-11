@@ -33,6 +33,9 @@ const PLAYER_ANIMATION_VERSION: u32 = 1;
 const PLAYER_ANIMATION_HASH_BYTES: usize = 32;
 const PLAYER_MODEL_ASSET_KEY: u32 = 2001;
 const PLAYER_ANIMATION_ASSET_KEY: u32 = 2002;
+/// Manifest asset-kind tag for decal image payloads (DECALIMG-0610) — the
+/// writer twin is cart/hmsc-int/compile/decalAssets.ts ASSET_KIND_DECAL_IMAGE.
+const DECAL_IMAGE_ASSET_KIND: u16 = 11;
 const HEIGHTFIELDS_VERSION: u32 = 2;
 const HEIGHTFIELD_RECORD_FLOATS: usize = 10;
 
@@ -205,6 +208,19 @@ pub const Material = struct {
     }
 };
 
+/// One decal-image payload from the content-addressed asset store
+/// (DECALIMG-0610): the raw encoded image FILE bytes (png/jpg…), NOT decoded
+/// pixels. Packed decal docs reference it by manifest `key`; the rasterizer
+/// (gpu/decal_raster.zig) stbi-decodes it at materialize time.
+pub const DecalAsset = struct {
+    key: u32,
+    bytes: []u8,
+
+    pub fn deinit(self: DecalAsset, allocator: std.mem.Allocator) void {
+        allocator.free(self.bytes);
+    }
+};
+
 /// Host wire widths (mirror framework/game/physics.zig RECT_FLOATS/ORIENTED_FLOATS
 /// + hmsc-int/game/physics.ts writeRect): a blocking rect is 9 floats, an
 /// oriented rect is those 9 + pivotX, pivotZ, yawRadians. The COLLIDERS lump
@@ -305,6 +321,10 @@ pub const Scene = struct {
     /// Player tuning + walk/run speed from the PHYSICS_CONFIG lump. null → the
     /// loader keeps its built-in defaults (pre-lump bakes).
     physics_config: ?PhysicsConfig,
+    /// Decal image payloads (manifest kind 11, DECALIMG-0610), read from the
+    /// content store at construct — the packed decal docs reference them by
+    /// key. Empty when no decal ships an image.
+    decal_assets: []DecalAsset,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
@@ -318,6 +338,8 @@ pub const Scene = struct {
         allocator.free(self.materials);
         allocator.free(self.material_refs);
         if (self.baked_colliders) |bc| bc.deinit(allocator);
+        for (self.decal_assets) |asset| asset.deinit(allocator);
+        allocator.free(self.decal_assets);
     }
 };
 
@@ -875,6 +897,24 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     else
         null;
 
+    // Decal image payloads (DECALIMG-0610, req_0592): every manifest asset
+    // tagged decal-image is read from the content store once, here — the
+    // packed decal docs reference them by key and gpu/decal_raster.zig
+    // decodes them at materialize time. installAndValidate already proved
+    // presence; a payload that still fails to read degrades to a skipped
+    // image node (the rasterizer warns by key), never a failed construct.
+    var decal_asset_list: std.ArrayList(DecalAsset) = .{};
+    errdefer {
+        for (decal_asset_list.items) |asset| asset.deinit(allocator);
+        decal_asset_list.deinit(allocator);
+    }
+    for (file.manifest) |entry| {
+        if (entry.kind != DECAL_IMAGE_ASSET_KIND) continue;
+        const payload = (readInstalledAsset(allocator, file, store_dir, entry.key) catch null) orelse continue;
+        try decal_asset_list.append(allocator, .{ .key = entry.key, .bytes = payload });
+    }
+    const decal_assets = try decal_asset_list.toOwnedSlice(allocator);
+
     // grid.values ownership transfers to the Scene; do not deinit grid.
     return .{
         .width = grid.width,
@@ -893,5 +933,6 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .material_refs = material_refs,
         .baked_colliders = baked_colliders,
         .physics_config = physics_config,
+        .decal_assets = decal_assets,
     };
 }

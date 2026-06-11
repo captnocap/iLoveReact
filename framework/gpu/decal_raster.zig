@@ -18,8 +18,12 @@
 //!     rect:  fill RGBA | f32 borderRadius | f32 borderWidth | border RGBA
 //!     text:  color RGBA | f32 fontSize | u16 fontWeight | u8 align
 //!            | f32 letterSpacing | u16 textByteLen | utf8 bytes
-//!     image: u16 srcByteLen | utf8 bytes  (v1: logged + skipped — image
-//!            payloads ride the content-addressed asset store next)
+//!     image: u32 assetKey | f32 borderRadius | u16 srcByteLen | utf8 bytes
+//!            (DECALIMG-0610: assetKey references a content-addressed image
+//!            payload — constructor.zig reads manifest kind-11 assets from
+//!            the store and hands them in via `images`; stbi decodes here.
+//!            Key 0 or a missing payload = warn + skip, never a failure.
+//!            The src string is diagnostics only.)
 //!
 //! Malformed input degrades to null (the face keeps its flat fallback color);
 //! it never crashes the construct and never returns partial pixels.
@@ -41,12 +45,32 @@ const MAX_TEXT_BYTES = 4096;
 /// be 64MB); the texture stretches onto its face anyway. 512-1024 reads
 /// crisp at game scale (shader materials materialize at 256).
 const RASTER_MAX_SIDE: f32 = 1024;
+/// Longest decoded image side the blit accepts — the raster canvas caps at
+/// 1024 anyway, so a larger decode is a corrupt or hostile payload, not a
+/// texture (the bake also caps the file at 8MB).
+const MAX_IMAGE_SIDE: c_int = 4096;
 
 pub const Raster = struct {
     rgba: []u8,
     w: u32,
     h: u32,
 };
+
+/// One content-addressed image payload (raw encoded file bytes) an image
+/// node may reference by manifest key. The caller (world_loader.zig) maps
+/// these from constructor.Scene.decal_assets — this module stays free of
+/// world/ imports.
+pub const ImageAsset = struct {
+    key: u32,
+    bytes: []const u8,
+};
+
+fn findImage(images: []const ImageAsset, key: u32) ?[]const u8 {
+    for (images) |asset| {
+        if (asset.key == key) return asset.bytes;
+    }
+    return null;
+}
 
 // ── the packed-doc reader (bounds-checked; null on any malformation) ────────
 
@@ -64,6 +88,12 @@ const Reader = struct {
         if (self.at + 2 > self.bytes.len) return null;
         const v = std.mem.readInt(u16, self.bytes[self.at..][0..2], .little);
         self.at += 2;
+        return v;
+    }
+    fn u32v(self: *Reader) ?u32 {
+        if (self.at + 4 > self.bytes.len) return null;
+        const v = std.mem.readInt(u32, self.bytes[self.at..][0..4], .little);
+        self.at += 4;
         return v;
     }
     fn f32v(self: *Reader) ?f32 {
@@ -249,12 +279,90 @@ fn drawTextNode(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f32, col
     }
 }
 
+// ── images (DECALIMG-0610) ──────────────────────────────────────────────────
+
+/// stbi-decode a content-addressed image payload and blit it into the node's
+/// rect: bilinear-sampled, edge-AA'd with the same rounded-rect SDF the rect
+/// fill uses (borderRadius rides free). A payload that fails to decode warns
+/// and leaves the canvas untouched — image problems never fail the raster.
+fn drawImageNode(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f32, radius: f32, opacity: f32, payload: []const u8, src: []const u8) void {
+    if (w <= 0 or h <= 0) return;
+    var iw: c_int = 0;
+    var ih: c_int = 0;
+    var channels: c_int = 0;
+    const pixels_ptr = c.stbi_load_from_memory(payload.ptr, @intCast(payload.len), &iw, &ih, &channels, 4);
+    if (pixels_ptr == null or iw <= 0 or ih <= 0) {
+        log.warn(.render, "[decal-raster] image node ('{s}'): payload does not decode — skipped", .{src});
+        return;
+    }
+    defer c.stbi_image_free(pixels_ptr);
+    if (iw > MAX_IMAGE_SIDE or ih > MAX_IMAGE_SIDE) {
+        log.warn(.render, "[decal-raster] image node ('{s}'): {d}x{d} exceeds the {d}px side cap — skipped", .{ src, iw, ih, MAX_IMAGE_SIDE });
+        return;
+    }
+    const sw: usize = @intCast(iw);
+    const sh: usize = @intCast(ih);
+    const pix: [*]const u8 = pixels_ptr;
+
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const hx = w / 2;
+    const hy = h / 2;
+    const x0: i64 = @intFromFloat(@floor(x - 1));
+    const y0: i64 = @intFromFloat(@floor(y - 1));
+    const x1: i64 = @intFromFloat(@ceil(x + w + 1));
+    const y1: i64 = @intFromFloat(@ceil(y + h + 1));
+    const op = std.math.clamp(opacity, 0, 1);
+
+    var yy = @max(y0, 0);
+    while (yy < @min(y1, @as(i64, @intCast(oh)))) : (yy += 1) {
+        var xx = @max(x0, 0);
+        while (xx < @min(x1, @as(i64, @intCast(ow)))) : (xx += 1) {
+            const px = @as(f32, @floatFromInt(xx)) + 0.5;
+            const py = @as(f32, @floatFromInt(yy)) + 0.5;
+            const coverage = 0.5 - roundedBoxSdf(px, py, cx, cy, hx, hy, radius);
+            if (coverage <= 0) continue;
+            // Bilinear sample at the rect-relative uv (stb rows are top-down,
+            // same orientation as the doc's y axis; the raster's final 180°
+            // rotation handles the world-face orientation globally).
+            const u = std.math.clamp((px - x) / w, 0, 1);
+            const v = std.math.clamp((py - y) / h, 0, 1);
+            const fx = u * @as(f32, @floatFromInt(sw - 1));
+            const fy = v * @as(f32, @floatFromInt(sh - 1));
+            const ix0: usize = @intFromFloat(@floor(fx));
+            const iy0: usize = @intFromFloat(@floor(fy));
+            const ix1 = @min(ix0 + 1, sw - 1);
+            const iy1 = @min(iy0 + 1, sh - 1);
+            const tx = fx - @floor(fx);
+            const ty = fy - @floor(fy);
+            var sample: [4]f32 = undefined;
+            inline for (0..4) |k| {
+                const p00: f32 = @floatFromInt(pix[(iy0 * sw + ix0) * 4 + k]);
+                const p10: f32 = @floatFromInt(pix[(iy0 * sw + ix1) * 4 + k]);
+                const p01: f32 = @floatFromInt(pix[(iy1 * sw + ix0) * 4 + k]);
+                const p11: f32 = @floatFromInt(pix[(iy1 * sw + ix1) * 4 + k]);
+                sample[k] = (p00 * (1 - tx) + p10 * tx) * (1 - ty) + (p01 * (1 - tx) + p11 * tx) * ty;
+            }
+            const color = [4]u8{
+                @intFromFloat(std.math.clamp(sample[0], 0, 255)),
+                @intFromFloat(std.math.clamp(sample[1], 0, 255)),
+                @intFromFloat(std.math.clamp(sample[2], 0, 255)),
+                @intFromFloat(std.math.clamp(sample[3] * op, 0, 255)),
+            };
+            const i: usize = (@as(usize, @intCast(yy)) * @as(usize, ow) + @as(usize, @intCast(xx))) * 4;
+            blend(out, i, color, coverage);
+        }
+    }
+}
+
 // ── the door ────────────────────────────────────────────────────────────────
 
 /// Run a packed decal recipe into a fresh RGBA buffer (caller frees `rgba`
-/// with the same allocator). Null on malformed input or OOM — callers leave
-/// the face on its flat fallback color.
-pub fn rasterize(allocator: std.mem.Allocator, doc: []const u8) ?Raster {
+/// with the same allocator). `images` is the content-addressed payload table
+/// image nodes reference by key (constructor.Scene.decal_assets — pass empty
+/// when the gamefile ships none). Null on malformed input or OOM — callers
+/// leave the face on its flat fallback color.
+pub fn rasterize(allocator: std.mem.Allocator, doc: []const u8, images: []const ImageAsset) ?Raster {
     var r = Reader{ .bytes = doc };
     const doc_w = r.u16v() orelse return null;
     const doc_h = r.u16v() orelse return null;
@@ -310,10 +418,18 @@ pub fn rasterize(allocator: std.mem.Allocator, doc: []const u8) ?Raster {
                 drawTextNode(out, ow, oh, x, y, w, h, color, px, weight, align_b, letter_spacing, text, opacity);
             },
             NODE_IMAGE => {
+                const asset_key = r.u32v() orelse return fail(allocator, out);
+                const radius = (r.f32v() orelse return fail(allocator, out)) * s;
                 const len = r.u16v() orelse return fail(allocator, out);
                 if (len > MAX_TEXT_BYTES) return fail(allocator, out);
                 const src = r.slice(len) orelse return fail(allocator, out);
-                log.warn(.render, "[decal-raster] image node ('{s}') skipped — image payloads ride the content-addressed asset store (follow-up)", .{src});
+                if (asset_key == 0) {
+                    log.warn(.render, "[decal-raster] image node ('{s}') shipped no asset (empty/unreadable src at bake) — skipped", .{src});
+                } else if (findImage(images, asset_key)) |payload| {
+                    drawImageNode(out, ow, oh, x, y, w, h, radius, opacity, payload, src);
+                } else {
+                    log.warn(.render, "[decal-raster] image node ('{s}') references asset key {d} with no installed payload — skipped", .{ src, asset_key });
+                }
             },
             else => return fail(allocator, out),
         }

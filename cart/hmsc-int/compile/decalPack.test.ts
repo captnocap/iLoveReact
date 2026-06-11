@@ -5,6 +5,7 @@
 import { assert, assertClose, assertEqual, finish, test } from '../game/_testkit';
 import type { DecalDoc } from '../game/textures/decal';
 import { DECAL_NODE_IMAGE, DECAL_NODE_RECT, DECAL_NODE_TEXT, packColor, packDecalDoc } from './decalPack';
+import type { DecalAssetSink, DecalImageAsset } from './decalAssets';
 
 function view(bytes: Uint8Array): DataView {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -68,7 +69,7 @@ test('text node packs font surface + utf8 payload', () => {
   assertEqual(bytes.length, at + 25, 'text record ends the stream');
 });
 
-test('hidden nodes drop at pack; image nodes carry their src', () => {
+test('hidden nodes drop at pack; sink-less image nodes pack key 0 (DECALIMG-0610)', () => {
   const doc: DecalDoc = {
     version: 1, width: 64, height: 64, bg: '#000000',
     nodes: [
@@ -80,9 +81,41 @@ test('hidden nodes drop at pack; image nodes carry their src', () => {
   const v = view(bytes);
   assertEqual(v.getUint16(8, true), 1, 'hidden node dropped — one packed node');
   assertEqual(bytes[10], DECAL_NODE_IMAGE, 'image kind');
+  // image record: u32 assetKey | f32 borderRadius | u16 srcByteLen | utf8
   const at = 10 + 1 + 20;
-  assertEqual(v.getUint16(at, true), 17, 'src byte length');
-  assertEqual(String.fromCharCode(...bytes.subarray(at + 2, at + 19)), 'images/poster.png', 'src payload');
+  assertEqual(v.getUint32(at, true), 0, 'no sink on this pack path — key 0 (loader warns + skips)');
+  assertClose(v.getFloat32(at + 4, true), 0, 1e-6, 'borderRadius defaults to 0');
+  assertEqual(v.getUint16(at + 8, true), 17, 'src byte length');
+  assertEqual(String.fromCharCode(...bytes.subarray(at + 10, at + 27)), 'images/poster.png', 'src payload (diagnostics)');
+  assertEqual(bytes.length, at + 27, 'image record ends the stream');
+});
+
+test('image nodes intern through the asset sink and pack its key (DECALIMG-0610)', () => {
+  const calls: string[] = [];
+  const sink: DecalAssetSink = {
+    assets: [] as DecalImageAsset[],
+    internImage(src, context) {
+      calls.push(`${src}|${context}`);
+      return 3001;
+    },
+  };
+  const doc: DecalDoc = {
+    version: 1, width: 64, height: 64, bg: '#000000',
+    nodes: [
+      { id: 'i1', kind: 'image', x: 0, y: 0, w: 8, h: 8, src: 'images/a.png', borderRadius: 3 },
+      { id: 'i2', kind: 'image', x: 8, y: 0, w: 8, h: 8, src: '' },
+    ],
+  };
+  const bytes = packDecalDoc(doc, 'custom:test', sink);
+  const v = view(bytes);
+  assertEqual(calls.length, 1, 'an empty-src node never reaches the sink');
+  assertEqual(calls[0], 'images/a.png|custom:test: image node i1', 'the sink sees the src + warn context');
+  const at = 10 + 1 + 20;
+  assertEqual(v.getUint32(at, true), 3001, 'the interned manifest key rides the record');
+  assertClose(v.getFloat32(at + 4, true), 3, 1e-6, 'borderRadius rides the record');
+  // first image record = kind(1) + 5×f32(20) + key(4) + radius(4) + len(2) + 'images/a.png'(12)
+  const at2 = 10 + 1 + 20 + 4 + 4 + 2 + 12 + 1 + 20;
+  assertEqual(v.getUint32(at2, true), 0, 'the empty-src image packs key 0');
 });
 
 test('shader-fill rect substitutes a visible flat color when its bg is transparent', () => {
