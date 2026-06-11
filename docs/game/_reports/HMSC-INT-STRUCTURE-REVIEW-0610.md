@@ -938,3 +938,58 @@ product.
 
 Priority: step 1 (registry unification) is a hazard fix and belongs in the
 §9 list immediately after §9.1; steps 2–3 join the §9.4 panel family.
+
+---
+
+## 14. THE TWO STANDING LAWS (req_0612, USER-RULED 2026-06-10) — the closing frame
+
+The user, closing this review: *"anything that is used even twice should be
+a helper/component and not private. also that all the game values are not
+magic numbers. thats how things fall apart from one thing to another."*
+
+These two laws ARE this report. Read back through it: every finding is one
+of them violated —
+
+**Law 1 — THE RULE OF TWO: used twice → a shared helper/component, never a
+second private copy.** This is stricter than conventional taste (which
+tolerates a duplicate until the third use) and it is RULED. The violations
+this review caught, each now a named fix:
+- three identical color groups in one panel (§11.2)
+- two property-panel renderers (§5.2), two settings surfaces — then three
+  doors (§5.1, L4), two lab registries (§5.3), four bespoke rails (§5.4)
+- two layer-strip implementations and two canvases for one editor (§12)
+- TWO prop kind registries with split consumers + per-prop meshes + a third
+  re-encoding in compile (§13)
+- three keyboard transports and per-surface typing gates (§3)
+- the same `commitMany` feature-detect cast pasted four times (§2)
+- value-vs-layout of the same slider control differing between fields.tsx
+  and the shader lab (§11.3)
+Enforcement is structural, not aspirational: the ONE-renderer/ONE-registry
+pattern (fields.tsx, GAME_KINDS, the picker, twigs, tunables) is exactly how
+the rule of two becomes self-sustaining — when the shared thing exists and
+is good, the second use reaches for it because it is CHEAPER than copying.
+Every §9 item that consolidates a duplicate is this law executing.
+
+**Law 2 — NO MAGIC GAME VALUES, anywhere.** This is P2, re-affirmed with
+teeth, and the review's P2 gaps are its checklist: the prop tables
+unreachable from the tool (§13), `MapPayload.fx/fy`-style constants living
+in schema (§8), tuning values inlined in surfaces instead of registered
+(`editorTunables` exists — registration is the missing habit, not the
+machinery), the vehicle panel showing values it never registered as
+editable color/num fields (§11.3). The standard: a game-affecting number
+appears ONCE, in a registered table the tool can edit and the compile
+consumes — `editorTunables`/`GAME_KINDS` are the proven homes.
+
+**Why the user is right that "that's how things fall apart from one thing
+to another":** both laws prevent the same failure — DIVERGENCE. A second
+private copy and an unregistered constant are the same bug at different
+scales: two places that must agree, with no mechanism making them agree.
+The props registry split (§13) is the live proof — editor and compile
+already read different tables. In GUIDING_LIGHT's terms these two laws are
+the one law: store each thing once and reference it; the copy and the magic
+number are both the outer product sneaking back in.
+
+Standing instruction for every worker in this codebase: before writing a
+helper, a control, a constant — survey for the existing one (the
+survey-before-build discipline); on the SECOND use of anything, extraction
+is not optional.
