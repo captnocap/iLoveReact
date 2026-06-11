@@ -7,7 +7,7 @@
 import { MAP_LUMP } from '@reactjit/workspace';
 import { sha256 } from '@reactjit/workspace/sha256';
 import * as Geometry from '@reactjit/geometries';
-import { parseAnimationDsl, sampleAnimationTimeline } from '../../animationDsl';
+import { parseAnimationDsl, sampleAnimationTimeline } from '@game/animation';
 import { bakeFigureFromSeed } from '@game/figure/bake';
 import { buildRigFrame } from '@game/figure/rig';
 import type { BodyInstance } from '@game/figure/assembly';

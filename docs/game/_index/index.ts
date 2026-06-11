@@ -1,4 +1,10 @@
-// docs/game/_index — aggregate over all 39 DocIndex records + query helpers.
+// docs/game/_index — aggregate over the live DocIndex records + query helpers.
+//
+// DEMOLITION-0610 (USER ASK req_0610/req_0611): the ~30 per-cart records for
+// the deleted standalone lab/demo carts retired to docs/game/_archive/records/
+// alongside their .md docs. A deleted cart cannot keep a live index record —
+// the maintenance contract runs in reverse. What remains is the game itself
+// (game_* doors, hmsc_int the tool) + the framework/CLI docs.
 //
 // Usage (from a cart, a script under tools/v8cli, or just by reading):
 //   import { byPurpose, byStatus, hazardsBySeverity } from 'docs/game/_index';
@@ -14,46 +20,16 @@ import type {
   Purpose, SymbolKind, InterfaceStatus, PatternStatus, HazardSeverity,
 } from './types';
 
-import { animationDsl } from './records/animationDsl';
-import { animation_lab } from './records/animation_lab';
 import { bake_geometry } from './records/bake_geometry';
-import { billboard_demo } from './records/billboard_demo';
-import { bodylab } from './records/bodylab';
-import { boxxx_demo } from './records/boxxx_demo';
-import { camera_lab } from './records/camera_lab';
-import { carve_lab } from './records/carve_lab';
-import { combat_lab } from './records/combat_lab';
-import { composer } from './records/composer';
-import { cutout } from './records/cutout';
-import { effect_fills } from './records/effect_fills';
-import { game_item_gallery } from './records/game_item_gallery';
 import { game_activities } from './records/game_activities';
 import { game_build } from './records/game_build';
 import { game_animation } from './records/game_animation';
 import { game_cutscene } from './records/game_cutscene';
 import { game_missions } from './records/game_missions';
 import { game_world } from './records/game_world';
-import { geometry_demo } from './records/geometry_demo';
-import { head_lab } from './records/head_lab';
-import { hmsc } from './records/hmsc';
 import { hmsc_int } from './records/hmsc_int';
-import { hmsc_massive_map_lab } from './records/hmsc_massive_map_lab';
-import { hmsc_scale_lab } from './records/hmsc_scale_lab';
-import { input_bench } from './records/input_bench';
-import { pathing_lab } from './records/pathing_lab';
 import { physics3d } from './records/physics3d';
-import { physics_lab } from './records/physics_lab';
-import { pixel_icon_demo } from './records/pixel_icon_demo';
-import { pixel_icon_gallery } from './records/pixel_icon_gallery';
-import { planet_run } from './records/planet_run';
-import { ragdoll_lab } from './records/ragdoll_lab';
-import { render_perf_lab } from './records/render_perf_lab';
 import { request_ledger } from './records/request_ledger';
-import { scape } from './records/scape';
-import { shitcoin } from './records/shitcoin';
-import { skybox_demo } from './records/skybox_demo';
-import { vehicle_lab } from './records/vehicle_lab';
-import { voxel_stack_demo } from './records/voxel_stack_demo';
 
 export type {
   DocIndex, InterfaceRecord, PatternRecord, HazardRecord,
@@ -61,13 +37,8 @@ export type {
 };
 
 export const ALL_DOCS: DocIndex[] = [
-  animationDsl, animation_lab, bake_geometry, billboard_demo, bodylab,
-  boxxx_demo, camera_lab, carve_lab, combat_lab, composer, cutout,
-  effect_fills, game_item_gallery, game_activities, game_animation, game_build, game_cutscene, game_missions, game_world, geometry_demo, head_lab, hmsc, hmsc_int,
-  hmsc_massive_map_lab, hmsc_scale_lab, input_bench, pathing_lab, physics3d,
-  physics_lab, pixel_icon_demo, pixel_icon_gallery, planet_run, ragdoll_lab,
-  render_perf_lab, request_ledger, scape, shitcoin, skybox_demo, vehicle_lab,
-  voxel_stack_demo,
+  bake_geometry, game_activities, game_animation, game_build, game_cutscene,
+  game_missions, game_world, hmsc_int, physics3d, request_ledger,
 ];
 
 // ── flattened views (each row carries its owning doc) ───────────────────────
