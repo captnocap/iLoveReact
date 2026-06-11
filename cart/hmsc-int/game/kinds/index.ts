@@ -44,10 +44,11 @@ export {
   PROP_KIND_DEFINITIONS,
   PROP_KINDS,
   isPropKind,
+  propDynamics,
   propKindDefinition,
   propKindNamesForConsole,
 } from './props';
-export type { PropKind, PropKindDefinition, PropTrafficControl } from './props';
+export type { PropDynamics, PropKind, PropKindDefinition, PropTrafficControl } from './props';
 
 export {
   NPC_KIND_DEFINITIONS,

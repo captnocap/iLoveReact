@@ -41,13 +41,13 @@ import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import {
   GAME_BUILD, GAME_CAMERA, GAME_CHROME, GAME_COMMANDS, GAME_FIGURE, GAME_INPUT,
-  GAME_ITEMS, GAME_LOOP, GAME_PATHING, GAME_PHYSICS, GAME_TELEMETRY, GAME_WORLD, buildingsStream, cameraOcclusionResponse, pieceMutationMapName, piecesForMap, withBuildingPieces, worldStream,
+  GAME_ITEMS, GAME_LOOP, GAME_PATHING, GAME_PHYSICS, GAME_TELEMETRY, GAME_WORLD, PHYSICS_LIMITS, buildingsStream, cameraOcclusionResponse, pieceMutationMapName, piecesForMap, withBuildingPieces, worldStream,
 } from '@game';
 import type {
   BuildFaceSkin, BuildFaceSlot, BuildMaterial, BuildPieceDef, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingsStreamState, PieceRay,
-  PlacedBuildPiece, WallEdit, WorldEvent, WorldStreamState,
+  PlacedBuildPiece, SteppedBody, WallEdit, WorldEvent, WorldStreamState,
 } from '@game';
-import type { GameState } from '../../design'; // GAP: retires when hmsc becomes compile/'s output (V15)
+import type { GameState, WorldProp } from '../../design'; // GAP: retires when hmsc becomes compile/'s output (V15)
 import {
   EmbodiedCaptures, EmbodiedMouseSurface, EmbodiedScene, PLAYER_CAMERA,
   groundColumnTop, normalizeYawDegrees, readEmbodiedCameraNode, useEmbodiedPlayer, worldGridOf,
@@ -69,6 +69,47 @@ import { TextureCapture } from '../../game/textures/registry';
 import { BUILD_UI, CAMERA_OCCLUSION_TUNING } from '../build/buildUi';
 import { perfMs, warnPlaceFreeze, startPlaceFreezeProbe, markPlaceFreezeProbe, type PlaceFreezeProbe } from '../build/placeFreezeProbe';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, type VisualShape } from '../build/pieceMeshes';
+import { propDynamics } from '../../world/propKinds';
+import { Prop } from '../../render3d/Prop';
+
+// ── KICKPROP-0610: a placed dynamic prop's live body state ──────────────────
+// The route-side record behind the EmbodiedWorldExtras.bodies door: the host
+// PhysicsBody fields plus the identity needed to render the prop model at the
+// body's live position (mesh anchor = body center minus radius).
+type DynamicPropBodyState = {
+  pieceId: string;
+  propKind: WorldProp['kind'];
+  yawDegrees: number;
+  radiusMeters: number;
+  restitution: number;
+  position: { x: number; y: number; z: number };
+  velocity: { x: number; y: number; z: number };
+};
+
+// The live layer for kicked-around props: renders each dynamic body's prop
+// model at its current physics position. `rev` is the publish signal — it only
+// bumps while a body moves, so resting props cost nothing per frame.
+const DynamicPropMeshes = memo(function DynamicPropMeshes(props: { bodies: readonly DynamicPropBodyState[]; rev: number }) {
+  void props.rev; // memo key — the bodies array is ref-backed and mutates in place
+  return (
+    <>
+      {props.bodies.map((body) => (
+        <Prop
+          key={body.pieceId}
+          prop={{
+            id: body.pieceId,
+            kind: body.propKind,
+            x: body.position.x,
+            y: body.position.y - body.radiusMeters,
+            z: body.position.z,
+            yawDegrees: body.yawDegrees,
+            createdByCommand: 'hmsc-int:dynamic-prop',
+          }}
+        />
+      ))}
+    </>
+  );
+});
 
 const DEG = Math.PI / 180;
 
@@ -449,6 +490,51 @@ export function PlayRoute(props: {
   }, [pieces]);
   const piecesRef = useRef(liftedPieces);
   piecesRef.current = liftedPieces;
+  // ── KICKPROP-0610: dynamic prop bodies (balls, cones, cans) ──────────────
+  // A placed dynamic prop leaves the static collider set (placed.colliders
+  // skips it) and lives here as a host sphere body: Embodied hands the list
+  // to GAME_PHYSICS.step each frame (the host's capsule-vs-sphere contact is
+  // the kick) and commits the stepped result back through the worldExtras
+  // door. Ref-backed — the sim itself never re-renders the route; the rev
+  // bump publishes only while a body is actually moving, so resting props
+  // follow the same idle discipline as the player pose.
+  const dynamicBodiesRef = useRef<DynamicPropBodyState[]>([]);
+  const [dynamicBodiesRev, setDynamicBodiesRev] = useState(0);
+  const dynamicBodiesRevRef = useRef(0);
+  useEffect(() => {
+    // Reconcile with the placed world: surviving ids keep their in-flight
+    // motion, new pieces spawn resting on their (terrain-lifted) anchor,
+    // removed pieces drop out.
+    const prev = new Map(dynamicBodiesRef.current.map((body) => [body.pieceId, body]));
+    const next: DynamicPropBodyState[] = [];
+    for (const piece of liftedPieces) {
+      const def = GAME_BUILD.catalog.get(piece.pieceId);
+      if (def.kind !== 'prop' || !def.propKind) continue;
+      const dynamics = propDynamics(def.propKind);
+      if (!dynamics) continue;
+      const existing = prev.get(piece.id);
+      if (existing) {
+        next.push(existing);
+        continue;
+      }
+      next.push({
+        pieceId: piece.id,
+        propKind: def.propKind,
+        yawDegrees: piece.yawDegrees,
+        radiusMeters: dynamics.bodyRadiusMeters,
+        restitution: dynamics.restitution,
+        position: { x: piece.x, y: piece.y + dynamics.bodyRadiusMeters, z: piece.z },
+        velocity: { x: 0, y: 0, z: 0 },
+      });
+    }
+    if (next.length > PHYSICS_LIMITS.bodies) {
+      console.warn(`[play] ${next.length} dynamic props exceed the host body cap of ${PHYSICS_LIMITS.bodies} — the tail stays frozen at its anchor`);
+      next.length = PHYSICS_LIMITS.bodies;
+    }
+    dynamicBodiesRef.current = next;
+    dynamicBodiesRevRef.current += 1;
+    setDynamicBodiesRev(dynamicBodiesRevRef.current);
+  }, [liftedPieces]);
   const cameraOccluders = useMemo(() => GAME_BUILD.placed.cameraOccluders(liftedPieces), [liftedPieces]);
   const cameraOccludersRef = useRef(cameraOccluders);
   cameraOccludersRef.current = cameraOccluders;
@@ -510,6 +596,34 @@ export function PlayRoute(props: {
     warnPlaceFreeze('colliders', { pieces: pieces.length, solids: solids.length, ms: collidersMs });
     return {
       solids,
+      bodies: {
+        get: () => dynamicBodiesRef.current.map((body) => ({
+          position: body.position,
+          velocity: body.velocity,
+          radiusMeters: body.radiusMeters,
+          restitution: body.restitution,
+        })),
+        commit: (stepped: SteppedBody[]) => {
+          const bodies = dynamicBodiesRef.current;
+          let moved = false;
+          for (let index = 0; index < stepped.length && index < bodies.length; index += 1) {
+            const after = stepped[index];
+            const body = bodies[index];
+            if (!moved) {
+              const dx = after.position.x - body.position.x;
+              const dy = after.position.y - body.position.y;
+              const dz = after.position.z - body.position.z;
+              if (dx * dx + dy * dy + dz * dz > 1e-8) moved = true;
+            }
+            body.position = after.position;
+            body.velocity = after.velocity;
+          }
+          if (moved) {
+            dynamicBodiesRevRef.current += 1;
+            setDynamicBodiesRev(dynamicBodiesRevRef.current);
+          }
+        },
+      },
       registerHeightfields: (worldBake) => {
         const rampsT0 = perfMs();
         const ramps = GAME_BUILD.placed.ramps(liftedPieces, worldBake.fields.length);
@@ -1556,7 +1670,8 @@ export function PlayRoute(props: {
       <EmbodiedScene embodied={embodied}>
         {/* the standing pieces — the world stream's materialized truth, in
             BOTH modes (solid in both; the toggle exists to walk what you built) */}
-        <PlacedPieceMeshes pieces={liftedPieces} markedIds={markedIds} targetId={showSelectionOverlay ? snapTarget?.targetPieceId ?? null : null} occludedIds={occludedPieceIds} placeFreezeProbe={placeFreezeProbeRef.current} />
+        <PlacedPieceMeshes pieces={liftedPieces} markedIds={markedIds} targetId={showSelectionOverlay ? snapTarget?.targetPieceId ?? null : null} occludedIds={occludedPieceIds} placeFreezeProbe={placeFreezeProbeRef.current} skipDynamicProps />
+        <DynamicPropMeshes bodies={dynamicBodiesRef.current} rev={dynamicBodiesRev} />
         {/* the snap indicator + placement ghost are PLACE-mode language only.
             Select mode keeps the hover/selected piece highlights above. */}
         {showPlacementGhost && snapTarget && (

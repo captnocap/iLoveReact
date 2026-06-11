@@ -17,6 +17,7 @@ import { GAME_BUILD, GAME_TELEMETRY } from '@game';
 import type { BuildFaceSkin, BuildMaterial, BuildSkinSet, PlacedBuildPiece, WallEdit } from '@game';
 import type { WorldProp } from '../../design';
 import { Prop } from '../../render3d/Prop';
+import { propDynamics } from '../../world/propKinds';
 import { BUILD_UI, CAMERA_OCCLUSION_TUNING } from './buildUi';
 import { markPlaceFreezeProbe, perfMs, warnPlaceFreeze, type PlaceFreezeProbe } from './placeFreezeProbe';
 
@@ -488,6 +489,11 @@ export const PlacedPieceMeshes = memo(function PlacedPieceMeshes(props: {
   targetId: string | null;
   occludedIds: ReadonlySet<string>;
   placeFreezeProbe?: PlaceFreezeProbe | null;
+  /** KICKPROP-0610: the play route simulates dynamic props (balls, cones) as
+   *  host bodies and renders them in its own live layer — skip them here so
+   *  they don't ALSO render frozen at their placement anchor. Default false
+   *  (the iso author pane has no physics loop and renders everything). */
+  skipDynamicProps?: boolean;
 }) {
   const { joinKeys, boxes, ms: boxesMs, cached } = joinKeysOf(props.pieces);
   // Bucket every opaque box by texture into instance streams; everything that
@@ -506,6 +512,7 @@ export const PlacedPieceMeshes = memo(function PlacedPieceMeshes(props: {
     const opacityOverride = occluded ? CAMERA_OCCLUSION_TUNING.residualOpacity : undefined;
     const prop = propFromPiece(piece);
     if (prop) {
+      if (props.skipDynamicProps && propDynamics(prop.kind)) continue;
       propMeshes.push(prop);
       if (colorOverride || opacityOverride !== undefined) {
         loose.push({

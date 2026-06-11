@@ -19,7 +19,7 @@
 //!   [3]  speed                   [16] player radius
 //!   [4]  jump down (>0.5)        [17] player height
 //!   [5..7]  player x,y,z         [18] wall restitution
-//!   [8..10] player vx,vy,vz      [19] body restitution (reserved, unused)
+//!   [8..10] player vx,vy,vz      [19] body restitution (player→body kick)
 //!   [11] walkable rect side-push grace
 //!                                [20] step height
 //!   [12] entity count            [21] acceleration multiplier
@@ -42,7 +42,13 @@ const std = @import("std");
 pub const movement = @import("movement.zig");
 
 pub const MAX_ENTITIES: usize = 128;
-pub const MAX_RECTS: usize = 4096;
+// 16384: a built-out city (hand-placed walls + floor plates) overran the old
+// 4096 — placedPieceColliders alone hit ~4928 on a real map, so the tail of
+// recently-built structures silently lost collision (you walked through them).
+// The only static buffer keyed to this is g_camera_occlusion_rect_values
+// (~720KB at 16384), so the headroom is cheap. The per-step cost is the ACTUAL
+// rect count, not the cap, so unused headroom is free.
+pub const MAX_RECTS: usize = 16384;
 pub const MAX_ORIENTED: usize = 256;
 pub const INPUT_HEADER_FLOATS: usize = 25;
 pub const ENTITY_FLOATS: usize = 8;
@@ -1200,12 +1206,11 @@ pub fn step(input: []const f32) ?[]f32 {
     const player_radius = @max(0.05, input[16]);
     const player_height = @max(0.2, input[17]);
     const wall_restitution = clamp(input[18], 0, 1);
-    const body_restitution = clamp(input[19], 0, 1); // reserved — parsed to document the layout
+    const body_restitution = clamp(input[19], 0, 1); // player→body kick transfer (the capsule-vs-sphere contact below)
     const step_height = @max(0, input[20]);
     const acceleration_multiplier = clamp(input[21], 0.05, 4);
     const player_surface_friction = clamp(input[22], 0, 1);
     const player_surface_restitution = clamp(input[23], 0, 1);
-    _ = body_restitution;
 
     const walkable_side_push_grace = @max(@as(f32, 0), input[11]);
 
@@ -1306,6 +1311,42 @@ pub fn step(input: []const f32) ?[]f32 {
             const surface_drag = @max(@as(f32, 0), 1 - dt * (1.5 + surface_friction * 12));
             vx *= surface_drag;
             vz *= surface_drag;
+        }
+
+        // The kick: player capsule vs entity sphere. Pushing into a body
+        // transfers the player's approach velocity along the contact normal,
+        // scaled by tuning's bodyRestitution ([19]) — so running into a ball
+        // boots it, and a faster run boots it harder. The player is kinematic
+        // here (a light prop never deflects the runner). Grounded contacts get
+        // a small upward pop so a hard kick lofts the ball off the pavement.
+        {
+            const dxp = x - px;
+            const dzp = z - pz;
+            const cy = clamp(y, py, py + player_height);
+            const dyp = y - cy;
+            const dist2 = dxp * dxp + dyp * dyp + dzp * dzp;
+            const min_dist = r + player_radius;
+            if (dist2 < min_dist * min_dist and dist2 > 1e-8) {
+                const dist = @sqrt(dist2);
+                const nx = dxp / dist;
+                const ny = dyp / dist;
+                const nz = dzp / dist;
+                const overlap = min_dist - dist;
+                x += nx * overlap;
+                y += @max(0, ny) * overlap;
+                z += nz * overlap;
+                const rel = (pvx - vx) * nx + (pvy - vy) * ny + (pvz - vz) * nz;
+                if (rel > 0) {
+                    const transfer = rel * (1 + restitution) * body_restitution;
+                    vx += nx * transfer;
+                    vy += @max(0, ny) * transfer;
+                    vz += nz * transfer;
+                    if (grounded == 1 and transfer > 1.2) {
+                        vy = @max(vy, transfer * 0.22);
+                        grounded = 0;
+                    }
+                }
+            }
         }
 
         g_snapshot[at] = x;

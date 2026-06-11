@@ -56,7 +56,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Pressable, Scene3D } from '@reactjit/primitives';
 import { GAME_CAMERA, GAME_FIGURE, GAME_INPUT, GAME_KINDS, GAME_LOOP, GAME_NATIVE_CAMERA, GAME_PHYSICS, GAME_TELEMETRY, GAME_WORLD, PHYSICS_LIMITS } from '@game';
-import type { CollisionRect, OrientedCollisionRect, WorldGridState } from '@game';
+import type { CollisionRect, OrientedCollisionRect, PhysicsBody, SteppedBody, WorldGridState } from '@game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '@game/figure/render';
 import { LIVE_FLOOR_PROBE, liveFloorRecoveryDecision } from './embodiedLiveFloor';
 import type { GameState, Vec3 } from './design'; // GAP: the editor GameState type retires when hmsc becomes compile/'s output (V15)
@@ -217,6 +217,14 @@ export type EmbodiedWorldExtras = {
   /** register extra heightfields after the world's; receives the world bake
    *  so slots continue where terrain stopped */
   registerHeightfields?: (worldBake: ReturnType<typeof GAME_WORLD.registerHeightfields>) => void;
+  /** KICKPROP-0610: dynamic prop bodies (balls, cones, cans). Read each step,
+   *  handed to the host alongside the player, written back after — the host's
+   *  capsule-vs-sphere contact is what makes running into a ball kick it. The
+   *  door is ref-backed on the route side so the sim never re-renders here. */
+  bodies?: {
+    get: () => PhysicsBody[];
+    commit: (stepped: SteppedBody[]) => void;
+  };
 };
 
 export type EmbodiedOptions = {
@@ -861,6 +869,10 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
       // (WO-1-proven), ground/step resolution — tuning is the authored
       // state.config.physics, colliders + heightfields are the W-1 door's
       // (GAME_WORLD.collisionRects / registerHeightfields, mounted above).
+      // KICKPROP-0610: dynamic prop bodies ride the same step — the host's
+      // capsule-vs-sphere contact turns running into a ball into a kick.
+      const bodiesDoor = optionsRef.current.worldExtras?.bodies;
+      const dynamicBodies = bodiesDoor?.get();
       const stepped = GAME_PHYSICS.hostReady()
         ? GAME_PHYSICS.step({
             dtSeconds: dt,
@@ -879,11 +891,13 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
               restitution: surfaceProfile.restitution,
             },
             tuning: physicsTuning,
+            bodies: dynamicBodies && dynamicBodies.length > 0 ? dynamicBodies : undefined,
             rects: solids.rects,
             orientedRects: solids.orientedRects,
           })
         : null;
       if (stepped) {
+        if (bodiesDoor && stepped.bodies.length > 0) bodiesDoor.commit(stepped.bodies);
         const p = stepped.player;
         playerJitProbeRef.current.latestPhysics = {
           x: p.position.x,

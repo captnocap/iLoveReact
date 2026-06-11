@@ -31,7 +31,24 @@ export type PropKindDefinition = {
   // "gets all the property ideas of a tile" without a parallel schema.
   tileKind: TileKind;
   trafficControl: PropTrafficControl;
+  // Present = this prop is a DYNAMIC body, not static scenery: placed, it
+  // becomes a host physics sphere the player kicks around by running into it
+  // (KICKPROP-0610). Dynamic props contribute NO static blocking rect.
+  dynamics?: PropDynamics;
 };
+
+/** The dynamic-body recipe for a kickable prop (host sphere body). */
+export type PropDynamics = {
+  /** sphere body radius in meters (the mesh rides at body.y - radius) */
+  bodyRadiusMeters: number;
+  /** bounce on world contact, 0..1 — balls high, cones/cans low */
+  restitution: number;
+};
+
+/** The dynamics recipe for a kind, or null for static scenery. */
+export function propDynamics(kind: PropKind): PropDynamics | null {
+  return PROP_KIND_DEFINITIONS[kind].dynamics ?? null;
+}
 
 export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   rock: {
@@ -201,6 +218,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.7,
     tileKind: 'wall',
     trafficControl: 'none',
+    dynamics: { bodyRadiusMeters: 0.22, restitution: 0.15 },
   },
   barrier: {
     kind: 'barrier',
@@ -221,6 +239,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 1.0,
     tileKind: 'wall',
     trafficControl: 'none',
+    dynamics: { bodyRadiusMeters: 0.38, restitution: 0.22 },
   },
   bench: {
     kind: 'bench',
@@ -360,6 +379,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.8,
     tileKind: 'wall',
     trafficControl: 'none',
+    dynamics: { bodyRadiusMeters: 0.4, restitution: 0.75 },
   },
   ballSoccer: {
     kind: 'ballSoccer',
@@ -369,6 +389,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.22,
     tileKind: 'wall',
     trafficControl: 'none',
+    dynamics: { bodyRadiusMeters: 0.11, restitution: 0.65 },
   },
   ballBasketball: {
     kind: 'ballBasketball',
@@ -378,6 +399,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     heightMeters: 0.24,
     tileKind: 'wall',
     trafficControl: 'none',
+    dynamics: { bodyRadiusMeters: 0.12, restitution: 0.78 },
   },
 
   // ── wall decor ─────────────────────────────────────────────────────────────

@@ -36,6 +36,7 @@ import {
   type BuildPieceDef,
 } from './catalog';
 import { BUILD_KIND_CONTRACTS, type BuildGameplayTags, type BuildPieceKind } from './pieces';
+import { propDynamics } from '../kinds';
 import { wallEditDefinition, type WallEdit } from './edits';
 import type { BuildPrefabDef, PrefabPiece } from './prefabs';
 import { BUILD_FACE_SLOTS, resolveFaceSkin, type BuildSkinSet } from './skins';
@@ -828,6 +829,9 @@ export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): Place
       }
       continue;
     }
+    // KICKPROP-0610: a dynamic prop (ball, cone, can) is a host sphere BODY,
+    // not a wall — it contributes no static rect; the play route owns its sim.
+    if (def.kind === 'prop' && def.propKind && propDynamics(def.propKind)) continue;
     if (!placedPieceTags(piece).collision) continue;
     const quarter = quarterTurns(piece.yawDegrees);
     const depthSpan = placedPieceDepthSpan(piece, pieces);
