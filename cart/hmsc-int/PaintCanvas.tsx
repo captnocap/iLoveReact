@@ -37,6 +37,7 @@ import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneD
 import { applyMergeGesture, clampProfile, laneFlowArrows, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, strokeWireFlip, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
 import { RoadRail } from './RoadRail';
 import { ChunkSurface } from './ChunkSurface';
+import type { PainterEmphasis } from './painterSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
 import { placementCellRect, type Placement, type PlaceCat } from './placements';
 import type { MapBuildFootprint } from './mapBuildPlacements';
@@ -795,6 +796,15 @@ export function PaintCanvas(props: {
 
   const allChunks = useMemo(() => Array.from(chunks.values()), [chunks, chunkRev]);
   const focusedChunks = allChunks.filter((c) => focus.has(chunkKey(c.cx, c.cz)));
+  // Per-channel emphasis for the combined chunk shader (PAINTER-0610): the active
+  // target reads full strength, the rest stay visible as dim landmarks — roads are
+  // world content so the ribbon renders full whenever shown. Identity-stable
+  // (useMemo): ChunkSurface is memo'd and its encode re-runs on emphasis change.
+  const emphasis = useMemo<PainterEmphasis>(() => ({
+    road: 1,
+    height: layer === 'height' ? 1 : 0.3,
+    zone: layer === 'zone' ? 1 : 0.25,
+  }), [layer]);
   // [mapgone-probe MAPGONE2-0605] surface gate — stays until the user confirms
   useEffect(() => {
     console.warn(`[mapgone] PaintCanvas mount: seed=${props.initialWorld ? 'initialWorld' : 'blank'} chunks=${chunks.size} focus=${focus.size} focusedChunks=${focusedChunks.length} layer=${layer}`);
@@ -1695,7 +1705,7 @@ export function PaintCanvas(props: {
           <ChunkSurface
             key={chunkKey(c.cx, c.cz)}
             chunk={c}
-            layer={layer}
+            emphasis={emphasis}
             zones={zones}
             roads={ribbonSegsFor(c.cx, c.cz)}
             register={registerTouch}
