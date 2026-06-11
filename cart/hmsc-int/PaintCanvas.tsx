@@ -422,6 +422,7 @@ export function PaintCanvas(props: {
   onBrushChange: (patch: Partial<BrushSettings>) => void;
   place: PlaceProps;
   showGrid?: boolean;
+  onShowGrid?: (v: boolean) => void;
   // Throttled mirror of the focused chunks' painted tiles (one floor snapshot per
   // chunk) — drives the live iso-3D preview.
   onFloors?: (floors: ChunkFloor[]) => void;
@@ -1902,6 +1903,8 @@ export function PaintCanvas(props: {
           place={place}
           selPlacement={selPlacement}
           selBuild={selBuildPlacement}
+          grid={grid}
+          onGrid={(v: boolean) => props.onShowGrid?.(v)}
           road={{
             profile: selRoad ? selRoad.profile : roadProfile,
             onProfile: editActiveProfile,

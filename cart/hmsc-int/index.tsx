@@ -432,7 +432,8 @@ function EditorShell() {
     if (applyTwig && p.tile) setTile(p.tile);
     if (applyTwig && p.layer) setLayer(p.layer);
     if (applyTwig) setChannels(p.channels ?? {});
-    if (applyTwig && p.tab) setTab(p.tab);
+    // SET tab retired (SETFOLD-0610): old payloads may still say 'settings'.
+    if (applyTwig && p.tab) setTab((p.tab as string) === 'settings' ? 'objects' : p.tab);
     if (typeof p.notes === 'string') setNotes(p.notes);
     if (applyTwig && typeof p.showGrid === 'boolean') setShowGrid(p.showGrid);
     // Decode the world and remount PaintCanvas onto it.
@@ -742,7 +743,6 @@ function EditorShell() {
     else setFy((f) => clampFrac(f + d));
   }, []);
   const resetLayout = useCallback(() => { setFx(0.5); setFy(0.5); }, []);
-  const clearNotes = useCallback(() => setNotes(''), []);
 
   // ── Object placements (the 'place' layer) ───────────────────────────────────
   // The model viewer's + drops the selected kind at the origin, selects it, and
@@ -1178,6 +1178,7 @@ function EditorShell() {
             fx={fx}
             fy={fy}
             onResize={onResize}
+            onReset={resetLayout}
             topLeft={<PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />}
             topRight={
               <RightPanel
@@ -1185,11 +1186,6 @@ function EditorShell() {
                 onTab={setTab}
                 notes={notes}
                 onNotes={setNotes}
-                showGrid={showGrid}
-                onShowGrid={setShowGrid}
-                onResetLayout={resetLayout}
-                onClearNotes={clearNotes}
-                lastSavedAt={ws.lastSavedAt}
                 buildingPrefabs={buildingPrefabs}
                 onPlace={placeObject}
                 activePlaceable={activePlaceable}
@@ -1215,6 +1211,7 @@ function EditorShell() {
                 onBrushChange={updateBrush}
                 place={place}
                 showGrid={showGrid}
+                onShowGrid={setShowGrid}
                 onFloors={onFloors}
                 onEditBegin={snapshotForUndo}
                 wasdFocused={atEditor && wasdQuad === 'canvas'}

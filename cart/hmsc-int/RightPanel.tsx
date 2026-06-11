@@ -2,7 +2,7 @@
 // tab's content.
 //
 //   ┌──────────────────────┬──┐
-//   │  active tab content   │ ▣│  ← right rail: Objects / Notes / Chat / Settings
+//   │  active tab content   │ ▣│  ← right rail: Objects / Notes / Chat
 //   └──────────────────────┴──┘
 //
 // Tab content lives in ./tabs/*. The active tab is owned + persisted by the cart
@@ -13,17 +13,19 @@ import { Icon } from '@reactjit/icons/Icon';
 import { ObjectsTab } from './tabs/ObjectsTab';
 import { NotesTab } from './tabs/NotesTab';
 import { ChatTab } from './tabs/ChatTab';
-import { SettingsTab } from './tabs/SettingsTab';
 import type { PlaceCat } from './placements';
 import type { BuildPrefabDef } from '@game';
 
-export type TabId = 'objects' | 'notes' | 'chat' | 'settings';
+// SET retired (SETFOLD-0610, review §5.1/L4): the chrome's SETTINGS door →
+// the workbench settings source is THE settings home. The tab's three
+// controls went to their task homes: grid toggle → the painter rail,
+// pane reset → double-press the QuadSplit knob, notepad clear → NotesTab.
+export type TabId = 'objects' | 'notes' | 'chat';
 
 const TABS: { id: TabId; icon: string; label: string }[] = [
   { id: 'objects', icon: 'FolderTree', label: 'OBJ' },
   { id: 'notes', icon: 'NotebookPen', label: 'NOTE' },
   { id: 'chat', icon: 'MessageSquare', label: 'CHAT' },
-  { id: 'settings', icon: 'Settings', label: 'SET' },
 ];
 
 function TabButton(props: { icon: string; label: string; active: boolean; onPress: () => void }) {
@@ -48,11 +50,6 @@ export function RightPanel(props: {
   onTab: (t: TabId) => void;
   notes: string;
   onNotes: (s: string) => void;
-  showGrid: boolean;
-  onShowGrid: (v: boolean) => void;
-  onResetLayout: () => void;
-  onClearNotes: () => void;
-  lastSavedAt: number | null;
   buildingPrefabs?: BuildPrefabDef[];
   onPlace: (cat: 'building' | 'prop' | 'marker', kind: string) => void;
   activePlaceable?: { cat: PlaceCat; kind: string } | null;
@@ -65,15 +62,6 @@ export function RightPanel(props: {
         {props.tab === 'objects' ? <ObjectsTab buildingPrefabs={props.buildingPrefabs} onPlace={props.onPlace} activePlaceable={props.activePlaceable} onArmPlaceable={props.onArmPlaceable} /> : null}
         {props.tab === 'notes' ? <NotesTab notes={props.notes} onNotes={props.onNotes} /> : null}
         {props.tab === 'chat' ? <ChatTab /> : null}
-        {props.tab === 'settings' ? (
-          <SettingsTab
-            showGrid={props.showGrid}
-            onShowGrid={props.onShowGrid}
-            onResetLayout={props.onResetLayout}
-            onClearNotes={props.onClearNotes}
-            lastSavedAt={props.lastSavedAt}
-          />
-        ) : null}
       </Box>
 
       {/* Right nav rail */}

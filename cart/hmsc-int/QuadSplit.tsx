@@ -32,6 +32,9 @@ export function QuadSplit(props: {
   fx: number;
   fy: number;
   onResize: (axis: Axis, deltaFrac: number) => void;
+  /** double-press the center knob → even split (replaced the SettingsTab's
+   *  "Reset panes" button — the affordance lives ON the thing it resets) */
+  onReset?: () => void;
   topLeft: ReactNode;
   topRight: ReactNode;
   bottomLeft: ReactNode;
@@ -61,6 +64,13 @@ export function QuadSplit(props: {
 
   const begin = (axis: Axis) => () => { dragRef.current = axis; };
   const end = () => { dragRef.current = null; };
+  // Double-press detection for the knob's reset (no host dblclick event).
+  const lastKnobPressRef = useRef(0);
+  const knobPress = () => {
+    const now = Date.now();
+    if (now - lastKnobPressRef.current < 350) props.onReset?.();
+    lastKnobPressRef.current = now;
+  };
 
   const vDivider = (
     <Pressable onMouseDown={begin('col')} onMouseUp={end} style={{ width: DIVIDER, height: '100%', backgroundColor: '#1e293b' }} />
@@ -100,6 +110,7 @@ export function QuadSplit(props: {
           DIVIDER/2 to land on the visual center of the 6px-thick bars. */}
       {dims.width > 0 && (
         <Pressable
+          onPress={knobPress}
           onMouseDown={begin('both')}
           onMouseUp={end}
           onHoverEnter={() => setKnobHot(true)}

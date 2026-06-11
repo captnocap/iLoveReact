@@ -53,6 +53,8 @@ function ToolCard(props: {
   brushMode: BrushRailSettings['mode'];
   onTool: (t: Tool) => void;
   onBrushChange: (p: Partial<BrushRailSettings>) => void;
+  grid: boolean;
+  onGrid: (v: boolean) => void;
 }) {
   const erasing = props.tool === 'eraser' || (props.tool === 'brush' && props.brushMode === 'erase');
   const entries: { tool: Tool; icon: string; label: string; active: boolean; press: () => void }[] = [
@@ -71,6 +73,13 @@ function ToolCard(props: {
           </Box>
         );
       })}
+      <Box style={{ flexGrow: 1 }} />
+      {/* The canvas grid toggle — a VIEW preference, parked at the row's edge
+          (came home from the retired SettingsTab; the canvas owns its view). */}
+      <Box style={{ alignItems: 'center', gap: 2 }}>
+        <ToolBtn icon="Grid3x3" active={props.grid} onPress={() => props.onGrid(!props.grid)} />
+        <Text fontSize={7} color={props.grid ? '#f8fafc' : '#64748b'} style={{ fontFamily: 'monospace' }}>grid</Text>
+      </Box>
     </Box>
   );
 }
@@ -273,6 +282,8 @@ export function PainterRail(props: {
   selPlacement: Placement | null;
   selBuild: MapBuildFootprint | null;
   road: RoadCardProps;
+  grid: boolean;
+  onGrid: (v: boolean) => void;
 }) {
   const { target, tool } = props;
   const onPaint = () => { props.onBrushChange({ mode: 'paint' }); props.onTool('brush'); };
@@ -284,7 +295,7 @@ export function PainterRail(props: {
 
   return (
     <Box style={{ width: '100%', height: '100%', gap: 7 }}>
-      <ToolCard tool={tool} target={target} placeArmed={!!props.place.active} brushMode={props.brush.mode} onTool={props.onTool} onBrushChange={props.onBrushChange} />
+      <ToolCard tool={tool} target={target} placeArmed={!!props.place.active} brushMode={props.brush.mode} onTool={props.onTool} onBrushChange={props.onBrushChange} grid={props.grid} onGrid={props.onGrid} />
       <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
       {target === 'road' ? (
         <>
