@@ -491,6 +491,13 @@ Commands present in the registry:
 - Defines labels, solidity, footprint radius, height, tile kind, and traffic-control role.
 - Props include rocks, hydrants, street signs, street lights, bush variants, stop signs, traffic lights, payphones, dumpsters, mailboxes, and fences.
 
+`cart/hmsc-int/world/propScaleCli.ts` (+ `tools/prop-scale`)
+
+- Static size-validation readout (req_0605): every prop kind vs the player model, instantly, without booting the editor.
+- The player reference is MEASURED from the live stand-pose skeleton (`game/figure/skeleton.ts` head-top/eyes/chest/waist/knee), not a constant.
+- Prints height, ratio vs head-top, the body landmark a prop tops out at, footprint diameter vs the physics capsule, and a bar chart with the player line marked.
+- `tools/prop-scale [filter…] [--sort name] [--json]` — auto-rebundles via `tools/esbuild`, runs under `tools/v8cli` (the `tools/oracle` wrapper pattern).
+
 `cart/hmsc-int/world/props.ts`
 
 - Prop footprint, top height, physics rect, picking, placement, removal, and signal override helpers.

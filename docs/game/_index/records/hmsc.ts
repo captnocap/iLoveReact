@@ -459,6 +459,15 @@ export const hmsc: DocIndex = {
       status: 'live',
     },
     {
+      name: 'world/propScaleCli.ts (tools/prop-scale)',
+      purpose: ['maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/world/propScaleCli.ts',
+      description:
+        'Static prop-vs-player size readout (req_0605): tools/prop-scale [filter…] [--sort name] [--json] prints every prop kind’s height as a ratio of the player figure’s MEASURED stand-pose head-top (live skeleton, not a constant), the body landmark it tops out at (knee/waist/chest/eyes/head/over head/towering), footprint diameter vs the physics capsule, and a bar chart with the player line marked — instant size validation without booting the editor. Auto-rebundles, runs under tools/v8cli (the tools/oracle wrapper pattern).',
+      status: 'live',
+    },
+    {
       name: 'world/props.ts',
       purpose: ['world_gen', 'physics'],
       kind: 'module',

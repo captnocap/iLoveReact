@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# prop-scale — static prop-vs-player size readout for the hmsc-int world.
+#
+#   tools/prop-scale                 # every prop kind, tallest first
+#   tools/prop-scale tree bush       # substring filter on kind/label
+#   tools/prop-scale --sort name     # alphabetical
+#   tools/prop-scale --json          # machine-readable rows
+#
+# Instant size validation without booting the editor: each prop's height as a
+# ratio of the player figure's measured head-top, the body landmark it tops
+# out at, its collision footprint, and a bar chart with the player line
+# marked. The player numbers come from the live stand-pose skeleton
+# (cart/hmsc-int/game/figure/skeleton.ts), not a constant. Rebuilds its
+# bundle automatically when the prop registry or figure sources change; runs
+# under tools/v8cli (no node, per house rules).
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="$ROOT/cart/hmsc-int"
+GEN="$SRC/world/bundle-prop-scale.js"   # bundle-*.js is gitignored
+
+if [ ! -f "$GEN" ] || [ -n "$(find "$SRC/world" "$SRC/game/figure" -name '*.ts' -newer "$GEN" -print -quit 2>/dev/null)" ]; then
+  "$ROOT/tools/esbuild" "$SRC/world/propScaleCli.ts" --bundle --format=iife \
+    --platform=neutral --target=es2022 \
+    "--alias:@reactjit=$ROOT/runtime" \
+    --outfile="$GEN" --log-level=error
+fi
+
+exec "$ROOT/tools/v8cli" "$GEN" "$@"
