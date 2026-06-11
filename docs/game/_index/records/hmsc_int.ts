@@ -506,9 +506,9 @@ export const hmsc_int: DocIndex = {
       kind: 'component',
       sourceFile: 'cart/hmsc-int/PaintCanvas.tsx',
       description:
-        'The bottom-left authoring quad (1265, largest file). Four layers (paint/height/place/zone) over focused chunks; each chunk is one <ChunkSurface>; "+" ghosts grow the map. Brush input = screen-space Pressable over the Canvas (same-node down/move for capture); alt-drag/WASD pan.',
+        'The bottom-left authoring quad — ONE Painter since PAINTER-0610 (req_0593): one active tool (Select/Paint/Erase), one active target (the Layer union: paint/height/place/zone/road, relabeled TILE/TERRAIN/OBJECT/ZONE/ROAD in the TargetDock), many visible channels. ONE input overlay (cutout Pressable) driven by painterBehavior.ts resolvePainterBehavior (stroke|click|select|none — none on Object+Select keeps native Canvas.Node drag); per-target stamping dispatches through a capability table (no per-layer if-chains); Erase works on every target (terrain lowers, objects under the brush delete, the road stroke under a click deletes); Select is universal and most-specific (placement → build piece → road → cell). Each focused chunk is one <ChunkSurface> on the COMBINED painter shader; channel eyes (TargetDock, persisted MapPayload.channels) dim/hide inactive channels. "+" ghosts grow the map; alt-drag/WASD pan.',
       consumes: ['__canvas_screen_to_graph', '__tel_input', '__keydown', '__keyup', 'system:blur'],
-      dependsOn: ['ChunkSurface', 'usePaintedField'],
+      dependsOn: ['ChunkSurface', 'usePaintedField', 'painterBehavior.ts', 'painterSurface.ts', 'PainterRail', 'TargetDock'],
       status: 'live',
     },
     {
@@ -517,8 +517,8 @@ export const hmsc_int: DocIndex = {
       kind: 'component',
       sourceFile: 'cart/hmsc-int/ChunkSurface.tsx',
       description:
-        'One chunk = one Effect quad (72); owns its coalesced GPU buffer (usePaintedField), picks the layer’s shader, registers a flush so a stroke re-uploads only its chunk.',
-      dependsOn: ['usePaintedField'],
+        'One chunk = one Effect quad; owns its coalesced GPU buffer (usePaintedField), renders the COMBINED painter view (painterView.wgsl.ts: tile ground + road ribbon + height tint + zone tint in one pass, weighted by the per-channel emphasis header — PAINTER-0610; the old per-layer shader switch is gone), registers a flush so a stroke re-uploads only its chunk. encodePainterSurface (painterSurface.ts) ALWAYS emits every section with explicit headers (GHOSTROAD-0610). The emphasis prop must stay identity-stable (memo).',
+      dependsOn: ['usePaintedField', 'painterSurface.ts', 'painterView.wgsl.ts'],
       status: 'live',
     },
     {
