@@ -24,7 +24,7 @@
 // the shared box; shapeId 1 is the shared ramp slab mesh.
 
 import type { GameState, PropKind, BuildingKind, TileKind, WorldProp } from '../design';
-import { propKindDefinition } from '../world/propKinds';
+import { dumpsterBodyMeters, propKindDefinition } from '../world/propKinds';
 import { solveRoadCrossSection } from '../world/roadProfile';
 import { tileKindDefinition } from '../world/tileKinds';
 import { CHUNK_TILES } from '../chunks';
@@ -437,12 +437,9 @@ function propParts(prop: WorldProp): PropPartSpec[] {
         sphere([def.footprintRadiusMeters * 0.25, def.heightMeters * 0.58, -def.footprintRadiusMeters * 0.1], [def.footprintRadiusMeters, def.heightMeters * 0.7, def.footprintRadiusMeters * 0.85], [0.56, 0.56, 0.58]),
       ];
     case 'dumpster': {
-      // PROPSCALE-0611: 1.09 = the parts' real AABB top (was 1.2 — rendered
-      // ~12% under registry); depth 1.2 matches the real 4-yd profile.
-      // Mirrors render3d/props/Dumpster.tsx.
-      const s = def.heightMeters / 1.09;
-      const w = def.footprintRadiusMeters * 1.6 * s;
-      const d = def.footprintRadiusMeters * 1.2 * s;
+      // Body box + scale from the registry's ONE definition (req_0623) —
+      // host physics and the live model consume the same numbers.
+      const { scale: s, widthMeters: w, depthMeters: d } = dumpsterBodyMeters();
       return [
         box([0, 0.03 * s, 0], [w * 0.85, 0.06 * s, d * 0.8], [0x3a / 255, 0x4a / 255, 0x30 / 255]),
         box([0, 0.45 * s, 0], [w, 0.78 * s, d], [0x4a / 255, 0x5d / 255, 0x3f / 255]),

@@ -753,3 +753,23 @@ export function propKindDefinition(kind: PropKind): PropKindDefinition {
 export function propKindNamesForConsole(): string {
   return PROP_KINDS.join(', ');
 }
+
+// ── the dumpster body box, the ONE place it is defined (req_0623) ────────────
+// The model is authored at DUMPSTER_AUTHORED_HEIGHT (the parts' AABB top) and
+// derives its body width/depth from the footprint radius. Both renderers
+// (render3d/props/Dumpster.tsx, compile/worldGeometry.ts) AND host physics
+// (world/props.ts propFootprint) consume THIS, so the box you see is the box
+// you bump — the player was clipping into the widened body because physics
+// still used the old footprint square.
+
+export const DUMPSTER_AUTHORED_HEIGHT = 1.09;
+
+export function dumpsterBodyMeters(): { scale: number; widthMeters: number; depthMeters: number } {
+  const def = PROP_KIND_DEFINITIONS.dumpster;
+  const scale = def.heightMeters / DUMPSTER_AUTHORED_HEIGHT;
+  return {
+    scale,
+    widthMeters: def.footprintRadiusMeters * 1.6 * scale,
+    depthMeters: def.footprintRadiusMeters * 1.2 * scale,
+  };
+}

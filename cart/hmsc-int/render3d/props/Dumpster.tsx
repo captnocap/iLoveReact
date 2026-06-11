@@ -1,18 +1,15 @@
 import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { WorldProp } from '../../design';
-import { propKindDefinition } from '../../world/propKinds';
+import { dumpsterBodyMeters } from '../../world/propKinds';
 import { at } from './place';
 
 // A back-alley dumpster: a beat-up metal box with a sloped hinged lid, a rust
 // patina, and a pair of horizontal reinforcing ribs. Solid — the player bumps it.
-// The model is authored at AUTHORED_HEIGHT and uniformly scaled to the kind's
-// heightMeters so resizing is one number in propKinds.ts.
-//
-// PROPSCALE-0611: AUTHORED_HEIGHT must equal the parts' real AABB top (lid
-// peak ≈ 0.96 + half-thickness + 18° tilt lift ≈ 1.09) — it was 1.2, which
-// silently rendered every dumpster ~12% below its registry height. Depth
-// factor 1.2 (was 0.9) matches the real 4-yd squarish profile.
+// The body box and scale come from propKinds.dumpsterBodyMeters() — the ONE
+// definition host physics and the compiled renderer also consume (req_0623);
+// part layout here is authored in units of that scale (parts' AABB top =
+// DUMPSTER_AUTHORED_HEIGHT, so the lid peak lands exactly at heightMeters).
 
 const BODY = '#4a5d3f';
 const BODY_DARK = '#3a4a30';
@@ -20,14 +17,11 @@ const LID = '#556649';
 const LID_DARK = '#45553a';
 const RUST = '#7a5c3a';
 
-const AUTHORED_HEIGHT = 1.09;
-
 export function Dumpster(props: { prop: WorldProp }) {
   const yaw = props.prop.yawDegrees;
-  const def = propKindDefinition(props.prop.kind);
-  const s = def.heightMeters / AUTHORED_HEIGHT;
-  const w = def.footprintRadiusMeters * 1.6 * s; // body width
-  const d = def.footprintRadiusMeters * 1.2 * s; // body depth
+  // Body box + scale from the registry's ONE definition (req_0623) — host
+  // physics steps against the same numbers, so you bump what you see.
+  const { scale: s, widthMeters: w, depthMeters: d } = dumpsterBodyMeters();
 
   return (
     <>

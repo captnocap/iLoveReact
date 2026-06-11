@@ -1,5 +1,5 @@
 import type { GameState, TrafficSignalPhase, Vec3, WorldProp } from '../design';
-import { propKindDefinition } from './propKinds';
+import { dumpsterBodyMeters, propKindDefinition } from './propKinds';
 
 // World-layer geometry, queries, and mutations for props — the props twin of
 // roads.ts. A prop is anchored at a world-meter point; its collision is a small
@@ -31,14 +31,27 @@ export function propFootprint(prop: WorldProp): PropFootprint | null {
   const def = propKindDefinition(prop.kind);
   if (!def.solid || def.footprintRadiusMeters <= 0) return null;
   const r = def.footprintRadiusMeters;
-  const segmentHalfThick = SEGMENT_HALF_THICKNESS[prop.kind];
-  if (segmentHalfThick === undefined) {
-    return { minX: prop.x - r, minZ: prop.z - r, maxX: prop.x + r, maxZ: prop.z + r };
+  // The dumpster's body is a wide box (width ≠ depth ≠ the radius square) —
+  // its half-extents come from the SAME helper both renderers draw with
+  // (req_0623: the player clipped into the widened body because physics
+  // still used the footprint square).
+  let halfSpan: number;
+  let halfThick: number;
+  if (prop.kind === 'dumpster') {
+    const body = dumpsterBodyMeters();
+    halfSpan = body.widthMeters / 2;
+    halfThick = body.depthMeters / 2;
+  } else {
+    const segmentHalfThick = SEGMENT_HALF_THICKNESS[prop.kind];
+    if (segmentHalfThick === undefined) {
+      return { minX: prop.x - r, minZ: prop.z - r, maxX: prop.x + r, maxZ: prop.z + r };
+    }
+    // Long thin segment. halfSpan = the segment half-width (along local X);
+    // halfThick = its half-thickness.
+    halfSpan = r;
+    halfThick = segmentHalfThick;
   }
-  // Long thin segment. halfSpan = the segment half-width (along local X);
-  // halfThick = its half-thickness. The AABB of a rotated rectangle.
-  const halfSpan = r;
-  const halfThick = segmentHalfThick;
+  // The AABB of a rotated rectangle.
   const yaw = prop.yawDegrees * Math.PI / 180;
   const c = Math.abs(Math.cos(yaw));
   const s = Math.abs(Math.sin(yaw));
