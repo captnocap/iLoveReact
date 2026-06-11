@@ -456,3 +456,169 @@ Three consequences:
 Priority list update: §9.5's pop-out re-targets /compiled; the PrefabInfo →
 BOM rework joins §9.4 (it is the same "panels carry data + verbs through the
 one renderer" move).
+
+---
+
+## 11. ADDENDUM (req_0604, same day) — the thirteen-screenshot UX audit
+
+The user supplied 13 screenshots across the workbench, the buildings panel,
+the paint/compose/shader-lab editors, and /assist3d, with four explicit laws.
+Verdict on "straightforward or confusing as fuck": **confusing** — and the
+confusion has ONE structural cause, diagnosed in §11.4. First the laws, then
+the per-screenshot evidence.
+
+### 11.1 The user's laws (codify these — they are P2/P3 rulings in UX form)
+
+- **L1 — A JavaScript slider is bad; sliders are host-driven.** Verified:
+  the framework has NO native slider primitive — every slider in the tool is
+  `WorkbenchSlider` (JS pointer math → re-render per move). The repo already
+  owns the precedent twice: placement drag is engine-native (the engine owns
+  `canvas_gx` while the button is down, JS gets the settle — `index.tsx`
+  movePlacement) and V23/V26 moved camera drags host-side for exactly this
+  lag. A first-class host `Slider` (engine-owned thumb, value streamed on
+  change, settle event for commit) is V23's law applied to scrubbing. Every
+  `t:'num'`/`t:'slider'` field then upgrades in ONE place (`fields.tsx`
+  NumField), which is the payoff of having the one renderer.
+- **L2 — A ± stepper with no slider and no direct entry is bad.** Live
+  violations on screen: viewport zoom `- 8.2 +` (vehicles), `- 9.4 +`
+  (animation/characters), SAM threshold `- 0 +` (paint bench). NumField
+  already does input+slider correctly — the steppers are surfaces that
+  bypassed the renderer. Rule: a number is ALWAYS (direct entry + slider);
+  steppers exist only as an optional third affordance.
+- **L3 — An unconstrained container width is bad.** Violations: panel fields
+  stretch to whatever the column is; the shader-lab stage renders a 1m-tile
+  material as a full-bleed ~1600px quad with zero tile-scale context; the
+  compose route's 3D billboard preview is half cut off below the canvas;
+  materials-browser rows stretch full width with two words in them. Constraint
+  belongs in the RENDERER and the stage frames, not per-source.
+- **L4 — One settings door.** Today there are THREE: the chrome's SET door,
+  the workbench rail's settings source icon, and the `/` RightPanel SET tab
+  (§5.1). The chrome door should navigate to the bench source; the others
+  retire.
+
+### 11.2 "Why do I have 3 color swatches and no wheel" — the buildings panel
+
+The buildings source emits WALLS·GLOBAL / ROOFS·GLOBAL / PROPS·GLOBAL as
+three structurally identical groups — each with its own copy of the same
+11-swatch palette, its own `target` dropdown, its own material row, its own
+browse/paint verbs. That is the outer product again (3 piece classes × one
+identical picker), rendered vertically. And the missing wheel is NOT missing
+machinery: `FieldSpec` `t:'color'` already supports `wheel?: boolean` and
+`range` (`shell/fields.tsx:40`, ColorWheel is already imported there) — the
+characters source uses the range grid; the buildings source just never opted
+in. **The fix is data, not new UI**: one COLOR field with `wheel`+`range`,
+one MATERIAL row, and the class becomes a selector (`enum`:
+walls/roofs/props — the panel already has exactly this shape in its `target`
+dropdown). Three duplicated groups collapse into one task-shaped group.
+
+When image 4 is open, the screen shows FIVE simultaneous swatch collections
+(3 building palettes + the paint editor's P/S pair + its quick palette).
+One color system, presented once per task, is the bar.
+
+### 11.3 Per-screenshot findings
+
+- **Materials browser (img 3):** two categories are both named "FACADES"
+  ("BUILDING FACADES · 6" and "FACADES · 7") — distinguished only by their
+  sublabels `recipe · i-brick-*` vs `react · *`, which leak the
+  IMPLEMENTATION (shader recipe vs react-rendered) into the user's taxonomy.
+  Readable-code rule: name the meaning, not the mechanism. "no building face
+  target" / "84 / 84 assignable materials" is internal-state jargon as
+  headline copy.
+- **Compose (img 5):** width/height are JS sliders + free steppers (L1/L2);
+  three deletion-adjacent verbs with unclear scopes (Remove · delete stored ·
+  Materialize); layers auto-name `text 7/6/5/3/2` (rename affordance exists
+  but the default names carry nothing); the 3D billboard preview is cropped
+  (L3).
+- **Shader lab (img 6):** "TAKE 1 PARAMETERS" / "Take seed shift" /
+  "MATERIAL BANK · count 0 · latest none" — names that fail the travel test
+  cold (what is a Take? what does banking do?). The hint text exists
+  ("Materialize banks the current look here") but the NAMES should carry it.
+  Value renders BELOW the slider here while NumField renders input BESIDE
+  slider — same control, two layouts (the one-renderer rule violated by a
+  bespoke surface).
+- **Vehicles (img 7):** P2 executed literally but without TIERS — identity,
+  population tuning, color variations, motion, DEBUG (hitboxes/anchors), gas
+  tank, damage all flat and equal. A developer sentence ("consumer: world
+  vehicle spawner reads per-type population rows") renders as UI copy. Hex
+  colors display as dead text instead of `t:'color'` fields. Zoom is a bare
+  stepper (L2). Wants: tier the groups (identity → gameplay tuning →
+  debug-collapsed), every number through NumField.
+- **Items / TV (img 8):** the useless-panel archetype — five read-only facts
+  ("registry item · unaudited scale", "6 parts", a note) and zero verbs
+  beyond New/Voxel Blockout. Nothing to do, nothing to learn. Either the
+  panel earns fields (scale audit controls — R5 says every item NEEDS scale
+  work; this is the natural surface for it) or the source isn't ready to be
+  a category. Stage: dark mesh on dark void, no ground/grid reference.
+- **Paint roster (img 9):** 77 ungrouped rows mixing real materials with
+  draft junk (`shitbrick0`, `whitebrick1`) and a raw content-hash name
+  (`chr-mq5aleby-p3g`) — internal ids leaking into the roster. The roster
+  needs the same grouping the materials browser already has, and a
+  draft-vs-library split. (Counter-example done RIGHT in the same shot: the
+  tiny B/E/H/L/F/S key legend — §3's bindings-as-data idea, already alive,
+  just 7px small.)
+- **Animation (img 10):** 35 action verbs as a full-width vertical chip wall
+  — the EXACT shape req_0184 already ruled against ("the chip-wall verdict")
+  and built `t:'pick'` for (searchable grouped chooser). The script DSL
+  string is cut off in a narrow input (`t:'text'` with width, or `t:'para'`).
+  Undo/redo appears THREE times in one view (hero buttons + stage buttons +
+  ^Z/^Y). Zoom stepper (L2).
+- **Clothing (img 11):** the panel is starved — GARMENT facts + one verb —
+  while the real interaction (variant thumbnails, "click a variant to wear
+  it") lives at the stage's bottom. LAW 1 says column 3 edits, column 4
+  demonstrates; here the edit surface migrated INTO the stage.
+- **Characters (img 12):** LAW 1 violated in BOTH directions in one source:
+  column 3 is the longest scroll in the tool (SEVEN hero verbs wrapping, an
+  8+40-swatch skin dump, sliders for skull/photo/sculpt/six face regions —
+  every slider a label/slider/value triple-stack), AND the sculpt-map stage
+  carries its own embedded edit panel (MODE/ACTIONS/TOGGLES/BRUSH/STRENGTH/
+  PASSES) on the right of column 4. Undo/redo duplicated again (hero + stage
+  toolbar). The skin grid is what `t:'color'` `range` exists for — one
+  field, not 48 chips.
+- **/assist3d (img 13, "this route is ass"):** the last pre-fold lab shell
+  still standing as a route — its own backend bar, its own objects tree, its
+  own inspector, none of the workbench grammar. Plus a visible controlled-
+  input echo bug: MODEL shows `claude-opus-4-7claude-opus-4-7` (BackendBar
+  `Field` round-trips value→onChange→patch and doubles —
+  `assist3d/BackendBar.tsx:70`). V17-TRIAGE already names the fix: capture it
+  as a workbench source (prompt+backend = panel, generated scene = stage,
+  objects tree = roster, generate = action) or retire it. As-is it is the
+  tool's "30th camera."
+
+### 11.4 The structural diagnosis — panels mirror the data, not the task
+
+Every screenshot is the same disease at a different stage: **a source's
+panel is whatever shape its backing data happened to have.** Three piece
+classes in the data → three duplicate groups on screen. 35 DSL actions in a
+table → 35 buttons. A registry row with five fields → a five-fact dead
+panel. The PanelSpec system made panels CHEAP to emit — but it has no
+composition LAWS, so each source dumps its state shape raw.
+
+The Workbench has LAW 1 and LAW 2. It needs a PANEL GRAMMAR, enforced where
+deep-interfaces says to enforce — at the boundary, in the one renderer, so
+no source can violate it:
+
+1. A number is entry + slider, always (L2); sliders are host-driven (L1).
+2. Widths are renderer-owned constants; sources cannot produce an
+   unconstrained row (L3).
+3. One color surface per panel: `t:'color'` with wheel/range; >K quick-picks
+   forbidden (the swatch-dump killer).
+4. Repeated group shapes are ILLEGAL — if two groups have identical field
+   signatures, the spec must factor them into one group + a selector field
+   (the buildings fix, made a rule; this is GUIDING_LIGHT's factor law
+   applied to UI and it is mechanically detectable in the spec).
+5. Verb-set caps: > N actions requires `t:'pick'`/grouped chooser
+   (req_0184 already ruled this); hero verbs ≤ 4, the rest behind a menu.
+6. Tiers: identity / working controls / debug — debug groups render
+   collapsed by default.
+7. Undo/redo/save render ONCE (the hero), never per-stage.
+8. Stages frame their subject (fit-to-content + ground/grid reference +
+   real-scale context for materials), never full-bleed (L3).
+
+Because every source already speaks PanelSpec, the grammar lands in ONE file
+(`shell/fields.tsx` + a spec validator) and every panel inherits it — the
+same leverage that made the panels cheap makes fixing them cheap. That is
+the answer to "repetitive and horribly thought about": the thought belongs
+in the renderer's laws, once, not in eleven sources.
+
+Priority insert: the panel grammar + host slider slot between §9.4 and §9.5
+— they multiply §9.4's value across every source at once.
