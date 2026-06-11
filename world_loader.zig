@@ -251,7 +251,14 @@ fn buildCube() [36 * 8]f32 {
         .{ .n = .{ 0, 1, 0 }, .a = v7, .b = v6, .c = v2, .d = v3 }, // +Y
         .{ .n = .{ 0, -1, 0 }, .a = v0, .b = v1, .c = v5, .d = v4 }, // -Y
     };
-    const uvs = [4][2]f32{ .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 }, .{ 0, 1 } };
+    // Corners run world bottom→top (BL,BR,TR,TL); V is FLIPPED so a top-down
+    // texture stays upright on the face — the geometry registry's addFace
+    // convention EXACTLY (runtime/geometries/_util.ts face()), which the
+    // editor's every textured mesh uses. UVFLIP-0610: this cube shipped v=0
+    // at world BOTTOM for two days — every materialized shader sampled
+    // upside-down (the user's door), and the decal raster compensated with a
+    // 180° rotation that silently mirrored u. One convention, one place.
+    const uvs = [4][2]f32{ .{ 0, 1 }, .{ 1, 1 }, .{ 1, 0 }, .{ 0, 0 } };
     var out: [36 * 8]f32 = undefined;
     var i: usize = 0;
     for (faces) |f| {

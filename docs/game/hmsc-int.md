@@ -645,8 +645,8 @@ world_loader maps them to `decal_raster.ImageAsset` and
 `rasterize(alloc, doc, images)` NODE_IMAGE stbi-decodes the payload
 (4096px decoded-side cap) and bilinear-blits into the node rect with the
 SAME rounded-rect SDF coverage rect fills use (borderRadius + opacity
-honored), before the global 180° flip — so orientation matches every other
-node. Degradation is total at every layer: key 0 / missing payload /
+honored) — top-down, like every other node (orientation: UVFLIP-0610
+below). Degradation is total at every layer: key 0 / missing payload /
 undecodable / oversized → one warn + a skipped node; the rest of the doc
 still rasterizes. P4: `decalAssets.test.ts` (2 cases: intern/sequential
 keys/content-dedupe/src-cache + missing/empty/invalid/oversized→0),
@@ -660,6 +660,30 @@ box face in the headless loader — rounded corners visible, zero skip
 warns; `rjit game shot` stays GREEN on the real world (the user's two
 saved decals carry EMPTY-src image nodes, which now warn actionably:
 re-pick the image in /compose).
+
+UVFLIP-0610 (2026-06-10, USER ASK req_0600 "all the actual shader based
+materials are all upside down lol. wondered why the door looked weird"):
+the compiled loader's hand-rolled cube (`world_loader.zig buildCube()`)
+carried v=0 at world BOTTOM, while the editor's geometry registry box
+(`runtime/geometries/_util.ts face()`) flips V so a top-down texture stays
+upright — its corner orders were already identical to the registry's
+`Box.ts`, ONLY the uv row differed. Consequence: every materialized SHADER
+recipe sampled upside-down in the compiled game (the user's door facade),
+and the decal pipeline had "calibrated" against the wrong cube — the
+DECALFLIP-0610 180° pixel-order reversal in `decal_raster.rasterize()`
+fixed decal v but silently MIRRORED u (caught in hindsight: the DECALIMG
+image proof showed the source's right-side road on the left; the noise-like
+calibration materials and a near-symmetric test image hid both errors).
+Fix at the root: `buildCube()` now wears the registry's exact uv row
+(`(0,1),(1,1),(1,0),(0,0)` for BL,BR,TR,TL — one convention, fixed at the
+sampling geometry) and the rasterizer's 180° compensation is DELETED
+(raster output is plain top-down; per-producer compensations are the
+anti-pattern). Proof: a 3-box calibration gamefile through the production
+writers — brick-entrance door facade upright (door at the BOTTOM), decal
+text "ABC" reading left-to-right with its red marker TOP-LEFT, decal image
+upright AND unmirrored (road on the right, matching the source) — plus
+`rjit game shot` GREEN on the real world. Both ±Z box faces verified
+readable from their own outside.
 
 ## game/build/ — the building piece grammar (V24 capture, 2026-06-04)
 
