@@ -157,7 +157,14 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
   const runSourceAction = (a: ActionSpec) => {
     a.run();
     onEdit();
+    // Re-target ONLY when the selected row disappeared (review §5 QoL bug:
+    // pressing Save while editing row 3 of 10 jumped the selection to row 10
+    // — an action must never steal the row you're working on). A vanished or
+    // never-set selection falls through to defaultRow ?? last as before, so
+    // New still lands on the created row and Delete advances sensibly.
     const nextRows = source.list();
+    const prevSel = selBySrc[source.id];
+    if (prevSel && nextRows.some((r) => r.id === prevSel)) return;
     const nextSel = source.defaultRow?.(nextRows) ?? nextRows[nextRows.length - 1]?.id;
     if (nextSel) setSelBySrc((s) => ({ ...s, [source.id]: nextSel }));
   };
