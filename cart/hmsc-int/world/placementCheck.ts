@@ -3,7 +3,7 @@ import { buildingFootprint, buildingHeightMeters } from './buildings';
 import { landformKindDef, landformSurfaceTop } from './landforms';
 import { buildingKindDefinition } from './buildingKinds';
 import { propFootprint, propTopMeters } from './props';
-import { propKindDefinition } from './propKinds';
+import { propKindDefinition } from '../game/kinds/props';
 import { tileKindAtCell } from './grid';
 import { tileKindDefinition } from './tileKinds';
 import { nearestRoad, MAX_ROAD_DISTANCE_METERS } from './buildingPlacement';

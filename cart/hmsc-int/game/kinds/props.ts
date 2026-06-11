@@ -10,8 +10,13 @@
 // 'wall' (they block sight and give cover). This is how a placement "gets all
 // the property ideas of a tile" without a parallel schema.
 //
-// Fresh capture of cart/hmsc/world/propKinds.ts (behavior reference only —
-// see the capture note). Consumers go through game/kinds/index.ts (P3).
+// THE ONE TABLE since PROPMERGE-0611 (review §13.1): the legacy twin
+// world/propKinds.ts is retired and every consumer — the editor palette,
+// PropertiesPanel, placements, host physics, traffic, the prop meshes, AND
+// compile/worldGeometry — resolves through here. The split-consumer
+// divergence hazard (editor+compile on one table, the game door on another)
+// is dead; a prop value edited here is the value everywhere.
+// (Originally a fresh capture of cart/hmsc/world/propKinds.ts.)
 
 import type { TileKind } from './tiles';
 
@@ -231,7 +236,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Fire Hydrant',
     solid: true,
     footprintRadiusMeters: 0.27,
-    // PROPSCALE-0611: real 0.75m × 1.15 (presence law — see world/propKinds.ts)
+    // PROPSCALE-0611: real 0.75m × 1.15 (presence law)
     heightMeters: 0.86,
     tileKind: 'wall',
     trafficControl: 'none',
@@ -803,4 +808,24 @@ export function propKindDefinition(kind: PropKind): PropKindDefinition {
 
 export function propKindNamesForConsole(): string {
   return PROP_KINDS.join(', ');
+}
+
+// ── the dumpster body box, the ONE place it is defined (req_0623) ────────────
+// The model is authored at DUMPSTER_AUTHORED_HEIGHT (the parts' AABB top) and
+// derives its body width/depth from the footprint radius. Both renderers
+// (render3d/props/Dumpster.tsx, compile/worldGeometry.ts) AND host physics
+// (world/props.ts propFootprint) consume THIS, so the box you see is the box
+// you bump — the player was clipping into the widened body because physics
+// still used the old footprint square.
+
+export const DUMPSTER_AUTHORED_HEIGHT = 1.09;
+
+export function dumpsterBodyMeters(): { scale: number; widthMeters: number; depthMeters: number } {
+  const def = PROP_KIND_DEFINITIONS.dumpster;
+  const scale = def.heightMeters / DUMPSTER_AUTHORED_HEIGHT;
+  return {
+    scale,
+    widthMeters: def.footprintRadiusMeters * 1.6 * scale,
+    depthMeters: def.footprintRadiusMeters * 1.2 * scale,
+  };
 }

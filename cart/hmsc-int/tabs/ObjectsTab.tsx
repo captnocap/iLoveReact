@@ -34,7 +34,7 @@ import { useRouteTwigState } from '../editors/twigs';
 import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import type { TileKind } from '../design';
-import { PROP_KINDS, propKindDefinition } from '../world/propKinds';
+import { PROP_KINDS, propKindDefinition } from '../game/kinds/props';
 import { EMBEDDED_TILE_KINDS, GAMEPLAY_TILE_KINDS, PAINTABLE_TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { buildObjectWorld, type ObjectWorld } from '../objectPreview';
 import { ModelViewer } from '../ModelViewer';

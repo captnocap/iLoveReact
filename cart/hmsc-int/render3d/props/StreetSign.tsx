@@ -1,5 +1,5 @@
 import type { WorldProp } from '../../design';
-import { propKindDefinition } from '../../world/propKinds';
+import { propKindDefinition } from '../../game/kinds/props';
 import { at } from './place';
 import { STREET_SIGN_TEXTURE_KEY } from './signFace';
 import { type Part, TexturedParts } from '../parts';

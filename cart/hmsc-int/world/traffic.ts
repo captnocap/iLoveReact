@@ -1,5 +1,5 @@
 import type { GameState, TrafficSignalPhase, Vec3, WorldProp } from '../design';
-import { propKindDefinition } from './propKinds';
+import { propKindDefinition } from '../game/kinds/props';
 
 // The traffic-control layer: it turns a stop sign or traffic light into a live
 // phase a vehicle can read, and answers the one question NPC vehicle pathing

@@ -69,7 +69,7 @@ import { TextureCapture } from '../../game/textures/registry';
 import { BUILD_UI, CAMERA_OCCLUSION_TUNING } from '../build/buildUi';
 import { perfMs, warnPlaceFreeze, startPlaceFreezeProbe, markPlaceFreezeProbe, type PlaceFreezeProbe } from '../build/placeFreezeProbe';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, type VisualShape } from '../build/pieceMeshes';
-import { propContainer, propDynamics, propSeat } from '../../world/propKinds';
+import { propContainer, propDynamics, propSeat } from '../../game/kinds/props';
 import { Prop } from '../../render3d/Prop';
 
 // ── KICKPROP-0610: a placed dynamic prop's live body state ──────────────────

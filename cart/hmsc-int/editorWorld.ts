@@ -29,7 +29,7 @@ import { landformGroundTopAt } from './world/landforms';
 import { placeProp, removeProp, propFootprint } from './world/props';
 import { addZone, removeZone } from './world/zones';
 import { addSurfaceRegion, placeCell } from './world/grid';
-import { propKindDefinition } from './world/propKinds';
+import { propKindDefinition } from './game/kinds/props';
 import { nextUniqueId } from './world/idgen';
 import { writeHmscPackageFromState } from './packageMap';
 

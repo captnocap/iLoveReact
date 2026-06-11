@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { TrafficSignalPhase, WorldProp } from '../../design';
-import { propKindDefinition } from '../../world/propKinds';
+import { propKindDefinition } from '../../game/kinds/props';
 import { trafficClockSeconds, trafficSignalPhase } from '../../world/traffic';
 import { at } from './place';
 

@@ -22,7 +22,7 @@ import type { Building, BuildingSkin, GameState, TileKind, WorldProp } from './d
 import { tileKindDefinition } from './world/tileKinds';
 import { tileAltitudeAtWorldPosition, type TileAltitudeSample } from './world/tileAltitude';
 import { buildingKindDefinition } from './world/buildingKinds';
-import { propKindDefinition } from './world/propKinds';
+import { propKindDefinition } from './game/kinds/props';
 import { buildingSkinFacade } from './render3d/buildingSkins';
 import { FACE_ROLES, SKIN_NAMES, currentFaceSkins } from './buildingEditor';
 import { cellAddress } from './address';

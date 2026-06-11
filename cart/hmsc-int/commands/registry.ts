@@ -42,7 +42,7 @@ import { placeRoad, removeRoad, roadFootprint } from '../world/roads';
 import { junctionFootprint, placeJunction, removeJunction } from '../world/roadJunctions';
 import { solveRoadCrossSection } from '../world/roadProfile';
 import { placeProp, removeProp, setPropSignalOverride } from '../world/props';
-import { isPropKind, propKindDefinition, propKindNamesForConsole } from '../world/propKinds';
+import { isPropKind, propKindDefinition, propKindNamesForConsole } from '../game/kinds/props';
 import { checkPlacement, formatPlacementIssues, propSubject, landformSubject, type PlacementSubject } from '../world/placementCheck';
 import { mountainTrailheadPoint } from '../world/landforms';
 import { addZone, removeZone, isZoneFlag, zoneFlagNamesForConsole } from '../world/zones';

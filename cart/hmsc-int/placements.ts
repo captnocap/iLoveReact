@@ -6,7 +6,7 @@
 // of the editor uses, so a placement reads consistently with the preview + props.
 
 import { buildingKindDefinition } from './world/buildingKinds';
-import { propKindDefinition } from './world/propKinds';
+import { propKindDefinition } from './game/kinds/props';
 import { tileKindDefinition } from './world/tileKinds';
 import type { Building, TileKind } from './design';
 import { TILE_UNITS } from './heightData';

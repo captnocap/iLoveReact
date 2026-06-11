@@ -24,7 +24,7 @@
 // the shared box; shapeId 1 is the shared ramp slab mesh.
 
 import type { GameState, PropKind, BuildingKind, TileKind, WorldProp } from '../design';
-import { dumpsterBodyMeters, propKindDefinition } from '../world/propKinds';
+import { dumpsterBodyMeters, propKindDefinition } from '../game/kinds/props';
 import { solveRoadCrossSection } from '../world/roadProfile';
 import { tileKindDefinition } from '../world/tileKinds';
 import { CHUNK_TILES } from '../chunks';

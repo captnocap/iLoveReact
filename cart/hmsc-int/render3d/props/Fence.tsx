@@ -1,7 +1,7 @@
 import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { WorldProp } from '../../design';
-import { propKindDefinition } from '../../world/propKinds';
+import { propKindDefinition } from '../../game/kinds/props';
 import { at } from './place';
 
 // A chain-link fence segment: two vertical posts with a top rail, a bottom rail,

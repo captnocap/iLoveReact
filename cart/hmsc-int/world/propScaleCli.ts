@@ -15,7 +15,7 @@
 //   tools/prop-scale --sort name     # alphabetical
 //   tools/prop-scale --json          # machine-readable rows
 
-import { PROP_KIND_DEFINITIONS, type PropKindDefinition } from './propKinds';
+import { PROP_KIND_DEFINITIONS, type PropKindDefinition } from '../game/kinds/props';
 import { HMSC_SCALE } from './scale';
 import { buildSkeleton } from '../game/figure/skeleton';
 

@@ -376,71 +376,14 @@ export type InteriorSpace = {
 // roads/junctions/placedCells — because, like a road, it isn't a field of
 // identical floor tiles: each kind owns its own sculpted mesh and its own
 // footprint. The shared property bundle (solidity, cover, line-of-sight,
-// traffic control) is resolved by kind through world/propKinds.ts, the same way
-// a tile resolves through tileKindDefinition. 1 tile = 1 meter.
-export type PropKind =
-  | 'rock'
-  | 'rockLarge'
-  | 'rockSmall'
-  | 'fireHydrant'
-  | 'streetSign'
-  | 'streetLight'
-  | 'bush'
-  | 'bushLarge'
-  | 'bushLow'
-  | 'bushSparse'
-  | 'stopSign'
-  | 'trafficLight'
-  | 'payphone'
-  | 'dumpster'
-  | 'mailbox'
-  | 'fence'
-  // street furniture
-  | 'trafficCone'
-  | 'barrier'
-  | 'trashCan'
-  | 'bench'
-  | 'planter'
-  // trees (trunk-sized collision; canopy is visual)
-  | 'treeOak'
-  | 'treePine'
-  | 'treeBirch'
-  | 'treeCypress'
-  | 'treePalm'
-  | 'treeDead'
-  // rock forms beyond the small/medium/large trio
-  | 'boulder'
-  | 'rockFlat'
-  | 'rockSpire'
-  | 'rockMossy'
-  | 'rockPile'
-  // balls — solid colliders the player bumps
-  | 'ballBeach'
-  | 'ballSoccer'
-  | 'ballBasketball'
-  // wall-mounted decor (anchor at the wall base, decor hangs at height)
-  | 'wallPainting'
-  | 'ledLight'
-  // furniture
-  | 'chair'
-  | 'chairRed'
-  | 'chairBlue'
-  | 'chairGreen'
-  | 'couch'
-  | 'table'
-  | 'floorLamp'
-  // household (bedroom/kitchen/bathroom)
-  | 'bedSingle'
-  | 'bedDouble'
-  | 'cupboard'
-  | 'mirror'
-  | 'sink'
-  | 'oven'
-  | 'fridge'
-  | 'computer'
-  // utility + sport
-  | 'telephonePole'
-  | 'basketballHoop';
+// traffic control) is resolved by kind through game/kinds/props.ts, the same
+// way a tile resolves through tileKindDefinition. 1 tile = 1 meter.
+// PROPMERGE-0611 (review §13.1): the kind UNION lives with the registry —
+// game/kinds/props.ts is the ONE table (world/propKinds.ts retired; its
+// 709-line duplicate had split consumers, the live divergence hazard).
+// Re-exported here so the editor's type spine keeps one import surface.
+import type { PropKind } from './game/kinds/props';
+export type { PropKind };
 
 // A traffic-control prop tells an approaching vehicle to stop, slow, or go. A
 // stop sign is always 'stop'; a traffic light cycles through all three. The

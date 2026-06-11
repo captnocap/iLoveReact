@@ -1,5 +1,5 @@
 import type { GameState, TrafficSignalPhase, Vec3, WorldProp } from '../design';
-import { dumpsterBodyMeters, propKindDefinition } from './propKinds';
+import { dumpsterBodyMeters, propKindDefinition } from '../game/kinds/props';
 
 // World-layer geometry, queries, and mutations for props — the props twin of
 // roads.ts. A prop is anchored at a world-meter point; its collision is a small

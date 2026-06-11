@@ -6,7 +6,7 @@ import { placedCellTopMeters, surfaceRegionTopMeters } from '../world/surfaceHei
 import { roadPhysicsBands, roadTopMeters } from '../world/roads';
 import { junctionPhysicsBands, junctionTopMeters } from '../world/roadJunctions';
 import { propPhysicsRect } from '../world/props';
-import { propKindDefinition } from '../world/propKinds';
+import { propKindDefinition } from '../game/kinds/props';
 
 // Header gained slot 24 = oriented-rect count (after the legacy rect count at 13).
 // Bumping this shifts the entity/rect sections consistently because both this

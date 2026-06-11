@@ -17,7 +17,7 @@ import { GAME_BUILD, GAME_TELEMETRY } from '@game';
 import type { BuildFaceSkin, BuildMaterial, BuildSkinSet, PlacedBuildPiece, WallEdit } from '@game';
 import type { WorldProp } from '../../design';
 import { Prop } from '../../render3d/Prop';
-import { propDynamics } from '../../world/propKinds';
+import { propDynamics } from '../../game/kinds/props';
 import { BUILD_UI, CAMERA_OCCLUSION_TUNING } from './buildUi';
 import { markPlaceFreezeProbe, perfMs, warnPlaceFreeze, type PlaceFreezeProbe } from './placeFreezeProbe';
 

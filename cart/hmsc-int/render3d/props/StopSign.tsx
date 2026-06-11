@@ -1,7 +1,7 @@
 import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { WorldProp } from '../../design';
-import { propKindDefinition } from '../../world/propKinds';
+import { propKindDefinition } from '../../game/kinds/props';
 import { at } from './place';
 
 // A stop sign: the unmistakable red octagon with a white rim, on a slim pole.

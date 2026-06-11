@@ -1,7 +1,7 @@
 import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { WorldProp } from '../../design';
-import { propKindDefinition } from '../../world/propKinds';
+import { propKindDefinition } from '../../game/kinds/props';
 import { at, type V3 } from './place';
 
 // A sidewalk payphone: a stand pole, an acoustic hood (the curved privacy shell),

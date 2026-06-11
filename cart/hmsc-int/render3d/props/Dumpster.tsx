@@ -1,7 +1,7 @@
 import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { WorldProp } from '../../design';
-import { dumpsterBodyMeters } from '../../world/propKinds';
+import { dumpsterBodyMeters } from '../../game/kinds/props';
 import { at } from './place';
 
 // A back-alley dumpster: a beat-up metal box with a sloped hinged lid, a rust

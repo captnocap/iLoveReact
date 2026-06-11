@@ -1,6 +1,6 @@
 import type { GameState, ZoneFlag } from '../design';
 import type { WorldLayer } from './placeables';
-import { propKindDefinition } from './propKinds';
+import { propKindDefinition } from '../game/kinds/props';
 import { landformKindDef } from './landforms';
 
 // The shared map read-model. Both the in-game minimap (render/Hud.tsx) and the
