@@ -185,6 +185,14 @@ pub fn build(b: *std.Build) void {
             .file = b.path("framework/ffi/v8_stack_shim.cpp"),
             .flags = &.{ "-O2", "-std=c++17" },
         });
+        // Real per-frame V8 GC wall-time via the isolate's prologue/epilogue
+        // callbacks — feeds the spikewatch's definitive "what fired" attribution
+        // (see framework/ffi/v8_gc_shim.cpp). Same mangled-symbol approach as the
+        // stack shim; the prebuilt libc_v8.a doesn't expose the binding.
+        root_mod.addCSourceFile(.{
+            .file = b.path("framework/ffi/v8_gc_shim.cpp"),
+            .flags = &.{ "-O2", "-std=c++17" },
+        });
     }
 
     const exe = b.addExecutable(.{
@@ -504,26 +512,26 @@ pub fn build(b: *std.Build) void {
         root_mod.addCSourceFiles(.{
             .root = doom_src,
             .files = &.{
-                "dummy.c",      "am_map.c",     "doomdef.c",    "doomstat.c",
-                "dstrings.c",   "d_event.c",    "d_items.c",    "d_iwad.c",
-                "d_loop.c",     "d_main.c",     "d_mode.c",     "d_net.c",
-                "f_finale.c",   "f_wipe.c",     "g_game.c",     "hu_lib.c",
-                "hu_stuff.c",   "info.c",       "i_cdmus.c",    "i_endoom.c",
-                "i_joystick.c", "i_scale.c",    "i_sound.c",    "i_system.c",
-                "i_timer.c",    "memio.c",      "m_argv.c",     "m_bbox.c",
-                "m_cheat.c",    "m_config.c",   "m_controls.c", "m_fixed.c",
-                "m_menu.c",     "m_misc.c",     "m_random.c",   "p_ceilng.c",
-                "p_doors.c",    "p_enemy.c",    "p_floor.c",    "p_inter.c",
-                "p_lights.c",   "p_map.c",      "p_maputl.c",   "p_mobj.c",
-                "p_plats.c",    "p_pspr.c",     "p_saveg.c",    "p_setup.c",
-                "p_sight.c",    "p_spec.c",     "p_switch.c",   "p_telept.c",
-                "p_tick.c",     "p_user.c",     "r_bsp.c",      "r_data.c",
-                "r_draw.c",     "r_main.c",     "r_plane.c",    "r_segs.c",
-                "r_sky.c",      "r_things.c",   "sha1.c",       "sounds.c",
-                "statdump.c",   "st_lib.c",     "st_stuff.c",   "s_sound.c",
-                "tables.c",     "v_video.c",    "wi_stuff.c",   "w_checksum.c",
-                "w_file.c",     "w_main.c",     "w_wad.c",      "z_zone.c",
-                "w_file_stdc.c","i_input.c",    "i_video.c",    "doomgeneric.c",
+                "dummy.c",       "am_map.c",   "doomdef.c",    "doomstat.c",
+                "dstrings.c",    "d_event.c",  "d_items.c",    "d_iwad.c",
+                "d_loop.c",      "d_main.c",   "d_mode.c",     "d_net.c",
+                "f_finale.c",    "f_wipe.c",   "g_game.c",     "hu_lib.c",
+                "hu_stuff.c",    "info.c",     "i_cdmus.c",    "i_endoom.c",
+                "i_joystick.c",  "i_scale.c",  "i_sound.c",    "i_system.c",
+                "i_timer.c",     "memio.c",    "m_argv.c",     "m_bbox.c",
+                "m_cheat.c",     "m_config.c", "m_controls.c", "m_fixed.c",
+                "m_menu.c",      "m_misc.c",   "m_random.c",   "p_ceilng.c",
+                "p_doors.c",     "p_enemy.c",  "p_floor.c",    "p_inter.c",
+                "p_lights.c",    "p_map.c",    "p_maputl.c",   "p_mobj.c",
+                "p_plats.c",     "p_pspr.c",   "p_saveg.c",    "p_setup.c",
+                "p_sight.c",     "p_spec.c",   "p_switch.c",   "p_telept.c",
+                "p_tick.c",      "p_user.c",   "r_bsp.c",      "r_data.c",
+                "r_draw.c",      "r_main.c",   "r_plane.c",    "r_segs.c",
+                "r_sky.c",       "r_things.c", "sha1.c",       "sounds.c",
+                "statdump.c",    "st_lib.c",   "st_stuff.c",   "s_sound.c",
+                "tables.c",      "v_video.c",  "wi_stuff.c",   "w_checksum.c",
+                "w_file.c",      "w_main.c",   "w_wad.c",      "z_zone.c",
+                "w_file_stdc.c", "i_input.c",  "i_video.c",    "doomgeneric.c",
             },
             .flags = &.{ "-O2", "-fPIC", "-w", "-DNORMALUNIX", "-DLINUX", "-D_DEFAULT_SOURCE" },
         });
@@ -657,9 +665,23 @@ pub fn build(b: *std.Build) void {
     const v8_hello_mod = b.createModule(.{
         .root_source_file = b.path("v8_hello.zig"),
         .target = target,
-        .optimize = optimize,
+        // Pin ReleaseFast like v8cli: a Debug-optimized V8 binary trips the Zig
+        // 0.15 / lld CREL `.init_array` bug (NULL function pointers → crash at
+        // PC 0 on launch, before main runs). See the v8cli block below for the
+        // full story. This makes the smoke/GC-probe target runnable by default.
+        .optimize = .ReleaseFast,
     });
     v8_hello_mod.addImport("v8", v8_mod);
+    // v8_hello compiles v8_runtime.zig, which calls setStackLimit and the
+    // GC-timing shim — link both so the smoke target resolves their symbols.
+    v8_hello_mod.addCSourceFile(.{
+        .file = b.path("framework/ffi/v8_stack_shim.cpp"),
+        .flags = &.{ "-O2", "-std=c++17" },
+    });
+    v8_hello_mod.addCSourceFile(.{
+        .file = b.path("framework/ffi/v8_gc_shim.cpp"),
+        .flags = &.{ "-O2", "-std=c++17" },
+    });
 
     const v8_hello_exe = b.addExecutable(.{
         .name = "v8-hello",
@@ -693,6 +715,12 @@ pub fn build(b: *std.Build) void {
     // setStackLimit, which the prebuilt libc_v8.a doesn't ship.
     v8_cli_mod.addCSourceFile(.{
         .file = b.path("framework/ffi/v8_stack_shim.cpp"),
+        .flags = &.{ "-O2", "-std=c++17" },
+    });
+    // v8_cli compiles v8_runtime.zig too, which references the GC-timing shim
+    // symbols — link the same shim here so v8cli resolves them.
+    v8_cli_mod.addCSourceFile(.{
+        .file = b.path("framework/ffi/v8_gc_shim.cpp"),
         .flags = &.{ "-O2", "-std=c++17" },
     });
 

@@ -159,11 +159,10 @@ fn getTickUsCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setNumberReturn(info, @floatFromInt(frame_telemetry.telemetry_tick_us));
 }
 
-fn telFrameCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const iso = info.getIsolate();
-    const ctx = iso.getCurrentContext();
-    const s = telemetry.current;
+/// Build a JS frame object from a snapshot. Shared by __tel_frame (the latest
+/// frame) and __tel_frame_at (a historical frame), so the spikewatch can read
+/// the SPIKE frame's latched buckets instead of the recovered current frame's.
+fn buildFrameObject(iso: v8.Isolate, ctx: v8.Context, s: telemetry.Snapshot) v8.Object {
     const obj = iso.initObject();
     setObjectNumber(ctx, obj, "fps", s.fps);
     setObjectNumber(ctx, obj, "tick_us", s.tick_us);
@@ -175,9 +174,42 @@ fn telFrameCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "app_tick_us", s.app_tick_us);
     setObjectNumber(ctx, obj, "pre_paint_us", s.pre_paint_us);
     setObjectNumber(ctx, obj, "post_frame_us", s.post_frame_us);
+    // Outside-render attribution (measured at real boundaries) — the spikewatch
+    // reads these to name the ONE cause that fired instead of guessing. gc_ns is
+    // nanoseconds (sub-µs honest); gc_count disambiguates a zero from "dead".
+    setObjectNumber(ctx, obj, "gc_ns", s.gc_ns);
+    setObjectNumber(ctx, obj, "gc_count", s.gc_count);
+    setObjectNumber(ctx, obj, "gc_type", s.gc_type);
+    setObjectNumber(ctx, obj, "present_us", s.present_us);
+    setObjectNumber(ctx, obj, "bridge_us", s.bridge_us);
     setObjectNumber(ctx, obj, "frame_number", s.frame_number);
     setObjectNumber(ctx, obj, "bridge_calls_per_sec", s.bridge_calls_per_sec);
+    return obj;
+}
+
+fn telFrameCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const iso = info.getIsolate();
+    const ctx = iso.getCurrentContext();
+    const obj = buildFrameObject(iso, ctx, telemetry.current);
     info.getReturnValue().set(obj.toValue());
+}
+
+/// __tel_frame_at(n) — the full frame object for history depth n (0 = current,
+/// newest first), matching __tel_history's indexing. Returns null past the ring.
+/// This is the GAP-2 fix: the spikewatch finds the worst frame in the tape, then
+/// reads THAT frame's latched buckets here instead of the post-recovery frame.
+fn telFrameAtCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const iso = info.getIsolate();
+    const ctx = iso.getCurrentContext();
+    const n: usize = if (info.length() >= 1) @intCast(@max(0, argI32(info, 0, 0))) else 0;
+    if (telemetry.getHistory(n)) |snap| {
+        const obj = buildFrameObject(iso, ctx, snap.*);
+        info.getReturnValue().set(obj.toValue());
+    } else {
+        info.getReturnValue().set(iso.initNull().toValue());
+    }
 }
 
 fn telHostFlushCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -998,6 +1030,7 @@ pub fn registerTelemetry(_: anytype) void {
     v8rt.registerHostFn("getTickUs", getTickUsCb);
 
     v8rt.registerHostFn("__tel_frame", telFrameCb);
+    v8rt.registerHostFn("__tel_frame_at", telFrameAtCb);
     v8rt.registerHostFn("__tel_host_flush", telHostFlushCb);
     v8rt.registerHostFn("__tel_gpu", telGpuCb);
     v8rt.registerHostFn("__tel_nodes", telNodesCb);

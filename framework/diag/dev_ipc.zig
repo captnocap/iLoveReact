@@ -10,6 +10,9 @@
 //! Wire protocol (one message per TCP accept — connections are one-shot):
 //!   PUSH <name> <bundle_byte_length>\n
 //!   <bundle_byte_length raw bytes>
+//!   INFO\n
+//!   NOTICE <json_byte_length>\n
+//!   <json_byte_length raw bytes>
 //!
 //! The server acks with a single "OK\n" or "ERR <reason>\n" line.
 //!
@@ -36,9 +39,19 @@ pub const PushMessage = struct {
     bundle: []u8, // ditto
 };
 
+pub const NoticeMessage = struct {
+    json: []u8, // heap-allocated JSON payload, owned by the caller after take()
+};
+
+pub const Message = union(enum) {
+    push: PushMessage,
+    notice: NoticeMessage,
+};
+
 var listen_fd: ?std.posix.socket_t = null;
-var queued: std.ArrayList(PushMessage) = .{};
+var queued: std.ArrayList(Message) = .{};
 var alloc: std.mem.Allocator = std.heap.page_allocator;
+var build_id: []const u8 = "unknown";
 
 /// Install the allocator used for push-message buffers. Must be called
 /// BEFORE start() so bundle bytes are freed by the same allocator that
@@ -46,6 +59,10 @@ var alloc: std.mem.Allocator = std.heap.page_allocator;
 /// is a silent UB/crash — don't skip this.
 pub fn setAllocator(a: std.mem.Allocator) void {
     alloc = a;
+}
+
+pub fn setBuildId(id: []const u8) void {
+    build_id = id;
 }
 
 /// Bind + listen on the well-known socket path. Silently no-ops if we can't
@@ -137,9 +154,20 @@ fn handleClient(client_fd: std.posix.socket_t) !void {
     if (header_len == 0 or header_buf[header_len - 1] != '\n') return error.BadHeader;
     const header = std.mem.trimRight(u8, header_buf[0..header_len], "\r\n");
 
-    // Parse: "PUSH <name> <length>" or "TELEMETRY"
+    // Parse: "PUSH <name> <length>", "INFO", "NOTICE <length>", or diagnostics.
     var it = std.mem.tokenizeScalar(u8, header, ' ');
     const verb = it.next() orelse return error.BadHeader;
+
+    if (std.mem.eql(u8, verb, "INFO")) {
+        var buf: [256]u8 = undefined;
+        const reply = std.fmt.bufPrint(
+            &buf,
+            "{{\"build_id\":\"{s}\"}}\n",
+            .{build_id},
+        ) catch "{\"build_id\":\"unknown\"}\n";
+        try writeAll(client_fd, reply);
+        return;
+    }
 
     if (std.mem.eql(u8, verb, "LOGLEVEL")) {
         // "LOGLEVEL"          → reply "{\"level\":<f>}\n" (current threshold)
@@ -201,6 +229,27 @@ fn handleClient(client_fd: std.posix.socket_t) !void {
         return;
     }
 
+    if (std.mem.eql(u8, verb, "NOTICE")) {
+        const len_str = it.next() orelse return error.BadHeader;
+        const json_len = std.fmt.parseInt(usize, len_str, 10) catch return error.BadHeader;
+        if (json_len > 128 * 1024) {
+            try writeAll(client_fd, "ERR notice too large\n");
+            return;
+        }
+        const json = try alloc.alloc(u8, json_len);
+        errdefer alloc.free(json);
+        var read_total: usize = 0;
+        while (read_total < json_len) {
+            const n = try std.posix.read(client_fd, json[read_total..]);
+            if (n == 0) return error.EarlyEof;
+            read_total += n;
+        }
+        try queued.append(alloc, .{ .notice = .{ .json = json } });
+        try writeAll(client_fd, "OK\n");
+        _ = event_bus.emit("dev.notice", "framework/dev_ipc.zig", null, "{\"kind\":\"notice\"}");
+        return;
+    }
+
     if (!std.mem.eql(u8, verb, "PUSH")) {
         try writeAll(client_fd, "ERR unknown verb\n");
         return;
@@ -226,7 +275,7 @@ fn handleClient(client_fd: std.posix.socket_t) !void {
         read_total += n;
     }
 
-    try queued.append(alloc, .{ .name = name_copy, .bundle = bundle });
+    try queued.append(alloc, .{ .push = .{ .name = name_copy, .bundle = bundle } });
     try writeAll(client_fd, "OK\n");
     log.info("pushed '{s}' ({d} bytes)", .{ name_copy, bundle_len });
 
@@ -260,9 +309,9 @@ fn peerPidOrZero(fd: std.posix.socket_t) i32 {
     return cred.pid;
 }
 
-/// Pull the next queued push message. Returns null if the queue is empty.
-/// Caller owns the returned memory — free both `.name` and `.bundle`.
-pub fn takeNext() ?PushMessage {
+/// Pull the next queued dev message. Returns null if the queue is empty.
+/// Caller owns the returned message memory.
+pub fn takeNext() ?Message {
     if (queued.items.len == 0) return null;
     return queued.orderedRemove(0);
 }
@@ -270,7 +319,12 @@ pub fn takeNext() ?PushMessage {
 fn drainQueue() void {
     while (queued.items.len > 0) {
         const msg = queued.orderedRemove(0);
-        alloc.free(msg.name);
-        alloc.free(msg.bundle);
+        switch (msg) {
+            .push => |push| {
+                alloc.free(push.name);
+                alloc.free(push.bundle);
+            },
+            .notice => |notice| alloc.free(notice.json),
+        }
     }
 }

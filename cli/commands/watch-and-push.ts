@@ -4,6 +4,7 @@ import { bundleFlags } from '../cart/bundle.ts';
 import { tryFsStat } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 import { spawn, spawnSync } from '../host/process.ts';
+import { DEV_SOCKET_PATH, sendRebuildNotice, shortHash, staleDevHost } from '../dev/rebuild-signal.ts';
 
 const POLL_MS = 200;
 
@@ -12,6 +13,7 @@ export async function run(argv: string[]): Promise<number> {
   const cartFile = argv[1];
   const outPath = argv[2];
   const tui = argv.includes('--tui') || argv.includes('--headless');
+  const rjitHome = flagValue(argv, '--rjit-home') ?? __cwd();
   if (!cartName || !cartFile || !outPath) {
     err('[watch-and-push] usage: watch-and-push.js <cart-name> <cart-file> <out-path>');
     return 1;
@@ -44,9 +46,14 @@ export async function run(argv: string[]): Promise<number> {
     const mtime = statMtime(outAbs);
     if (mtime !== 0 && mtime !== lastMtime) {
       lastMtime = mtime;
-      push(root, cartName, outAbs);
+      push(root, rjitHome, cartName, outAbs);
     }
   }
+}
+
+function flagValue(argv: string[], flag: string): string | null {
+  const idx = argv.indexOf(flag);
+  return idx >= 0 ? argv[idx + 1] ?? null : null;
 }
 
 function toAbs(root: string, path: string): string {
@@ -60,7 +67,13 @@ function statMtime(path: string): number {
   return stat ? Number(stat.mtimeMs) || 0 : 0;
 }
 
-function push(root: string, cartName: string, outAbs: string): void {
+function push(root: string, rjitHome: string, cartName: string, outAbs: string): void {
+  const stale = staleDevHost(rjitHome, DEV_SOCKET_PATH);
+  if (stale) {
+    sendRebuildNotice(stale, DEV_SOCKET_PATH);
+    err(`[dev ${new Date().toLocaleTimeString()}] rebuild needed - native build id running ${shortHash(stale.host.build_id)} / disk ${shortHash(stale.current.hash)}`);
+    return;
+  }
   const result = spawnSync(`${root}/tools/rjit`, ['push-bundle', cartName, outAbs]);
   const timestamp = new Date().toLocaleTimeString();
   if (result.code === 0) {

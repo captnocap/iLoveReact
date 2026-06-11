@@ -897,7 +897,7 @@
       "v8Bindings": [
         "compiled_world"
       ],
-      "note": "Embedded compiled-world primitive for hmsc-int: React mounts one Scene3D viewport node; framework/world/compiled_world.zig constructs the baked game-file and gpu/3d.zig renders the retained native scene without per-frame V8 or React reconciliation."
+      "note": "Embedded compiled-world primitive for hmsc-int: React mounts one WorldLoader host node; world_loader.zig constructs and steps the baked game-file runtime, then gpu/3d.zig renders that loader-owned Scene3D tree without per-frame V8 or React reconciliation."
     },
     "pg": {
       "shipGate": "pg",

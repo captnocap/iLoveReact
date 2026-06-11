@@ -36,6 +36,13 @@ pub const LumpType = struct {
     pub const materials: u32 = 12;
     /// Per-instance-row material reference (1-based into materials; 0 = none).
     pub const material_refs: u32 = 13;
+    /// Authored physics colliders — the editor's semantic solids
+    /// (placedPieceColliders / placedPieceRamps), packed in host wire order so a
+    /// "+" wall collides where it looks. See runtime/workspace/lumps.ts COLLIDERS.
+    pub const colliders: u32 = 14;
+    /// Player physics tuning + walk/run speeds, baked so the shipped game matches
+    /// the editor play view. See runtime/workspace/lumps.ts PHYSICS_CONFIG.
+    pub const physics_config: u32 = 15;
 };
 
 pub const Lump = struct {

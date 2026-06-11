@@ -12,6 +12,10 @@
 //!     Gray rejection is enforced GPU-side in a followup; the threshold
 //!     metadata travels with the op so existing callsites won't churn.
 //!
+//!   __paintable_brush(id, cx, cy, r, value, kind, angle, aspect, hardness, flow, scatter, seed)
+//!     One general brush stamp. `kind` is a small numeric enum owned by
+//!     the JS painter; angle is radians; aspect is width/height.
+//!
 //!   __paintable_polygon(id, vertsFloat32, value)
 //!     Lasso/freehand polygon fill. `vertsFloat32` is a Float32Array of
 //!     interleaved x,y pairs. CPU-rasterized into a small writeTexture
@@ -108,6 +112,25 @@ fn paintCircleEdge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     defer alloc.free(gray_id);
     const threshold = argF32(info, 6) orelse return;
     paintable.queueCircleEdgeAware(id, cx, cy, r, value, gray_id, threshold);
+}
+
+fn paintBrush(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 12) return;
+    const id = argStrAlloc(info, 0) orelse return;
+    defer alloc.free(id);
+    const cx = argF32(info, 1) orelse return;
+    const cy = argF32(info, 2) orelse return;
+    const r = argF32(info, 3) orelse return;
+    const value = argF32(info, 4) orelse return;
+    const kind = argF32(info, 5) orelse return;
+    const angle = argF32(info, 6) orelse return;
+    const aspect = argF32(info, 7) orelse return;
+    const hardness = argF32(info, 8) orelse return;
+    const flow = argF32(info, 9) orelse return;
+    const scatter = argF32(info, 10) orelse return;
+    const seed = argF32(info, 11) orelse return;
+    paintable.queueBrush(id, cx, cy, r, value, kind, angle, aspect, hardness, flow, scatter, seed);
 }
 
 fn paintPolygon(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -209,6 +232,7 @@ fn readbackDeleter(data: ?*anyopaque, _: usize, deleter_data: ?*anyopaque) callc
 pub fn registerPaintable(_: anytype) void {
     v8_runtime.registerHostFn("__paintable_circle", paintCircle);
     v8_runtime.registerHostFn("__paintable_circle_edge", paintCircleEdge);
+    v8_runtime.registerHostFn("__paintable_brush", paintBrush);
     v8_runtime.registerHostFn("__paintable_polygon", paintPolygon);
     v8_runtime.registerHostFn("__paintable_clear", paintClear);
     v8_runtime.registerHostFn("__paintable_upload", paintUpload);

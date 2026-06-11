@@ -84,6 +84,23 @@ fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
     return info.getArg(idx).toF64(infoCtx(info)) catch return null;
 }
 
+fn argBytes(info: v8.FunctionCallbackInfo, idx: u32) ?[]const u8 {
+    if (idx >= info.length()) return null;
+    const value = info.getArg(idx);
+    if (!value.isArrayBufferView()) return null;
+    const view: v8.ArrayBufferView = .{ .handle = @ptrCast(value.handle) };
+    const byte_len = view.getByteLength();
+    if (byte_len == 0) return &[_]u8{};
+    const byte_off = view.getByteOffset();
+    const ab = view.getBuffer();
+    var shared = ab.getBackingStore();
+    defer v8.BackingStore.sharedPtrReset(&shared);
+    const bs = v8.BackingStore.sharedPtrGet(&shared);
+    const base = bs.getData() orelse return null;
+    const base_bytes: [*]const u8 = @ptrCast(base);
+    return base_bytes[byte_off .. byte_off + byte_len];
+}
+
 // __hostFlush now lives in framework/v8_bindings_reconciler.zig (single
 // registration site shared by both v8_app and v8_tui_app). The pending-
 // flush queue + drain + clear all moved there too.
@@ -133,6 +150,33 @@ fn hostLoadFileToBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
         return;
     };
 
+    const next_id = g_content_store_next_id;
+    g_content_store_next_id = next_id + 1;
+    g_content_store.put(next_id, data) catch {
+        std.heap.c_allocator.free(data);
+        setReturnNumber(info, 0);
+        return;
+    };
+    setReturnNumber(info, @floatFromInt(next_id));
+}
+
+fn hostUploadFloatBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (bytes.len == 0 or bytes.len > 256 * 1024 * 1024 or bytes.len % @sizeOf(f32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+
+    ensureContentStore();
+    const data = std.heap.c_allocator.alloc(u8, bytes.len) catch {
+        setReturnNumber(info, 0);
+        return;
+    };
+    @memcpy(data, bytes);
     const next_id = g_content_store_next_id;
     g_content_store_next_id = next_id + 1;
     g_content_store.put(next_id, data) catch {
@@ -500,6 +544,12 @@ pub fn contentStoreGet(id: u32) ?[]const u8 {
     return g_content_store.get(id);
 }
 
+pub fn contentStoreTake(id: u32) ?[]u8 {
+    if (!g_content_store_inited) return null;
+    if (g_content_store.fetchRemove(id)) |entry| return entry.value;
+    return null;
+}
+
 // ── Router host functions (framework/router.zig) ────────────
 fn hostRouterInit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -794,6 +844,7 @@ pub fn registerCore(vm: anytype) void {
     // (the shell calls reconciler.register() directly).
     v8_runtime.registerHostFn("__getInputTextForNode", hostGetInputTextForNode);
     v8_runtime.registerHostFn("__hostLoadFileToBuffer", hostLoadFileToBuffer);
+    v8_runtime.registerHostFn("__hostUploadFloatBuffer", hostUploadFloatBuffer);
     v8_runtime.registerHostFn("__hostReleaseFileBuffer", hostReleaseFileBuffer);
     v8_runtime.registerHostFn("__hostLog", hostLog);
     v8_runtime.registerHostFn("__js_eval", hostJsEval);

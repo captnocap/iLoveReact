@@ -45,5 +45,32 @@ pub fn main() !void {
 
     v8rt.callGlobalInt("__tick", 42);
 
+    // ── GC-binding proof (req_0301 GAP 1) ───────────────────────────────────
+    // Allocate hard in JS to force V8 to collect, then read the shim's counters.
+    // If the mangled-symbol registration in v8_gc_shim.cpp is alive, the GC
+    // prologue/epilogue callbacks fire and the count comes back > 0. A 0 here is
+    // the real bug (wrong isolate handle / mangled name / callbacks not invoked).
+    _ = v8rt.gcTakeNs();
+    _ = v8rt.gcTakeCount();
+    v8rt.evalScript(
+        \\(function () {
+        \\  var sink = [];
+        \\  for (var i = 0; i < 2000000; i++) {
+        \\    sink.push({ a: i, b: 'x' + i, c: [i, i + 1] });
+        \\    if ((i & 8191) === 0) sink.length = 0; // drop refs → garbage to collect
+        \\  }
+        \\  return sink.length;
+        \\})();
+    );
+    const gc_ns = v8rt.gcTakeNs();
+    const gc_count = v8rt.gcTakeCount();
+    const gc_type = v8rt.gcLastType();
+    std.debug.print("v8_hello GC PROBE: count={d} ns={d} last_type={d} (1=scavenge 2=minor-ms 4=mark-sweep 8=incremental)\n", .{ gc_count, gc_ns, gc_type });
+    if (gc_count == 0) {
+        std.debug.print("v8_hello GC PROBE: FAIL — callback never fired; the mangled-symbol binding is dead\n", .{});
+    } else {
+        std.debug.print("v8_hello GC PROBE: PASS — the GC binding is alive and timing real collections\n", .{});
+    }
+
     std.debug.print("v8_hello: ok\n", .{});
 }

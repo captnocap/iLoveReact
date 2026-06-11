@@ -4916,6 +4916,16 @@ pub fn run(config_in: AppConfig) !void {
             std.process.exit(witness.exitCode());
         }
 
+        // Outside-render attribution — measured at real boundaries, taken once
+        // per frame. GC fired wherever V8 collected (any phase); bridge is the
+        // Zig→JS app-tick/event time (lives in `other`); present is the vsync
+        // wait inside the gpu phase. These split the old "GC / NATIVE" guess.
+        const gc_ns_frame = js_vm.gcTakeNs();
+        const gc_count_frame = js_vm.gcTakeCount();
+        const gc_type_frame = js_vm.gcLastType();
+        const bridge_us_frame = js_vm.bridgeTakeUs();
+        const present_us_frame = gpu.presentWaitUs();
+
         // Unified telemetry snapshot
         const t6 = std.time.microTimestamp();
         telemetry.collect(.{
@@ -4928,6 +4938,11 @@ pub fn run(config_in: AppConfig) !void {
             .app_tick_us = @intCast(@max(0, phase_t1 - phase_t0)),
             .pre_paint_us = @intCast(@max(0, t4 - t3)),
             .post_frame_us = @intCast(@max(0, t6 - phase_t_postframe)),
+            .gc_ns = gc_ns_frame,
+            .gc_count = gc_count_frame,
+            .gc_type = gc_type_frame,
+            .present_us = present_us_frame,
+            .bridge_us = bridge_us_frame,
             .fps = frame_telemetry.telemetry_fps,
             .bridge_calls_per_sec = frame_telemetry.telemetry_bridge_calls,
             .root = config.root,
@@ -4953,6 +4968,13 @@ pub fn run(config_in: AppConfig) !void {
                 const other_i: i64 = @max(0, frame_total_i - cpu_i - gpu_i);
                 std.debug.print("[host-spike] frame={d} total={d}us cpu={d} tick={d} layout={d} paint={d} gpu={d} other={d}\n", .{
                     gpu.frameCounter(), frame_total_i, cpu_i, t1 - t0, t3 - t2, t5 - t4, gpu_i, other_i,
+                });
+                // Outside-render attribution, measured (not inferred): GC is
+                // frame-wide; present is inside gpu; bridge lives in other; the
+                // remainder of other is genuinely native/unattributed.
+                const unattributed_i: i64 = @max(0, other_i - @as(i64, @intCast(bridge_us_frame)));
+                std.debug.print("[host-spike-attrib] frame={d} gc={d}ns(x{d},type={d}) present={d}us(in-gpu) bridge={d}us(in-other) unattributed={d}us(native)\n", .{
+                    gpu.frameCounter(), gc_ns_frame, gc_count_frame, gc_type_frame, present_us_frame, bridge_us_frame, unattributed_i,
                 });
                 const gpu_stats = gpu.telemetryStats();
                 std.debug.print("[host-spike-gpu] frame={d} rects={d} glyphs={d} atlas={d} atlas_miss={d} static_caps={d} frame_hash={d} rect_hash={d} text_hash={d} drain={d}\n", .{

@@ -619,19 +619,25 @@ export function classifier(defs: Record<string, ClassifierDef>): void {
       C = (props: any) => {
         const snap = needsStore ? __useClassifierSnapshot() : null;
 
-        let effective: ClassifierStyleSet;
-        if (snap && (needsVariants || needsBp || needsDims)) {
-          effective = resolveEffective(def, snap.variant, snap.breakpoint, snap.dims);
-        } else {
-          effective = staticBase;
-        }
+        const resolved = React.useMemo(() => {
+          let effective: ClassifierStyleSet;
+          if (snap && (needsVariants || needsBp || needsDims)) {
+            effective = resolveEffective(def, snap.variant, snap.breakpoint, snap.dims);
+          } else {
+            effective = staticBase;
+          }
 
-        let resolved: Record<string, any>;
-        if (needsTokens && snap) {
-          resolved = resolveTokens(effective as Record<string, any>, snap.colors, snap.styles);
-        } else {
-          resolved = effective as Record<string, any>;
-        }
+          if (needsTokens && snap) {
+            return resolveTokens(effective as Record<string, any>, snap.colors, snap.styles);
+          }
+          return effective as Record<string, any>;
+        }, [
+          snap?.colors,
+          snap?.styles,
+          snap?.variant,
+          snap?.breakpoint,
+          snap?.dims,
+        ]);
 
         const hookProps = needsHook ? def.use!() : null;
         const merged = hookProps

@@ -12,6 +12,50 @@
 const std = @import("std");
 const v8 = @import("v8");
 
+// ── V8 GC timing shim (framework/ffi/v8_gc_shim.cpp) ────────────────────────
+// Real GC wall-time measured at V8's prologue/epilogue callbacks — feeds the
+// spikewatch's definitive "what fired" line instead of the old GC/native guess.
+extern fn rjit_v8_gc_install(iso: *anyopaque) void;
+extern fn rjit_v8_gc_take_ns() u64;
+extern fn rjit_v8_gc_take_count() c_uint;
+extern fn rjit_v8_gc_last_type() c_int;
+
+/// GC NANOSECONDS accumulated since the last call (resets the accumulator).
+/// Call once per frame. Nanoseconds so a sub-µs scavenge isn't floored to a
+/// misleading "0us". Covers GC wherever it fired in the frame — V8's callbacks
+/// fire on this thread synchronously around every pause.
+pub fn gcTakeNs() u64 {
+    return rjit_v8_gc_take_ns();
+}
+
+/// GC invocation count since the last call (resets). The disambiguator for a
+/// zero time: "fired N times, tiny" vs "fired 0 times, binding dead."
+pub fn gcTakeCount() u32 {
+    return @intCast(rjit_v8_gc_take_count());
+}
+
+/// GCType bitmask of the most recent GC: 1=scavenge, 2=minor-mark-sweep,
+/// 4=mark-sweep-compact, 8=incremental, 16=process-weak-callbacks.
+pub fn gcLastType() i32 {
+    return @intCast(rjit_v8_gc_last_type());
+}
+
+// ── Bridge (Zig→JS) wall-time accumulator ───────────────────────────────────
+// Every host-initiated cross into JS funnels through callGlobalWithArgs (app
+// tick __jsTick, event dispatch, etc). We time the call + microtask drain and
+// sum it per frame, so the spikewatch can attribute "outside-render" time to the
+// bridge instead of guessing. Single-threaded; plain global is fine.
+var g_bridge_us_accum: i64 = 0;
+
+/// Bridge microseconds accumulated since the last call (resets). Call once per
+/// frame. Covers callGlobal* crossings (Zig→JS), which is where the V8 dev-host
+/// spends its per-frame JS time (js_vm.tick() is a no-op under V8).
+pub fn bridgeTakeUs() u64 {
+    const v = g_bridge_us_accum;
+    g_bridge_us_accum = 0;
+    return if (v > 0) @intCast(v) else 0;
+}
+
 var g_platform: ?v8.Platform = null;
 var g_isolate_params: v8.CreateParams = undefined;
 var g_isolate: ?v8.Isolate = null;
@@ -64,6 +108,11 @@ pub fn initVM() void {
     const sp_addr = @intFromPtr(&sp_marker);
     const STACK_BUDGET: usize = 16 * 1024 * 1024;
     isolate.setStackLimit(sp_addr - STACK_BUDGET);
+
+    // Install the GC prologue/epilogue timers once per process. The isolate
+    // persists across hot-reload (only the Context is rebuilt), so this never
+    // double-registers. Gives the spikewatch real GC wall-time + type.
+    rjit_v8_gc_install(@ptrCast(isolate.handle));
 
     g_hscope_storage.init(isolate);
     g_hscope_alive = true;
@@ -241,15 +290,21 @@ fn callGlobalWithArgs(name: [*:0]const u8, argv: []const v8.Value) void {
     const val = global.getValue(ctx, key) catch return;
     if (val.isUndefined() or !val.isFunction()) return;
     const func = val.castTo(v8.Function);
-    _ = func.call(ctx, global.toValue(), argv) orelse {
+    // Time the whole cross-into-JS (call + microtask drain) so the spikewatch
+    // can attribute frame time to the bridge with a measured number.
+    const bridge_t0 = std.time.microTimestamp();
+    const ret = func.call(ctx, global.toValue(), argv);
+    if (ret == null) {
+        g_bridge_us_accum += @max(0, std.time.microTimestamp() - bridge_t0);
         logException(iso, ctx, try_catch, std.mem.span(name));
         return;
-    };
+    }
     // Explicit microtask drain (kExplicit policy set in initVM). Promises
     // resolved during the call (fetch, async hooks) get their .then()
     // continuations to run here on our central stack, dodging V8 14's auto-
     // drain IsOnCentralStack check.
     iso.performMicrotasksCheckpoint();
+    g_bridge_us_accum += @max(0, std.time.microTimestamp() - bridge_t0);
 }
 
 pub fn callGlobal(name: [*:0]const u8) void {

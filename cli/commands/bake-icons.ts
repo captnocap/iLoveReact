@@ -1,6 +1,6 @@
 // cli/commands/bake-icons.ts - pre-bake icon polylines into an SDF atlas.
 
-import { fsRead, fsWrite } from '../host/fs.ts';
+import { fsRead, fsWrite, tryFsStat } from '../host/fs.ts';
 import { err } from '../host/log.ts';
 
 type Polyline = number[];
@@ -14,12 +14,6 @@ interface IconMeta {
   h: number;
 }
 
-const ROOT = __cwd();
-const ICONS_TS = `${ROOT}/runtime/icons/icons.ts`;
-const OUT_ZIG = `${ROOT}/framework/gpu/icon_atlas.zig`;
-const OUT_PGM_HEX = `${ROOT}/framework/gpu/icon_atlas_debug.ppm.txt`;
-const OUT_TS = `${ROOT}/runtime/icons/baked-names.ts`;
-
 const VIEWBOX = 24;
 const HIRES = 256;
 const TILE = 32;
@@ -28,37 +22,52 @@ const SPREAD_HIRES = 18;
 const ATLAS_COLS = 16;
 const PADDING = 2;
 
-const ICON_NAMES = [
-  'Heart', 'Search', 'ArrowRight', 'Plus', 'X', 'Settings',
-  'Star', 'Home', 'Eye', 'User', 'Bell', 'Bookmark',
-  'Upload', 'Download', 'Save', 'FileImage', 'Image',
-  'Hand', 'Brush', 'WandSparkles', 'Eraser', 'RotateCcw', 'Palette',
-  'Minus', 'Square', 'Maximize', 'Minimize', 'Scissors',
-  'FolderOpen', 'FolderInput', 'PanelTop', 'PanelLeft',
-  'Undo2', 'Redo2', 'RefreshCw', 'RefreshCcw',
-  'Copy', 'ArrowUp', 'ArrowDown', 'Merge', 'Trash2', 'Package',
-  'ScanLine', 'Spline',
-  // hmsc-int world editor — bars, tabs, log, paint tools, assist route.
-  'Activity', 'ArrowLeft', 'Check', 'ChevronDown', 'FolderTree', 'Hammer',
-  'Map', 'MessageSquare', 'MousePointer', 'NotebookPen', 'Sparkles',
-];
-
 const HEX = '0123456789abcdef';
+
+interface BakeOptions {
+  root?: string;
+  ifNeeded?: boolean;
+  quiet?: boolean;
+}
 
 export async function run(argv: string[]): Promise<number> {
   if (argv[0] === '--help' || argv[0] === '-h') {
-    __writeStdout('Usage: rjit bake-icons\n');
+    __writeStdout('Usage: rjit bake-icons [--if-needed] [--quiet]\n');
     return 0;
   }
-  if (argv.length !== 0) {
-    err('[bake-icons] usage: rjit bake-icons');
-    return 1;
+  const opts: BakeOptions = {};
+  for (const arg of argv) {
+    if (arg === '--if-needed') opts.ifNeeded = true;
+    else if (arg === '--quiet') opts.quiet = true;
+    else {
+      err('[bake-icons] usage: rjit bake-icons [--if-needed] [--quiet]');
+      return 1;
+    }
+  }
+  return bakeIconAtlas(opts);
+}
+
+export function bakeIconAtlas(opts: BakeOptions = {}): number {
+  const root = opts.root || __env('RJIT_HOME') || __cwd();
+  const iconsTs = `${root}/runtime/icons/icons.ts`;
+  const outZig = `${root}/framework/gpu/icon_atlas.zig`;
+  const outPgmHex = `${root}/framework/gpu/icon_atlas_debug.ppm.txt`;
+  const outTs = `${root}/runtime/icons/baked-names.ts`;
+  const srcRaw = fsRead(iconsTs);
+  const iconNames = discoverIconNames(srcRaw);
+
+  if (iconNames.length === 0) {
+    return fail('no icons discovered in runtime/icons/icons.ts');
   }
 
-  const srcRaw = fsRead(ICONS_TS);
+  if (opts.ifNeeded && atlasIsCurrent(iconsTs, outZig, outPgmHex, outTs, iconNames)) {
+    log(`atlas current (${iconNames.length} icons)`, opts);
+    return 0;
+  }
+
   const polylines: Record<string, IconPolylines> = {};
   const missing: string[] = [];
-  for (const name of ICON_NAMES) {
+  for (const name of iconNames) {
     const data = loadIcon(srcRaw, name);
     if (!data) {
       missing.push(name);
@@ -69,17 +78,17 @@ export async function run(argv: string[]): Promise<number> {
   if (missing.length) return fail(`missing icons in icons.ts: ${missing.join(', ')}`);
 
   const cols = ATLAS_COLS;
-  const rows = Math.ceil(ICON_NAMES.length / cols);
+  const rows = Math.ceil(iconNames.length / cols);
   const cellPx = TILE + PADDING * 2;
   const atlasW = cols * cellPx;
   const atlasH = rows * cellPx;
   const atlas = new Uint8Array(atlasW * atlasH);
   const meta: IconMeta[] = [];
 
-  log(`baking ${ICON_NAMES.length} icons into ${atlasW}×${atlasH} R8 atlas (tile ${TILE}, hires ${HIRES})`);
+  log(`baking ${iconNames.length} icons into ${atlasW}x${atlasH} R8 atlas (tile ${TILE}, hires ${HIRES})`, opts);
 
-  for (let i = 0; i < ICON_NAMES.length; i++) {
-    const name = ICON_NAMES[i]!;
+  for (let i = 0; i < iconNames.length; i++) {
+    const name = iconNames[i]!;
     const t0 = Date.now();
     const mask = rasterizePolylines(polylines[name]!);
     const sdf = distanceTransform(mask);
@@ -96,20 +105,59 @@ export async function run(argv: string[]): Promise<number> {
       }
     }
     meta.push({ name, u, v, w: TILE, h: TILE });
-    log(`  [${i + 1}/${ICON_NAMES.length}] ${name} (${Date.now() - t0}ms)`);
+    log(`  [${i + 1}/${iconNames.length}] ${name} (${Date.now() - t0}ms)`, opts);
   }
 
-  fsWrite(OUT_ZIG, emitZig(atlas, meta, atlasW, atlasH));
-  log(`wrote ${OUT_ZIG} (${meta.length} icons + ${atlas.length}-byte atlas inlined)`);
+  fsWrite(outZig, emitZig(atlas, meta, atlasW, atlasH));
+  log(`wrote ${outZig} (${meta.length} icons + ${atlas.length}-byte atlas inlined)`, opts);
 
-  fsWrite(OUT_PGM_HEX, emitPgmHex(atlas, atlasW, atlasH));
-  log(`wrote ${OUT_PGM_HEX} - preview via:`);
-  log(`  xxd -r -p ${OUT_PGM_HEX} > /tmp/icon_atlas.pgm && xdg-open /tmp/icon_atlas.pgm`);
+  fsWrite(outPgmHex, emitPgmHex(atlas, atlasW, atlasH));
+  log(`wrote ${outPgmHex} - preview via:`, opts);
+  log(`  xxd -r -p ${outPgmHex} > /tmp/icon_atlas.pgm && xdg-open /tmp/icon_atlas.pgm`, opts);
 
-  fsWrite(OUT_TS, emitNamesTs(meta));
-  log(`wrote ${OUT_TS}`);
-  log('done.');
+  fsWrite(outTs, emitNamesTs(meta));
+  log(`wrote ${outTs}`, opts);
+  log('done.', opts);
   return 0;
+}
+
+function discoverIconNames(src: string): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const re = /^export const ([A-Za-z0-9_]+): number\[\]\[] = /gm;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(src)) !== null) {
+    const name = match[1]!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+}
+
+function atlasIsCurrent(iconsTs: string, outZig: string, outPgmHex: string, outTs: string, iconNames: string[]): boolean {
+  const source = tryFsStat(iconsTs);
+  const zig = tryFsStat(outZig);
+  const pgm = tryFsStat(outPgmHex);
+  const ts = tryFsStat(outTs);
+  if (!source || !zig || !pgm || !ts) return false;
+  if (zig.mtimeMs < source.mtimeMs || pgm.mtimeMs < source.mtimeMs || ts.mtimeMs < source.mtimeMs) return false;
+
+  const baked = readBakedNames(outTs);
+  if (baked.size !== iconNames.length) return false;
+  for (const name of iconNames) {
+    if (!baked.has(name)) return false;
+  }
+  return true;
+}
+
+function readBakedNames(outTs: string): Set<string> {
+  const raw = fsRead(outTs);
+  const names = new Set<string>();
+  const re = /^\s+"([^"]+)",\s*$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(raw)) !== null) names.add(match[1]!);
+  return names;
 }
 
 function loadIcon(src: string, name: string): IconPolylines | null {
@@ -256,7 +304,7 @@ function downsample(hi: Uint8Array): Uint8Array {
 function emitZig(atlas: Uint8Array, meta: IconMeta[], atlasW: number, atlasH: number): string {
   let zig = '// Auto-generated by scripts/bake-icons.js — do not edit.\n';
   zig += '// Source: runtime/icons/icons.ts\n';
-  zig += `// Atlas: ${atlasW}×${atlasH} R8, ${ICON_NAMES.length} icons, tile=${TILE}, hires=${HIRES}.\n`;
+  zig += `// Atlas: ${atlasW}x${atlasH} R8, ${meta.length} icons, tile=${TILE}, hires=${HIRES}.\n`;
   zig += `// SDF encoding: byte = clamp(255 * (1 - dist/${SPREAD_HIRES}_hires_px), 0, 255).\n`;
   zig += `// Effective spread in tile space: ${SPREAD_HIRES * TILE / HIRES} px.\n`;
   zig += `// Smoothstep edge sits at byte 128 (== distance ${SPREAD_HIRES / 2} hires px).\n\n`;
@@ -315,7 +363,8 @@ function hexByte(value: number): string {
   return HEX[value >> 4]! + HEX[value & 15]!;
 }
 
-function log(message: string): void {
+function log(message: string, opts: BakeOptions = {}): void {
+  if (opts.quiet) return;
   __writeStderr(`[bake-icons] ${message}\n`);
 }
 

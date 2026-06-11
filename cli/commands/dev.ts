@@ -2,9 +2,20 @@
 
 import { bundleCart, BundleMode } from '../cart/bundle.ts';
 import { loadManifest } from '../cart/manifest.ts';
+import { bakeIconAtlas } from './bake-icons.ts';
 import { fsExists, fsMkdir, fsRead, fsRemove, fsWrite, tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 import { spawn, spawnSync } from '../host/process.ts';
+import {
+  DEV_SOCKET_PATH,
+  nativeBuildFingerprint,
+  readDevBuildId,
+  readDevHostInfo,
+  sendRebuildNotice,
+  shortHash,
+  writeDevBuildInfo,
+  type NativeBuildFingerprint,
+} from '../dev/rebuild-signal.ts';
 
 type Substrate = 'gui' | 'tui';
 
@@ -36,6 +47,8 @@ export async function run(argv: string[]): Promise<number> {
   fsMkdir(`${cartRoot}/.cache`);
 
   runFixReactImports(rjitHome, cartRoot);
+  const bakedIcons = bakeIconAtlas({ root: rjitHome, ifNeeded: true, quiet: true });
+  if (bakedIcons !== 0) return bakedIcons;
   reapOrphanWatchers();
 
   out(`[dev] bundling ${cart.entry} -> ${perCartBundle}`);
@@ -51,16 +64,20 @@ export async function run(argv: string[]): Promise<number> {
   writeSpawnOutput(bundle);
   if (bundle.code !== 0) return bundle.code || 1;
 
-  const needsBuild = devHostNeedsBuild(rjitHome, bin);
-  const socket = '/tmp/reactjit.sock';
+  const nativeFingerprint = nativeBuildFingerprint(rjitHome);
+  const needsBuild = devHostNeedsBuild(bin, nativeFingerprint);
+  const socket = DEV_SOCKET_PATH;
   const hostAlive = isHostAlive(socket);
   if (hostAlive) {
-    if (needsBuild) {
-      err('[dev] STALE DEV HOST - running binary predates current framework source.');
-      err('[dev] refusing to push: bundle would talk to yesterday\'s native code.');
+    const hostInfo = readDevHostInfo(socket);
+    if (!hostInfo || hostInfo.build_id !== nativeFingerprint.hash) {
+      const stale = { current: nativeFingerprint, host: hostInfo ?? { build_id: 'unknown' } };
+      sendRebuildNotice(stale, socket);
+      err('[dev] STALE DEV HOST - running native build id differs from disk.');
+      err('[dev] refusing to push: bundle would talk to incompatible native code.');
       err('[dev] kill the running dev host (ctrl-c its terminal) and rerun this command.');
-      err(`[dev] inputs newer than ${bin}:`);
-      for (const path of newerInputs(rjitHome, bin).slice(0, 10)) err(`[dev]   ${path}`);
+      err(`[dev] running build id: ${shortHash(stale.host.build_id)}`);
+      err(`[dev] disk build id:    ${shortHash(stale.current.hash)} (${stale.current.inputCount} native inputs)`);
       return 1;
     }
     out(`[dev] host detected - pushing '${parsed.name}'`);
@@ -77,8 +94,9 @@ export async function run(argv: string[]): Promise<number> {
 
   if (needsBuild && fsExists(bin)) out('[dev] dev host inputs newer than binary - rebuilding...');
   if (needsBuild) {
-    const built = buildDevHost(rjitHome, cartRoot, binName, substrate, perCartBundle);
+    const built = buildDevHost(rjitHome, cartRoot, binName, substrate, perCartBundle, nativeFingerprint);
     if (built !== 0) return built;
+    writeDevBuildInfo(bin, nativeFingerprint);
   }
 
   ensurePgRunning(rjitHome);
@@ -86,7 +104,7 @@ export async function run(argv: string[]): Promise<number> {
   const child = spawn('env', [`RJIT_DEV_CART_DIR=${cart.dir}`, bin]);
   out(`[dev] host child=${child.id} - run 'rjit dev <other>' from another terminal to add tabs`);
 
-  const watchArgs = ['watch-and-push', parsed.name, cart.entry, perCartBundle];
+  const watchArgs = ['watch-and-push', parsed.name, cart.entry, perCartBundle, '--rjit-home', rjitHome];
   if (substrate === 'tui') watchArgs.push('--tui');
   const watcher = spawn(`${rjitHome}/tools/rjit`, watchArgs);
   drainUntilExit(child.id, watcher.id);
@@ -158,29 +176,9 @@ function reapOrphanWatchers(): void {
   }
 }
 
-function devHostNeedsBuild(rjitHome: string, bin: string): boolean {
+function devHostNeedsBuild(bin: string, fingerprint: NativeBuildFingerprint): boolean {
   if (!fsExists(bin)) return true;
-  return newerInputs(rjitHome, bin).length > 0;
-}
-
-function newerInputs(rjitHome: string, bin: string): string[] {
-  const candidates = [
-    `${rjitHome}/framework`,
-    `${rjitHome}/build.zig`,
-    `${rjitHome}/v8_app.zig`,
-    `${rjitHome}/sdk/dependency-registry.json`,
-    `${rjitHome}/scripts/sdk-dependency-resolve.js`,
-    `${rjitHome}/tools/zig/zig`,
-  ].filter((path) => fsExists(path));
-  if (candidates.length === 0) return [];
-  const args = [
-    ...candidates,
-    '-newer',
-    bin,
-  ];
-  const result = spawnSync('find', args);
-  if (result.code !== 0) return [];
-  return result.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+  return readDevBuildId(bin) !== fingerprint.hash;
 }
 
 function isHostAlive(socket: string): boolean {
@@ -191,7 +189,7 @@ function isHostAlive(socket: string): boolean {
   return false;
 }
 
-function buildDevHost(rjitHome: string, cartRoot: string, binName: string, substrate: Substrate, bundlePath: string): number {
+function buildDevHost(rjitHome: string, cartRoot: string, binName: string, substrate: Substrate, bundlePath: string, fingerprint: NativeBuildFingerprint): number {
   out(`[dev] compiling dev binary (${rjitHome}/zig-out/bin/${binName}, ${substrate}, ReleaseFast)...`);
   const flagsResult = spawnSync(`${rjitHome}/tools/rjit`, ['metafile-gate', '--format', 'dev-zig-flags', '--build-zig', `${rjitHome}/build.zig`]);
   writeSpawnOutput(flagsResult);
@@ -208,6 +206,7 @@ function buildDevHost(rjitHome: string, cartRoot: string, binName: string, subst
     `-Dapp-name=${binName}`,
     '-Dapp-source=v8_app.zig',
     `-Dbundle-path=${bundlePath}`,
+    `-Ddev-build-id=${fingerprint.hash}`,
     ...devFlags,
     '-Doptimize=ReleaseFast',
   ];

@@ -42,12 +42,29 @@ pub const Snapshot = struct {
     pre_paint_us: u64 = 0,
     post_frame_us: u64 = 0,
 
+    // ── Outside-render attribution (each measured at its real boundary) ──
+    // These split the old "GC / NATIVE — could be one of three" catch-all into
+    // separately-measured, definitively-attributed costs:
+    //   gc_ns      V8 GC wall-time this frame in NANOSECONDS (prologue/epilogue
+    //              cbs). ns, not µs, so a sub-µs scavenge isn't floored to "0".
+    //   gc_count   GC invocations this frame — disambiguates "tiny" from "never
+    //              fired" when gc_ns is 0.
+    //   gc_type    GCType bitmask: 1=scavenge 2=minor-ms 4=mark-sweep 8=incremental 16=weak
+    //   present_us vsync/present wait (swapchain acquire + present) — subset of gpu_us.
+    //   bridge_us  Zig→JS crossings (callGlobal* incl. app tick + event dispatch).
+    gc_ns: u64 = 0,
+    gc_count: u32 = 0,
+    gc_type: i32 = 0,
+    present_us: u64 = 0,
+    bridge_us: u64 = 0,
+
     // ── GPU ──
     rect_count: u32 = 0,
     glyph_count: u32 = 0,
     rect_capacity: u32 = 0,
     glyph_capacity: u32 = 0,
     atlas_glyph_count: u32 = 0,
+    atlas_miss_count: u32 = 0,
     atlas_capacity: u32 = 0,
     atlas_row_x: u32 = 0,
     atlas_row_y: u32 = 0,
@@ -56,6 +73,14 @@ pub const Snapshot = struct {
     gpu_surface_w: u32 = 0,
     gpu_surface_h: u32 = 0,
     frame_hash: u64 = 0,
+    rect_hash: u64 = 0,
+    text_hash: u64 = 0,
+    curves_hash: u64 = 0,
+    capsules_hash: u64 = 0,
+    polys_hash: u64 = 0,
+    text_trace: []const u8 = "",
+    static_capture_count: u32 = 0,
+    static_capture_trace: []const u8 = "",
     frames_since_drain: u64 = 0,
     scene3d_scene_count: u32 = 0,
     scene3d_mesh_children: u32 = 0,
@@ -249,6 +274,11 @@ pub const CollectArgs = struct {
     app_tick_us: u64 = 0,
     pre_paint_us: u64 = 0,
     post_frame_us: u64 = 0,
+    gc_ns: u64 = 0,
+    gc_count: u32 = 0,
+    gc_type: i32 = 0,
+    present_us: u64 = 0,
+    bridge_us: u64 = 0,
     fps: u32,
     bridge_calls_per_sec: u64,
     root: *const Node,
@@ -272,6 +302,11 @@ pub fn collect(args: CollectArgs) void {
     snap.app_tick_us = args.app_tick_us;
     snap.pre_paint_us = args.pre_paint_us;
     snap.post_frame_us = args.post_frame_us;
+    snap.gc_ns = args.gc_ns;
+    snap.gc_count = args.gc_count;
+    snap.gc_type = args.gc_type;
+    snap.present_us = args.present_us;
+    snap.bridge_us = args.bridge_us;
     snap.fps = args.fps;
     snap.frame_number = gpu.telemetryFrameCounter();
 
@@ -282,6 +317,7 @@ pub fn collect(args: CollectArgs) void {
     snap.rect_capacity = gpu_stats.rect_capacity;
     snap.glyph_capacity = gpu_stats.glyph_capacity;
     snap.atlas_glyph_count = gpu_stats.atlas_glyph_count;
+    snap.atlas_miss_count = gpu_stats.atlas_miss_count;
     snap.atlas_capacity = gpu_stats.atlas_capacity;
     snap.atlas_row_x = gpu_stats.atlas_row_x;
     snap.atlas_row_y = gpu_stats.atlas_row_y;
@@ -290,6 +326,14 @@ pub fn collect(args: CollectArgs) void {
     snap.gpu_surface_w = gpu_stats.surface_w;
     snap.gpu_surface_h = gpu_stats.surface_h;
     snap.frame_hash = gpu_stats.frame_hash;
+    snap.rect_hash = gpu_stats.rect_hash;
+    snap.text_hash = gpu_stats.text_hash;
+    snap.curves_hash = gpu_stats.curves_hash;
+    snap.capsules_hash = gpu_stats.capsules_hash;
+    snap.polys_hash = gpu_stats.polys_hash;
+    snap.text_trace = gpu_stats.text_trace;
+    snap.static_capture_count = gpu_stats.static_capture_count;
+    snap.static_capture_trace = gpu_stats.static_capture_trace;
     snap.frames_since_drain = gpu_stats.frames_since_drain;
     const scene3d_stats = scene3d.telemetryStats();
     snap.scene3d_scene_count = scene3d_stats.scene_count;

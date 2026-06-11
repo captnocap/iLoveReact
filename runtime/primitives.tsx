@@ -440,6 +440,7 @@ function _scaleVec3(v: any): [number, number, number] {
   if (Array.isArray(v) && v.length === 3) return [v[0] ?? 1, v[1] ?? 1, v[2] ?? 1];
   return [1, 1, 1];
 }
+const _AUTO_FOG_COLOR = [-1, -1, -1];
 const Scene3DBase: any = ({ ...rest }: any) =>
   h('View', {
     ...rest,
@@ -515,7 +516,7 @@ Scene3DBase.Fog = ({ near, far, color, enabled = true, ...rest }: any) =>
   h('View', {
     ...rest,
     scene3dFog: true,
-    scene3dFogColor: typeof color === 'string' ? _hexToRgb(color, [-1, -1, -1] as any) : [-1, -1, -1],
+    scene3dFogColor: typeof color === 'string' ? _hexToRgb(color, _AUTO_FOG_COLOR as any) : _AUTO_FOG_COLOR,
     scene3dFogNear: enabled === false ? 1e7 : (Number.isFinite(near) && near > 0 ? near : 0),
     scene3dFogFar: enabled === false ? 2e7 : (Number.isFinite(far) && far > 0 ? far : 0),
   });
@@ -535,8 +536,24 @@ const _hfShipCache = new WeakMap<object, { arr: number[]; maxAbsY: number }>();
 // dyn verts: keyed by the dynamicKey string, which by contract already encodes a
 // version that changes when the verts change — so equal key ⇒ equal verts. Bounded
 // FIFO because keys are strings (old versions would otherwise accumulate).
-const _dynGeomCache = new Map<string, { verts: number[]; count: number; radius: number }>();
+const _dynGeomCache = new Map<string, { verts: number[] | Float32Array; count: number; radius: number; shipped: boolean }>();
 const _DYN_GEOM_CACHE_MAX = 64;
+function _verticesJsonArray(verts: number[] | Float32Array): number[] {
+  return Array.isArray(verts) ? verts : Array.from(verts);
+}
+function _uploadScene3DVertices(verts: number[] | Float32Array): number {
+  const host: any = globalThis as any;
+  if (typeof host.__hostUploadFloatBuffer !== 'function') return 0;
+  const view = verts instanceof Float32Array ? verts : new Float32Array(verts);
+  const handle = host.__hostUploadFloatBuffer(view);
+  return Number.isFinite(handle) && handle > 0 ? handle | 0 : 0;
+}
+function _scene3dVertexProps(key: string, verts: number[] | Float32Array, count: number, bounds: number): Record<string, any> {
+  const handle = _uploadScene3DVertices(verts);
+  return handle > 0
+    ? { scene3dGeomKey: key, scene3dVerticesHandle: handle, scene3dVertCount: count, scene3dBoundsRadius: bounds }
+    : { scene3dGeomKey: key, scene3dVertices: _verticesJsonArray(verts), scene3dVertCount: count, scene3dBoundsRadius: bounds };
+}
 Scene3DBase.Mesh = ({
   geometry, params, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ,
   texture, textureKey, dynamicKey, heights, hfCols, hfRows, waveAmplitude, waveLength, waveSpeed,
@@ -639,24 +656,28 @@ Scene3DBase.Mesh = ({
       // Same identity-stability rule as the hf path: the dynamicKey by contract
       // encodes a version that changes when the verts change, so equal key ⇒ equal
       // verts — regenerate + reconvert ONLY when the key is new. Without this,
-      // every re-render re-ran the full generator AND re-shipped the vert buffer.
+      // every re-render re-ran the full generator. Ship discipline mirrors the
+      // static intern path below: the first mesh for a dynamic key carries the
+      // heavy vertex buffer; siblings/remounts carry only the key and let the host
+      // draw from the retained dynamic slot.
       let dynShip = _dynGeomCache.get(dyn);
       if (!dynShip) {
         const gd = geometry.generate(merged);
-        dynShip = { verts: Array.from(gd.positions), count: gd.count, radius: gd.bounds.radius };
+        dynShip = { verts: gd.positions, count: gd.count, radius: gd.bounds.radius, shipped: false };
         if (_dynGeomCache.size >= _DYN_GEOM_CACHE_MAX) {
           const oldest = _dynGeomCache.keys().next().value;
           if (oldest != null) _dynGeomCache.delete(oldest);
         }
         _dynGeomCache.set(dyn, dynShip);
       }
+      const dynGeomProps = dynShip.shipped
+        ? { scene3dGeomKey: '~dyn~' + dyn, scene3dBoundsRadius: dynShip.radius }
+        : _scene3dVertexProps('~dyn~' + dyn, dynShip.verts, dynShip.count, dynShip.radius);
+      dynShip.shipped = true;
       return h('View', {
         ...rest,
         scene3dMesh: true,
-        scene3dGeomKey: '~dyn~' + dyn,
-        scene3dVertices: dynShip.verts,
-        scene3dVertCount: dynShip.count,
-        scene3dBoundsRadius: dynShip.radius,
+        ...dynGeomProps,
         scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
         scene3dRotX: rx, scene3dRotY: ry, scene3dRotZ: rz,
         scene3dScaleX: sx, scene3dScaleY: sy, scene3dScaleZ: sz,
@@ -681,7 +702,7 @@ Scene3DBase.Mesh = ({
     const firstForKey = !geomIntern.hasShipped(g3.key);
     if (firstForKey) geomIntern.markShipped(g3.key);
     const geomProps = firstForKey
-      ? { scene3dGeomKey: g3.key, scene3dVertices: g3.vertices, scene3dVertCount: g3.count, scene3dBoundsRadius: g3.bounds }
+      ? _scene3dVertexProps(g3.key, g3.vertices, g3.count, g3.bounds)
       : { scene3dGeomKey: g3.key, scene3dBoundsRadius: g3.bounds };
     return h('View', {
       ...rest,
@@ -723,7 +744,7 @@ Scene3DBase.Instances = ({
   const firstForKey = !geomIntern.hasShipped(g3.key);
   if (firstForKey) geomIntern.markShipped(g3.key);
   const geomProps = firstForKey
-    ? { scene3dGeomKey: g3.key, scene3dVertices: g3.vertices, scene3dVertCount: g3.count, scene3dBoundsRadius: boundsRadius ?? g3.bounds }
+    ? _scene3dVertexProps(g3.key, g3.vertices, g3.count, boundsRadius ?? g3.bounds)
     : { scene3dGeomKey: g3.key, scene3dBoundsRadius: boundsRadius ?? g3.bounds };
   return h('View', {
     ...rest,

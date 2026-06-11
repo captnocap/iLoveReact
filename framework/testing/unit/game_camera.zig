@@ -274,6 +274,23 @@ test "controller smoothing moves continuously instead of snapping" {
     try expectBetween(first.pos.z, start.pos.z, desired.pos.z);
 }
 
+test "controller distance constraint pulls camera inside obstruction and releases smoothly" {
+    var c = camera.Controller{};
+    c.setSmoothing(0);
+    c.setOrbit(.{ .target = .{}, .yaw = 0, .pitch = 0, .dist = 10, .fov = 50 });
+    c.setDistanceConstraint(4, 1.25, 0);
+    const pulled = c.step(0.016);
+    try expectClose(pulled.pos.z, -4);
+    try expectClose(pulled.target.z, 0);
+
+    c.setDistanceConstraint(10, 1.25, 4);
+    const first_release = c.step(0.016);
+    try expectBetween(first_release.pos.z, -10, -4);
+    const later_release = c.step(0.5);
+    try testing.expect(later_release.pos.z < first_release.pos.z);
+    try testing.expect(later_release.pos.z > -10);
+}
+
 test "controller walk to aim transition interpolates toward ADS solve" {
     var c = camera.Controller{};
     c.setSmoothing(8);

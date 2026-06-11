@@ -60,6 +60,14 @@ export interface PaintableOps {
     cx: number, cy: number, r: number, value: number,
     grayId: string, gradThreshold: number,
   ): void;
+  /** General brush stamp. `kind` is a small numeric enum owned by the caller;
+   *  angle is radians; aspect is width/height; hardness/flow/scatter are 0..1+
+   *  tuning values interpreted by the host brush shader. */
+  brush(
+    cx: number, cy: number, r: number, value: number,
+    kind: number, angle: number, aspect: number, hardness: number,
+    flow: number, scatter: number, seed: number,
+  ): void;
   /** Polygon fill via interleaved [x0, y0, x1, y1, ...] Float32Array. */
   polygon(verts: Float32Array, value: number): void;
   /** Replace every pixel with `value`. */
@@ -101,6 +109,9 @@ function makeOps(id: string): PaintableOps {
     circle(cx, cy, r, value) { callHost('__paintable_circle', undefined, id, cx, cy, r, value); },
     circleEdgeAware(cx, cy, r, value, grayId, gradThreshold) {
       callHost('__paintable_circle_edge', undefined, id, cx, cy, r, value, grayId, gradThreshold);
+    },
+    brush(cx, cy, r, value, kind, angle, aspect, hardness, flow, scatter, seed) {
+      callHost('__paintable_brush', undefined, id, cx, cy, r, value, kind, angle, aspect, hardness, flow, scatter, seed);
     },
     polygon(verts, value) {
       callHost('__paintable_polygon', undefined, id, verts, value);
