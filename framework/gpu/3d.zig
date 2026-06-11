@@ -1594,16 +1594,29 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
             if (mvisited[hi]) continue;
             if (mslot[hi].offset != group_slot.offset) continue;
             if (mtex[hi] != group_tex) continue;
+            // A STATIC-instanced batch draws on its own leader turn (the fast
+            // path above) — never fold it into another leader's dynamic group.
+            // Folding staged idata[0..count] and ignored scene3d_instance_first,
+            // so a plain mesh sharing the batch's (geometry, texture) — e.g. a
+            // live prop box beside the streamed world's box family — made every
+            // sub-range chunk draw the WRONG rows (req_0631's partial renders:
+            // walls vanished while their building's other faces drew).
+            if (hi != gi and scene_node.children[midx[hi]].scene3d_instance_static) continue;
             if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) break; // overflow
 
             const child = &scene_node.children[midx[hi]];
             if (child.scene3d_instance_data) |idata| {
                 const stride = child.scene3d_instance_stride;
-                const icount = child.scene3d_instance_count;
-                if (stride >= 9 and icount > 0 and idata.len >= @as(usize, icount) * stride) {
+                // Honor the sub-range here too (the static→dynamic degrade path
+                // when the retained instance buffer is full): stage rows starting
+                // at scene3d_instance_first, clamped to the data's real length.
+                const total_rows: u32 = @intCast(idata.len / @max(1, stride));
+                const ifirst: u32 = @min(child.scene3d_instance_first, total_rows);
+                const icount: u32 = @min(child.scene3d_instance_count, total_rows - ifirst);
+                if (stride >= 9 and icount > 0) {
                     var ii: u32 = 0;
                     while (ii < icount and inst_top + @sizeOf(InstanceData) <= inst_cap_bytes) : (ii += 1) {
-                        const base = @as(usize, ii) * stride;
+                        const base = @as(usize, ifirst + ii) * stride;
                         const inst_index: usize = @intCast(inst_top / @sizeOf(InstanceData));
                         const scale_base: usize = if (stride >= 12) 6 else 3;
                         const color_base: usize = if (stride >= 12) 9 else 6;

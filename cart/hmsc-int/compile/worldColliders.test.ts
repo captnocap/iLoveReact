@@ -9,8 +9,11 @@ import {
   buildBakedColliders,
   encodeCollidersLump,
   encodePhysicsConfigLump,
+  paintedFloorTopAt,
   type BakedPhysicsConfig,
 } from './worldColliders';
+import { CHUNK_TILES } from '../chunks';
+import type { ChunkFloor } from '../chunkFloor';
 
 function anEdgeWall(): string {
   for (const id of GAME_BUILD.catalog.ids as readonly string[]) {
@@ -129,6 +132,33 @@ test('PHYSICS_CONFIG lump round-trips field order', () => {
   assertClose(pv.getFloat32(4 + 2 * 4, true), 0.34, 1e-6, 'player radius at slot 2');
   assertClose(pv.getFloat32(4 + 11 * 4, true), 2.4, 1e-6, 'walk speed at slot 11');
   assertClose(pv.getFloat32(4 + 12 * 4, true), 5.8, 1e-6, 'run speed at slot 12');
+});
+
+test('paintedFloorTopAt mirrors the collider surface law (req_0630)', () => {
+  // 3×3 height samples spanning the chunk; a 9.6m peak at the grid center.
+  const relief: ChunkFloor = {
+    cx: 0,
+    cz: 0,
+    tileData: [2, 2, 1, 0.5, 0.5, 0.5, 0, 0, 0, 0],
+    heights: [0, 0, 0, 0, 9.6, 0, 0, 0, 0],
+    hcols: 3,
+    hrows: 3,
+    hver: 1,
+  };
+  const flat: ChunkFloor = {
+    cx: 1,
+    cz: 0,
+    tileData: [2, 2, 1, 0.5, 0.5, 0.5, 0, 0, 0, 0],
+    heights: [2, 2, 2, 2],
+    hcols: 2,
+    hrows: 2,
+    hver: 1,
+  };
+  const floors = [relief, flat];
+  const mid = CHUNK_TILES / 2;
+  assertClose(paintedFloorTopAt(floors, mid, mid)!, 9.6, 1e-6, 'relief chunk stands you on the height grid (the hill the tree rests on)');
+  assertClose(paintedFloorTopAt(floors, CHUNK_TILES + mid, mid)!, 2.1, 1e-6, 'flat chunk stands you on the slab top (level + 0.1)');
+  assert(paintedFloorTopAt(floors, -10, -10) === null, 'outside every painted chunk is void');
 });
 
 finish('worldColliders');

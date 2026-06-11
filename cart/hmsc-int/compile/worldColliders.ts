@@ -106,6 +106,41 @@ function flatChunkField(f: ChunkFloor, slot: number): Heightfield | null {
   };
 }
 
+/** The PAINTED-FLOOR walkable surface at (x, z), or null when no chunk covers
+ *  the point — the same per-chunk law the colliders above ship: a FLAT chunk
+ *  stands you on its slab top (level + PAINTED_FLOOR_SLAB_TOP_METERS), a
+ *  relief/road chunk on its height grid (the draped heightfield surface).
+ *  This is the terrain the bake's piece/prop lifts must rest things on
+ *  (req_0630: a tree on a painted hill shipped buried at y=0 because the lift
+ *  sampled only state.world.landforms — the live painted hill exists ONLY in
+ *  the session floors). Nearest-sample, matching the loader's ground walk. */
+export function paintedFloorTopAt(floors: readonly ChunkFloor[], x: number, z: number): number | null {
+  let best: number | null = null;
+  for (const f of floors) {
+    const originX = f.cx * CHUNK_TILES;
+    const originZ = f.cz * CHUNK_TILES;
+    if (x < originX || z < originZ || x > originX + CHUNK_TILES || z > originZ + CHUNK_TILES) continue;
+    const tcols = f.tileData[0] | 0;
+    const trows = f.tileData[1] | 0;
+    if (tcols <= 0 || trows <= 0) continue; // nothing painted — void
+    let top: number;
+    if (floorHasRelief(f)) {
+      const hcols = Math.max(1, f.hcols);
+      const hrows = Math.max(1, f.hrows);
+      if (!f.heights || f.heights.length < hcols * hrows) continue;
+      const hCell = hcols > 1 ? CHUNK_TILES / (hcols - 1) : CHUNK_TILES;
+      const hi = Math.min(hcols - 1, Math.max(0, Math.round((x - originX) / hCell)));
+      const hj = Math.min(hrows - 1, Math.max(0, Math.round((z - originZ) / hCell)));
+      top = f.heights[hj * hcols + hi] ?? 0;
+    } else {
+      const level = f.heights && f.heights.length > 0 ? (f.heights[0] ?? 0) : 0;
+      top = level + PAINTED_FLOOR_SLAB_TOP_METERS;
+    }
+    if (best === null || top > best) best = top;
+  }
+  return best;
+}
+
 /** Build the authored colliders for the placed pieces (the +-join-aware wall /
  *  floor / pillar bands + the ramp/stair slopes) PLUS one collision heightfield
  *  per FLAT painted chunk. The painted ground travels as heightfields, NOT
