@@ -43,6 +43,10 @@ pub const LumpType = struct {
     /// Player physics tuning + walk/run speeds, baked so the shipped game matches
     /// the editor play view. See runtime/workspace/lumps.ts PHYSICS_CONFIG.
     pub const physics_config: u32 = 15;
+    /// The prop interaction layer (PROPUSE req_0624): seat/container archetypes
+    /// + thin instance refs, so E-to-sit/search works in the compiled game.
+    /// See runtime/workspace/lumps.ts INTERACTABLES + compile/worldInteractables.ts.
+    pub const interactables: u32 = 16;
 };
 
 pub const Lump = struct {

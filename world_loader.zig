@@ -31,6 +31,7 @@ const scene3d = @import("framework/gpu/3d.zig");
 const material_tex = @import("framework/gpu/material_tex.zig");
 const decal_raster = @import("framework/gpu/decal_raster.zig");
 const layout = @import("framework/layout.zig");
+const text_engine = @import("framework/primitive/text.zig");
 const Node = layout.Node;
 const constructor = @import("framework/world/constructor.zig");
 const streaming = @import("framework/world/streaming.zig");
@@ -108,7 +109,19 @@ const PLAYER_RUN_CYCLES_PER_SECOND: f32 = 2.3;
 const PLAYER_CLIP_IDLE: u32 = 0;
 const PLAYER_CLIP_WALK: u32 = 1;
 const PLAYER_CLIP_JUMP: u32 = 2;
+// PROPUSE req_0624 — the seat poses (compile/playerModel.ts CLIP.sit/lay).
+const PLAYER_CLIP_SIT: u32 = 3;
+const PLAYER_CLIP_LAY: u32 = 4;
 const MAX_EMBEDDED_LOADERS: usize = 8;
+
+// ── prop interaction (PROPUSE req_0624) — parity with /test's interact frame
+// (cart/hmsc-int/editors/play/PlayRoute.tsx): same reach, same cancel radius,
+// same prompt grammar, driven by the INTERACTABLES lump instead of a JS scan.
+const SCAN_E: usize = 8;
+const INTERACT_REACH_METERS: f32 = 2.2;
+const INTERACT_Y_WINDOW_METERS: f32 = 2.5;
+const INTERACT_SEARCH_CANCEL_MOVE_METERS: f32 = 0.35;
+const INTERACT_NOTICE_SECONDS: f32 = 3.2;
 
 const log = std.debug;
 
@@ -117,6 +130,8 @@ const Vec3 = struct {
     y: f32,
     z: f32,
 };
+
+const Posture = enum { none, sit, lay };
 
 const PlayerState = struct {
     x: f32,
@@ -129,6 +144,48 @@ const PlayerState = struct {
     grounded: bool = false,
     gait_phase: f32 = 0,
     jump_time: f32 = 0,
+    /// Seated/lying on a prop (PROPUSE req_0624): movement is skipped and the
+    /// figure plays the baked sit/lay clip until WASD/Space stands up.
+    posture: Posture = .none,
+};
+
+/// The interaction frame's live state — what the player can do right now and
+/// what the HUD shows (prompt / search bar / notice). One per Runtime.
+const InteractState = struct {
+    /// session-local searched flags, parallel to interactables.instances
+    searched: []bool = &.{},
+    search_active: bool = false,
+    search_instance: usize = 0,
+    search_elapsed: f32 = 0,
+    search_anchor_x: f32 = 0,
+    search_anchor_z: f32 = 0,
+    prev_e_down: bool = false,
+    prompt_buf: [160]u8 = undefined,
+    prompt_len: usize = 0,
+    notice_buf: [192]u8 = undefined,
+    notice_len: usize = 0,
+    notice_left: f32 = 0,
+    /// 0..1 while a search runs, negative when no bar should draw
+    bar_progress: f32 = -1,
+
+    fn prompt(self: *const InteractState) []const u8 {
+        return self.prompt_buf[0..self.prompt_len];
+    }
+
+    fn notice(self: *const InteractState) []const u8 {
+        return self.notice_buf[0..self.notice_len];
+    }
+
+    fn setPrompt(self: *InteractState, comptime fmt: []const u8, args: anytype) void {
+        const written = std.fmt.bufPrint(&self.prompt_buf, fmt, args) catch self.prompt_buf[0..0];
+        self.prompt_len = written.len;
+    }
+
+    fn postNotice(self: *InteractState, comptime fmt: []const u8, args: anytype) void {
+        const written = std.fmt.bufPrint(&self.notice_buf, fmt, args) catch self.notice_buf[0..0];
+        self.notice_len = written.len;
+        self.notice_left = INTERACT_NOTICE_SECONDS;
+    }
 };
 
 const CameraState = struct {
@@ -1396,7 +1453,11 @@ fn sampleClipTransform(clip: constructor.PlayerAnimationClip, node_index: usize,
 
 fn updatePlayerModelNodes(kids: []Node, first: usize, groups: []const constructor.PlayerModelGroup, animation: constructor.PlayerAnimationSet, player: PlayerState, moving: bool, running: bool, airborne: bool) void {
     const model_yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
-    const clip_id: u32 = if (airborne) PLAYER_CLIP_JUMP else if (moving or running) PLAYER_CLIP_WALK else PLAYER_CLIP_IDLE;
+    const clip_id: u32 = switch (player.posture) {
+        .sit => PLAYER_CLIP_SIT,
+        .lay => PLAYER_CLIP_LAY,
+        .none => if (airborne) PLAYER_CLIP_JUMP else if (moving or running) PLAYER_CLIP_WALK else PLAYER_CLIP_IDLE,
+    };
     const clip_time: f32 = if (clip_id == PLAYER_CLIP_WALK) player.gait_phase else if (clip_id == PLAYER_CLIP_JUMP) player.jump_time else 0;
     const clip = if (animation.node_count == groups.len) findPlayerClip(animation, clip_id) else null;
     var i: usize = 0;
@@ -1511,6 +1572,8 @@ pub const Runtime = struct {
     player_first_child: usize = 0,
     player: PlayerState = undefined,
     camera: CameraState = undefined,
+    /// Prop interaction (PROPUSE req_0624) — driven by scene.interactables.
+    interact: InteractState = .{},
     last_ns: i64 = 0,
     frame: u32 = 0,
     // Content streaming (engaged when the world outgrows the detail radius):
@@ -1624,6 +1687,7 @@ pub const Runtime = struct {
         if (self.camera_colliders) |cam_cols| cam_cols.deinit(self.allocator);
         if (self.grid) |g| g.deinit(self.allocator);
         if (self.fallback) |f| self.allocator.free(f);
+        if (self.interact.searched.len > 0) self.allocator.free(self.interact.searched);
         self.scene.deinit(self.allocator);
         self.* = undefined;
     }
@@ -1646,6 +1710,13 @@ pub const Runtime = struct {
         self.piece_count = self.scene.piece_count;
         log.print("[loader] built {d} mesh instances ({d} placed pieces)\n", .{ self.inst_count, self.piece_count });
         if (self.inst_count == 0) log.print("[loader] empty world — rendering sky/model over void\n", .{});
+
+        // PROPUSE req_0624: session-local searched flags, one per interactable.
+        if (self.scene.interactables) |ia| {
+            self.interact.searched = try self.allocator.alloc(bool, ia.instances.len);
+            @memset(self.interact.searched, false);
+            log.print("[loader] interaction layer: {d} archetypes, {d} interactable props\n", .{ ia.archetypes.len, ia.instances.len });
+        }
 
         self.physics_colliders = try buildPhysicsColliders(self.allocator, self.scene, self.insts, self.inst_count, self.stride);
         self.has_physics_colliders = true;
@@ -2282,14 +2353,24 @@ pub const Runtime = struct {
         const walk_speed = if (cfg) |cf| cf.walk_speed else PLAYER_WALK_SPEED_METERS_PER_SECOND;
         const run_speed = if (cfg) |cf| cf.run_speed else PLAYER_RUN_SPEED_METERS_PER_SECOND;
         const speed: f32 = if (run_down) run_speed else walk_speed;
-        // Refresh the near-field collider window around the player (huge maps only).
-        // Cheap — it touches only the spanning list + the cells around the player.
-        if (self.windowed) self.rebuildWindow(self.player.x, self.player.z);
-        runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE), cfg);
+        // PROPUSE req_0624: a seated/lying player is pinned to the seat and the
+        // movement step is skipped — WASD or Space stands up (/test parity:
+        // the embodied loop owns the exit, the world keeps stepping).
+        if (self.player.posture != .none and (@abs(forward) + @abs(strafe) > 0.001 or keyDown(SCAN_SPACE))) {
+            self.player.posture = .none;
+        }
+        if (self.player.posture == .none) {
+            // Refresh the near-field collider window around the player (huge maps only).
+            // Cheap — it touches only the spanning list + the cells around the player.
+            if (self.windowed) self.rebuildWindow(self.player.x, self.player.z);
+            runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE), cfg);
+        }
         if (self.camera.aiming) self.player.yaw = self.camera.yaw_degrees * std.math.pi / 180.0;
-        const moving = @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001;
-        const airborne = !self.player.grounded or @abs(self.player.vy) > 0.05;
+        const seated = self.player.posture != .none;
+        const moving = !seated and @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001;
+        const airborne = !seated and (!self.player.grounded or @abs(self.player.vy) > 0.05);
         updatePlayerAnimationClock(&self.player, dt, moving, run_down, airborne);
+        self.stepInteract(dt);
 
         updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, self.cameraColliderSet(), dt);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
@@ -2297,6 +2378,111 @@ pub const Runtime = struct {
         // (uses the camera solved just above for sight culling).
         self.refreshStreamNodes();
         self.frame += 1;
+    }
+
+    /// PROPUSE req_0624 — /test's interact frame, native: resolve the nearest
+    /// seat/container in reach over the INTERACTABLES lump, run the prompt /
+    /// E edge / search timer, pin the seat pose. Mirrors PlayRoute.tsx
+    /// interactFrame semantics (reach, cancel radius, prompt grammar).
+    fn stepInteract(self: *Runtime, dt: f32) void {
+        const st = &self.interact;
+        if (st.notice_left > 0) st.notice_left = @max(0, st.notice_left - dt);
+        st.prompt_len = 0;
+        st.bar_progress = -1;
+        const ia = self.scene.interactables orelse return;
+        if (ia.instances.len == 0) return;
+
+        // 1. advance / cancel / finish an active search
+        if (st.search_active) {
+            const arch = ia.archetypes[ia.instances[st.search_instance].archetype];
+            const adx = self.player.x - st.search_anchor_x;
+            const adz = self.player.z - st.search_anchor_z;
+            const moved_away = @sqrt(adx * adx + adz * adz) > INTERACT_SEARCH_CANCEL_MOVE_METERS;
+            st.search_elapsed += dt;
+            if (moved_away) {
+                st.search_active = false;
+                st.postNotice("Search interrupted", .{});
+            } else if (st.search_elapsed >= arch.search_seconds) {
+                st.search_active = false;
+                st.searched[st.search_instance] = true;
+                st.postNotice("Searched the {s} — empty for now ({s} loot lands with the item system)", .{ arch.label, arch.loot_category });
+            } else {
+                st.bar_progress = clamp(st.search_elapsed / @max(0.001, arch.search_seconds), 0, 1);
+                st.setPrompt("Searching the {s}...", .{arch.label});
+            }
+        }
+
+        // 2. resolve the nearest interactable in reach
+        var target: ?usize = null;
+        if (self.player.posture != .none) {
+            st.setPrompt("WASD / Space — stand up", .{});
+        } else if (!st.search_active) {
+            var best_distance: f32 = INTERACT_REACH_METERS;
+            for (ia.instances, 0..) |inst, i| {
+                if (@abs(inst.y - self.player.y) > INTERACT_Y_WINDOW_METERS) continue;
+                const dx = inst.x - self.player.x;
+                const dz = inst.z - self.player.z;
+                const distance = @sqrt(dx * dx + dz * dz);
+                if (distance > best_distance) continue;
+                best_distance = distance;
+                target = i;
+            }
+            if (target) |i| {
+                const arch = ia.archetypes[ia.instances[i].archetype];
+                if (arch.has_container) {
+                    if (st.searched[i]) {
+                        st.setPrompt("{s} — already searched", .{arch.label});
+                    } else if (arch.access != 0) {
+                        st.setPrompt("{s} — locked (needs a key)", .{arch.label});
+                    } else {
+                        st.setPrompt("E — search the {s}", .{arch.label});
+                    }
+                } else if (arch.has_seat) {
+                    if (arch.seat_pose == 1) {
+                        st.setPrompt("E — lie down on the {s}", .{arch.label});
+                    } else {
+                        st.setPrompt("E — sit on the {s}", .{arch.label});
+                    }
+                }
+            }
+        }
+
+        // 3. the E edge
+        const down = keyDown(SCAN_E);
+        const pressed = down and !st.prev_e_down;
+        st.prev_e_down = down;
+        if (!pressed or st.search_active or self.player.posture != .none) return;
+        const i = target orelse return;
+        const inst = ia.instances[i];
+        const arch = ia.archetypes[inst.archetype];
+        if (arch.has_container) {
+            if (st.searched[i]) {
+                st.postNotice("Nothing left in there", .{});
+            } else if (arch.access != 0) {
+                st.postNotice("The {s} is locked — needs a key", .{arch.label});
+            } else {
+                st.search_active = true;
+                st.search_instance = i;
+                st.search_elapsed = 0;
+                st.search_anchor_x = self.player.x;
+                st.search_anchor_z = self.player.z;
+                st.bar_progress = 0;
+            }
+            return;
+        }
+        if (!arch.has_seat) return;
+        // seat: pin the player to the prop (/test adoptPose parity: position =
+        // the prop anchor, velocity zeroed, facing = the prop's yaw); stepNow's
+        // stand-up edge owns the exit.
+        self.player.x = inst.x;
+        self.player.y = inst.y;
+        self.player.z = inst.z;
+        self.player.vx = 0;
+        self.player.vy = 0;
+        self.player.vz = 0;
+        self.player.yaw = inst.yaw_degrees * std.math.pi / 180.0;
+        self.player.grounded = true;
+        self.player.posture = if (arch.seat_pose == 1) .lay else .sit;
     }
 
     pub fn sceneNodeForFrame(self: *Runtime) *Node {

@@ -37,6 +37,7 @@ import { loadCustomTextures, type CustomTexture } from '@game/textures/materials
 import { BUILTIN_DECALS } from '@game/textures/builtinDecals';
 import { packDecalDoc } from './decalPack';
 import type { DecalAssetSink } from './decalAssets';
+import { createInteractableSink, type InteractableSink } from './worldInteractables';
 import { textBytes } from '@reactjit/workspace';
 
 export const INSTANCE_STRIDE = 13;
@@ -131,10 +132,14 @@ type Build = {
   /** the bake's content-addressed image collector (DECALIMG-0610) — absent on
    *  paths that can't ship assets (decal image nodes then pack key 0) */
   assets?: DecalAssetSink;
+  /** seat/container props recorded as they lower (PROPUSE req_0624) — the
+   *  INTERACTABLES lump's source, collected in ONE place so every caller
+   *  (build pieces and painted world layers alike) ships the capability */
+  interact: InteractableSink;
 };
 
 function newBuild(assets?: DecalAssetSink): Build {
-  return { inst: [], mats: [], vocab: [], index: new Map(), assets };
+  return { inst: [], mats: [], vocab: [], index: new Map(), assets, interact: createInteractableSink() };
 }
 
 // Resolve a {kind:'material'} skin to its shipped recipe and intern it; return
@@ -1052,6 +1057,7 @@ function propParts(prop: WorldProp): PropPartSpec[] {
 }
 
 function pushPropGeometry(b: Build, prop: WorldProp): number {
+  b.interact.collect(prop);
   return pushPropParts(b, prop, propParts(prop));
 }
 
@@ -1505,6 +1511,9 @@ export type WorldInstanceResult = {
   /** The content-addressed material vocab the host materializes at load: each a
    *  WGSL shader + its data[] params. Empty when nothing is material-skinned. */
   materials: MaterialAsset[];
+  /** Seat/container props (archetypes + instance refs) for the INTERACTABLES
+   *  lump — the compiled game's E-to-sit/search capability (req_0624). */
+  interactables: Pick<InteractableSink, 'archetypes' | 'instances'>;
 };
 
 /** Build the packed instance buffer for the authored world.
@@ -1536,6 +1545,7 @@ export function buildWorldInstances(
     pieces: pieceCount,
     materialRefs: Uint32Array.from(b.mats),
     materials: b.vocab,
+    interactables: { archetypes: b.interact.archetypes, instances: b.interact.instances },
   };
 }
 

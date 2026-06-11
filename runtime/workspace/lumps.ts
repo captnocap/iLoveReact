@@ -78,6 +78,12 @@ export const MAP_LUMP = {
   // walkableSidePushGrace, accelMultiplier, surfaceFriction, surfaceRestitution,
   // walkSpeed, runSpeed. Absent → loader keeps its built-in defaults.
   PHYSICS_CONFIG: 15,
+  // The prop interaction layer (PROPUSE req_0624): seat/container ARCHETYPES
+  // (one per prop kind — label, sit/lay pose + height, search seconds, access,
+  // loot category) plus thin instance refs (archetype index + transform), so
+  // the no-V8 loader carries /test's E-to-sit/search capability as data.
+  // Layout: cart/hmsc-int/compile/worldInteractables.ts encodeInteractables.
+  INTERACTABLES: 16,
 } as const;
 
 export type LumpInput = {

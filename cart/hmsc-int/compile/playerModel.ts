@@ -30,6 +30,11 @@ const CLIP = {
   idle: 0,
   walk: 1,
   jump: 2,
+  // PROPUSE req_0624 — the seat poses, baked from the SAME skeleton posture
+  // actions /test plays live (Embodied.tsx: {target:'body', action:posture}).
+  // Loader twin: world_loader.zig PLAYER_CLIP_SIT / PLAYER_CLIP_LAY.
+  sit: 3,
+  lay: 4,
 } as const;
 
 export type PlayerTransform = {
@@ -233,12 +238,19 @@ export function buildDefaultPlayerAnimation(nodeCount: number): BakedPlayerAnima
     jumpKeys.push(keyframe(phase, transforms));
   }
 
+  const sitTransforms = rigTransforms('stand', 0, [{ target: 'body', action: 'sit', phase: 1, weight: 1 }]);
+  assertNodeCount(sitTransforms, nodeCount, 'sit');
+  const layTransforms = rigTransforms('stand', 0, [{ target: 'body', action: 'lay', phase: 1, weight: 1 }]);
+  assertNodeCount(layTransforms, nodeCount, 'lay');
+
   return {
     nodeCount,
     clips: [
       { id: CLIP.idle, duration: 1, looping: false, keyframes: [keyframe(0, idleTransforms)] },
       { id: CLIP.walk, duration: 1, looping: true, keyframes: walkKeys },
       { id: CLIP.jump, duration: 1, looping: false, keyframes: jumpKeys },
+      { id: CLIP.sit, duration: 1, looping: false, keyframes: [keyframe(0, sitTransforms)] },
+      { id: CLIP.lay, duration: 1, looping: false, keyframes: [keyframe(0, layTransforms)] },
     ],
   };
 }

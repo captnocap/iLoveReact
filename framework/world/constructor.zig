@@ -20,11 +20,13 @@ pub const Error = gamefile.Error || error{
     BadHeightfields,
     BadColliders,
     BadPhysicsConfig,
+    BadInteractables,
 };
 
 const COLLIDERS_VERSION: u32 = 1;
 const PHYSICS_CONFIG_VERSION: u32 = 1;
 const PHYSICS_CONFIG_FLOATS: usize = 13;
+const INTERACTABLES_VERSION: u32 = 1;
 
 const SCENE_ENV_VERSION: u32 = 1;
 const SCENE_ENV_FLOATS: usize = 35;
@@ -286,6 +288,47 @@ pub const PhysicsConfig = struct {
     run_speed: f32,
 };
 
+/// One interaction archetype — the seat/container definition a prop KIND
+/// carries, stored once and referenced by every instance (the lump's factored
+/// shape). Writer twin: compile/worldInteractables.ts encodeInteractables.
+pub const InteractArchetype = struct {
+    has_seat: bool,
+    has_container: bool,
+    /// 0 = sit, 1 = lay
+    seat_pose: u8,
+    /// 0 = open, 1 = locked, 2 = keyed
+    access: u8,
+    seat_height: f32,
+    search_seconds: f32,
+    label: []u8,
+    loot_category: []u8,
+
+    pub fn deinit(self: InteractArchetype, allocator: std.mem.Allocator) void {
+        allocator.free(self.label);
+        allocator.free(self.loot_category);
+    }
+};
+
+/// One placed interactable prop: archetype ref + transform.
+pub const InteractInstance = struct {
+    archetype: u32,
+    x: f32,
+    y: f32,
+    z: f32,
+    yaw_degrees: f32,
+};
+
+pub const Interactables = struct {
+    archetypes: []InteractArchetype,
+    instances: []InteractInstance,
+
+    pub fn deinit(self: Interactables, allocator: std.mem.Allocator) void {
+        for (self.archetypes) |archetype| archetype.deinit(allocator);
+        allocator.free(self.archetypes);
+        allocator.free(self.instances);
+    }
+};
+
 pub const Scene = struct {
     width: u32,
     height: u32,
@@ -325,6 +368,10 @@ pub const Scene = struct {
     /// content store at construct — the packed decal docs reference them by
     /// key. Empty when no decal ships an image.
     decal_assets: []DecalAsset,
+    /// The prop interaction layer (PROPUSE req_0624) — seat/container
+    /// archetypes + instance refs. null in pre-lump bakes; the loader then
+    /// simply has nothing to interact with.
+    interactables: ?Interactables,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
@@ -340,6 +387,7 @@ pub const Scene = struct {
         if (self.baked_colliders) |bc| bc.deinit(allocator);
         for (self.decal_assets) |asset| asset.deinit(allocator);
         allocator.free(self.decal_assets);
+        if (self.interactables) |ia| ia.deinit(allocator);
     }
 };
 
@@ -700,6 +748,81 @@ fn decodePhysicsConfig(data: []const u8) Error!PhysicsConfig {
     };
 }
 
+/// Decode the INTERACTABLES lump (PROPUSE req_0624). Wire layout:
+/// compile/worldInteractables.ts encodeInteractables — u32 version |
+/// u32 archetypeCount | per archetype: u8 flags (bit0 seat, bit1 container) |
+/// u8 seatPose | u8 access | u8 pad | f32 seatHeight | f32 searchSeconds |
+/// u32 labelLen | label | u32 lootLen | loot | u32 instanceCount | per
+/// instance: u32 archetypeIndex | f32 x,y,z,yawDegrees.
+fn decodeInteractables(allocator: std.mem.Allocator, data: []const u8) Error!Interactables {
+    if (data.len < 12) return Error.BadInteractables;
+    if (std.mem.readInt(u32, data[0..4], .little) != INTERACTABLES_VERSION) return Error.BadInteractables;
+    const archetype_count = std.mem.readInt(u32, data[4..8], .little);
+    var at: usize = 8;
+
+    var archetypes = try std.ArrayList(InteractArchetype).initCapacity(allocator, archetype_count);
+    errdefer {
+        for (archetypes.items) |archetype| archetype.deinit(allocator);
+        archetypes.deinit(allocator);
+    }
+    var i: usize = 0;
+    while (i < archetype_count) : (i += 1) {
+        if (at + 12 + 4 > data.len) return Error.BadInteractables;
+        const flags = data[at];
+        const seat_pose = data[at + 1];
+        const access = data[at + 2];
+        const seat_height = readF32(data, at + 4);
+        const search_seconds = readF32(data, at + 8);
+        at += 12;
+        const label_len = std.mem.readInt(u32, data[at..][0..4], .little);
+        at += 4;
+        if (at + label_len + 4 > data.len) return Error.BadInteractables;
+        const label = try allocator.dupe(u8, data[at .. at + label_len]);
+        errdefer allocator.free(label);
+        at += label_len;
+        const loot_len = std.mem.readInt(u32, data[at..][0..4], .little);
+        at += 4;
+        if (at + loot_len > data.len) return Error.BadInteractables;
+        const loot = try allocator.dupe(u8, data[at .. at + loot_len]);
+        errdefer allocator.free(loot);
+        at += loot_len;
+        try archetypes.append(allocator, .{
+            .has_seat = (flags & 1) != 0,
+            .has_container = (flags & 2) != 0,
+            .seat_pose = seat_pose,
+            .access = access,
+            .seat_height = seat_height,
+            .search_seconds = search_seconds,
+            .label = label,
+            .loot_category = loot,
+        });
+    }
+
+    if (at + 4 > data.len) return Error.BadInteractables;
+    const instance_count = std.mem.readInt(u32, data[at..][0..4], .little);
+    at += 4;
+    if (at + @as(usize, instance_count) * 20 > data.len) return Error.BadInteractables;
+    const instances = try allocator.alloc(InteractInstance, instance_count);
+    errdefer allocator.free(instances);
+    for (instances) |*inst| {
+        const archetype = std.mem.readInt(u32, data[at..][0..4], .little);
+        if (archetype >= archetype_count) return Error.BadInteractables;
+        inst.* = .{
+            .archetype = archetype,
+            .x = readF32(data, at + 4),
+            .y = readF32(data, at + 8),
+            .z = readF32(data, at + 12),
+            .yaw_degrees = readF32(data, at + 16),
+        };
+        at += 20;
+    }
+
+    return .{
+        .archetypes = try archetypes.toOwnedSlice(allocator),
+        .instances = instances,
+    };
+}
+
 /// Max packed decal recipe size — a doc is a handful of node records (~1KB
 /// typical); a corrupt length can't ask for a huge dupe.
 const MAX_DECAL_DOC_BYTES: u32 = 1 << 20;
@@ -896,6 +1019,13 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         try decodePhysicsConfig(lump.data)
     else
         null;
+    // The prop interaction layer (PROPUSE req_0624) — optional like the other
+    // post-v1 lumps; absent in pre-lump bakes and the codec fixture.
+    const interactables: ?Interactables = if (mapfile.findLump(map_lumps, mapfile.LumpType.interactables)) |lump|
+        try decodeInteractables(allocator, lump.data)
+    else
+        null;
+    errdefer if (interactables) |ia| ia.deinit(allocator);
 
     // Decal image payloads (DECALIMG-0610, req_0592): every manifest asset
     // tagged decal-image is read from the content store once, here — the
@@ -934,5 +1064,6 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .baked_colliders = baked_colliders,
         .physics_config = physics_config,
         .decal_assets = decal_assets,
+        .interactables = interactables,
     };
 }

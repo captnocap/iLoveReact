@@ -179,3 +179,20 @@ which side the user is aiming from. Edge snap now has a wall-specific face path:
 end-cap hits extend the wall collinearly, side-face hits near an endpoint turn
 the corner on the aimed side, and side-face hits away from endpoints stay on the
 same authored wall line. Floor/roof side faces remain blocked for wall-on-floor.
+
+## REQ-0596 (2026-06-11): prop freeform override in iso authoring
+
+Default prop placement still rides the 1m substrate from GRIDSNAP-0605. In the
+iso authoring pane, holding Alt while placing a prop passes an explicit
+`freeform` flag to `resolveSnapTarget`, landing on the cursor hit quantized only
+to the freeform tuning row. Holding Alt while dragging a selection made only of
+prop pieces moves by the raw world delta instead of whole grid cells, so props
+can sit flush against walls. Structural selections remain grid/module locked.
+
+## REQ-0598 (2026-06-11): R rotates selected placed items too
+
+The iso pane's R key is now mode-sensitive: while a catalog entry is armed it
+keeps rotating the placement ghost; with nothing armed and a selection present it
+rotates the selected placed item(s). Whole-building selections commit one
+`buildingMoved` yaw update, while loose pieces use the existing remove+place
+world-stream path with the same placement metadata and `yawDegrees + 90`.

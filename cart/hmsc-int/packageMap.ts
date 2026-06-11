@@ -22,6 +22,7 @@ import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
 import { buildWorldInstances, encodeFloorHeightfields, encodeInstanceLump, encodeMaterialRefs, encodeMaterials } from './compile/worldGeometry';
 import type { DecalAssetSink } from './compile/decalAssets';
 import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, type BakedPhysicsConfig } from './compile/worldColliders';
+import { encodeInteractables } from './compile/worldInteractables';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './compile/playerModel';
 import type { ChunkFloor } from './chunkFloor';
@@ -270,6 +271,9 @@ export function createHmscMapfile(
     // against THESE, not a guess re-derived from the render boxes.
     { type: MAP_LUMP.COLLIDERS, encoding: 'raw', data: colliders },
     { type: MAP_LUMP.PHYSICS_CONFIG, encoding: 'raw', data: physics },
+    // The prop interaction layer (seat/container archetypes + instance refs) —
+    // E-to-sit/search in the compiled game (compile/worldInteractables.ts).
+    { type: MAP_LUMP.INTERACTABLES, encoding: 'raw', data: encodeInteractables(geometry.interactables) },
   ];
   if (playerModel) {
     // The compiled player figure from @game/figure. Runtime movement changes

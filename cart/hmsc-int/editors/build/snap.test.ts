@@ -151,6 +151,15 @@ test('free snap rides the 1m substrate with the user yaw (GRIDSNAP-0605: nothing
   assertEqual(target!.placement.yawDegrees, 45, 'the ghost rotation is still the user\'s');
 });
 
+test('REQ-0596: freeform override places a free prop at the cursor instead of the 1m cell center', () => {
+  const hydrant = GAME_BUILD.catalog.get('prop.fireHydrant').size;
+  const target = resolveSnapTarget(snapInput({ snap: 'free', yawDegrees: 45, size: hydrant, freeform: true }));
+  assert(!!target, 'a target resolves');
+  assertClose(target!.placement.x, 0, 1e-9, 'raw hit x, not the cell center');
+  assertClose(target!.placement.z, 4, 1e-9, 'raw hit z, not the cell center');
+  assertEqual(target!.placement.yawDegrees, 45, 'freeform still keeps the user yaw');
+});
+
 // ── piece faces: targeting + stacking ────────────────────────────────────────
 
 test('the nearer surface wins: a wall in front of the ground point takes the target', () => {

@@ -30,6 +30,8 @@ export type SnapTuning = {
   gridMeters: number;
   /** surface-mode quantization on a piece face, meters */
   surfaceSnapMeters: number;
+  /** intentional freeform prop placement quantization, meters */
+  freeformSnapMeters: number;
   /** how close an edge line must be to a floor/roof perimeter to inherit its top Y */
   edgeAnchorToleranceMeters: number;
   /** wall-face edge snap: how close to a wall endpoint a side-face hit turns the corner */
@@ -41,6 +43,7 @@ export const SNAP_TUNING_DEFAULTS: SnapTuning = {
   groundMarchStepMeters: 0.25,
   gridMeters: 1,
   surfaceSnapMeters: 0.5,
+  freeformSnapMeters: 0.01,
   edgeAnchorToleranceMeters: 0.02,
   wallEndpointSnapMeters: 0.5,
 };
@@ -69,6 +72,8 @@ export type SnapInput = {
   size: BuildPieceSize;
   /** the user's ghost rotation (grid/free/surface; edge derives its own run) */
   yawDegrees: number;
+  /** held override for prop authoring: raw hit position instead of 1m substrate */
+  freeform?: boolean;
   tuning?: SnapTuning;
 };
 
@@ -297,20 +302,33 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
   const spanZ = turned ? input.size.widthMeters : input.size.depthMeters;
   const pitchX = modulePitch(spanX, grid);
   const pitchZ = modulePitch(spanZ, grid);
+  const substratePlacement = () => {
+    const x = snapToCellCenter(hit.x, pitchX);
+    const z = snapToCellCenter(hit.z, pitchZ);
+    // ground under the SNAPPED center, so the piece sits on the terrain it covers
+    const y = common.surface === 'ground'
+      ? input.groundTopAt(x, z)
+      : gridFacePlacementY(pieceHit!.piece, input.size, x, z, yaw);
+    return { x, y, z, yawDegrees: yaw };
+  };
 
   switch (input.snap) {
-    case 'grid':
     case 'free': {
+      if (input.freeform) {
+        const x = quantize(hit.x, tuning.freeformSnapMeters);
+        const z = quantize(hit.z, tuning.freeformSnapMeters);
+        const y = common.surface === 'ground'
+          ? input.groundTopAt(x, z)
+          : gridFacePlacementY(pieceHit!.piece, input.size, x, z, yaw);
+        return { ...common, placement: { x, y, z, yawDegrees: yaw } };
+      }
+      return { ...common, placement: substratePlacement() };
+    }
+    case 'grid': {
       // 'free' rides the same substrate snap (GRIDSNAP-0605: the user's
       // verdict — raw-hit placement left props "slightly off set from
       // everything else"; the 1m grid is the floor for everything placed)
-      const x = snapToCellCenter(hit.x, pitchX);
-      const z = snapToCellCenter(hit.z, pitchZ);
-      // ground under the SNAPPED center, so the piece sits on the terrain it covers
-      const y = common.surface === 'ground'
-        ? input.groundTopAt(x, z)
-        : gridFacePlacementY(pieceHit!.piece, input.size, x, z, yaw);
-      return { ...common, placement: { x, y, z, yawDegrees: yaw } };
+      return { ...common, placement: substratePlacement() };
     }
     case 'edge': {
       if (onFace && isTopAnchorPlate(pieceHit!.piece) && !isTopFace(pieceHit!.normal)) return null;
