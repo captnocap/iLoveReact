@@ -701,3 +701,60 @@ family addition, never a schema migration").
 Priority: joins the §9.4 panel-consolidation family; sequence it AFTER the
 panel grammar (§11.4) so the merged editor is born under the new laws rather
 than retrofitted.
+
+### 12.1 REVISION (req_0607, same day) — the user's answer is better: lower it ALL to the GPU
+
+The user, on §12's "compositor interleave" cost: *"why dont you just move it
+all to the gpu instead? i mean look at cart/boxxx_demo.tsx."* Checked the
+engine. **He's right, and the engine is closer than §12 assumed.** Cost #1
+(React-captured node layers sandwiched between paintable quads) is the wrong
+plan — capture leaves the loop entirely:
+
+- `paintRectBatch` (`framework/engine.zig:2420`) already has a **flat-spec
+  path**: boxes as PURE DATA — 14-float rows (pos/size/color/radius/border),
+  no child nodes, no layout pass, straight into the instanced SDF-rect
+  pipeline (`framework/gpu/rects.zig`, 80-byte instances). A `DecalRectNode`
+  IS one of those rows with names. The decal doc never needed the JSX walk —
+  `decal.ts` is already "data only, no React imports"; only `decalRender.tsx`
+  hydrates it into React so StaticSurface can capture it. Cut the middleman:
+  **DecalDoc → instance rows is a direct serialization**, the document is
+  already the Boxxx flat-spec format.
+- So the merged painter canvas becomes ALL GPU: mask layers on paintable
+  surfaces (as today) + node layers as instanced rows, z-ordered as DRAW
+  ORDER between two GPU pipelines — not as React-capture sandwiching. No
+  StaticSurface in the edit loop at all. That also deletes the per-keystroke
+  React-render+capture the compose preview pays today, and removes the
+  editor's dependency on the exact mechanism implicated in the open re-bake
+  spike hunt (§10.2.3) — the same machinery the user experiences as /test
+  lag leaves his daily canvas.
+- Constitution math: this is P1 verbatim (JS authors the doc; Zig runs it),
+  GUIDING_LIGHT's narrow waist (declarative data through a fixed system),
+  and V28's shape (the canvas becomes engine capability parameterized by
+  data). §12's React-capture plan was the obvious-shape temptation table's
+  left column; the flat-spec path is the right column and it already exists.
+
+**The real dependency list** (smaller than §12's, and each item is already
+on a roadmap):
+1. **Glyph-atlas emit for text rows** — the SOLE hard gap, and it is
+   literally the named "next layer" in the Boxxx plan (boxxx_demo.tsx:12,
+   engine.zig: "Text/Image are skipped for now (next layer: glyph-atlas
+   emit)"). gpu_text already owns the FT faces; the work is emitting
+   positioned glyph quads into a batch instead of scatter paint. Building it
+   for the painter UNBLOCKS Boxxx v2 for every cart — shared win, one
+   roadmap item funded twice. (Mind the shared-FT-face pixel-size hazard —
+   memory `ft_face_shared`.)
+2. **Textured-quad instances** for image rows (atlas/texture binding in the
+   rect pipeline, or a sibling instanced pipeline).
+3. **Shader-filled rects**: `fillData` is a FROZEN recipe — bake it once to
+   a content-addressed texture (V29's move exactly; the material bank
+   already does this) and it becomes a textured quad. Re-bake per EDIT when
+   tweaking, never per frame.
+4. Selection chrome/handles can stay React — overlay UI, tiny, not hot.
+
+Materialize then needs no special path either: the export is one readback of
+the GPU canvas — `framework/gpu/capture.zig` (the SELFSHOT machinery) already
+reads back its own frame.
+
+§12's verdict stands (one editor, one layer stack); §12.1 replaces its
+rendering plan: **don't composite two render worlds — lower the document to
+the one the engine already batches.**
