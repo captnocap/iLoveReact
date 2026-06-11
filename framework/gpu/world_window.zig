@@ -27,6 +27,8 @@ const wgpu = @import("wgpu");
 const c = @import("../c.zig").imports;
 const gpu = @import("gpu.zig");
 const scene3d = @import("3d.zig");
+const rects = @import("rects.zig");
+const text = @import("text.zig");
 const world_loader = @import("../../world_loader.zig");
 const log = @import("../diag/log.zig");
 
@@ -366,6 +368,32 @@ pub fn frame() void {
     pass.setPipeline(g_blit_pipeline.?);
     pass.setBindGroup(0, bind_group, 0, null);
     pass.draw(3, 1, 0, 0);
+
+    // Interaction HUD (PROPUSE req_0624): this runs AFTER the main gpu.frame()
+    // reset the shared 2D batches, so they are empty and ours for the pass —
+    // append the HUD prims, point the shared globals at THIS window's size,
+    // draw them over the blitted world, then put both back (below). The 2D
+    // pipelines target the main surface format; skip when the window's format
+    // differs (drawing would trip wgpu validation).
+    var hud_rects: u32 = 0;
+    var hud_glyphs: u32 = 0;
+    if (g_surface_format == gpu.getFormat()) {
+        world_loader.drawHudForWindow(WINDOW_NODE_ID, @floatFromInt(g_width), @floatFromInt(g_height));
+        hud_rects = @intCast(rects.count());
+        hud_glyphs = @intCast(text.count());
+        if (hud_rects > 0 or hud_glyphs > 0) {
+            gpu.setGlobalsScreenSize(g_width, g_height);
+            if (hud_rects > 0) {
+                rects.upload(queue);
+                rects.drawBatch(pass, 0, hud_rects);
+            }
+            if (hud_glyphs > 0) {
+                text.upload(queue);
+                text.drawBatch(pass, 0, hud_glyphs);
+            }
+        }
+    }
+
     pass.end();
     pass.release();
     const command = encoder.finish(&.{ .label = wgpu.StringView.fromSlice("world_window_cmd") }) orelse {
@@ -375,6 +403,15 @@ pub fn frame() void {
     encoder.release();
     queue.submit(&.{command});
     command.release();
+    // Put the shared 2D state back for the next main editor frame: empty
+    // batches (ours are drawn) and the main window's screen_size (the main
+    // frame only rewrites globals when content changed — a leaked override
+    // would mis-scale the whole editor).
+    if (hud_rects > 0 or hud_glyphs > 0) {
+        rects.reset();
+        text.reset();
+        gpu.restoreGlobalsScreenSize();
+    }
     _ = surface.present();
 }
 

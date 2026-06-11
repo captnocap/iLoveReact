@@ -2485,6 +2485,52 @@ pub const Runtime = struct {
         self.player.posture = if (arch.seat_pose == 1) .lay else .sit;
     }
 
+    /// PROPUSE req_0624 — /test's InteractOverlay, native: the bottom-center
+    /// prompt pill / search loading bar / notice, drawn through the engine's
+    /// 2D batches right after the world quad is queued. Image quads record
+    /// segment boundaries, so these composite ON TOP of the world in both the
+    /// embedded /compiled route and the standalone window. Text no-ops when no
+    /// font face is initialized (drawTextLine guards); the bar still draws.
+    fn drawHud(self: *Runtime, x: f32, y: f32, w: f32, h: f32) void {
+        const st = &self.interact;
+        const has_bar = st.bar_progress >= 0;
+        const has_prompt = st.prompt_len > 0;
+        const has_notice = st.notice_left > 0 and st.notice_len > 0;
+        if (!has_bar and !has_prompt and !has_notice) return;
+        // /test anchors the overlay column 96px above the pane bottom.
+        const cx = x + w / 2;
+        const bar_block: f32 = 15 + 4 + 10;
+        const prompt_block: f32 = 25;
+        const notice_block: f32 = 22;
+        var total: f32 = 0;
+        if (has_bar) total += bar_block else if (has_prompt) total += prompt_block;
+        if (has_notice) total += if (total > 0) 6 + notice_block else notice_block;
+        var cy = y + h - 96 - total;
+        if (has_bar) {
+            // "Searching the X..." label over the 260x10 track + sky-blue fill.
+            const label = st.prompt();
+            const lw = gpu.measureTextLineWidth(label, 11);
+            gpu.drawTextLine(label, cx - lw / 2, cy, 11, 0.886, 0.910, 0.941, 1);
+            cy += 15 + 4;
+            gpu.drawRect(cx - 130, cy, 260, 10, 0.059, 0.102, 0.180, 0.8, 5, 1, 0.2, 0.255, 0.333, 1);
+            const fill_w: f32 = @max(4, @round(258 * st.bar_progress));
+            gpu.drawRect(cx - 129, cy + 1, fill_w, 8, 0.22, 0.741, 0.973, 1, 4, 0, 0, 0, 0, 0);
+            cy += 10 + 6;
+        } else if (has_prompt) {
+            const label = st.prompt();
+            const lw = gpu.measureTextLineWidth(label, 11);
+            gpu.drawRect(cx - lw / 2 - 12, cy, lw + 24, prompt_block, 0.059, 0.102, 0.180, 0.8, 6, 1, 0.2, 0.255, 0.333, 1);
+            gpu.drawTextLine(label, cx - lw / 2, cy + 5, 11, 0.886, 0.910, 0.941, 1);
+            cy += prompt_block + 6;
+        }
+        if (has_notice) {
+            const label = st.notice();
+            const lw = gpu.measureTextLineWidth(label, 10);
+            gpu.drawRect(cx - lw / 2 - 12, cy, lw + 24, notice_block, 0.090, 0.145, 0.329, 0.8, 6, 0, 0, 0, 0, 0);
+            gpu.drawTextLine(label, cx - lw / 2, cy + 4, 10, 0.749, 0.859, 0.996, 1);
+        }
+    }
+
     pub fn sceneNodeForFrame(self: *Runtime) *Node {
         self.stepNow();
         return &self.root;
@@ -2564,7 +2610,11 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
     runtime.last_aspect = w / @max(h, 1); // streaming's sight culling needs the real pane shape
     runtime.stepNow();
     runtime.ensureMaterials();
-    return scene3d.render(&runtime.root, x, y, w, h, opacity);
+    const ok = scene3d.render(&runtime.root, x, y, w, h, opacity);
+    // Interaction HUD (PROPUSE req_0624) — queued after the world quad so the
+    // image-boundary segmentation draws it on top, inside this pane.
+    if (ok) runtime.drawHud(x, y, w, h);
+    return ok;
 }
 
 /// WORLDWIN-0611: step a mounted runtime and render it into a CALLER-OWNED
@@ -2578,6 +2628,15 @@ pub fn renderDetachedView(node_id: u32, target: *scene3d.DetachedTarget, w: f32,
     runtime.stepNow();
     runtime.ensureMaterials();
     return scene3d.renderDetached(target, &runtime.root, w, h);
+}
+
+/// WORLDWIN + PROPUSE req_0624: queue the interaction HUD prims for a
+/// window-mounted runtime at (0,0,w,h). The window's frame draws them into
+/// its own pass (world_window.zig owns globals/upload/reset around it).
+pub fn drawHudForWindow(node_id: u32, w: f32, h: f32) void {
+    const entry = findMounted(node_id) orelse return;
+    const runtime = entry.runtime orelse return;
+    runtime.drawHud(0, 0, w, h);
 }
 
 pub fn mouseLook(node_id: u32, dx: f32, dy: f32) void {
@@ -2632,6 +2691,21 @@ pub fn main() !void {
     };
     capture.init();
 
+    // Text for the interaction HUD (PROPUSE req_0624) — same system-font
+    // fallback chain the engine uses. Missing fonts degrade gracefully:
+    // drawTextLine no-ops without a face, the loading bar still draws.
+    var te: ?text_engine.TextEngine = text_engine.TextEngine.initHeadless("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") catch
+        text_engine.TextEngine.initHeadless("/usr/share/fonts/dejavu/DejaVuSans.ttf") catch // Alpine (font-dejavu)
+        text_engine.TextEngine.initHeadless("/System/Library/Fonts/Supplemental/Arial.ttf") catch
+        text_engine.TextEngine.initHeadless("C:/Windows/Fonts/segoeui.ttf") catch null;
+    if (te) |*engine_ref| {
+        gpu.initText(engine_ref.library, engine_ref.face, engine_ref.fallback_faces, engine_ref.fallback_count);
+        if (engine_ref.face_bold != null) gpu.setBoldFace(engine_ref.face_bold);
+    } else {
+        log.print("[loader] no system font found — HUD prompts render without text\n", .{});
+    }
+    defer if (te) |*engine_ref| engine_ref.deinit();
+
     const screenshotting = capture.isScreenshotMode();
     if (!screenshotting) log.print("[loader] live window — close it or press ESC to exit (WASD move, Shift run, Space jump, mouse look, RMB aim)\n", .{});
     if (!headless and !screenshotting) {
@@ -2660,6 +2734,8 @@ pub fn main() !void {
         }
         runtime.ensureMaterials();
         _ = scene3d.render(&runtime.root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
+        // Interaction HUD over the world quad (PROPUSE req_0624).
+        runtime.drawHud(0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H));
         gpu.frame(0.52, 0.62, 0.74); // sky-ish clear so the ground reads against it
 
         if (screenshotting) {

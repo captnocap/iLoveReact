@@ -73,14 +73,24 @@ are zero. Payloads appear in the file in directory order.
 
 ## 2. Lump types (`MAP_LUMP` / `mapfile.LumpType`)
 
-| Id | Name         | Typical encoding | Carries                                   |
-|---:|--------------|------------------|-------------------------------------------|
-| 1  | `STRINGS`    | text             | string table (e.g. tile/material names)   |
-| 2  | `TILES`      | rle8 / rle16     | per-cell tile index grid                  |
-| 3  | `HEIGHTS`    | rle8 / rle16     | per-cell quantized height grid (see §5)   |
-| 4  | `ZONES`      | rle8 / rle16     | per-cell zone index grid                  |
-| 5  | `PLACEMENTS` | text / raw       | placed-object references                  |
-| 6  | `ENTITIES`   | text / raw       | dynamic-entity seeds                      |
+| Id | Name             | Typical encoding | Carries                                   |
+|---:|------------------|------------------|-------------------------------------------|
+| 1  | `STRINGS`        | text             | string table (e.g. tile/material names)   |
+| 2  | `TILES`          | rle8 / rle16     | per-cell tile index grid                  |
+| 3  | `HEIGHTS`        | rle8 / rle16     | per-cell quantized height grid (see §5)   |
+| 4  | `ZONES`          | rle8 / rle16     | per-cell zone index grid                  |
+| 5  | `PLACEMENTS`     | text / raw       | placed-object references                  |
+| 6  | `ENTITIES`       | text / raw       | dynamic-entity seeds                      |
+| 7  | `INSTANCES`      | raw              | packed 3D instance buffer (the rendered world) |
+| 8  | `ENVIRONMENT`    | raw              | scene render environment (lighting/sky/camera) |
+| 9  | `PLAYER_MODEL`   | raw              | baked player mesh groups                  |
+| 10 | `PLAYER_ANIMATION` | raw            | baked player transform clips              |
+| 11 | `HEIGHTFIELDS`   | raw              | regular-grid terrain heightfields         |
+| 12 | `MATERIALS`      | raw              | face-material recipes (WGSL + data, decal docs) |
+| 13 | `MATERIAL_REFS`  | raw              | per-instance-row material reference       |
+| 14 | `COLLIDERS`      | raw              | authored physics solids (+ ramp fields)   |
+| 15 | `PHYSICS_CONFIG` | raw              | player physics tuning + walk/run speeds   |
+| 16 | `INTERACTABLES`  | raw              | prop interaction layer: seat/container archetypes + instance refs (PROPUSE req_0624) |
 
 Type ids are an open numeric space; new types append without disturbing readers
 that don't know them (§1.4).
@@ -88,9 +98,12 @@ that don't know them (§1.4).
 ### 2.1 Game-file (top-level) lump types (`GAME_LUMP` / `gamefile.LumpId`)
 
 A *game file* (§7) is a top-level RJMP container carrying the three RLE streams
-plus the asset vocabulary. Its lump ids occupy a distinct range (16+) so they
-never collide with the map sub-lumps (1–6), which appear *inside* the nested map
-stream:
+plus the asset vocabulary. Its id space is INDEPENDENT of the map sub-lump
+space — map sub-lumps appear only *inside* the nested map stream's own RJMP
+container, so a reader always knows which table applies. (Historically the
+top-level ids started at 16 to also stay numerically disjoint; the map space
+reached 16 with `INTERACTABLES`, so disjointness no longer holds — container
+context, not the number, is what disambiguates.)
 
 | Id | Name             | Encoding | Carries                                          |
 |---:|------------------|----------|--------------------------------------------------|

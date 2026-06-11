@@ -1768,3 +1768,37 @@ mouse, WASD walks (world_loader reads process-wide key state — zero new
 plumbing), Esc releases, RMB aims; its events are consumed so editor hotkeys
 never fire while walking. One window for now; the runtime mounts under
 reserved node id 0xFFFFFF01.
+
+## Compiled prop interaction parity (PROPUSE-COMPILED, req_0624, 2026-06-11)
+
+The compiled game now carries /test's prop interaction capability (E to
+sit / lie down / search, PROPUSE-0610) — as DATA plus a fixed engine system,
+per V28/GUIDING_LIGHT, never JS in the loop.
+
+- **Data:** the `INTERACTABLES` map lump (id 16) — factored per the one law:
+  an ARCHETYPE table (one row per interactive prop kind: label, sit/lay pose
+  + seat height, search seconds, open/locked/keyed access, loot category —
+  the same registry data `game/kinds/props.ts` authors) plus thin instance
+  refs (archetype index + x/y/z/yaw). Writer `compile/worldInteractables.ts`
+  (collected in ONE place — `pushPropGeometry` — so build-piece props AND
+  painted world props both ship); wire spec in `runtime/workspace/lumps.ts`
+  and `docs/game/RLE_FORMAT.md` §2.
+- **Engine:** `constructor.zig decodeInteractables` → `Scene.interactables`;
+  `world_loader.zig stepInteract` mirrors PlayRoute's interact frame exactly
+  (reach 2.2m, |Δy| ≤ 2.5m, nearest wins, E edge, search cancels past 0.35m,
+  session-local searched set, locked denial, seat pins the player + skips the
+  movement step until WASD/Space stands up). Sit/lay are baked player clips
+  (CLIP 3/4 from the skeleton's posture actions, `compile/playerModel.ts`).
+- **HUD:** the loader draws /test's InteractOverlay natively (prompt pill /
+  loading bar / notice) through the engine's shared 2D batches. Embedded
+  /compiled route + standalone window: prims queue right after the world quad
+  (image quads record segment boundaries → HUD composites on top). Pop-out
+  window: `world_window.frame` appends the prims post-main-frame (batches are
+  empty then), points the shared globals at the window size
+  (`gpu.setGlobalsScreenSize`), draws them into the blit pass, then resets
+  batches + restores globals. Standalone `main()` initializes the TextEngine
+  (same font chain as the engine; no font → bar still draws, text no-ops).
+- **Proof:** `rjit game shot` GREEN — the real map bakes 14 archetypes /
+  30 interactable props and the loader logs the parsed layer at boot.
+  P4: `compile/worldInteractables.test.ts` 3/3 (factoring + exact wire
+  round-trip vs the Zig decoder's layout).

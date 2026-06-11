@@ -1391,6 +1391,23 @@ fn writeGlobals(queue: *wgpu.Queue, width: u32, height: u32) void {
     }
 }
 
+/// Point the shared 2D-pipeline globals (screen_size) at a SECONDARY surface's
+/// dimensions while it draws px-coordinate batches into its own pass (the
+/// world window's HUD, WORLDWIN + PROPUSE req_0624). writeBuffer is
+/// queue-ordered, so commands submitted after this call see the new size.
+/// ALWAYS pair with restoreGlobalsScreenSize() — the main frame only rewrites
+/// globals when its content changed, so a leaked override mis-scales the
+/// entire next editor frame.
+pub fn setGlobalsScreenSize(width: u32, height: u32) void {
+    const queue = g_queue orelse return;
+    writeGlobals(queue, width, height);
+}
+
+pub fn restoreGlobalsScreenSize() void {
+    const queue = g_queue orelse return;
+    writeGlobals(queue, g_width, g_height);
+}
+
 fn countsFromSegment(seg: ScissorSegment) PrimitiveCounts {
     return .{
         .rects = seg.rect_start,
