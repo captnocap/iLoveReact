@@ -1510,6 +1510,11 @@ fn applyTypeDefaults(node: *Node, id: u32, type_name: []const u8) void {
         node.is_paintable = true;
     } else if (eq(u8, type_name, "WorldLoader")) {
         node.world_loader = true;
+    } else if (eq(u8, type_name, "Slider")) {
+        // Host-driven slider (SLIDER-0611): engine owns the thumb while the
+        // button is down; value streams via __dispatchSliderChange and settles
+        // via __dispatchSliderCommit. See engine.zig slider drag + paintSlider.
+        node.slider = true;
     } else if (isTerminalType(type_name)) {
         node.terminal = true;
     }
@@ -2134,6 +2139,19 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                 node.scroll_x = f;
                 markScrollPropSlot(node);
             }
+        } else if (std.mem.eql(u8, k, "sliderValue")) {
+            // Controlled value — but the ENGINE owns the thumb while the
+            // button is down (SLIDER-0611): a React echo arriving mid-drag
+            // must never fight the pool-resident drag value.
+            if (!node.slider_dragging) {
+                if (jsonFloat(v)) |f| node.slider_value = f;
+            }
+        } else if (std.mem.eql(u8, k, "sliderMin")) {
+            if (jsonFloat(v)) |f| node.slider_min = f;
+        } else if (std.mem.eql(u8, k, "sliderMax")) {
+            if (jsonFloat(v)) |f| node.slider_max = f;
+        } else if (std.mem.eql(u8, k, "sliderStep")) {
+            if (jsonFloat(v)) |f| node.slider_step = @max(0, f);
         } else if (std.mem.eql(u8, k, "showScrollbar")) {
             if (jsonBool(v)) |b| node.show_scrollbar = b;
         } else if (std.mem.eql(u8, k, "scrollbarSide")) {

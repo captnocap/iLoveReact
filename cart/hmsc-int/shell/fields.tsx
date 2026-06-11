@@ -11,8 +11,8 @@
 // demonstrates). After any set() the renderer calls onEdit() so the frame
 // re-reads every get() — sources stay poll-free.
 
-import { useEffect, useRef, useState } from 'react';
-import { Box, Pressable, Text } from '@reactjit/primitives';
+import { useEffect, useState } from 'react';
+import { Box, Pressable, Slider, Text } from '@reactjit/primitives';
 import { C, accentFor } from './workbench.cls';
 import { colorRangeCells, type ColorRange } from './colorRange';
 import { PickerChooser, type PickOption } from './picker';
@@ -68,8 +68,6 @@ export function panelFieldCount(spec: PanelSpec): number {
 // group accents cycle the studio status palette (the wireframe's rhythm)
 const ACCENTS = ['primary', 'info', 'warning', 'success', 'error', 'accentTeal'];
 const SLIDER_TRACK_W = 124;
-const SLIDER_GUTTER = 7;
-const SLIDER_KNOB_W = 14;
 const NUM_INPUT_W = 66;
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -193,11 +191,15 @@ function NumField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'num' }>; onEdit: 
   );
 }
 
-// Slider drag: all three mouse handlers on the SAME node (pointer-capture
-// rule) + onLayout for the track rect, the proven cutout BrushSlider wire.
-// COMMIT ON RELEASE (WBCHAR-0606): drags preview locally and call set() ONCE
-// on mouse-up — region sliders re-sculpt a mesh per set(), so per-move
-// commits would melt the frame (the route's latch-preview law, kept).
+// HOST-DRIVEN slider (SLIDER-0611, L1: "a JavaScript slider is bad"). The
+// engine owns the thumb while the button is down — pointer math, capture,
+// repaint all happen host-side with zero JS in the loop; this component only
+// mirrors the streamed value into the label and forwards the settle. The
+// nonlinear toTrack/fromTrack consumers keep working: the host runs the
+// 0..1 track domain and the mapping stays JS-side at the seams.
+// COMMIT ON RELEASE (WBCHAR-0606, kept): set() fires ONCE on mouse-up —
+// region sliders re-sculpt a mesh per set(), so per-move commits would melt
+// the frame. The live stream only updates the local preview label.
 export function WorkbenchSlider(props: {
   value: number;
   min: number;
@@ -211,69 +213,39 @@ export function WorkbenchSlider(props: {
   tooltip?: string;
   showValue?: boolean;
 }) {
-  const rectRef = useRef<{ x: number; width: number } | null>(null);
-  const [drag, setDrag] = useState<number | null>(null); // preview value while dragging
-  const [capturing, setCapturing] = useState(false);
-  const dragRef = useRef<number | null>(null);
-  const draggingRef = useRef(false);
+  const [live, setLive] = useState<number | null>(null); // streamed value while dragging
   const toTrack = props.toTrack ?? ((v: number) => (props.max > props.min ? (v - props.min) / (props.max - props.min) : 0));
   const fromTrack = props.fromTrack ?? ((t: number) => props.min + t * (props.max - props.min));
-  const preview = (px: number) => {
-    const r = rectRef.current;
-    if (!r || r.width <= 0) return;
-    const frac = clamp((px - r.x) / r.width, 0, 1);
-    const next = fromTrack(frac);
-    if (props.commitOnRelease) {
-      dragRef.current = next;
-      setDrag(next);
-    } else {
-      props.onChange(next);
-      props.onCommit?.();
-    }
-  };
-  const finishDrag = (px?: number) => {
-    if (typeof px === 'number' && Number.isFinite(px)) preview(px);
-    draggingRef.current = false;
-    setCapturing(false);
-    const final = dragRef.current;
-    if (props.commitOnRelease && final !== null) {
-      props.onChange(final);
-      props.onCommit?.();
-    }
-    dragRef.current = null;
-    setDrag(null);
-  };
-  const v = drag ?? props.value;
-  const frac = clamp(toTrack(v), 0, 1);
-  const fillW = Math.round(frac * (SLIDER_TRACK_W - SLIDER_GUTTER * 2));
-  const knobX = Math.round(SLIDER_GUTTER + frac * (SLIDER_TRACK_W - SLIDER_GUTTER * 2 - SLIDER_KNOB_W));
+  const v = live ?? props.value;
   return (
     <>
-      <Pressable
+      <Slider
+        value={clamp(toTrack(v), 0, 1)}
+        min={0}
+        max={1}
         tooltip={props.tooltip}
-        onMouseDown={(p: any) => {
-          draggingRef.current = true;
-          setCapturing(true);
-          preview(p.x);
+        onChange={(t: number) => {
+          const next = fromTrack(clamp(t, 0, 1));
+          if (props.commitOnRelease) {
+            setLive(next);
+          } else {
+            props.onChange(next);
+            props.onCommit?.();
+          }
         }}
-        onMouseMove={(p: any) => { if (draggingRef.current) preview(p.x); }}
-        onMouseUp={(p: any) => finishDrag(Number(p?.x ?? NaN))}
-      >
-        <Box onLayout={(r: any) => { rectRef.current = { x: r.x, width: r.width }; }}>
-          <C.SliderTrack>
-            <C.SliderFill style={{ width: Math.max(3, fillW) }} />
-            <C.SliderKnob style={{ left: knobX }} />
-          </C.SliderTrack>
-        </Box>
-      </Pressable>
-      {capturing ? (
-        <Pressable
-          onMouseMove={(p: any) => { if (draggingRef.current) preview(Number(p?.x ?? 0)); }}
-          onMouseUp={(p: any) => finishDrag(Number(p?.x ?? NaN))}
-          onMouseLeave={(p: any) => finishDrag(Number(p?.x ?? NaN))}
-          style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, zIndex: 99999, backgroundColor: 'rgba(0,0,0,0.001)' }}
-        />
-      ) : null}
+        onCommit={(t: number) => {
+          const next = fromTrack(clamp(t, 0, 1));
+          setLive(null);
+          props.onChange(next);
+          props.onCommit?.();
+        }}
+        style={{
+          width: SLIDER_TRACK_W,
+          height: 14,
+          backgroundColor: accentFor('controlBg'),
+          color: accentFor('primary'),
+        }}
+      />
       {props.showValue === false ? null : <C.SliderValue>{props.show(v)}</C.SliderValue>}
     </>
   );

@@ -96,7 +96,18 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/shell/panelGrammar.ts',
       description:
-        'PANELGRAMMAR-0610 (review §11.4): pure PanelSpec analysis consulted by the one renderer (fields.tsx PanelGroups) — warns loudly once per offending panel shape, render continues. G1 repeated group shapes illegal (groupSignature detects; factor into one group + selector), G2 one color system per panel (caps: color fields/panel, quick-picks/field without wheel|range), G3 verb caps (chip walls demand t:pick, req_0184), G4 undo/redo/save render once. Named caps in PANEL_GRAMMAR_CAPS. PanelGroup grew tier:debug (collapsed by default). First fix under the law: buildings per-kind GLOBAL groups folded to ONE SKINS·GLOBAL group + class enum; its color field gained wheel+range. P4: shell/panelGrammar.test.ts (6). Remaining L1: the host-driven Slider primitive (framework) upgrades every num field in one place.',
+        'PANELGRAMMAR-0610 (review §11.4): pure PanelSpec analysis consulted by the one renderer (fields.tsx PanelGroups) — warns loudly once per offending panel shape, render continues. G1 repeated group shapes illegal (groupSignature detects; factor into one group + selector), G2 one color system per panel (caps: color fields/panel, quick-picks/field without wheel|range), G3 verb caps (chip walls demand t:pick, req_0184), G4 undo/redo/save render once. Named caps in PANEL_GRAMMAR_CAPS. PanelGroup grew tier:debug (collapsed by default). First fix under the law: buildings per-kind GLOBAL groups folded to ONE SKINS·GLOBAL group + class enum; its color field gained wheel+range. P4: shell/panelGrammar.test.ts (6).',
+      status: 'live',
+    },
+    {
+      name: 'WorkbenchSlider on the host <Slider> (SLIDER-0611)',
+      purpose: ['ui', 'input'],
+      kind: 'component',
+      sourceFile: 'cart/hmsc-int/shell/fields.tsx',
+      description:
+        'L1 closed: WorkbenchSlider renders through the framework’s host-driven <Slider> primitive (runtime/primitives.tsx; engine type "Slider"), so every num field, the shader lab, and the cutout tool rail upgraded in ONE place. The engine owns the thumb while the button is down (V23/movePlacement law applied to scrubbing): engine.zig slider drag updates the pool node’s slider_value and repaints with zero JS in the loop; paintSlider draws track/fill/knob host-side (track = style background, fill = color). JS hears __dispatchSliderChange (throttled ~60Hz, label mirror) and __dispatchSliderCommit (once on release — the authoritative settle; WBCHAR-0606 commit-on-release kept). Mid-drag sliderValue echoes are ignored host-side (slider_dragging gate in v8_app.zig applyProps). Nonlinear toTrack/fromTrack consumers keep working — host runs the 0..1 track domain, mapping stays JS-side.',
+      consumes: ['__dispatchSliderChange', '__dispatchSliderCommit'],
+      dependsOn: ['runtime/primitives.tsx <Slider>', 'framework/engine.zig paintSlider + slider drag'],
       status: 'live',
     },
     {

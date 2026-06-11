@@ -550,6 +550,24 @@ if (typeof registerDispatch === 'function') {
   }
 };
 
+// <Slider> (SLIDER-0611): the engine owns the thumb during a drag and streams
+// the value here (throttled); commit fires once on release with the settle.
+(globalThis as any).__dispatchSliderChange = (id: number, value: number) => {
+  try {
+    dispatchAliases(id, ['onChange', 'onValueChange'], { targetId: id, value });
+  } catch (e) {
+    // swallow — host prints nothing for eval exceptions except via QJS itself
+  }
+};
+
+(globalThis as any).__dispatchSliderCommit = (id: number, value: number) => {
+  try {
+    dispatchAliases(id, ['onCommit', 'onChangeEnd'], { targetId: id, value });
+  } catch (e) {
+    // swallow — host prints nothing for eval exceptions except via QJS itself
+  }
+};
+
 // Effect render dispatch. Host calls this once per frame per Effect node with
 // a zero-copy ArrayBuffer view of the pixel buffer. We build (or reuse) a
 // context object and invoke the user's onRender handler with it. The handler

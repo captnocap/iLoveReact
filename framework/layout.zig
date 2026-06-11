@@ -633,6 +633,19 @@ pub const Node = struct {
     // alternative to <Graph.Path> for icons whose geometry doesn't change.
     // Tint comes from text_color; size comes from layout (style.width/height).
     icon_name: ?[]const u8 = null,
+    // <Slider> — host-driven slider (SLIDER-0611, the V23 law applied to
+    // scrubbing: the engine owns the thumb while the button is down). While
+    // slider_dragging, motion updates slider_value pool-side and repaints with
+    // ZERO JS in the loop; the value streams to JS via __dispatchSliderChange
+    // (throttled) and settles via __dispatchSliderCommit on release. UPDATEs
+    // to sliderValue are ignored mid-drag so a React echo never fights the
+    // engine thumb. Track tint = style background, fill tint = text_color.
+    slider: bool = false,
+    slider_dragging: bool = false,
+    slider_min: f32 = 0,
+    slider_max: f32 = 1,
+    slider_step: f32 = 0, // 0 = continuous
+    slider_value: f32 = 0,
     // Graph.Polyline — flat point array {x0, y0, x1, y1, …} parsed ONCE at
     // CREATE/UPDATE from the cart's `points` prop. Engine paint emits one
     // capsule-SDF line per segment, batched. Bypasses the SVG d-string

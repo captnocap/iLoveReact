@@ -728,6 +728,14 @@ var pointer_capture_slot: u32 = 0;
 var pointer_capture_button: u8 = 0;
 var world_loader_mouse_node_id: u32 = 0;
 var world_loader_mouse_aiming: bool = false;
+// <Slider> drag (SLIDER-0611) — engine-owned thumb, the scrollbar-drag wire
+// applied to a value control. While slider_drag_slot != 0 every motion
+// updates the pool node's slider_value and repaints with zero JS in the
+// loop; the value streams to JS throttled (~60Hz, change-deduped) and the
+// settle dispatch fires once on release.
+var slider_drag_slot: u32 = 0;
+var slider_drag_last_dispatch_ms: u32 = 0;
+var slider_drag_last_sent: f32 = std.math.nan(f32);
 
 fn findNodeByScrollSlot(node: *Node, slot: u32) ?*Node {
     if (slot == 0) return null;
@@ -888,6 +896,92 @@ fn findWorldLoaderNodeById(node: *Node, id: u32) ?*Node {
         if (findWorldLoaderNodeById(child, id)) |hit| return hit;
     }
     return null;
+}
+
+// <Slider> hit walker (SLIDER-0611) — deepest slider node containing the
+// point, honoring scroll offsets exactly like hitTestWorldLoader above.
+fn hitTestSlider(node: *Node, mx: f32, my: f32) ?*Node {
+    if (node.style.display == .none) return null;
+
+    const r = node.computed;
+    const ov = node.style.overflow;
+    const is_scroll = (ov == .scroll or (ov == .auto and node.content_height > r.h));
+    var child_mx = mx;
+    var child_my = my;
+    if (is_scroll) {
+        if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
+        child_mx = mx + node.scroll_x;
+        child_my = my + node.scroll_y;
+    }
+
+    var i = node.children.len;
+    while (i > 0) {
+        i -= 1;
+        if (hitTestSlider(&node.children[i], child_mx, child_my)) |hit| return hit;
+    }
+
+    if (node.slider and mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) {
+        return node;
+    }
+    return null;
+}
+
+// Slider geometry shared by paint + drag: the knob is a square of the node's
+// height (capped), and the value span is the track minus one knob width so
+// the knob center maps [min..max] without overhanging the rect.
+fn sliderKnobW(r: layout.LayoutRect) f32 {
+    return @min(@max(r.h, 8.0), 16.0);
+}
+
+fn sliderSnap(node: *Node, raw: f32) f32 {
+    var v = raw;
+    if (node.slider_step > 0) {
+        v = node.slider_min + @round((v - node.slider_min) / node.slider_step) * node.slider_step;
+    }
+    const lo = @min(node.slider_min, node.slider_max);
+    const hi = @max(node.slider_min, node.slider_max);
+    return @max(lo, @min(v, hi));
+}
+
+fn dispatchSliderJs(comptime fmt: []const u8, slot: u32, value: f32) void {
+    var buf: [96]u8 = undefined;
+    if (std.fmt.bufPrintZ(&buf, fmt, .{ slot, value })) |expr| {
+        js_vm.callGlobal("__beginJsEvent");
+        js_vm.evalExpr(expr);
+        js_vm.callGlobal("__endJsEvent");
+    } else |_| {}
+}
+
+fn updateSliderDrag(root: *Node, mx: f32) void {
+    if (slider_drag_slot == 0) return;
+    const node = findNodeByScrollSlot(root, slider_drag_slot) orelse return;
+    const r = node.computed;
+    const knob_w = sliderKnobW(r);
+    const span = @max(1.0, r.w - knob_w);
+    const frac = @max(0.0, @min((mx - r.x - knob_w * 0.5) / span, 1.0));
+    const next = sliderSnap(node, node.slider_min + frac * (node.slider_max - node.slider_min));
+    node.slider_value = next;
+    state_mod.markDirty();
+
+    // Stream the value (throttled + change-deduped) so the cart can mirror
+    // it live; the AUTHORITATIVE write is the commit dispatch on release.
+    const now_ms: u32 = @intCast(c.SDL_GetTicks() & 0xFFFFFFFF);
+    if (next != slider_drag_last_sent and now_ms -% slider_drag_last_dispatch_ms >= 16) {
+        slider_drag_last_dispatch_ms = now_ms;
+        slider_drag_last_sent = next;
+        dispatchSliderJs("__dispatchSliderChange({d},{d})", slider_drag_slot, next);
+    }
+}
+
+fn endSliderDrag(root: *Node) void {
+    if (slider_drag_slot == 0) return;
+    const slot = slider_drag_slot;
+    slider_drag_slot = 0;
+    if (findNodeByScrollSlot(root, slot)) |node| {
+        node.slider_dragging = false;
+        dispatchSliderJs("__dispatchSliderCommit({d},{d})", slot, node.slider_value);
+        state_mod.markDirty();
+    }
 }
 
 fn captureWorldLoaderPointer(node: *Node) void {
@@ -1731,6 +1825,78 @@ fn scrollbarOpacity(node: *Node) f32 {
     return 0.82 * (1.0 - t);
 }
 
+// <Slider> paint (SLIDER-0611) — track (style background, default studio
+// dark), fill (text_color, default studio accent), square knob sized to the
+// node height. Geometry shared with updateSliderDrag via sliderKnobW so the
+// knob center maps the value span exactly the way the drag computes it.
+fn paintSlider(node: *Node) void {
+    const r = node.computed;
+    const knob_w = sliderKnobW(r);
+    const span = @max(1.0, r.w - knob_w);
+    const denom = node.slider_max - node.slider_min;
+    const frac_raw = if (denom != 0) (node.slider_value - node.slider_min) / denom else 0;
+    const frac = @max(0.0, @min(frac_raw, 1.0));
+
+    const track_h = @min(r.h, 5.0);
+    const track_y = r.y + (r.h - track_h) * 0.5;
+
+    const tc = node.style.background_color orelse Color.rgb(46, 51, 61);
+    gpu.drawRect(
+        r.x,
+        track_y,
+        r.w,
+        track_h,
+        @as(f32, @floatFromInt(tc.r)) / 255.0,
+        @as(f32, @floatFromInt(tc.g)) / 255.0,
+        @as(f32, @floatFromInt(tc.b)) / 255.0,
+        @as(f32, @floatFromInt(tc.a)) / 255.0 * g_paint_opacity,
+        track_h * 0.5,
+        0,
+        0,
+        0,
+        0,
+        0,
+    );
+
+    const fc = node.text_color orelse Color.rgb(96, 165, 250);
+    const fill_w = knob_w * 0.5 + frac * span;
+    gpu.drawRect(
+        r.x,
+        track_y,
+        fill_w,
+        track_h,
+        @as(f32, @floatFromInt(fc.r)) / 255.0,
+        @as(f32, @floatFromInt(fc.g)) / 255.0,
+        @as(f32, @floatFromInt(fc.b)) / 255.0,
+        @as(f32, @floatFromInt(fc.a)) / 255.0 * g_paint_opacity,
+        track_h * 0.5,
+        0,
+        0,
+        0,
+        0,
+        0,
+    );
+
+    const knob_x = r.x + frac * span;
+    const knob_alpha: f32 = if (node.slider_dragging) 1.0 else 0.92;
+    gpu.drawRect(
+        knob_x,
+        r.y,
+        knob_w,
+        r.h,
+        0.84,
+        0.88,
+        0.94,
+        knob_alpha * g_paint_opacity,
+        @min(knob_w, r.h) * 0.5,
+        0,
+        0,
+        0,
+        0,
+        0,
+    );
+}
+
 fn paintScrollbars(node: *Node) void {
     const ov = node.style.overflow;
     const r = node.computed;
@@ -2067,6 +2233,14 @@ fn paintNode(node: *Node) void {
     const r = node.computed;
     if (r.w <= 0 or r.h <= 0) {
         g_zero_count += 1;
+        return;
+    }
+
+    // <Slider> — host-painted track/fill/knob from the pool-resident value
+    // (SLIDER-0611). No children, no JS: the thumb stays glued to the cursor
+    // even when the cart's render loop lags.
+    if (node.slider) {
+        paintSlider(node);
         return;
     }
 
@@ -3824,6 +3998,19 @@ pub fn run(config_in: AppConfig) !void {
                             _ = updateScrollbarDrag(config.root, pos);
                             continue;
                         }
+                        // <Slider> grab (SLIDER-0611) — engine owns the thumb until
+                        // release; the press position IS the first value write.
+                        if (hitTestSlider(config.root, mx, my)) |sn| {
+                            if (sn.scroll_persist_slot != 0) {
+                                slider_drag_slot = sn.scroll_persist_slot;
+                                slider_drag_last_dispatch_ms = 0;
+                                slider_drag_last_sent = std.math.nan(f32);
+                                sn.slider_dragging = true;
+                                input.unfocus();
+                                updateSliderDrag(config.root, mx);
+                                continue;
+                            }
+                        }
                         // Alt+click on a Canvas.Node with canvas_move_draggable starts a
                         // position-drag that the cart commits via onMove(gx, gy) on release.
                         const mod_state = c.SDL_GetModState();
@@ -4167,6 +4354,12 @@ pub fn run(config_in: AppConfig) !void {
                         _ = updateScrollbarDrag(config.root, pos);
                         continue;
                     }
+                    // <Slider> drag (SLIDER-0611) — engine-owned thumb; zero JS
+                    // in the loop beyond the throttled value stream.
+                    if (slider_drag_slot != 0) {
+                        updateSliderDrag(config.root, mx);
+                        continue;
+                    }
                     // Physics drag update
                     if (physics2d.isDragging()) {
                         physics2d.updateDrag(mx, my);
@@ -4347,6 +4540,9 @@ pub fn run(config_in: AppConfig) !void {
                             canvas_move_drag_canvas_id = 0;
                         }
                         scrollbar_drag_slot = 0;
+                        // <Slider> settle (SLIDER-0611) — ONE commit dispatch with
+                        // the final value; the cart's React state catches up here.
+                        endSliderDrag(config.root);
                         physics2d.endDrag();
                         canvas_drag_node = null;
                         input_drag_active = false;

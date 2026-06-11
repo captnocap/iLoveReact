@@ -1682,9 +1682,27 @@ shell owns them). Thresholds are named constants (`PANEL_GRAMMAR_CAPS`).
 First fix under the law: the buildings source's per-kind `<KIND>S · GLOBAL`
 groups (the user: "why do I have 3 color swatches and no wheel") folded into
 ONE `SKINS · GLOBAL` group with a class enum, and its color field opted into
-`wheel` + `range` — quick-picks on top, any tone reachable. Outstanding L1
-half: sliders are still JS (`WorkbenchSlider`); the host-driven Slider
-primitive is the framework item that upgrades every num field in one place.
+`wheel` + `range` — quick-picks on top, any tone reachable.
+
+## The host-driven Slider (SLIDER-0611, 2026-06-11) — L1 closed
+
+L1's outstanding half is done: the framework grew a first-class `<Slider>`
+primitive (`runtime/primitives.tsx`; engine type `"Slider"`) and
+`WorkbenchSlider` now renders THROUGH it — every num field, the shader lab,
+and the cutout tool rail upgraded in the one place. The engine owns the
+thumb while the button is down (the V23/movePlacement law applied to
+scrubbing): `framework/engine.zig` slider drag (hitTestSlider →
+slider_drag_slot; motion writes the pool node's `slider_value` and repaints
+with ZERO JS in the loop), `paintSlider` draws track/fill/knob host-side
+(track tint = style background, fill tint = `color`), and JS hears the value
+two ways — `__dispatchSliderChange` (throttled ~60Hz, change-deduped,
+mirrors the label) and `__dispatchSliderCommit` (ONCE on release, the
+authoritative settle; WBCHAR-0606's commit-on-release law kept). Mid-drag
+`sliderValue` prop echoes are ignored host-side (`slider_dragging` gate in
+`v8_app.zig` applyProps) so a controlled value never fights the engine
+thumb. Props: `value/min/max/step` (`sliderStep` snaps host-side),
+`onChange(v)`, `onCommit(v)`. Nonlinear `toTrack`/`fromTrack` consumers keep
+working — the host runs the 0..1 track domain, the mapping stays JS-side.
 
 ## The compiled-world POP-OUT window (WORLDWIN-0611, 2026-06-11)
 

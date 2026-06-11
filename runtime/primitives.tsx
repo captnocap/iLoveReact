@@ -956,6 +956,28 @@ export const Boxxx: any = ({ boxes, children, ...rest }: any) =>
     ? h('RectBatch', { ...rest, effectData: __packBoxxx(boxes) }, null)
     : h('RectBatch', rest, children);
 
+// ── Slider — host-driven slider (SLIDER-0611, the V23 law for scrubbing) ─
+// <Slider value min max step onChange onCommit style />
+//   The ENGINE owns the thumb while the button is down: motion updates the
+//   pool-side value and repaints with zero JS in the loop. `onChange(v)`
+//   streams the live value (throttled ~60Hz, change-deduped) for mirrors
+//   like a paired number entry; `onCommit(v)` fires ONCE on release and is
+//   the authoritative settle — wire setState there, never per-move.
+//   Mid-drag sliderValue echoes are ignored host-side, so a controlled
+//   `value` never fights the thumb. Track tint = style.backgroundColor,
+//   fill tint = style.color; knob is engine chrome.
+export const Slider: any = ({ value = 0, min = 0, max = 1, step = 0, onChange, onCommit, style, ...rest }: any) =>
+  h('Slider', {
+    ...rest,
+    sliderValue: value,
+    sliderMin: min,
+    sliderMax: max,
+    sliderStep: step,
+    onChange: onChange ? (e: any) => onChange(typeof e === 'number' ? e : e?.value ?? 0) : undefined,
+    onCommit: onCommit ? (e: any) => onCommit(typeof e === 'number' ? e : e?.value ?? 0) : undefined,
+    style: { height: 14, ...style },
+  }, null);
+
 // ── Paintable — persistent GPU mask texture, no visible rendering ─
 // <Paintable id="my-mask" w={W} h={H} />
 //   Allocates an R8Unorm GPU texture keyed by `id` at host_tree CREATE
