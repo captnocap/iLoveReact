@@ -1,6 +1,7 @@
 // workbench.test.ts — shell-level shortcut dispatch for the Workbench frame.
-// The useIFTTT bindings in Workbench.tsx call this same action resolver; source
-// tests cover the domain behavior behind the actions.
+// The editor-control-contract bindings in Workbench.tsx ('bench' scope) call
+// this same action resolver; source tests cover the domain behavior behind
+// the actions. Chord/gate behavior is covered by editors/controls.test.ts.
 
 import { assert, assertEqual, finish, test } from '../game/_testkit';
 import { workbenchActionShortcut, workbenchShortcutAction, workbenchShortcutHandlers, type ActionSpec } from './Workbench';

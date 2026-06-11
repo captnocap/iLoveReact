@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Box, ScrollView } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
-import { useIFTTT } from '../../../runtime/hooks/useIFTTT';
+import { useEditorControls } from '../editors/useEditorControls';
 // twigs are workspace-persistence INFRA, not game knowledge — the LabsRoute
 // precedent (shell/LabsRoute.tsx imports the same hook)
 import { useRouteTwigState } from '../editors/twigs';
@@ -192,10 +192,18 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
     setSelBySrc((s) => ({ ...s, [source.id]: id }));
   };
 
-  useIFTTT('key:ctrl+z', () => shortcutRef.current.undo?.());
-  useIFTTT('key:ctrl+y', () => shortcutRef.current.redo?.());
-  useIFTTT('key:ctrl+shift+z', () => shortcutRef.current.redo?.());
-  useIFTTT('key:ctrl+s', () => shortcutRef.current.save?.());
+  // The shell chords ride the EDITOR CONTROL CONTRACT ('bench' scope,
+  // editors/controls.ts) — same table that renders legends and catches key
+  // conflicts. The contract's typing gate means a focused text field keeps
+  // its own ctrl+z; the bench acts only when nothing is being typed.
+  useEditorControls('bench', {
+    active: true,
+    handlers: {
+      'bench.undo': () => shortcutRef.current.undo?.(),
+      'bench.redo': () => shortcutRef.current.redo?.(),
+      'bench.save': () => shortcutRef.current.save?.(),
+    },
+  });
 
   if (!selRow) {
     const emptyActions = source.emptyActions?.() ?? [];

@@ -15,7 +15,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
-import { busOn } from '@reactjit/hooks/useIFTTT';
 import { GAME_BUILD, GAME_NATIVE_CAMERA, buildingDefFromPieces, buildingPieceInstanceId, partitionBuildingSelection } from './game';
 import type { BuildEditEvent, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingInstance, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
 import { resolveSnapTarget, modulePitch, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
@@ -25,6 +24,7 @@ import { FacePainter } from './editors/build/FacePainter';
 import { BUILD_UI } from './editors/build/buildUi';
 import { IsoStage, METERS_PER_LEVEL, type IsoPose } from './isoStage';
 import { readRouteTwigState, writeRouteTwigState } from './editors/twigs';
+import { useEditorControls, useHeldModifiers } from './editors/useEditorControls';
 import type { GameState } from './design';
 import { WorldStatics } from './render3d/GameWorld3D';
 import { LandformSurfaceCaptures } from './render3d/Landform';
@@ -52,7 +52,6 @@ const PALETTE_KINDS: BuildPieceKind[] = ['floor', 'wall', 'ramp', 'roof', 'stair
 const ISO_ROUTE = '/iso-build';
 const ISO_CAM_TWIG = 'camera';
 
-const MOVE_KEYS = new Set(['w', 'a', 's', 'd']);
 const ARROW_TO_WASD: Record<string, string> = { arrowup: 'w', arrowdown: 's', arrowleft: 'a', arrowright: 'd' };
 
 // Where the view opens / recenters: the centroid of what's already built, so you
@@ -277,19 +276,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const [wholeBuilding, setWholeBuilding] = useState(false);
   const wholeBuildingRef = useRef(wholeBuilding);
   wholeBuildingRef.current = wholeBuilding;
-  // Shift/Alt held? Mouse events carry no modifier flags here, so track it off the key
-  // bus (which does) and read it at click time to invert the select scope.
-  const modHeldRef = useRef(false);
-  const freeformHeldRef = useRef(false);
-  useEffect(() => {
-    const upd = (e: any) => {
-      modHeldRef.current = !!(e?.shiftKey || e?.altKey);
-      freeformHeldRef.current = !!e?.altKey;
-    };
-    const offD = busOn('__keydown', upd);
-    const offU = busOn('__keyup', upd);
-    return () => { offD(); offU(); };
-  }, []);
+  // Shift/Alt held? Mouse events carry no modifier flags here — read the shared
+  // contract tracker at click time to invert the select scope / go freeform.
+  const heldModifiers = useHeldModifiers();
   // An in-progress move drag: the world (dx,dz) the selection is being dragged by on
   // the active level's plane, or null when not moving. Drives the move ghost; the
   // selection re-places (remove+place) on mouse-up.
@@ -416,7 +405,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       : a.kind === 'tower'
         ? GAME_BUILD.catalog.get(TOWER_WALL_ID).size
         : { widthMeters: 1, heightMeters: 3, depthMeters: 1 };
-    const freeform = pieceDef?.kind === 'prop' && freeformHeldRef.current;
+    const freeform = pieceDef?.kind === 'prop' && heldModifiers.current.alt;
     return resolveSnapTarget({
       ray: stage.pieceRay(sx, sy, rectRef.current),
       // The VISIBLE (cut-away) list, not the full world: placement obeys the
@@ -655,7 +644,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         // Prop-only moves may hold Alt for intentional freeform nudges against walls.
         if (g) {
           const cs = state.world.cellSizeMeters || 1;
-          const freeform = freeformHeldRef.current && selectionIsOnlyProps(selectedIdsRef.current, piecesRef.current);
+          const freeform = heldModifiers.current.alt && selectionIsOnlyProps(selectedIdsRef.current, piecesRef.current);
           const rawDx = g.x - d.gx0;
           const rawDz = g.z - d.gz0;
           const dx = freeform ? quantizeMeters(rawDx, FREEFORM_MOVE_SNAP_METERS) : Math.round(rawDx / cs) * cs;
@@ -749,7 +738,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // modifier away — no need to flip the toggle to edit one piece. The connected
     // walk spans the FULL piece set (hidden floors included) so grabbing a
     // building grabs ALL of it — a move never tears off the cut-away storeys.
-    const whole = wholeBuildingRef.current !== modHeldRef.current;
+    const whole = wholeBuildingRef.current !== (heldModifiers.current.shift || heldModifiers.current.alt);
     setSelectedIds(whole ? GAME_BUILD.placed.connected(hit.piece.id, displayPiecesRef.current) : new Set([hit.piece.id]));
   };
   // Remove every selected piece (one pieceRemoved each, the SAME event F2's X
@@ -990,35 +979,45 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const keyActionsRef = useRef({ deleteSelected, cloneSelected, rotateSelected, recenter, saveCamera });
   keyActionsRef.current = { deleteSelected, cloneSelected, rotateSelected, recenter, saveCamera };
 
-  // Keys (while focused): R rotates the ghost, Q/E turn the view, Delete/Backspace
-  // removes the selection, Esc disarms / clears the selection.
-  useEffect(() => {
-    if (!props.focused) return;
-    const off = busOn('__keydown', (e: any) => {
-      lastInputAtRef.current = (globalThis as any).performance?.now?.() ?? 0;
-      const k = String(e?.key ?? '').toLowerCase();
-      if (k === 'r') {
+  // Keys (while focused) ride the EDITOR CONTROL CONTRACT (editors/controls.ts,
+  // EDITORCTL-0610): the 'iso-build' scope table IS the bindings; this hook
+  // only supplies the verbs. The contract owns chord matching and the typing
+  // gate (which this pane previously lacked — R in a text field rotated).
+  const heldPanRef = useRef<Record<string, boolean>>({});
+  useEditorControls('iso-build', {
+    active: !!props.focused,
+    handlers: {
+      'selection.rotate': () => {
+        lastInputAtRef.current = (globalThis as any).performance?.now?.() ?? 0;
         if (armedRef.current) setGhostYaw((y) => (y + 90) % 360);
         else keyActionsRef.current.rotateSelected();
-      }
-      else if (k === 'escape') { setArmed(null); setSelectedIds(new Set()); }
-      else if (k === 'q') { stage.rotate(-1); pushNativeCamera(); keyActionsRef.current.saveCamera(); }
-      else if (k === 'e') { stage.rotate(1); pushNativeCamera(); keyActionsRef.current.saveCamera(); }
-      else if (k === 'f' || k === 'home') keyActionsRef.current.recenter();
-      else if (k === 'delete' || k === 'backspace') keyActionsRef.current.deleteSelected();
-    });
-    return off;
-  }, [props.focused, stage, pushNativeCamera]);
+      },
+      'selection.cancel': () => { setArmed(null); setSelectedIds(new Set()); },
+      'camera.orbit-ccw': () => { stage.rotate(-1); pushNativeCamera(); keyActionsRef.current.saveCamera(); },
+      'camera.orbit-cw': () => { stage.rotate(1); pushNativeCamera(); keyActionsRef.current.saveCamera(); },
+      'view.recenter': () => keyActionsRef.current.recenter(),
+      'selection.delete': () => keyActionsRef.current.deleteSelected(),
+      'view.pan': ({ phase, key }) => {
+        const k = ARROW_TO_WASD[key] ?? key;
+        if (phase === 'down') {
+          heldPanRef.current[k] = true;
+          lastInputAtRef.current = (globalThis as any).performance?.now?.() ?? 0;
+        } else {
+          heldPanRef.current[k] = false;
+          keyActionsRef.current.saveCamera();
+        }
+      },
+    },
+  });
 
-  // WASD / arrow keys slide the view across the ground (held-key pan loop). Speed
-  // scales with the eye distance so a keystroke crosses the same fraction of the view
-  // at every zoom. The loop only runs while this pane is focused.
+  // The held-key pan loop: WASD/arrows slide the view across the ground. Speed
+  // scales with the eye distance so a keystroke crosses the same fraction of the
+  // view at every zoom. The loop only runs while this pane is focused; the held
+  // set is written by the contract dispatcher above.
   useEffect(() => {
     if (!props.focused) return;
-    const held: Record<string, boolean> = {};
-    const key = (e: any): string => { const k = String(e?.key ?? '').toLowerCase(); return ARROW_TO_WASD[k] ?? k; };
-    const offD = busOn('__keydown', (e: any) => { const k = key(e); if (MOVE_KEYS.has(k)) { held[k] = true; lastInputAtRef.current = G.performance?.now?.() ?? 0; } });
-    const offU = busOn('__keyup', (e: any) => { const k = key(e); if (MOVE_KEYS.has(k)) { held[k] = false; keyActionsRef.current.saveCamera(); } });
+    heldPanRef.current = {}; // a refocus starts with nothing held
+    const held = heldPanRef.current;
     const G: any = globalThis;
     const sched = G.requestAnimationFrame ? G.requestAnimationFrame.bind(G) : (fn: any) => setTimeout(fn, 16);
     const cancel = G.cancelAnimationFrame ? G.cancelAnimationFrame.bind(G) : clearTimeout;
@@ -1119,7 +1118,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       handle = sched(tick);
     };
     handle = sched(tick);
-    return () => { alive = false; cancel(handle); offD(); offU(); };
+    return () => { alive = false; cancel(handle); };
   }, [props.focused, stage, redraw]);
 
   const level = stage.pose.level;

@@ -1,7 +1,7 @@
 // editors/paint/ColorWheel.tsx - reusable HSV color wheel for paint chrome.
 
 import { useEffect, useRef, useState } from 'react';
-import { Box, Col, Effect, Pressable, Row, TextInput } from '@reactjit/runtime/primitives';
+import { Box, Col, Effect, Pressable, Row, TextInput } from '@reactjit/primitives';
 import { GAME_CHROME } from '../../game/chrome';
 import { hexToHsv, hsvToHex, isFullHexColor, isHexColor, normalizeHexColor, type HsvColor } from './colors';
 

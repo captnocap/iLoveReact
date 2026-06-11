@@ -1640,3 +1640,28 @@ carries a 3×3 grid of paintable tile kinds — the nav substrate stays uniform
   ready for the first driver), road decks (lane kinds on lifted floors —
   elevation modes), multi-level surface nav, the host MAX_CELLS raise
   (heap-allocated grids) for whole-map 0.5m publish.
+
+## editors/controls.ts — the EDITOR control contract (EDITORCTL-0610, 2026-06-10)
+
+Structure review §3's fix, landed: the editor's keyboard is ONE table
+(`editors/controls.ts`, data only — the gameplay side keeps its own ruled
+contract in `input/controlContract.ts`). Each `EditorBinding` row carries
+action id (`<concern>.<verb>`), scope (`'canvas' | 'iso-build' | 'bench'`),
+key chords, label, legend text, and flags (`whileTyping`, `held`).
+`validateEditorBindings` runs at module init — malformed rows and intra-scope
+key conflicts are BOOT-TIME errors ("E means one thing per focus scope" is
+machine-checked, not hoped). `editors/useEditorControls.ts` is the one React
+dispatcher: a surface declares its scope + active flag + handlers by action
+id; the dispatcher owns chord normalization and THE typing gate (previously
+re-implemented or missing per surface — IsoAuthor's R fired into text
+fields). Held bindings get both key phases, base-key matched on release and
+gate-exempt on release so a pan can never strand. `editors/KeyLegend.tsx`
+renders a scope's legend FROM the table (the strip cannot lie); the canvas
+pane shows it bottom-left. `useHeldModifiers` is the shared
+modifier-off-the-key-bus tracker (was hand-copied in PaintCanvas +
+IsoAuthor). Adopted: PaintCanvas (pan/lock/brush-rotate/road draft),
+IsoAuthor (rotate/orbit/recenter/delete/cancel/pan), Workbench shell chords
+(undo/redo/save — off useIFTTT). Remaining transports to fold by ADDING
+rows: the paint editor tool keys (usePaintEditor.ts), Embodied/sculptCamera/
+usePlayerDrive, plus a whole-keymap view in the settings bench. P4:
+`editors/controls.test.ts` (6).

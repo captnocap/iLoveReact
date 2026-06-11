@@ -23,6 +23,9 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Canvas, Pressable, ScrollView, Text } from '@reactjit/primitives';
 import { callHost } from '@reactjit/ffi';
 import { busOn } from '@reactjit/hooks/useIFTTT';
+import { bindingsForScope } from './editors/controls';
+import { useEditorControls, useHeldModifiers } from './editors/useEditorControls';
+import { KeyLegend } from './editors/KeyLegend';
 import { columnLabel } from './address';
 import { CHUNK_FLOOR_HF_RES, downsampleChunkFloorHeights, type ChunkFloor } from './chunkFloor';
 import type { TileKind } from './design';
@@ -115,7 +118,9 @@ const SIZE_MIN = 0, SIZE_MAX = 40;
 const REGION_SYNC_MS = 320;
 
 export const CANVAS_PAN_SPEED = 700; // px/s while a direction key is held
-export const CANVAS_PAN_FOCUS_LOCK_KEY = 'f8';
+// The lock key lives in the editor control contract — this export is a
+// derived view for the shell/tests, never a second source.
+export const CANVAS_PAN_FOCUS_LOCK_KEY = bindingsForScope('canvas').find((b) => b.action === 'view.pan-lock')!.keys[0];
 type CanvasPanDrift = { x: number; y: number };
 export type EffectiveCanvasPanDrift = CanvasPanDrift & { active: boolean };
 
@@ -531,58 +536,54 @@ export function PaintCanvas(props: {
     if (next) props.onWasdFocus?.();
     else clearPanDrift();
   }, [clearPanDrift, props.onWasdFocus]);
-  // Ctrl-held state — mouse events carry no modifier flags, so track it off the key
-  // bus (every key event reports the live modifier mask). Drives ctrl-click select.
-  const ctrlHeldRef = useRef(false);
+  // Ctrl-held state — mouse events carry no modifier flags, so read the shared
+  // contract tracker at click time. Drives ctrl-click select.
+  const heldModifiers = useHeldModifiers();
   const placeBrushKeyRef = useRef<{ enabled: boolean; rotate: (delta: number) => void }>({ enabled: false, rotate: () => {} });
   // Lost focus (another quad claimed WASD) → drop held keys so the pan stops at once.
   useEffect(() => {
     if (!canvasOwnsWasd) clearPanDrift();
   }, [canvasOwnsWasd, clearPanDrift]);
-  useEffect(() => {
-    const recompute = () => {
-      setPanDrift(canvasPanDriftForHeldKeys(heldKeys.current));
-    };
-    recomputeDriftRef.current = recompute;
-    const textFocused = () => {
-      if (panFocusLockedRef.current) return false;
-      const t = callHost<{ focused_id?: number } | null>('__tel_input', null);
-      return !!t && Number(t.focused_id ?? -1) >= 0;
-    };
-    const onDown = (ev: any) => {
-      if (typeof ev?.ctrlKey === 'boolean') ctrlHeldRef.current = ev.ctrlKey || ev.metaKey;
-      const k = String(ev?.key ?? '').toLowerCase();
-      if (isCanvasPanFocusLockKey(k) && !ev?.ctrlKey && !ev?.altKey && !ev?.metaKey) {
+  const recomputeDrift = useCallback(() => {
+    setPanDrift(canvasPanDriftForHeldKeys(heldKeys.current));
+  }, [setPanDrift]);
+  recomputeDriftRef.current = recomputeDrift;
+  // The keys ride the EDITOR CONTROL CONTRACT (editors/controls.ts,
+  // EDITORCTL-0610): the 'canvas' scope table IS the bindings; this surface
+  // only supplies the verbs. The contract owns chord matching + the typing
+  // gate; the pan focus lock is this surface's documented gate override
+  // (locking exists precisely to pan while a text field is focused).
+  useEditorControls('canvas', {
+    active: true, // the brush + lock work canvas-wide; pan gates on wasdFocused below
+    bypassTypingGate: () => panFocusLockedRef.current,
+    handlers: {
+      'view.pan-lock': ({ phase }) => {
+        if (phase === 'up') { panFocusLockKeyDownRef.current = false; return; }
         if (!panFocusLockKeyDownRef.current) {
           panFocusLockKeyDownRef.current = true;
           togglePanFocusLock();
         }
-        return;
-      }
-      if (placeBrushKeyRef.current.enabled && !ev?.ctrlKey && !ev?.altKey && !ev?.metaKey && (k === 'r' || k === 'e' || k === 'q')) {
-        if (!textFocused()) placeBrushKeyRef.current.rotate(k === 'q' ? -ROT_STEP : ROT_STEP);
-        return;
-      }
-      if (!PAN_DIR[k] || ev?.ctrlKey || ev?.altKey || ev?.metaKey) return;
-      if (!wasdFocusedRef.current) return; // only the focused quad pans
-      if (heldKeys.current.has(k) || textFocused()) return; // ignore key-repeat / typing
-      heldKeys.current.add(k); recompute();
-    };
-    const onUp = (ev: any) => {
-      if (typeof ev?.ctrlKey === 'boolean') ctrlHeldRef.current = ev.ctrlKey || ev.metaKey;
-      const k = String(ev?.key ?? '').toLowerCase();
-      if (isCanvasPanFocusLockKey(k)) {
-        panFocusLockKeyDownRef.current = false;
-        return;
-      }
-      if (heldKeys.current.delete(k)) recompute();
-    };
+      },
+      'brush.rotate-cw': () => { if (placeBrushKeyRef.current.enabled) placeBrushKeyRef.current.rotate(ROT_STEP); },
+      'brush.rotate-ccw': () => { if (placeBrushKeyRef.current.enabled) placeBrushKeyRef.current.rotate(-ROT_STEP); },
+      'view.pan': ({ phase, key }) => {
+        if (phase === 'up') {
+          if (heldKeys.current.delete(key)) recomputeDriftRef.current();
+          return;
+        }
+        if (!wasdFocusedRef.current) return; // only the focused quad pans
+        if (heldKeys.current.has(key)) return; // ignore key-repeat
+        heldKeys.current.add(key);
+        recomputeDriftRef.current();
+      },
+    },
+  });
+  // Alt-tab / window blur clears the drift so nothing strands mid-pan.
+  useEffect(() => {
     const clear = () => { clearPanDrift(); };
-    const offDown = busOn('__keydown', onDown);
-    const offUp = busOn('__keyup', onUp);
     const offBlur = busOn('system:blur', clear);
-    return () => { offDown(); offUp(); offBlur(); clear(); };
-  }, [clearPanDrift, setPanDrift, togglePanFocusLock]);
+    return () => { offBlur(); clear(); };
+  }, [clearPanDrift]);
   // Claim WASD focus on a click anywhere in the canvas working area.
   const claimWasd = props.onWasdFocus;
 
@@ -1176,15 +1177,15 @@ export function PaintCanvas(props: {
   commitRoadDraftRef.current = commitRoadDraft;
   const cancelRoadDraftRef = useRef(cancelRoadDraft);
   cancelRoadDraftRef.current = cancelRoadDraft;
-  // Enter stamps the draft, Esc drops it — only while the road layer is up.
-  useEffect(() => {
-    if (layer !== 'road') return;
-    return busOn('__keydown', (ev: any) => {
-      const k = String(ev?.key ?? '');
-      if (k === 'Enter') commitRoadDraftRef.current();
-      else if (k === 'Escape') cancelRoadDraftRef.current();
-    });
-  }, [layer]);
+  // Enter stamps the draft, Esc drops it — only while the road layer is up
+  // (contract scope 'canvas'; activation is the layer, the table is the keys).
+  useEditorControls('canvas', {
+    active: layer === 'road',
+    handlers: {
+      'road.commit': () => commitRoadDraftRef.current(),
+      'road.cancel': () => cancelRoadDraftRef.current(),
+    },
+  });
 
   // Register the live-world getter so the cart can serialize on autosave. Reassign
   // each render so it captures the latest zones / focus (chunks is a stable ref).
@@ -1468,10 +1469,10 @@ export function PaintCanvas(props: {
     setSelRoadId(road ? road.id : null); // one selection focus: a non-road click clears a stale road pick
     if (road) return;
     const sel = props.select; if (!sel) return;
-    if (!c) { if (!ctrlHeldRef.current) sel.clear(); return; } // plain click on empty = deselect
+    if (!c) { if (!heldModifiers.current.ctrl) sel.clear(); return; } // plain click on empty = deselect
     const idx = c.chunk.tiles.idx[c.cellZ * c.chunk.tiles.cols + c.cellX];
     const cell: SelCell = { gx: c.gCellX, gz: c.gCellZ, kind: idx >= 0 ? (TILE_KINDS[idx] ?? null) : null };
-    if (ctrlHeldRef.current) sel.toggle(cell); else sel.set(cell);
+    if (heldModifiers.current.ctrl) sel.toggle(cell); else sel.set(cell);
   };
 
   // Road target clicks: Paint lays centerline points; Erase deletes the stroke
@@ -1929,6 +1930,11 @@ export function PaintCanvas(props: {
           Inset left of the gutter so they never overlap. */}
       <Box style={{ position: 'absolute', right: GUTTER_W + 8, bottom: 8, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#1e293b', borderRadius: 6, padding: 4 }}>
         <TargetDock layer={layer} onLayer={props.onLayer} channels={channels} onToggleChannel={props.onToggleChannel ?? (() => {})} />
+      </Box>
+
+      {/* The keymap strip — rendered from the control contract, so it can't lie. */}
+      <Box style={{ position: 'absolute', left: RAIL_W + 8, bottom: 8 }}>
+        <KeyLegend scope="canvas" dimmed={!canvasOwnsWasd} />
       </Box>
     </Box>
   );

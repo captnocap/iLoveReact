@@ -73,6 +73,15 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'editors/controls.ts (the editor control contract)',
+      purpose: ['ui', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/editors/controls.ts',
+      description:
+        'EDITORCTL-0610 (review §3): the editor keyboard is ONE table — EditorBinding rows (action <concern>.<verb>, scope canvas|iso-build|bench, chords, label, legend, whileTyping/held flags), data only, headless-testable. validateEditorBindings at module init makes intra-scope key conflicts a BOOT-TIME error. editors/useEditorControls.ts is the one React dispatcher (chord normalization + THE typing gate, owned once; held bindings get both phases, release is base-key matched + gate-exempt so a pan never strands) + useHeldModifiers (the shared modifier tracker, was hand-copied per surface). editors/KeyLegend.tsx renders a scope legend FROM the table. Adopted: PaintCanvas, IsoAuthor, Workbench shell chords. Fold remaining transports (usePaintEditor tool keys, Embodied, sculptCamera, usePlayerDrive) by ADDING rows, never new busOn listeners. Gameplay keys stay on input/controlContract.ts (a different, ruled contract). P4: editors/controls.test.ts (6).',
+      status: 'live',
+    },
+    {
       name: 'editors/sessions.ts (route-scoped session history)',
       purpose: ['persistence', 'maintenance'],
       kind: 'module',
