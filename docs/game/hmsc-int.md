@@ -19,7 +19,30 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
 ## File map (by subsystem)
 
 **Spine / shell**
-- `index.tsx` (833) — composition only: workspace persistence (`useWorkspace`, payload v2), multi-map CRUD orchestration, placement state + undo snapshots, tile-selection + override state, `previewWorld` assembly, compile, router. The 2×2 `QuadSplit` layout: PropertiesPanel | RightPanel / PaintCanvas | IsoPreview, under the persistent chrome strip (`shell/chrome.tsx`).
+- `index.tsx` (~480) — WIRING ONLY since SHELLFOLD-0611 (review §2: the ~1,000-line
+  EditorShell cut along its four seams, each concern now a module):
+  - `editors/world/useMapSession.ts` — the map persistence engine: `MapPayload`
+    (v2 schema), buildPayload/applyPayload, the `useWorkspace` autosave wiring,
+    undo snapshot hooks, open/new/rename/delete, the view-sanity laws
+    (VIEWRUNAWAY/MAPGONE), every per-map twig (tool/tile/layer/channels/tab/
+    notes/grid/brush/wasd), placement STATE, tile selection + overrides, camera
+    seeds. Boot reads ONE envelope (the view seed and the legacy-piece probe
+    used to each parse the session file — review §1's triple-parse, ⅓ fixed).
+  - `editors/world/useBuildUndo.ts` — build-stream commits (event scoped to its
+    owning map, one undo step per interaction, `commitMany` batches) + the
+    Ctrl+Z piece reconciler (`pieceValueKey`/`reconcileBuildPieces` — undo
+    APPENDS compensating events, V20). The four `commitMany` structural casts
+    are gone: it IS the RouteSession contract.
+  - `editors/world/usePlacements.ts` — the 'place' layer's CRUD verbs (arm/
+    drop/paint/move/rotate/clone/remove, footprint batch-delete, face re-skin)
+    + the `place` API the canvas consumes.
+  - `editors/world/previewWorld.ts` — `assemblePreviewWorld`: a PURE compiler
+    from (base world, painted floors, placements, kind textures) → the
+    GameState the iso pane, /test, and Compile consume.
+  The shell keeps: route composition, the chrome + popovers, the event-log
+  trace, the world/buildings session opens, the tunables boot fold, compile.
+  The 2×2 `QuadSplit` layout: PropertiesPanel | RightPanel / PaintCanvas |
+  IsoAuthor, under the persistent chrome strip (`shell/chrome.tsx`).
 - `AGENTS.md` — the cart's own agent contract (mutator rule, compile-=-persist, shape map). *Drift note: it documents `MapCanvas.tsx`, which has since become `PaintCanvas.tsx`.*
 - `shell/chrome.tsx` (302) — the persistent titlebar strip (WBCHROME-0606, WORKBENCH.md step 2; replaced `ProjectBar.tsx`, full parity — line-referenced table in commit `34400c6e7`): map switcher (`MapsMenu`), new/rename/delete, undo/redo, THE RULED SIX route icons (STEP10-COLLAPSE-0607, WORKBENCH.md §3: editor `LayoutGrid` · play `Play` · labs `FlaskConical` · assets `Shapes` · settings `Settings` · assist3d `Sparkles` — assets and settings are two doors into /workbench via `shell/workbenchDoor.ts`, a one-shot `requestWorkbenchSource` ask + a live source-family report that lights the right door; the per-flip shrink history: cutout's Scissors died at CUTOUTFLIP-0606, items/voxels at WBITEMS-FLIP-0606, vehicles at WBSTEP6-FLIP-0606, textures/compose at WBMATERIALS-FLIP-0607, log/settings at WBSTEP9-FLIP-0607), Compile button, save pill, event-log popover — plus the W1 additions: the borderless host's WINDOW CONTROLS (`__window_minimize/maximize/close`) and the dead-middle `windowDrag` titlebar grab. Renders through the `Chrome*`/`Win*` classes (`shell/workbench.cls.ts`), zero raw colours. Menus export separately and render as the **root's last children** (the overlays-last hit-test rule, recorded in its header).
 - `QuadSplit.tsx` (133) — controlled 2×2 splitter; drag is driven by the host's **global cursor channel** (`system:cursor:move`, pumped by Zig from `SDL_GetGlobalMouseState`) rather than per-node mouse-move, so tracking never loses capture; mouse down/up only bracket the gesture.
