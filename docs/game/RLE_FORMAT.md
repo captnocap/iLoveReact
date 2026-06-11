@@ -91,6 +91,7 @@ are zero. Payloads appear in the file in directory order.
 | 14 | `COLLIDERS`      | raw              | authored physics solids (+ ramp fields)   |
 | 15 | `PHYSICS_CONFIG` | raw              | player physics tuning + walk/run speeds   |
 | 16 | `INTERACTABLES`  | raw              | prop interaction layer: seat/container archetypes + instance refs (PROPUSE req_0624) |
+| 17 | `DYNAMIC_PROPS`  | raw              | kickable props: sphere-body recipes + local render parts (KICKPROP req_0625) |
 
 Type ids are an open numeric space; new types append without disturbing readers
 that don't know them (§1.4).

@@ -1292,7 +1292,10 @@ pub fn step(input: []const f32) ?[]f32 {
         z += vz * dt;
         const entity_step_height = @max(0.05, r * 0.35);
         collideSolidRects(&x, y - r, &z, &vx, &vz, r, r * 2, rects, oriented, wall_restitution, entity_step_height, walkable_side_push_grace);
-        const gy = groundAt(rects, oriented, x, z, y - r, entity_step_height) + r;
+        // Painted terrain supports bodies too (req_0625: balls/cones fell
+        // through heightfield landforms — only the player sampled them).
+        var gy = groundAt(rects, oriented, x, z, y - r, entity_step_height) + r;
+        gy = @max(gy, heightfieldGroundAt(x, z, y - r, entity_step_height) + r);
         const surface_friction = clamp(surfaceValueAt(rects, oriented, x, z, y - r, entity_step_height, 6, 0.2), 0, 1);
         const surface_restitution = clamp(surfaceValueAt(rects, oriented, x, z, y - r, entity_step_height, 7, 0.8), 0, 1);
         var grounded: f32 = 0;

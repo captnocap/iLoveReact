@@ -38,6 +38,7 @@ import { BUILTIN_DECALS } from '@game/textures/builtinDecals';
 import { packDecalDoc } from './decalPack';
 import type { DecalAssetSink } from './decalAssets';
 import { createInteractableSink, type InteractableSink } from './worldInteractables';
+import { createDynamicPropSink, type DynamicPropSink } from './worldDynamicProps';
 import { textBytes } from '@reactjit/workspace';
 
 export const INSTANCE_STRIDE = 13;
@@ -136,10 +137,14 @@ type Build = {
    *  INTERACTABLES lump's source, collected in ONE place so every caller
    *  (build pieces and painted world layers alike) ships the capability */
   interact: InteractableSink;
+  /** kickable props (KICKPROP req_0625) — dynamics kinds route their parts
+   *  here as LOCAL rows instead of the static instance buffer; the loader
+   *  steps them as sphere bodies and renders them as live nodes */
+  dyn: DynamicPropSink;
 };
 
 function newBuild(assets?: DecalAssetSink): Build {
-  return { inst: [], mats: [], vocab: [], index: new Map(), assets, interact: createInteractableSink() };
+  return { inst: [], mats: [], vocab: [], index: new Map(), assets, interact: createInteractableSink(), dyn: createDynamicPropSink() };
 }
 
 // Resolve a {kind:'material'} skin to its shipped recipe and intern it; return
@@ -1058,6 +1063,24 @@ function propParts(prop: WorldProp): PropPartSpec[] {
 
 function pushPropGeometry(b: Build, prop: WorldProp): number {
   b.interact.collect(prop);
+  // A dynamics kind (ball/cone/can) is a BODY, not scenery: its parts ship in
+  // the DYNAMIC_PROPS lump as LOCAL rows (anchor-relative, yaw un-folded — the
+  // loader composes per frame like the player model) and stay OUT of the
+  // one-time-uploaded static instance buffer. Mirrors /test's skipDynamicProps
+  // + DynamicPropMeshes split (KICKPROP-0610).
+  const dynamic = b.dyn.open(prop);
+  if (dynamic) {
+    for (const part of propParts(prop)) {
+      dynamic.parts.push(
+        part.local[0], part.local[1], part.local[2],
+        part.rotation?.[0] ?? 0, part.rotation?.[1] ?? 0, part.rotation?.[2] ?? 0,
+        part.size[0], part.size[1], part.size[2],
+        part.color[0], part.color[1], part.color[2],
+        propShapeId(part.shape),
+      );
+    }
+    return 0;
+  }
   return pushPropParts(b, prop, propParts(prop));
 }
 
@@ -1514,6 +1537,9 @@ export type WorldInstanceResult = {
   /** Seat/container props (archetypes + instance refs) for the INTERACTABLES
    *  lump — the compiled game's E-to-sit/search capability (req_0624). */
   interactables: Pick<InteractableSink, 'archetypes' | 'instances'>;
+  /** Kickable props (body recipe + local render parts) for the DYNAMIC_PROPS
+   *  lump — the compiled game's roll/kick dynamics (req_0625). */
+  dynamicProps: DynamicPropSink['props'];
 };
 
 /** Build the packed instance buffer for the authored world.
@@ -1546,6 +1572,7 @@ export function buildWorldInstances(
     materialRefs: Uint32Array.from(b.mats),
     materials: b.vocab,
     interactables: { archetypes: b.interact.archetypes, instances: b.interact.instances },
+    dynamicProps: b.dyn.props,
   };
 }
 

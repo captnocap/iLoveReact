@@ -1802,3 +1802,37 @@ per V28/GUIDING_LIGHT, never JS in the loop.
   30 interactable props and the loader logs the parsed layer at boot.
   P4: `compile/worldInteractables.test.ts` 3/3 (factoring + exact wire
   round-trip vs the Zig decoder's layout).
+
+## Compiled dynamic props + props respect heightfields (KICKPROP-COMPILED, req_0625, 2026-06-11)
+
+The compiled game gets /test's KICKPROP-0610 dynamics — run into a ball and it
+flies, cones and cans shove — plus the heightfield grounding the user reported
+missing ("props in general are not respecting heightfields").
+
+- **Data:** the `DYNAMIC_PROPS` map lump (id 17, `compile/worldDynamicProps.ts`):
+  per kickable prop the sphere-body recipe (radius/restitution — the registry's
+  authored `dynamics`) plus its render parts as LOCAL 13-float rows
+  (anchor-relative, yaw un-folded). `pushPropGeometry` routes dynamics kinds
+  here and OUT of the static instance buffer — the /test skipDynamicProps +
+  DynamicPropMeshes split, applied at bake.
+- **Engine:** `world_loader` reserves an entity section in the host physics
+  input (`PhysicsColliders.entity_capacity`, layout
+  [header][entities][rects][oriented]; every rect writer/reader shifted) and
+  steps the bodies through the SAME `game_physics.step` /test uses — gravity,
+  world collision, bounce, sphere-sphere, the player kick all come from the one
+  host integrator. Bodies render as live per-frame nodes (the player-model
+  pattern), so a rolling ball never re-stages the one-time-uploaded world.
+  While seated (PROPUSE), an intent-less ghost step keeps balls rolling.
+- **Heightfields (the user's report), both halves:**
+  1. `framework/game/physics.zig`: the entity loop now samples
+     `heightfieldGroundAt` — bodies land on painted terrain instead of falling
+     through (this also fixes /test, which uses the same step).
+  2. The bake now applies `liftPropsToTerrain` (the per-prop lift /test already
+     uses, 37033d24f) after the building lift in `packageMap.ts`, so a stored
+     y=0 prop under a painted hill ships resting ON it — render, colliders,
+     interactables, and dynamic-body anchors all see the lifted y. Loader-side,
+     dynamic bodies additionally spawn at max(anchor, terrain top) + radius.
+- **Proof:** `rjit game shot` GREEN — the real map bakes "dynamics layer: 5
+  kickable props" at boot beside the interaction layer. P4:
+  `compile/worldDynamicProps.test.ts` 3/3 (bake split + exact wire round-trip),
+  worldColliders 4/4, `zig build test-game-physics` green.

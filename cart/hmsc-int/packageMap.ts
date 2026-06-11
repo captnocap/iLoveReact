@@ -23,6 +23,7 @@ import { buildWorldInstances, encodeFloorHeightfields, encodeInstanceLump, encod
 import type { DecalAssetSink } from './compile/decalAssets';
 import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, type BakedPhysicsConfig } from './compile/worldColliders';
 import { encodeInteractables } from './compile/worldInteractables';
+import { encodeDynamicProps } from './compile/worldDynamicProps';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './compile/playerModel';
 import type { ChunkFloor } from './chunkFloor';
@@ -197,7 +198,13 @@ export function createHmscMapfile(
   // the shipped game stands every building exactly where the editor showed it. Applied
   // ONCE here so BOTH the render geometry and the physics colliders below use the lifted
   // positions (see-it == walk-it). Loose single pieces keep their authored y.
-  const liftedPieces = GAME_BUILD.placed.liftToTerrain(pieces, (x, z) => compileTerrainTopAt(state.world, x, z));
+  const liftedBuildings = GAME_BUILD.placed.liftToTerrain(pieces, (x, z) => compileTerrainTopAt(state.world, x, z));
+  // Props are free-standing objects (req_0625, USER report "props in general
+  // are not respecting heightfields"): a stored y=0 prop under a painted hill
+  // rests ON the terrain at its anchor — the SAME per-prop lift /test applies
+  // (PlayRoute liftPropsToTerrain), so render, colliders, interactables, and
+  // dynamic-body anchors below all see the lifted y.
+  const liftedPieces = GAME_BUILD.placed.liftPropsToTerrain(liftedBuildings, (x, z) => compileTerrainTopAt(state.world, x, z));
 
   // The authored world's 3D geometry: the placed pieces (structures) PLUS the
   // painted floor (the user's real ground, from chunk tile fields). The piece
@@ -274,6 +281,9 @@ export function createHmscMapfile(
     // The prop interaction layer (seat/container archetypes + instance refs) —
     // E-to-sit/search in the compiled game (compile/worldInteractables.ts).
     { type: MAP_LUMP.INTERACTABLES, encoding: 'raw', data: encodeInteractables(geometry.interactables) },
+    // Kickable dynamic props (sphere bodies + local render parts) — balls
+    // roll and cones shove in the compiled game (compile/worldDynamicProps.ts).
+    { type: MAP_LUMP.DYNAMIC_PROPS, encoding: 'raw', data: encodeDynamicProps(geometry.dynamicProps) },
   ];
   if (playerModel) {
     // The compiled player figure from @game/figure. Runtime movement changes

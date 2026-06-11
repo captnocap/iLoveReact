@@ -21,12 +21,17 @@ pub const Error = gamefile.Error || error{
     BadColliders,
     BadPhysicsConfig,
     BadInteractables,
+    BadDynamicProps,
 };
 
 const COLLIDERS_VERSION: u32 = 1;
 const PHYSICS_CONFIG_VERSION: u32 = 1;
 const PHYSICS_CONFIG_FLOATS: usize = 13;
 const INTERACTABLES_VERSION: u32 = 1;
+const DYNAMIC_PROPS_VERSION: u32 = 1;
+/// One local render part: px,py,pz, rx,ry,rz, sx,sy,sz, r,g,b, shapeId —
+/// the INSTANCES row field order, anchor-relative and yaw-unfolded.
+pub const DYNAMIC_PART_FLOATS: usize = 13;
 
 const SCENE_ENV_VERSION: u32 = 1;
 const SCENE_ENV_FLOATS: usize = 35;
@@ -329,6 +334,32 @@ pub const Interactables = struct {
     }
 };
 
+/// One kickable prop (KICKPROP req_0625): the sphere-body recipe + its render
+/// parts as local 13-float rows (DYNAMIC_PART_FLOATS stride). Writer twin:
+/// compile/worldDynamicProps.ts encodeDynamicProps.
+pub const DynamicProp = struct {
+    x: f32,
+    y: f32,
+    z: f32,
+    yaw_degrees: f32,
+    body_radius: f32,
+    restitution: f32,
+    parts: []f32,
+
+    pub fn deinit(self: DynamicProp, allocator: std.mem.Allocator) void {
+        allocator.free(self.parts);
+    }
+};
+
+pub const DynamicProps = struct {
+    props: []DynamicProp,
+
+    pub fn deinit(self: DynamicProps, allocator: std.mem.Allocator) void {
+        for (self.props) |prop| prop.deinit(allocator);
+        allocator.free(self.props);
+    }
+};
+
 pub const Scene = struct {
     width: u32,
     height: u32,
@@ -372,6 +403,9 @@ pub const Scene = struct {
     /// archetypes + instance refs. null in pre-lump bakes; the loader then
     /// simply has nothing to interact with.
     interactables: ?Interactables,
+    /// Kickable dynamic props (KICKPROP req_0625) — sphere-body recipes +
+    /// local render parts. null in pre-lump bakes (everything stays static).
+    dynamic_props: ?DynamicProps,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
@@ -388,6 +422,7 @@ pub const Scene = struct {
         for (self.decal_assets) |asset| asset.deinit(allocator);
         allocator.free(self.decal_assets);
         if (self.interactables) |ia| ia.deinit(allocator);
+        if (self.dynamic_props) |dp| dp.deinit(allocator);
     }
 };
 
@@ -823,6 +858,53 @@ fn decodeInteractables(allocator: std.mem.Allocator, data: []const u8) Error!Int
     };
 }
 
+/// Decode the DYNAMIC_PROPS lump (KICKPROP req_0625). Wire layout:
+/// compile/worldDynamicProps.ts encodeDynamicProps — u32 version | u32 count |
+/// per prop: f32 x,y,z,yawDegrees,bodyRadius,restitution | u32 partCount |
+/// f32[partCount * DYNAMIC_PART_FLOATS] local part rows.
+fn decodeDynamicProps(allocator: std.mem.Allocator, data: []const u8) Error!DynamicProps {
+    if (data.len < 8) return Error.BadDynamicProps;
+    if (std.mem.readInt(u32, data[0..4], .little) != DYNAMIC_PROPS_VERSION) return Error.BadDynamicProps;
+    const prop_count = std.mem.readInt(u32, data[4..8], .little);
+    var at: usize = 8;
+
+    var props = try std.ArrayList(DynamicProp).initCapacity(allocator, prop_count);
+    errdefer {
+        for (props.items) |prop| prop.deinit(allocator);
+        props.deinit(allocator);
+    }
+    var i: usize = 0;
+    while (i < prop_count) : (i += 1) {
+        if (at + 24 + 4 > data.len) return Error.BadDynamicProps;
+        const x = readF32(data, at);
+        const y = readF32(data, at + 4);
+        const z = readF32(data, at + 8);
+        const yaw_degrees = readF32(data, at + 12);
+        const body_radius = readF32(data, at + 16);
+        const restitution = readF32(data, at + 20);
+        at += 24;
+        const part_count = std.mem.readInt(u32, data[at..][0..4], .little);
+        at += 4;
+        const floats = std.math.mul(usize, part_count, DYNAMIC_PART_FLOATS) catch return Error.BadDynamicProps;
+        if (at + floats * 4 > data.len) return Error.BadDynamicProps;
+        const parts = try allocator.alloc(f32, floats);
+        errdefer allocator.free(parts);
+        for (parts, 0..) |*v, k| v.* = readF32(data, at + k * 4);
+        at += floats * 4;
+        try props.append(allocator, .{
+            .x = x,
+            .y = y,
+            .z = z,
+            .yaw_degrees = yaw_degrees,
+            .body_radius = body_radius,
+            .restitution = restitution,
+            .parts = parts,
+        });
+    }
+
+    return .{ .props = try props.toOwnedSlice(allocator) };
+}
+
 /// Max packed decal recipe size — a doc is a handful of node records (~1KB
 /// typical); a corrupt length can't ask for a huge dupe.
 const MAX_DECAL_DOC_BYTES: u32 = 1 << 20;
@@ -1026,6 +1108,13 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     else
         null;
     errdefer if (interactables) |ia| ia.deinit(allocator);
+    // Kickable dynamic props (KICKPROP req_0625) — optional like the other
+    // post-v1 lumps; absent means everything renders static.
+    const dynamic_props: ?DynamicProps = if (mapfile.findLump(map_lumps, mapfile.LumpType.dynamic_props)) |lump|
+        try decodeDynamicProps(allocator, lump.data)
+    else
+        null;
+    errdefer if (dynamic_props) |dp| dp.deinit(allocator);
 
     // Decal image payloads (DECALIMG-0610, req_0592): every manifest asset
     // tagged decal-image is read from the content store once, here — the
@@ -1065,5 +1154,6 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .physics_config = physics_config,
         .decal_assets = decal_assets,
         .interactables = interactables,
+        .dynamic_props = dynamic_props,
     };
 }

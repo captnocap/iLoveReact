@@ -205,10 +205,34 @@ const PhysicsColliders = struct {
     oriented_count: usize,
     heightfield_count: usize,
     clipped_rows: usize,
+    /// Dynamic-body slots reserved between the header and the rect data
+    /// (KICKPROP req_0625) — the host step's entity section. The layout is
+    /// [header][entity_capacity × ENTITY_FLOATS][rects][oriented]; every rect
+    /// writer and reader must shift by this. 0 on maps with no dynamic props
+    /// (and on the camera's dedicated set), keeping the legacy layout.
+    entity_capacity: usize = 0,
 
     pub fn deinit(self: PhysicsColliders, allocator: std.mem.Allocator) void {
         allocator.free(self.values);
     }
+
+    /// First float index of the rect section.
+    fn rectBase(self: *const PhysicsColliders) usize {
+        return game_physics.INPUT_HEADER_FLOATS + self.entity_capacity * game_physics.ENTITY_FLOATS;
+    }
+};
+
+/// One kickable prop's live body (KICKPROP req_0625) — stepped through the
+/// host physics entity section every frame; render nodes follow it.
+const PropBody = struct {
+    x: f32,
+    y: f32,
+    z: f32,
+    vx: f32 = 0,
+    vy: f32 = 0,
+    vz: f32 = 0,
+    radius: f32,
+    restitution: f32,
 };
 
 fn clamp(v: f32, lo: f32, hi: f32) f32 {
@@ -843,7 +867,8 @@ fn maxAbsHeight(heights: []const f32) f32 {
     return max_abs;
 }
 
-fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene, insts: []const f32, inst_count: u32, stride: usize) !PhysicsColliders {
+fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene, insts: []const f32, inst_count: u32, stride: usize, entity_capacity: usize) !PhysicsColliders {
+    const entity_floats = entity_capacity * game_physics.ENTITY_FLOATS;
     var rects: std.ArrayList(f32) = .{};
     errdefer rects.deinit(allocator);
     var oriented: std.ArrayList(f32) = .{};
@@ -900,10 +925,11 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
         // above AND passable from below. (Heightfields above handle the ground;
         // baked rects/oriented handle every authored piece.)
 
-        const values = try allocator.alloc(f32, game_physics.INPUT_HEADER_FLOATS + rects.items.len + oriented.items.len);
+        const values = try allocator.alloc(f32, game_physics.INPUT_HEADER_FLOATS + entity_floats + rects.items.len + oriented.items.len);
         @memset(values, 0);
-        @memcpy(values[game_physics.INPUT_HEADER_FLOATS .. game_physics.INPUT_HEADER_FLOATS + rects.items.len], rects.items);
-        @memcpy(values[game_physics.INPUT_HEADER_FLOATS + rects.items.len ..], oriented.items);
+        const rect_base = game_physics.INPUT_HEADER_FLOATS + entity_floats;
+        @memcpy(values[rect_base .. rect_base + rects.items.len], rects.items);
+        @memcpy(values[rect_base + rects.items.len ..], oriented.items);
         rects.deinit(allocator);
         oriented.deinit(allocator);
         return .{
@@ -912,6 +938,7 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
             .oriented_count = oriented_count,
             .heightfield_count = heightfield_count,
             .clipped_rows = clipped_rows,
+            .entity_capacity = entity_capacity,
         };
     }
 
@@ -964,13 +991,14 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
         }
     }
 
-    var values = try allocator.alloc(f32, game_physics.INPUT_HEADER_FLOATS + rects.items.len + oriented.items.len);
+    var values = try allocator.alloc(f32, game_physics.INPUT_HEADER_FLOATS + entity_floats + rects.items.len + oriented.items.len);
     @memset(values, 0);
-    @memcpy(values[game_physics.INPUT_HEADER_FLOATS .. game_physics.INPUT_HEADER_FLOATS + rects.items.len], rects.items);
-    @memcpy(values[game_physics.INPUT_HEADER_FLOATS + rects.items.len ..], oriented.items);
+    const rect_base = game_physics.INPUT_HEADER_FLOATS + entity_floats;
+    @memcpy(values[rect_base .. rect_base + rects.items.len], rects.items);
+    @memcpy(values[rect_base + rects.items.len ..], oriented.items);
     rects.deinit(allocator);
     oriented.deinit(allocator);
-    return .{ .values = values, .rect_count = rect_count, .oriented_count = oriented_count, .heightfield_count = heightfield_count, .clipped_rows = clipped_rows };
+    return .{ .values = values, .rect_count = rect_count, .oriented_count = oriented_count, .heightfield_count = heightfield_count, .clipped_rows = clipped_rows, .entity_capacity = entity_capacity };
 }
 
 // ── spatial collider windowing (huge maps) ─────────────────────────────────
@@ -1084,9 +1112,23 @@ fn buildSpatialGrid(allocator: std.mem.Allocator, insts: []const f32, inst_count
     return .{ .cell = cell, .min_x = min_x, .min_z = min_z, .cols = cols, .rows = rows, .starts = starts, .items = items, .always = always };
 }
 
-fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: f32, intent: game_physics.movement.Direction, speed: f32, jump_down: bool, cfg: ?constructor.PhysicsConfig) void {
+fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: f32, intent: game_physics.movement.Direction, speed: f32, jump_down: bool, cfg: ?constructor.PhysicsConfig, bodies: []PropBody) void {
     if (colliders.values.len < game_physics.INPUT_HEADER_FLOATS) return;
     const input = colliders.values;
+    // The dynamic-body entity section (KICKPROP req_0625): live body state in,
+    // stepped state out. `bodies.len == colliders.entity_capacity` by
+    // construction (both come from the DYNAMIC_PROPS lump at build).
+    for (bodies, 0..) |b, i| {
+        const at = game_physics.INPUT_HEADER_FLOATS + i * game_physics.ENTITY_FLOATS;
+        input[at] = b.x;
+        input[at + 1] = b.y;
+        input[at + 2] = b.z;
+        input[at + 3] = b.vx;
+        input[at + 4] = b.vy;
+        input[at + 5] = b.vz;
+        input[at + 6] = b.radius;
+        input[at + 7] = b.restitution;
+    }
     input[0] = dt;
     input[1] = intent.x;
     input[2] = intent.z;
@@ -1102,7 +1144,7 @@ fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: f32,
     // come from the editor's own config (so the shipped game feels identical);
     // without it they fall back to the loader's built-in constants.
     input[11] = if (cfg) |cf| cf.walkable_side_push_grace else WALKABLE_SIDE_PUSH_GRACE_METERS;
-    input[12] = 0;
+    input[12] = @floatFromInt(bodies.len);
     input[13] = @floatFromInt(colliders.rect_count);
     input[14] = if (cfg) |cf| cf.gravity else PLAYER_GRAVITY_METERS_PER_SECOND2;
     input[15] = if (cfg) |cf| cf.jump_speed else PLAYER_JUMP_SPEED_METERS_PER_SECOND;
@@ -1124,6 +1166,18 @@ fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: f32,
     player.vy = out[5];
     player.vz = out[6];
     player.grounded = out[7] > 0.5;
+    // Commit the stepped bodies back — gravity, bounce, the player kick, and
+    // sphere-sphere shoves all came from the one host step.
+    const stepped = @min(bodies.len, @as(usize, @intFromFloat(@max(0, out[8]))));
+    for (bodies[0..stepped], 0..) |*b, i| {
+        const at = game_physics.OUTPUT_HEADER_FLOATS + i * game_physics.ENTITY_FLOATS;
+        b.x = out[at];
+        b.y = out[at + 1];
+        b.z = out[at + 2];
+        b.vx = out[at + 3];
+        b.vy = out[at + 4];
+        b.vz = out[at + 5];
+    }
     const horizontal_speed = @sqrt(player.vx * player.vx + player.vz * player.vz);
     if (horizontal_speed > 0.05) {
         player.yaw = std.math.atan2(player.vx, player.vz);
@@ -1339,8 +1393,10 @@ fn springArmEye(want: CameraSolve, maybe_colliders: ?PhysicsColliders) Vec3 {
     var cap: f32 = -1;
     if (maybe_colliders) |colliders| {
         if (colliders.rect_count != 0 or colliders.oriented_count != 0) {
+            // cameraOcclusionStepColliders assumes rects at INPUT_HEADER_FLOATS
+            // (no entity section) — skip past the body slots when present.
             const wall = game_physics.cameraOcclusionStepColliders(
-                colliders.values,
+                colliders.values[colliders.entity_capacity * game_physics.ENTITY_FLOATS ..],
                 colliders.rect_count,
                 colliders.oriented_count,
                 want.pos.x,
@@ -1574,6 +1630,12 @@ pub const Runtime = struct {
     camera: CameraState = undefined,
     /// Prop interaction (PROPUSE req_0624) — driven by scene.interactables.
     interact: InteractState = .{},
+    /// Kickable prop bodies (KICKPROP req_0625): the first MAX_ENTITIES of
+    /// scene.dynamic_props, stepped through the host entity section.
+    bodies: []PropBody = &.{},
+    /// First kid index of the dynamic prop part nodes (laid out prop-by-prop
+    /// in scene.dynamic_props order; updateDynamicPropNodes walks them).
+    dyn_first_child: usize = 0,
     last_ns: i64 = 0,
     frame: u32 = 0,
     // Content streaming (engaged when the world outgrows the detail radius):
@@ -1688,6 +1750,7 @@ pub const Runtime = struct {
         if (self.grid) |g| g.deinit(self.allocator);
         if (self.fallback) |f| self.allocator.free(f);
         if (self.interact.searched.len > 0) self.allocator.free(self.interact.searched);
+        if (self.bodies.len > 0) self.allocator.free(self.bodies);
         self.scene.deinit(self.allocator);
         self.* = undefined;
     }
@@ -1718,7 +1781,25 @@ pub const Runtime = struct {
             log.print("[loader] interaction layer: {d} archetypes, {d} interactable props\n", .{ ia.archetypes.len, ia.instances.len });
         }
 
-        self.physics_colliders = try buildPhysicsColliders(self.allocator, self.scene, self.insts, self.inst_count, self.stride);
+        // KICKPROP req_0625: one live sphere body per dynamic prop, spawned a
+        // radius above the anchor — lifted to the painted terrain when ground
+        // sits above it (an authored-flat ball still lands ON the hill).
+        if (self.scene.dynamic_props) |dp| {
+            const body_count = @min(dp.props.len, game_physics.MAX_ENTITIES);
+            if (dp.props.len > body_count) {
+                log.print("[loader] {d} dynamic props exceed the host body cap of {d} — the tail stays frozen at its anchor\n", .{ dp.props.len - body_count, game_physics.MAX_ENTITIES });
+            }
+            self.bodies = try self.allocator.alloc(PropBody, body_count);
+            for (self.bodies, 0..) |*b, i| {
+                const p = dp.props[i];
+                var anchor_y = p.y;
+                if (sceneTerrainTopAt(self.scene.heightfields, p.x, p.z)) |top| anchor_y = @max(anchor_y, top);
+                b.* = .{ .x = p.x, .y = anchor_y + p.body_radius, .z = p.z, .radius = p.body_radius, .restitution = p.restitution };
+            }
+            log.print("[loader] dynamics layer: {d} kickable props\n", .{self.bodies.len});
+        }
+
+        self.physics_colliders = try buildPhysicsColliders(self.allocator, self.scene, self.insts, self.inst_count, self.stride, self.bodies.len);
         self.has_physics_colliders = true;
         log.print("[loader] built {d} physics rects + {d} oriented physics rects + {d} heightfields\n", .{ self.physics_colliders.rect_count, self.physics_colliders.oriented_count, self.physics_colliders.heightfield_count });
         if (self.physics_colliders.clipped_rows > 0) {
@@ -1805,7 +1886,7 @@ pub const Runtime = struct {
         // MAX capacity for in-place per-frame refills, and seed the window at spawn.
         if (self.physics_colliders.clipped_rows > 0) {
             if (buildSpatialGrid(self.allocator, self.insts, self.inst_count, self.stride)) |g| {
-                const cap = game_physics.INPUT_HEADER_FLOATS + game_physics.MAX_RECTS * game_physics.RECT_FLOATS + game_physics.MAX_ORIENTED * game_physics.ORIENTED_FLOATS;
+                const cap = self.physics_colliders.rectBase() + game_physics.MAX_RECTS * game_physics.RECT_FLOATS + game_physics.MAX_ORIENTED * game_physics.ORIENTED_FLOATS;
                 if (self.allocator.alloc(f32, cap)) |buf| {
                     @memset(buf, 0);
                     self.allocator.free(self.physics_colliders.values);
@@ -1944,6 +2025,52 @@ pub const Runtime = struct {
         if (self.scene.heightfields.len > 0) {
             const first = self.scene.heightfields[0];
             log.print("[loader] built {d} terrain heightfield mesh(es); first grid {d}x{d} at ({d:.2},{d:.2}) span {d:.2}x{d:.2}\n", .{ self.scene.heightfields.len, first.cols, first.rows, first.center_x, first.center_z, first.width, first.depth });
+        }
+        // KICKPROP req_0625: dynamic props render as LIVE per-frame nodes (the
+        // player-model pattern) — their parts are NOT in the one-time-uploaded
+        // static instance buffer, so a rolling ball never re-stages the world.
+        // Transforms land in updateDynamicPropNodes each step.
+        self.dyn_first_child = self.kid_list.items.len;
+        if (self.scene.dynamic_props) |dp| {
+            for (dp.props) |dprop| {
+                const part_count = dprop.parts.len / constructor.DYNAMIC_PART_FLOATS;
+                var k: usize = 0;
+                while (k < part_count) : (k += 1) {
+                    const row = dprop.parts[k * constructor.DYNAMIC_PART_FLOATS ..];
+                    const shape_id = row[12];
+                    var geom_key: []const u8 = "box";
+                    var verts: []const f32 = self.cube[0..];
+                    var vert_count: u32 = 36;
+                    if (shape_id == SHAPE_RAMP) {
+                        geom_key = "ramp-slab";
+                        verts = self.ramp_slab[0..];
+                    } else if (shape_id == SHAPE_CYLINDER8) {
+                        geom_key = "cylinder8";
+                        verts = self.cylinder8[0..];
+                        vert_count = 8 * 12;
+                    } else if (shape_id == SHAPE_CYLINDER16) {
+                        geom_key = "cylinder16";
+                        verts = self.cylinder16[0..];
+                        vert_count = 16 * 12;
+                    } else if (shape_id == SHAPE_SPHERE) {
+                        geom_key = "sphere12x8";
+                        verts = self.sphere[0..];
+                        vert_count = 12 * 8 * 6;
+                    }
+                    try self.kid_list.append(self.allocator, .{
+                        .scene3d_mesh = true,
+                        .scene3d_geom_key = geom_key,
+                        .scene3d_vertices = verts,
+                        .scene3d_vert_count = vert_count,
+                        .scene3d_scale_x = row[6],
+                        .scene3d_scale_y = row[7],
+                        .scene3d_scale_z = row[8],
+                        .scene3d_color_r = row[9],
+                        .scene3d_color_g = row[10],
+                        .scene3d_color_b = row[11],
+                    });
+                }
+            }
         }
         // The world batches are STATIC (built once at construct, never mutated) —
         // flag them so the host uploads each ONCE and redraws from the retained
@@ -2251,7 +2378,7 @@ pub const Runtime = struct {
                 return;
             }
             const rf = rectFloats(self.insts, row, self.stride, solid);
-            @memcpy(values[game_physics.INPUT_HEADER_FLOATS + rc.* * game_physics.RECT_FLOATS ..][0..game_physics.RECT_FLOATS], &rf);
+            @memcpy(values[self.physics_colliders.rectBase() + rc.* * game_physics.RECT_FLOATS ..][0..game_physics.RECT_FLOATS], &rf);
             rc.* += 1;
         }
     }
@@ -2282,7 +2409,7 @@ pub const Runtime = struct {
     fn rebuildWindow(self: *Runtime, center_x: f32, center_z: f32) void {
         const grid = self.grid orelse return;
         const values = self.physics_colliders.values;
-        const need = game_physics.INPUT_HEADER_FLOATS + game_physics.MAX_RECTS * game_physics.RECT_FLOATS + game_physics.MAX_ORIENTED * game_physics.ORIENTED_FLOATS;
+        const need = self.physics_colliders.rectBase() + game_physics.MAX_RECTS * game_physics.RECT_FLOATS + game_physics.MAX_ORIENTED * game_physics.ORIENTED_FLOATS;
         if (values.len < need) return;
         var oriented_tmp: [game_physics.MAX_ORIENTED * game_physics.ORIENTED_FLOATS]f32 = undefined;
         var rc: usize = 0;
@@ -2316,7 +2443,7 @@ pub const Runtime = struct {
             }
         }
         // oriented rects sit right after the actual rects in the physics input layout.
-        const oriented_base = game_physics.INPUT_HEADER_FLOATS + rc * game_physics.RECT_FLOATS;
+        const oriented_base = self.physics_colliders.rectBase() + rc * game_physics.RECT_FLOATS;
         @memcpy(values[oriented_base .. oriented_base + oc * game_physics.ORIENTED_FLOATS], oriented_tmp[0 .. oc * game_physics.ORIENTED_FLOATS]);
         self.physics_colliders.rect_count = rc;
         self.physics_colliders.oriented_count = oc;
@@ -2363,7 +2490,13 @@ pub const Runtime = struct {
             // Refresh the near-field collider window around the player (huge maps only).
             // Cheap — it touches only the spanning list + the cells around the player.
             if (self.windowed) self.rebuildWindow(self.player.x, self.player.z);
-            runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE), cfg);
+            runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE), cfg, self.bodies);
+        } else if (self.bodies.len > 0) {
+            // Seated: the world keeps stepping — an intent-less step whose
+            // player result is discarded, so kicked balls roll past you
+            // (/test parity, PROPUSE-0610).
+            var ghost = self.player;
+            runPlayerPhysics(&ghost, &self.physics_colliders, dt, .{ .x = 0, .z = 0 }, 0, false, cfg, self.bodies);
         }
         if (self.camera.aiming) self.player.yaw = self.camera.yaw_degrees * std.math.pi / 180.0;
         const seated = self.player.posture != .none;
@@ -2374,10 +2507,45 @@ pub const Runtime = struct {
 
         updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, self.cameraColliderSet(), dt);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
+        self.updateDynamicPropNodes();
         // Re-stream the world around wherever the player ended up this step
         // (uses the camera solved just above for sight culling).
         self.refreshStreamNodes();
         self.frame += 1;
+    }
+
+    /// KICKPROP req_0625 — follow each dynamic prop's live body with its render
+    /// parts (mesh anchor = body.y - radius, /test parity); props past the host
+    /// body cap stay frozen at their authored anchor. Same composition as the
+    /// bake's static path: anchor + yaw-rotated local, part rot + prop yaw.
+    fn updateDynamicPropNodes(self: *Runtime) void {
+        const dp = self.scene.dynamic_props orelse return;
+        var kid = self.dyn_first_child;
+        for (dp.props, 0..) |dprop, i| {
+            var ax = dprop.x;
+            var ay = dprop.y;
+            var az = dprop.z;
+            if (i < self.bodies.len) {
+                const b = self.bodies[i];
+                ax = b.x;
+                ay = b.y - b.radius;
+                az = b.z;
+            }
+            const part_count = dprop.parts.len / constructor.DYNAMIC_PART_FLOATS;
+            var k: usize = 0;
+            while (k < part_count) : (k += 1) {
+                const row = dprop.parts[k * constructor.DYNAMIC_PART_FLOATS ..];
+                const local = rotateYLocal(.{ row[0], row[1], row[2] }, dprop.yaw_degrees);
+                const node = &self.kid_list.items[kid];
+                node.scene3d_pos_x = ax + local.x;
+                node.scene3d_pos_y = ay + local.y;
+                node.scene3d_pos_z = az + local.z;
+                node.scene3d_rot_x = row[3];
+                node.scene3d_rot_y = row[4] + dprop.yaw_degrees;
+                node.scene3d_rot_z = row[5];
+                kid += 1;
+            }
+        }
     }
 
     /// PROPUSE req_0624 — /test's interact frame, native: resolve the nearest

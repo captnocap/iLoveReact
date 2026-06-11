@@ -47,6 +47,10 @@ pub const LumpType = struct {
     /// + thin instance refs, so E-to-sit/search works in the compiled game.
     /// See runtime/workspace/lumps.ts INTERACTABLES + compile/worldInteractables.ts.
     pub const interactables: u32 = 16;
+    /// Kickable dynamic props (KICKPROP req_0625): sphere-body recipes + local
+    /// render parts. See runtime/workspace/lumps.ts DYNAMIC_PROPS +
+    /// compile/worldDynamicProps.ts.
+    pub const dynamic_props: u32 = 17;
 };
 
 pub const Lump = struct {

@@ -84,6 +84,12 @@ export const MAP_LUMP = {
   // the no-V8 loader carries /test's E-to-sit/search capability as data.
   // Layout: cart/hmsc-int/compile/worldInteractables.ts encodeInteractables.
   INTERACTABLES: 16,
+  // Kickable dynamic props (KICKPROP req_0625): per prop a sphere-body recipe
+  // (radius/restitution from the kind registry's dynamics) + its render parts
+  // as LOCAL 13-float rows. The loader steps them through the host physics
+  // entity section and renders them as live nodes — balls roll, cones shove.
+  // Layout: cart/hmsc-int/compile/worldDynamicProps.ts encodeDynamicProps.
+  DYNAMIC_PROPS: 17,
 } as const;
 
 export type LumpInput = {
