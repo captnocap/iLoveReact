@@ -38,6 +38,7 @@ import { applyMergeGesture, clampProfile, laneFlowArrows, laneGuides, parseCellK
 import { RoadRail } from './RoadRail';
 import { ChunkSurface } from './ChunkSurface';
 import type { PainterEmphasis } from './painterSurface';
+import { resolvePainterBehavior } from './painterBehavior';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
 import { placementCellRect, type Placement, type PlaceCat } from './placements';
 import type { MapBuildFootprint } from './mapBuildPlacements';
@@ -576,7 +577,11 @@ export function PaintCanvas(props: {
   const selBuildPlacement = place.buildItems?.find((p) => p.id === place.buildSelId) ?? null;
 
   const brushMode: BrushMode = props.brush.mode === 'erase' ? 'erase' : 'paint';
-  const activeBrushMode: BrushMode = tool === 'eraser' && (layer === 'paint' || layer === 'zone') ? 'erase' : brushMode;
+  // Erase is a TOOL on every target (PAINTER-0610): the eraser tool erases the
+  // active target (tiles, zone cells, terrain lowers, objects delete, roads
+  // delete). The legacy brush.mode==='erase' (the rail's old eraser chip,
+  // persisted in saved maps) still counts.
+  const activeBrushMode: BrushMode = tool === 'eraser' ? 'erase' : brushMode;
   const heightMode: HeightMode = props.brush.heightMode === 'ramp' || props.brush.heightMode === 'slope' || props.brush.heightMode === 'smooth' ? props.brush.heightMode : 'brush';
   const centerZ = clamp(Number(props.brush.centerZ), Z_MIN, Z_MAX);
   // One brush size (radius in tiles) shared by paint, zone, and height.
@@ -890,8 +895,8 @@ export function PaintCanvas(props: {
   };
 
   // ── Brush params (ref so the screen-space handler never goes stale) ──────────
-  const brushRef = useRef({ centerZ, size: brushSize, mode: brushMode, shape: brushShape, profile: heightProfile, heightMode, rampMin, rampMax, rampWide, rampLong, rampAngle, smoothStrength });
-  brushRef.current = { centerZ, size: brushSize, mode: brushMode, shape: brushShape, profile: heightProfile, heightMode, rampMin, rampMax, rampWide, rampLong, rampAngle, smoothStrength };
+  const brushRef = useRef({ centerZ, size: brushSize, mode: activeBrushMode, shape: brushShape, profile: heightProfile, heightMode, rampMin, rampMax, rampWide, rampLong, rampAngle, smoothStrength });
+  brushRef.current = { centerZ, size: brushSize, mode: activeBrushMode, shape: brushShape, profile: heightProfile, heightMode, rampMin, rampMax, rampWide, rampLong, rampAngle, smoothStrength };
   // Height is ADDITIVE (heightData.stampCone stacks), but onMouseMove fires at input
   // rate (~100/s) — re-stamping a stationary brush every event saturates cells to
   // HEIGHT_LIMIT in a few frames, flattening everything to one max plateau and making
@@ -1311,33 +1316,83 @@ export function PaintCanvas(props: {
   };
   if (props.apiRef) props.apiRef.current = { getWorld: () => ({ chunks, zones, focus, roads, roadUnder: roadUnderRef.current! }), getView };
 
-  // Unified brush dispatch: paint paints tiles, zone paints the active zone, height
-  // sculpts; place stamps the armed object when the brush tool is active.
+  // ── One Painter (PAINTER-0610, req_0593) ─────────────────────────────────────
+  // One active tool (Select/Paint/Erase), one active target (`layer`). The pure
+  // resolver picks what the single input overlay does; the capability table picks
+  // what a stroke sample edits — the per-layer if-chains live HERE now, nowhere else.
   const isRampTool = layer === 'height' && heightMode === 'ramp';
   const isSlopeTool = layer === 'height' && heightMode === 'slope';
   const isSmoothTool = layer === 'height' && heightMode === 'smooth';
   const showPlaceBrush = layer === 'place' && tool === 'brush' && !!place.active;
-  const showBrush = layer === 'height' || showPlaceBrush || ((layer === 'paint' || layer === 'zone') && tool !== 'pointer');
+  const behavior = resolvePainterBehavior({ tool, target: layer, placeArmed: !!place.active });
+  const showBrush = behavior === 'stroke';
   placeBrushKeyRef.current = { enabled: showPlaceBrush, rotate: place.onRotateBrush };
-  // What a just-finished stroke did, for the event log — read from the active layer
-  // + tool at stroke end.
-  const strokeNote = (): EditNote => {
-    if (layer === 'height') return { cat: 'height', text: isRampTool ? 'stamped ramp' : isSlopeTool ? 'painted slope' : isSmoothTool ? 'smoothed terrain' : brushMode === 'erase' ? 'lowered terrain' : 'raised terrain' };
-    if (layer === 'place') return { cat: 'object', text: `painted ${place.active?.label ?? 'object'}` };
-    if (layer === 'zone') { const z = zones[activeZone]; return { cat: 'zone', text: activeBrushMode === 'erase' ? 'erased zone' : `painted ${z ? z.name : 'zone'}` }; }
-    return { cat: 'tile', text: activeBrushMode === 'erase' ? 'erased tiles' : `painted ${tile}` };
+
+  // Stamp the armed object at the cursor's cell (no interpolation — objects drop
+  // at input samples, deduped per tile, exactly the pre-table behavior).
+  const stampObjectAt = (gx0: number, gy0: number) => {
+    if (!place.active) return;
+    const c = resolveCell(gx0, gy0);
+    if (!c) return;
+    const gx = c.cgx, gy = c.cgy;
+    const stampKey = `${place.active.cat}:${place.active.kind}:${Math.round(gx / TILE_UNITS)}:${Math.round(gy / TILE_UNITS)}`;
+    if (heightStamped.current.has(stampKey)) return;
+    heightStamped.current.add(stampKey);
+    strokeStats.current.stamps++;
+    place.onPaintAt(place.active.cat, place.active.kind, gx, gy, place.active.rotation);
   };
+  // Erase-everywhere: on the Object target the eraser deletes any UNLOCKED
+  // placement whose footprint rect intersects the brush footprint (rect-to-point
+  // distance, rotation ignored — the same axis rect the native node hit-tests).
+  const erasePlacementsAt = (gx: number, gy: number) => {
+    const radiusG = (paintRef.current.size + 0.5) * TILE_UNITS;
+    for (const p of place.items) {
+      if (p.locked) continue;
+      const dx = Math.max(0, Math.abs(gx - p.gx) - (p.footW * TILE_UNITS) / 2);
+      const dy = Math.max(0, Math.abs(gy - p.gy) - (p.footD * TILE_UNITS) / 2);
+      if (Math.hypot(dx, dy) <= radiusG) {
+        strokeStats.current.stamps++;
+        place.onDelete(p.id);
+      }
+    }
+  };
+
+  // What the active target's stroke does + how the event log names it. `sample`
+  // runs inside the drag interpolation (touched accumulates dirty chunks);
+  // `rawSample` runs once per raw input sample (object stamp/erase — cart-side
+  // state, no chunk buffers to touch). Road has neither: its edits are clicks.
+  type PainterCapability = {
+    sample?: (gx: number, gy: number, touched: Set<ChunkKey>) => void;
+    rawSample?: (gx: number, gy: number) => void;
+    note: () => EditNote;
+  };
+  const painterCapabilities: Record<Layer, PainterCapability> = {
+    paint: {
+      sample: stampTileAtGraph,
+      note: () => ({ cat: 'tile', text: activeBrushMode === 'erase' ? 'erased tiles' : `painted ${tile}` }),
+    },
+    height: {
+      sample: isSmoothTool ? stampSmoothAtGraph : isRampTool || isSlopeTool ? undefined : stampHeightAtGraph,
+      note: () => ({ cat: 'height', text: isRampTool ? 'stamped ramp' : isSlopeTool ? 'painted slope' : isSmoothTool ? 'smoothed terrain' : activeBrushMode === 'erase' ? 'lowered terrain' : 'raised terrain' }),
+    },
+    zone: {
+      sample: stampZoneAtGraph,
+      note: () => { const z = zones[activeZone]; return { cat: 'zone', text: activeBrushMode === 'erase' ? 'erased zone' : `painted ${z ? z.name : 'zone'}` }; },
+    },
+    place: {
+      rawSample: tool === 'eraser' ? erasePlacementsAt : stampObjectAt,
+      note: () => ({ cat: 'object', text: tool === 'eraser' ? 'erased objects' : `painted ${place.active?.label ?? 'object'}` }),
+    },
+    road: {
+      note: () => ({ cat: 'road', text: 'road' }), // road notes come from restampRoads, not strokes
+    },
+  };
+  const strokeNote = painterCapabilities[layer].note;
   // Where the last stamp landed, in GRAPH space, so onBrush can fill the gap to the
   // current point. null between strokes (reset in beginStroke) so a new stroke never
   // draws a line from the previous stroke's end.
   const lastStampG = useRef<{ x: number; y: number } | null>(null);
   const rampStroke = useRef<{ start: { x: number; y: number }; current: { x: number; y: number } } | null>(null);
-  const stampOneAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
-    if (layer === 'height' && isSmoothTool) stampSmoothAtGraph(gx, gy, touched);
-    else if (layer === 'height' && !isRampTool && !isSlopeTool) stampHeightAtGraph(gx, gy, touched);
-    else if (layer === 'zone') stampZoneAtGraph(gx, gy, touched);
-    else if (layer === 'paint') stampTileAtGraph(gx, gy, touched);
-  };
 
   const rampPlan = () => {
     const b = brushRef.current;
@@ -1424,18 +1479,8 @@ export function PaintCanvas(props: {
     strokeStats.current.samples++;
     const g = screenToGraph(sx, sy);
     if (!g) return;
-    if (showPlaceBrush && place.active) {
-      const c = resolveCell(g.gx, g.gy);
-      if (!c) return;
-      const gx = c ? c.cgx : g.gx;
-      const gy = c ? c.cgy : g.gy;
-      const stampKey = `${place.active.cat}:${place.active.kind}:${Math.round(gx / TILE_UNITS)}:${Math.round(gy / TILE_UNITS)}`;
-      if (heightStamped.current.has(stampKey)) return;
-      heightStamped.current.add(stampKey);
-      strokeStats.current.stamps++;
-      place.onPaintAt(place.active.cat, place.active.kind, gx, gy, place.active.rotation);
-      return;
-    }
+    const cap = painterCapabilities[layer];
+    if (cap.rawSample) { cap.rawSample(g.gx, g.gy); return; } // object stamp/erase: per raw sample, no interpolation
     const touched = new Set<ChunkKey>();
     if (isSlopeTool) {
       const st = slopeStroke.current ?? { points: [] };
@@ -1448,7 +1493,7 @@ export function PaintCanvas(props: {
     }
     const prev = lastStampG.current;
     if (!prev) {
-      stampOneAtGraph(g.gx, g.gy, touched); // first sample of the stroke: just the point
+      cap.sample?.(g.gx, g.gy, touched); // first sample of the stroke: just the point
     } else {
       const dx = g.gx - prev.x, dy = g.gy - prev.y;
       const dist = Math.hypot(dx, dy);
@@ -1457,7 +1502,7 @@ export function PaintCanvas(props: {
       const steps = Math.min(256, Math.max(1, Math.ceil(dist / stepG)));
       for (let i = 1; i <= steps; i++) {
         const t = i / steps;
-        stampOneAtGraph(prev.x + dx * t, prev.y + dy * t, touched);
+        cap.sample?.(prev.x + dx * t, prev.y + dy * t, touched);
       }
     }
     lastStampG.current = { x: g.gx, y: g.gy };
@@ -1505,41 +1550,54 @@ export function PaintCanvas(props: {
     syncRegionsNow();
   };
 
-  // The pointer tool SELECTS tiles (paint/zone layers): click = focus one cell,
-  // ctrl-click = add/remove from the group. The selection (cart-owned) drives the
-  // top-left override panel. A select overlay (sibling, like the brush) captures the
-  // click without one Canvas.Node per tile; only the chosen cells get a highlight.
-  const showSelect = !!props.select && tool === 'pointer' && (layer === 'paint' || layer === 'zone');
+  // The road stroke nearest a cell, within half its stamped width + a tile of
+  // slack — shared by Select (pick) and Erase (delete) on the road network.
+  const roadStrokeAtCell = (p: RoadPoint): RoadStroke | null => {
+    let best: { r: RoadStroke; d: number } | null = null;
+    for (const r of roadsRef.current) {
+      for (let i = 0; i + 1 < r.points.length; i++) {
+        const d = distPointSegmentCells(p, r.points[i]!, r.points[i + 1]!);
+        if (!best || d < best.d) best = { r, d };
+      }
+    }
+    return best && best.d <= roadWidthTiles(best.r.profile) / 2 + 1 ? best.r : null;
+  };
+
+  // Universal Select (PAINTER-0610): one click, the most specific thing under the
+  // cursor wins — placement/build piece first, road stroke second, tile cell third
+  // (ctrl-click keeps the cell group-toggle). Runs from every target except Object,
+  // where no overlay mounts and the native Canvas.Nodes own the pointer.
   const selectAtScreen = (sx: number, sy: number) => {
-    const sel = props.select; if (!sel) return;
     const g = screenToGraph(sx, sy); if (!g) return;
+    const inRect = (p: { gx: number; gy: number; footW: number; footD: number }) =>
+      Math.abs(g.gx - p.gx) <= (p.footW * TILE_UNITS) / 2 && Math.abs(g.gy - p.gy) <= (p.footD * TILE_UNITS) / 2;
+    const hitPlacement = [...place.items].reverse().find(inRect); // later = painted on top
+    if (hitPlacement) { place.onSelectBuild?.(null); place.onSelect(hitPlacement.id); return; }
+    const hitBuild = [...(place.buildItems ?? [])].reverse().find(inRect);
+    if (hitBuild) { place.onSelect(null); place.onSelectBuild?.(hitBuild.id); return; }
     const c = resolveCell(g.gx, g.gy);
+    const road = c ? roadStrokeAtCell({ gx: c.gCellX, gz: c.gCellZ }) : null;
+    setSelRoadId(road ? road.id : null); // one selection focus: a non-road click clears a stale road pick
+    if (road) return;
+    const sel = props.select; if (!sel) return;
     if (!c) { if (!ctrlHeldRef.current) sel.clear(); return; } // plain click on empty = deselect
     const idx = c.chunk.tiles.idx[c.cellZ * c.chunk.tiles.cols + c.cellX];
     const cell: SelCell = { gx: c.gCellX, gz: c.gCellZ, kind: idx >= 0 ? (TILE_KINDS[idx] ?? null) : null };
     if (ctrlHeldRef.current) sel.toggle(cell); else sel.set(cell);
   };
 
-  // Road layer clicks: the brush lays centerline points; the pointer selects the
-  // nearest stroke (within half its stamped width + a tile of slack).
+  // Road target clicks: Paint lays centerline points; Erase deletes the stroke
+  // under the cursor (erase-everywhere). Select goes through selectAtScreen.
   const roadClickAt = (sx: number, sy: number) => {
     const g = screenToGraph(sx, sy);
     if (!g) return;
     const c = resolveCell(g.gx, g.gy);
-    if (tool === 'pointer') {
-      if (!c) { setSelRoadId(null); return; }
-      const p: RoadPoint = { gx: c.gCellX, gz: c.gCellZ };
-      let best: { r: RoadStroke; d: number } | null = null;
-      for (const r of roadsRef.current) {
-        for (let i = 0; i + 1 < r.points.length; i++) {
-          const d = distPointSegmentCells(p, r.points[i]!, r.points[i + 1]!);
-          if (!best || d < best.d) best = { r, d };
-        }
-      }
-      setSelRoadId(best && best.d <= roadWidthTiles(best.r.profile) / 2 + 1 ? best.r.id : null);
+    if (!c) return;
+    if (tool === 'eraser') {
+      const road = roadStrokeAtCell({ gx: c.gCellX, gz: c.gCellZ });
+      if (road) deleteRoad(road.id);
       return;
     }
-    if (!c) return;
     // Snap order: a nearby stroke ENDPOINT (2.5 cells) continues the network;
     // failing that, a nearby CENTERLINE (1.5 cells) lands the point ON the
     // wire — committing a stroke that ends there splits the road at that spot.
@@ -1583,7 +1641,7 @@ export function PaintCanvas(props: {
     const g2 = screenToGraph(sx + BRUSH_PROBE, sy);
     const zoom = g2 && g2.gx !== g.gx ? BRUSH_PROBE / (g2.gx - g.gx) : 1; // px per graph unit
     const dia = (brushSize * 2 + 1) * TILE_UNITS * zoom; // footprint width across, in px
-    const erasing = !isRampTool && (layer === 'height' ? brushMode === 'erase' : activeBrushMode === 'erase');
+    const erasing = !isRampTool && activeBrushMode === 'erase';
     const color = erasing ? '#f87171'
       : layer === 'height' ? '#fbbf24'
       : layer === 'place' ? (place.active?.color ?? '#a78bfa')
@@ -1888,38 +1946,35 @@ export function PaintCanvas(props: {
         }) : null}
       </Canvas>
 
-      {/* Brush layer — screen-space sibling (cutout pattern). Down + move on the
-          same node → pointer capture carries the stroke. A down on an empty open
-          slot attaches a chunk instead of painting. */}
-      {showBrush ? (
+      {/* Painter input overlay (PAINTER-0610) — ONE screen-space sibling for every
+          behavior (cutout pattern: down + move + up on the same node so pointer
+          capture carries the stroke; rails/buttons render after it so they stay
+          clickable). The resolver picks what events mean: 'stroke' runs the brush
+          lifecycle, 'click' lays/erases road points, 'select' runs the universal
+          most-specific pick. 'none' (Object+Select, or Object+Paint with nothing
+          armed) mounts NO overlay — the placements' native Canvas.Nodes own the
+          pointer there (engine-side drag). A down on an empty open slot attaches
+          a chunk instead, on every behavior. */}
+      {behavior !== 'none' ? (
         <Pressable
-          onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; drawing.current = true; beginStroke(); notifyEditBegin(); if (isRampTool) beginRamp(sx, sy); else onBrush(sx, sy); updateCursor(sx, sy); }}
-          onMouseMove={(p: any) => { const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (drawing.current) { if (isRampTool) updateRamp(sx, sy); else onBrush(sx, sy); } updateCursor(sx, sy); }}
+          onMouseDown={(p: any) => {
+            claimWasd?.();
+            const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0);
+            if (tryAddSlotAt(sx, sy)) return;
+            if (behavior === 'select') { selectAtScreen(sx, sy); return; }
+            if (behavior === 'click') { roadClickAt(sx, sy); return; }
+            drawing.current = true; beginStroke(); notifyEditBegin();
+            if (isRampTool) beginRamp(sx, sy); else onBrush(sx, sy);
+            updateCursor(sx, sy);
+          }}
+          onMouseMove={(p: any) => {
+            const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0);
+            if (behavior !== 'stroke') { updateHover(sx, sy); return; }
+            if (drawing.current) { if (isRampTool) updateRamp(sx, sy); else onBrush(sx, sy); }
+            updateCursor(sx, sy);
+          }}
           onMouseUp={() => { const was = drawing.current; drawing.current = false; let changed = false; if (was && isRampTool) changed = finishRamp(); else if (was && isSlopeTool) changed = finishSlope(); if (was) { endStroke(); if (changed || (!isRampTool && !isSlopeTool)) notifyEdit(strokeNote()); } }}
           onMouseLeave={() => { const was = drawing.current; drawing.current = false; let changed = false; if (was && isRampTool) changed = finishRamp(); else if (was && isSlopeTool) changed = finishSlope(); hoverSink.current?.(null); brushSink.current?.(null); if (was) { endStroke(); if (changed || (!isRampTool && !isSlopeTool)) notifyEdit(strokeNote()); } }}
-          style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
-        />
-      ) : null}
-
-      {/* Select layer — pointer tool, paint/zone. Click focuses a cell (ctrl-click
-          adds to the group); forwards "+" ghost clicks like the brush overlay. Pan
-          here is via WASD (this overlay owns the clicks). */}
-      {showSelect ? (
-        <Pressable
-          onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; selectAtScreen(sx, sy); }}
-          onMouseMove={(p: any) => { updateHover(Number(p?.x ?? 0), Number(p?.y ?? 0)); }}
-          onMouseLeave={() => { hoverSink.current?.(null); }}
-          style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
-        />
-      ) : null}
-
-      {/* Road layer — click overlay (cutout pattern, like select): brush lays
-          centerline points, pointer selects a stroke; forwards "+" ghost clicks. */}
-      {layer === 'road' ? (
-        <Pressable
-          onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; roadClickAt(sx, sy); }}
-          onMouseMove={(p: any) => { updateHover(Number(p?.x ?? 0), Number(p?.y ?? 0)); }}
-          onMouseLeave={() => { hoverSink.current?.(null); }}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
         />
       ) : null}
