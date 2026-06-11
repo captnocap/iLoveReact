@@ -1,5 +1,68 @@
 # Prop real-world size audit (req_0616, 2026-06-11)
 
+> **CONTESTED & CORRECTED (req_0617, same day).** The user contested every
+> verdict below with reference photos (a 4-yd dumpster reaching a 6ft man's
+> chest vs the game's waist-high render). They were right; the verdicts below
+> used the WRONG YARDSTICK. §CORRECTED below is the operative table; the
+> original sections are kept for the raw real-world research numbers only.
+
+## CORRECTED — presence ratio, not absolute meters (req_0617)
+
+What the eye judges is **prop height ÷ body height in frame**, not meters.
+Real presence = real avg ÷ 1.75m person. Game presence = rendered height ÷
+the 2.01m player. Two compounding shrinks were found:
+
+1. **The anchor gap (every prop):** props carry real-world meters but the
+   player is 2.01m, so every "exact" prop renders at ~87% of its real
+   presence. This alone makes the whole catalog feel uniformly small —
+   exactly the user's complaint.
+2. **Model honesty (per prop):** some models render BELOW their registry
+   height. The dumpster's parts top out at ~1.05 of its `AUTHORED_HEIGHT`
+   (1.2) normalization, so it renders ~1.18m, not the registry's 1.35m
+   (~12% short). Its depth (`footprintRadius × 0.9` → 0.96m) is also far
+   under the real 1.37m — interior volume ~1.2m³ vs the real 3.1m³, which
+   is why 2–3 people fit in a real one and barely 1 in the game's.
+   FireHydrant and Fence verified honest; the other ~15 models are
+   UNAUDITED for this defect. (Dumpster part tables are also hand-duplicated
+   between render3d/props/Dumpster.tsx and compile/worldGeometry.ts —
+   rule-of-two violation, req_0612.)
+
+| kind | game presence | real presence | % of real feel |
+|---|---|---|---|
+| treeBirch / treePine / treeOak / treePalm / treeCypress | 3.0–4.5× | 7.4–11.4× | **37–44%** |
+| streetLight | 2.59× | 4.0× | **65%** |
+| dumpster (rendered ~1.18m) | 0.59× | 0.78× | **75%** + half the volume |
+| telephonePole | 4.23× | 5.03× | 84% |
+| basketballHoop | 1.89× | 2.26× | 84% |
+| barrier | 0.52× | 0.61× | 85% |
+| trafficCone | 0.35× | 0.41× | 86% |
+| bench / couch / cupboard / soccer/basketball | — | — | 87% |
+| trafficLight | 2.79× | 3.14× | 89% |
+| payphone / fence / table | — | — | 90% |
+| chair / mailbox / stopSign | — | — | 92–93% |
+| fridge | 0.95× | 0.97× | 97% |
+| streetSign | 1.64× | 1.54× | 106% (over) |
+| fireHydrant | 0.49× | 0.43× | 114% (over) |
+| ballBeach | 0.40× | 0.29× | 139% (over) |
+
+**The law that fixes it:** target `heightMeters` = real avg × (2.01/1.75 =
+**×1.15**) — i.e. preserve the real-world presence ratio against the
+stylized-tall player. EXCEPTION: interaction-anchored dimensions (seat
+heights, counter/table tops, bed tops) stay locked to the FIGURE's landmarks
+(seat 0.45 = the figure's knee 0.44; counters ≈ its 0.90 waist) — the figure
+is not a uniformly scaled human (proportionally shorter legs), so sit/use
+heights must track its skeleton, not the ×1.15.
+
+Proposed registry targets: dumpster 1.57 (+footprint→~2.1m wide, deeper
+aspect), trashCan 1.15, cone 0.82, mailbox 1.46, payphone 1.61, bench 0.98
+(seat stays 0.45), stopSign 3.33, trafficLight 6.3, streetLight 8.0,
+telephonePole 10.1, hoop 4.5 (rim 3.5), fence 1.4, barrier 1.23, hydrant
+DOWN to 0.86, soccer 0.25, basketball 0.28; trees oak 17 / pine 23 / birch
+16 / cypress 17 / palm 15 (or a tamer 12–16 urban band — needs a ruling,
+trees affect sightlines/streaming). Plus: audit all ~15 unchecked models for
+rendered-vs-registry honesty, and fix the dumpster model (parts must reach
+AUTHORED_HEIGHT; depth aspect 0.9 → ~1.2).
+
 Every hmsc-int prop kind (`cart/hmsc-int/world/propKinds.ts`) compared to its
 real-world average size. Game numbers from `tools/prop-scale`; real-world
 numbers researched 2026-06-11 (MUTCD/industry specs for street infrastructure,
