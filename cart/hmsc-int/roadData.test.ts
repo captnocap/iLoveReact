@@ -12,7 +12,7 @@ import {
   laneFlowArrows, snapToRoadEnd, speedLimitAtPoint, speedLimitMps, splitStroke, strokeChevrons, strokeWireFlip,
   type RoadPlan, type RoadStroke,
 } from './roadData';
-import { roadRibbonSection } from './tileField.wgsl';
+import { roadRibbonSection } from './render3d/heightfieldSurface';
 
 const at = (plan: RoadPlan, gx: number, gz: number) => plan.get(cellKey(gx, gz));
 

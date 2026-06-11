@@ -519,15 +519,6 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
-      name: 'worldFile.ts / assets.ts / assetPrompt.ts',
-      purpose: ['ai_edit', 'asset_pipeline', 'world_gen'],
-      kind: 'module',
-      sourceFile: 'cart/hmsc-int/worldFile.ts',
-      description:
-        'The other (future) authoring lane: the world as a hand-editable .tsx file importing asset components, placements serialized as JSX tags at spreadsheet addresses; ASSET_AUTHORING_PROMPT codifies the AI-generated-asset contract. Not wired to the main editor flow yet — a parallel model awaiting the bake pipeline.',
-      status: 'dormant',
-    },
-    {
       name: 'PaintCanvas.tsx',
       purpose: ['world_gen', 'rendering', 'input'],
       kind: 'component',
@@ -558,21 +549,12 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
-      name: 'tileField.wgsl.ts (HEIGHTFIELD_TILE_SHADER re-export)',
+      name: 'heightTileView.wgsl.ts / zoneView.wgsl.ts',
       purpose: ['shader', 'rendering', 'world_gen'],
       kind: 'shader',
-      sourceFile: 'cart/hmsc-int/tileField.wgsl.ts',
+      sourceFile: 'cart/hmsc-int/heightTileView.wgsl.ts',
       description:
-        'A re-export of the game’s HEIGHTFIELD_TILE_SHADER (render3d/heightfieldSurface): the editor paints with the very shader the game drapes terrain with. One source; what you paint is what boots.',
-      status: 'live',
-    },
-    {
-      name: 'heightField.wgsl.ts / heightTileView.wgsl.ts / zoneView.wgsl.ts',
-      purpose: ['shader', 'rendering', 'world_gen'],
-      kind: 'shader',
-      sourceFile: 'cart/hmsc-int/heightField.wgsl.ts',
-      description:
-        'WGSL paint views: heightField (bilinear height → elevation ramp + grid lines), heightTileView (height tint over tile ground), zoneView (tile ground + translucent zone tint in ONE quad — no Effect-over-Effect alpha).',
+        'WGSL paint views: heightTileView (height tint over tile ground), zoneView (tile ground + translucent zone tint in ONE quad — no Effect-over-Effect alpha). The painted ground uses the game’s HEIGHTFIELD_TILE_SHADER (render3d/heightfieldSurface) directly — the tileField.wgsl.ts re-export shim and the superseded heightField.wgsl.ts elevation-ramp view were removed in the 2026-06-11 fallow sweep.',
       status: 'live',
     },
     {
@@ -937,15 +919,6 @@ export const hmsc_int: DocIndex = {
       evidence: ['cart/hmsc-int/tileOverrides.ts (88); what-is-not-here section line 94'],
       fix: 'Wire override consumption into the game runtime per the tile-overrides memory.',
       severity: 'high',
-    },
-    {
-      name: 'two coexisting authoring models',
-      purpose: ['world_gen', 'ai_edit', 'maintenance'],
-      description:
-        'worldFile.ts/assets.ts/assetPrompt.ts (world-as-.tsx + AI asset generation + bake-to-Zig) is built but not wired into the main GameState flow; the two authoring lanes coexist unreconciled.',
-      evidence: ['cart/hmsc-int/worldFile.ts (178), assets.ts (91), assetPrompt.ts; what-is-not-here section line 92'],
-      fix: 'The coherence pass must reconcile the two authoring models.',
-      severity: 'medium',
     },
     {
       name: 'assist3d meshes don’t bridge into placements',
