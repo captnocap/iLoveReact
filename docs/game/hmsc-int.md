@@ -1665,3 +1665,24 @@ IsoAuthor (rotate/orbit/recenter/delete/cancel/pan), Workbench shell chords
 rows: the paint editor tool keys (usePaintEditor.ts), Embodied/sculptCamera/
 usePlayerDrive, plus a whole-keymap view in the settings bench. P4:
 `editors/controls.test.ts` (6).
+
+## shell/panelGrammar.ts — the panel grammar (PANELGRAMMAR-0610, 2026-06-11)
+
+Review §11.4's diagnosis made law: a source's panel was whatever shape its
+backing data happened to have (three piece classes → three duplicate groups;
+35 DSL verbs → 35 buttons). The grammar is pure spec analysis
+(`panelGrammarViolations`, data only, P4 `shell/panelGrammar.test.ts`)
+consulted by PanelGroups, which warns LOUDLY once per offending panel shape —
+render continues. The laws: G1 repeated group shapes are illegal (factor into
+one group + a selector — GUIDING_LIGHT's factor law in UI, mechanically
+detected via `groupSignature`); G2 one color system per panel (caps on color
+fields per panel + quick-picks per field without wheel/range); G3 verb caps
+(chip walls demand `t:'pick'`, req_0184); G4 undo/redo/save render once (the
+shell owns them). Thresholds are named constants (`PANEL_GRAMMAR_CAPS`).
+`PanelGroup` grew `tier?: 'debug'` — debug groups render COLLAPSED (rule 6).
+First fix under the law: the buildings source's per-kind `<KIND>S · GLOBAL`
+groups (the user: "why do I have 3 color swatches and no wheel") folded into
+ONE `SKINS · GLOBAL` group with a class enum, and its color field opted into
+`wheel` + `range` — quick-picks on top, any tone reachable. Outstanding L1
+half: sliders are still JS (`WorkbenchSlider`); the host-driven Slider
+primitive is the framework item that upgrades every num field in one place.

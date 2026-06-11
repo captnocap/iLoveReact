@@ -195,14 +195,24 @@ test('removing a piece keeps every other piece\'s skin (overrides ride the piece
 
 // ── the panel + ordering laws ────────────────────────────────────────────────
 
-test('the panel generates: type-global groups for kinds present (quartet first) + the piece group', () => {
+test('the panel generates: ONE skins group with a class selector (quartet first) + the piece group', () => {
+  // PANELGRAMMAR-0610 (§11.2): the per-kind GLOBAL groups were N copies of
+  // one picker — the grammar's G1 case. One group + a class enum now.
   const { store } = fixture();
   const spec = buildingsPanel(store, MOTEL);
   const titles = spec.groups.map((g) => g.title);
   assertEqual(titles[0], 'BUILDING', 'identity group leads');
-  assert(titles.includes('WALLS · GLOBAL') && titles.includes('FLOORS · GLOBAL') && titles.includes('ROOFS · GLOBAL'), 'one global group per kind present');
-  assert(titles.indexOf('WALLS · GLOBAL') < titles.indexOf('FLOORS · GLOBAL'), 'the structural quartet order leads');
-  assert(!titles.includes('PILLARS · GLOBAL'), 'absent kinds get no group');
+  assertEqual(titles.filter((t) => t.includes('GLOBAL')).join(','), 'SKINS · GLOBAL', 'exactly ONE global skins group');
+  const skins = spec.groups.find((g) => g.title === 'SKINS · GLOBAL')!;
+  const classField = skins.fields.find((f) => f.k === 'class') as any;
+  assertEqual(classField.t, 'enum', 'the piece class is a selector field, not a group per class');
+  assertEqual(classField.get(), 'wall', 'quartet order: walls lead');
+  assertEqual(classField.opts.join(','), 'wall,floor,roof', 'one option per kind PRESENT, quartet first');
+  classField.set('roof');
+  const retargeted = buildingsPanel(store, MOTEL);
+  const roofSkins = retargeted.groups.find((g) => g.title === 'SKINS · GLOBAL')!;
+  assertEqual((roofSkins.fields.find((f) => f.k === 'class') as any).get(), 'roof', 'the selector retargets the one picker');
+  store.setSkinClass(MOTEL, 'wall'); // back to the default for the tests below
   assertEqual(skinKindOrder(['roof', 'wall', 'trim']).join(','), 'wall,roof,trim', 'quartet first, then the rest');
 
   store.selectPiece(MOTEL, 1);
@@ -256,7 +266,7 @@ test('pick folds: materials keep catalog groups, pieces by type with counts, cat
   assert(cat.every((c) => c.group && c.group.endsWith('s')), 'the catalog groups by kind');
   // the panel rows are PICKS now, never option-dump enums
   const spec = buildingsPanel(store, MOTEL);
-  const wallGroup = spec.groups.find((g) => g.title === 'WALLS · GLOBAL')!;
+  const wallGroup = spec.groups.find((g) => g.title === 'SKINS · GLOBAL')!;
   const matField = wallGroup.fields.find((f) => f.k === 'material') as any;
   assertEqual(matField.t, 'val', 'material is a readout, not an inline catalog dropdown');
   assertEqual(matField.get(), 'bare', 'bare reads without opening a picker');
@@ -277,7 +287,7 @@ test('paint target handoff: a compact face target can receive the materialized p
     store.setPaintTarget(target);
     store.setLens('paint');
   });
-  const wallGroup = spec.groups.find((g) => g.title === 'WALLS · GLOBAL')!;
+  const wallGroup = spec.groups.find((g) => g.title === 'SKINS · GLOBAL')!;
   const targetField = wallGroup.fields.find((f) => f.k === 'target') as any;
   targetField.set('front');
   const paintField = wallGroup.fields.find((f) => f.k === 'paint target') as any;
@@ -298,7 +308,7 @@ test('material browse handoff: existing materials open as a wide source lens tar
     store.setPaintTarget(target);
     store.setLens('materials');
   });
-  const wallGroup = spec.groups.find((g) => g.title === 'WALLS · GLOBAL')!;
+  const wallGroup = spec.groups.find((g) => g.title === 'SKINS · GLOBAL')!;
   const targetField = wallGroup.fields.find((f) => f.k === 'target') as any;
   targetField.set('sides');
   const browse = wallGroup.fields.find((f) => f.k === 'browse material') as any;
@@ -390,7 +400,7 @@ test('clear target clears the saved skin and the active material target state', 
     store.setPaintTarget(target);
     store.setLens('materials');
   });
-  const wallGroup = spec.groups.find((g) => g.title === 'WALLS · GLOBAL')!;
+  const wallGroup = spec.groups.find((g) => g.title === 'SKINS · GLOBAL')!;
   const targetField = wallGroup.fields.find((f) => f.k === 'target') as any;
   targetField.set('front');
   const browse = wallGroup.fields.find((f) => f.k === 'browse material') as any;
@@ -398,7 +408,7 @@ test('clear target clears the saved skin and the active material target state', 
   store.setPaintTargetSkin(store.paintTarget()!, { kind: 'material', id: 'mat.asphalt' });
   assertEqual(store.paintTarget()?.materialId, 'mat.asphalt', 'active target tracks the applied material');
   const refreshed = buildingsPanel(store, MOTEL, (target) => store.setPaintTarget(target));
-  const clear = refreshed.groups.find((g) => g.title === 'WALLS · GLOBAL')!.fields.find((f) => f.k === 'clear target') as any;
+  const clear = refreshed.groups.find((g) => g.title === 'SKINS · GLOBAL')!.fields.find((f) => f.k === 'clear target') as any;
   clear.run();
   assertEqual(store.resolved(MOTEL, 1, 'front').skin, null, 'the saved face material is cleared');
   assertEqual(store.paintTarget()?.materialId, null, 'the material browser target no longer previews the cleared material');

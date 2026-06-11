@@ -17,6 +17,7 @@ import { C, accentFor } from './workbench.cls';
 import { colorRangeCells, type ColorRange } from './colorRange';
 import { PickerChooser, type PickOption } from './picker';
 import { ColorWheel } from '../editors/paint/ColorWheel';
+import { groupSignature, panelGrammarViolations } from './panelGrammar';
 
 export type { PickOption };
 
@@ -55,7 +56,9 @@ export type FieldSpec =
 // mouth"): 'rows' renders the group's strip as a COLUMN — one field per row,
 // label in a fixed gutter so controls align, no wrap, no label collisions.
 // Additive: omitted = the flowing D1 strip every existing panel keeps.
-export interface PanelGroup { title: string; fields: FieldSpec[]; layout?: 'rows' }
+// tier (PANELGRAMMAR-0610, §11.4 rule 6): 'debug' groups render COLLAPSED by
+// default — diagnostics never crowd the working controls. Additive.
+export interface PanelGroup { title: string; fields: FieldSpec[]; layout?: 'rows'; tier?: 'debug' }
 export interface PanelSpec { groups: PanelGroup[] }
 
 export function panelFieldCount(spec: PanelSpec): number {
@@ -455,25 +458,51 @@ function FieldCell({ f, path, wide, onEdit }: { f: FieldSpec; path: string; wide
 
 // ── the panel ─────────────────────────────────────────────────────────────────
 
+// The grammar gate (PANELGRAMMAR-0610): every rendered panel is checked
+// against shell/panelGrammar.ts and violations warn LOUDLY, once per
+// offending panel shape — render continues (a broken panel teaches; a blank
+// one hides). The warned-set is module-level so a re-render doesn't repeat.
+const warnedPanelShapes = new Set<string>();
+function warnGrammar(spec: PanelSpec): void {
+  const violations = panelGrammarViolations(spec);
+  if (!violations.length) return;
+  const shape = spec.groups.map(groupSignature).join(';');
+  if (warnedPanelShapes.has(shape)) return;
+  warnedPanelShapes.add(shape);
+  for (const v of violations) {
+    console.warn(`[panel-grammar] ${v.law}${v.group ? ` (${v.group})` : ''}: ${v.detail}`);
+  }
+}
+
+function GroupBlock({ g, accent, onEdit }: { g: PanelGroup; accent: string; onEdit: () => void }) {
+  // §11.4 rule 6: debug-tier groups open collapsed — diagnostics on demand.
+  const [open, setOpen] = useState(g.tier !== 'debug');
+  return (
+    <C.Group>
+      <Pressable onPress={g.tier === 'debug' ? () => setOpen((o) => !o) : undefined}>
+        <C.GroupHead>
+          <C.GroupAccentBar style={{ backgroundColor: accent }} />
+          <C.GroupTitle color={accent}>{g.tier === 'debug' ? `${open ? '▾' : '▸'} ${g.title}` : g.title}</C.GroupTitle>
+          <C.GroupRule />
+          <C.GroupCount>{`${g.fields.length}`}</C.GroupCount>
+        </C.GroupHead>
+      </Pressable>
+      {open ? (
+        <C.FieldStrip style={g.layout === 'rows' ? { flexDirection: 'column', alignItems: 'stretch' } : undefined}>
+          {g.fields.map((f) => <FieldCell key={f.k} f={f} path={`${g.title}/${f.k}`} wide={g.layout === 'rows'} onEdit={onEdit} />)}
+        </C.FieldStrip>
+      ) : null}
+    </C.Group>
+  );
+}
+
 export function PanelGroups({ spec, onEdit }: { spec: PanelSpec; onEdit: () => void }) {
+  warnGrammar(spec);
   return (
     <>
-      {spec.groups.map((g, gi) => {
-        const accent = accentFor(ACCENTS[gi % ACCENTS.length]);
-        return (
-          <C.Group key={g.title}>
-            <C.GroupHead>
-              <C.GroupAccentBar style={{ backgroundColor: accent }} />
-              <C.GroupTitle color={accent}>{g.title}</C.GroupTitle>
-              <C.GroupRule />
-              <C.GroupCount>{`${g.fields.length}`}</C.GroupCount>
-            </C.GroupHead>
-            <C.FieldStrip style={g.layout === 'rows' ? { flexDirection: 'column', alignItems: 'stretch' } : undefined}>
-              {g.fields.map((f) => <FieldCell key={f.k} f={f} path={`${g.title}/${f.k}`} wide={g.layout === 'rows'} onEdit={onEdit} />)}
-            </C.FieldStrip>
-          </C.Group>
-        );
-      })}
+      {spec.groups.map((g, gi) => (
+        <GroupBlock key={g.title} g={g} accent={accentFor(ACCENTS[gi % ACCENTS.length])} onEdit={onEdit} />
+      ))}
     </>
   );
 }

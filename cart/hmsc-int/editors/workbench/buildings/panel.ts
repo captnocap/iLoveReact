@@ -40,6 +40,14 @@ import type { BuildingPaintTarget, BuildingSkinScope, BuildingsStore, SkinSlotTa
 // quick-pick swatches for the color rows (colors are local; material choices
 // come through the MATERIAL source chooser contract).
 export const BUILDING_PALETTE = ['#16a34a', '#dc2626', '#2563eb', '#f59e0b', '#7c3aed', '#0891b2', '#f8fafc', '#111827', '#a16207', '#db2777'];
+/** the wheel's range grid — full hue sweep + neutrals, any tone reachable
+ *  (§11.2: quick-picks stay on top, the range makes nothing unreachable) */
+export const BUILDING_COLOR_RANGE = Object.freeze({
+  stops: ['#f8fafc', '#dc2626', '#f59e0b', '#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#111827'],
+  cols: 14,
+  rows: 5,
+  warmth: 16,
+});
 
 /** the BARE look per physical material — what an unskinned face renders
  *  (display default only; a skin always wins) */
@@ -149,10 +157,15 @@ function skinRows(
       set: (v: string | null) => { if (v) store.setSkinTarget(id, scope, v as SkinSlotTarget); },
     },
     {
+      // §11.2 ("why do I have 3 color swatches and no wheel"): the ONE color
+      // surface — quick-picks on top, wheel + range grid for any tone. The
+      // machinery existed (t:'color' wheel/range); this field just opts in.
       k: 'color',
       t: 'color',
       get: () => { const skin = activeSkin(); return skin?.kind === 'color' ? skin.value : ''; },
       opts: BUILDING_PALETTE,
+      wheel: true,
+      range: BUILDING_COLOR_RANGE,
       set: (v: string) => write(active(), { kind: 'color', value: v }),
     },
     {
@@ -230,23 +243,41 @@ export function buildingsPanel(
     ],
   });
 
-  // ── the type GLOBALS — one group per kind present, quartet first ───────────
-  const present = def.pieces.map((p) => catalogEntry(p.pieceId).kind);
-  for (const kind of skinKindOrder(present)) {
-    const labels = faceSlotLabels(kind);
+  // ── the type GLOBALS — ONE group, the piece class is a SELECTOR ────────────
+  // PANELGRAMMAR-0610 (§11.2/§11.4 rule 4, the user: "why do I have 3 color
+  // swatches and no wheel"): the old shape emitted one structurally identical
+  // group per kind present — N copies of the same picker, vertically (the
+  // outer product; the grammar's G1 case). One group now: a class enum
+  // (quartet order), then the one skin picker editing that class.
+  const kindsPresent = skinKindOrder(def.pieces.map((p) => catalogEntry(p.pieceId).kind));
+  if (kindsPresent.length > 0) {
+    const activeKind = (): BuildPieceKind => {
+      const chosen = store.skinClass(id);
+      return chosen && kindsPresent.includes(chosen) ? chosen : kindsPresent[0];
+    };
+    const labels = () => faceSlotLabels(activeKind());
     groups.push({
-      title: `${kind.toUpperCase()}S · GLOBAL`,
+      title: 'SKINS · GLOBAL',
       layout: 'rows',
-      fields: skinRows(
-        store,
-        id,
-        { kind: 'type', pieceKind: kind },
-        (slot) => (slot === 'all' ? 'all faces' : labels[slot]),
-        (slot) => store.building(id)?.skins?.[kind]?.[slot] ?? null,
-        (target, skin) => store.setTypeSkin(id, kind, target, skin),
-        onMaterialTarget,
-        onPaintTarget,
-      ),
+      fields: [
+        {
+          k: 'class',
+          t: 'enum',
+          get: () => activeKind(),
+          opts: [...kindsPresent],
+          set: (v: string) => store.setSkinClass(id, v as BuildPieceKind),
+        },
+        ...skinRows(
+          store,
+          id,
+          { kind: 'type', pieceKind: activeKind() },
+          (slot) => (slot === 'all' ? `all ${activeKind()} faces` : labels()[slot]),
+          (slot) => store.building(id)?.skins?.[activeKind()]?.[slot] ?? null,
+          (target, skin) => store.setTypeSkin(id, activeKind(), target, skin),
+          onMaterialTarget,
+          onPaintTarget,
+        ),
+      ],
     });
   }
 

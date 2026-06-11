@@ -88,6 +88,11 @@ export type BuildingsStore = {
   /** compact panel view state: which face row a type/piece skin group edits */
   skinTarget(id: string, scope: BuildingSkinScope): SkinSlotTarget;
   setSkinTarget(id: string, scope: BuildingSkinScope, target: SkinSlotTarget): void;
+  /** PANELGRAMMAR-0610 (§11.2): the ONE type-globals group edits one piece
+   *  CLASS at a time — this is that selector's view state (null = the panel
+   *  defaults to the first kind present) */
+  skinClass(id: string): BuildPieceKind | null;
+  setSkinClass(id: string, kind: BuildPieceKind): void;
   /** a paint lens target selected from the panel */
   paintTarget(): BuildingPaintTarget | null;
   setPaintTarget(target: BuildingPaintTarget | null): void;
@@ -131,6 +136,7 @@ export function createBuildingsStore(deps: BuildingsStoreDeps): BuildingsStore {
   // ephemeral view state: the piece the panel's override section edits
   const selection: Record<string, number> = {};
   const skinTargets: Record<string, SkinSlotTarget> = {};
+  const skinClasses: Record<string, BuildPieceKind> = {};
   const localPrefabs: Record<string, BuildPrefabDef> = {};
   const localRemoved = new Set<string>();
   let paintTarget: BuildingPaintTarget | null = null;
@@ -297,6 +303,14 @@ export function createBuildingsStore(deps: BuildingsStoreDeps): BuildingsStore {
     },
     setSkinTarget(id, scope, target): void {
       skinTargets[scopeKey(id, scope)] = target;
+      armed = null;
+      notify();
+    },
+    skinClass(id): BuildPieceKind | null {
+      return skinClasses[id] ?? null;
+    },
+    setSkinClass(id, kind): void {
+      skinClasses[id] = kind;
       armed = null;
       notify();
     },
