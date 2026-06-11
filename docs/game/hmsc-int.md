@@ -273,6 +273,20 @@ incompleteness guard is in the API: `defineStream` demands the log name AND
 the materializer (initial+apply) in ONE registration — a stream without
 snapshot support cannot be expressed.
 
+SNAPBOOT-0610 (structure review §1/§9.1): the TOOL boots the same way the
+game loads — `defineStream` reads the stream's snapshot and replays only the
+tail (`seq > snapshot.globalSeq`), so boot cost is O(tail) instead of
+O(every event ever logged). The seam is guarded: snapshots carry the
+folded-event count (`events`) and boot verifies the DB agrees
+(`COUNT WHERE seq <= globalSeq`); a mismatch (e.g. a legacy archive ingested
+after the snapshot), a pre-SNAPBOOT snapshot shape, or damaged snapshot
+bytes all fall back to the full replay — tolerance law, never a throw. The
+full log is no longer resident in JS heap; `stateAt(seq)` is an honest cold
+path that pages history back in from the DB (history stays the immutable
+truth even when the live state booted from a snapshot). Covering index
+`events(stream, seq, id)` keeps the seam count + tail query index-range
+reads.
+
 BACKING (STOREDB-0606 step 1, 2026-06-06 — the user's ruling after the
 sessions.jsonl:884 outage: "we need to move to pg or sqlite which are in the
 framework already"): streams live in ONE sqlite database, `data/store.db`
