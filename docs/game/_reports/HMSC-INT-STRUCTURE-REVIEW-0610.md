@@ -758,3 +758,81 @@ reads back its own frame.
 §12's verdict stands (one editor, one layer stack); §12.1 replaces its
 rendering plan: **don't composite two render worlds — lower the document to
 the one the engine already batches.**
+
+---
+
+## 13. ADDENDUM (req_0608, same day) — props vs items: props have NO workspace existence
+
+The user's hint checks out, and the asymmetry is stark. **Items** are
+first-class workspace citizens: `itemsSource()` on the bench (roster, panel,
+voxel SCULPT stage), `items` + `voxels` streams, their own data domains —
+author an item in the tool, it persists, the registry serves it. **Props are
+not in the workspace at all**: no source, no stream, no data domain, no
+roster. Verified: `ls data/domains/ | grep prop` → nothing;
+`editors/workbench/sources.ts` → no props source.
+
+Where props actually live is the pre-fold disease at full strength —
+**FOUR hand-synced code homes for one concept**:
+
+1. `world/propKinds.ts` (722 lines) — the LEGACY kind registry, still the
+   one consumed by the live editor surfaces: ObjectsTab's palette
+   (`ObjectsTab.tsx:36`), PropertiesPanel, placements.ts, editorWorld,
+   npc/kinds, **and compile/worldGeometry.ts**.
+2. `game/kinds/props.ts` (791 lines) — the V17-captured registry ("fresh
+   capture of … behavior reference only"), consumed by the OTHER half:
+   `game/kinds/index.ts`, the build catalog, command vocabulary.
+   **The two registries have SPLIT consumers — the editor and compile read
+   the legacy file; the game door reads the capture.** That is a live
+   divergence hazard, not just duplication: a prop edited in one table
+   silently differs in the other's consumers.
+3. `render3d/props/*.tsx` — a hand-written React mesh file PER PROP
+   (Bush.tsx, FireHydrant.tsx, Mailbox.tsx, Payphone.tsx, …) on the layer
+   V2 already retired.
+4. `compile/worldGeometry.ts` — `propColor`/`propAt` re-encode prop
+   geometry/colors AGAIN for the baked world.
+
+So the lifecycle today: adding or changing a prop = an agent edits 2–4 code
+files + rebuild. `game/kinds/props.ts` opens with "THE TABLE IS THE DATA
+(P2)" — but a table you cannot reach from the tool is exactly the buried
+constant P2 outlaws; the memory layer even carries standing instructions for
+which files to hand-sync (`hmsc_dir_dissolved`: "new prop kinds go in
+world/propKinds.ts AND game/kinds/props.ts + compiled parts in
+compile/worldGeometry.ts"). And the prop INTERACTION layer just shipped
+(PROPUSE-0610: seats, searchable containers, cover, mounts) — more per-kind
+data, also code-only.
+
+The constitution has already ruled the destination twice:
+- **V24**: "Props remain PROMPT-GENERATED assets — the catalog's prop
+  entries fill from the existing items/model pipelines, not from the
+  builder." Props are supposed to ride the SAME model pipeline items ride.
+- **V11/R5**: the items registry is the source for small objects, with the
+  scale audit as standing work — a workspace surface is where an audit can
+  actually happen.
+
+**The fold (the same shape every other concern already took):**
+1. **One kind registry.** `game/kinds/props.ts` is the ruled home (V17
+   capture, V18 game door); the legacy `world/propKinds.ts` consumers
+   (ObjectsTab, PropertiesPanel, placements, compile) repoint to
+   `GAME_KINDS` and the legacy file retires. This kills the split-consumer
+   divergence hazard FIRST — it's the cheapest and most dangerous item.
+2. **A `props` workbench source** on the tunables pattern (code-table
+   defaults + a V20 `props` stream of overrides/additions folded at boot —
+   `editorTunables` is the exact precedent): roster = the kind table,
+   panel = the property bundle (footprint, tileKind borrow, cover/
+   concealment, the PROPUSE interaction rows), stage = the placed prop at
+   1-tile scale. P2 satisfied: every prop number reachable in the tool,
+   compile consumes the merged snapshot.
+3. **Models from the items/voxel/carve pipeline** (V24's ruling): a prop's
+   mesh becomes authored data like an item's — voxel blockout, carve, or
+   prompt-generated — replacing the per-prop hand-written `.tsx` mesh files
+   and `worldGeometry`'s re-encoded colors with one model record the
+   compile bakes (V29 content-addressed, same as everything else).
+
+Items vs props then stops being two systems: both are "small 3D things with
+a property bundle and a model"; an item is the carryable specialization
+(HUD icon, in-hand pose), a prop is the placeable one (collision, cover,
+interactions). One authoring stack, two property schemas — the sum, not the
+product.
+
+Priority: step 1 (registry unification) is a hazard fix and belongs in the
+§9 list immediately after §9.1; steps 2–3 join the §9.4 panel family.
