@@ -126,6 +126,27 @@ const PROP_MODELS: Record<PropKind, PropModel> = {
   pallet: DataProp,
   palletStack: DataProp,
   toiletPaper: DataProp,
+  // ── PROPVENUE-0611: parks + shop interiors (all data recipes) ─────────────
+  fountain: DataProp,
+  drinkingFountain: DataProp,
+  loungeChair: DataProp,
+  swingset: DataProp,
+  sandCastle: DataProp,
+  picketFence: DataProp,
+  appleTree: DataProp,
+  apple: DataProp,
+  arcadeCabinet: DataProp,
+  slotMachine: DataProp,
+  clothingRack: DataProp,
+  displayCase: DataProp,
+  liquorShelf: DataProp,
+  beerCase: DataProp,
+  dinerBooth: DataProp,
+  orderCounter: DataProp,
+  menuBoard: DataProp,
+  sodaMachine: DataProp,
+  openSign: DataProp,
+  greenCrossSign: DataProp,
 };
 
 // One placed prop, drawn by its kind's model at its anchor + yaw. Memoized on

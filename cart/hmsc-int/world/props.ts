@@ -33,6 +33,15 @@ const SEGMENT_HALF_THICKNESS: Partial<Record<WorldProp['kind'], number>> = {
   corrugatedSheet: 0.18,
   lockerSet: 0.25,
   oilTank: 1.0,
+  // PROPVENUE-0611 long props.
+  picketFence: 0.08,
+  loungeChair: 0.35,
+  swingset: 0.75,
+  clothingRack: 0.3,
+  displayCase: 0.4,
+  liquorShelf: 0.25,
+  dinerBooth: 0.8,
+  orderCounter: 0.4,
 };
 
 export function propFootprint(prop: WorldProp): PropFootprint | null {

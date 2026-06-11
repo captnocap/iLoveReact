@@ -100,9 +100,19 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
   jerry can, brick) and containers (vending machine, lockers, shipping
   container, crate, barrel, store shelf) ride the existing lumps 16/17 —
   zero Zig changes. **PROPSHELF-0611 (req_0636 follow-on)**: `PROP_CATEGORIES`
-  (same registry) shelves every kind into 11 categories; the IsoAuthor build
+  (same registry) shelves every kind into categories; the IsoAuthor build
   rail's prop tab shows a category chip row instead of a ~100-button wall,
   and `props.test.ts` asserts the shelving is a total, disjoint partition.
+- **PROPVENUE-0611 (req_0640)** — 20 more kinds on two new shelves: `park`
+  (plaza fountain — sittable rim — drinking fountain, lounge chair, swing
+  set, sand castle, picket fence, apple tree + kickable `apple` dynamics
+  prop) and `shops` (arcade cabinet — image-target screen — slot machine,
+  clothing rack, glass display case, liquor shelf, beer cases, diner booth,
+  order counter, menu board — image-target face — soda machine — image-
+  target front — neon OPEN sign, dispensary green cross). Deferred by name:
+  swing PENDULUM physics (needs constrained bodies; today's entity bodies
+  are free spheres) and apple-tree DROP spawning + throw/eat (the item
+  system's slice) — both recorded in the registry comments.
 
 **game/commands/ — the console vocabulary (capture wave, 2026-06-05)**
 - `game/commands/vocabulary.ts` — hmsc's 49-command console vocabulary (`cmd_/lab_/gv_/pv_/ev_/wv_` plus V27 `log`) REWRITTEN fresh onto the skeleton's mutable-ctx conventions (`cart/hmsc-int/commands/registry.ts` stays an untouched behavior reference). All 49 names register so the V19 script language is complete: captured commands run against command state + `COMMAND_TUNING`/`SKY_NAMED_HOURS`/`SKY_WEATHER_PRESETS` P2 tables + `GAME_KINDS`, `GAME_PERCEPTION`, V20 persistence, and V27 `GAME_TELEMETRY` diagnostics control (`log status`, `log all on|off|toggle`, `log <channel> on|off|toggle`, `log dump`, `log overhead`, `gv_perflog` as `spikes` alias). `wv_prop` is partial (kinds listing real, placement world-owned), and 14 explicit NOT-YET stubs FAIL LOUDLY (`system not captured yet: <owner>`; `NOT_YET_CAPTURED` exports the per-owner hand-off lists — roads/traffic/buildings/interiors/zones/validation, lab scenes, input contract). Dot-path state shape (`player.physics.velocity`, `config.sky.hour`) preserved so saved scripts keep meaning. `vocabulary.test.ts` (21 P4 cases) + `compile/verify/commands.cmds`; `rjit game verify` GREEN. `CAPTURE.md` records the boundary, dropped pieces, and surfaced ambiguities. SELFSHOT-0606 (2026-06-06, USER RULING "dont look at the system") adds `shot [path]` beside the captured names: the console captures the app's OWN rendered frame to a PNG through the `captureFrame` door (`@reactjit/capture` → `__capture_frame` → `framework/gpu/capture.zig` swapchain readback — desktop/X11 capture of the user's system is BANNED, CLAUDE.md "Screenshots"); headless boots degrade gracefully ("unavailable", never fake success); the CLI sibling is `rjit shot <cart> [--route /r]`.

@@ -134,7 +134,30 @@ export type PropKind =
   | 'pallet'
   | 'palletStack'
   // bathroom wall
-  | 'toiletPaper';
+  | 'toiletPaper'
+  // ── PROPVENUE-0611 (req_0640): parks + shop interiors ──────────────────────
+  // park / playground
+  | 'fountain'
+  | 'drinkingFountain'
+  | 'loungeChair'
+  | 'swingset'
+  | 'sandCastle'
+  | 'picketFence'
+  | 'appleTree'
+  | 'apple'
+  // venue / shop interiors (arcade, casino, dispensary, liquor, fast food)
+  | 'arcadeCabinet'
+  | 'slotMachine'
+  | 'clothingRack'
+  | 'displayCase'
+  | 'liquorShelf'
+  | 'beerCase'
+  | 'dinerBooth'
+  | 'orderCounter'
+  | 'menuBoard'
+  | 'sodaMachine'
+  | 'openSign'
+  | 'greenCrossSign';
 
 // How a prop governs vehicle traffic. 'none' props are scenery; 'stopSign' is
 // always a hard stop; 'signal' free-runs a green→caution→stop cycle (the
@@ -1311,6 +1334,230 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     mount: 'wall',
     coverClass: 'none',
   },
+
+  // ── PROPVENUE-0611 (req_0640): parks + shop interiors. Real scale × 1.15. ──
+  fountain: {
+    kind: 'fountain',
+    label: 'Plaza Fountain',
+    // A round plaza fountain — basin, pedestal, upper bowl, jet. You can sit
+    // on the basin edge like every city park.
+    solid: true,
+    footprintRadiusMeters: 1.8,
+    heightMeters: 2.2,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    seat: { pose: 'sit', seatHeightMeters: 0.55, capacity: 3 },
+  },
+  drinkingFountain: {
+    kind: 'drinkingFountain',
+    label: 'Drinking Fountain',
+    solid: true,
+    footprintRadiusMeters: 0.2,
+    heightMeters: 1.0,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  loungeChair: {
+    kind: 'loungeChair',
+    label: 'Lounge Chair',
+    // The pool/beach lounger — long like a bed (yaw-aware thin AABB).
+    solid: true,
+    footprintRadiusMeters: 0.95,
+    heightMeters: 0.8,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    seat: { pose: 'lay', seatHeightMeters: 0.38, capacity: 1 },
+    coverClass: 'soft',
+  },
+  swingset: {
+    kind: 'swingset',
+    label: 'Swing Set',
+    // Static A-frame with two hanging seats for now; the seats are sittable.
+    // PHYSICS OPPORTUNITY (user, req_0640): swinging is a future dynamics
+    // slice — the chain/seat pendulum wants the entity body system once
+    // constrained bodies exist (today's bodies are free spheres only).
+    solid: true,
+    footprintRadiusMeters: 1.9,
+    heightMeters: 2.5,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    seat: { pose: 'sit', seatHeightMeters: 0.55, capacity: 2 },
+  },
+  sandCastle: {
+    kind: 'sandCastle',
+    label: 'Sand Castle',
+    solid: true,
+    footprintRadiusMeters: 0.4,
+    heightMeters: 0.5,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    coverClass: 'none',
+  },
+  picketFence: {
+    kind: 'picketFence',
+    label: 'Picket Fence',
+    // A white 2.5m garden segment — same yaw-aware thin AABB as 'fence'.
+    solid: true,
+    footprintRadiusMeters: 1.35,
+    heightMeters: 1.1,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  appleTree: {
+    kind: 'appleTree',
+    label: 'Apple Tree',
+    // Orchard scale (~5.5m × 1.15), apples visible in the canopy. The DROP —
+    // apples detaching as live bodies over time — is a future spawn slice;
+    // today you place 'apple' props under it and they roll/kick like balls
+    // (and become throwable/eatable when the item system lands, user ask).
+    solid: true,
+    footprintRadiusMeters: 0.35,
+    heightMeters: 6.5,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  apple: {
+    kind: 'apple',
+    label: 'Apple',
+    // Acts like a ball (user ask req_0640): tiny sphere body, modest bounce.
+    // Future: throwable / eatable once items exist.
+    solid: true,
+    footprintRadiusMeters: 0.05,
+    heightMeters: 0.09,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    dynamics: { bodyRadiusMeters: 0.06, restitution: 0.35 },
+  },
+  arcadeCabinet: {
+    kind: 'arcadeCabinet',
+    label: 'Arcade Cabinet',
+    // Real upright cab ~1.75m × 1.15. The screen takes an image (partId
+    // 'screen') so any art becomes the game on the marquee glass.
+    solid: true,
+    footprintRadiusMeters: 0.38,
+    heightMeters: 2.0,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    coverClass: 'hard',
+  },
+  slotMachine: {
+    kind: 'slotMachine',
+    label: 'Slot Machine',
+    solid: true,
+    footprintRadiusMeters: 0.3,
+    heightMeters: 1.45,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    container: { lootCategory: 'valuables', capacity: 2, spawnFillChance: 0.4, searchSeconds: 3, access: 'locked' },
+  },
+  clothingRack: {
+    kind: 'clothingRack',
+    label: 'Clothing Rack',
+    solid: true,
+    footprintRadiusMeters: 0.7,
+    heightMeters: 1.6,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    container: { lootCategory: 'clothing', capacity: 4, spawnFillChance: 0.7, searchSeconds: 2.5, access: 'open' },
+    coverClass: 'soft',
+  },
+  displayCase: {
+    kind: 'displayCase',
+    label: 'Display Case',
+    // The glass counter case (dispensary/jewelry/pawn) — valuables, locked.
+    solid: true,
+    footprintRadiusMeters: 0.6,
+    heightMeters: 1.0,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    container: { lootCategory: 'valuables', capacity: 3, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
+  },
+  liquorShelf: {
+    kind: 'liquorShelf',
+    label: 'Liquor Shelf',
+    solid: true,
+    footprintRadiusMeters: 0.9,
+    heightMeters: 2.0,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    container: { lootCategory: 'kitchen', capacity: 5, spawnFillChance: 0.7, searchSeconds: 2.5, access: 'open' },
+  },
+  beerCase: {
+    kind: 'beerCase',
+    label: 'Beer Cases',
+    solid: true,
+    footprintRadiusMeters: 0.25,
+    heightMeters: 0.55,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  dinerBooth: {
+    kind: 'dinerBooth',
+    label: 'Diner Booth',
+    // Two facing vinyl benches + the table — one seat each side.
+    solid: true,
+    footprintRadiusMeters: 0.8,
+    heightMeters: 1.35,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 2 },
+    coverClass: 'soft',
+  },
+  orderCounter: {
+    kind: 'orderCounter',
+    label: 'Order Counter',
+    solid: true,
+    footprintRadiusMeters: 0.9,
+    heightMeters: 1.16,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    container: { lootCategory: 'valuables', capacity: 2, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
+  },
+  menuBoard: {
+    kind: 'menuBoard',
+    label: 'Menu Board',
+    // Wall board over the counter; the face takes an image (the menu).
+    solid: true,
+    footprintRadiusMeters: 0.08,
+    heightMeters: 2.6,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'wall',
+    coverClass: 'none',
+  },
+  sodaMachine: {
+    kind: 'sodaMachine',
+    label: 'Soda Machine',
+    solid: true,
+    footprintRadiusMeters: 0.35,
+    heightMeters: 1.7,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  openSign: {
+    kind: 'openSign',
+    label: 'OPEN Sign',
+    // The neon window sign every storefront wants — liquor, dispensary, diner.
+    solid: true,
+    footprintRadiusMeters: 0.06,
+    heightMeters: 2.2,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'wall',
+    coverClass: 'none',
+  },
+  greenCrossSign: {
+    kind: 'greenCrossSign',
+    label: 'Green Cross Sign',
+    // The dispensary/pharmacy green cross — the policeSign/hospitalSign family.
+    solid: true,
+    footprintRadiusMeters: 0.1,
+    heightMeters: 2.8,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'wall',
+    coverClass: 'none',
+  },
 };
 
 export const PROP_KINDS = Object.keys(PROP_KIND_DEFINITIONS) as PropKind[];
@@ -1322,7 +1569,8 @@ export const PROP_KINDS = Object.keys(PROP_KIND_DEFINITIONS) as PropKind[];
 // one shelf (props.test.ts asserts the partition is total and disjoint).
 export type PropCategory =
   | 'nature' | 'trees' | 'rocks' | 'street' | 'signs' | 'furniture'
-  | 'household' | 'media' | 'commerce' | 'junkyard' | 'sport';
+  | 'household' | 'media' | 'commerce' | 'junkyard' | 'sport'
+  | 'park' | 'shops';
 
 export const PROP_CATEGORIES: Record<PropCategory, PropKind[]> = {
   nature: ['bush', 'bushLarge', 'bushLow', 'bushSparse', 'grassPatch', 'grassTall'],
@@ -1336,6 +1584,8 @@ export const PROP_CATEGORIES: Record<PropCategory, PropKind[]> = {
   commerce: ['vendingMachine', 'gasPump', 'storeShelf', 'crate', 'pallet', 'palletStack'],
   junkyard: ['shippingContainer', 'concretePipe', 'pipeStack', 'corrugatedSheet', 'cableSpool', 'lockerSet', 'oilTank', 'tire', 'tireStack', 'barrel', 'steelDrum', 'propaneTank', 'jerryCan', 'cinderBlock', 'brick', 'rubblePile', 'radioTower'],
   sport: ['ballBeach', 'ballSoccer', 'ballBasketball', 'basketballHoop'],
+  park: ['fountain', 'drinkingFountain', 'loungeChair', 'swingset', 'sandCastle', 'picketFence', 'appleTree', 'apple'],
+  shops: ['arcadeCabinet', 'slotMachine', 'clothingRack', 'displayCase', 'liquorShelf', 'beerCase', 'dinerBooth', 'orderCounter', 'menuBoard', 'sodaMachine', 'openSign', 'greenCrossSign'],
 };
 
 export const PROP_CATEGORY_NAMES = Object.keys(PROP_CATEGORIES) as PropCategory[];
