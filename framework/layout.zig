@@ -601,6 +601,13 @@ pub const Node = struct {
     canvas_drift_x: f32 = 0, // horizontal drift speed (px/s, negative = left)
     canvas_drift_y: f32 = 0, // vertical drift speed (px/s, negative = up)
     canvas_drift_active: bool = false, // true = drift animation is running
+    // false = this Canvas opts out of the engine's built-in Canvas.Node
+    // click-to-select + hover/selected highlight. A selected node freezes
+    // drift (paintCanvasContainer), so carts with their own selection model
+    // (the hmsc-int map painter) must turn this off — otherwise a background
+    // click over any node silently toggles a phantom selection that kills
+    // WASD pan. Prop: selectNodes={false}.
+    canvas_node_select: bool = true,
     canvas_auto_stacked: bool = false, // true = generative layout already applied this visit
     // Built-in grid overlay — painted under all Canvas children when grid_step > 0.
     canvas_grid_step: f32 = 0,

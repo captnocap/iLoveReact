@@ -478,6 +478,7 @@ pub const CanvasExt = struct {
     drift_x: f32 = 0,
     drift_y: f32 = 0,
     drift_active: bool = false,
+    node_select: bool = true, // mirrors layout.Node.canvas_node_select (selectNodes prop)
     auto_stacked: bool = false,
     grid_step: f32 = 0,
     grid_stroke: f32 = 1,

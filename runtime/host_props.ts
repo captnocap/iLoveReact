@@ -116,6 +116,13 @@ export type HostNodeProps = Partial<{
   driftY: number;
   /** Toggle the drift animation. */
   driftActive: boolean;
+  /**
+   * Engine-side Canvas.Node click-to-select + hover/selected highlight on
+   * `<Canvas>` (default true). Set false when the cart owns its own selection
+   * model — an engine-selected node silently freezes drift (the WASD pan), so
+   * a background click over any node would gridlock panning until re-clicked.
+   */
+  selectNodes: boolean;
 
   // ── Terminal (cell-grid <Terminal> primitive) ─────────────
   /**

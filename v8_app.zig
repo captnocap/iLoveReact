@@ -2283,6 +2283,13 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonFloat(v)) |f| node.canvas_drift_y = f;
         } else if (std.mem.eql(u8, k, "driftActive")) {
             if (jsonBool(v)) |b| node.canvas_drift_active = b;
+        } else if (std.mem.eql(u8, k, "selectNodes")) {
+            // false = opt out of the engine's built-in Canvas.Node click-to-select
+            // and its hover/selected rings. A selected node freezes drift
+            // (paintCanvasContainer), so editors with their own selection model
+            // (hmsc-int map painter) set selectNodes={false} — otherwise any
+            // background click over a node gridlocks WASD pan until re-clicked.
+            if (jsonBool(v)) |b| node.canvas_node_select = b;
         } else if (std.mem.eql(u8, k, "gridStep")) {
             if (jsonFloat(v)) |f| node.canvas_grid_step = if (f > 0) f else 0;
         } else if (std.mem.eql(u8, k, "gridStroke")) {

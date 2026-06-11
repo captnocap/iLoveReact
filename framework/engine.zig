@@ -3376,8 +3376,10 @@ noinline fn paintCanvasContainer(node: *Node) void {
         _ = canvas.applyPropView(node.canvas_id, node.canvas_view_x, node.canvas_view_y, node.canvas_view_zoom);
         node.canvas_view_set = false;
     }
-    // Apply drift — continuous camera animation (pauses during drag or node selection)
-    if (node.canvas_drift_active and canvas_drag_node == null and canvas.getSelectedNode() == null and g_dt_sec > 0) {
+    // Apply drift — continuous camera animation (pauses during drag or node
+    // selection; a no-select canvas ignores selection entirely, so a stale
+    // global selection can never freeze its WASD pan).
+    if (node.canvas_drift_active and canvas_drag_node == null and (!node.canvas_node_select or canvas.getSelectedNode() == null) and g_dt_sec > 0) {
         canvas.handleDrag(-node.canvas_drift_x * g_dt_sec, -node.canvas_drift_y * g_dt_sec);
     }
     gpu.pushScissor(r.x, r.y, r.w, r.h);
@@ -3437,8 +3439,9 @@ noinline fn paintCanvasContainer(node: *Node) void {
         }
     }
     {
-        const hovered = canvas.getHoveredNode();
-        const selected = canvas.getSelectedNode();
+        // No-select canvases never paint the built-in hover/selected rings.
+        const hovered = if (node.canvas_node_select) canvas.getHoveredNode() else null;
+        const selected = if (node.canvas_node_select) canvas.getSelectedNode() else null;
         var child_idx: u16 = 0;
         for (node.children) |*child| {
             if (child.canvas_clamp) continue;
@@ -4254,9 +4257,11 @@ pub fn run(config_in: AppConfig) !void {
                                 if (handled_interactive) witness.recordClick(h);
                             }
                             if (!handled_interactive) {
-                                // Background click — select/deselect canvas node and start drag
+                                // Background click — select/deselect canvas node and start drag.
+                                // selectNodes={false} canvases skip the toggle: their carts own
+                                // selection, and a phantom engine selection freezes drift pan.
                                 input.unfocus();
-                                if (canvas.getHoveredNode() != null) canvas.clickNode();
+                                if (cn.canvas_node_select and canvas.getHoveredNode() != null) canvas.clickNode();
                                 canvas_drag_node = cn;
                                 canvas_drag_last_x = mx;
                                 canvas_drag_last_y = my;

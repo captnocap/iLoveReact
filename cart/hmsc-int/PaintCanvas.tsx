@@ -1647,6 +1647,14 @@ export function PaintCanvas(props: {
         driftX={canvasDrift.x}
         driftY={canvasDrift.y}
         driftActive={canvasDrift.active}
+        // The painter owns its own selection (tile cells / placements / roads).
+        // Without this, a background click over ANY Canvas.Node — and every
+        // chunk surface IS one — toggled the engine's hidden click-to-select,
+        // and a selected node freezes drift: WASD pan dead until the next
+        // click happened to toggle it back off (the "gridlocked half the
+        // time" lockup, req_0636). F8 couldn't help — it only bypasses the
+        // JS typing gate; the freeze lived engine-side.
+        selectNodes={false}
       >
         {/* Each focused chunk = one Effect quad at its lattice slot (own buffer). */}
         {focusedChunks.map((c) => (

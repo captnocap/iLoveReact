@@ -195,7 +195,7 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
 - **Localstore**: `hmscStoreGet/Set` (game-side wrappers over `__store_*`) for the boot key, kind textures, materialized textures. The compile channel.
 - **fs**: session files, `_eventlog.json`, diagnostics JSONL/churn channel, voxel exports, scene.json (cart-write backends), via `__fs_*`.
 - **Canvas math**: `__canvas_screen_to_graph` (pan/zoom-aware pointer→graph; `framework/v8_bindings_telemetry.zig`) — here it's *live*, unlike pixel_icon_demo's dead wrapper. `__tel_input` (focused-node id) gates WASD/brush against typing.
-- **Canvas camera**: `viewX/viewY/viewZoom` + `driftX/driftY/driftActive` props (host-applied pan, the canvas_view_control_props seam) for alt-drag and WASD pan.
+- **Canvas camera**: `viewX/viewY/viewZoom` + `driftX/driftY/driftActive` props (host-applied pan, the canvas_view_control_props seam) for alt-drag and WASD pan. `selectNodes={false}` (req_0636) opts the painter out of the engine's built-in Canvas.Node click-to-select — every chunk surface IS a Canvas.Node, and a phantom engine selection silently freezes drift (WASD pan locked "half the time"; F8 couldn't help because the freeze was host-side, not the JS typing gate).
 - **Input buses**: `__keydown`/`__keyup`/`system:blur` (key state for WASD + modifiers), `system:cursor:move` (global cursor channel from `SDL_GetGlobalMouseState` — divider drag, orbit drag).
 - **AI**: `useAssistant` (claude_code subprocess / OpenAI-compatible HTTP / embedded llama.cpp) for ChatTab + assist3d.
 - Everything else is JS/GPU: typed-array buffers, RLE codec, Effect storage buffers, the game's own world mutators.
