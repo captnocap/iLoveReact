@@ -38,6 +38,7 @@ const FAR_CLIP = 4000;
 // crosshair reach — so the ground march has to travel much further before it dips
 // under the terrain. A coarser step keeps the per-move cost sane at that range.
 const ISO_SNAP_TUNING = { ...SNAP_TUNING_DEFAULTS, reachMeters: 600, groundMarchStepMeters: 0.5 };
+const FREEFORM_MOVE_SNAP_METERS = ISO_SNAP_TUNING.freeformSnapMeters;
 
 // The build palette, ruled-hotkey order first (floor, wall, ramp, roof), then the
 // rest — same kinds F2's palette leads with. Each tab lists its catalog entries.
@@ -61,6 +62,24 @@ function contentCenter(pieces: readonly PlacedBuildPiece[]): [number, number] {
   let sx = 0, sz = 0;
   for (const p of pieces) { sx += p.x; sz += p.z; }
   return [sx / pieces.length, sz / pieces.length];
+}
+
+function quantizeMeters(v: number, step: number): number {
+  return step > 0 ? Math.round(v / step) * step : v;
+}
+
+function isPropPiece(piece: PlacedBuildPiece): boolean {
+  return GAME_BUILD.catalog.get(piece.pieceId).kind === 'prop';
+}
+
+function selectionIsOnlyProps(ids: ReadonlySet<string>, pieces: readonly PlacedBuildPiece[]): boolean {
+  let found = false;
+  for (const piece of pieces) {
+    if (!ids.has(piece.id)) continue;
+    found = true;
+    if (!isPropPiece(piece)) return false;
+  }
+  return found;
 }
 
 // The material-skin texture ids the placed pieces reference — the SAME set F2 derives
@@ -261,8 +280,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // Shift/Alt held? Mouse events carry no modifier flags here, so track it off the key
   // bus (which does) and read it at click time to invert the select scope.
   const modHeldRef = useRef(false);
+  const freeformHeldRef = useRef(false);
   useEffect(() => {
-    const upd = (e: any) => { modHeldRef.current = !!(e?.shiftKey || e?.altKey); };
+    const upd = (e: any) => {
+      modHeldRef.current = !!(e?.shiftKey || e?.altKey);
+      freeformHeldRef.current = !!e?.altKey;
+    };
     const offD = busOn('__keydown', upd);
     const offU = busOn('__keyup', upd);
     return () => { offD(); offU(); };
@@ -386,19 +409,27 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // A piece snaps by its own catalog rule (walls edge-snap, etc.); a prefab drops on
     // the grid by its origin — exactly how F2's place() picks snap/size. The tower tool
     // grid-snaps a wall-module footprint (a click drops a 1×1-cell tower).
-    const snap = a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id).snap : 'grid';
-    const size = a.kind === 'piece'
-      ? GAME_BUILD.catalog.get(a.id).size
+    const pieceDef = a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id) : null;
+    const snap = pieceDef ? pieceDef.snap : 'grid';
+    const size = pieceDef
+      ? pieceDef.size
       : a.kind === 'tower'
         ? GAME_BUILD.catalog.get(TOWER_WALL_ID).size
         : { widthMeters: 1, heightMeters: 3, depthMeters: 1 };
+    const freeform = pieceDef?.kind === 'prop' && freeformHeldRef.current;
     return resolveSnapTarget({
       ray: stage.pieceRay(sx, sy, rectRef.current),
-      pieces: piecesRef.current,
+      // The VISIBLE (cut-away) list, not the full world: placement obeys the
+      // same law as grab — you can't snap onto what you can't see. Against
+      // the full list, a level-0 placement inside a roofed room raycast the
+      // HIDDEN roof and stacked furniture on top of it (BEDROOF-0610: "the
+      // bed keeps placing on the roof").
+      pieces: visiblePiecesRef.current,
       groundTopAt: placeGroundAt, // active-floor aware → upper-floor placement lands up there
       snap,
       size,
       yawDegrees: ghostYawRef.current,
+      freeform,
       tuning: ISO_SNAP_TUNING,
     });
   }, [stage, placeGroundAt]);
@@ -620,13 +651,15 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         }
       } else if (d.mode === 'move') {
         const g = stage.groundPoint(p.x, p.y, rectRef.current);
-        // Snap the drag delta to whole grid cells so a moved piece stays grid-locked —
-        // the pieces start grid-aligned, so a whole-cell shift keeps them aligned and
-        // anything built onto them lines up. cellSizeMeters is the build grid pitch.
+        // Snap structural moves to whole grid cells so buildings stay aligned.
+        // Prop-only moves may hold Alt for intentional freeform nudges against walls.
         if (g) {
           const cs = state.world.cellSizeMeters || 1;
-          const dx = Math.round((g.x - d.gx0) / cs) * cs;
-          const dz = Math.round((g.z - d.gz0) / cs) * cs;
+          const freeform = freeformHeldRef.current && selectionIsOnlyProps(selectedIdsRef.current, piecesRef.current);
+          const rawDx = g.x - d.gx0;
+          const rawDz = g.z - d.gz0;
+          const dx = freeform ? quantizeMeters(rawDx, FREEFORM_MOVE_SNAP_METERS) : Math.round(rawDx / cs) * cs;
+          const dz = freeform ? quantizeMeters(rawDz, FREEFORM_MOVE_SNAP_METERS) : Math.round(rawDz / cs) * cs;
           // Only update when the SNAPPED delta actually changes (req_0503):
           // a fresh {dx,dz} per raw mouse event re-rendered the whole pane +
           // rebuilt the 179-piece move ghost even while the drag sat inside
@@ -779,6 +812,44 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     }
     commitBatch(events);
   };
+  // Rotate the current selection with the SAME R key the placement ghost uses.
+  // Whole buildings rotate as ONE buildingMoved with yaw; loose pieces use the
+  // existing remove+place path so the shared world stream stays additive.
+  const rotateSelected = () => {
+    const ids = selectedIdsRef.current;
+    if (!ids.size) return;
+    const sel = piecesRef.current.filter((p) => ids.has(p.id));
+    if (!sel.length) return;
+    const { wholeInstances, partialInstances, loosePieceIds } = partitionBuildingSelection(ids, piecesRef.current);
+    if (partialInstances.length) {
+      console.warn(`[iso-author] rotate skipped ${partialInstances.length} partially-selected building(s) — select the whole building (▦ or shift-click)`);
+      return;
+    }
+    const events: Array<{ event: BuildEditEvent; label: string }> = [];
+    for (const instId of wholeInstances) {
+      const inst = buildingsRef.current?.[instId];
+      if (!inst) continue;
+      events.push({
+        event: { kind: 'buildingMoved', id: instId, x: inst.x, z: inst.z, yawDegrees: normalizeYawDegrees(inst.yawDegrees + 90) },
+        label: `rotated building ${instId}`,
+      });
+    }
+    const looseSet = new Set(loosePieceIds);
+    const rotations = sel
+      .filter((p) => looseSet.has(p.id))
+      .map((p) => {
+        const { id, ...rest } = p;
+        return { id, placement: { ...rest, yawDegrees: normalizeYawDegrees(p.yawDegrees + 90) } };
+      });
+    if (rotations.some((r) => GAME_BUILD.placed.validatePlacement(r.placement).length > 0)) return;
+    events.push(
+      ...rotations.map((r) => ({ event: { kind: 'pieceRemoved', id: r.id } as BuildEditEvent, label: `rotated ${r.id}` })),
+      ...rotations.map((r) => ({ event: { kind: 'piecePlaced', placement: r.placement } as BuildEditEvent, label: `rotated ${r.placement.pieceId}` })),
+    );
+    if (!events.length) return;
+    setSelectedIds(new Set());
+    commitBatch(events);
+  };
   // PROMOTE (req_0513, slice 1): capture the selected loose pieces into a
   // BuildingDef + ONE placed instance, then remove the originals — one batch,
   // one undo step. The derived stamp reproduces the pieces exactly (same
@@ -916,8 +987,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   };
   // Latest delete/clone closures, so the once-mounted key listener always calls the
   // current ones (they read live refs + the current onCommit).
-  const keyActionsRef = useRef({ deleteSelected, cloneSelected, recenter, saveCamera });
-  keyActionsRef.current = { deleteSelected, cloneSelected, recenter, saveCamera };
+  const keyActionsRef = useRef({ deleteSelected, cloneSelected, rotateSelected, recenter, saveCamera });
+  keyActionsRef.current = { deleteSelected, cloneSelected, rotateSelected, recenter, saveCamera };
 
   // Keys (while focused): R rotates the ghost, Q/E turn the view, Delete/Backspace
   // removes the selection, Esc disarms / clears the selection.
@@ -926,7 +997,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const off = busOn('__keydown', (e: any) => {
       lastInputAtRef.current = (globalThis as any).performance?.now?.() ?? 0;
       const k = String(e?.key ?? '').toLowerCase();
-      if (k === 'r') setGhostYaw((y) => (y + 90) % 360);
+      if (k === 'r') {
+        if (armedRef.current) setGhostYaw((y) => (y + 90) % 360);
+        else keyActionsRef.current.rotateSelected();
+      }
       else if (k === 'escape') { setArmed(null); setSelectedIds(new Set()); }
       else if (k === 'q') { stage.rotate(-1); pushNativeCamera(); keyActionsRef.current.saveCamera(); }
       else if (k === 'e') { stage.rotate(1); pushNativeCamera(); keyActionsRef.current.saveCamera(); }
@@ -1186,6 +1260,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       ))}
     </>
   ), [state.world.landforms, state.world.props, skinIds, state.player.perception]);
+  const armedPropCanFreeform = armed?.kind === 'piece' && GAME_BUILD.catalog.get(armed.id).kind === 'prop';
+  const selectedPropsCanFreeform = useMemo(() => selectionIsOnlyProps(selectedIds, pieces), [selectedIds, pieces]);
 
   return (
     <Box
@@ -1289,9 +1365,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         {armed
           ? armed.kind === 'tower'
             ? `tower: drag the footprint · ${towerFloors} floors (+/− top right) · hollow shell + roof, one building · Esc`
-            : `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · Esc`
+            : `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${armedPropCanFreeform ? ' · Alt freeform' : ''}${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · Esc`
           : selectedIds.size > 0
-            ? `${selectedIds.size} selected · drag to move · paint faces (top right) · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
+            ? `${selectedIds.size} selected · drag to move${selectedPropsCanFreeform ? ' · Alt-drag freeform' : ''} · R rotate · paint faces (top right) · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
             : `WASD pan · drag rotate · scroll zoom · F recenter · click = ${wholeBuilding ? 'building, shift = piece' : 'piece, shift = building'} · pick below to build`}
       </Text>
       {/* what's in the map — the "junk" is the real placed pieces + world props (the
