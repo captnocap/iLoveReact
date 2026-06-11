@@ -622,3 +622,82 @@ in the renderer's laws, once, not in eleven sources.
 
 Priority insert: the panel grammar + host slider slot between §9.4 and §9.5
 — they multiply §9.4's value across every source at once.
+
+---
+
+## 12. ADDENDUM (req_0606, same day) — why the decal composer CAN be part of the normal painter
+
+The user asked directly: "look one more time at the way you make decals and
+tell me why this cant be a part of the normal painter." Read both stacks
+end-to-end. **Answer: nothing structural separates them. They are the raster
+half and the vector half of ONE editor, split only by lineage** (the painter
+descends from the cutout cart → `paintSource`; the decal composer descends
+from the /compose route → a lens of `materialsSource`). Every "difference" is
+a seam, not a wall:
+
+| | painter (`editors/paint/`) | decal composer (`game/textures/` + materials compose lens) |
+|---|---|---|
+| document | layer stack: RLE byte masks + per-layer config (`layers.ts`) | layer stack: rect/text/image NODES with x/y/w/h + props (`decal.ts`) |
+| layer strip | LayerStrip — name/hide/reorder/dup/delete | compose layers rail — same verbs, second implementation |
+| image layers | `PaintLayerImage` — has them | `DecalImageNode` — has them |
+| render | WGSL surfaces composited through masks on GPU paintables | React subtree (`DecalSurface`) → StaticSurface/TextureCapture |
+| persistence | RLE masks on a V20 stream | DecalDoc riding the material record (lossless re-edit law) |
+| exit | **Materialize → the same materials store** | **Materialize → the same materials store** |
+
+Both already converge at the exit. Both are layer stacks. Both even have
+image layers. The user is looking at two implementations of the same idea
+with different layer TYPES.
+
+**The unified model is the one every real art tool ships** (Photoshop: raster
+layers, text layers, shape layers in ONE stack): the paint document's layer
+gains a kind —
+
+    layer.kind: 'mask' (today's painter layer)
+              | 'text' | 'rect' | 'image' (today's decal nodes)
+
+Mask layers brush/smart-select exactly as now; node layers stay parametric
+(re-edit the string, swap the font, drag the frame); a "rasterize" verb
+flattens a node layer into a mask layer when you want to brush over it (the
+standard one-way door). The merged doc rides the material the way DecalDoc
+does today — masks AND nodes both lossless, V20 schema-evolution-by-addition.
+
+**What this buys, in the user's own pain vocabulary:**
+- One canvas, one layer strip, one color system, one undo, one draft/save —
+  the compose lens retires; §11's duplicate-surfaces count drops again.
+- Capabilities COMBINE instead of round-tripping: graffiti text over a
+  painted brick layer, a shader-filled rect under hand-painted weathering —
+  today each requires materializing in one editor and reopening in the other
+  (lossy, two drafts, two histories).
+- The locked vocabulary SURVIVES intact (memory: shader|decal|image →
+  Materialize → material): those three stay the SOURCE KINDS — they become
+  layer kinds in one authoring canvas instead of three authoring surfaces.
+  Materialize remains the one exit. A `decal` material record stays a decal;
+  only its EDITOR folds.
+
+**The honest cost (the actual engineering seams):**
+1. **The compositor interleave** — the real work. Mask layers draw via GPU
+   paintable surfaces; node layers draw via React capture. One stack must
+   z-order them together: render node layers as captured textures (Static-
+   Surface already invalidates on subtree mutation — the compose preview
+   relies on this today) sandwiched between paintable quads. Contained to
+   the paint surface; the engine already owns both halves.
+2. **A move/select tool** in the painter's tool row + the compose stage's
+   selection chrome ported over. The painter is already tool-modal
+   (brush/smart/hand/lasso/refine) — 'move' is one more, and it resolves the
+   input-modality difference entirely.
+3. **History unification** — paint `history.ts` vs the materials session.
+   V20 answers this (undo = log position); the merged editor commits to one
+   channel.
+4. **Migration is trivial** — an existing DecalDoc is already the merged doc
+   with zero mask layers; an existing paint doc is the merged doc with zero
+   node layers. Nobody loses anything.
+
+This is the same fold the workbench was built to perform on routes, applied
+one level deeper — to documents. It also future-proofs the graffiti/custom-
+font direction for free: a font is a node-layer property (decal.ts already
+carries the full font surface "so the planned custom-font work is a host-side
+family addition, never a schema migration").
+
+Priority: joins the §9.4 panel-consolidation family; sequence it AFTER the
+panel grammar (§11.4) so the merged editor is born under the new laws rather
+than retrofitted.
