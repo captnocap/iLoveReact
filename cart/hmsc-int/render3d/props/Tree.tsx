@@ -224,12 +224,19 @@ function Dead(props: { prop: WorldProp }) {
 
 export function Tree(props: { prop: WorldProp }) {
   switch (props.prop.kind) {
-    case 'treePine': return <Pine prop={props.prop} />;
+    // Size variants (PROPBATCH-0611) share the species model — every
+    // dimension derives from the registry's height/footprint.
+    case 'treePine':
+    case 'treePineYoung':
+    case 'treePineGiant':
+      return <Pine prop={props.prop} />;
     case 'treeBirch': return <Birch prop={props.prop} />;
     case 'treeCypress': return <Cypress prop={props.prop} />;
     case 'treePalm': return <Palm prop={props.prop} />;
     case 'treeDead': return <Dead prop={props.prop} />;
     case 'treeOak':
+    case 'treeOakYoung':
+    case 'treeOakGiant':
     default:
       return <Oak prop={props.prop} />;
   }

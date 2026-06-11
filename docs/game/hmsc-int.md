@@ -79,10 +79,30 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
   consumer repointed. The `PropKind` union moved INTO the registry and
   `design.ts` re-exports it (one union, one table); req_0623's
   `dumpsterBodyMeters`/`DUMPSTER_AUTHORED_HEIGHT` one-definition block moved
-  with it. New prop kinds: `game/kinds/props.ts` ONLY (+ compiled mesh parts
-  in `compile/worldGeometry.ts` and a `render3d/props/` model while those
-  layers last — §13 steps 2–3 fold them into the items/voxel model pipeline
-  next). `tools/prop-scale` reads the unified table.
+  with it. `tools/prop-scale` reads the unified table.
+- **PROPBATCH-0611 (req_0633/0634/0635)** — ~100 kinds after the variety
+  drop: grass patches, jagged rocks (rotated-box facets), tree size variants,
+  radio tower, gas pump, vending machine, store shelf, signs (A-frame, blade,
+  poster, hospital/police), media set (books, record player, vinyl, album
+  cover, speakers, cassette), and the junkyard set (shipping container,
+  concrete pipe, pipe stack, corrugated sheet, cable spool, lockers, oil
+  tank, tires, barrels, steel drum, propane, jerry can, cinder block, brick,
+  rubble). Real scale × 1.15 per PROPSCALE. **A new kind is now ONE recipe**:
+  `game/kinds/propModels.ts` authors parts as data in the compiled loader's
+  shape vocabulary (box/cyl8/cyl16/sphere); `render3d/props/DataProp.tsx`
+  renders the same recipe in /test through `TexturedParts` (so every recipe
+  is click-to-pick texturable), and `compile/worldGeometry.ts` lowers it in
+  its `propParts` default case — the two paths agree by construction. Parts
+  carrying a `partId` are FLAT IMAGE TARGETS (req_0635): an applied
+  `partTextures[partId]` texture id renders live in /test AND interns as the
+  part's material in the bake (album cover 'cover', poster/sign 'face',
+  vending machine 'front'). New dynamics kinds (tire, steel drum, propane,
+  jerry can, brick) and containers (vending machine, lockers, shipping
+  container, crate, barrel, store shelf) ride the existing lumps 16/17 —
+  zero Zig changes. **PROPSHELF-0611 (req_0636 follow-on)**: `PROP_CATEGORIES`
+  (same registry) shelves every kind into 11 categories; the IsoAuthor build
+  rail's prop tab shows a category chip row instead of a ~100-button wall,
+  and `props.test.ts` asserts the shelving is a total, disjoint partition.
 
 **game/commands/ — the console vocabulary (capture wave, 2026-06-05)**
 - `game/commands/vocabulary.ts` — hmsc's 49-command console vocabulary (`cmd_/lab_/gv_/pv_/ev_/wv_` plus V27 `log`) REWRITTEN fresh onto the skeleton's mutable-ctx conventions (`cart/hmsc-int/commands/registry.ts` stays an untouched behavior reference). All 49 names register so the V19 script language is complete: captured commands run against command state + `COMMAND_TUNING`/`SKY_NAMED_HOURS`/`SKY_WEATHER_PRESETS` P2 tables + `GAME_KINDS`, `GAME_PERCEPTION`, V20 persistence, and V27 `GAME_TELEMETRY` diagnostics control (`log status`, `log all on|off|toggle`, `log <channel> on|off|toggle`, `log dump`, `log overhead`, `gv_perflog` as `spikes` alias). `wv_prop` is partial (kinds listing real, placement world-owned), and 14 explicit NOT-YET stubs FAIL LOUDLY (`system not captured yet: <owner>`; `NOT_YET_CAPTURED` exports the per-owner hand-off lists — roads/traffic/buildings/interiors/zones/validation, lab scenes, input contract). Dot-path state shape (`player.physics.velocity`, `config.sky.hour`) preserved so saved scripts keep meaning. `vocabulary.test.ts` (21 P4 cases) + `compile/verify/commands.cmds`; `rjit game verify` GREEN. `CAPTURE.md` records the boundary, dropped pieces, and surfaced ambiguities. SELFSHOT-0606 (2026-06-06, USER RULING "dont look at the system") adds `shot [path]` beside the captured names: the console captures the app's OWN rendered frame to a PNG through the `captureFrame` door (`@reactjit/capture` → `__capture_frame` → `framework/gpu/capture.zig` swapchain readback — desktop/X11 capture of the user's system is BANNED, CLAUDE.md "Screenshots"); headless boots degrade gracefully ("unavailable", never fake success); the CLI sibling is `rjit shot <cart> [--route /r]`.

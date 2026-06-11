@@ -16,6 +16,7 @@ import { Ball } from './props/Ball';
 import { WallDecor } from './props/WallDecor';
 import { Furniture } from './props/Furniture';
 import { StreetFurniture } from './props/StreetFurniture';
+import { DataProp } from './props/DataProp';
 
 // The one place that maps a PropKind to its model. Every placed prop renders
 // through this registry — the renderer never learns a prop's name, it just looks
@@ -78,6 +79,53 @@ const PROP_MODELS: Record<PropKind, PropModel> = {
   mirror: WallDecor,
   telephonePole: StreetFurniture,
   basketballHoop: StreetFurniture,
+  // ── PROPBATCH-0611: tree size variants ride the species models ────────────
+  treeOakYoung: Tree,
+  treeOakGiant: Tree,
+  treePineYoung: Tree,
+  treePineGiant: Tree,
+  // ── PROPBATCH-0611: everything else is a DATA recipe (propModels.ts),
+  //    rendered by the one generic component ─────────────────────────────────
+  grassPatch: DataProp,
+  grassTall: DataProp,
+  rockJagged: DataProp,
+  rockShard: DataProp,
+  radioTower: DataProp,
+  gasPump: DataProp,
+  vendingMachine: DataProp,
+  storeShelf: DataProp,
+  businessSign: DataProp,
+  shopSign: DataProp,
+  poster: DataProp,
+  hospitalSign: DataProp,
+  policeSign: DataProp,
+  bookStack: DataProp,
+  recordPlayer: DataProp,
+  vinylRecord: DataProp,
+  albumCover: DataProp,
+  speaker: DataProp,
+  speakerStack: DataProp,
+  cassette: DataProp,
+  shippingContainer: DataProp,
+  concretePipe: DataProp,
+  pipeStack: DataProp,
+  corrugatedSheet: DataProp,
+  cableSpool: DataProp,
+  lockerSet: DataProp,
+  oilTank: DataProp,
+  tire: DataProp,
+  tireStack: DataProp,
+  barrel: DataProp,
+  steelDrum: DataProp,
+  propaneTank: DataProp,
+  jerryCan: DataProp,
+  cinderBlock: DataProp,
+  brick: DataProp,
+  rubblePile: DataProp,
+  crate: DataProp,
+  pallet: DataProp,
+  palletStack: DataProp,
+  toiletPaper: DataProp,
 };
 
 // One placed prop, drawn by its kind's model at its anchor + yaw. Memoized on

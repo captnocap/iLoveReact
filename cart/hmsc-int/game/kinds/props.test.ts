@@ -4,7 +4,9 @@ import { isTileKind, tileKindDefinition } from './tiles';
 import {
   PROP_KIND_DEFINITIONS,
   PROP_KINDS,
+  PROP_CATEGORIES,
   isPropKind,
+  propCategory,
   propKindDefinition,
   type PropKind,
   propContainer,
@@ -23,23 +25,48 @@ test('every prop borrows a REAL tile kind for its gameplay bundle', () => {
   }
 });
 
-test('solid props block like walls; non-solid props hide like bushes', () => {
+test('solid props block like walls; non-solid props hide like bushes or are walk-over clutter', () => {
   for (const k of PROP_KINDS) {
     const d = def(k);
     if (d.solid) {
       assertEqual(d.tileKind, 'wall', `${k} (solid) borrows the wall bundle`);
       assert(!tileKindDefinition(d.tileKind).pathing.walkable, `${k} bundle is not walkable`);
-    } else {
-      assertEqual(d.tileKind, 'bush', `${k} (non-solid) borrows the foliage bundle`);
+    } else if (d.tileKind === 'bush') {
+      // foliage: walk-through AND it conceals
       assert(tileKindDefinition(d.tileKind).pathing.walkable, `${k} bundle is walk-through`);
       assert(tileKindDefinition(d.tileKind).cover.concealment >= 0.8, `${k} bundle conceals`);
+    } else {
+      // PROPBATCH-0611: walk-over CLUTTER (books, a vinyl record, a cassette,
+      // a toilet-paper roll) — too small to block or hide behind. Knee-high
+      // at most, and never reads as cover.
+      assert(d.heightMeters <= 0.8, `${k} (clutter) is walk-over small`);
+      assertEqual(propCoverClass(k), 'none', `${k} (clutter) is air to combat`);
     }
   }
 });
 
-test('exactly the bush family is non-solid (walk-through foliage)', () => {
+test('categories shelve every kind exactly once (PROPSHELF-0611)', () => {
+  const seen = new Map<string, string>();
+  for (const cat of Object.keys(PROP_CATEGORIES) as (keyof typeof PROP_CATEGORIES)[]) {
+    for (const k of PROP_CATEGORIES[cat]) {
+      assert(isPropKind(k), `${cat} lists a real kind (${k})`);
+      assert(!seen.has(k), `${k} is shelved once (also in ${seen.get(k) ?? ''})`);
+      seen.set(k, cat);
+    }
+  }
+  for (const k of PROP_KINDS) {
+    assert(seen.has(k), `${k} has a shelf`);
+    assertEqual(propCategory(k), seen.get(k), `${k} resolves its shelf`);
+  }
+});
+
+test('exactly the foliage + clutter families are non-solid', () => {
   const nonSolid = PROP_KINDS.filter((k) => !def(k).solid);
-  assertEqual(nonSolid.join(','), 'bush,bushLarge,bushLow,bushSparse', 'non-solid props');
+  assertEqual(
+    nonSolid.join(','),
+    'bush,bushLarge,bushLow,bushSparse,grassPatch,grassTall,bookStack,recordPlayer,vinylRecord,albumCover,cassette,toiletPaper',
+    'non-solid props',
+  );
 });
 
 test('traffic control: stop sign always stops, traffic light cycles, scenery is none', () => {

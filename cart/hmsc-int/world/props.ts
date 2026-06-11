@@ -25,6 +25,14 @@ const SEGMENT_HALF_THICKNESS: Partial<Record<WorldProp['kind'], number>> = {
   bedSingle: 0.5,
   bedDouble: 0.75,
   cupboard: 0.25,
+  // PROPBATCH-0611 long props — half the model's local-Z extent.
+  storeShelf: 0.3,
+  shippingContainer: 1.4,
+  concretePipe: 0.8,
+  pipeStack: 0.55,
+  corrugatedSheet: 0.18,
+  lockerSet: 0.25,
+  oilTank: 1.0,
 };
 
 export function propFootprint(prop: WorldProp): PropFootprint | null {

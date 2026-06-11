@@ -82,7 +82,59 @@ export type PropKind =
   | 'computer'
   // utility + sport
   | 'telephonePole'
-  | 'basketballHoop';
+  | 'basketballHoop'
+  // ── PROPBATCH-0611 (req_0633/req_0634/req_0635): the big variety drop ──────
+  // ground foliage
+  | 'grassPatch'
+  | 'grassTall'
+  // jagged rock forms (rotated-box facets, not sphere blobs)
+  | 'rockJagged'
+  | 'rockShard'
+  // tree size variants (same models, registry-scaled)
+  | 'treeOakYoung'
+  | 'treeOakGiant'
+  | 'treePineYoung'
+  | 'treePineGiant'
+  // broadcast / street commerce
+  | 'radioTower'
+  | 'gasPump'
+  | 'vendingMachine'
+  | 'storeShelf'
+  | 'businessSign'
+  | 'shopSign'
+  | 'poster'
+  | 'hospitalSign'
+  | 'policeSign'
+  // music / media (tabletop)
+  | 'bookStack'
+  | 'recordPlayer'
+  | 'vinylRecord'
+  | 'albumCover'
+  | 'speaker'
+  | 'speakerStack'
+  | 'cassette'
+  // the junkyard set
+  | 'shippingContainer'
+  | 'concretePipe'
+  | 'pipeStack'
+  | 'corrugatedSheet'
+  | 'cableSpool'
+  | 'lockerSet'
+  | 'oilTank'
+  | 'tire'
+  | 'tireStack'
+  | 'barrel'
+  | 'steelDrum'
+  | 'propaneTank'
+  | 'jerryCan'
+  | 'cinderBlock'
+  | 'brick'
+  | 'rubblePile'
+  | 'crate'
+  | 'pallet'
+  | 'palletStack'
+  // bathroom wall
+  | 'toiletPaper';
 
 // How a prop governs vehicle traffic. 'none' props are scenery; 'stopSign' is
 // always a hard stop; 'signal' free-runs a green→caution→stop cycle (the
@@ -794,9 +846,507 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     tileKind: 'wall',
     trafficControl: 'none',
   },
+
+  // ── PROPBATCH-0611 (req_0633 image set + named list, req_0634 grass,
+  //    req_0635 image-flats). Real scale × 1.15 — the PROPSCALE presence law.
+  //    Models are DATA (game/kinds/propModels.ts), rendered identically by
+  //    /test's DataProp and the compile bake. ────────────────────────────────
+  grassPatch: {
+    kind: 'grassPatch',
+    label: 'Grass Patch',
+    // Walk-through ground foliage — too low to hide in (no concealment read).
+    solid: false,
+    footprintRadiusMeters: 0.7,
+    heightMeters: 0.3,
+    tileKind: 'bush',
+    trafficControl: 'none',
+    coverClass: 'none',
+  },
+  grassTall: {
+    kind: 'grassTall',
+    label: 'Tall Grass',
+    // Waist-to-chest savanna grass — crouch in it and the bush tile conceals.
+    solid: false,
+    footprintRadiusMeters: 0.9,
+    heightMeters: 1.0,
+    tileKind: 'bush',
+    trafficControl: 'none',
+    coverClass: 'soft',
+  },
+  rockJagged: {
+    kind: 'rockJagged',
+    label: 'Jagged Rock',
+    solid: true,
+    footprintRadiusMeters: 0.7,
+    heightMeters: 1.4,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  rockShard: {
+    kind: 'rockShard',
+    label: 'Rock Shard',
+    solid: true,
+    footprintRadiusMeters: 0.45,
+    heightMeters: 2.6,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  // Tree size variants — same species models, different registry scale (the
+  // tree recipes derive everything from height/footprint).
+  treeOakYoung: {
+    kind: 'treeOakYoung',
+    label: 'Young Oak',
+    solid: true,
+    footprintRadiusMeters: 0.32,
+    heightMeters: 9,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  treeOakGiant: {
+    kind: 'treeOakGiant',
+    label: 'Giant Oak',
+    solid: true,
+    footprintRadiusMeters: 0.8,
+    heightMeters: 25,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  treePineYoung: {
+    kind: 'treePineYoung',
+    label: 'Young Pine',
+    solid: true,
+    footprintRadiusMeters: 0.24,
+    heightMeters: 11,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  treePineGiant: {
+    kind: 'treePineGiant',
+    label: 'Giant Pine',
+    solid: true,
+    footprintRadiusMeters: 0.6,
+    heightMeters: 32,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  radioTower: {
+    kind: 'radioTower',
+    label: 'Radio Tower',
+    // Real small-market lattice tower ~30m × 1.15. The footprint is the leg
+    // square's half-width.
+    solid: true,
+    footprintRadiusMeters: 2.2,
+    heightMeters: 34,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  gasPump: {
+    kind: 'gasPump',
+    label: 'Gas Pump',
+    // Real island pump ~1.8m × 1.15.
+    solid: true,
+    footprintRadiusMeters: 0.42,
+    heightMeters: 2.1,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    coverClass: 'hard',
+  },
+  vendingMachine: {
+    kind: 'vendingMachine',
+    label: 'Vending Machine',
+    // Real ~1.83m × 1.15. The front panel is an image target (partId 'front').
+    solid: true,
+    footprintRadiusMeters: 0.5,
+    heightMeters: 2.1,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    container: { lootCategory: 'kitchen', capacity: 3, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
+    coverClass: 'hard',
+  },
+  storeShelf: {
+    kind: 'storeShelf',
+    label: 'Store Shelf',
+    // A gondola run, long like a fence — yaw-aware thin AABB in world props.
+    solid: true,
+    footprintRadiusMeters: 0.95,
+    heightMeters: 1.9,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    container: { lootCategory: 'kitchen', capacity: 6, spawnFillChance: 0.65, searchSeconds: 3, access: 'open' },
+  },
+  businessSign: {
+    kind: 'businessSign',
+    label: 'A-Frame Sign',
+    // The sidewalk sandwich board in front of a business; face takes an image.
+    solid: true,
+    footprintRadiusMeters: 0.35,
+    heightMeters: 1.1,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    coverClass: 'none',
+  },
+  shopSign: {
+    kind: 'shopSign',
+    label: 'Shop Blade Sign',
+    // Wall-mounted bracket sign hanging over the sidewalk; face takes an image.
+    solid: true,
+    footprintRadiusMeters: 0.1,
+    heightMeters: 3.0,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'wall',
+    coverClass: 'none',
+  },
+  poster: {
+    kind: 'poster',
+    label: 'Poster',
+    // The req_0635 flat: a wall sheet whose face takes any image.
+    solid: true,
+    footprintRadiusMeters: 0.05,
+    heightMeters: 2.3,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'wall',
+    coverClass: 'none',
+  },
+  hospitalSign: {
+    kind: 'hospitalSign',
+    label: 'Hospital Sign',
+    // The building-identity prop: bolt it to any structure and it reads as a
+    // hospital (white panel + red cross).
+    solid: true,
+    footprintRadiusMeters: 0.12,
+    heightMeters: 3.2,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'wall',
+    coverClass: 'none',
+  },
+  policeSign: {
+    kind: 'policeSign',
+    label: 'Police Sign',
+    solid: true,
+    footprintRadiusMeters: 0.12,
+    heightMeters: 3.2,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'wall',
+    coverClass: 'none',
+  },
+  bookStack: {
+    kind: 'bookStack',
+    label: 'Books',
+    solid: false,
+    footprintRadiusMeters: 0.18,
+    heightMeters: 0.38,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'surface',
+  },
+  recordPlayer: {
+    kind: 'recordPlayer',
+    label: 'Record Player',
+    solid: false,
+    footprintRadiusMeters: 0.26,
+    heightMeters: 0.21,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'surface',
+  },
+  vinylRecord: {
+    kind: 'vinylRecord',
+    label: 'Vinyl Record',
+    solid: false,
+    footprintRadiusMeters: 0.18,
+    heightMeters: 0.04,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'surface',
+  },
+  albumCover: {
+    kind: 'albumCover',
+    label: 'Album Cover',
+    // A standing record sleeve; the cover is an image target (req_0635).
+    solid: false,
+    footprintRadiusMeters: 0.19,
+    heightMeters: 0.37,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'surface',
+  },
+  speaker: {
+    kind: 'speaker',
+    label: 'Speaker',
+    solid: true,
+    footprintRadiusMeters: 0.22,
+    heightMeters: 1.15,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  speakerStack: {
+    kind: 'speakerStack',
+    label: 'PA Speaker Stack',
+    solid: true,
+    footprintRadiusMeters: 0.46,
+    heightMeters: 1.9,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    coverClass: 'hard',
+  },
+  cassette: {
+    kind: 'cassette',
+    label: 'Cassette',
+    solid: false,
+    footprintRadiusMeters: 0.06,
+    heightMeters: 0.02,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'surface',
+  },
+  shippingContainer: {
+    kind: 'shippingContainer',
+    label: 'Shipping Container',
+    // Real 20ft box (6.06 × 2.44 × 2.59) × 1.15. Long — yaw-aware thin AABB.
+    solid: true,
+    footprintRadiusMeters: 3.5,
+    heightMeters: 3.0,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    container: { lootCategory: 'tools', capacity: 8, spawnFillChance: 0.6, searchSeconds: 5, access: 'locked' },
+    coverClass: 'hard',
+  },
+  concretePipe: {
+    kind: 'concretePipe',
+    label: 'Concrete Pipe',
+    // A lying Ø1.4 culvert section; spans local X (yaw-aware AABB).
+    solid: true,
+    footprintRadiusMeters: 1.3,
+    heightMeters: 1.6,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  pipeStack: {
+    kind: 'pipeStack',
+    label: 'Pipe Stack',
+    // A pyramid of steel pipes lying along local X (yaw-aware AABB).
+    solid: true,
+    footprintRadiusMeters: 1.75,
+    heightMeters: 1.0,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  corrugatedSheet: {
+    kind: 'corrugatedSheet',
+    label: 'Corrugated Sheet',
+    // A leaning zinc sheet; thin span along local X (yaw-aware AABB).
+    solid: true,
+    footprintRadiusMeters: 1.0,
+    heightMeters: 2.3,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    coverClass: 'hard',
+  },
+  cableSpool: {
+    kind: 'cableSpool',
+    label: 'Cable Spool',
+    // The wooden spool — street furniture's free table; you can sit on it.
+    solid: true,
+    footprintRadiusMeters: 0.8,
+    heightMeters: 0.95,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    seat: { pose: 'sit', seatHeightMeters: 0.95, capacity: 2 },
+  },
+  lockerSet: {
+    kind: 'lockerSet',
+    label: 'Lockers',
+    solid: true,
+    footprintRadiusMeters: 0.45,
+    heightMeters: 2.1,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    container: { lootCategory: 'clothing', capacity: 4, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
+  },
+  oilTank: {
+    kind: 'oilTank',
+    label: 'Oil Tank',
+    // A horizontal farm/fuel tank on cradles; spans local X (yaw-aware AABB).
+    solid: true,
+    footprintRadiusMeters: 2.3,
+    heightMeters: 2.4,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    coverClass: 'hard',
+  },
+  tire: {
+    kind: 'tire',
+    label: 'Tire',
+    // A standing car tire (Ø0.66 × 1.15) — it rolls when kicked.
+    solid: true,
+    footprintRadiusMeters: 0.38,
+    heightMeters: 0.76,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    dynamics: { bodyRadiusMeters: 0.38, restitution: 0.45 },
+  },
+  tireStack: {
+    kind: 'tireStack',
+    label: 'Tire Stack',
+    solid: true,
+    footprintRadiusMeters: 0.45,
+    heightMeters: 1.0,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    coverClass: 'soft',
+  },
+  barrel: {
+    kind: 'barrel',
+    label: 'Wooden Barrel',
+    solid: true,
+    footprintRadiusMeters: 0.36,
+    heightMeters: 1.0,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    container: { lootCategory: 'junk', capacity: 3, spawnFillChance: 0.5, searchSeconds: 2.5, access: 'open' },
+    coverClass: 'soft',
+  },
+  steelDrum: {
+    kind: 'steelDrum',
+    label: 'Steel Drum',
+    // The rusty 55-gal drum — heavy but it topples and rolls when shoved.
+    solid: true,
+    footprintRadiusMeters: 0.32,
+    heightMeters: 1.0,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    dynamics: { bodyRadiusMeters: 0.42, restitution: 0.18 },
+  },
+  propaneTank: {
+    kind: 'propaneTank',
+    label: 'Propane Tank',
+    solid: true,
+    footprintRadiusMeters: 0.24,
+    heightMeters: 0.7,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    dynamics: { bodyRadiusMeters: 0.28, restitution: 0.32 },
+  },
+  jerryCan: {
+    kind: 'jerryCan',
+    label: 'Jerry Can',
+    solid: true,
+    footprintRadiusMeters: 0.19,
+    heightMeters: 0.54,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    dynamics: { bodyRadiusMeters: 0.22, restitution: 0.15 },
+  },
+  cinderBlock: {
+    kind: 'cinderBlock',
+    label: 'Cinder Block',
+    solid: true,
+    footprintRadiusMeters: 0.22,
+    heightMeters: 0.23,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  brick: {
+    kind: 'brick',
+    label: 'Brick',
+    // Kickable street litter — tiny sphere body, near-dead bounce.
+    solid: true,
+    footprintRadiusMeters: 0.12,
+    heightMeters: 0.08,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    dynamics: { bodyRadiusMeters: 0.1, restitution: 0.12 },
+  },
+  rubblePile: {
+    kind: 'rubblePile',
+    label: 'Rubble Pile',
+    solid: true,
+    footprintRadiusMeters: 0.8,
+    heightMeters: 0.55,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    coverClass: 'soft',
+  },
+  crate: {
+    kind: 'crate',
+    label: 'Wooden Crate',
+    solid: true,
+    footprintRadiusMeters: 0.35,
+    heightMeters: 0.65,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    container: { lootCategory: 'tools', capacity: 3, spawnFillChance: 0.55, searchSeconds: 2.5, access: 'open' },
+  },
+  pallet: {
+    kind: 'pallet',
+    label: 'Pallet',
+    solid: true,
+    footprintRadiusMeters: 0.65,
+    heightMeters: 0.16,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  palletStack: {
+    kind: 'palletStack',
+    label: 'Pallet Stack',
+    solid: true,
+    footprintRadiusMeters: 0.65,
+    heightMeters: 1.05,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    coverClass: 'soft',
+  },
+  toiletPaper: {
+    kind: 'toiletPaper',
+    label: 'Toilet Paper',
+    solid: false,
+    footprintRadiusMeters: 0.1,
+    heightMeters: 0.78,
+    tileKind: 'wall',
+    trafficControl: 'none',
+    mount: 'wall',
+    coverClass: 'none',
+  },
 };
 
 export const PROP_KINDS = Object.keys(PROP_KIND_DEFINITIONS) as PropKind[];
+
+// ── categories: how pickers SHELVE the kinds (PROPSHELF-0611, req_0636) ──────
+// One registered table, category → kinds. With ~100 kinds a flat button wall
+// is unusable ("the millions of buttons is insane"); every palette renders a
+// category row first, then only that shelf's kinds. A kind lives on EXACTLY
+// one shelf (props.test.ts asserts the partition is total and disjoint).
+export type PropCategory =
+  | 'nature' | 'trees' | 'rocks' | 'street' | 'signs' | 'furniture'
+  | 'household' | 'media' | 'commerce' | 'junkyard' | 'sport';
+
+export const PROP_CATEGORIES: Record<PropCategory, PropKind[]> = {
+  nature: ['bush', 'bushLarge', 'bushLow', 'bushSparse', 'grassPatch', 'grassTall'],
+  trees: ['treeOak', 'treeOakYoung', 'treeOakGiant', 'treePine', 'treePineYoung', 'treePineGiant', 'treeBirch', 'treeCypress', 'treePalm', 'treeDead'],
+  rocks: ['rock', 'rockLarge', 'rockSmall', 'boulder', 'rockFlat', 'rockSpire', 'rockMossy', 'rockPile', 'rockJagged', 'rockShard'],
+  street: ['fireHydrant', 'streetLight', 'payphone', 'mailbox', 'dumpster', 'fence', 'trafficCone', 'barrier', 'trashCan', 'bench', 'planter', 'telephonePole'],
+  signs: ['streetSign', 'stopSign', 'trafficLight', 'businessSign', 'shopSign', 'poster', 'hospitalSign', 'policeSign'],
+  furniture: ['chair', 'chairRed', 'chairBlue', 'chairGreen', 'couch', 'table', 'floorLamp', 'wallPainting', 'ledLight', 'mirror'],
+  household: ['bedSingle', 'bedDouble', 'cupboard', 'sink', 'oven', 'fridge', 'computer', 'toiletPaper'],
+  media: ['bookStack', 'recordPlayer', 'vinylRecord', 'albumCover', 'cassette', 'speaker', 'speakerStack'],
+  commerce: ['vendingMachine', 'gasPump', 'storeShelf', 'crate', 'pallet', 'palletStack'],
+  junkyard: ['shippingContainer', 'concretePipe', 'pipeStack', 'corrugatedSheet', 'cableSpool', 'lockerSet', 'oilTank', 'tire', 'tireStack', 'barrel', 'steelDrum', 'propaneTank', 'jerryCan', 'cinderBlock', 'brick', 'rubblePile', 'radioTower'],
+  sport: ['ballBeach', 'ballSoccer', 'ballBasketball', 'basketballHoop'],
+};
+
+export const PROP_CATEGORY_NAMES = Object.keys(PROP_CATEGORIES) as PropCategory[];
+
+const CATEGORY_BY_KIND: Record<string, PropCategory> = {};
+for (const cat of PROP_CATEGORY_NAMES) for (const k of PROP_CATEGORIES[cat]) CATEGORY_BY_KIND[k] = cat;
+
+/** The shelf a kind lives on (every kind has one — the suite enforces it). */
+export function propCategory(kind: PropKind): PropCategory {
+  return CATEGORY_BY_KIND[kind];
+}
 
 export function isPropKind(value: string): value is PropKind {
   return Object.prototype.hasOwnProperty.call(PROP_KIND_DEFINITIONS, value);

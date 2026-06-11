@@ -32,6 +32,7 @@ import { PropSurfaceCaptures } from './render3d/PropCaptures';
 import { TextureCapture } from './game/textures/registry';
 import { groundColumnTop } from './Embodied';
 import { CHUNK_TILES } from './chunks';
+import { PROP_CATEGORIES, PROP_CATEGORY_NAMES, isPropKind, propCategory, type PropCategory } from './game/kinds/props';
 
 const FAR_CLIP = 4000;
 // The iso eye sits BASE_DIST/zoom (~90–257m) from the ground, far past F2's 14m
@@ -1490,12 +1491,24 @@ type RailTab = BuildPieceKind | 'prefabs';
 const RAIL_TABS: RailTab[] = [...PALETTE_KINDS, 'prefabs'];
 const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: readonly BuildPrefabDef[]; onArm: (a: NonNullable<Armed>) => void }) {
   const [tab, setTab] = useState<RailTab>('wall');
+  // The prop tab is SHELVED (PROPSHELF-0611, req_0636): ~100 kinds as one flat
+  // button wall was unusable, so a second chip row picks a registry category
+  // (game/kinds/props PROP_CATEGORIES) and only that shelf's pieces list.
+  const [propShelf, setPropShelf] = useState<PropCategory>('street');
   // 'prefabs' lists the named compositions (stamp → many pieces) — the FULL list the cart
   // passes (built-in + user-captured stream prefabs); every other tab lists that kind's
   // catalog pieces. Both feed the SAME rail, fed by the SAME GAME_BUILD.
   const entries = useMemo<{ id: string; label: string }[]>(
-    () => (tab === 'prefabs' ? props.prefabs.map((d) => ({ id: d.id, label: d.label })) : GAME_BUILD.catalog.byKind(tab)),
-    [tab, props.prefabs],
+    () => {
+      if (tab === 'prefabs') return props.prefabs.map((d) => ({ id: d.id, label: d.label }));
+      const all = GAME_BUILD.catalog.byKind(tab);
+      if (tab !== 'prop') return all;
+      return all.filter((e) => {
+        const kind = e.id.startsWith('prop.') ? e.id.slice('prop.'.length) : e.id;
+        return isPropKind(kind) && propCategory(kind) === propShelf;
+      });
+    },
+    [tab, propShelf, props.prefabs],
   );
   const armKind: 'piece' | 'prefab' = tab === 'prefabs' ? 'prefab' : 'piece';
   const armedId = props.armed && props.armed.kind !== 'tower' ? props.armed.id : null;
@@ -1523,6 +1536,17 @@ const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: re
           </Box>
         </Pressable>
       </Box>
+      {tab === 'prop' && (
+        <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
+          {PROP_CATEGORY_NAMES.map((cat) => (
+            <Pressable key={cat} onPress={() => setPropShelf(cat)}>
+              <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: cat === propShelf ? '#0e7490' : '#142031' }}>
+                <Text fontSize={10} color={cat === propShelf ? '#ecfeff' : '#8aa0b8'} style={{ fontFamily: 'monospace' }}>{`${cat} ${PROP_CATEGORIES[cat].length}`}</Text>
+              </Box>
+            </Pressable>
+          ))}
+        </Box>
+      )}
       <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
         {entries.map((def) => (
           <Pressable key={def.id} onPress={() => props.onArm({ kind: armKind, id: def.id })}>

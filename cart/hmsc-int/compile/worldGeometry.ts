@@ -39,6 +39,10 @@ import { packDecalDoc } from './decalPack';
 import type { DecalAssetSink } from './decalAssets';
 import { createInteractableSink, type InteractableSink } from './worldInteractables';
 import { createDynamicPropSink, type DynamicPropSink } from './worldDynamicProps';
+import {
+  box, cylinder8, cylinder16, sphere, propModelParts,
+  type Color, type Rotation, type PropPartShape, type PropPartSpec,
+} from '../game/kinds/propModels';
 import { textBytes } from '@reactjit/workspace';
 
 export const INSTANCE_STRIDE = 13;
@@ -206,8 +210,8 @@ const BUILD_FACE_SLAB_THICKNESS_METERS = 0.02; // Matches BUILD_UI.faceSlabThick
 const BUILD_FACE_SLAB_LIFT_METERS = 0.012; // Matches BUILD_UI.faceSlabLiftMeters.
 const DEG = Math.PI / 180;
 
-type Color = readonly [number, number, number];
-type Rotation = readonly [number, number, number];
+// Color / Rotation / the prop part vocabulary live in game/kinds/propModels —
+// the ONE module both renderers consume (PROPBATCH-0611).
 
 function pushShape(
   b: Build,
@@ -344,15 +348,6 @@ function propColor(kind: PropKind | string): Color {
   }
 }
 
-type PropPartShape = 'box' | 'cylinder8' | 'cylinder16' | 'sphere';
-type PropPartSpec = {
-  shape: PropPartShape;
-  local: readonly [number, number, number];
-  size: readonly [number, number, number];
-  color: Color;
-  rotation?: Rotation;
-};
-
 function propAt(prop: WorldProp, local: readonly [number, number, number]): readonly [number, number, number] {
   const yaw = (prop.yawDegrees ?? 0) * DEG;
   const c = Math.cos(yaw);
@@ -380,28 +375,18 @@ function propRotation(prop: WorldProp, local: Rotation | undefined): Rotation {
 
 function pushPropPart(b: Build, prop: WorldProp, part: PropPartSpec): void {
   const p = propAt(prop, part.local);
-  pushShape(b, propShapeId(part.shape), p[0], p[1], p[2], propRotation(prop, part.rotation), part.size[0], part.size[1], part.size[2], part.color);
+  // A part with a partId is an image target (req_0635): the placed prop's
+  // partTextures[partId] is a TEXTURE_REGISTRY id whose shader/decal recipe
+  // interns into the materials vocab — the SAME channel face skins ship
+  // through. Unresolvable ids (react-facade textures) keep the flat color.
+  const textureId = part.partId !== undefined ? prop.partTextures?.[part.partId] : undefined;
+  const material = textureId ? internMaterial(b, { kind: 'material', id: textureId }) : 0;
+  pushShape(b, propShapeId(part.shape), p[0], p[1], p[2], propRotation(prop, part.rotation), part.size[0], part.size[1], part.size[2], part.color, material);
 }
 
 function pushPropParts(b: Build, prop: WorldProp, parts: readonly PropPartSpec[]): number {
   for (const part of parts) pushPropPart(b, prop, part);
   return parts.length;
-}
-
-function box(local: readonly [number, number, number], size: readonly [number, number, number], color: Color, rotation?: Rotation): PropPartSpec {
-  return { shape: 'box', local, size, color, rotation };
-}
-
-function cylinder8(local: readonly [number, number, number], radius: number, height: number, color: Color, rotation?: Rotation): PropPartSpec {
-  return { shape: 'cylinder8', local, size: [radius * 2, height, radius * 2], color, rotation };
-}
-
-function cylinder16(local: readonly [number, number, number], radius: number, height: number, color: Color, rotation?: Rotation): PropPartSpec {
-  return { shape: 'cylinder16', local, size: [radius * 2, height, radius * 2], color, rotation };
-}
-
-function sphere(local: readonly [number, number, number], size: readonly [number, number, number], color: Color): PropPartSpec {
-  return { shape: 'sphere', local, size, color };
 }
 
 function bushParts(prop: WorldProp): PropPartSpec[] {
@@ -548,7 +533,10 @@ function propParts(prop: WorldProp): PropPartSpec[] {
         cylinder8([-0.15 * s, 0.46 * s, 0], 0.05 * s, 0.12 * s, cap, [0, 0, 90]),
       ];
     }
-    // ── trees (mirror hmsc-int/render3d/props/Tree.tsx) ───────────────────
+    // ── trees (mirror hmsc-int/render3d/props/Tree.tsx; size variants share
+    //    the species recipe — everything derives from the registry) ─────────
+    case 'treeOakYoung':
+    case 'treeOakGiant':
     case 'treeOak': {
       const h = def.heightMeters;
       const r = def.footprintRadiusMeters;
@@ -567,6 +555,8 @@ function propParts(prop: WorldProp): PropPartSpec[] {
         sphere([0, h * 0.84, 0], [c * 1.1, c * 0.9, c * 1.1], mid),
       ];
     }
+    case 'treePineYoung':
+    case 'treePineGiant':
     case 'treePine': {
       const h = def.heightMeters;
       const r = def.footprintRadiusMeters;
@@ -1052,11 +1042,16 @@ function propParts(prop: WorldProp): PropPartSpec[] {
       ];
     }
     default: {
+      // PROPBATCH-0611: data-recipe kinds (game/kinds/propModels.ts) — the
+      // SAME parts /test's DataProp renders, so the two paths agree by
+      // construction.
+      const recipe = propModelParts(prop.kind);
+      if (recipe) return recipe;
       // Registry-derived placeholder for any future kind without a parts
       // case (PROPSCALE-0611 deleted the stale hand-kept PROP_BOX table —
       // every current kind has a case above).
-      const box: readonly [number, number, number] = [def.footprintRadiusMeters * 2, def.heightMeters, def.footprintRadiusMeters * 2];
-      return [{ shape: 'box', local: [0, box[1] / 2, 0], size: box, color: propColor(prop.kind) }];
+      const fallback: readonly [number, number, number] = [def.footprintRadiusMeters * 2, def.heightMeters, def.footprintRadiusMeters * 2];
+      return [{ shape: 'box', local: [0, fallback[1] / 2, 0], size: fallback, color: propColor(prop.kind) }];
     }
   }
 }
