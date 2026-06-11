@@ -73,6 +73,15 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'CompiledWorld.tsx + framework world_window (the pop-out)',
+      purpose: ['ui', 'rendering'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/CompiledWorld.tsx',
+      description:
+        'WORLDWIN-0611 (review §6/§10.2, USER: "Do the real framework work"): the compiled world in a SECOND OS window on the full wgpu pipeline. Framework: gpu.createWindowSurface/configureExtraSurface (extra surfaces, same device), scene3d.DetachedTarget/renderDetached (caller-owned RT outside the per-frame pool; drawScene is encoder-self-contained), framework/gpu/world_window.zig (SDL window + blit pass + event routing; engine loop calls routeEvent + frame). Door rides the compiled-world ingredient: __compiled_world_window/_close/_status. Cart: popOutCompiledWorld() (POP OUT on the /compiled header); Compile calls reloadCompiledWindowIfOpen() — paint → Compile → the window takes the fresh gamefile live, zero route flips. In-window: click captures mouse, WASD walks (process-wide key state), Esc releases, RMB aims; events consumed so editor hotkeys never fire while walking. Runtime mounts under reserved node id 0xFFFFFF01. The in-process <Window> primitive remains 2D-only by design — this is the wgpu path.',
+      status: 'live',
+    },
+    {
       name: 'editors/controls.ts (the editor control contract)',
       purpose: ['ui', 'maintenance'],
       kind: 'module',

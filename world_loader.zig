@@ -24,6 +24,7 @@
 
 const std = @import("std");
 const c = @import("framework/c.zig").imports;
+const wgpu = @import("wgpu");
 const gpu = @import("framework/gpu/gpu.zig");
 const capture = @import("framework/gpu/capture.zig");
 const scene3d = @import("framework/gpu/3d.zig");
@@ -2378,6 +2379,19 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
     runtime.stepNow();
     runtime.ensureMaterials();
     return scene3d.render(&runtime.root, x, y, w, h, opacity);
+}
+
+/// WORLDWIN-0611: step a mounted runtime and render it into a CALLER-OWNED
+/// detached target — the pop-out window path. Unlike renderEmbedded nothing
+/// is queued into the main window's 2D stream; the returned view is the
+/// window's to blit. The runtime must already be mounted (mount()).
+pub fn renderDetachedView(node_id: u32, target: *scene3d.DetachedTarget, w: f32, h: f32) ?*wgpu.TextureView {
+    const entry = findMounted(node_id) orelse return null;
+    const runtime = entry.runtime orelse return null;
+    runtime.last_aspect = w / @max(h, 1);
+    runtime.stepNow();
+    runtime.ensureMaterials();
+    return scene3d.renderDetached(target, &runtime.root, w, h);
 }
 
 pub fn mouseLook(node_id: u32, dx: f32, dy: f32) void {

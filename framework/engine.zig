@@ -381,6 +381,15 @@ const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("../world_loader
     pub fn mouseLook(_: u32, _: f32, _: f32) void {}
     pub fn setAiming(_: u32, _: bool) void {}
 };
+// WORLDWIN-0611: the compiled-world pop-out window — same gate as the loader
+// it hosts. The stub keeps the loop call-sites unconditional.
+const world_window = if (HAS_3D and HAS_COMPILED_WORLD) @import("gpu/world_window.zig") else struct {
+    pub fn routeEvent(_: *const c.SDL_Event) bool {
+        return false;
+    }
+    pub fn frame() void {}
+    pub fn deinitAll() void {}
+};
 const transition = if (HAS_TRANSITIONS) @import("gpu/transition.zig") else struct {
     pub fn tick(_: f32) bool {
         return false;
@@ -3474,6 +3483,7 @@ pub fn run(config_in: AppConfig) !void {
     defer _ = c.SDL_SetWindowRelativeMouseMode(window, false);
     defer c.SDL_DestroyWindow(window);
     defer windows.deinitAll(); // close all secondary windows before SDL_Quit
+    defer world_window.deinitAll(); // the compiled-world pop-out too (WORLDWIN-0611)
     // SDL3: position is set after creation (not in CreateWindow)
     _ = c.SDL_SetWindowPosition(window, init_x, init_y);
     if (config.always_on_top) _ = c.SDL_SetWindowAlwaysOnTop(window, true);
@@ -3681,6 +3691,7 @@ pub fn run(config_in: AppConfig) !void {
             if (event.type == c.SDL_EVENT_MOUSE_MOTION) dt_motion_count += 1;
             // Route to secondary windows first — if consumed, skip main window handling
             if (windows.routeEvent(&event)) continue;
+            if (world_window.routeEvent(&event)) continue;
 
             switch (event.type) {
                 c.SDL_EVENT_QUIT => {
@@ -4871,6 +4882,11 @@ pub fn run(config_in: AppConfig) !void {
         gpu.frame(0.051, 0.067, 0.090);
         const phase_t_postframe = std.time.microTimestamp();
         frame_telemetry.telemetry_gpu_us = @intCast(@max(0, phase_t_postframe - phase_t_preframe));
+
+        // WORLDWIN-0611: the compiled-world pop-out presents its own surface
+        // after the main frame — fully self-contained (own RT, own encoder),
+        // a no-op while the window is closed.
+        world_window.frame();
         if (g_input_latency_ts_us != 0) {
             const since_click = phase_t_postframe - g_input_latency_ts_us;
             if (since_click > 50000) {

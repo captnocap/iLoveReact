@@ -7,6 +7,7 @@ const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const world_loader = @import("../world_loader.zig");
+const world_window = @import("gpu/world_window.zig");
 
 fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
     if (idx >= info.length()) return null;
@@ -86,8 +87,63 @@ fn hostStatus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnString(info, status);
 }
 
+// ── the pop-out window (WORLDWIN-0611) ──────────────────────────────────────
+// __compiled_world_window(gameFile, storeDir, width, height) opens the
+// second OS window (or reloads its gamefile when already open — the Compile
+// button's case); _close and _status do what they say. Same ingredient as
+// the embedded loader (the __compiled_world_ grep prefix), so the door costs
+// no new build flag.
+
+fn hostWindowOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const game_file = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "error:MissingGameFile");
+        return;
+    };
+    defer std.heap.c_allocator.free(game_file);
+    const store_dir = argToStringAlloc(info, 1) orelse {
+        setReturnString(info, "error:MissingStoreDir");
+        return;
+    };
+    defer std.heap.c_allocator.free(store_dir);
+    const width: u32 = if (argToF64(info, 2)) |w| @intFromFloat(@max(0.0, w)) else 1280;
+    const height: u32 = if (argToF64(info, 3)) |h| @intFromFloat(@max(0.0, h)) else 800;
+
+    world_window.open(game_file, store_dir, width, height) catch |e| {
+        var buf: [96]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, "error:{s}", .{@errorName(e)}) catch "error:open";
+        setReturnString(info, msg);
+        return;
+    };
+    const status = world_window.statusAlloc(std.heap.c_allocator) catch {
+        setReturnString(info, "ok");
+        return;
+    };
+    defer std.heap.c_allocator.free(status);
+    setReturnString(info, status);
+}
+
+fn hostWindowClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    world_window.close();
+    setReturnString(info, "ok");
+}
+
+fn hostWindowStatus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const status = world_window.statusAlloc(std.heap.c_allocator) catch {
+        setReturnString(info, "error:status");
+        return;
+    };
+    defer std.heap.c_allocator.free(status);
+    setReturnString(info, status);
+}
+
 pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_mount", hostMount);
     v8_runtime.registerHostFn("__compiled_world_unmount", hostUnmount);
     v8_runtime.registerHostFn("__compiled_world_status", hostStatus);
+    v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
+    v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);
+    v8_runtime.registerHostFn("__compiled_world_window_status", hostWindowStatus);
 }

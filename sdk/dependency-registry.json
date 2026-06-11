@@ -897,7 +897,7 @@
       "v8Bindings": [
         "compiled_world"
       ],
-      "note": "Embedded compiled-world primitive for hmsc-int: React mounts one WorldLoader host node; world_loader.zig constructs and steps the baked game-file runtime, then gpu/3d.zig renders that loader-owned Scene3D tree without per-frame V8 or React reconciliation."
+      "note": "Embedded compiled-world primitive for hmsc-int: React mounts one WorldLoader host node; world_loader.zig constructs and steps the baked game-file runtime, then gpu/3d.zig renders that loader-owned Scene3D tree without per-frame V8 or React reconciliation. WORLDWIN-0611: the same ingredient registers __compiled_world_window/_close/_status — the pop-out OS window (framework/gpu/world_window.zig: a second wgpu surface on the same device, the world rendered to a detached RT and blitted)."
     },
     "pg": {
       "shipGate": "pg",

@@ -625,6 +625,13 @@ fn acquireRt(w: u32, h: u32) ?*Rt {
     if (g_rt_cursor >= MAX_RT_POOL) return null;
     const slot = &g_rt_pool[g_rt_cursor];
     g_rt_cursor += 1;
+    return ensureRt(slot, w, h);
+}
+
+/// (Re)build a render-target slot at the given size — shared by the per-frame
+/// pool (acquireRt) and detached targets (WORLDWIN-0611). No-op when the slot
+/// already matches.
+fn ensureRt(slot: *Rt, w: u32, h: u32) ?*Rt {
     if (slot.width == w and slot.height == h and slot.color_view != null) return slot;
 
     const device = core.getDevice() orelse return null;
@@ -1099,6 +1106,40 @@ pub fn flushPending() void {
     const ended = std.time.microTimestamp();
     g_telemetry.draw_us = @intCast(@max(0, ended - started));
     g_pending_count = 0;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Detached targets (WORLDWIN-0611) — a render target OWNED BY THE CALLER,
+// outside the per-frame pool (whose cursor resets every main-window frame).
+// A secondary OS window renders its scene here on its own schedule:
+// drawScene is encoder-self-contained (own encoder, own submit), so nothing
+// about this touches the main frame's pass or the pool's slot identity.
+// ════════════════════════════════════════════════════════════════════════
+
+pub const DetachedTarget = struct {
+    slot: Rt = .{},
+
+    pub fn deinit(self: *DetachedTarget) void {
+        if (self.slot.composite_bind_group) |bg| bg.release();
+        if (self.slot.depth_view) |v| v.release();
+        if (self.slot.depth_texture) |t| t.destroy();
+        if (self.slot.color_view) |v| v.release();
+        if (self.slot.color_texture) |t| t.destroy();
+        self.slot = .{};
+    }
+};
+
+/// Render one scene into a detached target IMMEDIATELY (drawScene submits its
+/// own command buffer) and return the color view to blit/sample. Resizes the
+/// target when the requested dims changed.
+pub fn renderDetached(target: *DetachedTarget, node: *Node, w: f32, h: f32) ?*wgpu.TextureView {
+    if (!g_initialized) init();
+    if (!g_initialized) return null;
+    const iw: u32 = @intFromFloat(@max(1, w));
+    const ih: u32 = @intFromFloat(@max(1, h));
+    const slot = ensureRt(&target.slot, iw, ih) orelse return null;
+    drawScene(node, slot, w, h);
+    return slot.color_view;
 }
 
 // Draw the analytic skybox as one fullscreen triangle. Reconstructs each

@@ -1686,3 +1686,32 @@ ONE `SKINS · GLOBAL` group with a class enum, and its color field opted into
 `wheel` + `range` — quick-picks on top, any tone reachable. Outstanding L1
 half: sliders are still JS (`WorkbenchSlider`); the host-driven Slider
 primitive is the framework item that upgrades every num field in one place.
+
+## The compiled-world POP-OUT window (WORLDWIN-0611, 2026-06-11)
+
+Review §6/§10.2's pop-out, built as REAL framework work (user ruling: "Do the
+real framework work to achieve it") after the in-process `<Window>` path
+proved 2D-only by design (gpu.zig is a one-surface singleton; secondary
+in-process windows use the SDL3 2D renderer). The capability: a SECOND OS
+window running the full wgpu pipeline.
+
+What made it cheap: scene3d already renders every scene to its own
+render-to-texture (never the swapchain) and drawScene is encoder-self-
+contained — so multi-window needed only (1) extra surfaces on the same
+device (`gpu.createWindowSurface`/`configureExtraSurface`), (2) caller-owned
+render targets outside the per-frame pool (`scene3d.DetachedTarget` +
+`renderDetached`; `world_loader.renderDetachedView` steps a mounted runtime
+into one), and (3) a one-triangle blit pass into the window's swapchain —
+all in `framework/gpu/world_window.zig`, driven from the engine loop
+(routeEvent in the SDL poll, frame() after the main gpu.frame()).
+
+The door rides the SAME compiled-world ingredient (`__compiled_world_window`
+/ `_close` / `_status`; trigger = importing CompiledWorld.tsx, unchanged).
+Cart surface: `popOutCompiledWorld()` (POP OUT button on the /compiled
+header), and the Compile button calls `reloadCompiledWindowIfOpen()` — the
+user's daily loop becomes paint on `/` → Compile → the second window takes
+the fresh gamefile live, zero route flips. In the window: click captures the
+mouse, WASD walks (world_loader reads process-wide key state — zero new
+plumbing), Esc releases, RMB aims; its events are consumed so editor hotkeys
+never fire while walking. One window for now; the runtime mounts under
+reserved node id 0xFFFFFF01.

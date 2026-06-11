@@ -46,7 +46,7 @@ import { PlayRoute } from './editors/play/PlayRoute';
 import { LabsRoute } from './shell/LabsRoute';
 import { WorkbenchRoute } from './shell/WorkbenchRoute';
 import { currentWorkbenchFamily, requestWorkbenchSource, subscribeWorkbenchFamily, type WorkbenchFamily } from './shell/workbenchDoor';
-import { CompiledWorldRoute } from './CompiledWorld';
+import { CompiledWorldRoute, reloadCompiledWindowIfOpen } from './CompiledWorld';
 import { workbenchSources } from './editors/workbench/sources';
 import { LABS } from './labs';
 import { editorChannel } from './editors/store';
@@ -1106,6 +1106,9 @@ function EditorShell() {
       }
       setCompiledReloadKey((key) => key + 1);
       setCompiledStatus(summary || 'compiled game-file refreshed');
+      // WORLDWIN-0611: an open pop-out window takes the fresh gamefile live —
+      // paint → Compile → the second window updates, zero route flips.
+      reloadCompiledWindowIfOpen();
       // Surface the material breadcrumb the bake prints (worldGeometry
       // encodeMaterials) so you can confirm glass IS in the data — separate from
       // whether the /compiled host loader (a SEPARATE binary, needs a host

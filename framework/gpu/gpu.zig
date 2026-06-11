@@ -2416,6 +2416,51 @@ fn configureSurface(width: u32, height: u32) void {
     surface.configure(&config);
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// Extra surfaces (WORLDWIN-0611) — additional OS windows on the SAME wgpu
+// device. The main surface/swapchain stays the singleton this module is
+// built around; an extra surface is a sibling swapchain a secondary window
+// (gpu/world_window.zig) acquires/presents itself. Shared device + queue
+// means the pop-out can sample any texture this process rendered (the 3D
+// render-to-texture slots) with zero copies.
+// ════════════════════════════════════════════════════════════════════════
+
+/// Create a wgpu surface for an additional SDL window (same instance).
+pub fn createWindowSurface(window: *c.SDL_Window) ?*wgpu.Surface {
+    const instance = g_instance orelse return null;
+    return createSurfaceFromSDL(instance, window);
+}
+
+/// Configure an extra surface's swapchain; returns the format chosen from its
+/// own capabilities (an extra window may land on a different format than the
+/// main surface — its blit pipeline must be built against THIS return value).
+pub fn configureExtraSurface(surface: *wgpu.Surface, width: u32, height: u32) ?wgpu.TextureFormat {
+    const device = g_device orelse return null;
+    const adapter = g_adapter orelse return null;
+    var caps: wgpu.SurfaceCapabilities = undefined;
+    _ = surface.getCapabilities(adapter, &caps);
+    var format: wgpu.TextureFormat = .bgra8_unorm;
+    if (caps.format_count > 0) {
+        format = caps.formats[0];
+        for (caps.formats[0..caps.format_count]) |fmt| {
+            if (fmt == .bgra8_unorm or fmt == .rgba8_unorm) {
+                format = fmt;
+                break;
+            }
+        }
+    }
+    surface.configure(&.{
+        .device = device,
+        .format = format,
+        .usage = wgpu.TextureUsages.render_attachment,
+        .width = @max(1, width),
+        .height = @max(1, height),
+        .present_mode = .fifo,
+        .alpha_mode = .auto,
+    });
+    return format;
+}
+
 fn createSurfaceFromSDL(instance: *wgpu.Instance, window: *c.SDL_Window) ?*wgpu.Surface {
     const props = c.SDL_GetWindowProperties(window);
 
