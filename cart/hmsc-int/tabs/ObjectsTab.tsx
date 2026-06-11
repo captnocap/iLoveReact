@@ -30,6 +30,7 @@
 // Themed through accentFor() (theme tokens), no raw UI colours.
 
 import { useMemo, useState } from 'react';
+import { useRouteTwigState } from '../editors/twigs';
 import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import type { TileKind } from '../design';
@@ -252,17 +253,22 @@ export function ObjectsTab(props: {
   onArmPlaceable?: (cat: 'building' | 'prop' | 'marker', kind: string) => void;
 }) {
   const firstBuilding = props.buildingPrefabs?.[0]?.id;
-  const [sel, setSel] = useState<Sel>(() => firstBuilding ? { cat: 'building', kind: firstBuilding } : { cat: 'prop', kind: PROP_KINDS[0] });
+  // TWIGSWEEP-0610 (structure review §4): every selection/disclosure here is a
+  // TWIG, never bare useState — a hot reload used to snap the palette back to
+  // "first building, prop category, everything collapsed" (the literal "menus
+  // that reset" complaint). Stale twig ids degrade gracefully: a deleted kind
+  // just renders the not-found viewer until the next pick.
+  const [sel, setSel] = useRouteTwigState<Sel>('/objects-tab', 'sel', firstBuilding ? { cat: 'building', kind: firstBuilding } : { cat: 'prop', kind: PROP_KINDS[0] });
   // The category whose item list is showing in the breadcrumb. Kept apart from
   // `sel` so switching categories to browse doesn't reload the viewer until you
   // pick an item.
-  const [palCat, setPalCat] = useState<Cat>('prop');
-  const [catOpen, setCatOpen] = useState(false);
-  const [itemOpen, setItemOpen] = useState(false);
+  const [palCat, setPalCat] = useRouteTwigState<Cat>('/objects-tab', 'palCat', 'prop');
+  const [catOpen, setCatOpen] = useRouteTwigState('/objects-tab', 'catOpen', false);
+  const [itemOpen, setItemOpen] = useRouteTwigState('/objects-tab', 'itemOpen', false);
   // The model PART selected in the 3D inspector (click-to-pick), and whether the
   // texture-apply popover is open for it. Cleared when the inspected kind changes.
-  const [selPart, setSelPart] = useState<string | null>(null);
-  const [texOpen, setTexOpen] = useState(false);
+  const [selPart, setSelPart] = useRouteTwigState<string | null>('/objects-tab', 'selPart', null);
+  const [texOpen, setTexOpen] = useRouteTwigState('/objects-tab', 'texOpen', false);
 
   // GLOBAL per-kind textures (the right-rail scope): editing here re-skins EVERY
   // instance of the kind. Folded into the preview so the inspector wears them.
