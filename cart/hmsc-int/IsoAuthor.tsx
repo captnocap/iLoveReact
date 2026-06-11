@@ -1222,12 +1222,19 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // pick from this same visible list, so you can't grab what you can't see.
   const visiblePieces = useMemo(() => {
     const cut = (level + 1) * METERS_PER_LEVEL - 0.01;
+    // The cut plane is TERRAIN-RELATIVE (req_0639): a piece's storey is its
+    // height above the ground it STANDS ON, not its absolute world y. Cutting
+    // on the lifted world y hid anything seated on a painted hill taller than
+    // the cut the moment it committed (the radio-tower-on-a-hill vanish —
+    // ghost previews fine, the placed piece lands in this filter). A hilltop
+    // is still floor 0 up there.
     // Optimistic edits also hide here: a pending move's ORIGINALS vanish (the
     // solid ghost holds the building at its new spot), a pending delete's
     // pieces vanish this frame — both before the store batch lands.
-    const visible = displayPieces.filter((p) => p.y < cut && !pendingMove?.has(p.id) && !pendingDelete?.has(p.id));
+    const visible = displayPieces.filter((p) =>
+      p.y - groundTopAt(p.x, p.z) < cut && !pendingMove?.has(p.id) && !pendingDelete?.has(p.id));
     return visible.length === displayPieces.length ? displayPieces : visible;
-  }, [displayPieces, level, pendingMove, pendingDelete]);
+  }, [displayPieces, groundTopAt, level, pendingMove, pendingDelete]);
   const visiblePiecesRef = useRef(visiblePieces);
   visiblePiecesRef.current = visiblePieces;
 
