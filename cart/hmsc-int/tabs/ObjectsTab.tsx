@@ -118,29 +118,93 @@ function buildPrefabView(prefab: BuildPrefabDef): PrefabView {
   return { pieces, decomposed: GAME_BUILD.prefabs.decompose(prefab), baseDist: clamp(radius * 3.2 + 6, 8, 60), targetY: topY * 0.45 };
 }
 
-// The building's DATA: theme, piece count, and the decomposed semantic pieces
-// (catalog label · kind/material · cutout edit · local grid cell). This is the
-// see-through — a placed motel is still walls/doors/floor to every consumer.
+// The building's DATA as a BILL OF MATERIALS (BOM-0610, review §10.1). The old
+// panel mapped decompose() straight to one row per piece — 281 near-identical
+// rects, "the outer product instead of the factors" (user: "its all just
+// literal noise"). The BOM is the factored sum: one row per distinct
+// (kind, material, label) class with a count and its edit-variant tally, under
+// a rollup header (footprint, levels, distinct materials). The flat per-piece
+// dump survives only behind a "show all N" disclosure — it is debugging
+// output, not authoring surface. (Click-a-class→highlight in the inspect view
+// joins when the in-focus panel lands on the one renderer, §5.2.)
+
+type BomClass = { label: string; kind: string; material: string; count: number; edits: { edit: string; count: number }[] };
+type BomRollup = { classes: BomClass[]; tilesW: number; tilesD: number; levels: number; materials: string[] };
+
+function prefabBillOfMaterials(decomposed: DecomposedPiece[]): BomRollup {
+  const byClass = new Map<string, BomClass>();
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  const ys = new Set<number>();
+  const materials = new Set<string>();
+  for (const piece of decomposed) {
+    const key = `${piece.def.kind}|${piece.def.material}|${piece.def.label}`;
+    let cls = byClass.get(key);
+    if (!cls) { cls = { label: piece.def.label, kind: piece.def.kind, material: piece.def.material, count: 0, edits: [] }; byClass.set(key, cls); }
+    cls.count += 1;
+    if (piece.edit) {
+      const e = cls.edits.find((x) => x.edit === piece.edit);
+      if (e) e.count += 1; else cls.edits.push({ edit: piece.edit, count: 1 });
+    }
+    minX = Math.min(minX, piece.x); maxX = Math.max(maxX, piece.x);
+    minZ = Math.min(minZ, piece.z); maxZ = Math.max(maxZ, piece.z);
+    ys.add(piece.y);
+    materials.add(piece.def.material);
+  }
+  const classes = [...byClass.values()].sort((a, b) => b.count - a.count);
+  return {
+    classes,
+    tilesW: isFinite(minX) ? Math.round(maxX - minX) + 1 : 0,
+    tilesD: isFinite(minZ) ? Math.round(maxZ - minZ) + 1 : 0,
+    levels: ys.size,
+    materials: [...materials].sort(),
+  };
+}
+
 function PrefabInfo(props: { prefab: BuildPrefabDef; decomposed: DecomposedPiece[] }) {
   const { prefab, decomposed } = props;
+  const bom = useMemo(() => prefabBillOfMaterials(decomposed), [decomposed]);
+  // disclosure state is a twig (TWIGSWEEP-0610), like every other panel state
+  const [showAll, setShowAll] = useRouteTwigState('/objects-tab', 'bomShowAll', false);
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: accentFor('bg') }}>
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 9, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: accentFor('border') }}>
         <Text fontSize={10} color={accentFor('textDim')} style={{ fontFamily: 'monospace', fontWeight: 700 }}>theme</Text>
         <Text fontSize={10} color={accentFor('text')} style={{ fontFamily: 'monospace' }}>{prefab.theme}</Text>
         <Box style={{ flexGrow: 1 }} />
-        <Text fontSize={10} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>{`${decomposed.length} pieces`}</Text>
+        <Text fontSize={10} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>
+          {`${bom.tilesW}×${bom.tilesD} tiles · ${bom.levels} level${bom.levels === 1 ? '' : 's'} · ${decomposed.length} pieces`}
+        </Text>
       </Box>
       <ScrollView style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }} contentContainerStyle={{ paddingTop: 4, paddingBottom: 8 }}>
-        {decomposed.map((piece, i) => (
-          <Box key={`${piece.pieceId}-${i}`} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 3, paddingBottom: 3 }}>
-            <Text fontSize={11} color={accentFor('text')} style={{ fontFamily: 'monospace' }}>{piece.def.label}</Text>
-            <Text fontSize={9} color={accentFor('textDim')} style={{ fontFamily: 'monospace' }}>{`${piece.def.kind}·${piece.def.material}`}</Text>
+        {bom.classes.map((cls) => (
+          <Box key={`${cls.kind}-${cls.material}-${cls.label}`} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 4, paddingBottom: 4 }}>
+            <Text fontSize={12} color={accentFor('text')} style={{ fontFamily: 'monospace', fontWeight: 700 }}>{`${cls.count}×`}</Text>
+            <Text fontSize={11} color={accentFor('text')} style={{ fontFamily: 'monospace' }}>{cls.label}</Text>
+            <Text fontSize={9} color={accentFor('textDim')} style={{ fontFamily: 'monospace' }}>{`${cls.kind}·${cls.material}`}</Text>
+            <Box style={{ flexGrow: 1 }} />
+            {cls.edits.length ? (
+              <Text fontSize={9} color={accentFor('primary')} style={{ fontFamily: 'monospace' }}>
+                {cls.edits.map((e) => `${e.count} ${e.edit}`).join(' · ')}
+              </Text>
+            ) : null}
+          </Box>
+        ))}
+        <Box style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 2 }}>
+          <Text fontSize={9} color={accentFor('textDim')} style={{ fontFamily: 'monospace', fontWeight: 700 }}>materials</Text>
+          <Text fontSize={9} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>{bom.materials.join(' · ')}</Text>
+        </Box>
+        <Pressable onPress={() => setShowAll((v: boolean) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 4 }}>
+          <Icon name={showAll ? 'ChevronDown' : 'ChevronRight'} size={10} color={accentFor('textFaint')} />
+          <Text fontSize={9} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>{showAll ? `hide the ${decomposed.length}-piece listing` : `show all ${decomposed.length} pieces`}</Text>
+        </Pressable>
+        {showAll ? decomposed.map((piece, i) => (
+          <Box key={`${piece.pieceId}-${i}`} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingLeft: 20, paddingRight: 12, paddingTop: 2, paddingBottom: 2 }}>
+            <Text fontSize={10} color={accentFor('textDim')} style={{ fontFamily: 'monospace' }}>{piece.def.label}</Text>
             {piece.edit ? <Text fontSize={9} color={accentFor('primary')} style={{ fontFamily: 'monospace' }}>{piece.edit}</Text> : null}
             <Box style={{ flexGrow: 1 }} />
             <Text fontSize={9} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>{`(${piece.x},${piece.z})${piece.yawDegrees ? ` ${piece.yawDegrees}°` : ''}`}</Text>
           </Box>
-        ))}
+        )) : null}
       </ScrollView>
     </Box>
   );
