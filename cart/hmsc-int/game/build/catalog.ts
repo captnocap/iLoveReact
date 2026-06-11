@@ -117,6 +117,10 @@ function propMaterial(kind: PropKind): BuildMaterial {
     case 'table':
     case 'bench':
     case 'wallPainting':
+    case 'bedSingle':
+    case 'bedDouble':
+    case 'cupboard':
+    case 'telephonePole':
       return 'wood';
     case 'rock':
     case 'rockLarge':
@@ -141,6 +145,8 @@ function propCover(kind: PropKind): BuildGameplayTags['cover'] {
     case 'boulder':
     case 'rockSpire':
     case 'barrier':
+    case 'cupboard':
+    case 'fridge':
       return 'high';
     case 'rock':
     case 'rockSmall':
@@ -154,8 +160,15 @@ function propCover(kind: PropKind): BuildGameplayTags['cover'] {
     case 'bench':
     case 'planter':
     case 'chair':
+    case 'chairRed':
+    case 'chairBlue':
+    case 'chairGreen':
     case 'couch':
     case 'table':
+    case 'bedSingle':
+    case 'bedDouble':
+    case 'sink':
+    case 'oven':
     case 'treeOak':
     case 'treePine':
     case 'treeBirch':
@@ -181,9 +194,17 @@ const PROP_DEPTH_OVERRIDES: Partial<Record<PropKind, number>> = {
   barrier: 0.6,
   bench: 0.56,
   couch: 0.9,
+  bedSingle: 1.0,
+  bedDouble: 1.5,
+  cupboard: 0.5,
   // wall decor sits flush against its wall
   wallPainting: 0.16,
   ledLight: 0.12,
+  mirror: 0.12,
+  // appliances are deeper than their width-derived square
+  sink: 0.5,
+  oven: 0.62,
+  fridge: 0.72,
 };
 
 function propCatalogEntry(kind: PropKind): BuildPieceDef {

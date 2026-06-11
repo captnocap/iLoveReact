@@ -22,6 +22,9 @@ const SEGMENT_HALF_THICKNESS: Partial<Record<WorldProp['kind'], number>> = {
   barrier: 0.3,
   bench: 0.28,
   couch: 0.45,
+  bedSingle: 0.5,
+  bedDouble: 0.75,
+  cupboard: 0.25,
 };
 
 export function propFootprint(prop: WorldProp): PropFootprint | null {

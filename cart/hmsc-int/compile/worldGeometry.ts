@@ -777,16 +777,26 @@ function propParts(prop: WorldProp): PropPartSpec[] {
       ];
     }
     // ── furniture (mirror hmsc-int/render3d/props/Furniture.tsx) ──────────
-    case 'chair': {
+    case 'chair': case 'chairRed': case 'chairBlue': case 'chairGreen': {
+      // Painted variants share the chair body; wood keeps wood legs, painted
+      // chairs get dark metal legs (mirrors render3d/props/Furniture.tsx).
+      const paints: Record<string, Color> = {
+        chairRed: [0xb0 / 255, 0x3a / 255, 0x2e / 255],
+        chairBlue: [0x2e / 255, 0x6f / 255, 0xb0 / 255],
+        chairGreen: [0x3a / 255, 0x8f / 255, 0x4f / 255],
+      };
       const wood: Color = [0x8a / 255, 0x62 / 255, 0x40 / 255];
       const woodDark: Color = [0x6b / 255, 0x4a / 255, 0x2e / 255];
+      const metal: Color = [0x3a / 255, 0x3f / 255, 0x46 / 255];
+      const body = paints[prop.kind] ?? wood;
+      const legs = paints[prop.kind] ? metal : woodDark;
       return [
-        box([0.2, 0.225, 0.2], [0.05, 0.45, 0.05], woodDark),
-        box([-0.2, 0.225, 0.2], [0.05, 0.45, 0.05], woodDark),
-        box([0.2, 0.225, -0.2], [0.05, 0.45, 0.05], woodDark),
-        box([-0.2, 0.225, -0.2], [0.05, 0.45, 0.05], woodDark),
-        box([0, 0.45, 0], [0.5, 0.06, 0.5], wood),
-        box([0, 0.72, 0.23], [0.5, 0.5, 0.05], wood, [-6, 0, 0]),
+        box([0.2, 0.225, 0.2], [0.05, 0.45, 0.05], legs),
+        box([-0.2, 0.225, 0.2], [0.05, 0.45, 0.05], legs),
+        box([0.2, 0.225, -0.2], [0.05, 0.45, 0.05], legs),
+        box([-0.2, 0.225, -0.2], [0.05, 0.45, 0.05], legs),
+        box([0, 0.45, 0], [0.5, 0.06, 0.5], body),
+        box([0, 0.72, 0.23], [0.5, 0.5, 0.05], body, [-6, 0, 0]),
       ];
     }
     case 'couch': {
@@ -893,6 +903,149 @@ function propParts(prop: WorldProp): PropPartSpec[] {
         sphere([0, boxH + h * 0.22, 0], [half * 0.84, h * 0.6, half * 0.84], leafMid),
         sphere([-half * 0.45, boxH + h * 0.38, half * 0.15], [h * 0.12, h * 0.12, h * 0.12], [0xd6 / 255, 0x5d / 255, 0x8a / 255]),
         sphere([half * 0.4, boxH + h * 0.34, -half * 0.2], [h * 0.11, h * 0.11, h * 0.11], [0xe8 / 255, 0xc8 / 255, 0x4a / 255]),
+      ];
+    }
+    // ── household (mirror hmsc-int/render3d/props/Furniture.tsx) ──────────
+    case 'bedSingle': case 'bedDouble': {
+      const double = prop.kind === 'bedDouble';
+      const w = def.footprintRadiusMeters * 2;
+      const d = double ? 1.5 : 1.0;
+      const woodDark: Color = [0x6b / 255, 0x4a / 255, 0x2e / 255];
+      const wood: Color = [0x8a / 255, 0x62 / 255, 0x40 / 255];
+      const linen: Color = [0xec / 255, 0xe8 / 255, 0xdd / 255];
+      const porcelain: Color = [0xee / 255, 0xf0 / 255, 0xf2 / 255];
+      const blanket: Color = double ? [0x7d / 255, 0x3b / 255, 0x4a / 255] : [0x3a / 255, 0x7d / 255, 0x80 / 255];
+      const parts: PropPartSpec[] = [
+        box([0, 0.15, 0], [w, 0.3, d], woodDark),
+        box([0, 0.39, 0], [w * 0.97, 0.18, d * 0.94], linen),
+        box([-w * 0.16, 0.49, 0], [w * 0.62, 0.06, d * 0.96], blanket),
+        box([w * 0.49, def.heightMeters / 2, 0], [0.07, def.heightMeters, d], wood),
+      ];
+      if (double) {
+        parts.push(box([w * 0.36, 0.5, -d * 0.22], [w * 0.2, 0.1, d * 0.36], porcelain));
+        parts.push(box([w * 0.36, 0.5, d * 0.22], [w * 0.2, 0.1, d * 0.36], porcelain));
+      } else {
+        parts.push(box([w * 0.36, 0.5, 0], [w * 0.2, 0.1, d * 0.55], porcelain));
+      }
+      return parts;
+    }
+    case 'cupboard': {
+      const h = def.heightMeters;
+      const w = def.footprintRadiusMeters * 2;
+      const d = 0.5;
+      const wood: Color = [0x8a / 255, 0x62 / 255, 0x40 / 255];
+      const woodDark: Color = [0x6b / 255, 0x4a / 255, 0x2e / 255];
+      const metal: Color = [0x3a / 255, 0x3f / 255, 0x46 / 255];
+      return [
+        box([0, 0.04, 0], [w, 0.08, d], woodDark),
+        box([0, h / 2, 0], [w, h - 0.12, d - 0.06], wood),
+        box([0, h - 0.03, 0], [w + 0.04, 0.06, d], woodDark),
+        box([-w * 0.24, h * 0.52, -d / 2 + 0.015], [w * 0.44, h * 0.84, 0.02], woodDark),
+        box([w * 0.24, h * 0.52, -d / 2 + 0.015], [w * 0.44, h * 0.84, 0.02], woodDark),
+        box([-w * 0.06, h * 0.55, -d / 2 - 0.005], [0.035, 0.035, 0.035], metal),
+        box([w * 0.06, h * 0.55, -d / 2 - 0.005], [0.035, 0.035, 0.035], metal),
+      ];
+    }
+    case 'mirror': {
+      const cy = 1.18;
+      return [
+        box([0, cy, -0.025], [0.62, 1.5, 0.04], [0x8c / 255, 0x92 / 255, 0x99 / 255]),
+        box([0, cy, -0.05], [0.54, 1.42, 0.012], [0xbc / 255, 0xd6 / 255, 0xe2 / 255]),
+        box([0.09, cy + 0.04, -0.058], [0.07, 1.25, 0.006], [0xe8 / 255, 0xf4 / 255, 0xfa / 255], [0, 0, 18]),
+      ];
+    }
+    case 'sink': {
+      const h = def.heightMeters;
+      const porcelain: Color = [0xee / 255, 0xf0 / 255, 0xf2 / 255];
+      const fixture: Color = [0xaa / 255, 0xb0 / 255, 0xb6 / 255];
+      return [
+        cylinder8([0, h * 0.39, 0], 0.09, h * 0.78, porcelain),
+        sphere([0, h * 0.82, 0], [0.54, 0.23, 0.46], porcelain),
+        box([0, h * 0.88, 0], [0.56, 0.04, 0.46], porcelain),
+        cylinder8([0, h * 0.96, 0.16], 0.022, 0.16, fixture),
+        cylinder8([0, h + 0.03, 0.09], 0.018, 0.14, fixture, [90, 0, 0]),
+      ];
+    }
+    case 'oven': {
+      const h = def.heightMeters;
+      const w = def.footprintRadiusMeters * 2;
+      const d = 0.62;
+      const body: Color = [0xd6 / 255, 0xd9 / 255, 0xdc / 255];
+      const dark: Color = [0xaa / 255, 0xb0 / 255, 0xb6 / 255];
+      const black: Color = [0x22 / 255, 0x26 / 255, 0x2b / 255];
+      const metal: Color = [0x3a / 255, 0x3f / 255, 0x46 / 255];
+      return [
+        box([0, h / 2, 0], [w, h, d], body),
+        box([0, h, 0], [w, 0.025, d], black),
+        cylinder8([-w * 0.22, h + 0.012, -0.14], 0.085, 0.02, [0x33 / 255, 0x37 / 255, 0x3c / 255]),
+        cylinder8([w * 0.22, h + 0.012, -0.14], 0.085, 0.02, [0x33 / 255, 0x37 / 255, 0x3c / 255]),
+        cylinder8([-w * 0.22, h + 0.012, 0.14], 0.085, 0.02, [0x33 / 255, 0x37 / 255, 0x3c / 255]),
+        cylinder8([w * 0.22, h + 0.012, 0.14], 0.085, 0.02, [0x33 / 255, 0x37 / 255, 0x3c / 255]),
+        box([0, h * 0.42, -d / 2 + 0.005], [w * 0.86, h * 0.5, 0.02], dark),
+        box([0, h * 0.45, -d / 2 - 0.005], [w * 0.6, h * 0.26, 0.015], black),
+        box([0, h * 0.72, -d / 2 - 0.02], [w * 0.8, 0.035, 0.035], metal),
+      ];
+    }
+    case 'fridge': {
+      const h = def.heightMeters;
+      const w = def.footprintRadiusMeters * 2;
+      const d = 0.72;
+      const seamY = h * 0.68;
+      const body: Color = [0xd6 / 255, 0xd9 / 255, 0xdc / 255];
+      const dark: Color = [0xaa / 255, 0xb0 / 255, 0xb6 / 255];
+      const black: Color = [0x22 / 255, 0x26 / 255, 0x2b / 255];
+      return [
+        box([0, 0.04, 0], [w * 0.9, 0.08, d * 0.9], black),
+        box([0, h / 2 + 0.04, 0], [w, h - 0.08, d], body),
+        box([0, seamY, -d / 2 + 0.002], [w, 0.02, 0.02], dark),
+        box([-w * 0.34, seamY - h * 0.18, -d / 2 - 0.025], [0.035, h * 0.3, 0.035], dark),
+        box([-w * 0.34, seamY + h * 0.1, -d / 2 - 0.025], [0.035, h * 0.14, 0.035], dark),
+      ];
+    }
+    case 'computer': {
+      const shell: Color = [0xcf / 255, 0xc8 / 255, 0xb4 / 255];
+      const shellDark: Color = [0xb8 / 255, 0xb2 / 255, 0xa0 / 255];
+      const screen: Color = [0x2c / 255, 0x4a / 255, 0x66 / 255];
+      return [
+        box([-0.05, 0.32, 0.06], [0.36, 0.3, 0.3], shell),
+        box([-0.05, 0.32, -0.095], [0.3, 0.24, 0.012], screen),
+        box([-0.05, 0.14, 0.06], [0.12, 0.06, 0.12], shellDark),
+        box([-0.05, 0.1, 0.06], [0.24, 0.025, 0.2], shellDark),
+        box([-0.05, 0.105, -0.21], [0.34, 0.025, 0.12], [0xd9 / 255, 0xd3 / 255, 0xc2 / 255], [4, 0, 0]),
+        box([0.24, 0.27, 0.02], [0.16, 0.42, 0.38], [0xc4 / 255, 0xbd / 255, 0xa9 / 255]),
+        box([0.24, 0.38, -0.175], [0.1, 0.03, 0.012], [0x22 / 255, 0x26 / 255, 0x2b / 255]),
+      ];
+    }
+    // ── utility + sport (mirror render3d/props/StreetFurniture.tsx) ───────
+    case 'telephonePole': {
+      const h = def.heightMeters;
+      const r = def.footprintRadiusMeters;
+      const wood: Color = [0x4f / 255, 0x3d / 255, 0x2a / 255];
+      const woodDark: Color = [0x3e / 255, 0x30 / 255, 0x21 / 255];
+      const insulator: Color = [0x9a / 255, 0xa8 / 255, 0xb5 / 255];
+      const parts: PropPartSpec[] = [cylinder8([0, h / 2, 0], r * 0.8, h, wood)];
+      for (const [y, width] of [[h * 0.92, 1.7], [h * 0.82, 1.3]] as [number, number][]) {
+        parts.push(box([0, y, 0], [width, 0.09, 0.09], woodDark));
+        parts.push(cylinder8([-width * 0.42, y + 0.08, 0], 0.03, 0.1, insulator));
+        parts.push(cylinder8([width * 0.42, y + 0.08, 0], 0.03, 0.1, insulator));
+      }
+      return parts;
+    }
+    case 'basketballHoop': {
+      const h = def.heightMeters;
+      const rimY = 3.05;
+      const boardZ = -0.35;
+      const pole: Color = [0x3a / 255, 0x3f / 255, 0x46 / 255];
+      const board: Color = [0xe8 / 255, 0xea / 255, 0xec / 255];
+      const rim: Color = [0xd3 / 255, 0x72 / 255, 0x2c / 255];
+      return [
+        cylinder8([0, (h - 0.4) / 2, 0], 0.07, h - 0.4, pole),
+        box([0, h - 0.45, boardZ / 2], [0.06, 0.06, 0.42], pole, [14, 0, 0]),
+        box([0, rimY + 0.32, boardZ], [1.1, 0.75, 0.04], board),
+        box([0, rimY + 0.2, boardZ - 0.018], [0.45, 0.32, 0.015], rim),
+        box([0, rimY + 0.19, boardZ - 0.02], [0.34, 0.22, 0.018], board),
+        // No torus instance shape — the rim is a thin disc.
+        cylinder16([0, rimY, boardZ - 0.26], 0.245, 0.035, rim),
       ];
     }
     default: {

@@ -62,9 +62,22 @@ const PROP_MODELS: Record<PropKind, PropModel> = {
   wallPainting: WallDecor,
   ledLight: WallDecor,
   chair: Furniture,
+  chairRed: Furniture,
+  chairBlue: Furniture,
+  chairGreen: Furniture,
   couch: Furniture,
   table: Furniture,
   floorLamp: Furniture,
+  bedSingle: Furniture,
+  bedDouble: Furniture,
+  cupboard: Furniture,
+  sink: Furniture,
+  oven: Furniture,
+  fridge: Furniture,
+  computer: Furniture,
+  mirror: WallDecor,
+  telephonePole: StreetFurniture,
+  basketballHoop: StreetFurniture,
 };
 
 // One placed prop, drawn by its kind's model at its anchor + yaw. Memoized on

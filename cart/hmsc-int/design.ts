@@ -423,9 +423,24 @@ export type PropKind =
   | 'ledLight'
   // furniture
   | 'chair'
+  | 'chairRed'
+  | 'chairBlue'
+  | 'chairGreen'
   | 'couch'
   | 'table'
-  | 'floorLamp';
+  | 'floorLamp'
+  // household (bedroom/kitchen/bathroom)
+  | 'bedSingle'
+  | 'bedDouble'
+  | 'cupboard'
+  | 'mirror'
+  | 'sink'
+  | 'oven'
+  | 'fridge'
+  | 'computer'
+  // utility + sport
+  | 'telephonePole'
+  | 'basketballHoop';
 
 // A traffic-control prop tells an approaching vehicle to stop, slow, or go. A
 // stop sign is always 'stop'; a traffic light cycles through all three. The

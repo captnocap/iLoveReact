@@ -11,6 +11,7 @@ import { at } from './place';
 // wallPainting — a framed landscape canvas at eye height.
 // ledLight — a vertical glowing tube on two mounts (bright emissive-read color;
 // Scene3D materials are unlit colors, so saturation IS the glow).
+// mirror — a tall framed glass with a diagonal glint stripe.
 
 const FRAME = '#3d2b1c';
 const FRAME_LIGHT = '#5a4128';
@@ -19,6 +20,9 @@ const CANVAS_LAND = '#5d8a4a';
 const CANVAS_SUN = '#f2d27a';
 const LED_TUBE = '#5ff2ff';
 const LED_MOUNT = '#2a2d33';
+const MIRROR_FRAME = '#8c9299';
+const MIRROR_GLASS = '#bcd6e2';
+const MIRROR_GLINT = '#e8f4fa';
 
 function Panel(props: { prop: WorldProp; local: V3; width: number; height: number; depth: number; material: string }) {
   return (
@@ -67,6 +71,30 @@ function LedLight(props: { prop: WorldProp }) {
   );
 }
 
+function Mirror(props: { prop: WorldProp }) {
+  const cy = 1.18; // glass center; the frame spans roughly 0.45..1.9m
+  const yaw = props.prop.yawDegrees;
+  return (
+    <>
+      {/* Metal frame + glass */}
+      <Panel prop={props.prop} local={[0, cy, -0.025]} width={0.62} height={1.5} depth={0.04} material={MIRROR_FRAME} />
+      <Panel prop={props.prop} local={[0, cy, -0.05]} width={0.54} height={1.42} depth={0.012} material={MIRROR_GLASS} />
+      {/* Diagonal glint stripe */}
+      <Scene3D.Mesh
+        geometry={Geometry.Box}
+        params={{ width: 0.07, height: 1.25, depth: 0.006 }}
+        material={MIRROR_GLINT}
+        position={at(props.prop, [0.09, cy + 0.04, -0.058])}
+        rotation={[0, yaw, 18]}
+      />
+    </>
+  );
+}
+
 export function WallDecor(props: { prop: WorldProp }) {
-  return props.prop.kind === 'ledLight' ? <LedLight prop={props.prop} /> : <WallPainting prop={props.prop} />;
+  switch (props.prop.kind) {
+    case 'ledLight': return <LedLight prop={props.prop} />;
+    case 'mirror': return <Mirror prop={props.prop} />;
+    default: return <WallPainting prop={props.prop} />;
+  }
 }

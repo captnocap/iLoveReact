@@ -440,6 +440,136 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     tileKind: 'wall',
     trafficControl: 'none',
   },
+  // Colored chair variants — same body as 'chair', painted by kind (the model
+  // resolves its palette from the kind, like the rock and bush families).
+  chairRed: {
+    kind: 'chairRed',
+    label: 'Red Chair',
+    solid: true,
+    footprintRadiusMeters: 0.3,
+    heightMeters: 0.95,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  chairBlue: {
+    kind: 'chairBlue',
+    label: 'Blue Chair',
+    solid: true,
+    footprintRadiusMeters: 0.3,
+    heightMeters: 0.95,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  chairGreen: {
+    kind: 'chairGreen',
+    label: 'Green Chair',
+    solid: true,
+    footprintRadiusMeters: 0.3,
+    heightMeters: 0.95,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+
+  // ── household (bedroom / kitchen / bathroom) ───────────────────────────────
+  bedSingle: {
+    kind: 'bedSingle',
+    label: 'Single Bed',
+    // 2.1m long along local X, 1.0m wide — yaw-aware thin AABB (world/props.ts).
+    solid: true,
+    footprintRadiusMeters: 1.05,
+    heightMeters: 0.9,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  bedDouble: {
+    kind: 'bedDouble',
+    label: 'Double Bed',
+    // 2.1m long along local X, 1.5m wide — yaw-aware thin AABB (world/props.ts).
+    solid: true,
+    footprintRadiusMeters: 1.05,
+    heightMeters: 0.95,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  cupboard: {
+    kind: 'cupboard',
+    label: 'Cupboard',
+    // 1.0m wide, 0.5m deep — yaw-aware thin AABB (world/props.ts).
+    solid: true,
+    footprintRadiusMeters: 0.5,
+    heightMeters: 1.9,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  mirror: {
+    kind: 'mirror',
+    label: 'Mirror',
+    // Wall decor: anchor at the wall base, the glass hangs at height.
+    solid: true,
+    footprintRadiusMeters: 0.06,
+    heightMeters: 1.9,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  sink: {
+    kind: 'sink',
+    label: 'Sink',
+    solid: true,
+    footprintRadiusMeters: 0.3,
+    heightMeters: 0.9,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  oven: {
+    kind: 'oven',
+    label: 'Oven',
+    solid: true,
+    footprintRadiusMeters: 0.35,
+    heightMeters: 0.95,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  fridge: {
+    kind: 'fridge',
+    label: 'Fridge',
+    solid: true,
+    footprintRadiusMeters: 0.4,
+    heightMeters: 1.9,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  computer: {
+    kind: 'computer',
+    label: 'Computer',
+    // A desktop setup (monitor + keyboard + tower) at its anchor — drop it on
+    // any raised surface piece, or the floor.
+    solid: true,
+    footprintRadiusMeters: 0.3,
+    heightMeters: 0.55,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+
+  // ── utility + sport ────────────────────────────────────────────────────────
+  telephonePole: {
+    kind: 'telephonePole',
+    label: 'Telephone Pole',
+    solid: true,
+    footprintRadiusMeters: 0.16,
+    heightMeters: 8.5,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
+  basketballHoop: {
+    kind: 'basketballHoop',
+    label: 'Basketball Hoop',
+    // Street hoop: pole + backboard + rim at the regulation-ish 3.05m.
+    solid: true,
+    footprintRadiusMeters: 0.25,
+    heightMeters: 3.8,
+    tileKind: 'wall',
+    trafficControl: 'none',
+  },
 };
 
 export const PROP_KINDS = Object.keys(PROP_KIND_DEFINITIONS) as PropKind[];
