@@ -30,12 +30,12 @@ import { TILE_KINDS, tileKindDefinition } from './world/tileKinds';
 import { TILE_UNITS, DOT_M, DOTS_PER_TILE, HEIGHT_LIMIT, stampBrush, stampRamp, stampSlopeSegment, brushProfile, clearField, type BrushProfile } from './heightData';
 import { gradeHeightField, strokeGradeProfile } from './roadGrade';
 import { footprintDistance, forEachFootprintCell, type BrushMode, type BrushShape } from './brush';
-import { BrushRail, type BrushRailSettings } from './BrushRail';
-import { LayerBtn, MiniStepper, ToolBtn } from './railAtoms';
+import type { BrushRailSettings } from './BrushRail';
+import { LayerBtn } from './railAtoms';
+import { PainterRail } from './PainterRail';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
 import { applyMergeGesture, clampProfile, laneFlowArrows, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, strokeWireFlip, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
-import { RoadRail } from './RoadRail';
 import { ChunkSurface } from './ChunkSurface';
 import type { PainterEmphasis } from './painterSurface';
 import { resolvePainterBehavior } from './painterBehavior';
@@ -284,128 +284,6 @@ function det3(
 }
 
 const ROT_STEP = 15; // degrees per rotate tap
-
-// The spawn↔save link picker — shown only when a SAVE marker is selected. Lists
-// every spawn marker (the manual pairing target) so the author chooses which spawn
-// this save reappears the player at; clicking the armed one again unpairs it.
-function SaveLinkPicker(props: { sel: Placement; place: PlaceProps }) {
-  const spawns = props.place.items.filter((p) => p.cat === 'marker' && p.kind === 'spawn');
-  const armed = props.sel.spawnId;
-  const pick = (id: string) => props.place.onUpdate(props.sel.id, { spawnId: armed === id ? undefined : id });
-  return (
-    <Box style={{ gap: 4 }}>
-      <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
-      <Text fontSize={8} color="#a855f7" style={{ fontFamily: 'monospace', fontWeight: 700 }}>RESPAWN AT</Text>
-      {spawns.length === 0 ? (
-        <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>place a spawn first</Text>
-      ) : spawns.map((sp, i) => {
-        const on = armed === sp.id;
-        return (
-          <Pressable key={sp.id} onPress={() => pick(sp.id)} style={{ alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: on ? '#22c55e' : '#334155', backgroundColor: on ? '#0f3d2e' : '#0f1a2e' }}>
-            <Text fontSize={8} color={on ? '#86efac' : '#cbd5e1'} style={{ fontFamily: 'monospace', fontWeight: on ? 700 : 500 }}>{`spawn ${i + 1}`}</Text>
-          </Pressable>
-        );
-      })}
-    </Box>
-  );
-}
-
-// Place rail — controls for the SELECTED placement (conditional on selection).
-function PlaceRail(props: { tool: Tool; onTool: (t: Tool) => void; sel: Placement | null; buildSel: MapBuildFootprint | null; place: PlaceProps }) {
-  const sel = props.sel;
-  const buildSel = props.buildSel;
-  const active = props.place.active;
-  const recent = (() => {
-    const out: Placement[] = [];
-    const seen = new Set<string>();
-    for (let i = props.place.items.length - 1; i >= 0 && out.length < 8; i--) {
-      const p = props.place.items[i];
-      const k = `${p.cat}:${p.kind}`;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(p);
-    }
-    return out;
-  })();
-  const toolRow = (
-    <Box style={{ gap: 5 }}>
-      <Box style={{ flexDirection: 'row', gap: 4 }}>
-        <ToolBtn icon="MousePointer" active={props.tool === 'pointer'} onPress={() => props.onTool('pointer')} />
-        <ToolBtn icon="Brush" active={props.tool === 'brush'} onPress={() => props.onTool('brush')} />
-      </Box>
-      {active ? (
-        <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 4, paddingBottom: 4, borderTopWidth: 1, borderTopColor: '#1e293b' }}>
-          <Box style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: active.color }} />
-          <Text fontSize={8} color="#cbd5e1" style={{ flexGrow: 1, minWidth: 0, fontFamily: 'monospace', fontWeight: 700 }} numberOfLines={1}>{active.label}</Text>
-        </Box>
-      ) : (
-        <Text fontSize={8} color="#475569" style={{ fontFamily: 'monospace' }}>pick an object in the Objects tab</Text>
-      )}
-      {active ? (
-        <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <ToolBtn icon="RotateCcw" active={false} onPress={() => props.place.onRotateBrush(-ROT_STEP)} />
-          <Box style={{ flexGrow: 1, alignItems: 'center', borderWidth: 1, borderColor: '#27364a', borderRadius: 3, paddingTop: 4, paddingBottom: 4, backgroundColor: '#0f1a2e' }}>
-            <Text fontSize={8} color="#cbd5e1" style={{ fontFamily: 'monospace', fontWeight: 700 }}>{`${((active.rotation % 360) + 360) % 360}deg`}</Text>
-          </Box>
-          <ToolBtn icon="RefreshCw" active={false} onPress={() => props.place.onRotateBrush(ROT_STEP)} />
-        </Box>
-      ) : null}
-      {recent.length ? (
-        <Box style={{ gap: 4 }}>
-          <Text fontSize={7} color="#64748b" style={{ fontFamily: 'monospace', letterSpacing: 0.5 }}>recent</Text>
-          <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-            {recent.map((p) => {
-              const on = active?.cat === p.cat && active?.kind === p.kind;
-              return (
-                <Pressable key={`${p.cat}:${p.kind}`} onPress={() => { props.place.onArm(p.cat, p.kind); props.onTool('brush'); }} style={{ width: '48%', minHeight: 30, paddingLeft: 4, paddingRight: 4, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: on ? 2 : 1, borderColor: on ? '#f8fafc' : '#334155', backgroundColor: on ? '#1e293b' : '#0f1a2e' }}>
-                  <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Box style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: p.color }} />
-                    <Text fontSize={7} color={on ? '#f8fafc' : '#94a3b8'} style={{ flexGrow: 1, minWidth: 0, fontFamily: 'monospace', fontWeight: on ? 700 : 500 }} numberOfLines={1}>{p.label}</Text>
-                  </Box>
-                </Pressable>
-              );
-            })}
-          </Box>
-        </Box>
-      ) : null}
-    </Box>
-  );
-  if (!sel && !buildSel) {
-    return toolRow;
-  }
-  if (buildSel) {
-    return (
-      <Box style={{ gap: 6 }}>
-        {toolRow}
-        <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
-        <Text fontSize={8} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{buildSel.label}</Text>
-        <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>{`${buildSel.pieceIds.length} build pieces`}</Text>
-        <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-          <ToolBtn icon="Trash2" active={false} onPress={() => props.place.onDeleteBuild?.(buildSel.id)} />
-        </Box>
-      </Box>
-    );
-  }
-  const set = (patch: Partial<Placement>) => props.place.onUpdate(sel.id, patch);
-  return (
-    <Box style={{ gap: 6 }}>
-      {toolRow}
-      <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
-      <Text fontSize={8} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{sel.label}</Text>
-      <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-        <ToolBtn icon="RotateCcw" active={false} onPress={() => set({ rotation: sel.rotation - ROT_STEP })} />
-        <ToolBtn icon="RefreshCw" active={false} onPress={() => set({ rotation: sel.rotation + ROT_STEP })} />
-        <ToolBtn icon="Copy" active={false} onPress={() => props.place.onClone(sel.id)} />
-        <ToolBtn icon="Trash2" active={false} onPress={() => props.place.onDelete(sel.id)} />
-      </Box>
-      <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>{`${((sel.rotation % 360) + 360) % 360}°`}</Text>
-      <Pressable onPress={() => set({ locked: !sel.locked })} style={{ alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: sel.locked ? '#22c55e' : '#334155', backgroundColor: sel.locked ? '#0f3d2e' : '#0f1a2e' }}>
-        <Text fontSize={8} color={sel.locked ? '#86efac' : '#cbd5e1'} style={{ fontWeight: 700 }}>{sel.locked ? 'LOCKED' : 'lock'}</Text>
-      </Pressable>
-      {sel.cat === 'marker' && sel.kind === 'save' ? <SaveLinkPicker sel={sel} place={props.place} /> : null}
-    </Box>
-  );
-}
 
 // Chunk focus filter — docked in a thin right-edge GUTTER (not a floating panel)
 // so it never eats the centre working area no matter how many chunks exist. A
@@ -1985,48 +1863,46 @@ export function PaintCanvas(props: {
       {/* The visible brush footprint — only while a brush is the active tool. */}
       {showBrush ? <BrushCursor sink={brushSink} /> : null}
 
-      {/* Left rail — conditional on the active layer (absolute overlay, on top). */}
+      {/* Left rail — ONE PainterRail of composable cards (absolute overlay, on
+          top): universal ToolCard + the active target's cards + the selection
+          inspector. The rail never swaps wholesale on a target change. */}
       <Box style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: RAIL_W, backgroundColor: '#0b1320ee', borderRightWidth: 1, borderRightColor: '#1e293b', paddingLeft: 5, paddingRight: 5, paddingTop: 6, paddingBottom: 6 }}>
-        {layer === 'paint' || layer === 'height' || layer === 'zone' ? (
-          <BrushRail
-            layer={layer}
-            tool={tool}
-            tile={tile}
-            onTool={props.onTool}
-            onTile={props.onTile}
-            brush={{ size: brushSize, mode: layer === 'height' ? brushMode : activeBrushMode, shape: brushShape, profile: heightProfile, centerZ, heightMode, rampMin, rampMax, rampWide, rampLong, rampAngle, smoothStrength }}
-            onBrushChange={setBrushPatch}
-            onClearHeights={clearHeights}
-            zones={zones}
-            activeZone={activeZone}
-            onActiveZone={setActiveZone}
-            onAddZone={addZone}
-            onUpdateZone={updateZone}
-            onDeleteZone={deleteZone}
-          />
-        ) : null}
-        {layer === 'place' ? <PlaceRail tool={tool} onTool={props.onTool} sel={selPlacement} buildSel={selBuildPlacement} place={place} /> : null}
-        {layer === 'road' ? (
-          <RoadRail
-            tool={tool}
-            onTool={props.onTool}
-            profile={selRoad ? selRoad.profile : roadProfile}
-            onProfile={editActiveProfile}
-            editingLabel={selRoad ? `Road ${roads.indexOf(selRoad) + 1}` : null}
-            draftCount={roadDraft.length}
-            onFinish={commitRoadDraft}
-            onCancel={cancelRoadDraft}
-            onUndoPoint={undoRoadPoint}
-            roads={roads}
-            selId={selRoadId}
-            onSelect={setSelRoadId}
-            onDelete={deleteRoad}
-            wires={showRoadWires}
-            onWires={setShowRoadWires}
-            arrows={showFlowArrows}
-            onArrows={setShowFlowArrows}
-          />
-        ) : null}
+        <PainterRail
+          tool={tool}
+          onTool={props.onTool}
+          target={layer}
+          tile={tile}
+          onTile={props.onTile}
+          brush={{ size: brushSize, mode: activeBrushMode, shape: brushShape, profile: heightProfile, centerZ, heightMode, rampMin, rampMax, rampWide, rampLong, rampAngle, smoothStrength }}
+          onBrushChange={setBrushPatch}
+          onClearHeights={clearHeights}
+          zones={zones}
+          activeZone={activeZone}
+          onActiveZone={setActiveZone}
+          onAddZone={addZone}
+          onUpdateZone={updateZone}
+          onDeleteZone={deleteZone}
+          place={place}
+          selPlacement={selPlacement}
+          selBuild={selBuildPlacement}
+          road={{
+            profile: selRoad ? selRoad.profile : roadProfile,
+            onProfile: editActiveProfile,
+            editingLabel: selRoad ? `Road ${roads.indexOf(selRoad) + 1}` : null,
+            draftCount: roadDraft.length,
+            onFinish: commitRoadDraft,
+            onCancel: cancelRoadDraft,
+            onUndoPoint: undoRoadPoint,
+            roads,
+            selId: selRoadId,
+            onSelect: setSelRoadId,
+            onDelete: deleteRoad,
+            wires: showRoadWires,
+            onWires: setShowRoadWires,
+            arrows: showFlowArrows,
+            onArrows: setShowFlowArrows,
+          }}
+        />
       </Box>
 
       {/* Right edge: chunk focus gutter (thin dock, keeps the centre clear). */}

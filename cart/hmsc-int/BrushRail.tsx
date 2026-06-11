@@ -1,14 +1,16 @@
-import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
+// BrushRail.tsx — the brush-target CARDS of the painter rail (PAINTER-0610).
+// The monolithic per-layer BrushRail is gone; PainterRail.tsx composes these
+// sections (tile palette / terrain controls / zone list) under one ToolCard.
+
+import { Box, Pressable, Text, TextInput } from '@reactjit/primitives';
 import type { TileKind, ZoneFlag } from './design';
 import { TILE_KINDS, tileKindDefinition } from './world/tileKinds';
 import { ZONE_FLAGS } from './world/zones';
 import { HEIGHT_LIMIT, type BrushProfile } from './heightData';
 import type { BrushMode, BrushShape } from './brush';
-import { ChipGrid, MiniStepper, RailLabel, RailSlider, SizeSlider, Swatch, ToolBtn, RAIL_CELL } from './railAtoms';
+import { ChipGrid, MiniStepper, RailLabel, RailSlider, Swatch, RAIL_CELL } from './railAtoms';
 import type { ZoneDef } from './zoneData';
 
-type BrushLayer = 'paint' | 'height' | 'zone';
-type Tool = 'pointer' | 'brush' | 'eraser';
 type HeightMode = 'brush' | 'ramp' | 'slope' | 'smooth';
 
 export type BrushRailSettings = {
@@ -26,7 +28,6 @@ export type BrushRailSettings = {
   smoothStrength: number;
 };
 
-const SIZE_MIN = 0, SIZE_MAX = 40;
 const Z_STEP = 1;
 const RAMP_SIZE_MIN = 1, RAMP_SIZE_MAX = 120, RAMP_STEP = 1, ANGLE_STEP = 15;
 const FLAG_TAG: Record<ZoneFlag, string> = { private: 'PV', safe: 'SF', hostile: 'HO', restricted: 'RS', interior: 'IN' };
@@ -39,43 +40,13 @@ function wrapAngle(deg: number): number {
   return ((Math.round(deg) % 360) + 360) % 360;
 }
 
-const FOOTPRINTS: { id: BrushShape | 'ramp' | 'slope' | 'smooth'; label: string; hint: string }[] = [
-  { id: 'circle', label: 'circle', hint: 'o' },
-  { id: 'square', label: 'square', hint: '[]' },
-  { id: 'diamond', label: 'diamond', hint: '<>' },
-  { id: 'ramp', label: 'ramp', hint: '/' },
-  { id: 'slope', label: 'slope', hint: '~' },
-  { id: 'smooth', label: 'smooth', hint: 's' },
-];
-
 const PROFILES: { id: BrushProfile; label: string; hint: string }[] = [
   { id: 'cone', label: 'cone', hint: '^' },
   { id: 'flat', label: 'flat', hint: '-' },
   { id: 'dome', label: 'dome', hint: ')' },
 ];
 
-function ModeBar(props: {
-  layer: BrushLayer;
-  tool: Tool;
-  mode: BrushMode;
-  heightMode: HeightMode;
-  onTool: (t: Tool) => void;
-  onPatch: (p: Partial<BrushRailSettings>) => void;
-}) {
-  const setPaint = () => { props.onPatch({ mode: 'paint' }); if (props.layer !== 'height') props.onTool('brush'); };
-  const setErase = () => { props.onPatch({ mode: 'erase', heightMode: props.layer === 'height' ? 'brush' : props.heightMode }); if (props.layer !== 'height') props.onTool('brush'); };
-  const setSelect = () => props.onTool('pointer');
-  const isSelect = props.layer !== 'height' && props.tool === 'pointer';
-  return (
-    <Box style={{ flexDirection: 'row', gap: 5 }}>
-      {props.layer !== 'height' ? <ToolBtn icon="MousePointer" active={isSelect} onPress={setSelect} /> : null}
-      <ToolBtn icon="Brush" active={!isSelect && props.mode === 'paint'} onPress={setPaint} />
-      <ToolBtn icon="Eraser" active={!isSelect && props.mode === 'erase'} onPress={setErase} />
-    </Box>
-  );
-}
-
-function PaintSection(props: { tile: TileKind; onTile: (k: TileKind) => void; onPaint: () => void }) {
+export function PaintSection(props: { tile: TileKind; onTile: (k: TileKind) => void; onPaint: () => void }) {
   return (
     <Box style={{ gap: 5 }}>
       <RailLabel text="tiles" />
@@ -136,7 +107,7 @@ function SmoothSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<B
   );
 }
 
-function HeightSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void; onClear: () => void }) {
+export function HeightSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void; onClear: () => void }) {
   const b = props.brush;
   const dim = b.mode === 'erase';
   return (
@@ -171,7 +142,7 @@ function HeightSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<B
   );
 }
 
-function ZoneSection(props: {
+export function ZoneSection(props: {
   zones: ZoneDef[];
   activeZone: number;
   onActiveZone: (i: number) => void;
@@ -216,44 +187,3 @@ function ZoneSection(props: {
   );
 }
 
-export function BrushRail(props: {
-  layer: BrushLayer;
-  tool: Tool;
-  tile: TileKind;
-  onTool: (t: Tool) => void;
-  onTile: (k: TileKind) => void;
-  brush: BrushRailSettings;
-  onBrushChange: (patch: Partial<BrushRailSettings>) => void;
-  onClearHeights: () => void;
-  zones: ZoneDef[];
-  activeZone: number;
-  onActiveZone: (i: number) => void;
-  onAddZone: () => void;
-  onUpdateZone: (i: number, patch: Partial<ZoneDef>) => void;
-  onDeleteZone: (i: number) => void;
-}) {
-  const b = props.brush;
-  const shapeItems = props.layer === 'height' ? FOOTPRINTS : FOOTPRINTS.filter((it) => it.id !== 'ramp' && it.id !== 'slope' && it.id !== 'smooth');
-  const shapeValue = props.layer === 'height' && b.heightMode === 'ramp' ? 'ramp' : props.layer === 'height' && b.heightMode === 'slope' ? 'slope' : props.layer === 'height' && b.heightMode === 'smooth' ? 'smooth' : b.shape;
-  const onShape = (id: string) => {
-    if (id === 'ramp') props.onBrushChange({ heightMode: 'ramp', mode: 'paint' });
-    else if (id === 'slope') props.onBrushChange({ heightMode: 'slope', mode: 'paint' });
-    else if (id === 'smooth') props.onBrushChange({ heightMode: 'smooth', mode: 'paint' });
-    else props.onBrushChange({ shape: id as BrushShape, heightMode: 'brush' });
-    if (props.layer !== 'height') props.onTool('brush');
-  };
-  const onPaint = () => { props.onBrushChange({ mode: 'paint' }); props.onTool('brush'); };
-
-  return (
-    <ScrollView showScrollbar style={{ width: '100%', height: '100%' }} contentContainerStyle={{ gap: 7, paddingBottom: 10 }}>
-      <RailLabel text="brush" />
-      <ChipGrid items={shapeItems} value={shapeValue} onPick={onShape} dim={b.mode === 'erase'} />
-      <SizeSlider size={b.size} min={SIZE_MIN} max={SIZE_MAX} onSize={(size) => props.onBrushChange({ size })} />
-      <ModeBar layer={props.layer} tool={props.tool} mode={b.mode} heightMode={b.heightMode} onTool={props.onTool} onPatch={props.onBrushChange} />
-      <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
-      {props.layer === 'paint' ? <PaintSection tile={props.tile} onTile={props.onTile} onPaint={onPaint} /> : null}
-      {props.layer === 'height' ? <HeightSection brush={b} onPatch={props.onBrushChange} onClear={props.onClearHeights} /> : null}
-      {props.layer === 'zone' ? <ZoneSection zones={props.zones} activeZone={props.activeZone} onActiveZone={props.onActiveZone} onAddZone={props.onAddZone} onUpdateZone={props.onUpdateZone} onDeleteZone={props.onDeleteZone} onPaint={onPaint} /> : null}
-    </ScrollView>
-  );
-}

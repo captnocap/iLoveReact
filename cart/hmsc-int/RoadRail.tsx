@@ -1,21 +1,20 @@
-// RoadRail — the left rail for the ROAD layer (ROADSTROKE-0610).
+// RoadRail — the road card of the painter rail (ROADSTROKE-0610, PAINTER-0610).
 //
-// Roads are authored as STROKES (roadData.ts): the brush tool lays centerline
-// points on the canvas, this rail picks the cross-section profile — lanes per
+// Roads are authored as STROKES (roadData.ts): the Paint tool lays centerline
+// points on the canvas, this card picks the cross-section profile — lanes per
 // side (a side at 0 = one-way; direction chevrons render on the canvas), the
-// locked 2-tile sidewalk ring — and commits/cancels the draft. The pointer
-// tool selects a committed road; the list shows every stroke with its profile
-// chip and a delete. Re-stamping (the tile compile) lives in PaintCanvas; this
-// rail is pure controls.
+// locked 2-tile sidewalk ring — and commits/cancels the draft. The Select tool
+// picks a committed road; the list shows every stroke with its profile chip and
+// a delete. Tools live in the universal ToolCard (PainterRail); re-stamping
+// (the tile compile) lives in PaintCanvas; this card is pure controls.
 
 import { Box, Pressable, ScrollView, Text } from '@reactjit/primitives';
-import { MiniStepper, RailLabel, ToolBtn } from './railAtoms';
+import { MiniStepper, RailLabel } from './railAtoms';
 import { clampProfile, isOneWay, profileLabel, ROAD_SPEED_PRESETS, roadWidthTiles, type RoadProfile, type RoadStroke } from './roadData';
 import type { Tool } from './PaintCanvas';
 
 export function RoadRail(props: {
   tool: Tool;
-  onTool: (t: Tool) => void;
   profile: RoadProfile;
   onProfile: (patch: Partial<RoadProfile>) => void;
   /** non-null = the steppers are LIVE-editing this selected road, not the draft */
@@ -36,16 +35,11 @@ export function RoadRail(props: {
   onArrows: (on: boolean) => void;
 }) {
   const p = clampProfile(props.profile);
-  const drawing = props.tool !== 'pointer';
+  const drawing = props.tool === 'brush'; // eraser clicks delete strokes, they don't draft
   const drafting = props.draftCount > 0;
 
   return (
     <Box style={{ flexGrow: 1, gap: 8 }}>
-      <Box style={{ flexDirection: 'row', gap: 4 }}>
-        <ToolBtn icon="MousePointer" active={!drawing} onPress={() => props.onTool('pointer')} />
-        <ToolBtn icon="Brush" active={drawing} onPress={() => props.onTool('brush')} />
-      </Box>
-
       <RailLabel text="PROFILE" />
       {props.editingLabel ? (
         <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: '#f8fafc', backgroundColor: '#1e293b' }}>
