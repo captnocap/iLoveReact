@@ -14,7 +14,9 @@ const BOX = '#9ca3af';
 const BOX_DARK = '#6b7280';
 const FLAG = '#c23b22';
 
-const AUTHORED_HEIGHT = 1.3;
+// PROPSCALE-0611: 1.22 = the barrel's real top (1.04 + 0.18); was 1.3, which
+// rendered ~6% under the registry height.
+const AUTHORED_HEIGHT = 1.22;
 
 export function Mailbox(props: { prop: WorldProp }) {
   const yaw = props.prop.yawDegrees;

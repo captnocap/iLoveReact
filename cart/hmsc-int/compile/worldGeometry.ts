@@ -304,26 +304,6 @@ function tileColor(kind: TileKind | string): Color {
   }
 }
 
-const PROP_BOX: Record<string, readonly [number, number, number]> = {
-  // [width, height, depth] in meters
-  bush: [1.2, 0.8, 1.2],
-  bushLarge: [1.8, 1.1, 1.8],
-  bushLow: [1.2, 0.5, 1.2],
-  bushSparse: [1.0, 0.6, 1.0],
-  rock: [1.0, 0.8, 1.0],
-  rockLarge: [2.0, 1.6, 2.0],
-  rockSmall: [0.6, 0.5, 0.6],
-  fireHydrant: [0.4, 0.9, 0.4],
-  streetSign: [0.3, 3.0, 0.3],
-  streetLight: [0.3, 5.0, 0.3],
-  stopSign: [0.3, 2.6, 0.3],
-  trafficLight: [0.4, 5.0, 0.4],
-  payphone: [0.6, 1.4, 0.4],
-  dumpster: [1.6, 1.3, 1.0],
-  mailbox: [0.5, 1.1, 0.5],
-  fence: [1.0, 1.2, 0.2],
-};
-
 function propColor(kind: PropKind | string): Color {
   switch (kind) {
     case 'bush':
@@ -457,9 +437,12 @@ function propParts(prop: WorldProp): PropPartSpec[] {
         sphere([def.footprintRadiusMeters * 0.25, def.heightMeters * 0.58, -def.footprintRadiusMeters * 0.1], [def.footprintRadiusMeters, def.heightMeters * 0.7, def.footprintRadiusMeters * 0.85], [0.56, 0.56, 0.58]),
       ];
     case 'dumpster': {
-      const s = def.heightMeters / 1.2;
+      // PROPSCALE-0611: 1.09 = the parts' real AABB top (was 1.2 — rendered
+      // ~12% under registry); depth 1.2 matches the real 4-yd profile.
+      // Mirrors render3d/props/Dumpster.tsx.
+      const s = def.heightMeters / 1.09;
       const w = def.footprintRadiusMeters * 1.6 * s;
-      const d = def.footprintRadiusMeters * 0.9 * s;
+      const d = def.footprintRadiusMeters * 1.2 * s;
       return [
         box([0, 0.03 * s, 0], [w * 0.85, 0.06 * s, d * 0.8], [0x3a / 255, 0x4a / 255, 0x30 / 255]),
         box([0, 0.45 * s, 0], [w, 0.78 * s, d], [0x4a / 255, 0x5d / 255, 0x3f / 255]),
@@ -503,7 +486,8 @@ function propParts(prop: WorldProp): PropPartSpec[] {
       cylinder16([1.4, def.heightMeters - 1.2, -0.17], 0.13, 0.07, [0.21, 0.84, 0.36], [90, 0, 0]),
     ];
     case 'payphone': {
-      const s = def.heightMeters / 1.45;
+      // PROPSCALE-0611: 1.54 = the hood's real top (1.46 + 0.08), was 1.45
+      const s = def.heightMeters / 1.54;
       return [
         cylinder8([0, 0.5 * s, 0], 0.05 * s, 1.0 * s, [0.6, 0.62, 0.64]),
         box([0, 1.12 * s, 0], [0.42 * s, 0.6 * s, 0.22 * s], [0.84, 0.86, 0.88]),
@@ -514,7 +498,8 @@ function propParts(prop: WorldProp): PropPartSpec[] {
       ];
     }
     case 'mailbox': {
-      const s = def.heightMeters / 1.3;
+      // PROPSCALE-0611: 1.22 = the barrel's real top (1.04 + 0.18), was 1.3
+      const s = def.heightMeters / 1.22;
       return [
         cylinder8([0, 0.475 * s, 0], 0.06 * s, 0.95 * s, [0.42, 0.35, 0.26]),
         cylinder16([0, 1.04 * s, 0], 0.18 * s, 0.42 * s, [0.61, 0.64, 0.69], [90, 0, 0]),
@@ -856,8 +841,9 @@ function propParts(prop: WorldProp): PropPartSpec[] {
         box([0, 0.45, -0.14], [w, 0.04, 0.13], wood),
         box([0, 0.45, 0.02], [w, 0.04, 0.13], woodDark),
         box([0, 0.45, 0.18], [w, 0.04, 0.13], wood),
-        box([0, 0.69, 0.26], [w, 0.12, 0.04], wood, [-12, 0, 0]),
-        box([0, 0.83, 0.29], [w, 0.12, 0.04], woodDark, [-12, 0, 0]),
+        // PROPSCALE-0611: back top lands at the registry's 0.98m
+        box([0, 0.78, 0.26], [w, 0.12, 0.04], wood, [-12, 0, 0]),
+        box([0, 0.92, 0.29], [w, 0.12, 0.04], woodDark, [-12, 0, 0]),
       ];
     }
     // ── street furniture (mirror render3d/props/StreetFurniture.tsx) ──────
@@ -1042,7 +1028,8 @@ function propParts(prop: WorldProp): PropPartSpec[] {
     }
     case 'basketballHoop': {
       const h = def.heightMeters;
-      const rimY = 3.05;
+      // PROPSCALE-0611: regulation 3.05 × 1.15 (the presence law)
+      const rimY = 3.5;
       const boardZ = -0.35;
       const pole: Color = [0x3a / 255, 0x3f / 255, 0x46 / 255];
       const board: Color = [0xe8 / 255, 0xea / 255, 0xec / 255];
@@ -1058,7 +1045,10 @@ function propParts(prop: WorldProp): PropPartSpec[] {
       ];
     }
     default: {
-      const box = PROP_BOX[prop.kind] ?? [def.footprintRadiusMeters * 2, def.heightMeters, def.footprintRadiusMeters * 2];
+      // Registry-derived placeholder for any future kind without a parts
+      // case (PROPSCALE-0611 deleted the stale hand-kept PROP_BOX table —
+      // every current kind has a case above).
+      const box: readonly [number, number, number] = [def.footprintRadiusMeters * 2, def.heightMeters, def.footprintRadiusMeters * 2];
       return [{ shape: 'box', local: [0, box[1] / 2, 0], size: box, color: propColor(prop.kind) }];
     }
   }

@@ -250,9 +250,9 @@ function Bench(props: { prop: WorldProp }) {
       <Part prop={props.prop} local={[0, seatY, -0.14]} size={[w, 0.04, 0.13]} material={WOOD} />
       <Part prop={props.prop} local={[0, seatY, 0.02]} size={[w, 0.04, 0.13]} material={WOOD_DARK} />
       <Part prop={props.prop} local={[0, seatY, 0.18]} size={[w, 0.04, 0.13]} material={WOOD} />
-      {/* Back slats, leaning back */}
-      <Part prop={props.prop} local={[0, seatY + 0.24, 0.26]} size={[w, 0.12, 0.04]} material={WOOD} tiltX={-12} />
-      <Part prop={props.prop} local={[0, seatY + 0.38, 0.29]} size={[w, 0.12, 0.04]} material={WOOD_DARK} tiltX={-12} />
+      {/* Back slats, leaning back — top lands at the registry's 0.98m (PROPSCALE-0611) */}
+      <Part prop={props.prop} local={[0, seatY + 0.33, 0.26]} size={[w, 0.12, 0.04]} material={WOOD} tiltX={-12} />
+      <Part prop={props.prop} local={[0, seatY + 0.47, 0.29]} size={[w, 0.12, 0.04]} material={WOOD_DARK} tiltX={-12} />
     </>
   );
 }

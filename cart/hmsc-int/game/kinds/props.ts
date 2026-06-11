@@ -231,7 +231,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Fire Hydrant',
     solid: true,
     footprintRadiusMeters: 0.27,
-    heightMeters: 0.98,
+    // PROPSCALE-0611: real 0.75m × 1.15 (presence law — see world/propKinds.ts)
+    heightMeters: 0.86,
     tileKind: 'wall',
     trafficControl: 'none',
   },
@@ -251,7 +252,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Street Light',
     solid: true,
     footprintRadiusMeters: 0.16,
-    heightMeters: 5.2,
+    // PROPSCALE-0611: real residential pole ~7m × 1.15
+    heightMeters: 8.0,
     tileKind: 'wall',
     trafficControl: 'none',
   },
@@ -301,9 +303,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Stop Sign',
     solid: true,
     footprintRadiusMeters: 0.12,
-    // Real stop signs sit ~2.1m to the bottom of the plate; this puts the
-    // octagon well above head height.
-    heightMeters: 3.1,
+    // PROPSCALE-0611: real MUTCD urban total ~2.9m × 1.15
+    heightMeters: 3.35,
     tileKind: 'wall',
     trafficControl: 'stopSign',
   },
@@ -312,7 +313,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Traffic Light',
     solid: true,
     footprintRadiusMeters: 0.18,
-    heightMeters: 5.6,
+    // PROPSCALE-0611: real mast-arm head top ~5.5m × 1.15
+    heightMeters: 6.3,
     tileKind: 'wall',
     trafficControl: 'signal',
   },
@@ -323,7 +325,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // it; it's the load-bearing low-tech comms prop (call contacts, no mobile).
     solid: true,
     footprintRadiusMeters: 0.3,
-    heightMeters: 1.45,
+    // PROPSCALE-0611: real pedestal phone ~1.4m × 1.15
+    heightMeters: 1.61,
     tileKind: 'wall',
     trafficControl: 'none',
   },
@@ -331,8 +334,9 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     kind: 'dumpster',
     label: 'Dumpster',
     solid: true,
-    footprintRadiusMeters: 0.95,
-    heightMeters: 1.35,
+    // PROPSCALE-0611: real 4-yd front-load (1.83w × 1.37h × 1.37d) × 1.15
+    footprintRadiusMeters: 0.9,
+    heightMeters: 1.57,
     tileKind: 'wall',
     trafficControl: 'none',
     container: { lootCategory: 'junk', capacity: 6, spawnFillChance: 0.7, searchSeconds: 4, access: 'open' },
@@ -342,7 +346,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Mailbox',
     solid: true,
     footprintRadiusMeters: 0.22,
-    heightMeters: 1.35,
+    // PROPSCALE-0611: real USPS collection box ~1.27m × 1.15
+    heightMeters: 1.46,
     tileKind: 'wall',
     trafficControl: 'none',
     container: { lootCategory: 'office', capacity: 2, spawnFillChance: 0.4, searchSeconds: 2, access: 'locked' },
@@ -354,7 +359,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     solid: true,
     // A 2.5m segment; footprintRadius sizes the collision square.
     footprintRadiusMeters: 1.35,
-    heightMeters: 1.25,
+    // PROPSCALE-0611: real chain-link ~1.2m × 1.15
+    heightMeters: 1.4,
     tileKind: 'wall',
     trafficControl: 'none',
   },
@@ -365,10 +371,11 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Traffic Cone',
     solid: true,
     footprintRadiusMeters: 0.18,
-    heightMeters: 0.7,
+    // PROPSCALE-0611: real 28in cone 0.71m × 1.15
+    heightMeters: 0.82,
     tileKind: 'wall',
     trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.22, restitution: 0.15 },
+    dynamics: { bodyRadiusMeters: 0.26, restitution: 0.15 },
   },
   barrier: {
     kind: 'barrier',
@@ -377,7 +384,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // thin AABB treatment in the world props layer.
     solid: true,
     footprintRadiusMeters: 1.0,
-    heightMeters: 1.05,
+    // PROPSCALE-0611: real 42in tall Jersey 1.07m × 1.15
+    heightMeters: 1.25,
     tileKind: 'wall',
     trafficControl: 'none',
   },
@@ -386,12 +394,13 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Trash Can',
     solid: true,
     footprintRadiusMeters: 0.3,
-    heightMeters: 1.0,
+    // PROPSCALE-0611: real public can ~1.0m × 1.15
+    heightMeters: 1.15,
     tileKind: 'wall',
     trafficControl: 'none',
     container: { lootCategory: 'junk', capacity: 3, spawnFillChance: 0.6, searchSeconds: 2.5, access: 'open' },
     coverClass: 'soft',
-    dynamics: { bodyRadiusMeters: 0.38, restitution: 0.22 },
+    dynamics: { bodyRadiusMeters: 0.44, restitution: 0.22 },
   },
   bench: {
     kind: 'bench',
@@ -399,7 +408,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // Long like a fence segment — yaw-aware thin AABB in the world props layer.
     solid: true,
     footprintRadiusMeters: 0.8,
-    heightMeters: 0.85,
+    // PROPSCALE-0611: back top real ~0.85m × 1.15; the SEAT stays figure-locked
+    heightMeters: 0.98,
     tileKind: 'wall',
     trafficControl: 'none',
     seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 3 },
@@ -418,14 +428,15 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
 
   // ── trees ──────────────────────────────────────────────────────────────────
   // footprintRadius is the TRUNK, not the canopy — you bump the trunk and walk
-  // under the foliage edge, like every GTA tree. Heights follow the R4
-  // stylized-tall contract (scale verticals UP against the ~2m player).
+  // under the foliage edge, like every GTA tree. PROPSCALE-0611: heights are
+  // real urban-mature averages × 1.15 (were ~half real size); trunks
+  // thickened ~×1.4 to match.
   treeOak: {
     kind: 'treeOak',
     label: 'Oak Tree',
     solid: true,
-    footprintRadiusMeters: 0.35,
-    heightMeters: 7,
+    footprintRadiusMeters: 0.5,
+    heightMeters: 17,
     tileKind: 'wall',
     trafficControl: 'none',
   },
@@ -433,8 +444,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     kind: 'treePine',
     label: 'Pine Tree',
     solid: true,
-    footprintRadiusMeters: 0.3,
-    heightMeters: 9,
+    footprintRadiusMeters: 0.4,
+    heightMeters: 23,
     tileKind: 'wall',
     trafficControl: 'none',
   },
@@ -442,8 +453,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     kind: 'treeBirch',
     label: 'Birch Tree',
     solid: true,
-    footprintRadiusMeters: 0.18,
-    heightMeters: 6,
+    footprintRadiusMeters: 0.25,
+    heightMeters: 16,
     tileKind: 'wall',
     trafficControl: 'none',
   },
@@ -451,8 +462,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     kind: 'treeCypress',
     label: 'Cypress Tree',
     solid: true,
-    footprintRadiusMeters: 0.3,
-    heightMeters: 7.5,
+    footprintRadiusMeters: 0.35,
+    heightMeters: 17,
     tileKind: 'wall',
     trafficControl: 'none',
   },
@@ -460,8 +471,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     kind: 'treePalm',
     label: 'Palm Tree',
     solid: true,
-    footprintRadiusMeters: 0.22,
-    heightMeters: 6.5,
+    footprintRadiusMeters: 0.3,
+    heightMeters: 15,
     tileKind: 'wall',
     trafficControl: 'none',
   },
@@ -540,21 +551,23 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     kind: 'ballSoccer',
     label: 'Soccer Ball',
     solid: true,
-    footprintRadiusMeters: 0.11,
-    heightMeters: 0.22,
+    // PROPSCALE-0611: regulation size-5 (Ø0.22m) × 1.15
+    footprintRadiusMeters: 0.125,
+    heightMeters: 0.25,
     tileKind: 'wall',
     trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.11, restitution: 0.65 },
+    dynamics: { bodyRadiusMeters: 0.125, restitution: 0.65 },
   },
   ballBasketball: {
     kind: 'ballBasketball',
     label: 'Basketball',
     solid: true,
-    footprintRadiusMeters: 0.12,
-    heightMeters: 0.24,
+    // PROPSCALE-0611: regulation size-7 (Ø0.24m) × 1.15
+    footprintRadiusMeters: 0.14,
+    heightMeters: 0.28,
     tileKind: 'wall',
     trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.12, restitution: 0.78 },
+    dynamics: { bodyRadiusMeters: 0.14, restitution: 0.78 },
   },
 
   // ── wall decor ─────────────────────────────────────────────────────────────
@@ -760,17 +773,19 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Telephone Pole',
     solid: true,
     footprintRadiusMeters: 0.16,
-    heightMeters: 8.5,
+    // PROPSCALE-0611: real ~8.8m above ground × 1.15
+    heightMeters: 10.1,
     tileKind: 'wall',
     trafficControl: 'none',
   },
   basketballHoop: {
     kind: 'basketballHoop',
     label: 'Basketball Hoop',
-    // Street hoop: pole + backboard + rim at the regulation-ish 3.05m.
+    // Street hoop: pole + backboard + rim at 3.5m (regulation 3.05 × 1.15).
     solid: true,
     footprintRadiusMeters: 0.25,
-    heightMeters: 3.8,
+    // PROPSCALE-0611: real backboard top ~3.95m × 1.15
+    heightMeters: 4.5,
     tileKind: 'wall',
     trafficControl: 'none',
   },

@@ -137,7 +137,8 @@ function BasketballHoop(props: { prop: WorldProp }) {
   const pole = '#3a3f46';
   const board = '#e8eaec';
   const rim = '#d3722c';
-  const rimY = 3.05;
+  // PROPSCALE-0611: regulation 3.05 × 1.15 (the presence law)
+  const rimY = 3.5;
   const boardZ = -0.35;
   return (
     <>

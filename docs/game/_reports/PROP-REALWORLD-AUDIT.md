@@ -6,6 +6,26 @@
 > used the WRONG YARDSTICK. §CORRECTED below is the operative table; the
 > original sections are kept for the raw real-world research numbers only.
 
+> **APPLIED (req_0619, PROPSCALE-0611, USER RULED "yep fix it").** The ×1.15
+> presence law is now live in BOTH registries (world/propKinds.ts +
+> game/kinds/props.ts, verified field-identical): hydrant 0.86 (down),
+> streetLight 8.0, stopSign 3.35, trafficLight 6.3, telephonePole 10.1,
+> payphone 1.61, dumpster 1.57 (r 0.9), mailbox 1.46, fence 1.4, cone 0.82,
+> barrier 1.25, trashCan 1.15, bench 0.98 (seat stays 0.45), hoop 4.5
+> (rim 3.5 in both models), soccer 0.25, basketball 0.28, trees 17/23/16/17/15
+> (trunks ~×1.4). Dynamics radii scaled along. Model honesty fixes in BOTH
+> renderers (render3d/props/* + compile/worldGeometry.ts): dumpster
+> AUTHORED_HEIGHT 1.2→1.09 + depth 0.9→1.2 (was rendering ~12% short at half
+> volume), payphone 1.45→1.54, mailbox 1.3→1.22, bench back raised to 0.98;
+> stale PROP_BOX fallback table deleted (registry-derived now). All other
+> models verified honest (pole/tree/furniture parts scale off heightMeters).
+> Tests: props 13/13, navGrid 8/8, build 18/18, physics 15/15, world 21/21,
+> worldColliders 4/4, worldGeometry 7/7; cart bundles clean. Verify with
+> `tools/prop-scale` (dumpster now 0.78× of the player — the reference photo
+> ratio exactly). Left as-was: chairs/couch/table/beds/sink/oven (seat- and
+> counter-locked to the figure), wall decor, rocks/bushes (art), beach ball
+> (already over), streetSign 3.3 (already at target), treeDead 5 (snag).
+
 ## CORRECTED — presence ratio, not absolute meters (req_0617)
 
 What the eye judges is **prop height ÷ body height in frame**, not meters.

@@ -8,6 +8,11 @@ import { at } from './place';
 // patina, and a pair of horizontal reinforcing ribs. Solid — the player bumps it.
 // The model is authored at AUTHORED_HEIGHT and uniformly scaled to the kind's
 // heightMeters so resizing is one number in propKinds.ts.
+//
+// PROPSCALE-0611: AUTHORED_HEIGHT must equal the parts' real AABB top (lid
+// peak ≈ 0.96 + half-thickness + 18° tilt lift ≈ 1.09) — it was 1.2, which
+// silently rendered every dumpster ~12% below its registry height. Depth
+// factor 1.2 (was 0.9) matches the real 4-yd squarish profile.
 
 const BODY = '#4a5d3f';
 const BODY_DARK = '#3a4a30';
@@ -15,14 +20,14 @@ const LID = '#556649';
 const LID_DARK = '#45553a';
 const RUST = '#7a5c3a';
 
-const AUTHORED_HEIGHT = 1.2;
+const AUTHORED_HEIGHT = 1.09;
 
 export function Dumpster(props: { prop: WorldProp }) {
   const yaw = props.prop.yawDegrees;
   const def = propKindDefinition(props.prop.kind);
   const s = def.heightMeters / AUTHORED_HEIGHT;
   const w = def.footprintRadiusMeters * 1.6 * s; // body width
-  const d = def.footprintRadiusMeters * 0.9 * s; // body depth
+  const d = def.footprintRadiusMeters * 1.2 * s; // body depth
 
   return (
     <>

@@ -17,7 +17,9 @@ const KEYS = '#cfe7ff';
 const METAL = '#9a9ea4';
 const HANDSET = '#16181b';
 
-const AUTHORED_HEIGHT = 1.45;
+// PROPSCALE-0611: 1.54 = the hood's real top (1.46 + 0.08); was 1.45, which
+// rendered ~6% over the registry height.
+const AUTHORED_HEIGHT = 1.54;
 
 export function Payphone(props: { prop: WorldProp }) {
   const yaw = props.prop.yawDegrees;
