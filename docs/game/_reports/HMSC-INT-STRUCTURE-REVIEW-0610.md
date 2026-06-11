@@ -15,6 +15,105 @@ names the seam and the existing in-repo pattern that already solves it.
 
 ---
 
+## 0. PRIORITY ZERO — THE DEMOLITION ORDER (req_0610/req_0611, USER-RULED 2026-06-10)
+
+**This precedes everything else in this document.** The user, ruling: delete
+all the floating loose lab carts and the hmsc/ directory — "its all junk /
+old, as far as im concerned, we have ported in the capability from them, now
+its just causing trauma, i saw a claude making edits in the wrong space
+today, not again." And the scope, made exact: **the markdown files in
+`docs/game/` ARE the kill list** — every per-cart .md names an external
+standalone that now dies. This supersedes V17-LIFECYCLE's archive treatment
+by user word; git history is the archive.
+
+### 0.1 The kill list (docs/game/*.md → cart path, every path verified on disk)
+
+| doc | cart path to delete |
+|---|---|
+| animation_lab.md | `cart/animation_lab.tsx` |
+| animationDsl.md | `cart/animationDsl.ts` — **BLOCKED, see 0.2** |
+| billboard_demo.md | `cart/billboard_demo.tsx` |
+| bodylab.md | `cart/bodylab/` |
+| boxxx_demo.md | `cart/boxxx_demo.tsx` |
+| camera_lab.md | `cart/camera_lab.tsx` |
+| carve_lab.md | `cart/carve_lab.tsx` |
+| combat_lab.md | `cart/combat_lab/` |
+| composer.md | `cart/composer/` |
+| cutout.md | `cart/cutout/` — **BLOCKED, see 0.2** |
+| effect_fills.md | `cart/effect_fills/` |
+| game_item_gallery.md | `cart/game_item_gallery/` |
+| geometry_demo.md | `cart/geometry_demo.tsx` |
+| head_lab.md | `cart/head_lab/` |
+| hmsc.md | `cart/hmsc/` — already deleted (77726e201); retire the .md |
+| hmsc_massive_map_lab.md | `cart/hmsc_massive_map_lab.tsx` |
+| hmsc_scale_lab.md | `cart/hmsc_scale_lab.tsx` |
+| input_bench.md | `cart/input_bench/` |
+| pathing_lab.md | `cart/pathing_lab/` |
+| physics_lab.md | `cart/physics_lab.tsx` |
+| pixel_icon_demo.md | `cart/pixel_icon_demo.tsx` |
+| pixel_icon_gallery.md | `cart/pixel_icon_gallery.tsx` |
+| planet_run.md | `cart/planet_run/` |
+| ragdoll_lab.md | `cart/ragdoll_lab/` |
+| render_perf_lab.md | `cart/render_perf_lab.tsx` |
+| scape.md | `cart/scape/` |
+| shitcoin.md | `cart/shitcoin/` |
+| skybox_demo.md | `cart/skybox_demo.tsx` |
+| vehicle_lab.md | `cart/vehicle_lab/` |
+| voxel_stack_demo.md | `cart/voxel_stack_demo/` |
+
+NOT carts (the meta docs stay): DECISIONS, GUIDING_LIGHT, BUILDING-GRAMMAR,
+STRUCTURE, REQUESTS, RLE_FORMAT, PLATMOD_PLAN, bake-geometry (CLI doc),
+physics3d (framework doc), hmsc-int.md (the tool — stays).
+
+### 0.2 TWO BLOCKERS — capture before rm, or the surviving tool breaks
+
+Grepped every import from surviving spaces (cart/hmsc-int, runtime/, cli/,
+scripts/, build.zig) into the kill list. Everything is clean EXCEPT two:
+
+1. **`cart/cutout/` is load-bearing for the workbench TODAY.** ~20 live
+   imports from `editors/workbench/{paint,characters,items,vehicles,
+   materials}` reach across into `../../cutout/{models,draft,extraction,
+   stream,sources,ToolRail,Inspector}`. The CUTOUTFLIP capture killed the
+   ROUTE but left the IMPLEMENTATION in the old cart and imported across —
+   exactly the V17-TRIAGE failure mode ("a git mv into the new structure is
+   the capture done wrong" — this is worse: not even a mv). Capture: move
+   those modules into `cart/hmsc-int/editors/paint/` (their consumers' home),
+   fix the ~20 import paths, THEN rm the cart.
+2. **`cart/animationDsl.ts` feeds the compile.** `compile/playerModel.ts:10`
+   imports `parseAnimationDsl`/`sampleAnimationTimeline`. V6 already rules
+   the DSL semantics live on (the string format doesn't) — capture the
+   parser/sampler into `game/animation/`, repoint, then rm.
+
+(runtime/ mentions of dead carts are comments only — no imports; safe.)
+
+### 0.3 Needs one word from the user (adjacent junk the list doesn't name)
+
+- `cart/hmsc-int-old/` — the _old-pattern breadcrumb, surely junk now.
+- `cart/scape3d/` — scape.md is on the list but scape3d has no .md; it is
+  scape's 3D fork (memories reference it). Same fate as scape?
+- `cart/heads/`, `cart/deadcode/` — look dead, not in the corpus.
+
+### 0.4 Execution order (one worker, one sitting)
+
+1. Land/abandon any parallel-lane work inside kill-list dirs first (sessions
+   are active in this repo — coordinate, don't yank).
+2. The two captures (0.2), each with its import repoint, bench boots green.
+3. `git rm -r` the 0.1 paths by EXPLICIT path (never `-A`), one commit.
+4. Retire the per-cart docs: move the kill-list .md files +
+   `_index/records/<name>.ts` to an archive tier in the same commit (the
+   maintenance contract runs in reverse: a deleted cart can't keep a live
+   index record).
+5. Verify: `tools/rjit ship hmsc-int` (SHIP_RUN_PACKAGE=0) + `tools/rjit
+   game bake` green; grep for any straggler `cart/<dead>` import.
+
+Why this is priority zero and not hygiene: an agent edited a dead cart
+TODAY. Every dead cart is an attractive-nuisance copy of a captured system —
+the exact "two sources of truth" disease every section below is about, at
+directory scale. Nothing else in this report should be attempted until the
+only place to make an edit is the right place.
+
+---
+
 ## 1. STARTUP — the growth has one mechanical cause (highest priority)
 
 **Finding: boot cost is O(everything you have ever done).**
@@ -356,6 +455,9 @@ ones from the quad-layout era:
 
 ## 9. Priority order (if the findings become work)
 
+0. **THE DEMOLITION ORDER (§0) — USER-RULED, precedes everything.** Capture
+   the two blockers (cutout modules, animationDsl parser), then delete every
+   kill-list cart. No other item starts first.
 1. **Boot from snapshots + tail** (§1) — stops the startup growth permanently;
    contained in `data/index.ts`.
 2. **Editor control contract + keymap legend** (§3) — the biggest single cut
