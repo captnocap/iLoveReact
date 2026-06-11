@@ -364,8 +364,9 @@ ones from the quad-layout era:
    menus-reset complaint; mechanical.
 4. **Retire SettingsTab into the bench; PropertiesPanel onto fields.tsx**
    (§5.1, §5.2) — kills the same/useless-panels feeling.
-5. **`<Window>` pop-out for /test** (§6) — the highest-joy QoL item; small if
-   the gating checks pass.
+5. **`<Window>` pop-out** (§6) — the highest-joy QoL item; small if the
+   gating checks pass. ~~for /test~~ → **for /compiled** (§10.2 — the user's
+   actual daily driver).
 6. **EditorShell extraction along the four seams** (§2) — the enabling move
    for everything after; do it before the map editor goes event-sourced.
 7. **Map edits onto the world channel** (§2 V20 note) — the big one; erases
@@ -373,3 +374,85 @@ ones from the quad-layout era:
    side effect.
 8. **One lab registry** (§5.3) + root-directory sweep (§8) — hygiene with
    compounding payoff.
+
+---
+
+## 10. ADDENDUM (req_0603, same day) — user workflow corrections + the noise panel
+
+The user's response to this review pinned two findings more precisely.
+
+### 10.1 The 281-row "pieces" dump — `PrefabInfo` (`tabs/ObjectsTab.tsx:123-146`)
+
+User, verbatim: *"this panel is worthless at this point, its all just literal
+noise and un helpful … just a huge list of rects that dont let me do anything
+about it."* The screenshot: a building inspected in the OBJ tab renders
+`theme common · 281 pieces` followed by 281 near-identical rows of
+`Concrete Floor  floor·concrete  (1.5,1.5)`.
+
+What it is: `PrefabInfo` maps `GAME_BUILD.prefabs.decompose(prefab)` straight
+to one `<Box>` row per piece — label, `kind·material`, edit, local cell. The
+comment says why it exists: *"This is the see-through — a placed motel is
+still walls/doors/floor to every consumer"* — it was written to PROVE the V24
+no-opaque-blobs law, and as a proof it worked. As an interface it renders the
+**outer product instead of the factors** — GUIDING_LIGHT's one law, violated
+in information design: 281 rows whose true rank is ~4 (a handful of distinct
+(kind, material, edit) classes × a position list nobody reads as text).
+
+It also fails both halves of "useful": the rows carry no data a builder acts
+on (positions in local grid coords duplicate what the 3D view above already
+shows spatially), and they afford no action (no click→highlight, no select,
+no re-skin). 281 dead rects.
+
+What the panel should be — factor the decomposition, then attach verbs:
+
+- **A bill of materials** (the factored sum): one row per distinct
+  (piece kind, material, edit-variant) with a count —
+  `120× Concrete Floor`, `84× Brick Wall (12 window, 2 door)`, `4× Ramp` —
+  plus rollup facts that actually inform building: footprint W×D in tiles,
+  height/floor count, distinct materials list, collision/cover summary when
+  the bake contract surfaces it (V24's gameplay tags are the panel's real
+  payload).
+- **Rows as verbs, not text**: click a BOM class → highlight those pieces in
+  the inspect view above (the renderer already draws them; selection is a
+  color override away); a re-skin affordance per material row (the
+  buildingsSource already owns per-type global skins — this panel should be a
+  door to it, not a sibling); isolate/hide a class to see inside.
+- The flat per-piece listing, if kept at all, belongs behind a disclosure
+  ("show all 281") — it is debugging output, not authoring surface.
+
+This slots into §5.2's consolidation: when the in-focus panel emits a
+`PanelSpec`, the BOM is just a group of rows with `set()`s — the one renderer
+gives it tooltips/reset/edit affordances for free.
+
+### 10.2 Workflow correction: /test is avoided; /compiled is the daily driver
+
+User, verbatim: *"i dont even use the test route in comparison to the compiled
+route. the test route is just unreliably laggy, the compiled route is smooth.
+i use the iso3d for building everything. and the map tile painter."*
+
+Three consequences:
+
+1. **§6's pop-out target re-aims at /compiled** (+ the iso build pane). The
+   edit→feel loop the user actually runs is: paint/build on `/` → Compile →
+   `/compiled`. A `<Window>`-hosted CompiledWorldRoute beside the editor makes
+   that loop two-windows-zero-flips (compile button already bumps
+   `compiledReloadKey` — the second window picks it up for free).
+2. **The /test lag is itself evidence for the constitution.** /test is the
+   V28 dynamic JS path ("always rencoding, doing tons of work" — correct by
+   design); /compiled is the no-JS Zig loader path. The user's felt experience
+   — JS path unreliable, baked path smooth — is P1/V28 confirmed in practice.
+   The implication: stop spending /test polish budget on rendering smoothness
+   and spend it on COMPILE-LOOP latency (make Compile→/compiled so fast that
+   /test's only remaining job is what genuinely needs live JS: console
+   scripting, physics pokes, V19 verify runs).
+3. **The lag deserves a named hunt anyway** — "unreliably laggy" (intermittent,
+   not constant) matches the OPEN StaticSurface re-bake spike hunt (the
+   120-390ms idle CPU-paint spikes that never reproduce in the standalone
+   binary — see memory `devhost_hotreload_rebake_spike`). /test runs the same
+   live-JS + StaticSurface stack inside the dev host; /compiled does not.
+   These are likely the same bug, and V27's channels (`log churn on`) on a
+   /test session while it stutters is the cheap next probe.
+
+Priority list update: §9.5's pop-out re-targets /compiled; the PrefabInfo →
+BOM rework joins §9.4 (it is the same "panels carry data + verbs through the
+one renderer" move).
