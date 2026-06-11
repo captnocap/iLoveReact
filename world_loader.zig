@@ -2473,14 +2473,17 @@ pub const Runtime = struct {
         if (!arch.has_seat) return;
         // seat: pin the player to the prop (/test adoptPose parity: position =
         // the prop anchor, velocity zeroed, facing = the prop's yaw); stepNow's
-        // stand-up edge owns the exit.
+        // stand-up edge owns the exit. The render path adds 180° to player.yaw
+        // (updatePlayerModelNodes model_yaw_degrees), so bake the prop's yaw
+        // MINUS 180 into the state — the figure then faces the prop's own way
+        // instead of sitting backwards (USER report 2026-06-11).
         self.player.x = inst.x;
         self.player.y = inst.y;
         self.player.z = inst.z;
         self.player.vx = 0;
         self.player.vy = 0;
         self.player.vz = 0;
-        self.player.yaw = inst.yaw_degrees * std.math.pi / 180.0;
+        self.player.yaw = (inst.yaw_degrees - 180.0) * std.math.pi / 180.0;
         self.player.grounded = true;
         self.player.posture = if (arch.seat_pose == 1) .lay else .sit;
     }
