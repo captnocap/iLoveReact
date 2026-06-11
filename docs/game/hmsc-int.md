@@ -859,6 +859,12 @@ batch), the tower tool births a building, whole-instance move/clone/delete
 emit single building events. Slices 2–4 (piece-scoped building edits,
 per-building timeline UI, compile consuming instances natively) deferred.
 15 P4 meaning-tests green (`buildings.test.ts`).
+ROTATE-PLACED (req_0645): R is selection-first (a live selection rotates
+even while a piece is armed; the ghost only gets R when nothing is
+selected); shift-click while ARMED selects the piece under the cursor
+instead of placing (the armed brush used to make placed things untouchable);
+a loose-piece rotation re-acquires its selection by placement signature
+after the remove+place id swap, so R,R,R keeps turning the same thing.
 
 ## editors/build/ — Creative Build mode, /build (V24, 2026-06-05)
 

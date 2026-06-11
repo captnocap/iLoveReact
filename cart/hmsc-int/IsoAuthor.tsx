@@ -155,6 +155,12 @@ export interface IsoAuthorProps {
   onFocus?: () => void;
 }
 
+// A placement's identity-free fingerprint (kind + pose). The rotate flow uses
+// it to re-find a loose piece after remove+place hands it a fresh stream id.
+function pieceSignature(p: { pieceId: string; x: number; y: number; z: number; yawDegrees: number }): string {
+  return `${p.pieceId}|${p.x.toFixed(2)}|${p.y.toFixed(2)}|${p.z.toFixed(2)}|${Math.round(p.yawDegrees)}`;
+}
+
 export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const { state, pieces, onCommit } = props;
   // Commit many events as ONE undoable action (one store snapshot) when the host offers
@@ -271,6 +277,20 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
+  // Re-acquire rotated loose pieces (req_0645): a loose-piece rotation is
+  // remove+place (no pieceMoved event exists), so its id dies with the commit.
+  // rotateSelected parks the new placements' signatures here; when the
+  // re-materialized pieces arrive, matching ones re-enter the selection — so
+  // R,R,R keeps turning the same thing without re-clicking.
+  const reselectRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const want = reselectRef.current;
+    if (!want?.size) return;
+    const found = pieces.filter((p) => want.has(pieceSignature(p)));
+    if (!found.length) return;
+    reselectRef.current = null;
+    setSelectedIds((prev) => new Set([...prev, ...found.map((p) => p.id)]));
+  }, [pieces]);
   // Default to SINGLE-piece select so you can always grab one piece even when it touches
   // others (the toggle below flips the default; Shift/Alt inverts it for one click). A
   // whole-building select buried single-piece editing — req_0459.
@@ -695,6 +715,14 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     }
     // No travel → a click: place the armed piece, or (re)select under the cursor.
     if (armedRef.current) {
+      // Shift-click while ARMED selects the piece under the cursor instead of
+      // placing (req_0645): the armed brush used to make placed things
+      // untouchable — every click placed another — so click→R-rotate was only
+      // reachable through Esc. Shift is free here (Alt = freeform place).
+      if (heldModifiers.current.shift) {
+        selectPieceAt(d.x0, d.y0, false);
+        return;
+      }
       const t = resolveAt(d.x0, d.y0);
       if (t) { setSnap(t); placeAt(t); }
     } else {
@@ -705,6 +733,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const placeAt = (t: SnapTarget) => {
     const a = armedRef.current;
     if (!a) return;
+    // A stale selection must not eat the next R (selection-first rotate) —
+    // placing means you've moved on from whatever was selected.
+    if (selectedIdsRef.current.size) setSelectedIds(new Set());
     const at = `${t.placement.x.toFixed(1)},${t.placement.z.toFixed(1)}`;
     if (a.kind === 'tower') {
       // A click (no drag) drops the smallest tower: a 1×1-cell footprint shell.
@@ -728,8 +759,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   };
 
   // Select the piece under the cursor (raycast the standing pieces) — the whole
-  // connected building, or a single piece. Empty click clears.
-  const selectAt = (sx: number, sy: number) => {
+  // connected building, or a single piece. Empty click clears. `invert` flips
+  // the whole-building toggle for this click (the disarmed shift/alt chord);
+  // the armed shift-click path passes false (shift already meant "select").
+  const selectPieceAt = (sx: number, sy: number, invert: boolean) => {
     // Hit-test the VISIBLE (terrain-lifted, cut-away-filtered) pieces so a click
     // lands on what's on screen — a hidden upper floor can't shadow the click.
     const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), visiblePiecesRef.current, ISO_SNAP_TUNING.reachMeters);
@@ -739,8 +772,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // modifier away — no need to flip the toggle to edit one piece. The connected
     // walk spans the FULL piece set (hidden floors included) so grabbing a
     // building grabs ALL of it — a move never tears off the cut-away storeys.
-    const whole = wholeBuildingRef.current !== (heldModifiers.current.shift || heldModifiers.current.alt);
+    const whole = wholeBuildingRef.current !== invert;
     setSelectedIds(whole ? GAME_BUILD.placed.connected(hit.piece.id, displayPiecesRef.current) : new Set([hit.piece.id]));
+  };
+  const selectAt = (sx: number, sy: number) => {
+    selectPieceAt(sx, sy, heldModifiers.current.shift || heldModifiers.current.alt);
   };
   // Remove every selected piece (one pieceRemoved each, the SAME event F2's X
   // commits). A whole-building selection (req_0513) deletes as ONE
@@ -837,7 +873,16 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       ...rotations.map((r) => ({ event: { kind: 'piecePlaced', placement: r.placement } as BuildEditEvent, label: `rotated ${r.placement.pieceId}` })),
     );
     if (!events.length) return;
-    setSelectedIds(new Set());
+    // KEEP the selection across the rotation so R,R,R turns a thing 270°
+    // without re-clicking (req_0645). Building piece ids survive buildingMoved;
+    // loose pieces re-place under FRESH stream ids, so the dead ids drop now
+    // and the reselect effect re-acquires them by placement signature once the
+    // re-materialized pieces arrive.
+    if (rotations.length) reselectRef.current = new Set(rotations.map((r) => pieceSignature(r.placement)));
+    setSelectedIds((prev) => {
+      const dead = new Set(rotations.map((r) => r.id));
+      return new Set([...prev].filter((id) => !dead.has(id)));
+    });
     commitBatch(events);
   };
   // PROMOTE (req_0513, slice 1): capture the selected loose pieces into a
@@ -990,8 +1035,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     handlers: {
       'selection.rotate': () => {
         lastInputAtRef.current = (globalThis as any).performance?.now?.() ?? 0;
-        if (armedRef.current) setGhostYaw((y) => (y + 90) % 360);
-        else keyActionsRef.current.rotateSelected();
+        // A live selection wins R (req_0645 "i can only rotate before place"):
+        // you clicked a thing — R turns THAT, armed ghost or not. No selection
+        // and a piece armed → R turns the placement ghost, as ever.
+        if (selectedIdsRef.current.size) keyActionsRef.current.rotateSelected();
+        else if (armedRef.current) setGhostYaw((y) => (y + 90) % 360);
       },
       'selection.cancel': () => { setArmed(null); setSelectedIds(new Set()); },
       'camera.orbit-ccw': () => { stage.rotate(-1); pushNativeCamera(); keyActionsRef.current.saveCamera(); },
@@ -1372,7 +1420,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         {armed
           ? armed.kind === 'tower'
             ? `tower: drag the footprint · ${towerFloors} floors (+/− top right) · hollow shell + roof, one building · Esc`
-            : `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${armedPropCanFreeform ? ' · Alt freeform' : ''}${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · Esc`
+            : `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${armedPropCanFreeform ? ' · Alt freeform' : ''}${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · shift-click select · Esc`
           : selectedIds.size > 0
             ? `${selectedIds.size} selected · drag to move${selectedPropsCanFreeform ? ' · Alt-drag freeform' : ''} · R rotate · paint faces (top right) · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
             : `WASD pan · drag rotate · scroll zoom · F recenter · click = ${wholeBuilding ? 'building, shift = piece' : 'piece, shift = building'} · pick below to build`}
