@@ -530,6 +530,59 @@ test "heightfield: walkable grade climbs under movement" {
     physics.clearHeightfields();
 }
 
+test "heightfield: walking downhill stays glued to the grade, never ballistic" {
+    registerSlope(0.5);
+    // At 60fps the per-frame slope drop (v·dt·grade) outruns the first-frame
+    // gravity drop (g·dt²), so without the downhill snap the player goes
+    // airborne and re-lands every few frames — the "falling on every step" bug.
+    var sim = Sim{ .dt = 1.0 / 60.0, .px = 1.5, .pz = 1.0, .py = 0.3, .move_x = -1, .speed = 4 };
+    var out = physics.step(sim.pack(&g_buf)).?;
+    var frame: usize = 0;
+    while (frame < 20) : (frame += 1) {
+        try testing.expectEqual(@as(f32, 1), out[7]); // grounded every frame
+        try testing.expectApproxEqAbs(out[1] * 0.2, out[2], 1e-3); // riding h = 0.2x
+        try testing.expectApproxEqAbs(@as(f32, 0), out[5], 1e-5); // no fall speed
+        sim.px = out[1];
+        sim.py = out[2];
+        sim.pvx = out[4];
+        sim.pvy = out[5];
+        out = physics.step(sim.pack(&g_buf)).?;
+    }
+    try testing.expect(out[1] < 1.2); // actually advanced down-slope
+    physics.clearHeightfields();
+}
+
+test "ground collide: walking off a ledge taller than a step still falls" {
+    physics.clearHeightfields();
+    // Platform top=1 for x<0, street at 0: the 1m drop exceeds step_height,
+    // so the downhill snap must NOT glue the player across the edge.
+    const platform = [physics.RECT_FLOATS]f32{ -50, -50, 0, 50, 1, 0, 0.5, 0, -1e9 };
+    var sim = Sim{
+        .dt = 1.0 / 60.0,
+        .px = -0.05,
+        .py = 1,
+        .pz = 0,
+        .move_x = 1,
+        .speed = 4,
+        .rects = &.{ platform, GROUND },
+    };
+    var out = physics.step(sim.pack(&g_buf)).?;
+    var frame: usize = 0;
+    var went_airborne = false;
+    while (frame < 30) : (frame += 1) {
+        if (out[1] > 0.01 and out[7] == 0) went_airborne = true;
+        sim.px = out[1];
+        sim.py = out[2];
+        sim.pvx = out[4];
+        sim.pvy = out[5];
+        out = physics.step(sim.pack(&g_buf)).?;
+    }
+    try testing.expect(went_airborne); // the ledge was a real fall
+    try testing.expectApproxEqAbs(@as(f32, 0), out[2], 1e-4); // landed on the street
+    try testing.expectEqual(@as(f32, 1), out[7]);
+    physics.clearHeightfields();
+}
+
 test "heightfield: hollow ramp slab ascent reaches the crest with zero side grace" {
     physics.clearHeightfields();
     var ramp_samples: [36]f32 = undefined;

@@ -1271,6 +1271,15 @@ pub fn step(input: []const f32) ?[]f32 {
         py = next_ground_y;
         if (pvy < 0) pvy = 0;
         player_grounded = true;
+    } else if (player_grounded and pvy <= 0 and py - next_ground_y <= step_height) {
+        // Downhill snap: a player who was standing last frame and whose ground
+        // dropped by at most a step stays glued to it. Without this, every
+        // downslope/stair frame goes ballistic (gravity accumulates, then a
+        // hard landing) — walking down reads as falling on each step. A drop
+        // beyond step_height is a real ledge and falls normally.
+        py = next_ground_y;
+        pvy = 0;
+        player_grounded = true;
     }
 
     var at: usize = OUTPUT_HEADER_FLOATS;
