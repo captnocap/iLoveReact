@@ -26,7 +26,7 @@ import { markPlaceFreezeProbe, perfMs, warnPlaceFreeze, type PlaceFreezeProbe } 
 // The PURE shape decomposition lives in ./pieceShapes (PARITY-0611, req_0655)
 // so the compile bake and the headless parity suite import it without React.
 // Re-exported here so every existing consumer keeps its import path.
-export { MATERIAL_LOOK, SIGHTLINE_EDIT_OPACITY, pieceVisualShapes, elevatorCarVisualShape, wallJoinSignature } from './pieceShapes';
+export { MATERIAL_LOOK, pieceVisualShapes, elevatorCarVisualShape, wallJoinSignature } from './pieceShapes';
 export type { VisualBox, VisualRamp, VisualShape } from './pieceShapes';
 
 type RampSlabParams = {

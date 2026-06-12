@@ -864,6 +864,32 @@ owns the compile/ suites too (SUITE_ROOTS + `cart/hmsc-int/compile`). The
 iso pane renders rest cars. P4: `elevators.test.ts` (5) +
 `compile/worldElevators.test.ts` + build/placed/navGrid/physics additions.
 
+**PARITY-0611 — one decomposition, proven (req_0654/req_0655, 2026-06-11):**
+the compiled bake shipped door/window walls as SOLID core+slab boxes while
+the colliders shipped the opening — the user could "stand in the wall and
+walk through it" (a hidden wall). Root cause: `compile/worldGeometry.ts`
+carried PRIVATE copies of the wall/stairs/elevator decompositions that never
+read `piece.edit`. Fix: the pure shape math moved out of `pieceMeshes.tsx`
+into `editors/build/pieceShapes.ts` (React-free; `BUILD_UI` moved with it,
+old surfaces re-export) and the bake now lowers `pieceVisualShapes` rows
+directly — cutouts, corner miters, depth spans, stair steps, the elevator
+frame, glass panes (flat translucent material), and skin slots (VisualBox
+`slot` → intern shader/decal) all arrive exactly as the editor renders.
+Semantics fixed at the shared source: the dark `edit` placeholder box became
+the CLOSED DOOR PANEL — drawn only for edits with an `interaction`
+(door/garageDoor), sized by `PLACED_TUNING`'s portal opening + panel height
+(the collision panel, so what blocks the body is what blocks the eye); an
+arch is genuinely open, halfHeight has no floating box, garage panels fill
+their 2.6m vehicle opening. PROOF SHAPE (the req_0655 ruling — "all green is
+useless when it isn't true end to end"): `compile/worldParity.test.ts`
+sample-occupancy-compares the editor shapes vs the baked instance rows at a
+0.1m probe grid for EVERY WallEdit table row + stairs/elevator baselines,
+plus the player's invariant (a collider-passable point must never be opaquely
+rendered). Hand-mirrored copies deleted: `MATERIAL_COLOR`, `MATERIAL_ALPHA`,
+the slab constants, `pushStairs`/`pushElevatorStorey`/`pushSkinnedWallOrPlate`.
+Compiled door open/close (the Minecraft two-state machine in the loader) is
+the next slice — panels currently bake closed and static.
+
 **Buildings own their history (`game/world/buildings.ts`, req_0512→req_0513,
 2026-06-10):** the USER'S PROPOSAL made law — "give buildings their own
 branch of history rather than storing as a global state. and then the

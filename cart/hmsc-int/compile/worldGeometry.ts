@@ -32,6 +32,10 @@ import { heightfieldTexelColor, roadRibbonSection } from '../render3d/heightfiel
 import type { ChunkFloor } from '../chunkFloor';
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
+// THE ONE piece decomposition (PARITY-0611, req_0654/req_0655): the bake lowers
+// the SAME pieceVisualShapes the editor and /test render — never a private
+// re-derivation. compile/worldParity.test.ts holds the two views identical.
+import { MATERIAL_LOOK, pieceVisualShapes, type VisualShape } from '../editors/build/pieceShapes';
 import { shaderSpec, defaultShaderData } from '@game/textures/shaders';
 import { loadCustomTextures, type CustomTexture } from '@game/textures/materials';
 import { BUILTIN_DECALS } from '@game/textures/builtinDecals';
@@ -81,11 +85,9 @@ export type MaterialAsset = {
   doc?: Uint8Array;
 };
 
-// Translucent base materials — their look is an ALPHA, not a texture (glass/
-// chainlink are see-through, not procedural). Mirrors pieceMeshes MATERIAL_LOOK
-// opacity. A face on one of these (with no shader skin) ships a flat translucent
-// material so the loader renders it see-through instead of as an opaque box.
-const MATERIAL_ALPHA: Partial<Record<BuildMaterial, number>> = { glass: 0.3, chainlink: 0.45 };
+// Translucent looks (glass walls, window panes) arrive as VisualBox.opacity
+// from the SHARED decomposition (MATERIAL_LOOK glass/chainlink alphas, window
+// pane alpha) — no hand-mirrored alpha table here anymore.
 
 // A material id → its shader recipe (WGSL + frozen data). Built-in catalog ids
 // resolve via shaderSpec; 'custom:' ids resolve through the studio's saved
@@ -181,13 +183,12 @@ function internMaterial(b: Build, skin: BuildFaceSkin | undefined): number {
   return slot;
 }
 
-// Intern a TRANSLUCENT FLAT material for a base BuildMaterial (glass/chainlink) —
-// no shader, just an alpha; the row keeps its own MATERIAL_COLOR tint. Returns 0
-// for opaque materials (they stay in the flat instanced batch).
-function internTranslucent(b: Build, material: BuildMaterial): number {
-  const opacity = MATERIAL_ALPHA[material];
-  if (opacity === undefined) return 0;
-  const key = `flat:${material}`;
+// Intern a TRANSLUCENT FLAT material — no shader, just an alpha; the row keeps
+// its own color tint. The alpha comes from the shared decomposition's
+// VisualBox.opacity (glass walls, window panes — whatever the editor draws
+// see-through ships see-through).
+function internTranslucent(b: Build, opacity: number): number {
+  const key = `flat:a${opacity}`;
   const existing = b.index.get(key);
   if (existing !== undefined) return existing;
   const slot = b.vocab.length + 1;
@@ -195,18 +196,10 @@ function internTranslucent(b: Build, material: BuildMaterial): number {
   b.index.set(key, slot);
   return slot;
 }
-
-// The material slot a face wears: a shader skin wins (textured), else the base
-// material's translucency (glass → see-through), else 0 (opaque flat color).
-function faceMaterial(b: Build, skin: BuildFaceSkin | undefined, baseMaterial: BuildMaterial): number {
-  return internMaterial(b, skin) || internTranslucent(b, baseMaterial);
-}
 const HEIGHTFIELD_LUMP_VERSION = 2;
 const HEIGHTFIELD_RECORD_FLOATS = 10;
 const HEIGHTFIELD_TEXTURE_PIXELS_PER_TILE = 4;
 const HEIGHTFIELD_TEXTURE_MAX_PX = 512;
-const BUILD_FACE_SLAB_THICKNESS_METERS = 0.02; // Matches BUILD_UI.faceSlabThicknessMeters.
-const BUILD_FACE_SLAB_LIFT_METERS = 0.012; // Matches BUILD_UI.faceSlabLiftMeters.
 const DEG = Math.PI / 180;
 
 // Color / Rotation / the prop part vocabulary live in game/kinds/propModels —
@@ -259,76 +252,14 @@ function pushRamp(
   pushShape(b, INSTANCE_SHAPE_RAMP, x, y + height / 2, z, [0, yawDegrees, 0], width, height, depth, color, material);
 }
 
-function localOffset(u: number, v: number, yawDegrees: number): { dx: number; dz: number } {
-  const cos = Math.cos(yawDegrees * DEG);
-  const sin = Math.sin(yawDegrees * DEG);
-  return { dx: u * cos + v * sin, dz: -u * sin + v * cos };
-}
-
-function pushStairs(
-  b: Build,
-  x: number,
-  y: number,
-  z: number,
-  width: number,
-  height: number,
-  depth: number,
-  color: Color,
-  yawDegrees = 0,
-  material = 0,
-): number {
-  const steps = GAME_BUILD.placed.tuning.stairVisualSteps;
-  for (let i = 0; i < steps; i += 1) {
-    const v = (-depth / 2) + ((i + 0.5) / steps) * depth;
-    const stepHeight = ((i + 1) / steps) * height;
-    const { dx, dz } = localOffset(0, v, yawDegrees);
-    pushBox(b, x + dx, y + stepHeight / 2, z + dz, width, stepHeight, depth / steps, color, yawDegrees, material);
-  }
-  return steps;
-}
-
-/** REQ-0647: one elevator storey — the SAME open-front frame pieceMeshes
- *  draws in /test (posts, thin back/side walls, front header beam), never a
- *  solid box. The car bakes separately at each shaft's rest stop. */
-function pushElevatorStorey(
-  b: Build,
-  piece: { x: number; y: number; z: number; yawDegrees: number },
-  size: { widthMeters: number; heightMeters: number; depthMeters: number },
-  color: Color,
-): number {
-  const tuning = GAME_BUILD.placed.tuning;
-  const halfW = size.widthMeters / 2;
-  const halfD = size.depthMeters / 2;
-  const wall = tuning.elevatorShaftWallThicknessMeters;
-  const post = tuning.elevatorPostSizeMeters;
-  const h = size.heightMeters;
-  const at = (u: number, v: number, baseY: number, w: number, boxH: number, d: number): void => {
-    const { dx, dz } = localOffset(u, v, piece.yawDegrees);
-    pushBox(b, piece.x + dx, baseY + boxH / 2, piece.z + dz, w, boxH, d, color, piece.yawDegrees, 0);
-  };
-  at(-halfW + wall / 2, 0, piece.y, wall, h, size.depthMeters - post * 2); // left wall
-  at(halfW - wall / 2, 0, piece.y, wall, h, size.depthMeters - post * 2); // right wall
-  at(0, halfD - wall / 2, piece.y, size.widthMeters - post * 2, h, wall); // back wall
-  at(0, -halfD + wall / 2, piece.y + h - tuning.elevatorHeaderHeightMeters, size.widthMeters - post * 2, tuning.elevatorHeaderHeightMeters, wall); // front header
-  for (const [pu, pv] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-    at(pu * (halfW - post / 2), pv * (halfD - post / 2), piece.y, post, h, post);
-  }
-  return 8;
-}
+// (stairs / elevator-storey / wall decompositions all flow from the SHARED
+// pieceVisualShapes now — the dedicated pushStairs/pushElevatorStorey copies
+// are gone; the parity suite caught the elevator copy already drifting.)
 
 function hexColor(hex: string): Color {
   const h = hex.replace('#', '');
   const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
   return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255];
-}
-
-function skinColor(skin: BuildFaceSkin | undefined, fallback: Color): Color {
-  if (!skin) return fallback;
-  if (skin.kind === 'color') return hexColor(skin.value);
-  // The current instance lump carries color but not texture assets. Keep
-  // material-skinned face slabs present and visibly assigned; the texture stream
-  // can replace this fallback when skins RLE lands.
-  return fallback;
 }
 
 // ── colors ────────────────────────────────────────────────────────────────
@@ -1228,17 +1159,8 @@ function buildingColor(kind: BuildingKind | string): Color {
   }
 }
 
-// How each build MATERIAL reads — mirrors PlayRoute's MATERIAL_LOOK so the loader
-// shows the same wall/floor/pillar colors the /test play view does.
-const MATERIAL_COLOR: Record<BuildMaterial, Color> = {
-  concrete: hexColor('#9aa3ad'),
-  brick: hexColor('#8a4a3a'),
-  stucco: hexColor('#d8cdb8'),
-  wood: hexColor('#8a6a45'),
-  metal: hexColor('#7d858d'),
-  glass: hexColor('#cfe6f2'),
-  chainlink: hexColor('#b9c2c9'),
-};
+// (Build-material colors come straight off the shared MATERIAL_LOOK table via
+// pieceVisualShapes — the hand-mirrored MATERIAL_COLOR copy is gone.)
 
 // ── extrusion ───────────────────────────────────────────────────────────────
 
@@ -1307,77 +1229,38 @@ function pushWorldLayers(b: Build, state: GameState): void {
   }
 }
 
-function pushPieceBox(
-  b: Build,
-  piece: PlacedBuildPiece,
-  u: number,
-  v: number,
-  baseY: number,
-  width: number,
-  height: number,
-  depth: number,
-  color: Color,
-  material = 0,
-): void {
-  const { dx, dz } = localOffset(u, v, piece.yawDegrees);
-  pushBox(
-    b,
-    piece.x + dx,
-    baseY + height / 2,
-    piece.z + dz,
-    width,
-    height,
-    depth,
-    color,
-    piece.yawDegrees,
-    material,
-  );
-}
-
-function isHorizontalSkinPiece(kind: string): boolean {
-  return kind === 'floor' || kind === 'roof';
-}
-
-// Each face carries EITHER a material (the shader travels, interned) OR a flat
-// color (a {kind:'color'} swatch, or the piece's fallback). A material face is
-// still emitted with `fallback` as its color so a host without the materials
-// vocab degrades to the base look instead of going invisible.
-function pushSkinnedWallOrPlate(b: Build, piece: PlacedBuildPiece, fallback: Color): number {
-  const def = GAME_BUILD.catalog.get(piece.pieceId);
-  const size = def.size;
-  const sides = skinColor(piece.skin?.sides, fallback);
-  const front = skinColor(piece.skin?.front, fallback);
-  const back = skinColor(piece.skin?.back, fallback);
-  const sidesMat = faceMaterial(b, piece.skin?.sides, def.material);
-  const frontMat = faceMaterial(b, piece.skin?.front, def.material);
-  const backMat = faceMaterial(b, piece.skin?.back, def.material);
-  const slab = BUILD_FACE_SLAB_THICKNESS_METERS;
-  const lift = BUILD_FACE_SLAB_LIFT_METERS;
-
-  if (isHorizontalSkinPiece(def.kind)) {
-    const coreHeight = Math.max(0.01, size.heightMeters - lift * 2);
-    pushPieceBox(b, piece, 0, 0, piece.y + lift, size.widthMeters, coreHeight, size.depthMeters, sides, sidesMat);
-    pushPieceBox(b, piece, 0, 0, piece.y + size.heightMeters + lift - slab / 2, size.widthMeters, slab, size.depthMeters, front, frontMat);
-    pushPieceBox(b, piece, 0, 0, piece.y - lift - slab / 2, size.widthMeters, slab, size.depthMeters, back, backMat);
-    return 3;
+/** Lower ONE shared visual shape to an instance row. A box that wears a skin
+ *  slot interns that skin's shader/decal exactly as /test textures it; a
+ *  material-skinned face still ships its base-material color so a host
+ *  without the materials vocab degrades to the base look, not invisible.
+ *  Anything the editor draws translucent (glass, window panes) ships a flat
+ *  translucent material with the same alpha. */
+function pushVisualShape(b: Build, piece: PlacedBuildPiece, baseMaterial: BuildMaterial, shape: VisualShape): number {
+  if (shape.kind === 'ramp') {
+    // Match /test: ramps render as the real inclined slab geometry and
+    // collide as a slope heightfield, not as a bounding box.
+    const r = shape.ramp;
+    pushRamp(b, r.x, r.y, r.z, r.width, r.height, r.depth, hexColor(r.color), r.yawDegrees);
+    return 1;
   }
-
-  if (GAME_BUILD.kinds.get(def.kind).edits === 'wall') {
-    const frontV = size.depthMeters / 2 + lift;
-    const backV = -size.depthMeters / 2 - lift;
-    pushPieceBox(b, piece, 0, 0, piece.y, size.widthMeters, size.heightMeters, size.depthMeters, sides, sidesMat);
-    pushPieceBox(b, piece, 0, frontV, piece.y, size.widthMeters, size.heightMeters, slab, front, frontMat);
-    pushPieceBox(b, piece, 0, backV, piece.y, size.widthMeters, size.heightMeters, slab, back, backMat);
-    return 3;
-  }
-
-  return 0;
+  const v = shape.box;
+  const skin = v.slot !== undefined ? piece.skin?.[v.slot] : undefined;
+  let material = internMaterial(b, skin);
+  const color = skin?.kind === 'material'
+    ? hexColor(MATERIAL_LOOK[baseMaterial].color)
+    : hexColor(v.color);
+  if (material === 0 && (v.opacity ?? 1) < 1) material = internTranslucent(b, v.opacity!);
+  pushShape(b, INSTANCE_SHAPE_BOX, v.cx, v.cy, v.cz, [0, v.yawDegrees, 0], v.sx, v.sy, v.sz, color, material);
+  return 1;
 }
 
 /** Extrude the BUILD stream's PLACED PIECES into box instances — the city's
- *  structures (walls/floors/pillars/towers/prefabs). Wall and plate pieces emit
- *  the same core + face-slab boxes as /test so per-face skins survive the bake;
- *  simple pieces remain one body box. This is the parity-with-/test path. */
+ *  structures (walls/floors/pillars/towers/prefabs). Every non-prop piece
+ *  lowers through the SHARED pieceVisualShapes decomposition (PARITY-0611) —
+ *  door/window cutouts, corner miters, depth spans, stairs steps, the
+ *  elevator's open-front frame all arrive exactly as the editor renders them
+ *  (the old private wall/stairs/elevator copies shipped door walls SOLID,
+ *  req_0654's hidden-wall doorway). */
 function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number {
   let emitted = 0;
   for (const piece of pieces) {
@@ -1387,8 +1270,6 @@ function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number
     } catch {
       continue; // unknown piece id — skip rather than abort the whole bake
     }
-    const color = MATERIAL_COLOR[def.material] ?? [0.62, 0.64, 0.68];
-    const size = def.size;
     if (def.kind === 'prop' && def.propKind) {
       emitted += pushPropGeometry(b, {
         id: piece.id,
@@ -1401,46 +1282,9 @@ function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number
       });
       continue;
     }
-    const skinnedBoxes = pushSkinnedWallOrPlate(b, piece, color);
-    if (skinnedBoxes > 0) {
-      emitted += skinnedBoxes;
-      continue;
+    for (const shape of pieceVisualShapes(piece, piece.id, pieces)) {
+      emitted += pushVisualShape(b, piece, def.material, shape);
     }
-    if (def.kind === 'ramp') {
-      // Match /test: ramps render as the real inclined slab geometry and
-      // collide as a slope heightfield, not as a bounding box.
-      pushRamp(b, piece.x, piece.y, piece.z, size.widthMeters, size.heightMeters, size.depthMeters, color, piece.yawDegrees);
-      emitted += 1;
-      continue;
-    }
-    if (def.kind === 'stairs') {
-      // Match /test: stairs are visually distinct stepped boxes, while their
-      // collision remains the walkable slope heightfield.
-      emitted += pushStairs(b, piece.x, piece.y, piece.z, size.widthMeters, size.heightMeters, size.depthMeters, color, piece.yawDegrees);
-      continue;
-    }
-    if (def.kind === 'elevator') {
-      // Match /test: the open-front shaft frame, never a solid box (REQ-0647).
-      emitted += pushElevatorStorey(b, piece, size, color);
-      continue;
-    }
-    // The play view's body box: center (x, y + h/2, z), full catalog size, yaw.
-    // A non-wall single body (pillar/post/column) takes its material from the
-    // 'sides' slot — the whole box wears one look.
-    const bodyMat = faceMaterial(b, piece.skin?.sides, def.material);
-    pushBox(
-      b,
-      piece.x,
-      piece.y + size.heightMeters / 2,
-      piece.z,
-      size.widthMeters,
-      size.heightMeters,
-      size.depthMeters,
-      color,
-      piece.yawDegrees,
-      bodyMat,
-    );
-    emitted += 1;
   }
   // The elevator CAR is deliberately NOT a static instance row (REQ-0652):
   // the ELEVATORS lump ships the shafts and the loader renders one LIVE car

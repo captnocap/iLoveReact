@@ -244,8 +244,8 @@ const PALETTE_KIND_ORDER: readonly BuildPieceKind[] = [
   ...GAME_BUILD.kinds.kinds.filter((kind) => !RULED_HOTKEY_KINDS.includes(kind)),
 ];
 
-// MATERIAL_LOOK + SIGHTLINE_EDIT_OPACITY moved to ../build/pieceMeshes (the
-// renderer that owns them).
+// MATERIAL_LOOK moved to ../build/pieceShapes (the pure shape source the
+// editor renderer AND the compile bake share — PARITY-0611).
 
 const PLAYER_POSE_TWIG = {
   route: '/test',

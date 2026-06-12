@@ -40,8 +40,14 @@ type SolidBox = {
   yawDegrees: number;
 };
 
+/** face-inclusive margin: the baked rows live in a Float32Array, so a probe
+ *  sitting EXACTLY on a box face (sill tops land on grid-aligned y) flips
+ *  open/solid on f32-vs-f64 rounding alone. 1mm of inclusion absorbs that
+ *  without hiding any real (≥ probe-step) geometry divergence. */
+const FACE_EPS_METERS = 0.001;
+
 function boxContains(b: SolidBox, x: number, y: number, z: number): boolean {
-  if (Math.abs(y - b.cy) > b.sy / 2) return false;
+  if (Math.abs(y - b.cy) > b.sy / 2 + FACE_EPS_METERS) return false;
   const cos = Math.cos(b.yawDegrees * DEG);
   const sin = Math.sin(b.yawDegrees * DEG);
   const dx = x - b.cx;
@@ -49,7 +55,7 @@ function boxContains(b: SolidBox, x: number, y: number, z: number): boolean {
   // inverse of the renderer's yaw: world → piece-local (u along width, v along depth)
   const u = dx * cos - dz * sin;
   const v = dx * sin + dz * cos;
-  return Math.abs(u) <= b.sx / 2 && Math.abs(v) <= b.sz / 2;
+  return Math.abs(u) <= b.sx / 2 + FACE_EPS_METERS && Math.abs(v) <= b.sz / 2 + FACE_EPS_METERS;
 }
 
 function anyContains(boxes: readonly SolidBox[], x: number, y: number, z: number): boolean {

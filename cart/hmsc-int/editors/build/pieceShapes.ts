@@ -36,7 +36,6 @@ export const BUILD_UI = {
   editCutoutWidthMeters: 1.2,
   doubleWindowCutoutWidthMeters: 2.2,
   editCutoutHeightMeters: 1.2,
-  editCutoutLowHeightMeters: 2.2,
   windowPaneDepthMeters: 0.04,
   windowPaneColor: '#bcd3dd',
   windowPaneOpacity: 0.3,
@@ -58,11 +57,9 @@ export const MATERIAL_LOOK: Record<BuildMaterial, { color: string; opacity?: num
   glass: { color: '#cfe6f2', opacity: 0.3 },
   chainlink: { color: '#b9c2c9', opacity: 0.45 },
 };
-export const SIGHTLINE_EDIT_OPACITY: Partial<Record<WallEdit, number>> = {
-  window: 0.35,
-  doubleWindow: 0.3,
-  brokenWindow: 0.12,
-};
+/** the closed door/garage panel's look — dark so the leaf reads against any
+ *  wall material (the same value the old inline edit box carried) */
+export const DOOR_PANEL_COLOR = '#0c1018';
 
 // ── BUILD-mode piece visuals: the same meaning the colliders carry, as boxes ─
 
@@ -74,6 +71,10 @@ export type VisualBox = {
   color: string;
   textureKey?: string;
   opacity?: number;
+  /** which skin slot this box wears (PARITY-0611) — the compile bake reads
+   *  piece.skin[slot] through the SAME decomposition to intern shader/decal
+   *  materials; boxes with a fixed look (door panel, glass pane) carry none */
+  slot?: 'front' | 'back' | 'sides';
 };
 
 export type VisualRamp = {
@@ -100,10 +101,12 @@ function localOffset(u: number, v: number, yawDegrees: number): { dx: number; dz
   return { dx: u * cos + v * sin, dz: -u * sin + v * cos };
 }
 
-function visualLook(skin: BuildFaceSkin | undefined, fallback: string): { color: string; textureKey?: string } {
-  if (!skin) return { color: fallback };
-  if (skin.kind === 'color') return { color: skin.value };
-  return { color: '#ffffff', textureKey: `bldskin:${skin.id}` };
+type FaceLook = { color: string; textureKey?: string; slot?: 'front' | 'back' | 'sides' };
+
+function visualLook(skin: BuildFaceSkin | undefined, fallback: string, slot: 'front' | 'back' | 'sides'): FaceLook {
+  if (!skin) return { color: fallback, slot };
+  if (skin.kind === 'color') return { color: skin.value, slot };
+  return { color: '#ffffff', textureKey: `bldskin:${skin.id}`, slot };
 }
 
 function isHorizontalSkinPiece(kind: string): boolean {
@@ -117,9 +120,9 @@ export function pieceVisualShapes(
 ): VisualShape[] {
   const def = GAME_BUILD.catalog.get(piece.pieceId);
   const look = MATERIAL_LOOK[def.material];
-  const sides = visualLook(piece.skin?.sides, look.color);
-  const front = visualLook(piece.skin?.front, look.color);
-  const back = visualLook(piece.skin?.back, look.color);
+  const sides = visualLook(piece.skin?.sides, look.color, 'sides');
+  const front = visualLook(piece.skin?.front, look.color, 'front');
+  const back = visualLook(piece.skin?.back, look.color, 'back');
   const size = def.size;
   const yaw = piece.yawDegrees;
   const depthSpan = GAME_BUILD.placed.depthSpan({ id: key, ...piece }, pieces);
@@ -133,7 +136,7 @@ export function pieceVisualShapes(
     w: number,
     h: number,
     d: number,
-    face: { color: string; textureKey?: string },
+    face: FaceLook,
     opacity?: number,
   ): VisualShape => {
     const { dx, dz } = localOffset(u, v, yaw);
@@ -147,6 +150,7 @@ export function pieceVisualShapes(
         color: face.color,
         textureKey: face.textureKey,
         opacity: opacity ?? look.opacity,
+        slot: face.slot,
       },
     };
   };
@@ -291,13 +295,21 @@ export function pieceVisualShapes(
         BUILD_UI.windowPaneOpacity,
       ));
     }
+    // The closed DOOR PANEL — only edits that DECLARE an interaction have a
+    // leaf (door/garageDoor); an arch is "a doorway with no door" and a
+    // halfHeight wall has no cutout at all. The panel's footprint is the
+    // COLLISION panel's (placedClosedDoorBand: the portal opening × the panel
+    // height from PLACED_TUNING) so what blocks the body is exactly what
+    // blocks the eye — req_0654's hidden-wall class, killed at the source.
+    // (Replaces the old dark 'edit' placeholder box that also opaquely filled
+    // arches and floated mid-wall on halfHeight.)
     const interaction = edit ? GAME_BUILD.edits.wall[edit]?.interaction : null;
-    if (edit !== undefined && !isWindowOpening && !(interaction && piece.doorOpen === true)) {
-      const low = edit === 'door' || edit === 'garageDoor' || edit === 'arch';
-      const eh = low ? BUILD_UI.editCutoutLowHeightMeters : BUILD_UI.editCutoutHeightMeters;
-      const ey = low ? piece.y + eh / 2 : piece.y + size.heightMeters * 0.55;
-      const opacity = SIGHTLINE_EDIT_OPACITY[edit];
-      shapes.push(box('edit', 0, depthCenter, ey - eh / 2, BUILD_UI.editCutoutWidthMeters, eh, depthSize + 0.06, { color: '#0c1018' }, opacity));
+    if (edit !== undefined && interaction && piece.doorOpen !== true) {
+      const tuning = GAME_BUILD.placed.tuning;
+      const vehicle = GAME_BUILD.edits.wall[edit].portalKind === 'vehicle';
+      const panelW = vehicle ? tuning.vehicleOpeningWidthMeters : tuning.walkOpeningWidthMeters;
+      const panelH = Math.min(size.heightMeters, vehicle ? tuning.garageDoorPanelHeightMeters : tuning.walkDoorPanelHeightMeters);
+      shapes.push(box('door', 0, depthCenter, piece.y, panelW, panelH, depthSize + 0.06, { color: DOOR_PANEL_COLOR }));
     }
     return shapes;
   }
