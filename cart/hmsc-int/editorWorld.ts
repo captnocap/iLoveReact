@@ -111,15 +111,17 @@ export function propNearPoint(state: GameState, x: number, z: number, radius: nu
   let best: WorldProp | null = null;
   let bestDist = radius;
   for (const prop of state.world.props) {
-    const d = Math.hypot(prop.x - x, prop.z - z);
     const def = propKindDefinition(prop.kind);
-    const reach = Math.max(def.footprintRadiusMeters, 0.5);
+    const fp = propFootprint(prop);
+    const dx = fp ? (x < fp.minX ? fp.minX - x : x > fp.maxX ? x - fp.maxX : 0) : prop.x - x;
+    const dz = fp ? (z < fp.minZ ? fp.minZ - z : z > fp.maxZ ? z - fp.maxZ : 0) : prop.z - z;
+    const d = Math.hypot(dx, dz);
+    const reach = fp ? 0 : Math.max(def.footprintRadiusMeters, 0.5);
     if (d - reach < bestDist) {
       bestDist = Math.max(0, d - reach);
       best = prop;
     }
   }
-  void propFootprint;
   return best;
 }
 
@@ -156,7 +158,7 @@ export function fillTiles(
 // terrain via their tileKind altitude.
 export function placeMarker(
   state: GameState,
-  opts: { kind: 'spawn' | 'save'; x: number; z: number; spawnKey?: string },
+  opts: { kind: 'spawn' | 'save' | 'vehicleSpawn'; x: number; z: number; spawnKey?: string },
 ): GameState {
   return placeCell(
     state,

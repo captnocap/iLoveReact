@@ -108,3 +108,14 @@ landforms behaviorally identical over 4,356 surface samples + all pure helpers
    e.g. pathing_lab walks road-family at ~12 vs crosswalk 1). Carried verbatim.
 6. **No 'grass' tile kind** — old comments rule `sand` as the soft-ground
    stand-in for landform footings. Preserved, not "fixed".
+
+## PARKSPAWN-0612 (req_0694)
+
+Two kinds appended LAST (indices stable): `parking` — paintable parking-lot
+ground, asphalt that wears white 3m stall lines (drawn by the tile surface
+shaders: HEIGHTFIELD_TILE_SHADER + its CPU mirror + PAINTER_VIEW_WGSL, all
+keyed by the baked kind index); priced as a destination (vehicleCost 1.4,
+never preferred) so A* parks there but never shortcuts through. And
+`vehicleSpawn` — the gameplay marker where the traffic system may
+materialize a vehicle; WHICH vehicle is `GAME_VEHICLE.pickSpawn`'s
+spawnRate-weighted pick, WHERE is `GAME_WORLD.vehicleSpawnCells`.

@@ -58,7 +58,14 @@ export type TileKind =
   // Living ground (GRASSTILE-0611, req_0642): paintable lawn/meadow surfaces —
   // the user had bush (an embedded foliage profile) but no grass GROUND.
   | 'grass'
-  | 'grassDry';
+  | 'grassDry'
+  // Parking + vehicle spawn (PARKSPAWN-0612, req_0694). Appended last — kind
+  // indices stay stable. 'parking' is painted parking-lot ground (asphalt
+  // wearing white stall lines); 'vehicleSpawn' is the gameplay marker where
+  // the traffic system may materialize a vehicle (which vehicle = the
+  // garage's per-style spawnRate weighting, not the cell's business).
+  | 'parking'
+  | 'vehicleSpawn';
 
 // How a tile kind is allowed to enter the world — the registry is several
 // things in one list, and this is what tells them apart:
@@ -306,6 +313,8 @@ const TEX = {
   spawn: 'hmsc.tile.spawn',
   save: 'hmsc.tile.save',
   grass: 'hmsc.tile.grass',
+  parking: 'hmsc.tile.parking',
+  vehicleSpawn: 'hmsc.tile.vehicleSpawn',
 } as const;
 
 const ROAD_SURFACE: TileSurfaceProfile = {
@@ -629,6 +638,43 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.55 },
     surface: { material: 'soil', walkSpeedMultiplier: 0.96, runSpeedMultiplier: 0.94, vehicleSpeedMultiplier: 0.55, accelerationMultiplier: 0.72, friction: 0.58, lateralGrip: 0.62, restitution: 0.2 },
     render: { color: '#8a9a4a', heightMeters: 0.06, textureKey: TEX.grass },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  // ── parking + vehicle spawn (PARKSPAWN-0612, req_0694) — appended LAST ─────
+  // Painted parking-lot ground: asphalt wearing white stall lines (the tile
+  // surface shaders draw 3m bays). Drivable but priced as a destination, not
+  // a thoroughfare — vehicleCost 1.4 keeps A* from cutting through lots.
+  parking: {
+    kind: 'parking',
+    placement: 'surface',
+    label: 'Parking',
+    flow: 'none',
+    pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.05, runCost: 1.0, vehicleCost: 1.4, preferredByVehicles: false, noise: 0.6 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 0.95 },
+    surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 0.85, accelerationMultiplier: 0.95, friction: 0.2, lateralGrip: 0.9, restitution: 0.82 },
+    render: { color: '#2a2f3a', heightMeters: 0.08, textureKey: TEX.parking },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  // Where the traffic system may materialize a vehicle. Ordinary drivable
+  // ground under a marker look; WHICH vehicle is the garage's per-style
+  // spawnRate weighting (GAME_VEHICLE.pickSpawn), not the cell's business.
+  vehicleSpawn: {
+    kind: 'vehicleSpawn',
+    placement: 'gameplay',
+    label: 'Vehicle Spawn',
+    flow: 'none',
+    pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.0, runCost: 1.0, vehicleCost: 1.0, preferredByVehicles: false, noise: 0.0 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: OPEN_TRAVERSAL,
+    surface: { material: 'dev', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.2, lateralGrip: 0.9, restitution: 0.8 },
+    render: { color: '#f97316', heightMeters: 0.05, textureKey: TEX.vehicleSpawn },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
 };

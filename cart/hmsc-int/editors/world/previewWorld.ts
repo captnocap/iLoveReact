@@ -55,7 +55,7 @@ export function assemblePreviewWorld(opts: {
         const sc = markerCellOf.get(p.spawnId);
         if (sc && !(sc.x === wx && sc.z === wz)) spawnKey = gridCellKey({ x: sc.x, y: 0, z: sc.z });
       }
-      s = placeMarker(s, { kind: p.kind as 'spawn' | 'save', x: wx, z: wz, spawnKey });
+      s = placeMarker(s, { kind: p.kind as 'spawn' | 'save' | 'vehicleSpawn', x: wx, z: wz, spawnKey });
     } else {
       // Props anchor at their CENTER (radial footprint) — the snapped rect's
       // centre, so the prop sits exactly where its canvas node draws.

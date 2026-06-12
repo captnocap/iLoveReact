@@ -26,6 +26,13 @@
 //
 // (WGSL: no unary plus, no backticks in comments.)
 
+import { TILE_KINDS } from './world/tileKinds';
+
+// Parking stall paint (PARKSPAWN-0612): same per-kind branch as the game's
+// HEIGHTFIELD_TILE_SHADER — the kind index is baked from TILE_KINDS order, so
+// the painter shows the stall lines the game will bake.
+const PARKING_KIND_INDEX = TILE_KINDS.indexOf('parking');
+
 export const PAINTER_VIEW_WGSL = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
 
@@ -81,6 +88,12 @@ fn hSample(base: i32, ix: i32, iy: i32, cols: i32, rows: i32) -> f32 {
     let col = vec3f(D[pbase], D[pbase + 1], D[pbase + 2]);
     let shade = mix(1.0, 0.78, smoothstep(0.44, 0.5, edge));
     rgb = col * shade;
+    if (kind == ${PARKING_KIND_INDEX}) {
+      let pwx = in.uv.x * f32(cols);
+      let stallD = abs(pwx - 3.0 * round(pwx / 3.0));
+      let stall = 1.0 - smoothstep(0.06, 0.10, stallD);
+      rgb = mix(rgb, vec3f(0.85, 0.86, 0.88), stall * 0.85);
+    }
   }
 
   // ── road ribbon (verbatim from HEIGHTFIELD_TILE_SHADER, weighted) ──────────

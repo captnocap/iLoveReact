@@ -65,7 +65,15 @@ export type TileKind =
   // Appended at the END — both tile tables ship kind INDICES in their own key
   // order, so new kinds never enter the middle.
   | 'grass'
-  | 'grassDry';
+  | 'grassDry'
+  // Parking (PARKSPAWN-0612, req_0694): painted parking-lot ground — asphalt
+  // wearing white stall lines (3m bays drawn by the tile surface shaders).
+  // Drivable but never a thoroughfare; where parked traffic lives.
+  | 'parking'
+  // Vehicle spawn marker (req_0694): a single placed cell where the traffic
+  // system may materialize a vehicle. WHICH vehicle is the garage's per-style
+  // spawnRate weighting (editors/vehicles), not the cell's business.
+  | 'vehicleSpawn';
 
 // Altered-perception channel. Drives how building skins (and later other
 // surfaces) reinterpret themselves — e.g. being high scrambling facade text or

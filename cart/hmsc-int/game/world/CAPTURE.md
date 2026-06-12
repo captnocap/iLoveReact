@@ -90,3 +90,9 @@ owners: `wv_path` (grid × V5 host-pathing integration), `wv_road`/
 (`cellPlaced`/`cellRemoved`/`regionFilled`/`triggerSet`/`landformPlaced`/
 `landformRemoved`/`respawnArmed`) materializing the WorldGridState snapshot;
 unknown future kinds pass through untouched.
+
+## PARKSPAWN-0612 (req_0694)
+
+`placeMarker` accepts `vehicleSpawn` (the third gameplay marker — no
+save-pairing semantics) and `vehicleSpawnCells(world)` lists the authored
+vehicle-spawn cells in placement order for the traffic system.

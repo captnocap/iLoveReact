@@ -140,7 +140,7 @@ export type { PaintedOverlay, PaintedOverlayLayer, PaintedLayerLook } from './pa
 // ── capture-pending doors (V17: the import line is already the right one) ──
 export { GAME_FIGURE, charactersStream, bakeBodyDocument, applyBodyPaint } from './figure';
 export type { BodyDocument, BakedFigure, CharactersEvent, CharactersStreamState } from './figure';
-export { GAME_VEHICLE, vehiclesStream, applyVehiclePaint } from './vehicle';
+export { GAME_VEHICLE, vehiclesStream, applyVehiclePaint, pickVehicleSpawn } from './vehicle';
 export type { VehicleDoc, VehiclePartId, VehicleStyleId, VehicleRoleId, VehiclePoseId, DamageLevel, VehicleBuild, VehiclesEvent, VehiclesStreamState } from './vehicle';
 export { GAME_DRIVING, makeCarState, defaultTuning, stepCar, rightCar } from './driving';
 export type { CarState, CarTuning, CarInput, CarTelemetry } from './driving';

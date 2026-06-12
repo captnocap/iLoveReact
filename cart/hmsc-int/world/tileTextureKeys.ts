@@ -24,4 +24,6 @@ export const HMSC_TILE_TEXTURE_KEYS = {
   median: 'hmsc.tile.road',
   grass: 'hmsc.tile.grass',
   grassDry: 'hmsc.tile.grass',
+  parking: 'hmsc.tile.parking',
+  vehicleSpawn: 'hmsc.tile.vehicleSpawn',
 } satisfies Record<TileKind, string>;

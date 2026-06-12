@@ -35,7 +35,7 @@ import type { Vec3 } from '../physics';
  */
 export function placeMarker(
   world: WorldGridState,
-  opts: { kind: 'spawn' | 'save'; x: number; z: number; y?: number; spawnKey?: string },
+  opts: { kind: 'spawn' | 'save' | 'vehicleSpawn'; x: number; z: number; y?: number; spawnKey?: string },
   sourceLine: string,
 ): WorldGridState {
   const cell: GridCell = { x: opts.x, y: opts.y ?? 0, z: opts.z };
@@ -54,6 +54,20 @@ export function defaultSpawnCell(world: WorldGridState): GridCell | undefined {
     if (placedCell.kind === 'spawn') return placedCell.cell;
   }
   return undefined;
+}
+
+/**
+ * Every authored vehicle-spawn cell (PARKSPAWN-0612, req_0694) in placement
+ * order — where the traffic system may materialize a vehicle. WHICH vehicle
+ * each point produces is the garage's per-style spawnRate weighting
+ * (GAME_VEHICLE.pickSpawn), not the cell's business.
+ */
+export function vehicleSpawnCells(world: WorldGridState): GridCell[] {
+  const cells: GridCell[] = [];
+  for (const placedCell of Object.values(world.placedCells)) {
+    if (placedCell.kind === 'vehicleSpawn') cells.push(placedCell.cell);
+  }
+  return cells;
 }
 
 // ── respawn ──────────────────────────────────────────────────────────────────

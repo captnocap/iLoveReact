@@ -753,6 +753,27 @@ export { vehiclesStream } from './stream';
 export type { VehiclesEvent, VehiclesStreamState } from './stream';
 import { vehiclesStream } from './stream';
 
+/**
+ * Weighted spawn pick (PARKSPAWN-0612, req_0694): WHICH authored vehicle a
+ * vehicle-spawn cell materializes, weighted by each doc's spawnRate (the
+ * editors/vehicles CONTRACT knob; 0/undefined never spawns). `roll` ∈ [0,1) —
+ * the caller owns randomness, so the pick is pure and replayable. undefined
+ * when the garage holds no spawnable vehicle.
+ */
+export function pickVehicleSpawn(garage: readonly VehicleDoc[], roll: number): VehicleDoc | undefined {
+  const weightOf = (doc: VehicleDoc) => Math.max(0, doc.spawnRate ?? 0);
+  const total = garage.reduce((sum, doc) => sum + weightOf(doc), 0);
+  if (total <= 0) return undefined;
+  let remaining = Math.min(Math.max(roll, 0), 1 - 1e-9) * total;
+  for (const doc of garage) {
+    const weight = weightOf(doc);
+    if (weight <= 0) continue;
+    remaining -= weight;
+    if (remaining < 0) return doc;
+  }
+  return undefined;
+}
+
 export const GAME_VEHICLE = Object.freeze({
   make: makeVehicle,
   build: buildVehicle,
@@ -764,6 +785,9 @@ export const GAME_VEHICLE = Object.freeze({
   panelMaterial,
   glassMaterial,
   meshKind: vehicleMeshKind,
+  // PARKSPAWN-0612: spawnRate-weighted "which vehicle does this spawn point
+  // produce" — pairs with GAME_WORLD.vehicleSpawnCells (the WHERE).
+  pickSpawn: pickVehicleSpawn,
   stream: vehiclesStream,
   tables: Object.freeze({
     parts: VEHICLE_PART_IDS,

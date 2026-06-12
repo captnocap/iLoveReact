@@ -26,6 +26,14 @@ import { hexToRgb01 } from '../world/placeables';
 // Road-STAMPED cells that fall OUTSIDE the analytic band (the rasterization
 // staircase at curves) render as a concrete curb apron instead of raw asphalt
 // tiles — the gameplay stamp stays, the blocky edge disappears.
+// Parking stall paint (PARKSPAWN-0612): 'parking' cells draw white stall lines
+// every 3m (bay width) over their asphalt palette color. The kind INDEX is
+// baked into the shader string from TILE_KINDS order — the same order
+// encodeTileMap ships cell indices in — so the shader needs no extra D[] slot
+// (Effect buffers only grow; a layout change would ripple the CPU mirror, the
+// painter view, and every baked floor).
+const PARKING_KIND_INDEX = TILE_KINDS.indexOf('parking');
+
 export const HEIGHTFIELD_TILE_SHADER = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
 
@@ -51,6 +59,12 @@ export const HEIGHTFIELD_TILE_SHADER = `
     let col = vec3f(D[pbase], D[pbase + 1], D[pbase + 2]);
     let shade = mix(1.0, 0.78, smoothstep(0.44, 0.5, edge));
     rgb = col * shade;
+    if (kind == ${PARKING_KIND_INDEX}) {
+      let pwx = in.uv.x * f32(cols);
+      let stallD = abs(pwx - 3.0 * round(pwx / 3.0));
+      let stall = 1.0 - smoothstep(0.06, 0.10, stallD);
+      rgb = mix(rgb, vec3f(0.85, 0.86, 0.88), stall * 0.85);
+    }
   }
 
   let cellEnd = cellBase + rows * cols;
@@ -172,6 +186,11 @@ export function heightfieldTexelColor(data: number[], u: number, v: number): [nu
     const pbase = 3 + kind * 3;
     const shade = 1 + (0.78 - 1) * smoothstep01(0.44, 0.5, edge);
     r = data[pbase] * shade; g = data[pbase + 1] * shade; b = data[pbase + 2] * shade;
+    if (kind === PARKING_KIND_INDEX) {
+      const stallD = Math.abs(px - 3 * Math.round(px / 3));
+      const stall = (1 - smoothstep01(0.06, 0.1, stallD)) * 0.85;
+      r += (0.85 - r) * stall; g += (0.86 - g) * stall; b += (0.88 - b) * stall;
+    }
   }
 
   const cellEnd = cellBase + rows * cols;

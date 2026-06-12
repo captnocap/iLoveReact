@@ -502,6 +502,41 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     render: { color: '#8a9a4a', heightMeters: 0.06, textureKey: HMSC_TILE_TEXTURE_KEYS.grassDry },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
+  // ── parking + vehicle spawn (PARKSPAWN-0612, req_0694) — appended LAST ─────
+  // Painted parking-lot ground: asphalt that wears white stall lines (the tile
+  // surface shaders draw 3m bays). Drivable but priced as a destination, not a
+  // thoroughfare — vehicles path in to park, never through as a shortcut.
+  parking: {
+    kind: 'parking',
+    placement: 'surface',
+    label: 'Parking',
+    pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.05, runCost: 1.0, vehicleCost: 1.4, preferredByVehicles: false, cover: 'none', noise: 0.6 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 0.95 },
+    surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 0.85, accelerationMultiplier: 0.95, friction: 0.2, lateralGrip: 0.9, restitution: 0.82 },
+    render: { color: '#2a2f3a', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.parking },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  // Where the traffic system may materialize a vehicle. Ordinary drivable
+  // ground under a marker look; WHICH vehicle is the garage's per-style
+  // spawnRate weighting (editors/vehicles), not the cell's business.
+  vehicleSpawn: {
+    kind: 'vehicleSpawn',
+    placement: 'gameplay',
+    label: 'Vehicle Spawn',
+    pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.0, runCost: 1.0, vehicleCost: 1.0, preferredByVehicles: false, cover: 'none', noise: 0.0 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: OPEN_TRAVERSAL,
+    surface: { material: 'dev', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.2, lateralGrip: 0.9, restitution: 0.8 },
+    render: { color: '#f97316', heightMeters: 0.05, textureKey: HMSC_TILE_TEXTURE_KEYS.vehicleSpawn },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
 };
 
 export const TILE_KINDS = Object.keys(TILE_KIND_DEFINITIONS) as TileKind[];

@@ -139,3 +139,11 @@ REPRESENTATIONAL PICKS (named, per the ruling's no-stall order):
   unwrap; a part with several boxes repeats the texture per box.
 - glass/light parts are paintable like everything else (uniform
   capability); a painted windshield reads opaque — the user's choice.
+
+## PARKSPAWN-0612 (req_0694)
+
+`pickVehicleSpawn(garage, roll)` / `GAME_VEHICLE.pickSpawn` — the
+spawnRate-weighted "which vehicle does a spawn point produce" pick over the
+authored garage (editors/vehicles' CONTRACT knob; 0/undefined never spawns).
+Pure: the caller owns the roll, so picks are replayable. Pairs with
+`GAME_WORLD.vehicleSpawnCells` (the authored WHERE).

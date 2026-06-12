@@ -12,6 +12,7 @@ import {
   buildVehicle,
   makeVehicle,
   panelMaterial,
+  pickVehicleSpawn,
   type DamageLevel,
   type VehicleDoc,
   type VehiclePartId,
@@ -210,6 +211,23 @@ test('painted overlays: paintless builds byte-identical, panels keyed, decals ne
   const cleared = applyVehiclePaint(painted, 'hood', null);
   assert(!('paint' in cleared), 'removing the last overlay drops the channel');
   assertEqual(JSON.stringify(buildVehicle(cleared)), before, 'paint → unpaint rebuilds byte-identical');
+});
+
+test('pickSpawn: spawnRate weights the garage pick; zero-rate never spawns (req_0694)', () => {
+  const heavy: VehicleDoc = { ...makeVehicle(2), spawnRate: 30 };
+  const light: VehicleDoc = { ...makeVehicle(3), spawnRate: 10 };
+  const never: VehicleDoc = { ...makeVehicle(1), spawnRate: 0 };
+  const garage = [never, heavy, light];
+  assertEqual(pickVehicleSpawn([], 0.5), undefined, 'an empty garage spawns nothing');
+  assertEqual(pickVehicleSpawn([never], 0.5), undefined, 'an all-zero garage spawns nothing');
+  // total weight 40: rolls below 0.75 land the 30-weight doc, above it the 10.
+  assertEqual(pickVehicleSpawn(garage, 0), heavy, 'roll 0 → the heavy doc');
+  assertEqual(pickVehicleSpawn(garage, 0.74), heavy, 'just under the split stays heavy');
+  assertEqual(pickVehicleSpawn(garage, 0.76), light, 'past the split → the light doc');
+  assertEqual(pickVehicleSpawn(garage, 0.999999), light, 'the top of the range stays in the garage');
+  for (let roll = 0; roll < 1; roll += 0.05) {
+    assert(pickVehicleSpawn(garage, roll) !== never, `zero-rate never picked (roll ${roll.toFixed(2)})`);
+  }
 });
 
 finish('game/vehicle');

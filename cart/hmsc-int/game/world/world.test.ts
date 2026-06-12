@@ -174,6 +174,17 @@ test('default spawn: the first spawn marker wins', () => {
   assertEqual(GAME_WORLD.cellKey(cell), '7,0,7', 'the first authored spawn must win');
 });
 
+test('vehicle spawn cells: authored markers list in placement order (req_0694)', () => {
+  let w = worldWith((s) => GAME_WORLD.placeMarker(s, { kind: 'vehicleSpawn', x: 2, z: 3 }, 'test'));
+  w = GAME_WORLD.placeMarker(w, { kind: 'vehicleSpawn', x: 8, z: 1 }, 'test');
+  w = GAME_WORLD.placeMarker(w, { kind: 'spawn', x: 5, z: 5 }, 'test');
+  const cells = GAME_WORLD.vehicleSpawnCells(w);
+  assertEqual(cells.length, 2, 'two authored vehicle spawns');
+  assertEqual(GAME_WORLD.cellKey(cells[0]), '2,0,3', 'first authored lists first');
+  assertEqual(GAME_WORLD.cellKey(cells[1]), '8,0,1', 'second authored lists second');
+  assertEqual(GAME_WORLD.cellKey(GAME_WORLD.defaultSpawnCell(w)!), '5,0,5', 'the player spawn is untouched by vehicle markers');
+});
+
 test('respawn lands on the ground under the cell centre', () => {
   const w = worldWith((s) => GAME_WORLD.addSurfaceRegion(s, region('sidewalk', 0, 0, 8, 8)));
   const point = GAME_WORLD.respawnPoint(w, { x: 3, y: 0, z: 3 }, 0.5, 99);

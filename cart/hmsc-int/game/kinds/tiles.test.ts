@@ -156,9 +156,9 @@ test('the paint palette offers surfaces only', () => {
   }
 });
 
-test('embedded = wall/door/bush; gameplay = spawn/save; every kind in exactly one class', () => {
+test('embedded = wall/door/bush; gameplay = spawn/save/vehicleSpawn; every kind in exactly one class', () => {
   assertEqual(EMBEDDED_TILE_KINDS.join(','), 'wall,door,bush', 'embedded kinds');
-  assertEqual(GAMEPLAY_TILE_KINDS.join(','), 'spawn,save', 'gameplay kinds');
+  assertEqual(GAMEPLAY_TILE_KINDS.join(','), 'spawn,save,vehicleSpawn', 'gameplay kinds');
   const total = PAINTABLE_TILE_KINDS.length + EMBEDDED_TILE_KINDS.length
     + GAMEPLAY_TILE_KINDS.length + TILE_KINDS.filter((k) => def(k).placement === 'dev').length;
   assertEqual(total, TILE_KINDS.length, 'placement classes partition the registry');
@@ -169,7 +169,7 @@ test('embedded = wall/door/bush; gameplay = spawn/save; every kind in exactly on
 test('TILE_KINDS index order is locked (host pathing ships kind indices)', () => {
   assertEqual(
     TILE_KINDS.join(','),
-    'water,road,asphalt,sidewalk,mud,sand,wall,door,bush,marker,spawn,save,laneNorth,laneSouth,laneEast,laneWest,junction,crosswalk,median,grass,grassDry',
+    'water,road,asphalt,sidewalk,mud,sand,wall,door,bush,marker,spawn,save,laneNorth,laneSouth,laneEast,laneWest,junction,crosswalk,median,grass,grassDry,parking,vehicleSpawn',
     'TILE_KINDS order',
   );
   for (const k of TILE_KINDS) {
@@ -215,6 +215,20 @@ test('embedded/dev kinds sit on the cell base; surfaces drape the heightfield', 
   for (const k of PAINTABLE_TILE_KINDS) {
     assertEqual(TILE_KIND_DEFINITIONS[k].altitude.sample, 'heightfieldSurface', `${k} altitude`);
   }
+});
+
+test('parking + vehicleSpawn (PARKSPAWN-0612, req_0694) append LAST, classed right', () => {
+  // Appended at the END — kind indices are the host-pathing wire format.
+  assertEqual(TILE_KINDS[TILE_KINDS.length - 2], 'parking', 'parking second-to-last');
+  assertEqual(TILE_KINDS[TILE_KINDS.length - 1], 'vehicleSpawn', 'vehicleSpawn last');
+  assert(PAINTABLE_TILE_KINDS.includes('parking'), 'parking is paintable ground');
+  assert(GAMEPLAY_TILE_KINDS.includes('vehicleSpawn'), 'vehicleSpawn is a placed marker');
+  const parking = def('parking');
+  assert(parking.pathing.walkable, 'a lot is walkable');
+  assert(parking.traversal.allowedModes.includes('drive'), 'a lot is drivable');
+  assert(parking.npc.vehicleCost > def('road').npc.vehicleCost, 'a lot is a destination, never a shortcut');
+  assert(!parking.npc.preferredByVehicles, 'through-traffic does not prefer the lot');
+  assertEqual(def('vehicleSpawn').flow, 'none', 'a vehicle spawn imposes no lane flow');
 });
 
 finish('kinds/tiles');

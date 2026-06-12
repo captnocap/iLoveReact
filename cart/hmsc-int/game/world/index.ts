@@ -66,6 +66,7 @@ import {
   placeMarker,
   respawnPoint,
   triggerCellAtWorldPosition,
+  vehicleSpawnCells,
 } from './spawn';
 import { authoredWorldFromRecord, AUTHORED_WORLD_STORE, loadAuthoredWorld, readAuthoredWorldRaw } from './authored';
 import { legacyGlobalPieces, pieceMutationMapName, piecesForMap, worldStream } from './stream';
@@ -124,6 +125,7 @@ export {
   placeMarker,
   respawnPoint,
   triggerCellAtWorldPosition,
+  vehicleSpawnCells,
 } from './spawn';
 export type { RespawnPoint, SaveStepResult, TriggerStepResult } from './spawn';
 export { authoredWorldFromRecord, AUTHORED_WORLD_STORE, loadAuthoredWorld, readAuthoredWorldRaw } from './authored';
@@ -253,6 +255,7 @@ export const GAME_WORLD = Object.freeze({
   heightfieldSlots: WORLD_HEIGHTFIELD_SLOTS,
   // spawn / respawn / triggers
   defaultSpawnCell,
+  vehicleSpawnCells,
   respawnPoint,
   enteredTriggerStep,
   enteredSaveStep,
