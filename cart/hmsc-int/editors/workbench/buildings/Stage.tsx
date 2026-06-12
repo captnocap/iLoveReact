@@ -252,11 +252,18 @@ export function BuildingStage(props: { store: BuildingsStore; buildingId: string
 
   return (
     <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: 'column' }}>
-      {/* one capture per distinct material id — the slabs sample by textureKey */}
-      {textureIds.map((id) => (
-        <TextureCapture key={id} textureId={id} staticKey={`bldskin:${id}`}
-          widthPx={TEX_PX} heightPx={TEX_PX} cols={1} floors={1} perception={NEUTRAL_PERCEPTION} />
-      ))}
+      {/* one capture per distinct material id — the slabs sample by textureKey.
+          The list is VARIABLE-LENGTH (per-building material count): bare among
+          fixed siblings, a length change (switching to a material-skinned
+          building) shifts the Scene3D's host child index and the reconciler
+          DROPS the scene (reconciler_array_sibling_shift — the blank-stage
+          bug). Its own zero-size container keeps every sibling index fixed. */}
+      <Box style={{ width: 0, height: 0 }}>
+        {textureIds.map((id) => (
+          <TextureCapture key={id} textureId={id} staticKey={`bldskin:${id}`}
+            widthPx={TEX_PX} heightPx={TEX_PX} cols={1} floors={1} perception={NEUTRAL_PERCEPTION} />
+        ))}
+      </Box>
       <Pressable
         onLayout={(r: any) => { rectRef.current = { x: r.x, y: r.y, width: r.width, height: r.height }; }}
         onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onWheel={onWheel}

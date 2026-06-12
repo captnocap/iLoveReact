@@ -201,15 +201,26 @@ export function GarmentStage(props: { store: ClothingStore; garmentId: string })
 
   return (
     <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: 'column' }}>
-      {/* offscreen bakes: saved materials + painted designs + the shared prints */}
-      {r.mounts.map((m) => (
-        <TextureCapture key={m.staticKey} textureId={m.textureId} staticKey={m.staticKey}
-          widthPx={TEX_PX} heightPx={TEX_PX} cols={1} floors={1} perception={NEUTRAL_PERCEPTION} />
-      ))}
-      {r.overlayMounts.map((m) => (
-        <PaintedOverlaySurface key={m.staticKey} staticKey={m.staticKey} bg="#ffffff" w={256} h={192} overlay={m.overlay} />
-      ))}
-      {r.needsSkinCaptures ? <ClothingSkinCaptures /> : null}
+      {/* offscreen bakes: saved materials + painted designs + the shared prints.
+          Each list is VARIABLE-LENGTH: bare among fixed siblings, a length
+          change shifts the Scene3D's host child index and the reconciler DROPS
+          the scene (reconciler_array_sibling_shift — the buildings stage's
+          blank-stage bug). One zero-size container per list keeps every
+          sibling index fixed. */}
+      <Box style={{ width: 0, height: 0 }}>
+        {r.mounts.map((m) => (
+          <TextureCapture key={m.staticKey} textureId={m.textureId} staticKey={m.staticKey}
+            widthPx={TEX_PX} heightPx={TEX_PX} cols={1} floors={1} perception={NEUTRAL_PERCEPTION} />
+        ))}
+      </Box>
+      <Box style={{ width: 0, height: 0 }}>
+        {r.overlayMounts.map((m) => (
+          <PaintedOverlaySurface key={m.staticKey} staticKey={m.staticKey} bg="#ffffff" w={256} h={192} overlay={m.overlay} />
+        ))}
+      </Box>
+      <Box style={{ width: 0, height: 0 }}>
+        {r.needsSkinCaptures ? <ClothingSkinCaptures /> : null}
+      </Box>
       <Pressable
         onLayout={(lr: any) => { rectRef.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
         onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onWheel={onWheel}
