@@ -211,3 +211,24 @@ GRIDSNAP-0605 sub-tile offsets cannot return), and frees the edge-snap GROUND
 line lattice to any 1m tile edge. 'free' props keep the raw-hit behavior; the
 wall-face continuation path stays module-relative. Default (no Alt) placement
 is unchanged.
+
+## REQ-0653 (2026-06-11): wall lines anchor to real geometry, not the world lattice
+
+USER: wrapping a floor pad with SINGLE walls left edges misaligned, while a
+long drag stroke aligned — "if i place single walls, the edges do not align.
+if i however place multiple walls at a time... the walls then align." Cause:
+every wall path snapped its line to the WORLD-anchored module lattice
+(round(hit/3)*3). On-lattice buildings made that coincide with the pad edge;
+the moment a building sits off the lattice (REQ-0650 Alt fine placement, a
+1-tile building move, a corner-turned run at edge+1.5), each single click
+re-derives its own lattice line and lands 1–2 tiles off the building — while
+a stroke pins ONE line at drag start and stays self-consistent, hence the
+mismatched storeys. Fix in snap.ts: `nearestWallLineAnchor` — edge snap now
+prefers REAL geometry: a plate-top click anchors to THAT plate's edges and
+run lattice; a wall-top click stacks on the wall below's exact line/run; a
+ground click within `wallAnchorMagnetMeters` (new P2 row, 1m) of an existing
+wall line or plate edge inherits it; the world lattice is only the open-space
+fallback. An anchored line beats an unanchored lattice tie. The iso pane's
+drag stroke (computePaint walls) anchors through the same helper, so singles
+and strokes agree by construction. Alt (fine) opts out: fine means "exactly
+the tile line I point at". 3 new P4 tests; suite 25/25.

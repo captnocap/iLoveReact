@@ -36,6 +36,9 @@ export type SnapTuning = {
   edgeAnchorToleranceMeters: number;
   /** wall-face edge snap: how close to a wall endpoint a side-face hit turns the corner */
   wallEndpointSnapMeters: number;
+  /** REQ-0653: how far a ground edge-snap reaches for REAL geometry (existing
+   *  wall lines / plate edges) before falling back to the world lattice */
+  wallAnchorMagnetMeters: number;
 };
 
 export const SNAP_TUNING_DEFAULTS: SnapTuning = {
@@ -46,6 +49,7 @@ export const SNAP_TUNING_DEFAULTS: SnapTuning = {
   freeformSnapMeters: 0.01,
   edgeAnchorToleranceMeters: 0.02,
   wallEndpointSnapMeters: 0.5,
+  wallAnchorMagnetMeters: 1,
 };
 
 export type SnapTarget = {
@@ -280,6 +284,67 @@ export function fineModuleCenter(v: number, spanMeters: number, grid: number): n
   return cleanEven ? Math.round(v / grid) * grid : snapToCellCenter(v, grid);
 }
 
+/** REQ-0653: a new wall's line prefers REAL geometry near the cursor — an
+ *  existing wall's line, a floor/roof plate's edge — over the world-anchored
+ *  module lattice. The lattice only APPROXIMATES "walls land on plate edges"
+ *  (the V24 contract): the moment a building sits off the world lattice (Alt
+ *  fine placement, a 1-tile building move, a corner-turned run), every
+ *  lattice-derived single placement lands 1–2 tiles off the building while
+ *  drag strokes stay self-consistent — the user's mismatched-storeys bug.
+ *  Returns the anchored line plus the source's OWN run lattice (plates: cells
+ *  from the plate corner; walls: module steps from that wall's run center),
+ *  or null when nothing anchors within magnetMeters. */
+export type WallLineAnchor = { line: number; runOrigin: number; runPhase: 'cell' | 'center' };
+export function nearestWallLineAnchor(
+  pieces: readonly PlacedBuildPiece[],
+  axis: 'x' | 'z',
+  lineAt: number,
+  runAt: number,
+  pitch: number,
+  magnetMeters: number,
+): WallLineAnchor | null {
+  let best: WallLineAnchor | null = null;
+  let bestDistance = magnetMeters;
+  for (const piece of pieces) {
+    const def = GAME_BUILD.catalog.get(piece.pieceId);
+    if (def.kind === 'wall') {
+      const quarter = quarterTurns(piece.yawDegrees);
+      if (quarter === null) continue;
+      const lineAxis: 'x' | 'z' = quarter % 2 === 0 ? 'z' : 'x'; // yaw 0 runs along x → its line is z
+      if (lineAxis !== axis) continue;
+      const line = axis === 'x' ? piece.x : piece.z;
+      const runCenter = axis === 'x' ? piece.z : piece.x;
+      // reachable run window: the wall itself plus one module past either end,
+      // so a click that EXTENDS the run still inherits its line
+      if (Math.abs(runAt - runCenter) > def.size.widthMeters / 2 + pitch + magnetMeters) continue;
+      const distance = Math.abs(lineAt - line);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = { line, runOrigin: runCenter, runPhase: 'center' };
+      }
+    } else if (isTopAnchorPlate(piece)) {
+      const b = GAME_BUILD.placed.bounds(piece);
+      const [edgeMin, edgeMax] = axis === 'x' ? [b.minX, b.maxX] : [b.minZ, b.maxZ];
+      const [runMin, runMax] = axis === 'x' ? [b.minZ, b.maxZ] : [b.minX, b.maxX];
+      if (runAt < runMin - magnetMeters || runAt > runMax + magnetMeters) continue;
+      for (const edge of [edgeMin, edgeMax]) {
+        const distance = Math.abs(lineAt - edge);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = { line: edge, runOrigin: runMin, runPhase: 'cell' };
+        }
+      }
+    }
+  }
+  return best;
+}
+
+export function anchoredRunCenter(anchor: WallLineAnchor, runAt: number, pitch: number): number {
+  return anchor.runPhase === 'center'
+    ? anchor.runOrigin + Math.round((runAt - anchor.runOrigin) / pitch) * pitch
+    : anchor.runOrigin + (Math.floor((runAt - anchor.runOrigin) / pitch) + 0.5) * pitch;
+}
+
 /**
  * Resolve the crosshair into the snap target for the selected piece — null
  * when nothing in reach (or the mode demands a face and there is none).
@@ -370,21 +435,39 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
         if (wallFacePlacement) return { ...common, placement: wallFacePlacement };
       }
       const lineStep = fine ? grid : linePitch;
-      const runCenter = (v: number) => fine ? fineModuleCenter(v, input.size.widthMeters, grid) : snapToCellCenter(v, linePitch);
-      const lineX = Math.round(hit.x / lineStep) * lineStep;
-      const lineZ = Math.round(hit.z / lineStep) * lineStep;
-      const onXLine = Math.abs(hit.x - lineX) <= Math.abs(hit.z - lineZ);
-      if (onXLine) {
-        // plane at x = lineX, running along z (the turned frame)
-        const z = runCenter(hit.z);
-        if (common.surface === 'ground' && topAnchorYAtEdge(input.pieces, 'x', lineX, z, tuning.edgeAnchorToleranceMeters) !== null) return null;
-        const y = common.surface === 'ground' ? input.groundTopAt(lineX, z) : baseY;
-        return { ...common, placement: { x: lineX, y, z, yawDegrees: 90 } };
+      // REQ-0653: anchor to real geometry before the lattice. On a top face,
+      // the anchor set is the HIT piece alone (the plate you stand a wall on /
+      // the wall you stack a storey on) with an unbounded magnet — a plate-top
+      // click means THAT plate's edge, wherever the plate sits. On the ground,
+      // scan the standing world within the magnet so a click extending an
+      // off-lattice run inherits its line. Alt (fine) opts out of anchoring:
+      // fine mode means "exactly the tile line I point at".
+      const candidate = (axis: 'x' | 'z') => {
+        const lineAt = axis === 'x' ? hit.x : hit.z;
+        const runAt = axis === 'x' ? hit.z : hit.x;
+        const anchor = fine ? null : onFace
+          ? nearestWallLineAnchor([pieceHit!.piece], axis, lineAt, runAt, linePitch, Number.POSITIVE_INFINITY)
+          : nearestWallLineAnchor(input.pieces, axis, lineAt, runAt, linePitch, tuning.wallAnchorMagnetMeters);
+        const line = anchor ? anchor.line : Math.round(lineAt / lineStep) * lineStep;
+        const run = anchor
+          ? anchoredRunCenter(anchor, runAt, linePitch)
+          : fine ? fineModuleCenter(runAt, input.size.widthMeters, grid) : snapToCellCenter(runAt, linePitch);
+        return { line, run, distance: Math.abs(lineAt - line), anchored: anchor !== null };
+      };
+      const cx = candidate('x');
+      const cz = candidate('z');
+      // an anchored line beats an unanchored lattice line outright (stacking on
+      // a wall top must not lose a tie to a world lattice line crossing the run)
+      const xWins = cx.anchored !== cz.anchored ? cx.anchored : cx.distance <= cz.distance;
+      if (xWins) {
+        // plane at x = line, running along z (the turned frame)
+        if (common.surface === 'ground' && topAnchorYAtEdge(input.pieces, 'x', cx.line, cx.run, tuning.edgeAnchorToleranceMeters) !== null) return null;
+        const y = common.surface === 'ground' ? input.groundTopAt(cx.line, cx.run) : baseY;
+        return { ...common, placement: { x: cx.line, y, z: cx.run, yawDegrees: 90 } };
       }
-      const x = runCenter(hit.x);
-      if (common.surface === 'ground' && topAnchorYAtEdge(input.pieces, 'z', lineZ, x, tuning.edgeAnchorToleranceMeters) !== null) return null;
-      const y = common.surface === 'ground' ? input.groundTopAt(x, lineZ) : baseY;
-      return { ...common, placement: { x, y, z: lineZ, yawDegrees: 0 } };
+      if (common.surface === 'ground' && topAnchorYAtEdge(input.pieces, 'z', cz.line, cz.run, tuning.edgeAnchorToleranceMeters) !== null) return null;
+      const y = common.surface === 'ground' ? input.groundTopAt(cz.run, cz.line) : baseY;
+      return { ...common, placement: { x: cz.run, y, z: cz.line, yawDegrees: 0 } };
     }
     case 'surface': {
       // mount ON the face: centered on the quantized hit, proud of the plane

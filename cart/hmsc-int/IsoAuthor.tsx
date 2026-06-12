@@ -17,7 +17,7 @@ import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { GAME_BUILD, GAME_NATIVE_CAMERA, buildingDefFromPieces, buildingPieceInstanceId, partitionBuildingSelection } from './game';
 import type { BuildEditEvent, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingInstance, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
-import { resolveSnapTarget, modulePitch, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
+import { resolveSnapTarget, modulePitch, nearestWallLineAnchor, anchoredRunCenter, SNAP_TUNING_DEFAULTS, type SnapTarget, type WallLineAnchor } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, elevatorCarVisualShape } from './editors/build/pieceMeshes';
 import { perfMs, warnPlaceFreeze } from './editors/build/placeFreezeProbe';
 import { FacePainter } from './editors/build/FacePainter';
@@ -511,16 +511,33 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       const [z0, z1] = range(cellOf(start.z), cellOf(end.z));
       for (let cx = x0; cx <= x1; cx += 1) for (let cz = z0; cz <= z1; cz += 1) cells.push({ x: center(cx), z: center(cz), yaw: 0 });
     } else {
-      // wall: the longer drag axis is the run; the short axis pins to the nearest 3m edge
+      // wall: the longer drag axis is the run; the short axis pins to the nearest
+      // 3m edge — anchored to real geometry first (REQ-0653: a stroke along an
+      // off-lattice pad/run hugs ITS line, same law as single-click edge snap),
+      // world lattice only in open space.
       const dx = Math.abs(end.x - start.x), dz = Math.abs(end.z - start.z);
+      const magnet = ISO_SNAP_TUNING.wallAnchorMagnetMeters;
+      const runCells = (anchor: WallLineAnchor | null, a0: number, a1: number): number[] => {
+        if (!anchor) {
+          const [c0, c1] = range(cellOf(a0), cellOf(a1));
+          const out: number[] = [];
+          for (let c = c0; c <= c1; c += 1) out.push(center(c));
+          return out;
+        }
+        const lo = anchoredRunCenter(anchor, Math.min(a0, a1), pitch);
+        const hi = anchoredRunCenter(anchor, Math.max(a0, a1), pitch);
+        const out: number[] = [];
+        for (let v = lo; v <= hi + 1e-6 && out.length < PAINT_MAX_SPAN; v += pitch) out.push(v);
+        return out;
+      };
       if (dx >= dz) {
-        const lineZ = Math.round(start.z / pitch) * pitch;
-        const [c0, c1] = range(cellOf(start.x), cellOf(end.x));
-        for (let cx = c0; cx <= c1; cx += 1) cells.push({ x: center(cx), z: lineZ, yaw: 0 });
+        const anchor = nearestWallLineAnchor(visiblePiecesRef.current, 'z', start.z, start.x, pitch, magnet);
+        const lineZ = anchor ? anchor.line : Math.round(start.z / pitch) * pitch;
+        for (const x of runCells(anchor, start.x, end.x)) cells.push({ x, z: lineZ, yaw: 0 });
       } else {
-        const lineX = Math.round(start.x / pitch) * pitch;
-        const [c0, c1] = range(cellOf(start.z), cellOf(end.z));
-        for (let cz = c0; cz <= c1; cz += 1) cells.push({ x: lineX, z: center(cz), yaw: 90 });
+        const anchor = nearestWallLineAnchor(visiblePiecesRef.current, 'x', start.x, start.z, pitch, magnet);
+        const lineX = anchor ? anchor.line : Math.round(start.x / pitch) * pitch;
+        for (const z of runCells(anchor, start.z, end.z)) cells.push({ x: lineX, z, yaw: 90 });
       }
     }
     if (!cells.length) return [];

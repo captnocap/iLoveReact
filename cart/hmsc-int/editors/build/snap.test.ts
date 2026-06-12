@@ -300,6 +300,41 @@ test('REQ-0650: fine edge placement reaches 1m wall lines off the module lattice
   assertEqual(fine!.placement.yawDegrees, 90, 'run direction follows the chosen line');
 });
 
+// ── REQ-0653: wall lines anchor to REAL geometry before the world lattice ──
+
+test('REQ-0653: a plate-top wall hugs the plate edge even when the plate is off the world lattice', () => {
+  // pad Alt-placed 1 tile off the 3m lattice: floor center (2.5, 1.5), x edges 1..4
+  const pad = placed('floor.concrete.common', 2.5, 1.5);
+  const ray = { origin: { x: 3.8, y: 2, z: 1.4 }, dir: norm(0, -1, 0) };
+  const t = resolveSnapTarget(snapInput({ ray, pieces: [pad], snap: 'edge', size: WALL_SIZE }));
+  assert(!!t, 'the pad top resolves');
+  assertClose(t!.placement.x, 4, 1e-9, 'the wall line is the pad edge (4), not the lattice line (3)');
+  assertClose(t!.placement.z, 1.5, 1e-9, 'run centered on the pad OWN lattice, not the world one');
+  assertClose(t!.placement.y, FLOOR_SIZE.heightMeters, 1e-9, 'stands on the pad top');
+  assertEqual(t!.placement.yawDegrees, 90, 'runs along the pad edge');
+});
+
+test('REQ-0653: stacking on a wall top inherits its off-lattice line and run', () => {
+  const below = placed('wall.concrete.common', 49.5, 17, { yawDegrees: 0 }); // line z=17, off the 3m lattice
+  const ray = { origin: { x: 49.6, y: 5, z: 17.05 }, dir: norm(0, -1, 0) };
+  const t = resolveSnapTarget(snapInput({ ray, pieces: [below], snap: 'edge', size: WALL_SIZE }));
+  assert(!!t, 'the wall top resolves');
+  assertClose(t!.placement.z, 17, 1e-9, 'same line as the wall below (the lattice would say 18)');
+  assertClose(t!.placement.x, 49.5, 1e-9, 'same run module as the wall below');
+  assertClose(t!.placement.y, WALL_SIZE.heightMeters, 1e-6, 'stands on the wall top');
+  assertEqual(t!.placement.yawDegrees, 0, 'keeps the run direction');
+});
+
+test('REQ-0653: a ground click extending an off-lattice run inherits its line', () => {
+  const first = placed('wall.concrete.common', 1.5, 17, { yawDegrees: 0 });
+  const ray = { origin: { x: 4.6, y: 2, z: 17.3 }, dir: norm(0, -1, 0) };
+  const t = resolveSnapTarget(snapInput({ ray, pieces: [first], snap: 'edge', size: WALL_SIZE }));
+  assert(!!t, 'the ground beside the run resolves');
+  assertClose(t!.placement.z, 17, 1e-9, 'the extension stays on the run line (the lattice would say 18)');
+  assertClose(t!.placement.x, 4.5, 1e-9, 'the next module steps from the EXISTING wall, not the world origin');
+  assertEqual(t!.placement.yawDegrees, 0, 'continues the run direction');
+});
+
 test('REQ-0650: fine centers keep even-celled spans edge-aligned to tile lines', () => {
   assertClose(fineModuleCenter(5.2, 3, 1), 5.5, 1e-9, 'odd span centers on a cell');
   assertClose(fineModuleCenter(5.2, 2, 1), 5, 1e-9, 'even span centers on a line (edges 4 and 6)');
