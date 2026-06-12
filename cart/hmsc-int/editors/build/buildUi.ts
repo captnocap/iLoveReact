@@ -9,30 +9,11 @@
 
 import { PLAYER_CAMERA } from '../../Embodied';
 
-// ── BUILD-mode presentation/feel data (P2: named values, no inline numbers) ──
-export const BUILD_UI = {
-  ghostOpacity: 0.45,
-  ghostColor: '#7dd3fc',
-  ghostBlockedColor: '#fb7185',
-  markColor: '#fbbf24',
-  targetColor: '#a5f3fc',
-  /** the snap indicator cube's edge, meters */
-  indicatorSizeMeters: 0.14,
-  faceSlabThicknessMeters: 0.02,
-  faceSlabLiftMeters: 0.012,
-  editCutoutWidthMeters: 1.2,
-  doubleWindowCutoutWidthMeters: 2.2,
-  editCutoutHeightMeters: 1.2,
-  editCutoutLowHeightMeters: 2.2,
-  windowPaneDepthMeters: 0.04,
-  windowPaneColor: '#bcd3dd',
-  windowPaneOpacity: 0.3,
-  buildingSkinTexturePx: 256,
-  /** REQ-0647: the elevator car platform's look (a steel plate, distinct from
-   *  the shaft frame's metal so the car reads against it) */
-  elevatorCarColor: '#aeb6bf',
-  panelBg: '#0f1a2ef0',
-} as const;
+// BUILD_UI moved to ./pieceShapes (PARITY-0611, req_0655): the shape math the
+// compile bake and the headless parity suite share needs the cutout/slab
+// numbers without dragging this module's Embodied (React) import. Re-exported
+// here so every existing consumer keeps its import path.
+export { BUILD_UI } from './pieceShapes';
 
 export const CAMERA_OCCLUSION_TUNING = {
   // Faded walls/ceiling stack between the lens and the player inside a building,
