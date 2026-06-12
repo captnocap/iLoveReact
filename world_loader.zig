@@ -122,6 +122,14 @@ const INTERACT_REACH_METERS: f32 = 2.2;
 const INTERACT_Y_WINDOW_METERS: f32 = 2.5;
 const INTERACT_SEARCH_CANCEL_MOVE_METERS: f32 = 0.35;
 const INTERACT_NOTICE_SECONDS: f32 = 3.2;
+// req_0674: the reach gate — the E ray starts at the standing chest/eye line
+// and aims at the candidate's mid-body; a THIN solid collider crossing it
+// (wall slab, closed door panel, window strip) kills the prompt. Props are
+// chunkier than the thickness cap in both plan extents, so a candidate's own
+// collider never blocks it. Mirrors PlayRoute.tsx's editor-side gate.
+const INTERACT_EYE_HEIGHT_METERS: f32 = 1.4;
+const INTERACT_PROP_AIM_HEIGHT_METERS: f32 = 0.9;
+const INTERACT_BLOCKER_MAX_THICKNESS_METERS: f32 = 0.5;
 
 // ── elevators (req_0652) — parity with /test's ride (PlayRoute.tsx): the car
 // is a LIVE rect in the physics buffer, re-aimed in place per frame; E rides
@@ -641,6 +649,7 @@ const MaterialBatch = struct {
     boxes: []f32,
     count: u32,
     key: []u8,
+    textured_translucent: bool,
     translucent: bool,
     opacity: f32,
 
@@ -762,6 +771,11 @@ fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_c
             // decal material also has empty wgsl but carries its packed DOC —
             // it draws in the textured batch like any shader material.
             .translucent = materials[built].wgsl.len == 0 and materials[built].decal_doc.len == 0,
+            // Shader/decal textures can carry alpha (painted stencil materials
+            // are opaque paint over transparent background). Instanced opaque
+            // draws write depth even where tex alpha is 0, so route these sparse
+            // cases through single textured meshes in the transparent pass.
+            .textured_translucent = materials[built].opacity < 0.999 and (materials[built].wgsl.len > 0 or materials[built].decal_doc.len > 0),
             .opacity = materials[built].opacity,
         };
     }
@@ -872,6 +886,26 @@ fn orientedFloats(insts: []const f32, row: usize, stride: usize, solid: bool) [g
     return .{
         r[0],                    r[1],                    r[2],                                   r[3], r[4], r[5], r[6], r[7], r[8],
         insts[row * stride + 0], insts[row * stride + 2], instanceYawRadians(insts, row, stride),
+    };
+}
+
+fn meshPropOrientedFloats(inst: constructor.MeshPropInstance, mesh: constructor.MeshPropMesh) ?[game_physics.ORIENTED_FLOATS]f32 {
+    if (!mesh.solid or mesh.footprint_width <= 0 or mesh.footprint_depth <= 0) return null;
+    const hx = mesh.footprint_width / 2;
+    const hz = mesh.footprint_depth / 2;
+    return .{
+        inst.x - hx,
+        inst.z - hz,
+        inst.x + hx,
+        inst.z + hz,
+        inst.y + mesh.height,
+        1,
+        PLAYER_SURFACE_FRICTION,
+        PLAYER_SURFACE_RESTITUTION,
+        inst.y,
+        inst.x,
+        inst.z,
+        inst.yaw_degrees * std.math.pi / 180.0,
     };
 }
 
@@ -1009,6 +1043,23 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
 
         try oriented.appendSlice(allocator, bc.oriented[0 .. kept_oriented * game_physics.ORIENTED_FLOATS]);
         oriented_count = kept_oriented;
+
+        // Imported OBJ/GLB props are not part of the instanced primitive buffer,
+        // so their static blocking footprint rides the MESH_PROPS lump. Use the
+        // measured local X/Z rectangle from the importer; a desk stays narrow on
+        // its short axis instead of colliding as a radius square.
+        if (scene.mesh_props) |mp| {
+            for (mp.instances, 0..) |inst, imported_index| {
+                const mesh = mp.meshes[@as(usize, @intCast(inst.mesh))];
+                const collider = meshPropOrientedFloats(inst, mesh) orelse continue;
+                if (oriented_count >= game_physics.MAX_ORIENTED) {
+                    clipped_rows += mp.instances.len - imported_index;
+                    break;
+                }
+                try oriented.appendSlice(allocator, &collider);
+                oriented_count += 1;
+            }
+        }
 
         // LIVE elevator car rects (req_0652): one per ELEVATORS-lump shaft,
         // appended AFTER the baked rects so stepElevators can re-aim their
@@ -1725,6 +1776,9 @@ fn updatePlayerAnimationClock(player: *PlayerState, dt: f32, moving: bool, runni
 // turn its ranges into sub-range static draws (scene3d_instance_first).
 const STREAM_CELL_METERS: f32 = 64.0; // same granularity as the collider grid
 const STREAM_DETAIL_RADIUS_METERS: f32 = 240.0;
+const CUTOUT_STENCIL_DATA_HEADER: usize = 10;
+const CUTOUT_STENCIL_MAX_CELLS: usize = 512 * 512;
+const CUTOUT_STENCIL_MARKER = "D[10u + cy * igw + cx]";
 
 const StreamMode = enum { off, auto, force };
 
@@ -1739,6 +1793,64 @@ fn streamRadiusFromEnv() f32 {
     const s = std.posix.getenv("RJIT_STREAM_RADIUS") orelse return STREAM_DETAIL_RADIUS_METERS;
     const v = std.fmt.parseFloat(f32, s) catch return STREAM_DETAIL_RADIUS_METERS;
     return clamp(v, 64.0, 4096.0);
+}
+
+fn colorChannelByte(v: f32) u8 {
+    const scaled = clamp(v, 0, 1) * 255.0;
+    return @intFromFloat(@round(scaled));
+}
+
+fn cutoutStencilGridSize(data: []const f32) ?struct { w: usize, h: usize } {
+    if (data.len < CUTOUT_STENCIL_DATA_HEADER) return null;
+    const wf = data[0];
+    const hf = data[1];
+    if (wf < 1 or hf < 1 or wf > 512 or hf > 512) return null;
+    const w: usize = @intFromFloat(@round(wf));
+    const h: usize = @intFromFloat(@round(hf));
+    if (w == 0 or h == 0 or w * h > CUTOUT_STENCIL_MAX_CELLS) return null;
+    if (@abs(wf - @as(f32, @floatFromInt(w))) > 0.01) return null;
+    if (@abs(hf - @as(f32, @floatFromInt(h))) > 0.01) return null;
+    if (data.len < CUTOUT_STENCIL_DATA_HEADER + w * h) return null;
+    return .{ .w = w, .h = h };
+}
+
+fn materializeCutoutStencilPixels(allocator: std.mem.Allocator, key: []const u8, material: constructor.Material) bool {
+    if (std.mem.indexOf(u8, material.wgsl, CUTOUT_STENCIL_MARKER) == null) return false;
+    const grid = cutoutStencilGridSize(material.data) orelse return false;
+    const tile_px: usize = MATERIAL_TILE_PX;
+    const rgba = allocator.alloc(u8, tile_px * tile_px * 4) catch return false;
+    defer allocator.free(rgba);
+
+    const fg = [_]u8{
+        colorChannelByte(material.data[2]),
+        colorChannelByte(material.data[3]),
+        colorChannelByte(material.data[4]),
+        255,
+    };
+    const bg = [_]u8{
+        colorChannelByte(material.data[5]),
+        colorChannelByte(material.data[6]),
+        colorChannelByte(material.data[7]),
+        colorChannelByte(material.data[8]),
+    };
+    const cells = material.data[CUTOUT_STENCIL_DATA_HEADER .. CUTOUT_STENCIL_DATA_HEADER + grid.w * grid.h];
+
+    var py: usize = 0;
+    while (py < tile_px) : (py += 1) {
+        const cy = @min(grid.h - 1, (py * grid.h) / tile_px);
+        var px: usize = 0;
+        while (px < tile_px) : (px += 1) {
+            const cx = @min(grid.w - 1, (px * grid.w) / tile_px);
+            const cell_on = cells[cy * grid.w + cx] >= 0.5;
+            const color = if (cell_on) fg else bg;
+            const o = (py * tile_px + px) * 4;
+            rgba[o + 0] = color[0];
+            rgba[o + 1] = color[1];
+            rgba[o + 2] = color[2];
+            rgba[o + 3] = color[3];
+        }
+    }
+    return material_tex.materializePixels(key, rgba, MATERIAL_TILE_PX, MATERIAL_TILE_PX);
 }
 
 /// What a streamed family draws as: the shared geometry + texture every range
@@ -1903,6 +2015,11 @@ pub const Runtime = struct {
             // they render through the transparent pass with the row's own color.
             // Feeding "" to the shader pipeline would crash wgpu, so skip them.
             if (m.wgsl.len == 0) continue;
+            // Paint-bench cutout stencils ship as a tiny recipe: colors + a
+            // coarse 0/1 mask grid. Rebuild that texture directly here so the
+            // no-JS game path does not depend on the effects shader pipeline for
+            // player-authored wall paint.
+            if (materializeCutoutStencilPixels(self.allocator, key, m)) continue;
             if (!material_tex.materialize(key, m.wgsl, m.data, MATERIAL_TILE_PX))
                 log.print("[loader] material {d} not materialized — faces show fallback color\n", .{i});
         }
@@ -2191,6 +2308,32 @@ pub const Runtime = struct {
             });
         }
         if (self.scene.player_model.len == 0) log.print("[loader] no player model lump — camera target only\n", .{});
+
+        if (self.scene.mesh_props) |mp| {
+            for (mp.instances) |inst| {
+                const mesh_index: usize = @intCast(inst.mesh);
+                const mesh = mp.meshes[mesh_index];
+                try self.kid_list.append(self.allocator, .{
+                    .scene3d_mesh = mesh.vertex_count > 0,
+                    .scene3d_geom_key = mesh.key,
+                    .scene3d_vertices = mesh.vertices,
+                    .scene3d_vert_count = mesh.vertex_count,
+                    .scene3d_bounds_radius = mesh.bounds_radius,
+                    .scene3d_pos_x = inst.x,
+                    .scene3d_pos_y = inst.y,
+                    .scene3d_pos_z = inst.z,
+                    .scene3d_rot_y = inst.yaw_degrees,
+                    .scene3d_color_r = mesh.color[0],
+                    .scene3d_color_g = mesh.color[1],
+                    .scene3d_color_b = mesh.color[2],
+                    .scene3d_color_a = 1,
+                });
+            }
+            if (mp.instances.len > 0) {
+                log.print("[loader] built {d} imported prop mesh instance(s) from {d} mesh asset(s)\n", .{ mp.instances.len, mp.meshes.len });
+            }
+        }
+
         for (self.scene.heightfields, 0..) |field, i| {
             const key = try std.fmt.allocPrint(self.allocator, "~hf~loader-floor-{d}~1", .{i});
             self.player_geom_keys.append(self.allocator, key) catch |err| {
@@ -2388,10 +2531,13 @@ pub const Runtime = struct {
         // and can't go through the opaque instanced pass — emit each of its rows as
         // an individual see-through mesh (scene3d_color_a) so the transparent pass
         // (single meshes, sorted far→near) draws it; those stay OUT of streaming
-        // (sparse, already distance-culled). Both share the interned "box".
+        // (sparse, already distance-culled). Textured-alpha materials use that
+        // same single-mesh path but keep scene3d_tex_key so the stencil/decal
+        // alpha samples instead of writing an invisible opaque face. Both share
+        // the interned "box".
         var translucent_meshes: u32 = 0;
         for (self.material_batches) |batch| {
-            if (batch.translucent) {
+            if (batch.translucent or batch.textured_translucent) {
                 var r: usize = 0;
                 while (r < batch.count) : (r += 1) {
                     const o = @as(usize, r) * self.stride;
@@ -2411,6 +2557,7 @@ pub const Runtime = struct {
                         .scene3d_color_g = batch.boxes[o + 10],
                         .scene3d_color_b = batch.boxes[o + 11],
                         .scene3d_color_a = batch.opacity,
+                        .scene3d_tex_key = if (batch.textured_translucent) batch.key else null,
                     });
                     translucent_meshes += 1;
                 }
@@ -2469,7 +2616,7 @@ pub const Runtime = struct {
         try fams.append(self.allocator, .{ .rows = self.shape_batches.spheres, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "sphere12x8", .verts = self.sphere[0..], .tex_key = null });
         for (self.material_batches) |batch| {
-            if (batch.translucent or batch.count == 0) continue;
+            if (batch.translucent or batch.textured_translucent or batch.count == 0) continue;
             try fams.append(self.allocator, .{ .rows = batch.boxes, .stride = @intCast(self.stride) });
             try self.stream_protos.append(self.allocator, .{ .geom_key = "box", .verts = self.cube[0..], .tex_key = batch.key });
         }
@@ -2652,6 +2799,20 @@ pub const Runtime = struct {
         }
     }
 
+    fn emitMeshPropColliders(self: *Runtime, oriented_tmp: []f32, oc: *usize, clipped: *usize) void {
+        const mp = self.scene.mesh_props orelse return;
+        for (mp.instances) |inst| {
+            const mesh = mp.meshes[@as(usize, @intCast(inst.mesh))];
+            const collider = meshPropOrientedFloats(inst, mesh) orelse continue;
+            if (oc.* >= game_physics.MAX_ORIENTED) {
+                clipped.* += 1;
+                continue;
+            }
+            @memcpy(oriented_tmp[oc.* * game_physics.ORIENTED_FLOATS ..][0..game_physics.ORIENTED_FLOATS], &collider);
+            oc.* += 1;
+        }
+    }
+
     /// Rebuild the player's near-field collider set from the spatial grid: the
     /// always list (world-spanning floors/walls) plus every local instance in the
     /// window of cells around (center_x, center_z). Floors-first so the ground always
@@ -2686,6 +2847,7 @@ pub const Runtime = struct {
             // then the outer rings. The cap now drops only the FAR field.
             self.emitWindowRing(&grid, pc.cx, pc.cz, 0, want_solid, values, oriented_tmp[0..], &rc, &oc, &hf, &clipped);
             self.emitWindowRing(&grid, pc.cx, pc.cz, 1, want_solid, values, oriented_tmp[0..], &rc, &oc, &hf, &clipped);
+            if (want_solid) self.emitMeshPropColliders(oriented_tmp[0..], &oc, &clipped);
             for (grid.always) |row| self.emitRowCollider(row, want_solid, values, oriented_tmp[0..], &rc, &oc, &hf, &clipped);
             var ring: i32 = 2;
             while (ring <= COLLIDER_WINDOW_CELLS) : (ring += 1) {
@@ -2854,6 +3016,29 @@ pub const Runtime = struct {
         node.scene3d_pos_y = record.base_y + record.panel_h / 2 - hide;
     }
 
+    /// req_0674 — true when a thin solid collider (wall slab, closed door
+    /// panel, window strip) crosses the segment from the player's chest line
+    /// to the candidate. Open doors dropped their solid flag in setDoorOpen,
+    /// so they pass; a box containing the target itself (the aimed door's own
+    /// panel) is skipped inside the query.
+    fn interactReachBlocked(self: *Runtime, target_x: f32, target_y: f32, target_z: f32) bool {
+        if (!self.has_physics_colliders) return false;
+        const colliders = &self.physics_colliders;
+        if (colliders.rect_count == 0 and colliders.oriented_count == 0) return false;
+        return game_physics.reachBlockedStepColliders(
+            colliders.values[colliders.entity_capacity * game_physics.ENTITY_FLOATS ..],
+            colliders.rect_count,
+            colliders.oriented_count,
+            self.player.x,
+            self.player.y + INTERACT_EYE_HEIGHT_METERS,
+            self.player.z,
+            target_x,
+            target_y,
+            target_z,
+            INTERACT_BLOCKER_MAX_THICKNESS_METERS,
+        );
+    }
+
     /// PROPUSE req_0624 — /test's interact frame, native: resolve the nearest
     /// seat/container in reach over the INTERACTABLES lump, run the prompt /
     /// E edge / search timer, pin the seat pose. Mirrors PlayRoute.tsx
@@ -2906,6 +3091,9 @@ pub const Runtime = struct {
                 const dz = inst.z - self.player.z;
                 const distance = @sqrt(dx * dx + dz * dz);
                 if (distance > best_distance) continue;
+                // req_0674: within arm's length is not enough — a wall between
+                // the player and the prop kills its E (fridge on the far side).
+                if (self.interactReachBlocked(inst.x, inst.y + INTERACT_PROP_AIM_HEIGHT_METERS, inst.z)) continue;
                 best_distance = distance;
                 target = i;
             }
@@ -2943,6 +3131,9 @@ pub const Runtime = struct {
                 const dz = record.z - self.player.z;
                 const distance = @sqrt(dx * dx + dz * dz);
                 if (distance > record.reach or distance > best_distance) continue;
+                // req_0674: a door behind ANOTHER wall must not offer its E;
+                // the aimed door's own panel is skipped inside the query.
+                if (self.interactReachBlocked(record.x, record.base_y + record.panel_h / 2, record.z)) continue;
                 best_distance = distance;
                 door_target = i;
             }

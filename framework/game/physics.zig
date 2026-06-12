@@ -736,6 +736,79 @@ pub fn cameraOcclusionStepColliders(
     return if (clear < 0) 0 else clear;
 }
 
+/// req_0674 — the compiled game's interact REACH gate: true when a THIN solid
+/// collider crosses the eye→target segment. Thin solid boxes are the wall
+/// family (wall slabs, CLOSED door panels, window strips — an open door
+/// already dropped its solid flag), while props are chunky in both plan
+/// extents, so a candidate's own body never reads as an obstruction. A box
+/// containing the target point itself (the door panel being aimed at) is
+/// skipped explicitly, so doors stay interactable from both of their sides.
+/// Same packed step_input wire as the spring-arm above (rects at
+/// INPUT_HEADER_FLOATS, oriented rects after).
+pub fn reachBlockedStepColliders(
+    step_input: []const f32,
+    rect_count: usize,
+    oriented_count: usize,
+    eye_x: f32,
+    eye_y: f32,
+    eye_z: f32,
+    target_x: f32,
+    target_y: f32,
+    target_z: f32,
+    max_blocker_thickness: f32,
+) bool {
+    const dx = target_x - eye_x;
+    const dy = target_y - eye_y;
+    const dz = target_z - eye_z;
+    if (!std.math.isFinite(dx) or !std.math.isFinite(dy) or !std.math.isFinite(dz)) return false;
+    if (dx * dx + dy * dy + dz * dz <= 0.0001) return false;
+    const rect_base = INPUT_HEADER_FLOATS;
+    const oriented_base = rect_base + rect_count * RECT_FLOATS;
+    if (step_input.len < oriented_base + oriented_count * ORIENTED_FLOATS) return false;
+
+    var r: usize = 0;
+    while (r < rect_count) : (r += 1) {
+        const at = rect_base + r * RECT_FLOATS;
+        if (step_input[at + 5] <= 0.5) continue; // solid only
+        const min_x = step_input[at];
+        const min_z = step_input[at + 1];
+        const max_x = step_input[at + 2];
+        const max_z = step_input[at + 3];
+        const top = step_input[at + 4];
+        const floor = bandFloor(step_input[at + 8]);
+        if (@min(max_x - min_x, max_z - min_z) > max_blocker_thickness) continue; // walls are thin
+        const contains_target = target_x >= min_x and target_x <= max_x and target_z >= min_z and target_z <= max_z and target_y >= floor and target_y <= top;
+        if (contains_target) continue;
+        if (segmentAabbSpan(eye_x, eye_y, eye_z, dx, dy, dz, min_x, floor, min_z, max_x, top, max_z) != null) return true;
+    }
+
+    var o: usize = 0;
+    while (o < oriented_count) : (o += 1) {
+        const at = oriented_base + o * ORIENTED_FLOATS;
+        if (step_input[at + 5] <= 0.5) continue;
+        const min_u = step_input[at];
+        const min_v = step_input[at + 1];
+        const max_u = step_input[at + 2];
+        const max_v = step_input[at + 3];
+        const top = step_input[at + 4];
+        const floor = bandFloor(step_input[at + 8]);
+        if (@min(max_u - min_u, max_v - min_v) > max_blocker_thickness) continue;
+        const yaw = step_input[at + 11];
+        const cs = @cos(yaw);
+        const sn = @sin(yaw);
+        var le_x: f32 = undefined;
+        var le_z: f32 = undefined;
+        var lt_x: f32 = undefined;
+        var lt_z: f32 = undefined;
+        worldToLocal(eye_x, eye_z, step_input[at + 9], step_input[at + 10], cs, sn, &le_x, &le_z);
+        worldToLocal(target_x, target_z, step_input[at + 9], step_input[at + 10], cs, sn, &lt_x, &lt_z);
+        const contains_target = lt_x >= min_u and lt_x <= max_u and lt_z >= min_v and lt_z <= max_v and target_y >= floor and target_y <= top;
+        if (contains_target) continue;
+        if (segmentAabbSpan(le_x, eye_y, le_z, lt_x - le_x, dy, lt_z - le_z, min_u, floor, min_v, max_u, top, max_v) != null) return true;
+    }
+    return false;
+}
+
 /// Spring-arm against the terrain/ramp HEIGHTFIELDS (a separate collider type
 /// from the rect buffer — sampled, not box-tested). Marches the camera→pivot
 /// segment and returns the distance from the pivot at which the terrain first

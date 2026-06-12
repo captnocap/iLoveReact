@@ -779,3 +779,85 @@ test "compiled door: de-flagging alone is NOT open — the law that broke req_06
     const z = walkAtDoor(DOOR_DEFLAGGED);
     try testing.expect(z <= -0.13 - 0.4 + 1e-3);
 }
+
+// ── interact reach gate (req_0674) ───────────────────────────────────
+
+// Eye at the standing chest line, target a fridge-height point 2m east.
+const REACH_EYE = [3]f32{ 0, 1.4, 0 };
+const REACH_TARGET = [3]f32{ 2, 0.9, 0 };
+
+fn reachBlockedWithRects(rects: []const [physics.RECT_FLOATS]f32) bool {
+    const sim = Sim{ .rects = rects };
+    const buf = sim.pack(&g_buf);
+    return physics.reachBlockedStepColliders(
+        buf,
+        rects.len,
+        0,
+        REACH_EYE[0],
+        REACH_EYE[1],
+        REACH_EYE[2],
+        REACH_TARGET[0],
+        REACH_TARGET[1],
+        REACH_TARGET[2],
+        0.5,
+    );
+}
+
+test "reach gate: a thin solid wall between eye and prop blocks the E" {
+    // 0.25m-thick wall slab crossing the segment at x≈1
+    const wall = [physics.RECT_FLOATS]f32{ 1.0, -2, 1.25, 2, 3, 1, 0.5, 0, 0 };
+    try testing.expect(reachBlockedWithRects(&.{wall}));
+}
+
+test "reach gate: an OPEN door (solid flag dropped) does not block" {
+    const open_door = [physics.RECT_FLOATS]f32{ 1.0, -2, 1.25, 2, 3, 0, 0.5, 0, 0 };
+    try testing.expect(!reachBlockedWithRects(&.{open_door}));
+}
+
+test "reach gate: the candidate's own chunky collider is not an obstruction" {
+    // the fridge body: 0.8×0.8 plan (past the thinness cap) containing the target
+    const fridge = [physics.RECT_FLOATS]f32{ 1.6, -0.4, 2.4, 0.4, 1.8, 1, 0.5, 0, 0 };
+    try testing.expect(!reachBlockedWithRects(&.{fridge}));
+}
+
+test "reach gate: a wall behind the player does not block" {
+    const behind = [physics.RECT_FLOATS]f32{ -1.25, -2, -1.0, 2, 3, 1, 0.5, 0, 0 };
+    try testing.expect(!reachBlockedWithRects(&.{behind}));
+}
+
+test "reach gate: a thin box CONTAINING the target (the aimed door panel) is skipped" {
+    // panel around the target point itself — aiming at a door must not self-block
+    const panel = [physics.RECT_FLOATS]f32{ 1.9, -1.5, 2.1, 1.5, 3, 1, 0.5, 0, 0 };
+    const eye_to_panel_center = physics.reachBlockedStepColliders(
+        (Sim{ .rects = &.{panel} }).pack(&g_buf),
+        1,
+        0,
+        REACH_EYE[0],
+        REACH_EYE[1],
+        REACH_EYE[2],
+        2.0,
+        1.5,
+        0,
+        0.5,
+    );
+    try testing.expect(!eye_to_panel_center);
+}
+
+test "reach gate: an oriented thin wall between eye and prop blocks the E" {
+    var buf: [physics.INPUT_HEADER_FLOATS + physics.ORIENTED_FLOATS]f32 = @splat(0);
+    // yaw-0 oriented slab at world x∈[0.875,1.125], z∈[-2,2] (pivot 1,0)
+    const o = [physics.ORIENTED_FLOATS]f32{ -0.125, -2, 0.125, 2, 3, 1, 0.5, 0, 0, 1.0, 0, 0 };
+    @memcpy(buf[physics.INPUT_HEADER_FLOATS..], &o);
+    try testing.expect(physics.reachBlockedStepColliders(
+        &buf,
+        0,
+        1,
+        REACH_EYE[0],
+        REACH_EYE[1],
+        REACH_EYE[2],
+        REACH_TARGET[0],
+        REACH_TARGET[1],
+        REACH_TARGET[2],
+        0.5,
+    ));
+}
