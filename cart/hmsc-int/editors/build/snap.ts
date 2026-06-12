@@ -72,7 +72,10 @@ export type SnapInput = {
   size: BuildPieceSize;
   /** the user's ghost rotation (grid/free/surface; edge derives its own run) */
   yawDegrees: number;
-  /** held override for prop authoring: raw hit position instead of 1m substrate */
+  /** held fine-placement override (Alt): 'free' props land on the raw hit
+   *  (REQ-0596); grid/edge MODULES step at the 1m substrate instead of their
+   *  module pitch, edges still on tile lines (REQ-0650: module pitch made an
+   *  even road setback on both sides of a street unreachable) */
   freeform?: boolean;
   tuning?: SnapTuning;
 };
@@ -264,6 +267,19 @@ export function modulePitch(sizeMeters: number, grid: number): number {
   return clean ? cells * grid : grid;
 }
 
+/** Fine (Alt-held) module stepping (REQ-0650): the module-pitch lattice is
+ *  world-anchored, so a 3m plate could stand 0/3/6 tiles from a road line but
+ *  never 1 or 2 — equal setbacks on both sides of a street were unreachable.
+ *  Fine mode steps the piece ONE substrate cell at a time while keeping its
+ *  EDGES on tile lines (odd-cell spans center on a cell, even-cell spans on a
+ *  line), so the GRIDSNAP-0605 sub-tile "slightly off set" positions still
+ *  cannot happen. */
+export function fineModuleCenter(v: number, spanMeters: number, grid: number): number {
+  const cells = Math.round(spanMeters / grid);
+  const cleanEven = cells >= 1 && cells % 2 === 0 && Math.abs(spanMeters - cells * grid) < 1e-6;
+  return cleanEven ? Math.round(v / grid) * grid : snapToCellCenter(v, grid);
+}
+
 /**
  * Resolve the crosshair into the snap target for the selected piece — null
  * when nothing in reach (or the mode demands a face and there is none).
@@ -296,15 +312,18 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
 
   // GRIDSNAP-0605: modules tile at their OWN pitch (the yawed footprint per
   // axis), so a 3m plate has ONE lattice instead of three near-miss offsets;
-  // sub-module pieces fall back to the 1m substrate.
+  // sub-module pieces fall back to the 1m substrate. Held fine mode
+  // (REQ-0650) trades the one-lattice guarantee for 1-tile stepping, edges
+  // still tile-aligned.
+  const fine = !!input.freeform;
   const turned = Math.round(yaw / 90) % 2 === 1;
   const spanX = turned ? input.size.depthMeters : input.size.widthMeters;
   const spanZ = turned ? input.size.widthMeters : input.size.depthMeters;
   const pitchX = modulePitch(spanX, grid);
   const pitchZ = modulePitch(spanZ, grid);
   const substratePlacement = () => {
-    const x = snapToCellCenter(hit.x, pitchX);
-    const z = snapToCellCenter(hit.z, pitchZ);
+    const x = fine ? fineModuleCenter(hit.x, spanX, grid) : snapToCellCenter(hit.x, pitchX);
+    const z = fine ? fineModuleCenter(hit.z, spanZ, grid) : snapToCellCenter(hit.z, pitchZ);
     // ground under the SNAPPED center, so the piece sits on the terrain it covers
     const y = common.surface === 'ground'
       ? input.groundTopAt(x, z)
@@ -335,7 +354,9 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
       // the nearer MODULE line owns the wall: a wall bounds the plates it
       // walls in, so its line lattice is the wall's own module pitch (3m
       // walls land on plate edges, never mid-plate near-misses), and the run
-      // centers along the same pitch
+      // centers along the same pitch. Fine mode (REQ-0650) frees the GROUND
+      // lattice to any 1m tile line; the wall-face continuation below stays
+      // module-relative (flush-past-the-end is inherently module math).
       const linePitch = modulePitch(input.size.widthMeters, grid);
       if (onFace && !isTopFace(pieceHit!.normal)) {
         const wallFacePlacement = wallEdgeSnapFromWallFace(
@@ -348,17 +369,19 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
         );
         if (wallFacePlacement) return { ...common, placement: wallFacePlacement };
       }
-      const lineX = Math.round(hit.x / linePitch) * linePitch;
-      const lineZ = Math.round(hit.z / linePitch) * linePitch;
+      const lineStep = fine ? grid : linePitch;
+      const runCenter = (v: number) => fine ? fineModuleCenter(v, input.size.widthMeters, grid) : snapToCellCenter(v, linePitch);
+      const lineX = Math.round(hit.x / lineStep) * lineStep;
+      const lineZ = Math.round(hit.z / lineStep) * lineStep;
       const onXLine = Math.abs(hit.x - lineX) <= Math.abs(hit.z - lineZ);
       if (onXLine) {
         // plane at x = lineX, running along z (the turned frame)
-        const z = snapToCellCenter(hit.z, linePitch);
+        const z = runCenter(hit.z);
         if (common.surface === 'ground' && topAnchorYAtEdge(input.pieces, 'x', lineX, z, tuning.edgeAnchorToleranceMeters) !== null) return null;
         const y = common.surface === 'ground' ? input.groundTopAt(lineX, z) : baseY;
         return { ...common, placement: { x: lineX, y, z, yawDegrees: 90 } };
       }
-      const x = snapToCellCenter(hit.x, linePitch);
+      const x = runCenter(hit.x);
       if (common.surface === 'ground' && topAnchorYAtEdge(input.pieces, 'z', lineZ, x, tuning.edgeAnchorToleranceMeters) !== null) return null;
       const y = common.surface === 'ground' ? input.groundTopAt(x, lineZ) : baseY;
       return { ...common, placement: { x, y, z: lineZ, yawDegrees: 0 } };

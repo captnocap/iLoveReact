@@ -196,3 +196,18 @@ keeps rotating the placement ghost; with nothing armed and a selection present i
 rotates the selected placed item(s). Whole-building selections commit one
 `buildingMoved` yaw update, while loose pieces use the existing remove+place
 world-stream path with the same placement metadata and `yawDegrees + 90`.
+
+## REQ-0650 (2026-06-11): Alt = fine 1-tile module stepping
+
+USER: a 3m plate could only stand 0/3/6 tiles from a painted road line (the
+GRIDSNAP-0605 module lattice is world-anchored), so equal building setbacks on
+both sides of a street were unreachable — "i can never actually get there,
+unless i pre plan every single road to be at minimum the same distance apart".
+Fix: the iso pane now passes `freeform` for EVERYTHING armed while Alt is held
+(extending REQ-0596's prop override). In snap.ts, fine mode steps grid modules
+ONE substrate cell at a time via `fineModuleCenter` (odd-cell spans center on a
+cell, even-cell spans on a line — edges always on tile lines, so the
+GRIDSNAP-0605 sub-tile offsets cannot return), and frees the edge-snap GROUND
+line lattice to any 1m tile edge. 'free' props keep the raw-hit behavior; the
+wall-face continuation path stays module-relative. Default (no Alt) placement
+is unchanged.

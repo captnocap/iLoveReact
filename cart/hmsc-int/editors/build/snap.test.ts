@@ -5,7 +5,7 @@
 
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 import { GAME_BUILD, type PlacedBuildPiece } from '@game';
-import { raycastGround, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapInput } from './snap';
+import { fineModuleCenter, raycastGround, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapInput } from './snap';
 
 const FLAT = (_x: number, _z: number) => 0;
 const WALL_SIZE = GAME_BUILD.catalog.get('wall.concrete.common').size;
@@ -268,6 +268,42 @@ test('surface pieces mount on faces only — and face outward', () => {
   assertEqual(target!.placement.yawDegrees, 180, 'faces out along the -z normal');
   assert(target!.placement.z < 4 - WALL_SIZE.depthMeters / 2, 'sits proud of the face, not inside it');
   assertClose(target!.placement.x % SNAP_TUNING_DEFAULTS.surfaceSnapMeters, 0, 1e-9, 'quantized along the face');
+});
+
+// ── REQ-0650: held fine mode steps modules 1 tile, edges stay tile-aligned ──
+
+test('REQ-0650: fine grid placement steps a 3m plate one tile at a time', () => {
+  const ray = { origin: { x: 5.2, y: 2, z: 0.3 }, dir: norm(0, -0.5, 1) };
+  const coarse = resolveSnapTarget(snapInput({ ray, snap: 'grid', size: FLOOR_SIZE }));
+  assertClose(coarse!.placement.x, 4.5, 1e-9, 'module pitch stays the default (GRIDSNAP-0605 lattice)');
+  const fine = resolveSnapTarget(snapInput({ ray, snap: 'grid', size: FLOOR_SIZE, freeform: true }));
+  assert(!!fine, 'fine mode resolves');
+  // hit x≈5.2 → cell-centered 5.5: a position the 3m lattice (1.5/4.5/7.5)
+  // cannot reach — the 1-tile road setback that motivated this req
+  assertClose(fine!.placement.x, 5.5, 1e-9, 'fine x centers on the hovered 1m cell');
+  assertClose(fine!.placement.z, 4.5, 1e-9, 'fine z centers on the hovered 1m cell');
+  // edges remain EXACT tile lines — the GRIDSNAP-0605 sub-tile offsets cannot return
+  assertClose(fine!.placement.x - FLOOR_SIZE.widthMeters / 2, 4, 1e-9, 'min edge on a tile line');
+  assertClose(fine!.placement.x + FLOOR_SIZE.widthMeters / 2, 7, 1e-9, 'max edge on a tile line');
+  const stepped = resolveSnapTarget(snapInput({ ray: { ...ray, origin: { ...ray.origin, x: 6.2 } }, snap: 'grid', size: FLOOR_SIZE, freeform: true }));
+  assertClose(stepped!.placement.x, 6.5, 1e-9, 'one cell of cursor travel moves the ghost exactly one tile');
+});
+
+test('REQ-0650: fine edge placement reaches 1m wall lines off the module lattice', () => {
+  const ray = { origin: { x: 1.0, y: 2, z: 0.3 }, dir: norm(0, -0.5, 1) };
+  const coarse = resolveSnapTarget(snapInput({ ray, snap: 'edge', size: WALL_SIZE }));
+  assertClose(coarse!.placement.x, 0, 1e-9, 'module pitch pins the wall to the 3m line');
+  const fine = resolveSnapTarget(snapInput({ ray, snap: 'edge', size: WALL_SIZE, freeform: true }));
+  assert(!!fine, 'fine mode resolves');
+  assertClose(fine!.placement.x, 1, 1e-9, 'the wall line lands on the 1m tile edge under the cursor');
+  assertClose(fine!.placement.z, 4.5, 1e-9, 'run still cell-centered, endpoints on tile lines');
+  assertEqual(fine!.placement.yawDegrees, 90, 'run direction follows the chosen line');
+});
+
+test('REQ-0650: fine centers keep even-celled spans edge-aligned to tile lines', () => {
+  assertClose(fineModuleCenter(5.2, 3, 1), 5.5, 1e-9, 'odd span centers on a cell');
+  assertClose(fineModuleCenter(5.2, 2, 1), 5, 1e-9, 'even span centers on a line (edges 4 and 6)');
+  assertClose(fineModuleCenter(5.2, 0.6, 1), 5.5, 1e-9, 'sub-module spans ride the substrate cell center');
 });
 
 finish('build-snap');
