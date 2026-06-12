@@ -36,33 +36,66 @@ export type CustomTexture = {
   shaderId?: string;
   /** SHADER source: the frozen buildData snapshot */
   data?: number[];
+  /** Optional material canvas the paint bench used under this shader. Painted
+   *  cutout stencils are transparent overlays; the compiler uses this to ship
+   *  the same underlay+paint stack the live preview shows. */
+  underlayId?: string | null;
   /** DECAL source: the composed Box/Text/Image document (re-editable).
    *  The doc IS what the compiled game ships (DECALRECIPE-0610 — the bake
    *  packs it; the loader rasterizes it at load). */
   decal?: DecalDoc;
 };
 
+// Host localstore writes can lag a same-dispatch read in some runtimes. Keep
+// this process' material writes visible immediately so materialize-then-assign
+// flows resolve through textureById without weakening registry validation.
+const sessionWrites = new Map<string, CustomTexture>();
+const sessionRemoved = new Set<string>();
+
+function withSessionWrites(list: CustomTexture[]): CustomTexture[] {
+  const out = list.filter((t) => !sessionRemoved.has(t.id));
+  const seen = new Set(out.map((t) => t.id));
+  for (const t of sessionWrites.values()) {
+    if (!seen.has(t.id) && !sessionRemoved.has(t.id)) {
+      out.push(t);
+      seen.add(t.id);
+    }
+  }
+  return out;
+}
+
+function rememberSessionWrite(record: CustomTexture): void {
+  sessionRemoved.delete(record.id);
+  sessionWrites.set(record.id, record);
+}
+
 export function loadCustomTextures(): CustomTexture[] {
   try {
     const raw = hmscStoreGet(STORE_KEY);
-    if (!raw) return [];
+    if (!raw) return withSessionWrites([]);
     const j = JSON.parse(raw);
-    if (!Array.isArray(j)) return [];
+    if (!Array.isArray(j)) return withSessionWrites([]);
     const out: CustomTexture[] = [];
     for (const t of j) {
       if (!t || typeof t.id !== 'string' || typeof t.label !== 'string') continue;
       // shader record — the pre-decal shape, unchanged
       if (typeof t.shaderId === 'string' && Array.isArray(t.data)) {
-        out.push({ id: t.id, label: t.label, shaderId: t.shaderId, data: t.data });
+        out.push({
+          id: t.id,
+          label: t.label,
+          shaderId: t.shaderId,
+          data: t.data,
+          ...(typeof t.underlayId === 'string' ? { underlayId: t.underlayId } : {}),
+        });
         continue;
       }
       // decal record — boundary-validated; a corrupt doc drops the record
       const doc = validateDecalDoc(t.decal);
       if (doc) out.push({ id: t.id, label: t.label, decal: doc });
     }
-    return out;
+    return withSessionWrites(out);
   } catch {
-    return [];
+    return withSessionWrites([]);
   }
 }
 
@@ -85,12 +118,35 @@ function mintId(list: CustomTexture[], label: string): string {
 
 // Save a materialized look under a name. Returns the stored record (its id is
 // unique — a name collision gets a numeric suffix, never an overwrite).
-export function saveCustomTexture(label: string, shaderId: string, data: number[]): CustomTexture {
+export function saveCustomTexture(label: string, shaderId: string, data: number[], opts?: { underlayId?: string | null }): CustomTexture {
   const list = loadCustomTextures();
   const id = mintId(list, label);
-  const record: CustomTexture = { id, label: label.trim() || id, shaderId, data: [...data] };
+  const record: CustomTexture = {
+    id,
+    label: label.trim() || id,
+    shaderId,
+    data: [...data],
+    ...(opts?.underlayId ? { underlayId: opts.underlayId } : {}),
+  };
   write([...list, record]);
+  rememberSessionWrite(record);
   return record;
+}
+
+export function paintUnderlayIdForTexture(id: string | null | undefined): string | null {
+  if (!id) return null;
+  let cur: string | null = id;
+  const seen = new Set<string>();
+  for (let i = 0; i < 16 && cur && !seen.has(cur); i += 1) {
+    seen.add(cur);
+    const tex = loadCustomTextures().find((t) => t.id === cur);
+    if (tex?.shaderId === 'cutout-stencil' && tex.underlayId && tex.underlayId !== cur) {
+      cur = tex.underlayId;
+      continue;
+    }
+    return cur;
+  }
+  return id;
 }
 
 // Save a composed decal under a name (DECALEDIT-0606). Same id minting; the
@@ -105,16 +161,25 @@ export function saveDecalTexture(label: string, doc: DecalDoc, existingId?: stri
   if (existing) {
     const record: CustomTexture = { id: existing.id, label: label.trim() || existing.label, decal: valid };
     write(list.map((t) => (t.id === existing.id ? record : t)));
+    rememberSessionWrite(record);
     return record;
   }
   const id = mintId(list, label);
   const record: CustomTexture = { id, label: label.trim() || id, decal: valid };
   write([...list, record]);
+  rememberSessionWrite(record);
   return record;
 }
 
 export function removeCustomTexture(id: string): void {
+  sessionWrites.delete(id);
+  sessionRemoved.add(id);
   write(loadCustomTextures().filter((t) => t.id !== id));
+}
+
+export function __resetCustomTextureSessionCacheForTests(): void {
+  sessionWrites.clear();
+  sessionRemoved.clear();
 }
 
 // Subscribe a component to the stored-material list. Re-renders on save/remove.

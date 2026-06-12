@@ -59,13 +59,14 @@ type Rec = {
   lib: Array<{ e: any; label: string }>;
   fig: Array<{ e: any; label: string }>;
   veh: Array<{ e: any; label: string }>;
-  mat: Array<{ name: string; recipe: string }>;
+  mat: Array<{ name: string; recipe: string; underlayId?: string | null }>;
+  dec: Array<{ name: string; doc: any }>;
   adopt: Array<{ docId: string }>;
   notes: string[];
 };
 
 function rig(opts?: { bookSeed?: (book: CutoutDraftBook) => CutoutDraftBook; noFigures?: boolean; identify?: (path: string) => Promise<{ w: number; h: number } | null> }) {
-  const rec: Rec = { lib: [], fig: [], veh: [], mat: [], adopt: [], notes: [] };
+  const rec: Rec = { lib: [], fig: [], veh: [], mat: [], dec: [], adopt: [], notes: [] };
   let libState: CutoutStreamState = cutoutStream.initial();
   const figDoc = draftToDocument(generateCharacterDraft(7), 'alpha');
   // the saved overlay carries its re-edit document (the reopen law)
@@ -85,7 +86,8 @@ function rig(opts?: { bookSeed?: (book: CutoutDraftBook) => CutoutDraftBook; noF
     vehicles: { state: () => vehicles },
     figureSession: () => ({ commit: (e: any, label: string) => { figures.characters[e.id] = e.doc; rec.fig.push({ e, label }); } }),
     vehicleSession: () => ({ commit: (e: any, label: string) => { vehicles.vehicles[e.id] = e.doc; rec.veh.push({ e, label }); } }),
-    materialize: (name, recipe) => { rec.mat.push({ name, recipe }); return { id: `custom:${name}` }; },
+    materialize: (name, recipe, _data, opts) => { rec.mat.push({ name, recipe, underlayId: opts?.underlayId ?? null }); return { id: `custom:${name}` }; },
+    materializeDecal: (name, doc) => { rec.dec.push({ name, doc }); return { id: `custom:${name}` }; },
     textureById: (id) => (id === 'brick' ? { id, label: 'Brick' } : null),
     catalogs: () => ({ materials: [{ id: 'custom:x', label: 'X' }], recipes: [{ id: 'brick', label: 'Brick' }] }),
     charAdopt: (docId) => rec.adopt.push({ docId }),
@@ -118,13 +120,16 @@ function rig(opts?: { bookSeed?: (book: CutoutDraftBook) => CutoutDraftBook; noF
 }
 
 test('open round-trip: blank · material · ghost-material degrade', () => {
-  const { store } = rig();
+  const { store, rec } = rig();
   store.open({ kind: 'blank', w: 64, h: 32 });
   assertEqual(`${store.work.dims.w}x${store.work.dims.h}`, '64x32', 'blank carries its size');
   assert(!store.work.model && !store.work.textureId, 'blank is bare');
   const keep = store.work.docId;
   assert(store.open({ kind: 'material', id: 'brick', label: 'Brick' }), 'a registry texture opens');
   assertEqual(store.work.textureId, 'brick', 'the material rides under the paint');
+  store.onDirty();
+  assertEqual(store.materializeCurrent('painted brick'), 'custom:painted brick', 'material target can materialize directly');
+  assertEqual(rec.mat[0].underlayId, 'brick', 'materialized paint remembers the material canvas underlay');
   assert(store.work.docId !== keep, 'a material canvas is a fresh document (paintOnMaterial law)');
   assert(!store.open({ kind: 'material', id: 'ghost', label: '?' }), 'a ghost target refuses');
   assertEqual(store.work.textureId, 'brick', 'the canvas stays put on a ghost open');
@@ -190,6 +195,7 @@ test('MATERIALIZE routing: library save → extract → materialize → the mate
   store.materializeAsset(extracted.id);
   assertEqual(rec.mat.length, 1, 'the cutout materialized through the material door');
   assertEqual(rec.mat[0].recipe, 'cutout-stencil', 'the stencil recipe');
+  assertEqual(rec.mat[0].underlayId ?? null, null, 'a blank canvas has no material underlay');
   // reopen the saved document — same id (re-saves upsert)
   assert(store.open({ kind: 'document', id: savedId }), 'the saved document reopens');
   assertEqual(store.work.docId, savedId, 'reopen keeps the id');
@@ -237,6 +243,57 @@ test('IMGLAYER: open image adds a layer on the current target; paint above it sa
   assert(store.open({ kind: 'document', id: saved.id }), 'saved document reopens');
   assertEqual(store.work.initial?.layers[0].image?.path, '/tmp/reference face.png', 'reload restores the image layer');
   assertEqual(store.work.initial?.layers[1].name, 'Paint over reference', 'reload restores the stroke layer above');
+});
+
+// req_0697 — the IMAGE leg of the material vocabulary: image layers ride the
+// decal pipeline at materialize (a full-bleed image node per layer), and the
+// painted stencil stacks over them via underlayId. Pure-image canvases (no
+// strokes) materialize as the image decal directly.
+test('IMGMAT: image + strokes materializes the image as a decal underlay beneath the stencil', () => {
+  const { store, rec } = rig();
+  store.open({ kind: 'blank', w: 16, h: 16 });
+  const base = store.painterApi.current!;
+  store.painterApi.current = {
+    ...base,
+    buildDocument: () => paintDocWithLayers(16, 16, [
+      imageLayer('/tmp/brickwall.png', 'brickwall', 16, 16),
+      solidLayer('stroke', 'Paint over brickwall', 16, 16),
+    ]),
+  };
+  store.onDirty();
+  assertEqual(store.materializeCurrent('graffiti wall'), 'custom:graffiti wall', 'the stencil id returns');
+  assertEqual(rec.dec.length, 1, 'the image went through the decal door');
+  assertEqual(rec.dec[0].name, 'graffiti wall image', 'the image material carries the work name');
+  assertEqual(rec.dec[0].doc.nodes.length, 1, 'one node per image layer');
+  assertEqual(rec.dec[0].doc.nodes[0].kind, 'image', 'the node is an image node');
+  assertEqual(rec.dec[0].doc.nodes[0].src, '/tmp/brickwall.png', 'the node carries the layer path');
+  assertEqual(`${rec.dec[0].doc.nodes[0].w}x${rec.dec[0].doc.nodes[0].h}`, '16x16', 'the image node is full-bleed');
+  assertEqual(rec.mat[0].underlayId, 'custom:graffiti wall image', 'the stencil stacks over the image underlay');
+});
+
+test('IMGMAT: a pure image canvas (no strokes) materializes as the image material itself', () => {
+  const { store, rec } = rig();
+  store.open({ kind: 'blank', w: 16, h: 16 });
+  const base = store.painterApi.current!;
+  store.painterApi.current = {
+    ...base,
+    buildDocument: () => paintDocWithLayers(16, 16, [imageLayer('/tmp/poster.png', 'poster', 16, 16)]),
+    composeExportMask: () => new Uint8Array(16 * 16), // nothing painted
+  };
+  store.onDirty();
+  assertEqual(store.materializeCurrent('lobby poster'), 'custom:lobby poster image', 'the image material id returns');
+  assertEqual(rec.dec.length, 1, 'the image went through the decal door');
+  assertEqual(rec.mat.length, 0, 'no empty stencil record is minted');
+  // a muted image layer does NOT materialize
+  store.painterApi.current = {
+    ...base,
+    buildDocument: () => paintDocWithLayers(16, 16, [
+      { ...imageLayer('/tmp/poster.png', 'poster', 16, 16), config: { ...imageLayer('/tmp/poster.png', 'poster', 16, 16).config, muted: true } },
+    ]),
+    composeExportMask: () => new Uint8Array(16 * 16),
+  };
+  assertEqual(store.materializeCurrent('hidden poster'), null, 'a muted image layer stays out of the material');
+  assertEqual(rec.dec.length, 1, 'no second decal record');
 });
 
 test('roster row encoding round-trips every family', () => {

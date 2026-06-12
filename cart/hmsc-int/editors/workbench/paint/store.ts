@@ -28,6 +28,7 @@ import {
   draftModelBinding, type CutoutDraftBook,
 } from '../../cutout/draft';
 import { extractCutout, stencilDataFromAsset, uniqueAssetName, STENCIL_RECIPE_ID } from '../../cutout/extraction';
+import { DECAL_DOC_VERSION, type DecalDoc } from '../../../game/textures/decal';
 import { cutoutStream, libraryCutouts, libraryDocuments, type CutoutAsset, type CutoutEvent, type CutoutStreamState } from '../../cutout/stream';
 import { charactersStream, type CharactersEvent, type CharactersStreamState } from '../../../game/figure/stream';
 import { vehiclesStream } from '../../../game/vehicle/stream';
@@ -56,7 +57,10 @@ export type PaintBenchDeps = {
   figureSession: (() => Commitish | null) | null;
   vehicleSession: (() => Commitish | null) | null;
   /** materialize door (live: saveCustomTexture) */
-  materialize: ((name: string, recipeId: string, data: number[]) => { id: string }) | null;
+  materialize: ((name: string, recipeId: string, data: number[], opts?: { underlayId?: string | null }) => { id: string }) | null;
+  /** the IMAGE leg of the material vocabulary (req_0697) — image layers ride
+   *  the decal pipeline (live: saveDecalTexture); null result = invalid doc */
+  materializeDecal?: ((name: string, doc: DecalDoc) => { id: string } | null) | null;
   /** registry texture lookup + catalogs (live: textures registry) */
   textureById: (id: string) => { id: string; label: string } | null;
   catalogs: () => { materials: Array<{ id: string; label: string }>; recipes: Array<{ id: string; label: string }> };
@@ -390,32 +394,65 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
     const lib = deps.library?.state() ?? null;
     const asset = lib ? libraryCutouts(lib).find((c) => c.id === assetId) : null;
     if (!asset || !deps.materialize) { setStatus('nothing to materialize'); return; }
-    const record = deps.materialize(asset.name, STENCIL_RECIPE_ID, stencilDataFromAsset(asset));
+    const record = deps.materialize(asset.name, STENCIL_RECIPE_ID, stencilDataFromAsset(asset), { underlayId: asset.textureId ?? null });
     deps.session?.note?.(`materialized · ${asset.name} → ${record.id}`);
     setStatus(`material saved · ${record.id} — assignable in /textures and on faces/tiles`);
   };
 
-  const materializeCurrent = (nameOverride?: string): string | null => {
+  /** the finished-materialize bookkeeping both legs share */
+  const materializedDone = (name: string, id: string, what: string): string => {
+    deps.session?.note?.(`materialized · ${name} → ${id}`);
+    edited = false;
+    libRev += 1;
+    lastSavedAt = Date.now();
+    setStatus(`${what} saved · ${id} — ready for building faces`);
+    emit();
+    return id;
+  };
+
+  const materializeCurrent = (nameOverride?: string, opts?: { underlayId?: string | null }): string | null => {
+    if (!deps.materialize) { setStatus('nothing to materialize'); return null; }
+    const name = (nameOverride ?? work.name).trim() || 'painted material';
+    // IMAGE leg (req_0697 — the vocabulary's shader|decal|image → material):
+    // visible image layers are real content, not selection masks. They ride
+    // the decal pipeline as full-bleed image nodes (exactly how the canvas
+    // draws them, PaintSurface) — the live registry renders the doc and the
+    // bake ships the file content-addressed (DECALIMG-0610). The painted
+    // stencil stacks OVER the image via underlayId, same as any underlay.
+    const doc = painterApi.current?.buildDocument() ?? null;
+    const images = (doc?.layers ?? [])
+      .filter((l) => !l.config.muted && l.image?.path)
+      .map((l) => l.image!);
+    let imageMaterialId: string | null = null;
+    if (doc && images.length > 0 && deps.materializeDecal) {
+      const { w, h } = doc.dims;
+      const decal: DecalDoc = {
+        version: DECAL_DOC_VERSION, width: w, height: h, bg: '',
+        nodes: images.map((img, i) => ({ id: `img${i}`, kind: 'image' as const, x: 0, y: 0, w, h, src: img.path })),
+      };
+      imageMaterialId = deps.materializeDecal(`${name} image`, decal)?.id ?? null;
+    }
     const mask = painterApi.current?.composeExportMask() ?? null;
-    if (!mask || !deps.materialize) { setStatus('nothing to materialize'); return null; }
-    const asset = extractCutout({
-      name: (nameOverride ?? work.name).trim() || 'painted material',
+    const asset = mask ? extractCutout({
+      name,
       dims: work.dims,
       mask,
       srcPath: work.srcPath,
       textureId: work.textureId,
       colors: painterApi.current?.lookColors(),
       docId: work.docId,
-    });
-    if (!asset) { setStatus('nothing selected — paint the material first'); return null; }
-    const record = deps.materialize(asset.name, STENCIL_RECIPE_ID, stencilDataFromAsset(asset));
-    deps.session?.note?.(`materialized · ${asset.name} → ${record.id}`);
-    edited = false;
-    libRev += 1;
-    lastSavedAt = Date.now();
-    setStatus(`material saved · ${record.id} — ready for building faces`);
-    emit();
-    return record.id;
+    }) : null;
+    if (!asset) {
+      // no strokes: a pure image canvas materializes as the image itself
+      if (imageMaterialId) return materializedDone(name, imageMaterialId, 'image material');
+      setStatus(mask ? 'nothing selected — paint the material first' : 'nothing to materialize');
+      return null;
+    }
+    // strokes over an image: the image IS the canvas, so it wins the underlay;
+    // otherwise the caller's underlay (the face's current material) holds
+    const record = deps.materialize(asset.name, STENCIL_RECIPE_ID, stencilDataFromAsset(asset),
+      { underlayId: imageMaterialId ?? opts?.underlayId ?? asset.textureId ?? null });
+    return materializedDone(asset.name, record.id, 'material');
   };
 
   const removeEntry = (id: string, target: 'document' | 'cutout', name: string) => {

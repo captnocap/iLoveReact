@@ -72,6 +72,7 @@ export type BuildingPaintTarget = {
   slot: SkinSlotTarget;
   label: string;
   materialId: string | null;
+  underlayId?: string | null;
 };
 
 export type BuildingsStore = {
@@ -232,10 +233,19 @@ export function createBuildingsStore(deps: BuildingsStoreDeps): BuildingsStore {
 
   const normalizedTarget = (target: BuildingPaintTarget): BuildingPaintTarget => {
     const skin = targetSkin(target.buildingId, target.scope, target.slot);
+    let underlayId: string | null = null;
+    if (target.scope.kind === 'piece' && target.slot !== 'all') {
+      const def = must(target.buildingId);
+      const piece = mustPiece(def, target.scope.index);
+      const kind = catalogEntry(piece.pieceId).kind;
+      const inherited = def.skins?.[kind]?.[target.slot];
+      underlayId = inherited?.kind === 'material' ? inherited.id : null;
+    }
     return {
       ...target,
       label: targetLabel(target.buildingId, target.scope, target.slot),
       materialId: skin?.kind === 'material' ? skin.id : null,
+      underlayId,
     };
   };
 

@@ -53,7 +53,7 @@ function fixture(): { store: BuildingsStore; labels: string[]; state: () => Worl
       },
     },
     error: null,
-    validMaterial: (id) => id === 'mat.asphalt' || id === 'brickRed',
+    validMaterial: (id) => id === 'mat.asphalt' || id === 'brickRed' || id.startsWith('custom:'),
     materials: () => [
       { id: 'mat.asphalt', label: 'Asphalt', group: 'HMSC · Game', source: 'recipe' },
       { id: 'brickRed', label: 'Brick Red' },
@@ -67,7 +67,7 @@ function sessionlessFixture(): BuildingsStore {
     world: () => worldStream.initial(),
     session: null,
     error: null,
-    validMaterial: (id) => id === 'mat.asphalt' || id === 'brickRed',
+    validMaterial: (id) => id === 'mat.asphalt' || id === 'brickRed' || id.startsWith('custom:'),
     materials: () => [
       { id: 'mat.asphalt', label: 'Asphalt', group: 'HMSC · Game', source: 'recipe' },
       { id: 'brickRed', label: 'Brick Red' },
@@ -366,6 +366,16 @@ test('material browser target can switch faces and keep the selected material re
   store.setPaintTargetSkin(store.paintTarget()!, { kind: 'material', id: 'brickRed' });
   assertEqual(store.resolved(MOTEL, 1, 'back').skin?.kind === 'material' ? store.resolved(MOTEL, 1, 'back').skin!.id : '', 'brickRed', 'apply writes the retargeted back face');
   assertEqual(store.resolved(MOTEL, 1, 'front').skin, null, 'the previous front face stays untouched');
+});
+
+test('repainting a piece override keeps the inherited type material as the paint underlay', () => {
+  const { store } = fixture();
+  store.setTypeSkin(MOTEL, 'wall', 'back', { kind: 'material', id: 'brickRed' });
+  store.setPieceSkin(MOTEL, 1, 'back', { kind: 'material', id: 'custom:old-painted-back' });
+  store.selectPieceTarget(MOTEL, 1, 'back');
+  const target = store.paintTarget();
+  assertEqual(target?.materialId, 'custom:old-painted-back', 'the active face is still the current painted override');
+  assertEqual(target?.underlayId, 'brickRed', 'the repaint target remembers the inherited wall material underneath');
 });
 
 test('material apply updates the visible building even when the session is unavailable', () => {

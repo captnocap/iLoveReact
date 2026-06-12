@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { Effect, StaticSurface } from '@reactjit/primitives';
+import { Box, Effect, StaticSurface } from '@reactjit/primitives';
 // GAP(V15): the PerceptionState type rides the legacy design module until hmsc
 // becomes compile/'s output.
 import type { PerceptionState } from '../../design';
@@ -124,6 +124,17 @@ export function textureById(id: string): TextureDef | undefined {
 
 export const TEXTURE_IDS: string[] = TEXTURE_REGISTRY.map((t) => t.id);
 
+// A painted stencil's underlay def (cutout-stencil + underlayId, req_0697) —
+// the live bake stacks it BENEATH the stencil exactly as the compile ships it
+// (worldGeometry overlayUnderlaySkins), so iso3d and the compiled world agree.
+// One level deep: a stencil chained under another stencil renders bare there
+// rather than recursing.
+function stencilUnderlayDef(id: string): TextureDef | null {
+  const t = loadCustomTextures().find((x) => x.id === id);
+  if (t?.shaderId !== 'cutout-stencil' || !t.underlayId || t.underlayId === id) return null;
+  return textureById(t.underlayId) ?? null;
+}
+
 // ── Baking ──────────────────────────────────────────────────────────────────
 //
 // One capture for BOTH sources: wrap the source's child in a `<StaticSurface>`
@@ -149,14 +160,13 @@ export const TextureCapture = memo(function TextureCapture(props: {
     [w, h],
   );
   const childStyle = useMemo(() => ({ width: w, height: h }), [w, h]);
+  const stackStyle = useMemo(() => ({ width: w, height: h, position: 'relative' as const }), [w, h]);
+  const overlayStyle = useMemo(() => ({ position: 'absolute' as const, left: 0, top: 0, width: w, height: h }), [w, h]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- perception excluded on
   // purpose: the static catalog does not read it, so it must not trigger a re-bake.
   const child = useMemo(() => {
     if (!def) return null;
-    if (def.source.kind === 'shader') {
-      return <Effect shader={def.source.shader} data={props.data ?? def.source.data} style={childStyle} />;
-    }
-    return def.source.render({
+    const ctx = {
       widthMeters: props.cols * 3,
       heightMeters: props.floors * 3,
       widthPx: props.widthPx,
@@ -164,8 +174,25 @@ export const TextureCapture = memo(function TextureCapture(props: {
       cols: props.cols,
       floors: props.floors,
       perception: props.perception,
-    });
-  }, [props.textureId, props.cols, props.floors, props.data, childStyle]);
+    };
+    if (def.source.kind === 'shader') {
+      // a painted stencil over a material/image canvas bakes its underlay
+      // beneath it (req_0697) — live matches what the compile ships
+      const underlay = stencilUnderlayDef(props.textureId);
+      if (underlay) {
+        return (
+          <Box style={stackStyle}>
+            {underlay.source.kind === 'shader'
+              ? <Effect shader={underlay.source.shader} data={underlay.source.data} style={childStyle} />
+              : underlay.source.render(ctx)}
+            <Effect shader={def.source.shader} data={props.data ?? def.source.data} style={overlayStyle} />
+          </Box>
+        );
+      }
+      return <Effect shader={def.source.shader} data={props.data ?? def.source.data} style={childStyle} />;
+    }
+    return def.source.render(ctx);
+  }, [props.textureId, props.cols, props.floors, props.data, childStyle, stackStyle, overlayStyle]);
   if (!def) return null;
   return (
     <StaticSurface staticKey={props.staticKey} style={surfaceStyle}>

@@ -13,7 +13,7 @@ import { charactersStream, type CharactersEvent } from '../../../game/figure/str
 import { vehiclesStream } from '../../../game/vehicle/stream';
 import { editorChannel } from '../../store';
 import { editorSessions, type RouteSession } from '../../sessions';
-import { saveCustomTexture } from '../../../game/textures/materials';
+import { saveCustomTexture, saveDecalTexture } from '../../../game/textures/materials';
 import { allTextures, textureById as registryTextureById } from '../../../game/textures/registry';
 import { identifyImage, loadGraySource } from '../../cutout/sources';
 import { characterWorkbenchStore } from '../characters/store';
@@ -44,7 +44,8 @@ export function paintBenchStore(): PaintBenchStore {
       garmentLabel: (id) => garmentLabelById(id),
       garmentDesigns: garmentVariants,
       garmentSession: () => (garmentSess ??= editorSessions().open('/workbench', garmentVariants) as RouteSession<ClothingVariantsEvent>),
-      materialize: (name, recipeId, data) => saveCustomTexture(name, recipeId, data),
+      materialize: (name, recipeId, data, opts) => saveCustomTexture(name, recipeId, data, opts),
+      materializeDecal: (name, doc) => saveDecalTexture(name, doc),
       textureById: (id) => (registryTextureById(id) as { id: string; label: string } | null) ?? null,
       catalogs: () => {
         const shaders = allTextures().filter((t: any) => t.source?.kind === 'shader');

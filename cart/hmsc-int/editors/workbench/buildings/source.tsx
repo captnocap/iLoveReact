@@ -16,6 +16,7 @@ import { paintBenchStore } from '../paint/live';
 import { PaintBench } from '../paint/PaintBench';
 import { BUILD_FACE_SLOTS, catalogEntry, faceSlotLabels, type BuildFaceSlot, type BuildPieceKind } from '../../../game/build';
 import { textureById } from '../../../game/textures/registry';
+import { paintUnderlayIdForTexture } from '../../../game/textures/materials';
 import { accentFor } from '../../../shell/workbench.cls';
 import { buildingsActions, buildingsPanel, buildingsRoster } from './panel';
 import { buildingsWorkbenchStore } from './live';
@@ -28,16 +29,25 @@ const BUILDING_LENSES: LensSpec[] = [
   { id: 'paint', label: 'PAINT' },
 ];
 
+function paintCanvasMaterialId(target: BuildingPaintTarget): string | null {
+  const resolved = paintUnderlayIdForTexture(target.materialId);
+  if (resolved && resolved !== target.materialId) return resolved;
+  if (target.underlayId && target.underlayId !== target.materialId) return target.underlayId;
+  return resolved ?? target.materialId ?? target.underlayId ?? null;
+}
+
 function openPaintTarget(store: ReturnType<typeof buildingsWorkbenchStore>, target: BuildingPaintTarget): void {
+  store.setPaintTarget(target);
+  const normalized = store.paintTarget() ?? target;
   const bench = paintBenchStore();
-  const name = `${target.label} texture`;
-  if (target.materialId) bench.open({ kind: 'material', id: target.materialId, label: name });
+  const name = `${normalized.label} texture`;
+  const materialId = paintCanvasMaterialId(normalized);
+  if (materialId) bench.open({ kind: 'material', id: materialId, label: name });
   else {
     bench.open({ kind: 'blank', w: 256, h: 256 });
     bench.rename(name);
     bench.commitName(name);
   }
-  store.setPaintTarget(target);
   store.setLens('paint');
 }
 
@@ -218,8 +228,16 @@ export function buildingsSource(): WorkbenchSource<string> {
           label: 'Apply paint',
           icon: 'Paintbrush',
           run: () => {
-            const materialId = paintBenchStore().materializeCurrent(`${target.label} material`);
-            if (materialId) store.setPaintTargetSkin(target, { kind: 'material', id: materialId });
+            const current = store.paintTarget();
+            const bench = paintBenchStore();
+            if (!current || current.buildingId !== id) {
+              bench.setStatus('no building face target — pick a face and press paint target again');
+              return;
+            }
+            const materialId = bench.materializeCurrent(`${current.label} material`, { underlayId: current.underlayId ?? null });
+            if (materialId && store.applyPaintTargetSkin({ kind: 'material', id: materialId })) {
+              store.setLens('model');
+            }
           },
         });
       }
