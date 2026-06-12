@@ -140,6 +140,9 @@ type ElevatorLive = {
 };
 
 const INTERACT_REACH_METERS = 2.2;
+// req_0674: where the reach ray starts — roughly the standing chest/eye line,
+// so counters and half walls read correctly against prop mid-heights.
+const INTERACT_EYE_HEIGHT_METERS = 1.4;
 
 // The live layer for kicked-around props: renders each dynamic body's prop
 // model at its current physics position. `rev` is the publish signal — it only
@@ -852,31 +855,63 @@ export function PlayRoute(props: {
     if (pose.posture) {
       prompt = 'WASD / Space — stand up';
     } else if (!searchRef.current && !typing) {
-      let bestDistance = INTERACT_REACH_METERS;
       let best:
         | { kind: 'prop'; piece: PlacedBuildPiece; label: string; seat: ReturnType<typeof propSeat>; container: ReturnType<typeof propContainer> }
         | { kind: 'door'; piece: PlacedBuildPiece; label: string; open: boolean }
         | null = null;
+      // req_0674: reach is BLOCKED by walls — a fridge within arm's length on
+      // the FAR side of a wall must not offer its E. One pass collects the
+      // candidates in reach AND the nearby blocker walls, then the nearest
+      // candidate the player can actually reach wins. A wall blocks unless it
+      // is an always-open portal (arch/open doorway) or a door standing OPEN;
+      // window walls block reach (you can see through, you cannot grab through).
+      type InteractCandidate = { distance: number; piece: PlacedBuildPiece; heightMeters: number; entry: NonNullable<typeof best> };
+      const candidates: InteractCandidate[] = [];
+      const reachWalls: PlacedBuildPiece[] = [];
       for (const piece of piecesRef.current) {
         const def = GAME_BUILD.catalog.get(piece.pieceId);
         if (Math.abs(piece.y - pose.y) > 2.5) continue;
         const distance = Math.hypot(piece.x - pose.x, piece.z - pose.z);
-        if (distance > bestDistance) continue;
+        if (def.kind === 'wall' && distance <= INTERACT_REACH_METERS + def.size.widthMeters) {
+          const tags = GAME_BUILD.catalog.effectiveTags(def, piece.edit);
+          const edit = piece.edit ? GAME_BUILD.edits.wall[piece.edit] : undefined;
+          // portal + no door panel (arch) never blocks; a door blocks while closed
+          const passable = tags.portal && (!edit?.interaction || piece.doorOpen === true);
+          if (!passable) reachWalls.push(piece);
+        }
+        if (distance > INTERACT_REACH_METERS) continue;
         if (def.kind === 'prop' && def.propKind) {
           const seat = propSeat(def.propKind);
           const container = propContainer(def.propKind);
           if (!seat && !container) continue;
-          bestDistance = distance;
-          best = { kind: 'prop', piece, label: def.label, seat, container };
+          candidates.push({ distance, piece, heightMeters: def.size.heightMeters, entry: { kind: 'prop', piece, label: def.label, seat, container } });
           continue;
         }
         if (def.kind === 'wall' && piece.edit) {
           const edit = GAME_BUILD.edits.wall[piece.edit];
           if (!edit?.interaction) continue;
           if (distance > edit.interaction.reachMeters) continue;
-          bestDistance = distance;
-          best = { kind: 'door', piece, label: edit.label, open: piece.doorOpen === true };
+          candidates.push({ distance, piece, heightMeters: def.size.heightMeters, entry: { kind: 'door', piece, label: edit.label, open: piece.doorOpen === true } });
         }
+      }
+      candidates.sort((a, b) => a.distance - b.distance);
+      const eye = { x: pose.x, y: pose.y + INTERACT_EYE_HEIGHT_METERS, z: pose.z };
+      const reachBlocked = (candidate: InteractCandidate): boolean => {
+        if (!reachWalls.length) return false;
+        const dx = candidate.piece.x - eye.x;
+        const dy = candidate.piece.y + candidate.heightMeters / 2 - eye.y;
+        const dz = candidate.piece.z - eye.z;
+        const len = Math.hypot(dx, dy, dz);
+        if (len < 1e-6) return false;
+        const hit = GAME_BUILD.placed.raycast({ origin: eye, dir: { x: dx / len, y: dy / len, z: dz / len } }, reachWalls, len);
+        // a candidate DOOR is itself a wall in the blocker set — hitting
+        // yourself is not an obstruction
+        return hit !== null && hit.piece.id !== candidate.piece.id;
+      };
+      for (const candidate of candidates) {
+        if (reachBlocked(candidate)) continue;
+        best = candidate.entry;
+        break;
       }
       if (best?.kind === 'door') {
         target = { kind: 'door', pieceId: best.piece.id, label: best.label, open: best.open };
