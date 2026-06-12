@@ -729,3 +729,53 @@ test "step rejects malformed buffers instead of reading out of bounds" {
     lying[13] = 2;
     try testing.expect(physics.step(lying[0..]) == null);
 }
+
+// ── compiled door lifecycle (DOORS-0611, req_0663/req_0669) ──────────
+// These pack the EXACT rect floats world_loader.zig writes for a door leaf
+// (walk door at the origin: opening 1.2m wide, panel 2.2m tall, 0.26m deep,
+// DOOR_PANEL_FRICTION/RESTITUTION) and walk a body at the doorway through
+// the REAL physics step — the proof req_0669 demanded after "the test says
+// the compiled game can go through an open door [and] its not true".
+
+// the loader's closed walk-door rect (buildPhysicsColliders door section)
+const DOOR_CLOSED = [physics.RECT_FLOATS]f32{ -0.6, -0.13, 0.6, 0.13, 2.2, 1, 0.85, 0.02, 0 };
+// the loader's OPEN rect: toggleDoor PARKS the bounds 1e9 m away
+const DOOR_PARKED = [physics.RECT_FLOATS]f32{ -0.6 + 1.0e9, -0.13 + 1.0e9, 0.6 + 1.0e9, 0.13 + 1.0e9, 2.2, 0, 0.85, 0.02, 0 };
+// the first cut's WRONG open rect: bounds in place, only blocksPlayer
+// de-flagged — the req_0663 bug this suite must never let return
+const DOOR_DEFLAGGED = [physics.RECT_FLOATS]f32{ -0.6, -0.13, 0.6, 0.13, 2.2, 0, 0.85, 0.02, 0 };
+
+fn walkAtDoor(door: [physics.RECT_FLOATS]f32) f32 {
+    physics.clearHeightfields();
+    var sim = Sim{ .dt = 0.05, .pz = -1.0, .pvz = 3, .walkable_side_push_grace = 0.08, .rects = &.{ GROUND, door } };
+    var out = physics.step(sim.pack(&g_buf)).?;
+    var frame: usize = 0;
+    while (frame < 40) : (frame += 1) {
+        sim.px = out[1];
+        sim.py = out[2];
+        sim.pz = out[3];
+        sim.pvz = 3;
+        out = physics.step(sim.pack(&g_buf)).?;
+    }
+    return out[3]; // final z
+}
+
+test "compiled door: the CLOSED leaf blocks the body at the doorway" {
+    const z = walkAtDoor(DOOR_CLOSED);
+    try testing.expect(z <= -0.13 - 0.4 + 1e-3); // held at the panel face minus radius
+}
+
+test "compiled door: the OPEN (parked) leaf admits the body straight through" {
+    const z = walkAtDoor(DOOR_PARKED);
+    try testing.expect(z > 1.0); // walked clean through the doorway
+}
+
+test "compiled door: de-flagging alone is NOT open — the law that broke req_0663" {
+    // A non-solid rect taller than step height still side-pushes (that is
+    // what keeps bodies from clipping through walkable platforms' sides).
+    // If this ever starts passing, collideSolidRects changed its law and
+    // toggleDoor's parking can be revisited — until then, parking is the
+    // only correct open state.
+    const z = walkAtDoor(DOOR_DEFLAGGED);
+    try testing.expect(z <= -0.13 - 0.4 + 1e-3);
+}
