@@ -11,7 +11,6 @@ const v8_runtime = @import("v8_runtime.zig");
 const localstore = @import("storage/localstore.zig");
 const fs = @import("fs/fs.zig");
 
-var g_read_buf: [64 * 1024]u8 = undefined;
 var g_keys_json_buf: [64 * 1024]u8 = undefined;
 
 fn infoCtx(info: v8.FunctionCallbackInfo) v8.Context {
@@ -45,8 +44,11 @@ fn hostGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     defer std.heap.c_allocator.free(ns);
     const key = argToStringAlloc(info, 1) orelse return setReturnString(info, "");
     defer std.heap.c_allocator.free(key);
-    const len = localstore.get(ns, key, &g_read_buf) catch return setReturnString(info, "");
-    if (len) |n| setReturnString(info, g_read_buf[0..n]) else setReturnString(info, "");
+    const value = localstore.getAlloc(std.heap.c_allocator, ns, key) catch return setReturnString(info, "");
+    if (value) |v| {
+        defer std.heap.c_allocator.free(v);
+        setReturnString(info, v);
+    } else setReturnString(info, "");
 }
 
 fn hostHas(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -55,8 +57,8 @@ fn hostHas(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     defer std.heap.c_allocator.free(ns);
     const key = argToStringAlloc(info, 1) orelse return setReturnNumber(info, 0);
     defer std.heap.c_allocator.free(key);
-    const len = localstore.get(ns, key, &g_read_buf) catch return setReturnNumber(info, 0);
-    setReturnNumber(info, if (len != null) 1 else 0);
+    const found = localstore.has(ns, key) catch return setReturnNumber(info, 0);
+    setReturnNumber(info, if (found) 1 else 0);
 }
 
 fn hostSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -67,7 +69,11 @@ fn hostSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     defer std.heap.c_allocator.free(key);
     const value = argToStringAlloc(info, 2) orelse return;
     defer std.heap.c_allocator.free(value);
-    localstore.set(ns, key, value) catch {};
+    localstore.set(ns, key, value) catch |err| {
+        // a swallowed set is invisible data loss (the 8KB-cap bug hid behind
+        // exactly this catch) — fail loud on stderr
+        std.debug.print("[localstore] SET FAILED ns={s} key={s} len={d}: {s}\n", .{ ns, key, value.len, @errorName(err) });
+    };
 }
 
 fn hostDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

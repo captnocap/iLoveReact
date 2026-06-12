@@ -1084,4 +1084,25 @@ pub fn build(b: *std.Build) void {
     const run_key_pack_test = b.addRunArtifact(key_pack_test);
     const key_pack_test_step = b.step("test-key-pack", "Run the key packing behavior tests");
     key_pack_test_step.dependOn(&run_key_pack_test.step);
+
+    // ── Localstore behavior tests (PAINTLOSS req_0695, P4) ──────
+    // Exercises framework/storage/localstore.zig: large-value persistence
+    // across a deinit/init "restart" (the old 8KB MAX_VALUE silently ate the
+    // editor's custom-textures + game-state writes) and the loud oversized-
+    // write error. Roots at framework/testing_localstore.zig so localstore's
+    // relative imports (../fs/fs.zig, sqlite.zig — dlopen, no link dep)
+    // stay inside the module path. Needs libc for the heap + dlopen.
+    const localstore_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_localstore.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const localstore_test = b.addTest(.{
+        .name = "localstore-test",
+        .root_module = localstore_test_mod,
+    });
+    const run_localstore_test = b.addRunArtifact(localstore_test);
+    const localstore_test_step = b.step("test-localstore", "Run the localstore persistence behavior tests");
+    localstore_test_step.dependOn(&run_localstore_test.step);
 }

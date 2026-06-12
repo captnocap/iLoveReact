@@ -1085,16 +1085,18 @@ fn storeGetCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(key);
-    var buf: [localstore.MAX_VALUE]u8 = undefined;
-    const n = localstore.get(LS_NS, key, &buf) catch {
+    // alloc-based read: MAX_VALUE is 4MB now (heap-backed values), far too
+    // big for a stack buffer
+    const value = localstore.getAlloc(alloc, LS_NS, key) catch {
         setNullReturn(info);
         return;
     };
-    if (n == null) {
+    if (value) |v| {
+        defer alloc.free(v);
+        setStringReturn(info, v);
+    } else {
         setNullReturn(info);
-        return;
     }
-    setStringReturn(info, buf[0..n.?]);
 }
 
 fn storeSetCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1114,7 +1116,10 @@ fn storeSetCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(val);
-    localstore.set(LS_NS, key, val) catch {};
+    localstore.set(LS_NS, key, val) catch |err| {
+        // a swallowed set is invisible data loss — fail loud on stderr
+        std.debug.print("[localstore] SET FAILED ns={s} key={s} len={d}: {s}\n", .{ LS_NS, key, val.len, @errorName(err) });
+    };
     retUndefined(info_c);
 }
 

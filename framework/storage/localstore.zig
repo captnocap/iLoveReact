@@ -12,8 +12,14 @@ const fs = @import("../fs/fs.zig");
 const sqlite = @import("sqlite.zig");
 
 pub const MAX_KEY = 256;
-pub const MAX_VALUE = 8192;
+// Values are heap-backed (write queue + read-back cache hold owned slices),
+// so this is a sanity ceiling, not a buffer size. It was 8192 when jobs held
+// fixed buffers — that cap silently ate the editor's custom-textures and
+// game-state writes (a painted 128×128 stencil material is ~33KB of JSON).
+pub const MAX_VALUE = 4 * 1024 * 1024;
 pub const MAX_KEYS = 256;
+
+const value_alloc = std.heap.c_allocator;
 
 pub const KeyEntry = struct {
     buf: [MAX_KEY]u8 = undefined,
@@ -38,8 +44,9 @@ const WriteJob = struct {
     namespace_len: u16 = 0,
     key: [MAX_KEY]u8 = undefined,
     key_len: u16 = 0,
-    value: [MAX_VALUE]u8 = undefined,
-    value_len: u16 = 0,
+    /// owned heap copy (value_alloc); freed by the writer thread (queue jobs),
+    /// on overwrite/eviction (cache jobs), or in deinit
+    value: []u8 = &.{},
 
     fn namespaceSlice(self: *const WriteJob) []const u8 {
         return self.namespace[0..self.namespace_len];
@@ -50,7 +57,7 @@ const WriteJob = struct {
     }
 
     fn valueSlice(self: *const WriteJob) []const u8 {
-        return self.value[0..self.value_len];
+        return self.value;
     }
 };
 
@@ -88,30 +95,31 @@ fn setWithDb(database: *sqlite.Database, namespace: []const u8, key: []const u8,
     _ = try stmt.step();
 }
 
-fn writeJobFrom(namespace: []const u8, key: []const u8, value: []const u8) WriteJob {
+fn writeJobFrom(namespace: []const u8, key: []const u8, value: []const u8) !WriteJob {
     var job = WriteJob{};
     @memcpy(job.namespace[0..namespace.len], namespace);
     job.namespace_len = @intCast(namespace.len);
     @memcpy(job.key[0..key.len], key);
     job.key_len = @intCast(key.len);
-    @memcpy(job.value[0..value.len], value);
-    job.value_len = @intCast(value.len);
+    job.value = try value_alloc.dupe(u8, value);
     return job;
 }
 
-fn rememberSetLocked(namespace: []const u8, key: []const u8, value: []const u8) void {
+fn rememberSetLocked(namespace: []const u8, key: []const u8, value: []const u8) !void {
     var i: usize = 0;
     while (i < write_cache_len) : (i += 1) {
         if (std.mem.eql(u8, write_cache[i].namespaceSlice(), namespace) and
             std.mem.eql(u8, write_cache[i].keySlice(), key))
         {
-            @memcpy(write_cache[i].value[0..value.len], value);
-            write_cache[i].value_len = @intCast(value.len);
+            const next = try value_alloc.dupe(u8, value);
+            value_alloc.free(write_cache[i].value);
+            write_cache[i].value = next;
             return;
         }
     }
 
     if (write_cache_len >= WRITE_QUEUE_CAP) {
+        value_alloc.free(write_cache[0].value);
         var j: usize = 1;
         while (j < write_cache_len) : (j += 1) {
             write_cache[j - 1] = write_cache[j];
@@ -119,11 +127,11 @@ fn rememberSetLocked(namespace: []const u8, key: []const u8, value: []const u8) 
         write_cache_len -= 1;
     }
 
-    write_cache[write_cache_len] = writeJobFrom(namespace, key, value);
+    write_cache[write_cache_len] = try writeJobFrom(namespace, key, value);
     write_cache_len += 1;
 }
 
-fn getRemembered(namespace: []const u8, key: []const u8, buf: []u8) ?usize {
+fn getRemembered(namespace: []const u8, key: []const u8, buf: []u8) !?usize {
     write_mutex.lock();
     defer write_mutex.unlock();
 
@@ -135,7 +143,9 @@ fn getRemembered(namespace: []const u8, key: []const u8, buf: []u8) ?usize {
             std.mem.eql(u8, job.keySlice(), key))
         {
             const val = job.valueSlice();
-            if (val.len > buf.len) return null;
+            // falling through to the DB here would read a STALE row — the
+            // fresh value is this one; a too-small buffer is the caller's error
+            if (val.len > buf.len) return error.BufferTooSmall;
             @memcpy(buf[0..val.len], val);
             return val.len;
         }
@@ -143,20 +153,68 @@ fn getRemembered(namespace: []const u8, key: []const u8, buf: []u8) ?usize {
     return null;
 }
 
+/// Read-your-writes lookup that allocates: pending/cached value first, then the
+/// DB row. Caller owns the returned slice. Null = key not found.
+fn getRememberedAlloc(allocator: std.mem.Allocator, namespace: []const u8, key: []const u8) !?[]u8 {
+    write_mutex.lock();
+    defer write_mutex.unlock();
+
+    var remaining = write_cache_len;
+    while (remaining > 0) {
+        remaining -= 1;
+        const job = &write_cache[remaining];
+        if (std.mem.eql(u8, job.namespaceSlice(), namespace) and
+            std.mem.eql(u8, job.keySlice(), key))
+        {
+            return try allocator.dupe(u8, job.valueSlice());
+        }
+    }
+    return null;
+}
+
+/// Drop matching entries from the read-back cache AND the pending queue.
+/// null namespace = everything; null key = the whole namespace. Without this,
+/// delete()/clear() removed the DB row while the session cache kept serving
+/// the dead value — a delete that doesn't delete.
+fn purgeRemembered(namespace: ?[]const u8, key: ?[]const u8) void {
+    write_mutex.lock();
+    defer write_mutex.unlock();
+
+    inline for (.{ .{ &write_cache, &write_cache_len }, .{ &write_queue, &write_queue_len } }) |pair| {
+        const jobs = pair[0];
+        const len = pair[1];
+        var i: usize = 0;
+        while (i < len.*) {
+            const job = &jobs[i];
+            const ns_hit = namespace == null or std.mem.eql(u8, job.namespaceSlice(), namespace.?);
+            const key_hit = key == null or std.mem.eql(u8, job.keySlice(), key.?);
+            if (ns_hit and key_hit) {
+                value_alloc.free(job.value);
+                var j: usize = i + 1;
+                while (j < len.*) : (j += 1) jobs[j - 1] = jobs[j];
+                len.* -= 1;
+            } else {
+                i += 1;
+            }
+        }
+    }
+}
+
 fn enqueueSet(namespace: []const u8, key: []const u8, value: []const u8) !void {
     if (namespace.len > MAX_KEY or key.len > MAX_KEY or value.len > MAX_VALUE) return error.BufferTooSmall;
 
     write_mutex.lock();
     defer write_mutex.unlock();
-    rememberSetLocked(namespace, key, value);
+    try rememberSetLocked(namespace, key, value);
 
     var i: usize = 0;
     while (i < write_queue_len) : (i += 1) {
         if (std.mem.eql(u8, write_queue[i].namespaceSlice(), namespace) and
             std.mem.eql(u8, write_queue[i].keySlice(), key))
         {
-            @memcpy(write_queue[i].value[0..value.len], value);
-            write_queue[i].value_len = @intCast(value.len);
+            const next = try value_alloc.dupe(u8, value);
+            value_alloc.free(write_queue[i].value);
+            write_queue[i].value = next;
             write_cond.signal();
             return;
         }
@@ -164,6 +222,7 @@ fn enqueueSet(namespace: []const u8, key: []const u8, value: []const u8) !void {
 
     if (write_queue_len >= WRITE_QUEUE_CAP) {
         // Drop the oldest pending write rather than blocking the UI thread.
+        value_alloc.free(write_queue[0].value);
         var j: usize = 1;
         while (j < write_queue_len) : (j += 1) {
             write_queue[j - 1] = write_queue[j];
@@ -171,7 +230,7 @@ fn enqueueSet(namespace: []const u8, key: []const u8, value: []const u8) !void {
         write_queue_len -= 1;
     }
 
-    write_queue[write_queue_len] = writeJobFrom(namespace, key, value);
+    write_queue[write_queue_len] = try writeJobFrom(namespace, key, value);
     write_queue_len += 1;
     write_cond.signal();
 }
@@ -199,9 +258,15 @@ fn writerMain() void {
     while (popWriteJob()) |job| {
         db_mutex.lock();
         if (db) |*d| {
-            setWithDb(d, job.namespaceSlice(), job.keySlice(), job.valueSlice()) catch {};
+            setWithDb(d, job.namespaceSlice(), job.keySlice(), job.valueSlice()) catch |err| {
+                // a dropped persist is data loss — never fail silently
+                std.debug.print("[localstore] WRITE FAILED ns={s} key={s} len={d}: {s}\n", .{
+                    job.namespaceSlice(), job.keySlice(), job.value.len, @errorName(err),
+                });
+            };
         }
         db_mutex.unlock();
+        value_alloc.free(job.value);
     }
 }
 
@@ -243,7 +308,13 @@ pub fn deinit() void {
     if (db) |*d| d.close();
     db = null;
     db_path_len = 0;
+    // the writer drains the queue before join; these loops only matter when
+    // the thread never spawned — and the read-back cache always owns its values
+    var i: usize = 0;
+    while (i < write_queue_len) : (i += 1) value_alloc.free(write_queue[i].value);
     write_queue_len = 0;
+    i = 0;
+    while (i < write_cache_len) : (i += 1) value_alloc.free(write_cache[i].value);
     write_cache_len = 0;
 }
 
@@ -255,7 +326,7 @@ pub fn isInitialized() bool {
 
 /// Get a value by namespace and key. Returns bytes written to buf, or null if not found.
 pub fn get(namespace: []const u8, key: []const u8, buf: []u8) !?usize {
-    if (getRemembered(namespace, key, buf)) |n| return n;
+    if (try getRemembered(namespace, key, buf)) |n| return n;
 
     db_mutex.lock();
     defer db_mutex.unlock();
@@ -273,6 +344,55 @@ pub fn get(namespace: []const u8, key: []const u8, buf: []u8) !?usize {
     if (val.len > buf.len) return error.BufferTooSmall;
     @memcpy(buf[0..val.len], val);
     return val.len;
+}
+
+/// Get a value of any size. Caller owns the returned slice (free with the same
+/// allocator). Null = key not found. This is the host bindings' read path —
+/// fixed read buffers silently truncated/dropped large values (the same class
+/// of bug as the old 8KB write cap).
+pub fn getAlloc(allocator: std.mem.Allocator, namespace: []const u8, key: []const u8) !?[]u8 {
+    if (try getRememberedAlloc(allocator, namespace, key)) |v| return v;
+
+    db_mutex.lock();
+    defer db_mutex.unlock();
+
+    var d = db orelse return error.NotInitialized;
+    var stmt = try d.prepare("SELECT value FROM store WHERE namespace = ? AND key = ?");
+    defer stmt.deinit();
+
+    try stmt.bindText(1, namespace);
+    try stmt.bindText(2, key);
+
+    if (!try stmt.step()) return null; // key not found
+
+    const val = stmt.columnText(0) orelse return null;
+    return try allocator.dupe(u8, val);
+}
+
+/// Does the key exist? No value buffer involved, so size never matters.
+pub fn has(namespace: []const u8, key: []const u8) !bool {
+    {
+        write_mutex.lock();
+        defer write_mutex.unlock();
+        var remaining = write_cache_len;
+        while (remaining > 0) {
+            remaining -= 1;
+            const job = &write_cache[remaining];
+            if (std.mem.eql(u8, job.namespaceSlice(), namespace) and
+                std.mem.eql(u8, job.keySlice(), key)) return true;
+        }
+    }
+
+    db_mutex.lock();
+    defer db_mutex.unlock();
+
+    var d = db orelse return error.NotInitialized;
+    var stmt = try d.prepare("SELECT 1 FROM store WHERE namespace = ? AND key = ?");
+    defer stmt.deinit();
+
+    try stmt.bindText(1, namespace);
+    try stmt.bindText(2, key);
+    return try stmt.step();
 }
 
 /// Get a stored integer value. Returns null if not found.
@@ -330,6 +450,9 @@ pub fn setBool(namespace: []const u8, key: []const u8, value: bool) !void {
 
 /// Delete a single key from a namespace.
 pub fn delete(namespace: []const u8, key: []const u8) !void {
+    // the cache/queue first, so a read can't resurrect the dead value
+    purgeRemembered(namespace, key);
+
     db_mutex.lock();
     defer db_mutex.unlock();
 
@@ -344,27 +467,56 @@ pub fn delete(namespace: []const u8, key: []const u8) !void {
 
 // -- Keys --
 
-/// List all keys in a namespace, sorted alphabetically.
+fn keyEntryLessThan(_: void, a: KeyEntry, b: KeyEntry) bool {
+    return std.mem.lessThan(u8, a.key(), b.key());
+}
+
+/// List all keys in a namespace, sorted alphabetically. Merges pending writes
+/// (the async queue may not have committed yet) with the DB rows.
 /// Returns the number of keys written to `out`.
 pub fn keys(namespace: []const u8, out: []KeyEntry) !usize {
-    db_mutex.lock();
-    defer db_mutex.unlock();
-
-    var d = db orelse return error.NotInitialized;
-    var stmt = try d.prepare("SELECT key FROM store WHERE namespace = ? ORDER BY key");
-    defer stmt.deinit();
-
-    try stmt.bindText(1, namespace);
-
     var count: usize = 0;
-    while (try stmt.step()) {
-        if (count >= out.len) break;
-        const k = stmt.columnText(0) orelse continue;
-        const len: u16 = @intCast(@min(k.len, MAX_KEY));
-        @memcpy(out[count].buf[0..len], k[0..len]);
-        out[count].len = len;
-        count += 1;
+    {
+        db_mutex.lock();
+        defer db_mutex.unlock();
+
+        var d = db orelse return error.NotInitialized;
+        var stmt = try d.prepare("SELECT key FROM store WHERE namespace = ? ORDER BY key");
+        defer stmt.deinit();
+
+        try stmt.bindText(1, namespace);
+
+        while (try stmt.step()) {
+            if (count >= out.len) break;
+            const k = stmt.columnText(0) orelse continue;
+            const len: u16 = @intCast(@min(k.len, MAX_KEY));
+            @memcpy(out[count].buf[0..len], k[0..len]);
+            out[count].len = len;
+            count += 1;
+        }
     }
+
+    // read-your-writes: session-written keys the writer hasn't committed yet
+    {
+        write_mutex.lock();
+        defer write_mutex.unlock();
+        var i: usize = 0;
+        outer: while (i < write_cache_len) : (i += 1) {
+            const job = &write_cache[i];
+            if (!std.mem.eql(u8, job.namespaceSlice(), namespace)) continue;
+            if (count >= out.len) break;
+            var j: usize = 0;
+            while (j < count) : (j += 1) {
+                if (std.mem.eql(u8, out[j].key(), job.keySlice())) continue :outer;
+            }
+            const len: u16 = job.key_len;
+            @memcpy(out[count].buf[0..len], job.keySlice());
+            out[count].len = len;
+            count += 1;
+        }
+    }
+
+    std.sort.pdq(KeyEntry, out[0..count], {}, keyEntryLessThan);
     return count;
 }
 
@@ -372,6 +524,9 @@ pub fn keys(namespace: []const u8, out: []KeyEntry) !usize {
 
 /// Clear all keys in a namespace. If namespace is null, clear everything.
 pub fn clear(namespace: ?[]const u8) !void {
+    // the cache/queue first, so reads can't resurrect cleared values
+    purgeRemembered(namespace, null);
+
     db_mutex.lock();
     defer db_mutex.unlock();
 
@@ -507,4 +662,48 @@ test "overwrite value" {
     var buf: [256]u8 = undefined;
     const len = (try get("app", "version", &buf)).?;
     try std.testing.expectEqualStrings("2.0", buf[0..len]);
+}
+
+test "large value survives set, restart, and getAlloc" {
+    // The regression that ate painted building-face materials: a ~33KB
+    // custom-textures JSON was rejected by the old 8KB MAX_VALUE and the
+    // failure was swallowed — visible all session (in-process caches), gone
+    // on restart. This pins set→persist→reopen→read for a >64KB value
+    // (past the old write cap AND the old fixed read buffers).
+    try fs.init("tsz-localstore-test");
+    defer fs.deinit();
+    try init();
+
+    const big = try std.testing.allocator.alloc(u8, 100 * 1024);
+    defer std.testing.allocator.free(big);
+    for (big, 0..) |*c, i| c.* = 'a' + @as(u8, @intCast(i % 26));
+
+    try set("app", "big-value", big);
+
+    // read-your-writes before the writer commits
+    const cached = (try getAlloc(std.testing.allocator, "app", "big-value")).?;
+    defer std.testing.allocator.free(cached);
+    try std.testing.expectEqualStrings(big, cached);
+
+    // "restart": deinit flushes the write queue and drops the in-memory cache
+    deinit();
+    try init();
+    defer deinit();
+
+    const reread = (try getAlloc(std.testing.allocator, "app", "big-value")).?;
+    defer std.testing.allocator.free(reread);
+    try std.testing.expectEqualStrings(big, reread);
+    try std.testing.expect(try has("app", "big-value"));
+}
+
+test "oversized value is a loud error, not a silent drop" {
+    try fs.init("tsz-localstore-test");
+    defer fs.deinit();
+    try init();
+    defer deinit();
+
+    const huge = try std.testing.allocator.alloc(u8, MAX_VALUE + 1);
+    defer std.testing.allocator.free(huge);
+    @memset(huge, 'x');
+    try std.testing.expectError(error.BufferTooSmall, set("app", "too-big", huge));
 }

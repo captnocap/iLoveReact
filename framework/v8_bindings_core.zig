@@ -606,9 +606,9 @@ fn hostFiledropSeq(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
 }
 
 // ── localstore host functions (framework/localstore.zig) ─────
-// 64 KB read buffer — values larger than this are truncated. JS-side
-// callers should keep entries small; for blobs use a file path.
-var g_localstore_read_buf: [64 * 1024]u8 = undefined;
+// Reads allocate (localstore.getAlloc) — the old fixed 64KB buffer silently
+// returned "" for big values, the read-side twin of the 8KB write cap that
+// ate painted custom-textures records.
 var g_localstore_keys_json_buf: [64 * 1024]u8 = undefined;
 
 fn hostLocalstoreGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -623,12 +623,13 @@ fn hostLocalstoreGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
         return;
     };
     defer std.heap.c_allocator.free(key);
-    const len = localstore.get(ns, key, &g_localstore_read_buf) catch {
+    const value = localstore.getAlloc(std.heap.c_allocator, ns, key) catch {
         setReturnString(info, "");
         return;
     };
-    if (len) |n| {
-        setReturnString(info, g_localstore_read_buf[0..n]);
+    if (value) |v| {
+        defer std.heap.c_allocator.free(v);
+        setReturnString(info, v);
     } else {
         setReturnString(info, "");
     }
@@ -646,11 +647,11 @@ fn hostLocalstoreHas(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
         return;
     };
     defer std.heap.c_allocator.free(key);
-    const len = localstore.get(ns, key, &g_localstore_read_buf) catch {
+    const found = localstore.has(ns, key) catch {
         setReturnNumber(info, 0);
         return;
     };
-    setReturnNumber(info, if (len != null) 1 else 0);
+    setReturnNumber(info, if (found) 1 else 0);
 }
 
 fn hostLocalstoreSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -661,7 +662,11 @@ fn hostLocalstoreSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     defer std.heap.c_allocator.free(key);
     const value = argToStringAlloc(info, 2) orelse return;
     defer std.heap.c_allocator.free(value);
-    localstore.set(ns, key, value) catch {};
+    localstore.set(ns, key, value) catch |err| {
+        // a swallowed set is invisible data loss (the 8KB-cap bug hid behind
+        // exactly this catch) — fail loud on stderr
+        std.debug.print("[localstore] SET FAILED ns={s} key={s} len={d}: {s}\n", .{ ns, key, value.len, @errorName(err) });
+    };
 }
 
 fn hostLocalstoreDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
