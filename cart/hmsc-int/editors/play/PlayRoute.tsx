@@ -68,6 +68,7 @@ import { TextureCapture } from '../../game/textures/registry';
 // out of this file, re-imported here).
 import { BUILD_UI, CAMERA_OCCLUSION_TUNING } from '../build/buildUi';
 import { perfMs, warnPlaceFreeze, startPlaceFreezeProbe, markPlaceFreezeProbe, type PlaceFreezeProbe } from '../build/placeFreezeProbe';
+import { logPiecePlaced, logPrefabStamped } from '../build/placeLog';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, elevatorCarVisualShape, type VisualShape } from '../build/pieceMeshes';
 import { propContainer, propDynamics, propSeat } from '../../game/kinds/props';
 import { Prop } from '../../render3d/Prop';
@@ -1680,6 +1681,7 @@ export function PlayRoute(props: {
     if (current.type === 'prefab') {
       const def = prefabDefsRef.current.find((d) => d.id === current.id);
       if (!def) return;
+      logPrefabStamped('F2', def, { x: target.placement.x, y: target.placement.y, z: target.placement.z }, target.placement.yawDegrees);
       commit(
         { kind: 'prefabStamped', prefabId: def.id, origin: { x: target.placement.x, y: target.placement.y, z: target.placement.z }, yawDegrees: target.placement.yawDegrees },
         `stamped ${def.label} @ ${at}`,
@@ -1706,6 +1708,7 @@ export function PlayRoute(props: {
         surface: target.surface,
       });
     }
+    logPiecePlaced('F2 place', placement);
     commit({ kind: 'piecePlaced', placement }, `placed ${def.label} @ ${at}`);
   };
   const placeRef = useRef(place);

@@ -20,6 +20,7 @@ import type { BuildEditEvent, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, Bui
 import { resolveSnapTarget, modulePitch, nearestWallLineAnchor, anchoredRunCenter, SNAP_TUNING_DEFAULTS, type SnapTarget, type WallLineAnchor } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, elevatorCarVisualShape } from './editors/build/pieceMeshes';
 import { perfMs, warnPlaceFreeze } from './editors/build/placeFreezeProbe';
+import { logPiecePlaced, logPiecesPlaced, logPrefabStamped } from './editors/build/placeLog';
 import { FacePainter } from './editors/build/FacePainter';
 import { BUILD_UI } from './editors/build/buildUi';
 import { IsoStage, METERS_PER_LEVEL, type IsoPose } from './isoStage';
@@ -587,6 +588,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const label = `Tower ${w}×${d}×${floors}F`;
     const capture = buildingDefFromPieces(label, valid);
     if (!capture) return;
+    logPiecesPlaced(`iso tower (origin=${capture.origin.x.toFixed(2)},${capture.origin.z.toFixed(2)})`, valid);
     commitBatch([
       { event: { kind: 'buildingDefined', def: capture.def } as BuildEditEvent, label: `defined ${label}` },
       { event: { kind: 'buildingPlaced', defId: capture.def.id, x: capture.origin.x, y: capture.origin.y, z: capture.origin.z, yawDegrees: 0 } as BuildEditEvent, label: `tower ${w}×${d}×${floors}F` },
@@ -783,6 +785,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       // built-in AND stream prefabs.
       const def = prefabByIdRef.current.get(a.id);
       if (!def) return;
+      logPrefabStamped('iso', def, { x: t.placement.x, y: t.placement.y, z: t.placement.z }, t.placement.yawDegrees);
       onCommit({ kind: 'prefabStamped', prefabId: a.id, origin: { x: t.placement.x, y: t.placement.y, z: t.placement.z }, yawDegrees: t.placement.yawDegrees }, `stamped ${def.label} @ ${at}`);
       return;
     }
@@ -791,6 +794,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // walls land with their cut) — the SAME helper F2's place() uses.
     const placement = GAME_BUILD.placed.placementFor(def, t.placement);
     if (GAME_BUILD.placed.validatePlacement(placement).length > 0) return;
+    logPiecePlaced('iso place', placement);
     // Keep the thing you just placed live for same-key editing. The stream
     // mints the id, so reselect by pose signature when pieces materialize;
     // with a selection present, R rotates the landed piece before the armed
@@ -872,12 +876,16 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // flat-pad terrain lift as a unit) instead of a phantom member of the original's stamp.
     // One batch → one undo step, one snapshot.
     const cloneStampId = `clone-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const clonedPlacements: Array<{ pieceId: string; x: number; y: number; z: number; yawDegrees: number }> = [];
     for (const p of sel) {
       const inst = buildingPieceInstanceId(p.id);
       if (inst && whole.has(inst)) continue; // cloned above as one instance
       const { id, ...rest } = p;
-      events.push({ event: { kind: 'piecePlaced', placement: { ...rest, x: p.x + dx, stampId: cloneStampId } }, label: `cloned ${p.pieceId}` });
+      const placement = { ...rest, x: p.x + dx, stampId: cloneStampId };
+      clonedPlacements.push(placement);
+      events.push({ event: { kind: 'piecePlaced', placement }, label: `cloned ${p.pieceId}` });
     }
+    if (clonedPlacements.length) logPiecesPlaced(`iso clone (dx=${dx.toFixed(2)})`, clonedPlacements);
     commitBatch(events);
   };
   // Rotate the current selection with the SAME R key the placement ghost uses.
@@ -910,6 +918,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         return { id, placement: { ...rest, yawDegrees: normalizeYawDegrees(p.yawDegrees + 90) } };
       });
     if (rotations.some((r) => GAME_BUILD.placed.validatePlacement(r.placement).length > 0)) return;
+    if (rotations.length) logPiecesPlaced('iso rotate', rotations.map((r) => r.placement));
     events.push(
       ...rotations.map((r) => ({ event: { kind: 'pieceRemoved', id: r.id } as BuildEditEvent, label: `rotated ${r.id}` })),
       ...rotations.map((r) => ({ event: { kind: 'piecePlaced', placement: r.placement } as BuildEditEvent, label: `rotated ${r.placement.pieceId}` })),
@@ -1033,6 +1042,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // One batch: building moves + (all removes then all places) → one undo
     // step, one store snapshot, so moving a whole building doesn't freeze.
     setTimeout(() => {
+      logPiecesPlaced(`iso move (dx=${delta.dx.toFixed(2)} dz=${delta.dz.toFixed(2)})`, moves.map((m) => m.placement));
       commitBatch([
         ...events,
         ...moves.map((m) => ({ event: { kind: 'pieceRemoved', id: m.id } as BuildEditEvent, label: `moved ${m.id}` })),
@@ -1072,8 +1082,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     setTimeout(() => {
       // placementFor injects the row's defaultEdit (REQ-0647) so a drag-painted
       // run of Window Walls lands with every pane cut, like a single click.
-      commitBatch(valid.map((c) => ({
-        event: { kind: 'piecePlaced', placement: GAME_BUILD.placed.placementFor(GAME_BUILD.catalog.get(c.pieceId), c) } as WorldEvent,
+      const placements = valid.map((c) => GAME_BUILD.placed.placementFor(GAME_BUILD.catalog.get(c.pieceId), c));
+      logPiecesPlaced('iso drag-paint', placements);
+      commitBatch(placements.map((placement) => ({
+        event: { kind: 'piecePlaced', placement } as WorldEvent,
         label: `painted ${label}`,
       })));
     }, 0);
