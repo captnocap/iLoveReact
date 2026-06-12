@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   GAME_DRIVING, GAME_VEHICLE, GAME_INPUT, GAME_LOOP, GAME_NATIVE_CAMERA,
+  tuningForStyle,
   type CarState, type CarTuning, type VehicleDoc, type VehicleStyleId,
   type DamageLevel, type VehiclePartId,
 } from '@game';
@@ -30,13 +31,18 @@ const RECENTER_RATE = 1.7; // how fast the peek offset eases back behind the car
 
 const STYLE = GAME_VEHICLE.tables.styles;
 
-// The styles offered in the lab + the role that paints each one right.
+// Every body style is drivable + the role that paints each one right. Each
+// pick loads ITS OWN stock handling (VEHICLE_HANDLING) — tuning a style here
+// is dialing the game's feel table for that type, not one shared car.
 const DRIVABLE: ReadonlyArray<{ style: VehicleStyleId; role: VehicleDoc['role']; label: string }> = [
   { style: 'sedan', role: 'civilian', label: 'sedan' },
+  { style: 'coupe', role: 'civilian', label: 'coupe' },
+  { style: 'wagon', role: 'civilian', label: 'wagon' },
   { style: 'sports', role: 'civilian', label: 'sports' },
   { style: 'pickup', role: 'civilian', label: 'pickup' },
   { style: 'van', role: 'civilian', label: 'van' },
   { style: 'police_car', role: 'police', label: 'police' },
+  { style: 'ambulance', role: 'medical', label: 'ambulance' },
   { style: 'fire_truck', role: 'fire', label: 'fire truck' },
 ];
 
@@ -48,9 +54,6 @@ function docForStyle(style: VehicleStyleId, role: VehicleDoc['role']): VehicleDo
   const base = GAME_VEHICLE.make(0x5eed ^ style.length * 131);
   return { ...base, style, role, damage: {} };
 }
-
-/** wheelbase ≈ 58% of overall length — feeds the bicycle model's turn radius. */
-const wheelBaseOf = (style: VehicleStyleId) => STYLE[style].length * 0.58;
 
 // A rollover bangs up the cabin, glass and the panels that hit the deck — this
 // is what the body damage states were built for (req_0558). Each flip escalates
@@ -82,12 +85,13 @@ export default function VehicleHandling() {
   const [doc, setDoc] = useState<VehicleDoc>(() => docForStyle(sel.style, sel.role));
   const build = useMemo(() => GAME_VEHICLE.build(doc), [doc]);
 
-  const [tuning, setTuning] = useState<CarTuning>(() => GAME_DRIVING.defaultTuning(wheelBaseOf(sel.style), STYLE[sel.style].width));
-  // New body → fresh (undamaged) doc, and adopt its wheelbase + track width
-  // while keeping the dialed feel.
+  const [tuning, setTuning] = useState<CarTuning>(() => tuningForStyle(sel.style));
+  // New body → fresh (undamaged) doc + THAT style's stock handling. Each type
+  // has its own feel table (VEHICLE_HANDLING) — picking a body loads it; the
+  // knobs then dial on top ("stock" reloads it).
   useEffect(() => {
     setDoc(docForStyle(sel.style, sel.role));
-    setTuning((t) => ({ ...t, wheelBase: wheelBaseOf(sel.style), trackWidth: STYLE[sel.style].width }));
+    setTuning(tuningForStyle(sel.style));
   }, [sel.style, sel.role]);
 
   // The live driving state + frame readout. The car/tuning live in refs the
@@ -247,7 +251,14 @@ export default function VehicleHandling() {
           ))}
         </Box>
 
-        <Text style={{ color: DIM, fontSize: 10, marginBottom: 4 }}>FEEL</Text>
+        <Row style={{ alignItems: 'center', marginBottom: 4 }}>
+          <Text style={{ color: DIM, fontSize: 10, flexGrow: 1 }}>{`FEEL · ${sel.label}`}</Text>
+          <Pressable onPress={() => setTuning(tuningForStyle(sel.style))}>
+            <Box style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: '#10203a' }}>
+              <Text style={{ color: DIM, fontSize: 10 }}>stock</Text>
+            </Box>
+          </Pressable>
+        </Row>
         <Knob label="engine" value={tuning.enginePower} step={1} min={2} max={40} onSet={(v) => setTuning((t) => ({ ...t, enginePower: v }))} />
         <Knob label="top speed" value={tuning.topSpeed} step={2} min={6} max={90} onSet={(v) => setTuning((t) => ({ ...t, topSpeed: v }))} unit="m/s" />
         <Knob label="brake" value={tuning.brakePower} step={1} min={4} max={50} onSet={(v) => setTuning((t) => ({ ...t, brakePower: v }))} />

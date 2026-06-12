@@ -30,8 +30,11 @@ dial its handling live:
 - **cornering** — tire scrub: hard turning bleeds forward speed (0 = donuts).
 - **steer / steer spd** — lock angle + how fast the wheels reach it (low = the
   floaty GTA-4 response). **drag** — high-speed falloff.
-- **body** picks the `GAME_VEHICLE` style; wheelbase + track width feed the turn
-  radius and tip threshold, so the fire truck turns wide and tips late.
+- **body** picks the `GAME_VEHICLE` style — all nine are drivable, and each
+  pick loads ITS OWN stock handling from `game/driving/handling.ts`
+  (`VEHICLE_HANDLING` / `tuningForStyle`, req_0694), so no two types feel the
+  same: the sports car is fast/low/darty, the fire truck is slow, wide, tall
+  and tippable. The knobs dial on top of stock; **stock** reloads the table.
 
 Body **lean** (roll) and **dive/squat** (pitch) are rendered as weight transfer.
 NOT YET: collision-driven flips (hitting a wall/curb) — the cones are decorative
@@ -87,3 +90,7 @@ rewrite. Next consumers: the `/test` play route, then the host port.
 - 2026-06-10: GTA-4 handling pass (req_0558) — grip-limited understeer, body
   roll/pitch, rollover (tips & flips onto its roof, traction lost, R to right),
   flip→damage escalation, weighty low-grip default tune.
+- 2026-06-12: per-style handling (req_0694) — `VEHICLE_HANDLING` table in
+  `game/driving/handling.ts`, all nine bodies drivable, body pick loads its
+  stock tune, "stock" button reloads it. Tested in
+  `game/driving/handling.test.ts` (7 cases).

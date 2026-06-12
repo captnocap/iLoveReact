@@ -20,7 +20,20 @@ A pure, React-free kinematic **bicycle model**:
   engine/brake/drag; lateral velocity bleeds by `exp(-grip·dt)` (low grip =
   drift); heading turns at `vf/wheelBase · tan(steer)` so turning scales with
   speed and reverses with reverse.
-- `GAME_DRIVING = { makeState, defaultTuning, step }` is the door object.
+- `GAME_DRIVING = { makeState, defaultTuning, step, right }` is the door object.
+
+## Per-style handling (handling.ts, req_0694)
+
+One model, nine bodies, nine FEELS. `VEHICLE_HANDLING` is the authored
+per-style override table (keyed by `VehicleStyleId`) and
+`tuningForStyle(style)` is the door: baseline `defaultTuning` + the style's
+overrides, wheelbase (`length · WHEELBASE_FRACTION`) and track width lifted
+from `VEHICLE_STYLES` so the feel always matches the body on screen. The
+sedan IS the baseline; the sports car is fast/low/darty and grips below the
+tip line (spins, never trips itself); the van/ambulance/fire truck are slow,
+understeery, top-heavy and WILL roll (tippable iff
+`maxLatG > halfTrack/cgHeight` — asserted in `handling.test.ts`). The
+handling lab loads a style's stock tuning on body pick and dials on top.
 
 ## Why cart-side
 

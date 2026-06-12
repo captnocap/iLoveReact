@@ -144,6 +144,7 @@ export { GAME_VEHICLE, vehiclesStream, applyVehiclePaint } from './vehicle';
 export type { VehicleDoc, VehiclePartId, VehicleStyleId, VehicleRoleId, VehiclePoseId, DamageLevel, VehicleBuild, VehiclesEvent, VehiclesStreamState } from './vehicle';
 export { GAME_DRIVING, makeCarState, defaultTuning, stepCar, rightCar } from './driving';
 export type { CarState, CarTuning, CarInput, CarTelemetry } from './driving';
+export { VEHICLE_HANDLING, tuningForStyle, wheelBaseOf } from './driving/handling';
 export { GAME_ITEMS } from './items';
 export { GAME_ANIMATION } from './animation';
 export { GAME_KINDS } from './kinds';
