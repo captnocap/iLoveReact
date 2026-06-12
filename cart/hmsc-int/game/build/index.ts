@@ -65,8 +65,9 @@ export {
 export type { BuildPrefabDef, DecomposedPiece, PrefabPiece } from './prefabs';
 
 // REQ-0647: the elevator — a vertical-link PIECE (never a prefab; USER ruled).
-// Stacked storeys derive a shaft; the car is live collision the play route
-// rides and the compile bake ships at rest.
+// Stacked storeys derive a shaft; the car is LIVE collision — the play route
+// rides it, and the compiled loader rides it through the ELEVATORS lump
+// (compile/worldElevators.ts, REQ-0652).
 export {
   elevatorShafts,
   elevatorCarRect,
@@ -75,7 +76,6 @@ export {
   updateElevatorCarRect,
   nextElevatorStop,
   nearestElevatorStop,
-  elevatorRestCarRects,
 } from './elevators';
 export type { ElevatorShaft } from './elevators';
 
@@ -197,7 +197,6 @@ import {
   updateElevatorCarRect,
   nextElevatorStop,
   nearestElevatorStop,
-  elevatorRestCarRects,
 } from './elevators';
 import {
   BUILD_FACE_SLOTS,
@@ -275,7 +274,8 @@ export const GAME_BUILD = {
   },
   // REQ-0647: the elevator's pure layer — shafts from stacked storey pieces,
   // the car's rect/box at any height, stop arithmetic. The play route rides
-  // the live rect; the compile bake ships restCarRects.
+  // the live rect; the compiled loader rides the same shafts through the
+  // ELEVATORS lump (REQ-0652).
   elevators: {
     shafts: elevatorShafts,
     carRect: elevatorCarRect,
@@ -284,7 +284,6 @@ export const GAME_BUILD = {
     updateCarRect: updateElevatorCarRect,
     nextStop: nextElevatorStop,
     nearestStop: nearestElevatorStop,
-    restCarRects: elevatorRestCarRects,
   },
   // BUILDSKIN-0606: the face-skin vocabulary — the skin IS the material
   // system (a skin = the mesh's base color or a registry textureKey).

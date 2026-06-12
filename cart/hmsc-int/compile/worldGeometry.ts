@@ -287,10 +287,6 @@ function pushStairs(
   return steps;
 }
 
-// REQ-0647: the elevator car platform's bake color (the editor's
-// BUILD_UI.elevatorCarColor look; compile/ does not import editor tables).
-const ELEVATOR_CAR_COLOR: Color = [0.68, 0.71, 0.75];
-
 /** REQ-0647: one elevator storey — the SAME open-front frame pieceMeshes
  *  draws in /test (posts, thin back/side walls, front header beam), never a
  *  solid box. The car bakes separately at each shaft's rest stop. */
@@ -1446,14 +1442,10 @@ function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number
     );
     emitted += 1;
   }
-  // REQ-0647: each elevator shaft's car bakes parked at its REST stop (the
-  // bottom storey). The compiled game has no ride loop yet — the car is a
-  // standable platform there; live motion is the editor play surface's layer.
-  for (const shaft of GAME_BUILD.elevators.shafts(pieces)) {
-    const car = GAME_BUILD.elevators.carBox(shaft, shaft.stops[0]);
-    pushBox(b, car.cx, car.cy, car.cz, car.sx, car.sy, car.sz, ELEVATOR_CAR_COLOR, car.yawDegrees, 0);
-    emitted += 1;
-  }
+  // The elevator CAR is deliberately NOT a static instance row (REQ-0652):
+  // the ELEVATORS lump ships the shafts and the loader renders one LIVE car
+  // node per shaft (the dynamic-prop pattern) — a moving car never re-stages
+  // the world buffer. The shaft frames above stay static.
   return emitted;
 }
 

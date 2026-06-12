@@ -846,15 +846,23 @@ across the portal opening — and navGrid derives its blockers with doors held
 OPEN, a doorway is a nav portal even shut). The ELEVATOR is kind `elevator`
 in the vertical-link family: `elevator.metal.common` = ONE 3m storey module;
 stacked storeys derive a SHAFT with a stop per storey (`elevators.ts` —
-shafts/carRect/carBox/nextStop/nearestStop/restCarRects). Static colliders
-are an open-front frame (back + sides, `placed.ts`); the CAR is a live
+shafts/carRect/carBox/nextStop/nearestStop). Static colliders are an
+open-front frame (back + sides, `placed.ts`) — and the SAME frame feeds
+`placedPieceCameraOccluders`, so the editor spring-arm and the compiled
+camera push in identically (REQ-0652 parity report). The CAR is a live
 `CollisionRect` PlayRoute mutates in place per frame (the host step re-reads
 rects every frame, so the rising car carries the standing player — pinned in
 `physics.test.ts`); E rides up stop-by-stop (wrapping down from the top) or
-calls the car to a landing; car height is route-local transient state. The
-compile bake ships the frame + the car parked at the bottom stop
-(`worldGeometry.ts`/`worldColliders.ts`); the iso pane renders rest cars.
-P4: `elevators.test.ts` (6) + build/placed/navGrid/physics additions.
+calls the car to a landing; car height is route-local transient state. THE
+COMPILED GAME RIDES TOO (REQ-0652): the ELEVATORS lump (MAP_LUMP 18,
+`compile/worldElevators.ts` → `constructor.zig` decodeElevators) ships each
+shaft's car/module footprint + stops; `world_loader.zig` appends one LIVE
+car rect per shaft, stepElevators re-aims it in place before each physics
+step, one live render node per car follows, and stepInteract grew the
+board/call E branch — /test's ride, native, zero V8. `rjit game verify` now
+owns the compile/ suites too (SUITE_ROOTS + `cart/hmsc-int/compile`). The
+iso pane renders rest cars. P4: `elevators.test.ts` (5) +
+`compile/worldElevators.test.ts` + build/placed/navGrid/physics additions.
 
 **Buildings own their history (`game/world/buildings.ts`, req_0512→req_0513,
 2026-06-10):** the USER'S PROPOSAL made law — "give buildings their own

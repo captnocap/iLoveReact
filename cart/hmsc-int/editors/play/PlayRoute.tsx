@@ -1493,7 +1493,9 @@ export function PlayRoute(props: {
       const meta = ownerId ? cameraOccluderOwnersRef.current[ownerId] : null;
       const kind = meta?.kind ?? (hitDistance > 0 ? 'unknown' : 'none');
       const isPlayerGround = kind === 'ramp' && meta ? isPlayerStandingOnRamp(p, meta.piece) : false;
-      const occludes = kind === 'wall' || kind === 'roof' || (kind === 'ramp' && !isPlayerGround);
+      // elevator shaft walls occlude too (REQ-0652 parity: the compiled
+      // camera collides with the baked shaft walls — /test must match)
+      const occludes = kind === 'wall' || kind === 'roof' || kind === 'elevator' || (kind === 'ramp' && !isPlayerGround);
       const distance = hitDistance > 0 && occludes
         ? Math.max(CAMERA_OCCLUSION_TUNING.minDistanceMeters, Math.min(cam.baseDistance, hitDistance - CAMERA_OCCLUSION_TUNING.skinOffsetMeters))
         : cam.baseDistance;

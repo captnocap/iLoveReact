@@ -216,10 +216,49 @@ isnt an elevator at all." The prefab delivery (the one-piece method prefabs,
 
 P4 coverage: `build.test.ts` (wall-type rows, placementFor, kind contract),
 `elevators.test.ts` (shaft stacking/splitting, open-front colliders, car rect
-ride, stop loop, rest cars), `physics.test.ts` REQ-0647 (the ride carries the
-player), `navGrid.test.ts` (doorway stays pathable). The PLAYFOLD viewport
-guard also went green again: the interact E now reads through
-`embodied.actionDown` instead of a route-local key state.
+ride, stop loop), `physics.test.ts` REQ-0647 (the ride carries the player),
+`navGrid.test.ts` (doorway stays pathable). The PLAYFOLD viewport guard also
+went green again: the interact E now reads through `embodied.actionDown`
+instead of a route-local key state.
+
+## REQ-0652 (2026-06-12): the elevator RIDES in the compiled game; occlusion parity
+
+USER: "it works only in the test route. next add the method to the compiled
+game loader" + the parity report "camera raycast / occlusion is not hitting
+your elevator walls in test, but it is hitting the elevator walls in compiled."
+
+- **The ELEVATORS lump (MAP_LUMP 18)**: `compile/worldElevators.ts` derives
+  per-shaft records from the SAME `GAME_BUILD.elevators` source the editor
+  rides (car footprint/thickness/speed from PLACED_TUNING, module footprint,
+  one stop per storey); `packageMap.ts` ships it; `constructor.zig`
+  decodeElevators reads it. The first delivery's STATIC rest car (a parked
+  rect in COLLIDERS + an instance row) is REMOVED — superseded by the live
+  car, never doubled.
+- **The loader rides** (`world_loader.zig`): one LIVE car rect per shaft
+  appended after the baked rects (`car_rect_start`/`car_count` keep
+  cars[i]↔shafts[i] aligned; `break` on cap), re-aimed IN PLACE by
+  stepElevators each frame before the physics step — the host's groundAt +
+  downhill snap carry the rider both ways. One live render node per car (the
+  dynamic-prop pattern; the shaft frame stays in the static buffer).
+  stepInteract grew the elevator branch (board → "E — elevator up/down to
+  floor N", landing → "E — call the elevator", same PLACED_TUNING-parity
+  reaches) and now runs with EITHER lump present (interactables-less maps
+  used to early-return). Cars skip under spatial windowing (the massive-lab
+  path re-derives its buffer per frame; logged at build).
+- **Occlusion parity**: `placedPieceCameraOccluders` now emits the elevator's
+  open-front frame (same pushElevatorShaftRects, with ownerIndex) and
+  PlayRoute counts kind `elevator` as occluding — the editor spring-arm and
+  the compiled camera (whose set is the COLLIDERS lump, shaft walls included)
+  push in identically.
+- **Verify owns compile/ now**: `cart/hmsc-int/compile` joined SUITE_ROOTS
+  (cli/commands/game.ts) — its five suites (geometry/colliders/interactables/
+  dynamic props/elevators) existed but never ran under `rjit game verify`;
+  87/87 green.
+
+P4: `compile/worldElevators.test.ts` (records from the editor source, f32
+round-trip — the constructor.zig reference). Proof: `rjit game shot` GREEN
+with "[loader] elevator layer: 2 live car(s) across 2 shaft(s)" on the
+user's own map.
 
 ## REQ-0472 (2026-06-10): supported wall joins stop at the real intersection
 

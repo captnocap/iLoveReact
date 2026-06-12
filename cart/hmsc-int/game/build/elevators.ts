@@ -14,9 +14,10 @@
 //   • elevatorCarBox     the car's render box (same footprint, one source)
 //   • updateElevatorCarRect  in-place re-aim of a live rect (per-frame ride)
 //   • nextElevatorStop / nearestElevatorStop  stop arithmetic for E-interact
-//   • elevatorRestCarRects  cars at their rest stop — what the COMPILE bake
-//     ships (the compiled game gets a standable car; live motion is the play
-//     route's layer, the same split the dynamic props use)
+//
+// The compiled game consumes the SAME derivation through the ELEVATORS lump
+// (compile/worldElevators.ts, REQ-0652) — its loader appends one live car
+// rect per shaft and rides it natively.
 //
 // The shaft frame's STATIC colliders live with the other piece colliders
 // (placed.ts pushElevatorShaftRects); all numbers are PLACED_TUNING rows.
@@ -160,9 +161,3 @@ export function nearestElevatorStop(shaft: ElevatorShaft, y: number): number {
   return best;
 }
 
-/** Every shaft's car at its REST stop (the bottom storey) — the static twin
- *  the compile bake ships so the compiled game has a standable car. The play
- *  route does NOT use this: its live rects move. */
-export function elevatorRestCarRects(pieces: readonly PlacedBuildPiece[]): CollisionRect[] {
-  return elevatorShafts(pieces).map((shaft) => elevatorCarRect(shaft, shaft.stops[0]));
-}

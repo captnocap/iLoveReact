@@ -22,6 +22,7 @@ pub const Error = gamefile.Error || error{
     BadPhysicsConfig,
     BadInteractables,
     BadDynamicProps,
+    BadElevators,
 };
 
 const COLLIDERS_VERSION: u32 = 1;
@@ -29,6 +30,7 @@ const PHYSICS_CONFIG_VERSION: u32 = 1;
 const PHYSICS_CONFIG_FLOATS: usize = 13;
 const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
+const ELEVATORS_VERSION: u32 = 1;
 /// One local render part: px,py,pz, rx,ry,rz, sx,sy,sz, r,g,b, shapeId —
 /// the INSTANCES row field order, anchor-relative and yaw-unfolded.
 pub const DYNAMIC_PART_FLOATS: usize = 13;
@@ -360,6 +362,34 @@ pub const DynamicProps = struct {
     }
 };
 
+/// One elevator shaft (req_0652) — wire-format twin of
+/// compile/worldElevators.ts ElevatorShaftRecord.
+pub const ElevatorShaft = struct {
+    x: f32,
+    z: f32,
+    car_half_x: f32,
+    car_half_z: f32,
+    car_thickness: f32,
+    car_speed: f32,
+    module_half_x: f32,
+    module_half_z: f32,
+    /// ascending storey base levels — the car serves one stop per storey
+    stops: []f32,
+
+    pub fn deinit(self: ElevatorShaft, allocator: std.mem.Allocator) void {
+        allocator.free(self.stops);
+    }
+};
+
+pub const Elevators = struct {
+    shafts: []ElevatorShaft,
+
+    pub fn deinit(self: Elevators, allocator: std.mem.Allocator) void {
+        for (self.shafts) |shaft| shaft.deinit(allocator);
+        allocator.free(self.shafts);
+    }
+};
+
 pub const Scene = struct {
     width: u32,
     height: u32,
@@ -406,6 +436,9 @@ pub const Scene = struct {
     /// Kickable dynamic props (KICKPROP req_0625) — sphere-body recipes +
     /// local render parts. null in pre-lump bakes (everything stays static).
     dynamic_props: ?DynamicProps,
+    /// Elevator shafts (req_0652) — the loader appends one LIVE car rect per
+    /// shaft and rides it. null in pre-lump bakes (no cars).
+    elevators: ?Elevators,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
@@ -423,6 +456,7 @@ pub const Scene = struct {
         allocator.free(self.decal_assets);
         if (self.interactables) |ia| ia.deinit(allocator);
         if (self.dynamic_props) |dp| dp.deinit(allocator);
+        if (self.elevators) |el| el.deinit(allocator);
     }
 };
 
@@ -905,6 +939,54 @@ fn decodeDynamicProps(allocator: std.mem.Allocator, data: []const u8) Error!Dyna
     return .{ .props = try props.toOwnedSlice(allocator) };
 }
 
+/// Decode the ELEVATORS lump (req_0652) — wire-format twin of
+/// compile/worldElevators.ts encodeElevators.
+fn decodeElevators(allocator: std.mem.Allocator, data: []const u8) Error!Elevators {
+    if (data.len < 8) return Error.BadElevators;
+    if (std.mem.readInt(u32, data[0..4], .little) != ELEVATORS_VERSION) return Error.BadElevators;
+    const shaft_count = std.mem.readInt(u32, data[4..8], .little);
+    var at: usize = 8;
+
+    var shafts = try std.ArrayList(ElevatorShaft).initCapacity(allocator, shaft_count);
+    errdefer {
+        for (shafts.items) |shaft| shaft.deinit(allocator);
+        shafts.deinit(allocator);
+    }
+    var i: usize = 0;
+    while (i < shaft_count) : (i += 1) {
+        if (at + 32 + 4 > data.len) return Error.BadElevators;
+        const x = readF32(data, at);
+        const z = readF32(data, at + 4);
+        const car_half_x = readF32(data, at + 8);
+        const car_half_z = readF32(data, at + 12);
+        const car_thickness = readF32(data, at + 16);
+        const car_speed = readF32(data, at + 20);
+        const module_half_x = readF32(data, at + 24);
+        const module_half_z = readF32(data, at + 28);
+        at += 32;
+        const stop_count = std.mem.readInt(u32, data[at..][0..4], .little);
+        at += 4;
+        if (stop_count == 0 or at + @as(usize, stop_count) * 4 > data.len) return Error.BadElevators;
+        const stops = try allocator.alloc(f32, stop_count);
+        errdefer allocator.free(stops);
+        for (stops, 0..) |*v, k| v.* = readF32(data, at + k * 4);
+        at += @as(usize, stop_count) * 4;
+        try shafts.append(allocator, .{
+            .x = x,
+            .z = z,
+            .car_half_x = car_half_x,
+            .car_half_z = car_half_z,
+            .car_thickness = car_thickness,
+            .car_speed = car_speed,
+            .module_half_x = module_half_x,
+            .module_half_z = module_half_z,
+            .stops = stops,
+        });
+    }
+
+    return .{ .shafts = try shafts.toOwnedSlice(allocator) };
+}
+
 /// Max packed decal recipe size — a doc is a handful of node records (~1KB
 /// typical); a corrupt length can't ask for a huge dupe.
 const MAX_DECAL_DOC_BYTES: u32 = 1 << 20;
@@ -1115,6 +1197,13 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     else
         null;
     errdefer if (dynamic_props) |dp| dp.deinit(allocator);
+    // Elevator shafts (req_0652) — optional like the other post-v1 lumps;
+    // absent means no cars (the shaft frames stay static geometry).
+    const elevators: ?Elevators = if (mapfile.findLump(map_lumps, mapfile.LumpType.elevators)) |lump|
+        try decodeElevators(allocator, lump.data)
+    else
+        null;
+    errdefer if (elevators) |el| el.deinit(allocator);
 
     // Decal image payloads (DECALIMG-0610, req_0592): every manifest asset
     // tagged decal-image is read from the content store once, here — the
@@ -1155,5 +1244,6 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .decal_assets = decal_assets,
         .interactables = interactables,
         .dynamic_props = dynamic_props,
+        .elevators = elevators,
     };
 }

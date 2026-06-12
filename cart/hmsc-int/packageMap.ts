@@ -24,6 +24,7 @@ import type { DecalAssetSink } from './compile/decalAssets';
 import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, paintedFloorTopAt, type BakedPhysicsConfig } from './compile/worldColliders';
 import { encodeInteractables } from './compile/worldInteractables';
 import { encodeDynamicProps } from './compile/worldDynamicProps';
+import { elevatorShaftRecords, encodeElevators } from './compile/worldElevators';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './compile/playerModel';
 import type { ChunkFloor } from './chunkFloor';
@@ -291,6 +292,9 @@ export function createHmscMapfile(
     // Kickable dynamic props (sphere bodies + local render parts) — balls
     // roll and cones shove in the compiled game (compile/worldDynamicProps.ts).
     { type: MAP_LUMP.DYNAMIC_PROPS, encoding: 'raw', data: encodeDynamicProps(geometry.dynamicProps) },
+    // Elevator shafts (REQ-0652) — the loader appends one LIVE car rect per
+    // shaft and rides it: E to ride/call, /test parity (compile/worldElevators.ts).
+    { type: MAP_LUMP.ELEVATORS, encoding: 'raw', data: encodeElevators(elevatorShaftRecords(liftedPieces)) },
   ];
   if (playerModel) {
     // The compiled player figure from @game/figure. Runtime movement changes

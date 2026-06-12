@@ -5511,7 +5511,7 @@ done
     run: () => run11
   });
   var GAME_DIR = "cart/hmsc-int/game";
-  var SUITE_ROOTS = [GAME_DIR, "cart/hmsc-int/data", "cart/hmsc-int/editors", "docs/game/_index"];
+  var SUITE_ROOTS = [GAME_DIR, "cart/hmsc-int/data", "cart/hmsc-int/editors", "cart/hmsc-int/compile", "docs/game/_index"];
   var COMPILE_ENTRY = "cart/hmsc-int/compile/main.ts";
   var VERIFY_DIR = "cart/hmsc-int/compile/verify";
   var OUT_DIR = "zig-out/game";

@@ -16,8 +16,8 @@ import { err, out } from '../host/log.ts';
 import { spawnSync } from '../host/process.ts';
 
 const GAME_DIR = 'cart/hmsc-int/game';
-/** every root whose *.test.ts suites the verify run owns (game + the V20 data layer + the editor routes + the oracle/_index layer incl. the request ledger) */
-const SUITE_ROOTS = [GAME_DIR, 'cart/hmsc-int/data', 'cart/hmsc-int/editors', 'docs/game/_index'];
+/** every root whose *.test.ts suites the verify run owns (game + the V20 data layer + the editor routes + the COMPILE bake (req_0652 — its five suites existed but never ran here) + the oracle/_index layer incl. the request ledger) */
+const SUITE_ROOTS = [GAME_DIR, 'cart/hmsc-int/data', 'cart/hmsc-int/editors', 'cart/hmsc-int/compile', 'docs/game/_index'];
 const COMPILE_ENTRY = 'cart/hmsc-int/compile/main.ts';
 const VERIFY_DIR = 'cart/hmsc-int/compile/verify';
 const OUT_DIR = 'zig-out/game';

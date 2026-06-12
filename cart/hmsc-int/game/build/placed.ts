@@ -811,13 +811,14 @@ function pushStairBoundaryRects(
  *  back and side walls (inside the module footprint, flush with its edges)
  *  collide; the front face (local −v) stays open so a body walks onto the
  *  car. The CAR is deliberately NOT here: it is live, moving collision —
- *  the play route owns its rect (editors/play), the compile bake ships it at
- *  rest via elevators.restCarRects. */
+ *  the play route owns its rect (editors/play), and the compiled loader owns
+ *  its own through the ELEVATORS lump (REQ-0652). */
 function pushElevatorShaftRects(
-  rects: CollisionRect[],
-  orientedRects: OrientedCollisionRect[],
+  rects: (CollisionRect & { ownerIndex?: number })[],
+  orientedRects: (OrientedCollisionRect & { ownerIndex?: number })[],
   piece: PlacedBuildPiece,
   def: BuildPieceDef,
+  ownerIndex?: number,
 ): void {
   const size = def.size;
   const halfW = size.widthMeters / 2;
@@ -829,6 +830,7 @@ function pushElevatorShaftRects(
     blocksPlayer: true,
     friction: PLACED_TUNING.pieceFriction,
     restitution: PLACED_TUNING.pieceRestitution,
+    ...(ownerIndex === undefined ? {} : { ownerIndex }),
   };
   const localRects: LocalPlanRect[] = [
     { minU: -halfW, maxU: -halfW + wall, minV: -halfD, maxV: halfD }, // left wall
@@ -1005,6 +1007,16 @@ export function placedPieceCameraOccluders(pieces: readonly PlacedBuildPiece[]):
       if (!tags.collision || !tags.blocksSight) continue;
       const ownerIndex = ownerIds.push(piece.id);
       pushRampSlabEdgeRects(rects, orientedRects, piece, def, ownerIndex);
+      continue;
+    }
+    if (def.kind === 'elevator') {
+      // REQ-0652 parity (USER report): the compiled camera collides with the
+      // baked shaft walls (its camera set IS the COLLIDERS lump), so the
+      // editor spring-arm must see the same thin frame — otherwise /test
+      // looks through a shaft the shipped game pushes in on.
+      if (!tags.collision) continue;
+      const ownerIndex = ownerIds.push(piece.id);
+      pushElevatorShaftRects(rects, orientedRects, piece, def, ownerIndex);
       continue;
     }
     if (def.kind !== 'wall' && def.kind !== 'roof') continue;

@@ -90,6 +90,13 @@ export const MAP_LUMP = {
   // entity section and renders them as live nodes — balls roll, cones shove.
   // Layout: cart/hmsc-int/compile/worldDynamicProps.ts encodeDynamicProps.
   DYNAMIC_PROPS: 17,
+  // Elevator shafts (REQ-0652): per shaft the car footprint/thickness/speed,
+  // the module footprint, and one stop level per stacked storey. The loader
+  // appends a LIVE car rect per shaft to its physics buffer and rides it —
+  // E to ride/call, exactly /test's elevator. Absent → no cars (the shaft
+  // frames still render/collide through INSTANCES + COLLIDERS).
+  // Layout: cart/hmsc-int/compile/worldElevators.ts encodeElevators.
+  ELEVATORS: 18,
 } as const;
 
 export type LumpInput = {

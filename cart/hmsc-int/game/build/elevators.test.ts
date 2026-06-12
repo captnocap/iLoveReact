@@ -1,16 +1,15 @@
 // game/build elevator behavior tests (P4) — MEANING tests for REQ-0647's
 // moving vertical link: stacked storeys ARE a shaft with a stop per storey, a
 // gap splits shafts, the static colliders are an OPEN-FRONT frame (a body
-// walks in; the car is live, not static), stop arithmetic rides the loop, and
-// the compile bake's rest car is standable at the bottom storey. Runs under
-// tools/v8cli via `rjit game verify`.
+// walks in; the car is live, not static), and stop arithmetic rides the loop.
+// The compiled twin (the ELEVATORS lump) is covered in
+// compile/worldElevators.test.ts. Runs under tools/v8cli via `rjit game verify`.
 
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 import {
   elevatorCarBox,
   elevatorCarRect,
   elevatorCarTop,
-  elevatorRestCarRects,
   elevatorShafts,
   nearestElevatorStop,
   nextElevatorStop,
@@ -81,13 +80,6 @@ test('stop arithmetic rides the loop: up through the stops, wrap to the bottom f
   assertEqual(nearestElevatorStop(shaft, STOREY + 0.4), STOREY, 'a body just above a landing resolves to it');
   const single = elevatorShafts([storey(10.5, 1.5, 0)])[0];
   assertEqual(nextElevatorStop(single, 0), null, 'a one-storey shaft has nowhere to go');
-});
-
-test('the compile bake gets every shaft car parked at its rest stop', () => {
-  const pieces = [storey(1.5, 1.5, 0), storey(1.5, 1.5, STOREY), storey(7.5, 1.5, 0)];
-  const rest = elevatorRestCarRects(pieces);
-  assertEqual(rest.length, 2, 'one parked car per shaft');
-  for (const rect of rest) assertClose(rect.floorMeters!, 0, 1e-9, 'parked at the bottom storey');
 });
 
 finish('build-elevators');

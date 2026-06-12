@@ -123,6 +123,45 @@ const INTERACT_Y_WINDOW_METERS: f32 = 2.5;
 const INTERACT_SEARCH_CANCEL_MOVE_METERS: f32 = 0.35;
 const INTERACT_NOTICE_SECONDS: f32 = 3.2;
 
+// ── elevators (req_0652) — parity with /test's ride (PlayRoute.tsx): the car
+// is a LIVE rect in the physics buffer, re-aimed in place per frame; E rides
+// up a stop per press (wrapping down from the top) or calls the car to a
+// landing. Tuning mirrors PLACED_TUNING (game/build/placed.ts) — per-shaft
+// speed/thickness travel in the ELEVATORS lump, interaction reach here.
+const ELEVATOR_ARRIVE_TOLERANCE_METERS: f32 = 0.02;
+const ELEVATOR_BOARD_REACH_METERS: f32 = 1.2;
+const ELEVATOR_BOARD_BELOW_METERS: f32 = 0.4;
+const ELEVATOR_CALL_REACH_METERS: f32 = 2.8;
+const ELEVATOR_CAR_FRICTION: f32 = 0.85;
+const ELEVATOR_CAR_RESTITUTION: f32 = 0.02;
+// the editor's BUILD_UI.elevatorCarColor look
+const ELEVATOR_CAR_COLOR = [3]f32{ 0.68, 0.71, 0.75 };
+
+/// The next stop the car serves from car_y: closest stop ABOVE, wrapping to
+/// the bottom from the top (game/build/elevators.ts nextElevatorStop parity).
+fn nextElevatorStop(stops: []const f32, car_y: f32) ?f32 {
+    if (stops.len < 2) return null;
+    for (stops) |stop| {
+        if (stop > car_y + ELEVATOR_ARRIVE_TOLERANCE_METERS) return stop;
+    }
+    return stops[0];
+}
+
+fn nearestElevatorStop(stops: []const f32, y: f32) f32 {
+    var best = stops[0];
+    for (stops) |stop| {
+        if (@abs(stop - y) < @abs(best - y)) best = stop;
+    }
+    return best;
+}
+
+fn elevatorStopIndex(stops: []const f32, stop: f32) usize {
+    for (stops, 0..) |s, i| {
+        if (s == stop) return i;
+    }
+    return 0;
+}
+
 const log = std.debug;
 
 const Vec3 = struct {
@@ -211,6 +250,12 @@ const PhysicsColliders = struct {
     /// writer and reader must shift by this. 0 on maps with no dynamic props
     /// (and on the camera's dedicated set), keeping the legacy layout.
     entity_capacity: usize = 0,
+    /// LIVE elevator car rects (req_0652): `car_count` rects starting at rect
+    /// index `car_rect_start` are the cars, one per ELEVATORS-lump shaft in
+    /// order — stepElevators re-aims their top/floor floats in place per
+    /// frame. 0/0 on maps without elevators (and on the camera set).
+    car_rect_start: usize = 0,
+    car_count: usize = 0,
 
     pub fn deinit(self: PhysicsColliders, allocator: std.mem.Allocator) void {
         allocator.free(self.values);
@@ -233,6 +278,15 @@ const PropBody = struct {
     vz: f32 = 0,
     radius: f32,
     restitution: f32,
+};
+
+/// One elevator shaft's live car (req_0652) — parallel to the ELEVATORS-lump
+/// shafts (first car_count of them) and to the live car rects in the physics
+/// buffer. Car height is transient runtime state, parked at the bottom stop
+/// on load (/test parity: doors persist, car height does not).
+const ElevatorCar = struct {
+    car_y: f32,
+    target_y: f32,
 };
 
 fn clamp(v: f32, lo: f32, hi: f32) f32 {
@@ -914,6 +968,38 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
         try oriented.appendSlice(allocator, bc.oriented[0 .. kept_oriented * game_physics.ORIENTED_FLOATS]);
         oriented_count = kept_oriented;
 
+        // LIVE elevator car rects (req_0652): one per ELEVATORS-lump shaft,
+        // appended AFTER the baked rects so stepElevators can re-aim their
+        // top/floor floats in place per frame (the step reads this same
+        // buffer every frame — a rising top carries the standing player).
+        // Cars spawn parked at each shaft's bottom stop. `break` on cap keeps
+        // cars[i] ↔ shafts[i] aligned (a partial tail would skew indices).
+        var car_rect_start: usize = 0;
+        var car_count: usize = 0;
+        if (scene.elevators) |el| {
+            car_rect_start = rect_count;
+            for (el.shafts) |shaft| {
+                if (rect_count >= game_physics.MAX_RECTS) {
+                    clipped_rows += el.shafts.len - car_count;
+                    break;
+                }
+                const rest = shaft.stops[0];
+                try rects.appendSlice(allocator, &[_]f32{
+                    shaft.x - shaft.car_half_x, // minX
+                    shaft.z - shaft.car_half_z, // minZ
+                    shaft.x + shaft.car_half_x, // maxX
+                    shaft.z + shaft.car_half_z, // maxZ
+                    rest + shaft.car_thickness, // top (the standable car surface)
+                    1, // blocksPlayer
+                    ELEVATOR_CAR_FRICTION,
+                    ELEVATOR_CAR_RESTITUTION,
+                    rest, // floor (banded: walk under a risen car)
+                });
+                rect_count += 1;
+                car_count += 1;
+            }
+        }
+
         // We DON'T derive any colliders from the render instances here — exactly
         // like /test, the pieces collide ONLY through the baked colliders above
         // and the painted ground through the heightfields. This matters: a piece
@@ -939,6 +1025,8 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
             .heightfield_count = heightfield_count,
             .clipped_rows = clipped_rows,
             .entity_capacity = entity_capacity,
+            .car_rect_start = car_rect_start,
+            .car_count = car_count,
         };
     }
 
@@ -1636,6 +1724,12 @@ pub const Runtime = struct {
     /// First kid index of the dynamic prop part nodes (laid out prop-by-prop
     /// in scene.dynamic_props order; updateDynamicPropNodes walks them).
     dyn_first_child: usize = 0,
+    /// Live elevator cars (req_0652): parallel to the first
+    /// physics_colliders.car_count ELEVATORS-lump shafts; stepElevators
+    /// advances them and re-aims their live rects + render nodes.
+    cars: []ElevatorCar = &.{},
+    /// First kid index of the elevator car nodes (one box per car).
+    car_first_child: usize = 0,
     last_ns: i64 = 0,
     frame: u32 = 0,
     // Content streaming (engaged when the world outgrows the detail radius):
@@ -1751,6 +1845,7 @@ pub const Runtime = struct {
         if (self.fallback) |f| self.allocator.free(f);
         if (self.interact.searched.len > 0) self.allocator.free(self.interact.searched);
         if (self.bodies.len > 0) self.allocator.free(self.bodies);
+        if (self.cars.len > 0) self.allocator.free(self.cars);
         self.scene.deinit(self.allocator);
         self.* = undefined;
     }
@@ -1804,6 +1899,19 @@ pub const Runtime = struct {
         log.print("[loader] built {d} physics rects + {d} oriented physics rects + {d} heightfields\n", .{ self.physics_colliders.rect_count, self.physics_colliders.oriented_count, self.physics_colliders.heightfield_count });
         if (self.physics_colliders.clipped_rows > 0) {
             log.print("[loader] physics collider cap clipped {d} rendered instance rows\n", .{self.physics_colliders.clipped_rows});
+        }
+        // Elevator cars (req_0652): one live car per shaft that got a rect,
+        // parked at its bottom stop. stepElevators owns motion + the rect.
+        if (self.physics_colliders.car_count > 0) {
+            self.cars = try self.allocator.alloc(ElevatorCar, self.physics_colliders.car_count);
+            const el = self.scene.elevators.?;
+            for (self.cars, 0..) |*car, i| {
+                const rest = el.shafts[i].stops[0];
+                car.* = .{ .car_y = rest, .target_y = rest };
+            }
+            log.print("[loader] elevator layer: {d} live car(s) across {d} shaft(s)\n", .{ self.cars.len, el.shafts.len });
+        } else if (self.scene.elevators) |el| {
+            if (el.shafts.len > 0) log.print("[loader] elevator layer: {d} shaft(s) but no live cars (collider cap / no baked colliders)\n", .{el.shafts.len});
         }
         // The camera's own collider set: the FULL baked authored rects/oriented,
         // unclamped, packed in cameraOcclusionStepColliders wire order. Built once
@@ -2070,6 +2178,31 @@ pub const Runtime = struct {
                         .scene3d_color_b = row[11],
                     });
                 }
+            }
+        }
+        // Elevator cars (req_0652) render as LIVE per-frame nodes too — one
+        // box per car, positioned by stepElevators each step (the shaft frame
+        // stays in the static instance buffer; only the car moves).
+        self.car_first_child = self.kid_list.items.len;
+        if (self.cars.len > 0) {
+            const el = self.scene.elevators.?;
+            for (self.cars, 0..) |car, i| {
+                const shaft = el.shafts[i];
+                try self.kid_list.append(self.allocator, .{
+                    .scene3d_mesh = true,
+                    .scene3d_geom_key = "box",
+                    .scene3d_vertices = self.cube[0..],
+                    .scene3d_vert_count = 36,
+                    .scene3d_pos_x = shaft.x,
+                    .scene3d_pos_y = car.car_y + shaft.car_thickness / 2,
+                    .scene3d_pos_z = shaft.z,
+                    .scene3d_scale_x = shaft.car_half_x * 2,
+                    .scene3d_scale_y = shaft.car_thickness,
+                    .scene3d_scale_z = shaft.car_half_z * 2,
+                    .scene3d_color_r = ELEVATOR_CAR_COLOR[0],
+                    .scene3d_color_g = ELEVATOR_CAR_COLOR[1],
+                    .scene3d_color_b = ELEVATOR_CAR_COLOR[2],
+                });
             }
         }
         // The world batches are STATIC (built once at construct, never mutated) —
@@ -2466,6 +2599,10 @@ pub const Runtime = struct {
         const dt = clamp(@as(f32, @floatFromInt(ns - self.last_ns)) / 1_000_000_000.0, 0.001, 0.05);
         self.last_ns = ns;
 
+        // req_0652: cars advance FIRST so this frame's physics step (and the
+        // interact prompts) read the fresh car heights — /test's frame order.
+        self.stepElevators(dt);
+
         var forward: f32 = 0;
         var strafe: f32 = 0;
         if (keyDown(SCAN_W)) forward += 1;
@@ -2548,20 +2685,54 @@ pub const Runtime = struct {
         }
     }
 
+    /// req_0652 — /test's elevator ride, native: advance every car toward its
+    /// target stop and re-aim its LIVE rect in the physics buffer IN PLACE
+    /// (the step reads this buffer every frame, so the rising top carries the
+    /// standing player); the car's render node follows. No-op without cars;
+    /// skipped under spatial windowing (that path re-derives its buffer from
+    /// render instances per frame, which carries no cars).
+    fn stepElevators(self: *Runtime, dt: f32) void {
+        if (self.cars.len == 0 or self.windowed) return;
+        const el = self.scene.elevators orelse return;
+        const base = self.physics_colliders.rectBase() + self.physics_colliders.car_rect_start * game_physics.RECT_FLOATS;
+        for (self.cars, 0..) |*car, i| {
+            const shaft = el.shafts[i];
+            const delta = car.target_y - car.car_y;
+            if (@abs(delta) > ELEVATOR_ARRIVE_TOLERANCE_METERS) {
+                const step_m = @max(0.01, shaft.car_speed) * dt;
+                car.car_y = if (@abs(delta) <= step_m) car.target_y else car.car_y + std.math.sign(delta) * step_m;
+            }
+            const at = base + i * game_physics.RECT_FLOATS;
+            self.physics_colliders.values[at + 4] = car.car_y + shaft.car_thickness; // top
+            self.physics_colliders.values[at + 8] = car.car_y; // floor
+            const node = &self.kid_list.items[self.car_first_child + i];
+            node.scene3d_pos_x = shaft.x;
+            node.scene3d_pos_y = car.car_y + shaft.car_thickness / 2;
+            node.scene3d_pos_z = shaft.z;
+        }
+    }
+
     /// PROPUSE req_0624 — /test's interact frame, native: resolve the nearest
     /// seat/container in reach over the INTERACTABLES lump, run the prompt /
     /// E edge / search timer, pin the seat pose. Mirrors PlayRoute.tsx
     /// interactFrame semantics (reach, cancel radius, prompt grammar).
+    /// req_0652 adds the elevator: standing ON the car E rides to the next
+    /// stop (wrapping down from the top); at a landing with the car elsewhere
+    /// E calls it — props in reach win the E first, /test's priority.
     fn stepInteract(self: *Runtime, dt: f32) void {
         const st = &self.interact;
         if (st.notice_left > 0) st.notice_left = @max(0, st.notice_left - dt);
         st.prompt_len = 0;
         st.bar_progress = -1;
-        const ia = self.scene.interactables orelse return;
-        if (ia.instances.len == 0) return;
+        // props are optional (the INTERACTABLES lump) and so are elevators
+        // (the ELEVATORS lump) — either alone keeps the frame alive (req_0652).
+        const ia_opt = self.scene.interactables;
+        const has_props = if (ia_opt) |ia| ia.instances.len > 0 else false;
+        if (!has_props and self.cars.len == 0) return;
 
-        // 1. advance / cancel / finish an active search
+        // 1. advance / cancel / finish an active search (props only)
         if (st.search_active) {
+            const ia = ia_opt.?;
             const arch = ia.archetypes[ia.instances[st.search_instance].archetype];
             const adx = self.player.x - st.search_anchor_x;
             const adz = self.player.z - st.search_anchor_z;
@@ -2584,7 +2755,8 @@ pub const Runtime = struct {
         var target: ?usize = null;
         if (self.player.posture != .none) {
             st.setPrompt("WASD / Space — stand up", .{});
-        } else if (!st.search_active) {
+        } else if (!st.search_active and has_props) {
+            const ia = ia_opt.?;
             var best_distance: f32 = INTERACT_REACH_METERS;
             for (ia.instances, 0..) |inst, i| {
                 if (@abs(inst.y - self.player.y) > INTERACT_Y_WINDOW_METERS) continue;
@@ -2615,12 +2787,59 @@ pub const Runtime = struct {
             }
         }
 
+        // 2b. the elevator (req_0652) — only when no prop claimed the prompt
+        // (/test's priority: doors/props in reach win the E first).
+        var elevator_ride: ?struct { index: usize, to_y: f32 } = null;
+        if (self.player.posture == .none and !st.search_active and st.prompt_len == 0 and self.cars.len > 0) {
+            const el = self.scene.elevators.?;
+            for (self.cars, 0..) |car, i| {
+                const shaft = el.shafts[i];
+                const inside = @abs(self.player.x - shaft.x) <= shaft.module_half_x and @abs(self.player.z - shaft.z) <= shaft.module_half_z;
+                const car_moving = @abs(car.target_y - car.car_y) > ELEVATOR_ARRIVE_TOLERANCE_METERS;
+                if (inside and car_moving) {
+                    st.setPrompt("Elevator moving...", .{});
+                    break;
+                }
+                const car_top = car.car_y + shaft.car_thickness;
+                const on_car = inside and self.player.y >= car.car_y - ELEVATOR_BOARD_BELOW_METERS and self.player.y <= car_top + ELEVATOR_BOARD_REACH_METERS;
+                if (on_car) {
+                    if (nextElevatorStop(shaft.stops, car.car_y)) |next| {
+                        elevator_ride = .{ .index = i, .to_y = next };
+                        const floor_number = elevatorStopIndex(shaft.stops, next) + 1;
+                        if (next > car.car_y) {
+                            st.setPrompt("E — elevator up to floor {d}", .{floor_number});
+                        } else {
+                            st.setPrompt("E — elevator down to floor {d}", .{floor_number});
+                        }
+                    } else {
+                        st.setPrompt("Elevator — one stop (stack more storeys for more floors)", .{});
+                    }
+                    break;
+                }
+                if (car_moving) continue;
+                const dx = shaft.x - self.player.x;
+                const dz = shaft.z - self.player.z;
+                if (@sqrt(dx * dx + dz * dz) > ELEVATOR_CALL_REACH_METERS) continue;
+                const stop = nearestElevatorStop(shaft.stops, self.player.y);
+                if (@abs(self.player.y - stop) > ELEVATOR_BOARD_REACH_METERS) continue;
+                if (@abs(car.car_y - stop) <= ELEVATOR_ARRIVE_TOLERANCE_METERS) continue;
+                elevator_ride = .{ .index = i, .to_y = stop };
+                st.setPrompt("E — call the elevator", .{});
+                break;
+            }
+        }
+
         // 3. the E edge
         const down = keyDown(SCAN_E);
         const pressed = down and !st.prev_e_down;
         st.prev_e_down = down;
         if (!pressed or st.search_active or self.player.posture != .none) return;
+        if (elevator_ride) |ride| {
+            self.cars[ride.index].target_y = ride.to_y;
+            return;
+        }
         const i = target orelse return;
+        const ia = ia_opt.?;
         const inst = ia.instances[i];
         const arch = ia.archetypes[inst.archetype];
         if (arch.has_container) {

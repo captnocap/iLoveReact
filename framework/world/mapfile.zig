@@ -51,6 +51,11 @@ pub const LumpType = struct {
     /// render parts. See runtime/workspace/lumps.ts DYNAMIC_PROPS +
     /// compile/worldDynamicProps.ts.
     pub const dynamic_props: u32 = 17;
+    /// Elevator shafts (req_0652): car footprint/thickness/speed + module
+    /// footprint + one stop per stacked storey. The loader appends one LIVE
+    /// car rect per shaft and rides it (E to ride/call, /test parity). See
+    /// runtime/workspace/lumps.ts ELEVATORS + compile/worldElevators.ts.
+    pub const elevators: u32 = 18;
 };
 
 pub const Lump = struct {
