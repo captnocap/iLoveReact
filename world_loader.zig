@@ -149,8 +149,22 @@ const DOOR_PANEL_RESTITUTION: f32 = 0.02;
 /// same storey, mirrors the interactables Y window)
 const DOOR_Y_WINDOW_METERS: f32 = 2.5;
 /// an OPEN door's node drops here — out of every sightline (no node-hide
-/// flag in the kid list; the rect stops blocking via its blocksPlayer float)
+/// flag in the kid list)
 const DOOR_OPEN_HIDE_DROP_METERS: f32 = 4000.0;
+/// an OPEN door's rect parks here. Flipping blocksPlayer alone is NOT enough:
+/// the host step side-pushes any rect too tall to step onto EVEN when
+/// non-solid (physics.zig collideSolidRects — that's what makes walkable
+/// platforms push you off their sides), so a de-flagged 2.2m door still
+/// blocked the doorway (req_0663). Out of the world = out of every test.
+const DOOR_OPEN_PARK_METERS: f32 = 1.0e9;
+
+/// The door panel's world-AABB half extents (quarter-turn walls — exact).
+fn doorHalfExtents(door: constructor.Door) [2]f32 {
+    const rad = door.yaw_degrees * std.math.pi / 180.0;
+    const half_x = @abs(@cos(rad)) * door.panel_w / 2 + @abs(@sin(rad)) * door.panel_d / 2;
+    const half_z = @abs(@sin(rad)) * door.panel_w / 2 + @abs(@cos(rad)) * door.panel_d / 2;
+    return .{ half_x, half_z };
+}
 
 /// The next stop the car serves from car_y: closest stop ABOVE, wrapping to
 /// the bottom from the top (game/build/elevators.ts nextElevatorStop parity).
@@ -1040,16 +1054,15 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
                     clipped_rows += doors.records.len - door_count;
                     break;
                 }
-                const rad = door.yaw_degrees * std.math.pi / 180.0;
-                const half_x = @abs(@cos(rad)) * door.panel_w / 2 + @abs(@sin(rad)) * door.panel_d / 2;
-                const half_z = @abs(@sin(rad)) * door.panel_w / 2 + @abs(@cos(rad)) * door.panel_d / 2;
+                const half = doorHalfExtents(door);
+                const park: f32 = if (door.start_open) DOOR_OPEN_PARK_METERS else 0;
                 try rects.appendSlice(allocator, &[_]f32{
-                    door.x - half_x, // minX
-                    door.z - half_z, // minZ
-                    door.x + half_x, // maxX
-                    door.z + half_z, // maxZ
+                    door.x - half[0] + park, // minX (an open door's rect parks out of the world)
+                    door.z - half[1] + park, // minZ
+                    door.x + half[0] + park, // maxX
+                    door.z + half[1] + park, // maxZ
                     door.base_y + door.panel_h, // top
-                    if (door.start_open) 0 else 1, // blocksPlayer — the toggle flips this
+                    if (door.start_open) 0 else 1, // blocksPlayer
                     DOOR_PANEL_FRICTION,
                     DOOR_PANEL_RESTITUTION,
                     door.base_y, // floor (banded with the wall's storey)
@@ -2825,7 +2838,16 @@ pub const Runtime = struct {
         const record = doors.records[index];
         const open = !self.doors_state[index].open;
         self.doors_state[index].open = open;
+        // The rect PARKS out of the world while open (see DOOR_OPEN_PARK_METERS:
+        // a non-solid rect taller than step height still side-pushes — that
+        // de-flag-only first cut was req_0663's unwalkable open door).
         const at = self.physics_colliders.rectBase() + (self.physics_colliders.door_rect_start + index) * game_physics.RECT_FLOATS;
+        const half = doorHalfExtents(record);
+        const park: f32 = if (open) DOOR_OPEN_PARK_METERS else 0;
+        self.physics_colliders.values[at + 0] = record.x - half[0] + park; // minX
+        self.physics_colliders.values[at + 1] = record.z - half[1] + park; // minZ
+        self.physics_colliders.values[at + 2] = record.x + half[0] + park; // maxX
+        self.physics_colliders.values[at + 3] = record.z + half[1] + park; // maxZ
         self.physics_colliders.values[at + 5] = if (open) 0 else 1; // blocksPlayer
         const node = &self.kid_list.items[self.door_first_child + index];
         const hide: f32 = if (open) DOOR_OPEN_HIDE_DROP_METERS else 0;

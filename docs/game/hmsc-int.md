@@ -901,8 +901,11 @@ appends one live rect per door after the elevator car rects
 (door_rect_start/door_count), renders one live panel node (yawed box,
 `DOOR_PANEL_COLOR`), and stepInteract grew the 2a-doors branch: nearest leaf
 within ITS reach prompts "E — open/close the door/garage door"; the toggle
-flips the rect's blocksPlayer float in place and drops/returns the node —
-instant, /test's pieceDoorSet semantics. Parity suite now compares against
+PARKS the rect out of the world / restores it and drops/returns the node —
+instant, /test's pieceDoorSet semantics. (req_0663: de-flagging blocksPlayer
+alone is NOT open — physics.zig side-pushes any rect too tall to step onto
+even when non-solid, the law that makes walkable platforms push you off
+their sides; the first cut's open door still blocked the body.) Parity suite now compares against
 the BOOT UNION (static rows + closed leaves from doorRecords). P4:
 `compile/worldDoors.test.ts` (derivation by tuning, no-leaf edits,
 startOpen, wire round-trip, the colliders drop exactly the panel band).
