@@ -39,6 +39,10 @@ export type SnapTuning = {
   /** REQ-0653: how far a ground edge-snap reaches for REAL geometry (existing
    *  wall lines / plate edges) before falling back to the world lattice */
   wallAnchorMagnetMeters: number;
+  /** req_0672: how far a GRID module placement reaches for a standing plate
+   *  whose lattice it joins (the floor/roof twin of the wall magnet) before
+   *  falling back to the world lattice */
+  plateAnchorMagnetMeters: number;
 };
 
 export const SNAP_TUNING_DEFAULTS: SnapTuning = {
@@ -50,6 +54,7 @@ export const SNAP_TUNING_DEFAULTS: SnapTuning = {
   edgeAnchorToleranceMeters: 0.02,
   wallEndpointSnapMeters: 0.5,
   wallAnchorMagnetMeters: 1,
+  plateAnchorMagnetMeters: 3,
 };
 
 export type SnapTarget = {
@@ -353,6 +358,37 @@ export function anchoredRunCenter(anchor: WallLineAnchor, runAt: number, pitch: 
     : anchor.runOrigin + (Math.floor((runAt - anchor.runOrigin) / pitch) + 0.5) * pitch;
 }
 
+/** req_0672: REQ-0653 extended to GRID modules — the nearest standing plate
+ *  (floor/roof) within magnetMeters of the hit, whose CENTER is the lattice
+ *  origin a new module placement steps from. A building that sits off the
+ *  world lattice (a 1m move, an Alt placement, a width+1m clone) defines its
+ *  OWN module grid; new plates and prefab stamps beside it must join THAT
+ *  grid or they can never tile flush ("prefabs are on a completely different
+ *  axis than floors"). Distance is to the plate's footprint bounds, so a
+ *  click anywhere on or beside the building anchors; open ground past the
+ *  magnet falls back to the world lattice. */
+export function nearestPlateLatticeAnchor(
+  pieces: readonly PlacedBuildPiece[],
+  hitX: number,
+  hitZ: number,
+  magnetMeters: number,
+): { x: number; z: number } | null {
+  let best: { x: number; z: number } | null = null;
+  let bestDistance = magnetMeters;
+  for (const piece of pieces) {
+    if (!isTopAnchorPlate(piece)) continue;
+    const b = GAME_BUILD.placed.bounds(piece);
+    const dx = Math.max(b.minX - hitX, 0, hitX - b.maxX);
+    const dz = Math.max(b.minZ - hitZ, 0, hitZ - b.maxZ);
+    const distance = Math.hypot(dx, dz);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = { x: piece.x, z: piece.z };
+    }
+  }
+  return best;
+}
+
 /**
  * Resolve the crosshair into the snap target for the selected piece — null
  * when nothing in reach (or the mode demands a face and there is none).
@@ -401,9 +437,25 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
   const yawRadians = yaw * DEG;
   const ax = input.anchorLocal ? input.anchorLocal.x * Math.cos(yawRadians) - input.anchorLocal.z * Math.sin(yawRadians) : 0;
   const az = input.anchorLocal ? input.anchorLocal.x * Math.sin(yawRadians) + input.anchorLocal.z * Math.cos(yawRadians) : 0;
+  // req_0672: a MODULE placement near standing plates joins THEIR lattice
+  // (the grid twin of the REQ-0653 wall magnet). On a plate's top face the
+  // anchor is THAT plate alone (a storey stacks on its own building, wherever
+  // it sits); on the ground, the nearest plate within the magnet. Alt (fine)
+  // opts out, same as edge snap: fine means "exactly the tile I point at".
+  const isModule = pitchX > grid || pitchZ > grid;
+  const plateAnchor = !fine && isModule
+    ? (onFace
+      ? (isTopAnchorPlate(pieceHit!.piece) ? { x: pieceHit!.piece.x, z: pieceHit!.piece.z } : nearestPlateLatticeAnchor(input.pieces, hit.x, hit.z, tuning.plateAnchorMagnetMeters))
+      : nearestPlateLatticeAnchor(input.pieces, hit.x, hit.z, tuning.plateAnchorMagnetMeters))
+    : null;
+  const snapAxis = (hitV: number, a: number, span: number, pitch: number, originV: number | null) => {
+    if (fine) return fineModuleCenter(hitV + a, span, grid) - a;
+    if (originV !== null && pitch > grid) return originV + Math.round((hitV + a - originV) / pitch) * pitch - a;
+    return snapToCellCenter(hitV + a, pitch) - a;
+  };
   const substratePlacement = () => {
-    const x = (fine ? fineModuleCenter(hit.x + ax, spanX, grid) : snapToCellCenter(hit.x + ax, pitchX)) - ax;
-    const z = (fine ? fineModuleCenter(hit.z + az, spanZ, grid) : snapToCellCenter(hit.z + az, pitchZ)) - az;
+    const x = snapAxis(hit.x, ax, spanX, pitchX, plateAnchor ? plateAnchor.x : null);
+    const z = snapAxis(hit.z, az, spanZ, pitchZ, plateAnchor ? plateAnchor.z : null);
     // ground under the SNAPPED center (the anchor piece's center, when one is
     // set), so the piece sits on the terrain it covers
     const y = common.surface === 'ground'

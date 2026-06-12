@@ -17,7 +17,7 @@ import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { GAME_BUILD, GAME_NATIVE_CAMERA, buildingDefFromPieces, buildingPieceInstanceId, partitionBuildingSelection } from './game';
 import type { BuildEditEvent, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingInstance, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
-import { resolveSnapTarget, modulePitch, nearestWallLineAnchor, anchoredRunCenter, SNAP_TUNING_DEFAULTS, type SnapTarget, type WallLineAnchor } from './editors/build/snap';
+import { resolveSnapTarget, modulePitch, nearestWallLineAnchor, nearestPlateLatticeAnchor, anchoredRunCenter, SNAP_TUNING_DEFAULTS, type SnapTarget, type WallLineAnchor } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, elevatorCarVisualShape } from './editors/build/pieceMeshes';
 import { perfMs, warnPlaceFreeze } from './editors/build/placeFreezeProbe';
 import { logPiecePlaced, logPiecesPlaced, logPrefabStamped } from './editors/build/placeLog';
@@ -521,9 +521,17 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const range = (a0: number, b0: number): [number, number] => { const lo = Math.min(a0, b0), hi = Math.max(a0, b0); return [lo, Math.min(hi, lo + PAINT_MAX_SPAN - 1)]; };
     const cells: { x: number; z: number; yaw: number }[] = [];
     if (kind === 'floor') {
-      const [x0, x1] = range(cellOf(start.x), cellOf(end.x));
-      const [z0, z1] = range(cellOf(start.z), cellOf(end.z));
-      for (let cx = x0; cx <= x1; cx += 1) for (let cz = z0; cz <= z1; cz += 1) cells.push({ x: center(cx), z: center(cz), yaw: 0 });
+      // req_0672: the SAME plate-lattice law as single-click grid snap — a
+      // floor drag starting near standing plates fills THEIR grid (an off-
+      // world-lattice building extends flush), world lattice in open space.
+      const anchor = nearestPlateLatticeAnchor(visiblePiecesRef.current, start.x, start.z, ISO_SNAP_TUNING.plateAnchorMagnetMeters);
+      const originX = anchor ? anchor.x - pitch / 2 : 0;
+      const originZ = anchor ? anchor.z - pitch / 2 : 0;
+      const cellFrom = (v: number, origin: number) => Math.floor((v - origin) / pitch);
+      const centerFrom = (c: number, origin: number) => origin + (c + 0.5) * pitch;
+      const [x0, x1] = range(cellFrom(start.x, originX), cellFrom(end.x, originX));
+      const [z0, z1] = range(cellFrom(start.z, originZ), cellFrom(end.z, originZ));
+      for (let cx = x0; cx <= x1; cx += 1) for (let cz = z0; cz <= z1; cz += 1) cells.push({ x: centerFrom(cx, originX), z: centerFrom(cz, originZ), yaw: 0 });
     } else {
       // wall: the longer drag axis is the run; the short axis pins to the nearest
       // 3m edge — anchored to real geometry first (REQ-0653: a stroke along an

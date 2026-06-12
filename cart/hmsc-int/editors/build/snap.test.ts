@@ -150,6 +150,50 @@ test('a prefab stamp lands its floors flush with natively-placed floors (req_066
   }
 });
 
+test('a floor beside an off-lattice plate joins ITS lattice and tiles flush (req_0672)', () => {
+  // a building moved 1m off the world lattice: plate centered (10, 4), phase (1.0, 1.0)
+  const offPlate = placed('floor.concrete.common', 10, 4);
+  const down = { origin: { x: 11.8, y: 2, z: 4.2 }, dir: norm(0, -1, 0) };
+  const target = resolveSnapTarget(snapInput({ ray: down, pieces: [offPlate], snap: 'grid', size: FLOOR_SIZE }));
+  assert(!!target, 'a target resolves beside the plate');
+  assertClose(target!.placement.x, 13, 1e-9, 'steps one module from the PLATE center, not the world lattice');
+  assertClose(target!.placement.z, 4, 1e-9, 'shares the plate row');
+  const a = GAME_BUILD.placed.bounds(offPlate);
+  const b = GAME_BUILD.placed.bounds({ ...target!.placement, pieceId: 'floor.concrete.common', id: 'next' });
+  assertEqual(a.maxX, b.minX, 'the new floor shares the exact edge — flush, no half-tile seam');
+});
+
+test('a prefab stamp beside an off-lattice plate lands its floors on the plate lattice (req_0672)', () => {
+  const offPlate = placed('floor.concrete.common', 10, 4);
+  const down = { origin: { x: 11.8, y: 2, z: 4.2 }, dir: norm(0, -1, 0) };
+  const anchor = { x: 1.5, z: 1.5 }; // captured-prefab shape: floor plate 1.5 off the origin
+  const target = resolveSnapTarget(snapInput({ ray: down, pieces: [offPlate], snap: 'grid', size: FLOOR_SIZE, anchorLocal: anchor }));
+  assert(!!target, 'a target resolves');
+  const floorX = target!.placement.x + anchor.x;
+  const floorZ = target!.placement.z + anchor.z;
+  assertClose(((floorX - offPlate.x) % 3 + 3) % 3, 0, 1e-9, 'the stamped floor steps the PLATE lattice in x');
+  assertClose(((floorZ - offPlate.z) % 3 + 3) % 3, 0, 1e-9, 'the stamped floor steps the PLATE lattice in z');
+});
+
+test('stacking on an off-lattice plate top anchors to THAT plate; Alt and open ground do not anchor (req_0672)', () => {
+  const offPlate = placed('floor.concrete.common', 10, 4);
+  // top-face hit: a storey stacks aligned to its own building
+  const ontoTop = { origin: { x: 10.6, y: 2, z: 4.1 }, dir: norm(0, -1, 0) };
+  const stacked = resolveSnapTarget(snapInput({ ray: ontoTop, pieces: [offPlate], snap: 'grid', size: FLOOR_SIZE }));
+  assert(!!stacked && stacked.surface === 'pieceFace', 'the plate top is the surface');
+  assertClose(stacked!.placement.x, 10, 1e-9, 'the storey centers on the plate, wherever it sits');
+  assertClose(stacked!.placement.z, 4, 1e-9, 'both axes');
+  // Alt fine placement opts out of anchoring (REQ-0650: exactly the tile I point at)
+  const down = { origin: { x: 11.8, y: 2, z: 4.2 }, dir: norm(0, -1, 0) };
+  const fine = resolveSnapTarget(snapInput({ ray: down, pieces: [offPlate], snap: 'grid', size: FLOOR_SIZE, freeform: true }));
+  assertClose(fine!.placement.x, 11.5, 1e-9, 'fine mode stays on the 1m substrate');
+  // a plate beyond the magnet changes nothing — the world lattice rules open ground
+  const farPlate = placed('floor.concrete.common', 40, 40);
+  const open = resolveSnapTarget(snapInput({ pieces: [farPlate], snap: 'grid', size: FLOOR_SIZE }));
+  assertClose(open!.placement.x, 1.5, 1e-9, 'world module lattice in x');
+  assertClose(open!.placement.z, 4.5, 1e-9, 'world module lattice in z');
+});
+
 test('edge snap puts the wall ON the nearer grid line, running along it', () => {
   // aim so the hit lands near x = 3.05 (close to the x=3 line) with z
   // mid-cell (~4.4) so the x line is unambiguously the nearer one
