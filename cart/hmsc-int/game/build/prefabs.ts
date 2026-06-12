@@ -101,6 +101,27 @@ export function prefabDefinition(id: string): BuildPrefabDef {
   return def;
 }
 
+/** The stamp's lattice anchor (req_0668): the local center + size of the
+ *  prefab's first floor (else roof) plate. Snapping THIS point onto the
+ *  plate's own module lattice lands every plate in the stamp flush with
+ *  natively-placed floors. The stamp ORIGIN is wherever the capture's min
+ *  corner fell — often a wall line, off the floor lattice by half a module —
+ *  so origin-snapping left a stamped room's floors 1–2 tiles off every floor
+ *  placed next to it ("prefabs are on a completely different axis"). Null
+ *  when the prefab has no plates (walls-only): callers keep origin snapping. */
+export function prefabGridAnchor(
+  prefab: BuildPrefabDef,
+): { x: number; z: number; size: BuildPieceDef['size'] } | null {
+  let roof: { x: number; z: number; size: BuildPieceDef['size'] } | null = null;
+  for (const piece of prefab.pieces) {
+    if (!isCatalogId(piece.pieceId)) continue;
+    const def = catalogEntry(piece.pieceId);
+    if (def.kind === 'floor') return { x: piece.x, z: piece.z, size: def.size };
+    if (def.kind === 'roof' && roof === null) roof = { x: piece.x, z: piece.z, size: def.size };
+  }
+  return roof;
+}
+
 /** The see-through: a prefab placed at a world origin IS its semantic pieces
  *  with effective tags — what collision/nav/rooms emission consumes. */
 export function decomposePrefab(

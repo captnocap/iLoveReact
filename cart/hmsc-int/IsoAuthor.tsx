@@ -72,6 +72,10 @@ function isPropPiece(piece: PlacedBuildPiece): boolean {
   return GAME_BUILD.catalog.get(piece.pieceId).kind === 'prop';
 }
 
+function isWallPiece(piece: PlacedBuildPiece): boolean {
+  return GAME_BUILD.catalog.get(piece.pieceId).kind === 'wall';
+}
+
 function selectionIsOnlyProps(ids: ReadonlySet<string>, pieces: readonly PlacedBuildPiece[]): boolean {
   let found = false;
   for (const piece of pieces) {
@@ -297,6 +301,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const [wholeBuilding, setWholeBuilding] = useState(false);
   const wholeBuildingRef = useRef(wholeBuilding);
   wholeBuildingRef.current = wholeBuilding;
+  const [wallsVisible, setWallsVisible] = useRouteTwigState<boolean>(ISO_ROUTE, 'wallsVisible', true);
   // Shift/Alt held? Mouse events carry no modifier flags here — read the shared
   // contract tracker at click time to invert the select scope / go freeform.
   const heldModifiers = useHeldModifiers();
@@ -391,6 +396,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   }, [paintCells]);
   // The save-as-prefab naming prompt: null = closed, else the draft name being typed.
   const [prefabNameDraft, setPrefabNameDraft] = useState<string | null>(null);
+  const [prefabUpdateOpen, setPrefabUpdateOpen] = useState(false);
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 800, height: 600 });
@@ -417,15 +423,21 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const a = armedRef.current;
     if (!a) return null;
     // A piece snaps by its own catalog rule (walls edge-snap, etc.); a prefab drops on
-    // the grid by its origin — exactly how F2's place() picks snap/size. The tower tool
-    // grid-snaps a wall-module footprint (a click drops a 1×1-cell tower).
+    // the grid by its floor-plate anchor (req_0668: the capture origin is often a wall
+    // line, so origin snapping put a stamped room's floors off the world floor
+    // lattice) — exactly how F2's refreshSnapTarget picks snap/size/anchor. The tower
+    // tool grid-snaps a wall-module footprint (a click drops a 1×1-cell tower).
     const pieceDef = a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id) : null;
+    const armedPrefabDef = a.kind === 'prefab' ? prefabByIdRef.current.get(a.id) : undefined;
+    const prefabAnchor = armedPrefabDef ? GAME_BUILD.prefabs.gridAnchor(armedPrefabDef) : null;
     const snap = pieceDef ? pieceDef.snap : 'grid';
     const size = pieceDef
       ? pieceDef.size
       : a.kind === 'tower'
         ? GAME_BUILD.catalog.get(TOWER_WALL_ID).size
-        : { widthMeters: 1, heightMeters: 3, depthMeters: 1 };
+        : prefabAnchor
+          ? prefabAnchor.size
+          : { widthMeters: 1, heightMeters: 3, depthMeters: 1 };
     // Alt = fine placement for EVERYTHING armed (REQ-0650, extending the
     // REQ-0596 prop override): 'free' props still land on the raw hit;
     // grid/edge modules step 1 tile (edges tile-aligned) instead of their
@@ -444,6 +456,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       size,
       yawDegrees: ghostYawRef.current,
       freeform,
+      ...(prefabAnchor ? { anchorLocal: { x: prefabAnchor.x, z: prefabAnchor.z } } : {}),
       tuning: ISO_SNAP_TUNING,
     });
   }, [stage, placeGroundAt]);
@@ -778,6 +791,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // walls land with their cut) — the SAME helper F2's place() uses.
     const placement = GAME_BUILD.placed.placementFor(def, t.placement);
     if (GAME_BUILD.placed.validatePlacement(placement).length > 0) return;
+    // Keep the thing you just placed live for same-key editing. The stream
+    // mints the id, so reselect by pose signature when pieces materialize;
+    // with a selection present, R rotates the landed piece before the armed
+    // ghost. This is especially important for props, where pre-place yaw was
+    // easy but post-place rotation required an extra select dance.
+    reselectRef.current = new Set([pieceSignature(placement)]);
     onCommit({ kind: 'piecePlaced', placement }, `placed ${def.label} @ ${at}`);
   };
 
@@ -953,6 +972,17 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const theme = GAME_BUILD.catalog.get(sel[0].pieceId).theme;
     const def = GAME_BUILD.placed.prefabFromPieces(id, label, theme, sel);
     onCommit({ kind: 'prefabDefined', def }, `saved prefab ${label}`);
+  };
+  // Overwrite an EXISTING prefab id from the current selection. This uses the
+  // same prefabDefined upsert the building workspace uses, so the palette entry
+  // keeps its identity while the semantic pieces underneath are replaced.
+  const updatePrefabFromSelection = (targetId: string) => {
+    const target = prefabByIdRef.current.get(targetId);
+    if (!target) return;
+    const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
+    if (!sel.length) return;
+    const def = GAME_BUILD.placed.prefabFromPieces(target.id, target.label, target.theme, sel);
+    onCommit({ kind: 'prefabDefined', def }, `updated prefab ${target.label}`);
   };
   // Commit a finished move drag: shift every selected piece by the dragged world delta.
   // A whole BUILDING moves as ONE buildingMoved event on its own history
@@ -1310,9 +1340,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // solid ghost holds the building at its new spot), a pending delete's
     // pieces vanish this frame — both before the store batch lands.
     const visible = displayPieces.filter((p) =>
-      p.y - groundTopAt(p.x, p.z) < cut && !pendingMove?.has(p.id) && !pendingDelete?.has(p.id));
+      p.y - groundTopAt(p.x, p.z) < cut
+      && (wallsVisible || !isWallPiece(p))
+      && !pendingMove?.has(p.id)
+      && !pendingDelete?.has(p.id));
     return visible.length === displayPieces.length ? displayPieces : visible;
-  }, [displayPieces, groundTopAt, level, pendingMove, pendingDelete]);
+  }, [displayPieces, groundTopAt, level, pendingMove, pendingDelete, wallsVisible]);
   const visiblePiecesRef = useRef(visiblePieces);
   visiblePiecesRef.current = visiblePieces;
 
@@ -1427,9 +1460,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         </Box>
         <IsoBtn label="▲" title="Floor up a storey" onPress={() => { stage.raiseLevel(); redraw(); saveCamera(); }} />
         <IsoBtn label={wholeBuilding ? '▦' : '▪'} title={wholeBuilding ? 'Select: whole building · Shift-click = one piece' : 'Select: one piece · Shift-click = whole building'} onPress={() => setWholeBuilding((v) => !v)} />
+        <IsoBtn label="W" active={!wallsVisible} title={wallsVisible ? 'Hide walls in this iso view' : 'Show walls in this iso view'} onPress={() => setWallsVisible((v) => !v)} />
         {selectedIds.size > 0 ? (
           <>
             <IsoBtn label="⊞" title="Save selection as a prefab" onPress={() => setPrefabNameDraft(nextCustomName())} />
+            <IsoBtn label="↻" title="Update an existing prefab from selection" onPress={() => setPrefabUpdateOpen(true)} />
             <IsoBtn label="⌂+" title="Promote selection to a BUILDING — it owns its history; moves become one event" onPress={promoteSelectionToBuilding} />
             <IsoBtn label="⧉" title="Clone selection" onPress={cloneSelected} />
             <IsoBtn label="✕" title="Delete selection (Del)" onPress={deleteSelected} />
@@ -1464,7 +1499,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
             : `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${armedPropCanFreeform ? ' · Alt freeform' : ''}${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · shift-click select · Esc`
           : selectedIds.size > 0
             ? `${selectedIds.size} selected · drag to move${selectedPropsCanFreeform ? ' · Alt-drag freeform' : ''} · R rotate · paint faces (top right) · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
-            : `WASD pan · drag rotate · scroll zoom · F recenter · click = ${wholeBuilding ? 'building, shift = piece' : 'piece, shift = building'} · pick below to build`}
+            : `WASD pan · drag rotate · scroll zoom · F recenter · click = ${wholeBuilding ? 'building, shift = piece' : 'piece, shift = building'} · ${wallsVisible ? 'walls shown' : 'walls hidden'} · pick below to build`}
       </Text>
       {/* what's in the map — the "junk" is the real placed pieces + world props (the
           same content F2/the game shows); ones off the painted chunk float over sky */}
@@ -1498,19 +1533,43 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
           </Box>
         </Box>
       ) : null}
+      {prefabUpdateOpen ? (
+        <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000099' }}>
+          <Box style={{ width: 420, maxWidth: '90%', backgroundColor: '#0b1220', borderWidth: 1, borderColor: '#1e3a5f', borderRadius: 8, padding: 14, gap: 10 }}>
+            <Text fontSize={12} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>Update prefab from selection</Text>
+            <Text fontSize={10} color="#94a3b8" style={{ fontFamily: 'monospace' }}>{`${selectedIds.size} selected · choose the prefab definition to overwrite`}</Text>
+            <Box style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+              {prefabs.map((def) => (
+                <Pressable key={def.id} onPress={() => { updatePrefabFromSelection(def.id); setPrefabUpdateOpen(false); }}>
+                  <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: '#3a4f6b', backgroundColor: '#16233a' }}>
+                    <Text fontSize={11} color="#dbe6f3" style={{ fontFamily: 'monospace' }}>{def.label}</Text>
+                  </Box>
+                </Pressable>
+              ))}
+            </Box>
+            <Box style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
+              <Pressable onPress={() => setPrefabUpdateOpen(false)}>
+                <Box style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 5, backgroundColor: '#1e293b' }}>
+                  <Text fontSize={11} color="#a8b6c8" style={{ fontFamily: 'monospace' }}>Cancel</Text>
+                </Box>
+              </Pressable>
+            </Box>
+          </Box>
+        </Box>
+      ) : null}
     </Box>
   );
 });
 
-function IsoBtn(props: { label: string; onPress: () => void; title?: string }) {
+function IsoBtn(props: { label: string; onPress: () => void; title?: string; active?: boolean }) {
   // The icons are cryptic, so each carries a hover tooltip — the engine-native one
   // (hoverable + tooltip, painted by framework/tooltip.zig as an overlay), the same
   // door cart/testing_carts/tooltip_test.tsx exercises. No layout shift here: the
   // cluster is an absolutely-positioned overlay, and the tooltip paints over the scene.
   return (
     <Pressable onPress={props.onPress} hoverable={props.title ? true : undefined} tooltip={props.title}>
-      <Box style={{ width: 26, height: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: BUILD_UI.panelBg, borderRadius: 4 }}>
-        <Text fontSize={12} color="#cbd5e1">{props.label}</Text>
+      <Box style={{ width: 26, height: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: props.active ? '#12324f' : BUILD_UI.panelBg, borderRadius: 4, borderWidth: props.active ? 1 : 0, borderColor: '#38bdf8' }}>
+        <Text fontSize={12} color={props.active ? '#7dd3fc' : '#cbd5e1'}>{props.label}</Text>
       </Box>
     </Pressable>
   );

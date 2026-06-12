@@ -57,6 +57,7 @@ export {
   BUILD_PREFAB_IDS,
   isPrefabId,
   prefabDefinition,
+  prefabGridAnchor,
   decomposePrefab,
   validatePrefab,
   validatePrefabs,
@@ -186,6 +187,7 @@ import {
   BUILD_PREFAB_IDS,
   isPrefabId,
   prefabDefinition,
+  prefabGridAnchor,
   decomposePrefab,
   validatePrefabs,
 } from './prefabs';
@@ -269,6 +271,7 @@ export const GAME_BUILD = {
     ids: BUILD_PREFAB_IDS,
     is: isPrefabId,
     get: prefabDefinition,
+    gridAnchor: prefabGridAnchor,
     decompose: decomposePrefab,
     validate: validatePrefabs,
   },

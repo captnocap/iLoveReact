@@ -1571,10 +1571,13 @@ export function PlayRoute(props: {
     const current = armedRef.current;
     // Pieces use their OWN catalog snap mode (REQ-0647: door/window methods
     // are wall TYPES — they ride the wall edge snap here like any wall row);
-    // prefabs stamp on the grid by their origin.
+    // prefabs stamp on the grid by their floor-plate anchor (req_0668: the
+    // capture origin is often a wall line, so origin snapping put a stamped
+    // room's floors off the world floor lattice).
     const def = current.type === 'piece' ? GAME_BUILD.catalog.get(current.id) : null;
+    const prefabAnchor = current.type === 'prefab' && armedPrefab ? GAME_BUILD.prefabs.gridAnchor(armedPrefab) : null;
     const snap = def ? def.snap : 'grid';
-    const size = def ? def.size : { widthMeters: 1, heightMeters: 3, depthMeters: 1 };
+    const size = def ? def.size : prefabAnchor ? prefabAnchor.size : { widthMeters: 1, heightMeters: 3, depthMeters: 1 };
     const target = resolveSnapTarget({
       ray: crosshairRayRef.current(),
       pieces: piecesRef.current,
@@ -1582,6 +1585,7 @@ export function PlayRoute(props: {
       snap,
       size,
       yawDegrees: ghostYawRef.current,
+      ...(prefabAnchor ? { anchorLocal: { x: prefabAnchor.x, z: prefabAnchor.z } } : {}),
       tuning: snapTuningRef.current,
     });
     const key = target

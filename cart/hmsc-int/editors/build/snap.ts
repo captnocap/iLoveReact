@@ -81,6 +81,14 @@ export type SnapInput = {
    *  module pitch, edges still on tile lines (REQ-0650: module pitch made an
    *  even road setback on both sides of a street unreachable) */
   freeform?: boolean;
+  /** lattice anchor (req_0668): a local-frame point (relative to the armed
+   *  thing's origin, pre-rotation) that must land on the module lattice
+   *  INSTEAD of the origin — a prefab's floor-plate center. A captured
+   *  prefab's origin is its min piece center (often a wall line, off the
+   *  floor lattice by half a module), so snapping the origin stamped rooms
+   *  1–2 tiles off every natively-placed floor. `size` should be the anchor
+   *  piece's own size so the pitch is its module pitch. */
+  anchorLocal?: { x: number; z: number };
   tuning?: SnapTuning;
 };
 
@@ -386,13 +394,21 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
   const spanZ = turned ? input.size.widthMeters : input.size.depthMeters;
   const pitchX = modulePitch(spanX, grid);
   const pitchZ = modulePitch(spanZ, grid);
+  // req_0668: the anchor rotates with the ghost (the same R(+yaw) frame
+  // stampPrefabPieces composes locals with), then the ANCHOR point snaps to
+  // the lattice and the origin shifts back by the rotated offset — so
+  // worldAnchor = placement + a = snap(hit + a) sits on the lattice exactly.
+  const yawRadians = yaw * DEG;
+  const ax = input.anchorLocal ? input.anchorLocal.x * Math.cos(yawRadians) - input.anchorLocal.z * Math.sin(yawRadians) : 0;
+  const az = input.anchorLocal ? input.anchorLocal.x * Math.sin(yawRadians) + input.anchorLocal.z * Math.cos(yawRadians) : 0;
   const substratePlacement = () => {
-    const x = fine ? fineModuleCenter(hit.x, spanX, grid) : snapToCellCenter(hit.x, pitchX);
-    const z = fine ? fineModuleCenter(hit.z, spanZ, grid) : snapToCellCenter(hit.z, pitchZ);
-    // ground under the SNAPPED center, so the piece sits on the terrain it covers
+    const x = (fine ? fineModuleCenter(hit.x + ax, spanX, grid) : snapToCellCenter(hit.x + ax, pitchX)) - ax;
+    const z = (fine ? fineModuleCenter(hit.z + az, spanZ, grid) : snapToCellCenter(hit.z + az, pitchZ)) - az;
+    // ground under the SNAPPED center (the anchor piece's center, when one is
+    // set), so the piece sits on the terrain it covers
     const y = common.surface === 'ground'
-      ? input.groundTopAt(x, z)
-      : gridFacePlacementY(pieceHit!.piece, input.size, x, z, yaw);
+      ? input.groundTopAt(x + ax, z + az)
+      : gridFacePlacementY(pieceHit!.piece, input.size, x + ax, z + az, yaw);
     return { x, y, z, yawDegrees: yaw };
   };
 

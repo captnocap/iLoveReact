@@ -4,7 +4,7 @@
 // on top. Flat-ground fns keep the cases analytic.
 
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
-import { GAME_BUILD, type PlacedBuildPiece } from '@game';
+import { GAME_BUILD, type BuildPrefabDef, type PlacedBuildPiece } from '@game';
 import { fineModuleCenter, raycastGround, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapInput } from './snap';
 
 const FLAT = (_x: number, _z: number) => 0;
@@ -117,6 +117,36 @@ test('a grid of adjacent floor placements has exact shared-edge coordinates', ()
       assertEqual(lower.maxZ, upper.minZ, `column x=${x} shared z edge is exact`);
       assertEqual(lower.topY, upper.topY, `column x=${x} top plane is exact`);
     }
+  }
+});
+
+test('a prefab stamp lands its floors flush with natively-placed floors (req_0668)', () => {
+  // captured-prefab shape: the origin (min piece center) is a WALL on a tile
+  // line; the floor plate sits at local (1.5, 1.5). Origin snapping put that
+  // plate off the 3m floor lattice — "prefabs are on a completely different
+  // axis than floors".
+  const room: BuildPrefabDef = {
+    id: 'prefab.test.room',
+    label: 'Test Room',
+    theme: 'motel',
+    pieces: [
+      { pieceId: 'wall.stucco.motel', x: 1.5, y: 0, z: 0, yawDegrees: 0 },
+      { pieceId: 'floor.concrete.common', x: 1.5, y: 0, z: 1.5, yawDegrees: 0 },
+    ],
+  };
+  const anchor = GAME_BUILD.prefabs.gridAnchor(room);
+  assert(!!anchor, 'the floor plate anchors the stamp');
+  assertClose(anchor!.x, 1.5, 1e-9, 'anchor is the floor center x');
+  assertClose(anchor!.z, 1.5, 1e-9, 'anchor is the floor center z');
+  for (const yaw of [0, 90, 180, 270]) {
+    const target = resolveSnapTarget(snapInput({ snap: 'grid', size: anchor!.size, yawDegrees: yaw, anchorLocal: { x: anchor!.x, z: anchor!.z } }));
+    assert(!!target, `a target resolves at yaw ${yaw}`);
+    const stamped = GAME_BUILD.placed.stamp(room, { x: target!.placement.x, y: target!.placement.y, z: target!.placement.z }, target!.placement.yawDegrees);
+    const floor = stamped.find((p) => p.pieceId === 'floor.concrete.common')!;
+    // the stamped floor center sits where a natively-placed floor snaps:
+    // module-centered on the 3m lattice (≡ 1.5 mod 3) on both axes
+    assertClose(((floor.x % 3) + 3) % 3, 1.5, 1e-6, `floor on the 3m lattice in x at yaw ${yaw}`);
+    assertClose(((floor.z % 3) + 3) % 3, 1.5, 1e-6, `floor on the 3m lattice in z at yaw ${yaw}`);
   }
 });
 

@@ -5,6 +5,7 @@
 // functions are called. Runs under tools/v8cli via `rjit game verify`.
 
 import { assert, assertEqual, finish, test } from '../_testkit';
+import { dumpsterBodyMeters } from '../kinds/props';
 import {
   BUILD_PIECE_KINDS,
   BUILD_KIND_CONTRACTS,
@@ -25,8 +26,10 @@ import {
 import {
   decomposePrefab,
   prefabDefinition,
+  prefabGridAnchor,
   validatePrefab,
   validatePrefabs,
+  type BuildPrefabDef,
 } from './prefabs';
 import { placementFor } from './placed';
 import {
@@ -122,6 +125,13 @@ test('prop entries must reference a real prop kind; others must not', () => {
   assert(validateCatalogEntry(wallWithProp).length > 0, 'propKind on a wall is meaningless');
 });
 
+test('dumpster catalog size uses the shared visible body footprint', () => {
+  const dumpster = catalogEntry('prop.dumpster');
+  const body = dumpsterBodyMeters();
+  assertEqual(dumpster.size.widthMeters, body.widthMeters, 'dumpster catalog width matches the visible body');
+  assertEqual(dumpster.size.depthMeters, body.depthMeters, 'dumpster catalog depth matches the visible body');
+});
+
 test('every kind has a contract, renders, and only the wall family takes edits', () => {
   for (const kind of BUILD_PIECE_KINDS) {
     const contract = buildKindContract(kind);
@@ -164,6 +174,26 @@ test('a prefab decomposes to its semantic pieces — the bake sees through it', 
   assert(pieces.every((piece) => piece.def.kind !== undefined), 'every piece resolves its catalog row');
   const floor = pieces.find((piece) => piece.def.kind === 'floor');
   assert(floor !== undefined && floor.x === 10 && floor.z === 20, 'world placement = origin + local');
+});
+
+test('the stamp lattice anchor is the first floor plate, roof as fallback, null when plateless (req_0668)', () => {
+  const motelRoom = prefabDefinition('prefab.motelRoom');
+  const anchor = prefabGridAnchor(motelRoom);
+  assert(anchor !== null, 'the motel room anchors on its floor');
+  assertEqual(anchor!.x, 0, 'anchor x is the floor local center');
+  assertEqual(anchor!.z, 0, 'anchor z is the floor local center');
+  assertEqual(anchor!.size.widthMeters, catalogEntry('floor.concrete.common').size.widthMeters, 'anchor carries the plate module size');
+  const roofOnly: BuildPrefabDef = {
+    id: 'prefab.test.roofOnly', label: 'Roof Only', theme: 'motel',
+    pieces: [{ pieceId: 'roof.flat.common', x: 1.5, y: 3, z: 4.5, yawDegrees: 0 }],
+  };
+  const roofAnchor = prefabGridAnchor(roofOnly);
+  assert(roofAnchor !== null && roofAnchor.x === 1.5 && roofAnchor.z === 4.5, 'no floor → the roof plate anchors');
+  const wallsOnly: BuildPrefabDef = {
+    id: 'prefab.test.wallsOnly', label: 'Walls Only', theme: 'motel',
+    pieces: [{ pieceId: 'wall.stucco.motel', x: 0, y: 0, z: 0, yawDegrees: 0 }],
+  };
+  assertEqual(prefabGridAnchor(wallsOnly), null, 'plateless prefabs keep origin snapping');
 });
 
 // ── wall TYPES that are a cutout (REQ-0647: NOT prefabs, USER ruled) ─────────
