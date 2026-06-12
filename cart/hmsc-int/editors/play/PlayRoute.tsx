@@ -44,7 +44,7 @@ import {
   GAME_ITEMS, GAME_LOOP, GAME_PATHING, GAME_PHYSICS, GAME_TELEMETRY, GAME_WORLD, PHYSICS_LIMITS, buildingsStream, cameraOcclusionResponse, pieceMutationMapName, piecesForMap, withBuildingPieces, worldStream,
 } from '@game';
 import type {
-  BuildFaceSkin, BuildFaceSlot, BuildMaterial, BuildPieceDef, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingsStreamState, PieceRay,
+  BuildFaceSkin, BuildFaceSlot, BuildMaterial, BuildPieceDef, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingsStreamState, CollisionRect, ElevatorShaft, PieceRay,
   PlacedBuildPiece, SteppedBody, WallEdit, WorldEvent, WorldStreamState,
 } from '@game';
 import type { GameState, WorldProp } from '../../design'; // GAP: retires when hmsc becomes compile/'s output (V15)
@@ -68,7 +68,7 @@ import { TextureCapture } from '../../game/textures/registry';
 // out of this file, re-imported here).
 import { BUILD_UI, CAMERA_OCCLUSION_TUNING } from '../build/buildUi';
 import { perfMs, warnPlaceFreeze, startPlaceFreezeProbe, markPlaceFreezeProbe, type PlaceFreezeProbe } from '../build/placeFreezeProbe';
-import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, type VisualShape } from '../build/pieceMeshes';
+import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, elevatorCarVisualShape, type VisualShape } from '../build/pieceMeshes';
 import { propContainer, propDynamics, propSeat } from '../../game/kinds/props';
 import { Prop } from '../../render3d/Prop';
 
@@ -123,7 +123,20 @@ function InteractOverlay(props: {
 // What the interact frame found in reach this frame (the E target).
 type InteractTarget =
   | { kind: 'seat'; pieceId: string; label: string; pose: 'sit' | 'lay'; x: number; y: number; z: number; yawDegrees: number }
-  | { kind: 'container'; pieceId: string; label: string; locked: boolean; searched: boolean; searchSeconds: number; lootCategory: string };
+  | { kind: 'container'; pieceId: string; label: string; locked: boolean; searched: boolean; searchSeconds: number; lootCategory: string }
+  | { kind: 'door'; pieceId: string; label: string; open: boolean }
+  // REQ-0647: ride/call the elevator car — E sends it to `toY` (route-local
+  // live state, never a stream commit; the car's position is transient)
+  | { kind: 'elevator'; key: string; toY: number };
+
+// REQ-0647: one shaft's LIVE car. `rect` is the host collision rect the
+// physics step holds by reference — the ride mutates it in place per frame.
+type ElevatorLive = {
+  shaft: ElevatorShaft;
+  carY: number;
+  targetY: number;
+  rect: CollisionRect;
+};
 
 const INTERACT_REACH_METERS = 2.2;
 
@@ -179,6 +192,7 @@ editorTunables().register({
     rampSlabEdgePlanThicknessMeters: { label: 'ramp edge lip m', min: 0.02, max: 0.5, step: 0.01, precision: 2 },
     rampSlabEdgeSegments: { label: 'ramp edge bands', min: 1, max: 32, step: 1, precision: 0 },
     verticalLinkHeightfieldCellMeters: { label: 'slope hf cell m', min: 0.2, max: 1.5, step: 0.1, precision: 1 },
+    elevatorCarSpeedMetersPerSecond: { label: 'elevator speed m/s', min: 0.5, max: 8, step: 0.1, precision: 1 },
   },
 });
 // CAMERA_OCCLUSION_TUNING moved to ../build/buildUi (imported above). Its
@@ -538,15 +552,9 @@ export function PlayRoute(props: {
   // figure plays the skeleton's sit/lay action) or runs the container's
   // loading-bar search. Searches are session-local until the item system
   // lands (lootCategory names the slot it will fill).
-  const interactKeysRef = useRef<ReturnType<typeof GAME_INPUT.createKeyState> | null>(null);
-  useEffect(() => {
-    const keys = GAME_INPUT.createKeyState();
-    interactKeysRef.current = keys;
-    return () => {
-      interactKeysRef.current = null;
-      keys.dispose();
-    };
-  }, []);
+  // The E read goes through the SUBSTRATE's key transport (embodied.actionDown
+  // below — the PLAYFOLD-0605 guard bans route-local key states and
+  // viewport.test.ts pins it); only the press-edge tracking lives here.
   const interactPrevDownRef = useRef(false);
   const searchedContainersRef = useRef<Set<string>>(new Set());
   const searchRef = useRef<{ pieceId: string; label: string; lootCategory: string; startedAtMs: number; seconds: number; anchorX: number; anchorZ: number } | null>(null);
@@ -560,8 +568,8 @@ export function PlayRoute(props: {
   // ── KICKPROP-0610: dynamic prop bodies (balls, cones, cans) ──────────────
   // A placed dynamic prop leaves the static collider set (placed.colliders
   // skips it) and lives here as a host sphere body: Embodied hands the list
-  // to GAME_PHYSICS.step each frame (the host's capsule-vs-sphere contact is
-  // the kick) and commits the stepped result back through the worldExtras
+  // to the substrate's host physics step each frame (capsule-vs-sphere contact
+  // is the kick) and commits the stepped result back through the worldExtras
   // door. Ref-backed — the sim itself never re-renders the route; the rev
   // bump publishes only while a body is actually moving, so resting props
   // follow the same idle discipline as the player pose.
@@ -645,6 +653,18 @@ export function PlayRoute(props: {
   const buildTapRef = useRef<() => void>(() => undefined);
   const buildFrameRef = useRef<() => void>(() => undefined);
 
+  // ── REQ-0647: the LIVE elevator cars ───────────────────────────────────────
+  // One ElevatorLive per derived shaft (worldExtras reconciles the map when
+  // the placed world changes, carrying an in-flight car across edits). The
+  // per-frame ride mutates each live rect IN PLACE — the host physics step
+  // reads the same rect array every frame, so a rising car carries the player
+  // with zero re-registration. `elevatorRev` publishes render updates only
+  // while a car is actually moving (the dynamic-props idle discipline).
+  const elevatorsRef = useRef<Map<string, ElevatorLive>>(new Map());
+  const [, setElevatorRev] = useState(0);
+  const elevatorFrameLastMsRef = useRef(0);
+  const elevatorFrameRef = useRef<() => void>(() => undefined);
+
   // ── the player: the shared embodied substrate, fed BOTH lineages' options ──
   // Placed pieces join the world as solids + ramp/stairs heightfields in BOTH
   // modes (you built it, you can test it). The crosshair re-resolves on the
@@ -653,6 +673,23 @@ export function PlayRoute(props: {
   const worldExtras = useMemo<EmbodiedWorldExtras>(() => {
     const collidersT0 = perfMs();
     const solids = GAME_BUILD.placed.colliders(liftedPieces);
+    // REQ-0647: reconcile the live elevator cars with the placed world and
+    // merge their rects into the solids the host steps against. Surviving
+    // shafts keep their in-flight car height (clamped into the new stop
+    // range); new shafts spawn resting at the bottom stop.
+    const prevElevators = elevatorsRef.current;
+    const liveElevators = new Map<string, ElevatorLive>();
+    for (const shaft of GAME_BUILD.elevators.shafts(liftedPieces)) {
+      const old = prevElevators.get(shaft.key);
+      const bottom = shaft.stops[0];
+      const top = shaft.stops[shaft.stops.length - 1];
+      const carY = old ? Math.min(top, Math.max(bottom, old.carY)) : bottom;
+      const targetY = old ? Math.min(top, Math.max(bottom, old.targetY)) : carY;
+      const rect = GAME_BUILD.elevators.carRect(shaft, carY);
+      liveElevators.set(shaft.key, { shaft, carY, targetY, rect });
+      solids.rects.push(rect);
+    }
+    elevatorsRef.current = liveElevators;
     const collidersMs = perfMs() - collidersT0;
     GAME_TELEMETRY.recordDiagnostic('physics', 'placement.colliders', {
       pieces: pieces.length,
@@ -757,6 +794,7 @@ export function PlayRoute(props: {
     }),
     onFrame: () => {
       updateCameraOcclusionRef.current();
+      elevatorFrameRef.current(); // rides advance first so prompts read fresh car heights
       interactFrameRef.current();
       if (modeRef.current !== 'build') return;
       refreshSnapRef.current();
@@ -814,20 +852,35 @@ export function PlayRoute(props: {
       prompt = 'WASD / Space — stand up';
     } else if (!searchRef.current && !typing) {
       let bestDistance = INTERACT_REACH_METERS;
-      let best: { piece: PlacedBuildPiece; label: string; seat: ReturnType<typeof propSeat>; container: ReturnType<typeof propContainer> } | null = null;
+      let best:
+        | { kind: 'prop'; piece: PlacedBuildPiece; label: string; seat: ReturnType<typeof propSeat>; container: ReturnType<typeof propContainer> }
+        | { kind: 'door'; piece: PlacedBuildPiece; label: string; open: boolean }
+        | null = null;
       for (const piece of piecesRef.current) {
         const def = GAME_BUILD.catalog.get(piece.pieceId);
-        if (def.kind !== 'prop' || !def.propKind) continue;
-        const seat = propSeat(def.propKind);
-        const container = propContainer(def.propKind);
-        if (!seat && !container) continue;
         if (Math.abs(piece.y - pose.y) > 2.5) continue;
         const distance = Math.hypot(piece.x - pose.x, piece.z - pose.z);
         if (distance > bestDistance) continue;
-        bestDistance = distance;
-        best = { piece, label: def.label, seat, container };
+        if (def.kind === 'prop' && def.propKind) {
+          const seat = propSeat(def.propKind);
+          const container = propContainer(def.propKind);
+          if (!seat && !container) continue;
+          bestDistance = distance;
+          best = { kind: 'prop', piece, label: def.label, seat, container };
+          continue;
+        }
+        if (def.kind === 'wall' && piece.edit) {
+          const edit = GAME_BUILD.edits.wall[piece.edit];
+          if (!edit?.interaction) continue;
+          if (distance > edit.interaction.reachMeters) continue;
+          bestDistance = distance;
+          best = { kind: 'door', piece, label: edit.label, open: piece.doorOpen === true };
+        }
       }
-      if (best && best.container) {
+      if (best?.kind === 'door') {
+        target = { kind: 'door', pieceId: best.piece.id, label: best.label, open: best.open };
+        prompt = `E — ${best.open ? 'close' : 'open'} the ${best.label}`;
+      } else if (best && best.container) {
         const searched = searchedContainersRef.current.has(best.piece.id);
         const locked = best.container.access !== 'open';
         target = {
@@ -853,14 +906,65 @@ export function PlayRoute(props: {
         };
         prompt = `E — ${best.seat.pose === 'lay' ? 'lie down on' : 'sit on'} the ${best.label}`;
       }
+      // REQ-0647: the elevator — standing ON the car, E rides it to the next
+      // stop (up the shaft, wrapping to the bottom from the top); standing at
+      // a landing with the car elsewhere, E calls it. Doors/props in reach
+      // win the E first (target already set above).
+      if (target === null && prompt === null) {
+        const tuning = GAME_BUILD.placed.tuning;
+        for (const live of elevatorsRef.current.values()) {
+          const shaft = live.shaft;
+          const local = worldToPieceLocal(pose.x, pose.z, shaft);
+          const inside = Math.abs(local.u) <= shaft.size.widthMeters / 2 && Math.abs(local.v) <= shaft.size.depthMeters / 2;
+          const carMoving = Math.abs(live.targetY - live.carY) > tuning.elevatorArriveToleranceMeters;
+          if (inside && carMoving) {
+            prompt = 'Elevator moving…';
+            break;
+          }
+          const onCar = inside
+            && pose.y >= live.carY - 0.4
+            && pose.y <= GAME_BUILD.elevators.carTop(live.carY) + tuning.elevatorBoardVerticalReachMeters;
+          if (onCar) {
+            const next = GAME_BUILD.elevators.nextStop(shaft, live.carY);
+            if (next === null) {
+              prompt = 'Elevator — one stop (stack more storeys for more floors)';
+              break;
+            }
+            target = { kind: 'elevator', key: shaft.key, toY: next };
+            prompt = `E — elevator ${next > live.carY ? 'up' : 'down'} to floor ${shaft.stops.indexOf(next) + 1}`;
+            break;
+          }
+          if (carMoving) continue;
+          const distance = Math.hypot(shaft.x - pose.x, shaft.z - pose.z);
+          if (distance > tuning.elevatorCallReachMeters) continue;
+          const stop = GAME_BUILD.elevators.nearestStop(shaft, pose.y);
+          if (Math.abs(pose.y - stop) > tuning.elevatorBoardVerticalReachMeters) continue;
+          if (Math.abs(live.carY - stop) <= tuning.elevatorArriveToleranceMeters) continue;
+          target = { kind: 'elevator', key: shaft.key, toY: stop };
+          prompt = 'E — call the elevator';
+          break;
+        }
+      }
     }
     setPromptIfChanged(prompt);
-    // 3. the E edge
-    const keys = interactKeysRef.current;
-    const down = keys != null && !typing && GAME_INPUT.actionDown(keys, 'interact');
+    // 3. the E edge (read through the substrate's key transport)
+    const down = !typing && embodied.actionDown('interact');
     const pressed = down && !interactPrevDownRef.current;
     interactPrevDownRef.current = down;
     if (!pressed || !target || searchRef.current || pose.posture) return;
+    if (target.kind === 'elevator') {
+      // route-local live state — the car's position is transient, never a
+      // world-stream commit (doors persist; a car height does not)
+      const live = elevatorsRef.current.get(target.key);
+      if (live) live.targetY = target.toY;
+      return;
+    }
+    if (target.kind === 'door') {
+      const nextOpen = !target.open;
+      commit({ kind: 'pieceDoorSet', id: target.pieceId, open: nextOpen }, `${target.pieceId}: door ${nextOpen ? 'open' : 'closed'}`);
+      postNotice(`${target.label} ${nextOpen ? 'opened' : 'closed'}`);
+      return;
+    }
     if (target.kind === 'container') {
       if (target.searched) {
         postNotice('Nothing left in there');
@@ -895,6 +999,30 @@ export function PlayRoute(props: {
       grounded: true,
       posture: target.pose,
     });
+  };
+
+  // ── REQ-0647: the elevator ride (per embodied frame, BOTH modes) ───────────
+  // Advance every car toward its target stop and re-aim its live rect IN
+  // PLACE — the host physics step holds the same rect array, so the rising
+  // car's top carries the standing player (step resolution) and a descending
+  // car lowers under their feet. Publishes a render rev only while moving.
+  elevatorFrameRef.current = () => {
+    const now = perfMs();
+    const last = elevatorFrameLastMsRef.current;
+    elevatorFrameLastMsRef.current = now;
+    const dt = last > 0 ? Math.min(0.1, Math.max(0, (now - last) / 1000)) : 0;
+    if (dt <= 0) return;
+    const tuning = GAME_BUILD.placed.tuning;
+    let moved = false;
+    for (const live of elevatorsRef.current.values()) {
+      const delta = live.targetY - live.carY;
+      if (Math.abs(delta) <= tuning.elevatorArriveToleranceMeters) continue;
+      const step = tuning.elevatorCarSpeedMetersPerSecond * dt;
+      live.carY = Math.abs(delta) <= step ? live.targetY : live.carY + Math.sign(delta) * step;
+      GAME_BUILD.elevators.updateCarRect(live.rect, live.carY);
+      moved = true;
+    }
+    if (moved) setElevatorRev((r) => r + 1);
   };
 
   // ── THE LIVE NAV PUBLISH (NAVLIVE-0610) ────────────────────────────────────
@@ -1439,8 +1567,10 @@ export function PlayRoute(props: {
 
   const refreshSnapTarget = () => {
     const current = armedRef.current;
+    // Pieces use their OWN catalog snap mode (REQ-0647: door/window methods
+    // are wall TYPES — they ride the wall edge snap here like any wall row);
+    // prefabs stamp on the grid by their origin.
     const def = current.type === 'piece' ? GAME_BUILD.catalog.get(current.id) : null;
-    // prefab stamps drop on the grid; pieces use their OWN catalog snap mode
     const snap = def ? def.snap : 'grid';
     const size = def ? def.size : { widthMeters: 1, heightMeters: 3, depthMeters: 1 };
     const target = resolveSnapTarget({
@@ -1487,6 +1617,7 @@ export function PlayRoute(props: {
         return { ...event, mapName: props.mapName } as WorldEvent;
       case 'pieceRemoved':
       case 'pieceEditSet':
+      case 'pieceDoorSet':
       case 'pieceSkinSet': {
         const mapName = pieceMutationMapName(streamState, props.mapName, props.legacyPieceMapName, event.id);
         return mapName ? ({ ...event, mapName } as WorldEvent) : event;
@@ -1550,13 +1681,9 @@ export function PlayRoute(props: {
       return;
     }
     const def = GAME_BUILD.catalog.get(current.id);
-    const placement = {
-      pieceId: def.id,
-      x: target.placement.x,
-      y: target.placement.y,
-      z: target.placement.z,
-      yawDegrees: target.placement.yawDegrees,
-    };
+    // placementFor carries the row's defaultEdit (REQ-0647): a Doorway Wall
+    // lands as a wall WITH its door cut, one click, no prefab.
+    const placement = GAME_BUILD.placed.placementFor(def, target.placement);
     const problems = GAME_BUILD.placed.validatePlacement(placement);
     if (problems.length > 0) {
       console.warn(`[play] placement refused: ${problems.join('; ')}`);
@@ -1798,7 +1925,22 @@ export function PlayRoute(props: {
       return stamped.flatMap((piece, index) => pieceVisualShapes(piece, `ghost.${index}`, supportPieces));
     }
     if (armedDef) {
-      return pieceVisualShapes({ pieceId: armedDef.id, x: p.x, y: p.y, z: p.z, yawDegrees: p.yawDegrees }, 'ghost', piecesRef.current);
+      // the ghost previews the row's defaultEdit cutout (REQ-0647) so a
+      // Doorway Wall reads as a doorway BEFORE it lands
+      const shapes = pieceVisualShapes(
+        { pieceId: armedDef.id, x: p.x, y: p.y, z: p.z, yawDegrees: p.yawDegrees, edit: armedDef.defaultEdit },
+        'ghost',
+        piecesRef.current,
+      );
+      if (armedDef.kind === 'elevator') {
+        // preview the car resting at this storey so the ghost reads "elevator"
+        const ghostShaft: ElevatorShaft = {
+          key: 'ghost', x: p.x, z: p.z, yawDegrees: p.yawDegrees,
+          stops: [p.y], topY: p.y + armedDef.size.heightMeters, size: armedDef.size,
+        };
+        shapes.push(elevatorCarVisualShape(GAME_BUILD.elevators.carBox(ghostShaft, p.y), 'ghost.elevatorCar'));
+      }
+      return shapes;
     }
     return [];
   }, [snapTarget, armedDef, armedPrefab]);
@@ -1870,6 +2012,15 @@ export function PlayRoute(props: {
             BOTH modes (solid in both; the toggle exists to walk what you built) */}
         <PlacedPieceMeshes pieces={liftedPieces} markedIds={markedIds} targetId={showSelectionOverlay ? snapTarget?.targetPieceId ?? null : null} occludedIds={occludedPieceIds} placeFreezeProbe={placeFreezeProbeRef.current} skipDynamicProps />
         <DynamicPropMeshes bodies={dynamicBodiesRef.current} rev={dynamicBodiesRev} />
+        {/* REQ-0647: the live elevator cars at their LIVE height (the ride's
+            setElevatorRev re-renders the route while a car moves; the shaft
+            frames render with the standing pieces above). */}
+        {[...elevatorsRef.current.values()].map((live) => (
+          <VisualShapeMesh
+            key={`${live.shaft.key}.car`}
+            shape={elevatorCarVisualShape(GAME_BUILD.elevators.carBox(live.shaft, live.carY), `${live.shaft.key}.car`)}
+          />
+        ))}
         {/* the snap indicator + placement ghost are PLACE-mode language only.
             Select mode keeps the hover/selected piece highlights above. */}
         {showPlacementGhost && snapTarget && (

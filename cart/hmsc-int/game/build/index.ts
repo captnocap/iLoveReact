@@ -64,6 +64,21 @@ export {
 } from './prefabs';
 export type { BuildPrefabDef, DecomposedPiece, PrefabPiece } from './prefabs';
 
+// REQ-0647: the elevator — a vertical-link PIECE (never a prefab; USER ruled).
+// Stacked storeys derive a shaft; the car is live collision the play route
+// rides and the compile bake ships at rest.
+export {
+  elevatorShafts,
+  elevatorCarRect,
+  elevatorCarBox,
+  elevatorCarTop,
+  updateElevatorCarRect,
+  nextElevatorStop,
+  nearestElevatorStop,
+  elevatorRestCarRects,
+} from './elevators';
+export type { ElevatorShaft } from './elevators';
+
 // BUILDSKIN-0606: the building face-skin vocabulary (per-type globals,
 // per-piece overrides, 2 majors + the one side group; resolution order).
 export {
@@ -95,6 +110,7 @@ export {
   stampPrefabPieces,
   mintPrefabId,
   prefabFromPieces,
+  placementFor,
   validatePlacement,
   liftBuildingsToTerrain,
   liftPropsToTerrain,
@@ -174,6 +190,16 @@ import {
   validatePrefabs,
 } from './prefabs';
 import {
+  elevatorShafts,
+  elevatorCarRect,
+  elevatorCarBox,
+  elevatorCarTop,
+  updateElevatorCarRect,
+  nextElevatorStop,
+  nearestElevatorStop,
+  elevatorRestCarRects,
+} from './elevators';
+import {
   BUILD_FACE_SLOTS,
   STRUCTURAL_SKIN_KINDS,
   faceSlotLabels,
@@ -209,6 +235,7 @@ import {
   stampPrefabPieces,
   mintPrefabId,
   prefabFromPieces,
+  placementFor,
   validatePlacement,
   liftBuildingsToTerrain,
   liftPropsToTerrain,
@@ -245,6 +272,19 @@ export const GAME_BUILD = {
     get: prefabDefinition,
     decompose: decomposePrefab,
     validate: validatePrefabs,
+  },
+  // REQ-0647: the elevator's pure layer — shafts from stacked storey pieces,
+  // the car's rect/box at any height, stop arithmetic. The play route rides
+  // the live rect; the compile bake ships restCarRects.
+  elevators: {
+    shafts: elevatorShafts,
+    carRect: elevatorCarRect,
+    carBox: elevatorCarBox,
+    carTop: elevatorCarTop,
+    updateCarRect: updateElevatorCarRect,
+    nextStop: nextElevatorStop,
+    nearestStop: nearestElevatorStop,
+    restCarRects: elevatorRestCarRects,
   },
   // BUILDSKIN-0606: the face-skin vocabulary — the skin IS the material
   // system (a skin = the mesh's base color or a registry textureKey).
@@ -289,6 +329,9 @@ export const GAME_BUILD = {
     stamp: stampPrefabPieces,
     mintPrefabId,
     prefabFromPieces,
+    /** REQ-0647: the authored placement for a catalog row — wall types with a
+     *  defaultEdit (Doorway Wall, Window Wall) carry their cut on it */
+    placementFor,
     validatePlacement,
     /** flat-pad terrain lift (req_0444): a stamped building rides the terrain under
      *  its footprint as one level pad — pure/idempotent, applied at render+collide+compile */

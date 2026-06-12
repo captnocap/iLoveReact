@@ -26,7 +26,7 @@ import {
   type BuildPieceKind,
   type BuildSnapMode,
 } from './pieces';
-import { applyWallEdit, type WallEdit } from './edits';
+import { applyWallEdit, isWallEdit, type WallEdit } from './edits';
 
 // The V24 theme vocabulary, verbatim — plus 'common' for the theme-neutral
 // structural rows every district uses (surfaced in the capture note).
@@ -65,6 +65,12 @@ export type BuildPieceDef = {
   size: BuildPieceSize;
   snap: BuildSnapMode;
   tags: BuildGameplayTags;
+  // Wall-family rows only (REQ-0647, USER VERDICT "it should be a wall type"):
+  // a row that IS a cutout — Doorway Wall, Window Wall — names its WallEdit
+  // here, and every placement site stamps it onto the placed piece (see
+  // placed.placementFor). The row stays a normal wall: same kind, same edge
+  // snap, same join math; E still re-cycles the edit on the standing piece.
+  defaultEdit?: WallEdit;
   // kind 'prop' only — the prop registry entry whose asset/bundle this row
   // places. REQUIRED on prop rows, forbidden elsewhere (validateCatalog).
   propKind?: PropKind;
@@ -98,6 +104,7 @@ const SOLID_PLATE_TAGS: BuildGameplayTags = {
 // The standard piece module: one storey tall, one cell-run wide.
 const WALL_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 3, depthMeters: 0.25 };
 const PLATE_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 0.2, depthMeters: 3 };
+const VERTICAL_LINK_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 3, depthMeters: 3 };
 
 function propMaterial(kind: PropKind): BuildMaterial {
   switch (kind) {
@@ -319,6 +326,77 @@ export const BUILD_CATALOG: Record<string, BuildPieceDef> = {
     },
   },
 
+  // ── wall TYPES that are a cutout (REQ-0647: "it should be a wall type") ────
+  // One-line door/doorway/window methods: a normal wall row whose defaultEdit
+  // rides every placement. They live in the WALL palette tab, edge-snap onto
+  // the same lattice, and join/depth-span exactly like the solid rows.
+  'wall.concrete.doorway': {
+    id: 'wall.concrete.doorway',
+    kind: 'wall',
+    label: 'Doorway Wall',
+    theme: 'common',
+    material: 'concrete',
+    size: WALL_SIZE,
+    snap: 'edge',
+    defaultEdit: 'door', // interactable: starts closed, E toggles (edits.ts)
+    tags: SOLID_WALL_TAGS,
+  },
+  'wall.concrete.openDoorway': {
+    id: 'wall.concrete.openDoorway',
+    kind: 'wall',
+    label: 'Open Doorway Wall',
+    theme: 'common',
+    material: 'concrete',
+    size: WALL_SIZE,
+    snap: 'edge',
+    defaultEdit: 'arch', // always-open walk portal, no door panel
+    tags: SOLID_WALL_TAGS,
+  },
+  'wall.metal.garageDoor': {
+    id: 'wall.metal.garageDoor',
+    kind: 'wall',
+    label: 'Garage Door Wall',
+    theme: 'industrial',
+    material: 'metal',
+    size: WALL_SIZE,
+    snap: 'edge',
+    defaultEdit: 'garageDoor',
+    tags: { ...SOLID_WALL_TAGS, blocksSound: false },
+  },
+  'wall.stucco.window': {
+    id: 'wall.stucco.window',
+    kind: 'wall',
+    label: 'Window Wall',
+    theme: 'suburb',
+    material: 'stucco',
+    size: WALL_SIZE,
+    snap: 'edge',
+    defaultEdit: 'window', // the non-storefront residential window method
+    tags: { ...SOLID_WALL_TAGS, durability: 240 },
+  },
+  'wall.stucco.doubleWindow': {
+    id: 'wall.stucco.doubleWindow',
+    kind: 'wall',
+    label: 'Double Window Wall',
+    theme: 'suburb',
+    material: 'stucco',
+    size: WALL_SIZE,
+    snap: 'edge',
+    defaultEdit: 'doubleWindow',
+    tags: { ...SOLID_WALL_TAGS, durability: 240 },
+  },
+  'wall.plywood.brokenWindow': {
+    id: 'wall.plywood.brokenWindow',
+    kind: 'wall',
+    label: 'Broken Window Wall',
+    theme: 'trap_lot',
+    material: 'wood',
+    size: WALL_SIZE,
+    snap: 'edge',
+    defaultEdit: 'brokenWindow',
+    tags: { ...SOLID_WALL_TAGS, blocksSound: false, durability: 120 },
+  },
+
   // ── floors / roofs ─────────────────────────────────────────────────────────
   'floor.concrete.common': {
     id: 'floor.concrete.common',
@@ -382,9 +460,53 @@ export const BUILD_CATALOG: Record<string, BuildPieceDef> = {
     label: 'Wood Stairs',
     theme: 'common',
     material: 'wood',
-    size: { widthMeters: 1.2, heightMeters: 3, depthMeters: 3 },
+    size: VERTICAL_LINK_SIZE,
     snap: 'grid',
     tags: { ...SOLID_PLATE_TAGS, cover: 'low', durability: 150, blocksSound: false },
+  },
+  'stairs.concrete.common': {
+    id: 'stairs.concrete.common',
+    kind: 'stairs',
+    label: 'Concrete Stairs',
+    theme: 'common',
+    material: 'concrete',
+    size: VERTICAL_LINK_SIZE,
+    snap: 'grid',
+    tags: { ...SOLID_PLATE_TAGS, cover: 'low', blocksSound: false },
+  },
+  'stairs.metal.industrial': {
+    id: 'stairs.metal.industrial',
+    kind: 'stairs',
+    label: 'Metal Utility Stairs',
+    theme: 'industrial',
+    material: 'metal',
+    size: VERTICAL_LINK_SIZE,
+    snap: 'grid',
+    tags: { ...SOLID_PLATE_TAGS, cover: 'low', durability: 180, blocksSound: false },
+  },
+  'stairs.wood.narrow': {
+    id: 'stairs.wood.narrow',
+    kind: 'stairs',
+    label: 'Narrow Wood Stairs',
+    theme: 'common',
+    material: 'wood',
+    size: { widthMeters: 1.2, heightMeters: 3, depthMeters: 3 },
+    snap: 'grid',
+    tags: { ...SOLID_PLATE_TAGS, cover: 'low', durability: 120, blocksSound: false },
+  },
+  // REQ-0647: the elevator method — "a 'ramp' that is really an elevator".
+  // ONE storey module (one wall/floor space, "fits right in"); stack rows of
+  // this piece to add floors — every stacked storey IS a stop (elevators.ts
+  // derives the shaft + car; placed.ts gives it the open-front frame colliders).
+  'elevator.metal.common': {
+    id: 'elevator.metal.common',
+    kind: 'elevator',
+    label: 'Elevator',
+    theme: 'common',
+    material: 'metal',
+    size: VERTICAL_LINK_SIZE,
+    snap: 'grid',
+    tags: { ...SOLID_PLATE_TAGS, cover: 'high', durability: 200, blocksSound: false },
   },
 
   // ── columns / corners / arches ─────────────────────────────────────────────
@@ -604,6 +726,13 @@ export function validateCatalogEntry(entry: BuildPieceDef): string[] {
     problems.push(`${entry.id}: tags.portal but kind '${entry.kind}' promises no nav portal`);
   if (tags.durability !== null && !promise.destructibleSections)
     problems.push(`${entry.id}: finite durability but kind '${entry.kind}' promises no destructible sections`);
+
+  if (entry.defaultEdit !== undefined) {
+    if (BUILD_KIND_CONTRACTS[entry.kind].edits !== 'wall')
+      problems.push(`${entry.id}: defaultEdit '${entry.defaultEdit}' but kind '${entry.kind}' accepts no edits`);
+    else if (!isWallEdit(entry.defaultEdit))
+      problems.push(`${entry.id}: unknown defaultEdit '${entry.defaultEdit}'`);
+  }
 
   if (entry.kind === 'prop') {
     if (entry.propKind === undefined)

@@ -295,6 +295,10 @@ export type Embodied = {
   resendCameraParams: () => void;
   /** back to the authored spawn (the Drop-in button) */
   resetPlayer: () => void;
+  /** Read an action's held state from the substrate's ONE key transport — the
+   *  PLAYFOLD-0605 guard bans route-local key states, so mode layers (the E
+   *  interact frame) ask the substrate instead. False before keys mount. */
+  actionDown: (action: Parameters<typeof GAME_INPUT.actionDown>[1]) => boolean;
 };
 
 type PlayerJitRenderedFrame = {
@@ -1167,6 +1171,11 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
   // pose change.
   const resendCameraParams = () => sendCameraRef.current(playerRef.current);
 
+  // The mode layers' window into the substrate's ONE key state (PLAYFOLD-0605:
+  // routes own no key transport) — the interact frame reads E through this.
+  const actionDownFromSubstrate = (action: Parameters<typeof GAME_INPUT.actionDown>[1]): boolean =>
+    keysRef.current != null && GAME_INPUT.actionDown(keysRef.current, action);
+
   return {
     worldGrid,
     player,
@@ -1189,6 +1198,7 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
     desiredCamera,
     resendCameraParams,
     resetPlayer,
+    actionDown: actionDownFromSubstrate,
   };
 }
 

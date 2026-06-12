@@ -123,7 +123,7 @@ function isHorizontalSkinPiece(kind: string): boolean {
 }
 
 export function pieceVisualShapes(
-  piece: { pieceId: string; x: number; y: number; z: number; yawDegrees: number; edit?: WallEdit; skin?: BuildSkinSet },
+  piece: { pieceId: string; x: number; y: number; z: number; yawDegrees: number; edit?: WallEdit; skin?: BuildSkinSet; doorOpen?: boolean },
   key: string,
   pieces?: readonly PlacedBuildPiece[],
 ): VisualShape[] {
@@ -185,7 +185,7 @@ export function pieceVisualShapes(
     // stepped boxes rising along local +v — the heightfield's own direction,
     // so stairs stay visually distinct from the ramp's smooth plane.
     const boxes: VisualShape[] = [];
-    const steps = BUILD_UI.stairVisualSteps;
+    const steps = GAME_BUILD.placed.tuning.stairVisualSteps;
     for (let i = 0; i < steps; i += 1) {
       const v = (-size.depthMeters / 2) + ((i + 0.5) / steps) * size.depthMeters;
       const h = ((i + 1) / steps) * size.heightMeters;
@@ -204,6 +204,30 @@ export function pieceVisualShapes(
       });
     }
     return boxes;
+  }
+
+  if (def.kind === 'elevator') {
+    // REQ-0647: the shaft storey is an OPEN-FRONT frame — corner posts, thin
+    // back/side walls, a header beam over the front opening — never a solid
+    // box (the user's verdict: "a solid 1x* box that isnt an elevator at
+    // all"). The CAR is live and rendered by its owner (PlayRoute's ride
+    // layer / the iso pane's rest-car layer) via elevatorCarVisualShape.
+    const t = GAME_BUILD.placed.tuning;
+    const halfW = size.widthMeters / 2;
+    const halfD = size.depthMeters / 2;
+    const wall = t.elevatorShaftWallThicknessMeters;
+    const post = t.elevatorPostSizeMeters;
+    const h = size.heightMeters;
+    const shapes: VisualShape[] = [
+      box('left', -halfW + wall / 2, 0, piece.y, wall, h, size.depthMeters - post * 2, sides),
+      box('right', halfW - wall / 2, 0, piece.y, wall, h, size.depthMeters - post * 2, sides),
+      box('back', 0, halfD - wall / 2, piece.y, size.widthMeters - post * 2, h, wall, back),
+      box('header', 0, -halfD + wall / 2, piece.y + h - t.elevatorHeaderHeightMeters, size.widthMeters - post * 2, t.elevatorHeaderHeightMeters, wall, front),
+    ];
+    for (const [pu, pv] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+      shapes.push(box(`post${pu}${pv}`, pu * (halfW - post / 2), pv * (halfD - post / 2), piece.y, post, h, post, front));
+    }
+    return shapes;
   }
 
   const edit = piece.edit;
@@ -279,7 +303,8 @@ export function pieceVisualShapes(
         BUILD_UI.windowPaneOpacity,
       ));
     }
-    if (edit !== undefined && !isWindowOpening) {
+    const interaction = edit ? GAME_BUILD.edits.wall[edit]?.interaction : null;
+    if (edit !== undefined && !isWindowOpening && !(interaction && piece.doorOpen === true)) {
       const low = edit === 'door' || edit === 'garageDoor' || edit === 'arch';
       const eh = low ? BUILD_UI.editCutoutLowHeightMeters : BUILD_UI.editCutoutHeightMeters;
       const ey = low ? piece.y + eh / 2 : piece.y + size.heightMeters * 0.55;
@@ -340,6 +365,26 @@ export function VisualShapeMesh(props: { shape: VisualShape; colorOverride?: str
   return props.shape.kind === 'ramp'
     ? <VisualRampMesh ramp={props.shape.ramp} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />
     : <VisualBoxMesh box={props.shape.box} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />;
+}
+
+/** REQ-0647: the elevator CAR as a renderable shape. The car is LIVE state —
+ *  pieceVisualShapes never draws it; its owner does (PlayRoute's ride layer at
+ *  the live height, the iso pane at the rest stop, the ghost at the snap
+ *  target) — one footprint source (GAME_BUILD.elevators.carBox), one look. */
+export function elevatorCarVisualShape(
+  carBox: { cx: number; cy: number; cz: number; sx: number; sy: number; sz: number; yawDegrees: number },
+  key: string,
+): VisualShape {
+  return {
+    kind: 'box',
+    box: {
+      key,
+      cx: carBox.cx, cy: carBox.cy, cz: carBox.cz,
+      sx: carBox.sx, sy: carBox.sy, sz: carBox.sz,
+      yawDegrees: carBox.yawDegrees,
+      color: BUILD_UI.elevatorCarColor,
+    },
+  };
 }
 
 function wallJoinSignature(piece: PlacedBuildPiece, pieces: readonly PlacedBuildPiece[]): string {
@@ -475,7 +520,7 @@ function joinKeysOf(pieces: readonly PlacedBuildPiece[]): { joinKeys: Map<string
       boxes += signature.split('|').length;
     } else {
       const def = GAME_BUILD.catalog.get(piece.pieceId);
-      boxes += def.kind === 'stairs' ? BUILD_UI.stairVisualSteps : 1;
+      boxes += def.kind === 'stairs' ? GAME_BUILD.placed.tuning.stairVisualSteps : 1;
     }
   }
   const entry = { joinKeys, boxes, ms: perfMs() - t0 };

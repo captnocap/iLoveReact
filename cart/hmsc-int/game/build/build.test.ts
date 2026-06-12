@@ -23,12 +23,12 @@ import {
   validateCatalogEntry,
 } from './catalog';
 import {
-  BUILD_PREFAB_DEFINITIONS,
   decomposePrefab,
   prefabDefinition,
   validatePrefab,
   validatePrefabs,
 } from './prefabs';
+import { placementFor } from './placed';
 import {
   validateMarkers,
   markersOfType,
@@ -44,6 +44,8 @@ test('a doorway is a portal: the door edit opens a walk portal through a solid w
   assert(tags.portal, 'door edit must set portal');
   assertEqual(WALL_EDIT_DEFINITIONS.door.portalKind, 'walk', 'a doorway admits bodies');
   assert(WALL_EDIT_DEFINITIONS.door.traversable, 'a doorway is traversable');
+  assertEqual(WALL_EDIT_DEFINITIONS.door.interaction?.action, 'toggle', 'a door exposes the open/close interaction');
+  assertEqual(WALL_EDIT_DEFINITIONS.door.interaction?.defaultState, 'closed', 'authored doors start closed until toggled');
   assert(!SOLID_WALL.tags.portal, 'the uncut wall is NOT a portal');
 });
 
@@ -69,6 +71,7 @@ test('a garage door is a vehicle portal', () => {
   const tags = applyWallEdit(SOLID_WALL.tags, 'garageDoor');
   assert(tags.portal, 'garage door connects spaces');
   assertEqual(WALL_EDIT_DEFINITIONS.garageDoor.portalKind, 'vehicle', 'a car drives through');
+  assertEqual(WALL_EDIT_DEFINITIONS.garageDoor.interaction?.action, 'toggle', 'garage doors are interactable too');
 });
 
 test('halfHeight drops a full wall to vaultable low cover with sight over the top', () => {
@@ -130,9 +133,17 @@ test('every kind has a contract, renders, and only the wall family takes edits',
   assert(WALL_EDITS.length === 8 && isWallEdit('doubleWindow'), 'the ruled edit vocabulary is present');
 });
 
-test('vertical links are exactly ramp and stairs (a ramp knows it connects floors)', () => {
+test('vertical links are exactly ramp, stairs, and elevator (the kinds that connect floors)', () => {
   const links = BUILD_PIECE_KINDS.filter((kind) => BUILD_KIND_CONTRACTS[kind].promise.verticalLink);
-  assertEqual(links.sort().join(','), 'ramp,stairs', 'the floor-connecting kinds');
+  assertEqual(links.sort().join(','), 'elevator,ramp,stairs', 'the floor-connecting kinds');
+});
+
+test('stairs default to the full 3m module, with narrow stairs as an explicit variant', () => {
+  assertEqual(catalogEntry('stairs.wood.common').size.widthMeters, 3, 'default wood stairs are not the old one-third-width model');
+  assertEqual(catalogEntry('stairs.concrete.common').size.widthMeters, 3, 'concrete stairs fill the same floor module');
+  assertEqual(catalogEntry('stairs.metal.industrial').size.widthMeters, 3, 'industrial stairs fill the same floor module');
+  assertEqual(catalogEntry('stairs.wood.narrow').size.widthMeters, 1.2, 'the compact stair is named narrow on purpose');
+  assert(catalogEntriesByKind('stairs').length >= 4, 'the palette has multiple stair models');
 });
 
 test('theme query folds the common rows in; kind query is exact', () => {
@@ -153,6 +164,55 @@ test('a prefab decomposes to its semantic pieces — the bake sees through it', 
   assert(pieces.every((piece) => piece.def.kind !== undefined), 'every piece resolves its catalog row');
   const floor = pieces.find((piece) => piece.def.kind === 'floor');
   assert(floor !== undefined && floor.x === 10 && floor.z === 20, 'world placement = origin + local');
+});
+
+// ── wall TYPES that are a cutout (REQ-0647: NOT prefabs, USER ruled) ─────────
+
+test('door/doorway/window methods are WALL TYPES: same kind, same edge snap, the cut rides the row', () => {
+  const expectations: Array<[string, string]> = [
+    ['wall.concrete.doorway', 'door'],
+    ['wall.concrete.openDoorway', 'arch'],
+    ['wall.metal.garageDoor', 'garageDoor'],
+    ['wall.stucco.window', 'window'],
+    ['wall.stucco.doubleWindow', 'doubleWindow'],
+    ['wall.plywood.brokenWindow', 'brokenWindow'],
+  ];
+  for (const [id, edit] of expectations) {
+    const row = catalogEntry(id);
+    assertEqual(row.kind, 'wall', `${id} is a wall, not a prefab composition`);
+    assertEqual(row.snap, 'edge', `${id} rides the wall edge-snap lattice — it lines up with walls`);
+    assertEqual(row.defaultEdit, edit, `${id} carries its cut as the row's defaultEdit`);
+  }
+  assertEqual(catalogEntry('wall.stucco.window').material, 'stucco', 'the window method is residential, not storefront glass');
+  // the door method is the interactable door (E opens/closes)
+  assertEqual(WALL_EDIT_DEFINITIONS[catalogEntry('wall.concrete.doorway').defaultEdit!].interaction?.action, 'toggle', 'the doorway wall lands an interactable door');
+});
+
+test('placementFor stamps the defaultEdit onto the placement — every site cuts the same opening', () => {
+  const doorway = catalogEntry('wall.concrete.doorway');
+  const placement = placementFor(doorway, { x: 3, y: 0, z: 6, yawDegrees: 90 });
+  assertEqual(placement.edit, 'door', 'the placed wall arrives with its doorway cut');
+  assert(effectiveTags(doorway, placement.edit).portal, 'the placed doorway IS a walk portal');
+  const solid = placementFor(SOLID_WALL, { x: 0, y: 0, z: 0, yawDegrees: 0 });
+  assertEqual(solid.edit, undefined, 'a plain wall places uncut');
+});
+
+test('a defaultEdit on a non-wall kind violates the catalog contract', () => {
+  const floor = catalogEntry('floor.concrete.common');
+  const cheating = { ...floor, id: 'floor.cheat', defaultEdit: 'door' as const };
+  assert(validateCatalogEntry(cheating).length > 0, 'only the wall family carries cutouts');
+});
+
+// ── the elevator is a PIECE (REQ-0647: "a ramp that is really an elevator") ──
+
+test('the elevator is a one-module vertical-link piece, never a prefab', () => {
+  const row = catalogEntry('elevator.metal.common');
+  assertEqual(row.kind, 'elevator', 'a first-class kind in the vertical-link family');
+  assertEqual(row.snap, 'grid', 'drops on the module grid like ramp/stairs');
+  assertEqual(row.size.widthMeters, 3, 'one wall/floor module wide — "fits right in"');
+  assertEqual(row.size.heightMeters, 3, 'one storey per placed piece; stack for floors');
+  assert(BUILD_KIND_CONTRACTS.elevator.promise.verticalLink, 'an elevator knows it connects floors');
+  assertEqual(BUILD_KIND_CONTRACTS.elevator.edits, 'none', 'shaft storeys take no wall cutouts');
 });
 
 test('the shipped prefabs validate; dangling references and illegal edits are rejected', () => {

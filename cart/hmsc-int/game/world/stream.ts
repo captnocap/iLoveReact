@@ -45,6 +45,7 @@ import {
   skinSetProblems,
   stampPrefabPieces,
   validatePrefab,
+  wallEditDefinition,
   type BuildSkinSet,
   type BuildPrefabDef,
   type PlacedBuildPiece,
@@ -89,6 +90,7 @@ export type WorldEvent =
   | { kind: 'piecePlaced'; placement: PiecePlacement; mapName?: string }
   | { kind: 'pieceRemoved'; id: string; mapName?: string }
   | { kind: 'pieceEditSet'; id: string; edit: WallEdit; mapName?: string }
+  | { kind: 'pieceDoorSet'; id: string; open: boolean; mapName?: string }
   // TOWERSKIN-0610 (addition): per-face paint on a STANDING piece — set slots
   // MERGE onto the piece's skin. Mirrors pieceEditSet so the id stays stable
   // (the editor's selection survives painting face after face).
@@ -264,6 +266,18 @@ export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freez
         if (!placedPieceAcceptsEdits(source[index])) return state;
         const pieces = [...source];
         pieces[index] = { ...pieces[index], edit: event.edit };
+        if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
+        return { ...state, pieces };
+      }
+      case 'pieceDoorSet': {
+        const map = eventMapName(event);
+        const source = map ? (state.piecesByMap?.[map] ?? []) : state.pieces;
+        const index = source.findIndex((piece) => piece.id === event.id);
+        if (index < 0) return state;
+        const edit = source[index].edit;
+        if (edit === undefined || !wallEditDefinition(edit).interaction) return state;
+        const pieces = [...source];
+        pieces[index] = { ...pieces[index], doorOpen: Boolean(event.open) };
         if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
         return { ...state, pieces };
       }

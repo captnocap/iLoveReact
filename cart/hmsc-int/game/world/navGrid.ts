@@ -31,6 +31,7 @@
 
 import { TILE_KIND_INDEX, type TileKind } from '../kinds';
 import { placedPieceColliders, placedPieceDef, pieceBounds, type PlacedBuildPiece } from '../build/placed';
+import { wallEditDefinition } from '../build/edits';
 import { carriesMicroGrid, floorCellRects } from '../build/microGrid';
 
 export const NAV_TUNING = {
@@ -110,7 +111,10 @@ export function bakeNavGrid(opts: {
     const def = placedPieceDef(piece);
     if (carriesMicroGrid(def.kind)) {
       for (const r of floorCellRects(piece)) stampRect(r.minX, r.minZ, r.maxX, r.maxZ, TILE_KIND_INDEX[r.kind]);
-    } else if (def.kind === 'ramp' || def.kind === 'stairs') {
+    } else if (def.kind === 'ramp' || def.kind === 'stairs' || def.kind === 'elevator') {
+      // vertical links (an elevator connects floors too, REQ-0647) stamp the
+      // walkable link surface; the elevator's shaft walls re-stamp their thin
+      // blocked strips in the collider pass below, leaving the doorway open.
       const b = pieceBounds(piece);
       stampRect(b.minX, b.minZ, b.maxX, b.maxZ, TILE_KIND_INDEX[NAV_TUNING.linkKind]);
     }
@@ -122,10 +126,17 @@ export function bakeNavGrid(opts: {
   //    (full-width sloped slab strips, blocksPlayer for side collision) — the
   //    link stamp above is their nav truth, not a wall.
   const blockIdx = TILE_KIND_INDEX[NAV_TUNING.blockKind];
-  const blockers = pieces.filter((p) => {
-    const k = placedPieceDef(p).kind;
-    return k !== 'ramp' && k !== 'stairs';
-  });
+  const blockers = pieces
+    .filter((p) => {
+      const k = placedPieceDef(p).kind;
+      return k !== 'ramp' && k !== 'stairs';
+    })
+    // a doorway is a NAV PORTAL even while its panel is shut (an agent opens
+    // the door): derive nav colliders with interactable doors held OPEN so
+    // the closed-panel band (live-play collision) never seals the path.
+    .map((p) => (p.edit !== undefined && placedPieceDef(p).kind === 'wall' && wallEditDefinition(p.edit).interaction && p.doorOpen !== true
+      ? { ...p, doorOpen: true }
+      : p));
   const colliders = placedPieceColliders(blockers);
   for (const r of colliders.rects) {
     if (!r.blocksPlayer) continue;

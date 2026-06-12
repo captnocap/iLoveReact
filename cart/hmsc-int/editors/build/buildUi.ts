@@ -28,9 +28,9 @@ export const BUILD_UI = {
   windowPaneColor: '#bcd3dd',
   windowPaneOpacity: 0.3,
   buildingSkinTexturePx: 256,
-  /** stairs render as this many stepped boxes; ramps render as one smooth
-   *  heightfield plane matching their collision slope. */
-  stairVisualSteps: 4,
+  /** REQ-0647: the elevator car platform's look (a steel plate, distinct from
+   *  the shaft frame's metal so the car reads against it) */
+  elevatorCarColor: '#aeb6bf',
   panelBg: '#0f1a2ef0',
 } as const;
 

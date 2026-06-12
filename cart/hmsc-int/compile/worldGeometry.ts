@@ -205,7 +205,6 @@ const HEIGHTFIELD_LUMP_VERSION = 2;
 const HEIGHTFIELD_RECORD_FLOATS = 10;
 const HEIGHTFIELD_TEXTURE_PIXELS_PER_TILE = 4;
 const HEIGHTFIELD_TEXTURE_MAX_PX = 512;
-const STAIR_VISUAL_STEPS = 4; // Matches BUILD_UI.stairVisualSteps in /test.
 const BUILD_FACE_SLAB_THICKNESS_METERS = 0.02; // Matches BUILD_UI.faceSlabThicknessMeters.
 const BUILD_FACE_SLAB_LIFT_METERS = 0.012; // Matches BUILD_UI.faceSlabLiftMeters.
 const DEG = Math.PI / 180;
@@ -278,13 +277,47 @@ function pushStairs(
   yawDegrees = 0,
   material = 0,
 ): number {
-  for (let i = 0; i < STAIR_VISUAL_STEPS; i += 1) {
-    const v = (-depth / 2) + ((i + 0.5) / STAIR_VISUAL_STEPS) * depth;
-    const stepHeight = ((i + 1) / STAIR_VISUAL_STEPS) * height;
+  const steps = GAME_BUILD.placed.tuning.stairVisualSteps;
+  for (let i = 0; i < steps; i += 1) {
+    const v = (-depth / 2) + ((i + 0.5) / steps) * depth;
+    const stepHeight = ((i + 1) / steps) * height;
     const { dx, dz } = localOffset(0, v, yawDegrees);
-    pushBox(b, x + dx, y + stepHeight / 2, z + dz, width, stepHeight, depth / STAIR_VISUAL_STEPS, color, yawDegrees, material);
+    pushBox(b, x + dx, y + stepHeight / 2, z + dz, width, stepHeight, depth / steps, color, yawDegrees, material);
   }
-  return STAIR_VISUAL_STEPS;
+  return steps;
+}
+
+// REQ-0647: the elevator car platform's bake color (the editor's
+// BUILD_UI.elevatorCarColor look; compile/ does not import editor tables).
+const ELEVATOR_CAR_COLOR: Color = [0.68, 0.71, 0.75];
+
+/** REQ-0647: one elevator storey — the SAME open-front frame pieceMeshes
+ *  draws in /test (posts, thin back/side walls, front header beam), never a
+ *  solid box. The car bakes separately at each shaft's rest stop. */
+function pushElevatorStorey(
+  b: Build,
+  piece: { x: number; y: number; z: number; yawDegrees: number },
+  size: { widthMeters: number; heightMeters: number; depthMeters: number },
+  color: Color,
+): number {
+  const tuning = GAME_BUILD.placed.tuning;
+  const halfW = size.widthMeters / 2;
+  const halfD = size.depthMeters / 2;
+  const wall = tuning.elevatorShaftWallThicknessMeters;
+  const post = tuning.elevatorPostSizeMeters;
+  const h = size.heightMeters;
+  const at = (u: number, v: number, baseY: number, w: number, boxH: number, d: number): void => {
+    const { dx, dz } = localOffset(u, v, piece.yawDegrees);
+    pushBox(b, piece.x + dx, baseY + boxH / 2, piece.z + dz, w, boxH, d, color, piece.yawDegrees, 0);
+  };
+  at(-halfW + wall / 2, 0, piece.y, wall, h, size.depthMeters - post * 2); // left wall
+  at(halfW - wall / 2, 0, piece.y, wall, h, size.depthMeters - post * 2); // right wall
+  at(0, halfD - wall / 2, piece.y, size.widthMeters - post * 2, h, wall); // back wall
+  at(0, -halfD + wall / 2, piece.y + h - tuning.elevatorHeaderHeightMeters, size.widthMeters - post * 2, tuning.elevatorHeaderHeightMeters, wall); // front header
+  for (const [pu, pv] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    at(pu * (halfW - post / 2), pv * (halfD - post / 2), piece.y, post, h, post);
+  }
+  return 8;
 }
 
 function hexColor(hex: string): Color {
@@ -1390,6 +1423,11 @@ function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number
       emitted += pushStairs(b, piece.x, piece.y, piece.z, size.widthMeters, size.heightMeters, size.depthMeters, color, piece.yawDegrees);
       continue;
     }
+    if (def.kind === 'elevator') {
+      // Match /test: the open-front shaft frame, never a solid box (REQ-0647).
+      emitted += pushElevatorStorey(b, piece, size, color);
+      continue;
+    }
     // The play view's body box: center (x, y + h/2, z), full catalog size, yaw.
     // A non-wall single body (pillar/post/column) takes its material from the
     // 'sides' slot — the whole box wears one look.
@@ -1406,6 +1444,14 @@ function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number
       piece.yawDegrees,
       bodyMat,
     );
+    emitted += 1;
+  }
+  // REQ-0647: each elevator shaft's car bakes parked at its REST stop (the
+  // bottom storey). The compiled game has no ride loop yet — the car is a
+  // standable platform there; live motion is the editor play surface's layer.
+  for (const shaft of GAME_BUILD.elevators.shafts(pieces)) {
+    const car = GAME_BUILD.elevators.carBox(shaft, shaft.stops[0]);
+    pushBox(b, car.cx, car.cy, car.cz, car.sx, car.sy, car.sz, ELEVATOR_CAR_COLOR, car.yawDegrees, 0);
     emitted += 1;
   }
   return emitted;

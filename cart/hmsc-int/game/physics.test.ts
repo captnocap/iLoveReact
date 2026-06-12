@@ -514,6 +514,36 @@ test('true outer floor edge supports to the bound without oscillating', () => {
   }
 });
 
+test('REQ-0647: the elevator ride — a car rect re-aimed in place per frame carries the standing player', () => {
+  installFloorEdgeHost();
+  // the play route mutates ONE rect object per frame (updateElevatorCarRect);
+  // the step contract resolves a player within step height below a walkable
+  // top UP onto it, so the rising car carries its rider with no extra code.
+  const car = { minX: 0, minZ: 0, maxX: 3, maxZ: 3, topMeters: 0.22, blocksPlayer: true, friction: 0.85, restitution: 0.02, floorMeters: 0 };
+  let player = { x: 1.5, y: 0.22, z: 1.5, vx: 0, vy: 0, vz: 0 };
+  const speed = PLACED_TUNING.elevatorCarSpeedMetersPerSecond;
+  const dt = 0.016;
+  for (let frame = 0; frame < 60; frame += 1) {
+    car.topMeters += speed * dt;
+    car.floorMeters += speed * dt;
+    const result = GAME_PHYSICS.step(stepInput({
+      dtSeconds: dt,
+      player: { position: { x: player.x, y: player.y, z: player.z }, velocity: { x: player.vx, y: player.vy, z: player.vz }, yawDegrees: 0 },
+      rects: [car],
+    }))!;
+    assertEqual(result.player.grounded, true, `ride frame ${frame} stays on the car`);
+    assertClose(result.player.position.y, car.topMeters, 1e-6, `ride frame ${frame} rides the car top`);
+    player = {
+      x: result.player.position.x,
+      y: result.player.position.y,
+      z: result.player.position.z,
+      vx: result.player.velocity.x,
+      vy: result.player.velocity.y,
+      vz: result.player.velocity.z,
+    };
+  }
+});
+
 test('RAMPREAL-0606: ramp slab walks on top, stays hollow underneath, and blocks through the slab edge', () => {
   installRampCollisionHost();
   GAME_PHYSICS.clearHeightfields();
@@ -663,16 +693,20 @@ test('STAIRS-0607: stairs walk up, keep terrain underneath, and block from the s
   GAME_PHYSICS.clearHeightfields();
   const stairs = buildPiece('stairs.wood.common', 6, 6);
   const solids = placedPieceColliders([stairs]);
+  // flat terrain reaches LEFT of the stair footprint so the side-block walker
+  // below approaches the side wall from real ground (REQ-0641 widened the
+  // common stairs 1.2m → the full 3m module; the side wall now sits at
+  // x≈4.25–4.5, so the approach starts further out than it used to)
   GAME_PHYSICS.registerHeightfield({
     slot: 0,
-    originX: 4.5,
+    originX: 1.5,
     originZ: 3,
     cellSizeMeters: 3,
-    cols: 2,
+    cols: 3,
     rows: 3,
     baseY: 0,
     walkableSlopeCos: 1,
-    heights: new Float32Array([0, 0, 0, 0, 0, 0]),
+    heights: new Float32Array(9),
   });
   const stairFields = placedPieceRamps([stairs], 1);
   for (const field of stairFields) GAME_PHYSICS.registerHeightfield(field);
@@ -721,13 +755,15 @@ test('STAIRS-0607: stairs walk up, keep terrain underneath, and block from the s
     assertEqual(walked.player.grounded, true, `under-stair terrain frame ${frame} remains grounded`);
   }
 
+  // the 3m-wide stairs' side wall spans x[4.25,4.5]: walk into it from the
+  // left and the capsule (radius 0.35) stops at ≈3.9
   const side = GAME_PHYSICS.step(stepInput({
     dtSeconds: 0.05,
-    player: { position: { x: 4.8, y: 0, z: 6 }, velocity: { x: 2.5, y: 0, z: 0 }, yawDegrees: 0 },
+    player: { position: { x: 3.8, y: 0, z: 6 }, velocity: { x: 2.5, y: 0, z: 0 }, yawDegrees: 0 },
     rects: solids.rects,
   }))!;
   console.log(`[STAIRS-0607] registration rects=${solids.rects.map((r) => `x[${r.minX},${r.maxX}]z[${r.minZ},${r.maxZ}] y[${r.floorMeters},${r.topMeters}]`).join(';')} field=origin(${stairFields[0].originX},${stairFields[0].originZ}) cell=${stairFields[0].cellSizeMeters} cols=${stairFields[0].cols} rows=${stairFields[0].rows} heights=${Array.from(stairFields[0].heights).join(',')} walkUp=${upFrames.join(' | ')} under=${underFrames.join(' | ')} side=pos(${side.player.position.x.toFixed(3)},${side.player.position.y.toFixed(3)},${side.player.position.z.toFixed(3)}) vel(${side.player.velocity.x.toFixed(3)},${side.player.velocity.y.toFixed(3)},${side.player.velocity.z.toFixed(3)})`);
-  assert(side.player.position.x <= 4.81, `walking into the stair side is blocked (x=${side.player.position.x})`);
+  assert(side.player.position.x <= 3.91, `walking into the stair side is blocked (x=${side.player.position.x})`);
   assertClose(side.player.position.y, 0, 1e-6, 'side-block case stays on terrain ground');
   removeFakeHost();
 });

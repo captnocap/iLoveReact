@@ -153,6 +153,10 @@ export function buildBakedColliders(
   fieldStartSlot = 0,
 ): BakedColliders {
   const { rects, orientedRects } = GAME_BUILD.placed.colliders(pieces);
+  // REQ-0647: elevator cars ship parked at their rest stop — placed.colliders
+  // deliberately omits the car (live collision in the editor); the compiled
+  // game gets the static twin so every shaft floor is standable.
+  rects.push(...GAME_BUILD.elevators.restCarRects(pieces));
   const ramps = GAME_BUILD.placed.ramps(pieces, fieldStartSlot);
   const flatFields: Heightfield[] = [];
   let slot = fieldStartSlot + ramps.length;

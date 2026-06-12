@@ -58,6 +58,10 @@ export type PlacedBuildPiece = {
   yawDegrees: number;
   /** the meaningful cutout on THIS placement (wall-family kinds only) */
   edit?: WallEdit;
+  /** Runtime state for interactive door-family edits. Undefined = the edit's
+   *  default state (door/garageDoor default closed); true = open. This is live
+   *  state, not prefab-authoring structure. */
+  doorOpen?: boolean;
   /** resolved per-face skin/material snapshot for this placed instance */
   skin?: BuildSkinSet;
   /** prefab stamp group id, when this piece came from one prefabStamped event */
@@ -80,6 +84,9 @@ export const PLACED_TUNING = {
   walkOpeningWidthMeters: 1.2,
   /** a vehicle portal's opening (garage door), meters */
   vehicleOpeningWidthMeters: 2.6,
+  /** closed door panels fill only the portal opening, not the wall jambs */
+  walkDoorPanelHeightMeters: 2.2,
+  garageDoorPanelHeightMeters: 2.8,
   /** where a halfHeight wall's collision band tops out (low cover), meters */
   halfHeightTopMeters: 1.1,
   /** surface feel of built pieces (one material-agnostic profile until the
@@ -106,6 +113,33 @@ export const PLACED_TUNING = {
   /** RAMPSIDE-0606 legacy for stairs only: side/back boundary thickness for
    *  stair wall faces. Ramps no longer use this. */
   stairBoundaryWallThicknessMeters: 0.25,
+  /** Stairs lower to this many visible step boxes in every renderer. This is
+   *  presentation, but it must live with placed-build semantics so editor and
+   *  compiled game never drift into different stair models. */
+  stairVisualSteps: 10,
+  /** ── ELEVATOR (REQ-0647): the moving vertical link ─────────────────────
+   *  One catalog module per storey; stacked modules form a SHAFT whose car
+   *  serves one stop per storey (game/build/elevators.ts derives both). The
+   *  shaft is an open-front frame: back + side walls collide, the front face
+   *  stays open so a body walks onto the car. */
+  elevatorShaftWallThicknessMeters: 0.12,
+  elevatorPostSizeMeters: 0.18,
+  /** the visual beam over the open front (reads as the shaft doorway) */
+  elevatorHeaderHeightMeters: 0.35,
+  /** the car: a platform slab; its TOP surface = stop level + this thickness
+   *  (matches the 0.2m floor-plate top at each storey within a step) */
+  elevatorCarFloorThicknessMeters: 0.22,
+  /** the car sits this far inside the shaft's inner walls on every side */
+  elevatorCarInsetMeters: 0.06,
+  elevatorCarSpeedMetersPerSecond: 2.2,
+  /** stacked storeys whose seams sit within this are ONE shaft */
+  elevatorStackToleranceMeters: 0.05,
+  /** |carY - stop| under this = the car has arrived */
+  elevatorArriveToleranceMeters: 0.02,
+  /** how far above/below a stop a body can stand and still board/call */
+  elevatorBoardVerticalReachMeters: 1.2,
+  /** horizontal reach for calling the car from a landing */
+  elevatorCallReachMeters: 2.8,
   /** RAMPFOOT-0605: degenerate-band floor when trimming wall overhangs out of
    *  ramp footprints — a trimmed band thinner than this is dropped, meters */
   rampTrimMinBandMeters: 0.01,
@@ -633,6 +667,25 @@ export function placedPieceBands(piece: PlacedBuildPiece, pieces: readonly Place
   return [{ u0: minU, u1: maxU, top: fullTop }];
 }
 
+function placedClosedDoorBand(piece: PlacedBuildPiece, def: BuildPieceDef): PlacedPieceBand | null {
+  if (piece.doorOpen === true) return null;
+  const edit = piece.edit;
+  if (edit === undefined || BUILD_KIND_CONTRACTS[def.kind].edits !== 'wall') return null;
+  const meaning = wallEditDefinition(edit);
+  if (!meaning.interaction || meaning.portalKind === 'none') return null;
+  const opening = meaning.portalKind === 'vehicle'
+    ? PLACED_TUNING.vehicleOpeningWidthMeters
+    : PLACED_TUNING.walkOpeningWidthMeters;
+  const panelHeight = meaning.portalKind === 'vehicle'
+    ? PLACED_TUNING.garageDoorPanelHeightMeters
+    : PLACED_TUNING.walkDoorPanelHeightMeters;
+  return {
+    u0: -opening / 2,
+    u1: opening / 2,
+    top: piece.y + Math.min(def.size.heightMeters, panelHeight),
+  };
+}
+
 /**
  * The live-play solids of the placed pieces: every piece whose EFFECTIVE tags
  * carry collision becomes band(s) the host steps against — quarter-turn yaw
@@ -754,6 +807,53 @@ function pushStairBoundaryRects(
   }
 }
 
+/** REQ-0647: one elevator storey's static solids — an OPEN-FRONT frame. The
+ *  back and side walls (inside the module footprint, flush with its edges)
+ *  collide; the front face (local −v) stays open so a body walks onto the
+ *  car. The CAR is deliberately NOT here: it is live, moving collision —
+ *  the play route owns its rect (editors/play), the compile bake ships it at
+ *  rest via elevators.restCarRects. */
+function pushElevatorShaftRects(
+  rects: CollisionRect[],
+  orientedRects: OrientedCollisionRect[],
+  piece: PlacedBuildPiece,
+  def: BuildPieceDef,
+): void {
+  const size = def.size;
+  const halfW = size.widthMeters / 2;
+  const halfD = size.depthMeters / 2;
+  const wall = PLACED_TUNING.elevatorShaftWallThicknessMeters;
+  const base = {
+    topMeters: piece.y + size.heightMeters,
+    floorMeters: piece.y,
+    blocksPlayer: true,
+    friction: PLACED_TUNING.pieceFriction,
+    restitution: PLACED_TUNING.pieceRestitution,
+  };
+  const localRects: LocalPlanRect[] = [
+    { minU: -halfW, maxU: -halfW + wall, minV: -halfD, maxV: halfD }, // left wall
+    { minU: halfW - wall, maxU: halfW, minV: -halfD, maxV: halfD }, // right wall
+    { minU: -halfW, maxU: halfW, minV: halfD - wall, maxV: halfD }, // back wall
+  ];
+  const quarter = quarterTurns(piece.yawDegrees);
+  for (const local of localRects) {
+    if (quarter !== null) {
+      rects.push({ ...base, ...localRectToAxisRect(piece, local) });
+    } else {
+      orientedRects.push({
+        ...base,
+        minX: piece.x + local.minU,
+        maxX: piece.x + local.maxU,
+        minZ: piece.z + local.minV,
+        maxZ: piece.z + local.maxV,
+        pivotX: piece.x,
+        pivotZ: piece.z,
+        yawRadians: piece.yawDegrees * DEG,
+      });
+    }
+  }
+}
+
 function pushRampSlabEdgeRects(
   rects: (CollisionRect & { ownerIndex?: number })[],
   orientedRects: (OrientedCollisionRect & { ownerIndex?: number })[],
@@ -829,13 +929,19 @@ export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): Place
       }
       continue;
     }
+    if (def.kind === 'elevator') {
+      if (placedPieceTags(piece).collision) pushElevatorShaftRects(rects, orientedRects, piece, def);
+      continue;
+    }
     // KICKPROP-0610: a dynamic prop (ball, cone, can) is a host sphere BODY,
     // not a wall — it contributes no static rect; the play route owns its sim.
     if (def.kind === 'prop' && def.propKind && propDynamics(def.propKind)) continue;
     if (!placedPieceTags(piece).collision) continue;
     const quarter = quarterTurns(piece.yawDegrees);
     const depthSpan = placedPieceDepthSpan(piece, pieces);
-    for (const band of placedPieceBands(piece, pieces)) {
+    const closedDoor = placedClosedDoorBand(piece, def);
+    const bands = closedDoor ? [...placedPieceBands(piece, pieces), closedDoor] : placedPieceBands(piece, pieces);
+    for (const band of bands) {
       const base = {
         topMeters: band.top,
         floorMeters: piece.y,
@@ -906,7 +1012,9 @@ export function placedPieceCameraOccluders(pieces: readonly PlacedBuildPiece[]):
     const ownerIndex = ownerIds.push(piece.id);
     const quarter = quarterTurns(piece.yawDegrees);
     const depthSpan = placedPieceDepthSpan(piece, pieces);
-    for (const band of placedPieceBands(piece, pieces)) {
+    const closedDoor = placedClosedDoorBand(piece, def);
+    const bands = closedDoor ? [...placedPieceBands(piece, pieces), closedDoor] : placedPieceBands(piece, pieces);
+    for (const band of bands) {
       const base = {
         topMeters: band.top,
         floorMeters: piece.y,
@@ -1187,6 +1295,24 @@ export function liftPropsToTerrain<T extends PlacedBuildPiece>(
     out.push({ ...piece, y: y! });
   }
   return out;
+}
+
+/** The authored placement for a catalog row at a position (REQ-0647). Wall
+ *  types that ARE a cutout (defaultEdit — Doorway Wall, Window Wall) carry
+ *  their edit on the placement, so every placement site (F2 crosshair, iso
+ *  click, iso drag-paint) cuts the same opening without copying the rule. */
+export function placementFor(
+  def: BuildPieceDef,
+  at: { x: number; y: number; z: number; yawDegrees: number },
+): Omit<PlacedBuildPiece, 'id'> {
+  return {
+    pieceId: def.id,
+    x: at.x,
+    y: at.y,
+    z: at.z,
+    yawDegrees: at.yawDegrees,
+    ...(def.defaultEdit !== undefined ? { edit: def.defaultEdit } : {}),
+  };
 }
 
 export function validatePlacement(placement: Omit<PlacedBuildPiece, 'id'>): string[] {

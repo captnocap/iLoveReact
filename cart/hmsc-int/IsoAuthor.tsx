@@ -18,7 +18,7 @@ import * as Geometry from '@reactjit/geometries';
 import { GAME_BUILD, GAME_NATIVE_CAMERA, buildingDefFromPieces, buildingPieceInstanceId, partitionBuildingSelection } from './game';
 import type { BuildEditEvent, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingInstance, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
 import { resolveSnapTarget, modulePitch, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
-import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes } from './editors/build/pieceMeshes';
+import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, elevatorCarVisualShape } from './editors/build/pieceMeshes';
 import { perfMs, warnPlaceFreeze } from './editors/build/placeFreezeProbe';
 import { FacePainter } from './editors/build/FacePainter';
 import { BUILD_UI } from './editors/build/buildUi';
@@ -43,7 +43,7 @@ const FREEFORM_MOVE_SNAP_METERS = ISO_SNAP_TUNING.freeformSnapMeters;
 
 // The build palette, ruled-hotkey order first (floor, wall, ramp, roof), then the
 // rest — same kinds F2's palette leads with. Each tab lists its catalog entries.
-const PALETTE_KINDS: BuildPieceKind[] = ['floor', 'wall', 'ramp', 'roof', 'stairs', 'pillar', 'prop'];
+const PALETTE_KINDS: BuildPieceKind[] = ['floor', 'wall', 'ramp', 'roof', 'stairs', 'elevator', 'pillar', 'prop'];
 
 // Route id the iso camera pose persists under (editors/twigs) so a hot reload — which
 // remounts this component and reconstructs the IsoStage — restores where you were
@@ -426,7 +426,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       : a.kind === 'tower'
         ? GAME_BUILD.catalog.get(TOWER_WALL_ID).size
         : { widthMeters: 1, heightMeters: 3, depthMeters: 1 };
-    const freeform = pieceDef?.kind === 'prop' && heldModifiers.current.alt;
+    // Alt = fine placement for EVERYTHING armed (REQ-0650, extending the
+    // REQ-0596 prop override): 'free' props still land on the raw hit;
+    // grid/edge modules step 1 tile (edges tile-aligned) instead of their
+    // module pitch, so a building can stand 1–2 tiles from a road line.
+    const freeform = !!heldModifiers.current.alt;
     return resolveSnapTarget({
       ray: stage.pieceRay(sx, sy, rectRef.current),
       // The VISIBLE (cut-away) list, not the full world: placement obeys the
@@ -753,7 +757,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       return;
     }
     const def = GAME_BUILD.catalog.get(a.id);
-    const placement = { pieceId: def.id, x: t.placement.x, y: t.placement.y, z: t.placement.z, yawDegrees: t.placement.yawDegrees };
+    // placementFor carries the row's defaultEdit (REQ-0647: Doorway/Window
+    // walls land with their cut) — the SAME helper F2's place() uses.
+    const placement = GAME_BUILD.placed.placementFor(def, t.placement);
     if (GAME_BUILD.placed.validatePlacement(placement).length > 0) return;
     onCommit({ kind: 'piecePlaced', placement }, `placed ${def.label} @ ${at}`);
   };
@@ -1017,7 +1023,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const label = a && a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id).label : 'piece';
     setPendingPaint(true);
     setTimeout(() => {
-      commitBatch(valid.map((c) => ({ event: { kind: 'piecePlaced', placement: c } as WorldEvent, label: `painted ${label}` })));
+      // placementFor injects the row's defaultEdit (REQ-0647) so a drag-painted
+      // run of Window Walls lands with every pane cut, like a single click.
+      commitBatch(valid.map((c) => ({
+        event: { kind: 'piecePlaced', placement: GAME_BUILD.placed.placementFor(GAME_BUILD.catalog.get(c.pieceId), c) } as WorldEvent,
+        label: `painted ${label}`,
+      })));
     }, 0);
   };
   // Latest delete/clone closures, so the once-mounted key listener always calls the
@@ -1193,7 +1204,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (a.kind === 'prefab' && !prefabDef) return null;
     const previews = prefabDef
       ? GAME_BUILD.placed.stamp(prefabDef, { x: snap.placement.x, y: snap.placement.y, z: snap.placement.z }, yaw)
-      : [{ pieceId: a.id, x: snap.placement.x, y: snap.placement.y, z: snap.placement.z, yawDegrees: yaw }];
+      // placementFor previews the row's defaultEdit (REQ-0647) — a Doorway
+      // Wall ghost shows its cut before it lands, same as F2's ghost.
+      : [GAME_BUILD.placed.placementFor(GAME_BUILD.catalog.get(a.id), { x: snap.placement.x, y: snap.placement.y, z: snap.placement.z, yawDegrees: yaw })];
     const blocked = a.kind === 'piece' && GAME_BUILD.placed.validatePlacement(previews[0] as any).length > 0;
     const color = blocked ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
     const supportPieces = [...displayPieces, ...previews.map((p, i) => ({ id: `isoGhost${i}`, ...p }))];
@@ -1317,6 +1330,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   ), [state.world.landforms, state.world.props, skinIds, state.player.perception]);
   const armedPropCanFreeform = armed?.kind === 'piece' && GAME_BUILD.catalog.get(armed.id).kind === 'prop';
   const selectedPropsCanFreeform = useMemo(() => selectionIsOnlyProps(selectedIds, pieces), [selectedIds, pieces]);
+  // REQ-0647: each shaft's car parked at its bottom stop (no ride loop here).
+  const restElevatorCarMeshes = useMemo(() => GAME_BUILD.elevators.shafts(visiblePieces).map((shaft) => (
+    <VisualShapeMesh
+      key={`${shaft.key}.car`}
+      shape={elevatorCarVisualShape(GAME_BUILD.elevators.carBox(shaft, shaft.stops[0]), `${shaft.key}.car`)}
+    />
+  )), [visiblePieces]);
 
   return (
     <Box
@@ -1334,6 +1354,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         {/* the standing city — the SAME renderer F2 uses (instanced buckets);
             selection highlighted, floors above the active level HIDDEN (cut-away) */}
         <PlacedPieceMeshes pieces={visiblePieces} markedIds={selectedIds} targetId={null} occludedIds={noIds} />
+        {/* REQ-0647: elevator cars at their REST stop — the iso pane has no
+            ride loop, so it shows each shaft's car parked at the bottom storey
+            (same carBox source the play route animates). */}
+        {restElevatorCarMeshes}
         {ghostMeshes}
         {moveGhostMeshes}
         {paintGhostMeshes}

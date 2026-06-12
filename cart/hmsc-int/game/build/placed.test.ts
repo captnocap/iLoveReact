@@ -62,15 +62,41 @@ test('a solid wall is one solid band; a doorway splits it so a body fits through
   const solid = placedPieceColliders([placed('wall.concrete.common', 0, 0)]);
   assertEqual(solid.rects.length, 1, 'the uncut wall is one band');
 
-  const door = placedPieceColliders([placed('wall.concrete.common', 0, 0, { edit: 'door' })]);
+  const door = placedPieceColliders([placed('wall.concrete.common', 0, 0, { edit: 'door', doorOpen: true })]);
   assertEqual(door.rects.length, 2, 'the doorway leaves the two jambs');
   const [left, right] = [...door.rects].sort((a, b) => a.minX - b.minX);
   const gap = right.minX - left.maxX;
   assertClose(gap, PLACED_TUNING.walkOpeningWidthMeters, 1e-9, 'the opening is the walk-portal width');
 });
 
+test('an interactable door starts closed and opens through pieceDoorSet', () => {
+  let state = fold([
+    { kind: 'piecePlaced', placement: { pieceId: 'wall.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0, edit: 'door' } },
+  ]);
+  const closed = placedPieceColliders(state.pieces);
+  assertEqual(closed.rects.length, 3, 'closed door = two jambs plus the shut panel');
+  const panel = closed.rects.find((r) => Math.abs((r.maxX - r.minX) - PLACED_TUNING.walkOpeningWidthMeters) < 1e-9);
+  assert(panel !== undefined, 'the closed panel fills the walk opening');
+
+  state = worldStream.apply(state, { kind: 'pieceDoorSet', id: state.pieces[0].id, open: true });
+  assertEqual(state.pieces[0].doorOpen, true, 'the stream stores the live open state on the piece');
+  const open = placedPieceColliders(state.pieces);
+  assertEqual(open.rects.length, 2, 'open door removes the shut panel and leaves the jambs');
+
+  state = worldStream.apply(state, { kind: 'pieceDoorSet', id: state.pieces[0].id, open: false });
+  assertEqual(state.pieces[0].doorOpen, false, 'the same event closes it again');
+});
+
+test('pieceDoorSet refuses non-interactive wall edits', () => {
+  let state = fold([
+    { kind: 'piecePlaced', placement: { pieceId: 'wall.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0, edit: 'window' } },
+  ]);
+  state = worldStream.apply(state, { kind: 'pieceDoorSet', id: state.pieces[0].id, open: true });
+  assertEqual(state.pieces[0].doorOpen, undefined, 'a window has no open/close state');
+});
+
 test('a garage door opens a vehicle-wide gap', () => {
-  const garage = placedPieceColliders([placed('wall.metal.industrial', 0, 0, { edit: 'garageDoor' })]);
+  const garage = placedPieceColliders([placed('wall.metal.industrial', 0, 0, { edit: 'garageDoor', doorOpen: true })]);
   const [left, right] = [...garage.rects].sort((a, b) => a.minX - b.minX);
   assertClose(right.minX - left.maxX, PLACED_TUNING.vehicleOpeningWidthMeters, 1e-9, 'a car fits');
 });
@@ -293,7 +319,7 @@ test('STAIRS-0607: rotated stairs register to their visible footprint and face t
   assertEqual(fields.length, 1, 'stairs register one walkable slope');
   assertEqual(fields[0].slot, 7, 'slots continue after world fields');
   assertClose(fields[0].cellSizeMeters, PLACED_TUNING.verticalLinkHeightfieldCellMeters, 1e-9, 'stairs use the vertical-link cell tuning');
-  assertEqual(fields[0].cols, 3, '1.2m stairs are three samples wide at 0.6m cells');
+  assertEqual(fields[0].cols, 6, '3m stairs are six samples wide at 0.6m cells');
   assertEqual(fields[0].rows, 6, '3m stair run is six samples deep at 0.6m cells');
   assertClose(fields[0].originX, stairs.x - catalogEntry(stairs.pieceId).size.widthMeters / 2, 1e-9, 'local width starts at the visible stair side');
   assertClose(fields[0].originZ, stairs.z - catalogEntry(stairs.pieceId).size.depthMeters / 2, 1e-9, 'local depth starts at the low approach edge');

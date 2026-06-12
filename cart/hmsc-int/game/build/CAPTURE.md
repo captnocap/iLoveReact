@@ -159,6 +159,68 @@ half-depth to the outer face. L-corners and T-junctions are covered in
 `placed.test.ts`: raw placed bounds log the 0.125m sliver, joined bands close
 the outer faces exactly, and standalone floor/wall placement stays unchanged.
 
+## REQ-0641 (2026-06-11): stairs, doors, and residential windows
+
+USER ASK: default stairs were "ugly as hell" and "like 1/3rd width"; add more
+models, an elevator method with a stop at every floor in one wall/floor module,
+interactable doors/doorways that open/close, and non-storefront windows. Fix:
+`stairs.wood.common` is now the full 3m module; the old 1.2m size survives only
+as explicit `stairs.wood.narrow`, with concrete and industrial stair catalog
+rows added. The wall edit table now marks door and garageDoor as toggle
+interactions; `PlacedBuildPiece.doorOpen` plus `pieceDoorSet` carries live
+open/closed state, and closed panels add collision only across the portal
+opening. The door/window/elevator METHODS first landed as prefabs here and
+were rejected (USER: "i kept saying dont put it in prefabs") — REQ-0647 below
+is the shape that shipped. P4 coverage: `build.test.ts` and `placed.test.ts`.
+
+## REQ-0643 (2026-06-11): editor stairs and compiled-game stairs match
+
+USER SCREENSHOTS: the editor showed the improved full-width multi-step stairs,
+but the game rendered chunky old block stairs. Cause: editor preview used
+`BUILD_UI.stairVisualSteps` while `compile/worldGeometry.ts` baked stairs with
+its own stale `STAIR_VISUAL_STEPS = 4`. Fix: stair visual decomposition count
+now lives in `PLACED_TUNING.stairVisualSteps`, and both `pieceMeshes.tsx` and
+the compiled geometry bake read that same placed-build tuning. P4 coverage:
+`compile/worldGeometry.test.ts` asserts the compiled stair step count, width,
+tread depth, and top height from the shared tuning and catalog.
+
+## REQ-0647 (2026-06-12): door/window walls are CATALOG ROWS; the elevator is a PIECE KIND
+
+USER VERDICT (after the REQ-0641/0646 prefab attempts): "i kept saying dont
+put it in prefabs but it keeps being put into prefabs"; the door wall "doesnt
+even align with the walls"; the placed elevator was "just a solid 1x* box that
+isnt an elevator at all." The prefab delivery (the one-piece method prefabs,
+`elevatorPrefabDefinition`, `prefabPlacementBasis`) is DELETED. What shipped:
+
+- **defaultEdit on BuildPieceDef** (catalog.ts): a wall row that IS a cutout —
+  `wall.concrete.doorway` / `openDoorway` / `wall.metal.garageDoor` /
+  `wall.stucco.window` / `doubleWindow` / `wall.plywood.brokenWindow` — names
+  its WallEdit on the row. `placementFor` (placed.ts) stamps it onto every
+  placement, so F2 place, iso click, and iso drag-paint all cut the same
+  opening. The rows are NORMAL walls: kind `wall`, snap `edge`, same join and
+  depth-span math — alignment comes free because they ARE walls.
+- **kind `elevator`** (pieces.ts) joins ramp/stairs in the vertical-link
+  family: `elevator.metal.common` is ONE 3m storey module; STACKING pieces
+  grows the shaft and every storey IS a stop (`elevators.ts` derives shafts +
+  stop arithmetic). Static colliders are an OPEN-FRONT frame (back + side
+  walls only, placed.ts); the visual is posts + thin walls + a front header
+  (pieceMeshes.tsx + worldGeometry.ts — never a solid box). The CAR is a live
+  CollisionRect the play route mutates in place per frame — the host step
+  re-reads rects every frame, so a rising car carries the standing player
+  (pinned in physics.test.ts). E rides up stop-by-stop (wrapping down from the
+  top) or calls the car to a landing; car height is route-local transient
+  state, never a stream commit. The compile bake ships the car parked at the
+  bottom stop (worldColliders.ts + worldGeometry.ts); nav stamps the shaft
+  interior as a link and holds interactable doors OPEN for pathing
+  (navGrid.ts — a doorway is a nav portal even when its panel is shut).
+
+P4 coverage: `build.test.ts` (wall-type rows, placementFor, kind contract),
+`elevators.test.ts` (shaft stacking/splitting, open-front colliders, car rect
+ride, stop loop, rest cars), `physics.test.ts` REQ-0647 (the ride carries the
+player), `navGrid.test.ts` (doorway stays pathable). The PLAYFOLD viewport
+guard also went green again: the interact E now reads through
+`embodied.actionDown` instead of a route-local key state.
+
 ## REQ-0472 (2026-06-10): supported wall joins stop at the real intersection
 
 USER DRAWING: after wall thickness started sitting fully on a one-sided floor,

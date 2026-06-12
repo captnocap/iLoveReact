@@ -116,6 +116,7 @@ export type {
   BuildSnapMode,
   BuildTheme,
   DecomposedPiece,
+  ElevatorShaft,
   PieceBounds,
   PieceHit,
   PieceRay,

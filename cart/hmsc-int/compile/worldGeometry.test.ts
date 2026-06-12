@@ -3,7 +3,7 @@
 // React preview renderer.
 
 import { assert, assertClose, assertEqual, finish, test, withHost } from '../game/_testkit';
-import type { PlacedBuildPiece } from '@game';
+import { GAME_BUILD, type PlacedBuildPiece } from '@game';
 import { emptyDecalDoc } from '../game/textures/decal';
 import { BUILTIN_DECALS } from '../game/textures/builtinDecals';
 import { packDecalDoc } from './decalPack';
@@ -76,6 +76,27 @@ test('compiled floors preserve top, bottom, and edge face skins', () => {
   assertColor(row(built.instances, 0), [17 / 255, 17 / 255, 17 / 255], 'edge/core slab');
   assertColor(row(built.instances, 1), [238 / 255, 238 / 255, 238 / 255], 'top slab');
   assertColor(row(built.instances, 2), [51 / 255, 51 / 255, 51 / 255], 'bottom slab');
+});
+
+test('compiled stairs use the same full-width step decomposition as build preview', () => {
+  const piece: PlacedBuildPiece = {
+    id: 's1',
+    pieceId: 'stairs.wood.common',
+    x: 0,
+    y: 0,
+    z: 0,
+    yawDegrees: 0,
+  };
+
+  const built = buildWorldInstances({} as any, [piece], []);
+  const def = GAME_BUILD.catalog.get(piece.pieceId);
+  const steps = GAME_BUILD.placed.tuning.stairVisualSteps;
+  assertEqual(built.pieces, steps, 'compiled stairs emit the shared visual step count');
+  assertEqual(built.total, steps, 'stairs do not bake through a stale alternate mesh');
+  assertEqual(row(built.instances, 0)[12], INSTANCE_SHAPE_BOX, 'stair treads are box instances');
+  assertClose(row(built.instances, 0)[6], def.size.widthMeters, 1e-6, 'compiled stairs keep the catalog full width');
+  assertClose(row(built.instances, 0)[8], def.size.depthMeters / steps, 1e-6, 'compiled stair tread depth matches shared step count');
+  assertClose(row(built.instances, steps - 1)[7], def.size.heightMeters, 1e-6, 'the top compiled stair reaches the next floor');
 });
 
 test('decal materials ship their packed RECIPE in the MATERIALS lump tail', () => {

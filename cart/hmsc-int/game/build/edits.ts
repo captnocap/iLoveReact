@@ -28,6 +28,17 @@ export type WallEdit =
 // sightline, not a corridor).
 export type EditPortalKind = 'none' | 'walk' | 'vehicle';
 
+export type DoorInteractionDefinition = {
+  action: 'toggle';
+  defaultState: 'closed';
+  states: readonly ['closed', 'open'];
+  reachMeters: number;
+  openSeconds: number;
+  blocksMovementWhenClosed: boolean;
+  blocksSightWhenClosed: boolean;
+  blocksSoundWhenClosed: boolean;
+};
+
 export type WallEditDefinition = {
   edit: WallEdit;
   label: string;
@@ -40,6 +51,25 @@ export type WallEditDefinition = {
   sightline: boolean;
   // Can a body pass through the opening (walking or vaulting)?
   traversable: boolean;
+  // The live interaction contract. Door-like cutouts expose an E/F toggle;
+  // open archways/windows do not.
+  interaction: DoorInteractionDefinition | null;
+};
+
+const WALK_DOOR_INTERACTION: DoorInteractionDefinition = {
+  action: 'toggle',
+  defaultState: 'closed',
+  states: ['closed', 'open'],
+  reachMeters: 2.2,
+  openSeconds: 0.35,
+  blocksMovementWhenClosed: true,
+  blocksSightWhenClosed: true,
+  blocksSoundWhenClosed: true,
+};
+
+const GARAGE_DOOR_INTERACTION: DoorInteractionDefinition = {
+  ...WALK_DOOR_INTERACTION,
+  openSeconds: 0.65,
 };
 
 export const WALL_EDIT_DEFINITIONS: Record<WallEdit, WallEditDefinition> = {
@@ -51,15 +81,17 @@ export const WALL_EDIT_DEFINITIONS: Record<WallEdit, WallEditDefinition> = {
     portalKind: 'none',
     sightline: false,
     traversable: false,
+    interaction: null,
   },
   door: {
     edit: 'door',
     label: 'Door',
-    meaning: 'A doorway knows it connects rooms: a body-sized portal.',
+    meaning: 'A doorway knows it connects rooms: a body-sized portal with a toggleable door panel.',
     overrides: { portal: true },
     portalKind: 'walk',
     sightline: true, // the opening exists; the door system's closed state re-seals it
     traversable: true,
+    interaction: WALK_DOOR_INTERACTION,
   },
   window: {
     edit: 'window',
@@ -69,6 +101,7 @@ export const WALL_EDIT_DEFINITIONS: Record<WallEdit, WallEditDefinition> = {
     portalKind: 'none',
     sightline: true,
     traversable: false,
+    interaction: null,
   },
   doubleWindow: {
     edit: 'doubleWindow',
@@ -78,6 +111,7 @@ export const WALL_EDIT_DEFINITIONS: Record<WallEdit, WallEditDefinition> = {
     portalKind: 'none',
     sightline: true,
     traversable: false,
+    interaction: null,
   },
   brokenWindow: {
     edit: 'brokenWindow',
@@ -89,15 +123,17 @@ export const WALL_EDIT_DEFINITIONS: Record<WallEdit, WallEditDefinition> = {
     portalKind: 'none',
     sightline: true,
     traversable: true,
+    interaction: null,
   },
   garageDoor: {
     edit: 'garageDoor',
     label: 'Garage Door',
-    meaning: 'A vehicle-sized portal — the roller door a car drives through.',
+    meaning: 'A vehicle-sized portal — the toggleable roller door a car drives through.',
     overrides: { portal: true },
     portalKind: 'vehicle',
     sightline: true,
     traversable: true,
+    interaction: GARAGE_DOOR_INTERACTION,
   },
   arch: {
     edit: 'arch',
@@ -107,6 +143,7 @@ export const WALL_EDIT_DEFINITIONS: Record<WallEdit, WallEditDefinition> = {
     portalKind: 'walk',
     sightline: true,
     traversable: true,
+    interaction: null,
   },
   halfHeight: {
     edit: 'halfHeight',
@@ -116,6 +153,7 @@ export const WALL_EDIT_DEFINITIONS: Record<WallEdit, WallEditDefinition> = {
     portalKind: 'none',
     sightline: true,
     traversable: true, // by vault — the overrides carry vaultable
+    interaction: null,
   },
 };
 

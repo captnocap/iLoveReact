@@ -790,8 +790,9 @@ The V24 ruling's data layer ("Author by semantic piece. Bake by gameplay
 contract. Skin by catalog" — evidence docs/game/BUILDING-GRAMMAR.md), written
 fresh. Five families behind one door (`game/build/index.ts`, exported as
 `GAME_BUILD` through `game/index.ts` — the 21st door, STRUCTURE list updated
-same commit): `pieces.ts` (the 13-kind taxonomy wall/floor/ramp/stairs/roof/
-pillar/corner/arch/fence/railing/trim/sign/prop, each with a `BakePromise`
+same commit): `pieces.ts` (the 14-kind taxonomy wall/floor/ramp/stairs/
+elevator (REQ-0647)/roof/pillar/corner/arch/fence/railing/trim/sign/prop,
+each with a `BakePromise`
 contract DECLARING what a placed piece promises the bake — emission lands
 with compile/), `edits.ts` (the WallEdit vocabulary with per-edit MEANING:
 a doorway is a walk portal, a window is sightline-not-traversal, halfHeight
@@ -829,6 +830,31 @@ the full BakePromise later), rotation-aware prefab stamping
 capture (`prefabFromPieces`/`mintPrefabId`), and the strict authoring
 boundary (`validatePlacement` — the stream materializer stays tolerant).
 Numbers in `PLACED_TUNING` (P2). 21 P4 meaning-tests green (`placed.test.ts`).
+
+**Wall types that are a cutout + the ELEVATOR (REQ-0647, 2026-06-12):** the
+door/doorway/garage/window methods are CATALOG WALL ROWS, never prefabs
+(USER ruled after two prefab deliveries: "i kept saying dont put it in
+prefabs"; "it should be a wall type"). `BuildPieceDef.defaultEdit` names the
+row's WallEdit (`wall.concrete.doorway`/`openDoorway`, `wall.metal.garageDoor`,
+`wall.stucco.window`/`doubleWindow`, `wall.plywood.brokenWindow`) and
+`placementFor` stamps it onto every placement — F2 crosshair, iso click, iso
+drag-paint cut the same opening; alignment comes free because the rows ARE
+walls (kind `wall`, snap `edge`, same join/depth-span math). Door/garageDoor
+edits are interactable (REQ-0641: `interaction` on the edit, `doorOpen` live
+state via `pieceDoorSet`, E toggles in test mode; closed panels collide only
+across the portal opening — and navGrid derives its blockers with doors held
+OPEN, a doorway is a nav portal even shut). The ELEVATOR is kind `elevator`
+in the vertical-link family: `elevator.metal.common` = ONE 3m storey module;
+stacked storeys derive a SHAFT with a stop per storey (`elevators.ts` —
+shafts/carRect/carBox/nextStop/nearestStop/restCarRects). Static colliders
+are an open-front frame (back + sides, `placed.ts`); the CAR is a live
+`CollisionRect` PlayRoute mutates in place per frame (the host step re-reads
+rects every frame, so the rising car carries the standing player — pinned in
+`physics.test.ts`); E rides up stop-by-stop (wrapping down from the top) or
+calls the car to a landing; car height is route-local transient state. The
+compile bake ships the frame + the car parked at the bottom stop
+(`worldGeometry.ts`/`worldColliders.ts`); the iso pane renders rest cars.
+P4: `elevators.test.ts` (6) + build/placed/navGrid/physics additions.
 
 **Buildings own their history (`game/world/buildings.ts`, req_0512→req_0513,
 2026-06-10):** the USER'S PROPOSAL made law — "give buildings their own

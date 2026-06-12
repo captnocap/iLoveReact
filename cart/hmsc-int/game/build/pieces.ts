@@ -26,6 +26,7 @@ export type BuildPieceKind =
   | 'floor'
   | 'ramp'
   | 'stairs'
+  | 'elevator'
   | 'roof'
   | 'pillar'
   | 'corner'
@@ -168,6 +169,24 @@ export const BUILD_KIND_CONTRACTS: Record<BuildPieceKind, BuildKindContract> = {
     kind: 'stairs',
     label: 'Stairs',
     meaning: 'Stairs connect floors for bodies only — steps, never a vehicle surface.',
+    edits: 'none',
+    snapDefault: 'grid',
+    promise: {
+      renderGeometry: true,
+      collisionBoxes: true,
+      coverFaces: true,
+      soundOcclusion: false,
+      roomBoundary: false,
+      navPortal: false,
+      navBlocker: false,
+      verticalLink: true,
+      destructibleSections: true,
+    },
+  },
+  elevator: {
+    kind: 'elevator',
+    label: 'Elevator',
+    meaning: 'An elevator is a vertical link that MOVES: a one-module shaft whose car serves a stop at every stacked storey.',
     edits: 'none',
     snapDefault: 'grid',
     promise: {
