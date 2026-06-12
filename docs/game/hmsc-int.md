@@ -887,8 +887,28 @@ sample-occupancy-compares the editor shapes vs the baked instance rows at a
 plus the player's invariant (a collider-passable point must never be opaquely
 rendered). Hand-mirrored copies deleted: `MATERIAL_COLOR`, `MATERIAL_ALPHA`,
 the slab constants, `pushStairs`/`pushElevatorStorey`/`pushSkinnedWallOrPlate`.
-Compiled door open/close (the Minecraft two-state machine in the loader) is
-the next slice — panels currently bake closed and static.
+**DOORS-0611 — the compiled two-state door (same req):** the leaf is LIVE in
+the shipped game, the elevator pattern: `compile/worldDoors.ts` derives one
+record per interactable wall cutout (door/garageDoor — the panel box comes
+from the SAME door-marked `pieceVisualShapes` shape, forced closed, so the
+live leaf is byte-for-byte the editor's panel; reach from the edit's
+interaction contract; `startOpen` carries authored `doorOpen`) into the DOORS
+lump (MAP_LUMP 19, `constructor.zig` decodeDoors). The static halves ship
+WITHOUT the panel: `worldGeometry` skips door-marked boxes and
+`worldColliders` bakes `placed.colliders(pieces, { liveDoorPanels: true })`
+(a new opt — the editor's live play keeps the default). `world_loader.zig`
+appends one live rect per door after the elevator car rects
+(door_rect_start/door_count), renders one live panel node (yawed box,
+`DOOR_PANEL_COLOR`), and stepInteract grew the 2a-doors branch: nearest leaf
+within ITS reach prompts "E — open/close the door/garage door"; the toggle
+flips the rect's blocksPlayer float in place and drops/returns the node —
+instant, /test's pieceDoorSet semantics. Parity suite now compares against
+the BOOT UNION (static rows + closed leaves from doorRecords). P4:
+`compile/worldDoors.test.ts` (derivation by tuning, no-leaf edits,
+startOpen, wire round-trip, the colliders drop exactly the panel band).
+Deferred by name: open/close travel animation (openSeconds rides the edit
+contract already), auto-sliding storefront glass (a new WallEdit table row
+with proximity interaction), door sounds.
 
 **Buildings own their history (`game/world/buildings.ts`, req_0512→req_0513,
 2026-06-10):** the USER'S PROPOSAL made law — "give buildings their own

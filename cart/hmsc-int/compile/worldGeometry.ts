@@ -1244,6 +1244,10 @@ function pushVisualShape(b: Build, piece: PlacedBuildPiece, baseMaterial: BuildM
     return 1;
   }
   const v = shape.box;
+  // DOORS-0611: the closed door/garage panel is LIVE state — it ships through
+  // the DOORS lump (compile/worldDoors.ts) as a toggleable rect+node, never a
+  // static row (a static panel could not open).
+  if (v.door === true) return 0;
   const skin = v.slot !== undefined ? piece.skin?.[v.slot] : undefined;
   let material = internMaterial(b, skin);
   const color = skin?.kind === 'material'

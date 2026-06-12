@@ -24,6 +24,7 @@ import { assert, assertEqual, finish, test } from '../game/_testkit';
 import { GAME_BUILD, type CollisionRect, type PlacedBuildPiece, type WallEdit } from '@game';
 import { pieceVisualShapes, type VisualShape } from '../editors/build/pieceShapes';
 import { buildWorldInstances, INSTANCE_SHAPE_BOX, INSTANCE_STRIDE, type MaterialAsset } from './worldGeometry';
+import { doorRecords } from './worldDoors';
 
 const DEG = Math.PI / 180;
 /** probe spacing — fine enough that the 1.2m cutout and 0.45m jambs each get
@@ -95,6 +96,27 @@ function bakedOpaqueBoxes(built: { instances: Float32Array; materialRefs: number
   return out;
 }
 
+/** What the player SEES AT BOOT in the compiled game: the static instance
+ *  rows PLUS the closed door leaves the DOORS lump ships as live nodes
+ *  (DOORS-0611 — panels are toggleable, so they never ride the static
+ *  buffer; parity is against the boot union). */
+function bakedBootBoxes(piece: PlacedBuildPiece): SolidBox[] {
+  const boxes = bakedOpaqueBoxes(buildWorldInstances({} as any, [piece], []));
+  for (const record of doorRecords([piece])) {
+    if (record.startOpen) continue;
+    boxes.push({
+      cx: record.x,
+      cy: record.baseY + record.panelHeightMeters / 2,
+      cz: record.z,
+      sx: record.panelWidthMeters,
+      sy: record.panelHeightMeters,
+      sz: record.panelDepthMeters,
+      yawDegrees: record.yawDegrees,
+    });
+  }
+  return boxes;
+}
+
 type ParityReport = { probes: number; mismatches: { x: number; y: number; z: number; editor: boolean; baked: boolean }[] };
 
 /** Walk a probe grid over the piece's catalog volume (inflated past slabs and
@@ -102,7 +124,7 @@ type ParityReport = { probes: number; mismatches: { x: number; y: number; z: num
 function compareOccupancy(piece: PlacedBuildPiece): ParityReport {
   const def = GAME_BUILD.catalog.get(piece.pieceId);
   const editor = editorOpaqueBoxes(piece);
-  const baked = bakedOpaqueBoxes(buildWorldInstances({} as any, [piece], []));
+  const baked = bakedBootBoxes(piece);
   const reachX = def.size.widthMeters / 2 + 0.3;
   const reachZ = def.size.depthMeters / 2 + 0.3;
   const report: ParityReport = { probes: 0, mismatches: [] };

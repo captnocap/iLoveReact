@@ -152,10 +152,11 @@ export function buildBakedColliders(
   floors: readonly ChunkFloor[] = [],
   fieldStartSlot = 0,
 ): BakedColliders {
-  const { rects, orientedRects } = GAME_BUILD.placed.colliders(pieces);
-  // Elevator cars are NOT here (REQ-0652): placed.colliders omits the car
-  // (live collision) and the ELEVATORS lump ships the shafts — the loader
-  // appends one LIVE car rect per shaft and rides it, exactly like /test.
+  // Elevator cars are NOT here (REQ-0652) and neither are door panels
+  // (DOORS-0611): both are LIVE collision — the ELEVATORS/DOORS lumps ship
+  // the records and the loader appends one live rect each (cars re-aim per
+  // frame; door rects toggle blocking on E), exactly like /test.
+  const { rects, orientedRects } = GAME_BUILD.placed.colliders(pieces, { liveDoorPanels: true });
   const ramps = GAME_BUILD.placed.ramps(pieces, fieldStartSlot);
   const flatFields: Heightfield[] = [];
   let slot = fieldStartSlot + ramps.length;

@@ -75,6 +75,10 @@ export type VisualBox = {
    *  piece.skin[slot] through the SAME decomposition to intern shader/decal
    *  materials; boxes with a fixed look (door panel, glass pane) carry none */
   slot?: 'front' | 'back' | 'sides';
+  /** DOORS-0611: this box IS the closed door/garage panel (the live leaf of
+   *  the two-state machine). The compile bake ships it through the DOORS lump
+   *  as a LIVE toggleable rect+node, never a static instance row. */
+  door?: true;
 };
 
 export type VisualRamp = {
@@ -309,7 +313,9 @@ export function pieceVisualShapes(
       const vehicle = GAME_BUILD.edits.wall[edit].portalKind === 'vehicle';
       const panelW = vehicle ? tuning.vehicleOpeningWidthMeters : tuning.walkOpeningWidthMeters;
       const panelH = Math.min(size.heightMeters, vehicle ? tuning.garageDoorPanelHeightMeters : tuning.walkDoorPanelHeightMeters);
-      shapes.push(box('door', 0, depthCenter, piece.y, panelW, panelH, depthSize + 0.06, { color: DOOR_PANEL_COLOR }));
+      const panel = box('door', 0, depthCenter, piece.y, panelW, panelH, depthSize + 0.06, { color: DOOR_PANEL_COLOR });
+      if (panel.kind === 'box') panel.box.door = true;
+      shapes.push(panel);
     }
     return shapes;
   }

@@ -25,6 +25,7 @@ import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, pain
 import { encodeInteractables } from './compile/worldInteractables';
 import { encodeDynamicProps } from './compile/worldDynamicProps';
 import { elevatorShaftRecords, encodeElevators } from './compile/worldElevators';
+import { doorRecords, encodeDoors } from './compile/worldDoors';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './compile/playerModel';
 import type { ChunkFloor } from './chunkFloor';
@@ -295,6 +296,9 @@ export function createHmscMapfile(
     // Elevator shafts (REQ-0652) — the loader appends one LIVE car rect per
     // shaft and rides it: E to ride/call, /test parity (compile/worldElevators.ts).
     { type: MAP_LUMP.ELEVATORS, encoding: 'raw', data: encodeElevators(elevatorShaftRecords(liftedPieces)) },
+    // Door panels (DOORS-0611) — the loader appends one LIVE toggleable rect +
+    // panel node per door: E opens/closes, /test parity (compile/worldDoors.ts).
+    { type: MAP_LUMP.DOORS, encoding: 'raw', data: encodeDoors(doorRecords(liftedPieces)) },
   ];
   if (playerModel) {
     // The compiled player figure from @game/figure. Runtime movement changes

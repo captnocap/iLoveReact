@@ -97,6 +97,13 @@ export const MAP_LUMP = {
   // frames still render/collide through INSTANCES + COLLIDERS).
   // Layout: cart/hmsc-int/compile/worldElevators.ts encodeElevators.
   ELEVATORS: 18,
+  // Door panels (DOORS-0611, req_0654): per interactable wall cutout
+  // (door/garageDoor) the closed panel's box + reach + flags. The loader
+  // appends one LIVE rect per door and renders one live panel node — E
+  // toggles the two-state machine (closed blocks body+eye, open is clear),
+  // /test's door. Absent → no leaves (the wall jambs still render/collide).
+  // Layout: cart/hmsc-int/compile/worldDoors.ts encodeDoors.
+  DOORS: 19,
 } as const;
 
 export type LumpInput = {

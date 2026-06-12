@@ -137,6 +137,21 @@ const ELEVATOR_CAR_RESTITUTION: f32 = 0.02;
 // the editor's BUILD_UI.elevatorCarColor look
 const ELEVATOR_CAR_COLOR = [3]f32{ 0.68, 0.71, 0.75 };
 
+// ── doors (DOORS-0611, req_0654) — /test's two-state door, native: the closed
+// panel is a LIVE rect in the physics buffer + a live render node; E within
+// the record's reach toggles open/closed (closed blocks body AND eye, open is
+// genuinely clear). Per-door reach travels in the DOORS lump (edits.ts is the
+// source); the leaf's look mirrors pieceShapes' DOOR_PANEL_COLOR (#0c1018).
+const DOOR_PANEL_COLOR = [3]f32{ 0.047, 0.063, 0.094 };
+const DOOR_PANEL_FRICTION: f32 = 0.85;
+const DOOR_PANEL_RESTITUTION: f32 = 0.02;
+/// vertical window around the door base the prompt accepts (player on the
+/// same storey, mirrors the interactables Y window)
+const DOOR_Y_WINDOW_METERS: f32 = 2.5;
+/// an OPEN door's node drops here — out of every sightline (no node-hide
+/// flag in the kid list; the rect stops blocking via its blocksPlayer float)
+const DOOR_OPEN_HIDE_DROP_METERS: f32 = 4000.0;
+
 /// The next stop the car serves from car_y: closest stop ABOVE, wrapping to
 /// the bottom from the top (game/build/elevators.ts nextElevatorStop parity).
 fn nextElevatorStop(stops: []const f32, car_y: f32) ?f32 {
@@ -256,6 +271,12 @@ const PhysicsColliders = struct {
     /// frame. 0/0 on maps without elevators (and on the camera set).
     car_rect_start: usize = 0,
     car_count: usize = 0,
+    /// LIVE door panel rects (DOORS-0611): `door_count` rects starting at
+    /// rect index `door_rect_start`, one per DOORS-lump record in order —
+    /// the E toggle flips their blocksPlayer float in place. 0/0 on maps
+    /// without doors (and on the camera set).
+    door_rect_start: usize = 0,
+    door_count: usize = 0,
 
     pub fn deinit(self: PhysicsColliders, allocator: std.mem.Allocator) void {
         allocator.free(self.values);
@@ -287,6 +308,13 @@ const PropBody = struct {
 const ElevatorCar = struct {
     car_y: f32,
     target_y: f32,
+};
+
+/// One door's live two-state machine (DOORS-0611) — parallel to the
+/// DOORS-lump records (first door_count of them) and to the live door rects.
+/// State is transient like car height: doors boot at their authored state.
+const DoorState = struct {
+    open: bool,
 };
 
 fn clamp(v: f32, lo: f32, hi: f32) f32 {
@@ -1000,6 +1028,37 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
             }
         }
 
+        // LIVE door panel rects (DOORS-0611): one per DOORS-lump record,
+        // appended after the cars so the E toggle can flip blocksPlayer in
+        // place. AABB of the yawed panel (quarter-turn walls — exact).
+        var door_rect_start: usize = 0;
+        var door_count: usize = 0;
+        if (scene.doors) |doors| {
+            door_rect_start = rect_count;
+            for (doors.records) |door| {
+                if (rect_count >= game_physics.MAX_RECTS) {
+                    clipped_rows += doors.records.len - door_count;
+                    break;
+                }
+                const rad = door.yaw_degrees * std.math.pi / 180.0;
+                const half_x = @abs(@cos(rad)) * door.panel_w / 2 + @abs(@sin(rad)) * door.panel_d / 2;
+                const half_z = @abs(@sin(rad)) * door.panel_w / 2 + @abs(@cos(rad)) * door.panel_d / 2;
+                try rects.appendSlice(allocator, &[_]f32{
+                    door.x - half_x, // minX
+                    door.z - half_z, // minZ
+                    door.x + half_x, // maxX
+                    door.z + half_z, // maxZ
+                    door.base_y + door.panel_h, // top
+                    if (door.start_open) 0 else 1, // blocksPlayer — the toggle flips this
+                    DOOR_PANEL_FRICTION,
+                    DOOR_PANEL_RESTITUTION,
+                    door.base_y, // floor (banded with the wall's storey)
+                });
+                rect_count += 1;
+                door_count += 1;
+            }
+        }
+
         // We DON'T derive any colliders from the render instances here — exactly
         // like /test, the pieces collide ONLY through the baked colliders above
         // and the painted ground through the heightfields. This matters: a piece
@@ -1027,6 +1086,8 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
             .entity_capacity = entity_capacity,
             .car_rect_start = car_rect_start,
             .car_count = car_count,
+            .door_rect_start = door_rect_start,
+            .door_count = door_count,
         };
     }
 
@@ -1730,6 +1791,12 @@ pub const Runtime = struct {
     cars: []ElevatorCar = &.{},
     /// First kid index of the elevator car nodes (one box per car).
     car_first_child: usize = 0,
+    /// Live doors (DOORS-0611): parallel to the first
+    /// physics_colliders.door_count DOORS-lump records; the E toggle flips
+    /// state, rect blocking, and the panel node together.
+    doors_state: []DoorState = &.{},
+    /// First kid index of the door panel nodes (one box per door).
+    door_first_child: usize = 0,
     last_ns: i64 = 0,
     frame: u32 = 0,
     // Content streaming (engaged when the world outgrows the detail radius):
@@ -1912,6 +1979,16 @@ pub const Runtime = struct {
             log.print("[loader] elevator layer: {d} live car(s) across {d} shaft(s)\n", .{ self.cars.len, el.shafts.len });
         } else if (self.scene.elevators) |el| {
             if (el.shafts.len > 0) log.print("[loader] elevator layer: {d} shaft(s) but no live cars (collider cap / no baked colliders)\n", .{el.shafts.len});
+        }
+        // Doors (DOORS-0611): one live two-state machine per door that got a
+        // rect, booting at its authored state. The E toggle owns the rest.
+        if (self.physics_colliders.door_count > 0) {
+            self.doors_state = try self.allocator.alloc(DoorState, self.physics_colliders.door_count);
+            const doors = self.scene.doors.?;
+            for (self.doors_state, 0..) |*door, i| door.* = .{ .open = doors.records[i].start_open };
+            log.print("[loader] door layer: {d} live door(s)\n", .{self.doors_state.len});
+        } else if (self.scene.doors) |doors| {
+            if (doors.records.len > 0) log.print("[loader] door layer: {d} door(s) but no live rects (collider cap / no baked colliders)\n", .{doors.records.len});
         }
         // The camera's own collider set: the FULL baked authored rects/oriented,
         // unclamped, packed in cameraOcclusionStepColliders wire order. Built once
@@ -2202,6 +2279,33 @@ pub const Runtime = struct {
                     .scene3d_color_r = ELEVATOR_CAR_COLOR[0],
                     .scene3d_color_g = ELEVATOR_CAR_COLOR[1],
                     .scene3d_color_b = ELEVATOR_CAR_COLOR[2],
+                });
+            }
+        }
+        // Door panels (DOORS-0611) render as LIVE nodes — one box per door,
+        // dropped out of sight while open (the jambs stay in the static
+        // instance buffer; only the leaf toggles).
+        self.door_first_child = self.kid_list.items.len;
+        if (self.doors_state.len > 0) {
+            const doors = self.scene.doors.?;
+            for (self.doors_state, 0..) |door, i| {
+                const record = doors.records[i];
+                const hide: f32 = if (door.open) DOOR_OPEN_HIDE_DROP_METERS else 0;
+                try self.kid_list.append(self.allocator, .{
+                    .scene3d_mesh = true,
+                    .scene3d_geom_key = "box",
+                    .scene3d_vertices = self.cube[0..],
+                    .scene3d_vert_count = 36,
+                    .scene3d_pos_x = record.x,
+                    .scene3d_pos_y = record.base_y + record.panel_h / 2 - hide,
+                    .scene3d_pos_z = record.z,
+                    .scene3d_rot_y = record.yaw_degrees,
+                    .scene3d_scale_x = record.panel_w,
+                    .scene3d_scale_y = record.panel_h,
+                    .scene3d_scale_z = record.panel_d,
+                    .scene3d_color_r = DOOR_PANEL_COLOR[0],
+                    .scene3d_color_g = DOOR_PANEL_COLOR[1],
+                    .scene3d_color_b = DOOR_PANEL_COLOR[2],
                 });
             }
         }
@@ -2712,6 +2816,22 @@ pub const Runtime = struct {
         }
     }
 
+    /// DOORS-0611 — flip one door's two-state machine: the live rect stops or
+    /// resumes blocking (blocksPlayer float, read by the step every frame)
+    /// and the panel node drops out of sight / returns. Instant, /test parity
+    /// (pieceDoorSet re-materializes the panel the same way).
+    fn toggleDoor(self: *Runtime, index: usize) void {
+        const doors = self.scene.doors orelse return;
+        const record = doors.records[index];
+        const open = !self.doors_state[index].open;
+        self.doors_state[index].open = open;
+        const at = self.physics_colliders.rectBase() + (self.physics_colliders.door_rect_start + index) * game_physics.RECT_FLOATS;
+        self.physics_colliders.values[at + 5] = if (open) 0 else 1; // blocksPlayer
+        const node = &self.kid_list.items[self.door_first_child + index];
+        const hide: f32 = if (open) DOOR_OPEN_HIDE_DROP_METERS else 0;
+        node.scene3d_pos_y = record.base_y + record.panel_h / 2 - hide;
+    }
+
     /// PROPUSE req_0624 — /test's interact frame, native: resolve the nearest
     /// seat/container in reach over the INTERACTABLES lump, run the prompt /
     /// E edge / search timer, pin the seat pose. Mirrors PlayRoute.tsx
@@ -2728,7 +2848,7 @@ pub const Runtime = struct {
         // (the ELEVATORS lump) — either alone keeps the frame alive (req_0652).
         const ia_opt = self.scene.interactables;
         const has_props = if (ia_opt) |ia| ia.instances.len > 0 else false;
-        if (!has_props and self.cars.len == 0) return;
+        if (!has_props and self.cars.len == 0 and self.doors_state.len == 0) return;
 
         // 1. advance / cancel / finish an active search (props only)
         if (st.search_active) {
@@ -2787,6 +2907,34 @@ pub const Runtime = struct {
             }
         }
 
+        // 2a-doors (DOORS-0611) — the nearest door leaf in ITS OWN reach wins
+        // the E when no prop claimed the prompt (/test's priority: things in
+        // reach beat the elevator call).
+        var door_target: ?usize = null;
+        if (self.player.posture == .none and !st.search_active and st.prompt_len == 0 and self.doors_state.len > 0) {
+            const doors = self.scene.doors.?;
+            var best_distance: f32 = std.math.floatMax(f32);
+            for (self.doors_state, 0..) |_, i| {
+                const record = doors.records[i];
+                if (@abs(record.base_y - self.player.y) > DOOR_Y_WINDOW_METERS) continue;
+                const dx = record.x - self.player.x;
+                const dz = record.z - self.player.z;
+                const distance = @sqrt(dx * dx + dz * dz);
+                if (distance > record.reach or distance > best_distance) continue;
+                best_distance = distance;
+                door_target = i;
+            }
+            if (door_target) |i| {
+                const record = doors.records[i];
+                const label: []const u8 = if (record.vehicle) "garage door" else "door";
+                if (self.doors_state[i].open) {
+                    st.setPrompt("E — close the {s}", .{label});
+                } else {
+                    st.setPrompt("E — open the {s}", .{label});
+                }
+            }
+        }
+
         // 2b. the elevator (req_0652) — only when no prop claimed the prompt
         // (/test's priority: doors/props in reach win the E first).
         var elevator_ride: ?struct { index: usize, to_y: f32 } = null;
@@ -2834,6 +2982,10 @@ pub const Runtime = struct {
         const pressed = down and !st.prev_e_down;
         st.prev_e_down = down;
         if (!pressed or st.search_active or self.player.posture != .none) return;
+        if (door_target) |i| {
+            self.toggleDoor(i);
+            return;
+        }
         if (elevator_ride) |ride| {
             self.cars[ride.index].target_y = ride.to_y;
             return;

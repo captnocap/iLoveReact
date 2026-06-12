@@ -23,6 +23,7 @@ pub const Error = gamefile.Error || error{
     BadInteractables,
     BadDynamicProps,
     BadElevators,
+    BadDoors,
 };
 
 const COLLIDERS_VERSION: u32 = 1;
@@ -31,6 +32,7 @@ const PHYSICS_CONFIG_FLOATS: usize = 13;
 const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
+const DOORS_VERSION: u32 = 1;
 /// One local render part: px,py,pz, rx,ry,rz, sx,sy,sz, r,g,b, shapeId —
 /// the INSTANCES row field order, anchor-relative and yaw-unfolded.
 pub const DYNAMIC_PART_FLOATS: usize = 13;
@@ -390,6 +392,29 @@ pub const Elevators = struct {
     }
 };
 
+/// One door panel (DOORS-0611) — wire-format twin of compile/worldDoors.ts
+/// DoorRecord. The loader owns the live two-state machine.
+pub const Door = struct {
+    x: f32,
+    base_y: f32,
+    z: f32,
+    yaw_degrees: f32,
+    panel_w: f32,
+    panel_h: f32,
+    panel_d: f32,
+    reach: f32,
+    vehicle: bool,
+    start_open: bool,
+};
+
+pub const Doors = struct {
+    records: []Door,
+
+    pub fn deinit(self: Doors, allocator: std.mem.Allocator) void {
+        allocator.free(self.records);
+    }
+};
+
 pub const Scene = struct {
     width: u32,
     height: u32,
@@ -439,6 +464,9 @@ pub const Scene = struct {
     /// Elevator shafts (req_0652) — the loader appends one LIVE car rect per
     /// shaft and rides it. null in pre-lump bakes (no cars).
     elevators: ?Elevators,
+    /// Door panels (DOORS-0611) — the loader appends one LIVE toggleable rect
+    /// + panel node per door. null in pre-lump bakes (no leaves).
+    doors: ?Doors,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
@@ -457,6 +485,7 @@ pub const Scene = struct {
         if (self.interactables) |ia| ia.deinit(allocator);
         if (self.dynamic_props) |dp| dp.deinit(allocator);
         if (self.elevators) |el| el.deinit(allocator);
+        if (self.doors) |d| d.deinit(allocator);
     }
 };
 
@@ -987,6 +1016,34 @@ fn decodeElevators(allocator: std.mem.Allocator, data: []const u8) Error!Elevato
     return .{ .shafts = try shafts.toOwnedSlice(allocator) };
 }
 
+/// Decode the DOORS lump (DOORS-0611) — wire-format twin of
+/// compile/worldDoors.ts encodeDoors.
+fn decodeDoors(allocator: std.mem.Allocator, data: []const u8) Error!Doors {
+    if (data.len < 8) return Error.BadDoors;
+    if (std.mem.readInt(u32, data[0..4], .little) != DOORS_VERSION) return Error.BadDoors;
+    const count = std.mem.readInt(u32, data[4..8], .little);
+    if (8 + @as(usize, count) * 36 > data.len) return Error.BadDoors;
+    const records = try allocator.alloc(Door, count);
+    errdefer allocator.free(records);
+    for (records, 0..) |*door, i| {
+        const at = 8 + i * 36;
+        const flags = std.mem.readInt(u32, data[at + 32 ..][0..4], .little);
+        door.* = .{
+            .x = readF32(data, at),
+            .base_y = readF32(data, at + 4),
+            .z = readF32(data, at + 8),
+            .yaw_degrees = readF32(data, at + 12),
+            .panel_w = readF32(data, at + 16),
+            .panel_h = readF32(data, at + 20),
+            .panel_d = readF32(data, at + 24),
+            .reach = readF32(data, at + 28),
+            .vehicle = (flags & 1) != 0,
+            .start_open = (flags & 2) != 0,
+        };
+    }
+    return .{ .records = records };
+}
+
 /// Max packed decal recipe size — a doc is a handful of node records (~1KB
 /// typical); a corrupt length can't ask for a huge dupe.
 const MAX_DECAL_DOC_BYTES: u32 = 1 << 20;
@@ -1204,6 +1261,13 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     else
         null;
     errdefer if (elevators) |el| el.deinit(allocator);
+    // Door panels (DOORS-0611) — optional like the other post-v1 lumps;
+    // absent means no leaves (the wall jambs stay static geometry).
+    const doors: ?Doors = if (mapfile.findLump(map_lumps, mapfile.LumpType.doors)) |lump|
+        try decodeDoors(allocator, lump.data)
+    else
+        null;
+    errdefer if (doors) |d| d.deinit(allocator);
 
     // Decal image payloads (DECALIMG-0610, req_0592): every manifest asset
     // tagged decal-image is read from the content store once, here — the
@@ -1245,5 +1309,6 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .interactables = interactables,
         .dynamic_props = dynamic_props,
         .elevators = elevators,
+        .doors = doors,
     };
 }

@@ -912,7 +912,16 @@ function pushRampSlabEdgeRects(
   );
 }
 
-export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): PlacedPieceColliders {
+export function placedPieceColliders(
+  pieces: readonly PlacedBuildPiece[],
+  opts?: {
+    /** DOORS-0611: the compiled loader owns door panels as LIVE rects (the
+     *  DOORS lump toggles them open/closed at play time) — the bake skips the
+     *  static closed-panel band so a door isn't doubly solid. The editor's
+     *  live play keeps the default (panels re-materialize with doorOpen). */
+    liveDoorPanels?: boolean;
+  },
+): PlacedPieceColliders {
   const rects: CollisionRect[] = [];
   const orientedRects: OrientedCollisionRect[] = [];
   // ramp plan footprints (quarter-turn exact; free-yaw ramps fall back to
@@ -941,7 +950,7 @@ export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): Place
     if (!placedPieceTags(piece).collision) continue;
     const quarter = quarterTurns(piece.yawDegrees);
     const depthSpan = placedPieceDepthSpan(piece, pieces);
-    const closedDoor = placedClosedDoorBand(piece, def);
+    const closedDoor = opts?.liveDoorPanels ? null : placedClosedDoorBand(piece, def);
     const bands = closedDoor ? [...placedPieceBands(piece, pieces), closedDoor] : placedPieceBands(piece, pieces);
     for (const band of bands) {
       const base = {

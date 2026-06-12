@@ -56,6 +56,11 @@ pub const LumpType = struct {
     /// car rect per shaft and rides it (E to ride/call, /test parity). See
     /// runtime/workspace/lumps.ts ELEVATORS + compile/worldElevators.ts.
     pub const elevators: u32 = 18;
+    /// Door panels (DOORS-0611, req_0654): the closed leaf's box + reach +
+    /// flags per interactable wall cutout. The loader appends one LIVE rect
+    /// per door and toggles it on E (/test's two-state door). See
+    /// runtime/workspace/lumps.ts DOORS + compile/worldDoors.ts.
+    pub const doors: u32 = 19;
 };
 
 pub const Lump = struct {
