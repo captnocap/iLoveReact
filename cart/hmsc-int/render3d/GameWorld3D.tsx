@@ -11,7 +11,7 @@ import { Road } from './Road';
 import { CulDeSac, Intersection } from './RoadJunctions';
 import { Prop } from './Prop';
 import { Landform } from './Landform';
-import { WaterBodyMesh } from './WaterBody';
+import { WaterBodies } from './WaterBody';
 import { nearestLandformCameraHit } from '../world/landforms';
 import { buildHmscSky } from './sky';
 
@@ -158,13 +158,11 @@ export const WorldStatics = memo(function WorldStatics(props: {
       {(world.landforms ?? []).map((landform) => (
         <Landform key={landform.id} landform={landform} />
       ))}
-      {/* Bodies of water (world/water): a translucent surface at each body's
-          level, drawn AFTER the bed so the terrain reads through it as depth.
-          Authored as factors (footprint + surfaceY); depth is the geometry
-          between this surface and the bed below, never a stored grid. */}
-      {(world.waterBodies ?? []).map((body) => (
-        <WaterBodyMesh key={body.id} body={body} />
-      ))}
+      {/* Bodies of water (world/water): translucent wavy-heightfield volumes at
+          each body's level, drawn AFTER the bed so the terrain reads through as
+          depth. WaterBodies owns the wave clock, so only the water ripples each
+          tick — the static world around it never re-renders. */}
+      <WaterBodies bodies={world.waterBodies ?? []} />
     </>
   );
 });
