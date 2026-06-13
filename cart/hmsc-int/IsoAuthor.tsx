@@ -336,6 +336,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const wholeBuildingRef = useRef(wholeBuilding);
   wholeBuildingRef.current = wholeBuilding;
   const [wallsVisible, setWallsVisible] = useRouteTwigState<boolean>(ISO_ROUTE, 'wallsVisible', true);
+  // Show the WHOLE building stack (req_0721/req_0722). The floor-level cut-away
+  // (storey ≥ the active level vanishes) is a "look into one floor" tool — for a
+  // city of multi-storey buildings it strips everything above the ground floor,
+  // so the map reads as empty of buildings. Default ON (see the whole city); the
+  // cut-away becomes opt-in for when you actually want to edit inside one floor.
+  const [showAllFloors, setShowAllFloors] = useRouteTwigState<boolean>(ISO_ROUTE, 'showAllFloors', true);
   // Shift/Alt held? Mouse events carry no modifier flags here — read the shared
   // contract tracker at click time to invert the select scope / go freeform.
   const heldModifiers = useHeldModifiers();
@@ -1393,12 +1399,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // solid ghost holds the building at its new spot), a pending delete's
     // pieces vanish this frame — both before the store batch lands.
     const visible = displayPieces.filter((p) =>
-      p.y - groundTopAt(p.x, p.z) < cut
+      (showAllFloors || p.y - groundTopAt(p.x, p.z) < cut)
       && (wallsVisible || !isWallPiece(p))
       && !pendingMove?.has(p.id)
       && !pendingDelete?.has(p.id));
     return visible.length === displayPieces.length ? displayPieces : visible;
-  }, [displayPieces, groundTopAt, level, pendingMove, pendingDelete, wallsVisible]);
+  }, [displayPieces, groundTopAt, level, pendingMove, pendingDelete, wallsVisible, showAllFloors]);
   const visiblePiecesRef = useRef(visiblePieces);
   visiblePiecesRef.current = visiblePieces;
 
@@ -1512,6 +1518,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
           <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{`F${level}`}</Text>
         </Box>
         <IsoBtn label="▲" title="Floor up a storey" onPress={() => { stage.raiseLevel(); redraw(); saveCamera(); }} />
+        <IsoBtn label="⌷" active={!showAllFloors} title={showAllFloors ? 'Showing ALL floors — click to cut away to the active floor (F)' : 'Cut-away ON (showing up to the active floor) — click to show ALL floors'} onPress={() => setShowAllFloors((v) => !v)} />
         <IsoBtn label={wholeBuilding ? '▦' : '▪'} title={wholeBuilding ? 'Select: whole building · Shift-click = one piece' : 'Select: one piece · Shift-click = whole building'} onPress={() => setWholeBuilding((v) => !v)} />
         <IsoBtn label="W" active={!wallsVisible} title={wallsVisible ? 'Hide walls in this iso view' : 'Show walls in this iso view'} onPress={() => setWallsVisible((v) => !v)} />
         {selectedIds.size > 0 ? (
