@@ -193,14 +193,31 @@ fn hSample(base: i32, ix: i32, iy: i32, cols: i32, rows: i32) -> f32 {
 
   // ── zone tint (verbatim from ZONE_VIEW_WGSL, amount scaled by opZone) ──────
   let zBase = hBase + 5 + hcols * hrows;
+  let zpalN = i32(D[zBase + 2]);
   if (opZone > 0.001) {
-    let zpal = i32(D[zBase + 2]);
-    let zCellBase = zBase + 3 + zpal * 3;
+    let zCellBase = zBase + 3 + zpalN * 3;
     let zkind = i32(D[zCellBase + cy * cols + cx]);
     if (zkind >= 0) {
       let zb = zBase + 3 + zkind * 3;
       let zc = vec3f(D[zb], D[zb + 1], D[zb + 2]);
       rgb = mix(rgb, zc, 0.5 * opZone);
+    }
+  }
+
+  // ── painted water (the terrain water brush): a clear blue where the water grid
+  // is wet (level > 0), so you SEE what you paint on the 2D map. Same encodeField
+  // layout as height; the section sits after zone. Always shown (it's the body
+  // of water, not a tint channel).
+  let zEnd = zBase + 3 + zpalN * 3 + i32(D[zBase]) * i32(D[zBase + 1]);
+  let wcols = i32(D[zEnd]);
+  let wrows = i32(D[zEnd + 1]);
+  if (wcols > 1 && wrows > 1) {
+    let wx = clamp(i32(in.uv.x * f32(wcols)), 0, wcols - 1);
+    let wy = clamp(i32(in.uv.y * f32(wrows)), 0, wrows - 1);
+    let level = D[zEnd + 5 + wy * wcols + wx];
+    if (level > 0.02) {
+      let deep = clamp(0.45 + level * 0.04, 0.45, 0.78);
+      rgb = mix(rgb, vec3f(0.18, 0.50, 0.66), deep);
     }
   }
 
