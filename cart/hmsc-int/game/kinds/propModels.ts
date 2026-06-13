@@ -22,8 +22,6 @@
 // material. An album cover, a poster, a business sign face — one thin box
 // each, image-skinnable end to end.
 
-import { propKindDefinition, type PropKind } from './props';
-
 export type Color = readonly [number, number, number];
 export type Rotation = readonly [number, number, number];
 export type PropPartShape = 'box' | 'cylinder8' | 'cylinder16' | 'sphere';
@@ -116,29 +114,3 @@ export const WHITE = hx('#eef0f2');
 export const GRASS_MID = hx('#3f7d33');
 export const GRASS_LIGHT = hx('#5a9a42');
 export const GRASS_DRY = hx('#8a9a4a');
-
-// The RECIPES god-file is fully dissolved — every prop now lives in its own file
-// under compile/propRecipes/, resolved by resolvePartsForKind. This stays empty
-// (kept only so the legacy propModelParts/hasPropModelRecipe accessors still
-// resolve to null) until those accessors are removed in the pure-kit pass.
-const RECIPES: Partial<Record<PropKind, () => PropPartSpec[]>> = {};
-
-// propKindDefinition typed against the registry — a recipe asking for a kind
-// that left the registry is a build error at the lookup site, not a silent
-// undefined. (Thin alias kept local so recipes read tight.)
-function propKindDefinitionStrict(kind: PropKind) {
-  return propKindDefinition(kind);
-}
-
-/** The data recipe for a kind, or null when the kind has a bespoke model
- *  (the pre-batch props keep their hand-built cases in both renderers). */
-export function propModelParts(kind: PropKind): PropPartSpec[] | null {
-  const recipe = RECIPES[kind];
-  return recipe ? recipe() : null;
-}
-
-/** Kinds whose model is data-driven (PROPBATCH) — the /test renderer maps
- *  these to the generic DataProp component. */
-export function hasPropModelRecipe(kind: PropKind): boolean {
-  return RECIPES[kind] !== undefined;
-}

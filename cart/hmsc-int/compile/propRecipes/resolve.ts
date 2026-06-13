@@ -12,7 +12,7 @@
 
 import type { WorldProp } from '../../design';
 import { propKindDefinition, type PropKind } from '../../game/kinds/props';
-import { propModelParts, type Color, type PropPartSpec } from '../../game/kinds/propModels';
+import { type Color, type PropPartSpec } from '../../game/kinds/propModels';
 import { ballBasketballParts } from './ballBasketball';
 import { ballBeachParts } from './ballBeach';
 import { ballSoccerParts } from './ballSoccer';
@@ -146,9 +146,8 @@ function propColor(kind: PropKind | string): Color {
 }
 
 /** Every prop's parts, in ONE place — by kind, so render, bake, AND the physics
- *  footprint all read the SAME geometry. Bespoke kinds resolve to their per-prop
- *  file; data-recipe kinds fall through to propModelParts; anything else gets a
- *  registry-derived box. */
+ *  footprint all read the SAME geometry. Each kind resolves to its own per-prop
+ *  file; anything without one gets a registry-derived placeholder box. */
 export function resolvePropParts(prop: WorldProp): PropPartSpec[] {
   return resolvePartsForKind(prop.kind);
 }
@@ -288,11 +287,8 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     case 'rockJagged': return rockJaggedParts();
     case 'rockShard': return rockShardParts();
     default: {
-      // data-recipe kinds (propModels.RECIPES) resolve here; the two paths agree
-      // by construction since everyone calls this one function.
-      const recipe = propModelParts(kind);
-      if (recipe) return recipe;
-      // registry-derived placeholder for any kind without a recipe case.
+      // Any kind without its own recipe file gets a registry-derived placeholder
+      // box (sized from its footprint/height). Every real prop has a case above.
       const fallback: readonly [number, number, number] = [def.footprintRadiusMeters * 2, def.heightMeters, def.footprintRadiusMeters * 2];
       return [{ shape: 'box', local: [0, fallback[1] / 2, 0], size: fallback, color: propColor(kind) }];
     }
