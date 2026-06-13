@@ -82,7 +82,10 @@ import { rockJaggedParts } from './rockJagged';
 import { rockShardParts } from './rockShard';
 import { boulderParts } from './boulder';
 import { bushParts } from './bush';
-import { chairParts } from './chair';
+import { diningChairParts } from './diningChair';
+import { armchairParts } from './armchair';
+import { officeChairParts } from './officeChair';
+import { foldingChairParts } from './foldingChair';
 import { computerParts } from './computer';
 import { couchParts } from './couch';
 import { cupboardParts } from './cupboard';
@@ -202,11 +205,10 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     case 'ballBasketball': return ballBasketballParts(def.footprintRadiusMeters);
     case 'wallPainting': return wallPaintingParts();
     case 'ledLight': return ledLightParts();
-    case 'chair':
-    case 'chairRed':
-    case 'chairBlue':
-    case 'chairGreen':
-      return chairParts(kind);
+    case 'diningChair': return diningChairParts();
+    case 'armchair': return armchairParts();
+    case 'officeChair': return officeChairParts();
+    case 'foldingChair': return foldingChairParts();
     case 'couch': return couchParts(def.footprintRadiusMeters);
     case 'table': return tableParts(def.heightMeters, def.footprintRadiusMeters);
     case 'floorLamp': return floorLampParts(def.heightMeters);

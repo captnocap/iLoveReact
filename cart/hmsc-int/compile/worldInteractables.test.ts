@@ -21,8 +21,8 @@ const prop = (kind: WorldProp['kind'], x: number, y: number, z: number, yawDegre
 
 test('sink collects only seat/container kinds, one archetype per kind', () => {
   const sink = createInteractableSink();
-  sink.collect(prop('chair', 1, 0, 1));
-  sink.collect(prop('chair', 4, 0, 2, 90));
+  sink.collect(prop('diningChair', 1, 0, 1));
+  sink.collect(prop('diningChair', 4, 0, 2, 90));
   sink.collect(prop('dumpster', 8, 0, 3));
   sink.collect(prop('fireHydrant', 2, 0, 9)); // neither seat nor container
   assertEqual(sink.archetypes.length, 2, 'chair + dumpster archetypes, hydrant skipped');

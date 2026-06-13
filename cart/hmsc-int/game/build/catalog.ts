@@ -121,7 +121,7 @@ function propMaterial(kind: PropKind): BuildMaterial {
     case 'treePalm':
     case 'treeDead':
     case 'planter':
-    case 'chair':
+    case 'diningChair':
     case 'couch':
     case 'table':
     case 'bench':
@@ -168,10 +168,10 @@ function propCover(kind: PropKind): BuildGameplayTags['cover'] {
     case 'trashCan':
     case 'bench':
     case 'planter':
-    case 'chair':
-    case 'chairRed':
-    case 'chairBlue':
-    case 'chairGreen':
+    case 'diningChair':
+    case 'armchair':
+    case 'officeChair':
+    case 'foldingChair':
     case 'couch':
     case 'table':
     case 'bedSingle':

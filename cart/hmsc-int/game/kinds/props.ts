@@ -19,8 +19,13 @@
 // (Originally a fresh capture of cart/hmsc/world/propKinds.ts.)
 
 import type { TileKind } from './tiles';
+import {
+  IMPORTED_PROP_DEFINITIONS,
+  IMPORTED_PROP_KINDS,
+  type ImportedPropKind,
+} from './importedProps.generated';
 
-export type PropKind =
+export type BuiltinPropKind =
   | 'rock'
   | 'rockLarge'
   | 'rockSmall'
@@ -63,11 +68,8 @@ export type PropKind =
   // wall-mounted decor (anchor at the wall base, decor hangs at height)
   | 'wallPainting'
   | 'ledLight'
-  // furniture
-  | 'chair'
-  | 'chairRed'
-  | 'chairBlue'
-  | 'chairGreen'
+  // furniture (chairs are type-named: diningChair/armchair/officeChair/foldingChair
+  // below in the PROPFURNITURE union — color is a skin, never a kind id)
   | 'couch'
   | 'table'
   | 'floorLamp'
@@ -157,7 +159,120 @@ export type PropKind =
   | 'menuBoard'
   | 'sodaMachine'
   | 'openSign'
-  | 'greenCrossSign';
+  | 'greenCrossSign'
+  // ── PROPFURNITURE-0613 (req_0783): dozens of interior props — chairs, desks,
+  // shelves, couches, computers, poster sizes, tables, beds, appliances, storage,
+  // lights, decor. All data-recipe, all skinnable, exact scale + physics. ─────
+  // chairs
+  | 'stool'
+  | 'barStool'
+  | 'officeChair'
+  | 'diningChair'
+  | 'armchair'
+  | 'foldingChair'
+  | 'rockingChair'
+  | 'beanBag'
+  | 'highChair'
+  | 'directorsChair'
+  | 'patioChair'
+  // desks
+  | 'officeDesk'
+  | 'receptionDesk'
+  | 'standingDesk'
+  | 'cornerDesk'
+  | 'draftingTable'
+  | 'computerDesk'
+  | 'writingDesk'
+  | 'classroomDesk'
+  // shelves
+  | 'bookcase'
+  | 'wallShelf'
+  | 'wireShelf'
+  | 'floatingShelf'
+  | 'storageShelf'
+  | 'displayShelf'
+  | 'magazineRack'
+  | 'dvdShelf'
+  | 'wineRack'
+  | 'toolShelf'
+  // couches + lounge
+  | 'loveseat'
+  | 'sectional'
+  | 'sofa'
+  | 'chaiseLounge'
+  | 'ottoman'
+  | 'futon'
+  | 'daybed'
+  | 'recliner'
+  // tables
+  | 'coffeeTable'
+  | 'endTable'
+  | 'nightstand'
+  | 'diningTable'
+  | 'conferenceTable'
+  | 'picnicTable'
+  | 'sideTable'
+  | 'consoleTable'
+  | 'pokerTable'
+  | 'workbench'
+  // computers + tech
+  | 'laptop'
+  | 'monitor'
+  | 'keyboard'
+  | 'serverRack'
+  | 'printer'
+  | 'router'
+  | 'tv'
+  | 'gameConsole'
+  | 'phone'
+  | 'tablet'
+  // posters + wall surfaces
+  | 'posterSmall'
+  | 'posterLarge'
+  | 'posterWide'
+  | 'posterTall'
+  | 'noticeBoard'
+  | 'corkboard'
+  | 'whiteboard'
+  | 'chalkboard'
+  // beds
+  | 'bunkBed'
+  | 'hospitalBed'
+  | 'mattress'
+  // appliances + fixtures
+  | 'microwave'
+  | 'toaster'
+  | 'blender'
+  | 'washingMachine'
+  | 'dryer'
+  | 'toilet'
+  | 'bathtub'
+  | 'radiator'
+  | 'waterCooler'
+  // storage
+  | 'wardrobe'
+  | 'dresser'
+  | 'filingCabinet'
+  | 'toolCabinet'
+  | 'safe'
+  | 'cardboardBox'
+  | 'storageBin'
+  | 'coatRack'
+  // lights
+  | 'deskLamp'
+  | 'ceilingLamp'
+  | 'wallSconce'
+  | 'neonSign'
+  | 'exitSign'
+  // decor
+  | 'rug'
+  | 'pottedPlant'
+  | 'vase'
+  | 'clock'
+  | 'tvStand'
+  | 'curtain';
+
+export type PropKind = BuiltinPropKind | ImportedPropKind;
 
 // How a prop governs vehicle traffic. 'none' props are scenery; 'stopSign' is
 // always a hard stop; 'signal' free-runs a green→caution→stop cycle (the
@@ -177,6 +292,11 @@ export type PropKindDefinition = {
   // physics blocking rect AND the model's base width, so they never drift.
   // For a NON-solid prop it is not collision — it sizes the concealment query.
   footprintRadiusMeters: number;
+  // Optional rectangular footprint for props whose local X/Z extents are not
+  // square. When present, physics/placement use this yaw-aware rectangle and
+  // `footprintRadiusMeters` remains the coarse reach/concealment fallback.
+  footprintWidthMeters?: number;
+  footprintDepthMeters?: number;
   // Visual top in meters above the ground anchor — the prop's full height,
   // used by the model and as a scale reference. 1 tile = 1 meter.
   heightMeters: number;
@@ -321,6 +441,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Street Sign',
     solid: true,
     footprintRadiusMeters: 0.12,
+    footprintDepthMeters: 0.24,
     // Tall enough that the panel clears head height (visual head-top ~2.04m,
     // stylized-tall — see the R4 scale contract).
     heightMeters: 3.3,
@@ -332,6 +453,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Street Light',
     solid: true,
     footprintRadiusMeters: 0.16,
+    footprintDepthMeters: 0.4,
     // PROPSCALE-0611: real residential pole ~7m × 1.15
     heightMeters: 8.0,
     tileKind: 'wall',
@@ -383,6 +505,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Stop Sign',
     solid: true,
     footprintRadiusMeters: 0.12,
+    footprintDepthMeters: 0.24,
     // PROPSCALE-0611: real MUTCD urban total ~2.9m × 1.15
     heightMeters: 3.35,
     tileKind: 'wall',
@@ -393,6 +516,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Traffic Light',
     solid: true,
     footprintRadiusMeters: 0.18,
+    footprintDepthMeters: 0.46,
     // PROPSCALE-0611: real mast-arm head top ~5.5m × 1.15
     heightMeters: 6.3,
     tileKind: 'wall',
@@ -405,6 +529,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // it; it's the load-bearing low-tech comms prop (call contacts, no mobile).
     solid: true,
     footprintRadiusMeters: 0.3,
+    footprintDepthMeters: 0.34,
     // PROPSCALE-0611: real pedestal phone ~1.4m × 1.15
     heightMeters: 1.61,
     tileKind: 'wall',
@@ -426,6 +551,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Mailbox',
     solid: true,
     footprintRadiusMeters: 0.22,
+    footprintDepthMeters: 0.44,
     // PROPSCALE-0611: real USPS collection box ~1.27m × 1.15
     heightMeters: 1.46,
     tileKind: 'wall',
@@ -439,6 +565,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     solid: true,
     // A 2.5m segment; footprintRadius sizes the collision square.
     footprintRadiusMeters: 1.35,
+    footprintDepthMeters: 0.16,
     // PROPSCALE-0611: real chain-link ~1.2m × 1.15
     heightMeters: 1.4,
     tileKind: 'wall',
@@ -464,6 +591,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // thin AABB treatment in the world props layer.
     solid: true,
     footprintRadiusMeters: 1.0,
+    footprintDepthMeters: 0.6,
     // PROPSCALE-0611: real 42in tall Jersey 1.07m × 1.15
     heightMeters: 1.25,
     tileKind: 'wall',
@@ -488,6 +616,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // Long like a fence segment — yaw-aware thin AABB in the world props layer.
     solid: true,
     footprintRadiusMeters: 0.8,
+    footprintDepthMeters: 0.56,
     // PROPSCALE-0611: back top real ~0.85m × 1.15; the SEAT stays figure-locked
     heightMeters: 0.98,
     tileKind: 'wall',
@@ -658,6 +787,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Wall Painting',
     solid: true,
     footprintRadiusMeters: 0.08,
+    footprintDepthMeters: 0.16,
     heightMeters: 2.1,
     tileKind: 'wall',
     trafficControl: 'none',
@@ -669,6 +799,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'LED Light',
     solid: true,
     footprintRadiusMeters: 0.06,
+    footprintDepthMeters: 0.12,
     heightMeters: 2.4,
     tileKind: 'wall',
     trafficControl: 'none',
@@ -677,9 +808,9 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   },
 
   // ── furniture ──────────────────────────────────────────────────────────────
-  chair: {
-    kind: 'chair',
-    label: 'Chair',
+  diningChair: {
+    kind: 'diningChair',
+    label: 'Dining Chair',
     solid: true,
     footprintRadiusMeters: 0.3,
     heightMeters: 0.95,
@@ -694,6 +825,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // Long like a fence segment — yaw-aware thin AABB in the world props layer.
     solid: true,
     footprintRadiusMeters: 0.95,
+    footprintDepthMeters: 0.9,
     heightMeters: 0.85,
     tileKind: 'wall',
     trafficControl: 'none',
@@ -720,10 +852,10 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     trafficControl: 'none',
     coverClass: 'none',
   },
-  // Colored chair variants — same body as 'chair', painted by kind.
-  chairRed: {
-    kind: 'chairRed',
-    label: 'Red Chair',
+  // Chair TYPES (color is a skin, not a kind id — same frame, different default).
+  armchair: {
+    kind: 'armchair',
+    label: 'Armchair',
     solid: true,
     footprintRadiusMeters: 0.3,
     heightMeters: 0.95,
@@ -732,9 +864,9 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 1 },
     coverClass: 'soft',
   },
-  chairBlue: {
-    kind: 'chairBlue',
-    label: 'Blue Chair',
+  officeChair: {
+    kind: 'officeChair',
+    label: 'Office Chair',
     solid: true,
     footprintRadiusMeters: 0.3,
     heightMeters: 0.95,
@@ -743,9 +875,9 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 1 },
     coverClass: 'soft',
   },
-  chairGreen: {
-    kind: 'chairGreen',
-    label: 'Green Chair',
+  foldingChair: {
+    kind: 'foldingChair',
+    label: 'Folding Chair',
     solid: true,
     footprintRadiusMeters: 0.3,
     heightMeters: 0.95,
@@ -762,6 +894,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // 2.1m long along local X, 1.0m wide — yaw-aware thin AABB in world props.
     solid: true,
     footprintRadiusMeters: 1.05,
+    footprintDepthMeters: 1.0,
     heightMeters: 0.9,
     tileKind: 'wall',
     trafficControl: 'none',
@@ -774,6 +907,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // 2.1m long along local X, 1.5m wide — yaw-aware thin AABB in world props.
     solid: true,
     footprintRadiusMeters: 1.05,
+    footprintDepthMeters: 1.5,
     heightMeters: 0.95,
     tileKind: 'wall',
     trafficControl: 'none',
@@ -786,6 +920,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // 1.0m wide, 0.5m deep — yaw-aware thin AABB in world props.
     solid: true,
     footprintRadiusMeters: 0.5,
+    footprintDepthMeters: 0.5,
     heightMeters: 1.9,
     tileKind: 'wall',
     trafficControl: 'none',
@@ -797,6 +932,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     // Wall decor: anchor at the wall base, the glass hangs at height.
     solid: true,
     footprintRadiusMeters: 0.06,
+    footprintDepthMeters: 0.12,
     heightMeters: 1.9,
     tileKind: 'wall',
     trafficControl: 'none',
@@ -808,6 +944,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Sink',
     solid: true,
     footprintRadiusMeters: 0.3,
+    footprintDepthMeters: 0.5,
     heightMeters: 0.9,
     tileKind: 'wall',
     trafficControl: 'none',
@@ -819,6 +956,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Oven',
     solid: true,
     footprintRadiusMeters: 0.35,
+    footprintDepthMeters: 0.62,
     heightMeters: 0.95,
     tileKind: 'wall',
     trafficControl: 'none',
@@ -829,6 +967,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     label: 'Fridge',
     solid: true,
     footprintRadiusMeters: 0.4,
+    footprintDepthMeters: 0.72,
     heightMeters: 1.9,
     tileKind: 'wall',
     trafficControl: 'none',
@@ -1558,6 +1697,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     mount: 'wall',
     coverClass: 'none',
   },
+  ...IMPORTED_PROP_DEFINITIONS,
 };
 
 export const PROP_KINDS = Object.keys(PROP_KIND_DEFINITIONS) as PropKind[];
@@ -1570,7 +1710,7 @@ export const PROP_KINDS = Object.keys(PROP_KIND_DEFINITIONS) as PropKind[];
 export type PropCategory =
   | 'nature' | 'trees' | 'rocks' | 'street' | 'signs' | 'furniture'
   | 'household' | 'media' | 'commerce' | 'junkyard' | 'sport'
-  | 'park' | 'shops';
+  | 'park' | 'shops' | 'imported';
 
 export const PROP_CATEGORIES: Record<PropCategory, PropKind[]> = {
   nature: ['bush', 'bushLarge', 'bushLow', 'bushSparse', 'grassPatch', 'grassTall'],
@@ -1578,7 +1718,7 @@ export const PROP_CATEGORIES: Record<PropCategory, PropKind[]> = {
   rocks: ['rock', 'rockLarge', 'rockSmall', 'boulder', 'rockFlat', 'rockSpire', 'rockMossy', 'rockPile', 'rockJagged', 'rockShard'],
   street: ['fireHydrant', 'streetLight', 'payphone', 'mailbox', 'dumpster', 'fence', 'trafficCone', 'barrier', 'trashCan', 'bench', 'planter', 'telephonePole'],
   signs: ['streetSign', 'stopSign', 'trafficLight', 'businessSign', 'shopSign', 'poster', 'hospitalSign', 'policeSign'],
-  furniture: ['chair', 'chairRed', 'chairBlue', 'chairGreen', 'couch', 'table', 'floorLamp', 'wallPainting', 'ledLight', 'mirror'],
+  furniture: ['diningChair', 'armchair', 'officeChair', 'foldingChair', 'couch', 'table', 'floorLamp', 'wallPainting', 'ledLight', 'mirror'],
   household: ['bedSingle', 'bedDouble', 'cupboard', 'sink', 'oven', 'fridge', 'computer', 'toiletPaper'],
   media: ['bookStack', 'recordPlayer', 'vinylRecord', 'albumCover', 'cassette', 'speaker', 'speakerStack'],
   commerce: ['vendingMachine', 'gasPump', 'storeShelf', 'crate', 'pallet', 'palletStack'],
@@ -1586,6 +1726,7 @@ export const PROP_CATEGORIES: Record<PropCategory, PropKind[]> = {
   sport: ['ballBeach', 'ballSoccer', 'ballBasketball', 'basketballHoop'],
   park: ['fountain', 'drinkingFountain', 'loungeChair', 'swingset', 'sandCastle', 'picketFence', 'appleTree', 'apple'],
   shops: ['arcadeCabinet', 'slotMachine', 'clothingRack', 'displayCase', 'liquorShelf', 'beerCase', 'dinerBooth', 'orderCounter', 'menuBoard', 'sodaMachine', 'openSign', 'greenCrossSign'],
+  imported: [...IMPORTED_PROP_KINDS],
 };
 
 export const PROP_CATEGORY_NAMES = Object.keys(PROP_CATEGORIES) as PropCategory[];

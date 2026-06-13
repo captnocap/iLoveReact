@@ -112,7 +112,7 @@ test('isPropKind accepts every kind and rejects strangers', () => {
 
 test('seats: chairs sit 1, sofas/benches sit 3, beds lay — heights land on the prop', () => {
   const sitters: [PropKind, 'sit' | 'lay', number][] = [
-    ['chair', 'sit', 1], ['chairRed', 'sit', 1], ['chairBlue', 'sit', 1], ['chairGreen', 'sit', 1],
+    ['diningChair', 'sit', 1], ['armchair', 'sit', 1], ['officeChair', 'sit', 1], ['foldingChair', 'sit', 1],
     ['couch', 'sit', 3], ['bench', 'sit', 3],
     ['bedSingle', 'lay', 1], ['bedDouble', 'lay', 2],
   ];
@@ -163,7 +163,7 @@ test('mounts: wall decor hangs, the computer sits on surfaces, the rest stand on
     assertEqual(propMount(k), 'wall', `${k} mounts on walls`);
   }
   assertEqual(propMount('computer'), 'surface', 'a computer sits on a surface');
-  assertEqual(propMount('chair'), 'floor', 'a chair stands on the floor');
+  assertEqual(propMount('diningChair'), 'floor', 'a chair stands on the floor');
   assertEqual(propMount('ballBeach'), 'floor', 'a ball rests on the floor');
 });
 
