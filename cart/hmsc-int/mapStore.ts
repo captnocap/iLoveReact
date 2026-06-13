@@ -36,7 +36,43 @@ import {
 } from './chunks';
 import { type ZoneDef } from './zoneData';
 import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } from './placements';
-import { cellKey, type RoadStroke } from './roadData';
+import { cellKey, planRoads, type RoadStroke } from './roadData';
+
+// Map format version. v1 stored the road RASTER baked into the tile grids plus a
+// `roadUnder` undercoat to reverse it — the recipe (roads) AND its result (tiles)
+// AND the data to un-bake, all side by side (GUIDING_LIGHT: store the factors,
+// not the product). v2 stores the BASE terrain only + the stroke recipe, and
+// re-derives the road grid at load via planRoads (the same pure compiler the
+// editor runs at paint time). v1 snapshots still load (their tiles are already
+// composited; their `roadUnder` rides as before).
+const MAP_FORMAT_V = 2;
+
+// Re-derive the road raster onto the base chunks from the stroke recipe — the
+// load-time half of the v2 "store recipe, not result" format. planRoads is
+// authoritative, so it OVERWRITES whatever sits in road cells; only non-road base
+// terrain needs to survive serialization. Returns the rebuilt roadUnder (each
+// stamped cell's prior BASE tile) so the live editor can un-stamp on re-edit.
+function stampRoadsOntoChunks(chunks: Map<ChunkKey, Chunk>, roads: readonly RoadStroke[]): Map<string, number> {
+  const under = new Map<string, number>();
+  if (!roads.length) return under;
+  for (const [key, kind] of planRoads([...roads])) {
+    const i = key.indexOf(',');
+    const gx = Number(key.slice(0, i));
+    const gz = Number(key.slice(i + 1));
+    const cx = Math.floor(gx / CHUNK_TILES);
+    const cz = Math.floor(gz / CHUNK_TILES);
+    const c = chunks.get(chunkKey(cx, cz));
+    if (!c) continue;
+    const lx = gx - cx * CHUNK_TILES;
+    const lz = gz - cz * CHUNK_TILES;
+    if (lx < 0 || lx >= c.tiles.cols || lz < 0 || lz >= c.tiles.rows) continue;
+    const ci = lz * c.tiles.cols + lx;
+    const prior = c.tiles.idx[ci];
+    under.set(cellKey(gx, gz), prior == null ? -1 : prior);
+    c.tiles.idx[ci] = TILE_KINDS.indexOf(kind);
+  }
+  return under;
+}
 
 // Height quantization: heights are metres in ±HEIGHT_LIMIT. 0.01m steps are
 // imperceptible on the coarse preview mesh and keep the value a small integer
@@ -102,32 +138,39 @@ export interface EditorWorld {
 // ── Encode ─────────────────────────────────────────────────────────────────
 
 export function serializeMap(world: EditorWorld): MapSnapshot {
+  // v2 stores the BASE terrain only — un-stamp the road raster using roadUnder
+  // (each road cell's prior tile) so what's saved is base + the stroke recipe,
+  // never the baked product. Road cells whose prior is itself a road (overlaps)
+  // are harmless: planRoads re-derives all road cells at load, overwriting them.
+  const under = world.roadUnder;
   const chunks: ChunkSnap[] = [];
   for (const c of world.chunks.values()) {
     // Heights → quantized integers (mostly 0), then row-RLE.
     const hz = c.height.z;
     const q = new Array<number>(hz.length);
     for (let i = 0; i < hz.length; i++) q[i] = Math.round(hz[i] * HEIGHT_Q);
+    const baseIdx = Array.from(c.tiles.idx);
+    if (under && under.size) {
+      const cx0 = c.cx * CHUNK_TILES;
+      const cz0 = c.cz * CHUNK_TILES;
+      for (const [key, prior] of under) {
+        const i = key.indexOf(',');
+        const lx = Number(key.slice(0, i)) - cx0;
+        const lz = Number(key.slice(i + 1)) - cz0;
+        if (lx < 0 || lx >= c.tiles.cols || lz < 0 || lz >= c.tiles.rows) continue;
+        baseIdx[lz * c.tiles.cols + lx] = prior;
+      }
+    }
     chunks.push({
       cx: c.cx,
       cz: c.cz,
-      tiles: encodeGrid(Array.from(c.tiles.idx), c.tiles.cols, c.tiles.rows),
+      tiles: encodeGrid(baseIdx, c.tiles.cols, c.tiles.rows),
       height: encodeGrid(q, c.height.cols, c.height.rows),
       zones: encodeGrid(Array.from(c.zones.idx), c.zones.cols, c.zones.rows),
     });
   }
-  // Road undercoat: cellKey → prior index. Values are CURRENT global indices,
-  // which is exactly the legend this snapshot writes — remapped by name on load
-  // like the tile grids.
-  const roadUnder: [number, number, number][] = [];
-  if (world.roadUnder) {
-    for (const [key, prior] of world.roadUnder) {
-      const i = key.indexOf(',');
-      roadUnder.push([Number(key.slice(0, i)), Number(key.slice(i + 1)), prior]);
-    }
-  }
   return {
-    v: 1,
+    v: MAP_FORMAT_V,
     tileLegend: [...TILE_KINDS],
     zones: world.zones.map((z) => ({ ...z, flags: [...z.flags] })),
     focus: Array.from(world.focus),
@@ -136,9 +179,11 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
       ...(p.spawnId ? { spawnId: p.spawnId } : {}),
     })),
     chunks,
-    // profile spreads whole so new fields (speedLimitKph, …) ride automatically
+    // The recipe: stroke centerlines + profile. The road raster is DERIVED from
+    // this at load (planRoads), not stored. profile spreads whole so new fields
+    // (speedLimitKph, …) ride automatically. No roadUnder in v2 — the base IS the
+    // un-stamped grid, and load rebuilds the undercoat by re-stamping.
     ...(world.roads?.length ? { roads: world.roads.map((r) => ({ id: r.id, points: r.points.map((pt) => ({ ...pt })), profile: { ...r.profile } })) } : {}),
-    ...(roadUnder.length ? { roadUnder } : {}),
   };
 }
 
@@ -218,11 +263,20 @@ export function deserializeMap(snap: MapSnapshot): EditorWorld {
         ...(Number.isFinite(r.profile.speedLimitKph) ? { speedLimitKph: r.profile.speedLimitKph } : {}),
       },
     }));
-  const roadUnder = new Map<string, number>();
-  for (const entry of snap.roadUnder ?? []) {
-    if (!Array.isArray(entry) || entry.length < 3) continue;
-    const [gx, gz, prior] = entry;
-    roadUnder.set(cellKey(gx, gz), prior == null || prior < 0 ? -1 : (remap[prior] ?? -1));
+  // v2: the saved tiles are BASE terrain — re-derive the road raster from the
+  // stroke recipe (the same planRoads the editor runs at paint), which also
+  // rebuilds the undercoat. v1: the tiles are already composited; take the saved
+  // undercoat as-is (remapped through the saved legend like the tile grids).
+  let roadUnder: Map<string, number>;
+  if ((snap.v ?? 1) >= 2) {
+    roadUnder = stampRoadsOntoChunks(chunks, roads);
+  } else {
+    roadUnder = new Map<string, number>();
+    for (const entry of snap.roadUnder ?? []) {
+      if (!Array.isArray(entry) || entry.length < 3) continue;
+      const [gx, gz, prior] = entry;
+      roadUnder.set(cellKey(gx, gz), prior == null || prior < 0 ? -1 : (remap[prior] ?? -1));
+    }
   }
 
   return { chunks, zones, focus, placements, roads, roadUnder };
