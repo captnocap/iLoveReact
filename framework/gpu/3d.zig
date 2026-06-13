@@ -1107,14 +1107,14 @@ fn hfGen(hs_in: []const f32, cols: usize, rows: usize, width: f32, depth: f32, b
     // (outside a disc's footprint) stay flat so the skirt rounds the body off.
     var hs = hs_in;
     if (hfWaveActive(wave) and cols * rows <= g_hf_wave_heights.len) {
-        var j2: usize = 0;
-        while (j2 < rows) : (j2 += 1) {
-            const z = z0 + @as(f32, @floatFromInt(j2)) * dz;
-            var i2: usize = 0;
-            while (i2 < cols) : (i2 += 1) {
-                const idx = j2 * cols + i2;
+        var wj: usize = 0;
+        while (wj < rows) : (wj += 1) {
+            const z = z0 + @as(f32, @floatFromInt(wj)) * dz;
+            var wi: usize = 0;
+            while (wi < cols) : (wi += 1) {
+                const idx = wj * cols + wi;
                 const h = hs_in[idx];
-                const x = x0 + @as(f32, @floatFromInt(i2)) * dx;
+                const x = x0 + @as(f32, @floatFromInt(wi)) * dx;
                 g_hf_wave_heights[idx] = if (h > base) h + hfWaveAt(wave, x, z, t) else h;
             }
         }
