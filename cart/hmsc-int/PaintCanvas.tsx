@@ -855,10 +855,13 @@ export function PaintCanvas(props: {
     // mid-stroke per dirty chunk freezes paint. The 2D canvas is live via the touch.
   };
 
-  // Paint WATER into the terrain (heightMode 'water'): the brush fills its footprint
-  // with water up to the brush Z level (a flat surface), into the chunk's water grid.
-  // A wet cell (level > 0) becomes a body of water; depth is derived against the
-  // terrain bed under it. Erase clears to dry. Same chunk-local mapping as height.
+  // Paint WATER into the terrain (heightMode 'water'): water sits IN a pool, not as
+  // a block above ground — so the brush EXCAVATES a basin (digs the terrain down by
+  // the brush depth) AND fills it with water flush to the surrounding ground. The
+  // chunk's `water` grid stores the water DEPTH (>0 = wet); the water surface is the
+  // bed + depth, which (since we dig the bed by depth) lands at the original ground
+  // level. Erase drains the pool: clears the water AND raises the bed back. The
+  // slider magnitude is the pool depth (its sign is irrelevant here).
   const stampWaterAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
     const b = brushRef.current;
     const gsx = Math.round(gx / GSAMPLE), gsy = Math.round(gy / GSAMPLE);
@@ -867,20 +870,20 @@ export function PaintCanvas(props: {
     heightStamped.current.add(stampKey);
     const radiusM = Math.max(0.5, b.size);
     const rd = Math.max(1, Math.ceil(radiusM / DOT_M));
-    // Water level = the brush Z's MAGNITUDE (the surface must be positive to hold
-    // water above the bed; the sign on the height slider is for digging terrain,
-    // which is meaningless here, so |Z| keeps the brush from no-op'ing on a
-    // negative value). At least 1 m so any stroke deposits visible water. Flat
-    // profile fills the footprint to that level; erase pulls cells back to dry.
-    const level = b.mode === 'erase' ? 0 : Math.max(1, Math.abs(b.centerZ));
+    const erase = b.mode === 'erase';
+    const depth = Math.max(1, Math.abs(b.centerZ)); // pool depth in metres
     for (const ch of focusedChunks) {
       const cols = ch.water.cols, rows = ch.water.rows;
       const cix = Math.round((gx - ch.cx * PATCH + PATCH / 2) / PATCH * (cols - 1));
       const ciy = Math.round((gy - ch.cz * PATCH + PATCH / 2) / PATCH * (rows - 1));
       if (cix + rd < 0 || cix - rd > cols - 1 || ciy + rd < 0 || ciy - rd > rows - 1) continue;
-      stampBrush(ch.water, cix, ciy, { centerZ: level, radiusM, shape: b.shape, profile: 'flat', erase: b.mode === 'erase' });
+      // Dig the basin (bed → -depth), then mark the water depth. Erase un-digs the
+      // bed (back to 0) and clears the water — draining + filling the pit.
+      stampBrush(ch.height, cix, ciy, { centerZ: erase ? 0 : -depth, radiusM, shape: b.shape, profile: 'flat', erase });
+      stampBrush(ch.water, cix, ciy, { centerZ: erase ? 0 : depth, radiusM, shape: b.shape, profile: 'flat', erase });
       const k = chunkKey(ch.cx, ch.cz);
       touched.add(k);
+      heightDirty.current.add(k);
       waterDirty.current.add(k);
     }
   };

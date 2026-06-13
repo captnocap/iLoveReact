@@ -568,7 +568,7 @@ export type WaterBodyShape = 'rect' | 'disc';
 // per-cell water SURFACE level (≤ 0 = dry/no water there), `cell` metres apart,
 // centred on the body. When present it overrides the parametric footprint —
 // depth is still derived against the terrain bed, per cell.
-export type WaterField = { cols: number; rows: number; cell: number; heights: number[] };
+export type WaterField = { cols: number; rows: number; cell: number; heights: number[]; base: number };
 export type WaterBody = {
   id: string;
   label: string;

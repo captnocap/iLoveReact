@@ -171,14 +171,22 @@ export function floorsToLandforms(floors: ChunkFloor[]): Landform[] {
 }
 
 // A painted-water chunk → a field-backed WaterBody (the terrain water brush's
-// twin of floorToLandform): the chunk's water grid becomes the body's per-cell
-// surface field (wet samples keep their level, dry → the basin floor so the
-// heightfield skirt closes the volume). Depth is derived against the painted
-// terrain (the chunk's heightfield landform) under it. One body per wet chunk.
+// twin of floorToLandform). The brush excavated a basin (the chunk's terrain
+// `heights` were dug down by the water DEPTH it stored in `water`), so the water
+// SURFACE per wet cell = bed + depth (≈ the original ground level — a flush pool).
+// Dry cells drop to `base` (just under the deepest basin floor) so the heightfield
+// skirt fills the whole basin and dry cells hide under the terrain. One body per
+// wet chunk; depth is derived against the bed at lookup.
 export function floorToWaterBody(f: ChunkFloor): WaterBody {
-  const base = -WATER_LOOK.floorTuckMeters;
   const cell = CHUNK_TILES / (f.hcols - 1);
-  const heights = (f.water ?? []).map((v) => (v > 0 ? v : base));
+  const water = f.water ?? [];
+  const beds = f.heights;
+  // Basin floor: the deepest bed under any wet cell, minus a tuck so the skirt
+  // closes cleanly under it (and dry cells sit here, below the terrain → hidden).
+  let deepest = 0;
+  for (let i = 0; i < water.length; i++) if (water[i]! > 0) deepest = Math.min(deepest, beds[i] ?? 0);
+  const base = deepest - WATER_LOOK.floorTuckMeters;
+  const heights = water.map((d, i) => (d > 0 ? (beds[i] ?? 0) + d : base));
   const span = (f.hcols - 1) * cell; // = CHUNK_TILES
   const centerX = f.cx * CHUNK_TILES + CHUNK_TILES / 2;
   const centerZ = f.cz * CHUNK_TILES + CHUNK_TILES / 2;
@@ -191,7 +199,7 @@ export function floorToWaterBody(f: ChunkFloor): WaterBody {
     width: span,
     depth: span,
     surfaceY: 0, // unused — the field drives the per-cell surface
-    field: { cols: f.hcols, rows: f.hrows, cell, heights },
+    field: { cols: f.hcols, rows: f.hrows, cell, heights, base },
     createdByCommand: 'hmsc-int:paint-water',
   };
 }
@@ -199,7 +207,7 @@ export function floorToWaterBody(f: ChunkFloor): WaterBody {
 // Stable-identity cache (mirrors floorsToLandforms): only a chunk whose water grid
 // ref actually changed rebuilds its body, so an unrelated sync doesn't churn the
 // preview's water meshes. Keyed by chunk id; unfocused chunks are pruned.
-type WaterCacheEntry = { water: number[]; body: WaterBody };
+type WaterCacheEntry = { water: number[]; heights: number[]; body: WaterBody };
 const waterCache = new Map<string, WaterCacheEntry>();
 
 export function floorsToWaterBodies(floors: ChunkFloor[]): WaterBody[] {
@@ -210,12 +218,14 @@ export function floorsToWaterBodies(floors: ChunkFloor[]): WaterBody[] {
     const id = chunkFloorId(f.cx, f.cz);
     live.add(id);
     const hit = waterCache.get(id);
-    if (hit && hit.water === f.water) {
+    // Rebuild if EITHER the water depth grid OR the terrain bed changed (the
+    // surface is bed + depth, so a re-dug bed moves the water).
+    if (hit && hit.water === f.water && hit.heights === f.heights) {
       out.push(hit.body);
       continue;
     }
     const body = floorToWaterBody(f);
-    waterCache.set(id, { water: f.water, body });
+    waterCache.set(id, { water: f.water, heights: f.heights, body });
     out.push(body);
   }
   for (const id of waterCache.keys()) if (!live.has(id)) waterCache.delete(id);

@@ -647,7 +647,7 @@ export function encodeWaterBodies(bodies: GameState['world']['waterBodies'] | un
   // wave either way.
   const grids = list.map((b) =>
     b.field
-      ? { cols: b.field.cols, rows: b.field.rows, base: -WATER_LOOK.floorTuckMeters, heights: b.field.heights }
+      ? { cols: b.field.cols, rows: b.field.rows, base: b.field.base, heights: b.field.heights }
       : waterFlatHeights(b.shape, b.width, b.depth, b.surfaceY));
   let bytes = 8 + 16 + 20;
   for (const g of grids) bytes += 8 + 20 + g.cols * g.rows * 4;

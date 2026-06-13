@@ -33,7 +33,7 @@ export type WaterBodyShape = 'rect' | 'disc';
 // A painted water grid (the terrain tool's water brush): per-cell surface level,
 // centred on the body, `cell` metres apart. A cell ≤ 0 is dry. When present it
 // overrides the parametric footprint (organic painted ponds, not just rect/disc).
-export type WaterField = { cols: number; rows: number; cell: number; heights: number[] };
+export type WaterField = { cols: number; rows: number; cell: number; heights: number[]; base: number };
 
 export type WaterBody = {
   id: string;
@@ -48,12 +48,12 @@ export type WaterBody = {
   createdByCommand: string;
 };
 
-/** Bilinear sample of a painted water grid at body-local (lx,lz); ≤0 / off-grid = dry. */
+/** Bilinear sample of a painted water grid at body-local (lx,lz); off-grid = dry (-inf). */
 function sampleWaterField(f: WaterField, lx: number, lz: number): number {
   const { cols, rows, cell, heights } = f;
   const fx = (lx + (cols - 1) * cell * 0.5) / cell;
   const fz = (lz + (rows - 1) * cell * 0.5) / cell;
-  if (fx < 0 || fz < 0 || fx > cols - 1 || fz > rows - 1) return 0;
+  if (fx < 0 || fz < 0 || fx > cols - 1 || fz > rows - 1) return -Infinity;
   const i0 = Math.floor(fx);
   const j0 = Math.floor(fz);
   const i1 = Math.min(i0 + 1, cols - 1);
@@ -69,14 +69,15 @@ function sampleWaterField(f: WaterField, lx: number, lz: number): number {
 
 /**
  * The water SURFACE level of a body at (x,z), or undefined where the body has no
- * water there. A painted body samples its grid (>0 = wet); a parametric body
- * returns its surfaceY inside the footprint (rect = the box, disc = the inscribed
- * ellipse). This is the ONE "where + how high is the water" query the rest read.
+ * water there. A painted body samples its grid (a cell well above the basin floor
+ * `base` is wet — the surface can be ~0 for a flush pool, so the wet test is
+ * relative to base, not to 0); a parametric body returns its surfaceY inside the
+ * footprint (rect = the box, disc = the inscribed ellipse).
  */
 export function waterSurfaceAt(b: WaterBody, x: number, z: number): number | undefined {
   if (b.field) {
     const s = sampleWaterField(b.field, x - (b.x + b.width / 2), z - (b.z + b.depth / 2));
-    return s > 0 ? s : undefined;
+    return s > b.field.base + 0.25 ? s : undefined;
   }
   if (x < b.x || x >= b.x + b.width || z < b.z || z >= b.z + b.depth) return undefined;
   if (b.shape === 'disc') {
