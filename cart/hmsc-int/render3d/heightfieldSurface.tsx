@@ -103,27 +103,35 @@ fn hf_tile_var(k: i32) -> f32 {
 }
 `;
 
-export const HEIGHTFIELD_TILE_SHADER = `
-@group(0) @binding(1) var<storage, read> D: array<f32>;
+// The painted-ground FORMULA, as a reusable function `hf_ground_rgb(uv) -> vec3f`
+// that reads the module-global `D` reference stream ([cols,rows,pal, palette…,
+// cell idx…, ribbon section]). It does NOT declare D, VsOut, or fs_main — each
+// consumer supplies those: the StaticSurface Effect wrapper below (D at
+// group0/binding1, fs_main returns the colour) AND the per-fragment 3D ground
+// pipeline (framework/gpu/3d.zig: D at group1/binding0, fs_main = ground_rgb +
+// scene lighting). ONE formula source, evaluated by a fixed system on the mesh —
+// the data-shape ground (GUIDING_LIGHT): the chunk is a per-cell reference stream
+// into the tile-material recipe vocab, the grain is synthesised, nothing baked.
+export const HEIGHTFIELD_TILE_BODY = `
 ${TILE_FILL_WGSL}
 ${HF_TILE_MATERIAL_WGSL}
 ${GROUND_RESOLVE_WGSL}
 ${PARKING_STALL_WGSL}
-@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+fn hf_ground_rgb(uv0: vec2f) -> vec3f {
   let cols = i32(D[0]);
   let rows = i32(D[1]);
   let pal = i32(D[2]);
   let cellBase = 3 + pal * 3;
 
-  let cx = clamp(i32(floor(in.uv.x * f32(cols))), 0, cols - 1);
-  let cy = clamp(i32(floor(in.uv.y * f32(rows))), 0, rows - 1);
+  let cx = clamp(i32(floor(uv0.x * f32(cols))), 0, cols - 1);
+  let cy = clamp(i32(floor(uv0.y * f32(rows))), 0, rows - 1);
   let kind = hf_ground_kind(cellBase, cols, rows, cx, cy);
 
   // World cell position — 1 tile = 1 m, so p IS world XZ in metres. fract gives
   // the in-tile uv, and the per-cell seed varies the grain exactly the way the
   // placed-piece path does (tileSurface / landformFill: tileMaterial(matId, f,
   // f*64, variant, seed)).
-  let p = in.uv * vec2f(f32(cols), f32(rows));
+  let p = uv0 * vec2f(f32(cols), f32(rows));
   let fc = fract(p);
   let seed = tf_rand(floor(p) + vec2f(3.1, 7.7)) * 50.0;
 
@@ -159,7 +167,6 @@ ${PARKING_STALL_WGSL}
     let laneIdx = i32(D[cellEnd + 3]);
     let medIdx = i32(D[cellEnd + 4]);
     if (segN > 0 && kind != cwIdx) {
-      let p = in.uv * vec2f(f32(cols), f32(rows));
       var bestD = 1e9;
       var signedD = 0.0;
       var rExt = 0.0;
@@ -228,7 +235,18 @@ ${PARKING_STALL_WGSL}
       }
     }
   }
-  return vec4f(rgb, 1.0);
+  return rgb;
+}
+`;
+
+// The StaticSurface (offscreen capture) entry — the editor's legacy path while
+// the per-fragment 3D ground pipeline rolls out. D rides group0/binding1 (the
+// Effect primitive's storage slot); fs_main just returns the formula colour.
+export const HEIGHTFIELD_TILE_SHADER = `
+@group(0) @binding(1) var<storage, read> D: array<f32>;
+${HEIGHTFIELD_TILE_BODY}
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  return vec4f(hf_ground_rgb(in.uv), 1.0);
 }
 `;
 
