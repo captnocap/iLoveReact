@@ -6,6 +6,19 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const fridgeDef: PropKindDefinition = {
+  kind: 'fridge',
+  label: 'Fridge',
+  solid: true,
+  footprintRadiusMeters: 0.4,
+  footprintDepthMeters: 0.72,
+  heightMeters: 1.9,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'kitchen', capacity: 5, spawnFillChance: 0.7, searchSeconds: 3, access: 'open' },
+};
 
 const COLORS = {
   body: recipeColor('#d6d9dc'),

@@ -6,6 +6,19 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const basketballHoopDef: PropKindDefinition = {
+  kind: 'basketballHoop',
+  label: 'Basketball Hoop',
+  // Street hoop: pole + backboard + rim at 3.5m (regulation 3.05 × 1.15).
+  solid: true,
+  footprintRadiusMeters: 0.25,
+  // PROPSCALE-0611: real backboard top ~3.95m × 1.15
+  heightMeters: 4.5,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   pole: recipeColor('#3a3f46'),

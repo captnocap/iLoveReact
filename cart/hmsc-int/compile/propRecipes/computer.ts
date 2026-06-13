@@ -6,6 +6,20 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const computerDef: PropKindDefinition = {
+  kind: 'computer',
+  label: 'Computer',
+  // A desktop setup (monitor + keyboard + tower) at its anchor.
+  solid: true,
+  footprintRadiusMeters: 0.3,
+  heightMeters: 0.55,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'office', capacity: 1, spawnFillChance: 0.5, searchSeconds: 3, access: 'open' },
+  mount: 'surface',
+};
 
 const COLORS = {
   shell: recipeColor('#cfc8b4'),

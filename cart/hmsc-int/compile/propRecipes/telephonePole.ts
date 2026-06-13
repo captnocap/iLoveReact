@@ -6,6 +6,18 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const telephonePoleDef: PropKindDefinition = {
+  kind: 'telephonePole',
+  label: 'Telephone Pole',
+  solid: true,
+  footprintRadiusMeters: 0.16,
+  // PROPSCALE-0611: real ~8.8m above ground × 1.15
+  heightMeters: 10.1,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   wood: recipeColor('#4f3d2a'),

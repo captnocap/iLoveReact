@@ -6,6 +6,20 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const sinkDef: PropKindDefinition = {
+  kind: 'sink',
+  label: 'Sink',
+  solid: true,
+  footprintRadiusMeters: 0.3,
+  footprintDepthMeters: 0.5,
+  heightMeters: 0.9,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'bathroom', capacity: 2, spawnFillChance: 0.3, searchSeconds: 2, access: 'open' },
+  coverClass: 'soft',
+};
 
 const COLORS = {
   porcelain: recipeColor('#eef0f2'),

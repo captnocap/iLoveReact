@@ -64,6 +64,12 @@ import { tableDef } from '../../compile/propRecipes/table';
 import { floorLampDef } from '../../compile/propRecipes/floorLamp';
 import { cupboardDef } from '../../compile/propRecipes/cupboard';
 import { mirrorDef } from '../../compile/propRecipes/mirror';
+import { sinkDef } from '../../compile/propRecipes/sink';
+import { ovenDef } from '../../compile/propRecipes/oven';
+import { fridgeDef } from '../../compile/propRecipes/fridge';
+import { computerDef } from '../../compile/propRecipes/computer';
+import { telephonePoleDef } from '../../compile/propRecipes/telephonePole';
+import { basketballHoopDef } from '../../compile/propRecipes/basketballHoop';
 
 export type BuiltinPropKind =
   | 'rock'
@@ -608,75 +614,14 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   },
   cupboard: cupboardDef,
   mirror: mirrorDef,
-  sink: {
-    kind: 'sink',
-    label: 'Sink',
-    solid: true,
-    footprintRadiusMeters: 0.3,
-    footprintDepthMeters: 0.5,
-    heightMeters: 0.9,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'bathroom', capacity: 2, spawnFillChance: 0.3, searchSeconds: 2, access: 'open' },
-    coverClass: 'soft',
-  },
-  oven: {
-    kind: 'oven',
-    label: 'Oven',
-    solid: true,
-    footprintRadiusMeters: 0.35,
-    footprintDepthMeters: 0.62,
-    heightMeters: 0.95,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'kitchen', capacity: 2, spawnFillChance: 0.35, searchSeconds: 2.5, access: 'open' },
-  },
-  fridge: {
-    kind: 'fridge',
-    label: 'Fridge',
-    solid: true,
-    footprintRadiusMeters: 0.4,
-    footprintDepthMeters: 0.72,
-    heightMeters: 1.9,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'kitchen', capacity: 5, spawnFillChance: 0.7, searchSeconds: 3, access: 'open' },
-  },
-  computer: {
-    kind: 'computer',
-    label: 'Computer',
-    // A desktop setup (monitor + keyboard + tower) at its anchor.
-    solid: true,
-    footprintRadiusMeters: 0.3,
-    heightMeters: 0.55,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'office', capacity: 1, spawnFillChance: 0.5, searchSeconds: 3, access: 'open' },
-    mount: 'surface',
-  },
+  sink: sinkDef,
+  oven: ovenDef,
+  fridge: fridgeDef,
+  computer: computerDef,
 
   // ── utility + sport ────────────────────────────────────────────────────────
-  telephonePole: {
-    kind: 'telephonePole',
-    label: 'Telephone Pole',
-    solid: true,
-    footprintRadiusMeters: 0.16,
-    // PROPSCALE-0611: real ~8.8m above ground × 1.15
-    heightMeters: 10.1,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  basketballHoop: {
-    kind: 'basketballHoop',
-    label: 'Basketball Hoop',
-    // Street hoop: pole + backboard + rim at 3.5m (regulation 3.05 × 1.15).
-    solid: true,
-    footprintRadiusMeters: 0.25,
-    // PROPSCALE-0611: real backboard top ~3.95m × 1.15
-    heightMeters: 4.5,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
+  telephonePole: telephonePoleDef,
+  basketballHoop: basketballHoopDef,
 
   // ── PROPBATCH-0611 (req_0633 image set + named list, req_0634 grass,
   //    req_0635 image-flats). Real scale × 1.15 — the PROPSCALE presence law.
