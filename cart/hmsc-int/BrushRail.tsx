@@ -11,7 +11,7 @@ import type { BrushMode, BrushShape } from './brush';
 import { ChipGrid, MiniStepper, RailLabel, RailSlider, Swatch, RAIL_CELL } from './railAtoms';
 import type { ZoneDef } from './zoneData';
 
-type HeightMode = 'brush' | 'ramp' | 'slope' | 'smooth';
+type HeightMode = 'brush' | 'ramp' | 'slope' | 'smooth' | 'water' | 'waterSlope';
 
 export type BrushRailSettings = {
   size: number;
@@ -85,6 +85,23 @@ function SlopeSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<Br
   );
 }
 
+// The water SLOPE (ocean shore): same graded stroke as the terrain slope, but the
+// two values are pool DEPTHS — shallow at the start of the drag, deep at the end —
+// so dragging from the beach out to sea makes a wadeable shoreline. rampMin = shore
+// depth, rampMax = deep depth; both non-negative (the bed digs to -depth).
+function WaterSlopeSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void }) {
+  const b = props.brush;
+  const set = props.onPatch;
+  return (
+    <Box style={{ gap: 5 }}>
+      <RailLabel text="shore" />
+      <ChipGrid items={PROFILES} value={b.profile} onPick={(profile) => set({ profile: profile as BrushProfile })} />
+      <MiniStepper label="shore z" value={Math.max(0, b.rampMin).toFixed(1)} onDec={() => set({ rampMin: clamp(b.rampMin - Z_STEP, 0, HEIGHT_LIMIT) })} onInc={() => set({ rampMin: clamp(b.rampMin + Z_STEP, 0, HEIGHT_LIMIT) })} />
+      <MiniStepper label="deep z" value={Math.max(0, b.rampMax).toFixed(1)} onDec={() => set({ rampMax: clamp(b.rampMax - Z_STEP, 0, HEIGHT_LIMIT) })} onInc={() => set({ rampMax: clamp(b.rampMax + Z_STEP, 0, HEIGHT_LIMIT) })} />
+    </Box>
+  );
+}
+
 function SmoothSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void }) {
   const b = props.brush;
   const set = props.onPatch;
@@ -116,6 +133,8 @@ export function HeightSection(props: { brush: BrushRailSettings; onPatch: (p: Pa
         <RampSection brush={b} onPatch={props.onPatch} />
       ) : b.heightMode === 'slope' ? (
         <SlopeSection brush={b} onPatch={props.onPatch} />
+      ) : b.heightMode === 'waterSlope' ? (
+        <WaterSlopeSection brush={b} onPatch={props.onPatch} />
       ) : b.heightMode === 'smooth' ? (
         <SmoothSection brush={b} onPatch={props.onPatch} />
       ) : (

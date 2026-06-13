@@ -51,7 +51,7 @@ import type { SelCell } from './tileOverrides';
 import type { EditNote } from './editLog';
 import { plog, useChurn, countersSnapshot, counterDelta } from './perfLog';
 
-export type HeightMode = 'brush' | 'ramp' | 'slope' | 'smooth' | 'water';
+export type HeightMode = 'brush' | 'ramp' | 'slope' | 'smooth' | 'water' | 'waterSlope';
 type CanvasRect = { x: number; y: number; width: number; height: number } | null;
 type HoverState = { x: number; y: number; addr: string } | null;
 type HoverSink = { current: ((h: HoverState) => void) | null };
@@ -476,7 +476,7 @@ export function PaintCanvas(props: {
   // delete). The legacy brush.mode==='erase' (the rail's old eraser chip,
   // persisted in saved maps) still counts.
   const activeBrushMode: BrushMode = tool === 'eraser' ? 'erase' : brushMode;
-  const heightMode: HeightMode = props.brush.heightMode === 'ramp' || props.brush.heightMode === 'slope' || props.brush.heightMode === 'smooth' || props.brush.heightMode === 'water' ? props.brush.heightMode : 'brush';
+  const heightMode: HeightMode = props.brush.heightMode === 'ramp' || props.brush.heightMode === 'slope' || props.brush.heightMode === 'smooth' || props.brush.heightMode === 'water' || props.brush.heightMode === 'waterSlope' ? props.brush.heightMode : 'brush';
   const centerZ = clamp(Number(props.brush.centerZ), Z_MIN, Z_MAX);
   // One brush size (radius in tiles) shared by paint, zone, and height.
   const brushSize = clamp(Math.round(Number(props.brush.size)), SIZE_MIN, SIZE_MAX);
@@ -911,6 +911,41 @@ export function PaintCanvas(props: {
     }
   };
 
+  // WATER SLOPE (ocean shore): the slope stroke graded for water. Mirrors
+  // stampWaterAtGraph (excavate the bed + fill water flush) but RAMPS the pool
+  // depth along the drag — shallow at the start point, deepening to the end — so
+  // a single stroke from the beach out to sea makes a wadeable shoreline instead
+  // of a flat-bottomed basin. rampMin/rampMax (the slope sliders) are the start /
+  // end DEPTHS in metres; the bed digs to -depth and the water fills to +depth, so
+  // the surface stays flush with the original ground (waterline where depth > 0).
+  const stampWaterSlopeSegmentAtGraph = (from: { x: number; y: number }, to: { x: number; y: number }, distanceStartM: number, runM: number, touched: Set<ChunkKey>) => {
+    const b = brushRef.current;
+    const key = `wslope:${Math.round(from.x / GSAMPLE)}:${Math.round(from.y / GSAMPLE)}:${Math.round(to.x / GSAMPLE)}:${Math.round(to.y / GSAMPLE)}:${Math.round(distanceStartM * 4)}`;
+    if (heightStamped.current.has(key)) return;
+    heightStamped.current.add(key);
+    const radiusM = Math.max(0.5, b.size);
+    const rd = Math.max(1, Math.ceil(radiusM / DOT_M)) + 1;
+    const erase = b.mode === 'erase';
+    // Shore→deep depths (non-negative metres). Bed digs to -depth, water to +depth.
+    const startDepth = erase ? 0 : Math.max(0, b.rampMin);
+    const endDepth = erase ? 0 : Math.max(0, b.rampMax);
+    for (const ch of focusedChunks) {
+      const cols = ch.height.cols, rows = ch.height.rows; // height & water share dims
+      const ax = (from.x - ch.cx * PATCH + PATCH / 2) / PATCH * (cols - 1);
+      const ay = (from.y - ch.cz * PATCH + PATCH / 2) / PATCH * (rows - 1);
+      const bx = (to.x - ch.cx * PATCH + PATCH / 2) / PATCH * (cols - 1);
+      const by = (to.y - ch.cz * PATCH + PATCH / 2) / PATCH * (rows - 1);
+      if (Math.max(ax, bx) + rd < 0 || Math.min(ax, bx) - rd > cols - 1 || Math.max(ay, by) + rd < 0 || Math.min(ay, by) - rd > rows - 1) continue;
+      const dug = stampSlopeSegment(ch.height, ax, ay, bx, by, { startZ: -startDepth, endZ: -endDepth, runM, distanceStartM, radiusM, profile: b.profile, erase });
+      const wet = stampSlopeSegment(ch.water, ax, ay, bx, by, { startZ: startDepth, endZ: endDepth, runM, distanceStartM, radiusM, profile: b.profile, erase });
+      if (!dug && !wet) continue;
+      const k = chunkKey(ch.cx, ch.cz);
+      touched.add(k);
+      heightDirty.current.add(k);
+      waterDirty.current.add(k);
+    }
+  };
+
   const stampSmoothAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
     const b = brushRef.current;
     const gsx = Math.round(gx / GSAMPLE), gsy = Math.round(gy / GSAMPLE);
@@ -1267,6 +1302,7 @@ export function PaintCanvas(props: {
   const isSlopeTool = layer === 'height' && heightMode === 'slope';
   const isSmoothTool = layer === 'height' && heightMode === 'smooth';
   const isWaterTool = layer === 'height' && heightMode === 'water';
+  const isWaterSlopeTool = layer === 'height' && heightMode === 'waterSlope';
   const showPlaceBrush = layer === 'place' && tool === 'brush' && !!place.active;
   const behavior = resolvePainterBehavior({ tool, target: layer, placeArmed: !!place.active });
   const showBrush = behavior === 'stroke';
@@ -1348,8 +1384,8 @@ export function PaintCanvas(props: {
       note: () => ({ cat: 'tile', text: activeBrushMode === 'erase' ? 'erased tiles' : `painted ${tile}` }),
     },
     height: {
-      sample: isWaterTool ? stampWaterAtGraph : isSmoothTool ? stampSmoothAtGraph : isRampTool || isSlopeTool ? undefined : stampHeightAtGraph,
-      note: () => ({ cat: 'height', text: isWaterTool ? (activeBrushMode === 'erase' ? 'cleared water' : 'painted water') : isRampTool ? 'stamped ramp' : isSlopeTool ? 'painted slope' : isSmoothTool ? 'smoothed terrain' : activeBrushMode === 'erase' ? 'lowered terrain' : 'raised terrain' }),
+      sample: isWaterTool ? stampWaterAtGraph : isSmoothTool ? stampSmoothAtGraph : isRampTool || isSlopeTool || isWaterSlopeTool ? undefined : stampHeightAtGraph,
+      note: () => ({ cat: 'height', text: isWaterTool ? (activeBrushMode === 'erase' ? 'cleared water' : 'painted water') : isWaterSlopeTool ? (activeBrushMode === 'erase' ? 'drained shoreline' : 'sloped water') : isRampTool ? 'stamped ramp' : isSlopeTool ? 'painted slope' : isSmoothTool ? 'smoothed terrain' : activeBrushMode === 'erase' ? 'lowered terrain' : 'raised terrain' }),
     },
     zone: {
       sample: stampZoneAtGraph,
@@ -1428,13 +1464,14 @@ export function PaintCanvas(props: {
     }
     const runM = Math.max(DOT_M, totalM);
     const touched = new Set<ChunkKey>();
+    const stampSegment = isWaterSlopeTool ? stampWaterSlopeSegmentAtGraph : stampSlopeSegmentAtGraph;
     if (points.length === 1) {
-      stampSlopeSegmentAtGraph(points[0]!, points[0]!, 0, runM, touched);
+      stampSegment(points[0]!, points[0]!, 0, runM, touched);
     } else {
       let distanceStartM = 0;
       for (let i = 1; i < points.length; i += 1) {
         const from = points[i - 1]!, to = points[i]!;
-        stampSlopeSegmentAtGraph(from, to, distanceStartM, runM, touched);
+        stampSegment(from, to, distanceStartM, runM, touched);
         distanceStartM += Math.hypot(to.x - from.x, to.y - from.y) / TILE_UNITS;
       }
     }
@@ -1458,7 +1495,7 @@ export function PaintCanvas(props: {
     const cap = painterCapabilities[layer];
     if (cap.rawSample) { cap.rawSample(g.gx, g.gy); return; } // object stamp/erase: per raw sample, no interpolation
     const touched = new Set<ChunkKey>();
-    if (isSlopeTool) {
+    if (isSlopeTool || isWaterSlopeTool) {
       const st = slopeStroke.current ?? { points: [] };
       const point = { x: g.gx, y: g.gy };
       const prev = st.points[st.points.length - 1];
@@ -1619,7 +1656,7 @@ export function PaintCanvas(props: {
     const dia = (brushSize * 2 + 1) * TILE_UNITS * zoom; // footprint width across, in px
     const erasing = !isRampTool && activeBrushMode === 'erase';
     const color = erasing ? '#f87171'
-      : isWaterTool ? '#2f7fa8'
+      : isWaterTool || isWaterSlopeTool ? '#2f7fa8'
       : layer === 'height' ? '#fbbf24'
       : layer === 'place' ? (place.active?.color ?? '#a78bfa')
       : layer === 'zone' ? (zones[activeZone]?.color ?? '#22d3ee')
@@ -1964,8 +2001,8 @@ export function PaintCanvas(props: {
             if (drawing.current) { if (isRampTool) updateRamp(sx, sy); else onBrush(sx, sy); }
             updateCursor(sx, sy);
           }}
-          onMouseUp={() => { const was = drawing.current; drawing.current = false; let changed = false; if (was && isRampTool) changed = finishRamp(); else if (was && isSlopeTool) changed = finishSlope(); if (was) { endStroke(); if (changed || (!isRampTool && !isSlopeTool)) notifyEdit(strokeNote()); } }}
-          onMouseLeave={() => { const was = drawing.current; drawing.current = false; let changed = false; if (was && isRampTool) changed = finishRamp(); else if (was && isSlopeTool) changed = finishSlope(); hoverSink.current?.(null); brushSink.current?.(null); if (was) { endStroke(); if (changed || (!isRampTool && !isSlopeTool)) notifyEdit(strokeNote()); } }}
+          onMouseUp={() => { const was = drawing.current; drawing.current = false; let changed = false; if (was && isRampTool) changed = finishRamp(); else if (was && (isSlopeTool || isWaterSlopeTool)) changed = finishSlope(); if (was) { endStroke(); if (changed || (!isRampTool && !isSlopeTool && !isWaterSlopeTool)) notifyEdit(strokeNote()); } }}
+          onMouseLeave={() => { const was = drawing.current; drawing.current = false; let changed = false; if (was && isRampTool) changed = finishRamp(); else if (was && (isSlopeTool || isWaterSlopeTool)) changed = finishSlope(); hoverSink.current?.(null); brushSink.current?.(null); if (was) { endStroke(); if (changed || (!isRampTool && !isSlopeTool && !isWaterSlopeTool)) notifyEdit(strokeNote()); } }}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
         />
       ) : null}
