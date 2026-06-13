@@ -1,6 +1,18 @@
 import { box, cylinder8, hx, STEEL, STEEL_DARK, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const drinkingFountainDef: PropKindDefinition = {
+  kind: 'drinkingFountain',
+  label: 'Drinking Fountain',
+  solid: true,
+  footprintRadiusMeters: 0.2,
+  heightMeters: 1.0,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
+
 export function drinkingFountainParts(): PropPartSpec[] {
   const h = propKindDefinition('drinkingFountain').heightMeters;
   return [

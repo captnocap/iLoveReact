@@ -1,6 +1,19 @@
 import { box, hx, WHITE, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const picketFenceDef: PropKindDefinition = {
+  kind: 'picketFence',
+  label: 'Picket Fence',
+  // A white 2.5m garden segment — same yaw-aware thin AABB as 'fence'.
+  solid: true,
+  footprintRadiusMeters: 1.35,
+  heightMeters: 1.1,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
+
 export function picketFenceParts(): PropPartSpec[] {
   const def = propKindDefinition('picketFence');
   const h = def.heightMeters;

@@ -1,5 +1,18 @@
 import { box, cylinder8, hx, type PropPartSpec } from '../../game/kinds/propModels';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const sandCastleDef: PropKindDefinition = {
+  kind: 'sandCastle',
+  label: 'Sand Castle',
+  solid: true,
+  footprintRadiusMeters: 0.4,
+  heightMeters: 0.5,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'none',
+};
+
 export function sandCastleParts(): PropPartSpec[] {
   const sand = hx('#d8c08a');
   const sandDark = hx('#c0a870');

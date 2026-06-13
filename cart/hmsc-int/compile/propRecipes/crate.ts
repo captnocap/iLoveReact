@@ -1,6 +1,19 @@
 import { box, WOOD, WOOD_DARK, WOOD_PALE, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const crateDef: PropKindDefinition = {
+  kind: 'crate',
+  label: 'Wooden Crate',
+  solid: true,
+  footprintRadiusMeters: 0.35,
+  heightMeters: 0.65,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'tools', capacity: 3, spawnFillChance: 0.55, searchSeconds: 2.5, access: 'open' },
+};
+
 export function crateParts(): PropPartSpec[] {
   const s = propKindDefinition('crate').heightMeters / 0.65;
   return [

@@ -1,5 +1,18 @@
 import { box, WOOD, WOOD_DARK, WOOD_PALE, type PropPartSpec } from '../../game/kinds/propModels';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const palletStackDef: PropKindDefinition = {
+  kind: 'palletStack',
+  label: 'Pallet Stack',
+  solid: true,
+  footprintRadiusMeters: 0.65,
+  heightMeters: 1.05,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'soft',
+};
+
 export function palletStackParts(): PropPartSpec[] {
   const parts: PropPartSpec[] = [];
   const jitter = [0.03, -0.04, 0.02, -0.02, 0.04, 0];

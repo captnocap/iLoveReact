@@ -1,6 +1,21 @@
 import { box, hx, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const loungeChairDef: PropKindDefinition = {
+  kind: 'loungeChair',
+  label: 'Lounge Chair',
+  // The pool/beach lounger — long like a bed (yaw-aware thin AABB).
+  solid: true,
+  footprintRadiusMeters: 0.95,
+  heightMeters: 0.8,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  seat: { pose: 'lay', seatHeightMeters: 0.38, capacity: 1 },
+  coverClass: 'soft',
+};
+
 export function loungeChairParts(): PropPartSpec[] {
   const len = propKindDefinition('loungeChair').footprintRadiusMeters * 2;
   const frame = hx('#e8e4da');

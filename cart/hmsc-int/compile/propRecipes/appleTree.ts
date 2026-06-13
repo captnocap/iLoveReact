@@ -1,6 +1,22 @@
 import { cylinder8, hx, sphere, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const appleTreeDef: PropKindDefinition = {
+  kind: 'appleTree',
+  label: 'Apple Tree',
+  // Orchard scale (~5.5m × 1.15), apples visible in the canopy. The DROP —
+  // apples detaching as live bodies over time — is a future spawn slice;
+  // today you place 'apple' props under it and they roll/kick like balls
+  // (and become throwable/eatable when the item system lands, user ask).
+  solid: true,
+  footprintRadiusMeters: 0.35,
+  heightMeters: 6.5,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
+
 export function appleTreeParts(): PropPartSpec[] {
   const def = propKindDefinition('appleTree');
   const h = def.heightMeters;

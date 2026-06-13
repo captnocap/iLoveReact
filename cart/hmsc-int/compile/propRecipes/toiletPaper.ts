@@ -1,6 +1,20 @@
 import { box, cylinder8, hx, STEEL, WHITE, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const toiletPaperDef: PropKindDefinition = {
+  kind: 'toiletPaper',
+  label: 'Toilet Paper',
+  solid: false,
+  footprintRadiusMeters: 0.1,
+  heightMeters: 0.78,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'wall',
+  coverClass: 'none',
+};
+
 export function toiletPaperParts(): PropPartSpec[] {
   const h = propKindDefinition('toiletPaper').heightMeters;
   return [

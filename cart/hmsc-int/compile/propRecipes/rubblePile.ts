@@ -1,6 +1,19 @@
 import { box, CONCRETE, cylinder8, hx, STEEL_DARK, STONE, STONE_DARK, STONE_LIGHT, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const rubblePileDef: PropKindDefinition = {
+  kind: 'rubblePile',
+  label: 'Rubble Pile',
+  solid: true,
+  footprintRadiusMeters: 0.8,
+  heightMeters: 0.55,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'soft',
+};
+
 export function rubblePileParts(): PropPartSpec[] {
   const { heightMeters: h, footprintRadiusMeters: r } = propKindDefinition('rubblePile');
   return [

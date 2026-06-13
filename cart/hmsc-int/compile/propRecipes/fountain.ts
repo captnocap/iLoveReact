@@ -1,6 +1,21 @@
 import { CONCRETE, cylinder8, cylinder16, hx, sphere, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const fountainDef: PropKindDefinition = {
+  kind: 'fountain',
+  label: 'Plaza Fountain',
+  // A round plaza fountain — basin, pedestal, upper bowl, jet. You can sit
+  // on the basin edge like every city park.
+  solid: true,
+  footprintRadiusMeters: 1.8,
+  heightMeters: 2.2,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  seat: { pose: 'sit', seatHeightMeters: 0.55, capacity: 3 },
+};
+
 export function fountainParts(): PropPartSpec[] {
   const r = propKindDefinition('fountain').footprintRadiusMeters;
   const water = hx('#3a8fd8');
