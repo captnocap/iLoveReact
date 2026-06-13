@@ -37,6 +37,13 @@ import { lockerSetParts } from './lockerSet';
 import { oilTankParts } from './oilTank';
 import { rubblePileParts } from './rubblePile';
 import { toiletPaperParts } from './toiletPaper';
+import { radioTowerParts } from './radioTower';
+import { gasPumpParts } from './gasPump';
+import { vendingMachineParts } from './vendingMachine';
+import { storeShelfParts } from './storeShelf';
+import { crateParts } from './crate';
+import { palletParts } from './pallet';
+import { palletStackParts } from './palletStack';
 import { boulderParts } from './boulder';
 import { bushParts } from './bush';
 import { chairParts } from './chair';
@@ -201,6 +208,13 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     case 'oilTank': return oilTankParts();
     case 'rubblePile': return rubblePileParts();
     case 'toiletPaper': return toiletPaperParts();
+    case 'radioTower': return radioTowerParts();
+    case 'gasPump': return gasPumpParts();
+    case 'vendingMachine': return vendingMachineParts();
+    case 'storeShelf': return storeShelfParts();
+    case 'crate': return crateParts();
+    case 'pallet': return palletParts();
+    case 'palletStack': return palletStackParts();
     default: {
       // data-recipe kinds (propModels.RECIPES) resolve here; the two paths agree
       // by construction since everyone calls this one function.
