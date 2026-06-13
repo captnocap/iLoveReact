@@ -1241,10 +1241,18 @@ function colocationKey(p: PlacedBuildPiece): string {
   return `${p.pieceId}|${q(p.x)}|${q(p.y)}|${q(p.z)}|${Math.round(p.yawDegrees)}|${p.edit ?? ''}|${p.stampId ?? ''}`;
 }
 export function dedupeColocatedPieces<T extends PlacedBuildPiece>(pieces: readonly T[]): T[] {
+  // ONLY loose pieces (no stampId) dedup. A building instance's pieces are a
+  // coherent set — never drop a member, even if two happen to overlap (that's
+  // the building's geometry, not a z-fight twin the user accidentally stacked).
+  // The reported clash is loose painted/placed floors and walls; scoping here
+  // keeps that fix while guaranteeing buildings are untouched.
   const lastAt = new Map<string, number>();
-  for (let i = 0; i < pieces.length; i += 1) lastAt.set(colocationKey(pieces[i]), i);
-  if (lastAt.size === pieces.length) return pieces as T[]; // no twins — keep the same ref (memo-friendly)
-  return pieces.filter((p, i) => lastAt.get(colocationKey(p)) === i);
+  for (let i = 0; i < pieces.length; i += 1) {
+    if (pieces[i].stampId) continue;
+    lastAt.set(colocationKey(pieces[i]), i);
+  }
+  const survivors = pieces.filter((p, i) => p.stampId !== undefined || lastAt.get(colocationKey(p)) === i);
+  return survivors.length === pieces.length ? (pieces as T[]) : survivors; // no twins → same ref (memo-friendly)
 }
 
 export function liftBuildingsToTerrain<T extends PlacedBuildPiece>(
