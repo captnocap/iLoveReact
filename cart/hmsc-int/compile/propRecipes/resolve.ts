@@ -66,6 +66,16 @@ import { appleTreeParts } from './appleTree';
 import { appleParts } from './apple';
 import { arcadeCabinetParts } from './arcadeCabinet';
 import { slotMachineParts } from './slotMachine';
+import { clothingRackParts } from './clothingRack';
+import { displayCaseParts } from './displayCase';
+import { liquorShelfParts } from './liquorShelf';
+import { beerCaseParts } from './beerCase';
+import { dinerBoothParts } from './dinerBooth';
+import { orderCounterParts } from './orderCounter';
+import { menuBoardParts } from './menuBoard';
+import { sodaMachineParts } from './sodaMachine';
+import { openSignParts } from './openSign';
+import { greenCrossSignParts } from './greenCrossSign';
 import { boulderParts } from './boulder';
 import { bushParts } from './bush';
 import { chairParts } from './chair';
@@ -259,6 +269,16 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     case 'apple': return appleParts();
     case 'arcadeCabinet': return arcadeCabinetParts();
     case 'slotMachine': return slotMachineParts();
+    case 'clothingRack': return clothingRackParts();
+    case 'displayCase': return displayCaseParts();
+    case 'liquorShelf': return liquorShelfParts();
+    case 'beerCase': return beerCaseParts();
+    case 'dinerBooth': return dinerBoothParts();
+    case 'orderCounter': return orderCounterParts();
+    case 'menuBoard': return menuBoardParts();
+    case 'sodaMachine': return sodaMachineParts();
+    case 'openSign': return openSignParts();
+    case 'greenCrossSign': return greenCrossSignParts();
     default: {
       // data-recipe kinds (propModels.RECIPES) resolve here; the two paths agree
       // by construction since everyone calls this one function.
