@@ -104,6 +104,15 @@ export const MAP_LUMP = {
   // /test's door. Absent → no leaves (the wall jambs still render/collide).
   // Layout: cart/hmsc-int/compile/worldDoors.ts encodeDoors.
   DOORS: 19,
+  // Imported OBJ/GLB prop meshes: shared baked vertex payloads plus placed
+  // transforms. Layout: cart/hmsc-int/compile/worldGeometry.ts encodeMeshProps.
+  MESH_PROPS: 20,
+  // Bodies of water (world/water): each a flat surface-level height grid the
+  // loader renders as a translucent heightfield with a host-clock travelling
+  // wave (animated ripples in the shipped game). Header carries the shared
+  // look + wave; the per-body grid + skirt make a wadeable volume. Absent → no
+  // water. Layout: cart/hmsc-int/compile/worldGeometry.ts encodeWaterBodies.
+  WATER: 21,
 } as const;
 
 export type LumpInput = {

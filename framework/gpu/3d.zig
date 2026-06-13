@@ -1031,6 +1031,23 @@ fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, 
 // omitted. KEEP IN PARITY with Heightfield.ts (winding, normals, skirt).
 var g_hf_scratch: [MAX_DYN_VERTS]Vertex = undefined;
 
+// A travelling surface wave for a heightfield (bodies of water). Zero amplitude =
+// no wave (all terrain). Mirrors runtime/geometries/Heightfield.ts waveHeight.
+const HfWave = struct { amp: f32 = 0, len: f32 = 0, speed: f32 = 0, dx: f32 = 1, dz: f32 = 0 };
+fn hfWaveActive(w: HfWave) bool {
+    return @abs(w.amp) > 1e-4 and w.len > 1e-4;
+}
+fn hfWaveAt(w: HfWave, x: f32, z: f32, t: f32) f32 {
+    const dlen = @sqrt(w.dx * w.dx + w.dz * w.dz);
+    const ux = if (dlen > 1e-4) w.dx / dlen else 1.0;
+    const uz = if (dlen > 1e-4) w.dz / dlen else 0.0;
+    const cycles = (x * ux + z * uz) / w.len + t * w.speed;
+    return @sin(cycles * std.math.pi * 2.0) * w.amp;
+}
+// Scratch for the rippled copy of a wave heightfield's grid (water grids are
+// small; a field too big for this renders still — no wave, never a crash).
+var g_hf_wave_heights: [64 * 64]f32 = undefined;
+
 fn hfHeightAt(hs: []const f32, cols: usize, rows: usize, ix: i64, iz: i64) f32 {
     const ci: usize = @intCast(std.math.clamp(ix, 0, @as(i64, @intCast(cols)) - 1));
     const cj: usize = @intCast(std.math.clamp(iz, 0, @as(i64, @intCast(rows)) - 1));
@@ -1077,14 +1094,32 @@ fn hfSkirt(n: *usize, a: [3]f32, b: [3]f32, c: [3]f32, d: [3]f32, nrm: [3]f32) v
 
 /// Build the heightfield mesh into g_hf_scratch; returns the vertex count (0 = bad
 /// input). Caller uploads g_hf_scratch[0..count] to the slot.
-fn hfGen(hs: []const f32, cols: usize, rows: usize, width: f32, depth: f32, base: f32) u32 {
-    if (cols < 2 or rows < 2 or hs.len < cols * rows) return 0;
+fn hfGen(hs_in: []const f32, cols: usize, rows: usize, width: f32, depth: f32, base: f32, wave: HfWave, t: f32) u32 {
+    if (cols < 2 or rows < 2 or hs_in.len < cols * rows) return 0;
     const cf: f32 = @floatFromInt(cols - 1);
     const rf: f32 = @floatFromInt(rows - 1);
     const dx = width / cf;
     const dz = depth / rf;
     const x0 = -width * 0.5;
     const z0 = -depth * 0.5;
+    // A wave heightfield ripples its top: build a rippled copy of the grid and
+    // bake from that (the rest of the bake is untouched). Cells at/under `base`
+    // (outside a disc's footprint) stay flat so the skirt rounds the body off.
+    var hs = hs_in;
+    if (hfWaveActive(wave) and cols * rows <= g_hf_wave_heights.len) {
+        var j2: usize = 0;
+        while (j2 < rows) : (j2 += 1) {
+            const z = z0 + @as(f32, @floatFromInt(j2)) * dz;
+            var i2: usize = 0;
+            while (i2 < cols) : (i2 += 1) {
+                const idx = j2 * cols + i2;
+                const h = hs_in[idx];
+                const x = x0 + @as(f32, @floatFromInt(i2)) * dx;
+                g_hf_wave_heights[idx] = if (h > base) h + hfWaveAt(wave, x, z, t) else h;
+            }
+        }
+        hs = g_hf_wave_heights[0 .. cols * rows];
+    }
     var n: usize = 0;
 
     // Top surface — wound to face +Y.
@@ -1141,12 +1176,16 @@ fn hfGen(hs: []const f32, cols: usize, rows: usize, width: f32, depth: f32, base
 /// Resolve a "~hf~<slotId>~<version>" key: generate the heightfield mesh from the
 /// streamed height grid into the reused slot, overwriting on version change. The
 /// grid is the same one the collider takes, so render == collide.
-fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]const f32, cols: u32, rows: u32, width: f32, depth: f32, base: f32) ?GeoSlice {
+fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]const f32, cols: u32, rows: u32, width: f32, depth: f32, base: f32, wave: HfWave) ?GeoSlice {
     const loc = dynSlotLocate("~hf~".len, key) orelse return null;
     const s = &g_dyn_slots[loc.i];
-    if (s.version_hash != loc.ver_hash or s.count == 0) {
+    // A wave heightfield (bodies of water) re-bakes EVERY frame from the host
+    // clock so the ripple animates; static fields rebake only on version change.
+    const animated = hfWaveActive(wave);
+    if (animated or s.version_hash != loc.ver_hash or s.count == 0) {
         const hs = heights orelse return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
-        const cnt = hfGen(hs, @intCast(cols), @intCast(rows), width, depth, base);
+        const t: f32 = if (animated) @as(f32, @floatFromInt(@mod(std.time.milliTimestamp(), 1_000_000))) / 1000.0 else 0;
+        const cnt = hfGen(hs, @intCast(cols), @intCast(rows), width, depth, base, wave, t);
         if (cnt == 0) return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
         const buf = g_retained_vbuf orelse return null;
         queue.writeBuffer(buf, loc.off, @ptrCast(&g_hf_scratch), @as(u64, cnt) * @sizeOf(Vertex));
@@ -1678,6 +1717,13 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                 child.scene3d_hf_width,
                 child.scene3d_hf_depth,
                 child.scene3d_hf_base,
+                .{
+                    .amp = child.scene3d_hf_wave_amp,
+                    .len = child.scene3d_hf_wave_len,
+                    .speed = child.scene3d_hf_wave_speed,
+                    .dx = child.scene3d_hf_wave_dx,
+                    .dz = child.scene3d_hf_wave_dz,
+                },
             );
             if (maybe_slot == null) continue;
         } else if (std.mem.startsWith(u8, key, "~dyn~")) {

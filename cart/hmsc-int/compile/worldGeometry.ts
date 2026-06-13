@@ -28,7 +28,7 @@ import { propKindDefinition } from '../game/kinds/props';
 import { solveRoadCrossSection } from '../world/roadProfile';
 import { tileKindDefinition } from '../world/tileKinds';
 import { CHUNK_TILES } from '../chunks';
-import { WATER_LOOK, waterBodyVolume } from '../game/kinds/waterBodies';
+import { WATER_LOOK, WATER_WAVE, waterFlatHeights } from '../game/kinds/waterBodies';
 import { groundKindAt, heightfieldTexelColor, MARKER_KIND_INDICES, roadRibbonSection } from '../render3d/heightfieldSurface';
 import { isParkingKind } from '../render3d/parkingStall';
 import type { ChunkFloor } from '../chunkFloor';
@@ -46,40 +46,12 @@ import type { DecalAssetSink } from './decalAssets';
 import { createInteractableSink, type InteractableSink } from './worldInteractables';
 import { createDynamicPropSink, type DynamicPropSink } from './worldDynamicProps';
 import {
-  box, cylinder8, cylinder16, sphere, propModelParts, propPartId,
+  box, cylinder8, cylinder16, sphere, propPartId,
   type Color, type Rotation, type PropPartShape, type PropPartSpec,
 } from '../game/kinds/propModels';
-import { ballBasketballParts } from './propRecipes/ballBasketball';
-import { ballBeachParts } from './propRecipes/ballBeach';
-import { ballSoccerParts } from './propRecipes/ballSoccer';
-import { benchParts } from './propRecipes/bench';
-import { boulderParts } from './propRecipes/boulder';
-import { chairParts } from './propRecipes/chair';
-import { couchParts } from './propRecipes/couch';
-import { dumpsterParts } from './propRecipes/dumpster';
-import { fenceParts } from './propRecipes/fence';
-import { fireHydrantParts } from './propRecipes/fireHydrant';
-import { floorLampParts } from './propRecipes/floorLamp';
-import { ledLightParts } from './propRecipes/ledLight';
-import { mailboxParts } from './propRecipes/mailbox';
-import { payphoneParts } from './propRecipes/payphone';
-import { rockParts } from './propRecipes/rock';
-import { rockFlatParts } from './propRecipes/rockFlat';
-import { rockMossyParts } from './propRecipes/rockMossy';
-import { rockPileParts } from './propRecipes/rockPile';
-import { rockSpireParts } from './propRecipes/rockSpire';
-import { stopSignParts } from './propRecipes/stopSign';
-import { streetLightParts } from './propRecipes/streetLight';
-import { streetSignParts } from './propRecipes/streetSign';
-import { tableParts } from './propRecipes/table';
-import { trafficLightParts } from './propRecipes/trafficLight';
-import { treeBirchParts } from './propRecipes/treeBirch';
-import { treeCypressParts } from './propRecipes/treeCypress';
-import { treeDeadParts } from './propRecipes/treeDead';
-import { treeOakParts } from './propRecipes/treeOak';
-import { treePalmParts } from './propRecipes/treePalm';
-import { treePineParts } from './propRecipes/treePine';
-import { wallPaintingParts } from './propRecipes/wallPainting';
+// PROPSINGLE-0782: the ONE prop→parts resolver, shared with the /test render
+// (render3d/props/DataProp) so a prop's geometry lives in exactly one place.
+import { resolvePropParts } from './propRecipes/resolve';
 import { importedPropMesh, isImportedPropKind, type ImportedPropMesh } from '../game/kinds/importedProps';
 import { textBytes } from '@reactjit/workspace';
 
@@ -367,35 +339,6 @@ function tileColor(kind: TileKind | string): Color {
   }
 }
 
-function propColor(kind: PropKind | string): Color {
-  switch (kind) {
-    case 'bush':
-    case 'bushLarge':
-    case 'bushLow':
-    case 'bushSparse':
-      return [0.3, 0.55, 0.25];
-    case 'fireHydrant':
-    case 'stopSign':
-      return [0.82, 0.22, 0.16];
-    case 'trafficLight':
-      return [0.85, 0.7, 0.2];
-    case 'streetLight':
-    case 'streetSign':
-    case 'payphone':
-    case 'mailbox':
-      return [0.5, 0.5, 0.55];
-    case 'dumpster':
-      return [0.25, 0.45, 0.3];
-    case 'rock':
-    case 'rockLarge':
-    case 'rockSmall':
-      return [0.5, 0.5, 0.52];
-    case 'fence':
-      return [0.55, 0.4, 0.25];
-    default:
-      return [0.7, 0.6, 0.4];
-  }
-}
 
 function propAt(prop: WorldProp, local: readonly [number, number, number]): readonly [number, number, number] {
   const yaw = (prop.yawDegrees ?? 0) * DEG;
@@ -446,311 +389,6 @@ function pushPropParts(b: Build, prop: WorldProp, parts: readonly PropPartSpec[]
   return parts.length;
 }
 
-function bushParts(prop: WorldProp): PropPartSpec[] {
-  const def = propKindDefinition(prop.kind);
-  const radius = def.footprintRadiusMeters;
-  const height = def.heightMeters;
-  const palette: Color[] = [[0x1f / 255, 0x4a / 255, 0x20 / 255], [0x2f / 255, 0x6b / 255, 0x2f / 255], [0x43 / 255, 0x88 / 255, 0x3a / 255]];
-  const blobs = [
-    { cx: 0, cy: 0.18, cz: 0, rh: 0.86, rv: 0.82, tint: 1 },
-    { cx: 0.4, cy: 0.1, cz: 0.04, rh: 0.62, rv: 0.52, tint: 0 },
-    { cx: -0.38, cy: 0.12, cz: 0.12, rh: 0.64, rv: 0.52, tint: 2 },
-    { cx: 0.08, cy: 0.08, cz: -0.42, rh: 0.6, rv: 0.5, tint: 2 },
-    { cx: -0.14, cy: 0.1, cz: 0.4, rh: 0.62, rv: 0.5, tint: 0 },
-    { cx: 0.12, cy: 0.62, cz: 0.08, rh: 0.4, rv: 0.36, tint: 2 },
-    { cx: -0.16, cy: 0.66, cz: -0.06, rh: 0.36, rv: 0.34, tint: 0 },
-  ];
-  for (let i = 0; i < 9; i += 1) {
-    const a = (i / 9) * Math.PI * 2;
-    const rh = 0.6 + (i % 3) * 0.05;
-    blobs.push({ cx: Math.cos(a) * (rh - 0.04), cz: Math.sin(a) * (rh - 0.04), cy: 0.26 + (i % 2) * 0.14, rh, rv: 0.46, tint: i % 3 });
-  }
-  for (let i = 0; i < 6; i += 1) {
-    const a = (i / 6) * Math.PI * 2 + 0.4;
-    const rh = 0.42 + (i % 2) * 0.05;
-    blobs.push({ cx: Math.cos(a) * (rh - 0.06), cz: Math.sin(a) * (rh - 0.06), cy: 0.5 + (i % 2) * 0.1, rh, rv: 0.4, tint: (i % 2) === 0 ? 2 : 0 });
-  }
-  return blobs.map((blob) => sphere([blob.cx * radius, blob.cy * height, blob.cz * radius], [blob.rh * radius * 2, blob.rv * height * 2, blob.rh * radius * 2], palette[blob.tint]));
-}
-
-function propParts(prop: WorldProp): PropPartSpec[] {
-  const def = propKindDefinition(prop.kind);
-  switch (prop.kind) {
-    case 'bush':
-    case 'bushLarge':
-    case 'bushLow':
-    case 'bushSparse':
-      return bushParts(prop);
-    case 'rock':
-    case 'rockLarge':
-    case 'rockSmall':
-      return rockParts(prop.kind, def.heightMeters, def.footprintRadiusMeters);
-    case 'dumpster': {
-      return dumpsterParts();
-    }
-    case 'streetSign': return streetSignParts(def.heightMeters);
-    case 'stopSign': return stopSignParts(def.heightMeters);
-    case 'streetLight': return streetLightParts(def.heightMeters);
-    case 'trafficLight': return trafficLightParts(def.heightMeters);
-    case 'payphone': return payphoneParts(def.heightMeters);
-    case 'mailbox': return mailboxParts(def.heightMeters);
-    case 'fence': return fenceParts(def.heightMeters, def.footprintRadiusMeters);
-    case 'fireHydrant': {
-      return fireHydrantParts(def.heightMeters);
-    }
-    // ── trees (mirror hmsc-int/render3d/props/Tree.tsx; size variants share
-    //    the species recipe — everything derives from the registry) ─────────
-    case 'treeOakYoung':
-    case 'treeOakGiant':
-    case 'treeOak':
-      return treeOakParts(prop.kind, def.heightMeters, def.footprintRadiusMeters);
-    case 'treePineYoung':
-    case 'treePineGiant':
-    case 'treePine':
-      return treePineParts(prop.kind, def.heightMeters, def.footprintRadiusMeters);
-    case 'treeBirch':
-      return treeBirchParts(def.heightMeters, def.footprintRadiusMeters);
-    case 'treeCypress':
-      return treeCypressParts(def.heightMeters, def.footprintRadiusMeters);
-    case 'treePalm':
-      return treePalmParts(def.heightMeters, def.footprintRadiusMeters);
-    case 'treeDead':
-      return treeDeadParts(def.heightMeters, def.footprintRadiusMeters);
-    // ── rock forms (mirror hmsc-int/render3d/props/Rock.tsx) ──────────────
-    case 'boulder': return boulderParts(def.heightMeters, def.footprintRadiusMeters);
-    case 'rockFlat': return rockFlatParts(def.heightMeters, def.footprintRadiusMeters);
-    case 'rockSpire': return rockSpireParts(def.heightMeters, def.footprintRadiusMeters);
-    case 'rockMossy': return rockMossyParts(def.heightMeters, def.footprintRadiusMeters);
-    case 'rockPile': return rockPileParts(def.heightMeters, def.footprintRadiusMeters);
-    // ── balls (mirror hmsc-int/render3d/props/Ball.tsx) ───────────────────
-    case 'ballBeach': return ballBeachParts(def.footprintRadiusMeters);
-    case 'ballSoccer': return ballSoccerParts(def.footprintRadiusMeters);
-    case 'ballBasketball': return ballBasketballParts(def.footprintRadiusMeters);
-    // ── wall decor (mirror hmsc-int/render3d/props/WallDecor.tsx) ─────────
-    case 'wallPainting': return wallPaintingParts();
-    case 'ledLight': return ledLightParts();
-    // ── furniture (mirror hmsc-int/render3d/props/Furniture.tsx) ──────────
-    case 'chair':
-    case 'chairRed':
-    case 'chairBlue':
-    case 'chairGreen':
-      return chairParts(prop.kind);
-    case 'couch': return couchParts(def.footprintRadiusMeters);
-    case 'table': return tableParts(def.heightMeters, def.footprintRadiusMeters);
-    case 'floorLamp': return floorLampParts(def.heightMeters);
-    case 'bench': return benchParts(def.footprintRadiusMeters);
-    // ── street furniture (mirror render3d/props/StreetFurniture.tsx) ──────
-    case 'trafficCone': {
-      const h = def.heightMeters;
-      const orange: Color = [0xe8 / 255, 0x68 / 255, 0x2a / 255];
-      return [
-        box([0, h * 0.03, 0], [def.footprintRadiusMeters * 2, h * 0.06, def.footprintRadiusMeters * 2], orange),
-        // No cone instance shape — three stacked cylinders narrowing upward.
-        cylinder8([0, h * 0.26, 0], h * 0.185, h * 0.4, orange),
-        cylinder8([0, h * 0.57, 0], h * 0.12, h * 0.34, orange),
-        cylinder8([0, h * 0.83, 0], h * 0.064, h * 0.26, orange),
-        cylinder8([0, h * 0.52, 0], h * 0.15, h * 0.11, [0xf2 / 255, 0xef / 255, 0xe8 / 255]),
-      ];
-    }
-    case 'barrier': {
-      const w = def.footprintRadiusMeters * 2;
-      const h = def.heightMeters;
-      const concrete: Color = [0x9a / 255, 0x9a / 255, 0x92 / 255];
-      const concreteDark: Color = [0x82 / 255, 0x82 / 255, 0x7a / 255];
-      return [
-        box([0, h * 0.14, 0], [w, h * 0.28, 0.6], concreteDark),
-        box([0, h * 0.47, 0], [w, h * 0.42, 0.4], concrete),
-        box([0, h * 0.85, 0], [w, h * 0.3, 0.24], concrete),
-        box([-w * 0.3, h * 0.1, 0], [0.18, h * 0.12, 0.62], concreteDark),
-        box([w * 0.3, h * 0.1, 0], [0.18, h * 0.12, 0.62], concreteDark),
-      ];
-    }
-    case 'trashCan': {
-      const h = def.heightMeters;
-      const r = def.footprintRadiusMeters;
-      const body: Color = [0x3f / 255, 0x57 / 255, 0x47 / 255];
-      const dark: Color = [0x32 / 255, 0x46 / 255, 0x3a / 255];
-      return [
-        cylinder16([0, h * 0.41, 0], r * 0.92, h * 0.78, body),
-        cylinder16([0, h * 0.82, 0], r, h * 0.05, dark),
-        sphere([0, h * 0.84, 0], [r * 2, h * 0.45, r * 2], dark),
-        box([0, h * 0.86, -r * 0.7], [r * 1.1, h * 0.16, 0.02], body, [18, 0, 0]),
-      ];
-    }
-    case 'planter': {
-      const h = def.heightMeters;
-      const half = def.footprintRadiusMeters;
-      const boxH = h * 0.7;
-      const leafMid: Color = [0x2f / 255, 0x6b / 255, 0x2f / 255];
-      const leafLight: Color = [0x43 / 255, 0x88 / 255, 0x3a / 255];
-      return [
-        box([0, boxH / 2, 0], [half * 2, boxH, half * 2], [0xa8 / 255, 0x59 / 255, 0x3a / 255]),
-        box([0, boxH, 0], [half * 1.8, h * 0.06, half * 1.8], [0x3e / 255, 0x2f / 255, 0x22 / 255]),
-        sphere([-half * 0.4, boxH + h * 0.18, -half * 0.2], [half * 0.8, h * 0.56, half * 0.8], leafMid),
-        sphere([half * 0.35, boxH + h * 0.14, half * 0.25], [half * 0.76, h * 0.48, half * 0.76], leafLight),
-        sphere([0, boxH + h * 0.22, 0], [half * 0.84, h * 0.6, half * 0.84], leafMid),
-        sphere([-half * 0.45, boxH + h * 0.38, half * 0.15], [h * 0.12, h * 0.12, h * 0.12], [0xd6 / 255, 0x5d / 255, 0x8a / 255]),
-        sphere([half * 0.4, boxH + h * 0.34, -half * 0.2], [h * 0.11, h * 0.11, h * 0.11], [0xe8 / 255, 0xc8 / 255, 0x4a / 255]),
-      ];
-    }
-    // ── household (mirror hmsc-int/render3d/props/Furniture.tsx) ──────────
-    case 'bedSingle': case 'bedDouble': {
-      const double = prop.kind === 'bedDouble';
-      const w = def.footprintRadiusMeters * 2;
-      const d = double ? 1.5 : 1.0;
-      const woodDark: Color = [0x6b / 255, 0x4a / 255, 0x2e / 255];
-      const wood: Color = [0x8a / 255, 0x62 / 255, 0x40 / 255];
-      const linen: Color = [0xec / 255, 0xe8 / 255, 0xdd / 255];
-      const porcelain: Color = [0xee / 255, 0xf0 / 255, 0xf2 / 255];
-      const blanket: Color = double ? [0x7d / 255, 0x3b / 255, 0x4a / 255] : [0x3a / 255, 0x7d / 255, 0x80 / 255];
-      const parts: PropPartSpec[] = [
-        box([0, 0.15, 0], [w, 0.3, d], woodDark),
-        box([0, 0.39, 0], [w * 0.97, 0.18, d * 0.94], linen),
-        box([-w * 0.16, 0.49, 0], [w * 0.62, 0.06, d * 0.96], blanket),
-        box([w * 0.49, def.heightMeters / 2, 0], [0.07, def.heightMeters, d], wood),
-      ];
-      if (double) {
-        parts.push(box([w * 0.36, 0.5, -d * 0.22], [w * 0.2, 0.1, d * 0.36], porcelain));
-        parts.push(box([w * 0.36, 0.5, d * 0.22], [w * 0.2, 0.1, d * 0.36], porcelain));
-      } else {
-        parts.push(box([w * 0.36, 0.5, 0], [w * 0.2, 0.1, d * 0.55], porcelain));
-      }
-      return parts;
-    }
-    case 'cupboard': {
-      const h = def.heightMeters;
-      const w = def.footprintRadiusMeters * 2;
-      const d = 0.5;
-      const wood: Color = [0x8a / 255, 0x62 / 255, 0x40 / 255];
-      const woodDark: Color = [0x6b / 255, 0x4a / 255, 0x2e / 255];
-      const metal: Color = [0x3a / 255, 0x3f / 255, 0x46 / 255];
-      return [
-        box([0, 0.04, 0], [w, 0.08, d], woodDark),
-        box([0, h / 2, 0], [w, h - 0.12, d - 0.06], wood),
-        box([0, h - 0.03, 0], [w + 0.04, 0.06, d], woodDark),
-        box([-w * 0.24, h * 0.52, -d / 2 + 0.015], [w * 0.44, h * 0.84, 0.02], woodDark),
-        box([w * 0.24, h * 0.52, -d / 2 + 0.015], [w * 0.44, h * 0.84, 0.02], woodDark),
-        box([-w * 0.06, h * 0.55, -d / 2 - 0.005], [0.035, 0.035, 0.035], metal),
-        box([w * 0.06, h * 0.55, -d / 2 - 0.005], [0.035, 0.035, 0.035], metal),
-      ];
-    }
-    case 'mirror': {
-      const cy = 1.18;
-      return [
-        box([0, cy, -0.025], [0.62, 1.5, 0.04], [0x8c / 255, 0x92 / 255, 0x99 / 255]),
-        box([0, cy, -0.05], [0.54, 1.42, 0.012], [0xbc / 255, 0xd6 / 255, 0xe2 / 255]),
-        box([0.09, cy + 0.04, -0.058], [0.07, 1.25, 0.006], [0xe8 / 255, 0xf4 / 255, 0xfa / 255], [0, 0, 18]),
-      ];
-    }
-    case 'sink': {
-      const h = def.heightMeters;
-      const porcelain: Color = [0xee / 255, 0xf0 / 255, 0xf2 / 255];
-      const fixture: Color = [0xaa / 255, 0xb0 / 255, 0xb6 / 255];
-      return [
-        cylinder8([0, h * 0.39, 0], 0.09, h * 0.78, porcelain),
-        sphere([0, h * 0.82, 0], [0.54, 0.23, 0.46], porcelain),
-        box([0, h * 0.88, 0], [0.56, 0.04, 0.46], porcelain),
-        cylinder8([0, h * 0.96, 0.16], 0.022, 0.16, fixture),
-        cylinder8([0, h + 0.03, 0.09], 0.018, 0.14, fixture, [90, 0, 0]),
-      ];
-    }
-    case 'oven': {
-      const h = def.heightMeters;
-      const w = def.footprintRadiusMeters * 2;
-      const d = 0.62;
-      const body: Color = [0xd6 / 255, 0xd9 / 255, 0xdc / 255];
-      const dark: Color = [0xaa / 255, 0xb0 / 255, 0xb6 / 255];
-      const black: Color = [0x22 / 255, 0x26 / 255, 0x2b / 255];
-      const metal: Color = [0x3a / 255, 0x3f / 255, 0x46 / 255];
-      return [
-        box([0, h / 2, 0], [w, h, d], body),
-        box([0, h, 0], [w, 0.025, d], black),
-        cylinder8([-w * 0.22, h + 0.012, -0.14], 0.085, 0.02, [0x33 / 255, 0x37 / 255, 0x3c / 255]),
-        cylinder8([w * 0.22, h + 0.012, -0.14], 0.085, 0.02, [0x33 / 255, 0x37 / 255, 0x3c / 255]),
-        cylinder8([-w * 0.22, h + 0.012, 0.14], 0.085, 0.02, [0x33 / 255, 0x37 / 255, 0x3c / 255]),
-        cylinder8([w * 0.22, h + 0.012, 0.14], 0.085, 0.02, [0x33 / 255, 0x37 / 255, 0x3c / 255]),
-        box([0, h * 0.42, -d / 2 + 0.005], [w * 0.86, h * 0.5, 0.02], dark),
-        box([0, h * 0.45, -d / 2 - 0.005], [w * 0.6, h * 0.26, 0.015], black),
-        box([0, h * 0.72, -d / 2 - 0.02], [w * 0.8, 0.035, 0.035], metal),
-      ];
-    }
-    case 'fridge': {
-      const h = def.heightMeters;
-      const w = def.footprintRadiusMeters * 2;
-      const d = 0.72;
-      const seamY = h * 0.68;
-      const body: Color = [0xd6 / 255, 0xd9 / 255, 0xdc / 255];
-      const dark: Color = [0xaa / 255, 0xb0 / 255, 0xb6 / 255];
-      const black: Color = [0x22 / 255, 0x26 / 255, 0x2b / 255];
-      return [
-        box([0, 0.04, 0], [w * 0.9, 0.08, d * 0.9], black),
-        box([0, h / 2 + 0.04, 0], [w, h - 0.08, d], body),
-        box([0, seamY, -d / 2 + 0.002], [w, 0.02, 0.02], dark),
-        box([-w * 0.34, seamY - h * 0.18, -d / 2 - 0.025], [0.035, h * 0.3, 0.035], dark),
-        box([-w * 0.34, seamY + h * 0.1, -d / 2 - 0.025], [0.035, h * 0.14, 0.035], dark),
-      ];
-    }
-    case 'computer': {
-      const shell: Color = [0xcf / 255, 0xc8 / 255, 0xb4 / 255];
-      const shellDark: Color = [0xb8 / 255, 0xb2 / 255, 0xa0 / 255];
-      const screen: Color = [0x2c / 255, 0x4a / 255, 0x66 / 255];
-      return [
-        box([-0.05, 0.32, 0.06], [0.36, 0.3, 0.3], shell),
-        box([-0.05, 0.32, -0.095], [0.3, 0.24, 0.012], screen),
-        box([-0.05, 0.14, 0.06], [0.12, 0.06, 0.12], shellDark),
-        box([-0.05, 0.1, 0.06], [0.24, 0.025, 0.2], shellDark),
-        box([-0.05, 0.105, -0.21], [0.34, 0.025, 0.12], [0xd9 / 255, 0xd3 / 255, 0xc2 / 255], [4, 0, 0]),
-        box([0.24, 0.27, 0.02], [0.16, 0.42, 0.38], [0xc4 / 255, 0xbd / 255, 0xa9 / 255]),
-        box([0.24, 0.38, -0.175], [0.1, 0.03, 0.012], [0x22 / 255, 0x26 / 255, 0x2b / 255]),
-      ];
-    }
-    // ── utility + sport (mirror render3d/props/StreetFurniture.tsx) ───────
-    case 'telephonePole': {
-      const h = def.heightMeters;
-      const r = def.footprintRadiusMeters;
-      const wood: Color = [0x4f / 255, 0x3d / 255, 0x2a / 255];
-      const woodDark: Color = [0x3e / 255, 0x30 / 255, 0x21 / 255];
-      const insulator: Color = [0x9a / 255, 0xa8 / 255, 0xb5 / 255];
-      const parts: PropPartSpec[] = [cylinder8([0, h / 2, 0], r * 0.8, h, wood)];
-      for (const [y, width] of [[h * 0.92, 1.7], [h * 0.82, 1.3]] as [number, number][]) {
-        parts.push(box([0, y, 0], [width, 0.09, 0.09], woodDark));
-        parts.push(cylinder8([-width * 0.42, y + 0.08, 0], 0.03, 0.1, insulator));
-        parts.push(cylinder8([width * 0.42, y + 0.08, 0], 0.03, 0.1, insulator));
-      }
-      return parts;
-    }
-    case 'basketballHoop': {
-      const h = def.heightMeters;
-      // PROPSCALE-0611: regulation 3.05 × 1.15 (the presence law)
-      const rimY = 3.5;
-      const boardZ = -0.35;
-      const pole: Color = [0x3a / 255, 0x3f / 255, 0x46 / 255];
-      const board: Color = [0xe8 / 255, 0xea / 255, 0xec / 255];
-      const rim: Color = [0xd3 / 255, 0x72 / 255, 0x2c / 255];
-      return [
-        cylinder8([0, (h - 0.4) / 2, 0], 0.07, h - 0.4, pole),
-        box([0, h - 0.45, boardZ / 2], [0.06, 0.06, 0.42], pole, [14, 0, 0]),
-        box([0, rimY + 0.32, boardZ], [1.1, 0.75, 0.04], board),
-        box([0, rimY + 0.2, boardZ - 0.018], [0.45, 0.32, 0.015], rim),
-        box([0, rimY + 0.19, boardZ - 0.02], [0.34, 0.22, 0.018], board),
-        // No torus instance shape — the rim is a thin disc.
-        cylinder16([0, rimY, boardZ - 0.26], 0.245, 0.035, rim),
-      ];
-    }
-    default: {
-      // PROPBATCH-0611: data-recipe kinds (game/kinds/propModels.ts) — the
-      // SAME parts /test's DataProp renders, so the two paths agree by
-      // construction.
-      const recipe = propModelParts(prop.kind);
-      if (recipe) return recipe;
-      // Registry-derived placeholder for any future kind without a parts
-      // case (PROPSCALE-0611 deleted the stale hand-kept PROP_BOX table —
-      // every current kind has a case above).
-      const fallback: readonly [number, number, number] = [def.footprintRadiusMeters * 2, def.heightMeters, def.footprintRadiusMeters * 2];
-      return [{ shape: 'box', local: [0, fallback[1] / 2, 0], size: fallback, color: propColor(prop.kind) }];
-    }
-  }
-}
 
 function pushPropGeometry(b: Build, prop: WorldProp): number {
   b.interact.collect(prop);
@@ -766,7 +404,7 @@ function pushPropGeometry(b: Build, prop: WorldProp): number {
   // + DynamicPropMeshes split (KICKPROP-0610).
   const dynamic = b.dyn.open(prop);
   if (dynamic) {
-    for (const part of propParts(prop)) {
+    for (const part of resolvePropParts(prop)) {
       dynamic.parts.push(
         part.local[0], part.local[1], part.local[2],
         part.rotation?.[0] ?? 0, part.rotation?.[1] ?? 0, part.rotation?.[2] ?? 0,
@@ -777,7 +415,7 @@ function pushPropGeometry(b: Build, prop: WorldProp): number {
     }
     return 0;
   }
-  return pushPropParts(b, prop, propParts(prop));
+  return pushPropParts(b, prop, resolvePropParts(prop));
 }
 
 export function floorHasRelief(f: ChunkFloor): boolean {
@@ -990,26 +628,40 @@ function pushWorldLayers(b: Build, state: GameState): void {
   }
 }
 
-/** Bodies of water (world/water) → translucent slab instances. GUIDING_LIGHT
- *  refuses a new engine system: water is expressed as EXISTING data — each body
- *  is a translucent slab (box for rect, cylinder for disc) at the body's surface
- *  level, referencing a flat-translucent material (the same intern glass walls
- *  use). The no-V8 loader renders it through its transparent pass with no new
- *  code, and the bed below (floors/heightfields) reads THROUGH it as depth, so
- *  the compiled game shows the same body of water the editor does.
+export const WATER_LUMP_VERSION = 1;
+
+/** Bodies of water (world/water) → the WATER lump. Each body ships its FLAT
+ *  surface-level height grid (waterFlatHeights — surfaceY inside the footprint,
+ *  the basin floor outside so a disc rounds off); the loader renders it as a
+ *  translucent heightfield (a wadeable volume via the skirt) and applies the
+ *  travelling wave from its OWN clock — animated ripples in the shipped game with
+ *  no per-frame data. The shared look (colour + alpha) and wave ride the header.
  *
- *  Unlike the rest of pushWorldLayers (legacy demo scaffolding, off by default),
- *  water bodies are genuinely authored content, so they always bake. */
-function pushWaterBodies(b: Build, bodies: GameState['world']['waterBodies'] | undefined): void {
-  const waterColor = hexColor(WATER_LOOK.color);
-  for (const body of bodies ?? []) {
-    const cx = body.x + body.width / 2;
-    const cz = body.z + body.depth / 2;
-    const vol = waterBodyVolume(body.surfaceY);
-    const material = internTranslucent(b, WATER_LOOK.opacity);
-    const shape = body.shape === 'disc' ? INSTANCE_SHAPE_CYLINDER16 : INSTANCE_SHAPE_BOX;
-    pushShape(b, shape, cx, vol.centerY, cz, [0, 0, 0], body.width, vol.height, body.depth, waterColor, material);
+ *  Layout: u32 version | u32 count |
+ *          f32 colorR,colorG,colorB,alpha | f32 waveAmp,waveLen,waveSpeed,waveDirX,waveDirZ |
+ *          per body: u32 cols,rows | f32 centerX,centerZ,base,width,depth | f32[cols*rows] heights */
+export function encodeWaterBodies(bodies: GameState['world']['waterBodies'] | undefined): Uint8Array {
+  const list = bodies ?? [];
+  const grids = list.map((b) => waterFlatHeights(b.shape, b.width, b.depth, b.surfaceY));
+  let bytes = 8 + 16 + 20;
+  for (const g of grids) bytes += 8 + 20 + g.cols * g.rows * 4;
+  const dv = new DataView(new ArrayBuffer(bytes));
+  let o = 0;
+  const u32 = (v: number) => { dv.setUint32(o, v >>> 0, true); o += 4; };
+  const f32 = (v: number) => { dv.setFloat32(o, v, true); o += 4; };
+  u32(WATER_LUMP_VERSION);
+  u32(list.length);
+  const c = hexColor(WATER_LOOK.color);
+  f32(c[0]); f32(c[1]); f32(c[2]); f32(WATER_LOOK.opacity);
+  f32(WATER_WAVE.amplitude); f32(WATER_WAVE.length); f32(WATER_WAVE.speed); f32(WATER_WAVE.dirX); f32(WATER_WAVE.dirZ);
+  for (let k = 0; k < list.length; k += 1) {
+    const b = list[k]!;
+    const g = grids[k]!;
+    u32(g.cols); u32(g.rows);
+    f32(b.x + b.width / 2); f32(b.z + b.depth / 2); f32(g.base); f32(b.width); f32(b.depth);
+    for (let m = 0; m < g.heights.length; m += 1) f32(g.heights[m]!);
   }
+  return new Uint8Array(dv.buffer);
 }
 
 /** Lower ONE shared visual shape to an instance row. A box that wears a skin
@@ -1246,8 +898,8 @@ export function buildWorldInstances(
   const pieceCount = pushPlacedPieces(b, pieces);
   pushPaintedFloors(b, floors);
   if (opts.includeGroundLayers) pushWorldLayers(b, state);
-  // Bodies of water always bake (authored content, not demo scaffolding).
-  pushWaterBodies(b, state.world.waterBodies);
+  // Bodies of water ship in their own WATER lump (encodeWaterBodies) as animated
+  // translucent heightfields, not instances — so they're NOT pushed here.
   return {
     instances: new Float32Array(b.inst),
     total: Math.floor(b.inst.length / INSTANCE_STRIDE),

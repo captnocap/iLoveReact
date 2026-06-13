@@ -537,6 +537,14 @@ pub const Node = struct {
     scene3d_hf_width: f32 = 0,
     scene3d_hf_depth: f32 = 0,
     scene3d_hf_base: f32 = 0,
+    // Optional travelling surface wave (bodies of water): a heightfield with a
+    // non-zero wave amplitude re-bakes every frame from the host clock, rippling
+    // its top surface. Zero amplitude (the default, all terrain) = static, cached.
+    scene3d_hf_wave_amp: f32 = 0,
+    scene3d_hf_wave_len: f32 = 0,
+    scene3d_hf_wave_speed: f32 = 0,
+    scene3d_hf_wave_dx: f32 = 1,
+    scene3d_hf_wave_dz: f32 = 0,
     // Packed instance stream for large static batches. One Scene3D node can
     // submit thousands of transforms/colors without creating one host node per
     // object. Layout: [px,py,pz, sx,sy,sz, r,g,b] * count when stride=9.

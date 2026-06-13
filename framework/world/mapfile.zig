@@ -61,6 +61,15 @@ pub const LumpType = struct {
     /// per door and toggles it on E (/test's two-state door). See
     /// runtime/workspace/lumps.ts DOORS + compile/worldDoors.ts.
     pub const doors: u32 = 19;
+    /// Imported OBJ/GLB prop meshes: shared baked vertex payloads plus placed
+    /// transforms. See runtime/workspace/lumps.ts MESH_PROPS +
+    /// compile/worldGeometry.ts encodeMeshProps.
+    pub const mesh_props: u32 = 20;
+    /// Bodies of water (world/water): per-body flat surface-level height grids
+    /// the loader renders as translucent heightfields with a host-clock
+    /// travelling wave. See runtime/workspace/lumps.ts WATER +
+    /// compile/worldGeometry.ts encodeWaterBodies.
+    pub const water: u32 = 21;
 };
 
 pub const Lump = struct {

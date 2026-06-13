@@ -19,7 +19,7 @@ import {
   writeLumpContainer,
 } from '@reactjit/workspace';
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
-import { buildWorldInstances, encodeFloorHeightfields, encodeInstanceLump, encodeMaterialRefs, encodeMaterials } from './compile/worldGeometry';
+import { buildWorldInstances, encodeFloorHeightfields, encodeInstanceLump, encodeMaterialRefs, encodeMaterials, encodeMeshProps, encodeWaterBodies } from './compile/worldGeometry';
 import type { DecalAssetSink } from './compile/decalAssets';
 import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, paintedFloorTopAt, type BakedPhysicsConfig } from './compile/worldColliders';
 import { encodeInteractables } from './compile/worldInteractables';
@@ -299,6 +299,12 @@ export function createHmscMapfile(
     // Door panels (DOORS-0611) — the loader appends one LIVE toggleable rect +
     // panel node per door: E opens/closes, /test parity (compile/worldDoors.ts).
     { type: MAP_LUMP.DOORS, encoding: 'raw', data: encodeDoors(doorRecords(liftedPieces)) },
+    // Imported OBJ/GLB props — arbitrary baked vertex buffers as static prop
+    // assets, referenced by transform rows so repeated desks share one mesh.
+    { type: MAP_LUMP.MESH_PROPS, encoding: 'raw', data: encodeMeshProps(geometry.meshProps) },
+    // Bodies of water (world/water) — the loader renders each as a translucent
+    // heightfield with a host-clock travelling wave (animated ripples).
+    { type: MAP_LUMP.WATER, encoding: 'raw', data: encodeWaterBodies(state.world.waterBodies) },
   ];
   if (playerModel) {
     // The compiled player figure from @game/figure. Runtime movement changes

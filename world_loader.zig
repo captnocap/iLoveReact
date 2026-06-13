@@ -2367,6 +2367,48 @@ pub const Runtime = struct {
             const first = self.scene.heightfields[0];
             log.print("[loader] built {d} terrain heightfield mesh(es); first grid {d}x{d} at ({d:.2},{d:.2}) span {d:.2}x{d:.2}\n", .{ self.scene.heightfields.len, first.cols, first.rows, first.center_x, first.center_z, first.width, first.depth });
         }
+
+        // Bodies of water (world/water): one translucent heightfield per body with
+        // a host-clock travelling wave. The wave forces resolveDynamicHeightfield
+        // to re-bake every frame, so the surface ripples in the shipped game with
+        // no per-frame loader work. color_a < 1 routes it through the transparent
+        // pass; the skirt down to `base` makes a wadeable volume. Water is NOT in
+        // scene.heightfields, so it never registers as a collider (wade, don't bump).
+        if (self.scene.water) |w| {
+            for (w.bodies, 0..) |body, i| {
+                const key = try std.fmt.allocPrint(self.allocator, "~hf~water-{d}~1", .{i});
+                self.player_geom_keys.append(self.allocator, key) catch |err| {
+                    self.allocator.free(key);
+                    return err;
+                };
+                const max_abs_y = maxAbsHeight(body.heights);
+                const bounds_radius = @sqrt(body.width * body.width * 0.25 + body.depth * body.depth * 0.25 + max_abs_y * max_abs_y);
+                try self.kid_list.append(self.allocator, .{
+                    .scene3d_mesh = true,
+                    .scene3d_geom_key = key,
+                    .scene3d_heights = body.heights,
+                    .scene3d_hf_cols = body.cols,
+                    .scene3d_hf_rows = body.rows,
+                    .scene3d_hf_width = body.width,
+                    .scene3d_hf_depth = body.depth,
+                    .scene3d_hf_base = body.base,
+                    .scene3d_hf_wave_amp = w.wave_amp,
+                    .scene3d_hf_wave_len = w.wave_len,
+                    .scene3d_hf_wave_speed = w.wave_speed,
+                    .scene3d_hf_wave_dx = w.wave_dx,
+                    .scene3d_hf_wave_dz = w.wave_dz,
+                    .scene3d_bounds_radius = bounds_radius,
+                    .scene3d_pos_x = body.center_x,
+                    .scene3d_pos_y = 0,
+                    .scene3d_pos_z = body.center_z,
+                    .scene3d_color_r = w.color[0],
+                    .scene3d_color_g = w.color[1],
+                    .scene3d_color_b = w.color[2],
+                    .scene3d_color_a = w.alpha,
+                });
+            }
+            if (w.bodies.len > 0) log.print("[loader] built {d} water heightfield(s), wave amp {d:.2}\n", .{ w.bodies.len, w.wave_amp });
+        }
         // KICKPROP req_0625: dynamic props render as LIVE per-frame nodes (the
         // player-model pattern) — their parts are NOT in the one-time-uploaded
         // static instance buffer, so a rolling ball never re-stages the world.

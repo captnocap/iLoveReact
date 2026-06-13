@@ -43,36 +43,54 @@ function clampInt(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, Math.round(v)));
 }
 
-// The cols×rows height grid for a body at animation time `t` (seconds): the
-// surface level INSIDE the footprint (dropped to the basin floor outside, so a
-// 'disc' rounds off via the heightfield's own skirt), plus a travelling sine
-// ripple. Fed to a host heightfield mesh (the SAME path painted terrain uses): a
-// wavy top + a perimeter skirt down to `base` = a translucent water volume with a
-// rippling surface, in one mesh. Pure, so t=0 is the still surface. ~1 vertex per
-// 2.5 m, capped, so even a big lake stays a cheap grid to re-bake each tick.
-export function waterHeightGrid(
-  shape: WaterBodyShape, width: number, depth: number, surfaceY: number, t: number,
+// The FLAT (still, t=0, no ripple) cols×rows height grid for a body: the surface
+// level INSIDE the footprint, dropped to the basin floor `base` OUTSIDE it, so a
+// 'disc' rounds off via the heightfield's own skirt at the ellipse edge. ~1 vertex
+// per 2.5 m, capped. This is the still surface the wave rides on — the compiled
+// game ships THIS grid + the wave params and applies the ripple host-side (its own
+// clock); the editor adds the ripple per tick (waterHeightGrid below).
+export function waterFlatHeights(
+  shape: WaterBodyShape, width: number, depth: number, surfaceY: number,
 ): { cols: number; rows: number; heights: number[]; base: number } {
   const base = -WATER_LOOK.floorTuckMeters;
   const cols = clampInt(width / 2.5 + 1, 6, 24);
   const rows = clampInt(depth / 2.5 + 1, 6, 24);
   const rx = width / 2;
   const rz = depth / 2;
-  const w = WATER_WAVE;
-  const dlen = Math.hypot(w.dirX, w.dirZ) || 1;
-  const ux = w.dirX / dlen;
-  const uz = w.dirZ / dlen;
   const heights = new Array<number>(cols * rows);
   for (let j = 0; j < rows; j += 1) {
     const lz = -rz + (rows > 1 ? (j / (rows - 1)) * depth : 0);
     for (let i = 0; i < cols; i += 1) {
       const lx = -rx + (cols > 1 ? (i / (cols - 1)) * width : 0);
       const inside = shape !== 'disc' || (rx > 0 && rz > 0 && (lx / rx) ** 2 + (lz / rz) ** 2 <= 1);
-      const ripple = Math.sin(((lx * ux + lz * uz) / w.length + t * w.speed) * TAU) * w.amplitude;
-      heights[j * cols + i] = inside ? surfaceY + ripple : base;
+      heights[j * cols + i] = inside ? surfaceY : base;
     }
   }
   return { cols, rows, heights, base };
+}
+
+/** Add the travelling ripple to a flat grid at time `t` (seconds) — the editor's
+ *  animated surface. Outside-footprint cells (at `base`) stay flat. */
+export function waterHeightGrid(
+  shape: WaterBodyShape, width: number, depth: number, surfaceY: number, t: number,
+): { cols: number; rows: number; heights: number[]; base: number } {
+  const flat = waterFlatHeights(shape, width, depth, surfaceY);
+  const { cols, rows, base } = flat;
+  const rx = width / 2;
+  const rz = depth / 2;
+  const w = WATER_WAVE;
+  const dlen = Math.hypot(w.dirX, w.dirZ) || 1;
+  const ux = w.dirX / dlen;
+  const uz = w.dirZ / dlen;
+  for (let j = 0; j < rows; j += 1) {
+    const lz = -rz + (rows > 1 ? (j / (rows - 1)) * depth : 0);
+    for (let i = 0; i < cols; i += 1) {
+      if (flat.heights[j * cols + i] <= base) continue; // outside the footprint
+      const lx = -rx + (cols > 1 ? (i / (cols - 1)) * width : 0);
+      flat.heights[j * cols + i] += Math.sin(((lx * ux + lz * uz) / w.length + t * w.speed) * TAU) * w.amplitude;
+    }
+  }
+  return flat;
 }
 
 export type WaterBodyPreset = {

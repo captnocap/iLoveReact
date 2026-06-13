@@ -24,6 +24,8 @@ pub const Error = gamefile.Error || error{
     BadDynamicProps,
     BadElevators,
     BadDoors,
+    BadMeshProps,
+    BadWater,
 };
 
 const COLLIDERS_VERSION: u32 = 1;
@@ -33,6 +35,8 @@ const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
+const MESH_PROPS_VERSION: u32 = 2;
+const WATER_VERSION: u32 = 1;
 /// One local render part: px,py,pz, rx,ry,rz, sx,sy,sz, r,g,b, shapeId —
 /// the INSTANCES row field order, anchor-relative and yaw-unfolded.
 pub const DYNAMIC_PART_FLOATS: usize = 13;
@@ -97,6 +101,42 @@ pub const PlayerModelGroup = struct {
     }
 };
 
+pub const MeshPropMesh = struct {
+    key: []u8,
+    color: [3]f32,
+    bounds_radius: f32,
+    footprint_width: f32,
+    footprint_depth: f32,
+    height: f32,
+    solid: bool,
+    vertices: []f32,
+    vertex_count: u32,
+
+    pub fn deinit(self: MeshPropMesh, allocator: std.mem.Allocator) void {
+        allocator.free(self.key);
+        allocator.free(self.vertices);
+    }
+};
+
+pub const MeshPropInstance = struct {
+    mesh: u32,
+    x: f32,
+    y: f32,
+    z: f32,
+    yaw_degrees: f32,
+};
+
+pub const MeshProps = struct {
+    meshes: []MeshPropMesh,
+    instances: []MeshPropInstance,
+
+    pub fn deinit(self: MeshProps, allocator: std.mem.Allocator) void {
+        for (self.meshes) |mesh| mesh.deinit(allocator);
+        allocator.free(self.meshes);
+        allocator.free(self.instances);
+    }
+};
+
 pub const PlayerTransform = struct {
     position: [3]f32,
     rotation: [3]f32,
@@ -154,6 +194,41 @@ pub const HeightfieldMesh = struct {
     pub fn deinit(self: HeightfieldMesh, allocator: std.mem.Allocator) void {
         allocator.free(self.heights);
         if (self.tex_rgba) |rgba| allocator.free(rgba);
+    }
+};
+
+/// One body of water — a flat surface-level height grid the loader renders as a
+/// translucent heightfield (a wadeable volume via the skirt). The travelling wave
+/// is applied host-side (gpu/3d.zig) from its own clock, so this stays still data.
+pub const WaterField = struct {
+    cols: u32,
+    rows: u32,
+    center_x: f32,
+    center_z: f32,
+    base: f32,
+    width: f32,
+    depth: f32,
+    heights: []f32,
+
+    pub fn deinit(self: WaterField, allocator: std.mem.Allocator) void {
+        allocator.free(self.heights);
+    }
+};
+
+/// The WATER lump (world/water): the shared look + wave, plus the bodies.
+pub const WaterBodies = struct {
+    color: [3]f32,
+    alpha: f32,
+    wave_amp: f32,
+    wave_len: f32,
+    wave_speed: f32,
+    wave_dx: f32,
+    wave_dz: f32,
+    bodies: []WaterField,
+
+    pub fn deinit(self: WaterBodies, allocator: std.mem.Allocator) void {
+        for (self.bodies) |b| b.deinit(allocator);
+        allocator.free(self.bodies);
     }
 };
 
@@ -467,6 +542,12 @@ pub const Scene = struct {
     /// Door panels (DOORS-0611) — the loader appends one LIVE toggleable rect
     /// + panel node per door. null in pre-lump bakes (no leaves).
     doors: ?Doors,
+    /// Imported OBJ/GLB prop meshes: shared baked vertices plus placed
+    /// transforms. null in pre-lump bakes.
+    mesh_props: ?MeshProps,
+    /// Bodies of water (world/water) — translucent wavy heightfields. null in
+    /// pre-lump bakes / the codec fixture (no water).
+    water: ?WaterBodies,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
@@ -486,6 +567,8 @@ pub const Scene = struct {
         if (self.dynamic_props) |dp| dp.deinit(allocator);
         if (self.elevators) |el| el.deinit(allocator);
         if (self.doors) |d| d.deinit(allocator);
+        if (self.mesh_props) |mp| mp.deinit(allocator);
+        if (self.water) |w| w.deinit(allocator);
     }
 };
 
@@ -589,6 +672,82 @@ fn decodePlayerModel(allocator: std.mem.Allocator, data: []const u8) Error![]Pla
     return groups;
 }
 
+fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshProps {
+    if (data.len < 12) return Error.BadMeshProps;
+    const version = std.mem.readInt(u32, data[0..4], .little);
+    if (version != 1 and version != MESH_PROPS_VERSION) return Error.BadMeshProps;
+    const mesh_count_u32 = std.mem.readInt(u32, data[4..8], .little);
+    const instance_count_u32 = std.mem.readInt(u32, data[8..12], .little);
+    const mesh_count: usize = @intCast(mesh_count_u32);
+    const instance_count: usize = @intCast(instance_count_u32);
+    var meshes = try allocator.alloc(MeshPropMesh, mesh_count);
+    var initialized_meshes: usize = 0;
+    errdefer {
+        for (meshes[0..initialized_meshes]) |mesh| mesh.deinit(allocator);
+        allocator.free(meshes);
+    }
+
+    var at: usize = 12;
+    var mi: usize = 0;
+    while (mi < mesh_count) : (mi += 1) {
+        if (at + 4 > data.len) return Error.BadMeshProps;
+        const key_len: usize = @intCast(std.mem.readInt(u32, data[at..][0..4], .little));
+        at += 4;
+        const meta_bytes: usize = if (version == 1) 20 else 36;
+        if (at + key_len + meta_bytes > data.len) return Error.BadMeshProps;
+        const key = try allocator.dupe(u8, data[at .. at + key_len]);
+        errdefer allocator.free(key);
+        at += key_len;
+        const color = [3]f32{ readF32(data, at + 0), readF32(data, at + 4), readF32(data, at + 8) };
+        const bounds_radius = readF32(data, at + 12);
+        const footprint_width = if (version == 1) bounds_radius * 2 else readF32(data, at + 16);
+        const footprint_depth = if (version == 1) bounds_radius * 2 else readF32(data, at + 20);
+        const height = if (version == 1) bounds_radius * 2 else readF32(data, at + 24);
+        const solid = if (version == 1) true else std.mem.readInt(u32, data[at + 28 ..][0..4], .little) != 0;
+        const vertex_count_at: usize = if (version == 1) at + 16 else at + 32;
+        const vertex_count = std.mem.readInt(u32, data[vertex_count_at..][0..4], .little);
+        at += meta_bytes;
+        const floats: usize = @as(usize, @intCast(vertex_count)) * 8;
+        const vertex_bytes = floats * 4;
+        if (at + vertex_bytes > data.len) return Error.BadMeshProps;
+        const vertices = try allocator.alloc(f32, floats);
+        errdefer allocator.free(vertices);
+        var vi: usize = 0;
+        while (vi < floats) : (vi += 1) vertices[vi] = readF32(data, at + vi * 4);
+        at += vertex_bytes;
+        meshes[mi] = .{
+            .key = key,
+            .color = color,
+            .bounds_radius = bounds_radius,
+            .footprint_width = footprint_width,
+            .footprint_depth = footprint_depth,
+            .height = height,
+            .solid = solid,
+            .vertices = vertices,
+            .vertex_count = vertex_count,
+        };
+        initialized_meshes += 1;
+    }
+
+    var instances = try allocator.alloc(MeshPropInstance, instance_count);
+    errdefer allocator.free(instances);
+    var ii: usize = 0;
+    while (ii < instance_count) : (ii += 1) {
+        if (at + 20 > data.len) return Error.BadMeshProps;
+        const mesh = std.mem.readInt(u32, data[at..][0..4], .little);
+        if (mesh >= mesh_count_u32) return Error.BadMeshProps;
+        instances[ii] = .{
+            .mesh = mesh,
+            .x = readF32(data, at + 4),
+            .y = readF32(data, at + 8),
+            .z = readF32(data, at + 12),
+            .yaw_degrees = readF32(data, at + 16),
+        };
+        at += 20;
+    }
+    return .{ .meshes = meshes, .instances = instances };
+}
+
 fn decodePlayerAnimationPayload(allocator: std.mem.Allocator, payload: []const u8, hash: [PLAYER_ANIMATION_HASH_BYTES]u8) Error!PlayerAnimationSet {
     if (payload.len < 12) return Error.BadPlayerModel;
     if (std.mem.readInt(u32, payload[0..4], .little) != PLAYER_ANIMATION_VERSION) return Error.BadPlayerModel;
@@ -654,6 +813,51 @@ fn decodePlayerAnimation(allocator: std.mem.Allocator, data: []const u8) Error!P
     std.crypto.hash.sha2.Sha256.hash(payload, &actual, .{});
     if (!std.mem.eql(u8, &expected, &actual)) return Error.BadPlayerModel;
     return decodePlayerAnimationPayload(allocator, payload, expected);
+}
+
+/// Decode the WATER lump (encodeWaterBodies): header (version, count, color3+
+/// alpha, wave5) then per body (cols,rows, centerX,centerZ,base,width,depth, then
+/// cols*rows flat heights). The wave is applied host-side from its own clock.
+fn decodeWater(allocator: std.mem.Allocator, data: []const u8) Error!WaterBodies {
+    const header: usize = 8 + 16 + 20;
+    if (data.len < header) return Error.BadWater;
+    const version = std.mem.readInt(u32, data[0..4], .little);
+    if (version != WATER_VERSION) return Error.BadWater;
+    const count = std.mem.readInt(u32, data[4..8], .little);
+    const color = [3]f32{ readF32(data, 8), readF32(data, 12), readF32(data, 16) };
+    const alpha = readF32(data, 20);
+    const wave_amp = readF32(data, 24);
+    const wave_len = readF32(data, 28);
+    const wave_speed = readF32(data, 32);
+    const wave_dx = readF32(data, 36);
+    const wave_dz = readF32(data, 40);
+    const bodies = try allocator.alloc(WaterField, count);
+    var built: usize = 0;
+    errdefer {
+        for (bodies[0..built]) |b| b.deinit(allocator);
+        allocator.free(bodies);
+    }
+    var at: usize = header;
+    while (built < count) : (built += 1) {
+        if (at + 28 > data.len) return Error.BadWater; // 2 u32 + 5 f32
+        const cols = std.mem.readInt(u32, data[at..][0..4], .little);
+        const rows = std.mem.readInt(u32, data[at + 4 ..][0..4], .little);
+        const center_x = readF32(data, at + 8);
+        const center_z = readF32(data, at + 12);
+        const base = readF32(data, at + 16);
+        const width = readF32(data, at + 20);
+        const depth = readF32(data, at + 24);
+        at += 28;
+        if (cols < 2 or rows < 2) return Error.BadWater;
+        const samples = std.math.mul(usize, @as(usize, cols), @as(usize, rows)) catch return Error.BadWater;
+        if (at + samples * 4 > data.len) return Error.BadWater;
+        const heights = try allocator.alloc(f32, samples);
+        var m: usize = 0;
+        while (m < samples) : (m += 1) heights[m] = readF32(data, at + m * 4);
+        at += samples * 4;
+        bodies[built] = .{ .cols = cols, .rows = rows, .center_x = center_x, .center_z = center_z, .base = base, .width = width, .depth = depth, .heights = heights };
+    }
+    return .{ .color = color, .alpha = alpha, .wave_amp = wave_amp, .wave_len = wave_len, .wave_speed = wave_speed, .wave_dx = wave_dx, .wave_dz = wave_dz, .bodies = bodies };
 }
 
 fn decodeHeightfields(allocator: std.mem.Allocator, data: []const u8) Error![]HeightfieldMesh {
@@ -1268,6 +1472,18 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     else
         null;
     errdefer if (doors) |d| d.deinit(allocator);
+    const mesh_props: ?MeshProps = if (mapfile.findLump(map_lumps, mapfile.LumpType.mesh_props)) |lump|
+        try decodeMeshProps(allocator, lump.data)
+    else
+        null;
+    errdefer if (mesh_props) |mp| mp.deinit(allocator);
+    // Bodies of water (world/water) — optional like the other post-v1 lumps;
+    // absent means no water (the loader renders nothing for it).
+    const water: ?WaterBodies = if (mapfile.findLump(map_lumps, mapfile.LumpType.water)) |lump|
+        try decodeWater(allocator, lump.data)
+    else
+        null;
+    errdefer if (water) |w| w.deinit(allocator);
 
     // Decal image payloads (DECALIMG-0610, req_0592): every manifest asset
     // tagged decal-image is read from the content store once, here — the
@@ -1310,5 +1526,7 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .dynamic_props = dynamic_props,
         .elevators = elevators,
         .doors = doors,
+        .mesh_props = mesh_props,
+        .water = water,
     };
 }
