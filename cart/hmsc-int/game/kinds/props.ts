@@ -35,6 +35,17 @@ import { streetSignDef } from '../../compile/propRecipes/streetSign';
 import { streetLightDef } from '../../compile/propRecipes/streetLight';
 import { stopSignDef } from '../../compile/propRecipes/stopSign';
 import { trafficLightDef } from '../../compile/propRecipes/trafficLight';
+import { treeOakDef } from '../../compile/propRecipes/treeOak';
+import { treePineDef } from '../../compile/propRecipes/treePine';
+import { treeBirchDef } from '../../compile/propRecipes/treeBirch';
+import { treeCypressDef } from '../../compile/propRecipes/treeCypress';
+import { treePalmDef } from '../../compile/propRecipes/treePalm';
+import { treeDeadDef } from '../../compile/propRecipes/treeDead';
+import { boulderDef } from '../../compile/propRecipes/boulder';
+import { rockFlatDef } from '../../compile/propRecipes/rockFlat';
+import { rockSpireDef } from '../../compile/propRecipes/rockSpire';
+import { rockMossyDef } from '../../compile/propRecipes/rockMossy';
+import { rockPileDef } from '../../compile/propRecipes/rockPile';
 
 export type BuiltinPropKind =
   | 'rock'
@@ -601,107 +612,19 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   // under the foliage edge, like every GTA tree. PROPSCALE-0611: heights are
   // real urban-mature averages × 1.15 (were ~half real size); trunks
   // thickened ~×1.4 to match.
-  treeOak: {
-    kind: 'treeOak',
-    label: 'Oak Tree',
-    solid: true,
-    footprintRadiusMeters: 0.5,
-    heightMeters: 17,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  treePine: {
-    kind: 'treePine',
-    label: 'Pine Tree',
-    solid: true,
-    footprintRadiusMeters: 0.4,
-    heightMeters: 23,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  treeBirch: {
-    kind: 'treeBirch',
-    label: 'Birch Tree',
-    solid: true,
-    footprintRadiusMeters: 0.25,
-    heightMeters: 16,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  treeCypress: {
-    kind: 'treeCypress',
-    label: 'Cypress Tree',
-    solid: true,
-    footprintRadiusMeters: 0.35,
-    heightMeters: 17,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  treePalm: {
-    kind: 'treePalm',
-    label: 'Palm Tree',
-    solid: true,
-    footprintRadiusMeters: 0.3,
-    heightMeters: 15,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  treeDead: {
-    kind: 'treeDead',
-    label: 'Dead Tree',
-    solid: true,
-    footprintRadiusMeters: 0.25,
-    heightMeters: 5,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
+  treeOak: treeOakDef,
+  treePine: treePineDef,
+  treeBirch: treeBirchDef,
+  treeCypress: treeCypressDef,
+  treePalm: treePalmDef,
+  treeDead: treeDeadDef,
 
   // ── rock forms ─────────────────────────────────────────────────────────────
-  boulder: {
-    kind: 'boulder',
-    label: 'Boulder',
-    solid: true,
-    footprintRadiusMeters: 1.6,
-    heightMeters: 2.6,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  rockFlat: {
-    kind: 'rockFlat',
-    label: 'Flat Rock',
-    solid: true,
-    footprintRadiusMeters: 0.9,
-    heightMeters: 0.45,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  rockSpire: {
-    kind: 'rockSpire',
-    label: 'Rock Spire',
-    solid: true,
-    footprintRadiusMeters: 0.5,
-    heightMeters: 2.4,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  rockMossy: {
-    kind: 'rockMossy',
-    label: 'Mossy Rock',
-    solid: true,
-    footprintRadiusMeters: 0.6,
-    heightMeters: 0.85,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  rockPile: {
-    kind: 'rockPile',
-    label: 'Rock Pile',
-    solid: true,
-    footprintRadiusMeters: 0.8,
-    heightMeters: 0.7,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
+  boulder: boulderDef,
+  rockFlat: rockFlatDef,
+  rockSpire: rockSpireDef,
+  rockMossy: rockMossyDef,
+  rockPile: rockPileDef,
 
   // ── balls ──────────────────────────────────────────────────────────────────
   // Solid: they get a host-physics blocking rect like every obstacle, so the

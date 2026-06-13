@@ -6,6 +6,17 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const treeOakDef: PropKindDefinition = {
+  kind: 'treeOak',
+  label: 'Oak Tree',
+  solid: true,
+  footprintRadiusMeters: 0.5,
+  heightMeters: 17,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   bark: recipeColor('#5c4631'),

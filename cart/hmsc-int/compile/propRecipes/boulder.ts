@@ -6,6 +6,17 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const boulderDef: PropKindDefinition = {
+  kind: 'boulder',
+  label: 'Boulder',
+  solid: true,
+  footprintRadiusMeters: 1.6,
+  heightMeters: 2.6,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   stone: recipeColor('#6b7079'),

@@ -6,6 +6,17 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const treeDeadDef: PropKindDefinition = {
+  kind: 'treeDead',
+  label: 'Dead Tree',
+  solid: true,
+  footprintRadiusMeters: 0.25,
+  heightMeters: 5,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   wood: recipeColor('#6e5d4b'),

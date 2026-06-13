@@ -6,6 +6,17 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const rockMossyDef: PropKindDefinition = {
+  kind: 'rockMossy',
+  label: 'Mossy Rock',
+  solid: true,
+  footprintRadiusMeters: 0.6,
+  heightMeters: 0.85,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   stone: recipeColor('#6b7079'),

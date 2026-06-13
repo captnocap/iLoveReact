@@ -6,6 +6,17 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const treeCypressDef: PropKindDefinition = {
+  kind: 'treeCypress',
+  label: 'Cypress Tree',
+  solid: true,
+  footprintRadiusMeters: 0.35,
+  heightMeters: 17,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   barkDark: recipeColor('#4a3826'),
