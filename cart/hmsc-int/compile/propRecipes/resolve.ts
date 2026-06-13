@@ -56,6 +56,16 @@ import { albumCoverParts } from './albumCover';
 import { speakerParts } from './speaker';
 import { speakerStackParts } from './speakerStack';
 import { cassetteParts } from './cassette';
+import { fountainParts } from './fountain';
+import { drinkingFountainParts } from './drinkingFountain';
+import { loungeChairParts } from './loungeChair';
+import { swingsetParts } from './swingset';
+import { sandCastleParts } from './sandCastle';
+import { picketFenceParts } from './picketFence';
+import { appleTreeParts } from './appleTree';
+import { appleParts } from './apple';
+import { arcadeCabinetParts } from './arcadeCabinet';
+import { slotMachineParts } from './slotMachine';
 import { boulderParts } from './boulder';
 import { bushParts } from './bush';
 import { chairParts } from './chair';
@@ -239,6 +249,16 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     case 'speaker': return speakerParts();
     case 'speakerStack': return speakerStackParts();
     case 'cassette': return cassetteParts();
+    case 'fountain': return fountainParts();
+    case 'drinkingFountain': return drinkingFountainParts();
+    case 'loungeChair': return loungeChairParts();
+    case 'swingset': return swingsetParts();
+    case 'sandCastle': return sandCastleParts();
+    case 'picketFence': return picketFenceParts();
+    case 'appleTree': return appleTreeParts();
+    case 'apple': return appleParts();
+    case 'arcadeCabinet': return arcadeCabinetParts();
+    case 'slotMachine': return slotMachineParts();
     default: {
       // data-recipe kinds (propModels.RECIPES) resolve here; the two paths agree
       // by construction since everyone calls this one function.
