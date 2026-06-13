@@ -346,7 +346,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // was the geometry-dedup desync (fixed in runtime/primitives.tsx, req_0735), so
   // the band-aid is obsolete and only got in the way — an upper floor occluded the
   // floor being edited. The ⌷ toggle still shows the whole city when wanted.
-  const [showAllFloors, setShowAllFloors] = useRouteTwigState<boolean>(ISO_ROUTE, 'showAllFloors', false);
+  // Twig key is bumped to v2: the old 'showAllFloors' is persisted to disk, so a
+  // user who ran the band-aid build has true saved — orphan it so this OFF default
+  // actually applies instead of resurrecting the all-floors view (req_0737).
+  const [showAllFloors, setShowAllFloors] = useRouteTwigState<boolean>(ISO_ROUTE, 'showAllFloors_v2', false);
   // Shift/Alt held? Mouse events carry no modifier flags here — read the shared
   // contract tracker at click time to invert the select scope / go freeform.
   const heldModifiers = useHeldModifiers();
