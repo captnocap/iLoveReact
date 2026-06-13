@@ -1,4 +1,5 @@
 import type { TileKind } from '../design';
+import { tileKindDefinition } from '../world/tileKinds';
 
 // Procedural tile materials ported from cart/effect_fills (the static env set:
 // concrete, road, sand). fbm()/snoise() are injected by the <Effect> primitive,
@@ -65,18 +66,17 @@ fn tileMaterial(matId: f32, uv: vec2f, px: vec2f, variant: f32, seed: f32) -> ve
 }
 `;
 
-// TileKind → (materialId, variant) into tileMaterial above.
+// TileKind → tileMaterial id, by the kind's DECLARED surface material (not its
+// name): every road-family kind (the lane trios, junction, crosswalk, median,
+// parking — all material:'road') reads as asphalt, not concrete. The old
+// name-switch only caught the literal 'road'/'asphalt' kinds, so lane tiles fell
+// through to concrete and the painted road vanished into the ground (req_0774).
+// One source of truth — a new road kind maps correctly with no edit here.
 export function tileFillMaterialId(kind: TileKind): number {
-  switch (kind) {
-    case 'road':
-    case 'asphalt':
-      return 1;
-    case 'sand':
-    case 'mud':
-      return 2;
-    default:
-      return 0; // concrete: sidewalk, etc.
-  }
+  const m = tileKindDefinition(kind).surface?.material;
+  if (m === 'road') return 1; // asphalt
+  if (m === 'sand' || m === 'soil') return 2; // sand / earth (no separate soil fill yet)
+  return 0; // concrete, water, structural, markers → concrete grain
 }
 
 export function tileFillVariant(kind: TileKind): number {
