@@ -3,12 +3,11 @@
 // its pane instead of floating over the world, so the map stays uncrowded and
 // the full material browser gets real estate).
 //
-// A selection is a box in space with 6 faces. N/E/S/W paint each selected
-// piece's EXTERIOR-facing major slot on that side (exterior = the front/back
-// slot pointing away from the selection's centre, so it works on towers and
-// hand-built shells alike), Top paints plate tops, In paints every
-// interior-facing slot. Commits pieceSkinSet events — ids stay stable, so the
-// selection survives and you paint face after face without re-selecting.
+// The face row IS the piece's real skin slots (front/back/sides — a plate reads
+// top/bottom/edges), each shown wearing its ACTUAL look. Click a face to TARGET
+// it; with a target set, picking a skin paints only that slot. With NO target,
+// picking a skin paints every slot (req_0758). Commits pieceSkinSet events — ids
+// stay stable, so the selection survives and you paint face after face.
 //
 // Extracted from IsoAuthor (the "extend = modularize preemptively" ruling) and
 // rebuilt around material NAVIGATION: the v1 blind ◀ ▶ cycler becomes grouped,
@@ -20,53 +19,35 @@
 import { memo, useMemo, useRef, useState } from 'react';
 import { Box, Effect, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { GAME_BUILD } from '@game';
-import type { BuildFaceSkin, BuildFaceSlot, PlacedBuildPiece, WorldEvent } from '@game';
+import type { BuildFaceSkin, BuildFaceSlot, BuildSkinSet, PlacedBuildPiece, WorldEvent } from '@game';
 import { allTextures, type TextureDef } from '@game/textures/registry';
 import { useCustomTextures } from '@game/textures/materials';
 import { materialFamily } from '../workbench/materials/chooser';
 import { PanelGroups, type FieldSpec, type PanelSpec } from '../../shell/fields';
 import { uploadFaceTexture } from './uploadFaceTexture';
 
-// ── Face classification: which slot a compass face means on a piece ─────────
-
-export type FaceId = 'N' | 'E' | 'S' | 'W' | 'top' | 'in';
-
-const FACE_BUTTONS: { id: FaceId; label: string; title: string }[] = [
-  { id: 'N', label: 'N', title: 'Paint the north-facing exterior' },
-  { id: 'E', label: 'E', title: 'Paint the east-facing exterior' },
-  { id: 'S', label: 'S', title: 'Paint the south-facing exterior' },
-  { id: 'W', label: 'W', title: 'Paint the west-facing exterior' },
-  { id: 'top', label: 'Top', title: 'Paint floor/roof plate tops' },
-  { id: 'in', label: 'In', title: 'Paint every interior-facing side' },
-];
+// ── Faces: the piece's REAL skin slots (front / back / sides), kind-labelled (a
+//    plate reads top / bottom / edges). The row shows each slot wearing its
+//    ACTUAL look; click one to target it, leave none selected to paint them all
+//    (req_0758 — "click a face to change it, otherwise edit every face"). The old
+//    N/E/S/W compass mapping is gone: each slot already owns its own look, so the
+//    row IS the slots (USER req_0762: "each already owns its own slot").
 
 const BRUSH_SWATCHES = [
   '#d8cdb8', '#9aa3ad', '#8a4a3a', '#506a85', '#2d3b4e', '#c8b06a',
   '#7a8b6f', '#e0e5ea', '#1a1d24', '#8a6a45', '#b04a3a', '#3a6b8a',
 ];
 
-/** front (+v) world direction per quarter yaw — matches localOffset(0,1,yaw) */
-function frontDirOf(quarter: number): { dx: number; dz: number } {
-  return quarter === 0 ? { dx: 0, dz: 1 } : quarter === 1 ? { dx: 1, dz: 0 } : quarter === 2 ? { dx: 0, dz: -1 } : { dx: -1, dz: 0 };
-}
-
-/** The slot `face` lands on for this piece given the selection centre (cx,cz),
- *  or null when the piece has no such face (a plate has no N wall, a free-yaw
- *  wall has no cardinal face). Plates: front=top / back=bottom by skin contract. */
-export function faceSlotOf(piece: PlacedBuildPiece, face: FaceId, cx: number, cz: number): BuildFaceSlot | null {
-  const kind = GAME_BUILD.catalog.get(piece.pieceId).kind;
-  const plate = kind === 'floor' || kind === 'roof' || kind === 'ramp' || kind === 'stairs';
-  if (plate) return face === 'top' ? 'front' : face === 'in' ? 'back' : null;
-  if (face === 'top') return null;
-  const yaw = ((piece.yawDegrees % 360) + 360) % 360;
-  const quarter = Math.round(yaw / 90) % 4;
-  if (Math.abs(yaw - quarter * 90) > 1e-6 && Math.abs(yaw - 360) > 1e-6) return null; // free-yaw: no cardinal face
-  const front = frontDirOf(quarter);
-  const outward = front.dx * (piece.x - cx) + front.dz * (piece.z - cz) >= 0; // front faces away from the centre?
-  if (face === 'in') return outward ? 'back' : 'front';
-  const ext = outward ? front : { dx: -front.dx, dz: -front.dz };
-  const onFace = face === 'N' ? ext.dz > 0.5 : face === 'S' ? ext.dz < -0.5 : face === 'E' ? ext.dx > 0.5 : ext.dx < -0.5;
-  return onFace ? (outward ? 'front' : 'back') : null;
+/** The skin a slot wears across the selection: one skin, 'mixed', or null
+ *  (unpainted). Drives the per-face thumbnail and what a re-pick would replace. */
+function slotWear(pieces: readonly PlacedBuildPiece[], slot: BuildFaceSlot): BuildFaceSkin | 'mixed' | null {
+  let seen: BuildFaceSkin | null | undefined; // undefined = none seen yet
+  for (const p of pieces) {
+    const s = (p.skin as BuildSkinSet | undefined)?.[slot] ?? null;
+    if (seen === undefined) seen = s;
+    else if (matKey2(seen) !== matKey2(s)) return 'mixed';
+  }
+  return seen ?? null;
 }
 
 // ── Material groups: the workbench chooser's family contract, customs first ──
@@ -143,8 +124,6 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   commitRef.current = props.commitBatch;
 
   const [brush, setBrush] = useState<BuildFaceSkin>({ kind: 'color', value: '#d8cdb8' });
-  const brushRef = useRef(brush);
-  brushRef.current = brush;
   // The last few brushes actually painted with — one click back to a mix you were using.
   const [recent, setRecent] = useState<BuildFaceSkin[]>([]);
   // Custom color draft: any valid #rrggbb becomes the brush as you type.
@@ -178,71 +157,46 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
     [q, materials],
   );
 
-  // The selection's centroid — exterior/interior is judged against it.
-  const centroid = useMemo(() => {
-    let cx = 0, cz = 0;
-    for (const p of selPieces) { cx += p.x; cz += p.z; }
-    const n = Math.max(1, selPieces.length);
-    return { cx: cx / n, cz: cz / n };
-  }, [selPieces]);
+  // The TARGETED slot, or null = paint every slot. Clicking a face in the row
+  // toggles it; read through a ref in the (frozen) press closures.
+  const [selectedSlot, setSelectedSlot] = useState<BuildFaceSlot | null>(null);
+  const selectedSlotRef = useRef(selectedSlot);
+  selectedSlotRef.current = selectedSlot;
 
-  // What each face currently WEARS across the selection: nothing, one skin, or a
-  // mix — surfaced as a dot on each face button so painted state is visible.
-  const faceWear = useMemo(() => {
-    const wear: Partial<Record<FaceId, BuildFaceSkin | 'mixed' | null>> = {};
-    for (const f of FACE_BUTTONS) {
-      let seen: BuildFaceSkin | null | undefined; // undefined = none yet
-      let mixed = false;
-      for (const p of selPieces) {
-        const slot = faceSlotOf(p, f.id, centroid.cx, centroid.cz);
-        if (!slot) continue;
-        const s = (p.skin as Partial<Record<BuildFaceSlot, BuildFaceSkin>> | undefined)?.[slot] ?? null;
-        if (seen === undefined) seen = s;
-        else if (matKey2(seen) !== matKey2(s)) { mixed = true; break; }
-      }
-      wear[f.id] = mixed ? 'mixed' : seen ?? null;
-    }
-    return wear as Record<FaceId, BuildFaceSkin | 'mixed' | null>;
-  }, [selPieces, centroid]);
+  // The slots this selection exposes + their kind labels (front/back/sides, or a
+  // plate's top/bottom/edges). Labels follow the first selected piece's kind.
+  const slots = GAME_BUILD.skins.slots;
+  const slotLabels = useMemo(
+    () => GAME_BUILD.skins.slotLabels(selPieces[0] ? GAME_BUILD.catalog.get(selPieces[0].pieceId).kind : 'wall'),
+    [selPieces],
+  );
+
+  // What each slot currently WEARS across the selection (its real look or 'mixed'),
+  // so the row can show every face as it actually appears.
+  const slotWears = useMemo(
+    () => Object.fromEntries(slots.map((s) => [s, slotWear(selPieces, s)])) as Record<BuildFaceSlot, BuildFaceSkin | 'mixed' | null>,
+    [selPieces, slots],
+  );
 
   const pushRecent = (b: BuildFaceSkin) => {
     setRecent((list) => [b, ...list.filter((x) => matKey(x) !== matKey(b))].slice(0, 8));
   };
 
-  // Apply the brush to one compass face of the selection — one pieceSkinSet per
-  // classified piece, one batch (one undo step). Ids stay stable.
-  const paintFace = (face: FaceId) => {
-    const sel = selRef.current;
-    if (!sel.length) return;
-    let cx = 0, cz = 0;
-    for (const p of sel) { cx += p.x; cz += p.z; }
-    cx /= sel.length; cz /= sel.length;
-    const b = brushRef.current;
-    const items: { event: WorldEvent; label: string }[] = [];
-    for (const p of sel) {
-      const slot = faceSlotOf(p, face, cx, cz);
-      if (!slot) continue;
-      items.push({ event: { kind: 'pieceSkinSet', id: p.id, skin: { [slot]: b } } as WorldEvent, label: `painted ${face} face` });
-    }
-    if (items.length) { commitRef.current(items); pushRecent(b); }
-  };
-
-  // Picking a swatch PAINTS the whole selection immediately (every slot — the
-  // Sims expectation: click a material, see it on the building; one undo step).
-  // The face buttons then refine a single side with the same brush.
-  const pickBrush = (b: BuildFaceSkin) => {
+  // Apply a skin to the TARGETED slot if one is selected, else every slot (the
+  // Sims expectation — click a material, the whole piece wears it). One batch =
+  // one undo step; ids stay stable so the selection (and target) survive.
+  const applyBrush = (b: BuildFaceSkin) => {
     setBrush(b);
     const sel = selRef.current;
     if (!sel.length) return;
-    const items = sel.map((p) => ({
-      event: { kind: 'pieceSkinSet', id: p.id, skin: { front: b, back: b, sides: b } } as WorldEvent,
-      label: 'painted piece',
-    }));
-    commitRef.current(items);
+    const slot = selectedSlotRef.current;
+    const patch: BuildSkinSet = slot ? { [slot]: b } : { front: b, back: b, sides: b };
+    const label = slot ? `painted ${slot}` : 'painted piece';
+    commitRef.current(sel.map((p) => ({ event: { kind: 'pieceSkinSet', id: p.id, skin: patch } as WorldEvent, label })));
     pushRecent(b);
   };
 
-  const pickMaterial = (id: string) => pickBrush({ kind: 'material', id });
+  const pickMaterial = (id: string) => applyBrush({ kind: 'material', id });
 
   // Upload an image (req_0749): the picker → a stored decal material → set as
   // the BRUSH (not auto-painted onto every side — an uploaded image is usually
@@ -327,7 +281,7 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b1220', padding: 10, gap: 7 }}>
       <Text fontSize={9} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-        {`PAINT — ${selPieces.length} piece${selPieces.length === 1 ? '' : 's'} · a swatch paints it all · a side refines`}
+        {`PAINT — ${selPieces.length} piece${selPieces.length === 1 ? '' : 's'} · ${selectedSlot ? `face: ${slotLabels[selectedSlot]}` : 'a skin paints every face'}`}
       </Text>
       {selPieces.length === 0 ? (
         <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>
@@ -346,27 +300,37 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         </ScrollView>
       ) : null}
 
-      {/* faces: big targets, each with a dot of what that face currently wears */}
-      <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
-        {FACE_BUTTONS.map((f) => {
-          const wear = faceWear[f.id];
-          const dot = wear === 'mixed'
-            ? { backgroundColor: '#475569', borderColor: '#94a3b8' }
-            : wear === null
-              ? { backgroundColor: '#0b1220', borderColor: '#2a3a52' }
-              : wear.kind === 'color'
-                ? { backgroundColor: wear.value, borderColor: '#3a4f6b' }
-                : { backgroundColor: '#ffffff', borderColor: '#7dd3fc' };
-          const wearName = wear === 'mixed' ? 'mixed' : wear === null ? 'unpainted' : wear.kind === 'color' ? wear.value : (materialById.get(wear.id)?.label ?? wear.id);
-          return (
-            <Pressable key={f.id} onPress={() => paintFace(f.id)} hoverable tooltip={`${f.title} · now: ${wearName}`}>
-              <Box style={{ width: 73, paddingTop: 5, paddingBottom: 5, borderRadius: 4, borderWidth: 1, borderColor: '#3a4f6b', backgroundColor: '#16233a', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                <Text fontSize={11} color="#dbe6f3" style={{ fontFamily: 'monospace' }}>{f.label}</Text>
-                <Box style={{ width: 9, height: 9, borderRadius: 5, borderWidth: 1, ...dot }} />
-              </Box>
-            </Pressable>
-          );
-        })}
+      {/* faces: each shows its REAL look. Click one to target it (a skin then
+          paints only that face); click it again — or leave none — to paint all. */}
+      <Box style={{ gap: 3 }}>
+        <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>
+          {selPieces.length === 0
+            ? 'FACES'
+            : selectedSlot
+              ? `FACES · targeting ${slotLabels[selectedSlot]} — a skin paints just this · click again for all`
+              : 'FACES · a skin paints all · click one to refine it'}
+        </Text>
+        <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
+          {slots.map((slot) => {
+            const wear = slotWears[slot];
+            const active = selectedSlot === slot;
+            const def = wear && wear !== 'mixed' && wear.kind === 'material' ? materialById.get(wear.id) : undefined;
+            const wearName = wear === 'mixed' ? 'mixed' : wear === null ? 'unpainted' : wear.kind === 'color' ? wear.value : (materialById.get(wear.id)?.label ?? wear.id);
+            const fill = wear === null ? '#0b1220' : wear === 'mixed' ? '#475569' : wear.kind === 'color' ? wear.value : '#0f1a2e';
+            return (
+              <Pressable key={slot} onPress={() => setSelectedSlot((cur) => (cur === slot ? null : slot))} hoverable tooltip={`${slotLabels[slot]} · now: ${wearName} · click to refine just this face`}>
+                <Box style={{ width: 60, gap: 2 }}>
+                  <Box style={{ width: 60, height: 44, borderRadius: 4, borderWidth: active ? 2 : 1, borderColor: active ? '#7dd3fc' : '#3a4f6b', backgroundColor: fill, overflow: 'hidden' }}>
+                    {def ? (def.source.kind === 'shader'
+                      ? <Effect shader={def.source.shader} data={def.source.data} style={SWATCH_FILL} />
+                      : def.source.render(SWATCH_CTX)) : null}
+                  </Box>
+                  <Text fontSize={8} color={active ? '#7dd3fc' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{slotLabels[slot]}</Text>
+                </Box>
+              </Pressable>
+            );
+          })}
+        </Box>
       </Box>
 
       {/* the current brush — always visible, so you know what a face click drops */}
@@ -393,7 +357,7 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         <Box style={{ flexDirection: 'row', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
           <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>RECENT</Text>
           {recent.map((b) => (
-            <Pressable key={matKey(b)} onPress={() => pickBrush(b)} hoverable tooltip={b.kind === 'color' ? b.value : (materialById.get(b.id)?.label ?? b.id)}>
+            <Pressable key={matKey(b)} onPress={() => applyBrush(b)} hoverable tooltip={b.kind === 'color' ? b.value : (materialById.get(b.id)?.label ?? b.id)}>
               {b.kind === 'color' ? (
                 <Box style={{ width: 14, height: 14, borderRadius: 3, backgroundColor: b.value, borderWidth: 1, borderColor: '#3a4f6b' }} />
               ) : (
@@ -409,14 +373,14 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
       {/* colors: the fixed swatches + any #rrggbb you type */}
       <Box style={{ flexDirection: 'row', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
         {BRUSH_SWATCHES.map((c) => (
-          <Pressable key={c} onPress={() => pickBrush({ kind: 'color', value: c })}>
+          <Pressable key={c} onPress={() => applyBrush({ kind: 'color', value: c })}>
             <Box style={{ width: 14, height: 14, borderRadius: 3, backgroundColor: c, borderWidth: brush.kind === 'color' && brush.value === c ? 2 : 1, borderColor: brush.kind === 'color' && brush.value === c ? '#7dd3fc' : '#3a4f6b' }} />
           </Pressable>
         ))}
         <TextInput
           text={hexDraft}
           placeholder="#rrggbb"
-          onChangeText={(v: string) => { setHexDraft(v); if (/^#[0-9a-fA-F]{6}$/.test(v)) pickBrush({ kind: 'color', value: v }); }}
+          onChangeText={(v: string) => { setHexDraft(v); if (/^#[0-9a-fA-F]{6}$/.test(v)) applyBrush({ kind: 'color', value: v }); }}
           style={{ width: 66, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: hexDraft.length === 0 ? '#27364a' : hexValid ? '#34d399' : '#b04a3a', borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
         />
       </Box>
@@ -495,7 +459,7 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   );
 });
 
-// faceWear's comparator: like matKey but null-tolerant (an unpainted slot).
+// slotWear's comparator: like matKey but null-tolerant (an unpainted slot).
 function matKey2(skin: BuildFaceSkin | null): string {
   return skin === null ? 'none' : matKey(skin);
 }
