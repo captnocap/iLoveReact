@@ -557,8 +557,14 @@ function _scene3dVertexProps(key: string, verts: number[] | Float32Array, count:
 Scene3DBase.Mesh = ({
   geometry, params, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ,
   texture, textureKey, dynamicKey, heights, hfCols, hfRows, waveAmplitude, waveLength, waveSpeed,
-  waveDirection, waveDirX, waveDirZ, wavePhase, ...rest
+  waveDirection, waveDirX, waveDirZ, wavePhase, groundFormula, groundData, ...rest
 }: any) => {
+  // Data-shape ground: a WGSL surface formula + its per-cell ref stream make the
+  // mesh synthesise its look per fragment (no baked texture). Only the host-side
+  // heightfield path consumes them; a normal textured mesh ignores both.
+  const groundProps = (typeof groundFormula === 'string' && groundFormula.length > 0 && Array.isArray(groundData))
+    ? { scene3dGroundFormula: groundFormula, scene3dGroundData: groundData }
+    : null;
   const matColor = typeof material === 'string' ? material : (material?.color ?? color);
   const [r, g, b] = _hexToRgb(matColor, [0.8, 0.8, 0.8]);
   // Opacity comes only from an object material (`{ color, opacity }`). <1 makes
@@ -651,6 +657,7 @@ Scene3DBase.Mesh = ({
           scene3dTexH: texH,
           scene3dTexData: texData,
           ...(texKey ? { scene3dTexKey: texKey } : {}),
+          ...(groundProps ?? {}),
         });
       }
       // Same identity-stability rule as the hf path: the dynamicKey by contract

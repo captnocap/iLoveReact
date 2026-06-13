@@ -4,7 +4,7 @@ import * as Geometry from '@reactjit/geometries';
 import type { Landform as LandformData } from '../design';
 import { landformHeightfield, landformRoadCenterline, landformRoadHalfWidth, mountainCraterLake } from '../world/landforms';
 import { LANDFORM_FILL_SHADER, landformCaptureDimension, landformFillData, landformTextureKey } from './landformFill';
-import { HeightfieldSurfaceCaptures, heightfieldTextureKey } from './heightfieldSurface';
+import { HEIGHTFIELD_TILE_BODY, HeightfieldSurfaceCaptures, heightfieldTextureKey, heightfieldTileData } from './heightfieldSurface';
 import { WATER_FILL_SHADER, waterTextureKey } from './waterFill';
 import {
   ROAD_RIBBON_CAPTURE_H,
@@ -107,6 +107,14 @@ export const Landform = memo(function Landform(props: { landform: LandformData }
     verRef.current += 1;
   }
   const dynamicKey = lf.field ? `landform_${lf.id}~${verRef.current}` : undefined;
+  // Painted (tile-grid) fields run the ground FORMULA per fragment — crisp at any
+  // zoom, no baked capture (the data-shape ground, GUIDING_LIGHT). Other landform
+  // kinds keep the natural-blend surface capture. groundData is memoised on the
+  // tile/road identity so the prop only re-crosses the bridge when the paint
+  // actually changes (static_surface_inline_props_rebake discipline).
+  const tiles = lf.field?.tiles;
+  const roads = lf.field?.roads;
+  const groundData = useMemo(() => (tiles ? heightfieldTileData(tiles, roads) : null), [tiles, roads]);
   return (
     <>
       <Scene3D.Mesh
@@ -121,7 +129,9 @@ export const Landform = memo(function Landform(props: { landform: LandformData }
         }}
         dynamicKey={dynamicKey}
         material="#ffffff"
-        textureKey={landformSurfaceTextureKey(lf)}
+        {...(groundData
+          ? { groundFormula: HEIGHTFIELD_TILE_BODY, groundData }
+          : { textureKey: landformSurfaceTextureKey(lf) })}
         position={[lf.centerX, lf.baseY, lf.centerZ]}
       />
       {LANDFORM_DECORATIONS[lf.kind]?.(lf)}

@@ -11,6 +11,7 @@ const core = @import("gpu.zig");
 const images = @import("images.zig");
 const math = @import("../math/root.zig");
 const layout = @import("../layout.zig");
+const effect_assemble = @import("effect_assemble.zig");
 const Node = layout.Node;
 
 // ════════════════════════════════════════════════════════════════════════
@@ -124,8 +125,45 @@ const MAX_FRAME_VERTS = 262144;
 // vertices: identical geometry across N meshes collapses to one GPU copy. The
 // "240fps coconut" — regenerated every frame in the legacy path — becomes one
 // upload that never runs again unless its params (hence its key) change.
-const MAX_RETAINED_VERTS = 524288; // 512k verts × 32 B/vert ≈ 16 MB
-const GEO_CACHE_SIZE = 512;
+// CAP RAISE (req_0725): a city editor interns a LOT of distinct geometry —
+// every prop kind, imported mesh, building piece variant, etc. When this region
+// (or GEO_CACHE_SIZE below) fills, internGeometry returns null and pass 1
+// SILENTLY DROPS the mesh (no per-frame fallback despite the older comment). The
+// fill order is deterministic — worldStatics props are collected before the
+// build pieces, so once the cache is full the shared Box geometry (the grid AND
+// every building bucket) can't intern and EVERY building + the grid vanish while
+// props survive (and a restart can't help: same order refills the same way).
+// MEASURED (req_0727): with caps at 2M/2048 the census still showed
+// inst_collected=0 with geo_cache_len=146 — so it's NOT the KEY count (146 ≪
+// 2048), it's the VERTEX BUFFER: ~146 distinct geometries (props, humanoids,
+// carves, and the user's newly-IMPORTED mesh) fill MAX_RETAINED_VERTS before the
+// Box geometry the building buckets share can intern, so every bucket + the grid
+// drop. So we want this region as large as possible to fit a city's worth of
+// distinct meshes plus the imported asset.
+//
+// HARD CEILING (req_0731): g_retained_vbuf is ONE buffer holding the intern
+// region [0, MAX_RETAINED_VERTS) AND the reserved dynamic-slot tail
+// (DYN_REGION_VERTS) on top — its total alloc is (MAX_RETAINED_VERTS +
+// DYN_REGION_VERTS) * sizeof(Vertex). WebGPU caps a SINGLE buffer at
+// maxBufferSize (the 256 MiB default we get from passing null limits at device
+// creation — NOT the machine's VRAM). req_0725 set this to 8M verts = exactly
+// 256 MiB, ignoring the dyn tail, so the buffer asked the GPU for ~400 MiB —
+// over the per-buffer limit. In a validation build that's a clean abort; in a
+// build where validation does not catch it, the oversized per-frame allocation
+// hard-locks the GPU driver (observed: kernel panic + looping audio). So size
+// the intern region to fill exactly what's LEFT under the cap once the dyn tail
+// is reserved. The comptime assert below DYN_REGION_VERTS enforces this so the
+// build FAILS instead of the machine if either constant is bumped past the cap.
+// (To genuinely get a 256 MiB intern region back, split the dyn tail into its
+// own buffer or request a higher maxBufferSize at device creation — both are
+// later changes; this keeps the single-buffer layout safe.)
+// WebGPU's default per-buffer ceiling. We get this because device creation passes
+// null limits (gpu.zig), so we never raise maxBufferSize. This is a single-buffer
+// API cap, NOT the machine's VRAM — a beefy GPU does not change it.
+const MAX_BUFFER_BYTES = 268_435_456; // 256 MiB — WebGPU default maxBufferSize
+const MAX_BUFFER_VERTS = MAX_BUFFER_BYTES / @sizeOf(Vertex); // 8,388,608 verts at 32 B/vert
+const MAX_RETAINED_VERTS = MAX_BUFFER_VERTS - DYN_REGION_VERTS; // fills the buffer up to the 256 MiB cap
+const GEO_CACHE_SIZE = 2048;
 const GeoEntry = struct {
     hash: u64 = 0,
     offset_bytes: u64 = 0,
@@ -135,6 +173,7 @@ const GeoEntry = struct {
 var g_geo_cache: [GEO_CACHE_SIZE]GeoEntry = [_]GeoEntry{.{}} ** GEO_CACHE_SIZE;
 var g_geo_cache_len: usize = 0;
 var g_retained_top: u64 = 0; // bump cursor (bytes) into g_retained_vbuf; persists across frames
+var g_dbg_frame: u64 = 0; // req_0727: rate-limit the r3d-census diagnostic print
 
 // ── Dynamic geometry slots ──────────────────────────────────────────────────
 // LIVE-edited geometry (a sculpted heightfield, etc.) cannot use the intern cache:
@@ -155,6 +194,19 @@ const DYN_SLOTS = 48; // distinct live meshes (e.g. focused chunks)
 // ~6x and are the real fix, but that's a vertex+index pipeline change for later.)
 const MAX_DYN_VERTS = 98304;
 const DYN_REGION_VERTS = DYN_SLOTS * MAX_DYN_VERTS;
+
+// req_0731: g_retained_vbuf is ONE buffer = intern region + this dyn tail. Its
+// total alloc MUST stay within the WebGPU per-buffer cap, or the GPU allocation
+// is illegal — and uncaught (a non-validation build) that hard-locks the driver
+// (kernel panic + looping audio). Fail the BUILD here, not the machine, if either
+// MAX_RETAINED_VERTS or the dyn region is ever bumped past the cap.
+comptime {
+    const total_bytes = (MAX_RETAINED_VERTS + DYN_REGION_VERTS) * @sizeOf(Vertex);
+    if (total_bytes > MAX_BUFFER_BYTES) {
+        @compileError("g_retained_vbuf would exceed WebGPU maxBufferSize (256 MiB): shrink MAX_RETAINED_VERTS or the dyn region, or raise the device maxBufferSize limit at device creation");
+    }
+}
+
 const DynSlot = struct { id_hash: u64 = 0, version_hash: u64 = 0, count: u32 = 0, present: bool = false };
 var g_dyn_slots: [DYN_SLOTS]DynSlot = [_]DynSlot{.{}} ** DYN_SLOTS;
 var g_dyn_len: usize = 0;
@@ -202,6 +254,18 @@ var g_pipeline: ?*wgpu.RenderPipeline = null;
 // and other alpha<1 meshes draw through this in a second, back-to-front pass so
 // they composite over the opaque scene without occluding each other via depth.
 var g_pipeline_transparent: ?*wgpu.RenderPipeline = null;
+// Ground-formula pipeline (the data-shape ground — GUIDING_LIGHT). Built ONCE,
+// lazily, the first frame a mesh carries scene3d_ground_formula: the formula is
+// identical for every chunk (only the per-cell D ref stream differs), so one
+// pipeline serves them all. group0 = SceneUniforms (shared layout); group1 = a
+// per-chunk storage buffer holding D. No baked texture — crisp at any zoom.
+var g_ground_pipeline: ?*wgpu.RenderPipeline = null;
+var g_ground_bgl: ?*wgpu.BindGroupLayout = null; // group1: read-only storage D
+const GROUND_POOL = 16; // distinct D buffers (≈ max simultaneously-drawn ground chunks)
+const GROUND_DATA_FLOATS = 20000; // cap per chunk: 130*130 cells + palette + ribbon, ample
+var g_ground_data_buf: [GROUND_POOL]?*wgpu.Buffer = [_]?*wgpu.Buffer{null} ** GROUND_POOL;
+var g_ground_data_bg: [GROUND_POOL]?*wgpu.BindGroup = [_]?*wgpu.BindGroup{null} ** GROUND_POOL;
+var g_ground_wgsl_buf: [96 * 1024]u8 = undefined; // scratch for the one-time assembled module
 var g_vertex_buffer: ?*wgpu.Buffer = null;
 var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned registry geometry
 var g_instance_buf: ?*wgpu.Buffer = null; // per-frame InstanceData buffer (step=instance, vbuf 1)
@@ -421,6 +485,42 @@ pub fn init() void {
         });
     }
 
+    // ── Ground-formula group(1): one read-only storage buffer (the D ref stream).
+    //    The pool of buffers + their bind groups is created up front; the PIPELINE
+    //    is built lazily (ensureGroundPipeline) once a formula arrives. ──
+    g_ground_bgl = device.createBindGroupLayout(&.{
+        .entry_count = 1,
+        .entries = @ptrCast(&wgpu.BindGroupLayoutEntry{
+            .binding = 0,
+            .visibility = wgpu.ShaderStages.fragment,
+            .buffer = .{ .type = .read_only_storage, .has_dynamic_offset = 0, .min_binding_size = 0 },
+        }),
+    }) orelse return;
+    {
+        var gi: usize = 0;
+        while (gi < GROUND_POOL) : (gi += 1) {
+            const buf = device.createBuffer(&.{
+                .label = wgpu.StringView.fromSlice("r3d_ground_data"),
+                .size = GROUND_DATA_FLOATS * @sizeOf(f32),
+                .usage = wgpu.BufferUsages.storage | wgpu.BufferUsages.copy_dst,
+                .mapped_at_creation = 0,
+            });
+            g_ground_data_buf[gi] = buf;
+            if (buf) |b| {
+                g_ground_data_bg[gi] = device.createBindGroup(&.{
+                    .layout = g_ground_bgl.?,
+                    .entry_count = 1,
+                    .entries = @ptrCast(&wgpu.BindGroupEntry{
+                        .binding = 0,
+                        .buffer = b,
+                        .offset = 0,
+                        .size = GROUND_DATA_FLOATS * @sizeOf(f32),
+                    }),
+                });
+            }
+        }
+    }
+
     const layouts = [_]?*wgpu.BindGroupLayout{ g_bind_group_layout.?, g_tex_bind_group_layout.? };
     const pipeline_layout = device.createPipelineLayout(&.{
         .bind_group_layout_count = layouts.len,
@@ -475,12 +575,14 @@ pub fn init() void {
     // Transparent companion: identical layout/shader/blend, depth-test on but
     // depth-write OFF, so translucent meshes drawn after the opaque batch read
     // the depth buffer (hidden behind walls) without writing it (no self-occlusion
-    // between panes). Reuses pipeline_layout/shader_module/frag, which the createRenderPipeline
+    // between panes). `less_equal` lets intentional coplanar overlays (painted
+    // stencil over the face's underlay material) draw on top of the base face.
+    // Reuses pipeline_layout/shader_module/frag, which the createRenderPipeline
     // calls retain — both stay valid until this fn's deferred releases fire.
     const depth_stencil_transparent = wgpu.DepthStencilState{
         .format = .depth24_plus,
         .depth_write_enabled = .false,
-        .depth_compare = .less,
+        .depth_compare = .less_equal,
         .stencil_front = .{},
         .stencil_back = .{},
     };
@@ -1264,6 +1366,70 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
     return .{ .offset = base_offset, .count = n };
 }
 
+// Build the ground-formula pipeline once, from the first chunk's formula. The
+// assembled module = scene3d_ground_prefix + effect_math (fbm/snoise) + the
+// shipped formula (hf_ground_rgb + helpers) + scene3d_ground_epilogue. The
+// formula is identical across chunks, so this runs exactly once.
+fn ensureGroundPipeline(formula: []const u8) void {
+    if (g_ground_pipeline != null) return;
+    const device = core.getDevice() orelse return;
+    if (g_bind_group_layout == null or g_ground_bgl == null) return;
+    const wgsl = std.fmt.bufPrint(&g_ground_wgsl_buf, "{s}\n{s}\n{s}\n{s}", .{
+        shaders.scene3d_ground_prefix, effect_assemble.MATH, formula, shaders.scene3d_ground_epilogue,
+    }) catch return;
+    const sm_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_ground", .code = wgsl });
+    const sm = device.createShaderModule(&sm_desc) orelse return;
+    defer sm.release();
+    const gl = [_]?*wgpu.BindGroupLayout{ g_bind_group_layout.?, g_ground_bgl.? };
+    const pl = device.createPipelineLayout(&.{
+        .bind_group_layout_count = gl.len,
+        .bind_group_layouts = @ptrCast(&gl),
+    }) orelse return;
+    defer pl.release();
+    const vert_attrs = [_]wgpu.VertexAttribute{
+        .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
+        .{ .format = .float32x3, .offset = 12, .shader_location = 1 },
+        .{ .format = .float32x2, .offset = 24, .shader_location = 2 },
+    };
+    const inst_attrs = [_]wgpu.VertexAttribute{
+        .{ .format = .float32x4, .offset = 0, .shader_location = 3 },
+        .{ .format = .float32x4, .offset = 16, .shader_location = 4 },
+        .{ .format = .float32x4, .offset = 32, .shader_location = 5 },
+        .{ .format = .float32x4, .offset = 48, .shader_location = 6 },
+        .{ .format = .float32x4, .offset = 64, .shader_location = 7 },
+    };
+    const vert_layouts = [_]wgpu.VertexBufferLayout{
+        .{ .step_mode = .vertex, .array_stride = @sizeOf(Vertex), .attribute_count = vert_attrs.len, .attributes = &vert_attrs },
+        .{ .step_mode = .instance, .array_stride = @sizeOf(InstanceData), .attribute_count = inst_attrs.len, .attributes = &inst_attrs },
+    };
+    const color_target = wgpu.ColorTargetState{
+        .format = .rgba8_unorm,
+        .blend = &wgpu.BlendState.premultiplied_alpha_blending,
+        .write_mask = wgpu.ColorWriteMasks.all,
+    };
+    const frag = wgpu.FragmentState{
+        .module = sm,
+        .entry_point = wgpu.StringView.fromSlice("fs_main"),
+        .target_count = 1,
+        .targets = @ptrCast(&color_target),
+    };
+    const depth_stencil = wgpu.DepthStencilState{
+        .format = .depth24_plus,
+        .depth_write_enabled = .true,
+        .depth_compare = .less,
+        .stencil_front = .{},
+        .stencil_back = .{},
+    };
+    g_ground_pipeline = device.createRenderPipeline(&.{
+        .layout = pl,
+        .vertex = .{ .module = sm, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = vert_layouts.len, .buffers = &vert_layouts },
+        .primitive = .{ .topology = .triangle_list, .cull_mode = .back, .front_face = .ccw },
+        .depth_stencil = &depth_stencil,
+        .multisample = .{},
+        .fragment = &frag,
+    });
+}
+
 fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     const queue = core.getQueue() orelse return;
     const device = core.getDevice() orelse return;
@@ -1465,11 +1631,19 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     var ttex: [MAX_SCENE_MESHES]?*wgpu.BindGroup = undefined;
     var tdist: [MAX_SCENE_MESHES]f32 = undefined;
     var tcount: usize = 0;
+    // Ground-formula single meshes — collected separately, drawn in their own
+    // opaque pass binding each chunk's D ref stream (the data-shape ground).
+    var gidx: [GROUND_POOL]u32 = undefined;
+    var gslot: [GROUND_POOL]GeoSlice = undefined;
+    var gcount: usize = 0;
 
+    var dbg_inst_seen: u32 = 0; // req_0727: instanced (bucket) meshes seen vs collected
+    var dbg_inst_collected: u32 = 0;
     var ci: u32 = 0;
     while (ci < scene_node.children.len and mcount < MAX_SCENE_MESHES) : (ci += 1) {
         const child = &scene_node.children[ci];
         if (!child.scene3d_mesh) continue;
+        if (child.scene3d_instance_count > 0) dbg_inst_seen += 1;
         // Draw-radius cull. Only with an explicit camera `far`, and only for
         // single (non-instanced) meshes — an instance batch carries many
         // positions, not this node's one. Skip if the mesh's nearest point is
@@ -1514,6 +1688,18 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
             }
         }
 
+        // Ground-formula mesh: skip the textured batches; collect for the dedicated
+        // ground pass (binds the per-chunk D ref stream + the ground pipeline).
+        if (child.scene3d_ground_formula != null) {
+            if (gcount < GROUND_POOL) {
+                gidx[gcount] = ci;
+                gslot[gcount] = maybe_slot.?;
+                gcount += 1;
+                collected_logical += 1;
+            }
+            continue;
+        }
+
         var tex_bg: ?*wgpu.BindGroup = g_default_tex_bind_group;
         if (child.scene3d_tex_rgba) |rgba| {
             if (getOrCreateTexBindGroup(rgba, child.scene3d_tex_w, child.scene3d_tex_h)) |bg| tex_bg = bg;
@@ -1541,11 +1727,21 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         mslot[mcount] = maybe_slot.?;
         mtex[mcount] = tex_bg;
         mcount += 1;
+        if (child.scene3d_instance_count > 0) dbg_inst_collected += 1;
         collected_logical += if (child.scene3d_instance_count > 0) child.scene3d_instance_count else 1;
     }
     const collected_count: u32 = collected_logical;
     g_telemetry.meshes_collected += collected_count;
     if (scene_mesh_children > collected_count) g_telemetry.meshes_dropped += scene_mesh_children - collected_count;
+    // req_0727 one-shot-per-~120-frames census: instanced bucket meshes seen vs
+    // collected, + total scene children. If seen>0 but collected==0, pass 1 is
+    // dropping the building buckets (geometry key never cached / no verts);
+    // if seen==collected, they pass collection and the DRAW is the suspect.
+    g_dbg_frame += 1;
+    if (g_dbg_frame % 120 == 1) {
+        const retained_kverts = g_retained_top / @sizeOf(Vertex) / 1000;
+        std.debug.print("[r3d-census] children={d} inst_seen={d} inst_collected={d} mcount={d} tcount={d} geo_cache_len={d} retained={d}k/{d}k verts\n", .{ scene_node.children.len, dbg_inst_seen, dbg_inst_collected, mcount, tcount, g_geo_cache_len, retained_kverts, MAX_RETAINED_VERTS / 1000 });
+    }
 
     // ── Pass 2: group by (slot.offset, tex_bg) and issue ONE instanced draw per
     //    group. slot.offset is the cache offset for a key — identity-by-offset
@@ -1675,6 +1871,55 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     }
 
     // ── Transparent pass ──────────────────────────────────────────────────
+    // ── Ground-formula pass (the data-shape ground): each chunk floor runs its
+    //    surface formula per fragment instead of sampling a baked texture. Opaque,
+    //    so drawn after the opaque batch and before the transparent pass. Build the
+    //    one pipeline lazily, then per chunk upload its D ref stream to a pool
+    //    buffer, write the model instance, and draw. ──
+    if (gcount > 0 and scene_node.children[gidx[0]].scene3d_ground_formula != null) {
+        ensureGroundPipeline(scene_node.children[gidx[0]].scene3d_ground_formula.?);
+        if (g_ground_pipeline) |gp| {
+            pass.setPipeline(gp);
+            pass.setBindGroup(0, g_bind_group.?, 0, null);
+            var gp_i: usize = 0;
+            while (gp_i < gcount) : (gp_i += 1) {
+                if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) break;
+                const child = &scene_node.children[gidx[gp_i]];
+                const pool = gp_i; // gcount <= GROUND_POOL → one distinct buffer per draw
+                if (g_ground_data_buf[pool] == null or g_ground_data_bg[pool] == null) continue;
+                if (child.scene3d_ground_data) |d| {
+                    const n = @min(d.len, GROUND_DATA_FLOATS);
+                    queue.writeBuffer(g_ground_data_buf[pool].?, 0, @ptrCast(d.ptr), n * @sizeOf(f32));
+                }
+                const inst_index: usize = @intCast(inst_top / @sizeOf(InstanceData));
+                inst_scratch[inst_index] = makeInstance(
+                    child.scene3d_pos_x,
+                    child.scene3d_pos_y,
+                    child.scene3d_pos_z,
+                    child.scene3d_rot_x,
+                    child.scene3d_rot_y,
+                    child.scene3d_rot_z,
+                    child.scene3d_scale_x,
+                    child.scene3d_scale_y,
+                    child.scene3d_scale_z,
+                    child.scene3d_color_r,
+                    child.scene3d_color_g,
+                    child.scene3d_color_b,
+                    child.scene3d_color_a,
+                );
+                queue.writeBuffer(g_instance_buf.?, inst_top, @ptrCast(&inst_scratch[inst_index]), @sizeOf(InstanceData));
+                pass.setBindGroup(1, g_ground_data_bg[pool].?, 0, null);
+                const geo_bytes: u64 = @as(u64, gslot[gp_i].count) * @sizeOf(Vertex);
+                pass.setVertexBuffer(0, g_retained_vbuf.?, gslot[gp_i].offset, geo_bytes);
+                pass.setVertexBuffer(1, g_instance_buf.?, inst_top, @sizeOf(InstanceData));
+                pass.draw(gslot[gp_i].count, 1, 0, 0);
+                inst_top += @sizeOf(InstanceData);
+                g_telemetry.draw_calls += 1;
+                g_telemetry.instances += 1;
+            }
+        }
+    }
+
     // Glass and other alpha<1 meshes, drawn after every opaque draw so they read
     // a complete depth buffer, sorted far→near so overlapping panes blend in the
     // correct order. depth-write is off (g_pipeline_transparent), so panes don't

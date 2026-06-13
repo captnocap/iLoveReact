@@ -509,6 +509,13 @@ pub const Node = struct {
     scene3d_tex_h: u32 = 0,
     scene3d_tex_rgba: ?[]const u8 = null, // raw RGBA bytes, length = w*h*4
     scene3d_tex_key: ?[]const u8 = null, // StaticSurface key — looked up in gpu/gpu.zig
+    // Ground-formula surface (the data-shape ground — GUIDING_LIGHT). When set,
+    // the mesh runs this WGSL formula per fragment (gpu/3d.zig assembles it with
+    // scene3d_ground_prefix/epilogue + effect_math, compiled once) instead of
+    // sampling a baked texture; scene3d_ground_data is the per-cell reference
+    // stream bound as the formula's storage buffer D. Crisp at any zoom, no bake.
+    scene3d_ground_formula: ?[]const u8 = null, // WGSL defining fn hf_ground_rgb(uv)->vec3f
+    scene3d_ground_data: ?[]const f32 = null, // D ref stream (cols,rows,pal,palette…,cells…,ribbon)
     // @reactjit/geometries registry mesh. A geometry generator (TS) produced these
     // interleaved verts [px,py,pz,nx,ny,nz,u,v]×count; gpu/3d.zig interns them by
     // `scene3d_geom_key` (id+paramHash) into a RETAINED GPU buffer and redraws the
