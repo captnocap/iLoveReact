@@ -101,6 +101,7 @@ interface ChunkSnap {
   tiles: RleGrid;   // per-cell index into tileLegend (-1 = empty)
   height: RleGrid;  // per-sample quantized height (round(z * HEIGHT_Q); 0 = flat)
   zones: RleGrid;   // per-cell index into `zones` list (-1 = unzoned)
+  water?: RleGrid;  // per-sample quantized WATER surface level (>0 = wet); absent = dry
 }
 
 export interface MapSnapshot {
@@ -149,6 +150,11 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
     const hz = c.height.z;
     const q = new Array<number>(hz.length);
     for (let i = 0; i < hz.length; i++) q[i] = Math.round(hz[i] * HEIGHT_Q);
+    // Painted water surface (mostly 0/dry) → the same quantize + RLE as height.
+    const wz = c.water.z;
+    let anyWater = false;
+    const wq = new Array<number>(wz.length);
+    for (let i = 0; i < wz.length; i++) { wq[i] = Math.round(wz[i] * HEIGHT_Q); if (wq[i] !== 0) anyWater = true; }
     const baseIdx = Array.from(c.tiles.idx);
     if (under && under.size) {
       const cx0 = c.cx * CHUNK_TILES;
@@ -167,6 +173,7 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
       tiles: encodeGrid(baseIdx, c.tiles.cols, c.tiles.rows),
       height: encodeGrid(q, c.height.cols, c.height.rows),
       zones: encodeGrid(Array.from(c.zones.idx), c.zones.cols, c.zones.rows),
+      ...(anyWater ? { water: encodeGrid(wq, c.water.cols, c.water.rows) } : {}),
     });
   }
   return {
@@ -218,6 +225,14 @@ export function deserializeMap(snap: MapSnapshot): EditorWorld {
     for (let i = 0; i < c.height.z.length && i < hflat.length; i++) {
       const v = hflat[i];
       c.height.z[i] = v == null ? 0 : v / HEIGHT_Q;
+    }
+
+    if (cs.water) {
+      const wflat = decodeGrid(cs.water);
+      for (let i = 0; i < c.water.z.length && i < wflat.length; i++) {
+        const v = wflat[i];
+        c.water.z[i] = v == null ? 0 : v / HEIGHT_Q;
+      }
     }
 
     const zflat = decodeGrid(cs.zones);

@@ -12,10 +12,11 @@
 // stroke never regenerates the height mesh and a height stroke never re-bakes the
 // texture.
 
-import type { Landform } from './design';
+import type { Landform, WaterBody } from './design';
 import { CHUNK_TILES, chunkKey, type Chunk, type ChunkKey } from './chunks';
 import { encodeTileMap } from './tileData';
 import { roadRibbonSegments, type RoadStroke } from './roadData';
+import { WATER_LOOK } from './game/kinds/waterBodies';
 import { plog } from './perfLog';
 
 export const chunkFloorId = (cx: number, cz: number): string => `chunk_${cx}_${cz}`;
@@ -29,6 +30,10 @@ export type ChunkFloor = {
   hcols: number;      // height-sample columns / rows (cols*rows = heights.length)
   hrows: number;
   hver: number;       // height version — bumps each height edit; drives the host's dynamic-slot overwrite
+  // Painted WATER surface level per height-sample (the terrain tool's water brush),
+  // same grid as `heights`; a sample > 0 is WET (water up to that level), 0 = dry.
+  // Present only on chunks with painted water; stable ref unless water painted.
+  water?: number[];
   // Analytic road ribbon segments over this chunk (ROADCURVE-0610), chunk-local
   // cell space, 8 floats/segment — stable identity unless a road changed.
   roads?: number[];
@@ -65,8 +70,14 @@ export function downsampleChunkFloorHeights(z: Float32Array, cols: number, rows:
   return out;
 }
 
+function anyPositive(z: Float32Array): boolean {
+  for (let i = 0; i < z.length; i++) if (z[i] > 0) return true;
+  return false;
+}
+
 export function chunkToFloor(c: Chunk, hver = 1, roads?: RoadStroke[]): ChunkFloor {
   const segs = roads?.length ? roadRibbonSegments(roads, c.cx, c.cz, CHUNK_TILES) : [];
+  const hasWater = anyPositive(c.water.z);
   return {
     cx: c.cx,
     cz: c.cz,
@@ -75,6 +86,7 @@ export function chunkToFloor(c: Chunk, hver = 1, roads?: RoadStroke[]): ChunkFlo
     hcols: CHUNK_FLOOR_HF_RES,
     hrows: CHUNK_FLOOR_HF_RES,
     hver,
+    ...(hasWater ? { water: downsampleChunkFloorHeights(c.water.z, c.water.cols, c.water.rows) } : {}),
     ...(segs.length ? { roads: segs } : {}),
   };
 }
@@ -155,5 +167,57 @@ export function floorsToLandforms(floors: ChunkFloor[]): Landform[] {
   // mid-stroke sync. rebuilt=N every sync = stable identity broke → preview re-bakes
   // everything again (the choke is back).
   plog('landforms', `rebuilt=${rebuilt} reused=${reused} (only rebuilt chunks re-bake in the preview)`);
+  return out;
+}
+
+// A painted-water chunk → a field-backed WaterBody (the terrain water brush's
+// twin of floorToLandform): the chunk's water grid becomes the body's per-cell
+// surface field (wet samples keep their level, dry → the basin floor so the
+// heightfield skirt closes the volume). Depth is derived against the painted
+// terrain (the chunk's heightfield landform) under it. One body per wet chunk.
+export function floorToWaterBody(f: ChunkFloor): WaterBody {
+  const base = -WATER_LOOK.floorTuckMeters;
+  const cell = CHUNK_TILES / (f.hcols - 1);
+  const heights = (f.water ?? []).map((v) => (v > 0 ? v : base));
+  const span = (f.hcols - 1) * cell; // = CHUNK_TILES
+  const centerX = f.cx * CHUNK_TILES + CHUNK_TILES / 2;
+  const centerZ = f.cz * CHUNK_TILES + CHUNK_TILES / 2;
+  return {
+    id: `painted_water_${f.cx}_${f.cz}`,
+    label: `painted water ${f.cx},${f.cz}`,
+    shape: 'rect',
+    x: centerX - span / 2,
+    z: centerZ - span / 2,
+    width: span,
+    depth: span,
+    surfaceY: 0, // unused — the field drives the per-cell surface
+    field: { cols: f.hcols, rows: f.hrows, cell, heights },
+    createdByCommand: 'hmsc-int:paint-water',
+  };
+}
+
+// Stable-identity cache (mirrors floorsToLandforms): only a chunk whose water grid
+// ref actually changed rebuilds its body, so an unrelated sync doesn't churn the
+// preview's water meshes. Keyed by chunk id; unfocused chunks are pruned.
+type WaterCacheEntry = { water: number[]; body: WaterBody };
+const waterCache = new Map<string, WaterCacheEntry>();
+
+export function floorsToWaterBodies(floors: ChunkFloor[]): WaterBody[] {
+  const live = new Set<string>();
+  const out: WaterBody[] = [];
+  for (const f of floors) {
+    if (!f.water || f.water.length === 0) continue;
+    const id = chunkFloorId(f.cx, f.cz);
+    live.add(id);
+    const hit = waterCache.get(id);
+    if (hit && hit.water === f.water) {
+      out.push(hit.body);
+      continue;
+    }
+    const body = floorToWaterBody(f);
+    waterCache.set(id, { water: f.water, body });
+    out.push(body);
+  }
+  for (const id of waterCache.keys()) if (!live.has(id)) waterCache.delete(id);
   return out;
 }

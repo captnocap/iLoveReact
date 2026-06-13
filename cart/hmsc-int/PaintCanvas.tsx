@@ -51,7 +51,7 @@ import type { SelCell } from './tileOverrides';
 import type { EditNote } from './editLog';
 import { plog, useChurn, countersSnapshot, counterDelta } from './perfLog';
 
-export type HeightMode = 'brush' | 'ramp' | 'slope' | 'smooth';
+export type HeightMode = 'brush' | 'ramp' | 'slope' | 'smooth' | 'water';
 type CanvasRect = { x: number; y: number; width: number; height: number } | null;
 type HoverState = { x: number; y: number; addr: string } | null;
 type HoverSink = { current: ((h: HoverState) => void) | null };
@@ -476,7 +476,7 @@ export function PaintCanvas(props: {
   // delete). The legacy brush.mode==='erase' (the rail's old eraser chip,
   // persisted in saved maps) still counts.
   const activeBrushMode: BrushMode = tool === 'eraser' ? 'erase' : brushMode;
-  const heightMode: HeightMode = props.brush.heightMode === 'ramp' || props.brush.heightMode === 'slope' || props.brush.heightMode === 'smooth' ? props.brush.heightMode : 'brush';
+  const heightMode: HeightMode = props.brush.heightMode === 'ramp' || props.brush.heightMode === 'slope' || props.brush.heightMode === 'smooth' || props.brush.heightMode === 'water' ? props.brush.heightMode : 'brush';
   const centerZ = clamp(Number(props.brush.centerZ), Z_MIN, Z_MAX);
   // One brush size (radius in tiles) shared by paint, zone, and height.
   const brushSize = clamp(Math.round(Number(props.brush.size)), SIZE_MIN, SIZE_MAX);
@@ -625,8 +625,10 @@ export function PaintCanvas(props: {
   const notifyEditBegin = useCallback(() => { onEditBeginRef.current?.(); }, []);
   const tileDirty = useRef<Set<ChunkKey>>(new Set());
   const heightDirty = useRef<Set<ChunkKey>>(new Set());
+  const waterDirty = useRef<Set<ChunkKey>>(new Set());
   const tileCache = useRef<Map<ChunkKey, number[]>>(new Map());
   const heightCache = useRef<Map<ChunkKey, number[]>>(new Map());
+  const waterCache = useRef<Map<ChunkKey, number[] | null>>(new Map()); // downsampled water grid (null = dry, no body)
   const heightVer = useRef<Map<ChunkKey, number>>(new Map()); // bumps per re-downsample → host slot overwrite
   // Analytic ribbon segments per chunk (ROADCURVE-0610): recomputed only when
   // a road changed (per-entry rev vs roadsRev), and kept IDENTITY-STABLE when a
@@ -668,8 +670,17 @@ export function PaintCanvas(props: {
         heightDirty.current.delete(k);
         heightEnc++;
       }
+      // Painted water (the water brush): re-downsample only on a water edit. A dry
+      // chunk caches null so floorsToWaterBodies skips it; a stable ref otherwise.
+      if (waterDirty.current.has(k) || !waterCache.current.has(k)) {
+        let wet = false;
+        for (let i = 0; i < c.water.z.length; i++) if (c.water.z[i] > 0) { wet = true; break; }
+        waterCache.current.set(k, wet ? downsampleChunkFloorHeights(c.water.z, c.water.cols, c.water.rows) : null);
+        waterDirty.current.delete(k);
+      }
       const segs = ribbonSegsForRef.current(c.cx, c.cz);
-      out.push({ cx: c.cx, cz: c.cz, tileData: tileCache.current.get(k)!, heights: heightCache.current.get(k)!, hcols: CHUNK_FLOOR_HF_RES, hrows: CHUNK_FLOOR_HF_RES, hver: heightVer.current.get(k) ?? 0, ...(segs.length ? { roads: segs } : {}) });
+      const water = waterCache.current.get(k) ?? null;
+      out.push({ cx: c.cx, cz: c.cz, tileData: tileCache.current.get(k)!, heights: heightCache.current.get(k)!, hcols: CHUNK_FLOOR_HF_RES, hrows: CHUNK_FLOOR_HF_RES, hver: heightVer.current.get(k) ?? 0, ...(water ? { water } : {}), ...(segs.length ? { roads: segs } : {}) });
     }
     const dt = ((globalThis as any).performance?.now?.() ?? 0) - t0;
     plog('buildFloors', `focused=${focused} tileEncoded=${tileEnc} heightEncoded=${heightEnc} took ${dt.toFixed(2)}ms`);
@@ -842,6 +853,33 @@ export function PaintCanvas(props: {
     // The 3D preview-mesh mirror is DEFERRED to stroke end (endStroke → syncRegionsNow):
     // a height edit re-ships the whole ~65k-float mesh across the bridge, so doing it
     // mid-stroke per dirty chunk freezes paint. The 2D canvas is live via the touch.
+  };
+
+  // Paint WATER into the terrain (heightMode 'water'): the brush fills its footprint
+  // with water up to the brush Z level (a flat surface), into the chunk's water grid.
+  // A wet cell (level > 0) becomes a body of water; depth is derived against the
+  // terrain bed under it. Erase clears to dry. Same chunk-local mapping as height.
+  const stampWaterAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
+    const b = brushRef.current;
+    const gsx = Math.round(gx / GSAMPLE), gsy = Math.round(gy / GSAMPLE);
+    const stampKey = `${gsx}:${gsy}`;
+    if (heightStamped.current.has(stampKey)) return;
+    heightStamped.current.add(stampKey);
+    const radiusM = Math.max(0.5, b.size);
+    const rd = Math.max(1, Math.ceil(radiusM / DOT_M));
+    // Water level = the brush Z (must be > 0 to read as water); flat profile fills
+    // the footprint to that level. Erase pulls cells back to dry (0).
+    const level = b.mode === 'erase' ? 0 : Math.max(0, b.centerZ);
+    for (const ch of focusedChunks) {
+      const cols = ch.water.cols, rows = ch.water.rows;
+      const cix = Math.round((gx - ch.cx * PATCH + PATCH / 2) / PATCH * (cols - 1));
+      const ciy = Math.round((gy - ch.cz * PATCH + PATCH / 2) / PATCH * (rows - 1));
+      if (cix + rd < 0 || cix - rd > cols - 1 || ciy + rd < 0 || ciy - rd > rows - 1) continue;
+      stampBrush(ch.water, cix, ciy, { centerZ: level, radiusM, shape: b.shape, profile: 'flat', erase: b.mode === 'erase' });
+      const k = chunkKey(ch.cx, ch.cz);
+      touched.add(k);
+      waterDirty.current.add(k);
+    }
   };
 
   const slopeStroke = useRef<{ points: { x: number; y: number }[] } | null>(null);
@@ -1222,6 +1260,7 @@ export function PaintCanvas(props: {
   const isRampTool = layer === 'height' && heightMode === 'ramp';
   const isSlopeTool = layer === 'height' && heightMode === 'slope';
   const isSmoothTool = layer === 'height' && heightMode === 'smooth';
+  const isWaterTool = layer === 'height' && heightMode === 'water';
   const showPlaceBrush = layer === 'place' && tool === 'brush' && !!place.active;
   const behavior = resolvePainterBehavior({ tool, target: layer, placeArmed: !!place.active });
   const showBrush = behavior === 'stroke';
@@ -1303,8 +1342,8 @@ export function PaintCanvas(props: {
       note: () => ({ cat: 'tile', text: activeBrushMode === 'erase' ? 'erased tiles' : `painted ${tile}` }),
     },
     height: {
-      sample: isSmoothTool ? stampSmoothAtGraph : isRampTool || isSlopeTool ? undefined : stampHeightAtGraph,
-      note: () => ({ cat: 'height', text: isRampTool ? 'stamped ramp' : isSlopeTool ? 'painted slope' : isSmoothTool ? 'smoothed terrain' : activeBrushMode === 'erase' ? 'lowered terrain' : 'raised terrain' }),
+      sample: isWaterTool ? stampWaterAtGraph : isSmoothTool ? stampSmoothAtGraph : isRampTool || isSlopeTool ? undefined : stampHeightAtGraph,
+      note: () => ({ cat: 'height', text: isWaterTool ? (activeBrushMode === 'erase' ? 'cleared water' : 'painted water') : isRampTool ? 'stamped ramp' : isSlopeTool ? 'painted slope' : isSmoothTool ? 'smoothed terrain' : activeBrushMode === 'erase' ? 'lowered terrain' : 'raised terrain' }),
     },
     zone: {
       sample: stampZoneAtGraph,
@@ -1574,6 +1613,7 @@ export function PaintCanvas(props: {
     const dia = (brushSize * 2 + 1) * TILE_UNITS * zoom; // footprint width across, in px
     const erasing = !isRampTool && activeBrushMode === 'erase';
     const color = erasing ? '#f87171'
+      : isWaterTool ? '#2f7fa8'
       : layer === 'height' ? '#fbbf24'
       : layer === 'place' ? (place.active?.color ?? '#a78bfa')
       : layer === 'zone' ? (zones[activeZone]?.color ?? '#22d3ee')

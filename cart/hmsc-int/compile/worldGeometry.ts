@@ -642,7 +642,13 @@ export const WATER_LUMP_VERSION = 1;
  *          per body: u32 cols,rows | f32 centerX,centerZ,base,width,depth | f32[cols*rows] heights */
 export function encodeWaterBodies(bodies: GameState['world']['waterBodies'] | undefined): Uint8Array {
   const list = bodies ?? [];
-  const grids = list.map((b) => waterFlatHeights(b.shape, b.width, b.depth, b.surfaceY));
+  // A painted body (terrain water brush) ships its authored per-cell grid; a
+  // parametric body builds a still grid from its footprint. The host applies the
+  // wave either way.
+  const grids = list.map((b) =>
+    b.field
+      ? { cols: b.field.cols, rows: b.field.rows, base: -WATER_LOOK.floorTuckMeters, heights: b.field.heights }
+      : waterFlatHeights(b.shape, b.width, b.depth, b.surfaceY));
   let bytes = 8 + 16 + 20;
   for (const g of grids) bytes += 8 + 20 + g.cols * g.rows * 4;
   const dv = new DataView(new ArrayBuffer(bytes));

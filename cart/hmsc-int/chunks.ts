@@ -33,6 +33,11 @@ export interface Chunk {
   cz: number;
   tiles: TileMap;
   height: HeightField;
+  // Painted WATER surface level (the terrain tool's water brush). Same grid as
+  // `height`; a cell with z > 0 is WET and holds water up to that surface level —
+  // depth is derived against `height` (the bed). 0 = dry. So you paint water into
+  // terrain and dig the bed under it for depth, exactly like a dropped body.
+  water: HeightField;
   zones: ZoneMap;
 }
 
@@ -42,6 +47,7 @@ export function makeChunk(cx: number, cz: number): Chunk {
     cz,
     tiles: makeTileMap(CHUNK_TILES, CHUNK_TILES),
     height: makeHeightField(CHUNK_TILES, CHUNK_TILES),
+    water: makeHeightField(CHUNK_TILES, CHUNK_TILES),
     zones: makeZoneMap(CHUNK_TILES, CHUNK_TILES),
   };
 }

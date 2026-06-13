@@ -40,6 +40,7 @@ const TERRAIN_MODES = [
   { id: 'ramp', label: 'ramp', hint: '/' },
   { id: 'slope', label: 'slope', hint: '~' },
   { id: 'smooth', label: 'smooth', hint: 's' },
+  { id: 'water', label: 'water', hint: 'w' },
 ];
 
 // Select / Paint / Erase — the whole tool surface, on every target. Erase is

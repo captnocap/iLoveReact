@@ -30,6 +30,11 @@ export type WaterBodyShape = 'rect' | 'disc';
  * water surface height in metres — the single factor; depth is derived against
  * the terrain bed.
  */
+// A painted water grid (the terrain tool's water brush): per-cell surface level,
+// centred on the body, `cell` metres apart. A cell ≤ 0 is dry. When present it
+// overrides the parametric footprint (organic painted ponds, not just rect/disc).
+export type WaterField = { cols: number; rows: number; cell: number; heights: number[] };
+
 export type WaterBody = {
   id: string;
   label: string;
@@ -39,45 +44,80 @@ export type WaterBody = {
   width: number;
   depth: number;
   surfaceY: number;
+  field?: WaterField;
   createdByCommand: string;
 };
 
-/** Is (x,z) inside this body's footprint? Rect = the box; disc = the inscribed ellipse. */
-export function waterBodyContains(b: WaterBody, x: number, z: number): boolean {
-  if (x < b.x || x >= b.x + b.width || z < b.z || z >= b.z + b.depth) return false;
+/** Bilinear sample of a painted water grid at body-local (lx,lz); ≤0 / off-grid = dry. */
+function sampleWaterField(f: WaterField, lx: number, lz: number): number {
+  const { cols, rows, cell, heights } = f;
+  const fx = (lx + (cols - 1) * cell * 0.5) / cell;
+  const fz = (lz + (rows - 1) * cell * 0.5) / cell;
+  if (fx < 0 || fz < 0 || fx > cols - 1 || fz > rows - 1) return 0;
+  const i0 = Math.floor(fx);
+  const j0 = Math.floor(fz);
+  const i1 = Math.min(i0 + 1, cols - 1);
+  const j1 = Math.min(j0 + 1, rows - 1);
+  const tx = fx - i0;
+  const tz = fz - j0;
+  const a = heights[j0 * cols + i0];
+  const b = heights[j0 * cols + i1];
+  const c = heights[j1 * cols + i0];
+  const d = heights[j1 * cols + i1];
+  return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+}
+
+/**
+ * The water SURFACE level of a body at (x,z), or undefined where the body has no
+ * water there. A painted body samples its grid (>0 = wet); a parametric body
+ * returns its surfaceY inside the footprint (rect = the box, disc = the inscribed
+ * ellipse). This is the ONE "where + how high is the water" query the rest read.
+ */
+export function waterSurfaceAt(b: WaterBody, x: number, z: number): number | undefined {
+  if (b.field) {
+    const s = sampleWaterField(b.field, x - (b.x + b.width / 2), z - (b.z + b.depth / 2));
+    return s > 0 ? s : undefined;
+  }
+  if (x < b.x || x >= b.x + b.width || z < b.z || z >= b.z + b.depth) return undefined;
   if (b.shape === 'disc') {
     const rx = b.width / 2;
     const rz = b.depth / 2;
-    if (rx <= 0 || rz <= 0) return false;
+    if (rx <= 0 || rz <= 0) return undefined;
     const nx = (x - (b.x + rx)) / rx;
     const nz = (z - (b.z + rz)) / rz;
-    return nx * nx + nz * nz <= 1;
+    if (nx * nx + nz * nz > 1) return undefined;
   }
-  return true;
+  return b.surfaceY;
+}
+
+/** Is (x,z) covered by this body's water? */
+export function waterBodyContains(b: WaterBody, x: number, z: number): boolean {
+  return waterSurfaceAt(b, x, z) !== undefined;
 }
 
 /**
  * Derived water depth under (x,z): the factor product computed at lookup, never
  * stored. `bedTop` is the terrain ground top there (groundTopAt / landformGroundTopAt
- * / flat ground). 0 where the point is outside the body or the bed is at/above the
- * surface (an island, a shore).
+ * / flat ground). 0 where the point has no water or the bed is at/above the surface.
  */
 export function waterDepthAt(b: WaterBody, x: number, z: number, bedTop: number): number {
-  if (!waterBodyContains(b, x, z)) return 0;
-  return Math.max(0, b.surfaceY - bedTop);
+  const surface = waterSurfaceAt(b, x, z);
+  return surface === undefined ? 0 : Math.max(0, surface - bedTop);
 }
 
-/** Submerged in THIS body: inside the footprint and below the surface. */
+/** Submerged in THIS body: water covers (x,z) and the point is below its surface. */
 export function submergedInWaterBody(b: WaterBody, x: number, z: number, worldY: number): boolean {
-  return waterBodyContains(b, x, z) && worldY < b.surfaceY;
+  const surface = waterSurfaceAt(b, x, z);
+  return surface !== undefined && worldY < surface;
 }
 
 /** The water surface a body of water at (x,z) lifts to — highest over overlaps. undefined where dry. */
 export function waterSurfaceTopAt(bodies: readonly WaterBody[] | undefined, x: number, z: number): number | undefined {
   let top: number | undefined;
   for (const b of bodies ?? []) {
-    if (!waterBodyContains(b, x, z)) continue;
-    top = top == null ? b.surfaceY : Math.max(top, b.surfaceY);
+    const surface = waterSurfaceAt(b, x, z);
+    if (surface === undefined) continue;
+    top = top == null ? surface : Math.max(top, surface);
   }
   return top;
 }

@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { WaterBody as WaterBodyData } from '../design';
-import { WATER_LOOK, waterHeightGrid } from '../game/kinds/waterBodies';
+import { WATER_LOOK, waterHeightGrid, rippleWaterField } from '../game/kinds/waterBodies';
 
 // The renderer for an authored body of water (world/water). A body is FACTORS —
 // a footprint + one surface level — and renders as ONE host heightfield mesh: a
@@ -28,9 +28,11 @@ const WaterBodyMesh = memo(function WaterBodyMesh(props: { body: WaterBodyData; 
   // The grid recomputes each tick (new t) — a fresh heights array per frame, the
   // dynamicKey version bumped in lockstep, so the host re-bakes the ripple into
   // the body's reused slot (the Landform live-edit pattern, leak-free).
+  // A painted body (terrain water brush) ripples its authored grid; a parametric
+  // body builds a footprint grid. Both yield the same {cols,rows,heights,base}.
   const field = useMemo(
-    () => waterHeightGrid(b.shape, b.width, b.depth, b.surfaceY, props.t),
-    [b.shape, b.width, b.depth, b.surfaceY, props.t],
+    () => (b.field ? rippleWaterField(b.field, props.t) : waterHeightGrid(b.shape, b.width, b.depth, b.surfaceY, props.t)),
+    [b.field, b.shape, b.width, b.depth, b.surfaceY, props.t],
   );
   const material = useMemo(() => ({ color: WATER_LOOK.color, opacity: WATER_LOOK.opacity }), []);
   return (

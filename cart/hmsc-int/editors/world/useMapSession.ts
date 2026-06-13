@@ -114,7 +114,7 @@ export function normalizeBrushSettings(value: Partial<BrushSettings> | undefined
     centerZ: clampNum(v.centerZ, -HEIGHT_LIMIT, HEIGHT_LIMIT, DEFAULT_BRUSH.centerZ),
     profile: profile === 'flat' || profile === 'dome' ? profile : DEFAULT_BRUSH.profile,
     shape: shape === 'square' || shape === 'diamond' ? shape : DEFAULT_BRUSH.shape,
-    heightMode: v.heightMode === 'ramp' || v.heightMode === 'slope' || v.heightMode === 'smooth' ? v.heightMode : DEFAULT_BRUSH.heightMode,
+    heightMode: v.heightMode === 'ramp' || v.heightMode === 'slope' || v.heightMode === 'smooth' || v.heightMode === 'water' ? v.heightMode : DEFAULT_BRUSH.heightMode,
     rampMin: clampNum(v.rampMin, -HEIGHT_LIMIT, HEIGHT_LIMIT, DEFAULT_BRUSH.rampMin),
     rampMax: clampNum(v.rampMax, -HEIGHT_LIMIT, HEIGHT_LIMIT, DEFAULT_BRUSH.rampMax),
     rampWide: clampNum(v.rampWide, 1, 120, DEFAULT_BRUSH.rampWide),

@@ -12,7 +12,7 @@
 import type { GameState } from '../../design';
 import { placeMarker, placeWorldProp } from '../../editorWorld';
 import { cellCenterToWorld, cellKey as gridCellKey } from '../../world/grid';
-import { floorsToLandforms, type ChunkFloor } from '../../chunkFloor';
+import { floorsToLandforms, floorsToWaterBodies, type ChunkFloor } from '../../chunkFloor';
 import { placementCellRect, type Placement } from '../../placements';
 import { waterBodyPreset } from '../../game/kinds/waterBodies';
 
@@ -24,7 +24,9 @@ export function assemblePreviewWorld(opts: {
   mergeKindTextures: (cat: 'building' | 'prop', kind: string, inst?: Record<string, string>) => Record<string, string> | undefined;
 }): GameState {
   const { baseWorld, floors, placements, mergeKindTextures } = opts;
-  let s: GameState = { ...baseWorld, world: { ...baseWorld.world, landforms: floorsToLandforms(floors) } };
+  // Painted water (the terrain water brush) becomes one field-backed WaterBody per
+  // wet chunk; dropped water placements (below) append to the same layer.
+  let s: GameState = { ...baseWorld, world: { ...baseWorld.world, landforms: floorsToLandforms(floors), waterBodies: floorsToWaterBodies(floors) } };
   // Markers are single cells; precompute every marker's cell up front so a
   // save can resolve the spawn it links to even if that spawn is placed later
   // in the list.

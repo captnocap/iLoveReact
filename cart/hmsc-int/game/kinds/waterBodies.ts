@@ -8,7 +8,7 @@
 // over flat ground — dig the bed under it for a deeper body, world/water derives
 // the depth).
 
-import type { WaterBodyShape } from '../world/water';
+import type { WaterBodyShape, WaterField } from '../world/water';
 
 // The ONE water look, shared by the editor preview render (render3d/WaterBody)
 // and the compiled-game bake (compile/worldGeometry) so water is identical in
@@ -91,6 +91,33 @@ export function waterHeightGrid(
     }
   }
   return flat;
+}
+
+/** Ripple a PAINTED water field (the terrain water brush) at time `t`: wet cells
+ *  (surface > 0) get the travelling wave; dry cells (the basin floor) stay put.
+ *  Returns the heightfield grid the editor render bakes, same shape as
+ *  waterHeightGrid so WaterBodyMesh treats painted + parametric bodies alike. */
+export function rippleWaterField(field: WaterField, t: number): { cols: number; rows: number; heights: number[]; base: number } {
+  const base = -WATER_LOOK.floorTuckMeters;
+  const { cols, rows, cell, heights: src } = field;
+  const w = WATER_WAVE;
+  const dlen = Math.hypot(w.dirX, w.dirZ) || 1;
+  const ux = w.dirX / dlen;
+  const uz = w.dirZ / dlen;
+  const rx = ((cols - 1) * cell) / 2;
+  const rz = ((rows - 1) * cell) / 2;
+  const heights = new Array<number>(src.length);
+  for (let j = 0; j < rows; j += 1) {
+    const lz = -rz + j * cell;
+    for (let i = 0; i < cols; i += 1) {
+      const idx = j * cols + i;
+      const h = src[idx]!;
+      if (h <= 0) { heights[idx] = h; continue; }
+      const lx = -rx + i * cell;
+      heights[idx] = h + Math.sin(((lx * ux + lz * uz) / w.length + t * w.speed) * TAU) * w.amplitude;
+    }
+  }
+  return { cols, rows, heights, base };
 }
 
 export type WaterBodyPreset = {
