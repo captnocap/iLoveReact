@@ -35,8 +35,28 @@ import { floorsFromEditorWorld, floorToLandform } from './hmsc-int/chunkFloor';
 import { HEIGHTFIELD_TILE_SHADER, heightfieldTileData } from './hmsc-int/render3d/heightfieldSurface';
 import { Landform } from './hmsc-int/render3d/Landform';
 import { IsoStage } from './hmsc-int/isoStage';
+import { landformHeightfield } from './hmsc-int/world/landforms/registry';
 
 const CHUNK = 120;
+
+// /diag — a self-contained probe formula: instead of the real material, output what
+// the GPU ACTUALLY computes per fragment so the checker can read it back: R = the
+// mesh uv.y the fragment receives; G = the cell ROW (cy) it resolves; B = the tile
+// KIND it reads at that cell. Run under flat lighting (ambient 1, directional 0) so
+// the epilogue passes these through ~unscaled. Decoding at a failing cell tells us
+// whether the uv, the cell index, or the kind→material step is where it goes wrong.
+const DIAG_FORMULA = `
+fn hf_ground_rgb(uv0: vec2f) -> vec3f {
+  let cols = i32(D[0]);
+  let rows = i32(D[1]);
+  let pal = i32(D[2]);
+  let cellBase = 3 + pal * 3;
+  let cx = clamp(i32(floor(uv0.x * f32(cols))), 0, cols - 1);
+  let cy = clamp(i32(floor(uv0.y * f32(rows))), 0, rows - 1);
+  let kind = i32(D[cellBase + cy * cols + cx]);
+  return vec3f(uv0.y, f32(cy) / f32(rows), f32(max(kind, 0)) / 24.0);
+}
+`;
 // Fiducial offsets from the view centre + the /mesh zoom. Tight zoom so a 1m cell is
 // ~tens of px and adjacent cells (e.g. EK52/EK53) never bleed. KEEP IN SYNC with
 // road_render_test.sh (FID_DX / FID_DZ / the zoom is implicit in the view span).
@@ -73,10 +93,29 @@ function FiducialMarker(props: { color: string; x: number; z: number }) {
   );
 }
 
+// Mirror of <Landform>'s mesh but with the DIAG probe formula, for the /diag route.
+function DiagLandform(props: { landform: any }) {
+  const lf = props.landform;
+  const field = landformHeightfield(lf);
+  const data = lf.field?.tiles ? heightfieldTileData(lf.field.tiles) : [1, 1, 0, -1];
+  return (
+    <Scene3D.Mesh
+      geometry={Geometry.Heightfield}
+      params={{ heights: field.heights, cols: field.cols, rows: field.rows, width: field.width, depth: field.depth, base: field.base }}
+      dynamicKey={`diag_${lf.id}`}
+      material="#ffffff"
+      groundFormula={DIAG_FORMULA}
+      groundData={data}
+      position={[lf.centerX, lf.baseY, lf.centerZ]}
+    />
+  );
+}
+
 export default function RoadRenderTest() {
   const route = String(callHost('__env_get', '/mesh', 'RJIT_BOOT_ROUTE') ?? '/mesh');
   const seg = route.split('/').filter(Boolean); // e.g. ['mesh','140','52.5']
   const isQuad = seg[0] === 'quad';
+  const isDiag = seg[0] === 'diag';
   const WX = seg.length >= 3 && Number.isFinite(Number(seg[1])) ? Number(seg[1]) : DEFAULT_WX;
   const WZ = seg.length >= 3 && Number.isFinite(Number(seg[2])) ? Number(seg[2]) : DEFAULT_WZ;
 
@@ -104,6 +143,24 @@ export default function RoadRenderTest() {
     return (
       <Box style={{ width: '100%', height: '100%', backgroundColor: '#ff00ff' }}>
         {tiles ? <Effect shader={HEIGHTFIELD_TILE_SHADER} data={data} style={{ width: '100%', height: '100%' }} /> : null}
+      </Box>
+    );
+  }
+
+  // /diag — same camera as /mesh, but the DIAG probe formula under FLAT lighting
+  // (ambient 1, no directional) so the epilogue passes the encoded rgb through
+  // unscaled. The checker reuses the /mesh homography (identical camera) to sample.
+  if (isDiag) {
+    return (
+      <Box style={{ width: '100%', height: '100%' }}>
+        <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#000000" showAxes={false}>
+          <Scene3D.Camera position={cam.pos} target={cam.target} fov={cam.fov} far={4000} />
+          <Scene3D.Fog enabled={false} />
+          <Scene3D.AmbientLight color="#ffffff" intensity={1.0} />
+          {landforms.map((lf) => (
+            <DiagLandform key={lf.id} landform={lf} />
+          ))}
+        </Scene3D>
       </Box>
     );
   }

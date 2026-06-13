@@ -54,7 +54,7 @@ cells=[parse(t) for t in ARGS]
 
 def shot(route,out):
     subprocess.run(['tools/rjit','shot','road-render-test','--route',route,'--out',out,
-                    '--frames','90','--timeout','120'],check=True,
+                    '--frames','200','--timeout','120'],check=True,
                    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 def load(p): return np.asarray(Image.open(p).convert('RGB')).astype(np.float64)
 def classify(rgb):
