@@ -107,7 +107,13 @@ ${GROUND_RESOLVE_WGSL}
     if (kind == ${PARKING_KIND_INDEX}) {
       let pwx = in.uv.x * f32(cols);
       let stallD = abs(pwx - 3.0 * round(pwx / 3.0));
-      let stall = 1.0 - smoothstep(0.06, 0.10, stallD);
+      // The compiled floor bakes at 4 px/tile, so texel centres sit 0.25 tiles
+      // apart and the nearest one to a bay line is up to 0.125 away. A thin
+      // (0.06) line falls BETWEEN texels and never samples (req_0704: lines
+      // showed in the painter, vanished in the game). The full-white core must
+      // reach past 0.125 tiles so a texel always lands inside it; 0.16 clears
+      // it with margin. Same constant in the CPU mirror + painter view.
+      let stall = 1.0 - smoothstep(0.16, 0.28, stallD);
       rgb = mix(rgb, vec3f(0.85, 0.86, 0.88), stall * 0.85);
     }
   }
@@ -254,8 +260,10 @@ export function heightfieldTexelColor(data: number[], u: number, v: number): [nu
     const shade = 1 + (0.78 - 1) * smoothstep01(0.44, 0.5, edge);
     r = data[pbase] * shade; g = data[pbase + 1] * shade; b = data[pbase + 2] * shade;
     if (kind === PARKING_KIND_INDEX) {
+      // Match the shader: a 0.16-tile core so the line survives the 4 px/tile
+      // bake (texel centres up to 0.125 tiles off the line). See the WGSL note.
       const stallD = Math.abs(px - 3 * Math.round(px / 3));
-      const stall = (1 - smoothstep01(0.06, 0.1, stallD)) * 0.85;
+      const stall = (1 - smoothstep01(0.16, 0.28, stallD)) * 0.85;
       r += (0.85 - r) * stall; g += (0.86 - g) * stall; b += (0.88 - b) * stall;
     }
   }

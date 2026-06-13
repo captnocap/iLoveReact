@@ -91,7 +91,9 @@ fn hSample(base: i32, ix: i32, iy: i32, cols: i32, rows: i32) -> f32 {
     if (kind == ${PARKING_KIND_INDEX}) {
       let pwx = in.uv.x * f32(cols);
       let stallD = abs(pwx - 3.0 * round(pwx / 3.0));
-      let stall = 1.0 - smoothstep(0.06, 0.10, stallD);
+      // 0.16-tile core so the bay line survives the 4 px/tile floor bake (the
+      // game shader + CPU mirror use the same width — req_0704).
+      let stall = 1.0 - smoothstep(0.16, 0.28, stallD);
       rgb = mix(rgb, vec3f(0.85, 0.86, 0.88), stall * 0.85);
     }
   }

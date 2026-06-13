@@ -55,12 +55,29 @@ test('the baked floor texel under a marker is the ground colour, never orange', 
   assert(mr < 0.5, 'nothing orange about it');
 });
 
-test('parking stall lines land in the bake: white at 3m bay boundaries', () => {
+test('parking stall lines survive the REAL 4 px/tile bake sampling (req_0704)', () => {
+  // The bug: the bake samples at texel centres (px = 0.125, 0.375, …), never
+  // exactly on a 3-tile bay line, so a thin line falls between texels and
+  // vanishes. This test samples the way heightfieldTextureBytes actually does —
+  // texel centres at scale px/tile — and asserts a white texel lands at the bay
+  // boundary. Sampling exactly on the line (the old test) hid the bug.
   const data = parkingLotWithMarker(VEHICLE_SPAWN);
-  const [lr, lg, lb] = heightfieldTexelColor(data, 3 / 8, 2.5 / 8); // on the x=3 bay line
-  const [br] = heightfieldTexelColor(data, 4.5 / 8, 2.5 / 8); // mid-bay
-  assert(lr > 0.7 && lg > 0.7 && lb > 0.7, `bay boundary is painted white (got ${lr.toFixed(2)},${lg.toFixed(2)},${lb.toFixed(2)})`);
-  assert(br < 0.3, 'mid-bay stays asphalt-dark');
+  const cols = data[0] | 0;
+  const scale = 4; // HEIGHTFIELD_TEXTURE_PIXELS_PER_TILE
+  const width = cols * scale;
+  const row = (px: number) => heightfieldTexelColor(data, px / cols, 2.5 / 8);
+  // Walk the real texel grid; find the brightest texel within ±0.5 tile of the
+  // px=3 bay line (mirrors the bake's row scan around a boundary).
+  let bestAtLine = 0;
+  let midBay = 1;
+  for (let x = 0; x < width; x += 1) {
+    const px = (x + 0.5) / scale; // bake's px for texel x
+    const [r] = row(px);
+    if (Math.abs(px - 3) <= 0.5) bestAtLine = Math.max(bestAtLine, r);
+    if (Math.abs(px - 1.5) <= 0.2) midBay = Math.min(midBay, r); // mid-bay sample
+  }
+  assert(bestAtLine > 0.7, `a baked texel at the bay line is white (brightest=${bestAtLine.toFixed(2)})`);
+  assert(midBay < 0.3, `mid-bay stays asphalt-dark (got ${midBay.toFixed(2)})`);
 });
 
 test('flat parking floors route through the textured heightfield bake', () => {
