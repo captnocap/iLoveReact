@@ -949,7 +949,15 @@ export function PaintCanvas(props: {
     if (!c) return;
     const p = paintRef.current;
     const idx = p.tool === 'eraser' || p.mode === 'erase' ? -1 : tileKindIndex(p.tile);
+    // Road cells are owned by the stroke recipe and IMMUTABLE to paint/erase
+    // (USER RULING req_0795): the grid is a pure base+roads function, so brushing
+    // a road cell can't persist (the v2 load re-derives roads over base). Skip
+    // them — to change a road, edit the stroke. Keeps live == persisted.
+    const roadCells = roadUnderRef.current;
+    const cgx0 = c.chunk.cx * CHUNK_TILES;
+    const cgz0 = c.chunk.cz * CHUNK_TILES;
     forEachFootprintCell(p.shape, p.size, c.cellX, c.cellZ, (x, z) => {
+      if (roadCells && roadCells.has(`${cgx0 + x},${cgz0 + z}`)) return; // cellKey format
       const s = strokeStats.current; s.stamps++;
       if (x >= 0 && z >= 0 && x < CHUNK_TILES && z < CHUNK_TILES) s.cells.add(`${c.k}:${x}:${z}`);
       paintTile(c.chunk.tiles, x, z, idx);
