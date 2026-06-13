@@ -42,7 +42,7 @@ set -eu
 cd "$1"
 {
   find framework -type f -print 2>/dev/null || true
-  printf '%s\\n' build.zig v8_app.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig
+  printf '%s\\n' build.zig v8_app.zig v8_cli.zig v8_hello.zig world_loader.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig
 } | LC_ALL=C sort -u | while IFS= read -r f; do
   [ -f "$f" ] || continue
   sha256sum "$f"
