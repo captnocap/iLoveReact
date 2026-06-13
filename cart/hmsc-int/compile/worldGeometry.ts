@@ -28,7 +28,7 @@ import { propKindDefinition } from '../game/kinds/props';
 import { solveRoadCrossSection } from '../world/roadProfile';
 import { tileKindDefinition } from '../world/tileKinds';
 import { CHUNK_TILES } from '../chunks';
-import { WATER_LOOK } from '../game/kinds/waterBodies';
+import { WATER_LOOK, waterBodyVolume } from '../game/kinds/waterBodies';
 import { groundKindAt, heightfieldTexelColor, MARKER_KIND_INDICES, roadRibbonSection } from '../render3d/heightfieldSurface';
 import { isParkingKind } from '../render3d/parkingStall';
 import type { ChunkFloor } from '../chunkFloor';
@@ -1005,10 +1005,10 @@ function pushWaterBodies(b: Build, bodies: GameState['world']['waterBodies'] | u
   for (const body of bodies ?? []) {
     const cx = body.x + body.width / 2;
     const cz = body.z + body.depth / 2;
-    const top = body.surfaceY - WATER_LOOK.thicknessMeters / 2;
+    const vol = waterBodyVolume(body.surfaceY);
     const material = internTranslucent(b, WATER_LOOK.opacity);
     const shape = body.shape === 'disc' ? INSTANCE_SHAPE_CYLINDER16 : INSTANCE_SHAPE_BOX;
-    pushShape(b, shape, cx, top, cz, [0, 0, 0], body.width, WATER_LOOK.thicknessMeters, body.depth, waterColor, material);
+    pushShape(b, shape, cx, vol.centerY, cz, [0, 0, 0], body.width, vol.height, body.depth, waterColor, material);
   }
 }
 

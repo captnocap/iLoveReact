@@ -10,16 +10,30 @@
 
 import type { WaterBodyShape } from '../world/water';
 
-// The ONE water surface look, shared by the editor preview render
-// (render3d/WaterBody) and the compiled-game bake (compile/worldGeometry) so the
-// translucent surface is identical in /test and the no-V8 game. A thin slab whose
-// TOP face sits at the body's surfaceY; opacity < 1 routes it through the
-// transparent pass (the same path glass uses), so the bed reads through as depth.
+// The ONE water look, shared by the editor preview render (render3d/WaterBody)
+// and the compiled-game bake (compile/worldGeometry) so water is identical in
+// /test and the no-V8 game. Water renders as a translucent VOLUME (not a surface
+// film) filling from the ground plane up to surfaceY — that's what reads as a
+// body of water with depth: wade in and the blue surrounds you up to the surface.
+// opacity < 1 routes it through the transparent pass (the path glass uses).
 export const WATER_LOOK = {
   color: '#2f7fa8',
   opacity: 0.6,
-  thicknessMeters: 0.12,
+  // How far below the ground plane (y=0) the volume tucks, so the waterline meets
+  // the bed with no shoreline gap/z-fight.
+  floorTuckMeters: 0.3,
 } as const;
+
+// The render volume for a body whose surface stands at surfaceY: a slab from just
+// under the ground plane up to surfaceY. ONE source for the editor mesh and the
+// compiled bake, so both fill the same column. (Bottom is the ground plane, not a
+// per-cell bed sample — a body dropped on flat ground fills 0→surfaceY and covers
+// the player; this is the visible body, while world/water derives wade depth.)
+export function waterBodyVolume(surfaceY: number): { height: number; centerY: number } {
+  const bottom = -WATER_LOOK.floorTuckMeters;
+  const height = Math.max(0.05, surfaceY - bottom);
+  return { height, centerY: bottom + height / 2 };
+}
 
 export type WaterBodyPreset = {
   label: string;
