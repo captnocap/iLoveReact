@@ -44,6 +44,18 @@ import { storeShelfParts } from './storeShelf';
 import { crateParts } from './crate';
 import { palletParts } from './pallet';
 import { palletStackParts } from './palletStack';
+import { businessSignParts } from './businessSign';
+import { shopSignParts } from './shopSign';
+import { posterParts } from './poster';
+import { hospitalSignParts } from './hospitalSign';
+import { policeSignParts } from './policeSign';
+import { bookStackParts } from './bookStack';
+import { recordPlayerParts } from './recordPlayer';
+import { vinylRecordParts } from './vinylRecord';
+import { albumCoverParts } from './albumCover';
+import { speakerParts } from './speaker';
+import { speakerStackParts } from './speakerStack';
+import { cassetteParts } from './cassette';
 import { boulderParts } from './boulder';
 import { bushParts } from './bush';
 import { chairParts } from './chair';
@@ -215,6 +227,18 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     case 'crate': return crateParts();
     case 'pallet': return palletParts();
     case 'palletStack': return palletStackParts();
+    case 'businessSign': return businessSignParts();
+    case 'shopSign': return shopSignParts();
+    case 'poster': return posterParts();
+    case 'hospitalSign': return hospitalSignParts();
+    case 'policeSign': return policeSignParts();
+    case 'bookStack': return bookStackParts();
+    case 'recordPlayer': return recordPlayerParts();
+    case 'vinylRecord': return vinylRecordParts();
+    case 'albumCover': return albumCoverParts();
+    case 'speaker': return speakerParts();
+    case 'speakerStack': return speakerStackParts();
+    case 'cassette': return cassetteParts();
     default: {
       // data-recipe kinds (propModels.RECIPES) resolve here; the two paths agree
       // by construction since everyone calls this one function.
