@@ -55,6 +55,15 @@ const ISO_CAM_TWIG = 'camera';
 
 const ARROW_TO_WASD: Record<string, string> = { arrowup: 'w', arrowdown: 's', arrowleft: 'a', arrowright: 'd' };
 
+// One-shot guard flag (req_0717): a NON-FINITE ground sample (a malformed
+// landform/heightfield → groundColumnTop returns NaN/Infinity) makes
+// liftToTerrain hand the piece y=NaN, and the cut-away (p.y - groundTopAt < cut)
+// is then false at EVERY floor level — so the piece silently vanishes from the
+// iso pane while the compiled world (a different sampler) renders it fine. We
+// clamp the sample to 0 so the piece still stands, and warn ONCE so the real
+// culprit (the bad landform) surfaces instead of being masked.
+let warnedNonFiniteGround = false;
+
 // Where the view opens / recenters: the centroid of what's already built, so you
 // start looking AT the map instead of an empty chunk corner. Empty map → chunk centre.
 function contentCenter(pieces: readonly PlacedBuildPiece[]): [number, number] {
@@ -210,10 +219,21 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     placedCells: state.world.placedCells as unknown as WorldGridState['placedCells'],
     landforms: (state.world.landforms ?? []) as unknown as WorldGridState['landforms'],
   }), [state.world.cellSizeMeters, state.world.surfaceRegions, state.world.placedCells, state.world.landforms]);
-  const groundTopAt = useMemo<(x: number, z: number) => number>(
-    () => props.groundTopAt ?? ((x, z) => groundColumnTop(worldGrid, x, z)),
-    [props.groundTopAt, worldGrid],
-  );
+  const groundTopAt = useMemo<(x: number, z: number) => number>(() => {
+    const base = props.groundTopAt ?? ((x, z) => groundColumnTop(worldGrid, x, z));
+    // Guard non-finite samples so the lift/cut never silently drop a piece (see
+    // warnedNonFiniteGround above). The warn names the offending coords so the
+    // malformed landform is findable.
+    return (x, z) => {
+      const t = base(x, z);
+      if (Number.isFinite(t)) return t;
+      if (!warnedNonFiniteGround) {
+        warnedNonFiniteGround = true;
+        console.warn(`[iso-author] non-finite ground sample at (${x.toFixed(1)},${z.toFixed(1)}) — a malformed landform/heightfield; placed pieces would vanish (lift→NaN→cut-away). Clamping to 0.`);
+      }
+      return 0;
+    };
+  }, [props.groundTopAt, worldGrid]);
   // What the pane DRAWS and HIT-TESTS: stamped buildings lifted onto the terrain under
   // their footprint (flat pad, req_0444) via the shared idempotent helper the game and
   // compile also use — so the build pane shows pieces exactly where they'll stand, and
