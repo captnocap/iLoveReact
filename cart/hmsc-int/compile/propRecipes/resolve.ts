@@ -28,6 +28,15 @@ import { propaneTankParts } from './propaneTank';
 import { steelDrumParts } from './steelDrum';
 import { tireParts } from './tire';
 import { tireStackParts } from './tireStack';
+import { shippingContainerParts } from './shippingContainer';
+import { concretePipeParts } from './concretePipe';
+import { pipeStackParts } from './pipeStack';
+import { corrugatedSheetParts } from './corrugatedSheet';
+import { cableSpoolParts } from './cableSpool';
+import { lockerSetParts } from './lockerSet';
+import { oilTankParts } from './oilTank';
+import { rubblePileParts } from './rubblePile';
+import { toiletPaperParts } from './toiletPaper';
 import { boulderParts } from './boulder';
 import { bushParts } from './bush';
 import { chairParts } from './chair';
@@ -183,6 +192,15 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     case 'jerryCan': return jerryCanParts();
     case 'cinderBlock': return cinderBlockParts();
     case 'brick': return brickParts();
+    case 'shippingContainer': return shippingContainerParts();
+    case 'concretePipe': return concretePipeParts();
+    case 'pipeStack': return pipeStackParts();
+    case 'corrugatedSheet': return corrugatedSheetParts();
+    case 'cableSpool': return cableSpoolParts();
+    case 'lockerSet': return lockerSetParts();
+    case 'oilTank': return oilTankParts();
+    case 'rubblePile': return rubblePileParts();
+    case 'toiletPaper': return toiletPaperParts();
     default: {
       // data-recipe kinds (propModels.RECIPES) resolve here; the two paths agree
       // by construction since everyone calls this one function.
