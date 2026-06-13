@@ -247,27 +247,19 @@ export function stepCar(s: CarState, input: CarInput, t: CarTuning, dt: number):
       s.rollVel = (aLat > 0 ? -1 : 1) * crest; // kicked over to the outside
     }
   } else {
-    // Rolled over — LET IT PLAY OUT, then recover. No freeze, no reset, no
-    // mandatory keypress (req_0709). The body first TUMBLES on momentum:
-    // bistable gravity (-sin(2·roll), minima wheels-down at 0 and roof-down at
-    // ±π, unstable peak on its side at ±π/2) carries the roll wherever the flip
-    // threw it, so the car genuinely goes over. The instant it comes to REST,
-    // we self-right it — ease the body back onto its wheels in place and hand
-    // control back — so a rollover resolves itself instead of stranding the car
-    // upside-down. (R / the reset button still right it instantly if impatient.)
-    const atRest = Math.abs(s.rollVel) < 1.0;
-    if (atRest && Math.abs(s.roll) > 0.25) {
-      s.roll += (0 - s.roll) * clamp(t.rollEase * 0.4 * step, 0, 1); // flop upright
-      s.rollVel *= 0.6;
-    } else {
-      // Airborne tumble — LIGHT damping so the committed kick clears ±π/2 and the
-      // car goes all the way over (heavy damping stalled it half-leaned, which is
-      // what made it flicker). Bistable gravity then settles it roof-down (±π).
-      s.rollVel += (-t.rollDamping * 0.12 * s.rollVel - t.rolloverGravity * 0.7 * Math.sin(2 * s.roll)) * step;
-      s.roll += s.rollVel * step;
-      if (s.roll > Math.PI) s.roll -= 2 * Math.PI;
-      if (s.roll < -Math.PI) s.roll += 2 * Math.PI;
-    }
+    // Rolled over — it PLAYS OUT and STAYS where it lands. No auto-recovery
+    // (req_0714): the car tumbles under gravity and comes to rest on its roof —
+    // a dead car you bail out of and replace — or, only if its own momentum
+    // carries it all the way back around, onto its wheels. We never right it for
+    // the player. Light damping so the committed kick clears the on-its-side
+    // peak (±π/2) and the car goes fully over instead of stalling half-leaned;
+    // bistable gravity (minima wheels-down at 0, roof-down at ±π) then settles
+    // it. (In the lab, R / reset stand in for "get out and find a new car.")
+    s.rollVel += (-t.rollDamping * 0.12 * s.rollVel - t.rolloverGravity * 0.7 * Math.sin(2 * s.roll)) * step;
+    s.roll += s.rollVel * step;
+    if (s.roll > Math.PI) s.roll -= 2 * Math.PI;
+    if (s.roll < -Math.PI) s.roll += 2 * Math.PI;
+    // Cleared ONLY if momentum happens to leave it upright again — never forced.
     if (Math.abs(s.roll) < 0.25 && Math.abs(s.rollVel) < 0.6) { s.flipped = false; s.roll = 0; s.rollVel = 0; }
   }
 

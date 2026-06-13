@@ -332,11 +332,11 @@ export default function VehicleHandling() {
           </Box>
         </Box>
 
-        {/* Rollover banner — the car rights itself; R only hurries it */}
+        {/* Rollover banner — the car stays down; reset for a fresh one */}
         {frame.car.flipped ? (
           <Box style={{ position: 'absolute', left: 0, right: 0, top: 18, alignItems: 'center' }}>
             <Box style={{ paddingLeft: 16, paddingRight: 16, paddingTop: 8, paddingBottom: 8, borderRadius: 8, backgroundColor: 'rgba(120,20,20,0.82)' }}>
-              <Text style={{ color: '#fee2e2', fontSize: 14, fontFamily: 'monospace' }}>ROLLED OVER — recovering… (R to right now)</Text>
+              <Text style={{ color: '#fee2e2', fontSize: 14, fontFamily: 'monospace' }}>ROLLED OVER — reset for a new car (R to right)</Text>
             </Box>
           </Box>
         ) : null}
