@@ -23,6 +23,7 @@
 import { isTileKind, tileKindDefinition, type TileKind } from '../kinds';
 import type { LandformField } from '../kinds';
 import type { Vec3 } from '../physics';
+import type { WaterBody } from './water';
 
 // ── P2 tuning: every behavior-affecting number is table data ─────────────────
 
@@ -105,6 +106,9 @@ export type WorldGridState = {
   surfaceRegions: WorldSurfaceRegion[];
   placedCells: Record<string, PlacedCell>;
   landforms: LandformPlacement[];
+  // Bodies of water (world/water): footprint + a surface level; depth is derived
+  // against the bed. A first-class world layer, peer of surfaceRegions/landforms.
+  waterBodies: WaterBody[];
 };
 
 export function createWorldGridState(): WorldGridState {
@@ -113,6 +117,7 @@ export function createWorldGridState(): WorldGridState {
     surfaceRegions: [],
     placedCells: {},
     landforms: [],
+    waterBodies: [],
   };
 }
 
@@ -211,6 +216,15 @@ export function placeLandform(world: WorldGridState, landform: LandformPlacement
 
 export function removeLandform(world: WorldGridState, id: string): WorldGridState {
   return { ...world, landforms: world.landforms.filter((lf) => lf.id !== id) };
+}
+
+/** Append a body of water. */
+export function addWaterBody(world: WorldGridState, body: WaterBody): WorldGridState {
+  return { ...world, waterBodies: [...(world.waterBodies ?? []), body] };
+}
+
+export function removeWaterBody(world: WorldGridState, id: string): WorldGridState {
+  return { ...world, waterBodies: (world.waterBodies ?? []).filter((b) => b.id !== id) };
 }
 
 // ── resolvers ────────────────────────────────────────────────────────────────

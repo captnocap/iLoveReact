@@ -234,7 +234,7 @@ export function createGameCommandState(): GameCommandState {
       runSpeedMetersPerSecond: t.player.defaultRunSpeedMetersPerSecond,
       physics: { velocity: { x: 0, y: 0, z: 0 }, grounded: true },
     },
-    world: { cellSizeMeters: t.world.cellSizeMeters, spawnedEntities: {}, surfaceRegions: [], placedCells: {}, landforms: [] },
+    world: { cellSizeMeters: t.world.cellSizeMeters, spawnedEntities: {}, surfaceRegions: [], placedCells: {}, landforms: [], waterBodies: [] },
     events: { nextSerial: 1, recent: [] },
     nextEntitySerial: 0,
   };

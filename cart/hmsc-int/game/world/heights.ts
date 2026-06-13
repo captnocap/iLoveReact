@@ -21,6 +21,7 @@
 
 import { landformKindDefinition, landformSurfaceTop, tileKindDefinition, type TileKind } from '../kinds';
 import type { Vec3 } from '../physics';
+import { waterBodyKindAt } from './water';
 import {
   placedCellAt,
   surfaceRegionAtCell,
@@ -143,12 +144,13 @@ export function landformWaterKindAt(world: WorldGridState, position: Vec3): Tile
 /**
  * Position-precise footing resolver — what surface the body at `position`
  * reads. Layer order (the reference's, with the road-lane seam marked):
- * landform water (wading overrides any footing) > placed cell >
+ * water body (wading overrides any footing) > landform water > placed cell >
  * [junction band] > [road band] > landform footing > surface region.
  */
 export function footingKindAtWorldPosition(world: WorldGridState, position: Vec3): TileKind | undefined {
   const cell = worldToCell(position, world.cellSizeMeters);
-  return landformWaterKindAt(world, position)
+  return waterBodyKindAt(world.waterBodies, position)
+    ?? landformWaterKindAt(world, position)
     ?? placedCellAt(world, cell)?.kind
     ?? landformFootingKindAt(world, position)
     ?? surfaceRegionAtCell(world, cell)?.kind;

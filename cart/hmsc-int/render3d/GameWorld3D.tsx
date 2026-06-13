@@ -11,6 +11,7 @@ import { Road } from './Road';
 import { CulDeSac, Intersection } from './RoadJunctions';
 import { Prop } from './Prop';
 import { Landform } from './Landform';
+import { WaterBodyMesh } from './WaterBody';
 import { nearestLandformCameraHit } from '../world/landforms';
 import { buildHmscSky } from './sky';
 
@@ -156,6 +157,13 @@ export const WorldStatics = memo(function WorldStatics(props: {
           road ribbon). A new terrain shape is one registry entry, zero wiring. */}
       {(world.landforms ?? []).map((landform) => (
         <Landform key={landform.id} landform={landform} />
+      ))}
+      {/* Bodies of water (world/water): a translucent surface at each body's
+          level, drawn AFTER the bed so the terrain reads through it as depth.
+          Authored as factors (footprint + surfaceY); depth is the geometry
+          between this surface and the bed below, never a stored grid. */}
+      {(world.waterBodies ?? []).map((body) => (
+        <WaterBodyMesh key={body.id} body={body} />
       ))}
     </>
   );

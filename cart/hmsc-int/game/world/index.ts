@@ -36,12 +36,21 @@ import {
   placeLandform,
   removeCell,
   removeLandform,
+  addWaterBody,
+  removeWaterBody,
   setCellTrigger,
   surfaceRegionAtCell,
   tileKindAtCell,
   WORLD_TUNING,
   worldToCell,
 } from './grid';
+import {
+  submergedInWaterBody,
+  waterBodyContains,
+  waterBodyKindAt,
+  waterDepthAt,
+  waterSurfaceTopAt,
+} from './water';
 import {
   footingKindAtWorldPosition,
   groundTopAtWorldPosition,
@@ -86,6 +95,8 @@ export {
   placeLandform,
   removeCell,
   removeLandform,
+  addWaterBody,
+  removeWaterBody,
   setCellTrigger,
   surfaceRegionAtCell,
   tileKindAtCell,
@@ -100,6 +111,14 @@ export type {
   WorldGridState,
   WorldSurfaceRegion,
 } from './grid';
+export {
+  submergedInWaterBody,
+  waterBodyContains,
+  waterBodyKindAt,
+  waterDepthAt,
+  waterSurfaceTopAt,
+} from './water';
+export type { WaterBody, WaterBodyShape } from './water';
 export {
   footingKindAtWorldPosition,
   groundTopAtWorldPosition,
@@ -217,6 +236,8 @@ export const GAME_WORLD = Object.freeze({
   setCellTrigger,
   placeLandform,
   removeLandform,
+  addWaterBody,
+  removeWaterBody,
   placeMarker,
   // resolvers
   placedCellAt,
@@ -234,6 +255,11 @@ export const GAME_WORLD = Object.freeze({
   landformWalkableTopAt,
   landformFootingKindAt,
   landformWaterKindAt,
+  // bodies of water (world/water): footprint + level, depth derived against the bed
+  waterBodyKindAt,
+  waterDepthAt,
+  waterSurfaceTopAt,
+  waterBodyContains,
   // the nav bake (world → host path grid; pair with GAME_PATHING.publishGrid)
   bakeNavGrid,
   navKindAt,

@@ -388,6 +388,7 @@ function createInitialWorld(): WorldState {
     buildings: [],
     interiors: {},
     landforms: createInitialLandforms(),
+    waterBodies: [],
     zones: [],
     spawnedEntities: {},
     npcs: {},

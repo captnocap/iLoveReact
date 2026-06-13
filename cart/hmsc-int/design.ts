@@ -268,6 +268,9 @@ export type WorldState = {
   // pure data resolved by kind. A new terrain shape is a registry entry, not a new
   // array on WorldState.
   landforms: Landform[];
+  // Bodies of water (world/water): each a footprint + a surface level; depth is
+  // derived against the terrain bed. A first-class world layer, peer of landforms.
+  waterBodies: WaterBody[];
   // Named rectangular areas with enter/exit behavior (district names, private
   // property, safe houses…). A first-class world layer, peer of surfaceRegions.
   zones: Zone[];
@@ -553,6 +556,24 @@ export type WorldSurfaceRegion = {
   width: number;
   depth: number;
   zoneKey: string;
+};
+
+// A body of water (mirror of game/world/water.ts WaterBody — V15-TRANSITION: the
+// game door owns the canonical type, this is the editor-side twin). The lowest-
+// rank thing it can be: a footprint (min-corner + extent, 1 tile = 1 m) plus ONE
+// surface-level float. Depth is never stored — it is derived (surfaceY minus the
+// terrain bed) at lookup. `shape` 'disc' = the footprint's inscribed ellipse.
+export type WaterBodyShape = 'rect' | 'disc';
+export type WaterBody = {
+  id: string;
+  label: string;
+  shape: WaterBodyShape;
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  surfaceY: number;
+  createdByCommand: string;
 };
 
 // Behavior tags a zone carries for other systems to read. 'private' (property),

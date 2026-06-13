@@ -73,6 +73,7 @@ export function emptyEditorWorld(): GameState {
       props: [],
       interiors: {},
       landforms: [],
+      waterBodies: [],
       zones: [],
       spawnedEntities: {},
       npcs: {},
