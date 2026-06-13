@@ -1178,7 +1178,14 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
         if (y + height <= rect_floor) continue;
         const finite_floor_band = rect_floor > -100000;
         const grace_walkable = walkable_side_push_grace > 0 and finite_floor_band and rect_height <= y + step_height and y >= rect_floor - walkable_side_push_grace;
-        const slope_walkable = finite_floor_band and heightfieldSlopeGroundAt(x.*, z.*, y, step_height);
+        // req_0742: slope_walkable skips the side-push so descending a slope/stairs
+        // doesn't shove you off the low ramp-edge platforms — but it MUST only apply
+        // to rects you could actually step ONTO. Without the `rect_height <= y +
+        // step_height` guard (the one grace_walkable already has), a TALL finite-
+        // floor wall (finite so it doesn't block lower storeys) gets its side-push
+        // skipped whenever you stand on any heightfield slope. With painted terrain
+        // the whole ground is a heightfield, so every wall stopped blocking. Guard it.
+        const slope_walkable = finite_floor_band and rect_height <= y + step_height and heightfieldSlopeGroundAt(x.*, z.*, y, step_height);
         if (grace_walkable or slope_walkable) continue;
         _ = collideCircleRect(x, z, vx, vz, radius, rects[at .. at + RECT_FLOATS], restitution);
     }
@@ -1196,7 +1203,14 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
         if (y + height <= rect_floor) continue;
         const finite_floor_band = rect_floor > -100000;
         const grace_walkable = walkable_side_push_grace > 0 and finite_floor_band and rect_height <= y + step_height and y >= rect_floor - walkable_side_push_grace;
-        const slope_walkable = finite_floor_band and heightfieldSlopeGroundAt(x.*, z.*, y, step_height);
+        // req_0742: slope_walkable skips the side-push so descending a slope/stairs
+        // doesn't shove you off the low ramp-edge platforms — but it MUST only apply
+        // to rects you could actually step ONTO. Without the `rect_height <= y +
+        // step_height` guard (the one grace_walkable already has), a TALL finite-
+        // floor wall (finite so it doesn't block lower storeys) gets its side-push
+        // skipped whenever you stand on any heightfield slope. With painted terrain
+        // the whole ground is a heightfield, so every wall stopped blocking. Guard it.
+        const slope_walkable = finite_floor_band and rect_height <= y + step_height and heightfieldSlopeGroundAt(x.*, z.*, y, step_height);
         if (grace_walkable or slope_walkable) continue;
         const pivot_x = oriented[o + 9];
         const pivot_z = oriented[o + 10];
