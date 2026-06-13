@@ -847,6 +847,102 @@ pub const scene3d_wgsl =
     \\}
 ;
 
+/// Ground-formula mesh pipeline (the data-shape ground — GUIDING_LIGHT).
+/// `Scene3D.Mesh` normally samples a baked texture; a chunk-floor mesh instead
+/// runs a SURFACE FORMULA per fragment — no baked texture, crisp at any zoom,
+/// O(1) memory. The shipped formula (cart/hmsc-int render3d: HEIGHTFIELD_TILE_BODY,
+/// defining `fn hf_ground_rgb(uv: vec2f) -> vec3f` reading the per-cell ref stream
+/// `D`) is assembled at runtime between this PREFIX and EPILOGUE:
+///   scene3d_ground_prefix  +  effect_math (fbm/snoise/…)  +  <formula>  +  scene3d_ground_epilogue
+/// Group 0 = the SAME SceneUniforms as scene3d (shared layout); group 1 binding 0
+/// = the chunk's `D` storage buffer (the reference stream, not pixels). The vertex
+/// stage and lighting/fog mirror scene3d_wgsl so a formula floor lights and fogs
+/// identically to a textured one; only the base colour comes from the formula.
+pub const scene3d_ground_prefix =
+    \\struct SceneUniforms {
+    \\    vp: mat4x4f,
+    \\    light_dir: vec3f,
+    \\    specular_power: f32,
+    \\    light_color: vec3f,
+    \\    _pad1: f32,
+    \\    ambient_color: vec3f,
+    \\    _pad2: f32,
+    \\    camera_pos: vec3f,
+    \\    _pad3: f32,
+    \\    fog_color: vec3f,
+    \\    fog_near: f32,
+    \\    fog_far: f32,
+    \\    fog_sky: f32,
+    \\    _pad4a: f32,
+    \\    _pad4b: f32,
+    \\    sky_horizon: vec3f,
+    \\    _pad5: f32,
+    \\    sky_zenith: vec4f,
+    \\};
+    \\@group(0) @binding(0) var<uniform> S: SceneUniforms;
+    \\@group(1) @binding(0) var<storage, read> D: array<f32>;
+    \\
+    \\struct VertexInput {
+    \\    @location(0) position: vec3f,
+    \\    @location(1) normal: vec3f,
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) model_c0: vec4f,
+    \\    @location(4) model_c1: vec4f,
+    \\    @location(5) model_c2: vec4f,
+    \\    @location(6) model_c3: vec4f,
+    \\    @location(7) inst_color: vec4f,
+    \\};
+    \\struct VertexOutput {
+    \\    @builtin(position) clip_pos: vec4f,
+    \\    @location(0) world_pos: vec3f,
+    \\    @location(1) world_normal: vec3f,
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) inst_color: vec4f,
+    \\    @location(4) @interpolate(linear) screen_y: f32,
+    \\};
+    \\@vertex
+    \\fn vs_main(in: VertexInput) -> VertexOutput {
+    \\    var out: VertexOutput;
+    \\    let model = mat4x4f(in.model_c0, in.model_c1, in.model_c2, in.model_c3);
+    \\    let world = model * vec4f(in.position, 1.0);
+    \\    out.clip_pos = S.vp * world;
+    \\    out.world_pos = world.xyz;
+    \\    out.world_normal = normalize((model * vec4f(in.normal, 0.0)).xyz);
+    \\    out.uv = in.uv;
+    \\    out.inst_color = in.inst_color;
+    \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
+    \\    return out;
+    \\}
+    \\
+;
+
+/// fs_main for the ground pipeline: base colour from the shipped formula, then
+/// the SAME Blinn-Phong + aerial-fog as scene3d_wgsl (kept in step by hand —
+/// any lighting change in scene3d_wgsl's fs_main must land here too).
+pub const scene3d_ground_epilogue =
+    \\@fragment
+    \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+    \\    let N = normalize(in.world_normal);
+    \\    let L = normalize(S.light_dir);
+    \\    let V = normalize(S.camera_pos - in.world_pos);
+    \\    let diff = max(dot(N, L), 0.0);
+    \\    let H = normalize(L + V);
+    \\    let spec = pow(max(dot(N, H), 0.0), S.specular_power);
+    \\    let base = in.inst_color.rgb * hf_ground_rgb(in.uv);
+    \\    let ambient = S.ambient_color * base;
+    \\    let diffuse = S.light_color * base * diff;
+    \\    let specular = S.light_color * spec * 0.4;
+    \\    let lit = ambient + diffuse + specular;
+    \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
+    \\    let g = clamp(in.screen_y * 0.5 + 0.5, 0.0, 1.0);
+    \\    let sky_grad = mix(S.sky_horizon, S.sky_zenith.xyz, pow(g, 0.6));
+    \\    let fog_target = mix(S.fog_color, sky_grad, S.fog_sky);
+    \\    let final_rgb = mix(lit, fog_target, fog_t);
+    \\    let out_a = in.inst_color.a;
+    \\    return vec4f(final_rgb * out_a, out_a);
+    \\}
+;
+
 /// Analytic procedural skybox. Drawn as ONE fullscreen triangle BEFORE the
 /// meshes, with depth-test = always + depth-write off, so it fills the whole
 /// 3D target and meshes paint over it. Every visual is driven by uniforms, so
