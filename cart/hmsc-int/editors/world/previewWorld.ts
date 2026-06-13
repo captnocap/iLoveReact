@@ -14,6 +14,7 @@ import { placeMarker, placeWorldProp } from '../../editorWorld';
 import { cellCenterToWorld, cellKey as gridCellKey } from '../../world/grid';
 import { floorsToLandforms, type ChunkFloor } from '../../chunkFloor';
 import { placementCellRect, type Placement } from '../../placements';
+import { waterBodyPreset } from '../../game/kinds/waterBodies';
 
 export function assemblePreviewWorld(opts: {
   baseWorld: GameState;
@@ -40,6 +41,25 @@ export function assemblePreviewWorld(opts: {
     const wz = rect.minZ;
     if (p.cat === 'building') {
       continue;
+    } else if (p.cat === 'water') {
+      // A body of water lowers to a world/water WaterBody: the snapped footprint
+      // (min-corner + the preset footprint) plus the preset's surface level. Depth
+      // is derived against the bed at lookup — nothing per-cell is stored.
+      const preset = waterBodyPreset(p.kind);
+      if (preset) {
+        const body = {
+          id: p.id,
+          label: preset.label,
+          shape: preset.shape,
+          x: wx,
+          z: wz,
+          width: p.footW,
+          depth: p.footD,
+          surfaceY: preset.surfaceY,
+          createdByCommand: 'hmsc-int:place',
+        };
+        s = { ...s, world: { ...s.world, waterBodies: [...(s.world.waterBodies ?? []), body] } };
+      }
     } else if (p.cat === 'marker') {
       // Spawn / save markers lower to single placedCells. ONE marker per cell —
       // a spawn can't sit on a save (the non-overlap rule), so the first to claim

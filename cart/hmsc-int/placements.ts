@@ -7,12 +7,16 @@
 
 import { buildingKindDefinition } from './world/buildingKinds';
 import { propKindDefinition } from './game/kinds/props';
+import { waterBodyPreset } from './game/kinds/waterBodies';
 import { tileKindDefinition } from './world/tileKinds';
 import type { Building, TileKind } from './design';
 import { TILE_UNITS } from './heightData';
 import { CHUNK_TILES } from './chunks';
 
-export type PlaceCat = 'building' | 'prop' | 'marker';
+// 'water' bodies are placements too (cat 'water', kind = a water preset id): they
+// drop, snap, persist, and draw a footprint node exactly like a prop, and their
+// footprint/level/shape re-resolve from game/kinds/waterBodies by kind.
+export type PlaceCat = 'building' | 'prop' | 'marker' | 'water';
 
 export interface Placement {
   id: string;
@@ -81,7 +85,13 @@ export function resolvePlaceable(cat: PlaceCat, kind: string): Placeable {
     const def = tileKindDefinition(kind as TileKind);
     return { label: def.label, footW: 1, footD: 1, color: def.render.color };
   }
+  if (cat === 'water') {
+    const def = waterBodyPreset(kind);
+    if (def) return { label: def.label, footW: def.footW, footD: def.footD, color: def.color };
+    return { label: 'Water', footW: 12, footD: 8, color: '#3f8fbf' };
+  }
   const def = propKindDefinition(kind as Parameters<typeof propKindDefinition>[0]);
-  const span = Math.max(1, Math.round(def.footprintRadiusMeters * 2));
-  return { label: def.label, footW: span, footD: span, color: tileKindDefinition(def.tileKind).render.color };
+  const footW = Math.max(1, Math.ceil(def.footprintWidthMeters ?? def.footprintRadiusMeters * 2));
+  const footD = Math.max(1, Math.ceil(def.footprintDepthMeters ?? def.footprintRadiusMeters * 2));
+  return { label: def.label, footW, footD, color: tileKindDefinition(def.tileKind).render.color };
 }

@@ -3,13 +3,14 @@
 // cart's top-left "in focus" panel (so a selected placement inspects correctly).
 
 import { emptyEditorWorld, placeWorldProp, fillTiles } from './editorWorld';
+import { waterBodyPreset } from './game/kinds/waterBodies';
 import type { Building, GameState, TileKind, WorldProp } from './design';
 import type { Focus } from './PropertiesPanel';
 
 // 'embedded' is the wall/door/bush profile group — built exactly like a tile
 // (a slab + tile focus) so it inspects through the same path; it just lives in a
 // separate tree group because it isn't freely paintable.
-export type ObjCat = 'prop' | 'tile' | 'embedded' | 'marker';
+export type ObjCat = 'prop' | 'tile' | 'embedded' | 'marker' | 'water';
 
 export interface ObjectWorld {
   world: GameState;
@@ -30,6 +31,24 @@ export function buildObjectWorld(
   // tile: a slab of the kind + a tile focus, through the same fillTiles path.
   if (cat === 'tile' || cat === 'embedded' || cat === 'marker') {
     return { world: fillTiles(base, { kind: kind as TileKind, x: -5, z: -5, width: 10, depth: 10 }), focus: { kind: 'tile', tile: kind as TileKind } };
+  }
+  if (cat === 'water') {
+    // Demonstrate a body of water OVER a flat sand bed, centred on the origin, so
+    // the inspector preview shows the real translucent surface + the depth down to
+    // the bed (the same WorldStatics path the world uses).
+    const preset = waterBodyPreset(kind);
+    const w = preset?.footW ?? 12;
+    const d = preset?.footD ?? 8;
+    const bed = fillTiles(base, { kind: 'sand', x: -Math.ceil(w / 2) - 2, z: -Math.ceil(d / 2) - 2, width: w + 4, depth: d + 4 });
+    const body = {
+      id: 'preview_water', label: preset?.label ?? 'Water', shape: preset?.shape ?? 'rect',
+      x: -w / 2, z: -d / 2, width: w, depth: d, surfaceY: preset?.surfaceY ?? 1.5,
+      createdByCommand: 'preview',
+    } as const;
+    return {
+      world: { ...bed, world: { ...bed.world, waterBodies: [body] } },
+      focus: { kind: 'tile', tile: 'water' as TileKind },
+    };
   }
   const { state, prop } = placeWorldProp(base, { kind: kind as WorldProp['kind'], x: 0, z: 0, partTextures });
   return { world: state, focus: { kind: 'prop', id: prop.id }, prop };

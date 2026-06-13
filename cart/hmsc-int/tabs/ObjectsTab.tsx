@@ -36,6 +36,7 @@ import { Icon } from '@reactjit/icons/Icon';
 import type { TileKind } from '../design';
 import { PROP_KINDS, propKindDefinition } from '../game/kinds/props';
 import { SCATTER_BRUSHES, SCATTER_BRUSH_IDS, isScatterBrushId, type ScatterBrushId } from '../game/kinds/scatter';
+import { WATER_BODY_PRESETS, WATER_BODY_PRESET_IDS } from '../game/kinds/waterBodies';
 import { EMBEDDED_TILE_KINDS, GAMEPLAY_TILE_KINDS, PAINTABLE_TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { buildObjectWorld, type ObjectWorld } from '../objectPreview';
 import { ModelViewer } from '../ModelViewer';
@@ -56,7 +57,7 @@ import { round, type MeshSpec } from '../assist3d/scene';
 import { GAME_BUILD } from '@game';
 import type { BuildPrefabDef, DecomposedPiece, PlacedBuildPiece } from '@game';
 
-type Cat = 'building' | 'prop' | 'scatter' | 'marker' | 'tile' | 'embedded' | 'texture' | 'assistant';
+type Cat = 'building' | 'prop' | 'scatter' | 'marker' | 'tile' | 'embedded' | 'texture' | 'assistant' | 'water';
 type Sel = { cat: Cat; kind: string };
 type Group = { cat: Cat; title: string; items: { kind: string; label: string }[] };
 
@@ -73,13 +74,16 @@ const STATIC_GROUPS: Group[] = [
   // Placeable (the + drops one), and the save↔spawn link is set on the placed
   // marker in the canvas place-rail.
   { cat: 'marker', title: 'MARKERS', items: GAMEPLAY_TILE_KINDS.map((k) => ({ kind: k, label: tileKindDefinition(k as TileKind).label })) },
+  // WATER — bodies of water you DROP (a footprint + a surface level); depth is
+  // derived against the terrain bed, so dig under one for a deeper pool.
+  { cat: 'water', title: 'WATER', items: WATER_BODY_PRESET_IDS.map((k) => ({ kind: k, label: WATER_BODY_PRESETS[k].label })) },
   { cat: 'tile', title: 'TILES', items: PAINTABLE_TILE_KINDS.map((k) => ({ kind: k, label: tileKindDefinition(k as TileKind).label })) },
   { cat: 'embedded', title: 'EMBEDDED', items: EMBEDDED_TILE_KINDS.map((k) => ({ kind: k, label: tileKindDefinition(k as TileKind).label })) },
   // TEXTURES is appended in-component (not here): the one flat list of bakeable
   // looks is LIVE — built-ins plus the studio's saved materials (allTextures).
 ];
 
-const isPlaceable = (cat: Cat) => cat === 'building' || cat === 'prop' || cat === 'marker';
+const isPlaceable = (cat: Cat) => cat === 'building' || cat === 'prop' || cat === 'marker' || cat === 'water';
 
 type Preview = ObjectWorld & { tile?: TileKind; baseDist: number; targetY: number };
 
@@ -90,6 +94,12 @@ function buildPreview(sel: Sel, partTextures?: Record<string, string>): Preview 
   const ow = buildObjectWorld(sel.cat as Exclude<Cat, 'texture' | 'assistant'>, sel.kind, undefined, partTextures);
   if (sel.cat === 'tile' || sel.cat === 'embedded' || sel.cat === 'marker') {
     return { ...ow, tile: sel.kind as TileKind, baseDist: 16, targetY: 0.3 };
+  }
+  if (sel.cat === 'water') {
+    // Frame the whole footprint from above so the surface + the bed depth read.
+    const preset = WATER_BODY_PRESETS[sel.kind];
+    const span = Math.max(preset?.footW ?? 12, preset?.footD ?? 8);
+    return { ...ow, tile: 'water' as TileKind, baseDist: clamp(span * 1.4 + 6, 12, 60), targetY: 0 };
   }
   const def = propKindDefinition(sel.kind as typeof PROP_KINDS[number]);
   return { ...ow, baseDist: clamp(def.heightMeters * 4 + 4, 5, 30), targetY: def.heightMeters * 0.5 };
