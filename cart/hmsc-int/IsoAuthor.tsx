@@ -18,7 +18,7 @@ import * as Geometry from '@reactjit/geometries';
 import { GAME_BUILD, GAME_NATIVE_CAMERA, buildingDefFromPieces, buildingPieceInstanceId, partitionBuildingSelection } from './game';
 import type { BuildEditEvent, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingInstance, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
 import { resolveSnapTarget, modulePitch, nearestWallLineAnchor, nearestPlateLatticeAnchor, anchoredRunCenter, SNAP_TUNING_DEFAULTS, type SnapTarget, type WallLineAnchor } from './editors/build/snap';
-import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, elevatorCarVisualShape } from './editors/build/pieceMeshes';
+import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, GhostPiece, elevatorCarVisualShape } from './editors/build/pieceMeshes';
 import { perfMs, warnPlaceFreeze } from './editors/build/placeFreezeProbe';
 import { logPiecePlaced, logPiecesPlaced, logPrefabStamped } from './editors/build/placeLog';
 import { BUILD_UI } from './editors/build/buildUi';
@@ -1324,9 +1324,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const blocked = a.kind === 'piece' && GAME_BUILD.placed.validatePlacement(previews[0] as any).length > 0;
     const color = blocked ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
     const supportPieces = [...displayPieces, ...previews.map((p, i) => ({ id: `isoGhost${i}`, ...p }))];
-    return previews.flatMap((p, i) => pieceVisualShapes(p, `isoGhost${i}`, supportPieces).map((shape) => (
-      <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} />
-    )));
+    return previews.map((p, i) => (
+      <GhostPiece key={i} piece={p} ghostKey={`isoGhost${i}`} supportPieces={supportPieces} colorOverride={color} opacityOverride={BUILD_UI.ghostOpacity} blocked={blocked} />
+    ));
   }, [snap, armed, prefabById, paintCells, displayPieces]);
 
   // The move preview: the selected pieces drawn translucent at the dragged offset while
@@ -1352,9 +1352,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       ...displayPieces.filter((p) => !ids.has(p.id)),
       ...moved.map((m, i) => ({ id: `isoMove${i}`, ...m })),
     ];
-    return moved.flatMap((m, i) => pieceVisualShapes(m, `isoMove${i}`, supportPieces).map((shape) => (
-      <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={opacity} />
-    )));
+    return moved.map((m, i) => (
+      <GhostPiece key={i} piece={m} ghostKey={`isoMove${i}`} supportPieces={supportPieces} colorOverride={color} opacityOverride={opacity} blocked={blocked} />
+    ));
   }, [moveDelta, displayPieces, selectedIds, pendingMove]);
 
   // The drag-paint preview: every wall in the line / floor in the rect drawn translucent,
@@ -1370,11 +1370,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // flatMap (a fresh array per cell) forced an O(N) grid rebuild per cell, per
     // mouse-move — the drag-draw lag. Hoisted, all cells share one cached grid.
     const supportPieces = [...displayPieces, ...paintCells.map((p, j) => ({ id: `isoPaint${j}`, ...p }))];
-    const ghosts = paintCells.flatMap((c, i) => {
-      const color = solid ? undefined : GAME_BUILD.placed.validatePlacement(c).length > 0 ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
-      return pieceVisualShapes(c, `isoPaint${i}`, supportPieces).map((shape) => (
-        <VisualShapeMesh key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key} shape={shape} colorOverride={color} opacityOverride={solid ? undefined : BUILD_UI.ghostOpacity} />
-      ));
+    const ghosts = paintCells.map((c, i) => {
+      const blockedCell = !solid && GAME_BUILD.placed.validatePlacement(c).length > 0;
+      const color = solid ? undefined : blockedCell ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
+      return (
+        <GhostPiece key={i} piece={c} ghostKey={`isoPaint${i}`} supportPieces={supportPieces} colorOverride={color} opacityOverride={solid ? undefined : BUILD_UI.ghostOpacity} blocked={blockedCell} />
+      );
     });
     const ghostMs = perfMs() - t0;
     warnPlaceFreeze('paintGhost', { cells: paintCells.length, pieces: displayPieces.length, ms: ghostMs });

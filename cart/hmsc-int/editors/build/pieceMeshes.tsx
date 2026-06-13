@@ -105,6 +105,60 @@ export function VisualShapeMesh(props: { shape: VisualShape; colorOverride?: str
     : <VisualBoxMesh box={props.shape.box} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />;
 }
 
+// One ghost/preview piece (PROPGHOST-0754). The iso pane's placement / move /
+// paint previews used to draw EVERY armed piece through pieceVisualShapes — and
+// a PROP has no shape decomposition, so it fell through to a single def.size box.
+// That slab looked nothing like the model it became ("you have no idea what it
+// is til its placed"). A prop's ghost now mounts the SAME <Prop> renderer the
+// standing world uses, so the preview IS the prop; non-prop pieces (walls, floors,
+// ramps, stairs, elevators) keep the translucent box/ramp decomposition. A blocked
+// placement lays the red def.size footprint OVER the model so the refusal still
+// reads. This is the "ONE MODEL, TWO VIEWS" contract extended to the ghost.
+export const GhostPiece = memo(function GhostPiece(props: {
+  piece: Parameters<typeof pieceVisualShapes>[0];
+  ghostKey: string;
+  supportPieces: readonly PlacedBuildPiece[];
+  colorOverride?: string;
+  opacityOverride?: number;
+  blocked?: boolean;
+}) {
+  const { piece, ghostKey, supportPieces, colorOverride, opacityOverride, blocked } = props;
+  const def = GAME_BUILD.catalog.get(piece.pieceId);
+  if (def.kind === 'prop' && def.propKind) {
+    const prop: WorldProp = {
+      id: ghostKey,
+      kind: def.propKind as WorldProp['kind'],
+      x: piece.x,
+      y: piece.y,
+      z: piece.z,
+      yawDegrees: piece.yawDegrees,
+      createdByCommand: 'hmsc-int:ghost',
+    };
+    return (
+      <>
+        <Prop prop={prop} />
+        {blocked ? (
+          <VisualShapeMesh
+            shape={propSelectionShape({ id: ghostKey, ...piece } as PlacedBuildPiece, BUILD_UI.ghostBlockedColor, BUILD_UI.ghostOpacity)}
+          />
+        ) : null}
+      </>
+    );
+  }
+  return (
+    <>
+      {pieceVisualShapes(piece, ghostKey, supportPieces).map((shape) => (
+        <VisualShapeMesh
+          key={shape.kind === 'ramp' ? shape.ramp.key : shape.box.key}
+          shape={shape}
+          colorOverride={colorOverride}
+          opacityOverride={opacityOverride}
+        />
+      ))}
+    </>
+  );
+});
+
 
 // ── Instanced city rendering (req_0504: "this whole building should turn into
 // one object not 179") ───────────────────────────────────────────────────────
