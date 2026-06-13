@@ -1,127 +1,146 @@
 #!/usr/bin/env bash
-# road-render-test.sh — the REAL-GPU regression test for the painted-road render
-# bug (req_0833 / req_0835 / req_0837). NOT a JS reproduction of the shader (those
+# road-render-test.sh — the REAL-GPU regression test + fix gate for the painted-road
+# render bug (req_0833/0835/0837/0838). NOT a JS reproduction of the shader (those
 # kept lying that the road resolves fine). It boots the road-render-test cart
 # HEADLESS, renders the actual WGSL on the GPU, captures the swapchain, and reads the
-# rendered colour back at named road cells. FAIL while the bug is live, PASS when the
-# road renders as asphalt on the 3D mesh.
+# rendered colour back at named road cells across any chunk. FAIL while the bug is
+# live; PASS when every named cell renders as asphalt on the 3D mesh.
 #
-# Two routes (one cart, one shared chunk(1,0) tile field from coastal-town):
-#   /mesh[/cx/cz] — the iso-3D ground path under test: <Landform> groundFormula mesh
-#                   evaluated per fragment by framework/gpu/3d.zig, real IsoStage
-#                   camera, recentred on (cx,cz) so distant cells sample at resolution.
-#   /quad         — the SAME formula as a 2D <Effect> quad: the control that proves
-#                   the DATA is road and the classifier detects asphalt when drawn.
+# Routes (over ALL painted chunks of coastal-town):
+#   /mesh/<wx>/<wz> — the iso-3D ground path under test: every painted <Landform>
+#                     groundFormula mesh per fragment in framework/gpu/3d.zig, real
+#                     IsoStage camera centred on (wx,wz) at a tight zoom.
+#   /quad/<wx>/<wz> — the SAME formula as a 2D <Effect> quad for the chunk containing
+#                     (wx,wz): the control that proves the DATA is road and the
+#                     classifier detects asphalt when the formula actually draws it.
 #
-# Addressing on /mesh: four ground fiducials at ±FID_DX/±FID_DZ around the view
-# centre → ground-plane->pixel homography. /quad uv is linear: cell(cx,cy) ->
-# ((cx+.5)/120*W,(cy+.5)/120*H). asphalt(fill_road) is dark; concrete(fill_concrete)
-# is light tan — a road cell reading light rendered as concrete = the bug.
+# The checker parses the cell addresses, groups them by chunk (one /quad shot each)
+# and into tight z-clusters (one /mesh shot each, so adjacent cells like EK52/EK53
+# resolve), finds the four ground fiducials per /mesh shot, solves the y=0-plane ->
+# pixel homography, and samples each cell. asphalt is dark; concrete is light tan.
 #
 # Usage:
-#   ./cart/road-render-test.sh                                 # default region (z~112), expect FAIL
-#   ./cart/road-render-test.sh 139 11 EI10 EI11 EI12 EJ12 EK12 # a chosen region + cells
-#       arg1 arg2 = view centre world (x,z); rest = cell addresses (must be road cells)
+#   ./cart/road-render-test.sh                                 # default z~112 region (FAIL)
+#   ./cart/road-render-test.sh EK52 EK53 EK100 EK121 EK170 EK173
+#       — bare addresses; the TARGET is that ALL render as road (exit 0 when fixed).
+#   ./cart/road-render-test.sh EK52=pass EK53=fail ...
+#       — optional =pass/=fail tags = the CURRENT on-screen state you observe; the
+#         checker reports whether its verdict MATCHES your eyes (test self-validation).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Defaults: the z~112 region the bug shows at.
-CX=142.5; CZ=113.5
-ADDRS=(EK111 EI111 EI112 EI113 EI114 EJ111)
-if [ "$#" -ge 3 ]; then CX="$1"; CZ="$2"; shift 2; ADDRS=("$@"); fi
-
-MESH=/tmp/road-mesh.png
-QUAD=/tmp/road-quad.png
-echo "[road-test] centre=($CX,$CZ) cells: ${ADDRS[*]}"
-echo "[road-test] shooting /mesh (iso-3D mesh path — under test)..."
-tools/rjit shot road-render-test --route "/mesh/$CX/$CZ" --out "$MESH" --frames 90 --timeout 120 >/dev/null
-echo "[road-test] shooting /quad (2D formula control)..."
-tools/rjit shot road-render-test --route /quad --out "$QUAD" --frames 90 --timeout 120 >/dev/null
-
-python3 - "$MESH" "$QUAD" "$CX" "$CZ" "${ADDRS[@]}" <<'PY'
-import sys, numpy as np
+python3 - "$@" <<'PY'
+import sys, subprocess, numpy as np
 from PIL import Image
 
-mesh_p, quad_p, CX, CZ = sys.argv[1], sys.argv[2], float(sys.argv[3]), float(sys.argv[4])
-ADDRS = sys.argv[5:]
-FID_DX, FID_DZ = 17.5, 8.5          # MUST match cart/road-render-test.tsx
-COLS = ROWS = 120                    # chunk(1,0) tile grid; min-corner world cell (120,0)
+CHUNK=120; FID_DX,FID_DZ=8.0,5.0; CLUSTER_GAP=8   # MUST match cart/road-render-test.tsx
+ARGS=sys.argv[1:]
+if not ARGS:  # default: the z~112 bug region
+    ARGS=['EK111','EI111','EI112','EI113','EI114','EJ111']
 
-def col_index(letters):              # bijective base-26 (A=0,...,Z=25,AA=26): inverse of address.ts
-    n = 0
-    for ch in letters.upper(): n = n*26 + (ord(ch)-ord('A')+1)
+def col_index(L):
+    n=0
+    for ch in L.upper(): n=n*26+(ord(ch)-ord('A')+1)
     return n-1
+def parse(tok):                       # "EK52" | "EK52=pass" | "EK52=fail"
+    obs=None
+    if '=' in tok: tok,tag=tok.split('=',1); obs=('road' if tag.strip().lower()=='pass' else 'concrete')
+    i=0
+    while i<len(tok) and tok[i].isalpha(): i+=1
+    gx,gz=col_index(tok[:i]),int(tok[i:])
+    return {'addr':tok,'gx':gx,'gz':gz,'cx':gx//CHUNK,'cz':gz//CHUNK,'obs':obs}
 
-def parse_addr(a):                   # "EI112" -> (gx,gz)
-    i = 0
-    while i < len(a) and a[i].isalpha(): i += 1
-    return col_index(a[:i]), int(a[i:])
+cells=[parse(t) for t in ARGS]
 
-# Fiducials: world (x,z) -> marker colour, by the SAME rule the cart uses.
-FIDUCIALS = [((CX-FID_DX, CZ-FID_DZ),'R'), ((CX+FID_DX, CZ-FID_DZ),'G'),
-             ((CX+FID_DX, CZ+FID_DZ),'B'), ((CX-FID_DX, CZ+FID_DZ),'C')]
-
+def shot(route,out):
+    subprocess.run(['tools/rjit','shot','road-render-test','--route',route,'--out',out,
+                    '--frames','90','--timeout','120'],check=True,
+                   stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 def load(p): return np.asarray(Image.open(p).convert('RGB')).astype(np.float64)
-
-def fiducial_px(im):
-    # CENTROID of each colour blob, not argmax: a marker is ~80px wide, so the single
-    # brightest pixel can sit anywhere in it and skew the homography by a whole cell
-    # (which false-flagged road cells next to the concrete sidewalk). The centroid of
-    # the strongly-coloured pixels is the marker's true centre.
-    R,G,B = im[:,:,0],im[:,:,1],im[:,:,2]
-    score = {'R':R-np.maximum(G,B),'G':G-np.maximum(R,B),
-             'B':B-np.maximum(R,G),'C':np.minimum(G,B)-R}
-    out={}
-    for s,m in score.items():
-        mask = m >= max(m.max()*0.6, 80.0)
-        ys,xs = np.where(mask)
-        out[s] = (float(xs.mean()), float(ys.mean()))
-    return out
-
-def homography(im):
-    px=fiducial_px(im); A=[];b=[]
-    for (wx,wz),tag in FIDUCIALS:
-        x,y=px[tag]
-        A.append([wx,wz,1,0,0,0,-x*wx,-x*wz]); b.append(x)
-        A.append([0,0,0,wx,wz,1,-y*wx,-y*wz]); b.append(y)
-    h=np.linalg.solve(np.array(A),np.array(b))
-    H=np.array([[h[0],h[1],h[2]],[h[3],h[4],h[5]],[h[6],h[7],1]])
-    return lambda wx,wz:(lambda v:(v[0]/v[2],v[1]/v[2]))(H@np.array([wx,wz,1.0]))
-
-def sample(im,px,py,r=3):
-    x0,y0=int(round(px)),int(round(py))
-    return im[max(0,y0-r):y0+r+1, max(0,x0-r):x0+r+1].reshape(-1,3).mean(0)
-
 def classify(rgb):
     r,g,b=rgb; lum=(r+g+b)/3
     if r>120 and g>110 and b<90 and r-b>60: return 'YELLOW'   # median centreline
     if r-b>35 and lum>70: return 'SAND'
     return 'ROAD' if lum<70 else 'CONCRETE'
+def sample(im,px,py,r=3):
+    x0,y0=int(round(px)),int(round(py))
+    return im[max(0,y0-r):y0+r+1,max(0,x0-r):x0+r+1].reshape(-1,3).mean(0)
+def centroids(im):
+    R,G,B=im[:,:,0],im[:,:,1],im[:,:,2]
+    sc={'R':R-np.maximum(G,B),'G':G-np.maximum(R,B),'B':B-np.maximum(R,G),'C':np.minimum(G,B)-R}
+    out={}
+    for s,m in sc.items():
+        mask=m>=max(m.max()*0.6,80.0); ys,xs=np.where(mask); out[s]=(float(xs.mean()),float(ys.mean()))
+    return out
+def homography(im,cx,cz):
+    fid=[((cx-FID_DX,cz-FID_DZ),'R'),((cx+FID_DX,cz-FID_DZ),'G'),
+         ((cx+FID_DX,cz+FID_DZ),'B'),((cx-FID_DX,cz+FID_DZ),'C')]
+    px=centroids(im); A=[];b=[]
+    for (wx,wz),t in fid:
+        x,y=px[t]; A.append([wx,wz,1,0,0,0,-x*wx,-x*wz]); b.append(x); A.append([0,0,0,wx,wz,1,-y*wx,-y*wz]); b.append(y)
+    h=np.linalg.solve(np.array(A),np.array(b)); H=np.array([[h[0],h[1],h[2]],[h[3],h[4],h[5]],[h[6],h[7],1]])
+    return lambda wx,wz:(lambda v:(v[0]/v[2],v[1]/v[2]))(H@np.array([wx,wz,1.0]))
 
-mesh=load(mesh_p); quad=load(quad_p); w2p=homography(mesh)
-print(f"\naddr   worldXZ      | /quad (2D control)        | /mesh (iso-3D mesh — under test)")
-print( "--------------------+---------------------------+----------------------------------")
-fails=[]; control_fail=[]
-for a in ADDRS:
-    gx,gz=parse_addr(a); cx,cy=gx-120,gz
-    qrgb=sample(quad,(cx+0.5)/COLS*quad.shape[1],(cy+0.5)/ROWS*quad.shape[0]); qcl=classify(qrgb)
-    mpx,mpy=w2p(gx+0.5,gz+0.5); mrgb=sample(mesh,mpx,mpy); mcl=classify(mrgb)
-    qok=qcl in ('ROAD','YELLOW'); mok=mcl in ('ROAD','YELLOW')
-    if not qok: control_fail.append(a)
-    if not mok: fails.append((a,mcl,mrgb))
-    print(f"{a:6} ({gx},{gz})  | [{qrgb[0]:5.1f},{qrgb[1]:5.1f},{qrgb[2]:5.1f}] {qcl:8} | "
-          f"[{mrgb[0]:5.1f},{mrgb[1]:5.1f},{mrgb[2]:5.1f}] {mcl:8} {'OK' if mok else 'FAIL'}")
+# ── control: one /quad per distinct chunk ──
+chunks=sorted({(c['cx'],c['cz']) for c in cells})
+for (cx,cz) in chunks:
+    wx,wz=cx*CHUNK+CHUNK/2, cz*CHUNK+CHUNK/2
+    print(f"[road-test] /quad control for chunk ({cx},{cz})..."); shot(f"/quad/{wx}/{wz}", f"/tmp/road-quad-{cx}-{cz}.png")
+for c in cells:
+    im=load(f"/tmp/road-quad-{c['cx']}-{c['cz']}.png"); H,W=im.shape[:2]
+    lx,lz=c['gx']-c['cx']*CHUNK, c['gz']-c['cz']*CHUNK
+    c['quad']=classify(sample(im,(lx+0.5)/CHUNK*W,(lz+0.5)/CHUNK*H))
+
+# ── test: one /mesh per tight z-cluster (per chunk) ──
+def clusters_of(chunk_cells):
+    cc=sorted(chunk_cells,key=lambda c:c['gz']); groups=[[cc[0]]]
+    for c in cc[1:]:
+        if c['gz']-groups[-1][-1]['gz']<=CLUSTER_GAP: groups[-1].append(c)
+        else: groups.append([c])
+    return groups
+clusters=[]
+for (cx,cz) in chunks:
+    clusters += clusters_of([c for c in cells if (c['cx'],c['cz'])==(cx,cz)])
+for i,grp in enumerate(clusters):
+    cwx=sum(c['gx'] for c in grp)/len(grp)+0.5
+    cwz=sum(c['gz'] for c in grp)/len(grp)+0.5
+    print(f"[road-test] /mesh shot for {[c['addr'] for c in grp]} centred ({cwx},{cwz})...")
+    shot(f"/mesh/{cwx}/{cwz}", f"/tmp/road-mesh-{i}.png")
+    im=load(f"/tmp/road-mesh-{i}.png"); w2p=homography(im,cwx,cwz)
+    for c in grp:
+        px,py=w2p(c['gx']+0.5,c['gz']+0.5); c['mesh']=classify(sample(im,px,py)); c['rgb']=sample(im,px,py)
+
+# ── report ──
+print(f"\naddr   chunk worldXZ   | /quad control | /mesh (under test)         | your eyes  match")
+print(  "--------------------------+---------------+----------------------------+-----------------")
+control_fail=[]; fails=[]; mismatches=[]
+for c in cells:
+    mok = c['mesh'] in ('ROAD','YELLOW'); qok = c['quad'] in ('ROAD','YELLOW')
+    if not qok: control_fail.append(c['addr'])
+    if not mok: fails.append(c)
+    obs=c['obs']; matchtxt=''
+    if obs is not None:
+        observed_road = (obs=='road'); match = (mok==observed_road)
+        matchtxt = ('match' if match else 'MISMATCH')
+        if not match: mismatches.append(c['addr'])
+        obs=('PASS' if observed_road else 'FAIL')
+    else: obs='-'
+    r=c['rgb']
+    print(f"{c['addr']:6} ({c['cx']},{c['cz']}) ({c['gx']},{c['gz']}) | {c['quad']:8}      | "
+          f"[{r[0]:5.1f},{r[1]:5.1f},{r[2]:5.1f}] {c['mesh']:8} {'OK' if mok else 'FAIL'} | {obs:6}    {matchtxt}")
+
 print()
 if control_fail:
-    print(f"[road-test] HARNESS BROKEN: /quad (control) did not render asphalt at {control_fail} —")
-    print( "            the data or classifier is wrong; the /mesh result cannot be trusted.")
+    print(f"[road-test] HARNESS BROKEN: /quad control did not render asphalt at {control_fail}.")
     sys.exit(2)
+if mismatches:
+    print(f"[road-test] WARNING: test verdict disagrees with your observed state at {mismatches} —")
+    print( "            the harness sampling may be off there; investigate before trusting it.")
 if fails:
-    print(f"[road-test] FAIL — {len(fails)} road cell(s) render as CONCRETE on the iso-3D mesh,")
-    print( "            though the data is road AND the same formula draws asphalt on /quad.")
-    print( "            Bug is in the 3D mesh ground path (framework/gpu/3d.zig), not data/formula.")
-    for a,cl,rgb in fails:
-        print(f"              {a}: rendered {cl} rgb=[{rgb[0]:.0f},{rgb[1]:.0f},{rgb[2]:.0f}] (expected dark asphalt)")
+    print(f"[road-test] FAIL — {len(fails)} cell(s) render as CONCRETE on the iso-3D mesh though the")
+    print( "            data is road and /quad draws asphalt. Bug is in framework/gpu/3d.zig (mesh path).")
+    for c in fails:
+        r=c['rgb']; print(f"              {c['addr']}: {c['mesh']} rgb=[{r[0]:.0f},{r[1]:.0f},{r[2]:.0f}] (expected dark asphalt)")
     sys.exit(1)
-print("[road-test] PASS — all road cells render as asphalt on the iso-3D mesh.")
+print("[road-test] PASS — every cell renders as asphalt on the iso-3D mesh.")
 PY
