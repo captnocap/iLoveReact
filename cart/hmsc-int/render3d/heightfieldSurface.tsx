@@ -6,6 +6,7 @@ import { hexToRgb01 } from '../world/placeables';
 import {
   PARKING_KIND_INDEX, PARKING_CROSS_KIND_INDEX, PARKING_STALL_WGSL, parkingStallColor,
 } from './parkingStall';
+import { TILE_FILL_WGSL, tileFillMaterialId, tileFillVariant } from './tileFill';
 // re-exported so the compile bake + tests keep one import source
 export { PARKING_KIND_INDEX, PARKING_CROSS_KIND_INDEX } from './parkingStall';
 
@@ -82,8 +83,30 @@ fn hf_ground_kind(cellBase: i32, cols: i32, rows: i32, cx: i32, cy: i32) -> i32 
 }
 `;
 
+// Per-kind (materialId, variant) into tileMaterial, baked into the shader from
+// TILE_KINDS order — a cell index maps straight to its procedural material with
+// no per-cell JS, the SAME asphalt/concrete/sand grain the placed floor pieces
+// wear (tileSurface.tsx / landformFill.ts via tileFill.ts). This is what makes
+// the painted ground read like a placed piece instead of a flat colour fill.
+const HF_MAT_IDS = TILE_KINDS.map((k) => tileFillMaterialId(k));
+const HF_VARIANTS = TILE_KINDS.map((k) => tileFillVariant(k));
+const HF_TILE_MATERIAL_WGSL = `
+fn hf_tile_mat(k: i32) -> f32 {
+  var m = array<f32, ${HF_MAT_IDS.length}>(${HF_MAT_IDS.map((x) => x.toFixed(1)).join(', ')});
+  if (k < 0) { return 0.0; }
+  return m[clamp(k, 0, ${HF_MAT_IDS.length - 1})];
+}
+fn hf_tile_var(k: i32) -> f32 {
+  var v = array<f32, ${HF_VARIANTS.length}>(${HF_VARIANTS.map((x) => x.toFixed(1)).join(', ')});
+  if (k < 0) { return 0.0; }
+  return v[clamp(k, 0, ${HF_VARIANTS.length - 1})];
+}
+`;
+
 export const HEIGHTFIELD_TILE_SHADER = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
+${TILE_FILL_WGSL}
+${HF_TILE_MATERIAL_WGSL}
 ${GROUND_RESOLVE_WGSL}
 ${PARKING_STALL_WGSL}
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
@@ -96,25 +119,35 @@ ${PARKING_STALL_WGSL}
   let cy = clamp(i32(floor(in.uv.y * f32(rows))), 0, rows - 1);
   let kind = hf_ground_kind(cellBase, cols, rows, cx, cy);
 
-  let gf = abs(fract(in.uv * vec2f(f32(cols), f32(rows))) - vec2f(0.5));
-  let edge = max(gf.x, gf.y);
+  // World cell position — 1 tile = 1 m, so p IS world XZ in metres. fract gives
+  // the in-tile uv, and the per-cell seed varies the grain exactly the way the
+  // placed-piece path does (tileSurface / landformFill: tileMaterial(matId, f,
+  // f*64, variant, seed)).
+  let p = in.uv * vec2f(f32(cols), f32(rows));
+  let fc = fract(p);
+  let seed = tf_rand(floor(p) + vec2f(3.1, 7.7)) * 50.0;
 
   var rgb = vec3f(0.0);
   if (kind < 0) {
-    let g = smoothstep(0.46, 0.5, edge) * 0.07;
+    let gf0 = abs(fc - vec2f(0.5));
+    let edge0 = max(gf0.x, gf0.y);
+    let g = smoothstep(0.46, 0.5, edge0) * 0.07;
     rgb = vec3f(0.05 + g, 0.07 + g, 0.10 + g);
   } else {
-    let pbase = 3 + kind * 3;
-    let col = vec3f(D[pbase], D[pbase + 1], D[pbase + 2]);
-    let shade = mix(1.0, 0.78, smoothstep(0.44, 0.5, edge));
-    rgb = col * shade;
+    rgb = tileMaterial(hf_tile_mat(kind), fc, fc * 64.0, hf_tile_var(kind), seed);
     // Parking bays: 'parking' lines run across X, 'parkingCross' across Z
     // (req_0710). The stall math + line width live in parking_stall (parkingStall.ts).
     if (kind == ${PARKING_KIND_INDEX}) {
-      rgb = parking_stall(in.uv.x * f32(cols), rgb);
+      rgb = parking_stall(p.x, rgb);
     } else if (kind == ${PARKING_CROSS_KIND_INDEX}) {
-      rgb = parking_stall(in.uv.y * f32(rows), rgb);
+      rgb = parking_stall(p.y, rgb);
     }
+    // Slab joint at tile edges — the same grid read the placed pieces carry. Only
+    // bare ground tiles get it; the carriageway (painted by the ribbon below)
+    // overwrites rgb and stays seamless, as a real road should.
+    let je = min(min(fc.x, 1.0 - fc.x), min(fc.y, 1.0 - fc.y));
+    let jaa = max(fwidth(je), 0.0008);
+    rgb = mix(rgb, rgb * 0.5, (1.0 - smoothstep(0.012, 0.012 + jaa, je)) * 0.8);
   }
 
   let cellEnd = cellBase + rows * cols;
@@ -167,7 +200,9 @@ ${PARKING_STALL_WGSL}
       let overshoot2 = bestD * bestD - signedD * signedD;
       let inside = bestD < 1e8 && signedD < rExt && signedD > (0.0 - lExt) && overshoot2 < 0.25;
       if (inside) {
-        var road = vec3f(0.118, 0.129, 0.157);
+        // The carriageway: real asphalt grain (the piece's fill_road) with the
+        // crisp analytic markings laid on top — not a flat slab.
+        var road = fill_road(fc, fc * 64.0, 0.0, seed);
         let ad = abs(signedD);
         if (kind != jIdx) {
           if (twoWay > 0.5 && abs(ad - 0.17) < 0.07) { road = vec3f(0.76, 0.60, 0.11); }
@@ -188,8 +223,7 @@ ${PARKING_STALL_WGSL}
         // curve — render it as concrete shoulder, not blocky asphalt tiles.
         let isLane = kind >= laneIdx && kind < laneIdx + 4;
         if (isLane || kind == jIdx || kind == medIdx) {
-          let shade2 = mix(1.0, 0.9, smoothstep(0.44, 0.5, edge));
-          rgb = vec3f(0.33, 0.36, 0.41) * shade2;
+          rgb = fill_concrete(fc, fc * 64.0, 0.0, seed);
         }
       }
     }
