@@ -119,3 +119,12 @@ never preferred) so A* parks there but never shortcuts through. And
 `vehicleSpawn` — the gameplay marker where the traffic system may
 materialize a vehicle; WHICH vehicle is `GAME_VEHICLE.pickSpawn`'s
 spawnRate-weighted pick, WHERE is `GAME_WORLD.vehicleSpawnCells`.
+
+req_0699 amendment: marker kinds NEVER paint the game's ground. The painter's
+2D view keeps their swatch colour (authoring), but the game floor — the live
+heightfield shader, the CPU bake mirror, and the compiled box-slab path — all
+resolve a marker cell to the nearest non-marker ground around it
+(`groundKindAt` / `hf_ground_kind`, ring search radius 4), so a vehicleSpawn
+painted on a parking lot renders as parking, stall lines included. Flat floors
+containing parking cells route through the textured heightfield bake
+(`floorHasParkingCells`) — the slab path cannot draw fragment paint.

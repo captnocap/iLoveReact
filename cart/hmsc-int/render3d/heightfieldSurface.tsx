@@ -32,11 +32,56 @@ import { hexToRgb01 } from '../world/placeables';
 // encodeTileMap ships cell indices in — so the shader needs no extra D[] slot
 // (Effect buffers only grow; a layout change would ripple the CPU mirror, the
 // painter view, and every baked floor).
-const PARKING_KIND_INDEX = TILE_KINDS.indexOf('parking');
+export const PARKING_KIND_INDEX = TILE_KINDS.indexOf('parking');
+
+// Gameplay/dev marker kinds (spawn / save / vehicleSpawn / marker) are META,
+// not ground (req_0699: "putting the orange for spawn in a parking space just
+// makes orange ground"). The GAME's floor — this shader, its CPU bake mirror,
+// and everything compiled from them — renders a marker cell as the ground
+// AROUND it (nearest non-marker neighbour, ring search), so a spawn painted
+// onto a parking lot still reads as parking, stall lines included. The 2D
+// painter view keeps drawing markers in their own colour — that's the
+// authoring surface; this is the world.
+export const MARKER_KIND_INDICES: readonly number[] = TILE_KINDS
+  .filter((k) => {
+    const placement = tileKindDefinition(k).placement;
+    return placement === 'gameplay' || placement === 'dev';
+  })
+  .map((k) => TILE_KINDS.indexOf(k));
+
+const MARKER_SEARCH_RADIUS = 4;
+
+// WGSL fragment shared by the heightfield shader: marker-kind test + the
+// ground-resolve ring search (kept tiny — non-marker cells exit on the first
+// comparison; the ring walk only runs on the rare marker cells).
+const GROUND_RESOLVE_WGSL = `
+fn hf_is_marker(k: i32) -> bool {
+  return ${MARKER_KIND_INDICES.map((i) => `k == ${i}`).join(' || ')};
+}
+fn hf_cell_kind(cellBase: i32, cols: i32, rows: i32, cx: i32, cy: i32) -> i32 {
+  let xx = clamp(cx, 0, cols - 1);
+  let yy = clamp(cy, 0, rows - 1);
+  return i32(D[cellBase + yy * cols + xx]);
+}
+fn hf_ground_kind(cellBase: i32, cols: i32, rows: i32, cx: i32, cy: i32) -> i32 {
+  let k = hf_cell_kind(cellBase, cols, rows, cx, cy);
+  if (!hf_is_marker(k)) { return k; }
+  for (var r = 1; r <= ${MARKER_SEARCH_RADIUS}; r = r + 1) {
+    for (var dy = -r; dy <= r; dy = dy + 1) {
+      for (var dx = -r; dx <= r; dx = dx + 1) {
+        if (max(abs(dx), abs(dy)) != r) { continue; }
+        let n = hf_cell_kind(cellBase, cols, rows, cx + dx, cy + dy);
+        if (n >= 0 && !hf_is_marker(n)) { return n; }
+      }
+    }
+  }
+  return k;
+}
+`;
 
 export const HEIGHTFIELD_TILE_SHADER = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
-
+${GROUND_RESOLVE_WGSL}
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
   let cols = i32(D[0]);
   let rows = i32(D[1]);
@@ -45,7 +90,7 @@ export const HEIGHTFIELD_TILE_SHADER = `
 
   let cx = clamp(i32(floor(in.uv.x * f32(cols))), 0, cols - 1);
   let cy = clamp(i32(floor(in.uv.y * f32(rows))), 0, rows - 1);
-  let kind = i32(D[cellBase + cy * cols + cx]);
+  let kind = hf_ground_kind(cellBase, cols, rows, cx, cy);
 
   let gf = abs(fract(in.uv * vec2f(f32(cols), f32(rows))) - vec2f(0.5));
   let edge = max(gf.x, gf.y);
@@ -153,6 +198,28 @@ function smoothstep01(e0: number, e1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
+const MARKER_INDEX_SET: ReadonlySet<number> = new Set(MARKER_KIND_INDICES);
+
+// CPU mirror of hf_ground_kind (GROUND_RESOLVE_WGSL): a marker cell renders as
+// the nearest non-marker ground around it. Exported so the compile's slab path
+// can resolve markers the same way the textured bake does.
+export function groundKindAt(data: number[], cellBase: number, cols: number, rows: number, cx: number, cy: number): number {
+  const at = (x: number, y: number) =>
+    data[cellBase + Math.max(0, Math.min(rows - 1, y)) * cols + Math.max(0, Math.min(cols - 1, x))] | 0;
+  const k = at(cx, cy);
+  if (!MARKER_INDEX_SET.has(k)) return k;
+  for (let r = 1; r <= MARKER_SEARCH_RADIUS; r += 1) {
+    for (let dy = -r; dy <= r; dy += 1) {
+      for (let dx = -r; dx <= r; dx += 1) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const n = at(cx + dx, cy + dy);
+        if (n >= 0 && !MARKER_INDEX_SET.has(n)) return n;
+      }
+    }
+  }
+  return k;
+}
+
 // CPU MIRROR of HEIGHTFIELD_TILE_SHADER's fragment function (RIBBONBAKE-0610).
 // The compiled game ships a BAKED floor texture — it cannot run this Effect at
 // load — so the editor's LIVE ribbon and the game's baked floor only match if
@@ -170,7 +237,7 @@ export function heightfieldTexelColor(data: number[], u: number, v: number): [nu
 
   const cxi = Math.max(0, Math.min(cols - 1, Math.floor(u * cols)));
   const cyi = Math.max(0, Math.min(rows - 1, Math.floor(v * rows)));
-  const kind = data[cellBase + cyi * cols + cxi] | 0;
+  const kind = groundKindAt(data, cellBase, cols, rows, cxi, cyi);
 
   const px = u * cols;
   const py = v * rows;
