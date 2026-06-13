@@ -741,11 +741,21 @@ Scene3DBase.Instances = ({
     throw new Error('<Scene3D.Instances geometry={...}> requires a @reactjit/geometries generator.');
   }
   const g3 = geomIntern.internGeometry(geometry, params);
-  const firstForKey = !geomIntern.hasShipped(g3.key);
-  if (firstForKey) geomIntern.markShipped(g3.key);
-  const geomProps = firstForKey
-    ? _scene3dVertexProps(g3.key, g3.vertices, g3.count, boundsRadius ?? g3.bounds)
-    : { scene3dGeomKey: g3.key, scene3dBoundsRadius: boundsRadius ?? g3.bounds };
+  // ALWAYS ship verts for an instanced bucket — never gate them behind the global
+  // shipped-set (req_0735). A bucket carries ONE geometry payload for ALL its
+  // instances, so the bridge-cost dedup (which exists to collapse N payloads from
+  // N repeated NON-instanced meshes) saves nothing here. Gating it only creates a
+  // silent-drop hazard: if any OTHER mesh flips markShipped(key) but its verts
+  // never reach the host intern cache (it was culled, painted into a capture, or
+  // unmounted before paint), this bucket would ship key-only, miss lookupGeometry,
+  // and vanish — even with the vertex buffer nearly empty. That is exactly the
+  // iso-pane "buildings + grid gone" bug: census showed inst_seen=15
+  // inst_collected=0 with retained=32k/3670k (0.9% full). The host dedups by key
+  // on its side (lookupGeometry hits for the 2nd+ bucket sharing a key), so
+  // always-shipping costs ONE intern, not one per bucket. We still markShipped so
+  // non-instanced Scene3D.Mesh siblings cache-hit once the host actually has it.
+  geomIntern.markShipped(g3.key);
+  const geomProps = _scene3dVertexProps(g3.key, g3.vertices, g3.count, boundsRadius ?? g3.bounds);
   return h('View', {
     ...rest,
     scene3dMesh: true,
