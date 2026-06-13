@@ -32,6 +32,7 @@ import { useMapSession } from './editors/world/useMapSession';
 import { useBuildUndo } from './editors/world/useBuildUndo';
 import { usePlacements } from './editors/world/usePlacements';
 import { assemblePreviewWorld } from './editors/world/previewWorld';
+import { worldToPlacementGraph } from './placements';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
 // one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
@@ -281,6 +282,14 @@ function EditorShell() {
     if (gained) setTab('paint');
   }, [setTab]);
 
+  // The iso build pane's WATER tab drops a body of water at a clicked ground
+  // point: lower it to an ordinary water placement (cat 'water') at that world
+  // position, so it persists, positions, renders, and bakes like everything else.
+  const placeWaterBodyAt = useCallback((presetKind: string, x: number, z: number) => {
+    const { gx, gy } = worldToPlacementGraph(x, z);
+    place.onPaintAt('water', presetKind, gx, gy, 0);
+  }, [place]);
+
   // The top-left "in focus" panel. A tile SELECTION (group) wins — it's the
   // bulk-override surface. Else the place layer shows the SELECTED placement's
   // object (built into a one-object world so the panel resolves it); else it falls
@@ -471,6 +480,7 @@ function EditorShell() {
                   focused={atEditor && wasdQuad === 'preview'}
                   onFocus={focusPreview}
                   onSelectionChange={onIsoSelectionChange}
+                  onPlaceWaterBody={placeWaterBodyAt}
                 />
               </Pane>
             }

@@ -73,6 +73,14 @@ export function placementCellRect(
   };
 }
 
+// Inverse of placementCellRect's graph→world step: a clicked world tile (x,z) →
+// the graph CENTER a placement node sits at. The iso build pane drops bodies of
+// water by world position; this maps that back into the place layer's graph frame
+// so a water body becomes an ordinary placement.
+export function worldToPlacementGraph(worldX: number, worldZ: number): { gx: number; gy: number } {
+  return { gx: (worldX - CHUNK_TILES / 2) * TILE_UNITS, gy: (worldZ - CHUNK_TILES / 2) * TILE_UNITS };
+}
+
 // Footprint + swatch for a kind. Buildings use their facade colour + default
 // footprint; props borrow their gameplay tile's colour and a square footprint.
 export function resolvePlaceable(cat: PlaceCat, kind: string): Placeable {

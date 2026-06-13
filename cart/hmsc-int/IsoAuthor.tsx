@@ -34,6 +34,7 @@ import { TextureCapture } from './game/textures/registry';
 import { groundColumnTop } from './Embodied';
 import { CHUNK_TILES } from './chunks';
 import { PROP_CATEGORIES, PROP_CATEGORY_NAMES, isPropKind, propCategory, type PropCategory } from './game/kinds/props';
+import { WATER_BODY_PRESETS, WATER_BODY_PRESET_IDS } from './game/kinds/waterBodies';
 
 const FAR_CLIP = 4000;
 // The iso eye sits BASE_DIST/zoom (~90–257m) from the ground, far past F2's 14m
@@ -120,7 +121,7 @@ function skinTextureIds(pieces: readonly PlacedBuildPiece[]): string[] {
 // What's armed to place: a single catalog PIECE, a PREFAB (a named composition that
 // stamps into many pieces), or the TOWER tool (req_0478: drag a footprint → a hollow
 // multi-storey shell). null = nothing armed (pan/select mode).
-type Armed = { kind: 'piece' | 'prefab'; id: string } | { kind: 'tower' } | null;
+type Armed = { kind: 'piece' | 'prefab'; id: string } | { kind: 'tower' } | { kind: 'water'; id: string } | null;
 
 // ── Tower tool (req_0478): skyscrapers without laying every storey by hand ───
 // Drag a footprint rectangle → a HOLLOW shell: perimeter walls stacked N floors
@@ -175,6 +176,11 @@ export interface IsoAuthorProps {
   // Selection mirror (req_0702): the cart hosts the face painter in the top-right
   // PAINT tab, so it needs to know what's selected here. Fired on every change.
   onSelectionChange?: (ids: ReadonlySet<string>) => void;
+  // Drop a body of water (world/water) at a clicked ground point. The WATER rail
+  // tab arms a preset; a ground click fires this with the preset kind + world
+  // (x,z). The cart turns it into a water placement (cat 'water') — reusing the
+  // placement system, so it persists/positions/bakes like any placement.
+  onPlaceWaterBody?: (presetKind: string, x: number, z: number) => void;
 }
 
 // A placement's identity-free fingerprint (kind + pose). The rotate flow uses
@@ -845,6 +851,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       onCommit({ kind: 'prefabStamped', prefabId: a.id, origin: { x: t.placement.x, y: t.placement.y, z: t.placement.z }, yawDegrees: t.placement.yawDegrees }, `stamped ${def.label} @ ${at}`);
       return;
     }
+    if (a.kind === 'water') {
+      // A body of water drops at the clicked ground point — the cart turns it into
+      // a water placement (world/water). Not a piece commit; its own channel.
+      props.onPlaceWaterBody?.(a.id, t.placement.x, t.placement.z);
+      return;
+    }
     const def = GAME_BUILD.catalog.get(a.id);
     // placementFor carries the row's defaultEdit (REQ-0647: Doorway/Window
     // walls land with their cut) — the SAME helper F2's place() uses.
@@ -1304,6 +1316,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const a = armedRef.current;
     if (!a || !snap) return null;
     if (paintCells && paintCells.length) return null; // the paint line/rect ghost owns the preview
+    if (a.kind === 'water') return null; // water drops on click; no piece ghost
     if (a.kind === 'tower') {
       // Hover-preview ONE wall module at the snapped cell (the full ring ghosts
       // on drag via the paint preview; a whole-shell hover ghost would thrash).
@@ -1569,7 +1582,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         {armed
           ? armed.kind === 'tower'
             ? `tower: drag the footprint · ${towerFloors} floors (+/− top right) · hollow shell + roof, one building · Esc`
-            : `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${armedPropCanFreeform ? ' · Alt freeform' : ''}${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · shift-click select · Esc`
+            : armed.kind === 'water'
+              ? `water: ${WATER_BODY_PRESETS[armed.id]?.label ?? armed.id} · click the ground to drop a body of water · dig under it (Height brush) for a deeper pool · Esc`
+              : `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${armedPropCanFreeform ? ' · Alt freeform' : ''}${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · shift-click select · Esc`
           : selectedIds.size > 0
             ? `${selectedIds.size} selected · drag to move${selectedPropsCanFreeform ? ' · Alt-drag freeform' : ''} · R rotate · paint in the PAINT panel above · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
             : `WASD pan · drag rotate · scroll zoom · F recenter · click = ${wholeBuilding ? 'building, shift = piece' : 'piece, shift = building'} · ${wallsVisible ? 'walls shown' : 'walls hidden'} · pick below to build`}
@@ -1715,8 +1730,8 @@ const IsoGrid = memo(function IsoGrid(props: { centerX: number; centerZ: number;
 // The bottom build palette. A row of kind tabs (floor/wall/ramp/...) and, under the
 // active tab, that kind's catalog entries as chips — the Sims bottom bar, fed by the
 // SAME BUILD_CATALOG the F2 palette reads.
-type RailTab = BuildPieceKind | 'prefabs';
-const RAIL_TABS: RailTab[] = [...PALETTE_KINDS, 'prefabs'];
+type RailTab = BuildPieceKind | 'prefabs' | 'water';
+const RAIL_TABS: RailTab[] = [...PALETTE_KINDS, 'prefabs', 'water'];
 const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: readonly BuildPrefabDef[]; onArm: (a: NonNullable<Armed>) => void }) {
   // TWIGS (req_0643 "annoying have it reset"): the rail's tab + prop shelf are
   // route twig state, so a hot reload restores the menu where you left it —
@@ -1732,6 +1747,7 @@ const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: re
   const entries = useMemo<{ id: string; label: string }[]>(
     () => {
       if (tab === 'prefabs') return props.prefabs.map((d) => ({ id: d.id, label: d.label }));
+      if (tab === 'water') return WATER_BODY_PRESET_IDS.map((id) => ({ id, label: WATER_BODY_PRESETS[id].label }));
       const all = GAME_BUILD.catalog.byKind(tab);
       if (tab !== 'prop') return all;
       return all.filter((e) => {
@@ -1741,13 +1757,13 @@ const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: re
     },
     [tab, propShelf, props.prefabs],
   );
-  const armKind: 'piece' | 'prefab' = tab === 'prefabs' ? 'prefab' : 'piece';
+  const armKind: 'piece' | 'prefab' | 'water' = tab === 'prefabs' ? 'prefab' : tab === 'water' ? 'water' : 'piece';
   const armedId = props.armed && props.armed.kind !== 'tower' ? props.armed.id : null;
   const towerArmed = props.armed?.kind === 'tower';
   return (
     <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 8, backgroundColor: '#0b1220fa', borderRadius: 6, borderWidth: 1, borderColor: '#1e3a5f', padding: 8, gap: 6 }}>
       <Text fontSize={10} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-        {`${tab === 'prefabs' ? 'PREFABS' : 'PIECES'} — ${tab} (${entries.length}) · click one, then click the ground`}
+        {`${tab === 'prefabs' ? 'PREFABS' : tab === 'water' ? 'WATER' : 'PIECES'} — ${tab} (${entries.length}) · click one, then click the ground`}
       </Text>
       <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
         {RAIL_TABS.map((k) => (
