@@ -1036,7 +1036,7 @@ fn clampUphillSurfaceSpeed(vx: *f32, vz: *f32, x: f32, z: f32, y: f32, step_heig
 
 /// The highest registered-heightfield surface under (x,z), with its up-normal.
 /// This remains public for diagnostics/tests. Ground support below intentionally
-/// uses heightfieldGroundAt instead: an overhead ramp must not hide the terrain
+/// uses heightfieldFloorAt instead: an overhead ramp must not hide the terrain
 /// heightfield the player is actually standing on.
 pub fn heightfieldSurfaceAt(x: f32, z: f32) ?HfSurface {
     var best: ?HfSurface = null;
@@ -1060,8 +1060,29 @@ pub fn heightfieldGroundSurfaceAt(x: f32, z: f32, current_y: f32, step_height: f
     return best;
 }
 
-fn heightfieldGroundAt(x: f32, z: f32, current_y: f32, step_height: f32) f32 {
-    return if (heightfieldGroundSurfaceAt(x, z, current_y, step_height)) |s| s.height else -1000000;
+// Ground SUPPORT under the feet, SLOPE-AGNOSTIC. Stands the player on the
+// highest heightfield mesh surface at/below the feet (within a step) no matter
+// how steep it is — a basin wall, a dug-pool rim, a cone face all hold you up so
+// you never fall THROUGH the mesh. The slope LIMIT (can you CLIMB onto it / gain
+// height) is enforced separately: the move-cancel wall-block in step() reverts a
+// horizontal move into a too-steep face that rises ABOVE the feet, and the
+// walkable-only heightfieldGroundSurfaceAt drives speed clamping + wall grace.
+// Before this, steep cells returned NO support, so walking onto the steep wall of
+// a painted water basin (or any heightfield edge) dropped you into the void.
+fn heightfieldFloorSurfaceAt(x: f32, z: f32, current_y: f32, step_height: f32) ?HfSurface {
+    var best: ?HfSurface = null;
+    for (&g_heightfields) |*hf| {
+        if (!hf.active) continue;
+        const s = heightfieldSurface(hf, x, z) orelse continue;
+        if (s.height <= current_y + step_height) {
+            if (best == null or s.height > best.?.height) best = s;
+        }
+    }
+    return best;
+}
+
+fn heightfieldFloorAt(x: f32, z: f32, current_y: f32, step_height: f32) f32 {
+    return if (heightfieldFloorSurfaceAt(x, z, current_y, step_height)) |s| s.height else -1000000;
 }
 
 fn heightfieldSlopeGroundAt(x: f32, z: f32, current_y: f32, step_height: f32) bool {
@@ -1311,11 +1332,13 @@ pub fn step(input: []const f32) ?[]f32 {
     // V7: the ONE host-side movement integrator, inside the physics step.
     movement.integrateHorizontal(&pvx, &pvz, move_x, move_z, speed, acceleration_multiplier, player_surface_friction, dt);
 
-    // Ground support = highest of the rect floor and any walkable terrain
-    // surface under the feet (terrain steeper than its slope limit does not
-    // support you, so it is excluded here and handled as a wall after the move).
+    // Ground support = highest of the rect floor and the heightfield mesh under
+    // the feet. The terrain holds you up at ANY slope (a steep face is still
+    // ground, not a hole) — the slope limit only governs whether you can CLIMB
+    // it, enforced by the move-cancel wall-block after the move, not by dropping
+    // the surface from support here (that was the basin-wall fall-through bug).
     var player_ground_y = groundAt(rects, oriented, px, pz, py, step_height);
-    player_ground_y = @max(player_ground_y, heightfieldGroundAt(px, pz, py, step_height));
+    player_ground_y = @max(player_ground_y, heightfieldFloorAt(px, pz, py, step_height));
     var player_grounded = py <= player_ground_y + 0.015 and pvy <= 0;
     if (player_grounded) {
         if (heightfieldGroundSurfaceAt(px, pz, py, step_height)) |s| {
@@ -1353,7 +1376,7 @@ pub fn step(input: []const f32) ?[]f32 {
             pvz = 0;
         }
     }
-    next_ground_y = @max(next_ground_y, heightfieldGroundAt(px, pz, py, step_height));
+    next_ground_y = @max(next_ground_y, heightfieldFloorAt(px, pz, py, step_height));
     if (py <= next_ground_y) {
         py = next_ground_y;
         if (pvy < 0) pvy = 0;
@@ -1391,7 +1414,7 @@ pub fn step(input: []const f32) ?[]f32 {
         // Painted terrain supports bodies too (req_0625: balls/cones fell
         // through heightfield landforms — only the player sampled them).
         var gy = groundAt(rects, oriented, x, z, y - r, entity_step_height) + r;
-        gy = @max(gy, heightfieldGroundAt(x, z, y - r, entity_step_height) + r);
+        gy = @max(gy, heightfieldFloorAt(x, z, y - r, entity_step_height) + r);
         const surface_friction = clamp(surfaceValueAt(rects, oriented, x, z, y - r, entity_step_height, 6, 0.2), 0, 1);
         const surface_restitution = clamp(surfaceValueAt(rects, oriented, x, z, y - r, entity_step_height, 7, 0.8), 0, 1);
         var grounded: f32 = 0;
