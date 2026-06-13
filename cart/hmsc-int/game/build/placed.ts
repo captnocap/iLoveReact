@@ -36,8 +36,8 @@ import {
   type BuildPieceDef,
 } from './catalog';
 import { BUILD_KIND_CONTRACTS, type BuildGameplayTags, type BuildPieceKind } from './pieces';
-import { propDynamics } from '../kinds';
-import { propModelFootprintMeters } from '../kinds/propModels';
+import { propDynamics, propKindDefinition } from '../kinds';
+import { propModelFootprintMeters } from '../../compile/propRecipes/footprint';
 import { wallEditDefinition, type WallEdit } from './edits';
 import type { BuildPrefabDef, PrefabPiece } from './prefabs';
 import { BUILD_FACE_SLOTS, resolveFaceSkin, type BuildSkinSet } from './skins';
@@ -1354,33 +1354,95 @@ export function liftBuildingsToTerrain<T extends PlacedBuildPiece>(
     if (offset <= 1e-6) { for (const p of g) out.push(p); }
     else for (const p of g) out.push({ ...p, y: p.y + offset });
   }
-  return out;
+  return restPropsOnSupport(out, terrainAt);
 }
 
-// Build-catalog props are free/surface objects, not structural pads. They rest on
-// the raw terrain at their own anchor so a hydrant/rock/bush placed before a
-// heightfield edit does not stay buried at y=0 and lose its render/collider.
-// Unlike liftBuildingsToTerrain this is per-prop only: walls/floors/buildings keep
-// their authored y until the broader flat-pad terrain-lift lane is explicitly on.
+// req_0771/req_0776: EVERY prop rests on the solid surface beneath it — the same
+// rule whether it's a barrel on the ground or a computer on a desk. After the
+// terrain lift, each prop drops onto the HIGHEST solid piece-top under its anchor
+// (a desk/floor/another prop), else the terrain. ONE rule, run by BOTH lift paths
+// (the iso editor's liftBuildingsToTerrain AND the play/compiled liftPropsToTerrain)
+// so a thing set on a desk sits on the desk in the editor, in /test, and in the
+// bake — no more a prop that rests in one view and floats in another. Wall-hung
+// props (signs) keep their authored height. A small upward grace snaps a prop
+// nudged just into a surface up onto it; surfaces ABOVE the prop are never grabbed.
+const PROP_REST_SNAP_UP_METERS = 0.35;
+// How far a prop will DROP to find the surface it belongs on (a desktop item
+// floating above its desk). Kept under one storey so an intentionally elevated
+// prop (REQ-0582) is never yanked down onto a low piece far beneath it.
+const PROP_REST_DROP_REACH_METERS = 1.2;
+function isRestableProp(piece: PlacedBuildPiece): boolean {
+  const def = placedPieceDef(piece);
+  if (def.kind !== 'prop' || def.propKind === undefined) return false;
+  return propKindDefinition(def.propKind).mount !== 'wall';
+}
+function restPropsOnSupport<T extends PlacedBuildPiece>(
+  pieces: readonly T[],
+  terrainAt: (x: number, z: number) => number | undefined,
+): T[] {
+  if (!pieces.some(isRestableProp)) return pieces as T[];
+  // Spatial hash of SUPPORT bounds (every solid piece, props included — a desk
+  // holds a computer) by XZ cell, so each prop only tests nearby supports. Tagged
+  // with the piece id to skip a prop resting on its OWN bounds.
+  const cellMeters = 4;
+  type Support = { id: string; bounds: PieceBounds };
+  const buckets = new Map<string, Support[]>();
+  for (const q of pieces) {
+    // A support is anything with a solid top to rest on: every structural piece
+    // (floor/wall/roof/ramp/stairs) plus SOLID props (a desk) — but not a
+    // walk-through prop (a bush), so a prop never perches on foliage.
+    if (placedPieceDef(q).kind === 'prop' && !placedPieceTags(q).collision) continue;
+    const support: Support = { id: q.id, bounds: pieceBounds(q) };
+    const b = support.bounds;
+    const ix0 = Math.floor(b.minX / cellMeters), ix1 = Math.floor(b.maxX / cellMeters);
+    const iz0 = Math.floor(b.minZ / cellMeters), iz1 = Math.floor(b.maxZ / cellMeters);
+    for (let ix = ix0; ix <= ix1; ix += 1) {
+      for (let iz = iz0; iz <= iz1; iz += 1) {
+        const key = `${ix},${iz}`;
+        const cell = buckets.get(key);
+        if (cell) cell.push(support); else buckets.set(key, [support]);
+      }
+    }
+  }
+  return pieces.map((piece) => {
+    if (!isRestableProp(piece)) return piece;
+    let supportTop = -Infinity;
+    // A solid piece under the prop's anchor holds it up: drop the prop onto the
+    // HIGHEST such top within reach (a desk under a floating computer). The reach
+    // band keeps an INTENTIONALLY elevated prop (REQ-0582) from falling onto a
+    // distant low piece far below it — only a surface near the prop catches it.
+    const cell = buckets.get(`${Math.floor(piece.x / cellMeters)},${Math.floor(piece.z / cellMeters)}`);
+    if (cell) {
+      for (const { id, bounds: qb } of cell) {
+        if (id === piece.id) continue; // never rest a prop on itself
+        if (piece.x < qb.minX || piece.x > qb.maxX || piece.z < qb.minZ || piece.z > qb.maxZ) continue;
+        if (qb.topY > piece.y + PROP_REST_SNAP_UP_METERS) continue; // not a surface above the prop
+        if (qb.topY < piece.y - PROP_REST_DROP_REACH_METERS) continue; // too far below to be its surface
+        if (qb.topY > supportTop) supportTop = qb.topY;
+      }
+    }
+    // Terrain only lifts a BURIED prop up onto the ground; it never pulls an
+    // elevated prop down (REQ-0582: a prop placed high stays high unless a real
+    // surface is under it).
+    const ty = terrainAt(piece.x, piece.z);
+    if (Number.isFinite(ty) && ty! > piece.y && ty! > supportTop) supportTop = ty!;
+    if (!Number.isFinite(supportTop) || Math.abs(supportTop - piece.y) < 1e-6) return piece;
+    return { ...piece, y: supportTop };
+  });
+}
+
+// Build-catalog props are free/surface objects, not structural pads: each rests on
+// the solid surface beneath it — terrain OR a desk/floor/another prop under its
+// anchor — so a hydrant on the ground, a barrel on a floor, and a computer on a
+// desk all sit right (req_0776). This is the play/compiled lane; it shares the ONE
+// resting rule (restPropsOnSupport) with the editor's liftBuildingsToTerrain so a
+// prop never rests in one view and floats in another. Walls/floors/buildings keep
+// their authored y (only props rest); wall-hung props keep their height.
 export function liftPropsToTerrain<T extends PlacedBuildPiece>(
   pieces: readonly T[],
   terrainAt: (x: number, z: number) => number | undefined,
 ): T[] {
-  const out: T[] = [];
-  for (const piece of pieces) {
-    const def = placedPieceDef(piece);
-    if (def.kind !== 'prop') {
-      out.push(piece);
-      continue;
-    }
-    const y = terrainAt(piece.x, piece.z);
-    if (!Number.isFinite(y) || y! <= piece.y + 1e-6) {
-      out.push(piece);
-      continue;
-    }
-    out.push({ ...piece, y: y! });
-  }
-  return out;
+  return restPropsOnSupport(pieces, terrainAt);
 }
 
 /** The authored placement for a catalog row at a position (REQ-0647). Wall

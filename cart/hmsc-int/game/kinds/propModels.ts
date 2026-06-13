@@ -23,7 +23,6 @@
 // each, image-skinnable end to end.
 
 import { propKindDefinition, type PropKind } from './props';
-import { HMSC_SCALE } from '../../world/scale';
 
 export type Color = readonly [number, number, number];
 export type Rotation = readonly [number, number, number];
@@ -40,6 +39,10 @@ export type PropPartSpec = {
   rotation?: Rotation;
   /** present = this part is a flat image target (partTextures key) */
   partId?: string;
+  /** < 1 = a TRANSLUCENT part (glass): the /test renderer draws it with this
+   *  opacity, the bake interns a translucent flat material with the same alpha —
+   *  the SAME path build-piece glass panes ride. Absent = opaque. */
+  opacity?: number;
 };
 
 export function box(local: readonly [number, number, number], size: readonly [number, number, number], color: Color, rotation?: Rotation): PropPartSpec {
@@ -61,6 +64,16 @@ export function sphere(local: readonly [number, number, number], size: readonly 
 /** A flat image-target panel: a thin box whose broad faces take a texture. */
 function panel(partId: string, local: readonly [number, number, number], size: readonly [number, number, number], color: Color, rotation?: Rotation): PropPartSpec {
   return { shape: 'box', local, size, color, rotation, partId };
+}
+
+// The SAME glass build-piece windows wear (render3d/materials Glass / the window
+// pane) — a cool architectural tint at window opacity. A glass box is translucent
+// by default; it stays textureable, so a skin still overrides it. Kept as local
+// constants (game/kinds must not import the render layer); mirrors materials.ts.
+const GLASS_TINT = hx('#bcd3dd');
+const GLASS_OPACITY = 0.3;
+function glassBox(local: readonly [number, number, number], size: readonly [number, number, number], rotation?: Rotation): PropPartSpec {
+  return { shape: 'box', local, size, color: GLASS_TINT, rotation, opacity: GLASS_OPACITY };
 }
 
 // The stable id a part is textured under — the key in WorldProp.partTextures.
@@ -127,10 +140,30 @@ function grassParts(kind: PropKind): PropPartSpec[] {
   return spots.flatMap(([x, z, t, color]) => tuft(x, z, r * 0.55, h * t, color));
 }
 
+// ── chairs (PROPSKIN-0769): migrated out of the bespoke render3d/props/Furniture
+// component into a data recipe so every chair exposes skinnable PARTS (legs, seat,
+// backrest) AND bakes faithfully — the bespoke model had no recipe, so a compiled
+// chair fell back to a single box. Four legs + seat + a tilted backrest, the exact
+// geometry the Furniture <Chair> drew. Painted variants pass body/leg colours.
+const CHAIR_METAL = hx('#3a3f46');
+function chairParts(body: Color, legColor: Color): PropPartSpec[] {
+  const seatY = 0.45;
+  const legSpots: [number, number, number][] = [[0.2, seatY / 2, 0.2], [-0.2, seatY / 2, 0.2], [0.2, seatY / 2, -0.2], [-0.2, seatY / 2, -0.2]];
+  return [
+    ...legSpots.map((p) => box(p, [0.05, seatY, 0.05], legColor)),
+    box([0, seatY, 0], [0.5, 0.06, 0.5], body),                          // seat
+    box([0, seatY + 0.27, 0.23], [0.5, 0.5, 0.05], body, [-6, 0, 0]),    // backrest (rises behind +Z, tilted)
+  ];
+}
+
 // ── recipes for every PROPBATCH kind ─────────────────────────────────────────
 // Keyed by kind; a kind absent here uses worldGeometry's bespoke case (the
 // pre-batch props) or the registry-box placeholder.
 const RECIPES: Partial<Record<PropKind, () => PropPartSpec[]>> = {
+  chair: () => chairParts(WOOD, WOOD_DARK),
+  chairRed: () => chairParts(hx('#b03a2e'), CHAIR_METAL),
+  chairBlue: () => chairParts(hx('#2e6fb0'), CHAIR_METAL),
+  chairGreen: () => chairParts(hx('#3a8f4f'), CHAIR_METAL),
   grassPatch: () => grassParts('grassPatch'),
   grassTall: () => {
     const parts = grassParts('grassTall');
@@ -705,10 +738,9 @@ const RECIPES: Partial<Record<PropKind, () => PropPartSpec[]>> = {
   displayCase: () => {
     const def = propKindDefinitionStrict('displayCase');
     const w = def.footprintRadiusMeters * 2;
-    const glass = hx('#cfe6f2');
     return [
       box([0, 0.27, 0], [w, 0.54, 0.7], WOOD_DARK),
-      box([0, 0.76, 0], [w - 0.02, 0.42, 0.66], glass),
+      glassBox([0, 0.76, 0], [w - 0.02, 0.42, 0.66]),   // the real translucent glass pane (same as windows)
       box([0, 0.99, 0], [w, 0.04, 0.72], STEEL),
       box([-w * 0.25, 0.62, 0], [0.18, 0.12, 0.3], hx('#d8a23a')),
       box([w * 0.05, 0.61, 0.1], [0.14, 0.1, 0.2], hx('#7a4a8a')),
@@ -820,109 +852,4 @@ export function propModelParts(kind: PropKind): PropPartSpec[] | null {
  *  these to the generic DataProp component. */
 export function hasPropModelRecipe(kind: PropKind): boolean {
   return RECIPES[kind] !== undefined;
-}
-
-const FOOTPRINT_DEG = Math.PI / 180;
-
-// A walking player only collides with what stands in its own height band — the
-// canopy 5m up, the blade sign overhead, a high shelf's top are visual, not
-// blockers. The band is the player capsule height (HMSC_SCALE, the one source),
-// measured up from the prop's ground anchor; parts entirely above it don't widen
-// the footprint into a phantom ground wall (PROPFOOT-0759: a derived appleTree
-// was a 5m collision blob from its canopy until this gate).
-const FOOTPRINT_BAND_METERS = HMSC_SCALE.playerCapsuleHeightMeters;
-
-// One local point spun by a part's own Euler rotation (degrees), Rz·Ry·Rx — the
-// SAME order the renderer composes before the prop's yaw. Used to find the true
-// XZ extent (and Y, to test the band) of a tilted part (the A-frame's ±12°
-// boards, a leaning blade).
-function rotatePartPoint(x: number, y: number, z: number, rx: number, ry: number, rz: number): { x: number; y: number; z: number } {
-  const cx = Math.cos(rx * FOOTPRINT_DEG), sx = Math.sin(rx * FOOTPRINT_DEG);
-  const y1 = y * cx - z * sx, z1 = y * sx + z * cx;
-  const cy = Math.cos(ry * FOOTPRINT_DEG), sy = Math.sin(ry * FOOTPRINT_DEG);
-  const x2 = x * cy + z1 * sy, z2 = -x * sy + z1 * cy;
-  const cz = Math.cos(rz * FOOTPRINT_DEG), sz = Math.sin(rz * FOOTPRINT_DEG);
-  const x3 = x2 * cz - y1 * sz, y3 = x2 * sz + y1 * cz;
-  return { x: x3, y: y3, z: z2 };
-}
-
-/** The EXACT measured footprint of a data-recipe prop. */
-export type PropModelFootprint = {
-  /** local-X span of the in-band model mass, meters */
-  widthMeters: number;
-  /** local-Z span, meters */
-  depthMeters: number;
-  /** the model's XZ center in its OWN (un-yawed) local frame — nonzero when the
-   *  mass is authored off the placement anchor. Consumers rotate this by the
-   *  prop's yaw so the footprint tracks the mesh at any rotation (FOOTPRINT-0765). */
-  offsetXMeters: number;
-  offsetZMeters: number;
-  /** the model reads ROUND in plan (cylinder/sphere mass dominates and width ≈
-   *  depth) — collision should be a CIRCLE of radius max(width,depth)/2, not a
-   *  square that overhangs the corners (a fountain, barrel, drum). */
-  round: boolean;
-};
-
-/** FOOTPRINT-0759/0765: the EXACT collision footprint of a data-recipe prop,
- *  measured from the model itself — the XZ bounding box over the parts that stand
- *  in the player's walking band (see FOOTPRINT_BAND_METERS), so the player bumps
- *  precisely what they see at body height, with no hand-tuned number to drift.
- *  Carries the model's center OFFSET (so an off-center body tracks under rotation)
- *  and a ROUND flag (so a circular base collides as a circle, not a square).
- *  Returns null for bespoke (TSX) models — they keep a measured footprint field —
- *  and for props whose mass is ALL overhead (a hanging blade sign), so those fall
- *  back to the kind's footprintRadius square. A cylinder's size is [diameter, h,
- *  diameter], so its corner box IS its circular footprint's AABB. */
-export function propModelFootprintMeters(kind: PropKind): PropModelFootprint | null {
-  const parts = propModelParts(kind);
-  if (!parts || parts.length === 0) return null;
-  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  let roundVolume = 0, boxVolume = 0;
-  let inBand = false;
-  for (const part of parts) {
-    const hx = part.size[0] / 2, hy = part.size[1] / 2, hz = part.size[2] / 2;
-    const rx = part.rotation?.[0] ?? 0, ry = part.rotation?.[1] ?? 0, rz = part.rotation?.[2] ?? 0;
-    let partMinY = Infinity, partMaxY = -Infinity;
-    let pMinX = Infinity, pMaxX = -Infinity, pMinZ = Infinity, pMaxZ = -Infinity;
-    for (const ax of [-1, 1] as const) {
-      for (const ay of [-1, 1] as const) {
-        for (const az of [-1, 1] as const) {
-          const r = rotatePartPoint(ax * hx, ay * hy, az * hz, rx, ry, rz);
-          const py = part.local[1] + r.y;
-          if (py < partMinY) partMinY = py;
-          if (py > partMaxY) partMaxY = py;
-          const wx = part.local[0] + r.x;
-          const wz = part.local[2] + r.z;
-          if (wx < pMinX) pMinX = wx;
-          if (wx > pMaxX) pMaxX = wx;
-          if (wz < pMinZ) pMinZ = wz;
-          if (wz > pMaxZ) pMaxZ = wz;
-        }
-      }
-    }
-    // Skip parts that float entirely above the player (canopy, hanging sign) or
-    // below the ground anchor — they are not what a walking body runs into.
-    if (partMaxY < 0 || partMinY > FOOTPRINT_BAND_METERS) continue;
-    inBand = true;
-    if (pMinX < minX) minX = pMinX;
-    if (pMaxX > maxX) maxX = pMaxX;
-    if (pMinZ < minZ) minZ = pMinZ;
-    if (pMaxZ > maxZ) maxZ = pMaxZ;
-    const volume = part.size[0] * part.size[1] * part.size[2];
-    if (part.shape === 'box') boxVolume += volume; else roundVolume += volume;
-  }
-  if (!inBand) return null;
-  const widthMeters = maxX - minX;
-  const depthMeters = maxZ - minZ;
-  // Round only when the plan is near-square (a tall cylinder), so a long oval
-  // cylinder (a pipe on its side) stays a rect, not a misfit circle.
-  const round = roundVolume > boxVolume
-    && Math.abs(widthMeters - depthMeters) < 0.15 * Math.max(widthMeters, depthMeters);
-  return {
-    widthMeters,
-    depthMeters,
-    offsetXMeters: (minX + maxX) / 2,
-    offsetZMeters: (minZ + maxZ) / 2,
-    round,
-  };
 }

@@ -85,12 +85,20 @@ function propColor(kind: PropKind | string): Color {
   }
 }
 
-/** Every prop's parts, in ONE place. Bespoke kinds resolve to their recipe (the
- *  per-prop file in this dir); data-recipe kinds fall through to propModelParts;
- *  anything else gets a registry-derived box. */
+/** Every prop's parts, in ONE place — by kind, so render, bake, AND the physics
+ *  footprint all read the SAME geometry. Bespoke kinds resolve to their per-prop
+ *  file; data-recipe kinds fall through to propModelParts; anything else gets a
+ *  registry-derived box. */
 export function resolvePropParts(prop: WorldProp): PropPartSpec[] {
-  const def = propKindDefinition(prop.kind);
-  switch (prop.kind) {
+  return resolvePartsForKind(prop.kind);
+}
+
+/** Resolve a kind's parts directly, with no WorldProp instance — the footprint
+ *  derivation calls this so EVERY prop gets a measured collision footprint, not
+ *  just the old RECIPES kinds. */
+export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
+  const def = propKindDefinition(kind);
+  switch (kind) {
     case 'bush':
     case 'bushLarge':
     case 'bushLow':
@@ -99,7 +107,7 @@ export function resolvePropParts(prop: WorldProp): PropPartSpec[] {
     case 'rock':
     case 'rockLarge':
     case 'rockSmall':
-      return rockParts(prop.kind, def.heightMeters, def.footprintRadiusMeters);
+      return rockParts(kind, def.heightMeters, def.footprintRadiusMeters);
     case 'dumpster': return dumpsterParts();
     case 'streetSign': return streetSignParts(def.heightMeters);
     case 'stopSign': return stopSignParts(def.heightMeters);
@@ -112,11 +120,11 @@ export function resolvePropParts(prop: WorldProp): PropPartSpec[] {
     case 'treeOakYoung':
     case 'treeOakGiant':
     case 'treeOak':
-      return treeOakParts(prop.kind, def.heightMeters, def.footprintRadiusMeters);
+      return treeOakParts(kind, def.heightMeters, def.footprintRadiusMeters);
     case 'treePineYoung':
     case 'treePineGiant':
     case 'treePine':
-      return treePineParts(prop.kind, def.heightMeters, def.footprintRadiusMeters);
+      return treePineParts(kind, def.heightMeters, def.footprintRadiusMeters);
     case 'treeBirch':
       return treeBirchParts(def.heightMeters, def.footprintRadiusMeters);
     case 'treeCypress':
@@ -139,7 +147,7 @@ export function resolvePropParts(prop: WorldProp): PropPartSpec[] {
     case 'chairRed':
     case 'chairBlue':
     case 'chairGreen':
-      return chairParts(prop.kind);
+      return chairParts(kind);
     case 'couch': return couchParts(def.footprintRadiusMeters);
     case 'table': return tableParts(def.heightMeters, def.footprintRadiusMeters);
     case 'floorLamp': return floorLampParts(def.heightMeters);
@@ -150,7 +158,7 @@ export function resolvePropParts(prop: WorldProp): PropPartSpec[] {
     case 'planter': return planterParts(def.heightMeters, def.footprintRadiusMeters);
     case 'bedSingle':
     case 'bedDouble':
-      return bedParts(prop.kind, def.heightMeters, def.footprintRadiusMeters);
+      return bedParts(kind, def.heightMeters, def.footprintRadiusMeters);
     case 'cupboard': return cupboardParts(def.heightMeters, def.footprintRadiusMeters);
     case 'mirror': return mirrorParts();
     case 'sink': return sinkParts(def.heightMeters);
@@ -162,11 +170,11 @@ export function resolvePropParts(prop: WorldProp): PropPartSpec[] {
     default: {
       // data-recipe kinds (propModels.RECIPES) resolve here; the two paths agree
       // by construction since everyone calls this one function.
-      const recipe = propModelParts(prop.kind);
+      const recipe = propModelParts(kind);
       if (recipe) return recipe;
       // registry-derived placeholder for any kind without a recipe case.
       const fallback: readonly [number, number, number] = [def.footprintRadiusMeters * 2, def.heightMeters, def.footprintRadiusMeters * 2];
-      return [{ shape: 'box', local: [0, fallback[1] / 2, 0], size: fallback, color: propColor(prop.kind) }];
+      return [{ shape: 'box', local: [0, fallback[1] / 2, 0], size: fallback, color: propColor(kind) }];
     }
   }
 }

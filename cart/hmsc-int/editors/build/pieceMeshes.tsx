@@ -18,7 +18,7 @@ import type { PlacedBuildPiece } from '@game';
 import type { WorldProp } from '../../design';
 import { Prop } from '../../render3d/Prop';
 import { propDynamics } from '../../game/kinds/props';
-import { propModelFootprintMeters } from '../../game/kinds/propModels';
+import { propModelFootprintMeters } from '../../compile/propRecipes/footprint';
 import { BUILD_UI, pieceVisualShapes, wallJoinSignature } from './pieceShapes';
 import type { VisualBox, VisualShape } from './pieceShapes';
 import { CAMERA_OCCLUSION_TUNING } from './buildUi';

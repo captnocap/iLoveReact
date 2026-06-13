@@ -19,6 +19,8 @@
 // by the builder; the borrow mirrors how props borrow tile bundles.
 
 import { PROP_KINDS, isPropKind, propKindDefinition, type PropKind } from '../kinds';
+import { dumpsterBodyMeters } from '../kinds/props';
+import { propModelFootprintMeters } from '../../compile/propRecipes/footprint';
 import {
   BUILD_KIND_CONTRACTS,
   isBuildPieceKind,
@@ -188,36 +190,20 @@ function propCover(kind: PropKind): BuildGameplayTags['cover'] {
   }
 }
 
-const PROP_DEPTH_OVERRIDES: Partial<Record<PropKind, number>> = {
-  dumpster: 0.86,
-  mailbox: 0.44,
-  payphone: 0.34,
-  streetSign: 0.24,
-  streetLight: 0.4,
-  stopSign: 0.24,
-  trafficLight: 0.46,
-  fence: 0.08,
-  // segment props span local X; their depth is the thin axis
-  barrier: 0.6,
-  bench: 0.56,
-  couch: 0.9,
-  bedSingle: 1.0,
-  bedDouble: 1.5,
-  cupboard: 0.5,
-  // wall decor sits flush against its wall
-  wallPainting: 0.16,
-  ledLight: 0.12,
-  mirror: 0.12,
-  // appliances are deeper than their width-derived square
-  sink: 0.5,
-  oven: 0.62,
-  fridge: 0.72,
-};
-
 function propCatalogEntry(kind: PropKind): BuildPieceDef {
   const def = propKindDefinition(kind);
-  const width = def.kind === 'fence' ? def.footprintRadiusMeters * 1.9 : def.footprintRadiusMeters * 2;
-  const depth = PROP_DEPTH_OVERRIDES[kind] ?? def.footprintRadiusMeters * 2;
+  // FOOTPRINT-0759: the build-piece SIZE (and thus the placed prop's collider,
+  // since GAME_BUILD.placed.colliders lowers def.size) reads the SAME footprint
+  // physics does — MEASURED from a data-recipe prop's model (exact, no magic
+  // number), else the bespoke prop's measured footprintWidth/Depth field, else a
+  // radius square. This killed the fat footprintRadius*2 box that made a shelf
+  // collide a metre off its face while the model was ~0.5m deep, and the
+  // square-from-radius that overhung the vending machine. The dumpster keeps its
+  // body-derived box.
+  const model = propModelFootprintMeters(kind);
+  const dumpsterBody = kind === 'dumpster' ? dumpsterBodyMeters() : null;
+  const width = model?.widthMeters ?? dumpsterBody?.widthMeters ?? def.footprintWidthMeters ?? (def.kind === 'fence' ? def.footprintRadiusMeters * 1.9 : def.footprintRadiusMeters * 2);
+  const depth = model?.depthMeters ?? dumpsterBody?.depthMeters ?? def.footprintDepthMeters ?? def.footprintRadiusMeters * 2;
   return {
     id: `prop.${kind}`,
     kind: 'prop',

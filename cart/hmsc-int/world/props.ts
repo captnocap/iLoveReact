@@ -1,50 +1,56 @@
 import type { GameState, TrafficSignalPhase, Vec3, WorldProp } from '../design';
 import { dumpsterBodyMeters, propKindDefinition } from '../game/kinds/props';
+import { propModelFootprintMeters } from '../compile/propRecipes/footprint';
 
 // World-layer geometry, queries, and mutations for props — the props twin of
-// roads.ts. A prop is anchored at a world-meter point; its collision is a small
-// axis-aligned square around that anchor (solid props only), so the player
-// bumps the hydrant but walks through the bush. 1 tile = 1 meter.
+// roads.ts. A prop is anchored at a world-meter point; its collision footprint
+// comes from its kind (solid props only), so the player bumps the hydrant/desk
+// but walks through the bush. 1 tile = 1 meter.
 
 export type PropFootprint = { minX: number; minZ: number; maxX: number; maxZ: number };
+// Half-extents of a prop's footprint plus the model-center OFFSET in the prop's
+// own (un-yawed) local frame — nonzero for a body authored off its placement
+// anchor (FOOTPRINT-0765). `round` marks a circular base (collide as a circle).
+type PropHalfExtents = { halfSpan: number; halfThick: number; offsetX: number; offsetZ: number; round: boolean };
 
-// The collision footprint of a solid prop, sized by its kind's radius.
+// The collision footprint of a solid prop, sized by its kind's footprint.
 // Non-solid props return null — there is nothing to bump.
 //
-// Segment props (fence, jersey barrier, bench, couch) are a special case: they
-// are long thin shapes spanning along local X, so their axis-aligned bounding
-// box depends on yaw. A square would block a wide slab around a thin panel —
-// the player would be stopped walking parallel to the fence. The AABB of a
-// rotated rectangle gives a thin box that follows the actual mesh. The value
-// is the segment's half-THICKNESS in meters (its local-Z half-extent).
-const SEGMENT_HALF_THICKNESS: Partial<Record<WorldProp['kind'], number>> = {
-  fence: 0.08,
-  barrier: 0.3,
-  bench: 0.28,
-  couch: 0.45,
-  bedSingle: 0.5,
-  bedDouble: 0.75,
-  cupboard: 0.25,
-  // PROPBATCH-0611 long props — half the model's local-Z extent.
-  storeShelf: 0.3,
-  shippingContainer: 1.4,
-  concretePipe: 0.8,
-  pipeStack: 0.55,
-  corrugatedSheet: 0.18,
-  lockerSet: 0.25,
-  oilTank: 1.0,
-  // PROPVENUE-0611 long props.
-  picketFence: 0.08,
-  loungeChair: 0.35,
-  swingset: 0.75,
-  clothingRack: 0.3,
-  displayCase: 0.4,
-  liquorShelf: 0.25,
-  dinerBooth: 0.8,
-  orderCounter: 0.4,
-};
+// Rectangular props (fence, jersey barrier, bench, shelf, desk…) are long thin
+// shapes spanning along local X, so their AABB depends on yaw. A square would
+// block a wide slab around a thin panel — the player stopped walking parallel
+// to the fence, or a metre off a shelf face (req_0756). Each such kind carries
+// `footprintDepthMeters` on its definition (FOOTPRINT-0756: the ONE footprint
+// source the catalog size, placement grid, and physics all read — no more the
+// hand-mirrored SEGMENT_HALF_THICKNESS / PROP_DEPTH_OVERRIDES tables that drifted
+// fat). Width is `footprintRadiusMeters * 2` (or an explicit footprintWidthMeters);
+// depth is the thin axis. Props with no depth field stay a radius-sized square.
+
+// Rotate a prop-LOCAL (un-yawed) offset into world, matching the render/yaw
+// convention pieceShapes.localOffset uses (local +z turns toward world +x at
+// yaw 90), so the collider tracks the drawn mesh.
+function rotateLocalOffset(offsetX: number, offsetZ: number, yawRadians: number): { dx: number; dz: number } {
+  const c = Math.cos(yawRadians);
+  const s = Math.sin(yawRadians);
+  return { dx: offsetX * c + offsetZ * s, dz: -offsetX * s + offsetZ * c };
+}
 
 export function propFootprint(prop: WorldProp): PropFootprint | null {
+  const extents = propHalfExtents(prop);
+  if (!extents) return null;
+  const { halfSpan, halfThick, offsetX, offsetZ } = extents;
+  const yaw = prop.yawDegrees * Math.PI / 180;
+  const center = rotateLocalOffset(offsetX, offsetZ, yaw);
+  const c = Math.abs(Math.cos(yaw));
+  const s = Math.abs(Math.sin(yaw));
+  const dx = halfSpan * c + halfThick * s;
+  const dz = halfSpan * s + halfThick * c;
+  const cx = prop.x + center.dx;
+  const cz = prop.z + center.dz;
+  return { minX: cx - dx, minZ: cz - dz, maxX: cx + dx, maxZ: cz + dz };
+}
+
+function propHalfExtents(prop: WorldProp): PropHalfExtents | null {
   const def = propKindDefinition(prop.kind);
   if (!def.solid || def.footprintRadiusMeters <= 0) return null;
   const r = def.footprintRadiusMeters;
@@ -52,29 +58,23 @@ export function propFootprint(prop: WorldProp): PropFootprint | null {
   // its half-extents come from the SAME helper both renderers draw with
   // (req_0623: the player clipped into the widened body because physics
   // still used the footprint square).
-  let halfSpan: number;
-  let halfThick: number;
   if (prop.kind === 'dumpster') {
     const body = dumpsterBodyMeters();
-    halfSpan = body.widthMeters / 2;
-    halfThick = body.depthMeters / 2;
-  } else {
-    const segmentHalfThick = SEGMENT_HALF_THICKNESS[prop.kind];
-    if (segmentHalfThick === undefined) {
-      return { minX: prop.x - r, minZ: prop.z - r, maxX: prop.x + r, maxZ: prop.z + r };
-    }
-    // Long thin segment. halfSpan = the segment half-width (along local X);
-    // halfThick = its half-thickness.
-    halfSpan = r;
-    halfThick = segmentHalfThick;
+    return { halfSpan: body.widthMeters / 2, halfThick: body.depthMeters / 2, offsetX: 0, offsetZ: 0, round: false };
   }
-  // The AABB of a rotated rectangle.
-  const yaw = prop.yawDegrees * Math.PI / 180;
-  const c = Math.abs(Math.cos(yaw));
-  const s = Math.abs(Math.sin(yaw));
-  const dx = halfSpan * c + halfThick * s;
-  const dz = halfSpan * s + halfThick * c;
-  return { minX: prop.x - dx, minZ: prop.z - dz, maxX: prop.x + dx, maxZ: prop.z + dz };
+  // FOOTPRINT-0759/0765: a data-recipe prop's footprint is MEASURED from its
+  // model (exact, no magic number) — width/depth span, the model-center offset
+  // (so an off-center body tracks under rotation), and a round flag. Bespoke
+  // (TSX) props have no recipe → their measured footprintDepthMeters field;
+  // props with neither stay a radius square. Width defaults to r*2.
+  const model = propModelFootprintMeters(prop.kind);
+  if (model) {
+    return { halfSpan: model.widthMeters / 2, halfThick: model.depthMeters / 2, offsetX: model.offsetXMeters, offsetZ: model.offsetZMeters, round: model.round };
+  }
+  if (def.footprintDepthMeters !== undefined) {
+    return { halfSpan: (def.footprintWidthMeters ?? r * 2) / 2, halfThick: def.footprintDepthMeters / 2, offsetX: 0, offsetZ: 0, round: false };
+  }
+  return { halfSpan: r, halfThick: r, offsetX: 0, offsetZ: 0, round: false };
 }
 
 export function propTopMeters(prop: WorldProp): number {
@@ -94,11 +94,37 @@ function footprintContains(footprint: PropFootprint, x: number, z: number): bool
 // always "above" it (the `y >= rect_height - 0.04` skip in hmscCollideSolidRects)
 // and walked through. Using the real height makes poles/signs/hydrants solid.
 export type PropPhysicsRect = PropFootprint & { topMeters: number };
+export type PropOrientedPhysicsRect = PropPhysicsRect & { pivotX: number; pivotZ: number; yawRadians: number };
 
 export function propPhysicsRect(prop: WorldProp): PropPhysicsRect | null {
   const footprint = propFootprint(prop);
   if (!footprint) return null;
   return { ...footprint, topMeters: propTopMeters(prop) };
+}
+
+// The exact host-physics OBB for rectangular prop footprints. `propFootprint`
+// stays an AABB for editor selection/overlap scans; physics should use this
+// where an oriented-rect lane is available so a rotated desk/fence does not
+// fall back to a radius-sized or AABB-sized air wall.
+export function propOrientedPhysicsRect(prop: WorldProp): PropOrientedPhysicsRect | null {
+  const extents = propHalfExtents(prop);
+  if (!extents) return null;
+  // A centered square needs no oriented lane (its axis rect is rotation-proof);
+  // anything non-square OR off-center (the offset must orbit the pivot with yaw)
+  // rides the oriented rect. The rect is the footprint in the prop's LOCAL frame
+  // positioned at the anchor (pivot); the host rotates the player into it.
+  const offCenter = Math.abs(extents.offsetX) > 1e-6 || Math.abs(extents.offsetZ) > 1e-6;
+  if (Math.abs(extents.halfSpan - extents.halfThick) < 1e-6 && !offCenter) return null;
+  return {
+    minX: prop.x + extents.offsetX - extents.halfSpan,
+    minZ: prop.z + extents.offsetZ - extents.halfThick,
+    maxX: prop.x + extents.offsetX + extents.halfSpan,
+    maxZ: prop.z + extents.offsetZ + extents.halfThick,
+    topMeters: propTopMeters(prop),
+    pivotX: prop.x,
+    pivotZ: prop.z,
+    yawRadians: prop.yawDegrees * Math.PI / 180,
+  };
 }
 
 // The prop the player is currently standing inside, if any — used to fold a
@@ -108,6 +134,11 @@ export function propAtWorldPosition(state: GameState, position: Vec3): WorldProp
   for (let index = state.world.props.length - 1; index >= 0; index -= 1) {
     const prop = state.world.props[index];
     const def = propKindDefinition(prop.kind);
+    const solidFootprint = def.solid ? propFootprint(prop) : null;
+    if (solidFootprint) {
+      if (footprintContains(solidFootprint, position.x, position.z)) return prop;
+      continue;
+    }
     const radius = def.solid ? def.footprintRadiusMeters : Math.max(def.footprintRadiusMeters, 0.6);
     if (radius <= 0) continue;
     const footprint: PropFootprint = { minX: prop.x - radius, minZ: prop.z - radius, maxX: prop.x + radius, maxZ: prop.z + radius };
