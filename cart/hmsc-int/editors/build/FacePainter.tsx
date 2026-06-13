@@ -146,12 +146,27 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
 
   // Registry materials (built-in + Materialized customs; read at mount — a
   // material stored mid-session appears after the next reload), grouped for
-  // navigation. Only the open group's swatch previews mount.
+  // navigation. Only the open group's (or the search hits') swatch previews
+  // mount — never the whole registry at once, which is a live <Effect> apiece.
   const materials = useMemo(() => allTextures(), []);
   const materialById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
-  const groups = useMemo(() => materialGroups(materials), [materials]);
+  // The 'all' group (req_0711) heads the list so the ENTIRE textures menu is one
+  // click away from the workspace — no trip to the Objects tab. It's opt-in
+  // (selecting it mounts every preview), the families keep browsing bounded.
+  const groups = useMemo<MatGroup[]>(() => [{ name: 'all', items: materials }, ...materialGroups(materials)], [materials]);
   const [openGroupName, setOpenGroupName] = useState<string | null>(null);
-  const openGroup = groups.find((g) => g.name === openGroupName) ?? groups[0] ?? null;
+  // Default to the first REAL group (my materials / a family), never 'all' — the
+  // 'all' view mounts every live preview and must stay an explicit click.
+  const openGroup = groups.find((g) => g.name === openGroupName) ?? groups.find((g) => g.name !== 'all') ?? groups[0] ?? null;
+  // Live filter across EVERY texture (req_0711): type a name and the whole menu
+  // narrows to the hits, flat — the fast path to any texture without scrolling
+  // families. Only the hits mount, so the search view stays cheap.
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const matchHits = useMemo(
+    () => (q ? materials.filter((m) => m.label.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)) : null),
+    [q, materials],
+  );
 
   // The selection's centroid — exterior/interior is judged against it.
   const centroid = useMemo(() => {
@@ -307,28 +322,55 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         />
       </Box>
 
-      {/* materials: grouped accordion — open a group, see its swatches. The
-          browser takes the pane's remaining height (it owns its own scroll). */}
+      {/* materials: the ENTIRE textures menu, in the workspace (req_0711). A live
+          search narrows EVERY texture flat; else family chips ('all' heads them)
+          browse one group. The browser takes the pane's remaining height. */}
       {groups.length > 0 ? (
         <Box style={{ gap: 4, flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
-          <Box style={{ flexDirection: 'row', gap: 3, flexWrap: 'wrap' }}>
-            {groups.map((g) => (
-              <Pressable key={g.name} onPress={() => setOpenGroupName(g.name)}>
-                <Box style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: openGroup?.name === g.name ? '#2563eb' : '#1e293b' }}>
-                  <Text fontSize={9} color={openGroup?.name === g.name ? '#eaf4ff' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{`${g.name} (${g.items.length})`}</Text>
+          <TextInput
+            text={query}
+            placeholder="search every texture…"
+            onChangeText={setQuery}
+            style={{ backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: q ? '#38bdf8' : '#27364a', borderRadius: 3, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
+          />
+          {matchHits ? (
+            // Search view: flat hits across the whole registry — only these mount.
+            <>
+              <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>{`${matchHits.length} match${matchHits.length === 1 ? '' : 'es'}`}</Text>
+              <ScrollView style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
+                <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
+                  {matchHits.map((def) => (
+                    <MatSwatch key={def.id} def={def} active={brush.kind === 'material' && brush.id === def.id} onPick={pickMaterial} />
+                  ))}
                 </Box>
-              </Pressable>
-            ))}
-          </Box>
-          {openGroup ? (
-            <ScrollView style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
-              <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
-                {openGroup.items.map((def) => (
-                  <MatSwatch key={def.id} def={def} active={brush.kind === 'material' && brush.id === def.id} onPick={pickMaterial} />
+                {matchHits.length === 0 ? (
+                  <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace', paddingTop: 6 }}>{'no texture by that name'}</Text>
+                ) : null}
+              </ScrollView>
+            </>
+          ) : (
+            // Browse view: family chips, 'all' first — open one group at a time.
+            <>
+              <Box style={{ flexDirection: 'row', gap: 3, flexWrap: 'wrap' }}>
+                {groups.map((g) => (
+                  <Pressable key={g.name} onPress={() => setOpenGroupName(g.name)}>
+                    <Box style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: openGroup?.name === g.name ? '#2563eb' : '#1e293b' }}>
+                      <Text fontSize={9} color={openGroup?.name === g.name ? '#eaf4ff' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{`${g.name} (${g.items.length})`}</Text>
+                    </Box>
+                  </Pressable>
                 ))}
               </Box>
-            </ScrollView>
-          ) : null}
+              {openGroup ? (
+                <ScrollView style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
+                  <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
+                    {openGroup.items.map((def) => (
+                      <MatSwatch key={def.id} def={def} active={brush.kind === 'material' && brush.id === def.id} onPick={pickMaterial} />
+                    ))}
+                  </Box>
+                </ScrollView>
+              ) : null}
+            </>
+          )}
         </Box>
       ) : null}
     </Box>
