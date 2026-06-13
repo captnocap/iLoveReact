@@ -107,6 +107,12 @@ function localOffset(u: number, v: number, yawDegrees: number): { dx: number; dz
 
 type FaceLook = { color: string; textureKey?: string; slot?: 'front' | 'back' | 'sides' };
 
+function quarterTurns(yawDegrees: number): number | null {
+  const yaw = ((yawDegrees % 360) + 360) % 360;
+  const quarter = Math.round(yaw / 90) % 4;
+  return Math.abs(yaw - quarter * 90) < 1e-6 || Math.abs(yaw - 360) < 1e-6 ? quarter : null;
+}
+
 function visualLook(skin: BuildFaceSkin | undefined, fallback: string, slot: 'front' | 'back' | 'sides'): FaceLook {
   if (!skin) return { color: fallback, slot };
   if (skin.kind === 'color') return { color: skin.value, slot };
@@ -196,6 +202,12 @@ export function pieceVisualShapes(
           color: front.color,
           textureKey: front.textureKey,
           opacity: look.opacity,
+          // Carry the face slot so the bake applies the skin (req_0713): the
+          // lowering reads piece.skin[box.slot], and a box with no slot drops
+          // its material → skinned stairs shipped FLAT (their "drop"). Stairs
+          // wear their top/front skin on every step, the same slot the editor
+          // textures here via front.textureKey.
+          slot: front.slot,
         },
       });
     }
@@ -228,6 +240,13 @@ export function pieceVisualShapes(
 
   const edit = piece.edit;
   if (GAME_BUILD.kinds.get(def.kind).edits === 'wall') {
+    // BuildingStage's face convention names yaw 90's world -X side "front".
+    // Scene3D's yaw frame puts local +v on world +X, so odd quarter-turn walls
+    // swap which major slab wears the semantic front/back skin. Geometry stays
+    // in the renderer frame; only the authored face slots change sides.
+    const quarter = quarterTurns(yaw);
+    const wallFront = quarter !== null && quarter % 2 === 1 ? back : front;
+    const wallBack = quarter !== null && quarter % 2 === 1 ? front : back;
     const shapes: VisualShape[] = [];
     const slab = BUILD_UI.faceSlabThicknessMeters;
     const lift = BUILD_UI.faceSlabLiftMeters;
@@ -260,10 +279,10 @@ export function pieceVisualShapes(
       shapes.push(box(`${label}.core`, (u0 + u1) / 2, depthCenter, baseY, u1 - u0, h, depthSize, sides));
       const f0 = slabU0(u0, 1);
       const f1 = slabU1(u1, 1);
-      shapes.push(box(`${label}.front`, (f0 + f1) / 2, frontV, baseY, f1 - f0, h, slab, front));
+      shapes.push(box(`${label}.front`, (f0 + f1) / 2, frontV, baseY, f1 - f0, h, slab, wallFront));
       const b0 = slabU0(u0, -1);
       const b1 = slabU1(u1, -1);
-      shapes.push(box(`${label}.back`, (b0 + b1) / 2, backV, baseY, b1 - b0, h, slab, back));
+      shapes.push(box(`${label}.back`, (b0 + b1) / 2, backV, baseY, b1 - b0, h, slab, wallBack));
     };
     for (const [index, band] of bands.entries()) {
       const label = `band${index}`;

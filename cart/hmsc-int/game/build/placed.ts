@@ -1226,14 +1226,39 @@ export function prefabFromPieces(
 // hash and only bounds-tests pairs sharing a cell (PLACEPERF-0610 — the pairwise
 // O(loose²) loop was half of the ~970ms/frame stall at 785 pieces); touching pieces
 // always share a cell, so the components are identical to the pairwise answer.
+// Two placed pieces at the SAME footprint — identical pieceId, position (to the
+// millimetre), yaw, edit, and stamp group — are COLOCATED: their faces share
+// exact depth, so the GPU can't order them and they z-fight (the floor/wall
+// "fighting for which one renders" jitter, req_0712/req_0713). Painting a floor
+// area over an existing one, or clicking a piece onto its twin, stacks them and
+// nothing rejects it. This collapses each such cluster to ONE, keeping the LAST
+// (most-recently placed → the look you just painted wins). A different y (a
+// stacked storey), a different footprint (a corner), or a different building
+// stamp (two instances) is NOT colocated and is left untouched.
+const COLOCATE_MM = 1000; // mm key resolution — kills float noise, never merges real neighbours
+function colocationKey(p: PlacedBuildPiece): string {
+  const q = (v: number) => Math.round(v * COLOCATE_MM);
+  return `${p.pieceId}|${q(p.x)}|${q(p.y)}|${q(p.z)}|${Math.round(p.yawDegrees)}|${p.edit ?? ''}|${p.stampId ?? ''}`;
+}
+export function dedupeColocatedPieces<T extends PlacedBuildPiece>(pieces: readonly T[]): T[] {
+  const lastAt = new Map<string, number>();
+  for (let i = 0; i < pieces.length; i += 1) lastAt.set(colocationKey(pieces[i]), i);
+  if (lastAt.size === pieces.length) return pieces as T[]; // no twins — keep the same ref (memo-friendly)
+  return pieces.filter((p, i) => lastAt.get(colocationKey(p)) === i);
+}
+
 export function liftBuildingsToTerrain<T extends PlacedBuildPiece>(
   pieces: readonly T[],
   terrainAt: (x: number, z: number) => number,
 ): T[] {
+  // Collapse colocated z-fighting twins BEFORE grouping/lift — one render-prep
+  // chokepoint both the editor (IsoAuthor displayPieces) and the bake
+  // (packageMap, render + colliders) flow through, so the fix lands everywhere.
+  const src = dedupeColocatedPieces(pieces);
   const groups: T[][] = [];
   const stamped = new Map<string, T[]>();
   const loose: T[] = [];
-  for (const p of pieces) {
+  for (const p of src) {
     if (p.stampId) { const g = stamped.get(p.stampId); if (g) g.push(p); else stamped.set(p.stampId, [p]); }
     else loose.push(p);
   }
