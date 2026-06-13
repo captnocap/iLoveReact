@@ -1,6 +1,20 @@
 import { cylinder16, METAL, WOOD, WOOD_DARK, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const barrelDef: PropKindDefinition = {
+  kind: 'barrel',
+  label: 'Wooden Barrel',
+  solid: true,
+  footprintRadiusMeters: 0.36,
+  heightMeters: 1.0,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'junk', capacity: 3, spawnFillChance: 0.5, searchSeconds: 2.5, access: 'open' },
+  coverClass: 'soft',
+};
+
 export function barrelParts(): PropPartSpec[] {
   const h = propKindDefinition('barrel').heightMeters;
   return [

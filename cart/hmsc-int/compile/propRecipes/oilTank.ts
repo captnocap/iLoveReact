@@ -1,6 +1,20 @@
 import { box, cylinder8, cylinder16, hx, RUST, sphere, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const oilTankDef: PropKindDefinition = {
+  kind: 'oilTank',
+  label: 'Oil Tank',
+  // A horizontal farm/fuel tank on cradles; spans local X (yaw-aware AABB).
+  solid: true,
+  footprintRadiusMeters: 2.3,
+  heightMeters: 2.4,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'hard',
+};
+
 export function oilTankParts(): PropPartSpec[] {
   const def = propKindDefinition('oilTank');
   const r = def.heightMeters / 2 - 0.25;

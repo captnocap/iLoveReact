@@ -1,6 +1,20 @@
 import { cylinder8, cylinder16, hx, METAL, WOOD_DARK, WOOD_PALE, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const cableSpoolDef: PropKindDefinition = {
+  kind: 'cableSpool',
+  label: 'Cable Spool',
+  // The wooden spool — street furniture's free table; you can sit on it.
+  solid: true,
+  footprintRadiusMeters: 0.8,
+  heightMeters: 0.95,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  seat: { pose: 'sit', seatHeightMeters: 0.95, capacity: 2 },
+};
+
 export function cableSpoolParts(): PropPartSpec[] {
   const def = propKindDefinition('cableSpool');
   const r = def.footprintRadiusMeters;

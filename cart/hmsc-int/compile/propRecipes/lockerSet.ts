@@ -1,6 +1,19 @@
 import { box, hx, NEAR_BLACK, STEEL, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const lockerSetDef: PropKindDefinition = {
+  kind: 'lockerSet',
+  label: 'Lockers',
+  solid: true,
+  footprintRadiusMeters: 0.45,
+  heightMeters: 2.1,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'clothing', capacity: 4, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
+};
+
 export function lockerSetParts(): PropPartSpec[] {
   const def = propKindDefinition('lockerSet');
   const h = def.heightMeters;

@@ -1,5 +1,18 @@
 import { cylinder16, hx, NEAR_BLACK, type PropPartSpec } from '../../game/kinds/propModels';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const tireStackDef: PropKindDefinition = {
+  kind: 'tireStack',
+  label: 'Tire Stack',
+  solid: true,
+  footprintRadiusMeters: 0.45,
+  heightMeters: 1.0,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'soft',
+};
+
 export function tireStackParts(): PropPartSpec[] {
   const parts: PropPartSpec[] = [];
   const jitter = [[0.04, -0.02], [-0.05, 0.03], [0.02, 0.05], [-0.03, -0.04]];

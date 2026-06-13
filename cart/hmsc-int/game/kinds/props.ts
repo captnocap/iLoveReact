@@ -90,6 +90,17 @@ import { shippingContainerDef } from '../../compile/propRecipes/shippingContaine
 import { concretePipeDef } from '../../compile/propRecipes/concretePipe';
 import { pipeStackDef } from '../../compile/propRecipes/pipeStack';
 import { corrugatedSheetDef } from '../../compile/propRecipes/corrugatedSheet';
+import { cableSpoolDef } from '../../compile/propRecipes/cableSpool';
+import { lockerSetDef } from '../../compile/propRecipes/lockerSet';
+import { oilTankDef } from '../../compile/propRecipes/oilTank';
+import { tireDef } from '../../compile/propRecipes/tire';
+import { tireStackDef } from '../../compile/propRecipes/tireStack';
+import { barrelDef } from '../../compile/propRecipes/barrel';
+import { steelDrumDef } from '../../compile/propRecipes/steelDrum';
+import { propaneTankDef } from '../../compile/propRecipes/propaneTank';
+import { jerryCanDef } from '../../compile/propRecipes/jerryCan';
+import { cinderBlockDef } from '../../compile/propRecipes/cinderBlock';
+import { brickDef } from '../../compile/propRecipes/brick';
 
 export type BuiltinPropKind =
   | 'rock'
@@ -745,121 +756,17 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   concretePipe: concretePipeDef,
   pipeStack: pipeStackDef,
   corrugatedSheet: corrugatedSheetDef,
-  cableSpool: {
-    kind: 'cableSpool',
-    label: 'Cable Spool',
-    // The wooden spool — street furniture's free table; you can sit on it.
-    solid: true,
-    footprintRadiusMeters: 0.8,
-    heightMeters: 0.95,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'sit', seatHeightMeters: 0.95, capacity: 2 },
-  },
-  lockerSet: {
-    kind: 'lockerSet',
-    label: 'Lockers',
-    solid: true,
-    footprintRadiusMeters: 0.45,
-    heightMeters: 2.1,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'clothing', capacity: 4, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
-  },
-  oilTank: {
-    kind: 'oilTank',
-    label: 'Oil Tank',
-    // A horizontal farm/fuel tank on cradles; spans local X (yaw-aware AABB).
-    solid: true,
-    footprintRadiusMeters: 2.3,
-    heightMeters: 2.4,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'hard',
-  },
-  tire: {
-    kind: 'tire',
-    label: 'Tire',
-    // A standing car tire (Ø0.66 × 1.15) — it rolls when kicked.
-    solid: true,
-    footprintRadiusMeters: 0.38,
-    heightMeters: 0.76,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.38, restitution: 0.45 },
-  },
-  tireStack: {
-    kind: 'tireStack',
-    label: 'Tire Stack',
-    solid: true,
-    footprintRadiusMeters: 0.45,
-    heightMeters: 1.0,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'soft',
-  },
-  barrel: {
-    kind: 'barrel',
-    label: 'Wooden Barrel',
-    solid: true,
-    footprintRadiusMeters: 0.36,
-    heightMeters: 1.0,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'junk', capacity: 3, spawnFillChance: 0.5, searchSeconds: 2.5, access: 'open' },
-    coverClass: 'soft',
-  },
-  steelDrum: {
-    kind: 'steelDrum',
-    label: 'Steel Drum',
-    // The rusty 55-gal drum — heavy but it topples and rolls when shoved.
-    solid: true,
-    footprintRadiusMeters: 0.32,
-    heightMeters: 1.0,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.42, restitution: 0.18 },
-  },
-  propaneTank: {
-    kind: 'propaneTank',
-    label: 'Propane Tank',
-    solid: true,
-    footprintRadiusMeters: 0.24,
-    heightMeters: 0.7,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.28, restitution: 0.32 },
-  },
-  jerryCan: {
-    kind: 'jerryCan',
-    label: 'Jerry Can',
-    solid: true,
-    footprintRadiusMeters: 0.19,
-    heightMeters: 0.54,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.22, restitution: 0.15 },
-  },
-  cinderBlock: {
-    kind: 'cinderBlock',
-    label: 'Cinder Block',
-    solid: true,
-    footprintRadiusMeters: 0.22,
-    heightMeters: 0.23,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  brick: {
-    kind: 'brick',
-    label: 'Brick',
-    // Kickable street litter — tiny sphere body, near-dead bounce.
-    solid: true,
-    footprintRadiusMeters: 0.12,
-    heightMeters: 0.08,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.1, restitution: 0.12 },
-  },
+  cableSpool: cableSpoolDef,
+  lockerSet: lockerSetDef,
+  oilTank: oilTankDef,
+  tire: tireDef,
+  tireStack: tireStackDef,
+  barrel: barrelDef,
+  steelDrum: steelDrumDef,
+  propaneTank: propaneTankDef,
+  jerryCan: jerryCanDef,
+  cinderBlock: cinderBlockDef,
+  brick: brickDef,
   rubblePile: {
     kind: 'rubblePile',
     label: 'Rubble Pile',

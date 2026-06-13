@@ -1,6 +1,19 @@
 import { box, cylinder8, hx, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const jerryCanDef: PropKindDefinition = {
+  kind: 'jerryCan',
+  label: 'Jerry Can',
+  solid: true,
+  footprintRadiusMeters: 0.19,
+  heightMeters: 0.54,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  dynamics: { bodyRadiusMeters: 0.22, restitution: 0.15 },
+};
+
 export function jerryCanParts(): PropPartSpec[] {
   const h = propKindDefinition('jerryCan').heightMeters;
   const red = hx('#b03028');

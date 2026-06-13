@@ -1,6 +1,19 @@
 import { box, cylinder8, cylinder16, hx, sphere, WHITE, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const propaneTankDef: PropKindDefinition = {
+  kind: 'propaneTank',
+  label: 'Propane Tank',
+  solid: true,
+  footprintRadiusMeters: 0.24,
+  heightMeters: 0.7,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  dynamics: { bodyRadiusMeters: 0.28, restitution: 0.32 },
+};
+
 export function propaneTankParts(): PropPartSpec[] {
   const h = propKindDefinition('propaneTank').heightMeters;
   return [
