@@ -30,6 +30,11 @@ import { diningChairDef } from '../../compile/propRecipes/diningChair';
 import { armchairDef } from '../../compile/propRecipes/armchair';
 import { officeChairDef } from '../../compile/propRecipes/officeChair';
 import { foldingChairDef } from '../../compile/propRecipes/foldingChair';
+import { fireHydrantDef } from '../../compile/propRecipes/fireHydrant';
+import { streetSignDef } from '../../compile/propRecipes/streetSign';
+import { streetLightDef } from '../../compile/propRecipes/streetLight';
+import { stopSignDef } from '../../compile/propRecipes/stopSign';
+import { trafficLightDef } from '../../compile/propRecipes/trafficLight';
 
 export type BuiltinPropKind =
   | 'rock'
@@ -432,39 +437,9 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     tileKind: 'wall',
     trafficControl: 'none',
   },
-  fireHydrant: {
-    kind: 'fireHydrant',
-    label: 'Fire Hydrant',
-    solid: true,
-    footprintRadiusMeters: 0.27,
-    // PROPSCALE-0611: real 0.75m × 1.15 (presence law)
-    heightMeters: 0.86,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  streetSign: {
-    kind: 'streetSign',
-    label: 'Street Sign',
-    solid: true,
-    footprintRadiusMeters: 0.12,
-    footprintDepthMeters: 0.24,
-    // Tall enough that the panel clears head height (visual head-top ~2.04m,
-    // stylized-tall — see the R4 scale contract).
-    heightMeters: 3.3,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  streetLight: {
-    kind: 'streetLight',
-    label: 'Street Light',
-    solid: true,
-    footprintRadiusMeters: 0.16,
-    footprintDepthMeters: 0.4,
-    // PROPSCALE-0611: real residential pole ~7m × 1.15
-    heightMeters: 8.0,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
+  fireHydrant: fireHydrantDef,
+  streetSign: streetSignDef,
+  streetLight: streetLightDef,
   bush: {
     kind: 'bush',
     label: 'Bush',
@@ -506,28 +481,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     tileKind: 'bush',
     trafficControl: 'none',
   },
-  stopSign: {
-    kind: 'stopSign',
-    label: 'Stop Sign',
-    solid: true,
-    footprintRadiusMeters: 0.12,
-    footprintDepthMeters: 0.24,
-    // PROPSCALE-0611: real MUTCD urban total ~2.9m × 1.15
-    heightMeters: 3.35,
-    tileKind: 'wall',
-    trafficControl: 'stopSign',
-  },
-  trafficLight: {
-    kind: 'trafficLight',
-    label: 'Traffic Light',
-    solid: true,
-    footprintRadiusMeters: 0.18,
-    footprintDepthMeters: 0.46,
-    // PROPSCALE-0611: real mast-arm head top ~5.5m × 1.15
-    heightMeters: 6.3,
-    tileKind: 'wall',
-    trafficControl: 'signal',
-  },
+  stopSign: stopSignDef,
+  trafficLight: trafficLightDef,
   payphone: {
     kind: 'payphone',
     label: 'Payphone',

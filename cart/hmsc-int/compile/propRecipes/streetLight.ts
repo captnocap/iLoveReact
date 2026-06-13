@@ -5,6 +5,19 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const streetLightDef: PropKindDefinition = {
+  kind: 'streetLight',
+  label: 'Street Light',
+  solid: true,
+  footprintRadiusMeters: 0.16,
+  footprintDepthMeters: 0.4,
+  // PROPSCALE-0611: real residential pole ~7m × 1.15
+  heightMeters: 8.0,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   base: [0.16, 0.18, 0.21],

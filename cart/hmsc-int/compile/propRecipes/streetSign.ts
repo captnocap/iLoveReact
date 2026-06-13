@@ -5,6 +5,20 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const streetSignDef: PropKindDefinition = {
+  kind: 'streetSign',
+  label: 'Street Sign',
+  solid: true,
+  footprintRadiusMeters: 0.12,
+  footprintDepthMeters: 0.24,
+  // Tall enough that the panel clears head height (visual head-top ~2.04m,
+  // stylized-tall — see the R4 scale contract).
+  heightMeters: 3.3,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   base: [0.42, 0.45, 0.48],

@@ -5,6 +5,19 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const stopSignDef: PropKindDefinition = {
+  kind: 'stopSign',
+  label: 'Stop Sign',
+  solid: true,
+  footprintRadiusMeters: 0.12,
+  footprintDepthMeters: 0.24,
+  // PROPSCALE-0611: real MUTCD urban total ~2.9m × 1.15
+  heightMeters: 3.35,
+  tileKind: 'wall',
+  trafficControl: 'stopSign',
+};
 
 const COLORS = {
   base: [0.38, 0.4, 0.44],

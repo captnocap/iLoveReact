@@ -6,6 +6,18 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const fireHydrantDef: PropKindDefinition = {
+  kind: 'fireHydrant',
+  label: 'Fire Hydrant',
+  solid: true,
+  footprintRadiusMeters: 0.27,
+  // PROPSCALE-0611: real 0.75m × 1.15 (presence law)
+  heightMeters: 0.86,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const FIRE_HYDRANT_COLORS = {
   red: recipeColor('#c2362f'),

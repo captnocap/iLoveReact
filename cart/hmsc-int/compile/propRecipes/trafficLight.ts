@@ -5,6 +5,19 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const trafficLightDef: PropKindDefinition = {
+  kind: 'trafficLight',
+  label: 'Traffic Light',
+  solid: true,
+  footprintRadiusMeters: 0.18,
+  footprintDepthMeters: 0.46,
+  // PROPSCALE-0611: real mast-arm head top ~5.5m × 1.15
+  heightMeters: 6.3,
+  tileKind: 'wall',
+  trafficControl: 'signal',
+};
 
 const COLORS = {
   base: [0.14, 0.15, 0.17],
