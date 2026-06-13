@@ -337,11 +337,16 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   wholeBuildingRef.current = wholeBuilding;
   const [wallsVisible, setWallsVisible] = useRouteTwigState<boolean>(ISO_ROUTE, 'wallsVisible', true);
   // Show the WHOLE building stack (req_0721/req_0722). The floor-level cut-away
-  // (storey ≥ the active level vanishes) is a "look into one floor" tool — for a
-  // city of multi-storey buildings it strips everything above the ground floor,
-  // so the map reads as empty of buildings. Default ON (see the whole city); the
-  // cut-away becomes opt-in for when you actually want to edit inside one floor.
-  const [showAllFloors, setShowAllFloors] = useRouteTwigState<boolean>(ISO_ROUTE, 'showAllFloors', true);
+  // (storey ≥ the active level vanishes) is the "look into one floor" tool — show
+  // the active floor and everything BELOW, hide what's above so you can see and
+  // edit inside the storey you're on (the Sims "view this level" move).
+  // DEFAULT OFF = cut-away ON (req_0737). It was forced ON (showAllFloors=true) as
+  // a band-aid for the iso-pane buildings-vanishing bug (commit 79da84357), back
+  // when that was misdiagnosed as the cut-away stripping the city. The real cause
+  // was the geometry-dedup desync (fixed in runtime/primitives.tsx, req_0735), so
+  // the band-aid is obsolete and only got in the way — an upper floor occluded the
+  // floor being edited. The ⌷ toggle still shows the whole city when wanted.
+  const [showAllFloors, setShowAllFloors] = useRouteTwigState<boolean>(ISO_ROUTE, 'showAllFloors', false);
   // Shift/Alt held? Mouse events carry no modifier flags here — read the shared
   // contract tracker at click time to invert the select scope / go freeform.
   const heldModifiers = useHeldModifiers();
