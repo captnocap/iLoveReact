@@ -117,29 +117,6 @@ export const GRASS_MID = hx('#3f7d33');
 export const GRASS_LIGHT = hx('#5a9a42');
 export const GRASS_DRY = hx('#8a9a4a');
 
-// ── grass (req: "can u just make patches of grass also lol") ────────────────
-// A tuft is two crossed thin boxes — the PSX foliage cross, flat-shaded.
-function tuft(x: number, z: number, w: number, h: number, color: Color): PropPartSpec[] {
-  return [
-    box([x, h / 2, z], [w, h, 0.02], color, [0, 45, 0]),
-    box([x, h / 2, z], [w, h, 0.02], color, [0, -45, 0]),
-  ];
-}
-
-function grassParts(kind: PropKind): PropPartSpec[] {
-  const def = propKindDefinition(kind);
-  const r = def.footprintRadiusMeters;
-  const h = def.heightMeters;
-  const spots: [number, number, number, Color][] = [
-    [0, 0, 1, GRASS_MID],
-    [r * 0.55, r * 0.2, 0.8, GRASS_LIGHT],
-    [-r * 0.5, -r * 0.3, 0.85, GRASS_MID],
-    [r * 0.15, -r * 0.55, 0.7, GRASS_DRY],
-    [-r * 0.3, r * 0.5, 0.75, GRASS_LIGHT],
-  ];
-  return spots.flatMap(([x, z, t, color]) => tuft(x, z, r * 0.55, h * t, color));
-}
-
 // ── chairs (PROPSKIN-0769): migrated out of the bespoke render3d/props/Furniture
 // component into a data recipe so every chair exposes skinnable PARTS (legs, seat,
 // backrest) AND bakes faithfully — the bespoke model had no recipe, so a compiled
@@ -164,38 +141,6 @@ const RECIPES: Partial<Record<PropKind, () => PropPartSpec[]>> = {
   chairRed: () => chairParts(hx('#b03a2e'), CHAIR_METAL),
   chairBlue: () => chairParts(hx('#2e6fb0'), CHAIR_METAL),
   chairGreen: () => chairParts(hx('#3a8f4f'), CHAIR_METAL),
-  grassPatch: () => grassParts('grassPatch'),
-  grassTall: () => {
-    const parts = grassParts('grassTall');
-    const def = propKindDefinition('grassTall');
-    // seed heads poking above the tall tufts
-    parts.push(sphere([def.footprintRadiusMeters * 0.3, def.heightMeters * 0.95, 0.1], [0.07, 0.12, 0.07], GRASS_DRY));
-    parts.push(sphere([-def.footprintRadiusMeters * 0.25, def.heightMeters * 0.88, -0.15], [0.07, 0.12, 0.07], GRASS_DRY));
-    return parts;
-  },
-
-  // jagged rock forms — rotated boxes give the sharp facets the sphere-blob
-  // rocks can't (user: "more like jagged rocks")
-  rockJagged: () => {
-    const { heightMeters: h, footprintRadiusMeters: r } = propKindDefinition('rockJagged');
-    return [
-      box([0, h * 0.45, 0], [r * 1.5, h * 0.9, r * 1.2], STONE, [12, 25, -8]),
-      box([r * 0.4, h * 0.3, -r * 0.3], [r * 0.9, h * 0.7, r * 0.8], STONE_DARK, [-15, 60, 10]),
-      box([-r * 0.45, h * 0.35, r * 0.25], [r * 0.8, h * 0.8, r * 0.7], STONE_LIGHT, [8, -35, -18]),
-      box([r * 0.1, h * 0.8, r * 0.1], [r * 0.6, h * 0.55, r * 0.5], STONE, [22, 45, 15]),
-    ];
-  },
-  rockShard: () => {
-    const { heightMeters: h, footprintRadiusMeters: r } = propKindDefinition('rockShard');
-    return [
-      box([0, h * 0.5, 0], [r * 1.1, h * 1.0, r * 0.9], STONE, [4, 15, -6]),
-      box([r * 0.35, h * 0.38, r * 0.2], [r * 0.8, h * 0.76, r * 0.7], STONE_DARK, [-8, 50, 9]),
-      box([-r * 0.3, h * 0.42, -r * 0.25], [r * 0.7, h * 0.85, r * 0.6], STONE_LIGHT, [10, -30, -12]),
-      box([0, h * 0.1, 0], [r * 1.8, h * 0.2, r * 1.5], STONE_DARK, [0, 30, 0]),
-    ];
-  },
-
-  // ── broadcast / street commerce ────────────────────────────────────────────
 
   // ── PROPVENUE-0611 (req_0640): parks + shop interiors ────────────────────
 };

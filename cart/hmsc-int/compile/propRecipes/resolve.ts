@@ -76,6 +76,10 @@ import { menuBoardParts } from './menuBoard';
 import { sodaMachineParts } from './sodaMachine';
 import { openSignParts } from './openSign';
 import { greenCrossSignParts } from './greenCrossSign';
+import { grassPatchParts } from './grassPatch';
+import { grassTallParts } from './grassTall';
+import { rockJaggedParts } from './rockJagged';
+import { rockShardParts } from './rockShard';
 import { boulderParts } from './boulder';
 import { bushParts } from './bush';
 import { chairParts } from './chair';
@@ -279,6 +283,10 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     case 'sodaMachine': return sodaMachineParts();
     case 'openSign': return openSignParts();
     case 'greenCrossSign': return greenCrossSignParts();
+    case 'grassPatch': return grassPatchParts();
+    case 'grassTall': return grassTallParts();
+    case 'rockJagged': return rockJaggedParts();
+    case 'rockShard': return rockShardParts();
     default: {
       // data-recipe kinds (propModels.RECIPES) resolve here; the two paths agree
       // by construction since everyone calls this one function.
