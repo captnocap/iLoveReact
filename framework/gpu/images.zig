@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const wgpu = @import("wgpu");
+const bu = @import("buffer_upload.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 const log = @import("../diag/log.zig");
@@ -241,7 +242,7 @@ pub fn initPipeline(device: *wgpu.Device, globals_buffer: *wgpu.Buffer) void {
 pub fn upload(queue: *wgpu.Queue) void {
     if (g_quad_count > 0) {
         if (g_buffer) |buf| {
-            queue.writeBuffer(buf, 0, @ptrCast(&g_quads), g_quad_count * @sizeOf(ImageQuad));
+            bu.writeTypedBuffer(queue, buf, 0, ImageQuad, g_quads[0..g_quad_count]);
         }
     }
 }
@@ -258,7 +259,7 @@ pub fn drawBatch(render_pass: *wgpu.RenderPassEncoder, start: u32, end: u32) voi
     const buffer = g_buffer orelse return;
 
     render_pass.setPipeline(pipeline);
-    render_pass.setVertexBuffer(0, buffer, 0, g_quad_count * @sizeOf(ImageQuad));
+    render_pass.setVertexBuffer(0, buffer, 0, bu.bytesOfCount(ImageQuad, g_quad_count));
 
     var i = start;
     while (i < end) : (i += 1) {

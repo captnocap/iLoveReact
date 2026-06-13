@@ -26,6 +26,7 @@
 
 const std = @import("std");
 const wgpu = @import("wgpu");
+const bu = @import("buffer_upload.zig");
 const gpu_core = @import("gpu.zig");
 const log = @import("../diag/log.zig");
 
@@ -766,7 +767,7 @@ fn drainEntry(e: *Paintable) void {
                     .pad1 = 0,
                     .pad2 = 0,
                 };
-                queue.writeBuffer(uniform_buf, 0, @ptrCast(&u), @sizeOf(BrushUniforms));
+                bu.writeValue(queue, uniform_buf, 0, &u);
 
                 const encoder = device.createCommandEncoder(&.{
                     .label = wgpu.StringView.fromSlice("paintable_brush"),

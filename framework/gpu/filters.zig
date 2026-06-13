@@ -20,6 +20,7 @@
 
 const std = @import("std");
 const wgpu = @import("wgpu");
+const bu = @import("buffer_upload.zig");
 
 const filter_shaders = @import("filter_shaders.zig");
 const log = @import("../diag/log.zig");
@@ -280,7 +281,7 @@ pub fn queueComposite(
         .time = time,
         .intensity = std.math.clamp(intensity, 0.0, 1.0),
     };
-    queue.writeBuffer(uniform_buf, 0, @ptrCast(&u), @sizeOf(FilterUniforms));
+    bu.writeValue(queue, uniform_buf, 0, &u);
 
     g_composites[g_composite_count] = .{
         .filter = filter,
@@ -319,7 +320,7 @@ pub fn drawInline(
         .time = time,
         .intensity = std.math.clamp(intensity, 0.0, 1.0),
     };
-    queue.writeBuffer(uniform_buf, 0, @ptrCast(&u), @sizeOf(FilterUniforms));
+    bu.writeValue(queue, uniform_buf, 0, &u);
     render_pass.setPipeline(pipeline);
     render_pass.setBindGroup(0, bind_group, 0, null);
     render_pass.draw(6, 1, 0, 0);

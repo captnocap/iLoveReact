@@ -29,6 +29,7 @@
 const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
+const bu = @import("buffer_upload.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 
@@ -211,8 +212,7 @@ pub fn initPipeline(device: *wgpu.Device, globals_buffer: *wgpu.Buffer) void {
 pub fn upload(queue: *wgpu.Queue) void {
     if (g_count == 0) return;
     if (g_buffer) |buf| {
-        const byte_size = g_count * @sizeOf(GCurveFillInstance);
-        queue.writeBuffer(buf, 0, @ptrCast(&g_instances), byte_size);
+        bu.writeTypedBuffer(queue, buf, 0, GCurveFillInstance, g_instances[0..g_count]);
     }
 }
 
@@ -222,7 +222,7 @@ pub fn drawBatch(render_pass: *wgpu.RenderPassEncoder, start: u32, end: u32) voi
         render_pass.setPipeline(pipeline);
         if (g_bind_group) |bg| render_pass.setBindGroup(0, bg, 0, null);
         if (g_buffer) |buf| {
-            render_pass.setVertexBuffer(0, buf, 0, g_count * @sizeOf(GCurveFillInstance));
+            render_pass.setVertexBuffer(0, buf, 0, bu.bytesOfCount(GCurveFillInstance, g_count));
         }
         // 3 vertices per triangle, one triangle per instance.
         render_pass.draw(3, end - start, 0, start);

@@ -25,6 +25,7 @@
 const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
+const bu = @import("buffer_upload.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 const atlas = @import("icon_atlas.zig");
@@ -341,8 +342,7 @@ pub fn queueIcon(
 pub fn upload(queue: *wgpu.Queue) void {
     if (g_icon_count == 0) return;
     if (g_buffer) |buf| {
-        const byte_size = g_icon_count * @sizeOf(SdfIconInstance);
-        queue.writeBuffer(buf, 0, @ptrCast(&g_icons), byte_size);
+        bu.writeTypedBuffer(queue, buf, 0, SdfIconInstance, g_icons[0..g_icon_count]);
     }
 }
 
@@ -352,7 +352,7 @@ pub fn drawBatch(render_pass: *wgpu.RenderPassEncoder, start: u32, end: u32) voi
         render_pass.setPipeline(pipeline);
         if (g_bind_group) |bg| render_pass.setBindGroup(0, bg, 0, null);
         if (g_buffer) |buf| {
-            render_pass.setVertexBuffer(0, buf, 0, g_icon_count * @sizeOf(SdfIconInstance));
+            render_pass.setVertexBuffer(0, buf, 0, bu.bytesOfCount(SdfIconInstance, g_icon_count));
         }
         render_pass.draw(6, end - start, 0, start);
     }

@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const wgpu = @import("wgpu");
+const bu = @import("buffer_upload.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 const images = @import("images.zig");
@@ -970,7 +971,7 @@ fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count
     if (lookupGeometry(key)) |slot| return slot;
     if (g_geo_cache_len >= GEO_CACHE_SIZE) return null;
     const buf = g_retained_vbuf orelse return null;
-    const bytes: u64 = @as(u64, count) * @sizeOf(Vertex);
+    const bytes = bu.bytesOfCount(Vertex, count);
     if (g_retained_top + bytes > @as(u64, MAX_RETAINED_VERTS) * @sizeOf(Vertex)) return null;
     queue.writeBuffer(buf, g_retained_top, @ptrCast(verts.ptr), bytes);
     const off = g_retained_top;
@@ -1018,7 +1019,7 @@ fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, 
             return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
         }
         const buf = g_retained_vbuf orelse return null;
-        queue.writeBuffer(buf, loc.off, @ptrCast(v.ptr), @as(u64, count) * @sizeOf(Vertex));
+        queue.writeBuffer(buf, loc.off, @ptrCast(v.ptr), bu.bytesOfCount(Vertex, count));
         s.version_hash = loc.ver_hash;
         s.count = count;
     }
@@ -1191,7 +1192,7 @@ fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]co
         const cnt = hfGen(hs, @intCast(cols), @intCast(rows), width, depth, base, wave, t);
         if (cnt == 0) return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
         const buf = g_retained_vbuf orelse return null;
-        queue.writeBuffer(buf, loc.off, @ptrCast(&g_hf_scratch), @as(u64, cnt) * @sizeOf(Vertex));
+        bu.writeTypedBuffer(queue, buf, loc.off, Vertex, g_hf_scratch[0..cnt]);
         s.version_hash = loc.ver_hash;
         s.count = cnt;
     }
@@ -1316,7 +1317,7 @@ fn drawSky(pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.Mat4, cam_po
         .sun_color = node.scene3d_sky_sun_color,
         .night = node.scene3d_sky_night,
     };
-    queue.writeBuffer(sky_buf, 0, @ptrCast(&u), @sizeOf(SkyUniforms));
+    bu.writeValue(queue, sky_buf, 0, &u);
 
     pass.setPipeline(sky_pipeline);
     pass.setBindGroup(0, sky_bg, 0, null);
@@ -1400,7 +1401,7 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
                 1.0,
             );
         }
-        queue.writeBuffer(g_static_inst_buf.?, g_static_inst_top, @ptrCast(&g_inst_scratch[0]), @as(u64, chunk) * @sizeOf(InstanceData));
+        bu.writeTypedBuffer(queue, g_static_inst_buf.?, g_static_inst_top, InstanceData, g_inst_scratch[0..chunk]);
         g_static_inst_top += @as(u64, chunk) * @sizeOf(InstanceData);
         done += chunk;
     }
@@ -1662,7 +1663,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         .sky_horizon = sky_horizon,
         .sky_zenith = .{ sky_zenith[0], sky_zenith[1], sky_zenith[2], 0 },
     };
-    queue.writeBuffer(g_uniform_buffer.?, 0, @ptrCast(&scene_u), @sizeOf(SceneUniforms));
+    bu.writeValue(queue, g_uniform_buffer.?, 0, &scene_u);
     pass.setBindGroup(0, g_bind_group.?, 0, null);
 
     // ── Pass 1: resolve each mesh (geometry slot, texture bind group). Skips
@@ -1831,8 +1832,8 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                     const count: u32 = @min(leader.scene3d_instance_count, sd.count - first);
                     if (count > 0) {
                         if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
-                        pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, @as(u64, group_slot.count) * @sizeOf(Vertex));
-                        pass.setVertexBuffer(1, g_static_inst_buf.?, sd.offset + @as(u64, first) * @sizeOf(InstanceData), @as(u64, count) * @sizeOf(InstanceData));
+                        pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, bu.bytesOfCount(Vertex, group_slot.count));
+                        pass.setVertexBuffer(1, g_static_inst_buf.?, sd.offset + bu.bytesOfCount(InstanceData, first), bu.bytesOfCount(InstanceData, count));
                         pass.draw(group_slot.count, count, 0, 0);
                         g_telemetry.draw_calls += 1;
                         g_telemetry.instances += count;
@@ -1920,11 +1921,11 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
 
         if (group_count == 0) continue;
         const inst_start_index: usize = @intCast(inst_start / @sizeOf(InstanceData));
-        queue.writeBuffer(g_instance_buf.?, inst_start, @ptrCast(&inst_scratch[inst_start_index]), @as(u64, group_count) * @sizeOf(InstanceData));
+        bu.writeTypedBuffer(queue, g_instance_buf.?, inst_start, InstanceData, inst_scratch[inst_start_index .. inst_start_index + group_count]);
         if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
-        const geo_bytes: u64 = @as(u64, group_slot.count) * @sizeOf(Vertex);
+        const geo_bytes = bu.bytesOfCount(Vertex, group_slot.count);
         pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, geo_bytes);
-        pass.setVertexBuffer(1, g_instance_buf.?, inst_start, @as(u64, group_count) * @sizeOf(InstanceData));
+        pass.setVertexBuffer(1, g_instance_buf.?, inst_start, bu.bytesOfCount(InstanceData, group_count));
         pass.draw(group_slot.count, group_count, 0, 0);
         g_telemetry.draw_calls += 1;
         g_telemetry.instances += group_count;
@@ -1952,14 +1953,13 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                 if (g_ground_data_buf[pool] == null or g_ground_data_bg[pool] == null) continue;
                 if (child.scene3d_ground_data) |d| {
                     const n = @min(d.len, GROUND_DATA_FLOATS);
-                    // The byte size MUST be computed in u64 (req_0842): the old
-                    // `n * @sizeOf(f32)` overflowed a narrow integer (e.g. 14528*4 came
-                    // out 25344 instead of 58112), so writeBuffer uploaded only ~6336 of
-                    // the 14528 floats. Every cell past that read 0 = water = concrete
-                    // material, so painted roads rendered as concrete past a per-chunk
-                    // seam. The vertex/instance writes already cast to u64; this one
-                    // didn't. Keep the cast.
-                    queue.writeBuffer(g_ground_data_buf[pool].?, 0, @ptrCast(d.ptr), @as(u64, n) * @sizeOf(f32));
+                    // req_0842: this upload once computed its size as `n * @sizeOf(f32)`
+                    // WITHOUT a wide cast — for n=14528 that overflowed to 25344 instead
+                    // of 58112, truncating the write so cells past ~6336 read 0 = water =
+                    // concrete, and painted roads rendered as concrete past a chunk seam.
+                    // writeTypedBuffer derives the byte size in u64 from the slice itself,
+                    // so the class of bug can't recur (req_0871).
+                    bu.writeTypedBuffer(queue, g_ground_data_buf[pool].?, 0, f32, d[0..n]);
                 }
                 const inst_index: usize = @intCast(inst_top / @sizeOf(InstanceData));
                 inst_scratch[inst_index] = makeInstance(
@@ -1977,7 +1977,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                     child.scene3d_color_b,
                     child.scene3d_color_a,
                 );
-                queue.writeBuffer(g_instance_buf.?, inst_top, @ptrCast(&inst_scratch[inst_index]), @sizeOf(InstanceData));
+                bu.writeValue(queue, g_instance_buf.?, inst_top, &inst_scratch[inst_index]);
                 pass.setBindGroup(1, g_ground_data_bg[pool].?, 0, null);
                 const geo_bytes: u64 = @as(u64, gslot[gp_i].count) * @sizeOf(Vertex);
                 pass.setVertexBuffer(0, g_retained_vbuf.?, gslot[gp_i].offset, geo_bytes);
@@ -2043,7 +2043,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                 child.scene3d_color_b,
                 child.scene3d_color_a,
             );
-            queue.writeBuffer(g_instance_buf.?, inst_top, @ptrCast(&inst_scratch[inst_index]), @sizeOf(InstanceData));
+            bu.writeValue(queue, g_instance_buf.?, inst_top, &inst_scratch[inst_index]);
             if (ttex[ti]) |bg| pass.setBindGroup(1, bg, 0, null);
             const geo_bytes: u64 = @as(u64, tslot[ti].count) * @sizeOf(Vertex);
             pass.setVertexBuffer(0, g_retained_vbuf.?, tslot[ti].offset, geo_bytes);

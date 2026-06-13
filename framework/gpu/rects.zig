@@ -7,6 +7,7 @@
 const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
+const bu = @import("buffer_upload.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 
@@ -493,7 +494,7 @@ pub fn drawBatch(render_pass: *wgpu.RenderPassEncoder, start: u32, end: u32) voi
         render_pass.setPipeline(pipeline);
         if (g_bind_group) |bg| render_pass.setBindGroup(0, bg, 0, null);
         if (g_rect_buffer) |buf| {
-            render_pass.setVertexBuffer(0, buf, 0, g_rect_count * @sizeOf(RectInstance));
+            render_pass.setVertexBuffer(0, buf, 0, bu.bytesOfCount(RectInstance, g_rect_count));
         }
         render_pass.draw(6, end - start, 0, start);
     }
@@ -503,8 +504,7 @@ pub fn drawBatch(render_pass: *wgpu.RenderPassEncoder, start: u32, end: u32) voi
 pub fn upload(queue: *wgpu.Queue) void {
     if (g_rect_count > 0) {
         if (g_rect_buffer) |buf| {
-            const byte_size = g_rect_count * @sizeOf(RectInstance);
-            queue.writeBuffer(buf, 0, @ptrCast(&g_rects), byte_size);
+            bu.writeTypedBuffer(queue, buf, 0, RectInstance, g_rects[0..g_rect_count]);
         }
     }
 }

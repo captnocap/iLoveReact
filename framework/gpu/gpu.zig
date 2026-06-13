@@ -8,6 +8,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const wgpu = @import("wgpu");
+const bu = @import("buffer_upload.zig");
 const mathx = @import("../math/root.zig");
 
 const is_web = builtin.cpu.arch == .wasm32;
@@ -1387,7 +1388,7 @@ fn frameDataHash() u64 {
 fn writeGlobals(queue: *wgpu.Queue, width: u32, height: u32) void {
     const globals = [2]f32{ @floatFromInt(width), @floatFromInt(height) };
     if (g_globals_buffer) |buf| {
-        queue.writeBuffer(buf, 0, @ptrCast(&globals), @sizeOf(@TypeOf(globals)));
+        bu.writeValue(queue, buf, 0, &globals);
     }
 }
 

@@ -18,6 +18,7 @@
 const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
+const bu = @import("buffer_upload.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 
@@ -214,7 +215,7 @@ pub fn drawBatch(render_pass: *wgpu.RenderPassEncoder, start: u32, end: u32) voi
         render_pass.setPipeline(pipeline);
         if (g_capsule_bind_group) |bg| render_pass.setBindGroup(0, bg, 0, null);
         if (g_capsule_buffer) |buf| {
-            render_pass.setVertexBuffer(0, buf, 0, g_capsule_count * @sizeOf(CapsuleInstance));
+            render_pass.setVertexBuffer(0, buf, 0, bu.bytesOfCount(CapsuleInstance, g_capsule_count));
         }
         render_pass.draw(6, end - start, 0, start);
     }
@@ -223,8 +224,7 @@ pub fn drawBatch(render_pass: *wgpu.RenderPassEncoder, start: u32, end: u32) voi
 pub fn upload(queue: *wgpu.Queue) void {
     if (g_capsule_count > 0) {
         if (g_capsule_buffer) |buf| {
-            const byte_size = g_capsule_count * @sizeOf(CapsuleInstance);
-            queue.writeBuffer(buf, 0, @ptrCast(&g_capsules), byte_size);
+            bu.writeTypedBuffer(queue, buf, 0, CapsuleInstance, g_capsules[0..g_capsule_count]);
         }
     }
 }

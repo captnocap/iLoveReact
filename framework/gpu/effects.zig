@@ -18,6 +18,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const wgpu = @import("wgpu");
+const bu = @import("buffer_upload.zig");
 const gpu_core = @import("gpu.zig");
 const images = @import("images.zig");
 const log = @import("../diag/log.zig");
@@ -925,7 +926,7 @@ fn renderGpu(self: *Instance) bool {
         .mouse_y = mouse.effect_y,
         .mouse_inside = if (mouse.inside) 1.0 else 0.0,
     };
-    queue.writeBuffer(uniform_buf, 0, @ptrCast(&uniforms), @sizeOf(GpuUniforms));
+    bu.writeValue(queue, uniform_buf, 0, &uniforms);
 
     // Storage-buffer upload of cart-supplied data. Uploaded only when present;
     // the cart's prop reader sets gpu_data_pending and the buffer was already
@@ -936,7 +937,7 @@ fn renderGpu(self: *Instance) bool {
         if (self.gpu_data_buffer) |db| {
             const upload_len = @min(pd.len, self.gpu_data_capacity_floats);
             if (upload_len > 0) {
-                queue.writeBuffer(db, 0, @ptrCast(pd.ptr), upload_len * @sizeOf(f32));
+                bu.writeTypedBuffer(queue, db, 0, f32, pd[0..upload_len]);
             }
         }
         self.gpu_data_pending = null;

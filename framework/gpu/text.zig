@@ -6,6 +6,7 @@
 const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
+const bu = @import("buffer_upload.zig");
 const m = @import("../math/root.zig");
 const c = @import("../c.zig").imports;
 const shaders = @import("shaders.zig");
@@ -1059,7 +1060,7 @@ pub fn drawBatch(render_pass: *wgpu.RenderPassEncoder, start: u32, end: u32) voi
         render_pass.setPipeline(pipeline);
         if (g_text_bind_group) |bg| render_pass.setBindGroup(0, bg, 0, null);
         if (g_text_buffer) |buf| {
-            render_pass.setVertexBuffer(0, buf, 0, g_glyph_count * @sizeOf(GlyphInstance));
+            render_pass.setVertexBuffer(0, buf, 0, bu.bytesOfCount(GlyphInstance, g_glyph_count));
         }
         render_pass.draw(6, end - start, 0, start);
     }
@@ -1069,8 +1070,7 @@ pub fn drawBatch(render_pass: *wgpu.RenderPassEncoder, start: u32, end: u32) voi
 pub fn upload(queue: *wgpu.Queue) void {
     if (g_glyph_count > 0) {
         if (g_text_buffer) |buf| {
-            const byte_size = g_glyph_count * @sizeOf(GlyphInstance);
-            queue.writeBuffer(buf, 0, @ptrCast(&g_glyphs), byte_size);
+            bu.writeTypedBuffer(queue, buf, 0, GlyphInstance, g_glyphs[0..g_glyph_count]);
         }
     }
 }
