@@ -239,16 +239,35 @@ export function stepCar(s: CarState, input: CarInput, t: CarTuning, dt: number):
     const tipAccel = GRAV * (t.trackWidth * 0.5) / Math.max(0.2, t.cgHeight);
     if (Math.abs(aLat) > tipAccel) {
       s.flipped = true;
-      s.rollVel = (aLat > 0 ? -1 : 1) * 2.6; // kicked over to the outside
+      // COMMIT the roll: the kick must clear the on-its-side peak (±π/2) so the
+      // car actually goes OVER and plays out, instead of half-leaning and
+      // snapping back every frame (the old 2.6 stranded it in a control-cutting
+      // flicker). Energy to crest is ½v² > rolloverGravity·0.7, so kick past it.
+      const crest = Math.sqrt(2 * t.rolloverGravity * 0.7) * 1.15;
+      s.rollVel = (aLat > 0 ? -1 : 1) * crest; // kicked over to the outside
     }
   } else {
-    // On its shell: suspension off the ground. Bistable gravity settles the body
-    // to wheels-down (0) or roof-down (±π) by momentum; -sin(2·roll) has minima
-    // at 0 and ±π and an unstable peak on its side at ±π/2.
-    s.rollVel += (-t.rollDamping * 0.5 * s.rollVel - t.rolloverGravity * 0.7 * Math.sin(2 * s.roll)) * step;
-    s.roll += s.rollVel * step;
-    if (s.roll > Math.PI) s.roll -= 2 * Math.PI;
-    if (s.roll < -Math.PI) s.roll += 2 * Math.PI;
+    // Rolled over — LET IT PLAY OUT, then recover. No freeze, no reset, no
+    // mandatory keypress (req_0709). The body first TUMBLES on momentum:
+    // bistable gravity (-sin(2·roll), minima wheels-down at 0 and roof-down at
+    // ±π, unstable peak on its side at ±π/2) carries the roll wherever the flip
+    // threw it, so the car genuinely goes over. The instant it comes to REST,
+    // we self-right it — ease the body back onto its wheels in place and hand
+    // control back — so a rollover resolves itself instead of stranding the car
+    // upside-down. (R / the reset button still right it instantly if impatient.)
+    const atRest = Math.abs(s.rollVel) < 1.0;
+    if (atRest && Math.abs(s.roll) > 0.25) {
+      s.roll += (0 - s.roll) * clamp(t.rollEase * 0.4 * step, 0, 1); // flop upright
+      s.rollVel *= 0.6;
+    } else {
+      // Airborne tumble — LIGHT damping so the committed kick clears ±π/2 and the
+      // car goes all the way over (heavy damping stalled it half-leaned, which is
+      // what made it flicker). Bistable gravity then settles it roof-down (±π).
+      s.rollVel += (-t.rollDamping * 0.12 * s.rollVel - t.rolloverGravity * 0.7 * Math.sin(2 * s.roll)) * step;
+      s.roll += s.rollVel * step;
+      if (s.roll > Math.PI) s.roll -= 2 * Math.PI;
+      if (s.roll < -Math.PI) s.roll += 2 * Math.PI;
+    }
     if (Math.abs(s.roll) < 0.25 && Math.abs(s.rollVel) < 0.6) { s.flipped = false; s.roll = 0; s.rollVel = 0; }
   }
 
