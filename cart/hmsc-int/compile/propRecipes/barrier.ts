@@ -6,6 +6,21 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const barrierDef: PropKindDefinition = {
+  kind: 'barrier',
+  label: 'Jersey Barrier',
+  // A concrete road segment, long like a fence — gets the same yaw-aware
+  // thin AABB treatment in the world props layer.
+  solid: true,
+  footprintRadiusMeters: 1.0,
+  footprintDepthMeters: 0.6,
+  // PROPSCALE-0611: real 42in tall Jersey 1.07m × 1.15
+  heightMeters: 1.25,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   concrete: recipeColor('#9a9a92'),

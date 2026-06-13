@@ -5,6 +5,21 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const payphoneDef: PropKindDefinition = {
+  kind: 'payphone',
+  label: 'Payphone',
+  // A sidewalk phone on a stand with a small acoustic hood — the player bumps
+  // it; it's the load-bearing low-tech comms prop (call contacts, no mobile).
+  solid: true,
+  footprintRadiusMeters: 0.3,
+  footprintDepthMeters: 0.34,
+  // PROPSCALE-0611: real pedestal phone ~1.4m × 1.15
+  heightMeters: 1.61,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   post: [0.6, 0.62, 0.64],

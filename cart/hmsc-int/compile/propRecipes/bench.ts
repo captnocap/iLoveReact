@@ -6,6 +6,22 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const benchDef: PropKindDefinition = {
+  kind: 'bench',
+  label: 'Park Bench',
+  // Long like a fence segment — yaw-aware thin AABB in the world props layer.
+  solid: true,
+  footprintRadiusMeters: 0.8,
+  footprintDepthMeters: 0.56,
+  // PROPSCALE-0611: back top real ~0.85m × 1.15; the SEAT stays figure-locked
+  heightMeters: 0.98,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 3 },
+  coverClass: 'soft',
+};
 
 const COLORS = {
   wood: recipeColor('#8a6240'),

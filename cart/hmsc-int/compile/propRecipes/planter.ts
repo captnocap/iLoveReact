@@ -6,6 +6,18 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const planterDef: PropKindDefinition = {
+  kind: 'planter',
+  label: 'Planter',
+  solid: true,
+  footprintRadiusMeters: 0.5,
+  heightMeters: 0.6,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'soft',
+};
 
 const COLORS = {
   pot: recipeColor('#a8593a'),

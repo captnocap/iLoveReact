@@ -46,6 +46,14 @@ import { rockFlatDef } from '../../compile/propRecipes/rockFlat';
 import { rockSpireDef } from '../../compile/propRecipes/rockSpire';
 import { rockMossyDef } from '../../compile/propRecipes/rockMossy';
 import { rockPileDef } from '../../compile/propRecipes/rockPile';
+import { payphoneDef } from '../../compile/propRecipes/payphone';
+import { mailboxDef } from '../../compile/propRecipes/mailbox';
+import { fenceDef } from '../../compile/propRecipes/fence';
+import { trafficConeDef } from '../../compile/propRecipes/trafficCone';
+import { barrierDef } from '../../compile/propRecipes/barrier';
+import { trashCanDef } from '../../compile/propRecipes/trashCan';
+import { benchDef } from '../../compile/propRecipes/bench';
+import { planterDef } from '../../compile/propRecipes/planter';
 
 export type BuiltinPropKind =
   | 'rock'
@@ -494,19 +502,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   },
   stopSign: stopSignDef,
   trafficLight: trafficLightDef,
-  payphone: {
-    kind: 'payphone',
-    label: 'Payphone',
-    // A sidewalk phone on a stand with a small acoustic hood — the player bumps
-    // it; it's the load-bearing low-tech comms prop (call contacts, no mobile).
-    solid: true,
-    footprintRadiusMeters: 0.3,
-    footprintDepthMeters: 0.34,
-    // PROPSCALE-0611: real pedestal phone ~1.4m × 1.15
-    heightMeters: 1.61,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
+  payphone: payphoneDef,
   dumpster: {
     kind: 'dumpster',
     label: 'Dumpster',
@@ -518,94 +514,15 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     trafficControl: 'none',
     container: { lootCategory: 'junk', capacity: 6, spawnFillChance: 0.7, searchSeconds: 4, access: 'open' },
   },
-  mailbox: {
-    kind: 'mailbox',
-    label: 'Mailbox',
-    solid: true,
-    footprintRadiusMeters: 0.22,
-    footprintDepthMeters: 0.44,
-    // PROPSCALE-0611: real USPS collection box ~1.27m × 1.15
-    heightMeters: 1.46,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'office', capacity: 2, spawnFillChance: 0.4, searchSeconds: 2, access: 'locked' },
-    coverClass: 'soft',
-  },
-  fence: {
-    kind: 'fence',
-    label: 'Fence',
-    solid: true,
-    // A 2.5m segment; footprintRadius sizes the collision square.
-    footprintRadiusMeters: 1.35,
-    footprintDepthMeters: 0.16,
-    // PROPSCALE-0611: real chain-link ~1.2m × 1.15
-    heightMeters: 1.4,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
+  mailbox: mailboxDef,
+  fence: fenceDef,
 
   // ── street furniture ──────────────────────────────────────────────────────
-  trafficCone: {
-    kind: 'trafficCone',
-    label: 'Traffic Cone',
-    solid: true,
-    footprintRadiusMeters: 0.18,
-    // PROPSCALE-0611: real 28in cone 0.71m × 1.15
-    heightMeters: 0.82,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.26, restitution: 0.15 },
-  },
-  barrier: {
-    kind: 'barrier',
-    label: 'Jersey Barrier',
-    // A concrete road segment, long like a fence — gets the same yaw-aware
-    // thin AABB treatment in the world props layer.
-    solid: true,
-    footprintRadiusMeters: 1.0,
-    footprintDepthMeters: 0.6,
-    // PROPSCALE-0611: real 42in tall Jersey 1.07m × 1.15
-    heightMeters: 1.25,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  trashCan: {
-    kind: 'trashCan',
-    label: 'Trash Can',
-    solid: true,
-    footprintRadiusMeters: 0.3,
-    // PROPSCALE-0611: real public can ~1.0m × 1.15
-    heightMeters: 1.15,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'junk', capacity: 3, spawnFillChance: 0.6, searchSeconds: 2.5, access: 'open' },
-    coverClass: 'soft',
-    dynamics: { bodyRadiusMeters: 0.44, restitution: 0.22 },
-  },
-  bench: {
-    kind: 'bench',
-    label: 'Park Bench',
-    // Long like a fence segment — yaw-aware thin AABB in the world props layer.
-    solid: true,
-    footprintRadiusMeters: 0.8,
-    footprintDepthMeters: 0.56,
-    // PROPSCALE-0611: back top real ~0.85m × 1.15; the SEAT stays figure-locked
-    heightMeters: 0.98,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 3 },
-    coverClass: 'soft',
-  },
-  planter: {
-    kind: 'planter',
-    label: 'Planter',
-    solid: true,
-    footprintRadiusMeters: 0.5,
-    heightMeters: 0.6,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'soft',
-  },
+  trafficCone: trafficConeDef,
+  barrier: barrierDef,
+  trashCan: trashCanDef,
+  bench: benchDef,
+  planter: planterDef,
 
   // ── trees ──────────────────────────────────────────────────────────────────
   // footprintRadius is the TRUNK, not the canopy — you bump the trunk and walk

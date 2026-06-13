@@ -6,6 +6,21 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const trashCanDef: PropKindDefinition = {
+  kind: 'trashCan',
+  label: 'Trash Can',
+  solid: true,
+  footprintRadiusMeters: 0.3,
+  // PROPSCALE-0611: real public can ~1.0m × 1.15
+  heightMeters: 1.15,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'junk', capacity: 3, spawnFillChance: 0.6, searchSeconds: 2.5, access: 'open' },
+  coverClass: 'soft',
+  dynamics: { bodyRadiusMeters: 0.44, restitution: 0.22 },
+};
 
 const COLORS = {
   body: recipeColor('#3f5747'),

@@ -5,6 +5,20 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const fenceDef: PropKindDefinition = {
+  kind: 'fence',
+  label: 'Fence',
+  solid: true,
+  // A 2.5m segment; footprintRadius sizes the collision square.
+  footprintRadiusMeters: 1.35,
+  footprintDepthMeters: 0.16,
+  // PROPSCALE-0611: real chain-link ~1.2m × 1.15
+  heightMeters: 1.4,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
 
 const COLORS = {
   post: [0.42, 0.45, 0.5],

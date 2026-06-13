@@ -6,6 +6,19 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const trafficConeDef: PropKindDefinition = {
+  kind: 'trafficCone',
+  label: 'Traffic Cone',
+  solid: true,
+  footprintRadiusMeters: 0.18,
+  // PROPSCALE-0611: real 28in cone 0.71m × 1.15
+  heightMeters: 0.82,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  dynamics: { bodyRadiusMeters: 0.26, restitution: 0.15 },
+};
 
 const COLORS = {
   orange: recipeColor('#e8682a'),

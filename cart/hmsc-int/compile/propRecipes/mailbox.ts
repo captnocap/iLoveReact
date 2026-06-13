@@ -5,6 +5,21 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const mailboxDef: PropKindDefinition = {
+  kind: 'mailbox',
+  label: 'Mailbox',
+  solid: true,
+  footprintRadiusMeters: 0.22,
+  footprintDepthMeters: 0.44,
+  // PROPSCALE-0611: real USPS collection box ~1.27m × 1.15
+  heightMeters: 1.46,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'office', capacity: 2, spawnFillChance: 0.4, searchSeconds: 2, access: 'locked' },
+  coverClass: 'soft',
+};
 
 const COLORS = {
   post: [0.42, 0.35, 0.26],
