@@ -550,6 +550,11 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
         landforms: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.landforms)
           ? parsed.world.landforms
           : initial.world.landforms,
+        // Bodies of water (world/water) are authored; a save predating the layer
+        // has no key → empty. Layout-matched saves keep their water.
+        waterBodies: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.waterBodies)
+          ? parsed.world.waterBodies
+          : initial.world.waterBodies,
         // Zones are authored (wv_zone); a save predating the layer has no key →
         // empty. Layout-matched saves keep their stored zones.
         zones: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.zones)

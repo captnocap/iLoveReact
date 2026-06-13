@@ -2541,11 +2541,35 @@ pub const Runtime = struct {
                 var r: usize = 0;
                 while (r < batch.count) : (r += 1) {
                     const o = @as(usize, r) * self.stride;
+                    // Shape-aware (water discs / glass cylinders): a translucent
+                    // row keeps its instance shape id, so a 'disc' body of water
+                    // draws as a flat cylinder, not a square slab — parity with the
+                    // editor's WaterBody/Glass meshes. Box is the default.
+                    const shape_id = if (self.stride >= 13) batch.boxes[o + 12] else SHAPE_BOX;
+                    var geom_key: []const u8 = "box";
+                    var verts: []const f32 = self.cube[0..];
+                    var vert_count: u32 = 36;
+                    if (shape_id == SHAPE_CYLINDER8) {
+                        geom_key = "cylinder8";
+                        verts = self.cylinder8[0..];
+                        vert_count = 8 * 12;
+                    } else if (shape_id == SHAPE_CYLINDER16) {
+                        geom_key = "cylinder16";
+                        verts = self.cylinder16[0..];
+                        vert_count = 16 * 12;
+                    } else if (shape_id == SHAPE_SPHERE) {
+                        geom_key = "sphere12x8";
+                        verts = self.sphere[0..];
+                        vert_count = 12 * 8 * 6;
+                    } else if (shape_id == SHAPE_RAMP) {
+                        geom_key = "ramp-slab";
+                        verts = self.ramp_slab[0..];
+                    }
                     try self.kid_list.append(self.allocator, .{
                         .scene3d_mesh = true,
-                        .scene3d_geom_key = "box",
-                        .scene3d_vertices = self.cube[0..],
-                        .scene3d_vert_count = 36,
+                        .scene3d_geom_key = geom_key,
+                        .scene3d_vertices = verts,
+                        .scene3d_vert_count = vert_count,
                         .scene3d_pos_x = batch.boxes[o + 0],
                         .scene3d_pos_y = batch.boxes[o + 1],
                         .scene3d_pos_z = batch.boxes[o + 2],

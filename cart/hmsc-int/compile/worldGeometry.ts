@@ -28,6 +28,7 @@ import { propKindDefinition } from '../game/kinds/props';
 import { solveRoadCrossSection } from '../world/roadProfile';
 import { tileKindDefinition } from '../world/tileKinds';
 import { CHUNK_TILES } from '../chunks';
+import { WATER_LOOK } from '../game/kinds/waterBodies';
 import { groundKindAt, heightfieldTexelColor, MARKER_KIND_INDICES, roadRibbonSection } from '../render3d/heightfieldSurface';
 import { isParkingKind } from '../render3d/parkingStall';
 import type { ChunkFloor } from '../chunkFloor';
@@ -430,7 +431,13 @@ function pushPropPart(b: Build, prop: WorldProp, part: PropPartSpec, index: numb
   // the SAME key /test's DataProp stores under, so the bake textures the mesh
   // the user clicked. Unresolvable ids (react-facade textures) keep flat color.
   const textureId = prop.partTextures?.[propPartId(part, index)];
-  const material = textureId ? internMaterial(b, { kind: 'material', id: textureId }) : 0;
+  // A skin wins; else a glass part (opacity < 1) interns a translucent flat
+  // material with that alpha — the SAME transparent path build-piece panes ride
+  // (PROPGLASS-0773), so a display case's pane renders as real glass, not a
+  // solid blue box, in both /test and the compiled game.
+  const material = textureId
+    ? internMaterial(b, { kind: 'material', id: textureId })
+    : (part.opacity != null && part.opacity < 1 ? internTranslucent(b, part.opacity) : 0);
   pushShape(b, propShapeId(part.shape), p[0], p[1], p[2], propRotation(prop, part.rotation), part.size[0], part.size[1], part.size[2], part.color, material);
 }
 
@@ -983,6 +990,28 @@ function pushWorldLayers(b: Build, state: GameState): void {
   }
 }
 
+/** Bodies of water (world/water) → translucent slab instances. GUIDING_LIGHT
+ *  refuses a new engine system: water is expressed as EXISTING data — each body
+ *  is a translucent slab (box for rect, cylinder for disc) at the body's surface
+ *  level, referencing a flat-translucent material (the same intern glass walls
+ *  use). The no-V8 loader renders it through its transparent pass with no new
+ *  code, and the bed below (floors/heightfields) reads THROUGH it as depth, so
+ *  the compiled game shows the same body of water the editor does.
+ *
+ *  Unlike the rest of pushWorldLayers (legacy demo scaffolding, off by default),
+ *  water bodies are genuinely authored content, so they always bake. */
+function pushWaterBodies(b: Build, bodies: GameState['world']['waterBodies'] | undefined): void {
+  const waterColor = hexColor(WATER_LOOK.color);
+  for (const body of bodies ?? []) {
+    const cx = body.x + body.width / 2;
+    const cz = body.z + body.depth / 2;
+    const top = body.surfaceY - WATER_LOOK.thicknessMeters / 2;
+    const material = internTranslucent(b, WATER_LOOK.opacity);
+    const shape = body.shape === 'disc' ? INSTANCE_SHAPE_CYLINDER16 : INSTANCE_SHAPE_BOX;
+    pushShape(b, shape, cx, top, cz, [0, 0, 0], body.width, WATER_LOOK.thicknessMeters, body.depth, waterColor, material);
+  }
+}
+
 /** Lower ONE shared visual shape to an instance row. A box that wears a skin
  *  slot interns that skin's shader/decal exactly as /test textures it; a
  *  material-skinned face still ships its base-material color so a host
@@ -1217,6 +1246,8 @@ export function buildWorldInstances(
   const pieceCount = pushPlacedPieces(b, pieces);
   pushPaintedFloors(b, floors);
   if (opts.includeGroundLayers) pushWorldLayers(b, state);
+  // Bodies of water always bake (authored content, not demo scaffolding).
+  pushWaterBodies(b, state.world.waterBodies);
   return {
     instances: new Float32Array(b.inst),
     total: Math.floor(b.inst.length / INSTANCE_STRIDE),

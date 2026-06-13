@@ -10,6 +10,17 @@
 
 import type { WaterBodyShape } from '../world/water';
 
+// The ONE water surface look, shared by the editor preview render
+// (render3d/WaterBody) and the compiled-game bake (compile/worldGeometry) so the
+// translucent surface is identical in /test and the no-V8 game. A thin slab whose
+// TOP face sits at the body's surfaceY; opacity < 1 routes it through the
+// transparent pass (the same path glass uses), so the bed reads through as depth.
+export const WATER_LOOK = {
+  color: '#2f7fa8',
+  opacity: 0.6,
+  thicknessMeters: 0.12,
+} as const;
+
 export type WaterBodyPreset = {
   label: string;
   shape: WaterBodyShape;
