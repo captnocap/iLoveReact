@@ -89,8 +89,17 @@ export type WorldEvent =
   // ── V24 placed pieces (additions; older logs predate them and stay valid) ──
   | { kind: 'piecePlaced'; placement: PiecePlacement; mapName?: string }
   | { kind: 'pieceRemoved'; id: string; mapName?: string }
-  | { kind: 'pieceEditSet'; id: string; edit: WallEdit; mapName?: string }
+  // edit:null CLEARS the cutout back to none (PLACEDEDIT-0613) — the placed
+  // panel's cutout='none', mirroring the buildings store's setPieceEdit(…,null).
+  | { kind: 'pieceEditSet'; id: string; edit: WallEdit | null; mapName?: string }
   | { kind: 'pieceDoorSet'; id: string; open: boolean; mapName?: string }
+  // PLACEDEDIT-0613 (req_0748, additions): in-place pose + type edits on a
+  // STANDING piece, keyed by id so the editor's selection survives the change
+  // (the iso build pane's PAINT panel gained the buildings-panel placement
+  // controls). Mirror pieceEditSet/pieceSkinSet — the old remove+replace path
+  // minted a fresh id, which thrashed numeric editing from a detached panel.
+  | { kind: 'pieceMoved'; id: string; x: number; y: number; z: number; yawDegrees: number; mapName?: string }
+  | { kind: 'pieceSwapped'; id: string; pieceId: string; mapName?: string }
   // TOWERSKIN-0610 (addition): per-face paint on a STANDING piece — set slots
   // MERGE onto the piece's skin. Mirrors pieceEditSet so the id stays stable
   // (the editor's selection survives painting face after face).
@@ -256,16 +265,26 @@ export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freez
         }
         return { ...state, pieces: state.pieces.filter((piece) => piece.id !== event.id) };
       case 'pieceEditSet': {
-        if (!isWallEdit(event.edit)) return state;
+        // edit:null clears the cutout; any other non-WallEdit is noise.
+        const clearing = event.edit === null;
+        if (!clearing && !isWallEdit(event.edit)) return state;
         const map = eventMapName(event);
         const source = map ? (state.piecesByMap?.[map] ?? []) : state.pieces;
         const index = source.findIndex((piece) => piece.id === event.id);
         if (index < 0) return state;
         // an edit on an editless kind would poison every later tags read —
-        // refuse it here too (the kind contract, enforced at both layers)
-        if (!placedPieceAcceptsEdits(source[index])) return state;
+        // refuse it here too (the kind contract, enforced at both layers).
+        // Clearing is always safe (it only ever removes a cutout).
+        if (!clearing && !placedPieceAcceptsEdits(source[index])) return state;
         const pieces = [...source];
-        pieces[index] = { ...pieces[index], edit: event.edit };
+        if (clearing) {
+          const next = { ...pieces[index] };
+          delete next.edit;
+          delete next.doorOpen; // a cleared cutout has no door-family interaction
+          pieces[index] = next;
+        } else {
+          pieces[index] = { ...pieces[index], edit: event.edit as WallEdit };
+        }
         if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
         return { ...state, pieces };
       }
@@ -278,6 +297,36 @@ export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freez
         if (edit === undefined || !wallEditDefinition(edit).interaction) return state;
         const pieces = [...source];
         pieces[index] = { ...pieces[index], doorOpen: Boolean(event.open) };
+        if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
+        return { ...state, pieces };
+      }
+      case 'pieceMoved': {
+        // PLACEDEDIT-0613: relocate/rotate in place by id (selection survives).
+        // Refuse non-finite poses so a malformed event can't NaN-poison the lift.
+        if (![event.x, event.y, event.z, event.yawDegrees].every((n) => Number.isFinite(n))) return state;
+        const map = eventMapName(event);
+        const source = map ? (state.piecesByMap?.[map] ?? []) : state.pieces;
+        const index = source.findIndex((piece) => piece.id === event.id);
+        if (index < 0) return state;
+        const pieces = [...source];
+        pieces[index] = { ...pieces[index], x: event.x, y: event.y, z: event.z, yawDegrees: event.yawDegrees };
+        if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
+        return { ...state, pieces };
+      }
+      case 'pieceSwapped': {
+        // PLACEDEDIT-0613: swap the catalog type in place. Mirrors the buildings
+        // store's swapPiece — KEEP placement + skin (the override rides the
+        // piece); DROP the edit when the new kind takes none (an edit on an
+        // editless kind would poison every later tags read).
+        if (!isCatalogId(event.pieceId)) return state;
+        const map = eventMapName(event);
+        const source = map ? (state.piecesByMap?.[map] ?? []) : state.pieces;
+        const index = source.findIndex((piece) => piece.id === event.id);
+        if (index < 0) return state;
+        const swapped: PlacedBuildPiece = { ...source[index], pieceId: event.pieceId };
+        if (swapped.edit !== undefined && !placedPieceAcceptsEdits(swapped)) delete swapped.edit;
+        const pieces = [...source];
+        pieces[index] = swapped;
         if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
         return { ...state, pieces };
       }

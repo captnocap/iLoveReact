@@ -23,6 +23,7 @@ import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildFaceSlot, PlacedBuildPiece, WorldEvent } from '@game';
 import { allTextures, type TextureDef } from '@game/textures/registry';
 import { materialFamily } from '../workbench/materials/chooser';
+import { PanelGroups, type FieldSpec, type PanelSpec } from '../../shell/fields';
 
 // ── Face classification: which slot a compass face means on a piece ─────────
 
@@ -236,6 +237,70 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
 
   const brushLabel = brush.kind === 'color' ? brush.value : (materialById.get(brush.id)?.label ?? brush.id);
 
+  // ── single-piece config (req_0748): the iso pane's PAINT panel gains the
+  // buildings-panel controls (piece type, cutout, x/y/z/yaw) + a per-face
+  // provenance readout — the "full picture" for a clicked piece. Pose and type
+  // ride the in-place pieceMoved/pieceSwapped events, so the id (and thus the
+  // selection) survives editing; cutout rides pieceEditSet. Only ONE selected
+  // piece carries a config (placement is per-instance); a multi-select stays a
+  // pure painter (a swatch still paints them all). The widgets are the SAME
+  // FieldSpec/PanelGroups the buildings gutter uses — no re-rolled sliders.
+  const configPiece = selPieces.length === 1 ? selPieces[0] : null;
+  // Anchor the numeric window on the SELECTED id (not the live value) so the
+  // track never recenters mid-edit — a placed piece sits at world meters, far
+  // past the prefab panel's local ±60, so a ±window around it is the nudge range.
+  const anchor = useMemo(
+    () => (configPiece ? { x: Math.round(configPiece.x), y: Math.round(configPiece.y), z: Math.round(configPiece.z) } : null),
+    [configPiece?.id],
+  );
+  const [, bumpConfig] = useState(0);
+  const onConfigEdit = () => bumpConfig((n) => (n + 1) & 0xffff);
+  const configSpec = useMemo<PanelSpec | null>(() => {
+    const p = configPiece;
+    if (!p || !anchor) return null;
+    const kind = GAME_BUILD.catalog.get(p.pieceId).kind;
+    const labels = GAME_BUILD.skins.slotLabels(kind);
+    const live = () => selRef.current[0] ?? p; // commit against the freshest pose
+    const commitOne = (event: WorldEvent, label: string) => commitRef.current([{ event, label }]);
+    const placement = (key: 'x' | 'y' | 'z', label: string): FieldSpec => ({
+      k: label, t: 'num', min: anchor[key] - 64, max: anchor[key] + 64, step: 1, precision: 0,
+      get: () => live()[key],
+      set: (v: number) => { const c = live(); commitOne({ kind: 'pieceMoved', id: c.id, x: c.x, y: c.y, z: c.z, yawDegrees: c.yawDegrees, [key]: v } as WorldEvent, `${label} → ${v}`); },
+    });
+    const faceProvenance = (slot: BuildFaceSlot): FieldSpec => ({
+      k: `${labels[slot]} =`, t: 'val',
+      get: () => {
+        const s = live().skin?.[slot];
+        if (!s) return 'bare';
+        return s.kind === 'color' ? s.value : (materialById.get(s.id)?.label ?? s.id);
+      },
+    });
+    const fields: FieldSpec[] = [
+      {
+        k: 'piece type', t: 'pick',
+        get: () => live().pieceId,
+        opts: () => GAME_BUILD.catalog.ids.map((id) => ({ id, label: GAME_BUILD.catalog.get(id).label, group: `${GAME_BUILD.catalog.get(id).kind}s` })),
+        show: (v: string) => GAME_BUILD.catalog.get(v).label,
+        set: (v: string | null) => { if (!v) return; const c = live(); commitOne({ kind: 'pieceSwapped', id: c.id, pieceId: v } as WorldEvent, `swapped → ${GAME_BUILD.catalog.get(v).label}`); },
+      },
+      ...(GAME_BUILD.placed.acceptsEdits(p) ? [{
+        k: 'cutout', t: 'enum',
+        get: () => live().edit ?? 'none',
+        opts: ['none', ...GAME_BUILD.edits.wallEdits],
+        set: (v: string) => { const c = live(); commitOne({ kind: 'pieceEditSet', id: c.id, edit: v === 'none' ? null : (v as typeof GAME_BUILD.edits.wallEdits[number]) } as WorldEvent, `cutout → ${v}`); },
+      } satisfies FieldSpec] : []),
+      placement('x', 'x'), placement('y', 'y'), placement('z', 'z'),
+      {
+        k: 'yaw°', t: 'num', min: 0, max: 270, step: 90, precision: 0,
+        get: () => ((live().yawDegrees % 360) + 360) % 360,
+        set: (v: number) => { const c = live(); commitOne({ kind: 'pieceMoved', id: c.id, x: c.x, y: c.y, z: c.z, yawDegrees: v } as WorldEvent, `yaw → ${v}°`); },
+      },
+      ...GAME_BUILD.skins.slots.map(faceProvenance),
+    ];
+    const tag = p.id.replace(/^bps?_/, '#');
+    return { groups: [{ title: `PIECE ${tag} ${kind.toUpperCase()}`, layout: 'rows', fields }] };
+  }, [configPiece?.id, configPiece?.pieceId, anchor, materialById]);
+
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b1220', padding: 10, gap: 7 }}>
       <Text fontSize={9} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
@@ -245,6 +310,17 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>
           {'nothing selected — click pieces in the build pane below; the brush you set here is ready when you do'}
         </Text>
+      ) : null}
+
+      {/* the clicked piece's full config — type/cutout/placement/provenance —
+          shares the panel height with the material browser below (each scrolls).
+          Only a single selection carries it; a multi-select stays a painter. */}
+      {configPiece && configSpec ? (
+        <ScrollView style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
+          <Box style={{ gap: 4 }}>
+            <PanelGroups spec={configSpec} onEdit={onConfigEdit} />
+          </Box>
+        </ScrollView>
       ) : null}
 
       {/* faces: big targets, each with a dot of what that face currently wears */}

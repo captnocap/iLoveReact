@@ -5,6 +5,7 @@
 // replay ids, clone-from-world round-trips. Never function-name assertions.
 
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
+import { dumpsterBodyMeters } from '../kinds/props';
 import {
   PLACED_TUNING,
   connectedPieceIds,
@@ -121,6 +122,15 @@ test('no-collision pieces contribute nothing solid', () => {
     placed('trim.cornice.downtown', 5, 5),
   ]);
   assertEqual(rects.length + orientedRects.length, 0, 'bush and trim have no collision mass');
+});
+
+test('dumpster collision uses the same body footprint as the visible model', () => {
+  const { widthMeters: w, depthMeters: d } = dumpsterBodyMeters();
+  const { rects, orientedRects } = placedPieceColliders([placed('prop.dumpster', 10, 20)]);
+  assertEqual(orientedRects.length, 0, 'axis-aligned dumpster stays a plain rect');
+  assertEqual(rects.length, 1, 'one solid dumpster body rect');
+  assertClose(rects[0].maxX - rects[0].minX, w, 1e-9, 'dumpster collision width matches visible body');
+  assertClose(rects[0].maxZ - rects[0].minZ, d, 1e-9, 'dumpster collision depth matches visible body');
 });
 
 test('REQ-0582: build props rest on heightfield terrain without moving structural pieces', () => {
@@ -657,6 +667,57 @@ test('pieceSkinSet paints one face of a STANDING piece — id stable, other slot
   assertEqual(state, before, 'a non-#rrggbb color is refused at the materializer');
   state = worldStream.apply(state, { kind: 'pieceSkinSet', id: 'bp_nope', skin: { front: { kind: 'color', value: '#112233' } } });
   assertEqual(state, before, 'an unknown id paints nothing and crashes nothing');
+});
+
+// ── PLACEDEDIT-0613 (req_0748): in-place pose/type edits keep the id ─────────
+
+test('pieceMoved relocates + rotates a STANDING piece in place — id stable', () => {
+  let state = fold([
+    { kind: 'piecePlaced', placement: { pieceId: 'wall.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0 } },
+  ]);
+  const id = state.pieces[0].id;
+  state = worldStream.apply(state, { kind: 'pieceMoved', id, x: 12, y: 3, z: -4, yawDegrees: 90 });
+  assertEqual(state.pieces[0].id, id, 'moving never re-mints the id (the selection survives a numeric edit)');
+  assertEqual(`${state.pieces[0].x},${state.pieces[0].y},${state.pieces[0].z},${state.pieces[0].yawDegrees}`, '12,3,-4,90', 'the new pose landed');
+  // a non-finite pose is noise, not a crash — it would NaN-poison the lift
+  const before = state;
+  state = worldStream.apply(state, { kind: 'pieceMoved', id, x: Number.NaN, y: 0, z: 0, yawDegrees: 0 });
+  assertEqual(state, before, 'a non-finite pose is refused at the materializer');
+  state = worldStream.apply(state, { kind: 'pieceMoved', id: 'bp_nope', x: 1, y: 1, z: 1, yawDegrees: 0 });
+  assertEqual(state, before, 'an unknown id moves nothing and crashes nothing');
+});
+
+test('pieceSwapped changes the catalog type in place — keeps skin, drops an editless cutout', () => {
+  let state = fold([
+    { kind: 'piecePlaced', placement: { pieceId: 'wall.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0, edit: 'door' } },
+  ]);
+  const id = state.pieces[0].id;
+  state = worldStream.apply(state, { kind: 'pieceSkinSet', id, skin: { front: { kind: 'color', value: '#aa3311' } } });
+  // wall → wall keeps the cutout (wall family accepts edits)
+  state = worldStream.apply(state, { kind: 'pieceSwapped', id, pieceId: 'wall.brick.downtown' });
+  assertEqual(state.pieces[0].id, id, 'swapping never re-mints the id');
+  assertEqual(state.pieces[0].pieceId, 'wall.brick.downtown', 'the type swapped');
+  assertEqual(state.pieces[0].edit, 'door', 'a wall→wall swap keeps the cutout');
+  assertEqual(JSON.stringify(state.pieces[0].skin?.front), '{"kind":"color","value":"#aa3311"}', 'the skin override rides the swap');
+  // wall → floor: a floor takes no cutout, so the edit drops (else it poisons tags)
+  state = worldStream.apply(state, { kind: 'pieceSwapped', id, pieceId: 'floor.concrete.common' });
+  assertEqual(state.pieces[0].edit, undefined, 'an editless target drops the cutout');
+  // unknown catalog id is refused
+  const before = state;
+  state = worldStream.apply(state, { kind: 'pieceSwapped', id, pieceId: 'wall.that.never.was' });
+  assertEqual(state, before, 'an unknown catalog id swaps nothing');
+});
+
+test('pieceEditSet with edit:null clears the cutout back to none', () => {
+  let state = fold([
+    { kind: 'piecePlaced', placement: { pieceId: 'wall.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0, edit: 'door' } },
+  ]);
+  const id = state.pieces[0].id;
+  state = worldStream.apply(state, { kind: 'pieceDoorSet', id, open: true });
+  assertEqual(state.pieces[0].doorOpen, true, 'the door opened (setup)');
+  state = worldStream.apply(state, { kind: 'pieceEditSet', id, edit: null });
+  assertEqual(state.pieces[0].edit, undefined, 'edit:null cleared the cutout');
+  assertEqual(state.pieces[0].doorOpen, undefined, 'a cleared cutout has no door-family interaction left');
 });
 
 // ── RAMPFOOT-0605: the ramp owns footing in its footprint ────────────────────
