@@ -6,6 +6,20 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const cupboardDef: PropKindDefinition = {
+  kind: 'cupboard',
+  label: 'Cupboard',
+  // 1.0m wide, 0.5m deep — yaw-aware thin AABB in world props.
+  solid: true,
+  footprintRadiusMeters: 0.5,
+  footprintDepthMeters: 0.5,
+  heightMeters: 1.9,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'clothing', capacity: 4, spawnFillChance: 0.6, searchSeconds: 3, access: 'open' },
+};
 
 const COLORS = {
   wood: recipeColor('#8a6240'),

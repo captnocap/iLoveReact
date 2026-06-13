@@ -6,6 +6,20 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const ledLightDef: PropKindDefinition = {
+  kind: 'ledLight',
+  label: 'LED Light',
+  solid: true,
+  footprintRadiusMeters: 0.06,
+  footprintDepthMeters: 0.12,
+  heightMeters: 2.4,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'wall',
+  coverClass: 'none',
+};
 
 const COLORS = {
   mount: recipeColor('#2a2d33'),

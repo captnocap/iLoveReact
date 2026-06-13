@@ -6,6 +6,21 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const couchDef: PropKindDefinition = {
+  kind: 'couch',
+  label: 'Couch',
+  // Long like a fence segment — yaw-aware thin AABB in the world props layer.
+  solid: true,
+  footprintRadiusMeters: 0.95,
+  footprintDepthMeters: 0.9,
+  heightMeters: 0.85,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  seat: { pose: 'sit', seatHeightMeters: 0.4, capacity: 3 },
+  coverClass: 'soft',
+};
 
 const COLORS = {
   woodDark: recipeColor('#6b4a2e'),

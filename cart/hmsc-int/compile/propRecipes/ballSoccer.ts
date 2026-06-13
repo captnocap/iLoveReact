@@ -6,6 +6,19 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const ballSoccerDef: PropKindDefinition = {
+  kind: 'ballSoccer',
+  label: 'Soccer Ball',
+  solid: true,
+  // PROPSCALE-0611: regulation size-5 (Ø0.22m) × 1.15
+  footprintRadiusMeters: 0.125,
+  heightMeters: 0.25,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  dynamics: { bodyRadiusMeters: 0.125, restitution: 0.65 },
+};
 
 const COLORS = {
   shell: recipeColor('#f0f0ee'),

@@ -54,6 +54,16 @@ import { barrierDef } from '../../compile/propRecipes/barrier';
 import { trashCanDef } from '../../compile/propRecipes/trashCan';
 import { benchDef } from '../../compile/propRecipes/bench';
 import { planterDef } from '../../compile/propRecipes/planter';
+import { ballBeachDef } from '../../compile/propRecipes/ballBeach';
+import { ballSoccerDef } from '../../compile/propRecipes/ballSoccer';
+import { ballBasketballDef } from '../../compile/propRecipes/ballBasketball';
+import { wallPaintingDef } from '../../compile/propRecipes/wallPainting';
+import { ledLightDef } from '../../compile/propRecipes/ledLight';
+import { couchDef } from '../../compile/propRecipes/couch';
+import { tableDef } from '../../compile/propRecipes/table';
+import { floorLampDef } from '../../compile/propRecipes/floorLamp';
+import { cupboardDef } from '../../compile/propRecipes/cupboard';
+import { mirrorDef } from '../../compile/propRecipes/mirror';
 
 export type BuiltinPropKind =
   | 'rock'
@@ -547,104 +557,23 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   // Solid: they get a host-physics blocking rect like every obstacle, so the
   // player collides with them. (Rolling/kick dynamics is a separate system —
   // props are static world geometry today.)
-  ballBeach: {
-    kind: 'ballBeach',
-    label: 'Beach Ball',
-    solid: true,
-    footprintRadiusMeters: 0.4,
-    heightMeters: 0.8,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.4, restitution: 0.75 },
-  },
-  ballSoccer: {
-    kind: 'ballSoccer',
-    label: 'Soccer Ball',
-    solid: true,
-    // PROPSCALE-0611: regulation size-5 (Ø0.22m) × 1.15
-    footprintRadiusMeters: 0.125,
-    heightMeters: 0.25,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.125, restitution: 0.65 },
-  },
-  ballBasketball: {
-    kind: 'ballBasketball',
-    label: 'Basketball',
-    solid: true,
-    // PROPSCALE-0611: regulation size-7 (Ø0.24m) × 1.15
-    footprintRadiusMeters: 0.14,
-    heightMeters: 0.28,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.14, restitution: 0.78 },
-  },
+  ballBeach: ballBeachDef,
+  ballSoccer: ballSoccerDef,
+  ballBasketball: ballBasketballDef,
 
   // ── wall decor ─────────────────────────────────────────────────────────────
   // Anchored at the wall base; the decor hangs at height in the model. The
   // thin solid footprint sits flush against the wall it mounts on.
-  wallPainting: {
-    kind: 'wallPainting',
-    label: 'Wall Painting',
-    solid: true,
-    footprintRadiusMeters: 0.08,
-    footprintDepthMeters: 0.16,
-    heightMeters: 2.1,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'wall',
-    coverClass: 'none',
-  },
-  ledLight: {
-    kind: 'ledLight',
-    label: 'LED Light',
-    solid: true,
-    footprintRadiusMeters: 0.06,
-    footprintDepthMeters: 0.12,
-    heightMeters: 2.4,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'wall',
-    coverClass: 'none',
-  },
+  wallPainting: wallPaintingDef,
+  ledLight: ledLightDef,
 
   // ── furniture ──────────────────────────────────────────────────────────────
   // Chairs own their data in their own files (the file with the most data owns
   // it) — see compile/propRecipes/<chair>.ts. This registry just collects them.
   diningChair: diningChairDef,
-  couch: {
-    kind: 'couch',
-    label: 'Couch',
-    // Long like a fence segment — yaw-aware thin AABB in the world props layer.
-    solid: true,
-    footprintRadiusMeters: 0.95,
-    footprintDepthMeters: 0.9,
-    heightMeters: 0.85,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'sit', seatHeightMeters: 0.4, capacity: 3 },
-    coverClass: 'soft',
-  },
-  table: {
-    kind: 'table',
-    label: 'Table',
-    solid: true,
-    footprintRadiusMeters: 0.6,
-    heightMeters: 0.78,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'soft',
-  },
-  floorLamp: {
-    kind: 'floorLamp',
-    label: 'Floor Lamp',
-    solid: true,
-    footprintRadiusMeters: 0.2,
-    heightMeters: 1.7,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'none',
-  },
+  couch: couchDef,
+  table: tableDef,
+  floorLamp: floorLampDef,
   // Chair TYPES (color is a skin, not a kind id) — each owns its data in its file.
   armchair: armchairDef,
   officeChair: officeChairDef,
@@ -677,31 +606,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     seat: { pose: 'lay', seatHeightMeters: 0.48, capacity: 2 },
     coverClass: 'soft',
   },
-  cupboard: {
-    kind: 'cupboard',
-    label: 'Cupboard',
-    // 1.0m wide, 0.5m deep — yaw-aware thin AABB in world props.
-    solid: true,
-    footprintRadiusMeters: 0.5,
-    footprintDepthMeters: 0.5,
-    heightMeters: 1.9,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'clothing', capacity: 4, spawnFillChance: 0.6, searchSeconds: 3, access: 'open' },
-  },
-  mirror: {
-    kind: 'mirror',
-    label: 'Mirror',
-    // Wall decor: anchor at the wall base, the glass hangs at height.
-    solid: true,
-    footprintRadiusMeters: 0.06,
-    footprintDepthMeters: 0.12,
-    heightMeters: 1.9,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'wall',
-    coverClass: 'none',
-  },
+  cupboard: cupboardDef,
+  mirror: mirrorDef,
   sink: {
     kind: 'sink',
     label: 'Sink',

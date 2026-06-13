@@ -6,6 +6,21 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const mirrorDef: PropKindDefinition = {
+  kind: 'mirror',
+  label: 'Mirror',
+  // Wall decor: anchor at the wall base, the glass hangs at height.
+  solid: true,
+  footprintRadiusMeters: 0.06,
+  footprintDepthMeters: 0.12,
+  heightMeters: 1.9,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'wall',
+  coverClass: 'none',
+};
 
 const COLORS = {
   frame: recipeColor('#8c9299'),

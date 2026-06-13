@@ -6,6 +6,18 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const floorLampDef: PropKindDefinition = {
+  kind: 'floorLamp',
+  label: 'Floor Lamp',
+  solid: true,
+  footprintRadiusMeters: 0.2,
+  heightMeters: 1.7,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'none',
+};
 
 const COLORS = {
   metal: recipeColor('#3a3f46'),

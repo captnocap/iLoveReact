@@ -6,6 +6,18 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const tableDef: PropKindDefinition = {
+  kind: 'table',
+  label: 'Table',
+  solid: true,
+  footprintRadiusMeters: 0.6,
+  heightMeters: 0.78,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'soft',
+};
 
 const COLORS = {
   wood: recipeColor('#8a6240'),

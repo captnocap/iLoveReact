@@ -6,6 +6,20 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const wallPaintingDef: PropKindDefinition = {
+  kind: 'wallPainting',
+  label: 'Wall Painting',
+  solid: true,
+  footprintRadiusMeters: 0.08,
+  footprintDepthMeters: 0.16,
+  heightMeters: 2.1,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'wall',
+  coverClass: 'none',
+};
 
 const COLORS = {
   frame: recipeColor('#3d2b1c'),

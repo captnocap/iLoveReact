@@ -6,6 +6,18 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const ballBeachDef: PropKindDefinition = {
+  kind: 'ballBeach',
+  label: 'Beach Ball',
+  solid: true,
+  footprintRadiusMeters: 0.4,
+  heightMeters: 0.8,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  dynamics: { bodyRadiusMeters: 0.4, restitution: 0.75 },
+};
 
 const COLORS = {
   shell: recipeColor('#f4f1e8'),
