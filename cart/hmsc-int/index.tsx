@@ -425,6 +425,7 @@ function EditorShell() {
                 paintPieces={buildPieces}
                 paintSelectedIds={isoSelectedIds}
                 onPaintCommit={commitBuildEvents}
+                onOpenPainter={() => { requestWorkbenchSource('paint'); nav.push('/workbench'); }}
               />
             }
             bottomLeft={

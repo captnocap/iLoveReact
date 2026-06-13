@@ -66,12 +66,14 @@ export function RightPanel(props: {
   paintPieces: readonly PlacedBuildPiece[];
   paintSelectedIds: ReadonlySet<string>;
   onPaintCommit: (items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => void;
+  // req_0749: the PAINT tab's "paint a texture…" door → the /workbench painter.
+  onOpenPainter?: () => void;
 }) {
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'row', backgroundColor: '#0b1320' }}>
       {/* Active tab content */}
       <Box style={{ flexGrow: 1, minWidth: 0, height: '100%' }}>
-        {props.tab === 'paint' ? <FacePainter pieces={props.paintPieces} selectedIds={props.paintSelectedIds} commitBatch={props.onPaintCommit} /> : null}
+        {props.tab === 'paint' ? <FacePainter pieces={props.paintPieces} selectedIds={props.paintSelectedIds} commitBatch={props.onPaintCommit} onOpenPainter={props.onOpenPainter} /> : null}
         {props.tab === 'objects' ? <ObjectsTab buildingPrefabs={props.buildingPrefabs} onPlace={props.onPlace} activePlaceable={props.activePlaceable} onArmPlaceable={props.onArmPlaceable} onArmScatter={props.onArmScatter} /> : null}
         {props.tab === 'notes' ? <NotesTab notes={props.notes} onNotes={props.onNotes} /> : null}
         {props.tab === 'chat' ? <ChatTab /> : null}

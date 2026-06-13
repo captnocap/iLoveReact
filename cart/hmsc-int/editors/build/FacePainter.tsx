@@ -22,8 +22,10 @@ import { Box, Effect, Pressable, ScrollView, Text, TextInput } from '@reactjit/p
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildFaceSlot, PlacedBuildPiece, WorldEvent } from '@game';
 import { allTextures, type TextureDef } from '@game/textures/registry';
+import { useCustomTextures } from '@game/textures/materials';
 import { materialFamily } from '../workbench/materials/chooser';
 import { PanelGroups, type FieldSpec, type PanelSpec } from '../../shell/fields';
+import { uploadFaceTexture } from './uploadFaceTexture';
 
 // ── Face classification: which slot a compass face means on a piece ─────────
 
@@ -122,6 +124,10 @@ export interface FacePainterProps {
   selectedIds: ReadonlySet<string>;
   // The iso pane's batched commit: many pieceSkinSet events as ONE undo step.
   commitBatch: (items: ReadonlyArray<{ event: WorldEvent; label: string }>) => void;
+  // req_0749: open the full texture painter (the /workbench PAINT source) for
+  // drawing/layered editing — the cart routes there; whatever you save to the
+  // library appears in the browser below to apply. Omitted = the button hides.
+  onOpenPainter?: () => void;
 }
 
 export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
@@ -145,11 +151,14 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   const [hexDraft, setHexDraft] = useState('');
   const hexValid = /^#[0-9a-fA-F]{6}$/.test(hexDraft);
 
-  // Registry materials (built-in + Materialized customs; read at mount — a
-  // material stored mid-session appears after the next reload), grouped for
-  // navigation. Only the open group's (or the search hits') swatch previews
-  // mount — never the whole registry at once, which is a live <Effect> apiece.
-  const materials = useMemo(() => allTextures(), []);
+  // Registry materials (built-in + Materialized customs), grouped for
+  // navigation. Subscribed to the custom-texture store (req_0749) so an image
+  // uploaded right here — or a texture saved in the painter — appears in the
+  // browser the moment it lands, no reload. Only the open group's (or the
+  // search hits') swatch previews mount — never the whole registry at once,
+  // which is a live <Effect> apiece.
+  const customTextures = useCustomTextures();
+  const materials = useMemo(() => allTextures(), [customTextures]);
   const materialById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
   // The 'all' group (req_0711) heads the list so the ENTIRE textures menu is one
   // click away from the workspace — no trip to the Objects tab. It's opt-in
@@ -234,6 +243,20 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   };
 
   const pickMaterial = (id: string) => pickBrush({ kind: 'material', id });
+
+  // Upload an image (req_0749): the picker → a stored decal material → set as
+  // the BRUSH (not auto-painted onto every side — an uploaded image is usually
+  // for ONE face, like a poster, so the next click is a face button). It's in
+  // the browser too (useCustomTextures), where its swatch covers all sides if
+  // that's what you want. `uploading` guards the native picker double-open.
+  const [uploading, setUploading] = useState(false);
+  const onUploadImage = () => {
+    if (uploading) return;
+    setUploading(true);
+    void uploadFaceTexture()
+      .then((r) => { if (r) { const b: BuildFaceSkin = { kind: 'material', id: r.id }; setBrush(b); pushRecent(b); } })
+      .finally(() => setUploading(false));
+  };
 
   const brushLabel = brush.kind === 'color' ? brush.value : (materialById.get(brush.id)?.label ?? brush.id);
 
@@ -396,6 +419,25 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
           onChangeText={(v: string) => { setHexDraft(v); if (/^#[0-9a-fA-F]{6}$/.test(v)) pickBrush({ kind: 'color', value: v }); }}
           style={{ width: 66, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: hexDraft.length === 0 ? '#27364a' : hexValid ? '#34d399' : '#b04a3a', borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
         />
+      </Box>
+
+      {/* textures from here (req_0749): upload an image straight onto the piece,
+          or open the full painter to draw/layer one — both feed the SAME library
+          the browser below reads, so what you make lands as a usable swatch. */}
+      <Box style={{ flexDirection: 'row', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>TEXTURE</Text>
+        <Pressable onPress={onUploadImage} hoverable tooltip="pick an image — it becomes your brush; click a face button (N/E/S/W/Top/In) to put it on just that side, or its swatch below to cover all sides">
+          <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: '#3a4f6b', backgroundColor: uploading ? '#1e293b' : '#16233a' }}>
+            <Text fontSize={9} color={uploading ? '#64748b' : '#7dd3fc'} style={{ fontFamily: 'monospace' }}>{uploading ? 'opening…' : 'open image…'}</Text>
+          </Box>
+        </Pressable>
+        {props.onOpenPainter ? (
+          <Pressable onPress={props.onOpenPainter} hoverable tooltip="open the texture painter — draw, layer, smart-select, save to library">
+            <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: '#3a4f6b', backgroundColor: '#16233a' }}>
+              <Text fontSize={9} color="#a8b6c8" style={{ fontFamily: 'monospace' }}>paint a texture…</Text>
+            </Box>
+          </Pressable>
+        ) : null}
       </Box>
 
       {/* materials: the ENTIRE textures menu, in the workspace (req_0711). A live
