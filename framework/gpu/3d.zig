@@ -260,6 +260,7 @@ var g_pipeline_transparent: ?*wgpu.RenderPipeline = null;
 // pipeline serves them all. group0 = SceneUniforms (shared layout); group1 = a
 // per-chunk storage buffer holding D. No baked texture — crisp at any zoom.
 var g_ground_pipeline: ?*wgpu.RenderPipeline = null;
+var g_ground_formula_hash: u64 = 0; // formula the live pipeline was built from; rebuild on change
 var g_ground_bgl: ?*wgpu.BindGroupLayout = null; // group1: read-only storage D
 const GROUND_POOL = 16; // distinct D buffers (≈ max simultaneously-drawn ground chunks)
 const GROUND_DATA_FLOATS = 20000; // cap per chunk: 130*130 cells + palette + ribbon, ample
@@ -1371,9 +1372,16 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
 // shipped formula (hf_ground_rgb + helpers) + scene3d_ground_epilogue. The
 // formula is identical across chunks, so this runs exactly once.
 fn ensureGroundPipeline(formula: []const u8) void {
-    if (g_ground_pipeline != null) return;
+    // Rebuild when the formula CHANGES, not just once: a TSX hot-reload (e.g. a
+    // tile-material fix) ships a new formula string, and a cached pipeline would
+    // keep running the stale shader (roads reading as concrete). Hash-gate it so
+    // an unchanged formula is a no-op but an edited one re-compiles.
+    const h = std.hash.Wyhash.hash(0, formula);
+    if (g_ground_pipeline != null and h == g_ground_formula_hash) return;
     const device = core.getDevice() orelse return;
     if (g_bind_group_layout == null or g_ground_bgl == null) return;
+    if (g_ground_pipeline) |old| old.release();
+    g_ground_pipeline = null;
     const wgsl = std.fmt.bufPrint(&g_ground_wgsl_buf, "{s}\n{s}\n{s}\n{s}", .{
         shaders.scene3d_ground_prefix, effect_assemble.MATH, formula, shaders.scene3d_ground_epilogue,
     }) catch return;
@@ -1428,6 +1436,7 @@ fn ensureGroundPipeline(formula: []const u8) void {
         .multisample = .{},
         .fragment = &frag,
     });
+    if (g_ground_pipeline != null) g_ground_formula_hash = h;
 }
 
 fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
