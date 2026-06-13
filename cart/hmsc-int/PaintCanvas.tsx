@@ -867,9 +867,12 @@ export function PaintCanvas(props: {
     heightStamped.current.add(stampKey);
     const radiusM = Math.max(0.5, b.size);
     const rd = Math.max(1, Math.ceil(radiusM / DOT_M));
-    // Water level = the brush Z (must be > 0 to read as water); flat profile fills
-    // the footprint to that level. Erase pulls cells back to dry (0).
-    const level = b.mode === 'erase' ? 0 : Math.max(0, b.centerZ);
+    // Water level = the brush Z's MAGNITUDE (the surface must be positive to hold
+    // water above the bed; the sign on the height slider is for digging terrain,
+    // which is meaningless here, so |Z| keeps the brush from no-op'ing on a
+    // negative value). At least 1 m so any stroke deposits visible water. Flat
+    // profile fills the footprint to that level; erase pulls cells back to dry.
+    const level = b.mode === 'erase' ? 0 : Math.max(1, Math.abs(b.centerZ));
     for (const ch of focusedChunks) {
       const cols = ch.water.cols, rows = ch.water.rows;
       const cix = Math.round((gx - ch.cx * PATCH + PATCH / 2) / PATCH * (cols - 1));
