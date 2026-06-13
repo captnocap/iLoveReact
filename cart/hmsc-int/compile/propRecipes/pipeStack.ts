@@ -1,5 +1,18 @@
 import { cylinder8, STEEL, STEEL_DARK, type Color, type PropPartSpec } from '../../game/kinds/propModels';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const pipeStackDef: PropKindDefinition = {
+  kind: 'pipeStack',
+  label: 'Pipe Stack',
+  // A pyramid of steel pipes lying along local X (yaw-aware AABB).
+  solid: true,
+  footprintRadiusMeters: 1.75,
+  heightMeters: 1.0,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
+
 export function pipeStackParts(): PropPartSpec[] {
   const len = 3.4;
   const r = 0.17;

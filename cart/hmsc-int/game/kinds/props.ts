@@ -80,6 +80,16 @@ import { posterDef } from '../../compile/propRecipes/poster';
 import { hospitalSignDef } from '../../compile/propRecipes/hospitalSign';
 import { policeSignDef } from '../../compile/propRecipes/policeSign';
 import { bookStackDef } from '../../compile/propRecipes/bookStack';
+import { recordPlayerDef } from '../../compile/propRecipes/recordPlayer';
+import { vinylRecordDef } from '../../compile/propRecipes/vinylRecord';
+import { albumCoverDef } from '../../compile/propRecipes/albumCover';
+import { speakerDef } from '../../compile/propRecipes/speaker';
+import { speakerStackDef } from '../../compile/propRecipes/speakerStack';
+import { cassetteDef } from '../../compile/propRecipes/cassette';
+import { shippingContainerDef } from '../../compile/propRecipes/shippingContainer';
+import { concretePipeDef } from '../../compile/propRecipes/concretePipe';
+import { pipeStackDef } from '../../compile/propRecipes/pipeStack';
+import { corrugatedSheetDef } from '../../compile/propRecipes/corrugatedSheet';
 
 export type BuiltinPropKind =
   | 'rock'
@@ -725,109 +735,16 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   hospitalSign: hospitalSignDef,
   policeSign: policeSignDef,
   bookStack: bookStackDef,
-  recordPlayer: {
-    kind: 'recordPlayer',
-    label: 'Record Player',
-    solid: false,
-    footprintRadiusMeters: 0.26,
-    heightMeters: 0.21,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'surface',
-  },
-  vinylRecord: {
-    kind: 'vinylRecord',
-    label: 'Vinyl Record',
-    solid: false,
-    footprintRadiusMeters: 0.18,
-    heightMeters: 0.04,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'surface',
-  },
-  albumCover: {
-    kind: 'albumCover',
-    label: 'Album Cover',
-    // A standing record sleeve; the cover is an image target (req_0635).
-    solid: false,
-    footprintRadiusMeters: 0.19,
-    heightMeters: 0.37,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'surface',
-  },
-  speaker: {
-    kind: 'speaker',
-    label: 'Speaker',
-    solid: true,
-    footprintRadiusMeters: 0.22,
-    heightMeters: 1.15,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  speakerStack: {
-    kind: 'speakerStack',
-    label: 'PA Speaker Stack',
-    solid: true,
-    footprintRadiusMeters: 0.46,
-    heightMeters: 1.9,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'hard',
-  },
-  cassette: {
-    kind: 'cassette',
-    label: 'Cassette',
-    solid: false,
-    footprintRadiusMeters: 0.06,
-    heightMeters: 0.02,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'surface',
-  },
-  shippingContainer: {
-    kind: 'shippingContainer',
-    label: 'Shipping Container',
-    // Real 20ft box (6.06 × 2.44 × 2.59) × 1.15. Long — yaw-aware thin AABB.
-    solid: true,
-    footprintRadiusMeters: 3.5,
-    heightMeters: 3.0,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'tools', capacity: 8, spawnFillChance: 0.6, searchSeconds: 5, access: 'locked' },
-    coverClass: 'hard',
-  },
-  concretePipe: {
-    kind: 'concretePipe',
-    label: 'Concrete Pipe',
-    // A lying Ø1.4 culvert section; spans local X (yaw-aware AABB).
-    solid: true,
-    footprintRadiusMeters: 1.3,
-    heightMeters: 1.6,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  pipeStack: {
-    kind: 'pipeStack',
-    label: 'Pipe Stack',
-    // A pyramid of steel pipes lying along local X (yaw-aware AABB).
-    solid: true,
-    footprintRadiusMeters: 1.75,
-    heightMeters: 1.0,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  corrugatedSheet: {
-    kind: 'corrugatedSheet',
-    label: 'Corrugated Sheet',
-    // A leaning zinc sheet; thin span along local X (yaw-aware AABB).
-    solid: true,
-    footprintRadiusMeters: 1.0,
-    heightMeters: 2.3,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'hard',
-  },
+  recordPlayer: recordPlayerDef,
+  vinylRecord: vinylRecordDef,
+  albumCover: albumCoverDef,
+  speaker: speakerDef,
+  speakerStack: speakerStackDef,
+  cassette: cassetteDef,
+  shippingContainer: shippingContainerDef,
+  concretePipe: concretePipeDef,
+  pipeStack: pipeStackDef,
+  corrugatedSheet: corrugatedSheetDef,
   cableSpool: {
     kind: 'cableSpool',
     label: 'Cable Spool',

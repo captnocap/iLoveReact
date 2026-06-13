@@ -1,5 +1,18 @@
 import { box, cylinder8, cylinder16, hx, NEAR_BLACK, STEEL, WOOD, type PropPartSpec } from '../../game/kinds/propModels';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const recordPlayerDef: PropKindDefinition = {
+  kind: 'recordPlayer',
+  label: 'Record Player',
+  solid: false,
+  footprintRadiusMeters: 0.26,
+  heightMeters: 0.21,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'surface',
+};
+
 export function recordPlayerParts(): PropPartSpec[] {
   return [
     box([0, 0.07, 0], [0.5, 0.14, 0.4], WOOD),

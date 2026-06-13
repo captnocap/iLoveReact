@@ -1,6 +1,20 @@
 import { box, hx, RUST, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const corrugatedSheetDef: PropKindDefinition = {
+  kind: 'corrugatedSheet',
+  label: 'Corrugated Sheet',
+  // A leaning zinc sheet; thin span along local X (yaw-aware AABB).
+  solid: true,
+  footprintRadiusMeters: 1.0,
+  heightMeters: 2.3,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'hard',
+};
+
 export function corrugatedSheetParts(): PropPartSpec[] {
   const h = propKindDefinition('corrugatedSheet').heightMeters;
   const zinc = hx('#b8bcb6');

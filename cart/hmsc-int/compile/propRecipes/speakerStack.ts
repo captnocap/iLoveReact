@@ -1,6 +1,19 @@
 import { box, cylinder16, hx, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const speakerStackDef: PropKindDefinition = {
+  kind: 'speakerStack',
+  label: 'PA Speaker Stack',
+  solid: true,
+  footprintRadiusMeters: 0.46,
+  heightMeters: 1.9,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'hard',
+};
+
 export function speakerStackParts(): PropPartSpec[] {
   const h = propKindDefinition('speakerStack').heightMeters;
   const cab = hx('#23262a');

@@ -1,6 +1,21 @@
 import { box, hx, STEEL_DARK, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const shippingContainerDef: PropKindDefinition = {
+  kind: 'shippingContainer',
+  label: 'Shipping Container',
+  // Real 20ft box (6.06 × 2.44 × 2.59) × 1.15. Long — yaw-aware thin AABB.
+  solid: true,
+  footprintRadiusMeters: 3.5,
+  heightMeters: 3.0,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'tools', capacity: 8, spawnFillChance: 0.6, searchSeconds: 5, access: 'locked' },
+  coverClass: 'hard',
+};
+
 export function shippingContainerParts(): PropPartSpec[] {
   const def = propKindDefinition('shippingContainer');
   const len = def.footprintRadiusMeters * 2;

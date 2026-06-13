@@ -1,6 +1,19 @@
 import { CONCRETE, cylinder16, hx, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const concretePipeDef: PropKindDefinition = {
+  kind: 'concretePipe',
+  label: 'Concrete Pipe',
+  // A lying Ø1.4 culvert section; spans local X (yaw-aware AABB).
+  solid: true,
+  footprintRadiusMeters: 1.3,
+  heightMeters: 1.6,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
+
 export function concretePipeParts(): PropPartSpec[] {
   const def = propKindDefinition('concretePipe');
   const radius = def.heightMeters / 2;

@@ -1,6 +1,18 @@
 import { box, cylinder8, cylinder16, hx, sphere, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const speakerDef: PropKindDefinition = {
+  kind: 'speaker',
+  label: 'Speaker',
+  solid: true,
+  footprintRadiusMeters: 0.22,
+  heightMeters: 1.15,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
+
 export function speakerParts(): PropPartSpec[] {
   const h = propKindDefinition('speaker').heightMeters;
   return [
