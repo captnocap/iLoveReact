@@ -262,7 +262,10 @@ var g_pipeline_transparent: ?*wgpu.RenderPipeline = null;
 var g_ground_pipeline: ?*wgpu.RenderPipeline = null;
 var g_ground_formula_hash: u64 = 0; // formula the live pipeline was built from; rebuild on change
 var g_ground_bgl: ?*wgpu.BindGroupLayout = null; // group1: read-only storage D
-const GROUND_POOL = 16; // distinct D buffers (≈ max simultaneously-drawn ground chunks)
+const GROUND_POOL = 128; // distinct D buffers (≈ max simultaneously-drawn ground chunks).
+// Was 16 — a city's worth of painted chunks (one ground mesh each) blew past it and
+// every chunk past the 16th was silently dropped, so roads vanished / stopped at a
+// chunk seam (PERTILEROAD-0814). 128 × 20000 f32 ≈ 10 MB of pooled storage buffers.
 const GROUND_DATA_FLOATS = 20000; // cap per chunk: 130*130 cells + palette + ribbon, ample
 var g_ground_data_buf: [GROUND_POOL]?*wgpu.Buffer = [_]?*wgpu.Buffer{null} ** GROUND_POOL;
 var g_ground_data_bg: [GROUND_POOL]?*wgpu.BindGroup = [_]?*wgpu.BindGroup{null} ** GROUND_POOL;
@@ -1684,6 +1687,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     var gidx: [GROUND_POOL]u32 = undefined;
     var gslot: [GROUND_POOL]GeoSlice = undefined;
     var gcount: usize = 0;
+    var dbg_ground_seen: u32 = 0; // ground-formula meshes SEEN (uncapped) vs gcount collected
 
     var dbg_inst_seen: u32 = 0; // req_0727: instanced (bucket) meshes seen vs collected
     var dbg_inst_collected: u32 = 0;
@@ -1692,6 +1696,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         const child = &scene_node.children[ci];
         if (!child.scene3d_mesh) continue;
         if (child.scene3d_instance_count > 0) dbg_inst_seen += 1;
+        if (child.scene3d_ground_formula != null) dbg_ground_seen += 1; // total ground meshes (pre-cull)
         // Draw-radius cull. Only with an explicit camera `far`, and only for
         // single (non-instanced) meshes — an instance batch carries many
         // positions, not this node's one. Skip if the mesh's nearest point is
@@ -1931,6 +1936,9 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     //    so drawn after the opaque batch and before the transparent pass. Build the
     //    one pipeline lazily, then per chunk upload its D ref stream to a pool
     //    buffer, write the model instance, and draw. ──
+    const dbg_ground_inst_top_start = inst_top;
+    var dbg_ground_drawn: u32 = 0;
+    var dbg_ground_broke = false;
     if (gcount > 0 and scene_node.children[gidx[0]].scene3d_ground_formula != null) {
         ensureGroundPipeline(scene_node.children[gidx[0]].scene3d_ground_formula.?);
         if (g_ground_pipeline) |gp| {
@@ -1938,13 +1946,20 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
             pass.setBindGroup(0, g_bind_group.?, 0, null);
             var gp_i: usize = 0;
             while (gp_i < gcount) : (gp_i += 1) {
-                if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) break;
+                if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) { dbg_ground_broke = true; break; }
                 const child = &scene_node.children[gidx[gp_i]];
                 const pool = gp_i; // gcount <= GROUND_POOL → one distinct buffer per draw
                 if (g_ground_data_buf[pool] == null or g_ground_data_bg[pool] == null) continue;
                 if (child.scene3d_ground_data) |d| {
                     const n = @min(d.len, GROUND_DATA_FLOATS);
-                    queue.writeBuffer(g_ground_data_buf[pool].?, 0, @ptrCast(d.ptr), n * @sizeOf(f32));
+                    // The byte size MUST be computed in u64 (req_0842): the old
+                    // `n * @sizeOf(f32)` overflowed a narrow integer (e.g. 14528*4 came
+                    // out 25344 instead of 58112), so writeBuffer uploaded only ~6336 of
+                    // the 14528 floats. Every cell past that read 0 = water = concrete
+                    // material, so painted roads rendered as concrete past a per-chunk
+                    // seam. The vertex/instance writes already cast to u64; this one
+                    // didn't. Keep the cast.
+                    queue.writeBuffer(g_ground_data_buf[pool].?, 0, @ptrCast(d.ptr), @as(u64, n) * @sizeOf(f32));
                 }
                 const inst_index: usize = @intCast(inst_top / @sizeOf(InstanceData));
                 inst_scratch[inst_index] = makeInstance(
@@ -1969,10 +1984,16 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                 pass.setVertexBuffer(1, g_instance_buf.?, inst_top, @sizeOf(InstanceData));
                 pass.draw(gslot[gp_i].count, 1, 0, 0);
                 inst_top += @sizeOf(InstanceData);
+                dbg_ground_drawn += 1;
                 g_telemetry.draw_calls += 1;
                 g_telemetry.instances += 1;
             }
         }
+    }
+    if (g_dbg_frame % 120 == 1) {
+        const inst_used: u64 = dbg_ground_inst_top_start / @sizeOf(InstanceData);
+        const inst_cap: u64 = inst_cap_bytes / @sizeOf(InstanceData);
+        std.debug.print("[ground-pass] seen={d} collected(gcount)={d} drawn={d} pool_cap={d} inst_used_before_ground={d}/{d} broke_on_inst_cap={}\n", .{ dbg_ground_seen, gcount, dbg_ground_drawn, GROUND_POOL, inst_used, inst_cap, dbg_ground_broke });
     }
 
     // Glass and other alpha<1 meshes, drawn after every opaque draw so they read

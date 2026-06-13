@@ -54,7 +54,11 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
   let cx = clamp(i32(floor(uv0.x * f32(cols))), 0, cols - 1);
   let cy = clamp(i32(floor(uv0.y * f32(rows))), 0, rows - 1);
   let kind = i32(D[cellBase + cy * cols + cx]);
-  return vec3f(uv0.y, f32(cy) / f32(rows), f32(max(kind, 0)) / 24.0);
+  // Raw uv visualization: R = uv.x, G = uv.y, B = 0. If the mesh uv is linear and
+  // sane, this is a smooth red→green gradient across the chunk; a break/wrap exposes
+  // the mesh-uv bug directly. (D access kept above so the formula matches the real
+  // one's structure, but the output ignores it to isolate uv.)
+  return vec3f(uv0.x, uv0.y, 0.0);
 }
 `;
 // Fiducial offsets from the view centre + the /mesh zoom. Tight zoom so a 1m cell is
@@ -102,7 +106,7 @@ function DiagLandform(props: { landform: any }) {
     <Scene3D.Mesh
       geometry={Geometry.Heightfield}
       params={{ heights: field.heights, cols: field.cols, rows: field.rows, width: field.width, depth: field.depth, base: field.base }}
-      dynamicKey={`diag_${lf.id}`}
+      dynamicKey={`landform_${lf.id}~0`}
       material="#ffffff"
       groundFormula={DIAG_FORMULA}
       groundData={data}
