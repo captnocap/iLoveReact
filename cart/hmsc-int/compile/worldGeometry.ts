@@ -45,7 +45,7 @@ import type { DecalAssetSink } from './decalAssets';
 import { createInteractableSink, type InteractableSink } from './worldInteractables';
 import { createDynamicPropSink, type DynamicPropSink } from './worldDynamicProps';
 import {
-  box, cylinder8, cylinder16, sphere, propModelParts,
+  box, cylinder8, cylinder16, sphere, propModelParts, propPartId,
   type Color, type Rotation, type PropPartShape, type PropPartSpec,
 } from '../game/kinds/propModels';
 import { ballBasketballParts } from './propRecipes/ballBasketball';
@@ -421,19 +421,21 @@ function propRotation(prop: WorldProp, local: Rotation | undefined): Rotation {
   return [local?.[0] ?? 0, (prop.yawDegrees ?? 0) + (local?.[1] ?? 0), local?.[2] ?? 0];
 }
 
-function pushPropPart(b: Build, prop: WorldProp, part: PropPartSpec): void {
+function pushPropPart(b: Build, prop: WorldProp, part: PropPartSpec, index: number): void {
   const p = propAt(prop, part.local);
-  // A part with a partId is an image target (req_0635): the placed prop's
-  // partTextures[partId] is a TEXTURE_REGISTRY id whose shader/decal recipe
-  // interns into the materials vocab — the SAME channel face skins ship
-  // through. Unresolvable ids (react-facade textures) keep the flat color.
-  const textureId = part.partId !== undefined ? prop.partTextures?.[part.partId] : undefined;
+  // EVERY part is a texture target now (req_0757): the placed prop's
+  // partTextures[id] is a TEXTURE_REGISTRY id whose shader/decal recipe interns
+  // into the materials vocab — the SAME channel face skins ship through. The id
+  // is propPartId(spec,index) — a panel's own partId, else its recipe index —
+  // the SAME key /test's DataProp stores under, so the bake textures the mesh
+  // the user clicked. Unresolvable ids (react-facade textures) keep flat color.
+  const textureId = prop.partTextures?.[propPartId(part, index)];
   const material = textureId ? internMaterial(b, { kind: 'material', id: textureId }) : 0;
   pushShape(b, propShapeId(part.shape), p[0], p[1], p[2], propRotation(prop, part.rotation), part.size[0], part.size[1], part.size[2], part.color, material);
 }
 
 function pushPropParts(b: Build, prop: WorldProp, parts: readonly PropPartSpec[]): number {
-  for (const part of parts) pushPropPart(b, prop, part);
+  parts.forEach((part, index) => pushPropPart(b, prop, part, index));
   return parts.length;
 }
 
@@ -1043,6 +1045,9 @@ function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number
         y: piece.y,
         z: piece.z,
         yawDegrees: piece.yawDegrees,
+        // PROPSKIN-0766: bake the placed prop's per-part textures (the same
+        // partTextures channel /test renders) so the compiled prop wears them.
+        partTextures: piece.partTextures,
         createdByCommand: 'hmsc-int:compile-build-prop',
       });
       continue;

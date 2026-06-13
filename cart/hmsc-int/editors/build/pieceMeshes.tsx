@@ -18,6 +18,7 @@ import type { PlacedBuildPiece } from '@game';
 import type { WorldProp } from '../../design';
 import { Prop } from '../../render3d/Prop';
 import { propDynamics } from '../../game/kinds/props';
+import { propModelFootprintMeters } from '../../game/kinds/propModels';
 import { BUILD_UI, pieceVisualShapes, wallJoinSignature } from './pieceShapes';
 import type { VisualBox, VisualShape } from './pieceShapes';
 import { CAMERA_OCCLUSION_TUNING } from './buildUi';
@@ -214,7 +215,7 @@ type InstanceBucket = {
   maxHalf: number;
 };
 
-function propFromPiece(piece: PlacedBuildPiece): WorldProp | null {
+export function propFromPiece(piece: PlacedBuildPiece): WorldProp | null {
   const def = GAME_BUILD.catalog.get(piece.pieceId);
   if (def.kind !== 'prop' || !def.propKind) return null;
   return {
@@ -224,22 +225,45 @@ function propFromPiece(piece: PlacedBuildPiece): WorldProp | null {
     y: piece.y,
     z: piece.z,
     yawDegrees: piece.yawDegrees,
+    // PROPSKIN-0766: the placed piece's per-part texture overrides ride into the
+    // WorldProp so the rendered prop wears them (DataProp + WorldPartCaptures).
+    partTextures: piece.partTextures,
     createdByCommand: 'hmsc-int:build-prop',
   };
 }
 
+/** The placed PROP pieces that carry per-part textures, as WorldProps — the
+ *  capture mount needs these (only textured props produce buckets). */
+export function texturedPropsFromPieces(pieces: readonly PlacedBuildPiece[]): WorldProp[] {
+  const out: WorldProp[] = [];
+  for (const piece of pieces) {
+    if (!piece.partTextures) continue;
+    const prop = propFromPiece(piece);
+    if (prop) out.push(prop);
+  }
+  return out;
+}
+
 function propSelectionShape(piece: PlacedBuildPiece, color: string, opacity: number): VisualShape {
   const def = GAME_BUILD.catalog.get(piece.pieceId);
+  // FOOTPRINT-0765: a recipe prop's selection box is its MEASURED footprint at
+  // the model-center offset, rotated about the anchor (matching localOffset/yaw),
+  // so the highlight tracks the mesh under rotation like its collider does.
+  const fp = def.propKind ? propModelFootprintMeters(def.propKind) : null;
+  const yaw = piece.yawDegrees * Math.PI / 180;
+  const ox = fp?.offsetXMeters ?? 0, oz = fp?.offsetZMeters ?? 0;
+  const dx = ox * Math.cos(yaw) + oz * Math.sin(yaw);
+  const dz = -ox * Math.sin(yaw) + oz * Math.cos(yaw);
   return {
     kind: 'box',
     box: {
       key: `${piece.id}.prop-select`,
-      cx: piece.x,
+      cx: piece.x + dx,
       cy: piece.y + def.size.heightMeters / 2,
-      cz: piece.z,
-      sx: def.size.widthMeters,
+      cz: piece.z + dz,
+      sx: fp?.widthMeters ?? def.size.widthMeters,
       sy: def.size.heightMeters,
-      sz: def.size.depthMeters,
+      sz: fp?.depthMeters ?? def.size.depthMeters,
       yawDegrees: piece.yawDegrees,
       color,
       opacity,

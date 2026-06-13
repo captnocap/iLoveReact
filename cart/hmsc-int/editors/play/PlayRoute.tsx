@@ -1660,7 +1660,8 @@ export function PlayRoute(props: {
       case 'pieceRemoved':
       case 'pieceEditSet':
       case 'pieceDoorSet':
-      case 'pieceSkinSet': {
+      case 'pieceSkinSet':
+      case 'piecePartTextureSet': {
         const mapName = pieceMutationMapName(streamState, props.mapName, props.legacyPieceMapName, event.id);
         return mapName ? ({ ...event, mapName } as WorldEvent) : event;
       }

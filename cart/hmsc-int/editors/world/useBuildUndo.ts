@@ -128,7 +128,8 @@ export function useBuildUndo(opts: {
       case 'pieceEditSet':
       case 'pieceMoved':
       case 'pieceSwapped':
-      case 'pieceSkinSet': {
+      case 'pieceSkinSet':
+      case 'piecePartTextureSet': {
         const mapName = pieceMutationMapName(streamState, stem, legacyPieceMapName, event.id);
         return mapName ? ({ ...event, mapName } as WorldEvent) : event;
       }

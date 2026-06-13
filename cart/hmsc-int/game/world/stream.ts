@@ -104,6 +104,10 @@ export type WorldEvent =
   // MERGE onto the piece's skin. Mirrors pieceEditSet so the id stays stable
   // (the editor's selection survives painting face after face).
   | { kind: 'pieceSkinSet'; id: string; skin: BuildSkinSet; mapName?: string }
+  // PROPSKIN-0766: per-PART texture on a STANDING prop piece — set/clear
+  // partTextures[partId] (a TEXTURE_REGISTRY id, null clears). Mirrors
+  // pieceSkinSet so the id stays stable (selection survives part-by-part skinning).
+  | { kind: 'piecePartTextureSet'; id: string; partId: string; textureId: string | null; mapName?: string }
   | { kind: 'prefabDefined'; def: BuildPrefabDef }
   // BUILDSKIN req_0184 addendum (addition): delete a building TYPE — drops
   // the def + tombstones the id (a same-id static seed stays gone); placed
@@ -342,6 +346,22 @@ export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freez
         if (index < 0) return state;
         const pieces = [...source];
         pieces[index] = { ...pieces[index], skin: { ...(pieces[index].skin ?? {}), ...event.skin } };
+        if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
+        return { ...state, pieces };
+      }
+      case 'piecePartTextureSet': {
+        // PROPSKIN-0766: set/clear one PART's texture on a standing prop piece.
+        // Merges onto partTextures (skin part-by-part); clearing the last entry
+        // drops the map so a bare prop carries no field.
+        if (!event.partId) return state;
+        const map = eventMapName(event);
+        const source = map ? (state.piecesByMap?.[map] ?? []) : state.pieces;
+        const index = source.findIndex((piece) => piece.id === event.id);
+        if (index < 0) return state;
+        const next = { ...(source[index].partTextures ?? {}) };
+        if (event.textureId) next[event.partId] = event.textureId; else delete next[event.partId];
+        const pieces = [...source];
+        pieces[index] = { ...pieces[index], partTextures: Object.keys(next).length ? next : undefined };
         if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
         return { ...state, pieces };
       }

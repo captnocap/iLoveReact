@@ -7,6 +7,7 @@ import { TileSurfaceCaptures } from '../render3d/tileSurface';
 import { RoadSurfaceCaptures } from '../render3d/Road';
 import { RoadJunctionCaptures } from '../render3d/RoadJunctions';
 import { PropSurfaceCaptures } from '../render3d/PropCaptures';
+import { WorldPartCaptures } from '../render3d/PartCaptures';
 import { LandformSurfaceCaptures } from '../render3d/Landform';
 import { HumanoidFaceCaptures } from '../render3d/humanoid';
 import { hmscSkyBackgroundColor } from '../render3d/sky';
@@ -256,6 +257,9 @@ export function HmscGameplayRig(props: HmscGameplayRigProps) {
       <RoadSurfaceCaptures roads={props.state.world.roads} />
       <RoadJunctionCaptures junctions={props.state.world.junctions} />
       <PropSurfaceCaptures props={props.state.world.props} />
+      {/* Click-to-pick PART textures (WorldProp/Building.partTextures) — empty
+          until a part is textured, so zero cost when unused. */}
+      <WorldPartCaptures buildings={props.state.world.buildings} props={props.state.world.props} />
       <LandformSurfaceCaptures landforms={props.state.world.landforms ?? []} />
       {/* The humanoid face pool — the player's and every NPC's head decal. */}
       <HumanoidFaceCaptures />

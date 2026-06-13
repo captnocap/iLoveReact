@@ -18,7 +18,7 @@ import * as Geometry from '@reactjit/geometries';
 import { GAME_BUILD, GAME_NATIVE_CAMERA, buildingDefFromPieces, buildingPieceInstanceId, partitionBuildingSelection } from './game';
 import type { BuildEditEvent, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingInstance, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
 import { resolveSnapTarget, modulePitch, nearestWallLineAnchor, nearestPlateLatticeAnchor, anchoredRunCenter, SNAP_TUNING_DEFAULTS, type SnapTarget, type WallLineAnchor } from './editors/build/snap';
-import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, GhostPiece, elevatorCarVisualShape } from './editors/build/pieceMeshes';
+import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, GhostPiece, elevatorCarVisualShape, texturedPropsFromPieces } from './editors/build/pieceMeshes';
 import { perfMs, warnPlaceFreeze } from './editors/build/placeFreezeProbe';
 import { logPiecePlaced, logPiecesPlaced, logPrefabStamped } from './editors/build/placeLog';
 import { BUILD_UI } from './editors/build/buildUi';
@@ -29,6 +29,7 @@ import type { GameState } from './design';
 import { WorldStatics } from './render3d/GameWorld3D';
 import { LandformSurfaceCaptures } from './render3d/Landform';
 import { PropSurfaceCaptures } from './render3d/PropCaptures';
+import { WorldPartCaptures } from './render3d/PartCaptures';
 import { TextureCapture } from './game/textures/registry';
 import { groundColumnTop } from './Embodied';
 import { CHUNK_TILES } from './chunks';
@@ -1430,6 +1431,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     <>
       <LandformSurfaceCaptures landforms={state.world.landforms ?? []} />
       <PropSurfaceCaptures props={state.world.props} />
+      {/* click-to-pick PART textures (WorldProp.partTextures / Building.partTextures)
+          — bakes the texture each textured prop/structure part samples, so the iso
+          build pane wears them. Covers both the world's props AND the placed PROP
+          PIECES (PROPSKIN-0766: a prop piece skinned in the PAINT panel). Empty
+          until a part is textured → zero cost. */}
+      <WorldPartCaptures buildings={state.world.buildings} props={[...state.world.props, ...texturedPropsFromPieces(pieces)]} perception={state.player.perception} />
       {/* bind each placed skin's material texture (the SAME staticKey the renderer's
           textureKey points at) so skinned pieces wear their material — F2 does this. */}
       {skinIds.map((id) => (
@@ -1445,7 +1452,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         />
       ))}
     </>
-  ), [state.world.landforms, state.world.props, skinIds, state.player.perception]);
+  ), [state.world.landforms, state.world.props, state.world.buildings, pieces, skinIds, state.player.perception]);
   const armedPropCanFreeform = armed?.kind === 'piece' && GAME_BUILD.catalog.get(armed.id).kind === 'prop';
   const selectedPropsCanFreeform = useMemo(() => selectionIsOnlyProps(selectedIds, pieces), [selectedIds, pieces]);
   // REQ-0647: each shaft's car parked at its bottom stop (no ride loop here).

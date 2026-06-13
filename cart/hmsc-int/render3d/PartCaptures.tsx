@@ -13,12 +13,21 @@ import { isOpenBuildingKind } from '../world/buildingKinds';
 // structures (a garage's deck/parapet/pillar) and props (a sign's panel) do.
 //
 // Mount as a 2D sibling of <Scene3D>, alongside the other *SurfaceCaptures
-// (HmscGameplayRig in the live game, IsoPreview in the editor). One StaticSurface
-// per distinct (textureId, cols, floors) bucket; every matching part samples it.
+// (HmscGameplayRig in the live game, IsoPreview / IsoAuthor in the editor). One
+// StaticSurface per distinct (textureId, cols, floors) bucket; every matching
+// part samples it.
+//
+// `perception` is optional and defaults to neutral: the world rigs (the editor's
+// iso/build panes, the play rigs) bake part textures with no perception tint, so
+// they need not each spell the magic value — only a caller that wants an explicit
+// value (the OBJ inspector) passes one. Empty world → zero buckets → zero cost,
+// so it is safe to mount unconditionally.
+const NEUTRAL_PERCEPTION: PerceptionState = { high: 0 };
+
 export const WorldPartCaptures = memo(function WorldPartCaptures(props: {
   buildings: Building[];
   props: WorldProp[];
-  perception: PerceptionState;
+  perception?: PerceptionState;
 }) {
   const buckets = useMemo<PartTextureBucket[]>(() => {
     const map = new Map<string, PartTextureBucket>();
@@ -31,7 +40,7 @@ export const WorldPartCaptures = memo(function WorldPartCaptures(props: {
     return Array.from(map.values());
   }, [props.buildings, props.props]);
 
-  return <PartTextureCaptures buckets={buckets} perception={props.perception} />;
+  return <PartTextureCaptures buckets={buckets} perception={props.perception ?? NEUTRAL_PERCEPTION} />;
 });
 
 // Textured facade panels for BOX buildings driven by the part-texture channel

@@ -20,10 +20,31 @@ import { memo, useMemo, useRef, useState } from 'react';
 import { Box, Effect, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildFaceSlot, BuildSkinSet, PlacedBuildPiece, WorldEvent } from '@game';
+import type { WorldProp } from '../../design';
 import { allTextures, type TextureDef } from '@game/textures/registry';
 import { useCustomTextures } from '@game/textures/materials';
 import { materialFamily } from '../workbench/materials/chooser';
+import { propParts } from '../../render3d/propParts';
+import { isTextureable, type Part } from '../../render3d/parts';
 import { uploadFaceTexture } from './uploadFaceTexture';
+
+// PROPSKIN-0766: a placed PROP piece (pieceId 'prop.<kind>') skins by NAMED PART,
+// not by front/back/sides. Its texturable parts come from the SAME propParts the
+// renderer + bake use, so part.id (a panel's partId, else 'partN') is the exact
+// key piecePartTextureSet writes and the prop wears. null = the piece is not a prop.
+function propPieceParts(piece: PlacedBuildPiece): Part[] | null {
+  const def = GAME_BUILD.catalog.get(piece.pieceId);
+  if (def.kind !== 'prop' || !def.propKind) return null;
+  const prop: WorldProp = {
+    id: piece.id,
+    kind: def.propKind as WorldProp['kind'],
+    x: piece.x, y: piece.y, z: piece.z,
+    yawDegrees: piece.yawDegrees,
+    partTextures: piece.partTextures,
+    createdByCommand: 'hmsc-int:paint-parts',
+  };
+  return propParts(prop).filter(isTextureable);
+}
 
 // ── Faces: the piece's REAL skin slots (front / back / sides), kind-labelled (a
 //    plate reads top / bottom / edges). The row shows each slot wearing its
@@ -177,6 +198,33 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
     [selPieces, slots],
   );
 
+  // ── PROP MODE (PROPSKIN-0766): a selection of ONLY prop pieces skins by named
+  // PART, not by face slot. The parts row replaces the slot row; a texture pick
+  // writes piecePartTextureSet to the targeted part (or every part) per piece.
+  const propMode = selPieces.length > 0 && selPieces.every((p) => GAME_BUILD.catalog.get(p.pieceId).kind === 'prop');
+  const propModeRef = useRef(propMode);
+  propModeRef.current = propMode;
+  // The texturable parts of the FIRST selected prop (same-kind props share them).
+  const propPartList = useMemo(() => (propMode && selPieces[0] ? (propPieceParts(selPieces[0]) ?? []) : []), [propMode, selPieces]);
+  // The targeted part id, or null = skin every part.
+  const [selectedPart, setSelectedPart] = useState<string | null>(null);
+  const selectedPartRef = useRef(selectedPart);
+  selectedPartRef.current = selectedPart;
+  // What each part wears across the selection: a texture id, 'mixed', or null.
+  const partWears = useMemo(() => {
+    const wear: Record<string, string | 'mixed' | null> = {};
+    for (const part of propPartList) {
+      let seen: string | null | undefined;
+      for (const p of selPieces) {
+        const t = p.partTextures?.[part.id] ?? null;
+        if (seen === undefined) seen = t;
+        else if (seen !== t) { seen = 'mixed'; break; }
+      }
+      wear[part.id] = seen ?? null;
+    }
+    return wear;
+  }, [propPartList, selPieces]);
+
   const pushRecent = (b: BuildFaceSkin) => {
     setRecent((list) => [b, ...list.filter((x) => matKey(x) !== matKey(b))].slice(0, 8));
   };
@@ -195,7 +243,25 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
     pushRecent(b);
   };
 
-  const pickMaterial = (id: string) => applyBrush({ kind: 'material', id });
+  // Apply a TEXTURE to the targeted prop PART (or every part) across the selection
+  // — one piecePartTextureSet per (piece, part), one batch. Reads refs so it stays
+  // correct when called from a frozen swatch closure (the applyBrush pattern).
+  const applyPropTexture = (textureId: string) => {
+    const sel = selRef.current;
+    if (!sel.length) return;
+    const target = selectedPartRef.current;
+    const items: { event: WorldEvent; label: string }[] = [];
+    for (const p of sel) {
+      const partIds = target ? [target] : (propPieceParts(p) ?? []).map((part) => part.id);
+      for (const partId of partIds) {
+        items.push({ event: { kind: 'piecePartTextureSet', id: p.id, partId, textureId } as WorldEvent, label: target ? `skinned ${target}` : 'skinned prop' });
+      }
+    }
+    if (items.length) { commitRef.current(items); pushRecent({ kind: 'material', id: textureId }); }
+  };
+
+  // A texture pick routes by mode: a prop's PART, or a build piece's face slot.
+  const pickMaterial = (id: string) => { if (propModeRef.current) applyPropTexture(id); else applyBrush({ kind: 'material', id }); };
 
   // Upload an image (req_0749): the picker → a stored decal material → set as
   // the BRUSH (not auto-painted onto every side — an uploaded image is usually
@@ -207,7 +273,15 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
     if (uploading) return;
     setUploading(true);
     void uploadFaceTexture()
-      .then((r) => { if (r) { const b: BuildFaceSkin = { kind: 'material', id: r.id }; setBrush(b); pushRecent(b); } })
+      .then((r) => {
+        if (!r) return;
+        // In prop mode the upload skins the targeted part directly; in piece mode
+        // it becomes the brush (the next face click drops it on one side).
+        if (propModeRef.current) { applyPropTexture(r.id); return; }
+        const b: BuildFaceSkin = { kind: 'material', id: r.id };
+        setBrush(b);
+        pushRecent(b);
+      })
       .finally(() => setUploading(false));
   };
 
@@ -216,7 +290,9 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b1220', padding: 10, gap: 7 }}>
       <Text fontSize={9} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-        {`PAINT — ${selPieces.length} piece${selPieces.length === 1 ? '' : 's'} · ${selectedSlot ? `face: ${slotLabels[selectedSlot]}` : 'a skin paints every face'}`}
+        {propMode
+          ? `PAINT — ${selPieces.length} prop${selPieces.length === 1 ? '' : 's'} · ${selectedPart ? `part: ${selectedPart}` : 'a texture skins every part'}`
+          : `PAINT — ${selPieces.length} piece${selPieces.length === 1 ? '' : 's'} · ${selectedSlot ? `face: ${slotLabels[selectedSlot]}` : 'a skin paints every face'}`}
       </Text>
       {selPieces.length === 0 ? (
         <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>
@@ -224,40 +300,67 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         </Text>
       ) : null}
 
-      {/* faces: each shows its REAL look. Click one to target it (a skin then
-          paints only that face); click it again — or leave none — to paint all. */}
+      {/* the row: a build piece's FACES (front/back/sides) or a prop's PARTS — each
+          shows its REAL look. Click one to target it (a skin then covers only it);
+          click again — or leave none — to skin every face/part. */}
       <Box style={{ gap: 3 }}>
         <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>
           {selPieces.length === 0
-            ? 'FACES'
-            : selectedSlot
-              ? `FACES · targeting ${slotLabels[selectedSlot]} — a skin paints just this · click again for all`
-              : 'FACES · a skin paints all · click one to refine it'}
+            ? (propMode ? 'PARTS' : 'FACES')
+            : propMode
+              ? (selectedPart
+                  ? `PARTS · targeting ${selectedPart} — a texture skins just this · click again for all`
+                  : 'PARTS · a texture skins all · click one to refine it')
+              : selectedSlot
+                ? `FACES · targeting ${slotLabels[selectedSlot]} — a skin paints just this · click again for all`
+                : 'FACES · a skin paints all · click one to refine it'}
         </Text>
         <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
-          {slots.map((slot) => {
-            const wear = slotWears[slot];
-            const active = selectedSlot === slot;
-            const def = wear && wear !== 'mixed' && wear.kind === 'material' ? materialById.get(wear.id) : undefined;
-            const wearName = wear === 'mixed' ? 'mixed' : wear === null ? 'unpainted' : wear.kind === 'color' ? wear.value : (materialById.get(wear.id)?.label ?? wear.id);
-            const fill = wear === null ? '#0b1220' : wear === 'mixed' ? '#475569' : wear.kind === 'color' ? wear.value : '#0f1a2e';
-            return (
-              <Pressable key={slot} onPress={() => setSelectedSlot((cur) => (cur === slot ? null : slot))} hoverable tooltip={`${slotLabels[slot]} · now: ${wearName} · click to refine just this face`}>
-                <Box style={{ width: 60, gap: 2 }}>
-                  <Box style={{ width: 60, height: 44, borderRadius: 4, borderWidth: active ? 2 : 1, borderColor: active ? '#7dd3fc' : '#3a4f6b', backgroundColor: fill, overflow: 'hidden' }}>
-                    {def ? (def.source.kind === 'shader'
-                      ? <Effect shader={def.source.shader} data={def.source.data} style={SWATCH_FILL} />
-                      : def.source.render(SWATCH_CTX)) : null}
-                  </Box>
-                  <Text fontSize={8} color={active ? '#7dd3fc' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{slotLabels[slot]}</Text>
-                </Box>
-              </Pressable>
-            );
-          })}
+          {propMode
+            ? propPartList.map((part) => {
+                const wear = partWears[part.id];
+                const active = selectedPart === part.id;
+                const def = wear && wear !== 'mixed' ? materialById.get(wear) : undefined;
+                const wearName = wear === 'mixed' ? 'mixed' : wear === null ? `${part.material} (default)` : (materialById.get(wear)?.label ?? wear);
+                const fill = wear === 'mixed' ? '#475569' : wear === null ? part.material : '#0f1a2e';
+                return (
+                  <Pressable key={part.id} onPress={() => setSelectedPart((cur) => (cur === part.id ? null : part.id))} hoverable tooltip={`${part.label} · now: ${wearName} · click to skin just this part`}>
+                    <Box style={{ width: 60, gap: 2 }}>
+                      <Box style={{ width: 60, height: 44, borderRadius: 4, borderWidth: active ? 2 : 1, borderColor: active ? '#7dd3fc' : '#3a4f6b', backgroundColor: fill, overflow: 'hidden' }}>
+                        {def ? (def.source.kind === 'shader'
+                          ? <Effect shader={def.source.shader} data={def.source.data} style={SWATCH_FILL} />
+                          : def.source.render(SWATCH_CTX)) : null}
+                      </Box>
+                      <Text fontSize={8} color={active ? '#7dd3fc' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{part.label}</Text>
+                    </Box>
+                  </Pressable>
+                );
+              })
+            : slots.map((slot) => {
+                const wear = slotWears[slot];
+                const active = selectedSlot === slot;
+                const def = wear && wear !== 'mixed' && wear.kind === 'material' ? materialById.get(wear.id) : undefined;
+                const wearName = wear === 'mixed' ? 'mixed' : wear === null ? 'unpainted' : wear.kind === 'color' ? wear.value : (materialById.get(wear.id)?.label ?? wear.id);
+                const fill = wear === null ? '#0b1220' : wear === 'mixed' ? '#475569' : wear.kind === 'color' ? wear.value : '#0f1a2e';
+                return (
+                  <Pressable key={slot} onPress={() => setSelectedSlot((cur) => (cur === slot ? null : slot))} hoverable tooltip={`${slotLabels[slot]} · now: ${wearName} · click to refine just this face`}>
+                    <Box style={{ width: 60, gap: 2 }}>
+                      <Box style={{ width: 60, height: 44, borderRadius: 4, borderWidth: active ? 2 : 1, borderColor: active ? '#7dd3fc' : '#3a4f6b', backgroundColor: fill, overflow: 'hidden' }}>
+                        {def ? (def.source.kind === 'shader'
+                          ? <Effect shader={def.source.shader} data={def.source.data} style={SWATCH_FILL} />
+                          : def.source.render(SWATCH_CTX)) : null}
+                      </Box>
+                      <Text fontSize={8} color={active ? '#7dd3fc' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{slotLabels[slot]}</Text>
+                    </Box>
+                  </Pressable>
+                );
+              })}
         </Box>
       </Box>
 
-      {/* the current brush — always visible, so you know what a face click drops */}
+      {/* the current brush — face mode only (a prop part takes a texture directly,
+          there is no colour brush to pre-load). */}
+      {!propMode ? (
       <Box style={{ flexDirection: 'row', gap: 6, alignItems: 'center', backgroundColor: '#0f1a2e', borderRadius: 4, paddingLeft: 6, paddingRight: 6, paddingTop: 4, paddingBottom: 4 }}>
         <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>BRUSH</Text>
         {brush.kind === 'color' ? (
@@ -275,13 +378,15 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         )}
         <Text fontSize={9} color="#eaf4ff" style={{ fontFamily: 'monospace' }}>{brushLabel}</Text>
       </Box>
+      ) : null}
 
-      {/* recently painted-with brushes — one click back */}
+      {/* recently used — one click back. A material re-applies (routed by mode);
+          a colour only re-applies in face mode. */}
       {recent.length > 0 ? (
         <Box style={{ flexDirection: 'row', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
           <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>RECENT</Text>
-          {recent.map((b) => (
-            <Pressable key={matKey(b)} onPress={() => applyBrush(b)} hoverable tooltip={b.kind === 'color' ? b.value : (materialById.get(b.id)?.label ?? b.id)}>
+          {recent.filter((b) => !propMode || b.kind === 'material').map((b) => (
+            <Pressable key={matKey(b)} onPress={() => (b.kind === 'material' ? pickMaterial(b.id) : applyBrush(b))} hoverable tooltip={b.kind === 'color' ? b.value : (materialById.get(b.id)?.label ?? b.id)}>
               {b.kind === 'color' ? (
                 <Box style={{ width: 14, height: 14, borderRadius: 3, backgroundColor: b.value, borderWidth: 1, borderColor: '#3a4f6b' }} />
               ) : (
@@ -294,7 +399,9 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         </Box>
       ) : null}
 
-      {/* colors: the fixed swatches + any #rrggbb you type */}
+      {/* colors: the fixed swatches + any #rrggbb you type. Face mode only — a
+          prop part wears a texture, not a flat colour. */}
+      {!propMode ? (
       <Box style={{ flexDirection: 'row', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
         {BRUSH_SWATCHES.map((c) => (
           <Pressable key={c} onPress={() => applyBrush({ kind: 'color', value: c })}>
@@ -308,6 +415,7 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
           style={{ width: 66, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: hexDraft.length === 0 ? '#27364a' : hexValid ? '#34d399' : '#b04a3a', borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
         />
       </Box>
+      ) : null}
 
       {/* textures from here (req_0749): upload an image straight onto the piece,
           or open the full painter to draw/layer one — both feed the SAME library

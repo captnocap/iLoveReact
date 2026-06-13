@@ -22,6 +22,7 @@ import type { GameState } from './design';
 import { WorldStatics } from './render3d/GameWorld3D';
 import { LandformSurfaceCaptures } from './render3d/Landform';
 import { PropSurfaceCaptures } from './render3d/PropCaptures';
+import { WorldPartCaptures } from './render3d/PartCaptures';
 import { GAME_CAMERA, GAME_NATIVE_CAMERA } from './game';
 import { CHUNK_TILES } from './chunks';
 import { useChurn } from './perfLog';
@@ -195,9 +196,11 @@ export const IsoPreview = memo(function IsoPreview(props: {
           captures, the game's own path) — siblings of the Scene3D, like the
           captures HmscGameplayRig mounts in the live game. */}
       <LandformSurfaceCaptures landforms={world.landforms ?? []} />
-      {/* The street-sign route plate (default key) + per-part textures the inspector
-          assigns to props, so the iso preview wears them too. */}
+      {/* The street-sign route plate (default key). */}
       <PropSurfaceCaptures props={world.props} />
+      {/* Click-to-pick PART textures the inspector assigns to props/structures, so
+          the iso preview wears them too. Empty until a part is textured. */}
+      <WorldPartCaptures buildings={world.buildings} props={world.props} />
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showGrid={false} showAxes={false}>
         <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} far={FAR_CLIP} />
         <Scene3D.Fog enabled={false} />

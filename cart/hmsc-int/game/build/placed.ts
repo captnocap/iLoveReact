@@ -37,6 +37,7 @@ import {
 } from './catalog';
 import { BUILD_KIND_CONTRACTS, type BuildGameplayTags, type BuildPieceKind } from './pieces';
 import { propDynamics } from '../kinds';
+import { propModelFootprintMeters } from '../kinds/propModels';
 import { wallEditDefinition, type WallEdit } from './edits';
 import type { BuildPrefabDef, PrefabPiece } from './prefabs';
 import { BUILD_FACE_SLOTS, resolveFaceSkin, type BuildSkinSet } from './skins';
@@ -64,6 +65,11 @@ export type PlacedBuildPiece = {
   doorOpen?: boolean;
   /** resolved per-face skin/material snapshot for this placed instance */
   skin?: BuildSkinSet;
+  /** PROPSKIN-0766: per-PART texture overrides for a placed PROP piece (kind
+   *  'prop') — partId → TEXTURE_REGISTRY id, the WorldProp.partTextures channel.
+   *  A prop has named parts (a vending front, a chassis) rather than the
+   *  front/back/sides `skin` slots, so it carries this map instead. */
+  partTextures?: Record<string, string>;
   /** prefab stamp group id, when this piece came from one prefabStamped event */
   stampId?: string;
   /** source prefab id for stamped pieces, so type-skin edits can refresh live instances */
@@ -948,6 +954,32 @@ export function placedPieceColliders(
     // not a wall — it contributes no static rect; the play route owns its sim.
     if (def.kind === 'prop' && def.propKind && propDynamics(def.propKind)) continue;
     if (!placedPieceTags(piece).collision) continue;
+    // FOOTPRINT-0765: a data-recipe prop collides as its EXACT measured footprint
+    // — width/depth span plus the model-center offset, so an off-center body (an
+    // arcade cabinet whose mass sits forward of its anchor) tracks the drawn mesh
+    // at any yaw instead of a centered box that swings off under rotation. One
+    // oriented rect about the anchor. Bespoke props (no recipe) fall through to
+    // the generic def.size band path below.
+    if (def.kind === 'prop' && def.propKind) {
+      const fp = propModelFootprintMeters(def.propKind);
+      if (fp) {
+        orientedRects.push({
+          topMeters: piece.y + def.size.heightMeters,
+          floorMeters: piece.y,
+          blocksPlayer: true,
+          friction: PLACED_TUNING.pieceFriction,
+          restitution: PLACED_TUNING.pieceRestitution,
+          minX: piece.x + fp.offsetXMeters - fp.widthMeters / 2,
+          maxX: piece.x + fp.offsetXMeters + fp.widthMeters / 2,
+          minZ: piece.z + fp.offsetZMeters - fp.depthMeters / 2,
+          maxZ: piece.z + fp.offsetZMeters + fp.depthMeters / 2,
+          pivotX: piece.x,
+          pivotZ: piece.z,
+          yawRadians: piece.yawDegrees * DEG,
+        });
+        continue;
+      }
+    }
     const quarter = quarterTurns(piece.yawDegrees);
     const depthSpan = placedPieceDepthSpan(piece, pieces);
     const closedDoor = opts?.liveDoorPanels ? null : placedClosedDoorBand(piece, def);
