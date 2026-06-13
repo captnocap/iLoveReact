@@ -15,7 +15,6 @@
 import type { WorldProp } from '../../design';
 import { propModelParts, propPartId, cssColor, type PropPartSpec } from '../../game/kinds/propModels';
 import { type Part, TexturedParts } from '../parts';
-import { skinGridCols, skinGridFloors } from '../buildingSkins';
 import { at } from './place';
 
 function partGeometry(spec: PropPartSpec): { geometry: string; params: Record<string, any>; scale?: [number, number, number] } {
@@ -50,13 +49,14 @@ export function dataPropParts(prop: WorldProp): Part[] {
       rotation: [spec.rotation?.[0] ?? 0, prop.yawDegrees + (spec.rotation?.[1] ?? 0), spec.rotation?.[2] ?? 0],
       scale: g.scale,
       material: cssColor(spec.color),
-      // An image panel samples its texture on its broad faces at a 1×1 grid —
-      // one whole image per face (an album cover, not a tiled facade). Every
-      // OTHER part (the chassis boxes/cylinders) is textureable too now
-      // (req_0757): the texture WRAPS the whole mesh (no texturedFaces limit)
-      // and tiles by the part's footprint, like a building skin.
+      // ONE WHOLE IMAGE per part, always (PARTSCALE-0772). An image panel puts it
+      // on its broad faces; every other part (chassis boxes/cylinders) wraps it on
+      // all faces. Both bake at a 1×1 grid — the SAME thing the compiled game does
+      // (worldGeometry interns the material by id with NO grid → one image per
+      // face). The earlier size-derived tiling made the editor repeat the image
+      // small while the game showed it whole — an editor↔compiled scale mismatch.
       texturedFaces: image ? ['front', 'back'] : undefined,
-      tex: image ? { cols: 1, floors: 1 } : { cols: skinGridCols(Math.max(spec.size[0], spec.size[2])), floors: skinGridFloors(spec.size[1]) },
+      tex: { cols: 1, floors: 1 },
       textureable: true,
     };
   });
