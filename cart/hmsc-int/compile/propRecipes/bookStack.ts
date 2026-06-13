@@ -1,5 +1,18 @@
 import { box, hx, type Color, type PropPartSpec } from '../../game/kinds/propModels';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const bookStackDef: PropKindDefinition = {
+  kind: 'bookStack',
+  label: 'Books',
+  solid: false,
+  footprintRadiusMeters: 0.18,
+  heightMeters: 0.38,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'surface',
+};
+
 export function bookStackParts(): PropPartSpec[] {
   const covers: Color[] = [hx('#7a3b2a'), hx('#2e6f55'), hx('#3a5a8a'), hx('#a8893a')];
   const parts = covers.map((color, i) =>

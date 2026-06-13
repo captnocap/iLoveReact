@@ -1,5 +1,20 @@
 import { box, hx, panel, type PropPartSpec } from '../../game/kinds/propModels';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const posterDef: PropKindDefinition = {
+  kind: 'poster',
+  label: 'Poster',
+  // The req_0635 flat: a wall sheet whose face takes any image.
+  solid: true,
+  footprintRadiusMeters: 0.05,
+  heightMeters: 2.3,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'wall',
+  coverClass: 'none',
+};
+
 export function posterParts(): PropPartSpec[] {
   return [
     box([0, 1.55, -0.02], [0.96, 1.36, 0.015], hx('#3a3a3a')),

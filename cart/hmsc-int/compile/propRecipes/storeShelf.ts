@@ -1,6 +1,20 @@
 import { box, hx, STEEL, STEEL_DARK, type Color, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const storeShelfDef: PropKindDefinition = {
+  kind: 'storeShelf',
+  label: 'Store Shelf',
+  // A gondola run, long like a fence — yaw-aware thin AABB in world props.
+  solid: true,
+  footprintRadiusMeters: 0.95,
+  heightMeters: 1.9,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'kitchen', capacity: 6, spawnFillChance: 0.65, searchSeconds: 3, access: 'open' },
+};
+
 export function storeShelfParts(): PropPartSpec[] {
   const def = propKindDefinition('storeShelf');
   const span = def.footprintRadiusMeters * 2;

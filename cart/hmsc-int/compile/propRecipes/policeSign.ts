@@ -1,5 +1,19 @@
 import { box, cylinder8, hx, WHITE, type PropPartSpec } from '../../game/kinds/propModels';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const policeSignDef: PropKindDefinition = {
+  kind: 'policeSign',
+  label: 'Police Sign',
+  solid: true,
+  footprintRadiusMeters: 0.12,
+  heightMeters: 3.2,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'wall',
+  coverClass: 'none',
+};
+
 export function policeSignParts(): PropPartSpec[] {
   return [
     box([0, 2.7, -0.05], [2.4, 0.7, 0.1], hx('#16365c')),

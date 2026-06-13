@@ -1,6 +1,20 @@
 import { box, cylinder8, hx, sphere, STEEL, STEEL_DARK, WHITE, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const radioTowerDef: PropKindDefinition = {
+  kind: 'radioTower',
+  label: 'Radio Tower',
+  // Real small-market lattice tower ~30m × 1.15. The footprint is the leg
+  // square's half-width.
+  solid: true,
+  footprintRadiusMeters: 2.2,
+  heightMeters: 34,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
+
 export function radioTowerParts(): PropPartSpec[] {
   const { heightMeters: h, footprintRadiusMeters: r } = propKindDefinition('radioTower');
   const latticeTop = h * 0.88;

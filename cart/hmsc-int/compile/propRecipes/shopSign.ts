@@ -1,6 +1,21 @@
 import { box, hx, METAL, panel, STEEL_DARK, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const shopSignDef: PropKindDefinition = {
+  kind: 'shopSign',
+  label: 'Shop Blade Sign',
+  // Wall-mounted bracket sign hanging over the sidewalk; face takes an image.
+  solid: true,
+  footprintRadiusMeters: 0.1,
+  heightMeters: 3.0,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'wall',
+  coverClass: 'none',
+};
+
 export function shopSignParts(): PropPartSpec[] {
   const h = propKindDefinition('shopSign').heightMeters;
   return [

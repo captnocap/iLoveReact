@@ -1,6 +1,21 @@
 import { box, hx, METAL, NEAR_BLACK, panel, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const vendingMachineDef: PropKindDefinition = {
+  kind: 'vendingMachine',
+  label: 'Vending Machine',
+  // Real ~1.83m × 1.15. The front panel is an image target (partId 'front').
+  solid: true,
+  footprintRadiusMeters: 0.5,
+  heightMeters: 2.1,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'kitchen', capacity: 3, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
+  coverClass: 'hard',
+};
+
 export function vendingMachineParts(): PropPartSpec[] {
   const s = propKindDefinition('vendingMachine').heightMeters / 2.1;
   const red = hx('#c1272d');

@@ -70,6 +70,16 @@ import { fridgeDef } from '../../compile/propRecipes/fridge';
 import { computerDef } from '../../compile/propRecipes/computer';
 import { telephonePoleDef } from '../../compile/propRecipes/telephonePole';
 import { basketballHoopDef } from '../../compile/propRecipes/basketballHoop';
+import { radioTowerDef } from '../../compile/propRecipes/radioTower';
+import { gasPumpDef } from '../../compile/propRecipes/gasPump';
+import { vendingMachineDef } from '../../compile/propRecipes/vendingMachine';
+import { storeShelfDef } from '../../compile/propRecipes/storeShelf';
+import { businessSignDef } from '../../compile/propRecipes/businessSign';
+import { shopSignDef } from '../../compile/propRecipes/shopSign';
+import { posterDef } from '../../compile/propRecipes/poster';
+import { hospitalSignDef } from '../../compile/propRecipes/hospitalSign';
+import { policeSignDef } from '../../compile/propRecipes/policeSign';
+import { bookStackDef } from '../../compile/propRecipes/bookStack';
 
 export type BuiltinPropKind =
   | 'rock'
@@ -705,120 +715,16 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     tileKind: 'wall',
     trafficControl: 'none',
   },
-  radioTower: {
-    kind: 'radioTower',
-    label: 'Radio Tower',
-    // Real small-market lattice tower ~30m × 1.15. The footprint is the leg
-    // square's half-width.
-    solid: true,
-    footprintRadiusMeters: 2.2,
-    heightMeters: 34,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  gasPump: {
-    kind: 'gasPump',
-    label: 'Gas Pump',
-    // Real island pump ~1.8m × 1.15.
-    solid: true,
-    footprintRadiusMeters: 0.42,
-    heightMeters: 2.1,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'hard',
-  },
-  vendingMachine: {
-    kind: 'vendingMachine',
-    label: 'Vending Machine',
-    // Real ~1.83m × 1.15. The front panel is an image target (partId 'front').
-    solid: true,
-    footprintRadiusMeters: 0.5,
-    heightMeters: 2.1,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'kitchen', capacity: 3, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
-    coverClass: 'hard',
-  },
-  storeShelf: {
-    kind: 'storeShelf',
-    label: 'Store Shelf',
-    // A gondola run, long like a fence — yaw-aware thin AABB in world props.
-    solid: true,
-    footprintRadiusMeters: 0.95,
-    heightMeters: 1.9,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'kitchen', capacity: 6, spawnFillChance: 0.65, searchSeconds: 3, access: 'open' },
-  },
-  businessSign: {
-    kind: 'businessSign',
-    label: 'A-Frame Sign',
-    // The sidewalk sandwich board in front of a business; face takes an image.
-    solid: true,
-    footprintRadiusMeters: 0.35,
-    heightMeters: 1.1,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'none',
-  },
-  shopSign: {
-    kind: 'shopSign',
-    label: 'Shop Blade Sign',
-    // Wall-mounted bracket sign hanging over the sidewalk; face takes an image.
-    solid: true,
-    footprintRadiusMeters: 0.1,
-    heightMeters: 3.0,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'wall',
-    coverClass: 'none',
-  },
-  poster: {
-    kind: 'poster',
-    label: 'Poster',
-    // The req_0635 flat: a wall sheet whose face takes any image.
-    solid: true,
-    footprintRadiusMeters: 0.05,
-    heightMeters: 2.3,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'wall',
-    coverClass: 'none',
-  },
-  hospitalSign: {
-    kind: 'hospitalSign',
-    label: 'Hospital Sign',
-    // The building-identity prop: bolt it to any structure and it reads as a
-    // hospital (white panel + red cross).
-    solid: true,
-    footprintRadiusMeters: 0.12,
-    heightMeters: 3.2,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'wall',
-    coverClass: 'none',
-  },
-  policeSign: {
-    kind: 'policeSign',
-    label: 'Police Sign',
-    solid: true,
-    footprintRadiusMeters: 0.12,
-    heightMeters: 3.2,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'wall',
-    coverClass: 'none',
-  },
-  bookStack: {
-    kind: 'bookStack',
-    label: 'Books',
-    solid: false,
-    footprintRadiusMeters: 0.18,
-    heightMeters: 0.38,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'surface',
-  },
+  radioTower: radioTowerDef,
+  gasPump: gasPumpDef,
+  vendingMachine: vendingMachineDef,
+  storeShelf: storeShelfDef,
+  businessSign: businessSignDef,
+  shopSign: shopSignDef,
+  poster: posterDef,
+  hospitalSign: hospitalSignDef,
+  policeSign: policeSignDef,
+  bookStack: bookStackDef,
   recordPlayer: {
     kind: 'recordPlayer',
     label: 'Record Player',

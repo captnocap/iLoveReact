@@ -1,6 +1,20 @@
 import { box, CONCRETE, cylinder8, hx, NEAR_BLACK, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const gasPumpDef: PropKindDefinition = {
+  kind: 'gasPump',
+  label: 'Gas Pump',
+  // Real island pump ~1.8m × 1.15.
+  solid: true,
+  footprintRadiusMeters: 0.42,
+  heightMeters: 2.1,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'hard',
+};
+
 export function gasPumpParts(): PropPartSpec[] {
   const s = propKindDefinition('gasPump').heightMeters / 2.1;
   const cream = hx('#e8e4da');

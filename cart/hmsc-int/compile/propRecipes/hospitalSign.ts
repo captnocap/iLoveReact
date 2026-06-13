@@ -1,5 +1,21 @@
 import { box, hx, WHITE, type PropPartSpec } from '../../game/kinds/propModels';
 
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const hospitalSignDef: PropKindDefinition = {
+  kind: 'hospitalSign',
+  label: 'Hospital Sign',
+  // The building-identity prop: bolt it to any structure and it reads as a
+  // hospital (white panel + red cross).
+  solid: true,
+  footprintRadiusMeters: 0.12,
+  heightMeters: 3.2,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'wall',
+  coverClass: 'none',
+};
+
 export function hospitalSignParts(): PropPartSpec[] {
   const red = hx('#c1272d');
   return [
