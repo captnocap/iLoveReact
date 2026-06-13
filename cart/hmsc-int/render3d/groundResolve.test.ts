@@ -9,6 +9,7 @@ import type { ChunkFloor } from '../chunkFloor';
 import { assert, assertClose, assertEqual, finish, test } from '../game/_testkit';
 
 const PARKING = tileKindIndex('parking');
+const PARKING_CROSS = tileKindIndex('parkingCross');
 const VEHICLE_SPAWN = tileKindIndex('vehicleSpawn');
 const SPAWN = tileKindIndex('spawn');
 const MUD = tileKindIndex('mud');
@@ -18,6 +19,30 @@ function parkingLotWithMarker(markerIdx: number): number[] {
   for (let y = 0; y < 8; y += 1) for (let x = 0; x < 8; x += 1) paintTile(m, x, y, PARKING);
   paintTile(m, 4, 4, markerIdx);
   return encodeTileMap(m);
+}
+
+function lotOf(kindIdx: number): number[] {
+  const m = makeTileMap(8, 8);
+  for (let y = 0; y < 8; y += 1) for (let x = 0; x < 8; x += 1) paintTile(m, x, y, kindIdx);
+  return encodeTileMap(m);
+}
+
+// The brightest texel within ±0.5 tiles of (px,py), sampled the way the bake
+// does (4 px/tile texel centres), scanning along the given axis.
+function brightestNearLine(data: number[], axis: 'x' | 'z', linePos: number, fixedTile: number): number {
+  const cols = data[0] | 0;
+  const rows = data[1] | 0;
+  const scale = 4;
+  let best = 0;
+  const span = axis === 'x' ? cols * scale : rows * scale;
+  for (let i = 0; i < span; i += 1) {
+    const p = (i + 0.5) / scale;
+    if (Math.abs(p - linePos) > 0.5) continue;
+    const u = axis === 'x' ? p / cols : (fixedTile + 0.5) / cols;
+    const v = axis === 'x' ? (fixedTile + 0.5) / rows : p / rows;
+    best = Math.max(best, heightfieldTexelColor(data, u, v)[0]);
+  }
+  return best;
 }
 
 function flatFloor(tileData: number[]): ChunkFloor {
@@ -88,6 +113,26 @@ test('flat parking floors route through the textured heightfield bake', () => {
   for (let y = 0; y < 8; y += 1) for (let x = 0; x < 8; x += 1) paintTile(mudMap, x, y, MUD);
   const mudFloor = flatFloor(encodeTileMap(mudMap));
   assert(!floorNeedsHeightfieldRender(mudFloor), 'plain flat ground keeps the cheap slab path');
+});
+
+test('parkingCross rotates the bay lines 90° — perpendicular to parking (req_0710)', () => {
+  const park = lotOf(PARKING);
+  const cross = lotOf(PARKING_CROSS);
+  // parking draws a VERTICAL stripe (line of constant X) at px=3: a scan ACROSS
+  // X at a mid-Z row hits white; the same scan on parkingCross stays dark
+  // (its lines run the other way).
+  assert(brightestNearLine(park, 'x', 3, 1) > 0.7, 'parking has a bay line along the X axis');
+  assert(brightestNearLine(cross, 'x', 3, 1) < 0.3, 'parkingCross has NO line along X there (rotated away)');
+  // parkingCross draws a HORIZONTAL stripe (line of constant Z) at pz=3: a scan
+  // ACROSS Z hits white; plain parking stays dark on that same scan.
+  assert(brightestNearLine(cross, 'z', 3, 1) > 0.7, 'parkingCross has a bay line along the Z axis');
+  assert(brightestNearLine(park, 'z', 3, 1) < 0.3, 'parking has NO line along Z (its lines run across X)');
+});
+
+test('a parkingCross-only flat floor still routes through the textured bake', () => {
+  const crossFloor = flatFloor(lotOf(PARKING_CROSS));
+  assert(floorHasParkingCells(crossFloor), 'parkingCross cells detected');
+  assert(floorNeedsHeightfieldRender(crossFloor), 'parkingCross floor takes the textured path');
 });
 
 finish('render3d/groundResolve');

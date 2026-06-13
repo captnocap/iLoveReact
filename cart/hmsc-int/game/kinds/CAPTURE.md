@@ -128,3 +128,12 @@ resolve a marker cell to the nearest non-marker ground around it
 painted on a parking lot renders as parking, stall lines included. Flat floors
 containing parking cells route through the textured heightfield bake
 (`floorHasParkingCells`) — the slab path cannot draw fragment paint.
+
+req_0710 amendment: parking comes in two orientations so a lot is not stuck to
+one direction. `parkingCross` is identical lot ground to `parking` (same
+gameplay profile) but its bay lines run across Z instead of X — the same way
+the road grammar expresses direction as separate lane kinds. The stall paint +
+line geometry live in ONE home (`render3d/parkingStall.ts`: PARKING_STALL_WGSL
++ parkingStallColor + the kind indices), shared by the game heightfield shader,
+its CPU bake mirror, and the editor painter view, so the two kinds differ only
+in which axis they feed `parking_stall`. Paint "Parking" or "Parking ⟂".

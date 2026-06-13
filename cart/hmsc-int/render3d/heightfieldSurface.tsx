@@ -3,6 +3,11 @@ import { Effect, StaticSurface } from '@reactjit/primitives';
 import type { Landform } from '../design';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { hexToRgb01 } from '../world/placeables';
+import {
+  PARKING_KIND_INDEX, PARKING_CROSS_KIND_INDEX, PARKING_STALL_WGSL, parkingStallColor,
+} from './parkingStall';
+// re-exported so the compile bake + tests keep one import source
+export { PARKING_KIND_INDEX, PARKING_CROSS_KIND_INDEX } from './parkingStall';
 
 // The painted-terrain surface: the per-cell tile grid a 'heightfield' landform
 // carries (field.tiles), captured offscreen by ONE Effect quad and draped over the
@@ -26,13 +31,11 @@ import { hexToRgb01 } from '../world/placeables';
 // Road-STAMPED cells that fall OUTSIDE the analytic band (the rasterization
 // staircase at curves) render as a concrete curb apron instead of raw asphalt
 // tiles — the gameplay stamp stays, the blocky edge disappears.
-// Parking stall paint (PARKSPAWN-0612): 'parking' cells draw white stall lines
-// every 3m (bay width) over their asphalt palette color. The kind INDEX is
-// baked into the shader string from TILE_KINDS order — the same order
-// encodeTileMap ships cell indices in — so the shader needs no extra D[] slot
-// (Effect buffers only grow; a layout change would ripple the CPU mirror, the
-// painter view, and every baked floor).
-export const PARKING_KIND_INDEX = TILE_KINDS.indexOf('parking');
+// Parking stall paint lives in ./parkingStall (the ONE home shared by this
+// shader, its CPU mirror, and the painter view). 'parking' draws bay lines
+// across X, 'parkingCross' across Z (req_0710). Kind indices are baked into the
+// shader string from TILE_KINDS order — the same order encodeTileMap ships cell
+// indices in — so the shader needs no extra D[] slot.
 
 // Gameplay/dev marker kinds (spawn / save / vehicleSpawn / marker) are META,
 // not ground (req_0699: "putting the orange for spawn in a parking space just
@@ -82,6 +85,7 @@ fn hf_ground_kind(cellBase: i32, cols: i32, rows: i32, cx: i32, cy: i32) -> i32 
 export const HEIGHTFIELD_TILE_SHADER = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
 ${GROUND_RESOLVE_WGSL}
+${PARKING_STALL_WGSL}
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
   let cols = i32(D[0]);
   let rows = i32(D[1]);
@@ -104,17 +108,12 @@ ${GROUND_RESOLVE_WGSL}
     let col = vec3f(D[pbase], D[pbase + 1], D[pbase + 2]);
     let shade = mix(1.0, 0.78, smoothstep(0.44, 0.5, edge));
     rgb = col * shade;
+    // Parking bays: 'parking' lines run across X, 'parkingCross' across Z
+    // (req_0710). The stall math + line width live in parking_stall (parkingStall.ts).
     if (kind == ${PARKING_KIND_INDEX}) {
-      let pwx = in.uv.x * f32(cols);
-      let stallD = abs(pwx - 3.0 * round(pwx / 3.0));
-      // The compiled floor bakes at 4 px/tile, so texel centres sit 0.25 tiles
-      // apart and the nearest one to a bay line is up to 0.125 away. A thin
-      // (0.06) line falls BETWEEN texels and never samples (req_0704: lines
-      // showed in the painter, vanished in the game). The full-white core must
-      // reach past 0.125 tiles so a texel always lands inside it; 0.16 clears
-      // it with margin. Same constant in the CPU mirror + painter view.
-      let stall = 1.0 - smoothstep(0.16, 0.28, stallD);
-      rgb = mix(rgb, vec3f(0.85, 0.86, 0.88), stall * 0.85);
+      rgb = parking_stall(in.uv.x * f32(cols), rgb);
+    } else if (kind == ${PARKING_CROSS_KIND_INDEX}) {
+      rgb = parking_stall(in.uv.y * f32(rows), rgb);
     }
   }
 
@@ -259,13 +258,10 @@ export function heightfieldTexelColor(data: number[], u: number, v: number): [nu
     const pbase = 3 + kind * 3;
     const shade = 1 + (0.78 - 1) * smoothstep01(0.44, 0.5, edge);
     r = data[pbase] * shade; g = data[pbase + 1] * shade; b = data[pbase + 2] * shade;
-    if (kind === PARKING_KIND_INDEX) {
-      // Match the shader: a 0.16-tile core so the line survives the 4 px/tile
-      // bake (texel centres up to 0.125 tiles off the line). See the WGSL note.
-      const stallD = Math.abs(px - 3 * Math.round(px / 3));
-      const stall = (1 - smoothstep01(0.16, 0.28, stallD)) * 0.85;
-      r += (0.85 - r) * stall; g += (0.86 - g) * stall; b += (0.88 - b) * stall;
-    }
+    // Parking bays — mirror of parking_stall: 'parking' across X, 'parkingCross'
+    // across Z (req_0710). One implementation in parkingStall.ts.
+    if (kind === PARKING_KIND_INDEX) [r, g, b] = parkingStallColor(px, [r, g, b]);
+    else if (kind === PARKING_CROSS_KIND_INDEX) [r, g, b] = parkingStallColor(py, [r, g, b]);
   }
 
   const cellEnd = cellBase + rows * cols;

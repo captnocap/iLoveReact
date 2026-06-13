@@ -26,15 +26,17 @@
 //
 // (WGSL: no unary plus, no backticks in comments.)
 
-import { TILE_KINDS } from './world/tileKinds';
-
-// Parking stall paint (PARKSPAWN-0612): same per-kind branch as the game's
-// HEIGHTFIELD_TILE_SHADER — the kind index is baked from TILE_KINDS order, so
-// the painter shows the stall lines the game will bake.
-const PARKING_KIND_INDEX = TILE_KINDS.indexOf('parking');
+// Parking stall paint: same per-kind branch + line width as the game's
+// HEIGHTFIELD_TILE_SHADER, sharing the one home (parkingStall.ts), so the
+// painter shows exactly the bay lines the game will bake. 'parking' runs across
+// X, 'parkingCross' across Z (req_0710).
+import {
+  PARKING_KIND_INDEX, PARKING_CROSS_KIND_INDEX, PARKING_STALL_WGSL,
+} from './render3d/parkingStall';
 
 export const PAINTER_VIEW_WGSL = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
+${PARKING_STALL_WGSL}
 
 fn warmRamp(t: f32) -> vec3f {
   let c0 = vec3f(0.98, 0.78, 0.24);
@@ -89,12 +91,9 @@ fn hSample(base: i32, ix: i32, iy: i32, cols: i32, rows: i32) -> f32 {
     let shade = mix(1.0, 0.78, smoothstep(0.44, 0.5, edge));
     rgb = col * shade;
     if (kind == ${PARKING_KIND_INDEX}) {
-      let pwx = in.uv.x * f32(cols);
-      let stallD = abs(pwx - 3.0 * round(pwx / 3.0));
-      // 0.16-tile core so the bay line survives the 4 px/tile floor bake (the
-      // game shader + CPU mirror use the same width — req_0704).
-      let stall = 1.0 - smoothstep(0.16, 0.28, stallD);
-      rgb = mix(rgb, vec3f(0.85, 0.86, 0.88), stall * 0.85);
+      rgb = parking_stall(in.uv.x * f32(cols), rgb);
+    } else if (kind == ${PARKING_CROSS_KIND_INDEX}) {
+      rgb = parking_stall(in.uv.y * f32(rows), rgb);
     }
   }
 

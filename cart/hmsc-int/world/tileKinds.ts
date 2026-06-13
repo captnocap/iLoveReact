@@ -537,6 +537,23 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     render: { color: '#f97316', heightMeters: 0.05, textureKey: HMSC_TILE_TEXTURE_KEYS.vehicleSpawn },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
+  // Parking rotated 90° (req_0710): identical lot ground to 'parking', its bay
+  // lines just run the perpendicular axis (the tile surface shaders branch the
+  // stall direction on the kind). Appended LAST — indices stay stable.
+  parkingCross: {
+    kind: 'parkingCross',
+    placement: 'surface',
+    label: 'Parking ⟂',
+    pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.05, runCost: 1.0, vehicleCost: 1.4, preferredByVehicles: false, cover: 'none', noise: 0.6 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 0.95 },
+    surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 0.85, accelerationMultiplier: 0.95, friction: 0.2, lateralGrip: 0.9, restitution: 0.82 },
+    render: { color: '#2a2f3a', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.parkingCross },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
 };
 
 export const TILE_KINDS = Object.keys(TILE_KIND_DEFINITIONS) as TileKind[];

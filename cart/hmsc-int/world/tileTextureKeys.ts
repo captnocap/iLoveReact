@@ -26,4 +26,7 @@ export const HMSC_TILE_TEXTURE_KEYS = {
   grassDry: 'hmsc.tile.grass',
   parking: 'hmsc.tile.parking',
   vehicleSpawn: 'hmsc.tile.vehicleSpawn',
+  // shares the parking base — the stall direction is shader paint, not a
+  // separate base material (like the lanes sharing the road texture)
+  parkingCross: 'hmsc.tile.parking',
 } satisfies Record<TileKind, string>;

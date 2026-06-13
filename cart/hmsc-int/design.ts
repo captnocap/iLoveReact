@@ -73,7 +73,11 @@ export type TileKind =
   // Vehicle spawn marker (req_0694): a single placed cell where the traffic
   // system may materialize a vehicle. WHICH vehicle is the garage's per-style
   // spawnRate weighting (editors/vehicles), not the cell's business.
-  | 'vehicleSpawn';
+  | 'vehicleSpawn'
+  // Parking rotated 90° (req_0710): same lot ground as 'parking', but its bay
+  // lines run across Z instead of X — the perpendicular stall orientation, so
+  // a lot is not stuck to one direction. Appended LAST (indices stay stable).
+  | 'parkingCross';
 
 // Altered-perception channel. Drives how building skins (and later other
 // surfaces) reinterpret themselves — e.g. being high scrambling facade text or

@@ -169,7 +169,7 @@ test('embedded = wall/door/bush; gameplay = spawn/save/vehicleSpawn; every kind 
 test('TILE_KINDS index order is locked (host pathing ships kind indices)', () => {
   assertEqual(
     TILE_KINDS.join(','),
-    'water,road,asphalt,sidewalk,mud,sand,wall,door,bush,marker,spawn,save,laneNorth,laneSouth,laneEast,laneWest,junction,crosswalk,median,grass,grassDry,parking,vehicleSpawn',
+    'water,road,asphalt,sidewalk,mud,sand,wall,door,bush,marker,spawn,save,laneNorth,laneSouth,laneEast,laneWest,junction,crosswalk,median,grass,grassDry,parking,vehicleSpawn,parkingCross',
     'TILE_KINDS order',
   );
   for (const k of TILE_KINDS) {
@@ -217,12 +217,20 @@ test('embedded/dev kinds sit on the cell base; surfaces drape the heightfield', 
   }
 });
 
-test('parking + vehicleSpawn (PARKSPAWN-0612, req_0694) append LAST, classed right', () => {
+test('parking + vehicleSpawn (PARKSPAWN-0612, req_0694) + parkingCross (req_0710) append LAST, classed right', () => {
   // Appended at the END — kind indices are the host-pathing wire format.
-  assertEqual(TILE_KINDS[TILE_KINDS.length - 2], 'parking', 'parking second-to-last');
-  assertEqual(TILE_KINDS[TILE_KINDS.length - 1], 'vehicleSpawn', 'vehicleSpawn last');
+  assertEqual(TILE_KINDS[TILE_KINDS.length - 1], 'parkingCross', 'parkingCross last (newest)');
+  assert(TILE_KINDS.indexOf('parking') >= 0 && TILE_KINDS.indexOf('vehicleSpawn') >= 0, 'parking + vehicleSpawn present');
   assert(PAINTABLE_TILE_KINDS.includes('parking'), 'parking is paintable ground');
+  assert(PAINTABLE_TILE_KINDS.includes('parkingCross'), 'parkingCross is paintable ground too');
   assert(GAMEPLAY_TILE_KINDS.includes('vehicleSpawn'), 'vehicleSpawn is a placed marker');
+  // parkingCross shares parking's whole gameplay profile — only the stall axis
+  // (a render concern) differs, so the two read identically to the game loop.
+  for (const path of ['pathing.walkable', 'npc.vehicleCost', 'npc.preferredByVehicles', 'surface.friction', 'traversal.vehicleGripMultiplier'] as const) {
+    const a = path.split('.').reduce<any>((o, k) => o?.[k], def('parking'));
+    const b = path.split('.').reduce<any>((o, k) => o?.[k], def('parkingCross'));
+    assertEqual(b, a, `parkingCross.${path} matches parking`);
+  }
   const parking = def('parking');
   assert(parking.pathing.walkable, 'a lot is walkable');
   assert(parking.traversal.allowedModes.includes('drive'), 'a lot is drivable');

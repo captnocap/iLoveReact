@@ -28,7 +28,8 @@ import { propKindDefinition } from '../game/kinds/props';
 import { solveRoadCrossSection } from '../world/roadProfile';
 import { tileKindDefinition } from '../world/tileKinds';
 import { CHUNK_TILES } from '../chunks';
-import { groundKindAt, heightfieldTexelColor, MARKER_KIND_INDICES, PARKING_KIND_INDEX, roadRibbonSection } from '../render3d/heightfieldSurface';
+import { groundKindAt, heightfieldTexelColor, MARKER_KIND_INDICES, roadRibbonSection } from '../render3d/heightfieldSurface';
+import { isParkingKind } from '../render3d/parkingStall';
 import type { ChunkFloor } from '../chunkFloor';
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
@@ -797,16 +798,16 @@ export function floorHasRoadRibbon(f: ChunkFloor): boolean {
  *  same fragment logic via heightfieldTexelColor). Collision is unaffected — a
  *  flat chunk's collider is the whole-chunk plane (worldColliders.flatChunkField),
  *  independent of which cells render. */
-/** Parking cells need the textured bake — the white stall lines are fragment
- *  paint the flat box-slab path cannot draw (req_0699: the painter showed the
- *  lines, the compiled game showed plain dark cells). */
+/** Parking cells (either orientation) need the textured bake — the white stall
+ *  lines are fragment paint the flat box-slab path cannot draw (req_0699: the
+ *  painter showed the lines, the compiled game showed plain dark cells). */
 export function floorHasParkingCells(f: ChunkFloor): boolean {
   const tcols = f.tileData[0] | 0;
   const trows = f.tileData[1] | 0;
   const palCount = f.tileData[2] | 0;
   const idxBase = 3 + palCount * 3;
   for (let i = 0; i < tcols * trows; i += 1) {
-    if ((f.tileData[idxBase + i] | 0) === PARKING_KIND_INDEX) return true;
+    if (isParkingKind(f.tileData[idxBase + i] | 0)) return true;
   }
   return false;
 }

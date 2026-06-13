@@ -65,7 +65,10 @@ export type TileKind =
   // the traffic system may materialize a vehicle (which vehicle = the
   // garage's per-style spawnRate weighting, not the cell's business).
   | 'parking'
-  | 'vehicleSpawn';
+  | 'vehicleSpawn'
+  // Parking rotated 90° (req_0710): same lot ground as 'parking', bay lines
+  // run the perpendicular axis. Appended last — kind indices stay stable.
+  | 'parkingCross';
 
 // How a tile kind is allowed to enter the world — the registry is several
 // things in one list, and this is what tells them apart:
@@ -315,6 +318,7 @@ const TEX = {
   grass: 'hmsc.tile.grass',
   parking: 'hmsc.tile.parking',
   vehicleSpawn: 'hmsc.tile.vehicleSpawn',
+  parkingCross: 'hmsc.tile.parking', // shares the parking base; stalls are shader paint
 } as const;
 
 const ROAD_SURFACE: TileSurfaceProfile = {
@@ -675,6 +679,23 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     traversal: OPEN_TRAVERSAL,
     surface: { material: 'dev', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.2, lateralGrip: 0.9, restitution: 0.8 },
     render: { color: '#f97316', heightMeters: 0.05, textureKey: TEX.vehicleSpawn },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  // Parking rotated 90° (req_0710): identical lot ground to 'parking', bay
+  // lines run the perpendicular axis. Appended LAST — indices stay stable.
+  parkingCross: {
+    kind: 'parkingCross',
+    placement: 'surface',
+    label: 'Parking ⟂',
+    flow: 'none',
+    pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.05, runCost: 1.0, vehicleCost: 1.4, preferredByVehicles: false, noise: 0.6 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 0.95 },
+    surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 0.85, accelerationMultiplier: 0.95, friction: 0.2, lateralGrip: 0.9, restitution: 0.82 },
+    render: { color: '#2a2f3a', heightMeters: 0.08, textureKey: TEX.parkingCross },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
 };
