@@ -24,6 +24,12 @@ import {
   IMPORTED_PROP_KINDS,
   type ImportedPropKind,
 } from './importedProps.generated';
+// Per-prop defs live in each prop's own file (the file with the most data owns
+// it); this registry assembles them. Migrating prop-by-prop — chairs first.
+import { diningChairDef } from '../../compile/propRecipes/diningChair';
+import { armchairDef } from '../../compile/propRecipes/armchair';
+import { officeChairDef } from '../../compile/propRecipes/officeChair';
+import { foldingChairDef } from '../../compile/propRecipes/foldingChair';
 
 export type BuiltinPropKind =
   | 'rock'
@@ -808,17 +814,9 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   },
 
   // ── furniture ──────────────────────────────────────────────────────────────
-  diningChair: {
-    kind: 'diningChair',
-    label: 'Dining Chair',
-    solid: true,
-    footprintRadiusMeters: 0.3,
-    heightMeters: 0.95,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 1 },
-    coverClass: 'soft',
-  },
+  // Chairs own their data in their own files (the file with the most data owns
+  // it) — see compile/propRecipes/<chair>.ts. This registry just collects them.
+  diningChair: diningChairDef,
   couch: {
     kind: 'couch',
     label: 'Couch',
@@ -852,40 +850,10 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
     trafficControl: 'none',
     coverClass: 'none',
   },
-  // Chair TYPES (color is a skin, not a kind id — same frame, different default).
-  armchair: {
-    kind: 'armchair',
-    label: 'Armchair',
-    solid: true,
-    footprintRadiusMeters: 0.3,
-    heightMeters: 0.95,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 1 },
-    coverClass: 'soft',
-  },
-  officeChair: {
-    kind: 'officeChair',
-    label: 'Office Chair',
-    solid: true,
-    footprintRadiusMeters: 0.3,
-    heightMeters: 0.95,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 1 },
-    coverClass: 'soft',
-  },
-  foldingChair: {
-    kind: 'foldingChair',
-    label: 'Folding Chair',
-    solid: true,
-    footprintRadiusMeters: 0.3,
-    heightMeters: 0.95,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 1 },
-    coverClass: 'soft',
-  },
+  // Chair TYPES (color is a skin, not a kind id) — each owns its data in its file.
+  armchair: armchairDef,
+  officeChair: officeChairDef,
+  foldingChair: foldingChairDef,
 
   // ── household (bedroom / kitchen / bathroom) ───────────────────────────────
   bedSingle: {
