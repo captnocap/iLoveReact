@@ -16,10 +16,18 @@ import { propModelParts, type Color, type PropPartSpec } from '../../game/kinds/
 import { ballBasketballParts } from './ballBasketball';
 import { ballBeachParts } from './ballBeach';
 import { ballSoccerParts } from './ballSoccer';
+import { barrelParts } from './barrel';
 import { barrierParts } from './barrier';
 import { basketballHoopParts } from './basketballHoop';
 import { bedParts } from './bed';
 import { benchParts } from './bench';
+import { brickParts } from './brick';
+import { cinderBlockParts } from './cinderBlock';
+import { jerryCanParts } from './jerryCan';
+import { propaneTankParts } from './propaneTank';
+import { steelDrumParts } from './steelDrum';
+import { tireParts } from './tire';
+import { tireStackParts } from './tireStack';
 import { boulderParts } from './boulder';
 import { bushParts } from './bush';
 import { chairParts } from './chair';
@@ -167,6 +175,14 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     case 'computer': return computerParts();
     case 'telephonePole': return telephonePoleParts(def.heightMeters, def.footprintRadiusMeters);
     case 'basketballHoop': return basketballHoopParts(def.heightMeters);
+    case 'tire': return tireParts();
+    case 'tireStack': return tireStackParts();
+    case 'barrel': return barrelParts();
+    case 'steelDrum': return steelDrumParts();
+    case 'propaneTank': return propaneTankParts();
+    case 'jerryCan': return jerryCanParts();
+    case 'cinderBlock': return cinderBlockParts();
+    case 'brick': return brickParts();
     default: {
       // data-recipe kinds (propModels.RECIPES) resolve here; the two paths agree
       // by construction since everyone calls this one function.

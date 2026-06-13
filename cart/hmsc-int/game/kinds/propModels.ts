@@ -62,7 +62,7 @@ export function sphere(local: readonly [number, number, number], size: readonly 
 }
 
 /** A flat image-target panel: a thin box whose broad faces take a texture. */
-function panel(partId: string, local: readonly [number, number, number], size: readonly [number, number, number], color: Color, rotation?: Rotation): PropPartSpec {
+export function panel(partId: string, local: readonly [number, number, number], size: readonly [number, number, number], color: Color, rotation?: Rotation): PropPartSpec {
   return { shape: 'box', local, size, color, rotation, partId };
 }
 
@@ -72,7 +72,7 @@ function panel(partId: string, local: readonly [number, number, number], size: r
 // constants (game/kinds must not import the render layer); mirrors materials.ts.
 const GLASS_TINT = hx('#bcd3dd');
 const GLASS_OPACITY = 0.3;
-function glassBox(local: readonly [number, number, number], size: readonly [number, number, number], rotation?: Rotation): PropPartSpec {
+export function glassBox(local: readonly [number, number, number], size: readonly [number, number, number], rotation?: Rotation): PropPartSpec {
   return { shape: 'box', local, size, color: GLASS_TINT, rotation, opacity: GLASS_OPACITY };
 }
 
@@ -99,23 +99,23 @@ export function cssColor(color: Color): string {
   return `#${channel(color[0])}${channel(color[1])}${channel(color[2])}`;
 }
 
-// ── the shared palette ───────────────────────────────────────────────────────
-const STONE = hx('#6b7079');
-const STONE_DARK = hx('#52565d');
-const STONE_LIGHT = hx('#82868d');
-const METAL = hx('#3a3f46');
-const STEEL = hx('#9aa1ab');
-const STEEL_DARK = hx('#6c727b');
-const RUST = hx('#8a4a32');
-const WOOD = hx('#8a6240');
-const WOOD_DARK = hx('#6b4a2e');
-const WOOD_PALE = hx('#c2a878');
-const CONCRETE = hx('#b9b6ae');
-const NEAR_BLACK = hx('#1a1c1e');
-const WHITE = hx('#eef0f2');
-const GRASS_MID = hx('#3f7d33');
-const GRASS_LIGHT = hx('#5a9a42');
-const GRASS_DRY = hx('#8a9a4a');
+// ── the shared palette (the kit's colours — props import these) ───────────────
+export const STONE = hx('#6b7079');
+export const STONE_DARK = hx('#52565d');
+export const STONE_LIGHT = hx('#82868d');
+export const METAL = hx('#3a3f46');
+export const STEEL = hx('#9aa1ab');
+export const STEEL_DARK = hx('#6c727b');
+export const RUST = hx('#8a4a32');
+export const WOOD = hx('#8a6240');
+export const WOOD_DARK = hx('#6b4a2e');
+export const WOOD_PALE = hx('#c2a878');
+export const CONCRETE = hx('#b9b6ae');
+export const NEAR_BLACK = hx('#1a1c1e');
+export const WHITE = hx('#eef0f2');
+export const GRASS_MID = hx('#3f7d33');
+export const GRASS_LIGHT = hx('#5a9a42');
+export const GRASS_DRY = hx('#8a9a4a');
 
 // ── grass (req: "can u just make patches of grass also lol") ────────────────
 // A tuft is two crossed thin boxes — the PSX foliage cross, flat-shaded.
@@ -485,69 +485,6 @@ const RECIPES: Partial<Record<PropKind, () => PropPartSpec[]>> = {
       box([len * 0.32, 0.28, 0], [0.32, 0.56, r * 1.9], hx('#82827a')),
     ];
   },
-  tire: () => {
-    const R = propKindDefinitionStrict('tire').heightMeters / 2;
-    return [
-      cylinder16([0, R, 0], R, R * 0.68, NEAR_BLACK, [90, 0, 0]),
-      cylinder16([0, R, 0], R * 0.46, R * 0.72, hx('#6c727b'), [90, 0, 0]),
-      cylinder8([0, R, 0], R * 0.14, R * 0.76, hx('#52565d'), [90, 0, 0]),
-    ];
-  },
-  tireStack: () => {
-    const parts: PropPartSpec[] = [];
-    const jitter = [[0.04, -0.02], [-0.05, 0.03], [0.02, 0.05], [-0.03, -0.04]];
-    for (let i = 0; i < 4; i += 1) {
-      parts.push(cylinder16([jitter[i][0], 0.13 + i * 0.24, jitter[i][1]], 0.42, 0.23, i % 2 === 0 ? NEAR_BLACK : hx('#232628')));
-    }
-    parts.push(cylinder16([jitter[3][0], 1.0, jitter[3][1]], 0.2, 0.02, hx('#0c0d0e')));
-    return parts;
-  },
-  barrel: () => {
-    const h = propKindDefinitionStrict('barrel').heightMeters;
-    return [
-      cylinder16([0, h * 0.13, 0], 0.3, h * 0.26, WOOD),
-      cylinder16([0, h * 0.5, 0], 0.35, h * 0.52, WOOD),
-      cylinder16([0, h * 0.87, 0], 0.3, h * 0.26, WOOD),
-      cylinder16([0, h * 0.28, 0], 0.355, h * 0.06, METAL),
-      cylinder16([0, h * 0.72, 0], 0.355, h * 0.06, METAL),
-      cylinder16([0, h - 0.01, 0], 0.27, 0.04, WOOD_DARK),
-    ];
-  },
-  steelDrum: () => {
-    const h = propKindDefinitionStrict('steelDrum').heightMeters;
-    const body = hx('#7a3b2a');
-    return [
-      cylinder16([0, h * 0.48, 0], 0.3, h * 0.94, body),
-      cylinder16([0, h * 0.33, 0], 0.315, h * 0.05, hx('#5e2c1e')),
-      cylinder16([0, h * 0.66, 0], 0.315, h * 0.05, hx('#5e2c1e')),
-      cylinder16([0, h * 0.97, 0], 0.295, h * 0.04, hx('#4a4843')),
-    ];
-  },
-  propaneTank: () => {
-    const h = propKindDefinitionStrict('propaneTank').heightMeters;
-    return [
-      cylinder16([0, h * 0.42, 0], 0.23, h * 0.56, WHITE),
-      sphere([0, h * 0.7, 0], [0.46, h * 0.42, 0.46], WHITE),
-      cylinder16([0, h * 0.07, 0], 0.2, h * 0.14, hx('#d2d4d6')),
-      cylinder8([0, h * 0.88, 0], 0.12, h * 0.16, hx('#d2d4d6')),
-      box([0, h * 0.97, 0], [0.1, h * 0.06, 0.04], hx('#c14d4d')),
-    ];
-  },
-  jerryCan: () => {
-    const h = propKindDefinitionStrict('jerryCan').heightMeters;
-    const red = hx('#b03028');
-    return [
-      box([0, h * 0.46, 0], [0.36, h * 0.84, 0.17], red),
-      box([0, h * 0.94, 0], [0.2, h * 0.08, 0.06], hx('#8e1d22')),
-      cylinder8([0.13, h * 0.93, 0], 0.035, h * 0.14, hx('#8e1d22'), [0, 0, -20]),
-    ];
-  },
-  cinderBlock: () => [
-    box([0, 0.11, 0], [0.44, 0.22, 0.22], hx('#a8a8a0')),
-    box([-0.1, 0.222, 0], [0.13, 0.015, 0.16], hx('#62625c')),
-    box([0.1, 0.222, 0], [0.13, 0.015, 0.16], hx('#62625c')),
-  ],
-  brick: () => [box([0, 0.036, 0], [0.23, 0.07, 0.11], hx('#9c4a36'))],
   rubblePile: () => {
     const { heightMeters: h, footprintRadiusMeters: r } = propKindDefinitionStrict('rubblePile');
     return [
