@@ -117,33 +117,11 @@ export const GRASS_MID = hx('#3f7d33');
 export const GRASS_LIGHT = hx('#5a9a42');
 export const GRASS_DRY = hx('#8a9a4a');
 
-// ── chairs (PROPSKIN-0769): migrated out of the bespoke render3d/props/Furniture
-// component into a data recipe so every chair exposes skinnable PARTS (legs, seat,
-// backrest) AND bakes faithfully — the bespoke model had no recipe, so a compiled
-// chair fell back to a single box. Four legs + seat + a tilted backrest, the exact
-// geometry the Furniture <Chair> drew. Painted variants pass body/leg colours.
-const CHAIR_METAL = hx('#3a3f46');
-function chairParts(body: Color, legColor: Color): PropPartSpec[] {
-  const seatY = 0.45;
-  const legSpots: [number, number, number][] = [[0.2, seatY / 2, 0.2], [-0.2, seatY / 2, 0.2], [0.2, seatY / 2, -0.2], [-0.2, seatY / 2, -0.2]];
-  return [
-    ...legSpots.map((p) => box(p, [0.05, seatY, 0.05], legColor)),
-    box([0, seatY, 0], [0.5, 0.06, 0.5], body),                          // seat
-    box([0, seatY + 0.27, 0.23], [0.5, 0.5, 0.05], body, [-6, 0, 0]),    // backrest (rises behind +Z, tilted)
-  ];
-}
-
-// ── recipes for every PROPBATCH kind ─────────────────────────────────────────
-// Keyed by kind; a kind absent here uses worldGeometry's bespoke case (the
-// pre-batch props) or the registry-box placeholder.
-const RECIPES: Partial<Record<PropKind, () => PropPartSpec[]>> = {
-  chair: () => chairParts(WOOD, WOOD_DARK),
-  chairRed: () => chairParts(hx('#b03a2e'), CHAIR_METAL),
-  chairBlue: () => chairParts(hx('#2e6fb0'), CHAIR_METAL),
-  chairGreen: () => chairParts(hx('#3a8f4f'), CHAIR_METAL),
-
-  // ── PROPVENUE-0611 (req_0640): parks + shop interiors ────────────────────
-};
+// The RECIPES god-file is fully dissolved — every prop now lives in its own file
+// under compile/propRecipes/, resolved by resolvePartsForKind. This stays empty
+// (kept only so the legacy propModelParts/hasPropModelRecipe accessors still
+// resolve to null) until those accessors are removed in the pure-kit pass.
+const RECIPES: Partial<Record<PropKind, () => PropPartSpec[]>> = {};
 
 // propKindDefinition typed against the registry — a recipe asking for a kind
 // that left the registry is a build error at the lookup site, not a silent
