@@ -1,4 +1,7 @@
-// FacePainter — the iso build pane's paint-faces panel (req_0478 v1 → req_0483).
+// FacePainter — the build view's paint-faces panel (req_0478 v1 → req_0483 →
+// req_0702: moved off the iso map into the top-right PAINT tab — the panel fills
+// its pane instead of floating over the world, so the map stays uncrowded and
+// the full material browser gets real estate).
 //
 // A selection is a box in space with 6 faces. N/E/S/W paint each selected
 // piece's EXTERIOR-facing major slot on that side (exterior = the front/back
@@ -219,10 +222,15 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   const brushLabel = brush.kind === 'color' ? brush.value : (materialById.get(brush.id)?.label ?? brush.id);
 
   return (
-    <Box style={{ position: 'absolute', right: 8, top: 36, backgroundColor: '#0b1220fa', borderWidth: 1, borderColor: '#1e3a5f', borderRadius: 6, padding: 8, gap: 6, width: 248 }}>
+    <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b1220', padding: 10, gap: 7 }}>
       <Text fontSize={9} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
         {`PAINT — ${selPieces.length} piece${selPieces.length === 1 ? '' : 's'} · a swatch paints it all · a side refines`}
       </Text>
+      {selPieces.length === 0 ? (
+        <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>
+          {'nothing selected — click pieces in the build pane below; the brush you set here is ready when you do'}
+        </Text>
+      ) : null}
 
       {/* faces: big targets, each with a dot of what that face currently wears */}
       <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
@@ -299,9 +307,10 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         />
       </Box>
 
-      {/* materials: grouped accordion — open a group, see its swatches */}
+      {/* materials: grouped accordion — open a group, see its swatches. The
+          browser takes the pane's remaining height (it owns its own scroll). */}
       {groups.length > 0 ? (
-        <Box style={{ gap: 4 }}>
+        <Box style={{ gap: 4, flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
           <Box style={{ flexDirection: 'row', gap: 3, flexWrap: 'wrap' }}>
             {groups.map((g) => (
               <Pressable key={g.name} onPress={() => setOpenGroupName(g.name)}>
@@ -312,7 +321,7 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
             ))}
           </Box>
           {openGroup ? (
-            <ScrollView style={{ height: 150 }}>
+            <ScrollView style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
               <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
                 {openGroup.items.map((def) => (
                   <MatSwatch key={def.id} def={def} active={brush.kind === 'material' && brush.id === def.id} onPick={pickMaterial} />

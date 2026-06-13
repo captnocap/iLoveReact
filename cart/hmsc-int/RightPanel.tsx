@@ -13,17 +13,22 @@ import { Icon } from '@reactjit/icons/Icon';
 import { ObjectsTab } from './tabs/ObjectsTab';
 import { NotesTab } from './tabs/NotesTab';
 import { ChatTab } from './tabs/ChatTab';
+import { FacePainter } from './editors/build/FacePainter';
 import type { PlaceCat } from './placements';
 import type { ScatterBrushId } from './game/kinds/scatter';
-import type { BuildPrefabDef } from '@game';
+import type { BuildEditEvent, BuildPrefabDef, PlacedBuildPiece } from '@game';
 
 // SET retired (SETFOLD-0610, review §5.1/L4): the chrome's SETTINGS door →
 // the workbench settings source is THE settings home. The tab's three
 // controls went to their task homes: grid toggle → the painter rail,
 // pane reset → double-press the QuadSplit knob, notepad clear → NotesTab.
-export type TabId = 'objects' | 'notes' | 'chat';
+// PAINT added (req_0702): the iso build pane's face painter moved up here —
+// full skin-editing capability in the quadrant, off the crowded map. It
+// auto-opens when the build pane gets a selection (the cart owns that flip).
+export type TabId = 'paint' | 'objects' | 'notes' | 'chat';
 
 const TABS: { id: TabId; icon: string; label: string }[] = [
+  { id: 'paint', icon: 'Paintbrush', label: 'PAINT' },
   { id: 'objects', icon: 'FolderTree', label: 'OBJ' },
   { id: 'notes', icon: 'NotebookPen', label: 'NOTE' },
   { id: 'chat', icon: 'MessageSquare', label: 'CHAT' },
@@ -56,11 +61,17 @@ export function RightPanel(props: {
   activePlaceable?: { cat: PlaceCat; kind: string } | null;
   onArmPlaceable?: (cat: PlaceCat, kind: string) => void;
   onArmScatter?: (id: ScatterBrushId) => void;
+  // PAINT tab (req_0702): the build pieces + the iso pane's mirrored selection +
+  // the cart's batched commit — the same trio the floating panel used to get.
+  paintPieces: readonly PlacedBuildPiece[];
+  paintSelectedIds: ReadonlySet<string>;
+  onPaintCommit: (items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => void;
 }) {
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'row', backgroundColor: '#0b1320' }}>
       {/* Active tab content */}
       <Box style={{ flexGrow: 1, minWidth: 0, height: '100%' }}>
+        {props.tab === 'paint' ? <FacePainter pieces={props.paintPieces} selectedIds={props.paintSelectedIds} commitBatch={props.onPaintCommit} /> : null}
         {props.tab === 'objects' ? <ObjectsTab buildingPrefabs={props.buildingPrefabs} onPlace={props.onPlace} activePlaceable={props.activePlaceable} onArmPlaceable={props.onArmPlaceable} onArmScatter={props.onArmScatter} /> : null}
         {props.tab === 'notes' ? <NotesTab notes={props.notes} onNotes={props.onNotes} /> : null}
         {props.tab === 'chat' ? <ChatTab /> : null}

@@ -21,7 +21,6 @@ import { resolveSnapTarget, modulePitch, nearestWallLineAnchor, nearestPlateLatt
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, elevatorCarVisualShape } from './editors/build/pieceMeshes';
 import { perfMs, warnPlaceFreeze } from './editors/build/placeFreezeProbe';
 import { logPiecePlaced, logPiecesPlaced, logPrefabStamped } from './editors/build/placeLog';
-import { FacePainter } from './editors/build/FacePainter';
 import { BUILD_UI } from './editors/build/buildUi';
 import { IsoStage, METERS_PER_LEVEL, type IsoPose } from './isoStage';
 import { readRouteTwigState, writeRouteTwigState, useRouteTwigState } from './editors/twigs';
@@ -67,6 +66,10 @@ function contentCenter(pieces: readonly PlacedBuildPiece[]): [number, number] {
 
 function quantizeMeters(v: number, step: number): number {
   return step > 0 ? Math.round(v / step) * step : v;
+}
+
+function normalizeYawDegrees(yawDegrees: number): number {
+  return ((yawDegrees % 360) + 360) % 360;
 }
 
 function isPropPiece(piece: PlacedBuildPiece): boolean {
@@ -121,8 +124,9 @@ const TOWER_MAX_SPAN = 16; // footprint cells per axis (48m at the 3m pitch)
 const TOWER_MIN_FLOORS = 1;
 const TOWER_MAX_FLOORS = 30;
 
-// The face painter (req_0478 → req_0483) lives in ./editors/build/FacePainter —
-// the selection's 6-face paint panel, mounted below when a selection exists.
+// The face painter (req_0478 → req_0483 → req_0702) lives in
+// ./editors/build/FacePainter, mounted in the cart's top-right PAINT tab — this
+// pane only reports its selection up (onSelectionChange) so the map stays clear.
 
 /** the same tool armed twice = a toggle-off (rail chips re-click to disarm) */
 function sameArmed(cur: Armed, next: NonNullable<Armed>): boolean {
@@ -158,6 +162,9 @@ export interface IsoAuthorProps {
   // drives input. A click here claims it.
   focused?: boolean;
   onFocus?: () => void;
+  // Selection mirror (req_0702): the cart hosts the face painter in the top-right
+  // PAINT tab, so it needs to know what's selected here. Fired on every change.
+  onSelectionChange?: (ids: ReadonlySet<string>) => void;
 }
 
 // A placement's identity-free fingerprint (kind + pose). The rotate flow uses
@@ -282,6 +289,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
+  // Mirror the selection up to the cart (req_0702) — the top-right PAINT tab
+  // paints whatever is selected here. Ref'd callback: a parent re-render must
+  // not re-fire the effect with an unchanged selection.
+  const onSelectionChangeRef = useRef(props.onSelectionChange);
+  onSelectionChangeRef.current = props.onSelectionChange;
+  useEffect(() => { onSelectionChangeRef.current?.(selectedIds); }, [selectedIds]);
   // Re-acquire rotated loose pieces (req_0645): a loose-piece rotation is
   // remove+place (no pieceMoved event exists), so its id dies with the commit.
   // rotateSelected parks the new placements' signatures here; when the
@@ -1503,11 +1516,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         </Box>
       ) : null}
 
-      {/* ── face painter (req_0478 → req_0483): paint the selection's 6 faces —
-          the panel module owns the brush, material navigation, and slot math ── */}
-      {selectedIds.size > 0 && !armed ? (
-        <FacePainter pieces={pieces} selectedIds={selectedIds} commitBatch={commitBatch} />
-      ) : null}
+      {/* face painter: NOT here anymore (req_0702) — it fills the cart's top-right
+          PAINT tab, fed by the onSelectionChange mirror above. The map stays clear. */}
 
       {/* ── catalog rail (bottom): pick a piece to place ───────────────────── */}
       <CatalogRail prefabs={prefabs} armed={armed} onArm={(a) => { setArmed((cur) => (sameArmed(cur, a) ? null : a)); setSelectedIds(new Set()); }} />
@@ -1518,7 +1528,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
             ? `tower: drag the footprint · ${towerFloors} floors (+/− top right) · hollow shell + roof, one building · Esc`
             : `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${armedPropCanFreeform ? ' · Alt freeform' : ''}${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · shift-click select · Esc`
           : selectedIds.size > 0
-            ? `${selectedIds.size} selected · drag to move${selectedPropsCanFreeform ? ' · Alt-drag freeform' : ''} · R rotate · paint faces (top right) · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
+            ? `${selectedIds.size} selected · drag to move${selectedPropsCanFreeform ? ' · Alt-drag freeform' : ''} · R rotate · paint in the PAINT panel above · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
             : `WASD pan · drag rotate · scroll zoom · F recenter · click = ${wholeBuilding ? 'building, shift = piece' : 'piece, shift = building'} · ${wallsVisible ? 'walls shown' : 'walls hidden'} · pick below to build`}
       </Text>
       {/* what's in the map — the "junk" is the real placed pieces + world props (the

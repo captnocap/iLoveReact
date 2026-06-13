@@ -268,6 +268,19 @@ function EditorShell() {
     if (e) logEvent(e);
   }, [bumpWorldRev, logEvent]);
 
+  // ── The iso pane's selection, mirrored up (req_0702) ─────────────────────────
+  // The face painter lives in the top-right PAINT tab now (off the crowded map),
+  // so the cart holds a mirror of what the iso build pane has selected. Gaining a
+  // selection auto-opens the PAINT tab — select pieces, the paint surface is there.
+  const [isoSelectedIds, setIsoSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const isoSelRef = useRef<ReadonlySet<string>>(isoSelectedIds);
+  const onIsoSelectionChange = useCallback((ids: ReadonlySet<string>) => {
+    const gained = ids.size > 0 && isoSelRef.current.size === 0;
+    isoSelRef.current = ids;
+    setIsoSelectedIds(ids);
+    if (gained) setTab('paint');
+  }, [setTab]);
+
   // The top-left "in focus" panel. A tile SELECTION (group) wins — it's the
   // bulk-override surface. Else the place layer shows the SELECTED placement's
   // object (built into a one-object world so the panel resolves it); else it falls
@@ -409,6 +422,9 @@ function EditorShell() {
                 activePlaceable={activePlaceable}
                 onArmPlaceable={armPlaceable}
                 onArmScatter={armScatter}
+                paintPieces={buildPieces}
+                paintSelectedIds={isoSelectedIds}
+                onPaintCommit={commitBuildEvents}
               />
             }
             bottomLeft={
@@ -453,6 +469,7 @@ function EditorShell() {
                   onCommitMany={commitBuildEvents}
                   focused={atEditor && wasdQuad === 'preview'}
                   onFocus={focusPreview}
+                  onSelectionChange={onIsoSelectionChange}
                 />
               </Pane>
             }
