@@ -36,6 +36,9 @@ import type { DecalAssetSink } from './decalAssets';
 export const DECAL_NODE_RECT = 0;
 export const DECAL_NODE_TEXT = 1;
 export const DECAL_NODE_IMAGE = 2;
+// PARAMETRIC neon (req_0893): a glowing stroke path. Glow defaults resolve HERE
+// (pack time) so the Zig rasterizer stays dumb — read RGBA + widths, stroke.
+export const DECAL_NODE_PATH = 3;
 
 /** Flat gray a shader-fill rect ships when its own bg is transparent — a
  *  wrong-but-visible block beats an invisible one (warned at pack time). */
@@ -90,7 +93,12 @@ class ByteWriter {
 
 /** Pack one VISIBLE node, or null for kinds the artifact drops (hidden). */
 function packNode(w: ByteWriter, node: DecalNode, decalId: string, assets: DecalAssetSink | undefined): void {
-  w.u8(node.kind === 'rect' ? DECAL_NODE_RECT : node.kind === 'text' ? DECAL_NODE_TEXT : DECAL_NODE_IMAGE);
+  const kindByte =
+    node.kind === 'rect' ? DECAL_NODE_RECT :
+    node.kind === 'text' ? DECAL_NODE_TEXT :
+    node.kind === 'path' ? DECAL_NODE_PATH :
+    DECAL_NODE_IMAGE;
+  w.u8(kindByte);
   w.f32(node.x);
   w.f32(node.y);
   w.f32(node.w);
@@ -120,6 +128,25 @@ function packNode(w: ByteWriter, node: DecalNode, decalId: string, assets: Decal
     const utf8 = textBytes(node.text);
     w.u16(Math.min(utf8.length, 0xffff));
     w.bytes(utf8.subarray(0, 0xffff));
+    return;
+  }
+  if (node.kind === 'path') {
+    // Resolve glow defaults at pack time (the raster stays dumb): glow color
+    // falls to the stroke, glow width to 3.5× core, glow opacity to 0.5 — the
+    // same layered-glow defaults decalRender.NeonPathView draws in the editor.
+    const stroke = packColor(node.stroke);
+    const glow = packColor(node.glow ?? node.stroke);
+    const glowWidth = node.glowWidth ?? node.strokeWidth * 3.5;
+    const glowA = node.glowOpacity ?? 0.5;
+    w.rgba(stroke);
+    w.f32(node.strokeWidth);
+    w.rgba(glow);
+    w.f32(glowWidth);
+    w.f32(glowA);
+    w.rgba(packColor(node.fill)); // [0,0,0,0] when no fill
+    const dBytes = textBytes(node.d);
+    w.u16(Math.min(dBytes.length, 0xffff));
+    w.bytes(dBytes.subarray(0, 0xffff));
     return;
   }
   // Image (DECALIMG-0610): the file bytes ride the content-addressed asset

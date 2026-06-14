@@ -176,6 +176,8 @@ import { mugParts } from './mug';
 import { monumentParts } from './monument';
 import { neonSignParts } from './neonSign';
 import { blockLettersParts } from './blockText';
+import { neonLogoParts } from './neonLogo';
+import { neonLogoDoubleParts } from './neonLogoDouble';
 import { officeDeskParts } from './officeDesk';
 import { phoneParts } from './phone';
 import { plateParts } from './plate';
@@ -480,6 +482,8 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     // feeds the measured collision footprint. The live geometry comes through
     // resolvePropParts (above), which passes the placement's real text.
     case 'blockLetters': return blockLettersParts(def.heightMeters);
+    case 'neonLogo': return neonLogoParts();
+    case 'neonLogoDouble': return neonLogoDoubleParts();
     case 'officeDesk': return officeDeskParts();
     case 'phone': return phoneParts();
     case 'plate': return plateParts();

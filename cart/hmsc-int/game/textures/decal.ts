@@ -81,7 +81,41 @@ export type DecalImageNode = {
   opacity?: number;
 };
 
-export type DecalNode = DecalRectNode | DecalTextNode | DecalImageNode;
+// PARAMETRIC neon (req_0893, ask #2): a STROKE-shaped node — the "SVG" side of
+// the user's line-vs-shader vocabulary (Graph.Path, not <Effect>). `d` is an SVG
+// path string in the doc's pixel space (paste a logo's path, or a pen tool emits
+// M/L commands); the renderer draws it as a glowing neon tube via layered
+// Graph.Path strokes (wide soft glow under a bright core). One panel wears it for
+// a single-faced sign, two back-to-back panels for a double-sided one.
+export type DecalPathNode = {
+  id: string;
+  name?: string;
+  hidden?: boolean;
+  kind: 'path';
+  /** bounding-box hint for the editor (move/select); the path itself uses the
+   *  ABSOLUTE doc-pixel coordinates in `d`, so a Graph overlay can span the canvas. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** SVG path data in doc-pixel coords (M/L/H/V/C/Q/Z, abs or rel) */
+  d: string;
+  /** the lit tube color (the neon core) */
+  stroke: string;
+  /** core tube width in px */
+  strokeWidth: number;
+  /** glow halo color — defaults to `stroke` */
+  glow?: string;
+  /** glow halo width in px — defaults to strokeWidth × 3.5 */
+  glowWidth?: number;
+  /** glow strength 0..1 — defaults to 0.5 */
+  glowOpacity?: number;
+  /** optional filled interior (a solid logo body behind the tube); '' / absent = none */
+  fill?: string;
+  opacity?: number;
+};
+
+export type DecalNode = DecalRectNode | DecalTextNode | DecalImageNode | DecalPathNode;
 
 export type DecalDoc = {
   version: typeof DECAL_DOC_VERSION;
@@ -135,6 +169,9 @@ function numArray(v: unknown, maxLen: number): number[] | null {
 
 const MAX_DIM = 4096;
 const MAX_NODES = 256;
+// A neon path's `d` — generous (a detailed logo has many curves), but bounded so
+// a corrupt blob can't choke the capture. See [[feedback_juice_limits_dont_set_low]].
+const MAX_PATH_D_CHARS = 20000;
 
 function validateNode(raw: any): DecalNode | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -185,6 +222,24 @@ function validateNode(raw: any): DecalNode | null {
     return {
       ...base, kind: 'image', src,
       borderRadius: num(raw.borderRadius, 0, MAX_DIM) ?? undefined,
+      opacity,
+    };
+  }
+  if (raw.kind === 'path') {
+    const d = str(raw.d);
+    const stroke = str(raw.stroke);
+    const strokeWidth = num(raw.strokeWidth, 0.1, 512);
+    // A path string longer than this is almost certainly junk, not a logo —
+    // reject the whole doc rather than choke the capture (loud, not silent).
+    if (d === null || d.length > MAX_PATH_D_CHARS || stroke === null || strokeWidth === null) return null;
+    const glowFill = raw.fill === undefined ? undefined : str(raw.fill);
+    if (glowFill === null) return null;
+    return {
+      ...base, kind: 'path', d, stroke, strokeWidth,
+      glow: raw.glow === undefined ? undefined : (str(raw.glow) ?? undefined),
+      glowWidth: num(raw.glowWidth, 0, 1024) ?? undefined,
+      glowOpacity: num(raw.glowOpacity, 0, 1) ?? undefined,
+      fill: glowFill,
       opacity,
     };
   }

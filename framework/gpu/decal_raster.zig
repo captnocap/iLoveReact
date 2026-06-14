@@ -36,6 +36,19 @@ const TextEngine = @import("../primitive/text.zig").TextEngine;
 const NODE_RECT = 0;
 const NODE_TEXT = 1;
 const NODE_IMAGE = 2;
+// PARAMETRIC neon (req_0893): a glowing stroke path — the compiled twin of
+// decalRender.NeonPathView. The byte layout adds (after the shared x/y/w/h/op):
+//   stroke RGBA | f32 strokeWidth | glow RGBA | f32 glowWidth | f32 glowOpacity
+//   | fill RGBA | u16 dByteLen | utf8 `d` bytes
+// Glow defaults are resolved at pack time (decalPack), so this side just strokes.
+const NODE_PATH = 3;
+/// Curve flattening + segment cap — bounded so a hostile `d` can't stall load.
+const PATH_CUBIC_STEPS = 16;
+const PATH_QUAD_STEPS = 12;
+const MAX_PATH_SEGS = 16384;
+/// Longest neon `d` string accepted — mirrors decal.ts MAX_PATH_D_CHARS so the
+/// two sides agree on what's a logo vs a hostile blob.
+const MAX_PATH_D_BYTES = 20000;
 
 const MIN_DOC_SIDE = 8;
 const MAX_DOC_SIDE = 4096;
@@ -355,6 +368,292 @@ fn drawImageNode(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f32, ra
     }
 }
 
+// ── neon path (PARAMETRIC neon, req_0893) ───────────────────────────────────
+// Parse the SVG `d` to flat segments (curves flattened), then stroke them in
+// layered passes — wide soft glow under a bright core, the white-hot center on
+// top — the exact look decalRender.NeonPathView layers with Graph.Path. Stroke
+// work is line geometry, never a fragment shader ([[feedback_shader_vs_polyline]]).
+
+const Seg = struct { ax: f32, ay: f32, bx: f32, by: f32 };
+
+fn withGlowAlpha(col: [4]u8, a: f32) [4]u8 {
+    var o = col;
+    o[3] = @intFromFloat(std.math.clamp(@as(f32, @floatFromInt(col[3])) * std.math.clamp(a, 0, 1), 0, 255));
+    return o;
+}
+
+/// One round-capped segment (capsule) blended over its bbox. Overlapping joints
+/// over-blend slightly — which reads as a brighter neon joint, the look we want.
+fn strokeSeg(out: []u8, ow: u32, oh: u32, ax: f32, ay: f32, bx: f32, by: f32, half: f32, color: [4]u8) void {
+    if (half <= 0 or color[3] == 0) return;
+    const x0: i64 = @intFromFloat(@floor(@min(ax, bx) - half - 1));
+    const y0: i64 = @intFromFloat(@floor(@min(ay, by) - half - 1));
+    const x1: i64 = @intFromFloat(@ceil(@max(ax, bx) + half + 1));
+    const y1: i64 = @intFromFloat(@ceil(@max(ay, by) + half + 1));
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    var yy = @max(y0, 0);
+    while (yy < @min(y1, @as(i64, @intCast(oh)))) : (yy += 1) {
+        var xx = @max(x0, 0);
+        while (xx < @min(x1, @as(i64, @intCast(ow)))) : (xx += 1) {
+            const px = @as(f32, @floatFromInt(xx)) + 0.5;
+            const py = @as(f32, @floatFromInt(yy)) + 0.5;
+            var t: f32 = 0;
+            if (len2 > 1e-6) t = std.math.clamp(((px - ax) * dx + (py - ay) * dy) / len2, 0, 1);
+            const ddx = px - (ax + t * dx);
+            const ddy = py - (ay + t * dy);
+            const dist = @sqrt(ddx * ddx + ddy * ddy);
+            const coverage = 0.5 - (dist - half);
+            if (coverage <= 0) continue;
+            const i: usize = (@as(usize, @intCast(yy)) * @as(usize, ow) + @as(usize, @intCast(xx))) * 4;
+            blend(out, i, color, coverage);
+        }
+    }
+}
+
+const PathScan = struct {
+    d: []const u8,
+    at: usize = 0,
+
+    fn skipSep(self: *PathScan) void {
+        while (self.at < self.d.len) {
+            const ch = self.d[self.at];
+            if (ch == ' ' or ch == ',' or ch == '\t' or ch == '\n' or ch == '\r') self.at += 1 else break;
+        }
+    }
+    fn peekCmd(self: *PathScan) ?u8 {
+        self.skipSep();
+        if (self.at >= self.d.len) return null;
+        const ch = self.d[self.at];
+        if ((ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z')) return ch;
+        return null;
+    }
+    fn num(self: *PathScan) ?f32 {
+        self.skipSep();
+        const start = self.at;
+        var i = self.at;
+        if (i < self.d.len and (self.d[i] == '+' or self.d[i] == '-')) i += 1;
+        var seen = false;
+        while (i < self.d.len and self.d[i] >= '0' and self.d[i] <= '9') : (i += 1) seen = true;
+        if (i < self.d.len and self.d[i] == '.') {
+            i += 1;
+            while (i < self.d.len and self.d[i] >= '0' and self.d[i] <= '9') : (i += 1) seen = true;
+        }
+        if (seen and i < self.d.len and (self.d[i] == 'e' or self.d[i] == 'E')) {
+            i += 1;
+            if (i < self.d.len and (self.d[i] == '+' or self.d[i] == '-')) i += 1;
+            while (i < self.d.len and self.d[i] >= '0' and self.d[i] <= '9') i += 1;
+        }
+        if (!seen) return null;
+        const v = std.fmt.parseFloat(f32, self.d[start..i]) catch return null;
+        self.at = i;
+        return if (std.math.isFinite(v)) v else null;
+    }
+};
+
+fn pushSeg(segs: *std.ArrayList(Seg), allocator: std.mem.Allocator, s: f32, ax: f32, ay: f32, bx: f32, by: f32) void {
+    if (segs.items.len >= MAX_PATH_SEGS) return;
+    segs.append(allocator, .{ .ax = ax * s, .ay = ay * s, .bx = bx * s, .by = by * s }) catch {};
+}
+
+fn flattenCubic(segs: *std.ArrayList(Seg), allocator: std.mem.Allocator, s: f32, x0: f32, y0: f32, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32) void {
+    var prevx = x0;
+    var prevy = y0;
+    var i: usize = 1;
+    while (i <= PATH_CUBIC_STEPS) : (i += 1) {
+        const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(PATH_CUBIC_STEPS));
+        const u = 1 - t;
+        const a = u * u * u;
+        const b = 3 * u * u * t;
+        const cc = 3 * u * t * t;
+        const dd = t * t * t;
+        const cxp = a * x0 + b * x1 + cc * x2 + dd * x3;
+        const cyp = a * y0 + b * y1 + cc * y2 + dd * y3;
+        pushSeg(segs, allocator, s, prevx, prevy, cxp, cyp);
+        prevx = cxp;
+        prevy = cyp;
+    }
+}
+
+fn flattenQuad(segs: *std.ArrayList(Seg), allocator: std.mem.Allocator, s: f32, x0: f32, y0: f32, x1: f32, y1: f32, x2: f32, y2: f32) void {
+    var prevx = x0;
+    var prevy = y0;
+    var i: usize = 1;
+    while (i <= PATH_QUAD_STEPS) : (i += 1) {
+        const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(PATH_QUAD_STEPS));
+        const u = 1 - t;
+        const cxp = u * u * x0 + 2 * u * t * x1 + t * t * x2;
+        const cyp = u * u * y0 + 2 * u * t * y1 + t * t * y2;
+        pushSeg(segs, allocator, s, prevx, prevy, cxp, cyp);
+        prevx = cxp;
+        prevy = cyp;
+    }
+}
+
+/// Parse `d` into flat segments (in raster pixels via `s`). Supports M/L/H/V/C/
+/// Q/Z (abs+rel). S/T approximate the smooth control as the current point (no
+/// reflection — neon glow blurs the small difference); A degrades to a line to
+/// its endpoint. Coords stay in DOC space; pushSeg scales on append.
+fn parsePath(segs: *std.ArrayList(Seg), allocator: std.mem.Allocator, d: []const u8, s: f32) void {
+    var ps = PathScan{ .d = d };
+    var cx: f32 = 0;
+    var cy: f32 = 0;
+    var startx: f32 = 0;
+    var starty: f32 = 0;
+    var cmd: u8 = 0;
+    while (segs.items.len < MAX_PATH_SEGS) {
+        if (ps.peekCmd()) |cmd_ch| {
+            cmd = cmd_ch;
+            ps.at += 1;
+        } else if (cmd == 0) break;
+        const rel = cmd >= 'a' and cmd <= 'z';
+        const lower = if (rel) cmd else cmd | 0x20;
+        switch (lower) {
+            'm' => {
+                const x = ps.num() orelse break;
+                const y = ps.num() orelse break;
+                cx = if (rel) cx + x else x;
+                cy = if (rel) cy + y else y;
+                startx = cx;
+                starty = cy;
+                cmd = if (rel) 'l' else 'L'; // implicit lineto for following pairs
+            },
+            'l' => {
+                const x = ps.num() orelse break;
+                const y = ps.num() orelse break;
+                const nx = if (rel) cx + x else x;
+                const ny = if (rel) cy + y else y;
+                pushSeg(segs, allocator, s, cx, cy, nx, ny);
+                cx = nx;
+                cy = ny;
+            },
+            'h' => {
+                const x = ps.num() orelse break;
+                const nx = if (rel) cx + x else x;
+                pushSeg(segs, allocator, s, cx, cy, nx, cy);
+                cx = nx;
+            },
+            'v' => {
+                const y = ps.num() orelse break;
+                const ny = if (rel) cy + y else y;
+                pushSeg(segs, allocator, s, cx, cy, cx, ny);
+                cy = ny;
+            },
+            'c' => {
+                const x1 = ps.num() orelse break;
+                const y1 = ps.num() orelse break;
+                const x2 = ps.num() orelse break;
+                const y2 = ps.num() orelse break;
+                const x = ps.num() orelse break;
+                const y = ps.num() orelse break;
+                const p1x = if (rel) cx + x1 else x1;
+                const p1y = if (rel) cy + y1 else y1;
+                const p2x = if (rel) cx + x2 else x2;
+                const p2y = if (rel) cy + y2 else y2;
+                const px = if (rel) cx + x else x;
+                const py = if (rel) cy + y else y;
+                flattenCubic(segs, allocator, s, cx, cy, p1x, p1y, p2x, p2y, px, py);
+                cx = px;
+                cy = py;
+            },
+            's' => {
+                const x2 = ps.num() orelse break;
+                const y2 = ps.num() orelse break;
+                const x = ps.num() orelse break;
+                const y = ps.num() orelse break;
+                const p2x = if (rel) cx + x2 else x2;
+                const p2y = if (rel) cy + y2 else y2;
+                const px = if (rel) cx + x else x;
+                const py = if (rel) cy + y else y;
+                flattenCubic(segs, allocator, s, cx, cy, cx, cy, p2x, p2y, px, py);
+                cx = px;
+                cy = py;
+            },
+            'q' => {
+                const x1 = ps.num() orelse break;
+                const y1 = ps.num() orelse break;
+                const x = ps.num() orelse break;
+                const y = ps.num() orelse break;
+                const p1x = if (rel) cx + x1 else x1;
+                const p1y = if (rel) cy + y1 else y1;
+                const px = if (rel) cx + x else x;
+                const py = if (rel) cy + y else y;
+                flattenQuad(segs, allocator, s, cx, cy, p1x, p1y, px, py);
+                cx = px;
+                cy = py;
+            },
+            't' => {
+                const x = ps.num() orelse break;
+                const y = ps.num() orelse break;
+                const px = if (rel) cx + x else x;
+                const py = if (rel) cy + y else y;
+                flattenQuad(segs, allocator, s, cx, cy, cx, cy, px, py);
+                cx = px;
+                cy = py;
+            },
+            'a' => {
+                // arc → line to endpoint (rx ry rot large sweep x y); flags read
+                // as numbers. A faithful arc flattener is the marked follow-up.
+                _ = ps.num() orelse break; // rx
+                _ = ps.num() orelse break; // ry
+                _ = ps.num() orelse break; // x-rotation
+                _ = ps.num() orelse break; // large-arc
+                _ = ps.num() orelse break; // sweep
+                const x = ps.num() orelse break;
+                const y = ps.num() orelse break;
+                const nx = if (rel) cx + x else x;
+                const ny = if (rel) cy + y else y;
+                pushSeg(segs, allocator, s, cx, cy, nx, ny);
+                cx = nx;
+                cy = ny;
+            },
+            'z' => {
+                pushSeg(segs, allocator, s, cx, cy, startx, starty);
+                cx = startx;
+                cy = starty;
+            },
+            else => break, // unknown command → stop (what parsed still draws)
+        }
+    }
+}
+
+fn drawNeonPath(
+    allocator: std.mem.Allocator,
+    out: []u8,
+    ow: u32,
+    oh: u32,
+    s: f32,
+    opacity: f32,
+    stroke: [4]u8,
+    stroke_w: f32,
+    glow: [4]u8,
+    glow_w: f32,
+    glow_a: f32,
+    d: []const u8,
+) void {
+    var segs: std.ArrayList(Seg) = .{};
+    defer segs.deinit(allocator);
+    parsePath(&segs, allocator, d, s);
+    if (segs.items.len == 0) return;
+    const op = std.math.clamp(opacity, 0, 1);
+    const ga = std.math.clamp(glow_a, 0, 1) * op;
+    // widths are full stroke widths (NeonPathView): capsule half = width/2 × s.
+    const glow_outer_half = glow_w * s * 0.5;
+    const glow_inner_half = glow_w * s * 0.275;
+    const core_half = stroke_w * s * 0.5;
+    const hot_half = @max(0.25, stroke_w * s * 0.2);
+    const c_glow_outer = withGlowAlpha(glow, ga * 0.4);
+    const c_glow_inner = withGlowAlpha(glow, ga * 0.7);
+    const c_core = withGlowAlpha(stroke, op);
+    const c_hot = [4]u8{ 255, 255, 255, @intFromFloat(std.math.clamp(0.85 * 255.0 * op, 0, 255)) };
+    // pass order: outer glow → inner glow → core → hot center (back to front)
+    for (segs.items) |g| strokeSeg(out, ow, oh, g.ax, g.ay, g.bx, g.by, glow_outer_half, c_glow_outer);
+    for (segs.items) |g| strokeSeg(out, ow, oh, g.ax, g.ay, g.bx, g.by, glow_inner_half, c_glow_inner);
+    for (segs.items) |g| strokeSeg(out, ow, oh, g.ax, g.ay, g.bx, g.by, core_half, c_core);
+    for (segs.items) |g| strokeSeg(out, ow, oh, g.ax, g.ay, g.bx, g.by, hot_half, c_hot);
+}
+
 // ── the door ────────────────────────────────────────────────────────────────
 
 /// Run a packed decal recipe into a fresh RGBA buffer (caller frees `rgba`
@@ -430,6 +729,20 @@ pub fn rasterize(allocator: std.mem.Allocator, doc: []const u8, images: []const 
                 } else {
                     log.warn(.render, "[decal-raster] image node ('{s}') references asset key {d} with no installed payload — skipped", .{ src, asset_key });
                 }
+            },
+            NODE_PATH => {
+                const stroke = r.rgba() orelse return fail(allocator, out);
+                const stroke_w = r.f32v() orelse return fail(allocator, out);
+                const glow = r.rgba() orelse return fail(allocator, out);
+                const glow_w = r.f32v() orelse return fail(allocator, out);
+                const glow_a = r.f32v() orelse return fail(allocator, out);
+                _ = r.rgba() orelse return fail(allocator, out); // fill RGBA — interior fill is the marked follow-up; the tube is the neon
+                const len = r.u16v() orelse return fail(allocator, out);
+                if (len > MAX_PATH_D_BYTES) return fail(allocator, out);
+                const d = r.slice(len) orelse return fail(allocator, out);
+                // widths carry their own ×s inside drawNeonPath (the `d` coords
+                // scale on append); x/y/w/h above are the bbox hint, unused here.
+                drawNeonPath(allocator, out, ow, oh, s, opacity, stroke, stroke_w, glow, glow_w, glow_a, d);
             },
             else => return fail(allocator, out),
         }

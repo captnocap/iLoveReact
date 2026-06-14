@@ -23,7 +23,8 @@ import { propTakesText } from '../../game/kinds';
 import type { BuildFaceSkin, BuildFaceSlot, BuildSkinSet, PlacedBuildPiece, WorldEvent } from '@game';
 import type { WorldProp } from '../../design';
 import { allTextures, type TextureDef } from '@game/textures/registry';
-import { useCustomTextures } from '@game/textures/materials';
+import { useCustomTextures, saveDecalTexture } from '@game/textures/materials';
+import { neonDecalDoc } from '@game/textures/neon';
 import { materialFamily } from '../workbench/materials/chooser';
 import { propParts } from '../../render3d/propParts';
 import { isTextureable, type Part } from '../../render3d/parts';
@@ -242,6 +243,21 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
     commitRef.current(sel.map((p) => ({ event: { kind: 'pieceTextSet', id: p.id, text } as WorldEvent, label: 'sign text' })));
   };
 
+  // ── PARAMETRIC neon (req_0893, ask #2): paste a logo's SVG path `d` (or draw
+  // one), pick the tube color, and bake it to a NEON decal material. It lands in
+  // the library below the moment it saves (useCustomTextures is subscribed), then
+  // skin a neonLogo / neonLogoDouble face with it — the normal part-skin flow, so
+  // no bespoke apply path. Works on any face, not just neon props.
+  const [neonD, setNeonD] = useState('');
+  const [neonColor, setNeonColor] = useState('#ff3bd0');
+  const makeNeon = () => {
+    const d = neonD.trim();
+    if (!d) return;
+    const doc = neonDecalDoc(d, { stroke: neonColor });
+    const tex = saveDecalTexture('Neon', doc);
+    if (tex) { setNeonD(''); applyPropTexture(tex.id); }
+  };
+
   const pushRecent = (b: BuildFaceSkin) => {
     setRecent((list) => [b, ...list.filter((x) => matKey(x) !== matKey(b))].slice(0, 8));
   };
@@ -447,6 +463,33 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         />
       </Box>
       ) : null}
+
+      {/* PARAMETRIC neon (req_0893): paste a logo's SVG path `d`, pick a tube
+          color, and bake a glowing NEON decal — it lands in the library below and
+          (in prop mode) skins the selected face right away. Pair it with a
+          neonLogo / neonLogoDouble sign for a 1- or 2-faced business sign. */}
+      <Box style={{ gap: 3 }}>
+        <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>NEON FROM SVG · paste a path d</Text>
+        <Box style={{ flexDirection: 'row', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+          <TextInput
+            text={neonD}
+            placeholder="M10,10 L90,90 …"
+            onChangeText={setNeonD}
+            style={{ width: 150, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: neonD.trim() ? '#ff3bd0' : '#27364a', borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
+          />
+          <TextInput
+            text={neonColor}
+            placeholder="#ff3bd0"
+            onChangeText={setNeonColor}
+            style={{ width: 64, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: '#3a4f6b', borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
+          />
+          <Pressable onPress={makeNeon} hoverable tooltip="bake the path into a glowing neon decal — saved to the library; in prop mode it skins the selected face too">
+            <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: neonD.trim() ? '#ff3bd0' : '#3a4f6b', backgroundColor: '#16233a' }}>
+              <Text fontSize={9} color={neonD.trim() ? '#ff8fe0' : '#64748b'} style={{ fontFamily: 'monospace' }}>make neon</Text>
+            </Box>
+          </Pressable>
+        </Box>
+      </Box>
 
       {/* textures from here (req_0749): upload an image straight onto the piece,
           or open the full painter to draw/layer one — both feed the SAME library

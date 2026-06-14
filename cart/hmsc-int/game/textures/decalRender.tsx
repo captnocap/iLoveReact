@@ -14,12 +14,47 @@
 // Absolute children take raw PIXELS (the engine resolves no % left/top —
 // memory abs_left_top_no_percent), which is exactly what the doc stores.
 
-import { Box, Effect, Image, Text } from '@reactjit/primitives';
-import type { DecalAlign, DecalDoc, DecalNode } from './decal';
+import { Box, Effect, Graph, Image, Text } from '@reactjit/primitives';
+import type { DecalAlign, DecalDoc, DecalNode, DecalPathNode } from './decal';
 import { shaderSpec } from './shaders';
 
 function alignItems(align: DecalAlign | undefined): 'flex-start' | 'center' | 'flex-end' {
   return align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start';
+}
+
+// Graph.Path opacity rides in the stroke color's alpha (the engine has no opacity
+// prop on a path — memory: alpha-hex strokes like '#ffffff08'). Append a 2-digit
+// alpha to a #rrggbb; pass through anything already carrying alpha or non-hex.
+function withAlpha(color: string, a: number): string {
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) return color;
+  const byte = Math.max(0, Math.min(255, Math.round(a * 255)));
+  return color + byte.toString(16).padStart(2, '0');
+}
+
+// A neon path: layered Graph.Path strokes — wide soft glow halos under a bright
+// core, with a white-hot inner line for the lit-tube read. The path `d` is in
+// doc-pixel coords, so a Graph spanning the whole surface (originTopLeft,
+// viewZoom = sx) maps it 1:1 at bake (sx=sy=1). [[feedback_shader_vs_polyline]]:
+// stroke work is line geometry (Graph.Path capsules), never a fragment shader.
+function NeonPathView(props: { node: DecalPathNode; sx: number; sy: number }) {
+  const { node, sx } = props;
+  const core = node.stroke;
+  const glow = node.glow ?? node.stroke;
+  const coreW = node.strokeWidth;
+  const glowW = node.glowWidth ?? node.strokeWidth * 3.5;
+  const glowA = node.glowOpacity ?? 0.5;
+  return (
+    <Box style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', opacity: node.opacity ?? 1 }}>
+      <Graph style={{ width: '100%', height: '100%' }} viewX={0} viewY={0} viewZoom={sx} originTopLeft>
+        {node.fill ? <Graph.Path d={node.d} fill={node.fill} stroke="none" strokeWidth={0} /> : null}
+        {/* outer → inner glow falloff, then the saturated core, then a hot center */}
+        <Graph.Path d={node.d} fill="none" stroke={withAlpha(glow, glowA * 0.4)} strokeWidth={glowW} />
+        <Graph.Path d={node.d} fill="none" stroke={withAlpha(glow, glowA * 0.7)} strokeWidth={glowW * 0.55} />
+        <Graph.Path d={node.d} fill="none" stroke={core} strokeWidth={coreW} />
+        <Graph.Path d={node.d} fill="none" stroke={withAlpha('#ffffff', 0.85)} strokeWidth={Math.max(0.5, coreW * 0.4)} />
+      </Graph>
+    </Box>
+  );
 }
 
 function DecalNodeView(props: { node: DecalNode; sx: number; sy: number }) {
@@ -59,6 +94,9 @@ function DecalNodeView(props: { node: DecalNode; sx: number; sy: number }) {
         <Image src={node.src} style={{ width: '100%', height: '100%' }} />
       </Box>
     );
+  }
+  if (node.kind === 'path') {
+    return <NeonPathView node={node} sx={sx} sy={sy} />;
   }
   // text — the box owns position + alignment; the glyphs scale by min axis
   const fontScale = Math.min(sx, sy);
