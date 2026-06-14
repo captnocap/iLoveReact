@@ -102,6 +102,32 @@ function WaterSlopeSection(props: { brush: BrushRailSettings; onPatch: (p: Parti
   );
 }
 
+// Flat water (heightMode 'water'). Water only exists IN a basin it's held by — it
+// never rises above the ground — so the only knob is DEPTH: how deep the dug pool
+// is. There is no negative (a signed "height z" here was meaningless and made the
+// brush paint water on negative values, which read as a bug); depth is a single
+// positive number in metres. The brush stores it in centerZ (and reads |centerZ|).
+function WaterSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void }) {
+  const b = props.brush;
+  const set = props.onPatch;
+  return (
+    <Box style={{ gap: 5 }}>
+      <RailLabel text="water" />
+      <RailSlider
+        label="depth"
+        value={Math.max(0.5, Math.abs(b.centerZ))}
+        min={0.5}
+        max={HEIGHT_LIMIT}
+        step={0.5}
+        valueText="m"
+        formatDraft={(n) => n.toFixed(1)}
+        inputWidth={42}
+        onValue={(depth) => set({ centerZ: clamp(Math.abs(depth), 0.5, HEIGHT_LIMIT) })}
+      />
+    </Box>
+  );
+}
+
 function SmoothSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void }) {
   const b = props.brush;
   const set = props.onPatch;
@@ -135,6 +161,8 @@ export function HeightSection(props: { brush: BrushRailSettings; onPatch: (p: Pa
         <SlopeSection brush={b} onPatch={props.onPatch} />
       ) : b.heightMode === 'waterSlope' ? (
         <WaterSlopeSection brush={b} onPatch={props.onPatch} />
+      ) : b.heightMode === 'water' ? (
+        <WaterSection brush={b} onPatch={props.onPatch} />
       ) : b.heightMode === 'smooth' ? (
         <SmoothSection brush={b} onPatch={props.onPatch} />
       ) : (
