@@ -66,14 +66,20 @@ export function StoryBoard(props: { store: StoryStore }) {
   const g = store.graph();
   const selected = store.selectedKey();
 
-  // group nodes by questline, then by depth column
-  const lines = new Map<number, QuestNode[]>();
+  // group nodes by questline NAME (the author's `questline` field), then by
+  // depth column. Bands order by the lowest component index they contain so the
+  // layout stays stable as names are typed.
+  const lines = new Map<string, QuestNode[]>();
   for (const n of g.nodes) {
-    const list = lines.get(n.questline) ?? [];
+    const list = lines.get(n.questlineLabel) ?? [];
     list.push(n);
-    lines.set(n.questline, list);
+    lines.set(n.questlineLabel, list);
   }
-  const questlineIds = [...lines.keys()].sort((a, b) => a - b);
+  const questlineLabels = [...lines.keys()].sort((a, b) => {
+    const ra = Math.min(...lines.get(a)!.map((n) => n.questline));
+    const rb = Math.min(...lines.get(b)!.map((n) => n.questline));
+    return ra - rb || a.localeCompare(b);
+  });
 
   return (
     <ScrollView style={{ width: '100%', height: '100%', backgroundColor: accentFor('bg') }}>
@@ -83,17 +89,17 @@ export function StoryBoard(props: { store: StoryStore }) {
           {`${g.nodes.length} quests · ${g.edges.length} gates · ${g.external.length} external`}
         </Text>
 
-        {questlineIds.map((qid) => {
-          const nodes = lines.get(qid)!;
+        {questlineLabels.map((label) => {
+          const nodes = lines.get(label)!;
           const maxDepth = nodes.reduce((m, n) => Math.max(m, n.depth), 0);
           const columns = Array.from({ length: maxDepth + 1 }, (_, depth) =>
             nodes.filter((n) => n.depth === depth).sort((a, b) => a.lane - b.lane));
           return (
-            <Box key={`ql-${qid}`} style={{ marginBottom: 16 }}>
-              <Text fontSize={11} color={accentFor('info')} style={{ fontFamily: MONO, fontWeight: 800, marginBottom: 6 }}>{`QUESTLINE ${qid + 1}`}</Text>
+            <Box key={`ql-${label}`} style={{ marginBottom: 16 }}>
+              <Text fontSize={11} color={accentFor('info')} style={{ fontFamily: MONO, fontWeight: 800, marginBottom: 6 }}>{label.toUpperCase()}</Text>
               <Box style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
                 {columns.map((col, depth) => (
-                  <Box key={`col-${qid}-${depth}`} style={{ marginRight: 18 }}>
+                  <Box key={`col-${label}-${depth}`} style={{ marginRight: 18 }}>
                     {col.map((n) => (
                       <QuestCard key={n.key} node={n} selected={n.key === selected} onPick={() => store.select(n.key)} />
                     ))}

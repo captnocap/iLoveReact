@@ -2,13 +2,16 @@
 // roster (quests grouped by questline) and the per-quest PanelSpec the one
 // field renderer draws. No React (the characters.test.ts bundling law).
 //
-// The panel edits the MissionDef SHAPE the user named — title, the V22 verb,
-// the client (fromNPC), the PERSON/POSITION contract binding, the reward, and
-// THE UNLOCK GATES (their "constraints"): each gate is a flag another quest
-// provides, so authoring an edge is picking a flag, and the picker's options
-// ARE the affordances (you can only gate on something the world opens). What a
-// quest PROVIDES is derived from its hooks and shown read-only — you open gates
-// by authoring hooks, not by asserting it here (PROTECT THE ZERO).
+// THE PANEL IS THE USER'S SHAPE (req_0910/req_0914), in their order:
+//   IDENTITY     title · id · author · questline · fromNPC · desc
+//   CONSTRAINTS  the unlock gates (a flag another quest opens; the picker's
+//                options ARE the affordances — you can't gate on nothing)
+//   DEPENDENTS   what this quest unlocks downstream (derived from the edges)
+//   REWARD       cash · rep
+//   EVENTS       the ordered beats — each carrying location, cutscene, dialog;
+//                click a beat to expand it for editing, ▲▼ reorder, ✕ remove
+//   WIRING       verb / binding / expiry — the runtime substrate, demoted (the
+//                user's note: verb is the wrong level of hierarchy to lead with)
 
 import type { FieldSpec, PanelSpec } from '../../../shell/fields';
 import type { RosterRow } from '../../../shell/Workbench';
@@ -17,9 +20,10 @@ import type { ActivityVerb } from '../../../game/activities';
 import type { StoryStore } from './store';
 
 const BINDINGS = ['job', 'person', 'position'] as const;
+const COORD = { min: -100000, max: 100000, step: 1, precision: 1 } as const;
 
 /** roster = every quest, ordered (questline, column, lane); label carries the
- *  questline + verb so the flat rail still reads as grouped lines. */
+ *  questline name + title so the flat rail reads as grouped lines. */
 export function storyRoster(store: StoryStore): RosterRow[] {
   const g = store.graph();
   const node = (key: string) => g.nodes.find((n) => n.key === key)!;
@@ -31,11 +35,11 @@ export function storyRoster(store: StoryStore): RosterRow[] {
     })
     .map((d) => {
       const n = node(d.key);
-      return { id: d.key, label: `Q${n.questline + 1} · ${d.title}`, icon: 'GitBranch' };
+      return { id: d.key, label: `${n.questlineLabel} · ${d.title}`, icon: 'GitBranch' };
     });
 }
 
-/** every flag any OTHER quest provides — the affordances a gate may name. */
+/** every flag any OTHER quest provides — the affordances a constraint may name. */
 function gateOptions(store: StoryStore, selfKey: string): { id: string; label: string; group?: string }[] {
   const g = store.graph();
   const out: { id: string; label: string; group?: string }[] = [];
@@ -51,21 +55,105 @@ function gateOptions(store: StoryStore, selfKey: string): { id: string; label: s
   return out;
 }
 
-export function storyPanel(store: StoryStore, key: string): PanelSpec {
-  const d = store.draft(key);
-  if (!d) return { groups: [{ title: 'QUEST', fields: [{ k: 'missing', t: 'val', get: () => 'no quest selected' }], layout: 'rows' }] };
-  const g = store.graph();
-  const node = g.nodes.find((n) => n.key === key)!;
-
-  const identity: FieldSpec[] = [
+function identityGroup(store: StoryStore, key: string): FieldSpec[] {
+  const d = store.draft(key)!;
+  return [
     { k: 'title', t: 'text', get: () => d.title, set: (v) => store.edit(key, (x) => { x.title = v; }) },
     { k: 'id', t: 'val', get: () => d.key },
-    { k: 'verb', t: 'enum', get: () => d.verb, opts: [...GAME_ACTIVITIES.VERBS], set: (v) => store.edit(key, (x) => { x.verb = v as ActivityVerb; }) },
-    { k: 'client (fromNPC)', t: 'text', get: () => d.client, set: (v) => store.edit(key, (x) => { x.client = v; }) },
+    { k: 'author', t: 'text', get: () => d.author, set: (v) => store.edit(key, (x) => { x.author = v; }), placeholder: 'who wrote this quest' },
+    { k: 'questline', t: 'text', get: () => d.questline, set: (v) => store.edit(key, (x) => { x.questline = v; }), placeholder: 'e.g. Main Story' },
+    { k: 'fromNPC', t: 'text', get: () => d.client, set: (v) => store.edit(key, (x) => { x.client = v; }) },
+    { k: 'desc', t: 'text', get: () => d.desc, set: (v) => store.edit(key, (x) => { x.desc = v; }), width: 2, placeholder: 'what this quest is about' },
   ];
+}
 
+function constraintsGroup(store: StoryStore, key: string): FieldSpec[] {
+  const g = store.graph();
+  const node = g.nodes.find((n) => n.key === key)!;
+  const fields: FieldSpec[] = [];
+  for (const flag of node.requiresFlags) {
+    const edge = g.edges.find((e) => e.to === key && e.flag === flag);
+    const provenance = edge ? `← ${g.nodes.find((n) => n.key === edge.from)?.title ?? edge.from}` : '⚠ external (arc/system)';
+    fields.push({ k: `✕ ${flag}  ${provenance}`, t: 'act', tone: 'warning', run: () => store.removeFlagGate(key, flag) });
+  }
+  for (const gate of node.requiresOther) {
+    fields.push({ k: gate.kind === 'counter' ? `${gate.counter} ≥ ${gate.atLeast}` : `event: ${gate.kind === 'event' ? gate.type : ''}`, t: 'val', get: () => '(non-flag gate)' });
+  }
+  fields.push({
+    k: 'add constraint', t: 'pick', get: () => null,
+    opts: () => gateOptions(store, key).filter((o) => !node.requiresFlags.includes(o.id)),
+    set: (v) => { if (v) store.addFlagGate(key, v); },
+    clearLabel: 'pick a flag another quest opens',
+  });
+  if (fields.length === 1) fields.unshift({ k: 'none', t: 'val', get: () => 'offerable from the start (no constraints)' });
+  return fields;
+}
+
+function dependentsGroup(store: StoryStore, key: string): FieldSpec[] {
+  const g = store.graph();
+  const downstream = g.edges.filter((e) => e.from === key);
+  if (downstream.length === 0) return [{ k: 'none', t: 'val', get: () => 'nothing depends on this quest yet' }];
+  return downstream.map((e) => ({
+    k: `→ ${g.nodes.find((n) => n.key === e.to)?.title ?? e.to}`,
+    t: 'val' as const,
+    get: () => `unlocks via ${e.flag}`,
+  }));
+}
+
+function rewardGroup(store: StoryStore, key: string): FieldSpec[] {
+  const d = store.draft(key)!;
+  return [
+    { k: 'cash', t: 'num', get: () => d.reward.cash ?? 0, min: 0, max: 100000, step: 10, precision: 0, set: (v) => store.edit(key, (x) => { x.reward.cash = v; }) },
+    { k: 'rep Δ', t: 'num', get: () => d.reward.repDelta ?? 0, min: -100, max: 100, step: 1, precision: 0, set: (v) => store.edit(key, (x) => { x.reward.repDelta = v; }) },
+  ];
+}
+
+/** EVENTS — the ordered beats. The list focuses a beat; the focused beat
+ *  expands into its own group (location, cutscene, dialog). */
+function eventsGroup(store: StoryStore, key: string): FieldSpec[] {
+  const d = store.draft(key)!;
+  const focused = store.focusedEvent();
+  const fields: FieldSpec[] = [];
+  d.events.forEach((ev, i) => {
+    const loc = ev.location ? ` @(${ev.location.x},${ev.location.z})` : '';
+    const mark = i === focused ? '▾ ' : '▸ ';
+    fields.push({ k: `${mark}${i + 1}. ${ev.brief}${loc}`, t: 'act', tone: i === focused ? 'primary' : undefined, run: () => store.focusEvent(i === focused ? null : i) });
+  });
+  if (d.events.length === 0) fields.push({ k: 'none', t: 'val', get: () => 'no events yet — add the first beat' });
+  fields.push({ k: '+ add event', t: 'act', tone: 'accent', run: () => store.addEvent(key) });
+  return fields;
+}
+
+function focusedEventGroup(store: StoryStore, key: string): FieldSpec[] | null {
+  const d = store.draft(key)!;
+  const i = store.focusedEvent();
+  if (i === null || i < 0 || i >= d.events.length) return null;
+  const ev = d.events[i];
+  const fields: FieldSpec[] = [
+    { k: 'brief', t: 'text', get: () => ev.brief, set: (v) => store.edit(key, (x) => { x.events[i].brief = v; }) },
+    { k: 'order', t: 'val', get: () => `${i + 1} of ${d.events.length}` },
+    { k: '▲ earlier', t: 'act', run: () => store.moveEvent(key, i, -1) },
+    { k: '▼ later', t: 'act', run: () => store.moveEvent(key, i, 1) },
+    { k: '✕ remove event', t: 'act', tone: 'warning', run: () => store.removeEvent(key, i) },
+    { k: 'location x', t: 'num', get: () => ev.location?.x ?? 0, ...COORD, set: (v) => store.edit(key, (x) => { const e = x.events[i]; e.location = { x: v, z: e.location?.z ?? 0 }; }) },
+    { k: 'location z', t: 'num', get: () => ev.location?.z ?? 0, ...COORD, set: (v) => store.edit(key, (x) => { const e = x.events[i]; e.location = { x: e.location?.x ?? 0, z: v }; }) },
+    { k: 'cutscene', t: 'text', get: () => ev.cutscene, set: (v) => store.edit(key, (x) => { x.events[i].cutscene = v; }), placeholder: 'cutscene id (game/cutscene)' },
+  ];
+  ev.dialog.forEach((line, di) => {
+    fields.push({ k: `speaker ${di + 1}`, t: 'text', get: () => line.speaker, set: (v) => store.edit(key, (x) => { x.events[i].dialog[di].speaker = v; }), placeholder: 'npc id' });
+    fields.push({ k: `line ${di + 1}`, t: 'text', get: () => line.text, set: (v) => store.edit(key, (x) => { x.events[i].dialog[di].text = v; }), width: 2 });
+    fields.push({ k: `✕ remove line ${di + 1}`, t: 'act', tone: 'warning', run: () => store.edit(key, (x) => { x.events[i].dialog.splice(di, 1); }) });
+  });
+  fields.push({ k: '+ add dialog line', t: 'act', tone: 'accent', run: () => store.edit(key, (x) => { x.events[i].dialog.push({ speaker: '', text: '' }); }) });
+  fields.push({ k: 'objectives', t: 'val', get: () => ev.objectives.length ? `${ev.objectives.length} (target-pickers: next pass)` : 'none yet' });
+  return fields;
+}
+
+function wiringGroup(store: StoryStore, key: string): FieldSpec[] {
+  const d = store.draft(key)!;
   const bindingKind = d.binding?.kind ?? 'job';
-  const contract: FieldSpec[] = [
+  const fields: FieldSpec[] = [
+    { k: 'verb (gameplay)', t: 'enum', get: () => d.verb, opts: [...GAME_ACTIVITIES.VERBS], set: (v) => store.edit(key, (x) => { x.verb = v as ActivityVerb; }) },
     {
       k: 'binding', t: 'enum', get: () => bindingKind, opts: [...BINDINGS],
       set: (v) => store.edit(key, (x) => {
@@ -76,51 +164,27 @@ export function storyPanel(store: StoryStore, key: string): PanelSpec {
     },
   ];
   if (d.binding?.kind === 'person') {
-    contract.push({ k: 'npc id (grievance)', t: 'text', get: () => d.binding!.kind === 'person' ? d.binding!.npcId : '', set: (v) => store.edit(key, (x) => { if (x.binding?.kind === 'person') x.binding.npcId = v; }) });
+    fields.push({ k: 'npc id (grievance)', t: 'text', get: () => d.binding!.kind === 'person' ? d.binding!.npcId : '', set: (v) => store.edit(key, (x) => { if (x.binding?.kind === 'person') x.binding.npcId = v; }) });
   } else if (d.binding?.kind === 'position') {
-    contract.push({ k: 'position id (racket)', t: 'text', get: () => d.binding!.kind === 'position' ? d.binding!.positionId : '', set: (v) => store.edit(key, (x) => { if (x.binding?.kind === 'position') x.binding.positionId = v; }) });
+    fields.push({ k: 'position id (racket)', t: 'text', get: () => d.binding!.kind === 'position' ? d.binding!.positionId : '', set: (v) => store.edit(key, (x) => { if (x.binding?.kind === 'position') x.binding.positionId = v; }) });
   }
+  fields.push({ k: 'expiry', t: 'val', get: () => d.expiryTicks === null ? 'never expires' : `${d.expiryTicks} ticks` });
+  return fields;
+}
 
-  // THE CONDITIONAL SPINE — unlock gates (their "constraints") + provider edges
-  const gates: FieldSpec[] = [];
-  for (const flag of node.requiresFlags) {
-    const fromQuest = g.edges.find((e) => e.to === key && e.flag === flag);
-    const provenance = fromQuest ? `← ${g.nodes.find((n) => n.key === fromQuest.from)?.title ?? fromQuest.from}` : '⚠ external (arc/system)';
-    gates.push({ k: `✕ ${flag}  ${provenance}`, t: 'act', tone: 'warning', run: () => store.removeFlagGate(key, flag) });
-  }
-  for (const gate of node.requiresOther) {
-    gates.push({ k: gate.kind === 'counter' ? `${gate.counter} ≥ ${gate.atLeast}` : `event: ${gate.kind === 'event' ? gate.type : ''}`, t: 'val', get: () => '(non-flag gate)' });
-  }
-  gates.push({
-    k: 'add unlock gate', t: 'pick', get: () => null,
-    opts: () => gateOptions(store, key).filter((o) => !node.requiresFlags.includes(o.id)),
-    set: (v) => { if (v) store.addFlagGate(key, v); },
-    clearLabel: 'pick a flag another quest opens',
-  });
+export function storyPanel(store: StoryStore, key: string): PanelSpec {
+  const d = store.draft(key);
+  if (!d) return { groups: [{ title: 'QUEST', fields: [{ k: 'missing', t: 'val', get: () => 'no quest selected' }], layout: 'rows' }] };
 
-  const provides: FieldSpec[] = node.providesFlags.length
-    ? node.providesFlags.map((f) => ({ k: f, t: 'val' as const, get: () => 'set by a hook' }))
-    : [{ k: 'none', t: 'val', get: () => 'this quest opens no gate (author a hook with worldDelta.setFlag)' }];
-
-  const reward: FieldSpec[] = [
-    { k: 'cash', t: 'num', get: () => d.reward.cash ?? 0, min: 0, max: 100000, step: 10, precision: 0, set: (v) => store.edit(key, (x) => { x.reward.cash = v; }) },
-    { k: 'rep Δ', t: 'num', get: () => d.reward.repDelta ?? 0, min: -100, max: 100, step: 1, precision: 0, set: (v) => store.edit(key, (x) => { x.reward.repDelta = v; }) },
+  const groups: PanelSpec['groups'] = [
+    { title: 'IDENTITY', fields: identityGroup(store, key), layout: 'rows' },
+    { title: 'CONSTRAINTS', fields: constraintsGroup(store, key), layout: 'rows' },
+    { title: 'DEPENDENTS', fields: dependentsGroup(store, key), layout: 'rows' },
+    { title: 'REWARD', fields: rewardGroup(store, key), layout: 'rows' },
+    { title: 'EVENTS', fields: eventsGroup(store, key), layout: 'rows' },
   ];
-
-  const flow: FieldSpec[] = [
-    { k: 'stages', t: 'val', get: () => `${d.stages.length} stage${d.stages.length === 1 ? '' : 's'}: ${d.stages.map((s) => s.id).join(' → ')}` },
-    { k: 'hooks', t: 'val', get: () => `${d.hooks.length} narrative hook${d.hooks.length === 1 ? '' : 's'}` },
-    { k: 'expiry', t: 'val', get: () => d.expiryTicks === null ? 'never expires' : `${d.expiryTicks} ticks` },
-  ];
-
-  return {
-    groups: [
-      { title: 'IDENTITY', fields: identity, layout: 'rows' },
-      { title: 'CONTRACT (V22 person | position)', fields: contract, layout: 'rows' },
-      { title: 'UNLOCK GATES — constraints', fields: gates, layout: 'rows' },
-      { title: 'PROVIDES — what this opens', fields: provides, layout: 'rows' },
-      { title: 'REWARD', fields: reward, layout: 'rows' },
-      { title: 'FLOW', fields: flow, layout: 'rows' },
-    ],
-  };
+  const focused = focusedEventGroup(store, key);
+  if (focused) groups.push({ title: 'EVENT — cutscene · location · dialog', fields: focused, layout: 'rows' });
+  groups.push({ title: 'WIRING (substrate)', fields: wiringGroup(store, key), layout: 'rows', tier: 'debug' });
+  return { groups };
 }

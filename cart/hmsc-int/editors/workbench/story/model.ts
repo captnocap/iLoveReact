@@ -37,8 +37,12 @@ export type QuestNode = {
   depth: number;
   /** stable row within the column, for layout */
   lane: number;
-  /** weakly-connected component index — a QUESTLINE is a connected subgraph */
+  /** weakly-connected component index — the geometric fallback grouping */
   questline: number;
+  /** the DISPLAY questline: the author's explicit `questline` name when set,
+   *  else the derived `Q<n>` of the connected component. The board groups by
+   *  this — naming a quest's questline is how the user organizes the line. */
+  questlineLabel: string;
 };
 
 /** A dependency edge: the provider opens a flag the requirer gates on. */
@@ -114,19 +118,24 @@ export function buildQuestGraph(defs: readonly MissionDef[]): QuestGraph {
   const questline = weaklyConnectedComponents(defs, edges);
   const lane = laneWithinColumn(defs, depth, questline);
 
-  const nodes: QuestNode[] = defs.map((def) => ({
-    key: def.key,
-    title: def.title,
-    verb: def.verb,
-    client: def.client,
-    ...flatBinding(def),
-    requiresFlags: requiresFlags(def),
-    requiresOther: requiresOther(def),
-    providesFlags: providesFlags(def),
-    depth: depth.get(def.key) ?? 0,
-    lane: lane.get(def.key) ?? 0,
-    questline: questline.get(def.key) ?? 0,
-  }));
+  const nodes: QuestNode[] = defs.map((def) => {
+    const component = questline.get(def.key) ?? 0;
+    const named = ((def as { questline?: string }).questline ?? '').trim();
+    return {
+      key: def.key,
+      title: def.title,
+      verb: def.verb,
+      client: def.client,
+      ...flatBinding(def),
+      requiresFlags: requiresFlags(def),
+      requiresOther: requiresOther(def),
+      providesFlags: providesFlags(def),
+      depth: depth.get(def.key) ?? 0,
+      lane: lane.get(def.key) ?? 0,
+      questline: component,
+      questlineLabel: named || `Q${component + 1}`,
+    };
+  });
 
   return { nodes, edges, external };
 }
