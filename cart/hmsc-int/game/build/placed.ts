@@ -70,6 +70,11 @@ export type PlacedBuildPiece = {
    *  A prop has named parts (a vending front, a chassis) rather than the
    *  front/back/sides `skin` slots, so it carries this map instead. */
   partTextures?: Record<string, string>;
+  /** PARAMETRIC props (req_0893): per-instance text for a parametric prop kind
+   *  (a block-letter business name, a neon caption, an LED ticker message). The
+   *  prop's recipe lowers it to geometry/material; non-parametric kinds ignore
+   *  it. Rides into the rendered WorldProp the same way `partTextures` does. */
+  text?: string;
   /** prefab stamp group id, when this piece came from one prefabStamped event */
   stampId?: string;
   /** source prefab id for stamped pieces, so type-skin edits can refresh live instances */
@@ -960,7 +965,7 @@ export function placedPieceColliders(
     // at any yaw instead of a centered box that swings off under rotation. One
     // oriented rect about the anchor. Bespoke props (no recipe) fall through to
     // the generic def.size band path below.
-    if (def.kind === 'prop' && def.propKind) {
+    if (def.kind === 'prop' && def.propKind && def.propKind !== 'dumpster') {
       const fp = propModelFootprintMeters(def.propKind);
       if (fp) {
         orientedRects.push({

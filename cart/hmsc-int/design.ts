@@ -428,6 +428,11 @@ export type WorldProp = {
   // e.g. a street sign's 'panel'/'pole'. Values are TEXTURE_REGISTRY ids,
   // resolved through resolvePartTexture. Same channel buildings use.
   partTextures?: Record<string, string>;
+  // PARAMETRIC props (req_0893): per-instance text the recipe lowers to geometry
+  // or an animated material — a block-letter business name, a neon caption, an
+  // LED ticker message. Plain scenery props ignore it. resolvePropParts reads it;
+  // the kind decides what it means.
+  text?: string;
   createdByCommand: string;
 };
 

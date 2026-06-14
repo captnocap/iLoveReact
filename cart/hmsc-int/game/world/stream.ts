@@ -108,6 +108,11 @@ export type WorldEvent =
   // partTextures[partId] (a TEXTURE_REGISTRY id, null clears). Mirrors
   // pieceSkinSet so the id stays stable (selection survives part-by-part skinning).
   | { kind: 'piecePartTextureSet'; id: string; partId: string; textureId: string | null; mapName?: string }
+  // PARAMETRIC props (req_0893): set/clear the per-instance text on a STANDING
+  // prop piece (block-letter name, neon caption, ticker message). Empty/whitespace
+  // clears it back to the kind's default. Mirrors piecePartTextureSet — id stays
+  // stable so the editor's selection survives retyping.
+  | { kind: 'pieceTextSet'; id: string; text: string | null; mapName?: string }
   | { kind: 'prefabDefined'; def: BuildPrefabDef }
   // BUILDSKIN req_0184 addendum (addition): delete a building TYPE — drops
   // the def + tombstones the id (a same-id static seed stays gone); placed
@@ -362,6 +367,20 @@ export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freez
         if (event.textureId) next[event.partId] = event.textureId; else delete next[event.partId];
         const pieces = [...source];
         pieces[index] = { ...pieces[index], partTextures: Object.keys(next).length ? next : undefined };
+        if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
+        return { ...state, pieces };
+      }
+      case 'pieceTextSet': {
+        // PARAMETRIC props (req_0893): set/clear the per-instance text on a
+        // standing prop. Empty/whitespace clears the field (the kind's default
+        // shows). Id stays stable so retyping doesn't drop the selection.
+        const map = eventMapName(event);
+        const source = map ? (state.piecesByMap?.[map] ?? []) : state.pieces;
+        const index = source.findIndex((piece) => piece.id === event.id);
+        if (index < 0) return state;
+        const trimmed = typeof event.text === 'string' ? event.text : '';
+        const pieces = [...source];
+        pieces[index] = { ...pieces[index], text: trimmed.length ? trimmed : undefined };
         if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
         return { ...state, pieces };
       }

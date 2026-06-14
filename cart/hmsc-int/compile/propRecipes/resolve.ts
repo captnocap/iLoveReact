@@ -121,6 +121,131 @@ import { treeOakParts } from './treeOak';
 import { treePalmParts } from './treePalm';
 import { treePineParts } from './treePine';
 import { wallPaintingParts } from './wallPainting';
+import { barStoolParts } from './barStool';
+import { bathtubParts } from './bathtub';
+import { blenderParts } from './blender';
+import { bongParts } from './bong';
+import { bookcaseParts } from './bookcase';
+import { bottleParts } from './bottle';
+import { bowlParts } from './bowl';
+import { broomParts } from './broom';
+import { bucketParts } from './bucket';
+import { bunkBedParts } from './bunkBed';
+import { canParts } from './can';
+import { cardboardBoxParts } from './cardboardBox';
+import { chaiseLoungeParts } from './chaiseLounge';
+import { clockParts } from './clock';
+import { coatRackParts } from './coatRack';
+import { coffeeTableParts } from './coffeeTable';
+import { computerDeskParts } from './computerDesk';
+import { conferenceTableParts } from './conferenceTable';
+import { cupParts } from './cup';
+import { curtainParts } from './curtain';
+import { deskLampParts } from './deskLamp';
+import { diceParts } from './dice';
+import { diningTableParts } from './diningTable';
+import { directorsChairParts } from './directorsChair';
+import { displayShelfParts } from './displayShelf';
+import { draftingTableParts } from './draftingTable';
+import { dresserParts } from './dresser';
+import { dryerParts } from './dryer';
+import { endTableParts } from './endTable';
+import { exitSignParts } from './exitSign';
+import { filingCabinetParts } from './filingCabinet';
+import { fireExtinguisherParts } from './fireExtinguisher';
+import { fishOnWallParts } from './fishOnWall';
+import { fishWallParts } from './fishWall';
+import { fishtankParts } from './fishtank';
+import { forkParts } from './fork';
+import { gameConsoleParts } from './gameConsole';
+import { highChairParts } from './highChair';
+import { hospitalBedParts } from './hospitalBed';
+import { jarParts } from './jar';
+import { katanaParts } from './katana';
+import { keyboardParts } from './keyboard';
+import { knifeParts } from './knife';
+import { laptopParts } from './laptop';
+import { loveseatParts } from './loveseat';
+import { magazineRackParts } from './magazineRack';
+import { makeupParts } from './makeup';
+import { makeupPaletteParts } from './makeupPalette';
+import { mattressParts } from './mattress';
+import { microwaveParts } from './microwave';
+import { monitorParts } from './monitor';
+import { mugParts } from './mug';
+import { monumentParts } from './monument';
+import { neonSignParts } from './neonSign';
+import { blockLettersParts } from './blockText';
+import { officeDeskParts } from './officeDesk';
+import { phoneParts } from './phone';
+import { plateParts } from './plate';
+import { sodaCanParts } from './sodaCan';
+import { soupCanParts } from './soupCan';
+import { spoonParts } from './spoon';
+import { pokerTableParts } from './pokerTable';
+import { pottedPlantParts } from './pottedPlant';
+import { printerParts } from './printer';
+import { radiatorParts } from './radiator';
+import { receptionDeskParts } from './receptionDesk';
+import { reclinerParts } from './recliner';
+import { rockingChairParts } from './rockingChair';
+import { routerParts } from './router';
+import { rugParts } from './rug';
+import { safeParts } from './safe';
+import { serverRackParts } from './serverRack';
+import { showerParts } from './shower';
+import { sofaParts } from './sofa';
+import { stageParts } from './stage';
+import { standingDeskParts } from './standingDesk';
+import { stoolParts } from './stool';
+import { storageBinParts } from './storageBin';
+import { storageShelfParts } from './storageShelf';
+import { tabletParts } from './tablet';
+import { toasterParts } from './toaster';
+import { toiletParts } from './toilet';
+import { towelParts } from './towel';
+import { towelRackParts } from './towelRack';
+import { tvParts } from './tv';
+import { tvCRTParts } from './tvCRT';
+import { tvFlatParts } from './tvFlat';
+import { tvStandParts } from './tvStand';
+import { vaseParts } from './vase';
+import { wallSconceParts } from './wallSconce';
+import { waterBottleParts } from './waterBottle';
+import { wineBottleParts } from './wineBottle';
+import { wallShelfParts } from './wallShelf';
+import { wardrobeParts } from './wardrobe';
+import { washingMachineParts } from './washingMachine';
+import { waterCoolerParts } from './waterCooler';
+import { beanBagParts } from './beanBag';
+import { ceilingLampParts } from './ceilingLamp';
+import { chalkboardParts } from './chalkboard';
+import { classroomDeskParts } from './classroomDesk';
+import { consoleTableParts } from './consoleTable';
+import { corkboardParts } from './corkboard';
+import { cornerDeskParts } from './cornerDesk';
+import { daybedParts } from './daybed';
+import { dvdShelfParts } from './dvdShelf';
+import { floatingShelfParts } from './floatingShelf';
+import { futonParts } from './futon';
+import { nightstandParts } from './nightstand';
+import { noticeBoardParts } from './noticeBoard';
+import { ottomanParts } from './ottoman';
+import { patioChairParts } from './patioChair';
+import { picnicTableParts } from './picnicTable';
+import { posterLargeParts } from './posterLarge';
+import { posterSmallParts } from './posterSmall';
+import { posterTallParts } from './posterTall';
+import { posterWideParts } from './posterWide';
+import { sectionalParts } from './sectional';
+import { sideTableParts } from './sideTable';
+import { toolCabinetParts } from './toolCabinet';
+import { toolShelfParts } from './toolShelf';
+import { whiteboardParts } from './whiteboard';
+import { wineRackParts } from './wineRack';
+import { wireShelfParts } from './wireShelf';
+import { workbenchParts } from './workbench';
+import { writingDeskParts } from './writingDesk';
 
 // The registry-derived placeholder colour for a kind with no recipe case.
 function propColor(kind: PropKind | string): Color {
@@ -152,7 +277,16 @@ function propColor(kind: PropKind | string): Color {
  *  footprint all read the SAME geometry. Each kind resolves to its own per-prop
  *  file; anything without one gets a registry-derived placeholder box. */
 export function resolvePropParts(prop: WorldProp): PropPartSpec[] {
-  return resolvePartsForKind(prop.kind);
+  // PARAMETRIC props (req_0893): the recipe is a function of the instance's
+  // `text`, not the kind alone. These are the ONLY kinds that read the WorldProp
+  // beyond its kind; everything else resolves purely by kind (and so shares the
+  // footprint path below, which has no instance).
+  switch (prop.kind) {
+    case 'blockLetters':
+      return blockLettersParts(propKindDefinition('blockLetters').heightMeters, prop.text);
+    default:
+      return resolvePartsForKind(prop.kind);
+  }
 }
 
 /** Resolve a kind's parts directly, with no WorldProp instance — the footprint
@@ -288,10 +422,142 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     case 'grassTall': return grassTallParts();
     case 'rockJagged': return rockJaggedParts();
     case 'rockShard': return rockShardParts();
+    case 'barStool': return barStoolParts();
+    case 'bathtub': return bathtubParts();
+    case 'blender': return blenderParts();
+    case 'bong': return bongParts();
+    case 'bookcase': return bookcaseParts();
+    case 'bottle': return bottleParts();
+    case 'bowl': return bowlParts();
+    case 'broom': return broomParts();
+    case 'bucket': return bucketParts();
+    case 'bunkBed': return bunkBedParts();
+    case 'can': return canParts();
+    case 'cardboardBox': return cardboardBoxParts();
+    case 'chaiseLounge': return chaiseLoungeParts();
+    case 'clock': return clockParts();
+    case 'coatRack': return coatRackParts();
+    case 'coffeeTable': return coffeeTableParts();
+    case 'computerDesk': return computerDeskParts();
+    case 'conferenceTable': return conferenceTableParts();
+    case 'cup': return cupParts();
+    case 'curtain': return curtainParts();
+    case 'deskLamp': return deskLampParts();
+    case 'dice': return diceParts();
+    case 'diningTable': return diningTableParts();
+    case 'directorsChair': return directorsChairParts();
+    case 'displayShelf': return displayShelfParts();
+    case 'draftingTable': return draftingTableParts();
+    case 'dresser': return dresserParts();
+    case 'dryer': return dryerParts();
+    case 'endTable': return endTableParts();
+    case 'exitSign': return exitSignParts();
+    case 'filingCabinet': return filingCabinetParts();
+    case 'fireExtinguisher': return fireExtinguisherParts();
+    case 'fishOnWall': return fishOnWallParts();
+    case 'fishWall': return fishWallParts();
+    case 'fishtank': return fishtankParts();
+    case 'fork': return forkParts();
+    case 'gameConsole': return gameConsoleParts();
+    case 'highChair': return highChairParts();
+    case 'hospitalBed': return hospitalBedParts();
+    case 'jar': return jarParts();
+    case 'katana': return katanaParts();
+    case 'keyboard': return keyboardParts();
+    case 'knife': return knifeParts();
+    case 'laptop': return laptopParts();
+    case 'loveseat': return loveseatParts();
+    case 'magazineRack': return magazineRackParts();
+    case 'makeup': return makeupParts();
+    case 'makeupPalette': return makeupPaletteParts();
+    case 'mattress': return mattressParts();
+    case 'mug': return mugParts();
+    case 'microwave': return microwaveParts();
+    case 'monitor': return monitorParts();
+    case 'monument': return monumentParts();
+    case 'neonSign': return neonSignParts();
+    // PARAMETRIC: no instance here, so lower the DEFAULT word — this path only
+    // feeds the measured collision footprint. The live geometry comes through
+    // resolvePropParts (above), which passes the placement's real text.
+    case 'blockLetters': return blockLettersParts(def.heightMeters);
+    case 'officeDesk': return officeDeskParts();
+    case 'phone': return phoneParts();
+    case 'plate': return plateParts();
+    case 'sodaCan': return sodaCanParts();
+    case 'soupCan': return soupCanParts();
+    case 'spoon': return spoonParts();
+    case 'pokerTable': return pokerTableParts();
+    case 'pottedPlant': return pottedPlantParts();
+    case 'printer': return printerParts();
+    case 'radiator': return radiatorParts();
+    case 'receptionDesk': return receptionDeskParts();
+    case 'recliner': return reclinerParts();
+    case 'rockingChair': return rockingChairParts();
+    case 'router': return routerParts();
+    case 'rug': return rugParts();
+    case 'safe': return safeParts();
+    case 'serverRack': return serverRackParts();
+    case 'shower': return showerParts();
+    case 'sofa': return sofaParts();
+    case 'stage': return stageParts();
+    case 'standingDesk': return standingDeskParts();
+    case 'stool': return stoolParts();
+    case 'storageBin': return storageBinParts();
+    case 'storageShelf': return storageShelfParts();
+    case 'tablet': return tabletParts();
+    case 'toaster': return toasterParts();
+    case 'toilet': return toiletParts();
+    case 'towel': return towelParts();
+    case 'towelRack': return towelRackParts();
+    case 'tv': return tvParts();
+    case 'tvCRT': return tvCRTParts();
+    case 'tvFlat': return tvFlatParts();
+    case 'tvStand': return tvStandParts();
+    case 'vase': return vaseParts();
+    case 'wallSconce': return wallSconceParts();
+    case 'wallShelf': return wallShelfParts();
+    case 'waterBottle': return waterBottleParts();
+    case 'wineBottle': return wineBottleParts();
+    case 'wardrobe': return wardrobeParts();
+    case 'washingMachine': return washingMachineParts();
+    case 'waterCooler': return waterCoolerParts();
+    case 'beanBag': return beanBagParts();
+    case 'ceilingLamp': return ceilingLampParts();
+    case 'chalkboard': return chalkboardParts();
+    case 'classroomDesk': return classroomDeskParts();
+    case 'consoleTable': return consoleTableParts();
+    case 'corkboard': return corkboardParts();
+    case 'cornerDesk': return cornerDeskParts();
+    case 'daybed': return daybedParts();
+    case 'dvdShelf': return dvdShelfParts();
+    case 'floatingShelf': return floatingShelfParts();
+    case 'futon': return futonParts();
+    case 'nightstand': return nightstandParts();
+    case 'noticeBoard': return noticeBoardParts();
+    case 'ottoman': return ottomanParts();
+    case 'patioChair': return patioChairParts();
+    case 'picnicTable': return picnicTableParts();
+    case 'posterLarge': return posterLargeParts();
+    case 'posterSmall': return posterSmallParts();
+    case 'posterTall': return posterTallParts();
+    case 'posterWide': return posterWideParts();
+    case 'sectional': return sectionalParts();
+    case 'sideTable': return sideTableParts();
+    case 'toolCabinet': return toolCabinetParts();
+    case 'toolShelf': return toolShelfParts();
+    case 'whiteboard': return whiteboardParts();
+    case 'wineRack': return wineRackParts();
+    case 'wireShelf': return wireShelfParts();
+    case 'workbench': return workbenchParts();
+    case 'writingDesk': return writingDeskParts();
     default: {
       // Any kind without its own recipe file gets a registry-derived placeholder
-      // box (sized from its footprint/height). Every real prop has a case above.
-      const fallback: readonly [number, number, number] = [def.footprintRadiusMeters * 2, def.heightMeters, def.footprintRadiusMeters * 2];
+      // box (sized from its footprint/height). Imported/bespoke props may carry an
+      // explicit width/depth pair; use it so physics sees the measured rectangle
+      // instead of a coarse radius square (FOOTPRINT-0756).
+      const width = def.footprintWidthMeters ?? def.footprintRadiusMeters * 2;
+      const depth = def.footprintDepthMeters ?? def.footprintRadiusMeters * 2;
+      const fallback: readonly [number, number, number] = [width, def.heightMeters, depth];
       return [{ shape: 'box', local: [0, fallback[1] / 2, 0], size: fallback, color: propColor(kind) }];
     }
   }

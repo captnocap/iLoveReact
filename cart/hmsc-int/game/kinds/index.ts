@@ -51,6 +51,7 @@ export {
   propKindNamesForConsole,
   propMount,
   propSeat,
+  propTakesText,
 } from './props';
 export type {
   PropContainer, PropContainerAccess, PropCoverClass, PropDynamics, PropKind,

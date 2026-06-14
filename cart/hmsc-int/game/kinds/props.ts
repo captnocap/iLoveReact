@@ -101,6 +101,175 @@ import { propaneTankDef } from '../../compile/propRecipes/propaneTank';
 import { jerryCanDef } from '../../compile/propRecipes/jerryCan';
 import { cinderBlockDef } from '../../compile/propRecipes/cinderBlock';
 import { brickDef } from '../../compile/propRecipes/brick';
+import { rubblePileDef } from '../../compile/propRecipes/rubblePile';
+import { crateDef } from '../../compile/propRecipes/crate';
+import { palletDef } from '../../compile/propRecipes/pallet';
+import { palletStackDef } from '../../compile/propRecipes/palletStack';
+import { toiletPaperDef } from '../../compile/propRecipes/toiletPaper';
+import { fountainDef } from '../../compile/propRecipes/fountain';
+import { drinkingFountainDef } from '../../compile/propRecipes/drinkingFountain';
+import { loungeChairDef } from '../../compile/propRecipes/loungeChair';
+import { swingsetDef } from '../../compile/propRecipes/swingset';
+import { sandCastleDef } from '../../compile/propRecipes/sandCastle';
+import { picketFenceDef } from '../../compile/propRecipes/picketFence';
+import { appleTreeDef } from '../../compile/propRecipes/appleTree';
+
+import { barStoolDef } from '../../compile/propRecipes/barStool';
+import { bathtubDef } from '../../compile/propRecipes/bathtub';
+import { blenderDef } from '../../compile/propRecipes/blender';
+import { bongDef } from '../../compile/propRecipes/bong';
+import { bookcaseDef } from '../../compile/propRecipes/bookcase';
+import { bottleDef } from '../../compile/propRecipes/bottle';
+import { bowlDef } from '../../compile/propRecipes/bowl';
+import { broomDef } from '../../compile/propRecipes/broom';
+import { bucketDef } from '../../compile/propRecipes/bucket';
+import { bunkBedDef } from '../../compile/propRecipes/bunkBed';
+import { canDef } from '../../compile/propRecipes/can';
+import { cardboardBoxDef } from '../../compile/propRecipes/cardboardBox';
+import { chaiseLoungeDef } from '../../compile/propRecipes/chaiseLounge';
+import { clockDef } from '../../compile/propRecipes/clock';
+import { coatRackDef } from '../../compile/propRecipes/coatRack';
+import { coffeeTableDef } from '../../compile/propRecipes/coffeeTable';
+import { computerDeskDef } from '../../compile/propRecipes/computerDesk';
+import { conferenceTableDef } from '../../compile/propRecipes/conferenceTable';
+import { cupDef } from '../../compile/propRecipes/cup';
+import { curtainDef } from '../../compile/propRecipes/curtain';
+import { deskLampDef } from '../../compile/propRecipes/deskLamp';
+import { diceDef } from '../../compile/propRecipes/dice';
+import { diningTableDef } from '../../compile/propRecipes/diningTable';
+import { directorsChairDef } from '../../compile/propRecipes/directorsChair';
+import { displayShelfDef } from '../../compile/propRecipes/displayShelf';
+import { draftingTableDef } from '../../compile/propRecipes/draftingTable';
+import { dresserDef } from '../../compile/propRecipes/dresser';
+import { dryerDef } from '../../compile/propRecipes/dryer';
+import { endTableDef } from '../../compile/propRecipes/endTable';
+import { exitSignDef } from '../../compile/propRecipes/exitSign';
+import { filingCabinetDef } from '../../compile/propRecipes/filingCabinet';
+import { fireExtinguisherDef } from '../../compile/propRecipes/fireExtinguisher';
+import { fishOnWallDef } from '../../compile/propRecipes/fishOnWall';
+import { fishtankDef } from '../../compile/propRecipes/fishtank';
+import { forkDef } from '../../compile/propRecipes/fork';
+import { gameConsoleDef } from '../../compile/propRecipes/gameConsole';
+import { highChairDef } from '../../compile/propRecipes/highChair';
+import { hospitalBedDef } from '../../compile/propRecipes/hospitalBed';
+import { jarDef } from '../../compile/propRecipes/jar';
+import { katanaDef } from '../../compile/propRecipes/katana';
+import { keyboardDef } from '../../compile/propRecipes/keyboard';
+import { knifeDef } from '../../compile/propRecipes/knife';
+import { laptopDef } from '../../compile/propRecipes/laptop';
+import { loveseatDef } from '../../compile/propRecipes/loveseat';
+import { magazineRackDef } from '../../compile/propRecipes/magazineRack';
+import { makeupDef } from '../../compile/propRecipes/makeup';
+import { mattressDef } from '../../compile/propRecipes/mattress';
+import { microwaveDef } from '../../compile/propRecipes/microwave';
+import { monitorDef } from '../../compile/propRecipes/monitor';
+import { monumentDef } from '../../compile/propRecipes/monument';
+import { neonSignDef } from '../../compile/propRecipes/neonSign';
+import { blockLettersDef } from '../../compile/propRecipes/blockText';
+import { officeDeskDef } from '../../compile/propRecipes/officeDesk';
+import { phoneDef } from '../../compile/propRecipes/phone';
+import { plateDef } from '../../compile/propRecipes/plate';
+import { pokerTableDef } from '../../compile/propRecipes/pokerTable';
+import { pottedPlantDef } from '../../compile/propRecipes/pottedPlant';
+import { printerDef } from '../../compile/propRecipes/printer';
+import { radiatorDef } from '../../compile/propRecipes/radiator';
+import { receptionDeskDef } from '../../compile/propRecipes/receptionDesk';
+import { reclinerDef } from '../../compile/propRecipes/recliner';
+import { rockingChairDef } from '../../compile/propRecipes/rockingChair';
+import { routerDef } from '../../compile/propRecipes/router';
+import { rugDef } from '../../compile/propRecipes/rug';
+import { safeDef } from '../../compile/propRecipes/safe';
+import { serverRackDef } from '../../compile/propRecipes/serverRack';
+import { showerDef } from '../../compile/propRecipes/shower';
+import { sofaDef } from '../../compile/propRecipes/sofa';
+import { stageDef } from '../../compile/propRecipes/stage';
+import { standingDeskDef } from '../../compile/propRecipes/standingDesk';
+import { stoolDef } from '../../compile/propRecipes/stool';
+import { storageBinDef } from '../../compile/propRecipes/storageBin';
+import { storageShelfDef } from '../../compile/propRecipes/storageShelf';
+import { tabletDef } from '../../compile/propRecipes/tablet';
+import { toasterDef } from '../../compile/propRecipes/toaster';
+import { toiletDef } from '../../compile/propRecipes/toilet';
+import { towelDef } from '../../compile/propRecipes/towel';
+import { tvDef } from '../../compile/propRecipes/tv';
+import { tvStandDef } from '../../compile/propRecipes/tvStand';
+import { vaseDef } from '../../compile/propRecipes/vase';
+import { wallSconceDef } from '../../compile/propRecipes/wallSconce';
+import { wallShelfDef } from '../../compile/propRecipes/wallShelf';
+import { wardrobeDef } from '../../compile/propRecipes/wardrobe';
+import { washingMachineDef } from '../../compile/propRecipes/washingMachine';
+import { waterCoolerDef } from '../../compile/propRecipes/waterCooler';
+import { rockDef } from '../../compile/propRecipes/rock';
+import { rockLargeDef } from '../../compile/propRecipes/rockLarge';
+import { rockSmallDef } from '../../compile/propRecipes/rockSmall';
+import { bushDef } from '../../compile/propRecipes/bush';
+import { bushLargeDef } from '../../compile/propRecipes/bushLarge';
+import { bushLowDef } from '../../compile/propRecipes/bushLow';
+import { bushSparseDef } from '../../compile/propRecipes/bushSparse';
+import { dumpsterDef } from '../../compile/propRecipes/dumpster';
+import { bedSingleDef } from '../../compile/propRecipes/bedSingle';
+import { bedDoubleDef } from '../../compile/propRecipes/bedDouble';
+import { grassPatchDef } from '../../compile/propRecipes/grassPatch';
+import { grassTallDef } from '../../compile/propRecipes/grassTall';
+import { rockJaggedDef } from '../../compile/propRecipes/rockJagged';
+import { rockShardDef } from '../../compile/propRecipes/rockShard';
+import { treeOakYoungDef } from '../../compile/propRecipes/treeOakYoung';
+import { treeOakGiantDef } from '../../compile/propRecipes/treeOakGiant';
+import { treePineYoungDef } from '../../compile/propRecipes/treePineYoung';
+import { treePineGiantDef } from '../../compile/propRecipes/treePineGiant';
+import { appleDef } from '../../compile/propRecipes/apple';
+import { arcadeCabinetDef } from '../../compile/propRecipes/arcadeCabinet';
+import { slotMachineDef } from '../../compile/propRecipes/slotMachine';
+import { clothingRackDef } from '../../compile/propRecipes/clothingRack';
+import { displayCaseDef } from '../../compile/propRecipes/displayCase';
+import { liquorShelfDef } from '../../compile/propRecipes/liquorShelf';
+import { beerCaseDef } from '../../compile/propRecipes/beerCase';
+import { dinerBoothDef } from '../../compile/propRecipes/dinerBooth';
+import { orderCounterDef } from '../../compile/propRecipes/orderCounter';
+import { menuBoardDef } from '../../compile/propRecipes/menuBoard';
+import { sodaMachineDef } from '../../compile/propRecipes/sodaMachine';
+import { openSignDef } from '../../compile/propRecipes/openSign';
+import { greenCrossSignDef } from '../../compile/propRecipes/greenCrossSign';
+import { sodaCanDef } from '../../compile/propRecipes/sodaCan';
+import { soupCanDef } from '../../compile/propRecipes/soupCan';
+import { mugDef } from '../../compile/propRecipes/mug';
+import { spoonDef } from '../../compile/propRecipes/spoon';
+import { waterBottleDef } from '../../compile/propRecipes/waterBottle';
+import { wineBottleDef } from '../../compile/propRecipes/wineBottle';
+import { makeupPaletteDef } from '../../compile/propRecipes/makeupPalette';
+import { towelRackDef } from '../../compile/propRecipes/towelRack';
+import { tvCRTDef } from '../../compile/propRecipes/tvCRT';
+import { tvFlatDef } from '../../compile/propRecipes/tvFlat';
+import { fishWallDef } from '../../compile/propRecipes/fishWall';
+import { beanBagDef } from '../../compile/propRecipes/beanBag';
+import { ceilingLampDef } from '../../compile/propRecipes/ceilingLamp';
+import { chalkboardDef } from '../../compile/propRecipes/chalkboard';
+import { classroomDeskDef } from '../../compile/propRecipes/classroomDesk';
+import { consoleTableDef } from '../../compile/propRecipes/consoleTable';
+import { corkboardDef } from '../../compile/propRecipes/corkboard';
+import { cornerDeskDef } from '../../compile/propRecipes/cornerDesk';
+import { daybedDef } from '../../compile/propRecipes/daybed';
+import { dvdShelfDef } from '../../compile/propRecipes/dvdShelf';
+import { floatingShelfDef } from '../../compile/propRecipes/floatingShelf';
+import { futonDef } from '../../compile/propRecipes/futon';
+import { nightstandDef } from '../../compile/propRecipes/nightstand';
+import { noticeBoardDef } from '../../compile/propRecipes/noticeBoard';
+import { ottomanDef } from '../../compile/propRecipes/ottoman';
+import { patioChairDef } from '../../compile/propRecipes/patioChair';
+import { picnicTableDef } from '../../compile/propRecipes/picnicTable';
+import { posterLargeDef } from '../../compile/propRecipes/posterLarge';
+import { posterSmallDef } from '../../compile/propRecipes/posterSmall';
+import { posterTallDef } from '../../compile/propRecipes/posterTall';
+import { posterWideDef } from '../../compile/propRecipes/posterWide';
+import { sectionalDef } from '../../compile/propRecipes/sectional';
+import { sideTableDef } from '../../compile/propRecipes/sideTable';
+import { toolCabinetDef } from '../../compile/propRecipes/toolCabinet';
+import { toolShelfDef } from '../../compile/propRecipes/toolShelf';
+import { whiteboardDef } from '../../compile/propRecipes/whiteboard';
+import { wineRackDef } from '../../compile/propRecipes/wineRack';
+import { wireShelfDef } from '../../compile/propRecipes/wireShelf';
+import { workbenchDef } from '../../compile/propRecipes/workbench';
+import { writingDeskDef } from '../../compile/propRecipes/writingDesk';
 
 export type BuiltinPropKind =
   | 'rock'
@@ -341,13 +510,50 @@ export type BuiltinPropKind =
   | 'wallSconce'
   | 'neonSign'
   | 'exitSign'
+  // ── PARAMETRIC signage (req_0893): geometry/material is a function of the
+  // placement's `text` (WorldProp.text). blockLetters = extruded 3D channel
+  // letters spelling a business name.
+  | 'blockLetters'
   // decor
   | 'rug'
   | 'pottedPlant'
   | 'vase'
   | 'clock'
   | 'tvStand'
-  | 'curtain';
+  | 'curtain'
+  // ── PROPEXTRA-0613: user-requested variety props ───────────────────────────
+  | 'bong'
+  | 'bottle'
+  | 'bowl'
+  | 'broom'
+  | 'bucket'
+  | 'can'
+  | 'cup'
+  | 'dice'
+  | 'fireExtinguisher'
+  | 'fishOnWall'
+  | 'fishWall'
+  | 'fishtank'
+  | 'fork'
+  | 'jar'
+  | 'katana'
+  | 'knife'
+  | 'makeup'
+  | 'makeupPalette'
+  | 'monument'
+  | 'mug'
+  | 'plate'
+  | 'shower'
+  | 'sodaCan'
+  | 'soupCan'
+  | 'spoon'
+  | 'stage'
+  | 'towel'
+  | 'towelRack'
+  | 'tvCRT'
+  | 'tvFlat'
+  | 'waterBottle'
+  | 'wineBottle';
 
 export type PropKind = BuiltinPropKind | ImportedPropKind;
 
@@ -476,91 +682,20 @@ export function propCoverClass(kind: PropKind): PropCoverClass {
 }
 
 export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
-  rock: {
-    kind: 'rock',
-    label: 'Rock',
-    solid: true,
-    footprintRadiusMeters: 0.55,
-    heightMeters: 0.9,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  rockLarge: {
-    kind: 'rockLarge',
-    label: 'Large Rock',
-    solid: true,
-    footprintRadiusMeters: 1.1,
-    heightMeters: 1.6,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  rockSmall: {
-    kind: 'rockSmall',
-    label: 'Small Rock',
-    solid: true,
-    footprintRadiusMeters: 0.28,
-    heightMeters: 0.42,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
+  rock: rockDef,
+  rockLarge: rockLargeDef,
+  rockSmall: rockSmallDef,
   fireHydrant: fireHydrantDef,
   streetSign: streetSignDef,
   streetLight: streetLightDef,
-  bush: {
-    kind: 'bush',
-    label: 'Bush',
-    // Non-solid: the GTA shrub you walk straight through. A BIG hide-in bush —
-    // taller than the player so standing inside it conceals you. The radius is
-    // its canopy half-width, sizing the concealment query only (no physics rect).
-    solid: false,
-    footprintRadiusMeters: 1.2,
-    heightMeters: 2.5,
-    tileKind: 'bush',
-    trafficControl: 'none',
-  },
-  bushLarge: {
-    kind: 'bushLarge',
-    // A MASSIVE bush — taller than a two-storey building. Same walk-through
-    // foliage, just enormous: you can lose a whole car in it.
-    label: 'Massive Bush',
-    solid: false,
-    footprintRadiusMeters: 6.5,
-    heightMeters: 13,
-    tileKind: 'bush',
-    trafficControl: 'none',
-  },
-  bushLow: {
-    kind: 'bushLow',
-    label: 'Low Hedge',
-    solid: false,
-    footprintRadiusMeters: 0.85,
-    heightMeters: 0.9,
-    tileKind: 'bush',
-    trafficControl: 'none',
-  },
-  bushSparse: {
-    kind: 'bushSparse',
-    label: 'Sparse Bush',
-    solid: false,
-    footprintRadiusMeters: 0.7,
-    heightMeters: 1.1,
-    tileKind: 'bush',
-    trafficControl: 'none',
-  },
+  bush: bushDef,
+  bushLarge: bushLargeDef,
+  bushLow: bushLowDef,
+  bushSparse: bushSparseDef,
   stopSign: stopSignDef,
   trafficLight: trafficLightDef,
   payphone: payphoneDef,
-  dumpster: {
-    kind: 'dumpster',
-    label: 'Dumpster',
-    solid: true,
-    // PROPSCALE-0611: real 4-yd front-load (1.83w × 1.37h × 1.37d) × 1.15
-    footprintRadiusMeters: 0.9,
-    heightMeters: 1.57,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'junk', capacity: 6, spawnFillChance: 0.7, searchSeconds: 4, access: 'open' },
-  },
+  dumpster: dumpsterDef,
   mailbox: mailboxDef,
   fence: fenceDef,
 
@@ -617,32 +752,8 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   foldingChair: foldingChairDef,
 
   // ── household (bedroom / kitchen / bathroom) ───────────────────────────────
-  bedSingle: {
-    kind: 'bedSingle',
-    label: 'Single Bed',
-    // 2.1m long along local X, 1.0m wide — yaw-aware thin AABB in world props.
-    solid: true,
-    footprintRadiusMeters: 1.05,
-    footprintDepthMeters: 1.0,
-    heightMeters: 0.9,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'lay', seatHeightMeters: 0.48, capacity: 1 },
-    coverClass: 'soft',
-  },
-  bedDouble: {
-    kind: 'bedDouble',
-    label: 'Double Bed',
-    // 2.1m long along local X, 1.5m wide — yaw-aware thin AABB in world props.
-    solid: true,
-    footprintRadiusMeters: 1.05,
-    footprintDepthMeters: 1.5,
-    heightMeters: 0.95,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'lay', seatHeightMeters: 0.48, capacity: 2 },
-    coverClass: 'soft',
-  },
+  bedSingle: bedSingleDef,
+  bedDouble: bedDoubleDef,
   cupboard: cupboardDef,
   mirror: mirrorDef,
   sink: sinkDef,
@@ -658,84 +769,14 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   //    req_0635 image-flats). Real scale × 1.15 — the PROPSCALE presence law.
   //    Models are DATA (game/kinds/propModels.ts), rendered identically by
   //    /test's DataProp and the compile bake. ────────────────────────────────
-  grassPatch: {
-    kind: 'grassPatch',
-    label: 'Grass Patch',
-    // Walk-through ground foliage — too low to hide in (no concealment read).
-    solid: false,
-    footprintRadiusMeters: 0.7,
-    heightMeters: 0.3,
-    tileKind: 'bush',
-    trafficControl: 'none',
-    coverClass: 'none',
-  },
-  grassTall: {
-    kind: 'grassTall',
-    label: 'Tall Grass',
-    // Waist-to-chest savanna grass — crouch in it and the bush tile conceals.
-    solid: false,
-    footprintRadiusMeters: 0.9,
-    heightMeters: 1.0,
-    tileKind: 'bush',
-    trafficControl: 'none',
-    coverClass: 'soft',
-  },
-  rockJagged: {
-    kind: 'rockJagged',
-    label: 'Jagged Rock',
-    solid: true,
-    footprintRadiusMeters: 0.7,
-    heightMeters: 1.4,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  rockShard: {
-    kind: 'rockShard',
-    label: 'Rock Shard',
-    solid: true,
-    footprintRadiusMeters: 0.45,
-    heightMeters: 2.6,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  // Tree size variants — same species models, different registry scale (the
-  // tree recipes derive everything from height/footprint).
-  treeOakYoung: {
-    kind: 'treeOakYoung',
-    label: 'Young Oak',
-    solid: true,
-    footprintRadiusMeters: 0.32,
-    heightMeters: 9,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  treeOakGiant: {
-    kind: 'treeOakGiant',
-    label: 'Giant Oak',
-    solid: true,
-    footprintRadiusMeters: 0.8,
-    heightMeters: 25,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  treePineYoung: {
-    kind: 'treePineYoung',
-    label: 'Young Pine',
-    solid: true,
-    footprintRadiusMeters: 0.24,
-    heightMeters: 11,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  treePineGiant: {
-    kind: 'treePineGiant',
-    label: 'Giant Pine',
-    solid: true,
-    footprintRadiusMeters: 0.6,
-    heightMeters: 32,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
+  grassPatch: grassPatchDef,
+  grassTall: grassTallDef,
+  rockJagged: rockJaggedDef,
+  rockShard: rockShardDef,
+  treeOakYoung: treeOakYoungDef,
+  treeOakGiant: treeOakGiantDef,
+  treePineYoung: treePineYoungDef,
+  treePineGiant: treePineGiantDef,
   radioTower: radioTowerDef,
   gasPump: gasPumpDef,
   vendingMachine: vendingMachineDef,
@@ -767,280 +808,163 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   jerryCan: jerryCanDef,
   cinderBlock: cinderBlockDef,
   brick: brickDef,
-  rubblePile: {
-    kind: 'rubblePile',
-    label: 'Rubble Pile',
-    solid: true,
-    footprintRadiusMeters: 0.8,
-    heightMeters: 0.55,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'soft',
-  },
-  crate: {
-    kind: 'crate',
-    label: 'Wooden Crate',
-    solid: true,
-    footprintRadiusMeters: 0.35,
-    heightMeters: 0.65,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'tools', capacity: 3, spawnFillChance: 0.55, searchSeconds: 2.5, access: 'open' },
-  },
-  pallet: {
-    kind: 'pallet',
-    label: 'Pallet',
-    solid: true,
-    footprintRadiusMeters: 0.65,
-    heightMeters: 0.16,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  palletStack: {
-    kind: 'palletStack',
-    label: 'Pallet Stack',
-    solid: true,
-    footprintRadiusMeters: 0.65,
-    heightMeters: 1.05,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'soft',
-  },
-  toiletPaper: {
-    kind: 'toiletPaper',
-    label: 'Toilet Paper',
-    solid: false,
-    footprintRadiusMeters: 0.1,
-    heightMeters: 0.78,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'wall',
-    coverClass: 'none',
-  },
+  rubblePile: rubblePileDef,
+  crate: crateDef,
+  pallet: palletDef,
+  palletStack: palletStackDef,
+  toiletPaper: toiletPaperDef,
 
   // ── PROPVENUE-0611 (req_0640): parks + shop interiors. Real scale × 1.15. ──
-  fountain: {
-    kind: 'fountain',
-    label: 'Plaza Fountain',
-    // A round plaza fountain — basin, pedestal, upper bowl, jet. You can sit
-    // on the basin edge like every city park.
-    solid: true,
-    footprintRadiusMeters: 1.8,
-    heightMeters: 2.2,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'sit', seatHeightMeters: 0.55, capacity: 3 },
-  },
-  drinkingFountain: {
-    kind: 'drinkingFountain',
-    label: 'Drinking Fountain',
-    solid: true,
-    footprintRadiusMeters: 0.2,
-    heightMeters: 1.0,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  loungeChair: {
-    kind: 'loungeChair',
-    label: 'Lounge Chair',
-    // The pool/beach lounger — long like a bed (yaw-aware thin AABB).
-    solid: true,
-    footprintRadiusMeters: 0.95,
-    heightMeters: 0.8,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'lay', seatHeightMeters: 0.38, capacity: 1 },
-    coverClass: 'soft',
-  },
-  swingset: {
-    kind: 'swingset',
-    label: 'Swing Set',
-    // Static A-frame with two hanging seats for now; the seats are sittable.
-    // PHYSICS OPPORTUNITY (user, req_0640): swinging is a future dynamics
-    // slice — the chain/seat pendulum wants the entity body system once
-    // constrained bodies exist (today's bodies are free spheres only).
-    solid: true,
-    footprintRadiusMeters: 1.9,
-    heightMeters: 2.5,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'sit', seatHeightMeters: 0.55, capacity: 2 },
-  },
-  sandCastle: {
-    kind: 'sandCastle',
-    label: 'Sand Castle',
-    solid: true,
-    footprintRadiusMeters: 0.4,
-    heightMeters: 0.5,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'none',
-  },
-  picketFence: {
-    kind: 'picketFence',
-    label: 'Picket Fence',
-    // A white 2.5m garden segment — same yaw-aware thin AABB as 'fence'.
-    solid: true,
-    footprintRadiusMeters: 1.35,
-    heightMeters: 1.1,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  appleTree: {
-    kind: 'appleTree',
-    label: 'Apple Tree',
-    // Orchard scale (~5.5m × 1.15), apples visible in the canopy. The DROP —
-    // apples detaching as live bodies over time — is a future spawn slice;
-    // today you place 'apple' props under it and they roll/kick like balls
-    // (and become throwable/eatable when the item system lands, user ask).
-    solid: true,
-    footprintRadiusMeters: 0.35,
-    heightMeters: 6.5,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  apple: {
-    kind: 'apple',
-    label: 'Apple',
-    // Acts like a ball (user ask req_0640): tiny sphere body, modest bounce.
-    // Future: throwable / eatable once items exist.
-    solid: true,
-    footprintRadiusMeters: 0.05,
-    heightMeters: 0.09,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    dynamics: { bodyRadiusMeters: 0.06, restitution: 0.35 },
-  },
-  arcadeCabinet: {
-    kind: 'arcadeCabinet',
-    label: 'Arcade Cabinet',
-    // Real upright cab ~1.75m × 1.15. The screen takes an image (partId
-    // 'screen') so any art becomes the game on the marquee glass.
-    solid: true,
-    footprintRadiusMeters: 0.38,
-    heightMeters: 2.0,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    coverClass: 'hard',
-  },
-  slotMachine: {
-    kind: 'slotMachine',
-    label: 'Slot Machine',
-    solid: true,
-    footprintRadiusMeters: 0.3,
-    heightMeters: 1.45,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'valuables', capacity: 2, spawnFillChance: 0.4, searchSeconds: 3, access: 'locked' },
-  },
-  clothingRack: {
-    kind: 'clothingRack',
-    label: 'Clothing Rack',
-    solid: true,
-    footprintRadiusMeters: 0.7,
-    heightMeters: 1.6,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'clothing', capacity: 4, spawnFillChance: 0.7, searchSeconds: 2.5, access: 'open' },
-    coverClass: 'soft',
-  },
-  displayCase: {
-    kind: 'displayCase',
-    label: 'Display Case',
-    // The glass counter case (dispensary/jewelry/pawn) — valuables, locked.
-    solid: true,
-    footprintRadiusMeters: 0.6,
-    heightMeters: 1.0,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'valuables', capacity: 3, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
-  },
-  liquorShelf: {
-    kind: 'liquorShelf',
-    label: 'Liquor Shelf',
-    solid: true,
-    footprintRadiusMeters: 0.9,
-    heightMeters: 2.0,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'kitchen', capacity: 5, spawnFillChance: 0.7, searchSeconds: 2.5, access: 'open' },
-  },
-  beerCase: {
-    kind: 'beerCase',
-    label: 'Beer Cases',
-    solid: true,
-    footprintRadiusMeters: 0.25,
-    heightMeters: 0.55,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  dinerBooth: {
-    kind: 'dinerBooth',
-    label: 'Diner Booth',
-    // Two facing vinyl benches + the table — one seat each side.
-    solid: true,
-    footprintRadiusMeters: 0.8,
-    heightMeters: 1.35,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 2 },
-    coverClass: 'soft',
-  },
-  orderCounter: {
-    kind: 'orderCounter',
-    label: 'Order Counter',
-    solid: true,
-    footprintRadiusMeters: 0.9,
-    heightMeters: 1.16,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    container: { lootCategory: 'valuables', capacity: 2, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
-  },
-  menuBoard: {
-    kind: 'menuBoard',
-    label: 'Menu Board',
-    // Wall board over the counter; the face takes an image (the menu).
-    solid: true,
-    footprintRadiusMeters: 0.08,
-    heightMeters: 2.6,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'wall',
-    coverClass: 'none',
-  },
-  sodaMachine: {
-    kind: 'sodaMachine',
-    label: 'Soda Machine',
-    solid: true,
-    footprintRadiusMeters: 0.35,
-    heightMeters: 1.7,
-    tileKind: 'wall',
-    trafficControl: 'none',
-  },
-  openSign: {
-    kind: 'openSign',
-    label: 'OPEN Sign',
-    // The neon window sign every storefront wants — liquor, dispensary, diner.
-    solid: true,
-    footprintRadiusMeters: 0.06,
-    heightMeters: 2.2,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'wall',
-    coverClass: 'none',
-  },
-  greenCrossSign: {
-    kind: 'greenCrossSign',
-    label: 'Green Cross Sign',
-    // The dispensary/pharmacy green cross — the policeSign/hospitalSign family.
-    solid: true,
-    footprintRadiusMeters: 0.1,
-    heightMeters: 2.8,
-    tileKind: 'wall',
-    trafficControl: 'none',
-    mount: 'wall',
-    coverClass: 'none',
-  },
+  fountain: fountainDef,
+  drinkingFountain: drinkingFountainDef,
+  loungeChair: loungeChairDef,
+  swingset: swingsetDef,
+  sandCastle: sandCastleDef,
+  picketFence: picketFenceDef,
+  appleTree: appleTreeDef,
+  apple: appleDef,
+  arcadeCabinet: arcadeCabinetDef,
+  slotMachine: slotMachineDef,
+  clothingRack: clothingRackDef,
+  displayCase: displayCaseDef,
+  liquorShelf: liquorShelfDef,
+  beerCase: beerCaseDef,
+  dinerBooth: dinerBoothDef,
+  orderCounter: orderCounterDef,
+  menuBoard: menuBoardDef,
+  sodaMachine: sodaMachineDef,
+  openSign: openSignDef,
+  greenCrossSign: greenCrossSignDef,
+
+  // ── PROPEXTRA-0613: user-requested variety props ─────────────────────────
+  fishWall: fishWallDef,
+  makeupPalette: makeupPaletteDef,
+  mug: mugDef,
+  sodaCan: sodaCanDef,
+  soupCan: soupCanDef,
+  spoon: spoonDef,
+  towelRack: towelRackDef,
+  tvCRT: tvCRTDef,
+  tvFlat: tvFlatDef,
+  waterBottle: waterBottleDef,
+  wineBottle: wineBottleDef,
+  barStool: barStoolDef,
+  bathtub: bathtubDef,
+  blender: blenderDef,
+  bong: bongDef,
+  bookcase: bookcaseDef,
+  bottle: bottleDef,
+  bowl: bowlDef,
+  broom: broomDef,
+  bucket: bucketDef,
+  bunkBed: bunkBedDef,
+  can: canDef,
+  cardboardBox: cardboardBoxDef,
+  chaiseLounge: chaiseLoungeDef,
+  clock: clockDef,
+  coatRack: coatRackDef,
+  coffeeTable: coffeeTableDef,
+  computerDesk: computerDeskDef,
+  conferenceTable: conferenceTableDef,
+  cup: cupDef,
+  curtain: curtainDef,
+  deskLamp: deskLampDef,
+  dice: diceDef,
+  diningTable: diningTableDef,
+  directorsChair: directorsChairDef,
+  displayShelf: displayShelfDef,
+  draftingTable: draftingTableDef,
+  dresser: dresserDef,
+  dryer: dryerDef,
+  endTable: endTableDef,
+  exitSign: exitSignDef,
+  filingCabinet: filingCabinetDef,
+  fireExtinguisher: fireExtinguisherDef,
+  fishOnWall: fishOnWallDef,
+  fishtank: fishtankDef,
+  fork: forkDef,
+  gameConsole: gameConsoleDef,
+  highChair: highChairDef,
+  hospitalBed: hospitalBedDef,
+  jar: jarDef,
+  katana: katanaDef,
+  keyboard: keyboardDef,
+  knife: knifeDef,
+  laptop: laptopDef,
+  loveseat: loveseatDef,
+  magazineRack: magazineRackDef,
+  makeup: makeupDef,
+  mattress: mattressDef,
+  microwave: microwaveDef,
+  monitor: monitorDef,
+  monument: monumentDef,
+  neonSign: neonSignDef,
+  blockLetters: blockLettersDef,
+  officeDesk: officeDeskDef,
+  phone: phoneDef,
+  plate: plateDef,
+  pokerTable: pokerTableDef,
+  pottedPlant: pottedPlantDef,
+  printer: printerDef,
+  radiator: radiatorDef,
+  receptionDesk: receptionDeskDef,
+  recliner: reclinerDef,
+  rockingChair: rockingChairDef,
+  router: routerDef,
+  rug: rugDef,
+  safe: safeDef,
+  serverRack: serverRackDef,
+  shower: showerDef,
+  sofa: sofaDef,
+  stage: stageDef,
+  standingDesk: standingDeskDef,
+  stool: stoolDef,
+  storageBin: storageBinDef,
+  storageShelf: storageShelfDef,
+  tablet: tabletDef,
+  toaster: toasterDef,
+  toilet: toiletDef,
+  towel: towelDef,
+  tv: tvDef,
+  tvStand: tvStandDef,
+  vase: vaseDef,
+  wallSconce: wallSconceDef,
+  wallShelf: wallShelfDef,
+  wardrobe: wardrobeDef,
+  washingMachine: washingMachineDef,
+  waterCooler: waterCoolerDef,
+
+  // ── PROPFURNITURE-0613 extensions: additional interior recipe files ────────
+  beanBag: beanBagDef,
+  ceilingLamp: ceilingLampDef,
+  chalkboard: chalkboardDef,
+  classroomDesk: classroomDeskDef,
+  consoleTable: consoleTableDef,
+  corkboard: corkboardDef,
+  cornerDesk: cornerDeskDef,
+  daybed: daybedDef,
+  dvdShelf: dvdShelfDef,
+  floatingShelf: floatingShelfDef,
+  futon: futonDef,
+  nightstand: nightstandDef,
+  noticeBoard: noticeBoardDef,
+  ottoman: ottomanDef,
+  patioChair: patioChairDef,
+  picnicTable: picnicTableDef,
+  posterLarge: posterLargeDef,
+  posterSmall: posterSmallDef,
+  posterTall: posterTallDef,
+  posterWide: posterWideDef,
+  sectional: sectionalDef,
+  sideTable: sideTableDef,
+  toolCabinet: toolCabinetDef,
+  toolShelf: toolShelfDef,
+  whiteboard: whiteboardDef,
+  wineRack: wineRackDef,
+  wireShelf: wireShelfDef,
+  workbench: workbenchDef,
+  writingDesk: writingDeskDef,
+
   ...IMPORTED_PROP_DEFINITIONS,
 };
 
@@ -1060,16 +984,16 @@ export const PROP_CATEGORIES: Record<PropCategory, PropKind[]> = {
   nature: ['bush', 'bushLarge', 'bushLow', 'bushSparse', 'grassPatch', 'grassTall'],
   trees: ['treeOak', 'treeOakYoung', 'treeOakGiant', 'treePine', 'treePineYoung', 'treePineGiant', 'treeBirch', 'treeCypress', 'treePalm', 'treeDead'],
   rocks: ['rock', 'rockLarge', 'rockSmall', 'boulder', 'rockFlat', 'rockSpire', 'rockMossy', 'rockPile', 'rockJagged', 'rockShard'],
-  street: ['fireHydrant', 'streetLight', 'payphone', 'mailbox', 'dumpster', 'fence', 'trafficCone', 'barrier', 'trashCan', 'bench', 'planter', 'telephonePole'],
-  signs: ['streetSign', 'stopSign', 'trafficLight', 'businessSign', 'shopSign', 'poster', 'hospitalSign', 'policeSign'],
-  furniture: ['diningChair', 'armchair', 'officeChair', 'foldingChair', 'couch', 'table', 'floorLamp', 'wallPainting', 'ledLight', 'mirror'],
-  household: ['bedSingle', 'bedDouble', 'cupboard', 'sink', 'oven', 'fridge', 'computer', 'toiletPaper'],
-  media: ['bookStack', 'recordPlayer', 'vinylRecord', 'albumCover', 'cassette', 'speaker', 'speakerStack'],
+  street: ['fireHydrant', 'streetLight', 'payphone', 'mailbox', 'dumpster', 'fence', 'trafficCone', 'barrier', 'trashCan', 'bench', 'planter', 'telephonePole', 'fireExtinguisher'],
+  signs: ['streetSign', 'stopSign', 'trafficLight', 'businessSign', 'shopSign', 'poster', 'posterSmall', 'posterLarge', 'posterWide', 'posterTall', 'hospitalSign', 'policeSign', 'exitSign', 'neonSign', 'blockLetters', 'noticeBoard', 'corkboard', 'whiteboard', 'chalkboard'],
+  furniture: ['diningChair', 'armchair', 'officeChair', 'foldingChair', 'couch', 'table', 'floorLamp', 'wallPainting', 'ledLight', 'mirror', 'barStool', 'beanBag', 'bookcase', 'chaiseLounge', 'coffeeTable', 'computerDesk', 'conferenceTable', 'consoleTable', 'cornerDesk', 'diningTable', 'directorsChair', 'displayShelf', 'draftingTable', 'dvdShelf', 'endTable', 'floatingShelf', 'futon', 'highChair', 'loveseat', 'magazineRack', 'nightstand', 'officeDesk', 'ottoman', 'patioChair', 'picnicTable', 'pokerTable', 'receptionDesk', 'recliner', 'rockingChair', 'sectional', 'sideTable', 'sofa', 'standingDesk', 'stool', 'storageShelf', 'toolShelf', 'tvStand', 'wallShelf', 'wineRack', 'wireShelf', 'workbench', 'writingDesk', 'classroomDesk', 'daybed'],
+  household: ['bedSingle', 'bedDouble', 'cupboard', 'sink', 'oven', 'fridge', 'computer', 'toiletPaper', 'bathtub', 'blender', 'bottle', 'bowl', 'broom', 'bucket', 'bunkBed', 'can', 'cardboardBox', 'ceilingLamp', 'clock', 'coatRack', 'cup', 'curtain', 'deskLamp', 'dresser', 'dryer', 'filingCabinet', 'fishOnWall', 'fishWall', 'fishtank', 'fork', 'hospitalBed', 'jar', 'knife', 'mattress', 'microwave', 'mug', 'plate', 'pottedPlant', 'radiator', 'rug', 'safe', 'shower', 'sodaCan', 'soupCan', 'spoon', 'storageBin', 'toaster', 'toilet', 'toolCabinet', 'towel', 'towelRack', 'vase', 'wallSconce', 'wardrobe', 'washingMachine', 'waterBottle', 'waterCooler', 'wineBottle'],
+  media: ['bookStack', 'recordPlayer', 'vinylRecord', 'albumCover', 'cassette', 'speaker', 'speakerStack', 'gameConsole', 'keyboard', 'laptop', 'monitor', 'phone', 'printer', 'router', 'serverRack', 'tablet', 'tv', 'tvCRT', 'tvFlat'],
   commerce: ['vendingMachine', 'gasPump', 'storeShelf', 'crate', 'pallet', 'palletStack'],
   junkyard: ['shippingContainer', 'concretePipe', 'pipeStack', 'corrugatedSheet', 'cableSpool', 'lockerSet', 'oilTank', 'tire', 'tireStack', 'barrel', 'steelDrum', 'propaneTank', 'jerryCan', 'cinderBlock', 'brick', 'rubblePile', 'radioTower'],
   sport: ['ballBeach', 'ballSoccer', 'ballBasketball', 'basketballHoop'],
-  park: ['fountain', 'drinkingFountain', 'loungeChair', 'swingset', 'sandCastle', 'picketFence', 'appleTree', 'apple'],
-  shops: ['arcadeCabinet', 'slotMachine', 'clothingRack', 'displayCase', 'liquorShelf', 'beerCase', 'dinerBooth', 'orderCounter', 'menuBoard', 'sodaMachine', 'openSign', 'greenCrossSign'],
+  park: ['fountain', 'drinkingFountain', 'loungeChair', 'swingset', 'sandCastle', 'picketFence', 'appleTree', 'apple', 'monument'],
+  shops: ['arcadeCabinet', 'slotMachine', 'clothingRack', 'displayCase', 'liquorShelf', 'beerCase', 'dinerBooth', 'orderCounter', 'menuBoard', 'sodaMachine', 'openSign', 'greenCrossSign', 'bong', 'dice', 'katana', 'makeup', 'makeupPalette', 'stage'],
   imported: [...IMPORTED_PROP_KINDS],
 };
 
@@ -1085,6 +1009,17 @@ export function propCategory(kind: PropKind): PropCategory {
 
 export function isPropKind(value: string): value is PropKind {
   return Object.prototype.hasOwnProperty.call(PROP_KIND_DEFINITIONS, value);
+}
+
+// ── PARAMETRIC props (req_0893): kinds whose recipe/material is a function of
+// the placement's `text` (WorldProp.text). The ONE list both the editor (to show
+// a text field) and any text-aware consumer read — no per-kind branching twice.
+export const TEXT_PROP_KINDS: ReadonlySet<PropKind> = new Set<PropKind>(['blockLetters']);
+
+/** Does this kind read a per-instance `text`? (block-letter name, neon caption,
+ *  ticker message.) The editor shows a text input for these; others ignore it. */
+export function propTakesText(kind: PropKind): boolean {
+  return TEXT_PROP_KINDS.has(kind);
 }
 
 export function propKindDefinition(kind: PropKind): PropKindDefinition {

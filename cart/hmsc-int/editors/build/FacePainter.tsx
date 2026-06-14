@@ -16,9 +16,10 @@
 // custom #rrggbb brush, a recently-used row, a visible current-brush readout,
 // and a per-face readout of what the selection currently wears.
 
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Effect, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { GAME_BUILD } from '@game';
+import { propTakesText } from '../../game/kinds';
 import type { BuildFaceSkin, BuildFaceSlot, BuildSkinSet, PlacedBuildPiece, WorldEvent } from '@game';
 import type { WorldProp } from '../../design';
 import { allTextures, type TextureDef } from '@game/textures/registry';
@@ -225,6 +226,22 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
     return wear;
   }, [propPartList, selPieces]);
 
+  // ── PARAMETRIC props (req_0893): a selection of text-driven props (block
+  // letters, …) gets a text field that retypes the sign. The draft re-syncs when
+  // the selection changes; each edit commits pieceTextSet per piece (one undo
+  // step), the same stable-id pattern the skin/part events use.
+  const textProp = propMode && selPieces.length > 0
+    && selPieces.every((p) => { const k = GAME_BUILD.catalog.get(p.pieceId).propKind; return !!k && propTakesText(k); });
+  const [textDraft, setTextDraft] = useState('');
+  const selSig = selPieces.map((p) => p.id).join(',');
+  useEffect(() => { setTextDraft(selPieces[0]?.text ?? ''); }, [selSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  const applyText = (text: string) => {
+    setTextDraft(text);
+    const sel = selRef.current;
+    if (!sel.length) return;
+    commitRef.current(sel.map((p) => ({ event: { kind: 'pieceTextSet', id: p.id, text } as WorldEvent, label: 'sign text' })));
+  };
+
   const pushRecent = (b: BuildFaceSkin) => {
     setRecent((list) => [b, ...list.filter((x) => matKey(x) !== matKey(b))].slice(0, 8));
   };
@@ -298,6 +315,20 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>
           {'nothing selected — click pieces in the build pane below; the brush you set here is ready when you do'}
         </Text>
+      ) : null}
+
+      {/* PARAMETRIC props (req_0893): the sign's text. Typing retypes the letters
+          live — the recipe rebuilds the geometry from this word. */}
+      {textProp ? (
+        <Box style={{ gap: 3 }}>
+          <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>SIGN TEXT</Text>
+          <TextInput
+            text={textDraft}
+            placeholder="business name…"
+            onChangeText={applyText}
+            style={{ backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: '#38bdf8', borderRadius: 3, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, color: '#e2e8f0', fontSize: 11, fontFamily: 'monospace' }}
+          />
+        </Box>
       ) : null}
 
       {/* the row: a build piece's FACES (front/back/sides) or a prop's PARTS — each

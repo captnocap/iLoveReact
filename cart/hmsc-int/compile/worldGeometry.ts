@@ -735,6 +735,9 @@ function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number
         // PROPSKIN-0766: bake the placed prop's per-part textures (the same
         // partTextures channel /test renders) so the compiled prop wears them.
         partTextures: piece.partTextures,
+        // PARAMETRIC props (req_0893): bake THIS placement's text so the compiled
+        // sign lowers the same word the editor showed.
+        text: piece.text,
         createdByCommand: 'hmsc-int:compile-build-prop',
       });
       continue;

@@ -133,6 +133,7 @@ export const GhostPiece = memo(function GhostPiece(props: {
       y: piece.y,
       z: piece.z,
       yawDegrees: piece.yawDegrees,
+      text: piece.text,
       createdByCommand: 'hmsc-int:ghost',
     };
     return (
@@ -228,6 +229,9 @@ export function propFromPiece(piece: PlacedBuildPiece): WorldProp | null {
     // PROPSKIN-0766: the placed piece's per-part texture overrides ride into the
     // WorldProp so the rendered prop wears them (DataProp + WorldPartCaptures).
     partTextures: piece.partTextures,
+    // PARAMETRIC props (req_0893): per-instance text rides in so the recipe
+    // lowers THIS placement's word.
+    text: piece.text,
     createdByCommand: 'hmsc-int:build-prop',
   };
 }
