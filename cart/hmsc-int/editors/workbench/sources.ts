@@ -18,6 +18,7 @@ import { settingsSource } from './settings/source';
 import { logsSource } from './logs/source';
 import { requestsSource } from './requests/source';
 import { garmentsSource } from './clothing/source';
+import { storySource } from './story/source';
 
 export function workbenchSources(): Array<WorkbenchSource<any>> {
   return [
@@ -32,5 +33,6 @@ export function workbenchSources(): Array<WorkbenchSource<any>> {
     settingsSource(),   // WBSET9-0606 — settings domains + rigs; the tunables proof source FOLDED IN (/settings DEAD — WBSTEP9-FLIP-0607)
     logsSource(),       // WBSET9-0606 — churn tail + session event bus as one streaming category (/log DEAD — WBSTEP9-FLIP-0607)
     requestsSource(),   // REQPANEL-0606 — the request ledger: what is left unresolved, click it done (same resolveRequest door as tools/request)
+    storySource(),      // STORYBOARD-0613 (req_0910/req_0911) — the storyline authoring board: the conditional state machine over game/missions defs + game/story gates (provider→requirer edges; the user's quest-object shape)
   ];
 }

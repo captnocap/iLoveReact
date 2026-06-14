@@ -21,6 +21,7 @@
 
 import type { ActivityReward, ActivityVerb } from '../activities';
 import { GAME_ACTIVITIES } from '../activities';
+import type { StoryCondition } from '../story';
 import type { MissionObjective } from './objectives';
 import { OBJECTIVE_TARGET_KINDS } from './objectives';
 
@@ -58,6 +59,15 @@ export type MissionDef = {
   client: string;
   /** contracts bind; jobs (the opening delivery gig) may not */
   binding?: MissionBinding;
+  /**
+   * THE UNLOCK GATE (the storyline state machine's inbound edges): the mission
+   * is only OFFERABLE when every one of these story conditions holds. Predicates
+   * as data, the SAME StoryCondition vocabulary arcs and dialog gate on
+   * (game/story/conditions.ts) — flag / counter / event. Empty/absent = a root
+   * (offerable from the start). A mission `provides` the flags its hooks set
+   * (worldDelta.setFlag); B requiring a flag A provides is the edge A→B. This is
+   * what the storyline authoring board renders and edits. */
+  requires?: readonly StoryCondition[];
   stages: readonly MissionStage[];
   /** scape Quest.reward verbatim (the activities-shared row) */
   reward: ActivityReward;
@@ -70,6 +80,25 @@ export type MissionDef = {
   seed?: string;
   fingerprint?: readonly number[];
 };
+
+/** Validate one unlock gate — the same StoryCondition shapes conditions.ts
+ *  defines (predicates as data); malformed gates fail at table-build time. */
+function validateRequire(where: string, gate: StoryCondition): void {
+  switch (gate.kind) {
+    case 'flag':
+      if (!gate.flag) throw new Error(`${where}: a 'flag' require needs a flag name`);
+      return;
+    case 'counter':
+      if (!gate.counter) throw new Error(`${where}: a 'counter' require needs a counter name`);
+      if (!Number.isFinite(gate.atLeast)) throw new Error(`${where}: counter require '${gate.counter}' needs a finite atLeast`);
+      return;
+    case 'event':
+      if (!gate.type) throw new Error(`${where}: an 'event' require needs a type`);
+      return;
+    default:
+      throw new Error(`${where}: unknown require kind ${JSON.stringify((gate as { kind?: unknown }).kind)}`);
+  }
+}
 
 function validateObjective(where: string, objective: MissionObjective): void {
   const allowed = OBJECTIVE_TARGET_KINDS[objective.kind];
@@ -125,6 +154,11 @@ export function defineMission(def: MissionDef): MissionDef {
     if (def.binding.kind === 'position' && !def.binding.positionId) throw new Error(`${where}: position binding needs a positionId`);
     Object.freeze(def.binding);
   }
+  for (const gate of def.requires ?? []) {
+    validateRequire(where, gate);
+    Object.freeze(gate);
+  }
+  if (def.requires) Object.freeze(def.requires);
   if (def.expiryTicks !== null && !(Number.isInteger(def.expiryTicks) && def.expiryTicks > 0)) {
     throw new Error(`${where}: expiryTicks must be a positive integer or null`);
   }
