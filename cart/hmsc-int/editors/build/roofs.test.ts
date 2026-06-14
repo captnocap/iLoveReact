@@ -8,13 +8,21 @@
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 import { GAME_BUILD, ROOF_PITCH, type PlacedBuildPiece } from '@game';
 import { pieceVisualShapes, type VisualShape } from './pieceShapes';
-import { buildWorldInstances, INSTANCE_SHAPE_RAMP, INSTANCE_STRIDE } from '../../compile/worldGeometry';
+import { buildWorldInstances, INSTANCE_SHAPE_GABLE, INSTANCE_SHAPE_RAMP, INSTANCE_STRIDE } from '../../compile/worldGeometry';
 
 function ramps(shapes: VisualShape[]) {
   return shapes.filter((s) => s.kind === 'ramp').map((s) => (s as Extract<VisualShape, { kind: 'ramp' }>).ramp);
 }
-function boxes(shapes: VisualShape[]) {
-  return shapes.filter((s) => s.kind === 'box').map((s) => (s as Extract<VisualShape, { kind: 'box' }>).box);
+function gables(shapes: VisualShape[]) {
+  return shapes.filter((s) => s.kind === 'gable').map((s) => (s as Extract<VisualShape, { kind: 'gable' }>).box);
+}
+function bakedShapeCount(piece: PlacedBuildPiece, shapeId: number): number {
+  const built = buildWorldInstances({} as any, [piece], []);
+  let n = 0;
+  for (let i = 0; i < built.instances.length / INSTANCE_STRIDE; i += 1) {
+    if (built.instances[i * INSTANCE_STRIDE + 12] === shapeId) n += 1;
+  }
+  return n;
 }
 function roof(pieceId: string, extra: Partial<PlacedBuildPiece> = {}): PlacedBuildPiece {
   return { id: 'r1', pieceId, x: 0, y: 0, z: 0, yawDegrees: 0, ...extra };
@@ -48,7 +56,18 @@ test('a gable roof is two opposed slopes meeting at a center ridge', () => {
   }
   const yaws = r.map((x) => ((x.yawDegrees % 360) + 360) % 360).sort((a, b) => a - b);
   assertEqual(yaws[1] - yaws[0], 180, 'the two slopes face opposite ways (mirror at the ridge)');
-  assert(boxes(shapes).length > 0, 'the gable ends are closed (stepped infill boxes)');
+  const ends = gables(shapes);
+  assertEqual(ends.length, 2, 'both gable ends are closed by a solid triangular prism (no see-through notches)');
+  for (const end of ends) {
+    assertClose(end.sy, GAME_BUILD.placed.roofRise(piece), 1e-6, 'the gable wall rises to the ridge');
+    assertClose(end.sz, 3, 1e-6, 'the gable wall spans the eave-to-eave depth');
+  }
+});
+
+test('PARITY: the gable ends ship as GABLE-prism rows to the compiled bake', () => {
+  assertEqual(bakedShapeCount(roof('roof.gable.suburb'), INSTANCE_SHAPE_GABLE), 2, 'two gable-end prisms reach the instance buffer');
+  assertEqual(bakedShapeCount(roof('roof.shed.common'), INSTANCE_SHAPE_GABLE), 0, 'a shed roof has no gable ends');
+  assertEqual(bakedShapeCount(roof('roof.flat.common'), INSTANCE_SHAPE_GABLE), 0, 'a flat roof has no gable ends');
 });
 
 test('a roofSpan footprint scales the profile to the whole base floor', () => {

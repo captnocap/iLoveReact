@@ -61,6 +61,10 @@ export const INSTANCE_SHAPE_RAMP = 1;
 export const INSTANCE_SHAPE_CYLINDER8 = 2;
 export const INSTANCE_SHAPE_CYLINDER16 = 3;
 export const INSTANCE_SHAPE_SPHERE = 4;
+// req_0930: a triangular prism — the GABLE END wall (a solid isoceles triangle
+// extruded thin across the roof width). Keyed geometry in world_loader.zig
+// (buildGablePrism); editor twin is pieceMeshes' GablePrismGeometry.
+export const INSTANCE_SHAPE_GABLE = 5;
 
 // ── materials: ship the SHADER (the formula) — pixels only when there IS no formula ─
 // GUIDING_LIGHT: procedural content travels as its recipe. A face whose skin is
@@ -684,7 +688,10 @@ function pushVisualShape(b: Build, piece: PlacedBuildPiece, baseMaterial: BuildM
     pushRamp(b, r.x, r.y, r.z, r.width, r.height, r.depth, hexColor(r.color), r.yawDegrees);
     return 1;
   }
+  // 'box' and 'gable' share the instance layout (pos+yaw+scale+skin); only the
+  // keyed geometry differs (a unit cube vs the triangular gable-end prism).
   const v = shape.box;
+  const shapeId = shape.kind === 'gable' ? INSTANCE_SHAPE_GABLE : INSTANCE_SHAPE_BOX;
   // DOORS-0611: the closed door/garage panel is LIVE state — it ships through
   // the DOORS lump (compile/worldDoors.ts) as a toggleable rect+node, never a
   // static row (a static panel could not open).
@@ -699,12 +706,12 @@ function pushVisualShape(b: Build, piece: PlacedBuildPiece, baseMaterial: BuildM
   for (const underlaySkin of underlaySkins) {
     const underlayMaterial = internMaterial(b, underlaySkin);
     if (underlayMaterial !== 0) {
-      pushShape(b, INSTANCE_SHAPE_BOX, v.cx, v.cy, v.cz, [0, v.yawDegrees, 0], v.sx, v.sy, v.sz, color, underlayMaterial);
+      pushShape(b, shapeId, v.cx, v.cy, v.cz, [0, v.yawDegrees, 0], v.sx, v.sy, v.sz, color, underlayMaterial);
       underlayRows += 1;
     }
   }
   if (material === 0 && (v.opacity ?? 1) < 1) material = internTranslucent(b, v.opacity!);
-  pushShape(b, INSTANCE_SHAPE_BOX, v.cx, v.cy, v.cz, [0, v.yawDegrees, 0], v.sx, v.sy, v.sz, color, material);
+  pushShape(b, shapeId, v.cx, v.cy, v.cz, [0, v.yawDegrees, 0], v.sx, v.sy, v.sz, color, material);
   return underlayRows + 1;
 }
 

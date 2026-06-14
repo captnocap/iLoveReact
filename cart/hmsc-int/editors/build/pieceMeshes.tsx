@@ -81,6 +81,59 @@ function VisualBoxMesh(props: { box: VisualBox; colorOverride?: string; opacityO
   );
 }
 
+// req_0930: the GABLE END prism — a unit isoceles-triangle wall, the EDITOR twin
+// of world_loader.zig's buildGablePrism (same verts/normals/winding so the
+// editor and the compiled game render the identical solid). Unit cube space:
+// x ∈ [-0.5,0.5] is the thin width-thickness, z ∈ [-0.5,0.5] is the eave-to-eave
+// base, y is centered [-0.5,0.5] so scale.y = the ridge rise. The apex is an
+// EDGE at y=+0.5, z=0 (running along x); the base sits flat at y=-0.5.
+const GablePrismGeometry: Geometry.GeometryDef<Record<string, never>> = {
+  id: 'HmscGableEndPrism',
+  defaults: {},
+  generate: (): Geometry.GeometryData => {
+    const a0: Geometry.Vec3 = [-0.5, -0.5, -0.5];
+    const a1: Geometry.Vec3 = [0.5, -0.5, -0.5];
+    const b0: Geometry.Vec3 = [-0.5, -0.5, 0.5];
+    const b1: Geometry.Vec3 = [0.5, -0.5, 0.5];
+    const p0: Geometry.Vec3 = [-0.5, 0.5, 0];
+    const p1: Geometry.Vec3 = [0.5, 0.5, 0];
+    const down: Geometry.Vec3 = [0, -1, 0];
+    const negZ = Geometry.normalize(0, 0.5, -1); // -z slope, up-and-out
+    const posZ = Geometry.normalize(0, 0.5, 1); // +z slope, up-and-out
+    const negX: Geometry.Vec3 = [-1, 0, 0];
+    const posX: Geometry.Vec3 = [1, 0, 0];
+    const g = Geometry.mesh();
+    // base (two tris, normal down)
+    g.tri(a0, down, [0, 0], b1, down, [1, 1], b0, down, [0, 1]);
+    g.tri(a0, down, [0, 0], a1, down, [1, 0], b1, down, [1, 1]);
+    // -z slope
+    g.tri(a0, negZ, [0, 0], p1, negZ, [1, 1], a1, negZ, [1, 0]);
+    g.tri(a0, negZ, [0, 0], p0, negZ, [0, 1], p1, negZ, [1, 1]);
+    // +z slope
+    g.tri(b0, posZ, [0, 0], b1, posZ, [1, 0], p1, posZ, [1, 1]);
+    g.tri(b0, posZ, [0, 0], p1, posZ, [1, 1], p0, posZ, [0, 1]);
+    // triangular end caps
+    g.tri(a0, negX, [0, 0], b0, negX, [1, 0], p0, negX, [0.5, 1]);
+    g.tri(a1, posX, [0, 0], p1, posX, [0.5, 1], b1, posX, [1, 0]);
+    return g.build();
+  },
+};
+
+function VisualGablePrismMesh(props: { box: VisualBox; colorOverride?: string; opacityOverride?: number }) {
+  const b = props.box;
+  return (
+    <Scene3D.Mesh
+      geometry={GablePrismGeometry}
+      params={{}}
+      scale={[b.sx, b.sy, b.sz]}
+      rotation={[0, b.yawDegrees, 0]}
+      position={[b.cx, b.cy, b.cz]}
+      material={{ color: props.colorOverride ?? b.color, opacity: props.opacityOverride ?? b.opacity ?? 1 }}
+      textureKey={props.colorOverride ? undefined : b.textureKey}
+    />
+  );
+}
+
 function VisualRampMesh(props: { ramp: VisualRamp; colorOverride?: string; opacityOverride?: number }) {
   const r = props.ramp;
   return (
@@ -101,9 +154,11 @@ function VisualRampMesh(props: { ramp: VisualRamp; colorOverride?: string; opaci
 }
 
 export function VisualShapeMesh(props: { shape: VisualShape; colorOverride?: string; opacityOverride?: number }) {
-  return props.shape.kind === 'ramp'
-    ? <VisualRampMesh ramp={props.shape.ramp} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />
-    : <VisualBoxMesh box={props.shape.box} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />;
+  if (props.shape.kind === 'ramp')
+    return <VisualRampMesh ramp={props.shape.ramp} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />;
+  if (props.shape.kind === 'gable')
+    return <VisualGablePrismMesh box={props.shape.box} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />;
+  return <VisualBoxMesh box={props.shape.box} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />;
 }
 
 // One ghost/preview piece (PROPGHOST-0754). The iso pane's placement / move /
@@ -359,7 +414,9 @@ export const PlacedPieceMeshes = memo(function PlacedPieceMeshes(props: {
     const shapes = pieceShapesCached(piece, joinKeys.get(piece.id) ?? '', props.pieces);
     for (const shape of shapes) {
       const baseOpacity = shape.kind === 'ramp' ? shape.ramp.opacity : shape.box.opacity;
-      if (shape.kind === 'ramp' || opacityOverride !== undefined || (baseOpacity !== undefined && baseOpacity < 1)) {
+      // ramps AND gable-end prisms carry their own keyed geometry — they can't
+      // ride the unit-box instance bucket, so they fall out to individual meshes.
+      if (shape.kind === 'ramp' || shape.kind === 'gable' || opacityOverride !== undefined || (baseOpacity !== undefined && baseOpacity < 1)) {
         loose.push({
           key: shape.kind === 'ramp' ? shape.ramp.key : shape.box.key,
           shape,

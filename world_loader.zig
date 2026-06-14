@@ -55,6 +55,7 @@ const SHAPE_RAMP: f32 = 1;
 const SHAPE_CYLINDER8: f32 = 2;
 const SHAPE_CYLINDER16: f32 = 3;
 const SHAPE_SPHERE: f32 = 4;
+const SHAPE_GABLE: f32 = 5; // req_0930: the triangular gable-end wall prism
 const SCAN_A: usize = 4;
 const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
@@ -531,6 +532,40 @@ fn buildRampSlab() [36 * 8]f32 {
     return out;
 }
 
+/// req_0930: the GABLE END prism — a unit isoceles-triangle wall, the compiled
+/// twin of pieceMeshes' GablePrismGeometry (same verts/normals/winding so the
+/// editor and the compiled game render the identical solid). Unit space: x is
+/// the thin width-thickness, z is the eave-to-eave base, y is centered so
+/// scale.y = the ridge rise. The apex is an EDGE at y=+0.5, z=0 (along x).
+fn buildGablePrism() [24 * 8]f32 {
+    const a0 = [3]f32{ -0.5, -0.5, -0.5 };
+    const a1 = [3]f32{ 0.5, -0.5, -0.5 };
+    const b0 = [3]f32{ -0.5, -0.5, 0.5 };
+    const b1 = [3]f32{ 0.5, -0.5, 0.5 };
+    const p0 = [3]f32{ -0.5, 0.5, 0 };
+    const p1 = [3]f32{ 0.5, 0.5, 0 };
+    const down = [3]f32{ 0, -1, 0 };
+    const neg_z = normalize3(0, 0.5, -1); // -z slope, up-and-out
+    const pos_z = normalize3(0, 0.5, 1); // +z slope, up-and-out
+    const neg_x = [3]f32{ -1, 0, 0 };
+    const pos_x = [3]f32{ 1, 0, 0 };
+    var out: [24 * 8]f32 = undefined;
+    var i: usize = 0;
+    // base
+    pushTri(out[0..], &i, a0, b1, b0, down, .{ 0, 0 }, .{ 1, 1 }, .{ 0, 1 });
+    pushTri(out[0..], &i, a0, a1, b1, down, .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 });
+    // -z slope
+    pushTri(out[0..], &i, a0, p1, a1, neg_z, .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 });
+    pushTri(out[0..], &i, a0, p0, p1, neg_z, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 1 });
+    // +z slope
+    pushTri(out[0..], &i, b0, b1, p1, pos_z, .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 });
+    pushTri(out[0..], &i, b0, p1, p0, pos_z, .{ 0, 0 }, .{ 1, 1 }, .{ 0, 1 });
+    // triangular end caps
+    pushTri(out[0..], &i, a0, b0, p0, neg_x, .{ 0, 0 }, .{ 1, 0 }, .{ 0.5, 1 });
+    pushTri(out[0..], &i, a1, p1, b1, pos_x, .{ 0, 0 }, .{ 0.5, 1 }, .{ 1, 0 });
+    return out;
+}
+
 fn spherePos(radius: f32, theta: f32, phi: f32) [3]f32 {
     const st = @sin(theta);
     return .{ radius * st * @cos(phi), radius * @cos(theta), radius * st * @sin(phi) };
@@ -632,6 +667,8 @@ const ShapeBatches = struct {
     cylinder16_count: u32,
     spheres: []f32,
     sphere_count: u32,
+    gables: []f32,
+    gable_count: u32,
 
     pub fn deinit(self: ShapeBatches, allocator: std.mem.Allocator) void {
         allocator.free(self.boxes);
@@ -639,6 +676,7 @@ const ShapeBatches = struct {
         allocator.free(self.cylinder8s);
         allocator.free(self.cylinder16s);
         allocator.free(self.spheres);
+        allocator.free(self.gables);
     }
 };
 
@@ -674,11 +712,14 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     errdefer cylinder16s.deinit(allocator);
     var spheres: std.ArrayList(f32) = .{};
     errdefer spheres.deinit(allocator);
+    var gables: std.ArrayList(f32) = .{};
+    errdefer gables.deinit(allocator);
     var box_count: u32 = 0;
     var ramp_count: u32 = 0;
     var cylinder8_count: u32 = 0;
     var cylinder16_count: u32 = 0;
     var sphere_count: u32 = 0;
+    var gable_count: u32 = 0;
     var row: usize = 0;
     while (row < @as(usize, @intCast(inst_count))) : (row += 1) {
         if (row < material_refs.len and material_refs[row] != 0) continue; // textured batch
@@ -697,6 +738,9 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         } else if (@abs(shape - SHAPE_SPHERE) < 0.5) {
             try spheres.appendSlice(allocator, src);
             sphere_count += 1;
+        } else if (@abs(shape - SHAPE_GABLE) < 0.5) {
+            try gables.appendSlice(allocator, src);
+            gable_count += 1;
         } else {
             try boxes.appendSlice(allocator, src);
             box_count += 1;
@@ -713,6 +757,8 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         .cylinder16_count = cylinder16_count,
         .spheres = try spheres.toOwnedSlice(allocator),
         .sphere_count = sphere_count,
+        .gables = try gables.toOwnedSlice(allocator),
+        .gable_count = gable_count,
     };
 }
 
@@ -1890,6 +1936,7 @@ pub const Runtime = struct {
     cylinder8: [8 * 12 * 8]f32 = undefined,
     cylinder16: [16 * 12 * 8]f32 = undefined,
     sphere: [12 * 8 * 6 * 8]f32 = undefined,
+    gable_prism: [24 * 8]f32 = undefined,
     shape_batches: ShapeBatches = undefined,
     has_shape_batches: bool = false,
     // Per-material textured batches (geometry built at construct; the shaders are
@@ -2239,6 +2286,7 @@ pub const Runtime = struct {
         self.cylinder8 = buildUnitCylinder(8);
         self.cylinder16 = buildUnitCylinder(16);
         self.sphere = buildUnitSphere(12, 8);
+        self.gable_prism = buildGablePrism();
         self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.material_refs);
         self.has_shape_batches = true;
         // The textured remainder: rows wearing a material, partitioned per slot.
@@ -2453,6 +2501,10 @@ pub const Runtime = struct {
                         geom_key = "sphere12x8";
                         verts = self.sphere[0..];
                         vert_count = 12 * 8 * 6;
+                    } else if (shape_id == SHAPE_GABLE) {
+                        geom_key = "gable-prism";
+                        verts = self.gable_prism[0..];
+                        vert_count = 24;
                     }
                     try self.kid_list.append(self.allocator, .{
                         .scene3d_mesh = true,
@@ -2604,6 +2656,16 @@ pub const Runtime = struct {
                 .scene3d_instance_stride = @intCast(self.stride),
                 .scene3d_instance_static = true,
             });
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.gable_count > 0,
+                .scene3d_geom_key = "gable-prism",
+                .scene3d_vertices = self.gable_prism[0..],
+                .scene3d_vert_count = 24,
+                .scene3d_instance_data = self.shape_batches.gables,
+                .scene3d_instance_count = self.shape_batches.gable_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
         }
 
         // Per material: a SHADER material draws as one TEXTURED instanced box batch
@@ -2645,6 +2707,10 @@ pub const Runtime = struct {
                     } else if (shape_id == SHAPE_RAMP) {
                         geom_key = "ramp-slab";
                         verts = self.ramp_slab[0..];
+                    } else if (shape_id == SHAPE_GABLE) {
+                        geom_key = "gable-prism";
+                        verts = self.gable_prism[0..];
+                        vert_count = 24;
                     }
                     try self.kid_list.append(self.allocator, .{
                         .scene3d_mesh = true,
@@ -2720,6 +2786,8 @@ pub const Runtime = struct {
         try self.stream_protos.append(self.allocator, .{ .geom_key = "cylinder16", .verts = self.cylinder16[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.spheres, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "sphere12x8", .verts = self.sphere[0..], .tex_key = null });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.gables, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "gable-prism", .verts = self.gable_prism[0..], .tex_key = null });
         for (self.material_batches) |batch| {
             if (batch.translucent or batch.textured_translucent or batch.count == 0) continue;
             try fams.append(self.allocator, .{ .rows = batch.boxes, .stride = @intCast(self.stride) });

@@ -94,7 +94,13 @@ export type VisualRamp = {
 
 export type VisualShape =
   | { kind: 'box'; box: VisualBox }
-  | { kind: 'ramp'; ramp: VisualRamp };
+  | { kind: 'ramp'; ramp: VisualRamp }
+  // req_0930: a GABLE END — a solid isoceles-triangle wall extruded thin across
+  // the roof width. Carries the same VisualBox instance fields as a box (the
+  // unit prism is centered like the unit cube); only the keyed geometry differs
+  // (pieceMeshes' GablePrismGeometry / world_loader's buildGablePrism). sx = the
+  // thin width-thickness, sy = the ridge rise, sz = the eave-to-eave depth.
+  | { kind: 'gable'; box: VisualBox };
 
 /** local (u along width, v along depth) → world offset, R(+yaw) — the same
  *  frame the colliders/raycast/stamp rotate with. */
@@ -383,22 +389,29 @@ export function pieceVisualShapes(
     };
     if ((shape === 'shed' || shape === 'gable') && rise > 0.01) {
       if (shape === 'shed') return [rampAt('slope', 0, 0, W, D, rise, yaw, front)];
-      // gable: two slopes rising to a center ridge along the width, plus a
-      // stepped triangular infill closing each gable end (boxes stay
-      // parity-clean; the true-triangle end rides the Phase 2 panel).
+      // gable: two slopes rising to a center ridge along the width, plus a SOLID
+      // triangular wall closing each gable end (req_0930). The end is the
+      // 'gable' prim — a real isoceles triangle (base = depth, apex = rise),
+      // extruded thin across the width — so there are no see-through notches
+      // the old stepped-box fill left. One prim per end, at u = ±W/2.
       const shapes: VisualShape[] = [
         rampAt('slopeA', 0, -D / 4, W, D / 2, rise, yaw, front),
         rampAt('slopeB', 0, D / 4, W, D / 2, rise, yaw + 180, back),
       ];
-      const STEPS = 5;
-      const endW = 0.14;
+      const endThickness = thick; // matches the slab edge so the wall reads flush
       for (const eu of [-1, 1] as const) {
-        for (let i = 0; i < STEPS; i += 1) {
-          const dep = D * (1 - (i + 1) / STEPS); // triangle depth at the step top
-          if (dep <= 0.05) continue;
-          const h = rise / STEPS;
-          shapes.push(box(`gableEnd${eu === -1 ? 'L' : 'R'}${i}`, eu * (W / 2 - endW / 2), 0, piece.y + i * h, endW, h, dep, sides));
-        }
+        const { dx, dz } = localOffset(eu * (W / 2 - endThickness / 2), 0, yaw);
+        shapes.push({
+          kind: 'gable',
+          box: {
+            key: `${key}.gableEnd${eu === -1 ? 'L' : 'R'}`,
+            cx: piece.x + dx, cy: piece.y + rise / 2, cz: piece.z + dz,
+            sx: endThickness, sy: rise, sz: D,
+            yawDegrees: yaw,
+            color: sides.color, textureKey: sides.textureKey, opacity: look.opacity,
+            slot: sides.slot,
+          },
+        });
       }
       return shapes;
     }
