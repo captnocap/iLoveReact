@@ -394,9 +394,12 @@ export function pieceVisualShapes(
       // 'gable' prim — a real isoceles triangle (base = depth, apex = rise),
       // extruded thin across the width — so there are no see-through notches
       // the old stepped-box fill left. One prim per end, at u = ±W/2.
+      // SKINNING (req_0939): BOTH slopes wear the `front` (top) slot so painting
+      // the roof's "top" skins the whole roof surface as one; the gable-end
+      // walls wear `sides` (edges) so they're a distinct paintable face.
       const shapes: VisualShape[] = [
         rampAt('slopeA', 0, -D / 4, W, D / 2, rise, yaw, front),
-        rampAt('slopeB', 0, D / 4, W, D / 2, rise, yaw + 180, back),
+        rampAt('slopeB', 0, D / 4, W, D / 2, rise, yaw + 180, front),
       ];
       const endThickness = thick; // matches the slab edge so the wall reads flush
       for (const eu of [-1, 1] as const) {
