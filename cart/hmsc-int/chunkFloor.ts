@@ -177,59 +177,16 @@ export function floorsToLandforms(floors: ChunkFloor[]): Landform[] {
 // Dry cells drop to `base` (just under the deepest basin floor) so the heightfield
 // skirt fills the whole basin and dry cells hide under the terrain. One body per
 // wet chunk; depth is derived against the bed at lookup.
-// How far (in height-samples ≈ metres) to extend the flat water surface PAST the
-// wet/dry boundary, tucked under the surrounding terrain wall. Without this the
-// surface ramped straight down to `base` at the first dry cell while the basin
-// wall rose UP — leaving a wedge of open air between the water's edge and the
-// wall. Extending the flat surface a couple cells into the dry ring puts that
-// downward skirt UNDER the (higher, opaque) terrain so the waterline meets the
-// wall cleanly. 2 cells is enough to hide the skirt without leaking through a
-// thin wall to the far side.
-const WATER_SURFACE_DILATE = 2;
-
 export function floorToWaterBody(f: ChunkFloor): WaterBody {
   const cell = CHUNK_TILES / (f.hcols - 1);
   const water = f.water ?? [];
   const beds = f.heights;
-  const cols = f.hcols, rows = f.hrows;
-  // Water is FLAT: one fill level for the whole body. The brush digs the bed to
-  // -depth, so a wet cell's flush surface = bed + depth; take the highest of those
-  // as the single surface level (all equal for a uniform-depth pool or a ramped
-  // ocean, since bed = -depth there too). Basin floor = deepest wet bed minus a
-  // tuck so the skirt closes under it.
-  let surfaceY = -Infinity;
+  // Basin floor: the deepest bed under any wet cell, minus a tuck so the skirt
+  // closes cleanly under it (and dry cells sit here, below the terrain → hidden).
   let deepest = 0;
-  for (let i = 0; i < water.length; i++) {
-    if (water[i]! > 0) {
-      const surf = (beds[i] ?? 0) + water[i]!;
-      if (surf > surfaceY) surfaceY = surf;
-      deepest = Math.min(deepest, beds[i] ?? 0);
-    }
-  }
-  if (!Number.isFinite(surfaceY)) surfaceY = 0;
+  for (let i = 0; i < water.length; i++) if (water[i]! > 0) deepest = Math.min(deepest, beds[i] ?? 0);
   const base = deepest - WATER_LOOK.floorTuckMeters;
-  // Build the surface grid: flat surfaceY over the wet region AND a dilated ring
-  // of dry cells around it (so the surface tucks under the wall, killing the air
-  // wedge); everything else drops to `base` (the perimeter skirt / hidden floor).
-  const heights = new Array<number>(water.length).fill(base);
-  const d = WATER_SURFACE_DILATE;
-  for (let j = 0; j < rows; j++) {
-    for (let i = 0; i < cols; i++) {
-      const idx = j * cols + i;
-      if ((water[idx] ?? 0) > 0) { heights[idx] = surfaceY; continue; }
-      let nearWet = false;
-      for (let dj = -d; dj <= d && !nearWet; dj++) {
-        const nj = j + dj;
-        if (nj < 0 || nj >= rows) continue;
-        for (let di = -d; di <= d; di++) {
-          const ni = i + di;
-          if (ni < 0 || ni >= cols) continue;
-          if ((water[nj * cols + ni] ?? 0) > 0) { nearWet = true; break; }
-        }
-      }
-      if (nearWet) heights[idx] = surfaceY;
-    }
-  }
+  const heights = water.map((d, i) => (d > 0 ? (beds[i] ?? 0) + d : base));
   const span = (f.hcols - 1) * cell; // = CHUNK_TILES
   const centerX = f.cx * CHUNK_TILES + CHUNK_TILES / 2;
   const centerZ = f.cz * CHUNK_TILES + CHUNK_TILES / 2;

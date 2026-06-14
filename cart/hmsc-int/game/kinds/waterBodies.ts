@@ -35,7 +35,7 @@ export function waterBodyVolume(surfaceY: number): { height: number; centerY: nu
 
 // A gentle travelling surface wave (the ripple the editor render animates). Pure
 // numbers — amplitude in metres, length in metres, speed in wave-cycles/second.
-export const WATER_WAVE = { amplitude: 0.25, length: 4, speed: 0.32, dirX: 1, dirZ: 0.55 } as const;
+export const WATER_WAVE = { amplitude: 0.1, length: 5, speed: 0.22, dirX: 1, dirZ: 0.55 } as const;
 
 const TAU = Math.PI * 2;
 
