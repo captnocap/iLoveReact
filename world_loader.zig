@@ -1922,6 +1922,13 @@ pub const Runtime = struct {
     doors_state: []DoorState = &.{},
     /// First kid index of the door panel nodes (one box per door).
     door_first_child: usize = 0,
+    /// Live LED tickers (req_0893 #3): one MUTABLE instances node per ticker,
+    /// whose lit-LED instance data we rebuild each frame as the scroll offset
+    /// advances (the elevator-car live-node pattern, instanced). Buffers are
+    /// owned, sized for the max lit dots ((windowCols+1)*rows).
+    ticker_first_child: usize = 0,
+    ticker_buffers: [][]f32 = &.{},
+    ticker_seconds: f32 = 0,
     last_ns: i64 = 0,
     frame: u32 = 0,
     // Content streaming (engaged when the world outgrows the detail radius):
@@ -2048,6 +2055,8 @@ pub const Runtime = struct {
         if (self.interact.searched.len > 0) self.allocator.free(self.interact.searched);
         if (self.bodies.len > 0) self.allocator.free(self.bodies);
         if (self.cars.len > 0) self.allocator.free(self.cars);
+        for (self.ticker_buffers) |buf| self.allocator.free(buf);
+        if (self.ticker_buffers.len > 0) self.allocator.free(self.ticker_buffers);
         self.scene.deinit(self.allocator);
         self.* = undefined;
     }
@@ -2509,6 +2518,31 @@ pub const Runtime = struct {
                     .scene3d_color_r = DOOR_PANEL_COLOR[0],
                     .scene3d_color_g = DOOR_PANEL_COLOR[1],
                     .scene3d_color_b = DOOR_PANEL_COLOR[2],
+                });
+            }
+        }
+        // LED ticker boards (req_0893 #3) render as LIVE instanced nodes — one
+        // bucket per ticker, its lit-LED instance data rebuilt every frame by
+        // stepTickers as the message scrolls. The dark HOUSING rode the static
+        // prop bake; only the moving LEDs are here. Placed in the stable node
+        // prefix (before the static/stream tail) so streaming never clobbers them.
+        self.ticker_first_child = self.kid_list.items.len;
+        if (self.scene.tickers) |tk| {
+            self.ticker_buffers = try self.allocator.alloc([]f32, tk.boards.len);
+            for (tk.boards, 0..) |board, i| {
+                const max_dots = (@as(usize, board.window_cols) + 1) * @as(usize, board.rows);
+                const buf = try self.allocator.alloc(f32, max_dots * INSTANCE_STRIDE);
+                @memset(buf, 0);
+                self.ticker_buffers[i] = buf;
+                try self.kid_list.append(self.allocator, .{
+                    .scene3d_mesh = true,
+                    .scene3d_geom_key = "box",
+                    .scene3d_vertices = self.cube[0..],
+                    .scene3d_vert_count = 36,
+                    .scene3d_instance_data = buf,
+                    .scene3d_instance_count = 0,
+                    .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
+                    .scene3d_instance_static = false,
                 });
             }
         }
@@ -2995,6 +3029,7 @@ pub const Runtime = struct {
         updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, self.cameraColliderSet(), dt);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
         self.updateDynamicPropNodes();
+        self.stepTickers(dt);
         // Re-stream the world around wherever the player ended up this step
         // (uses the camera solved just above for sight culling).
         self.refreshStreamNodes();
@@ -3032,6 +3067,61 @@ pub const Runtime = struct {
                 node.scene3d_rot_z = row[5];
                 kid += 1;
             }
+        }
+    }
+
+    /// req_0893 #3 — scroll every LED ticker and rebuild its lit-LED instance
+    /// bucket in place. Mirrors cart/hmsc-int/compile/propRecipes/ledTicker.ts
+    /// ledLitDots: the integer part of the offset selects the source column
+    /// (wrapped), the fraction slides the window; lit cells become dot-box
+    /// instances at the prop's anchor + yaw. Visual only (no physics), so it runs
+    /// even under spatial windowing.
+    fn stepTickers(self: *Runtime, dt: f32) void {
+        const tk = self.scene.tickers orelse return;
+        if (tk.boards.len == 0) return;
+        self.ticker_seconds += dt;
+        for (tk.boards, 0..) |board, ti| {
+            const buf = self.ticker_buffers[ti];
+            const n_cols = board.columns.len;
+            var count: u32 = 0;
+            if (n_cols > 0) {
+                const offset = self.ticker_seconds * board.scroll_cols_per_sec;
+                const base: i64 = @intFromFloat(@floor(offset));
+                const frac = offset - @floor(offset);
+                const half_w = -board.face_left; // face_left is negative
+                const max_dots: u32 = @intCast(buf.len / INSTANCE_STRIDE);
+                const m: i64 = @intCast(n_cols);
+                var vc: u32 = 0;
+                while (vc <= board.window_cols) : (vc += 1) {
+                    const src: usize = @intCast(@mod(base + @as(i64, @intCast(vc)), m));
+                    const mask = board.columns[src];
+                    if (mask == 0) continue;
+                    const cell_x = board.face_left + (@as(f32, @floatFromInt(vc)) - frac + 0.5) * board.cell;
+                    if (cell_x < board.face_left - board.cell * 0.5 or cell_x > half_w + board.cell * 0.5) continue;
+                    var r: u32 = 0;
+                    while (r < board.rows) : (r += 1) {
+                        if ((mask & (@as(u8, 1) << @as(u3, @intCast(r)))) == 0) continue;
+                        if (count >= max_dots) break;
+                        const ly = board.face_top - (@as(f32, @floatFromInt(r)) + 0.5) * board.cell;
+                        const local = rotateYLocal(.{ cell_x, ly, board.face_z }, board.yaw_degrees);
+                        const o = @as(usize, count) * INSTANCE_STRIDE;
+                        buf[o + 0] = board.x + local.x;
+                        buf[o + 1] = board.y + local.y;
+                        buf[o + 2] = board.z + local.z;
+                        buf[o + 3] = 0;
+                        buf[o + 4] = board.yaw_degrees;
+                        buf[o + 5] = 0;
+                        buf[o + 6] = board.dot_size;
+                        buf[o + 7] = board.dot_size;
+                        buf[o + 8] = board.dot_size;
+                        buf[o + 9] = board.color[0];
+                        buf[o + 10] = board.color[1];
+                        buf[o + 11] = board.color[2];
+                        count += 1;
+                    }
+                }
+            }
+            self.kid_list.items[self.ticker_first_child + ti].scene3d_instance_count = count;
         }
     }
 

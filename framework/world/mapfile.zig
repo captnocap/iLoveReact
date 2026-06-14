@@ -75,6 +75,11 @@ pub const LumpType = struct {
     /// layout u32 version | f32[43]; see runtime/workspace/lumps.ts STATS_CONFIG
     /// + compile/playerStats.ts encodeStatsConfig.
     pub const stats_config: u32 = 22;
+    /// LED ticker boards (req_0893 #3): per ticker — anchor + yaw + board dims +
+    /// lit color + scroll speed + the message column bitmasks. world_loader.zig
+    /// scrolls + draws the lit LEDs per frame. Layout: runtime/workspace/lumps.ts
+    /// TICKER + compile/worldTicker.ts encodeTickers.
+    pub const ticker: u32 = 23;
 };
 
 pub const Lump = struct {

@@ -27,6 +27,7 @@ pub const Error = gamefile.Error || error{
     BadMeshProps,
     BadWater,
     BadStatsConfig,
+    BadTicker,
 };
 
 const COLLIDERS_VERSION: u32 = 1;
@@ -40,6 +41,10 @@ const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
 const MESH_PROPS_VERSION: u32 = 2;
 const WATER_VERSION: u32 = 1;
+const TICKER_VERSION: u32 = 1;
+/// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
+/// corrupt lump can't allocate wild. (req_0893 #3)
+const MAX_TICKER_COLS: u32 = 1024;
 /// One local render part: px,py,pz, rx,ry,rz, sx,sy,sz, r,g,b, shapeId —
 /// the INSTANCES row field order, anchor-relative and yaw-unfolded.
 pub const DYNAMIC_PART_FLOATS: usize = 13;
@@ -529,6 +534,41 @@ pub const Doors = struct {
     }
 };
 
+/// One LED ticker board (req_0893 #3) — wire-format twin of
+/// compile/worldTicker.ts TickerRecord. The loader scrolls `columns` past the
+/// `window_cols`-wide face and draws the lit LEDs as instanced boxes per frame.
+pub const Ticker = struct {
+    x: f32,
+    y: f32,
+    z: f32,
+    yaw_degrees: f32,
+    cell: f32,
+    dot_size: f32,
+    face_left: f32,
+    face_top: f32,
+    face_width: f32,
+    face_z: f32,
+    color: [3]f32,
+    scroll_cols_per_sec: f32,
+    window_cols: u32,
+    rows: u32,
+    /// per-column lit-row bitmasks (bit r = row r lit, r=0 top)
+    columns: []u8,
+
+    pub fn deinit(self: Ticker, allocator: std.mem.Allocator) void {
+        allocator.free(self.columns);
+    }
+};
+
+pub const Tickers = struct {
+    boards: []Ticker,
+
+    pub fn deinit(self: Tickers, allocator: std.mem.Allocator) void {
+        for (self.boards) |board| board.deinit(allocator);
+        allocator.free(self.boards);
+    }
+};
+
 pub const Scene = struct {
     width: u32,
     height: u32,
@@ -590,6 +630,9 @@ pub const Scene = struct {
     /// Bodies of water (world/water) — translucent wavy heightfields. null in
     /// pre-lump bakes / the codec fixture (no water).
     water: ?WaterBodies,
+    /// LED ticker boards (req_0893 #3) — the loader scrolls + draws the lit LEDs
+    /// per frame. null in pre-lump bakes / maps with no tickers.
+    tickers: ?Tickers,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
@@ -611,6 +654,7 @@ pub const Scene = struct {
         if (self.doors) |d| d.deinit(allocator);
         if (self.mesh_props) |mp| mp.deinit(allocator);
         if (self.water) |w| w.deinit(allocator);
+        if (self.tickers) |t| t.deinit(allocator);
     }
 };
 
@@ -1310,6 +1354,71 @@ fn decodeElevators(allocator: std.mem.Allocator, data: []const u8) Error!Elevato
     return .{ .shafts = try shafts.toOwnedSlice(allocator) };
 }
 
+/// Decode the TICKER lump (req_0893 #3) — wire-format twin of
+/// compile/worldTicker.ts encodeTickers.
+fn decodeTickers(allocator: std.mem.Allocator, data: []const u8) Error!Tickers {
+    if (data.len < 8) return Error.BadTicker;
+    if (std.mem.readInt(u32, data[0..4], .little) != TICKER_VERSION) return Error.BadTicker;
+    const count = std.mem.readInt(u32, data[4..8], .little);
+    var at: usize = 8;
+
+    var boards = try std.ArrayList(Ticker).initCapacity(allocator, count);
+    errdefer {
+        for (boards.items) |b| b.deinit(allocator);
+        boards.deinit(allocator);
+    }
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        // 14 f32 (x,y,z,yaw, cell,dotSize,faceLeft,faceTop,faceWidth,faceZ, r,g,b, speed)
+        // + 3 u32 (windowCols, rows, colCount)
+        if (at + 14 * 4 + 3 * 4 > data.len) return Error.BadTicker;
+        const x = readF32(data, at);
+        const y = readF32(data, at + 4);
+        const z = readF32(data, at + 8);
+        const yaw = readF32(data, at + 12);
+        const cell = readF32(data, at + 16);
+        const dot_size = readF32(data, at + 20);
+        const face_left = readF32(data, at + 24);
+        const face_top = readF32(data, at + 28);
+        const face_width = readF32(data, at + 32);
+        const face_z = readF32(data, at + 36);
+        const cr = readF32(data, at + 40);
+        const cg = readF32(data, at + 44);
+        const cb = readF32(data, at + 48);
+        const speed = readF32(data, at + 52);
+        at += 56;
+        const window_cols = std.mem.readInt(u32, data[at..][0..4], .little);
+        const rows = std.mem.readInt(u32, data[at + 4 ..][0..4], .little);
+        const col_count = std.mem.readInt(u32, data[at + 8 ..][0..4], .little);
+        at += 12;
+        if (col_count > MAX_TICKER_COLS) return Error.BadTicker;
+        if (at + @as(usize, col_count) > data.len) return Error.BadTicker;
+        const columns = try allocator.alloc(u8, col_count);
+        errdefer allocator.free(columns);
+        for (columns, 0..) |*v, k| v.* = data[at + k];
+        at += @as(usize, col_count);
+        try boards.append(allocator, .{
+            .x = x,
+            .y = y,
+            .z = z,
+            .yaw_degrees = yaw,
+            .cell = cell,
+            .dot_size = dot_size,
+            .face_left = face_left,
+            .face_top = face_top,
+            .face_width = face_width,
+            .face_z = face_z,
+            .color = .{ cr, cg, cb },
+            .scroll_cols_per_sec = speed,
+            .window_cols = window_cols,
+            .rows = rows,
+            .columns = columns,
+        });
+    }
+
+    return .{ .boards = try boards.toOwnedSlice(allocator) };
+}
+
 /// Decode the DOORS lump (DOORS-0611) — wire-format twin of
 /// compile/worldDoors.ts encodeDoors.
 fn decodeDoors(allocator: std.mem.Allocator, data: []const u8) Error!Doors {
@@ -1580,6 +1689,13 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     else
         null;
     errdefer if (water) |w| w.deinit(allocator);
+    // LED ticker boards (req_0893 #3) — optional like the other post-v1 lumps;
+    // absent means no tickers (the housings, if any, stay static prop geometry).
+    const tickers: ?Tickers = if (mapfile.findLump(map_lumps, mapfile.LumpType.ticker)) |lump|
+        try decodeTickers(allocator, lump.data)
+    else
+        null;
+    errdefer if (tickers) |t| t.deinit(allocator);
 
     // Decal image payloads (DECALIMG-0610, req_0592): every manifest asset
     // tagged decal-image is read from the content store once, here — the
@@ -1625,5 +1741,6 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .doors = doors,
         .mesh_props = mesh_props,
         .water = water,
+        .tickers = tickers,
     };
 }

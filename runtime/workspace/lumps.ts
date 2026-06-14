@@ -123,6 +123,11 @@ export const MAP_LUMP = {
   // cart/hmsc-int/compile/playerStats.ts encodeStatsConfig. Absent → loader
   // keeps its built-in stat defaults.
   STATS_CONFIG: 22,
+  // LED ticker boards (req_0893 #3): per ticker — anchor + yaw + board dims +
+  // lit color + scroll speed + the message's column bitmasks. world_loader.zig
+  // scrolls + draws the lit LEDs per frame (the elevator-car pattern). Layout in
+  // cart/hmsc-int/compile/worldTicker.ts encodeTickers. Absent → no tickers.
+  TICKER: 23,
 } as const;
 
 export type LumpInput = {

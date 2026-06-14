@@ -27,6 +27,7 @@ import { encodeInteractables } from './compile/worldInteractables';
 import { encodeDynamicProps } from './compile/worldDynamicProps';
 import { elevatorShaftRecords, encodeElevators } from './compile/worldElevators';
 import { doorRecords, encodeDoors } from './compile/worldDoors';
+import { tickerRecords, encodeTickers } from './compile/worldTicker';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './compile/playerModel';
 import type { ChunkFloor } from './chunkFloor';
@@ -300,6 +301,9 @@ export function createHmscMapfile(
     // Door panels (DOORS-0611) — the loader appends one LIVE toggleable rect +
     // panel node per door: E opens/closes, /test parity (compile/worldDoors.ts).
     { type: MAP_LUMP.DOORS, encoding: 'raw', data: encodeDoors(doorRecords(liftedPieces)) },
+    // LED ticker boards (req_0893 #3) — the loader scrolls the message + draws
+    // the lit LEDs per frame, the elevator-car pattern (compile/worldTicker.ts).
+    { type: MAP_LUMP.TICKER, encoding: 'raw', data: encodeTickers(tickerRecords(liftedPieces)) },
     // Imported OBJ/GLB props — arbitrary baked vertex buffers as static prop
     // assets, referenced by transform rows so repeated desks share one mesh.
     { type: MAP_LUMP.MESH_PROPS, encoding: 'raw', data: encodeMeshProps(geometry.meshProps) },
