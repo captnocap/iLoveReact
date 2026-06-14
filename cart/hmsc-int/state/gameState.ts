@@ -13,6 +13,7 @@ import {
   WorldSurfaceRegion,
 } from '../design';
 import { surfaceRegionTopMeters } from '../world/surfaceHeights';
+import { GAME_STATS } from '../game/stats';
 import {
   DEFAULT_GAME_CONFIG,
   DEFAULT_ENTITY_RADIUS_METERS,
@@ -444,6 +445,7 @@ export function createInitialGameState(): GameState {
       money: DEFAULT_PLAYER_MONEY,
       perception: { high: 0 },
       inventory: [],
+      stats: GAME_STATS.defaultPlayerStats(),
     },
     world: createInitialWorld(),
     suspendedSpaces: [],
@@ -521,6 +523,11 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
             ...initial.player.physics.velocity,
             ...(storedWorldMatchesCurrentLayout ? (parsed.player?.physics?.velocity ?? {}) : {}),
           },
+        },
+        // Old saves (pre-stats) get the default stat set; saved stats load whole.
+        stats: {
+          ...initial.player.stats,
+          ...(parsed.player?.stats ?? {}),
         },
       },
       world: {

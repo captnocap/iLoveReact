@@ -22,6 +22,7 @@ import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
 import { buildWorldInstances, encodeFloorHeightfields, encodeInstanceLump, encodeMaterialRefs, encodeMaterials, encodeMeshProps, encodeWaterBodies } from './compile/worldGeometry';
 import type { DecalAssetSink } from './compile/decalAssets';
 import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, paintedFloorTopAt, type BakedPhysicsConfig } from './compile/worldColliders';
+import { encodeStatsConfigLump } from './compile/playerStats';
 import { encodeInteractables } from './compile/worldInteractables';
 import { encodeDynamicProps } from './compile/worldDynamicProps';
 import { elevatorShaftRecords, encodeElevators } from './compile/worldElevators';
@@ -305,6 +306,10 @@ export function createHmscMapfile(
     // Bodies of water (world/water) — the loader renders each as a translucent
     // heightfield with a host-clock travelling wave (animated ripples).
     { type: MAP_LUMP.WATER, encoding: 'raw', data: encodeWaterBodies(state.world.waterBodies) },
+    // Player-stats config (GAME_STATS) — the flat stat tuning the loader seeds
+    // the compiled player's stats from (compile/playerStats.ts). The config
+    // carries end to end; the engine stays dumb.
+    { type: MAP_LUMP.STATS_CONFIG, encoding: 'raw', data: encodeStatsConfigLump() },
   ];
   if (playerModel) {
     // The compiled player figure from @game/figure. Runtime movement changes

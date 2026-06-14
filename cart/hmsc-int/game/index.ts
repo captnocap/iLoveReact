@@ -156,3 +156,7 @@ export { GAME_MISSIONS } from './missions';
 export { GAME_ACTIVITIES } from './activities';
 export { GAME_CHROME } from './chrome';
 export { GAME_TELEMETRY } from './telemetry';
+export { GAME_STATS, STATS_TUNING } from './stats';
+export type {
+  PlayerStats, Wallet, AssetRef, OutfitLoadout, SkillId, SkillState, EnergyActivity, PantsId, BackpackId,
+} from './stats';

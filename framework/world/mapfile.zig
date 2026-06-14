@@ -70,6 +70,11 @@ pub const LumpType = struct {
     /// travelling wave. See runtime/workspace/lumps.ts WATER +
     /// compile/worldGeometry.ts encodeWaterBodies.
     pub const water: u32 = 21;
+    /// Player-stats config (GAME_STATS): the flat stat tuning the formulas read,
+    /// baked so the no-V8 loader seeds the same numbers as the editor. Fixed
+    /// layout u32 version | f32[43]; see runtime/workspace/lumps.ts STATS_CONFIG
+    /// + compile/playerStats.ts encodeStatsConfig.
+    pub const stats_config: u32 = 22;
 };
 
 pub const Lump = struct {

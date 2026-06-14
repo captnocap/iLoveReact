@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { Box, Effect, Text } from '@reactjit/primitives';
+import { GAME_STATS } from '@game';
 import type { GameState, GridCell } from '../design';
 import { tileKindAtCell } from '../world/grid';
 import { worldMarkers } from '../world/worldView';
@@ -16,6 +17,7 @@ const HUD = {
   money: '#5fe08c',
   health: '#ff5ea0',
   armor: '#8a6cff',
+  energy: '#5fe0c8',
   ledShadow: '#070310',
   star: '#18e0d8',
   starDim: '#3a2540',
@@ -294,10 +296,11 @@ function ZoneNameFlash() {
 export function Hud(props: { state: GameState }) {
   const clock = ledClockFromSkyHour(props.state.config.sky.hour);
   const player = props.state.player;
-  const money = String(Math.max(0, Math.round(player.money))).padStart(8, '0');
-  const armor = Math.max(0, Math.round((player as any).armor ?? 0));
+  const money = String(Math.max(0, Math.round(GAME_STATS.moneyTotal(player.stats.wallet)))).padStart(8, '0');
+  const armor = Math.max(0, Math.round(player.stats.armor));
   const health = Math.max(0, Math.round(player.health));
-  const wanted = Math.min(6, Math.round((Math.max(0, player.heat) / 100) * 6));
+  const energy = Math.max(0, Math.round(player.stats.energy));
+  const wanted = GAME_STATS.wantedFromNotoriety(Math.max(0, player.heat));
   const itemLabel = player.inventory[0]?.toUpperCase() ?? 'FISTS';
 
   return (
@@ -310,6 +313,7 @@ export function Hud(props: { state: GameState }) {
             <MeterStat label="AR" value={armor} color={HUD.armor} />
             <MeterStat label="HP" value={health} color={HUD.health} />
           </Box>
+          <MeterStat label="EN" value={energy} color={HUD.energy} />
           <WantedStars lit={wanted} />
         </Box>
         <ItemBox itemLabel={itemLabel} />

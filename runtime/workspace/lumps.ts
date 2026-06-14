@@ -113,6 +113,16 @@ export const MAP_LUMP = {
   // look + wave; the per-body grid + skirt make a wadeable volume. Absent → no
   // water. Layout: cart/hmsc-int/compile/worldGeometry.ts encodeWaterBodies.
   WATER: 21,
+  // Player-stats config (GAME_STATS): the flat, declarative tuning the stat
+  // formulas read — vitals maxes/starts, energy drain/regen, the wanted decay +
+  // 6 star thresholds, the carry-capacity FACTOR tables (pocket-by-pants,
+  // pack-by-backpack), the xp curve, the per-skill effect coefficients and the
+  // event→xp rates. Baked so the no-V8 loader seeds the SAME numbers as the
+  // editor instead of re-declaring constants (GUIDING_LIGHT: store the config,
+  // the engine stays dumb). Fixed layout: u32 version | f32[43]; field order in
+  // cart/hmsc-int/compile/playerStats.ts encodeStatsConfig. Absent → loader
+  // keeps its built-in stat defaults.
+  STATS_CONFIG: 22,
 } as const;
 
 export type LumpInput = {

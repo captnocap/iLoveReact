@@ -1972,6 +1972,11 @@ pub const Runtime = struct {
         };
         errdefer self.deinit();
         log.print("[loader] constructed map {d}x{d} from {s} (no JS)\n", .{ self.scene.width, self.scene.height, path });
+        if (self.scene.stats_config) |sc| {
+            log.print("[loader] player stats config: hp_max={d:.0} armor={d:.0}/{d:.0} energy={d:.0}/{d:.0} wanted_decay={d:.2} skill_max_lvl={d:.0} (carries end to end)\n", .{ sc.health_max, sc.armor_start, sc.armor_max, sc.energy_start, sc.energy_max, sc.wanted_decay, sc.max_level });
+        } else {
+            log.print("[loader] no stats config lump — player stats use built-in defaults\n", .{});
+        }
         try self.build();
     }
 

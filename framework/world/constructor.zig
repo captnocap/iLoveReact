@@ -26,11 +26,14 @@ pub const Error = gamefile.Error || error{
     BadDoors,
     BadMeshProps,
     BadWater,
+    BadStatsConfig,
 };
 
 const COLLIDERS_VERSION: u32 = 1;
 const PHYSICS_CONFIG_VERSION: u32 = 1;
 const PHYSICS_CONFIG_FLOATS: usize = 13;
+const STATS_CONFIG_VERSION: u32 = 1;
+const STATS_CONFIG_FLOATS: usize = 43;
 const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
@@ -372,6 +375,42 @@ pub const PhysicsConfig = struct {
     run_speed: f32,
 };
 
+/// Player-stats config from the STATS_CONFIG lump (GAME_STATS) — the flat stat
+/// tuning the loader seeds the compiled player's stats from, the same numbers
+/// the editor uses. Field order mirrors compile/playerStats.ts statsConfigFloats.
+/// null in pre-lump bakes → the loader keeps its built-in stat defaults.
+pub const StatsConfig = struct {
+    health_max: f32,
+    armor_max: f32,
+    armor_start: f32,
+    energy_max: f32,
+    energy_start: f32,
+    energy_drain_walk: f32,
+    energy_drain_run: f32,
+    energy_drain_jump: f32,
+    energy_regen: f32,
+    energy_sprint_floor: f32,
+    wanted_decay: f32,
+    star_thresholds: [6]f32,
+    hands_slots: f32,
+    pocket_by_pants: [7]f32,
+    pack_by_backpack: [4]f32,
+    xp_base: f32,
+    xp_curve: f32,
+    max_level: f32,
+    stamina_drain_reduction: f32,
+    stamina_run_bonus: f32,
+    vehicle_handling_bonus: f32,
+    aim_sway_reduction: f32,
+    aim_recovery_bonus: f32,
+    stealth_gain_reduction: f32,
+    stealth_decay_bonus: f32,
+    xp_stamina_per_step: f32,
+    xp_vehicle_per_meter: f32,
+    xp_aim_per_shot: f32,
+    xp_stealth_per_sec_unseen: f32,
+};
+
 /// One interaction archetype — the seat/container definition a prop KIND
 /// carries, stored once and referenced by every instance (the lump's factored
 /// shape). Writer twin: compile/worldInteractables.ts encodeInteractables.
@@ -525,6 +564,9 @@ pub const Scene = struct {
     /// Player tuning + walk/run speed from the PHYSICS_CONFIG lump. null → the
     /// loader keeps its built-in defaults (pre-lump bakes).
     physics_config: ?PhysicsConfig,
+    /// Player-stats config from the STATS_CONFIG lump (GAME_STATS) — vitals,
+    /// energy, wanted, carry factors, skills. null → built-in stat defaults.
+    stats_config: ?StatsConfig,
     /// Decal image payloads (manifest kind 11, DECALIMG-0610), read from the
     /// content store at construct — the packed decal docs reference them by
     /// key. Empty when no decal ships an image.
@@ -1050,6 +1092,54 @@ fn decodePhysicsConfig(data: []const u8) Error!PhysicsConfig {
     };
 }
 
+/// Decode the STATS_CONFIG lump (u32 version | f32[43]); see
+/// runtime/workspace/lumps.ts STATS_CONFIG + compile/playerStats.ts for the
+/// field order. The fixed-count factor runs (thresholds[6], pants[7], pack[4])
+/// keep the whole lump fixed-layout.
+fn decodeStatsConfig(data: []const u8) Error!StatsConfig {
+    if (data.len < 4 + STATS_CONFIG_FLOATS * 4) return Error.BadStatsConfig;
+    if (std.mem.readInt(u32, data[0..4], .little) != STATS_CONFIG_VERSION) return Error.BadStatsConfig;
+    const f = struct {
+        fn at(d: []const u8, i: usize) f32 {
+            return readF32(d, 4 + i * 4);
+        }
+    }.at;
+    var cfg: StatsConfig = undefined;
+    cfg.health_max = f(data, 0);
+    cfg.armor_max = f(data, 1);
+    cfg.armor_start = f(data, 2);
+    cfg.energy_max = f(data, 3);
+    cfg.energy_start = f(data, 4);
+    cfg.energy_drain_walk = f(data, 5);
+    cfg.energy_drain_run = f(data, 6);
+    cfg.energy_drain_jump = f(data, 7);
+    cfg.energy_regen = f(data, 8);
+    cfg.energy_sprint_floor = f(data, 9);
+    cfg.wanted_decay = f(data, 10);
+    var i: usize = 0;
+    while (i < 6) : (i += 1) cfg.star_thresholds[i] = f(data, 11 + i);
+    cfg.hands_slots = f(data, 17);
+    i = 0;
+    while (i < 7) : (i += 1) cfg.pocket_by_pants[i] = f(data, 18 + i);
+    i = 0;
+    while (i < 4) : (i += 1) cfg.pack_by_backpack[i] = f(data, 25 + i);
+    cfg.xp_base = f(data, 29);
+    cfg.xp_curve = f(data, 30);
+    cfg.max_level = f(data, 31);
+    cfg.stamina_drain_reduction = f(data, 32);
+    cfg.stamina_run_bonus = f(data, 33);
+    cfg.vehicle_handling_bonus = f(data, 34);
+    cfg.aim_sway_reduction = f(data, 35);
+    cfg.aim_recovery_bonus = f(data, 36);
+    cfg.stealth_gain_reduction = f(data, 37);
+    cfg.stealth_decay_bonus = f(data, 38);
+    cfg.xp_stamina_per_step = f(data, 39);
+    cfg.xp_vehicle_per_meter = f(data, 40);
+    cfg.xp_aim_per_shot = f(data, 41);
+    cfg.xp_stealth_per_sec_unseen = f(data, 42);
+    return cfg;
+}
+
 /// Decode the INTERACTABLES lump (PROPUSE req_0624). Wire layout:
 /// compile/worldInteractables.ts encodeInteractables — u32 version |
 /// u32 archetypeCount | per archetype: u8 flags (bit0 seat, bit1 container) |
@@ -1444,6 +1534,12 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         try decodePhysicsConfig(lump.data)
     else
         null;
+    // Player-stats config (GAME_STATS) — optional like the other post-v1 lumps;
+    // absent in pre-lump bakes and the codec fixture.
+    const stats_config: ?StatsConfig = if (mapfile.findLump(map_lumps, mapfile.LumpType.stats_config)) |lump|
+        try decodeStatsConfig(lump.data)
+    else
+        null;
     // The prop interaction layer (PROPUSE req_0624) — optional like the other
     // post-v1 lumps; absent in pre-lump bakes and the codec fixture.
     const interactables: ?Interactables = if (mapfile.findLump(map_lumps, mapfile.LumpType.interactables)) |lump|
@@ -1521,6 +1617,7 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .material_refs = material_refs,
         .baked_colliders = baked_colliders,
         .physics_config = physics_config,
+        .stats_config = stats_config,
         .decal_assets = decal_assets,
         .interactables = interactables,
         .dynamic_props = dynamic_props,

@@ -1,4 +1,6 @@
-export const HMSC_STATE_SCHEMA_VERSION = 16;
+import type { PlayerStats } from './game/stats';
+
+export const HMSC_STATE_SCHEMA_VERSION = 17;
 export const DEFAULT_AUTOSAVE_INTERVAL_MS = 120_000;
 export const DEFAULT_LIVE_SYNC_INTERVAL_MS = 100;
 export const DEFAULT_CELL_SIZE_METERS = 1;
@@ -103,6 +105,10 @@ export type PlayerState = {
   money: number;
   perception: PerceptionState;
   inventory: string[];
+  // The full player-stats set (armor, energy, wallet, outfit, gained skills).
+  // health/heat/money/inventory above are the legacy scalars GAME_STATS bridges;
+  // `stats` is the additive remainder that makes the stat set first-class.
+  stats: PlayerStats;
   // The cell the player respawns at — set when stepping on a 'save' checkpoint
   // (to that save's paired 'spawn' cell) and at boot (the world's default spawn).
   // Absent → fall back to the player's start position.
