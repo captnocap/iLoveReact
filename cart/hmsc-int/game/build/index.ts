@@ -49,8 +49,9 @@ export {
   validateCatalogEntry,
   validateCatalog,
   catalogIdsForConsole,
+  ROOF_PITCH,
 } from './catalog';
-export type { BuildMaterial, BuildPieceDef, BuildPieceSize, BuildTheme } from './catalog';
+export type { BuildMaterial, BuildPieceDef, BuildPieceSize, BuildTheme, RoofShape } from './catalog';
 
 export {
   BUILD_PREFAB_DEFINITIONS,
@@ -97,6 +98,9 @@ export type { BuildFaceSlot, BuildFaceSkin, BuildSkinSet, BuildTypeSkins, Resolv
 export {
   PLACED_TUNING,
   placedPieceDef,
+  placedPieceSize,
+  placedRoofProfile,
+  roofRiseMeters,
   placedPieceTags,
   placedPieceAcceptsEdits,
   placedPieceBands,
@@ -222,6 +226,9 @@ import {
 import {
   PLACED_TUNING,
   placedPieceDef,
+  placedPieceSize,
+  placedRoofProfile,
+  roofRiseMeters,
   placedPieceTags,
   placedPieceAcceptsEdits,
   placedPieceBands,
@@ -315,6 +322,13 @@ export const GAME_BUILD = {
   placed: {
     tuning: PLACED_TUNING,
     def: placedPieceDef,
+    /** effective plan size: catalog `size` with a roof's dragged footprint
+     *  (ROOFSPAN) substituted (req_0917) */
+    size: placedPieceSize,
+    /** a pitched roof's resolved {shape, pitch}; flat for non-roof rows */
+    roofProfile: placedRoofProfile,
+    /** ridge/apex rise of a placed roof above its eave, scaled to the span */
+    roofRise: roofRiseMeters,
     tags: placedPieceTags,
     acceptsEdits: placedPieceAcceptsEdits,
     bands: placedPieceBands,

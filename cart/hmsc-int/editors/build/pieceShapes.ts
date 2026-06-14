@@ -124,7 +124,7 @@ function isHorizontalSkinPiece(kind: string): boolean {
 }
 
 export function pieceVisualShapes(
-  piece: { pieceId: string; x: number; y: number; z: number; yawDegrees: number; edit?: WallEdit; skin?: BuildSkinSet; doorOpen?: boolean },
+  piece: { pieceId: string; x: number; y: number; z: number; yawDegrees: number; edit?: WallEdit; skin?: BuildSkinSet; doorOpen?: boolean; roofSpan?: { widthMeters: number; depthMeters: number } },
   key: string,
   pieces?: readonly PlacedBuildPiece[],
 ): VisualShape[] {
@@ -338,15 +338,76 @@ export function pieceVisualShapes(
     }
     return shapes;
   }
-  if (isHorizontalSkinPiece(def.kind)) {
+  // The flat plate decomposition (floors + flat roofs): a skinned core slab
+  // with thin top/bottom face plates. Sized to w×d so a roof's dragged span
+  // (ROOFSPAN) lowers the same way a single tile does.
+  const plateShapes = (w: number, d: number, plateHeight: number): VisualShape[] => {
     const slab = BUILD_UI.faceSlabThicknessMeters;
     const lift = BUILD_UI.faceSlabLiftMeters;
-    const coreHeight = Math.max(0.01, size.heightMeters - lift * 2);
+    const coreHeight = Math.max(0.01, plateHeight - lift * 2);
     return [
-      box('edges', 0, 0, piece.y + lift, size.widthMeters, coreHeight, size.depthMeters, sides),
-      box('top', 0, 0, piece.y + size.heightMeters + lift - slab / 2, size.widthMeters, slab, size.depthMeters, front),
-      box('bottom', 0, 0, piece.y - lift - slab / 2, size.widthMeters, slab, size.depthMeters, back),
+      box('edges', 0, 0, piece.y + lift, w, coreHeight, d, sides),
+      box('top', 0, 0, piece.y + plateHeight + lift - slab / 2, w, slab, d, front),
+      box('bottom', 0, 0, piece.y - lift - slab / 2, w, slab, d, back),
     ];
+  };
+
+  if (def.kind === 'roof') {
+    // ROOFPROFILE (req_0917): a roof lifts its profile over the footprint span.
+    // shed/gable decompose into the SAME ramp primitive /test and the compiled
+    // bake already render+collide (PARITY-0611) — so a pitched roof streams to
+    // the compiled game and is walkable, with no new instance shape. hip and
+    // pyramid (need a triangular roof panel) ship in Phase 2; until then they
+    // fall back to the flat plate so nothing renders broken.
+    const roof = GAME_BUILD.placed.size(piece as PlacedBuildPiece);
+    const W = roof.widthMeters;
+    const D = roof.depthMeters;
+    const { shape } = GAME_BUILD.placed.roofProfile(piece as PlacedBuildPiece);
+    const rise = GAME_BUILD.placed.roofRise(piece as PlacedBuildPiece);
+    const thick = GAME_BUILD.placed.tuning.rampSlabThicknessMeters;
+    const rampAt = (
+      k: string, u: number, v: number, w: number, dep: number, riseH: number, ramYaw: number, face: FaceLook,
+    ): VisualShape => {
+      const { dx, dz } = localOffset(u, v, yaw);
+      return {
+        kind: 'ramp',
+        ramp: {
+          key: `${key}.${k}`,
+          x: piece.x + dx, y: piece.y, z: piece.z + dz,
+          width: w, height: riseH, depth: dep,
+          slabThickness: thick,
+          yawDegrees: ramYaw,
+          color: face.color, textureKey: face.textureKey, opacity: look.opacity,
+        },
+      };
+    };
+    if ((shape === 'shed' || shape === 'gable') && rise > 0.01) {
+      if (shape === 'shed') return [rampAt('slope', 0, 0, W, D, rise, yaw, front)];
+      // gable: two slopes rising to a center ridge along the width, plus a
+      // stepped triangular infill closing each gable end (boxes stay
+      // parity-clean; the true-triangle end rides the Phase 2 panel).
+      const shapes: VisualShape[] = [
+        rampAt('slopeA', 0, -D / 4, W, D / 2, rise, yaw, front),
+        rampAt('slopeB', 0, D / 4, W, D / 2, rise, yaw + 180, back),
+      ];
+      const STEPS = 5;
+      const endW = 0.14;
+      for (const eu of [-1, 1] as const) {
+        for (let i = 0; i < STEPS; i += 1) {
+          const dep = D * (1 - (i + 1) / STEPS); // triangle depth at the step top
+          if (dep <= 0.05) continue;
+          const h = rise / STEPS;
+          shapes.push(box(`gableEnd${eu === -1 ? 'L' : 'R'}${i}`, eu * (W / 2 - endW / 2), 0, piece.y + i * h, endW, h, dep, sides));
+        }
+      }
+      return shapes;
+    }
+    // flat roof (and hip/pyramid until Phase 2) → the plate, sized to the span
+    return plateShapes(W, D, roof.heightMeters);
+  }
+
+  if (isHorizontalSkinPiece(def.kind)) {
+    return plateShapes(size.widthMeters, size.depthMeters, size.heightMeters);
   }
 
   return [box('body', 0, 0, piece.y, size.widthMeters, size.heightMeters, size.depthMeters, front)];

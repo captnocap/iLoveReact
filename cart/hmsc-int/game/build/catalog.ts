@@ -58,6 +58,19 @@ export type BuildPieceSize = {
   depthMeters: number;
 };
 
+// The roof PROFILE (roof-kind rows only). A roof's plan footprint is a plate
+// like any floor; the profile is the height function lifted over that footprint
+// — so the SAME roof row covers a 3×3 cottage or a whole apartment block, the
+// ridge/apex scaling with the span (see pieceShapes' roof decomposition).
+//   flat    — the legacy slab (no rise).
+//   shed    — a single mono-pitch plane (lean-to): low eave → high eave.
+//   gable   — two planes meeting at a center ridge running along the WIDTH.
+//   hip     — gable whose ends ALSO slope in (Phase 2: triangular roof panel).
+//   pyramid — four planes to a single apex, no ridge (Phase 2).
+// Phase 1 lowers shed/gable through the ramp primitive (clean editor↔compiled
+// parity); hip/pyramid land with the triangular roof-panel primitive.
+export type RoofShape = 'flat' | 'shed' | 'gable' | 'hip' | 'pyramid';
+
 export type BuildPieceDef = {
   id: string;
   kind: BuildPieceKind;
@@ -76,6 +89,13 @@ export type BuildPieceDef = {
   // kind 'prop' only — the prop registry entry whose asset/bundle this row
   // places. REQUIRED on prop rows, forbidden elsewhere (validateCatalog).
   propKind?: PropKind;
+  // Roof-family rows only. The profile lifted over the footprint; absent or
+  // 'flat' = the legacy slab. Validated roof-only (validateCatalog).
+  roofShape?: RoofShape;
+  // Roof-family rows only — the pitch as a rise:run RATIO (so the ridge/apex
+  // height scales with the footprint, not a fixed metre that flattens on a big
+  // span). 0.5 ≈ 27° (semi-slant), 1.0 = 45° (full-slant). Default ROOF_PITCH.
+  roofPitch?: number;
 };
 
 // ── shared tag rows (named, not buried) ──────────────────────────────────────
@@ -107,6 +127,10 @@ const SOLID_PLATE_TAGS: BuildGameplayTags = {
 const WALL_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 3, depthMeters: 0.25 };
 const PLATE_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 0.2, depthMeters: 3 };
 const VERTICAL_LINK_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 3, depthMeters: 3 };
+
+// Roof pitch presets, rise:run (see RoofShape). The "variety of life" axis the
+// user asked for — a roof row picks a profile AND a pitch.
+export const ROOF_PITCH = { semiSlant: 0.5, fullSlant: 1.0 } as const;
 
 function propMaterial(kind: PropKind): BuildMaterial {
   switch (kind) {
@@ -201,9 +225,11 @@ function propCatalogEntry(kind: PropKind): BuildPieceDef {
   // square-from-radius that overhung the vending machine. The dumpster keeps its
   // body-derived box.
   const model = propModelFootprintMeters(kind);
+  // req_0623: the dumpster's collision/catalog size is the visible BODY box,
+  // not the decorative top-rim overhang the recipe includes for visual detail.
   const dumpsterBody = kind === 'dumpster' ? dumpsterBodyMeters() : null;
-  const width = model?.widthMeters ?? dumpsterBody?.widthMeters ?? def.footprintWidthMeters ?? (def.kind === 'fence' ? def.footprintRadiusMeters * 1.9 : def.footprintRadiusMeters * 2);
-  const depth = model?.depthMeters ?? dumpsterBody?.depthMeters ?? def.footprintDepthMeters ?? def.footprintRadiusMeters * 2;
+  const width = dumpsterBody?.widthMeters ?? model?.widthMeters ?? def.footprintWidthMeters ?? (def.kind === 'fence' ? def.footprintRadiusMeters * 1.9 : def.footprintRadiusMeters * 2);
+  const depth = dumpsterBody?.depthMeters ?? model?.depthMeters ?? def.footprintDepthMeters ?? def.footprintRadiusMeters * 2;
   return {
     id: `prop.${kind}`,
     kind: 'prop',
@@ -412,8 +438,62 @@ export const BUILD_CATALOG: Record<string, BuildPieceDef> = {
     material: 'concrete',
     size: PLATE_SIZE,
     snap: 'grid',
+    roofShape: 'flat',
     // Roof lips read as low cover for anyone up there.
     tags: { ...SOLID_PLATE_TAGS, cover: 'low' },
+  },
+  // ── pitched roofs (req_0917): the residential profiles, sized to a whole
+  // base floor by the Roof drag tool. shed/gable lower through the ramp
+  // primitive → clean editor↔compiled parity. The legacy "Shingle Roof" is now
+  // the gable it always meant to be (its old size carried a pitched height that
+  // never reached the geometry).
+  'roof.gable.suburb': {
+    id: 'roof.gable.suburb',
+    kind: 'roof',
+    label: 'Gable Roof',
+    theme: 'suburb',
+    material: 'wood',
+    size: PLATE_SIZE,
+    snap: 'grid',
+    roofShape: 'gable',
+    roofPitch: ROOF_PITCH.semiSlant,
+    tags: { ...SOLID_PLATE_TAGS, cover: 'low', durability: 180, climbable: true },
+  },
+  'roof.gableSteep.suburb': {
+    id: 'roof.gableSteep.suburb',
+    kind: 'roof',
+    label: 'Gable Roof (Steep)',
+    theme: 'suburb',
+    material: 'wood',
+    size: PLATE_SIZE,
+    snap: 'grid',
+    roofShape: 'gable',
+    roofPitch: ROOF_PITCH.fullSlant,
+    tags: { ...SOLID_PLATE_TAGS, cover: 'low', durability: 180, climbable: true },
+  },
+  'roof.shed.common': {
+    id: 'roof.shed.common',
+    kind: 'roof',
+    label: 'Shed Roof',
+    theme: 'common',
+    material: 'metal',
+    size: PLATE_SIZE,
+    snap: 'grid',
+    roofShape: 'shed',
+    roofPitch: ROOF_PITCH.semiSlant,
+    tags: { ...SOLID_PLATE_TAGS, cover: 'low', durability: 180, climbable: true },
+  },
+  'roof.shedSteep.common': {
+    id: 'roof.shedSteep.common',
+    kind: 'roof',
+    label: 'Shed Roof (Steep)',
+    theme: 'common',
+    material: 'metal',
+    size: PLATE_SIZE,
+    snap: 'grid',
+    roofShape: 'shed',
+    roofPitch: ROOF_PITCH.fullSlant,
+    tags: { ...SOLID_PLATE_TAGS, cover: 'low', durability: 180, climbable: true },
   },
   'roof.shingle.suburb': {
     id: 'roof.shingle.suburb',
@@ -421,8 +501,10 @@ export const BUILD_CATALOG: Record<string, BuildPieceDef> = {
     label: 'Shingle Roof',
     theme: 'suburb',
     material: 'wood',
-    size: { widthMeters: 3, heightMeters: 1.2, depthMeters: 3 }, // pitched
+    size: PLATE_SIZE,
     snap: 'grid',
+    roofShape: 'gable',
+    roofPitch: ROOF_PITCH.semiSlant,
     tags: { ...SOLID_PLATE_TAGS, cover: 'low', durability: 180, climbable: true },
   },
 
@@ -727,6 +809,15 @@ export function validateCatalogEntry(entry: BuildPieceDef): string[] {
       problems.push(`${entry.id}: unknown propKind '${entry.propKind}'`);
   } else if (entry.propKind !== undefined) {
     problems.push(`${entry.id}: propKind is only meaningful on kind 'prop'`);
+  }
+
+  if (entry.kind !== 'roof') {
+    if (entry.roofShape !== undefined)
+      problems.push(`${entry.id}: roofShape is only meaningful on kind 'roof'`);
+    if (entry.roofPitch !== undefined)
+      problems.push(`${entry.id}: roofPitch is only meaningful on kind 'roof'`);
+  } else if (entry.roofPitch !== undefined && !(entry.roofPitch > 0)) {
+    problems.push(`${entry.id}: roofPitch must be a positive rise:run ratio`);
   }
 
   const { widthMeters, heightMeters, depthMeters } = entry.size;

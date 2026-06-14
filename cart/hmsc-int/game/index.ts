@@ -101,7 +101,7 @@ export type {
 // vocabulary, the catalog (P2), prefabs (decompose to semantic pieces), and
 // the WorldMarker semantic overlays. Data + validation; the bake emission and
 // the Build/Plan mode editors land later behind this same door.
-export { GAME_BUILD } from './build';
+export { GAME_BUILD, ROOF_PITCH } from './build';
 export type {
   BakePromise,
   BuildFaceSkin,
@@ -122,6 +122,7 @@ export type {
   PieceRay,
   PlacedBuildPiece,
   PrefabPiece,
+  RoofShape,
   WallEdit,
   WorldMarker,
   WorldMarkerType,

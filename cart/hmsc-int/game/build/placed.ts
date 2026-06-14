@@ -33,7 +33,9 @@ import {
   catalogEntry,
   effectiveTags,
   isCatalogId,
+  ROOF_PITCH,
   type BuildPieceDef,
+  type RoofShape,
 } from './catalog';
 import { BUILD_KIND_CONTRACTS, type BuildGameplayTags, type BuildPieceKind } from './pieces';
 import { propDynamics, propKindDefinition } from '../kinds';
@@ -81,6 +83,12 @@ export type PlacedBuildPiece = {
   prefabId?: string;
   /** source piece index inside the prefab definition */
   prefabPieceIndex?: number;
+  /** ROOFSPAN (req_0917): a roof placed by the Roof drag tool covers a whole
+   *  base floor, not one 3×3 plate. The dragged footprint (meters) overrides
+   *  the catalog row's `size` width/depth for THIS placement — the profile
+   *  (gable ridge / shed slope / hip apex) scales to fit it. Roof-kind only;
+   *  absent = the catalog plate size (a single-click roof tile). */
+  roofSpan?: { widthMeters: number; depthMeters: number };
   /** FLOOR 3×3 micro-grid (MICROGRID-0610): 9 row-major authored cell kinds,
    *  null = the material default. Floor-family kinds only; absent = a bare
    *  floor. See game/build/microGrid.ts for semantics + resolution. */
@@ -167,6 +175,40 @@ export function placedPieceDef(piece: PlacedBuildPiece): BuildPieceDef {
   return catalogEntry(piece.pieceId);
 }
 
+/** The placed piece's EFFECTIVE plan size — the catalog row's `size` with a
+ *  roof's dragged footprint (ROOFSPAN, req_0917) substituted for width/depth.
+ *  ONE source so visuals, bounds, snap and colliders all read the same span. */
+export function placedPieceSize(piece: PlacedBuildPiece): BuildPieceDef['size'] {
+  const size = placedPieceDef(piece).size;
+  if (piece.roofSpan && piece.roofSpan.widthMeters > 0 && piece.roofSpan.depthMeters > 0) {
+    return { widthMeters: piece.roofSpan.widthMeters, heightMeters: size.heightMeters, depthMeters: piece.roofSpan.depthMeters };
+  }
+  return size;
+}
+
+/** A pitched roof's effective PROFILE (shape + pitch), the one place the
+ *  defaults resolve. Non-roof / flat rows report shape 'flat', rise 0. */
+export function placedRoofProfile(piece: PlacedBuildPiece): { shape: RoofShape; pitch: number } {
+  const def = placedPieceDef(piece);
+  if (def.kind !== 'roof') return { shape: 'flat', pitch: 0 };
+  return { shape: def.roofShape ?? 'flat', pitch: def.roofPitch ?? ROOF_PITCH.semiSlant };
+}
+
+/** The vertical rise of a placed roof's ridge/apex above its eave, scaled to
+ *  the footprint span (req_0917). 0 for flat roofs and non-roof pieces. The run
+ *  is the horizontal distance eave→ridge: full depth (shed), half depth
+ *  (gable), or half the short footprint axis (hip/pyramid). ONE source for
+ *  bounds, stacking, and the pieceShapes decomposition. */
+export function roofRiseMeters(piece: PlacedBuildPiece): number {
+  const { shape, pitch } = placedRoofProfile(piece);
+  if (shape === 'flat') return 0;
+  const size = placedPieceSize(piece);
+  const run = shape === 'shed' ? size.depthMeters
+    : shape === 'gable' ? size.depthMeters / 2
+    : Math.min(size.widthMeters, size.depthMeters) / 2; // hip / pyramid
+  return Math.max(0, pitch * run);
+}
+
 /** The placed piece's EFFECTIVE tags — catalog row + edit, the one composition
  *  point (catalog.effectiveTags), so authored and embodied meaning agree. */
 export function placedPieceTags(piece: PlacedBuildPiece): BuildGameplayTags {
@@ -212,8 +254,7 @@ export type PlacedPieceDepthSpan = { minV: number; maxV: number };
 /** Axis-aligned world envelope of a placed piece (exact for quarter-turn yaw,
  *  the rotated envelope otherwise). */
 export function pieceBounds(piece: PlacedBuildPiece): PieceBounds {
-  const def = placedPieceDef(piece);
-  const size = def.size;
+  const size = placedPieceSize(piece);
   const halfW = size.widthMeters / 2;
   const halfD = size.depthMeters / 2;
   const quarter = quarterTurns(piece.yawDegrees);
@@ -235,7 +276,8 @@ export function pieceBounds(piece: PlacedBuildPiece): PieceBounds {
     minZ: piece.z - hz,
     maxZ: piece.z + hz,
     baseY: piece.y,
-    topY: piece.y + size.heightMeters,
+    // A pitched roof's envelope tops out at the ridge/apex, not its eave plate.
+    topY: piece.y + Math.max(size.heightMeters, roofRiseMeters(piece)),
   };
 }
 
@@ -955,6 +997,9 @@ export function placedPieceColliders(
       if (placedPieceTags(piece).collision) pushElevatorShaftRects(rects, orientedRects, piece, def);
       continue;
     }
+    // A pitched roof's footing is its slope heightfield (placedPieceRamps) — the
+    // flat band path below would stamp a phantom eave-height slab (req_0917).
+    if (def.kind === 'roof' && roofRiseMeters(piece) > 0.01) continue;
     // KICKPROP-0610: a dynamic prop (ball, cone, can) is a host sphere BODY,
     // not a wall — it contributes no static rect; the play route owns its sim.
     if (def.kind === 'prop' && def.propKind && propDynamics(def.propKind)) continue;
@@ -1121,14 +1166,31 @@ export function placedPieceRamps(pieces: readonly PlacedBuildPiece[], startSlot:
   const fields: Heightfield[] = [];
   for (const piece of pieces) {
     const def = placedPieceDef(piece);
-    if (def.kind !== 'ramp' && def.kind !== 'stairs') continue;
-    const size = def.size;
+    const roofRise = roofRiseMeters(piece);
+    const isPitchedRoof = def.kind === 'roof' && roofRise > 0.01;
+    if (def.kind !== 'ramp' && def.kind !== 'stairs' && !isPitchedRoof) continue;
+    // A pitched roof collides as its own SLOPE surface — the same heightfield
+    // mechanism a ramp uses, so a gable/shed is walkable in /test AND compiled
+    // and never a phantom flat slab at the eave (req_0917). The height function
+    // matches pieceShapes' ramp decomposition: shed = a single plane along the
+    // depth, gable = a tent rising to the center ridge.
+    const size = placedPieceSize(piece);
+    const profile = placedRoofProfile(piece);
     const cell = PLACED_TUNING.verticalLinkHeightfieldCellMeters;
     const cols = Math.max(2, Math.round(size.widthMeters / cell) + 1);
-    const rows = Math.max(2, Math.round(size.depthMeters / cell) + 1);
+    let rows = Math.max(2, Math.round(size.depthMeters / cell) + 1);
+    // A gable's ridge sits at the center depth row — force an odd row count so a
+    // sample lands exactly on it (else the heightfield peak clips a cell short).
+    if (isPitchedRoof && profile.shape === 'gable' && rows % 2 === 0) rows += 1;
     const heights = new Float32Array(cols * rows);
+    const heightAtRow = (row: number): number => {
+      const t = row / (rows - 1); // 0..1 along depth (−D/2 → +D/2)
+      if (!isPitchedRoof) return t * size.heightMeters; // ramp/stairs: linear rise
+      if (profile.shape === 'gable') return roofRise * (1 - Math.abs(t - 0.5) * 2); // tent to the ridge
+      return t * roofRise; // shed: single plane
+    };
     for (let row = 0; row < rows; row += 1) {
-      const h = (row / (rows - 1)) * size.heightMeters;
+      const h = heightAtRow(row);
       for (let col = 0; col < cols; col += 1) heights[row * cols + col] = h;
     }
     fields.push({
