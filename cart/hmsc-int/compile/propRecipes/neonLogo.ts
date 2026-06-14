@@ -1,32 +1,34 @@
-// neonLogo — a decal-faced NEON SIGN (req_0893, ask #2).
+// neonLogo — a decal-faced NEON SIGN (req_0893 #2; req_0915 floating tubes).
 //
-// The neon itself is a DECAL: author a glowing path in /compose (a DecalPathNode
-// — paste a logo's SVG `d` or draw it with the pen), then skin this sign's face
-// part with that material through the normal partTextures channel. The prop is
-// just the mounting panel(s): ONE face for a single-sided sign, TWO back-to-back
-// faces for a double-sided one (the user's "1 or 2 faced" ask). The dark backing
-// makes the lit tube read; transparent areas of the decal fall to that backing.
+// The neon itself is a DECAL: paste a logo's SVG (game/textures/neon), then skin
+// this sign's face with that material through partTextures. The prop is JUST a
+// thin face panel — no board (req_0915: the user wanted only the glowing tubes,
+// not a black rectangle). The decal ships a TRANSPARENT background, and the
+// scene3d shader alpha-cuts empty texels, so the wall behind shows through and
+// only the lit tubes float. The panel is SQUARE so a square-fit logo decal isn't
+// stretched. ONE face for a 1-sided sign, TWO back-to-back for a 2-sided one.
 //
 // Two kinds share ONE panel builder (rule of two): neonLogo (single) and
 // neonLogoDouble own their defs in their own files, both lowering through here.
 
-import { box, panel, hx, type PropPartSpec } from '../../game/kinds/propModels';
+import { panel, hx, type PropPartSpec } from '../../game/kinds/propModels';
 import { type PropKindDefinition } from '../../game/kinds/props';
 
-// A storefront logo sign — wide enough to read a name, mounted on a wall.
-const NEON_WIDTH_METERS = 1.4;
-const NEON_HEIGHT_METERS = 0.8;
-const PANEL_DEPTH_METERS = 0.04;
-// The dark housing the tubes sit against (unlit decal areas fall to this).
-const BACKING = hx('#0a0a12');
+// Square so a fit-to-square logo decal maps without horizontal stretch.
+const NEON_SIZE_METERS = 1.1;
+const FACE_DEPTH_METERS = 0.012;
+const FACE_GAP_METERS = 0.013; // back face offset for the 2-sided blade
+// Shows ONLY on an un-skinned sign; a decal forces the material white so the
+// logo's own colors read true (render3d/parts PartMesh whitens textured parts).
+const BASE = hx('#0a0a12');
 
 export const neonLogoDef: PropKindDefinition = {
   kind: 'neonLogo',
   label: 'Neon Logo (1-sided)',
   solid: true,
-  footprintRadiusMeters: 0.7,
+  footprintRadiusMeters: NEON_SIZE_METERS / 2,
   footprintDepthMeters: 0.05,
-  heightMeters: NEON_HEIGHT_METERS,
+  heightMeters: NEON_SIZE_METERS,
   tileKind: 'wall',
   trafficControl: 'none',
   mount: 'wall',
@@ -37,9 +39,9 @@ export const neonLogoDoubleDef: PropKindDefinition = {
   kind: 'neonLogoDouble',
   label: 'Neon Logo (2-sided)',
   solid: true,
-  footprintRadiusMeters: 0.7,
-  footprintDepthMeters: 0.12,
-  heightMeters: NEON_HEIGHT_METERS,
+  footprintRadiusMeters: NEON_SIZE_METERS / 2,
+  footprintDepthMeters: 0.06,
+  heightMeters: NEON_SIZE_METERS,
   tileKind: 'wall',
   trafficControl: 'none',
   // A blade sign hangs perpendicular off a wall so both faces show to passers-by.
@@ -47,22 +49,19 @@ export const neonLogoDoubleDef: PropKindDefinition = {
   coverClass: 'none',
 };
 
-/** The neon sign's parts. `double` adds a second face on the back, rotated 180°
- *  so its decal reads from behind — the two faces are independent texture targets
- *  ('face' / 'faceBack'), so a sign can show the same logo or a different one each
- *  way. The face panels are thin so the decal's glow dominates the silhouette. */
+/** The neon sign's parts — just the thin face panel(s), no board. `double` adds a
+ *  second face on the back, yawed 180° so its decal reads from behind; the two are
+ *  independent texture targets ('face' / 'faceBack') so each side can wear its own
+ *  logo. Transparent decal texels are alpha-cut by the shader, so only the lit
+ *  tubes show (req_0915 floating neon). */
 export function neonPanelParts(double: boolean): PropPartSpec[] {
-  const cy = NEON_HEIGHT_METERS / 2;
-  const size: readonly [number, number, number] = [NEON_WIDTH_METERS, NEON_HEIGHT_METERS, 0.012];
+  const cy = NEON_SIZE_METERS / 2;
+  const size: readonly [number, number, number] = [NEON_SIZE_METERS, NEON_SIZE_METERS, FACE_DEPTH_METERS];
   const parts: PropPartSpec[] = [
-    // central dark housing (the board the tubes mount on)
-    box([0, cy, 0], [NEON_WIDTH_METERS, NEON_HEIGHT_METERS, PANEL_DEPTH_METERS], BACKING),
-    // front face — the neon decal target
-    panel('face', [0, cy, PANEL_DEPTH_METERS / 2 + 0.006], size, BACKING),
+    panel('face', [0, cy, double ? FACE_GAP_METERS : 0], size, BASE),
   ];
   if (double) {
-    // back face: pushed to the rear and yawed 180° so its decal faces -Z.
-    parts.push(panel('faceBack', [0, cy, -(PANEL_DEPTH_METERS / 2 + 0.006)], size, BACKING, [0, 180, 0]));
+    parts.push(panel('faceBack', [0, cy, -FACE_GAP_METERS], size, BASE, [0, 180, 0]));
   }
   return parts;
 }

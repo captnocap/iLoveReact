@@ -161,7 +161,9 @@ function round2(n: number): number {
 /** Build the neon decal from a single `d` OR a full multi-<path> SVG. */
 export function neonDecalDoc(input: string, opts: NeonOptions = {}): DecalDoc {
   const canvas = opts.size ?? DEFAULT_CANVAS;
-  const bg = opts.bg ?? '#07070d';
+  // Transparent backing (req_0915): the sign floats — only the lit tubes show,
+  // the wall behind reads through. The shader alpha-cuts the empty texels.
+  const bg = opts.bg ?? '';
   let raw = extractSvgPaths(input);
   if (raw.length > MAX_NEON_PATHS) {
     console.warn(`[neon] ${raw.length} paths — capping at ${MAX_NEON_PATHS}`);

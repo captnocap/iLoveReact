@@ -843,6 +843,12 @@ pub const scene3d_wgsl =
     \\    // premultiplied_alpha_blending, so scale rgb by alpha here. Opaque meshes
     \\    // (a == 1) are unchanged; glass (a < 1) composites correctly over the scene.
     \\    let out_a = in.inst_color.a * tex_sample.a;
+    \\    // Alpha-cut fully-transparent texels (req_0915): a decal with a transparent
+    \\    // background (a floating neon sign) shows ONLY its lit texels — discarding
+    \\    // the empty ones writes no color AND no depth, so the wall behind shows
+    \\    // through cleanly. Harmless elsewhere: opaque meshes sample the 1×1 white
+    \\    // default (a == 1) and never hit this.
+    \\    if (out_a <= 0.01) { discard; }
     \\    return vec4f(final_rgb * out_a, out_a);
     \\}
 ;
