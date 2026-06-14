@@ -17,7 +17,7 @@
 // and a per-face readout of what the selection currently wears.
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Effect, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
+import { Box, Effect, Pressable, ScrollView, Text, TextInput, TextArea } from '@reactjit/primitives';
 import { GAME_BUILD } from '@game';
 import { propTakesText } from '../../game/kinds';
 import type { BuildFaceSkin, BuildFaceSlot, BuildSkinSet, PlacedBuildPiece, WorldEvent } from '@game';
@@ -228,19 +228,22 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   }, [propPartList, selPieces]);
 
   // ── PARAMETRIC props (req_0893): a selection of text-driven props (block
-  // letters, …) gets a text field that retypes the sign. The draft re-syncs when
-  // the selection changes; each edit commits pieceTextSet per piece (one undo
-  // step), the same stable-id pattern the skin/part events use.
+  // letters, …) gets a text field that retypes the sign. Typing only edits the
+  // DRAFT; an explicit Apply button commits it (req_0898 — per-keystroke commits
+  // spammed undo and the user expected a button). The draft re-syncs when the
+  // selection changes. Commits one pieceTextSet per piece, the stable-id pattern
+  // the skin/part events use.
   const textProp = propMode && selPieces.length > 0
     && selPieces.every((p) => { const k = GAME_BUILD.catalog.get(p.pieceId).propKind; return !!k && propTakesText(k); });
   const [textDraft, setTextDraft] = useState('');
   const selSig = selPieces.map((p) => p.id).join(',');
   useEffect(() => { setTextDraft(selPieces[0]?.text ?? ''); }, [selSig]); // eslint-disable-line react-hooks/exhaustive-deps
-  const applyText = (text: string) => {
-    setTextDraft(text);
+  const committedText = selPieces[0]?.text ?? '';
+  const textDirty = textDraft !== committedText;
+  const applyText = () => {
     const sel = selRef.current;
     if (!sel.length) return;
-    commitRef.current(sel.map((p) => ({ event: { kind: 'pieceTextSet', id: p.id, text } as WorldEvent, label: 'sign text' })));
+    commitRef.current(sel.map((p) => ({ event: { kind: 'pieceTextSet', id: p.id, text: textDraft } as WorldEvent, label: 'sign text' })));
   };
 
   // ── PARAMETRIC neon (req_0893, ask #2): paste a logo's SVG path `d` (or draw
@@ -248,14 +251,16 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   // the library below the moment it saves (useCustomTextures is subscribed), then
   // skin a neonLogo / neonLogoDouble face with it — the normal part-skin flow, so
   // no bespoke apply path. Works on any face, not just neon props.
-  const [neonD, setNeonD] = useState('');
-  const [neonColor, setNeonColor] = useState('#ff3bd0');
+  const [neonSvg, setNeonSvg] = useState('');
+  const [neonColor, setNeonColor] = useState(''); // blank = each path keeps its own fill color
   const makeNeon = () => {
-    const d = neonD.trim();
-    if (!d) return;
-    const doc = neonDecalDoc(d, { stroke: neonColor });
+    const input = neonSvg.trim();
+    if (!input) return;
+    // A full <svg>/<path …> paste OR a single path `d`; blank color → logo's fills.
+    const doc = neonDecalDoc(input, { stroke: neonColor.trim() || undefined });
+    if (doc.nodes.length === 0) return; // nothing parsed — leave the field for a retry
     const tex = saveDecalTexture('Neon', doc);
-    if (tex) { setNeonD(''); applyPropTexture(tex.id); }
+    if (tex) { setNeonSvg(''); applyPropTexture(tex.id); }
   };
 
   const pushRecent = (b: BuildFaceSkin) => {
@@ -333,17 +338,25 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         </Text>
       ) : null}
 
-      {/* PARAMETRIC props (req_0893): the sign's text. Typing retypes the letters
-          live — the recipe rebuilds the geometry from this word. */}
+      {/* PARAMETRIC props (req_0893): the sign's text. Type, then APPLY to retype
+          the sign (req_0898 — an explicit button; the recipe rebuilds from the word). */}
       {textProp ? (
         <Box style={{ gap: 3 }}>
           <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>SIGN TEXT</Text>
-          <TextInput
-            text={textDraft}
-            placeholder="business name…"
-            onChangeText={applyText}
-            style={{ backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: '#38bdf8', borderRadius: 3, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, color: '#e2e8f0', fontSize: 11, fontFamily: 'monospace' }}
-          />
+          <Box style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+            <TextInput
+              text={textDraft}
+              placeholder="business name…"
+              onChangeText={setTextDraft}
+              onSubmitEditing={applyText}
+              style={{ flexGrow: 1, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: textDirty ? '#fbbf24' : '#38bdf8', borderRadius: 3, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, color: '#e2e8f0', fontSize: 11, fontFamily: 'monospace' }}
+            />
+            <Pressable onPress={applyText} hoverable tooltip="apply the typed text to the selected sign(s)">
+              <Box style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: textDirty ? '#fbbf24' : '#3a4f6b', backgroundColor: textDirty ? '#3a2f12' : '#16233a' }}>
+                <Text fontSize={9} color={textDirty ? '#fbbf24' : '#64748b'} style={{ fontFamily: 'monospace' }}>{textDirty ? 'apply' : 'applied'}</Text>
+              </Box>
+            </Pressable>
+          </Box>
         </Box>
       ) : null}
 
@@ -464,28 +477,28 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
       </Box>
       ) : null}
 
-      {/* PARAMETRIC neon (req_0893): paste a logo's SVG path `d`, pick a tube
-          color, and bake a glowing NEON decal — it lands in the library below and
-          (in prop mode) skins the selected face right away. Pair it with a
-          neonLogo / neonLogoDouble sign for a 1- or 2-faced business sign. */}
+      {/* PARAMETRIC neon (req_0893/req_0899): paste a whole logo SVG (every
+          <path> becomes a glowing tube in its own fill color) OR a single path
+          `d`. The logo is fit to the face; blank color keeps the logo's colors.
+          Bakes a NEON decal into the library + (in prop mode) skins the face. */}
       <Box style={{ gap: 3 }}>
-        <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>NEON FROM SVG · paste a path d</Text>
+        <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>NEON FROM SVG · paste a logo's SVG or one path d</Text>
+        <TextArea
+          text={neonSvg}
+          placeholder={'<svg>…</svg>  or  M10,10 L90,90 …'}
+          onChangeText={setNeonSvg}
+          style={{ width: '100%', height: 56, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: neonSvg.trim() ? '#ff3bd0' : '#27364a', borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 3, paddingBottom: 3, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
+        />
         <Box style={{ flexDirection: 'row', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
           <TextInput
-            text={neonD}
-            placeholder="M10,10 L90,90 …"
-            onChangeText={setNeonD}
-            style={{ width: 150, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: neonD.trim() ? '#ff3bd0' : '#27364a', borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
-          />
-          <TextInput
             text={neonColor}
-            placeholder="#ff3bd0"
+            placeholder="tube color (blank = logo colors)"
             onChangeText={setNeonColor}
-            style={{ width: 64, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: '#3a4f6b', borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
+            style={{ width: 200, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: '#3a4f6b', borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
           />
-          <Pressable onPress={makeNeon} hoverable tooltip="bake the path into a glowing neon decal — saved to the library; in prop mode it skins the selected face too">
-            <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: neonD.trim() ? '#ff3bd0' : '#3a4f6b', backgroundColor: '#16233a' }}>
-              <Text fontSize={9} color={neonD.trim() ? '#ff8fe0' : '#64748b'} style={{ fontFamily: 'monospace' }}>make neon</Text>
+          <Pressable onPress={makeNeon} hoverable tooltip="bake the SVG into a glowing neon decal — saved to the library; in prop mode it skins the selected face too">
+            <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: neonSvg.trim() ? '#ff3bd0' : '#3a4f6b', backgroundColor: '#16233a' }}>
+              <Text fontSize={9} color={neonSvg.trim() ? '#ff8fe0' : '#64748b'} style={{ fontFamily: 'monospace' }}>make neon</Text>
             </Box>
           </Pressable>
         </Box>

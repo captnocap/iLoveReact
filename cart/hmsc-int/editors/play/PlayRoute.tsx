@@ -1661,7 +1661,10 @@ export function PlayRoute(props: {
       case 'pieceEditSet':
       case 'pieceDoorSet':
       case 'pieceSkinSet':
-      case 'piecePartTextureSet': {
+      case 'piecePartTextureSet':
+      // PARAMETRIC props (req_0893/req_0898): the sign-text edit needs the owning
+      // map's name like every per-piece mutation, or the reducer no-ops it.
+      case 'pieceTextSet': {
         const mapName = pieceMutationMapName(streamState, props.mapName, props.legacyPieceMapName, event.id);
         return mapName ? ({ ...event, mapName } as WorldEvent) : event;
       }

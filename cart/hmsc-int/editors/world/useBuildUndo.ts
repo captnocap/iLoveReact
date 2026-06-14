@@ -129,7 +129,11 @@ export function useBuildUndo(opts: {
       case 'pieceMoved':
       case 'pieceSwapped':
       case 'pieceSkinSet':
-      case 'piecePartTextureSet': {
+      case 'piecePartTextureSet':
+      // PARAMETRIC props (req_0893): the sign-text edit is a per-piece mutation
+      // like skin/part — it MUST carry the owning map's name or the reducer looks
+      // in the wrong piece bucket and the edit silently no-ops (req_0898).
+      case 'pieceTextSet': {
         const mapName = pieceMutationMapName(streamState, stem, legacyPieceMapName, event.id);
         return mapName ? ({ ...event, mapName } as WorldEvent) : event;
       }
