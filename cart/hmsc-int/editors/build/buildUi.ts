@@ -30,4 +30,9 @@ export const CAMERA_OCCLUSION_TUNING = {
   skinOffsetMeters: 0.14,
   pullSmoothingPerSecond: 26,
   rampGroundToleranceMeters: 0.28,
+  // req_0930: a roof high overhead must not yank the camera. A roof pulls the
+  // spring-arm in ONLY when the player's head is within this of the eave (i.e.
+  // on/just under the roof); a player a storey-plus below it (the ground floor
+  // of a 2-storey house) leaves the roof a non-occluder — the camera rides on.
+  roofOverheadClearanceMeters: 3,
 };

@@ -1529,9 +1529,18 @@ export function PlayRoute(props: {
       const meta = ownerId ? cameraOccluderOwnersRef.current[ownerId] : null;
       const kind = meta?.kind ?? (hitDistance > 0 ? 'unknown' : 'none');
       const isPlayerGround = kind === 'ramp' && meta ? isPlayerStandingOnRamp(p, meta.piece) : false;
+      // req_0930: a roof a storey-plus overhead does NOT pull the camera — only
+      // a roof at/just above the player's head (on it, or right under it on the
+      // top floor) occludes. The eave is meta.piece.y; the player's head is feet
+      // + the camera target height. Below that clearance, the roof is ignored so
+      // the camera rides on instead of getting yanked under a 2-storeys-up roof.
+      const playerHeadY = p.y + CAMERA_OCCLUSION_TUNING.playerTargetHeightMeters;
+      const roofOverhead = kind === 'roof' && meta
+        ? (meta.piece.y - playerHeadY) > CAMERA_OCCLUSION_TUNING.roofOverheadClearanceMeters
+        : false;
       // elevator shaft walls occlude too (REQ-0652 parity: the compiled
       // camera collides with the baked shaft walls — /test must match)
-      const occludes = kind === 'wall' || kind === 'roof' || kind === 'elevator' || (kind === 'ramp' && !isPlayerGround);
+      const occludes = kind === 'wall' || kind === 'elevator' || (kind === 'roof' && !roofOverhead) || (kind === 'ramp' && !isPlayerGround);
       const distance = hitDistance > 0 && occludes
         ? Math.max(CAMERA_OCCLUSION_TUNING.minDistanceMeters, Math.min(cam.baseDistance, hitDistance - CAMERA_OCCLUSION_TUNING.skinOffsetMeters))
         : cam.baseDistance;
