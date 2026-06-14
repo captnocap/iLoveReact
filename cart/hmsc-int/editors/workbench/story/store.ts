@@ -1,21 +1,27 @@
 // editors/workbench/story/store.ts — the STORYLINE BOARD's working store.
 //
-// THE AUTHORED SHAPE IS THE USER'S (req_0910/req_0914), not MissionDef's: a
-// quest is title / id / author / questline / fromNPC / desc / reward /
-// dependents / constraints / events(cutscene, location, order, dialog). The
-// store holds that shape directly as the editable draft; the runtime MissionDef
-// is the PROJECTION (events→stages, constraints→requires, fromNPC→client) the
-// compile step makes — so authoring reads as the user thinks while still riding
-// the ruled substrate. Fields MissionDef lacks (author, questline, desc, and
-// per-event location/cutscene/dialog) live here and persist with the editor.
+// THE HIERARCHY IS QUESTLINE-FIRST (req_0919/req_0920, the user's ruling): you
+// always pick a QUESTLINE before anything else — even one-off quests live in a
+// misc/extra line, because the line is what keeps the board organized. A
+// questline is a CREATED OBJECT, never a bare string: it owns a core array of
+// missions, a summary, line-level requirements (the GREATER dependency — the
+// missions inside carry their own), and line-level rewards (the bonus for
+// finishing the whole line). The builder starts EMPTY — no seeded missions
+// (the prior single seed was Claude placeholder, not authored content); the
+// first move is always "New Questline".
 //
-// The board graph is DERIVED on read (buildQuestGraph) — never stored. Drafts
-// seed from the shipped MISSION_DEFINITIONS (deep-cloned; the frozen tables stay
-// frozen). SLICE state is in-session (a singleton); the V20 'storyline' stream
-// is the declared persistence follow-up — every edit already routes through the
-// one writer (edit), which is its seam.
+// THE AUTHORED SHAPE IS THE USER'S (req_0910/req_0914), not MissionDef's: a
+// quest is title / id / author / fromNPC / desc / reward / constraints /
+// events(cutscene, location, order, dialog). The runtime MissionDef is the
+// PROJECTION (events→stages, constraints→requires, fromNPC→client) the compile
+// step makes — so authoring reads as the user thinks while still riding the
+// ruled substrate. Fields MissionDef lacks (author, desc, per-event
+// location/cutscene/dialog) and the whole Questline wrapper live here and
+// persist with the editor; the V20 'storyline' stream is the persistence seam.
+//
+// The board graph is DERIVED on read (buildQuestGraph over the SELECTED line's
+// missions) — never stored.
 
-import { MISSION_DEFINITIONS } from '../../../game/missions';
 import type { MissionDef } from '../../../game/missions';
 import type { ActivityVerb } from '../../../game/activities';
 import { buildQuestGraph, type QuestGraph } from './model';
@@ -44,7 +50,6 @@ export type QuestDraft = {
   key: string;            // id
   title: string;
   author: string;
-  questline: string;      // explicit questline NAME (the organizing field)
   client: string;         // fromNPC
   desc: string;
   reward: { cash?: number; repDelta?: number };
@@ -59,48 +64,70 @@ export type QuestDraft = {
   seed?: string;
 };
 
-function eventsFromStages(def: MissionDef): QuestEvent[] {
-  return def.stages.map((stage, i) => {
-    const marker = stage.objectives.find((o) => o.marker)?.marker
-      ?? stage.objectives.map((o) => (o.target?.kind === 'point' ? { x: o.target.x, z: o.target.z } : null)).find(Boolean) ?? undefined;
-    return {
-      id: stage.id || `event-${i + 1}`,
-      brief: stage.brief,
-      location: marker ?? undefined,
-      cutscene: '',
-      dialog: [],
-      objectives: [...stage.objectives],
-    };
-  });
+/** Line-level bonus for finishing the WHOLE line (atop each mission's reward). */
+export type QuestlineRewards = { cash?: number; repDelta?: number };
+
+/** THE TOP OF THE HIERARCHY (req_0919): a created object, not a string. Holds
+ *  the core array of missions, a summary, the GREATER dependency (line-level
+ *  requirements — the missions inside have their own), and the line reward. */
+export type Questline = {
+  id: string;
+  title: string;
+  summary: string;
+  /** the greater dependency: gates that must hold before the line opens */
+  requires: NonNullable<MissionDef['requires']>[number][];
+  rewards: QuestlineRewards;
+  /** the core array of missions */
+  missions: QuestDraft[];
+};
+
+function blankDraft(key: string, n: number): QuestDraft {
+  return {
+    key,
+    title: `Mission ${n}`,
+    author: '',
+    client: '',
+    desc: '',
+    reward: {},
+    requires: [],
+    events: [],
+    verb: 'role',
+    binding: undefined,
+    expiryTicks: null,
+    collateral: { ratingDeltaPerCivilianKill: 0 },
+    hooks: [],
+  };
 }
 
-function cloneDraft(def: MissionDef): QuestDraft {
-  const base = JSON.parse(JSON.stringify({
-    key: def.key,
-    title: def.title,
-    author: '',
-    questline: '',
-    client: def.client,
-    desc: '',
-    reward: def.reward,
-    requires: def.requires ?? [],
-    verb: def.verb,
-    binding: def.binding,
-    expiryTicks: def.expiryTicks,
-    collateral: def.collateral,
-    hooks: def.hooks,
-    seed: def.seed,
-  })) as QuestDraft;
-  base.events = eventsFromStages(def);
-  return base;
+function blankQuestline(id: string, n: number): Questline {
+  return { id, title: `Questline ${n}`, summary: '', requires: [], rewards: {}, missions: [] };
 }
+
+const EMPTY_GRAPH: QuestGraph = { nodes: [], edges: [], external: [] };
 
 export interface StoryStore {
-  drafts(): QuestDraft[];
+  // ── questlines (the top of the hierarchy) ──
+  questlines(): Questline[];
+  line(id: string): Questline | null;
+  selectedLineId(): string | null;
+  selectLine(id: string | null): void;
+  /** create a fresh questline, select it, clear mission selection; returns id */
+  newQuestline(): string;
+  removeQuestline(id: string): void;
+  editLine(id: string, mutate: (l: Questline) => void): void;
+  addLineGate(id: string, flag: string): void;
+  removeLineGate(id: string, flag: string): void;
+
+  // ── missions within the SELECTED line ──
+  /** the conditional state machine over the SELECTED line's missions (empty
+   *  when no line is selected). Derived on read — never stored. */
   graph(): QuestGraph;
   selectedKey(): string | null;
   select(key: string | null): void;
   draft(key: string): QuestDraft | null;
+  /** add a blank mission to the selected line, select it; returns its key */
+  newMission(): string | null;
+  removeMission(key: string): void;
   /** the one writer — every mutator routes here (the persistence seam) */
   edit(key: string, mutate: (d: QuestDraft) => void): void;
   addFlagGate(key: string, flag: string): void;
@@ -111,42 +138,117 @@ export interface StoryStore {
   addEvent(key: string): void;
   removeEvent(key: string, index: number): void;
   moveEvent(key: string, index: number, dir: -1 | 1): void;
+
   subscribe(fn: () => void): () => void;
 }
 
-export function createStoryStore(seed: readonly MissionDef[]): StoryStore {
-  const drafts: QuestDraft[] = seed.map(cloneDraft);
-  let selected: string | null = drafts[0]?.key ?? null;
+export function createStoryStore(): StoryStore {
+  const lines: Questline[] = [];
+  let selectedLine: string | null = null;
+  let selected: string | null = null;
   let focused: number | null = null;
+  // monotonic id counters (no Date.now/Math.random in the cart host)
+  let lineSeq = 0;
+  let missionSeq = 0;
   const listeners = new Set<() => void>();
   const notify = () => { for (const fn of listeners) fn(); };
-  const byKey = (key: string) => drafts.find((d) => d.key === key) ?? null;
 
-  // the graph reads only key/title/verb/client/binding/requires/hooks/questline
-  // — never events — so the draft shape satisfies it as-is (extra fields ignored).
-  const graphView = (): QuestGraph => buildQuestGraph(drafts as unknown as MissionDef[]);
+  const lineByKey = (id: string) => lines.find((l) => l.id === id) ?? null;
+  const currentLine = () => (selectedLine ? lineByKey(selectedLine) : null);
+  const draftByKey = (key: string) => currentLine()?.missions.find((d) => d.key === key) ?? null;
+
+  // the graph reads only key/title/verb/client/binding/requires/hooks — never
+  // events — so the draft shape satisfies it as-is (extra fields ignored).
+  const graphView = (): QuestGraph => {
+    const line = currentLine();
+    return line ? buildQuestGraph(line.missions as unknown as MissionDef[]) : EMPTY_GRAPH;
+  };
 
   return {
-    drafts: () => drafts,
+    questlines: () => lines,
+    line: lineByKey,
+    selectedLineId: () => selectedLine,
+    selectLine: (id) => {
+      if (id !== selectedLine) { selected = null; focused = null; }
+      selectedLine = id;
+      notify();
+    },
+    newQuestline: () => {
+      lineSeq += 1;
+      const id = `line-${lineSeq}`;
+      lines.push(blankQuestline(id, lineSeq));
+      selectedLine = id;
+      selected = null;
+      focused = null;
+      notify();
+      return id;
+    },
+    removeQuestline: (id) => {
+      const i = lines.findIndex((l) => l.id === id);
+      if (i < 0) return;
+      lines.splice(i, 1);
+      if (selectedLine === id) { selectedLine = lines[i]?.id ?? lines[i - 1]?.id ?? null; selected = null; focused = null; }
+      notify();
+    },
+    editLine: (id, mutate) => {
+      const l = lineByKey(id);
+      if (!l) return;
+      mutate(l);
+      notify();
+    },
+    addLineGate: (id, flag) => {
+      const l = lineByKey(id);
+      if (!l || !flag) return;
+      if (l.requires.some((g) => g.kind === 'flag' && g.flag === flag)) return;
+      l.requires.push({ kind: 'flag', flag });
+      notify();
+    },
+    removeLineGate: (id, flag) => {
+      const l = lineByKey(id);
+      if (!l) return;
+      l.requires = l.requires.filter((g) => !(g.kind === 'flag' && g.flag === flag));
+      notify();
+    },
+
     graph: graphView,
     selectedKey: () => selected,
     select: (key) => { if (key !== selected) focused = null; selected = key; notify(); },
-    draft: byKey,
+    draft: draftByKey,
+    newMission: () => {
+      const line = currentLine();
+      if (!line) return null;
+      missionSeq += 1;
+      const key = `quest-${missionSeq}`;
+      line.missions.push(blankDraft(key, missionSeq));
+      selected = key;
+      focused = null;
+      notify();
+      return key;
+    },
+    removeMission: (key) => {
+      const line = currentLine();
+      if (!line) return;
+      const i = line.missions.findIndex((d) => d.key === key);
+      if (i < 0) return;
+      line.missions.splice(i, 1);
+      if (selected === key) { selected = line.missions[i]?.key ?? line.missions[i - 1]?.key ?? null; focused = null; }
+      notify();
+    },
     edit: (key, mutate) => {
-      const d = byKey(key);
+      const d = draftByKey(key);
       if (!d) return;
       mutate(d);
       notify();
     },
     addFlagGate: (key, flag) => {
-      const d = byKey(key);
+      const d = draftByKey(key);
       if (!d || !flag) return;
       if (d.requires.some((g) => g.kind === 'flag' && g.flag === flag)) return;
       d.requires.push({ kind: 'flag', flag });
       notify();
     },
     removeFlagGate: (key, flag) => {
-      const d = byKey(key);
+      const d = draftByKey(key);
       if (!d) return;
       d.requires = d.requires.filter((g) => !(g.kind === 'flag' && g.flag === flag));
       notify();
@@ -154,7 +256,7 @@ export function createStoryStore(seed: readonly MissionDef[]): StoryStore {
     focusedEvent: () => focused,
     focusEvent: (index) => { focused = index; notify(); },
     addEvent: (key) => {
-      const d = byKey(key);
+      const d = draftByKey(key);
       if (!d) return;
       const n = d.events.length + 1;
       d.events.push({ id: `event-${n}`, brief: `Event ${n}`, cutscene: '', dialog: [], objectives: [] });
@@ -162,14 +264,14 @@ export function createStoryStore(seed: readonly MissionDef[]): StoryStore {
       notify();
     },
     removeEvent: (key, index) => {
-      const d = byKey(key);
+      const d = draftByKey(key);
       if (!d || index < 0 || index >= d.events.length) return;
       d.events.splice(index, 1);
       if (focused !== null && focused >= d.events.length) focused = d.events.length ? d.events.length - 1 : null;
       notify();
     },
     moveEvent: (key, index, dir) => {
-      const d = byKey(key);
+      const d = draftByKey(key);
       if (!d) return;
       const to = index + dir;
       if (to < 0 || to >= d.events.length) return;
@@ -184,8 +286,8 @@ export function createStoryStore(seed: readonly MissionDef[]): StoryStore {
 
 let live: StoryStore | null = null;
 
-/** The in-session singleton, seeded from the shipped mission tables. */
+/** The in-session singleton. Starts EMPTY — the first move is New Questline. */
 export function storyWorkbenchStore(): StoryStore {
-  if (!live) live = createStoryStore(Object.values(MISSION_DEFINITIONS));
+  if (!live) live = createStoryStore();
   return live;
 }

@@ -1,13 +1,13 @@
 // editors/workbench/story/StoryBoard.tsx — the STORYLINE BOARD stage: the
-// conditional state machine, laid out. Each QUESTLINE is a horizontal band; in
-// it, quests sit in COLUMNS by dependency depth (a quest is one column right of
-// its deepest prerequisite), so reading left→right is reading the unlock order.
-// Edges are carried as flag chips on each card (← gates that open it, → gates
-// it opens) — free-form SVG edges are the declared follow-up; the topological
-// columns already make the machine legible and every card is clickable.
+// SELECTED questline's missions, laid out. Missions sit in COLUMNS by
+// dependency depth (a mission is one column right of its deepest prerequisite),
+// so reading left→right is reading the unlock order. Edges are carried as flag
+// chips on each card (← gates that open it, → gates it opens); free-form SVG
+// edges are the declared follow-up.
 //
 // LAW 1 (the workbench contract): the stage receives values and SELECTS; it
 // never edits. Clicking a card selects it; the panel (gutter 3) does the edits.
+// The board scopes to ONE questline (req_0919) — the questline is the band.
 
 import { Box, Pressable, ScrollView, Text } from '@reactjit/primitives';
 import { accentFor } from '../../../shell/workbench.cls';
@@ -55,64 +55,60 @@ function QuestCard(props: { node: QuestNode; selected: boolean; onPick: () => vo
             {node.providesFlags.map((f) => <Chip key={`out-${f}`} text={`→ ${f}`} color={accentFor('success')} />)}
           </Box>
         )}
-        <Text fontSize={9} color={accentFor('textFaint')} style={{ fontFamily: MONO, marginTop: 4 }}>{node.client}</Text>
+        <Text fontSize={9} color={accentFor('textFaint')} style={{ fontFamily: MONO, marginTop: 4 }}>{node.client || '—'}</Text>
       </Box>
     </Pressable>
   );
 }
 
+function Banner(props: { title: string; hint: string }) {
+  return (
+    <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: accentFor('bg') }}>
+      <Text fontSize={13} color={accentFor('textDim')} style={{ fontFamily: MONO, fontWeight: 800 }}>{props.title}</Text>
+      <Text fontSize={10} color={accentFor('textFaint')} style={{ fontFamily: MONO, marginTop: 6 }}>{props.hint}</Text>
+    </Box>
+  );
+}
+
 export function StoryBoard(props: { store: StoryStore }) {
   const { store } = props;
+  const lineId = store.selectedLineId();
+  const line = lineId ? store.line(lineId) : null;
+
+  if (!line) {
+    return <Banner title="STORYLINE" hint="pick or create a questline to begin — every quest lives in a line" />;
+  }
+  if (line.missions.length === 0) {
+    return <Banner title={(line.title || 'QUESTLINE').toUpperCase()} hint="no missions yet — add the first from the panel" />;
+  }
+
   const g = store.graph();
   const selected = store.selectedKey();
-
-  // group nodes by questline NAME (the author's `questline` field), then by
-  // depth column. Bands order by the lowest component index they contain so the
-  // layout stays stable as names are typed.
-  const lines = new Map<string, QuestNode[]>();
-  for (const n of g.nodes) {
-    const list = lines.get(n.questlineLabel) ?? [];
-    list.push(n);
-    lines.set(n.questlineLabel, list);
-  }
-  const questlineLabels = [...lines.keys()].sort((a, b) => {
-    const ra = Math.min(...lines.get(a)!.map((n) => n.questline));
-    const rb = Math.min(...lines.get(b)!.map((n) => n.questline));
-    return ra - rb || a.localeCompare(b);
-  });
+  const maxDepth = g.nodes.reduce((m, n) => Math.max(m, n.depth), 0);
+  const columns = Array.from({ length: maxDepth + 1 }, (_, depth) =>
+    g.nodes.filter((n) => n.depth === depth).sort((a, b) => a.lane - b.lane));
 
   return (
     <ScrollView style={{ width: '100%', height: '100%', backgroundColor: accentFor('bg') }}>
       <Box style={{ padding: 12 }}>
-        <Text fontSize={13} color={accentFor('text')} style={{ fontFamily: MONO, fontWeight: 800 }}>STORYLINE — conditional state machine</Text>
+        <Text fontSize={13} color={accentFor('text')} style={{ fontFamily: MONO, fontWeight: 800 }}>{(line.title || 'QUESTLINE').toUpperCase()}</Text>
         <Text fontSize={10} color={accentFor('textDim')} style={{ fontFamily: MONO, marginTop: 2, marginBottom: 8 }}>
-          {`${g.nodes.length} quests · ${g.edges.length} gates · ${g.external.length} external`}
+          {`${g.nodes.length} missions · ${g.edges.length} gates · ${g.external.length} external`}
         </Text>
 
-        {questlineLabels.map((label) => {
-          const nodes = lines.get(label)!;
-          const maxDepth = nodes.reduce((m, n) => Math.max(m, n.depth), 0);
-          const columns = Array.from({ length: maxDepth + 1 }, (_, depth) =>
-            nodes.filter((n) => n.depth === depth).sort((a, b) => a.lane - b.lane));
-          return (
-            <Box key={`ql-${label}`} style={{ marginBottom: 16 }}>
-              <Text fontSize={11} color={accentFor('info')} style={{ fontFamily: MONO, fontWeight: 800, marginBottom: 6 }}>{label.toUpperCase()}</Text>
-              <Box style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-                {columns.map((col, depth) => (
-                  <Box key={`col-${label}-${depth}`} style={{ marginRight: 18 }}>
-                    {col.map((n) => (
-                      <QuestCard key={n.key} node={n} selected={n.key === selected} onPick={() => store.select(n.key)} />
-                    ))}
-                  </Box>
-                ))}
-              </Box>
+        <Box style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+          {columns.map((col, depth) => (
+            <Box key={`col-${depth}`} style={{ marginRight: 18 }}>
+              {col.map((n) => (
+                <QuestCard key={n.key} node={n} selected={n.key === selected} onPick={() => store.select(n.key)} />
+              ))}
             </Box>
-          );
-        })}
+          ))}
+        </Box>
 
         {g.external.length > 0 && (
           <Box style={{ marginTop: 8, padding: 8, borderRadius: 6, borderWidth: 1, borderColor: accentFor('warning') }}>
-            <Text fontSize={10} color={accentFor('warning')} style={{ fontFamily: MONO, fontWeight: 800 }}>EXTERNAL GATES (opened by arcs / other systems)</Text>
+            <Text fontSize={10} color={accentFor('warning')} style={{ fontFamily: MONO, fontWeight: 800 }}>EXTERNAL GATES (opened by other lines / systems)</Text>
             {g.external.map((x, i) => (
               <Text key={`ext-${i}`} fontSize={10} color={accentFor('textDim')} style={{ fontFamily: MONO, marginTop: 2 }}>
                 {`${x.flag}  →  ${g.nodes.find((n) => n.key === x.to)?.title ?? x.to}`}

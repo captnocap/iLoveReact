@@ -1,22 +1,33 @@
 // editors/workbench/story/source.tsx — the STORYLINE WorkbenchSource: the
-// conditional-state-machine board the user asked for, authoring into the
-// EXISTING substrate (game/missions defs + game/story conditions), never a
-// parallel schema. Gutter 2 = the quest roster (grouped by questline); gutter 3
-// = the selected quest's MissionDef shape (identity, the V22 person|position
-// contract, the unlock gates, reward, flow); gutter 4 = the board itself,
-// quests laid out in dependency columns.
+// questline-first authoring board (req_0919/req_0920). Gutter 2 = the roster of
+// questlines, each with its missions nested under it; gutter 3 = the selected
+// questline OR mission's panel; gutter 4 = the board (the selected line's
+// missions laid out in dependency columns).
 //
-// The board's edges come for free from the data: a quest provides the flags its
-// hooks set, requires the flags its gates name, and provider→requirer IS the
-// edge (model.ts). Editing a gate in the panel reshapes the machine next frame.
+// THE HIERARCHY (the user's ruling): a questline is the top, always — you pick
+// or create one before anything else. The builder starts EMPTY, so the only
+// move on a blank board is "New Questline" (emptyActions). Once a line exists,
+// "New Mission" adds to it. Selection truth lives in the store; the roster
+// highlight mirrors it through defaultRow, and onPick installs the load.
 
-import type { WorkbenchSource } from '../../../shell/Workbench';
-import { storyPanel, storyRoster } from './panel';
+import type { WorkbenchSource, ActionSpec, RosterRow } from '../../../shell/Workbench';
+import { storyPanel, storyRoster, parseRowId, lineRowId, missionRowId } from './panel';
 import { StoryBoard } from './StoryBoard';
 import { storyWorkbenchStore } from './store';
 
 export function storySource(): WorkbenchSource<string> {
   const store = storyWorkbenchStore();
+
+  // the row id the store's current selection maps to (mission wins over line).
+  const currentRowId = (): string | undefined => {
+    const line = store.selectedLineId();
+    if (!line) return undefined;
+    const key = store.selectedKey();
+    return key && store.draft(key) ? missionRowId(line, key) : lineRowId(line);
+  };
+
+  const newQuestline: ActionSpec = { id: 'new-line', label: 'New Questline', icon: 'Plus', run: () => store.newQuestline() };
+
   return {
     id: 'story',
     icon: 'GitBranch',
@@ -24,17 +35,36 @@ export function storySource(): WorkbenchSource<string> {
 
     list: () => storyRoster(store),
     select: (rowId: string): string => rowId,
-    // selection lives in the store (the single truth): roster picks AND board
-    // card clicks both route through store.select, so panel + board never
-    // diverge. onPick is the contract's home for the load side-effect.
-    onPick: (rowId: string) => store.select(rowId),
-    panel: (subject: string) => storyPanel(store, store.selectedKey() ?? subject),
+    // roster click → install the selection in the store (render stays pure).
+    onPick: (rowId: string) => {
+      const parsed = parseRowId(rowId);
+      if (!parsed) return;
+      store.selectLine(parsed.line);
+      store.select(parsed.mission ?? null);
+    },
+    panel: () => storyPanel(store),
 
-    // the stage IS the board — values + selection only (LAW 1); the side-effect
-    // is the user's click inside it, never render.
+    // before the first questline exists, the only sensible verb is creation.
+    emptyActions: () => [newQuestline],
+    actions: () => {
+      const out: ActionSpec[] = [newQuestline];
+      const lineId = store.selectedLineId();
+      if (!lineId) return out;
+      const key = store.selectedKey();
+      if (key && store.draft(key)) {
+        out.push({ id: 'del-mission', label: '✕ Delete Mission', run: () => store.removeMission(key) });
+      } else {
+        out.push({ id: 'new-mission', label: '+ New Mission', icon: 'Plus', run: () => store.newMission() });
+        out.push({ id: 'del-line', label: '✕ Delete Questline', run: () => store.removeQuestline(lineId) });
+      }
+      return out;
+    },
+
+    // the stage IS the board — values + selection only (LAW 1).
     stage: () => <StoryBoard store={store} />,
 
-    defaultRow: (rows) => rows[0]?.id,
+    // the highlight follows the store: prefer its selection, else the first row.
+    defaultRow: (rows: RosterRow[]) => currentRowId() ?? rows[0]?.id,
     subscribe: (fn: () => void) => store.subscribe(fn),
   };
 }

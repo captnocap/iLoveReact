@@ -1,17 +1,26 @@
 // editors/workbench/story/panel.ts — the STORYLINE BOARD's headless half: the
-// roster (quests grouped by questline) and the per-quest PanelSpec the one
+// roster (questlines, each with its missions nested) and the PanelSpec the one
 // field renderer draws. No React (the characters.test.ts bundling law).
 //
-// THE PANEL IS THE USER'S SHAPE (req_0910/req_0914), in their order:
-//   IDENTITY     title · id · author · questline · fromNPC · desc
-//   CONSTRAINTS  the unlock gates (a flag another quest opens; the picker's
-//                options ARE the affordances — you can't gate on nothing)
-//   DEPENDENTS   what this quest unlocks downstream (derived from the edges)
+// THE HIERARCHY IS QUESTLINE-FIRST (req_0919/req_0920). The roster lists every
+// questline; under each, its missions are indented. Selecting a questline shows
+// the QUESTLINE panel (summary · requirements · rewards · its missions);
+// selecting a mission shows the MISSION panel.
+//
+// QUESTLINE panel (the user's shape):
+//   IDENTITY      title · id · summary
+//   REQUIREMENTS  the GREATER dependency — gates that hold before the line
+//                 opens (missions inside carry their own constraints)
+//   REWARDS       the bonus for finishing the WHOLE line (cash · rep)
+//   MISSIONS      the core array — click to edit, + add
+//
+// MISSION panel (the user's shape, in their order):
+//   IDENTITY     title · id · author · fromNPC · desc
+//   CONSTRAINTS  the unlock gates (a flag another mission in this line opens)
+//   DEPENDENTS   what this mission unlocks downstream (derived from the edges)
 //   REWARD       cash · rep
-//   EVENTS       the ordered beats — each carrying location, cutscene, dialog;
-//                click a beat to expand it for editing, ▲▼ reorder, ✕ remove
-//   WIRING       verb / binding / expiry — the runtime substrate, demoted (the
-//                user's note: verb is the wrong level of hierarchy to lead with)
+//   EVENTS       the ordered beats — location, cutscene, dialog
+//   WIRING       verb / binding / expiry — the runtime substrate, demoted
 
 import type { FieldSpec, PanelSpec } from '../../../shell/fields';
 import type { RosterRow } from '../../../shell/Workbench';
@@ -22,24 +31,117 @@ import type { StoryStore } from './store';
 const BINDINGS = ['job', 'person', 'position'] as const;
 const COORD = { min: -100000, max: 100000, step: 1, precision: 1 } as const;
 
-/** roster = every quest, ordered (questline, column, lane); label carries the
- *  questline name + title so the flat rail reads as grouped lines. */
-export function storyRoster(store: StoryStore): RosterRow[] {
-  const g = store.graph();
-  const node = (key: string) => g.nodes.find((n) => n.key === key)!;
-  return [...store.drafts()]
-    .sort((a, b) => {
-      const na = node(a.key);
-      const nb = node(b.key);
-      return na.questline - nb.questline || na.depth - nb.depth || na.lane - nb.lane;
-    })
-    .map((d) => {
-      const n = node(d.key);
-      return { id: d.key, label: `${n.questlineLabel} · ${d.title}`, icon: 'GitBranch' };
-    });
+/** Roster row ids encode the hierarchy: `L:<lineId>` is a questline header,
+ *  `M:<lineId>:<key>` is a mission under it. source.ts parses the prefix. */
+export const lineRowId = (lineId: string) => `L:${lineId}`;
+export const missionRowId = (lineId: string, key: string) => `M:${lineId}:${key}`;
+export function parseRowId(rowId: string): { line: string; mission?: string } | null {
+  if (rowId.startsWith('L:')) return { line: rowId.slice(2) };
+  if (rowId.startsWith('M:')) {
+    const rest = rowId.slice(2);
+    const i = rest.indexOf(':');
+    if (i < 0) return null;
+    return { line: rest.slice(0, i), mission: rest.slice(i + 1) };
+  }
+  return null;
 }
 
-/** every flag any OTHER quest provides — the affordances a constraint may name. */
+/** roster = every questline, each followed by its (indented) missions. */
+export function storyRoster(store: StoryStore): RosterRow[] {
+  const rows: RosterRow[] = [];
+  for (const line of store.questlines()) {
+    rows.push({ id: lineRowId(line.id), label: line.title || '(untitled line)', icon: 'GitBranch' });
+    for (const m of line.missions) {
+      rows.push({ id: missionRowId(line.id, m.key), label: `   ↳ ${m.title}`, icon: 'ListChecks' });
+    }
+  }
+  return rows;
+}
+
+// ── QUESTLINE panel ──────────────────────────────────────────────────────────
+
+/** flags any mission in ANOTHER line provides — the greater dependency's
+ *  affordances (a line gates on what an upstream line opens). */
+function lineGateOptions(store: StoryStore, selfLine: string): { id: string; label: string; group?: string }[] {
+  const out: { id: string; label: string; group?: string }[] = [];
+  const seen = new Set<string>();
+  for (const line of store.questlines()) {
+    if (line.id === selfLine) continue;
+    for (const m of line.missions) {
+      for (const hook of m.hooks) {
+        const delta = hook.worldDelta as Record<string, unknown>;
+        const flags = typeof delta.setFlag === 'string' ? [delta.setFlag]
+          : Array.isArray(delta.setFlags) ? delta.setFlags.filter((f): f is string => typeof f === 'string') : [];
+        for (const flag of flags) {
+          if (seen.has(flag)) continue;
+          seen.add(flag);
+          out.push({ id: flag, label: flag, group: line.title });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function lineIdentityGroup(store: StoryStore, id: string): FieldSpec[] {
+  const l = store.line(id)!;
+  return [
+    { k: 'title', t: 'text', get: () => l.title, set: (v) => store.editLine(id, (x) => { x.title = v; }) },
+    { k: 'id', t: 'val', get: () => l.id },
+    { k: 'summary', t: 'text', get: () => l.summary, set: (v) => store.editLine(id, (x) => { x.summary = v; }), width: 2, placeholder: 'what this whole line is about' },
+  ];
+}
+
+function lineRequirementsGroup(store: StoryStore, id: string): FieldSpec[] {
+  const l = store.line(id)!;
+  const fields: FieldSpec[] = [];
+  for (const gate of l.requires) {
+    if (gate.kind !== 'flag') continue;
+    fields.push({ k: `✕ ${gate.flag}`, t: 'act', tone: 'warning', run: () => store.removeLineGate(id, gate.flag) });
+  }
+  fields.push({
+    k: 'add requirement', t: 'pick', get: () => null,
+    opts: () => lineGateOptions(store, id).filter((o) => !l.requires.some((g) => g.kind === 'flag' && g.flag === o.id)),
+    set: (v) => { if (v) store.addLineGate(id, v); },
+    clearLabel: 'pick a flag an upstream line opens',
+  });
+  if (fields.length === 1) fields.unshift({ k: 'none', t: 'val', get: () => 'open from the start (no greater dependency)' });
+  return fields;
+}
+
+function lineRewardsGroup(store: StoryStore, id: string): FieldSpec[] {
+  const l = store.line(id)!;
+  return [
+    { k: 'cash', t: 'num', get: () => l.rewards.cash ?? 0, min: 0, max: 1000000, step: 25, precision: 0, set: (v) => store.editLine(id, (x) => { x.rewards.cash = v; }) },
+    { k: 'rep Δ', t: 'num', get: () => l.rewards.repDelta ?? 0, min: -100, max: 100, step: 1, precision: 0, set: (v) => store.editLine(id, (x) => { x.rewards.repDelta = v; }) },
+  ];
+}
+
+function lineMissionsGroup(store: StoryStore, id: string): FieldSpec[] {
+  const l = store.line(id)!;
+  const fields: FieldSpec[] = l.missions.map((m) => ({
+    k: `▸ ${m.title}`, t: 'act' as const, run: () => store.select(m.key),
+  }));
+  if (l.missions.length === 0) fields.push({ k: 'none', t: 'val', get: () => 'no missions yet — add the first' });
+  fields.push({ k: '+ add mission', t: 'act', tone: 'accent', run: () => store.newMission() });
+  return fields;
+}
+
+function questlinePanel(store: StoryStore, id: string): PanelSpec {
+  return {
+    groups: [
+      { title: 'QUESTLINE', fields: lineIdentityGroup(store, id), layout: 'rows' },
+      { title: 'REQUIREMENTS (greater dependency)', fields: lineRequirementsGroup(store, id), layout: 'rows' },
+      { title: 'REWARDS (finish the line)', fields: lineRewardsGroup(store, id), layout: 'rows' },
+      { title: 'MISSIONS', fields: lineMissionsGroup(store, id), layout: 'rows' },
+    ],
+  };
+}
+
+// ── MISSION panel ────────────────────────────────────────────────────────────
+
+/** every flag any OTHER mission in this line provides — the affordances a
+ *  constraint may name. */
 function gateOptions(store: StoryStore, selfKey: string): { id: string; label: string; group?: string }[] {
   const g = store.graph();
   const out: { id: string; label: string; group?: string }[] = [];
@@ -61,7 +163,6 @@ function identityGroup(store: StoryStore, key: string): FieldSpec[] {
     { k: 'title', t: 'text', get: () => d.title, set: (v) => store.edit(key, (x) => { x.title = v; }) },
     { k: 'id', t: 'val', get: () => d.key },
     { k: 'author', t: 'text', get: () => d.author, set: (v) => store.edit(key, (x) => { x.author = v; }), placeholder: 'who wrote this quest' },
-    { k: 'questline', t: 'text', get: () => d.questline, set: (v) => store.edit(key, (x) => { x.questline = v; }), placeholder: 'e.g. Main Story' },
     { k: 'fromNPC', t: 'text', get: () => d.client, set: (v) => store.edit(key, (x) => { x.client = v; }) },
     { k: 'desc', t: 'text', get: () => d.desc, set: (v) => store.edit(key, (x) => { x.desc = v; }), width: 2, placeholder: 'what this quest is about' },
   ];
@@ -172,10 +273,7 @@ function wiringGroup(store: StoryStore, key: string): FieldSpec[] {
   return fields;
 }
 
-export function storyPanel(store: StoryStore, key: string): PanelSpec {
-  const d = store.draft(key);
-  if (!d) return { groups: [{ title: 'QUEST', fields: [{ k: 'missing', t: 'val', get: () => 'no quest selected' }], layout: 'rows' }] };
-
+function missionPanel(store: StoryStore, key: string): PanelSpec {
   const groups: PanelSpec['groups'] = [
     { title: 'IDENTITY', fields: identityGroup(store, key), layout: 'rows' },
     { title: 'CONSTRAINTS', fields: constraintsGroup(store, key), layout: 'rows' },
@@ -187,4 +285,14 @@ export function storyPanel(store: StoryStore, key: string): PanelSpec {
   if (focused) groups.push({ title: 'EVENT — cutscene · location · dialog', fields: focused, layout: 'rows' });
   groups.push({ title: 'WIRING (substrate)', fields: wiringGroup(store, key), layout: 'rows', tier: 'debug' });
   return { groups };
+}
+
+/** The panel dispatches on selection (truth lives in the store): a selected
+ *  mission shows the mission panel; else the selected questline; else empty. */
+export function storyPanel(store: StoryStore): PanelSpec {
+  const key = store.selectedKey();
+  if (key && store.draft(key)) return missionPanel(store, key);
+  const lineId = store.selectedLineId();
+  if (lineId && store.line(lineId)) return questlinePanel(store, lineId);
+  return { groups: [{ title: 'STORYLINE', fields: [{ k: 'start', t: 'val', get: () => 'pick or create a questline to begin' }], layout: 'rows' }] };
 }
