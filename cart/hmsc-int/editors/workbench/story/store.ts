@@ -10,14 +10,16 @@
 // (the prior single seed was Claude placeholder, not authored content); the
 // first move is always "New Questline".
 //
-// THE AUTHORED SHAPE IS THE USER'S (req_0910/req_0914), not MissionDef's: a
-// quest is title / id / author / fromNPC / desc / reward / constraints /
-// events(cutscene, location, order, dialog). The runtime MissionDef is the
-// PROJECTION (events→stages, constraints→requires, fromNPC→client) the compile
-// step makes — so authoring reads as the user thinks while still riding the
-// ruled substrate. Fields MissionDef lacks (author, desc, per-event
-// location/cutscene/dialog) and the whole Questline wrapper live here and
-// persist with the editor; the V20 'storyline' stream is the persistence seam.
+// POST-ITS EVERYWHERE (req_0922): notes attach to questlines, missions, events,
+// AND a general board pad — scattered thoughts kept in place, never one god
+// notepad. WORLD TRANSITIONS (req_0921): a story point (mission/line anchor) can
+// declare a persistent world-state change ("mission 3 complete → apartment
+// catches fire"); this is the INFRA — the rich timeline editor is deferred.
+//
+// IT SAVES (req_0921, "notes that save"): the whole board persists to the twig
+// file (cart/hmsc-int/sessions/_route-twigs.json) via the same door materials
+// uses, so reload restores everything. The V20 'storyline' stream (undo chain)
+// remains the heavier persistence follow-up.
 //
 // The board graph is DERIVED on read (buildQuestGraph over the SELECTED line's
 // missions) — never stored.
@@ -25,13 +27,18 @@
 import type { MissionDef } from '../../../game/missions';
 import type { ActivityVerb } from '../../../game/activities';
 import { buildQuestGraph, type QuestGraph } from './model';
+import { nextSeqId, type Note, type WorldTransition } from './notes';
+import { readRouteTwigState, writeRouteTwigState } from '../../twigs';
+
+export type { Note, WorldChange, WorldTransition } from './notes';
+
+const STORY_ROUTE = '/workbench/story';
 
 /** One spoken line inside an event (the V16 cutscene-clock dialog). */
 export type QuestDialogLine = { speaker: string; text: string };
 
-/** THE USER'S "event": an ordered beat carrying its cutscene, location, and
- *  dialog. Order is the array index. Objectives stay as the mission predicate
- *  vocabulary (deep target-pickers are the next pass). */
+/** THE USER'S "event": an ordered beat carrying its cutscene, location, dialog,
+ *  and its own scattered post-its. Order is the array index. */
 export type QuestEvent = {
   id: string;
   /** one line of player-facing meaning (the beat's desc) */
@@ -43,6 +50,8 @@ export type QuestEvent = {
   dialog: QuestDialogLine[];
   /** completion predicates (MissionStage.objectives shape) */
   objectives: MissionDef['stages'][number]['objectives'][number][];
+  /** post-its on this beat */
+  notes: Note[];
 };
 
 /** The editable quest — the user's shape verbatim, MissionDef-backed fields kept. */
@@ -55,6 +64,10 @@ export type QuestDraft = {
   reward: { cash?: number; repDelta?: number };
   requires: NonNullable<MissionDef['requires']>[number][]; // constraints
   events: QuestEvent[];
+  /** post-its on this mission */
+  notes: Note[];
+  /** transitional world states anchored at this mission's story points */
+  transitions: WorldTransition[];
   // ── runtime-substrate fields, kept (demoted in the panel) ──
   verb: ActivityVerb;
   binding?: MissionDef['binding'];
@@ -67,9 +80,7 @@ export type QuestDraft = {
 /** Line-level bonus for finishing the WHOLE line (atop each mission's reward). */
 export type QuestlineRewards = { cash?: number; repDelta?: number };
 
-/** THE TOP OF THE HIERARCHY (req_0919): a created object, not a string. Holds
- *  the core array of missions, a summary, the GREATER dependency (line-level
- *  requirements — the missions inside have their own), and the line reward. */
+/** THE TOP OF THE HIERARCHY (req_0919): a created object, not a string. */
 export type Questline = {
   id: string;
   title: string;
@@ -79,6 +90,10 @@ export type Questline = {
   rewards: QuestlineRewards;
   /** the core array of missions */
   missions: QuestDraft[];
+  /** post-its on the line as a whole */
+  notes: Note[];
+  /** transitional world states anchored at line-level points (start/complete) */
+  transitions: WorldTransition[];
 };
 
 function blankDraft(key: string, n: number): QuestDraft {
@@ -91,6 +106,8 @@ function blankDraft(key: string, n: number): QuestDraft {
     reward: {},
     requires: [],
     events: [],
+    notes: [],
+    transitions: [],
     verb: 'role',
     binding: undefined,
     expiryTicks: null,
@@ -100,7 +117,28 @@ function blankDraft(key: string, n: number): QuestDraft {
 }
 
 function blankQuestline(id: string, n: number): Questline {
-  return { id, title: `Questline ${n}`, summary: '', requires: [], rewards: {}, missions: [] };
+  return { id, title: `Questline ${n}`, summary: '', requires: [], rewards: {}, missions: [], notes: [], transitions: [] };
+}
+
+/** Fill arrays older saved data may lack — forward migration on load. */
+function normalizeLine(l: Questline): Questline {
+  l.notes ??= [];
+  l.transitions ??= [];
+  l.requires ??= [];
+  l.missions ??= [];
+  for (const m of l.missions) {
+    m.notes ??= [];
+    m.transitions ??= [];
+    m.requires ??= [];
+    m.events ??= [];
+    for (const e of m.events) e.notes ??= [];
+  }
+  return l;
+}
+
+function maxSeq(prefix: string, items: readonly { id: string }[]): number {
+  const probe = nextSeqId(prefix, items);
+  return parseInt(/(\d+)$/.exec(probe)![1], 10) - 1;
 }
 
 const EMPTY_GRAPH: QuestGraph = { nodes: [], edges: [], external: [] };
@@ -118,21 +156,21 @@ export interface StoryStore {
   addLineGate(id: string, flag: string): void;
   removeLineGate(id: string, flag: string): void;
 
+  // ── general board notes (the "in general" pad) ──
+  generalNotes(): Note[];
+  editGeneral(mutate: (notes: Note[]) => void): void;
+
   // ── missions within the SELECTED line ──
-  /** the conditional state machine over the SELECTED line's missions (empty
-   *  when no line is selected). Derived on read — never stored. */
   graph(): QuestGraph;
   selectedKey(): string | null;
   select(key: string | null): void;
   draft(key: string): QuestDraft | null;
-  /** add a blank mission to the selected line, select it; returns its key */
   newMission(): string | null;
   removeMission(key: string): void;
   /** the one writer — every mutator routes here (the persistence seam) */
   edit(key: string, mutate: (d: QuestDraft) => void): void;
   addFlagGate(key: string, flag: string): void;
   removeFlagGate(key: string, flag: string): void;
-  // event focus — which beat the panel expands for deep editing
   focusedEvent(): number | null;
   focusEvent(index: number | null): void;
   addEvent(key: string): void;
@@ -143,22 +181,34 @@ export interface StoryStore {
 }
 
 export function createStoryStore(): StoryStore {
-  const lines: Questline[] = [];
-  let selectedLine: string | null = null;
-  let selected: string | null = null;
+  // load persisted board (guarded — a twigless host degrades to empty/in-session)
+  const load = <T,>(key: string, initial: T): T => {
+    try { return readRouteTwigState(STORY_ROUTE, key, initial); } catch { return initial; }
+  };
+  const lines: Questline[] = (load<Questline[]>('lines', [])).map(normalizeLine);
+  const general: Note[] = load<Note[]>('general', []);
+  let selectedLine: string | null = load<string | null>('selLine', null);
+  let selected: string | null = load<string | null>('selKey', null);
   let focused: number | null = null;
-  // monotonic id counters (no Date.now/Math.random in the cart host)
-  let lineSeq = 0;
-  let missionSeq = 0;
+  // seed monotonic counters past whatever the saved data already used
+  let lineSeq = maxSeq('line', lines);
+  let missionSeq = lines.reduce((m, l) => Math.max(m, maxSeq('quest', l.missions)), 0);
+
   const listeners = new Set<() => void>();
-  const notify = () => { for (const fn of listeners) fn(); };
+  const persist = () => {
+    try {
+      writeRouteTwigState(STORY_ROUTE, 'lines', lines);
+      writeRouteTwigState(STORY_ROUTE, 'general', general);
+      writeRouteTwigState(STORY_ROUTE, 'selLine', selectedLine);
+      writeRouteTwigState(STORY_ROUTE, 'selKey', selected);
+    } catch { /* twigless host — stay in-session */ }
+  };
+  const notify = () => { persist(); for (const fn of listeners) fn(); };
 
   const lineByKey = (id: string) => lines.find((l) => l.id === id) ?? null;
   const currentLine = () => (selectedLine ? lineByKey(selectedLine) : null);
   const draftByKey = (key: string) => currentLine()?.missions.find((d) => d.key === key) ?? null;
 
-  // the graph reads only key/title/verb/client/binding/requires/hooks — never
-  // events — so the draft shape satisfies it as-is (extra fields ignored).
   const graphView = (): QuestGraph => {
     const line = currentLine();
     return line ? buildQuestGraph(line.missions as unknown as MissionDef[]) : EMPTY_GRAPH;
@@ -210,6 +260,9 @@ export function createStoryStore(): StoryStore {
       notify();
     },
 
+    generalNotes: () => general,
+    editGeneral: (mutate) => { mutate(general); notify(); },
+
     graph: graphView,
     selectedKey: () => selected,
     select: (key) => { if (key !== selected) focused = null; selected = key; notify(); },
@@ -259,7 +312,7 @@ export function createStoryStore(): StoryStore {
       const d = draftByKey(key);
       if (!d) return;
       const n = d.events.length + 1;
-      d.events.push({ id: `event-${n}`, brief: `Event ${n}`, cutscene: '', dialog: [], objectives: [] });
+      d.events.push({ id: `event-${n}`, brief: `Event ${n}`, cutscene: '', dialog: [], objectives: [], notes: [] });
       focused = d.events.length - 1;
       notify();
     },
@@ -286,7 +339,7 @@ export function createStoryStore(): StoryStore {
 
 let live: StoryStore | null = null;
 
-/** The in-session singleton. Starts EMPTY — the first move is New Questline. */
+/** The in-session singleton, rehydrated from the twig file. Empty on first run. */
 export function storyWorkbenchStore(): StoryStore {
   if (!live) live = createStoryStore();
   return live;

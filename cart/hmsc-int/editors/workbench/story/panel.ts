@@ -1,41 +1,41 @@
 // editors/workbench/story/panel.ts — the STORYLINE BOARD's headless half: the
-// roster (questlines, each with its missions nested) and the PanelSpec the one
-// field renderer draws. No React (the characters.test.ts bundling law).
+// roster (a general-notes pad, then every questline with its missions nested)
+// and the PanelSpec the one field renderer draws. No React (the bundling law).
 //
-// THE HIERARCHY IS QUESTLINE-FIRST (req_0919/req_0920). The roster lists every
-// questline; under each, its missions are indented. Selecting a questline shows
-// the QUESTLINE panel (summary · requirements · rewards · its missions);
-// selecting a mission shows the MISSION panel.
+// THE HIERARCHY IS QUESTLINE-FIRST (req_0919/req_0920). POST-ITS EVERYWHERE
+// (req_0922): a NOTES group rides the general pad, every questline, every
+// mission, and every event — scattered thoughts kept in place. WORLD
+// TRANSITIONS (req_0921): a TRANSITIONS group on missions and lines anchors a
+// persistent world-state change at a story point (the infra; the rich timeline
+// editor is deferred).
 //
-// QUESTLINE panel (the user's shape):
-//   IDENTITY      title · id · summary
-//   REQUIREMENTS  the GREATER dependency — gates that hold before the line
-//                 opens (missions inside carry their own constraints)
-//   REWARDS       the bonus for finishing the WHOLE line (cash · rep)
-//   MISSIONS      the core array — click to edit, + add
-//
-// MISSION panel (the user's shape, in their order):
-//   IDENTITY     title · id · author · fromNPC · desc
-//   CONSTRAINTS  the unlock gates (a flag another mission in this line opens)
-//   DEPENDENTS   what this mission unlocks downstream (derived from the edges)
-//   REWARD       cash · rep
-//   EVENTS       the ordered beats — location, cutscene, dialog
-//   WIRING       verb / binding / expiry — the runtime substrate, demoted
+// QUESTLINE panel: identity · requirements (greater dependency) · rewards
+// (finish-the-line) · missions · notes · transitions.
+// MISSION panel: identity · constraints · dependents · reward · events ·
+// notes · transitions · wiring(substrate, demoted).
 
 import type { FieldSpec, PanelSpec } from '../../../shell/fields';
 import type { RosterRow } from '../../../shell/Workbench';
 import { GAME_ACTIVITIES } from '../../../game/activities';
 import type { ActivityVerb } from '../../../game/activities';
 import type { StoryStore } from './store';
+import {
+  addNote, setNote, removeNote,
+  addTransition, removeTransition, setTransitionLabel, addChange, removeChange, setChange,
+  type Note, type WorldTransition,
+} from './notes';
 
 const BINDINGS = ['job', 'person', 'position'] as const;
 const COORD = { min: -100000, max: 100000, step: 1, precision: 1 } as const;
 
-/** Roster row ids encode the hierarchy: `L:<lineId>` is a questline header,
- *  `M:<lineId>:<key>` is a mission under it. source.ts parses the prefix. */
+const GENERAL_ROW = 'G:';
+
+/** Roster row ids encode the hierarchy: `G:` the general pad, `L:<lineId>` a
+ *  questline header, `M:<lineId>:<key>` a mission under it. */
 export const lineRowId = (lineId: string) => `L:${lineId}`;
 export const missionRowId = (lineId: string, key: string) => `M:${lineId}:${key}`;
-export function parseRowId(rowId: string): { line: string; mission?: string } | null {
+export function parseRowId(rowId: string): { general: true } | { line: string; mission?: string } | null {
+  if (rowId === GENERAL_ROW) return { general: true };
   if (rowId.startsWith('L:')) return { line: rowId.slice(2) };
   if (rowId.startsWith('M:')) {
     const rest = rowId.slice(2);
@@ -46,9 +46,9 @@ export function parseRowId(rowId: string): { line: string; mission?: string } | 
   return null;
 }
 
-/** roster = every questline, each followed by its (indented) missions. */
+/** roster = the general pad, then every questline with its (indented) missions. */
 export function storyRoster(store: StoryStore): RosterRow[] {
-  const rows: RosterRow[] = [];
+  const rows: RosterRow[] = [{ id: GENERAL_ROW, label: '📌 General Notes', icon: 'SquarePen' }];
   for (const line of store.questlines()) {
     rows.push({ id: lineRowId(line.id), label: line.title || '(untitled line)', icon: 'GitBranch' });
     for (const m of line.missions) {
@@ -56,6 +56,57 @@ export function storyRoster(store: StoryStore): RosterRow[] {
     }
   }
   return rows;
+}
+
+// ── shared post-it + transition builders (one impl, reused on every surface) ──
+
+type NoteCommit = (mutate: (arr: Note[]) => void) => void;
+type TransitionCommit = (mutate: (arr: WorldTransition[]) => void) => void;
+
+function notesFields(notes: Note[], commit: NoteCommit): FieldSpec[] {
+  const fields: FieldSpec[] = [];
+  notes.forEach((note, i) => {
+    fields.push({ k: `📌 ${i + 1}`, t: 'text', width: 2, get: () => note.text, set: (v) => commit((arr) => setNote(arr, note.id, v)), placeholder: 'a thought, a TODO, a feature this needs…' });
+    fields.push({ k: `✕ remove note ${i + 1}`, t: 'act', tone: 'warning', run: () => commit((arr) => removeNote(arr, note.id)) });
+  });
+  if (notes.length === 0) fields.push({ k: 'none', t: 'val', get: () => 'no notes here yet' });
+  fields.push({ k: '+ add note', t: 'act', tone: 'accent', run: () => commit(addNote) });
+  return fields;
+}
+
+function transitionsFields(transitions: WorldTransition[], anchors: { id: string; label: string }[], commit: TransitionCommit): FieldSpec[] {
+  const fields: FieldSpec[] = [];
+  transitions.forEach((t, ti) => {
+    const anchorLabel = anchors.find((a) => a.id === t.at)?.label ?? t.at;
+    fields.push({ k: `◆ ${ti + 1} · ${anchorLabel}`, t: 'text', width: 2, get: () => t.label, set: (v) => commit((arr) => setTransitionLabel(arr, t.id, v)), placeholder: 'what changes (e.g. apartment building catches fire)' });
+    t.changes.forEach((c, ci) => {
+      fields.push({ k: `target ${ti + 1}.${ci + 1}`, t: 'text', get: () => c.target, set: (v) => commit((arr) => { const tr = arr.find((x) => x.id === t.id); if (tr) setChange(tr, c.id, { target: v }); }), placeholder: 'what in the world (building, prop, npc…)' });
+      fields.push({ k: `effect ${ti + 1}.${ci + 1}`, t: 'text', get: () => c.effect, set: (v) => commit((arr) => { const tr = arr.find((x) => x.id === t.id); if (tr) setChange(tr, c.id, { effect: v }); }), placeholder: 'the new persistent state' });
+      fields.push({ k: `✕ change ${ti + 1}.${ci + 1}`, t: 'act', tone: 'warning', run: () => commit((arr) => { const tr = arr.find((x) => x.id === t.id); if (tr) removeChange(tr, c.id); }) });
+    });
+    fields.push({ k: `+ add change (transition ${ti + 1})`, t: 'act', tone: 'accent', run: () => commit((arr) => { const tr = arr.find((x) => x.id === t.id); if (tr) addChange(tr); }) });
+    fields.push({ k: `✕ remove transition ${ti + 1}`, t: 'act', tone: 'warning', run: () => commit((arr) => removeTransition(arr, t.id)) });
+  });
+  if (transitions.length === 0) fields.push({ k: 'none', t: 'val', get: () => 'no transitions — anchor a world change at a story point' });
+  fields.push({
+    k: 'add transition at…', t: 'pick', get: () => null,
+    opts: () => anchors,
+    set: (v) => { if (v) commit((arr) => addTransition(arr, v)); },
+    clearLabel: 'pick a story point',
+  });
+  return fields;
+}
+
+// ── general notes pad ──────────────────────────────────────────────────────────
+
+function generalPanel(store: StoryStore): PanelSpec {
+  return {
+    groups: [{
+      title: 'GENERAL NOTES',
+      fields: notesFields(store.generalNotes(), (m) => store.editGeneral(m)),
+      layout: 'rows',
+    }],
+  };
 }
 
 // ── QUESTLINE panel ──────────────────────────────────────────────────────────
@@ -82,6 +133,8 @@ function lineGateOptions(store: StoryStore, selfLine: string): { id: string; lab
   }
   return out;
 }
+
+const LINE_ANCHORS = [{ id: 'start', label: 'on line start' }, { id: 'complete', label: 'on line complete' }];
 
 function lineIdentityGroup(store: StoryStore, id: string): FieldSpec[] {
   const l = store.line(id)!;
@@ -128,12 +181,15 @@ function lineMissionsGroup(store: StoryStore, id: string): FieldSpec[] {
 }
 
 function questlinePanel(store: StoryStore, id: string): PanelSpec {
+  const l = store.line(id)!;
   return {
     groups: [
       { title: 'QUESTLINE', fields: lineIdentityGroup(store, id), layout: 'rows' },
       { title: 'REQUIREMENTS (greater dependency)', fields: lineRequirementsGroup(store, id), layout: 'rows' },
       { title: 'REWARDS (finish the line)', fields: lineRewardsGroup(store, id), layout: 'rows' },
       { title: 'MISSIONS', fields: lineMissionsGroup(store, id), layout: 'rows' },
+      { title: 'NOTES', fields: notesFields(l.notes, (m) => store.editLine(id, (x) => m(x.notes))), layout: 'rows' },
+      { title: 'TRANSITIONS (world state)', fields: transitionsFields(l.transitions, LINE_ANCHORS, (m) => store.editLine(id, (x) => m(x.transitions))), layout: 'rows' },
     ],
   };
 }
@@ -155,6 +211,17 @@ function gateOptions(store: StoryStore, selfKey: string): { id: string; label: s
     }
   }
   return out;
+}
+
+/** the story points a mission transition can anchor to. */
+function missionAnchors(store: StoryStore, key: string): { id: string; label: string }[] {
+  const d = store.draft(key)!;
+  return [
+    { id: 'accept', label: 'on accept' },
+    { id: 'complete', label: 'on complete' },
+    { id: 'fail', label: 'on fail' },
+    ...d.events.map((e, i) => ({ id: `event:${e.id}`, label: `after event ${i + 1}: ${e.brief}` })),
+  ];
 }
 
 function identityGroup(store: StoryStore, key: string): FieldSpec[] {
@@ -210,7 +277,7 @@ function rewardGroup(store: StoryStore, key: string): FieldSpec[] {
 }
 
 /** EVENTS — the ordered beats. The list focuses a beat; the focused beat
- *  expands into its own group (location, cutscene, dialog). */
+ *  expands into its own group (location, cutscene, dialog, notes). */
 function eventsGroup(store: StoryStore, key: string): FieldSpec[] {
   const d = store.draft(key)!;
   const focused = store.focusedEvent();
@@ -247,6 +314,8 @@ function focusedEventGroup(store: StoryStore, key: string): FieldSpec[] | null {
   });
   fields.push({ k: '+ add dialog line', t: 'act', tone: 'accent', run: () => store.edit(key, (x) => { x.events[i].dialog.push({ speaker: '', text: '' }); }) });
   fields.push({ k: 'objectives', t: 'val', get: () => ev.objectives.length ? `${ev.objectives.length} (target-pickers: next pass)` : 'none yet' });
+  // post-its on this beat
+  for (const f of notesFields(ev.notes, (m) => store.edit(key, (x) => m(x.events[i].notes)))) fields.push(f);
   return fields;
 }
 
@@ -274,6 +343,7 @@ function wiringGroup(store: StoryStore, key: string): FieldSpec[] {
 }
 
 function missionPanel(store: StoryStore, key: string): PanelSpec {
+  const d = store.draft(key)!;
   const groups: PanelSpec['groups'] = [
     { title: 'IDENTITY', fields: identityGroup(store, key), layout: 'rows' },
     { title: 'CONSTRAINTS', fields: constraintsGroup(store, key), layout: 'rows' },
@@ -282,17 +352,20 @@ function missionPanel(store: StoryStore, key: string): PanelSpec {
     { title: 'EVENTS', fields: eventsGroup(store, key), layout: 'rows' },
   ];
   const focused = focusedEventGroup(store, key);
-  if (focused) groups.push({ title: 'EVENT — cutscene · location · dialog', fields: focused, layout: 'rows' });
+  if (focused) groups.push({ title: 'EVENT — cutscene · location · dialog · notes', fields: focused, layout: 'rows' });
+  groups.push({ title: 'NOTES', fields: notesFields(d.notes, (m) => store.edit(key, (x) => m(x.notes))), layout: 'rows' });
+  groups.push({ title: 'TRANSITIONS (world state)', fields: transitionsFields(d.transitions, missionAnchors(store, key), (m) => store.edit(key, (x) => m(x.transitions))), layout: 'rows' });
   groups.push({ title: 'WIRING (substrate)', fields: wiringGroup(store, key), layout: 'rows', tier: 'debug' });
   return { groups };
 }
 
 /** The panel dispatches on selection (truth lives in the store): a selected
- *  mission shows the mission panel; else the selected questline; else empty. */
+ *  mission → mission panel; else a selected questline → questline panel; else
+ *  the general notes pad (the landing). */
 export function storyPanel(store: StoryStore): PanelSpec {
   const key = store.selectedKey();
   if (key && store.draft(key)) return missionPanel(store, key);
   const lineId = store.selectedLineId();
   if (lineId && store.line(lineId)) return questlinePanel(store, lineId);
-  return { groups: [{ title: 'STORYLINE', fields: [{ k: 'start', t: 'val', get: () => 'pick or create a questline to begin' }], layout: 'rows' }] };
+  return generalPanel(store);
 }

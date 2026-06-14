@@ -104,7 +104,7 @@ classifier({
   ItemRowTextOn: { type: 'Text', fontSize: 'theme:fontLg', color: 'theme:text', style: { fontWeight: 700 } },
 
   // 3 — properties column (panel kit itself comes from studio.cls)
-  PropsCol: { type: 'Box', style: { width: 290, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bg', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
+  PropsCol: { type: 'Box', style: { width: 360, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bg', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
 
   // HEROBAR-0606 (USER: "this header is crowded, and there is a button in
   // that array u cant even see") — the hero is a STACK, never a crowded row:

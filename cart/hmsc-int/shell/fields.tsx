@@ -460,7 +460,7 @@ function GroupBlock({ g, accent, onEdit }: { g: PanelGroup; accent: string; onEd
         </C.GroupHead>
       </Pressable>
       {open ? (
-        <C.FieldStrip style={g.layout === 'rows' ? { flexDirection: 'column', alignItems: 'stretch' } : undefined}>
+        <C.FieldStrip style={g.layout === 'rows' ? { flexDirection: 'column', flexWrap: 'nowrap', alignItems: 'stretch' } : undefined}>
           {g.fields.map((f) => <FieldCell key={f.k} f={f} path={`${g.title}/${f.k}`} wide={g.layout === 'rows'} onEdit={onEdit} />)}
         </C.FieldStrip>
       ) : null}

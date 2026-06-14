@@ -39,6 +39,7 @@ export function storySource(): WorkbenchSource<string> {
     onPick: (rowId: string) => {
       const parsed = parseRowId(rowId);
       if (!parsed) return;
+      if ('general' in parsed) { store.selectLine(null); store.select(null); return; }
       store.selectLine(parsed.line);
       store.select(parsed.mission ?? null);
     },
