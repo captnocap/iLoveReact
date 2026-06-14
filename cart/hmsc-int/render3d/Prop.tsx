@@ -1,159 +1,35 @@
 import { memo } from 'react';
 import type { PropKind, WorldProp } from '../design';
-import { Rock } from './props/Rock';
-import { FireHydrant } from './props/FireHydrant';
 import { StreetSign } from './props/StreetSign';
-import { StreetLight } from './props/StreetLight';
-import { Bush } from './props/Bush';
-import { StopSign } from './props/StopSign';
-import { TrafficLight } from './props/TrafficLight';
-import { Payphone } from './props/Payphone';
-import { Dumpster } from './props/Dumpster';
-import { Mailbox } from './props/Mailbox';
-import { Fence } from './props/Fence';
-import { Tree } from './props/Tree';
-import { Ball } from './props/Ball';
-import { WallDecor } from './props/WallDecor';
-import { Furniture } from './props/Furniture';
-import { StreetFurniture } from './props/StreetFurniture';
+import { LedTicker } from './props/LedTicker';
 import { DataProp } from './props/DataProp';
+import { ImportedProp } from './props/ImportedProp';
+import { isImportedPropKind } from '../game/kinds/importedProps';
 
-// The one place that maps a PropKind to its model. Every placed prop renders
-// through this registry — the renderer never learns a prop's name, it just looks
-// the kind up here, the same way the geometry registry resolves a shape. Adding
-// a prop is: a kind in propKinds.ts + a model file + one line here.
+// PROPSINGLE-0782: every prop renders through the ONE generic component —
+// DataProp → resolvePropParts(prop) → the prop's single recipe (the SAME source
+// the compile bake reads). So every prop is skinnable (click-to-pick parts) and
+// matches the compiled game by construction, with no per-prop render code.
+//
+// This map holds only the rare SPECIAL cases that aren't a plain recipe yet;
+// every other kind falls through to DataProp. Imported (GLB) props go to
+// ImportedProp. The former per-prop components (Payphone, Dumpster, Tree, Rock,
+// Furniture…) are retired — their geometry now lives once in compile/propRecipes.
 type PropModel = (props: { prop: WorldProp }) => any;
 
-const PROP_MODELS: Record<PropKind, PropModel> = {
-  rock: Rock,
-  rockLarge: Rock,
-  rockSmall: Rock,
-  fireHydrant: FireHydrant,
+const PROP_MODELS: Partial<Record<PropKind, PropModel>> = {
+  // Street signs carry a default route-plate texture (a defaultTextureKey the
+  // flat recipe can't express yet), so they keep their bespoke component.
   streetSign: StreetSign,
-  streetLight: StreetLight,
-  bush: Bush,
-  bushLarge: Bush,
-  bushLow: Bush,
-  bushSparse: Bush,
-  stopSign: StopSign,
-  trafficLight: TrafficLight,
-  payphone: Payphone,
-  dumpster: Dumpster,
-  mailbox: Mailbox,
-  fence: Fence,
-  trafficCone: StreetFurniture,
-  barrier: StreetFurniture,
-  trashCan: StreetFurniture,
-  bench: Furniture,
-  planter: StreetFurniture,
-  treeOak: Tree,
-  treePine: Tree,
-  treeBirch: Tree,
-  treeCypress: Tree,
-  treePalm: Tree,
-  treeDead: Tree,
-  boulder: Rock,
-  rockFlat: Rock,
-  rockSpire: Rock,
-  rockMossy: Rock,
-  rockPile: Rock,
-  ballBeach: Ball,
-  ballSoccer: Ball,
-  ballBasketball: Ball,
-  wallPainting: WallDecor,
-  ledLight: WallDecor,
-  chair: Furniture,
-  chairRed: Furniture,
-  chairBlue: Furniture,
-  chairGreen: Furniture,
-  couch: Furniture,
-  table: Furniture,
-  floorLamp: Furniture,
-  bedSingle: Furniture,
-  bedDouble: Furniture,
-  cupboard: Furniture,
-  sink: Furniture,
-  oven: Furniture,
-  fridge: Furniture,
-  computer: Furniture,
-  mirror: WallDecor,
-  telephonePole: StreetFurniture,
-  basketballHoop: StreetFurniture,
-  // ── PROPBATCH-0611: tree size variants ride the species models ────────────
-  treeOakYoung: Tree,
-  treeOakGiant: Tree,
-  treePineYoung: Tree,
-  treePineGiant: Tree,
-  // ── PROPBATCH-0611: everything else is a DATA recipe (propModels.ts),
-  //    rendered by the one generic component ─────────────────────────────────
-  grassPatch: DataProp,
-  grassTall: DataProp,
-  rockJagged: DataProp,
-  rockShard: DataProp,
-  radioTower: DataProp,
-  gasPump: DataProp,
-  vendingMachine: DataProp,
-  storeShelf: DataProp,
-  businessSign: DataProp,
-  shopSign: DataProp,
-  poster: DataProp,
-  hospitalSign: DataProp,
-  policeSign: DataProp,
-  bookStack: DataProp,
-  recordPlayer: DataProp,
-  vinylRecord: DataProp,
-  albumCover: DataProp,
-  speaker: DataProp,
-  speakerStack: DataProp,
-  cassette: DataProp,
-  shippingContainer: DataProp,
-  concretePipe: DataProp,
-  pipeStack: DataProp,
-  corrugatedSheet: DataProp,
-  cableSpool: DataProp,
-  lockerSet: DataProp,
-  oilTank: DataProp,
-  tire: DataProp,
-  tireStack: DataProp,
-  barrel: DataProp,
-  steelDrum: DataProp,
-  propaneTank: DataProp,
-  jerryCan: DataProp,
-  cinderBlock: DataProp,
-  brick: DataProp,
-  rubblePile: DataProp,
-  crate: DataProp,
-  pallet: DataProp,
-  palletStack: DataProp,
-  toiletPaper: DataProp,
-  // ── PROPVENUE-0611: parks + shop interiors (all data recipes) ─────────────
-  fountain: DataProp,
-  drinkingFountain: DataProp,
-  loungeChair: DataProp,
-  swingset: DataProp,
-  sandCastle: DataProp,
-  picketFence: DataProp,
-  appleTree: DataProp,
-  apple: DataProp,
-  arcadeCabinet: DataProp,
-  slotMachine: DataProp,
-  clothingRack: DataProp,
-  displayCase: DataProp,
-  liquorShelf: DataProp,
-  beerCase: DataProp,
-  dinerBooth: DataProp,
-  orderCounter: DataProp,
-  menuBoard: DataProp,
-  sodaMachine: DataProp,
-  openSign: DataProp,
-  greenCrossSign: DataProp,
+  // The LED ticker's lit face is ANIMATED (scrolls each frame), so it can't be a
+  // static recipe — its custom renderer draws the housing + the moving LEDs.
+  ledTicker: LedTicker,
 };
 
-// One placed prop, drawn by its kind's model at its anchor + yaw. Memoized on
-// the (referentially stable) prop so a player/camera frame does not re-render
-// every prop — the same statics-stability contract the road meshes follow.
+// One placed prop, drawn at its anchor + yaw. Memoized on the (referentially
+// stable) prop so a player/camera frame does not re-render every prop.
 export const Prop = memo(function Prop(props: { prop: WorldProp }) {
-  const Model = PROP_MODELS[props.prop.kind];
-  if (!Model) return null;
+  if (isImportedPropKind(props.prop.kind)) return <ImportedProp prop={props.prop} />;
+  const Model = PROP_MODELS[props.prop.kind] ?? DataProp;
   return <Model prop={props.prop} />;
 });

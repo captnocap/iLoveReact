@@ -168,6 +168,7 @@ import { neonSignDef } from '../../compile/propRecipes/neonSign';
 import { blockLettersDef } from '../../compile/propRecipes/blockText';
 import { neonLogoDef } from '../../compile/propRecipes/neonLogo';
 import { neonLogoDoubleDef } from '../../compile/propRecipes/neonLogoDouble';
+import { ledTickerDef } from '../../compile/propRecipes/ledTicker';
 import { officeDeskDef } from '../../compile/propRecipes/officeDesk';
 import { phoneDef } from '../../compile/propRecipes/phone';
 import { plateDef } from '../../compile/propRecipes/plate';
@@ -519,6 +520,8 @@ export type BuiltinPropKind =
   | 'blockLetters'
   | 'neonLogo'
   | 'neonLogoDouble'
+  // ledTicker = a scrolling LED ticker-tape; its `text` is the message (animated).
+  | 'ledTicker'
   // decor
   | 'rug'
   | 'pottedPlant'
@@ -907,6 +910,7 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   blockLetters: blockLettersDef,
   neonLogo: neonLogoDef,
   neonLogoDouble: neonLogoDoubleDef,
+  ledTicker: ledTickerDef,
   officeDesk: officeDeskDef,
   phone: phoneDef,
   plate: plateDef,
@@ -992,7 +996,7 @@ export const PROP_CATEGORIES: Record<PropCategory, PropKind[]> = {
   trees: ['treeOak', 'treeOakYoung', 'treeOakGiant', 'treePine', 'treePineYoung', 'treePineGiant', 'treeBirch', 'treeCypress', 'treePalm', 'treeDead'],
   rocks: ['rock', 'rockLarge', 'rockSmall', 'boulder', 'rockFlat', 'rockSpire', 'rockMossy', 'rockPile', 'rockJagged', 'rockShard'],
   street: ['fireHydrant', 'streetLight', 'payphone', 'mailbox', 'dumpster', 'fence', 'trafficCone', 'barrier', 'trashCan', 'bench', 'planter', 'telephonePole', 'fireExtinguisher'],
-  signs: ['streetSign', 'stopSign', 'trafficLight', 'businessSign', 'shopSign', 'poster', 'posterSmall', 'posterLarge', 'posterWide', 'posterTall', 'hospitalSign', 'policeSign', 'exitSign', 'neonSign', 'blockLetters', 'neonLogo', 'neonLogoDouble', 'noticeBoard', 'corkboard', 'whiteboard', 'chalkboard'],
+  signs: ['streetSign', 'stopSign', 'trafficLight', 'businessSign', 'shopSign', 'poster', 'posterSmall', 'posterLarge', 'posterWide', 'posterTall', 'hospitalSign', 'policeSign', 'exitSign', 'neonSign', 'blockLetters', 'neonLogo', 'neonLogoDouble', 'ledTicker', 'noticeBoard', 'corkboard', 'whiteboard', 'chalkboard'],
   furniture: ['diningChair', 'armchair', 'officeChair', 'foldingChair', 'couch', 'table', 'floorLamp', 'wallPainting', 'ledLight', 'mirror', 'barStool', 'beanBag', 'bookcase', 'chaiseLounge', 'coffeeTable', 'computerDesk', 'conferenceTable', 'consoleTable', 'cornerDesk', 'diningTable', 'directorsChair', 'displayShelf', 'draftingTable', 'dvdShelf', 'endTable', 'floatingShelf', 'futon', 'highChair', 'loveseat', 'magazineRack', 'nightstand', 'officeDesk', 'ottoman', 'patioChair', 'picnicTable', 'pokerTable', 'receptionDesk', 'recliner', 'rockingChair', 'sectional', 'sideTable', 'sofa', 'standingDesk', 'stool', 'storageShelf', 'toolShelf', 'tvStand', 'wallShelf', 'wineRack', 'wireShelf', 'workbench', 'writingDesk', 'classroomDesk', 'daybed'],
   household: ['bedSingle', 'bedDouble', 'cupboard', 'sink', 'oven', 'fridge', 'computer', 'toiletPaper', 'bathtub', 'blender', 'bottle', 'bowl', 'broom', 'bucket', 'bunkBed', 'can', 'cardboardBox', 'ceilingLamp', 'clock', 'coatRack', 'cup', 'curtain', 'deskLamp', 'dresser', 'dryer', 'filingCabinet', 'fishOnWall', 'fishWall', 'fishtank', 'fork', 'hospitalBed', 'jar', 'knife', 'mattress', 'microwave', 'mug', 'plate', 'pottedPlant', 'radiator', 'rug', 'safe', 'shower', 'sodaCan', 'soupCan', 'spoon', 'storageBin', 'toaster', 'toilet', 'toolCabinet', 'towel', 'towelRack', 'vase', 'wallSconce', 'wardrobe', 'washingMachine', 'waterBottle', 'waterCooler', 'wineBottle'],
   media: ['bookStack', 'recordPlayer', 'vinylRecord', 'albumCover', 'cassette', 'speaker', 'speakerStack', 'gameConsole', 'keyboard', 'laptop', 'monitor', 'phone', 'printer', 'router', 'serverRack', 'tablet', 'tv', 'tvCRT', 'tvFlat'],
@@ -1021,7 +1025,7 @@ export function isPropKind(value: string): value is PropKind {
 // ── PARAMETRIC props (req_0893): kinds whose recipe/material is a function of
 // the placement's `text` (WorldProp.text). The ONE list both the editor (to show
 // a text field) and any text-aware consumer read — no per-kind branching twice.
-export const TEXT_PROP_KINDS: ReadonlySet<PropKind> = new Set<PropKind>(['blockLetters']);
+export const TEXT_PROP_KINDS: ReadonlySet<PropKind> = new Set<PropKind>(['blockLetters', 'ledTicker']);
 
 /** Does this kind read a per-instance `text`? (block-letter name, neon caption,
  *  ticker message.) The editor shows a text input for these; others ignore it. */

@@ -178,6 +178,7 @@ import { neonSignParts } from './neonSign';
 import { blockLettersParts } from './blockText';
 import { neonLogoParts } from './neonLogo';
 import { neonLogoDoubleParts } from './neonLogoDouble';
+import { ledTickerHousingParts } from './ledTicker';
 import { officeDeskParts } from './officeDesk';
 import { phoneParts } from './phone';
 import { plateParts } from './plate';
@@ -484,6 +485,9 @@ export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
     case 'blockLetters': return blockLettersParts(def.heightMeters);
     case 'neonLogo': return neonLogoParts();
     case 'neonLogoDouble': return neonLogoDoubleParts();
+    // The ledTicker resolves to its static HOUSING only — the scrolling LEDs are
+    // the animated layer (editor: LedTicker.tsx, compiled: the TICKER lump).
+    case 'ledTicker': return ledTickerHousingParts();
     case 'officeDesk': return officeDeskParts();
     case 'phone': return phoneParts();
     case 'plate': return plateParts();

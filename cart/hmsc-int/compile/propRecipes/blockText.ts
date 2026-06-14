@@ -103,6 +103,32 @@ function glyph(ch: string): readonly string[] {
   return FONT[ch] ?? FONT[ch.toUpperCase()] ?? FONT[' '];
 }
 
+// The font's row count — the LED ticker's dot-matrix is this tall (req_0893 #3).
+export const TICKER_FONT_ROWS = GLYPH_ROWS;
+
+/**
+ * Per-column lit-row bitmasks for a message — the LED ticker's DATA RECIPE,
+ * shared by the editor renderer and the compiled loader (the same shared-recipe /
+ * twin-renderer split decals use). Each entry is a GLYPH_ROWS-bit mask, bit r
+ * (r=0 = TOP row) set when that LED cell is lit. Columns run left→right: 5 per
+ * glyph + one blank spacer column. Case-folded; unknown glyphs blank.
+ */
+export function textColumns(text: string): number[] {
+  const cols: number[] = [];
+  for (const ch of text.toUpperCase()) {
+    const rows = glyph(ch);
+    for (let c = 0; c < GLYPH_COLS; c += 1) {
+      let mask = 0;
+      for (let r = 0; r < GLYPH_ROWS; r += 1) {
+        if ((rows[r] ?? '')[c] === '#') mask |= (1 << r);
+      }
+      cols.push(mask);
+    }
+    cols.push(0); // inter-glyph spacer column
+  }
+  return cols;
+}
+
 /** Normalize, fold case, and cap. Truncation is LOUD (a warn), never silent —
  *  see [[feedback_juice_limits_dont_set_low]]. */
 function normalizeText(raw: string | undefined): string {
