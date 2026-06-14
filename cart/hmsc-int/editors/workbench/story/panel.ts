@@ -276,46 +276,94 @@ function rewardGroup(store: StoryStore, key: string): FieldSpec[] {
   ];
 }
 
-/** EVENTS — the ordered beats. The list focuses a beat; the focused beat
- *  expands into its own group (location, cutscene, dialog, notes). */
-function eventsGroup(store: StoryStore, key: string): FieldSpec[] {
+// the world-trigger kinds a step completes on. Friendly verb → maps to a
+// MissionObjective kind at compile (the precise target-picker is a follow-up).
+const STEP_TRIGGERS: { id: string; label: string }[] = [
+  { id: 'reach', label: 'go to' },
+  { id: 'acquire', label: 'grab' },
+  { id: 'talk', label: 'talk to' },
+  { id: 'deliver', label: 'deliver to' },
+  { id: 'eliminate', label: 'take out' },
+  { id: 'wait', label: 'wait for' },
+  { id: 'custom', label: 'custom' },
+];
+const triggerVerb = (kind: string) => STEP_TRIGGERS.find((t) => t.id === kind)?.label ?? kind;
+const stepSummary = (ev: { trigger: { kind: string; target: string }; brief: string }) =>
+  ev.trigger.target ? `${triggerVerb(ev.trigger.kind)} ${ev.trigger.target}` : ev.brief;
+
+/** STEPS — the ordered world triggers (the mission spine). The list focuses a
+ *  step; the focused step expands into trigger · cutscene · dialog · notes. */
+function stepsGroup(store: StoryStore, key: string): FieldSpec[] {
   const d = store.draft(key)!;
   const focused = store.focusedEvent();
   const fields: FieldSpec[] = [];
   d.events.forEach((ev, i) => {
-    const loc = ev.location ? ` @(${ev.location.x},${ev.location.z})` : '';
     const mark = i === focused ? '▾ ' : '▸ ';
-    fields.push({ k: `${mark}${i + 1}. ${ev.brief}${loc}`, t: 'act', tone: i === focused ? 'primary' : undefined, run: () => store.focusEvent(i === focused ? null : i) });
+    fields.push({ k: `${mark}${i + 1}. ${stepSummary(ev)}`, t: 'act', tone: i === focused ? 'primary' : undefined, run: () => store.focusEvent(i === focused ? null : i) });
   });
-  if (d.events.length === 0) fields.push({ k: 'none', t: 'val', get: () => 'no events yet — add the first beat' });
-  fields.push({ k: '+ add event', t: 'act', tone: 'accent', run: () => store.addEvent(key) });
+  if (d.events.length === 0) fields.push({ k: 'none', t: 'val', get: () => 'no steps yet — add the first world trigger' });
+  fields.push({ k: '+ add step', t: 'act', tone: 'accent', run: () => store.addEvent(key) });
   return fields;
 }
 
-function focusedEventGroup(store: StoryStore, key: string): FieldSpec[] | null {
+function focusedStepGroup(store: StoryStore, key: string): FieldSpec[] | null {
   const d = store.draft(key)!;
   const i = store.focusedEvent();
   if (i === null || i < 0 || i >= d.events.length) return null;
   const ev = d.events[i];
   const fields: FieldSpec[] = [
-    { k: 'brief', t: 'text', get: () => ev.brief, set: (v) => store.edit(key, (x) => { x.events[i].brief = v; }) },
+    { k: 'brief', t: 'text', get: () => ev.brief, set: (v) => store.edit(key, (x) => { x.events[i].brief = v; }), width: 2, placeholder: 'one line of player-facing meaning' },
+    { k: 'trigger', t: 'enum', get: () => ev.trigger.kind, opts: STEP_TRIGGERS.map((t) => t.id), set: (v) => store.edit(key, (x) => { x.events[i].trigger.kind = v; }) },
+    { k: 'target', t: 'text', get: () => ev.trigger.target, set: (v) => store.edit(key, (x) => { x.events[i].trigger.target = v; }), width: 2, placeholder: 'the depot / the package / Vic …' },
     { k: 'order', t: 'val', get: () => `${i + 1} of ${d.events.length}` },
     { k: '▲ earlier', t: 'act', run: () => store.moveEvent(key, i, -1) },
     { k: '▼ later', t: 'act', run: () => store.moveEvent(key, i, 1) },
-    { k: '✕ remove event', t: 'act', tone: 'warning', run: () => store.removeEvent(key, i) },
+    { k: '✕ remove step', t: 'act', tone: 'warning', run: () => store.removeEvent(key, i) },
     { k: 'location x', t: 'num', get: () => ev.location?.x ?? 0, ...COORD, set: (v) => store.edit(key, (x) => { const e = x.events[i]; e.location = { x: v, z: e.location?.z ?? 0 }; }) },
     { k: 'location z', t: 'num', get: () => ev.location?.z ?? 0, ...COORD, set: (v) => store.edit(key, (x) => { const e = x.events[i]; e.location = { x: e.location?.x ?? 0, z: v }; }) },
-    { k: 'cutscene', t: 'text', get: () => ev.cutscene, set: (v) => store.edit(key, (x) => { x.events[i].cutscene = v; }), placeholder: 'cutscene id (game/cutscene)' },
+    { k: 'cutscene', t: 'text', get: () => ev.cutscene, set: (v) => store.edit(key, (x) => { x.events[i].cutscene = v; }), placeholder: 'cutscene id to play at this step' },
   ];
   ev.dialog.forEach((line, di) => {
     fields.push({ k: `speaker ${di + 1}`, t: 'text', get: () => line.speaker, set: (v) => store.edit(key, (x) => { x.events[i].dialog[di].speaker = v; }), placeholder: 'npc id' });
-    fields.push({ k: `line ${di + 1}`, t: 'text', get: () => line.text, set: (v) => store.edit(key, (x) => { x.events[i].dialog[di].text = v; }), width: 2 });
+    fields.push({ k: `line ${di + 1}`, t: 'text', get: () => line.text, set: (v) => store.edit(key, (x) => { x.events[i].dialog[di].text = v; }), width: 2, placeholder: 'spoken line (becomes a subtitle)' });
     fields.push({ k: `✕ remove line ${di + 1}`, t: 'act', tone: 'warning', run: () => store.edit(key, (x) => { x.events[i].dialog.splice(di, 1); }) });
   });
   fields.push({ k: '+ add dialog line', t: 'act', tone: 'accent', run: () => store.edit(key, (x) => { x.events[i].dialog.push({ speaker: '', text: '' }); }) });
-  fields.push({ k: 'objectives', t: 'val', get: () => ev.objectives.length ? `${ev.objectives.length} (target-pickers: next pass)` : 'none yet' });
-  // post-its on this beat
+  // post-its on this step
   for (const f of notesFields(ev.notes, (m) => store.edit(key, (x) => m(x.events[i].notes)))) fields.push(f);
+  return fields;
+}
+
+/** NPCS — the characters involved (could be many): id (also a dialog speaker)
+ *  + the role they play in this quest. */
+function npcsGroup(store: StoryStore, key: string): FieldSpec[] {
+  const d = store.draft(key)!;
+  const fields: FieldSpec[] = [];
+  d.npcs.forEach((npc, i) => {
+    fields.push({ k: `npc ${i + 1} id`, t: 'text', get: () => npc.id, set: (v) => store.edit(key, (x) => { x.npcs[i].id = v; }), placeholder: 'character id (e.g. vic)' });
+    fields.push({ k: `npc ${i + 1} role`, t: 'text', get: () => npc.role, set: (v) => store.edit(key, (x) => { x.npcs[i].role = v; }), width: 2, placeholder: 'what they are to this quest' });
+    fields.push({ k: `✕ remove npc ${i + 1}`, t: 'act', tone: 'warning', run: () => store.edit(key, (x) => { x.npcs.splice(i, 1); }) });
+  });
+  if (d.npcs.length === 0) fields.push({ k: 'none', t: 'val', get: () => 'no characters yet' });
+  fields.push({ k: '+ add npc', t: 'act', tone: 'accent', run: () => store.edit(key, (x) => { x.npcs.push({ id: '', role: '' }); }) });
+  return fields;
+}
+
+/** SCRIPT — every dialog line across the steps, in order, as the subtitle
+ *  read-through. Lines are edited in their step; this is the aggregate view. */
+function scriptGroup(store: StoryStore, key: string): FieldSpec[] {
+  const d = store.draft(key)!;
+  const fields: FieldSpec[] = [];
+  let any = false;
+  d.events.forEach((ev, i) => {
+    if (ev.dialog.length === 0) return;
+    any = true;
+    fields.push({ k: `— step ${i + 1}: ${stepSummary(ev)}`, t: 'val', get: () => '' });
+    ev.dialog.forEach((line, di) => {
+      fields.push({ k: `${i + 1}.${di + 1} ${line.speaker || '???'}`, t: 'para', get: () => line.text || '(empty line)' });
+    });
+  });
+  if (!any) fields.push({ k: 'none', t: 'val', get: () => 'no dialog yet — add lines inside a step' });
   return fields;
 }
 
@@ -342,29 +390,76 @@ function wiringGroup(store: StoryStore, key: string): FieldSpec[] {
   return fields;
 }
 
-function missionPanel(store: StoryStore, key: string): PanelSpec {
+/** human "last updated" — recomputed each render against the wall clock. */
+function agoLabel(ms: number): string {
+  if (!ms) return 'never';
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (s < 5) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+/** METADATA — the side's read-out: where this mission sits, when it changed,
+ *  what comes before it (req_0926: the side is metadata, the main is authoring). */
+function metadataGroup(store: StoryStore, key: string): FieldSpec[] {
   const d = store.draft(key)!;
-  const groups: PanelSpec['groups'] = [
-    { title: 'IDENTITY', fields: identityGroup(store, key), layout: 'rows' },
-    { title: 'CONSTRAINTS', fields: constraintsGroup(store, key), layout: 'rows' },
-    { title: 'DEPENDENTS', fields: dependentsGroup(store, key), layout: 'rows' },
-    { title: 'REWARD', fields: rewardGroup(store, key), layout: 'rows' },
-    { title: 'EVENTS', fields: eventsGroup(store, key), layout: 'rows' },
+  const g = store.graph();
+  const lineId = store.selectedLineId();
+  const line = lineId ? store.line(lineId) : null;
+  const node = g.nodes.find((n) => n.key === key)!;
+  const gated = node.requiresFlags.length + node.requiresOther.length;
+  const status = gated === 0 ? 'root (offerable from the start)' : `gated (${gated} requirement${gated === 1 ? '' : 's'})`;
+  const fields: FieldSpec[] = [
+    { k: 'questline', t: 'val', get: () => line?.title ?? '—' },
+    { k: 'last updated', t: 'val', get: () => agoLabel(d.updatedAt) },
+    { k: 'status', t: 'val', get: () => status },
   ];
-  const focused = focusedEventGroup(store, key);
-  if (focused) groups.push({ title: 'EVENT — cutscene · location · dialog · notes', fields: focused, layout: 'rows' });
-  groups.push({ title: 'NOTES', fields: notesFields(d.notes, (m) => store.edit(key, (x) => m(x.notes))), layout: 'rows' });
-  groups.push({ title: 'TRANSITIONS (world state)', fields: transitionsFields(d.transitions, missionAnchors(store, key), (m) => store.edit(key, (x) => m(x.transitions))), layout: 'rows' });
-  groups.push({ title: 'WIRING (substrate)', fields: wiringGroup(store, key), layout: 'rows', tier: 'debug' });
+  const upstream = g.edges.filter((e) => e.to === key);
+  if (upstream.length) for (const e of upstream) fields.push({ k: `prev ← ${g.nodes.find((n) => n.key === e.from)?.title ?? e.from}`, t: 'val', get: () => `via ${e.flag}` });
+  else fields.push({ k: 'prev', t: 'val', get: () => 'none (entry point)' });
+  return fields;
+}
+
+/** The SIDE panel for a mission — metadata + the light, dependency-shaped
+ *  fields. The heavy authoring (steps/npcs/script) lives in the stage. */
+function missionMetaPanel(store: StoryStore, key: string): PanelSpec {
+  const d = store.draft(key)!;
+  return {
+    groups: [
+      { title: 'IDENTITY', fields: identityGroup(store, key), layout: 'rows' },
+      { title: 'METADATA', fields: metadataGroup(store, key), layout: 'rows' },
+      { title: 'CONSTRAINTS', fields: constraintsGroup(store, key), layout: 'rows' },
+      { title: 'UNLOCKS', fields: dependentsGroup(store, key), layout: 'rows' },
+      { title: 'REWARD', fields: rewardGroup(store, key), layout: 'rows' },
+      { title: 'NOTES', fields: notesFields(d.notes, (m) => store.edit(key, (x) => m(x.notes))), layout: 'rows' },
+      { title: 'TRANSITIONS (world state)', fields: transitionsFields(d.transitions, missionAnchors(store, key), (m) => store.edit(key, (x) => m(x.transitions))), layout: 'rows' },
+      { title: 'WIRING (substrate)', fields: wiringGroup(store, key), layout: 'rows', tier: 'debug' },
+    ],
+  };
+}
+
+/** The MAIN (stage) authoring canvas for a mission — the spine the user
+ *  authors against: world-trigger steps, the cast, and the dialog script. */
+export function missionStagePanel(store: StoryStore, key: string): PanelSpec {
+  const groups: PanelSpec['groups'] = [
+    { title: 'STEPS (world triggers)', fields: stepsGroup(store, key), layout: 'rows' },
+  ];
+  const focused = focusedStepGroup(store, key);
+  if (focused) groups.push({ title: 'STEP — trigger · cutscene · dialog · notes', fields: focused, layout: 'rows' });
+  groups.push({ title: 'NPCS (involved)', fields: npcsGroup(store, key), layout: 'rows' });
+  groups.push({ title: 'SCRIPT (subtitles)', fields: scriptGroup(store, key), layout: 'rows' });
   return { groups };
 }
 
-/** The panel dispatches on selection (truth lives in the store): a selected
- *  mission → mission panel; else a selected questline → questline panel; else
- *  the general notes pad (the landing). */
+/** The SIDE panel dispatches on selection: mission → metadata; questline →
+ *  questline panel; else the general notes pad (the landing). */
 export function storyPanel(store: StoryStore): PanelSpec {
   const key = store.selectedKey();
-  if (key && store.draft(key)) return missionPanel(store, key);
+  if (key && store.draft(key)) return missionMetaPanel(store, key);
   const lineId = store.selectedLineId();
   if (lineId && store.line(lineId)) return questlinePanel(store, lineId);
   return generalPanel(store);

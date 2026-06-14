@@ -12,7 +12,7 @@
 
 import type { WorkbenchSource, ActionSpec, RosterRow } from '../../../shell/Workbench';
 import { storyPanel, storyRoster, parseRowId, lineRowId, missionRowId } from './panel';
-import { StoryBoard } from './StoryBoard';
+import { StoryStage } from './StoryStage';
 import { storyWorkbenchStore } from './store';
 
 export function storySource(): WorkbenchSource<string> {
@@ -61,8 +61,9 @@ export function storySource(): WorkbenchSource<string> {
       return out;
     },
 
-    // the stage IS the board — values + selection only (LAW 1).
-    stage: () => <StoryBoard store={store} />,
+    // the MAIN panel: authoring canvas for a mission, dependency board for a
+    // questline (req_0926 — gutter 4 now EDITS, overriding the old demo-only law).
+    stage: () => <StoryStage store={store} />,
 
     // the highlight follows the store: prefer its selection, else the first row.
     defaultRow: (rows: RosterRow[]) => currentRowId() ?? rows[0]?.id,

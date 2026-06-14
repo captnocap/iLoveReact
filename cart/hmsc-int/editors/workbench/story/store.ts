@@ -48,11 +48,19 @@ export type QuestEvent = {
   /** the cutscene def id this beat plays (game/cutscene/), or '' for none */
   cutscene: string;
   dialog: QuestDialogLine[];
+  /** the WORLD TRIGGER that completes this step — "go to <target>", "grab
+   *  <target>", "talk to <target>". kind maps to an objective kind at compile;
+   *  target is a free label now (the world-instance picker is a follow-up). */
+  trigger: { kind: string; target: string };
   /** completion predicates (MissionStage.objectives shape) */
   objectives: MissionDef['stages'][number]['objectives'][number][];
   /** post-its on this beat */
   notes: Note[];
 };
+
+/** An NPC involved in a mission (could be many): the character id (also a
+ *  dialog speaker) + the role it plays in this quest. */
+export type NpcInvolved = { id: string; role: string };
 
 /** The editable quest — the user's shape verbatim, MissionDef-backed fields kept. */
 export type QuestDraft = {
@@ -64,10 +72,14 @@ export type QuestDraft = {
   reward: { cash?: number; repDelta?: number };
   requires: NonNullable<MissionDef['requires']>[number][]; // constraints
   events: QuestEvent[];
+  /** the characters involved in this mission (many) */
+  npcs: NpcInvolved[];
   /** post-its on this mission */
   notes: Note[];
   /** transitional world states anchored at this mission's story points */
   transitions: WorldTransition[];
+  /** wall-clock ms of the last edit (the side panel's "last updated") */
+  updatedAt: number;
   // ── runtime-substrate fields, kept (demoted in the panel) ──
   verb: ActivityVerb;
   binding?: MissionDef['binding'];
@@ -94,6 +106,8 @@ export type Questline = {
   notes: Note[];
   /** transitional world states anchored at line-level points (start/complete) */
   transitions: WorldTransition[];
+  /** wall-clock ms of the last edit */
+  updatedAt: number;
 };
 
 function blankDraft(key: string, n: number): QuestDraft {
@@ -106,8 +120,10 @@ function blankDraft(key: string, n: number): QuestDraft {
     reward: {},
     requires: [],
     events: [],
+    npcs: [],
     notes: [],
     transitions: [],
+    updatedAt: Date.now(),
     verb: 'role',
     binding: undefined,
     expiryTicks: null,
@@ -117,7 +133,7 @@ function blankDraft(key: string, n: number): QuestDraft {
 }
 
 function blankQuestline(id: string, n: number): Questline {
-  return { id, title: `Questline ${n}`, summary: '', requires: [], rewards: {}, missions: [], notes: [], transitions: [] };
+  return { id, title: `Questline ${n}`, summary: '', requires: [], rewards: {}, missions: [], notes: [], transitions: [], updatedAt: Date.now() };
 }
 
 /** Fill arrays older saved data may lack — forward migration on load. */
@@ -126,12 +142,18 @@ function normalizeLine(l: Questline): Questline {
   l.transitions ??= [];
   l.requires ??= [];
   l.missions ??= [];
+  l.updatedAt ??= 0;
   for (const m of l.missions) {
     m.notes ??= [];
     m.transitions ??= [];
     m.requires ??= [];
     m.events ??= [];
-    for (const e of m.events) e.notes ??= [];
+    m.npcs ??= [];
+    m.updatedAt ??= 0;
+    for (const e of m.events) {
+      e.notes ??= [];
+      e.trigger ??= { kind: 'reach', target: '' };
+    }
   }
   return l;
 }
@@ -244,6 +266,7 @@ export function createStoryStore(): StoryStore {
       const l = lineByKey(id);
       if (!l) return;
       mutate(l);
+      l.updatedAt = Date.now();
       notify();
     },
     addLineGate: (id, flag) => {
@@ -251,12 +274,14 @@ export function createStoryStore(): StoryStore {
       if (!l || !flag) return;
       if (l.requires.some((g) => g.kind === 'flag' && g.flag === flag)) return;
       l.requires.push({ kind: 'flag', flag });
+      l.updatedAt = Date.now();
       notify();
     },
     removeLineGate: (id, flag) => {
       const l = lineByKey(id);
       if (!l) return;
       l.requires = l.requires.filter((g) => !(g.kind === 'flag' && g.flag === flag));
+      l.updatedAt = Date.now();
       notify();
     },
 
@@ -291,6 +316,7 @@ export function createStoryStore(): StoryStore {
       const d = draftByKey(key);
       if (!d) return;
       mutate(d);
+      d.updatedAt = Date.now();
       notify();
     },
     addFlagGate: (key, flag) => {
@@ -298,12 +324,14 @@ export function createStoryStore(): StoryStore {
       if (!d || !flag) return;
       if (d.requires.some((g) => g.kind === 'flag' && g.flag === flag)) return;
       d.requires.push({ kind: 'flag', flag });
+      d.updatedAt = Date.now();
       notify();
     },
     removeFlagGate: (key, flag) => {
       const d = draftByKey(key);
       if (!d) return;
       d.requires = d.requires.filter((g) => !(g.kind === 'flag' && g.flag === flag));
+      d.updatedAt = Date.now();
       notify();
     },
     focusedEvent: () => focused,
@@ -312,8 +340,9 @@ export function createStoryStore(): StoryStore {
       const d = draftByKey(key);
       if (!d) return;
       const n = d.events.length + 1;
-      d.events.push({ id: `event-${n}`, brief: `Event ${n}`, cutscene: '', dialog: [], objectives: [], notes: [] });
+      d.events.push({ id: `event-${n}`, brief: `Step ${n}`, cutscene: '', dialog: [], trigger: { kind: 'reach', target: '' }, objectives: [], notes: [] });
       focused = d.events.length - 1;
+      d.updatedAt = Date.now();
       notify();
     },
     removeEvent: (key, index) => {
@@ -321,6 +350,7 @@ export function createStoryStore(): StoryStore {
       if (!d || index < 0 || index >= d.events.length) return;
       d.events.splice(index, 1);
       if (focused !== null && focused >= d.events.length) focused = d.events.length ? d.events.length - 1 : null;
+      d.updatedAt = Date.now();
       notify();
     },
     moveEvent: (key, index, dir) => {
@@ -331,6 +361,7 @@ export function createStoryStore(): StoryStore {
       const [ev] = d.events.splice(index, 1);
       d.events.splice(to, 0, ev);
       if (focused === index) focused = to;
+      d.updatedAt = Date.now();
       notify();
     },
     subscribe: (fn) => { listeners.add(fn); return () => { listeners.delete(fn); }; },
