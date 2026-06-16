@@ -232,6 +232,44 @@ already has `client` + a typed `target`).
 
 ---
 
+## 8 — The Endless Passenger (req_1108)
+
+The narrative payload of the void — the *reason* to drive into the dead-end.
+Reference: the end of **Spun** — an 18-hour meth-fueled drive to drop someone off
+a city away, then show up at an ex who's living a better life, arriving with
+literally no reason to be there. The journey is the whole thing; there is no
+arrival.
+
+The mechanic:
+
+- An NPC event — walk by, they carry a mission marker, you interact. **They ask
+  for a ride into the void.**
+- **The mission never ends.** It's a *treadmill mission*: the stated destination
+  (a drop-off, a sister, an ex two towns over) is always "ahead," and the fold
+  (§4) guarantees you never arrive. The recursion field is what makes "never
+  arriving" diegetic instead of a scripted softlock — the void is the reason the
+  road never delivers them.
+- **The passenger talks, forever.** As you drive and drive, their monologue keeps
+  going. A finite authored script can't fill an infinite drive — so it's
+  **generative**: `useAssistant` (`runtime/hooks/useAssistant.ts` — streams; the
+  `local_ai` .gguf backend can run offline) is the inexhaustible voice. Toggled
+  on as **"game enrichment"** (USER, req_1108) — opt-in.
+- **Decay rides the depth.** Prompt the model with the current wrongness so the
+  passenger's coherence tracks `voidDistortion.dialogCorrupt` — lucid near the
+  city, drifting / looping / unhinged the deeper you go. The Spun meth-monologue
+  texture intensifies with `escape_depth`.
+
+**THE GUARDRAIL (V22 P2 — non-negotiable):** the LLM **never touches numbers**.
+The passenger's output is TEXT ONLY — pure ambiance. It cannot set flags, complete
+the mission, spend money, change state, or steer any mechanic except through a
+validated **(text, world_delta)** narrative hook. Free model text drives nothing
+but the player's ears.
+
+**Enrichment is optional, never required.** With the toggle off (or no model
+available), the passenger falls back to a canned/looping line pool — the mechanic
+exists without an LLM; the model only makes the voice infinite. Game ships and
+plays offline.
+
 ## Design disciplines (must not break)
 
 These are the invariants a worker is most likely to get wrong:

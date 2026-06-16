@@ -56,6 +56,16 @@ export const skybox_void: DocIndex = {
       status: 'candidate',
     },
     {
+      name: 'Endless Passenger (ride into the void)',
+      purpose: ['npc', 'agent_llm', 'game_loop'],
+      kind: 'module',
+      description:
+        'The narrative payload of the void (Spun-ending reference). An NPC asks for a ride into the void; the mission NEVER ENDS — a treadmill mission whose stated destination is always ahead and the fold (§4) guarantees no arrival (the recursion field makes never-arriving diegetic, not a softlock). The passenger talks forever via useAssistant (runtime/hooks/useAssistant.ts — streams; local_ai .gguf runs offline), toggled on as opt-in "game enrichment"; prompt it with the current wrongness so coherence rides voidDistortion.dialogCorrupt. With the toggle off it falls back to a canned/looping line pool — enrichment is optional, never required.',
+      dependsOn: ['GAME_MISSIONS'],
+      consumes: ['useAssistant'],
+      status: 'candidate',
+    },
+    {
       name: 'Void Distance leaderboard record',
       purpose: ['persistence', 'game_loop'],
       kind: 'data_model',
@@ -132,6 +142,15 @@ export const skybox_void: DocIndex = {
       description:
         'Environmental wrongness eases as you drive back (positional, f(escape_depth)) but player damage/resources do NOT auto-refund — healing is by food/items only. Resource exhaustion is the intended governor; do NOT add an auto-heal-on-return or an invisible distance wall. The return trip is the boss.',
       evidence: ['SKYBOX_PLAYBOOK.md §3', 'req_1102'],
+      severity: 'high',
+    },
+    {
+      name: 'LLM enrichment never touches numbers (V22 P2)',
+      purpose: ['agent_llm', 'game_loop'],
+      description:
+        'The Endless Passenger / any useAssistant enrichment outputs TEXT ONLY — pure ambiance. It must never set flags, complete a mission, spend money, change state, or steer a mechanic except through a validated (text, world_delta) narrative hook. Free model text drives nothing but the player`s ears. Also: enrichment is opt-in with a canned/looping fallback — the mechanic must exist and ship/play offline without any model.',
+      evidence: ['SKYBOX_PLAYBOOK.md §8', 'req_1108', 'DECISIONS V22'],
+      fix: 'Route any world effect through the structured (text, world_delta) hook + validator; never parse mechanics out of free LLM text.',
       severity: 'high',
     },
     {
