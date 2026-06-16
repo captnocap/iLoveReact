@@ -22,6 +22,9 @@ import * as TorusMod from './Torus';
 import * as HeightfieldMod from './Heightfield';
 import * as HumanoidMod from './Humanoid';
 import * as VoxelMeshMod from './VoxelMesh';
+import * as GrassBladeMod from './GrassBlade';
+import * as BushClumpMod from './BushClump';
+import * as FrondMod from './Frond';
 
 export type { GeometryData, Vec2, Vec3 } from './_util';
 // The vertex-assembly kit, so a cart can hand-author its own generator:
@@ -75,6 +78,17 @@ export const Humanoid = def('Humanoid', HumanoidMod.generate, HumanoidMod.HUMANO
 // a real mesh generator, not a stack of Box instances, so authored voxel items
 // can persist as one shape and sculpt displacement rides the exposed surface.
 export const VoxelMesh = def('VoxelMesh', VoxelMeshMod.generate, VoxelMeshMod.VOXEL_MESH_DEFAULTS);
+// GrassBlade — a clump of crossed quads (a grass tuft), UV root(0)→tip(1). Cheap
+// on purpose: the grass scene3d pipeline paints the wisps + gradient + wind. One
+// interned blade serves every cell; per-instance scale/yaw/color give the field.
+export const GrassBlade = def('GrassBlade', GrassBladeMod.generate, GrassBladeMod.GRASS_BLADE_DEFAULTS);
+// BushClump — outward-splaying foliage cards (a leafy shrub), the bush sibling of
+// GrassBlade. Same foliage pipeline; per-instance scale/yaw/color give the field.
+export const BushClump = def('BushClump', BushClumpMod.generate, BushClumpMod.BUSH_CLUMP_DEFAULTS);
+// Frond — one arched palm/leaf card, UV base(0)→tip(1), style baked in uv.u.
+// Routed via "~frond~" to the foliage wind pipeline; a tree crown is many frond
+// instances radiating from the trunk top (the grass move, leaf-shaped).
+export const Frond = def('Frond', FrondMod.generate, FrondMod.FROND_DEFAULTS);
 
 // DEFAULTS re-exports (spread-override friendly: { ...SPHERE_DEFAULTS, radius: 2 }).
 export const BOX_DEFAULTS = BoxMod.BOX_DEFAULTS;
@@ -89,6 +103,11 @@ export const TORUS_DEFAULTS = TorusMod.TORUS_DEFAULTS;
 export const HEIGHTFIELD_DEFAULTS = HeightfieldMod.HEIGHTFIELD_DEFAULTS;
 export const HUMANOID_DEFAULTS = HumanoidMod.HUMANOID_DEFAULTS;
 export const VOXEL_MESH_DEFAULTS = VoxelMeshMod.VOXEL_MESH_DEFAULTS;
+export const GRASS_BLADE_DEFAULTS = GrassBladeMod.GRASS_BLADE_DEFAULTS;
+export const BUSH_CLUMP_DEFAULTS = BushClumpMod.BUSH_CLUMP_DEFAULTS;
+export const FROND_DEFAULTS = FrondMod.FROND_DEFAULTS;
+export const FLOWING_FROND_DEFAULTS = FrondMod.FLOWING_FROND_DEFAULTS;
+export const BROAD_FROND_DEFAULTS = FrondMod.BROAD_FROND_DEFAULTS;
 // The Humanoid's UV atlas — top-left=head, top-right=arms, bottom-left=torso,
 // bottom-right=legs. Painters target a single texture image with those four
 // rectangles and the generator's UVs route each body part into its rectangle.
@@ -112,6 +131,8 @@ export type { HeightfieldParams, HeightfieldWave } from './Heightfield';
 export type { HumanoidParams, UVRect } from './Humanoid';
 export type { VoxelMeshParams, VoxelMeshBlock, VoxelMeshStats } from './VoxelMesh';
 export { voxelMeshStats } from './VoxelMesh';
+export type { GrassBladeParams } from './GrassBlade';
+export type { BushClumpParams } from './BushClump';
 
 /**
  * The registry keyed by id. The bake step serializes a def's `id` + resolved
@@ -119,5 +140,5 @@ export { voxelMeshStats } from './VoxelMesh';
  * id through this map.
  */
 export const GEOMETRIES: Record<string, GeometryDef> = {
-  Box, Sphere, Head, Carve, Globe, Plane, Cylinder, Cone, Torus, Heightfield, Humanoid, VoxelMesh,
+  Box, Sphere, Head, Carve, Globe, Plane, Cylinder, Cone, Torus, Heightfield, Humanoid, VoxelMesh, GrassBlade, BushClump,
 };

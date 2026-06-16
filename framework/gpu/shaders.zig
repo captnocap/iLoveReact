@@ -1157,6 +1157,151 @@ pub const water_wgsl =
     \\}
 ;
 
+/// Frond pipeline — the foliage move (FluffyGrass / the ~grass~ twin) applied to
+/// PALM/LEAF cards: a tree crown is many Frond instances radiating from the trunk
+/// top, each a dumb arched card this shader paints. The fragment alpha-cuts the
+/// leaf SHAPE from the card and the vertex bends it by wind (tip-weighted), so the
+/// whole crown sways like the grass field. The leaf STYLE is baked into uv.u's
+/// integer part (runtime/geometries/Frond.ts): floor(u)==0 → feathered coconut
+/// frond (a rachis + tapering leaflets), floor(u)==1 → a broad split leaf. ONE
+/// pipeline serves every tree shape; variety is geometry + per-instance scale/yaw.
+/// Instanced groups whose leader carries the "~frond~" tex key swap to this.
+pub const frond_wgsl =
+    \\struct SceneUniforms {
+    \\    vp: mat4x4f,
+    \\    light_dir: vec3f,
+    \\    specular_power: f32,
+    \\    light_color: vec3f,
+    \\    _pad1: f32,
+    \\    ambient_color: vec3f,
+    \\    _pad2: f32,
+    \\    camera_pos: vec3f,
+    \\    time: f32,
+    \\    fog_color: vec3f,
+    \\    fog_near: f32,
+    \\    fog_far: f32,
+    \\    fog_sky: f32,
+    \\    _pad4a: f32,
+    \\    _pad4b: f32,
+    \\    sky_horizon: vec3f,
+    \\    _pad5: f32,
+    \\    sky_zenith: vec4f,
+    \\};
+    \\@group(0) @binding(0) var<uniform> S: SceneUniforms;
+    \\@group(1) @binding(0) var diffuse_tex: texture_2d<f32>;
+    \\@group(1) @binding(1) var diffuse_smp: sampler;
+    \\
+    \\struct VertexInput {
+    \\    @location(0) position: vec3f,
+    \\    @location(1) normal: vec3f,
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) model_c0: vec4f,
+    \\    @location(4) model_c1: vec4f,
+    \\    @location(5) model_c2: vec4f,
+    \\    @location(6) model_c3: vec4f,
+    \\    @location(7) inst_color: vec4f,
+    \\};
+    \\struct VertexOutput {
+    \\    @builtin(position) clip_pos: vec4f,
+    \\    @location(0) world_pos: vec3f,
+    \\    @location(1) world_normal: vec3f,
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) inst_color: vec4f,
+    \\    @location(4) @interpolate(linear) screen_y: f32,
+    \\};
+    \\
+    \\fn hash21(p: vec2f) -> f32 {
+    \\    return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453);
+    \\}
+    \\
+    \\@vertex
+    \\fn vs_main(in: VertexInput) -> VertexOutput {
+    \\    var out: VertexOutput;
+    \\    let model = mat4x4f(in.model_c0, in.model_c1, in.model_c2, in.model_c3);
+    \\    // The "spaghetti generator": a per-frond seed (the instance's rotation
+    \\    // columns differ per frond, so this is constant across ONE frond's verts
+    \\    // but varies frond-to-frond), used to curve each frond's BODY its own way
+    \\    // in the local frame (y = base→tip) before the model transform — so no two
+    \\    // fronds droop, sag, or bend the same. Tip-weighted (t² / t) so the base
+    \\    // stays planted at the crown.
+    \\    let seed = hash21(vec2f(in.model_c0.x * 3.7 + in.model_c2.z * 1.9, in.model_c0.z * 2.3 + in.model_c2.x * 5.1));
+    \\    let seed2 = hash21(vec2f(seed * 11.0 + 0.7, in.model_c0.y * 4.4 + 0.3));
+    \\    var pos = in.position;
+    \\    let t = clamp(in.uv.y, 0.0, 1.0);   // true base→tip param (pos.y now sags via geometry)
+    \\    let t2 = t * t;
+    \\    let wig = sin(t * (2.5 + 4.0 * seed2) + seed2 * 6.283) + 0.45 * sin(t * (5.5 + 3.0 * seed) + seed * 3.1);
+    \\    // The geometry preset carries the BASE curve (arc + sag = palm vs weeping);
+    \\    // the shader adds only per-frond VARIETY so no two fronds match — a little
+    \\    // extra arch + sag jitter, plus the sideways snake.
+    \\    pos.z = pos.z + (0.1 + 0.6 * seed) * t2;                          // per-frond arch jitter
+    \\    pos.y = pos.y - (0.05 + 0.4 * seed) * t2;                         // per-frond sag jitter
+    \\    pos.x = pos.x + wig * (0.16 + 0.5 * seed2) * t;                   // sideways snake (2 harmonics)
+    \\    var world = model * vec4f(pos, 1.0);
+    \\    // Tip-weighted wind: the frond base is anchored to the crown, the tip
+    \\    // swings. A slower, wider sway than grass (a frond is heavy).
+    \\    let tipw = pow(t, 1.4);
+    \\    let phase = world.x * 0.10 + world.z * 0.12 + S.time * 1.1;
+    \\    let sway = sin(phase) + 0.35 * sin(phase * 2.3 + 1.1);
+    \\    let gust = 0.18 + 0.16 * sin(S.time * 0.4 + world.x * 0.04);
+    \\    let bend = sway * gust * tipw;
+    \\    let wind_dir = normalize(vec2f(0.8, 0.6));
+    \\    world.x = world.x + wind_dir.x * bend;
+    \\    world.z = world.z + wind_dir.y * bend;
+    \\    world.y = world.y - abs(bend) * 0.20;
+    \\    out.clip_pos = S.vp * world;
+    \\    out.world_pos = world.xyz;
+    \\    out.world_normal = normalize((model * vec4f(in.normal, 0.0)).xyz);
+    \\    out.uv = in.uv;
+    \\    out.inst_color = in.inst_color;
+    \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
+    \\    return out;
+    \\}
+    \\
+    \\@fragment
+    \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+    \\    let style = step(5.0, in.uv.x);          // 0 = feathered (u~0..1), 1 = broad (u~10..11)
+    \\    let u = in.uv.x - style * 10.0;          // 0..1 across the leaf width (no fract wrap)
+    \\    let v = clamp(in.uv.y, 0.0, 1.0);        // 0 base → 1 tip
+    \\    let d = abs(u - 0.5);                // distance from the central rib
+    \\    var keep = false;
+    \\    if (style < 0.5) {
+    \\        // Feathered coconut frond: a thin opaque rachis + leaflets that splay
+    \\        // off it, each leaflet tapering and the whole frond narrowing to a tip.
+    \\        let rachis = 0.06 * (1.0 - 0.5 * v);
+    \\        let reach = 0.5 * (1.0 - 0.78 * v);          // frond tapers toward the tip (fuller)
+    \\        let n = 28.0;                                // more leaflets per side
+    \\        let cell = fract(v * n);                     // 0..1 within one leaflet
+    \\        let leaflet = reach * (1.0 - 0.62 * cell);   // fatter leaflets (shrink less)
+    \\        let gap = step(0.9, cell);                   // thinner seam = denser frond
+    \\        keep = (d < rachis) || (d < leaflet && gap < 0.5 && v < 0.99);
+    \\    } else {
+    \\        // Broad split leaf: one tapering blade with a few deep slits cut from
+    \\        // the edge toward the midrib (banana/fan read).
+    \\        let reach = 0.5 * (1.0 - 0.65 * v);
+    \\        let slit = step(0.86, fract(v * 5.0)) * step(0.18, d); // edge-in slits
+    \\        keep = (d < reach) && (slit < 0.5) && (v < 0.99);
+    \\    }
+    \\    if (!keep) { discard; }
+    \\    // Dark per-instance root → bright tip, varied per frond by world position.
+    \\    let root_col = in.inst_color.rgb;
+    \\    let tip_var = hash21(floor(in.world_pos.xz * 0.5));
+    \\    let tip_col = mix(vec3f(0.32, 0.55, 0.22), vec3f(0.45, 0.62, 0.20), tip_var);
+    \\    let albedo = mix(root_col, tip_col, pow(v, 0.9));
+    \\    // Double-sided half-lambert + a touch of rib shading (darker near the rib).
+    \\    let N = normalize(in.world_normal);
+    \\    let L = normalize(S.light_dir);
+    \\    let ndl = abs(dot(N, L)) * 0.5 + 0.5;
+    \\    let rib_shade = mix(0.82, 1.0, smoothstep(0.0, 0.12, d));
+    \\    let lit = albedo * rib_shade * (S.ambient_color + S.light_color * ndl * 0.9);
+    \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
+    \\    let g = clamp(in.screen_y * 0.5 + 0.5, 0.0, 1.0);
+    \\    let sky_grad = mix(S.sky_horizon, S.sky_zenith.xyz, pow(g, 0.6));
+    \\    let fog_target = mix(S.fog_color, sky_grad, S.fog_sky);
+    \\    let final_rgb = mix(lit, fog_target, fog_t);
+    \\    return vec4f(final_rgb, 1.0);
+    \\}
+;
+
 /// Ground-formula mesh pipeline (the data-shape ground — GUIDING_LIGHT).
 /// `Scene3D.Mesh` normally samples a baked texture; a chunk-floor mesh instead
 /// runs a SURFACE FORMULA per fragment — no baked texture, crisp at any zoom,

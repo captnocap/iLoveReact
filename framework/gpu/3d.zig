@@ -267,6 +267,11 @@ var g_grass_pipeline: ?*wgpu.RenderPipeline = null;
 // opaque-pass draw (depth-write ON, no sorting). Instanced groups whose leader
 // carries the "~water~" tex-key sentinel swap to this mid-pass.
 var g_water_pipeline: ?*wgpu.RenderPipeline = null;
+// Frond pipeline — twin of grass/water (same layout/vertex layouts), shaders.frond_wgsl:
+// vertex wind sway + fragment palm/leaf cutout (feathered or broad by uv.u) + green
+// gradient. Alpha-tested via discard → opaque-pass draw. Instanced groups whose leader
+// carries the "~frond~" tex-key sentinel swap to this — tree crowns of leaf cards.
+var g_frond_pipeline: ?*wgpu.RenderPipeline = null;
 // Ground-formula pipeline (the data-shape ground — GUIDING_LIGHT). Built ONCE,
 // lazily, the first frame a mesh carries scene3d_ground_formula: the formula is
 // identical for every chunk (only the per-cell D ref stream differs), so one
@@ -658,6 +663,29 @@ pub fn init() void {
             water_module.release();
         }
     }
+    // Frond companion: same layout/vertex/blend, depth-write ON (alpha-tested via
+    // discard → opaque), cull OFF so a wind-bent frond reads from both faces. Only
+    // the module differs — wind sway + palm/leaf cutout + green gradient.
+    {
+        const frond_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_frond_shader", .code = shaders.frond_wgsl });
+        if (device.createShaderModule(&frond_desc)) |frond_module| {
+            const frond_frag = wgpu.FragmentState{
+                .module = frond_module,
+                .entry_point = wgpu.StringView.fromSlice("fs_main"),
+                .target_count = 1,
+                .targets = @ptrCast(&color_target),
+            };
+            g_frond_pipeline = device.createRenderPipeline(&.{
+                .layout = pipeline_layout,
+                .vertex = .{ .module = frond_module, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = vert_layouts.len, .buffers = &vert_layouts },
+                .primitive = .{ .topology = .triangle_list, .cull_mode = .none, .front_face = .ccw },
+                .depth_stencil = &depth_stencil,
+                .multisample = .{},
+                .fragment = &frond_frag,
+            });
+            frond_module.release();
+        }
+    }
     g_sampler = device.createSampler(&.{
         .address_mode_u = .clamp_to_edge,
         .address_mode_v = .clamp_to_edge,
@@ -770,6 +798,7 @@ pub fn deinit() void {
     if (g_pipeline) |p| p.release();
     if (g_grass_pipeline) |p| p.release();
     if (g_water_pipeline) |p| p.release();
+    if (g_frond_pipeline) |p| p.release();
     if (g_sky_bind_group) |bg| bg.release();
     if (g_sky_bind_group_layout) |l| l.release();
     if (g_sky_uniform_buffer) |b| b.release();
@@ -1901,6 +1930,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
             const k = leader.scene3d_tex_key orelse break :blk null;
             if (g_grass_pipeline != null and std.mem.startsWith(u8, k, "~grass~")) break :blk g_grass_pipeline.?;
             if (g_water_pipeline != null and std.mem.startsWith(u8, k, "~water~")) break :blk g_water_pipeline.?;
+            if (g_frond_pipeline != null and std.mem.startsWith(u8, k, "~frond~")) break :blk g_frond_pipeline.?;
             break :blk null;
         };
         if (want_special != cur_special) {
