@@ -6,7 +6,7 @@ import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import {
   addMount, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
-  flipFace, mirrorEdit, mirrorPartners, setFaceGlass, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout,
+  flipFace, mirrorEdit, mirrorPartners, setFaceGlass, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
@@ -543,6 +543,17 @@ test('mirrorEdit skips seam verts and both-sides selections (no double-apply) (r
   // selecting BOTH twins (1 and 2) and moving → mirror pass must not fight itself
   const both = translateVerts(m, [1, 2], [0, 0.3, 0]);
   assertEqual(JSON.stringify(mirrorEdit(m, both, [1, 2], 0).verts), JSON.stringify(both.verts), 'both-sides selection is left as-is');
+});
+
+test('vertsBounds measures a selection — face dims + a degenerate flat axis (req_1185)', () => {
+  const box = cuboid(3, 2, 4); // x∈[-1.5,1.5] y∈[-1,1] z∈[-2,2]
+  const all = vertsBounds(box, box.verts.map((_, i) => i));
+  assert(approx(all.size[0], 3) && approx(all.size[1], 2) && approx(all.size[2], 4), 'whole-box size = its dims');
+  // the +Y top face (loop [4,7,6,5]) is flat in Y → size.y ≈ 0, x/z span the face
+  const top = vertsBounds(box, box.faces[0].loop);
+  assert(approx(top.size[1], 0), 'a flat face has ~0 thickness on its normal axis');
+  assert(approx(top.size[0], 3) && approx(top.size[2], 4), 'the face spans the full x/z extent');
+  assertEqual(JSON.stringify(vertsBounds(box, []).size), JSON.stringify([0, 0, 0]), 'empty selection → zero box');
 });
 
 test('facesUsingVerts / facesUsingEdges resolve a selection to faces (req_1020)', () => {

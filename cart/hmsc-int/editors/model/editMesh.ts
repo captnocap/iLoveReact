@@ -694,6 +694,19 @@ export function vertsCentroid(m: EditMesh, indices: Iterable<number>): V3 {
   return n === 0 ? [0, 0, 0] : [x / n, y / n, z / n];
 }
 
+/** Axis-aligned bounds of a vert subset: min/max corner + per-axis SIZE — the
+ *  selection's measured dimensions (the size readout, req_1185). Empty → zero box. */
+export function vertsBounds(m: EditMesh, indices: Iterable<number>): { min: V3; max: V3; size: V3 } {
+  let mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity, n = 0;
+  for (const i of indices) {
+    const v = m.verts[i]; if (!v) continue; n += 1;
+    if (v[0] < mnx) mnx = v[0]; if (v[1] < mny) mny = v[1]; if (v[2] < mnz) mnz = v[2];
+    if (v[0] > mxx) mxx = v[0]; if (v[1] > mxy) mxy = v[1]; if (v[2] > mxz) mxz = v[2];
+  }
+  if (n === 0) return { min: [0, 0, 0], max: [0, 0, 0], size: [0, 0, 0] };
+  return { min: [mnx, mny, mnz], max: [mxx, mxy, mxz], size: [mxx - mnx, mxy - mny, mxz - mnz] };
+}
+
 /** Half-extent of a vert subset from `anchor` along world axis 0|1|2 — the resize
  *  reference (how far the farthest selected vert sits from the center on that axis). */
 export function vertsHalfExtent(m: EditMesh, indices: Iterable<number>, anchor: V3, axis: 0 | 1 | 2): number {

@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEdit, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, tagOneFace, translateVerts, updateMount, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEdit, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, tagOneFace, translateVerts, updateMount, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -1607,6 +1607,50 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           </Box>
         </Box>
       ) : null}
+
+      {/* SIZE READOUT (req_1185): the focused selection's measured dimensions, so the
+          size of a face/edge/vert never has to be remembered. Reads the LIVE mesh
+          (draft during a drag → updates as you resize). Units are modeling units
+          (16u = 1 tile = 1 m). Stacked above the compass, bottom-left. */}
+      {(() => {
+        if (!activePart || !activeMesh) return null;
+        const idx = selMode === 'object'
+          ? activeMesh.verts.map((_, i) => i)
+          : selMode === 'rig' ? [] : selectionVertIndices(activeMesh, selMode, sel);
+        if (idx.length === 0) return null;
+        const b = vertsBounds(activeMesh, idx);
+        const u = (mtr: number) => { const v = Math.round(metersToUnits(mtr) * 100) / 100; return Number.isInteger(v) ? v.toFixed(0) : v.toFixed(2); };
+        const cnt = selMode === 'vertex' ? sel.verts.size : selMode === 'edge' ? sel.edges.size : selMode === 'face' ? sel.faces.size : 0;
+        let head: string;
+        let body: string;
+        if (selMode === 'edge' && sel.edges.size === 1) {
+          const e = meshEdges(activeMesh)[[...sel.edges][0]];
+          const a = activeMesh.verts[e[0]], c = activeMesh.verts[e[1]];
+          head = 'edge';
+          body = `${u(Math.hypot(a[0] - c[0], a[1] - c[1], a[2] - c[2]))}u long`;
+        } else {
+          head = selMode === 'object' ? (activePart.name || 'object') : `${cnt} ${selMode}${cnt === 1 ? '' : 's'}`;
+          body = `${u(b.size[0])} × ${u(b.size[1])} × ${u(b.size[2])} u`;
+        }
+        return (
+          <Box style={{ position: 'absolute', left: 14, bottom: 100, paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#2c4a6a' }}>
+            <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{head}</Text>
+            <Row style={{ gap: 4, alignItems: 'baseline', marginTop: 1 }}>
+              {selMode === 'edge' && sel.edges.size === 1
+                ? <Text fontSize={12} color="#cfe2ff" style={{ fontFamily: 'monospace', fontWeight: '800' }}>{body}</Text>
+                : <>
+                    <Text fontSize={8} color="#e0584e" style={{ fontFamily: 'monospace' }}>X</Text>
+                    <Text fontSize={12} color="#cfe2ff" style={{ fontFamily: 'monospace', fontWeight: '800' }}>{u(b.size[0])}</Text>
+                    <Text fontSize={8} color="#5ec26a" style={{ fontFamily: 'monospace' }}>Y</Text>
+                    <Text fontSize={12} color="#cfe2ff" style={{ fontFamily: 'monospace', fontWeight: '800' }}>{u(b.size[1])}</Text>
+                    <Text fontSize={8} color="#4aa3ff" style={{ fontFamily: 'monospace' }}>Z</Text>
+                    <Text fontSize={12} color="#cfe2ff" style={{ fontFamily: 'monospace', fontWeight: '800' }}>{u(b.size[2])}</Text>
+                    <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>u</Text>
+                  </>}
+            </Row>
+          </Box>
+        );
+      })()}
 
       <ViewCompass lookRef={lookRef} onFace={faceAxis} />
 
