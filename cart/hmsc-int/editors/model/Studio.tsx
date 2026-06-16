@@ -1276,39 +1276,41 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         />
       ) : null}
 
-      <Row style={{ position: 'absolute', left: 12, top: 12, gap: 8, alignItems: 'center' }}>
-        <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#0b1320dd', borderWidth: 1, borderColor: '#27364a' }}>
-          <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
-            {props.partCount === 0 ? 'STUDIO · empty grid · + add a mesh' : `STUDIO · ${props.partCount} part${props.partCount === 1 ? '' : 's'} · ${props.activeName ?? '—'}`}
-          </Text>
-        </Box>
-        {/* SCALE GHOST (req_1165): stand the player beside the model for scale. */}
-        <Pressable
-          onPress={() => setShowScale((v) => !v)}
-          style={{ ...STEP_BTN, backgroundColor: showScale ? '#1c3a2a' : '#0b1320dd', borderColor: showScale ? '#2f7a4f' : '#27364a' }}
-        >
-          <Text fontSize={10} color={showScale ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>
-            {showScale ? `scale · player ${HMSC_SCALE.playerCapsuleHeightMeters.toFixed(2)} m` : '☖ scale'}
-          </Text>
-        </Pressable>
-        {/* MIRROR (req_1183): symmetric editing across X — edit one side, the other
-            follows mirrored. */}
-        <Pressable
-          onPress={() => setMirror((v) => !v)}
-          style={{ ...STEP_BTN, backgroundColor: mirror ? '#3a2f5e' : '#0b1320dd', borderColor: mirror ? '#9b7fd6' : '#27364a' }}
-        >
-          <Text fontSize={10} color={mirror ? '#e0d4ff' : T.dim} style={{ fontFamily: 'monospace' }}>{mirror ? '⇄ mirror X' : '⇄ mirror'}</Text>
-        </Pressable>
-      </Row>
-
-      {/* Diagnostics toolbar (req_0981): the FRAMES readout folded into ONE thin
-          top-right strip with the smooth/log/fps levers — debug aids kept
-          reachable (re-arm in one tap) but demoted out of the working area. */}
-      <Row style={{ position: 'absolute', right: 12, top: 12, gap: 6, alignItems: 'center' }}>
-        {diagOn ? <FrameDiagBar logToTerminal={logOn} /> : null}
-        <Pressable onPress={cycleSmooth} style={STEP_BTN}><Text fontSize={9} color={T.text}>smooth: {smooth === 0 ? 'direct' : `${smooth}/s`}</Text></Pressable>
-        <Pressable onPress={() => setLogOn((v) => !v)} style={{ ...STEP_BTN, backgroundColor: logOn ? '#1c3a2a' : '#13233aee', borderColor: logOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={logOn ? '#7fd6a0' : T.dim}>log cam</Text></Pressable>
-        <Pressable onPress={() => setDiagOn((v) => !v)} style={{ ...STEP_BTN, backgroundColor: diagOn ? '#1c3a2a' : '#13233aee', borderColor: diagOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={diagOn ? '#7fd6a0' : T.dim}>fps</Text></Pressable>
+      {/* ── TOOLBAR tier 1 (req_1184): info + view toggles (left) · diagnostics
+          (right) on ONE strip, space-between so they never overlap. The tools sit
+          on tier 2 below; the old three same-row absolute bars piled on top of each
+          other (scale text over the mode buttons, fps over the export row). */}
+      <Row style={{ position: 'absolute', left: 8, right: 8, top: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+        <Row style={{ gap: 8, alignItems: 'center' }}>
+          <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#0b1320dd', borderWidth: 1, borderColor: '#27364a' }}>
+            <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
+              {props.partCount === 0 ? 'STUDIO · empty grid · + add a mesh' : `STUDIO · ${props.partCount} part${props.partCount === 1 ? '' : 's'} · ${props.activeName ?? '—'}`}
+            </Text>
+          </Box>
+          {/* SCALE GHOST (req_1165): stand the player beside the model for scale. */}
+          <Pressable
+            onPress={() => setShowScale((v) => !v)}
+            style={{ ...STEP_BTN, backgroundColor: showScale ? '#1c3a2a' : '#0b1320dd', borderColor: showScale ? '#2f7a4f' : '#27364a' }}
+          >
+            <Text fontSize={10} color={showScale ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>
+              {showScale ? `scale · player ${HMSC_SCALE.playerCapsuleHeightMeters.toFixed(2)} m` : '☖ scale'}
+            </Text>
+          </Pressable>
+          {/* MIRROR (req_1183): symmetric editing across X. */}
+          <Pressable
+            onPress={() => setMirror((v) => !v)}
+            style={{ ...STEP_BTN, backgroundColor: mirror ? '#3a2f5e' : '#0b1320dd', borderColor: mirror ? '#9b7fd6' : '#27364a' }}
+          >
+            <Text fontSize={10} color={mirror ? '#e0d4ff' : T.dim} style={{ fontFamily: 'monospace' }}>{mirror ? '⇄ mirror X' : '⇄ mirror'}</Text>
+          </Pressable>
+        </Row>
+        {/* Diagnostics (req_0981): FRAMES readout + smooth/log/fps levers, far right. */}
+        <Row style={{ gap: 6, alignItems: 'center' }}>
+          {diagOn ? <FrameDiagBar logToTerminal={logOn} /> : null}
+          <Pressable onPress={cycleSmooth} style={STEP_BTN}><Text fontSize={9} color={T.text}>smooth: {smooth === 0 ? 'direct' : `${smooth}/s`}</Text></Pressable>
+          <Pressable onPress={() => setLogOn((v) => !v)} style={{ ...STEP_BTN, backgroundColor: logOn ? '#1c3a2a' : '#13233aee', borderColor: logOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={logOn ? '#7fd6a0' : T.dim}>log cam</Text></Pressable>
+          <Pressable onPress={() => setDiagOn((v) => !v)} style={{ ...STEP_BTN, backgroundColor: diagOn ? '#1c3a2a' : '#13233aee', borderColor: diagOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={diagOn ? '#7fd6a0' : T.dim}>fps</Text></Pressable>
+        </Row>
       </Row>
 
       {activePart && activeMesh && selMode !== 'object' && selMode !== 'rig'
@@ -1360,9 +1362,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         );
       })() : null}
 
-      {/* Element-mode toolbar (persistent toggle — Blockbench-style, req_0970) +
-          the move/resize tool toggle (req_0983), shown once an element mode is on. */}
-      <Row style={{ position: 'absolute', left: 0, right: 0, top: 12, gap: 4, alignItems: 'center', justifyContent: 'center' }}>
+      {/* ── TOOLBAR tier 2 (req_1184): the TOOLS — modes · transform · context edit
+          ops · texture/compile — on their OWN line below tier 1 (no more piling onto
+          the info/diag strip). Left-aligned + wraps so a dense selection never
+          overflows off-screen; a faint bar groups them as one real toolbar. */}
+      <Row style={{ position: 'absolute', left: 8, right: 8, top: 40, gap: 4, rowGap: 4, alignItems: 'center', flexWrap: 'wrap', paddingLeft: 6, paddingRight: 6, paddingTop: 5, paddingBottom: 5, borderRadius: 7, backgroundColor: '#0a111caa', borderWidth: 1, borderColor: '#1c2940' }}>
         {(['object', 'vertex', 'edge', 'face', 'rig'] as SelMode[]).map((m) => {
           const on = selMode === m;
           const n = selectionCount(sel, m);
