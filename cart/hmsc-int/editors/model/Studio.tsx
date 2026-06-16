@@ -405,11 +405,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // opposite side AND another direction at once). Stored as a bitmask in twig state.
   const [mirrorMask, setMirrorMask] = useHotState('studio:mirrorMask', 0);
   const mirrorAxes = useMemo(() => ([0, 1, 2] as (0 | 1 | 2)[]).filter((a) => mirrorMask & (1 << a)), [mirrorMask]);
-  // SYMMETRY CHECK (req_1191): live "is it symmetric?" badge for the symmetrize axis
-  // (first enabled mirror plane, else X). Memoized on the committed mesh so camera
-  // moves don't recompute it.
-  const symAxis = (mirrorAxes[0] ?? 0) as 0 | 1 | 2;
-  const symReport = useMemo(() => (activePart ? symmetryReport(activePart.mesh, symAxis) : null), [activePart?.id, activePart?.version, symAxis]);
+  // SYMMETRY CHECK (req_1191/1192): live "is it symmetric?" badge. If a mirror plane
+  // is enabled, check THAT axis; otherwise AUTO-PICK the axis the model is most
+  // symmetric about (a car is symmetric left↔right, not front↔back — defaulting to X
+  // mis-reported "110 off"). Memoized on the committed mesh so camera moves don't
+  // recompute it. `symReport.axis` drives the badge AND the symmetrize buttons.
+  const symReport = useMemo(() => {
+    if (!activePart) return null;
+    if (mirrorAxes.length) return { axis: mirrorAxes[0], ...symmetryReport(activePart.mesh, mirrorAxes[0]) };
+    const reps = ([0, 1, 2] as (0 | 1 | 2)[]).map((a) => ({ axis: a, ...symmetryReport(activePart.mesh, a) }));
+    return reps.reduce((best, r) => (r.unmatched < best.unmatched ? r : best));
+  }, [activePart?.id, activePart?.version, mirrorAxes]);
   const scaleFigure = useMemo(() => {
     const doc = GAME_FIGURE.generateFace(SCALE_FIGURE_SEED);
     const fparts = buildPartRender(doc, GAME_FIGURE.hedDepthGrid(doc), SCALE_FIGURE_CART_KEY, SCALE_FIGURE_SEED);
@@ -1457,8 +1463,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 rebuild the other as its exact mirror. Kills drift from a one-sided edit
                 (a stray vert/triangle). Two buttons = pick the GOOD half by result, no
                 abstract prompt; mirror across the first enabled plane (else X). */}
-            {activePart ? (() => {
-              const symAxis = (mirrorAxes[0] ?? 0) as 0 | 1 | 2;
+            {activePart && symReport ? (() => {
+              const symAxis = symReport.axis; // explicit mirror plane, else the auto-detected most-symmetric axis
               const ax = STUDIO.mirrorAxisLabels[symAxis];
               const doSym = (keepPos: boolean) => {
                 props.onEditMesh(activePart.id, symmetrize(activePart.mesh, symAxis, keepPos));

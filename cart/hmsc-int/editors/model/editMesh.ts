@@ -290,23 +290,34 @@ export function symmetrize(m: EditMesh, axis: 0 | 1 | 2, keepPositive: boolean, 
   return { ...m, verts, faces, mounts: mounts.length ? mounts : m.mounts };
 }
 
-/** SYMMETRY CHECK (req_1191): is the part symmetric across its CENTRE on `axis`?
- *  The plane sits at the bbox centre on that axis ("centre of the radius"); a vert is
- *  matched if a vert exists at its reflection (within `dp` decimals). Returns the
- *  centre, how many verts have NO mirror twin (0 = symmetric — a drifted vertex shows
- *  as 2: itself + its now-orphaned twin), and the total. Drives the live badge. Pure. */
-export function symmetryReport(m: EditMesh, axis: 0 | 1 | 2, dp = 4): { center: number; unmatched: number; total: number } {
-  if (m.verts.length === 0) return { center: 0, unmatched: 0, total: 0 };
-  let lo = Infinity, hi = -Infinity;
-  for (const v of m.verts) { if (v[axis] < lo) lo = v[axis]; if (v[axis] > hi) hi = v[axis]; }
-  const c = (lo + hi) / 2;
-  const key = (p: V3) => `${p[0].toFixed(dp)},${p[1].toFixed(dp)},${p[2].toFixed(dp)}`;
-  const have = new Set<string>();
-  for (const v of m.verts) have.add(key(v));
+/** SYMMETRY CHECK (req_1191/1192): is the part symmetric across plane `axis = c`?
+ *  The plane is the ORIGIN (c=0) by default — the SAME plane mirror/symmetrize use,
+ *  not the bbox centre (which drifts off the true plane the moment anything is
+ *  asymmetric and then mis-flags EVERY pair). A vert matches if a vert exists within
+ *  `eps` of its reflection (a tolerance grid, so float noise from edits doesn't
+ *  false-flag). Returns the plane, how many verts have NO mirror twin (0 = symmetric;
+ *  a single drifted vert reads as 2 — itself + its orphaned twin), and the total.
+ *  NOTE: a car is symmetric LEFT↔RIGHT but not front↔back — check the right axis
+ *  (the caller auto-picks the most-symmetric one). Pure. */
+export function symmetryReport(m: EditMesh, axis: 0 | 1 | 2, c = 0, eps = 1e-3): { center: number; unmatched: number; total: number } {
+  if (m.verts.length === 0) return { center: c, unmatched: 0, total: 0 };
+  // tolerance grid: bucket verts by eps-cell; a reflection matches if ANY vert sits in
+  // its cell or the 26 neighbours within eps (handles cell-straddling float noise).
+  const g = (x: number) => Math.round(x / eps);
+  const cells = new Map<string, V3[]>();
+  for (const v of m.verts) { const k = `${g(v[0])},${g(v[1])},${g(v[2])}`; (cells.get(k) ?? (cells.set(k, []), cells.get(k)!)).push(v); }
+  const near = (p: V3): boolean => {
+    const gx = g(p[0]), gy = g(p[1]), gz = g(p[2]);
+    for (let dx = -1; dx <= 1; dx += 1) for (let dy = -1; dy <= 1; dy += 1) for (let dz = -1; dz <= 1; dz += 1) {
+      const bucket = cells.get(`${gx + dx},${gy + dy},${gz + dz}`);
+      if (bucket) for (const v of bucket) if (Math.abs(v[0] - p[0]) <= eps && Math.abs(v[1] - p[1]) <= eps && Math.abs(v[2] - p[2]) <= eps) return true;
+    }
+    return false;
+  };
   let unmatched = 0;
   for (const v of m.verts) {
     const r: V3 = [v[0], v[1], v[2]]; r[axis] = 2 * c - r[axis];
-    if (!have.has(key(r))) unmatched += 1;
+    if (!near(r)) unmatched += 1;
   }
   return { center: c, unmatched, total: m.verts.length };
 }

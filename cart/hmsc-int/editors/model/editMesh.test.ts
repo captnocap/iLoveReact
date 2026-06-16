@@ -630,6 +630,17 @@ test('symmetryReport flags a drifted vert and clears after symmetrize (req_1191)
   assertEqual(symmetryReport(box, 1).unmatched, 0, 'symmetric about its Y centre too');
 });
 
+test('symmetryReport checks the right plane (car: Z-symmetric, X not) + tolerates noise (req_1192)', () => {
+  const car = cuboid(4, 2, 2); // a plain box, symmetric on all axes to start
+  const plusX = car.verts.map((_, i) => i).filter((i) => car.verts[i][0] > 0);
+  const asymX = translateVerts(car, plusX, [0.5, 0, 0]); // push the "front" out → X asymmetric, Z still symmetric
+  assert(symmetryReport(asymX, 0).unmatched > 0, 'reports NOT symmetric front-back (X)');
+  assertEqual(symmetryReport(asymX, 2).unmatched, 0, 'still symmetric left-right (Z) — axis matters');
+  // sub-eps float noise (the kind edits accumulate) must NOT false-flag a symmetric model
+  const noisy: EditMesh = { ...car, verts: car.verts.map((v) => [v[0] + (v[0] > 0 ? 1e-4 : v[0] < 0 ? -1e-4 : 0), v[1], v[2]] as V3) };
+  assertEqual(symmetryReport(noisy, 0).unmatched, 0, 'tiny float noise within tolerance reads as symmetric (no phantom "110 off")');
+});
+
 test('facesUsingVerts / facesUsingEdges resolve a selection to faces (req_1020)', () => {
   const box = cuboid(2, 2, 2);
   assertEqual(facesUsingVerts(box, [6]).length, 3, 'a cube corner vertex touches 3 faces');
