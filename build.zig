@@ -295,10 +295,19 @@ pub fn build(b: *std.Build) void {
     // stbi_write_png powers capture/witness screenshotting. Both are
     // GPU-substrate (no image decode/encode path in the ANSI walker),
     // so gate them on has_gpu_cli OR has_window — a headless cart that
-    // opts into <Window> may use <Image> inside it.
-    if (has_gpu_cli or has_window) {
+    // opts into <Window> may use <Image> inside it. ALSO linked for
+    // has_imageops: the @reactjit/image door (codec.zig) is a headless
+    // decode/resize/encode service that needs the same stb symbols.
+    // Declaration hoisted here next to its link gate (addOption + manifest
+    // live with the other ingredient flags below).
+    const has_imageops = b.option(bool, "has-imageops", "Register __imageops_* bindings (@reactjit/image: Sharp-style decode/resize/encode PNG/JPEG/WebP via stb + dlopen'd libwebp)") orelse false;
+    if (has_gpu_cli or has_window or has_imageops) {
         root_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_impl.c"), .flags = &.{"-O2"} });
         root_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_write_impl.c"), .flags = &.{"-O2"} });
+    }
+    // stb_image_resize2 — only the @reactjit/image door uses it; gate tight.
+    if (has_imageops) {
+        root_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_resize_impl.c"), .flags = &.{"-O2"} });
     }
 
     // ── libfvad (WebRTC VAD) ─────────────────────────────────
@@ -564,6 +573,7 @@ pub fn build(b: *std.Build) void {
     const has_game_camera = b.option(bool, "has-game-camera", "Register __game_camera_* bindings (framework/game: native per-frame camera controller)") orelse false;
     const has_compiled_world = b.option(bool, "has-compiled-world", "Register WorldLoader host primitive + __compiled_world_* status bindings") orelse false;
     const has_capture = b.option(bool, "has-capture", "Register __capture_frame binding (SELFSHOT-0606: the app screenshots its OWN rendered frame; desktop capture of the user's system is banned)") orelse false;
+    // has_imageops hoisted earlier (next to its stb link block).
     // has_whisper, has_pg, has_embed, has_doom hoisted earlier (next to their compile/link blocks).
     options.addOption(bool, "has_process", has_process);
     options.addOption(bool, "has_httpsrv", has_httpsrv);
@@ -585,6 +595,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_game_camera", has_game_camera);
     options.addOption(bool, "has_compiled_world", has_compiled_world);
     options.addOption(bool, "has_capture", has_capture);
+    options.addOption(bool, "has_imageops", has_imageops);
     options.addOption(bool, "has_pg", has_pg or has_embed);
     options.addOption(bool, "has_embed", has_embed);
     options.addOption(bool, "has_whisper", has_whisper);
@@ -619,6 +630,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/game_camera.flag", if (has_game_camera) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/compiled_world.flag", if (has_compiled_world) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/capture.flag", if (has_capture) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/imageops.flag", if (has_imageops) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/pg.flag", if (has_pg or has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/embed.flag", if (has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/whisper.flag", if (has_whisper) "1\n" else "0\n");

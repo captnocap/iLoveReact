@@ -214,6 +214,15 @@
       "bundlePolicy": "feature-gated",
       "buildFlag": "-Dhas-privacy"
     },
+    "libwebp": {
+      "kind": "dynamic-library",
+      "systemNames": [
+        "webp"
+      ],
+      "linkPolicy": "never",
+      "bundlePolicy": "feature-gated",
+      "note": "dlopen'd at runtime by framework/image/codec.zig (WebPEncodeRGBA / WebPEncodeLosslessRGBA / WebPDecodeRGBA / WebPGetInfo / WebPFree) when a cart encodes/decodes WebP via @reactjit/image — no link-time dependency, so PNG/JPEG-only carts never load it. Present on most Linux desktops (libwebp.so.7); pack-sdk stages it alongside the cart when the imageops feature triggers so WebP works on hosts that lack it."
+    },
     "sqlite3": {
       "kind": "dynamic-library",
       "systemNames": [
@@ -977,6 +986,24 @@
         "capture"
       ],
       "note": "SELFSHOT-0606: __capture_frame(path) — the app screenshots its OWN rendered frame (framework/gpu/capture.zig readback → PNG), registered by framework/v8_bindings_capture.zig. The replacement for the BANNED desktop/X11 capture of the user's system. Carts opt in by importing runtime/capture.ts (the captureFrame door)."
+    },
+    "imageops": {
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/image.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-imageops"
+      ],
+      "v8Bindings": [
+        "imageops"
+      ],
+      "nativeLibraries": [
+        "libwebp"
+      ],
+      "note": "@reactjit/image: a Sharp-style decode/resize/encode service (__imageops_*, framework/v8_bindings_image_ops.zig → framework/image/codec.zig). PNG/JPEG via the foundational stb_image + stb_image_write; resize via vendored stb_image_resize2; WebP via libwebp dlopen'd at runtime (no link-time cost — present on most Linux desktops, staged by pack-sdk when bundled). The heavy raw RGBA never crosses the JS↔Zig FFI: carts pass compressed bytes/base64 in and get compressed bytes back. Carts opt in by importing runtime/image.ts."
     }
   },
   "shipGate": {

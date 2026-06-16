@@ -333,6 +333,7 @@ function verifyIngredientLabels(cartRoot: string, buildBin: string, flags: strin
     doom: hasBuildFlag(flags, 'has-doom'),
     pathing: hasBuildFlag(flags, 'has-pathing'),
     compiled_world: hasBuildFlag(flags, 'has-compiled-world'),
+    imageops: hasBuildFlag(flags, 'has-imageops'),
   };
 
   let mismatch = false;

@@ -273,6 +273,14 @@ const v8_bindings_capture = if (enabledFor("capture") and has_gpu_flag) @import(
     pub fn registerCapture(_: anytype) void {}
 };
 
+// Image transcode service (@reactjit/image): __imageops_* decode/resize/encode
+// for PNG/JPEG/WebP. Pure headless — codec.zig only touches stb + a dlopen'd
+// libwebp, never gpu.zig — so the gate does NOT compose with has_gpu (a TUI or
+// pure-headless cart can resize images just fine).
+const v8_bindings_image_ops = if (enabledFor("imageops")) @import("v8_bindings_image_ops.zig") else struct {
+    pub fn registerImageOps(_: anytype) void {}
+};
+
 // ── INGREDIENTS ─────────────────────────────────────────────────────
 //
 // Required-true rows are always registered. Required-false rows are
@@ -354,6 +362,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "game_camera", .required = false, .grep_prefix = "__game_camera_", .reg_fn = "registerGameCamera", .mod = v8_bindings_game_camera },
     .{ .name = "compiled_world", .required = false, .grep_prefix = "__compiled_world_", .reg_fn = "registerCompiledWorld", .mod = v8_bindings_compiled_world },
     .{ .name = "capture", .required = false, .grep_prefix = "__capture_", .reg_fn = "registerCapture", .mod = v8_bindings_capture },
+    .{ .name = "imageops", .required = false, .grep_prefix = "__imageops_", .reg_fn = "registerImageOps", .mod = v8_bindings_image_ops },
 };
 
 /// Register every ingredient's host fns into the current V8 context.
