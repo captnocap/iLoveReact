@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEdit, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, tagOneFace, translateVerts, updateMount, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, tagOneFace, translateVerts, updateMount, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -120,9 +120,11 @@ export const STUDIO = {
    *  architectural pane at the materials.ts Glass opacity (0.34). */
   glassColor: '#a9cbe0',
   glassOpacity: 0.34,
-  /** MIRROR (req_1183): symmetric editing reflects edits across this part-local axis
-   *  at coord 0 — X (left↔right), the axis a model is built symmetric about. */
-  mirrorAxis: 0 as 0 | 1 | 2,
+  /** MIRROR (req_1183/1186): symmetric editing reflects edits across any enabled
+   *  part-local plane at coord 0 — X (left↔right), Y (up↔down), Z (front↔back),
+   *  multi-select for combined symmetry. The active planes live in twig state. */
+  mirrorAxisLabels: ['X', 'Y', 'Z'] as const,
+  mirrorAxisColors: ['#e0584e', '#5ec26a', '#4aa3ff'] as const,
   /** the SELECTED face is shaded this vivid color (req_0986) — distinct from the
    *  pastel part tints so the active face is unmistakable. */
   selectFaceColor: '#ff8a3d',
@@ -398,9 +400,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // feet on the grid. Toggled by the 'scale' button; interned so the static figure
   // doesn't compete for the sculpt DYN slots. Twig state (survives hot reload).
   const [showScale, setShowScale] = useHotState('studio:showScale', false);
-  // MIRROR (req_1183): symmetric editing — a gizmo transform on one side is reflected
-  // onto each moved vert's mirror partner across X=0. Twig state (survives reload).
-  const [mirror, setMirror] = useHotState('studio:mirror', false);
+  // MIRROR (req_1183/1186): symmetric editing — a gizmo transform is reflected onto
+  // each moved vert's partner across every ENABLED plane (X/Y/Z, multi-select for the
+  // opposite side AND another direction at once). Stored as a bitmask in twig state.
+  const [mirrorMask, setMirrorMask] = useHotState('studio:mirrorMask', 0);
+  const mirrorAxes = useMemo(() => ([0, 1, 2] as (0 | 1 | 2)[]).filter((a) => mirrorMask & (1 << a)), [mirrorMask]);
   const scaleFigure = useMemo(() => {
     const doc = GAME_FIGURE.generateFace(SCALE_FIGURE_SEED);
     const fparts = buildPartRender(doc, GAME_FIGURE.hedDepthGrid(doc), SCALE_FIGURE_CART_KEY, SCALE_FIGURE_SEED);
@@ -584,7 +588,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // moves, the start mesh + anchor, and the start-frozen axis screen frame (so
   // the world mapping is stable for the whole drag).
   const gizmoDragRef = useRef<null | {
-    partId: string; tool: GizmoTool; hit: GizmoHit; indices: number[]; startMesh: EditMesh; mirror: boolean;
+    partId: string; tool: GizmoTool; hit: GizmoHit; indices: number[]; startMesh: EditMesh; mirrorAxes: (0 | 1 | 2)[];
     anchorL: MV3; anchorScreen: { x: number; y: number }; axis: { dx: number; dy: number; pxPerUnit: number };
     startCx: number; startCy: number; startScreenDist: number; halfExt: number; rotSign: number; lastMesh?: EditMesh;
   }>(null);
@@ -858,7 +862,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           const ax = axisScreen(anchorW, AXIS_DIR[hit.axis], proj);
           gizmoDragRef.current = {
             partId: activePart.id, tool: gizmoTool, hit, indices, startMesh: mesh,
-            mirror, // symmetry snapshotted at drag start (req_1183)
+            mirrorAxes, // symmetry planes snapshotted at drag start (req_1183/1186)
             anchorL, anchorScreen: { x: aS.x, y: aS.y },
             axis: { dx: ax.dx, dy: ax.dy, pxPerUnit: ax.pxPerUnit },
             startCx: lx, startCy: ly,
@@ -972,10 +976,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         next = scaleVerts(g.startMesh, g.indices, g.anchorL, factor);
         readout = `${axisLabel} Δ${fmtUnits(metersToUnits(target - g.halfExt))}`;
       }
-      // MIRROR (req_1183): reflect the moved verts onto their partners across X=0 —
-      // op-agnostic, so move/resize/rotate all stay symmetric. Object-mode (all verts
-      // moved) self-cancels inside mirrorEdit. Snapshotted at drag start (g.mirror).
-      if (g.mirror) next = mirrorEdit(g.startMesh, next, g.indices, STUDIO.mirrorAxis);
+      // MIRROR (req_1183/1186): reflect the moved verts onto their partners across
+      // every enabled plane — op-agnostic, so move/resize/rotate all stay symmetric.
+      // Object-mode (all verts moved) self-cancels inside mirrorEditAxes.
+      if (g.mirrorAxes.length) next = mirrorEditAxes(g.startMesh, next, g.indices, g.mirrorAxes);
       setGizmoReadout(readout);
       g.lastMesh = next;
       dragSeqRef.current += 1;
@@ -1296,13 +1300,19 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               {showScale ? `scale · player ${HMSC_SCALE.playerCapsuleHeightMeters.toFixed(2)} m` : '☖ scale'}
             </Text>
           </Pressable>
-          {/* MIRROR (req_1183): symmetric editing across X. */}
-          <Pressable
-            onPress={() => setMirror((v) => !v)}
-            style={{ ...STEP_BTN, backgroundColor: mirror ? '#3a2f5e' : '#0b1320dd', borderColor: mirror ? '#9b7fd6' : '#27364a' }}
-          >
-            <Text fontSize={10} color={mirror ? '#e0d4ff' : T.dim} style={{ fontFamily: 'monospace' }}>{mirror ? '⇄ mirror X' : '⇄ mirror'}</Text>
-          </Pressable>
+          {/* MIRROR (req_1183/1186): symmetric editing — pick the plane(s). X=left↔right,
+              Y=up↔down, Z=front↔back; enable more than one for combined symmetry. */}
+          <Row style={{ gap: 3, alignItems: 'center', paddingLeft: 5, paddingRight: 4, paddingTop: 2, paddingBottom: 2, borderRadius: 5, backgroundColor: mirrorMask ? '#241c3a' : '#0b1320dd', borderWidth: 1, borderColor: mirrorMask ? '#6b54a6' : '#27364a' }}>
+            <Text fontSize={9} color={mirrorMask ? '#cdbcff' : T.dim} style={{ fontFamily: 'monospace' }}>⇄</Text>
+            {([0, 1, 2] as const).map((a) => {
+              const on = !!(mirrorMask & (1 << a));
+              return (
+                <Pressable key={a} onPress={() => setMirrorMask((m) => m ^ (1 << a))} style={{ paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, borderRadius: 4, backgroundColor: on ? STUDIO.mirrorAxisColors[a] + '33' : 'transparent', borderWidth: 1, borderColor: on ? STUDIO.mirrorAxisColors[a] : '#2c4a6a' }}>
+                  <Text fontSize={10} color={on ? STUDIO.mirrorAxisColors[a] : T.dim} style={{ fontFamily: 'monospace', fontWeight: on ? '800' : '400' }}>{STUDIO.mirrorAxisLabels[a]}</Text>
+                </Pressable>
+              );
+            })}
+          </Row>
         </Row>
         {/* Diagnostics (req_0981): FRAMES readout + smooth/log/fps levers, far right. */}
         <Row style={{ gap: 6, alignItems: 'center' }}>

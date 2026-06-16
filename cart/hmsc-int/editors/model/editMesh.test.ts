@@ -6,7 +6,7 @@ import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import {
   addMount, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
-  flipFace, mirrorEdit, mirrorPartners, setFaceGlass, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
+  flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
@@ -531,6 +531,23 @@ test('mirrorEdit reflects a moved vert onto its X-partner — pull left, right f
   }
   // the moved side itself is untouched by the mirror pass
   for (const i of plusX) assert(approx(sym.verts[i][0], box.verts[i][0] + 0.5), 'the dragged side keeps its own move');
+});
+
+test('mirrorEditAxes mirrors across TWO planes incl. the diagonal twin (req_1186)', () => {
+  // a symmetric box: pulling one corner mirrors to all 4 corners (X and Z planes).
+  const box = cuboid(2, 2, 2);
+  const corner = box.verts.map((v, i) => i).filter((i) => box.verts[i][0] > 0 && box.verts[i][2] > 0); // +x+z column
+  const moved = translateVerts(box, corner, [0.5, 0, 0.5]); // pull it out diagonally
+  const sym = mirrorEditAxes(box, moved, corner, [0, 2]); // mirror X and Z
+  for (const i of corner) {
+    const s = sym.verts[i];
+    // the −x twin: (−x, y, z); the −z twin: (x, y, −z); the diagonal: (−x, y, −z)
+    const find = (x: number, z: number) => sym.verts.findIndex((v) => approx(v[1], s[1]) && Math.sign(v[0]) === Math.sign(x) && Math.sign(v[2]) === Math.sign(z));
+    const tx = find(-1, 1), tz = find(1, -1), td = find(-1, -1);
+    assert(approx(sym.verts[tx][0], -s[0]) && approx(sym.verts[tx][2], s[2]), 'the −x twin mirrors X only');
+    assert(approx(sym.verts[tz][0], s[0]) && approx(sym.verts[tz][2], -s[2]), 'the −z twin mirrors Z only');
+    assert(approx(sym.verts[td][0], -s[0]) && approx(sym.verts[td][2], -s[2]), 'the diagonal twin mirrors both');
+  }
 });
 
 test('mirrorEdit skips seam verts and both-sides selections (no double-apply) (req_1183)', () => {

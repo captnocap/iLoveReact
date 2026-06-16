@@ -1164,25 +1164,46 @@ export function mirrorPartners(m: EditMesh, axis: 0 | 1 | 2, c = 0, dp = 4): num
   });
 }
 
-/** Reflect each `moved` vert's new position onto its mirror partner (across plane
- *  `axis = c`) — the symmetry pass applied after a transform. `base` (the pre-drag
- *  mesh) fixes the pairing; `next` holds the transformed positions. Seam verts (own
- *  partner) and partners that are themselves in `moved` (both sides selected, or an
- *  object-mode all-verts move) are skipped so nothing double-applies. Pure. */
-export function mirrorEdit(base: EditMesh, next: EditMesh, moved: Iterable<number>, axis: 0 | 1 | 2, c = 0): EditMesh {
-  const partners = mirrorPartners(base, axis, c);
+/** Reflect each `moved` vert's new position onto its mirror partner across EVERY
+ *  enabled plane in `axes` (each `= c`) — symmetric editing on one OR more planes
+ *  (req_1183/1186: "the other direction also"). For >1 axis it also reflects across
+ *  their COMBINATIONS (X+Z → the diagonal twin), so two planes give clean 4-way
+ *  symmetry, not two half-mirrors. `base` (pre-drag) fixes the pairing; `next` holds
+ *  the transformed positions. A vert's own reflection (seam) and partners that are
+ *  themselves in `moved` are skipped so nothing double-applies. Pure. */
+export function mirrorEditAxes(base: EditMesh, next: EditMesh, moved: Iterable<number>, axes: (0 | 1 | 2)[], c = 0, dp = 4): EditMesh {
+  if (axes.length === 0) return next;
   const movedSet = moved instanceof Set ? moved : new Set(moved);
+  const key = (p: V3) => `${p[0].toFixed(dp)},${p[1].toFixed(dp)},${p[2].toFixed(dp)}`;
+  const byPos = new Map<string, number>();
+  base.verts.forEach((v, i) => byPos.set(key(v), i));
+  // every non-empty subset of the enabled axes = one reflection (single planes + diagonals)
+  const subsets: (0 | 1 | 2)[][] = [];
+  for (let mask = 1; mask < (1 << axes.length); mask += 1) {
+    const s: (0 | 1 | 2)[] = [];
+    for (let k = 0; k < axes.length; k += 1) if (mask & (1 << k)) s.push(axes[k]);
+    subsets.push(s);
+  }
   const verts = next.verts.map((v) => [v[0], v[1], v[2]] as V3);
   let touched = false;
   for (const i of movedSet) {
-    const p = partners[i];
-    if (p === i || movedSet.has(p)) continue;
-    const s = next.verts[i];
-    verts[p] = [s[0], s[1], s[2]];
-    verts[p][axis] = 2 * c - s[axis];
-    touched = true;
+    const bi = base.verts[i];
+    for (const s of subsets) {
+      const rp: V3 = [bi[0], bi[1], bi[2]]; for (const a of s) rp[a] = 2 * c - rp[a]; // the twin's ORIGINAL pos
+      const p = byPos.get(key(rp));
+      if (p == null || p === i || movedSet.has(p)) continue;
+      const si = next.verts[i];
+      const np: V3 = [si[0], si[1], si[2]]; for (const a of s) np[a] = 2 * c - np[a]; // its reflected NEW pos
+      verts[p] = np;
+      touched = true;
+    }
   }
   return touched ? { ...next, verts } : next;
+}
+
+/** Single-plane symmetry — `mirrorEditAxes` for one axis (back-compat). Pure. */
+export function mirrorEdit(base: EditMesh, next: EditMesh, moved: Iterable<number>, axis: 0 | 1 | 2, c = 0): EditMesh {
+  return mirrorEditAxes(base, next, moved, [axis], c);
 }
 
 /** A GeometryData of ONLY the given faces, each pushed out along its own normal
