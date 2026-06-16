@@ -56,6 +56,8 @@ const SHAPE_CYLINDER8: f32 = 2;
 const SHAPE_CYLINDER16: f32 = 3;
 const SHAPE_SPHERE: f32 = 4;
 const SHAPE_GABLE: f32 = 5; // req_0930: the triangular gable-end wall prism
+const SHAPE_GRASS: f32 = 6; // a grass blade clump — drawn by the grass pipeline (wind/wisp/gradient)
+const SHAPE_BUSH: f32 = 7; // a bush foliage clump — same foliage pipeline, bushier geometry
 const SCAN_A: usize = 4;
 const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
@@ -224,6 +226,22 @@ const PlayerState = struct {
     /// Seated/lying on a prop (PROPUSE req_0624): movement is skipped and the
     /// figure plays the baked sit/lay clip until WASD/Space stands up.
     posture: Posture = .none,
+};
+
+/// One live NPC figure (req_0935): which baked model it wears, where its child
+/// nodes start in the kid list, and its transform/animation state. Stage 1
+/// renders + animates only (clip defaults to IDLE); the Stage-2 Zig combat AI
+/// will drive x/z/yaw/gait/clip. y is grounded on the terrain at build time.
+const NpcRuntime = struct {
+    model_index: u32,
+    first_child: usize,
+    group_count: usize,
+    x: f32,
+    y: f32,
+    z: f32,
+    yaw: f32,
+    gait_phase: f32 = 0,
+    clip: u32 = PLAYER_CLIP_IDLE,
 };
 
 /// The interaction frame's live state — what the player can do right now and
@@ -566,6 +584,72 @@ fn buildGablePrism() [24 * 8]f32 {
     return out;
 }
 
+/// A grass blade clump — the compiled twin of runtime/geometries/GrassBlade.ts
+/// (same crossed-quad layout / UVs so the editor iso view and the compiled game
+/// render identical blades). 3 quads crossed around Y, each unit-tall (uv.y
+/// 0=root,1=tip), double-sided (both windings). The grass pipeline (gpu/3d.zig,
+/// routed by the "~grass~" tex key) paints the wisp cutout + gradient + wind.
+fn buildGrassBlade() [36 * 8]f32 {
+    const half_w: f32 = 0.07; // GRASS_BLADE_DEFAULTS.width 0.14 * 0.5
+    const tip_half: f32 = 0.0175; // half_w * tipTaper 0.25
+    var out: [36 * 8]f32 = undefined;
+    var i: usize = 0;
+    var b: usize = 0;
+    while (b < 3) : (b += 1) {
+        const theta = (@as(f32, @floatFromInt(b)) + 0.5) / 3.0 * std.math.pi;
+        const dx = @cos(theta);
+        const dz = @sin(theta);
+        const n = [3]f32{ dz, 0, -dx };
+        const nb = [3]f32{ -dz, 0, dx };
+        const bl = [3]f32{ -dx * half_w, 0, -dz * half_w };
+        const br = [3]f32{ dx * half_w, 0, dz * half_w };
+        const tr = [3]f32{ dx * tip_half, 1, dz * tip_half };
+        const tl = [3]f32{ -dx * tip_half, 1, -dz * tip_half };
+        // front
+        pushTri(out[0..], &i, bl, br, tr, n, .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 });
+        pushTri(out[0..], &i, bl, tr, tl, n, .{ 0, 0 }, .{ 1, 1 }, .{ 0, 1 });
+        // back (reversed winding + flipped normal)
+        pushTri(out[0..], &i, bl, tr, br, nb, .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 });
+        pushTri(out[0..], &i, bl, tl, tr, nb, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 1 });
+    }
+    return out;
+}
+
+/// A bush foliage clump — the compiled twin of runtime/geometries/BushClump.ts.
+/// 5 cards fanned a FULL circle, each leaning OUTWARD (tip splayed along its
+/// compass dir) so the silhouette reads as a leafy shrub, not a tuft. Double-sided;
+/// the foliage pipeline (routed by "~grass~") cuts + gradients + sways it.
+fn buildBushClump() [60 * 8]f32 {
+    const half_w: f32 = 0.25; // BUSH_CLUMP_DEFAULTS.width 0.5 * 0.5
+    const tip_half: f32 = 0.075; // half_w * tipTaper 0.3
+    const splay: f32 = 0.5;
+    var out: [60 * 8]f32 = undefined;
+    var i: usize = 0;
+    var b: usize = 0;
+    while (b < 5) : (b += 1) {
+        const theta = (@as(f32, @floatFromInt(b)) + 0.5) / 5.0 * std.math.pi * 2.0;
+        const dx = @cos(theta);
+        const dz = @sin(theta);
+        const perp_x = -dz;
+        const perp_z = dx;
+        const n = [3]f32{ dx, 0.6, dz };
+        const nb = [3]f32{ -dx, 0.6, -dz };
+        const tip_x = dx * splay;
+        const tip_z = dz * splay;
+        const bl = [3]f32{ -perp_x * half_w, 0, -perp_z * half_w };
+        const br = [3]f32{ perp_x * half_w, 0, perp_z * half_w };
+        const tr = [3]f32{ tip_x + perp_x * tip_half, 1, tip_z + perp_z * tip_half };
+        const tl = [3]f32{ tip_x - perp_x * tip_half, 1, tip_z - perp_z * tip_half };
+        // front
+        pushTri(out[0..], &i, bl, br, tr, n, .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 });
+        pushTri(out[0..], &i, bl, tr, tl, n, .{ 0, 0 }, .{ 1, 1 }, .{ 0, 1 });
+        // back (reversed winding + flipped normal)
+        pushTri(out[0..], &i, bl, tr, br, nb, .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 });
+        pushTri(out[0..], &i, bl, tl, tr, nb, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 1 });
+    }
+    return out;
+}
+
 fn spherePos(radius: f32, theta: f32, phi: f32) [3]f32 {
     const st = @sin(theta);
     return .{ radius * st * @cos(phi), radius * @cos(theta), radius * st * @sin(phi) };
@@ -669,6 +753,10 @@ const ShapeBatches = struct {
     sphere_count: u32,
     gables: []f32,
     gable_count: u32,
+    grass: []f32,
+    grass_count: u32,
+    bush: []f32,
+    bush_count: u32,
 
     pub fn deinit(self: ShapeBatches, allocator: std.mem.Allocator) void {
         allocator.free(self.boxes);
@@ -677,6 +765,8 @@ const ShapeBatches = struct {
         allocator.free(self.cylinder16s);
         allocator.free(self.spheres);
         allocator.free(self.gables);
+        allocator.free(self.grass);
+        allocator.free(self.bush);
     }
 };
 
@@ -687,6 +777,11 @@ const MaterialBatch = struct {
     boxes: []f32,
     count: u32,
     key: []u8,
+    // The instance SHAPE this batch draws (FORMULAFLOOR sibling, req_0939): a
+    // material-skinned gable roof / cylinder / sphere must wear its real geometry,
+    // not a textured box. Rows are partitioned per (material, shape), so every
+    // batch is single-shape and the draw picks geometry from it.
+    shape: f32,
     textured_translucent: bool,
     translucent: bool,
     opacity: f32,
@@ -714,12 +809,18 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     errdefer spheres.deinit(allocator);
     var gables: std.ArrayList(f32) = .{};
     errdefer gables.deinit(allocator);
+    var grass: std.ArrayList(f32) = .{};
+    errdefer grass.deinit(allocator);
+    var bush: std.ArrayList(f32) = .{};
+    errdefer bush.deinit(allocator);
     var box_count: u32 = 0;
     var ramp_count: u32 = 0;
     var cylinder8_count: u32 = 0;
     var cylinder16_count: u32 = 0;
     var sphere_count: u32 = 0;
     var gable_count: u32 = 0;
+    var grass_count: u32 = 0;
+    var bush_count: u32 = 0;
     var row: usize = 0;
     while (row < @as(usize, @intCast(inst_count))) : (row += 1) {
         if (row < material_refs.len and material_refs[row] != 0) continue; // textured batch
@@ -741,6 +842,12 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         } else if (@abs(shape - SHAPE_GABLE) < 0.5) {
             try gables.appendSlice(allocator, src);
             gable_count += 1;
+        } else if (@abs(shape - SHAPE_GRASS) < 0.5) {
+            try grass.appendSlice(allocator, src);
+            grass_count += 1;
+        } else if (@abs(shape - SHAPE_BUSH) < 0.5) {
+            try bush.appendSlice(allocator, src);
+            bush_count += 1;
         } else {
             try boxes.appendSlice(allocator, src);
             box_count += 1;
@@ -759,6 +866,10 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         .sphere_count = sphere_count,
         .gables = try gables.toOwnedSlice(allocator),
         .gable_count = gable_count,
+        .grass = try grass.toOwnedSlice(allocator),
+        .grass_count = grass_count,
+        .bush = try bush.toOwnedSlice(allocator),
+        .bush_count = bush_count,
     };
 }
 
@@ -782,10 +893,17 @@ fn whitenRows(rows: []f32, stride: usize) void {
 // at build time). Rows keep their authored fallback color here; the caller
 // whitens whichever array actually draws (whitenRows above), so the streaming
 // LOD shell can read the real colors first. Empty when the map has no materials.
+// Shape slots a material batch can split into — indexed by the rounded shape id
+// (SHAPE_BOX..SHAPE_BUSH). A skinned row is bucketed by BOTH its material AND its
+// shape, so a brick-skinned gable roof draws as a gable, not a textured box
+// (req_0939). Most rows are boxes, so a typical material still yields one batch.
+const MATERIAL_SHAPE_SLOTS: usize = 8;
+
 fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, materials: []const constructor.Material, material_refs: []const u32) ![]MaterialBatch {
     const mat_count = materials.len;
     if (mat_count == 0 or material_refs.len == 0) return try allocator.alloc(MaterialBatch, 0);
-    var lists = try allocator.alloc(std.ArrayList(f32), mat_count);
+    // One row list per (material, shape) — lists[mat * SLOTS + shape].
+    var lists = try allocator.alloc(std.ArrayList(f32), mat_count * MATERIAL_SHAPE_SLOTS);
     defer allocator.free(lists);
     for (lists) |*l| l.* = .{};
     defer for (lists) |*l| l.deinit(allocator);
@@ -795,35 +913,54 @@ fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_c
         const ref = if (row < material_refs.len) material_refs[row] else 0;
         if (ref == 0 or ref > mat_count) continue;
         const b = row * stride;
-        try lists[ref - 1].appendSlice(allocator, insts[b .. b + stride]);
+        // Round the shape id to a slot; anything outside the known shapes (incl.
+        // grass/bush, which are never skinned) falls back to the box slot.
+        const sid = instanceShapeId(insts, row, stride);
+        var slot: usize = @intFromFloat(@max(0, @min(@as(f32, MATERIAL_SHAPE_SLOTS - 1), @round(sid))));
+        if (slot >= MATERIAL_SHAPE_SLOTS) slot = 0;
+        try lists[(ref - 1) * MATERIAL_SHAPE_SLOTS + slot].appendSlice(allocator, insts[b .. b + stride]);
     }
 
-    var batches = try allocator.alloc(MaterialBatch, mat_count);
+    var nonempty: usize = 0;
+    for (lists) |l| {
+        if (l.items.len > 0) nonempty += 1;
+    }
+    var batches = try allocator.alloc(MaterialBatch, nonempty);
     var built: usize = 0;
     errdefer {
         for (batches[0..built]) |batch| batch.deinit(allocator);
         allocator.free(batches);
     }
-    while (built < mat_count) : (built += 1) {
-        const key = try std.fmt.allocPrint(allocator, "wmat-{d}", .{built});
-        errdefer allocator.free(key);
-        const count: u32 = @intCast(lists[built].items.len / stride);
-        const boxes = try lists[built].toOwnedSlice(allocator);
-        batches[built] = .{
-            .boxes = boxes,
-            .count = count,
-            .key = key,
-            // Translucent flat (glass) = NO look to materialize at all. A
-            // decal material also has empty wgsl but carries its packed DOC —
-            // it draws in the textured batch like any shader material.
-            .translucent = materials[built].wgsl.len == 0 and materials[built].decal_doc.len == 0,
-            // Shader/decal textures can carry alpha (painted stencil materials
-            // are opaque paint over transparent background). Instanced opaque
-            // draws write depth even where tex alpha is 0, so route these sparse
-            // cases through single textured meshes in the transparent pass.
-            .textured_translucent = materials[built].opacity < 0.999 and (materials[built].wgsl.len > 0 or materials[built].decal_doc.len > 0),
-            .opacity = materials[built].opacity,
-        };
+    var mi: usize = 0;
+    while (mi < mat_count) : (mi += 1) {
+        var slot: usize = 0;
+        while (slot < MATERIAL_SHAPE_SLOTS) : (slot += 1) {
+            const list = &lists[mi * MATERIAL_SHAPE_SLOTS + slot];
+            if (list.items.len == 0) continue;
+            // Every (material, shape) batch keys off the SAME wmat-<i> texture
+            // (materialized once per material). Each batch owns its own key copy.
+            const key = try std.fmt.allocPrint(allocator, "wmat-{d}", .{mi});
+            errdefer allocator.free(key);
+            const count: u32 = @intCast(list.items.len / stride);
+            const boxes = try list.toOwnedSlice(allocator);
+            batches[built] = .{
+                .boxes = boxes,
+                .count = count,
+                .key = key,
+                .shape = @floatFromInt(slot),
+                // Translucent flat (glass) = NO look to materialize at all. A
+                // decal material also has empty wgsl but carries its packed DOC —
+                // it draws in the textured batch like any shader material.
+                .translucent = materials[mi].wgsl.len == 0 and materials[mi].decal_doc.len == 0,
+                // Shader/decal textures can carry alpha (painted stencil materials
+                // are opaque paint over transparent background). Instanced opaque
+                // draws write depth even where tex alpha is 0, so route these sparse
+                // cases through single textured meshes in the transparent pass.
+                .textured_translucent = materials[mi].opacity < 0.999 and (materials[mi].wgsl.len > 0 or materials[mi].decal_doc.len > 0),
+                .opacity = materials[mi].opacity,
+            };
+            built += 1;
+        }
     }
     return batches;
 }
@@ -901,6 +1038,20 @@ fn instanceShapeId(insts: []const f32, row: usize, stride: usize) f32 {
 
 fn isRampInstance(insts: []const f32, row: usize, stride: usize) bool {
     return @abs(instanceShapeId(insts, row, stride) - SHAPE_RAMP) < 0.5;
+}
+
+const GeomPick = struct { key: []const u8, verts: []const f32, vert_count: u32 };
+
+/// The keyed geometry (verts + count) for an instance SHAPE id — the ONE place
+/// shape→geometry is resolved for the material draws (req_0939). Grass/bush and
+/// any unknown shape fall back to the box; foliage is never material-skinned.
+fn geomForShape(rt: *const Runtime, shape: f32) GeomPick {
+    if (@abs(shape - SHAPE_RAMP) < 0.5) return .{ .key = "ramp-slab", .verts = rt.ramp_slab[0..], .vert_count = 36 };
+    if (@abs(shape - SHAPE_CYLINDER8) < 0.5) return .{ .key = "cylinder8", .verts = rt.cylinder8[0..], .vert_count = 8 * 12 };
+    if (@abs(shape - SHAPE_CYLINDER16) < 0.5) return .{ .key = "cylinder16", .verts = rt.cylinder16[0..], .vert_count = 16 * 12 };
+    if (@abs(shape - SHAPE_SPHERE) < 0.5) return .{ .key = "sphere12x8", .verts = rt.sphere[0..], .vert_count = 12 * 8 * 6 };
+    if (@abs(shape - SHAPE_GABLE) < 0.5) return .{ .key = "gable-prism", .verts = rt.gable_prism[0..], .vert_count = 24 };
+    return .{ .key = "box", .verts = rt.cube[0..], .vert_count = 36 };
 }
 
 /// The 9 axis-aligned-rect collider floats for one instance row (shared by the
@@ -1798,6 +1949,37 @@ fn updatePlayerModelNodes(kids: []Node, first: usize, groups: []const constructo
     }
 }
 
+/// The NPC twin of updatePlayerModelNodes (req_0935): pose one NPC's child
+/// nodes from its own transform + clip, reusing the SAME findPlayerClip /
+/// sampleClipTransform / rotateYLocal the player figure uses (NPCs share the
+/// PLAYER_ANIMATION clips). Stage 1 leaves clip = IDLE so figures stand.
+fn updateNpcModelNodes(kids: []Node, npc: NpcRuntime, groups: []const constructor.PlayerModelGroup, animation: constructor.PlayerAnimationSet) void {
+    const model_yaw_degrees = npc.yaw * 180.0 / std.math.pi + 180.0;
+    const clip_time: f32 = if (npc.clip == PLAYER_CLIP_WALK) npc.gait_phase else 0;
+    const clip = if (animation.node_count == groups.len) findPlayerClip(animation, npc.clip) else null;
+    var i: usize = 0;
+    while (i < groups.len) : (i += 1) {
+        const base = groups[i];
+        const base_transform = constructor.PlayerTransform{
+            .position = base.position,
+            .rotation = base.rotation,
+            .scale = base.scale,
+        };
+        const t = if (clip) |cclip| sampleClipTransform(cclip, i, clip_time) orelse base_transform else base_transform;
+        const local = rotateYLocal(t.position, model_yaw_degrees);
+        const node = &kids[npc.first_child + i];
+        node.scene3d_pos_x = npc.x + local.x;
+        node.scene3d_pos_y = npc.y + local.y;
+        node.scene3d_pos_z = npc.z + local.z;
+        node.scene3d_rot_x = t.rotation[0];
+        node.scene3d_rot_y = t.rotation[1] + model_yaw_degrees;
+        node.scene3d_rot_z = t.rotation[2];
+        node.scene3d_scale_x = t.scale[0];
+        node.scene3d_scale_y = t.scale[1];
+        node.scene3d_scale_z = t.scale[2];
+    }
+}
+
 fn updatePlayerAnimationClock(player: *PlayerState, dt: f32, moving: bool, running: bool, airborne: bool) void {
     if (moving) {
         const cycles = if (running) PLAYER_RUN_CYCLES_PER_SECOND else PLAYER_WALK_CYCLES_PER_SECOND;
@@ -1937,6 +2119,8 @@ pub const Runtime = struct {
     cylinder16: [16 * 12 * 8]f32 = undefined,
     sphere: [12 * 8 * 6 * 8]f32 = undefined,
     gable_prism: [24 * 8]f32 = undefined,
+    grass_blade: [36 * 8]f32 = undefined,
+    bush_clump: [60 * 8]f32 = undefined,
     shape_batches: ShapeBatches = undefined,
     has_shape_batches: bool = false,
     // Per-material textured batches (geometry built at construct; the shaders are
@@ -1947,6 +2131,10 @@ pub const Runtime = struct {
     kid_list: std.ArrayList(Node) = .{},
     root: Node = .{},
     player_first_child: usize = 0,
+    /// Live NPC figures (req_0935) — built from scene.npc_spawns, rendered with
+    /// the player figure's machinery. Their node child-strings are owned by
+    /// player_geom_keys (the shared owned-key bag, freed at teardown).
+    npcs: std.ArrayList(NpcRuntime) = .{},
     player: PlayerState = undefined,
     camera: CameraState = undefined,
     /// Prop interaction (PROPUSE req_0624) — driven by scene.interactables.
@@ -2087,6 +2275,7 @@ pub const Runtime = struct {
     pub fn deinit(self: *Runtime) void {
         for (self.player_geom_keys.items) |key| self.allocator.free(key);
         self.player_geom_keys.deinit(self.allocator);
+        self.npcs.deinit(self.allocator);
         if (self.material_batches.len > 0) {
             for (self.material_batches) |batch| batch.deinit(self.allocator);
             self.allocator.free(self.material_batches);
@@ -2287,6 +2476,8 @@ pub const Runtime = struct {
         self.cylinder16 = buildUnitCylinder(16);
         self.sphere = buildUnitSphere(12, 8);
         self.gable_prism = buildGablePrism();
+        self.grass_blade = buildGrassBlade();
+        self.bush_clump = buildBushClump();
         self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.material_refs);
         self.has_shape_batches = true;
         // The textured remainder: rows wearing a material, partitioned per slot.
@@ -2315,7 +2506,13 @@ pub const Runtime = struct {
         // keep their look. Translucent (glass) batches always keep their tint.
         if (self.stream) |*w| {
             for (self.stream_protos.items, 0..) |proto, fi| {
-                if (proto.tex_key != null) whitenRows(w.families[fi].rows, w.families[fi].stride);
+                if (proto.tex_key) |tk| {
+                    // The "~grass~" sentinel is routing, NOT a real texture — the
+                    // grass shader reads inst_color as the per-blade root tint, so
+                    // never whiten it (that would flatten the field to one green).
+                    if (std.mem.eql(u8, tk, "~grass~")) continue;
+                    whitenRows(w.families[fi].rows, w.families[fi].stride);
+                }
             }
         } else {
             for (self.material_batches) |batch| {
@@ -2371,6 +2568,52 @@ pub const Runtime = struct {
         }
         if (self.scene.player_model.len == 0) log.print("[loader] no player model lump — camera target only\n", .{});
 
+        // NPC figures (req_0935): one child node per spawn × model group, posed
+        // every frame by updateNpcModelNodes. Each (spawn, group) gets a unique
+        // geom key — a small Stage-1 population interns well within GEO_CACHE;
+        // sharing keys per model to dedup geometry is a later optimization once
+        // crowds grow. y is grounded on the terrain like the player spawn.
+        self.npcs.clearRetainingCapacity();
+        for (self.scene.npc_spawns) |npc_spawn| {
+            const mi: usize = @intCast(npc_spawn.model_index);
+            if (mi >= self.scene.npc_models.len) continue;
+            const groups = self.scene.npc_models[mi];
+            if (groups.len == 0) continue;
+            const ground = sceneTerrainTopAt(self.scene.heightfields, npc_spawn.x, npc_spawn.z) orelse 0;
+            const first = self.kid_list.items.len;
+            const npc_index = self.npcs.items.len;
+            for (groups, 0..) |group, gi| {
+                const key = try std.fmt.allocPrint(self.allocator, "npc-{d}-{d}-{d}", .{ npc_index, mi, gi });
+                self.player_geom_keys.append(self.allocator, key) catch |err| {
+                    self.allocator.free(key);
+                    return err;
+                };
+                try self.kid_list.append(self.allocator, .{
+                    .scene3d_mesh = group.vertex_count > 0,
+                    .scene3d_geom_key = key,
+                    .scene3d_vertices = group.vertices,
+                    .scene3d_vert_count = group.vertex_count,
+                    .scene3d_color_r = group.color[0],
+                    .scene3d_color_g = group.color[1],
+                    .scene3d_color_b = group.color[2],
+                    .scene3d_color_a = group.alpha,
+                    .scene3d_tex_w = group.tex_w,
+                    .scene3d_tex_h = group.tex_h,
+                    .scene3d_tex_rgba = group.tex_rgba,
+                });
+            }
+            try self.npcs.append(self.allocator, .{
+                .model_index = npc_spawn.model_index,
+                .first_child = first,
+                .group_count = groups.len,
+                .x = npc_spawn.x,
+                .y = ground,
+                .z = npc_spawn.z,
+                .yaw = npc_spawn.yaw,
+            });
+        }
+        if (self.npcs.items.len > 0) log.print("[loader] built {d} NPC figure(s) from {d} model(s)\n", .{ self.npcs.items.len, self.scene.npc_models.len });
+
         if (self.scene.mesh_props) |mp| {
             for (mp.instances) |inst| {
                 const mesh_index: usize = @intCast(inst.mesh);
@@ -2417,12 +2660,21 @@ pub const Runtime = struct {
                 .scene3d_pos_x = field.center_x,
                 .scene3d_pos_y = field.base_y,
                 .scene3d_pos_z = field.center_z,
-                .scene3d_color_r = if (field.tex_rgba != null) 1 else field.color[0],
-                .scene3d_color_g = if (field.tex_rgba != null) 1 else field.color[1],
-                .scene3d_color_b = if (field.tex_rgba != null) 1 else field.color[2],
+                // Whitened when the look is a texture OR a formula: the ground
+                // pipeline multiplies inst_color * hf_ground_rgb(uv), so a flat
+                // tint would dim the formula. Only the bare fallback keeps color.
+                .scene3d_color_r = if (field.tex_rgba != null or field.ground_formula != null) 1 else field.color[0],
+                .scene3d_color_g = if (field.tex_rgba != null or field.ground_formula != null) 1 else field.color[1],
+                .scene3d_color_b = if (field.tex_rgba != null or field.ground_formula != null) 1 else field.color[2],
                 .scene3d_tex_w = field.tex_w,
                 .scene3d_tex_h = field.tex_h,
                 .scene3d_tex_rgba = field.tex_rgba,
+                // v3 ground: render the painted floor through the per-fragment
+                // FORMULA (gpu/3d.zig g_ground_pipeline) — crisp at any distance,
+                // the same shader the editor /test view runs. Wins over tex_rgba
+                // (which is null on v3 lumps) in the 3d.zig draw dispatch.
+                .scene3d_ground_formula = field.ground_formula,
+                .scene3d_ground_data = field.ground_data,
             });
         }
         if (self.scene.heightfields.len > 0) {
@@ -2430,12 +2682,17 @@ pub const Runtime = struct {
             log.print("[loader] built {d} terrain heightfield mesh(es); first grid {d}x{d} at ({d:.2},{d:.2}) span {d:.2}x{d:.2}\n", .{ self.scene.heightfields.len, first.cols, first.rows, first.center_x, first.center_z, first.width, first.depth });
         }
 
-        // Bodies of water (world/water): one translucent heightfield per body with
-        // a host-clock travelling wave. The wave forces resolveDynamicHeightfield
-        // to re-bake every frame, so the surface ripples in the shipped game with
-        // no per-frame loader work. color_a < 1 routes it through the transparent
-        // pass; the skirt down to `base` makes a wadeable volume. Water is NOT in
-        // scene.heightfields, so it never registers as a collider (wade, don't bump).
+        // Bodies of water (world/water): one STATIC flat heightfield per body,
+        // routed to the fixed "~water~" host pipeline (gpu/3d.zig g_water_pipeline,
+        // shaders.water_wgsl) by the tex key — the twin of "~grass~". All wave
+        // motion + the deep/shallow gradient, foam, and Bayer-dither halftone live
+        // in that pipeline, animated from the host S.time clock, so the mesh bakes
+        // ONCE (no per-frame re-bake) and is OPAQUE: the dither IS the see-through
+        // water, and an opaque mesh stays on the pipeline-swap path (color_a < 1
+        // would divert to the transparent pass and miss the pipeline). The skirt
+        // down to `base` makes a wadeable volume. Water is NOT in scene.heightfields,
+        // so it never registers as a collider (wade, don't bump). This matches the
+        // editor (cart/hmsc-int render3d/WaterBody.tsx) exactly — same 3d.zig.
         if (self.scene.water) |w| {
             for (w.bodies, 0..) |body, i| {
                 const key = try std.fmt.allocPrint(self.allocator, "~hf~water-{d}~1", .{i});
@@ -2448,28 +2705,28 @@ pub const Runtime = struct {
                 try self.kid_list.append(self.allocator, .{
                     .scene3d_mesh = true,
                     .scene3d_geom_key = key,
+                    .scene3d_tex_key = "~water~",
                     .scene3d_heights = body.heights,
                     .scene3d_hf_cols = body.cols,
                     .scene3d_hf_rows = body.rows,
                     .scene3d_hf_width = body.width,
                     .scene3d_hf_depth = body.depth,
                     .scene3d_hf_base = body.base,
-                    .scene3d_hf_wave_amp = w.wave_amp,
-                    .scene3d_hf_wave_len = w.wave_len,
-                    .scene3d_hf_wave_speed = w.wave_speed,
-                    .scene3d_hf_wave_dx = w.wave_dx,
-                    .scene3d_hf_wave_dz = w.wave_dz,
+                    // No baked wave — the ~water~ pipeline displaces the surface on
+                    // the GPU from S.time, so the field stays a flat static bake.
                     .scene3d_bounds_radius = bounds_radius,
                     .scene3d_pos_x = body.center_x,
                     .scene3d_pos_y = 0,
                     .scene3d_pos_z = body.center_z,
+                    // inst_color is ignored by the water shader (it carries the ONE
+                    // shared look); opaque so it rides the pipeline-swap path.
                     .scene3d_color_r = w.color[0],
                     .scene3d_color_g = w.color[1],
                     .scene3d_color_b = w.color[2],
-                    .scene3d_color_a = w.alpha,
+                    .scene3d_color_a = 1,
                 });
             }
-            if (w.bodies.len > 0) log.print("[loader] built {d} water heightfield(s), wave amp {d:.2}\n", .{ w.bodies.len, w.wave_amp });
+            if (w.bodies.len > 0) log.print("[loader] built {d} water heightfield(s) → ~water~ pipeline\n", .{w.bodies.len});
         }
         // KICKPROP req_0625: dynamic props render as LIVE per-frame nodes (the
         // player-model pattern) — their parts are NOT in the one-time-uploaded
@@ -2666,6 +2923,31 @@ pub const Runtime = struct {
                 .scene3d_instance_stride = @intCast(self.stride),
                 .scene3d_instance_static = true,
             });
+            // Grass blades: the "~grass~" tex key routes this batch to the grass
+            // pipeline (gpu/3d.zig) — wind + wisp cutout + root→tip gradient.
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.grass_count > 0,
+                .scene3d_geom_key = "grass-blade",
+                .scene3d_tex_key = "~grass~",
+                .scene3d_vertices = self.grass_blade[0..],
+                .scene3d_vert_count = 36,
+                .scene3d_instance_data = self.shape_batches.grass,
+                .scene3d_instance_count = self.shape_batches.grass_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
+            // Bush clumps: same "~grass~" foliage pipeline, bushier geometry.
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.bush_count > 0,
+                .scene3d_geom_key = "bush-clump",
+                .scene3d_tex_key = "~grass~",
+                .scene3d_vertices = self.bush_clump[0..],
+                .scene3d_vert_count = 60,
+                .scene3d_instance_data = self.shape_batches.bush,
+                .scene3d_instance_count = self.shape_batches.bush_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
         }
 
         // Per material: a SHADER material draws as one TEXTURED instanced box batch
@@ -2735,11 +3017,15 @@ pub const Runtime = struct {
                 continue;
             }
             if (self.stream != null) continue; // streamed: drawn as per-chunk ranges
+            // Shape-aware (req_0939): a skinned gable roof / cylinder / sphere
+            // draws its real geometry sampling the same material texture, not a
+            // textured box. Most batches are boxes (geomForShape's default).
+            const geom = geomForShape(self, batch.shape);
             try self.kid_list.append(self.allocator, .{
                 .scene3d_mesh = batch.count > 0,
-                .scene3d_geom_key = "box",
-                .scene3d_vertices = self.cube[0..],
-                .scene3d_vert_count = 36,
+                .scene3d_geom_key = geom.key,
+                .scene3d_vertices = geom.verts,
+                .scene3d_vert_count = geom.vert_count,
                 .scene3d_instance_data = batch.boxes,
                 .scene3d_instance_count = batch.count,
                 .scene3d_instance_stride = @intCast(self.stride),
@@ -2748,6 +3034,15 @@ pub const Runtime = struct {
             });
         }
         if (self.scene.materials.len > 0) log.print("[loader] {d} face material(s) → {d} batch(es), {d} translucent meshes\n", .{ self.scene.materials.len, self.material_batches.len, translucent_meshes });
+        // DIAG req_1109: dump each material batch (shape/count/key) + the UNSKINNED
+        // ramp/gable counts, to see whether the gray flickering roof slope is a
+        // skinned ramp batch, an unskinned flat-color ramp, or a z-fight overlap.
+        if (self.scene.materials.len > 0) {
+            for (self.material_batches, 0..) |batch, bi| {
+                log.print("[diag-roof] matbatch[{d}] key={s} shape={d:.0} count={d} translucent={} tex_translucent={}\n", .{ bi, batch.key, batch.shape, batch.count, batch.translucent, batch.textured_translucent });
+            }
+            log.print("[diag-roof] UNSKINNED ramp_count={d} gable_count={d} box_count={d}\n", .{ self.shape_batches.ramp_count, self.shape_batches.gable_count, self.shape_batches.box_count });
+        }
 
         // The streamed draw tail begins after every static-prefix node above;
         // refreshStreamNodes truncates back to here each frame. Capacity is
@@ -2760,6 +3055,7 @@ pub const Runtime = struct {
         self.root = .{ .children = self.kid_list.items };
         updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, self.cameraColliderSet(), 0);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, false, false, false);
+        self.refreshNpcNodes();
         // Seed the bubble at spawn and assemble the first draw tail — the very
         // first rendered frame already streams (the camera was just solved).
         self.refreshStreamNodes();
@@ -2788,10 +3084,17 @@ pub const Runtime = struct {
         try self.stream_protos.append(self.allocator, .{ .geom_key = "sphere12x8", .verts = self.sphere[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.gables, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "gable-prism", .verts = self.gable_prism[0..], .tex_key = null });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.grass, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "grass-blade", .verts = self.grass_blade[0..], .tex_key = "~grass~" });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.bush, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "bush-clump", .verts = self.bush_clump[0..], .tex_key = "~grass~" });
         for (self.material_batches) |batch| {
             if (batch.translucent or batch.textured_translucent or batch.count == 0) continue;
+            // Shape-aware streaming proto (req_0939): same fix as the monolithic
+            // opaque draw — a skinned non-box shape streams with its real geometry.
+            const geom = geomForShape(self, batch.shape);
             try fams.append(self.allocator, .{ .rows = batch.boxes, .stride = @intCast(self.stride) });
-            try self.stream_protos.append(self.allocator, .{ .geom_key = "box", .verts = self.cube[0..], .tex_key = batch.key });
+            try self.stream_protos.append(self.allocator, .{ .geom_key = geom.key, .verts = geom.verts, .tex_key = batch.key });
         }
         var total_rows: u64 = 0;
         for (fams.items) |fam| total_rows += fam.rows.len / fam.stride;
@@ -2825,6 +3128,16 @@ pub const Runtime = struct {
     /// around the player, LOD-shell ranges for the visible rest of the city.
     /// Allocation-free (capacity reserved at build; the streaming world merges
     /// and caps its draw list).
+    /// Re-pose every live NPC figure's nodes from its transform + clip
+    /// (req_0935). Called each frame beside the player figure update.
+    fn refreshNpcNodes(self: *Runtime) void {
+        for (self.npcs.items) |npc| {
+            const mi: usize = @intCast(npc.model_index);
+            if (mi >= self.scene.npc_models.len) continue;
+            updateNpcModelNodes(self.kid_list.items, npc, self.scene.npc_models[mi], self.scene.player_animation);
+        }
+    }
+
     fn refreshStreamNodes(self: *Runtime) void {
         const w = if (self.stream) |*world| world else return;
         w.updateResidency(self.player.x, self.player.z, self.stream_radius);
@@ -3096,6 +3409,7 @@ pub const Runtime = struct {
 
         updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, self.cameraColliderSet(), dt);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
+        self.refreshNpcNodes();
         self.updateDynamicPropNodes();
         self.stepTickers(dt);
         // Re-stream the world around wherever the player ended up this step
