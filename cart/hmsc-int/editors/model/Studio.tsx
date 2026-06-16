@@ -1,0 +1,2380 @@
+// editors/model/Studio.tsx — the Studio modeling viewport (req_0956 → req_0964).
+//
+// Scene model: an ordered LIST of EditMesh PARTS (studioModel.ts), surfaced
+// through the paint editor's layers component as the OUTLINER (Outliner.tsx).
+// The scene starts BLANK — the grid + axes with NO mesh (the user, req_0961:
+// "start with an empty grid no mesh on it at all"); parts arrive via the
+// outliner's +add. The viewport renders every VISIBLE part; the camera frames
+// the combined bounds (or the grid when empty).
+//
+// The camera is NOT re-rolled — it drives framework/game/camera.zig's orbit
+// Controller through GAME_NATIVE_CAMERA (the same host camera the compiled no-JS
+// path uses, req_0957), so movement is host-solved every frame. The mesh renders
+// through Scene3D's dynamic-geometry path (live verts, hot-reload, no rebuild).
+//
+// Diagnostics (req_0963/0964): a host-accurate frame-drop readout (frameProbe.ts
+// reads the host's per-frame ring so it catches hard skips a JS timer can't see)
+// + an opt-in camera-angle trace (console.warn on every drag event, so one
+// smooth physical movement reveals whether the COMMANDED angle is jumping —
+// i.e. bursty input — vs the host present stalling).
+//
+// Scale (req_0956): 1 tile = 1 m, matching the world (floors/walls are 3×3 m).
+// Every value here is a named STUDIO tunable, not an inline magic number.
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { callHost } from '@reactjit/runtime/ffi';
+import { useHotState, useInterval, useRerender } from '@reactjit/hooks';
+import { Box, Col, Pressable, Row, Scene3D, Text, TextInput } from '@reactjit/primitives';
+import { GAME_CAMERA, GAME_CHROME, GAME_FIGURE, GAME_NATIVE_CAMERA } from '../../game';
+import { CharacterCaptures, FigureMeshes, buildPartRender } from '../../game/figure/render';
+import { HMSC_SCALE } from '../../world/scale';
+import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
+import { editorTunables } from '../tunables';
+import { useHeldModifiers } from '../useEditorControls';
+import { addMount, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, hasPivot, loopCutPositions, loopCutRange, meshEdges, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setPivot, splitConcaveFaces, tagOneFace, translateVerts, updateMount, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
+import { cookProp, type PropDescriptorInput } from './cookedAsset';
+import { useCookedAssets } from './cookedAssets';
+import { StudioOutliner } from './Outliner';
+import { SceneTextureAtlas, STUDIO_TEXTURE_KEY } from './TextureAtlas';
+import { textureizeScene, rasterizeAtlas, DEFAULT_TEXTURE_OPTIONS, PIXEL_DENSITIES, type TextureOptions, type TextureType, type RasterSlice } from './textureize';
+import { encodePng } from './png';
+import { exists, mkdir, readFileBase64, writeFileBase64Atomic } from '@reactjit/hooks/fs';
+import { bytesToBase64 } from '@reactjit/workspace';
+import { useAssistant } from '@reactjit/hooks/useAssistant';
+import { processCwd } from '../../assist3d/scene';
+import { buildTexturePrompt, enhanceViaNano, generateTexture, getNanoKey, setNanoKey, hashHex, pngDataUrl, stripDataUrl, ENHANCE_SYSTEM } from './textureGen';
+import { useFrameProbe } from './frameProbe';
+import {
+  SelectionOverlay, makeProjector, orbitalEyeJS, pickElement, applyPick, emptySelection, selectionCount,
+  type SelMode, type Selection, type CameraSnap,
+} from './meshSelect';
+import {
+  TransformGizmo, AXIS_DIR, axisScreen, dragWorldDistance, pickGizmoHandle, rotationSign, selectionVertIndices, selectionFaceIndices,
+  type GizmoTool, type GizmoHit,
+} from './meshGizmo';
+import { RigOverlay, pickRigHandle, rigHandles, type RigSel } from './meshRig';
+
+const T = GAME_CHROME.tokens.color;
+const STEP_BTN = { paddingLeft: 7, paddingRight: 7, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' } as const;
+// camera-smoothing presets cycled by the 'smooth' button — 0 = direct (Blockbench).
+const SMOOTH_PRESETS = [0, 24, 80, 160];
+
+// SCALE GHOST (req_1165): a static reference figure — THE in-game player at its
+// true height (collider 1.65 m, visual head-top ~2.04 m, RULED R4) — stood beside
+// the model being made so the user can gauge real-world scale. Same seed as the
+// game player so it IS the player; a unique cartKey so its face/skin captures don't
+// collide with /test's, and rendered `intern` so it lives in the retained geometry
+// buffer (no contention with the sculpted part's DYN slots).
+const SCALE_FIGURE_SEED = 1;
+const SCALE_FIGURE_CART_KEY = 'studio-scale';
+
+type Vec3 = [number, number, number];
+type Rect = { x: number; y: number; width: number; height: number };
+
+// ── STUDIO tunables (P2 — named, registered, live-tunable in /settings) ───────
+export const STUDIO = {
+  /** the ground grid (req_0960): a clean 9-segment (gridTiles²) tile grid = one
+   *  game floor (floors/walls are 3×3 tiles), 1 big tile = 1 game tile =
+   *  tileMeters. ONLY the CENTER tile carries the fine subdivision. gridTiles
+   *  must be ODD so a center tile exists. The center tile is a 16×16 line grid
+   *  (`unitsPerTile`), Blockbench-style — that 16×16 IS the modeling unit ruler
+   *  (req_0973): a 16-unit cube fills exactly one tile. */
+  gridTiles: 3,
+  tileMeters: 1,
+  /** modeling units per tile (Blockbench's "pixels"): 16 units = 1 tile =
+   *  tileMeters, and the same basis per-face UV/texels will use. The center
+   *  tile's fine grid = this many lines, so 1 fine cell = 1 unit. */
+  unitsPerTile: 16,
+  fineDivisions: 16,
+  gridLineMeters: 0.012,
+  fineLineMeters: 0.006,
+  gridLiftMeters: 0.001,
+  /** origin axes: length + the thin square cross-section. */
+  axisLengthMeters: 1,
+  axisThicknessMeters: 0.02,
+  /** Blockbench-ish boot framing: a 3/4 view looking slightly down. */
+  bootYaw: 35,
+  bootPitch: 28,
+  fov: 38,
+  /** orbit feel — degrees of camera turn per pixel of drag. */
+  yawPerPixel: 0.4,
+  pitchPerPixel: 0.32,
+  // Full pole-to-pole so you can orbit UNDER the part (req_0960 — no camera
+  // floor); just shy of ±90 to avoid the straight-up/down gimbal.
+  minPitch: -89.9,
+  maxPitch: 89.9,
+  /** zoom (orbit distance) range + wheel step fraction. */
+  minDistance: 0.4,
+  maxDistance: 40,
+  zoomStepFraction: 0.12,
+  /** how tightly the boot distance frames the part (× its bounds radius). */
+  fitDistanceFactor: 3.2,
+  /** when the scene is empty, frame this radius so the 3×3 grid reads (grid
+   *  half-extent is gridTiles·tileMeters/2 = 1.5 m). */
+  emptyFitRadius: 1.6,
+  /** SCALE GHOST (req_1165): clearance (meters) between the model's bounding
+   *  radius and the reference figure, so the player stands just clear of the work. */
+  scaleFigureGapMeters: 0.5,
+  /** the SELECTED face is shaded this vivid color (req_0986) — distinct from the
+   *  pastel part tints so the active face is unmistakable. */
+  selectFaceColor: '#ff8a3d',
+  /** push the face-highlight overlay out along the face normal so it sits just
+   *  above the surface without z-fighting (meters). */
+  selectFacePushMeters: 0.004,
+  /** extrude's default lip: Blockbench's "Extend 1" = 1 unit on the 16-units
+   *  basis (1/16 m). The button commits this thin extrusion; the move gizmo then
+   *  pulls the cap in/out (req_1015). */
+  extrudeMeters: 1 / 16,
+  /** gizmo STEP (req_1023): every gizmo drag (move / resize / loop-cut slide)
+   *  SNAPS by default — no modifier = whole modeling units, Shift = a finer step,
+   *  Alt = freeform (no snap). On the 16-units basis 1 unit = 1/16 m. */
+  gizmoStepMeters: 1 / 16,        // default: 1 modeling unit
+  gizmoStepFineMeters: 1 / 64,    // Shift: a quarter unit
+  /** uniform (center-hub) resize snaps the SCALE FACTOR instead of a distance. */
+  gizmoUniformStep: 0.1,
+  gizmoUniformStepFine: 0.05,
+  /** rotate snaps in DEGREES — default 15° (orientation-friendly), Shift = 1°. */
+  rotateStepDeg: 15,
+  rotateStepFineDeg: 1,
+  /** host camera smoothing (per-second ease). 0 = DIRECT 1:1 tracking, like
+   *  Blockbench (no momentum/lag) — the default after the spin-feel hunt found
+   *  the smoothing ease (24/s ≈ 42 ms lag) was the "skip"/float, not fps. The
+   *  'smooth' button cycles presets live so the feel can be dialed in. */
+  cameraSmoothing: 0,
+  /** TEXTURE MAPPING (req_1062): the box-net atlas is rendered into one offscreen
+   *  StaticSurface at this pixel resolution and the active part samples it via
+   *  `textureKey` — so the UV→atlas→mesh mapping is visible on the 3D model
+   *  (painting the atlas is the deferred next step). `textureCheckerCells` = the
+   *  UV-test checkerboard density across the square (reads scale/stretch/seams). */
+  textureAtlasPx: 256,
+  textureCheckerCells: 8,
+  /** AI TEXTURE FILL (req_1070/1110, Phase 5d): the square px the image model
+   *  generates at. Kept at atlas scale (NOT the model's 4096² default) so img2img
+   *  results stay light; the atlas downscales them into the slot on render. */
+  aiTextureSize: 1024,
+  /** a re-uploaded / AI texture at or under this many bytes rides INLINE as a data:
+   *  URL on the twig; anything larger is written to a content-addressed cache file
+   *  and referenced by PATH instead (req_1110 — keeps big textures out of the twig
+   *  while staying cache-correct, since the path's hash changes with content). */
+  textureInlineMaxBytes: 256 * 1024,
+  /** default text model for prompt enhancement via nano-gpt (req_1113) — any
+   *  nano-gpt text model id works; the field is editable. */
+  aiTextModel: 'openai/gpt-5.1',
+  /** default image model for AI texture fill — any nano-gpt image model id works
+   *  (seedream / nano-banana / riverflow / wan …); the field is editable. */
+  aiImageModel: 'seedream-v4',
+} as const;
+
+editorTunables().register({
+  system: 'studio-viewport', route: '/model', table: STUDIO,
+  specs: {
+    tileMeters: { label: 'tile (m)', min: 0.25, max: 8, step: 0.25, precision: 2 },
+    fineDivisions: { label: 'center subdiv', min: 2, max: 32, step: 1, precision: 0 },
+    bootYaw: { label: 'boot yaw°', min: -180, max: 180, step: 1, precision: 0 },
+    bootPitch: { label: 'boot pitch°', min: -85, max: 85, step: 1, precision: 0 },
+    fov: { label: 'fov°', min: 20, max: 80, step: 1, precision: 0 },
+    yawPerPixel: { label: 'yaw / px', min: 0.05, max: 1.5, step: 0.01, precision: 2 },
+    pitchPerPixel: { label: 'pitch / px', min: 0.05, max: 1.5, step: 0.01, precision: 2 },
+    fitDistanceFactor: { label: 'fit dist ×r', min: 1.5, max: 6, step: 0.1, precision: 1 },
+  },
+});
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+/** Same rig handle? (the pivot is singular; joints compare by name.) */
+function sameRigSel(a: RigSel | null, b: RigSel | null): boolean {
+  if (!a || !b || a.kind !== b.kind) return false;
+  return a.kind !== 'joint' || a.name === (b as { kind: 'joint'; name: string }).name;
+}
+
+/** A fresh joint name unique within the mesh: joint_1, joint_2, … (req_1025). */
+function nextJointName(mesh: EditMesh): string {
+  const used = new Set((mesh.mounts ?? []).map((m) => m.name));
+  for (let i = 1; ; i += 1) { const n = `joint_${i}`; if (!used.has(n)) return n; }
+}
+
+/** Snap a value to the gizmo step grid (req_1023): no modifier → `step`, Shift →
+ *  `fine`, Alt → freeform (returned unchanged). Used by every gizmo drag so the
+ *  default is stepped, never freeform. */
+function snapToStep(value: number, step: number, fine: number, mods: { shift: boolean; alt: boolean }): number {
+  if (mods.alt) return value;
+  const s = mods.shift ? fine : step;
+  return s > 0 ? Math.round(value / s) * s : value;
+}
+
+/** modeling units → world meters: 16 units = 1 tile = tileMeters (req_0973). */
+function unitsToMeters(u: number): number {
+  return (u * STUDIO.tileMeters) / STUDIO.unitsPerTile;
+}
+/** world meters → modeling units (the inverse — the gizmo readout speaks units). */
+function metersToUnits(m: number): number {
+  return (m * STUDIO.unitsPerTile) / STUDIO.tileMeters;
+}
+/** a compact signed unit string for the drag readout: "+3u", "−2.5u", "+0u". */
+function fmtUnits(u: number): string {
+  const r = Math.round(u * 100) / 100;
+  const abs = Math.abs(r);
+  const body = Number.isInteger(abs) ? abs.toFixed(0) : String(abs);
+  return `${r < 0 ? '−' : '+'}${body}u`;
+}
+
+function nowMs(): number {
+  return (globalThis as any).performance?.now?.() ?? Date.now();
+}
+
+/** schedule one frame — host rAF if present, else a 16 ms timer (the cart V8
+ *  host has no requestAnimationFrame, per reactjit_no_raf). */
+function schedFrame(fn: () => void): void {
+  const h = globalThis as any;
+  if (h.requestAnimationFrame) h.requestAnimationFrame(fn); else setTimeout(fn, 16);
+}
+
+/** Where a part rests: lift its lowest vert to y=0 (sits ON the grid), and its
+ *  rendered vertical span. Parts authored centered at origin → lift by half. */
+function partPlacement(mesh: EditMesh): { lift: number; height: number } {
+  let lo = Infinity, hi = -Infinity;
+  for (const v of mesh.verts) { lo = Math.min(lo, v[1]); hi = Math.max(hi, v[1]); }
+  if (!Number.isFinite(lo)) return { lift: 0, height: 0 };
+  return { lift: -lo, height: hi - lo };
+}
+
+type LoopCutAxis = { axis: 0 | 1 | 2; lo: number; hi: number; sizeMeters: number; sizeUnits: number; unitsPerMeter: number };
+
+/** Resolve the loop-cut axis from the clicked face + direction. The cut SPLITS
+ *  the selected face, so the axis is one of the face's two IN-PLANE axes (NOT its
+ *  normal — cutting ⟂ the normal would slab toward the face and leave it whole).
+ *  Direction 0/1 picks which in-plane axis, matching Blockbench (req_0990). */
+function loopCutAxisInfo(mesh: EditMesh, faceIndex: number, dir: 0 | 1): LoopCutAxis | null {
+  const face = mesh.faces[faceIndex];
+  if (!face) return null;
+  const n = faceNormal(mesh, face);
+  const na: 0 | 1 | 2 = Math.abs(n[0]) >= Math.abs(n[1]) && Math.abs(n[0]) >= Math.abs(n[2]) ? 0 : Math.abs(n[1]) >= Math.abs(n[2]) ? 1 : 2;
+  const inPlane = ([0, 1, 2] as (0 | 1 | 2)[]).filter((a) => a !== na); // the face's two edge axes
+  const axis = inPlane[dir] ?? inPlane[0];
+  // The span is the SELECTED FACE's extent on the cut axis — NOT the whole mesh —
+  // so a cut on an already-cut half subdivides THAT half (req_1006). Using the
+  // whole mesh placed the second cut at the first cut's plane → no visible change.
+  let lo = Infinity, hi = -Infinity;
+  for (const vi of face.loop) { const v = mesh.verts[vi]; if (v[axis] < lo) lo = v[axis]; if (v[axis] > hi) hi = v[axis]; }
+  const unitsPerMeter = STUDIO.unitsPerTile / STUDIO.tileMeters;
+  return { axis, lo, hi, sizeMeters: hi - lo, sizeUnits: (hi - lo) * unitsPerMeter, unitsPerMeter };
+}
+
+/** After a loop cut, the selected face has split into pieces all carrying tag 1;
+ *  keep just ONE — the piece on the −axis (lo) side — so the selection halves
+ *  with the face (and shrinks as offset rises) instead of re-covering it whole. */
+function lcKeptFace(cutMesh: EditMesh, axis: 0 | 1 | 2): number {
+  const tagged = facesWithTag(cutMesh, 1);
+  if (tagged.length <= 1) return tagged[0] ?? -1;
+  let best = tagged[0], bestC = Infinity;
+  for (const i of tagged) { const c = faceCentroid(cutMesh, cutMesh.faces[i])[axis]; if (c < bestC) { bestC = c; best = i; } }
+  return best;
+}
+
+// ── Staging: a ground grid + origin axes as Scene3D content ───────────────────
+// These will graduate to host-rendered, screen-stable overlays (Part 4b); for
+// the hot-reload first slice they are thin Scene3D boxes so the stage reads now.
+
+function GroundGrid() {
+  const lines = useMemo(() => {
+    const out: { key: string; pos: Vec3; size: Vec3; color: string }[] = [];
+    const tiles = STUDIO.gridTiles;
+    const tile = STUDIO.tileMeters;
+    const total = tiles * tile;
+    const half = total / 2;
+    const lift = STUDIO.gridLiftMeters;
+    const bw = STUDIO.gridLineMeters;
+    const fw = STUDIO.fineLineMeters;
+    const big = '#41526e';
+    const fine = '#283648';
+    for (let i = 0; i <= tiles; i += 1) {
+      const p = -half + i * tile;
+      out.push({ key: `bx${i}`, pos: [p, lift, 0], size: [bw, bw, total], color: big });
+      out.push({ key: `bz${i}`, pos: [0, lift, p], size: [total, bw, bw], color: big });
+    }
+    const c = tile / 2;
+    const step = tile / STUDIO.fineDivisions;
+    for (let i = 1; i < STUDIO.fineDivisions; i += 1) {
+      const p = -c + i * step;
+      out.push({ key: `fx${i}`, pos: [p, lift, 0], size: [fw, fw, tile], color: fine });
+      out.push({ key: `fz${i}`, pos: [0, lift, p], size: [tile, fw, fw], color: fine });
+    }
+    return out;
+  }, []);
+  return (
+    <>
+      {lines.map((l) => (
+        <Scene3D.Mesh key={l.key} geometry={Geom.box} params={{ width: l.size[0], height: l.size[1], depth: l.size[2] }} material={{ color: l.color, opacity: 0.85 }} position={l.pos} />
+      ))}
+    </>
+  );
+}
+
+function OriginAxes() {
+  const len = STUDIO.axisLengthMeters;
+  const th = STUDIO.axisThicknessMeters;
+  const half = len / 2;
+  return (
+    <>
+      <Scene3D.Mesh geometry={Geom.box} params={{ width: len, height: th, depth: th }} material="#e0584e" position={[half, 0, 0]} />
+      <Scene3D.Mesh geometry={Geom.box} params={{ width: th, height: len, depth: th }} material="#5ec26a" position={[0, half, 0]} />
+      <Scene3D.Mesh geometry={Geom.box} params={{ width: th, height: th, depth: len }} material="#4aa3ff" position={[0, 0, half]} />
+    </>
+  );
+}
+
+// A minimal box geometry def (a unit cube) for the staging lines/axes.
+const Geom = { box: require('@reactjit/geometries').Box };
+
+// ── The viewport ─────────────────────────────────────────────────────────────
+
+export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onSelectFaces: (ids: number[]) => void }) {
+  const { parts, revision, activePart, onSelectFaces } = props;
+
+  // Lower each visible part once per structural revision (camera drags + fov
+  // tweaks don't bump `revision`, so they never re-bake the geometry).
+  // Bake the per-part Scene3D inputs (def / dynamicKey / material / position) so
+  // they keep a STABLE identity across viewport re-renders — a new inline
+  // `material={{…}}` or `position={[…]}` each render stamps the mesh UPDATE-dirty
+  // and re-bakes it (the static_surface_inline_props_rebake trap). Only a
+  // structural change (revision) rebuilds these.
+  const placed = useMemo(
+    () => parts.map((part, index) => ({
+      key: part.id,
+      // dynamicKey MUST carry the '~<version>' separator or the host drops the
+      // mesh. The slot id (before '~') is the RENDER INDEX, not the part id, so the
+      // host's 48 DYN_SLOTS are REUSED across parts/models instead of leaking one
+      // per part ever created (the slots never free — req_1008 'no highlight after
+      // new'). The version part (id+version) re-uploads when the part at this slot
+      // changes or edits.
+      def: { id: `studio.${part.id}`, generate: () => part.geo, defaults: {} },
+      dynKey: `studio.s${index}~${part.id}.${part.version}`,
+      material: { color: part.color },
+      // lift is FROZEN at mint (studioModel) — editing verts moves them in place,
+      // never re-seats the whole part on the grid.
+      position: [0, part.lift, 0] as Vec3,
+    })),
+    // rebuild on a structural change (revision) OR a committed mesh edit (meshRev);
+    // both are stable numbers, so the per-render-fresh `parts` array never re-bakes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [revision, props.meshRev],
+  );
+
+  // The staging (grid + axes) is built ONCE — a memoized element keeps the same
+  // reference across every viewport re-render, so React skips reconciling the
+  // 26 grid-line meshes (each with inline params/material) on fov tweaks, the
+  // diag poll, etc. Without this the staging re-bakes on every parent render.
+  const staging = useMemo(() => (<><GroundGrid /><OriginAxes /></>), []);
+
+  // Frame the combined bounds (or the grid when empty).
+  const frame = useMemo(() => {
+    let radius = 0, top = 0;
+    for (const part of parts) {
+      radius = Math.max(radius, part.geo.bounds.radius || 0);
+      top = Math.max(top, partPlacement(part.mesh).height);
+    }
+    return { radius: radius > 0 ? radius : STUDIO.emptyFitRadius, target: [0, top / 2, 0] as Vec3 };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revision]);
+  const target = frame.target;
+  const fitDistance = () => clamp(frame.radius * STUDIO.fitDistanceFactor, STUDIO.minDistance, STUDIO.maxDistance);
+
+  // SCALE GHOST (req_1165): the reference player, built ONCE (the seed/outfit never
+  // change here), stood to the +X side of the model just clear of its bounds with
+  // feet on the grid. Toggled by the 'scale' button; interned so the static figure
+  // doesn't compete for the sculpt DYN slots. Twig state (survives hot reload).
+  const [showScale, setShowScale] = useHotState('studio:showScale', false);
+  const scaleFigure = useMemo(() => {
+    const doc = GAME_FIGURE.generateFace(SCALE_FIGURE_SEED);
+    const fparts = buildPartRender(doc, GAME_FIGURE.hedDepthGrid(doc), SCALE_FIGURE_CART_KEY, SCALE_FIGURE_SEED);
+    const frig = GAME_FIGURE.buildRigFrame('neutral', 'stand', 0, []);
+    return { doc, parts: fparts, rig: frig };
+  }, []);
+  // x just past the model's bounding radius; faces -X toward the model (parts face
+  // -Z at yaw 0, so +90° turns them toward −X).
+  const scaleOffset = useMemo<Vec3>(() => [frame.radius + STUDIO.scaleFigureGapMeters, 0, 0], [frame.radius]);
+
+  const lookRef = useRef({ yaw: STUDIO.bootYaw, pitch: STUDIO.bootPitch });
+  const distRef = useRef(fitDistance());
+  const fovRef = useRef<number>(STUDIO.fov);
+  const cameraRef = useRef<any>(null);
+  const ctlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
+  const rectRef = useRef<Rect>({ x: 0, y: 0, width: 1000, height: 700 });
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  // generation token for the compass snap tween — bumping it cancels an in-flight snap.
+  const snapGenRef = useRef(0);
+  // camera-angle trace (req_0964) — opt-in so it only spams when asked. The
+  // trace is COALESCED to one line per frame (the flush loop below): move events
+  // arrive in bursts (many at +0ms in a single JS tick), and a per-event
+  // console.warn flood is itself a load that pollutes the very timing we measure.
+  // Per-frame we report how many events folded in (moves), the net angle change,
+  // and the worst inter-event gap — which is what actually reveals a "jump".
+  const logCamRef = useRef(true);
+  const lastMoveRef = useRef(0);
+  const camRef = useRef({ moves: 0, startYaw: STUDIO.bootYaw, startPitch: STUDIO.bootPitch, maxGap: 0 });
+  const smoothRef = useRef(STUDIO.cameraSmoothing);
+
+  const [bootCam] = useState(() => GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, { target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, dist: distRef.current, zoom: 1, fov: fovRef.current }));
+
+  // ── Element selection (req_0970): persistent mode toggle + per-mode sets ──
+  // TWIG (working state, survives hot reload, reset on cold restart — the
+  // branch/twig law): the tool MODE + element gizmo + rig selection + camera
+  // smoothing ride hotstate so a TSX edit doesn't bounce you out of rig mode or
+  // drop your selection. The rig DATA itself is BRANCH (it's on the EditMesh →
+  // partMeshUpdated → persisted V20 + undoable). See [[feedback_studio_branch_twig_cold_hot]].
+  const [selMode, setSelMode] = useHotState<SelMode>('studio:selMode', 'object');
+  // TWIG: show the scene sprite-map texture vs solid colors (req_1062/req_1068).
+  // The packed UVs are BRANCH (textureize commits them) — this is just the display.
+  const [texView, setTexView] = useHotState('studio:texView', false);
+  // the active scene texture's atlas params (set by the Create Texture dialog) — the
+  // render reads type/color/texels off this; the UVs themselves live on the meshes.
+  // imageUrl = a RE-UPLOADED whole-sheet texture (a data: URL so a same-path re-import
+  // still refreshes past the host's content-hashed image cache); sliceImages = per-face
+  // re-uploads keyed "partId:faceIndex"; imageRev bumps each import to force a re-bake.
+  const [tex, setTex] = useHotState<{ texels: number; type: TextureType; color: string; name: string; imageUrl?: string; sliceImages?: Record<string, string>; imageRev?: number } | null>('studio:tex', null);
+  // the Create Texture dialog (req_1068) — transient, not a twig.
+  const [texDialog, setTexDialog] = useState(false);
+  // the import-texture dialog (req_1079): { slice } when re-uploading ONE face, else
+  // the whole sheet. null = closed.
+  const [importTex, setImportTex] = useState<{ slice?: RasterSlice } | null>(null);
+  // the AI-fill dialog (req_1070/1110): { slice } when filling ONE face's island, else
+  // the whole sheet. null = closed. Phase 5d — automated image-to-image.
+  const [aiTex, setAiTex] = useState<{ slice?: RasterSlice } | null>(null);
+  // a transient toast for export/import results, cleared after a moment.
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const toast = (m: string, ms = 2600) => { setExportMsg(m); setTimeout(() => setExportMsg(null), ms); };
+  // the asset compiler (Part 7, req_1122): the Compile dialog cooks this Studio
+  // model into a typed, content-addressed, installed game asset. Transient (twig).
+  const cooked = useCookedAssets();
+  const [compileOpen, setCompileOpen] = useState(false);
+
+  // Export the sprite sheet (req_1072): rasterize the atlas (whole, or ONE slice =
+  // a selected face's island) → PNG → cart/hmsc-int/exports/<name>.png. The raster
+  // uses the SHARED islandColorFor, so the PNG matches the model + the UV panel.
+  // Named by the SCENE/model name (NOT the dialog's 'texture' default) + a numeric
+  // suffix when the file exists, so exports never silently overwrite (req_1076).
+  const exportSprite = (slice?: RasterSlice) => {
+    if (!tex) return;
+    const parts = props.parts.map((p) => ({ id: p.id, mesh: p.mesh }));
+    const img = rasterizeAtlas(parts, tex.texels, tex.type, tex.color, slice);
+    const png = encodePng(img.rgba, img.width, img.height);
+    const clean = (s: string) => s.replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '');
+    // prefer the scene (model) name; fall back to the texture name, then 'texture'.
+    const base = clean(props.sceneName || tex.name || 'texture') || 'texture';
+    const stem = slice ? `${base}_face${slice.faceIndex}` : base;
+    mkdir('cart/hmsc-int/exports');
+    // pick the first free filename so we don't overwrite an earlier export.
+    let path = `cart/hmsc-int/exports/${stem}.png`;
+    for (let i = 1; exists(path) && i < 1000; i += 1) path = `cart/hmsc-int/exports/${stem}_${i}.png`;
+    const ok = writeFileBase64Atomic(path, bytesToBase64(png));
+    console.warn(ok ? `[studio] exported ${path} (${img.width}×${img.height})` : `[studio] export failed: ${path}`);
+    setExportMsg(ok ? `saved ${path} (${img.width}×${img.height})` : 'export failed');
+    setTimeout(() => setExportMsg(null), 2600);
+  };
+
+  // Turn raw base64 PNG bytes into an <Image> source for the atlas. SMALL textures ride
+  // INLINE as a data: URL (the req_1079 path); LARGE ones are written to a content-
+  // addressed cache file and referenced by PATH (req_1110) — keeping big textures out
+  // of the twig. The host image cache is keyed on the source bytes, so the hash in the
+  // filename makes the path change with content (a bare reused path would go stale).
+  const texSource = (b64: string): string => {
+    const approxBytes = Math.floor(b64.length * 0.75);
+    if (approxBytes <= STUDIO.textureInlineMaxBytes) return pngDataUrl(b64);
+    const dir = 'cart/hmsc-int/exports/.cache';
+    mkdir(dir);
+    const path = `${dir}/tex_${hashHex(b64)}.png`;
+    if (!exists(path)) writeFileBase64Atomic(path, b64);
+    return path;
+  };
+
+  // Drop an <Image> source onto the tex twig — a whole-sheet replaces `imageUrl`, a
+  // SLICE drops into its `sliceImages` slot (the cookie cutter is automatic: every face
+  // samples only its UV slot). The one composite tail for BOTH re-upload + AI fill.
+  const applyTextureImage = (url: string, slice?: RasterSlice) => {
+    if (!tex) return;
+    const rev = (tex.imageRev ?? 0) + 1;
+    if (slice) {
+      const key = `${slice.partId}:${slice.faceIndex}`;
+      setTex({ ...tex, sliceImages: { ...(tex.sliceImages ?? {}), [key]: url }, imageRev: rev });
+    } else {
+      setTex({ ...tex, imageUrl: url, imageRev: rev });
+    }
+    setTexView(true);
+  };
+
+  // Read an atlas <Image> source (a data: URL OR a cache file path, per texSource) back
+  // to raw base64 — so a prior upload/generation can be re-fed as an img2img reference.
+  const sourceToB64 = (src: string): string =>
+    src.startsWith('data:') ? stripDataUrl(src) : (readFileBase64(src) || '');
+
+  // The CURRENT atlas art as base64, for an img2img reference (req_1070): a prior
+  // upload/generation if one exists (so the model iterates on it), else the procedural
+  // island raster (the shape + colors guide the result). Atlas-sized → small payload.
+  const referenceB64 = (slice?: RasterSlice): string => {
+    if (slice) {
+      const cur = tex?.sliceImages?.[`${slice.partId}:${slice.faceIndex}`];
+      if (cur) return sourceToB64(cur);
+    } else if (tex?.imageUrl) {
+      return sourceToB64(tex.imageUrl);
+    }
+    const parts = props.parts.map((p) => ({ id: p.id, mesh: p.mesh }));
+    const img = rasterizeAtlas(parts, tex!.texels, tex!.type, tex!.color, slice);
+    return bytesToBase64(encodePng(img.rgba, img.width, img.height));
+  };
+
+  // Re-upload a texture (req_1079): read a PNG off disk → an atlas <Image> source (inline
+  // or cached, texSource) → the shared composite tail. The model captures it because every
+  // face samples ONLY its UV slot (the cookie cutter): a whole-sheet upload slips back into
+  // place, overshoot ignored; a SLICE upload drops one regenerated island into its slot.
+  const importTexture = (pngPath: string, slice?: RasterSlice) => {
+    if (!tex) return;
+    const path = pngPath.trim();
+    if (!path) { toast('enter a .png path', 2200); return; }
+    if (!exists(path)) { toast(`not found: ${path}`); return; }
+    const b64 = readFileBase64(path);
+    if (!b64) { toast(`could not read: ${path}`); return; }
+    applyTextureImage(texSource(b64), slice);
+    setImportTex(null);
+    toast(`loaded ${path}${slice ? ` → face ${slice.faceIndex}` : ''}`);
+  };
+
+  const [sel, setSel] = useState<Selection>(emptySelection);
+  // mouse-press events don't carry modifier flags here — held shift/ctrl come
+  // from the key bus (req_0979). This is the same ref IsoAuthor uses.
+  const heldMods = useHeldModifiers();
+  // selection is per-part — drop it when the active part changes.
+  useEffect(() => { setSel(emptySelection()); }, [activePart?.id]);
+  // publish the selected faces to the shared store so the UV panel scopes to the
+  // selected face's island (Part 5.2) — only meaningful in face mode.
+  useEffect(() => {
+    onSelectFaces(selMode === 'face' ? [...sel.faces].sort((a, b) => a - b) : []);
+  }, [sel, selMode, onSelectFaces]);
+
+  // ── Transform gizmo (req_0983): move / resize the selection ──
+  const [gizmoTool, setGizmoTool] = useHotState<GizmoTool>('studio:gizmoTool', 'move');
+  const [activeGizmo, setActiveGizmo] = useState<GizmoHit | null>(null);
+  // Live drag readout (req_1024): a small tooltip showing how far the active gizmo
+  // has moved this drag (in modeling units), so the amount can be MIRRORED on the
+  // other side for parity instead of mentally tracked. Set in onMove, cleared on up.
+  const [gizmoReadout, setGizmoReadout] = useState<string | null>(null);
+  // a live working copy of the dragged part — the viewport re-lowers THIS each
+  // move (small mesh, cheap) and commits to the store on mouse-up, so a drag
+  // never writes through the store per-move (the commit-on-release pattern; a
+  // per-move mesh write would re-render the whole bench and melt the frame).
+  const [draft, setDraft] = useState<{ partId: string; mesh: EditMesh; seq: number } | null>(null);
+  const dragSeqRef = useRef(0);
+  // the in-flight gizmo grab (frozen at mouse-down): which handle, the verts it
+  // moves, the start mesh + anchor, and the start-frozen axis screen frame (so
+  // the world mapping is stable for the whole drag).
+  const gizmoDragRef = useRef<null | {
+    partId: string; tool: GizmoTool; hit: GizmoHit; indices: number[]; startMesh: EditMesh;
+    anchorL: MV3; anchorScreen: { x: number; y: number }; axis: { dx: number; dy: number; pxPerUnit: number };
+    startCx: number; startCy: number; startScreenDist: number; halfExt: number; rotSign: number; lastMesh?: EditMesh;
+  }>(null);
+
+  // ── Rig mode (req_1025): author the part's PIVOT (rotation origin) + JOINTS ──
+  // (typed sockets with a spin axis + rotation limit). The selected rig handle, a
+  // live drag DRAFT of its local position (commit-on-release, like the gizmo), and
+  // the in-flight grab (start-frozen axis frame, mirrors gizmoDragRef). Reuses the
+  // SAME TransformGizmo + drag math — only the anchor + commit differ.
+  const [rigSel, setRigSel] = useHotState<RigSel | null>('studio:rigSel', null);
+  const [rigDraft, setRigDraft] = useState<{ sel: RigSel; localPos: MV3 } | null>(null);
+  const [rigDragAxis, setRigDragAxis] = useState<GizmoHit | null>(null);
+  const rigDragRef = useRef<null | { sel: RigSel; axis: { dx: number; dy: number; pxPerUnit: number }; unit: MV3; startCx: number; startCy: number; startLocal: MV3 }>(null);
+  // A rig handle's LOCAL position, draft-aware: the live drag draft if it's the one
+  // being dragged, else the stored pivot / joint position. null = the joint is gone.
+  const rigLocalPos = (mesh: EditMesh, sel: RigSel): MV3 | null => {
+    if (rigDraft && sameRigSel(rigDraft.sel, sel)) return rigDraft.localPos;
+    if (sel.kind === 'pivot') return hasPivot(mesh) ? pivotOf(mesh) as MV3 : null; // no phantom pivot
+    const mt = (mesh.mounts ?? []).find((m) => m.name === sel.name);
+    return mt ? [mt.position[0], mt.position[1], mt.position[2]] : null;
+  };
+  // Commit a moved rig handle to the mesh (pivot → setPivot, joint → updateMount).
+  const commitRig = (sel: RigSel, local: MV3) => {
+    if (!activePart) return;
+    const m = activePart.mesh;
+    props.onEditMesh(activePart.id, sel.kind === 'pivot' ? setPivot(m, local) : updateMount(m, sel.name, { position: local }));
+  };
+
+  // ── Loop cut (req_0984/0985/0990): a face click → a small popup → N cuts ──
+  // The clicked face + a direction (which in-plane axis) + cut count + offset,
+  // splitting the SELECTED face. While the popup is open the cut is PREVIEWED
+  // live (through the same draft path as the gizmo) and committed only on Apply.
+  const [lc, setLc] = useState<null | { faceIndex: number; dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent' }>(null);
+  const lcAxisInfo = lc && activePart ? loopCutAxisInfo(activePart.mesh, lc.faceIndex, lc.dir) : null;
+  // ── Concave Auto-Fix guard (req_0949/req_1016): an edit that buckles a quad
+  // into a non-convex (reflex-corner) face is ILLEGAL. Rather than silently
+  // triangulating it, the commit STOPS and surfaces a dialog — the buckled mesh
+  // stays previewed (the draft) so the offender is visible — and the user chooses:
+  // Split Quads (recommended) / Ignore (keep it concave) / Revert (drop the edit).
+  const [autoFix, setAutoFix] = useState<null | { partId: string; mesh: EditMesh; count: number }>(null);
+  const resolveAutoFix = (action: 'split' | 'ignore' | 'revert') => {
+    setAutoFix((af) => {
+      if (af) {
+        if (action === 'split') props.onEditMesh(af.partId, splitConcaveFaces(af.mesh));
+        else if (action === 'ignore') props.onEditMesh(af.partId, af.mesh);
+        // revert → commit nothing; the store still holds the pre-edit mesh.
+      }
+      return null;
+    });
+    setDraft(null);
+  };
+  // offset (in the popup's unit) → mesh-meters along the cut axis (0..size).
+  const lcOffsetMeters = (info: LoopCutAxis): number =>
+    lc!.unit === 'percent' ? (lc!.offset / 100) * info.sizeMeters : lc!.offset / info.unitsPerMeter;
+  // Build the preview: TAG the clicked face, then cut — the tag rides onto the
+  // face's pieces (so the selection survives the cut, like Blockbench).
+  const lcCutMesh = (info: LoopCutAxis): EditMesh =>
+    loopCutRange(tagOneFace(activePart!.mesh, lc!.faceIndex, 1), info.axis, info.lo, info.hi, lc!.cuts, lcOffsetMeters(info));
+  // ── Loop-cut SLIDE gizmo (req_1022): a move handle ON the cut so the offset can
+  // be dragged on the model (Blockbench), not just typed in the popup. The anchor
+  // sits on the (middle) cut plane; dragging the CUT-AXIS arrow drives lc.offset,
+  // and the live preview + anchor follow. A separate drag ref from the vert gizmo.
+  const lcDragRef = useRef<null | { axis: { dx: number; dy: number; pxPerUnit: number }; startCx: number; startCy: number; startOffset: number; info: LoopCutAxis }>(null);
+  const [lcDragAxis, setLcDragAxis] = useState<GizmoHit | null>(null);
+  // The cut plane coordinate on the cut axis (the middle cut for cuts>1).
+  const lcCutPlaneAt = (info: LoopCutAxis): number => {
+    const ps = loopCutPositions(info.lo, info.hi, lc!.cuts, lcOffsetMeters(info));
+    return ps.length ? ps[Math.floor((ps.length - 1) / 2)] : (info.lo + info.hi) / 2;
+  };
+  // World anchor for the slide gizmo: the face centroid pinned onto the cut plane.
+  const lcGizmoAnchor: MV3 | null = (lc && lcAxisInfo && activePart && activePart.mesh.faces[lc.faceIndex])
+    ? (() => {
+        const info = lcAxisInfo;
+        const a = faceCentroid(activePart.mesh, activePart.mesh.faces[lc.faceIndex]) as MV3;
+        a[info.axis] = lcCutPlaneAt(info);
+        return [a[0], a[1] + activePart.lift, a[2]] as MV3;
+      })()
+    : null;
+  // Drive the live preview draft from the popup params. Keyed on `lc` ONLY — NOT
+  // on the active part: a popup is bound to one face of one part, so switching
+  // parts/models must CLOSE it (the reset effect below), never re-preview the
+  // stale cut onto the new part (the "cuts persist across new" bug, req_1011).
+  useEffect(() => {
+    if (!lc || !activePart || !lcAxisInfo) { return; }
+    dragSeqRef.current += 1;
+    setDraft({ partId: activePart.id, mesh: lcCutMesh(lcAxisInfo), seq: dragSeqRef.current });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lc]);
+  // The loop-cut popup + its preview draft are transient edit state tied to the
+  // ACTIVE PART. When the active part changes — selecting another part, switching
+  // models, or 'new' (→ a fresh part) — tear them down so a half-open cut never
+  // bleeds onto the next model (req_1011). Selection already resets on the same
+  // key (above); the gizmo grab is dropped too.
+  // Skip the FIRST run (mount / hot-reload remount): clearing on mount would wipe
+  // the twigged rigSel/selMode that hotstate just restored. Only a REAL part change
+  // tears down the transient edit state. (`prevPartId` resets to undefined on a hot
+  // reload remount, so the restored twig selection survives — branch/twig law.)
+  const prevPartId = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const changed = prevPartId.current !== undefined && prevPartId.current !== (activePart?.id ?? null);
+    prevPartId.current = activePart?.id ?? null;
+    if (!changed) return;
+    setLc(null);
+    setDraft(null);
+    setActiveGizmo(null);
+    setAutoFix(null);
+    lcDragRef.current = null;
+    setLcDragAxis(null);
+    setGizmoReadout(null);
+    // rig handles are per-part too — drop the selection + any in-flight drag.
+    setRigSel(null);
+    setRigDraft(null);
+    rigDragRef.current = null;
+    setRigDragAxis(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePart?.id]);
+  // Entering rig mode SPAWNS the gizmo on the pivot immediately (req_1051) — the
+  // pivot is always present, so default-select it so the 3-axis move gizmo is right
+  // there to grab (drag the into-screen axis for depth). Runs only on mode ENTRY
+  // (keyed on selMode), so Esc can still leave nothing selected while staying in rig.
+  useEffect(() => {
+    // select the pivot only if the part HAS one (req_1054) — a body is joints-only,
+    // so don't spawn a phantom pivot gizmo; leave nothing selected to place.
+    if (selMode === 'rig' && activePart) setRigSel((s) => s ?? (hasPivot(activePart.mesh) ? { kind: 'pivot' } : null));
+    // turning to OBJECT mode arms ROTATE on the whole piece (USER req_1058) — the
+    // common "reorient the part" move; the toggle still lets you switch to move/resize.
+    if (selMode === 'object') setGizmoTool('rotate');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selMode]);
+  const closeLoopCut = (commit: boolean) => {
+    if (commit && lc && activePart && lcAxisInfo) {
+      const cut = lcCutMesh(lcAxisInfo);
+      const kept = lcKeptFace(cut, lcAxisInfo.axis); // the −side half of the split face
+      props.onEditMesh(activePart.id, clearFaceTags(cut)); // store a clean mesh
+      // KEEP the selection on the resulting half (index unchanged by clear).
+      setSel({ verts: new Set(), edges: new Set(), faces: new Set(kept >= 0 ? [kept] : []) });
+    }
+    setDraft(null);
+    setLc(null);
+    lcDragRef.current = null;
+    setLcDragAxis(null);
+  };
+
+  // Selection keys (a focused TextInput consumes keys before the bus, so typing a
+  // name never triggers these — USER req_0978):
+  //  • Esc → clear the selection (the ONE deselect-all besides picking anew).
+  //  • Ctrl/Cmd+A → select EVERY element of the active mode (req_1020).
+  //  • Delete/Backspace → remove the selected faces, or the faces a selected
+  //    vertex/edge belongs to (Blockbench's connected-faces delete, req_1020).
+  useEffect(() => {
+    const off = busOn('__keydown', (e: any) => {
+      const key = String(e?.key ?? '').toLowerCase();
+      if (key === 'escape') { setSel(emptySelection()); setRigSel(null); return; }
+      // RIG mode: Delete removes the selected JOINT, or drops the pivot (pivots are
+      // opt-in, req_1054 — removing one makes the part joints-only again); Ctrl+A /
+      // face-delete don't apply here.
+      if (selMode === 'rig') {
+        if ((key === 'delete' || key === 'backspace') && activePart) {
+          if (rigSel?.kind === 'joint') { props.onEditMesh(activePart.id, removeMount(activePart.mesh, rigSel.name)); setRigSel(null); }
+          else if (rigSel?.kind === 'pivot') { props.onEditMesh(activePart.id, clearPivot(activePart.mesh)); setRigSel(null); }
+        }
+        return;
+      }
+      if (selMode === 'object' || !activePart || lc || autoFix) return;
+      const mesh = activePart.mesh;
+      if (key === 'a' && (e?.ctrlKey || e?.metaKey)) {
+        if (selMode === 'face') setSel({ verts: new Set(), edges: new Set(), faces: new Set(mesh.faces.map((_, i) => i)) });
+        else if (selMode === 'vertex') setSel({ verts: new Set(mesh.verts.map((_, i) => i)), edges: new Set(), faces: new Set() });
+        else setSel({ verts: new Set(), edges: new Set(meshEdges(mesh).map((_, i) => i)), faces: new Set() });
+        // The host's Ctrl+A ALSO lights up every text label in the whole app tree
+        // (selection.zig sel_all). We handled the key for the mesh — drop that
+        // app-wide highlight so it never renders (req_1058; door is a no-op on an
+        // un-rebuilt host).
+        callHost('__selection_clear', null);
+        return;
+      }
+      if (key === 'delete' || key === 'backspace') {
+        const faces = selectionFaceIndices(mesh, selMode, sel);
+        if (faces.length === 0) return;
+        props.onEditMesh(activePart.id, deleteFaces(mesh, faces));
+        setSel(emptySelection());
+      }
+    });
+    return () => off();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selMode, sel, activePart?.id, activePart?.mesh, lc, autoFix, rigSel]);
+  // a live camera snapshot matching gpu/3d.zig (eye from camera.zig orbital math,
+  // near 0.02 / fov from the Scene3D.Camera below); used by the overlay + picking.
+  const camSnap = (): CameraSnap => {
+    const r = rectRef.current;
+    return { eye: orbitalEyeJS(target, lookRef.current.yaw, lookRef.current.pitch, distRef.current), target, fov: fovRef.current, aspect: (r.width || 1) / (r.height || 1), w: r.width || 1, h: r.height || 1, near: 0.02 };
+  };
+
+  const sendOrbit = () => ctlRef.current?.setOrbit({ target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: distRef.current, fov: fovRef.current, zoom: 1 });
+
+  useEffect(() => {
+    const nodeId = Number(cameraRef.current?.id ?? 0);
+    if (!nodeId) return;
+    const ctl = GAME_NATIVE_CAMERA.forNode(nodeId);
+    ctlRef.current = ctl;
+    ctl.setMode('orbit');
+    ctl.setSmoothing(smoothRef.current); // 0 = direct/Blockbench-like by default
+    sendOrbit();
+    return () => { ctlRef.current = null; ctl.disable(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Re-frame when the scene changes (part added/removed/reordered/toggled).
+  useEffect(() => { distRef.current = fitDistance(); sendOrbit(); /* eslint-disable-next-line */ }, [revision]);
+
+  const onDown = (e: any) => {
+    snapGenRef.current += 1;
+    // While the loop-cut popup is open, the SLIDE gizmo on the cut comes first
+    // (drag the cut-axis arrow to move the cut, req_1022); anywhere else just
+    // orbits, so the user can rotate to inspect the live preview.
+    if (lc) {
+      if (lcGizmoAnchor && lcAxisInfo) {
+        const r = rectRef.current;
+        const lx = Number(e?.x ?? 0) - r.x, ly = Number(e?.y ?? 0) - r.y;
+        const proj = makeProjector(camSnap());
+        const hit = pickGizmoHandle(lcGizmoAnchor, 'move', proj, lx, ly);
+        if (hit && hit.axis === lcAxisInfo.axis) {
+          const ax = axisScreen(lcGizmoAnchor, AXIS_DIR[hit.axis], proj);
+          lcDragRef.current = { axis: { dx: ax.dx, dy: ax.dy, pxPerUnit: ax.pxPerUnit }, startCx: lx, startCy: ly, startOffset: lc.offset, info: lcAxisInfo };
+          setLcDragAxis(hit);
+          return; // grabbed the slide handle → move the cut, not orbit
+        }
+      }
+      dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs(); return;
+    }
+    // RIG mode (req_1025): (a) if a handle is selected, grab its move gizmo first;
+    // (b) else pick a rig handle (pivot / joint) — a hit selects and does NOT
+    // orbit; (c) a miss falls through to orbit, so you can spin to inspect. Mirrors
+    // the element-mode flow but on rig handles, reusing the SAME gizmo + drag math.
+    if (selMode === 'rig' && activePart) {
+      const r = rectRef.current;
+      const lx = Number(e?.x ?? 0) - r.x, ly = Number(e?.y ?? 0) - r.y;
+      const proj = makeProjector(camSnap());
+      if (rigSel) {
+        const lp = rigLocalPos(activePart.mesh, rigSel);
+        if (lp) {
+          const anchorW: MV3 = [lp[0], lp[1] + activePart.lift, lp[2]];
+          const hit = pickGizmoHandle(anchorW, 'move', proj, lx, ly);
+          if (hit) {
+            const ax = axisScreen(anchorW, AXIS_DIR[hit.axis], proj);
+            rigDragRef.current = { sel: rigSel, axis: { dx: ax.dx, dy: ax.dy, pxPerUnit: ax.pxPerUnit }, unit: AXIS_DIR[hit.axis] as MV3, startCx: lx, startCy: ly, startLocal: [lp[0], lp[1], lp[2]] };
+            setRigDragAxis(hit);
+            return; // grabbed → move the handle, not orbit
+          }
+        }
+      }
+      const h = rigHandles(activePart.mesh, hasPivot(activePart.mesh) ? pivotOf(activePart.mesh) as MV3 : null, activePart.lift);
+      const picked = pickRigHandle(h.pivot, h.joints, proj, lx, ly);
+      if (picked) { setRigSel(picked); return; } // selected → don't orbit
+      dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs(); return;
+    }
+    // GIZMO FIRST: if a transform handle is under the cursor, grab it — no pick,
+    // no orbit. In OBJECT mode the target is the WHOLE piece (every vert, req_1058);
+    // in element modes it's the live selection. (rig has its own handles.)
+    if (selMode !== 'rig' && activePart && (selMode === 'object' || selectionCount(sel, selMode) > 0)) {
+      const r = rectRef.current;
+      const lx = Number(e?.x ?? 0) - r.x, ly = Number(e?.y ?? 0) - r.y;
+      const mesh = activePart.mesh;
+      const indices = selMode === 'object' ? mesh.verts.map((_, i) => i) : selectionVertIndices(mesh, selMode, sel);
+      if (indices.length > 0) {
+        const anchorL = vertsCentroid(mesh, indices);
+        const anchorW: MV3 = [anchorL[0], anchorL[1] + activePart.lift, anchorL[2]];
+        const proj = makeProjector(camSnap());
+        const hit = pickGizmoHandle(anchorW, gizmoTool, proj, lx, ly);
+        if (hit) {
+          const aS = proj(anchorW);
+          const ax = axisScreen(anchorW, AXIS_DIR[hit.axis], proj);
+          gizmoDragRef.current = {
+            partId: activePart.id, tool: gizmoTool, hit, indices, startMesh: mesh,
+            anchorL, anchorScreen: { x: aS.x, y: aS.y },
+            axis: { dx: ax.dx, dy: ax.dy, pxPerUnit: ax.pxPerUnit },
+            startCx: lx, startCy: ly,
+            startScreenDist: Math.max(8, Math.hypot(lx - aS.x, ly - aS.y)),
+            halfExt: hit.uniform ? 0 : vertsHalfExtent(mesh, indices, anchorL, hit.axis),
+            rotSign: gizmoTool === 'rotate' ? rotationSign(anchorW, hit.axis, proj) : 1,
+          };
+          setActiveGizmo(hit);
+          return; // grabbed a handle → transform, not pick/orbit
+        }
+      }
+    }
+    // In an element mode, a press first tries to PICK. A HIT changes the
+    // selection (shift/ctrl = add/toggle, else replace) and does NOT orbit — so
+    // you can't spin by dragging on an element (USER req_0978). A MISS leaves the
+    // selection ALONE and falls through to orbit, so dragging off in empty space
+    // spins the camera WITHOUT deselecting. Deselect comes only from picking a
+    // new element or pressing Esc (the keydown effect below).
+    if (selMode !== 'object' && activePart) {
+      const r = rectRef.current;
+      const lx = Number(e?.x ?? 0) - r.x, ly = Number(e?.y ?? 0) - r.y;
+      const baseProj = makeProjector(camSnap());
+      const lift = activePart.lift;
+      const proj = (p: Vec3) => baseProj([p[0], p[1] + lift, p[2]]);
+      const hit = pickElement(activePart.mesh, selMode, proj, meshEdges(activePart.mesh), lx, ly);
+      if (hit != null) {
+        const m = heldMods.current;
+        const add = m.shift || m.ctrl || m.meta; // shift OR ctrl groups (USER req_0977/0979)
+        setSel((s) => applyPick(s, selMode, hit, add));
+        return; // picked → don't orbit
+      }
+      // miss → keep the selection; fall through to orbit
+    }
+    dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) };
+    lastMoveRef.current = nowMs();
+  };
+  const onMove = (e: any) => {
+    // RIG drag: move the selected pivot/joint along the grabbed axis. Snaps by
+    // default (req_1023); previews into rigDraft (commit-on-release), so the mesh
+    // isn't re-written per move (pivot/joints don't change geometry anyway).
+    const rd = rigDragRef.current;
+    if (rd) {
+      const r = rectRef.current;
+      const cx = Number(e?.x ?? 0) - r.x, cy = Number(e?.y ?? 0) - r.y;
+      const t = snapToStep(dragWorldDistance(rd.axis, cx - rd.startCx, cy - rd.startCy), STUDIO.gizmoStepMeters, STUDIO.gizmoStepFineMeters, heldMods.current);
+      const local: MV3 = [rd.startLocal[0] + rd.unit[0] * t, rd.startLocal[1] + rd.unit[1] * t, rd.startLocal[2] + rd.unit[2] * t];
+      setRigDraft({ sel: rd.sel, localPos: local });
+      setGizmoReadout(`${'XYZ'[rd.unit[0] ? 0 : rd.unit[1] ? 1 : 2]} ${fmtUnits(metersToUnits(t))}`);
+      return;
+    }
+    // LOOP-CUT SLIDE drag: map the cut-axis drag to lc.offset. Dragging toward
+    // +axis moves the cut that way, which (since a higher offset shrinks the −side
+    // end) DECREASES the offset by the same world distance. The setLc re-previews
+    // and re-anchors the gizmo. Absolute from the frozen start offset (no drift).
+    const ld = lcDragRef.current;
+    if (ld) {
+      const r = rectRef.current;
+      const cx = Number(e?.x ?? 0) - r.x, cy = Number(e?.y ?? 0) - r.y;
+      // snap the slide to the gizmo step grid (req_1023): default = whole units,
+      // Shift = finer, Alt = freeform.
+      const tMeters = snapToStep(dragWorldDistance(ld.axis, cx - ld.startCx, cy - ld.startCy), STUDIO.gizmoStepMeters, STUDIO.gizmoStepFineMeters, heldMods.current);
+      const dOffsetMeters = -tMeters;
+      const info = ld.info;
+      const dOffset = lc!.unit === 'percent' ? (dOffsetMeters * 100) / (info.sizeMeters || 1) : dOffsetMeters * info.unitsPerMeter;
+      const max = lc!.unit === 'percent' ? 100 : Math.max(1, info.sizeUnits);
+      const next = Math.round(clamp(ld.startOffset + dOffset, 0, max) * 10) / 10; // 1 dp keeps the popup tidy
+      setLc((s) => (s ? { ...s, offset: next } : s));
+      setGizmoReadout(`cut ${fmtUnits(metersToUnits(tMeters))}`);
+      return;
+    }
+    // GIZMO drag: transform the selection, re-lower the working draft (committed
+    // to the store only on mouse-up). Absolute from the start mesh + total delta,
+    // so there's no accumulation drift.
+    const g = gizmoDragRef.current;
+    if (g) {
+      const r = rectRef.current;
+      const cx = Number(e?.x ?? 0) - r.x, cy = Number(e?.y ?? 0) - r.y;
+      // Every gizmo drag SNAPS by default (req_1023): no modifier = whole modeling
+      // units, Shift = finer, Alt = freeform. Move/resize snap a distance; uniform
+      // snaps the scale factor.
+      const mods = heldMods.current;
+      const axisLabel = 'XYZ'[g.hit.axis];
+      let next: EditMesh;
+      let readout: string;
+      if (g.tool === 'rotate') {
+        // screen-angle about the anchor → world rotation about the axis. Snaps to
+        // whole steps by default (15°), Shift = 1°, Alt = free (req_1023 parity).
+        const a0 = Math.atan2(g.startCy - g.anchorScreen.y, g.startCx - g.anchorScreen.x);
+        const a1 = Math.atan2(cy - g.anchorScreen.y, cx - g.anchorScreen.x);
+        let d = a1 - a0; d = Math.atan2(Math.sin(d), Math.cos(d)); // normalize to [-π,π]
+        const deg = snapToStep((d * g.rotSign * 180) / Math.PI, STUDIO.rotateStepDeg, STUDIO.rotateStepFineDeg, mods);
+        next = rotateVerts(g.startMesh, g.indices, g.anchorL, g.hit.axis, (deg * Math.PI) / 180);
+        readout = `${axisLabel} ${mods.alt ? deg.toFixed(1) : Math.round(deg)}°`;
+      } else if (g.hit.uniform) {
+        const fRaw = Math.hypot(cx - g.anchorScreen.x, cy - g.anchorScreen.y) / g.startScreenDist;
+        const f = Math.max(0.02, snapToStep(fRaw, STUDIO.gizmoUniformStep, STUDIO.gizmoUniformStepFine, mods));
+        next = scaleVerts(g.startMesh, g.indices, g.anchorL, [f, f, f]);
+        readout = `⤢ ×${f.toFixed(2)}`;
+      } else if (g.tool === 'move') {
+        const t = snapToStep(dragWorldDistance(g.axis, cx - g.startCx, cy - g.startCy), STUDIO.gizmoStepMeters, STUDIO.gizmoStepFineMeters, mods);
+        const u = AXIS_DIR[g.hit.axis];
+        next = translateVerts(g.startMesh, g.indices, [u[0] * t, u[1] * t, u[2] * t]);
+        readout = `${axisLabel} ${fmtUnits(metersToUnits(t))}`;
+      } else {
+        if (g.halfExt < 1e-4) return; // a point/flat axis has no extent to scale
+        const raw = dragWorldDistance(g.axis, cx - g.startCx, cy - g.startCy) * g.hit.sign;
+        // snap the RESULTING half-extent to the grid so the size lands on whole units.
+        const target = snapToStep(g.halfExt + raw, STUDIO.gizmoStepMeters, STUDIO.gizmoStepFineMeters, mods);
+        const f = Math.max(0.02, target / g.halfExt);
+        const factor: MV3 = [1, 1, 1]; factor[g.hit.axis] = f;
+        next = scaleVerts(g.startMesh, g.indices, g.anchorL, factor);
+        readout = `${axisLabel} Δ${fmtUnits(metersToUnits(target - g.halfExt))}`;
+      }
+      setGizmoReadout(readout);
+      g.lastMesh = next;
+      dragSeqRef.current += 1;
+      setDraft({ partId: g.partId, mesh: next, seq: dragSeqRef.current });
+      return;
+    }
+    const d = dragRef.current;
+    if (!d) return;
+    const nx = Number(e?.x ?? 0), ny = Number(e?.y ?? 0);
+    const dx = nx - d.x, dy = ny - d.y;
+    d.x = nx; d.y = ny;
+    const l = lookRef.current;
+    const nextYaw = l.yaw - dx * STUDIO.yawPerPixel;
+    const nextPitch = clamp(l.pitch - dy * STUDIO.pitchPerPixel, STUDIO.minPitch, STUDIO.maxPitch);
+    // Host-owned: ship only the delta; camera.zig solves + smooths every frame
+    // (applyInputDeltas ACCUMULATES, so intra-frame bursts sum correctly).
+    ctlRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+    // Fold this event into the per-frame trace accumulator (flushed below).
+    const t = nowMs();
+    const gap = lastMoveRef.current ? t - lastMoveRef.current : 0;
+    lastMoveRef.current = t;
+    const c = camRef.current;
+    if (c.moves === 0) { c.startYaw = l.yaw; c.startPitch = l.pitch; c.maxGap = 0; }
+    c.moves += 1;
+    if (gap > c.maxGap) c.maxGap = gap;
+    l.yaw = nextYaw; l.pitch = nextPitch;
+  };
+  const onUp = () => {
+    setGizmoReadout(null); // the drag is ending — drop the live step readout
+    // end a loop-cut slide (the offset already lives in lc; nothing to commit —
+    // Apply commits the whole cut). Just drop the drag + clear the highlight.
+    if (lcDragRef.current) { lcDragRef.current = null; setLcDragAxis(null); return; }
+    // end a RIG drag: commit the moved pivot/joint to the mesh, drop the draft.
+    if (rigDragRef.current) {
+      const rd = rigDragRef.current;
+      rigDragRef.current = null;
+      setRigDragAxis(null);
+      if (rigDraft && sameRigSel(rigDraft.sel, rd.sel)) commitRig(rd.sel, rigDraft.localPos);
+      setRigDraft(null);
+      return;
+    }
+    const g = gizmoDragRef.current;
+    if (g) {
+      gizmoDragRef.current = null;
+      setActiveGizmo(null);
+      const result = g.lastMesh;
+      if (!result) { setDraft(null); return; }
+      // Concave Auto-Fix guard (req_0949/req_1016): a moved vert can buckle a quad
+      // into a reflex (non-convex) face. If it did, DON'T silently triangulate —
+      // keep the buckled preview on screen and raise the dialog for the user to
+      // resolve. A clean edit commits straight through.
+      const offenders = findConcaveFaces(result);
+      if (offenders.length === 0) { setDraft(null); props.onEditMesh(g.partId, result); }
+      else setAutoFix({ partId: g.partId, mesh: result, count: offenders.length });
+      return;
+    }
+    dragRef.current = null;
+  };
+  const onWheel = (e: any) => {
+    const dy = Number(e?.deltaY ?? e?.dy ?? 0);
+    const step = Math.max(STUDIO.tileMeters * 0.5, distRef.current * STUDIO.zoomStepFraction);
+    distRef.current = clamp(distRef.current + (dy > 0 ? -1 : 1) * step, STUDIO.minDistance, STUDIO.maxDistance);
+    sendOrbit();
+  };
+
+  // fov + reframe live in refs (no per-frame state); repaint the readout on change.
+  const repaint = useRerender();
+  const setFov = (v: number) => { fovRef.current = clamp(v, 20, 80); sendOrbit(); repaint(); };
+  const reframe = () => { lookRef.current = { yaw: STUDIO.bootYaw, pitch: STUDIO.bootPitch }; distRef.current = fitDistance(); sendOrbit(); repaint(); };
+
+  // Snap the orbit to face an axis (the compass click — req_0969). Eased turn
+  // along the SHORTEST yaw path; NaN targetYaw (the poles) keeps the current yaw.
+  // A generation token cancels the tween if the user grabs the camera mid-snap.
+  const faceAxis = (targetYaw: number, targetPitch: number) => {
+    const start = { yaw: lookRef.current.yaw, pitch: lookRef.current.pitch };
+    const tyaw = Number.isFinite(targetYaw) ? targetYaw : start.yaw;
+    let dyaw = tyaw - start.yaw;
+    dyaw = ((dyaw + 180) % 360 + 360) % 360 - 180; // shortest signed delta
+    const dpitch = clamp(targetPitch, STUDIO.minPitch, STUDIO.maxPitch) - start.pitch;
+    const gen = ++snapGenRef.current;
+    const t0 = nowMs();
+    const dur = 260;
+    const run = () => {
+      if (gen !== snapGenRef.current) return; // cancelled (a drag or newer snap)
+      const k = Math.min(1, (nowMs() - t0) / dur);
+      const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // easeInOutQuad
+      lookRef.current = { yaw: start.yaw + dyaw * e, pitch: clamp(start.pitch + dpitch * e, STUDIO.minPitch, STUDIO.maxPitch) };
+      sendOrbit();
+      if (k < 1) schedFrame(run);
+    };
+    schedFrame(run);
+  };
+
+  // Per-frame flush of the camera trace (req_0964). One warn line per frame
+  // while dragging — moves folded in, net angle delta, worst inter-event gap.
+  // No state, no re-render; rides the host rAF (or a 16 ms timer fallback —
+  // the cart V8 host has no requestAnimationFrame, per reactjit_no_raf).
+  useEffect(() => {
+    const host = globalThis as any;
+    const sched: (fn: () => void) => any = host.requestAnimationFrame ? host.requestAnimationFrame.bind(host) : (fn: () => void) => setTimeout(fn, 16);
+    let stop = false;
+    const loop = () => {
+      if (stop) return;
+      const c = camRef.current;
+      if (c.moves > 0) {
+        if (logCamRef.current) {
+          const l = lookRef.current;
+          console.warn(`[studio-cam] frame moves=${c.moves} gapMax=${c.maxGap.toFixed(1)}ms dyaw=${(l.yaw - c.startYaw).toFixed(2)} dpitch=${(l.pitch - c.startPitch).toFixed(2)} yaw=${l.yaw.toFixed(1)}° pitch=${l.pitch.toFixed(1)}°`);
+        }
+        c.moves = 0;
+      }
+      sched(loop);
+    };
+    sched(loop);
+    return () => { stop = true; };
+  }, []);
+
+  // ── Frame-drop diagnostics (req_0963/0965) ──
+  // diagOn/logOn live here (cheap toggle re-renders); the PROBE + its 5 Hz
+  // polling live in FrameDiagBar so its re-renders never touch the Scene3D
+  // tree (staging + parts) — the diag was itself re-rendering the 26 grid meshes
+  // at 5 Hz, a self-inflicted stutter while the readout was on.
+  // The spin-skip is fixed (direct camera), so the diagnostics default QUIET
+  // (req_0968): no terminal logging. The thin FRAMES strip + the 'log cam'/'fps'
+  // toggles stay so the whole probe can be re-armed in one tap if it recurs.
+  const [diagOn, setDiagOn] = useState(true);
+  const [logOn, setLogOn] = useState(false);
+  logCamRef.current = logOn;
+
+  // Live camera-smoothing lever (req_0967): cycle direct↔eased so the feel can
+  // be dialed against Blockbench. 0 = direct 1:1 (no momentum/lag); higher =
+  // more ease. Applied straight to the host controller — no re-render needed.
+  const [smooth, setSmooth] = useHotState('studio:smooth', STUDIO.cameraSmoothing);
+  const cycleSmooth = () => {
+    const i = SMOOTH_PRESETS.indexOf(smooth);
+    const next = SMOOTH_PRESETS[(i + 1) % SMOOTH_PRESETS.length] ?? 0;
+    smoothRef.current = next;
+    ctlRef.current?.setSmoothing(next);
+    setSmooth(next);
+    console.warn(`[studio-cam] smoothing=${next === 0 ? 'direct (0)' : `${next}/s`}`);
+  };
+
+  // ── Gizmo anchor + the live display mesh (req_0983) ──
+  // The mesh shown for the active part: the live drag draft if dragging it, else
+  // the committed store mesh. The gizmo + selection overlay both read THIS so
+  // they track the deformation live.
+  const activeMesh: EditMesh | null = activePart
+    ? (draft && draft.partId === activePart.id ? draft.mesh : activePart.mesh)
+    : null;
+  // OBJECT mode → the gizmo grabs the WHOLE piece (every vert), so move/resize/
+  // rotate reorient the part with no select-all (USER req_1058); rig has its own
+  // handles; element modes use the live selection.
+  const gizmoSelVerts = activePart && activeMesh
+    ? (selMode === 'object' ? activeMesh.verts.map((_, i) => i)
+      : selMode === 'rig' ? []
+        : selectionVertIndices(activeMesh, selMode, sel))
+    : [];
+  let gizmoAnchorWorld: MV3 | null = null;
+  if (activePart && activeMesh && gizmoSelVerts.length > 0) {
+    const a = vertsCentroid(activeMesh, gizmoSelVerts);
+    gizmoAnchorWorld = [a[0], a[1] + activePart.lift, a[2]];
+  }
+
+  // ── Rig handles + the selected-handle gizmo anchor (req_1025) ──
+  // The pivot + joint world positions for the overlay (draft-aware via rigLocalPos
+  // for the dragged one), and the move-gizmo anchor on the selected handle.
+  // the pivot handle shows only when the part HAS a pivot (opt-in, req_1054) — a
+  // body is joints-only; null = no pivot handle (rigHandles skips it).
+  const rigPivotLocal: MV3 | null = activePart
+    ? (rigDraft && rigDraft.sel.kind === 'pivot' ? rigDraft.localPos : (hasPivot(activePart.mesh) ? pivotOf(activePart.mesh) as MV3 : null))
+    : null;
+  const rig = selMode === 'rig' && activePart
+    ? rigHandles(activePart.mesh, rigPivotLocal, activePart.lift)
+    : null;
+  if (rig && rigDraft && rigDraft.sel.kind === 'joint') {
+    const j = rig.joints.find((x) => x.name === (rigDraft.sel as { kind: 'joint'; name: string }).name);
+    if (j) j.pos = [rigDraft.localPos[0], rigDraft.localPos[1] + activePart!.lift, rigDraft.localPos[2]];
+  }
+  let rigAnchorWorld: MV3 | null = null;
+  if (selMode === 'rig' && activePart && rigSel) {
+    const lp = rigLocalPos(activePart.mesh, rigSel);
+    if (lp) rigAnchorWorld = [lp[0], lp[1] + activePart.lift, lp[2]];
+  }
+
+  // Swap the live draft into the rendered list for the dragged part (re-lowered
+  // each move; a fresh dynamicKey forces the host re-upload). Every OTHER part
+  // keeps its memoized, baked entry — only the dragged part re-lowers.
+  const display = useMemo(() => {
+    if (!draft) return placed;
+    return placed.map((p) => (p.key === draft.partId
+      // ONE fixed dyn slot ('studio.draft') for whatever part is being dragged —
+      // never a per-part slot (req_1008: slots never free).
+      ? { ...p, def: { id: `studio.${draft.partId}`, generate: () => editMeshToGeometry(draft.mesh), defaults: {} }, dynKey: `studio.draft~${draft.partId}.${draft.seq}` }
+      : p));
+  }, [placed, draft]);
+
+  // ── Selected-face highlight (req_0986/0989): shade the active face(s) vivid ──
+  // so the clicked face is unmistakable AND stays tracked THROUGH a loop cut.
+  // During the cut preview the highlight follows the TAGGED pieces of the draft
+  // mesh (not the stale pre-cut index); otherwise it's the live selection.
+  const hiMesh: EditMesh | null = lc && draft && activePart && draft.partId === activePart.id
+    ? draft.mesh
+    : (activePart && selMode === 'face' ? activePart.mesh : null);
+  // During the cut preview, highlight only the kept −side half (what stays
+  // selected on Apply); otherwise the live selection.
+  const hiIdxs = lc && hiMesh && lcAxisInfo
+    ? (() => { const k = lcKeptFace(hiMesh, lcAxisInfo.axis); return k >= 0 ? [k] : []; })()
+    : (hiMesh && selMode === 'face' ? [...sel.faces].sort((a, b) => a - b) : []);
+  const hiSig = lc ? `lc${draft?.seq ?? 0}` : hiIdxs.join('-');
+  const hiSeqRef = useRef(0);
+  const faceHi = useMemo(() => {
+    if (!activePart || !hiMesh || hiIdxs.length === 0) return null;
+    // ONE fixed dyn slot ('studio.hi') for the highlight of WHATEVER part is
+    // active — the slot id is constant (not per-part), so it never leaks a slot
+    // per part over a session (req_1008: DYN_SLOTS never free). The version after
+    // '~' bumps to re-upload the new highlight geometry.
+    hiSeqRef.current += 1;
+    const key = `studio.hi~${hiSeqRef.current}`;
+    return { key, geo: facesGeometry(hiMesh, hiIdxs, STUDIO.selectFacePushMeters), lift: activePart.lift };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePart?.id, activePart?.version, activePart?.lift, hiSig]);
+
+  return (
+    <Pressable
+      onLayout={(lr: any) => { rectRef.current = { x: Number(lr.x ?? 0), y: Number(lr.y ?? 0), width: Number(lr.width ?? 1000), height: Number(lr.height ?? 700) }; }}
+      onMouseDown={onDown}
+      onMouseMove={onMove}
+      onMouseUp={onUp}
+      onScroll={onWheel}
+      style={{ flexGrow: 1, height: '100%', position: 'relative', overflow: 'hidden', backgroundColor: '#0a0e14' }}
+    >
+      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a0e14">
+        <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} near={0.02} far={200} />
+        <Scene3D.Fog enabled={false} />
+        <Scene3D.AmbientLight color="#dfe7ff" intensity={0.55} />
+        <Scene3D.DirectionalLight direction={[0.4, 0.92, 0.32]} color="#ffe9c2" intensity={0.85} />
+        {staging}
+        {display.map((p) => {
+          // TEXTURE (req_1068): with a scene texture made + texture view on, EVERY
+          // part samples the ONE shared sprite-map atlas (STUDIO_TEXTURE_KEY) —
+          // material '#ffffff' lets the texture show through (the cutout idiom).
+          const textured = texView && !!tex;
+          return (
+            <Scene3D.Mesh
+              key={p.key}
+              geometry={p.def}
+              dynamicKey={p.dynKey}
+              material={textured ? '#ffffff' : p.material}
+              textureKey={textured ? STUDIO_TEXTURE_KEY : undefined}
+              position={p.position}
+            />
+          );
+        })}
+        {faceHi ? (
+          <Scene3D.Mesh
+            geometry={{ id: faceHi.key, generate: () => faceHi.geo, defaults: {} }}
+            dynamicKey={faceHi.key}
+            material={{ color: STUDIO.selectFaceColor }}
+            position={[0, faceHi.lift, 0]}
+          />
+        ) : null}
+        {/* SCALE GHOST (req_1165): the reference player beside the model. */}
+        {showScale ? (
+          <>
+            <FigureMeshes rig={scaleFigure.rig} parts={scaleFigure.parts} intern yawDeg={90} offset={scaleOffset} />
+            <CharacterCaptures
+              headTexKey={scaleFigure.parts.head.texKey}
+              skinTexKey={scaleFigure.parts.torso.texKey}
+              skin={scaleFigure.doc.skin}
+              layers={scaleFigure.doc.layers}
+            />
+          </>
+        ) : null}
+      </Scene3D>
+
+      {/* TEXTURE (req_1068): the offscreen scene SPRITE-MAP atlas every part samples
+          via textureKey. Mounted while texture view is on; re-bakes only when the
+          scene's UVs (meshRev) or the atlas params change (the `sig` memo). */}
+      {texView && tex ? (
+        <SceneTextureAtlas
+          parts={props.parts.map((p) => ({ id: p.id, mesh: p.mesh }))}
+          texels={tex.texels}
+          type={tex.type}
+          color={tex.color}
+          imageUrl={tex.imageUrl}
+          sliceImages={tex.sliceImages}
+          sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}`}
+        />
+      ) : null}
+
+      <Row style={{ position: 'absolute', left: 12, top: 12, gap: 8, alignItems: 'center' }}>
+        <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#0b1320dd', borderWidth: 1, borderColor: '#27364a' }}>
+          <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
+            {props.partCount === 0 ? 'STUDIO · empty grid · + add a mesh' : `STUDIO · ${props.partCount} part${props.partCount === 1 ? '' : 's'} · ${props.activeName ?? '—'}`}
+          </Text>
+        </Box>
+        {/* SCALE GHOST (req_1165): stand the player beside the model for scale. */}
+        <Pressable
+          onPress={() => setShowScale((v) => !v)}
+          style={{ ...STEP_BTN, backgroundColor: showScale ? '#1c3a2a' : '#0b1320dd', borderColor: showScale ? '#2f7a4f' : '#27364a' }}
+        >
+          <Text fontSize={10} color={showScale ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>
+            {showScale ? `scale · player ${HMSC_SCALE.playerCapsuleHeightMeters.toFixed(2)} m` : '☖ scale'}
+          </Text>
+        </Pressable>
+      </Row>
+
+      {/* Diagnostics toolbar (req_0981): the FRAMES readout folded into ONE thin
+          top-right strip with the smooth/log/fps levers — debug aids kept
+          reachable (re-arm in one tap) but demoted out of the working area. */}
+      <Row style={{ position: 'absolute', right: 12, top: 12, gap: 6, alignItems: 'center' }}>
+        {diagOn ? <FrameDiagBar logToTerminal={logOn} /> : null}
+        <Pressable onPress={cycleSmooth} style={STEP_BTN}><Text fontSize={9} color={T.text}>smooth: {smooth === 0 ? 'direct' : `${smooth}/s`}</Text></Pressable>
+        <Pressable onPress={() => setLogOn((v) => !v)} style={{ ...STEP_BTN, backgroundColor: logOn ? '#1c3a2a' : '#13233aee', borderColor: logOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={logOn ? '#7fd6a0' : T.dim}>log cam</Text></Pressable>
+        <Pressable onPress={() => setDiagOn((v) => !v)} style={{ ...STEP_BTN, backgroundColor: diagOn ? '#1c3a2a' : '#13233aee', borderColor: diagOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={diagOn ? '#7fd6a0' : T.dim}>fps</Text></Pressable>
+      </Row>
+
+      {activePart && activeMesh && selMode !== 'object' && selMode !== 'rig'
+        ? <SelectionOverlay
+            mesh={activeMesh}
+            partLift={activePart.lift}
+            mode={selMode}
+            /* While the loop-cut preview is live the selected face index no longer
+               maps onto the freshly-cut mesh, so highlighting it would jump to a
+               random face. Show the cut wireframe with NO stale highlight. */
+            selection={lc ? emptySelection() : sel}
+            camSnap={camSnap}
+          />
+        : null}
+
+      {/* The transform gizmo — drawn AFTER the selection overlay (last 2D children
+          over the Scene3D), so the arrows are NEVER hidden by geometry (USER).
+          Hidden while the loop-cut popup is open (the cut preview owns the view). */}
+      {gizmoAnchorWorld && !lc && !autoFix
+        ? <TransformGizmo anchorW={gizmoAnchorWorld} tool={gizmoTool} camSnap={camSnap} activeAxis={activeGizmo} />
+        : null}
+
+      {/* Loop-cut SLIDE gizmo (req_1022): drag the cut-axis arrow ON the model to
+          move the cut; the cut axis is the live handle, drawn at the cut plane. */}
+      {lc && lcGizmoAnchor
+        ? <TransformGizmo anchorW={lcGizmoAnchor} tool="move" camSnap={camSnap} activeAxis={lcDragAxis} />
+        : null}
+
+      {/* Rig overlay (req_1025): the pivot ball + joint markers (axis arrow + the
+          type·travel label). The selected handle gets the move gizmo, reused. */}
+      {rig
+        ? <RigOverlay pivotW={rig.pivot} joints={rig.joints} sel={rigSel} camSnap={camSnap} />
+        : null}
+      {rigAnchorWorld
+        ? <TransformGizmo anchorW={rigAnchorWorld} tool="move" camSnap={camSnap} activeAxis={rigDragAxis} />
+        : null}
+
+      {/* Live drag readout (req_1024): floats by the gizmo anchor while dragging so
+          the step amount can be read off and mirrored on the other side. */}
+      {gizmoReadout ? (() => {
+        const anchor = lc ? lcGizmoAnchor : selMode === 'rig' ? rigAnchorWorld : gizmoAnchorWorld;
+        if (!anchor) return null;
+        const p = makeProjector(camSnap())(anchor);
+        if (!p.front) return null;
+        return (
+          <Box style={{ position: 'absolute', left: p.x + 14, top: p.y - 34, paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#5b8fd6' }}>
+            <Text fontSize={11} color="#cfe2ff" style={{ fontFamily: 'monospace', fontWeight: '800' }}>{gizmoReadout}</Text>
+          </Box>
+        );
+      })() : null}
+
+      {/* Element-mode toolbar (persistent toggle — Blockbench-style, req_0970) +
+          the move/resize tool toggle (req_0983), shown once an element mode is on. */}
+      <Row style={{ position: 'absolute', left: 0, right: 0, top: 12, gap: 4, alignItems: 'center', justifyContent: 'center' }}>
+        {(['object', 'vertex', 'edge', 'face', 'rig'] as SelMode[]).map((m) => {
+          const on = selMode === m;
+          const n = selectionCount(sel, m);
+          const disabled = m !== 'object' && !activePart;
+          return (
+            <Pressable key={m} onPress={() => { if (!disabled) setSelMode(m); }} style={{ ...STEP_BTN, opacity: disabled ? 0.4 : 1, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
+              <Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{m}{on && n > 0 ? ` ·${n}` : ''}</Text>
+            </Pressable>
+          );
+        })}
+        {/* RIG mode: add a joint, or opt the part into a pivot (req_1054 — pivots
+            are opt-in; a body is joints-only). The gizmo on the selected handle
+            does the placing — no move/resize toggle. */}
+        {selMode === 'rig' && activePart ? (
+          <>
+            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+            {!hasPivot(activePart.mesh) ? (
+              <Pressable
+                onPress={() => {
+                  const at = pivotOf(activePart.mesh); // lands at the bounds center; drag it onto the spin center
+                  props.onEditMesh(activePart.id, setPivot(activePart.mesh, [at[0], at[1], at[2]]));
+                  setRigSel({ kind: 'pivot' });
+                }}
+                style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#a8632c' }}
+              >
+                <Text fontSize={10} color="#ffb37d" style={{ fontFamily: 'monospace' }}>+ pivot</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={() => {
+                const name = nextJointName(activePart.mesh);
+                const at = pivotOf(activePart.mesh); // lands at the bounds center; drag it to the armpit/axle
+                props.onEditMesh(activePart.id, addMount(activePart.mesh, { name, kind: 'socket', position: [at[0], at[1], at[2]], axis: [0, 1, 0], limit: { min: -90, max: 90 } }));
+                setRigSel({ kind: 'joint', name });
+              }}
+              style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
+            >
+              <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>+ joint</Text>
+            </Pressable>
+            <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#0b1320cc', borderWidth: 1, borderColor: '#27364a' }}>
+              <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{rigSel ? (rigSel.kind === 'pivot' ? 'pivot selected' : `joint: ${rigSel.name}`) : 'pick a handle, or + above'}</Text>
+            </Box>
+          </>
+        ) : null}
+        {selMode !== 'rig' ? (
+          <>
+            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+            {(['move', 'resize', 'rotate'] as GizmoTool[]).map((tl) => {
+              const on = gizmoTool === tl;
+              return (
+                <Pressable key={tl} onPress={() => setGizmoTool(tl)} style={{ ...STEP_BTN, backgroundColor: on ? '#3a2f5e' : '#13233aee', borderColor: on ? '#9b7fd6' : '#2c4a6a' }}>
+                  <Text fontSize={10} color={on ? '#e0d4ff' : T.dim} style={{ fontFamily: 'monospace' }}>{tl}</Text>
+                </Pressable>
+              );
+            })}
+            {/* face-only edit ops: extrude + loop cut (a single selected face). */}
+            {selMode === 'face' && activePart && sel.faces.size === 1 ? (
+              <>
+                <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+                {/* extrude — commits a thin lip; the move gizmo then pulls it in/out
+                    (req_1015). The cap stays at the same index so it stays selected. */}
+                <Pressable
+                  onPress={() => {
+                    const faceIndex = [...sel.faces][0];
+                    const extruded = extrudeFace(activePart.mesh, faceIndex, STUDIO.extrudeMeters);
+                    props.onEditMesh(activePart.id, splitConcaveFaces(extruded));
+                    setGizmoTool('move'); // ready to drag the new cap in/out
+                  }}
+                  style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
+                >
+                  <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>extrude</Text>
+                </Pressable>
+                {/* loop cut — a face click + this opens the cut popup (req_0984/0985) */}
+                <Pressable
+                  onPress={() => {
+                    const faceIndex = [...sel.faces][0];
+                    const info = loopCutAxisInfo(activePart.mesh, faceIndex, 0);
+                    if (!info) return;
+                    setLc({ faceIndex, dir: 0, cuts: 1, offset: Math.round(info.sizeUnits / 2), unit: 'units' });
+                  }}
+                  style={{ ...STEP_BTN, backgroundColor: lc ? '#1c3a2a' : '#13233aee', borderColor: lc ? '#2f7a4f' : '#2c4a6a' }}
+                >
+                  <Text fontSize={10} color={lc ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>loop cut</Text>
+                </Pressable>
+              </>
+            ) : null}
+            {/* edge-only edit op: extrude (a single selected edge). Mirrors the
+                face extrude — pulls a new edge off + bridges with a quad, then the
+                move gizmo shapes it. Selection follows the NEW edge (req_1163). */}
+            {selMode === 'edge' && activePart && sel.edges.size === 1 ? (
+              <>
+                <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+                <Pressable
+                  onPress={() => {
+                    const mesh = activePart.mesh;
+                    const edge = meshEdges(mesh)[[...sel.edges][0]];
+                    if (!edge) return;
+                    const before = mesh.verts.length; // the new edge's two verts land here
+                    const out = extrudeEdge(mesh, edge, STUDIO.extrudeMeters);
+                    if (out === mesh) return;
+                    props.onEditMesh(activePart.id, out);
+                    // re-find the offset edge (before, before+1) so it stays selected.
+                    const ni = meshEdges(out).findIndex((e) => e[0] === before && e[1] === before + 1);
+                    setSel(ni >= 0 ? { verts: new Set(), edges: new Set([ni]), faces: new Set() } : emptySelection());
+                    setGizmoTool('move'); // ready to drag the new edge in/out
+                  }}
+                  style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
+                >
+                  <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>extrude</Text>
+                </Pressable>
+              </>
+            ) : null}
+            {/* create face (req_1059, req_1164): in EDGE mode, ANY ≥2 selected edges
+                — a closed loop fills as one n-gon, two chains loft a bridging strip
+                (a 4-edge side to a 2-edge side); in VERTEX mode, 3–4 verts → tri/quad. */}
+            {activePart && ((selMode === 'edge' && sel.edges.size >= 2) || (selMode === 'vertex' && (sel.verts.size === 3 || sel.verts.size === 4))) ? (
+              <Pressable
+                onPress={() => {
+                  const mesh = activePart.mesh;
+                  let out: EditMesh | null = null;
+                  if (selMode === 'edge') {
+                    const E = meshEdges(mesh);
+                    const edges = [...sel.edges].map((i) => E[i]).filter(Boolean);
+                    out = createFaceFromEdges(mesh, edges);
+                  } else {
+                    out = createFaceFromVerts(mesh, sel.verts);
+                  }
+                  if (out && out !== mesh) { props.onEditMesh(activePart.id, out); setSel(emptySelection()); }
+                }}
+                style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
+              >
+                <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>create face</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
+        {/* TEXTURE (req_1068): the GLOBAL "textureize" — takes the whole scene and
+            builds one packed sprite-map atlas via the Create Texture dialog (the
+            Blockbench flow). The toggle flips between the textured atlas and solid
+            once a texture exists. Painting the islands is the deferred next step. */}
+        {props.parts.length > 0 ? (
+          <>
+            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+            <Pressable
+              onPress={() => setTexDialog(true)}
+              style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c6a4a' }}
+            >
+              <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>textureize</Text>
+            </Pressable>
+            {/* COMPILE (req_1122, Part 7): cook this model into a typed, installed
+                game asset (prop first). Choose the kind → fill its descriptor →
+                validate → cook → it lands in the kind's catalog. */}
+            <Pressable
+              onPress={() => setCompileOpen(true)}
+              style={{ ...STEP_BTN, backgroundColor: '#16132aee', borderColor: '#8a6f3a' }}
+            >
+              <Text fontSize={10} color="#e9c77f" style={{ fontFamily: 'monospace' }}>⚙ compile</Text>
+            </Pressable>
+            {tex ? (
+              <>
+                <Pressable
+                  onPress={() => setTexView((v) => !v)}
+                  style={{ ...STEP_BTN, backgroundColor: texView ? '#1c3a2a' : '#13233aee', borderColor: texView ? '#2f7a4f' : '#2c4a6a' }}
+                >
+                  <Text fontSize={10} color={texView ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>{texView ? 'textured' : 'solid'}</Text>
+                </Pressable>
+                {/* export PNG (req_1072): the whole sprite sheet, or ONE slice (the
+                    selected face's island) — to cart/hmsc-int/exports/<name>.png. */}
+                <Pressable onPress={() => exportSprite()} style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
+                  <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>export sheet</Text>
+                </Pressable>
+                {/* re-upload PNG (req_1079): the edited/AI-generated sheet slips back
+                    onto the model (cookie-cutter via the UVs), or one face's slice. */}
+                <Pressable onPress={() => setImportTex({})} style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#3a2c6a' }}>
+                  <Text fontSize={10} color="#b9a8e9" style={{ fontFamily: 'monospace' }}>import sheet</Text>
+                </Pressable>
+                {/* AI fill (req_1070/1110): generate the whole sheet via image-to-image
+                    (the current atlas is the reference) — no leaving the app. */}
+                <Pressable onPress={() => setAiTex({})} style={{ ...STEP_BTN, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
+                  <Text fontSize={10} color="#cdbcff" style={{ fontFamily: 'monospace' }}>✦ ai fill</Text>
+                </Pressable>
+                {selMode === 'face' && activePart && sel.faces.size === 1 ? (
+                  <>
+                    <Pressable onPress={() => exportSprite({ partId: activePart.id, faceIndex: [...sel.faces][0] })} style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
+                      <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>export slice</Text>
+                    </Pressable>
+                    <Pressable onPress={() => setImportTex({ slice: { partId: activePart.id, faceIndex: [...sel.faces][0] } })} style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#3a2c6a' }}>
+                      <Text fontSize={10} color="#b9a8e9" style={{ fontFamily: 'monospace' }}>import slice</Text>
+                    </Pressable>
+                    <Pressable onPress={() => setAiTex({ slice: { partId: activePart.id, faceIndex: [...sel.faces][0] } })} style={{ ...STEP_BTN, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
+                      <Text fontSize={10} color="#cdbcff" style={{ fontFamily: 'monospace' }}>✦ ai fill slice</Text>
+                    </Pressable>
+                  </>
+                ) : null}
+              </>
+            ) : null}
+          </>
+        ) : null}
+      </Row>
+
+      {/* export confirmation toast (req_1072) */}
+      {exportMsg ? (
+        <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 54, alignItems: 'center' }}>
+          <Box style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#2f7a4f' }}>
+            <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>{exportMsg}</Text>
+          </Box>
+        </Box>
+      ) : null}
+
+      <ViewCompass lookRef={lookRef} onFace={faceAxis} />
+
+      {/* The selected joint's METADATA (name/type/axis/limit) is edited in workspace
+          column 3 (RigMetaPanel, req_1053) — the viewport just places it. */}
+
+      {/* Camera framing controls (fov + reframe) — kept bottom-right. */}
+      <Col style={{ position: 'absolute', right: 12, bottom: 12, gap: 6, alignItems: 'flex-end' }}>
+        <Row style={{ gap: 4, alignItems: 'center' }}>
+          <Pressable onPress={() => setFov(fovRef.current - 2)} style={STEP_BTN}><Text fontSize={13} color={T.text}>−</Text></Pressable>
+          <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 5, backgroundColor: '#0b1320dd', borderWidth: 1, borderColor: '#27364a' }}>
+            <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>fov {Math.round(fovRef.current)}</Text>
+          </Box>
+          <Pressable onPress={() => setFov(fovRef.current + 2)} style={STEP_BTN}><Text fontSize={13} color={T.text}>+</Text></Pressable>
+        </Row>
+        <Pressable onPress={reframe} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}>
+          <Text fontSize={10} color={T.text}>reframe (F)</Text>
+        </Pressable>
+      </Col>
+
+      {lc && lcAxisInfo ? (
+        <LoopCutPopup
+          dir={lc.dir}
+          cuts={lc.cuts}
+          offset={lc.offset}
+          unit={lc.unit}
+          sizeUnits={lcAxisInfo.sizeUnits}
+          onChange={(patch) => setLc((s) => {
+            if (!s) return s;
+            const next = { ...s, ...patch };
+            // Changing the cut axis (direction) RE-CENTERS the offset on the NEW
+            // axis. The face's extent differs per axis — after N cuts on axis A
+            // the face is narrow on A but still full on B — so carrying the old
+            // offset across mis-places the FIRST cut on the fresh axis as if it
+            // continued A's sequence (the "5th slice on a new face" bug, req_1010).
+            if (patch.dir !== undefined && patch.dir !== s.dir && activePart) {
+              const info = loopCutAxisInfo(activePart.mesh, s.faceIndex, patch.dir);
+              if (info) next.offset = next.unit === 'percent' ? 50 : Math.round(info.sizeUnits / 2);
+            }
+            return next;
+          })}
+          onApply={() => closeLoopCut(true)}
+          onCancel={() => closeLoopCut(false)}
+        />
+      ) : null}
+
+      {autoFix ? <ConcaveFixPopup count={autoFix.count} onResolve={resolveAutoFix} /> : null}
+
+      {/* Create Texture (req_1068): the global textureize dialog. Confirm packs the
+          whole scene into one sprite-map atlas, rewrites every part's UVs (a BRANCH
+          edit each), records the atlas params, and shows the texture. */}
+      {texDialog ? (
+        <CreateTextureDialog
+          onCancel={() => setTexDialog(false)}
+          onConfirm={(o) => {
+            const result = textureizeScene(props.parts.map((p) => p.mesh), o, STUDIO.unitsPerTile);
+            result.meshes.forEach((mesh, i) => { if (mesh !== props.parts[i].mesh) props.onEditMesh(props.parts[i].id, mesh); });
+            setTex({ texels: result.texels, type: o.type, color: o.color, name: o.name || 'texture' });
+            setTexView(true);
+            setTexDialog(false);
+          }}
+        />
+      ) : null}
+
+      {/* Compile Asset (req_1122, Part 7): choose the kind, fill its descriptor,
+          validate, cook → install into the content store. Prop kind first; the
+          texture factor (compressed WebP) folds in with the bake/rebuild slice, so
+          a v1 prop cooks untextured (it still carries its per-face UVs). */}
+      {compileOpen ? (
+        <CompileAssetDialog
+          sceneName={props.sceneName}
+          onCancel={() => setCompileOpen(false)}
+          onCook={(descriptor) => {
+            const base = (props.sceneName || 'asset').replace(/[^a-z0-9_-]+/gi, '_').toLowerCase();
+            const result = cookProp({ id: `studio.${base}`, name: props.sceneName || 'Asset', parts: props.parts, descriptor });
+            if (result.errors.length > 0) { toast(`can't compile: ${result.errors[0]}`); return; }
+            cooked.install(result);
+            const d = result.asset.descriptor;
+            const nature = d.dynamics ? `kickable r${d.dynamics.bodyRadiusMeters.toFixed(2)} b${d.dynamics.restitution.toFixed(2)}` : (d.solid ? 'static' : 'foliage');
+            toast(`compiled ${result.asset.name} → prop · ${nature}  ${d.footprintWidthMeters.toFixed(1)}×${d.footprintDepthMeters.toFixed(1)}×${d.heightMeters.toFixed(1)}m`);
+            setCompileOpen(false);
+          }}
+        />
+      ) : null}
+
+      {/* Import Texture (req_1079): re-upload an edited / AI-generated PNG. The
+          default path is this scene's export, so the round-trip is one click. */}
+      {importTex ? (
+        <ImportTextureDialog
+          slice={importTex.slice}
+          defaultPath={`cart/hmsc-int/exports/${(props.sceneName || tex?.name || 'texture').replace(/[^a-z0-9_-]+/gi, '_')}${importTex.slice ? `_face${importTex.slice.faceIndex}` : ''}.png`}
+          onCancel={() => setImportTex(null)}
+          onConfirm={(path) => importTexture(path, importTex.slice)}
+        />
+      ) : null}
+
+      {/* AI Fill (req_1070/1110, Phase 5d): automated image-to-image. Generate the
+          whole sheet or one island via the nano-gpt image client, the current atlas as
+          the img2img reference; optional prompt enhancement (nano-gpt text OR Claude). */}
+      {aiTex ? (
+        <AiTextureDialog
+          slice={aiTex.slice}
+          target={aiTex.slice ? `${props.activeName ?? 'part'} face ${aiTex.slice.faceIndex}` : (props.sceneName || tex?.name || 'texture')}
+          getReference={() => referenceB64(aiTex.slice)}
+          onCancel={() => setAiTex(null)}
+          onGenerated={(b64) => {
+            applyTextureImage(texSource(b64), aiTex.slice);
+            setAiTex(null);
+            toast(`AI filled ${aiTex.slice ? `face ${aiTex.slice.faceIndex}` : 'the sheet'}`);
+          }}
+        />
+      ) : null}
+    </Pressable>
+  );
+}
+
+// The concave Auto-Fix alert (req_0949/req_1016): an edit buckled a quad into a
+// non-convex (reflex-corner) face. The mesh is NOT silently triangulated — this
+// LOUD dialog (the buckled face still previewed behind it) makes the user choose:
+// Split Quads (the recommended fix) / Ignore (commit it concave) / Revert (drop it).
+function ConcaveFixPopup(props: { count: number; onResolve: (a: 'split' | 'ignore' | 'revert') => void }) {
+  return (
+    <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 18, alignItems: 'center' }}>
+      <Col style={{ gap: 8, paddingLeft: 14, paddingRight: 14, paddingTop: 11, paddingBottom: 11, borderRadius: 9, backgroundColor: '#1a1206f2', borderWidth: 1, borderColor: '#a86a2c', minWidth: 280 }}>
+        <Row style={{ gap: 8, alignItems: 'center' }}>
+          <Text fontSize={12} color="#ffb454" style={{ fontWeight: '800' }}>⚠ Concave face</Text>
+          <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
+            {`${props.count} face${props.count === 1 ? '' : 's'} buckled — not convex`}
+          </Text>
+        </Row>
+        <Row style={{ gap: 6 }}>
+          <Pressable onPress={() => props.onResolve('split')} style={{ flexGrow: 1, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}>
+            <Text fontSize={11} color="#7fd6a0" style={{ fontWeight: '800' }}>Split Quads</Text>
+          </Pressable>
+          <Pressable onPress={() => props.onResolve('ignore')} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}>
+            <Text fontSize={11} color={T.dim}>Ignore</Text>
+          </Pressable>
+          <Pressable onPress={() => props.onResolve('revert')} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#3a1c1c', borderWidth: 1, borderColor: '#7a2f2f' }}>
+            <Text fontSize={11} color="#e08a8a">Revert</Text>
+          </Pressable>
+        </Row>
+        <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>Split Quads is recommended — keeps the surface valid.</Text>
+      </Col>
+    </Box>
+  );
+}
+
+function StatCell(props: { label: string; value: string; warn?: boolean }) {
+  return (
+    <Row style={{ gap: 3, alignItems: 'baseline' }}>
+      <Text fontSize={8} color={T.dim} style={{ fontFamily: 'monospace' }}>{props.label}</Text>
+      <Text fontSize={9} color={props.warn ? '#ffb454' : T.text} style={{ fontFamily: 'monospace', fontWeight: '800' }}>{props.value}</Text>
+    </Row>
+  );
+}
+
+// ── View-orientation compass (the navigation gizmo — req_0969, playbook 4b#1) ──
+// A corner widget that always shows the camera's orientation (the ±X/Y/Z axis
+// ends projected through the live view basis) and snaps the view to face an axis
+// when you click its ball. A 2D projection of the camera basis for now (hot-
+// reload); it graduates to the host screen-stable overlay with the gizmo/grid.
+
+const DEG = Math.PI / 180;
+type V3 = [number, number, number];
+const dot3 = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm3 = (a: V3): V3 => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+
+const COMPASS = { size: 78, radius: 25, posR: 9, negR: 6 } as const;
+// the 6 axis ends. faceYaw/facePitch = orbit angles that look ALONG this axis
+// (camera on that side, looking at the origin). NaN yaw = a pole → keep current
+// yaw. Convention from camera.zig orbitalEye: yaw=atan2(-ox,-oz), pitch=asin(oy).
+const COMPASS_AXES: { key: string; dir: V3; color: string; label: string; pos: boolean; faceYaw: number; facePitch: number }[] = [
+  { key: '+x', dir: [1, 0, 0], color: '#e0584e', label: 'X', pos: true, faceYaw: -90, facePitch: 0 },
+  { key: '-x', dir: [-1, 0, 0], color: '#e0584e', label: '', pos: false, faceYaw: 90, facePitch: 0 },
+  { key: '+y', dir: [0, 1, 0], color: '#5ec26a', label: 'Y', pos: true, faceYaw: NaN, facePitch: 89.9 },
+  { key: '-y', dir: [0, -1, 0], color: '#5ec26a', label: '', pos: false, faceYaw: NaN, facePitch: -89.9 },
+  { key: '+z', dir: [0, 0, 1], color: '#4aa3ff', label: 'Z', pos: true, faceYaw: 180, facePitch: 0 },
+  { key: '-z', dir: [0, 0, -1], color: '#4aa3ff', label: '', pos: false, faceYaw: 0, facePitch: 0 },
+];
+
+function ViewCompass(props: { lookRef: { current: { yaw: number; pitch: number } }; onFace: (yaw: number, pitch: number) => void }) {
+  // Self-tick to mirror the camera live (the spin is host/ref-driven, so the
+  // parent doesn't re-render). Isolated → never touches the Scene3D tree.
+  const repaint = useRerender();
+  useInterval(repaint, 33);
+
+  const { yaw, pitch } = props.lookRef.current;
+  const yr = yaw * DEG, pr = pitch * DEG;
+  // forward = -eye_offset (camera.zig orbitalEye); right/up complete the basis.
+  const F: V3 = [Math.sin(yr) * Math.cos(pr), -Math.sin(pr), Math.cos(yr) * Math.cos(pr)];
+  const R = norm3(cross3(F, [0, 1, 0]));
+  const U = cross3(R, F);
+  const c = COMPASS.size / 2;
+  const ends = COMPASS_AXES.map((ax) => {
+    const sx = dot3(ax.dir, R), sy = dot3(ax.dir, U), depth = dot3(ax.dir, F);
+    return { ax, px: c + sx * COMPASS.radius, py: c - sy * COMPASS.radius, depth };
+  }).sort((a, b) => b.depth - a.depth); // far first → near drawn on top
+
+  return (
+    <Box style={{ position: 'absolute', left: 14, bottom: 14, width: COMPASS.size, height: COMPASS.size, borderRadius: COMPASS.size / 2, backgroundColor: '#0b1320bb', borderWidth: 1, borderColor: '#27364a' }}>
+      {ends.filter((e) => e.ax.pos).map((e) => {
+        const dx = e.px - c, dy = e.py - c;
+        const len = Math.hypot(dx, dy) || 0.001;
+        const angle = Math.atan2(dy, dx) / DEG;
+        return <Box key={`l${e.ax.key}`} style={{ position: 'absolute', left: (c + e.px) / 2 - len / 2, top: (c + e.py) / 2 - 1, width: len, height: 2, borderRadius: 1, backgroundColor: e.ax.color, opacity: 0.65, transform: { rotate: angle } }} />;
+      })}
+      <Box style={{ position: 'absolute', left: c - 3, top: c - 3, width: 6, height: 6, borderRadius: 3, backgroundColor: '#d98a4a' }} />
+      {ends.map((e) => {
+        const r = e.ax.pos ? COMPASS.posR : COMPASS.negR;
+        return (
+          <Pressable key={e.ax.key} onPress={() => props.onFace(e.ax.faceYaw, e.ax.facePitch)} tooltip={`face ${e.ax.key}`} style={{ position: 'absolute', left: e.px - r, top: e.py - r, width: r * 2, height: r * 2 }}>
+            <Box style={{ width: r * 2, height: r * 2, borderRadius: r, alignItems: 'center', justifyContent: 'center', backgroundColor: e.ax.pos ? e.ax.color : '#0b1320', borderWidth: e.ax.pos ? 0 : 2, borderColor: e.ax.color, opacity: e.ax.pos ? 1 : 0.62 }}>
+              {e.ax.label ? <Text fontSize={9} color="#08101c" style={{ fontWeight: '800', fontFamily: 'monospace' }}>{e.ax.label}</Text> : null}
+            </Box>
+          </Pressable>
+        );
+      })}
+    </Box>
+  );
+}
+
+// Isolated so its 5 Hz probe re-renders never touch the Scene3D tree. Now a THIN
+// horizontal strip (req_0981) — the key frame stats inline (fps · frame/worst ms
+// · skips · gc · present) so the readout sits in the top-right toolbar beside the
+// smooth/log/fps levers rather than as a tall corner box. The once-per-second
+// [studio-frames] terminal warn stays gated behind `logToTerminal` (the 'log cam'
+// toggle), default OFF so the dev terminal stays silent until re-armed.
+function FrameDiagBar(props: { logToTerminal: boolean }) {
+  const [resetSeq, setResetSeq] = useState(0);
+  const diag = useFrameProbe({ active: true, pollMs: 200, resetSeq, logToTerminal: props.logToTerminal });
+  return (
+    <Row style={{ gap: 8, alignItems: 'center', paddingLeft: 9, paddingRight: 6, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320e8', borderWidth: 1, borderColor: '#27364a' }}>
+      <Text fontSize={8} color={T.text} style={{ fontFamily: 'monospace', fontWeight: '800' }}>FRAMES</Text>
+      {diag.live ? (
+        <>
+          <StatCell label="fps" value={`${diag.fps.toFixed(0)}`} warn={diag.fps > 0 && diag.fps < 50} />
+          <StatCell label="ms" value={`${diag.medianMs.toFixed(1)}/${diag.worstMs.toFixed(1)}`} warn={diag.worstMs > diag.medianMs * 2 + 1} />
+          <StatCell label="skip" value={`${diag.peakSkips}`} warn={diag.peakSkips > 0} />
+          <StatCell label="gc" value={`${diag.gcMs.toFixed(1)}`} warn={diag.gcMs > 1} />
+          <StatCell label="pres" value={`${diag.presentMs.toFixed(1)}`} warn={diag.presentMs > diag.medianMs + 2} />
+        </>
+      ) : (
+        <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>no telemetry…</Text>
+      )}
+      <Pressable onPress={() => setResetSeq((n) => n + 1)} style={STEP_BTN}><Text fontSize={8} color={T.dim}>↺</Text></Pressable>
+    </Row>
+  );
+}
+
+// ── Add-mesh dialog (req_0972/0973) ───────────────────────────────────────────
+// The first shape is a cube; pick its diameter (= width = depth) and height in
+// MODELING UNITS (Blockbench-style: 16 units = 1 tile = 1 m, the same basis
+// per-face UV/texels use), then confirm. Default 16 fills exactly the center
+// tile's 16×16 grid. This changes nothing about the grid — the grid IS the ruler
+// these units read against (USER req_0973).
+
+function NumberField(props: { label: string; value: number; onChange: (n: number) => void; min: number; max: number; step: number; snap: number; suffix?: string }) {
+  const set = (n: number) => props.onChange(clamp(Math.round(n / props.snap) * props.snap, props.min, props.max));
+  return (
+    <Row style={{ gap: 8, alignItems: 'center' }}>
+      <Text fontSize={11} color={T.dim} style={{ width: 64, fontFamily: 'monospace' }}>{props.label}</Text>
+      <Pressable onPress={() => set(props.value - props.step)} style={STEP_BTN}><Text fontSize={13} color={T.text}>−</Text></Pressable>
+      <Box style={{ width: 66 }}>
+        <TextInput
+          value={String(props.value)}
+          onChangeText={(t: string) => { const n = parseFloat(t); if (Number.isFinite(n)) set(n); }}
+          style={{ height: 24, fontSize: 12, color: T.ink, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, textAlign: 'center', fontFamily: 'monospace' }}
+        />
+      </Box>
+      <Pressable onPress={() => set(props.value + props.step)} style={STEP_BTN}><Text fontSize={13} color={T.text}>+</Text></Pressable>
+      {props.suffix ? <Text fontSize={10} color={T.dim}>{props.suffix}</Text> : null}
+    </Row>
+  );
+}
+
+// The "Add" dialog (req_1056): pick a SHAPE beyond the cube, set its Blockbench
+// params — diameter (= width = depth) + height, plus a "sides" count (3..48) for
+// the round shapes — and confirm. Builds the topological EditMesh so the new part
+// is fully editable (loop cut / extrude / rig), unlike the render-only geometry
+// registry. cuboid/cylinder/cone/pyramid/plane share the 16-units basis.
+type ShapeKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane';
+const SHAPE_KINDS: { kind: ShapeKind; label: string }[] = [
+  { kind: 'cube', label: 'Cube' }, { kind: 'cylinder', label: 'Cylinder' }, { kind: 'cone', label: 'Cone' },
+  { kind: 'pyramid', label: 'Pyramid' }, { kind: 'plane', label: 'Plane' },
+];
+
+function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: EditMesh, name: string) => void }) {
+  const u = STUDIO.unitsPerTile;
+  const [shape, setShape] = useState<ShapeKind>('cube');
+  const [dia, setDia] = useState(u);   // default 16 u = one tile
+  const [hgt, setHgt] = useState(u);
+  const [sides, setSides] = useState(16);
+  const hasHeight = shape !== 'plane';
+  const hasSides = shape === 'cylinder' || shape === 'cone';
+  const fmtTiles = (units: number) => `${(units / u).toFixed(2)} tile`;
+  const meta = SHAPE_KINDS.find((s) => s.kind === shape)!;
+  const build = (): EditMesh => {
+    const d = unitsToMeters(dia), h = unitsToMeters(hgt), r = unitsToMeters(dia) / 2;
+    switch (shape) {
+      case 'cylinder': return cylinder(r, h, sides);
+      case 'cone': return cone(r, h, sides);
+      case 'pyramid': return pyramid(d, h, d);
+      case 'plane': return plane(d, d);
+      default: return cuboid(d, h, d);
+    }
+  };
+  return (
+    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa' }}>
+      <Col style={{ width: 360, gap: 11, padding: 16, borderRadius: 10, backgroundColor: T.panelSolid, borderWidth: 1, borderColor: '#2c4a6a' }}>
+        <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>Add Shape</Text>
+        <Row style={{ gap: 5, flexWrap: 'wrap' }}>
+          {SHAPE_KINDS.map((s) => {
+            const on = shape === s.kind;
+            return <Pressable key={s.kind} onPress={() => setShape(s.kind)} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderWidth: 1, borderColor: on ? '#5b8fd6' : '#2c4a6a' }}><Text fontSize={11} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{s.label}</Text></Pressable>;
+          })}
+        </Row>
+        <Text fontSize={10} color={T.dim}>{`Units: ${u} = 1 tile (1 m). Same basis as per-face UV. The grid is unchanged.`}</Text>
+        <NumberField label="diameter" value={dia} onChange={setDia} min={1} max={u * STUDIO.gridTiles} step={1} snap={0.5} suffix="u" />
+        {hasHeight ? <NumberField label="height" value={hgt} onChange={setHgt} min={1} max={u * STUDIO.gridTiles * 2} step={1} snap={0.5} suffix="u" /> : null}
+        {hasSides ? <NumberField label="sides" value={sides} onChange={(n) => setSides(clampSides(n))} min={SHAPE_SIDES_MIN} max={SHAPE_SIDES_MAX} step={1} snap={1} /> : null}
+        <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
+          {shape === 'plane' ? `= ${fmtTiles(dia)} × ${fmtTiles(dia)} flat`
+            : `= ${fmtTiles(dia)} ∅ × ${fmtTiles(hgt)}${hasSides ? ` · ${clampSides(sides)} sides` : ''}`}
+        </Text>
+        <Row style={{ gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+          <Pressable onPress={props.onCancel} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}><Text fontSize={11} color={T.dim}>Cancel</Text></Pressable>
+          <Pressable onPress={() => props.onConfirm(build(), meta.label)} style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}><Text fontSize={11} color="#7fd6a0" style={{ fontWeight: '800' }}>Add</Text></Pressable>
+        </Row>
+      </Col>
+    </Box>
+  );
+}
+
+// ── Create Texture dialog (req_1068) ──────────────────────────────────────────
+// Blockbench's "Create Texture" popup, faithfully: Name · Type · Pixel Density ·
+// Color · Rearrange UV · Power-of-2 Size · Keep Multi Texture Occupancy · Combine
+// Islands · Edge/Island Angle Threshold · Padding. The questions ARE the pack
+// parameters (textureize.ts); Confirm packs the whole scene into one sprite-map
+// atlas. The fully-wired options today: Pixel Density, Rearrange UV, Power-of-2,
+// Padding; the island-merge ones (Combine + the thresholds) + Keep-Multi are
+// surfaced for parity and carried through (their effect is the Phase-2 merge step).
+
+const TEXTURE_TYPES: { type: TextureType; label: string }[] = [
+  { type: 'template', label: 'Texture Template' }, { type: 'solid', label: 'Solid Color' }, { type: 'blank', label: 'Blank' },
+];
+
+function TexCheck(props: { label: string; value: boolean; onChange: (v: boolean) => void; dim?: boolean }) {
+  return (
+    <Row style={{ gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+      <Text fontSize={11} color={props.dim ? T.dim : T.ink} style={{ fontFamily: 'monospace' }}>{props.label}</Text>
+      <Pressable onPress={() => props.onChange(!props.value)} style={{ width: 20, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: props.value ? '#1c3a2a' : '#13233aee', borderWidth: 1, borderColor: props.value ? '#2f7a4f' : '#2c4a6a' }}>
+        {props.value ? <Text fontSize={12} color="#7fd6a0">✓</Text> : null}
+      </Pressable>
+    </Row>
+  );
+}
+
+function CreateTextureDialog(props: { onCancel: () => void; onConfirm: (o: TextureOptions) => void }) {
+  const [o, setO] = useState<TextureOptions>(DEFAULT_TEXTURE_OPTIONS);
+  const set = (p: Partial<TextureOptions>) => setO((prev) => ({ ...prev, ...p }));
+  return (
+    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa' }}>
+      <Col style={{ width: 420, gap: 9, padding: 16, borderRadius: 10, backgroundColor: T.panelSolid, borderWidth: 1, borderColor: '#2c4a6a' }}>
+        <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>Create Texture</Text>
+
+        <LCField label="Name">
+          <Box style={{ flexGrow: 1 }}>
+            <TextInput value={o.name} onChangeText={(t: string) => set({ name: t })} style={{ height: 24, fontSize: 11, color: T.ink, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, fontFamily: 'monospace' }} />
+          </Box>
+        </LCField>
+
+        <LCField label="Type">
+          <Row style={{ gap: 5, flexWrap: 'wrap' }}>
+            {TEXTURE_TYPES.map((tt) => {
+              const on = o.type === tt.type;
+              return <Pressable key={tt.type} onPress={() => set({ type: tt.type })} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderWidth: 1, borderColor: on ? '#5b8fd6' : '#2c4a6a' }}><Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{tt.label}</Text></Pressable>;
+            })}
+          </Row>
+        </LCField>
+
+        <LCField label="Pixel Density">
+          <Row style={{ gap: 5 }}>
+            {PIXEL_DENSITIES.map((d) => {
+              const on = o.density === d;
+              return <Pressable key={d} onPress={() => set({ density: d })} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderWidth: 1, borderColor: on ? '#5b8fd6' : '#2c4a6a' }}><Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{`${d}x`}</Text></Pressable>;
+            })}
+          </Row>
+        </LCField>
+
+        {/* Color — only for the Solid Color type (dim otherwise, like Blockbench). */}
+        <LCField label="Color">
+          <Row style={{ gap: 6, alignItems: 'center' }}>
+            <Box style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: o.color, borderWidth: 1, borderColor: '#2c4a6a', opacity: o.type === 'solid' ? 1 : 0.4 }} />
+            <Box style={{ width: 92 }}>
+              <TextInput value={o.color} onChangeText={(t: string) => set({ color: t })} style={{ height: 22, fontSize: 11, color: o.type === 'solid' ? T.ink : T.dim, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, fontFamily: 'monospace' }} />
+            </Box>
+          </Row>
+        </LCField>
+
+        <Box style={{ height: 1, backgroundColor: '#22344c', marginTop: 2, marginBottom: 2 }} />
+
+        <TexCheck label="Rearrange UV" value={o.rearrangeUV} onChange={(v) => set({ rearrangeUV: v })} />
+        <TexCheck label="Power-of-2 Size" value={o.powerOfTwo} onChange={(v) => set({ powerOfTwo: v })} />
+        <TexCheck label="Keep Multi Texture Occupancy" value={o.keepOccupancy} onChange={(v) => set({ keepOccupancy: v })} />
+        <TexCheck label="Combine Islands" value={o.combineIslands} onChange={(v) => set({ combineIslands: v })} />
+        <LCField label="Edge Angle">
+          <LCStepper value={o.edgeAngle} onChange={(n) => set({ edgeAngle: n })} min={0} max={180} step={1} />
+        </LCField>
+        <LCField label="Island Angle">
+          <LCStepper value={o.islandAngle} onChange={(n) => set({ islandAngle: n })} min={0} max={180} step={1} />
+        </LCField>
+        <TexCheck label="Padding" value={o.padding} onChange={(v) => set({ padding: v })} />
+
+        <Row style={{ gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+          <Pressable onPress={props.onCancel} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}><Text fontSize={11} color={T.dim}>Cancel</Text></Pressable>
+          <Pressable onPress={() => props.onConfirm(o)} style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}><Text fontSize={11} color="#7fd6a0" style={{ fontWeight: '800' }}>Confirm</Text></Pressable>
+        </Row>
+      </Col>
+    </Box>
+  );
+}
+
+// ── Compile Asset dialog (req_1122, Part 7 — the asset compiler) ──────────────
+// Turn a Studio model into a typed game asset. The FIRST question is the KIND (the
+// asset's MEANING — the user's "first menu asks what the shape is becoming"); the
+// kind drives a kind-specific descriptor. Prop is live; the other kinds land in
+// Phase 7b–7d. The cook MEASURES footprint/height from the mesh (derive, don't
+// store twice), so the descriptor here is only the gameplay meaning.
+
+const COMPILE_KINDS: { kind: 'prop' | 'item' | 'vehiclePart' | 'clothing'; label: string; ready: boolean }[] = [
+  { kind: 'prop', label: 'Prop', ready: true },
+  { kind: 'item', label: 'Item', ready: false },
+  { kind: 'vehiclePart', label: 'Vehicle part', ready: false },
+  { kind: 'clothing', label: 'Clothing', ready: false },
+];
+
+// A prop's NATURE — the three real shapes in the prop stack (game/kinds/props.ts):
+//   • static  = a fixed obstacle: solid, points at the 'wall' donor (blocks sight,
+//               gives cover).
+//   • foliage = walk-through scenery: non-solid, points at 'bush' (conceals).
+//   • physics = a KICKABLE dynamic body (a barrel/can/ball — the KICKPROP system):
+//               solid, carries `dynamics` (a sphere body + bounce); the player
+//               kicks it around. The body radius is MEASURED at cook time.
+// This maps the user's mental model (static / hollow / physics) onto the table's
+// granular fields, instead of asking about solid + tileKind separately.
+type PropNature = 'static' | 'foliage' | 'physics';
+const COMPILE_NATURES: { nature: PropNature; label: string; hint: string }[] = [
+  { nature: 'static', label: 'Static', hint: 'fixed — blocks movement & sight, gives cover' },
+  { nature: 'foliage', label: 'Foliage', hint: 'walk-through — conceals you (a bush)' },
+  { nature: 'physics', label: 'Physics', hint: 'kickable body — you knock it around (a barrel/can/ball)' },
+];
+
+/** Map a nature + bounce → the granular PropDescriptorInput the cook fills. */
+function natureToDescriptor(nature: PropNature, label: string, bounce: number): PropDescriptorInput {
+  if (nature === 'foliage') return { label, solid: false, tileKind: 'bush' };
+  if (nature === 'physics') return { label, solid: true, tileKind: 'wall', physics: { restitution: bounce } };
+  return { label, solid: true, tileKind: 'wall' };
+}
+
+function CompileAssetDialog(props: { sceneName: string | null; onCancel: () => void; onCook: (d: PropDescriptorInput) => void }) {
+  const [kind, setKind] = useState<'prop' | 'item' | 'vehiclePart' | 'clothing'>('prop');
+  const [label, setLabel] = useState(props.sceneName || 'Asset');
+  const [nature, setNature] = useState<PropNature>('static');
+  // bounce (restitution) for a physics body — drum/can ~0.18, a ball ~0.65.
+  const [bounce, setBounce] = useState(0.3);
+  const ready = COMPILE_KINDS.find((k) => k.kind === kind)?.ready ?? false;
+  const natureHint = COMPILE_NATURES.find((n) => n.nature === nature)?.hint ?? '';
+  return (
+    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa' }}>
+      <Col style={{ width: 440, gap: 9, padding: 16, borderRadius: 10, backgroundColor: T.panelSolid, borderWidth: 1, borderColor: '#8a6f3a' }}>
+        <Text fontSize={13} color="#e9c77f" style={{ fontWeight: '800' }}>⚙ Compile Asset</Text>
+        <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`from "${props.sceneName || 'untitled'}" — geometry + footprint are measured from the mesh`}</Text>
+
+        {/* The KIND — the asset's meaning, asked first. */}
+        <LCField label="Kind">
+          <Row style={{ gap: 5, flexWrap: 'wrap' }}>
+            {COMPILE_KINDS.map((k) => {
+              const on = kind === k.kind;
+              return (
+                <Pressable key={k.kind} onPress={() => setKind(k.kind)} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: on ? '#3a2f16' : '#13233aee', borderWidth: 1, borderColor: on ? '#c79a3a' : '#2c4a6a', opacity: k.ready ? 1 : 0.55 }}>
+                  <Text fontSize={10} color={on ? '#e9c77f' : T.dim} style={{ fontFamily: 'monospace' }}>{k.ready ? k.label : `${k.label} (soon)`}</Text>
+                </Pressable>
+              );
+            })}
+          </Row>
+        </LCField>
+
+        {ready ? (
+          <>
+            <LCField label="Label">
+              <Box style={{ flexGrow: 1 }}>
+                <TextInput value={label} onChangeText={setLabel} style={{ height: 24, fontSize: 11, color: T.ink, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, fontFamily: 'monospace' }} />
+              </Box>
+            </LCField>
+            <LCField label="Nature">
+              <Row style={{ gap: 5, flexWrap: 'wrap' }}>
+                {COMPILE_NATURES.map((n) => {
+                  const on = nature === n.nature;
+                  return <Pressable key={n.nature} onPress={() => setNature(n.nature)} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderWidth: 1, borderColor: on ? '#5b8fd6' : '#2c4a6a' }}><Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{n.label}</Text></Pressable>;
+                })}
+              </Row>
+            </LCField>
+            <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace', marginTop: -3 }}>{natureHint}</Text>
+            {/* Physics bodies author the BOUNCE; the body radius is MEASURED from the
+                footprint at cook time (derive, don't store twice). */}
+            {nature === 'physics' ? (
+              <LCField label="Bounce">
+                <LCStepper value={bounce} onChange={(n) => setBounce(Math.max(0, Math.min(1, Math.round(n * 100) / 100)))} min={0} max={1} step={0.05} />
+              </LCField>
+            ) : null}
+          </>
+        ) : (
+          <Text fontSize={11} color={T.dim} style={{ fontFamily: 'monospace', paddingTop: 6, paddingBottom: 6 }}>This kind's cook lands in a later slice. Prop is ready now.</Text>
+        )}
+
+        <Row style={{ gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+          <Pressable onPress={props.onCancel} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}><Text fontSize={11} color={T.dim}>Cancel</Text></Pressable>
+          <Pressable
+            onPress={() => { if (ready) props.onCook(natureToDescriptor(nature, label, bounce)); }}
+            style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: ready ? '#3a2f16' : '#1a2436', borderWidth: 1, borderColor: ready ? '#c79a3a' : '#2c4a6a', opacity: ready ? 1 : 0.5 }}
+          >
+            <Text fontSize={11} color={ready ? '#e9c77f' : T.dim} style={{ fontWeight: '800' }}>Cook + Install</Text>
+          </Pressable>
+        </Row>
+      </Col>
+    </Box>
+  );
+}
+
+// ── Import Texture dialog (req_1079) ──────────────────────────────────────────
+// Re-upload an edited / AI-generated PNG so the model captures the visual changes.
+// Just a PNG path (pre-filled with this scene's export path, so the round-trip —
+// export → edit → import — is one click); the model samples it through the existing
+// UVs, so the cookie cutter is automatic (overshoot outside the islands is ignored).
+
+function ImportTextureDialog(props: { slice?: RasterSlice; defaultPath: string; onCancel: () => void; onConfirm: (path: string) => void }) {
+  const [path, setPath] = useState(props.defaultPath);
+  const target = props.slice ? `face ${props.slice.faceIndex} (slice)` : 'the whole sprite sheet';
+  return (
+    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa' }}>
+      <Col style={{ width: 460, gap: 11, padding: 16, borderRadius: 10, backgroundColor: T.panelSolid, borderWidth: 1, borderColor: '#3a2c6a' }}>
+        <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>Import Texture</Text>
+        <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`re-upload a PNG onto ${target} — it slips back via the UVs (cookie cutter).`}</Text>
+        <LCField label="PNG path">
+          <Box style={{ flexGrow: 1 }}>
+            <TextInput value={path} onChangeText={setPath} style={{ height: 24, fontSize: 11, color: T.ink, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, fontFamily: 'monospace' }} />
+          </Box>
+        </LCField>
+        <Row style={{ gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+          <Pressable onPress={props.onCancel} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}><Text fontSize={11} color={T.dim}>Cancel</Text></Pressable>
+          <Pressable onPress={() => props.onConfirm(path)} style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#2a1c4a', borderWidth: 1, borderColor: '#6a4fb0' }}><Text fontSize={11} color="#cdbcff" style={{ fontWeight: '800' }}>Import</Text></Pressable>
+        </Row>
+      </Col>
+    </Box>
+  );
+}
+
+// AI Fill (req_1070/1110, Phase 5d): automated image-to-image. The prompt is OPTIONALLY
+// enhanced (a nano-gpt TEXT model OR Claude via the useAssistant worker — or bypassed and
+// sent raw), then the nano-gpt image client (cart/image-gen, reused) generates ONE image
+// with the CURRENT atlas as the img2img reference. The parent composites the result
+// through the same slot path as import (the cookie cutter is the UV slot). See 5.6b.
+function AiTextureDialog(props: {
+  slice?: RasterSlice;
+  target: string;
+  getReference: () => string;
+  onGenerated: (b64: string) => void;
+  onCancel: () => void;
+}) {
+  const [prompt, setPrompt] = useState('');
+  const [enhance, setEnhance] = useState(true);
+  const [backend, setBackend] = useState<'nano' | 'claude'>('nano');
+  const [textModel, setTextModel] = useState(STUDIO.aiTextModel);
+  const [imageModel, setImageModel] = useState(STUDIO.aiImageModel);
+  const [img2img, setImg2img] = useState(true);
+  const [status, setStatus] = useState('ready');
+  const [busy, setBusy] = useState(false);
+  // The nano-gpt key lives in hmsc-int's native localstore (req_1118); editing the
+  // field persists it so it's entered once and remembered across sessions.
+  const [apiKey, setApiKey] = useState(getNanoKey());
+  const saveKey = (v: string) => { setApiKey(v); setNanoKey(v); };
+
+  // Claude is spawned ONLY when picked (lazy); the worker closes when the dialog unmounts.
+  const cwd = useMemo(processCwd, []);
+  const claudeOn = enhance && backend === 'claude';
+  const assistant = useAssistant({ backend: claudeOn ? 'claude_code' : undefined, cwd, model: 'claude-opus-4-7', persistAcrossUnmount: false, pollMs: 120 });
+  const eventsRef = useRef(assistant.events);
+  eventsRef.current = assistant.events;
+
+  // Bridge the useAssistant event stream to a promise: wait until the worker is ready, ask
+  // once, then accumulate assistant_message text up to the turn's completion event.
+  const enhanceViaClaude = (text: string): Promise<string> => new Promise((resolve, reject) => {
+    let waited = 0;
+    const tryAsk = () => {
+      if (assistant.ready()) {
+        const start = eventsRef.current.length;
+        if (!assistant.ask(`${ENHANCE_SYSTEM}\n\nDescription: ${text}\n\nExpanded prompt:`)) { reject(new Error('claude not ready')); return; }
+        let polls = 0;
+        const iv = setInterval(() => {
+          polls += 1;
+          const evs = eventsRef.current;
+          let acc = '', done = false;
+          for (let i = start; i < evs.length; i += 1) {
+            const e = evs[i];
+            if (e.kind === 'assistant_message' && e.text) acc += e.text;
+            else if (e.kind === 'completion') done = true;
+            else if (e.kind === 'error_') { clearInterval(iv); reject(new Error(e.text || 'claude error')); return; }
+          }
+          if (done) { clearInterval(iv); resolve(acc.trim() || text); }
+          else if (polls > 900) { clearInterval(iv); reject(new Error('claude timed out')); }
+        }, 100);
+        return;
+      }
+      waited += 1;
+      if (waited > 300) { reject(new Error('claude worker did not start (is the claude CLI on PATH?)')); return; }
+      setTimeout(tryAsk, 100);
+    };
+    tryAsk();
+  });
+
+  const run = async () => {
+    const base = prompt.trim();
+    if (!base && !img2img) { setStatus('enter a prompt (or turn on “use current art”)'); return; }
+    if (!apiKey.trim()) { setStatus('enter your nano-gpt API key below'); return; }
+    setBusy(true);
+    try {
+      let finalPrompt = buildTexturePrompt(props.target, base);
+      if (enhance && base) {
+        setStatus(backend === 'claude' ? 'enhancing (claude)…' : 'enhancing…');
+        try {
+          finalPrompt = backend === 'claude' ? await enhanceViaClaude(finalPrompt) : await enhanceViaNano(finalPrompt, textModel, apiKey.trim());
+        } catch (e: any) {
+          // enhancement is optional — fall back to the raw prompt, but say what happened.
+          setStatus(`enhance failed (${e?.message ?? e}) — using raw prompt`);
+        }
+      }
+      setStatus('generating…');
+      const ref = img2img ? props.getReference() : null;
+      const b64 = await generateTexture(finalPrompt, imageModel, STUDIO.aiTextureSize, ref || null, apiKey.trim());
+      setStatus('done ✓');
+      props.onGenerated(b64);
+    } catch (e: any) {
+      setStatus(`failed: ${e?.message ?? e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const target = props.slice ? `face ${props.slice.faceIndex} (slice)` : 'the whole sprite sheet';
+  const field = { height: 24, fontSize: 11, color: T.ink, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, fontFamily: 'monospace' } as const;
+  const toggle = (on: boolean) => ({ ...STEP_BTN, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' });
+  return (
+    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa' }}>
+      <Col style={{ width: 480, gap: 10, padding: 16, borderRadius: 10, backgroundColor: T.panelSolid, borderWidth: 1, borderColor: '#6a4fb0' }}>
+        <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>✦ AI Fill</Text>
+        <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`generate ${target} — the current atlas guides it (img2img), masked to the UV slot.`}</Text>
+
+        <LCField label="prompt">
+          <Box style={{ flexGrow: 1 }}>
+            <TextInput value={prompt} onChangeText={setPrompt} style={field} />
+          </Box>
+        </LCField>
+        <LCField label="image model">
+          <Box style={{ flexGrow: 1 }}>
+            <TextInput value={imageModel} onChangeText={setImageModel} style={field} />
+          </Box>
+        </LCField>
+        {/* nano-gpt API key — stored natively in hmsc-int's localstore (req_1118), entered
+            once and remembered. The one key powers both image gen + text enhance. */}
+        <LCField label="api key">
+          <Box style={{ flexGrow: 1 }}>
+            <TextInput value={apiKey} onChangeText={saveKey} style={{ ...field, borderColor: apiKey.trim() ? '#2c4a6a' : '#7a4f4f' }} />
+          </Box>
+        </LCField>
+        {/* reference — img2img off the current atlas art, or text-to-image only. */}
+        <LCField label="reference">
+          <Row style={{ gap: 4 }}>
+            <Pressable onPress={() => setImg2img(true)} style={toggle(img2img)}><Text fontSize={9} color={img2img ? '#cfe2ff' : T.dim}>use current art</Text></Pressable>
+            <Pressable onPress={() => setImg2img(false)} style={toggle(!img2img)}><Text fontSize={9} color={!img2img ? '#cfe2ff' : T.dim}>from prompt only</Text></Pressable>
+          </Row>
+        </LCField>
+        {/* enhancement — off (raw), a nano-gpt text model, or Claude (the bypass toggle). */}
+        <LCField label="enhance">
+          <Row style={{ gap: 4 }}>
+            <Pressable onPress={() => setEnhance(false)} style={toggle(!enhance)}><Text fontSize={9} color={!enhance ? '#cfe2ff' : T.dim}>off</Text></Pressable>
+            <Pressable onPress={() => { setEnhance(true); setBackend('nano'); }} style={toggle(enhance && backend === 'nano')}><Text fontSize={9} color={enhance && backend === 'nano' ? '#cfe2ff' : T.dim}>nano text</Text></Pressable>
+            <Pressable onPress={() => { setEnhance(true); setBackend('claude'); }} style={toggle(enhance && backend === 'claude')}><Text fontSize={9} color={enhance && backend === 'claude' ? '#cfe2ff' : T.dim}>claude</Text></Pressable>
+          </Row>
+        </LCField>
+        {enhance && backend === 'nano' ? (
+          <LCField label="text model">
+            <Box style={{ flexGrow: 1 }}>
+              <TextInput value={textModel} onChangeText={setTextModel} style={field} />
+            </Box>
+          </LCField>
+        ) : null}
+
+        <Row style={{ gap: 8, alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
+          <Box style={{ flexShrink: 1 }}>
+            <Text fontSize={10} color={busy ? '#cdbcff' : T.dim} style={{ fontFamily: 'monospace' }}>{status}</Text>
+          </Box>
+          <Row style={{ gap: 8 }}>
+            <Pressable onPress={props.onCancel} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}><Text fontSize={11} color={T.dim}>Cancel</Text></Pressable>
+            <Pressable onPress={busy ? undefined : run} style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: busy ? '#241a3a' : '#2a1c4a', borderWidth: 1, borderColor: '#6a4fb0' }}><Text fontSize={11} color={busy ? T.dim : '#cdbcff'} style={{ fontWeight: '800' }}>{busy ? '…' : 'Generate'}</Text></Pressable>
+          </Row>
+        </Row>
+      </Col>
+    </Box>
+  );
+}
+
+// ── Loop-cut popup (req_0984/0985) ────────────────────────────────────────────
+// The small, non-invasive Blockbench panel: Direction (which in-plane axis),
+// Cuts (how many), Offset (where), Unit (size-units vs percent). Every change
+// re-previews live (the parent drives the draft); Apply commits, ✕ cancels.
+
+function LCStepper(props: { value: number; onChange: (n: number) => void; min: number; max: number; step?: number; width?: number }) {
+  const step = props.step ?? 1;
+  const set = (n: number) => props.onChange(clamp(n, props.min, props.max));
+  return (
+    <Row style={{ gap: 4, alignItems: 'center' }}>
+      <Pressable onPress={() => set(props.value - step)} style={STEP_BTN}><Text fontSize={12} color={T.text}>−</Text></Pressable>
+      <Box style={{ width: props.width ?? 54 }}>
+        <TextInput
+          value={String(props.value)}
+          onChangeText={(t: string) => { const n = parseFloat(t); if (Number.isFinite(n)) set(n); }}
+          style={{ height: 22, fontSize: 11, color: T.ink, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, textAlign: 'center', fontFamily: 'monospace' }}
+        />
+      </Box>
+      <Pressable onPress={() => set(props.value + step)} style={STEP_BTN}><Text fontSize={12} color={T.text}>+</Text></Pressable>
+    </Row>
+  );
+}
+
+function LCField(props: { label: string; children: any }) {
+  return (
+    <Row style={{ gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+      <Text fontSize={10} color={T.dim} style={{ width: 60, fontFamily: 'monospace' }}>{props.label}</Text>
+      {props.children}
+    </Row>
+  );
+}
+
+function LoopCutPopup(props: {
+  dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent'; sizeUnits: number;
+  onChange: (patch: Partial<{ dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent' }>) => void;
+  onApply: () => void; onCancel: () => void;
+}) {
+  const offMax = props.unit === 'percent' ? 100 : Math.max(1, Math.round(props.sizeUnits));
+  return (
+    <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 18, alignItems: 'center' }}>
+      <Col style={{ gap: 7, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderRadius: 9, backgroundColor: '#0b1320f2', borderWidth: 1, borderColor: '#2c4a6a', minWidth: 250 }}>
+        <Row style={{ gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text fontSize={11} color={T.text} style={{ fontWeight: '800' }}>Loop Cut</Text>
+          <Pressable onPress={props.onCancel} style={STEP_BTN}><Text fontSize={10} color={T.dim}>✕</Text></Pressable>
+        </Row>
+        <LCField label="direction"><LCStepper value={props.dir} min={0} max={1} onChange={(n) => props.onChange({ dir: (n ? 1 : 0) as 0 | 1 })} width={40} /></LCField>
+        <LCField label="cuts"><LCStepper value={props.cuts} min={1} max={64} onChange={(n) => props.onChange({ cuts: Math.round(n) })} width={40} /></LCField>
+        <LCField label="offset"><LCStepper value={props.offset} min={0} max={offMax} onChange={(n) => props.onChange({ offset: n })} width={54} /></LCField>
+        <LCField label="unit">
+          <Row style={{ gap: 4 }}>
+            {(['units', 'percent'] as const).map((u) => {
+              const on = props.unit === u;
+              const lbl = u === 'units' ? 'Size Units' : 'Percent';
+              return (
+                <Pressable
+                  key={u}
+                  onPress={() => {
+                    if (props.unit === u) return;
+                    const off = u === 'percent'
+                      ? (props.sizeUnits > 0 ? (props.offset / props.sizeUnits) * 100 : 0)
+                      : (props.offset / 100) * props.sizeUnits;
+                    props.onChange({ unit: u, offset: Math.round(off * 10) / 10 });
+                  }}
+                  style={{ ...STEP_BTN, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}
+                >
+                  <Text fontSize={9} color={on ? '#cfe2ff' : T.dim}>{lbl}</Text>
+                </Pressable>
+              );
+            })}
+          </Row>
+        </LCField>
+        <Pressable onPress={props.onApply} style={{ paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f', marginTop: 2 }}>
+          <Text fontSize={11} color="#7fd6a0" style={{ fontWeight: '800' }}>Apply</Text>
+        </Pressable>
+      </Col>
+    </Box>
+  );
+}
+
+// ── The editor: outliner (the layers component) docked beside the viewport ─────
+
+export function StudioEditor() {
+  const model: StudioModel = useStudioModel();
+  const [addOpen, setAddOpen] = useState(false);
+  // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) step the parts-library branch history.
+  // model.undo/redo are stable identities (MUTATORS) and read the live stacks,
+  // so the mount-time closure stays correct. A focused TextInput consumes keys
+  // before the bus (req_0978), so renaming a part never triggers undo.
+  useEffect(() => {
+    const off = busOn('__keydown', (e: any) => {
+      if (!(e?.ctrlKey || e?.metaKey)) return;
+      const key = String(e?.key ?? '').toLowerCase();
+      if (key === 'z' && !e?.shiftKey) model.undo();
+      else if (key === 'y' || (key === 'z' && e?.shiftKey)) model.redo();
+    });
+    return () => off();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <Row style={{ flexGrow: 1, height: '100%', minHeight: 0, position: 'relative' }}>
+      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onSelectFaces={model.setSelectedFaces} />
+      {/* Branch-history verbs — top-left, the one viewport corner the compass /
+          toolbar / mode-toggle don't claim. Disabled when the stack is empty. */}
+      <Row style={{ position: 'absolute', left: 8, top: 8, gap: 4, zIndex: 30 }}>
+        {([['undo', '↶ Undo', model.canUndo, () => model.undo()], ['redo', '↷ Redo', model.canRedo, () => model.redo()]] as const).map(([k, label, on, run]) => (
+          <Pressable key={k} onPress={on ? run : undefined} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, borderWidth: 1, backgroundColor: on ? '#13233aee' : '#0e1726aa', borderColor: on ? '#2c4a6a' : '#1c2a3c' }}>
+            <Text fontSize={10} color={on ? '#cfe2ff' : T.dim}>{label}</Text>
+          </Pressable>
+        ))}
+      </Row>
+      {/* the OUTLINER (layers) docks on the RIGHT of the viewport (req_0981). */}
+      <Box style={{ width: 236, minWidth: 236, height: '100%', borderLeftWidth: 1, borderColor: '#1c2a3c', backgroundColor: T.page }}>
+        <StudioOutliner model={model} height="100%" onAdd={() => setAddOpen(true)} />
+      </Box>
+      {addOpen ? (
+        <AddShapeDialog
+          onCancel={() => setAddOpen(false)}
+          onConfirm={(mesh, name) => { model.addPart(mesh, name); setAddOpen(false); }}
+        />
+      ) : null}
+    </Row>
+  );
+}
+
+// A self-contained route view — the same editor the workbench STUDIO tab mounts.
+export function StudioRoute() {
+  return (
+    <Col style={{ flexGrow: 1, height: '100%', minHeight: 0, backgroundColor: T.panelSolid }}>
+      <StudioEditor />
+    </Col>
+  );
+}

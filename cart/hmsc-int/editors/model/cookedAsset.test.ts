@@ -1,0 +1,124 @@
+// cookedAsset.test.ts — P4 tests for the asset compiler's cook core (Part 7,
+// req_1122/req_1129). Pure + headless under tools/v8cli — proves the Guiding
+// Light laws hold: content-addressed SEPARABLE factors (one model → prop + item
+// shares the meshRef), MEASURED collision (derive, don't store twice), idempotent
+// re-cook (same input → same hash), and fail-loud validation.
+
+import { cuboid, addMount, type EditMesh } from './editMesh';
+import { cookProp, flattenModel, validateProp, type CookPart, type PropDescriptorInput } from './cookedAsset';
+import { assert, assertEqual, finish, test } from '../../game/_testkit';
+
+function part(mesh: EditMesh, lift = 0, visible = true): CookPart {
+  return { mesh, lift, visible };
+}
+
+const PROP: PropDescriptorInput = { solid: true, tileKind: 'wall' };
+
+test('flattenModel concats visible parts and measures bounds', () => {
+  // a 2×1×2 cuboid lifted to sit on the ground (lift = 0.5).
+  const blob = flattenModel([part(cuboid(2, 1, 2), 0.5)]);
+  assert(blob.count > 0, 'soup has vertices');
+  assertEqual(blob.verts.length, blob.count * 8, '8 floats per vertex');
+  // bounds: x/z span 2, y span 1; lifted so y in [0,1].
+  assertEqual(Math.round(blob.bounds.size[0]), 2, 'width 2');
+  assertEqual(Math.round(blob.bounds.size[1]), 1, 'height 1');
+  assertEqual(Math.round(blob.bounds.size[2]), 2, 'depth 2');
+  assertEqual(Math.round(blob.bounds.min[1]), 0, 'sits on the ground (min y 0)');
+});
+
+test('invisible parts are excluded from the flatten', () => {
+  const both = flattenModel([part(cuboid(1, 1, 1)), part(cuboid(1, 1, 1))]);
+  const one = flattenModel([part(cuboid(1, 1, 1)), part(cuboid(1, 1, 1), 0, false)]);
+  assertEqual(one.count * 2, both.count, 'one hidden = half the verts');
+});
+
+test('cookProp MEASURES footprint + height from the mesh (derive, not store)', () => {
+  const { asset, errors } = cookProp({
+    id: 'studio.crate', name: 'Crate', parts: [part(cuboid(2, 3, 4), 1.5)], descriptor: PROP,
+  });
+  assertEqual(errors.length, 0, 'valid prop cooks clean');
+  assertEqual(Math.round(asset.descriptor.footprintWidthMeters), 2, 'measured width');
+  assertEqual(Math.round(asset.descriptor.footprintDepthMeters), 4, 'measured depth');
+  assertEqual(Math.round(asset.descriptor.heightMeters), 3, 'measured height');
+  assertEqual(asset.kind, 'prop', 'kind = prop');
+  assertEqual(asset.descriptor.kind, asset.id, 'descriptor kind = asset id (the placement key)');
+  assertEqual(asset.meshRef, asset.meshRef && asset.meshRef.length === 64 ? asset.meshRef : 'BAD', 'meshRef is a sha256');
+});
+
+test('re-cooking the same model is idempotent (the hash is the cache key)', () => {
+  const make = () => cookProp({ id: 'studio.a', name: 'A', parts: [part(cuboid(1, 1, 1))], descriptor: PROP });
+  assertEqual(make().asset.hash, make().asset.hash, 'same input → same asset hash');
+  assertEqual(make().blob.hash, make().blob.hash, 'same input → same mesh blob hash');
+});
+
+test('factors are SEPARABLE: same mesh + different descriptor shares meshRef, differs in asset hash', () => {
+  const parts = [part(cuboid(1, 1, 1))];
+  const a = cookProp({ id: 'studio.x', name: 'X', parts, descriptor: { solid: true, tileKind: 'wall' } });
+  const b = cookProp({ id: 'studio.x', name: 'X', parts, descriptor: { solid: false, tileKind: 'bush' } });
+  assertEqual(a.asset.meshRef, b.asset.meshRef, 'shared geometry factor (one blob)');
+  assert(a.asset.hash !== b.asset.hash, 'a descriptor change changes the asset identity');
+});
+
+test('a different mesh yields a different meshRef', () => {
+  const a = cookProp({ id: 'studio.a', name: 'A', parts: [part(cuboid(1, 1, 1))], descriptor: PROP });
+  const b = cookProp({ id: 'studio.b', name: 'B', parts: [part(cuboid(2, 2, 2))], descriptor: PROP });
+  assert(a.asset.meshRef !== b.asset.meshRef, 'distinct geometry → distinct content hash');
+});
+
+test('texRef rides as a reference when supplied (texture factor)', () => {
+  const withTex = cookProp({ id: 'studio.t', name: 'T', parts: [part(cuboid(1, 1, 1))], texRef: 'abc123', descriptor: PROP });
+  const noTex = cookProp({ id: 'studio.t', name: 'T', parts: [part(cuboid(1, 1, 1))], descriptor: PROP });
+  assertEqual(withTex.asset.texRef, 'abc123', 'texRef stored');
+  assert(noTex.asset.texRef === undefined, 'untextured asset has no texRef');
+  assertEqual(withTex.asset.meshRef, noTex.asset.meshRef, 'texture is separable from geometry');
+  assert(withTex.asset.hash !== noTex.asset.hash, 'the texture factor is part of the identity');
+});
+
+test('mounts gather into the model frame with lift baked in', () => {
+  const m = addMount(cuboid(1, 1, 1), { name: 'hub', kind: 'socket', position: [0, 0, 0] });
+  const { asset } = cookProp({ id: 'studio.m', name: 'M', parts: [part(m, 0.5)], descriptor: PROP });
+  assertEqual(asset.mounts.length, 1, 'one mount carried');
+  assertEqual(asset.mounts[0].position[1], 0.5, 'lift baked into the mount position');
+});
+
+test('validation FAILS LOUD on an under-specified container prop', () => {
+  const bad = cookProp({
+    id: 'studio.safe', name: 'Safe', parts: [part(cuboid(1, 1, 1))],
+    descriptor: { solid: true, tileKind: 'wall', container: { lootCategory: 'valuables', capacity: 0, spawnFillChance: 0.5, searchSeconds: 3, access: 'keyed' } },
+  });
+  assert(bad.errors.length > 0, 'a container with capacity 0 is rejected');
+  assert(bad.errors.some((e) => e.includes('capacity')), 'the error names the missing field');
+});
+
+test('a PHYSICS prop cooks a dynamic body with a MEASURED radius + authored bounce', () => {
+  // a barrel-ish 0.8×1.1×0.8 cuboid, kickable, bounce 0.18 (a drum/can).
+  const { asset, errors } = cookProp({
+    id: 'studio.drum', name: 'Drum', parts: [part(cuboid(0.8, 1.1, 0.8), 0.55)],
+    descriptor: { solid: true, tileKind: 'wall', physics: { restitution: 0.18 } },
+  });
+  assertEqual(errors.length, 0, 'a valid physics prop cooks clean');
+  assert(asset.descriptor.dynamics != null, 'it carries a dynamics body (KICKPROP)');
+  assertEqual(asset.descriptor.dynamics!.restitution, 0.18, 'bounce is the authored value');
+  // body radius is MEASURED from the footprint, not hand-typed.
+  assertEqual(asset.descriptor.dynamics!.bodyRadiusMeters, asset.descriptor.footprintRadiusMeters, 'body radius = measured footprint radius');
+});
+
+test('a STATIC prop carries NO dynamics (the default nature)', () => {
+  const { asset } = cookProp({ id: 'studio.s', name: 'S', parts: [part(cuboid(1, 1, 1), 0.5)], descriptor: PROP });
+  assert(asset.descriptor.dynamics === undefined, 'static scenery has no physics body');
+});
+
+test('validation FAILS LOUD on out-of-range bounce', () => {
+  const bad = cookProp({
+    id: 'studio.bouncy', name: 'B', parts: [part(cuboid(1, 1, 1), 0.5)],
+    descriptor: { solid: true, tileKind: 'wall', physics: { restitution: 1.8 } },
+  });
+  assert(bad.errors.some((e) => e.includes('restitution')), 'restitution > 1 is rejected loud');
+});
+
+test('validation FAILS LOUD on an empty mesh (no measurable footprint)', () => {
+  const errors = validateProp({ kind: 'x' as any, label: 'X', solid: true, footprintRadiusMeters: 0, heightMeters: 0, tileKind: 'wall', trafficControl: 'none' });
+  assert(errors.length >= 2, 'zero footprint AND zero height both flagged');
+});
+
+finish('cookedAsset');
