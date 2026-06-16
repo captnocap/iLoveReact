@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -1448,6 +1448,30 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 </Pressable>
               );
             })}
+            {/* SYMMETRIZE (req_1190): force the whole part symmetric — keep one half,
+                rebuild the other as its exact mirror. Kills drift from a one-sided edit
+                (a stray vert/triangle). Two buttons = pick the GOOD half by result, no
+                abstract prompt; mirror across the first enabled plane (else X). */}
+            {activePart ? (() => {
+              const symAxis = (mirrorAxes[0] ?? 0) as 0 | 1 | 2;
+              const ax = STUDIO.mirrorAxisLabels[symAxis];
+              const doSym = (keepPos: boolean) => {
+                props.onEditMesh(activePart.id, symmetrize(activePart.mesh, symAxis, keepPos));
+                setSel(emptySelection()); setRigSel(null);
+              };
+              return (
+                <>
+                  <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+                  <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>sym</Text>
+                  <Pressable onPress={() => doSym(true)} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: STUDIO.mirrorAxisColors[symAxis] }}>
+                    <Text fontSize={10} color={STUDIO.mirrorAxisColors[symAxis]} style={{ fontFamily: 'monospace' }}>keep +{ax}</Text>
+                  </Pressable>
+                  <Pressable onPress={() => doSym(false)} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: STUDIO.mirrorAxisColors[symAxis] }}>
+                    <Text fontSize={10} color={STUDIO.mirrorAxisColors[symAxis]} style={{ fontFamily: 'monospace' }}>keep −{ax}</Text>
+                  </Pressable>
+                </>
+              );
+            })() : null}
             {/* face-only edit ops: extrude + loop cut (a single selected face). */}
             {selMode === 'face' && activePart && sel.faces.size === 1 ? (
               <>

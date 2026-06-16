@@ -256,6 +256,40 @@ export function updateMountMirrored(m: EditMesh, name: string, newPos: V3, axes:
   return out;
 }
 
+/** SYMMETRIZE (req_1190): force the part perfectly symmetric across plane `axis = c`
+ *  by KEEPING one half and rebuilding the other as its exact mirror — kills the drift
+ *  a one-sided edit leaves (a lone vertex/triangle out of place that the live mirror
+ *  couldn't catch because it happened mirror-off). Cuts at the plane so no face
+ *  straddles, discards the far half, then emits each kept face PLUS its reflected
+ *  reverse-wound twin; seam verts merge by position so the halves stitch watertight.
+ *  Kept-side joints are mirrored too. `keepPositive` keeps the +axis half. Pure. */
+export function symmetrize(m: EditMesh, axis: 0 | 1 | 2, keepPositive: boolean, c = 0, eps = 1e-5): EditMesh {
+  const cut = cutMeshByPlane(m, axis, c);
+  const keepSign = keepPositive ? 1 : -1;
+  const verts: V3[] = [];
+  const byPos = new Map<string, number>();
+  const key = (p: V3) => `${p[0].toFixed(5)},${p[1].toFixed(5)},${p[2].toFixed(5)}`;
+  const intern = (p: V3): number => { const k = key(p); let i = byPos.get(k); if (i == null) { i = verts.length; verts.push([p[0], p[1], p[2]]); byPos.set(k, i); } return i; };
+  const reflect = (p: V3): V3 => { const r: V3 = [p[0], p[1], p[2]]; r[axis] = 2 * c - r[axis]; return r; };
+  const faces: EditMeshFace[] = [];
+  for (const f of cut.faces) {
+    if (f.loop.length < 3) continue;
+    let cs = 0; for (const vi of f.loop) cs += cut.verts[vi][axis]; cs = cs / f.loop.length - c;
+    if (cs * keepSign < -eps) continue; // drop the far half
+    faces.push({ ...f, loop: f.loop.map((vi) => intern(cut.verts[vi])), uv: f.uv ? f.uv.map((u) => [u[0], u[1]] as V2) : undefined });
+    if (Math.abs(cs) > eps) { // not a seam-coplanar face → also emit the reflected twin (winding reversed so it faces out)
+      faces.push({ ...f, loop: f.loop.map((vi) => intern(reflect(cut.verts[vi]))).reverse(), uv: f.uv ? f.uv.map((u) => [u[0], u[1]] as V2).reverse() : undefined });
+    }
+  }
+  // joints: keep the kept-side (+ seam) ones, mirror the off-seam ones (unique names).
+  const keptMounts = (m.mounts ?? []).filter((mt) => (mt.position[axis] - c) * keepSign >= -eps);
+  const taken = new Set(keptMounts.map((mt) => mt.name));
+  const uniq = (base: string): string => { let f = base; for (let k = 2; taken.has(f); k += 1) f = `${base}_${k}`; taken.add(f); return f; };
+  const mirroredMounts = keptMounts.filter((mt) => Math.abs(mt.position[axis] - c) > eps).map((mt) => { const r = mirrorMount(mt, [axis], c); return { ...r, name: uniq(r.name) }; });
+  const mounts = [...keptMounts, ...mirroredMounts];
+  return { ...m, verts, faces, mounts: mounts.length ? mounts : m.mounts };
+}
+
 /** An undirected edge as a sorted index pair (the dedupe key form). */
 export type Edge = readonly [number, number];
 

@@ -6,7 +6,7 @@ import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import {
   addMount, addMountReflections, updateMountMirrored, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
-  flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
+  flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
@@ -594,6 +594,26 @@ test('updateMountMirrored moves a wheel mount and its partner in sync (req_1189)
   const fl = out.mounts!.find((x) => x.name === 'fl')!, fr = out.mounts!.find((x) => x.name === 'fr')!;
   assert(approx(fl.position[0], 1.5) && approx(fl.position[2], 2.2), 'fl moved to the new spot');
   assert(approx(fr.position[0], -1.5) && approx(fr.position[2], 2.2), 'fr mirrored on x and followed z');
+});
+
+test('symmetrize rebuilds the far half as an exact mirror — drift is erased (req_1190)', () => {
+  const box = cuboid(2, 2, 2);
+  // drift ONE +x vert so the two halves diverge (the user's lone-vertex bug)
+  const driftMe = box.verts.findIndex((v) => v[0] > 0);
+  const asym = translateVerts(box, [driftMe], [0.3, 0.4, -0.2]);
+  const sym = symmetrize(asym, 0, true); // keep +x, mirror onto −x
+  // every off-centre vert now has an exact −x twin (perfect symmetry)
+  for (const v of sym.verts) {
+    if (Math.abs(v[0]) < 1e-6) continue;
+    const twin = sym.verts.some((w) => approx(w[0], -v[0]) && approx(w[1], v[1]) && approx(w[2], v[2]));
+    assert(twin, 'every off-centre vert has a mirror twin across x=0');
+  }
+  const b = vertsBounds(sym, sym.verts.map((_, i) => i));
+  assert(approx(b.min[0], -b.max[0]), 'the x-bounds are symmetric about 0');
+  // keeping the OTHER half drops the drift instead of mirroring it
+  const symOther = symmetrize(asym, 0, false); // keep −x (the clean side)
+  const bo = vertsBounds(symOther, symOther.verts.map((_, i) => i));
+  assert(approx(bo.size[1], 2), 'keeping the clean −x half restores the original height (drift gone)');
 });
 
 test('facesUsingVerts / facesUsingEdges resolve a selection to faces (req_1020)', () => {
