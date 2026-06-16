@@ -4,7 +4,7 @@
 
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import {
-  addMount, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
+  addMount, addMountReflections, updateMountMirrored, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
   flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent,
@@ -571,6 +571,29 @@ test('vertsBounds measures a selection — face dims + a degenerate flat axis (r
   assert(approx(top.size[1], 0), 'a flat face has ~0 thickness on its normal axis');
   assert(approx(top.size[0], 3) && approx(top.size[2], 4), 'the face spans the full x/z extent');
   assertEqual(JSON.stringify(vertsBounds(box, []).size), JSON.stringify([0, 0, 0]), 'empty selection → zero box');
+});
+
+test('addMountReflections places a tire mount + its X/Z twins — all four wheels (req_1189)', () => {
+  const base: EditMesh = { verts: [[0, 0, 0]], faces: [], mounts: [{ name: 'wheel', kind: 'socket', position: [1, -0.5, 2], axis: [1, 0, 0] }] };
+  const four = addMountReflections(base, 'wheel', [0, 2]); // mirror X (L/R) + Z (front/back)
+  assertEqual(four.mounts!.length, 4, 'original + 3 reflections = 4 wheel mounts');
+  const at = (x: number, y: number, z: number) => four.mounts!.find((m) => approx(m.position[0], x) && approx(m.position[1], y) && approx(m.position[2], z));
+  assert(!!at(1, -0.5, 2), 'the original FL stays');
+  assert(!!at(-1, -0.5, 2), 'the X twin (FR) at −x');
+  assert(!!at(1, -0.5, -2), 'the Z twin (RL) at −z');
+  assert(!!at(-1, -0.5, -2), 'the diagonal twin (RR) at −x,−z');
+  assert(approx(at(-1, -0.5, 2)!.axis![0], -1), 'the X-twin spin axis flips on X');
+  assert(new Set(four.mounts!.map((m) => m.name)).size === 4, 'every mount name is unique');
+});
+
+test('updateMountMirrored moves a wheel mount and its partner in sync (req_1189)', () => {
+  const m: EditMesh = { verts: [[0, 0, 0]], faces: [], mounts: [
+    { name: 'fl', kind: 'socket', position: [1, 0, 2] }, { name: 'fr', kind: 'socket', position: [-1, 0, 2] },
+  ] };
+  const out = updateMountMirrored(m, 'fl', [1.5, 0, 2.2], [0]); // pull FL out along x
+  const fl = out.mounts!.find((x) => x.name === 'fl')!, fr = out.mounts!.find((x) => x.name === 'fr')!;
+  assert(approx(fl.position[0], 1.5) && approx(fl.position[2], 2.2), 'fl moved to the new spot');
+  assert(approx(fr.position[0], -1.5) && approx(fr.position[2], 2.2), 'fr mirrored on x and followed z');
 });
 
 test('facesUsingVerts / facesUsingEdges resolve a selection to faces (req_1020)', () => {

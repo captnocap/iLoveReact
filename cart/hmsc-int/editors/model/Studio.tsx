@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, tagOneFace, translateVerts, updateMount, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -611,10 +611,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     return mt ? [mt.position[0], mt.position[1], mt.position[2]] : null;
   };
   // Commit a moved rig handle to the mesh (pivot → setPivot, joint → updateMount).
+  // MIRROR (req_1189): with planes enabled, a dragged JOINT carries its mirror
+  // partners along, so adjusting one wheel mount keeps the set symmetric.
   const commitRig = (sel: RigSel, local: MV3) => {
     if (!activePart) return;
     const m = activePart.mesh;
-    props.onEditMesh(activePart.id, sel.kind === 'pivot' ? setPivot(m, local) : updateMount(m, sel.name, { position: local }));
+    if (sel.kind === 'pivot') { props.onEditMesh(activePart.id, setPivot(m, local)); return; }
+    props.onEditMesh(activePart.id, mirrorAxes.length
+      ? updateMountMirrored(m, sel.name, local, mirrorAxes)
+      : updateMount(m, sel.name, { position: local }));
   };
 
   // ── Loop cut (req_0984/0985/0990): a face click → a small popup → N cuts ──
@@ -1416,6 +1421,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             >
               <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>+ joint</Text>
             </Pressable>
+            {/* MIRROR JOINT (req_1189): with mirror plane(s) on, reflect the selected
+                joint into its partners — place one tire mount, get the matching ones
+                (X = left/right, X+Z = all four). */}
+            {rigSel && rigSel.kind === 'joint' && mirrorAxes.length ? (
+              <Pressable
+                onPress={() => props.onEditMesh(activePart.id, addMountReflections(activePart.mesh, (rigSel as { kind: 'joint'; name: string }).name, mirrorAxes))}
+                style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: '#6b54a6' }}
+              >
+                <Text fontSize={10} color="#cdbcff" style={{ fontFamily: 'monospace' }}>⇄ mirror joint</Text>
+              </Pressable>
+            ) : null}
             <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#0b1320cc', borderWidth: 1, borderColor: '#27364a' }}>
               <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{rigSel ? (rigSel.kind === 'pivot' ? 'pivot selected' : `joint: ${rigSel.name}`) : 'pick a handle, or + above'}</Text>
             </Box>

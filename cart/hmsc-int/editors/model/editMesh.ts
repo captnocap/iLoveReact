@@ -197,6 +197,65 @@ export function renameMount(m: EditMesh, oldName: string, newName: string): Edit
   return touched ? { ...m, mounts } : m;
 }
 
+// ── Mirror joints (req_1189): place one wheel-mount, get its symmetric partners ──
+// The joint twin of the mesh mirror: reflect a MountPoint across the same X/Y/Z
+// planes (multi-axis → diagonals, so X+Z off one front-left tire mount yields the
+// front-right, rear-left, AND rear-right in one shot). Position AND spin axis are
+// mirrored; names are suffixed + kept unique.
+
+const MOUNT_AXIS_LETTER = ['x', 'y', 'z'] as const;
+
+/** Reflect a mount across the planes in `axes` (each `= c`): position + spin axis
+ *  flipped, the name suffixed with the plane letters. Pure. */
+export function mirrorMount(mount: MountPoint, axes: (0 | 1 | 2)[], c = 0): MountPoint {
+  const position: V3 = [mount.position[0], mount.position[1], mount.position[2]];
+  const axis: V3 | undefined = mount.axis ? [mount.axis[0], mount.axis[1], mount.axis[2]] : undefined;
+  let suffix = '';
+  for (const a of axes) { position[a] = 2 * c - position[a]; if (axis) axis[a] = -axis[a]; suffix += MOUNT_AXIS_LETTER[a]; }
+  return axis ? { ...mount, name: `${mount.name}_${suffix}`, position, axis } : { ...mount, name: `${mount.name}_${suffix}`, position };
+}
+
+/** Add the reflections of the named joint across every non-empty subset of `axes`
+ *  (single planes + diagonals) — place one, get its mirror partners. Names stay
+ *  unique. No match / no axes → unchanged. Pure. */
+export function addMountReflections(m: EditMesh, name: string, axes: (0 | 1 | 2)[], c = 0): EditMesh {
+  const src = m.mounts?.find((mt) => mt.name === name);
+  if (!src || axes.length === 0) return m;
+  const taken = new Set((m.mounts ?? []).map((mt) => mt.name));
+  const uniq = (base: string): string => { let f = base; for (let k = 2; taken.has(f); k += 1) f = `${base}_${k}`; taken.add(f); return f; };
+  const add: MountPoint[] = [];
+  for (let mask = 1; mask < (1 << axes.length); mask += 1) {
+    const s: (0 | 1 | 2)[] = [];
+    for (let k = 0; k < axes.length; k += 1) if (mask & (1 << k)) s.push(axes[k]);
+    const mir = mirrorMount(src, s, c);
+    add.push({ ...mir, name: uniq(mir.name) });
+  }
+  return { ...m, mounts: [...(m.mounts ?? []), ...add] };
+}
+
+/** Move the named joint to `newPos` AND its position-matched mirror partners (across
+ *  every non-empty subset of `axes`) to the reflected position — so adjusting one
+ *  wheel mount keeps the set symmetric. Partners matched by the joint's CURRENT
+ *  stored position. Pure. */
+export function updateMountMirrored(m: EditMesh, name: string, newPos: V3, axes: (0 | 1 | 2)[], c = 0, dp = 4): EditMesh {
+  let out = updateMount(m, name, { position: newPos });
+  const src = m.mounts?.find((mt) => mt.name === name);
+  if (!src || axes.length === 0) return out;
+  const key = (p: V3) => `${p[0].toFixed(dp)},${p[1].toFixed(dp)},${p[2].toFixed(dp)}`;
+  const byPos = new Map<string, string>();
+  for (const mt of m.mounts!) if (mt.name !== name) byPos.set(key(mt.position), mt.name);
+  for (let mask = 1; mask < (1 << axes.length); mask += 1) {
+    const s: (0 | 1 | 2)[] = [];
+    for (let k = 0; k < axes.length; k += 1) if (mask & (1 << k)) s.push(axes[k]);
+    const rp: V3 = [src.position[0], src.position[1], src.position[2]]; for (const a of s) rp[a] = 2 * c - rp[a];
+    const pName = byPos.get(key(rp));
+    if (pName == null) continue;
+    const np: V3 = [newPos[0], newPos[1], newPos[2]]; for (const a of s) np[a] = 2 * c - np[a];
+    out = updateMount(out, pName, { position: np });
+  }
+  return out;
+}
+
 /** An undirected edge as a sorted index pair (the dedupe key form). */
 export type Edge = readonly [number, number];
 
