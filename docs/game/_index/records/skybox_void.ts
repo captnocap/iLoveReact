@@ -1,0 +1,138 @@
+import type { DocIndex } from '../types';
+
+// The Skybox & The Void doctrine — DESIGN INTENT, banked, nothing built.
+// Source of truth: docs/game/SKYBOX_PLAYBOOK.md (consolidates USER ASKS
+// req_1095 → req_1105). Every interface here is status 'candidate' (design-
+// first, not implemented). The hazards are the load-bearing invariants a worker
+// is most likely to violate when a seam finally gets built.
+
+export const skybox_void: DocIndex = {
+  name: 'skybox_void',
+  file: 'SKYBOX_PLAYBOOK.md',
+  purpose: ['world_gen', 'rendering', 'perception', 'game_loop', 'vehicle'],
+  summary:
+    'DESIGN-INTENT doctrine (nothing built): the authored city is wrapped in a procedural SHELL — an endless hash-generated city (the archived hmsc_massive_map_lab pattern, zero storage, one-batch instanced draw) rendered as the outer ring of the SAME citywide map (V30, never a separate changelevel map). The shell is a second axis of play, not scenery: a roguelite "void run" the player discovers by refusing to stop driving. THE LAW (req_1104): "Outward travel stretches space. Inward travel folds it." One generator, four jobs — COAST (overt: another city across water, notoriety climbs, an ENGAGED apache blasts you, survive => achievement flag; stays Euclidean), ROAD INFINITY (covert: roads seam into endless sprawl, no notoriety, no warning, the believability-decay descent), LIVING NOWHERE (deterministic NPCs hydrate locally per V30 frozen activation; the SAME NPC recurs = the doppelganger horror tell), MOD CANVAS (V28/V29 huge bolted-on authorable space, procedural fill overridable). Believability decay is one scalar escape_depth = max(0, distance_from_core - safe_radius) driving a continuous voidDistortion() weight fan-out; named 10/25/50/75/100/150km tiers are achievement milestones not step-functions (100km = Truman tax: controls invert, people float, police radio your name). The road-void is a TREADMILL (psychological not physical distance): true position is clamped/folded near the authored seam, instruments lie independently (GPS says 87km, skyline over the fence), turning around collapses the route home — you were always 2 blocks out. No hand-outs: wrongness is positional but damage/resources heal only via consumables, so RESOURCE EXHAUSTION is the governor (no invisible wall). Plus the NIGHT ASSASSIN: the crime-for-hire app pointed inward — a hit on the player`s own head with rival bidders you can never outbid, an ENGAGED hunter pathing across the map at night, self-scaling with notoriety. Reuses existing stacks: sceneEnv sky/fog floats, perception notoriety, missions client/target, vehicle+stats survival, story flags, V20 store, Hud instruments.',
+  interfaces: [
+    {
+      name: 'escape_depth',
+      purpose: ['world_gen', 'game_loop'],
+      kind: 'utility',
+      description:
+        'The ONE registered scalar `max(0, distance_from_core - safe_radius)` that drives all void distortion. In the treadmill model it is a VIRTUAL accumulator (advanced by forward intent, collapsed by reverse intent), NOT the odometer — true position stays clamped near the authored seam. Single source of truth: instruments are lying views over it, never their own truth.',
+      status: 'candidate',
+    },
+    {
+      name: 'voidDistortion',
+      purpose: ['world_gen', 'rendering', 'perception'],
+      kind: 'utility',
+      description:
+        'Pure function escape_depth -> weight struct { trafficFlip, npcOrientCorrupt, controlInvert, skyDrift, dialogCorrupt, spawnWeird, roadRepeat, awarenessGlitch, instrumentLie }. Every consumer multiplies its behavior by its weight; NO consumer hardcodes a km threshold. Must be a seeded pure function (never Math.random) for a fair leaderboard + V30 f(seed,t,log).',
+      status: 'candidate',
+    },
+    {
+      name: 'VOID_TIERS',
+      purpose: ['world_gen', 'game_loop'],
+      kind: 'registry',
+      description:
+        'P2 tunable table of the named believability-decay milestones (10/25/50/75/100/150km) and per-band distortion weights. Bands are achievement-toast markers over ONE continuous curve, not six step-functions. 100km = the Truman tax band; 150km = the (flavor-only) ejection terminal.',
+      status: 'candidate',
+    },
+    {
+      name: 'procedural shell generator',
+      purpose: ['world_gen', 'rendering'],
+      kind: 'module',
+      description:
+        'The hash-deterministic city (regenerate the archived hmsc_massive_map_lab pattern: pure fn of coords, zero storage, one-batch Scene3D.Instances draw) wrapping the authored core as the OUTER RING of the one citywide map, streamed by the existing radius-bubble + LOD machinery. The treadmill recycles a bounded fold-region of it; the coast renders a denser cluster across a water gap.',
+      dependsOn: ['escape_depth'],
+      status: 'candidate',
+    },
+    {
+      name: 'Night Assassin / bounty-on-your-own-head',
+      purpose: ['npc', 'perception', 'game_loop'],
+      kind: 'module',
+      description:
+        'Replaces a curfew: the crime-for-hire contract system pointed inward. The player is a POSITION (missions/defs.ts client+target already supports it); at night an ENGAGED hunter spawns far and pathes toward the player; killing it reveals a job board for the player`s own head with rival bidders (validator: target != self). Self-scaling with CaaS activity + notoriety; losing bidders become an emergent rogues` gallery. On-doctrine with V22 PROTECT THE ZERO.',
+      dependsOn: ['GAME_MISSIONS'],
+      status: 'candidate',
+    },
+    {
+      name: 'Void Distance leaderboard record',
+      purpose: ['persistence', 'game_loop'],
+      kind: 'data_model',
+      description:
+        'A V20-store run record for the cursed-speedrun: furthest depth, time survived beyond safe radius, vehicle, seed/route direction, mods enabled, wrongness tier reached, cause of failure (crash/apache/starvation/void_ejection/car_folded/gave_up). Death/return also mints a V22 narrative hook (text, world_delta).',
+      status: 'candidate',
+    },
+  ],
+  patterns: [
+    {
+      name: 'Limitation-as-lore (procedural repetition reframed)',
+      purpose: ['world_gen'],
+      description:
+        'The engine`s biggest limitation — procedural sameness — becomes its most original feature by framing decay as the simulation fraying because the player exceeded its believable bounds. The recurring NPC and the recycle seam are leaned into as the horror TELL, not hidden.',
+      examples: ['SKYBOX_PLAYBOOK.md'],
+      status: 'recurring',
+    },
+    {
+      name: 'The Fold / treadmill (outward stretches, inward folds)',
+      purpose: ['world_gen', 'vehicle'],
+      description:
+        'Road-void distance is psychological, not physical: true position clamped, scenery recycled, instruments lying, return collapses to a nearby seam. Bounds the simulation (perf win) while selling endless travel; resources stay real so death is real "100km out" while 2 blocks from home.',
+      examples: ['SKYBOX_PLAYBOOK.md'],
+      status: 'recurring',
+    },
+    {
+      name: 'One scalar fans out to many systems',
+      purpose: ['world_gen', 'rendering'],
+      description:
+        'escape_depth -> voidDistortion() -> per-consumer weights. The director/intensity pattern: a single registered value modulates traffic, NPC orientation, controls, sky, dialogue, spawns, road repetition, awareness, and instrument lies — none owning its own distance check (repo no-magic-values law).',
+      examples: ['SKYBOX_PLAYBOOK.md'],
+      promoteTo: 'voidDistortion',
+      status: 'recurring',
+    },
+  ],
+  hazards: [
+    {
+      name: 'Believability-decay is NOT notoriety',
+      purpose: ['perception', 'world_gen'],
+      description:
+        'Two separate axes. Coast = overt social heat the player earned (notoriety -> apache). Road void = covert environmental decay (escape_depth) the player never agreed to, with NO warning UI. Conflating them kills the horror. At extreme depth the void corrupts the awareness system — that is the void acting on notoriety, not notoriety causing the void.',
+      evidence: ['SKYBOX_PLAYBOOK.md §Design disciplines', 'req_1099', 'req_1101'],
+      fix: 'Keep escape_depth and the notoriety blend as independent inputs; the road void must never raise a heat star.',
+      severity: 'high',
+    },
+    {
+      name: 'Instruments lie but never decide',
+      purpose: ['ui', 'world_gen'],
+      description:
+        'There is ONE true escape_depth. Odometer/GPS/minimap/distance-meter are lying VIEWS over it via instrumentLie corruption and may disagree with each other and reality. If an instrument becomes its own source of truth, the treadmill and wrongness curve desync.',
+      evidence: ['SKYBOX_PLAYBOOK.md §4', 'req_1104'],
+      fix: 'Render reported distance through a per-instrument corruption fn; gameplay/wrongness always read the true accumulator.',
+      severity: 'high',
+    },
+    {
+      name: 'Distortion + fold inconsistency must be seeded, never random',
+      purpose: ['chance', 'world_gen'],
+      description:
+        'The "sometimes 3 turns before the city appears" inconsistency and every distortion weight must be a pure seeded function of (depth, seed, position, time). Math.random breaks leaderboard fairness/replay and violates V30 f(seed,t,log).',
+      evidence: ['SKYBOX_PLAYBOOK.md §4', 'req_1104'],
+      severity: 'medium',
+    },
+    {
+      name: 'No hand-outs: positional wrongness, consumable healing',
+      purpose: ['game_loop'],
+      description:
+        'Environmental wrongness eases as you drive back (positional, f(escape_depth)) but player damage/resources do NOT auto-refund — healing is by food/items only. Resource exhaustion is the intended governor; do NOT add an auto-heal-on-return or an invisible distance wall. The return trip is the boss.',
+      evidence: ['SKYBOX_PLAYBOOK.md §3', 'req_1102'],
+      severity: 'high',
+    },
+    {
+      name: 'The coast stays Euclidean — fold is road-only',
+      purpose: ['world_gen'],
+      description:
+        'The treadmill/fold applies ONLY to the road void. The coast is a real water-gap crossing with a real achievement; if its geography folds, surviving the crossing means nothing.',
+      evidence: ['SKYBOX_PLAYBOOK.md §1', 'req_1103'],
+      severity: 'medium',
+    },
+  ],
+};

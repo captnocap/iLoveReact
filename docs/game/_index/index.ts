@@ -29,6 +29,7 @@ import { game_missions } from './records/game_missions';
 import { game_world } from './records/game_world';
 import { hmsc_int } from './records/hmsc_int';
 import { physics3d } from './records/physics3d';
+import { skybox_void } from './records/skybox_void';
 import { request_ledger } from './records/request_ledger';
 
 export type {
@@ -38,7 +39,7 @@ export type {
 
 export const ALL_DOCS: DocIndex[] = [
   bake_geometry, game_activities, game_animation, game_build, game_cutscene,
-  game_missions, game_world, hmsc_int, physics3d, request_ledger,
+  game_missions, game_world, hmsc_int, physics3d, skybox_void, request_ledger,
 ];
 
 // ── flattened views (each row carries its owning doc) ───────────────────────
