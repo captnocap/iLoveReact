@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -405,6 +405,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // opposite side AND another direction at once). Stored as a bitmask in twig state.
   const [mirrorMask, setMirrorMask] = useHotState('studio:mirrorMask', 0);
   const mirrorAxes = useMemo(() => ([0, 1, 2] as (0 | 1 | 2)[]).filter((a) => mirrorMask & (1 << a)), [mirrorMask]);
+  // SYMMETRY CHECK (req_1191): live "is it symmetric?" badge for the symmetrize axis
+  // (first enabled mirror plane, else X). Memoized on the committed mesh so camera
+  // moves don't recompute it.
+  const symAxis = (mirrorAxes[0] ?? 0) as 0 | 1 | 2;
+  const symReport = useMemo(() => (activePart ? symmetryReport(activePart.mesh, symAxis) : null), [activePart?.id, activePart?.version, symAxis]);
   const scaleFigure = useMemo(() => {
     const doc = GAME_FIGURE.generateFace(SCALE_FIGURE_SEED);
     const fparts = buildPartRender(doc, GAME_FIGURE.hedDepthGrid(doc), SCALE_FIGURE_CART_KEY, SCALE_FIGURE_SEED);
@@ -1469,6 +1474,14 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   <Pressable onPress={() => doSym(false)} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: STUDIO.mirrorAxisColors[symAxis] }}>
                     <Text fontSize={10} color={STUDIO.mirrorAxisColors[symAxis]} style={{ fontFamily: 'monospace' }}>keep −{ax}</Text>
                   </Pressable>
+                  {/* SYMMETRY BADGE (req_1191): live ✓ / ⚠ N off across the centre. */}
+                  {symReport ? (
+                    <Box style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: symReport.unmatched === 0 ? '#10261a' : '#2e1616', borderWidth: 1, borderColor: symReport.unmatched === 0 ? '#2f7a4f' : '#a14545' }}>
+                      <Text fontSize={10} color={symReport.unmatched === 0 ? '#7fd6a0' : '#f0a0a0'} style={{ fontFamily: 'monospace' }}>
+                        {symReport.unmatched === 0 ? `✓ symmetric ${ax}` : `⚠ ${symReport.unmatched} off ${ax}`}
+                      </Text>
+                    </Box>
+                  ) : null}
                 </>
               );
             })() : null}

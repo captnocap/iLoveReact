@@ -290,6 +290,27 @@ export function symmetrize(m: EditMesh, axis: 0 | 1 | 2, keepPositive: boolean, 
   return { ...m, verts, faces, mounts: mounts.length ? mounts : m.mounts };
 }
 
+/** SYMMETRY CHECK (req_1191): is the part symmetric across its CENTRE on `axis`?
+ *  The plane sits at the bbox centre on that axis ("centre of the radius"); a vert is
+ *  matched if a vert exists at its reflection (within `dp` decimals). Returns the
+ *  centre, how many verts have NO mirror twin (0 = symmetric — a drifted vertex shows
+ *  as 2: itself + its now-orphaned twin), and the total. Drives the live badge. Pure. */
+export function symmetryReport(m: EditMesh, axis: 0 | 1 | 2, dp = 4): { center: number; unmatched: number; total: number } {
+  if (m.verts.length === 0) return { center: 0, unmatched: 0, total: 0 };
+  let lo = Infinity, hi = -Infinity;
+  for (const v of m.verts) { if (v[axis] < lo) lo = v[axis]; if (v[axis] > hi) hi = v[axis]; }
+  const c = (lo + hi) / 2;
+  const key = (p: V3) => `${p[0].toFixed(dp)},${p[1].toFixed(dp)},${p[2].toFixed(dp)}`;
+  const have = new Set<string>();
+  for (const v of m.verts) have.add(key(v));
+  let unmatched = 0;
+  for (const v of m.verts) {
+    const r: V3 = [v[0], v[1], v[2]]; r[axis] = 2 * c - r[axis];
+    if (!have.has(key(r))) unmatched += 1;
+  }
+  return { center: c, unmatched, total: m.verts.length };
+}
+
 /** An undirected edge as a sorted index pair (the dedupe key form). */
 export type Edge = readonly [number, number];
 

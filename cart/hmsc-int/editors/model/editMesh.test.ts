@@ -6,7 +6,7 @@ import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import {
   addMount, addMountReflections, updateMountMirrored, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
-  flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
+  flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
@@ -614,6 +614,20 @@ test('symmetrize rebuilds the far half as an exact mirror — drift is erased (r
   const symOther = symmetrize(asym, 0, false); // keep −x (the clean side)
   const bo = vertsBounds(symOther, symOther.verts.map((_, i) => i));
   assert(approx(bo.size[1], 2), 'keeping the clean −x half restores the original height (drift gone)');
+});
+
+test('symmetryReport flags a drifted vert and clears after symmetrize (req_1191)', () => {
+  const box = cuboid(2, 2, 2);
+  assertEqual(symmetryReport(box, 0).unmatched, 0, 'a clean box is symmetric across X (0 off)');
+  assert(approx(symmetryReport(box, 0).center, 0), 'the centre is the bbox middle (x=0)');
+  // drift one +x vert → it + its orphaned twin are now unmatched (2 off)
+  const driftMe = box.verts.findIndex((v) => v[0] > 0);
+  const asym = translateVerts(box, [driftMe], [0, 0.5, 0]);
+  assert(symmetryReport(asym, 0).unmatched > 0, 'the drift is detected as not symmetric');
+  // symmetrize repairs it → back to 0 off
+  assertEqual(symmetryReport(symmetrize(asym, 0, false), 0).unmatched, 0, 'symmetrize restores symmetry (0 off)');
+  // a centred box is NOT symmetric across Y here (it is, actually) but a shifted one is reported about its own centre
+  assertEqual(symmetryReport(box, 1).unmatched, 0, 'symmetric about its Y centre too');
 });
 
 test('facesUsingVerts / facesUsingEdges resolve a selection to faces (req_1020)', () => {
