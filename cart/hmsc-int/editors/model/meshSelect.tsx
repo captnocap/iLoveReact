@@ -218,5 +218,13 @@ export function SelectionOverlay(props: {
     });
   }
 
-  return <>{out}</>;
+  // ISOLATE the overlay's many elements (one Line per edge + per-vert/face Dots) in
+  // ONE full-fill container so they count as a SINGLE child of the viewport — NOT
+  // hundreds of flattened direct siblings. A dense (loop-cut) mesh used to spill past
+  // the layout MAX_CHILDREN=512 cap and EVICT the trailing siblings — the toolbars —
+  // so "all my tools vanished after a cut" (req_1179/1180). `pointerEvents:'none'`
+  // keeps picking/orbit reaching the viewport beneath; `overflow:'visible'` so lines
+  // at the edges aren't clipped. (>512 elements now only drop a few wireframe lines
+  // INSIDE the overlay — never the tools.)
+  return <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>{out}</Box>;
 }
