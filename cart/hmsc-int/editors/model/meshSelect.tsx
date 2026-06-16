@@ -25,7 +25,10 @@ const C_DOT = '#8fa6c0';
 // 'rig' authors the part's pivot + joints (req_1025); it selects rig handles, not
 // mesh elements, so the element machinery (pickElement/applyPick/SelectionOverlay)
 // treats it like 'object' (a no-op) — the viewport runs a dedicated rig branch.
-export type SelMode = 'object' | 'vertex' | 'edge' | 'face' | 'rig';
+// 'paint' colours the atlas texels directly on the 3D faces (meshPaint.tsx); like
+// 'rig' it selects no mesh element, so the element machinery treats it as a no-op
+// and the viewport runs a dedicated paint branch.
+export type SelMode = 'object' | 'vertex' | 'edge' | 'face' | 'rig' | 'paint';
 export type Selection = { verts: Set<number>; edges: Set<number>; faces: Set<number> };
 export function emptySelection(): Selection { return { verts: new Set(), edges: new Set(), faces: new Set() }; }
 export function selectionCount(s: Selection, mode: SelMode): number {

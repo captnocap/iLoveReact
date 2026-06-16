@@ -49,6 +49,7 @@ import {
   SelectionOverlay, makeProjector, orbitalEyeJS, pickElement, applyPick, emptySelection, selectionCount,
   type SelMode, type Selection, type CameraSnap,
 } from './meshSelect';
+import { pickFaceTexel, brushTexels, faceTexelRect, PaintGridOverlay, type PaintCells, type PaintTarget, type FaceHit } from './meshPaint';
 import {
   TransformGizmo, NormalHandle, AXIS_DIR, axisScreen, dragWorldDistance, pickGizmoHandle, pickNormalHandle, rotationSign, selectionVertIndices, selectionFaceIndices,
   type GizmoTool, type GizmoHit,
@@ -59,6 +60,10 @@ const T = GAME_CHROME.tokens.color;
 const STEP_BTN = { paddingLeft: 7, paddingRight: 7, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' } as const;
 // camera-smoothing presets cycled by the 'smooth' button — 0 = direct (Blockbench).
 const SMOOTH_PRESETS = [0, 24, 80, 160];
+// PAINT mode palette (Phase 5c) — a compact spread; the user paints face texels with
+// the active swatch. The eraser (null colour) clears cells. Brush sizes = texel diam.
+const PAINT_SWATCHES = ['#d94c4c', '#e08c3a', '#e9d24a', '#5ec26a', '#4aa3ff', '#8a5bd6', '#1c1f26', '#f2f2f2'];
+const PAINT_BRUSH_SIZES = [1, 2, 3, 5];
 
 // SCALE GHOST (req_1165): a static reference figure — THE in-game player at its
 // true height (collider 1.65 m, visual head-top ~2.04 m, RULED R4) — stood beside
@@ -463,7 +468,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // imageUrl = a RE-UPLOADED whole-sheet texture (a data: URL so a same-path re-import
   // still refreshes past the host's content-hashed image cache); sliceImages = per-face
   // re-uploads keyed "partId:faceIndex"; imageRev bumps each import to force a re-bake.
-  const [tex, setTex] = useHotState<{ texels: number; type: TextureType; color: string; name: string; imageUrl?: string; sliceImages?: Record<string, string>; imageRev?: number } | null>('studio:tex', null);
+  const [tex, setTex] = useHotState<{ texels: number; type: TextureType; color: string; name: string; imageUrl?: string; sliceImages?: Record<string, string>; imageRev?: number; paint?: PaintCells; paintRev?: number } | null>('studio:tex', null);
+  // PAINT mode (Phase 5c): the current brush colour + size (tool prefs, TWIG). The
+  // painted texels themselves ride `tex.paint` (texture data, beside imageUrl). A
+  // null colour = ERASER (clears cells under the brush).
+  const [paintColor, setPaintColor] = useHotState<string | null>('studio:paintColor', PAINT_SWATCHES[0]);
+  const [paintBrush, setPaintBrush] = useHotState<number>('studio:paintBrush', 1);
+  // the face/texel under the cursor in paint mode → the live grid overlay + hover
+  // cell. Plain ref+rerender (not state) so onMove hover tracking stays cheap.
+  const [paintHover, setPaintHover] = useState<FaceHit | null>(null);
+  const paintingRef = useRef(false);
   // the Create Texture dialog (req_1068) — transient, not a twig.
   const [texDialog, setTexDialog] = useState(false);
   // the import-texture dialog (req_1079): { slice } when re-uploading ONE face, else
@@ -719,8 +733,12 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     setRigDraft(null);
     rigDragRef.current = null;
     setRigDragAxis(null);
+    setPaintHover(null);
+    paintingRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePart?.id]);
+  // Leaving paint mode drops the grid overlay + any in-flight stroke.
+  useEffect(() => { if (selMode !== 'paint') { setPaintHover(null); paintingRef.current = false; } }, [selMode]);
   // Entering rig mode SPAWNS the gizmo on the pivot immediately (req_1051) — the
   // pivot is always present, so default-select it so the 3-axis move gizmo is right
   // there to grab (drag the into-screen axis for depth). Runs only on mode ENTRY
@@ -768,7 +786,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         }
         return;
       }
-      if (selMode === 'object' || !activePart || lc || autoFix) return;
+      if (selMode === 'object' || selMode === 'paint' || !activePart || lc || autoFix) return;
       const mesh = activePart.mesh;
       if (key === 'a' && (e?.ctrlKey || e?.metaKey)) {
         if (selMode === 'face') setSel({ verts: new Set(), edges: new Set(), faces: new Set(mesh.faces.map((_, i) => i)) });
@@ -798,6 +816,40 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     return { eye: orbitalEyeJS(target, lookRef.current.yaw, lookRef.current.pitch, distRef.current), target, fov: fovRef.current, aspect: (r.width || 1) / (r.height || 1), w: r.width || 1, h: r.height || 1, near: 0.02 };
   };
 
+  // ── PAINT mode (Phase 5c) ──
+  // every part the paint ray can hit, with its live mesh + render lift.
+  const paintTargets = (): PaintTarget[] => props.parts.map((p) => ({ partId: p.id, mesh: p.mesh, lift: p.lift }));
+  // Entering paint needs a texture (distinct per-face atlas slots — else every face
+  // shares the full square and paint bleeds). Make a default one (the textureize
+  // pack) if none exists, then show it. Returns the texels so the caller can pick.
+  const ensureTexture = (): number => {
+    if (tex) { setTexView(true); return tex.texels; }
+    const result = textureizeScene(props.parts.map((p) => p.mesh), DEFAULT_TEXTURE_OPTIONS, STUDIO.unitsPerTile);
+    result.meshes.forEach((mesh, i) => { if (mesh !== props.parts[i].mesh) props.onEditMesh(props.parts[i].id, mesh); });
+    setTex({ texels: result.texels, type: DEFAULT_TEXTURE_OPTIONS.type, color: DEFAULT_TEXTURE_OPTIONS.color, name: DEFAULT_TEXTURE_OPTIONS.name });
+    setTexView(true);
+    return result.texels;
+  };
+  // Paint (or erase) the texels under (sx,sy). Raycasts the frontmost uv-mapped face,
+  // stamps the brush INSIDE that face's slot (clamped — no spill to a neighbour), and
+  // commits the cells onto tex.paint with a bumped paintRev (re-bakes the atlas). A
+  // null paintColor erases (drops the covered cells).
+  const paintAt = (sx: number, sy: number) => {
+    if (!tex) return;
+    const hit = pickFaceTexel(paintTargets(), camSnap(), sx, sy, tex.texels);
+    setPaintHover(hit);
+    if (!hit) return;
+    const cells = brushTexels(hit.tx, hit.ty, paintBrush, hit.rect);
+    const next: PaintCells = { ...(tex.paint ?? {}) };
+    let changed = false;
+    for (const [tx, ty] of cells) {
+      const key = `${tx}:${ty}`;
+      if (paintColor == null) { if (key in next) { delete next[key]; changed = true; } }
+      else if (next[key] !== paintColor) { next[key] = paintColor; changed = true; }
+    }
+    if (changed) setTex({ ...tex, paint: next, paintRev: (tex.paintRev ?? 0) + 1 });
+  };
+
   const sendOrbit = () => ctlRef.current?.setOrbit({ target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: distRef.current, fov: fovRef.current, zoom: 1 });
 
   useEffect(() => {
@@ -816,6 +868,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
 
   const onDown = (e: any) => {
     snapGenRef.current += 1;
+    // PAINT mode: a press paints the texel under the cursor and arms drag-painting
+    // (no orbit while painting — you draw on the model). The brush is clamped to the
+    // hit face's atlas slot, so a stroke at the edge never bleeds onto a neighbour.
+    if (selMode === 'paint') {
+      const r = rectRef.current;
+      paintingRef.current = true;
+      paintAt(Number(e?.x ?? 0) - r.x, Number(e?.y ?? 0) - r.y);
+      return;
+    }
     // While the loop-cut popup is open, the SLIDE gizmo on the cut comes first
     // (drag the cut-axis arrow to move the cut, req_1022); anywhere else just
     // orbits, so the user can rotate to inspect the live preview.
@@ -937,6 +998,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     lastMoveRef.current = nowMs();
   };
   const onMove = (e: any) => {
+    // PAINT mode: while pressed, keep stamping along the drag; otherwise just track
+    // the hovered face/texel so the grid overlay + hover cell follow the cursor.
+    if (selMode === 'paint') {
+      const r = rectRef.current;
+      const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
+      if (paintingRef.current) paintAt(sx, sy);
+      else if (tex) setPaintHover(pickFaceTexel(paintTargets(), camSnap(), sx, sy, tex.texels));
+      return;
+    }
     // RIG drag: move the selected pivot/joint along the grabbed axis. Snaps by
     // default (req_1023); previews into rigDraft (commit-on-release), so the mesh
     // isn't re-written per move (pivot/joints don't change geometry anyway).
@@ -1047,6 +1117,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     l.yaw = nextYaw; l.pitch = nextPitch;
   };
   const onUp = () => {
+    if (paintingRef.current) { paintingRef.current = false; return; } // end a paint stroke
     setGizmoReadout(null); // the drag is ending — drop the live step readout
     // end a loop-cut slide (the offset already lives in lc; nothing to commit —
     // Apply commits the whole cut). Just drop the drag + clear the highlight.
@@ -1315,7 +1386,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           color={tex.color}
           imageUrl={tex.imageUrl}
           sliceImages={tex.sliceImages}
-          sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}`}
+          paint={tex.paint}
+          sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}.${tex.paintRev ?? 0}`}
         />
       ) : null}
 
@@ -1362,7 +1434,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         </Row>
       </Row>
 
-      {activePart && activeMesh && selMode !== 'object' && selMode !== 'rig'
+      {activePart && activeMesh && selMode !== 'object' && selMode !== 'rig' && selMode !== 'paint'
         ? <SelectionOverlay
             mesh={activeMesh}
             partLift={activePart.lift}
@@ -1371,6 +1443,20 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                maps onto the freshly-cut mesh, so highlighting it would jump to a
                random face. Show the cut wireframe with NO stale highlight. */
             selection={lc ? emptySelection() : sel}
+            camSnap={camSnap}
+          />
+        : null}
+
+      {/* PAINT grid overlay (Phase 5c): the NORMALIZED texel grid on the face under
+          the cursor + the cell about to be painted, so you see where paint lands. */}
+      {selMode === 'paint' && tex && paintHover && props.parts[paintHover.partIndex]
+        ? <PaintGridOverlay
+            mesh={props.parts[paintHover.partIndex].mesh}
+            lift={props.parts[paintHover.partIndex].lift}
+            faceIndex={paintHover.faceIndex}
+            texels={tex.texels}
+            hover={{ tx: paintHover.tx, ty: paintHover.ty }}
+            color={paintColor ?? '#ffffff'}
             camSnap={camSnap}
           />
         : null}
@@ -1427,16 +1513,49 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           the info/diag strip). Left-aligned + wraps so a dense selection never
           overflows off-screen; a faint bar groups them as one real toolbar. */}
       <Row style={{ position: 'absolute', left: 8, right: 8, top: 40, gap: 4, rowGap: 4, alignItems: 'center', flexWrap: 'wrap', paddingLeft: 6, paddingRight: 6, paddingTop: 5, paddingBottom: 5, borderRadius: 7, backgroundColor: '#0a111caa', borderWidth: 1, borderColor: '#1c2940' }}>
-        {(['object', 'vertex', 'edge', 'face', 'rig'] as SelMode[]).map((m) => {
+        {(['object', 'vertex', 'edge', 'face', 'rig', 'paint'] as SelMode[]).map((m) => {
           const on = selMode === m;
           const n = selectionCount(sel, m);
           const disabled = m !== 'object' && !activePart;
           return (
-            <Pressable key={m} onPress={() => { if (!disabled) setSelMode(m); }} style={{ ...STEP_BTN, opacity: disabled ? 0.4 : 1, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
+            <Pressable key={m} onPress={() => { if (disabled) return; if (m === 'paint') ensureTexture(); setSelMode(m); }} style={{ ...STEP_BTN, opacity: disabled ? 0.4 : 1, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
               <Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{m}{on && n > 0 ? ` ·${n}` : ''}</Text>
             </Pressable>
           );
         })}
+        {/* PAINT mode (Phase 5c): the swatch palette + eraser + brush size. Painting
+            the 3D faces colours the atlas texels INSIDE each face's slot (no bleed). */}
+        {selMode === 'paint' ? (
+          <>
+            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+            {PAINT_SWATCHES.map((c) => {
+              const on = paintColor === c;
+              return (
+                <Pressable key={c} onPress={() => setPaintColor(c)} style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: c, borderWidth: on ? 2 : 1, borderColor: on ? '#ffffff' : '#0008' }} />
+              );
+            })}
+            {/* eraser — paints "nothing" (drops the covered cells). */}
+            <Pressable onPress={() => setPaintColor(null)} style={{ ...STEP_BTN, backgroundColor: paintColor == null ? '#2a3f5e' : '#13233aee', borderColor: paintColor == null ? '#5b8fd6' : '#2c4a6a' }}>
+              <Text fontSize={10} color={paintColor == null ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>erase</Text>
+            </Pressable>
+            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+            <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>brush</Text>
+            {PAINT_BRUSH_SIZES.map((s) => {
+              const on = paintBrush === s;
+              return (
+                <Pressable key={s} onPress={() => setPaintBrush(s)} style={{ ...STEP_BTN, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
+                  <Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{s}</Text>
+                </Pressable>
+              );
+            })}
+            {/* clear all paint on this texture. */}
+            {tex?.paint && Object.keys(tex.paint).length > 0 ? (
+              <Pressable onPress={() => { if (tex) setTex({ ...tex, paint: {}, paintRev: (tex.paintRev ?? 0) + 1 }); }} style={{ ...STEP_BTN, borderColor: '#a14545' }}>
+                <Text fontSize={10} color="#f0a0a0" style={{ fontFamily: 'monospace' }}>clear paint</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
         {/* RIG mode: add a joint, or opt the part into a pivot (req_1054 — pivots
             are opt-in; a body is joints-only). The gizmo on the selected handle
             does the placing — no move/resize toggle. */}
@@ -1482,7 +1601,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             </Box>
           </>
         ) : null}
-        {selMode !== 'rig' ? (
+        {selMode !== 'rig' && selMode !== 'paint' ? (
           <>
             <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
             {(['move', 'resize', 'rotate'] as GizmoTool[]).map((tl) => {

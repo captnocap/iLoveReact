@@ -15,6 +15,7 @@ import { memo } from 'react';
 import { Box, Image, StaticSurface, Text } from '@reactjit/primitives';
 import { islandColorFor, type TextureType } from './textureize';
 import { storedUVLayout, type V2, type EditMesh } from './editMesh';
+import { paintRuns, type PaintCells } from './meshPaint';
 import { STUDIO } from './Studio';
 
 /** The one live texture key every part's mesh samples (the cutout idiom). */
@@ -40,10 +41,15 @@ export type ScenePart = { id: string; mesh: EditMesh };
 /** The offscreen sprite-map capture for the WHOLE scene. `sig` (meshRev + atlas
  *  params) drives the re-bake: when it changes the memo re-renders, the capture
  *  subtree gets fresh identity, and the StaticSurface re-captures. */
-export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts: ScenePart[]; texels: number; type: TextureType; color: string; imageUrl?: string; sliceImages?: Record<string, string>; sig: string }) {
+export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts: ScenePart[]; texels: number; type: TextureType; color: string; imageUrl?: string; sliceImages?: Record<string, string>; paint?: PaintCells; sig: string }) {
   const px = STUDIO.textureAtlasPx;
   const cells = Math.max(2, STUDIO.textureCheckerCells);
   const cell = px / cells;
+  // the user's PAINT (Phase 5c) — texel cells coloured by painting the 3D faces,
+  // merged into horizontal runs (far fewer boxes). Scaled from atlas texels to px;
+  // drawn on TOP of the base art so manual paint always wins. One texel = `tpx` px.
+  const tpx = px / Math.max(1, props.texels);
+  const runs = props.paint ? paintRuns(props.paint) : [];
 
   // the checkerboard backdrop (the UV-test ground): light base + dark cells.
   const darkCells: { x: number; y: number }[] = [];
@@ -115,6 +121,15 @@ export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts:
             </Box>
           );
         })}
+        {/* PAINT (Phase 5c): the painted texel runs, on top of everything. Isolated
+            in one container so their box count keeps its own layout-child budget. */}
+        {runs.length > 0 ? (
+          <Box style={{ position: 'absolute', left: 0, top: 0, width: px, height: px }}>
+            {runs.map((r, i) => (
+              <Box key={`p${i}`} style={{ position: 'absolute', left: r.x * tpx, top: r.y * tpx, width: Math.max(1, r.w * tpx), height: Math.max(1, tpx), backgroundColor: r.color }} />
+            ))}
+          </Box>
+        ) : null}
         {islands.length === 0 && !whole ? (
           <Text fontSize={11} color="#5b6b80" style={{ position: 'absolute', left: 8, top: 8, fontFamily: 'monospace' }}>no unwrapped faces</Text>
         ) : null}
