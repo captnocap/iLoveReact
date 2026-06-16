@@ -21,7 +21,7 @@
 // Scale (req_0956): 1 tile = 1 m, matching the world (floors/walls are 3×3 m).
 // Every value here is a named STUDIO tunable, not an inline magic number.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { callHost } from '@reactjit/runtime/ffi';
 import { useHotState, useInterval, useRerender } from '@reactjit/hooks';
 import { Box, Col, Pressable, Row, Scene3D, Text, TextInput } from '@reactjit/primitives';
@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, hasPivot, loopCutPositions, loopCutRange, meshEdges, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setPivot, splitConcaveFaces, tagOneFace, translateVerts, updateMount, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, tagOneFace, translateVerts, updateMount, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -116,6 +116,10 @@ export const STUDIO = {
   /** SCALE GHOST (req_1165): clearance (meters) between the model's bounding
    *  radius and the reference figure, so the player stands just clear of the work. */
   scaleFigureGapMeters: 0.5,
+  /** GLASS (req_1181): how the editor renders a face marked glass — a cool neutral
+   *  architectural pane at the materials.ts Glass opacity (0.34). */
+  glassColor: '#a9cbe0',
+  glassOpacity: 0.34,
   /** the SELECTED face is shaded this vivid color (req_0986) — distinct from the
    *  pastel part tints so the active face is unmistakable. */
   selectFaceColor: '#ff8a3d',
@@ -353,6 +357,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       def: { id: `studio.${part.id}`, generate: () => part.geo, defaults: {} },
       dynKey: `studio.s${index}~${part.id}.${part.version}`,
       material: { color: part.color },
+      // GLASS (req_1181): the part's translucent faces lowered as a separate
+      // see-through pass over the opaque mesh. null when the part has no glass.
+      glassDef: part.glassGeo ? { id: `studio.glass.${part.id}`, generate: () => part.glassGeo!, defaults: {} } : null,
+      glassDynKey: `studio.g${index}~${part.id}.${part.version}`,
       // lift is FROZEN at mint (studioModel) — editing verts moves them in place,
       // never re-seats the whole part on the grid.
       position: [0, part.lift, 0] as Vec3,
@@ -1149,7 +1157,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     return placed.map((p) => (p.key === draft.partId
       // ONE fixed dyn slot ('studio.draft') for whatever part is being dragged —
       // never a per-part slot (req_1008: slots never free).
-      ? { ...p, def: { id: `studio.${draft.partId}`, generate: () => editMeshToGeometry(draft.mesh), defaults: {} }, dynKey: `studio.draft~${draft.partId}.${draft.seq}` }
+      ? { ...p, def: { id: `studio.${draft.partId}`, generate: () => editMeshToGeometry(draft.mesh, (f) => !f.glass), defaults: {} }, dynKey: `studio.draft~${draft.partId}.${draft.seq}` }
       : p));
   }, [placed, draft]);
 
@@ -1200,14 +1208,24 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           // material '#ffffff' lets the texture show through (the cutout idiom).
           const textured = texView && !!tex;
           return (
-            <Scene3D.Mesh
-              key={p.key}
-              geometry={p.def}
-              dynamicKey={p.dynKey}
-              material={textured ? '#ffffff' : p.material}
-              textureKey={textured ? STUDIO_TEXTURE_KEY : undefined}
-              position={p.position}
-            />
+            <Fragment key={p.key}>
+              <Scene3D.Mesh
+                geometry={p.def}
+                dynamicKey={p.dynKey}
+                material={textured ? '#ffffff' : p.material}
+                textureKey={textured ? STUDIO_TEXTURE_KEY : undefined}
+                position={p.position}
+              />
+              {/* GLASS (req_1181): translucent pass for this part's window faces. */}
+              {p.glassDef ? (
+                <Scene3D.Mesh
+                  geometry={p.glassDef}
+                  dynamicKey={p.glassDynKey}
+                  material={{ color: STUDIO.glassColor, opacity: STUDIO.glassOpacity }}
+                  position={p.position}
+                />
+              ) : null}
+            </Fragment>
           );
         })}
         {faceHi ? (
@@ -1412,6 +1430,38 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 </Pressable>
               </>
             ) : null}
+            {/* face ops on ANY face selection: flip winding (req_1182) + glass toggle
+                (req_1181). Flip reverses the normal when Create Face guessed wrong;
+                glass marks the face(s) as a translucent, un-textured pane. */}
+            {selMode === 'face' && activePart && sel.faces.size >= 1 ? (() => {
+              const faceList = [...sel.faces];
+              const allGlass = faceList.every((i) => activePart.mesh.faces[i]?.glass);
+              return (
+                <>
+                  <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+                  {/* flip — reverse the selected face(s) so the normal points the other
+                      way (fixes an upside-down Create Face). */}
+                  <Pressable
+                    onPress={() => {
+                      let out = activePart.mesh;
+                      for (const fi of faceList) out = flipFace(out, fi);
+                      props.onEditMesh(activePart.id, out);
+                    }}
+                    style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
+                  >
+                    <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>flip</Text>
+                  </Pressable>
+                  {/* glass — toggle the face(s) between a textured surface and a
+                      translucent window pane (renders see-through, skips texturing). */}
+                  <Pressable
+                    onPress={() => props.onEditMesh(activePart.id, setFaceGlass(activePart.mesh, faceList, !allGlass))}
+                    style={{ ...STEP_BTN, backgroundColor: allGlass ? '#16314a' : '#13233aee', borderColor: allGlass ? '#5b9fd6' : '#2c4a6a' }}
+                  >
+                    <Text fontSize={10} color={allGlass ? '#a9cbe0' : T.dim} style={{ fontFamily: 'monospace' }}>{allGlass ? '▣ glass' : 'glass'}</Text>
+                  </Pressable>
+                </>
+              );
+            })() : null}
             {/* edge-only edit op: extrude (a single selected edge). Mirrors the
                 face extrude — pulls a new edge off + bridges with a quad, then the
                 move gizmo shapes it. Selection follows the NEW edge (req_1163). */}

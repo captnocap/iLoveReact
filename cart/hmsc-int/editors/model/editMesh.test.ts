@@ -6,7 +6,7 @@ import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import {
   addMount, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
-  setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout,
+  flipFace, setFaceGlass, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout,
   vertsCentroid, vertsHalfExtent,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
@@ -487,6 +487,32 @@ test('createFaceFromEdges rejects a branchy / single-open-chain selection (req_1
   const m: EditMesh = { verts, faces: [], mounts: [] };
   assertEqual(createFaceFromEdges(m, [[0, 1], [1, 2], [1, 3]]), null, 'a junction (vert 1 in 3 edges) is rejected');
   assertEqual(createFaceFromEdges(m, [[0, 1], [1, 2]]), null, 'a lone open chain (no second side, not closed) is rejected');
+});
+
+test('flipFace reverses winding so the face normal flips (req_1182)', () => {
+  const box = cuboid(2, 2, 2);
+  const n0 = faceNormal(box, box.faces[0]); // +Y top
+  const f = flipFace(box, 0);
+  const n1 = faceNormal(f, f.faces[0]);
+  assert(approx(n1[0], -n0[0]) && approx(n1[1], -n0[1]) && approx(n1[2], -n0[2]), 'the flipped normal is negated');
+  assertEqual(f.faces[0].loop.length, box.faces[0].loop.length, 'loop length unchanged (only reversed)');
+  // each corner still pairs with ITS uv (loop + uv reversed together)
+  assertEqual(JSON.stringify([...f.faces[0].uv!].reverse()), JSON.stringify(box.faces[0].uv), 'uv reversed in lockstep with the loop');
+});
+
+test('setFaceGlass marks faces, and editMeshToGeometry can split glass vs opaque (req_1181)', () => {
+  const box = cuboid(2, 2, 2);
+  const g = setFaceGlass(box, [0], true);
+  assert(g.faces[0].glass === true, 'face 0 is now glass');
+  assert(!g.faces[1].glass, 'other faces untouched');
+  const full = editMeshToGeometry(g);
+  const opaque = editMeshToGeometry(g, (face) => !face.glass);
+  const glass = editMeshToGeometry(g, (face) => !!face.glass);
+  assert(glass.count > 0, 'the glass pass is non-empty');
+  assertEqual(opaque.count + glass.count, full.count, 'opaque + glass partition the whole mesh, no overlap');
+  const off = setFaceGlass(g, [0], false);
+  assert(!off.faces[0].glass, 'toggling glass off clears the flag (no lingering false)');
+  assert(!('glass' in off.faces[0]) || off.faces[0].glass === undefined, 'cleared glass is undefined, not false');
 });
 
 test('facesUsingVerts / facesUsingEdges resolve a selection to faces (req_1020)', () => {

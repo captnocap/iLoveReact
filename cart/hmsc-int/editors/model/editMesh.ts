@@ -28,6 +28,10 @@ export type EditMeshFace = {
   uv?: V2[];
   /** material/atlas slot. */
   material?: number;
+  /** GLASS (req_1181): this face is a translucent pane (windshield / window), NOT a
+   *  textured surface — it renders see-through and is skipped by the texture atlas.
+   *  Authored per-face in the Studio; the cook carries it as the Glass material. */
+  glass?: boolean;
   /** transient provenance tag — survives a cut so a tool can follow a face's
    *  pieces (the loop-cut selection-persist of req_0989). Not persisted geometry. */
   tag?: number;
@@ -262,10 +266,11 @@ export function faceCentroid(m: EditMesh, face: EditMeshFace): V3 {
  *  face, flat-shade by the Newell normal. Per-corner UVs ride through when the
  *  face carries stored `uv` (Part 5), so a textured display mode samples the
  *  real atlas; faces without UVs pin flat (0.5,0.5). */
-export function editMeshToGeometry(m: EditMesh): GeometryData {
+export function editMeshToGeometry(m: EditMesh, includeFace?: (f: EditMeshFace) => boolean): GeometryData {
   const g = mesh();
   const flat: V2 = [0.5, 0.5];
   for (const face of m.faces) {
+    if (includeFace && !includeFace(face)) continue;
     if (face.loop.length < 3) continue;
     const n = faceNormal(m, face) as Vec3;
     const uv = face.uv;
@@ -1103,6 +1108,25 @@ export function createFaceFromEdges(m: EditMesh, edges: Iterable<Edge>): EditMes
     return loftChains(m, chains[0].verts, chains[1].verts);
   }
   return null;
+}
+
+/** Reverse a face's winding (and its per-corner UV to match) so its NORMAL flips —
+ *  the "flip" fix when Create Face guessed the wrong side and the face came out
+ *  inside-out / upside-down (req_1182). Pure; topology + UV mapping unchanged, only
+ *  the orientation. */
+export function flipFace(m: EditMesh, faceIndex: number): EditMesh {
+  const face = m.faces[faceIndex];
+  if (!face || face.loop.length < 3) return m;
+  const faces = m.faces.slice();
+  faces[faceIndex] = { ...face, loop: face.loop.slice().reverse(), uv: face.uv ? face.uv.slice().reverse() : undefined };
+  return { ...m, faces };
+}
+
+/** Set (or clear) the GLASS flag on a set of faces (req_1181) — marks them as
+ *  translucent panes that render see-through and skip the texture atlas. Pure. */
+export function setFaceGlass(m: EditMesh, faceIndices: Iterable<number>, glass: boolean): EditMesh {
+  const set = faceIndices instanceof Set ? faceIndices : new Set(faceIndices);
+  return { ...m, faces: m.faces.map((f, i) => (set.has(i) ? { ...f, glass: glass || undefined } : f)) };
 }
 
 /** A GeometryData of ONLY the given faces, each pushed out along its own normal

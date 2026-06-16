@@ -35,6 +35,9 @@ export type StudioPart = {
   name: string;
   mesh: EditMesh;
   geo: GeometryData;
+  /** GLASS (req_1181): the translucent faces lowered separately, rendered as a
+   *  see-through pass over the opaque `geo`. null when the part has no glass faces. */
+  glassGeo: GeometryData | null;
   visible: boolean;
   color: string;
   version: number;
@@ -172,7 +175,7 @@ type StackEntry = { event: ModelEvent; tick: Tick };
 const store: { openModelId: string | null; parts: StudioPart[]; activeId: string | null; revision: number; meshRev: number; selectedFaces: number[] } = {
   openModelId: null, parts: [], activeId: null, revision: 0, meshRev: 0, selectedFaces: [],
 };
-const geoCache = new Map<string, { version: number; geo: GeometryData }>();
+const geoCache = new Map<string, { version: number; geo: GeometryData; glassGeo: GeometryData | null }>();
 const undoStack: StackEntry[] = [];
 const redoStack: StackEntry[] = [];
 const listeners = new Set<() => void>();
@@ -190,9 +193,16 @@ function buildParts(): void {
   store.parts = sps.map((sp: StoredPart) => {
     const cached = geoCache.get(sp.id);
     let geo: GeometryData;
-    if (cached && cached.version === sp.version) geo = cached.geo;
-    else { geo = editMeshToGeometry(sp.mesh); geoCache.set(sp.id, { version: sp.version, geo }); }
-    return { id: sp.id, name: sp.name, mesh: sp.mesh, geo, visible: sp.visible, color: sp.color, version: sp.version, lift: sp.lift };
+    let glassGeo: GeometryData | null;
+    if (cached && cached.version === sp.version) { geo = cached.geo; glassGeo = cached.glassGeo; }
+    else {
+      // opaque pass excludes glass faces; glass pass is built only when present so
+      // a glass-free part pays nothing (req_1181).
+      geo = editMeshToGeometry(sp.mesh, (f) => !f.glass);
+      glassGeo = sp.mesh.faces.some((f) => f.glass) ? editMeshToGeometry(sp.mesh, (f) => !!f.glass) : null;
+      geoCache.set(sp.id, { version: sp.version, geo, glassGeo });
+    }
+    return { id: sp.id, name: sp.name, mesh: sp.mesh, geo, glassGeo, visible: sp.visible, color: sp.color, version: sp.version, lift: sp.lift };
   });
 }
 
