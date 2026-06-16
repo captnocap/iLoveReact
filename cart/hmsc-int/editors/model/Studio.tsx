@@ -50,7 +50,7 @@ import {
   type SelMode, type Selection, type CameraSnap,
 } from './meshSelect';
 import {
-  TransformGizmo, AXIS_DIR, axisScreen, dragWorldDistance, pickGizmoHandle, rotationSign, selectionVertIndices, selectionFaceIndices,
+  TransformGizmo, NormalHandle, AXIS_DIR, axisScreen, dragWorldDistance, pickGizmoHandle, pickNormalHandle, rotationSign, selectionVertIndices, selectionFaceIndices,
   type GizmoTool, type GizmoHit,
 } from './meshGizmo';
 import { RigOverlay, pickRigHandle, rigHandles, type RigSel } from './meshRig';
@@ -872,6 +872,27 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         const anchorL = vertsCentroid(mesh, indices);
         const anchorW: MV3 = [anchorL[0], anchorL[1] + activePart.lift, anchorL[2]];
         const proj = makeProjector(camSnap());
+        // EXTRUDE-DEPTH (req_1193): a single selected face shows a normal arrow — grab
+        // it to push the face along its OWN normal (pull out = extrude, push in = inset
+        // a recess), straight even on an angled face (a tire), with a depth readout.
+        if (gizmoTool === 'move' && selMode === 'face' && sel.faces.size === 1) {
+          const face = mesh.faces[[...sel.faces][0]];
+          if (face) {
+            const nrm = faceNormal(mesh, face) as MV3;
+            if (pickNormalHandle(anchorW, nrm, proj, lx, ly)) {
+              const aS = proj(anchorW);
+              const ns = axisScreen(anchorW, nrm, proj);
+              const nHit: GizmoHit = { axis: 0, sign: 1, uniform: false, dir: nrm };
+              gizmoDragRef.current = {
+                partId: activePart.id, tool: 'move', hit: nHit, indices: face.loop.slice(), startMesh: mesh, mirrorAxes,
+                anchorL, anchorScreen: { x: aS.x, y: aS.y }, axis: { dx: ns.dx, dy: ns.dy, pxPerUnit: ns.pxPerUnit },
+                startCx: lx, startCy: ly, startScreenDist: Math.max(8, Math.hypot(lx - aS.x, ly - aS.y)), halfExt: 0, rotSign: 1,
+              };
+              setActiveGizmo(nHit);
+              return;
+            }
+          }
+        }
         const hit = pickGizmoHandle(anchorW, gizmoTool, proj, lx, ly);
         if (hit) {
           const aS = proj(anchorW);
@@ -979,9 +1000,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         readout = `⤢ ×${f.toFixed(2)}`;
       } else if (g.tool === 'move') {
         const t = snapToStep(dragWorldDistance(g.axis, cx - g.startCx, cy - g.startCy), STUDIO.gizmoStepMeters, STUDIO.gizmoStepFineMeters, mods);
-        const u = AXIS_DIR[g.hit.axis];
+        // EXTRUDE-DEPTH (req_1193): a normal handle drags along the face normal (g.hit.dir);
+        // +out / −in, so the readout reads as a depth (negative = sunk into the surface).
+        const u = g.hit.dir ?? AXIS_DIR[g.hit.axis];
         next = translateVerts(g.startMesh, g.indices, [u[0] * t, u[1] * t, u[2] * t]);
-        readout = `${axisLabel} ${fmtUnits(metersToUnits(t))}`;
+        readout = g.hit.dir ? `↕ depth ${fmtUnits(metersToUnits(t))}` : `${axisLabel} ${fmtUnits(metersToUnits(t))}`;
       } else {
         if (g.halfExt < 1e-4) return; // a point/flat axis has no extent to scale
         const raw = dragWorldDistance(g.axis, cx - g.startCx, cy - g.startCy) * g.hit.sign;
@@ -1357,6 +1380,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           Hidden while the loop-cut popup is open (the cut preview owns the view). */}
       {gizmoAnchorWorld && !lc && !autoFix
         ? <TransformGizmo anchorW={gizmoAnchorWorld} tool={gizmoTool} camSnap={camSnap} activeAxis={activeGizmo} />
+        : null}
+
+      {/* EXTRUDE-DEPTH (req_1193): the normal arrow on a single selected face (move
+          tool) — pull out to extrude, push in to inset/cut a recess. */}
+      {gizmoTool === 'move' && selMode === 'face' && activePart && activeMesh && sel.faces.size === 1 && !lc && !autoFix
+        ? (() => {
+            const face = activeMesh.faces[[...sel.faces][0]];
+            if (!face) return null;
+            const fc = faceCentroid(activeMesh, face);
+            return <NormalHandle anchorW={[fc[0], fc[1] + activePart.lift, fc[2]]} dir={faceNormal(activeMesh, face) as MV3} camSnap={camSnap} active={!!activeGizmo?.dir} />;
+          })()
         : null}
 
       {/* Loop-cut SLIDE gizmo (req_1022): drag the cut-axis arrow ON the model to

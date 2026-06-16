@@ -20,8 +20,11 @@ const DEG = Math.PI / 180;
 
 export type GizmoTool = 'move' | 'resize' | 'rotate';
 export type GizmoAxis = 0 | 1 | 2;
-/** a grabbed handle: an axis (+ which end), or the uniform center hub (resize). */
-export type GizmoHit = { axis: GizmoAxis; sign: 1 | -1; uniform: boolean };
+/** a grabbed handle: an axis (+ which end), or the uniform center hub (resize).
+ *  `dir` (req_1193) overrides the world axis with an arbitrary unit direction — the
+ *  extrude-DEPTH handle drags along a face's NORMAL so you sink straight into an
+ *  angled face (a tire) without cutting through. */
+export type GizmoHit = { axis: GizmoAxis; sign: 1 | -1; uniform: boolean; dir?: V3 };
 
 const ROTATE_RING_STEPS = 40; // segments per rotate ring
 
@@ -171,6 +174,43 @@ export function dragWorldDistance(startAxis: { dx: number; dy: number; pxPerUnit
   if (startAxis.pxPerUnit <= 0) return 0;
   const along = dcx * startAxis.dx + dcy * startAxis.dy;
   return along / startAxis.pxPerUnit;
+}
+
+// ── Extrude-depth (normal) handle (req_1193) ─────────────────────────────────────
+// A single double-ended arrow along a face's NORMAL: pull OUT to extrude the face,
+// push IN to inset / cut a recess — straight along the surface even when it's angled
+// (a tire sidewall), so you sink a groove without punching through the far side. The
+// drag reuses the move math (dragWorldDistance + the frozen axis frame), just with
+// the normal as the direction instead of a world axis.
+
+const NORMAL_COLOR = '#ff8a3d'; // the face-highlight orange — distinct from X/Y/Z.
+
+/** True if (cx,cy) grabs the normal-depth arrow (either end) at `anchorW`. */
+export function pickNormalHandle(anchorW: V3, dir: V3, proj: Proj, cx: number, cy: number): boolean {
+  const s = axisScreen(anchorW, dir, proj);
+  if (!s.front || s.pxPerUnit <= 0) return false;
+  for (const sign of [1, -1]) {
+    const hx = s.ax + s.dx * GIZMO.armPx * sign, hy = s.ay + s.dy * GIZMO.armPx * sign;
+    if (Math.min(Math.hypot(cx - hx, cy - hy), segDist(cx, cy, s.ax, s.ay, hx, hy)) <= GIZMO.grabPx) return true;
+  }
+  return false;
+}
+
+/** The normal-depth arrow overlay (self-ticking, drawn over the gizmo). */
+export function NormalHandle(props: { anchorW: V3; dir: V3; camSnap: () => CameraSnap; active?: boolean }) {
+  const repaint = useRerender();
+  useInterval(repaint, 33);
+  const proj = makeProjector(props.camSnap());
+  const s = axisScreen(props.anchorW, props.dir, proj);
+  if (!s.front || s.pxPerUnit <= 0) return null;
+  const c = props.active ? '#ffd24a' : NORMAL_COLOR;
+  const out: any[] = [];
+  for (const sign of [1, -1] as const) {
+    const hx = s.ax + s.dx * GIZMO.armPx * sign, hy = s.ay + s.dy * GIZMO.armPx * sign;
+    out.push(<Arm key={`narm${sign}`} ax={s.ax} ay={s.ay} bx={hx} by={hy} color={c} />);
+    out.push(<ArrowHead key={`nhd${sign}`} x={hx} y={hy} dx={s.dx * sign} dy={s.dy * sign} color={c} />);
+  }
+  return <>{out}</>;
 }
 
 // ── The overlay ────────────────────────────────────────────────────────────────
