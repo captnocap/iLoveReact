@@ -1129,6 +1129,49 @@ export function setFaceGlass(m: EditMesh, faceIndices: Iterable<number>, glass: 
   return { ...m, faces: m.faces.map((f, i) => (set.has(i) ? { ...f, glass: glass || undefined } : f)) };
 }
 
+// ── Mirror / symmetry editing (req_1183) ───────────────────────────────────────
+// Symmetric modeling: edit one side, the other follows mirrored ("pull left here →
+// right pulls there"). Done OP-AGNOSTICALLY — after ANY vertex transform, each moved
+// vert's mirror partner is set to the REFLECTED final position. So move, resize, and
+// rotate all mirror with one code path: we never re-derive the op, just reflect where
+// the verts ended up. Partners are matched by ORIGINAL position so the pairing holds
+// through a drag; a vert with no twin or one on the mirror plane is its own partner
+// and left alone.
+
+/** Map each vert index to its mirror partner across plane `axis = c` (default x=0):
+ *  the vert whose position is the reflection. Self when on the plane or no twin. */
+export function mirrorPartners(m: EditMesh, axis: 0 | 1 | 2, c = 0, dp = 4): number[] {
+  const key = (p: V3) => `${p[0].toFixed(dp)},${p[1].toFixed(dp)},${p[2].toFixed(dp)}`;
+  const byPos = new Map<string, number>();
+  m.verts.forEach((v, i) => byPos.set(key(v), i));
+  return m.verts.map((v, i) => {
+    const r: V3 = [v[0], v[1], v[2]]; r[axis] = 2 * c - v[axis];
+    const p = byPos.get(key(r));
+    return p == null ? i : p;
+  });
+}
+
+/** Reflect each `moved` vert's new position onto its mirror partner (across plane
+ *  `axis = c`) — the symmetry pass applied after a transform. `base` (the pre-drag
+ *  mesh) fixes the pairing; `next` holds the transformed positions. Seam verts (own
+ *  partner) and partners that are themselves in `moved` (both sides selected, or an
+ *  object-mode all-verts move) are skipped so nothing double-applies. Pure. */
+export function mirrorEdit(base: EditMesh, next: EditMesh, moved: Iterable<number>, axis: 0 | 1 | 2, c = 0): EditMesh {
+  const partners = mirrorPartners(base, axis, c);
+  const movedSet = moved instanceof Set ? moved : new Set(moved);
+  const verts = next.verts.map((v) => [v[0], v[1], v[2]] as V3);
+  let touched = false;
+  for (const i of movedSet) {
+    const p = partners[i];
+    if (p === i || movedSet.has(p)) continue;
+    const s = next.verts[i];
+    verts[p] = [s[0], s[1], s[2]];
+    verts[p][axis] = 2 * c - s[axis];
+    touched = true;
+  }
+  return touched ? { ...next, verts } : next;
+}
+
 /** A GeometryData of ONLY the given faces, each pushed out along its own normal
  *  by `push` meters so a shaded overlay sits just above the surface without
  *  z-fighting — the selected-face highlight (req_0986). Fan-triangulated like

@@ -6,7 +6,7 @@ import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import {
   addMount, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
-  flipFace, setFaceGlass, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout,
+  flipFace, mirrorEdit, mirrorPartners, setFaceGlass, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout,
   vertsCentroid, vertsHalfExtent,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
@@ -513,6 +513,36 @@ test('setFaceGlass marks faces, and editMeshToGeometry can split glass vs opaque
   const off = setFaceGlass(g, [0], false);
   assert(!off.faces[0].glass, 'toggling glass off clears the flag (no lingering false)');
   assert(!('glass' in off.faces[0]) || off.faces[0].glass === undefined, 'cleared glass is undefined, not false');
+});
+
+test('mirrorEdit reflects a moved vert onto its X-partner — pull left, right follows (req_1183)', () => {
+  const box = cuboid(2, 2, 2); // verts at x = ±1; partner across x=0 is the ∓1 twin
+  const partners = mirrorPartners(box, 0);
+  // every vert has a real twin (a symmetric box), none is its own partner
+  assert(partners.every((p, i) => p !== i && approx(box.verts[p][0], -box.verts[i][0])), 'each vert pairs with its −x twin');
+  // grab the +x face verts, pull them further +x; the −x twins must move −x by the same.
+  const plusX = box.verts.map((v, i) => i).filter((i) => box.verts[i][0] > 0);
+  const moved = translateVerts(box, plusX, [0.5, 0.2, 0]);
+  const sym = mirrorEdit(box, moved, plusX, 0);
+  for (const i of plusX) {
+    const p = partners[i];
+    assert(approx(sym.verts[p][0], -sym.verts[i][0]), 'partner x is the negative of the moved vert x (mirrored pull)');
+    assert(approx(sym.verts[p][1], sym.verts[i][1]) && approx(sym.verts[p][2], sym.verts[i][2]), 'y/z follow identically');
+  }
+  // the moved side itself is untouched by the mirror pass
+  for (const i of plusX) assert(approx(sym.verts[i][0], box.verts[i][0] + 0.5), 'the dragged side keeps its own move');
+});
+
+test('mirrorEdit skips seam verts and both-sides selections (no double-apply) (req_1183)', () => {
+  // a vert ON the plane is its own partner → left alone; selecting both twins → no mirror.
+  const m: EditMesh = { verts: [[0, 0, 0], [1, 0, 0], [-1, 0, 0]], faces: [], mounts: [] };
+  const partners = mirrorPartners(m, 0);
+  assertEqual(partners[0], 0, 'the seam vert (x=0) is its own partner');
+  const movedSeam = translateVerts(m, [0], [0, 1, 0]);
+  assertEqual(JSON.stringify(mirrorEdit(m, movedSeam, [0], 0).verts), JSON.stringify(movedSeam.verts), 'moving a seam vert mirrors nothing');
+  // selecting BOTH twins (1 and 2) and moving → mirror pass must not fight itself
+  const both = translateVerts(m, [1, 2], [0, 0.3, 0]);
+  assertEqual(JSON.stringify(mirrorEdit(m, both, [1, 2], 0).verts), JSON.stringify(both.verts), 'both-sides selection is left as-is');
 });
 
 test('facesUsingVerts / facesUsingEdges resolve a selection to faces (req_1020)', () => {
