@@ -43,7 +43,7 @@ const SceneUniforms = extern struct {
     ambient_color: [3]f32, // 96
     _pad2: f32 = 0, // 108
     camera_pos: [3]f32, // 112
-    _pad3: f32 = 0, // 124
+    time: f32 = 0, // 124  wrapped wall-clock for the grass pipeline's wind (was _pad3)
     fog_color: [3]f32, // 128  flat fade target (used when fog_sky == 0)
     fog_near: f32, // 140
     fog_far: f32, // 144
@@ -255,6 +255,18 @@ var g_pipeline: ?*wgpu.RenderPipeline = null;
 // and other alpha<1 meshes draw through this in a second, back-to-front pass so
 // they composite over the opaque scene without occluding each other via depth.
 var g_pipeline_transparent: ?*wgpu.RenderPipeline = null;
+// Grass pipeline — same pipeline LAYOUT and vertex layouts as g_pipeline (group0
+// SceneUniforms + group1 diffuse, per-instance model+color), only the shader module
+// differs (shaders.grass_wgsl: vertex wind + procedural wisp cutout + root→tip
+// gradient). Built once in init. Instanced groups whose leader carries the "~grass~"
+// texture-key sentinel swap to this mid-pass (the ~hf~-style host-routing convention).
+var g_grass_pipeline: ?*wgpu.RenderPipeline = null;
+// Water pipeline — twin of g_grass_pipeline (same layout/vertex layouts/blend),
+// only shaders.water_wgsl differs (vertex FBM wave displacement from S.time +
+// fragment deep/shallow/foam/Bayer-dither). Alpha-hashed via discard so it's an
+// opaque-pass draw (depth-write ON, no sorting). Instanced groups whose leader
+// carries the "~water~" tex-key sentinel swap to this mid-pass.
+var g_water_pipeline: ?*wgpu.RenderPipeline = null;
 // Ground-formula pipeline (the data-shape ground — GUIDING_LIGHT). Built ONCE,
 // lazily, the first frame a mesh carries scene3d_ground_formula: the formula is
 // identical for every chunk (only the per-cell D ref stream differs), so one
@@ -599,6 +611,53 @@ pub fn init() void {
         .multisample = .{},
         .fragment = &frag,
     });
+    // Grass companion: same layout/vertex/blend as g_pipeline, depth-write ON (the
+    // blade is alpha-TESTED via discard in the shader, so it's opaque), only the
+    // module differs — wind + procedural wisp cutout + root→tip gradient. The
+    // createRenderPipeline call retains the module, so we release it right after.
+    {
+        const grass_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_grass_shader", .code = shaders.grass_wgsl });
+        if (device.createShaderModule(&grass_desc)) |grass_module| {
+            const grass_frag = wgpu.FragmentState{
+                .module = grass_module,
+                .entry_point = wgpu.StringView.fromSlice("fs_main"),
+                .target_count = 1,
+                .targets = @ptrCast(&color_target),
+            };
+            g_grass_pipeline = device.createRenderPipeline(&.{
+                .layout = pipeline_layout,
+                .vertex = .{ .module = grass_module, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = vert_layouts.len, .buffers = &vert_layouts },
+                .primitive = .{ .topology = .triangle_list, .cull_mode = .back, .front_face = .ccw },
+                .depth_stencil = &depth_stencil,
+                .multisample = .{},
+                .fragment = &grass_frag,
+            });
+            grass_module.release();
+        }
+    }
+    // Water companion: same layout/vertex/blend, depth-write ON (alpha-hashed via
+    // discard → opaque), cull OFF so wave troughs/edges never drop out. Only the
+    // module differs — FBM waves + deep/shallow/foam/Bayer-dither.
+    {
+        const water_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_water_shader", .code = shaders.water_wgsl });
+        if (device.createShaderModule(&water_desc)) |water_module| {
+            const water_frag = wgpu.FragmentState{
+                .module = water_module,
+                .entry_point = wgpu.StringView.fromSlice("fs_main"),
+                .target_count = 1,
+                .targets = @ptrCast(&color_target),
+            };
+            g_water_pipeline = device.createRenderPipeline(&.{
+                .layout = pipeline_layout,
+                .vertex = .{ .module = water_module, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = vert_layouts.len, .buffers = &vert_layouts },
+                .primitive = .{ .topology = .triangle_list, .cull_mode = .none, .front_face = .ccw },
+                .depth_stencil = &depth_stencil,
+                .multisample = .{},
+                .fragment = &water_frag,
+            });
+            water_module.release();
+        }
+    }
     g_sampler = device.createSampler(&.{
         .address_mode_u = .clamp_to_edge,
         .address_mode_v = .clamp_to_edge,
@@ -709,6 +768,8 @@ pub fn deinit() void {
     if (g_instance_buf) |b| b.release();
     if (g_vertex_buffer) |b| b.release();
     if (g_pipeline) |p| p.release();
+    if (g_grass_pipeline) |p| p.release();
+    if (g_water_pipeline) |p| p.release();
     if (g_sky_bind_group) |bg| bg.release();
     if (g_sky_bind_group_layout) |l| l.release();
     if (g_sky_uniform_buffer) |b| b.release();
@@ -1649,6 +1710,9 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
 
     // ── Scene uniforms: ONE write per frame (no dynamic offset). The per-mesh
     //    model matrix + color moved into per-instance vertex attributes below. ──
+    // Wrapped wall-clock (mod 1e6 s) so float32 keeps precision — the grass
+    // pipeline's wind reads S.time. Same wrap drawSky uses for cloud drift.
+    const scene_time: f32 = @as(f32, @floatFromInt(@mod(std.time.milliTimestamp(), 1_000_000))) / 1000.0;
     const scene_u = SceneUniforms{
         .vp = math.m4transpose(vp),
         .light_dir = light_dir,
@@ -1656,6 +1720,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         .light_color = light_color,
         .ambient_color = ambient_color,
         .camera_pos = .{ cam_pos.x, cam_pos.y, cam_pos.z },
+        .time = scene_time,
         .fog_color = fog_color,
         .fog_near = fog_near,
         .fog_far = fog_far,
@@ -1810,6 +1875,11 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     const inst_cap_bytes: u64 = @as(u64, MAX_INSTANCES) * @sizeOf(InstanceData);
     const inst_scratch = &g_inst_scratch; // BSS-resident staging buffer (off the stack)
     var inst_top: u64 = 0;
+    // g_pipeline is the bound pipeline coming in (set above). A sentinel-flagged
+    // group ("~grass~"/"~water~" tex-key) swaps to its companion pipeline for the
+    // draw and we swap back for the next plain group — all three share the exact
+    // pipeline layout, so the bound group0/group1 stay valid across the switch.
+    var cur_special: ?*wgpu.RenderPipeline = null;
     var gi: usize = 0;
     while (gi < mcount) : (gi += 1) {
         if (mvisited[gi]) continue;
@@ -1824,6 +1894,19 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         // scene3d_instance_count — world streaming's per-chunk draws). Falls through
         // to the dynamic path if the retained buffer is full.
         const leader = &scene_node.children[midx[gi]];
+        // Route grass/water groups to their companion pipeline (wind + cutout +
+        // gradient for grass; FBM waves + foam + dither for water). A null key, or
+        // any other key, falls back to the plain mesh pipeline.
+        const want_special: ?*wgpu.RenderPipeline = blk: {
+            const k = leader.scene3d_tex_key orelse break :blk null;
+            if (g_grass_pipeline != null and std.mem.startsWith(u8, k, "~grass~")) break :blk g_grass_pipeline.?;
+            if (g_water_pipeline != null and std.mem.startsWith(u8, k, "~water~")) break :blk g_water_pipeline.?;
+            break :blk null;
+        };
+        if (want_special != cur_special) {
+            pass.setPipeline(want_special orelse g_pipeline.?);
+            cur_special = want_special;
+        }
         if (leader.scene3d_instance_static) {
             if (leader.scene3d_instance_data) |idata| {
                 if (resolveStaticInstances(device, queue, idata, leader.scene3d_instance_stride)) |sd| {

@@ -10,6 +10,7 @@ import { floorTextureKey } from './tileSurface';
 import { Road } from './Road';
 import { CulDeSac, Intersection } from './RoadJunctions';
 import { Prop } from './Prop';
+import { GrassField, BushField } from './GrassField';
 import { Landform } from './Landform';
 import { WaterBodies } from './WaterBody';
 import { nearestLandformCameraHit } from '../world/landforms';
@@ -151,6 +152,14 @@ export const WorldStatics = memo(function WorldStatics(props: {
       {world.props.map((prop) => (
         <Prop key={prop.id} prop={prop} />
       ))}
+      {/* Grass: the painted 'grass'/'grassDry' tiles populated as one instanced
+          blade field (a surface population system, not props). Drawn after the
+          floors it stands on. */}
+      <GrassField world={world} />
+      {/* Bush: painted 'bush' tiles populated as leafy foliage clumps (the same
+          card-population system as grass, bushier geometry — replaces the old
+          solid-sphere bush prop). */}
+      <BushField world={world} />
       {/* Registry-driven landforms (mountains, hills, estates): ONE component for
           every kind — a Heightfield mesh baked from the kind's height function,
           tiled with the surface material, plus any kind decoration (crater lake,
@@ -158,10 +167,12 @@ export const WorldStatics = memo(function WorldStatics(props: {
       {(world.landforms ?? []).map((landform) => (
         <Landform key={landform.id} landform={landform} />
       ))}
-      {/* Bodies of water (world/water): translucent wavy-heightfield volumes at
-          each body's level, drawn AFTER the bed so the terrain reads through as
-          depth. WaterBodies owns the wave clock, so only the water ripples each
-          tick — the static world around it never re-renders. */}
+      {/* Bodies of water (world/water): static flat-heightfield volumes at each
+          body's level, drawn after the bed. All wave motion + the deep/shallow,
+          foam, and Bayer-dither look live in the fixed host "~water~" pipeline
+          (framework/gpu: shaders.water_wgsl), animated from the host clock — so
+          the mesh is static and never re-renders, and /test + the compiled
+          no-V8 loader render water identically. */}
       <WaterBodies bodies={world.waterBodies ?? []} />
     </>
   );

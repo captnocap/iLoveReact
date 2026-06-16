@@ -853,6 +853,310 @@ pub const scene3d_wgsl =
     \\}
 ;
 
+/// Grass pipeline shader — a variant of scene3d_wgsl for the instanced blade field
+/// (the FluffyGrass look). Same uniform layout, same instanced VertexInput, drawn
+/// with the SAME pipeline layout as scene3d so the host just swaps the module for
+/// grass-flagged groups (gpu/3d.zig). Three things differ from scene3d_wgsl:
+///   1. VERTEX wind — the unit-tall blade (uv.y 0=root,1=tip) sways. The gust phase
+///      comes from the blade's WORLD xz, so neighbours share it (a gust ripples
+///      across the field, not per-blade jitter); the bend is weighted by uv.y^1.5
+///      so the root stays planted and only the tip moves. `S.time` is the wrapped
+///      wall-clock the host writes into the (formerly _pad3) uniform slot.
+///   2. FRAGMENT wisp cutout — each card is cut into several tapered blades
+///      procedurally (no texture asset; pure formula), so one card reads as many.
+///   3. FRAGMENT gradient — dark per-instance root tint -> bright lime tip, with
+///      per-blade tip-colour variation, lit with a soft half-lambert (double-sided
+///      blades shouldn't go black on their back).
+pub const grass_wgsl =
+    \\struct SceneUniforms {
+    \\    vp: mat4x4f,
+    \\    light_dir: vec3f,
+    \\    specular_power: f32,
+    \\    light_color: vec3f,
+    \\    _pad1: f32,
+    \\    ambient_color: vec3f,
+    \\    _pad2: f32,
+    \\    camera_pos: vec3f,
+    \\    time: f32,
+    \\    fog_color: vec3f,
+    \\    fog_near: f32,
+    \\    fog_far: f32,
+    \\    fog_sky: f32,
+    \\    _pad4a: f32,
+    \\    _pad4b: f32,
+    \\    sky_horizon: vec3f,
+    \\    _pad5: f32,
+    \\    sky_zenith: vec4f,
+    \\};
+    \\@group(0) @binding(0) var<uniform> S: SceneUniforms;
+    \\@group(1) @binding(0) var diffuse_tex: texture_2d<f32>;
+    \\@group(1) @binding(1) var diffuse_smp: sampler;
+    \\
+    \\struct VertexInput {
+    \\    @location(0) position: vec3f,
+    \\    @location(1) normal: vec3f,
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) model_c0: vec4f,
+    \\    @location(4) model_c1: vec4f,
+    \\    @location(5) model_c2: vec4f,
+    \\    @location(6) model_c3: vec4f,
+    \\    @location(7) inst_color: vec4f,
+    \\};
+    \\struct VertexOutput {
+    \\    @builtin(position) clip_pos: vec4f,
+    \\    @location(0) world_pos: vec3f,
+    \\    @location(1) world_normal: vec3f,
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) inst_color: vec4f,
+    \\    @location(4) @interpolate(linear) screen_y: f32,
+    \\};
+    \\
+    \\fn hash21(p: vec2f) -> f32 {
+    \\    return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453);
+    \\}
+    \\
+    \\@vertex
+    \\fn vs_main(in: VertexInput) -> VertexOutput {
+    \\    var out: VertexOutput;
+    \\    let model = mat4x4f(in.model_c0, in.model_c1, in.model_c2, in.model_c3);
+    \\    var world = model * vec4f(in.position, 1.0);
+    \\    let tipw = pow(clamp(in.uv.y, 0.0, 1.0), 1.5);
+    \\    let phase = world.x * 0.18 + world.z * 0.22 + S.time * 1.5;
+    \\    let sway = sin(phase) + 0.4 * sin(phase * 2.7 + 1.3);
+    \\    let gust = 0.10 + 0.10 * sin(S.time * 0.5 + world.x * 0.05);
+    \\    let bend = sway * gust * tipw;
+    \\    let wind_dir = normalize(vec2f(0.8, 0.6));
+    \\    world.x = world.x + wind_dir.x * bend;
+    \\    world.z = world.z + wind_dir.y * bend;
+    \\    world.y = world.y - abs(bend) * 0.12;
+    \\    out.clip_pos = S.vp * world;
+    \\    out.world_pos = world.xyz;
+    \\    out.world_normal = normalize((model * vec4f(in.normal, 0.0)).xyz);
+    \\    out.uv = in.uv;
+    \\    out.inst_color = in.inst_color;
+    \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
+    \\    return out;
+    \\}
+    \\
+    \\@fragment
+    \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+    \\    let v = clamp(in.uv.y, 0.0, 1.0);
+    \\    // Three sub-blades across the card width — one card reads as many.
+    \\    let nbl = 3.0;
+    \\    let bid = floor(in.uv.x * nbl);
+    \\    let bu = fract(in.uv.x * nbl);
+    \\    let r0 = hash21(vec2f(bid, 1.0));
+    \\    let r1 = hash21(vec2f(bid, 2.0));
+    \\    let max_v = 0.65 + 0.35 * r0;        // each wisp stops at its own height
+    \\    let half_w = (0.30 - 0.26 * v) * (0.55 + 0.45 * r1); // tapers to a point
+    \\    let d = abs(bu - 0.5);
+    \\    var mask = smoothstep(half_w, half_w * 0.55, d);
+    \\    if (v > max_v) { mask = 0.0; }
+    \\    if (mask < 0.5) { discard; }
+    \\    // Dark per-instance root tint -> bright lime tip, varied per blade.
+    \\    let root_col = in.inst_color.rgb;
+    \\    let tip_var = hash21(floor(in.world_pos.xz));
+    \\    let tip_col = mix(vec3f(0.55, 0.78, 0.36), vec3f(0.78, 0.86, 0.42), tip_var);
+    \\    let albedo = mix(root_col, tip_col, pow(v, 1.2));
+    \\    // Soft half-lambert so the blade's back side isn't black.
+    \\    let N = normalize(in.world_normal);
+    \\    let L = normalize(S.light_dir);
+    \\    let ndl = dot(N, L) * 0.5 + 0.5;
+    \\    let lit = albedo * (S.ambient_color + S.light_color * ndl * 0.9);
+    \\    // Aerial fog identical to scene3d_wgsl.
+    \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
+    \\    let g = clamp(in.screen_y * 0.5 + 0.5, 0.0, 1.0);
+    \\    let sky_grad = mix(S.sky_horizon, S.sky_zenith.xyz, pow(g, 0.6));
+    \\    let fog_target = mix(S.fog_color, sky_grad, S.fog_sky);
+    \\    let final_rgb = mix(lit, fog_target, fog_t);
+    \\    return vec4f(final_rgb, 1.0);
+    \\}
+;
+
+/// Stylized water pipeline — the fixed host system behind a "~water~" body
+/// (GUIDING_LIGHT: the DATA is "a water body lives here, this footprint"; the
+/// LOOK is this dumb fixed system, exactly like grass). An instanced batch whose
+/// leader carries the "~water~" tex-key sentinel swaps to g_water_pipeline.
+///
+/// The mesh shipped is a STATIC flat heightfield (top surface at surfaceY +
+/// perimeter skirt to the basin floor — the body's volume). All motion is here,
+/// driven by S.time, so nothing re-bakes per tick:
+///   • vertex: a multi-octave domain-warped sine field (FBM) displaces ONLY the
+///     top surface (weighted by normal.y, so the skirt stays put), in WORLD xz so
+///     waves are continuous across the body and independent of its size.
+///   • fragment: deep→shallow colour by wave height, white foam on crests and at
+///     the shore edge (uv proximity), then an ordered Bayer 8x8 alpha-hash —
+///     that dithered halftone IS the see-through water (discard, no blend pass).
+/// Ported from the beach-viewer water shader (Water_GetWaves / Water_WaveShape),
+/// adapted from UV-space to world-space and from GLSL gl_FragCoord to WGSL's
+/// @builtin(position).
+pub const water_wgsl =
+    \\struct SceneUniforms {
+    \\    vp: mat4x4f,
+    \\    light_dir: vec3f,
+    \\    specular_power: f32,
+    \\    light_color: vec3f,
+    \\    _pad1: f32,
+    \\    ambient_color: vec3f,
+    \\    _pad2: f32,
+    \\    camera_pos: vec3f,
+    \\    time: f32,
+    \\    fog_color: vec3f,
+    \\    fog_near: f32,
+    \\    fog_far: f32,
+    \\    fog_sky: f32,
+    \\    _pad4a: f32,
+    \\    _pad4b: f32,
+    \\    sky_horizon: vec3f,
+    \\    _pad5: f32,
+    \\    sky_zenith: vec4f,
+    \\};
+    \\@group(0) @binding(0) var<uniform> S: SceneUniforms;
+    \\@group(1) @binding(0) var diffuse_tex: texture_2d<f32>;
+    \\@group(1) @binding(1) var diffuse_smp: sampler;
+    \\
+    \\struct VertexInput {
+    \\    @location(0) position: vec3f,
+    \\    @location(1) normal: vec3f,
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) model_c0: vec4f,
+    \\    @location(4) model_c1: vec4f,
+    \\    @location(5) model_c2: vec4f,
+    \\    @location(6) model_c3: vec4f,
+    \\    @location(7) inst_color: vec4f,
+    \\};
+    \\struct VertexOutput {
+    \\    @builtin(position) clip_pos: vec4f,
+    \\    @location(0) world_pos: vec3f,
+    \\    @location(1) world_normal: vec3f,
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) inst_color: vec4f,
+    \\    @location(4) wave: f32,
+    \\    @location(5) @interpolate(linear) screen_y: f32,
+    \\};
+    \\
+    \\// Water look — the ONE shared look (mirrors waterBodies.ts WATER_LOOK).
+    \\const DEEP_COL = vec3f(0.06, 0.22, 0.38);
+    \\const SHALLOW_COL = vec3f(0.18, 0.52, 0.66);
+    \\const FOAM_COL = vec3f(0.92, 0.97, 1.0);
+    \\const WAVE_AMP = 0.35;       // metres of vertical displacement at the crest
+    \\const WAVE_FREQ = 0.10;      // world-space wave frequency (cycles/metre-ish)
+    \\const WATER_ALPHA = 0.82;    // dither coverage — ~18% sees through as halftone
+    \\
+    \\fn hash21(p: vec2f) -> f32 {
+    \\    return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453);
+    \\}
+    \\// Smooth value noise → vec2 domain-warp offset (beach-viewer SmoothNoise22).
+    \\fn smooth_noise22(p: vec2f) -> vec2f {
+    \\    let i = floor(p);
+    \\    var f = fract(p);
+    \\    f = f * f * (3.0 - 2.0 * f);
+    \\    let a = hash21(i);
+    \\    let b = hash21(i + vec2f(1.0, 0.0));
+    \\    let c = hash21(i + vec2f(0.0, 1.0));
+    \\    let d = hash21(i + vec2f(1.0, 1.0));
+    \\    let n = mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    \\    return vec2f(n, n);
+    \\}
+    \\fn wave_shape(uv_in: vec2f, chop: f32) -> f32 {
+    \\    let uv = uv_in + smooth_noise22(uv_in * 0.6) * 2.0;
+    \\    var w = sin(uv * 2.0) * 0.5 + vec2f(0.5);
+    \\    w = vec2f(1.0) - pow(vec2f(1.0) - w, vec2f(chop));
+    \\    return (w.x + w.y) * 0.5;
+    \\}
+    \\// FBM of 5 rotated/scaled sine-noise octaves → wave height in [0,1].
+    \\fn get_waves(map_pos: vec2f, t: f32) -> f32 {
+    \\    var a = 1.0;
+    \\    var h = 0.0;
+    \\    var tot = 0.0;
+    \\    let r = 2.5;
+    \\    let rm = mat2x2f(cos(r), -sin(r), sin(r), cos(r)) * 2.1;
+    \\    var a_pos = map_pos;
+    \\    var wave_t = t;
+    \\    for (var o = 0; o < 5; o = o + 1) {
+    \\        let chop = mix(0.7, 0.9, f32(o) / 4.0);
+    \\        h = h + wave_shape(a_pos + vec2f(wave_t), chop) * a;
+    \\        tot = tot + a;
+    \\        a_pos = a_pos * rm;
+    \\        a = a * 0.3;
+    \\        wave_t = wave_t * 1.6;
+    \\    }
+    \\    return h / tot;
+    \\}
+    \\
+    \\@vertex
+    \\fn vs_main(in: VertexInput) -> VertexOutput {
+    \\    var out: VertexOutput;
+    \\    let model = mat4x4f(in.model_c0, in.model_c1, in.model_c2, in.model_c3);
+    \\    var world = model * vec4f(in.position, 1.0);
+    \\    let wn = normalize((model * vec4f(in.normal, 0.0)).xyz);
+    \\    // Only the up-facing top surface rides the waves; the skirt (horizontal
+    \\    // normal) stays anchored so the volume edge holds.
+    \\    let top_w = clamp(wn.y, 0.0, 1.0);
+    \\    let map_pos = world.xz * WAVE_FREQ;
+    \\    let wh = get_waves(map_pos, S.time * 0.4);
+    \\    world.y = world.y + (wh - 0.5) * WAVE_AMP * top_w;
+    \\    out.clip_pos = S.vp * world;
+    \\    out.world_pos = world.xyz;
+    \\    out.world_normal = wn;
+    \\    out.uv = in.uv;
+    \\    out.inst_color = in.inst_color;
+    \\    out.wave = wh;
+    \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
+    \\    return out;
+    \\}
+    \\
+    \\fn bayer8(p: vec2f) -> f32 {
+    \\    let x = i32(p.x) & 7;
+    \\    let y = i32(p.y) & 7;
+    \\    var m = array<f32, 64>(
+    \\        0.0, 32.0, 8.0, 40.0, 2.0, 34.0, 10.0, 42.0,
+    \\        48.0, 16.0, 56.0, 24.0, 50.0, 18.0, 58.0, 26.0,
+    \\        12.0, 44.0, 4.0, 36.0, 14.0, 46.0, 6.0, 38.0,
+    \\        60.0, 28.0, 52.0, 20.0, 62.0, 30.0, 54.0, 22.0,
+    \\        3.0, 35.0, 11.0, 43.0, 1.0, 33.0, 9.0, 41.0,
+    \\        51.0, 19.0, 59.0, 27.0, 49.0, 17.0, 57.0, 25.0,
+    \\        15.0, 47.0, 7.0, 39.0, 13.0, 45.0, 5.0, 37.0,
+    \\        63.0, 31.0, 55.0, 23.0, 61.0, 29.0, 53.0, 21.0
+    \\    );
+    \\    return (m[y * 8 + x] + 0.5) / 64.0;
+    \\}
+    \\
+    \\@fragment
+    \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+    \\    // Recompute waves per-fragment (sharper than interpolating the vertex value).
+    \\    let map_pos = in.world_pos.xz * WAVE_FREQ;
+    \\    let waves = get_waves(map_pos, S.time * 0.4);
+    \\    // Deep troughs → light shallow crests.
+    \\    var colour = mix(DEEP_COL, SHALLOW_COL, clamp(waves * 0.9 + 0.1, 0.0, 1.0));
+    \\    // Foam: bright wave crests + a shore band at the body's uv edge, broken
+    \\    // up by animated noise so it reads as churn not a hard ring.
+    \\    let foam_noise = hash21(floor(map_pos * 8.0) + floor(vec2f(S.time * 2.0)));
+    \\    let crest = smoothstep(0.72, 0.92, waves);
+    \\    let edge = abs(in.uv - vec2f(0.5)) * 2.0;
+    \\    let shore = smoothstep(0.82, 1.0, max(edge.x, edge.y));
+    \\    var foam = clamp(crest + shore * 0.8, 0.0, 1.0);
+    \\    foam = smoothstep(0.35, 0.75, foam + (foam_noise - 0.5) * 0.4);
+    \\    colour = mix(colour, FOAM_COL, foam);
+    \\    // Soft half-lambert so a wave back-face isn't flat.
+    \\    let N = normalize(in.world_normal);
+    \\    let L = normalize(S.light_dir);
+    \\    let ndl = dot(N, L) * 0.5 + 0.5;
+    \\    colour = colour * (S.ambient_color + S.light_color * ndl * 0.6);
+    \\    // Aerial fog (matches scene3d_wgsl) so distant water meets the sky.
+    \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
+    \\    let g = clamp(in.screen_y * 0.5 + 0.5, 0.0, 1.0);
+    \\    let sky_grad = mix(S.sky_horizon, S.sky_zenith.xyz, pow(g, 0.6));
+    \\    let fog_target = mix(S.fog_color, sky_grad, S.fog_sky);
+    \\    colour = mix(colour, fog_target, fog_t);
+    \\    // Ordered alpha-hash: the dithered holes ARE the water's transparency.
+    \\    // Foam is opaque (alpha 1); open water dithers at WATER_ALPHA.
+    \\    let alpha = mix(WATER_ALPHA, 1.0, foam);
+    \\    if (alpha < bayer8(in.clip_pos.xy)) { discard; }
+    \\    return vec4f(colour, 1.0);
+    \\}
+;
+
 /// Ground-formula mesh pipeline (the data-shape ground — GUIDING_LIGHT).
 /// `Scene3D.Mesh` normally samples a baked texture; a chunk-floor mesh instead
 /// runs a SURFACE FORMULA per fragment — no baked texture, crisp at any zoom,

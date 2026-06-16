@@ -1,67 +1,63 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useMemo } from 'react';
 import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { WaterBody as WaterBodyData } from '../design';
-import { WATER_LOOK, waterHeightGrid, rippleWaterField } from '../game/kinds/waterBodies';
+import { waterFlatHeights } from '../game/kinds/waterBodies';
 
 // The renderer for an authored body of water (world/water). A body is FACTORS —
-// a footprint + one surface level — and renders as ONE host heightfield mesh: a
-// rippling top surface at surfaceY plus the heightfield's own perimeter skirt
-// dropped to the basin floor, so it's a translucent VOLUME with a moving surface
-// (wade in and the blue surrounds you; 'disc' rounds off via the skirt). Same
-// dynamic-heightfield path painted terrain uses — the host reuses ONE slot per
-// body and re-bakes on each version bump, so the wave animates without leaking
-// geometry slots. Translucent (opacity → 3d.zig's transparent pass, the glass path).
+// a footprint + one surface level — and renders as ONE STATIC heightfield mesh: a
+// flat top surface at surfaceY plus the heightfield's own perimeter skirt dropped
+// to the basin floor (the body's translucent VOLUME — wade in and the water
+// surrounds you; 'disc' rounds off via the skirt).
 //
-// The wave is baked into the height grid JS-side per tick (the host heightfield
-// path bakes a static grid); WaterBodies owns the clock so only the water subtree
-// re-renders each frame, never the whole WorldStatics.
+// All MOTION and LOOK live in the fixed host "~water~" pipeline (framework/gpu:
+// shaders.water_wgsl + g_water_pipeline), routed by the textureKey sentinel — the
+// twin of grass's "~grass~". The host animates a multi-octave wave field from its
+// own S.time clock and paints the deep/shallow gradient + foam + Bayer-dither
+// halftone (the dither IS the see-through water, so the mesh is OPAQUE — a
+// translucent mesh would divert to the transparent pass and miss the pipeline).
+// Because framework/gpu/3d.zig is shared, /test and the compiled no-V8 loader
+// render water identically (GUIDING_LIGHT: the DATA is just "a body lives here";
+// the look is the dumb fixed system). The mesh is static — it interns once and
+// never re-bakes per frame, unlike the old JS per-tick ripple.
 
-// Wave animation cadence — gentle ripple, cheap re-bake. ~20fps reads as smooth
-// water without burning a regen every display frame.
-const WATER_TICK_MS = 50;
-
-const WaterBodyMesh = memo(function WaterBodyMesh(props: { body: WaterBodyData; t: number; tick: number }) {
+const WaterBodyMesh = memo(function WaterBodyMesh(props: { body: WaterBodyData }) {
   const b = props.body;
   const centerX = b.x + b.width / 2;
   const centerZ = b.z + b.depth / 2;
-  // The grid recomputes each tick (new t) — a fresh heights array per frame, the
-  // dynamicKey version bumped in lockstep, so the host re-bakes the ripple into
-  // the body's reused slot (the Landform live-edit pattern, leak-free).
-  // A painted body (terrain water brush) ripples its authored grid; a parametric
-  // body builds a footprint grid. Both yield the same {cols,rows,heights,base}.
-  const field = useMemo(
-    () => (b.field ? rippleWaterField(b.field, props.t) : waterHeightGrid(b.shape, b.width, b.depth, b.surfaceY, props.t)),
-    [b.field, b.shape, b.width, b.depth, b.surfaceY, props.t],
-  );
-  const material = useMemo(() => ({ color: WATER_LOOK.color, opacity: WATER_LOOK.opacity }), []);
+  // FLAT still-water grid, baked once. A painted body (terrain water brush) ships
+  // its authored field verbatim; a parametric body builds a footprint grid. Both
+  // yield {cols,rows,heights,base} — the host waves ride this flat surface.
+  const field = useMemo(() => {
+    if (b.field) {
+      const { cols, rows, cell, heights, base } = b.field;
+      return { cols, rows, heights, base, width: (cols - 1) * cell, depth: (rows - 1) * cell };
+    }
+    const f = waterFlatHeights(b.shape, b.width, b.depth, b.surfaceY);
+    return { ...f, width: b.width, depth: b.depth };
+  }, [b.field, b.shape, b.width, b.depth, b.surfaceY]);
+  // Opaque (a < 1 would route to the transparent pass and skip the water pipeline).
+  // inst_color is ignored by the water shader, which carries the ONE water look.
+  const material = useMemo(() => ({ color: '#2f7fa8', opacity: 1 }), []);
   return (
     <Scene3D.Mesh
       geometry={Geometry.Heightfield}
-      params={{ heights: field.heights, cols: field.cols, rows: field.rows, width: b.width, depth: b.depth, base: field.base }}
-      dynamicKey={`water_${b.id}~${props.tick}`}
+      params={{ heights: field.heights, cols: field.cols, rows: field.rows, width: field.width, depth: field.depth, base: field.base }}
+      dynamicKey={`water_${b.id}~0`}
       material={material}
+      textureKey="~water~"
       position={[centerX, 0, centerZ]}
     />
   );
 });
 
-// Owns the wave clock so ticking re-renders ONLY the water meshes, not the static
-// world around them. Idle when there are no bodies (no timer, no work).
+// Renders every authored body. No clock — the host pipeline owns wave time, so
+// ticking a body never re-renders the static world around it.
 export const WaterBodies = memo(function WaterBodies(props: { bodies: readonly WaterBodyData[] }) {
-  const active = props.bodies.length > 0;
-  const [tick, setTick] = useState(0);
-  const tickRef = useRef(0);
-  useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => { tickRef.current += 1; setTick(tickRef.current); }, WATER_TICK_MS);
-    return () => clearInterval(id);
-  }, [active]);
-  const t = (tick * WATER_TICK_MS) / 1000; // seconds
   return (
     <>
       {props.bodies.map((body) => (
-        <WaterBodyMesh key={body.id} body={body} t={t} tick={tick} />
+        <WaterBodyMesh key={body.id} body={body} />
       ))}
     </>
   );
