@@ -19,10 +19,12 @@ export type LabEntry = {
 
 import VehicleHandling from './vehicle-handling';
 import PlayerStats from './player-stats';
+import Explosives from './explosives';
 // rjit:lab-imports — `rjit lab new` inserts imports above this line. Keep this marker.
 
 export const LABS: LabEntry[] = [
   { name: 'vehicle-handling', Component: VehicleHandling, notesPath: 'cart/hmsc-int/labs/vehicle-handling.notes.md' },
   { name: 'player-stats', Component: PlayerStats, notesPath: 'cart/hmsc-int/labs/player-stats.notes.md' },
+  { name: 'explosives', Component: Explosives, notesPath: 'cart/hmsc-int/labs/explosives.notes.md' },
   // rjit:lab-entries — `rjit lab new` inserts entries above this line. Keep this marker.
 ];
