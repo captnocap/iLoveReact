@@ -74,6 +74,14 @@ export const skybox_void: DocIndex = {
       status: 'recurring',
     },
     {
+      name: 'The escape that dead-ends (narrative spine)',
+      purpose: ['game_loop', 'world_gen'],
+      description:
+        'The thematic WHY: the protagonist is always "looking to get away from this shitty place" and the world is built so escape always LOOKS in reach but both ends dead-end — the coast kills you for reaching, the road folds you home. Geography as metaphor for the life that won`t let you leave (opening arc req_0375); PROTECT-THE-ZERO (V22) as level design. The void is the central metaphor, not a bolted-on boundary. Build the seams bleak.',
+      examples: ['SKYBOX_PLAYBOOK.md'],
+      status: 'recurring',
+    },
+    {
       name: 'The Fold / treadmill (outward stretches, inward folds)',
       purpose: ['world_gen', 'vehicle'],
       description:

@@ -38,6 +38,27 @@ cosmic horror.
 
 ---
 
+## The narrative spine — why the void IS the game (req_1107)
+
+This is the *why* that should set the tone for every seam built below. The
+protagonist's whole drive is **"looking to get away from this shitty place"** —
+and the world is built so escape always *looks* in reach and **both ends are a
+dead one**:
+
+- **The coast** dangles another city right across the water — and kills you for
+  reaching for it. *The system won't let you rise.*
+- **The road** promises open highway out — and folds you back two blocks from
+  where you started. *There's nowhere else; it's all the same place.*
+
+The geography is the metaphor: the world refuses to let you leave the same way
+the **life** refuses to let you leave (the opening arc — broke, high, fired,
+trapped in the gig-crime CaaS loop, req_0375). The escape fantasy is the carrot
+that powers the whole loop; the dead-end is the truth the player discovers
+diegetically. It's PROTECT-THE-ZERO (V22) expressed as level design: no chosen
+one, no triumphant exit — the platform harvests, the city keeps you. The void
+isn't a boundary system bolted onto the game; **it's the central metaphor the
+rest of the game is the setup for.** Build the seams bleak.
+
 ## One generator, four jobs
 
 The same hash-deterministic city generator (the archived `hmsc_massive_map_lab`
