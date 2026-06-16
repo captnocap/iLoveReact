@@ -50,3 +50,9 @@ export {
   type ParticleBus,
   makeParticleBus,
 } from './events';
+
+export {
+  type Particle,
+  type ParticleSystem,
+  makeParticleSystem,
+} from './simulate';
