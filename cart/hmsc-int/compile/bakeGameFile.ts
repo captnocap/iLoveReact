@@ -30,10 +30,13 @@ import { sha256Hex } from '@reactjit/workspace/sha256';
 import { lastPointerPath, sessionPathFor } from '@reactjit/workspace';
 import { readFile } from '@reactjit/hooks/fs';
 import { openStreamStore } from '../data';
+import { editorChannel } from '../editors/store';
+import { editorTunables, tuningStream } from '../editors/tunables';
 import { buildingsStream, worldStream, piecesForMap, withBuildingPieces } from '@game';
 import type { PlacedBuildPiece } from '@game';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './playerModel';
 import { ASSET_KIND_DECAL_IMAGE, createDecalAssetSink } from './decalAssets';
+import { ensureCookedRegistry } from '../editors/model/cookedAssets';
 
 const CART = 'hmsc-int';
 const EDITOR_DATA_ROOT = 'cart/hmsc-int/data';
@@ -117,6 +120,18 @@ function readPaintedFloors(stem: string | null): ChunkFloor[] {
   }
 }
 
+// Studio-cooked props (req_1134) live in the cooked-asset content store, not the
+// static catalog. The editor registers them at boot (index.tsx ensureCookedRegistry)
+// BEFORE any placement resolves; the bake runs in a fresh v8cli process, so it must
+// do the same or a placed `prop.<cooked>` id throws "unknown piece id" mid-bake
+// (req_1146: a placed cooked mesh broke Compile entirely). Same EDITOR_DATA_ROOT
+// store the world/tuning reads below; idempotent + headless-tolerant.
+try {
+  ensureCookedRegistry();
+} catch (error: any) {
+  warn(`[bake] could not register cooked props (ok on older/empty stores): ${String(error?.message ?? error)}`);
+}
+
 const stem = activeStem();
 const state = loadEditorWorld();
 const pieces = readPlacedPieces(stem);
@@ -129,6 +144,15 @@ const env = sceneEnvironmentFromSky(sky);
 // each image file ONCE (sha256-deduped) while the mapfile builds; the keys land
 // in the packed docs, the bytes ship below as content-addressed assets.
 const decalAssets = createDecalAssetSink();
+// Fold the persisted /settings tuning over the registered globals so the compiled
+// world matches what the editor shows — e.g. grass colour/height/density tuned on
+// /settings (GRASS_CONFIG). Same store root (cart/hmsc-int/data) the editor writes
+// to and this bake already reads the map from; same fold index.tsx does on boot.
+try {
+  editorTunables().applyOverrides(editorChannel(tuningStream).state().overrides);
+} catch {
+  // no fs / empty store headless → registered code defaults; the bake still runs.
+}
 const mapContainer = createHmscMapfile(state, pieces, floors, env, { includePlayerLumps: false, decalAssets });
 for (const asset of decalAssets.assets) {
   warn(`[bake] prepared decal image asset ${asset.hashHex} (${asset.bytes.byteLength} bytes, key ${asset.key}, src '${asset.src}')`);
