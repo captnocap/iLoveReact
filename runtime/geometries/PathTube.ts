@@ -37,23 +37,32 @@ export function generate(p: PathTubeParams): GeometryData {
   if (n < 2) return g.build();
   const sides = Math.max(3, Math.floor(p.sides));
 
-  // Tip param per spine point = its y normalized over the spine's y-span, so the
-  // taper tracks height however the path was drawn.
-  let y0 = sp[1]!, y1 = sp[1]!;
-  for (let i = 0; i < n; i += 1) { const y = sp[i * 2 + 1]!; y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-  const yspan = Math.max(1e-4, y1 - y0);
+  // Taper runs by index along the path (t = i/(n-1)) so it works for a vertical
+  // trunk, a diagonal branch, OR a horizontal stick alike — not just monotonic-y.
+  // Local tangent from the neighbours; the ring is a circle in the plane PERPEN-
+  // DICULAR to that tangent, spanned by the in-plane normal (-Ty,Tx,0) and Z —
+  // a proper sweep frame, so the tube never pinches whatever angle the path runs.
+  const tangent = (i: number): [number, number] => {
+    const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1);
+    const tx = sp[b * 2]! - sp[a * 2]!;
+    const ty = sp[b * 2 + 1]! - sp[a * 2 + 1]!;
+    const L = Math.hypot(tx, ty) || 1;
+    return [tx / L, ty / L];
+  };
 
   const ring = (i: number): { pos: Vec3; nrm: Vec3; u: number }[] => {
     const cx = sp[i * 2]!;
     const cy = sp[i * 2 + 1]!;
-    const t = (cy - y0) / yspan;
+    const t = i / (n - 1);
     const r = p.baseRadius + (p.tipRadius - p.baseRadius) * t;
+    const [tx, ty] = tangent(i);
+    const nx = -ty, ny = tx; // in-plane perpendicular to the tangent
     const out: { pos: Vec3; nrm: Vec3; u: number }[] = [];
     for (let s = 0; s <= sides; s += 1) {
-      const a = (s / sides) * TAU;
-      const dx = Math.cos(a);
-      const dz = Math.sin(a);
-      out.push({ pos: [cx + dx * r, cy, dz * r], nrm: normalize(dx, 0.12, dz), u: s / sides });
+      const ang = (s / sides) * TAU;
+      const ca = Math.cos(ang), sa = Math.sin(ang);
+      // ring point = center + r·(ca·N + sa·Z); N=(nx,ny,0), Z=(0,0,1)
+      out.push({ pos: [cx + r * ca * nx, cy + r * ca * ny, r * sa], nrm: normalize(ca * nx, ca * ny, sa), u: s / sides });
     }
     return out;
   };
@@ -61,8 +70,8 @@ export function generate(p: PathTubeParams): GeometryData {
   let lower = ring(0);
   for (let i = 1; i < n; i += 1) {
     const upper = ring(i);
-    const v0 = (sp[(i - 1) * 2 + 1]! - y0) / yspan;
-    const v1 = (sp[i * 2 + 1]! - y0) / yspan;
+    const v0 = (i - 1) / (n - 1);
+    const v1 = i / (n - 1);
     for (let s = 0; s < sides; s += 1) {
       const bl = lower[s]!, br = lower[s + 1]!, tr = upper[s + 1]!, tl = upper[s]!;
       g.tri(bl.pos, bl.nrm, [bl.u, v0], br.pos, br.nrm, [br.u, v0], tr.pos, tr.nrm, [tr.u, v1]);
