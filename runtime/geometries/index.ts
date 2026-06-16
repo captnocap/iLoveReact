@@ -25,6 +25,7 @@ import * as VoxelMeshMod from './VoxelMesh';
 import * as GrassBladeMod from './GrassBlade';
 import * as BushClumpMod from './BushClump';
 import * as FrondMod from './Frond';
+import * as PalmTrunkMod from './PalmTrunk';
 
 export type { GeometryData, Vec2, Vec3 } from './_util';
 // The vertex-assembly kit, so a cart can hand-author its own generator:
@@ -89,6 +90,8 @@ export const BushClump = def('BushClump', BushClumpMod.generate, BushClumpMod.BU
 // Routed via "~frond~" to the foliage wind pipeline; a tree crown is many frond
 // instances radiating from the trunk top (the grass move, leaf-shaped).
 export const Frond = def('Frond', FrondMod.generate, FrondMod.FROND_DEFAULTS);
+// PalmTrunk — a tapered, curved, scar-ringed palm log (replaces the plain cylinder).
+export const PalmTrunk = def('PalmTrunk', PalmTrunkMod.generate, PalmTrunkMod.PALM_TRUNK_DEFAULTS);
 
 // DEFAULTS re-exports (spread-override friendly: { ...SPHERE_DEFAULTS, radius: 2 }).
 export const BOX_DEFAULTS = BoxMod.BOX_DEFAULTS;
@@ -108,6 +111,7 @@ export const BUSH_CLUMP_DEFAULTS = BushClumpMod.BUSH_CLUMP_DEFAULTS;
 export const FROND_DEFAULTS = FrondMod.FROND_DEFAULTS;
 export const FLOWING_FROND_DEFAULTS = FrondMod.FLOWING_FROND_DEFAULTS;
 export const BROAD_FROND_DEFAULTS = FrondMod.BROAD_FROND_DEFAULTS;
+export const PALM_TRUNK_DEFAULTS = PalmTrunkMod.PALM_TRUNK_DEFAULTS;
 // The Humanoid's UV atlas — top-left=head, top-right=arms, bottom-left=torso,
 // bottom-right=legs. Painters target a single texture image with those four
 // rectangles and the generator's UVs route each body part into its rectangle.

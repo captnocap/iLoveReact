@@ -36,14 +36,18 @@ function tree(x: number, topY: number, z: number, outer: number, len: number, ro
 }
 
 function Trunk(props: { x: number; z: number; height: number; lean?: number; radius?: number }) {
-  const r = props.radius ?? 0.28;
+  // PalmTrunk is 1 unit tall; scale Y to height and X/Z to the real radius span.
+  // The geometry carries its own taper + curve + scar rings, so the trunk reads
+  // as a palm log instead of a cigar. A small yaw varies which way the lean faces.
+  const span = (props.radius ?? 0.13) / Geometry.PALM_TRUNK_DEFAULTS.baseRadius;
   return (
     <Scene3D.Mesh
-      geometry={Geometry.Cylinder}
-      params={{ radius: r, height: props.height, segments: 8 }}
-      position={[props.x, props.height / 2, props.z]}
-      rotation={[0, 0, (props.lean ?? 0) * -5]}
-      material="#6b513a"
+      geometry={Geometry.PalmTrunk}
+      params={Geometry.PALM_TRUNK_DEFAULTS}
+      position={[props.x, 0, props.z]}
+      rotation={[0, (props.lean ?? 0) * 140, 0]}
+      scale={[span, props.height, span]}
+      material="#7a6043"
     />
   );
 }
