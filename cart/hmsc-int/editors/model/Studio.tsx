@@ -1556,6 +1556,36 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             ) : null}
           </>
         ) : null}
+        {/* SYMMETRIZE (req_1190/1201): a WHOLE-MESH op, so shown in EVERY mode (it
+            used to be nested in the non-rig tool block → invisible in rig mode, where
+            the user went looking for it). Pick the GOOD half → it rebuilds the other
+            as an exact mirror; the badge shows live ✓ / ⚠ for the symmetry axis. */}
+        {activePart && symReport ? (() => {
+          const symAxis = symReport.axis; // explicit mirror plane, else the auto-detected most-symmetric axis
+          const ax = STUDIO.mirrorAxisLabels[symAxis];
+          const col = STUDIO.mirrorAxisColors[symAxis];
+          const doSym = (keepPos: boolean) => {
+            props.onEditMesh(activePart.id, symmetrize(activePart.mesh, symAxis, keepPos));
+            setSel(emptySelection()); setRigSel(null);
+          };
+          return (
+            <>
+              <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+              <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>symmetrize</Text>
+              <Pressable onPress={() => doSym(true)} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
+                <Text fontSize={10} color={col} style={{ fontFamily: 'monospace' }}>keep +{ax}</Text>
+              </Pressable>
+              <Pressable onPress={() => doSym(false)} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
+                <Text fontSize={10} color={col} style={{ fontFamily: 'monospace' }}>keep −{ax}</Text>
+              </Pressable>
+              <Box style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: symReport.unmatched === 0 ? '#10261a' : '#2e1616', borderWidth: 1, borderColor: symReport.unmatched === 0 ? '#2f7a4f' : '#a14545' }}>
+                <Text fontSize={10} color={symReport.unmatched === 0 ? '#7fd6a0' : '#f0a0a0'} style={{ fontFamily: 'monospace' }}>
+                  {symReport.unmatched === 0 ? `✓ symmetric ${ax}` : `⚠ ${symReport.unmatched} off ${ax}`}
+                </Text>
+              </Box>
+            </>
+          );
+        })() : null}
         {/* RIG mode: add a joint, or opt the part into a pivot (req_1054 — pivots
             are opt-in; a body is joints-only). The gizmo on the selected handle
             does the placing — no move/resize toggle. */}
@@ -1612,38 +1642,6 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 </Pressable>
               );
             })}
-            {/* SYMMETRIZE (req_1190): force the whole part symmetric — keep one half,
-                rebuild the other as its exact mirror. Kills drift from a one-sided edit
-                (a stray vert/triangle). Two buttons = pick the GOOD half by result, no
-                abstract prompt; mirror across the first enabled plane (else X). */}
-            {activePart && symReport ? (() => {
-              const symAxis = symReport.axis; // explicit mirror plane, else the auto-detected most-symmetric axis
-              const ax = STUDIO.mirrorAxisLabels[symAxis];
-              const doSym = (keepPos: boolean) => {
-                props.onEditMesh(activePart.id, symmetrize(activePart.mesh, symAxis, keepPos));
-                setSel(emptySelection()); setRigSel(null);
-              };
-              return (
-                <>
-                  <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
-                  <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>sym</Text>
-                  <Pressable onPress={() => doSym(true)} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: STUDIO.mirrorAxisColors[symAxis] }}>
-                    <Text fontSize={10} color={STUDIO.mirrorAxisColors[symAxis]} style={{ fontFamily: 'monospace' }}>keep +{ax}</Text>
-                  </Pressable>
-                  <Pressable onPress={() => doSym(false)} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: STUDIO.mirrorAxisColors[symAxis] }}>
-                    <Text fontSize={10} color={STUDIO.mirrorAxisColors[symAxis]} style={{ fontFamily: 'monospace' }}>keep −{ax}</Text>
-                  </Pressable>
-                  {/* SYMMETRY BADGE (req_1191): live ✓ / ⚠ N off across the centre. */}
-                  {symReport ? (
-                    <Box style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: symReport.unmatched === 0 ? '#10261a' : '#2e1616', borderWidth: 1, borderColor: symReport.unmatched === 0 ? '#2f7a4f' : '#a14545' }}>
-                      <Text fontSize={10} color={symReport.unmatched === 0 ? '#7fd6a0' : '#f0a0a0'} style={{ fontFamily: 'monospace' }}>
-                        {symReport.unmatched === 0 ? `✓ symmetric ${ax}` : `⚠ ${symReport.unmatched} off ${ax}`}
-                      </Text>
-                    </Box>
-                  ) : null}
-                </>
-              );
-            })() : null}
             {/* face-only edit ops: extrude + loop cut (a single selected face). */}
             {selMode === 'face' && activePart && sel.faces.size === 1 ? (
               <>
