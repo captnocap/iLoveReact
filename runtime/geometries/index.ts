@@ -26,6 +26,7 @@ import * as GrassBladeMod from './GrassBlade';
 import * as BushClumpMod from './BushClump';
 import * as FrondMod from './Frond';
 import * as PalmTrunkMod from './PalmTrunk';
+import * as PathTubeMod from './PathTube';
 
 export type { GeometryData, Vec2, Vec3 } from './_util';
 // The vertex-assembly kit, so a cart can hand-author its own generator:
@@ -92,6 +93,8 @@ export const BushClump = def('BushClump', BushClumpMod.generate, BushClumpMod.BU
 export const Frond = def('Frond', FrondMod.generate, FrondMod.FROND_DEFAULTS);
 // PalmTrunk — a tapered, curved, scar-ringed palm log (replaces the plain cylinder).
 export const PalmTrunk = def('PalmTrunk', PalmTrunkMod.generate, PalmTrunkMod.PALM_TRUNK_DEFAULTS);
+// PathTube — sweep a tapered tube along a drawn SVG-path spine (trunks/branches).
+export const PathTube = def('PathTube', PathTubeMod.generate, PathTubeMod.PATH_TUBE_DEFAULTS);
 
 // DEFAULTS re-exports (spread-override friendly: { ...SPHERE_DEFAULTS, radius: 2 }).
 export const BOX_DEFAULTS = BoxMod.BOX_DEFAULTS;
@@ -112,6 +115,7 @@ export const FROND_DEFAULTS = FrondMod.FROND_DEFAULTS;
 export const FLOWING_FROND_DEFAULTS = FrondMod.FLOWING_FROND_DEFAULTS;
 export const BROAD_FROND_DEFAULTS = FrondMod.BROAD_FROND_DEFAULTS;
 export const PALM_TRUNK_DEFAULTS = PalmTrunkMod.PALM_TRUNK_DEFAULTS;
+export const PATH_TUBE_DEFAULTS = PathTubeMod.PATH_TUBE_DEFAULTS;
 // The Humanoid's UV atlas — top-left=head, top-right=arms, bottom-left=torso,
 // bottom-right=legs. Painters target a single texture image with those four
 // rectangles and the generator's UVs route each body part into its rectangle.

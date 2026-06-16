@@ -75,7 +75,10 @@ export function extractSvgPaths(input: string): { d: string; fill: string | null
 }
 
 // ── path → flat polylines (mirror framework/gpu/decal_raster.zig parsePath) ──
-function flattenPathD(d: string): Pt[][] {
+export type SvgPoint = Pt;
+// Exported so other path consumers — e.g. PathTube tree trunks (svg path → swept
+// tube) — sample the SAME geometry the neon prop does, never a second parser.
+export function flattenPathD(d: string): Pt[][] {
   const subpaths: Pt[][] = [];
   let cur: Pt[] = [];
   let cx = 0;

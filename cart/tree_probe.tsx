@@ -8,8 +8,24 @@
 import { useMemo } from 'react';
 import { Box, Scene3D } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
+import { flattenPathD } from './hmsc-int/game/textures/neon';
 
 const STRIDE = 12;
+
+// SVG path `d` → a PathTube spine: flatten with the SAME parser the neon prop uses,
+// then normalize into unit space (y 0→1 up the trunk, x centered, aspect kept,
+// SVG y-down flipped). This is the "draw a trunk, get a trunk" path.
+function svgSpine(d: string): number[] {
+  const pts = flattenPathD(d)[0] ?? [];
+  if (pts.length < 2) return [];
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of pts) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
+  const h = Math.max(1e-4, maxY - minY);
+  const cx = (minX + maxX) / 2;
+  const out: number[] = [];
+  for (const p of pts) out.push((p.x - cx) / h, (maxY - p.y) / h); // flip y-down→up, unit height
+  return out;
+}
 
 // Crown rows for one tree: `count` fronds from the trunk top (x, topY, z), yawed
 // evenly and pitched out into a droop, with slight per-frond jitter.
@@ -52,6 +68,23 @@ function Trunk(props: { x: number; z: number; height: number; lean?: number; rad
   );
 }
 
+// A trunk DRAWN as an SVG path (svg path → swept tapered tube). The `d` is a
+// curve from base to top; svgSpine normalizes it, PathTube sweeps the tube.
+function PathTrunk(props: { x: number; z: number; height: number; d: string; yaw?: number }) {
+  const spine = useMemo(() => svgSpine(props.d), [props.d]);
+  if (spine.length < 4) return null;
+  return (
+    <Scene3D.Mesh
+      geometry={Geometry.PathTube}
+      params={{ spine, baseRadius: 0.022, tipRadius: 0.012, sides: 10 }}
+      position={[props.x, 0, props.z]}
+      rotation={[0, props.yaw ?? 0, 0]}
+      scale={[props.height, props.height, props.height]}
+      material="#7a6043"
+    />
+  );
+}
+
 export default function TreeProbe() {
   // classic coconut palm (left), broad-leaf (center)
   const classic = useMemo(() => tree(-7, 8.2, 0, 18, 5.0, [0.12, 0.32, 0.16]), []);
@@ -66,7 +99,8 @@ export default function TreeProbe() {
         <Scene3D.AmbientLight color="#ffffff" intensity={0.75} />
         <Scene3D.DirectionalLight direction={[-0.4, -1, -0.3]} color="#fff6e0" intensity={0.7} />
         <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 70, height: 2, depth: 70 }} material="#d8c79a" position={[0, -1, 0]} />
-        <Trunk x={-7} z={0} height={8.2} lean={0.3} />
+        {/* LEFT: trunk DRAWN as an SVG path (curved, leaning) → swept tube */}
+        <PathTrunk x={-7} z={0} height={8.2} d="M 60 200 C 64 150, 82 100, 70 40 C 66 22, 60 12, 64 2" />
         <Trunk x={6} z={5} height={7.4} lean={-0.4} />
         <Trunk x={0} z={-7} height={6.4} radius={0.34} />
         <Scene3D.Instances geometry={Geometry.Frond} params={Geometry.FROND_DEFAULTS} data={classic} count={classic.length / STRIDE} stride={STRIDE} center={[-7, 8, 0]} boundsRadius={60} textureKey="~frond~" />
