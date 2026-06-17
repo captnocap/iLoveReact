@@ -6,7 +6,7 @@ import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import {
   addMount, addMountReflections, updateMountMirrored, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
-  flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
+  flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
@@ -655,6 +655,28 @@ test('fitWheelCenter finds the axle centre + radius from arch points (req_1202)'
   assert(approx(fit.radius, R, 1e-3), 'radius matches the well — sizes the tire');
   assertEqual(fitWheelCenter([[0, 0, 0], [1, 0, 0]]), null, '<3 points → null');
   assertEqual(fitWheelCenter([[0, 0, 0], [1, 0, 0], [2, 0, 0]]), null, 'collinear → null (no circle)');
+});
+
+test('wheelMesh builds a tire on the given axle; mergeMesh sizes it into the body (req_1206)', () => {
+  const w = wheelMesh(0.5, 0.3, 12, 2); // radius 0.5, width 0.3, axle = Z
+  // axle along Z → width spans z (±0.15), radius spans x/y (±0.5)
+  const b = vertsBounds(w, w.verts.map((_, i) => i));
+  assert(approx(b.size[2], 0.3, 1e-6), 'width spans the axle (z)');
+  assert(approx(b.size[0], 1, 1e-6) && approx(b.size[1], 1, 1e-6), 'radius spans the disc (x,y) = diameter 1');
+  // every side-quad normal points radially OUT (away from the axle line), not in
+  const out = w.faces.every((f) => {
+    if (f.loop.length !== 4) return true; // skip the caps
+    const c = faceCentroid(w, f), n = faceNormal(w, f);
+    return n[0] * c[0] + n[1] * c[1] > 0; // radial component points out
+  });
+  assert(out, 'tire tread normals face outward (winding survived the reorient)');
+  // merge a wheel into a box at an offset → verts/faces append, offset applied
+  const body = cuboid(2, 2, 2);
+  const merged = mergeMesh(body, w, [1.2, -0.3, 0.86]);
+  assertEqual(merged.verts.length, body.verts.length + w.verts.length, 'verts append');
+  assertEqual(merged.faces.length, body.faces.length + w.faces.length, 'faces append');
+  const mb = vertsBounds(merged, merged.verts.slice(body.verts.length).map((_, i) => i + body.verts.length));
+  assert(approx((mb.min[0] + mb.max[0]) / 2, 1.2, 1e-6), 'the merged wheel is centred at the well x');
 });
 
 test('facesUsingVerts / facesUsingEdges resolve a selection to faces (req_1020)', () => {

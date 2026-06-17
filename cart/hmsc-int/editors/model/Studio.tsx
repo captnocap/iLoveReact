@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -125,6 +125,10 @@ export const STUDIO = {
    *  architectural pane at the materials.ts Glass opacity (0.34). */
   glassColor: '#a9cbe0',
   glassOpacity: 0.34,
+  /** WHEEL (req_1206): a generated tire's WIDTH as a fraction of its fitted radius,
+   *  and its tread facet count — low-poly to match the era. Resize after if needed. */
+  wheelWidthFraction: 0.5,
+  wheelSides: 16,
   /** MIRROR (req_1183/1186): symmetric editing reflects edits across any enabled
    *  part-local plane at coord 0 — X (left↔right), Y (up↔down), Z (front↔back),
    *  multi-select for combined symmetry. The active planes live in twig state. */
@@ -163,6 +167,16 @@ export const STUDIO = {
    *  UV-test checkerboard density across the square (reads scale/stretch/seams). */
   textureAtlasPx: 256,
   textureCheckerCells: 8,
+  /** PAINT mode (req_1203): throttle the atlas re-bake while a stroke is live — dabs
+   *  land in a ref every mouse-move, the atlas re-bakes at most once per this many ms
+   *  (the cutout painter's clock), so painting is smooth instead of re-rendering per dab. */
+  paintBakeMs: 70,
+  /** PAINT grid (req_1207, USER): a FIXED default grid the whole texture is divided
+   *  into — NOT the model-size-dependent packed atlas resolution (which ballooned to
+   *  1024 for a car, making each paint cell sub-pixel + invisible). A face sits on this
+   *  global grid and clips cells at its edges (a triangle cuts through squares). 64² →
+   *  4px cells on the 256px atlas, clearly visible. */
+  paintGridCells: 64,
   /** AI TEXTURE FILL (req_1070/1110, Phase 5d): the square px the image model
    *  generates at. Kept at atlas scale (NOT the model's 4096² default) so img2img
    *  results stay light; the atlas downscales them into the slot on render. */
@@ -474,10 +488,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // null colour = ERASER (clears cells under the brush).
   const [paintColor, setPaintColor] = useHotState<string | null>('studio:paintColor', PAINT_SWATCHES[0]);
   const [paintBrush, setPaintBrush] = useHotState<number>('studio:paintBrush', 1);
-  // the face/texel under the cursor in paint mode → the live grid overlay + hover
-  // cell. Plain ref+rerender (not state) so onMove hover tracking stays cheap.
-  const [paintHover, setPaintHover] = useState<FaceHit | null>(null);
+  // PERF (req_1203): the lag was setTex on EVERY mouse-move (a React re-render +
+  // JSON.stringify of the whole paint map per dab). The fix — the cutout painter's
+  // proven shape: dabs accumulate in a REF (zero React per move); the atlas re-bakes
+  // on a THROTTLED clock (paintBakeTick); the stroke commits to tex.paint on mouse-up.
+  // The hover/cursor cell rides a ref too and the grid overlay self-ticks, so hovering
+  // never re-renders the viewport either. paintRef is seeded from the persisted paint.
+  const paintRef = useRef<PaintCells>({});
+  const paintHoverRef = useRef<FaceHit | null>(null);
+  const paintDirtyRef = useRef(false);
   const paintingRef = useRef(false);
+  const [paintBakeTick, setPaintBakeTick] = useState(0);
   // the Create Texture dialog (req_1068) — transient, not a twig.
   const [texDialog, setTexDialog] = useState(false);
   // the import-texture dialog (req_1079): { slice } when re-uploading ONE face, else
@@ -733,12 +754,12 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     setRigDraft(null);
     rigDragRef.current = null;
     setRigDragAxis(null);
-    setPaintHover(null);
+    paintHoverRef.current = null;
     paintingRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePart?.id]);
   // Leaving paint mode drops the grid overlay + any in-flight stroke.
-  useEffect(() => { if (selMode !== 'paint') { setPaintHover(null); paintingRef.current = false; } }, [selMode]);
+  useEffect(() => { if (selMode !== 'paint') { paintHoverRef.current = null; paintingRef.current = false; } }, [selMode]);
   // Entering rig mode SPAWNS the gizmo on the pivot immediately (req_1051) — the
   // pivot is always present, so default-select it so the 3-axis move gizmo is right
   // there to grab (drag the into-screen axis for depth). Runs only on mode ENTRY
@@ -830,26 +851,39 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     setTexView(true);
     return result.texels;
   };
-  // Paint (or erase) the texels under (sx,sy). Raycasts the frontmost uv-mapped face,
-  // stamps the brush INSIDE that face's slot (clamped — no spill to a neighbour), and
-  // commits the cells onto tex.paint with a bumped paintRev (re-bakes the atlas). A
-  // null paintColor erases (drops the covered cells).
-  const paintAt = (sx: number, sy: number): FaceHit | null => {
-    if (!tex) return null;
-    const hit = pickFaceTexel(paintTargets(), camSnap(), sx, sy, tex.texels);
-    setPaintHover(hit);
-    if (!hit) return null;
-    const cells = brushTexels(hit.tx, hit.ty, paintBrush, hit.rect);
-    const next: PaintCells = { ...(tex.paint ?? {}) };
-    let changed = false;
-    for (const [tx, ty] of cells) {
-      const key = `${tx}:${ty}`;
-      if (paintColor == null) { if (key in next) { delete next[key]; changed = true; } }
-      else if (next[key] !== paintColor) { next[key] = paintColor; changed = true; }
-    }
-    if (changed) setTex({ ...tex, paint: next, paintRev: (tex.paintRev ?? 0) + 1 });
+  // Track the face/texel under the cursor (the grid overlay reads this ref + self-
+  // ticks, so a hover never re-renders the viewport). Returns the hit for the caller.
+  const paintProbe = (sx: number, sy: number): FaceHit | null => {
+    if (!tex) { paintHoverRef.current = null; return null; }
+    const hit = pickFaceTexel(paintTargets(), camSnap(), sx, sy, STUDIO.paintGridCells);
+    paintHoverRef.current = hit;
     return hit;
   };
+  // Paint (or erase) the texels under (sx,sy) into the LIVE buffer ref — NO React
+  // state per dab (the lag fix, req_1203). Marks dirty; the throttled bake clock
+  // re-renders the atlas from the ref; mouse-up commits the buffer to tex.paint.
+  const paintAt = (sx: number, sy: number): FaceHit | null => {
+    const hit = paintProbe(sx, sy);
+    if (!hit) return null;
+    const cells = brushTexels(hit.tx, hit.ty, paintBrush, hit.rect);
+    const buf = paintRef.current;
+    for (const [tx, ty] of cells) {
+      const key = `${tx}:${ty}`;
+      if (paintColor == null) { delete buf[key]; }
+      else { buf[key] = paintColor; }
+    }
+    paintDirtyRef.current = true;
+    return hit;
+  };
+  // Seed the live buffer from the persisted paint whenever the open texture changes
+  // (entering paint, a re-textureize, undo). Keyed on paintRev so an external change
+  // re-syncs but our own per-dab writes (which don't touch tex) don't clobber the buffer.
+  useEffect(() => { paintRef.current = { ...(tex?.paint ?? {}) }; setPaintBakeTick((t) => t + 1); }, [tex?.paintRev, tex?.texels]);
+  // The throttled bake clock (the cutout idiom): while a stroke is dirty, bump the
+  // tick at most ~12×/s so the atlas re-bakes smoothly instead of per mouse-move.
+  useInterval(() => { if (paintDirtyRef.current) { paintDirtyRef.current = false; setPaintBakeTick((t) => t + 1); } }, STUDIO.paintBakeMs);
+  // Commit the live buffer to persisted paint (one setState) at the end of a stroke.
+  const commitPaint = () => { if (tex) setTex({ ...tex, paint: { ...paintRef.current }, paintRev: (tex.paintRev ?? 0) + 1 }); };
 
   const sendOrbit = () => ctlRef.current?.setOrbit({ target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: distRef.current, fov: fovRef.current, zoom: 1 });
 
@@ -1007,8 +1041,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (selMode === 'paint') {
       const r = rectRef.current;
       const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
-      if (paintingRef.current) { paintAt(sx, sy); return; }
-      if (!dragRef.current) { if (tex) setPaintHover(pickFaceTexel(paintTargets(), camSnap(), sx, sy, tex.texels)); return; }
+      if (paintingRef.current) { paintAt(sx, sy); return; } // dab → ref (no React per move)
+      if (!dragRef.current) { paintProbe(sx, sy); return; } // hover → ref (overlay self-ticks)
       // else: a miss-drag in progress → continue to the orbit block (spin the camera).
     }
     // RIG drag: move the selected pivot/joint along the grabbed axis. Snaps by
@@ -1121,7 +1155,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     l.yaw = nextYaw; l.pitch = nextPitch;
   };
   const onUp = () => {
-    if (paintingRef.current) { paintingRef.current = false; return; } // end a paint stroke
+    if (paintingRef.current) { paintingRef.current = false; commitPaint(); return; } // end a paint stroke → persist
     setGizmoReadout(null); // the drag is ending — drop the live step readout
     // end a loop-cut slide (the offset already lives in lc; nothing to commit —
     // Apply commits the whole cut). Just drop the drag + clear the highlight.
@@ -1390,8 +1424,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           color={tex.color}
           imageUrl={tex.imageUrl}
           sliceImages={tex.sliceImages}
-          paint={tex.paint}
-          sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}.${tex.paintRev ?? 0}`}
+          paint={paintRef.current}
+          paintGrid={STUDIO.paintGridCells}
+          sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}.${tex.paintRev ?? 0}.${paintBakeTick}`}
         />
       ) : null}
 
@@ -1451,36 +1486,30 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           />
         : null}
 
-      {/* PAINT grid overlay (Phase 5c): the NORMALIZED texel grid on the face under
-          the cursor + the cell about to be painted, so you see where paint lands. */}
-      {selMode === 'paint' && tex && paintHover && props.parts[paintHover.partIndex]
+      {/* PAINT grid overlay (Phase 5c, req_1203): the global texel grid on the face
+          under the cursor + the cell about to be painted. Ref-driven + self-ticking,
+          so hovering/painting never re-renders the viewport (the lag fix). */}
+      {selMode === 'paint' && tex
         ? <PaintGridOverlay
-            mesh={props.parts[paintHover.partIndex].mesh}
-            lift={props.parts[paintHover.partIndex].lift}
-            faceIndex={paintHover.faceIndex}
-            texels={tex.texels}
-            hover={{ tx: paintHover.tx, ty: paintHover.ty }}
+            parts={paintTargets()}
+            getHover={() => paintHoverRef.current}
+            grid={STUDIO.paintGridCells}
             color={paintColor ?? '#ffffff'}
             camSnap={camSnap}
           />
         : null}
 
-      {/* PAINT diagnostics (req_1197): a compact live readout so paint problems are
-          legible — is a texture made, is it shown, how many cells are painted, did the
-          last click hit a face. Bottom-centre, paint mode only. */}
-      {selMode === 'paint' ? (() => {
-        const cellCount = tex?.paint ? Object.keys(tex.paint).length : 0;
-        const hitTxt = paintHover ? `hit f${paintHover.faceIndex} @(${paintHover.tx},${paintHover.ty})` : 'no face under cursor';
-        return (
-          <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 92, alignItems: 'center' }}>
-            <Box style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: tex ? '#2f7a4f' : '#a14545' }}>
-              <Text fontSize={10} color={tex ? '#7fd6a0' : '#f0a0a0'} style={{ fontFamily: 'monospace' }}>
-                paint · {tex ? `tex ${tex.texels}px` : 'NO TEXTURE'} · {texView ? 'textured' : 'solid (toggle on!)'} · {cellCount} cells · {hitTxt}
-              </Text>
-            </Box>
+      {/* PAINT diagnostics (req_1197): a compact readout — is a texture made + shown,
+          and how many cells are painted. Bottom-centre, paint mode only. */}
+      {selMode === 'paint' ? (
+        <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 92, alignItems: 'center' }}>
+          <Box style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: tex ? '#2f7a4f' : '#a14545' }}>
+            <Text fontSize={10} color={tex ? '#7fd6a0' : '#f0a0a0'} style={{ fontFamily: 'monospace' }}>
+              paint · {tex ? `grid ${STUDIO.paintGridCells}²` : 'NO TEXTURE'} · {texView ? 'textured' : 'solid (toggle on!)'} · {Object.keys(paintRef.current).length} cells · drag off model = orbit
+            </Text>
           </Box>
-        );
-      })() : null}
+        </Box>
+      ) : null}
 
       {/* The transform gizmo — drawn AFTER the selection overlay (last 2D children
           over the Scene3D), so the arrows are NEVER hidden by geometry (USER).
@@ -1569,9 +1598,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 </Pressable>
               );
             })}
-            {/* clear all paint on this texture. */}
-            {tex?.paint && Object.keys(tex.paint).length > 0 ? (
-              <Pressable onPress={() => { if (tex) setTex({ ...tex, paint: {}, paintRev: (tex.paintRev ?? 0) + 1 }); }} style={{ ...STEP_BTN, borderColor: '#a14545' }}>
+            {/* clear all paint on this texture (buffer + persisted). */}
+            {Object.keys(paintRef.current).length > 0 ? (
+              <Pressable onPress={() => { paintRef.current = {}; commitPaint(); }} style={{ ...STEP_BTN, borderColor: '#a14545' }}>
                 <Text fontSize={10} color="#f0a0a0" style={{ fontFamily: 'monospace' }}>clear paint</Text>
               </Pressable>
             ) : null}
@@ -1793,6 +1822,34 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c6a4a' }}
               >
                 <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>⌖ wheel center</Text>
+              </Pressable>
+            ) : null}
+            {/* MAKE WHEEL (req_1206): fit the well → GENERATE a tire of that exact
+                radius at the centre, merged into the body (so it re-seats on the
+                tire bottoms = ride height). Mirror-aware → both/all wheels at once. */}
+            {selMode === 'vertex' && activePart && sel.verts.size >= 3 ? (
+              <Pressable
+                onPress={() => {
+                  const mesh = activePart.mesh;
+                  const fit = fitWheelCenter([...sel.verts].map((i) => mesh.verts[i]).filter(Boolean));
+                  if (!fit) { toast('pick 3+ arch verts that form a curve'); return; }
+                  const wheel = wheelMesh(fit.radius, fit.radius * STUDIO.wheelWidthFraction, STUDIO.wheelSides, fit.axis);
+                  // every non-empty subset of the enabled mirror planes → a reflected copy.
+                  const centers: MV3[] = [[fit.center[0], fit.center[1], fit.center[2]]];
+                  for (let m = 1; m < (1 << mirrorAxes.length); m += 1) {
+                    const c: MV3 = [fit.center[0], fit.center[1], fit.center[2]];
+                    for (let k = 0; k < mirrorAxes.length; k += 1) if (m & (1 << k)) c[mirrorAxes[k]] = -c[mirrorAxes[k]];
+                    centers.push(c);
+                  }
+                  let out = mesh;
+                  for (const c of centers) out = mergeMesh(out, wheel, c);
+                  props.onEditMesh(activePart.id, out);
+                  setSel(emptySelection());
+                  toast(`wheel${centers.length > 1 ? `s ×${centers.length}` : ''} · radius ${fmtUnits(metersToUnits(fit.radius)).replace('+', '')} — resize/split as needed`);
+                }}
+                style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c6a4a' }}
+              >
+                <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>⊚ make wheel</Text>
               </Pressable>
             ) : null}
           </>

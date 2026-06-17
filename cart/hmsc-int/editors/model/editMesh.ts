@@ -866,6 +866,31 @@ export function fitWheelCenter(pts: V3[]): { center: V3; radius: number; axis: 0
   return { center, radius, axis: flat };
 }
 
+/** A WHEEL/tire: a cylinder whose AXLE runs along `axle` (so its round disc faces
+ *  the side), `radius` × `width`, centred at origin (req_1206). Built by reorienting
+ *  `cylinder()` (axle = Y); a coordinate swap flips winding, so the loops are
+ *  reversed to keep normals outward. Pair with `fitWheelCenter` to size it to a well. */
+export function wheelMesh(radius: number, width: number, sides: number, axle: 0 | 1 | 2): EditMesh {
+  const cyl = cylinder(radius, width, sides); // axle along Y
+  if (axle === 1) return cyl;
+  const map: (v: V3) => V3 = axle === 2 ? (v) => [v[0], v[2], v[1]] : (v) => [v[1], v[0], v[2]]; // Y→Z or Y→X
+  return {
+    ...cyl,
+    verts: cyl.verts.map(map),
+    faces: cyl.faces.map((f) => ({ ...f, loop: f.loop.slice().reverse(), uv: f.uv ? f.uv.slice().reverse() : undefined })),
+  };
+}
+
+/** Merge mesh `b` (offset by `delta`) into `a` — appends verts (reindexed) + faces,
+ *  so a generated wheel lands at the well centre inside the body mesh (req_1206). The
+ *  body then re-seats on its lowest point (the tire bottoms) for free. Pure. */
+export function mergeMesh(a: EditMesh, b: EditMesh, delta: V3): EditMesh {
+  const base = a.verts.length;
+  const verts = [...a.verts.map((v) => [v[0], v[1], v[2]] as V3), ...b.verts.map((v) => [v[0] + delta[0], v[1] + delta[1], v[2] + delta[2]] as V3)];
+  const faces = [...a.faces, ...b.faces.map((f) => ({ ...f, loop: f.loop.map((i) => i + base) }))];
+  return { ...a, verts, faces };
+}
+
 /** Half-extent of a vert subset from `anchor` along world axis 0|1|2 — the resize
  *  reference (how far the farthest selected vert sits from the center on that axis). */
 export function vertsHalfExtent(m: EditMesh, indices: Iterable<number>, anchor: V3, axis: 0 | 1 | 2): number {
