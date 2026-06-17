@@ -22,6 +22,10 @@ const T = GAME_CHROME.tokens.color;
 
 const CARD = { padding: 8, borderRadius: 7, backgroundColor: '#0b1320cc', borderWidth: 1, borderColor: '#27364a' } as const;
 const BTN = { paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' } as const;
+// Cap the per-face loop rows when expanded so a dense mesh can never spill past
+// the layout MAX_CHILDREN=512 cap (which silently evicts trailing UI). The full
+// topology is always available via copy / show json. (req_1242)
+const LOOP_ROW_CAP = 256;
 
 // meters → modeling units (16 u = 1 tile = 1 m), the Studio's display basis.
 const u = (m: number) => (m * STUDIO.unitsPerTile).toFixed(1);
@@ -40,6 +44,7 @@ export function StudioShapePanel() {
   const model = useStudioModel();
   const part = model.activePart;
   const [showJson, setShowJson] = useState(false);
+  const [showLoops, setShowLoops] = useState(false);
   const [copied, setCopied] = useState(false);
 
   // Recompute the decode ONLY when the active part's mesh changes (id+version) —
@@ -87,21 +92,38 @@ export function StudioShapePanel() {
         </Text>
       </Row>
 
-      {/* per-face loops — the vertex-index loop of every face, the n-gon topology. */}
+      {/* per-face loops — the vertex-index loop of every face, the n-gon topology.
+          COLLAPSED by default (req_1242): a dense/solidified mesh has hundreds of
+          faces, and rendering every loop as always-on text floods the layout child
+          + glyph budget, silently evicting trailing UI (the viewport compass letters
+          went missing). Behind a toggle like the JSON below, and capped at
+          LOOP_ROW_CAP when open so it can never spill past MAX_CHILDREN. */}
       <Col style={{ gap: 3, ...CARD }}>
-        <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>faces · vertex loops</Text>
-        {m.faces.map((f, i) => (
-          <Row key={i} style={{ gap: 6, alignItems: 'center' }}>
-            <Text fontSize={9} color={T.dim} style={{ width: 20, fontFamily: 'monospace', textAlign: 'right' }}>{i}</Text>
-            <Text fontSize={9} color={T.text} style={{ flexGrow: 1, fontFamily: 'monospace' }}>
-              {`[${f.loop.join(' ')}]`}
-            </Text>
-            <Text fontSize={8} color={f.uv && f.uv.length ? '#5ec26a' : '#3a4a5e'} style={{ fontFamily: 'monospace' }}>
-              {f.uv && f.uv.length ? 'uv' : '—'}
-            </Text>
-            {f.material != null ? <Text fontSize={8} color="#b49bc9" style={{ fontFamily: 'monospace' }}>{`m${f.material}`}</Text> : null}
-          </Row>
-        ))}
+        <Row style={{ gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>{`faces · vertex loops (${m.faces.length})`}</Text>
+          <Pressable onPress={() => setShowLoops((v) => !v)} style={BTN}>
+            <Text fontSize={10} color={T.text} style={{ fontFamily: 'monospace' }}>{showLoops ? 'hide ▴' : 'show ▾'}</Text>
+          </Pressable>
+        </Row>
+        {showLoops ? (
+          <>
+            {m.faces.slice(0, LOOP_ROW_CAP).map((f, i) => (
+              <Row key={i} style={{ gap: 6, alignItems: 'center' }}>
+                <Text fontSize={9} color={T.dim} style={{ width: 20, fontFamily: 'monospace', textAlign: 'right' }}>{i}</Text>
+                <Text fontSize={9} color={T.text} style={{ flexGrow: 1, fontFamily: 'monospace' }}>
+                  {`[${f.loop.join(' ')}]`}
+                </Text>
+                <Text fontSize={8} color={f.uv && f.uv.length ? '#5ec26a' : '#3a4a5e'} style={{ fontFamily: 'monospace' }}>
+                  {f.uv && f.uv.length ? 'uv' : '—'}
+                </Text>
+                {f.material != null ? <Text fontSize={8} color="#b49bc9" style={{ fontFamily: 'monospace' }}>{`m${f.material}`}</Text> : null}
+              </Row>
+            ))}
+            {m.faces.length > LOOP_ROW_CAP ? (
+              <Text fontSize={8} color={T.dim} style={{ fontFamily: 'monospace' }}>{`…and ${m.faces.length - LOOP_ROW_CAP} more — use copy / show json for the full topology`}</Text>
+            ) : null}
+          </>
+        ) : null}
       </Col>
 
       {/* mounts — the named joints/sockets encoded on the mesh (req_1025). */}
