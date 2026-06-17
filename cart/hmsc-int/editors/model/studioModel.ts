@@ -19,7 +19,7 @@
 import { useEffect } from 'react';
 import { getHotState, setHotState, useRerender } from '@reactjit/hooks';
 import type { GeometryData } from '@reactjit/geometries';
-import { cuboid, editMeshToGeometry, type EditMesh } from './editMesh';
+import { cuboid, editMeshToGeometry, mergeMesh, type EditMesh } from './editMesh';
 import type { LayerStripAction } from '../paint/LayerStrip';
 import { libraryModels, modelParts, modelStream, type ModelEvent, type ModelStreamState, type StoredModel, type StoredPart } from './modelStream';
 import type { StreamHandle } from '../../data';
@@ -70,11 +70,21 @@ export type StudioModel = {
   selectedFaces: number[];
   setSelectedFaces(ids: number[]): void;
   select(id: string): void;
-  addPart(mesh: EditMesh, name: string): string;
+  /** Add a part. `lift` overrides the ground-seat — a detached panel passes its
+   *  SOURCE part's lift so it renders in the body's frame, not seated on its own
+   *  lowest vert (which would float it off the body). Omitted → liftToGround. */
+  addPart(mesh: EditMesh, name: string, lift?: number): string;
   addCube(diameter: number, height: number): string;
   addCuboid(): void;
   rename(id: string, name: string): void;
   updatePartMesh(id: string, mesh: EditMesh): void;
+  /** Merge the active part DOWN into the part before it in order (mergeMesh in the
+   *  shared model frame), then drop the now-merged source — the re-attach / weld
+   *  (req_1224). No-op when the active part is the first / only one. */
+  mergeActive(): void;
+  /** The name of the part the active part would merge into (the previous in
+   *  order), or null when there's nothing above it — drives the merge button. */
+  mergeTargetName: string | null;
   runAction(id: string, action: LayerStripAction): void;
   undo(): void;
   redo(): void;
@@ -280,14 +290,29 @@ function commit(event: ModelEvent, tick: Tick, history: 'record' | 'undo' | 'red
 
 // ── Mutators ────────────────────────────────────────────────────────────────────
 
-function addPart(mesh: EditMesh, name: string): string {
+function addPart(mesh: EditMesh, name: string, lift?: number): string {
   ensureInit();
   const model = ensureOpenModel();
   const id = mintId('pt');
-  const part: StoredPart = { id, name, mesh, color: nextTint(), visible: true, lift: liftToGround(mesh), version: 0 };
+  const part: StoredPart = { id, name, mesh, color: nextTint(), visible: true, lift: lift ?? liftToGround(mesh), version: 0 };
   commit({ kind: 'partAdded', model, part }, 'structure', 'record');
   setActive(id);
   return id;
+}
+
+function mergeActive(): void {
+  ensureInit();
+  const model = store.openModelId; if (!model) return;
+  const i = store.parts.findIndex((p) => p.id === store.activeId);
+  if (i <= 0) return; // first part / none → nothing above to merge into
+  const target = store.parts[i - 1];
+  const src = store.parts[i];
+  // both meshes live in the SAME model frame (detach preserved positions), so a
+  // zero delta re-seats the panel exactly where it came from; the merged part keeps
+  // the target's lift, so the re-attached geometry lands back in place.
+  commit({ kind: 'partMeshUpdated', model, id: target.id, mesh: mergeMesh(target.mesh, src.mesh, [0, 0, 0]) }, 'mesh', 'record');
+  commit({ kind: 'partRemoved', model, id: src.id }, 'structure', 'record');
+  setActive(target.id);
 }
 
 function addCube(diameter: number, height: number): string {
@@ -397,7 +422,7 @@ export function studioModelName(): string | null {
 export function studioRenameModel(name: string): void { renameModel(name); }
 export function studioDeleteModel(id: string): void { deleteModel(id); }
 
-const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, runAction, undo, redo, newModel, openModel, renameModel, deleteModel } as const;
+const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, mergeActive, runAction, undo, redo, newModel, openModel, renameModel, deleteModel } as const;
 
 export function useStudioModel(): StudioModel {
   ensureInit();
@@ -416,6 +441,7 @@ export function useStudioModel(): StudioModel {
     revision: store.revision,
     meshRev: store.meshRev,
     activePart: store.parts.find((p) => p.id === store.activeId) ?? null,
+    mergeTargetName: (() => { const i = store.parts.findIndex((p) => p.id === store.activeId); return i > 0 ? store.parts[i - 1].name : null; })(),
     visibleParts: store.parts.filter((p) => p.visible),
     selectedFaces: store.selectedFaces,
     canUndo: undoStack.length > 0,

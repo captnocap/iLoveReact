@@ -1600,3 +1600,95 @@ export function deleteFaces(m: EditMesh, faceIndices: Iterable<number>): EditMes
   const faces = kept.map((f) => ({ ...f, loop: f.loop.map((vi) => remap.get(vi)!) }));
   return { ...m, verts, faces };
 }
+
+// ── Mesh lint: "hey, your shit is scuffed" (req_1224) ───────────────────────────
+// It's all numbers, so the mistakes are countable. validateMesh reads a mesh and
+// reports every defect it can prove from the topology — the same class of thing
+// that produced the doubled-corner door (req_1222), found BEFORE it bites a cut /
+// unwrap / cook. Each issue carries the faces + verts it implicates so the editor
+// can select-and-show them. Pure + headless; severity lets the UI rank a hard
+// error (a broken face) above a cosmetic warn (a weldable duplicate vertex).
+
+export type MeshIssueKind =
+  | 'repeated-corner'    // a face loop names the same vertex twice (zero-length edge / pinch)
+  | 'degenerate-face'    // fewer than 3 distinct corners, or ~zero area (collinear)
+  | 'non-manifold-edge'  // an edge shared by >2 faces (geometry folds on itself)
+  | 'open-edge'          // an edge used by exactly ONE face (a hole — fine for a flat panel)
+  | 'duplicate-vertex'   // two+ verts at the same position (weldable seam)
+  | 'orphan-vertex'      // a vertex no face uses (dead weight)
+  | 'concave-face';      // a reflex (non-convex) n-gon (the Auto-Fix offender)
+
+export type MeshSeverity = 'error' | 'warn' | 'info';
+export type MeshIssue = { kind: MeshIssueKind; severity: MeshSeverity; faces: number[]; verts: number[]; detail: string };
+
+/** Lint a mesh: every provable topological defect, each tagged with the faces +
+ *  verts it implicates and a severity. Empty array = clean. Pure + headless. */
+export function validateMesh(m: EditMesh, dp = 4): MeshIssue[] {
+  const out: MeshIssue[] = [];
+
+  // per-face defects: repeated corners + degenerate (sub-triangle / zero-area).
+  m.faces.forEach((f, fi) => {
+    const distinct = new Set(f.loop);
+    if (distinct.size < f.loop.length) {
+      const dupes = f.loop.filter((v, i) => f.loop.indexOf(v) !== i);
+      out.push({ kind: 'repeated-corner', severity: 'error', faces: [fi], verts: [...new Set(dupes)], detail: `face ${fi} names vertex ${[...new Set(dupes)].join(', ')} twice (zero-length edge)` });
+    }
+    if (distinct.size < 3) {
+      out.push({ kind: 'degenerate-face', severity: 'error', faces: [fi], verts: [...distinct], detail: `face ${fi} has only ${distinct.size} distinct corners` });
+      return; // area is meaningless for a sub-triangle
+    }
+    // raw Newell magnitude = 2× area; ~0 means collinear / zero-area.
+    let nx = 0, ny = 0, nz = 0;
+    for (let i = 0; i < f.loop.length; i += 1) {
+      const c = m.verts[f.loop[i]], n = m.verts[f.loop[(i + 1) % f.loop.length]];
+      nx += (c[1] - n[1]) * (c[2] + n[2]); ny += (c[2] - n[2]) * (c[0] + n[0]); nz += (c[0] - n[0]) * (c[1] + n[1]);
+    }
+    if (Math.hypot(nx, ny, nz) < 1e-7) out.push({ kind: 'degenerate-face', severity: 'error', faces: [fi], verts: [...distinct], detail: `face ${fi} has ~zero area (collinear corners)` });
+  });
+
+  // edge manifoldness: how many faces share each undirected edge.
+  const edgeFaces = new Map<string, number[]>();
+  m.faces.forEach((f, fi) => {
+    const n = f.loop.length;
+    for (let i = 0; i < n; i += 1) {
+      const a = f.loop[i], b = f.loop[(i + 1) % n];
+      if (a === b) continue; // already flagged as a repeated corner
+      const k = edgeKey(a, b);
+      (edgeFaces.get(k) ?? (edgeFaces.set(k, []), edgeFaces.get(k)!)).push(fi);
+    }
+  });
+  for (const [k, fs] of edgeFaces) {
+    const [a, b] = k.split(':').map(Number);
+    if (fs.length > 2) out.push({ kind: 'non-manifold-edge', severity: 'error', faces: [...new Set(fs)], verts: [a, b], detail: `edge ${a}-${b} is shared by ${fs.length} faces` });
+    else if (fs.length === 1) out.push({ kind: 'open-edge', severity: 'info', faces: fs, verts: [a, b], detail: `edge ${a}-${b} is a boundary (open) edge` });
+  }
+
+  // duplicate verts (same position) — a weldable seam.
+  const byPos = new Map<string, number[]>();
+  m.verts.forEach((v, i) => {
+    const key = `${v[0].toFixed(dp)},${v[1].toFixed(dp)},${v[2].toFixed(dp)}`;
+    (byPos.get(key) ?? (byPos.set(key, []), byPos.get(key)!)).push(i);
+  });
+  for (const ids of byPos.values()) if (ids.length > 1) out.push({ kind: 'duplicate-vertex', severity: 'warn', faces: [], verts: ids, detail: `${ids.length} verts share a position (${ids.join(', ')})` });
+
+  // orphan verts (used by no face).
+  const used = new Set<number>();
+  for (const f of m.faces) for (const vi of f.loop) used.add(vi);
+  const orphans = m.verts.map((_, i) => i).filter((i) => !used.has(i));
+  if (orphans.length) out.push({ kind: 'orphan-vertex', severity: 'warn', faces: [], verts: orphans, detail: `${orphans.length} verts are used by no face` });
+
+  // concave n-gons (the existing Auto-Fix class).
+  const concave = findConcaveFaces(m);
+  if (concave.length) out.push({ kind: 'concave-face', severity: 'warn', faces: concave, verts: [], detail: `${concave.length} face(s) are concave (reflex corner)` });
+
+  return out;
+}
+
+/** A one-line health summary of a mesh: counts by severity, worst first. "" when
+ *  clean. The Studio's check badge speaks this. */
+export function meshHealth(m: EditMesh): { clean: boolean; errors: number; warns: number; issues: MeshIssue[] } {
+  const issues = validateMesh(m);
+  const errors = issues.filter((i) => i.severity === 'error').length;
+  const warns = issues.filter((i) => i.severity === 'warn').length;
+  return { clean: errors === 0 && warns === 0, errors, warns, issues };
+}

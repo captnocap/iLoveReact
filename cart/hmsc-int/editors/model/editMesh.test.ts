@@ -7,7 +7,7 @@ import {
   addMount, addMountReflections, updateMountMirrored, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
   flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
-  vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel,
+  vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel, validateMesh, meshHealth,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
 
@@ -958,6 +958,54 @@ test('detach sanitizes a malformed (doubled-corner) source face — no degenerat
   }
   // shared interior edge still gets no wall: 2 outer + 2 inner + 6 silhouette = 10.
   assertEqual(panel.faces.length, 10, 'clean shell, no junk faces');
+});
+
+test('validateMesh: a clean closed cuboid has no errors or warns (req_1224)', () => {
+  const h = meshHealth(cuboid(2, 2, 2));
+  assert(h.clean, 'a fresh cuboid is clean');
+  assertEqual(h.errors, 0, 'no errors');
+  assertEqual(h.errors + h.warns, 0, 'no warns either');
+  // a closed solid has NO open edges (every edge shared by exactly 2 faces).
+  assert(!validateMesh(cuboid(2, 2, 2)).some((i) => i.kind === 'open-edge'), 'a closed cube has no boundary edges');
+});
+
+test('validateMesh flags a repeated corner (the doubled-vertex defect) (req_1224)', () => {
+  const m: EditMesh = { verts: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], faces: [{ loop: [0, 1, 2, 3, 3] }] };
+  const issues = validateMesh(m);
+  const rc = issues.find((i) => i.kind === 'repeated-corner');
+  assert(rc !== undefined && rc.severity === 'error', 'a doubled corner is an error');
+  assert(rc!.faces[0] === 0 && rc!.verts.includes(3), 'it points at face 0, vertex 3');
+});
+
+test('validateMesh flags a non-manifold edge (>2 faces on one edge) (req_1224)', () => {
+  // three triangles all sharing edge (0,1) — a fin/fold.
+  const m: EditMesh = {
+    verts: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [0, -1, 0]],
+    faces: [{ loop: [0, 1, 2] }, { loop: [0, 1, 3] }, { loop: [0, 1, 4] }],
+  };
+  const nm = validateMesh(m).find((i) => i.kind === 'non-manifold-edge');
+  assert(nm !== undefined && nm.severity === 'error', 'edge shared by 3 faces is a non-manifold error');
+  assert(nm!.verts.includes(0) && nm!.verts.includes(1), 'it names the offending edge');
+});
+
+test('validateMesh flags duplicate + orphan verts as warns; a flat panel reports open edges as info (req_1224)', () => {
+  // a quad with a 5th vert duplicating vert 0 and a 6th orphan vert.
+  const m: EditMesh = { verts: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1], [0, 0, 0], [9, 9, 9]], faces: [{ loop: [0, 1, 2, 3] }] };
+  const issues = validateMesh(m);
+  assert(issues.some((i) => i.kind === 'duplicate-vertex' && i.severity === 'warn'), 'coincident verts → weldable warn');
+  assert(issues.some((i) => i.kind === 'orphan-vertex' && i.verts.includes(5)), 'the unused vert is an orphan');
+  // a lone quad is an open shell: all 4 edges are boundaries (info, not error).
+  assertEqual(issues.filter((i) => i.kind === 'open-edge').length, 4, 'a flat panel has 4 open edges');
+  assertEqual(issues.filter((i) => i.severity === 'error').length, 0, 'open edges are not errors');
+});
+
+test('a detached panel from a CLEAN selection validates clean (req_1224)', () => {
+  // the door recipe end-to-end: detach off a cuboid face, the panel should be a
+  // closed solid with no errors (the sanitize from req_1222 keeps it clean).
+  const { panel } = detachPanel(cuboid(2, 2, 2), [0], 2 / 16);
+  const h = meshHealth(panel);
+  assertEqual(h.errors, 0, 'a detached panel has no topological errors');
+  assert(!validateMesh(panel).some((i) => i.kind === 'open-edge'), 'the panel is a closed solid (no holes)');
 });
 
 finish('editMesh');

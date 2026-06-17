@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -366,7 +366,7 @@ const Geom = { box: require('@reactjit/geometries').Box };
 
 // ── The viewport ─────────────────────────────────────────────────────────────
 
-export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string) => string; onSelectFaces: (ids: number[]) => void }) {
+export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void }) {
   const { parts, revision, activePart, onSelectFaces } = props;
 
   // Lower each visible part once per structural revision (camera drags + fov
@@ -442,6 +442,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     const reps = ([0, 1, 2] as (0 | 1 | 2)[]).map((a) => ({ axis: a, ...symmetryReport(activePart.mesh, a) }));
     return reps.reduce((best, r) => (r.unmatched < best.unmatched ? r : best));
   }, [activePart?.id, activePart?.version, mirrorAxes]);
+  // MESH LINT (req_1224): the live health of the active part — the "your shit is
+  // scuffed" badge. Memoized on the committed mesh (like symReport) so camera moves
+  // don't re-lint. Drives the check badge; pressing it selects the offenders.
+  const health = useMemo(() => (activePart ? meshHealth(activePart.mesh) : null), [activePart?.id, activePart?.version]);
   const scaleFigure = useMemo(() => {
     const doc = GAME_FIGURE.generateFace(SCALE_FIGURE_SEED);
     const fparts = buildPartRender(doc, GAME_FIGURE.hedDepthGrid(doc), SCALE_FIGURE_CART_KEY, SCALE_FIGURE_SEED);
@@ -1698,6 +1702,44 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             </>
           );
         })() : null}
+        {/* MESH LINT (req_1224): the live health badge — "✓ clean" or "⚠ N" — for the
+            active part. It's a whole-mesh read, so shown in every mode (beside
+            symmetrize). Pressing a dirty badge SELECTS the offending faces (face mode)
+            and logs the full breakdown, so the scuff is on-screen, not just counted. */}
+        {activePart && health ? (() => {
+          const dirty = !health.clean;
+          const faceIssues = health.issues.filter((iss) => iss.faces.length);
+          const showOffenders = () => {
+            if (!dirty) { toast('mesh is clean — no issues'); return; }
+            for (const iss of health.issues) console.warn(`[studio:lint] ${iss.severity} ${iss.kind}: ${iss.detail}`);
+            const faces = [...new Set(faceIssues.flatMap((iss) => iss.faces))];
+            if (faces.length) { setSelMode('face'); setSel({ verts: new Set(), edges: new Set(), faces: new Set(faces) }); }
+            toast(`${health.errors} error${health.errors === 1 ? '' : 's'}, ${health.warns} warn${health.warns === 1 ? '' : 's'} — see console`);
+          };
+          const col = health.errors ? '#f0a0a0' : health.warns ? '#e9d24a' : '#7fd6a0';
+          const bg = health.errors ? '#2e1616' : health.warns ? '#2a2410' : '#10261a';
+          return (
+            <>
+              <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+              <Pressable onPress={showOffenders} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: bg, borderWidth: 1, borderColor: col }}>
+                <Text fontSize={10} color={col} style={{ fontFamily: 'monospace' }}>
+                  {health.clean ? '✓ clean' : `⚠ ${health.errors ? `${health.errors}E` : ''}${health.errors && health.warns ? ' ' : ''}${health.warns ? `${health.warns}W` : ''}`}
+                </Text>
+              </Pressable>
+            </>
+          );
+        })() : null}
+        {/* MERGE / re-attach (req_1224): fold the active part DOWN into the part before
+            it (the body), in object mode. The instant re-attach for a bad detach is
+            undo×2; this is the durable weld — and combines any two parts. */}
+        {selMode === 'object' && activePart && props.mergeTargetName ? (
+          <>
+            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+            <Pressable onPress={() => { props.onMergeActive(); setSel(emptySelection()); }} style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
+              <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`merge → ${props.mergeTargetName}`}</Text>
+            </Pressable>
+          </>
+        ) : null}
         {/* RIG mode: add a joint, or opt the part into a pivot (req_1054 — pivots
             are opt-in; a body is joints-only). The gizmo on the selected handle
             does the placing — no move/resize toggle. */}
@@ -1823,7 +1865,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                     onPress={() => {
                       const { panel, body } = detachPanel(activePart.mesh, faceList, STUDIO.shellThicknessMeters);
                       props.onEditMesh(activePart.id, body);
-                      props.onAddPart(panel, 'panel');
+                      // the panel inherits the BODY's lift so it renders in place, not
+                      // re-seated on its own lowest vert (which would float it off).
+                      props.onAddPart(panel, 'panel', activePart.lift);
                       setSel(emptySelection());
                     }}
                     style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
@@ -2863,7 +2907,7 @@ export function StudioEditor() {
   }, []);
   return (
     <Row style={{ flexGrow: 1, height: '100%', minHeight: 0, position: 'relative' }}>
-      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onSelectFaces={model.setSelectedFaces} />
+      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} />
       {/* Branch-history verbs — top-left, the one viewport corner the compass /
           toolbar / mode-toggle don't claim. Disabled when the stack is empty. */}
       <Row style={{ position: 'absolute', left: 8, top: 8, gap: 4, zIndex: 30 }}>
