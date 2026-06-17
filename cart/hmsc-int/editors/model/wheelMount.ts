@@ -14,15 +14,14 @@
 
 import { faceCentroid, faceNormal, mergeMesh, setPivot, wheelMesh, type EditMesh, type V3 } from './editMesh';
 
-/** The two in-plane coordinate axes for a face whose dominant normal is `axis`. */
-function inPlaneCoords(axis: 0 | 1 | 2): [number, number] {
-  return axis === 0 ? [2, 1] : axis === 1 ? [0, 2] : [0, 1];
-}
-
-/** Seat a wheel from a selected face: centroid = the axle point, dominant normal =
- *  the spin axis, radius = HALF the smaller in-plane extent (the well opening, so
- *  the tire fits the hole rather than the corner-to-corner diagonal). Null on a
- *  degenerate face. */
+/** Seat a wheel from a selected face: centroid = the axle point; the dominant
+ *  normal cardinal = the spin axis (so the tire stays VERTICAL and rolls — a wheel
+ *  is never tilted to match a slanted fender, exactly like a real car); radius =
+ *  the median 3D distance from the centroid to the rim verts. That rim radius is
+ *  SLANT-INDEPENDENT (a true 3D distance, not a foreshortened cardinal projection),
+ *  so an angled round well still sizes the tire correctly (req_1264). For a round
+ *  well (the well's n-gon cap) it's the circle radius; a rectangular face gives the
+ *  corner radius (round wells are the intended case). Null on a degenerate face. */
 export function faceWheelFit(m: EditMesh, faceIndex: number): { center: V3; radius: number; axis: 0 | 1 | 2 } | null {
   const f = m.faces[faceIndex];
   if (!f || f.loop.length < 3) return null;
@@ -30,15 +29,14 @@ export function faceWheelFit(m: EditMesh, faceIndex: number): { center: V3; radi
   const n = faceNormal(m, f);
   const a0 = Math.abs(n[0]), a1 = Math.abs(n[1]), a2 = Math.abs(n[2]);
   const axis: 0 | 1 | 2 = a0 >= a1 && a0 >= a2 ? 0 : a1 >= a2 ? 1 : 2;
-  const [iu, iv] = inPlaneCoords(axis);
-  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+  const dists: number[] = [];
   for (const idx of f.loop) {
     const v = m.verts[idx];
-    if (!v) continue;
-    if (v[iu] < minU) minU = v[iu]; if (v[iu] > maxU) maxU = v[iu];
-    if (v[iv] < minV) minV = v[iv]; if (v[iv] > maxV) maxV = v[iv];
+    if (v) dists.push(Math.hypot(v[0] - center[0], v[1] - center[1], v[2] - center[2]));
   }
-  const radius = Math.min(maxU - minU, maxV - minV) / 2;
+  if (dists.length === 0) return null;
+  dists.sort((p, q) => p - q);
+  const radius = dists[Math.floor(dists.length / 2)]; // median rim distance
   if (!(radius > 0)) return null;
   return { center, radius, axis };
 }

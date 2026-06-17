@@ -3,10 +3,10 @@
 // the wheel built as a pivoted part seated at that hub. Pure + headless.
 
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
-import { cuboid, hasPivot, pivotOf, type EditMesh } from './editMesh';
+import { cuboid, hasPivot, pivotOf, type EditMesh, type V3 } from './editMesh';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from './wheelMount';
 
-// a single quad facing −X at x=2, spanning z∈[-1,1], y∈[0,3] → in-plane extent 2×3.
+// a single quad facing −X at x=2, spanning z∈[-1,1], y∈[0,3].
 function xFace(): EditMesh {
   return {
     verts: [[2, 0, -1], [2, 0, 1], [2, 3, 1], [2, 3, -1]],
@@ -14,15 +14,32 @@ function xFace(): EditMesh {
   };
 }
 
-test('faceWheelFit: centroid is the axle point, radius = half the SMALLER in-plane extent', () => {
-  const fit = faceWheelFit(xFace(), 0);
+// a regular hexagon (a round wheel-well cap proxy) of circumradius R, centred at
+// origin, facing ±X — optionally TILTED about Z by `tiltZ` so the well is slanted.
+function hexFace(R: number, tiltZ = 0): EditMesh {
+  const verts: V3[] = [];
+  const c = Math.cos(tiltZ), s = Math.sin(tiltZ);
+  for (let k = 0; k < 6; k += 1) {
+    const a = (k * Math.PI) / 3;
+    const x = 0, y = R * Math.cos(a), z = R * Math.sin(a);
+    verts.push([x * c - y * s, x * s + y * c, z]); // rotate the disc about Z
+  }
+  return { verts, faces: [{ loop: [0, 1, 2, 3, 4, 5] }] };
+}
+
+test('faceWheelFit: a round well → centroid axle point + rim radius, axle stays cardinal', () => {
+  const fit = faceWheelFit(hexFace(1.5), 0);
   assert(!!fit, 'a valid face yields a fit');
-  assertEqual(fit!.axis, 0, 'a face facing ±X → axle about X');
-  assertClose(fit!.center[1], 1.5, 1e-6, 'centroid y = mid of [0,3]');
-  assertClose(fit!.center[2], 0, 1e-6, 'centroid z = mid of [-1,1]');
-  // in-plane extents are 2 (z) and 3 (y); radius = min/2 = 1 (fits the opening, not
-  // the corner-to-corner diagonal a circle fit would give).
-  assertClose(fit!.radius, 1, 1e-6, 'radius = half the smaller opening dimension');
+  assertEqual(fit!.axis, 0, 'a face facing ±X → axle about X (a vertical, rolling wheel)');
+  assertClose(fit!.center[0], 0, 1e-6, 'centroid at the disc centre');
+  assertClose(fit!.radius, 1.5, 1e-6, 'radius = the rim circle radius');
+});
+
+test('faceWheelFit: a SLANTED round well sizes the SAME radius (slant-independent, req_1264)', () => {
+  const flat = faceWheelFit(hexFace(1.5, 0), 0)!;
+  const slanted = faceWheelFit(hexFace(1.5, 0.35), 0)!; // ~20° tilt
+  assertClose(slanted.radius, flat.radius, 1e-6, 'the true 3D rim radius is unchanged by the slant');
+  assertEqual(slanted.axis, 0, 'a modest slant keeps the axle cardinal → the wheel stays vertical');
 });
 
 test('faceWheelFit: a degenerate face returns null', () => {
