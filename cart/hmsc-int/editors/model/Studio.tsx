@@ -1802,18 +1802,28 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             >
               <Text fontSize={10} color="#9fe9de" style={{ fontFamily: 'monospace' }}>+ seat</Text>
             </Pressable>
-            {/* MIRROR JOINT (req_1189): with mirror plane(s) on, reflect the selected
-                joint into its partners — place one tire mount, get the matching ones
-                (X = left/right, X+Z = all four). */}
-            {rigSel && rigSel.kind === 'joint' && mirrorAxes.length ? (
-              <Pressable
-                onPress={() => props.onEditMesh(activePart.id, addMountReflections(activePart.mesh, (rigSel as { kind: 'joint'; name: string }).name, mirrorAxes))}
-                tooltip="Mirror this joint across the enabled plane(s) — place one wheel mount, get the matching ones (X = both sides, X+Z = all four)"
-                style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: '#6b54a6' }}
-              >
-                <Text fontSize={10} color="#cdbcff" style={{ fontFamily: 'monospace' }}>⇄ mirror joint</Text>
-              </Pressable>
-            ) : null}
+            {/* MIRROR MOUNT (req_1189; anchors req_1244): with mirror plane(s) on,
+                reflect the selected mount into its partners — one tire mount → all
+                four (X = left/right, X+Z = all four); one driver seat → the
+                passenger (facing mirrored too). mirrorMount preserves kind + role,
+                so the same op + button serves joints AND anchors — only the label
+                follows the selected mount's kind. */}
+            {rigSel && rigSel.kind === 'joint' && mirrorAxes.length ? (() => {
+              const selName = (rigSel as { kind: 'joint'; name: string }).name;
+              const selMount = (activePart.mesh.mounts ?? []).find((x) => x.name === selName);
+              const anchor = !!selMount && isAnchor(selMount);
+              return (
+                <Pressable
+                  onPress={() => props.onEditMesh(activePart.id, addMountReflections(activePart.mesh, selName, mirrorAxes))}
+                  tooltip={anchor
+                    ? 'Mirror this seat across the enabled plane(s) — place the driver seat, get the passenger (position + facing mirrored). X = both sides, X+Z = all four'
+                    : 'Mirror this joint across the enabled plane(s) — place one wheel mount, get the matching ones (X = both sides, X+Z = all four)'}
+                  style={{ ...STEP_BTN, backgroundColor: anchor ? '#163a36' : '#241c3a', borderColor: anchor ? '#2f7a6f' : '#6b54a6' }}
+                >
+                  <Text fontSize={10} color={anchor ? '#9fe9de' : '#cdbcff'} style={{ fontFamily: 'monospace' }}>{anchor ? '⇄ mirror seat' : '⇄ mirror joint'}</Text>
+                </Pressable>
+              );
+            })() : null}
             <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#0b1320cc', borderWidth: 1, borderColor: '#27364a' }}>
               <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{rigSel ? (rigSel.kind === 'pivot' ? 'pivot selected' : `${isAnchor((activePart.mesh.mounts ?? []).find((x) => x.name === rigSel.name) ?? { kind: 'socket' } as any) ? 'anchor' : 'joint'}: ${rigSel.name}`) : 'pick a handle, or + above'}</Text>
             </Box>
