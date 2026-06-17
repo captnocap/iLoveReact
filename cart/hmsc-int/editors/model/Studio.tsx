@@ -1516,6 +1516,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           {/* SCALE GHOST (req_1165): stand the player beside the model for scale. */}
           <Pressable
             onPress={() => setShowScale((v) => !v)}
+            tooltip="Scale reference — stand the in-game player (1.65 m) next to your model to size it against a real human"
             style={{ ...STEP_BTN, backgroundColor: showScale ? '#1c3a2a' : '#0b1320dd', borderColor: showScale ? '#2f7a4f' : '#27364a' }}
           >
             <Text fontSize={10} color={showScale ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>
@@ -1529,7 +1530,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             {([0, 1, 2] as const).map((a) => {
               const on = !!(mirrorMask & (1 << a));
               return (
-                <Pressable key={a} onPress={() => setMirrorMask((m) => m ^ (1 << a))} style={{ paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, borderRadius: 4, backgroundColor: on ? STUDIO.mirrorAxisColors[a] + '33' : 'transparent', borderWidth: 1, borderColor: on ? STUDIO.mirrorAxisColors[a] : '#2c4a6a' }}>
+                <Pressable key={a} onPress={() => setMirrorMask((m) => m ^ (1 << a))} tooltip={`Mirror edits across ${STUDIO.mirrorAxisLabels[a]} (${a === 0 ? 'left↔right' : a === 1 ? 'up↔down' : 'front↔back'}) — symmetric editing; enable more than one to combine`} style={{ paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, borderRadius: 4, backgroundColor: on ? STUDIO.mirrorAxisColors[a] + '33' : 'transparent', borderWidth: 1, borderColor: on ? STUDIO.mirrorAxisColors[a] : '#2c4a6a' }}>
                   <Text fontSize={10} color={on ? STUDIO.mirrorAxisColors[a] : T.dim} style={{ fontFamily: 'monospace', fontWeight: on ? '800' : '400' }}>{STUDIO.mirrorAxisLabels[a]}</Text>
                 </Pressable>
               );
@@ -1539,9 +1540,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         {/* Diagnostics (req_0981): FRAMES readout + smooth/log/fps levers, far right. */}
         <Row style={{ gap: 6, alignItems: 'center' }}>
           {diagOn ? <FrameDiagBar logToTerminal={logOn} /> : null}
-          <Pressable onPress={cycleSmooth} style={STEP_BTN}><Text fontSize={9} color={T.text}>smooth: {smooth === 0 ? 'direct' : `${smooth}/s`}</Text></Pressable>
-          <Pressable onPress={() => setLogOn((v) => !v)} style={{ ...STEP_BTN, backgroundColor: logOn ? '#1c3a2a' : '#13233aee', borderColor: logOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={logOn ? '#7fd6a0' : T.dim}>log cam</Text></Pressable>
-          <Pressable onPress={() => setDiagOn((v) => !v)} style={{ ...STEP_BTN, backgroundColor: diagOn ? '#1c3a2a' : '#13233aee', borderColor: diagOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={diagOn ? '#7fd6a0' : T.dim}>fps</Text></Pressable>
+          <Pressable onPress={cycleSmooth} tooltip="Camera smoothing — cycle direct / eased follow (cosmetic; 'direct' is 1:1 like Blockbench)" style={STEP_BTN}><Text fontSize={9} color={T.text}>smooth: {smooth === 0 ? 'direct' : `${smooth}/s`}</Text></Pressable>
+          <Pressable onPress={() => setLogOn((v) => !v)} tooltip="Log camera angles to the terminal (debug aid for chasing camera jitter)" style={{ ...STEP_BTN, backgroundColor: logOn ? '#1c3a2a' : '#13233aee', borderColor: logOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={logOn ? '#7fd6a0' : T.dim}>log cam</Text></Pressable>
+          <Pressable onPress={() => setDiagOn((v) => !v)} tooltip="Show/hide the FRAMES performance readout (fps · frame ms · skips · gc · present)" style={{ ...STEP_BTN, backgroundColor: diagOn ? '#1c3a2a' : '#13233aee', borderColor: diagOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={diagOn ? '#7fd6a0' : T.dim}>fps</Text></Pressable>
         </Row>
       </Row>
 
@@ -1639,8 +1640,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           const on = selMode === m;
           const n = selectionCount(sel, m);
           const disabled = m !== 'object' && !activePart;
+          const modeTip: Record<string, string> = {
+            object: 'Object mode — move/resize/rotate the WHOLE part as one',
+            vertex: 'Vertex mode — select & drag individual points (and build faces / fit wheels)',
+            edge: 'Edge mode — select edges; extrude an edge or bridge edges into a face',
+            face: 'Face mode — select faces; extrude, inset, loop-cut, flip, or mark glass',
+            rig: 'Rig mode — place the pivot + joints (axles, hinges) the part rotates about',
+            paint: 'Paint mode — paint texels directly onto the 3D faces',
+          };
           return (
-            <Pressable key={m} onPress={() => { if (disabled) return; if (m === 'paint') ensureTexture(); setSelMode(m); }} style={{ ...STEP_BTN, opacity: disabled ? 0.4 : 1, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
+            <Pressable key={m} onPress={() => { if (disabled) return; if (m === 'paint') ensureTexture(); setSelMode(m); }} tooltip={modeTip[m]} style={{ ...STEP_BTN, opacity: disabled ? 0.4 : 1, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
               <Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{m}{on && n > 0 ? ` ·${n}` : ''}</Text>
             </Pressable>
           );
@@ -1694,10 +1703,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             <>
               <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
               <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>symmetrize</Text>
-              <Pressable onPress={() => doSym(true)} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
+              <Pressable onPress={() => doSym(true)} tooltip={`Symmetrize — keep the +${ax} half and rebuild the other side as its exact mirror (kills any drift)`} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
                 <Text fontSize={10} color={col} style={{ fontFamily: 'monospace' }}>keep +{ax}</Text>
               </Pressable>
-              <Pressable onPress={() => doSym(false)} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
+              <Pressable onPress={() => doSym(false)} tooltip={`Symmetrize — keep the −${ax} half and rebuild the other side as its exact mirror (kills any drift)`} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
                 <Text fontSize={10} color={col} style={{ fontFamily: 'monospace' }}>keep −{ax}</Text>
               </Pressable>
               <Box style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: symReport.unmatched === 0 ? '#10261a' : '#2e1616', borderWidth: 1, borderColor: symReport.unmatched === 0 ? '#2f7a4f' : '#a14545' }}>
@@ -1797,7 +1806,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             {(['move', 'resize', 'rotate'] as GizmoTool[]).map((tl) => {
               const on = gizmoTool === tl;
               return (
-                <Pressable key={tl} onPress={() => setGizmoTool(tl)} style={{ ...STEP_BTN, backgroundColor: on ? '#3a2f5e' : '#13233aee', borderColor: on ? '#9b7fd6' : '#2c4a6a' }}>
+                <Pressable key={tl} onPress={() => setGizmoTool(tl)} tooltip={tl === 'move' ? 'Move tool — drag the arrows to slide the selection (in face mode an orange arrow extrudes along the normal)' : tl === 'resize' ? 'Resize tool — drag the square handles to scale the selection per-axis' : 'Rotate tool — drag the rings to spin the selection about an axis'} style={{ ...STEP_BTN, backgroundColor: on ? '#3a2f5e' : '#13233aee', borderColor: on ? '#9b7fd6' : '#2c4a6a' }}>
                   <Text fontSize={10} color={on ? '#e0d4ff' : T.dim} style={{ fontFamily: 'monospace' }}>{tl}</Text>
                 </Pressable>
               );
@@ -2346,7 +2355,7 @@ function FrameDiagBar(props: { logToTerminal: boolean }) {
       ) : (
         <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>no telemetry…</Text>
       )}
-      <Pressable onPress={() => setResetSeq((n) => n + 1)} style={STEP_BTN}><Text fontSize={8} color={T.dim}>↺</Text></Pressable>
+      <Pressable onPress={() => setResetSeq((n) => n + 1)} tooltip="Reset the FRAMES counters (clear the worst-ms / skip / gc peaks and start fresh)" style={STEP_BTN}><Text fontSize={8} color={T.dim}>↺</Text></Pressable>
     </Row>
   );
 }
