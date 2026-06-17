@@ -489,7 +489,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // imageUrl = a RE-UPLOADED whole-sheet texture (a data: URL so a same-path re-import
   // still refreshes past the host's content-hashed image cache); sliceImages = per-face
   // re-uploads keyed "partId:faceIndex"; imageRev bumps each import to force a re-bake.
-  const [tex, setTex] = useHotState<{ texels: number; type: TextureType; color: string; name: string; imageUrl?: string; sliceImages?: Record<string, string>; imageRev?: number; paint?: PaintCells; paintRev?: number } | null>('studio:tex', null);
+  const [tex, setTex] = useHotState<{ texels: number; type: TextureType; color: string; name: string; imageUrl?: string; sliceImages?: Record<string, string>; imageRev?: number; paint?: PaintCells; paintRev?: number; paintFit?: boolean } | null>('studio:tex', null);
   // PAINT mode (Phase 5c): the current brush colour + size (tool prefs, TWIG). The
   // painted texels themselves ride `tex.paint` (texture data, beside imageUrl). A
   // null colour = ERASER (clears cells under the brush).
@@ -875,11 +875,14 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     // missing texture, or a FINE one (e.g. a 1024-texel dialog atlas → sub-pixel cells
     // that straddle many slots), is (re)built fit to the grid; this resets paint, which
     // is invalid at a new grid anyway.
-    if (tex && tex.texels <= STUDIO.paintGridCells * 1.5) { setTexView(true); return; }
+    // `paintFit` marks a texture already built at the paint grid — the size the fit
+    // produces can vary (nextPow2), so a flag is robust where a texel-size compare
+    // would loop (re-fit → 128 > threshold → re-fit …).
+    if (tex?.paintFit) { setTexView(true); return; }
     const result = textureizeScene(props.parts.map((p) => p.mesh), DEFAULT_TEXTURE_OPTIONS, STUDIO.unitsPerTile, STUDIO.paintGridCells);
     result.meshes.forEach((mesh, i) => { if (mesh !== props.parts[i].mesh) props.onEditMesh(props.parts[i].id, mesh); });
     paintRef.current = {};
-    setTex({ texels: result.texels, type: DEFAULT_TEXTURE_OPTIONS.type, color: DEFAULT_TEXTURE_OPTIONS.color, name: DEFAULT_TEXTURE_OPTIONS.name, paint: {}, paintRev: 0 });
+    setTex({ texels: result.texels, type: DEFAULT_TEXTURE_OPTIONS.type, color: DEFAULT_TEXTURE_OPTIONS.color, name: DEFAULT_TEXTURE_OPTIONS.name, paint: {}, paintRev: 0, paintFit: true });
     setTexView(true);
   };
   // Track the face/cell under the cursor (the grid overlay reads this ref + self-ticks,
@@ -931,6 +934,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   useInterval(() => { if (paintDirtyRef.current) { paintDirtyRef.current = false; setPaintBakeTick((t) => t + 1); } }, STUDIO.paintBakeMs);
   // Commit the live buffer to persisted paint (one setState) at the end of a stroke.
   const commitPaint = () => { if (tex) setTex({ ...tex, paint: { ...paintRef.current }, paintRev: (tex.paintRev ?? 0) + 1 }); };
+  // AUTO-ENSURE the texture in paint mode (req_1220): switching models resets the
+  // (global twig) texture to null, but ensureTexture only ran on the mode-button press
+  // — so after a switch the new model had NO texture → no grid, no paint. This re-makes
+  // it whenever paint mode is active without a (suitable) texture, so the open model is
+  // always paintable. Guarded on parts existing; ensureTexture is a no-op once tex fits.
+  useEffect(() => {
+    if (selMode !== 'paint' || props.parts.length === 0) return;
+    if (!tex?.paintFit) ensureTexture();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selMode, tex, props.parts.length, props.sceneName]);
 
   const sendOrbit = () => ctlRef.current?.setOrbit({ target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: distRef.current, fov: fovRef.current, zoom: 1 });
 
