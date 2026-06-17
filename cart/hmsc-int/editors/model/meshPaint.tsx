@@ -16,7 +16,7 @@
 import { useInterval, useRerender } from '@reactjit/hooks';
 import { Box } from '@reactjit/primitives';
 import { makeProjector, type CameraSnap } from './meshSelect';
-import { faceNormal, type EditMesh, type V2, type V3 } from './editMesh';
+import { faceNormal, type EditMesh, type EditMeshFace, type V2, type V3 } from './editMesh';
 
 const DEG = Math.PI / 180;
 /** never draw more than this many grid divisions on a hovered face (sanity). */
@@ -191,6 +191,34 @@ export function paintRuns(paint: PaintCells): Array<{ x: number; y: number; w: n
 
 type Proj = { x: number; y: number; front: boolean };
 
+/** Map a UV point (normalized [0,1] atlas coords) to a world point ON the face, via
+ *  barycentric over the fan triangulation — works for ANY face (quad, triangle, n-gon),
+ *  unlike a 4-corner bilerp (which only handled axis-aligned quads, so angled/triangular
+ *  faces showed no grid, req_1225). Picks the triangle the UV is most inside; `inside`
+ *  is true when the UV actually lies within the face, so grid lines clip to the face. */
+export function uvToWorld(mesh: EditMesh, face: EditMeshFace, u: number, v: number): { world: V3; inside: boolean } | null {
+  const uvs = face.uv; if (!uvs || uvs.length < 3) return null;
+  const loop = face.loop;
+  let best: { i: number; wa: number; wb: number; wc: number; score: number } | null = null;
+  for (let i = 1; i + 1 < loop.length; i += 1) {
+    const a = uvs[0], b = uvs[i], c = uvs[i + 1];
+    const v0x = b[0] - a[0], v0y = b[1] - a[1], v1x = c[0] - a[0], v1y = c[1] - a[1], v2x = u - a[0], v2y = v - a[1];
+    const d00 = v0x * v0x + v0y * v0y, d01 = v0x * v1x + v0y * v1y, d11 = v1x * v1x + v1y * v1y;
+    const d20 = v2x * v0x + v2y * v0y, d21 = v2x * v1x + v2y * v1y;
+    const den = d00 * d11 - d01 * d01;
+    if (Math.abs(den) < 1e-14) continue;
+    const wb = (d11 * d20 - d01 * d21) / den, wc = (d00 * d21 - d01 * d20) / den, wa = 1 - wb - wc;
+    const score = Math.min(wa, wb, wc);
+    if (!best || score > best.score) best = { i, wa, wb, wc, score };
+  }
+  if (!best) return null;
+  const A = mesh.verts[loop[0]], B = mesh.verts[loop[best.i]], C = mesh.verts[loop[best.i + 1]];
+  return {
+    world: [best.wa * A[0] + best.wb * B[0] + best.wc * C[0], best.wa * A[1] + best.wb * B[1] + best.wc * C[1], best.wa * A[2] + best.wb * B[2] + best.wc * C[2]],
+    inside: best.score >= -0.02,
+  };
+}
+
 function Line(props: { a: Proj; b: Proj; color: string; thick: number; opacity?: number }) {
   if (!props.a.front || !props.b.front) return null;
   const dx = props.b.x - props.a.x, dy = props.b.y - props.a.y;
@@ -232,44 +260,39 @@ export function PaintGridOverlay(props: {
   }
 
   const rect = faceTexelRect(mesh, faceIndex, texels);
-  const isQuad = face.loop.length === 4 && !!face.uv && face.uv.length === 4 && !!rect;
-  if (isQuad && rect) {
-    const rw = rect.x1 - rect.x0 || 1, rh = rect.y1 - rect.y0 || 1;
-    // match each world corner to its uv-rect corner (su,sv ∈ {0,1}).
-    const corner: (V3 | null)[] = [null, null, null, null]; // code = (su>0.5)+2*(sv>0.5)
-    for (let k = 0; k < 4; k += 1) {
-      const uv = face.uv![k];
-      const su = (uv[0] * texels - rect.x0) / rw, sv = (uv[1] * texels - rect.y0) / rh;
-      corner[(su > 0.5 ? 1 : 0) + (sv > 0.5 ? 2 : 0)] = mesh.verts[face.loop[k]];
-    }
-    const c00 = corner[0], c10 = corner[1], c01 = corner[2], c11 = corner[3];
-    if (c00 && c10 && c01 && c11) {
-      const bilerp = (a: number, b: number): V3 => {
-        const top: V3 = [c00[0] + (c10[0] - c00[0]) * a, c00[1] + (c10[1] - c00[1]) * a, c00[2] + (c10[2] - c00[2]) * a];
-        const bot: V3 = [c01[0] + (c11[0] - c01[0]) * a, c01[1] + (c11[1] - c01[1]) * a, c01[2] + (c11[2] - c01[2]) * a];
-        return [top[0] + (bot[0] - top[0]) * b, top[1] + (bot[1] - top[1]) * b, top[2] + (bot[2] - top[2]) * b];
-      };
-      // Grid lines at the REAL integer-texel boundaries (req_1219) — NOT `round(rw)`
-      // equal divisions. The painted cells snap to integer texels (tx), but the fit-
-      // scaled slot width isn't a whole number of texels, so equal divisions drifted
-      // off the cells. A line at integer texel k sits at a=(k−rect.x0)/rw, exactly a
-      // cell boundary — so the grid lines up with the brush cell and the paint.
-      const loX = Math.ceil(rect.x0 + 1e-4), hiX = Math.floor(rect.x1 - 1e-4);
-      const loY = Math.ceil(rect.y0 + 1e-4), hiY = Math.floor(rect.y1 - 1e-4);
-      let nlines = 0;
-      for (let k = loX; k <= hiX && nlines < GRID_MAX; k += 1, nlines += 1) { const a = (k - rect.x0) / rw; out.push(<Line key={`gv${k}`} a={proj(bilerp(a, 0))} b={proj(bilerp(a, 1))} color="#5fe0bf" thick={1.0} opacity={0.7} />); }
-      nlines = 0;
-      for (let k = loY; k <= hiY && nlines < GRID_MAX; k += 1, nlines += 1) { const b = (k - rect.y0) / rh; out.push(<Line key={`gh${k}`} a={proj(bilerp(0, b))} b={proj(bilerp(1, b))} color="#5fe0bf" thick={1.0} opacity={0.7} />); }
-      // the cell under the cursor — outline it bright in the current paint colour, with
-      // a filled dot at its centre so it's unmistakable where a dab will land.
-      {
-        const a0 = (hover.tx - rect.x0) / rw, a1 = (hover.tx + 1 - rect.x0) / rw;
-        const b0 = (hover.ty - rect.y0) / rh, b1 = (hover.ty + 1 - rect.y0) / rh;
-        const q = [bilerp(a0, b0), bilerp(a1, b0), bilerp(a1, b1), bilerp(a0, b1)].map(proj);
-        for (let i = 0; i < 4; i += 1) out.push(<Line key={`hc${i}`} a={q[i]} b={q[(i + 1) % 4]} color={props.color} thick={2.6} />);
-        const ctr = proj(bilerp((a0 + a1) / 2, (b0 + b1) / 2));
-        if (ctr.front) out.push(<Box key="hcdot" style={{ position: 'absolute', left: ctr.x - 4, top: ctr.y - 4, width: 8, height: 8, borderRadius: 4, backgroundColor: props.color, borderWidth: 1, borderColor: '#0008' }} />);
+  if (rect && face.uv && face.uv.length >= 3) {
+    // Map a texel point to a world point ON the face (barycentric — ANY face shape, not
+    // just axis-aligned quads, so angled + triangular faces now get a grid, req_1225).
+    const uvw = (tu: number, tv: number) => uvToWorld(mesh, face, tu / texels, tv / texels);
+    const SAMPLES = 10;
+    // A grid line at a fixed integer texel (req_1219: real cell boundaries), CLIPPED to
+    // the face: sample along it and connect only points inside the face's UV hull, so a
+    // triangle's lines stop at its edges. `vertical` = a u=const line spanning v.
+    const gridLine = (key: string, fixed: number, lo: number, hi: number, vertical: boolean) => {
+      let prev: Proj | null = null, prevIn = false;
+      for (let s = 0; s <= SAMPLES; s += 1) {
+        const tt = lo + ((hi - lo) * s) / SAMPLES;
+        const r = vertical ? uvw(fixed, tt) : uvw(tt, fixed);
+        const p = r ? proj(r.world) : null;
+        const inside = !!r && r.inside;
+        if (p && prev && inside && prevIn) out.push(<Line key={`${key}-${s}`} a={prev} b={p} color="#5fe0bf" thick={1.0} opacity={0.7} />);
+        prev = p; prevIn = inside;
       }
+    };
+    const loX = Math.ceil(rect.x0 + 1e-4), hiX = Math.floor(rect.x1 - 1e-4);
+    const loY = Math.ceil(rect.y0 + 1e-4), hiY = Math.floor(rect.y1 - 1e-4);
+    let n = 0;
+    for (let k = loX; k <= hiX && n < GRID_MAX; k += 1, n += 1) gridLine(`gv${k}`, k, rect.y0, rect.y1, true);
+    n = 0;
+    for (let k = loY; k <= hiY && n < GRID_MAX; k += 1, n += 1) gridLine(`gh${k}`, k, rect.x0, rect.x1, false);
+    // the cell under the cursor — outline + centre dot, through the same uv→world map.
+    const cs = [uvw(hover.tx, hover.ty), uvw(hover.tx + 1, hover.ty), uvw(hover.tx + 1, hover.ty + 1), uvw(hover.tx, hover.ty + 1)];
+    if (cs.every((r) => r)) {
+      const q = cs.map((r) => proj((r as { world: V3 }).world));
+      for (let i = 0; i < 4; i += 1) out.push(<Line key={`hc${i}`} a={q[i]} b={q[(i + 1) % 4]} color={props.color} thick={2.6} />);
+      const cr = uvw(hover.tx + 0.5, hover.ty + 0.5);
+      const ctr = cr ? proj(cr.world) : null;
+      if (ctr && ctr.front) out.push(<Box key="hcdot" style={{ position: 'absolute', left: ctr.x - 4, top: ctr.y - 4, width: 8, height: 8, borderRadius: 4, backgroundColor: props.color, borderWidth: 1, borderColor: '#0008' }} />);
     }
   }
   }

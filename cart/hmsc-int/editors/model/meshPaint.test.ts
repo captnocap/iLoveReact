@@ -8,7 +8,7 @@
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import { cuboid } from './editMesh';
 import { makeProjector, type CameraSnap } from './meshSelect';
-import { screenRay, pickFaceTexel, faceTexelRect, brushTexels, paintRuns, type PaintTarget } from './meshPaint';
+import { screenRay, pickFaceTexel, faceTexelRect, brushTexels, paintRuns, uvToWorld, type PaintTarget } from './meshPaint';
 
 function nearly(a: number, b: number, eps = 1e-3): boolean { return Math.abs(a - b) <= eps; }
 
@@ -77,6 +77,28 @@ test('paintRuns merges same-colour cells in a row into one run', () => {
   assert(r0[0].x === 2 && r0[0].w === 3, 'first run is 2..4 (width 3)');
   assert(r0[1].x === 6 && r0[1].w === 1, 'second run is the lone cell at 6');
   assertEqual(runs.filter((r) => r.y === 1).length, 1, 'row 1 has one run');
+});
+
+test('uvToWorld maps a UV onto the face for ANY shape — quad + triangle (req_1225)', () => {
+  const box = cuboid(2, 2, 2); // faces are unwrapped (full-square UV per face) at mint
+  const quad = box.faces[0];
+  // the UV centre maps to the face centroid; a corner UV maps to that corner's vert.
+  const ctr = uvToWorld(box, quad, 0.5, 0.5)!;
+  assert(!!ctr && ctr.inside, 'centre UV is inside the quad');
+  const verts = quad.loop.map((vi) => box.verts[vi]);
+  const cx = verts.reduce((s, v) => s + v[0], 0) / verts.length;
+  const cy = verts.reduce((s, v) => s + v[1], 0) / verts.length;
+  const cz = verts.reduce((s, v) => s + v[2], 0) / verts.length;
+  assert(nearly(ctr.world[0], cx) && nearly(ctr.world[1], cy) && nearly(ctr.world[2], cz), 'centre UV → face centroid');
+  // a UV far outside the slot still returns a point, flagged NOT inside (so grid lines clip).
+  const out = uvToWorld(box, quad, 5, 5);
+  assert(!!out && !out.inside, 'a UV outside the face is flagged not-inside');
+  // a TRIANGLE face (cone side) also maps — the old quad-only bilerp returned nothing.
+  const cone = (require('./editMesh').cone)(2, 2, 6);
+  const tri = cone.faces.find((f: any) => f.loop.length === 3);
+  assert(!!tri, 'cone has triangular faces');
+  const onTri = uvToWorld(cone, tri, 0.34, 0.33);
+  assert(!!onTri, 'uvToWorld returns a point on a triangular face');
 });
 
 finish('meshPaint');
