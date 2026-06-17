@@ -23,8 +23,8 @@
 // and the interpolated uv for free. The grid stays the same; the mask becomes the
 // hardware.  Verify: ./tools/rjit shot triangle_mask_demo --out /tmp/trimask.png
 
-import { useMemo, useRef, useState } from 'react';
-import { Box, Effect, Pressable, Text } from '@reactjit/runtime/primitives';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Effect, Text } from '@reactjit/runtime/primitives';
 
 const SIZE = 560;
 const CELLS = 12; // grid divisions across the surface (cells straddle shared edges)
@@ -141,6 +141,25 @@ export default function TriangleMaskDemo() {
   const [mouse, setMouse] = useState<Mouse>({ inside: false, u: 0, v: 0 });
   const rectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
+  // A Pressable's onMouseMove only fires while a button is HELD — a free-moving
+  // cursor delivers no events (engine.zig gates .move on dragging_left). The host
+  // tracks the live cursor at getMouseX/getMouseY, so poll it: convert screen → the
+  // surface's uv via the onLayout rect, mark inside when the cursor is over it.
+  useEffect(() => {
+    const host: any = globalThis as any;
+    const id = setInterval(() => {
+      const r = rectRef.current;
+      if (!r || typeof host.getMouseX !== 'function') return;
+      const mx = Number(host.getMouseX()), my = Number(host.getMouseY());
+      if (!Number.isFinite(mx) || !Number.isFinite(my)) return;
+      const inside = mx >= r.x && mx <= r.x + r.width && my >= r.y && my <= r.y + r.height;
+      const u = (mx - r.x) / Math.max(1, r.width);
+      const v = (my - r.y) / Math.max(1, r.height);
+      setMouse((m) => (m.inside === inside && m.u === u && m.v === v ? m : { inside, u, v }));
+    }, 33);
+    return () => clearInterval(id);
+  }, []);
+
   const data = useMemo(() => {
     const out: number[] = [CELLS, mouse.inside ? 1 : 0, mouse.u, mouse.v, TRIS.length];
     for (const t of TRIS) for (const v of t) out.push(v[0], v[1]);
@@ -152,18 +171,12 @@ export default function TriangleMaskDemo() {
       <Text style={{ fontSize: 14, color: '#7f93b1', letterSpacing: 1 }}>
         hover a triangle — the cell highlights, and STOPS at the shared edge
       </Text>
-      <Pressable
+      <Box
         onLayout={(r: any) => { rectRef.current = r; }}
-        onMouseMove={(e: any) => {
-          const r = rectRef.current;
-          if (!r) return;
-          setMouse({ inside: true, u: (e.x - r.x) / Math.max(1, r.width), v: (e.y - r.y) / Math.max(1, r.height) });
-        }}
-        onMouseLeave={() => setMouse((m) => ({ ...m, inside: false }))}
         style={{ width: SIZE, height: SIZE, borderRadius: 10, overflow: 'hidden', position: 'relative' }}
       >
         <Effect shader={SHADER} data={data} style={{ position: 'absolute', left: 0, top: 0, width: SIZE, height: SIZE }} />
-      </Pressable>
+      </Box>
     </Box>
   );
 }
