@@ -41,14 +41,15 @@ export type ScenePart = { id: string; mesh: EditMesh };
 /** The offscreen sprite-map capture for the WHOLE scene. `sig` (meshRev + atlas
  *  params) drives the re-bake: when it changes the memo re-renders, the capture
  *  subtree gets fresh identity, and the StaticSurface re-captures. */
-export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts: ScenePart[]; texels: number; type: TextureType; color: string; imageUrl?: string; sliceImages?: Record<string, string>; paint?: PaintCells; sig: string }) {
+export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts: ScenePart[]; texels: number; type: TextureType; color: string; imageUrl?: string; sliceImages?: Record<string, string>; paint?: PaintCells; paintGrid?: number; sig: string }) {
   const px = STUDIO.textureAtlasPx;
   const cells = Math.max(2, STUDIO.textureCheckerCells);
   const cell = px / cells;
-  // the user's PAINT (Phase 5c) — texel cells coloured by painting the 3D faces,
-  // merged into horizontal runs (far fewer boxes). Scaled from atlas texels to px;
-  // drawn on TOP of the base art so manual paint always wins. One texel = `tpx` px.
-  const tpx = px / Math.max(1, props.texels);
+  // the user's PAINT (Phase 5c) — cells coloured by painting the 3D faces, merged into
+  // horizontal runs (far fewer boxes). Painting uses a FIXED grid (req_1207) NOT the
+  // packed atlas resolution, so cells are a visible size regardless of model size; one
+  // cell = `tpx` px. Drawn on TOP of the base art so manual paint always wins.
+  const tpx = px / Math.max(1, props.paintGrid ?? props.texels);
   const runs = props.paint ? paintRuns(props.paint) : [];
 
   // the checkerboard backdrop (the UV-test ground): light base + dark cells.

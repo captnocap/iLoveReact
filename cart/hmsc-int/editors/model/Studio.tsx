@@ -177,6 +177,9 @@ export const STUDIO = {
    *  global grid and clips cells at its edges (a triangle cuts through squares). 64² →
    *  4px cells on the 256px atlas, clearly visible. */
   paintGridCells: 64,
+  /** PAINT stroke (req_1207): a drag interpolates dabs every this-many screen px from
+   *  the last point, so a fast stroke fills continuously instead of leaving gaps. */
+  paintStrokeStepPx: 4,
   /** AI TEXTURE FILL (req_1070/1110, Phase 5d): the square px the image model
    *  generates at. Kept at atlas scale (NOT the model's 4096² default) so img2img
    *  results stay light; the atlas downscales them into the slot on render. */
@@ -498,6 +501,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const paintHoverRef = useRef<FaceHit | null>(null);
   const paintDirtyRef = useRef(false);
   const paintingRef = useRef(false);
+  // last painted screen point — a drag INTERPOLATES dabs along the segment to here so a
+  // fast stroke fills continuously instead of leaving gaps (the "pinlines", req_1207).
+  const lastPaintRef = useRef<{ x: number; y: number } | null>(null);
   const [paintBakeTick, setPaintBakeTick] = useState(0);
   // the Create Texture dialog (req_1068) — transient, not a twig.
   const [texDialog, setTexDialog] = useState(false);
@@ -875,6 +881,21 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     paintDirtyRef.current = true;
     return hit;
   };
+  // A drag paints a continuous STROKE: interpolate dabs along the segment from the last
+  // painted point to (sx,sy), stepping a few px, so a fast move fills instead of leaving
+  // gaps (the pinlines, req_1207). Each step raycasts (cheap JS, no React). The endpoint
+  // hit is returned so the hover/cursor stays in sync.
+  const paintStroke = (sx: number, sy: number): FaceHit | null => {
+    const last = lastPaintRef.current;
+    lastPaintRef.current = { x: sx, y: sy };
+    if (!last) return paintAt(sx, sy);
+    const dx = sx - last.x, dy = sy - last.y;
+    const dist = Math.hypot(dx, dy);
+    const steps = Math.max(1, Math.ceil(dist / STUDIO.paintStrokeStepPx));
+    let hit: FaceHit | null = null;
+    for (let i = 1; i <= steps; i += 1) hit = paintAt(last.x + (dx * i) / steps, last.y + (dy * i) / steps);
+    return hit;
+  };
   // Seed the live buffer from the persisted paint whenever the open texture changes
   // (entering paint, a re-textureize, undo). Keyed on paintRev so an external change
   // re-syncs but our own per-dab writes (which don't touch tex) don't clobber the buffer.
@@ -909,7 +930,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     // MISSES the model falls through to orbit, so you can still spin the camera.
     if (selMode === 'paint') {
       const r = rectRef.current;
-      const hit = paintAt(Number(e?.x ?? 0) - r.x, Number(e?.y ?? 0) - r.y);
+      const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
+      lastPaintRef.current = null; // start a fresh stroke (no interpolation from a prior one)
+      const hit = paintStroke(sx, sy);
       if (hit) { paintingRef.current = true; return; }
       dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs();
       return;
@@ -1041,7 +1064,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (selMode === 'paint') {
       const r = rectRef.current;
       const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
-      if (paintingRef.current) { paintAt(sx, sy); return; } // dab → ref (no React per move)
+      if (paintingRef.current) { paintStroke(sx, sy); return; } // interpolated stroke → ref (no React per move)
       if (!dragRef.current) { paintProbe(sx, sy); return; } // hover → ref (overlay self-ticks)
       // else: a miss-drag in progress → continue to the orbit block (spin the camera).
     }
@@ -1155,7 +1178,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     l.yaw = nextYaw; l.pitch = nextPitch;
   };
   const onUp = () => {
-    if (paintingRef.current) { paintingRef.current = false; commitPaint(); return; } // end a paint stroke → persist
+    if (paintingRef.current) { paintingRef.current = false; lastPaintRef.current = null; commitPaint(); return; } // end a paint stroke → persist
     setGizmoReadout(null); // the drag is ending — drop the live step readout
     // end a loop-cut slide (the offset already lives in lc; nothing to commit —
     // Apply commits the whole cut). Just drop the drag + clear the highlight.

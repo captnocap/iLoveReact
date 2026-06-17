@@ -134,11 +134,13 @@ function clampTexel(t: number, lo: number, hi: number): number {
   return Math.max(a, Math.min(b > a ? b : a, t));
 }
 
-/** The texels a brush stamp covers, clamped to the face's slot (so the stroke can't
- *  spill into the neighbouring face). `size` = brush diameter in texels (1,2,3…).
- *  A disc footprint keeps round brushes round on big faces. */
+/** The cells a brush stamp covers, clamped to the face's slot (so the stroke can't
+ *  spill into the neighbouring face). `size` = brush RADIUS+1 in cells: 1 → a single
+ *  cell, 2 → a 3-wide disc, 3 → 5-wide, … (each size is distinct — the old mapping
+ *  made 1 and 2 identical, so painting read as thin pinlines). A disc footprint keeps
+ *  round brushes round on big faces. */
 export function brushTexels(tx: number, ty: number, size: number, rect: TexelRect): Array<[number, number]> {
-  const r = Math.max(0, Math.floor((size - 1) / 2));
+  const r = Math.max(0, Math.round(size) - 1);
   const x0 = Math.floor(rect.x0), x1 = Math.ceil(rect.x1) - 1, y0 = Math.floor(rect.y0), y1 = Math.ceil(rect.y1) - 1;
   const out: Array<[number, number]> = [];
   for (let dy = -r; dy <= r; dy += 1) {
@@ -197,25 +199,31 @@ function Line(props: { a: Proj; b: Proj; color: string; thick: number; opacity?:
   return <Box style={{ position: 'absolute', left: (props.a.x + props.b.x) / 2 - len / 2, top: (props.a.y + props.b.y) / 2 - props.thick / 2, width: len, height: props.thick, borderRadius: props.thick / 2, backgroundColor: props.color, opacity: props.opacity ?? 1, transform: { rotate: angle } }} />;
 }
 
+/** The hovered-face grid overlay. REF-DRIVEN (req_1203): it reads the live hover via
+ *  `getHover()` and self-ticks, so moving the cursor or painting never re-renders the
+ *  parent viewport — the perf-critical decoupling. `grid` is the global texel grid the
+ *  whole atlas is divided into; a face sits on it and clips cells (a triangle cuts
+ *  through squares). Always mounted in paint mode; renders nothing when nothing is hit. */
 export function PaintGridOverlay(props: {
-  mesh: EditMesh;
-  lift: number;
-  faceIndex: number;
-  texels: number;
-  hover: { tx: number; ty: number } | null;
+  parts: PaintTarget[];
+  getHover: () => FaceHit | null;
+  grid: number;
   color: string;
   camSnap: () => CameraSnap;
 }) {
-  // self-tick so the grid tracks an orbiting camera without the parent re-rendering.
+  // self-tick so the grid tracks the live hover + an orbiting camera with no parent render.
   const repaint = useRerender();
   useInterval(repaint, 33);
 
-  const { mesh, lift, faceIndex, texels } = props;
-  const face = mesh.faces[faceIndex];
-  if (!face) return null;
+  const texels = props.grid;
+  const out: any[] = [];
+  const hover = props.getHover();
+  const target = hover ? props.parts[hover.partIndex] : null;
+  const face = target && hover ? target.mesh.faces[hover.faceIndex] : null;
+  if (target && hover && face) {
+    const mesh = target.mesh, lift = target.lift, faceIndex = hover.faceIndex;
   const baseProj = makeProjector(props.camSnap());
   const proj = (p: V3): Proj => { const q = baseProj([p[0], p[1] + lift, p[2]]); return { x: q.x, y: q.y, front: q.front }; };
-  const out: any[] = [];
 
   // the face outline (always — context, even for non-quad faces).
   const loopW = face.loop.map((vi) => mesh.verts[vi]);
@@ -243,16 +251,20 @@ export function PaintGridOverlay(props: {
       };
       const nx = Math.max(1, Math.min(GRID_MAX, Math.round(rw)));
       const ny = Math.max(1, Math.min(GRID_MAX, Math.round(rh)));
-      for (let i = 1; i < nx; i += 1) { const a = i / nx; out.push(<Line key={`gv${i}`} a={proj(bilerp(a, 0))} b={proj(bilerp(a, 1))} color="#46c9a8" thick={0.8} opacity={0.5} />); }
-      for (let j = 1; j < ny; j += 1) { const b = j / ny; out.push(<Line key={`gh${j}`} a={proj(bilerp(0, b))} b={proj(bilerp(1, b))} color="#46c9a8" thick={0.8} opacity={0.5} />); }
-      // the cell under the cursor — outline it bright in the current paint colour.
-      if (props.hover) {
-        const a0 = (props.hover.tx - rect.x0) / rw, a1 = (props.hover.tx + 1 - rect.x0) / rw;
-        const b0 = (props.hover.ty - rect.y0) / rh, b1 = (props.hover.ty + 1 - rect.y0) / rh;
+      for (let i = 1; i < nx; i += 1) { const a = i / nx; out.push(<Line key={`gv${i}`} a={proj(bilerp(a, 0))} b={proj(bilerp(a, 1))} color="#5fe0bf" thick={1.0} opacity={0.7} />); }
+      for (let j = 1; j < ny; j += 1) { const b = j / ny; out.push(<Line key={`gh${j}`} a={proj(bilerp(0, b))} b={proj(bilerp(1, b))} color="#5fe0bf" thick={1.0} opacity={0.7} />); }
+      // the cell under the cursor — outline it bright in the current paint colour, with
+      // a filled dot at its centre so it's unmistakable where a dab will land.
+      {
+        const a0 = (hover.tx - rect.x0) / rw, a1 = (hover.tx + 1 - rect.x0) / rw;
+        const b0 = (hover.ty - rect.y0) / rh, b1 = (hover.ty + 1 - rect.y0) / rh;
         const q = [bilerp(a0, b0), bilerp(a1, b0), bilerp(a1, b1), bilerp(a0, b1)].map(proj);
-        for (let i = 0; i < 4; i += 1) out.push(<Line key={`hc${i}`} a={q[i]} b={q[(i + 1) % 4]} color={props.color} thick={2.4} />);
+        for (let i = 0; i < 4; i += 1) out.push(<Line key={`hc${i}`} a={q[i]} b={q[(i + 1) % 4]} color={props.color} thick={2.6} />);
+        const ctr = proj(bilerp((a0 + a1) / 2, (b0 + b1) / 2));
+        if (ctr.front) out.push(<Box key="hcdot" style={{ position: 'absolute', left: ctr.x - 4, top: ctr.y - 4, width: 8, height: 8, borderRadius: 4, backgroundColor: props.color, borderWidth: 1, borderColor: '#0008' }} />);
       }
     }
+  }
   }
 
   return <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>{out}</Box>;
