@@ -533,11 +533,25 @@ Scene3DBase.Fog = ({ near, far, color, enabled = true, ...rest }: any) =>
 // edit (see render3d/Landform), so a WeakMap entry lives exactly as long as its
 // version of the terrain and drops with it.
 const _hfShipCache = new WeakMap<object, { arr: number[]; maxAbsY: number }>();
-// dyn verts: keyed by the dynamicKey string, which by contract already encodes a
-// version that changes when the verts change — so equal key ⇒ equal verts. Bounded
-// FIFO because keys are strings (old versions would otherwise accumulate).
-const _dynGeomCache = new Map<string, { verts: number[] | Float32Array; count: number; radius: number; shipped: boolean }>();
+// dyn verts CONTENT cache: keyed by the full dynamicKey string, which by contract
+// encodes a version that changes when the verts change — so equal key ⇒ equal verts.
+// This caches the generated VERTS (regen is the expensive part); it does NOT decide
+// whether to ship them. Bounded FIFO because keys are strings (old versions would
+// otherwise accumulate).
+const _dynGeomCache = new Map<string, { verts: number[] | Float32Array; count: number; radius: number }>();
 const _DYN_GEOM_CACHE_MAX = 64;
+// dyn SLOT shipment ledger: the last full dyn key we shipped VERTS to each host slot
+// (the slotId = everything before the final '~'). The host reuses ONE slot per slotId
+// and only retains the LAST version uploaded to it — so the "skip verts, the host
+// still has them" optimization is only safe when the slot currently holds THIS exact
+// version. Keying the skip decision by the full per-key (the old `shipped` flag)
+// desynced from the host whenever a DIFFERENT version reused the same slot in between
+// (e.g. Studio's render-index slot `studio.s1` shared across models): switching A→B→A
+// let JS skip verts while the host slot held the other model's mesh, so the host fell
+// back to drawing its stale contents — the "ghost trunk from another model" bug. Keyed
+// by slotId, this mirrors the host's single-slot truth exactly. Resets on hot reload
+// (module re-eval) — harmless: the next render re-ships, matching the persisted slot.
+const _dynSlotShipped = new Map<string, string>();
 function _verticesJsonArray(verts: number[] | Float32Array): number[] {
   return Array.isArray(verts) ? verts : Array.from(verts);
 }
@@ -670,17 +684,23 @@ Scene3DBase.Mesh = ({
       let dynShip = _dynGeomCache.get(dyn);
       if (!dynShip) {
         const gd = geometry.generate(merged);
-        dynShip = { verts: gd.positions, count: gd.count, radius: gd.bounds.radius, shipped: false };
+        dynShip = { verts: gd.positions, count: gd.count, radius: gd.bounds.radius };
         if (_dynGeomCache.size >= _DYN_GEOM_CACHE_MAX) {
           const oldest = _dynGeomCache.keys().next().value;
           if (oldest != null) _dynGeomCache.delete(oldest);
         }
         _dynGeomCache.set(dyn, dynShip);
       }
-      const dynGeomProps = dynShip.shipped
+      // Ship verts only when the host slot for this slotId doesn't already hold THIS
+      // exact version. The slotId is everything before the final '~' (matching the
+      // host's dynSlotLocate). If a different version reused the slot since we last
+      // shipped, re-ship — never trust the host to still hold a version we didn't
+      // last give it (the cross-model ghost-mesh bug).
+      const slotId = dyn.slice(0, dyn.lastIndexOf('~'));
+      const dynGeomProps = _dynSlotShipped.get(slotId) === dyn
         ? { scene3dGeomKey: '~dyn~' + dyn, scene3dBoundsRadius: dynShip.radius }
         : _scene3dVertexProps('~dyn~' + dyn, dynShip.verts, dynShip.count, dynShip.radius);
-      dynShip.shipped = true;
+      _dynSlotShipped.set(slotId, dyn);
       return h('View', {
         ...rest,
         scene3dMesh: true,
