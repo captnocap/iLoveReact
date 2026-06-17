@@ -19,19 +19,11 @@
 //
 // Verify:  ./tools/rjit shot triangle_mask_demo --out /tmp/trimask.png
 
-import { useEffect, useState } from 'react';
 import { Box, Effect, Text } from '@reactjit/runtime/primitives';
 
 const SIZE = 560;
 
 const SHADER = `
-// rotate a 2D point by angle a (radians)
-fn rot(p: vec2f, a: f32) -> vec2f {
-  let c = cos(a);
-  let s = sin(a);
-  return vec2f(c * p.x - s * p.y, s * p.x + c * p.y);
-}
-
 // IQ's exact equilateral-triangle SDF. Negative INSIDE, positive outside,
 // |value| = distance to the edge. r ~= the triangle's reach from center.
 fn sdTriangle(p_in: vec2f, r: f32) -> f32 {
@@ -61,9 +53,8 @@ fn sdTriangle(p_in: vec2f, r: f32) -> f32 {
   let lineDist = (vec2f(0.5, 0.5) - f) / fw;          // pixels-to-nearest gridline, per axis
   let gridLine = 1.0 - smoothstep(0.0, 1.5, min(lineDist.x, lineDist.y));
 
-  // ── 2. the MASK: an analytic triangle (slowly rotating to prove it's live) ─
-  let pr = rot(p, U.time * 0.3);
-  let d = sdTriangle(pr, 0.72);
+  // ── 2. the MASK: an analytic triangle, centered and steady ──────────────
+  let d = sdTriangle(p, 0.72);
   let aa = max(fwidth(d), 0.001);
   let inside = 1.0 - smoothstep(0.0 - aa, aa, d);     // 1 inside the triangle, 0 outside
 
@@ -81,14 +72,7 @@ fn sdTriangle(p_in: vec2f, r: f32) -> f32 {
 `;
 
 export default function TriangleMaskDemo() {
-  // The Effect samples U.time every frame; this re-render just keeps the
-  // surface ticking (the host advances U.time on its own).
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 33);
-    return () => clearInterval(id);
-  }, []);
-
+  // Nothing animates — the mask is a steady, analytic function of uv.
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b0d13', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 18 }}>
       <Text style={{ fontSize: 14, color: '#7f93b1', letterSpacing: 1 }}>
