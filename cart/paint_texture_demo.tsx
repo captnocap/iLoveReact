@@ -1,56 +1,51 @@
-// paint_texture_demo — painting WITH a shader/texture, the right way. The closing
-// piece: this is triangle_mask_demo's `pattern x mask` with the pattern being a real
-// material shader (brick / grass / ... the game-editor texture catalog) instead of a
-// flat colour.
+// paint_texture_demo — painting WITH a material shader, at a real WORLD SCALE.
+// Closes the texture-painting arc: triangle_mask's `pattern x mask` where the pattern
+// is a material (brick/grass — the game catalog shape) AND the texture tiles at a
+// chosen physical size instead of being stretched to fit.
 //
-// THE GOTCHA (req after req_1258): you do NOT want the texture to repeat per cell.
-// A brick wall painted over 6 cells must be ONE continuous wall flowing across them,
-// not 6 tiny independent brick tiles. The whole difference is which UV the shader
-// samples:
+//   final = material( surfaceUv * tilesAcross ) * paintMask(cell)
 //
-//   CONTINUOUS (right):  colour = material( uv )            — uv is SURFACE space, so
-//                        the texture spreads across the entire grid; the paint mask
-//                        only chooses WHERE it shows. Adjacent painted cells continue
-//                        the same wall.
-//   PER-CELL (wrong):    colour = material( fract(uv*cells) ) — every cell samples the
-//                        full 0..1 tile, so the texture repeats once per cell. Ugly.
+// tilesAcross = surfaceSize(m) / tileSize(m). The texture is sampled in continuous
+// surface space (it spreads across the grid, masked to painted cells — never per-cell),
+// and its DENSITY is a world scale, not a default:
 //
-// In both cases:  final = material(...) * paintMask(cell).  The mask is the painted
-// cells; the material is the pattern. Toggle the mode button to see why continuous is
-// the only correct one. The same applies on the 3D model: the mesh samples the material
-// in its FACE-surface uv (continuous), masked by the paint layer — never per-cell.
+//   STRETCHED (wrong):  tilesAcross = 1            — one 512 tile smeared over the whole
+//                       surface; a huge bridge gets one giant brick. The bad default.
+//   PER-CELL  (wrong):  tilesAcross = cells        — one tile crammed per paint cell.
+//   WORLD-SCALED (right): tilesAcross = size/tile  — a brick is always ~brick-sized; a
+//                       bigger surface just gets MORE bricks, not bigger ones.
+//
+// Toggle Surface 4 m -> 16 m at a fixed tile size and the bricks stay the same size,
+// you just get more of them — that is "don't stretch one texture across a huge surface."
+// (And yes — a big bridge is best authored in PARTS; each part is one manageable surface
+// carrying its own world-scaled material. Scale per part, compose the parts.)
 //
 // Verify: ./tools/rjit shot paint_texture_demo --out /tmp/ptex.png   (drag to paint live)
 
 import { useRef, useState } from 'react';
 import { Box, Effect, Pressable, Text } from '@reactjit/runtime/primitives';
 
-const SIZE = 560;
+const SIZE = 540;
 const CELLS = 12;                 // paint grid divisions across the surface
 const MASK_BASE = 5;              // ys[] index where the per-cell mask begins
 
-// One Effect over the whole surface. The mask (which cells are painted) rides in the
-// data buffer; the shader samples the chosen material either in continuous surface uv
-// or per-cell, and shows it only where the cell is painted.
 const SHADER = `
 @group(0) @binding(1) var<storage, read> ys: array<f32>;
 
-// ── materials (each maps a [0,1]^2 coord -> colour; the game catalog shaders look
-//    exactly like this — a function of a tile-local uv). ──
 fn brick(p: vec2f) -> vec3f {
-  let uv = p * vec2f(7.0, 11.0);          // bricks across the surface
+  let uv = p * vec2f(1.0, 1.6);                   // a brick is ~1.6x wider than tall
   let row = floor(uv.y);
-  let off = 0.5 * (row - 2.0 * floor(row * 0.5)); // half-offset on odd rows
+  let off = 0.5 * (row - 2.0 * floor(row * 0.5));
   let f = fract(vec2f(uv.x + off, uv.y));
-  let m = step(0.06, f.x) * step(0.10, f.y);      // 1 = brick face, 0 = mortar
+  let m = step(0.06, f.x) * step(0.10, f.y);
   let shade = 0.85 + 0.15 * fract(sin(dot(floor(vec2f(uv.x + off, uv.y)), vec2f(12.9, 78.2))) * 43758.5);
   return mix(vec3f(0.80, 0.78, 0.73), vec3f(0.62, 0.26, 0.22) * shade, m);
 }
 fn hash(p: vec2f) -> f32 { return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453); }
 fn grass(p: vec2f) -> vec3f {
-  let uv = p * 26.0;
-  let n = hash(floor(uv));
-  let streak = 0.5 + 0.5 * sin(uv.x * 6.2831 + hash(vec2f(floor(uv.x), 1.0)) * 6.2831);
+  let uv = p * 2.4;
+  let n = hash(floor(uv * 4.0));
+  let streak = 0.5 + 0.5 * sin(uv.x * 25.0 + hash(vec2f(floor(uv.x * 4.0), 1.0)) * 6.2831);
   let g = 0.38 + 0.30 * n + 0.12 * streak;
   return vec3f(0.10 * g, g, 0.14 * g);
 }
@@ -60,45 +55,52 @@ fn material(id: f32, p: vec2f) -> vec3f {
 }
 
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
-  let cells = ys[0];
-  let mode  = ys[1];   // 0 = continuous (surface uv), 1 = per-cell (repeats)
-  let matId = ys[2];
+  let cells       = ys[0];
+  let tilesAcross = ys[1];   // world density: how many tiles span the surface
+  let matId       = ys[2];
 
   let cell = floor(in.uv * cells);
   let idx  = u32(${MASK_BASE}.0 + cell.y * cells + cell.x);
   let painted = ys[idx];
 
-  // grid lines so the cells are visible (faint)
   let g = in.uv * cells;
   let fw = max(fwidth(g), vec2f(0.0001, 0.0001));
   let ff = abs(fract(g) - vec2f(0.5, 0.5));
   let gridLine = 1.0 - smoothstep(0.0, 1.5, min((0.5 - ff.x) / fw.x, (0.5 - ff.y) / fw.y));
 
   let bg = vec3f(0.07, 0.08, 0.12);
-  // CONTINUOUS samples the material in surface uv (texture spans the whole grid);
-  // PER-CELL samples fract(uv*cells) so each cell repeats the full tile.
-  let sampleUv = select(in.uv, fract(in.uv * cells), mode > 0.5);
-  let mat = material(matId, sampleUv);
+  // sample the material in continuous surface uv, scaled by the world tile density.
+  let mat = material(matId, in.uv * tilesAcross);
 
-  // final = material * paintMask, over the background.
   var col = mix(bg, mat, painted);
-  col = mix(col, vec3f(0.30, 0.42, 0.52), gridLine * 0.5); // grid on top, subtle
+  col = mix(col, vec3f(0.30, 0.42, 0.52), gridLine * 0.45);
   return vec4f(col, 1.0);
 }
 `;
 
 function Chip(props: { label: string; active: boolean; onPress: () => void }) {
   return (
-    <Pressable onMouseDown={props.onPress} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: props.active ? '#27324b' : '#161b26', borderWidth: 1, borderColor: props.active ? '#5fe0bf' : '#2a3140' }}>
+    <Pressable onMouseDown={props.onPress} style={{ paddingLeft: 11, paddingRight: 11, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: props.active ? '#27324b' : '#161b26', borderWidth: 1, borderColor: props.active ? '#5fe0bf' : '#2a3140' }}>
       <Text style={{ fontSize: 12, color: props.active ? '#dfe9f5' : '#8aa0bd' }}>{props.label}</Text>
     </Pressable>
   );
 }
 
+// world-scaled tile-size options (metres per tile) + the two wrong extremes.
+type ScaleMode = { label: string; tilesAcross: (surfaceM: number) => number };
+const SCALES: ScaleMode[] = [
+  { label: 'Stretched', tilesAcross: () => 1 },              // one tile over the whole surface (bad default)
+  { label: '2 m/tile', tilesAcross: (s) => s / 2 },
+  { label: '1 m/tile', tilesAcross: (s) => s / 1 },
+  { label: '0.5 m/tile', tilesAcross: (s) => s / 0.5 },
+  { label: 'Per-cell', tilesAcross: () => CELLS },           // one tile per paint cell (bad)
+];
+
 export default function PaintTextureDemo() {
   const [painted, setPainted] = useState<Record<string, true>>({});
-  const [mode, setMode] = useState<'continuous' | 'percell'>('continuous');
-  const [mat, setMat] = useState(0); // 0 brick, 1 grass
+  const [mat, setMat] = useState(0);       // 0 brick, 1 grass
+  const [scaleIdx, setScaleIdx] = useState(2); // default 1 m/tile — a real world size, NOT stretched
+  const [surfaceM, setSurfaceM] = useState(8); // surface side length in metres (segment vs big bridge)
   const drawingRef = useRef(false);
   const rectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
@@ -112,23 +114,27 @@ export default function PaintTextureDemo() {
     setPainted((p) => (p[key] ? p : { ...p, [key]: true }));
   };
 
-  // pack header + the per-cell mask (row-major) into the data buffer.
-  const data: number[] = [CELLS, mode === 'percell' ? 1 : 0, mat, 0, 0];
+  const tilesAcross = SCALES[scaleIdx].tilesAcross(surfaceM);
+  const data: number[] = [CELLS, tilesAcross, mat, 0, 0];
   for (let cy = 0; cy < CELLS; cy++) for (let cx = 0; cx < CELLS; cx++) data[MASK_BASE + cy * CELLS + cx] = painted[`${cx}:${cy}`] ? 1 : 0;
 
   return (
-    <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b0d13', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
+    <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b0d13', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10 }}>
       <Text style={{ fontSize: 14, color: '#7f93b1', letterSpacing: 1 }}>
-        drag to paint — the texture spreads across the whole grid, shown only where painted
+        texture tiles at a WORLD scale — a bigger surface gets more tiles, not bigger ones
       </Text>
-      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
         <Chip label="Brick" active={mat === 0} onPress={() => setMat(0)} />
         <Chip label="Grass" active={mat === 1} onPress={() => setMat(1)} />
-        <Box style={{ width: 1, height: 22, backgroundColor: '#2a3140', marginLeft: 4, marginRight: 4 }} />
-        <Chip label="Continuous (right)" active={mode === 'continuous'} onPress={() => setMode('continuous')} />
-        <Chip label="Per-cell (repeats)" active={mode === 'percell'} onPress={() => setMode('percell')} />
-        <Box style={{ width: 1, height: 22, backgroundColor: '#2a3140', marginLeft: 4, marginRight: 4 }} />
-        <Chip label="Clear" active={false} onPress={() => setPainted({})} />
+        <Box style={{ width: 1, height: 22, backgroundColor: '#2a3140', marginLeft: 3, marginRight: 3 }} />
+        {SCALES.map((s, i) => <Chip key={s.label} label={s.label} active={scaleIdx === i} onPress={() => setScaleIdx(i)} />)}
+      </Box>
+      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+        <Text style={{ fontSize: 12, color: '#6f819c' }}>Surface:</Text>
+        <Chip label="4 m (segment)" active={surfaceM === 4} onPress={() => setSurfaceM(4)} />
+        <Chip label="8 m" active={surfaceM === 8} onPress={() => setSurfaceM(8)} />
+        <Chip label="16 m (big bridge)" active={surfaceM === 16} onPress={() => setSurfaceM(16)} />
+        <Text style={{ fontSize: 12, color: '#5fe0bf', marginLeft: 6 }}>→ {tilesAcross % 1 === 0 ? tilesAcross : tilesAcross.toFixed(1)} tiles across</Text>
       </Box>
       <Box onLayout={(r: any) => { rectRef.current = r; }} style={{ width: SIZE, height: SIZE, position: 'relative', borderRadius: 10, overflow: 'hidden' }}>
         <Effect shader={SHADER} data={data} style={{ position: 'absolute', left: 0, top: 0, width: SIZE, height: SIZE }} />
