@@ -1,31 +1,29 @@
-// paint_on_3d_demo — painting ON the 3D model, the correct way. The sequel to
-// triangle_mask_demo (which proved the per-pixel no-spill mask in flat 2D).
+// paint_on_3d_demo — painting ON the 3D model, the correct way. The running proof
+// for the Studio painter rewrite. Built across triangle_mask_demo (per-pixel mask)
+// then lifted to 3D here. Properties proven, in order:
 //
-// THE CORRECTED MENTAL MODEL (what the Studio painter must become):
-//   1. You paint on the 3D MODEL surface — drag on the model, a ray finds the face
-//      and the cell on it. You never paint "on the atlas" directly.
-//   2. The atlas (the model's baked per-face texture) is READ-ONLY base. Paint is
-//      a SEPARATE LAYER in the same surface space, composited OVER the base. Here
-//      the base is the box's flat material (untouched) and the paint layer is the
-//      filled cells drawn on top — erase it and the base is intact.
-//   3. The grid is UNIFORM in MODEL-SURFACE space: one fixed world-space cell size
-//      (CELL) on EVERY face. A bigger face just shows more cells; a thin face fewer
-//      — never sliver cells. Camera zoom never changes it (the camera auto-orbits
-//      AND zooms while idle to prove it; it freezes while you paint).
-//   4. The mask is PER-FACE: a painted/hovered cell clips to its face and CANNOT
-//      spill across a shared edge onto the perpendicular neighbour.
+//   1. Paint on the 3D MODEL surface (raycast pick), NOT on the atlas. The atlas is
+//      READ-ONLY base; paint is a SEPARATE LAYER composited over it.
+//   2. UNIFORM model-space grid: one fixed world-size cell (CELL) on every face —
+//      no slivers — and camera zoom never changes it (idle auto-orbit + zoom proves
+//      it; it freezes while you paint).
+//   3. PER-FACE mask: a painted cell clips to its face, never spilling across a
+//      shared edge onto the perpendicular neighbour.
+//   4. NO PINSTRIPES: a painted cell is ONE solid polygon (Graph.Path fill) from its
+//      projected corners; adjacent cells share exact corners so fills tile with no
+//      seam — a continuous layer, not the old per-row run-boxes that rounded into
+//      periodic gaps.
 //
-//   5. NO PINSTRIPES (req_1256). The old painter merged paint into one horizontal
-//      run-box PER ROW and rasterized them into the atlas; fractional texel size
-//      made each row-box round its top/height independently, opening periodic 1px
-//      gaps that read as horizontal stripes. Here a painted cell is ONE solid
-//      polygon (Graph.Path fill) from its projected corners. Adjacent cells share
-//      exact edges, so the fill tiles seamlessly — a continuous layer, no rows, no
-//      gaps, no stripes. That is the fix: stop rasterizing paint as per-row boxes.
+//   5. PSEUDO-COLOUR / PALETTE paint (req_1258). You don't paint a colour — you paint
+//      a SLOT (a placement id: Body / Trim / Glass). The paint layer stores the slot
+//      INDEX, never RGB. A separate palette maps slot -> real colour, and a slot can
+//      have a SET of possible colours. So you paint ONE truck with detail, then a
+//      recolour tool swaps the palette to make blue / green / white trucks from the
+//      same painting — no repainting. Toggle "View: Pseudo" (the colourless slot
+//      layer you actually paint) vs "View: Painted" (a palette variant applied).
 //
 // The grid/paint is a 2D layer projected through the SAME camera the host renders
-// with (meshSelect.makeProjector replicates gpu/3d.zig), so it sits exactly on the
-// rendered faces — the proven Studio overlay technique.
+// with (meshSelect.makeProjector replicates gpu/3d.zig), so it sits on the faces.
 //
 // Verify: ./tools/rjit shot paint_on_3d_demo --out /tmp/paint3d.png   (drag to paint live)
 
@@ -36,13 +34,30 @@ import { screenRay } from './hmsc-int/editors/model/meshPaint';
 
 type V3 = [number, number, number];
 
-const SIZE = 620;
+const SIZE = 560;
 const FOV = 48;
 const CELL = 0.3;            // grid cell size, in MODEL/WORLD units — uniform on every face
 const PITCH = 20;            // camera elevation (deg)
 const HX = 1.35, HY = 0.85, HZ = 0.85; // box half-extents (deliberately unequal faces)
-const PAINT_COLOR = '#d24b4b'; // a flat red — the same colour the old painter pinstriped
 const Geom = { box: (require('@reactjit/geometries') as any).Box };
+
+// You paint a SLOT, not a colour. The paint layer stores this id; `pseudo` is just a
+// placeholder hue so the colourless slot layer is visible while you paint.
+type Slot = { id: number; name: string; pseudo: string };
+const SLOTS: Slot[] = [
+  { id: 0, name: 'Body', pseudo: '#ff4d6d' },
+  { id: 1, name: 'Trim', pseudo: '#4d8bff' },
+  { id: 2, name: 'Glass', pseudo: '#3ddc84' },
+];
+
+// The recolour tool's output: named variants, each a palette mapping slot -> real
+// colour. "What colours are possible" lives here — swap the variant, recolour the
+// SAME painted cells. One painting → many trucks.
+const VARIANTS: { name: string; colors: Record<number, string> }[] = [
+  { name: 'Blue', colors: { 0: '#3f6fb0', 1: '#20242b', 2: '#bfe6f2' } },
+  { name: 'Green', colors: { 0: '#4f9e63', 1: '#20242b', 2: '#bfe6f2' } },
+  { name: 'White', colors: { 0: '#dfe3ea', 1: '#3a3f47', 2: '#bfe6f2' } },
+];
 
 // vec helpers
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -65,11 +80,7 @@ const FACES: Face[] = [
 const facePoint = (f: Face, u: number, v: number): V3 => add(add(f.corner, mul(f.uDir, u)), mul(f.vDir, v));
 const faceCenter = (f: Face): V3 => facePoint(f, f.uLen / 2, f.vLen / 2);
 const faceVisible = (f: Face, eye: V3): boolean => dot(f.normal, sub(eye, faceCenter(f))) > 0;
-const cellsU = (f: Face) => Math.max(1, Math.round(f.uLen / CELL));
-const cellsV = (f: Face) => Math.max(1, Math.round(f.vLen / CELL));
 
-// camera as a pure function of the frame tick: spins in yaw, oscillates in distance
-// (zoom) so "the grid stays the same size on the surface as the camera zooms" is visible.
 function camAt(tick: number): CameraSnap {
   const yaw = tick * 0.5;
   const dist = 5.4 + 1.7 * Math.sin(tick * 0.018);
@@ -80,14 +91,13 @@ function camAt(tick: number): CameraSnap {
 type Hit = { face: number; cu: number; cv: number };
 const cellKey = (h: Hit) => `${h.face}:${h.cu}:${h.cv}`;
 
-// raycast the cursor against the 6 faces; nearest FRONT-facing hit wins.
 function pickFace(cam: CameraSnap, sx: number, sy: number): Hit | null {
   const { o, d } = screenRay(cam, sx, sy);
   let best: Hit | null = null;
   let bestT = Infinity;
   FACES.forEach((f, i) => {
     const denom = dot(d, f.normal);
-    if (denom >= -1e-6) return;                 // only the front side (normal points out)
+    if (denom >= -1e-6) return;
     const t = dot(sub(f.corner, o), f.normal) / denom;
     if (t <= 1e-3 || t >= bestT) return;
     const hit = add(o, mul(d, t));
@@ -102,7 +112,6 @@ function pickFace(cam: CameraSnap, sx: number, sy: number): Hit | null {
 
 type Proj = { x: number; y: number; front: boolean };
 
-// a projected world-space segment, drawn as a rotated thin box
 function Seg(props: { a: Proj; b: Proj; color: string; thick: number; opacity?: number }) {
   const { a, b } = props;
   if (!a.front || !b.front) return null;
@@ -112,18 +121,29 @@ function Seg(props: { a: Proj; b: Proj; color: string; thick: number; opacity?: 
   return <Box style={{ position: 'absolute', left: (a.x + b.x) / 2 - len / 2, top: (a.y + b.y) / 2 - props.thick / 2, width: len, height: props.thick, borderRadius: props.thick / 2, backgroundColor: props.color, opacity: props.opacity ?? 1, transform: { rotate: angle } }} />;
 }
 
+function Chip(props: { label: string; active: boolean; swatch?: string; onPress: () => void }) {
+  return (
+    <Pressable onMouseDown={props.onPress} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: props.active ? '#27324b' : '#161b26', borderWidth: 1, borderColor: props.active ? '#5fe0bf' : '#2a3140' }}>
+      {props.swatch ? <Box style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: props.swatch }} /> : null}
+      <Text style={{ fontSize: 12, color: props.active ? '#dfe9f5' : '#8aa0bd' }}>{props.label}</Text>
+    </Pressable>
+  );
+}
+
 export default function PaintOn3DDemo() {
   const [tick, setTick] = useState(0);
-  const [painted, setPainted] = useState<Record<string, string>>({});
+  const [painted, setPainted] = useState<Record<string, number>>({}); // cell -> SLOT id (pseudo-colour, never RGB)
+  const [activeSlot, setActiveSlot] = useState(0);
+  const [view, setView] = useState<'pseudo' | 'final'>('pseudo');
+  const [variant, setVariant] = useState(0);
   const hoverRef = useRef<Hit | null>(null);
   const drawingRef = useRef(false);
   const tickRef = useRef(0);
+  const slotRef = useRef(0);
   const rectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   tickRef.current = tick;
+  slotRef.current = activeSlot;
 
-  // Pump: advance the camera (FROZEN while painting so the target holds still), then
-  // re-pick the hovered face from the LIVE cursor (free-move delivers no onMouseMove —
-  // poll getMouseX/Y) using the next frame's camera so highlight and render agree.
   useEffect(() => {
     const host: any = globalThis as any;
     const id = setInterval(() => {
@@ -141,25 +161,26 @@ export default function PaintOn3DDemo() {
     return () => clearInterval(id);
   }, []);
 
-  // paint the cell under a screen-space point into the paint LAYER (additive set).
+  // paint the cell under a screen point with the active SLOT id (not a colour).
   const paintAt = (screenX: number, screenY: number) => {
     const r = rectRef.current;
     if (!r) return;
     const hit = pickFace(camAt(tickRef.current), screenX - r.x, screenY - r.y);
     if (!hit) return;
     const key = cellKey(hit);
-    setPainted((p) => (p[key] ? p : { ...p, [key]: PAINT_COLOR }));
+    setPainted((p) => (p[key] === slotRef.current ? p : { ...p, [key]: slotRef.current }));
   };
 
   const cam = camAt(tick);
   const project = makeProjector(cam);
   const proj = (p: V3): Proj => { const q = project(p); return { x: q.x, y: q.y, front: q.front }; };
   const hover = hoverRef.current;
-  const C = SIZE / 2; // Graph is center-origin; pixel (px,py) → graph (px-C, py-C)
+  const C = SIZE / 2;
 
-  // ── the PAINT LAYER: one solid filled polygon per painted cell ───────────────
-  // Corners come straight from the projected face cell; adjacent cells share exact
-  // corners, so the fills tile with no seam. This is the no-pinstripe fix.
+  // resolve a painted slot to a display colour: the pseudo placeholder, or the
+  // chosen palette variant's colour for that slot. Same cells, swappable palette.
+  const colorOf = (slot: number) => (view === 'pseudo' ? SLOTS[slot].pseudo : VARIANTS[variant].colors[slot]);
+
   const fills: any[] = [];
   for (const key in painted) {
     const [fs, cus, cvs] = key.split(':');
@@ -170,30 +191,35 @@ export default function PaintOn3DDemo() {
     const q = [facePoint(f, u0, v0), facePoint(f, u1, v0), facePoint(f, u1, v1), facePoint(f, u0, v1)].map(proj);
     if (!q.every((p) => p.front)) continue;
     const d = `M ${q[0].x - C},${q[0].y - C} L ${q[1].x - C},${q[1].y - C} L ${q[2].x - C},${q[2].y - C} L ${q[3].x - C},${q[3].y - C} Z`;
-    fills.push(<Graph.Path key={key} d={d} fill={painted[key]} />);
+    fills.push(<Graph.Path key={key} d={d} fill={colorOf(painted[key])} />);
   }
 
-  // ── grid + outlines + hover highlight (line layer, on top of the fills) ──────
   const lines: any[] = [];
   FACES.forEach((f, fi) => {
     if (!faceVisible(f, cam.eye)) return;
-    const c0 = facePoint(f, 0, 0), c1 = facePoint(f, f.uLen, 0), c2 = facePoint(f, f.uLen, f.vLen), c3 = facePoint(f, 0, f.vLen);
-    const corners = [c0, c1, c2, c3].map(proj);
+    const corners = [facePoint(f, 0, 0), facePoint(f, f.uLen, 0), facePoint(f, f.uLen, f.vLen), facePoint(f, 0, f.vLen)].map(proj);
     for (let i = 0; i < 4; i++) lines.push(<Seg key={`o${fi}-${i}`} a={corners[i]} b={corners[(i + 1) % 4]} color="#7fd6c0" thick={1.6} opacity={0.85} />);
-    for (let u = CELL; u < f.uLen - 1e-4; u += CELL) lines.push(<Seg key={`gu${fi}-${u.toFixed(2)}`} a={proj(facePoint(f, u, 0))} b={proj(facePoint(f, u, f.vLen))} color="#4fb8a0" thick={1.0} opacity={0.55} />);
-    for (let v = CELL; v < f.vLen - 1e-4; v += CELL) lines.push(<Seg key={`gv${fi}-${v.toFixed(2)}`} a={proj(facePoint(f, 0, v))} b={proj(facePoint(f, f.uLen, v))} color="#4fb8a0" thick={1.0} opacity={0.55} />);
+    for (let u = CELL; u < f.uLen - 1e-4; u += CELL) lines.push(<Seg key={`gu${fi}-${u.toFixed(2)}`} a={proj(facePoint(f, u, 0))} b={proj(facePoint(f, u, f.vLen))} color="#4fb8a0" thick={1.0} opacity={0.5} />);
+    for (let v = CELL; v < f.vLen - 1e-4; v += CELL) lines.push(<Seg key={`gv${fi}-${v.toFixed(2)}`} a={proj(facePoint(f, 0, v))} b={proj(facePoint(f, f.uLen, v))} color="#4fb8a0" thick={1.0} opacity={0.5} />);
     if (hover && hover.face === fi) {
       const u0 = hover.cu * CELL, u1 = Math.min(u0 + CELL, f.uLen), v0 = hover.cv * CELL, v1 = Math.min(v0 + CELL, f.vLen);
       const hc = [facePoint(f, u0, v0), facePoint(f, u1, v0), facePoint(f, u1, v1), facePoint(f, u0, v1)].map(proj);
-      for (let i = 0; i < 4; i++) lines.push(<Seg key={`hc${fi}-${i}`} a={hc[i]} b={hc[(i + 1) % 4]} color="#ffb019" thick={3} />);
+      for (let i = 0; i < 4; i++) lines.push(<Seg key={`hc${fi}-${i}`} a={hc[i]} b={hc[(i + 1) % 4]} color={SLOTS[activeSlot].pseudo} thick={3} />);
     }
   });
 
   return (
-    <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b0d13', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 14 }}>
+    <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b0d13', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
       <Text style={{ fontSize: 14, color: '#7f93b1', letterSpacing: 1 }}>
-        drag on the model to paint — solid fill, no pinstripes, clipped per face
+        paint SLOTS (pseudo-colour) once — recolour the same cells by swapping the palette
       </Text>
+      {/* toolbar: pick the slot you paint, toggle pseudo/painted view, cycle the palette variant */}
+      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {SLOTS.map((s) => <Chip key={s.id} label={s.name} swatch={s.pseudo} active={activeSlot === s.id} onPress={() => setActiveSlot(s.id)} />)}
+        <Box style={{ width: 1, height: 22, backgroundColor: '#2a3140', marginLeft: 4, marginRight: 4 }} />
+        <Chip label={view === 'pseudo' ? 'View: Pseudo' : 'View: Painted'} active={false} onPress={() => setView((v) => (v === 'pseudo' ? 'final' : 'pseudo'))} />
+        <Chip label={`Variant: ${VARIANTS[variant].name}`} active={view === 'final'} swatch={VARIANTS[variant].colors[0]} onPress={() => { setView('final'); setVariant((v) => (v + 1) % VARIANTS.length); }} />
+      </Box>
       <Box onLayout={(r: any) => { rectRef.current = r; }} style={{ width: SIZE, height: SIZE, position: 'relative', borderRadius: 10, overflow: 'hidden' }}>
         <Scene3D style={{ position: 'absolute', left: 0, top: 0, width: SIZE, height: SIZE }}>
           <Scene3D.Camera position={cam.eye} target={[0, 0, 0]} fov={FOV} />
