@@ -27,8 +27,8 @@ function noOverlaps(islands: { slot: { x: number; y: number; w: number; h: numbe
 
 test('a one-cube scene packs all 6 faces into the atlas, UVs in [0,1], no overlaps', () => {
   const scene: EditMesh[] = [cuboid(1, 1, 1)];
-  const tex = textureizeScene(scene, opts());
-  assertEqual(tex.islands.length, 6, 'six faces → six islands');
+  const tex = textureizeScene(scene, opts({ dedupIslands: false }));
+  assertEqual(tex.islands.length, 6, 'six faces → six islands (dedup OFF = per-face product)');
   assert(tex.texels >= 16, 'atlas has a sane texel size');
   for (const isl of tex.islands) {
     for (const [u, v] of isl.uv) {
@@ -42,8 +42,8 @@ test('a one-cube scene packs all 6 faces into the atlas, UVs in [0,1], no overla
 
 test('a multi-part scene packs EVERY part’s faces into one shared atlas (the sprite map)', () => {
   const scene: EditMesh[] = [cuboid(1, 1, 1), cuboid(2, 1, 1), cuboid(0.5, 0.5, 0.5)];
-  const tex = textureizeScene(scene, opts());
-  assertEqual(tex.islands.length, 18, 'three cubes → 18 islands in ONE atlas');
+  const tex = textureizeScene(scene, opts({ dedupIslands: false }));
+  assertEqual(tex.islands.length, 18, 'three cubes → 18 islands in ONE atlas (dedup OFF)');
   // islands reference all three parts
   assert([0, 1, 2].every((p) => tex.islands.some((i) => i.part === p)), 'all parts are represented');
   // every face of every part got a rewritten UV (the BRANCH edit)
@@ -126,6 +126,21 @@ test('fitTexels packs a fixed-size atlas regardless of model size (req_1209 pain
     for (const [u, v] of uv) { x0 = Math.min(x0, u); x1 = Math.max(x1, u); y0 = Math.min(y0, v); y1 = Math.max(y1, v); }
     assert((x1 - x0) * huge.texels >= 0.9 && (y1 - y0) * huge.texels >= 0.9, 'face slot spans at least ~1 grid cell');
   }
+});
+
+test('dedupIslands collapses congruent faces to one shared island (req_1255)', () => {
+  // a 1×1×1 cube's six faces are all 1×1 squares → ONE distinct shape. Dedup packs
+  // one island; every face still gets a uv (pointing at the shared slot).
+  const cube = textureizeScene([cuboid(1, 1, 1)], opts({ dedupIslands: true }));
+  assertEqual(cube.islands.length, 1, 'six congruent faces → one island');
+  for (const f of cube.meshes[0].faces) assert(!!f.uv && f.uv.length >= 3, 'every face still has a uv into the shared slot');
+  // a 2×1×1 slab has TWO distinct shapes (1×1 ends + 2×1 sides) → two islands.
+  const slab = textureizeScene([cuboid(2, 1, 1)], opts({ dedupIslands: true }));
+  assertEqual(slab.islands.length, 2, '1×1 ends + 2×1 sides → two shapes');
+  // dedup never GROWS the atlas vs the per-face product (the storage win).
+  const on = textureizeScene([cuboid(2, 1, 1)], opts({ dedupIslands: true })).texels;
+  const off = textureizeScene([cuboid(2, 1, 1)], opts({ dedupIslands: false })).texels;
+  assert(on <= off, 'the deduped atlas is no bigger than the per-face one');
 });
 
 finish('textureize');

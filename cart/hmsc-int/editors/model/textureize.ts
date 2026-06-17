@@ -12,6 +12,7 @@
 // is the foundation that carries the outlines. See ../MESH_EDITOR_PLAYBOOK.md 5.6.
 
 import { storedUVLayout, unwrapMesh, type EditMesh, type V2 } from './editMesh';
+import { groupByShape } from './uvDedup';
 
 /** Texture Template = the colored per-island UV template (the default + the
  *  point); Solid Color = one flat fill; Blank = empty. (Blockbench's Type seg.) */
@@ -35,6 +36,10 @@ export type TextureOptions = {
   edgeAngle: number;
   islandAngle: number;
   padding: boolean;
+  /** DEDUP congruent faces to one shared atlas island (req_1255 — store each
+   *  distinct shape once, reference it). Shrinks the atlas + makes matching panels
+   *  paint uniformly. Off → one island per face (the legacy product layout). */
+  dedupIslands: boolean;
 };
 
 /** The Pixel Density dropdown (Blockbench: 16x is the baseline). */
@@ -52,6 +57,7 @@ export const DEFAULT_TEXTURE_OPTIONS: TextureOptions = {
   edgeAngle: 36,
   islandAngle: 45,
   padding: true,
+  dedupIslands: true,
 };
 
 /** 16 units = 1 tile = 1 m (STUDIO.unitsPerTile) — the Blockbench-pixel basis the
@@ -156,18 +162,28 @@ export function textureizeScene(meshes: EditMesh[], opts: TextureOptions, unitsP
     return { texels: MIN_TEXELS, islands: [], meshes, options: opts };
   }
 
-  // 2. shelf-pack tallest-first into a near-square atlas (the unwrapMesh idiom, but
-  //    GLOBAL across all parts). Deterministic order → reproducible sprite map.
-  const totalArea = raws.reduce((s, r) => s + (r.w + pad) * (r.h + pad), 0);
-  const widest = raws.reduce((s, r) => Math.max(s, r.w + pad), 0);
-  const rowWidth = Math.max(widest, Math.ceil(Math.sqrt(totalArea)));
-  const order = raws.slice().sort((a, b) => b.h - a.h || b.w - a.w || a.part - b.part || a.face - b.face);
+  // 2. DEDUP congruent faces (req_1255, the GUIDING_LIGHT "store once, reference"
+  //    law): group faces by shape so each DISTINCT shape packs ONE slot and every
+  //    congruent member references it. Off → one group per face (the product, the
+  //    old behaviour). A face's local poly is min-normalized, so every member of a
+  //    group lands on its slot corner-for-corner — no rotation transform needed.
+  const groups = opts.dedupIslands
+    ? groupByShape(raws, (r) => r.local)
+    : raws.map((_, i) => ({ rep: i, members: [i] }));
 
-  const pos = new Map<string, { x: number; y: number }>();
+  // shelf-pack the REPRESENTATIVES tallest-first into a near-square atlas. Members
+  // share their group's slot. Deterministic order → reproducible sprite map.
+  const totalArea = groups.reduce((s, g) => { const r = raws[g.rep]; return s + (r.w + pad) * (r.h + pad); }, 0);
+  const widest = groups.reduce((s, g) => Math.max(s, raws[g.rep].w + pad), 0);
+  const rowWidth = Math.max(widest, Math.ceil(Math.sqrt(totalArea)));
+  const order = groups.slice().sort((a, b) => { const ra = raws[a.rep], rb = raws[b.rep]; return rb.h - ra.h || rb.w - ra.w || ra.part - rb.part || ra.face - rb.face; });
+
+  const pos = new Map<string, { x: number; y: number }>(); // part:face → slot (shared within a group)
   let cx = 0, cy = 0, rowH = 0, atlasW = 0;
-  for (const r of order) {
+  for (const g of order) {
+    const r = raws[g.rep];
     if (cx > 0 && cx + r.w + pad > rowWidth) { cx = 0; cy += rowH; rowH = 0; } // wrap to a new shelf
-    pos.set(`${r.part}:${r.face}`, { x: cx, y: cy });
+    for (const mi of g.members) { const m = raws[mi]; pos.set(`${m.part}:${m.face}`, { x: cx, y: cy }); }
     cx += r.w + pad;
     if (r.h + pad > rowH) rowH = r.h + pad;
     if (cx > atlasW) atlasW = cx;
@@ -176,25 +192,27 @@ export function textureizeScene(meshes: EditMesh[], opts: TextureOptions, unitsP
   let texels = opts.powerOfTwo ? nextPow2(extent) : Math.ceil(extent);
   texels = Math.min(MAX_TEXELS, Math.max(MIN_TEXELS, texels));
 
-  // 3. build the islands (slot + outline + normalized uv + color) and the new UVs.
+  // 3. UVs: EVERY face gets its uv (members of a group share their slot → identical
+  //    uv within the group). ISLANDS: one per distinct shape (the rep), so the atlas
+  //    + UV panel show K shapes, not N faces. Stable color by rep part/face order.
   const islands: TextureIsland[] = [];
   const uvByPart = new Map<number, Map<number, V2[]>>();
-  // stable index for color: part-major, face order.
-  const colorOrder = raws.slice().sort((a, b) => a.part - b.part || a.face - b.face);
-  const colorIndex = new Map<string, number>();
-  colorOrder.forEach((r, i) => colorIndex.set(`${r.part}:${r.face}`, i));
-
   for (const r of raws) {
-    const key = `${r.part}:${r.face}`;
-    const p = pos.get(key)!;
-    const outline = r.local.map(([u, v]) => [u + p.x, v + p.y] as V2);
-    const uv = outline.map(([u, v]) => [u / texels, v / texels] as V2);
-    const color = PALETTE[(colorIndex.get(key) ?? 0) % PALETTE.length];
-    islands.push({ part: r.part, face: r.face, slot: { x: p.x, y: p.y, w: r.w, h: r.h }, outline, uv, color });
+    const p = pos.get(`${r.part}:${r.face}`)!;
+    const uv = r.local.map(([u, v]) => [(u + p.x) / texels, (v + p.y) / texels] as V2);
     let m = uvByPart.get(r.part);
     if (!m) { m = new Map(); uvByPart.set(r.part, m); }
     m.set(r.face, uv);
   }
+  const colorOf = new Map<number, number>(); // group index → palette slot
+  groups.map((g, gi) => ({ gi, r: raws[g.rep] })).sort((a, b) => a.r.part - b.r.part || a.r.face - b.r.face).forEach((e, i) => colorOf.set(e.gi, i));
+  groups.forEach((g, gi) => {
+    const r = raws[g.rep];
+    const p = pos.get(`${r.part}:${r.face}`)!;
+    const outline = r.local.map(([u, v]) => [u + p.x, v + p.y] as V2);
+    const uv = outline.map(([u, v]) => [u / texels, v / texels] as V2);
+    islands.push({ part: r.part, face: r.face, slot: { x: p.x, y: p.y, w: r.w, h: r.h }, outline, uv, color: PALETTE[(colorOf.get(gi) ?? 0) % PALETTE.length] });
+  });
 
   // 4. rewrite each part's face UVs into the shared atlas (the BRANCH edit the
   //    caller commits). rearrangeUV: false keeps the meshes as-is (no repack).

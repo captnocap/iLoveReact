@@ -2572,6 +2572,7 @@ function CreateTextureDialog(props: { onCancel: () => void; onConfirm: (o: Textu
           <LCStepper value={o.islandAngle} onChange={(n) => set({ islandAngle: n })} min={0} max={180} step={1} />
         </LCField>
         <TexCheck label="Padding" value={o.padding} onChange={(v) => set({ padding: v })} />
+        <TexCheck label="Dedupe Islands (shared)" value={o.dedupIslands} onChange={(v) => set({ dedupIslands: v })} />
 
         <Row style={{ gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
           <Pressable onPress={props.onCancel} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}><Text fontSize={11} color={T.dim}>Cancel</Text></Pressable>
