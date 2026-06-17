@@ -2015,6 +2015,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
             <Pressable
               onPress={() => setTexDialog(true)}
+              tooltip="Textureize — unwrap the whole model into one packed sprite-sheet atlas you can paint / export / AI-fill"
               style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c6a4a' }}
             >
               <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>textureize</Text>
@@ -2024,6 +2025,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 validate → cook → it lands in the kind's catalog. */}
             <Pressable
               onPress={() => setCompileOpen(true)}
+              tooltip="Compile — cook this model into a typed, installed game asset (prop/vehicle): pick the kind, fill its descriptor, it lands in the catalog"
               style={{ ...STEP_BTN, backgroundColor: '#16132aee', borderColor: '#8a6f3a' }}
             >
               <Text fontSize={10} color="#e9c77f" style={{ fontFamily: 'monospace' }}>⚙ compile</Text>
@@ -2032,34 +2034,35 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               <>
                 <Pressable
                   onPress={() => setTexView((v) => !v)}
+                  tooltip="Toggle the textured atlas vs solid part colours in the viewport"
                   style={{ ...STEP_BTN, backgroundColor: texView ? '#1c3a2a' : '#13233aee', borderColor: texView ? '#2f7a4f' : '#2c4a6a' }}
                 >
                   <Text fontSize={10} color={texView ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>{texView ? 'textured' : 'solid'}</Text>
                 </Pressable>
                 {/* export PNG (req_1072): the whole sprite sheet, or ONE slice (the
                     selected face's island) — to cart/hmsc-int/exports/<name>.png. */}
-                <Pressable onPress={() => exportSprite()} style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
+                <Pressable onPress={() => exportSprite()} tooltip="Export the whole texture atlas as a PNG (to cart/hmsc-int/exports/) to edit externally" style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
                   <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>export sheet</Text>
                 </Pressable>
                 {/* re-upload PNG (req_1079): the edited/AI-generated sheet slips back
                     onto the model (cookie-cutter via the UVs), or one face's slice. */}
-                <Pressable onPress={() => setImportTex({})} style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#3a2c6a' }}>
+                <Pressable onPress={() => setImportTex({})} tooltip="Import an edited/AI PNG back onto the model — re-applied through the UVs (cookie-cutter)" style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#3a2c6a' }}>
                   <Text fontSize={10} color="#b9a8e9" style={{ fontFamily: 'monospace' }}>import sheet</Text>
                 </Pressable>
                 {/* AI fill (req_1070/1110): generate the whole sheet via image-to-image
                     (the current atlas is the reference) — no leaving the app. */}
-                <Pressable onPress={() => setAiTex({})} style={{ ...STEP_BTN, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
+                <Pressable onPress={() => setAiTex({})} tooltip="AI fill — generate the whole texture sheet via image-to-image (current atlas as reference), without leaving the app" style={{ ...STEP_BTN, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
                   <Text fontSize={10} color="#cdbcff" style={{ fontFamily: 'monospace' }}>✦ ai fill</Text>
                 </Pressable>
                 {selMode === 'face' && activePart && sel.faces.size === 1 ? (
                   <>
-                    <Pressable onPress={() => exportSprite({ partId: activePart.id, faceIndex: [...sel.faces][0] })} style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
+                    <Pressable onPress={() => exportSprite({ partId: activePart.id, faceIndex: [...sel.faces][0] })} tooltip="Export just the selected face's UV island as a PNG" style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
                       <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>export slice</Text>
                     </Pressable>
-                    <Pressable onPress={() => setImportTex({ slice: { partId: activePart.id, faceIndex: [...sel.faces][0] } })} style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#3a2c6a' }}>
+                    <Pressable onPress={() => setImportTex({ slice: { partId: activePart.id, faceIndex: [...sel.faces][0] } })} tooltip="Import a PNG onto just the selected face's island" style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#3a2c6a' }}>
                       <Text fontSize={10} color="#b9a8e9" style={{ fontFamily: 'monospace' }}>import slice</Text>
                     </Pressable>
-                    <Pressable onPress={() => setAiTex({ slice: { partId: activePart.id, faceIndex: [...sel.faces][0] } })} style={{ ...STEP_BTN, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
+                    <Pressable onPress={() => setAiTex({ slice: { partId: activePart.id, faceIndex: [...sel.faces][0] } })} tooltip="AI-fill just the selected face's island via image-to-image" style={{ ...STEP_BTN, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
                       <Text fontSize={10} color="#cdbcff" style={{ fontFamily: 'monospace' }}>✦ ai fill slice</Text>
                     </Pressable>
                   </>
@@ -2131,13 +2134,13 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {/* Camera framing controls (fov + reframe) — kept bottom-right. */}
       <Col style={{ position: 'absolute', right: 12, bottom: 12, gap: 6, alignItems: 'flex-end' }}>
         <Row style={{ gap: 4, alignItems: 'center' }}>
-          <Pressable onPress={() => setFov(fovRef.current - 2)} style={STEP_BTN}><Text fontSize={13} color={T.text}>−</Text></Pressable>
+          <Pressable onPress={() => setFov(fovRef.current - 2)} tooltip="Narrower field of view (zoom in / less perspective)" style={STEP_BTN}><Text fontSize={13} color={T.text}>−</Text></Pressable>
           <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 5, backgroundColor: '#0b1320dd', borderWidth: 1, borderColor: '#27364a' }}>
             <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>fov {Math.round(fovRef.current)}</Text>
           </Box>
-          <Pressable onPress={() => setFov(fovRef.current + 2)} style={STEP_BTN}><Text fontSize={13} color={T.text}>+</Text></Pressable>
+          <Pressable onPress={() => setFov(fovRef.current + 2)} tooltip="Wider field of view (zoom out / more perspective)" style={STEP_BTN}><Text fontSize={13} color={T.text}>+</Text></Pressable>
         </Row>
-        <Pressable onPress={reframe} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}>
+        <Pressable onPress={reframe} tooltip="Reframe (F) — recenter the camera on the model" style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}>
           <Text fontSize={10} color={T.text}>reframe (F)</Text>
         </Pressable>
       </Col>
