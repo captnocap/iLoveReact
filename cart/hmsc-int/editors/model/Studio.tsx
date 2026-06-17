@@ -1662,11 +1662,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             {PAINT_SWATCHES.map((c) => {
               const on = paintColor === c;
               return (
-                <Pressable key={c} onPress={() => setPaintColor(c)} style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: c, borderWidth: on ? 2 : 1, borderColor: on ? '#ffffff' : '#0008' }} />
+                <Pressable key={c} onPress={() => setPaintColor(c)} tooltip="Paint colour — click a face to fill its texels with this" style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: c, borderWidth: on ? 2 : 1, borderColor: on ? '#ffffff' : '#0008' }} />
               );
             })}
             {/* eraser — paints "nothing" (drops the covered cells). */}
-            <Pressable onPress={() => setPaintColor(null)} style={{ ...STEP_BTN, backgroundColor: paintColor == null ? '#2a3f5e' : '#13233aee', borderColor: paintColor == null ? '#5b8fd6' : '#2c4a6a' }}>
+            <Pressable onPress={() => setPaintColor(null)} tooltip="Eraser — painting removes texels (drops the covered cells) instead of colouring" style={{ ...STEP_BTN, backgroundColor: paintColor == null ? '#2a3f5e' : '#13233aee', borderColor: paintColor == null ? '#5b8fd6' : '#2c4a6a' }}>
               <Text fontSize={10} color={paintColor == null ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>erase</Text>
             </Pressable>
             <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
@@ -1674,14 +1674,14 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             {PAINT_BRUSH_SIZES.map((s) => {
               const on = paintBrush === s;
               return (
-                <Pressable key={s} onPress={() => setPaintBrush(s)} style={{ ...STEP_BTN, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
+                <Pressable key={s} onPress={() => setPaintBrush(s)} tooltip={`Brush size ${s} — paint a ${s}×${s} block of texels per dab`} style={{ ...STEP_BTN, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
                   <Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{s}</Text>
                 </Pressable>
               );
             })}
             {/* clear all paint on this texture (buffer + persisted). */}
             {Object.keys(paintRef.current).length > 0 ? (
-              <Pressable onPress={() => { paintRef.current = {}; commitPaint(); }} style={{ ...STEP_BTN, borderColor: '#a14545' }}>
+              <Pressable onPress={() => { paintRef.current = {}; commitPaint(); }} tooltip="Clear all paint on this texture (the buffer and the saved version)" style={{ ...STEP_BTN, borderColor: '#a14545' }}>
                 <Text fontSize={10} color="#f0a0a0" style={{ fontFamily: 'monospace' }}>clear paint</Text>
               </Pressable>
             ) : null}
@@ -1768,6 +1768,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   props.onEditMesh(activePart.id, setPivot(activePart.mesh, [at[0], at[1], at[2]]));
                   setRigSel({ kind: 'pivot' });
                 }}
+                tooltip="Add a pivot — the part's rotation origin (drag the handle onto the real spin centre). Opt-in; a body is joints-only"
                 style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#a8632c' }}
               >
                 <Text fontSize={10} color="#ffb37d" style={{ fontFamily: 'monospace' }}>+ pivot</Text>
@@ -1780,6 +1781,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 props.onEditMesh(activePart.id, addMount(activePart.mesh, { name, kind: 'socket', position: [at[0], at[1], at[2]], axis: [0, 1, 0], limit: { min: -90, max: 90 } }));
                 setRigSel({ kind: 'joint', name });
               }}
+              tooltip="Add a joint — a typed mount point (axle, hinge, socket) the child part connects + rotates at. Drag it into place"
               style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
             >
               <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>+ joint</Text>
@@ -1790,6 +1792,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             {rigSel && rigSel.kind === 'joint' && mirrorAxes.length ? (
               <Pressable
                 onPress={() => props.onEditMesh(activePart.id, addMountReflections(activePart.mesh, (rigSel as { kind: 'joint'; name: string }).name, mirrorAxes))}
+                tooltip="Mirror this joint across the enabled plane(s) — place one wheel mount, get the matching ones (X = both sides, X+Z = all four)"
                 style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: '#6b54a6' }}
               >
                 <Text fontSize={10} color="#cdbcff" style={{ fontFamily: 'monospace' }}>⇄ mirror joint</Text>
