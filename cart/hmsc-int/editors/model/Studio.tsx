@@ -33,6 +33,7 @@ import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
 import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from './anchors';
+import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from './wheelMount';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -1941,6 +1942,31 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   >
                     <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>solidify</Text>
                   </Pressable>
+                  {/* WHEEL FROM FACE (req_1261): the well's back face already gives the
+                      axle point (its centroid) + the spin axis (its normal), so ONE
+                      click drops an axle joint at the center AND seats a connected
+                      wheel part (pivot at the hub) there — mirror-aware → both/all
+                      wheels at once. The wheel comes in as its OWN pivoted part (not
+                      merged), set up for the articulation runtime to spin. */}
+                  {faceList.length === 1 ? (
+                    <Pressable
+                      onPress={() => {
+                        const fit = faceWheelFit(activePart.mesh, faceList[0]);
+                        if (!fit) { toast('select the flat back face of the wheel well'); return; }
+                        const centers = mirroredCenters(fit.center, mirrorAxes);
+                        let body = activePart.mesh;
+                        for (const c of centers) body = addMount(body, { name: nextJointName(body), kind: 'socket', position: c, axis: axleSpinAxis(fit.axis), limit: { full: true } });
+                        props.onEditMesh(activePart.id, body);
+                        for (const c of centers) props.onAddPart(buildWheelPart({ center: c, radius: fit.radius, axis: fit.axis }, STUDIO.wheelWidthFraction, STUDIO.wheelSides), 'wheel', activePart.lift);
+                        setSel(emptySelection());
+                        toast(`wheel${centers.length > 1 ? `s ×${centers.length}` : ''} connected · r ${fmtUnits(metersToUnits(fit.radius)).replace('+', '')}`);
+                      }}
+                      tooltip="Wheel from face — drop an axle joint at this face's center (axis = its normal) and seat a connected wheel part there, pivot at the hub. Mirror-aware → all wheels at once"
+                      style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c6a4a' }}
+                    >
+                      <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>⊚ wheel from face</Text>
+                    </Pressable>
+                  ) : null}
                 </>
               );
             })() : null}
