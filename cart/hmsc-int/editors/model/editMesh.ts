@@ -832,6 +832,40 @@ export function vertsBounds(m: EditMesh, indices: Iterable<number>): { min: V3; 
   return { min: [mnx, mny, mnz], max: [mxx, mxy, mxz], size: [mxx - mnx, mxy - mny, mxz - mnz] };
 }
 
+/** Fit a CIRCLE to a ring of points (a wheel-well arch) → the centre + radius: the
+ *  exact axle position for a tire to sit in the well, and how big to make it
+ *  (req_1202). The selected verts lie ~in a plane (a car's side panel); the flat
+ *  axis (least spread) is the well's normal, the other two are the fit plane.
+ *  Algebraic (Kåsa) least-squares fit, mean-centred for conditioning. ≥3 distinct
+ *  points required; returns null if they're collinear/degenerate. Pure. */
+export function fitWheelCenter(pts: V3[]): { center: V3; radius: number; axis: 0 | 1 | 2 } | null {
+  const n = pts.length;
+  if (n < 3) return null;
+  const mean: V3 = [0, 0, 0];
+  for (const p of pts) { mean[0] += p[0]; mean[1] += p[1]; mean[2] += p[2]; }
+  mean[0] /= n; mean[1] /= n; mean[2] /= n;
+  const varr = [0, 0, 0];
+  for (const p of pts) for (let a = 0; a < 3; a += 1) varr[a] += (p[a] - mean[a]) ** 2;
+  const flat: 0 | 1 | 2 = (varr[0] <= varr[1] && varr[0] <= varr[2]) ? 0 : (varr[1] <= varr[2] ? 1 : 2);
+  const u = ((flat + 1) % 3) as 0 | 1 | 2, v = ((flat + 2) % 3) as 0 | 1 | 2; // the two in-plane axes
+  // Kåsa: minimize Σ(x²+y²+Dx+Ey+F)² for the centred (x,y); normal equations on (uc,vc).
+  let Suu = 0, Svv = 0, Suv = 0, Suuu = 0, Svvv = 0, Suvv = 0, Svuu = 0;
+  for (const p of pts) {
+    const x = p[u] - mean[u], y = p[v] - mean[v];
+    Suu += x * x; Svv += y * y; Suv += x * y;
+    Suuu += x * x * x; Svvv += y * y * y; Suvv += x * y * y; Svuu += y * x * x;
+  }
+  const det = Suu * Svv - Suv * Suv;
+  if (Math.abs(det) < 1e-12) return null; // collinear → no circle
+  const bx = 0.5 * (Suuu + Suvv), by = 0.5 * (Svvv + Svuu);
+  const uc = (bx * Svv - by * Suv) / det;
+  const vc = (Suu * by - Suv * bx) / det;
+  const radius = Math.sqrt(Math.max(0, uc * uc + vc * vc + (Suu + Svv) / n));
+  const center: V3 = [0, 0, 0];
+  center[u] = mean[u] + uc; center[v] = mean[v] + vc; center[flat] = mean[flat];
+  return { center, radius, axis: flat };
+}
+
 /** Half-extent of a vert subset from `anchor` along world axis 0|1|2 — the resize
  *  reference (how far the farthest selected vert sits from the center on that axis). */
 export function vertsHalfExtent(m: EditMesh, indices: Iterable<number>, anchor: V3, axis: 0 | 1 | 2): number {

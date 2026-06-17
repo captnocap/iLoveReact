@@ -6,7 +6,7 @@ import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import {
   addMount, addMountReflections, updateMountMirrored, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
-  flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
+  flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
@@ -639,6 +639,22 @@ test('symmetryReport checks the right plane (car: Z-symmetric, X not) + tolerate
   // sub-eps float noise (the kind edits accumulate) must NOT false-flag a symmetric model
   const noisy: EditMesh = { ...car, verts: car.verts.map((v) => [v[0] + (v[0] > 0 ? 1e-4 : v[0] < 0 ? -1e-4 : 0), v[1], v[2]] as V3) };
   assertEqual(symmetryReport(noisy, 0).unmatched, 0, 'tiny float noise within tolerance reads as symmetric (no phantom "110 off")');
+});
+
+test('fitWheelCenter finds the axle centre + radius from arch points (req_1202)', () => {
+  // a wheel-well arch: points on a circle r=0.5 about (1.2,-0.3) in the side plane z=0.86,
+  // only the upper ~180° (the well is open at the ground) + a little jitter-free noise.
+  const R = 0.5, cx = 1.2, cy = -0.3, z = 0.86;
+  const pts: V3[] = [];
+  for (let k = 0; k <= 8; k += 1) { const a = Math.PI * (k / 8); pts.push([cx + R * Math.cos(a), cy + R * Math.sin(a), z]); }
+  const fit = fitWheelCenter(pts)!;
+  assert(fit !== null, 'a fit is returned');
+  assertEqual(fit.axis, 2, 'the flat axis (the well normal) is Z');
+  assert(approx(fit.center[0], cx, 1e-3) && approx(fit.center[1], cy, 1e-3), 'centre matches the true axle');
+  assert(approx(fit.center[2], z, 1e-6), 'centre sits in the well plane');
+  assert(approx(fit.radius, R, 1e-3), 'radius matches the well — sizes the tire');
+  assertEqual(fitWheelCenter([[0, 0, 0], [1, 0, 0]]), null, '<3 points → null');
+  assertEqual(fitWheelCenter([[0, 0, 0], [1, 0, 0], [2, 0, 0]]), null, 'collinear → null (no circle)');
 });
 
 test('facesUsingVerts / facesUsingEdges resolve a selection to faces (req_1020)', () => {

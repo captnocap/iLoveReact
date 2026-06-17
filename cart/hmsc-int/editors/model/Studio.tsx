@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -834,11 +834,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // stamps the brush INSIDE that face's slot (clamped — no spill to a neighbour), and
   // commits the cells onto tex.paint with a bumped paintRev (re-bakes the atlas). A
   // null paintColor erases (drops the covered cells).
-  const paintAt = (sx: number, sy: number) => {
-    if (!tex) return;
+  const paintAt = (sx: number, sy: number): FaceHit | null => {
+    if (!tex) return null;
     const hit = pickFaceTexel(paintTargets(), camSnap(), sx, sy, tex.texels);
     setPaintHover(hit);
-    if (!hit) return;
+    if (!hit) return null;
     const cells = brushTexels(hit.tx, hit.ty, paintBrush, hit.rect);
     const next: PaintCells = { ...(tex.paint ?? {}) };
     let changed = false;
@@ -848,6 +848,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       else if (next[key] !== paintColor) { next[key] = paintColor; changed = true; }
     }
     if (changed) setTex({ ...tex, paint: next, paintRev: (tex.paintRev ?? 0) + 1 });
+    return hit;
   };
 
   const sendOrbit = () => ctlRef.current?.setOrbit({ target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: distRef.current, fov: fovRef.current, zoom: 1 });
@@ -868,13 +869,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
 
   const onDown = (e: any) => {
     snapGenRef.current += 1;
-    // PAINT mode: a press paints the texel under the cursor and arms drag-painting
-    // (no orbit while painting — you draw on the model). The brush is clamped to the
-    // hit face's atlas slot, so a stroke at the edge never bleeds onto a neighbour.
+    // PAINT mode: a press on a FACE paints the texel + arms drag-painting (no orbit
+    // while painting — you draw on the model). The brush is clamped to the hit face's
+    // atlas slot, so a stroke at the edge never bleeds onto a neighbour. A press that
+    // MISSES the model falls through to orbit, so you can still spin the camera.
     if (selMode === 'paint') {
       const r = rectRef.current;
-      paintingRef.current = true;
-      paintAt(Number(e?.x ?? 0) - r.x, Number(e?.y ?? 0) - r.y);
+      const hit = paintAt(Number(e?.x ?? 0) - r.x, Number(e?.y ?? 0) - r.y);
+      if (hit) { paintingRef.current = true; return; }
+      dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs();
       return;
     }
     // While the loop-cut popup is open, the SLIDE gizmo on the cut comes first
@@ -998,14 +1001,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     lastMoveRef.current = nowMs();
   };
   const onMove = (e: any) => {
-    // PAINT mode: while pressed, keep stamping along the drag; otherwise just track
-    // the hovered face/texel so the grid overlay + hover cell follow the cursor.
+    // PAINT mode: while painting, keep stamping along the drag. Otherwise, if a
+    // miss-drag is orbiting (dragRef set), FALL THROUGH to the orbit handler below;
+    // a plain hover just tracks the face/texel under the cursor for the grid overlay.
     if (selMode === 'paint') {
       const r = rectRef.current;
       const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
-      if (paintingRef.current) paintAt(sx, sy);
-      else if (tex) setPaintHover(pickFaceTexel(paintTargets(), camSnap(), sx, sy, tex.texels));
-      return;
+      if (paintingRef.current) { paintAt(sx, sy); return; }
+      if (!dragRef.current) { if (tex) setPaintHover(pickFaceTexel(paintTargets(), camSnap(), sx, sy, tex.texels)); return; }
+      // else: a miss-drag in progress → continue to the orbit block (spin the camera).
     }
     // RIG drag: move the selected pivot/joint along the grabbed axis. Snaps by
     // default (req_1023); previews into rigDraft (commit-on-release), so the mesh
@@ -1461,6 +1465,23 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           />
         : null}
 
+      {/* PAINT diagnostics (req_1197): a compact live readout so paint problems are
+          legible — is a texture made, is it shown, how many cells are painted, did the
+          last click hit a face. Bottom-centre, paint mode only. */}
+      {selMode === 'paint' ? (() => {
+        const cellCount = tex?.paint ? Object.keys(tex.paint).length : 0;
+        const hitTxt = paintHover ? `hit f${paintHover.faceIndex} @(${paintHover.tx},${paintHover.ty})` : 'no face under cursor';
+        return (
+          <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 92, alignItems: 'center' }}>
+            <Box style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: tex ? '#2f7a4f' : '#a14545' }}>
+              <Text fontSize={10} color={tex ? '#7fd6a0' : '#f0a0a0'} style={{ fontFamily: 'monospace' }}>
+                paint · {tex ? `tex ${tex.texels}px` : 'NO TEXTURE'} · {texView ? 'textured' : 'solid (toggle on!)'} · {cellCount} cells · {hitTxt}
+              </Text>
+            </Box>
+          </Box>
+        );
+      })() : null}
+
       {/* The transform gizmo — drawn AFTER the selection overlay (last 2D children
           over the Scene3D), so the arrows are NEVER hidden by geometry (USER).
           Hidden while the loop-cut popup is open (the cut preview owns the view). */}
@@ -1751,6 +1772,27 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
               >
                 <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>create face</Text>
+              </Pressable>
+            ) : null}
+            {/* WHEEL CENTRE (req_1202): select the wheel-well arch verts → fit a circle
+                to them; its centre is the exact axle, its radius the tire size. Drops
+                a 'wheel' socket joint there (mirror-aware → both/all wheels at once). */}
+            {selMode === 'vertex' && activePart && sel.verts.size >= 3 ? (
+              <Pressable
+                onPress={() => {
+                  const mesh = activePart.mesh;
+                  const fit = fitWheelCenter([...sel.verts].map((i) => mesh.verts[i]).filter(Boolean));
+                  if (!fit) { toast('pick 3+ arch verts that form a curve'); return; }
+                  const name = nextJointName(mesh);
+                  let out = addMount(mesh, { name, kind: 'socket', position: [fit.center[0], fit.center[1], fit.center[2]], axis: [0, 0, 1], limit: { full: true } });
+                  if (mirrorAxes.length) out = addMountReflections(out, name, mirrorAxes);
+                  props.onEditMesh(activePart.id, out);
+                  setSel(emptySelection()); setSelMode('rig'); setRigSel({ kind: 'joint', name });
+                  toast(`wheel @ centre · tire radius ≈ ${fmtUnits(metersToUnits(fit.radius)).replace('+', '')}${mirrorAxes.length ? ' (mirrored)' : ''}`);
+                }}
+                style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c6a4a' }}
+              >
+                <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>⌖ wheel center</Text>
               </Pressable>
             ) : null}
           </>
