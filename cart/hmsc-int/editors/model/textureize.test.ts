@@ -111,4 +111,21 @@ test('encodePng emits a valid PNG signature + IHDR dimensions', () => {
   assertEqual(h, 2, 'IHDR height');
 });
 
+test('fitTexels packs a fixed-size atlas regardless of model size (req_1209 paint grid)', () => {
+  // A small and a 12× larger model both fit to ~the same target — the paint grid is
+  // model-INDEPENDENT (the bug was the packed atlas ballooning to 1024 for a big model,
+  // making paint cells sub-pixel + bleeding across faces).
+  const small = textureizeScene([cuboid(1, 1, 1)], DEFAULT_TEXTURE_OPTIONS, 16, 64);
+  const huge = textureizeScene([cuboid(12, 4, 4)], DEFAULT_TEXTURE_OPTIONS, 16, 64);
+  assert(small.texels <= 128 && huge.texels <= 128, 'both fit at/under 128 (≈ the 64 target, pow2-rounded)');
+  assert(Math.abs(small.texels - huge.texels) <= huge.texels, 'the huge model is NOT an order of magnitude bigger');
+  // every face gets a paintable slot (≥ ~1 cell) with the grid = the packed atlas (no bleed).
+  for (const f of huge.meshes[0].faces) {
+    const uv = f.uv!;
+    let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
+    for (const [u, v] of uv) { x0 = Math.min(x0, u); x1 = Math.max(x1, u); y0 = Math.min(y0, v); y1 = Math.max(y1, v); }
+    assert((x1 - x0) * huge.texels >= 0.9 && (y1 - y0) * huge.texels >= 0.9, 'face slot spans at least ~1 grid cell');
+  }
+});
+
 finish('textureize');

@@ -165,7 +165,7 @@ export const STUDIO = {
    *  `textureKey` — so the UV→atlas→mesh mapping is visible on the 3D model
    *  (painting the atlas is the deferred next step). `textureCheckerCells` = the
    *  UV-test checkerboard density across the square (reads scale/stretch/seams). */
-  textureAtlasPx: 256,
+  textureAtlasPx: 512,
   textureCheckerCells: 8,
   /** PAINT mode (req_1203): throttle the atlas re-bake while a stroke is live — dabs
    *  land in a ref every mouse-move, the atlas re-bakes at most once per this many ms
@@ -766,6 +766,21 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   }, [activePart?.id]);
   // Leaving paint mode drops the grid overlay + any in-flight stroke.
   useEffect(() => { if (selMode !== 'paint') { paintHoverRef.current = null; paintingRef.current = false; } }, [selMode]);
+  // The texture (+ its paint) is per-MODEL, but the `studio:tex` twig is one global
+  // store — so opening a different model used to carry the prior model's paint over
+  // (req_1208). Reset the texture + paint buffer when the open model changes (NOT on
+  // the first mount), so each model paints its own texture from scratch.
+  const prevSceneRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const scene = props.sceneName ?? null;
+    if (prevSceneRef.current !== undefined && prevSceneRef.current !== scene) {
+      paintRef.current = {};
+      paintHoverRef.current = null;
+      setTex(null);
+    }
+    prevSceneRef.current = scene;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.sceneName]);
   // Entering rig mode SPAWNS the gizmo on the pivot immediately (req_1051) — the
   // pivot is always present, so default-select it so the 3-axis move gizmo is right
   // there to grab (drag the into-screen axis for depth). Runs only on mode ENTRY
@@ -849,19 +864,26 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // Entering paint needs a texture (distinct per-face atlas slots — else every face
   // shares the full square and paint bleeds). Make a default one (the textureize
   // pack) if none exists, then show it. Returns the texels so the caller can pick.
-  const ensureTexture = (): number => {
-    if (tex) { setTexView(true); return tex.texels; }
-    const result = textureizeScene(props.parts.map((p) => p.mesh), DEFAULT_TEXTURE_OPTIONS, STUDIO.unitsPerTile);
+  const ensureTexture = () => {
+    // A paint-suitable texture has a COARSE FIXED grid (req_1209): the atlas IS the
+    // grid (texels ≈ paintGridCells), so each cell = one packed texel inside ONE face's
+    // padded slot — NO bleed across faces (the cause of the scattered "pinlines"). A
+    // missing texture, or a FINE one (e.g. a 1024-texel dialog atlas → sub-pixel cells
+    // that straddle many slots), is (re)built fit to the grid; this resets paint, which
+    // is invalid at a new grid anyway.
+    if (tex && tex.texels <= STUDIO.paintGridCells * 1.5) { setTexView(true); return; }
+    const result = textureizeScene(props.parts.map((p) => p.mesh), DEFAULT_TEXTURE_OPTIONS, STUDIO.unitsPerTile, STUDIO.paintGridCells);
     result.meshes.forEach((mesh, i) => { if (mesh !== props.parts[i].mesh) props.onEditMesh(props.parts[i].id, mesh); });
-    setTex({ texels: result.texels, type: DEFAULT_TEXTURE_OPTIONS.type, color: DEFAULT_TEXTURE_OPTIONS.color, name: DEFAULT_TEXTURE_OPTIONS.name });
+    paintRef.current = {};
+    setTex({ texels: result.texels, type: DEFAULT_TEXTURE_OPTIONS.type, color: DEFAULT_TEXTURE_OPTIONS.color, name: DEFAULT_TEXTURE_OPTIONS.name, paint: {}, paintRev: 0 });
     setTexView(true);
-    return result.texels;
   };
-  // Track the face/texel under the cursor (the grid overlay reads this ref + self-
-  // ticks, so a hover never re-renders the viewport). Returns the hit for the caller.
+  // Track the face/cell under the cursor (the grid overlay reads this ref + self-ticks,
+  // so a hover never re-renders the viewport). The grid IS the packed atlas (tex.texels)
+  // so a cell maps to exactly one face's slot — no bleed. Returns the hit for the caller.
   const paintProbe = (sx: number, sy: number): FaceHit | null => {
     if (!tex) { paintHoverRef.current = null; return null; }
-    const hit = pickFaceTexel(paintTargets(), camSnap(), sx, sy, STUDIO.paintGridCells);
+    const hit = pickFaceTexel(paintTargets(), camSnap(), sx, sy, tex.texels);
     paintHoverRef.current = hit;
     return hit;
   };
@@ -1448,7 +1470,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           imageUrl={tex.imageUrl}
           sliceImages={tex.sliceImages}
           paint={paintRef.current}
-          paintGrid={STUDIO.paintGridCells}
+          paintGrid={tex.texels}
           sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}.${tex.paintRev ?? 0}.${paintBakeTick}`}
         />
       ) : null}
@@ -1516,7 +1538,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         ? <PaintGridOverlay
             parts={paintTargets()}
             getHover={() => paintHoverRef.current}
-            grid={STUDIO.paintGridCells}
+            grid={tex.texels}
             color={paintColor ?? '#ffffff'}
             camSnap={camSnap}
           />
@@ -1528,7 +1550,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 92, alignItems: 'center' }}>
           <Box style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: tex ? '#2f7a4f' : '#a14545' }}>
             <Text fontSize={10} color={tex ? '#7fd6a0' : '#f0a0a0'} style={{ fontFamily: 'monospace' }}>
-              paint · {tex ? `grid ${STUDIO.paintGridCells}²` : 'NO TEXTURE'} · {texView ? 'textured' : 'solid (toggle on!)'} · {Object.keys(paintRef.current).length} cells · drag off model = orbit
+              paint · {tex ? `grid ${tex.texels}²` : 'NO TEXTURE'} · {texView ? 'textured' : 'solid (toggle on!)'} · {Object.keys(paintRef.current).length} cells · drag off model = orbit
             </Text>
           </Box>
         </Box>
@@ -1836,7 +1858,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   const fit = fitWheelCenter([...sel.verts].map((i) => mesh.verts[i]).filter(Boolean));
                   if (!fit) { toast('pick 3+ arch verts that form a curve'); return; }
                   const name = nextJointName(mesh);
-                  let out = addMount(mesh, { name, kind: 'socket', position: [fit.center[0], fit.center[1], fit.center[2]], axis: [0, 0, 1], limit: { full: true } });
+                  // the SPIN axis IS the axle = the well's normal (fit.axis), not a
+                  // hardcoded Z — so the wheel rolls correctly however the car is oriented.
+                  const spin: MV3 = [fit.axis === 0 ? 1 : 0, fit.axis === 1 ? 1 : 0, fit.axis === 2 ? 1 : 0];
+                  let out = addMount(mesh, { name, kind: 'socket', position: [fit.center[0], fit.center[1], fit.center[2]], axis: spin, limit: { full: true } });
                   if (mirrorAxes.length) out = addMountReflections(out, name, mirrorAxes);
                   props.onEditMesh(activePart.id, out);
                   setSel(emptySelection()); setSelMode('rig'); setRigSel({ kind: 'joint', name });

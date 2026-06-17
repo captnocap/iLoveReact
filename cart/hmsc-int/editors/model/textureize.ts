@@ -120,15 +120,32 @@ function nextPow2(n: number): number {
  *  is rewritten into its slot. Deterministic (stable sort) so the layout + colors
  *  are reproducible. `rearrangeUV: false` keeps the current UVs (no repack), still
  *  reporting islands/outlines from the stored mapping. */
-export function textureizeScene(meshes: EditMesh[], opts: TextureOptions, unitsPerMeter = TEXTURE_UNITS_PER_METER): SceneTexture {
-  const t = Math.max(1e-6, opts.density / 16); // texels per unit
+export function textureizeScene(meshes: EditMesh[], opts: TextureOptions, unitsPerMeter = TEXTURE_UNITS_PER_METER, fitTexels?: number): SceneTexture {
   const pad = opts.padding ? PAD_TEXELS : 0;
 
-  // 1. project + measure every face of every part into texel space (origin-local).
+  // 0. unwrap every part once (origin-local face rects, in UNITS at this stage).
+  const layouts = meshes.map((mesh) => unwrapMesh(mesh, unitsPerMeter, 0)); // pad 0 — our own gutter below
+
+  // `t` = texels per unit. Normally density/16 (the Pixel Density dial). For PAINT
+  // (req_1207/1209) the caller passes `fitTexels`: a FIXED target atlas size so the
+  // grid is the same regardless of model size (a face sits on a fixed global grid, no
+  // bleed — the grid IS the packed atlas). We size `t` so the packed extent ≈ fitTexels
+  // by estimating the shelf-pack extent (√area, shelf packs ~80% dense → /0.85).
+  let t = Math.max(1e-6, opts.density / 16);
+  if (fitTexels && fitTexels > 0) {
+    let area = 0, widest = 0;
+    for (const layout of layouts) for (const f of layout.faces) {
+      area += Math.max(0.001, f.rect.w) * Math.max(0.001, f.rect.h);
+      widest = Math.max(widest, f.rect.w, f.rect.h);
+    }
+    const naturalExtent = Math.max(widest, Math.sqrt(area) / 0.85, 1e-6);
+    t = (fitTexels * 0.92) / naturalExtent; // 0.92 headroom so nextPow2 rarely overshoots
+  }
+
+  // 1. project + measure every face into texel space (origin-local), scaled by `t`.
   type Raw = { part: number; face: number; w: number; h: number; local: V2[] };
   const raws: Raw[] = [];
-  meshes.forEach((mesh, pi) => {
-    const layout = unwrapMesh(mesh, unitsPerMeter, 0); // pad 0 — we add our own gutter
+  layouts.forEach((layout, pi) => {
     for (const f of layout.faces) {
       const local = f.poly.map(([u, v]) => [(u - f.rect.x) * t, (v - f.rect.y) * t] as V2);
       raws.push({ part: pi, face: f.faceIndex, w: Math.max(1, f.rect.w * t), h: Math.max(1, f.rect.h * t), local });
