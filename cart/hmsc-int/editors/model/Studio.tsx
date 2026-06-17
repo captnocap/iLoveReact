@@ -945,7 +945,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // always paintable. Guarded on parts existing; ensureTexture is a no-op once tex fits.
   useEffect(() => {
     if (selMode !== 'paint' || props.parts.length === 0) return;
-    if (!tex?.paintFit) ensureTexture();
+    // paint mode REQUIRES the textured view — paint only renders through the atlas
+    // (textureKey), so with texView off you'd register cells and see nothing (the
+    // exact "I'm painting but no paint shows" trap, req_1226). Build the texture if
+    // missing (which turns the view on), else just force the view on.
+    if (!tex?.paintFit) ensureTexture(); else setTexView(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selMode, tex, props.parts.length, props.sceneName]);
 
@@ -976,7 +980,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
       lastPaintRef.current = null; // start a fresh stroke (no interpolation from a prior one)
       const hit = paintStroke(sx, sy);
-      if (hit) { paintingRef.current = true; return; }
+      // the act of painting reveals the texture — if the view was toggled to solid,
+      // turn it back on so the stroke is visible immediately (req_1226).
+      if (hit) { paintingRef.current = true; if (!texView) setTexView(true); return; }
       dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs();
       return;
     }
