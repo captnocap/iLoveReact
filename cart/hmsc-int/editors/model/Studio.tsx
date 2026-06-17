@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -1896,6 +1896,24 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                     style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
                   >
                     <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>detach</Text>
+                  </Pressable>
+                  {/* solidify — give the selected face-group THICKNESS in place
+                      (req_1230): unlike detach, the faces STAY on the body; each gets
+                      an inward inner skin + the open rim (door/window holes, the shell
+                      boundary) bridged with wall quads. Turns a paper-thin box shell
+                      into walls you can see from inside — the cab stops reading hollow.
+                      Holes you cut (a detached door's gap) DON'T get capped: solidify
+                      only mirrors the faces you select and walls the open edges, so the
+                      door opening stays open, just gains a real thickness frame. */}
+                  <Pressable
+                    onPress={() => {
+                      const out = solidifyFaces(activePart.mesh, faceList, STUDIO.shellThicknessMeters);
+                      if (out !== activePart.mesh) { props.onEditMesh(activePart.id, out); setSel(emptySelection()); }
+                    }}
+                    tooltip="Solidify — give the selected faces thickness IN PLACE (inner skin + walled rim). Wraps a hollow box shell into solid walls; open holes (doors/windows) stay open with a thickness frame"
+                    style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
+                  >
+                    <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>solidify</Text>
                   </Pressable>
                 </>
               );
