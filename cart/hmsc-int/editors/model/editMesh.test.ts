@@ -7,7 +7,7 @@ import {
   addMount, addMountReflections, updateMountMirrored, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
   flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
-  vertsCentroid, vertsHalfExtent,
+  vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
 
@@ -882,6 +882,59 @@ test('createFaceFromVerts fills 3 verts (tri) and 4 verts (quad); rejects others
   assert(createFaceFromVerts(m, [0, 1, 2, 3, 0]) !== null, 'duplicate indices dedupe to 4 → still a quad');
   const big: EditMesh = { verts: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1], [0.5, 0, 2]], faces: [] };
   assertEqual(createFaceFromVerts(big, [0, 1, 2, 3, 4]), null, '5 distinct verts is too many for one face');
+});
+
+test('subMeshFromFaces extracts a face-group into a compact standalone mesh (req_1218)', () => {
+  const box = cuboid(2, 2, 2); // 8 verts, 6 faces
+  const sub = subMeshFromFaces(box, [0]); // one face → 4 verts, 1 face
+  assertEqual(sub.faces.length, 1, 'one selected face → one face');
+  assertEqual(sub.verts.length, 4, 'only that face\'s 4 verts come along, reindexed');
+  assert(sub.faces[0].loop.every((i) => i >= 0 && i < 4), 'loop indices are remapped into the sub mesh');
+  // selecting two faces that share an edge brings 6 distinct verts (not 8).
+  const two = subMeshFromFaces(box, [0, 1]);
+  assertEqual(two.faces.length, 2, 'two faces');
+  assert(two.verts.length <= 8 && two.verts.length >= 6, 'shared edge dedupes verts');
+});
+
+test('solidifyFaces thickens a single face into a closed 6-face slab (req_1218)', () => {
+  // a flat quad on the XZ plane, normal +Y. Solidify pushes a copy down by t.
+  const quad: EditMesh = { verts: [[0, 0, 0], [2, 0, 0], [2, 0, 2], [0, 0, 2]], faces: [{ loop: [0, 1, 2, 3] }] };
+  const slab = solidifyFaces(quad, [0], 0.5);
+  assertEqual(slab.verts.length, 8, 'inner skin duplicates the 4 verts → 8');
+  // 1 outer + 1 inner cap + 4 silhouette walls = 6 faces (a closed box).
+  assertEqual(slab.faces.length, 6, 'outer + inner + 4 rim walls = 6');
+  // the inner skin sits one thickness off the outer along the face normal (the
+  // outer stays on its plane); the slab's total depth is exactly `thickness`.
+  const ys = slab.verts.map((v) => v[1]);
+  assert(approx(Math.max(...ys) - Math.min(...ys), 0.5), 'the slab is one thickness deep');
+  assert(ys.filter((y) => approx(y, 0)).length === 4, 'the 4 outer verts stayed on the surface');
+  // every face lowers to whole triangles (a valid, renderable mesh).
+  const geo = editMeshToGeometry(slab);
+  assert(geo.count % 3 === 0, 'the slab lowers to whole triangles');
+});
+
+test('solidifyFaces walls only the SILHOUETTE, not interior shared edges (req_1218)', () => {
+  // two coplanar quads sharing the edge (1,2): together a 2×1 strip. The shared
+  // edge is interior → no wall there; the silhouette is 6 edges → 6 walls.
+  const strip: EditMesh = {
+    verts: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1], [2, 0, 0], [2, 0, 1]],
+    faces: [{ loop: [0, 1, 2, 3] }, { loop: [1, 4, 5, 2] }],
+  };
+  const slab = solidifyFaces(strip, [0, 1], 0.3);
+  // 2 outer + 2 inner + 6 silhouette walls = 10 (NOT 12, which is what 8 boundary
+  // edges incl. the shared one would give).
+  assertEqual(slab.faces.length, 10, 'shared interior edge gets no wall');
+});
+
+test('detachPanel peels a panel off the body, leaving no coincident skin (req_1218)', () => {
+  const box = cuboid(2, 2, 2); // 6 faces — think of face 0 as "the hood"
+  const { panel, body } = detachPanel(box, [0], 2 / 16);
+  assertEqual(body.faces.length, 5, 'the body loses the detached face');
+  assertEqual(panel.faces.length, 6, 'the panel is a closed slab (outer+inner+4 walls)');
+  assert(hasPivot(panel), 'the panel gets a pivot seated for rig mode');
+  // the body keeps no copy of the detached face → no z-fighting double skin.
+  const geo = editMeshToGeometry(body);
+  assert(geo.count % 3 === 0 && geo.count === 5 * 2 * 3, 'the holed body lowers to 5 clean quads');
 });
 
 finish('editMesh');

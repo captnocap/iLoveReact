@@ -1077,6 +1077,106 @@ export function extrudeFace(m: EditMesh, faceIndex: number, distance: number): E
   return { ...m, verts, faces };
 }
 
+// ── Solidify / detach a face selection into a THIN PANEL (req_1218) ─────────────
+// The user's hood/door/trunk recipe, verbatim: "take the edges, extrude them
+// inward and then a face between them all, so that it's a thin model — no need
+// to go more than that." A selected face-group on the body shell becomes its own
+// solid panel: the selection stays as the OUTER skin, its silhouette edges drop
+// inward by `thickness` to form the rim walls, and a reversed copy caps the
+// INSIDE. The result is a watertight thin slab that can pop off / hinge open as
+// its own part. No fixed car-part list — any face-group you peel is a part.
+
+/** Extract the given faces into a standalone EditMesh: their verts, compacted +
+ *  reindexed, with per-face uv / material / glass carried over. Mounts and pivot
+ *  are dropped — a detached panel starts its own rig. Pure + headless. */
+export function subMeshFromFaces(m: EditMesh, faceIndices: Iterable<number>): EditMesh {
+  const sel = [...new Set(faceIndices)].filter((i) => m.faces[i] && m.faces[i].loop.length >= 3);
+  const remap = new Map<number, number>();
+  const verts: V3[] = [];
+  for (const fi of sel) for (const vi of m.faces[fi].loop) {
+    if (!remap.has(vi)) { remap.set(vi, verts.length); const v = m.verts[vi]; verts.push([v[0], v[1], v[2]]); }
+  }
+  const faces: EditMeshFace[] = sel.map((fi) => {
+    const f = m.faces[fi];
+    return { loop: f.loop.map((vi) => remap.get(vi)!), uv: f.uv ? f.uv.map((p) => [p[0], p[1]] as V2) : undefined, material: f.material, glass: f.glass };
+  });
+  return { verts, faces };
+}
+
+/** Thicken a face selection into a closed solid: keep the selected faces as the
+ *  OUTER skin, push each of their verts inward (−averaged incident-face normal) by
+ *  `thickness` to make the INNER skin (a reversed copy of every selected face), and
+ *  bridge each SILHOUETTE edge (a boundary edge used by exactly one selected face)
+ *  outer→inner with a rim-wall quad. Interior shared edges get no wall (they're
+ *  internal to the slab). Glass carries onto the inner cap so a window stays a
+ *  window from both sides; walls are opaque. Pure + headless. */
+export function solidifyFaces(m: EditMesh, faceIndices: Iterable<number>, thickness: number): EditMesh {
+  const sel = [...new Set(faceIndices)].filter((i) => m.faces[i] && m.faces[i].loop.length >= 3);
+  if (sel.length === 0 || thickness <= 0) return m;
+
+  // per-vert inward direction = −normalize(Σ incident selected-face normals), so a
+  // curved panel's inner skin stays roughly parallel (constant thickness).
+  const acc = new Map<number, V3>();
+  for (const fi of sel) {
+    const n = faceNormal(m, m.faces[fi]);
+    for (const vi of m.faces[fi].loop) {
+      const a = acc.get(vi) ?? [0, 0, 0] as V3;
+      a[0] += n[0]; a[1] += n[1]; a[2] += n[2];
+      acc.set(vi, a);
+    }
+  }
+  const verts: V3[] = m.verts.map((v) => [v[0], v[1], v[2]]);
+  const inner = new Map<number, number>(); // body vert → its inner-skin dup index
+  for (const [vi, a] of acc) {
+    const len = Math.hypot(a[0], a[1], a[2]) || 1;
+    const v = verts[vi];
+    inner.set(vi, verts.length);
+    verts.push([v[0] - (a[0] / len) * thickness, v[1] - (a[1] / len) * thickness, v[2] - (a[2] / len) * thickness]);
+  }
+
+  const faces: EditMeshFace[] = m.faces.slice();
+  // INNER skin: a reversed copy of each selected face (winds the other way → faces in).
+  for (const fi of sel) {
+    const f = m.faces[fi];
+    const loop = f.loop.map((vi) => inner.get(vi)!).reverse();
+    faces.push({ loop, uv: faceSquareUV(verts, loop), material: f.material, glass: f.glass });
+  }
+  // SILHOUETTE walls: count each undirected edge across the selection; the ones used
+  // ONCE are the boundary. Keep the owning face's DIRECTED traverse (a→b) so the wall
+  // runs b→a on the outer ring — the same winding two outward faces share, so the
+  // wall faces outward (the extrudeEdge rule), no centroid heuristic needed.
+  const count = new Map<string, number>();
+  const dir = new Map<string, { a: number; b: number }>();
+  for (const fi of sel) {
+    const L = m.faces[fi].loop;
+    for (let k = 0; k < L.length; k += 1) {
+      const a = L[k], b = L[(k + 1) % L.length];
+      const uk = edgeKey(a, b);
+      count.set(uk, (count.get(uk) ?? 0) + 1);
+      if (!dir.has(uk)) dir.set(uk, { a, b });
+    }
+  }
+  for (const [uk, c] of count) {
+    if (c !== 1) continue;
+    const { a, b } = dir.get(uk)!;
+    const loop = [b, a, inner.get(a)!, inner.get(b)!];
+    faces.push({ loop, uv: faceSquareUV(verts, loop) });
+  }
+  return { ...m, verts, faces };
+}
+
+/** Detach a face selection off `m` as a standalone thin panel (req_1218): the
+ *  selection leaves the body (so there's no coincident, z-fighting double skin)
+ *  and returns as its own solidified part with a pivot seated at its center, ready
+ *  to hinge/pop in rig mode. `{ panel, body }` — commit `body` to the source part
+ *  and add `panel` as a new part. Pure + headless. */
+export function detachPanel(m: EditMesh, faceIndices: Iterable<number>, thickness: number): { panel: EditMesh; body: EditMesh } {
+  const sub = subMeshFromFaces(m, faceIndices);
+  const solid = solidifyFaces(sub, sub.faces.map((_, i) => i), thickness);
+  const panel = setPivot(solid, meshBoundsCenter(solid));
+  return { panel, body: deleteFaces(m, faceIndices) };
+}
+
 // ── Extrude an EDGE: pull a new edge off it, bridge the gap (req_1163) ──────────
 // The edge analog of extrudeFace (the user: "we gave extrude to faces but didn't
 // give it to edges"). Copy the selected edge's two verts, push the copy out, and

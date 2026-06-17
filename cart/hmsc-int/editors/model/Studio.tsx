@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -129,6 +129,10 @@ export const STUDIO = {
    *  and its tread facet count — low-poly to match the era. Resize after if needed. */
   wheelWidthFraction: 0.5,
   wheelSides: 16,
+  /** DETACH PANEL (req_1218): peel a selected face-group off the body into its own
+   *  thin solid part (hood/door/trunk/light housing). `thickness` = how far the inner
+   *  skin sits behind the outer skin (the panel's depth), on the 16-units basis. */
+  shellThicknessMeters: 2 / 16,
   /** MIRROR (req_1183/1186): symmetric editing reflects edits across any enabled
    *  part-local plane at coord 0 — X (left↔right), Y (up↔down), Z (front↔back),
    *  multi-select for combined symmetry. The active planes live in twig state. */
@@ -362,7 +366,7 @@ const Geom = { box: require('@reactjit/geometries').Box };
 
 // ── The viewport ─────────────────────────────────────────────────────────────
 
-export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onSelectFaces: (ids: number[]) => void }) {
+export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string) => string; onSelectFaces: (ids: number[]) => void }) {
   const { parts, revision, activePart, onSelectFaces } = props;
 
   // Lower each visible part once per structural revision (camera drags + fov
@@ -1797,6 +1801,22 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   >
                     <Text fontSize={10} color={allGlass ? '#a9cbe0' : T.dim} style={{ fontFamily: 'monospace' }}>{allGlass ? '▣ glass' : 'glass'}</Text>
                   </Pressable>
+                  {/* detach — peel the selected face-group off the body into its own
+                      thin solid part (req_1218): the faces leave the body, come back
+                      as a panel (outer skin + inward rim walls + inner cap) with a
+                      pivot seated, ready to hinge/pop in rig mode. Hood, door, trunk,
+                      light housing — every panel comes off this one button. */}
+                  <Pressable
+                    onPress={() => {
+                      const { panel, body } = detachPanel(activePart.mesh, faceList, STUDIO.shellThicknessMeters);
+                      props.onEditMesh(activePart.id, body);
+                      props.onAddPart(panel, 'panel');
+                      setSel(emptySelection());
+                    }}
+                    style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
+                  >
+                    <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>detach</Text>
+                  </Pressable>
                 </>
               );
             })() : null}
@@ -2830,7 +2850,7 @@ export function StudioEditor() {
   }, []);
   return (
     <Row style={{ flexGrow: 1, height: '100%', minHeight: 0, position: 'relative' }}>
-      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onSelectFaces={model.setSelectedFaces} />
+      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onSelectFaces={model.setSelectedFaces} />
       {/* Branch-history verbs — top-left, the one viewport corner the compass /
           toolbar / mode-toggle don't claim. Disabled when the stack is empty. */}
       <Row style={{ position: 'absolute', left: 8, top: 8, gap: 4, zIndex: 30 }}>
