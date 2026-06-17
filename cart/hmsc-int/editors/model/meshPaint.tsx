@@ -249,10 +249,17 @@ export function PaintGridOverlay(props: {
         const bot: V3 = [c01[0] + (c11[0] - c01[0]) * a, c01[1] + (c11[1] - c01[1]) * a, c01[2] + (c11[2] - c01[2]) * a];
         return [top[0] + (bot[0] - top[0]) * b, top[1] + (bot[1] - top[1]) * b, top[2] + (bot[2] - top[2]) * b];
       };
-      const nx = Math.max(1, Math.min(GRID_MAX, Math.round(rw)));
-      const ny = Math.max(1, Math.min(GRID_MAX, Math.round(rh)));
-      for (let i = 1; i < nx; i += 1) { const a = i / nx; out.push(<Line key={`gv${i}`} a={proj(bilerp(a, 0))} b={proj(bilerp(a, 1))} color="#5fe0bf" thick={1.0} opacity={0.7} />); }
-      for (let j = 1; j < ny; j += 1) { const b = j / ny; out.push(<Line key={`gh${j}`} a={proj(bilerp(0, b))} b={proj(bilerp(1, b))} color="#5fe0bf" thick={1.0} opacity={0.7} />); }
+      // Grid lines at the REAL integer-texel boundaries (req_1219) — NOT `round(rw)`
+      // equal divisions. The painted cells snap to integer texels (tx), but the fit-
+      // scaled slot width isn't a whole number of texels, so equal divisions drifted
+      // off the cells. A line at integer texel k sits at a=(k−rect.x0)/rw, exactly a
+      // cell boundary — so the grid lines up with the brush cell and the paint.
+      const loX = Math.ceil(rect.x0 + 1e-4), hiX = Math.floor(rect.x1 - 1e-4);
+      const loY = Math.ceil(rect.y0 + 1e-4), hiY = Math.floor(rect.y1 - 1e-4);
+      let nlines = 0;
+      for (let k = loX; k <= hiX && nlines < GRID_MAX; k += 1, nlines += 1) { const a = (k - rect.x0) / rw; out.push(<Line key={`gv${k}`} a={proj(bilerp(a, 0))} b={proj(bilerp(a, 1))} color="#5fe0bf" thick={1.0} opacity={0.7} />); }
+      nlines = 0;
+      for (let k = loY; k <= hiY && nlines < GRID_MAX; k += 1, nlines += 1) { const b = (k - rect.y0) / rh; out.push(<Line key={`gh${k}`} a={proj(bilerp(0, b))} b={proj(bilerp(1, b))} color="#5fe0bf" thick={1.0} opacity={0.7} />); }
       // the cell under the cursor — outline it bright in the current paint colour, with
       // a filled dot at its centre so it's unmistakable where a dab will land.
       {
