@@ -1827,6 +1827,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                     props.onEditMesh(activePart.id, splitConcaveFaces(extruded));
                     setGizmoTool('move'); // ready to drag the new cap in/out
                   }}
+                  tooltip="Extrude — pull a new lip out of the selected face; then drag the orange normal arrow to set depth (push IN to inset/cut a recess)"
                   style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
                 >
                   <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>extrude</Text>
@@ -1839,6 +1840,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                     if (!info) return;
                     setLc({ faceIndex, dir: 0, cuts: 1, offset: Math.round(info.sizeUnits / 2), unit: 'units' });
                   }}
+                  tooltip="Loop cut — slice parallel rings around the part to add edge loops (opens a popup for count + offset)"
                   style={{ ...STEP_BTN, backgroundColor: lc ? '#1c3a2a' : '#13233aee', borderColor: lc ? '#2f7a4f' : '#2c4a6a' }}
                 >
                   <Text fontSize={10} color={lc ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>loop cut</Text>
@@ -1862,6 +1864,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                       for (const fi of faceList) out = flipFace(out, fi);
                       props.onEditMesh(activePart.id, out);
                     }}
+                    tooltip="Flip — reverse the selected face(s) so the normal points the other way (un-inverts an upside-down Create Face)"
                     style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
                   >
                     <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>flip</Text>
@@ -1870,6 +1873,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                       translucent window pane (renders see-through, skips texturing). */}
                   <Pressable
                     onPress={() => props.onEditMesh(activePart.id, setFaceGlass(activePart.mesh, faceList, !allGlass))}
+                    tooltip="Glass — toggle the face(s) as a translucent window pane (renders see-through, skips texturing). For windshields/windows"
                     style={{ ...STEP_BTN, backgroundColor: allGlass ? '#16314a' : '#13233aee', borderColor: allGlass ? '#5b9fd6' : '#2c4a6a' }}
                   >
                     <Text fontSize={10} color={allGlass ? '#a9cbe0' : T.dim} style={{ fontFamily: 'monospace' }}>{allGlass ? '▣ glass' : 'glass'}</Text>
@@ -1888,6 +1892,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                       props.onAddPart(panel, 'panel', activePart.lift);
                       setSel(emptySelection());
                     }}
+                    tooltip="Detach — peel the selected faces off the body into their own thin panel part (hood / door / trunk), pivot seated, ready to hinge"
                     style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
                   >
                     <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>detach</Text>
@@ -1915,6 +1920,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                     setSel(ni >= 0 ? { verts: new Set(), edges: new Set([ni]), faces: new Set() } : emptySelection());
                     setGizmoTool('move'); // ready to drag the new edge in/out
                   }}
+                  tooltip="Extrude edge — pull a new edge off the selected one, bridged by a quad; then drag it with the move gizmo"
                   style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
                 >
                   <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>extrude</Text>
@@ -1938,6 +1944,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   }
                   if (out && out !== mesh) { props.onEditMesh(activePart.id, out); setSel(emptySelection()); }
                 }}
+                tooltip="Create face — fill the selection: 2+ edges (a loop → n-gon, two chains → a bridge) or 3–4 verts → a tri/quad"
                 style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
               >
                 <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>create face</Text>
@@ -1962,6 +1969,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   setSel(emptySelection()); setSelMode('rig'); setRigSel({ kind: 'joint', name });
                   toast(`wheel @ centre · tire radius ≈ ${fmtUnits(metersToUnits(fit.radius)).replace('+', '')}${mirrorAxes.length ? ' (mirrored)' : ''}`);
                 }}
+                tooltip="Wheel center — fit a circle to the selected wheel-well arch verts and drop an axle JOINT at the exact centre (mount a wheel part here). Mirror-aware"
                 style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c6a4a' }}
               >
                 <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>⌖ wheel center</Text>
@@ -1990,6 +1998,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   setSel(emptySelection());
                   toast(`wheel${centers.length > 1 ? `s ×${centers.length}` : ''} · radius ${fmtUnits(metersToUnits(fit.radius)).replace('+', '')} — resize/split as needed`);
                 }}
+                tooltip="Make wheel — fit the well and GENERATE a tire of that exact radius merged into the body (car auto-seats on the tire bottoms). Mirror-aware → all wheels at once"
                 style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c6a4a' }}
               >
                 <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>⊚ make wheel</Text>
