@@ -1086,9 +1086,27 @@ export function extrudeFace(m: EditMesh, faceIndex: number, distance: number): E
 // INSIDE. The result is a watertight thin slab that can pop off / hinge open as
 // its own part. No fixed car-part list — any face-group you peel is a part.
 
+/** Strip a loop of repeated corners — consecutive duplicates AND the wrap-around
+ *  (last === first) — keeping the per-corner uv in lockstep. Malformed source faces
+ *  carry these (a loop-cut / create-face can leave a `…,v,v` zero-length edge); left
+ *  in, they fan-triangulate to junk zero-area tris and, worse, count as silhouette
+ *  edges that spawn degenerate rim walls in `solidifyFaces`. Pure. */
+function cleanLoop(loop: number[], uv?: V2[]): { loop: number[]; uv?: V2[] } {
+  const L: number[] = [];
+  const U: V2[] = [];
+  for (let i = 0; i < loop.length; i += 1) {
+    if (L.length && L[L.length - 1] === loop[i]) continue; // consecutive dup
+    L.push(loop[i]);
+    if (uv && uv[i]) U.push([uv[i][0], uv[i][1]]);
+  }
+  while (L.length > 1 && L[L.length - 1] === L[0]) { L.pop(); if (uv) U.pop(); } // wrap dup
+  return { loop: L, uv: uv ? U : undefined };
+}
+
 /** Extract the given faces into a standalone EditMesh: their verts, compacted +
- *  reindexed, with per-face uv / material / glass carried over. Mounts and pivot
- *  are dropped — a detached panel starts its own rig. Pure + headless. */
+ *  reindexed, with per-face uv / material / glass carried over (loops sanitized of
+ *  repeated corners, fully-degenerate faces dropped). Mounts and pivot are dropped
+ *  — a detached panel starts its own rig. Pure + headless. */
 export function subMeshFromFaces(m: EditMesh, faceIndices: Iterable<number>): EditMesh {
   const sel = [...new Set(faceIndices)].filter((i) => m.faces[i] && m.faces[i].loop.length >= 3);
   const remap = new Map<number, number>();
@@ -1096,10 +1114,13 @@ export function subMeshFromFaces(m: EditMesh, faceIndices: Iterable<number>): Ed
   for (const fi of sel) for (const vi of m.faces[fi].loop) {
     if (!remap.has(vi)) { remap.set(vi, verts.length); const v = m.verts[vi]; verts.push([v[0], v[1], v[2]]); }
   }
-  const faces: EditMeshFace[] = sel.map((fi) => {
+  const faces: EditMeshFace[] = [];
+  for (const fi of sel) {
     const f = m.faces[fi];
-    return { loop: f.loop.map((vi) => remap.get(vi)!), uv: f.uv ? f.uv.map((p) => [p[0], p[1]] as V2) : undefined, material: f.material, glass: f.glass };
-  });
+    const c = cleanLoop(f.loop.map((vi) => remap.get(vi)!), f.uv ? f.uv.map((p) => [p[0], p[1]] as V2) : undefined);
+    if (c.loop.length < 3) continue; // a doubled-corner sliver → nothing real to keep
+    faces.push({ loop: c.loop, uv: c.uv, material: f.material, glass: f.glass });
+  }
   return { verts, faces };
 }
 
@@ -1136,9 +1157,11 @@ export function solidifyFaces(m: EditMesh, faceIndices: Iterable<number>, thickn
 
   const faces: EditMeshFace[] = m.faces.slice();
   // INNER skin: a reversed copy of each selected face (winds the other way → faces in).
+  // cleanLoop guards a malformed source face (doubled corner) used standalone.
   for (const fi of sel) {
     const f = m.faces[fi];
-    const loop = f.loop.map((vi) => inner.get(vi)!).reverse();
+    const loop = cleanLoop(f.loop.map((vi) => inner.get(vi)!)).loop.reverse();
+    if (loop.length < 3) continue;
     faces.push({ loop, uv: faceSquareUV(verts, loop), material: f.material, glass: f.glass });
   }
   // SILHOUETTE walls: count each undirected edge across the selection; the ones used
@@ -1151,6 +1174,7 @@ export function solidifyFaces(m: EditMesh, faceIndices: Iterable<number>, thickn
     const L = m.faces[fi].loop;
     for (let k = 0; k < L.length; k += 1) {
       const a = L[k], b = L[(k + 1) % L.length];
+      if (a === b) continue; // a zero-length edge (malformed loop) is no silhouette
       const uk = edgeKey(a, b);
       count.set(uk, (count.get(uk) ?? 0) + 1);
       if (!dir.has(uk)) dir.set(uk, { a, b });

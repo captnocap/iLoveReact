@@ -937,4 +937,27 @@ test('detachPanel peels a panel off the body, leaving no coincident skin (req_12
   assert(geo.count % 3 === 0 && geo.count === 5 * 2 * 3, 'the holed body lowers to 5 clean quads');
 });
 
+test('detach sanitizes a malformed (doubled-corner) source face — no degenerate slivers (req_1222)', () => {
+  // a real car body had a pentagon stored as a 6-loop with a repeated last corner
+  // (`…,v,v`, a zero-length edge). Detach used to copy it AND spin a degenerate
+  // rim wall [v,v,v',v'] off the zero-length edge. The selection is two coplanar
+  // quads sharing edge (1,2); face 0 is malformed with a doubled corner.
+  const body: EditMesh = {
+    verts: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1], [2, 0, 0], [2, 0, 1]],
+    faces: [{ loop: [0, 1, 2, 3, 3] }, { loop: [1, 4, 5, 2] }], // face 0 has a doubled corner
+  };
+  const sub = subMeshFromFaces(body, [0, 1]);
+  // the doubled corner is gone — face 0 is back to a clean 4-loop.
+  assert(sub.faces.every((f) => new Set(f.loop).size === f.loop.length), 'no face keeps a repeated corner');
+  const { panel } = detachPanel(body, [0, 1], 0.3);
+  // every face is a real polygon: ≥3 distinct corners, no zero-length edge.
+  for (const f of panel.faces) {
+    assert(f.loop.length >= 3, 'every panel face has ≥3 corners');
+    assert(new Set(f.loop).size === f.loop.length, 'no panel face has a repeated corner (no degenerate wall)');
+    for (let k = 0; k < f.loop.length; k += 1) assert(f.loop[k] !== f.loop[(k + 1) % f.loop.length], 'no zero-length edge');
+  }
+  // shared interior edge still gets no wall: 2 outer + 2 inner + 6 silhouette = 10.
+  assertEqual(panel.faces.length, 10, 'clean shell, no junk faces');
+});
+
 finish('editMesh');
