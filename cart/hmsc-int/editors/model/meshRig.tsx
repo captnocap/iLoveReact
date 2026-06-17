@@ -9,6 +9,7 @@
 import { useInterval, useRerender } from '@reactjit/hooks';
 import { Box, Text } from '@reactjit/primitives';
 import { jointTravelDegrees, type EditMesh, type MountPoint, type V3 } from './editMesh';
+import { anchorFacing, anchorRole, isAnchor } from './anchors';
 import { makeProjector, type CameraSnap } from './meshSelect';
 
 const DEG = Math.PI / 180;
@@ -18,6 +19,7 @@ export type RigSel = { kind: 'pivot' } | { kind: 'joint'; name: string };
 
 const PIVOT_COLOR = '#ff8a3d';
 const JOINT_COLOR = '#4aa3ff';
+const ANCHOR_COLOR = '#3fd6c0'; // teal — a FIXED seat/anchor (req_1244), vs the blue rotating joint
 const SEL_COLOR = '#ffd24a';
 const AXIS_M = 0.18;   // how far the spin-axis arrow reaches, in meters
 const GRAB_PX = 16;    // screen-space pick radius around a handle
@@ -56,6 +58,12 @@ function Ball(props: { x: number; y: number; r: number; color: string; hollow?: 
   return <Box style={{ position: 'absolute', left: props.x - props.r, top: props.y - props.r, width: props.r * 2, height: props.r * 2, borderRadius: props.r, backgroundColor: props.hollow ? '#0b1320cc' : props.color, borderWidth: 2, borderColor: props.color }} />;
 }
 
+// a FIXED-marker glyph (a hollow square) — reads as "doesn't rotate", vs Ball's
+// round joint handle. Used for anchors (seats / cargo slots, req_1244).
+function Square(props: { x: number; y: number; r: number; color: string }) {
+  return <Box style={{ position: 'absolute', left: props.x - props.r, top: props.y - props.r, width: props.r * 2, height: props.r * 2, borderRadius: 2, backgroundColor: '#0b1320cc', borderWidth: 2, borderColor: props.color }} />;
+}
+
 function Line(props: { ax: number; ay: number; bx: number; by: number; color: string; thick?: number }) {
   const dx = props.bx - props.ax, dy = props.by - props.ay;
   const len = Math.hypot(dx, dy) || 0.001;
@@ -81,23 +89,31 @@ export function RigOverlay(props: { pivotW: V3 | null; joints: { name: string; p
   const proj = makeProjector(props.camSnap());
   const out: any[] = [];
 
-  // joints first (so the pivot draws on top — it's the primary handle).
+  // mounts first (so the pivot draws on top — it's the primary handle). Each is
+  // selected via the shared name-addressed handle path (RigSel.kind 'joint'),
+  // regardless of whether it's a rotating joint or a fixed anchor.
   for (const j of props.joints) {
     const a = proj(j.pos);
     if (!a.front) continue;
     const selected = props.sel?.kind === 'joint' && props.sel.name === j.name;
-    const color = selected ? SEL_COLOR : JOINT_COLOR;
-    // the spin axis: a short arrow from the joint along its (normalized) axis.
-    const ax = j.mount.axis ?? [0, 1, 0];
+    const anchor = isAnchor(j.mount);
+    const color = selected ? SEL_COLOR : (anchor ? ANCHOR_COLOR : JOINT_COLOR);
+    // the direction arrow: a joint's SPIN axis, or an anchor's FACING. Both are
+    // the mount's `axis`, drawn the same way — only the meaning (+ glyph) differ.
+    const ax = anchor ? anchorFacing(j.mount) : (j.mount.axis ?? [0, 1, 0]);
     const al = Math.hypot(ax[0], ax[1], ax[2]) || 1;
     const tip: V3 = [j.pos[0] + (ax[0] / al) * AXIS_M, j.pos[1] + (ax[1] / al) * AXIS_M, j.pos[2] + (ax[2] / al) * AXIS_M];
     const b = proj(tip);
     if (b.front) { out.push(<Line key={`ja${j.name}`} ax={a.x} ay={a.y} bx={b.x} by={b.y} color={color} thick={2.5} />); out.push(<Ball key={`jt${j.name}`} x={b.x} y={b.y} r={2.5} color={color} />); }
-    out.push(<Ball key={`jr${j.name}`} x={a.x} y={a.y} r={5} color={color} hollow />);
-    // label by the PLACEMENT NAME (USER) — 'back_left', not 'joint' — with
-    // its travel as a quiet suffix so the binding target reads off the model.
-    const trav = jointTravelDegrees(j.mount);
-    out.push(<Tag key={`jl${j.name}`} x={a.x} y={a.y} text={`${j.name}  ·  ${trav >= 360 ? 'full' : `${Math.round(trav)}°`}`} color={color} />);
+    // a fixed anchor reads as a SQUARE (doesn't rotate); a joint as a round ring.
+    out.push(anchor
+      ? <Square key={`jr${j.name}`} x={a.x} y={a.y} r={5} color={color} />
+      : <Ball key={`jr${j.name}`} x={a.x} y={a.y} r={5} color={color} hollow />);
+    // label by the PLACEMENT NAME (USER) — 'back_left' / 'driver' — with a quiet
+    // suffix: the joint's travel, or the anchor's role, so the binding reads off
+    // the model.
+    const suffix = anchor ? anchorRole(j.mount) : (jointTravelDegrees(j.mount) >= 360 ? 'full' : `${Math.round(jointTravelDegrees(j.mount))}°`);
+    out.push(<Tag key={`jl${j.name}`} x={a.x} y={a.y} text={`${j.name}  ·  ${suffix}`} color={color} />);
   }
 
   // the pivot — a filled ball + a crosshair so it reads as the rotation origin.

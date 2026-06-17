@@ -46,6 +46,15 @@ export type EditMeshFace = {
 export const JOINT_TYPES = ['generic', 'axle', 'shoulder', 'hip', 'neck', 'spoiler', 'roof', 'hinge'] as const;
 export type JointType = typeof JOINT_TYPES[number];
 
+/** ANCHOR roles (req_1244) — what a FIXED (non-rotating) mount is FOR. A seat is
+ *  not a joint: it doesn't swing about an axis, it's a placement where a runtime
+ *  occupant/cargo attaches, facing a direction. The role drives runtime behaviour
+ *  (a `driver` anchor is the mount that grants vehicle control). The anchor helper
+ *  layer lives in `./anchors.ts`; the data shape (a `kind:'anchor'` MountPoint) is
+ *  DESIGNED IN here so it round-trips through the same store as joints. */
+export const ANCHOR_ROLES = ['driver', 'passenger', 'cargo', 'mount'] as const;
+export type AnchorRole = typeof ANCHOR_ROLES[number];
+
 /** A connection point — the Lego stud/anti-stud that mends parts together (USER
  *  req_0952). Connection points are PART OF THE DATA, authored in the Studio, NOT
  *  metadata bolted on later. A `socket` receives; a `plug` seats into it. Joints
@@ -61,11 +70,19 @@ export type MountPoint = {
   /** OPTIONAL dormant compatibility class (req_1057 — not authored in the UI;
    *  absent = `generic`). Strict if ever set (`JOINT_TYPES`, req_1055). */
   type?: JointType;
-  kind: 'socket' | 'plug';
+  /** 'socket'/'plug' = a JOINT (the part-to-part connector, rotation owned by
+   *  `limit`). 'anchor' (req_1244) = a FIXED placement (a seat / cargo slot) — it
+   *  never rotates; `axis` is its FACING, `role` says what it's for, and `limit`
+   *  is unused. See `./anchors.ts` for the anchor helper layer. */
+  kind: 'socket' | 'plug' | 'anchor';
   /** where on the part, in part-local space. */
   position: V3;
-  /** orientation / spin axis (tire spin, head up). Default +Y when omitted. */
+  /** orientation / spin axis (tire spin, head up). For an ANCHOR this is the
+   *  FACING direction the occupant looks, not a spin axis. Default +Y when omitted. */
   axis?: V3;
+  /** ANCHOR role (req_1244) — driver/passenger/cargo/mount. Only meaningful when
+   *  `kind === 'anchor'`; absent on joints. */
+  role?: AnchorRole;
   /** size constraint (axle hole / hub diameter) for the match check. */
   size?: number;
   /** ROTATION LIMIT a JOINT (socket) imposes on the child that connects here

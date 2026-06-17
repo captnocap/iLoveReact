@@ -32,6 +32,7 @@ import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
 import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addAnchor, isAnchor, nextAnchorName } from './anchors';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
@@ -1786,6 +1787,21 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             >
               <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>+ joint</Text>
             </Pressable>
+            {/* + SEAT (req_1244): a FIXED anchor — a seat / cargo slot the occupant
+                attaches to (no rotation). Drag it into place; set role + facing in
+                the rig panel. Distinct from a joint, which rotates. */}
+            <Pressable
+              onPress={() => {
+                const name = nextAnchorName(activePart.mesh);
+                const at = pivotOf(activePart.mesh); // lands at the bounds center; drag it onto the seat
+                props.onEditMesh(activePart.id, addAnchor(activePart.mesh, { name, position: [at[0], at[1], at[2]] }));
+                setRigSel({ kind: 'joint', name });
+              }}
+              tooltip="Add a seat — a FIXED anchor (driver/passenger/cargo) a runtime occupant attaches to, facing a direction. No rotation. Drag it into place; set role + facing in the rig panel"
+              style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2f7a6f' }}
+            >
+              <Text fontSize={10} color="#9fe9de" style={{ fontFamily: 'monospace' }}>+ seat</Text>
+            </Pressable>
             {/* MIRROR JOINT (req_1189): with mirror plane(s) on, reflect the selected
                 joint into its partners — place one tire mount, get the matching ones
                 (X = left/right, X+Z = all four). */}
@@ -1799,7 +1815,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               </Pressable>
             ) : null}
             <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#0b1320cc', borderWidth: 1, borderColor: '#27364a' }}>
-              <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{rigSel ? (rigSel.kind === 'pivot' ? 'pivot selected' : `joint: ${rigSel.name}`) : 'pick a handle, or + above'}</Text>
+              <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{rigSel ? (rigSel.kind === 'pivot' ? 'pivot selected' : `${isAnchor((activePart.mesh.mounts ?? []).find((x) => x.name === rigSel.name) ?? { kind: 'socket' } as any) ? 'anchor' : 'joint'}: ${rigSel.name}`) : 'pick a handle, or + above'}</Text>
             </Box>
           </>
         ) : null}
