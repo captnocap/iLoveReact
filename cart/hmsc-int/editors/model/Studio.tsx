@@ -39,10 +39,11 @@ import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
 import { StudioOutliner } from './Outliner';
 import { SceneTextureAtlas, STUDIO_TEXTURE_KEY } from './TextureAtlas';
+import { BackdropSurface, BackdropsPanel, backdropQuad, backdropTexKey, imageDims, BACKDROP_PLANES, type Backdrop } from './Backdrops';
 import { textureizeScene, rasterizeAtlas, DEFAULT_TEXTURE_OPTIONS, PIXEL_DENSITIES, type TextureOptions, type TextureType, type RasterSlice } from './textureize';
 import { encodePng } from './png';
 import { exists, mkdir, readFileBase64, writeFileBase64Atomic } from '@reactjit/hooks/fs';
-import { bytesToBase64 } from '@reactjit/workspace';
+import { bytesToBase64, base64ToBytes } from '@reactjit/workspace';
 import { useAssistant } from '@reactjit/hooks/useAssistant';
 import { processCwd } from '../../assist3d/scene';
 import { buildTexturePrompt, enhanceViaNano, generateTexture, getNanoKey, setNanoKey, hashHex, pngDataUrl, stripDataUrl, ENHANCE_SYSTEM } from './textureGen';
@@ -451,6 +452,12 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // feet on the grid. Toggled by the 'scale' button; interned so the static figure
   // doesn't compete for the sculpt DYN slots. Twig state (survives hot reload).
   const [showScale, setShowScale] = useHotState('studio:showScale', false);
+  // BACKDROPS (req_1280): reference images on the cardinal planes you trace over
+  // while modeling. Twig state (survives hot reload, reset cold) — a tracing aid,
+  // not model data. The setup panel is transient. See ./Backdrops.tsx.
+  const [backdrops, setBackdrops] = useHotState<Backdrop[]>('studio:backdrops', []);
+  const [backdropPanel, setBackdropPanel] = useState(false);
+  const backdropIdRef = useRef(0);
   // MIRROR (req_1183/1186): symmetric editing — a gizmo transform is reflected onto
   // each moved vert's partner across every ENABLED plane (X/Y/Z, multi-select for the
   // opposite side AND another direction at once). Stored as a bitmask in twig state.
@@ -592,6 +599,45 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (!exists(path)) writeFileBase64Atomic(path, b64);
     return path;
   };
+
+  // BACKDROPS (req_1280): load a reference image off disk → an <Image> source (the
+  // same inline/cache split as textures, texSource) → a backdrop on the default
+  // plane. The picture's pixel size (read straight from the PNG/JPEG header) sets
+  // the quad's aspect so it traces without stretch. The default plane cycles per
+  // add so a front/side/top set lands on three different walls automatically.
+  const addBackdrop = (rawPath: string) => {
+    const path = rawPath.trim();
+    if (!path) return;
+    if (!exists(path)) { toast(`not found: ${path}`); return; }
+    const b64 = readFileBase64(path);
+    if (!b64) { toast(`could not read: ${path}`); return; }
+    const dims = imageDims(base64ToBytes(b64));
+    const aspect = dims ? dims.w / dims.h : 1;
+    const planeDef = BACKDROP_PLANES[backdrops.length % BACKDROP_PLANES.length];
+    backdropIdRef.current += 1;
+    const id = `bd${Math.floor(nowMs())}_${backdropIdRef.current}`;
+    const name = (path.split('/').pop() || path).slice(0, 40);
+    const bd: Backdrop = {
+      id, name, source: texSource(b64), aspect,
+      plane: planeDef.key, scale: 4, offset: planeDef.defOffset, opacity: 0.5, flipU: false, visible: true,
+    };
+    setBackdrops((list) => [...list, bd]);
+    setBackdropPanel(true);
+    toast(`backdrop · ${name}${dims ? ` (${dims.w}×${dims.h})` : ''}`);
+  };
+  const updateBackdrop = (id: string, patch: Partial<Backdrop>) =>
+    setBackdrops((list) => list.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  const removeBackdrop = (id: string) =>
+    setBackdrops((list) => list.filter((b) => b.id !== id));
+  // The visible backdrops, lowered to renderable quads. Re-baked only when a
+  // backdrop's geometry-affecting fields change (NOT per camera move) — the `sig`
+  // memo dep mirrors the grid/part staging pattern so orbiting never re-bakes.
+  const backdropSig = backdrops.map((b) => `${b.id}:${b.visible ? 1 : 0}:${b.plane}:${b.scale}:${b.offset}:${b.aspect}:${b.flipU ? 1 : 0}`).join('|');
+  const backdropQuads = useMemo(
+    () => backdrops.filter((b) => b.visible).map((b) => ({ bd: b, geo: backdropQuad(b) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [backdropSig],
+  );
 
   // Drop an <Image> source onto the tex twig — a whole-sheet replaces `imageUrl`, a
   // SLICE drops into its `sliceImages` slot (the cookie cutter is automatic: every face
@@ -1613,6 +1659,21 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         <Scene3D.AmbientLight color="#dfe7ff" intensity={0.55} />
         <Scene3D.DirectionalLight direction={[0.4, 0.92, 0.32]} color="#ffe9c2" intensity={0.85} />
         {staging}
+        {/* BACKDROPS (req_1280): the reference-image trace planes. Translucent +
+            white-material so the picture (sampled via textureKey) reads through;
+            alpha<1 routes them to the back-to-front transparent pass. The slot id
+            before '~' is the backdrop INDEX (reused across the session, never a
+            per-id leak); the version after re-uploads on a geometry change. */}
+        {backdropQuads.map((q, i) => (
+          <Scene3D.Mesh
+            key={q.bd.id}
+            geometry={{ id: `studio.bd.${q.bd.id}`, generate: () => q.geo, defaults: {} }}
+            dynamicKey={`studio.bd${i}~${q.bd.id}.${q.bd.plane}.${q.bd.scale}.${q.bd.offset}.${q.bd.aspect}.${q.bd.flipU ? 1 : 0}`}
+            material={{ color: '#ffffff', opacity: q.bd.opacity }}
+            textureKey={backdropTexKey(q.bd.id)}
+            position={[0, 0, 0]}
+          />
+        ))}
         {display.map((p) => {
           // TEXTURE (req_1068): with a scene texture made + texture view on, EVERY
           // part samples the ONE shared sprite-map atlas (STUDIO_TEXTURE_KEY) —
@@ -1661,6 +1722,13 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         ) : null}
       </Scene3D>
 
+      {/* BACKDROPS (req_1280): each visible backdrop's image baked into its own
+          offscreen StaticSurface, sampled by the matching trace plane above. memo'd
+          on (id, source) so they re-bake only when a picture is added/replaced. */}
+      {backdrops.filter((b) => b.visible).map((b) => (
+        <BackdropSurface key={b.id} id={b.id} source={b.source} aspect={b.aspect} />
+      ))}
+
       {/* TEXTURE (req_1068): the offscreen scene SPRITE-MAP atlas every part samples
           via textureKey. Mounted while texture view is on; re-bakes only when the
           scene's UVs (meshRev) or the atlas params change (the `sig` memo). */}
@@ -1699,6 +1767,18 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               {showScale ? `scale · player ${HMSC_SCALE.playerCapsuleHeightMeters.toFixed(2)} m` : '☖ scale'}
             </Text>
           </Pressable>
+          {/* BACKDROPS (req_1280): reference images on the walls/floor to trace over. */}
+          {(() => { const shown = backdrops.filter((b) => b.visible).length; return (
+            <Pressable
+              onPress={() => setBackdropPanel(true)}
+              tooltip="Reference backdrops — drop a blueprint/photo on a wall or the floor and model straight over it"
+              style={{ ...STEP_BTN, backgroundColor: shown ? '#16324a' : '#0b1320dd', borderColor: shown ? '#4a7fb0' : '#27364a' }}
+            >
+              <Text fontSize={10} color={shown ? '#9fcfff' : T.dim} style={{ fontFamily: 'monospace' }}>
+                {shown ? `▦ trace · ${shown}` : '▦ trace'}
+              </Text>
+            </Pressable>
+          ); })()}
           {/* MIRROR (req_1183/1186): symmetric editing — pick the plane(s). X=left↔right,
               Y=up↔down, Z=front↔back; enable more than one for combined symmetry. */}
           <Row style={{ gap: 3, alignItems: 'center', paddingLeft: 5, paddingRight: 4, paddingTop: 2, paddingBottom: 2, borderRadius: 5, backgroundColor: mirrorMask ? '#241c3a' : '#0b1320dd', borderWidth: 1, borderColor: mirrorMask ? '#6b54a6' : '#27364a' }}>
@@ -2533,6 +2613,18 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           defaultPath={`cart/hmsc-int/exports/${(props.sceneName || tex?.name || 'texture').replace(/[^a-z0-9_-]+/gi, '_')}${importTex.slice ? `_face${importTex.slice.faceIndex}` : ''}.png`}
           onCancel={() => setImportTex(null)}
           onConfirm={(path) => importTexture(path, importTex.slice)}
+        />
+      ) : null}
+
+      {/* BACKDROPS (req_1280): the trace-image setup modal. Closing it leaves the
+          planes in the viewport so you model over them. */}
+      {backdropPanel ? (
+        <BackdropsPanel
+          backdrops={backdrops}
+          onAdd={addBackdrop}
+          onUpdate={updateBackdrop}
+          onRemove={removeBackdrop}
+          onClose={() => setBackdropPanel(false)}
         />
       ) : null}
 
