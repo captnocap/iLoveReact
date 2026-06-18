@@ -2681,6 +2681,12 @@ function FrameDiagBar(props: { logToTerminal: boolean }) {
           <StatCell label="skip" value={`${diag.peakSkips}`} warn={diag.peakSkips > 0} />
           <StatCell label="gc" value={`${diag.gcMs.toFixed(1)}`} warn={diag.gcMs > 1} />
           <StatCell label="pres" value={`${diag.presentMs.toFixed(1)}`} warn={diag.presentMs > diag.medianMs + 2} />
+          {/* TEXT RESOURCE gauges (req_1279): when the compass letters (or any text)
+              silently vanish, one of these is at cap. glyph = per-frame buffer
+              (trailing text drops); atlas = distinct-glyph cache (new combos can't
+              rasterize, no eviction). warn at 90%. */}
+          <StatCell label="glyph" value={`${diag.glyphCount}/${diag.glyphCap}`} warn={diag.glyphCap > 0 && diag.glyphCount >= diag.glyphCap * 0.9} />
+          <StatCell label="atlas" value={`${diag.atlasCount}/${diag.atlasCap}`} warn={diag.atlasCap > 0 && diag.atlasCount >= diag.atlasCap * 0.9} />
         </>
       ) : (
         <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>no telemetry…</Text>

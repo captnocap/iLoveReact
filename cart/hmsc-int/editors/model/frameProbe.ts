@@ -57,9 +57,25 @@ export type FrameDiag = {
   camSolvedStep: number;
   /** input-delta calls the host saw in the window (drag event throughput). */
   camDeltas: number;
+  // ── Text resource gauges (req_1279) — the compass-letters-vanish smoking gun.
+  // Glyphs silently drop two ways: the PER-FRAME instance buffer fills
+  // (glyphCount ≥ glyphCap → trailing text like the compass, drawn last, drops),
+  // or the ATLAS fills (atlasCount ≥ atlasCap → a NEW (codepoint,size,font) combo
+  // can't rasterize; no eviction, so it's permanent for the session). Surfacing
+  // both tells us WHICH is maxed when letters go missing.
+  /** glyph instances submitted this frame. */
+  glyphCount: number;
+  /** per-frame glyph buffer cap (MAX_GLYPHS). */
+  glyphCap: number;
+  /** distinct glyphs cached in the atlas. */
+  atlasCount: number;
+  /** atlas cap (MAX_ATLAS_GLYPHS). */
+  atlasCap: number;
+  /** atlas misses this frame (a glyph had to rasterize fresh). */
+  atlasMiss: number;
 };
 
-const EMPTY: FrameDiag = { fps: 0, medianMs: 0, worstMs: 0, peakMs: 0, skips: 0, peakSkips: 0, gcMs: 0, gcCount: 0, presentMs: 0, live: false, camAvgDtMs: 0, camFrames: 0, camSolvedStep: 0, camDeltas: 0 };
+const EMPTY: FrameDiag = { fps: 0, medianMs: 0, worstMs: 0, peakMs: 0, skips: 0, peakSkips: 0, gcMs: 0, gcCount: 0, presentMs: 0, live: false, camAvgDtMs: 0, camFrames: 0, camSolvedStep: 0, camDeltas: 0, glyphCount: 0, glyphCap: 0, atlasCount: 0, atlasCap: 0, atlasMiss: 0 };
 
 function median(sorted: number[]): number {
   if (!sorted.length) return 0;
@@ -106,6 +122,11 @@ export function useFrameProbe(opts: { active: boolean; pollMs?: number; resetSeq
         const camFrames = Number(cam?.frames) || 0;
         const camSolvedStep = Number(cam?.max_solved_step) || 0;
         const camDeltas = Number(cam?.deltas) || 0;
+        const glyphCount = Number(frame?.glyph_count) || 0;
+        const glyphCap = Number(frame?.glyph_capacity) || 0;
+        const atlasCount = Number(frame?.atlas_glyph_count) || 0;
+        const atlasCap = Number(frame?.atlas_capacity) || 0;
+        const atlasMiss = Number(frame?.atlas_miss_count) || 0;
         setDiag({
           fps,
           medianMs: medUs / 1000,
@@ -121,6 +142,11 @@ export function useFrameProbe(opts: { active: boolean; pollMs?: number; resetSeq
           camFrames,
           camSolvedStep,
           camDeltas,
+          glyphCount,
+          glyphCap,
+          atlasCount,
+          atlasCap,
+          atlasMiss,
         });
         // Mirror the host-frame truth to the dev terminal once a second — that's
         // the stream the user pastes; the on-screen box alone isn't enough. The
