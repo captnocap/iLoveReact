@@ -1051,9 +1051,13 @@ pub fn staticSurfaceBindGroup3D(key: []const u8) ?*wgpu.BindGroup {
 
     const layout_ = scene3d.getTexBindGroupLayout() orelse return null;
     const device = getDevice() orelse return null;
+    // The Scene3D diffuse layout is .non_filtering (nearest, no cross-slot blend —
+    // req_1321), so bind the matching nearest diffuse sampler, NOT the surface's own
+    // (filtering) 2D-composite sampler — mixing them is a wgpu validation error/crash.
+    const samp_3d = scene3d.getDiffuseSampler() orelse return null;
     const entries = [_]wgpu.BindGroupEntry{
         .{ .binding = 0, .texture_view = entry.view.? },
-        .{ .binding = 1, .sampler = entry.sampler.? },
+        .{ .binding = 1, .sampler = samp_3d },
     };
     entry.bind_group_3d = device.createBindGroup(&.{
         .layout = layout_,

@@ -776,6 +776,14 @@ pub fn getTexBindGroupLayout() ?*wgpu.BindGroupLayout {
     return g_tex_bind_group_layout;
 }
 
+/// The NEAREST, non-filtering diffuse sampler. Any bind group built against
+/// getTexBindGroupLayout() MUST bind this (the layout is .non_filtering, so a
+/// filtering sampler is a validation error — req_1321). StaticSurface-textured
+/// meshes use it so the paint atlas samples crisply with no cross-slot seams.
+pub fn getDiffuseSampler() ?*wgpu.Sampler {
+    return g_diffuse_sampler;
+}
+
 pub fn deinit() void {
     // Release every pool slot's resources.
     for (0..MAX_RT_POOL) |i| {
