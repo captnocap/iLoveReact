@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, addMountReflections, bevelEdge, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from './anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from './wheelMount';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
@@ -693,6 +693,42 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // live (through the same draft path as the gizmo) and committed only on Apply.
   const [lc, setLc] = useState<null | { faceIndex: number; dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent' }>(null);
   const lcAxisInfo = lc && activePart ? loopCutAxisInfo(activePart.mesh, lc.faceIndex, lc.dir) : null;
+  // ── Bevel (req_1266): chamfer a selected EDGE or VERTEX, with a live size preview ──
+  // Set up like the loop cut: a 'bevel' button opens a popup bound to the picked
+  // element; the chamfer is PREVIEWED live (through the same draft path) at the
+  // popup's `width` (in modeling units) so you can grow/shrink it, and it commits
+  // only on Apply. `index` is the edge index (into meshEdges) or the vertex index.
+  const [bv, setBv] = useState<null | { kind: 'edge' | 'vertex'; index: number; width: number }>(null);
+  // The previewed/committed bevel mesh at the current width — null when the op is a
+  // no-op (width 0, or a non-manifold edge / degree-2 tip the chamfer declines).
+  const bvMesh = (): EditMesh | null => {
+    if (!bv || !activePart) return null;
+    const m = activePart.mesh;
+    const w = unitsToMeters(bv.width);
+    const out = bv.kind === 'edge'
+      ? (() => { const e = meshEdges(m)[bv.index]; return e ? bevelEdge(m, e, w) : m; })()
+      : bevelVertex(m, bv.index, w);
+    return out === m ? null : out;
+  };
+  // The widest chamfer the picked element allows, in modeling units: the bevel slides
+  // each corner at most 0.45× along its edge, so the cap is the shortest incident edge
+  // (× 0.45). Drives the popup's slider max so it maps 1:1 instead of going dead.
+  const bevelMaxUnits = (kind: 'edge' | 'vertex', index: number): number => {
+    if (!activePart) return 1;
+    const m = activePart.mesh;
+    const elen = (a: number, b: number) => Math.hypot(m.verts[a][0] - m.verts[b][0], m.verts[a][1] - m.verts[b][1], m.verts[a][2] - m.verts[b][2]);
+    if (kind === 'edge') { const e = meshEdges(m)[index]; return e ? metersToUnits(elen(e[0], e[1]) * 0.45) : 1; }
+    const inc = meshEdges(m).filter(([a, b]) => a === index || b === index);
+    const minLen = inc.length ? Math.min(...inc.map(([a, b]) => elen(a, b))) : 0;
+    return minLen > 0 ? metersToUnits(minLen * 0.45) : 1;
+  };
+  // Open the popup on the picked element, seeding the width to the default chamfer
+  // (STUDIO.bevelMeters) clamped to what the element allows.
+  const openBevel = (kind: 'edge' | 'vertex', index: number) => {
+    const max = bevelMaxUnits(kind, index);
+    const w = Math.max(0.1, Math.min(metersToUnits(STUDIO.bevelMeters), max));
+    setBv({ kind, index, width: Math.round(w * 10) / 10 });
+  };
   // ── Concave Auto-Fix guard (req_0949/req_1016): an edit that buckles a quad
   // into a non-convex (reflex-corner) face is ILLEGAL. Rather than silently
   // triangulating it, the commit STOPS and surfaces a dialog — the buckled mesh
@@ -747,6 +783,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     setDraft({ partId: activePart.id, mesh: lcCutMesh(lcAxisInfo), seq: dragSeqRef.current });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lc]);
+  // Live bevel preview — re-lower the draft from the popup `width` whenever it changes
+  // (same draft path as the loop cut). Keyed on `bv` only; the part-change reset below
+  // tears it down so a half-open bevel never bleeds onto the next part.
+  useEffect(() => {
+    if (!bv || !activePart) return;
+    const mesh = bvMesh();
+    if (!mesh) return;
+    dragSeqRef.current += 1;
+    setDraft({ partId: activePart.id, mesh, seq: dragSeqRef.current });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bv]);
   // The loop-cut popup + its preview draft are transient edit state tied to the
   // ACTIVE PART. When the active part changes — selecting another part, switching
   // models, or 'new' (→ a fresh part) — tear them down so a half-open cut never
@@ -762,6 +809,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     prevPartId.current = activePart?.id ?? null;
     if (!changed) return;
     setLc(null);
+    setBv(null);
     setDraft(null);
     setActiveGizmo(null);
     setAutoFix(null);
@@ -820,6 +868,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     lcDragRef.current = null;
     setLcDragAxis(null);
   };
+  // Commit (Apply) or drop (Cancel) the live bevel — the chamfer at the popup's width
+  // is already lowered as the draft, so Apply just stores it. Mirrors closeLoopCut.
+  const closeBevel = (commit: boolean) => {
+    if (commit && bv && activePart) {
+      const mesh = bvMesh();
+      if (mesh) { props.onEditMesh(activePart.id, mesh); setSel(emptySelection()); }
+    }
+    setDraft(null);
+    setBv(null);
+  };
 
   // Selection keys (a focused TextInput consumes keys before the bus, so typing a
   // name never triggers these — USER req_0978):
@@ -830,7 +888,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   useEffect(() => {
     const off = busOn('__keydown', (e: any) => {
       const key = String(e?.key ?? '').toLowerCase();
-      if (key === 'escape') { setSel(emptySelection()); setRigSel(null); return; }
+      // Esc closes an open bevel popup first (drop the preview), like a Cancel.
+      if (key === 'escape') { if (bv) { setBv(null); setDraft(null); return; } setSel(emptySelection()); setRigSel(null); return; }
       // RIG mode: Delete removes the selected JOINT, or drops the pivot (pivots are
       // opt-in, req_1054 — removing one makes the part joints-only again); Ctrl+A /
       // face-delete don't apply here.
@@ -841,7 +900,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         }
         return;
       }
-      if (selMode === 'object' || selMode === 'paint' || !activePart || lc || autoFix) return;
+      if (selMode === 'object' || selMode === 'paint' || !activePart || lc || bv || autoFix) return;
       const mesh = activePart.mesh;
       if (key === 'a' && (e?.ctrlKey || e?.metaKey)) {
         if (selMode === 'face') setSel({ verts: new Set(), edges: new Set(), faces: new Set(mesh.faces.map((_, i) => i)) });
@@ -863,7 +922,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     });
     return () => off();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selMode, sel, activePart?.id, activePart?.mesh, lc, autoFix, rigSel]);
+  }, [selMode, sel, activePart?.id, activePart?.mesh, lc, bv, autoFix, rigSel]);
   // a live camera snapshot matching gpu/3d.zig (eye from camera.zig orbital math,
   // near 0.02 / fov from the Scene3D.Camera below); used by the overlay + picking.
   const camSnap = (): CameraSnap => {
@@ -1009,6 +1068,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       }
       dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs(); return;
     }
+    // While the bevel popup is open, a press just orbits (so you can spin to inspect
+    // the live chamfer) — never re-picks. The popup owns the width; Apply/Cancel close.
+    if (bv) { dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs(); return; }
     // RIG mode (req_1025): (a) if a handle is selected, grab its move gizmo first;
     // (b) else pick a rig handle (pivot / joint) — a hit selects and does NOT
     // orbit; (c) a miss falls through to orbit, so you can spin to inspect. Mirrors
@@ -1559,7 +1621,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             /* While the loop-cut preview is live the selected face index no longer
                maps onto the freshly-cut mesh, so highlighting it would jump to a
                random face. Show the cut wireframe with NO stale highlight. */
-            selection={lc ? emptySelection() : sel}
+            selection={lc || bv ? emptySelection() : sel}
             camSnap={camSnap}
           />
         : null}
@@ -1592,13 +1654,13 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {/* The transform gizmo — drawn AFTER the selection overlay (last 2D children
           over the Scene3D), so the arrows are NEVER hidden by geometry (USER).
           Hidden while the loop-cut popup is open (the cut preview owns the view). */}
-      {gizmoAnchorWorld && !lc && !autoFix
+      {gizmoAnchorWorld && !lc && !bv && !autoFix
         ? <TransformGizmo anchorW={gizmoAnchorWorld} tool={gizmoTool} camSnap={camSnap} activeAxis={activeGizmo} />
         : null}
 
       {/* EXTRUDE-DEPTH (req_1193): the normal arrow on a single selected face (move
           tool) — pull out to extrude, push in to inset/cut a recess. */}
-      {gizmoTool === 'move' && selMode === 'face' && activePart && activeMesh && sel.faces.size === 1 && !lc && !autoFix
+      {gizmoTool === 'move' && selMode === 'face' && activePart && activeMesh && sel.faces.size === 1 && !lc && !bv && !autoFix
         ? (() => {
             const face = activeMesh.faces[[...sel.faces][0]];
             if (!face) return null;
@@ -1998,25 +2060,38 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 >
                   <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>extrude</Text>
                 </Pressable>
-                {/* BEVEL (req_1265): chamfer the selected edge — both adjacent faces
-                    slide their shared corners in, a flat face bridges the gap. Manifold
-                    edges only (shared by exactly 2 faces). */}
+                {/* BEVEL (req_1265/1266): chamfer the selected edge. Opens a popup that
+                    PREVIEWS the chamfer live and lets you grow/shrink the width before
+                    confirming (like the loop cut). Manifold edges only. */}
                 <Pressable
                   onPress={() => {
-                    const mesh = activePart.mesh;
-                    const edge = meshEdges(mesh)[[...sel.edges][0]];
+                    const edge = meshEdges(activePart.mesh)[[...sel.edges][0]];
                     if (!edge) return;
-                    const out = bevelEdge(mesh, edge, STUDIO.bevelMeters);
-                    if (out === mesh) { toast('bevel needs a manifold edge (shared by exactly 2 faces)'); return; }
-                    props.onEditMesh(activePart.id, out);
-                    setSel(emptySelection());
+                    if (bevelEdge(activePart.mesh, edge, STUDIO.bevelMeters) === activePart.mesh) { toast('bevel needs a manifold edge (shared by exactly 2 faces)'); return; }
+                    openBevel('edge', [...sel.edges][0]);
                   }}
-                  tooltip="Bevel edge — chamfer the selected edge into a flat face (manifold edges only)"
-                  style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
+                  tooltip="Bevel edge — chamfer the selected edge into a flat face; opens a popup to size the bevel before applying (manifold edges only)"
+                  style={{ ...STEP_BTN, backgroundColor: bv?.kind === 'edge' ? '#1c3a2a' : '#13233aee', borderColor: bv?.kind === 'edge' ? '#2f7a4f' : '#2c4a6a' }}
                 >
-                  <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>bevel</Text>
+                  <Text fontSize={10} color={bv?.kind === 'edge' ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>bevel</Text>
                 </Pressable>
               </>
+            ) : null}
+            {/* BEVEL VERTEX (req_1266): chamfer a single selected corner — cut it off,
+                cap the hole. Opens the SAME sizing popup as the edge bevel. Needs a real
+                corner (3+ incident edges). */}
+            {selMode === 'vertex' && activePart && sel.verts.size === 1 ? (
+              <Pressable
+                onPress={() => {
+                  const vi = [...sel.verts][0];
+                  if (bevelVertex(activePart.mesh, vi, STUDIO.bevelMeters) === activePart.mesh) { toast('bevel needs a corner with 3+ edges'); return; }
+                  openBevel('vertex', vi);
+                }}
+                tooltip="Bevel vertex — chamfer the selected corner; opens a popup to size the bevel before applying (corners with 3+ edges)"
+                style={{ ...STEP_BTN, backgroundColor: bv?.kind === 'vertex' ? '#1c3a2a' : '#13233aee', borderColor: bv?.kind === 'vertex' ? '#2f7a4f' : '#2c4a6a' }}
+              >
+                <Text fontSize={10} color={bv?.kind === 'vertex' ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>bevel</Text>
+              </Pressable>
             ) : null}
             {/* create EDGE (req_1265): in VERTEX mode, exactly TWO non-adjacent corners
                 of a face → cut a new edge across it, splitting the face (Blender's
@@ -2196,6 +2271,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           (16u = 1 tile = 1 m). Stacked above the compass, bottom-left. */}
       {(() => {
         if (!activePart || !activeMesh) return null;
+        // while the bevel popup is open the draft is re-topologized, so the stale
+        // selection indices don't map — hide the readout (the popup shows the width).
+        if (bv) return null;
         const idx = selMode === 'object'
           ? activeMesh.verts.map((_, i) => i)
           : selMode === 'rig' ? [] : selectionVertIndices(activeMesh, selMode, sel);
@@ -2276,6 +2354,18 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           })}
           onApply={() => closeLoopCut(true)}
           onCancel={() => closeLoopCut(false)}
+        />
+      ) : null}
+
+      {/* Bevel sizing (req_1266): grow/shrink the live-previewed chamfer, then Apply. */}
+      {bv && activePart ? (
+        <BevelPopup
+          kind={bv.kind}
+          width={bv.width}
+          maxUnits={bevelMaxUnits(bv.kind, bv.index)}
+          onChange={(w) => setBv((s) => (s ? { ...s, width: w } : s))}
+          onApply={() => closeBevel(true)}
+          onCancel={() => closeBevel(false)}
         />
       ) : null}
 
@@ -3027,6 +3117,32 @@ function LoopCutPopup(props: {
             })}
           </Row>
         </LCField>
+        <Pressable onPress={props.onApply} style={{ paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f', marginTop: 2 }}>
+          <Text fontSize={11} color="#7fd6a0" style={{ fontWeight: '800' }}>Apply</Text>
+        </Pressable>
+      </Col>
+    </Box>
+  );
+}
+
+// The bevel sizing popup (req_1266) — set up like the loop cut: the chamfer is
+// previewed live on the model and this popup grows/shrinks its WIDTH (in modeling
+// units) before you confirm. `maxUnits` is the widest the picked element allows
+// (the bevel can't slide a corner past its edge), so the stepper maps 1:1.
+function BevelPopup(props: {
+  kind: 'edge' | 'vertex'; width: number; maxUnits: number;
+  onChange: (width: number) => void; onApply: () => void; onCancel: () => void;
+}) {
+  const max = Math.max(0.1, Math.round(props.maxUnits * 10) / 10);
+  return (
+    <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 18, alignItems: 'center' }}>
+      <Col style={{ gap: 7, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderRadius: 9, backgroundColor: '#0b1320f2', borderWidth: 1, borderColor: '#2c4a6a', minWidth: 230 }}>
+        <Row style={{ gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text fontSize={11} color={T.text} style={{ fontWeight: '800' }}>Bevel {props.kind === 'edge' ? 'Edge' : 'Vertex'}</Text>
+          <Pressable onPress={props.onCancel} style={STEP_BTN}><Text fontSize={10} color={T.dim}>✕</Text></Pressable>
+        </Row>
+        <LCField label="width"><LCStepper value={props.width} min={0.1} max={max} step={0.5} onChange={(n) => props.onChange(Math.round(n * 10) / 10)} width={54} /></LCField>
+        <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{`units · max ${max}`}</Text>
         <Pressable onPress={props.onApply} style={{ paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f', marginTop: 2 }}>
           <Text fontSize={11} color="#7fd6a0" style={{ fontWeight: '800' }}>Apply</Text>
         </Pressable>

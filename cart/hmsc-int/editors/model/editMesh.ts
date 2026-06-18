@@ -1649,6 +1649,69 @@ export function bevelEdge(m: EditMesh, edge: Edge, width: number): EditMesh {
   return { ...m, verts, faces };
 }
 
+/** Bevel (chamfer) a single vertex (req_1266): cut the corner off. Each incident
+ *  EDGE gets a new vert pulled back from `vi` along that edge by `width`; every face
+ *  using `vi` clips its corner to the two new verts on its two incident edges; and a
+ *  cap face fills the ring of those new verts. Needs ≥3 incident edges (a real
+ *  corner); returns m unchanged otherwise. The slide is clamped per-edge so it can't
+ *  pass the far vert. Pure + headless. */
+export function bevelVertex(m: EditMesh, vi: number, width: number): EditMesh {
+  if (!m.verts[vi] || width <= 0) return m;
+  const incident: number[] = [];                 // face indices using vi
+  m.faces.forEach((f, fi) => { if (f.loop.includes(vi)) incident.push(fi); });
+  const inc = new Set(incident);
+  // neighbours of vi across all incident faces = its incident edges.
+  const neighbours = new Set<number>();
+  for (const fi of incident) {
+    const L = m.faces[fi].loop, i = L.indexOf(vi);
+    neighbours.add(L[(i + 1) % L.length]);
+    neighbours.add(L[(i + L.length - 1) % L.length]);
+  }
+  if (neighbours.size < 3) return m;             // a flat/edge tip — nothing real to chamfer
+
+  const verts: V3[] = m.verts.map((v) => [v[0], v[1], v[2]]);
+  const p = verts[vi];
+  const onEdge = new Map<number, number>();      // neighbour vert → its new (slid) vert index
+  for (const nb of neighbours) {
+    const q = verts[nb];
+    const d: V3 = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+    const len = Math.hypot(d[0], d[1], d[2]) || 1;
+    const tt = Math.min(width, len * 0.45) / len;
+    onEdge.set(nb, verts.length);
+    verts.push([p[0] + d[0] * tt, p[1] + d[1] * tt, p[2] + d[2] * tt]);
+  }
+
+  // rewrite each incident face: replace vi with [vert-on-prev-edge, vert-on-next-edge]
+  // so the corner is clipped to the chamfer (one corner → two).
+  const faces: EditMeshFace[] = m.faces.map((f, fi) => {
+    if (!inc.has(fi)) return f;
+    const L = f.loop, i = L.indexOf(vi);
+    const prev = L[(i + L.length - 1) % L.length], next = L[(i + 1) % L.length];
+    const loop = L.slice();
+    const uv = f.uv ? f.uv.map((u) => [u[0], u[1]] as V2) : undefined;
+    loop.splice(i, 1, onEdge.get(prev)!, onEdge.get(next)!);
+    if (uv) uv.splice(i, 1, [uv[i][0], uv[i][1]], [uv[i][0], uv[i][1]]);
+    return { ...f, loop, uv };
+  });
+
+  // CAP: the ring of new verts, ordered around vi in the averaged incident-face
+  // normal's plane, wound outward (away from the mesh centroid).
+  let nx = 0, ny = 0, nz = 0;
+  for (const fi of incident) { const n = faceNormal(m, m.faces[fi]); nx += n[0]; ny += n[1]; nz += n[2]; }
+  const nl = Math.hypot(nx, ny, nz) || 1;
+  const N: V3 = [nx / nl, ny / nl, nz / nl];
+  const refAxis: V3 = Math.abs(N[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+  const uAxis = cross(N, refAxis), vAxis = cross(N, uAxis);
+  const ang = (idx: number): number => { const d = sub(verts[idx], p); return Math.atan2(dot(d, vAxis), dot(d, uAxis)); };
+  const ring = [...onEdge.values()].sort((a, b) => ang(a) - ang(b));
+  let cx = 0, cy = 0, cz = 0;
+  for (const v of m.verts) { cx += v[0]; cy += v[1]; cz += v[2]; }
+  const C: V3 = [cx / m.verts.length, cy / m.verts.length, cz / m.verts.length];
+  const capLoop = orientOutward(verts, ring, C);
+  faces.push({ loop: capLoop, uv: faceSquareUV(verts, capLoop) });
+  return { ...m, verts, faces };
+}
+
 /** Set (or clear) the GLASS flag on a set of faces (req_1181) — marks them as
  *  translucent panes that render see-through and skip the texture atlas. Pure. */
 export function setFaceGlass(m: EditMesh, faceIndices: Iterable<number>, glass: boolean): EditMesh {

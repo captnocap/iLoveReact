@@ -4,7 +4,7 @@
 
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 import {
-  addMount, addMountReflections, updateMountMirrored, bevelEdge, connectVerts, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag, icosphere, sphere, ICOSPHERE_SUBDIV_MAX,
+  addMount, addMountReflections, updateMountMirrored, bevelEdge, bevelVertex, connectVerts, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag, icosphere, sphere, ICOSPHERE_SUBDIV_MAX,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
   flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel, validateMesh, meshHealth,
@@ -1081,6 +1081,23 @@ test('bevelEdge declines a boundary / non-manifold edge', () => {
   const flat = plane(2, 2);                       // one quad → every edge is a boundary
   const e = meshEdges(flat)[0];
   assertEqual(bevelEdge(flat, e, 2 / 16), flat, 'a boundary edge (1 face) is left unchanged');
+});
+
+test('bevelVertex chamfers a cube corner: 3 new verts, a cap tri, still watertight', () => {
+  const box = cuboid(2, 2, 2);
+  // vertex 0 is a cube corner shared by 3 faces (bottom, front, left).
+  const out = bevelVertex(box, 0, 2 / 16);
+  assert(out !== box, 'a real corner (3+ incident edges) bevels');
+  assertEqual(out.verts.length, box.verts.length + 3, 'one new vert per incident edge (3)');
+  assertEqual(out.faces.length, box.faces.length + 1, 'a single cap face is added');
+  assertEqual(meshHealth(out).errors, 0, 'the bevelled corner stays watertight + manifold');
+  // the original sharp corner vertex 0 is no longer named by any face.
+  assert(!out.faces.some((f) => f.loop.includes(0)), 'the original corner vertex is fully clipped away');
+});
+
+test('bevelVertex declines a degree-2 tip (no real corner to cut)', () => {
+  const flat = plane(2, 2);                       // each corner touches only 2 edges
+  assertEqual(bevelVertex(flat, 0, 2 / 16), flat, 'a 2-edge tip is left unchanged');
 });
 
 finish('editMesh');
