@@ -1194,6 +1194,21 @@ fn maxAbsHeight(heights: []const f32) f32 {
     return max_abs;
 }
 
+/// Content fingerprint for a terrain heightfield — its grid dims + every height
+/// sample. This rides the ~hf~ geometry key as the VERSION so the host's dyn-slot
+/// cache (framework/gpu/3d.zig) rebuilds the mesh when the field's shape changes.
+/// Without it the version was a constant "1": recompiling a new/edited heightfield
+/// into an ALREADY-RUNNING process (the Compile → reload loop, the pop-out window)
+/// reused the prior mount's cached mesh and the new terrain never rendered until a
+/// full restart cleared the cache (req_1290).
+fn heightfieldContentHash(field: constructor.HeightfieldMesh) u64 {
+    var h = std.hash.Wyhash.init(0);
+    h.update(std.mem.asBytes(&field.cols));
+    h.update(std.mem.asBytes(&field.rows));
+    h.update(std.mem.sliceAsBytes(field.heights));
+    return h.final();
+}
+
 fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene, insts: []const f32, inst_count: u32, stride: usize, entity_capacity: usize) !PhysicsColliders {
     const entity_floats = entity_capacity * game_physics.ENTITY_FLOATS;
     var rects: std.ArrayList(f32) = .{};
@@ -2640,7 +2655,11 @@ pub const Runtime = struct {
         }
 
         for (self.scene.heightfields, 0..) |field, i| {
-            const key = try std.fmt.allocPrint(self.allocator, "~hf~loader-floor-{d}~1", .{i});
+            // Version = a hash of the field's content so the host dyn-slot cache
+            // rebuilds the mesh on reload when the terrain changed (req_1290). The
+            // id ("loader-floor-{i}") stays stable so the slot is REUSED, not
+            // re-allocated — only the version flips when the shape differs.
+            const key = try std.fmt.allocPrint(self.allocator, "~hf~loader-floor-{d}~{x}", .{ i, heightfieldContentHash(field) });
             self.player_geom_keys.append(self.allocator, key) catch |err| {
                 self.allocator.free(key);
                 return err;
