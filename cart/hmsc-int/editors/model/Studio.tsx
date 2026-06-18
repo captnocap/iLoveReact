@@ -1111,14 +1111,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     // forces a one-time repack of stale atlases — the old ones were DEDUPED (congruent
     // faces shared one slot, so a face couldn't be painted independently — the real
     // 'no colour' cause, req_1299) and/or fit sub-pixel.
-    if (tex?.paintFit && tex.name === 'paint-v2') { setTexView(true); return; }
+    if (tex?.paintFit && tex.name === 'paint-v4') { setTexView(true); return; }
     // PAINT pack: dedup OFF so EVERY face owns its own slot (independently paintable);
     // a SOLID neutral base so paint isn't buried in the pastel UV-debug template.
-    const paintOpts = { ...DEFAULT_TEXTURE_OPTIONS, dedupIslands: false, combineIslands: false, type: 'solid' as const, color: '#c8ccd2', name: 'paint-v2' };
+    // (Wide padTexels was reverted — it shrank face slots so the grey base dominated
+    // and faces wouldn't take paint, req_1306. Default gutter keeps slots full-size;
+    // the 1px edge-bleed in TextureAtlas covers the seam.) v4 forces a one-time repack.
+    const paintOpts = { ...DEFAULT_TEXTURE_OPTIONS, dedupIslands: false, combineIslands: false, type: 'solid' as const, color: '#c8ccd2', name: 'paint-v4' };
     const result = textureizeScene(props.parts.map((p) => p.mesh), paintOpts, STUDIO.unitsPerTile, STUDIO.paintAtlasTexels);
     result.meshes.forEach((mesh, i) => { if (mesh !== props.parts[i].mesh) props.onEditMesh(props.parts[i].id, mesh); });
     paintRef.current = {};
-    setTex({ texels: result.texels, type: 'solid', color: '#c8ccd2', name: 'paint-v2', paint: {}, paintRev: 0, paintFit: true });
+    setTex({ texels: result.texels, type: 'solid', color: '#c8ccd2', name: 'paint-v4', paint: {}, paintRev: 0, paintFit: true });
     setTexView(true);
   };
   // Track the face/cell under the cursor (the grid overlay reads this ref + self-ticks,

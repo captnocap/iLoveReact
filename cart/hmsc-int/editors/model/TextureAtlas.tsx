@@ -155,11 +155,17 @@ export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts:
               }
               const color = props.pseudo ? sl.pseudo : slotColor(props.palette, g.slot);
               if (!color) continue;
-              // 2D rect-merge so a solid region is ONE box (no per-row seams) and the
-              // box count stays under the layout child cap.
+              // 2D rect-merge so a solid region is ONE box (no per-row seams) + box
+              // count stays under the child cap. BLEED the FACE's outer edges past the
+              // slot into the gutter so the mesh's edge sampling lands on paint, not the
+              // gutter/neighbour slot — kills the thin seam at every face boundary
+              // (req_1304). Only outer edges bleed, so interior brush dabs stay precise.
+              const BLEED = 1;
               for (const rc of cellRects(g.cells)) {
                 const r = rectAtlasRect(grid, rc.cu0, rc.cv0, rc.cu1, rc.cv1, px);
-                nodes.push(<Box key={`${part.id}:${g.face}:${g.slot}:${rc.cv0}:${rc.cu0}`} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, backgroundColor: color }} />);
+                const bl = rc.cu0 === 0 ? BLEED : 0, bt = rc.cv0 === 0 ? BLEED : 0;
+                const br = rc.cu1 >= grid.nu - 1 ? BLEED : 0, bb = rc.cv1 >= grid.nv - 1 ? BLEED : 0;
+                nodes.push(<Box key={`${part.id}:${g.face}:${g.slot}:${rc.cv0}:${rc.cu0}`} style={{ position: 'absolute', left: r.x - bl, top: r.y - bt, width: r.w + bl + br, height: r.h + bt + bb, backgroundColor: color }} />);
               }
             }
             return <Fragment key={`paint-${part.id}`}>{nodes}</Fragment>;

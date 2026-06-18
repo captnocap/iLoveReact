@@ -36,6 +36,10 @@ export type TextureOptions = {
   edgeAngle: number;
   islandAngle: number;
   padding: boolean;
+  /** gutter width in texels when padding is on (default PAD_TEXELS). The PAINT atlas
+   *  uses a wider gutter so a face's paint can bleed into it (edge dilation) without
+   *  reaching a neighbour slot — kills seams without cross-contamination (req_1305). */
+  padTexels?: number;
   /** DEDUP congruent faces to one shared atlas island (req_1255 — store each
    *  distinct shape once, reference it). Shrinks the atlas + makes matching panels
    *  paint uniformly. Off → one island per face (the legacy product layout). */
@@ -127,7 +131,7 @@ function nextPow2(n: number): number {
  *  are reproducible. `rearrangeUV: false` keeps the current UVs (no repack), still
  *  reporting islands/outlines from the stored mapping. */
 export function textureizeScene(meshes: EditMesh[], opts: TextureOptions, unitsPerMeter = TEXTURE_UNITS_PER_METER, fitTexels?: number): SceneTexture {
-  const pad = opts.padding ? PAD_TEXELS : 0;
+  const pad = opts.padding ? (opts.padTexels ?? PAD_TEXELS) : 0;
 
   // 0. unwrap every part once (origin-local face rects, in UNITS at this stage).
   const layouts = meshes.map((mesh) => unwrapMesh(mesh, unitsPerMeter, 0)); // pad 0 — our own gutter below
