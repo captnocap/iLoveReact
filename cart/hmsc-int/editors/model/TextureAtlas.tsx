@@ -15,7 +15,7 @@ import { Fragment, memo } from 'react';
 import { Box, Image, StaticSurface, Text } from '@reactjit/primitives';
 import { islandColorFor, type TextureType } from './textureize';
 import { storedUVLayout, type V2, type EditMesh } from './editMesh';
-import { faceCellGrid, cellAtlasRect, PAINT_CELL_UNITS, type PaintCells } from './meshPaint';
+import { faceCellGrid, cellRuns, runAtlasRect, PAINT_CELL_UNITS, type PaintCells } from './meshPaint';
 import { slotById, slotColor, type Palette } from './modelStream';
 import { MaterialFill } from './MaterialFill';
 import { STUDIO } from './Studio';
@@ -132,38 +132,36 @@ export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts:
           {props.parts.map((part) => {
             const paint = part.paint;
             if (!paint) return null;
-            const colorNodes: any[] = [];
-            // material cells grouped per (face, slot) → one MaterialFill each.
-            const matGroups = new Map<string, { face: number; slot: number; cells: Array<[number, number]> }>();
+            // group cells per (face, slot): colour groups bake as run-merged boxes
+            // (cap-safe), material groups as one world-scaled MaterialFill each.
+            const groups = new Map<string, { face: number; slot: number; cells: Array<[number, number]> }>();
             for (const key in paint) {
               const sep1 = key.indexOf(':'); const sep2 = key.indexOf(':', sep1 + 1);
               const fi = Number(key.slice(0, sep1)), cu = Number(key.slice(sep1 + 1, sep2)), cv = Number(key.slice(sep2 + 1));
-              const slotId = paint[key];
-              const sl = slotById(props.palette, slotId);
+              const gk = `${fi}:${paint[key]}`;
+              let g = groups.get(gk);
+              if (!g) { g = { face: fi, slot: paint[key], cells: [] }; groups.set(gk, g); }
+              g.cells.push([cu, cv]);
+            }
+            const nodes: any[] = [];
+            for (const g of groups.values()) {
+              const sl = slotById(props.palette, g.slot);
               if (!sl) continue;
-              const grid = faceCellGrid(part.mesh, fi, paintCell);
+              const grid = faceCellGrid(part.mesh, g.face, paintCell);
               if (!grid) continue;
-              // material slots bake through the world-scaled shader — UNLESS the pseudo
-              // (colourless slot) view is on, where every slot shows its flat pseudo hue.
               if (sl.kind === 'material' && !props.pseudo) {
-                const gk = `${fi}:${slotId}`;
-                let g = matGroups.get(gk);
-                if (!g) { g = { face: fi, slot: slotId, cells: [] }; matGroups.set(gk, g); }
-                g.cells.push([cu, cv]);
+                nodes.push(<MaterialFill key={`${part.id}:m${g.face}:${g.slot}`} slot={sl} grid={grid} cells={g.cells} cell={paintCell} texels={px} />);
                 continue;
               }
-              const color = props.pseudo ? sl.pseudo : slotColor(props.palette, slotId);
+              const color = props.pseudo ? sl.pseudo : slotColor(props.palette, g.slot);
               if (!color) continue;
-              const r = cellAtlasRect(grid, cu, cv, px);
-              colorNodes.push(<Box key={`${part.id}:${key}`} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, backgroundColor: color }} />);
+              // run-merge so a filled face is a few boxes, not thousands (child cap).
+              for (const run of cellRuns(g.cells)) {
+                const r = runAtlasRect(grid, run.cu0, run.cu1, run.cv, px);
+                nodes.push(<Box key={`${part.id}:${g.face}:${g.slot}:${run.cv}:${run.cu0}`} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, backgroundColor: color }} />);
+              }
             }
-            const matNodes = [...matGroups.values()].map((g) => {
-              const grid = faceCellGrid(part.mesh, g.face, paintCell);
-              const sl = slotById(props.palette, g.slot);
-              if (!grid || !sl) return null;
-              return <MaterialFill key={`${part.id}:m${g.face}:${g.slot}`} slot={sl} grid={grid} cells={g.cells} cell={paintCell} texels={px} />;
-            });
-            return <Fragment key={`paint-${part.id}`}>{colorNodes}{matNodes}</Fragment>;
+            return <Fragment key={`paint-${part.id}`}>{nodes}</Fragment>;
           })}
         </Box>
         {islands.length === 0 && !whole ? (

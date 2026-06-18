@@ -195,6 +195,13 @@ export const STUDIO = {
    *  size in MODEL UNITS (16 units = 1 m), so a cell is the SAME world size on every
    *  face regardless of its atlas slot (no slivers). 2 units ≈ 0.125 m ≈ 8 cells/m. */
   paintCellUnits: 2,
+  /** PAINT atlas resolution (req_1299): the paint cells are world-uniform now and
+   *  INDEPENDENT of the atlas (the old `paintGridCells` fit is obsolete) — but the
+   *  bake still renders into the per-face atlas slot, so the atlas must be big enough
+   *  that a many-face model (a gun) gives each face real texels instead of flooring
+   *  to 1 (which overlapped slots → paint landed nowhere visible). Fit the pack to
+   *  this many texels so slots are well-resolved. */
+  paintAtlasTexels: 1024,
   /** PAINT stroke (req_1207): a drag interpolates dabs every this-many screen px from
    *  the last point, so a fast stroke fills continuously instead of leaving gaps. */
   paintStrokeStepPx: 4,
@@ -1096,11 +1103,18 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     // `paintFit` marks a texture already built at the paint grid — the size the fit
     // produces can vary (nextPow2), so a flag is robust where a texel-size compare
     // would loop (re-fit → 128 > threshold → re-fit …).
-    if (tex?.paintFit) { setTexView(true); return; }
-    const result = textureizeScene(props.parts.map((p) => p.mesh), DEFAULT_TEXTURE_OPTIONS, STUDIO.unitsPerTile, STUDIO.paintGridCells);
+    // Keep only a texture already packed FOR PAINT (name 'paint-v2'): the v2 marker
+    // forces a one-time repack of stale atlases — the old ones were DEDUPED (congruent
+    // faces shared one slot, so a face couldn't be painted independently — the real
+    // 'no colour' cause, req_1299) and/or fit sub-pixel.
+    if (tex?.paintFit && tex.name === 'paint-v2') { setTexView(true); return; }
+    // PAINT pack: dedup OFF so EVERY face owns its own slot (independently paintable);
+    // a SOLID neutral base so paint isn't buried in the pastel UV-debug template.
+    const paintOpts = { ...DEFAULT_TEXTURE_OPTIONS, dedupIslands: false, combineIslands: false, type: 'solid' as const, color: '#c8ccd2', name: 'paint-v2' };
+    const result = textureizeScene(props.parts.map((p) => p.mesh), paintOpts, STUDIO.unitsPerTile, STUDIO.paintAtlasTexels);
     result.meshes.forEach((mesh, i) => { if (mesh !== props.parts[i].mesh) props.onEditMesh(props.parts[i].id, mesh); });
     paintRef.current = {};
-    setTex({ texels: result.texels, type: DEFAULT_TEXTURE_OPTIONS.type, color: DEFAULT_TEXTURE_OPTIONS.color, name: DEFAULT_TEXTURE_OPTIONS.name, paint: {}, paintRev: 0, paintFit: true });
+    setTex({ texels: result.texels, type: 'solid', color: '#c8ccd2', name: 'paint-v2', paint: {}, paintRev: 0, paintFit: true });
     setTexView(true);
   };
   // Track the face/cell under the cursor (the grid overlay reads this ref + self-ticks,
@@ -2113,7 +2127,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 92, alignItems: 'center' }}>
           <Box style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: tex ? '#2f7a4f' : '#a14545' }}>
             <Text fontSize={10} color={tex ? '#7fd6a0' : '#f0a0a0'} style={{ fontFamily: 'monospace' }}>
-              paint · {tex ? `grid ${tex.texels}²` : 'NO TEXTURE'} · {texView ? 'textured' : 'solid (toggle on!)'} · {Object.keys(paintRef.current).length} cells · drag off model = orbit
+              paint · {tex ? `atlas ${tex.texels}²` : 'NO TEXTURE'} · {texView ? 'textured' : 'solid (toggle on!)'} · {Object.values(paintRef.current).reduce((n, m) => n + Object.keys(m).length, 0)} cells · drag off model = orbit
             </Text>
           </Box>
         </Box>

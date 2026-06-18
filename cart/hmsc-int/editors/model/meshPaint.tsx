@@ -108,15 +108,24 @@ export function faceTexelRect(mesh: EditMesh, faceIndex: number, texels: number)
 export type CellGrid = { cuv: number; u0: number; v0: number; u1: number; v1: number; nu: number; nv: number };
 export function faceCellGrid(mesh: EditMesh, faceIndex: number, cell = PAINT_CELL_UNITS): CellGrid | null {
   const face = mesh.faces[faceIndex];
-  if (!face?.uv || face.uv.length < 2 || face.loop.length < 2) return null;
-  const a = mesh.verts[face.loop[0]], b = mesh.verts[face.loop[1]];
-  const worldLen = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
-  const uvLen = Math.hypot(face.uv[1][0] - face.uv[0][0], face.uv[1][1] - face.uv[0][1]);
-  if (worldLen < 1e-9 || uvLen < 1e-12) return null;
-  const cuv = (cell / (worldLen / uvLen)); // uv units per cell
-  if (!(cuv > 1e-9)) return null;
+  if (!face?.uv || face.uv.length < 3 || face.loop.length < 3) return null;
   let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
   for (const [u, v] of face.uv) { if (u < u0) u0 = u; if (v < v0) v0 = v; if (u > u1) u1 = u; if (v > v1) v1 = v; }
+  // world↔uv scale from the LONGEST uv edge — robust where the first edge happens to
+  // be degenerate (a thin/folded face), which used to return null → an unpaintable
+  // face (req_1299). uvPerWorld = uvLen/worldLen on that edge.
+  let bestUv = 0, uvPerWorld = 0;
+  const n = face.loop.length;
+  for (let i = 0; i < n; i += 1) {
+    const a = mesh.verts[face.loop[i]], b = mesh.verts[face.loop[(i + 1) % n]];
+    const wl = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    const uv = face.uv[i], uvN = face.uv[(i + 1) % n];
+    const ul = Math.hypot(uvN[0] - uv[0], uvN[1] - uv[1]);
+    if (ul > bestUv && wl > 1e-9) { bestUv = ul; uvPerWorld = ul / wl; }
+  }
+  // cuv = uv units per cell; fall back to the whole face = 1 cell if no usable edge.
+  const cuv = uvPerWorld > 1e-9 ? uvPerWorld * cell : Math.max(u1 - u0, v1 - v0, 1e-6);
+  if (!(cuv > 1e-9) || !Number.isFinite(u0)) return null;
   const nu = Math.max(1, Math.min(GRID_MAX, Math.ceil((u1 - u0) / cuv)));
   const nv = Math.max(1, Math.min(GRID_MAX, Math.ceil((v1 - v0) / cuv)));
   return { cuv, u0, v0, u1, v1, nu, nv };
@@ -185,6 +194,35 @@ export function brushCells(hit: FaceHit, size: number, grid: CellGrid): Array<[n
 export function cellAtlasRect(grid: CellGrid, cu: number, cv: number, texels: number): { x: number; y: number; w: number; h: number } {
   const ax0 = Math.round((grid.u0 + cu * grid.cuv) * texels);
   const ax1 = Math.round(Math.min(grid.u0 + (cu + 1) * grid.cuv, grid.u1) * texels);
+  const ay0 = Math.round((grid.v0 + cv * grid.cuv) * texels);
+  const ay1 = Math.round(Math.min(grid.v0 + (cv + 1) * grid.cuv, grid.v1) * texels);
+  return { x: ax0, y: ay0, w: Math.max(1, ax1 - ax0), h: Math.max(1, ay1 - ay0) };
+}
+
+/** Merge a face's cells into horizontal RUNS (one per maximal consecutive cu in a
+ *  row) so a filled/large region bakes as a handful of boxes instead of thousands —
+ *  keeps the atlas under the layout child cap (a full 32² face → 32 boxes, not 1024). */
+export function cellRuns(cells: Array<[number, number]>): Array<{ cv: number; cu0: number; cu1: number }> {
+  const byRow = new Map<number, number[]>();
+  for (const [cu, cv] of cells) { let r = byRow.get(cv); if (!r) { r = []; byRow.set(cv, r); } r.push(cu); }
+  const out: Array<{ cv: number; cu0: number; cu1: number }> = [];
+  for (const [cv, cus] of byRow) {
+    cus.sort((a, b) => a - b);
+    let i = 0;
+    while (i < cus.length) {
+      const s = cus[i]; let e = cus[i]; i += 1;
+      while (i < cus.length && cus[i] === e + 1) { e = cus[i]; i += 1; }
+      out.push({ cv, cu0: s, cu1: e });
+    }
+  }
+  return out;
+}
+
+/** Atlas-pixel rect for a horizontal run of cells [cu0..cu1] on row cv — seamless
+ *  shared-edge rounding, like cellAtlasRect but spanning the run. */
+export function runAtlasRect(grid: CellGrid, cu0: number, cu1: number, cv: number, texels: number): { x: number; y: number; w: number; h: number } {
+  const ax0 = Math.round((grid.u0 + cu0 * grid.cuv) * texels);
+  const ax1 = Math.round(Math.min(grid.u0 + (cu1 + 1) * grid.cuv, grid.u1) * texels);
   const ay0 = Math.round((grid.v0 + cv * grid.cuv) * texels);
   const ay1 = Math.round(Math.min(grid.v0 + (cv + 1) * grid.cuv, grid.v1) * texels);
   return { x: ax0, y: ay0, w: Math.max(1, ax1 - ax0), h: Math.max(1, ay1 - ay0) };
