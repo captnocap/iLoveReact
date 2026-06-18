@@ -442,12 +442,13 @@ pub fn init() void {
         .{
             .binding = 1,
             .visibility = wgpu.ShaderStages.fragment,
-            // Linear so the binding-type matches the sampler we create
-            // (`.filtering` requires at least one linear filter). Linear
-            // smooths the 16×16 BlockFace pixels between cells; switch
-            // back to .non_filtering + nearest sampler if we want crisp
-            // pixel art.
-            .sampler = .{ .type = .filtering },
+            // NON-FILTERING to match the nearest diffuse sampler below. Linear
+            // sampling averaged each atlas slot's edge texels with the neighbour
+            // slot / gutter, drawing thin off-colour SEAM lines at every face
+            // boundary and bleeding a neighbour's paint onto a face's corner
+            // (the Studio paint seams, req_1321). Nearest samples exactly one
+            // texel — no cross-slot blend — and flat paint loses nothing.
+            .sampler = .{ .type = .non_filtering },
         },
     };
     g_tex_bind_group_layout = device.createBindGroupLayout(&.{
@@ -458,8 +459,12 @@ pub fn init() void {
     g_diffuse_sampler = device.createSampler(&.{
         .address_mode_u = .clamp_to_edge,
         .address_mode_v = .clamp_to_edge,
-        .mag_filter = .linear,
-        .min_filter = .linear,
+        // NEAREST: no blend across atlas slot boundaries → no seam lines, no
+        // neighbour-paint bleed onto a face edge (req_1321). Flat paint + the
+        // crisp PSX look mean nearest loses nothing; the matching bind-group
+        // layout above is .non_filtering.
+        .mag_filter = .nearest,
+        .min_filter = .nearest,
     });
 
     // 1×1 white default texture so untextured meshes sample white →
