@@ -1144,6 +1144,28 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     for (let i = 1; i <= steps; i += 1) hit = paintAt(last.x + (dx * i) / steps, last.y + (dy * i) / steps);
     return hit;
   };
+  // Cursor pump (req_1298): a Pressable's onMouseMove only fires while a button is
+  // HELD (engine.zig gates .move on dragging_left), so a free-moving cursor delivered
+  // no hover → the grid overlay + hovered cell never appeared until you pressed. Poll
+  // the host's live cursor (getMouseX/getMouseY) so the grid tracks on plain hover —
+  // the same fix PaintCanvas uses. probeRef keeps tex/camSnap fresh (effect runs once).
+  const probeRef = useRef(paintProbe);
+  probeRef.current = paintProbe;
+  useEffect(() => {
+    if (selMode !== 'paint') return;
+    const host: any = globalThis as any;
+    const id = setInterval(() => {
+      if (paintingRef.current) return; // a live drag is handled by onMove
+      const r = rectRef.current;
+      if (!r || typeof host.getMouseX !== 'function') return;
+      const mx = Number(host.getMouseX()), my = Number(host.getMouseY());
+      if (!Number.isFinite(mx) || !Number.isFinite(my)) return;
+      if (mx >= r.x && mx <= r.x + r.width && my >= r.y && my <= r.y + r.height) probeRef.current(mx - r.x, my - r.y);
+      else paintHoverRef.current = null;
+    }, 33);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selMode]);
   // Seed the live buffer from the persisted paint whenever the open texture changes
   // (entering paint, a re-textureize, undo). Keyed on paintRev so an external change
   // re-syncs but our own per-dab writes (which don't touch tex) don't clobber the buffer.
