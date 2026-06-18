@@ -30,6 +30,9 @@ export function PaintGridOverlay(props: {
   parts: PaintTarget[];
   getHover: () => FaceHit | null;
   cell: number;
+  /** brush dab radius in cells (0 = one cell). The highlight shows the FOOTPRINT a
+   *  click paints, not a single cell, so what you see is what you stamp. */
+  dabRadius?: number;
   color: string;
   camSnap: () => CameraSnap;
 }) {
@@ -75,9 +78,14 @@ export function PaintGridOverlay(props: {
       for (let k = 0; k <= grid.nu; k += su) gridLine(`gv${k}`, Math.min(grid.u0 + k * grid.cuv, grid.u1), grid.v0, grid.v1, true);
       for (let k = 0; k <= grid.nv; k += sv) gridLine(`gh${k}`, Math.min(grid.v0 + k * grid.cuv, grid.v1), grid.u0, grid.u1, false);
 
-      // the cell under the cursor — outline + centre dot, through the same uv→world map.
-      const cu0 = grid.u0 + hover.cu * grid.cuv, cu1 = Math.min(grid.u0 + (hover.cu + 1) * grid.cuv, grid.u1);
-      const cv0 = grid.v0 + hover.cv * grid.cuv, cv1 = Math.min(grid.v0 + (hover.cv + 1) * grid.cuv, grid.v1);
+      // the DAB about to be painted — the footprint outline + centre dot, through the
+      // same uv→world map. Spans the brush radius (clamped to the face), so the highlight
+      // matches what a click stamps, not a single grid cell.
+      const r = Math.max(0, Math.round(props.dabRadius ?? 0));
+      const cuLo = Math.max(0, hover.cu - r), cuHi = Math.min(grid.nu - 1, hover.cu + r);
+      const cvLo = Math.max(0, hover.cv - r), cvHi = Math.min(grid.nv - 1, hover.cv + r);
+      const cu0 = grid.u0 + cuLo * grid.cuv, cu1 = Math.min(grid.u0 + (cuHi + 1) * grid.cuv, grid.u1);
+      const cv0 = grid.v0 + cvLo * grid.cuv, cv1 = Math.min(grid.v0 + (cvHi + 1) * grid.cuv, grid.v1);
       const cs = [uvToWorld(mesh, face, cu0, cv0), uvToWorld(mesh, face, cu1, cv0), uvToWorld(mesh, face, cu1, cv1), uvToWorld(mesh, face, cu0, cv1)];
       if (cs.every((r) => r)) {
         const q = cs.map((r) => proj((r as { world: V3 }).world));

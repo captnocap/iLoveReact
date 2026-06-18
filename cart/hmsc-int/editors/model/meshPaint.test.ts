@@ -10,7 +10,7 @@
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import { cuboid } from './editMesh';
 import type { CameraSnap } from './meshSelect';
-import { screenRay, pickFaceCell, faceCellGrid, cellAtlasRect, brushCells, uvToWorld, PAINT_CELL_UNITS, type PaintTarget } from './meshPaint';
+import { screenRay, pickFaceCell, faceCellGrid, cellAtlasRect, brushCells, dabRadiusCells, uvToWorld, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintTarget } from './meshPaint';
 
 function nearly(a: number, b: number, eps = 1e-3): boolean { return Math.abs(a - b) <= eps; }
 
@@ -100,6 +100,26 @@ test('uvToWorld maps a UV onto the face for ANY shape — quad + triangle (req_1
   assert(!!tri, 'cone has triangular faces');
   const onTri = uvToWorld(cone, tri, 0.34, 0.33);
   assert(!!onTri, 'uvToWorld returns a point on a triangular face');
+});
+
+test('a BIG face still grids the WHOLE face — GRID_MAX coarsens the cell, never truncates the tail (req_1318)', () => {
+  // a 100u cube at the fine fixed resolution would want ~1250 cells/edge — far past the
+  // cap. The OLD code capped the COUNT but kept the fine cell, so the grid only covered
+  // the first 256 cells from one corner and the far end had no cells (the "can't paint
+  // the end" bug). The fix coarsens the cell so the grid spans u0..u1 within the cap.
+  const box = cuboid(100, 100, 100);
+  const grid = faceCellGrid(box, 0, PAINT_GRID_UNITS)!;
+  assert(grid.nu <= 256 && grid.nv <= 256, 'cell count stays within the cap');
+  assert(grid.u0 + grid.nu * grid.cuv >= grid.u1 - 1e-6, 'the grid reaches the far U edge of the face — no dropped tail');
+  assert(grid.v0 + grid.nv * grid.cuv >= grid.v1 - 1e-6, 'the grid reaches the far V edge of the face — no dropped tail');
+});
+
+test('dabRadiusCells maps the detail slider to a footprint on the FIXED grid (req_1318)', () => {
+  // a fine dab at one cell = a single cell (radius 0); the brush multiplier adds rings;
+  // a bigger dab spans more cells. The grid itself never changes — only the footprint.
+  assertEqual(dabRadiusCells(PAINT_GRID_UNITS, 1), 0, 'a one-cell dab, brush 1 → radius 0 (single cell)');
+  assertEqual(dabRadiusCells(PAINT_GRID_UNITS, 3), 2, 'brush 3 adds two rings → radius 2');
+  assert(dabRadiusCells(1.2, 1) > dabRadiusCells(0.2, 1), 'a bigger dab covers more cells');
 });
 
 finish('meshPaint');

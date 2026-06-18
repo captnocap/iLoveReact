@@ -97,12 +97,13 @@ export function PaintPanel(props: {
         <Tiny label="erase" on={props.erase} tip="Eraser — remove cells under the brush" onPress={props.onToggleErase} />
       </Box>
 
-      {/* DETAIL — the paint cell size (model units). Finer = more cells per face, so
-          brush-1 is a smaller dab on a small prop. Best set before painting a part. */}
+      {/* DAB SIZE — the brush footprint per click (model units). This only sizes the
+          brush; the paint canvas is a FIXED fine grid, so changing this NEVER moves
+          paint you already laid down (req_1318). Change it freely, any time. */}
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-        <Text fontSize={9} color="#6f819c" style={{ fontFamily: 'monospace' }}>detail</Text>
-        {([['ultra', 0.03], ['fine', 0.08], ['med', 0.2], ['coarse', 0.5], ['XL', 1.2]] as const).map(([label, n]) => (
-          <Tiny key={label} label={label} on={Math.abs(props.cell - n) < 1e-3} tip={`Cell ≈ ${(n / 16 * 100).toFixed(1)} cm — finer = more cells per face (set before painting)`} onPress={() => props.onSetCell(n)} />
+        <Text fontSize={9} color="#6f819c" style={{ fontFamily: 'monospace' }}>dab</Text>
+        {([['fine', 0.03], ['sm', 0.08], ['med', 0.2], ['lg', 0.5], ['XL', 1.2]] as const).map(([label, n]) => (
+          <Tiny key={label} label={label} on={Math.abs(props.cell - n) < 1e-3} tip={`Dab ≈ ${(n / 16 * 100).toFixed(1)} cm per click — sizes the brush only; safe to change any time`} onPress={() => props.onSetCell(n)} />
         ))}
       </Box>
 

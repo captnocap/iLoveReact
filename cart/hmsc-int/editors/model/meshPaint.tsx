@@ -27,6 +27,13 @@ const DEG = Math.PI / 180;
  *  (~3 cm) a prop-scale face shows a real grid instead of collapsing to one cell;
  *  GRID_MAX caps a huge face so the bake/overlay stay bounded. */
 export const PAINT_CELL_UNITS = 0.5;
+/** The FIXED storage/bake resolution for paint, in model units. Paint cells are keyed
+ *  on a grid of THIS size on every face — INDEPENDENT of the "detail" brush slider — so
+ *  changing the brush size never re-lays-out paint you already laid down (req_1318: the
+ *  detail slider used to re-key every stored cell against a different-sized grid, so the
+ *  whole layout scrambled / half the face went unpainted). The slider now sizes the
+ *  brush DAB only; this constant is the canvas it stamps onto. 0.08 ≈ 0.5 cm. */
+export const PAINT_GRID_UNITS = 0.08;
 /** never make more than this many grid divisions on a face (sanity + perf cap). High
  *  enough that a metre-scale face can still be painted at sub-cm detail; only painted
  *  cells bake (run-merged) and the overlay strides its grid, so this stays cheap. */
@@ -126,8 +133,15 @@ export function faceCellGrid(mesh: EditMesh, faceIndex: number, cell = PAINT_CEL
     if (ul > bestUv && wl > 1e-9) { bestUv = ul; uvPerWorld = ul / wl; }
   }
   // cuv = uv units per cell; fall back to the whole face = 1 cell if no usable edge.
-  const cuv = uvPerWorld > 1e-9 ? uvPerWorld * cell : Math.max(u1 - u0, v1 - v0, 1e-6);
+  let cuv = uvPerWorld > 1e-9 ? uvPerWorld * cell : Math.max(u1 - u0, v1 - v0, 1e-6);
   if (!(cuv > 1e-9) || !Number.isFinite(u0)) return null;
+  // NEVER let GRID_MAX silently truncate a big face (the "can't paint the end" bug,
+  // req_1318): the cell COUNT was capped while the cell SIZE stayed fine, so the grid
+  // only covered the first 256 cells from one corner and the far end had no cells to
+  // paint into. Coarsen the cell so the grid always spans the WHOLE face within the cap
+  // — cells get bigger on a huge face (loud), but every part stays reachable.
+  const span = Math.max(u1 - u0, v1 - v0);
+  if (span / cuv > GRID_MAX) cuv = span / GRID_MAX;
   const nu = Math.max(1, Math.min(GRID_MAX, Math.ceil((u1 - u0) / cuv)));
   const nv = Math.max(1, Math.min(GRID_MAX, Math.ceil((v1 - v0) / cuv)));
   return { cuv, u0, v0, u1, v1, nu, nv };
@@ -188,6 +202,15 @@ export function brushCells(hit: FaceHit, size: number, grid: CellGrid): Array<[n
   }
   if (out.length === 0) out.push([hit.cu, hit.cv]);
   return out;
+}
+
+/** The brush-dab radius in FIXED grid cells (PAINT_GRID_UNITS) for a dab of `dabUnits`
+ *  world-size, scaled by the brush multiplier. Face-independent: one fixed cell is the
+ *  same world size on every face, so a dab spans the same cell count everywhere. This is
+ *  how the "detail" slider maps to a footprint WITHOUT changing the stored grid — pass
+ *  the result+1 to brushCells (which takes radius+1). */
+export function dabRadiusCells(dabUnits: number, brushMult = 1, gridCell = PAINT_GRID_UNITS): number {
+  return Math.max(0, Math.floor(dabUnits / gridCell / 2) + Math.max(1, Math.round(brushMult)) - 1);
 }
 
 /** Atlas-pixel rect for one cell, with SHARED-EDGE rounding so neighbouring cells

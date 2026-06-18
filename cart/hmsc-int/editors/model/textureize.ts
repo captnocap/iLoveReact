@@ -14,6 +14,14 @@
 import { storedUVLayout, unwrapMesh, type EditMesh, type V2 } from './editMesh';
 import { groupByShape } from './uvDedup';
 
+/** Two UV loops equal within a texel-scale epsilon — lets the repack keep unchanged
+ *  face refs (idempotent re-pack, req_1320). */
+function uvEqual(a: V2[], b: V2[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (Math.abs(a[i][0] - b[i][0]) > 1e-6 || Math.abs(a[i][1] - b[i][1]) > 1e-6) return false;
+  return true;
+}
+
 /** Texture Template = the colored per-island UV template (the default + the
  *  point); Solid Color = one flat fill; Blank = empty. (Blockbench's Type seg.) */
 export type TextureType = 'template' | 'solid' | 'blank';
@@ -220,11 +228,21 @@ export function textureizeScene(meshes: EditMesh[], opts: TextureOptions, unitsP
 
   // 4. rewrite each part's face UVs into the shared atlas (the BRANCH edit the
   //    caller commits). rearrangeUV: false keeps the meshes as-is (no repack).
+  //    IDEMPOTENT: a face whose UV is already its packed slot keeps its exact ref, and
+  //    an unchanged mesh returns its exact ref — so re-packing identical geometry is a
+  //    no-op the caller can skip (no spurious mesh edit, no re-bake churn, req_1320).
   const meshesOut = opts.rearrangeUV
     ? meshes.map((mesh, pi) => {
         const m = uvByPart.get(pi);
         if (!m) return mesh;
-        return { ...mesh, faces: mesh.faces.map((face, fi) => { const uv = m.get(fi); return uv ? { ...face, uv } : face; }) };
+        let changed = false;
+        const faces = mesh.faces.map((face, fi) => {
+          const uv = m.get(fi);
+          if (!uv || (face.uv && uvEqual(face.uv, uv))) return face;
+          changed = true;
+          return { ...face, uv };
+        });
+        return changed ? { ...mesh, faces } : mesh;
       })
     : meshes;
 

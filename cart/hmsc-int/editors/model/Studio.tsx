@@ -53,7 +53,7 @@ import {
   SelectionOverlay, makeProjector, orbitalEyeJS, pickElement, applyPick, emptySelection, selectionCount,
   type SelMode, type Selection, type CameraSnap,
 } from './meshSelect';
-import { pickFaceCell, brushCells, faceCellGrid, PAINT_CELL_UNITS, type PaintCells, type PaintTarget, type FaceHit } from './meshPaint';
+import { pickFaceCell, brushCells, faceCellGrid, dabRadiusCells, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintCells, type PaintTarget, type FaceHit } from './meshPaint';
 import { PaintGridOverlay } from './meshPaintOverlay';
 import { PaintPanel } from './PaintPanel';
 import { defaultPalette, paletteWithColor, slotById, type Palette } from './modelStream';
@@ -558,7 +558,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // imageUrl = a RE-UPLOADED whole-sheet texture (a data: URL so a same-path re-import
   // still refreshes past the host's content-hashed image cache); sliceImages = per-face
   // re-uploads keyed "partId:faceIndex"; imageRev bumps each import to force a re-bake.
-  const [tex, setTex] = useHotState<{ texels: number; type: TextureType; color: string; name: string; imageUrl?: string; sliceImages?: Record<string, string>; imageRev?: number; paint?: PaintCells; paintRev?: number; paintFit?: boolean } | null>('studio:tex', null);
+  const [tex, setTex] = useHotState<{ texels: number; type: TextureType; color: string; name: string; imageUrl?: string; sliceImages?: Record<string, string>; imageRev?: number; paint?: PaintCells; paintRev?: number; paintFit?: boolean; faceSig?: string } | null>('studio:tex', null);
   // PAINT mode (the corrected painter, req_1288): you paint a SLOT id (a placement),
   // not a colour — the model palette resolves slot → colour/material. Tool prefs are
   // TWIG; the painted cells are BRANCH (on the part). `paintErase` drops cells under
@@ -1094,34 +1094,31 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // ── PAINT mode (Phase 5c) ──
   // every part the paint ray can hit, with its live mesh + render lift.
   const paintTargets = (): PaintTarget[] => props.parts.map((p) => ({ partId: p.id, mesh: p.mesh, lift: p.lift }));
+  // A signature of the scene's FACE topology: parts + per-part face counts. The paint
+  // atlas must allocate one distinct slot per (part, face); when this changes (a part
+  // added, a face extruded/mirrored), faces created AFTER the last pack carry their
+  // default full-square UV — which all overlap at one atlas region, so painting one
+  // such face shows on every other (the mirrored-prong bug, req_1320). A mismatch vs
+  // the packed tex's faceSig means "re-slot needed".
+  const paintFaceSig = props.parts.map((p) => `${p.id}:${p.mesh.faces.length}`).join('|');
   // Entering paint needs a texture (distinct per-face atlas slots — else every face
-  // shares the full square and paint bleeds). Make a default one (the textureize
-  // pack) if none exists, then show it. Returns the texels so the caller can pick.
+  // shares the full square and paint bleeds). Build/refresh the textureize pack, then
+  // show it. Re-packs whenever the face topology changed since the last pack so NEW
+  // faces always get their own slot (independently paintable).
   const ensureTexture = () => {
-    // A paint-suitable texture has a COARSE FIXED grid (req_1209): the atlas IS the
-    // grid (texels ≈ paintGridCells), so each cell = one packed texel inside ONE face's
-    // padded slot — NO bleed across faces (the cause of the scattered "pinlines"). A
-    // missing texture, or a FINE one (e.g. a 1024-texel dialog atlas → sub-pixel cells
-    // that straddle many slots), is (re)built fit to the grid; this resets paint, which
-    // is invalid at a new grid anyway.
-    // `paintFit` marks a texture already built at the paint grid — the size the fit
-    // produces can vary (nextPow2), so a flag is robust where a texel-size compare
-    // would loop (re-fit → 128 > threshold → re-fit …).
-    // Keep only a texture already packed FOR PAINT (name 'paint-v2'): the v2 marker
-    // forces a one-time repack of stale atlases — the old ones were DEDUPED (congruent
-    // faces shared one slot, so a face couldn't be painted independently — the real
-    // 'no colour' cause, req_1299) and/or fit sub-pixel.
-    if (tex?.paintFit && tex.name === 'paint-v4') { setTexView(true); return; }
+    // Already packed for paint AND no new faces since → just show it. The faceSig gate
+    // both avoids needless re-packs and breaks the auto-ensure effect's feedback loop.
+    if (tex?.paintFit && tex.name === 'paint-v4' && tex.faceSig === paintFaceSig) { setTexView(true); return; }
     // PAINT pack: dedup OFF so EVERY face owns its own slot (independently paintable);
     // a SOLID neutral base so paint isn't buried in the pastel UV-debug template.
-    // (Wide padTexels was reverted — it shrank face slots so the grey base dominated
-    // and faces wouldn't take paint, req_1306. Default gutter keeps slots full-size;
-    // the 1px edge-bleed in TextureAtlas covers the seam.) v4 forces a one-time repack.
     const paintOpts = { ...DEFAULT_TEXTURE_OPTIONS, dedupIslands: false, combineIslands: false, type: 'solid' as const, color: '#c8ccd2', name: 'paint-v4' };
     const result = textureizeScene(props.parts.map((p) => p.mesh), paintOpts, STUDIO.unitsPerTile, STUDIO.paintAtlasTexels);
+    // Apply only the meshes whose UVs actually changed (textureize is idempotent now),
+    // so re-slotting after adding ONE face doesn't churn every part. Paint is keyed in
+    // face-relative cells, so it survives a re-slot — DON'T wipe it (it was being lost
+    // on every repack, req_1320); the seed effect re-reads it from the branch.
     result.meshes.forEach((mesh, i) => { if (mesh !== props.parts[i].mesh) props.onEditMesh(props.parts[i].id, mesh); });
-    paintRef.current = {};
-    setTex({ texels: result.texels, type: 'solid', color: '#c8ccd2', name: 'paint-v4', paint: {}, paintRev: 0, paintFit: true });
+    setTex({ ...(tex ?? {}), texels: result.texels, type: 'solid', color: '#c8ccd2', name: 'paint-v4', paintRev: (tex?.paintRev ?? 0), paintFit: true, faceSig: paintFaceSig });
     setTexView(true);
   };
   // Track the face/cell under the cursor (the grid overlay reads this ref + self-ticks,
@@ -1129,7 +1126,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // so a cell maps to exactly one face's slot — no bleed. Returns the hit for the caller.
   const paintProbe = (sx: number, sy: number): FaceHit | null => {
     if (!tex) { paintHoverRef.current = null; return null; }
-    const hit = pickFaceCell(paintTargets(), camSnap(), sx, sy, paintCell);
+    const hit = pickFaceCell(paintTargets(), camSnap(), sx, sy, PAINT_GRID_UNITS);
     paintHoverRef.current = hit;
     return hit;
   };
@@ -1141,15 +1138,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (!hit) return null;
     const tgt = paintTargets()[hit.partIndex];
     if (!tgt) return null;
-    const grid = faceCellGrid(tgt.mesh, hit.faceIndex, paintCell);
+    const grid = faceCellGrid(tgt.mesh, hit.faceIndex, PAINT_GRID_UNITS);
     if (!grid) return null;
-    // FILL → every cell of the face (one-colour-per-face); else the brush disc.
+    // FILL → every cell of the face (one-colour-per-face); else the brush disc. The
+    // disc footprint comes from the DETAIL slider (dab size) × brush multiplier, mapped
+    // onto the FIXED grid — so changing detail resizes the dab, never the stored layout.
     let cells: Array<[number, number]>;
     if (paintFill) {
       cells = [];
       for (let cv = 0; cv < grid.nv; cv += 1) for (let cu = 0; cu < grid.nu; cu += 1) cells.push([cu, cv]);
     } else {
-      cells = brushCells(hit, paintBrush, grid);
+      cells = brushCells(hit, dabRadiusCells(paintCell, paintBrush) + 1, grid);
     }
     const buf = (paintRef.current[tgt.partId] ||= {});
     for (const [cu, cv] of cells) {
@@ -1232,10 +1231,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     // paint mode REQUIRES the textured view — paint only renders through the atlas
     // (textureKey), so with texView off you'd register cells and see nothing (the
     // exact "I'm painting but no paint shows" trap, req_1226). Build the texture if
-    // missing (which turns the view on), else just force the view on.
-    if (!tex?.paintFit) ensureTexture(); else setTexView(true);
+    // missing, OR re-slot when the face topology changed (a new/mirrored face needs its
+    // own atlas slot — req_1320); else just force the view on.
+    if (!tex?.paintFit || tex.faceSig !== paintFaceSig) ensureTexture(); else setTexView(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selMode, tex, props.parts.length, props.sceneName]);
+  }, [selMode, tex, props.parts.length, props.sceneName, paintFaceSig]);
 
   const sendOrbit = () => ctlRef.current?.setOrbit({ target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: distRef.current, fov: fovRef.current, zoom: 1 });
 
@@ -2018,7 +2018,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           sliceImages={tex.sliceImages}
           palette={livePalette}
           pseudo={paintView === 'pseudo'}
-          paintCell={paintCell}
+          paintCell={PAINT_GRID_UNITS}
           sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}.${paintBakeTick}.${paintView}.${livePalette.variant}.${livePalette.slots.length}`}
         />
       ) : null}
@@ -2100,7 +2100,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         ? <PaintGridOverlay
             parts={paintTargets()}
             getHover={() => paintHoverRef.current}
-            cell={paintCell}
+            cell={PAINT_GRID_UNITS}
+            dabRadius={dabRadiusCells(paintCell, paintBrush)}
             color={paintErase ? '#ff6b6b' : (slotById(livePalette, activeSlot)?.pseudo ?? '#ffffff')}
             camSnap={camSnap}
           />
