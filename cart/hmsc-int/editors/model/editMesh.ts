@@ -404,24 +404,51 @@ export function faceCentroid(m: EditMesh, face: EditMeshFace): V3 {
 
 // ── Lowering: EditMesh → GeometryData (the render bridge) ─────────────────────
 
-/** Lower to the framework's non-indexed triangle soup: fan-triangulate each
- *  face, flat-shade by the Newell normal. Per-corner UVs ride through when the
- *  face carries stored `uv` (Part 5), so a textured display mode samples the
- *  real atlas; faces without UVs pin flat (0.5,0.5). */
+/** Edges whose adjacent faces differ by MORE than this stay HARD (flat-shaded);
+ *  gentler angles smooth together. So a low-poly CURVED surface (a receiver, a
+ *  barrel — many facets a few degrees apart) shades smoothly with no dark facet
+ *  creases, while a box's 90° corners stay crisp. req_1326. */
+export const SMOOTH_CREASE_DEG = 40;
+
+/** Lower to the framework's non-indexed triangle soup: fan-triangulate each face,
+ *  SMOOTH-shade with a crease angle — a vertex's normal averages only the faces
+ *  around it within SMOOTH_CREASE_DEG of this face, so curved low-poly surfaces
+ *  lose their per-facet lighting seams but hard edges stay hard. Per-corner UVs
+ *  ride through when the face carries stored `uv`; faces without UVs pin (0.5,0.5). */
 export function editMeshToGeometry(m: EditMesh, includeFace?: (f: EditMeshFace) => boolean): GeometryData {
   const g = mesh();
   const flat: V2 = [0.5, 0.5];
-  for (const face of m.faces) {
+  // per-face normals + which faces touch each vertex (for the smoothing groups).
+  const faceN: Vec3[] = m.faces.map((f) => (f.loop.length >= 3 ? (faceNormal(m, f) as Vec3) : [0, 1, 0]));
+  const vertFaces = new Map<number, number[]>();
+  m.faces.forEach((f, fi) => { if (f.loop.length < 3) return; for (const vi of f.loop) { let a = vertFaces.get(vi); if (!a) { a = []; vertFaces.set(vi, a); } a.push(fi); } });
+  const cosCrease = Math.cos((SMOOTH_CREASE_DEG * Math.PI) / 180);
+  // smoothed normal at vertex `vi` as seen from face `fi`: average the faces around
+  // vi whose normal is within the crease angle of fi's (one smoothing group).
+  const normalAt = (vi: number, fi: number): Vec3 => {
+    const fn = faceN[fi];
+    let nx = 0, ny = 0, nz = 0;
+    for (const gf of vertFaces.get(vi) ?? [fi]) {
+      const gn = faceN[gf];
+      if (gn[0] * fn[0] + gn[1] * fn[1] + gn[2] * fn[2] >= cosCrease) { nx += gn[0]; ny += gn[1]; nz += gn[2]; }
+    }
+    const L = Math.hypot(nx, ny, nz) || 1;
+    return [nx / L, ny / L, nz / L];
+  };
+  for (let fi = 0; fi < m.faces.length; fi += 1) {
+    const face = m.faces[fi];
     if (includeFace && !includeFace(face)) continue;
     if (face.loop.length < 3) continue;
-    const n = faceNormal(m, face) as Vec3;
     const uv = face.uv;
-    const a = m.verts[face.loop[0]] as Vec3;
+    const i0 = face.loop[0];
+    const a = m.verts[i0] as Vec3;
+    const na = normalAt(i0, fi);
     const ua = (uv?.[0] ?? flat) as [number, number];
     for (let i = 1; i + 1 < face.loop.length; i += 1) {
-      const b = m.verts[face.loop[i]] as Vec3;
-      const c = m.verts[face.loop[i + 1]] as Vec3;
-      g.tri(a, n, ua, b, n, (uv?.[i] ?? flat) as [number, number], c, n, (uv?.[i + 1] ?? flat) as [number, number]);
+      const ib = face.loop[i], ic = face.loop[i + 1];
+      const b = m.verts[ib] as Vec3;
+      const c = m.verts[ic] as Vec3;
+      g.tri(a, na, ua, b, normalAt(ib, fi), (uv?.[i] ?? flat) as [number, number], c, normalAt(ic, fi), (uv?.[i + 1] ?? flat) as [number, number]);
     }
   }
   return g.build();
