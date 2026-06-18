@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, addMountReflections, clampSides, clearFaceTags, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, addMountReflections, bevelEdge, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from './anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from './wheelMount';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
@@ -150,6 +150,9 @@ export const STUDIO = {
    *  basis (1/16 m). The button commits this thin extrusion; the move gizmo then
    *  pulls the cap in/out (req_1015). */
   extrudeMeters: 1 / 16,
+  /** BEVEL (req_1265): the chamfer width a single 'bevel' commits — 2 modeling units
+   *  on the 16-units basis, a visible chamfer the gizmo can then shape. */
+  bevelMeters: 2 / 16,
   /** gizmo STEP (req_1023): every gizmo drag (move / resize / loop-cut slide)
    *  SNAPS by default — no modifier = whole modeling units, Shift = a finer step,
    *  Alt = freeform (no snap). On the 16-units basis 1 unit = 1/16 m. */
@@ -1995,7 +1998,42 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 >
                   <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>extrude</Text>
                 </Pressable>
+                {/* BEVEL (req_1265): chamfer the selected edge — both adjacent faces
+                    slide their shared corners in, a flat face bridges the gap. Manifold
+                    edges only (shared by exactly 2 faces). */}
+                <Pressable
+                  onPress={() => {
+                    const mesh = activePart.mesh;
+                    const edge = meshEdges(mesh)[[...sel.edges][0]];
+                    if (!edge) return;
+                    const out = bevelEdge(mesh, edge, STUDIO.bevelMeters);
+                    if (out === mesh) { toast('bevel needs a manifold edge (shared by exactly 2 faces)'); return; }
+                    props.onEditMesh(activePart.id, out);
+                    setSel(emptySelection());
+                  }}
+                  tooltip="Bevel edge — chamfer the selected edge into a flat face (manifold edges only)"
+                  style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
+                >
+                  <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>bevel</Text>
+                </Pressable>
               </>
+            ) : null}
+            {/* create EDGE (req_1265): in VERTEX mode, exactly TWO non-adjacent corners
+                of a face → cut a new edge across it, splitting the face (Blender's
+                Connect Vertex). Edges are face-derived here, so this is how one is made. */}
+            {selMode === 'vertex' && activePart && sel.verts.size === 2 ? (
+              <Pressable
+                onPress={() => {
+                  const [vA, vB] = [...sel.verts];
+                  const out = connectVerts(activePart.mesh, vA, vB);
+                  if (out && out !== activePart.mesh) { props.onEditMesh(activePart.id, out); setSel(emptySelection()); }
+                  else toast('pick two non-adjacent corners of one face');
+                }}
+                tooltip="Create edge — connect two corners of a face with a new edge, splitting the face (Blender's Connect Vertex)"
+                style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
+              >
+                <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>create edge</Text>
+              </Pressable>
             ) : null}
             {/* create face (req_1059, req_1164): in EDGE mode, ANY ≥2 selected edges
                 — a closed loop fills as one n-gon, two chains loft a bridging strip
@@ -2476,11 +2514,15 @@ function NumberField(props: { label: string; value: number; onChange: (n: number
 // the round shapes — and confirm. Builds the topological EditMesh so the new part
 // is fully editable (loop cut / extrude / rig), unlike the render-only geometry
 // registry. cuboid/cylinder/cone/pyramid/plane share the 16-units basis.
-type ShapeKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane';
+type ShapeKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere';
 const SHAPE_KINDS: { kind: ShapeKind; label: string }[] = [
   { kind: 'cube', label: 'Cube' }, { kind: 'cylinder', label: 'Cylinder' }, { kind: 'cone', label: 'Cone' },
   { kind: 'pyramid', label: 'Pyramid' }, { kind: 'plane', label: 'Plane' },
+  { kind: 'sphere', label: 'Sphere' }, { kind: 'icosphere', label: 'Icosphere' },
 ];
+// round-bodied shapes (sphere/icosphere) are sized by DIAMETER alone — no separate
+// height — and the 'sides' knob means longitude segments (icosphere uses subdiv).
+const ROUND_BODIES: ShapeKind[] = ['sphere', 'icosphere'];
 
 function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: EditMesh, name: string) => void }) {
   const u = STUDIO.unitsPerTile;
@@ -2488,8 +2530,10 @@ function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: EditMes
   const [dia, setDia] = useState(u);   // default 16 u = one tile
   const [hgt, setHgt] = useState(u);
   const [sides, setSides] = useState(16);
-  const hasHeight = shape !== 'plane';
-  const hasSides = shape === 'cylinder' || shape === 'cone';
+  const [subdiv, setSubdiv] = useState(1); // icosphere subdivisions
+  const hasHeight = shape !== 'plane' && !ROUND_BODIES.includes(shape);
+  const hasSides = shape === 'cylinder' || shape === 'cone' || shape === 'sphere';
+  const hasSubdiv = shape === 'icosphere';
   const fmtTiles = (units: number) => `${(units / u).toFixed(2)} tile`;
   const meta = SHAPE_KINDS.find((s) => s.kind === shape)!;
   const build = (): EditMesh => {
@@ -2499,6 +2543,8 @@ function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: EditMes
       case 'cone': return cone(r, h, sides);
       case 'pyramid': return pyramid(d, h, d);
       case 'plane': return plane(d, d);
+      case 'sphere': return sphere(r, sides);
+      case 'icosphere': return icosphere(r, subdiv);
       default: return cuboid(d, h, d);
     }
   };
@@ -2516,8 +2562,10 @@ function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: EditMes
         <NumberField label="diameter" value={dia} onChange={setDia} min={1} max={u * STUDIO.gridTiles} step={1} snap={0.5} suffix="u" />
         {hasHeight ? <NumberField label="height" value={hgt} onChange={setHgt} min={1} max={u * STUDIO.gridTiles * 2} step={1} snap={0.5} suffix="u" /> : null}
         {hasSides ? <NumberField label="sides" value={sides} onChange={(n) => setSides(clampSides(n))} min={SHAPE_SIDES_MIN} max={SHAPE_SIDES_MAX} step={1} snap={1} /> : null}
+        {hasSubdiv ? <NumberField label="subdiv" value={subdiv} onChange={(n) => setSubdiv(Math.max(0, Math.min(ICOSPHERE_SUBDIV_MAX, Math.round(n))))} min={0} max={ICOSPHERE_SUBDIV_MAX} step={1} snap={1} /> : null}
         <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
           {shape === 'plane' ? `= ${fmtTiles(dia)} × ${fmtTiles(dia)} flat`
+            : ROUND_BODIES.includes(shape) ? `= ${fmtTiles(dia)} ∅ ${shape}${hasSides ? ` · ${clampSides(sides)} sides` : ` · subdiv ${subdiv}`}`
             : `= ${fmtTiles(dia)} ∅ × ${fmtTiles(hgt)}${hasSides ? ` · ${clampSides(sides)} sides` : ''}`}
         </Text>
         <Row style={{ gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>

@@ -545,6 +545,100 @@ export function plane(width: number, depth: number): EditMesh {
   return fullFaceUV({ verts, faces: [{ loop: [0, 3, 2, 1] }] }); // +Y (cuboid top winding)
 }
 
+/** Order a face loop so its Newell normal points AWAY from `center` (default the
+ *  origin) — the outward orientation for a convex body about that point. Lets the
+ *  round primitives + bevel emit faces without hand-winding each case. */
+function orientOutward(verts: V3[], loop: number[], center: V3 = [0, 0, 0]): number[] {
+  const n = faceNormal({ verts, faces: [] }, { loop });
+  let cx = 0, cy = 0, cz = 0;
+  for (const i of loop) { cx += verts[i][0]; cy += verts[i][1]; cz += verts[i][2]; }
+  const k = loop.length || 1;
+  const out: V3 = [cx / k - center[0], cy / k - center[1], cz / k - center[2]];
+  return dot(n, out) >= 0 ? loop : loop.slice().reverse();
+}
+
+/** A UV sphere: `segments` longitude columns × derived latitude rings, capped by a
+ *  single vert at each pole — Blockbench's Sphere. `segments` is the one "sides"
+ *  knob (clamped 3..48, req_1056); latitude rings = half that (min 2) so the
+ *  silhouette reads round without a second control. Centered at origin; every face
+ *  wound outward. UV-sphere poles pinch (an icosphere distributes evenly). */
+export function sphere(radius: number, segments = 16): EditMesh {
+  const seg = clampSides(segments);
+  const rings = Math.max(2, Math.round(seg / 2)); // latitude bands (pole→pole)
+  const verts: V3[] = [];
+  const top = verts.length; verts.push([0, radius, 0]);
+  const bottom = verts.length; verts.push([0, -radius, 0]);
+  const ring: number[][] = [];           // interior latitude rings, top→bottom
+  for (let i = 1; i < rings; i += 1) {
+    const phi = (Math.PI * i) / rings;    // 0 at the top pole … π at the bottom
+    const y = Math.cos(phi) * radius;
+    const rr = Math.sin(phi) * radius;
+    const row: number[] = [];
+    for (let j = 0; j < seg; j += 1) {
+      const th = (j / seg) * Math.PI * 2;
+      row.push(verts.length);
+      verts.push([Math.cos(th) * rr, y, Math.sin(th) * rr]);
+    }
+    ring.push(row);
+  }
+  const faces: EditMeshFace[] = [];
+  const out = (loop: number[]) => faces.push({ loop: orientOutward(verts, loop) });
+  for (let j = 0; j < seg; j += 1) out([top, ring[0][j], ring[0][(j + 1) % seg]]); // top cap tris
+  for (let i = 0; i + 1 < ring.length; i += 1) {                                    // middle quad bands
+    const a = ring[i], b = ring[i + 1];
+    for (let j = 0; j < seg; j += 1) out([a[j], a[(j + 1) % seg], b[(j + 1) % seg], b[j]]);
+  }
+  const last = ring[ring.length - 1];
+  for (let j = 0; j < seg; j += 1) out([bottom, last[(j + 1) % seg], last[j]]);      // bottom cap tris
+  return fullFaceUV({ verts, faces });
+}
+
+/** Max icosphere subdivisions the Add dialog offers — 3 = 1280 tris, ample for the
+ *  low-poly era; the clamp stops a fat input melting the editor. */
+export const ICOSPHERE_SUBDIV_MAX = 3;
+
+/** An icosphere: a 12-vert icosahedron with each triangle subdivided `subdiv` times
+ *  and every vert pushed onto the sphere of `radius` — Blender/Blockbench's
+ *  Icosphere. Triangles distribute evenly (no UV-sphere pole pinch). Centered at
+ *  origin, faces wound outward. `subdiv` clamped 0..ICOSPHERE_SUBDIV_MAX. */
+export function icosphere(radius: number, subdiv = 1): EditMesh {
+  const n = Math.max(0, Math.min(ICOSPHERE_SUBDIV_MAX, Math.round(subdiv)));
+  const t = (1 + Math.sqrt(5)) / 2;
+  let pts: V3[] = [
+    [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
+    [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
+    [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+  ];
+  let tris: number[][] = [
+    [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+    [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+    [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+  ];
+  for (let s = 0; s < n; s += 1) {        // split each tri into 4, sharing edge midpoints
+    const mid = new Map<string, number>();
+    const midpoint = (a: number, b: number): number => {
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+      const hit = mid.get(key); if (hit != null) return hit;
+      const va = pts[a], vb = pts[b], i = pts.length;
+      pts.push([(va[0] + vb[0]) / 2, (va[1] + vb[1]) / 2, (va[2] + vb[2]) / 2]);
+      mid.set(key, i); return i;
+    };
+    const next: number[][] = [];
+    for (const [a, b, c] of tris) {
+      const ab = midpoint(a, b), bc = midpoint(b, c), ca = midpoint(c, a);
+      next.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]);
+    }
+    tris = next;
+  }
+  const verts: V3[] = pts.map((p) => {
+    const len = Math.hypot(p[0], p[1], p[2]) || 1;
+    return [(p[0] / len) * radius, (p[1] / len) * radius, (p[2] / len) * radius];
+  });
+  const faces: EditMeshFace[] = tris.map((loop) => ({ loop: orientOutward(verts, loop) }));
+  return fullFaceUV({ verts, faces });
+}
+
 // ── The concave-quad Auto-Fix guard (USER req_0949 — a first-class idea) ───────
 // After a gizmo move, before committing, the Studio checks whether any face went
 // concave (a reflex corner — convex ⇒ every consecutive-edge cross product points
@@ -1458,6 +1552,101 @@ export function flipFace(m: EditMesh, faceIndex: number): EditMesh {
   const faces = m.faces.slice();
   faces[faceIndex] = { ...face, loop: face.loop.slice().reverse(), uv: face.uv ? face.uv.slice().reverse() : undefined };
   return { ...m, faces };
+}
+
+// ── Connect verts: "create edge from vertexes" (req_1265) ──────────────────────
+// Edges here are face-derived (no loose-edge primitive), so the way to MAKE an edge
+// is to introduce it as the shared boundary of two faces — Blender's Connect Vertex
+// (J): pick two NON-adjacent corners of one face and cut a new edge across it,
+// splitting the face in two. The new edge is then a real, selectable, extrudable
+// edge. Pure + headless.
+
+/** Split the face the two verts share along the new edge vA–vB. Both must lie on ONE
+ *  common face and be NON-adjacent there (adjacent ⇒ the edge already exists). Returns
+ *  null when no such face exists. Per-corner uv / material / glass carry to both
+ *  halves; the two sub-loops inherit the parent winding so normals stay consistent. */
+export function connectVerts(m: EditMesh, vA: number, vB: number): EditMesh | null {
+  if (vA === vB || !m.verts[vA] || !m.verts[vB]) return null;
+  for (let fi = 0; fi < m.faces.length; fi += 1) {
+    const f = m.faces[fi];
+    const ia = f.loop.indexOf(vA), ib = f.loop.indexOf(vB);
+    if (ia < 0 || ib < 0) continue;
+    const L = f.loop.length;
+    // adjacent corners → that edge already exists, nothing to cut.
+    if ((ia + 1) % L === ib || (ib + 1) % L === ia) continue;
+    // walk the loop from `from` to `to` (inclusive, wrapping), keeping uv in lockstep.
+    const slice = (from: number, to: number): { loop: number[]; uv?: V2[] } => {
+      const loop: number[] = []; const uv: V2[] = [];
+      for (let k = from; ; k = (k + 1) % L) {
+        loop.push(f.loop[k]); if (f.uv) uv.push([f.uv[k][0], f.uv[k][1]]);
+        if (k === to) break;
+      }
+      return { loop, uv: f.uv ? uv : undefined };
+    };
+    const half1 = slice(ia, ib);   // vA … vB
+    const half2 = slice(ib, ia);   // vB … vA (wraps)
+    if (half1.loop.length < 3 || half2.loop.length < 3) continue;
+    const carry = (h: { loop: number[]; uv?: V2[] }): EditMeshFace => ({ loop: h.loop, uv: h.uv, material: f.material, glass: f.glass, tag: f.tag });
+    const faces = m.faces.slice();
+    faces.splice(fi, 1, carry(half1), carry(half2));
+    return { ...m, faces };
+  }
+  return null;
+}
+
+// ── Bevel: chamfer a single edge (req_1265) ────────────────────────────────────
+// Replace a sharp manifold edge with a flat chamfer (Blockbench/Blender's Bevel).
+// The two faces meeting at the edge each slide their two shared corners inward along
+// their OWN in-face edges by `width` (so the new verts stay on the surface), a
+// chamfer quad bridges the two new edges, and a small triangle caps each end corner
+// (the corner vert is KEPT for any third face still using it). Manifold edges only
+// (exactly 2 incident faces); returns m unchanged otherwise. Pure + headless.
+
+export function bevelEdge(m: EditMesh, edge: Edge, width: number): EditMesh {
+  const [a, b] = edge;
+  if (a === b || !m.verts[a] || !m.verts[b] || width <= 0) return m;
+  const incident = facesUsingEdges(m, [edge]);
+  if (incident.length !== 2) return m; // boundary / non-manifold → not a clean bevel
+
+  const verts: V3[] = m.verts.map((v) => [v[0], v[1], v[2]]);
+  // the in-face neighbour of corner `c` that ISN'T `other` — the edge we slide along.
+  const slideTarget = (f: EditMeshFace, c: number, other: number): number => {
+    const L = f.loop, i = L.indexOf(c);
+    const prev = L[(i + L.length - 1) % L.length], next = L[(i + 1) % L.length];
+    return next === other ? prev : next;
+  };
+  const slid = (c: number, target: number): V3 => {
+    const p = verts[c], q = verts[target];
+    const d: V3 = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+    const len = Math.hypot(d[0], d[1], d[2]) || 1;
+    const tt = Math.min(width, len * 0.45) / len; // clamp so the slide can't pass the far vert
+    return [p[0] + d[0] * tt, p[1] + d[1] * tt, p[2] + d[2] * tt];
+  };
+
+  // each incident face gets slid copies of a and b; rewrite the face to use them.
+  const faces: EditMeshFace[] = m.faces.map((f) => ({ ...f, loop: f.loop.slice(), uv: f.uv ? f.uv.map((p) => [p[0], p[1]] as V2) : undefined }));
+  const sides: { aNew: number; bNew: number }[] = [];
+  for (const fi of incident) {
+    const f = m.faces[fi];
+    const aNew = verts.length; verts.push(slid(a, slideTarget(f, a, b)));
+    const bNew = verts.length; verts.push(slid(b, slideTarget(f, b, a)));
+    const loop = faces[fi].loop;
+    loop[loop.indexOf(a)] = aNew;
+    loop[loop.indexOf(b)] = bNew;
+    sides.push({ aNew, bNew });
+  }
+
+  // mesh centroid → outward orientation for the three new faces.
+  let cx = 0, cy = 0, cz = 0;
+  for (const v of m.verts) { cx += v[0]; cy += v[1]; cz += v[2]; }
+  const C: V3 = [cx / m.verts.length, cy / m.verts.length, cz / m.verts.length];
+
+  const [s0, s1] = sides;
+  const add = (raw: number[]) => { const loop = orientOutward(verts, raw, C); faces.push({ loop, uv: faceSquareUV(verts, loop) }); };
+  add([s0.aNew, s0.bNew, s1.bNew, s1.aNew]); // the chamfer quad
+  add([a, s0.aNew, s1.aNew]);                // corner cap at a
+  add([b, s0.bNew, s1.bNew]);                // corner cap at b
+  return { ...m, verts, faces };
 }
 
 /** Set (or clear) the GLASS flag on a set of faces (req_1181) — marks them as

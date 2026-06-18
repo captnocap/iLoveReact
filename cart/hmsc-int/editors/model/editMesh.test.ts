@@ -2,9 +2,9 @@
 // topology (verts/faces/edges), the lowering to GeometryData, the shape
 // constructors, and the concave-quad Auto-Fix guard (req_0949). Pure + headless.
 
-import { assert, assertEqual, finish, test } from '../../game/_testkit';
+import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 import {
-  addMount, addMountReflections, updateMountMirrored, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag,
+  addMount, addMountReflections, updateMountMirrored, bevelEdge, connectVerts, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag, icosphere, sphere, ICOSPHERE_SUBDIV_MAX,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
   flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel, validateMesh, meshHealth,
@@ -1006,6 +1006,81 @@ test('a detached panel from a CLEAN selection validates clean (req_1224)', () =>
   const h = meshHealth(panel);
   assertEqual(h.errors, 0, 'a detached panel has no topological errors');
   assert(!validateMesh(panel).some((i) => i.kind === 'open-edge'), 'the panel is a closed solid (no holes)');
+});
+
+// ── sphere / icosphere shape constructors (req_1265) ───────────────────────────
+
+test('a UV sphere is centered, on-radius, and every face faces outward', () => {
+  const r = 2, seg = 12;
+  const s = sphere(r, seg);
+  // two poles + (rings-1) interior rings of `seg` verts; rings = round(seg/2) = 6.
+  assertEqual(s.verts.length, 2 + (6 - 1) * seg, 'pole verts + interior ring verts');
+  for (const v of s.verts) assertClose(Math.hypot(v[0], v[1], v[2]), r, 1e-6, 'every sphere vert sits on the radius');
+  for (const f of s.faces) {
+    const c = faceCentroid(s, f);                 // centered at origin → centroid points outward
+    assert(dot(faceNormal(s, f), c) > 0, 'every sphere face normal points away from the centre');
+  }
+  assertEqual(meshHealth(s).errors, 0, 'a sphere has no topological errors');
+});
+
+test('sphere honours the sides clamp (round shapes are 3..48, req_1056)', () => {
+  // below-min (2) clamps up to 3 longitudes: rings=round(3/2)=2 → 1 interior ring of 3 + 2 poles.
+  assertEqual(sphere(1, 2).verts.length, 2 + 3, 'sides below 3 clamp up to 3 longitudes');
+  // a 100-sided request clamps to 48 longitudes (interior ring verts are a multiple of 48).
+  assertEqual((sphere(1, 100).verts.length - 2) % 48, 0, 'longitude segments clamp to 48');
+});
+
+test('an icosphere subdivides 20→80→320 tris and stays on-radius', () => {
+  const r = 1.5;
+  assertEqual(icosphere(r, 0).faces.length, 20, 'subdiv 0 = the bare icosahedron (20 tris)');
+  assertEqual(icosphere(r, 1).faces.length, 80, 'each subdiv ×4');
+  assertEqual(icosphere(r, 2).faces.length, 320, 'two subdivs ×16');
+  const ico = icosphere(r, 1);
+  assert(ico.faces.every((f) => f.loop.length === 3), 'an icosphere is all triangles');
+  for (const v of ico.verts) assertClose(Math.hypot(v[0], v[1], v[2]), r, 1e-6, 'every icosphere vert sits on the radius');
+  for (const f of ico.faces) assert(dot(faceNormal(ico, f), faceCentroid(ico, f)) > 0, 'icosphere faces point outward');
+  assertEqual(icosphere(r, 99).faces.length, icosphere(r, ICOSPHERE_SUBDIV_MAX).faces.length, 'subdiv clamps to the max');
+});
+
+// ── connect verts: "create edge from vertexes" (req_1265) ──────────────────────
+
+test('connectVerts splits one face along a diagonal into two faces sharing the new edge', () => {
+  const q: EditMesh = { verts: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], faces: [{ loop: [0, 1, 2, 3] }] };
+  const out = connectVerts(q, 0, 2)!;            // the 0–2 diagonal
+  assert(!!out, 'a valid diagonal connects');
+  assertEqual(out.faces.length, 2, 'the quad split into two tris');
+  assert(out.faces.every((f) => f.loop.length === 3), 'both halves are triangles');
+  // the new edge 0–2 is now a real, shared edge of the mesh.
+  assert(meshEdges(out).some(([a, b]) => (a === 0 && b === 2)), 'the new edge 0–2 exists');
+  assert(facesUsingEdges(out, [[0, 2]]).length === 2, 'the new edge is shared by both halves (manifold)');
+});
+
+test('connectVerts refuses adjacent corners (the edge already exists) and foreign verts', () => {
+  const q: EditMesh = { verts: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], faces: [{ loop: [0, 1, 2, 3] }] };
+  assertEqual(connectVerts(q, 0, 1), null, 'adjacent corners 0–1 already share an edge');
+  assertEqual(connectVerts(q, 0, 0), null, 'a vert cannot connect to itself');
+});
+
+// ── bevel: chamfer a manifold edge (req_1265) ──────────────────────────────────
+
+test('bevelEdge chamfers a cube edge: 3 new faces, 4 new verts, still watertight', () => {
+  const box = cuboid(2, 2, 2);
+  // the top (+Y) face is loop [4,7,6,5]; edge 4–5 is one of its boundary edges.
+  const e = meshEdges(box).find(([a, b]) => (a === 4 && b === 5))!;
+  const before = box.faces.length, beforeV = box.verts.length;
+  const out = bevelEdge(box, e, 2 / 16);
+  assert(out !== box, 'a manifold edge bevels');
+  assertEqual(out.verts.length, beforeV + 4, 'four slid corner verts added');
+  assertEqual(out.faces.length, before + 3, 'a chamfer quad + two corner caps added');
+  assertEqual(meshHealth(out).errors, 0, 'the bevelled cube has no topological errors');
+  // the original sharp edge 4–5 is gone (its corners slid to fresh indices).
+  assert(!meshEdges(out).some(([a, b]) => a === 4 && b === 5), 'the original sharp edge is replaced');
+});
+
+test('bevelEdge declines a boundary / non-manifold edge', () => {
+  const flat = plane(2, 2);                       // one quad → every edge is a boundary
+  const e = meshEdges(flat)[0];
+  assertEqual(bevelEdge(flat, e, 2 / 16), flat, 'a boundary edge (1 face) is left unchanged');
 });
 
 finish('editMesh');
