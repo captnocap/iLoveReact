@@ -571,7 +571,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // PAINT cell size in MODEL UNITS (req_1301): adjustable so a small prop (a gun) can
   // be painted at fine detail while a big surface stays coarse. Default ~1.5 cm — a
   // gun face spans several cells, so brush-1 is a dab, not a whole-face fill.
-  const [paintCell, setPaintCell] = useHotState<number>('studio:paintCell', 0.25);
+  const [paintCell, setPaintCell] = useHotState<number>('studio:paintCell', 0.08);
   const [paintView, setPaintView] = useHotState<'pseudo' | 'painted'>('studio:paintView', 'painted');
   const [paintBrush, setPaintBrush] = useHotState<number>('studio:paintBrush', 1);
   // PERF (req_1203): the lag was setTex on EVERY mouse-move (a React re-render +

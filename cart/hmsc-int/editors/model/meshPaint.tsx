@@ -27,8 +27,10 @@ const DEG = Math.PI / 180;
  *  (~3 cm) a prop-scale face shows a real grid instead of collapsing to one cell;
  *  GRID_MAX caps a huge face so the bake/overlay stay bounded. */
 export const PAINT_CELL_UNITS = 0.5;
-/** never make more than this many grid divisions on a face (sanity + perf cap). */
-const GRID_MAX = 64;
+/** never make more than this many grid divisions on a face (sanity + perf cap). High
+ *  enough that a metre-scale face can still be painted at sub-cm detail; only painted
+ *  cells bake (run-merged) and the overlay strides its grid, so this stays cheap. */
+const GRID_MAX = 256;
 
 // ── small vec helpers (kept local; the gizmo/select math live in their modules) ──
 function sub(a: V3, b: V3): V3 { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }

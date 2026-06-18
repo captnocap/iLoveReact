@@ -67,8 +67,13 @@ export function PaintGridOverlay(props: {
           prev = p; prevIn = inside;
         }
       };
-      for (let k = 0; k <= grid.nu; k += 1) gridLine(`gv${k}`, Math.min(grid.u0 + k * grid.cuv, grid.u1), grid.v0, grid.v1, true);
-      for (let k = 0; k <= grid.nv; k += 1) gridLine(`gh${k}`, Math.min(grid.v0 + k * grid.cuv, grid.v1), grid.u0, grid.u1, false);
+      // STRIDE the drawn grid lines so a fine (many-cell) face stays cheap — show at
+      // most ~40 lines per axis as visual reference; the hovered cell (below) always
+      // shows the exact paint size regardless.
+      const MAXLINES = 40;
+      const su = Math.max(1, Math.ceil(grid.nu / MAXLINES)), sv = Math.max(1, Math.ceil(grid.nv / MAXLINES));
+      for (let k = 0; k <= grid.nu; k += su) gridLine(`gv${k}`, Math.min(grid.u0 + k * grid.cuv, grid.u1), grid.v0, grid.v1, true);
+      for (let k = 0; k <= grid.nv; k += sv) gridLine(`gh${k}`, Math.min(grid.v0 + k * grid.cuv, grid.v1), grid.u0, grid.u1, false);
 
       // the cell under the cursor — outline + centre dot, through the same uv→world map.
       const cu0 = grid.u0 + hover.cu * grid.cuv, cu1 = Math.min(grid.u0 + (hover.cu + 1) * grid.cuv, grid.u1);
