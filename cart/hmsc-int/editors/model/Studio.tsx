@@ -448,6 +448,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const target = frame.target;
   const fitDistance = () => clamp(frame.radius * STUDIO.fitDistanceFactor, STUDIO.minDistance, STUDIO.maxDistance);
 
+  // ALL-PARTS anchor (req_1287): the WORLD centroid of every part's verts (each part
+  // lifted by its own `lift`), so the all-parts gizmo scales/rotates the assembly
+  // about one shared point. Re-derived on a structural / committed-edit change only.
+  const allAnchorWorld = useMemo<MV3 | null>(() => {
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    for (const part of parts) for (const v of part.mesh.verts) { sx += v[0]; sy += v[1] + part.lift; sz += v[2]; n += 1; }
+    return n > 0 ? [sx / n, sy / n, sz / n] : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revision, props.meshRev]);
+
   // SCALE GHOST (req_1165): the reference player, built ONCE (the seed/outfit never
   // change here), stood to the +X side of the model just clear of its bounds with
   // feet on the grid. Toggled by the 'scale' button; interned so the static figure
@@ -725,6 +735,24 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // A self-contained parallel to gizmoDragRef/rigDragRef; commits straight to pos.
   const backdropDragRef = useRef<null | { id: string; axis: { dx: number; dy: number; pxPerUnit: number }; unit: MV3; startCx: number; startCy: number; startPos: MV3 }>(null);
   const [backdropDragAxis, setBackdropDragAxis] = useState<GizmoHit | null>(null);
+
+  // ALL-PARTS transform (req_1287): object mode normally moves/resizes only the
+  // ACTIVE part about ITS own centroid — resizing each layer one at a time scales
+  // them toward different centers and breaks the assembly. With this ON, the object
+  // gizmo grabs EVERY part at once and transforms them about the model's COMMON
+  // centroid, so the whole thing scales/moves/rotates as one and proportions hold.
+  const [allParts, setAllParts] = useState(false);
+  // the in-flight all-parts grab: the frozen common anchor + screen frame + each
+  // part's start mesh. A self-contained parallel to gizmoDragRef.
+  const multiGizmoDragRef = useRef<null | {
+    tool: GizmoTool; hit: GizmoHit; anchorW: MV3; anchorScreen: { x: number; y: number };
+    axis: { dx: number; dy: number; pxPerUnit: number }; startCx: number; startCy: number; startScreenDist: number; rotSign: number; combinedHalfExt: number;
+    parts: { id: string; startMesh: EditMesh; lift: number }[]; last?: Record<string, EditMesh>;
+  }>(null);
+  // live preview of an all-parts drag: each part's worked mesh, swapped into the
+  // rendered list (commit-on-release, like the single-part draft). Parts are few, so
+  // re-lowering them per move is cheap enough for an occasional whole-model resize.
+  const [multiDraft, setMultiDraft] = useState<{ meshes: Record<string, EditMesh>; seq: number } | null>(null);
 
   // ── Transform gizmo (req_0983): move / resize the selection ──
   const [gizmoTool, setGizmoTool] = useHotState<GizmoTool>('studio:gizmoTool', 'move');
@@ -1242,6 +1270,34 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       if (picked) { setRigSel(picked); return; } // selected → don't orbit
       dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs(); return;
     }
+    // ALL-PARTS gizmo (req_1287): in object mode with "all" on, grabbing the gizmo at
+    // the model's common centroid transforms EVERY part together. Takes priority over
+    // the single-part gizmo; a miss falls through to orbit.
+    if (selMode === 'object' && allParts && allAnchorWorld && props.parts.length > 0) {
+      const r = rectRef.current;
+      const lx = Number(e?.x ?? 0) - r.x, ly = Number(e?.y ?? 0) - r.y;
+      const proj = makeProjector(camSnap());
+      const hit = pickGizmoHandle(allAnchorWorld, gizmoTool, proj, lx, ly);
+      if (hit) {
+        const aS = proj(allAnchorWorld);
+        const ax = axisScreen(allAnchorWorld, AXIS_DIR[hit.axis], proj);
+        // combined half-extent on the grabbed axis (max |vertWorld − anchor|), so a
+        // per-axis resize maps drag-distance → a scale factor for the whole assembly.
+        let he = 0;
+        for (const p of props.parts) for (const v of p.mesh.verts) he = Math.max(he, Math.abs((v[hit.axis] + (hit.axis === 1 ? p.lift : 0)) - allAnchorWorld[hit.axis]));
+        multiGizmoDragRef.current = {
+          tool: gizmoTool, hit, anchorW: allAnchorWorld, anchorScreen: { x: aS.x, y: aS.y },
+          axis: { dx: ax.dx, dy: ax.dy, pxPerUnit: ax.pxPerUnit }, startCx: lx, startCy: ly,
+          startScreenDist: Math.max(8, Math.hypot(lx - aS.x, ly - aS.y)), rotSign: gizmoTool === 'rotate' ? rotationSign(allAnchorWorld, hit.axis, proj) : 1,
+          combinedHalfExt: he, parts: props.parts.map((p) => ({ id: p.id, startMesh: p.mesh, lift: p.lift })),
+        };
+        setActiveGizmo(hit);
+        return;
+      }
+      // miss → fall through to orbit; do NOT also run the single-part gizmo below.
+      dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs();
+      return;
+    }
     // GIZMO FIRST: if a transform handle is under the cursor, grab it — no pick,
     // no orbit. In OBJECT mode the target is the WHOLE piece (every vert, req_1058);
     // in element modes it's the live selection. (rig has its own handles.)
@@ -1389,6 +1445,57 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       }
       return;
     }
+    // ALL-PARTS drag (req_1287): the same move/resize/rotate math as the single gizmo,
+    // but applied to EVERY part about the common world anchor (mapped to each part's
+    // local space by subtracting its lift). Previews via multiDraft (setState, parts
+    // are few); commits all on release.
+    const mg = multiGizmoDragRef.current;
+    if (mg) {
+      const r = rectRef.current;
+      const cx = Number(e?.x ?? 0) - r.x, cy = Number(e?.y ?? 0) - r.y;
+      const mods = heldMods.current;
+      const axisLabel = 'XYZ'[mg.hit.axis];
+      let apply: (m: EditMesh, anchorL: MV3) => EditMesh;
+      let readout: string;
+      if (mg.tool === 'rotate') {
+        const a0 = Math.atan2(mg.startCy - mg.anchorScreen.y, mg.startCx - mg.anchorScreen.x);
+        const a1 = Math.atan2(cy - mg.anchorScreen.y, cx - mg.anchorScreen.x);
+        let d = a1 - a0; d = Math.atan2(Math.sin(d), Math.cos(d));
+        const deg = snapToStep((d * mg.rotSign * 180) / Math.PI, STUDIO.rotateStepDeg, STUDIO.rotateStepFineDeg, mods);
+        const rad = (deg * Math.PI) / 180;
+        apply = (m, aL) => rotateVerts(m, m.verts.map((_, i) => i), aL, mg.hit.axis, rad);
+        readout = `all · ${axisLabel} ${mods.alt ? deg.toFixed(1) : Math.round(deg)}°`;
+      } else if (mg.hit.uniform) {
+        const fRaw = Math.hypot(cx - mg.anchorScreen.x, cy - mg.anchorScreen.y) / mg.startScreenDist;
+        const f = Math.max(0.02, snapToStep(fRaw, STUDIO.gizmoUniformStep, STUDIO.gizmoUniformStepFine, mods));
+        apply = (m, aL) => scaleVerts(m, m.verts.map((_, i) => i), aL, [f, f, f]);
+        readout = `all · ⤢ ×${f.toFixed(2)}`;
+      } else if (mg.tool === 'move') {
+        const t = snapToStep(dragWorldDistance(mg.axis, cx - mg.startCx, cy - mg.startCy), STUDIO.gizmoStepMeters, STUDIO.gizmoStepFineMeters, mods);
+        const u = AXIS_DIR[mg.hit.axis];
+        const delta: MV3 = [u[0] * t, u[1] * t, u[2] * t];
+        apply = (m) => translateVerts(m, m.verts.map((_, i) => i), delta);
+        readout = `all · ${axisLabel} ${fmtUnits(metersToUnits(t))}`;
+      } else {
+        if (mg.combinedHalfExt < 1e-4) return;
+        const raw = dragWorldDistance(mg.axis, cx - mg.startCx, cy - mg.startCy) * mg.hit.sign;
+        const targetExt = snapToStep(mg.combinedHalfExt + raw, STUDIO.gizmoStepMeters, STUDIO.gizmoStepFineMeters, mods);
+        const f = Math.max(0.02, targetExt / mg.combinedHalfExt);
+        const factor: MV3 = [1, 1, 1]; factor[mg.hit.axis] = f;
+        apply = (m, aL) => scaleVerts(m, m.verts.map((_, i) => i), aL, factor);
+        readout = `all · ${axisLabel} Δ${fmtUnits(metersToUnits(targetExt - mg.combinedHalfExt))}`;
+      }
+      const meshes: Record<string, EditMesh> = {};
+      for (const p of mg.parts) {
+        const aL: MV3 = [mg.anchorW[0], mg.anchorW[1] - p.lift, mg.anchorW[2]];
+        meshes[p.id] = apply(p.startMesh, aL);
+      }
+      mg.last = meshes;
+      dragSeqRef.current += 1;
+      setMultiDraft({ meshes, seq: dragSeqRef.current });
+      setGizmoReadout(readout);
+      return;
+    }
     // GIZMO drag: transform the selection, re-lower the working draft (committed
     // to the store only on mouse-up). Absolute from the start mesh + total delta,
     // so there's no accumulation drift.
@@ -1507,6 +1614,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       setRigDragAxis(null);
       if (rigDraft && sameRigSel(rigDraft.sel, rd.sel)) commitRig(rd.sel, rigDraft.localPos);
       setRigDraft(null);
+      return;
+    }
+    // end an ALL-PARTS drag (req_1287): commit every changed part, drop the preview.
+    // A uniform/affine whole-model transform can't buckle a convex quad, so no
+    // concave-guard needed (unlike the single-part path).
+    if (multiGizmoDragRef.current) {
+      const mg = multiGizmoDragRef.current;
+      multiGizmoDragRef.current = null;
+      setActiveGizmo(null);
+      setMultiDraft(null);
+      if (mg.last) for (const p of mg.parts) { const nm = mg.last[p.id]; if (nm && nm !== p.startMesh) props.onEditMesh(p.id, nm); }
       return;
     }
     const g = gizmoDragRef.current;
@@ -1668,13 +1786,21 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // each move; a fresh dynamicKey forces the host re-upload). Every OTHER part
   // keeps its memoized, baked entry — only the dragged part re-lowers.
   const display = useMemo(() => {
+    // ALL-PARTS preview (req_1287): swap EVERY part with its worked mesh, re-using
+    // each part's OWN slot (studio.s<index>, version bumped) — no extra dyn slots.
+    if (multiDraft) {
+      return placed.map((p) => {
+        const m = multiDraft.meshes[p.key];
+        return m ? { ...p, def: { id: `studio.${p.key}`, generate: () => editMeshToGeometry(m, (f) => !f.glass), defaults: {} }, dynKey: `${p.dynKey}.md${multiDraft.seq}` } : p;
+      });
+    }
     if (!draft) return placed;
     return placed.map((p) => (p.key === draft.partId
       // ONE fixed dyn slot ('studio.draft') for whatever part is being dragged —
       // never a per-part slot (req_1008: slots never free).
       ? { ...p, def: { id: `studio.${draft.partId}`, generate: () => editMeshToGeometry(draft.mesh, (f) => !f.glass), defaults: {} }, dynKey: `studio.draft~${draft.partId}.${draft.seq}` }
       : p));
-  }, [placed, draft]);
+  }, [placed, draft, multiDraft]);
 
   // ── Selected-face highlight (req_0986/0989): shade the active face(s) vivid ──
   // so the clicked face is unmistakable AND stays tracked THROUGH a loop cut.
@@ -1908,9 +2034,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {/* The transform gizmo — drawn AFTER the selection overlay (last 2D children
           over the Scene3D), so the arrows are NEVER hidden by geometry (USER).
           Hidden while the loop-cut popup is open (the cut preview owns the view). */}
-      {gizmoAnchorWorld && !lc && !bv && !autoFix && !moveBackdrop
-        ? <TransformGizmo anchorW={gizmoAnchorWorld} tool={gizmoTool} camSnap={camSnap} activeAxis={activeGizmo} />
-        : null}
+      {/* ALL-PARTS mode shows ONE gizmo at the model's common centroid; otherwise the
+          single-part/selection gizmo. */}
+      {(() => {
+        const allMode = selMode === 'object' && allParts && !!allAnchorWorld;
+        const anchor = allMode ? allAnchorWorld : gizmoAnchorWorld;
+        return anchor && !lc && !bv && !autoFix && !moveBackdrop
+          ? <TransformGizmo anchorW={anchor} tool={gizmoTool} camSnap={camSnap} activeAxis={activeGizmo} />
+          : null;
+      })()}
 
       {/* EXTRUDE-DEPTH (req_1193): the normal arrow on a single selected face (move
           tool) — pull out to extrude, push in to inset/cut a recess. */}
@@ -2181,6 +2313,18 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 </Pressable>
               );
             })}
+            {/* ALL-PARTS toggle (req_1287): in object mode with 2+ parts, transform the
+                WHOLE model together about its common center (so resizing keeps the
+                assembly's proportions instead of scaling one layer about its own hub). */}
+            {selMode === 'object' && props.partCount >= 2 ? (
+              <Pressable
+                onPress={() => setAllParts((v) => !v)}
+                tooltip="All parts — move/resize/rotate EVERY layer together about the model's shared center, so the whole thing scales as one and proportions hold"
+                style={{ ...STEP_BTN, backgroundColor: allParts ? '#1c3a2a' : '#13233aee', borderColor: allParts ? '#2f7a4f' : '#2c4a6a' }}
+              >
+                <Text fontSize={10} color={allParts ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>{allParts ? `▣ all · ${props.partCount}` : '▢ all parts'}</Text>
+              </Pressable>
+            ) : null}
             {/* face-only edit ops: extrude + loop cut (a single selected face). */}
             {selMode === 'face' && activePart && sel.faces.size === 1 ? (
               <>
