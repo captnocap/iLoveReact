@@ -673,6 +673,12 @@ pub const Node = struct {
     // capsule-SDF line per segment, batched. Bypasses the SVG d-string
     // parser + bezier flattening that <Graph.Path> pays every paint.
     polyline_points: ?[]f32 = null,
+    // Graph.Polyline `segments` mode: when true the point array is a SEGMENT
+    // LIST (independent pairs p0p1, p2p3, …) instead of a connected strip — so
+    // ONE node draws N DISJOINT capsule lines (a mesh wireframe's edges, axis
+    // spokes) without spurious connectors and without N reconciler nodes. Engine
+    // paint steps by pairs (i += 4) instead of point-by-point (i += 2).
+    polyline_segments: bool = false,
     // Graph.GCurve — flat array of 6-float quadratic-bezier-triangle control
     // points: {p0x, p0y, p1x, p1y, p2x, p2y, p0x', p0y', …}. Each group of 6
     // is one Loop-Blinn fill triangle. Engine paint queues one g-curve fill

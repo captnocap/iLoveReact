@@ -914,7 +914,12 @@ GraphBase.Node = (props: any) => h('Graph.Node', props, props.children);
 // expensive at chart scale. Stroke color via `stroke`, width via
 // `strokeWidth` — same names as Graph.Path so the parser dispatches them
 // identically (color → text_color, width → canvas_stroke_width).
-GraphBase.Polyline = (props: any) => h('Graph.Polyline', props, props.children);
+// `segments` (req_1275): treat `points` as a DISJOINT segment list (pairs
+// p0p1, p2p3, …) instead of a connected strip — so ONE node draws N independent
+// capsule lines (a mesh wireframe's edges) with no spurious connectors and no
+// per-edge reconciler node. Without it, points are a connected polyline (charts).
+GraphBase.Polyline = ({ segments, ...props }: any) =>
+  h('Graph.Polyline', segments ? { ...props, polylineSegments: true } : props, props.children);
 // Graph.Polygon — filled sibling of Graph.Polyline. Same flat point array
 // shape; engine triangle-fans from vertex 0 into the batched polys pipeline
 // (one triangle per pair of subsequent edges). Fan triangulation requires

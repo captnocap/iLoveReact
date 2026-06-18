@@ -9,8 +9,8 @@
 // toggle, plain click = replace, empty click = clear.
 
 import { useInterval, useRerender } from '@reactjit/hooks';
-import { Box } from '@reactjit/primitives';
-import { meshEdges, faceCentroid, type Edge, type EditMesh, type V3 } from './editMesh';
+import { Box, Boxxx, Graph, type BoxxxRect } from '@reactjit/primitives';
+import { meshEdges, faceCentroid, faceNormal, type Edge, type EditMesh, type V3 } from './editMesh';
 
 const DEG = Math.PI / 180;
 const VERT_PX = 11; // click radius for vertex pick
@@ -143,17 +143,6 @@ export function applyPick(sel: Selection, mode: SelMode, hit: number | null, shi
 
 // ── The overlay ──────────────────────────────────────────────────────────────
 
-function Line(props: { ax: number; ay: number; bx: number; by: number; color: string; thick: number; opacity?: number }) {
-  const dx = props.bx - props.ax, dy = props.by - props.ay;
-  const len = Math.hypot(dx, dy) || 0.001;
-  const angle = Math.atan2(dy, dx) / DEG;
-  return <Box style={{ position: 'absolute', left: (props.ax + props.bx) / 2 - len / 2, top: (props.ay + props.by) / 2 - props.thick / 2, width: len, height: props.thick, borderRadius: props.thick / 2, backgroundColor: props.color, opacity: props.opacity ?? 1, transform: { rotate: angle } }} />;
-}
-
-function Dot(props: { x: number; y: number; r: number; color: string; ring?: boolean }) {
-  return <Box style={{ position: 'absolute', left: props.x - props.r, top: props.y - props.r, width: props.r * 2, height: props.r * 2, borderRadius: props.r, backgroundColor: props.ring ? '#0b1320' : props.color, borderWidth: props.ring ? 2 : 0, borderColor: props.color }} />;
-}
-
 export function SelectionOverlay(props: {
   mesh: EditMesh;
   partLift: number;
@@ -180,7 +169,8 @@ export function SelectionOverlay(props: {
   // verts left the face dots projecting from un-lifted local space, putting them
   // half a model-height off (top-face dot at the model center, bottom-face dot a
   // half-height below the model) — req_1014. One lift point = the dots can't drift.
-  const baseProj = makeProjector(props.camSnap());
+  const snap = props.camSnap();
+  const baseProj = makeProjector(snap);
   const proj = (p: V3): Proj => baseProj([p[0], p[1] + partLift, p[2]]);
   const P = mesh.verts.map((v) => proj(v));
   const edges = meshEdges(mesh);
@@ -197,44 +187,95 @@ export function SelectionOverlay(props: {
     }
   }
 
-  const out: any[] = [];
-
-  // wireframe edges (always — context), highlighted in edge mode / for selected faces
-  edges.forEach((e, i) => {
-    const a = P[e[0]], b = P[e[1]];
-    if (!a.front || !b.front) return;
-    const key = e[0] < e[1] ? `${e[0]}:${e[1]}` : `${e[1]}:${e[0]}`;
-    const edgeSel = mode === 'edge' && selection.edges.has(i);
-    const faceSel = mode === 'face' && selFaceEdges.has(key);
-    const color = edgeSel || faceSel ? C_SEL : (mode === 'edge' ? C_EDGE : C_WIRE);
-    const thick = edgeSel || faceSel ? 2.6 : 1.2;
-    out.push(<Line key={`e${i}`} ax={a.x} ay={a.y} bx={b.x} by={b.y} color={color} thick={thick} opacity={edgeSel || faceSel ? 1 : 0.7} />);
+  // BATCHED (req_1275): the wireframe used to be ONE <Box> per edge + per dot —
+  // ~2000 reconciler nodes for a dense mesh, capped at MAX_CHILDREN=512 (only a
+  // third of the wireframe drew) and melting fps (22fps/54ms) from laying out +
+  // painting 512 absolute boxes every frame. Now it's a handful of BATCHED GPU
+  // nodes: edges → <Graph.Polyline segments> (one instanced capsule per edge, in
+  // ONE node — no cap, analytic AA), dots → ONE <Boxxx> (instanced rects). The
+  // per-edge scatter that choked the frame is gone.
+  // DEPTH CUE (req_1276): the 2D overlay has no depth test against the solid mesh,
+  // so far-side edges draw at full strength on top of near ones — you can't tell
+  // the face you're looking at from the back of the object. Fix: classify every
+  // face as front- or back-FACING (its outward normal vs the eye), then DIM the
+  // geometry that belongs only to back faces so the near side reads bright and the
+  // far side recedes. An edge/vert is "front" if ANY adjacent/owning face faces the
+  // camera (so silhouette edges stay crisp). Selected geometry always draws bright
+  // (you want to see your selection through the model).
+  const eye = snap.eye;
+  const faceFront: boolean[] = new Array(mesh.faces.length);
+  const frontVert: boolean[] = new Array(mesh.verts.length).fill(false);
+  const edgeFront = new Map<string, boolean>();
+  mesh.faces.forEach((f, i) => {
+    const c = faceCentroid(mesh, f), n = faceNormal(mesh, f);
+    // outward normal · (eye - centroid) > 0 ⇒ the face turns toward the camera.
+    const front = n[0] * (eye[0] - c[0]) + n[1] * (eye[1] - (c[1] + partLift)) + n[2] * (eye[2] - c[2]) > 0;
+    faceFront[i] = front;
+    const loop = f.loop;
+    for (let k = 0; k < loop.length; k += 1) {
+      const va = loop[k], vb = loop[(k + 1) % loop.length];
+      if (front) frontVert[va] = true;
+      const key = va < vb ? `${va}:${vb}` : `${vb}:${va}`;
+      edgeFront.set(key, (edgeFront.get(key) ?? false) || front);
+    }
   });
 
+  const frontWire: number[] = []; // edges on a camera-facing face — bright
+  const backWire: number[] = [];  // edges only on far faces — dimmed/recede
+  const selPts: number[] = [];    // selected edges / selected-face outline — always bright, on top
+  edges.forEach((e, i) => {
+    const a = P[e[0]], b = P[e[1]];
+    if (!a.front || !b.front) return; // skip edges crossing behind the camera
+    const key = e[0] < e[1] ? `${e[0]}:${e[1]}` : `${e[1]}:${e[0]}`;
+    const sel = (mode === 'edge' && selection.edges.has(i)) || (mode === 'face' && selFaceEdges.has(key));
+    if (sel) selPts.push(a.x, a.y, b.x, b.y);
+    else (edgeFront.get(key) ? frontWire : backWire).push(a.x, a.y, b.x, b.y);
+  });
+  const base = mode === 'edge' ? C_EDGE : C_WIRE;
+  const frontWireColor = base + 'e6'; // ~0.90 — the side you're looking at
+  const backWireColor = base + '2b';  // ~0.17 — the far side, ghosted
+
+  // Dots → one Boxxx batch. A ring (unselected) is a dark fill + colored border; a
+  // selected dot is a solid fill. radius = half-size → a circle. Back-facing dots
+  // fade the same way the wire does so they read as "behind".
+  const dots: BoxxxRect[] = [];
+  const pushDot = (x: number, y: number, on: boolean, color: string, front: boolean) => {
+    const r = on ? 5.5 : 4;
+    if (on) { dots.push({ x: x - r, y: y - r, w: r * 2, h: r * 2, radius: r, bg: color }); return; }
+    const a = front ? 'ff' : '5e'; // back rings ~0.37
+    dots.push({ x: x - r, y: y - r, w: r * 2, h: r * 2, radius: r, bg: '#0b1320' + (front ? 'ff' : 'a0'), border: color + a, borderW: 2 });
+  };
   if (mode === 'face') {
     mesh.faces.forEach((f, i) => {
       const c = proj(faceCentroid(mesh, f));
       if (!c.front) return;
       const on = selection.faces.has(i);
-      out.push(<Dot key={`f${i}`} x={c.x} y={c.y} r={on ? 5.5 : 4} color={on ? C_SEL : C_DOT} ring={!on} />);
+      pushDot(c.x, c.y, on, on ? C_SEL : C_DOT, faceFront[i]);
     });
-  }
-
-  if (mode === 'vertex') {
+  } else if (mode === 'vertex') {
     P.forEach((q, i) => {
       if (!q.front) return;
       const on = selection.verts.has(i);
-      out.push(<Dot key={`v${i}`} x={q.x} y={q.y} r={on ? 5.5 : 4} color={on ? C_SEL : C_VERT} ring={!on} />);
+      pushDot(q.x, q.y, on, on ? C_SEL : C_VERT, frontVert[i]);
     });
   }
 
-  // ISOLATE the overlay's many elements (one Line per edge + per-vert/face Dots) in
-  // ONE full-fill container so they count as a SINGLE child of the viewport — NOT
-  // hundreds of flattened direct siblings. A dense (loop-cut) mesh used to spill past
-  // the layout MAX_CHILDREN=512 cap and EVICT the trailing siblings — the toolbars —
-  // so "all my tools vanished after a cut" (req_1179/1180). `pointerEvents:'none'`
-  // keeps picking/orbit reaching the viewport beneath; `overflow:'visible'` so lines
-  // at the edges aren't clipped. (>512 elements now only drop a few wireframe lines
-  // INSIDE the overlay — never the tools.)
-  return <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>{out}</Box>;
+  // ONE full-fill container → the overlay is a SINGLE child of the viewport (never
+  // spilling the layout MAX_CHILDREN=512 cap onto the toolbars, req_1179/1180).
+  // The Graph wraps the polylines with an identity view (viewZoom 1, originTopLeft)
+  // so `points` are plain viewport pixels — the same px makeProjector emits. Boxxx
+  // paints relative to its own top-left, which (inset 0) is the viewport origin too.
+  // Child order = paint order: back wire UNDER front wire UNDER the selection.
+  // `pointerEvents:'none'` keeps picking/orbit reaching the viewport beneath.
+  const w = snap.w, h = snap.h;
+  return (
+    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
+      <Graph style={{ width: w, height: h }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
+        {backWire.length ? <Graph.Polyline segments points={backWire} stroke={backWireColor} strokeWidth={1.0} /> : null}
+        {frontWire.length ? <Graph.Polyline segments points={frontWire} stroke={frontWireColor} strokeWidth={1.3} /> : null}
+        {selPts.length ? <Graph.Polyline segments points={selPts} stroke={C_SEL} strokeWidth={2.6} /> : null}
+      </Graph>
+      {dots.length ? <Boxxx boxes={dots} style={{ position: 'absolute', left: 0, top: 0, width: w, height: h }} /> : null}
+    </Box>
+  );
 }

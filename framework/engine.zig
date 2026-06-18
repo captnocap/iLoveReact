@@ -2222,8 +2222,12 @@ fn paintNode(node: *Node) void {
             const b = @as(f32, @floatFromInt(tc.b)) / 255.0;
             const a = @as(f32, @floatFromInt(tc.a)) / 255.0 * g_paint_opacity * node.canvas_stroke_opacity;
             const sw = node.canvas_stroke_width;
+            // segments mode → independent pairs (i += 4: p0p1, p2p3, …); strip
+            // mode → connected (i += 2: p0p1, p1p2, …). One node, N disjoint
+            // lines for a wireframe vs one continuous path for a chart line.
+            const stride: usize = if (node.polyline_segments) 4 else 2;
             var i: usize = 0;
-            while (i + 3 < pts.len) : (i += 2) {
+            while (i + 3 < pts.len) : (i += stride) {
                 gpu.drawCapsule(pts[i], pts[i + 1], pts[i + 2], pts[i + 3], r, g, b, a, sw);
             }
         }

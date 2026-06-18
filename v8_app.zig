@@ -2226,6 +2226,10 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                     node.polyline_points = out;
                 }
             }
+        } else if (std.mem.eql(u8, k, "polylineSegments")) {
+            // Graph.Polyline `segments` — the point array is a DISJOINT segment
+            // list (pairs), not a connected strip. One node, N independent lines.
+            node.polyline_segments = jsonBool(v) orelse false;
         } else if (std.mem.eql(u8, k, "gcurves")) {
             // Graph.GCurve — flat array of 6-float quadratic-bezier-triangle
             // control points: {p0x,p0y, p1x,p1y, p2x,p2y, …}. Parsed once at
