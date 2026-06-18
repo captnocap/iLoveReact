@@ -319,10 +319,15 @@ function addPart(mesh: EditMesh, name: string, lift?: number): string {
   return id;
 }
 
-function mergeActive(): void {
+/** Merge the part `id` DOWN into the part before it in order — append its geometry
+ *  to the target mesh (same model frame, zero delta) and drop the now-merged source.
+ *  No-op when `id` is the first / only part (nothing above to merge into). The one
+ *  weld used by BOTH the viewport "merge →" button (active part) and the outliner
+ *  row's merge verb (req_1296) — so the two paths can never diverge. */
+function mergeDown(id: string): void {
   ensureInit();
   const model = store.openModelId; if (!model) return;
-  const i = store.parts.findIndex((p) => p.id === store.activeId);
+  const i = store.parts.findIndex((p) => p.id === id);
   if (i <= 0) return; // first part / none → nothing above to merge into
   const target = store.parts[i - 1];
   const src = store.parts[i];
@@ -332,6 +337,10 @@ function mergeActive(): void {
   commit({ kind: 'partMeshUpdated', model, id: target.id, mesh: mergeMesh(target.mesh, src.mesh, [0, 0, 0]) }, 'mesh', 'record');
   commit({ kind: 'partRemoved', model, id: src.id }, 'structure', 'record');
   setActive(target.id);
+}
+
+function mergeActive(): void {
+  if (store.activeId) mergeDown(store.activeId);
 }
 
 function addCube(diameter: number, height: number): string {
@@ -390,6 +399,8 @@ function runAction(id: string, action: LayerStripAction): void {
   } else if (action === 'move-down') {
     if (i >= store.parts.length - 1) return;
     commit({ kind: 'partReordered', model, id, dir: 'down' }, 'structure', 'record');
+  } else if (action === 'merge-down') {
+    mergeDown(id); // fold this layer into the one above it (req_1296)
   } else if (action === 'delete') {
     commit({ kind: 'partRemoved', model, id }, 'structure', 'record');
     if (store.activeId === id) setActive(store.parts[Math.min(i, store.parts.length - 1)]?.id ?? null);

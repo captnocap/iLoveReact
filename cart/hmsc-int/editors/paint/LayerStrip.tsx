@@ -20,7 +20,7 @@ const T = GAME_CHROME.tokens.color;
 
 const PREVIEW = Object.freeze({ w: 34, h: 24 });
 
-export type LayerStripAction = 'visibility' | 'duplicate' | 'move-up' | 'move-down' | 'delete';
+export type LayerStripAction = 'visibility' | 'duplicate' | 'move-up' | 'move-down' | 'merge-down' | 'delete';
 export type LayerStripRowModel = {
   id: string;
   name: string;
@@ -31,6 +31,8 @@ export type LayerStripRowModel = {
   preview: any;
   canMoveUp?: boolean;
   canMoveDown?: boolean;
+  /** when set, the row shows a merge verb that folds it into the layer above it. */
+  canMerge?: boolean;
 };
 
 export function LayerStackStrip(props: {
@@ -130,6 +132,9 @@ function GenericLayerRow(props: {
         <LayerButton icon="Copy" label="Duplicate layer" onPress={() => props.onAction(row.id, 'duplicate')} />
         <LayerButton icon="ArrowUp" label="Move layer up" disabled={!row.canMoveUp} onPress={() => props.onAction(row.id, 'move-up')} />
         <LayerButton icon="ArrowDown" label="Move layer down" disabled={!row.canMoveDown} onPress={() => props.onAction(row.id, 'move-down')} />
+        {row.canMerge !== undefined ? (
+          <LayerButton icon="Merge" label="Merge into the layer above — fuse this layer down into the one above it" disabled={!row.canMerge} onPress={() => props.onAction(row.id, 'merge-down')} />
+        ) : null}
         <LayerButton icon="Trash2" label="Delete layer" danger onPress={() => props.onAction(row.id, 'delete')} />
       </Row>
     </Pressable>

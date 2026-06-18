@@ -22,6 +22,9 @@ function partRow(part: StudioPart, active: boolean, i: number, count: number): L
     preview: <Box style={{ width: '100%', height: '100%', backgroundColor: part.color }} />,
     canMoveUp: i > 0,
     canMoveDown: i < count - 1,
+    // merge folds this layer into the one above it (req_1296) — disabled on the
+    // topmost row, where there's nothing above to merge into.
+    canMerge: i > 0,
   };
 }
 
