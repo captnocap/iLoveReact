@@ -1602,51 +1602,121 @@ export function connectVerts(m: EditMesh, vA: number, vB: number): EditMesh | nu
 // (the corner vert is KEPT for any third face still using it). Manifold edges only
 // (exactly 2 incident faces); returns m unchanged otherwise. Pure + headless.
 
+/** Does a face's loop contain the undirected edge (x,y) as consecutive corners? */
+function faceHasEdge(f: EditMeshFace, x: number, y: number): boolean {
+  const L = f.loop;
+  for (let i = 0; i < L.length; i += 1) {
+    const u = L[i], v = L[(i + 1) % L.length];
+    if ((u === x && v === y) || (u === y && v === x)) return true;
+  }
+  return false;
+}
+
+/** Drop verts used by no face, reindexing every loop (the deleteFaces prune, reused
+ *  so bevel doesn't leave the old sharp-corner verts behind as orphan dots). Pure. */
+function pruneOrphanVerts(m: EditMesh): EditMesh {
+  const used = new Set<number>();
+  for (const f of m.faces) for (const vi of f.loop) used.add(vi);
+  if (used.size === m.verts.length) return m;
+  const remap = new Map<number, number>();
+  const verts: V3[] = [];
+  m.verts.forEach((v, i) => { if (used.has(i)) { remap.set(i, verts.length); verts.push([v[0], v[1], v[2]]); } });
+  return { ...m, verts, faces: m.faces.map((f) => ({ ...f, loop: f.loop.map((vi) => remap.get(vi)!) })) };
+}
+
 export function bevelEdge(m: EditMesh, edge: Edge, width: number): EditMesh {
   const [a, b] = edge;
   if (a === b || !m.verts[a] || !m.verts[b] || width <= 0) return m;
   const incident = facesUsingEdges(m, [edge]);
   if (incident.length !== 2) return m; // boundary / non-manifold → not a clean bevel
+  const [f0i, f1i] = incident;
+
+  const va = m.verts[a], vb = m.verts[b];
+  const eLen = Math.hypot(vb[0] - va[0], vb[1] - va[1], vb[2] - va[2]) || 1;
+  const eDir: V3 = [(vb[0] - va[0]) / eLen, (vb[1] - va[1]) / eLen, (vb[2] - va[2]) / eLen];
+  const mid: V3 = [(va[0] + vb[0]) / 2, (va[1] + vb[1]) / 2, (va[2] + vb[2]) / 2];
+
+  // For an incident face, the in-plane direction PERPENDICULAR to the edge, pointing
+  // into the face interior — the way its edge recedes. (The old code slid toward a
+  // corner vertex, which skewed the chamfer on non-rectangular faces and made it a
+  // sliver when a neighbour edge was short — req_1272.) `reach` = how far the face
+  // extends that way, to clamp the width so the new edge stays inside the face.
+  const recede = (fi: number): { dir: V3; reach: number } => {
+    const f = m.faces[fi];
+    const n = faceNormal(m, f);
+    let d = cross(n, eDir);
+    const c = faceCentroid(m, f);
+    if (dot(d, [c[0] - mid[0], c[1] - mid[1], c[2] - mid[2]]) < 0) d = [-d[0], -d[1], -d[2]];
+    const dl = Math.hypot(d[0], d[1], d[2]) || 1;
+    d = [d[0] / dl, d[1] / dl, d[2] / dl];
+    let reach = 0;
+    for (const vi of f.loop) { const v = m.verts[vi]; reach = Math.max(reach, (v[0] - va[0]) * d[0] + (v[1] - va[1]) * d[1] + (v[2] - va[2]) * d[2]); }
+    return { dir: d, reach };
+  };
+  const r0 = recede(f0i), r1 = recede(f1i);
+  const w = Math.min(width, r0.reach * 0.9, r1.reach * 0.9); // symmetric, kept inside both faces
+  if (w <= 1e-6) return m;
 
   const verts: V3[] = m.verts.map((v) => [v[0], v[1], v[2]]);
-  // the in-face neighbour of corner `c` that ISN'T `other` — the edge we slide along.
-  const slideTarget = (f: EditMeshFace, c: number, other: number): number => {
-    const L = f.loop, i = L.indexOf(c);
-    const prev = L[(i + L.length - 1) % L.length], next = L[(i + 1) % L.length];
-    return next === other ? prev : next;
-  };
-  const slid = (c: number, target: number): V3 => {
-    const p = verts[c], q = verts[target];
-    const d: V3 = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
-    const len = Math.hypot(d[0], d[1], d[2]) || 1;
-    const tt = Math.min(width, len * 0.45) / len; // clamp so the slide can't pass the far vert
-    return [p[0] + d[0] * tt, p[1] + d[1] * tt, p[2] + d[2] * tt];
+  const mk = (base: V3, d: V3): number => { const i = verts.length; verts.push([base[0] + d[0] * w, base[1] + d[1] * w, base[2] + d[2] * w]); return i; };
+  const a0 = mk(va, r0.dir), b0 = mk(vb, r0.dir); // F0's receded edge
+  const a1 = mk(va, r1.dir), b1 = mk(vb, r1.dir); // F1's receded edge
+
+  // replace ONE occurrence of `from` in a face loop (+ its uv) with `repl`.
+  const splice1 = (f: EditMeshFace, from: number, repl: number[]): EditMeshFace => {
+    const i = f.loop.indexOf(from);
+    if (i < 0) return f;
+    const loop = f.loop.slice(); loop.splice(i, 1, ...repl);
+    let uv = f.uv;
+    if (uv) { const u = uv.slice(); u.splice(i, 1, ...repl.map(() => [uv![i][0], uv![i][1]] as V2)); uv = u; }
+    return { ...f, loop, uv };
   };
 
-  // each incident face gets slid copies of a and b; rewrite the face to use them.
-  const faces: EditMeshFace[] = m.faces.map((f) => ({ ...f, loop: f.loop.slice(), uv: f.uv ? f.uv.map((p) => [p[0], p[1]] as V2) : undefined }));
-  const sides: { aNew: number; bNew: number }[] = [];
-  for (const fi of incident) {
-    const f = m.faces[fi];
-    const aNew = verts.length; verts.push(slid(a, slideTarget(f, a, b)));
-    const bNew = verts.length; verts.push(slid(b, slideTarget(f, b, a)));
-    const loop = faces[fi].loop;
-    loop[loop.indexOf(a)] = aNew;
-    loop[loop.indexOf(b)] = bNew;
-    sides.push({ aNew, bNew });
-  }
+  // recede each incident face's edge to its new verts.
+  const faces: EditMeshFace[] = m.faces.map((f, fi) => {
+    if (fi === f0i) return splice1(splice1(f, a, [a0]), b, [b0]);
+    if (fi === f1i) return splice1(splice1(f, a, [a1]), b, [b1]);
+    return f;
+  });
 
-  // mesh centroid → outward orientation for the three new faces.
+  // Absorb the new corner verts into the OTHER faces at each endpoint so the corner
+  // bevels CLEANLY — no pointy cap triangle (req_1272). For endpoint p (new verts p0
+  // on F0, p1 on F1): in each other face Fk using p, replace p with the verts its two
+  // p-edges connect to (edge shared with F0 → p0, with F1 → p1, else keep p). A
+  // degree-3 corner's single other face becomes a clean pentagon and the sharp vert
+  // is freed (pruned below) → no cap. A degree-2 fold (no other face) or a high-valence
+  // corner (≥4 faces, where absorption leaves the sharp vert still in use and a residual
+  // gap) gets a single triangle cap [p, p0, p1], which closes that gap manifold.
   let cx = 0, cy = 0, cz = 0;
   for (const v of m.verts) { cx += v[0]; cy += v[1]; cz += v[2]; }
   const C: V3 = [cx / m.verts.length, cy / m.verts.length, cz / m.verts.length];
+  const f0 = m.faces[f0i], f1 = m.faces[f1i];
+  const endpoint = (p: number, p0: number, p1: number) => {
+    let absorbed = false;
+    for (let fi = 0; fi < faces.length; fi += 1) {
+      if (fi === f0i || fi === f1i) continue;
+      const orig = m.faces[fi];
+      const i = orig.loop.indexOf(p);
+      if (i < 0) continue;
+      const L = orig.loop, prev = L[(i + L.length - 1) % L.length], next = L[(i + 1) % L.length];
+      const side = (nb: number): number => (faceHasEdge(f0, nb, p) ? p0 : faceHasEdge(f1, nb, p) ? p1 : p);
+      const left = side(prev), right = side(next);
+      const repl = left === right ? [left] : [left, right];
+      faces[fi] = splice1(faces[fi], p, repl);
+      absorbed = true;
+    }
+    const stillUsed = faces.some((f) => f.loop.includes(p));
+    if (!absorbed || stillUsed) { const loop = orientOutward(verts, [p, p0, p1], C); faces.push({ loop, uv: faceSquareUV(verts, loop) }); }
+  };
+  endpoint(a, a0, a1);
+  endpoint(b, b0, b1);
 
-  const [s0, s1] = sides;
-  const add = (raw: number[]) => { const loop = orientOutward(verts, raw, C); faces.push({ loop, uv: faceSquareUV(verts, loop) }); };
-  add([s0.aNew, s0.bNew, s1.bNew, s1.aNew]); // the chamfer quad
-  add([a, s0.aNew, s1.aNew]);                // corner cap at a
-  add([b, s0.bNew, s1.bNew]);                // corner cap at b
-  return { ...m, verts, faces };
+  // the chamfer face bridging the two receded edges, wound outward.
+  const cham = orientOutward(verts, [a0, b0, b1, a1], C);
+  faces.push({ loop: cham, uv: faceSquareUV(verts, cham) });
+
+  // the original sharp-corner verts are now used by no face — drop them (no orphan dots).
+  return pruneOrphanVerts({ ...m, verts, faces });
 }
 
 /** Bevel (chamfer) a single vertex (req_1266): cut the corner off. Each incident

@@ -1063,18 +1063,36 @@ test('connectVerts refuses adjacent corners (the edge already exists) and foreig
 
 // ── bevel: chamfer a manifold edge (req_1265) ──────────────────────────────────
 
-test('bevelEdge chamfers a cube edge: 3 new faces, 4 new verts, still watertight', () => {
+test('bevelEdge chamfers a cube edge cleanly: a chamfer quad, no pointy caps, watertight (req_1272)', () => {
   const box = cuboid(2, 2, 2);
-  // the top (+Y) face is loop [4,7,6,5]; edge 4–5 is one of its boundary edges.
+  // top (+Y) face is loop [4,7,6,5]; edge 4–5 is shared with the front (−Z) face.
   const e = meshEdges(box).find(([a, b]) => (a === 4 && b === 5))!;
-  const before = box.faces.length, beforeV = box.verts.length;
   const out = bevelEdge(box, e, 2 / 16);
   assert(out !== box, 'a manifold edge bevels');
-  assertEqual(out.verts.length, beforeV + 4, 'four slid corner verts added');
-  assertEqual(out.faces.length, before + 3, 'a chamfer quad + two corner caps added');
+  // 4 new verts, the 2 original corner verts pruned as orphans → net +2.
+  assertEqual(out.verts.length, box.verts.length + 2, 'net +2 verts (4 added, 2 sharp corners pruned)');
+  // exactly ONE new face (the chamfer): the two side faces ABSORB the corner (no caps).
+  assertEqual(out.faces.length, box.faces.length + 1, 'just the chamfer face is added — corners absorbed, no caps');
   assertEqual(meshHealth(out).errors, 0, 'the bevelled cube has no topological errors');
-  // the original sharp edge 4–5 is gone (its corners slid to fresh indices).
-  assert(!meshEdges(out).some(([a, b]) => a === 4 && b === 5), 'the original sharp edge is replaced');
+  assert(!validateMesh(out).some((i) => i.kind === 'orphan-vertex'), 'no orphan corner verts left behind');
+  // the absorbing side faces became pentagons; nothing degenerated to a pointy sliver.
+  assert(out.faces.filter((f) => f.loop.length === 5).length === 2, 'the two adjacent faces became clean pentagons');
+  assert(out.faces.every((f) => f.loop.length >= 4), 'no pointy triangle caps were created');
+});
+
+test('two bevels in a row stay watertight — corners absorbed, no holes (req_1272)', () => {
+  // bevel one cube edge, then bevel another edge of the result (whose endpoints now sit
+  // on the higher-valence beveled corners) — the chamfer must still close cleanly.
+  const box = cuboid(2, 2, 2);
+  const e1 = meshEdges(box).find(([a, b]) => a === 4 && b === 5)!;
+  const once = bevelEdge(box, e1, 2 / 16);
+  // pick any manifold edge of the result that touches the prior bevel's new geometry.
+  const e2 = meshEdges(once).find((e) => facesUsingEdges(once, [e]).length === 2 && (e[0] >= box.verts.length - 2 || e[1] >= box.verts.length - 2));
+  assert(!!e2, 'found a manifold edge near the first bevel');
+  const twice = bevelEdge(once, e2!, 1 / 16);
+  assert(twice !== once, 'the second edge bevels too');
+  assertEqual(meshHealth(twice).errors, 0, 'two stacked bevels leave no topological errors');
+  assert(!validateMesh(twice).some((i) => i.kind === 'orphan-vertex'), 'no orphan verts after stacked bevels');
 });
 
 test('bevelEdge declines a boundary / non-manifold edge', () => {
