@@ -1101,6 +1101,39 @@ test('bevelEdge declines a boundary / non-manifold edge', () => {
   assertEqual(bevelEdge(flat, e, 2 / 16), flat, 'a boundary edge (1 face) is left unchanged');
 });
 
+test('bevelEdge never throws + stays clean on a loop-cut mesh (high-valence corners) (req_1278)', () => {
+  // a loop cut makes degree-4 corners and coplanar seam faces — the cases that used to
+  // CRASH the bevel (so the edge button did nothing) or leave degenerate faces.
+  const m = loopCut(cuboid(1, 1, 1), 0, 1, 0.3);
+  let bevelled = 0, flat = 0;
+  for (const e of meshEdges(m)) {
+    if (facesUsingEdges(m, [e]).length !== 2) continue;
+    const out = bevelEdge(m, e, 2 / 16);          // must not throw
+    if (out === m) { flat += 1; continue; }       // a flat seam edge → correctly refused
+    bevelled += 1;
+    assertEqual(validateMesh(out).filter((i) => i.severity === 'error').length, 0, 'a loop-cut corner bevel stays error-free');
+  }
+  assert(bevelled > 0, 'real corner edges still bevel');
+  assert(flat > 0, 'coplanar seam edges are refused (no degenerate caps)');
+});
+
+test('bevelEdge refuses a FLAT (coplanar) edge — nothing to chamfer (req_1278)', () => {
+  // splitting a cube top face along a diagonal makes two coplanar faces sharing the
+  // diagonal; that seam has no dihedral angle, so bevel must no-op (not crash/degenerate).
+  const split = connectVerts(cuboid(2, 2, 2), 4, 6)!; // top face [4,7,6,5] → two tris sharing 4–6
+  const seam = meshEdges(split).find(([a, b]) => a === 4 && b === 6)!;
+  assertEqual(facesUsingEdges(split, [seam]).length, 2, 'the seam is a 2-face (manifold) edge');
+  assertEqual(bevelEdge(split, seam, 2 / 16), split, 'a coplanar seam is left unchanged');
+});
+
+test('bevelEdge tolerates a face with a malformed (short) uv array — no crash (req_1278)', () => {
+  const box = cuboid(1, 1, 1);
+  const bad: EditMesh = { ...box, faces: box.faces.map((f, i) => (i === 0 && f.uv ? { ...f, uv: f.uv.slice(0, 2) } : f)) };
+  const e = meshEdges(bad).find(([a, b]) => a === 4 && b === 5)!;
+  const out = bevelEdge(bad, e, 2 / 16);          // used to throw on uv[i] undefined
+  assert(out !== bad, 'still bevels despite the malformed uv');
+});
+
 test('bevelVertex chamfers a cube corner: 3 new verts, a cap tri, still watertight', () => {
   const box = cuboid(2, 2, 2);
   // vertex 0 is a cube corner shared by 3 faces (bottom, front, left).

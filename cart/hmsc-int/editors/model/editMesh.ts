@@ -1630,6 +1630,11 @@ export function bevelEdge(m: EditMesh, edge: Edge, width: number): EditMesh {
   const incident = facesUsingEdges(m, [edge]);
   if (incident.length !== 2) return m; // boundary / non-manifold → not a clean bevel
   const [f0i, f1i] = incident;
+  // A FLAT edge (the two faces are coplanar — e.g. a loop-cut seam) has no dihedral
+  // angle to chamfer; beveling it would fold the corner caps into zero-area faces
+  // (req_1278). Refuse it, like a boundary edge.
+  const n0 = faceNormal(m, m.faces[f0i]), n1 = faceNormal(m, m.faces[f1i]);
+  if (Math.abs(n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]) > 0.999) return m;
 
   const va = m.verts[a], vb = m.verts[b];
   const eLen = Math.hypot(vb[0] - va[0], vb[1] - va[1], vb[2] - va[2]) || 1;
@@ -1668,7 +1673,7 @@ export function bevelEdge(m: EditMesh, edge: Edge, width: number): EditMesh {
     if (i < 0) return f;
     const loop = f.loop.slice(); loop.splice(i, 1, ...repl);
     let uv = f.uv;
-    if (uv) { const u = uv.slice(); u.splice(i, 1, ...repl.map(() => [uv![i][0], uv![i][1]] as V2)); uv = u; }
+    if (uv) { const u = uv.slice(); const base = uv[i] ?? [0.5, 0.5]; u.splice(i, 1, ...repl.map(() => [base[0], base[1]] as V2)); uv = u; }
     return { ...f, loop, uv };
   };
 
@@ -1693,7 +1698,9 @@ export function bevelEdge(m: EditMesh, edge: Edge, width: number): EditMesh {
   const f0 = m.faces[f0i], f1 = m.faces[f1i];
   const endpoint = (p: number, p0: number, p1: number) => {
     let absorbed = false;
-    for (let fi = 0; fi < faces.length; fi += 1) {
+    // iterate the ORIGINAL faces only — a cap pushed by the first endpoint must not be
+    // re-read here (it has no m.faces entry; the old `faces.length` bound crashed on it).
+    for (let fi = 0; fi < m.faces.length; fi += 1) {
       if (fi === f0i || fi === f1i) continue;
       const orig = m.faces[fi];
       const i = orig.loop.indexOf(p);

@@ -2184,7 +2184,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   onPress={() => {
                     const edge = meshEdges(activePart.mesh)[[...sel.edges][0]];
                     if (!edge) return;
-                    if (bevelEdge(activePart.mesh, edge, STUDIO.bevelMeters) === activePart.mesh) { toast('bevel needs a manifold edge (shared by exactly 2 faces)'); return; }
+                    if (bevelEdge(activePart.mesh, edge, STUDIO.bevelMeters) === activePart.mesh) { toast('bevel needs a sharp manifold edge (2 faces at an angle — not a flat seam)'); return; }
                     openBevel('edge', [...sel.edges][0]);
                   }}
                   tooltip="Bevel edge — chamfer the selected edge into a flat face; opens a popup to size the bevel before applying (manifold edges only)"
