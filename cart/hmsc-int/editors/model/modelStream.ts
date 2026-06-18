@@ -211,19 +211,38 @@ export function modelParts(state: ModelStreamState, modelId: string | null): Sto
 
 // ── palette helpers (slot → appearance) ──────────────────────────────────────────
 
-/** The default palette minted on first paint: a few colour slots (each with a small
- *  set of possible colours that `variant` cycles) + a couple of material slots. */
+/** The default palette minted on first paint: a starter SWATCH ROW of plain single
+ *  colours (the common case — most faces are just one colour, req_1297), plus a couple
+ *  of world-scaled materials. A slot can carry MORE than one colour (then `variant`
+ *  cycles them — the recolour use-case); these start single, so painting is just
+ *  "pick a colour, paint". Material slugs are catalog spec ids (`<board>-<slug>`). */
 export function defaultPalette(): Palette {
   return {
     variant: 0,
     slots: [
-      { id: 0, name: 'Body', pseudo: '#ff4d6d', kind: 'color', colors: ['#c64b53', '#3f6fb0', '#4f9e63', '#dfe3ea', '#d8b24a'] },
-      { id: 1, name: 'Trim', pseudo: '#4d8bff', kind: 'color', colors: ['#20242b', '#8a909c', '#3a3f47'] },
-      { id: 2, name: 'Glass', pseudo: '#3ddc84', kind: 'color', colors: ['#bfe6f2', '#9fd0dc'] },
-      { id: 3, name: 'Brick', pseudo: '#e0a060', kind: 'material', material: { slug: 'brick', variant: 0 }, worldPerTile: 1 },
-      { id: 4, name: 'Grass', pseudo: '#7cd06a', kind: 'material', material: { slug: 'grass', variant: 0 }, worldPerTile: 1.5 },
+      { id: 0, name: 'Slate', pseudo: '#8a93a3', kind: 'color', colors: ['#8a93a3'] },
+      { id: 1, name: 'Red', pseudo: '#c64b53', kind: 'color', colors: ['#c64b53'] },
+      { id: 2, name: 'Orange', pseudo: '#d98a4a', kind: 'color', colors: ['#d98a4a'] },
+      { id: 3, name: 'Yellow', pseudo: '#d8c24a', kind: 'color', colors: ['#d8c24a'] },
+      { id: 4, name: 'Green', pseudo: '#5ec26a', kind: 'color', colors: ['#5ec26a'] },
+      { id: 5, name: 'Blue', pseudo: '#4aa3ff', kind: 'color', colors: ['#4aa3ff'] },
+      { id: 6, name: 'Purple', pseudo: '#8a5bd6', kind: 'color', colors: ['#8a5bd6'] },
+      { id: 7, name: 'Black', pseudo: '#1c1f26', kind: 'color', colors: ['#1c1f26'] },
+      { id: 8, name: 'White', pseudo: '#eef2f7', kind: 'color', colors: ['#eef2f7'] },
+      { id: 9, name: 'Brick', pseudo: '#b06a44', kind: 'material', material: { slug: 'a-brick', variant: 0 }, worldPerTile: 1 },
+      { id: 10, name: 'Grass', pseudo: '#5b9e4a', kind: 'material', material: { slug: 'a-grass', variant: 0 }, worldPerTile: 1.5 },
     ],
   };
+}
+
+/** Append (or reuse) a single-colour slot for `hex` and return its id — the
+ *  "pick any colour and paint" path (req_1297). */
+export function paletteWithColor(palette: Palette, hex: string): { palette: Palette; id: number } {
+  const existing = palette.slots.find((s) => s.kind === 'color' && s.colors?.length === 1 && s.colors[0] === hex);
+  if (existing) return { palette, id: existing.id };
+  const id = palette.slots.reduce((m, s) => Math.max(m, s.id), -1) + 1;
+  const slot: SlotDef = { id, name: hex, pseudo: hex, kind: 'color', colors: [hex] };
+  return { palette: { ...palette, slots: [...palette.slots, slot] }, id };
 }
 
 export function slotById(palette: Palette | null | undefined, id: number): SlotDef | null {

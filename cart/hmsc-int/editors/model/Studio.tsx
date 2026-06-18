@@ -55,7 +55,8 @@ import {
 } from './meshSelect';
 import { pickFaceCell, brushCells, faceCellGrid, PAINT_CELL_UNITS, type PaintCells, type PaintTarget, type FaceHit } from './meshPaint';
 import { PaintGridOverlay } from './meshPaintOverlay';
-import { defaultPalette, slotById, type Palette } from './modelStream';
+import { PaintPanel } from './PaintPanel';
+import { defaultPalette, paletteWithColor, slotById, type Palette } from './modelStream';
 import {
   TransformGizmo, NormalHandle, AXIS_DIR, axisScreen, dragWorldDistance, pickGizmoHandle, pickNormalHandle, rotationSign, selectionVertIndices, selectionFaceIndices,
   type GizmoTool, type GizmoHit,
@@ -2052,6 +2053,26 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           />
         : null}
 
+      {/* PAINT controls (req_1297): the floating panel — normal colours + custom
+          colour, materials, brush/erase/view/variant/clear. Paint mode only. */}
+      {selMode === 'paint' && tex ? (
+        <PaintPanel
+          palette={livePalette}
+          activeSlot={activeSlot}
+          erase={paintErase}
+          view={paintView}
+          brush={paintBrush}
+          brushSizes={PAINT_BRUSH_SIZES}
+          onPickSlot={(id) => { setActiveSlot(id); setPaintErase(false); }}
+          onAddColor={(hex) => { const { palette, id } = paletteWithColor(livePalette, hex); props.onSetPalette(palette); setActiveSlot(id); setPaintErase(false); }}
+          onToggleErase={() => setPaintErase(!paintErase)}
+          onToggleView={() => setPaintView(paintView === 'pseudo' ? 'painted' : 'pseudo')}
+          onSetBrush={setPaintBrush}
+          onCycleVariant={() => { const max = Math.max(1, ...livePalette.slots.map((s) => (s.kind === 'color' ? (s.colors?.length ?? 1) : 1))); props.onSetPalette({ ...livePalette, variant: (livePalette.variant + 1) % max }); }}
+          onClear={() => { props.parts.forEach((p) => { if (p.paint && Object.keys(p.paint).length) props.onEditPaint(p.id, {}); }); paintRef.current = {}; touchedRef.current.clear(); }}
+        />
+      ) : null}
+
       {/* PAINT diagnostics (req_1197): a compact readout — is a texture made + shown,
           and how many cells are painted. Bottom-centre, paint mode only. */}
       {selMode === 'paint' ? (
@@ -2161,50 +2182,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             </Pressable>
           );
         })}
-        {/* PAINT mode (the corrected painter, req_1288): SLOT chips (you paint a
-            placement, recolour via the palette), a pseudo/painted view toggle, a
-            variant cycler (recolour the SAME paint), the eraser + brush + clear. */}
-        {selMode === 'paint' ? (
-          <>
-            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
-            {livePalette.slots.map((s) => {
-              const on = !paintErase && activeSlot === s.id;
-              return (
-                <Pressable key={s.id} onPress={() => { setActiveSlot(s.id); setPaintErase(false); }} tooltip={`Paint the ${s.name} slot${s.kind === 'material' ? ' (material)' : ''} — recolour later from the palette`} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 6, paddingRight: 7, height: 20, borderRadius: 4, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderWidth: on ? 2 : 1, borderColor: on ? '#ffffff' : '#2c4a6a' }}>
-                  <Box style={{ width: 11, height: 11, borderRadius: 3, backgroundColor: s.pseudo }} />
-                  <Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{s.name}</Text>
-                </Pressable>
-              );
-            })}
-            {/* eraser — drops the covered cells. */}
-            <Pressable onPress={() => setPaintErase(!paintErase)} tooltip="Eraser — painting removes cells instead of assigning a slot" style={{ ...STEP_BTN, backgroundColor: paintErase ? '#2a3f5e' : '#13233aee', borderColor: paintErase ? '#5b8fd6' : '#2c4a6a' }}>
-              <Text fontSize={10} color={paintErase ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>erase</Text>
-            </Pressable>
-            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
-            {/* view: the colourless slot layer vs the palette-resolved paint. */}
-            <Pressable onPress={() => setPaintView(paintView === 'pseudo' ? 'painted' : 'pseudo')} tooltip="Toggle the colourless slot (pseudo) view vs the painted (palette) view" style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
-              <Text fontSize={10} color="#cfe2ff" style={{ fontFamily: 'monospace' }}>{paintView === 'pseudo' ? 'pseudo' : 'painted'}</Text>
-            </Pressable>
-            {/* variant: recolour the SAME paint by cycling the palette's colour sets. */}
-            <Pressable onPress={() => { const max = Math.max(1, ...livePalette.slots.map((s) => (s.kind === 'color' ? (s.colors?.length ?? 1) : 1))); props.onSetPalette({ ...livePalette, variant: (livePalette.variant + 1) % max }); }} tooltip="Recolour — cycle the palette variant (every colour slot picks its next colour)" style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
-              <Text fontSize={10} color="#cfe2ff" style={{ fontFamily: 'monospace' }}>variant {livePalette.variant + 1}</Text>
-            </Pressable>
-            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
-            <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>brush</Text>
-            {PAINT_BRUSH_SIZES.map((s) => {
-              const on = paintBrush === s;
-              return (
-                <Pressable key={s} onPress={() => setPaintBrush(s)} tooltip={`Brush size ${s} — paint a ${s}-cell-radius disc per dab`} style={{ ...STEP_BTN, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
-                  <Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{s}</Text>
-                </Pressable>
-              );
-            })}
-            {/* clear all paint on every part (undoable per part). */}
-            <Pressable onPress={() => { props.parts.forEach((p) => { if (p.paint && Object.keys(p.paint).length) props.onEditPaint(p.id, {}); }); paintRef.current = {}; touchedRef.current.clear(); }} tooltip="Clear all paint on this model" style={{ ...STEP_BTN, borderColor: '#a14545' }}>
-              <Text fontSize={10} color="#f0a0a0" style={{ fontFamily: 'monospace' }}>clear paint</Text>
-            </Pressable>
-          </>
-        ) : null}
+        {/* PAINT controls moved OUT of this toolbar into the floating PaintPanel
+            (req_1297 — the bar was overcrowded); only the mode tabs stay here. */}
         {/* SYMMETRIZE (req_1190/1201): a WHOLE-MESH op, so shown in EVERY mode (it
             used to be nested in the non-rig tool block → invisible in rig mode, where
             the user went looking for it). Pick the GOOD half → it rebuilds the other
