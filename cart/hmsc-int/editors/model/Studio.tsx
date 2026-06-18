@@ -779,17 +779,21 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     setDraft(null);
   };
   // offset (in the popup's unit) → mesh-meters along the cut axis (0..size).
-  const lcOffsetMeters = (info: LoopCutAxis): number =>
-    lc!.unit === 'percent' ? (lc!.offset / 100) * info.sizeMeters : lc!.offset / info.unitsPerMeter;
+  const lcOffsetMetersOf = (info: LoopCutAxis, offsetUnits: number): number =>
+    lc!.unit === 'percent' ? (offsetUnits / 100) * info.sizeMeters : offsetUnits / info.unitsPerMeter;
+  const lcOffsetMeters = (info: LoopCutAxis): number => lcOffsetMetersOf(info, lc!.offset);
   // Build the preview: TAG the clicked face, then cut — the tag rides onto the
-  // face's pieces (so the selection survives the cut, like Blockbench).
-  const lcCutMesh = (info: LoopCutAxis): EditMesh =>
-    loopCutRange(tagOneFace(activePart!.mesh, lc!.faceIndex, 1), info.axis, info.lo, info.hi, lc!.cuts, lcOffsetMeters(info));
+  // face's pieces (so the selection survives the cut, like Blockbench). lcCutMeshAt
+  // takes an EXPLICIT offset so the host-owned slide (req_1277) can bake any offset
+  // WITHOUT setLc (which would re-render the bench every move).
+  const lcCutMeshAt = (info: LoopCutAxis, offsetUnits: number): EditMesh =>
+    loopCutRange(tagOneFace(activePart!.mesh, lc!.faceIndex, 1), info.axis, info.lo, info.hi, lc!.cuts, lcOffsetMetersOf(info, offsetUnits));
+  const lcCutMesh = (info: LoopCutAxis): EditMesh => lcCutMeshAt(info, lc!.offset);
   // ── Loop-cut SLIDE gizmo (req_1022): a move handle ON the cut so the offset can
   // be dragged on the model (Blockbench), not just typed in the popup. The anchor
   // sits on the (middle) cut plane; dragging the CUT-AXIS arrow drives lc.offset,
   // and the live preview + anchor follow. A separate drag ref from the vert gizmo.
-  const lcDragRef = useRef<null | { axis: { dx: number; dy: number; pxPerUnit: number }; startCx: number; startCy: number; startOffset: number; info: LoopCutAxis }>(null);
+  const lcDragRef = useRef<null | { axis: { dx: number; dy: number; pxPerUnit: number }; startCx: number; startCy: number; startOffset: number; info: LoopCutAxis; lastOffset?: number }>(null);
   const [lcDragAxis, setLcDragAxis] = useState<GizmoHit | null>(null);
   // The cut plane coordinate on the cut axis (the middle cut for cuts>1).
   const lcCutPlaneAt = (info: LoopCutAxis): number => {
@@ -1108,6 +1112,14 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           const ax = axisScreen(lcGizmoAnchor, AXIS_DIR[hit.axis], proj);
           lcDragRef.current = { axis: { dx: ax.dx, dy: ax.dy, pxPerUnit: ax.pxPerUnit }, startCx: lx, startCy: ly, startOffset: lc.offset, info: lcAxisInfo };
           setLcDragAxis(hit);
+          // HOST-OWNED slide (req_1277): the preview already mounted slot
+          // 'studio.draft'; from here onMove streams cut verts straight to it via
+          // patchDynSlot (no setLc/setDraft per move). Seed the live refs so the
+          // wireframe overlay + the readout track the slide off-React.
+          liveDragMeshRef.current = lcCutMesh(lcAxisInfo);
+          gizmoReadoutRef.current = null;
+          gizmoReadoutAnchorRef.current = lcGizmoAnchor;
+          setGizmoDragActive(true);
           return; // grabbed the slide handle → move the cut, not orbit
         }
       }
@@ -1246,8 +1258,12 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     }
     // LOOP-CUT SLIDE drag: map the cut-axis drag to lc.offset. Dragging toward
     // +axis moves the cut that way, which (since a higher offset shrinks the −side
-    // end) DECREASES the offset by the same world distance. The setLc re-previews
-    // and re-anchors the gizmo. Absolute from the frozen start offset (no drift).
+    // end) DECREASES the offset by the same world distance. Absolute from the frozen
+    // start offset (no drift). HOST-OWNED (req_1277): the old path called setLc EVERY
+    // move, which re-rendered the bench AND re-cut the whole mesh + re-uploaded via
+    // the [lc] effect — the same per-event React storm the gizmo drag used to have,
+    // but heavier (re-cut > re-translate). Now it streams the freshly-cut verts
+    // straight to the dyn slot and writes refs; setLc happens ONCE on release.
     const ld = lcDragRef.current;
     if (ld) {
       const r = rectRef.current;
@@ -1260,8 +1276,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       const dOffset = lc!.unit === 'percent' ? (dOffsetMeters * 100) / (info.sizeMeters || 1) : dOffsetMeters * info.unitsPerMeter;
       const max = lc!.unit === 'percent' ? 100 : Math.max(1, info.sizeUnits);
       const next = Math.round(clamp(ld.startOffset + dOffset, 0, max) * 10) / 10; // 1 dp keeps the popup tidy
-      setLc((s) => (s ? { ...s, offset: next } : s));
-      setGizmoReadout(`cut ${fmtUnits(metersToUnits(tMeters))}`);
+      ld.lastOffset = next;
+      const cut = lcCutMeshAt(info, next);
+      liveDragMeshRef.current = cut;
+      gizmoReadoutRef.current = `cut ${fmtUnits(metersToUnits(tMeters))}`;
+      const gd = editMeshToGeometry(cut, (f) => !f.glass);
+      // Until the preview slot exists (race on the first frame), fall back to setLc
+      // so the [lc] effect mounts it; subsequent moves patch in place.
+      if (!patchDynSlot('studio.draft', gd.positions, gd.count)) {
+        setLc((s) => (s ? { ...s, offset: next } : s));
+      }
       return;
     }
     // GIZMO drag: transform the selection, re-lower the working draft (committed
@@ -1357,9 +1381,21 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const onUp = () => {
     if (paintingRef.current) { paintingRef.current = false; lastPaintRef.current = null; commitPaint(); return; } // end a paint stroke → persist
     setGizmoReadout(null); // the drag is ending — drop the live step readout
-    // end a loop-cut slide (the offset already lives in lc; nothing to commit —
-    // Apply commits the whole cut). Just drop the drag + clear the highlight.
-    if (lcDragRef.current) { lcDragRef.current = null; setLcDragAxis(null); return; }
+    // end a loop-cut slide. HOST-OWNED (req_1277): the slide streamed verts to the
+    // slot without setLc, so the offset lives only in the ref — sync it to state ONCE
+    // now (the [lc] effect re-previews at the final offset, matching the slot, and
+    // Apply reads it). Then drop the drag + clear the live refs / readout.
+    if (lcDragRef.current) {
+      const ld = lcDragRef.current;
+      lcDragRef.current = null;
+      setLcDragAxis(null);
+      liveDragMeshRef.current = null;
+      gizmoReadoutRef.current = null;
+      gizmoReadoutAnchorRef.current = null;
+      setGizmoDragActive(false);
+      if (ld.lastOffset !== undefined) setLc((s) => (s ? { ...s, offset: ld.lastOffset! } : s));
+      return;
+    }
     // end a RIG drag: commit the moved pivot/joint to the mesh, drop the draft.
     if (rigDragRef.current) {
       const rd = rigDragRef.current;
