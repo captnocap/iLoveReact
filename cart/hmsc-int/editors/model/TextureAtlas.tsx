@@ -15,7 +15,7 @@ import { Fragment, memo } from 'react';
 import { Box, Image, StaticSurface, Text } from '@reactjit/primitives';
 import { islandColorFor, type TextureType } from './textureize';
 import { storedUVLayout, type V2, type EditMesh } from './editMesh';
-import { faceCellGrid, cellRuns, runAtlasRect, PAINT_CELL_UNITS, type PaintCells } from './meshPaint';
+import { faceCellGrid, cellRects, rectAtlasRect, PAINT_CELL_UNITS, type PaintCells } from './meshPaint';
 import { slotById, slotColor, type Palette } from './modelStream';
 import { MaterialFill } from './MaterialFill';
 import { STUDIO } from './Studio';
@@ -155,10 +155,11 @@ export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts:
               }
               const color = props.pseudo ? sl.pseudo : slotColor(props.palette, g.slot);
               if (!color) continue;
-              // run-merge so a filled face is a few boxes, not thousands (child cap).
-              for (const run of cellRuns(g.cells)) {
-                const r = runAtlasRect(grid, run.cu0, run.cu1, run.cv, px);
-                nodes.push(<Box key={`${part.id}:${g.face}:${g.slot}:${run.cv}:${run.cu0}`} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, backgroundColor: color }} />);
+              // 2D rect-merge so a solid region is ONE box (no per-row seams) and the
+              // box count stays under the layout child cap.
+              for (const rc of cellRects(g.cells)) {
+                const r = rectAtlasRect(grid, rc.cu0, rc.cv0, rc.cu1, rc.cv1, px);
+                nodes.push(<Box key={`${part.id}:${g.face}:${g.slot}:${rc.cv0}:${rc.cu0}`} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, backgroundColor: color }} />);
               }
             }
             return <Fragment key={`paint-${part.id}`}>{nodes}</Fragment>;

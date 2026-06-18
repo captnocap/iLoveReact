@@ -220,13 +220,38 @@ export function cellRuns(cells: Array<[number, number]>): Array<{ cv: number; cu
   return out;
 }
 
-/** Atlas-pixel rect for a horizontal run of cells [cu0..cu1] on row cv — seamless
- *  shared-edge rounding, like cellAtlasRect but spanning the run. */
-export function runAtlasRect(grid: CellGrid, cu0: number, cu1: number, cv: number, texels: number): { x: number; y: number; w: number; h: number } {
+/** Merge a face's cells into maximal 2D RECTANGLES (greedy: extend right, then down
+ *  while the full width is present). A solid region bakes as ONE box — per-row runs
+ *  left thin seams between hundreds of fine rows (req_1303), this removes them. */
+export function cellRects(cells: Array<[number, number]>): Array<{ cu0: number; cv0: number; cu1: number; cv1: number }> {
+  const has = new Set(cells.map(([cu, cv]) => `${cu},${cv}`));
+  const used = new Set<string>();
+  const rects: Array<{ cu0: number; cv0: number; cu1: number; cv1: number }> = [];
+  const sorted = [...cells].sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+  for (const [cu, cv] of sorted) {
+    if (used.has(`${cu},${cv}`)) continue;
+    let cu1 = cu;
+    while (has.has(`${cu1 + 1},${cv}`) && !used.has(`${cu1 + 1},${cv}`)) cu1 += 1;
+    let cv1 = cv;
+    for (let nv = cv + 1; ; nv += 1) {
+      let full = true;
+      for (let x = cu; x <= cu1; x += 1) if (!has.has(`${x},${nv}`) || used.has(`${x},${nv}`)) { full = false; break; }
+      if (!full) break;
+      cv1 = nv;
+    }
+    for (let y = cv; y <= cv1; y += 1) for (let x = cu; x <= cu1; x += 1) used.add(`${x},${y}`);
+    rects.push({ cu0: cu, cv0: cv, cu1, cv1 });
+  }
+  return rects;
+}
+
+/** Atlas-pixel rect for a cell RECTANGLE [cu0..cu1]×[cv0..cv1] — seamless shared-edge
+ *  rounding, clamped to the face slot. One box per solid region → no internal seams. */
+export function rectAtlasRect(grid: CellGrid, cu0: number, cv0: number, cu1: number, cv1: number, texels: number): { x: number; y: number; w: number; h: number } {
   const ax0 = Math.round((grid.u0 + cu0 * grid.cuv) * texels);
   const ax1 = Math.round(Math.min(grid.u0 + (cu1 + 1) * grid.cuv, grid.u1) * texels);
-  const ay0 = Math.round((grid.v0 + cv * grid.cuv) * texels);
-  const ay1 = Math.round(Math.min(grid.v0 + (cv + 1) * grid.cuv, grid.v1) * texels);
+  const ay0 = Math.round((grid.v0 + cv0 * grid.cuv) * texels);
+  const ay1 = Math.round(Math.min(grid.v0 + (cv1 + 1) * grid.cuv, grid.v1) * texels);
   return { x: ax0, y: ay0, w: Math.max(1, ax1 - ax0), h: Math.max(1, ay1 - ay0) };
 }
 
