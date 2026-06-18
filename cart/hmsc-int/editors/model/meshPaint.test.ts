@@ -42,7 +42,7 @@ test('pickFaceCell hits the front (+Z) face and returns a cell inside the face g
 
 test('the cell grid is UNIFORM world-size — an 8u face gets 4 cells at 2u/cell (no slivers)', () => {
   const box = cuboid(8, 8, 8);
-  const grid = faceCellGrid(box, 0, PAINT_CELL_UNITS)!; // 8u edge, full-square uv → scale 8, cuv .25
+  const grid = faceCellGrid(box, 0, 2)!; // explicit 2u/cell: 8u edge → 4 cells (math, not the default)
   assertEqual(grid.nu, 4, '8 units / 2-unit cells = 4 cells across');
   assertEqual(grid.nv, 4, '4 cells down too');
 });

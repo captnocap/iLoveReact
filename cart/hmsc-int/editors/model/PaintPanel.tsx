@@ -18,6 +18,8 @@ export function PaintPanel(props: {
   view: 'pseudo' | 'painted';
   brush: number;
   brushSizes: number[];
+  fill: boolean;
+  onToggleFill: () => void;
   onPickSlot: (id: number) => void;
   onAddColor: (hex: string) => void;
   onToggleErase: () => void;
@@ -85,10 +87,11 @@ export function PaintPanel(props: {
         </Box>
       ) : null}
 
-      {/* BRUSH + erase */}
-      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+      {/* BRUSH + fill + erase */}
+      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
         <Text fontSize={9} color="#6f819c" style={{ fontFamily: 'monospace' }}>brush</Text>
-        {props.brushSizes.map((n) => <Tiny key={n} label={`${n}`} on={props.brush === n} tip={`Brush radius ${n}`} onPress={() => props.onSetBrush(n)} />)}
+        {props.brushSizes.map((n) => <Tiny key={n} label={`${n}`} on={!props.fill && props.brush === n} tip={`Brush radius ${n}`} onPress={() => props.onSetBrush(n)} />)}
+        <Tiny label="fill" on={props.fill} tip="Fill the WHOLE face one colour per click (paint a face flat)" onPress={props.onToggleFill} />
         <Tiny label="erase" on={props.erase} tip="Eraser — remove cells under the brush" onPress={props.onToggleErase} />
       </Box>
 

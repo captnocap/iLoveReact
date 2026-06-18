@@ -558,6 +558,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // the brush; `paintView` toggles the colourless pseudo-slot view vs the painted one.
   const [activeSlot, setActiveSlot] = useHotState<number>('studio:paintSlot', 0);
   const [paintErase, setPaintErase] = useHotState<boolean>('studio:paintErase', false);
+  // FILL mode (req_1298): a click fills the WHOLE hovered face one colour — the
+  // 'I just want this face one colour' path, independent of cell size.
+  const [paintFill, setPaintFill] = useHotState<boolean>('studio:paintFill', false);
   const [paintView, setPaintView] = useHotState<'pseudo' | 'painted'>('studio:paintView', 'painted');
   const [paintBrush, setPaintBrush] = useHotState<number>('studio:paintBrush', 1);
   // PERF (req_1203): the lag was setTex on EVERY mouse-move (a React re-render +
@@ -1119,7 +1122,14 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (!tgt) return null;
     const grid = faceCellGrid(tgt.mesh, hit.faceIndex, STUDIO.paintCellUnits);
     if (!grid) return null;
-    const cells = brushCells(hit, paintBrush, grid);
+    // FILL → every cell of the face (one-colour-per-face); else the brush disc.
+    let cells: Array<[number, number]>;
+    if (paintFill) {
+      cells = [];
+      for (let cv = 0; cv < grid.nv; cv += 1) for (let cu = 0; cu < grid.nu; cu += 1) cells.push([cu, cv]);
+    } else {
+      cells = brushCells(hit, paintBrush, grid);
+    }
     const buf = (paintRef.current[tgt.partId] ||= {});
     for (const [cu, cv] of cells) {
       const key = `${hit.faceIndex}:${cu}:${cv}`;
@@ -2085,6 +2095,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           view={paintView}
           brush={paintBrush}
           brushSizes={PAINT_BRUSH_SIZES}
+          fill={paintFill}
+          onToggleFill={() => setPaintFill(!paintFill)}
           onPickSlot={(id) => { setActiveSlot(id); setPaintErase(false); }}
           onAddColor={(hex) => { const { palette, id } = paletteWithColor(livePalette, hex); props.onSetPalette(palette); setActiveSlot(id); setPaintErase(false); }}
           onToggleErase={() => setPaintErase(!paintErase)}

@@ -23,9 +23,11 @@ import { type CameraSnap } from './meshSelect';
 import { type EditMesh, type EditMeshFace, type V3 } from './editMesh';
 
 const DEG = Math.PI / 180;
-/** model units per paint cell — uniform across every face (16 units = 1 m). */
-export const PAINT_CELL_UNITS = 2;
-/** never make more than this many grid divisions on a face (sanity). */
+/** model units per paint cell — uniform across every face (16 units = 1 m). At 0.5
+ *  (~3 cm) a prop-scale face shows a real grid instead of collapsing to one cell;
+ *  GRID_MAX caps a huge face so the bake/overlay stay bounded. */
+export const PAINT_CELL_UNITS = 0.5;
+/** never make more than this many grid divisions on a face (sanity + perf cap). */
 const GRID_MAX = 64;
 
 // ── small vec helpers (kept local; the gizmo/select math live in their modules) ──
