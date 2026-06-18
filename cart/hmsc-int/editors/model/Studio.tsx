@@ -568,6 +568,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // FILL mode (req_1298): a click fills the WHOLE hovered face one colour — the
   // 'I just want this face one colour' path, independent of cell size.
   const [paintFill, setPaintFill] = useHotState<boolean>('studio:paintFill', false);
+  // PAINT cell size in MODEL UNITS (req_1301): adjustable so a small prop (a gun) can
+  // be painted at fine detail while a big surface stays coarse. Default ~1.5 cm — a
+  // gun face spans several cells, so brush-1 is a dab, not a whole-face fill.
+  const [paintCell, setPaintCell] = useHotState<number>('studio:paintCell', 0.25);
   const [paintView, setPaintView] = useHotState<'pseudo' | 'painted'>('studio:paintView', 'painted');
   const [paintBrush, setPaintBrush] = useHotState<number>('studio:paintBrush', 1);
   // PERF (req_1203): the lag was setTex on EVERY mouse-move (a React re-render +
@@ -1122,7 +1126,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // so a cell maps to exactly one face's slot — no bleed. Returns the hit for the caller.
   const paintProbe = (sx: number, sy: number): FaceHit | null => {
     if (!tex) { paintHoverRef.current = null; return null; }
-    const hit = pickFaceCell(paintTargets(), camSnap(), sx, sy, STUDIO.paintCellUnits);
+    const hit = pickFaceCell(paintTargets(), camSnap(), sx, sy, paintCell);
     paintHoverRef.current = hit;
     return hit;
   };
@@ -1134,7 +1138,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (!hit) return null;
     const tgt = paintTargets()[hit.partIndex];
     if (!tgt) return null;
-    const grid = faceCellGrid(tgt.mesh, hit.faceIndex, STUDIO.paintCellUnits);
+    const grid = faceCellGrid(tgt.mesh, hit.faceIndex, paintCell);
     if (!grid) return null;
     // FILL → every cell of the face (one-colour-per-face); else the brush disc.
     let cells: Array<[number, number]>;
@@ -2011,7 +2015,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           sliceImages={tex.sliceImages}
           palette={livePalette}
           pseudo={paintView === 'pseudo'}
-          paintCell={STUDIO.paintCellUnits}
+          paintCell={paintCell}
           sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}.${paintBakeTick}.${paintView}.${livePalette.variant}.${livePalette.slots.length}`}
         />
       ) : null}
@@ -2093,7 +2097,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         ? <PaintGridOverlay
             parts={paintTargets()}
             getHover={() => paintHoverRef.current}
-            cell={STUDIO.paintCellUnits}
+            cell={paintCell}
             color={paintErase ? '#ff6b6b' : (slotById(livePalette, activeSlot)?.pseudo ?? '#ffffff')}
             camSnap={camSnap}
           />
@@ -2109,13 +2113,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           view={paintView}
           brush={paintBrush}
           brushSizes={PAINT_BRUSH_SIZES}
+          cell={paintCell}
+          onSetCell={setPaintCell}
           fill={paintFill}
-          onToggleFill={() => setPaintFill(!paintFill)}
+          onToggleFill={() => { setPaintFill(!paintFill); setPaintErase(false); }}
           onPickSlot={(id) => { setActiveSlot(id); setPaintErase(false); }}
           onAddColor={(hex) => { const { palette, id } = paletteWithColor(livePalette, hex); props.onSetPalette(palette); setActiveSlot(id); setPaintErase(false); }}
           onToggleErase={() => setPaintErase(!paintErase)}
           onToggleView={() => setPaintView(paintView === 'pseudo' ? 'painted' : 'pseudo')}
-          onSetBrush={setPaintBrush}
+          onSetBrush={(n) => { setPaintBrush(n); setPaintFill(false); }}
           onCycleVariant={() => { const max = Math.max(1, ...livePalette.slots.map((s) => (s.kind === 'color' ? (s.colors?.length ?? 1) : 1))); props.onSetPalette({ ...livePalette, variant: (livePalette.variant + 1) % max }); }}
           onClear={() => { props.parts.forEach((p) => { if (p.paint && Object.keys(p.paint).length) props.onEditPaint(p.id, {}); }); paintRef.current = {}; touchedRef.current.clear(); }}
         />

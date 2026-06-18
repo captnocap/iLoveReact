@@ -18,6 +18,8 @@ export function PaintPanel(props: {
   view: 'pseudo' | 'painted';
   brush: number;
   brushSizes: number[];
+  cell: number;
+  onSetCell: (n: number) => void;
   fill: boolean;
   onToggleFill: () => void;
   onPickSlot: (id: number) => void;
@@ -93,6 +95,15 @@ export function PaintPanel(props: {
         {props.brushSizes.map((n) => <Tiny key={n} label={`${n}`} on={!props.fill && props.brush === n} tip={`Brush radius ${n}`} onPress={() => props.onSetBrush(n)} />)}
         <Tiny label="fill" on={props.fill} tip="Fill the WHOLE face one colour per click (paint a face flat)" onPress={props.onToggleFill} />
         <Tiny label="erase" on={props.erase} tip="Eraser — remove cells under the brush" onPress={props.onToggleErase} />
+      </Box>
+
+      {/* DETAIL — the paint cell size (model units). Finer = more cells per face, so
+          brush-1 is a smaller dab on a small prop. Best set before painting a part. */}
+      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+        <Text fontSize={9} color="#6f819c" style={{ fontFamily: 'monospace' }}>detail</Text>
+        {([['fine', 0.12], ['med', 0.25], ['coarse', 0.6], ['XL', 1.5]] as const).map(([label, n]) => (
+          <Tiny key={label} label={label} on={Math.abs(props.cell - n) < 1e-3} tip={`Cell ≈ ${(n / 16 * 100).toFixed(1)} cm — finer = more cells per face (set before painting)`} onPress={() => props.onSetCell(n)} />
+        ))}
       </Box>
 
       {/* view + variant + clear */}
