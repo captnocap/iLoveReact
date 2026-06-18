@@ -31,7 +31,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../tunables';
 import { useHeldModifiers } from '../useEditorControls';
-import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
+import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from './anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from './wheelMount';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
@@ -39,7 +39,8 @@ import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
 import { StudioOutliner } from './Outliner';
 import { SceneTextureAtlas, STUDIO_TEXTURE_KEY } from './TextureAtlas';
-import { BackdropSurface, BackdropsPanel, backdropQuad, backdropTexKey, imageDims, BACKDROP_PLANES, type Backdrop } from './Backdrops';
+import { BackdropSurface, BackdropsPanel, backdropQuad, backdropTexKey, defaultBackdropPos, imageDims, type Backdrop } from './Backdrops';
+import * as localstore from '@reactjit/hooks/localstore';
 import { textureizeScene, rasterizeAtlas, DEFAULT_TEXTURE_OPTIONS, PIXEL_DENSITIES, type TextureOptions, type TextureType, type RasterSlice } from './textureize';
 import { encodePng } from './png';
 import { exists, mkdir, readFileBase64, writeFileBase64Atomic } from '@reactjit/hooks/fs';
@@ -452,11 +453,19 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // feet on the grid. Toggled by the 'scale' button; interned so the static figure
   // doesn't compete for the sculpt DYN slots. Twig state (survives hot reload).
   const [showScale, setShowScale] = useHotState('studio:showScale', false);
-  // BACKDROPS (req_1280): reference images on the cardinal planes you trace over
-  // while modeling. Twig state (survives hot reload, reset cold) — a tracing aid,
-  // not model data. The setup panel is transient. See ./Backdrops.tsx.
-  const [backdrops, setBackdrops] = useHotState<Backdrop[]>('studio:backdrops', []);
+  // BACKDROPS (req_1280): reference images you trace over while modeling. Persisted
+  // to DISK-backed localstore (req_1283) — NOT useHotState, which currently wipes on
+  // every hot reload (see Present memory), so a reload was blowing away the image +
+  // its placement. localstore survives both reload AND restart, and you don't want to
+  // re-import a blueprint each session anyway. The setup panel + the gizmo selection
+  // (req_1285) are transient. See ./Backdrops.tsx.
+  const BACKDROPS_KEY = 'studio:backdrops';
+  const [backdrops, setBackdropsState] = useState<Backdrop[]>(() => localstore.getJson<Backdrop[]>(BACKDROPS_KEY, []));
+  const setBackdrops = (u: Backdrop[] | ((p: Backdrop[]) => Backdrop[])) =>
+    setBackdropsState((prev) => { const next = typeof u === 'function' ? (u as (p: Backdrop[]) => Backdrop[])(prev) : u; localstore.setJson(BACKDROPS_KEY, next); return next; });
   const [backdropPanel, setBackdropPanel] = useState(false);
+  // the backdrop currently being positioned by the transform gizmo (req_1285), or null.
+  const [moveBackdropId, setMoveBackdropId] = useState<string | null>(null);
   const backdropIdRef = useRef(0);
   // MIRROR (req_1183/1186): symmetric editing — a gizmo transform is reflected onto
   // each moved vert's partner across every ENABLED plane (X/Y/Z, multi-select for the
@@ -605,6 +614,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // plane. The picture's pixel size (read straight from the PNG/JPEG header) sets
   // the quad's aspect so it traces without stretch. The default plane cycles per
   // add so a front/side/top set lands on three different walls automatically.
+  // each new backdrop lands on the next plane in this cycle so a front/side/top set
+  // auto-distributes onto different walls (the gizmo nudges from there).
+  const BACKDROP_PLANE_CYCLE = ['front', 'left', 'top', 'back', 'right', 'bottom'] as const;
   const addBackdrop = (rawPath: string) => {
     const path = rawPath.trim();
     if (!path) return;
@@ -613,28 +625,34 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (!b64) { toast(`could not read: ${path}`); return; }
     const dims = imageDims(base64ToBytes(b64));
     const aspect = dims ? dims.w / dims.h : 1;
-    const planeDef = BACKDROP_PLANES[backdrops.length % BACKDROP_PLANES.length];
+    const plane = BACKDROP_PLANE_CYCLE[backdrops.length % BACKDROP_PLANE_CYCLE.length];
     backdropIdRef.current += 1;
     const id = `bd${Math.floor(nowMs())}_${backdropIdRef.current}`;
     const name = (path.split('/').pop() || path).slice(0, 40);
     const bd: Backdrop = {
       id, name, source: texSource(b64), aspect,
-      plane: planeDef.key, scale: 4, offset: planeDef.defOffset, opacity: 0.5, flipU: false, visible: true,
+      plane, scale: 4, pos: defaultBackdropPos(plane), opacity: 0.5, flipU: false, visible: true,
     };
     setBackdrops((list) => [...list, bd]);
     setBackdropPanel(true);
-    toast(`backdrop · ${name}${dims ? ` (${dims.w}×${dims.h})` : ''}`);
+    toast(`backdrop · ${name}${dims ? ` (${dims.w}×${dims.h})` : ''} — hit Move to place it`);
   };
   const updateBackdrop = (id: string, patch: Partial<Backdrop>) =>
     setBackdrops((list) => list.map((b) => (b.id === id ? { ...b, ...patch } : b)));
-  const removeBackdrop = (id: string) =>
+  const removeBackdrop = (id: string) => {
     setBackdrops((list) => list.filter((b) => b.id !== id));
-  // The visible backdrops, lowered to renderable quads. Re-baked only when a
-  // backdrop's geometry-affecting fields change (NOT per camera move) — the `sig`
-  // memo dep mirrors the grid/part staging pattern so orbiting never re-bakes.
-  const backdropSig = backdrops.map((b) => `${b.id}:${b.visible ? 1 : 0}:${b.plane}:${b.scale}:${b.offset}:${b.aspect}:${b.flipU ? 1 : 0}`).join('|');
+    setMoveBackdropId((cur) => (cur === id ? null : cur));
+  };
+  // start positioning a backdrop with the gizmo (req_1285): select it + close the
+  // panel so the viewport (and its gizmo) is reachable.
+  const startMoveBackdrop = (id: string) => { setMoveBackdropId(id); setBackdropPanel(false); };
+  const moveBackdrop = moveBackdropId ? backdrops.find((b) => b.id === moveBackdropId && b.visible) ?? null : null;
+  // The visible backdrops, lowered to renderable quads. Geometry re-bakes only when a
+  // SHAPE field changes (plane/scale/aspect/flip) — NOT pos (applied via the mesh
+  // `position`) and NOT camera moves, so orbiting + dragging never re-bake geometry.
+  const backdropSig = backdrops.map((b) => `${b.id}:${b.visible ? 1 : 0}:${b.plane}:${b.scale}:${b.aspect}:${b.flipU ? 1 : 0}`).join('|');
   const backdropQuads = useMemo(
-    () => backdrops.filter((b) => b.visible).map((b) => ({ bd: b, geo: backdropQuad(b) })),
+    () => backdrops.filter((b) => b.visible).map((b) => ({ id: b.id, geo: backdropQuad(b) })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [backdropSig],
   );
@@ -701,6 +719,12 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   useEffect(() => {
     onSelectFaces(selMode === 'face' ? [...sel.faces].sort((a, b) => a - b) : []);
   }, [sel, selMode, onSelectFaces]);
+
+  // BACKDROP drag (req_1285): the in-flight gizmo grab for the active backdrop —
+  // which axis, its start-frozen screen frame, and the backdrop's start position.
+  // A self-contained parallel to gizmoDragRef/rigDragRef; commits straight to pos.
+  const backdropDragRef = useRef<null | { id: string; axis: { dx: number; dy: number; pxPerUnit: number }; unit: MV3; startCx: number; startCy: number; startPos: MV3 }>(null);
+  const [backdropDragAxis, setBackdropDragAxis] = useState<GizmoHit | null>(null);
 
   // ── Transform gizmo (req_0983): move / resize the selection ──
   const [gizmoTool, setGizmoTool] = useHotState<GizmoTool>('studio:gizmoTool', 'move');
@@ -971,7 +995,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     const off = busOn('__keydown', (e: any) => {
       const key = String(e?.key ?? '').toLowerCase();
       // Esc closes an open bevel popup first (drop the preview), like a Cancel.
-      if (key === 'escape') { if (bv) { setBv(null); setDraft(null); return; } setSel(emptySelection()); setRigSel(null); return; }
+      if (key === 'escape') { if (moveBackdropId) { setMoveBackdropId(null); return; } if (bv) { setBv(null); setDraft(null); return; } setSel(emptySelection()); setRigSel(null); return; }
       // RIG mode: Delete removes the selected JOINT, or drops the pivot (pivots are
       // opt-in, req_1054 — removing one makes the part joints-only again); Ctrl+A /
       // face-delete don't apply here.
@@ -1004,7 +1028,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     });
     return () => off();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selMode, sel, activePart?.id, activePart?.mesh, lc, bv, autoFix, rigSel]);
+  }, [selMode, sel, activePart?.id, activePart?.mesh, lc, bv, autoFix, rigSel, moveBackdropId]);
   // a live camera snapshot matching gpu/3d.zig (eye from camera.zig orbital math,
   // near 0.02 / fov from the Scene3D.Camera below); used by the overlay + picking.
   const camSnap = (): CameraSnap => {
@@ -1130,6 +1154,24 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
 
   const onDown = (e: any) => {
     snapGenRef.current += 1;
+    // BACKDROP gizmo (req_1285): when a backdrop is in move-mode, grabbing its 3-axis
+    // move handle takes priority over everything (drag = reposition, miss = orbit). A
+    // self-contained drag — no mesh selection involved.
+    if (moveBackdrop) {
+      const r = rectRef.current;
+      const lx = Number(e?.x ?? 0) - r.x, ly = Number(e?.y ?? 0) - r.y;
+      const proj = makeProjector(camSnap());
+      const anchorW = moveBackdrop.pos as MV3;
+      const hit = pickGizmoHandle(anchorW, 'move', proj, lx, ly);
+      if (hit) {
+        const ax = axisScreen(anchorW, AXIS_DIR[hit.axis], proj);
+        const unit = AXIS_DIR[hit.axis] as MV3;
+        backdropDragRef.current = { id: moveBackdrop.id, axis: { dx: ax.dx, dy: ax.dy, pxPerUnit: ax.pxPerUnit }, unit, startCx: lx, startCy: ly, startPos: [...moveBackdrop.pos] as MV3 };
+        setBackdropDragAxis(hit);
+        return;
+      }
+      // miss → fall through to orbit (so you can spin while placing it).
+    }
     // PAINT mode: a press on a FACE paints the texel + arms drag-painting (no orbit
     // while painting — you draw on the model). The brush is clamped to the hit face's
     // atlas slot, so a stroke at the edge never bleeds onto a neighbour. A press that
@@ -1289,6 +1331,19 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       if (!dragRef.current) { paintProbe(sx, sy); return; } // hover → ref (overlay self-ticks)
       // else: a miss-drag in progress → continue to the orbit block (spin the camera).
     }
+    // BACKDROP drag (req_1285): slide the active backdrop along the grabbed axis.
+    // Absolute from the frozen start pos; snaps to the gizmo grid. Writes pos straight
+    // to state — cheap, since pos doesn't re-bake geometry (it rides the `position`).
+    const bdd = backdropDragRef.current;
+    if (bdd) {
+      const r = rectRef.current;
+      const cx = Number(e?.x ?? 0) - r.x, cy = Number(e?.y ?? 0) - r.y;
+      const t = snapToStep(dragWorldDistance(bdd.axis, cx - bdd.startCx, cy - bdd.startCy), STUDIO.gizmoStepMeters, STUDIO.gizmoStepFineMeters, heldMods.current);
+      const pos: [number, number, number] = [bdd.startPos[0] + bdd.unit[0] * t, bdd.startPos[1] + bdd.unit[1] * t, bdd.startPos[2] + bdd.unit[2] * t];
+      updateBackdrop(bdd.id, { pos });
+      setGizmoReadout(`${'XYZ'[bdd.unit[0] ? 0 : bdd.unit[1] ? 1 : 2]} ${fmtUnits(metersToUnits(t))}`);
+      return;
+    }
     // RIG drag: move the selected pivot/joint along the grabbed axis. Snaps by
     // default (req_1023); previews into rigDraft (commit-on-release), so the mesh
     // isn't re-written per move (pivot/joints don't change geometry anyway).
@@ -1426,6 +1481,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   };
   const onUp = () => {
     if (paintingRef.current) { paintingRef.current = false; lastPaintRef.current = null; commitPaint(); return; } // end a paint stroke → persist
+    // end a BACKDROP drag (req_1285): pos was written live to state already, so just
+    // drop the grab + the readout. (No commit step — backdrops persist on every patch.)
+    if (backdropDragRef.current) { backdropDragRef.current = null; setBackdropDragAxis(null); setGizmoReadout(null); return; }
     setGizmoReadout(null); // the drag is ending — drop the live step readout
     // end a loop-cut slide. HOST-OWNED (req_1277): the slide streamed verts to the
     // slot without setLc, so the offset lives only in the ref — sync it to state ONCE
@@ -1659,21 +1717,27 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         <Scene3D.AmbientLight color="#dfe7ff" intensity={0.55} />
         <Scene3D.DirectionalLight direction={[0.4, 0.92, 0.32]} color="#ffe9c2" intensity={0.85} />
         {staging}
-        {/* BACKDROPS (req_1280): the reference-image trace planes. Translucent +
+        {/* BACKDROPS (req_1280/1285): the reference-image trace planes. Translucent +
             white-material so the picture (sampled via textureKey) reads through;
-            alpha<1 routes them to the back-to-front transparent pass. The slot id
-            before '~' is the backdrop INDEX (reused across the session, never a
-            per-id leak); the version after re-uploads on a geometry change. */}
-        {backdropQuads.map((q, i) => (
-          <Scene3D.Mesh
-            key={q.bd.id}
-            geometry={{ id: `studio.bd.${q.bd.id}`, generate: () => q.geo, defaults: {} }}
-            dynamicKey={`studio.bd${i}~${q.bd.id}.${q.bd.plane}.${q.bd.scale}.${q.bd.offset}.${q.bd.aspect}.${q.bd.flipU ? 1 : 0}`}
-            material={{ color: '#ffffff', opacity: q.bd.opacity }}
-            textureKey={backdropTexKey(q.bd.id)}
-            position={[0, 0, 0]}
-          />
-        ))}
+            alpha<1 routes them to the back-to-front transparent pass. The quad is
+            centered at origin and PLACED via `position` (bd.pos) — so the gizmo drag
+            moves it without a geometry re-bake. The slot id before '~' is the backdrop
+            INDEX (reused, never a per-id leak); the version after re-uploads on a
+            SHAPE change (geometry), while pos rides the per-frame instance. */}
+        {backdropQuads.map((q, i) => {
+          const bd = backdrops.find((b) => b.id === q.id);
+          if (!bd) return null;
+          return (
+            <Scene3D.Mesh
+              key={bd.id}
+              geometry={{ id: `studio.bd.${bd.id}`, generate: () => q.geo, defaults: {} }}
+              dynamicKey={`studio.bd${i}~${bd.id}.${bd.plane}.${bd.scale}.${bd.aspect}.${bd.flipU ? 1 : 0}`}
+              material={{ color: '#ffffff', opacity: bd.opacity }}
+              textureKey={backdropTexKey(bd.id)}
+              position={bd.pos}
+            />
+          );
+        })}
         {display.map((p) => {
           // TEXTURE (req_1068): with a scene texture made + texture view on, EVERY
           // part samples the ONE shared sprite-map atlas (STUDIO_TEXTURE_KEY) —
@@ -1844,7 +1908,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {/* The transform gizmo — drawn AFTER the selection overlay (last 2D children
           over the Scene3D), so the arrows are NEVER hidden by geometry (USER).
           Hidden while the loop-cut popup is open (the cut preview owns the view). */}
-      {gizmoAnchorWorld && !lc && !bv && !autoFix
+      {gizmoAnchorWorld && !lc && !bv && !autoFix && !moveBackdrop
         ? <TransformGizmo anchorW={gizmoAnchorWorld} tool={gizmoTool} camSnap={camSnap} activeAxis={activeGizmo} />
         : null}
 
@@ -1873,6 +1937,20 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {rigAnchorWorld
         ? <TransformGizmo anchorW={rigAnchorWorld} tool="move" camSnap={camSnap} activeAxis={rigDragAxis} />
         : null}
+
+      {/* BACKDROP move gizmo (req_1285): the 3-axis move handle on the active backdrop
+          — drag an arrow to slide the trace into place; scroll/empty-drag still orbits. */}
+      {moveBackdrop
+        ? <TransformGizmo anchorW={moveBackdrop.pos as MV3} tool="move" camSnap={camSnap} activeAxis={backdropDragAxis} />
+        : null}
+      {moveBackdrop ? (
+        <Box style={{ position: 'absolute', left: 0, right: 0, top: 44, alignItems: 'center' }}>
+          <Row style={{ gap: 8, alignItems: 'center', paddingLeft: 10, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#9b7fd6' }}>
+            <Text fontSize={10} color="#e0d4ff" style={{ fontFamily: 'monospace' }}>{`moving · ${moveBackdrop.name} · drag the arrows · scroll to orbit`}</Text>
+            <Pressable onPress={() => setMoveBackdropId(null)} tooltip="Done positioning (Esc)" style={STEP_BTN}><Text fontSize={10} color="#7fd6a0">done</Text></Pressable>
+          </Row>
+        </Box>
+      ) : null}
 
       {/* Live drag readout (req_1024): floats by the gizmo anchor while dragging so
           the step amount can be read off and mirrored on the other side. */}
@@ -2158,6 +2236,25 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   >
                     <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>flip</Text>
                   </Pressable>
+                  {/* merge — dissolve a coplanar, connected face group back into ONE
+                      clean face (req_1282): the inverse of a loop cut. Shared seam
+                      edges + their collinear leftover verts go away, so cuts you no
+                      longer want come back as a single quad. Needs ≥2 faces. */}
+                  {faceList.length >= 2 ? (
+                    <Pressable
+                      onPress={() => {
+                        const out = mergeFaces(activePart.mesh, faceList);
+                        if (!out) { toast('select a connected, coplanar face group to merge'); return; }
+                        props.onEditMesh(activePart.id, out);
+                        setSel(emptySelection());
+                        toast(`merged ${faceList.length} faces → 1`);
+                      }}
+                      tooltip="Merge — fuse the selected coplanar, connected faces back into one clean face (the inverse of a loop cut); seam edges + leftover collinear verts dissolve"
+                      style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
+                    >
+                      <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>merge</Text>
+                    </Pressable>
+                  ) : null}
                   {/* glass — toggle the face(s) between a textured surface and a
                       translucent window pane (renders see-through, skips texturing). */}
                   <Pressable
@@ -2621,9 +2718,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {backdropPanel ? (
         <BackdropsPanel
           backdrops={backdrops}
+          activeId={moveBackdropId}
           onAdd={addBackdrop}
           onUpdate={updateBackdrop}
           onRemove={removeBackdrop}
+          onMove={startMoveBackdrop}
           onClose={() => setBackdropPanel(false)}
         />
       ) : null}

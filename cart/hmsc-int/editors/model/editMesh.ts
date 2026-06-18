@@ -1947,6 +1947,110 @@ export function deleteFaces(m: EditMesh, faceIndices: Iterable<number>): EditMes
   return { ...m, verts, faces };
 }
 
+// ── Merge faces: dissolve cuts back into one clean face (req_1282) ──────────────
+// The inverse of a loop cut / subdivide: select the pieces a face was cut into and
+// fuse them back into a single face. Works on any coplanar, edge-connected group —
+// the shared (internal) edges dissolve, the outer boundary becomes the new face,
+// and the collinear seam verts left behind on straight runs are removed so a 2×2
+// grid of quads comes back as ONE clean quad (not an 8-gon). Pure + headless;
+// returns null when the selection can't merge cleanly (under 2 faces, not roughly
+// coplanar, disconnected, or a boundary with holes / non-manifold winding) so the
+// editor can say why instead of producing a broken n-gon.
+
+/** Drop a loop's collinear midpoint verts: a corner whose two incident edges are
+ *  parallel adds nothing to the polygon's shape (it's a leftover cut seam). */
+function dropCollinearLoop(verts: V3[], loop: number[], eps = 1e-5): number[] {
+  let L = loop.slice();
+  let changed = true;
+  while (changed && L.length > 3) {
+    changed = false;
+    for (let i = 0; i < L.length; i += 1) {
+      const a = verts[L[(i - 1 + L.length) % L.length]];
+      const b = verts[L[i]];
+      const c = verts[L[(i + 1) % L.length]];
+      const e1 = sub(b, a), e2 = sub(c, b);
+      const cr = cross(e1, e2);
+      const area = Math.hypot(cr[0], cr[1], cr[2]);
+      const len = Math.hypot(e1[0], e1[1], e1[2]) * Math.hypot(e2[0], e2[1], e2[2]);
+      // len ~0 ⇒ b duplicates a neighbor; area/len ~0 ⇒ a–b–c are collinear. Both
+      // mean b is redundant on the boundary, so splice it out and rescan.
+      if (len < 1e-12 || area / len < eps) { L.splice(i, 1); changed = true; break; }
+    }
+  }
+  return L;
+}
+
+export function mergeFaces(m: EditMesh, faceIndices: Iterable<number>): EditMesh | null {
+  const sel = [...new Set(faceIndices)].filter((i) => i >= 0 && i < m.faces.length);
+  if (sel.length < 2) return null;
+  const selSet = new Set(sel);
+  const selFaces = sel.map((i) => m.faces[i]);
+
+  // roughly coplanar? all face normals must point the same way (a fused face has to
+  // live in one plane to be "clean"). Lenient (>~60°) so a hand-selected strip with
+  // a little float drift still merges, but a box's adjacent sides don't.
+  const n0 = faceNormal(m, selFaces[0]);
+  for (const f of selFaces) if (dot(faceNormal(m, f), n0) < 0.5) return null;
+
+  // Directed boundary extraction: walk every selected face's loop as directed edges
+  // a→b. An INTERNAL (shared) edge between two faces appears once each way (a→b and
+  // b→a, since adjacent faces wind oppositely on it) — those cancel. A BOUNDARY edge
+  // appears only one way; `next[a] = b` chains it into the outer loop, already wound
+  // consistently with the selected faces.
+  const dir = new Set<string>();
+  for (const f of selFaces) { const L = f.loop; for (let i = 0; i < L.length; i += 1) dir.add(`${L[i]}>${L[(i + 1) % L.length]}`); }
+  const next = new Map<number, number>();
+  for (const f of selFaces) {
+    const L = f.loop;
+    for (let i = 0; i < L.length; i += 1) {
+      const a = L[i], b = L[(i + 1) % L.length];
+      if (!dir.has(`${b}>${a}`)) next.set(a, b); // reverse absent → it's a boundary edge
+    }
+  }
+  if (next.size < 3) return null;
+
+  // Chain the boundary edges from any start; a clean region is ONE cycle visiting
+  // every boundary vertex exactly once.
+  const start = next.keys().next().value as number;
+  const loop = [start];
+  let cur = start;
+  for (let guard = 0; guard <= next.size; guard += 1) {
+    const nx = next.get(cur);
+    if (nx === undefined) return null;     // dangling — not a closed boundary
+    if (nx === start) break;               // cycle closed
+    loop.push(nx);
+    cur = nx;
+  }
+  if (loop.length !== next.size) return null; // multiple loops (a hole) / revisit
+
+  const clean = dropCollinearLoop(m.verts, loop);
+  if (clean.length < 3) return null;
+
+  // orient the fused face to the shared normal (the boundary chain already matches,
+  // but guard against a degenerate first face), and carry the common appearance.
+  let newLoop = clean;
+  if (dot(faceNormal(m, { loop: newLoop }), n0) < 0) newLoop = newLoop.slice().reverse();
+  const base = selFaces[0];
+  const newFace: EditMeshFace = {
+    loop: newLoop,
+    uv: faceSquareUV(m.verts, newLoop),
+    material: base.material,
+    glass: selFaces.every((f) => f.glass) ? base.glass : undefined,
+  };
+
+  // replace the selected faces with the one fused face, then compact the interior
+  // (cut-seam) verts that nothing references anymore.
+  const kept = m.faces.filter((_, i) => !selSet.has(i));
+  kept.push(newFace);
+  const used = new Set<number>();
+  for (const f of kept) for (const vi of f.loop) used.add(vi);
+  const remap = new Map<number, number>();
+  const verts: V3[] = [];
+  m.verts.forEach((v, i) => { if (used.has(i)) { remap.set(i, verts.length); verts.push([v[0], v[1], v[2]]); } });
+  const faces = kept.map((f) => ({ ...f, loop: f.loop.map((vi) => remap.get(vi)!) }));
+  return { ...m, verts, faces };
+}
+
 // ── Mesh lint: "hey, your shit is scuffed" (req_1224) ───────────────────────────
 // It's all numbers, so the mistakes are countable. validateMesh reads a mesh and
 // reports every defect it can prove from the topology — the same class of thing

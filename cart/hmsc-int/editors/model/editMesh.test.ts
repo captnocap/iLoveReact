@@ -6,7 +6,7 @@ import { assert, assertClose, assertEqual, finish, test } from '../../game/_test
 import {
   addMount, addMountReflections, updateMountMirrored, bevelEdge, bevelVertex, connectVerts, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag, icosphere, sphere, ICOSPHERE_SUBDIV_MAX,
   bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
-  flipFace, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
+  flipFace, mergeFaces, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel, validateMesh, meshHealth,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
@@ -1149,6 +1149,28 @@ test('bevelVertex chamfers a cube corner: 3 new verts, a cap tri, still watertig
 test('bevelVertex declines a degree-2 tip (no real corner to cut)', () => {
   const flat = plane(2, 2);                       // each corner touches only 2 edges
   assertEqual(bevelVertex(flat, 0, 2 / 16), flat, 'a 2-edge tip is left unchanged');
+});
+
+// ── mergeFaces (req_1282): dissolve cut pieces back into one clean face ──────────
+test('mergeFaces fuses the two halves of a cut face back into one clean quad', () => {
+  const box = cuboid(2, 2, 2);
+  const cut = cutMeshByPlane(box, 0, 0); // X=0 plane splits top/bottom/front/back
+  const topsBefore = cut.faces.map((f, i) => ({ i, n: faceNormal(cut, f) })).filter((x) => x.n[1] > 0.9).map((x) => x.i);
+  assertEqual(topsBefore.length, 2, 'the top face split into two coplanar halves');
+  const merged = mergeFaces(cut, topsBefore);
+  assert(merged != null, 'a connected coplanar pair merges');
+  const topsAfter = merged!.faces.map((f, i) => ({ i, n: faceNormal(merged!, f) })).filter((x) => x.n[1] > 0.9);
+  assertEqual(topsAfter.length, 1, 'the two halves became ONE top face');
+  assertEqual(merged!.faces[topsAfter[0].i].loop.length, 4, 'collinear seam verts dropped → a clean quad');
+  assertEqual(merged!.faces.length, cut.faces.length - 1, 'net one fewer face');
+});
+
+test('mergeFaces refuses a single face and non-coplanar (perpendicular) faces', () => {
+  const box = cuboid(2, 2, 2);
+  const top = box.faces.findIndex((f) => faceNormal(box, f)[1] > 0.9);
+  const side = box.faces.findIndex((f) => faceNormal(box, f)[0] > 0.9);
+  assertEqual(mergeFaces(box, [top]), null, 'under two faces → null');
+  assertEqual(mergeFaces(box, [top, side]), null, 'a top + a perpendicular side → null');
 });
 
 finish('editMesh');

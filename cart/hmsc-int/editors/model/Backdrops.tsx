@@ -35,9 +35,10 @@ export interface Backdrop {
   plane: BackdropPlane;
   /** the longer side of the quad, in METERS (1 tile = 1 m, matching the world). */
   scale: number;
-  /** slide the plane along its axis (m): push a wall back behind the model, or lift
-   *  the floor plan just off the grid. */
-  offset: number;
+  /** free WORLD position of the quad's CENTER (m). The transform gizmo drags this
+   *  (req_1285) — you place the trace where it lines up with your view instead of
+   *  fighting plane presets. Seeded from the plane preset on add/orient. */
+  pos: [number, number, number];
   /** how see-through the trace is (0..1) — low so the model reads over it. */
   opacity: number;
   /** mirror left↔right (a side blueprint shot from the wrong side). */
@@ -45,14 +46,28 @@ export interface Backdrop {
   visible: boolean;
 }
 
-export const BACKDROP_PLANES: { key: BackdropPlane; label: string; hint: string; defOffset: number }[] = [
-  { key: 'front', label: 'Front', hint: 'XY wall · front blueprint', defOffset: -1.4 },
-  { key: 'back', label: 'Back', hint: 'XY wall · rear blueprint', defOffset: 1.4 },
-  { key: 'left', label: 'Left', hint: 'ZY wall · side blueprint', defOffset: -1.4 },
-  { key: 'right', label: 'Right', hint: 'ZY wall · side blueprint', defOffset: 1.4 },
-  { key: 'top', label: 'Top', hint: 'XZ floor · plan view', defOffset: 0.02 },
-  { key: 'bottom', label: 'Bottom', hint: 'XZ floor · underside', defOffset: -0.02 },
+export const BACKDROP_PLANES: { key: BackdropPlane; label: string; hint: string }[] = [
+  { key: 'front', label: 'Front', hint: 'XY wall · faces the +Z camera' },
+  { key: 'back', label: 'Back', hint: 'XY wall · rear view' },
+  { key: 'left', label: 'Left', hint: 'ZY wall · side view (−X)' },
+  { key: 'right', label: 'Right', hint: 'ZY wall · side view (+X)' },
+  { key: 'top', label: 'Top', hint: 'XZ floor · plan view' },
+  { key: 'bottom', label: 'Bottom', hint: 'XZ floor · underside' },
 ];
+
+/** A sensible starting CENTER for a freshly-oriented backdrop: vertical walls stand
+ *  ~1 m up and sit 1.4 m out (clear of a model at origin); floor plans lie just off
+ *  the grid. The gizmo moves it from here. */
+export function defaultBackdropPos(plane: BackdropPlane): [number, number, number] {
+  switch (plane) {
+    case 'front': return [0, 1, -1.4];
+    case 'back': return [0, 1, 1.4];
+    case 'left': return [-1.4, 1, 0];
+    case 'right': return [1.4, 1, 0];
+    case 'top': return [0, 0.02, 0];
+    default: return [0, -0.02, 0];
+  }
+}
 
 // ── Texture surface (offscreen) ───────────────────────────────────────────────
 // Each backdrop renders its image into its OWN StaticSurface (a unique staticKey)
@@ -107,20 +122,22 @@ function pushDoubleQuad(m: ReturnType<typeof mesh>, BL: V3, BR: V3, TR: V3, TL: 
 
 export function backdropQuad(bd: Backdrop): GeometryData {
   const { w, h } = quadDims(bd.aspect, bd.scale);
-  const off = bd.offset;
+  // Centered at the ORIGIN — world placement comes from the mesh `position` (bd.pos),
+  // so the transform gizmo moves the quad by editing pos, never the geometry.
   const uv = bd.flipU
     ? { bl: [1, 1] as UV, br: [0, 1] as UV, tr: [0, 0] as UV, tl: [1, 0] as UV }
     : { bl: [0, 1] as UV, br: [1, 1] as UV, tr: [1, 0] as UV, tl: [0, 0] as UV };
   const m = mesh();
+  const hw = w / 2, hh = h / 2;
   if (bd.plane === 'front' || bd.plane === 'back') {
-    // XY wall, standing on the floor (y: 0 → h), centered on X, slid along Z.
-    pushDoubleQuad(m, [-w / 2, 0, off], [w / 2, 0, off], [w / 2, h, off], [-w / 2, h, off], [0, 0, 1], uv);
+    // XY plane, normal +Z, centered.
+    pushDoubleQuad(m, [-hw, -hh, 0], [hw, -hh, 0], [hw, hh, 0], [-hw, hh, 0], [0, 0, 1], uv);
   } else if (bd.plane === 'left' || bd.plane === 'right') {
-    // ZY wall, standing on the floor; width runs along Z, slid along X.
-    pushDoubleQuad(m, [off, 0, -w / 2], [off, 0, w / 2], [off, h, w / 2], [off, h, -w / 2], [1, 0, 0], uv);
+    // ZY plane, normal +X; width runs along Z, height along Y.
+    pushDoubleQuad(m, [0, -hh, -hw], [0, -hh, hw], [0, hh, hw], [0, hh, -hw], [1, 0, 0], uv);
   } else {
-    // XZ floor plan, laid flat at y=off; width→X, height→Z (picture "up" = −Z).
-    pushDoubleQuad(m, [-w / 2, off, h / 2], [w / 2, off, h / 2], [w / 2, off, -h / 2], [-w / 2, off, -h / 2], [0, 1, 0], uv);
+    // XZ plane, normal +Y; width→X, height→Z (picture "up" = −Z).
+    pushDoubleQuad(m, [-hw, 0, hh], [hw, 0, hh], [hw, 0, -hh], [-hw, 0, -hh], [0, 1, 0], uv);
   }
   return m.build();
 }
@@ -181,9 +198,11 @@ function SliderRow(props: { label: string; value: number; min: number; max: numb
 
 export function BackdropsPanel(props: {
   backdrops: Backdrop[];
+  activeId: string | null;
   onAdd: (path: string) => void;
   onUpdate: (id: string, patch: Partial<Backdrop>) => void;
   onRemove: (id: string) => void;
+  onMove: (id: string) => void;
   onClose: () => void;
 }) {
   const { backdrops } = props;
@@ -195,7 +214,7 @@ export function BackdropsPanel(props: {
           <Pressable onPress={props.onClose} style={BTN}><Text fontSize={11} color={T.dim}>Done</Text></Pressable>
         </Row>
         <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
-          drop a PNG/JPEG onto a wall or the floor, then trace it as you model · 1 m = 1 tile
+          drop a PNG/JPEG, hit Move, then drag the gizmo to line it up · scroll = orbit · 1 m = 1 tile
         </Text>
 
         <AddRow onAdd={props.onAdd} />
@@ -208,6 +227,9 @@ export function BackdropsPanel(props: {
               <Row style={{ alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <Text fontSize={11} color={T.text} style={{ fontFamily: 'monospace', flexShrink: 1 }} numberOfLines={1}>{bd.name}</Text>
                 <Row style={{ gap: 6, alignItems: 'center' }}>
+                  <Pressable onPress={() => props.onMove(bd.id)} tooltip="Move — drag the transform gizmo in the viewport to position this backdrop (Esc to drop)" style={{ ...BTN, backgroundColor: props.activeId === bd.id ? '#3a2f5e' : '#16324a', borderColor: props.activeId === bd.id ? '#9b7fd6' : '#4a7fb0' }}>
+                    <Text fontSize={10} color={props.activeId === bd.id ? '#e0d4ff' : '#9fcfff'} style={{ fontWeight: '800' }}>✥ move</Text>
+                  </Pressable>
                   <Pressable onPress={() => props.onUpdate(bd.id, { visible: !bd.visible })} tooltip="Show / hide this backdrop" style={{ ...BTN, backgroundColor: bd.visible ? '#1c3a2a' : '#13233aee', borderColor: bd.visible ? '#2f7a4f' : '#2c4a6a' }}>
                     <Text fontSize={10} color={bd.visible ? '#7fd6a0' : T.dim}>{bd.visible ? '◉ shown' : '○ hidden'}</Text>
                   </Pressable>
@@ -219,19 +241,19 @@ export function BackdropsPanel(props: {
                   </Pressable>
                 </Row>
               </Row>
-              {/* plane picker */}
+              {/* orientation picker — re-orients the quad AND re-seats it to that
+                  plane's default spot (then the gizmo nudges it from there). */}
               <Row style={{ gap: 4, flexWrap: 'wrap' }}>
                 {BACKDROP_PLANES.map((pl) => {
                   const on = bd.plane === pl.key;
                   return (
-                    <Pressable key={pl.key} onPress={() => props.onUpdate(bd.id, { plane: pl.key, offset: pl.defOffset })} tooltip={pl.hint} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: on ? '#1c3a5a' : 'transparent', borderWidth: 1, borderColor: on ? '#4a7fb0' : '#2c4a6a' }}>
+                    <Pressable key={pl.key} onPress={() => props.onUpdate(bd.id, { plane: pl.key, pos: defaultBackdropPos(pl.key) })} tooltip={pl.hint} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: on ? '#1c3a5a' : 'transparent', borderWidth: 1, borderColor: on ? '#4a7fb0' : '#2c4a6a' }}>
                       <Text fontSize={10} color={on ? '#9fcfff' : T.dim} style={{ fontWeight: on ? '800' : '400' }}>{pl.label}</Text>
                     </Pressable>
                   );
                 })}
               </Row>
               <SliderRow label="size" value={bd.scale} min={0.5} max={20} step={0.1} suffix="m" onChange={(n) => props.onUpdate(bd.id, { scale: n })} />
-              <SliderRow label="offset" value={bd.offset} min={-8} max={8} step={0.1} suffix="m" onChange={(n) => props.onUpdate(bd.id, { offset: n })} />
               <SliderRow label="opacity" value={bd.opacity} min={0.05} max={1} step={0.05} onChange={(n) => props.onUpdate(bd.id, { opacity: n })} />
             </Col>
           ))}
