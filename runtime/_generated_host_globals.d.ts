@@ -6,6 +6,7 @@ declare global {
   function __getInputTextForNode(...args: unknown[]): unknown;
   function __hostLoadFileToBuffer(...args: unknown[]): unknown;
   function __hostUploadFloatBuffer(...args: unknown[]): unknown;
+  function __scene3d_patch_dyn(...args: unknown[]): unknown;
   function __hostReleaseFileBuffer(...args: unknown[]): unknown;
   function __hostLog(...args: unknown[]): unknown;
   function __js_eval(...args: unknown[]): unknown;

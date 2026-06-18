@@ -1116,6 +1116,31 @@ fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, 
     return .{ .offset = loc.off, .count = s.count };
 }
 
+/// Imperative dyn-slot patch (HOST-OWNED LIVE EDIT). Overwrites an EXISTING dyn
+/// slot's verts in place WITHOUT bumping its version, so a mounted node keeps
+/// drawing the slot while JS pushes fresh verts each frame straight to the GPU —
+/// entirely off the React/reconciler path. This is the imperative twin of
+/// resolveDynamicGeom: that path re-uploads when the node's VERSION changes (one
+/// React update per change); this one re-uploads on a direct call with no update
+/// at all (a Studio face-drag streams verts here per frame, setState only on
+/// release). `id` is the SLOT ID (the part before the final '~' of a dyn key,
+/// e.g. "studio.draft"). Returns false if no slot is claimed for that id yet —
+/// the node must have mounted it first; this never claims one. version_hash is
+/// left untouched so the node's own redraw (same version) won't reset our verts.
+pub fn patchDynSlotById(id: []const u8, verts: []const f32, count: u32) bool {
+    if (count == 0 or count > MAX_DYN_VERTS or verts.len < @as(usize, count) * 8) return false;
+    const id_hash = hashKey(id);
+    for (g_dyn_slots[0..g_dyn_len], 0..) |*s, i| {
+        if (!s.present or s.id_hash != id_hash) continue;
+        const queue = core.getQueue() orelse return false;
+        const buf = g_retained_vbuf orelse return false;
+        queue.writeBuffer(buf, dynSlotOffset(i), @ptrCast(verts.ptr), bu.bytesOfCount(Vertex, count));
+        s.count = count;
+        return true;
+    }
+    return false;
+}
+
 // ── Host-generated heightfield ──────────────────────────────────────────────
 // Faithful port of runtime/geometries/Heightfield.ts (top surface + central-
 // difference normals + perimeter skirt down to `base`). The live painted-terrain

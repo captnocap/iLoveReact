@@ -568,6 +568,23 @@ function _scene3dVertexProps(key: string, verts: number[] | Float32Array, count:
     ? { scene3dGeomKey: key, scene3dVerticesHandle: handle, scene3dVertCount: count, scene3dBoundsRadius: bounds }
     : { scene3dGeomKey: key, scene3dVertices: _verticesJsonArray(verts), scene3dVertCount: count, scene3dBoundsRadius: bounds };
 }
+
+// HOST-OWNED LIVE EDIT (req_1270): overwrite an ALREADY-MOUNTED dyn slot's verts
+// in place this frame, with NO reconciler update. A <Scene3D.Mesh dynamicKey=
+// "<slotId>~<version>"> must already have mounted the slot the normal way; this
+// streams fresh verts straight to its GPU offset so a live drag (Studio face/
+// vertex move) never round-trips through React — setState happens only on
+// release. `slotId` is the dynamicKey's portion BEFORE its final '~' (the host's
+// own slot-id parse), e.g. dynamicKey "studio.draft~part7.3" → slotId
+// "studio.draft". `verts` is interleaved [px,py,pz, nx,ny,nz, u,v] (GeometryData
+// .positions), `count` its vertex count. Returns true on a successful GPU write,
+// false if the slot isn't mounted yet or the door is absent.
+export function patchDynSlot(slotId: string, verts: number[] | Float32Array, count: number): boolean {
+  const host: any = globalThis as any;
+  if (typeof host.__scene3d_patch_dyn !== 'function') return false;
+  const view = verts instanceof Float32Array ? verts : new Float32Array(verts);
+  return host.__scene3d_patch_dyn(slotId, view, count | 0) === 1;
+}
 Scene3DBase.Mesh = ({
   geometry, params, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ,
   texture, textureKey, dynamicKey, heights, hfCols, hfRows, waveAmplitude, waveLength, waveSpeed,

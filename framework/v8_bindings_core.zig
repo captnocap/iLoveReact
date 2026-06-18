@@ -19,6 +19,7 @@ const localstore = @import("storage/localstore.zig");
 const fswatch = @import("fs/fswatch.zig");
 const latches = @import("state/latches.zig");
 const animations = @import("gpu/animations.zig");
+const scene3d = @import("gpu/3d.zig");
 const system_signals = @import("ifttt/system_signals.zig");
 const selection_watch = @import("ifttt/selection_watch.zig");
 const event_bus = @import("diag/event_bus.zig");
@@ -185,6 +186,35 @@ fn hostUploadFloatBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         return;
     };
     setReturnNumber(info, @floatFromInt(next_id));
+}
+
+/// __scene3d_patch_dyn(slotId, float32Verts, vertCount) → bool. Imperative
+/// HOST-OWNED dyn-slot vertex patch: overwrite an already-mounted dyn slot's
+/// verts in place this instant, with NO reconciler update. Studio's face/vertex
+/// drag streams baked verts here per frame so the live edit never round-trips
+/// through React (setState only on mouse-up). Returns 0 if the slot isn't
+/// claimed yet (the <Scene3D.Mesh dynamicKey> must mount it first) or the verts
+/// are malformed; 1 on a successful GPU write. Verts are interleaved Vertex
+/// (8 f32: pos3 + normal3 + uv2), the same layout the dynamic-geom path ships.
+fn hostScene3DPatchDyn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const id = argToStringAlloc(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(id);
+    const bytes = argBytes(info, 1) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    const count: u32 = @intCast(@max(0, argToI32(info, 2) orelse 0));
+    if (bytes.len % @sizeOf(f32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const verts: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, bytes));
+    const ok = scene3d.patchDynSlotById(id, verts, count);
+    setReturnNumber(info, if (ok) 1 else 0);
 }
 
 fn hostReleaseFileBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -433,6 +463,16 @@ fn hostSelectionGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     var buf: [4096]u8 = undefined;
     const n = selection.copySelectionToBuf(&buf);
     setReturnString(info, buf[0..n]);
+}
+
+/// __selection_clear() — drop the app-wide tree text selection (selection.zig
+/// `sel_all`/`sel_node`). A cart that handles Ctrl+A itself (e.g. the Studio's
+/// "select all faces") calls this so the host's Ctrl+A "select all text across the
+/// whole tree" doesn't ALSO light up every label in the app (USER req_1058). Runs
+/// synchronously in the same key dispatch, so the highlight never renders.
+fn hostSelectionClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    _ = info_c;
+    selection.clear();
 }
 
 fn hostSysDropPath(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -850,6 +890,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__getInputTextForNode", hostGetInputTextForNode);
     v8_runtime.registerHostFn("__hostLoadFileToBuffer", hostLoadFileToBuffer);
     v8_runtime.registerHostFn("__hostUploadFloatBuffer", hostUploadFloatBuffer);
+    v8_runtime.registerHostFn("__scene3d_patch_dyn", hostScene3DPatchDyn);
     v8_runtime.registerHostFn("__hostReleaseFileBuffer", hostReleaseFileBuffer);
     v8_runtime.registerHostFn("__hostLog", hostLog);
     v8_runtime.registerHostFn("__js_eval", hostJsEval);
@@ -875,6 +916,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__clipboard_set", hostClipboardSet);
     v8_runtime.registerHostFn("__clipboard_get", hostClipboardGet);
     v8_runtime.registerHostFn("__selection_get", hostSelectionGet);
+    v8_runtime.registerHostFn("__selection_clear", hostSelectionClear);
     v8_runtime.registerHostFn("__sys_drop_path", hostSysDropPath);
     v8_runtime.registerHostFn("__sys_selection_get", hostSysSelectionGet);
     v8_runtime.registerHostFn("__exec_async", hostExecAsync);

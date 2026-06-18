@@ -21,6 +21,10 @@
           "zig": "hostUploadFloatBuffer"
         },
         {
+          "js": "__scene3d_patch_dyn",
+          "zig": "hostScene3DPatchDyn"
+        },
+        {
           "js": "__hostReleaseFileBuffer",
           "zig": "hostReleaseFileBuffer"
         },

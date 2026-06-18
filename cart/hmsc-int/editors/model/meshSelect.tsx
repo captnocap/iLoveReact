@@ -160,6 +160,12 @@ export function SelectionOverlay(props: {
   mode: SelMode;
   selection: Selection;
   camSnap: () => CameraSnap;
+  /** HOST-OWNED DRAG (req_1270): during a gizmo drag the bench never re-renders,
+   *  so `mesh` is frozen at the grab pose. When set, the live dragged mesh is read
+   *  from this ref each self-tick instead, so the wireframe tracks the deforming
+   *  mesh at 30Hz with zero parent renders. Topology is unchanged mid-drag, so the
+   *  selection indices still map. Null between drags → fall back to `mesh`. */
+  liveMeshRef?: { current: EditMesh | null };
 }) {
   // Self-tick so the overlay mirrors the host/ref-driven spin without the parent
   // re-rendering; isolated → never touches the Scene3D tree.
@@ -167,7 +173,8 @@ export function SelectionOverlay(props: {
   useInterval(repaint, 33);
   if (props.mode === 'object') return null;
 
-  const { mesh, mode, selection, partLift } = props;
+  const { mode, selection, partLift } = props;
+  const mesh = props.liveMeshRef?.current ?? props.mesh;
   // Bake the part's render lift into the projector ONCE so EVERY projected element
   // — verts, edges, AND face-centroid dots — shares it. Adding the lift only to the
   // verts left the face dots projecting from un-lifted local space, putting them

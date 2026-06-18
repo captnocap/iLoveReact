@@ -24,7 +24,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { callHost } from '@reactjit/runtime/ffi';
 import { useHotState, useInterval, useRerender } from '@reactjit/hooks';
-import { Box, Col, Pressable, Row, Scene3D, Text, TextInput } from '@reactjit/primitives';
+import { Box, Col, patchDynSlot, Pressable, Row, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import { GAME_CAMERA, GAME_CHROME, GAME_FIGURE, GAME_NATIVE_CAMERA } from '../../game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '../../game/figure/render';
 import { HMSC_SCALE } from '../../world/scale';
@@ -369,6 +369,26 @@ function OriginAxes() {
 // A minimal box geometry def (a unit cube) for the staging lines/axes.
 const Geom = { box: require('@reactjit/geometries').Box };
 
+// HOST-OWNED DRAG readout (req_1270): a self-ticking tooltip for the gizmo move
+// step amount. The gizmo drag streams to the host with ZERO setState, so the
+// readout can't come from React state — it reads the live text + grab anchor from
+// refs and re-projects every 33ms, exactly like SelectionOverlay. Mounted only
+// while a gizmo drag is active (rig/loop-cut keep the inline state readout).
+function DragReadout(props: { textRef: { current: string | null }; anchorRef: { current: MV3 | null }; camSnap: () => CameraSnap }) {
+  const repaint = useRerender();
+  useInterval(repaint, 33);
+  const text = props.textRef.current;
+  const anchor = props.anchorRef.current;
+  if (!text || !anchor) return null;
+  const p = makeProjector(props.camSnap())(anchor);
+  if (!p.front) return null;
+  return (
+    <Box style={{ position: 'absolute', left: p.x + 14, top: p.y - 34, paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#5b8fd6' }}>
+      <Text fontSize={11} color="#cfe2ff" style={{ fontFamily: 'monospace', fontWeight: '800' }}>{text}</Text>
+    </Box>
+  );
+}
+
 // ── The viewport ─────────────────────────────────────────────────────────────
 
 export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void }) {
@@ -649,6 +669,18 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // per-move mesh write would re-render the whole bench and melt the frame).
   const [draft, setDraft] = useState<{ partId: string; mesh: EditMesh; seq: number } | null>(null);
   const dragSeqRef = useRef(0);
+  // HOST-OWNED LIVE DRAG (req_1270): a gizmo move/resize/rotate streams its baked
+  // verts STRAIGHT to the host dyn slot every frame (patchDynSlot) and writes the
+  // live mesh + readout to refs — ZERO setState per move. The draft is mounted
+  // ONCE at grab (to claim the slot) and committed ONCE on release; in between,
+  // React never re-renders the bench. Without this every move re-lowered geometry,
+  // bumped the dynKey, and forced a reconciler upload — a setState storm that froze
+  // the app even on a single cube (the camera orbit already does this right by
+  // shipping deltas to camera.zig per frame; the drag now matches it).
+  const liveDragMeshRef = useRef<EditMesh | null>(null); // the live dragged mesh (overlay reads this)
+  const gizmoReadoutRef = useRef<string | null>(null);   // the live step readout text (DragReadout reads this)
+  const gizmoReadoutAnchorRef = useRef<MV3 | null>(null); // world anchor the readout floats by (frozen at grab)
+  const [gizmoDragActive, setGizmoDragActive] = useState(false); // mounts DragReadout; toggled at grab/release only
   // the in-flight gizmo grab (frozen at mouse-down): which handle, the verts it
   // moves, the start mesh + anchor, and the start-frozen axis screen frame (so
   // the world mapping is stable for the whole drag).
@@ -1033,6 +1065,19 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // Re-frame when the scene changes (part added/removed/reordered/toggled).
   useEffect(() => { distRef.current = fitDistance(); sendOrbit(); /* eslint-disable-next-line */ }, [revision]);
 
+  // Begin a host-owned gizmo drag (req_1270): mount the draft ONCE so the host
+  // claims the 'studio.draft' dyn slot, then onMove streams verts straight to it
+  // (no setState per move). Called from BOTH grab sites (the axis handle + the
+  // face-normal handle). The readout floats by the grab-time anchor.
+  const beginGizmoDrag = (startMesh: EditMesh, anchorW: MV3) => {
+    liveDragMeshRef.current = startMesh;
+    gizmoReadoutRef.current = null;
+    gizmoReadoutAnchorRef.current = anchorW;
+    dragSeqRef.current += 1;
+    setDraft({ partId: activePart!.id, mesh: startMesh, seq: dragSeqRef.current });
+    setGizmoDragActive(true);
+  };
+
   const onDown = (e: any) => {
     snapGenRef.current += 1;
     // PAINT mode: a press on a FACE paints the texel + arms drag-painting (no orbit
@@ -1126,6 +1171,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 startCx: lx, startCy: ly, startScreenDist: Math.max(8, Math.hypot(lx - aS.x, ly - aS.y)), halfExt: 0, rotSign: 1,
               };
               setActiveGizmo(nHit);
+              beginGizmoDrag(mesh, anchorW);
               return;
             }
           }
@@ -1145,6 +1191,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             rotSign: gizmoTool === 'rotate' ? rotationSign(anchorW, hit.axis, proj) : 1,
           };
           setActiveGizmo(hit);
+          beginGizmoDrag(mesh, anchorW);
           return; // grabbed a handle → transform, not pick/orbit
         }
       }
@@ -1266,10 +1313,24 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       // every enabled plane — op-agnostic, so move/resize/rotate all stay symmetric.
       // Object-mode (all verts moved) self-cancels inside mirrorEditAxes.
       if (g.mirrorAxes.length) next = mirrorEditAxes(g.startMesh, next, g.indices, g.mirrorAxes);
-      setGizmoReadout(readout);
+      // HOST-OWNED (req_1270): stream the baked verts STRAIGHT to the host dyn slot
+      // and push the live mesh + readout to refs — NO setState, so the bench never
+      // re-renders mid-drag. The draft node mounted at grab keeps drawing slot
+      // 'studio.draft'; patchDynSlot overwrites its verts in place each frame
+      // WITHOUT bumping the dyn version, so the node's redraw shows our patch. The
+      // self-ticking overlay + DragReadout read the refs to track live.
       g.lastMesh = next;
-      dragSeqRef.current += 1;
-      setDraft({ partId: g.partId, mesh: next, seq: dragSeqRef.current });
+      liveDragMeshRef.current = next;
+      gizmoReadoutRef.current = readout;
+      const gd = editMeshToGeometry(next, (f) => !f.glass);
+      const patched = patchDynSlot('studio.draft', gd.positions, gd.count);
+      // Until the host has claimed the slot (the grab-mount node hasn't drawn a
+      // frame yet), the patch finds nothing — fall back to ONE reconciler upload
+      // so the verts still land; subsequent frames patch directly.
+      if (!patched) {
+        dragSeqRef.current += 1;
+        setDraft({ partId: g.partId, mesh: next, seq: dragSeqRef.current });
+      }
       return;
     }
     const d = dragRef.current;
@@ -1312,6 +1373,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (g) {
       gizmoDragRef.current = null;
       setActiveGizmo(null);
+      // host-owned drag is over: drop the live refs + unmount the DragReadout.
+      liveDragMeshRef.current = null;
+      gizmoReadoutRef.current = null;
+      gizmoReadoutAnchorRef.current = null;
+      setGizmoDragActive(false);
       const result = g.lastMesh;
       if (!result) { setDraft(null); return; }
       // Concave Auto-Fix guard (req_0949/req_1016): a moved vert can buckle a quad
@@ -1320,7 +1386,14 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       // resolve. A clean edit commits straight through.
       const offenders = findConcaveFaces(result);
       if (offenders.length === 0) { setDraft(null); props.onEditMesh(g.partId, result); }
-      else setAutoFix({ partId: g.partId, mesh: result, count: offenders.length });
+      else {
+        // keep the buckled preview on screen for the dialog: sync the draft to the
+        // RESULT (the host-owned drag never wrote it through React) + re-ship so the
+        // dyn slot shows the final mesh even if something re-renders behind the dialog.
+        dragSeqRef.current += 1;
+        setDraft({ partId: g.partId, mesh: result, seq: dragSeqRef.current });
+        setAutoFix({ partId: g.partId, mesh: result, count: offenders.length });
+      }
       return;
     }
     dragRef.current = null;
@@ -1616,6 +1689,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {activePart && activeMesh && selMode !== 'object' && selMode !== 'rig' && selMode !== 'paint'
         ? <SelectionOverlay
             mesh={activeMesh}
+            liveMeshRef={liveDragMeshRef}
             partLift={activePart.lift}
             mode={selMode}
             /* While the loop-cut preview is live the selected face index no longer
@@ -1697,6 +1771,13 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           </Box>
         );
       })() : null}
+
+      {/* HOST-OWNED gizmo readout (req_1270): self-ticking + ref-driven, so the live
+          step amount updates during a drag that never re-renders the bench. (The
+          inline readout above stays for rig/loop-cut, which still use state.) */}
+      {gizmoDragActive
+        ? <DragReadout textRef={gizmoReadoutRef} anchorRef={gizmoReadoutAnchorRef} camSnap={camSnap} />
+        : null}
 
       {/* ── TOOLBAR tier 2 (req_1184): the TOOLS — modes · transform · context edit
           ops · texture/compile — on their OWN line below tier 1 (no more piling onto
