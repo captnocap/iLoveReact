@@ -8,7 +8,7 @@
 // zig-out/ (never the live data/ content) — the sessions.test.ts idiom.
 
 import { openStore } from '../../data';
-import { libraryModels, modelParts, modelStream, type ModelEvent, type ModelStreamState, type StoredModel, type StoredPart } from './modelStream';
+import { libraryModels, modelParts, modelStream, slotColor, type ModelEvent, type ModelStreamState, type Palette, type StoredModel, type StoredPart } from './modelStream';
 import { addMount, cuboid, setPivot } from './editMesh';
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 
@@ -167,6 +167,35 @@ test('a pre-req_0998 flat-parts snapshot is tolerated, not a crash', () => {
   // folding a new event on the old shape starts clean (the editor boots to new).
   const recovered = modelStream.apply(oldShape, { kind: 'modelCreated', model: M, name: 'fresh' });
   assertEqual(libraryModels(recovered).map((m) => m.name).join(','), 'fresh', 'a new model lands on a clean library');
+});
+
+test('paint + palette are BRANCH data: round-trip reopen + apply/inverse (req_1288)', () => {
+  wipeScratch();
+  const store = openStore(ROOT);
+  const channel = store.defineStream(modelStream);
+  channel.append({ kind: 'modelCreated', model: M, name: 'new_mesh_001' });
+  channel.append({ kind: 'partAdded', model: M, part: part('pt-1', 'Body') });
+  const paint = { '0:1:2': 0, '0:1:3': 0, '2:0:0': 1 };
+  channel.append({ kind: 'partPaintUpdated', model: M, id: 'pt-1', paint });
+  const palette: Palette = { variant: 1, slots: [{ id: 0, name: 'Body', pseudo: '#f00', kind: 'color', colors: ['#a00', '#0a0', '#00a'] }] };
+  channel.append({ kind: 'modelPaletteSet', model: M, palette });
+  store.materializeSnapshots();
+
+  const reopened = openStore(ROOT);
+  const ch2 = reopened.defineStream(modelStream);
+  const p = modelParts(ch2.state(), M)[0];
+  assert(JSON.stringify(p.paint) === JSON.stringify(paint), 'the paint layer survived the cold reopen');
+  assertEqual(p.version, 0, 'partPaintUpdated leaves version untouched (no geometry rebake)');
+  const m = ch2.state().models[M] as StoredModel;
+  assertEqual(m.palette!.slots[0].name, 'Body', 'the palette survived the cold reopen');
+  assertEqual(slotColor(m.palette, 0), '#0a0', 'slotColor resolves variant 1 → the 2nd colour');
+
+  // inverse (undo): repaint the prior layer restores it exactly; same for the palette.
+  const before = ch2.state().models[M] as StoredModel;
+  const cleared = modelStream.apply(ch2.state(), { kind: 'partPaintUpdated', model: M, id: 'pt-1', paint: {} });
+  assertEqual(Object.keys(modelParts(cleared, M)[0].paint!).length, 0, 'an empty layer clears the paint');
+  const back = modelStream.apply(cleared, { kind: 'partPaintUpdated', model: M, id: 'pt-1', paint: before.parts['pt-1'].paint! });
+  assert(JSON.stringify(modelParts(back, M)[0].paint) === JSON.stringify(paint), 'the inverse paint restores the exact prior layer');
 });
 
 finish('modelStream');

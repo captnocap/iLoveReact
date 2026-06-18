@@ -21,7 +21,7 @@ import { getHotState, setHotState, useRerender } from '@reactjit/hooks';
 import type { GeometryData } from '@reactjit/geometries';
 import { cuboid, editMeshToGeometry, mergeMesh, type EditMesh } from './editMesh';
 import type { LayerStripAction } from '../paint/LayerStrip';
-import { libraryModels, modelParts, modelStream, type ModelEvent, type ModelStreamState, type StoredModel, type StoredPart } from './modelStream';
+import { libraryModels, modelParts, modelStream, type ModelEvent, type ModelStreamState, type Palette, type PaintLayer, type StoredModel, type StoredPart } from './modelStream';
 import type { StreamHandle } from '../../data';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
@@ -42,6 +42,8 @@ export type StudioPart = {
   color: string;
   version: number;
   lift: number;
+  /** the paint LAYER (surface-cell → slot id); undefined on an unpainted part. */
+  paint?: PaintLayer;
 };
 
 function liftToGround(mesh: EditMesh): number {
@@ -78,6 +80,12 @@ export type StudioModel = {
   addCuboid(): void;
   rename(id: string, name: string): void;
   updatePartMesh(id: string, mesh: EditMesh): void;
+  /** the open model's paint palette (slot table + variant), or null on a blank scene. */
+  palette: Palette | null;
+  /** commit a part's paint layer (surface-cell → slot id) — one stroke, undoable. */
+  editPaint(id: string, paint: PaintLayer): void;
+  /** set the model's paint palette — recolour / slot edits, undoable. */
+  setPalette(palette: Palette): void;
   /** Merge the active part DOWN into the part before it in order (mergeMesh in the
    *  shared model frame), then drop the now-merged source — the re-attach / weld
    *  (req_1224). No-op when the active part is the first / only one. */
@@ -137,6 +145,8 @@ function labelFor(event: ModelEvent): string {
     case 'modelDeleted': return 'delete model';
     case 'partAdded': return `add ${event.part.name}`;
     case 'partMeshUpdated': return 'edit mesh';
+    case 'partPaintUpdated': return 'paint';
+    case 'modelPaletteSet': return 'recolour';
     case 'partRenamed': return `rename → ${event.name}`;
     case 'partVisibilitySet': return event.visible ? 'show part' : 'hide part';
     case 'partReordered': return `reorder ${event.dir}`;
@@ -162,6 +172,15 @@ function inverseOf(event: ModelEvent, before: StoredModel): ModelEvent | null {
       const p = before.parts[event.id];
       return p ? { kind: 'partMeshUpdated', model, id: event.id, mesh: p.mesh } : null;
     }
+    case 'partPaintUpdated': {
+      // restore the prior paint layer (empty = back to unpainted — an empty layer
+      // resolves to nothing, identical to absent).
+      const p = before.parts[event.id];
+      return p ? { kind: 'partPaintUpdated', model, id: event.id, paint: p.paint ?? {} } : null;
+    }
+    case 'modelPaletteSet':
+      // restore the prior palette (empty = no slots, identical to absent).
+      return { kind: 'modelPaletteSet', model, palette: before.palette ?? { slots: [], variant: 0 } };
     case 'partRenamed': {
       const p = before.parts[event.id];
       return p ? { kind: 'partRenamed', model, id: event.id, name: p.name } : null;
@@ -212,7 +231,7 @@ function buildParts(): void {
       glassGeo = sp.mesh.faces.some((f) => f.glass) ? editMeshToGeometry(sp.mesh, (f) => !!f.glass) : null;
       geoCache.set(sp.id, { version: sp.version, geo, glassGeo });
     }
-    return { id: sp.id, name: sp.name, mesh: sp.mesh, geo, glassGeo, visible: sp.visible, color: sp.color, version: sp.version, lift: sp.lift };
+    return { id: sp.id, name: sp.name, mesh: sp.mesh, geo, glassGeo, visible: sp.visible, color: sp.color, version: sp.version, lift: sp.lift, paint: sp.paint };
   });
 }
 
@@ -335,6 +354,23 @@ function updatePartMesh(id: string, mesh: EditMesh): void {
   commit({ kind: 'partMeshUpdated', model, id, mesh }, 'mesh', 'record');
 }
 
+// Paint a part's layer — BRANCH + undoable, committed once per stroke (the live
+// dabs ride a twig ref in the viewport; this is the on-release commit). 'mesh' tick
+// so the texture re-bakes, but version is untouched so the lowered geo cache holds.
+function editPaint(id: string, paint: PaintLayer): void {
+  ensureInit();
+  const model = store.openModelId; if (!model) return;
+  commit({ kind: 'partPaintUpdated', model, id, paint }, 'mesh', 'record');
+}
+
+// Set the model's paint palette (slots + variant) — BRANCH + undoable. 'structure'
+// tick: model-level, no geometry change (the geo cache holds), texture re-bakes.
+function setPalette(palette: Palette): void {
+  ensureInit();
+  const model = store.openModelId; if (!model) return;
+  commit({ kind: 'modelPaletteSet', model, palette }, 'structure', 'record');
+}
+
 function runAction(id: string, action: LayerStripAction): void {
   ensureInit();
   const model = store.openModelId; if (!model) return;
@@ -422,7 +458,7 @@ export function studioModelName(): string | null {
 export function studioRenameModel(name: string): void { renameModel(name); }
 export function studioDeleteModel(id: string): void { deleteModel(id); }
 
-const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, mergeActive, runAction, undo, redo, newModel, openModel, renameModel, deleteModel } as const;
+const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, editPaint, setPalette, mergeActive, runAction, undo, redo, newModel, openModel, renameModel, deleteModel } as const;
 
 export function useStudioModel(): StudioModel {
   ensureInit();
@@ -435,6 +471,7 @@ export function useStudioModel(): StudioModel {
   return {
     openModelId: store.openModelId,
     modelName: store.openModelId ? (st.models?.[store.openModelId]?.name ?? null) : null,
+    palette: store.openModelId ? (st.models?.[store.openModelId]?.palette ?? null) : null,
     models: libraryModels(st),
     parts: store.parts,
     activeId: store.activeId,

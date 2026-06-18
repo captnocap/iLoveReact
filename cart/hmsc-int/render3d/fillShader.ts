@@ -17,7 +17,11 @@
 //                     4 E/NeonSurface · 5 F/Contraband · 6 G/Liminal · 7 H/SecondPass
 //                     8 I/Facades · 9 J/WallProps
 
-export const FILL_SHADER = `
+// The material FUNCTION library (helpers + every material fn + the `fill_pick`
+// dispatcher), with NO entry point — shared so the world-scaled atlas painter
+// (./MaterialFill) reuses the exact same materials (rule of two). `FILL_SHADER`
+// below = these funcs + the standard tile-local fs_main.
+const FILL_FUNCS_SRC = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
 
 fn sat(v: f32) -> f32 { return clamp(v, 0.0, 1.0); }
@@ -2033,21 +2037,8 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
   return sat3(out_col);
 }
 
-@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
-  let material = i32(D[0] + 0.5);
-  let variant = D[1];
-  let seed = D[2];
-  let quality = D[3];
-  let board = D[4];
-  var uv = in.uv;
-  if (quality < 0.5) {
-    uv = (floor(in.uv * 32.0) + vec2f(0.5, 0.5)) / 32.0;
-  } else if (quality < 1.5) {
-    uv = (floor(in.uv * 64.0) + vec2f(0.5, 0.5)) / 64.0;
-  }
-  let px = uv * vec2f(U.size_w, U.size_h);
+fn fill_pick(material: i32, board: f32, uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   var col = vec3f(0.0, 0.0, 0.0);
-
   if (board < 0.5) {
     if (material == 0) { col = road(uv, px, variant, seed); }
     else if (material == 1) { col = concrete(uv, px, variant, seed); }
@@ -2127,10 +2118,35 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     else if (material == 3) { col = wall_sign(uv, px, variant, seed); }
     else { col = wall_ac(uv, px, variant, seed); }
   }
+  return col;
+}
+`;
 
+// the standard tile-local entry: pick the material at in.uv, then vignette/quality.
+const FILL_MAIN_SRC = `
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let material = i32(D[0] + 0.5);
+  let variant = D[1];
+  let seed = D[2];
+  let quality = D[3];
+  let board = D[4];
+  var uv = in.uv;
+  if (quality < 0.5) {
+    uv = (floor(in.uv * 32.0) + vec2f(0.5, 0.5)) / 32.0;
+  } else if (quality < 1.5) {
+    uv = (floor(in.uv * 64.0) + vec2f(0.5, 0.5)) / 64.0;
+  }
+  let px = uv * vec2f(U.size_w, U.size_h);
+  var col = fill_pick(material, board, uv, px, variant, seed);
   let vignette = 1.0 - smoothstep(0.20, 0.88, length(uv - vec2f(0.5, 0.5)));
   col = quality_pass(col, uv, px, seed, quality, board);
   col = col * (0.82 + vignette * 0.20);
   return vec4f(sat3(col), 1.0);
 }
 `;
+
+/** The material function library (no entry point) — for callers that supply their
+ *  own fs_main (the world-scaled atlas painter). Reuses the exact catalog materials. */
+export const FILL_FUNCS = FILL_FUNCS_SRC;
+/** The canonical tile-local fill shader (funcs + standard fs_main). */
+export const FILL_SHADER = FILL_FUNCS_SRC + FILL_MAIN_SRC;

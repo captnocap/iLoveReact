@@ -1,42 +1,48 @@
-// editors/model/meshPaint.tsx — PAINT mode for the Studio (Phase 5c, the in-app
-// texture painter). USER model: with a texture made, EVERY face becomes a
-// NORMALIZED GRID of cells (the atlas texels its UV slot covers); a thin/slanted
-// face's cells are slivers because the geometry packs a thin slot — expected.
-// Painting a face writes the texels INSIDE that face's slot only, so a stroke at
-// the edge NEVER bleeds into a neighbouring face (every face owns a disjoint atlas
-// region, padded by textureize). The grid IS the texture's texel grid; painting a
-// cell colours the atlas region the face samples, so it shows on the 3D model live.
+// editors/model/meshPaint.tsx — PAINT mode PURE MATH for the Studio, the CORRECTED
+// painter (req_1288/req_1289). The React grid overlay lives in ./meshPaintOverlay
+// (this file stays import-clean + unit-testable). The model the demos proved
+// (triangle_mask → paint_on_3d → paint_texture):
 //
-// This module is the pure paint math + the hovered-face grid overlay. The viewport
-// (Studio.tsx) raycasts on press/drag, the renderer (TextureAtlas.tsx) draws the
-// painted cells into the offscreen atlas. Self-contained: reuses meshSelect's camera
+//   • Paint is keyed in UNIFORM MODEL-SURFACE CELLS, not atlas texels. Each face's
+//     cell size is a fixed world size (PAINT_CELL_UNITS) derived from the face's own
+//     world↔uv scale — so a thin/slanted face gets the SAME cell size as a big one
+//     (no slivers), independent of how the atlas packed its slot.
+//   • A cell stores a SLOT id (a pseudo-colour / placement), never raw RGB. The model
+//     palette (studioModel) resolves a slot → a colour or a material at bake time.
+//   • The mask is PER-FACE: a brush stamp clamps to the face's cell bounds, so a
+//     stroke at an edge never bleeds onto a neighbouring face.
+//   • The bake (TextureAtlas) fills each cell as one seamless atlas rect (shared-edge
+//     rounding) — a continuous layer, no per-row gaps (no pinstripes).
+//
+// The viewport (Studio.tsx) raycasts on press/drag; the renderer (TextureAtlas.tsx)
+// fills the painted cells into the offscreen atlas. Reuses meshSelect's camera
 // projection (the SAME view the host renders), adding the INVERSE (screen → world
-// ray) so a click lands on the exact face + texel under the cursor.
+// ray) so a click lands on the exact face + cell under the cursor.
 
-import { useInterval, useRerender } from '@reactjit/hooks';
-import { Box } from '@reactjit/primitives';
-import { makeProjector, type CameraSnap } from './meshSelect';
-import { faceNormal, type EditMesh, type EditMeshFace, type V2, type V3 } from './editMesh';
+import { type CameraSnap } from './meshSelect';
+import { type EditMesh, type EditMeshFace, type V3 } from './editMesh';
 
 const DEG = Math.PI / 180;
-/** never draw more than this many grid divisions on a hovered face (sanity). */
-const GRID_MAX = 48;
+/** model units per paint cell — uniform across every face (16 units = 1 m). */
+export const PAINT_CELL_UNITS = 2;
+/** never make more than this many grid divisions on a face (sanity). */
+const GRID_MAX = 64;
 
 // ── small vec helpers (kept local; the gizmo/select math live in their modules) ──
 function sub(a: V3, b: V3): V3 { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
 function cross(a: V3, b: V3): V3 { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
 function dot(a: V3, b: V3): number { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function clampInt(v: number, lo: number, hi: number): number { return Math.max(lo, Math.min(hi, v)); }
 
-/** the painted cells: key `"tx:ty"` (atlas texel) → colour hex. Global to the atlas
- *  because every face's slot is a disjoint texel rect — the key needs no face id. */
-export type PaintCells = Record<string, string>;
+/** the painted cells: key `"faceIndex:cu:cv"` (a model-surface cell on the part) →
+ *  slot id. Per-PART (one layer per part); the palette resolves slot → appearance. */
+export type PaintCells = Record<string, number>;
 
 /** one part the ray can hit (its live mesh + render lift on the grid + id). */
 export type PaintTarget = { partId: string; mesh: EditMesh; lift: number };
 
-/** A face hit: which part/face, the texel under the cursor, and the face's atlas
- *  texel rect (the clamp box so a brush can't spill past the face's slot). */
-export type FaceHit = { partIndex: number; faceIndex: number; tx: number; ty: number; rect: TexelRect };
+/** A face hit: which part/face and the uniform-world cell under the cursor. */
+export type FaceHit = { partIndex: number; faceIndex: number; cu: number; cv: number };
 export type TexelRect = { x0: number; y0: number; x1: number; y1: number };
 
 // ── screen → world ray (the inverse of meshSelect.makeProjector) ────────────────
@@ -83,7 +89,7 @@ function rayTri(o: V3, d: V3, a: V3, b: V3, c: V3): { t: number; u: number; v: n
 }
 
 /** The face's atlas texel rect from its STORED uv (the slot textureize packed it
- *  into) — the clamp box so a brush stays inside this face's region. */
+ *  into) — the clamp box so a fill stays inside this face's region. */
 export function faceTexelRect(mesh: EditMesh, faceIndex: number, texels: number): TexelRect | null {
   const face = mesh.faces[faceIndex];
   if (!face?.uv || face.uv.length < 3) return null;
@@ -92,10 +98,32 @@ export function faceTexelRect(mesh: EditMesh, faceIndex: number, texels: number)
   return { x0, y0, x1, y1 };
 }
 
-/** Raycast every part for the frontmost uv-mapped face under (sx,sy) and resolve
- *  the exact atlas TEXEL the cursor sits on (barycentric → interpolated uv → texel).
- *  Glass faces and faces without uv are skipped (nothing to paint). */
-export function pickFaceTexel(targets: PaintTarget[], cam: CameraSnap, sx: number, sy: number, texels: number): FaceHit | null {
+// ── the uniform-world cell grid on a face ───────────────────────────────────────
+// The face's slot in the atlas is its uv-rect; how big that rect is in WORLD units is
+// the face's own scale (a thin face packs a thin slot). We derive the cell size in UV
+// from that scale so a cell is always `cell` model-units on EVERY face: cuv = cell /
+// (worldLen/uvLen) measured on the face's first edge (the box unwrap is isometric).
+export type CellGrid = { cuv: number; u0: number; v0: number; u1: number; v1: number; nu: number; nv: number };
+export function faceCellGrid(mesh: EditMesh, faceIndex: number, cell = PAINT_CELL_UNITS): CellGrid | null {
+  const face = mesh.faces[faceIndex];
+  if (!face?.uv || face.uv.length < 2 || face.loop.length < 2) return null;
+  const a = mesh.verts[face.loop[0]], b = mesh.verts[face.loop[1]];
+  const worldLen = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  const uvLen = Math.hypot(face.uv[1][0] - face.uv[0][0], face.uv[1][1] - face.uv[0][1]);
+  if (worldLen < 1e-9 || uvLen < 1e-12) return null;
+  const cuv = (cell / (worldLen / uvLen)); // uv units per cell
+  if (!(cuv > 1e-9)) return null;
+  let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
+  for (const [u, v] of face.uv) { if (u < u0) u0 = u; if (v < v0) v0 = v; if (u > u1) u1 = u; if (v > v1) v1 = v; }
+  const nu = Math.max(1, Math.min(GRID_MAX, Math.ceil((u1 - u0) / cuv)));
+  const nv = Math.max(1, Math.min(GRID_MAX, Math.ceil((v1 - v0) / cuv)));
+  return { cuv, u0, v0, u1, v1, nu, nv };
+}
+
+/** Raycast every part for the frontmost uv-mapped face under (sx,sy) and resolve the
+ *  uniform-world cell the cursor sits on (barycentric → interpolated uv → cell). Glass
+ *  faces and faces without uv are skipped (nothing to paint). */
+export function pickFaceCell(targets: PaintTarget[], cam: CameraSnap, sx: number, sy: number, cell = PAINT_CELL_UNITS): FaceHit | null {
   const ray = screenRay(cam, sx, sy);
   let best: FaceHit | null = null;
   let bestT = Infinity;
@@ -104,6 +132,8 @@ export function pickFaceTexel(targets: PaintTarget[], cam: CameraSnap, sx: numbe
     for (let fi = 0; fi < m.faces.length; fi += 1) {
       const face = m.faces[fi];
       if (face.glass || !face.uv || face.uv.length < 3 || face.loop.length < 3) continue;
+      const grid = faceCellGrid(m, fi, cell);
+      if (!grid) continue;
       const lift = tgt.lift;
       const v0 = m.verts[face.loop[0]];
       const w0: V3 = [v0[0], v0[1] + lift, v0[2]];
@@ -118,84 +148,49 @@ export function pickFaceTexel(targets: PaintTarget[], cam: CameraSnap, sx: numbe
         const uv0 = face.uv[0], uva = face.uv[i], uvb = face.uv[i + 1];
         const au = ba * uv0[0] + hit.u * uva[0] + hit.v * uvb[0];
         const av = ba * uv0[1] + hit.u * uva[1] + hit.v * uvb[1];
-        const rect = faceTexelRect(m, fi, texels)!;
-        const tx = clampTexel(Math.floor(au * texels), rect.x0, rect.x1);
-        const ty = clampTexel(Math.floor(av * texels), rect.y0, rect.y1);
+        const cu = clampInt(Math.floor((au - grid.u0) / grid.cuv), 0, grid.nu - 1);
+        const cv = clampInt(Math.floor((av - grid.v0) / grid.cuv), 0, grid.nv - 1);
         bestT = hit.t;
-        best = { partIndex, faceIndex: fi, tx, ty, rect };
+        best = { partIndex, faceIndex: fi, cu, cv };
       }
     }
   });
   return best;
 }
 
-function clampTexel(t: number, lo: number, hi: number): number {
-  const a = Math.floor(lo), b = Math.ceil(hi) - 1;
-  return Math.max(a, Math.min(b > a ? b : a, t));
-}
-
-/** The cells a brush stamp covers, clamped to the face's slot (so the stroke can't
- *  spill into the neighbouring face). `size` = brush RADIUS+1 in cells: 1 → a single
- *  cell, 2 → a 3-wide disc, 3 → 5-wide, … (each size is distinct — the old mapping
- *  made 1 and 2 identical, so painting read as thin pinlines). A disc footprint keeps
- *  round brushes round on big faces. */
-export function brushTexels(tx: number, ty: number, size: number, rect: TexelRect): Array<[number, number]> {
+/** The cells a brush stamp covers, clamped to the face's cell bounds (so the stroke
+ *  can't spill onto a neighbouring face — the per-face mask). `size` = brush RADIUS+1
+ *  in cells: 1 → a single cell, 2 → a 3-wide disc, … A disc footprint keeps round
+ *  brushes round. */
+export function brushCells(hit: FaceHit, size: number, grid: CellGrid): Array<[number, number]> {
   const r = Math.max(0, Math.round(size) - 1);
-  const x0 = Math.floor(rect.x0), x1 = Math.ceil(rect.x1) - 1, y0 = Math.floor(rect.y0), y1 = Math.ceil(rect.y1) - 1;
   const out: Array<[number, number]> = [];
   for (let dy = -r; dy <= r; dy += 1) {
     for (let dx = -r; dx <= r; dx += 1) {
       if (r > 0 && dx * dx + dy * dy > r * r + 0.25) continue; // disc, not square
-      const px = tx + dx, py = ty + dy;
-      if (px < x0 || px > x1 || py < y0 || py > y1) continue; // clamp to the slot
-      out.push([px, py]);
+      const cu = hit.cu + dx, cv = hit.cv + dy;
+      if (cu < 0 || cu >= grid.nu || cv < 0 || cv >= grid.nv) continue; // clamp to the face
+      out.push([cu, cv]);
     }
   }
-  if (out.length === 0) out.push([tx, ty]);
+  if (out.length === 0) out.push([hit.cu, hit.cv]);
   return out;
 }
 
-/** Merge painted cells into horizontal RUNS of one colour per row — far fewer
- *  rendered boxes than one-per-texel (a full 64² face = ~64 boxes, not 4096), which
- *  keeps the atlas capture under the layout child cap. */
-export function paintRuns(paint: PaintCells): Array<{ x: number; y: number; w: number; color: string }> {
-  const rows = new Map<number, Array<{ x: number; color: string }>>();
-  for (const key in paint) {
-    const sep = key.indexOf(':');
-    const x = Number(key.slice(0, sep)), y = Number(key.slice(sep + 1));
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    let row = rows.get(y); if (!row) { row = []; rows.set(y, row); }
-    row.push({ x, color: paint[key] });
-  }
-  const runs: Array<{ x: number; y: number; w: number; color: string }> = [];
-  for (const [y, row] of rows) {
-    row.sort((a, b) => a.x - b.x);
-    let i = 0;
-    while (i < row.length) {
-      const startX = row[i].x, color = row[i].color;
-      let w = 1; i += 1;
-      while (i < row.length && row[i].x === startX + w && row[i].color === color) { w += 1; i += 1; }
-      runs.push({ x: startX, y, w, color });
-    }
-  }
-  return runs;
+/** Atlas-pixel rect for one cell, with SHARED-EDGE rounding so neighbouring cells
+ *  abut exactly (no 1px gap → no pinstripes). uv→atlas is a pure `*texels` scale, so
+ *  a cell maps to an axis-aligned rect; clamped to the face's slot. */
+export function cellAtlasRect(grid: CellGrid, cu: number, cv: number, texels: number): { x: number; y: number; w: number; h: number } {
+  const ax0 = Math.round((grid.u0 + cu * grid.cuv) * texels);
+  const ax1 = Math.round(Math.min(grid.u0 + (cu + 1) * grid.cuv, grid.u1) * texels);
+  const ay0 = Math.round((grid.v0 + cv * grid.cuv) * texels);
+  const ay1 = Math.round(Math.min(grid.v0 + (cv + 1) * grid.cuv, grid.v1) * texels);
+  return { x: ax0, y: ay0, w: Math.max(1, ax1 - ax0), h: Math.max(1, ay1 - ay0) };
 }
 
-// ── The hovered-face grid overlay ───────────────────────────────────────────────
-// Draws the NORMALIZED grid on the face under the cursor (quad faces — boxes, the
-// common case) so the user SEES the cells they'll paint, plus the cell under the
-// cursor highlighted. Bilinear over the face's 4 corners (matched to its uv-rect
-// corners) maps a grid coordinate back to a world point; everything projects through
-// the SAME view the host renders (so the grid sits ON the rendered face). Non-quad
-// faces just get an outline (the grid math is quad-only for v1).
-
-type Proj = { x: number; y: number; front: boolean };
-
-/** Map a UV point (normalized [0,1] atlas coords) to a world point ON the face, via
- *  barycentric over the fan triangulation — works for ANY face (quad, triangle, n-gon),
- *  unlike a 4-corner bilerp (which only handled axis-aligned quads, so angled/triangular
- *  faces showed no grid, req_1225). Picks the triangle the UV is most inside; `inside`
- *  is true when the UV actually lies within the face, so grid lines clip to the face. */
+/** Map a UV point (normalized atlas coords) to a world point ON the face, via
+ *  barycentric over the fan triangulation. `inside` is true when the UV lies within
+ *  the face, so grid lines clip to the face. (Used by the overlay; pure.) */
 export function uvToWorld(mesh: EditMesh, face: EditMeshFace, u: number, v: number): { world: V3; inside: boolean } | null {
   const uvs = face.uv; if (!uvs || uvs.length < 3) return null;
   const loop = face.loop;
@@ -217,85 +212,4 @@ export function uvToWorld(mesh: EditMesh, face: EditMeshFace, u: number, v: numb
     world: [best.wa * A[0] + best.wb * B[0] + best.wc * C[0], best.wa * A[1] + best.wb * B[1] + best.wc * C[1], best.wa * A[2] + best.wb * B[2] + best.wc * C[2]],
     inside: best.score >= -0.02,
   };
-}
-
-function Line(props: { a: Proj; b: Proj; color: string; thick: number; opacity?: number }) {
-  if (!props.a.front || !props.b.front) return null;
-  const dx = props.b.x - props.a.x, dy = props.b.y - props.a.y;
-  const len = Math.hypot(dx, dy) || 0.001;
-  const angle = Math.atan2(dy, dx) / DEG;
-  return <Box style={{ position: 'absolute', left: (props.a.x + props.b.x) / 2 - len / 2, top: (props.a.y + props.b.y) / 2 - props.thick / 2, width: len, height: props.thick, borderRadius: props.thick / 2, backgroundColor: props.color, opacity: props.opacity ?? 1, transform: { rotate: angle } }} />;
-}
-
-/** The hovered-face grid overlay. REF-DRIVEN (req_1203): it reads the live hover via
- *  `getHover()` and self-ticks, so moving the cursor or painting never re-renders the
- *  parent viewport — the perf-critical decoupling. `grid` is the global texel grid the
- *  whole atlas is divided into; a face sits on it and clips cells (a triangle cuts
- *  through squares). Always mounted in paint mode; renders nothing when nothing is hit. */
-export function PaintGridOverlay(props: {
-  parts: PaintTarget[];
-  getHover: () => FaceHit | null;
-  grid: number;
-  color: string;
-  camSnap: () => CameraSnap;
-}) {
-  // self-tick so the grid tracks the live hover + an orbiting camera with no parent render.
-  const repaint = useRerender();
-  useInterval(repaint, 33);
-
-  const texels = props.grid;
-  const out: any[] = [];
-  const hover = props.getHover();
-  const target = hover ? props.parts[hover.partIndex] : null;
-  const face = target && hover ? target.mesh.faces[hover.faceIndex] : null;
-  if (target && hover && face) {
-    const mesh = target.mesh, lift = target.lift, faceIndex = hover.faceIndex;
-  const baseProj = makeProjector(props.camSnap());
-  const proj = (p: V3): Proj => { const q = baseProj([p[0], p[1] + lift, p[2]]); return { x: q.x, y: q.y, front: q.front }; };
-
-  // the face outline (always — context, even for non-quad faces).
-  const loopW = face.loop.map((vi) => mesh.verts[vi]);
-  for (let i = 0; i < loopW.length; i += 1) {
-    out.push(<Line key={`o${i}`} a={proj(loopW[i])} b={proj(loopW[(i + 1) % loopW.length])} color="#7fd6c0" thick={1.6} opacity={0.9} />);
-  }
-
-  const rect = faceTexelRect(mesh, faceIndex, texels);
-  if (rect && face.uv && face.uv.length >= 3) {
-    // Map a texel point to a world point ON the face (barycentric — ANY face shape, not
-    // just axis-aligned quads, so angled + triangular faces now get a grid, req_1225).
-    const uvw = (tu: number, tv: number) => uvToWorld(mesh, face, tu / texels, tv / texels);
-    const SAMPLES = 10;
-    // A grid line at a fixed integer texel (req_1219: real cell boundaries), CLIPPED to
-    // the face: sample along it and connect only points inside the face's UV hull, so a
-    // triangle's lines stop at its edges. `vertical` = a u=const line spanning v.
-    const gridLine = (key: string, fixed: number, lo: number, hi: number, vertical: boolean) => {
-      let prev: Proj | null = null, prevIn = false;
-      for (let s = 0; s <= SAMPLES; s += 1) {
-        const tt = lo + ((hi - lo) * s) / SAMPLES;
-        const r = vertical ? uvw(fixed, tt) : uvw(tt, fixed);
-        const p = r ? proj(r.world) : null;
-        const inside = !!r && r.inside;
-        if (p && prev && inside && prevIn) out.push(<Line key={`${key}-${s}`} a={prev} b={p} color="#5fe0bf" thick={1.0} opacity={0.7} />);
-        prev = p; prevIn = inside;
-      }
-    };
-    const loX = Math.ceil(rect.x0 + 1e-4), hiX = Math.floor(rect.x1 - 1e-4);
-    const loY = Math.ceil(rect.y0 + 1e-4), hiY = Math.floor(rect.y1 - 1e-4);
-    let n = 0;
-    for (let k = loX; k <= hiX && n < GRID_MAX; k += 1, n += 1) gridLine(`gv${k}`, k, rect.y0, rect.y1, true);
-    n = 0;
-    for (let k = loY; k <= hiY && n < GRID_MAX; k += 1, n += 1) gridLine(`gh${k}`, k, rect.x0, rect.x1, false);
-    // the cell under the cursor — outline + centre dot, through the same uv→world map.
-    const cs = [uvw(hover.tx, hover.ty), uvw(hover.tx + 1, hover.ty), uvw(hover.tx + 1, hover.ty + 1), uvw(hover.tx, hover.ty + 1)];
-    if (cs.every((r) => r)) {
-      const q = cs.map((r) => proj((r as { world: V3 }).world));
-      for (let i = 0; i < 4; i += 1) out.push(<Line key={`hc${i}`} a={q[i]} b={q[(i + 1) % 4]} color={props.color} thick={2.6} />);
-      const cr = uvw(hover.tx + 0.5, hover.ty + 0.5);
-      const ctr = cr ? proj(cr.world) : null;
-      if (ctr && ctr.front) out.push(<Box key="hcdot" style={{ position: 'absolute', left: ctr.x - 4, top: ctr.y - 4, width: 8, height: 8, borderRadius: 4, backgroundColor: props.color, borderWidth: 1, borderColor: '#0008' }} />);
-    }
-  }
-  }
-
-  return <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>{out}</Box>;
 }

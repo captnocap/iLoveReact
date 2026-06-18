@@ -53,7 +53,9 @@ import {
   SelectionOverlay, makeProjector, orbitalEyeJS, pickElement, applyPick, emptySelection, selectionCount,
   type SelMode, type Selection, type CameraSnap,
 } from './meshSelect';
-import { pickFaceTexel, brushTexels, faceTexelRect, PaintGridOverlay, type PaintCells, type PaintTarget, type FaceHit } from './meshPaint';
+import { pickFaceCell, brushCells, faceCellGrid, PAINT_CELL_UNITS, type PaintCells, type PaintTarget, type FaceHit } from './meshPaint';
+import { PaintGridOverlay } from './meshPaintOverlay';
+import { defaultPalette, slotById, type Palette } from './modelStream';
 import {
   TransformGizmo, NormalHandle, AXIS_DIR, axisScreen, dragWorldDistance, pickGizmoHandle, pickNormalHandle, rotationSign, selectionVertIndices, selectionFaceIndices,
   type GizmoTool, type GizmoHit,
@@ -188,6 +190,10 @@ export const STUDIO = {
    *  global grid and clips cells at its edges (a triangle cuts through squares). 64² →
    *  4px cells on the 256px atlas, clearly visible. */
   paintGridCells: 64,
+  /** PAINT cell (the corrected painter, req_1288): the uniform model-surface cell
+   *  size in MODEL UNITS (16 units = 1 m), so a cell is the SAME world size on every
+   *  face regardless of its atlas slot (no slivers). 2 units ≈ 0.125 m ≈ 8 cells/m. */
+  paintCellUnits: 2,
   /** PAINT stroke (req_1207): a drag interpolates dabs every this-many screen px from
    *  the last point, so a fast stroke fills continuously instead of leaving gaps. */
   paintStrokeStepPx: 4,
@@ -393,7 +399,7 @@ function DragReadout(props: { textRef: { current: string | null }; anchorRef: { 
 
 // ── The viewport ─────────────────────────────────────────────────────────────
 
-export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void }) {
+export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void }) {
   const { parts, revision, activePart, onSelectFaces } = props;
 
   // Lower each visible part once per structural revision (camera drags + fov
@@ -545,10 +551,13 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // still refreshes past the host's content-hashed image cache); sliceImages = per-face
   // re-uploads keyed "partId:faceIndex"; imageRev bumps each import to force a re-bake.
   const [tex, setTex] = useHotState<{ texels: number; type: TextureType; color: string; name: string; imageUrl?: string; sliceImages?: Record<string, string>; imageRev?: number; paint?: PaintCells; paintRev?: number; paintFit?: boolean } | null>('studio:tex', null);
-  // PAINT mode (Phase 5c): the current brush colour + size (tool prefs, TWIG). The
-  // painted texels themselves ride `tex.paint` (texture data, beside imageUrl). A
-  // null colour = ERASER (clears cells under the brush).
-  const [paintColor, setPaintColor] = useHotState<string | null>('studio:paintColor', PAINT_SWATCHES[0]);
+  // PAINT mode (the corrected painter, req_1288): you paint a SLOT id (a placement),
+  // not a colour — the model palette resolves slot → colour/material. Tool prefs are
+  // TWIG; the painted cells are BRANCH (on the part). `paintErase` drops cells under
+  // the brush; `paintView` toggles the colourless pseudo-slot view vs the painted one.
+  const [activeSlot, setActiveSlot] = useHotState<number>('studio:paintSlot', 0);
+  const [paintErase, setPaintErase] = useHotState<boolean>('studio:paintErase', false);
+  const [paintView, setPaintView] = useHotState<'pseudo' | 'painted'>('studio:paintView', 'painted');
   const [paintBrush, setPaintBrush] = useHotState<number>('studio:paintBrush', 1);
   // PERF (req_1203): the lag was setTex on EVERY mouse-move (a React re-render +
   // JSON.stringify of the whole paint map per dab). The fix — the cutout painter's
@@ -556,7 +565,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // on a THROTTLED clock (paintBakeTick); the stroke commits to tex.paint on mouse-up.
   // The hover/cursor cell rides a ref too and the grid overlay self-ticks, so hovering
   // never re-renders the viewport either. paintRef is seeded from the persisted paint.
-  const paintRef = useRef<PaintCells>({});
+  // paint accumulates PER PART (partId → its cell layer), seeded from each part's
+  // committed paint; a stroke commits each touched part via onEditPaint (one undo entry).
+  const paintRef = useRef<Record<string, PaintCells>>({});
+  const touchedRef = useRef<Set<string>>(new Set());
   const paintHoverRef = useRef<FaceHit | null>(null);
   const paintDirtyRef = useRef(false);
   const paintingRef = useRef(false);
@@ -1092,7 +1104,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // so a cell maps to exactly one face's slot — no bleed. Returns the hit for the caller.
   const paintProbe = (sx: number, sy: number): FaceHit | null => {
     if (!tex) { paintHoverRef.current = null; return null; }
-    const hit = pickFaceTexel(paintTargets(), camSnap(), sx, sy, tex.texels);
+    const hit = pickFaceCell(paintTargets(), camSnap(), sx, sy, STUDIO.paintCellUnits);
     paintHoverRef.current = hit;
     return hit;
   };
@@ -1102,13 +1114,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const paintAt = (sx: number, sy: number): FaceHit | null => {
     const hit = paintProbe(sx, sy);
     if (!hit) return null;
-    const cells = brushTexels(hit.tx, hit.ty, paintBrush, hit.rect);
-    const buf = paintRef.current;
-    for (const [tx, ty] of cells) {
-      const key = `${tx}:${ty}`;
-      if (paintColor == null) { delete buf[key]; }
-      else { buf[key] = paintColor; }
+    const tgt = paintTargets()[hit.partIndex];
+    if (!tgt) return null;
+    const grid = faceCellGrid(tgt.mesh, hit.faceIndex, STUDIO.paintCellUnits);
+    if (!grid) return null;
+    const cells = brushCells(hit, paintBrush, grid);
+    const buf = (paintRef.current[tgt.partId] ||= {});
+    for (const [cu, cv] of cells) {
+      const key = `${hit.faceIndex}:${cu}:${cv}`;
+      if (paintErase) delete buf[key]; else buf[key] = activeSlot;
     }
+    touchedRef.current.add(tgt.partId);
     paintDirtyRef.current = true;
     return hit;
   };
@@ -1130,12 +1146,28 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // Seed the live buffer from the persisted paint whenever the open texture changes
   // (entering paint, a re-textureize, undo). Keyed on paintRev so an external change
   // re-syncs but our own per-dab writes (which don't touch tex) don't clobber the buffer.
-  useEffect(() => { paintRef.current = { ...(tex?.paint ?? {}) }; setPaintBakeTick((t) => t + 1); }, [tex?.paintRev, tex?.texels]);
+  useEffect(() => {
+    if (paintingRef.current) return; // don't clobber a live stroke mid-drag
+    const m: Record<string, PaintCells> = {};
+    for (const p of props.parts) if (p.paint) m[p.id] = { ...p.paint };
+    paintRef.current = m;
+    setPaintBakeTick((t) => t + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.meshRev, props.revision, selMode]);
   // The throttled bake clock (the cutout idiom): while a stroke is dirty, bump the
   // tick at most ~12×/s so the atlas re-bakes smoothly instead of per mouse-move.
   useInterval(() => { if (paintDirtyRef.current) { paintDirtyRef.current = false; setPaintBakeTick((t) => t + 1); } }, STUDIO.paintBakeMs);
   // Commit the live buffer to persisted paint (one setState) at the end of a stroke.
-  const commitPaint = () => { if (tex) setTex({ ...tex, paint: { ...paintRef.current }, paintRev: (tex.paintRev ?? 0) + 1 }); };
+  // Commit the live buffer to BRANCH paint (undoable) for every part the stroke
+  // touched — one onEditPaint per part. Mint the palette on the first stroke.
+  const commitPaint = () => {
+    if (touchedRef.current.size && !props.palette) props.onSetPalette(defaultPalette());
+    for (const id of touchedRef.current) props.onEditPaint(id, { ...(paintRef.current[id] ?? {}) });
+    touchedRef.current.clear();
+  };
+  // resolve paint against the model palette, falling back to the default so a stroke
+  // shows live BEFORE the first commit mints the real (persisted) palette.
+  const livePalette: Palette = props.palette ?? defaultPalette();
   // AUTO-ENSURE the texture in paint mode (req_1220): switching models resets the
   // (global twig) texture to null, but ensureTexture only ran on the mode-button press
   // — so after a switch the new model had NO texture → no grid, no paint. This re-makes
@@ -1924,15 +1956,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           scene's UVs (meshRev) or the atlas params change (the `sig` memo). */}
       {texView && tex ? (
         <SceneTextureAtlas
-          parts={props.parts.map((p) => ({ id: p.id, mesh: p.mesh }))}
+          parts={props.parts.map((p) => ({ id: p.id, mesh: p.mesh, paint: paintRef.current[p.id] ?? p.paint }))}
           texels={tex.texels}
           type={tex.type}
           color={tex.color}
           imageUrl={tex.imageUrl}
           sliceImages={tex.sliceImages}
-          paint={paintRef.current}
-          paintGrid={tex.texels}
-          sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}.${tex.paintRev ?? 0}.${paintBakeTick}`}
+          palette={livePalette}
+          pseudo={paintView === 'pseudo'}
+          paintCell={STUDIO.paintCellUnits}
+          sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}.${paintBakeTick}.${paintView}.${livePalette.variant}.${livePalette.slots.length}`}
         />
       ) : null}
 
@@ -2013,8 +2046,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         ? <PaintGridOverlay
             parts={paintTargets()}
             getHover={() => paintHoverRef.current}
-            grid={tex.texels}
-            color={paintColor ?? '#ffffff'}
+            cell={STUDIO.paintCellUnits}
+            color={paintErase ? '#ff6b6b' : (slotById(livePalette, activeSlot)?.pseudo ?? '#ffffff')}
             camSnap={camSnap}
           />
         : null}
@@ -2128,37 +2161,48 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             </Pressable>
           );
         })}
-        {/* PAINT mode (Phase 5c): the swatch palette + eraser + brush size. Painting
-            the 3D faces colours the atlas texels INSIDE each face's slot (no bleed). */}
+        {/* PAINT mode (the corrected painter, req_1288): SLOT chips (you paint a
+            placement, recolour via the palette), a pseudo/painted view toggle, a
+            variant cycler (recolour the SAME paint), the eraser + brush + clear. */}
         {selMode === 'paint' ? (
           <>
             <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
-            {PAINT_SWATCHES.map((c) => {
-              const on = paintColor === c;
+            {livePalette.slots.map((s) => {
+              const on = !paintErase && activeSlot === s.id;
               return (
-                <Pressable key={c} onPress={() => setPaintColor(c)} tooltip="Paint colour — click a face to fill its texels with this" style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: c, borderWidth: on ? 2 : 1, borderColor: on ? '#ffffff' : '#0008' }} />
+                <Pressable key={s.id} onPress={() => { setActiveSlot(s.id); setPaintErase(false); }} tooltip={`Paint the ${s.name} slot${s.kind === 'material' ? ' (material)' : ''} — recolour later from the palette`} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 6, paddingRight: 7, height: 20, borderRadius: 4, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderWidth: on ? 2 : 1, borderColor: on ? '#ffffff' : '#2c4a6a' }}>
+                  <Box style={{ width: 11, height: 11, borderRadius: 3, backgroundColor: s.pseudo }} />
+                  <Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{s.name}</Text>
+                </Pressable>
               );
             })}
-            {/* eraser — paints "nothing" (drops the covered cells). */}
-            <Pressable onPress={() => setPaintColor(null)} tooltip="Eraser — painting removes texels (drops the covered cells) instead of colouring" style={{ ...STEP_BTN, backgroundColor: paintColor == null ? '#2a3f5e' : '#13233aee', borderColor: paintColor == null ? '#5b8fd6' : '#2c4a6a' }}>
-              <Text fontSize={10} color={paintColor == null ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>erase</Text>
+            {/* eraser — drops the covered cells. */}
+            <Pressable onPress={() => setPaintErase(!paintErase)} tooltip="Eraser — painting removes cells instead of assigning a slot" style={{ ...STEP_BTN, backgroundColor: paintErase ? '#2a3f5e' : '#13233aee', borderColor: paintErase ? '#5b8fd6' : '#2c4a6a' }}>
+              <Text fontSize={10} color={paintErase ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>erase</Text>
+            </Pressable>
+            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+            {/* view: the colourless slot layer vs the palette-resolved paint. */}
+            <Pressable onPress={() => setPaintView(paintView === 'pseudo' ? 'painted' : 'pseudo')} tooltip="Toggle the colourless slot (pseudo) view vs the painted (palette) view" style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
+              <Text fontSize={10} color="#cfe2ff" style={{ fontFamily: 'monospace' }}>{paintView === 'pseudo' ? 'pseudo' : 'painted'}</Text>
+            </Pressable>
+            {/* variant: recolour the SAME paint by cycling the palette's colour sets. */}
+            <Pressable onPress={() => { const max = Math.max(1, ...livePalette.slots.map((s) => (s.kind === 'color' ? (s.colors?.length ?? 1) : 1))); props.onSetPalette({ ...livePalette, variant: (livePalette.variant + 1) % max }); }} tooltip="Recolour — cycle the palette variant (every colour slot picks its next colour)" style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
+              <Text fontSize={10} color="#cfe2ff" style={{ fontFamily: 'monospace' }}>variant {livePalette.variant + 1}</Text>
             </Pressable>
             <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
             <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>brush</Text>
             {PAINT_BRUSH_SIZES.map((s) => {
               const on = paintBrush === s;
               return (
-                <Pressable key={s} onPress={() => setPaintBrush(s)} tooltip={`Brush size ${s} — paint a ${s}×${s} block of texels per dab`} style={{ ...STEP_BTN, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
+                <Pressable key={s} onPress={() => setPaintBrush(s)} tooltip={`Brush size ${s} — paint a ${s}-cell-radius disc per dab`} style={{ ...STEP_BTN, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
                   <Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{s}</Text>
                 </Pressable>
               );
             })}
-            {/* clear all paint on this texture (buffer + persisted). */}
-            {Object.keys(paintRef.current).length > 0 ? (
-              <Pressable onPress={() => { paintRef.current = {}; commitPaint(); }} tooltip="Clear all paint on this texture (the buffer and the saved version)" style={{ ...STEP_BTN, borderColor: '#a14545' }}>
-                <Text fontSize={10} color="#f0a0a0" style={{ fontFamily: 'monospace' }}>clear paint</Text>
-              </Pressable>
-            ) : null}
+            {/* clear all paint on every part (undoable per part). */}
+            <Pressable onPress={() => { props.parts.forEach((p) => { if (p.paint && Object.keys(p.paint).length) props.onEditPaint(p.id, {}); }); paintRef.current = {}; touchedRef.current.clear(); }} tooltip="Clear all paint on this model" style={{ ...STEP_BTN, borderColor: '#a14545' }}>
+              <Text fontSize={10} color="#f0a0a0" style={{ fontFamily: 'monospace' }}>clear paint</Text>
+            </Pressable>
           </>
         ) : null}
         {/* SYMMETRIZE (req_1190/1201): a WHOLE-MESH op, so shown in EVERY mode (it
@@ -3630,7 +3674,7 @@ export function StudioEditor() {
   }, []);
   return (
     <Row style={{ flexGrow: 1, height: '100%', minHeight: 0, position: 'relative' }}>
-      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} />
+      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} />
       {/* Branch-history verbs — top-left, the one viewport corner the compass /
           toolbar / mode-toggle don't claim. Disabled when the stack is empty. */}
       <Row style={{ position: 'absolute', left: 8, top: 8, gap: 4, zIndex: 30 }}>

@@ -11,11 +11,13 @@
 // the mesh's `textureKey` points at, re-baked only when `sig` changes (the inline-
 // prop rebake hazard harnessed). See ../MESH_EDITOR_PLAYBOOK.md Part 5.6.
 
-import { memo } from 'react';
+import { Fragment, memo } from 'react';
 import { Box, Image, StaticSurface, Text } from '@reactjit/primitives';
 import { islandColorFor, type TextureType } from './textureize';
 import { storedUVLayout, type V2, type EditMesh } from './editMesh';
-import { paintRuns, type PaintCells } from './meshPaint';
+import { faceCellGrid, cellAtlasRect, PAINT_CELL_UNITS, type PaintCells } from './meshPaint';
+import { slotById, slotColor, type Palette } from './modelStream';
+import { MaterialFill } from './MaterialFill';
 import { STUDIO } from './Studio';
 
 /** The one live texture key every part's mesh samples (the cutout idiom). */
@@ -36,21 +38,22 @@ function Seg(props: { a: V2; b: V2; color: string; th?: number }) {
   return <Box style={{ position: 'absolute', left: (ax + bx) / 2 - len / 2, top: (ay + by) / 2 - th / 2, width: len, height: th, backgroundColor: props.color, transform: { rotate: angle } }} />;
 }
 
-export type ScenePart = { id: string; mesh: EditMesh };
+/** A part in the scene atlas, with its paint LAYER (surface-cell → slot id). */
+export type ScenePart = { id: string; mesh: EditMesh; paint?: PaintCells };
 
 /** The offscreen sprite-map capture for the WHOLE scene. `sig` (meshRev + atlas
- *  params) drives the re-bake: when it changes the memo re-renders, the capture
- *  subtree gets fresh identity, and the StaticSurface re-captures. */
-export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts: ScenePart[]; texels: number; type: TextureType; color: string; imageUrl?: string; sliceImages?: Record<string, string>; paint?: PaintCells; paintGrid?: number; sig: string }) {
+ *  params + paint/palette) drives the re-bake: when it changes the memo re-renders,
+ *  the capture subtree gets fresh identity, and the StaticSurface re-captures. */
+export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts: ScenePart[]; texels: number; type: TextureType; color: string; imageUrl?: string; sliceImages?: Record<string, string>; palette?: Palette; pseudo?: boolean; paintCell?: number; sig: string }) {
   const px = STUDIO.textureAtlasPx;
   const cells = Math.max(2, STUDIO.textureCheckerCells);
   const cell = px / cells;
-  // the user's PAINT (Phase 5c) — cells coloured by painting the 3D faces, merged into
-  // horizontal runs (far fewer boxes). Painting uses a FIXED grid (req_1207) NOT the
-  // packed atlas resolution, so cells are a visible size regardless of model size; one
-  // cell = `tpx` px. Drawn on TOP of the base art so manual paint always wins.
-  const tpx = px / Math.max(1, props.paintGrid ?? props.texels);
-  const runs = props.paint ? paintRuns(props.paint) : [];
+  // PAINT (the corrected painter, req_1288): each painted cell is a uniform model-
+  // surface cell (paintCell model-units) resolved through the model palette. Colour
+  // slots fill a seamless atlas rect (shared-edge rounding → no pinstripes); material
+  // slots bake through a world-scaled shader (MaterialFill). Drawn on top of the base
+  // art so manual paint always wins.
+  const paintCell = props.paintCell ?? PAINT_CELL_UNITS;
 
   // the checkerboard backdrop (the UV-test ground): light base + dark cells.
   const darkCells: { x: number; y: number }[] = [];
@@ -122,15 +125,47 @@ export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts:
             </Box>
           );
         })}
-        {/* PAINT (Phase 5c): the painted texel runs, on top of everything. Isolated
-            in one container so their box count keeps its own layout-child budget. */}
-        {runs.length > 0 ? (
-          <Box style={{ position: 'absolute', left: 0, top: 0, width: px, height: px }}>
-            {runs.map((r, i) => (
-              <Box key={`p${i}`} style={{ position: 'absolute', left: r.x * tpx, top: r.y * tpx, width: Math.max(1, r.w * tpx), height: Math.max(1, tpx), backgroundColor: r.color }} />
-            ))}
-          </Box>
-        ) : null}
+        {/* PAINT (the corrected painter, req_1288): each part's paint layer, resolved
+            through the model palette, on top of everything. Colour slots = seamless
+            atlas rects; material slots = a world-scaled shader fill. */}
+        <Box style={{ position: 'absolute', left: 0, top: 0, width: px, height: px }}>
+          {props.parts.map((part) => {
+            const paint = part.paint;
+            if (!paint) return null;
+            const colorNodes: any[] = [];
+            // material cells grouped per (face, slot) → one MaterialFill each.
+            const matGroups = new Map<string, { face: number; slot: number; cells: Array<[number, number]> }>();
+            for (const key in paint) {
+              const sep1 = key.indexOf(':'); const sep2 = key.indexOf(':', sep1 + 1);
+              const fi = Number(key.slice(0, sep1)), cu = Number(key.slice(sep1 + 1, sep2)), cv = Number(key.slice(sep2 + 1));
+              const slotId = paint[key];
+              const sl = slotById(props.palette, slotId);
+              if (!sl) continue;
+              const grid = faceCellGrid(part.mesh, fi, paintCell);
+              if (!grid) continue;
+              // material slots bake through the world-scaled shader — UNLESS the pseudo
+              // (colourless slot) view is on, where every slot shows its flat pseudo hue.
+              if (sl.kind === 'material' && !props.pseudo) {
+                const gk = `${fi}:${slotId}`;
+                let g = matGroups.get(gk);
+                if (!g) { g = { face: fi, slot: slotId, cells: [] }; matGroups.set(gk, g); }
+                g.cells.push([cu, cv]);
+                continue;
+              }
+              const color = props.pseudo ? sl.pseudo : slotColor(props.palette, slotId);
+              if (!color) continue;
+              const r = cellAtlasRect(grid, cu, cv, px);
+              colorNodes.push(<Box key={`${part.id}:${key}`} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, backgroundColor: color }} />);
+            }
+            const matNodes = [...matGroups.values()].map((g) => {
+              const grid = faceCellGrid(part.mesh, g.face, paintCell);
+              const sl = slotById(props.palette, g.slot);
+              if (!grid || !sl) return null;
+              return <MaterialFill key={`${part.id}:m${g.face}:${g.slot}`} slot={sl} grid={grid} cells={g.cells} cell={paintCell} texels={px} />;
+            });
+            return <Fragment key={`paint-${part.id}`}>{colorNodes}{matNodes}</Fragment>;
+          })}
+        </Box>
         {islands.length === 0 && !whole ? (
           <Text fontSize={11} color="#5b6b80" style={{ position: 'absolute', left: 8, top: 8, fontFamily: 'monospace' }}>no unwrapped faces</Text>
         ) : null}

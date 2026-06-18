@@ -17,6 +17,34 @@
 import type { StreamDef } from '../../data';
 import type { EditMesh } from './editMesh';
 
+// ── PAINT (the corrected painter, req_1288/req_1289) ─────────────────────────────
+// Paint is a LAYER over the read-only atlas, keyed in uniform model-SURFACE cells
+// (not atlas texels — that was the sliver bug), storing a SLOT id (a pseudo-colour /
+// placement), never raw RGB. A SLOT resolves through the model PALETTE to a real
+// colour OR a material shader sampled at a world scale. All of it is BRANCH data:
+// persisted + undoable, on the part (paint) and the model (palette).
+
+/** A part's paint layer: `"faceIndex:cu:cv"` (a model-surface cell) → slot id. */
+export type PaintLayer = Record<string, number>;
+
+export type SlotKind = 'color' | 'material';
+/** One palette slot — a named placement the painter assigns to cells. */
+export type SlotDef = {
+  id: number;
+  name: string;
+  /** placeholder hue for the colourless "slot" view while painting. */
+  pseudo: string;
+  kind: SlotKind;
+  /** kind 'color': the set of possible colours; `Palette.variant` picks one. */
+  colors?: string[];
+  /** kind 'material': a catalog material (game/textures) + its own variant. */
+  material?: { slug: string; variant: number };
+  /** metres per texture tile (material scale) — a physical size, never "fit". */
+  worldPerTile?: number;
+};
+/** Per-model palette: the slot table + the active recolour variant. */
+export type Palette = { slots: SlotDef[]; variant: number };
+
 /** One authored part as persisted — the library row + everything the viewport
  *  needs to render it. Geometry is lowered from `mesh` on read. */
 export type StoredPart = {
@@ -27,6 +55,8 @@ export type StoredPart = {
   visible: boolean;
   lift: number;
   version: number;
+  /** the paint LAYER (surface-cell → slot id). Absent on an unpainted part. */
+  paint?: PaintLayer;
 };
 
 /** One saved model = a named scene and its ordered parts. */
@@ -36,6 +66,8 @@ export type StoredModel = {
   parts: Record<string, StoredPart>;
   /** index 0 = TOP of the outliner. */
   order: string[];
+  /** the model's paint palette (slot → appearance). Absent until first paint. */
+  palette?: Palette;
 };
 
 export type ModelEvent =
@@ -47,6 +79,10 @@ export type ModelEvent =
   // absent / not-found → top.
   | { kind: 'partAdded'; model: string; part: StoredPart; afterId?: string | null }
   | { kind: 'partMeshUpdated'; model: string; id: string; mesh: EditMesh }
+  // paint a part's layer (surface-cell → slot id) — branch + undoable, no geometry change.
+  | { kind: 'partPaintUpdated'; model: string; id: string; paint: PaintLayer }
+  // set the model's paint palette (slot table + variant) — branch + undoable.
+  | { kind: 'modelPaletteSet'; model: string; palette: Palette }
   | { kind: 'partRenamed'; model: string; id: string; name: string }
   | { kind: 'partVisibilitySet'; model: string; id: string; visible: boolean }
   | { kind: 'partReordered'; model: string; id: string; dir: 'up' | 'down' }
@@ -84,6 +120,12 @@ function applyPartEdit(model: StoredModel, event: ModelEvent): StoredModel {
     case 'partMeshUpdated': {
       const prev = model.parts[event.id];
       return prev ? { ...model, parts: { ...model.parts, [event.id]: { ...prev, mesh: event.mesh, version: prev.version + 1 } } } : model;
+    }
+    case 'partPaintUpdated': {
+      // paint rides beside the mesh; version is NOT bumped (geometry is unchanged,
+      // so the lowered geo cache stays valid — only the texture re-bakes).
+      const prev = model.parts[event.id];
+      return prev ? { ...model, parts: { ...model.parts, [event.id]: { ...prev, paint: event.paint } } } : model;
     }
     case 'partRenamed': {
       const prev = model.parts[event.id];
@@ -131,8 +173,13 @@ export const modelStream: StreamDef<ModelStreamState, ModelEvent> = Object.freez
         delete models[event.model];
         return { models, order: state.order.filter((id) => id !== event.model) };
       }
+      case 'modelPaletteSet': {
+        const m = state.models[event.model];
+        return m ? { ...state, models: { ...state.models, [event.model]: { ...m, palette: event.palette } } } : state;
+      }
       case 'partAdded':
       case 'partMeshUpdated':
+      case 'partPaintUpdated':
       case 'partRenamed':
       case 'partVisibilitySet':
       case 'partReordered':
@@ -160,4 +207,34 @@ export function modelParts(state: ModelStreamState, modelId: string | null): Sto
   if (!modelId) return [];
   const m = state?.models?.[modelId];
   return m ? m.order.map((id) => m.parts[id]).filter(Boolean) : [];
+}
+
+// ── palette helpers (slot → appearance) ──────────────────────────────────────────
+
+/** The default palette minted on first paint: a few colour slots (each with a small
+ *  set of possible colours that `variant` cycles) + a couple of material slots. */
+export function defaultPalette(): Palette {
+  return {
+    variant: 0,
+    slots: [
+      { id: 0, name: 'Body', pseudo: '#ff4d6d', kind: 'color', colors: ['#c64b53', '#3f6fb0', '#4f9e63', '#dfe3ea', '#d8b24a'] },
+      { id: 1, name: 'Trim', pseudo: '#4d8bff', kind: 'color', colors: ['#20242b', '#8a909c', '#3a3f47'] },
+      { id: 2, name: 'Glass', pseudo: '#3ddc84', kind: 'color', colors: ['#bfe6f2', '#9fd0dc'] },
+      { id: 3, name: 'Brick', pseudo: '#e0a060', kind: 'material', material: { slug: 'brick', variant: 0 }, worldPerTile: 1 },
+      { id: 4, name: 'Grass', pseudo: '#7cd06a', kind: 'material', material: { slug: 'grass', variant: 0 }, worldPerTile: 1.5 },
+    ],
+  };
+}
+
+export function slotById(palette: Palette | null | undefined, id: number): SlotDef | null {
+  return palette?.slots.find((s) => s.id === id) ?? null;
+}
+
+/** A colour slot's current colour (variant picks from its set); null for a material
+ *  slot (which bakes through a shader, not a flat fill). */
+export function slotColor(palette: Palette | null | undefined, id: number): string | null {
+  const s = slotById(palette, id);
+  if (!s || s.kind !== 'color') return null;
+  const cs = s.colors && s.colors.length ? s.colors : [s.pseudo];
+  return cs[(palette?.variant ?? 0) % cs.length];
 }
