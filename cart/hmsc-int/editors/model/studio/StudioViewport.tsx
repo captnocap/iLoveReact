@@ -67,82 +67,13 @@ import {
 import { RigOverlay, pickRigHandle, rigHandles, type RigSel } from '../meshRig';
 import { T, STEP_BTN, SMOOTH_PRESETS, PAINT_SWATCHES, PAINT_BRUSH_SIZES, SCALE_FIGURE_SEED, SCALE_FIGURE_CART_KEY, STUDIO, type Vec3, type Rect } from './config';
 import { clamp, sameRigSel, nextJointName, snapToStep, unitsToMeters, metersToUnits, fmtUnits, nowMs, schedFrame, partPlacement, loopCutAxisInfo, lcKeptFace, type LoopCutAxis } from './helpers';
+import { GroundGrid, OriginAxes, DragReadout } from './scene/staging';
+import { NumberField } from './panels/NumberField';
+import { ViewCompass } from './overlays/ViewCompass';
+import { FrameDiagBar } from './overlays/FrameDiagBar';
+import { ConcaveFixPopup } from './dialogs/ConcaveFixPopup';
 
 
-// ── Staging: a ground grid + origin axes as Scene3D content ───────────────────
-// These will graduate to host-rendered, screen-stable overlays (Part 4b); for
-// the hot-reload first slice they are thin Scene3D boxes so the stage reads now.
-
-function GroundGrid() {
-  const lines = useMemo(() => {
-    const out: { key: string; pos: Vec3; size: Vec3; color: string }[] = [];
-    const tiles = STUDIO.gridTiles;
-    const tile = STUDIO.tileMeters;
-    const total = tiles * tile;
-    const half = total / 2;
-    const lift = STUDIO.gridLiftMeters;
-    const bw = STUDIO.gridLineMeters;
-    const fw = STUDIO.fineLineMeters;
-    const big = '#41526e';
-    const fine = '#283648';
-    for (let i = 0; i <= tiles; i += 1) {
-      const p = -half + i * tile;
-      out.push({ key: `bx${i}`, pos: [p, lift, 0], size: [bw, bw, total], color: big });
-      out.push({ key: `bz${i}`, pos: [0, lift, p], size: [total, bw, bw], color: big });
-    }
-    const c = tile / 2;
-    const step = tile / STUDIO.fineDivisions;
-    for (let i = 1; i < STUDIO.fineDivisions; i += 1) {
-      const p = -c + i * step;
-      out.push({ key: `fx${i}`, pos: [p, lift, 0], size: [fw, fw, tile], color: fine });
-      out.push({ key: `fz${i}`, pos: [0, lift, p], size: [tile, fw, fw], color: fine });
-    }
-    return out;
-  }, []);
-  return (
-    <>
-      {lines.map((l) => (
-        <Scene3D.Mesh key={l.key} geometry={Geom.box} params={{ width: l.size[0], height: l.size[1], depth: l.size[2] }} material={{ color: l.color, opacity: 0.85 }} position={l.pos} />
-      ))}
-    </>
-  );
-}
-
-function OriginAxes() {
-  const len = STUDIO.axisLengthMeters;
-  const th = STUDIO.axisThicknessMeters;
-  const half = len / 2;
-  return (
-    <>
-      <Scene3D.Mesh geometry={Geom.box} params={{ width: len, height: th, depth: th }} material="#e0584e" position={[half, 0, 0]} />
-      <Scene3D.Mesh geometry={Geom.box} params={{ width: th, height: len, depth: th }} material="#5ec26a" position={[0, half, 0]} />
-      <Scene3D.Mesh geometry={Geom.box} params={{ width: th, height: th, depth: len }} material="#4aa3ff" position={[0, 0, half]} />
-    </>
-  );
-}
-
-// A minimal box geometry def (a unit cube) for the staging lines/axes.
-const Geom = { box: require('@reactjit/geometries').Box };
-
-// HOST-OWNED DRAG readout (req_1270): a self-ticking tooltip for the gizmo move
-// step amount. The gizmo drag streams to the host with ZERO setState, so the
-// readout can't come from React state — it reads the live text + grab anchor from
-// refs and re-projects every 33ms, exactly like SelectionOverlay. Mounted only
-// while a gizmo drag is active (rig/loop-cut keep the inline state readout).
-function DragReadout(props: { textRef: { current: string | null }; anchorRef: { current: MV3 | null }; camSnap: () => CameraSnap }) {
-  const repaint = useRerender();
-  useInterval(repaint, 33);
-  const text = props.textRef.current;
-  const anchor = props.anchorRef.current;
-  if (!text || !anchor) return null;
-  const p = makeProjector(props.camSnap())(anchor);
-  if (!p.front) return null;
-  return (
-    <Box style={{ position: 'absolute', left: p.x + 14, top: p.y - 34, paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#5b8fd6' }}>
-      <Text fontSize={11} color="#cfe2ff" style={{ fontFamily: 'monospace', fontWeight: '800' }}>{text}</Text>
-    </Box>
-  );
-}
 
 // ── The viewport ─────────────────────────────────────────────────────────────
 
@@ -2830,145 +2761,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   );
 }
 
-// The concave Auto-Fix alert (req_0949/req_1016): an edit buckled a quad into a
-// non-convex (reflex-corner) face. The mesh is NOT silently triangulated — this
-// LOUD dialog (the buckled face still previewed behind it) makes the user choose:
-// Split Quads (the recommended fix) / Ignore (commit it concave) / Revert (drop it).
-function ConcaveFixPopup(props: { count: number; onResolve: (a: 'split' | 'ignore' | 'revert') => void }) {
-  return (
-    <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 18, alignItems: 'center' }}>
-      <Col style={{ gap: 8, paddingLeft: 14, paddingRight: 14, paddingTop: 11, paddingBottom: 11, borderRadius: 9, backgroundColor: '#1a1206f2', borderWidth: 1, borderColor: '#a86a2c', minWidth: 280 }}>
-        <Row style={{ gap: 8, alignItems: 'center' }}>
-          <Text fontSize={12} color="#ffb454" style={{ fontWeight: '800' }}>⚠ Concave face</Text>
-          <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
-            {`${props.count} face${props.count === 1 ? '' : 's'} buckled — not convex`}
-          </Text>
-        </Row>
-        <Row style={{ gap: 6 }}>
-          <Pressable onPress={() => props.onResolve('split')} style={{ flexGrow: 1, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}>
-            <Text fontSize={11} color="#7fd6a0" style={{ fontWeight: '800' }}>Split Quads</Text>
-          </Pressable>
-          <Pressable onPress={() => props.onResolve('ignore')} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}>
-            <Text fontSize={11} color={T.dim}>Ignore</Text>
-          </Pressable>
-          <Pressable onPress={() => props.onResolve('revert')} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#3a1c1c', borderWidth: 1, borderColor: '#7a2f2f' }}>
-            <Text fontSize={11} color="#e08a8a">Revert</Text>
-          </Pressable>
-        </Row>
-        <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>Split Quads is recommended — keeps the surface valid.</Text>
-      </Col>
-    </Box>
-  );
-}
 
-function StatCell(props: { label: string; value: string; warn?: boolean }) {
-  return (
-    <Row style={{ gap: 3, alignItems: 'baseline' }}>
-      <Text fontSize={8} color={T.dim} style={{ fontFamily: 'monospace' }}>{props.label}</Text>
-      <Text fontSize={9} color={props.warn ? '#ffb454' : T.text} style={{ fontFamily: 'monospace', fontWeight: '800' }}>{props.value}</Text>
-    </Row>
-  );
-}
 
-// ── View-orientation compass (the navigation gizmo — req_0969, playbook 4b#1) ──
-// A corner widget that always shows the camera's orientation (the ±X/Y/Z axis
-// ends projected through the live view basis) and snaps the view to face an axis
-// when you click its ball. A 2D projection of the camera basis for now (hot-
-// reload); it graduates to the host screen-stable overlay with the gizmo/grid.
 
-const DEG = Math.PI / 180;
-type V3 = [number, number, number];
-const dot3 = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const cross3 = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-const norm3 = (a: V3): V3 => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
-
-const COMPASS = { size: 78, radius: 25, posR: 9, negR: 6 } as const;
-// the 6 axis ends. faceYaw/facePitch = orbit angles that look ALONG this axis
-// (camera on that side, looking at the origin). NaN yaw = a pole → keep current
-// yaw. Convention from camera.zig orbitalEye: yaw=atan2(-ox,-oz), pitch=asin(oy).
-const COMPASS_AXES: { key: string; dir: V3; color: string; label: string; pos: boolean; faceYaw: number; facePitch: number }[] = [
-  { key: '+x', dir: [1, 0, 0], color: '#e0584e', label: 'X', pos: true, faceYaw: -90, facePitch: 0 },
-  { key: '-x', dir: [-1, 0, 0], color: '#e0584e', label: '', pos: false, faceYaw: 90, facePitch: 0 },
-  { key: '+y', dir: [0, 1, 0], color: '#5ec26a', label: 'Y', pos: true, faceYaw: NaN, facePitch: 89.9 },
-  { key: '-y', dir: [0, -1, 0], color: '#5ec26a', label: '', pos: false, faceYaw: NaN, facePitch: -89.9 },
-  { key: '+z', dir: [0, 0, 1], color: '#4aa3ff', label: 'Z', pos: true, faceYaw: 180, facePitch: 0 },
-  { key: '-z', dir: [0, 0, -1], color: '#4aa3ff', label: '', pos: false, faceYaw: 0, facePitch: 0 },
-];
-
-function ViewCompass(props: { lookRef: { current: { yaw: number; pitch: number } }; onFace: (yaw: number, pitch: number) => void }) {
-  // Self-tick to mirror the camera live (the spin is host/ref-driven, so the
-  // parent doesn't re-render). Isolated → never touches the Scene3D tree.
-  const repaint = useRerender();
-  useInterval(repaint, 33);
-
-  const { yaw, pitch } = props.lookRef.current;
-  const yr = yaw * DEG, pr = pitch * DEG;
-  // forward = -eye_offset (camera.zig orbitalEye); right/up complete the basis.
-  const F: V3 = [Math.sin(yr) * Math.cos(pr), -Math.sin(pr), Math.cos(yr) * Math.cos(pr)];
-  const R = norm3(cross3(F, [0, 1, 0]));
-  const U = cross3(R, F);
-  const c = COMPASS.size / 2;
-  const ends = COMPASS_AXES.map((ax) => {
-    const sx = dot3(ax.dir, R), sy = dot3(ax.dir, U), depth = dot3(ax.dir, F);
-    return { ax, px: c + sx * COMPASS.radius, py: c - sy * COMPASS.radius, depth };
-  }).sort((a, b) => b.depth - a.depth); // far first → near drawn on top
-
-  return (
-    <Box style={{ position: 'absolute', left: 14, bottom: 14, width: COMPASS.size, height: COMPASS.size, borderRadius: COMPASS.size / 2, backgroundColor: '#0b1320bb', borderWidth: 1, borderColor: '#27364a' }}>
-      {ends.filter((e) => e.ax.pos).map((e) => {
-        const dx = e.px - c, dy = e.py - c;
-        const len = Math.hypot(dx, dy) || 0.001;
-        const angle = Math.atan2(dy, dx) / DEG;
-        return <Box key={`l${e.ax.key}`} style={{ position: 'absolute', left: (c + e.px) / 2 - len / 2, top: (c + e.py) / 2 - 1, width: len, height: 2, borderRadius: 1, backgroundColor: e.ax.color, opacity: 0.65, transform: { rotate: angle } }} />;
-      })}
-      <Box style={{ position: 'absolute', left: c - 3, top: c - 3, width: 6, height: 6, borderRadius: 3, backgroundColor: '#d98a4a' }} />
-      {ends.map((e) => {
-        const r = e.ax.pos ? COMPASS.posR : COMPASS.negR;
-        return (
-          <Pressable key={e.ax.key} onPress={() => props.onFace(e.ax.faceYaw, e.ax.facePitch)} tooltip={`face ${e.ax.key}`} style={{ position: 'absolute', left: e.px - r, top: e.py - r, width: r * 2, height: r * 2 }}>
-            <Box style={{ width: r * 2, height: r * 2, borderRadius: r, alignItems: 'center', justifyContent: 'center', backgroundColor: e.ax.pos ? e.ax.color : '#0b1320', borderWidth: e.ax.pos ? 0 : 2, borderColor: e.ax.color, opacity: e.ax.pos ? 1 : 0.62 }}>
-              {e.ax.label ? <Text fontSize={9} color="#08101c" style={{ fontWeight: '800', fontFamily: 'monospace' }}>{e.ax.label}</Text> : null}
-            </Box>
-          </Pressable>
-        );
-      })}
-    </Box>
-  );
-}
-
-// Isolated so its 5 Hz probe re-renders never touch the Scene3D tree. Now a THIN
-// horizontal strip (req_0981) — the key frame stats inline (fps · frame/worst ms
-// · skips · gc · present) so the readout sits in the top-right toolbar beside the
-// smooth/log/fps levers rather than as a tall corner box. The once-per-second
-// [studio-frames] terminal warn stays gated behind `logToTerminal` (the 'log cam'
-// toggle), default OFF so the dev terminal stays silent until re-armed.
-function FrameDiagBar(props: { logToTerminal: boolean }) {
-  const [resetSeq, setResetSeq] = useState(0);
-  const diag = useFrameProbe({ active: true, pollMs: 200, resetSeq, logToTerminal: props.logToTerminal });
-  return (
-    <Row style={{ gap: 8, alignItems: 'center', paddingLeft: 9, paddingRight: 6, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320e8', borderWidth: 1, borderColor: '#27364a' }}>
-      <Text fontSize={8} color={T.text} style={{ fontFamily: 'monospace', fontWeight: '800' }}>FRAMES</Text>
-      {diag.live ? (
-        <>
-          <StatCell label="fps" value={`${diag.fps.toFixed(0)}`} warn={diag.fps > 0 && diag.fps < 50} />
-          <StatCell label="ms" value={`${diag.medianMs.toFixed(1)}/${diag.worstMs.toFixed(1)}`} warn={diag.worstMs > diag.medianMs * 2 + 1} />
-          <StatCell label="skip" value={`${diag.peakSkips}`} warn={diag.peakSkips > 0} />
-          <StatCell label="gc" value={`${diag.gcMs.toFixed(1)}`} warn={diag.gcMs > 1} />
-          <StatCell label="pres" value={`${diag.presentMs.toFixed(1)}`} warn={diag.presentMs > diag.medianMs + 2} />
-          {/* TEXT RESOURCE gauges (req_1279): when the compass letters (or any text)
-              silently vanish, one of these is at cap. glyph = per-frame buffer
-              (trailing text drops); atlas = distinct-glyph cache (new combos can't
-              rasterize, no eviction). warn at 90%. */}
-          <StatCell label="glyph" value={`${diag.glyphCount}/${diag.glyphCap}`} warn={diag.glyphCap > 0 && diag.glyphCount >= diag.glyphCap * 0.9} />
-          <StatCell label="atlas" value={`${diag.atlasCount}/${diag.atlasCap}`} warn={diag.atlasCap > 0 && diag.atlasCount >= diag.atlasCap * 0.9} />
-        </>
-      ) : (
-        <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>no telemetry…</Text>
-      )}
-      <Pressable onPress={() => setResetSeq((n) => n + 1)} tooltip="Reset the FRAMES counters (clear the worst-ms / skip / gc peaks and start fresh)" style={STEP_BTN}><Text fontSize={8} color={T.dim}>↺</Text></Pressable>
-    </Row>
-  );
-}
 
 // ── Add-mesh dialog (req_0972/0973) ───────────────────────────────────────────
 // The first shape is a cube; pick its diameter (= width = depth) and height in
@@ -2977,24 +2772,6 @@ function FrameDiagBar(props: { logToTerminal: boolean }) {
 // tile's 16×16 grid. This changes nothing about the grid — the grid IS the ruler
 // these units read against (USER req_0973).
 
-function NumberField(props: { label: string; value: number; onChange: (n: number) => void; min: number; max: number; step: number; snap: number; suffix?: string }) {
-  const set = (n: number) => props.onChange(clamp(Math.round(n / props.snap) * props.snap, props.min, props.max));
-  return (
-    <Row style={{ gap: 8, alignItems: 'center' }}>
-      <Text fontSize={11} color={T.dim} style={{ width: 64, fontFamily: 'monospace' }}>{props.label}</Text>
-      <Pressable onPress={() => set(props.value - props.step)} style={STEP_BTN}><Text fontSize={13} color={T.text}>−</Text></Pressable>
-      <Box style={{ width: 66 }}>
-        <TextInput
-          value={String(props.value)}
-          onChangeText={(t: string) => { const n = parseFloat(t); if (Number.isFinite(n)) set(n); }}
-          style={{ height: 24, fontSize: 12, color: T.ink, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, textAlign: 'center', fontFamily: 'monospace' }}
-        />
-      </Box>
-      <Pressable onPress={() => set(props.value + props.step)} style={STEP_BTN}><Text fontSize={13} color={T.text}>+</Text></Pressable>
-      {props.suffix ? <Text fontSize={10} color={T.dim}>{props.suffix}</Text> : null}
-    </Row>
-  );
-}
 
 // The "Add" dialog (req_1056): pick a SHAPE beyond the cube, set its Blockbench
 // params — diameter (= width = depth) + height, plus a "sides" count (3..48) for
