@@ -1043,8 +1043,34 @@ pub fn staticSurfaceWarming(key: []const u8, width_f: f32, height_f: f32, warmup
 /// it. This prevents a chicken-and-egg where the StaticSurface is always
 /// stale relative to the Scene3D render (both are in the same paint loop,
 /// but the 3D scene is drawn before the StaticSurface GPU capture finishes).
+/// Resolver injected by gpu/paintable.zig (lazily, on its first ensure) so a
+/// Scene3D mesh whose `textureKey` names a paintable resolves to it. A fn
+/// pointer instead of an @import keeps the paintable build-gate intact (no
+/// resolver registered ⇒ paintable not compiled ⇒ this stays null) and avoids
+/// an import cycle (paintable imports gpu.zig, not the reverse).
+const PaintableResolver = *const fn (key: []const u8) ?*wgpu.BindGroup;
+var g_paintable_resolver: ?PaintableResolver = null;
+pub fn setPaintableResolver(f: PaintableResolver) void {
+    g_paintable_resolver = f;
+}
+
+/// Scene3D diffuse texture layout + nearest sampler, exposed so paintable.zig
+/// can build a mesh-sampling bind group matching the 3D pipeline (binding 0 =
+/// texture, binding 1 = the .non_filtering nearest sampler — req_1321).
+pub fn scene3dTexLayout() ?*wgpu.BindGroupLayout {
+    return scene3d.getTexBindGroupLayout();
+}
+pub fn scene3dDiffuseSampler() ?*wgpu.Sampler {
+    return scene3d.getDiffuseSampler();
+}
+
 pub fn staticSurfaceBindGroup3D(key: []const u8) ?*wgpu.BindGroup {
-    const idx = findStaticEntry(staticKeyHash(key), key.len) orelse return null;
+    const idx = findStaticEntry(staticKeyHash(key), key.len) orelse {
+        // Not a captured StaticSurface — try a paintable of the same key (the
+        // Studio pixel painter installs its RGBA texture this way).
+        if (g_paintable_resolver) |resolve| return resolve(key);
+        return null;
+    };
     const entry = &g_static_entries[idx];
     if (entry.view == null or entry.sampler == null) return null;
     if (entry.bind_group_3d) |bg| return bg;

@@ -133,6 +133,57 @@ fn paintBrush(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     paintable.queueBrush(id, cx, cy, r, value, kind, angle, aspect, hardness, flow, scatter, seed);
 }
 
+fn argU32(info: v8.FunctionCallbackInfo, idx: u32) u32 {
+    if (idx >= info.length()) return 0;
+    const ctx = info.getIsolate().getCurrentContext();
+    const v = info.getArg(idx).toF64(ctx) catch return 0;
+    if (!(v > 0)) return 0;
+    return @intFromFloat(v);
+}
+
+/// __paintable_brush_rgba(id, cx, cy, r, cr, cg, cb, kind, angle, aspect,
+///   hardness, flow, scatter, seed, clipX, clipY, clipW, clipH)
+/// One coloured brush dab into an RGBA paintable. cr/cg/cb are 0..1. The clip
+/// rect (texture pixels; w/h==0 ⇒ unclamped) scissors the dab to the hit face's
+/// UV island so a round brush can't bleed onto a neighbour island.
+fn paintBrushRGBA(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 14) return;
+    const id = argStrAlloc(info, 0) orelse return;
+    defer alloc.free(id);
+    const cx = argF32(info, 1) orelse return;
+    const cy = argF32(info, 2) orelse return;
+    const r = argF32(info, 3) orelse return;
+    const cr = argF32(info, 4) orelse return;
+    const cg = argF32(info, 5) orelse return;
+    const cb = argF32(info, 6) orelse return;
+    const kind = argF32(info, 7) orelse return;
+    const angle = argF32(info, 8) orelse return;
+    const aspect = argF32(info, 9) orelse return;
+    const hardness = argF32(info, 10) orelse return;
+    const flow = argF32(info, 11) orelse return;
+    const scatter = argF32(info, 12) orelse return;
+    const seed = argF32(info, 13) orelse return;
+    const clip_x = argU32(info, 14);
+    const clip_y = argU32(info, 15);
+    const clip_w = argU32(info, 16);
+    const clip_h = argU32(info, 17);
+    paintable.queueBrushColor(id, cx, cy, r, cr, cg, cb, kind, angle, aspect, hardness, flow, scatter, seed, clip_x, clip_y, clip_w, clip_h);
+}
+
+/// __paintable_clear_rgba(id, r, g, b, a) — flat-colour clear (base coat).
+fn paintClearRGBA(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 5) return;
+    const id = argStrAlloc(info, 0) orelse return;
+    defer alloc.free(id);
+    const r = argF32(info, 1) orelse 0;
+    const g = argF32(info, 2) orelse 0;
+    const b = argF32(info, 3) orelse 0;
+    const a = argF32(info, 4) orelse 1;
+    paintable.queueClearColor(id, r, g, b, a);
+}
+
 fn paintPolygon(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 3) return;
@@ -233,8 +284,10 @@ pub fn registerPaintable(_: anytype) void {
     v8_runtime.registerHostFn("__paintable_circle", paintCircle);
     v8_runtime.registerHostFn("__paintable_circle_edge", paintCircleEdge);
     v8_runtime.registerHostFn("__paintable_brush", paintBrush);
+    v8_runtime.registerHostFn("__paintable_brush_rgba", paintBrushRGBA);
     v8_runtime.registerHostFn("__paintable_polygon", paintPolygon);
     v8_runtime.registerHostFn("__paintable_clear", paintClear);
+    v8_runtime.registerHostFn("__paintable_clear_rgba", paintClearRGBA);
     v8_runtime.registerHostFn("__paintable_upload", paintUpload);
     v8_runtime.registerHostFn("__paintable_readback", paintReadback);
 }

@@ -53,7 +53,10 @@ const Op = struct {
     cx: f32 = 0,
     cy: f32 = 0,
     r: f32 = 0,
-    value: f32 = 0,
+    value: f32 = 0, // R channel (also the R8 mask value)
+    value_g: f32 = 0, // G channel (RGBA paintables only)
+    value_b: f32 = 0, // B channel (RGBA paintables only)
+    value_a: f32 = 1, // A — clear ops only; brush coverage drives brush alpha
     brush_kind: f32 = 0,
     angle: f32 = 0,
     aspect: f32 = 1,
@@ -61,6 +64,14 @@ const Op = struct {
     flow: f32 = 1,
     scatter: f32 = 0,
     seed: f32 = 0,
+    // Scissor clamp for a brush dab, in texture pixels. Default (all 0) means
+    // "no clip" → the dab covers its full bbox. A Studio per-face dab passes the
+    // hit face's UV island rect so a round brush can't bleed onto a neighbour
+    // island packed beside it in the atlas. clip_w/clip_h == 0 ⇒ unclamped.
+    clip_x: u32 = 0,
+    clip_y: u32 = 0,
+    clip_w: u32 = 0,
+    clip_h: u32 = 0,
     // circle_edge: id of the gray reference paintable + sobel threshold
     gray_id_hash: u64 = 0,
     grad_threshold: f32 = 0,
@@ -79,10 +90,19 @@ const Paintable = struct {
     key_hash: u64 = 0,
     width: u32 = 0,
     height: u32 = 0,
+    /// false = R8Unorm (1 byte/px mask — the cutout/SAM path); true = RGBA8Unorm
+    /// (4 byte/px colour — the Studio model painter, N-colour flat paint).
+    rgba: bool = false,
 
     texture: ?*wgpu.Texture = null,
     view: ?*wgpu.TextureView = null,
     sampler: ?*wgpu.Sampler = null,
+    /// Lazily-built bind group for sampling this paintable as a Scene3D mesh
+    /// diffuse texture (binding 0 = view, binding 1 = the scene's nearest
+    /// diffuse sampler). Built on first 3D resolve, released with the texture
+    /// so a mesh never samples a destroyed view (the StaticSurface generation
+    /// dance isn't needed — the cache lifetime IS the texture lifetime).
+    bind_group_3d: ?*wgpu.BindGroup = null,
 
     /// FIFO op queue. Drained once per frame.
     ops: [MAX_OPS_PER_FRAME]Op = [_]Op{.{}} ** MAX_OPS_PER_FRAME,
@@ -107,11 +127,17 @@ var g_entries: [MAX_PAINTABLES]Paintable = [_]Paintable{.{}} ** MAX_PAINTABLES;
 /// Without this, hot reload or any Paintable unmount mid-frame trips
 /// "Texture with 'paintable' label has been destroyed" in wgpu.
 var g_generation: u64 = 0;
-var g_brush_pipeline: ?*wgpu.RenderPipeline = null;
+/// Two brush pipelines sharing one shader module — they differ ONLY by the
+/// colour-target format (r8_unorm vs rgba8_unorm). drainEntry picks by e.rgba.
+var g_brush_pipeline_r8: ?*wgpu.RenderPipeline = null;
+var g_brush_pipeline_rgba: ?*wgpu.RenderPipeline = null;
 var g_brush_bgl: ?*wgpu.BindGroupLayout = null;
 var g_brush_uniform_buf: ?*wgpu.Buffer = null;
 var g_brush_bind_group: ?*wgpu.BindGroup = null;
 var g_sampler_default: ?*wgpu.Sampler = null;
+/// Registered once (lazily, from ensure) so a Scene3D mesh whose textureKey
+/// names a paintable resolves to its view. See resolve3D / gpu.setPaintableResolver.
+var g_resolver_registered: bool = false;
 
 /// Per-draw uniforms for the brush pass. Matches WGSL struct BU below.
 const BrushUniforms = extern struct {
@@ -128,8 +154,8 @@ const BrushUniforms = extern struct {
     flow: f32,
     scatter: f32,
     seed: f32,
-    pad0: f32 = 0,
-    pad1: f32 = 0,
+    value_g: f32 = 0,
+    value_b: f32 = 0,
     pad2: f32 = 0,
 };
 
@@ -142,7 +168,7 @@ const BRUSH_WGSL =
     \\  aspect: f32, hardness: f32,
     \\  flow: f32, scatter: f32,
     \\  seed: f32,
-    \\  pad0: f32, pad1: f32, pad2: f32,
+    \\  value_g: f32, value_b: f32, pad2: f32,
     \\};
     \\@group(0) @binding(0) var<uniform> U: BU;
     \\
@@ -245,7 +271,11 @@ const BRUSH_WGSL =
     \\
     \\  coverage = sat(coverage) * sat(U.flow);
     \\  if (coverage <= 0.001) { discard; }
-    \\  return vec4f(U.value * coverage, 0.0, 0.0, coverage);
+    \\  // Premultiplied-alpha output. R8 targets read only .r (the mask value);
+    \\  // RGBA targets read all three colour channels. With premultiplied_alpha
+    \\  // blending a fully-opaque dab (coverage=1) REPLACES the destination —
+    \\  // adjacent flat colours stay crisp (no blend across a colour boundary).
+    \\  return vec4f(U.value * coverage, U.value_g * coverage, U.value_b * coverage, coverage);
     \\}
     ;
 
@@ -262,12 +292,14 @@ pub fn deinit() void {
     for (&g_parked_uploads) |*p| {
         if (p.active) releaseParked(p);
     }
-    if (g_brush_pipeline) |p| p.release();
+    if (g_brush_pipeline_r8) |p| p.release();
+    if (g_brush_pipeline_rgba) |p| p.release();
     if (g_brush_bgl) |b| b.release();
     if (g_brush_uniform_buf) |b| b.release();
     if (g_brush_bind_group) |b| b.release();
     if (g_sampler_default) |s| s.release();
-    g_brush_pipeline = null;
+    g_brush_pipeline_r8 = null;
+    g_brush_pipeline_rgba = null;
     g_brush_bgl = null;
     g_brush_uniform_buf = null;
     g_brush_bind_group = null;
@@ -281,6 +313,7 @@ fn releaseEntry(e: *Paintable) void {
         // and will recompute on its next render.
         g_generation += 1;
     }
+    if (e.bind_group_3d) |bg| bg.release();
     if (e.sampler) |s| s.release();
     if (e.view) |v| v.release();
     if (e.texture) |t| t.destroy();
@@ -314,11 +347,11 @@ fn findEntry(key: []const u8) ?*Paintable {
     return null;
 }
 
-fn findOrCreateEntry(key: []const u8, w: u32, h: u32) ?*Paintable {
+fn findOrCreateEntry(key: []const u8, w: u32, h: u32, rgba: bool) ?*Paintable {
     if (findEntry(key)) |existing| {
-        if (existing.width != w or existing.height != h) {
-            // Re-allocate texture at new size. Op queue is discarded —
-            // resize is treated as "fresh paintable".
+        if (existing.width != w or existing.height != h or existing.rgba != rgba) {
+            // Re-allocate texture at new size / format. Op queue is discarded —
+            // resize/reformat is treated as "fresh paintable".
             releaseEntry(existing);
         } else {
             return existing;
@@ -335,6 +368,7 @@ fn findOrCreateEntry(key: []const u8, w: u32, h: u32) ?*Paintable {
             .key_hash = hashKey(key),
             .width = w,
             .height = h,
+            .rgba = rgba,
         };
         if (!ensureTexture(e)) {
             releaseEntry(e);
@@ -399,7 +433,7 @@ fn parkUpload(key: []const u8, bytes: []const u8) void {
 fn flushParkedUpload(e: *Paintable) void {
     for (&g_parked_uploads) |*p| {
         if (!p.active or !std.mem.eql(u8, p.key, e.key)) continue;
-        if (p.bytes.len == @as(usize, e.width) * @as(usize, e.height)) {
+        if (p.bytes.len == @as(usize, e.width) * @as(usize, e.height) * @as(usize, bpp(e))) {
             // Ownership of bytes moves to the op (drainEntry frees them).
             pushOp(e, .{ .kind = .upload, .upload_bytes = p.bytes });
             page_alloc.free(p.key);
@@ -412,24 +446,34 @@ fn flushParkedUpload(e: *Paintable) void {
     }
 }
 
+/// Bytes per texel for this paintable's format.
+fn bpp(e: *const Paintable) u32 {
+    return if (e.rgba) 4 else 1;
+}
+
+fn texFormat(e: *const Paintable) wgpu.TextureFormat {
+    return if (e.rgba) .rgba8_unorm else .r8_unorm;
+}
+
 fn ensureTexture(e: *Paintable) bool {
     if (e.texture != null) return true;
     const device = gpu_core.getDevice() orelse return false;
     if (e.width == 0 or e.height == 0) return false;
+    const fmt = texFormat(e);
     const tex = device.createTexture(&.{
         .label = wgpu.StringView.fromSlice("paintable"),
         .size = .{ .width = e.width, .height = e.height, .depth_or_array_layers = 1 },
         .mip_level_count = 1,
         .sample_count = 1,
         .dimension = .@"2d",
-        .format = .r8_unorm,
+        .format = fmt,
         .usage = wgpu.TextureUsages.texture_binding |
             wgpu.TextureUsages.render_attachment |
             wgpu.TextureUsages.copy_src |
             wgpu.TextureUsages.copy_dst,
     }) orelse return false;
     const view = tex.createView(&.{
-        .format = .r8_unorm,
+        .format = fmt,
         .dimension = .@"2d",
         .base_mip_level = 0,
         .mip_level_count = 1,
@@ -462,7 +506,7 @@ fn ensureTexture(e: *Paintable) bool {
 // ─── Brush pipeline ──────────────────────────────────────────────────────
 
 fn ensureBrushPipeline() bool {
-    if (g_brush_pipeline != null) return true;
+    if (g_brush_pipeline_r8 != null and g_brush_pipeline_rgba != null) return true;
     const device = gpu_core.getDevice() orelse return false;
 
     const bgl_entries = [_]wgpu.BindGroupLayoutEntry{
@@ -514,40 +558,74 @@ fn ensureBrushPipeline() bool {
     defer pipeline_layout.release();
 
     const blend_state = wgpu.BlendState.premultiplied_alpha_blending;
-    const color_target = wgpu.ColorTargetState{
-        .format = .r8_unorm,
-        .blend = &blend_state,
-        .write_mask = wgpu.ColorWriteMasks.all,
-    };
-    const fragment_state = wgpu.FragmentState{
-        .module = shader,
-        .entry_point = wgpu.StringView.fromSlice("fs_main"),
-        .target_count = 1,
-        .targets = @ptrCast(&color_target),
-    };
-    const pipeline = device.createRenderPipeline(&.{
-        .layout = pipeline_layout,
-        .vertex = .{
+    // One shader module, two pipelines differing only by the colour-target
+    // format — the brush op renders into whichever the paintable owns.
+    const formats = [_]wgpu.TextureFormat{ .r8_unorm, .rgba8_unorm };
+    inline for (formats, 0..) |fmt, fi| {
+        const color_target = wgpu.ColorTargetState{
+            .format = fmt,
+            .blend = &blend_state,
+            .write_mask = wgpu.ColorWriteMasks.all,
+        };
+        const fragment_state = wgpu.FragmentState{
             .module = shader,
-            .entry_point = wgpu.StringView.fromSlice("vs_main"),
-            .buffer_count = 0,
-            .buffers = &[0]wgpu.VertexBufferLayout{},
-        },
-        .primitive = .{ .topology = .triangle_list },
-        .multisample = .{},
-        .fragment = &fragment_state,
-    }) orelse return false;
-    g_brush_pipeline = pipeline;
+            .entry_point = wgpu.StringView.fromSlice("fs_main"),
+            .target_count = 1,
+            .targets = @ptrCast(&color_target),
+        };
+        const pipeline = device.createRenderPipeline(&.{
+            .layout = pipeline_layout,
+            .vertex = .{
+                .module = shader,
+                .entry_point = wgpu.StringView.fromSlice("vs_main"),
+                .buffer_count = 0,
+                .buffers = &[0]wgpu.VertexBufferLayout{},
+            },
+            .primitive = .{ .topology = .triangle_list },
+            .multisample = .{},
+            .fragment = &fragment_state,
+        }) orelse return false;
+        if (fi == 0) g_brush_pipeline_r8 = pipeline else g_brush_pipeline_rgba = pipeline;
+    }
     return true;
 }
 
 // ─── Public API: declarative create / lookup ─────────────────────────────
 
 /// Get-or-create a paintable. Called from the Native primitive on mount /
-/// resize. Returns null on failure (no GPU device, no free slot).
-pub fn ensure(key: []const u8, w: u32, h: u32) bool {
+/// resize. `rgba` selects RGBA8 (colour painting) vs R8 (single-channel mask).
+/// Returns null on failure (no GPU device, no free slot).
+pub fn ensure(key: []const u8, w: u32, h: u32, rgba: bool) bool {
     if (key.len == 0 or w == 0 or h == 0) return false;
-    return findOrCreateEntry(key, w, h) != null;
+    // Register the Scene3D-mesh resolver once, lazily — paintable has no init()
+    // hook wired in engine.zig, and ensure() always runs before a mesh samples.
+    if (!g_resolver_registered) {
+        gpu_core.setPaintableResolver(resolve3D);
+        g_resolver_registered = true;
+    }
+    return findOrCreateEntry(key, w, h, rgba) != null;
+}
+
+/// Resolver handed to gpu.zig: a Scene3D mesh whose `textureKey` names this
+/// paintable resolves to a bind group sampling its view with the scene's
+/// nearest diffuse sampler. Cached on the entry, freed with the texture.
+fn resolve3D(key: []const u8) ?*wgpu.BindGroup {
+    const e = findEntry(key) orelse return null;
+    const view = e.view orelse return null;
+    if (e.bind_group_3d) |bg| return bg;
+    const layout = gpu_core.scene3dTexLayout() orelse return null;
+    const samp = gpu_core.scene3dDiffuseSampler() orelse return null;
+    const device = gpu_core.getDevice() orelse return null;
+    const entries = [_]wgpu.BindGroupEntry{
+        .{ .binding = 0, .texture_view = view },
+        .{ .binding = 1, .sampler = samp },
+    };
+    e.bind_group_3d = device.createBindGroup(&.{
+        .layout = layout,
+        .entry_count = entries.len,
+        .entries = &entries,
+    }) orelse return null;
+    return e.bind_group_3d;
 }
 
 /// Look up the read-only texture view for use as a binding on another
@@ -572,6 +650,59 @@ pub fn destroy(key: []const u8) void {
 pub fn queueClear(key: []const u8, value: f32) void {
     const e = findEntry(key) orelse return;
     pushOp(e, .{ .kind = .clear, .value = value });
+}
+
+/// Clear an RGBA paintable to a flat colour (the painter "base coat" / erase).
+pub fn queueClearColor(key: []const u8, r: f32, g: f32, b: f32, a: f32) void {
+    const e = findEntry(key) orelse return;
+    pushOp(e, .{ .kind = .clear, .value = r, .value_g = g, .value_b = b, .value_a = a });
+}
+
+/// One general brush dab carrying an RGB colour (RGBA paintables). `clip_*`
+/// (pixels) scissors the dab to a region — pass the hit face's UV island rect
+/// so a round brush can't bleed onto a neighbour island. clip_w/clip_h == 0 ⇒
+/// unclamped. Premultiplied-alpha + opaque coverage ⇒ flat colours stay crisp.
+pub fn queueBrushColor(
+    key: []const u8,
+    cx: f32,
+    cy: f32,
+    r: f32,
+    cr: f32,
+    cg: f32,
+    cb: f32,
+    kind: f32,
+    angle: f32,
+    aspect: f32,
+    hardness: f32,
+    flow: f32,
+    scatter: f32,
+    seed: f32,
+    clip_x: u32,
+    clip_y: u32,
+    clip_w: u32,
+    clip_h: u32,
+) void {
+    const e = findEntry(key) orelse return;
+    pushOp(e, .{
+        .kind = .brush,
+        .cx = cx,
+        .cy = cy,
+        .r = r,
+        .value = cr,
+        .value_g = cg,
+        .value_b = cb,
+        .brush_kind = kind,
+        .angle = angle,
+        .aspect = @max(0.05, aspect),
+        .hardness = std.math.clamp(hardness, 0.0, 1.0),
+        .flow = std.math.clamp(flow, 0.0, 1.0),
+        .scatter = @max(0.0, scatter),
+        .seed = seed,
+        .clip_x = clip_x,
+        .clip_y = clip_y,
+        .clip_w = clip_w,
+        .clip_h = clip_h,
+    });
 }
 
 pub fn queueCircle(key: []const u8, cx: f32, cy: f32, r: f32, value: f32) void {
@@ -661,8 +792,8 @@ pub fn queueUpload(key: []const u8, bytes: []const u8) void {
         parkUpload(key, bytes);
         return;
     };
-    if (bytes.len != @as(usize, e.width) * @as(usize, e.height)) {
-        log.print("[paintable] upload size mismatch: got {d}, want {d}*{d}\n", .{ bytes.len, e.width, e.height });
+    if (bytes.len != @as(usize, e.width) * @as(usize, e.height) * @as(usize, bpp(e))) {
+        log.print("[paintable] upload size mismatch: got {d}, want {d}*{d}*{d}\n", .{ bytes.len, e.width, e.height, bpp(e) });
         return;
     }
     const copy = page_alloc.alloc(u8, bytes.len) catch return;
@@ -704,7 +835,8 @@ fn drainEntry(e: *Paintable) void {
     const device = gpu_core.getDevice() orelse return;
     const queue = gpu_core.getQueue() orelse return;
     const target = e.view orelse return;
-    const pipeline = g_brush_pipeline orelse return;
+    // Pick the pipeline whose colour-target format matches this paintable.
+    const pipeline = (if (e.rgba) g_brush_pipeline_rgba else g_brush_pipeline_r8) orelse return;
     const bg = g_brush_bind_group orelse return;
     const uniform_buf = g_brush_uniform_buf orelse return;
 
@@ -725,7 +857,9 @@ fn drainEntry(e: *Paintable) void {
                         .view = target,
                         .load_op = .clear,
                         .store_op = .store,
-                        .clear_value = .{ .r = op.value, .g = 0, .b = 0, .a = 1 },
+                        // RGBA paintables clear to a flat colour; R8 masks read
+                        // only .r (g/b/a ignored by the single-channel target).
+                        .clear_value = .{ .r = op.value, .g = op.value_g, .b = op.value_b, .a = op.value_a },
                     }),
                 }) orelse {
                     encoder.release();
@@ -763,8 +897,8 @@ fn drainEntry(e: *Paintable) void {
                     .flow = op.flow,
                     .scatter = op.scatter,
                     .seed = op.seed,
-                    .pad0 = 0,
-                    .pad1 = 0,
+                    .value_g = op.value_g,
+                    .value_b = op.value_b,
                     .pad2 = 0,
                 };
                 bu.writeValue(queue, uniform_buf, 0, &u);
@@ -788,6 +922,16 @@ fn drainEntry(e: *Paintable) void {
                 };
                 pass.setPipeline(pipeline);
                 pass.setBindGroup(0, bg, 0, null);
+                // Per-face scissor: clamp the dab to the hit face's UV island so
+                // a round brush near an island edge can't bleed onto a neighbour
+                // island packed beside it (clip_w/h == 0 ⇒ no clamp).
+                if (op.clip_w > 0 and op.clip_h > 0) {
+                    const cx0 = @min(op.clip_x, e.width);
+                    const cy0 = @min(op.clip_y, e.height);
+                    const cw = @min(op.clip_w, e.width - cx0);
+                    const ch = @min(op.clip_h, e.height - cy0);
+                    if (cw > 0 and ch > 0) pass.setScissorRect(cx0, cy0, cw, ch);
+                }
                 pass.draw(6, 1, 0, 0);
                 pass.end();
                 pass.release();
@@ -826,12 +970,13 @@ fn drainEntry(e: *Paintable) void {
 fn uploadBytes(e: *Paintable, bytes: []const u8) void {
     const queue = gpu_core.getQueue() orelse return;
     const tex = e.texture orelse return;
-    if (bytes.len != @as(usize, e.width) * @as(usize, e.height)) return;
+    const row_bytes = e.width * bpp(e);
+    if (bytes.len != @as(usize, row_bytes) * @as(usize, e.height)) return;
     queue.writeTexture(
         &.{ .texture = tex, .mip_level = 0, .origin = .{ .x = 0, .y = 0, .z = 0 }, .aspect = .all },
         @ptrCast(bytes.ptr),
         bytes.len,
-        &.{ .offset = 0, .bytes_per_row = e.width, .rows_per_image = e.height },
+        &.{ .offset = 0, .bytes_per_row = row_bytes, .rows_per_image = e.height },
         &.{ .width = e.width, .height = e.height, .depth_or_array_layers = 1 },
     );
 }
@@ -959,10 +1104,11 @@ pub fn readbackSync(key: []const u8) ?[]u8 {
     const tex = e.texture orelse return null;
     const w = e.width;
     const h = e.height;
+    const row_bytes = w * bpp(e); // tight bytes per row (1 or 4 channels)
 
     // wgpu requires bytes_per_row to be 256-byte aligned on most backends.
     const ALIGN: u32 = 256;
-    const padded_row: u32 = ((w + ALIGN - 1) / ALIGN) * ALIGN;
+    const padded_row: u32 = ((row_bytes + ALIGN - 1) / ALIGN) * ALIGN;
     const total: usize = @as(usize, padded_row) * @as(usize, h);
 
     const buf = device.createBuffer(&.{
@@ -1020,17 +1166,17 @@ pub fn readbackSync(key: []const u8) ?[]u8 {
     }
 
     const mapped_ptr = buf.getConstMappedRange(0, total) orelse return null;
-    const out = page_alloc.alloc(u8, @as(usize, w) * @as(usize, h)) catch {
+    const out = page_alloc.alloc(u8, @as(usize, row_bytes) * @as(usize, h)) catch {
         buf.unmap();
         return null;
     };
-    // Strip row padding back to tight (w bytes per row).
+    // Strip row padding back to tight (row_bytes per row).
     var row: u32 = 0;
     while (row < h) : (row += 1) {
         const src_off: usize = @as(usize, row) * @as(usize, padded_row);
-        const dst_off: usize = @as(usize, row) * @as(usize, w);
+        const dst_off: usize = @as(usize, row) * @as(usize, row_bytes);
         const mapped_slice = @as([*]const u8, @ptrCast(mapped_ptr));
-        @memcpy(out[dst_off .. dst_off + w], mapped_slice[src_off .. src_off + w]);
+        @memcpy(out[dst_off .. dst_off + row_bytes], mapped_slice[src_off .. src_off + row_bytes]);
     }
     buf.unmap();
     return out;

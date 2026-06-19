@@ -107,8 +107,8 @@ const animations = if (HEADLESS) struct {
 } else @import("framework/gpu/animations.zig");
 const paintable = if (HEADLESS) struct {
     pub fn destroy(_: anytype) void {}
-    pub fn ensure(_: anytype, _: anytype, _: anytype) u32 {
-        return 0;
+    pub fn ensure(_: anytype, _: anytype, _: anytype, _: anytype) bool {
+        return false;
     }
 } else @import("framework/gpu/paintable.zig");
 const windows = if (HEADLESS) struct {
@@ -2396,6 +2396,8 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                 const ih: i64 = @intFromFloat(@max(0, f));
                 node.paintable_h = @intCast(ih);
             }
+        } else if (std.mem.eql(u8, k, "paintableRGBA")) {
+            node.paintable_rgba = (v == .bool and v.bool);
         }
     }
     // After all props are applied, if we have a complete paintable spec,
@@ -2404,7 +2406,7 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
     if (node.is_paintable) {
         if (node.paintable_id) |pid| {
             if (node.paintable_w > 0 and node.paintable_h > 0) {
-                _ = paintable.ensure(pid, node.paintable_w, node.paintable_h);
+                _ = paintable.ensure(pid, node.paintable_w, node.paintable_h, node.paintable_rgba);
             }
         }
     }

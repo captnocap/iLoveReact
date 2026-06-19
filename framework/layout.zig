@@ -422,6 +422,9 @@ pub const Node = struct {
     paintable_id: ?[]const u8 = null,
     paintable_w: u32 = 0,
     paintable_h: u32 = 0,
+    /// false = R8Unorm mask (default); true = RGBA8Unorm colour (the Studio
+    /// model painter). Selects the texture format in paintable.ensure().
+    paintable_rgba: bool = false,
     is_paintable: bool = false,
     input_id: ?u8 = null,
     input_paint_text: bool = true,

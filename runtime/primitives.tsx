@@ -1046,8 +1046,10 @@ export const Slider: any = ({ value = 0, min = 0, max = 1, step = 0, onChange, o
 //   other Effects can sample it via `textures={[id]}`. Paint into it
 //   via the usePaintable hook's imperative ops (V8 binding calls; no
 //   React state in the input path).
-export const Paintable: any = ({ id, w: ptW, h: ptH }: { id: string; w: number; h: number }) =>
-  h('Paintable', { paintableId: id, paintableW: ptW, paintableH: ptH });
+//   Pass `rgba` for an RGBA8Unorm colour texture (the Studio model painter,
+//   N-colour flat paint) instead of the default single-channel R8 mask.
+export const Paintable: any = ({ id, w: ptW, h: ptH, rgba }: { id: string; w: number; h: number; rgba?: boolean }) =>
+  h('Paintable', { paintableId: id, paintableW: ptW, paintableH: ptH, paintableRGBA: !!rgba });
 
 // ── Native — universal escape hatch for host-handled types ──
 

@@ -68,6 +68,18 @@ export interface PaintableOps {
     kind: number, angle: number, aspect: number, hardness: number,
     flow: number, scatter: number, seed: number,
   ): void;
+  /** Coloured brush dab into an RGBA paintable. cr/cg/cb are 0..1. The optional
+   *  clip rect (texture pixels; omit or 0 ⇒ unclamped) scissors the dab to a
+   *  region — pass the hit face's UV island rect so a round brush can't bleed
+   *  onto a neighbour island packed beside it in the atlas. */
+  brushColor(
+    cx: number, cy: number, r: number, cr: number, cg: number, cb: number,
+    kind: number, angle: number, aspect: number, hardness: number,
+    flow: number, scatter: number, seed: number,
+    clipX?: number, clipY?: number, clipW?: number, clipH?: number,
+  ): void;
+  /** Replace every pixel of an RGBA paintable with a flat colour (base coat). */
+  clearColor(r: number, g: number, b: number, a: number): void;
   /** Polygon fill via interleaved [x0, y0, x1, y1, ...] Float32Array. */
   polygon(verts: Float32Array, value: number): void;
   /** Replace every pixel with `value`. */
@@ -113,6 +125,10 @@ function makeOps(id: string): PaintableOps {
     brush(cx, cy, r, value, kind, angle, aspect, hardness, flow, scatter, seed) {
       callHost('__paintable_brush', undefined, id, cx, cy, r, value, kind, angle, aspect, hardness, flow, scatter, seed);
     },
+    brushColor(cx, cy, r, cr, cg, cb, kind, angle, aspect, hardness, flow, scatter, seed, clipX = 0, clipY = 0, clipW = 0, clipH = 0) {
+      callHost('__paintable_brush_rgba', undefined, id, cx, cy, r, cr, cg, cb, kind, angle, aspect, hardness, flow, scatter, seed, clipX, clipY, clipW, clipH);
+    },
+    clearColor(r, g, b, a) { callHost('__paintable_clear_rgba', undefined, id, r, g, b, a); },
     polygon(verts, value) {
       callHost('__paintable_polygon', undefined, id, verts, value);
     },

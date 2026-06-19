@@ -600,8 +600,10 @@ declare global {
   function __paintable_circle(...args: unknown[]): unknown;
   function __paintable_circle_edge(...args: unknown[]): unknown;
   function __paintable_brush(...args: unknown[]): unknown;
+  function __paintable_brush_rgba(...args: unknown[]): unknown;
   function __paintable_polygon(...args: unknown[]): unknown;
   function __paintable_clear(...args: unknown[]): unknown;
+  function __paintable_clear_rgba(...args: unknown[]): unknown;
   function __paintable_upload(...args: unknown[]): unknown;
   function __paintable_readback(...args: unknown[]): unknown;
 
