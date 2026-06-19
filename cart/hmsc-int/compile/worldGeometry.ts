@@ -29,9 +29,11 @@ import { solveRoadCrossSection } from '../world/roadProfile';
 import { tileKindDefinition } from '../world/tileKinds';
 import { CHUNK_TILES } from '../chunks';
 import { WATER_LOOK, WATER_WAVE, waterFlatHeights } from '../game/kinds/waterBodies';
-import { groundKindAt, heightfieldTexelColor, MARKER_KIND_INDICES, roadRibbonSection } from '../render3d/heightfieldSurface';
+import { groundKindAt, HEIGHTFIELD_TILE_BODY, MARKER_KIND_INDICES, roadRibbonSection } from '../render3d/heightfieldSurface';
 import { isParkingKind } from '../render3d/parkingStall';
 import type { ChunkFloor } from '../chunkFloor';
+import { floorToLandform } from '../chunkFloor';
+import { buildGrassInstances, buildBushInstances } from '../render3d/grassPopulation';
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
 // THE ONE piece decomposition (PARITY-0611, req_0654/req_0655): the bake lowers
@@ -65,6 +67,12 @@ export const INSTANCE_SHAPE_SPHERE = 4;
 // extruded thin across the roof width). Keyed geometry in world_loader.zig
 // (buildGablePrism); editor twin is pieceMeshes' GablePrismGeometry.
 export const INSTANCE_SHAPE_GABLE = 5;
+// Foliage card clumps — keyed geometry buildGrassBlade()/buildBushClump() in
+// world_loader.zig, editor twins runtime/geometries/GrassBlade+BushClump. Their
+// batch is routed to the foliage pipeline (wind + cutout + gradient) by the
+// "~grass~" tex key the loader stamps; the row colour is the per-card root tint.
+export const INSTANCE_SHAPE_GRASS = 6;
+export const INSTANCE_SHAPE_BUSH = 7;
 
 // ── materials: ship the SHADER (the formula) — pixels only when there IS no formula ─
 // GUIDING_LIGHT: procedural content travels as its recipe. A face whose skin is
@@ -263,10 +271,14 @@ function overlayUnderlaySkins(skin: BuildFaceSkin | undefined, seen = new Set<st
   const underlay: BuildFaceSkin = { kind: 'material', id: custom.underlayId };
   return [...overlayUnderlaySkins(underlay, seen), underlay];
 }
-const HEIGHTFIELD_LUMP_VERSION = 2;
+// v3 (FORMULAFLOOR-0615): the painted ground ships the per-fragment ground FORMULA
+// + each chunk's cell stream, NOT a baked 4px/tile raster. The compiled ground then
+// renders through the same HEIGHTFIELD_TILE_BODY shader the editor /test view runs
+// (constructor.zig decodes it, world_loader feeds gpu/3d.zig g_ground_pipeline) — crisp
+// at any distance. v2 was the blurry baked-pixel path. Keep the writer + the v3 Zig
+// decoder + worldGeometry.test.ts 'FORMULAFLOOR-0615' in lockstep.
+const HEIGHTFIELD_LUMP_VERSION = 3;
 const HEIGHTFIELD_RECORD_FLOATS = 10;
-const HEIGHTFIELD_TEXTURE_PIXELS_PER_TILE = 4;
-const HEIGHTFIELD_TEXTURE_MAX_PX = 512;
 const DEG = Math.PI / 180;
 
 // Color / Rotation / the prop part vocabulary live in game/kinds/propModels —
@@ -464,7 +476,17 @@ export function floorHasParkingCells(f: ChunkFloor): boolean {
 }
 
 export function floorNeedsHeightfieldRender(f: ChunkFloor): boolean {
-  return floorHasRelief(f) || floorHasRoadRibbon(f) || floorHasParkingCells(f);
+  // FORMULAFLOOR-0615: EVERY painted chunk — flat, road, relief, or parking —
+  // renders through the per-fragment ground formula, parity with the editor /test
+  // view. So any chunk carrying paintable tiles takes the heightfield path and none
+  // fall to the flat box-slab path (which can only flat-fill a cell with its colour).
+  return floorHasPaintableTiles(f) || floorHasRelief(f) || floorHasRoadRibbon(f) || floorHasParkingCells(f);
+}
+
+/** A chunk has paintable ground when its tile map carries cols×rows cells over a
+ *  non-empty palette (tileData = [cols, rows, palCount, …]). */
+function floorHasPaintableTiles(f: ChunkFloor): boolean {
+  return (f.tileData[0] | 0) > 0 && (f.tileData[1] | 0) > 0 && (f.tileData[2] | 0) > 0;
 }
 
 // Gameplay/dev marker indices in TILE_KINDS order — marker cells are META, not
@@ -495,39 +517,14 @@ function floorSurfaceColor(f: ChunkFloor): Color {
   return n > 0 ? [r / n, g / n, b / n] : [0.45, 0.5, 0.42];
 }
 
-function heightfieldTextureSize(f: ChunkFloor): { width: number; height: number; scale: number } {
-  const tcols = f.tileData[0] | 0;
-  const trows = f.tileData[1] | 0;
-  if (tcols <= 0 || trows <= 0) return { width: 0, height: 0, scale: 0 };
-  const scale = Math.max(1, Math.min(HEIGHTFIELD_TEXTURE_PIXELS_PER_TILE, Math.floor(HEIGHTFIELD_TEXTURE_MAX_PX / Math.max(tcols, trows))));
-  return { width: tcols * scale, height: trows * scale, scale };
-}
-
-function heightfieldTextureBytes(f: ChunkFloor): Uint8Array {
-  const { width, height } = heightfieldTextureSize(f);
-  if (width <= 0 || height <= 0) return new Uint8Array(0);
-  // Bake through the SAME fragment logic the editor's live shader runs: f.tileData
-  // ([cols, rows, palCount, palette…, cell idx…]) is prefix-compatible with the
-  // shader's data array; appending the ribbon section (header + segs) gives
-  // heightfieldTexelColor everything it needs, so the baked texture is pixel-for-
-  // pixel what the editor draws (RIBBONBAKE-0610). The texture is 4px/tile — the
-  // same resolution as the editor's HeightfieldSurfaceCapture — so even the lane
-  // lines and median land identically.
-  const data = [...f.tileData, ...roadRibbonSection(f.roads)];
-  const out = new Uint8Array(width * height * 4);
-  for (let y = 0; y < height; y += 1) {
-    const v = (y + 0.5) / height;
-    for (let x = 0; x < width; x += 1) {
-      const u = (x + 0.5) / width;
-      const [r, g, b] = heightfieldTexelColor(data, u, v);
-      const o = (y * width + x) * 4;
-      out[o + 0] = Math.max(0, Math.min(255, Math.round(r * 255)));
-      out[o + 1] = Math.max(0, Math.min(255, Math.round(g * 255)));
-      out[o + 2] = Math.max(0, Math.min(255, Math.round(b * 255)));
-      out[o + 3] = 255;
-    }
-  }
-  return out;
+/** The per-chunk CELL STREAM the ground formula samples: [cols, rows, palCount,
+ *  palette…, cell idx…, ribbon section]. Identical to the editor twin
+ *  heightfieldTileData(tiles, roads) (render3d/heightfieldSurface) — f.tileData is
+ *  already the [cols, rows, palCount, palette…, idx…] prefix, so we just append the
+ *  road ribbon. Shipped raw (one f32 per entry) instead of baked to pixels, so the
+ *  GPU evaluates HEIGHTFIELD_TILE_BODY per fragment = crisp at any zoom. */
+function heightfieldGroundData(f: ChunkFloor): number[] {
+  return [...f.tileData, ...roadRibbonSection(f.roads)];
 }
 
 const BUILDING_HEIGHT: Record<string, number> = {
@@ -819,41 +816,63 @@ function pushPaintedFloors(build: Build, floors: readonly ChunkFloor[]): number 
   return emitted;
 }
 
+/** Per painted chunk, the height grid the formula mesh displaces. A relief chunk
+ *  ships its real hcols×hrows samples; a FLAT chunk ships a cheap 2×2 of zeros (the
+ *  Zig decoder requires cols,rows ≥ 2). Either way the look comes from the cell
+ *  stream the formula samples, not the mesh resolution. */
+function heightfieldGrid(f: ChunkFloor): { cols: number; rows: number; height: (i: number) => number } {
+  const hcols = f.hcols | 0;
+  const hrows = f.hrows | 0;
+  const hasRelief = hcols >= 2 && hrows >= 2 && f.heights.length >= hcols * hrows;
+  if (hasRelief) return { cols: hcols, rows: hrows, height: (i) => f.heights[i] ?? 0 };
+  return { cols: 2, rows: 2, height: () => 0 };
+}
+
+// FORMULAFLOOR-0615 v3 lump layout (decoded by framework/world/constructor.zig
+// decodeHeightfields, asserted by worldGeometry.test.ts):
+//   u32 version=3 | u32 fieldCount
+//   u32 formulaLen | formula utf8           ← the ground formula, shipped ONCE
+//   per field: u32 cols | u32 rows | u32 groundDataLen | u32 0
+//              f32 record[HEIGHTFIELD_RECORD_FLOATS]
+//              f32 heights[cols*rows]
+//              f32 groundData[groundDataLen]
 export function encodeFloorHeightfields(floors: readonly ChunkFloor[]): Uint8Array {
   const fields = floors.filter(floorNeedsHeightfieldRender);
-  let bytes = 8;
-  for (const f of fields) {
-    const count = Math.max(0, f.hcols | 0) * Math.max(0, f.hrows | 0);
-    const tex = heightfieldTextureSize(f);
-    bytes += 16 + HEIGHTFIELD_RECORD_FLOATS * 4 + count * 4 + tex.width * tex.height * 4;
+  // textBytes is the workspace's headless-safe utf8 encoder (the v8cli bake has no
+  // TextEncoder). HEIGHTFIELD_TILE_BODY is ASCII WGSL, so it round-trips cleanly.
+  const formula = textBytes(HEIGHTFIELD_TILE_BODY);
+
+  const grids = fields.map(heightfieldGrid);
+  const groundDatas = fields.map(heightfieldGroundData);
+  let bytes = 8 + 4 + formula.byteLength; // header + formula (len + bytes), once
+  for (let fi = 0; fi < fields.length; fi += 1) {
+    bytes += 16 + HEIGHTFIELD_RECORD_FLOATS * 4 + grids[fi].cols * grids[fi].rows * 4 + groundDatas[fi].length * 4;
   }
 
   const out = new Uint8Array(bytes);
   const view = new DataView(out.buffer);
   view.setUint32(0, HEIGHTFIELD_LUMP_VERSION, true);
   view.setUint32(4, fields.length, true);
-  let at = 8;
-  for (const f of fields) {
-    const cols = f.hcols | 0;
-    const rows = f.hrows | 0;
-    const count = cols * rows;
-    const width = CHUNK_TILES;
-    const depth = CHUNK_TILES;
+  view.setUint32(8, formula.byteLength, true);
+  out.set(formula, 12);
+  let at = 12 + formula.byteLength;
+  for (let fi = 0; fi < fields.length; fi += 1) {
+    const f = fields[fi];
+    const { cols, rows, height } = grids[fi];
+    const groundData = groundDatas[fi];
     const cell = cols > 1 ? CHUNK_TILES / (cols - 1) : CHUNK_TILES;
     const color = floorSurfaceColor(f);
-    const texture = heightfieldTextureBytes(f);
-    const tex = heightfieldTextureSize(f);
     view.setUint32(at + 0, cols, true);
     view.setUint32(at + 4, rows, true);
-    view.setUint32(at + 8, tex.width, true);
-    view.setUint32(at + 12, tex.height, true);
+    view.setUint32(at + 8, groundData.length, true); // slot A = groundDataLen (v3)
+    view.setUint32(at + 12, 0, true); // slot B reserved
     at += 16;
     const floats = [
       f.cx * CHUNK_TILES + CHUNK_TILES / 2,
       f.cz * CHUNK_TILES + CHUNK_TILES / 2,
       0,
-      width,
-      depth,
+      CHUNK_TILES,
+      CHUNK_TILES,
       cell,
       Math.cos((38 * Math.PI) / 180),
       color[0],
@@ -862,10 +881,10 @@ export function encodeFloorHeightfields(floors: readonly ChunkFloor[]): Uint8Arr
     ];
     for (let i = 0; i < floats.length; i += 1) view.setFloat32(at + i * 4, floats[i], true);
     at += HEIGHTFIELD_RECORD_FLOATS * 4;
-    for (let i = 0; i < count; i += 1) view.setFloat32(at + i * 4, f.heights[i] ?? 0, true);
-    at += count * 4;
-    out.set(texture, at);
-    at += texture.byteLength;
+    for (let i = 0; i < cols * rows; i += 1) view.setFloat32(at + i * 4, height(i), true);
+    at += cols * rows * 4;
+    for (let i = 0; i < groundData.length; i += 1) view.setFloat32(at + i * 4, groundData[i], true);
+    at += groundData.length * 4;
   }
   return out;
 }
@@ -903,6 +922,43 @@ export type WorldInstanceResult = {
  *  unauthored demo scaffolding (createInitialGameState chunk regions + demo
  *  props) — phantom content — so they are OFF by default. `includeGroundLayers`
  *  is the opt-in for a genuinely painted map; the code is retained, not deleted. */
+/** Populate a foliage card field (grass blades / bush clumps) over its painted
+ *  tiles into the given shapeId. ALWAYS emitted (deliberate authored content) —
+ *  reuses the editor's populate fn so the field is identical in /test and /compiled.
+ *  Cards carry NO material; the loader routes the batch to the foliage pipeline via
+ *  the "~grass~" tex key. The painter writes foliage tiles into painted FLOOR chunks,
+ *  so the bake gets them as `floors`; convert each to its landform twin so the
+ *  populate fn reads the same tile grids the editor does — identical field. */
+function pushFoliage(
+  b: Build,
+  state: GameState,
+  floors: readonly ChunkFloor[],
+  build: (world: GameState['world']) => { data: Float32Array; count: number },
+  shapeId: number,
+  label: string,
+): void {
+  const floorLandforms = floors.map(floorToLandform);
+  const world = floorLandforms.length
+    ? { ...state.world, landforms: [...(state.world.landforms ?? []), ...floorLandforms] }
+    : state.world;
+  const field = build(world as GameState['world']); // stride-12: pos3 rot3 scale3 color3
+  const d = field.data;
+  // console.warn → stderr (NEVER print/console.log — stdout carries the bake's
+  // JSON result the CLI parses; writing there corrupts it).
+  console.warn(`[bake] ${label}: ${field.count} card(s) over painted tiles`);
+  for (let i = 0; i < field.count; i += 1) {
+    const o = i * 12;
+    pushShape(
+      b,
+      shapeId,
+      d[o + 0], d[o + 1], d[o + 2],
+      [d[o + 3], d[o + 4], d[o + 5]],
+      d[o + 6], d[o + 7], d[o + 8],
+      [d[o + 9], d[o + 10], d[o + 11]],
+    );
+  }
+}
+
 export function buildWorldInstances(
   state: GameState,
   pieces: readonly PlacedBuildPiece[] = [],
@@ -914,6 +970,8 @@ export function buildWorldInstances(
   const pieceCount = pushPlacedPieces(b, pieces);
   pushPaintedFloors(b, floors);
   if (opts.includeGroundLayers) pushWorldLayers(b, state);
+  pushFoliage(b, state, floors, buildGrassInstances, INSTANCE_SHAPE_GRASS, 'grass');
+  pushFoliage(b, state, floors, buildBushInstances, INSTANCE_SHAPE_BUSH, 'bush');
   // Bodies of water ship in their own WATER lump (encodeWaterBodies) as animated
   // translucent heightfields, not instances — so they're NOT pushed here.
   return {

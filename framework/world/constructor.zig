@@ -54,12 +54,17 @@ const SCENE_ENV_FLOATS: usize = 35;
 const PLAYER_MODEL_VERSION: u32 = 2;
 const PLAYER_ANIMATION_VERSION: u32 = 1;
 const PLAYER_ANIMATION_HASH_BYTES: usize = 32;
+// NPC population lumps (req_0935). NPC models reuse the PLAYER_MODEL group
+// layout verbatim, so decodeNpcModels shares readModelGroup with the player.
+const NPC_MODELS_VERSION: u32 = 1;
+const NPC_SPAWNS_VERSION: u32 = 1;
+const NPC_SPAWN_BYTES: usize = 24; // u32 modelIndex + f32 x,z,yaw + u32 kind + u32 faction
 const PLAYER_MODEL_ASSET_KEY: u32 = 2001;
 const PLAYER_ANIMATION_ASSET_KEY: u32 = 2002;
 /// Manifest asset-kind tag for decal image payloads (DECALIMG-0610) — the
 /// writer twin is cart/hmsc-int/compile/decalAssets.ts ASSET_KIND_DECAL_IMAGE.
 const DECAL_IMAGE_ASSET_KIND: u16 = 11;
-const HEIGHTFIELDS_VERSION: u32 = 2;
+const HEIGHTFIELDS_VERSION: u32 = 3;
 const HEIGHTFIELD_RECORD_FLOATS: usize = 10;
 
 /// The scene render environment (lighting / sky / camera), DATA the loader
@@ -107,6 +112,19 @@ pub const PlayerModelGroup = struct {
         allocator.free(self.vertices);
         if (self.tex_rgba) |tex| allocator.free(tex);
     }
+};
+
+/// One baked NPC spawn (req_0935). model_index selects a Scene.npc_models entry;
+/// kind/faction are reserved for the Stage-2 Zig combat AI (the Stage-1 loader
+/// renders + animates only). y is NOT stored — the loader grounds each NPC on
+/// the terrain the same way it grounds the player spawn.
+pub const NpcSpawn = struct {
+    model_index: u32,
+    x: f32,
+    z: f32,
+    yaw: f32,
+    kind: u32,
+    faction: u32,
 };
 
 pub const MeshPropMesh = struct {
@@ -198,10 +216,19 @@ pub const HeightfieldMesh = struct {
     tex_w: u32 = 0,
     tex_h: u32 = 0,
     tex_rgba: ?[]u8 = null,
+    // v3 (FORMULAFLOOR-0615): the ground recipe. ground_formula is the WGSL
+    // hf_ground_rgb(uv) body (shipped ONCE per lump, duplicated per field for
+    // simple ownership); ground_data is the per-cell reference stream it samples.
+    // When present, the loader renders this field through the per-fragment ground
+    // pipeline (gpu/3d.zig g_ground_pipeline) instead of a baked tex_rgba.
+    ground_formula: ?[]const u8 = null,
+    ground_data: ?[]f32 = null,
 
     pub fn deinit(self: HeightfieldMesh, allocator: std.mem.Allocator) void {
         allocator.free(self.heights);
         if (self.tex_rgba) |rgba| allocator.free(rgba);
+        if (self.ground_formula) |f| allocator.free(f);
+        if (self.ground_data) |d| allocator.free(d);
     }
 };
 
@@ -594,6 +621,13 @@ pub const Scene = struct {
     player_model: []PlayerModelGroup,
     /// Baked transform clips for the compiled player model.
     player_animation: PlayerAnimationSet,
+    /// The NPC figure models (req_0935): each entry is one figure's mesh groups
+    /// in the SAME layout as player_model. NPCs reuse player_animation. Empty
+    /// when the NPC_MODELS lump is absent.
+    npc_models: [][]PlayerModelGroup,
+    /// NPC spawn rows — which model, where, facing, plus kind/faction reserved
+    /// for the Stage-2 combat AI. Empty when the NPC_SPAWNS lump is absent.
+    npc_spawns: []NpcSpawn,
     /// Regular-grid terrain heightfields. The loader hands these to the native
     /// Scene3D heightfield primitive so gpu/3d.zig owns the triangulation.
     heightfields: []HeightfieldMesh,
@@ -640,6 +674,12 @@ pub const Scene = struct {
         for (self.player_model) |group| group.deinit(allocator);
         allocator.free(self.player_model);
         self.player_animation.deinit(allocator);
+        for (self.npc_models) |model| {
+            for (model) |group| group.deinit(allocator);
+            allocator.free(model);
+        }
+        allocator.free(self.npc_models);
+        allocator.free(self.npc_spawns);
         for (self.heightfields) |field| field.deinit(allocator);
         allocator.free(self.heightfields);
         for (self.materials) |material| material.deinit(allocator);
@@ -694,6 +734,60 @@ fn decodeInstances(allocator: std.mem.Allocator, data: []const u8) Error!Decoded
     return .{ .values = values, .count = count, .stride = stride, .pieces = @min(pieces, count) };
 }
 
+/// Read ONE mesh group at `at` and return it plus the next read offset. This is
+/// the canonical PLAYER_MODEL group layout (68-byte header + verts + optional
+/// texture); the NPC_MODELS lump reuses it byte-for-byte, so decodePlayerModel
+/// and decodeNpcModels share this reader. The TS twin is writeModelGroup in
+/// cart/hmsc-int/compile/playerModel.ts — keep them in lockstep.
+const ReadGroupResult = struct { group: PlayerModelGroup, at: usize };
+
+fn readModelGroup(allocator: std.mem.Allocator, data: []const u8, at_in: usize) Error!ReadGroupResult {
+    var at = at_in;
+    if (at + 68 > data.len) return Error.BadPlayerModel;
+    const color = [3]f32{ readF32(data, at + 0), readF32(data, at + 4), readF32(data, at + 8) };
+    const alpha = readF32(data, at + 12);
+    const vertex_count = std.mem.readInt(u32, data[at + 16 ..][0..4], .little);
+    const tex_w = std.mem.readInt(u32, data[at + 20 ..][0..4], .little);
+    const tex_h = std.mem.readInt(u32, data[at + 24 ..][0..4], .little);
+    const tex_len = std.mem.readInt(u32, data[at + 28 ..][0..4], .little);
+    const position = [3]f32{ readF32(data, at + 32), readF32(data, at + 36), readF32(data, at + 40) };
+    const rotation = [3]f32{ readF32(data, at + 44), readF32(data, at + 48), readF32(data, at + 52) };
+    const scale = [3]f32{ readF32(data, at + 56), readF32(data, at + 60), readF32(data, at + 64) };
+    at += 68;
+
+    const floats = @as(usize, vertex_count) * 8;
+    const vertex_bytes = floats * 4;
+    if (at + vertex_bytes + @as(usize, tex_len) > data.len) return Error.BadPlayerModel;
+    const vertices = try allocator.alloc(f32, floats);
+    errdefer allocator.free(vertices);
+    var vi: usize = 0;
+    while (vi < floats) : (vi += 1) {
+        vertices[vi] = readF32(data, at + vi * 4);
+    }
+    at += vertex_bytes;
+
+    const tex_rgba: ?[]u8 = if (tex_len > 0) blk: {
+        if (tex_w == 0 or tex_h == 0) return Error.BadPlayerModel;
+        const tex = try allocator.alloc(u8, tex_len);
+        @memcpy(tex, data[at .. at + tex_len]);
+        at += tex_len;
+        break :blk tex;
+    } else null;
+
+    return .{ .group = .{
+        .color = color,
+        .alpha = alpha,
+        .vertices = vertices,
+        .vertex_count = vertex_count,
+        .tex_w = tex_w,
+        .tex_h = tex_h,
+        .tex_rgba = tex_rgba,
+        .position = position,
+        .rotation = rotation,
+        .scale = scale,
+    }, .at = at };
+}
+
 fn decodePlayerModel(allocator: std.mem.Allocator, data: []const u8) Error![]PlayerModelGroup {
     if (data.len < 8) return try allocator.alloc(PlayerModelGroup, 0);
     if (std.mem.readInt(u32, data[0..4], .little) != PLAYER_MODEL_VERSION) return try allocator.alloc(PlayerModelGroup, 0);
@@ -710,52 +804,83 @@ fn decodePlayerModel(allocator: std.mem.Allocator, data: []const u8) Error![]Pla
     var at: usize = 8;
     var i: usize = 0;
     while (i < count) : (i += 1) {
-        if (at + 68 > data.len) return Error.BadPlayerModel;
-        const color = [3]f32{ readF32(data, at + 0), readF32(data, at + 4), readF32(data, at + 8) };
-        const alpha = readF32(data, at + 12);
-        const vertex_count = std.mem.readInt(u32, data[at + 16 ..][0..4], .little);
-        const tex_w = std.mem.readInt(u32, data[at + 20 ..][0..4], .little);
-        const tex_h = std.mem.readInt(u32, data[at + 24 ..][0..4], .little);
-        const tex_len = std.mem.readInt(u32, data[at + 28 ..][0..4], .little);
-        const position = [3]f32{ readF32(data, at + 32), readF32(data, at + 36), readF32(data, at + 40) };
-        const rotation = [3]f32{ readF32(data, at + 44), readF32(data, at + 48), readF32(data, at + 52) };
-        const scale = [3]f32{ readF32(data, at + 56), readF32(data, at + 60), readF32(data, at + 64) };
-        at += 68;
-
-        const floats = @as(usize, vertex_count) * 8;
-        const vertex_bytes = floats * 4;
-        if (at + vertex_bytes + @as(usize, tex_len) > data.len) return Error.BadPlayerModel;
-        const vertices = try allocator.alloc(f32, floats);
-        errdefer allocator.free(vertices);
-        var vi: usize = 0;
-        while (vi < floats) : (vi += 1) {
-            vertices[vi] = readF32(data, at + vi * 4);
-        }
-        at += vertex_bytes;
-
-        const tex_rgba: ?[]u8 = if (tex_len > 0) blk: {
-            if (tex_w == 0 or tex_h == 0) return Error.BadPlayerModel;
-            const tex = try allocator.alloc(u8, tex_len);
-            @memcpy(tex, data[at .. at + tex_len]);
-            at += tex_len;
-            break :blk tex;
-        } else null;
-
-        groups[i] = .{
-            .color = color,
-            .alpha = alpha,
-            .vertices = vertices,
-            .vertex_count = vertex_count,
-            .tex_w = tex_w,
-            .tex_h = tex_h,
-            .tex_rgba = tex_rgba,
-            .position = position,
-            .rotation = rotation,
-            .scale = scale,
-        };
+        const res = try readModelGroup(allocator, data, at);
+        groups[i] = res.group;
+        at = res.at;
         initialized += 1;
     }
     return groups;
+}
+
+/// NPC_MODELS lump (req_0935): u32 version | u32 modelCount | per model:
+/// u32 groupCount | groups[] (each group via readModelGroup). Absent / wrong
+/// version / zero models ⇒ empty slice (no NPCs). TS twin: encodeNpcModelsLump.
+fn decodeNpcModels(allocator: std.mem.Allocator, data: []const u8) Error![][]PlayerModelGroup {
+    if (data.len < 8) return try allocator.alloc([]PlayerModelGroup, 0);
+    if (std.mem.readInt(u32, data[0..4], .little) != NPC_MODELS_VERSION) return try allocator.alloc([]PlayerModelGroup, 0);
+    const model_count = std.mem.readInt(u32, data[4..8], .little);
+    if (model_count == 0) return try allocator.alloc([]PlayerModelGroup, 0);
+
+    var models = try allocator.alloc([]PlayerModelGroup, model_count);
+    var models_init: usize = 0;
+    errdefer {
+        for (models[0..models_init]) |model| {
+            for (model) |group| group.deinit(allocator);
+            allocator.free(model);
+        }
+        allocator.free(models);
+    }
+
+    var at: usize = 8;
+    var m: usize = 0;
+    while (m < model_count) : (m += 1) {
+        if (at + 4 > data.len) return Error.BadPlayerModel;
+        const group_count = std.mem.readInt(u32, data[at..][0..4], .little);
+        at += 4;
+        var groups = try allocator.alloc(PlayerModelGroup, group_count);
+        var groups_init: usize = 0;
+        errdefer {
+            for (groups[0..groups_init]) |group| group.deinit(allocator);
+            allocator.free(groups);
+        }
+        var g: usize = 0;
+        while (g < group_count) : (g += 1) {
+            const res = try readModelGroup(allocator, data, at);
+            groups[g] = res.group;
+            at = res.at;
+            groups_init += 1;
+        }
+        models[m] = groups;
+        models_init += 1;
+    }
+    return models;
+}
+
+/// NPC_SPAWNS lump (req_0935): u32 version | u32 count | per spawn:
+/// u32 modelIndex | f32 x,z,yaw | u32 kind | u32 faction. Absent / wrong
+/// version / zero count ⇒ empty slice. TS twin: encodeNpcSpawnsLump.
+fn decodeNpcSpawns(allocator: std.mem.Allocator, data: []const u8) Error![]NpcSpawn {
+    if (data.len < 8) return try allocator.alloc(NpcSpawn, 0);
+    if (std.mem.readInt(u32, data[0..4], .little) != NPC_SPAWNS_VERSION) return try allocator.alloc(NpcSpawn, 0);
+    const count = std.mem.readInt(u32, data[4..8], .little);
+    if (count == 0) return try allocator.alloc(NpcSpawn, 0);
+    if (8 + @as(usize, count) * NPC_SPAWN_BYTES > data.len) return Error.BadPlayerModel;
+
+    var spawns = try allocator.alloc(NpcSpawn, count);
+    var at: usize = 8;
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        spawns[i] = .{
+            .model_index = std.mem.readInt(u32, data[at + 0 ..][0..4], .little),
+            .x = readF32(data, at + 4),
+            .z = readF32(data, at + 8),
+            .yaw = readF32(data, at + 12),
+            .kind = std.mem.readInt(u32, data[at + 16 ..][0..4], .little),
+            .faction = std.mem.readInt(u32, data[at + 20 ..][0..4], .little),
+        };
+        at += NPC_SPAWN_BYTES;
+    }
+    return spawns;
 }
 
 fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshProps {
@@ -950,7 +1075,13 @@ fn decodeHeightfields(allocator: std.mem.Allocator, data: []const u8) Error![]He
     if (data.len == 0) return try allocator.alloc(HeightfieldMesh, 0);
     if (data.len < 8) return Error.BadHeightfields;
     const version = std.mem.readInt(u32, data[0..4], .little);
-    if (version != 1 and version != HEIGHTFIELDS_VERSION) return Error.BadHeightfields;
+    // Accept every shipped lump version through the current one (v1 legacy, v2
+    // baked-pixel, v3 formula). The decode branches below are all version-gated,
+    // so an older map still loads — the encoder migrates to v3 independently. A
+    // strict `!= 1 and != HEIGHTFIELDS_VERSION` gate (FORMULAFLOOR-0615) wrongly
+    // rejected v2, which is still what worldGeometry.ts emits → BadHeightfields
+    // on every freshly compiled painted-terrain map (req_1148).
+    if (version < 1 or version > HEIGHTFIELDS_VERSION) return Error.BadHeightfields;
     const count = std.mem.readInt(u32, data[4..8], .little);
     var fields = try allocator.alloc(HeightfieldMesh, count);
     var initialized: usize = 0;
@@ -960,23 +1091,41 @@ fn decodeHeightfields(allocator: std.mem.Allocator, data: []const u8) Error![]He
     }
 
     var at: usize = 8;
+    // v3 (FORMULAFLOOR-0615): the ground FORMULA rides ONCE, right after the count
+    // (u32 byteLen | bytes) — identical across chunks, so it is not repeated per
+    // field. Older lumps (v1/v2) have no formula; they keep the baked-pixel path.
+    var formula_src: []const u8 = &.{};
+    if (version >= 3) {
+        if (at + 4 > data.len) return Error.BadHeightfields;
+        const flen = std.mem.readInt(u32, data[at..][0..4], .little);
+        at += 4;
+        if (at + flen > data.len) return Error.BadHeightfields;
+        formula_src = data[at .. at + flen];
+        at += flen;
+    }
+
     var i: usize = 0;
     while (i < count) : (i += 1) {
         const fixed_header_bytes: usize = if (version >= 2) 16 else 8;
         if (at + fixed_header_bytes + HEIGHTFIELD_RECORD_FLOATS * 4 > data.len) return Error.BadHeightfields;
         const cols = std.mem.readInt(u32, data[at + 0 ..][0..4], .little);
         const rows = std.mem.readInt(u32, data[at + 4 ..][0..4], .little);
-        const tex_w = if (version >= 2) std.mem.readInt(u32, data[at + 8 ..][0..4], .little) else 0;
-        const tex_h = if (version >= 2) std.mem.readInt(u32, data[at + 12 ..][0..4], .little) else 0;
+        // Header slot A/B: v2 carries (tex_w, tex_h); v3 carries (groundDataLen, 0).
+        const slot_a = if (version >= 2) std.mem.readInt(u32, data[at + 8 ..][0..4], .little) else 0;
+        const slot_b = if (version >= 2) std.mem.readInt(u32, data[at + 12 ..][0..4], .little) else 0;
+        const tex_w = if (version == 2) slot_a else 0;
+        const tex_h = if (version == 2) slot_b else 0;
+        const gd_len = if (version >= 3) @as(usize, slot_a) else 0;
         at += fixed_header_bytes;
         if (cols < 2 or rows < 2) return Error.BadHeightfields;
         const samples = std.math.mul(usize, @as(usize, cols), @as(usize, rows)) catch return Error.BadHeightfields;
         const values_bytes = samples * 4;
-        const texture_bytes = if (version >= 2 and tex_w > 0 and tex_h > 0)
+        const texture_bytes = if (version == 2 and tex_w > 0 and tex_h > 0)
             (std.math.mul(usize, @as(usize, tex_w), @as(usize, tex_h)) catch return Error.BadHeightfields) * 4
         else
             0;
-        if (at + HEIGHTFIELD_RECORD_FLOATS * 4 + values_bytes + texture_bytes > data.len) return Error.BadHeightfields;
+        const ground_bytes = std.math.mul(usize, gd_len, 4) catch return Error.BadHeightfields;
+        if (at + HEIGHTFIELD_RECORD_FLOATS * 4 + values_bytes + texture_bytes + ground_bytes > data.len) return Error.BadHeightfields;
         const center_x = readF32(data, at + 0);
         const center_z = readF32(data, at + 4);
         const base_y = readF32(data, at + 8);
@@ -994,13 +1143,35 @@ fn decodeHeightfields(allocator: std.mem.Allocator, data: []const u8) Error![]He
             heights[h] = readF32(data, at + h * 4);
         }
         at += values_bytes;
-        const tex_rgba = if (texture_bytes > 0) blk: {
+
+        // Iteration-scoped errdefers (free on a later same-iteration error; cancel
+        // when the iteration completes and the slice is moved into fields[i]).
+        var tex_rgba: ?[]u8 = null;
+        errdefer if (tex_rgba) |r| allocator.free(r);
+        if (texture_bytes > 0) {
             const rgba = try allocator.alloc(u8, texture_bytes);
-            errdefer allocator.free(rgba);
             @memcpy(rgba, data[at .. at + texture_bytes]);
             at += texture_bytes;
-            break :blk rgba;
-        } else null;
+            tex_rgba = rgba;
+        }
+
+        var ground_data: ?[]f32 = null;
+        errdefer if (ground_data) |d| allocator.free(d);
+        if (gd_len > 0) {
+            const gd = try allocator.alloc(f32, gd_len);
+            var k: usize = 0;
+            while (k < gd_len) : (k += 1) gd[k] = readF32(data, at + k * 4);
+            at += ground_bytes;
+            ground_data = gd;
+        }
+
+        var ground_formula: ?[]const u8 = null;
+        errdefer if (ground_formula) |f| allocator.free(f);
+        if (version >= 3 and formula_src.len > 0) {
+            const fcopy = try allocator.alloc(u8, formula_src.len);
+            @memcpy(fcopy, formula_src);
+            ground_formula = fcopy;
+        }
 
         fields[i] = .{
             .cols = cols,
@@ -1017,6 +1188,8 @@ fn decodeHeightfields(allocator: std.mem.Allocator, data: []const u8) Error![]He
             .tex_w = tex_w,
             .tex_h = tex_h,
             .tex_rgba = tex_rgba,
+            .ground_formula = ground_formula,
+            .ground_data = ground_data,
         };
         initialized += 1;
     }
@@ -1605,6 +1778,24 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         player_animation_asset = try readInstalledAsset(allocator, file, store_dir, PLAYER_ANIMATION_ASSET_KEY);
         break :blk if (player_animation_asset) |bytes_animation| try decodePlayerAnimation(allocator, bytes_animation) else emptyPlayerAnimationSet();
     } else emptyPlayerAnimationSet();
+    // NPC population (req_0935): inline lumps in the map container (unlike the
+    // player model, which streams as a content-addressed asset). Absent ⇒ empty.
+    const npc_models = if (mapfile.findLump(map_lumps, mapfile.LumpType.npc_models)) |lump|
+        try decodeNpcModels(allocator, lump.data)
+    else
+        try allocator.alloc([]PlayerModelGroup, 0);
+    errdefer {
+        for (npc_models) |model| {
+            for (model) |group| group.deinit(allocator);
+            allocator.free(model);
+        }
+        allocator.free(npc_models);
+    }
+    const npc_spawns = if (mapfile.findLump(map_lumps, mapfile.LumpType.npc_spawns)) |lump|
+        try decodeNpcSpawns(allocator, lump.data)
+    else
+        try allocator.alloc(NpcSpawn, 0);
+    errdefer allocator.free(npc_spawns);
     const heightfields = if (mapfile.findLump(map_lumps, mapfile.LumpType.heightfields)) |lump|
         try decodeHeightfields(allocator, lump.data)
     else
@@ -1728,6 +1919,8 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .env = env,
         .player_model = player_model,
         .player_animation = player_animation,
+        .npc_models = npc_models,
+        .npc_spawns = npc_spawns,
         .heightfields = heightfields,
         .materials = materials,
         .material_refs = material_refs,

@@ -19,7 +19,7 @@ import {
   writeLumpContainer,
 } from '@reactjit/workspace';
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
-import { buildWorldInstances, encodeFloorHeightfields, encodeInstanceLump, encodeMaterialRefs, encodeMaterials, encodeMeshProps, encodeWaterBodies } from './compile/worldGeometry';
+import { buildWorldInstances, encodeFloorHeightfields, encodeInstanceLump, encodeMaterialRefs, encodeMaterials, encodeMeshProps, encodeWaterBodies, INSTANCE_STRIDE } from './compile/worldGeometry';
 import type { DecalAssetSink } from './compile/decalAssets';
 import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, paintedFloorTopAt, type BakedPhysicsConfig } from './compile/worldColliders';
 import { encodeStatsConfigLump } from './compile/playerStats';
@@ -30,6 +30,7 @@ import { doorRecords, encodeDoors } from './compile/worldDoors';
 import { tickerRecords, encodeTickers } from './compile/worldTicker';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './compile/playerModel';
+import { buildDefaultNpcPopulation, encodeNpcModelsLump, encodeNpcSpawnsLump } from './compile/npcModels';
 import type { ChunkFloor } from './chunkFloor';
 import { GAME_BUILD, GAME_WORLD, type PlacedBuildPiece } from '@game';
 
@@ -261,6 +262,32 @@ export function createHmscMapfile(
   };
   const physics = encodePhysicsConfigLump(physicsConfig);
 
+  // NPC population (req_0935): a baked crowd the no-V8 loader renders with the
+  // player figure's own machinery (compile/npcModels.ts). Anchor the Stage-1 test
+  // crowd at the centroid of the PLACED PIECES (the world's authored structures —
+  // the first geometry.pieces rows), NOT the centroid of ALL instances. Foliage
+  // (grass/bush cards) can be ~98% of instances and clusters over painted grass, so
+  // an all-instance centroid gets dragged across the map and SHIFTS on every compile
+  // as the foliage count changes — even though the authored data never moved
+  // (req_1395: "npcs spawn halfway down the map"). Pieces are stable, so the crowd
+  // stays put. Real authored NPC placements replace this once the editor grows a tool.
+  let npcAnchorX = 0;
+  let npcAnchorZ = 0;
+  const pieceRows = geometry.pieces;
+  if (pieceRows > 0) {
+    let sumX = 0;
+    let sumZ = 0;
+    for (let r = 0; r < pieceRows; r += 1) {
+      sumX += geometry.instances[r * INSTANCE_STRIDE + 0]!;
+      sumZ += geometry.instances[r * INSTANCE_STRIDE + 2]!;
+    }
+    npcAnchorX = sumX / pieceRows;
+    npcAnchorZ = sumZ / pieceRows;
+  }
+  const npcPopulation = buildDefaultNpcPopulation({ x: npcAnchorX, z: npcAnchorZ });
+  const npcModels = encodeNpcModelsLump(npcPopulation.models);
+  const npcSpawns = encodeNpcSpawnsLump(npcPopulation.spawns);
+
   const includePlayerLumps = opts.includePlayerLumps ?? true;
   const playerModelData = includePlayerLumps ? buildDefaultPlayerModel() : null;
   const playerModel = playerModelData ? encodePlayerModelLump(playerModelData) : null;
@@ -314,6 +341,11 @@ export function createHmscMapfile(
     // the compiled player's stats from (compile/playerStats.ts). The config
     // carries end to end; the engine stays dumb.
     { type: MAP_LUMP.STATS_CONFIG, encoding: 'raw', data: encodeStatsConfigLump() },
+    // The NPC population — figure models + spawn rows the loader renders and
+    // animates with the player figure's machinery (compile/npcModels.ts). NPCs
+    // reuse the PLAYER_ANIMATION clips shipped above.
+    { type: MAP_LUMP.NPC_MODELS, encoding: 'raw', data: npcModels },
+    { type: MAP_LUMP.NPC_SPAWNS, encoding: 'raw', data: npcSpawns },
   ];
   if (playerModel) {
     // The compiled player figure from @game/figure. Runtime movement changes

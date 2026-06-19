@@ -14,6 +14,7 @@ import type { BodyInstance } from '@game/figure/assembly';
 import type { ClothingInstance } from '@game/figure/clothing';
 import type { BakedFigure, BakedPart } from '@game/figure/bake';
 import type { RigTimelineAction } from '@game/figure/skeleton';
+import type { ClothingId, BottomsId } from '@game/figure/shapes';
 
 type V3 = [number, number, number];
 
@@ -205,15 +206,25 @@ function keyframe(time: number, transforms: PlayerTransform[]): PlayerAnimationK
   return { time, transforms };
 }
 
-export function buildDefaultPlayerModel(): BakedPlayerModel {
-  const figure = bakeFigureFromSeed(PLAYER_MODEL_SEED, { shape: 'neutral', outfit: { top: 'tee', bottoms: 'jeans' } });
-  const rig = buildRigFrame('neutral', 'stand', 0, [], 'tee', 'plain', [], 'jeans');
+// Bake ONE figure to loader-ready mesh groups. The seed varies the face + part
+// proportions; the rig structure (which parts, in which order) is fixed by the
+// shape/outfit, so every figure baked with the same outfit yields the SAME group
+// count — which is why NPCs (compile/npcModels.ts) can reuse PLAYER_ANIMATION
+// unchanged. Extracted from buildDefaultPlayerModel so the player and NPC bakes
+// share one figure→groups path (rule of two).
+export function buildFigureModel(seed: number, top: ClothingId, bottoms: BottomsId): BakedPlayerModel {
+  const figure = bakeFigureFromSeed(seed, { shape: 'neutral', outfit: { top, bottoms } });
+  const rig = buildRigFrame('neutral', 'stand', 0, [], top, 'plain', [], bottoms);
   const faceTexture = { width: figure.faceTexture.width, height: figure.faceTexture.height, rgba: rasterFaceTexture(figure.faceTexture) };
   const groups: PlayerMeshGroup[] = [];
   for (const inst of rig.assembly) groups.push(partGroup(figure, faceTexture, inst));
   for (const inst of rig.anatomy) groups.push(partGroup(figure, faceTexture, inst));
   for (const inst of rig.clothing) groups.push(clothingGroup(inst));
   return { groups };
+}
+
+export function buildDefaultPlayerModel(): BakedPlayerModel {
+  return buildFigureModel(PLAYER_MODEL_SEED, 'tee', 'jeans');
 }
 
 export function buildDefaultPlayerAnimation(nodeCount: number): BakedPlayerAnimation {
@@ -255,43 +266,55 @@ export function buildDefaultPlayerAnimation(nodeCount: number): BakedPlayerAnima
   };
 }
 
+// The on-wire size of one mesh group: the 68-byte header + interleaved verts +
+// optional RGBA texture. Shared by the player and NPC model encoders.
+export function modelGroupByteLength(group: PlayerMeshGroup): number {
+  return 68 + group.vertices.byteLength + (group.texture?.rgba.byteLength ?? 0);
+}
+
+// Write ONE mesh group at `at` and return the next write offset. This is the
+// canonical PLAYER_MODEL group layout (68-byte header + verts + texture); the
+// NPC_MODELS lump reuses it byte-for-byte so the Zig PlayerModelGroup reader
+// parses both (compile/npcModels.ts). The Zig twin is decodePlayerModel in
+// framework/world/constructor.zig — keep them in lockstep.
+export function writeModelGroup(out: Uint8Array, view: DataView, at: number, group: PlayerMeshGroup): number {
+  view.setFloat32(at + 0, group.color[0], true);
+  view.setFloat32(at + 4, group.color[1], true);
+  view.setFloat32(at + 8, group.color[2], true);
+  view.setFloat32(at + 12, group.alpha, true);
+  view.setUint32(at + 16, Math.floor(group.vertices.length / 8), true);
+  view.setUint32(at + 20, group.texture?.width ?? 0, true);
+  view.setUint32(at + 24, group.texture?.height ?? 0, true);
+  view.setUint32(at + 28, group.texture?.rgba.byteLength ?? 0, true);
+  view.setFloat32(at + 32, group.position[0], true);
+  view.setFloat32(at + 36, group.position[1], true);
+  view.setFloat32(at + 40, group.position[2], true);
+  view.setFloat32(at + 44, group.rotation[0], true);
+  view.setFloat32(at + 48, group.rotation[1], true);
+  view.setFloat32(at + 52, group.rotation[2], true);
+  view.setFloat32(at + 56, group.scale[0], true);
+  view.setFloat32(at + 60, group.scale[1], true);
+  view.setFloat32(at + 64, group.scale[2], true);
+  at += 68;
+  const vertexBytes = new Uint8Array(group.vertices.buffer, group.vertices.byteOffset, group.vertices.byteLength);
+  out.set(vertexBytes, at);
+  at += vertexBytes.byteLength;
+  if (group.texture) {
+    out.set(group.texture.rgba, at);
+    at += group.texture.rgba.byteLength;
+  }
+  return at;
+}
+
 export function encodePlayerModelLump(model: BakedPlayerModel): Uint8Array {
   let bytes = 8;
-  for (const group of model.groups) {
-    bytes += 68 + group.vertices.byteLength + (group.texture?.rgba.byteLength ?? 0);
-  }
+  for (const group of model.groups) bytes += modelGroupByteLength(group);
   const out = new Uint8Array(bytes);
   const view = new DataView(out.buffer);
   view.setUint32(0, PLAYER_MODEL_VERSION, true);
   view.setUint32(4, model.groups.length, true);
   let at = 8;
-  for (const group of model.groups) {
-    view.setFloat32(at + 0, group.color[0], true);
-    view.setFloat32(at + 4, group.color[1], true);
-    view.setFloat32(at + 8, group.color[2], true);
-    view.setFloat32(at + 12, group.alpha, true);
-    view.setUint32(at + 16, Math.floor(group.vertices.length / 8), true);
-    view.setUint32(at + 20, group.texture?.width ?? 0, true);
-    view.setUint32(at + 24, group.texture?.height ?? 0, true);
-    view.setUint32(at + 28, group.texture?.rgba.byteLength ?? 0, true);
-    view.setFloat32(at + 32, group.position[0], true);
-    view.setFloat32(at + 36, group.position[1], true);
-    view.setFloat32(at + 40, group.position[2], true);
-    view.setFloat32(at + 44, group.rotation[0], true);
-    view.setFloat32(at + 48, group.rotation[1], true);
-    view.setFloat32(at + 52, group.rotation[2], true);
-    view.setFloat32(at + 56, group.scale[0], true);
-    view.setFloat32(at + 60, group.scale[1], true);
-    view.setFloat32(at + 64, group.scale[2], true);
-    at += 68;
-    const vertexBytes = new Uint8Array(group.vertices.buffer, group.vertices.byteOffset, group.vertices.byteLength);
-    out.set(vertexBytes, at);
-    at += vertexBytes.byteLength;
-    if (group.texture) {
-      out.set(group.texture.rgba, at);
-      at += group.texture.rgba.byteLength;
-    }
-  }
+  for (const group of model.groups) at = writeModelGroup(out, view, at, group);
   return out;
 }
 
