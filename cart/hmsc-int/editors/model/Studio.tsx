@@ -35,6 +35,7 @@ import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clea
 import { addAnchor, isAnchor, nextAnchorName } from './anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from './wheelMount';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
+import { glbToEditMesh, base64ToBytes } from './importMesh';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
 import { StudioOutliner } from './Outliner';
@@ -593,6 +594,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // fast stroke fills continuously instead of leaving gaps (the "pinlines", req_1207).
   const lastPaintRef = useRef<{ x: number; y: number } | null>(null);
   const [paintBakeTick, setPaintBakeTick] = useState(0);
+  // DIAGNOSTIC (req_1376/1385): the model's UV layout, shown ON SCREEN in paint mode
+  // (cart console.log doesn't reach the terminal). Reveals shared/overlapping islands.
+  const [paintDiag, setPaintDiag] = useState<string | null>(null);
   // the Create Texture dialog (req_1068) — transient, not a twig.
   const [texDialog, setTexDialog] = useState(false);
   // the import-texture dialog (req_1079): { slice } when re-uploading ONE face, else
@@ -1303,7 +1307,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         if (ix > 0.001 && iy > 0.001) { overlapping += 1; break; }
       }
     }
-    console.log(`[paintdiag] tex=${tex?.name} paintFit=${tex?.paintFit} faces=${total} noUV=${noUV} fullSquare=${fullSq} overlappingIslands=${overlapping} maxUV=${maxUV.toFixed(3)} needRepack=${paintRepackNeeded}`);
+    setPaintDiag(`faces=${total} noUV=${noUV} fullSquare=${fullSq} overlap=${overlapping} maxUV=${maxUV.toFixed(2)} repack=${paintRepackNeeded ? 'Y' : 'n'} tex=${tex?.name}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [painting, props.meshRev, paintRepackNeeded, tex?.name]);
   // The throttled bake clock (the cutout idiom): while a stroke is dirty, bump the
@@ -3540,6 +3544,46 @@ function ImportTextureDialog(props: { slice?: RasterSlice; defaultPath: string; 
   );
 }
 
+// Import a generated/external GLB (tools/genmesh output, or any .glb) as a NEW
+// paintable Studio model (req_1383/req_1384). Reads the file via the fs door,
+// converts triangle soup -> EditMesh + unwraps UVs (glbToEditMesh), and on success
+// hands (mesh, name) to the parent which mints a fresh model + addPart. The mesh is
+// unwrapped, so the pixel painter works on it immediately.
+function ImportModelDialog(props: { defaultPath: string; onCancel: () => void; onConfirm: (mesh: EditMesh, name: string) => void }) {
+  const [path, setPath] = useState(props.defaultPath);
+  const [err, setErr] = useState<string | null>(null);
+  const doImport = () => {
+    try {
+      const b64 = readFileBase64(path);
+      if (!b64) throw new Error(`cannot read ${path}`);
+      const mesh = glbToEditMesh(base64ToBytes(b64));
+      if (!mesh.faces.length) throw new Error('no triangles in GLB');
+      const name = (path.split('/').pop() || 'imported').replace(/\.[^.]+$/, '');
+      props.onConfirm(mesh, name);
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    }
+  };
+  return (
+    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa' }}>
+      <Col style={{ width: 460, gap: 11, padding: 16, borderRadius: 10, backgroundColor: T.panelSolid, borderWidth: 1, borderColor: '#3a2c6a' }}>
+        <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>Import 3D model (GLB)</Text>
+        <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`a generated mesh (tools/genmesh) becomes a NEW editable, paintable model — UVs are unwrapped on import.`}</Text>
+        <LCField label="GLB path">
+          <Box style={{ flexGrow: 1 }}>
+            <TextInput value={path} onChangeText={(t) => { setErr(null); setPath(t); }} style={{ height: 24, fontSize: 11, color: T.ink, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, fontFamily: 'monospace' }} />
+          </Box>
+        </LCField>
+        {err ? <Text fontSize={10} color="#ff9a9a" style={{ fontFamily: 'monospace' }}>{err}</Text> : null}
+        <Row style={{ gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+          <Pressable onPress={props.onCancel} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}><Text fontSize={11} color={T.dim}>Cancel</Text></Pressable>
+          <Pressable onPress={doImport} style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#2a1c4a', borderWidth: 1, borderColor: '#6a4fb0' }}><Text fontSize={11} color="#cdbcff" style={{ fontWeight: '800' }}>Import</Text></Pressable>
+        </Row>
+      </Col>
+    </Box>
+  );
+}
+
 // AI Fill (req_1070/1110, Phase 5d): automated image-to-image. The prompt is OPTIONALLY
 // enhanced (a nano-gpt TEXT model OR Claude via the useAssistant worker — or bypassed and
 // sent raw), then the nano-gpt image client (cart/image-gen, reused) generates ONE image
@@ -3804,6 +3848,7 @@ function BevelPopup(props: {
 export function StudioEditor() {
   const model: StudioModel = useStudioModel();
   const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) step the parts-library branch history.
   // model.undo/redo are stable identities (MUTATORS) and read the live stacks,
   // so the mount-time closure stays correct. A focused TextInput consumes keys
@@ -3834,6 +3879,10 @@ export function StudioEditor() {
             <Text fontSize={10} color={on ? '#cfe2ff' : T.dim}>{label}</Text>
           </Pressable>
         ))}
+        {/* Import a generated/external GLB (tools/genmesh) as a NEW paintable model. */}
+        <Pressable onPress={() => setImportOpen(true)} tooltip="Import a 3D model (.glb) — converts it to an editable, paintable Studio model" style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, borderWidth: 1, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
+          <Text fontSize={10} color="#cdbcff">⬇ Import GLB</Text>
+        </Pressable>
       </Row>
       {/* the OUTLINER (layers) docks on the RIGHT of the viewport (req_0981). */}
       <Box style={{ width: 236, minWidth: 236, height: '100%', borderLeftWidth: 1, borderColor: '#1c2a3c', backgroundColor: T.page }}>
@@ -3843,6 +3892,13 @@ export function StudioEditor() {
         <AddShapeDialog
           onCancel={() => setAddOpen(false)}
           onConfirm={(mesh, name) => { model.addPart(mesh, name); setAddOpen(false); }}
+        />
+      ) : null}
+      {importOpen ? (
+        <ImportModelDialog
+          defaultPath={'cart/hmsc-int/data/generated/model.glb'}
+          onCancel={() => setImportOpen(false)}
+          onConfirm={(mesh, name) => { model.newModel(); model.addPart(mesh, name); setImportOpen(false); }}
         />
       ) : null}
     </Row>
