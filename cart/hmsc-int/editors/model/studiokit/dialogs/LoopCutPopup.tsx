@@ -1,6 +1,7 @@
 // editors/model/studio/dialogs/LoopCutPopup.tsx — lifted verbatim from editors/model/Studio.tsx (req_1390). No behavior change.
 import { Box, Col, Pressable, Row, Text, TextInput } from '@reactjit/primitives';
 import { STEP_BTN, T } from '../config';
+import { Z } from '../chrome/zlayers';
 import { clamp } from '../helpers';
 
 
@@ -43,7 +44,7 @@ export function LoopCutPopup(props: {
 }) {
   const offMax = props.unit === 'percent' ? 100 : Math.max(1, Math.round(props.sizeUnits));
   return (
-    <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 18, alignItems: 'center' }}>
+    <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 18, alignItems: 'center', zIndex: Z.popup }}>
       <Col style={{ gap: 7, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderRadius: 9, backgroundColor: '#0b1320f2', borderWidth: 1, borderColor: '#2c4a6a', minWidth: 250 }}>
         <Row style={{ gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
           <Text fontSize={11} color={T.text} style={{ fontWeight: '800' }}>Loop Cut</Text>

@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Box, Col, Pressable, Row, Text } from '@reactjit/primitives';
 import { STUDIO, T } from '../config';
+import { Z } from '../chrome/zlayers';
 import { unitsToMeters } from '../helpers';
 import { NumberField } from '../panels/NumberField';
 import { clampSides, cone, cuboid, cylinder, icosphere, ICOSPHERE_SUBDIV_MAX, plane, pyramid, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, sphere, type EditMesh } from '../../editMesh';
@@ -54,7 +55,7 @@ export function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: 
     }
   };
   return (
-    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa' }}>
+    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa', zIndex: Z.modal }}>
       <Col style={{ width: 360, gap: 11, padding: 16, borderRadius: 10, backgroundColor: T.panelSolid, borderWidth: 1, borderColor: '#2c4a6a' }}>
         <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>Add Shape</Text>
         <Row style={{ gap: 5, flexWrap: 'wrap' }}>

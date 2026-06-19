@@ -2,6 +2,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { Box, Col, Pressable, Row, Text, TextInput } from '@reactjit/primitives';
 import { STEP_BTN, STUDIO, T } from '../config';
+import { Z } from '../chrome/zlayers';
 import { buildTexturePrompt, enhanceViaNano, generateTexture, getNanoKey, setNanoKey, ENHANCE_SYSTEM } from '../../textureGen';
 import { useAssistant } from '@reactjit/hooks/useAssistant';
 import { processCwd } from '../../../../assist3d/scene';
@@ -103,7 +104,7 @@ export function AiTextureDialog(props: {
   const field = { height: 24, fontSize: 11, color: T.ink, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, fontFamily: 'monospace' } as const;
   const toggle = (on: boolean) => ({ ...STEP_BTN, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' });
   return (
-    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa' }}>
+    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa', zIndex: Z.modal }}>
       <Col style={{ width: 480, gap: 10, padding: 16, borderRadius: 10, backgroundColor: T.panelSolid, borderWidth: 1, borderColor: '#6a4fb0' }}>
         <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>✦ AI Fill</Text>
         <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`generate ${target} — the current atlas guides it (img2img), masked to the UV slot.`}</Text>

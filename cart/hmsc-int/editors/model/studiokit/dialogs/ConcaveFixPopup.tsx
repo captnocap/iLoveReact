@@ -8,10 +8,11 @@
 
 import { Box, Col, Pressable, Row, Text } from '@reactjit/primitives';
 import { T } from '../config';
+import { Z } from '../chrome/zlayers';
 
 export function ConcaveFixPopup(props: { count: number; onResolve: (a: 'split' | 'ignore' | 'revert') => void }) {
   return (
-    <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 18, alignItems: 'center' }}>
+    <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 18, alignItems: 'center', zIndex: Z.popup }}>
       <Col style={{ gap: 8, paddingLeft: 14, paddingRight: 14, paddingTop: 11, paddingBottom: 11, borderRadius: 9, backgroundColor: '#1a1206f2', borderWidth: 1, borderColor: '#a86a2c', minWidth: 280 }}>
         <Row style={{ gap: 8, alignItems: 'center' }}>
           <Text fontSize={12} color="#ffb454" style={{ fontWeight: '800' }}>⚠ Concave face</Text>

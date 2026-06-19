@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Box, Col, Pressable, Row, Text, TextInput } from '@reactjit/primitives';
 import { T } from '../config';
+import { Z } from '../chrome/zlayers';
 import type { RasterSlice } from '../../textureize';
 
 
@@ -15,7 +16,7 @@ export function ImportTextureDialog(props: { slice?: RasterSlice; defaultPath: s
   const [path, setPath] = useState(props.defaultPath);
   const target = props.slice ? `face ${props.slice.faceIndex} (slice)` : 'the whole sprite sheet';
   return (
-    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa' }}>
+    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa', zIndex: Z.modal }}>
       <Col style={{ width: 460, gap: 11, padding: 16, borderRadius: 10, backgroundColor: T.panelSolid, borderWidth: 1, borderColor: '#3a2c6a' }}>
         <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>Import Texture</Text>
         <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`re-upload a PNG onto ${target} — it slips back via the UVs (cookie cutter).`}</Text>

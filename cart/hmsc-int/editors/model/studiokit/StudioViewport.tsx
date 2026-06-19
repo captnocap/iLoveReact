@@ -67,6 +67,7 @@ import {
 } from '../meshGizmo';
 import { RigOverlay, pickRigHandle, rigHandles, type RigSel } from '../meshRig';
 import { T, STEP_BTN, SMOOTH_PRESETS, PAINT_SWATCHES, PAINT_BRUSH_SIZES, SCALE_FIGURE_SEED, SCALE_FIGURE_CART_KEY, STUDIO, type Vec3, type Rect } from './config';
+import { Z } from './chrome/zlayers';
 import './registerTunables';
 import { clamp, sameRigSel, nextJointName, snapToStep, unitsToMeters, metersToUnits, fmtUnits, nowMs, schedFrame, partPlacement, loopCutAxisInfo, lcKeptFace, type LoopCutAxis } from './helpers';
 import { GroundGrid, OriginAxes, DragReadout } from './scene/staging';
@@ -1827,7 +1828,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           (right) on ONE strip, space-between so they never overlap. The tools sit
           on tier 2 below; the old three same-row absolute bars piled on top of each
           other (scale text over the mode buttons, fps over the export row). */}
-      <Row style={{ position: 'absolute', left: 8, right: 8, top: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+      <Row style={{ position: 'absolute', left: 8, right: 8, top: 8, alignItems: 'center', justifyContent: 'space-between', zIndex: Z.chrome }}>
         <Row style={{ gap: 8, alignItems: 'center' }}>
           <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#0b1320dd', borderWidth: 1, borderColor: '#27364a' }}>
             <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
@@ -1900,7 +1901,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           console.log doesn't reach the terminal. overlap>0 or fullSquare>0 = shared
           islands (the bleed); repack=Y means a re-pack is pending. */}
       {selMode === 'paint' && paintDiag ? (
-        <Box style={{ position: 'absolute', left: 8, bottom: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b0d13ee', borderWidth: 1, borderColor: '#2c4a6a', zIndex: 50 }}>
+        <Box style={{ position: 'absolute', left: 8, bottom: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b0d13ee', borderWidth: 1, borderColor: '#2c4a6a', zIndex: Z.overlay }}>
           <Text fontSize={11} color="#9fe0ff" style={{ fontFamily: 'monospace' }}>{`paintdiag · ${paintDiag}`}</Text>
         </Box>
       ) : null}
@@ -1933,7 +1934,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {/* PAINT diagnostics (req_1197): a compact readout — is a texture made + shown,
           and how many cells are painted. Bottom-centre, paint mode only. */}
       {selMode === 'paint' ? (
-        <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 92, alignItems: 'center' }}>
+        <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 92, alignItems: 'center', zIndex: Z.overlay }}>
           <Box style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: tex ? '#2f7a4f' : '#a14545' }}>
             <Text fontSize={10} color={tex ? '#7fd6a0' : '#f0a0a0'} style={{ fontFamily: 'monospace' }}>
               paint · {tex ? `atlas ${tex.texels}²` : 'NO TEXTURE'} · {texView ? 'textured' : 'solid'} · {Object.values(paintRef.current).reduce((n, m) => n + Object.keys(m).length, 0)} cells
@@ -1987,7 +1988,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         ? <TransformGizmo anchorW={moveBackdrop.pos as MV3} tool="move" camSnap={camSnap} activeAxis={backdropDragAxis} />
         : null}
       {moveBackdrop ? (
-        <Box style={{ position: 'absolute', left: 0, right: 0, top: 44, alignItems: 'center' }}>
+        <Box style={{ position: 'absolute', left: 0, right: 0, top: 44, alignItems: 'center', zIndex: Z.overlay }}>
           <Row style={{ gap: 8, alignItems: 'center', paddingLeft: 10, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#9b7fd6' }}>
             <Text fontSize={10} color="#e0d4ff" style={{ fontFamily: 'monospace' }}>{`moving · ${moveBackdrop.name} · drag the arrows · scroll to orbit`}</Text>
             <Pressable onPress={() => setMoveBackdropId(null)} tooltip="Done positioning (Esc)" style={STEP_BTN}><Text fontSize={10} color="#7fd6a0">done</Text></Pressable>
@@ -2003,7 +2004,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         const p = makeProjector(camSnap())(anchor);
         if (!p.front) return null;
         return (
-          <Box style={{ position: 'absolute', left: p.x + 14, top: p.y - 34, paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#5b8fd6' }}>
+          <Box style={{ position: 'absolute', left: p.x + 14, top: p.y - 34, paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#5b8fd6', zIndex: Z.floating }}>
             <Text fontSize={11} color="#cfe2ff" style={{ fontFamily: 'monospace', fontWeight: '800' }}>{gizmoReadout}</Text>
           </Box>
         );
@@ -2020,7 +2021,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           ops · texture/compile — on their OWN line below tier 1 (no more piling onto
           the info/diag strip). Left-aligned + wraps so a dense selection never
           overflows off-screen; a faint bar groups them as one real toolbar. */}
-      <Row style={{ position: 'absolute', left: 8, right: 8, top: 40, gap: 4, rowGap: 4, alignItems: 'center', flexWrap: 'wrap', paddingLeft: 6, paddingRight: 6, paddingTop: 5, paddingBottom: 5, borderRadius: 7, backgroundColor: '#0a111caa', borderWidth: 1, borderColor: '#1c2940' }}>
+      <Row style={{ position: 'absolute', left: 8, right: 8, top: 40, gap: 4, rowGap: 4, alignItems: 'center', flexWrap: 'wrap', paddingLeft: 6, paddingRight: 6, paddingTop: 5, paddingBottom: 5, borderRadius: 7, backgroundColor: '#0a111caa', borderWidth: 1, borderColor: '#1c2940', zIndex: Z.chrome }}>
         {(['object', 'vertex', 'edge', 'face', 'rig', 'paint'] as SelMode[]).map((m) => {
           const on = selMode === m;
           const n = selectionCount(sel, m);
@@ -2576,7 +2577,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
 
       {/* export confirmation toast (req_1072) */}
       {exportMsg ? (
-        <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 54, alignItems: 'center' }}>
+        <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 54, alignItems: 'center', zIndex: Z.overlay }}>
           <Box style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#2f7a4f' }}>
             <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>{exportMsg}</Text>
           </Box>
@@ -2611,7 +2612,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           body = `${u(b.size[0])} × ${u(b.size[1])} × ${u(b.size[2])} u`;
         }
         return (
-          <Box style={{ position: 'absolute', left: 14, bottom: 100, paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#2c4a6a' }}>
+          <Box style={{ position: 'absolute', left: 14, bottom: 100, paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#2c4a6a', zIndex: Z.overlay }}>
             <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{head}</Text>
             <Row style={{ gap: 4, alignItems: 'baseline', marginTop: 1 }}>
               {selMode === 'edge' && sel.edges.size === 1
@@ -2636,7 +2637,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           column 3 (RigMetaPanel, req_1053) — the viewport just places it. */}
 
       {/* Camera framing controls (fov + reframe) — kept bottom-right. */}
-      <Col style={{ position: 'absolute', right: 12, bottom: 12, gap: 6, alignItems: 'flex-end' }}>
+      <Col style={{ position: 'absolute', right: 12, bottom: 12, gap: 6, alignItems: 'flex-end', zIndex: Z.chrome }}>
         <Row style={{ gap: 4, alignItems: 'center' }}>
           <Pressable onPress={() => setFov(fovRef.current - 2)} tooltip="Narrower field of view (zoom in / less perspective)" style={STEP_BTN}><Text fontSize={13} color={T.text}>−</Text></Pressable>
           <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 5, backgroundColor: '#0b1320dd', borderWidth: 1, borderColor: '#27364a' }}>
@@ -2801,7 +2802,7 @@ export function StudioEditor() {
       <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} />
       {/* Branch-history verbs — top-left, the one viewport corner the compass /
           toolbar / mode-toggle don't claim. Disabled when the stack is empty. */}
-      <Row style={{ position: 'absolute', left: 8, top: 8, gap: 4, zIndex: 30 }}>
+      <Row style={{ position: 'absolute', left: 8, top: 8, gap: 4, zIndex: Z.chrome }}>
         {([['undo', '↶ Undo', model.canUndo, () => model.undo()], ['redo', '↷ Redo', model.canRedo, () => model.redo()]] as const).map(([k, label, on, run]) => (
           <Pressable key={k} onPress={on ? run : undefined} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, borderWidth: 1, backgroundColor: on ? '#13233aee' : '#0e1726aa', borderColor: on ? '#2c4a6a' : '#1c2a3c' }}>
             <Text fontSize={10} color={on ? '#cfe2ff' : T.dim}>{label}</Text>
