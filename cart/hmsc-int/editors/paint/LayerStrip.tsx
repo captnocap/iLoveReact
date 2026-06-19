@@ -89,7 +89,7 @@ function GenericLayerRow(props: {
         borderWidth: 1, borderColor: row.active ? T.accent : T.frame,
         opacity: row.muted ? 0.55 : 1,
       }}>
-        <Box style={{ width: 3, height: 30, borderRadius: 2, backgroundColor: row.active ? T.accent : T.frame }} />
+        <Box style={{ width: 3, height: 38, borderRadius: 2, backgroundColor: row.active ? T.accent : T.frame }} />
         <Box style={{
           width: PREVIEW.w, height: PREVIEW.h,
           borderRadius: 4, overflow: 'hidden', position: 'relative',
@@ -97,7 +97,11 @@ function GenericLayerRow(props: {
         }}>
           {row.preview}
         </Box>
-        <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, gap: 1 }}>
+        {/* req_1389: the NAME owns its own line (full dock width) and the management
+            verbs drop to the meta line below, so a layer's name is always readable —
+            the old single-row layout buried it behind six inline buttons. Only the
+            visibility toggle stays on the name line; it earns the pixels. */}
+        <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, gap: 3 }}>
           {renaming ? (
             <TextInput
               value={row.name}
@@ -111,12 +115,13 @@ function GenericLayerRow(props: {
             />
           ) : (
             <Row style={{ gap: 5, alignItems: 'center' }}>
-              <Text style={{ color: row.active ? T.ink : T.dim, fontSize: 11, fontWeight: '700', flexGrow: 1 }} numberOfLines={1}>
+              <Text style={{ color: row.active ? T.ink : T.dim, fontSize: 11, fontWeight: '700', flexGrow: 1, flexBasis: 0, minWidth: 0 }} numberOfLines={1}>
                 {row.name}
               </Text>
               <Pressable onPress={() => setRenaming(true)} tooltip="Rename layer">
                 <Icon name="Pencil" size={10} color={T.dim} />
               </Pressable>
+              <LayerButton icon={row.muted ? 'EyeOff' : 'Eye'} label={row.muted ? 'Show layer' : 'Hide layer'} onPress={() => props.onAction(row.id, 'visibility')} />
             </Row>
           )}
           <Row style={{ gap: 5, alignItems: 'center' }}>
@@ -126,16 +131,16 @@ function GenericLayerRow(props: {
                 <Text style={{ color: T.dim, fontSize: 8, fontWeight: '800' }} numberOfLines={1}>{row.groupName}</Text>
               </Box>
             ) : null}
+            <Box style={{ flexGrow: 1 }} />
+            <LayerButton icon="Copy" label="Duplicate layer" onPress={() => props.onAction(row.id, 'duplicate')} />
+            <LayerButton icon="ArrowUp" label="Move layer up" disabled={!row.canMoveUp} onPress={() => props.onAction(row.id, 'move-up')} />
+            <LayerButton icon="ArrowDown" label="Move layer down" disabled={!row.canMoveDown} onPress={() => props.onAction(row.id, 'move-down')} />
+            {row.canMerge !== undefined ? (
+              <LayerButton icon="Merge" label="Merge into the layer above — fuse this layer down into the one above it" disabled={!row.canMerge} onPress={() => props.onAction(row.id, 'merge-down')} />
+            ) : null}
+            <LayerButton icon="Trash2" label="Delete layer" danger onPress={() => props.onAction(row.id, 'delete')} />
           </Row>
         </Col>
-        <LayerButton icon={row.muted ? 'EyeOff' : 'Eye'} label={row.muted ? 'Show layer' : 'Hide layer'} onPress={() => props.onAction(row.id, 'visibility')} />
-        <LayerButton icon="Copy" label="Duplicate layer" onPress={() => props.onAction(row.id, 'duplicate')} />
-        <LayerButton icon="ArrowUp" label="Move layer up" disabled={!row.canMoveUp} onPress={() => props.onAction(row.id, 'move-up')} />
-        <LayerButton icon="ArrowDown" label="Move layer down" disabled={!row.canMoveDown} onPress={() => props.onAction(row.id, 'move-down')} />
-        {row.canMerge !== undefined ? (
-          <LayerButton icon="Merge" label="Merge into the layer above — fuse this layer down into the one above it" disabled={!row.canMerge} onPress={() => props.onAction(row.id, 'merge-down')} />
-        ) : null}
-        <LayerButton icon="Trash2" label="Delete layer" danger onPress={() => props.onAction(row.id, 'delete')} />
       </Row>
     </Pressable>
   );
