@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# genprop — root-level shim. The real script lives next to the hmsc-int prop
+# importer it feeds (cart/hmsc-int/tools/genprop); this lets you run the short
+# `tools/genprop ...` from the repo root like rjit/v8cli.
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/cart/hmsc-int/tools/genprop" "$@"
