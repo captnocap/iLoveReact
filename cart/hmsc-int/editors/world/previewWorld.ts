@@ -9,24 +9,32 @@
 // inert: AUTHBUILD-REMOVE deleted the old world.buildings system; V24 build
 // pieces (`bp_*`) are the surviving building model.
 
-import type { GameState } from '../../design';
+import type { GameState, Landform, WaterBody } from '../../design';
 import { placeMarker, placeWorldProp } from '../../editorWorld';
 import { cellCenterToWorld, cellKey as gridCellKey } from '../../world/grid';
-import { floorsToLandforms, floorsToWaterBodies, type ChunkFloor } from '../../chunkFloor';
 import { placementCellRect, type Placement } from '../../placements';
 import { waterBodyPreset } from '../../game/kinds/waterBodies';
 
+// Takes the painted terrain ALREADY lowered to landforms + water bodies (the
+// caller does the floors→landforms conversion and caches it), not the raw
+// `floors`. This matters for perf: a tile-COLOUR paint produces new landforms but
+// leaves placements untouched, and prop Y depends only on terrain HEIGHT — so the
+// shell re-runs this placement loop only when heights or placements change, and
+// overlays fresh-coloured landforms on top cheaply (index.tsx previewWorld memo).
+// Folding floors→landforms in here instead would re-couple every colour dab to the
+// whole O(placements) placement walk — the choke this split removes.
 export function assemblePreviewWorld(opts: {
   baseWorld: GameState;
-  floors: ChunkFloor[];
+  landforms: Landform[];
+  waterBodies: WaterBody[];
   placements: Placement[];
   /** global per-kind part textures folded with the instance override winning */
   mergeKindTextures: (cat: 'building' | 'prop', kind: string, inst?: Record<string, string>) => Record<string, string> | undefined;
 }): GameState {
-  const { baseWorld, floors, placements, mergeKindTextures } = opts;
+  const { baseWorld, landforms, waterBodies, placements, mergeKindTextures } = opts;
   // Painted water (the terrain water brush) becomes one field-backed WaterBody per
   // wet chunk; dropped water placements (below) append to the same layer.
-  let s: GameState = { ...baseWorld, world: { ...baseWorld.world, landforms: floorsToLandforms(floors), waterBodies: floorsToWaterBodies(floors) } };
+  let s: GameState = { ...baseWorld, world: { ...baseWorld.world, landforms, waterBodies } };
   // Markers are single cells; precompute every marker's cell up front so a
   // save can resolve the spawn it links to even if that spawn is placed later
   // in the list.

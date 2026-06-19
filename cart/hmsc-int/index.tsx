@@ -3,7 +3,7 @@ import { Box, Text } from '@reactjit/primitives';
 import { execAsync } from '@reactjit/runtime/hooks/process';
 import type { GameState } from './design';
 import { compileEditorWorld, emptyEditorWorld } from './editorWorld';
-import type { ChunkFloor } from './chunkFloor';
+import { floorsToLandforms, floorsToWaterBodies, type ChunkFloor } from './chunkFloor';
 import { IsoAuthor } from './IsoAuthor';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas } from './PaintCanvas';
@@ -27,6 +27,7 @@ import { LABS } from './labs';
 import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
 import { editorTunables, tuningStream } from './editors/tunables';
+import { ensureCookedRegistry } from './editors/model/cookedAssets';
 import { worldStream, buildingsStream, type PlacedBuildPiece } from './game';
 import { useMapSession } from './editors/world/useMapSession';
 import { useBuildUndo } from './editors/world/useBuildUndo';
@@ -156,6 +157,14 @@ function EditorShell() {
   // marker-only commits (note()), so the route-scoped commit history exists TODAY
   // and world content events join the same channel later by ADDITION (V20 schema
   // evolution — nothing to migrate when the editor's world goes event-sourced).
+  // req_1136: register the persisted Studio-cooked props into the prop + catalog
+  // overlays BEFORE the worldStream is defined/folded below. The world materializer
+  // drops a piecePlaced whose pieceId isn't a known catalog id
+  // (game/world/stream.ts:267), so a placed cooked prop would silently vanish on
+  // fold (and stay gone — state() caches incrementally) until the overlay synced.
+  // Syncing here, ahead of the fold, makes a cooked prop placeable AND survive a
+  // cold reload. Idempotent; safe headless.
+  useMemo(() => { try { ensureCookedRegistry(); } catch { /* no store / headless */ } }, []);
   const worldChannel = useMemo(() => {
     try {
       return editorChannel(worldStream);
@@ -313,11 +322,37 @@ function EditorShell() {
   }, [kindTex]);
 
   // The preview world = baseWorld + the painted chunks as REAL heightfield
-  // landforms + every current placement applied via the game's own mutators —
-  // a pure assembler (editors/world/previewWorld.ts), memoized here.
-  const previewWorld = useMemo<GameState>(() => ptime('previewWorld', `rebuild floors=${floors.length} placements=${placements.length}`, () =>
-    assemblePreviewWorld({ baseWorld, floors, placements, mergeKindTextures })
-  ), [baseWorld, placements, floors, mergeKindTextures]);
+  // landforms + every current placement applied via the game's own mutators.
+  //
+  // PERF (PAINTCHOKE-0618): a tile-COLOUR dab used to re-run the whole placement
+  // walk because previewWorld was memoized on `floors` directly, and that walk is
+  // O(placements) (each placeWorldProp immutably re-appends to the props array +
+  // scans all ids). On a grown map that quadratic was the 3-4s-per-edit choke.
+  //
+  // The split below decouples the two cheap inputs from the expensive one:
+  //   • landforms/waterBodies — cached per chunk by floorsToLandforms (stable
+  //     identity for unpainted chunks), so a colour dab only rebuilds the one
+  //     painted chunk's landform.
+  //   • placementWorld — the O(placements) assembler, keyed on a HEIGHT signature
+  //     (hver per chunk) + placements, NOT on tile colour. Prop Y depends only on
+  //     terrain HEIGHT (landformGroundTopAt), so colouring never moves a prop and
+  //     this walk can be skipped for colour edits entirely.
+  //   • previewWorld — overlays the freshly-coloured landforms + floors-water onto
+  //     the (reused) placementWorld with a single spread. Cheap, runs every paint.
+  const landforms = useMemo(() => floorsToLandforms(floors), [floors]);
+  const floorsWater = useMemo(() => floorsToWaterBodies(floors), [floors]);
+  const heightSig = useMemo(() => floors.map((f) => `${f.cx},${f.cz}:${f.hver}`).join(';'), [floors]);
+  // The placement assembler holds ONLY placement-derived water (base water = []) so
+  // the overlay can refresh painted floors-water without re-running it AND without
+  // dropping placed water. landforms are baked for prop Y (height) but intentionally
+  // not a memo dep — keyed on heightSig so colour-only paint reuses this result.
+  const placementWorld = useMemo<GameState>(() => ptime('placementWorld', `rebuild placements=${placements.length} heightSig=${heightSig.length}b`, () =>
+    assemblePreviewWorld({ baseWorld, landforms, waterBodies: [], placements, mergeKindTextures })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [baseWorld, placements, mergeKindTextures, heightSig]);
+  const previewWorld = useMemo<GameState>(() => (
+    { ...placementWorld, world: { ...placementWorld.world, landforms, waterBodies: [...floorsWater, ...(placementWorld.world.waterBodies ?? [])] } }
+  ), [placementWorld, landforms, floorsWater]);
   const focusWorld = placeFocus?.world ?? previewWorld;
 
   // Compile = persist the authored world (the SAME GameState the preview shows:
