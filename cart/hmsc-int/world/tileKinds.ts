@@ -554,6 +554,56 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     render: { color: '#2a2f3a', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.parkingCross },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
+  // ── grass DENSITY variants (paint low/med/high grass) — appended LAST so every
+  // prior tile index stays stable AND matches game/kinds/tiles' order (the painter
+  // encodes cells as indices into THIS table; grassPopulation reads density by the
+  // same index). Same ground as `grass`; density differs in GRASS_DENSITY. ───────
+  grassSparse: {
+    kind: 'grassSparse',
+    placement: 'surface',
+    label: 'Grass (Sparse)',
+    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.9, preferredByVehicles: false, cover: 'none', noise: 0.2 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.12, lightTransmission: 0.97, soundOcclusion: 0.04 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
+    render: { color: '#5c8a40', heightMeters: 0.06, textureKey: HMSC_TILE_TEXTURE_KEYS.grass },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  grassLush: {
+    kind: 'grassLush',
+    placement: 'surface',
+    label: 'Grass (Lush)',
+    pathing: { walkable: true, movementCost: 1.18, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.14, runCost: 1.12, vehicleCost: 2.0, preferredByVehicles: false, cover: 'none', noise: 0.22 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.16, lightTransmission: 0.96, soundOcclusion: 0.05 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.48 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.94, runSpeedMultiplier: 0.9, vehicleSpeedMultiplier: 0.48, accelerationMultiplier: 0.68, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
+    render: { color: '#2f6b28', heightMeters: 0.06, textureKey: HMSC_TILE_TEXTURE_KEYS.grass },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  // Palm grove (req_1443) — appended LAST so its index stays in lockstep with
+  // game/kinds/tiles + design's TileKind. Grassy ground that GROWS palms the grass
+  // way: a painted cell sparsely spawns a PalmTrunk mesh + a ~frond~ crown
+  // (render3d/palmPopulation). The ground is plain soil; the palms are the population.
+  palm: {
+    kind: 'palm',
+    placement: 'surface',
+    label: 'Palm Grove',
+    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.9, preferredByVehicles: false, cover: 'none', noise: 0.2 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.12, lightTransmission: 0.95, soundOcclusion: 0.05 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
+    render: { color: '#4f7a3a', heightMeters: 0.06, textureKey: HMSC_TILE_TEXTURE_KEYS.grass },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
 };
 
 export const TILE_KINDS = Object.keys(TILE_KIND_DEFINITIONS) as TileKind[];

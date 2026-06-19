@@ -59,6 +59,9 @@ export type TileKind =
   // the user had bush (an embedded foliage profile) but no grass GROUND.
   | 'grass'
   | 'grassDry'
+  | 'grassSparse'
+  | 'grassLush'
+  | 'palm'
   // Parking + vehicle spawn (PARKSPAWN-0612, req_0694). Appended last — kind
   // indices stay stable. 'parking' is painted parking-lot ground (asphalt
   // wearing white stall lines); 'vehicleSpawn' is the gameplay marker where
@@ -696,6 +699,61 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 0.95 },
     surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 0.85, accelerationMultiplier: 0.95, friction: 0.2, lateralGrip: 0.9, restitution: 0.82 },
     render: { color: '#2a2f3a', heightMeters: 0.08, textureKey: TEX.parkingCross },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  // ── grass DENSITY variants (req: paint low/med/high grass) — appended LAST so
+  // every prior tile index stays stable. Same ground as `grass` (med); the only
+  // difference is how many blades the grass population system scatters per cell
+  // (render3d/grassPopulation GRASS_DENSITY). Distinct swatch colours so the three
+  // densities read apart in the painter. `grass`/`grassDry` stay MEDIUM. ─────────
+  grassSparse: {
+    kind: 'grassSparse',
+    placement: 'surface',
+    label: 'Grass (Sparse)',
+    flow: 'none',
+    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.9, preferredByVehicles: false, noise: 0.2 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.12, lightTransmission: 0.97, soundOcclusion: 0.04 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
+    render: { color: '#5c8a40', heightMeters: 0.06, textureKey: TEX.grass },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  grassLush: {
+    kind: 'grassLush',
+    placement: 'surface',
+    label: 'Grass (Lush)',
+    flow: 'none',
+    pathing: { walkable: true, movementCost: 1.18, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.14, runCost: 1.12, vehicleCost: 2.0, preferredByVehicles: false, noise: 0.22 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.16, lightTransmission: 0.96, soundOcclusion: 0.05 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.48 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.94, runSpeedMultiplier: 0.9, vehicleSpeedMultiplier: 0.48, accelerationMultiplier: 0.68, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
+    render: { color: '#2f6b28', heightMeters: 0.06, textureKey: TEX.grass },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  // ── palm GROVE (req_1443) — appended LAST so every prior tile index stays stable.
+  // A paintable ground that GROWS palm trees the grass way: a painted 'palm' cell
+  // sparsely spawns a palm (PalmTrunk mesh + a crown of Frond cards) through the
+  // ~frond~ foliage pipeline (render3d/palmPopulation). The ground itself is grassy
+  // soil; the palms are the population, just like grass blades over a grass cell. ──
+  palm: {
+    kind: 'palm',
+    placement: 'surface',
+    label: 'Palm Grove',
+    flow: 'none',
+    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.9, preferredByVehicles: false, noise: 0.2 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.12, lightTransmission: 0.95, soundOcclusion: 0.05 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
+    render: { color: '#4f7a3a', heightMeters: 0.06, textureKey: TEX.grass },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
 };

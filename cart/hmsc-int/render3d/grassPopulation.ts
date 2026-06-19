@@ -165,6 +165,55 @@ function landformFieldTop(lf: Landform, x: number, z: number): number {
 }
 
 /**
+ * The ONE walk over every painted ground cell — grass surfaceRegions (uniform-kind
+ * rects, flat at the region top) THEN landform tile grids (the painter's tiles on
+ * relief, each cell on its own sampled height). Calls `cb(kind, wx, wz, top, cellKey)`
+ * per cell with the resolved tile-kind string, the cell CENTRE in world metres, the
+ * surface height, and the deterministic per-cell seed. Both the foliage population
+ * (grass/bush) AND the palm population ride this, so every plant sits on the same
+ * surface at the same stable seed (rule-of-two: one walk, no divergent copies).
+ *
+ * `cellKey` matches the legacy per-source seed exactly so the grass buffer stays
+ * byte-identical: surfaceRegion cells pass the raw xz hash; landform cells pass the
+ * pre-mixed cell hash (the populate roll then mixes once more, as it always has).
+ */
+export function eachPaintedCell(
+  world: GameState['world'],
+  cb: (kind: string, wx: number, wz: number, top: number, cellKey: number) => void,
+): void {
+  const c = world.cellSizeMeters;
+  for (const region of world.surfaceRegions) {
+    const top = surfaceRegionTopMeters(region, c);
+    for (let j = 0; j < region.depth; j += 1) {
+      for (let i = 0; i < region.width; i += 1) {
+        const tileX = region.x + i;
+        const tileZ = region.z + j;
+        const key = Math.imul(tileX | 0, 0x85ebca6b) ^ Math.imul(tileZ | 0, 0xc2b2ae35);
+        cb(region.kind, (tileX + 0.5) * c, (tileZ + 0.5) * c, top, key);
+      }
+    }
+  }
+  for (const lf of world.landforms ?? []) {
+    const tiles = lf.field?.tiles;
+    const f = lf.field;
+    if (!tiles || !f) continue;
+    const fullW = (f.cols - 1) * f.cell;
+    const fullD = (f.rows - 1) * f.cell;
+    for (let tj = 0; tj < tiles.rows; tj += 1) {
+      for (let ti = 0; ti < tiles.cols; ti += 1) {
+        const kind = TILE_KINDS[tiles.idx[tj * tiles.cols + ti]];
+        if (!kind) continue;
+        const wx = lf.centerX - fullW / 2 + ((ti + 0.5) / tiles.cols) * fullW;
+        const wz = lf.centerZ - fullD / 2 + ((tj + 0.5) / tiles.rows) * fullD;
+        const top = landformFieldTop(lf, wx, wz);
+        const key = mix(Math.imul(ti | 0, 0x27d4eb2f) ^ Math.imul(tj | 0, 0x165667b1) ^ hashStr(lf.id));
+        cb(kind, wx, wz, top, key);
+      }
+    }
+  }
+}
+
+/**
  * Roll the blade instance buffer for a world. Pure in (world): same world → byte-
  * identical buffer. Scatters bladesPerCell blades per painted grass cell (from both
  * grass surfaceRegions and landform tile grids) at hashed sub-cell offset / yaw /
@@ -233,47 +282,17 @@ function populateFoliage(world: GameState['world'], spec: FoliageSpec): GrassIns
     }
   };
 
-  // Source 1 — grass surfaceRegions (uniform-kind rects), flat at the region top.
-  for (const region of world.surfaceRegions) {
-    const level = spec.kindLevel[region.kind];
-    if (!level) continue;
+  // Walk every painted cell (grass surfaceRegions + landform tile grids) through
+  // the ONE shared iterator (eachPaintedCell) — palms ride the same walk, so they
+  // plant on the exact same surface heights and cell seeds. emitClump no-ops once
+  // the cap is hit, so the post-truncation tail is dropped identically.
+  eachPaintedCell(world, (kind, wx, wz, top, cellKey) => {
+    const level = spec.kindLevel[kind];
+    if (!level) return;
     const density = bladesForLevel(spec.config, level);
-    const top = surfaceRegionTopMeters(region, c);
-    for (let j = 0; j < region.depth && !truncated; j += 1) {
-      for (let i = 0; i < region.width && !truncated; i += 1) {
-        const tileX = region.x + i;
-        const tileZ = region.z + j;
-        const key = Math.imul(tileX | 0, 0x85ebca6b) ^ Math.imul(tileZ | 0, 0xc2b2ae35);
-        emitClump((tileX + 0.5) * c, (tileZ + 0.5) * c, top, key, density);
-      }
-    }
-    if (truncated) break;
-  }
-
-  // Source 2 — landform tile grids (the painter's grass on painted terrain). Each
-  // grass cell sits on the landform's own sampled height, so relief carries it.
-  for (const lf of world.landforms ?? []) {
-    if (truncated) break;
-    const tiles = lf.field?.tiles;
-    const f = lf.field;
-    if (!tiles || !f) continue;
-    const fullW = (f.cols - 1) * f.cell;
-    const fullD = (f.rows - 1) * f.cell;
-    for (let tj = 0; tj < tiles.rows && !truncated; tj += 1) {
-      for (let ti = 0; ti < tiles.cols && !truncated; ti += 1) {
-        const level = spec.levelByIndex.get(tiles.idx[tj * tiles.cols + ti]);
-        if (!level) continue;
-        const density = bladesForLevel(spec.config, level);
-        if (density <= 0) continue;
-        const wx = lf.centerX - fullW / 2 + ((ti + 0.5) / tiles.cols) * fullW;
-        const wz = lf.centerZ - fullD / 2 + ((tj + 0.5) / tiles.rows) * fullD;
-        const top = landformFieldTop(lf, wx, wz);
-        // Seed in the landform's own cell space so it's stable per painted cell.
-        const key = mix(Math.imul(ti | 0, 0x27d4eb2f) ^ Math.imul(tj | 0, 0x165667b1) ^ hashStr(lf.id));
-        emitClump(wx, wz, top, key, density);
-      }
-    }
-  }
+    if (density <= 0) return;
+    emitClump(wx, wz, top, cellKey, density);
+  });
 
   if (truncated) {
     // Loud, never silent (juice-limits rule): tell the terminal the field outgrew
