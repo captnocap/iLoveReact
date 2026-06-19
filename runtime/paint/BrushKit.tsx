@@ -6,7 +6,7 @@
 // every tool in the repo gets the SAME paint UI (USER ASK req_1447).
 
 import { Box, Col, Row, Text, Pressable } from '../primitives';
-import { BrushScalar, ChipRow, BrushIcon, type ChipOption } from './controls';
+import { BrushScalar, ChipRow, BrushIcon, ToolIcon, type ChipOption } from './controls';
 import { ColorField } from './ColorField';
 import { type PaintTheme, DARK_THEME } from './theme';
 import {
@@ -77,10 +77,6 @@ export function BrushKit(props: BrushKitProps) {
   const patch = (delta: Partial<Brush>) => props.onBrushChange({ ...b, ...delta });
 
   const tools = props.tools ?? DEFAULT_TOOLS;
-  const toolOpts: ChipOption<BrushTool>[] = tools.map((t) => ({
-    value: t, label: TOOL_LABEL[t], hint: `${TOOL_LABEL[t]} (${TOOL_HOTKEY[t]})`,
-  }));
-
   const blendOpts: ChipOption<string>[] = BLEND_MODES.map((m) => ({ value: m, label: m }));
 
   const selectInk = (ink: PaintInk) => {
@@ -94,7 +90,25 @@ export function BrushKit(props: BrushKitProps) {
     <Col style={{ width: props.width ?? 248, gap: 12, padding: 12, backgroundColor: T.panel, borderWidth: 1, borderColor: T.frame, borderRadius: 8 }}>
       {show('tools') ? (
         <Section title="Tool" theme={T}>
-          <ChipRow options={toolOpts} value={props.tool} onChange={props.onToolChange} theme={T} wrap />
+          {/* tools ship with a standard icon too — picker is glyphs, not names */}
+          <Row style={{ gap: 6, flexWrap: 'wrap' }}>
+            {tools.map((t) => {
+              const sel = props.tool === t;
+              return (
+                <Pressable
+                  key={t}
+                  tooltip={`${TOOL_LABEL[t]} (${TOOL_HOTKEY[t]})`}
+                  onMouseDown={() => props.onToolChange(t)}
+                  style={{
+                    width: 34, height: 34, borderRadius: 6, alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: sel ? T.accent : T.control, borderWidth: 1, borderColor: sel ? T.accent : T.frame,
+                  }}
+                >
+                  <ToolIcon tool={t} size={22} color={sel ? T.page : T.ink} />
+                </Pressable>
+              );
+            })}
+          </Row>
         </Section>
       ) : null}
 

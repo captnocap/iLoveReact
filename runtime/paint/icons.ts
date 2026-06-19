@@ -4,7 +4,7 @@
 // seed for the Phase B host stamp mask. Centered at the origin in a ±12 range,
 // pure strings — render with <Graph.Path> (see BrushIcon in controls.tsx).
 
-import type { BrushShape } from './model';
+import type { BrushShape, BrushTool } from './model';
 
 export interface IconLayer {
   d: string;
@@ -65,5 +65,40 @@ export function brushIconLayers(shape: BrushShape): IconLayer[] {
     }
     case 'knife':
       return [{ d: poly([[-10, 5], [7, -5], [10, -3], [-7, 7]]), fill: true }];
+  }
+}
+
+/** Path layers for a TOOL's icon — every tool ships with a standard glyph so
+ *  the tool picker is icons, not names (req_1460). Same ±12 centered space. */
+export function toolIconLayers(tool: BrushTool): IconLayer[] {
+  switch (tool) {
+    case 'brush': // a paintbrush: handle + bristle tip
+      return [
+        { d: 'M 9,-9 L -1,1', fill: false },
+        { d: poly([[-1, 1], [-7, 3], [-3, 9], [3, 5]]), fill: true },
+      ];
+    case 'eraser': // a tilted eraser block
+      return [{ d: poly([[-8, 4], [-1, -5], [8, -5], [1, 4]]), fill: true }];
+    case 'line':
+      return [{ d: 'M -9,8 L 9,-8', fill: false }];
+    case 'rect':
+      return [{ d: rect(-8, -6, 16, 12), fill: false }];
+    case 'ellipse':
+      return [{ d: ellipse(0, 0, 9, 6), fill: false }];
+    case 'eyedropper': // pipette: bulb + body + drop
+      return [
+        { d: rect(4, -10, 6, 4), fill: true },
+        { d: 'M 7,-6 L -4,5', fill: false },
+        { d: poly([[-4, 5], [-7, 9], [-1, 9]]), fill: true },
+      ];
+    case 'fill': // paint bucket + a drip
+      return [
+        { d: poly([[-7, -3], [5, -5], [3, 8], [-5, 6]]), fill: true },
+        { d: circle(8, 4, 1.8), fill: true },
+      ];
+    case 'smudge': // a smeared zigzag
+      return [{ d: 'M -9,3 L -3,-4 L 3,3 L 9,-4', fill: false }];
+    case 'blur': // soft concentric rings
+      return [{ d: circle(0, 0, 8), fill: false }, { d: circle(0, 0, 4), fill: false }];
   }
 }
