@@ -44,7 +44,7 @@ import { BackdropSurface, BackdropsPanel, backdropQuad, backdropTexKey, defaultB
 import * as localstore from '@reactjit/hooks/localstore';
 import { textureizeScene, rasterizeAtlas, DEFAULT_TEXTURE_OPTIONS, PIXEL_DENSITIES, type TextureOptions, type TextureType, type RasterSlice } from './textureize';
 import { encodePng } from './png';
-import { exists, mkdir, readFileBase64, writeFileBase64Atomic } from '@reactjit/hooks/fs';
+import { exists, listDir, mkdir, readFileBase64, writeFileBase64Atomic } from '@reactjit/hooks/fs';
 import { bytesToBase64, base64ToBytes } from '@reactjit/workspace';
 import { useAssistant } from '@reactjit/hooks/useAssistant';
 import { processCwd } from '../../assist3d/scene';
@@ -3558,8 +3558,17 @@ function ImportTextureDialog(props: { slice?: RasterSlice; defaultPath: string; 
 // converts triangle soup -> EditMesh + unwraps UVs (glbToEditMesh), and on success
 // hands (mesh, name) to the parent which mints a fresh model + addPart. The mesh is
 // unwrapped, so the pixel painter works on it immediately.
-function ImportModelDialog(props: { defaultPath: string; onCancel: () => void; onConfirm: (mesh: EditMesh, name: string) => void }) {
-  const [path, setPath] = useState(props.defaultPath);
+const GENERATED_DIR = 'cart/hmsc-int/data/generated';
+function ImportModelDialog(props: { onCancel: () => void; onConfirm: (mesh: EditMesh, name: string) => void }) {
+  // Prefill the newest generated .glb (what `tools/genmodel` just wrote) instead
+  // of a fixed name that never matches the prompt's slug.
+  const [path, setPath] = useState(() => {
+    try {
+      const glbs = listDir(GENERATED_DIR).filter((f) => f.endsWith('.glb')).sort();
+      if (glbs.length) return `${GENERATED_DIR}/${glbs[glbs.length - 1]}`;
+    } catch { /* dir may not exist yet */ }
+    return `${GENERATED_DIR}/model.glb`;
+  });
   const [err, setErr] = useState<string | null>(null);
   const doImport = () => {
     try {
@@ -3905,7 +3914,6 @@ export function StudioEditor() {
       ) : null}
       {importOpen ? (
         <ImportModelDialog
-          defaultPath={'cart/hmsc-int/data/generated/model.glb'}
           onCancel={() => setImportOpen(false)}
           onConfirm={(mesh, name) => { model.newModel(); model.addPart(mesh, name); setImportOpen(false); }}
         />
