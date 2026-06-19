@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# tsc-check — fast TSX/TS compile check for a cart, WITHOUT a full ship.
+#
+#   tools/tsc-check                 # checks cart/hmsc-int (default)
+#   tools/tsc-check sweatshop       # checks cart/sweatshop
+#   tools/tsc-check hmsc-int -o /tmp/out.js   # keep the bundle output
+#
+# Runs esbuild with all the cart aliases/injects wired up and writes to
+# /tmp/<cart>.tsc-check.js. Exit 0 = bundles clean. This is NOT a typecheck
+# (esbuild strips types); it catches import/syntax/resolution errors fast.
+# For a real build use: tools/rjit ship <cart>.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+CART="${1:-hmsc-int}"
+shift || true
+OUT="/tmp/${CART}.tsc-check.js"
+
+# allow `-o <path>` to override the output location
+if [ "${1:-}" = "-o" ] && [ -n "${2:-}" ]; then
+  OUT="$2"
+  shift 2
+fi
+
+ENTRY="$ROOT/cart/$CART/index.tsx"
+[ -f "$ENTRY" ] || ENTRY="$ROOT/cart/$CART.tsx"
+if [ ! -f "$ENTRY" ]; then
+  echo "tsc-check: no entry found (tried cart/$CART/index.tsx and cart/$CART.tsx)" >&2
+  exit 2
+fi
+
+exec "$ROOT/tools/esbuild" "$ENTRY" \
+  --bundle --format=esm --platform=neutral --target=es2022 \
+  --jsx-factory=__jsx --jsx-fragment=Fragment \
+  --inject:"$ROOT/runtime/jsx_shim.ts" \
+  --inject:"$ROOT/runtime/ambient.ts" \
+  --inject:"$ROOT/runtime/ambient_primitives.ts" \
+  --alias:@game="$ROOT/cart/$CART/game" \
+  --alias:@reactjit/core="$ROOT/runtime/core_stub.ts" \
+  --alias:@reactjit/runtime="$ROOT/runtime" \
+  --alias:@reactjit/effects="$ROOT/runtime/effects" \
+  --alias:@reactjit/geometries="$ROOT/runtime/geometries" \
+  --alias:@reactjit/cameras="$ROOT/runtime/cameras" \
+  --alias:@reactjit="$ROOT/runtime" \
+  --alias:react="$ROOT/deps/react" \
+  --alias:react-reconciler="$ROOT/deps/react-reconciler" \
+  --alias:scheduler="$ROOT/deps/scheduler" \
+  --alias:loose-envify="$ROOT/deps/loose-envify" \
+  --alias:js-tokens="$ROOT/deps/js-tokens" \
+  --outfile="$OUT" "$@"
