@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio.tsx → studio/ — Decomposition Plan</title>
+<style>
+  :root{
+    --bg:#0e1622; --panel:#13202f; --panel2:#16273a; --ink:#dce7f2; --dim:#8aa2bb;
+    --line:#26415d; --accent:#4aa3ff; --good:#5ec26a; --warn:#e9c14a; --bad:#e0584e;
+    --mono:'SFMono-Regular',ui-monospace,'JetBrains Mono',Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;font-size:15px}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 28px 120px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.4px}
+  h2{font-size:21px;margin:46px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line);letter-spacing:-.2px}
+  h3{font-size:16px;margin:26px 0 10px;color:#bcd2e8}
+  p{margin:10px 0}
+  .sub{color:var(--dim);font-size:15px;margin:0 0 4px}
+  .pill{display:inline-block;font-family:var(--mono);font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);color:var(--dim);background:#0c1420}
+  code,.k{font-family:var(--mono);font-size:.86em;background:#0b1320;border:1px solid #1d3047;border-radius:5px;padding:1px 6px;color:#cfe2f6}
+  .lead{background:linear-gradient(180deg,#16273a,#11202f);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:22px 0}
+  .lead b{color:#fff}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .card h3{margin-top:0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #1e3349;vertical-align:top}
+  th{color:#9fb6cf;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px;background:#0f1b29}
+  td.mono,th.mono{font-family:var(--mono);font-size:12.5px}
+  tr:last-child td{border-bottom:none}
+  .tree{font-family:var(--mono);font-size:13px;background:#0b1320;border:1px solid #1d3047;border-radius:12px;padding:18px 20px;white-space:pre;overflow-x:auto;color:#bcd2e8;line-height:1.45}
+  .tree .dir{color:#7fc4ff}
+  .tree .new{color:var(--good)}
+  .tree .cmt{color:#5d7790}
+  .badge{font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:5px;border:1px solid;margin-left:6px;white-space:nowrap}
+  .b-safe{color:var(--good);border-color:#2e5e38;background:#11241699}
+  .b-care{color:var(--warn);border-color:#5e5326;background:#241f0d99}
+  .b-hot{color:var(--bad);border-color:#5e2e2e;background:#240d0d99}
+  ol.steps{counter-reset:step;list-style:none;padding:0;margin:18px 0}
+  ol.steps>li{position:relative;padding:14px 16px 14px 56px;margin:10px 0;background:var(--panel);border:1px solid var(--line);border-radius:11px}
+  ol.steps>li::before{counter-increment:step;content:counter(step);position:absolute;left:14px;top:13px;width:28px;height:28px;border-radius:8px;background:#173251;border:1px solid #2c557e;color:#9fd0ff;font-family:var(--mono);font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center}
+  ol.steps>li b{color:#fff}
+  .chk{color:var(--good);font-family:var(--mono);font-size:12.5px;display:block;margin-top:6px}
+  ul.tight{margin:8px 0;padding-left:20px}
+  ul.tight li{margin:5px 0}
+  .swap{background:#0b1320;border:1px solid #1d3047;border-radius:12px;padding:16px 18px;font-family:var(--mono);font-size:13px;white-space:pre;overflow-x:auto}
+  .del{color:var(--bad)} .add{color:var(--good)} .ctx{color:#7d93ab}
+  .note{border-left:3px solid var(--accent);background:#0f1d2c;padding:10px 14px;margin:14px 0;border-radius:0 8px 8px 0;color:#bcd2e8;font-size:14px}
+  .danger{border-left-color:var(--bad);background:#1d1112}
+  .good{border-left-color:var(--good);background:#0f1d14}
+  .meta{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+  .kbd{font-family:var(--mono);font-size:12px;color:#cfe2f6}
+  hr.soft{border:none;border-top:1px solid var(--line);margin:38px 0}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--dim);margin:8px 0 0}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <span class="pill">req_1386 · req_1387 · session-1863</span>
+  <h1>Studio.tsx → <span style="color:var(--good)">studio/</span></h1>
+  <p class="sub">A side-by-side decomposition of the 3,915-line Studio modeling viewport. Zero behavior change, zero edits to the existing file, single-line instant swap, single-line instant revert.</p>
+
+  <div class="lead">
+    <b>The thesis.</b> Nothing about <i>how Studio works</i> changes. We lift the same code, byte-for-byte where it's already separable, into a module that mirrors the UI's own structure (scene · overlays · toolbars · dialogs) and pushes the one true monolith — the 2,680-line <code>StudioViewport</code> — onto a spine of focused hooks. The current <code>Studio.tsx</code> is never touched; it stays frozen as the diff breadcrumb. When the new tree builds and self-shots clean, swapping it in is <b>one import line</b>. If anything looks off, reverting is the same one line.
+  </div>
+
+  <div class="legend">
+    <span><span class="badge b-safe">SAFE</span> pure lift — props-only / stateless, moves verbatim</span>
+    <span><span class="badge b-care">CARE</span> stateful extraction — preserve hook order &amp; keys</span>
+    <span><span class="badge b-hot">HOT</span> shared mutable state — the delicate seam</span>
+  </div>
+
+  <!-- ───────────────────────────── PROBLEM ───────────────────────────── -->
+  <h2>1 · Why this file hurts</h2>
+  <p><code>Studio.tsx</code> is 3,915 lines / 253&nbsp;KB, but the weight is lopsided. ~1,500 lines are already-separable leaf material (config, pure helpers, ~16 self-contained dialogs). The remaining ~2,680 lines are a <i>single function</i>, <code>StudioViewport</code>, carrying <b>42</b> <code>useState/useHotState</code> + <b>32</b> <code>useRef</code> + <b>18</b> <code>useEffect</code>, every event handler, and one enormous JSX return. Any change means scrolling a quarter-megabyte file and praying you don't trip an unrelated closure.</p>
+
+  <table>
+    <thead><tr><th>Region</th><th class="mono">Lines</th><th>What it is</th><th>Risk</th></tr></thead>
+    <tbody>
+      <tr><td>Config + constants + types</td><td class="mono">69–241</td><td><code>STUDIO</code> tunables table, <code>STEP_BTN</code>, swatches, <code>Vec3</code>/<code>Rect</code></td><td><span class="badge b-safe">SAFE</span></td></tr>
+      <tr><td>Pure helpers</td><td class="mono">242–339</td><td><code>clamp</code>, <code>snapToStep</code>, units↔meters, <code>loopCutAxisInfo</code>, vec math</td><td><span class="badge b-safe">SAFE</span></td></tr>
+      <tr><td>Static scene bits</td><td class="mono">340–412</td><td><code>GroundGrid</code>, <code>OriginAxes</code>, <code>DragReadout</code></td><td><span class="badge b-safe">SAFE</span></td></tr>
+      <tr><td><b>StudioViewport</b></td><td class="mono"><b>413–3091</b></td><td><b>the god-component</b> — 42 state + 32 refs + 18 effects + all handlers + JSX</td><td><span class="badge b-hot">HOT</span></td></tr>
+      <tr><td>Tail components</td><td class="mono">3092–3847</td><td>~16 props-only dialogs/popups/widgets</td><td><span class="badge b-safe">SAFE</span></td></tr>
+      <tr><td>Entry points</td><td class="mono">3848–3915</td><td><code>StudioEditor</code>, <code>StudioRoute</code></td><td><span class="badge b-care">CARE</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note good"><b>The one fact that makes this safe:</b> the <i>only</i> export anyone outside the file imports is <code>StudioEditor</code> — a single line in <code>editors/workbench/model/source.tsx</code>. <code>STUDIO</code>, <code>StudioViewport</code>, and <code>StudioRoute</code> are used only inside Studio.tsx. There is exactly one external wire to keep stable.</p></div>
+
+  <!-- ───────────────────────────── PRINCIPLES ───────────────────────────── -->
+  <h2>2 · Design principles</h2>
+  <div class="grid2">
+    <div class="card"><h3>Mirror the UI, not the code</h3><p>The file's <code>req_*</code> comment blocks already name the seams: a 3D scene, an overlay layer, two toolbars, a stack of dialogs. The directory <i>is</i> that layout — <code>scene/ overlays/ panels/ dialogs/</code>. Someone editing the tier-2 toolbar opens <code>panels/Toolbar2.tsx</code>, full stop.</p></div>
+    <div class="card"><h3>State lives in hooks, JSX stays dumb</h3><p>Each tangle of interrelated state becomes one custom hook (<code>useStudioCamera</code>, <code>useStudioPaint</code>…). The viewport calls them in fixed order and hands the results to presentational panels. The hooks own the <i>how</i>; the panels own the <i>look</i>.</p></div>
+    <div class="card"><h3>Lift verbatim before you reshape</h3><p>Leaf components and helpers move with their bodies unchanged — same logic, same closures, just a new home and an import. No "while I'm here" rewrites. Cleverness is how parity breaks.</p></div>
+    <div class="card"><h3>Old file is the breadcrumb</h3><p>Per the repo's <code>_old</code> convention, the original <code>Studio.tsx</code> is left frozen and untouched as the ground-truth to <code>git diff</code> against — deleted only after you confirm parity, never speculatively.</p></div>
+  </div>
+
+  <!-- ───────────────────────────── TARGET STRUCTURE ───────────────────────────── -->
+  <h2>3 · Target structure</h2>
+  <p>A new <code>editors/model/studio/</code> directory sits <i>alongside</i> the existing flat modules (<code>editMesh.ts</code>, <code>meshPaint.tsx</code>, …), which are already well-factored and stay exactly where they are. Only the contents of the old <code>Studio.tsx</code> get a home here.</p>
+
+<div class="tree"><span class="dir">editors/model/</span>
+├─ Studio.tsx            <span class="cmt"># FROZEN. untouched. the breadcrumb to diff against.</span>
+├─ editMesh.ts  meshPaint.tsx  studioModel.ts  …   <span class="cmt"># existing modules — unchanged</span>
+│
+└─ <span class="dir new">studio/</span>                <span class="cmt"># ← all of Studio.tsx's contents, restructured</span>
+   ├─ <span class="new">index.tsx</span>            <span class="cmt"># re-exports: StudioEditor, StudioRoute, StudioViewport, STUDIO</span>
+   ├─ <span class="new">config.ts</span>            <span class="cmt"># STUDIO table, STEP_BTN, swatches, Vec3/Rect</span>
+   ├─ <span class="new">helpers.ts</span>           <span class="cmt"># clamp, snapToStep, units↔meters, loopCutAxisInfo, vec math</span>
+   ├─ <span class="new">StudioEditor.tsx</span>     <span class="cmt"># StudioEditor + StudioRoute — the thin entry (owns useStudioModel)</span>
+   ├─ <span class="new">StudioViewport.tsx</span>   <span class="cmt"># slim orchestrator (~200 lines): wires hooks → panels</span>
+   │
+   ├─ <span class="dir new">hooks/</span>
+   │  ├─ <span class="new">useStudioCamera.ts</span>   <span class="cmt"># orbit/fit/faceAxis/reframe/fov/smooth/camSnap + wheel + bootCam</span>
+   │  ├─ <span class="new">useStudioPaint.ts</span>    <span class="cmt"># paint state, paintAt/Stroke/commit/fill, ensureTexture, bake interval</span>
+   │  ├─ <span class="new">useMeshEdit.ts</span>       <span class="cmt"># selection + gizmo drag + extrude/bevel/loopcut/rig/autofix/setDetail</span>
+   │  ├─ <span class="new">useBackdrops.ts</span>      <span class="cmt"># backdrop CRUD + backdropQuads + move gizmo state</span>
+   │  └─ <span class="new">useTextureExport.ts</span>  <span class="cmt"># exportSprite/applyTextureImage/importTexture/compile/toast</span>
+   │
+   ├─ <span class="dir new">scene/</span>
+   │  ├─ <span class="new">StudioScene.tsx</span>      <span class="cmt"># the &lt;Scene3D&gt; subtree: part meshes, glass pass, scale ghost,</span>
+   │  │                       <span class="cmt">#   backdrops, Paintable, texture atlas</span>
+   │  └─ <span class="new">staging.tsx</span>          <span class="cmt"># GroundGrid, OriginAxes, Geom, DragReadout</span>
+   │
+   ├─ <span class="dir new">overlays/</span>
+   │  ├─ <span class="new">ViewCompass.tsx</span>      <span class="cmt"># + COMPASS, COMPASS_AXES, vec math</span>
+   │  └─ <span class="new">FrameDiagBar.tsx</span>
+   │
+   ├─ <span class="dir new">panels/</span>
+   │  ├─ <span class="new">Toolbar1.tsx</span>         <span class="cmt"># tier-1: info + view toggles + diagnostics</span>
+   │  ├─ <span class="new">Toolbar2.tsx</span>         <span class="cmt"># tier-2: tools · transform · context edit ops</span>
+   │  ├─ <span class="new">SizeReadout.tsx</span>      <span class="cmt"># focused-selection measured dims</span>
+   │  ├─ <span class="new">StatCell.tsx</span>
+   │  └─ <span class="new">NumberField.tsx</span>
+   │
+   └─ <span class="dir new">dialogs/</span>
+      ├─ <span class="new">AddShapeDialog.tsx</span>     <span class="cmt"># + ShapeKind, SHAPE_KINDS, ROUND_BODIES</span>
+      ├─ <span class="new">CreateTextureDialog.tsx</span> <span class="cmt"># + TexCheck, TEXTURE_TYPES</span>
+      ├─ <span class="new">CompileAssetDialog.tsx</span>  <span class="cmt"># + COMPILE_KINDS, COMPILE_NATURES, natureToDescriptor</span>
+      ├─ <span class="new">ImportTextureDialog.tsx</span>
+      ├─ <span class="new">ImportModelDialog.tsx</span>
+      ├─ <span class="new">AiTextureDialog.tsx</span>
+      ├─ <span class="new">LoopCutPopup.tsx</span>       <span class="cmt"># + LCStepper, LCField</span>
+      ├─ <span class="new">BevelPopup.tsx</span>
+      └─ <span class="new">ConcaveFixPopup.tsx</span>
+</div>
+
+  <div class="note">Existing siblings already pulled out of Studio over time — <code>PaintPanel</code>, <code>Outliner</code>, <code>TextureAtlas</code>, <code>Backdrops</code>, <code>meshGizmo</code>, <code>meshRig</code>, <code>meshSelect</code>, <code>meshPaintOverlay</code> — stay where they are and are simply imported. The new tree doesn't relocate them; it joins them.</p></div>
+
+  <!-- ───────────────────────────── MAPPING ───────────────────────────── -->
+  <h2>4 · Where every piece goes</h2>
+
+  <h3>Leaf material (pure lift) <span class="badge b-safe">SAFE</span></h3>
+  <table>
+    <thead><tr><th class="mono">Current (Studio.tsx)</th><th>→ New home</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">STUDIO, STEP_BTN, SMOOTH_PRESETS, PAINT_SWATCHES, PAINT_BRUSH_SIZES, SCALE_FIGURE_*, Vec3, Rect</td><td><code>config.ts</code></td></tr>
+      <tr><td class="mono">clamp, sameRigSel, nextJointName, snapToStep, unitsToMeters, metersToUnits, fmtUnits, nowMs, schedFrame, partPlacement, LoopCutAxis, loopCutAxisInfo, lcKeptFace</td><td><code>helpers.ts</code></td></tr>
+      <tr><td class="mono">GroundGrid, OriginAxes, Geom, DragReadout</td><td><code>scene/staging.tsx</code></td></tr>
+      <tr><td class="mono">DEG/V3/dot3/cross3/norm3, COMPASS, COMPASS_AXES, ViewCompass</td><td><code>overlays/ViewCompass.tsx</code></td></tr>
+      <tr><td class="mono">FrameDiagBar</td><td><code>overlays/FrameDiagBar.tsx</code></td></tr>
+      <tr><td class="mono">StatCell · NumberField</td><td><code>panels/StatCell.tsx</code> · <code>panels/NumberField.tsx</code></td></tr>
+      <tr><td class="mono">ConcaveFixPopup, AddShapeDialog, CreateTextureDialog (+TexCheck), CompileAssetDialog (+natureToDescriptor), ImportTextureDialog, ImportModelDialog, AiTextureDialog, LoopCutPopup (+LCStepper/LCField), BevelPopup</td><td><code>dialogs/*</code> (one file each)</td></tr>
+    </tbody>
+  </table>
+  <p class="sub">These 16-odd components are already props-only. They move with bodies unchanged plus an import line. This alone evacuates ~1,500 lines and is mechanically reversible.</p>
+
+  <h3>StudioViewport's interior (stateful extraction) <span class="badge b-care">CARE</span></h3>
+  <p>The component's own comments already cluster the logic. Each cluster becomes a hook returning a typed bag of state + handlers; the orchestrator destructures them.</p>
+  <table>
+    <thead><tr><th>Hook</th><th>Absorbs</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">useStudioCamera</td><td><code>lookRef/distRef/camRef/smoothRef</code>, <code>fitDistance</code>, <code>sendOrbit</code>, <code>faceAxis</code>, <code>reframe</code>, <code>setFov</code>, <code>cycleSmooth</code>, <code>camSnap</code>, <code>bootCam</code>, <code>onWheel</code>, the orbit-controller effect</td></tr>
+      <tr><td class="mono">useBackdrops</td><td>backdrops state, <code>addBackdrop/updateBackdrop/removeBackdrop/startMoveBackdrop/moveBackdrop</code>, <code>backdropQuads</code>, <code>backdropSig</code></td></tr>
+      <tr><td class="mono">useTextureExport</td><td><code>exportSprite</code>, <code>applyTextureImage</code>, <code>importTexture</code>, <code>texSource</code>, <code>toast</code>/<code>exportMsg</code>, compile open-state, cooked-asset wiring</td></tr>
+      <tr><td class="mono">useStudioPaint</td><td><code>paintTargets/paintAt/paintStroke/commitPaint/fillAllFaces/ensureTexture/activePaintColor/brushRadiusPx</code>, paint refs, the bake <code>useInterval</code>, paint history effects</td></tr>
+      <tr><td class="mono">useMeshEdit</td><td>selection state, <code>beginGizmoDrag</code>, the big <code>onDown/onMove/onUp</code> pointer handlers, loop-cut (<code>lc*</code>), bevel (<code>bv*</code>), rig (<code>rigLocalPos/commitRig</code>), <code>resolveAutoFix</code>, <code>setDetail</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note danger"><b>The one genuinely delicate part</b> is that <code>onDown/onMove/onUp</code> (~480 lines) touch <i>camera, paint, selection, and gizmo</i> state together. Strategy: the pointer handlers stay in <code>useMeshEdit</code> but receive the camera + paint hook results as arguments, so cross-cutting reads/writes go through explicit parameters instead of shared closure scope. This is the seam to extract <b>last</b> and verify hardest.</p></div>
+
+  <h3>The JSX (presentational split)</h3>
+  <table>
+    <thead><tr><th>Component</th><th>Renders</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">scene/StudioScene</td><td>the <code>&lt;Scene3D&gt;</code> children: every visible part mesh, the glass pass, the scale ghost, baked backdrops, the <code>Paintable</code>, the texture atlas</td></tr>
+      <tr><td class="mono">panels/Toolbar1</td><td>tier-1 strip: info readout, view toggles (scale/backdrops/mirror), diagnostics levers</td></tr>
+      <tr><td class="mono">panels/Toolbar2</td><td>tier-2 strip: mode tabs, transform tools, the per-mode context edit ops (extrude/loopcut/flip/glass/detach/solidify/wheel/bevel/create-face…)</td></tr>
+      <tr><td class="mono">StudioViewport</td><td>orchestrator only: hook calls, the <code>NativeCameraSurface</code>/pointer bindings, then <code>&lt;StudioScene/&gt;</code> + overlays + <code>&lt;Toolbar1/&gt;</code> + <code>&lt;Toolbar2/&gt;</code> + the conditional dialog mounts</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ───────────────────────────── PARITY ───────────────────────────── -->
+  <h2>5 · The parity contract</h2>
+  <p>These are non-negotiable invariants. If any can't be held, that piece doesn't move until it can.</p>
+  <ul class="tight">
+    <li><b>Studio.tsx is never edited.</b> It remains on disk, frozen, as the diff source of truth.</li>
+    <li><b>Every <code>useHotState</code> / <code>localstore</code> string key stays byte-identical</b> — <code>'studio:showScale'</code>, <code>'studio:mirrorMask'</code>, <code>'studio:texView'</code>, <code>'studio:smooth'</code>, <code>STUDIO_PAINT_KEY</code>, <code>STUDIO_TEXTURE_KEY</code>, <code>SCALE_FIGURE_CART_KEY</code>, the V20 store keys. A changed key silently resets twig/hot state.</li>
+    <li><b>Hook-call order is fixed.</b> The orchestrator calls the five hooks in a stable sequence every render; each hook calls its own <code>useState/useRef/useEffect</code> in the same order they appear today. React's rules-of-hooks identity is thereby preserved.</li>
+    <li><b>Effect dependency arrays and execution order are carried over unchanged.</b> No effect is merged, split, or re-ordered relative to its neighbors during the move.</li>
+    <li><b>Ref identity semantics are preserved</b> — a ref that's created once and shared stays a single ref threaded through hook return values, never duplicated.</li>
+    <li><b>No prop-shape change to <code>StudioViewport</code>.</b> Its 18-field props object stays identical so <code>StudioEditor</code> wiring is untouched.</li>
+  </ul>
+
+  <!-- ───────────────────────────── SWAP ───────────────────────────── -->
+  <h2>6 · The instant swap (and instant revert)</h2>
+  <p>Because the new tree re-exports <code>StudioEditor</code> with an identical signature, cutting over is a one-line edit in the sole consumer — and backing out is the same edit reversed. The two implementations can coexist indefinitely; nothing forces a choice until you're satisfied.</p>
+
+  <h3>Swap in</h3>
+<div class="swap"><span class="ctx">// cart/hmsc-int/editors/workbench/model/source.tsx</span>
+<span class="del">- import { StudioEditor } from '../../model/Studio';</span>
+<span class="add">+ import { StudioEditor } from '../../model/studio';</span>
+</div>
+
+  <h3>Revert (if a self-shot looks wrong)</h3>
+<div class="swap"><span class="ctx">// flip the one line back — Studio.tsx is still fully intact</span>
+<span class="del">- import { StudioEditor } from '../../model/studio';</span>
+<span class="add">+ import { StudioEditor } from '../../model/Studio';</span>
+</div>
+
+  <div class="note"><b>Why not a runtime feature-flag?</b> A build-time import is simpler, leaves zero dead branches in the shipped binary, and the revert is just as fast. A flag only earns its keep if you need both live at once in the same build — we don't.</p></div>
+
+  <!-- ───────────────────────────── EXECUTION ───────────────────────────── -->
+  <h2>7 · Execution sequence</h2>
+  <p>Built so that a regression is always bisected to the smallest possible change: leaves first (can't break logic), then one hook at a time with a build between each, then the JSX, then the swap. The consumer import stays on the <i>old</i> file until the very end.</p>
+
+  <ol class="steps">
+    <li><b>Scaffold + leaf lift.</b> Create <code>studio/</code>, move <code>config.ts</code>, <code>helpers.ts</code>, <code>scene/staging.tsx</code>, all <code>overlays/*</code>, <code>panels/StatCell|NumberField</code>, and every <code>dialogs/*</code> — bodies verbatim. <code>index.tsx</code> re-exports a viewport that still inlines the old <code>StudioViewport</code> body importing these new leaves.
+      <span class="chk">✓ tools/rjit ship hmsc-int → green &nbsp;·&nbsp; git commit "studio/: leaf lift"</span></li>
+
+    <li><b>Extract the easy hooks.</b> Pull <code>useBackdrops</code>, then <code>useTextureExport</code>, then <code>useStudioCamera</code> — these have the cleanest state boundaries. Build after <i>each</i> one.
+      <span class="chk">✓ ship green after each &nbsp;·&nbsp; commit per hook</span></li>
+
+    <li><b>Extract <code>useStudioPaint</code>.</b> Paint owns its own refs + the bake interval; moderate coupling to the texture hook (resolved by passing <code>ensureTexture</code> deps in).
+      <span class="chk">✓ ship green &nbsp;·&nbsp; self-shot the paint route &nbsp;·&nbsp; commit</span></li>
+
+    <li><b>Extract <code>useMeshEdit</code> — the hot seam.</b> Selection + gizmo + the 480-line pointer handlers, receiving camera/paint results as explicit args. Build, then exercise every mesh op (extrude/bevel/loopcut/rig/wheel/flip/glass/detach/solidify).
+      <span class="chk">✓ ship green &nbsp;·&nbsp; self-shot &nbsp;·&nbsp; commit</span></li>
+
+    <li><b>Split the JSX.</b> Carve <code>scene/StudioScene</code>, <code>panels/Toolbar1</code>, <code>panels/Toolbar2</code>, <code>panels/SizeReadout</code> out of the return. <code>StudioViewport</code> is now the slim orchestrator.
+      <span class="chk">✓ ship green &nbsp;·&nbsp; commit "studio/: presentational split"</span></li>
+
+    <li><b>Parity pass — old vs new, side by side.</b> Both still build. Self-shot the same routes/states through each and compare. This is where divergence surfaces while the live path is still the old file.
+      <span class="chk">✓ shot diff clean &nbsp;·&nbsp; report PNGs + commands</span></li>
+
+    <li><b>Flip the swap (one line in source.tsx).</b> New tree goes live. Self-shot the real workbench column-4 viewport.
+      <span class="chk">✓ ship green &nbsp;·&nbsp; self-shot &nbsp;·&nbsp; commit "studio/: cut over"</span></li>
+
+    <li><b>Hand back for verification. STOP.</b> You drive the live editor. Only on your word does the next step run.</li>
+
+    <li><b>Retire the breadcrumb (your word only).</b> Delete <code>Studio.tsx</code> in its own commit so it's a clean, trivially-revertible delete. Move req_1386/1387 to <code>review</code>.
+      <span class="chk">✓ commit "studio/: retire monolith"</span></li>
+  </ol>
+
+  <!-- ───────────────────────────── VERIFY ───────────────────────────── -->
+  <h2>8 · Verification protocol</h2>
+  <ul class="tight">
+    <li><b>Build:</b> <code>tools/rjit ship hmsc-int</code> must stay green at every checkpoint — never let two or more steps stack before a build.</li>
+    <li><b>Self-shot (never desktop capture):</b> <code>tools/rjit shot hmsc-int --route &lt;r&gt; --out /tmp/studio-&lt;step&gt;.png</code>, cited by path in each progress note. The app reads back its own frame; nothing touches the user's screen.</li>
+    <li><b>The matrix to shot:</b> empty boot · a part added · object-mode gizmo drag · face select + extrude · loop-cut popup · paint mode + a stroke · backdrop placed · a dialog open (compile). Each must look identical old↔new.</li>
+    <li><b>Diff discipline:</b> <code>git diff --stat</code> against the frozen <code>Studio.tsx</code> should show leaf bodies arriving unchanged — large <i>moves</i>, near-zero <i>edits</i>. A leaf that shows real line edits is a smell; investigate before continuing.</li>
+  </ul>
+
+  <hr class="soft">
+  <div class="note good"><b>Net result.</b> <code>StudioViewport</code> goes from ~2,680 lines to a ~200-line orchestrator; the heaviest single file in the new tree is a hook or a toolbar in the low hundreds. Editing the tier-2 toolbar, the camera, or the paint logic each means opening one focused file — and the path there never required touching, or even understanding, the other three. Behavior is bit-for-bit the same; the swap and the escape hatch are each one line.</div>
+
+  <div class="meta">
+    <span class="pill">no edits to Studio.tsx until step 9</span>
+    <span class="pill">build-green at every checkpoint</span>
+    <span class="pill">self-shot, never desktop</span>
+    <span class="pill">one-line swap · one-line revert</span>
+  </div>
+
+</div>
+</body>
+</html>
