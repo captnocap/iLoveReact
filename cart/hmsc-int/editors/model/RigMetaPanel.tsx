@@ -15,7 +15,7 @@ import { GAME_CHROME } from '../../game';
 import { addMount, clearPivot, hasPivot, jointTravelDegrees, pivotOf, removeMount, renameMount, setPivot, updateMount, type EditMesh, type MountPoint, type V3 } from './editMesh';
 import { addAnchor, anchorFacing, anchorRole, ANCHOR_FACINGS, ANCHOR_ROLES, nextAnchorName, splitMounts } from './anchors';
 import { useStudioModel } from './studioModel';
-import { STUDIO } from './Studio';
+import { STUDIO } from './studiokit/config';
 
 const T = GAME_CHROME.tokens.color;
 const AXIS_COLOR = ['#e0584e', '#5ec26a', '#4aa3ff'];

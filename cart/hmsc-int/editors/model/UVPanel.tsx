@@ -19,7 +19,7 @@ import { GAME_CHROME } from '../../game';
 import { storedUVLayout, type UVLayout, type V2 } from './editMesh';
 import { islandColorFor } from './textureize';
 import { useStudioModel } from './studioModel';
-import { STUDIO } from './Studio';
+import { STUDIO } from './studiokit/config';
 
 const T = GAME_CHROME.tokens.color;
 

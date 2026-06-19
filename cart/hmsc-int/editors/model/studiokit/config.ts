@@ -6,7 +6,6 @@
 // runs as a module side effect exactly as before (P2 — live-tunable in /settings).
 
 import { GAME_CHROME } from '../../../game';
-import { editorTunables } from '../../tunables';
 
 export const T = GAME_CHROME.tokens.color;
 export const STEP_BTN = { paddingLeft: 7, paddingRight: 7, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' } as const;
@@ -167,16 +166,3 @@ export const STUDIO = {
   aiImageModel: 'seedream-v4',
 } as const;
 
-editorTunables().register({
-  system: 'studio-viewport', route: '/model', table: STUDIO,
-  specs: {
-    tileMeters: { label: 'tile (m)', min: 0.25, max: 8, step: 0.25, precision: 2 },
-    fineDivisions: { label: 'center subdiv', min: 2, max: 32, step: 1, precision: 0 },
-    bootYaw: { label: 'boot yaw°', min: -180, max: 180, step: 1, precision: 0 },
-    bootPitch: { label: 'boot pitch°', min: -85, max: 85, step: 1, precision: 0 },
-    fov: { label: 'fov°', min: 20, max: 80, step: 1, precision: 0 },
-    yawPerPixel: { label: 'yaw / px', min: 0.05, max: 1.5, step: 0.01, precision: 2 },
-    pitchPerPixel: { label: 'pitch / px', min: 0.05, max: 1.5, step: 0.01, precision: 2 },
-    fitDistanceFactor: { label: 'fit dist ×r', min: 1.5, max: 6, step: 0.1, precision: 1 },
-  },
-});

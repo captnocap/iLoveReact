@@ -66,6 +66,7 @@ import {
 } from '../meshGizmo';
 import { RigOverlay, pickRigHandle, rigHandles, type RigSel } from '../meshRig';
 import { T, STEP_BTN, SMOOTH_PRESETS, PAINT_SWATCHES, PAINT_BRUSH_SIZES, SCALE_FIGURE_SEED, SCALE_FIGURE_CART_KEY, STUDIO, type Vec3, type Rect } from './config';
+import './registerTunables';
 import { clamp, sameRigSel, nextJointName, snapToStep, unitsToMeters, metersToUnits, fmtUnits, nowMs, schedFrame, partPlacement, loopCutAxisInfo, lcKeptFace, type LoopCutAxis } from './helpers';
 import { GroundGrid, OriginAxes, DragReadout } from './scene/staging';
 import { NumberField } from './panels/NumberField';

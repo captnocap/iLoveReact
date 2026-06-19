@@ -16,7 +16,7 @@ import { set as clipboardSet } from '@reactjit/hooks/clipboard';
 import { GAME_CHROME } from '../../game';
 import { meshEdges, pivotOf, hasPivot, type EditMesh, type V3 } from './editMesh';
 import { useStudioModel } from './studioModel';
-import { STUDIO } from './Studio';
+import { STUDIO } from './studiokit/config';
 
 const T = GAME_CHROME.tokens.color;
 

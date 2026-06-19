@@ -18,7 +18,7 @@ import { storedUVLayout, type V2, type EditMesh } from './editMesh';
 import { faceCellGrid, cellRects, rectAtlasRect, PAINT_CELL_UNITS, type PaintCells } from './meshPaint';
 import { slotById, slotColor, type Palette } from './modelStream';
 import { MaterialFill } from './MaterialFill';
-import { STUDIO } from './Studio';
+import { STUDIO } from './studiokit/config';
 
 /** The one live texture key every part's mesh samples (the cutout idiom). */
 export const STUDIO_TEXTURE_KEY = 'studio.texture.live';
