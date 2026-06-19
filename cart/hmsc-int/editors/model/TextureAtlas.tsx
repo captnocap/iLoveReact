@@ -84,9 +84,11 @@ export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts:
   const sliceImages = props.sliceImages ?? {};
   const rectByKey = new Map(islands.map((i) => [i.key, i.rect] as const));
 
+  const baseBg = props.type === 'solid' && !whole ? props.color : CHECK_LIGHT;
+
   return (
     <StaticSurface staticKey={STUDIO_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: px, height: px }}>
-      <Box style={{ width: px, height: px, position: 'relative', overflow: 'hidden', backgroundColor: props.type === 'solid' && !whole ? props.color : CHECK_LIGHT }}>
+      <Box style={{ width: px, height: px, position: 'relative', overflow: 'hidden', backgroundColor: baseBg }}>
         {whole ? (
           // the uploaded sheet IS the texture — the faces sample it through the UVs.
           <Image source={whole} style={{ position: 'absolute', left: 0, top: 0, width: px, height: px }} />
@@ -156,16 +158,18 @@ export const SceneTextureAtlas = memo(function SceneTextureAtlas(props: { parts:
               const color = props.pseudo ? sl.pseudo : slotColor(props.palette, g.slot);
               if (!color) continue;
               // 2D rect-merge so a solid region is ONE box (no per-row seams) + box
-              // count stays under the child cap. BLEED the FACE's outer edges past the
-              // slot into the gutter so the mesh's edge sampling lands on paint, not the
-              // gutter/neighbour slot — kills the thin seam at every face boundary
-              // (req_1304). Only outer edges bleed, so interior brush dabs stay precise.
+              // count stays under the child cap. BLEED EVERY edge by 1px so the separate
+              // boxes a region splits into OVERLAP: a colour island (e.g. green on black)
+              // turns the surrounding colour into 4 rects meeting at T-junctions, and the
+              // GPU antialiases each box's edge against the base — leaving a 1px faded
+              // SEAM (a cross around the island) right at those shared edges (req_1344).
+              // Overlapping same-colour rects hides it (invisible); a colour boundary
+              // only shifts ≤1px. Outer edges also bleed into the gutter, killing the
+              // face-boundary seam too (req_1304).
               const BLEED = 1;
               for (const rc of cellRects(g.cells)) {
                 const r = rectAtlasRect(grid, rc.cu0, rc.cv0, rc.cu1, rc.cv1, px);
-                const bl = rc.cu0 === 0 ? BLEED : 0, bt = rc.cv0 === 0 ? BLEED : 0;
-                const br = rc.cu1 >= grid.nu - 1 ? BLEED : 0, bb = rc.cv1 >= grid.nv - 1 ? BLEED : 0;
-                nodes.push(<Box key={`${part.id}:${g.face}:${g.slot}:${rc.cv0}:${rc.cu0}`} style={{ position: 'absolute', left: r.x - bl, top: r.y - bt, width: r.w + bl + br, height: r.h + bt + bb, backgroundColor: color }} />);
+                nodes.push(<Box key={`${part.id}:${g.face}:${g.slot}:${rc.cv0}:${rc.cu0}`} style={{ position: 'absolute', left: r.x - BLEED, top: r.y - BLEED, width: r.w + BLEED * 2, height: r.h + BLEED * 2, backgroundColor: color }} />);
               }
             }
             return <Fragment key={`paint-${part.id}`}>{nodes}</Fragment>;

@@ -147,6 +147,30 @@ export function faceCellGrid(mesh: EditMesh, faceIndex: number, cell = PAINT_CEL
   return { cuv, u0, v0, u1, v1, nu, nv };
 }
 
+/** Re-key a part's paint from an OLD cell size to a NEW one, PRESERVING the painted
+ *  regions (req_1358): changing the detail grid used to re-interpret the stored cu:cv
+ *  against a different grid → the whole layout scrambled. Instead, for every NEW cell we
+ *  sample the OLD cell that covers its centre, so a finer grid SUBDIVIDES the paint (more
+ *  detail, same picture) and a coarser grid down-samples it — the image stays put. */
+export function resamplePaint(mesh: EditMesh, paint: PaintCells, oldCell: number, newCell: number): PaintCells {
+  const out: PaintCells = {};
+  const faces = new Set<number>();
+  for (const k in paint) faces.add(Number(k.slice(0, k.indexOf(':'))));
+  for (const fi of faces) {
+    const go = faceCellGrid(mesh, fi, oldCell);
+    const gn = faceCellGrid(mesh, fi, newCell);
+    if (!go || !gn) { for (const k in paint) if (Number(k.slice(0, k.indexOf(':'))) === fi) out[k] = paint[k]; continue; }
+    for (let cv = 0; cv < gn.nv; cv += 1) for (let cu = 0; cu < gn.nu; cu += 1) {
+      const cU = gn.u0 + (cu + 0.5) * gn.cuv, cV = gn.v0 + (cv + 0.5) * gn.cuv;
+      const ocu = Math.max(0, Math.min(go.nu - 1, Math.floor((cU - go.u0) / go.cuv)));
+      const ocv = Math.max(0, Math.min(go.nv - 1, Math.floor((cV - go.v0) / go.cuv)));
+      const slot = paint[`${fi}:${ocu}:${ocv}`];
+      if (slot !== undefined) out[`${fi}:${cu}:${cv}`] = slot;
+    }
+  }
+  return out;
+}
+
 /** Raycast every part for the frontmost uv-mapped face under (sx,sy) and resolve the
  *  uniform-world cell the cursor sits on (barycentric → interpolated uv → cell). Glass
  *  faces and faces without uv are skipped (nothing to paint). */

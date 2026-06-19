@@ -53,7 +53,7 @@ import {
   SelectionOverlay, makeProjector, orbitalEyeJS, pickElement, applyPick, emptySelection, selectionCount,
   type SelMode, type Selection, type CameraSnap,
 } from './meshSelect';
-import { pickFaceCell, brushCells, faceCellGrid, dabRadiusCells, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintCells, type PaintTarget, type FaceHit } from './meshPaint';
+import { pickFaceCell, brushCells, faceCellGrid, resamplePaint, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintCells, type PaintTarget, type FaceHit } from './meshPaint';
 import { PaintGridOverlay } from './meshPaintOverlay';
 import { PaintPanel } from './PaintPanel';
 import { defaultPalette, paletteWithColor, slotById, type Palette } from './modelStream';
@@ -571,7 +571,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // PAINT cell size in MODEL UNITS (req_1301): adjustable so a small prop (a gun) can
   // be painted at fine detail while a big surface stays coarse. Default ~1.5 cm — a
   // gun face spans several cells, so brush-1 is a dab, not a whole-face fill.
-  const [paintCell, setPaintCell] = useHotState<number>('studio:paintCell', 0.08);
+  const [paintCell, setPaintCell] = useHotState<number>('studio:paintCell', 0.06);
   const [paintView, setPaintView] = useHotState<'pseudo' | 'painted'>('studio:paintView', 'painted');
   const [paintBrush, setPaintBrush] = useHotState<number>('studio:paintBrush', 1);
   // PERF (req_1203): the lag was setTex on EVERY mouse-move (a React re-render +
@@ -1126,7 +1126,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // so a cell maps to exactly one face's slot — no bleed. Returns the hit for the caller.
   const paintProbe = (sx: number, sy: number): FaceHit | null => {
     if (!tex) { paintHoverRef.current = null; return null; }
-    const hit = pickFaceCell(paintTargets(), camSnap(), sx, sy, PAINT_GRID_UNITS);
+    const hit = pickFaceCell(paintTargets(), camSnap(), sx, sy, paintCell);
     paintHoverRef.current = hit;
     return hit;
   };
@@ -1138,17 +1138,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (!hit) return null;
     const tgt = paintTargets()[hit.partIndex];
     if (!tgt) return null;
-    const grid = faceCellGrid(tgt.mesh, hit.faceIndex, PAINT_GRID_UNITS);
+    const grid = faceCellGrid(tgt.mesh, hit.faceIndex, paintCell);
     if (!grid) return null;
-    // FILL → every cell of the face (one-colour-per-face); else the brush disc. The
-    // disc footprint comes from the DETAIL slider (dab size) × brush multiplier, mapped
-    // onto the FIXED grid — so changing detail resizes the dab, never the stored layout.
+    // FILL → every cell of the face (one-colour-per-face); else the brush disc of radius
+    // `paintBrush` cells on the DETAIL grid (paintCell). Finer detail = smaller cells =
+    // finer brush; changing detail resamples stored paint (no scramble), req_1358.
     let cells: Array<[number, number]>;
     if (paintFill) {
       cells = [];
       for (let cv = 0; cv < grid.nv; cv += 1) for (let cu = 0; cu < grid.nu; cu += 1) cells.push([cu, cv]);
     } else {
-      cells = brushCells(hit, dabRadiusCells(paintCell, paintBrush) + 1, grid);
+      cells = brushCells(hit, paintBrush, grid);
     }
     const buf = (paintRef.current[tgt.partId] ||= {});
     for (const [cu, cv] of cells) {
@@ -1158,6 +1158,47 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     touchedRef.current.add(tgt.partId);
     paintDirtyRef.current = true;
     return hit;
+  };
+  // FILL ALL (req_1352): paint EVERY paintable face of EVERY part with the active slot —
+  // one click to make a whole model one colour. Clicking 158 faces by hand is absurd; an
+  // unpainted face shows the atlas base (the "leak everywhere" on complex models). Erase
+  // mode clears every cell instead. Commits in one undo entry.
+  const fillAllFaces = () => {
+    for (const tgt of paintTargets()) {
+      // FRESH buffer — REPLACE the part's paint, don't merge. Merging keeps ORPHANED
+      // cells from an earlier grid resolution (their cu:cv indices no longer exist in
+      // the current grid), which fill never overwrites and the bake draws clamped to
+      // the slot edge → stray coloured lines all over a "filled" model (req_1357).
+      const buf: PaintCells = {};
+      if (!paintErase) {
+        for (let fi = 0; fi < tgt.mesh.faces.length; fi += 1) {
+          const face = tgt.mesh.faces[fi];
+          if (face.glass || !face.uv || face.uv.length < 3 || face.loop.length < 3) continue;
+          const grid = faceCellGrid(tgt.mesh, fi, paintCell);
+          if (!grid) continue;
+          for (let cv = 0; cv < grid.nv; cv += 1) for (let cu = 0; cu < grid.nu; cu += 1) buf[`${fi}:${cu}:${cv}`] = activeSlot;
+        }
+      }
+      paintRef.current[tgt.partId] = buf;
+      touchedRef.current.add(tgt.partId);
+    }
+    paintDirtyRef.current = true;
+    commitPaint();
+  };
+  // Change the DETAIL grid (req_1358) — RESAMPLE every part's paint from the old cell
+  // size to the new one so the picture is preserved (finer subdivides, coarser samples),
+  // never scrambled. Then the bake/brush use the new grid.
+  const setDetail = (next: number) => {
+    if (Math.abs(next - paintCell) < 1e-6) return;
+    for (const tgt of paintTargets()) {
+      const p = paintRef.current[tgt.partId] ?? props.parts.find((pp) => pp.id === tgt.partId)?.paint;
+      if (!p || !Object.keys(p).length) continue;
+      paintRef.current[tgt.partId] = resamplePaint(tgt.mesh, p, paintCell, next);
+      touchedRef.current.add(tgt.partId);
+    }
+    setPaintCell(next);
+    paintDirtyRef.current = true;
+    commitPaint();
   };
   // A drag paints a continuous STROKE: interpolate dabs along the segment from the last
   // painted point to (sx,sy), stepping a few px, so a fast move fills instead of leaving
@@ -2018,7 +2059,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           sliceImages={tex.sliceImages}
           palette={livePalette}
           pseudo={paintView === 'pseudo'}
-          paintCell={PAINT_GRID_UNITS}
+          paintCell={paintCell}
           sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}.${paintBakeTick}.${paintView}.${livePalette.variant}.${livePalette.slots.length}`}
         />
       ) : null}
@@ -2100,8 +2141,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         ? <PaintGridOverlay
             parts={paintTargets()}
             getHover={() => paintHoverRef.current}
-            cell={PAINT_GRID_UNITS}
-            dabRadius={dabRadiusCells(paintCell, paintBrush)}
+            cell={paintCell}
+            dabRadius={Math.max(0, paintBrush - 1)}
             color={paintErase ? '#ff6b6b' : (slotById(livePalette, activeSlot)?.pseudo ?? '#ffffff')}
             camSnap={camSnap}
           />
@@ -2118,12 +2159,13 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           brush={paintBrush}
           brushSizes={PAINT_BRUSH_SIZES}
           cell={paintCell}
-          onSetCell={setPaintCell}
+          onSetCell={setDetail}
           fill={paintFill}
           onToggleFill={() => { setPaintFill(!paintFill); setPaintErase(false); }}
           onPickSlot={(id) => { setActiveSlot(id); setPaintErase(false); }}
           onAddColor={(hex) => { const { palette, id } = paletteWithColor(livePalette, hex); props.onSetPalette(palette); setActiveSlot(id); setPaintErase(false); }}
           onToggleErase={() => setPaintErase(!paintErase)}
+          onFillAll={fillAllFaces}
           onToggleView={() => setPaintView(paintView === 'pseudo' ? 'painted' : 'pseudo')}
           onSetBrush={(n) => { setPaintBrush(n); setPaintFill(false); }}
           onCycleVariant={() => { const max = Math.max(1, ...livePalette.slots.map((s) => (s.kind === 'color' ? (s.colors?.length ?? 1) : 1))); props.onSetPalette({ ...livePalette, variant: (livePalette.variant + 1) % max }); }}
