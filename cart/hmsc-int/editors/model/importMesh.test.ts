@@ -3,7 +3,7 @@
 // carries a uv (the pixel painter's hard requirement).
 
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
-import { trianglesToEditMesh, glbToTriangles, base64ToBytes, type RawTriangles } from './importMesh';
+import { trianglesToEditMesh, glbToTriangles, objToTriangles, objToEditMesh, base64ToBytes, type RawTriangles } from './importMesh';
 import { unwrap, type V3 } from './editMesh';
 
 test('welds coincident positions and makes one face per triangle', () => {
@@ -48,6 +48,22 @@ test('glbToTriangles rejects non-GLB bytes cleanly', () => {
   let threw = false;
   try { glbToTriangles(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])); } catch { threw = true; }
   assert(threw, 'garbage bytes throw rather than silently returning empty');
+});
+
+test('parses an OBJ quad into welded triangles', () => {
+  // a unit quad as two triangles sharing an edge, 1-based indices, with vt/vn refs.
+  const obj = [
+    'v 0 0 0', 'v 1 0 0', 'v 1 1 0', 'v 0 1 0',
+    'vt 0 0', 'vn 0 0 1',
+    'f 1/1/1 2/1/1 3/1/1',
+    'f 1/1/1 3/1/1 4/1/1',
+  ].join('\n');
+  const raw = objToTriangles(obj);
+  assertEqual(raw.verts.length, 4, '4 OBJ verts');
+  assertEqual(raw.tris.length, 2, '2 triangles');
+  const m = objToEditMesh(obj);
+  assertEqual(m.faces.length, 2, 'two faces after weld');
+  for (const f of m.faces) assert(!!f.uv && f.uv.length === 3, 'OBJ import unwraps -> paintable');
 });
 
 finish('importMesh');

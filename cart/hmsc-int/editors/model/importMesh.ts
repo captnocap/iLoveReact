@@ -216,3 +216,32 @@ export function trianglesToEditMesh(raw: RawTriangles, weld = 1e-5): EditMesh {
 export function glbToEditMesh(bytes: Uint8Array): EditMesh {
   return unwrap(trianglesToEditMesh(glbToTriangles(bytes)));
 }
+
+// ── OBJ (InstantMesh and most generators also emit .obj) ───────────────────────
+/** Parse a Wavefront OBJ into the same indexed triangle set. Positions + faces
+ *  only (uv/normal/material ignored — Studio unwraps fresh and paints fresh); 1-based
+ *  and negative indices supported; n-gon faces fan-triangulated. */
+export function objToTriangles(text: string): RawTriangles {
+  const verts: V3[] = [];
+  const tris: [number, number, number][] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t[0] === '#') continue;
+    const parts = t.split(/\s+/);
+    if (parts[0] === 'v') {
+      verts.push([Number(parts[1]), Number(parts[2]), Number(parts[3])]);
+    } else if (parts[0] === 'f') {
+      const idx = parts.slice(1).map((p) => {
+        const n = parseInt(p.split('/')[0], 10); // strip /vt/vn; keep vertex index
+        return n < 0 ? verts.length + n : n - 1; // negative = relative; else 1-based
+      });
+      for (let i = 1; i + 1 < idx.length; i += 1) tris.push([idx[0], idx[i], idx[i + 1]]);
+    }
+  }
+  return { verts, tris };
+}
+
+/** Convenience: OBJ text → unwrapped EditMesh, ready for addPart() + painting. */
+export function objToEditMesh(text: string): EditMesh {
+  return unwrap(trianglesToEditMesh(objToTriangles(text)));
+}

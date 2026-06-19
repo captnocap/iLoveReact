@@ -35,7 +35,7 @@ import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clea
 import { addAnchor, isAnchor, nextAnchorName } from './anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from './wheelMount';
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
-import { glbToEditMesh, base64ToBytes } from './importMesh';
+import { glbToEditMesh, objToEditMesh, base64ToBytes } from './importMesh';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { useCookedAssets } from './cookedAssets';
 import { StudioOutliner } from './Outliner';
@@ -44,7 +44,7 @@ import { BackdropSurface, BackdropsPanel, backdropQuad, backdropTexKey, defaultB
 import * as localstore from '@reactjit/hooks/localstore';
 import { textureizeScene, rasterizeAtlas, DEFAULT_TEXTURE_OPTIONS, PIXEL_DENSITIES, type TextureOptions, type TextureType, type RasterSlice } from './textureize';
 import { encodePng } from './png';
-import { exists, listDir, mkdir, readFileBase64, writeFileBase64Atomic } from '@reactjit/hooks/fs';
+import { exists, listDir, mkdir, readFile, readFileBase64, writeFileBase64Atomic } from '@reactjit/hooks/fs';
 import { bytesToBase64, base64ToBytes } from '@reactjit/workspace';
 import { useAssistant } from '@reactjit/hooks/useAssistant';
 import { processCwd } from '../../assist3d/scene';
@@ -3564,18 +3564,26 @@ function ImportModelDialog(props: { onCancel: () => void; onConfirm: (mesh: Edit
   // of a fixed name that never matches the prompt's slug.
   const [path, setPath] = useState(() => {
     try {
-      const glbs = listDir(GENERATED_DIR).filter((f) => f.endsWith('.glb')).sort();
-      if (glbs.length) return `${GENERATED_DIR}/${glbs[glbs.length - 1]}`;
+      const files = listDir(GENERATED_DIR).filter((f) => f.endsWith('.glb') || f.endsWith('.obj')).sort();
+      if (files.length) return `${GENERATED_DIR}/${files[files.length - 1]}`;
     } catch { /* dir may not exist yet */ }
     return `${GENERATED_DIR}/model.glb`;
   });
   const [err, setErr] = useState<string | null>(null);
   const doImport = () => {
     try {
-      const b64 = readFileBase64(path);
-      if (!b64) throw new Error(`cannot read ${path}`);
-      const mesh = glbToEditMesh(base64ToBytes(b64));
-      if (!mesh.faces.length) throw new Error('no triangles in GLB');
+      // .obj is plain text (InstantMesh emits OBJ); .glb is binary (base64).
+      let mesh;
+      if (path.toLowerCase().endsWith('.obj')) {
+        const text = readFile(path);
+        if (!text) throw new Error(`cannot read ${path}`);
+        mesh = objToEditMesh(text);
+      } else {
+        const b64 = readFileBase64(path);
+        if (!b64) throw new Error(`cannot read ${path}`);
+        mesh = glbToEditMesh(base64ToBytes(b64));
+      }
+      if (!mesh.faces.length) throw new Error('no triangles in mesh');
       const name = (path.split('/').pop() || 'imported').replace(/\.[^.]+$/, '');
       props.onConfirm(mesh, name);
     } catch (e) {
@@ -3585,9 +3593,9 @@ function ImportModelDialog(props: { onCancel: () => void; onConfirm: (mesh: Edit
   return (
     <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa' }}>
       <Col style={{ width: 460, gap: 11, padding: 16, borderRadius: 10, backgroundColor: T.panelSolid, borderWidth: 1, borderColor: '#3a2c6a' }}>
-        <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>Import 3D model (GLB)</Text>
-        <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`a generated mesh (tools/genmesh) becomes a NEW editable, paintable model — UVs are unwrapped on import.`}</Text>
-        <LCField label="GLB path">
+        <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>Import 3D model (GLB / OBJ)</Text>
+        <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`a generated mesh (.glb or .obj — e.g. InstantMesh) becomes a NEW editable, paintable model — UVs are unwrapped on import.`}</Text>
+        <LCField label="mesh path">
           <Box style={{ flexGrow: 1 }}>
             <TextInput value={path} onChangeText={(t) => { setErr(null); setPath(t); }} style={{ height: 24, fontSize: 11, color: T.ink, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, fontFamily: 'monospace' }} />
           </Box>
@@ -3898,8 +3906,8 @@ export function StudioEditor() {
           </Pressable>
         ))}
         {/* Import a generated/external GLB (tools/genmesh) as a NEW paintable model. */}
-        <Pressable onPress={() => setImportOpen(true)} tooltip="Import a 3D model (.glb) — converts it to an editable, paintable Studio model" style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, borderWidth: 1, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
-          <Text fontSize={10} color="#cdbcff">⬇ Import GLB</Text>
+        <Pressable onPress={() => setImportOpen(true)} tooltip="Import a 3D model (.glb / .obj) — converts it to an editable, paintable Studio model" style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, borderWidth: 1, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
+          <Text fontSize={10} color="#cdbcff">⬇ Import mesh</Text>
         </Pressable>
       </Row>
       {/* the OUTLINER (layers) docks on the RIGHT of the viewport (req_0981). */}
