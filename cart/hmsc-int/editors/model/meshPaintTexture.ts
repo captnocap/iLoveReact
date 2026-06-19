@@ -14,8 +14,9 @@
 // bleed onto a neighbour island packed beside it in the atlas.
 
 import { paintableOps } from '@reactjit/runtime/hooks/usePaintable';
-import * as localstore from '@reactjit/hooks/localstore';
 import { bytesToBase64, base64ToBytes } from '@reactjit/workspace';
+import { sha256Hex } from '@reactjit/workspace/sha256';
+import { encode, image } from '@reactjit/image';
 import { faceTexelRect, type TexelRect } from './meshPaint';
 import { type EditMesh } from './editMesh';
 
@@ -80,27 +81,42 @@ export function eraseUV(u: number, v: number, baseHex: string, radiusPx: number,
 // hot reload picks it up instantly. (1024² RGBA ≈ 4MB → ~5.5MB base64 per save;
 // PNG-compressing it is a follow-up for whenever the host is rebuilt anyway.)
 
-const PAINT_STORE_NS = 'studio-paint';
 const RGBA_LEN = PAINT_TEX * PAINT_TEX * 4;
-const storeKey = (model: string | null) => `paint:${model || 'untitled'}`;
 
-/** Read the live paint texture back and persist it for `model`. Call at
- *  stroke-end / on leaving paint — readback blocks on the GPU, so NOT per dab. */
-export function savePaint(model: string | null): void {
-  const rgba = paintTex().readback();
-  if (!rgba || rgba.length !== RGBA_LEN) return;
-  localstore.nsSet(PAINT_STORE_NS, storeKey(model), bytesToBase64(rgba));
+// CONTENT-ADDRESSED persistence (req_1382, GUIDING_LIGHT). The painted texture is
+// an ASSET: PNG-compress it, hash the bytes (sha256 = paintRef), and hand the
+// (ref, blob) to the model stream which interns it ONCE and references it. This
+// replaces the localstore base64 hack (a 1024² RGBA is ~5.3MB base64 → blew
+// localstore's 4MB cap, so saves were silently dropped and paint vanished). PNG is
+// tens of KB; the V20 stream is durable across restart; and a hash-keyed blob is
+// exactly the form the in-game asset bake reads — store once, reference everywhere.
+
+/** Hands a content-addressed paint bake (sha256 ref + base64 PNG) to the model
+ *  store, which interns the blob and points the model at it. */
+export type PaintBake = (paintRef: string, blobB64: string) => void;
+
+function bakeAndEmit(rgba: Uint8Array, emit: PaintBake): void {
+  const png = encode(rgba, PAINT_TEX, PAINT_TEX, { format: 'png' });
+  if (!png || png.length === 0) return;
+  emit(sha256Hex(png), bytesToBase64(png));
 }
 
-/** Restore `model`'s saved paint into the texture. Returns true if there was
- *  saved paint (so the caller skips the base coat). Upload parks until the
- *  <Paintable> CREATE drains, so this is safe to call right on paint-enter. */
-export function restorePaint(model: string | null): boolean {
-  const b64 = localstore.nsHas(PAINT_STORE_NS, storeKey(model)) ? localstore.nsGet(PAINT_STORE_NS, storeKey(model)) : '';
-  if (!b64) return false;
-  const rgba = base64ToBytes(b64);
-  if (!rgba || rgba.length !== RGBA_LEN) return false;
-  paintTex().upload(rgba);
+/** Read the live paint texture back and bake it (PNG → hash → emit). Call at
+ *  stroke-end / undo / redo — readback blocks on the GPU, so NOT per dab. */
+export function savePaint(emit: PaintBake): void {
+  const rgba = paintTex().readback();
+  if (!rgba || rgba.length !== RGBA_LEN) return;
+  bakeAndEmit(rgba, emit);
+}
+
+/** Restore a saved paint blob (base64 PNG, resolved from the model's paintRef) into
+ *  the texture. Returns true if there was a blob (so the caller skips the base coat).
+ *  Upload parks until the <Paintable> CREATE drains — safe to call on paint-enter. */
+export function restorePaint(blobB64: string | null): boolean {
+  if (!blobB64) return false;
+  const raw = image(base64ToBytes(blobB64)).raw();
+  if (!raw || raw.width !== PAINT_TEX || raw.height !== PAINT_TEX || raw.rgba.length !== RGBA_LEN) return false;
+  paintTex().upload(raw.rgba);
   return true;
 }
 
@@ -133,26 +149,26 @@ export function paintSnapshotBegin(): void {
   g_redo.length = 0;
 }
 
-/** Undo the last stroke: stash the current state for redo, restore the previous.
- *  Persists the restored state so it survives reload too. Returns true if it ran. */
-export function paintUndo(model: string | null): boolean {
+/** Undo the last stroke: stash the current state for redo, restore the previous,
+ *  and re-bake the restored state so it persists. Returns true if it ran. */
+export function paintUndo(emit: PaintBake): boolean {
   if (g_undo.length === 0) return false;
   const cur = paintTex().readback();
   const prev = g_undo.pop()!;
   if (cur && cur.length === RGBA_LEN) g_redo.push(cur);
   paintTex().upload(prev);
-  localstore.nsSet(PAINT_STORE_NS, storeKey(model), bytesToBase64(prev));
+  bakeAndEmit(prev, emit);
   return true;
 }
 
 /** Redo: restore the state undone last, stashing the current for undo again. */
-export function paintRedo(model: string | null): boolean {
+export function paintRedo(emit: PaintBake): boolean {
   if (g_redo.length === 0) return false;
   const cur = paintTex().readback();
   const next = g_redo.pop()!;
   if (cur && cur.length === RGBA_LEN) g_undo.push(cur);
   paintTex().upload(next);
-  localstore.nsSet(PAINT_STORE_NS, storeKey(model), bytesToBase64(next));
+  bakeAndEmit(next, emit);
   return true;
 }
 

@@ -409,7 +409,7 @@ function DragReadout(props: { textRef: { current: string | null }; anchorRef: { 
 
 // ── The viewport ─────────────────────────────────────────────────────────────
 
-export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void }) {
+export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void }) {
   const { parts, revision, activePart, onSelectFaces } = props;
 
   // Lower each visible part once per structural revision (camera drags + fov
@@ -1098,6 +1098,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const paintTargets = (): PaintTarget[] => props.parts.map((p) => ({ partId: p.id, mesh: p.mesh, lift: p.lift }));
   // Paint mode active — the PIXEL painter owns the model texture while true.
   const painting = selMode === 'paint';
+  // A painted model samples its RGBA paintable in ALL modes (req_1380) — so the
+  // box-atlas StaticSurface isn't needed and isn't baked for it.
+  const modelPainted = !!tex && (!!props.paintRef || paintInited(props.sceneName ?? null));
   // A signature of the scene's FACE topology: parts + per-part face counts. The paint
   // atlas must allocate one distinct slot per (part, face); when this changes (a part
   // added, a face extruded/mirrored), faces created AFTER the last pack carry their
@@ -1253,10 +1256,13 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     const model = props.sceneName ?? null;
     if (paintInited(model)) return; // texture already live for this model — leave it
     const base = tex.color ?? '#c8ccd2';
-    const id = setTimeout(() => { if (!restorePaint(model)) baseCoat(base); markPaintInited(model); }, 80);
+    // Restore the model's content-addressed paint blob (resolved from its paintRef);
+    // base-coat only when the model has never been painted. (req_1382)
+    const blob = props.paintRef ? props.paintBlob(props.paintRef) : null;
+    const id = setTimeout(() => { if (!restorePaint(blob)) baseCoat(base); markPaintInited(model); }, 80);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [painting, props.sceneName, !!tex]);
+  }, [painting, props.sceneName, !!tex, props.paintRef]);
   // Seed the live buffer from the persisted paint whenever the open texture changes
   // (entering paint, a re-textureize, undo). Keyed on paintRev so an external change
   // re-syncs but our own per-dab writes (which don't touch tex) don't clobber the buffer.
@@ -1313,7 +1319,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const commitPaint = () => {
     if (touchedRef.current.size && !props.palette) props.onSetPalette(defaultPalette());
     touchedRef.current.clear();
-    savePaint(props.sceneName ?? null);
+    savePaint(props.onBakePaint);
   };
   // resolve paint against the model palette, falling back to the default so a stroke
   // shows live BEFORE the first commit mints the real (persisted) palette.
@@ -2058,11 +2064,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           // part samples the ONE shared sprite-map atlas (STUDIO_TEXTURE_KEY) —
           // material '#ffffff' lets the texture show through (the cutout idiom).
           const textured = texView && !!tex;
-          // PIXEL painter (req_1372): in paint mode the mesh samples the RGBA
-          // <Paintable> directly (brush dabs land straight in it), bypassing the
-          // box-atlas StaticSurface entirely. Otherwise the sprite-map atlas.
-          const painting3D = painting && !!tex;
-          const sampleKey = painting3D ? STUDIO_PAINT_KEY : textured ? STUDIO_TEXTURE_KEY : undefined;
+          // PIXEL painter (req_1372/1380): once a model is PAINTED, EVERY mode samples
+          // the RGBA <Paintable> — not just paint mode — so rig/object show the same
+          // painted face as paint mode (they used to sample the stale box-atlas, a
+          // different texture). An unpainted model still uses the sprite-map atlas.
+          const sampleKey = modelPainted ? STUDIO_PAINT_KEY : textured ? STUDIO_TEXTURE_KEY : undefined;
           return (
             <Fragment key={p.key}>
               <Scene3D.Mesh
@@ -2121,7 +2127,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {/* TEXTURE (req_1068): the offscreen scene SPRITE-MAP atlas every part samples
           via textureKey. Mounted while texture view is on (and NOT painting — the
           pixel painter owns the texture then); re-bakes only on UV/param change. */}
-      {texView && tex && !painting ? (
+      {texView && tex && !painting && !modelPainted ? (
         <SceneTextureAtlas
           parts={props.parts.map((p) => ({ id: p.id, mesh: p.mesh, paint: paintRef.current[p.id] ?? p.paint }))}
           texels={tex.texels}
@@ -3806,20 +3812,20 @@ export function StudioEditor() {
     const off = busOn('__keydown', (e: any) => {
       if (!(e?.ctrlKey || e?.metaKey)) return;
       const key = String(e?.key ?? '').toLowerCase();
-      const m = model.modelName;
       // In paint mode, Ctrl-Z/Y step the PAINT snapshot ring (req_1379) — paint lives
       // outside the model event stream, so model.undo() would only revert a stray
-      // palette mint ("brush goes white") and never the paint. Fall through to the
-      // model history when there's no paint step to take.
-      if (key === 'z' && !e?.shiftKey) { if (paintActive() && canPaintUndo()) paintUndo(m); else model.undo(); }
-      else if (key === 'y' || (key === 'z' && e?.shiftKey)) { if (paintActive() && canPaintRedo()) paintRedo(m); else model.redo(); }
+      // palette mint ("brush goes white") and never the paint. The restored state is
+      // re-baked (content-addressed) via model.bakePaint. Fall through to the model
+      // history when there's no paint step to take.
+      if (key === 'z' && !e?.shiftKey) { if (paintActive() && canPaintUndo()) paintUndo(model.bakePaint); else model.undo(); }
+      else if (key === 'y' || (key === 'z' && e?.shiftKey)) { if (paintActive() && canPaintRedo()) paintRedo(model.bakePaint); else model.redo(); }
     });
     return () => off();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
     <Row style={{ flexGrow: 1, height: '100%', minHeight: 0, position: 'relative' }}>
-      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} />
+      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} />
       {/* Branch-history verbs — top-left, the one viewport corner the compass /
           toolbar / mode-toggle don't claim. Disabled when the stack is empty. */}
       <Row style={{ position: 'absolute', left: 8, top: 8, gap: 4, zIndex: 30 }}>

@@ -68,6 +68,11 @@ export type StoredModel = {
   order: string[];
   /** the model's paint palette (slot → appearance). Absent until first paint. */
   palette?: Palette;
+  /** content hash (sha256) of the model's PIXEL paint texture, into `paintBlobs`
+   *  (req_1382). The painted atlas is stored ONCE by hash and referenced — the
+   *  GUIDING_LIGHT content-address law, and the same form the in-game bake reads.
+   *  Absent until the model is pixel-painted. */
+  paintRef?: string;
 };
 
 export type ModelEvent =
@@ -83,6 +88,12 @@ export type ModelEvent =
   | { kind: 'partPaintUpdated'; model: string; id: string; paint: PaintLayer }
   // set the model's paint palette (slot table + variant) — branch + undoable.
   | { kind: 'modelPaletteSet'; model: string; palette: Palette }
+  // bake the model's PIXEL paint texture as a content-addressed blob (req_1382):
+  // interns blobB64 under its hash (paintRef) and points the model at it. blobB64
+  // is omitted when the hash is already interned (dedup — re-stamping the same
+  // picture stores nothing). The durable, restart-safe replacement for the localstore
+  // base64 hack that blew the 4MB cap.
+  | { kind: 'modelPaintBaked'; model: string; paintRef: string; blobB64?: string }
   | { kind: 'partRenamed'; model: string; id: string; name: string }
   | { kind: 'partVisibilitySet'; model: string; id: string; visible: boolean }
   | { kind: 'partReordered'; model: string; id: string; dir: 'up' | 'down' }
@@ -92,6 +103,9 @@ export type ModelStreamState = {
   models: Record<string, StoredModel>;
   /** model creation order — the library list. */
   order: string[];
+  /** content-addressed pixel-paint texture blobs: paintRef → base64 PNG. Stored
+   *  ONCE per distinct picture, referenced by `StoredModel.paintRef` (req_1382). */
+  paintBlobs?: Record<string, string>;
 };
 
 function insertAfter(order: string[], id: string, afterId?: string | null): string[] {
@@ -177,6 +191,16 @@ export const modelStream: StreamDef<ModelStreamState, ModelEvent> = Object.freez
         const m = state.models[event.model];
         return m ? { ...state, models: { ...state.models, [event.model]: { ...m, palette: event.palette } } } : state;
       }
+      case 'modelPaintBaked': {
+        const m = state.models[event.model];
+        if (!m) return state;
+        const blobs = state.paintBlobs ?? {};
+        // intern the blob by its hash (dedup — a known hash re-uses the stored bytes).
+        const paintBlobs = event.blobB64 && !(event.paintRef in blobs)
+          ? { ...blobs, [event.paintRef]: event.blobB64 }
+          : blobs;
+        return { ...state, paintBlobs, models: { ...state.models, [event.model]: { ...m, paintRef: event.paintRef } } };
+      }
       case 'partAdded':
       case 'partMeshUpdated':
       case 'partPaintUpdated':
@@ -200,6 +224,12 @@ export const modelStream: StreamDef<ModelStreamState, ModelEvent> = Object.freez
 export function libraryModels(state: ModelStreamState): StoredModel[] {
   const models = state?.models ?? {};
   return (state?.order ?? []).map((id) => models[id]).filter(Boolean);
+}
+
+/** The content-addressed pixel-paint blob (base64 PNG) for a paintRef, or null. */
+export function paintBlobFor(state: ModelStreamState, paintRef: string | null | undefined): string | null {
+  if (!paintRef) return null;
+  return state?.paintBlobs?.[paintRef] ?? null;
 }
 
 /** One model's parts in outliner order (empty if the model is unknown). */

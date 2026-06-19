@@ -21,7 +21,7 @@ import { getHotState, setHotState, useRerender } from '@reactjit/hooks';
 import type { GeometryData } from '@reactjit/geometries';
 import { cuboid, editMeshToGeometry, mergeMesh, type EditMesh } from './editMesh';
 import type { LayerStripAction } from '../paint/LayerStrip';
-import { libraryModels, modelParts, modelStream, type ModelEvent, type ModelStreamState, type Palette, type PaintLayer, type StoredModel, type StoredPart } from './modelStream';
+import { libraryModels, modelParts, modelStream, paintBlobFor, type ModelEvent, type ModelStreamState, type Palette, type PaintLayer, type StoredModel, type StoredPart } from './modelStream';
 import type { StreamHandle } from '../../data';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
@@ -86,6 +86,13 @@ export type StudioModel = {
   editPaint(id: string, paint: PaintLayer): void;
   /** set the model's paint palette — recolour / slot edits, undoable. */
   setPalette(palette: Palette): void;
+  /** the open model's pixel-paint texture content hash (req_1382), or null. */
+  paintRef: string | null;
+  /** the base64 PNG for a paintRef (content-addressed blob), or null. */
+  paintBlob(paintRef: string | null): string | null;
+  /** bake the model's pixel-paint texture as a content-addressed blob + point the
+   *  model at it (durable, deduped). Called at stroke-end / undo / redo. */
+  bakePaint(paintRef: string, blobB64: string): void;
   /** Merge the active part DOWN into the part before it in order (mergeMesh in the
    *  shared model frame), then drop the now-merged source — the re-attach / weld
    *  (req_1224). No-op when the active part is the first / only one. */
@@ -380,6 +387,16 @@ function setPalette(palette: Palette): void {
   commit({ kind: 'modelPaletteSet', model, palette }, 'structure', 'record');
 }
 
+// Bake the model's pixel-paint texture as a content-addressed blob (req_1382) and
+// point the model at it. Persisted to the BRANCH (durable, restart-safe) but NOT an
+// undo entry — paint has its own snapshot ring (meshPaintTexture); a model.undo()
+// here would fight it. pushEvent persists without touching the undo stacks.
+function bakePaint(paintRef: string, blobB64: string): void {
+  ensureInit();
+  const model = store.openModelId; if (!model) return;
+  pushEvent({ kind: 'modelPaintBaked', model, paintRef, blobB64 }, 'paint baked');
+}
+
 function runAction(id: string, action: LayerStripAction): void {
   ensureInit();
   const model = store.openModelId; if (!model) return;
@@ -469,7 +486,7 @@ export function studioModelName(): string | null {
 export function studioRenameModel(name: string): void { renameModel(name); }
 export function studioDeleteModel(id: string): void { deleteModel(id); }
 
-const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, editPaint, setPalette, mergeActive, runAction, undo, redo, newModel, openModel, renameModel, deleteModel } as const;
+const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, editPaint, setPalette, bakePaint, mergeActive, runAction, undo, redo, newModel, openModel, renameModel, deleteModel } as const;
 
 export function useStudioModel(): StudioModel {
   ensureInit();
@@ -483,6 +500,8 @@ export function useStudioModel(): StudioModel {
     openModelId: store.openModelId,
     modelName: store.openModelId ? (st.models?.[store.openModelId]?.name ?? null) : null,
     palette: store.openModelId ? (st.models?.[store.openModelId]?.palette ?? null) : null,
+    paintRef: store.openModelId ? (st.models?.[store.openModelId]?.paintRef ?? null) : null,
+    paintBlob: (ref: string | null) => paintBlobFor(streamState(), ref),
     models: libraryModels(st),
     parts: store.parts,
     activeId: store.activeId,
