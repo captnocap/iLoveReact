@@ -2021,7 +2021,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           ops · texture/compile — on their OWN line below tier 1 (no more piling onto
           the info/diag strip). Left-aligned + wraps so a dense selection never
           overflows off-screen; a faint bar groups them as one real toolbar. */}
-      <Row style={{ position: 'absolute', left: 8, right: 8, top: 40, gap: 4, rowGap: 4, alignItems: 'center', flexWrap: 'wrap', paddingLeft: 6, paddingRight: 6, paddingTop: 5, paddingBottom: 5, borderRadius: 7, backgroundColor: '#0a111caa', borderWidth: 1, borderColor: '#1c2940', zIndex: Z.chrome }}>
+      <Row style={{ position: 'absolute', left: 8, top: 40, gap: 4, rowGap: 4, alignItems: 'center', flexWrap: 'wrap', paddingLeft: 6, paddingRight: 6, paddingTop: 5, paddingBottom: 5, borderRadius: 7, backgroundColor: '#0a111caa', borderWidth: 1, borderColor: '#1c2940', zIndex: Z.chrome }}>
         {(['object', 'vertex', 'edge', 'face', 'rig', 'paint'] as SelMode[]).map((m) => {
           const on = selMode === m;
           const n = selectionCount(sel, m);
@@ -2042,6 +2042,14 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         })}
         {/* PAINT controls moved OUT of this toolbar into the floating PaintPanel
             (req_1297 — the bar was overcrowded); only the mode tabs stay here. */}
+      </Row>
+
+      {/* ── CONTEXT RAIL (req_1427): the per-mode + per-selection edit ops, docked
+          as a vertical rail on the LEFT instead of wrapping the top bar DOWN into
+          the 3D scene (the original cram the user called out). Every cluster here is
+          selection-gated, so the rail is empty — and invisible — until a part or a
+          selection makes its ops relevant. */}
+      <Col style={{ position: 'absolute', left: 8, top: 72, gap: 4, alignItems: 'flex-start', zIndex: Z.chrome }}>
         {/* SYMMETRIZE (req_1190/1201): a WHOLE-MESH op, so shown in EVERY mode (it
             used to be nested in the non-rig tool block → invisible in rig mode, where
             the user went looking for it). Pick the GOOD half → it rebuilds the other
@@ -2056,7 +2064,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           };
           return (
             <>
-              <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+              <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
               <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>symmetrize</Text>
               <Pressable onPress={() => doSym(true)} tooltip={`Symmetrize — keep the +${ax} half and rebuild the other side as its exact mirror (kills any drift)`} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
                 <Text fontSize={10} color={col} style={{ fontFamily: 'monospace' }}>keep +{ax}</Text>
@@ -2090,7 +2098,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           const bg = health.errors ? '#2e1616' : health.warns ? '#2a2410' : '#10261a';
           return (
             <>
-              <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+              <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
               <Pressable onPress={showOffenders} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: bg, borderWidth: 1, borderColor: col }}>
                 <Text fontSize={10} color={col} style={{ fontFamily: 'monospace' }}>
                   {health.clean ? '✓ clean' : `⚠ ${health.errors ? `${health.errors}E` : ''}${health.errors && health.warns ? ' ' : ''}${health.warns ? `${health.warns}W` : ''}`}
@@ -2104,7 +2112,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             undo×2; this is the durable weld — and combines any two parts. */}
         {selMode === 'object' && activePart && props.mergeTargetName ? (
           <>
-            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+            <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
             <Pressable onPress={() => { props.onMergeActive(); setSel(emptySelection()); }} style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
               <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`merge → ${props.mergeTargetName}`}</Text>
             </Pressable>
@@ -2115,7 +2123,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             does the placing — no move/resize toggle. */}
         {selMode === 'rig' && activePart ? (
           <>
-            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+            <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
             {!hasPivot(activePart.mesh) ? (
               <Pressable
                 onPress={() => {
@@ -2185,7 +2193,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         ) : null}
         {selMode !== 'rig' && selMode !== 'paint' ? (
           <>
-            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+            <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
             {(['move', 'resize', 'rotate'] as GizmoTool[]).map((tl) => {
               const on = gizmoTool === tl;
               return (
@@ -2209,7 +2217,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             {/* face-only edit ops: extrude + loop cut (a single selected face). */}
             {selMode === 'face' && activePart && sel.faces.size === 1 ? (
               <>
-                <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+                <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
                 {/* extrude — commits a thin lip; the move gizmo then pulls it in/out
                     (req_1015). The cap stays at the same index so it stays selected. */}
                 <Pressable
@@ -2247,7 +2255,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               const allGlass = faceList.every((i) => activePart.mesh.faces[i]?.glass);
               return (
                 <>
-                  <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+                  <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
                   {/* flip — reverse the selected face(s) so the normal points the other
                       way (fixes an upside-down Create Face). */}
                   <Pressable
@@ -2359,7 +2367,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 move gizmo shapes it. Selection follows the NEW edge (req_1163). */}
             {selMode === 'edge' && activePart && sel.edges.size === 1 ? (
               <>
-                <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
+                <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
                 <Pressable
                   onPress={() => {
                     const mesh = activePart.mesh;
@@ -2508,13 +2516,18 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             ) : null}
           </>
         ) : null}
+      </Col>
+
+      {/* ── FILE / TEXTURE OPS (req_1427): scene-level actions (textureize, compile,
+          export / import / AI fill) — pinned top-RIGHT, content-sized, so they never
+          collide with the mode tabs on the left and don't balloon the bar. */}
+      <Row style={{ position: 'absolute', right: 8, top: 40, gap: 4, rowGap: 4, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', zIndex: Z.chrome }}>
         {/* TEXTURE (req_1068): the GLOBAL "textureize" — takes the whole scene and
             builds one packed sprite-map atlas via the Create Texture dialog (the
             Blockbench flow). The toggle flips between the textured atlas and solid
             once a texture exists. Painting the islands is the deferred next step. */}
         {props.parts.length > 0 ? (
           <>
-            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 4, marginRight: 4 }} />
             <Pressable
               onPress={() => setTexDialog(true)}
               tooltip="Textureize — unwrap the whole model into one packed sprite-sheet atlas you can paint / export / AI-fill"
