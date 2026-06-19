@@ -1838,7 +1838,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               strip, so they sat ON TOP of the STUDIO info; folded in here as one
               bar, req_1430). undo/redo/import handlers come from the model owner. */}
           <Row style={{ gap: 4, alignItems: 'center' }}>
-            {([['Undo2', 'Undo (Ctrl+Z)', props.canUndo, props.onUndo], ['Redo2', 'Redo (Ctrl+Y)', props.canRedo, props.onRedo]] as const).map(([icon, tip, on, run]) => (
+            {([['Undo2', 'Ctrl+Z · Undo', props.canUndo, props.onUndo], ['Redo2', 'Ctrl+Y · Redo', props.canRedo, props.onRedo]] as const).map(([icon, tip, on, run]) => (
               <Pressable key={icon} onPress={on ? run : undefined} tooltip={tip} style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, backgroundColor: on ? '#13233aee' : '#0e1726aa', borderColor: on ? '#2c4a6a' : '#1c2a3c' }}>
                 <Icon name={icon} size={13} color={on ? '#cfe2ff' : T.dim} />
               </Pressable>
@@ -2068,7 +2068,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           the 3D scene (the original cram the user called out). Every cluster here is
           selection-gated, so the rail is empty — and invisible — until a part or a
           selection makes its ops relevant. */}
-      <Col style={{ position: 'absolute', left: 8, top: 72, gap: 4, alignItems: 'flex-start', zIndex: Z.chrome }}>
+      <Row style={{ position: 'absolute', left: 8, top: 72, width: 168, gap: 4, rowGap: 4, flexWrap: 'wrap', alignItems: 'flex-start', alignContent: 'flex-start', zIndex: Z.chrome }}>
         {/* SYMMETRIZE (req_1190/1201): a WHOLE-MESH op, so shown in EVERY mode (it
             used to be nested in the non-rig tool block → invisible in rig mode, where
             the user went looking for it). Pick the GOOD half → it rebuilds the other
@@ -2084,7 +2084,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           return (
             <>
               <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
-              <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>symmetrize</Text>
+              <Text fontSize={9} color={T.dim} style={{ width: '100%', fontFamily: 'monospace' }}>symmetrize</Text>
               <Pressable onPress={() => doSym(true)} tooltip={`Symmetrize — keep the +${ax} half and rebuild the other side as its exact mirror (kills any drift)`} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
                 <Text fontSize={10} color={col} style={{ fontFamily: 'monospace' }}>keep +{ax}</Text>
               </Pressable>
@@ -2213,14 +2213,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         {selMode !== 'rig' && selMode !== 'paint' ? (
           <>
             <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
-            {(['move', 'resize', 'rotate'] as GizmoTool[]).map((tl) => {
-              const on = gizmoTool === tl;
-              return (
-                <Pressable key={tl} onPress={() => setGizmoTool(tl)} tooltip={tl === 'move' ? 'Move tool — drag the arrows to slide the selection (in face mode an orange arrow extrudes along the normal)' : tl === 'resize' ? 'Resize tool — drag the square handles to scale the selection per-axis' : 'Rotate tool — drag the rings to spin the selection about an axis'} style={{ ...STEP_BTN, backgroundColor: on ? '#3a2f5e' : '#13233aee', borderColor: on ? '#9b7fd6' : '#2c4a6a' }}>
-                  <Icon name={tl === 'move' ? 'Move' : tl === 'resize' ? 'Maximize' : 'RotateCw'} size={13} color={on ? '#e0d4ff' : T.dim} />
-                </Pressable>
-              );
-            })}
+            <Row style={{ gap: 4, width: '100%' }}>
+              {(['move', 'resize', 'rotate'] as GizmoTool[]).map((tl) => {
+                const on = gizmoTool === tl;
+                return (
+                  <Pressable key={tl} onPress={() => setGizmoTool(tl)} tooltip={tl === 'move' ? 'Move tool — drag the arrows to slide the selection (in face mode an orange arrow extrudes along the normal)' : tl === 'resize' ? 'Resize tool — drag the square handles to scale the selection per-axis' : 'Rotate tool — drag the rings to spin the selection about an axis'} style={{ ...STEP_BTN, flexGrow: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? '#3a2f5e' : '#13233aee', borderColor: on ? '#9b7fd6' : '#2c4a6a' }}>
+                    <Icon name={tl === 'move' ? 'Move' : tl === 'resize' ? 'Maximize' : 'RotateCw'} size={13} color={on ? '#e0d4ff' : T.dim} />
+                  </Pressable>
+                );
+              })}
+            </Row>
             {/* ALL-PARTS toggle (req_1287): in object mode with 2+ parts, transform the
                 WHOLE model together about its common center (so resizing keeps the
                 assembly's proportions instead of scaling one layer about its own hub). */}
@@ -2535,7 +2537,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             ) : null}
           </>
         ) : null}
-      </Col>
+      </Row>
 
       {/* ── FILE / TEXTURE OPS (req_1427): scene-level actions (textureize, compile,
           export / import / AI fill) — pinned top-RIGHT, content-sized, so they never
@@ -2683,7 +2685,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           </Box>
           <Pressable onPress={() => setFov(fovRef.current + 2)} tooltip="Wider field of view (zoom out / more perspective)" style={STEP_BTN}><Text fontSize={13} color={T.text}>+</Text></Pressable>
         </Row>
-        <Pressable onPress={reframe} tooltip="Reframe (F) — recenter the camera on the model" style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}>
+        <Pressable onPress={reframe} tooltip="F · Reframe — recenter the camera on the model" style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}>
           <Icon name="Frame" size={13} color={T.text} />
         </Pressable>
       </Col>
