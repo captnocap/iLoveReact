@@ -2219,6 +2219,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {/* PIXEL painter (req_1373): the cell-grid overlay is gone — there are no
           cells anymore, it was just noise on the model. You paint pixels. */}
 
+      {/* DIAGNOSTIC readout (req_1385): the model's UV layout, on screen since cart
+          console.log doesn't reach the terminal. overlap>0 or fullSquare>0 = shared
+          islands (the bleed); repack=Y means a re-pack is pending. */}
+      {selMode === 'paint' && paintDiag ? (
+        <Box style={{ position: 'absolute', left: 8, bottom: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b0d13ee', borderWidth: 1, borderColor: '#2c4a6a', zIndex: 50 }}>
+          <Text fontSize={11} color="#9fe0ff" style={{ fontFamily: 'monospace' }}>{`paintdiag · ${paintDiag}`}</Text>
+        </Box>
+      ) : null}
+
       {/* PAINT controls (req_1297): the floating panel — normal colours + custom
           colour, materials, brush/erase/view/variant/clear. Paint mode only. */}
       {selMode === 'paint' && tex ? (
