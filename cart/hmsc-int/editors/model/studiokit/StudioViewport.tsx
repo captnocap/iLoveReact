@@ -89,7 +89,7 @@ import { AddShapeDialog } from './dialogs/AddShapeDialog';
 
 // ── The viewport ─────────────────────────────────────────────────────────────
 
-export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void }) {
+export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
   const { parts, revision, activePart, onSelectFaces } = props;
 
   // Lower each visible part once per structural revision (camera drags + fov
@@ -1833,6 +1833,20 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           other (scale text over the mode buttons, fps over the export row). */}
       <Row style={{ position: 'absolute', left: 8, right: 8, top: 8, alignItems: 'center', justifyContent: 'space-between', zIndex: Z.chrome }}>
         <Row style={{ gap: 8, alignItems: 'center' }}>
+          {/* Branch-history verbs + import — first in the bar (they used to be a
+              SEPARATE absolute row pinned to the same top:8/left:8 corner as this
+              strip, so they sat ON TOP of the STUDIO info; folded in here as one
+              bar, req_1430). undo/redo/import handlers come from the model owner. */}
+          <Row style={{ gap: 4, alignItems: 'center' }}>
+            {([['Undo2', 'Undo (Ctrl+Z)', props.canUndo, props.onUndo], ['Redo2', 'Redo (Ctrl+Y)', props.canRedo, props.onRedo]] as const).map(([icon, tip, on, run]) => (
+              <Pressable key={icon} onPress={on ? run : undefined} tooltip={tip} style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, backgroundColor: on ? '#13233aee' : '#0e1726aa', borderColor: on ? '#2c4a6a' : '#1c2a3c' }}>
+                <Icon name={icon} size={13} color={on ? '#cfe2ff' : T.dim} />
+              </Pressable>
+            ))}
+            <Pressable onPress={props.onImportModel} tooltip="Import a 3D model (.glb) — converts it to an editable, paintable Studio model" style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
+              <Icon name="FileUp" size={13} color="#cdbcff" />
+            </Pressable>
+          </Row>
           <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#0b1320dd', borderWidth: 1, borderColor: '#27364a' }}>
             <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
               {props.partCount === 0 ? 'STUDIO · empty grid · + add a mesh' : `STUDIO · ${props.partCount} part${props.partCount === 1 ? '' : 's'} · ${props.activeName ?? '—'}`}
@@ -1906,7 +1920,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           console.log doesn't reach the terminal. overlap>0 or fullSquare>0 = shared
           islands (the bleed); repack=Y means a re-pack is pending. */}
       {selMode === 'paint' && paintDiag ? (
-        <Box style={{ position: 'absolute', left: 8, bottom: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b0d13ee', borderWidth: 1, borderColor: '#2c4a6a', zIndex: Z.overlay }}>
+        <Box style={{ position: 'absolute', right: 12, bottom: 84, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b0d13ee', borderWidth: 1, borderColor: '#2c4a6a', zIndex: Z.overlay }}>
           <Text fontSize={11} color="#9fe0ff" style={{ fontFamily: 'monospace' }}>{`paintdiag · ${paintDiag}`}</Text>
         </Box>
       ) : null}
@@ -2823,20 +2837,10 @@ export function StudioEditor() {
   }, []);
   return (
     <Row style={{ flexGrow: 1, height: '100%', minHeight: 0, position: 'relative' }}>
-      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} />
-      {/* Branch-history verbs — top-left, the one viewport corner the compass /
-          toolbar / mode-toggle don't claim. Disabled when the stack is empty. */}
-      <Row style={{ position: 'absolute', left: 8, top: 8, gap: 4, zIndex: Z.chrome }}>
-        {([['undo', 'Undo2', 'Undo (Ctrl+Z)', model.canUndo, () => model.undo()], ['redo', 'Redo2', 'Redo (Ctrl+Y)', model.canRedo, () => model.redo()]] as const).map(([k, icon, tip, on, run]) => (
-          <Pressable key={k} onPress={on ? run : undefined} tooltip={tip} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, borderWidth: 1, backgroundColor: on ? '#13233aee' : '#0e1726aa', borderColor: on ? '#2c4a6a' : '#1c2a3c' }}>
-            <Icon name={icon} size={13} color={on ? '#cfe2ff' : T.dim} />
-          </Pressable>
-        ))}
-        {/* Import a generated/external GLB (tools/genmesh) as a NEW paintable model. */}
-        <Pressable onPress={() => setImportOpen(true)} tooltip="Import a 3D model (.glb) — converts it to an editable, paintable Studio model" style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, borderWidth: 1, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
-          <Icon name="FileUp" size={13} color="#cdbcff" />
-        </Pressable>
-      </Row>
+      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} canUndo={model.canUndo} onUndo={() => model.undo()} canRedo={model.canRedo} onRedo={() => model.redo()} onImportModel={() => setImportOpen(true)} />
+      {/* Branch-history verbs + import now live INSIDE the viewport's top bar
+          (req_1430) — they used to be a separate absolute row colliding with the
+          STUDIO info strip at the same corner. */}
       {/* the OUTLINER (layers) docks on the RIGHT of the viewport (req_0981). */}
       <Box style={{ width: 236, minWidth: 236, height: '100%', borderLeftWidth: 1, borderColor: '#1c2a3c', backgroundColor: T.page }}>
         <StudioOutliner model={model} height="100%" onAdd={() => setAddOpen(true)} />
