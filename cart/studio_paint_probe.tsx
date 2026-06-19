@@ -11,7 +11,7 @@
 
 import { useEffect } from 'react';
 import { Box, Paintable, Scene3D } from '@reactjit/runtime/primitives';
-import { cuboid, editMeshToGeometry } from './hmsc-int/editors/model/editMesh';
+import { cuboid, extrudeFace, editMeshToGeometry } from './hmsc-int/editors/model/editMesh';
 import { textureizeScene, DEFAULT_TEXTURE_OPTIONS } from './hmsc-int/editors/model/textureize';
 import { makeProjector, orbitalEyeJS, type CameraSnap } from './hmsc-int/editors/model/meshSelect';
 import { pickFaceUV, paintUVsNeedRepack, type PaintTarget } from './hmsc-int/editors/model/meshPaint';
@@ -20,15 +20,17 @@ import { STUDIO_PAINT_KEY, PAINT_TEX, baseCoat, stampUV, faceIslandPx } from './
 const SIZE = 540;
 const FOV = 45;
 
-// Real Studio path, simulating req_1375's fix: a cuboid is first textureized the
-// DEFAULT way (dedup ON) — all 6 congruent faces collapse to ONE shared island, so
-// painting one would paint all six (the bug). paintUVsNeedRepack detects that, and
-// we re-pack dedup OFF so every face owns a UNIQUE island. Stamping one face then
-// stays on that one face only.
-const baseCube = cuboid(2, 2, 2);
-const shared = textureizeScene([baseCube], { ...DEFAULT_TEXTURE_OPTIONS, type: 'solid', color: '#c8ccd2' }, 16, 1024).meshes[0];
-const sharedFlag = paintUVsNeedRepack([shared]); // expect TRUE (dedup collapsed faces)
-const packed = textureizeScene([shared], { ...DEFAULT_TEXTURE_OPTIONS, dedupIslands: false, combineIslands: false, rearrangeUV: true, type: 'solid', color: '#c8ccd2' }, 16, 1024);
+// req_1376: the user's bleeding face is the ONLY one from an EXTRUDE. extrudeFace
+// gives the new SIDE WALLS a default full-square [0,1] UV (faceSquareUV) — each
+// samples the WHOLE texture, so painting one shows on all of them. Reproduce that
+// exactly: cuboid → extrude a face → the side walls are full-square. Then run the
+// req_1375 fix (detect → dedup-OFF re-pack) and confirm a stamp on a side wall now
+// isolates to that one wall. extrudeFace appends 4 side walls after the 6 cuboid
+// faces, so face 6 is a side wall.
+const baseCube = extrudeFace(cuboid(2, 2, 2), 2, 1.4); // extrude one face → +4 full-square side walls
+const sideWallFace = 6; // first appended side wall
+const sharedFlag = paintUVsNeedRepack([baseCube]); // expect TRUE (full-square side walls)
+const packed = textureizeScene([baseCube], { ...DEFAULT_TEXTURE_OPTIONS, dedupIslands: false, combineIslands: false, rearrangeUV: true, type: 'solid', color: '#c8ccd2' }, 16, 1024);
 const cube = packed.meshes[0];
 const uniqueFlag = paintUVsNeedRepack([cube]); // expect FALSE (each face its own island)
 const geom = editMeshToGeometry(cube);
@@ -45,20 +47,10 @@ function faceCenter(fi: number): [number, number, number] {
 
 export default function StudioPaintProbe() {
   useEffect(() => {
-    (globalThis as any).__hostLog?.(0, `[probe] dedup-shared needsRepack=${sharedFlag} (expect true); after dedup-off needsRepack=${uniqueFlag} (expect false)`);
-    const targets: PaintTarget[] = [{ partId: 'cube', mesh: cube, lift: 0 }];
-    const project = makeProjector(cam);
-    // pick a face whose projected center is well inside the viewport and front-facing
-    let chosen = -1;
-    for (let fi = 0; fi < cube.faces.length; fi += 1) {
-      const c = project(faceCenter(fi));
-      if (!c.front) continue;
-      if (c.x > SIZE * 0.2 && c.x < SIZE * 0.8 && c.y > SIZE * 0.2 && c.y < SIZE * 0.8) {
-        const hit = pickFaceUV(targets, cam, c.x, c.y);
-        if (hit) { chosen = hit.faceIndex; (globalThis as any).__hostLog?.(0, `[probe] pickFaceUV hit face ${hit.faceIndex} uv=(${hit.u.toFixed(3)},${hit.v.toFixed(3)})`); break; }
-      }
-    }
-    const fi = chosen >= 0 ? chosen : 0;
+    (globalThis as any).__hostLog?.(0, `[probe] extruded side-wall: needsRepack(full-square)=${sharedFlag} (expect true); after dedup-off re-pack=${uniqueFlag} (expect false)`);
+    // Paint the EXTRUDED side wall specifically (the user's case). If the fix works,
+    // only THIS wall greens; if not, all 4 side walls (faces 6..9) green together.
+    const fi = sideWallFace;
     const island = faceIslandPx(cube, fi);
     // two UVs inside this face's island, ADJACENT (discs touch) — the no-seam test.
     const uvAt = (fx: number, fy: number): [number, number] => {

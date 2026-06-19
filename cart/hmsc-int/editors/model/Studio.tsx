@@ -1261,6 +1261,38 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     setPaintBakeTick((t) => t + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.meshRev, props.revision, selMode]);
+  // DIAGNOSTIC (req_1376): log the model's UV layout on paint entry / after a re-pack
+  // so we can SEE whether faces share atlas space (full-square defaults, identical
+  // slots, or partial overlaps) on the real model — the probe isolates fine, so the
+  // truth has to come from the live data. Remove once the bleed is understood.
+  useEffect(() => {
+    if (!painting) return;
+    const meshes = props.parts.map((p) => p.mesh);
+    type R = { part: number; face: number; x0: number; y0: number; x1: number; y1: number };
+    const rects: R[] = [];
+    let total = 0, noUV = 0, fullSq = 0, maxUV = 0;
+    meshes.forEach((m, pi) => m.faces.forEach((f, fi) => {
+      if (f.glass || f.loop.length < 3) return; total += 1;
+      if (!f.uv || f.uv.length < 3) { noUV += 1; return; }
+      let x0 = 9, y0 = 9, x1 = -9, y1 = -9;
+      for (const [u, v] of f.uv) { if (u < x0) x0 = u; if (u > x1) x1 = u; if (v < y0) y0 = v; if (v > y1) y1 = v; if (u > maxUV) maxUV = u; if (v > maxUV) maxUV = v; }
+      if (x1 - x0 > 0.97 && y1 - y0 > 0.97) fullSq += 1;
+      rects.push({ part: pi, face: fi, x0, y0, x1, y1 });
+    }));
+    // count faces that OVERLAP at least one other face's island (partial or full).
+    let overlapping = 0;
+    for (let i = 0; i < rects.length; i += 1) {
+      const a = rects[i];
+      for (let j = 0; j < rects.length; j += 1) {
+        if (i === j) continue; const b = rects[j];
+        const ix = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+        const iy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+        if (ix > 0.001 && iy > 0.001) { overlapping += 1; break; }
+      }
+    }
+    console.log(`[paintdiag] tex=${tex?.name} paintFit=${tex?.paintFit} faces=${total} noUV=${noUV} fullSquare=${fullSq} overlappingIslands=${overlapping} maxUV=${maxUV.toFixed(3)} needRepack=${paintRepackNeeded}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [painting, props.meshRev, paintRepackNeeded, tex?.name]);
   // The throttled bake clock (the cutout idiom): while a stroke is dirty, bump the
   // tick at most ~12×/s so the atlas re-bakes smoothly instead of per mouse-move.
   useInterval(() => { if (paintDirtyRef.current) { paintDirtyRef.current = false; setPaintBakeTick((t) => t + 1); } }, STUDIO.paintBakeMs);
