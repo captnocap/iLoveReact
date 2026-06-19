@@ -843,6 +843,93 @@ test "reach gate: a thin box CONTAINING the target (the aimed door panel) is ski
     try testing.expect(!eye_to_panel_center);
 }
 
+// ── stair traversal (req_1453) ───────────────────────────────────────
+// A 3x3x3 stairs build piece bakes (placed.ts) into a slope heightfield rising
+// 0..3 along +z (walk_cos 0.6) plus three full-height boundary walls (2 sides +
+// 1 far/high wall at the crest, floor=0 top=3). Climbing the 45° run, the
+// player's circle (radius R) reaches the crest wall while its CENTER is R back,
+// where the slope is R*grade lower than the crest — a radius-induced lip. At
+// step_height 0.35 that lip (0.34 at 45°, up to 0.45 at the steepest walkable
+// 53° ramp) sat right at the limit, so the climber got walled out at the top —
+// worse as the frame dt grew (the per-frame advance overshoots the thin grace
+// window). The fix raises playerStepHeightMeters so every walkable stair/ramp
+// crest clears with margin at any framerate. This pins the crest behavior.
+fn registerStairSlope() void {
+    physics.clearHeightfields();
+    // 6 rows along +z, each row flat across x; rises 0,0.6,1.2,1.8,2.4,3.0.
+    var samples = [36]f32{
+        0,   0,   0,   0,   0,   0,
+        0.6, 0.6, 0.6, 0.6, 0.6, 0.6,
+        1.2, 1.2, 1.2, 1.2, 1.2, 1.2,
+        1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
+        2.4, 2.4, 2.4, 2.4, 2.4, 2.4,
+        3.0, 3.0, 3.0, 3.0, 3.0, 3.0,
+    };
+    std.debug.assert(physics.registerHeightfield(.{
+        .id = 0,
+        .origin_x = 0,
+        .origin_z = 0,
+        .cell = 0.6,
+        .cols = 6,
+        .rows = 6,
+        .base_y = 0,
+        .walk_cos = 0.6,
+    }, std.mem.sliceAsBytes(samples[0..])));
+}
+
+const STAIR_GROUND = [physics.RECT_FLOATS]f32{ -10, -10, 10, 10, 0, 0, 0.85, 0, -1e9 };
+const STAIR_FAR_WALL = [physics.RECT_FLOATS]f32{ -0.25, 3.0, 3.25, 3.25, 3, 1, 0.85, 0, 0 };
+const STAIR_SIDE_L = [physics.RECT_FLOATS]f32{ -0.25, 0.0, 0.0, 3.0, 3, 1, 0.85, 0, 0 };
+const STAIR_SIDE_R = [physics.RECT_FLOATS]f32{ 3.0, 0.0, 3.25, 3.0, 3, 1, 0.85, 0, 0 };
+
+// Highest py the player reaches running up the standalone staircase from the
+// ground — 3.0 means the full crest, ~2.66 means walled out at the radius lip.
+fn stairClimbPeak(dt: f32, step_h: f32) f32 {
+    registerStairSlope();
+    var sim = Sim{
+        .dt = dt,
+        .px = 1.5,
+        .pz = -1.0,
+        .py = 0,
+        .move_z = 1,
+        .speed = 5.8,
+        .player_radius = 0.34,
+        .player_height = 1.65,
+        .step_height = step_h,
+        .walkable_side_push_grace = 0.08,
+        .rects = &.{ STAIR_GROUND, STAIR_FAR_WALL, STAIR_SIDE_L, STAIR_SIDE_R },
+    };
+    var out = physics.step(sim.pack(&g_buf)).?;
+    var frame: usize = 0;
+    var max_py: f32 = out[2];
+    while (frame < 240) : (frame += 1) {
+        max_py = @max(max_py, out[2]);
+        sim.px = out[1];
+        sim.py = out[2];
+        sim.pz = out[3];
+        sim.pvx = out[4];
+        sim.pvy = out[5];
+        sim.pvz = out[6];
+        out = physics.step(sim.pack(&g_buf)).?;
+    }
+    physics.clearHeightfields();
+    return max_py;
+}
+
+test "stair crest: the player reaches the top of a staircase at every framerate" {
+    // The shipped step height must clear the 45° stair crest even at low fps.
+    // (HMSC_SCALE.playerStepHeightMeters — keep this >= ~0.45 or stairs wall out.)
+    const ship_step: f32 = 0.5;
+    const fps = [_]f32{ 60, 50, 40, 30, 20 };
+    for (fps) |f| {
+        const peak = stairClimbPeak(1.0 / f, ship_step);
+        try testing.expect(peak >= 2.97); // crested (3.0), not stuck at the lip
+    }
+    // Guard rail: the OLD 0.35 step height walled the climber out below 30fps —
+    // proof the crest depended on the step height we just raised.
+    try testing.expect(stairClimbPeak(1.0 / 30.0, 0.35) < 2.8);
+}
+
 test "reach gate: an oriented thin wall between eye and prop blocks the E" {
     var buf: [physics.INPUT_HEADER_FLOATS + physics.ORIENTED_FLOATS]f32 = @splat(0);
     // yaw-0 oriented slab at world x∈[0.875,1.125], z∈[-2,2] (pivot 1,0)

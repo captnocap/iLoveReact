@@ -7,7 +7,16 @@ export const HMSC_SCALE = {
   floorTileThicknessMeters: 0.2,
   playerCapsuleHeightMeters: 1.65,
   playerCapsuleRadiusMeters: 0.34,
-  playerStepHeightMeters: 0.35,
+  // Step-up tolerance. Must exceed the radius-induced LIP at a stair/ramp crest:
+  // climbing a slope of grade g, the player's circle reaches the crest wall while
+  // its centre is one radius back, where the surface sits radius*g lower — a lip
+  // of R*g. At 45° stairs that is 0.34m and at the steepest walkable ramp (53°,
+  // walkCos 0.6) it is ~0.45m, so 0.35 sat right at the limit and walled the
+  // climber out at the top (worse at low/variable framerate, where the per-frame
+  // advance overshoots the thin grace window). 0.5 clears every walkable
+  // stair/ramp crest with margin at any framerate (req_1453). Still knee-height
+  // on a ~1.7m human — a curb/low-ledge step, not a wall climb.
+  playerStepHeightMeters: 0.5,
   visualHumanMinMeters: 1.7,
   visualHumanMaxMeters: 2.0,
   doorWidthMeters: 1,
