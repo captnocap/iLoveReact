@@ -47,6 +47,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 echo "== installing InstantMesh deps =="
 pip install \
   "numpy<2" \
+  "setuptools<81" \
   pytorch-lightning==2.1.2 \
   einops omegaconf torchmetrics accelerate \
   transformers==4.34.1 diffusers==0.20.2 huggingface-hub \
