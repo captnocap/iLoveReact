@@ -22,9 +22,12 @@ const PALM_TRUNK_UNIT_RADIUS = 0.13;
 // Palm-grove globals. A future /settings rig (editorTunables, like grass/bush) can
 // swap these in; kept a plain table for now so the population stays pure data.
 export const PALM_CONFIG = {
-  // Sparsity: a painted palm cell spawns a palm with this probability — a grove
-  // reads as scattered trees, not a palm per square metre (~1 palm / 16 cells).
-  cellChance: 0.06,
+  // Sparsity: a painted palm cell spawns a palm with this probability — scattered
+  // trees, not a palm per square metre, but dense enough that a SMALL paint still
+  // shows a grove. At 0.06 a 25-cell test patch landed ~1.5 expected → often 0
+  // palms (the "I painted some and see nothing" bug, req_1465); 0.22 makes a
+  // 25-cell patch ~5 palms — a visible cluster — and a big field a real grove.
+  cellChance: 0.22,
   trunkHeight: { min: 4.2, max: 7.0 },
   trunkRadius: { min: 0.14, max: 0.2 },
   // Crown: `fronds` in the outer drooping ring; the inner ring is 0.6× that.
