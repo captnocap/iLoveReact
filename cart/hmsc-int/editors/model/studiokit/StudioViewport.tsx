@@ -25,6 +25,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { callHost } from '@reactjit/runtime/ffi';
 import { useHotState, useInterval, useRerender } from '@reactjit/hooks';
 import { Box, Col, patchDynSlot, Pressable, Row, Scene3D, Text, TextInput } from '@reactjit/primitives';
+import { Icon } from '@reactjit/icons/Icon';
 import { GAME_CAMERA, GAME_CHROME, GAME_FIGURE, GAME_NATIVE_CAMERA } from '../../../game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '../../../game/figure/render';
 import { HMSC_SCALE } from '../../../world/scale';
@@ -1935,7 +1936,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 92, alignItems: 'center' }}>
           <Box style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: tex ? '#2f7a4f' : '#a14545' }}>
             <Text fontSize={10} color={tex ? '#7fd6a0' : '#f0a0a0'} style={{ fontFamily: 'monospace' }}>
-              paint · {tex ? `atlas ${tex.texels}²` : 'NO TEXTURE'} · {texView ? 'textured' : 'solid (toggle on!)'} · {Object.values(paintRef.current).reduce((n, m) => n + Object.keys(m).length, 0)} cells · drag off model = orbit
+              paint · {tex ? `atlas ${tex.texels}²` : 'NO TEXTURE'} · {texView ? 'textured' : 'solid'} · {Object.values(paintRef.current).reduce((n, m) => n + Object.keys(m).length, 0)} cells
             </Text>
           </Box>
         </Box>
@@ -2188,7 +2189,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               const on = gizmoTool === tl;
               return (
                 <Pressable key={tl} onPress={() => setGizmoTool(tl)} tooltip={tl === 'move' ? 'Move tool — drag the arrows to slide the selection (in face mode an orange arrow extrudes along the normal)' : tl === 'resize' ? 'Resize tool — drag the square handles to scale the selection per-axis' : 'Rotate tool — drag the rings to spin the selection about an axis'} style={{ ...STEP_BTN, backgroundColor: on ? '#3a2f5e' : '#13233aee', borderColor: on ? '#9b7fd6' : '#2c4a6a' }}>
-                  <Text fontSize={10} color={on ? '#e0d4ff' : T.dim} style={{ fontFamily: 'monospace' }}>{tl}</Text>
+                  <Icon name={tl === 'move' ? 'Move' : tl === 'resize' ? 'Maximize' : 'RotateCw'} size={13} color={on ? '#e0d4ff' : T.dim} />
                 </Pressable>
               );
             })}
