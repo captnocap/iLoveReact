@@ -6,7 +6,8 @@
 
 import {
   EDITOR_BINDINGS, validateEditorBindings, bindingsForScope, legendForScope,
-  chordOf, resolveEditorKey, type EditorBinding,
+  chordOf, resolveEditorKey, setUserBinding, clearUserBinding, isOverridden,
+  loadUserBindings, exportUserBindings, prettyChord, setKeyCapture, type EditorBinding,
 } from './controls';
 import { assert, assertEqual, assertThrows, finish, test } from '../game/_testkit';
 
@@ -66,6 +67,51 @@ test('the legend derives from the dispatch rows — it cannot lie', () => {
     assertEqual(row.keys, backing!.keys.join('/'), 'legend keys are the binding keys, verbatim');
   }
   assert(legendForScope('iso-build').length > 0, 'every scope can render a legend');
+});
+
+test('user overrides: rebinding layers over the default and dispatch follows', () => {
+  loadUserBindings({}); // clean slate
+  const r = setUserBinding('studio', 'view.recenter', ['g']);
+  assert(r.ok, 'a free chord rebinds');
+  assertEqual(bindingsForScope('studio').find((b) => b.action === 'view.recenter')?.keys.join(','), 'g', 'the effective keys are the override');
+  assertEqual(resolveEditorKey('studio', 'down', { key: 'g' }, false)?.action, 'view.recenter', 'dispatch fires on the new chord');
+  assertEqual(resolveEditorKey('studio', 'down', { key: 'f' }, false), null, 'the old default no longer fires');
+  assert(isOverridden('studio', 'view.recenter'), 'the action reads as overridden');
+  clearUserBinding('studio', 'view.recenter');
+  assertEqual(bindingsForScope('studio').find((b) => b.action === 'view.recenter')?.keys.join(','), 'f,home', 'reset restores the default');
+});
+
+test('user overrides: a chord already bound in the scope is rejected, not crashed', () => {
+  loadUserBindings({});
+  const r = setUserBinding('studio', 'view.recenter', ['escape']); // escape = selection.cancel
+  assert(!r.ok, 'a clash returns a conflict');
+  assert(!isOverridden('studio', 'view.recenter'), 'the rejected rebind is not applied');
+  assertEqual(setUserBinding('studio', 'view.recenter', ['Bad!!']).ok, false, 'a malformed chord is rejected');
+});
+
+test('user overrides: persistence round-trips and drops corruption', () => {
+  loadUserBindings({});
+  setUserBinding('studio', 'selection.all', ['ctrl+g']);
+  const saved = exportUserBindings();
+  assertEqual(saved['studio:selection.all']?.join(','), 'ctrl+g', 'export captures the override');
+  loadUserBindings({ 'studio:view.recenter': ['g'], 'studio:junk': ['NOT A CHORD'] });
+  assertEqual(bindingsForScope('studio').find((b) => b.action === 'view.recenter')?.keys.join(','), 'g', 'a saved override hydrates');
+  assert(!isOverridden('studio', 'selection.all'), 'load REPLACES the map (the prior override is gone)');
+  assertEqual(exportUserBindings()['studio:junk'], undefined, 'a malformed entry is dropped on load');
+  loadUserBindings({}); // leave the global map clean for any later test
+});
+
+test('capture mode suppresses all dispatch (so binding Delete cannot delete)', () => {
+  setKeyCapture(true);
+  assertEqual(resolveEditorKey('studio', 'down', { key: 'delete' }, false), null, 'nothing dispatches mid-capture');
+  setKeyCapture(false);
+  assertEqual(resolveEditorKey('studio', 'down', { key: 'delete' }, false)?.action, 'selection.delete', 'dispatch resumes after capture');
+});
+
+test('prettyChord renders human labels', () => {
+  assertEqual(prettyChord('ctrl+shift+z'), 'Ctrl+Shift+Z', 'modifiers capitalize');
+  assertEqual(prettyChord('escape'), 'Esc', 'named keys get short labels');
+  assertEqual(prettyChord('f'), 'F', 'single keys uppercase');
 });
 
 finish('editors/controls');

@@ -33,6 +33,8 @@ import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../../tunables';
 import { useEditorControls, useHeldModifiers } from '../../useEditorControls';
 import { KeyLegend } from '../../KeyLegend';
+import { loadKeybinds } from '../../keybinds';
+import { HotkeysPanel } from './dialogs/HotkeysPanel';
 import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from '../editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from '../anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from '../wheelMount';
@@ -724,6 +726,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     setDraft(null);
     setBv(null);
   };
+
+  // Self-serve rebinding (req_1433): a Hotkeys panel reads/writes the control
+  // contract. Hydrate the user's saved overrides once at mount.
+  const [hotkeysOpen, setHotkeysOpen] = useState(false);
+  useEffect(() => { loadKeybinds(); }, []);
 
   // Selection keys — folded into the EDITOR CONTROL CONTRACT ('studio' scope,
   // editors/controls.ts). The dispatcher owns the typing gate, so the old
@@ -1896,6 +1903,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           <Pressable onPress={cycleSmooth} tooltip="Camera smoothing — cycle direct / eased follow (cosmetic; 'direct' is 1:1 like Blockbench)" style={STEP_BTN}><Text fontSize={9} color={T.text}>smooth: {smooth === 0 ? 'direct' : `${smooth}/s`}</Text></Pressable>
           <Pressable onPress={() => setLogOn((v) => !v)} tooltip="Log camera angles to the terminal (debug aid for chasing camera jitter)" style={{ ...STEP_BTN, backgroundColor: logOn ? '#1c3a2a' : '#13233aee', borderColor: logOn ? '#2f7a4f' : '#2c4a6a' }}><Icon name="ScrollText" size={12} color={logOn ? '#7fd6a0' : T.dim} /></Pressable>
           <Pressable onPress={() => setDiagOn((v) => !v)} tooltip="Show/hide the FRAMES performance readout (fps · frame ms · skips · gc · present)" style={{ ...STEP_BTN, backgroundColor: diagOn ? '#1c3a2a' : '#13233aee', borderColor: diagOn ? '#2f7a4f' : '#2c4a6a' }}><Icon name="Gauge" size={12} color={diagOn ? '#7fd6a0' : T.dim} /></Pressable>
+          <Pressable onPress={() => setHotkeysOpen(true)} tooltip="Hotkeys — view and rebind the keyboard shortcuts yourself" style={STEP_BTN}><Icon name="Keyboard" size={12} color={T.dim} /></Pressable>
         </Row>
       </Row>
 
@@ -2808,6 +2816,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           }}
         />
       ) : null}
+
+      {/* Self-serve rebind panel (req_1433): view + change the Studio shortcuts. */}
+      {hotkeysOpen ? <HotkeysPanel scope="studio" onClose={() => setHotkeysOpen(false)} /> : null}
     </Pressable>
   );
 }

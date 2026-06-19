@@ -122,8 +122,80 @@ export function validateEditorBindings(bindings: EditorBinding[]): void {
 }
 validateEditorBindings(EDITOR_BINDINGS);
 
+// ── USER OVERRIDES (req_1433): self-serve rebinding ────────────────────────
+// The user can replace any action's chords without a code change. Overrides
+// layer OVER the defaults; resolution, the legend, and tooltips all read
+// bindingsForScope(), so a rebind updates every surface at once. This map is
+// the contract's only mutable state — persistence (localstore) lives in the
+// React layer (editors/keybinds.ts) so this file stays import-pure and
+// headless-testable.
+const userKeys = new Map<string, string[]>(); // `${scope}:${action}` -> chords
+const overrideSlot = (scope: EditorScope, action: string) => `${scope}:${action}`;
+
+export type RebindResult = { ok: true } | { ok: false; conflict: string };
+
+/** Set a user override for one action. Validates each chord and rejects a
+ *  collision with another action's EFFECTIVE chords in the same scope — the
+ *  user-facing twin of validateEditorBindings (a warning, never a crash). */
+export function setUserBinding(scope: EditorScope, action: string, keys: string[]): RebindResult {
+  if (!keys.length) return { ok: false, conflict: 'bind at least one key' };
+  for (const chord of keys) {
+    if (!CHORD_SHAPE.test(chord)) return { ok: false, conflict: `"${chord}" is not a valid chord` };
+  }
+  for (const b of EDITOR_BINDINGS) {
+    if (b.scope !== scope || b.action === action) continue;
+    const other = userKeys.get(overrideSlot(b.scope, b.action)) ?? b.keys;
+    const clash = keys.find((c) => other.includes(c));
+    if (clash) return { ok: false, conflict: `"${clash}" is already bound to ${b.action}` };
+  }
+  userKeys.set(overrideSlot(scope, action), keys);
+  return { ok: true };
+}
+
+export function clearUserBinding(scope: EditorScope, action: string): void {
+  userKeys.delete(overrideSlot(scope, action));
+}
+
+export function isOverridden(scope: EditorScope, action: string): boolean {
+  return userKeys.has(overrideSlot(scope, action));
+}
+
+/** Replace ALL overrides (boot-time load). Silently drops malformed/unknown
+ *  entries so a corrupt store can never break input. */
+export function loadUserBindings(saved: Record<string, string[]> | null | undefined): void {
+  userKeys.clear();
+  for (const [slot, keys] of Object.entries(saved ?? {})) {
+    if (Array.isArray(keys) && keys.length && keys.every((k) => typeof k === 'string' && CHORD_SHAPE.test(k))) {
+      userKeys.set(slot, keys);
+    }
+  }
+}
+
+export function exportUserBindings(): Record<string, string[]> {
+  return Object.fromEntries(userKeys);
+}
+
+/** Effective bindings for a scope: defaults with any user override substituted
+ *  in. Everything downstream (resolve, legend) reads this, so overrides apply
+ *  uniformly. */
 export function bindingsForScope(scope: EditorScope): EditorBinding[] {
-  return EDITOR_BINDINGS.filter((b) => b.scope === scope);
+  return EDITOR_BINDINGS
+    .filter((b) => b.scope === scope)
+    .map((b) => {
+      const ov = userKeys.get(overrideSlot(b.scope, b.action));
+      return ov ? { ...b, keys: ov } : b;
+    });
+}
+
+// Set true by the rebind panel while it waits for a chord; gates resolveEditorKey.
+let keyCaptureActive = false;
+export function setKeyCapture(active: boolean): void { keyCaptureActive = active; }
+
+/** Human-readable chord for display: 'ctrl+shift+z' -> 'Ctrl+Shift+Z',
+ *  'escape' -> 'Esc'. Used by the rebind panel + key-bearing tooltips. */
+export function prettyChord(chord: string): string {
+  const NICE: Record<string, string> = { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', meta: 'Cmd', escape: 'Esc', delete: 'Del', backspace: 'Bksp', enter: 'Enter', home: 'Home', arrowup: 'Up', arrowdown: 'Down', arrowleft: 'Left', arrowright: 'Right' };
+  return chord.split('+').map((p) => NICE[p] ?? (p.length === 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1))).join('+');
 }
 
 /** The discoverable keymap: every legend-bearing row of a scope, in table
@@ -172,6 +244,9 @@ export function resolveEditorKey(
   ev: EditorKeyEvent,
   typingFocused: boolean,
 ): EditorBinding | null {
+  // While the rebind panel is capturing the next chord, NOTHING dispatches —
+  // otherwise pressing Delete to bind it would also delete the selection.
+  if (keyCaptureActive) return null;
   const base = String(ev?.key ?? '').toLowerCase();
   if (!base) return null;
   const chord = chordOf(ev);
