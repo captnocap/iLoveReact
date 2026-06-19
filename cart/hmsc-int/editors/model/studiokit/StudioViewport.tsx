@@ -2138,7 +2138,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             used to be nested in the non-rig tool block → invisible in rig mode, where
             the user went looking for it). Pick the GOOD half → it rebuilds the other
             as an exact mirror; the badge shows live ✓ / ⚠ for the symmetry axis. */}
-        {activePart && symReport ? (() => {
+        {activePart && symReport && selMode !== 'paint' ? (() => {
           const symAxis = symReport.axis; // explicit mirror plane, else the auto-detected most-symmetric axis
           const ax = STUDIO.mirrorAxisLabels[symAxis];
           const col = STUDIO.mirrorAxisColors[symAxis];
@@ -2168,7 +2168,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             active part. It's a whole-mesh read, so shown in every mode (beside
             symmetrize). Pressing a dirty badge SELECTS the offending faces (face mode)
             and logs the full breakdown, so the scuff is on-screen, not just counted. */}
-        {activePart && health ? (() => {
+        {activePart && health && selMode !== 'paint' ? (() => {
           const dirty = !health.clean;
           const faceIssues = health.issues.filter((iss) => iss.faces.length);
           const showOffenders = () => {
