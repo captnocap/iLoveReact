@@ -169,6 +169,12 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // re-import a blueprint each session anyway. The setup panel + the gizmo selection
   // (req_1285) are transient. See ./Backdrops.tsx.
   const BACKDROPS_KEY = 'studio:backdrops';
+  // A fresh nonce per MOUNT. Folded into the backdrop geometry id, texture key,
+  // and React key so every mount (incl. the one after a hot reload) bakes the
+  // trace image FRESH instead of reusing a host-cached bake keyed by the stable
+  // bd.id — which is what was leaving the image offset/reshaped after an update
+  // (req_1444: "just play it dumb, on updates unmount and remount it").
+  const mountEpoch = useRef(Math.floor(nowMs())).current;
   const [backdrops, setBackdropsState] = useState<Backdrop[]>(() => localstore.getJson<Backdrop[]>(BACKDROPS_KEY, []));
   const setBackdrops = (u: Backdrop[] | ((p: Backdrop[]) => Backdrop[])) =>
     setBackdropsState((prev) => { const next = typeof u === 'function' ? (u as (p: Backdrop[]) => Backdrop[])(prev) : u; localstore.setJson(BACKDROPS_KEY, next); return next; });
@@ -1793,11 +1799,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           if (!bd) return null;
           return (
             <Scene3D.Mesh
-              key={bd.id}
-              geometry={{ id: `studio.bd.${bd.id}`, generate: () => q.geo, defaults: {} }}
-              dynamicKey={`studio.bd${i}~${bd.id}.${bd.plane}.${bd.scale}.${bd.aspect}.${bd.flipU ? 1 : 0}`}
+              key={`${bd.id}~${mountEpoch}`}
+              geometry={{ id: `studio.bd.${bd.id}.${mountEpoch}`, generate: () => q.geo, defaults: {} }}
+              dynamicKey={`studio.bd${i}~${bd.id}.${mountEpoch}.${bd.plane}.${bd.scale}.${bd.aspect}.${bd.flipU ? 1 : 0}`}
               material={{ color: '#ffffff', opacity: bd.opacity }}
-              textureKey={backdropTexKey(bd.id)}
+              textureKey={backdropTexKey(`${bd.id}.${mountEpoch}`)}
               position={bd.pos}
             />
           );
@@ -1859,7 +1865,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           offscreen StaticSurface, sampled by the matching trace plane above. memo'd
           on (id, source) so they re-bake only when a picture is added/replaced. */}
       {backdrops.filter((b) => b.visible).map((b) => (
-        <BackdropSurface key={b.id} id={b.id} source={b.source} aspect={b.aspect} />
+        <BackdropSurface key={`${b.id}~${mountEpoch}`} id={`${b.id}.${mountEpoch}`} source={b.source} aspect={b.aspect} />
       ))}
 
       {/* PIXEL painter (req_1372): the RGBA paint texture the model samples while in
