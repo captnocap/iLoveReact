@@ -82,7 +82,13 @@ export function ColorField(props: ColorFieldProps) {
 
   const [wheelRect, setWheelRect] = useState<Rect | null>(null);
   const [valueRect, setValueRect] = useState<Rect | null>(null);
-  const [dragging, setDragging] = useState<DragTarget | null>(null);
+  // Drag is tracked in a REF, not state, and handled on the wheel/value
+  // Pressables themselves — no global drag overlay. The old overlay mounted
+  // only `when dragging`, so a no-move CLICK (down+up before it mounted) left
+  // `dragging` stuck true and the leftover overlay ate the next click — the
+  // long-standing "click a color, can't pick another until you leave & return"
+  // bug. Per-element handlers can't get stuck (req_1455).
+  const dragRef = useRef<DragTarget | null>(null);
   const [editingHex, setEditingHex] = useState(false);
   const [hexDraft, setHexDraft] = useState(value.toUpperCase());
   useEffect(() => { if (!editingHex) setHexDraft(value.toUpperCase()); }, [value, editingHex]);
@@ -99,7 +105,9 @@ export function ColorField(props: ColorFieldProps) {
   };
   const commitWheel = (p: any) => { if (wheelRect) commit(hsvFromWheel(hsvRef.current, p, wheelRect)); };
   const commitValue = (p: any) => { if (valueRect) commit(hsvFromValue(hsvRef.current, p, valueRect)); };
-  const commitDrag = (p: any) => { if (dragging === 'wheel') commitWheel(p); else if (dragging === 'value') commitValue(p); };
+  const startDrag = (t: DragTarget, p: any) => { dragRef.current = t; if (t === 'wheel') commitWheel(p); else commitValue(p); };
+  const moveDrag = (t: DragTarget, p: any) => { if (dragRef.current !== t) return; if (t === 'wheel') commitWheel(p); else commitValue(p); };
+  const endDrag = () => { dragRef.current = null; };
 
   const radius = size / 2;
   const markerX = radius + Math.cos(hsv.h * TAU) * hsv.s * radius - marker / 2;
@@ -109,7 +117,13 @@ export function ColorField(props: ColorFieldProps) {
   return (
     <Col style={{ gap: 5, alignItems: 'center', position: 'relative', ...(props.style ?? {}) }}>
       <Box style={{ width: size, height: size, position: 'relative' }}>
-        <Pressable tooltip="Hue / saturation" onMouseDown={(p: any) => { setDragging('wheel'); commitWheel(p); }}>
+        <Pressable
+          tooltip="Hue / saturation"
+          onMouseDown={(p: any) => startDrag('wheel', p)}
+          onMouseMove={(p: any) => moveDrag('wheel', p)}
+          onMouseUp={endDrag}
+          onMouseLeave={endDrag}
+        >
           <Box
             onLayout={(r: any) => setWheelRect(r)}
             style={{ width: size, height: size, borderRadius: radius, overflow: 'hidden', position: 'relative', backgroundColor: T.page, borderWidth: 1, borderColor: T.frame }}
@@ -121,7 +135,13 @@ export function ColorField(props: ColorFieldProps) {
       </Box>
 
       <Box style={{ width: size, height: valueHeight, position: 'relative' }}>
-        <Pressable tooltip="Value" onMouseDown={(p: any) => { setDragging('value'); commitValue(p); }}>
+        <Pressable
+          tooltip="Value"
+          onMouseDown={(p: any) => startDrag('value', p)}
+          onMouseMove={(p: any) => moveDrag('value', p)}
+          onMouseUp={endDrag}
+          onMouseLeave={endDrag}
+        >
           <Box
             onLayout={(r: any) => setValueRect(r)}
             style={{ width: size, height: valueHeight, borderRadius: 4, overflow: 'hidden', position: 'relative', borderWidth: 1, borderColor: T.frame, backgroundColor: T.page }}
@@ -131,15 +151,6 @@ export function ColorField(props: ColorFieldProps) {
           </Box>
         </Pressable>
       </Box>
-
-      {dragging ? (
-        <Pressable
-          style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, zIndex: 30, backgroundColor: '#00000001' }}
-          onMouseMove={commitDrag}
-          onMouseUp={(p: any) => { commitDrag(p); setDragging(null); }}
-          onMouseLeave={() => setDragging(null)}
-        />
-      ) : null}
 
       {props.showHex === false ? null : (
         <Row style={{ width: size, gap: 6, alignItems: 'center' }}>

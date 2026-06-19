@@ -6,14 +6,19 @@
 // every tool in the repo gets the SAME paint UI (USER ASK req_1447).
 
 import { Box, Col, Row, Text, Pressable } from '../primitives';
-import { BrushScalar, ChipRow, type ChipOption } from './controls';
+import { BrushScalar, ChipRow, BrushIcon, type ChipOption } from './controls';
 import { ColorField } from './ColorField';
 import { type PaintTheme, DARK_THEME } from './theme';
 import {
   type Brush, type BrushTool, type BrushShape, type Palette, type PaintInk,
-  BRUSH_SHAPES, BLEND_MODES, BRUSH_PRESETS, TOOL_HOTKEY,
-  pushRecent, inkKey,
+  BLEND_MODES, BRUSH_PRESETS, TOOL_HOTKEY,
+  normalizeBrush, pushRecent, inkKey,
 } from './model';
+
+function presetShape(p: typeof BRUSH_PRESETS[number]): BrushShape {
+  const s = p.brush.stamp;
+  return s && s.kind === 'analytic' ? s.shape : 'round';
+}
 
 const TOOL_LABEL: Record<BrushTool, string> = {
   brush: 'Brush', eraser: 'Eraser', line: 'Line', rect: 'Rect', ellipse: 'Oval',
@@ -76,9 +81,6 @@ export function BrushKit(props: BrushKitProps) {
     value: t, label: TOOL_LABEL[t], hint: `${TOOL_LABEL[t]} (${TOOL_HOTKEY[t]})`,
   }));
 
-  const shapeOpts: ChipOption<BrushShape>[] = BRUSH_SHAPES.map((s) => ({ value: s, label: s }));
-  const currentShape = b.stamp.kind === 'analytic' ? b.stamp.shape : 'round';
-
   const blendOpts: ChipOption<string>[] = BLEND_MODES.map((m) => ({ value: m, label: m }));
 
   const selectInk = (ink: PaintInk) => {
@@ -98,19 +100,26 @@ export function BrushKit(props: BrushKitProps) {
 
       {show('shapes') ? (
         <Section title="Brush" theme={T}>
-          <Row style={{ gap: 4, flexWrap: 'wrap' }}>
-            {BRUSH_PRESETS.map((p) => (
-              <Pressable
-                key={p.id}
-                tooltip={p.label}
-                onMouseDown={() => patch({ ...({ ...b, ...p.brush } as Brush), ink: b.ink, size: b.size, stamp: p.brush.stamp ?? b.stamp })}
-                style={{ paddingHorizontal: 7, height: 22, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: T.control, borderWidth: 1, borderColor: T.frame }}
-              >
-                <Text style={{ color: T.dim, fontSize: 9, fontWeight: '800' }}>{p.label}</Text>
-              </Pressable>
-            ))}
+          {/* the brush choice IS the icon (its SVG footprint), not a name */}
+          <Row style={{ gap: 6, flexWrap: 'wrap' }}>
+            {BRUSH_PRESETS.map((p) => {
+              const sh = presetShape(p);
+              const sel = b.stamp.kind === 'analytic' && b.stamp.shape === sh;
+              return (
+                <Pressable
+                  key={p.id}
+                  tooltip={p.label}
+                  onMouseDown={() => props.onBrushChange(normalizeBrush({ ...b, ...p.brush, ink: b.ink, size: b.size }))}
+                  style={{
+                    width: 34, height: 34, borderRadius: 6, alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: sel ? T.accent : T.control, borderWidth: 1, borderColor: sel ? T.accent : T.frame,
+                  }}
+                >
+                  <BrushIcon shape={sh} size={24} color={sel ? T.page : T.ink} />
+                </Pressable>
+              );
+            })}
           </Row>
-          <ChipRow options={shapeOpts} value={currentShape} onChange={(s) => patch({ stamp: { kind: 'analytic', shape: s } })} theme={T} wrap />
         </Section>
       ) : null}
 

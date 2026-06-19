@@ -7,6 +7,7 @@ export * from './model';
 export * from './colors';
 export * from './stroke';
 export * from './theme';
+export * from './icons';
 export * from './controls';
 export { ColorField, type ColorFieldProps } from './ColorField';
 export { BrushKit, type BrushKitProps } from './BrushKit';
@@ -17,6 +18,8 @@ export {
   type BrushStrokeController,
   type BrushStrokeHandlers,
   type ShapePreview,
+  type MappedPoint,
+  type ClipRect,
 } from '../hooks/useBrushStroke';
 export {
   useModifiers,

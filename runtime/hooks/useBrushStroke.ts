@@ -26,6 +26,15 @@ export type ShapePreview =
   | { tool: 'line'; ax: number; ay: number; bx: number; by: number }
   | { tool: 'rect' | 'ellipse'; ax: number; ay: number; bx: number; by: number };
 
+/** A clip rect in texture pixels — the UV island a dab is scissored to. */
+export interface ClipRect { x: number; y: number; w: number; h: number }
+
+/** A pointer mapped onto the paint texture. For 3D surfaces, `mapPoint`
+ *  raycasts the mesh and returns the hit's texture-pixel coords PLUS the hit
+ *  face's UV-island `clip` — so the same controller paints a flat canvas or a
+ *  building face / a shirt / any mesh, and a dab never bleeds across islands. */
+export interface MappedPoint { x: number; y: number; clip?: ClipRect }
+
 export interface BrushStrokeOpts {
   /** the target paintable's imperative ops (from usePaintable). */
   paint: PaintableOps;
@@ -35,14 +44,15 @@ export interface BrushStrokeOpts {
   /** live brush + tool — read every render, applied via refs. */
   brush: Brush;
   tool: BrushTool;
-  /** screen-space pointer → texture-pixel coords; return null to reject. */
-  mapPoint: (screenX: number, screenY: number) => { x: number; y: number } | null;
+  /** screen-space pointer → texture-pixel coords (+ optional per-hit clip for
+   *  3D). Return null to reject (off-surface / missed the mesh). */
+  mapPoint: (screenX: number, screenY: number) => MappedPoint | null;
   /** eyedropper result. */
   onPickColor?: (hex: string) => void;
   /** color the eraser writes until host alpha-erase lands (Phase B). */
   eraseColor?: string;
-  /** optional UV-island clip rect (texture px) so a dab can't bleed. */
-  clip?: { x: number; y: number; w: number; h: number };
+  /** static fallback clip when mapPoint doesn't carry a per-hit one. */
+  clip?: ClipRect;
   /** fired once when any stroke commits (undo checkpoints, dirty flags). */
   onStrokeEnd?: () => void;
 }
@@ -74,9 +84,20 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
   const engineRef = useRef<StrokeEngine | null>(null);
   const anchorRef = useRef<{ x: number; y: number } | null>(null);
   const lastEndRef = useRef<{ x: number; y: number } | null>(null);
+  // The clip of the most-recently-hit point — dabs (incl. interpolated ones)
+  // scissor to it, so a 3D stroke that lands on a face stays on that face's
+  // UV island. Updated by `map()` on every successful mapPoint.
+  const clipRef = useRef<ClipRect | null>(null);
   const [preview, setPreview] = useState<ShapePreview | null>(null);
 
   const { mods } = useModifiers();
+
+  // Map a pointer event onto the texture AND latch its per-hit clip.
+  const map = (e: any): MappedPoint | null => {
+    const p = ref.current.mapPoint(e.x, e.y);
+    if (p) clipRef.current = p.clip ?? ref.current.clip ?? null;
+    return p;
+  };
 
   // [ / ] size stepping + tool hotkeys are wired by the host via the kit; the
   // controller exposes the size stepper so chrome and keys share one path.
@@ -93,7 +114,7 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
     if (o.tool === 'eraser') rgb = hexToRgb01(o.eraseColor ?? '#0c0e14');
     else if (b.ink.kind === 'color') rgb = hexToRgb01(b.ink.hex);
     else rgb = [1, 1, 1]; // texture/shader inks resolve to color until Phase B
-    const c = o.clip;
+    const c = clipRef.current ?? o.clip;
     o.paint.brushColor(
       dab.x, dab.y, dab.radius, rgb[0], rgb[1], rgb[2],
       kindId, (b.angleDeg * Math.PI) / 180, b.aspect, b.hardness, b.flow, b.scatter,
@@ -152,7 +173,7 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
   const handlers: BrushStrokeHandlers = {
     onMouseDown: (e: any) => {
       const o = ref.current;
-      const p = o.mapPoint(e.x, e.y);
+      const p = map(e);
       if (!p) return;
       const tool = o.tool;
 
@@ -186,13 +207,13 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
       const o = ref.current;
       const eng = engineRef.current;
       if (eng && eng.drawing()) {
-        const p = o.mapPoint(e.x, e.y);
+        const p = map(e);
         if (p) stampMany(eng.move(p.x, p.y, e.pressure));
         return;
       }
       const anchor = anchorRef.current;
       if (!anchor) return;
-      const p = o.mapPoint(e.x, e.y);
+      const p = map(e);
       if (!p) return;
       let bx = p.x, by = p.y;
       if (o.tool === 'line') {
@@ -209,7 +230,7 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
       const o = ref.current;
       const eng = engineRef.current;
       if (eng && eng.drawing()) {
-        const p = o.mapPoint(e.x, e.y);
+        const p = map(e);
         if (p) { stampMany(eng.move(p.x, p.y, e.pressure)); lastEndRef.current = { x: p.x, y: p.y }; }
         eng.end();
         engineRef.current = null;
@@ -218,7 +239,7 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
       }
       const anchor = anchorRef.current;
       if (!anchor) return;
-      const p = o.mapPoint(e.x, e.y) ?? anchor;
+      const p = map(e) ?? anchor;
       let bx = p.x, by = p.y;
       if (o.tool === 'line') {
         const c = constrainLine(anchor.x, anchor.y, p.x, p.y, mods.shift);

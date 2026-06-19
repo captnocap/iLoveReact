@@ -1,0 +1,69 @@
+// runtime/paint/icons.ts — each brush shape drawn as path layers: the SVG icon
+// that IS the brush choice in the picker (req_1455 — "turn the svg into an icon
+// and use that icon as the brush choice over a name"), and the same path is the
+// seed for the Phase B host stamp mask. Centered at the origin in a ±12 range,
+// pure strings — render with <Graph.Path> (see BrushIcon in controls.tsx).
+
+import type { BrushShape } from './model';
+
+export interface IconLayer {
+  d: string;
+  /** filled glyph vs stroked outline (e.g. soft halo, fan bristles). */
+  fill: boolean;
+}
+
+function circle(cx: number, cy: number, r: number): string {
+  return `M ${cx},${cy - r} A ${r},${r} 0 1,1 ${cx},${cy + r} A ${r},${r} 0 1,1 ${cx},${cy - r} Z`;
+}
+function ellipse(cx: number, cy: number, rx: number, ry: number): string {
+  return `M ${cx},${cy - ry} A ${rx},${ry} 0 1,1 ${cx},${cy + ry} A ${rx},${ry} 0 1,1 ${cx},${cy - ry} Z`;
+}
+function rect(x: number, y: number, w: number, h: number): string {
+  return `M ${x},${y} L ${x + w},${y} L ${x + w},${y + h} L ${x},${y + h} Z`;
+}
+function poly(pts: [number, number][]): string {
+  return pts.map((p, i) => `${i ? 'L' : 'M'} ${p[0]},${p[1]}`).join(' ') + ' Z';
+}
+
+/** Path layers for a brush shape's icon. The same shapes the host will stamp. */
+export function brushIconLayers(shape: BrushShape): IconLayer[] {
+  switch (shape) {
+    case 'round':
+      return [{ d: circle(0, 0, 9), fill: true }];
+    case 'soft': // feathered: a halo ring + a small solid core
+      return [{ d: circle(0, 0, 9), fill: false }, { d: circle(0, 0, 4), fill: true }];
+    case 'square':
+      return [{ d: rect(-8, -8, 16, 16), fill: true }];
+    case 'flat':
+      return [{ d: rect(-10, -3.5, 20, 7), fill: true }];
+    case 'angle':
+      return [{ d: poly([[-10, 3], [4, -5], [10, -1], [-4, 7]]), fill: true }];
+    case 'filbert':
+      return [{ d: ellipse(0, 0, 9, 5), fill: true }];
+    case 'rake': // a comb of bristles
+      return [{ d: `${rect(-9, -8, 3, 16)} ${rect(-1.5, -8, 3, 16)} ${rect(6, -8, 3, 16)}`, fill: true }];
+    case 'fan': { // bristles radiating from the heel
+      const layers: IconLayer[] = [];
+      for (let i = -2; i <= 2; i++) {
+        const a = (i * 24 - 90) * (Math.PI / 180);
+        layers.push({ d: `M 0,9 L ${(Math.cos(a) * 17).toFixed(1)},${(9 + Math.sin(a) * 17).toFixed(1)}`, fill: false });
+      }
+      return layers;
+    }
+    case 'dry': { // broken, dry-brush speckle
+      const dots: [number, number][] = [[-7, -5], [-2, 2], [3, -3], [7, 4], [-5, 6], [5, -7], [0, -7], [2, 7]];
+      return [{ d: dots.map(([x, y]) => rect(x - 2, y - 2, 4, 4)).join(' '), fill: true }];
+    }
+    case 'spray': { // airbrush dot cloud (golden-angle scatter)
+      let d = '';
+      for (let i = 0; i < 16; i++) {
+        const a = i * 2.39996;
+        const r = 2 + (i % 5) * 1.7;
+        d += circle(Math.cos(a) * r * 1.1, Math.sin(a) * r * 1.1, 1.1) + ' ';
+      }
+      return [{ d: d.trim(), fill: true }];
+    }
+    case 'knife':
+      return [{ d: poly([[-10, 5], [7, -5], [10, -3], [-7, 7]]), fill: true }];
+  }
+}

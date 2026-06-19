@@ -9,9 +9,11 @@
 // at the low end) while the readout always shows the real value.
 
 import { useEffect, useState } from 'react';
-import { Box, Row, Text, Pressable, TextInput, Slider } from '../primitives';
+import { Box, Row, Text, Pressable, TextInput, Slider, Graph } from '../primitives';
 import { type PaintTheme, DARK_THEME } from './theme';
 import { sizeTrackToPx, sizePxToTrack } from './stroke';
+import { brushIconLayers } from './icons';
+import type { BrushShape } from './model';
 
 function fmt(v: number, precision: number): string {
   return precision <= 0 ? String(Math.round(v)) : v.toFixed(precision);
@@ -122,5 +124,22 @@ export function ChipRow<T extends string>(props: {
         );
       })}
     </Row>
+  );
+}
+
+// ── BrushIcon — a brush shape drawn from its SVG path layers. This IS the brush
+// choice in the picker (an icon, not a name) and the seed for the Phase B stamp.
+
+export function BrushIcon(props: { shape: BrushShape; size?: number; color: string }) {
+  const size = props.size ?? 26;
+  const layers = brushIconLayers(props.shape);
+  return (
+    <Graph style={{ width: size, height: size, pointerEvents: 'none' }} viewX={0} viewY={0} viewZoom={1}>
+      {layers.map((l, i) =>
+        l.fill
+          ? <Graph.Path key={i} d={l.d} fill={props.color} />
+          : <Graph.Path key={i} d={l.d} stroke={props.color} strokeWidth={1.8} />,
+      )}
+    </Graph>
   );
 }
