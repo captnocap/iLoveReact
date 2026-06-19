@@ -36,7 +36,7 @@ import { callHost } from '@reactjit/ffi';
 /** Per-surface activation scope. A scope is a focus world: within it a chord
  *  means ONE thing; across scopes the same key may differ (E orbits the iso
  *  camera, E rotates the canvas brush) because only one is active per press. */
-export type EditorScope = 'canvas' | 'iso-build' | 'bench';
+export type EditorScope = 'canvas' | 'iso-build' | 'bench' | 'studio';
 
 export type EditorBinding = {
   /** dot-namespaced action id, `<concern>.<verb>` (e.g. 'brush.rotate-cw') */
@@ -82,6 +82,16 @@ export const EDITOR_BINDINGS: EditorBinding[] = [
   { action: 'bench.undo', scope: 'bench', keys: ['ctrl+z'], label: 'Undo (the active source)', legend: '^Z undo' },
   { action: 'bench.redo', scope: 'bench', keys: ['ctrl+y', 'ctrl+shift+z'], label: 'Redo (the active source)', legend: '^Y redo' },
   { action: 'bench.save', scope: 'bench', keys: ['ctrl+s'], label: 'Save (the active source)', legend: '^S save' },
+
+  // ── 'studio' — the model editor viewport (StudioViewport) ──────────────────
+  // Folds the hand-rolled selection-key listener (req_0978) into the contract.
+  // Ctrl+Z/Y stay OUT of this scope on purpose: the always-active 'bench' scope
+  // already owns history (delegating to the source), and Studio layers paint-vs-
+  // model undo on its own — binding it here too would double-fire.
+  { action: 'selection.cancel', scope: 'studio', keys: ['escape'], label: 'Clear the selection (or close the open popup / finish moving a backdrop)', legend: 'Esc clear' },
+  { action: 'selection.all', scope: 'studio', keys: ['ctrl+a', 'meta+a'], label: 'Select every element of the active mode (vertex / edge / face)', legend: '^A all' },
+  { action: 'selection.delete', scope: 'studio', keys: ['delete', 'backspace'], label: 'Delete the selected faces — or the selected rig joint / pivot', legend: 'Del remove' },
+  { action: 'view.recenter', scope: 'studio', keys: ['f', 'home'], label: 'Reframe the camera on the model', legend: 'F reframe' },
 ];
 
 const ACTION_ID_SHAPE = /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/;

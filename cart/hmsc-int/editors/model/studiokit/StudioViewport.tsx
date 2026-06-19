@@ -31,7 +31,8 @@ import { CharacterCaptures, FigureMeshes, buildPartRender } from '../../../game/
 import { HMSC_SCALE } from '../../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../../tunables';
-import { useHeldModifiers } from '../../useEditorControls';
+import { useEditorControls, useHeldModifiers } from '../../useEditorControls';
+import { KeyLegend } from '../../KeyLegend';
 import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from '../editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from '../anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from '../wheelMount';
@@ -724,50 +725,52 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     setBv(null);
   };
 
-  // Selection keys (a focused TextInput consumes keys before the bus, so typing a
-  // name never triggers these — USER req_0978):
-  //  • Esc → clear the selection (the ONE deselect-all besides picking anew).
-  //  • Ctrl/Cmd+A → select EVERY element of the active mode (req_1020).
-  //  • Delete/Backspace → remove the selected faces, or the faces a selected
-  //    vertex/edge belongs to (Blockbench's connected-faces delete, req_1020).
-  useEffect(() => {
-    const off = busOn('__keydown', (e: any) => {
-      const key = String(e?.key ?? '').toLowerCase();
-      // Esc closes an open bevel popup first (drop the preview), like a Cancel.
-      if (key === 'escape') { if (moveBackdropId) { setMoveBackdropId(null); return; } if (bv) { setBv(null); setDraft(null); return; } setSel(emptySelection()); setRigSel(null); return; }
-      // RIG mode: Delete removes the selected JOINT, or drops the pivot (pivots are
-      // opt-in, req_1054 — removing one makes the part joints-only again); Ctrl+A /
-      // face-delete don't apply here.
-      if (selMode === 'rig') {
-        if ((key === 'delete' || key === 'backspace') && activePart) {
-          if (rigSel?.kind === 'joint') { props.onEditMesh(activePart.id, removeMount(activePart.mesh, rigSel.name)); setRigSel(null); }
-          else if (rigSel?.kind === 'pivot') { props.onEditMesh(activePart.id, clearPivot(activePart.mesh)); setRigSel(null); }
-        }
-        return;
-      }
-      if (selMode === 'object' || selMode === 'paint' || !activePart || lc || bv || autoFix) return;
-      const mesh = activePart.mesh;
-      if (key === 'a' && (e?.ctrlKey || e?.metaKey)) {
+  // Selection keys — folded into the EDITOR CONTROL CONTRACT ('studio' scope,
+  // editors/controls.ts). The dispatcher owns the typing gate, so the old
+  // hand-written "a focused TextInput eats the key" guard (req_0978) is gone,
+  // not copied. Defaults reproduce the prior bindings; F now actually reframes
+  // (it was advertised in the tooltip but never wired). Ctrl+Z/Y stay OUT of
+  // this scope — see the controls.ts note (bench owns history).
+  useEditorControls('studio', {
+    active: true,
+    handlers: {
+      // Esc: finish moving a backdrop → drop an open bevel preview → clear the selection.
+      'selection.cancel': () => {
+        if (moveBackdropId) { setMoveBackdropId(null); return; }
+        if (bv) { setBv(null); setDraft(null); return; }
+        setSel(emptySelection()); setRigSel(null);
+      },
+      // Ctrl/Cmd+A: select every element of the active mode (vertex/edge/face only).
+      'selection.all': () => {
+        if (selMode === 'rig' || selMode === 'object' || selMode === 'paint' || !activePart || lc || bv || autoFix) return;
+        const mesh = activePart.mesh;
         if (selMode === 'face') setSel({ verts: new Set(), edges: new Set(), faces: new Set(mesh.faces.map((_, i) => i)) });
         else if (selMode === 'vertex') setSel({ verts: new Set(mesh.verts.map((_, i) => i)), edges: new Set(), faces: new Set() });
         else setSel({ verts: new Set(), edges: new Set(meshEdges(mesh).map((_, i) => i)), faces: new Set() });
-        // The host's Ctrl+A ALSO lights up every text label in the whole app tree
-        // (selection.zig sel_all). We handled the key for the mesh — drop that
-        // app-wide highlight so it never renders (req_1058; door is a no-op on an
-        // un-rebuilt host).
+        // The host's Ctrl+A also lights up every text label app-wide (selection.zig
+        // sel_all); we handled it for the mesh, so drop that highlight (req_1058).
         callHost('__selection_clear', null);
-        return;
-      }
-      if (key === 'delete' || key === 'backspace') {
+      },
+      // Delete/Backspace: in rig mode remove the selected joint (or drop the pivot,
+      // req_1054); otherwise delete the faces the selection belongs to (req_1020).
+      'selection.delete': () => {
+        if (selMode === 'rig') {
+          if (!activePart) return;
+          if (rigSel?.kind === 'joint') { props.onEditMesh(activePart.id, removeMount(activePart.mesh, rigSel.name)); setRigSel(null); }
+          else if (rigSel?.kind === 'pivot') { props.onEditMesh(activePart.id, clearPivot(activePart.mesh)); setRigSel(null); }
+          return;
+        }
+        if (selMode === 'object' || selMode === 'paint' || !activePart || lc || bv || autoFix) return;
+        const mesh = activePart.mesh;
         const faces = selectionFaceIndices(mesh, selMode, sel);
         if (faces.length === 0) return;
         props.onEditMesh(activePart.id, deleteFaces(mesh, faces));
         setSel(emptySelection());
-      }
-    });
-    return () => off();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selMode, sel, activePart?.id, activePart?.mesh, lc, bv, autoFix, rigSel, moveBackdropId]);
+      },
+      // F / Home: reframe the camera on the model (reframe() is defined below).
+      'view.recenter': () => reframe(),
+    },
+  });
   // a live camera snapshot matching gpu/3d.zig (eye from camera.zig orbital math,
   // near 0.02 / fov from the Scene3D.Camera below); used by the overlay + picking.
   const camSnap = (): CameraSnap => {
@@ -2647,6 +2650,12 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       })()}
 
       <ViewCompass lookRef={lookRef} onFace={faceAxis} />
+
+      {/* Discoverable keymap — renders straight from the 'studio' control table
+          (editors/controls.ts), so it can never drift from what the keys do. */}
+      <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 8, alignItems: 'center', zIndex: Z.overlay }}>
+        <KeyLegend scope="studio" dimmed />
+      </Box>
 
       {/* The selected joint's METADATA (name/type/axis/limit) is edited in workspace
           column 3 (RigMetaPanel, req_1053) — the viewport just places it. */}
