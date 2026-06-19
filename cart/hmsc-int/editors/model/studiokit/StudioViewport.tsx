@@ -23,7 +23,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { callHost } from '@reactjit/runtime/ffi';
-import { useHotState, useInterval, useRerender } from '@reactjit/hooks';
+import { useHotState, getHotState, setHotState, useInterval, useRerender } from '@reactjit/hooks';
 import { Box, Col, patchDynSlot, Pressable, Row, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { GAME_CAMERA, GAME_CHROME, GAME_FIGURE, GAME_NATIVE_CAMERA } from '../../../game';
@@ -206,9 +206,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // -Z at yaw 0, so +90° turns them toward −X).
   const scaleOffset = useMemo<Vec3>(() => [frame.radius + STUDIO.scaleFigureGapMeters, 0, 0], [frame.radius]);
 
-  const lookRef = useRef({ yaw: STUDIO.bootYaw, pitch: STUDIO.bootPitch });
-  const distRef = useRef(fitDistance());
-  const fovRef = useRef<number>(STUDIO.fov);
+  // WORKING-VIEW PERSISTENCE (req_1435/1437): the camera is twig state — it must
+  // survive a hot reload so a code update never throws away where you were
+  // looking. Restored EXACTLY (yaw/pitch/dist/fov), because an approximate manual
+  // re-aim shifts the parallax between the near model and the far trace backdrop,
+  // so the reference image lands offset. Read once at mount (resets on cold
+  // restart — hotstate is in-process); persistCam() writes it back on every move.
+  const camSaved = useRef(getHotState<{ yaw: number; pitch: number; dist: number; fov: number } | null>('studio:cam', null)).current;
+  const lookRef = useRef(camSaved ? { yaw: camSaved.yaw, pitch: camSaved.pitch } : { yaw: STUDIO.bootYaw, pitch: STUDIO.bootPitch });
+  const distRef = useRef(camSaved ? camSaved.dist : fitDistance());
+  const fovRef = useRef<number>(camSaved ? camSaved.fov : STUDIO.fov);
   const cameraRef = useRef<any>(null);
   const ctlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 1000, height: 700 });
@@ -433,12 +440,26 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     toast(`loaded ${path}${slice ? ` → face ${slice.faceIndex}` : ''}`);
   };
 
-  const [sel, setSel] = useState<Selection>(emptySelection);
+  // Selection is twig state too (req_1435/1437): a hot reload must NOT throw away
+  // what you had selected — it's the one thing you can't re-aim by hand (the gizmo
+  // is just gone). Restored from hotstate as arrays (Sets aren't JSON), valid
+  // because the mesh indices are unchanged across a reload.
+  const [sel, setSel] = useState<Selection>(() => {
+    const s = getHotState<{ v: number[]; e: number[]; f: number[] } | null>('studio:sel', null);
+    return s ? { verts: new Set(s.v), edges: new Set(s.e), faces: new Set(s.f) } : emptySelection();
+  });
+  useEffect(() => { setHotState('studio:sel', { v: [...sel.verts], e: [...sel.edges], f: [...sel.faces] }); }, [sel]);
   // mouse-press events don't carry modifier flags here — held shift/ctrl come
   // from the key bus (req_0979). This is the same ref IsoAuthor uses.
   const heldMods = useHeldModifiers();
-  // selection is per-part — drop it when the active part changes.
-  useEffect(() => { setSel(emptySelection()); }, [activePart?.id]);
+  // selection is per-part — drop it when the active part changes. The mount run
+  // is SKIPPED so a restored selection survives a hot reload (req_1437); it only
+  // clears on a real part switch.
+  const skipFirstSelClear = useRef(true);
+  useEffect(() => {
+    if (skipFirstSelClear.current) { skipFirstSelClear.current = false; return; }
+    setSel(emptySelection());
+  }, [activePart?.id]);
   // publish the selected faces to the shared store so the UV panel scopes to the
   // selected face's island (Part 5.2) — only meaningful in face mode.
   useEffect(() => {
@@ -1052,7 +1073,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selMode, tex, props.parts.length, props.sceneName, paintFaceSig, paintRepackNeeded]);
 
-  const sendOrbit = () => ctlRef.current?.setOrbit({ target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: distRef.current, fov: fovRef.current, zoom: 1 });
+  // Save the live camera as twig state (survives a hot reload, req_1435/1437).
+  const persistCam = () => setHotState('studio:cam', { yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, dist: distRef.current, fov: fovRef.current });
+  const sendOrbit = () => { ctlRef.current?.setOrbit({ target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: distRef.current, fov: fovRef.current, zoom: 1 }); persistCam(); };
 
   useEffect(() => {
     const nodeId = Number(cameraRef.current?.id ?? 0);
@@ -1065,8 +1088,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     return () => { ctlRef.current = null; ctl.disable(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Re-frame when the scene changes (part added/removed/reordered/toggled).
-  useEffect(() => { distRef.current = fitDistance(); sendOrbit(); /* eslint-disable-next-line */ }, [revision]);
+  // Re-frame when the scene changes (part added/removed/reordered/toggled) — but
+  // NOT on the mount that follows a hot reload when a camera was restored, or the
+  // re-fit would clobber the user's saved zoom (req_1437).
+  const skipFirstFit = useRef(!!camSaved);
+  useEffect(() => {
+    if (skipFirstFit.current) { skipFirstFit.current = false; sendOrbit(); return; }
+    distRef.current = fitDistance(); sendOrbit();
+    /* eslint-disable-next-line */
+  }, [revision]);
 
   // Begin a host-owned gizmo drag (req_1270): mount the draft ONCE so the host
   // claims the 'studio.draft' dyn slot, then onMove streams verts straight to it
@@ -1559,6 +1589,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       }
       return;
     }
+    // orbit drag ended — the host accumulated the angle via setInputDeltas, so
+    // sendOrbit never fired; save the final camera as twig state (req_1437).
+    if (dragRef.current) { dragRef.current = null; persistCam(); return; }
     dragRef.current = null;
   };
   const onWheel = (e: any) => {
@@ -2036,7 +2069,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         <Box style={{ position: 'absolute', left: 0, right: 0, top: 44, alignItems: 'center', zIndex: Z.overlay }}>
           <Row style={{ gap: 8, alignItems: 'center', paddingLeft: 10, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#9b7fd6' }}>
             <Text fontSize={10} color="#e0d4ff" style={{ fontFamily: 'monospace' }}>{`moving · ${moveBackdrop.name} · drag the arrows · scroll to orbit`}</Text>
-            <Pressable onPress={() => setMoveBackdropId(null)} tooltip="Done positioning (Esc)" style={STEP_BTN}><Text fontSize={10} color="#7fd6a0">done</Text></Pressable>
+            <Pressable onPress={() => setMoveBackdropId(null)} tooltip="Done positioning (Esc) " style={STEP_BTN}><Text fontSize={10} color="#7fd6a0">done</Text></Pressable>
           </Row>
         </Box>
       ) : null}
