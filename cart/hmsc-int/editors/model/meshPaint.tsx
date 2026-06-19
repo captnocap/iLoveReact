@@ -213,42 +213,77 @@ export function pickFaceCell(targets: PaintTarget[], cam: CameraSnap, sx: number
  *  PIXEL painter — no cell grid. `u,v` is the exact texel the cursor sits on. */
 export type FaceUVHit = { partIndex: number; faceIndex: number; u: number; v: number };
 
-/** Raycast every part for the frontmost uv-mapped face under (sx,sy) and return the
- *  interpolated UV at the hit (barycentric over the fan triangulation). This is the
- *  pixel-painter pick: stamp a brush at (u*texels, v*texels) into the model's RGBA
- *  paint texture. Glass faces and faces without uv are skipped (nothing to paint).
- *  Nearest t wins, so the front-most visible uv-mapped face is the one painted. */
+/** True when the model's faces do NOT each own a UNIQUE atlas island — i.e.
+ *  painting one would paint others (req_1375, the "1 click → green in 4 places"
+ *  bug). Catches three sharers: a face with no uv, a face whose uv fills ~the
+ *  whole [0,1] square (the default mapping — every such face samples the entire
+ *  texture), and two faces packed onto the SAME slot (congruent-face dedup /
+ *  combine). When this is true, paint mode must re-pack with dedup OFF so every
+ *  face is independently paintable. After such a pack it returns false (stable). */
+export function paintUVsNeedRepack(meshes: EditMesh[]): boolean {
+  const seen = new Set<string>();
+  for (const m of meshes) {
+    for (const face of m.faces) {
+      if (face.glass || face.loop.length < 3) continue;
+      if (!face.uv || face.uv.length < 3) return true; // unmapped → can't isolate it
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [u, v] of face.uv) { if (u < x0) x0 = u; if (u > x1) x1 = u; if (v < y0) y0 = v; if (v > y1) y1 = v; }
+      const w = x1 - x0, h = y1 - y0;
+      if (w > 0.97 && h > 0.97) return true; // ~full-square default → shares with every default face
+      const key = `${x0.toFixed(4)},${y0.toFixed(4)},${w.toFixed(4)},${h.toFixed(4)}`;
+      if (seen.has(key)) return true; // identical slot as another face → deduped/overlapping
+      seen.add(key);
+    }
+  }
+  return false;
+}
+
+/** Raycast for the SURFACE the cursor is over and return its interpolated UV.
+ *
+ *  Occlusion-correct (req_1373): tests the ray against EVERY non-glass face (not
+ *  just uv-mapped ones) and keeps the nearest hit — the front-most surface. If that
+ *  nearest face has no uv, returns null (the face isn't paintable) instead of
+ *  punching THROUGH it to a uv-mapped face BEHIND. The old skip-no-uv-faces pick did
+ *  exactly that: clicking a no-uv front face painted a hidden back face, so a dab
+ *  "wouldn't paint" where you clicked and turned up arbitrarily elsewhere. Now the
+ *  click lands on what you actually see, or nothing. */
 export function pickFaceUV(targets: PaintTarget[], cam: CameraSnap, sx: number, sy: number): FaceUVHit | null {
   const ray = screenRay(cam, sx, sy);
-  let best: FaceUVHit | null = null;
   let bestT = Infinity;
+  let bestUV: FaceUVHit | null = null; // populated only when the nearest face has uv
   targets.forEach((tgt, partIndex) => {
     const m = tgt.mesh;
+    const lift = tgt.lift;
     for (let fi = 0; fi < m.faces.length; fi += 1) {
       const face = m.faces[fi];
-      if (face.glass || !face.uv || face.uv.length < 3 || face.loop.length < 3) continue;
-      const lift = tgt.lift;
+      if (face.glass || face.loop.length < 3) continue; // glass: paint through it
       const v0 = m.verts[face.loop[0]];
       const w0: V3 = [v0[0], v0[1] + lift, v0[2]];
+      const hasUV = !!face.uv && face.uv.length >= 3;
       for (let i = 1; i < face.loop.length - 1; i += 1) {
         const va = m.verts[face.loop[i]], vb = m.verts[face.loop[i + 1]];
         const wa: V3 = [va[0], va[1] + lift, va[2]];
         const wb: V3 = [vb[0], vb[1] + lift, vb[2]];
         const hit = rayTri(ray.o, ray.d, w0, wa, wb);
         if (!hit || hit.t >= bestT) continue;
-        const ba = 1 - hit.u - hit.v;
-        const uv0 = face.uv[0], uva = face.uv[i], uvb = face.uv[i + 1];
         bestT = hit.t;
-        best = {
-          partIndex,
-          faceIndex: fi,
-          u: ba * uv0[0] + hit.u * uva[0] + hit.v * uvb[0],
-          v: ba * uv0[1] + hit.u * uva[1] + hit.v * uvb[1],
-        };
+        if (hasUV) {
+          const ba = 1 - hit.u - hit.v;
+          const uv0 = face.uv![0], uva = face.uv![i], uvb = face.uv![i + 1];
+          bestUV = {
+            partIndex,
+            faceIndex: fi,
+            u: ba * uv0[0] + hit.u * uva[0] + hit.v * uvb[0],
+            v: ba * uv0[1] + hit.u * uva[1] + hit.v * uvb[1],
+          };
+        } else {
+          // A no-uv face is now the nearest surface — it OCCLUDES anything behind.
+          bestUV = null;
+        }
       }
     }
   });
-  return best;
+  return bestUV;
 }
 
 /** The cells a brush stamp covers, clamped to the face's cell bounds (so the stroke

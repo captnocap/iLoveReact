@@ -14,16 +14,23 @@ import { Box, Paintable, Scene3D } from '@reactjit/runtime/primitives';
 import { cuboid, editMeshToGeometry } from './hmsc-int/editors/model/editMesh';
 import { textureizeScene, DEFAULT_TEXTURE_OPTIONS } from './hmsc-int/editors/model/textureize';
 import { makeProjector, orbitalEyeJS, type CameraSnap } from './hmsc-int/editors/model/meshSelect';
-import { pickFaceUV, type PaintTarget } from './hmsc-int/editors/model/meshPaint';
+import { pickFaceUV, paintUVsNeedRepack, type PaintTarget } from './hmsc-int/editors/model/meshPaint';
 import { STUDIO_PAINT_KEY, PAINT_TEX, baseCoat, stampUV, faceIslandPx } from './hmsc-int/editors/model/meshPaintTexture';
 
 const SIZE = 540;
 const FOV = 45;
 
-// Real Studio path: a cuboid, textureized so every face owns a packed UV island.
+// Real Studio path, simulating req_1375's fix: a cuboid is first textureized the
+// DEFAULT way (dedup ON) — all 6 congruent faces collapse to ONE shared island, so
+// painting one would paint all six (the bug). paintUVsNeedRepack detects that, and
+// we re-pack dedup OFF so every face owns a UNIQUE island. Stamping one face then
+// stays on that one face only.
 const baseCube = cuboid(2, 2, 2);
-const packed = textureizeScene([baseCube], { ...DEFAULT_TEXTURE_OPTIONS, dedupIslands: false, combineIslands: false, type: 'solid', color: '#c8ccd2' }, 16, 1024);
+const shared = textureizeScene([baseCube], { ...DEFAULT_TEXTURE_OPTIONS, type: 'solid', color: '#c8ccd2' }, 16, 1024).meshes[0];
+const sharedFlag = paintUVsNeedRepack([shared]); // expect TRUE (dedup collapsed faces)
+const packed = textureizeScene([shared], { ...DEFAULT_TEXTURE_OPTIONS, dedupIslands: false, combineIslands: false, rearrangeUV: true, type: 'solid', color: '#c8ccd2' }, 16, 1024);
 const cube = packed.meshes[0];
+const uniqueFlag = paintUVsNeedRepack([cube]); // expect FALSE (each face its own island)
 const geom = editMeshToGeometry(cube);
 const cam: CameraSnap = { eye: orbitalEyeJS([0, 0, 0], 35, 22, 6), target: [0, 0, 0], fov: FOV, aspect: 1, w: SIZE, h: SIZE, near: 0.02 };
 
@@ -38,6 +45,7 @@ function faceCenter(fi: number): [number, number, number] {
 
 export default function StudioPaintProbe() {
   useEffect(() => {
+    (globalThis as any).__hostLog?.(0, `[probe] dedup-shared needsRepack=${sharedFlag} (expect true); after dedup-off needsRepack=${uniqueFlag} (expect false)`);
     const targets: PaintTarget[] = [{ partId: 'cube', mesh: cube, lift: 0 }];
     const project = makeProjector(cam);
     // pick a face whose projected center is well inside the viewport and front-facing

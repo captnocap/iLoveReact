@@ -53,8 +53,8 @@ import {
   SelectionOverlay, makeProjector, orbitalEyeJS, pickElement, applyPick, emptySelection, selectionCount,
   type SelMode, type Selection, type CameraSnap,
 } from './meshSelect';
-import { pickFaceCell, pickFaceUV, brushCells, faceCellGrid, resamplePaint, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintCells, type PaintTarget, type FaceHit, type FaceUVHit } from './meshPaint';
-import { STUDIO_PAINT_KEY, PAINT_TEX, baseCoat, stampUV, faceIslandPx } from './meshPaintTexture';
+import { pickFaceCell, pickFaceUV, paintUVsNeedRepack, brushCells, faceCellGrid, resamplePaint, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintCells, type PaintTarget, type FaceHit, type FaceUVHit } from './meshPaint';
+import { STUDIO_PAINT_KEY, PAINT_TEX, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint } from './meshPaintTexture';
 import { Paintable } from '@reactjit/runtime/primitives';
 import { PaintGridOverlay } from './meshPaintOverlay';
 import { PaintPanel } from './PaintPanel';
@@ -1105,6 +1105,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // such face shows on every other (the mirrored-prong bug, req_1320). A mismatch vs
   // the packed tex's faceSig means "re-slot needed".
   const paintFaceSig = props.parts.map((p) => `${p.id}:${p.mesh.faces.length}`).join('|');
+  // req_1375: faces sharing an atlas island (congruent-face dedup, or a default
+  // full-square UV) make one click paint several faces. faceSig only sees the face
+  // COUNT, so it can't catch a shared/default UV layout — this does. When true, the
+  // pack below MUST run (dedup off) so every face owns a unique, isolated island.
+  const paintRepackNeeded = painting && paintUVsNeedRepack(props.parts.map((p) => p.mesh));
   // Entering paint needs a texture (distinct per-face atlas slots — else every face
   // shares the full square and paint bleeds). Build/refresh the textureize pack, then
   // show it. Re-packs whenever the face topology changed since the last pack so NEW
@@ -1112,7 +1117,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const ensureTexture = () => {
     // Already packed for paint AND no new faces since → just show it. The faceSig gate
     // both avoids needless re-packs and breaks the auto-ensure effect's feedback loop.
-    if (tex?.paintFit && tex.name === 'paint-v4' && tex.faceSig === paintFaceSig) { setTexView(true); return; }
+    if (tex?.paintFit && tex.name === 'paint-v4' && tex.faceSig === paintFaceSig && !paintRepackNeeded) { setTexView(true); return; }
     // PAINT pack: dedup OFF so EVERY face owns its own slot (independently paintable);
     // a SOLID neutral base so paint isn't buried in the pastel UV-debug template.
     const paintOpts = { ...DEFAULT_TEXTURE_OPTIONS, dedupIslands: false, combineIslands: false, type: 'solid' as const, color: '#c8ccd2', name: 'paint-v4' };
@@ -1232,17 +1237,19 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selMode]);
-  // PIXEL painter base coat (req_1372): on entering paint mode, flat-fill the RGBA
-  // paint texture to the texture's base colour ONCE, after the <Paintable> CREATE
-  // drains (a clear op before the entry exists is dropped). Fires once per entry —
-  // re-coating would wipe live strokes (persistence is the follow-up).
+  // PIXEL painter restore/base-coat (req_1373): on entering paint mode (and after a
+  // hot reload, which re-runs this), RESTORE the model's saved paint into the RGBA
+  // texture; only if there's none do we flat-fill the base colour. Restore uploads
+  // (parks until the <Paintable> CREATE drains); base coat needs the entry, hence the
+  // short delay. This is why hot reload no longer wipes paint — it reloads the PNG.
   useEffect(() => {
     if (!painting || !tex) return;
     const base = tex.color ?? '#c8ccd2';
-    const id = setTimeout(() => baseCoat(base), 80);
+    const model = props.sceneName ?? null;
+    const id = setTimeout(() => { if (!restorePaint(model)) baseCoat(base); }, 80);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [painting]);
+  }, [painting, props.sceneName, !!tex]);
   // Seed the live buffer from the persisted paint whenever the open texture changes
   // (entering paint, a re-textureize, undo). Keyed on paintRev so an external change
   // re-syncs but our own per-dab writes (which don't touch tex) don't clobber the buffer.
@@ -1260,10 +1267,14 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // Commit the live buffer to persisted paint (one setState) at the end of a stroke.
   // Commit the live buffer to BRANCH paint (undoable) for every part the stroke
   // touched — one onEditPaint per part. Mint the palette on the first stroke.
+  // Stroke-end commit (req_1373): persist the painted RGBA texture (readback → PNG →
+  // localstore) so it survives hot reload AND restart. Mints the default palette on
+  // first paint so the active colour resolves. The old per-part PaintCells write is
+  // gone — the pixel painter is the source of truth now.
   const commitPaint = () => {
     if (touchedRef.current.size && !props.palette) props.onSetPalette(defaultPalette());
-    for (const id of touchedRef.current) props.onEditPaint(id, { ...(paintRef.current[id] ?? {}) });
     touchedRef.current.clear();
+    savePaint(props.sceneName ?? null);
   };
   // resolve paint against the model palette, falling back to the default so a stroke
   // shows live BEFORE the first commit mints the real (persisted) palette.
@@ -1280,9 +1291,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     // exact "I'm painting but no paint shows" trap, req_1226). Build the texture if
     // missing, OR re-slot when the face topology changed (a new/mirrored face needs its
     // own atlas slot — req_1320); else just force the view on.
-    if (!tex?.paintFit || tex.faceSig !== paintFaceSig) ensureTexture(); else setTexView(true);
+    // …or re-pack when faces SHARE an island (req_1375) so each is independently
+    // paintable; else just force the view on.
+    if (!tex?.paintFit || tex.faceSig !== paintFaceSig || paintRepackNeeded) ensureTexture(); else setTexView(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selMode, tex, props.parts.length, props.sceneName, paintFaceSig]);
+  }, [selMode, tex, props.parts.length, props.sceneName, paintFaceSig, paintRepackNeeded]);
 
   const sendOrbit = () => ctlRef.current?.setOrbit({ target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: distRef.current, fov: fovRef.current, zoom: 1 });
 
@@ -2150,19 +2163,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           />
         : null}
 
-      {/* PAINT grid overlay (Phase 5c, req_1203): the global texel grid on the face
-          under the cursor + the cell about to be painted. Ref-driven + self-ticking,
-          so hovering/painting never re-renders the viewport (the lag fix). */}
-      {selMode === 'paint' && tex
-        ? <PaintGridOverlay
-            parts={paintTargets()}
-            getHover={() => paintHoverRef.current}
-            cell={paintCell}
-            dabRadius={Math.max(0, paintBrush - 1)}
-            color={paintErase ? '#ff6b6b' : (slotById(livePalette, activeSlot)?.pseudo ?? '#ffffff')}
-            camSnap={camSnap}
-          />
-        : null}
+      {/* PIXEL painter (req_1373): the cell-grid overlay is gone — there are no
+          cells anymore, it was just noise on the model. You paint pixels. */}
 
       {/* PAINT controls (req_1297): the floating panel — normal colours + custom
           colour, materials, brush/erase/view/variant/clear. Paint mode only. */}

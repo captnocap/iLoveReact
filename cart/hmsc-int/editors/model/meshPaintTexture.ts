@@ -14,6 +14,8 @@
 // bleed onto a neighbour island packed beside it in the atlas.
 
 import { paintableOps } from '@reactjit/runtime/hooks/usePaintable';
+import * as localstore from '@reactjit/hooks/localstore';
+import { bytesToBase64, base64ToBytes } from '@reactjit/workspace';
 import { faceTexelRect, type TexelRect } from './meshPaint';
 import { type EditMesh } from './editMesh';
 
@@ -67,4 +69,37 @@ export function stampUV(u: number, v: number, hex: string, radiusPx: number, isl
  *  `baseHex` is the texture's base colour so erase reveals it. */
 export function eraseUV(u: number, v: number, baseHex: string, radiusPx: number, island: TexelRect | null): void {
   stampUV(u, v, baseHex, radiusPx, island);
+}
+
+// ── Persistence (req_1373) ────────────────────────────────────────────────
+// The paint lives in a GPU texture; a hot reload (or restart) would lose it. So
+// on each stroke we read the texture back (raw RGBA) and stash it as base64 in
+// localstore keyed by the model. On entering paint we restore it (upload parks
+// until the <Paintable> exists, then flushes). Raw (not PNG) keeps this a pure
+// cart-side feature — no @reactjit/image, no new build gate, no host rebuild;
+// hot reload picks it up instantly. (1024² RGBA ≈ 4MB → ~5.5MB base64 per save;
+// PNG-compressing it is a follow-up for whenever the host is rebuilt anyway.)
+
+const PAINT_STORE_NS = 'studio-paint';
+const RGBA_LEN = PAINT_TEX * PAINT_TEX * 4;
+const storeKey = (model: string | null) => `paint:${model || 'untitled'}`;
+
+/** Read the live paint texture back and persist it for `model`. Call at
+ *  stroke-end / on leaving paint — readback blocks on the GPU, so NOT per dab. */
+export function savePaint(model: string | null): void {
+  const rgba = paintTex().readback();
+  if (!rgba || rgba.length !== RGBA_LEN) return;
+  localstore.nsSet(PAINT_STORE_NS, storeKey(model), bytesToBase64(rgba));
+}
+
+/** Restore `model`'s saved paint into the texture. Returns true if there was
+ *  saved paint (so the caller skips the base coat). Upload parks until the
+ *  <Paintable> CREATE drains, so this is safe to call right on paint-enter. */
+export function restorePaint(model: string | null): boolean {
+  const b64 = localstore.nsHas(PAINT_STORE_NS, storeKey(model)) ? localstore.nsGet(PAINT_STORE_NS, storeKey(model)) : '';
+  if (!b64) return false;
+  const rgba = base64ToBytes(b64);
+  if (!rgba || rgba.length !== RGBA_LEN) return false;
+  paintTex().upload(rgba);
+  return true;
 }
