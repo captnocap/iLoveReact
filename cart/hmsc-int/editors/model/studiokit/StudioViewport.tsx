@@ -32,6 +32,7 @@ import { HMSC_SCALE } from '../../../world/scale';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { editorTunables } from '../../tunables';
 import { useEditorControls, useHeldModifiers } from '../../useEditorControls';
+import { chordHintFor } from '../../controls';
 import { KeyLegend } from '../../KeyLegend';
 import { loadKeybinds } from '../../keybinds';
 import { HotkeysPanel } from './dialogs/HotkeysPanel';
@@ -776,8 +777,25 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       },
       // F / Home: reframe the camera on the model (reframe() is defined below).
       'view.recenter': () => reframe(),
+      // Modes (1–6): same gate as the tab (non-object needs a part; paint mints a texture).
+      'mode.object': () => setSelMode('object'),
+      'mode.vertex': () => { if (activePart) setSelMode('vertex'); },
+      'mode.edge': () => { if (activePart) setSelMode('edge'); },
+      'mode.face': () => { if (activePart) setSelMode('face'); },
+      'mode.rig': () => { if (activePart) setSelMode('rig'); },
+      'mode.paint': () => { if (activePart) { ensureTexture(); setSelMode('paint'); } },
+      // Transform tools (G/R/S): only in the geometry modes, like the rail buttons.
+      'tool.move': () => { if (selMode !== 'rig' && selMode !== 'paint') setGizmoTool('move'); },
+      'tool.rotate': () => { if (selMode !== 'rig' && selMode !== 'paint') setGizmoTool('rotate'); },
+      'tool.resize': () => { if (selMode !== 'rig' && selMode !== 'paint') setGizmoTool('resize'); },
     },
   });
+  // Tooltip prefix for a keyed action, read from the LIVE contract so it shows
+  // the current (possibly rebound) chord — "F · ", "Ctrl+Z · ", or "" if unbound.
+  const keyHint = (action: string, scope: 'studio' | 'bench' = 'studio') => {
+    const c = chordHintFor(scope, action);
+    return c ? `${c} · ` : '';
+  };
   // a live camera snapshot matching gpu/3d.zig (eye from camera.zig orbital math,
   // near 0.02 / fov from the Scene3D.Camera below); used by the overlay + picking.
   const camSnap = (): CameraSnap => {
@@ -1845,7 +1863,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               strip, so they sat ON TOP of the STUDIO info; folded in here as one
               bar, req_1430). undo/redo/import handlers come from the model owner. */}
           <Row style={{ gap: 4, alignItems: 'center' }}>
-            {([['Undo2', 'Ctrl+Z · Undo', props.canUndo, props.onUndo], ['Redo2', 'Ctrl+Y · Redo', props.canRedo, props.onRedo]] as const).map(([icon, tip, on, run]) => (
+            {([['Undo2', `${keyHint('bench.undo', 'bench')}Undo`, props.canUndo, props.onUndo], ['Redo2', `${keyHint('bench.redo', 'bench')}Redo`, props.canRedo, props.onRedo]] as const).map(([icon, tip, on, run]) => (
               <Pressable key={icon} onPress={on ? run : undefined} tooltip={tip} style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, backgroundColor: on ? '#13233aee' : '#0e1726aa', borderColor: on ? '#2c4a6a' : '#1c2a3c' }}>
                 <Icon name={icon} size={13} color={on ? '#cfe2ff' : T.dim} />
               </Pressable>
@@ -2062,7 +2080,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             paint: 'Paint mode — paint texels directly onto the 3D faces',
           };
           return (
-            <Pressable key={m} onPress={() => { if (disabled) return; if (m === 'paint') ensureTexture(); setSelMode(m); }} tooltip={modeTip[m]} style={{ ...STEP_BTN, opacity: disabled ? 0.4 : 1, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
+            <Pressable key={m} onPress={() => { if (disabled) return; if (m === 'paint') ensureTexture(); setSelMode(m); }} tooltip={`${keyHint(`mode.${m}`)}${modeTip[m]}`} style={{ ...STEP_BTN, opacity: disabled ? 0.4 : 1, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderColor: on ? '#5b8fd6' : '#2c4a6a' }}>
               <Text fontSize={10} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{m}{on && n > 0 ? ` ·${n}` : ''}</Text>
             </Pressable>
           );
@@ -2225,7 +2243,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               {(['move', 'resize', 'rotate'] as GizmoTool[]).map((tl) => {
                 const on = gizmoTool === tl;
                 return (
-                  <Pressable key={tl} onPress={() => setGizmoTool(tl)} tooltip={tl === 'move' ? 'Move tool — drag the arrows to slide the selection (in face mode an orange arrow extrudes along the normal)' : tl === 'resize' ? 'Resize tool — drag the square handles to scale the selection per-axis' : 'Rotate tool — drag the rings to spin the selection about an axis'} style={{ ...STEP_BTN, flexGrow: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? '#3a2f5e' : '#13233aee', borderColor: on ? '#9b7fd6' : '#2c4a6a' }}>
+                  <Pressable key={tl} onPress={() => setGizmoTool(tl)} tooltip={`${keyHint(`tool.${tl}`)}${tl === 'move' ? 'Move tool — drag the arrows to slide the selection (in face mode an orange arrow extrudes along the normal)' : tl === 'resize' ? 'Resize tool — drag the square handles to scale the selection per-axis' : 'Rotate tool — drag the rings to spin the selection about an axis'}`} style={{ ...STEP_BTN, flexGrow: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? '#3a2f5e' : '#13233aee', borderColor: on ? '#9b7fd6' : '#2c4a6a' }}>
                     <Icon name={tl === 'move' ? 'Move' : tl === 'resize' ? 'Maximize' : 'RotateCw'} size={13} color={on ? '#e0d4ff' : T.dim} />
                   </Pressable>
                 );
@@ -2693,7 +2711,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           </Box>
           <Pressable onPress={() => setFov(fovRef.current + 2)} tooltip="Wider field of view (zoom out / more perspective)" style={STEP_BTN}><Text fontSize={13} color={T.text}>+</Text></Pressable>
         </Row>
-        <Pressable onPress={reframe} tooltip="F · Reframe — recenter the camera on the model" style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}>
+        <Pressable onPress={reframe} tooltip={`${keyHint('view.recenter')}Reframe — recenter the camera on the model`} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}>
           <Icon name="Frame" size={13} color={T.text} />
         </Pressable>
       </Col>

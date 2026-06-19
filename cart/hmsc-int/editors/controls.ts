@@ -92,6 +92,17 @@ export const EDITOR_BINDINGS: EditorBinding[] = [
   { action: 'selection.all', scope: 'studio', keys: ['ctrl+a', 'meta+a'], label: 'Select every element of the active mode (vertex / edge / face)', legend: '^A all' },
   { action: 'selection.delete', scope: 'studio', keys: ['delete', 'backspace'], label: 'Delete the selected faces — or the selected rig joint / pivot', legend: 'Del remove' },
   { action: 'view.recenter', scope: 'studio', keys: ['f', 'home'], label: 'Reframe the camera on the model', legend: 'F reframe' },
+  // Edit modes (1–6) + transform tools (G/R/S, the Blender idiom) — the high-
+  // frequency switches, so they earn keys and show them in their tooltips.
+  { action: 'mode.object', scope: 'studio', keys: ['1'], label: 'Object mode', legend: null },
+  { action: 'mode.vertex', scope: 'studio', keys: ['2'], label: 'Vertex mode', legend: null },
+  { action: 'mode.edge', scope: 'studio', keys: ['3'], label: 'Edge mode', legend: null },
+  { action: 'mode.face', scope: 'studio', keys: ['4'], label: 'Face mode', legend: null },
+  { action: 'mode.rig', scope: 'studio', keys: ['5'], label: 'Rig mode', legend: null },
+  { action: 'mode.paint', scope: 'studio', keys: ['6'], label: 'Paint mode', legend: null },
+  { action: 'tool.move', scope: 'studio', keys: ['g'], label: 'Move tool', legend: null },
+  { action: 'tool.rotate', scope: 'studio', keys: ['r'], label: 'Rotate tool', legend: null },
+  { action: 'tool.resize', scope: 'studio', keys: ['s'], label: 'Resize / scale tool', legend: null },
 ];
 
 const ACTION_ID_SHAPE = /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/;
@@ -196,6 +207,13 @@ export function setKeyCapture(active: boolean): void { keyCaptureActive = active
 export function prettyChord(chord: string): string {
   const NICE: Record<string, string> = { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', meta: 'Cmd', escape: 'Esc', delete: 'Del', backspace: 'Bksp', enter: 'Enter', home: 'Home', arrowup: 'Up', arrowdown: 'Down', arrowleft: 'Left', arrowright: 'Right' };
   return chord.split('+').map((p) => NICE[p] ?? (p.length === 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1))).join('+');
+}
+
+/** The EFFECTIVE primary chord for an action, prettified for a tooltip — '' if
+ *  the action is unbound. Reads bindingsForScope so a rebind is reflected. */
+export function chordHintFor(scope: EditorScope, action: string): string {
+  const b = bindingsForScope(scope).find((x) => x.action === action);
+  return b && b.keys.length ? prettyChord(b.keys[0]) : '';
 }
 
 /** The discoverable keymap: every legend-bearing row of a scope, in table

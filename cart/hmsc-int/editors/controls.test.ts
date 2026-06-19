@@ -71,10 +71,10 @@ test('the legend derives from the dispatch rows — it cannot lie', () => {
 
 test('user overrides: rebinding layers over the default and dispatch follows', () => {
   loadUserBindings({}); // clean slate
-  const r = setUserBinding('studio', 'view.recenter', ['g']);
+  const r = setUserBinding('studio', 'view.recenter', ['k']);
   assert(r.ok, 'a free chord rebinds');
-  assertEqual(bindingsForScope('studio').find((b) => b.action === 'view.recenter')?.keys.join(','), 'g', 'the effective keys are the override');
-  assertEqual(resolveEditorKey('studio', 'down', { key: 'g' }, false)?.action, 'view.recenter', 'dispatch fires on the new chord');
+  assertEqual(bindingsForScope('studio').find((b) => b.action === 'view.recenter')?.keys.join(','), 'k', 'the effective keys are the override');
+  assertEqual(resolveEditorKey('studio', 'down', { key: 'k' }, false)?.action, 'view.recenter', 'dispatch fires on the new chord');
   assertEqual(resolveEditorKey('studio', 'down', { key: 'f' }, false), null, 'the old default no longer fires');
   assert(isOverridden('studio', 'view.recenter'), 'the action reads as overridden');
   clearUserBinding('studio', 'view.recenter');
@@ -94,8 +94,8 @@ test('user overrides: persistence round-trips and drops corruption', () => {
   setUserBinding('studio', 'selection.all', ['ctrl+g']);
   const saved = exportUserBindings();
   assertEqual(saved['studio:selection.all']?.join(','), 'ctrl+g', 'export captures the override');
-  loadUserBindings({ 'studio:view.recenter': ['g'], 'studio:junk': ['NOT A CHORD'] });
-  assertEqual(bindingsForScope('studio').find((b) => b.action === 'view.recenter')?.keys.join(','), 'g', 'a saved override hydrates');
+  loadUserBindings({ 'studio:view.recenter': ['k'], 'studio:junk': ['NOT A CHORD'] });
+  assertEqual(bindingsForScope('studio').find((b) => b.action === 'view.recenter')?.keys.join(','), 'k', 'a saved override hydrates');
   assert(!isOverridden('studio', 'selection.all'), 'load REPLACES the map (the prior override is gone)');
   assertEqual(exportUserBindings()['studio:junk'], undefined, 'a malformed entry is dropped on load');
   loadUserBindings({}); // leave the global map clean for any later test
