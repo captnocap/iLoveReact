@@ -53,10 +53,12 @@ import {
   SelectionOverlay, makeProjector, orbitalEyeJS, pickElement, applyPick, emptySelection, selectionCount,
   type SelMode, type Selection, type CameraSnap,
 } from './meshSelect';
-import { pickFaceCell, brushCells, faceCellGrid, resamplePaint, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintCells, type PaintTarget, type FaceHit } from './meshPaint';
+import { pickFaceCell, pickFaceUV, brushCells, faceCellGrid, resamplePaint, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintCells, type PaintTarget, type FaceHit, type FaceUVHit } from './meshPaint';
+import { STUDIO_PAINT_KEY, PAINT_TEX, baseCoat, stampUV, faceIslandPx } from './meshPaintTexture';
+import { Paintable } from '@reactjit/runtime/primitives';
 import { PaintGridOverlay } from './meshPaintOverlay';
 import { PaintPanel } from './PaintPanel';
-import { defaultPalette, paletteWithColor, slotById, type Palette } from './modelStream';
+import { defaultPalette, paletteWithColor, slotById, slotColor, type Palette } from './modelStream';
 import {
   TransformGizmo, NormalHandle, AXIS_DIR, axisScreen, dragWorldDistance, pickGizmoHandle, pickNormalHandle, rotationSign, selectionVertIndices, selectionFaceIndices,
   type GizmoTool, type GizmoHit,
@@ -1094,6 +1096,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // ── PAINT mode (Phase 5c) ──
   // every part the paint ray can hit, with its live mesh + render lift.
   const paintTargets = (): PaintTarget[] => props.parts.map((p) => ({ partId: p.id, mesh: p.mesh, lift: p.lift }));
+  // Paint mode active — the PIXEL painter owns the model texture while true.
+  const painting = selMode === 'paint';
   // A signature of the scene's FACE topology: parts + per-part face counts. The paint
   // atlas must allocate one distinct slot per (part, face); when this changes (a part
   // added, a face extruded/mirrored), faces created AFTER the last pack carry their
@@ -1121,69 +1125,60 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     setTex({ ...(tex ?? {}), texels: result.texels, type: 'solid', color: '#c8ccd2', name: 'paint-v4', paintRev: (tex?.paintRev ?? 0), paintFit: true, faceSig: paintFaceSig });
     setTexView(true);
   };
-  // Track the face/cell under the cursor (the grid overlay reads this ref + self-ticks,
-  // so a hover never re-renders the viewport). The grid IS the packed atlas (tex.texels)
-  // so a cell maps to exactly one face's slot — no bleed. Returns the hit for the caller.
+  // The colour the brush lays down: the active slot resolved through the palette
+  // (the painted view), the pseudo placeholder (pseudo view), or — when erasing —
+  // the texture's base coat so erase reveals the background. PIXEL painter: a real
+  // RGBA colour, not a slot index. (req_1372)
+  const activePaintColor = (): string => {
+    if (paintErase) return tex?.color ?? '#c8ccd2';
+    if (paintView === 'pseudo') return slotById(livePalette, activeSlot)?.pseudo ?? '#ffffff';
+    return slotColor(livePalette, activeSlot) ?? slotById(livePalette, activeSlot)?.pseudo ?? '#ffffff';
+  };
+  // Brush radius in TEXTURE PIXELS, from the brush-size control. The PIXEL painter
+  // stamps a disc straight into the model's RGBA texture — no cell grid.
+  const brushRadiusPx = (): number => Math.max(2, Math.round(3 + (paintBrush - 1) * 6));
+  // Track the face under the cursor (cursor pump reads this ref). Returns a FaceHit
+  // (cu/cv unused by the pixel painter) so the existing in/out hover logic is intact.
   const paintProbe = (sx: number, sy: number): FaceHit | null => {
     if (!tex) { paintHoverRef.current = null; return null; }
-    const hit = pickFaceCell(paintTargets(), camSnap(), sx, sy, paintCell);
-    paintHoverRef.current = hit;
-    return hit;
+    const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
+    const fh = hit ? { partIndex: hit.partIndex, faceIndex: hit.faceIndex, cu: 0, cv: 0 } : null;
+    paintHoverRef.current = fh;
+    return fh;
   };
-  // Paint (or erase) the texels under (sx,sy) into the LIVE buffer ref — NO React
-  // state per dab (the lag fix, req_1203). Marks dirty; the throttled bake clock
-  // re-renders the atlas from the ref; mouse-up commits the buffer to tex.paint.
+  // Paint the texel under (sx,sy): raycast → face + interpolated UV → stamp a disc
+  // of the active colour straight into the model's RGBA paint texture, SCISSOR-
+  // clamped to the hit face's UV island so a round brush can't bleed onto the
+  // neighbour island packed beside it. NO boxes, NO StaticSurface, NO cell grid —
+  // the entire old bug class is gone (req_1372). FILL mode fills the whole face.
   const paintAt = (sx: number, sy: number): FaceHit | null => {
-    const hit = paintProbe(sx, sy);
-    if (!hit) return null;
+    if (!tex) return null;
+    const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
+    if (!hit) { paintHoverRef.current = null; return null; }
     const tgt = paintTargets()[hit.partIndex];
     if (!tgt) return null;
-    const grid = faceCellGrid(tgt.mesh, hit.faceIndex, paintCell);
-    if (!grid) return null;
-    // FILL → every cell of the face (one-colour-per-face); else the brush disc of radius
-    // `paintBrush` cells on the DETAIL grid (paintCell). Finer detail = smaller cells =
-    // finer brush; changing detail resamples stored paint (no scramble), req_1358.
-    let cells: Array<[number, number]>;
-    if (paintFill) {
-      cells = [];
-      for (let cv = 0; cv < grid.nv; cv += 1) for (let cu = 0; cu < grid.nu; cu += 1) cells.push([cu, cv]);
+    const island = faceIslandPx(tgt.mesh, hit.faceIndex);
+    const color = activePaintColor();
+    if (paintFill && island) {
+      // Whole-face fill: a disc large enough to cover the island, clamped to it.
+      const r = Math.hypot(island.x1 - island.x0, island.y1 - island.y0);
+      stampUV((hit.u), (hit.v), color, r, island);
     } else {
-      cells = brushCells(hit, paintBrush, grid);
-    }
-    const buf = (paintRef.current[tgt.partId] ||= {});
-    for (const [cu, cv] of cells) {
-      const key = `${hit.faceIndex}:${cu}:${cv}`;
-      if (paintErase) delete buf[key]; else buf[key] = activeSlot;
+      stampUV(hit.u, hit.v, color, brushRadiusPx(), island);
     }
     touchedRef.current.add(tgt.partId);
     paintDirtyRef.current = true;
-    return hit;
+    const fh = { partIndex: hit.partIndex, faceIndex: hit.faceIndex, cu: 0, cv: 0 };
+    paintHoverRef.current = fh;
+    return fh;
   };
-  // FILL ALL (req_1352): paint EVERY paintable face of EVERY part with the active slot —
-  // one click to make a whole model one colour. Clicking 158 faces by hand is absurd; an
-  // unpainted face shows the atlas base (the "leak everywhere" on complex models). Erase
-  // mode clears every cell instead. Commits in one undo entry.
+  // FILL ALL (req_1352): one click to make the whole model one colour. The PIXEL
+  // painter flat-fills the entire texture (every face samples it) in one clear —
+  // no per-face/per-cell walk, no orphans, no leak. Erase fills the base coat.
   const fillAllFaces = () => {
-    for (const tgt of paintTargets()) {
-      // FRESH buffer — REPLACE the part's paint, don't merge. Merging keeps ORPHANED
-      // cells from an earlier grid resolution (their cu:cv indices no longer exist in
-      // the current grid), which fill never overwrites and the bake draws clamped to
-      // the slot edge → stray coloured lines all over a "filled" model (req_1357).
-      const buf: PaintCells = {};
-      if (!paintErase) {
-        for (let fi = 0; fi < tgt.mesh.faces.length; fi += 1) {
-          const face = tgt.mesh.faces[fi];
-          if (face.glass || !face.uv || face.uv.length < 3 || face.loop.length < 3) continue;
-          const grid = faceCellGrid(tgt.mesh, fi, paintCell);
-          if (!grid) continue;
-          for (let cv = 0; cv < grid.nv; cv += 1) for (let cu = 0; cu < grid.nu; cu += 1) buf[`${fi}:${cu}:${cv}`] = activeSlot;
-        }
-      }
-      paintRef.current[tgt.partId] = buf;
-      touchedRef.current.add(tgt.partId);
-    }
+    baseCoat(activePaintColor());
+    for (const tgt of paintTargets()) touchedRef.current.add(tgt.partId);
     paintDirtyRef.current = true;
-    commitPaint();
   };
   // Change the DETAIL grid (req_1358) — RESAMPLE every part's paint from the old cell
   // size to the new one so the picture is preserved (finer subdivides, coarser samples),
@@ -1237,6 +1232,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selMode]);
+  // PIXEL painter base coat (req_1372): on entering paint mode, flat-fill the RGBA
+  // paint texture to the texture's base colour ONCE, after the <Paintable> CREATE
+  // drains (a clear op before the entry exists is dropped). Fires once per entry —
+  // re-coating would wipe live strokes (persistence is the follow-up).
+  useEffect(() => {
+    if (!painting || !tex) return;
+    const base = tex.color ?? '#c8ccd2';
+    const id = setTimeout(() => baseCoat(base), 80);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [painting]);
   // Seed the live buffer from the persisted paint whenever the open texture changes
   // (entering paint, a re-textureize, undo). Keyed on paintRev so an external change
   // re-syncs but our own per-dab writes (which don't touch tex) don't clobber the buffer.
@@ -1996,13 +2002,18 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           // part samples the ONE shared sprite-map atlas (STUDIO_TEXTURE_KEY) —
           // material '#ffffff' lets the texture show through (the cutout idiom).
           const textured = texView && !!tex;
+          // PIXEL painter (req_1372): in paint mode the mesh samples the RGBA
+          // <Paintable> directly (brush dabs land straight in it), bypassing the
+          // box-atlas StaticSurface entirely. Otherwise the sprite-map atlas.
+          const painting3D = painting && !!tex;
+          const sampleKey = painting3D ? STUDIO_PAINT_KEY : textured ? STUDIO_TEXTURE_KEY : undefined;
           return (
             <Fragment key={p.key}>
               <Scene3D.Mesh
                 geometry={p.def}
                 dynamicKey={p.dynKey}
-                material={textured ? '#ffffff' : p.material}
-                textureKey={textured ? STUDIO_TEXTURE_KEY : undefined}
+                material={sampleKey ? '#ffffff' : p.material}
+                textureKey={sampleKey}
                 position={p.position}
               />
               {/* GLASS (req_1181): translucent pass for this part's window faces. */}
@@ -2046,10 +2057,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         <BackdropSurface key={b.id} id={b.id} source={b.source} aspect={b.aspect} />
       ))}
 
+      {/* PIXEL painter (req_1372): the RGBA paint texture the model samples while in
+          paint mode. Brush dabs (paintAt) and base coat (fillAllFaces) write straight
+          into this GPU texture — no boxes, no StaticSurface capture. */}
+      {painting && tex ? <Paintable id={STUDIO_PAINT_KEY} w={PAINT_TEX} h={PAINT_TEX} rgba /> : null}
+
       {/* TEXTURE (req_1068): the offscreen scene SPRITE-MAP atlas every part samples
-          via textureKey. Mounted while texture view is on; re-bakes only when the
-          scene's UVs (meshRev) or the atlas params change (the `sig` memo). */}
-      {texView && tex ? (
+          via textureKey. Mounted while texture view is on (and NOT painting — the
+          pixel painter owns the texture then); re-bakes only on UV/param change. */}
+      {texView && tex && !painting ? (
         <SceneTextureAtlas
           parts={props.parts.map((p) => ({ id: p.id, mesh: p.mesh, paint: paintRef.current[p.id] ?? p.paint }))}
           texels={tex.texels}

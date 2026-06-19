@@ -209,6 +209,48 @@ export function pickFaceCell(targets: PaintTarget[], cam: CameraSnap, sx: number
   return best;
 }
 
+/** A face hit resolved to a continuous UV coordinate (0..1 atlas space), for the
+ *  PIXEL painter — no cell grid. `u,v` is the exact texel the cursor sits on. */
+export type FaceUVHit = { partIndex: number; faceIndex: number; u: number; v: number };
+
+/** Raycast every part for the frontmost uv-mapped face under (sx,sy) and return the
+ *  interpolated UV at the hit (barycentric over the fan triangulation). This is the
+ *  pixel-painter pick: stamp a brush at (u*texels, v*texels) into the model's RGBA
+ *  paint texture. Glass faces and faces without uv are skipped (nothing to paint).
+ *  Nearest t wins, so the front-most visible uv-mapped face is the one painted. */
+export function pickFaceUV(targets: PaintTarget[], cam: CameraSnap, sx: number, sy: number): FaceUVHit | null {
+  const ray = screenRay(cam, sx, sy);
+  let best: FaceUVHit | null = null;
+  let bestT = Infinity;
+  targets.forEach((tgt, partIndex) => {
+    const m = tgt.mesh;
+    for (let fi = 0; fi < m.faces.length; fi += 1) {
+      const face = m.faces[fi];
+      if (face.glass || !face.uv || face.uv.length < 3 || face.loop.length < 3) continue;
+      const lift = tgt.lift;
+      const v0 = m.verts[face.loop[0]];
+      const w0: V3 = [v0[0], v0[1] + lift, v0[2]];
+      for (let i = 1; i < face.loop.length - 1; i += 1) {
+        const va = m.verts[face.loop[i]], vb = m.verts[face.loop[i + 1]];
+        const wa: V3 = [va[0], va[1] + lift, va[2]];
+        const wb: V3 = [vb[0], vb[1] + lift, vb[2]];
+        const hit = rayTri(ray.o, ray.d, w0, wa, wb);
+        if (!hit || hit.t >= bestT) continue;
+        const ba = 1 - hit.u - hit.v;
+        const uv0 = face.uv[0], uva = face.uv[i], uvb = face.uv[i + 1];
+        bestT = hit.t;
+        best = {
+          partIndex,
+          faceIndex: fi,
+          u: ba * uv0[0] + hit.u * uva[0] + hit.v * uvb[0],
+          v: ba * uv0[1] + hit.u * uva[1] + hit.v * uvb[1],
+        };
+      }
+    }
+  });
+  return best;
+}
+
 /** The cells a brush stamp covers, clamped to the face's cell bounds (so the stroke
  *  can't spill onto a neighbouring face — the per-face mask). `size` = brush RADIUS+1
  *  in cells: 1 → a single cell, 2 → a 3-wide disc, … A disc footprint keeps round
