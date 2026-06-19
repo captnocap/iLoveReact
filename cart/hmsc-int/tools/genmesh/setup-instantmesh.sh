@@ -31,6 +31,11 @@ if [ ! -d "$DEST" ]; then
   git clone https://github.com/TencentARC/InstantMesh "$DEST"
 fi
 
+# 1b. 12GB-card fit: the default grid_res=128 FlexiCubes mesh extraction needs
+# ~15GB and OOMs a 12GB card. Drop to 64 so it fits (coarser mesh; raise to 96 for
+# more detail, or back to 128 on a 24GB+ card). Idempotent (no-op once changed).
+sed -i 's/grid_res: 128/grid_res: 64/' "$DEST/configs/instant-mesh-large.yaml" "$DEST/configs/instant-mesh-base.yaml" 2>/dev/null || true
+
 # 2. clean py3.10 env (independent of the broken base env)
 echo "== creating conda env '$ENV_NAME' (python 3.10) =="
 source "$(conda info --base)/etc/profile.d/conda.sh"
