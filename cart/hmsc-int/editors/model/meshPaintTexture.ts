@@ -103,3 +103,71 @@ export function restorePaint(model: string | null): boolean {
   paintTex().upload(rgba);
   return true;
 }
+
+// ── Paint undo/redo (req_1379) ─────────────────────────────────────────────
+// Paint lives in the GPU texture, OUTSIDE studioModel's event stream, so Ctrl-Z
+// hit model.undo() (reverting a stray palette mint — "brush goes white") and never
+// touched the paint. This is a paint-only snapshot ring: the texture state BEFORE
+// each stroke is read back and pushed; undo restores it. The parent's Ctrl-Z prefers
+// this whenever paint mode is active and the ring is non-empty.
+
+const UNDO_CAP = 24; // ~4MB each; bounded so a long session can't grow unbounded
+let g_paintActive = false;
+const g_undo: Uint8Array[] = [];
+const g_redo: Uint8Array[] = [];
+
+/** Paint mode on/off — gates whether Ctrl-Z routes to paint undo vs model undo. */
+export function setPaintActive(on: boolean): void { g_paintActive = on; }
+export function paintActive(): boolean { return g_paintActive; }
+export function canPaintUndo(): boolean { return g_undo.length > 0; }
+export function canPaintRedo(): boolean { return g_redo.length > 0; }
+
+/** Snapshot the texture BEFORE a stroke begins (call on mouse-down in paint).
+ *  Pushes the pre-stroke state so undo can return to it; a fresh stroke clears
+ *  the redo branch. Readback blocks on the GPU — once per stroke, never per dab. */
+export function paintSnapshotBegin(): void {
+  const rgba = paintTex().readback();
+  if (!rgba || rgba.length !== RGBA_LEN) return;
+  g_undo.push(rgba);
+  if (g_undo.length > UNDO_CAP) g_undo.shift();
+  g_redo.length = 0;
+}
+
+/** Undo the last stroke: stash the current state for redo, restore the previous.
+ *  Persists the restored state so it survives reload too. Returns true if it ran. */
+export function paintUndo(model: string | null): boolean {
+  if (g_undo.length === 0) return false;
+  const cur = paintTex().readback();
+  const prev = g_undo.pop()!;
+  if (cur && cur.length === RGBA_LEN) g_redo.push(cur);
+  paintTex().upload(prev);
+  localstore.nsSet(PAINT_STORE_NS, storeKey(model), bytesToBase64(prev));
+  return true;
+}
+
+/** Redo: restore the state undone last, stashing the current for undo again. */
+export function paintRedo(model: string | null): boolean {
+  if (g_redo.length === 0) return false;
+  const cur = paintTex().readback();
+  const next = g_redo.pop()!;
+  if (cur && cur.length === RGBA_LEN) g_undo.push(cur);
+  paintTex().upload(next);
+  localstore.nsSet(PAINT_STORE_NS, storeKey(model), bytesToBase64(next));
+  return true;
+}
+
+/** Drop all paint undo/redo history (call when leaving paint / switching model). */
+export function clearPaintHistory(): void { g_undo.length = 0; g_redo.length = 0; }
+
+// ── Session init tracking (req_1379b) ──────────────────────────────────────
+// The <Paintable> stays mounted as long as a paint texture exists (NOT gated on
+// paint mode), so the GPU texture survives paint→object→paint without being
+// destroyed. That means base-coat/restore must run only on the FIRST init per
+// model per session — re-running it on every paint re-entry would wipe the texture
+// that's still sitting there. This set tracks which models have been initialized;
+// a hot reload re-evals the module and clears it, so restore-from-localstore runs
+// again then (rebuilding a texture the reload may have dropped).
+const g_inited = new Set<string>();
+export function paintInited(model: string | null): boolean { return g_inited.has(model || 'untitled'); }
+export function markPaintInited(model: string | null): void { g_inited.add(model || 'untitled'); }
+export function forgetPaintInited(model: string | null): void { g_inited.delete(model || 'untitled'); }

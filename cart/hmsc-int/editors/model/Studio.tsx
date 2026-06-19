@@ -54,7 +54,7 @@ import {
   type SelMode, type Selection, type CameraSnap,
 } from './meshSelect';
 import { pickFaceCell, pickFaceUV, paintUVsNeedRepack, brushCells, faceCellGrid, resamplePaint, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintCells, type PaintTarget, type FaceHit, type FaceUVHit } from './meshPaint';
-import { STUDIO_PAINT_KEY, PAINT_TEX, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint } from './meshPaintTexture';
+import { STUDIO_PAINT_KEY, PAINT_TEX, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited } from './meshPaintTexture';
 import { Paintable } from '@reactjit/runtime/primitives';
 import { PaintGridOverlay } from './meshPaintOverlay';
 import { PaintPanel } from './PaintPanel';
@@ -1237,16 +1237,23 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selMode]);
-  // PIXEL painter restore/base-coat (req_1373): on entering paint mode (and after a
-  // hot reload, which re-runs this), RESTORE the model's saved paint into the RGBA
-  // texture; only if there's none do we flat-fill the base colour. Restore uploads
-  // (parks until the <Paintable> CREATE drains); base coat needs the entry, hence the
-  // short delay. This is why hot reload no longer wipes paint — it reloads the PNG.
+  // PIXEL painter init + paint-active (req_1379b): the <Paintable> stays MOUNTED while
+  // a paint texture exists (not gated on paint mode), so the GPU texture survives
+  // paint→object→paint without being destroyed. So restore/base-coat runs only ONCE
+  // per model per session (paintInited) — re-running it on every paint re-entry would
+  // wipe the texture that's still sitting there. On the FIRST init we RESTORE the
+  // model's saved paint, else base-coat. A hot reload clears the inited set, so this
+  // re-restores from localstore then (rebuilding a texture the reload may have dropped).
+  // Switching models shares ONE paint texture (STUDIO_PAINT_KEY) — drop the undo ring
+  // so a new model doesn't inherit the previous model's stroke history.
+  useEffect(() => { clearPaintHistory(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [props.sceneName]);
   useEffect(() => {
+    setPaintActive(painting);
     if (!painting || !tex) return;
-    const base = tex.color ?? '#c8ccd2';
     const model = props.sceneName ?? null;
-    const id = setTimeout(() => { if (!restorePaint(model)) baseCoat(base); }, 80);
+    if (paintInited(model)) return; // texture already live for this model — leave it
+    const base = tex.color ?? '#c8ccd2';
+    const id = setTimeout(() => { if (!restorePaint(model)) baseCoat(base); markPaintInited(model); }, 80);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [painting, props.sceneName, !!tex]);
@@ -1386,6 +1393,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       const r = rectRef.current;
       const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
       lastPaintRef.current = null; // start a fresh stroke (no interpolation from a prior one)
+      // Snapshot the PRE-stroke texture for undo (req_1379) — only when over a
+      // paintable face, and BEFORE paintStroke queues a dab (readback drains pending
+      // ops, so it must run before the first dab is enqueued).
+      if (pickFaceUV(paintTargets(), camSnap(), sx, sy)) paintSnapshotBegin();
       const hit = paintStroke(sx, sy);
       // the act of painting reveals the texture — if the view was toggled to solid,
       // turn it back on so the stroke is visible immediately (req_1226).
@@ -2105,7 +2116,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {/* PIXEL painter (req_1372): the RGBA paint texture the model samples while in
           paint mode. Brush dabs (paintAt) and base coat (fillAllFaces) write straight
           into this GPU texture — no boxes, no StaticSurface capture. */}
-      {painting && tex ? <Paintable id={STUDIO_PAINT_KEY} w={PAINT_TEX} h={PAINT_TEX} rgba /> : null}
+      {tex ? <Paintable id={STUDIO_PAINT_KEY} w={PAINT_TEX} h={PAINT_TEX} rgba /> : null}
 
       {/* TEXTURE (req_1068): the offscreen scene SPRITE-MAP atlas every part samples
           via textureKey. Mounted while texture view is on (and NOT painting — the
@@ -3795,8 +3806,13 @@ export function StudioEditor() {
     const off = busOn('__keydown', (e: any) => {
       if (!(e?.ctrlKey || e?.metaKey)) return;
       const key = String(e?.key ?? '').toLowerCase();
-      if (key === 'z' && !e?.shiftKey) model.undo();
-      else if (key === 'y' || (key === 'z' && e?.shiftKey)) model.redo();
+      const m = model.modelName;
+      // In paint mode, Ctrl-Z/Y step the PAINT snapshot ring (req_1379) — paint lives
+      // outside the model event stream, so model.undo() would only revert a stray
+      // palette mint ("brush goes white") and never the paint. Fall through to the
+      // model history when there's no paint step to take.
+      if (key === 'z' && !e?.shiftKey) { if (paintActive() && canPaintUndo()) paintUndo(m); else model.undo(); }
+      else if (key === 'y' || (key === 'z' && e?.shiftKey)) { if (paintActive() && canPaintRedo()) paintRedo(m); else model.redo(); }
     });
     return () => off();
     // eslint-disable-next-line react-hooks/exhaustive-deps
