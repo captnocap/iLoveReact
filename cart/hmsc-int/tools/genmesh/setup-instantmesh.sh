@@ -53,9 +53,12 @@ pip install \
   "imageio[ffmpeg]" rembg onnxruntime \
   trimesh PyMCubes xatlas plyfile opencv-python-headless ninja
 
-# 5. nvdiffrast (CUDA rasterizer; compiles on first import)
+# 5. nvdiffrast (CUDA rasterizer; compiles on first import). --no-build-isolation
+# is REQUIRED: nvdiffrast's build imports torch, which pip's isolated build env
+# hides (the "Cannot compile nvdiffrast CUDA extension" error). torch is already
+# in this env from step 3, so disabling isolation lets the build see it.
 echo "== installing nvdiffrast =="
-pip install git+https://github.com/NVlabs/nvdiffrast
+pip install --no-build-isolation git+https://github.com/NVlabs/nvdiffrast
 
 echo ""
 echo "== done. Smoke-test (downloads ~7GB of weights on first run): =="
