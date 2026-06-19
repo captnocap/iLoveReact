@@ -59,6 +59,7 @@ const SHAPE_GABLE: f32 = 5; // req_0930: the triangular gable-end wall prism
 const SHAPE_GRASS: f32 = 6; // a grass blade clump — drawn by the grass pipeline (wind/wisp/gradient)
 const SHAPE_BUSH: f32 = 7; // a bush foliage clump — same foliage pipeline, bushier geometry
 const SHAPE_FROND: f32 = 8; // a palm-crown frond card — drawn by the ~frond~ pipeline (leaf cutout + wind)
+const SHAPE_PALMTRUNK: f32 = 9; // a palm trunk — tapered/curved/scar-ringed log, a normal lit mesh
 const SCAN_A: usize = 4;
 const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
@@ -696,6 +697,70 @@ fn buildFrond() [144 * 8]f32 {
     return out;
 }
 
+// Palm-trunk profile at height t∈[0,1] — the compiled twin of PalmTrunk.ts `at()`:
+// taper base→top, a fattening bulge just above the base, the scar-ring radius
+// ripple, and a forward lean (cx) that grows toward the top with a slight S.
+fn palmTrunkProfile(t: f32) struct { r: f32, cx: f32 } {
+    const base_r: f32 = 0.13; // PALM_TRUNK_DEFAULTS.baseRadius
+    const top_r: f32 = 0.08;
+    const curve: f32 = 0.16;
+    const rings: f32 = 11;
+    const ring_depth: f32 = 0.12;
+    const taper = base_r + (top_r - base_r) * t;
+    const dd = (t - 0.12) * (t - 0.12);
+    const bulge = 1.0 + 0.18 * @exp(-dd / 0.01);
+    const ring = 1.0 + ring_depth * @cos(t * rings * (2.0 * std.math.pi));
+    const r = taper * bulge * ring;
+    const cx = curve * (t * t * 0.7 + @sin(t * 2.8) * 0.05);
+    return .{ .r = r, .cx = cx };
+}
+
+// One ring vertex at height t, side s of `sides` — outward radial normal tilted
+// slightly up (0.15) so the log lights like a cylinder. (PalmTrunk.ts ringVerts.)
+fn palmTrunkVert(t: f32, s: usize, sides: usize) struct { pos: [3]f32, nrm: [3]f32, u: f32 } {
+    const prof = palmTrunkProfile(t);
+    const a = @as(f32, @floatFromInt(s)) / @as(f32, @floatFromInt(sides)) * (2.0 * std.math.pi);
+    const dx = @cos(a);
+    const dz = @sin(a);
+    const nl = @sqrt(dx * dx + 0.15 * 0.15 + dz * dz);
+    return .{
+        .pos = .{ prof.cx + dx * prof.r, t, dz * prof.r },
+        .nrm = .{ dx / nl, 0.15 / nl, dz / nl },
+        .u = @as(f32, @floatFromInt(s)) / @as(f32, @floatFromInt(sides)),
+    };
+}
+
+/// One palm TRUNK — the compiled twin of runtime/geometries/PalmTrunk.ts
+/// (PALM_TRUNK_DEFAULTS). A tapered tube, 1 unit tall (base y=0 → top y=1), that
+/// fattens just above the base, narrows upward, leans forward, and wears horizontal
+/// scar rings (a radius ripple that bands in light). Per-vertex outward normals; the
+/// per-instance scale (span, height, span) sizes ONE interned trunk to every palm.
+/// 28 segments × 10 sides × 2 tris × 3 verts = 1680 verts.
+fn buildPalmTrunk() [1680 * 8]f32 {
+    const sides: usize = 10; // PALM_TRUNK_DEFAULTS.sides
+    const segs: usize = 28; // PALM_TRUNK_DEFAULTS.segments
+    var out: [1680 * 8]f32 = undefined;
+    var i: usize = 0;
+    var seg: usize = 0;
+    while (seg < segs) : (seg += 1) {
+        const v0 = @as(f32, @floatFromInt(seg)) / @as(f32, @floatFromInt(segs));
+        const v1 = @as(f32, @floatFromInt(seg + 1)) / @as(f32, @floatFromInt(segs));
+        var s: usize = 0;
+        while (s < sides) : (s += 1) {
+            const bl = palmTrunkVert(v0, s, sides);
+            const br = palmTrunkVert(v0, s + 1, sides);
+            const tr = palmTrunkVert(v1, s + 1, sides);
+            const tl = palmTrunkVert(v1, s, sides);
+            // CCW outward winding (cull_mode=.back/front_face=.ccw) so the OUTER
+            // wall is front-facing and the trunk reads solid — the reverse of
+            // PalmTrunk.ts's order, whose outer faces were culled (the "hollow C").
+            pushTriSmooth(out[0..], &i, bl.pos, tl.pos, tr.pos, bl.nrm, tl.nrm, tr.nrm, .{ bl.u, v0 }, .{ tl.u, v1 }, .{ tr.u, v1 });
+            pushTriSmooth(out[0..], &i, bl.pos, tr.pos, br.pos, bl.nrm, tr.nrm, br.nrm, .{ bl.u, v0 }, .{ tr.u, v1 }, .{ br.u, v0 });
+        }
+    }
+    return out;
+}
+
 fn spherePos(radius: f32, theta: f32, phi: f32) [3]f32 {
     const st = @sin(theta);
     return .{ radius * st * @cos(phi), radius * @cos(theta), radius * st * @sin(phi) };
@@ -805,6 +870,8 @@ const ShapeBatches = struct {
     bush_count: u32,
     frond: []f32,
     frond_count: u32,
+    palmtrunks: []f32,
+    palmtrunk_count: u32,
 
     pub fn deinit(self: ShapeBatches, allocator: std.mem.Allocator) void {
         allocator.free(self.boxes);
@@ -816,6 +883,7 @@ const ShapeBatches = struct {
         allocator.free(self.grass);
         allocator.free(self.bush);
         allocator.free(self.frond);
+        allocator.free(self.palmtrunks);
     }
 };
 
@@ -864,6 +932,8 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     errdefer bush.deinit(allocator);
     var frond: std.ArrayList(f32) = .{};
     errdefer frond.deinit(allocator);
+    var palmtrunks: std.ArrayList(f32) = .{};
+    errdefer palmtrunks.deinit(allocator);
     var box_count: u32 = 0;
     var ramp_count: u32 = 0;
     var cylinder8_count: u32 = 0;
@@ -873,6 +943,7 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     var grass_count: u32 = 0;
     var bush_count: u32 = 0;
     var frond_count: u32 = 0;
+    var palmtrunk_count: u32 = 0;
     var row: usize = 0;
     while (row < @as(usize, @intCast(inst_count))) : (row += 1) {
         if (row < material_refs.len and material_refs[row] != 0) continue; // textured batch
@@ -903,6 +974,9 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         } else if (@abs(shape - SHAPE_FROND) < 0.5) {
             try frond.appendSlice(allocator, src);
             frond_count += 1;
+        } else if (@abs(shape - SHAPE_PALMTRUNK) < 0.5) {
+            try palmtrunks.appendSlice(allocator, src);
+            palmtrunk_count += 1;
         } else {
             try boxes.appendSlice(allocator, src);
             box_count += 1;
@@ -927,6 +1001,8 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         .bush_count = bush_count,
         .frond = try frond.toOwnedSlice(allocator),
         .frond_count = frond_count,
+        .palmtrunks = try palmtrunks.toOwnedSlice(allocator),
+        .palmtrunk_count = palmtrunk_count,
     };
 }
 
@@ -1402,6 +1478,36 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
         // banded baked collider own the floor is what keeps it standable from
         // above AND passable from below. (Heightfields above handle the ground;
         // baked rects/oriented handle every authored piece.)
+
+        // Palm-trunk colliders (req_1454): a small AABB per palm trunk so you can't
+        // walk through the trees. The foliage cards (grass/bush/frond) stay
+        // collisionless — only SHAPE_PALMTRUNK rows register. The thin trunk's lean
+        // is ignored (a cheap axis-aligned box around the log).
+        {
+            const scale_base: usize = if (stride >= 12) 6 else 3;
+            var prow: usize = 0;
+            while (prow < @as(usize, @intCast(inst_count))) : (prow += 1) {
+                if (@abs(instanceShapeId(insts, prow, stride) - SHAPE_PALMTRUNK) >= 0.5) continue;
+                if (rect_count >= game_physics.MAX_RECTS) {
+                    clipped_rows += 1;
+                    continue;
+                }
+                const pb = prow * stride;
+                const x = insts[pb + 0];
+                const y = insts[pb + 1];
+                const z = insts[pb + 2];
+                const half = @abs(insts[pb + scale_base + 0]) * 0.15; // unit radius 0.13 + bulge margin
+                const height = @abs(insts[pb + scale_base + 1]);
+                try rects.appendSlice(allocator, &[_]f32{
+                    x - half, z - half, x + half, z + half,
+                    y + height, // top — the trunk's full height (blocks horizontally)
+                    1, // blocksPlayer
+                    0.6, 0.0, // bark friction, no restitution
+                    y, // floor — base rests on the ground
+                });
+                rect_count += 1;
+            }
+        }
 
         const values = try allocator.alloc(f32, game_physics.INPUT_HEADER_FLOATS + entity_floats + rects.items.len + oriented.items.len);
         @memset(values, 0);
@@ -2194,6 +2300,7 @@ pub const Runtime = struct {
     grass_blade: [36 * 8]f32 = undefined,
     bush_clump: [60 * 8]f32 = undefined,
     frond_card: [144 * 8]f32 = undefined,
+    palm_trunk: [1680 * 8]f32 = undefined,
     shape_batches: ShapeBatches = undefined,
     has_shape_batches: bool = false,
     // Per-material textured batches (geometry built at construct; the shaders are
@@ -2552,6 +2659,7 @@ pub const Runtime = struct {
         self.grass_blade = buildGrassBlade();
         self.bush_clump = buildBushClump();
         self.frond_card = buildFrond();
+        self.palm_trunk = buildPalmTrunk();
         self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.material_refs);
         self.has_shape_batches = true;
         // The textured remainder: rows wearing a material, partitioned per slot.
@@ -3040,6 +3148,18 @@ pub const Runtime = struct {
                 .scene3d_instance_stride = @intCast(self.stride),
                 .scene3d_instance_static = true,
             });
+            // Palm trunks: a normal LIT mesh (tapered/curved/scar-ringed log), no
+            // foliage tex key — the per-instance row colour tints the bark.
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.palmtrunk_count > 0,
+                .scene3d_geom_key = "palm-trunk",
+                .scene3d_vertices = self.palm_trunk[0..],
+                .scene3d_vert_count = 1680,
+                .scene3d_instance_data = self.shape_batches.palmtrunks,
+                .scene3d_instance_count = self.shape_batches.palmtrunk_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
         }
 
         // Per material: a SHADER material draws as one TEXTURED instanced box batch
@@ -3178,6 +3298,7 @@ pub const Runtime = struct {
         try self.stream_protos.append(self.allocator, .{ .geom_key = "gable-prism", .verts = self.gable_prism[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.grass, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "frond-card", .verts = self.frond_card[0..], .tex_key = "~frond~" });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "palm-trunk", .verts = self.palm_trunk[0..], .tex_key = null });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "grass-blade", .verts = self.grass_blade[0..], .tex_key = "~grass~" });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.bush, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "bush-clump", .verts = self.bush_clump[0..], .tex_key = "~grass~" });

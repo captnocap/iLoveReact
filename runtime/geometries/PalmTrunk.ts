@@ -67,8 +67,10 @@ export function generate(p: PalmTrunkParams): GeometryData {
     const v1 = t;
     for (let s = 0; s < sides; s += 1) {
       const bl = lower[s]!, br = lower[s + 1]!, tr = upper[s + 1]!, tl = upper[s]!;
-      g.tri(bl.pos, bl.nrm, [bl.u, v0], br.pos, br.nrm, [br.u, v0], tr.pos, tr.nrm, [tr.u, v1]);
-      g.tri(bl.pos, bl.nrm, [bl.u, v0], tr.pos, tr.nrm, [tr.u, v1], tl.pos, tl.nrm, [tl.u, v1]);
+      // CCW outward winding so the OUTER wall is front-facing (cull_mode .back) and
+      // the trunk reads solid, not a hollow shell you see the back wall through.
+      g.tri(bl.pos, bl.nrm, [bl.u, v0], tl.pos, tl.nrm, [tl.u, v1], tr.pos, tr.nrm, [tr.u, v1]);
+      g.tri(bl.pos, bl.nrm, [bl.u, v0], tr.pos, tr.nrm, [tr.u, v1], br.pos, br.nrm, [br.u, v0]);
     }
     lower = upper;
   }

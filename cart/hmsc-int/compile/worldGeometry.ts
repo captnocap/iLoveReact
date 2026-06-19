@@ -76,9 +76,13 @@ export const INSTANCE_SHAPE_GRASS = 6;
 export const INSTANCE_SHAPE_BUSH = 7;
 // Palm-crown frond card — keyed geometry buildFrond() in world_loader.zig, editor
 // twin runtime/geometries/Frond. Routed to the ~frond~ pipeline (its own wind +
-// leaf cutout, the grass pipeline's twin). The palm TRUNK rides the existing
-// cylinder shape; only the crown needs this. (req_1443, palm trees the grass way.)
+// leaf cutout, the grass pipeline's twin). (req_1443, palm trees the grass way.)
 export const INSTANCE_SHAPE_FROND = 8;
+// Palm TRUNK — keyed geometry buildPalmTrunk() in world_loader.zig, editor twin
+// runtime/geometries/PalmTrunk: a tapered, bulged, gently-curved log with scar
+// rings (the real palm trunk, NOT a plain cylinder). A normal lit mesh; the row
+// colour tints it. (req_1452 — the trunk quality was the whole point of the work.)
+export const INSTANCE_SHAPE_PALMTRUNK = 9;
 
 // ── materials: ship the SHADER (the formula) — pixels only when there IS no formula ─
 // GUIDING_LIGHT: procedural content travels as its recipe. A face whose skin is
@@ -983,7 +987,7 @@ function pushFoliage(
 function pushPalms(b: Build, state: GameState, floors: readonly ChunkFloor[]): void {
   const palm = buildPalmInstances(worldWithFloorLandforms(state, floors));
   console.warn(`[bake] palm: ${palm.trunks.count} trunk(s) + ${palm.fronds.count} frond(s) over painted tiles`);
-  pushInstanceField(b, palm.trunks, INSTANCE_SHAPE_CYLINDER16);
+  pushInstanceField(b, palm.trunks, INSTANCE_SHAPE_PALMTRUNK);
   pushInstanceField(b, palm.fronds, INSTANCE_SHAPE_FROND);
 }
 

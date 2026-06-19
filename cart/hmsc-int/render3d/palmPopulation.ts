@@ -13,6 +13,12 @@ import { eachPaintedCell, type GrassInstances } from './grassPopulation';
 
 const STRIDE = 12; // pos3 | rot3 (pitch,yaw,roll) | scale3 | rootColor3 — the foliage row
 
+// The loader's buildPalmTrunk geometry (compiled twin of runtime/geometries/PalmTrunk)
+// is 1 unit TALL (base y=0 → top y=1) with this base radius baked in unit space; a
+// real-radius trunk scales x/z by (radius / this), exactly like cart/tree_probe.tsx
+// (span = radius / PALM_TRUNK_DEFAULTS.baseRadius). Keep in lockstep with both.
+const PALM_TRUNK_UNIT_RADIUS = 0.13;
+
 // Palm-grove globals. A future /settings rig (editorTunables, like grass/bush) can
 // swap these in; kept a plain table for now so the population stays pure data.
 export const PALM_CONFIG = {
@@ -89,10 +95,11 @@ export function buildPalmInstances(world: GameState['world']): PalmField {
       lerp(PALM_CONFIG.rootLo.b, PALM_CONFIG.rootHi.b, unit(mix(h3 ^ 0x9d))),
     ];
 
-    // Trunk: a CENTER-origin cylinder (loader buildUnitCylinder spans y ∈ [-0.5,0.5])
-    // scaled to trunkH tall, radius on x/z, a small yaw aiming the lean. So the
-    // CENTRE sits at top + trunkH/2 → the base rests on the cell surface `top`.
-    trunks.push(px, top + trunkH / 2, pz, 0, leanYaw, 0, radius, trunkH, radius, PALM_CONFIG.trunkColor.r, PALM_CONFIG.trunkColor.g, PALM_CONFIG.trunkColor.b);
+    // Trunk: the PalmTrunk mesh (BASE-origin, 1 unit tall y∈[0,1]) so position y is
+    // the cell surface `top` (base on the ground). Scale x/z by span = radius/unit so
+    // the baked taper/bulge/curve/scar-rings keep their shape; yaw aims the lean.
+    const span = radius / PALM_TRUNK_UNIT_RADIUS;
+    trunks.push(px, top, pz, 0, leanYaw, 0, span, trunkH, span, PALM_CONFIG.trunkColor.r, PALM_CONFIG.trunkColor.g, PALM_CONFIG.trunkColor.b);
     tb.add(px, top, pz);
     tb.add(px, top + trunkH, pz);
 
