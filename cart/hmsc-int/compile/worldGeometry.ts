@@ -34,6 +34,7 @@ import { isParkingKind } from '../render3d/parkingStall';
 import type { ChunkFloor } from '../chunkFloor';
 import { floorToLandform } from '../chunkFloor';
 import { buildGrassInstances, buildBushInstances } from '../render3d/grassPopulation';
+import { buildPalmInstances } from '../render3d/palmPopulation';
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
 // THE ONE piece decomposition (PARITY-0611, req_0654/req_0655): the bake lowers
@@ -73,6 +74,11 @@ export const INSTANCE_SHAPE_GABLE = 5;
 // "~grass~" tex key the loader stamps; the row colour is the per-card root tint.
 export const INSTANCE_SHAPE_GRASS = 6;
 export const INSTANCE_SHAPE_BUSH = 7;
+// Palm-crown frond card — keyed geometry buildFrond() in world_loader.zig, editor
+// twin runtime/geometries/Frond. Routed to the ~frond~ pipeline (its own wind +
+// leaf cutout, the grass pipeline's twin). The palm TRUNK rides the existing
+// cylinder shape; only the crown needs this. (req_1443, palm trees the grass way.)
+export const INSTANCE_SHAPE_FROND = 8;
 
 // ── materials: ship the SHADER (the formula) — pixels only when there IS no formula ─
 // GUIDING_LIGHT: procedural content travels as its recipe. A face whose skin is
@@ -929,23 +935,20 @@ export type WorldInstanceResult = {
  *  the "~grass~" tex key. The painter writes foliage tiles into painted FLOOR chunks,
  *  so the bake gets them as `floors`; convert each to its landform twin so the
  *  populate fn reads the same tile grids the editor does — identical field. */
-function pushFoliage(
-  b: Build,
-  state: GameState,
-  floors: readonly ChunkFloor[],
-  build: (world: GameState['world']) => { data: Float32Array; count: number },
-  shapeId: number,
-  label: string,
-): void {
+/** The painter writes foliage tiles into painted FLOOR chunks, so the bake gets
+ *  them as `floors`; merge each as its landform twin so the populate fns read the
+ *  SAME tile grids the editor does — identical field in /test and /compiled. */
+function worldWithFloorLandforms(state: GameState, floors: readonly ChunkFloor[]): GameState['world'] {
   const floorLandforms = floors.map(floorToLandform);
-  const world = floorLandforms.length
-    ? { ...state.world, landforms: [...(state.world.landforms ?? []), ...floorLandforms] }
+  return floorLandforms.length
+    ? ({ ...state.world, landforms: [...(state.world.landforms ?? []), ...floorLandforms] } as GameState['world'])
     : state.world;
-  const field = build(world as GameState['world']); // stride-12: pos3 rot3 scale3 color3
+}
+
+/** Push a populated stride-12 field (pos3 | rot3 | scale3 | rootColor3) as instance
+ *  rows of one shape — the shared emit for every foliage population (grass/bush/palm). */
+function pushInstanceField(b: Build, field: { data: Float32Array; count: number }, shapeId: number): void {
   const d = field.data;
-  // console.warn → stderr (NEVER print/console.log — stdout carries the bake's
-  // JSON result the CLI parses; writing there corrupts it).
-  console.warn(`[bake] ${label}: ${field.count} card(s) over painted tiles`);
   for (let i = 0; i < field.count; i += 1) {
     const o = i * 12;
     pushShape(
@@ -957,6 +960,31 @@ function pushFoliage(
       [d[o + 9], d[o + 10], d[o + 11]],
     );
   }
+}
+
+function pushFoliage(
+  b: Build,
+  state: GameState,
+  floors: readonly ChunkFloor[],
+  build: (world: GameState['world']) => { data: Float32Array; count: number },
+  shapeId: number,
+  label: string,
+): void {
+  const field = build(worldWithFloorLandforms(state, floors));
+  // console.warn → stderr (NEVER print/console.log — stdout carries the bake's
+  // JSON result the CLI parses; writing there corrupts it).
+  console.warn(`[bake] ${label}: ${field.count} card(s) over painted tiles`);
+  pushInstanceField(b, field, shapeId);
+}
+
+/** Palm groves: each painted 'palm' cell sparsely grows a palm = a CYLINDER trunk
+ *  (existing shape) + a crown of FROND cards (routed to ~frond~ by the loader). Both
+ *  ride the same populate roll, so trunk and crown of one palm always line up. */
+function pushPalms(b: Build, state: GameState, floors: readonly ChunkFloor[]): void {
+  const palm = buildPalmInstances(worldWithFloorLandforms(state, floors));
+  console.warn(`[bake] palm: ${palm.trunks.count} trunk(s) + ${palm.fronds.count} frond(s) over painted tiles`);
+  pushInstanceField(b, palm.trunks, INSTANCE_SHAPE_CYLINDER16);
+  pushInstanceField(b, palm.fronds, INSTANCE_SHAPE_FROND);
 }
 
 export function buildWorldInstances(
@@ -972,6 +1000,7 @@ export function buildWorldInstances(
   if (opts.includeGroundLayers) pushWorldLayers(b, state);
   pushFoliage(b, state, floors, buildGrassInstances, INSTANCE_SHAPE_GRASS, 'grass');
   pushFoliage(b, state, floors, buildBushInstances, INSTANCE_SHAPE_BUSH, 'bush');
+  pushPalms(b, state, floors);
   // Bodies of water ship in their own WATER lump (encodeWaterBodies) as animated
   // translucent heightfields, not instances — so they're NOT pushed here.
   return {

@@ -58,6 +58,7 @@ const SHAPE_SPHERE: f32 = 4;
 const SHAPE_GABLE: f32 = 5; // req_0930: the triangular gable-end wall prism
 const SHAPE_GRASS: f32 = 6; // a grass blade clump — drawn by the grass pipeline (wind/wisp/gradient)
 const SHAPE_BUSH: f32 = 7; // a bush foliage clump — same foliage pipeline, bushier geometry
+const SHAPE_FROND: f32 = 8; // a palm-crown frond card — drawn by the ~frond~ pipeline (leaf cutout + wind)
 const SCAN_A: usize = 4;
 const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
@@ -650,6 +651,51 @@ fn buildBushClump() [60 * 8]f32 {
     return out;
 }
 
+/// One palm-crown FROND card — the compiled twin of runtime/geometries/Frond.ts
+/// (FROND_DEFAULTS: the feathered coconut leaf). A segmented arched card: y rises
+/// 0→1 up the leaf, z arches forward by arc·t², the tip sags by sag·t², and the
+/// width tapers to the point. uv.v 0=root→1=tip drives the gradient/wind; uv.u ∈
+/// [0,1] is the across-leaf coordinate (style 'feathered' → u offset 0). Emitted
+/// double-sided (front + flipped back) since the ~frond~ pipeline culls nothing.
+/// The per-instance scale (wide, len, wide) sizes ONE interned frond to every tree.
+fn buildFrond() [144 * 8]f32 {
+    const width: f32 = 0.5; // FROND_DEFAULTS.width
+    const tip_taper: f32 = 0.1;
+    const arc: f32 = 0.8;
+    const sag: f32 = 0.18;
+    const segs: usize = 12;
+    var out: [144 * 8]f32 = undefined;
+    var i: usize = 0;
+    var s: usize = 0;
+    while (s < segs) : (s += 1) {
+        const t0 = @as(f32, @floatFromInt(s)) / @as(f32, @floatFromInt(segs));
+        const t1 = @as(f32, @floatFromInt(s + 1)) / @as(f32, @floatFromInt(segs));
+        const ay = t0 - sag * t0 * t0;
+        const az = arc * t0 * t0;
+        const ah = width * 0.5 * (1.0 - (1.0 - tip_taper) * t0);
+        const by = t1 - sag * t1 * t1;
+        const bz = arc * t1 * t1;
+        const bh = width * 0.5 * (1.0 - (1.0 - tip_taper) * t1);
+        // Face normal ≈ the spine tangent rotated 90° (faces forward/up as it arches).
+        const dy = by - ay;
+        const dz = bz - az;
+        const len = @max(1e-6, @sqrt(dy * dy + dz * dz));
+        const nf = [3]f32{ 0, -dz / len, dy / len };
+        const nb = [3]f32{ 0, dz / len, -dy / len };
+        const bl = [3]f32{ -ah, ay, az };
+        const br = [3]f32{ ah, ay, az };
+        const tr = [3]f32{ bh, by, bz };
+        const tl = [3]f32{ -bh, by, bz };
+        // front (v base→tip, u spans leaf width)
+        pushTri(out[0..], &i, bl, br, tr, nf, .{ 0, t0 }, .{ 1, t0 }, .{ 1, t1 });
+        pushTri(out[0..], &i, bl, tr, tl, nf, .{ 0, t0 }, .{ 1, t1 }, .{ 0, t1 });
+        // back (reversed winding + flipped normal)
+        pushTri(out[0..], &i, bl, tr, br, nb, .{ 0, t0 }, .{ 1, t1 }, .{ 1, t0 });
+        pushTri(out[0..], &i, bl, tl, tr, nb, .{ 0, t0 }, .{ 0, t1 }, .{ 1, t1 });
+    }
+    return out;
+}
+
 fn spherePos(radius: f32, theta: f32, phi: f32) [3]f32 {
     const st = @sin(theta);
     return .{ radius * st * @cos(phi), radius * @cos(theta), radius * st * @sin(phi) };
@@ -757,6 +803,8 @@ const ShapeBatches = struct {
     grass_count: u32,
     bush: []f32,
     bush_count: u32,
+    frond: []f32,
+    frond_count: u32,
 
     pub fn deinit(self: ShapeBatches, allocator: std.mem.Allocator) void {
         allocator.free(self.boxes);
@@ -767,6 +815,7 @@ const ShapeBatches = struct {
         allocator.free(self.gables);
         allocator.free(self.grass);
         allocator.free(self.bush);
+        allocator.free(self.frond);
     }
 };
 
@@ -813,6 +862,8 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     errdefer grass.deinit(allocator);
     var bush: std.ArrayList(f32) = .{};
     errdefer bush.deinit(allocator);
+    var frond: std.ArrayList(f32) = .{};
+    errdefer frond.deinit(allocator);
     var box_count: u32 = 0;
     var ramp_count: u32 = 0;
     var cylinder8_count: u32 = 0;
@@ -821,6 +872,7 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     var gable_count: u32 = 0;
     var grass_count: u32 = 0;
     var bush_count: u32 = 0;
+    var frond_count: u32 = 0;
     var row: usize = 0;
     while (row < @as(usize, @intCast(inst_count))) : (row += 1) {
         if (row < material_refs.len and material_refs[row] != 0) continue; // textured batch
@@ -848,6 +900,9 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         } else if (@abs(shape - SHAPE_BUSH) < 0.5) {
             try bush.appendSlice(allocator, src);
             bush_count += 1;
+        } else if (@abs(shape - SHAPE_FROND) < 0.5) {
+            try frond.appendSlice(allocator, src);
+            frond_count += 1;
         } else {
             try boxes.appendSlice(allocator, src);
             box_count += 1;
@@ -870,6 +925,8 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         .grass_count = grass_count,
         .bush = try bush.toOwnedSlice(allocator),
         .bush_count = bush_count,
+        .frond = try frond.toOwnedSlice(allocator),
+        .frond_count = frond_count,
     };
 }
 
@@ -2136,6 +2193,7 @@ pub const Runtime = struct {
     gable_prism: [24 * 8]f32 = undefined,
     grass_blade: [36 * 8]f32 = undefined,
     bush_clump: [60 * 8]f32 = undefined,
+    frond_card: [144 * 8]f32 = undefined,
     shape_batches: ShapeBatches = undefined,
     has_shape_batches: bool = false,
     // Per-material textured batches (geometry built at construct; the shaders are
@@ -2493,6 +2551,7 @@ pub const Runtime = struct {
         self.gable_prism = buildGablePrism();
         self.grass_blade = buildGrassBlade();
         self.bush_clump = buildBushClump();
+        self.frond_card = buildFrond();
         self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.material_refs);
         self.has_shape_batches = true;
         // The textured remainder: rows wearing a material, partitioned per slot.
@@ -2522,10 +2581,11 @@ pub const Runtime = struct {
         if (self.stream) |*w| {
             for (self.stream_protos.items, 0..) |proto, fi| {
                 if (proto.tex_key) |tk| {
-                    // The "~grass~" sentinel is routing, NOT a real texture — the
-                    // grass shader reads inst_color as the per-blade root tint, so
-                    // never whiten it (that would flatten the field to one green).
-                    if (std.mem.eql(u8, tk, "~grass~")) continue;
+                    // The "~grass~"/"~frond~" sentinels are routing, NOT real
+                    // textures — the grass/frond shaders read inst_color as the
+                    // per-card root tint, so never whiten them (that would flatten
+                    // the field to one green / the crowns to white).
+                    if (std.mem.eql(u8, tk, "~grass~") or std.mem.eql(u8, tk, "~frond~")) continue;
                     whitenRows(w.families[fi].rows, w.families[fi].stride);
                 }
             }
@@ -2967,6 +3027,19 @@ pub const Runtime = struct {
                 .scene3d_instance_stride = @intCast(self.stride),
                 .scene3d_instance_static = true,
             });
+            // Palm crowns: the "~frond~" tex key routes this batch to the frond
+            // pipeline (gpu/3d.zig) — leaf cutout + root→tip gradient + wind sway.
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.frond_count > 0,
+                .scene3d_geom_key = "frond-card",
+                .scene3d_tex_key = "~frond~",
+                .scene3d_vertices = self.frond_card[0..],
+                .scene3d_vert_count = 144,
+                .scene3d_instance_data = self.shape_batches.frond,
+                .scene3d_instance_count = self.shape_batches.frond_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
         }
 
         // Per material: a SHADER material draws as one TEXTURED instanced box batch
@@ -3104,6 +3177,7 @@ pub const Runtime = struct {
         try fams.append(self.allocator, .{ .rows = self.shape_batches.gables, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "gable-prism", .verts = self.gable_prism[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.grass, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "frond-card", .verts = self.frond_card[0..], .tex_key = "~frond~" });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "grass-blade", .verts = self.grass_blade[0..], .tex_key = "~grass~" });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.bush, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "bush-clump", .verts = self.bush_clump[0..], .tex_key = "~grass~" });

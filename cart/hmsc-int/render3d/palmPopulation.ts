@@ -89,9 +89,10 @@ export function buildPalmInstances(world: GameState['world']): PalmField {
       lerp(PALM_CONFIG.rootLo.b, PALM_CONFIG.rootHi.b, unit(mix(h3 ^ 0x9d))),
     ];
 
-    // Trunk: the PalmTrunk mesh (1 unit tall, base at y=0) scaled to height, radius
-    // on x/z; a small yaw aims the baked lean. y position is the cell surface.
-    trunks.push(px, top, pz, 0, leanYaw, 0, radius, trunkH, radius, PALM_CONFIG.trunkColor.r, PALM_CONFIG.trunkColor.g, PALM_CONFIG.trunkColor.b);
+    // Trunk: a CENTER-origin cylinder (loader buildUnitCylinder spans y ∈ [-0.5,0.5])
+    // scaled to trunkH tall, radius on x/z, a small yaw aiming the lean. So the
+    // CENTRE sits at top + trunkH/2 → the base rests on the cell surface `top`.
+    trunks.push(px, top + trunkH / 2, pz, 0, leanYaw, 0, radius, trunkH, radius, PALM_CONFIG.trunkColor.r, PALM_CONFIG.trunkColor.g, PALM_CONFIG.trunkColor.b);
     tb.add(px, top, pz);
     tb.add(px, top + trunkH, pz);
 
