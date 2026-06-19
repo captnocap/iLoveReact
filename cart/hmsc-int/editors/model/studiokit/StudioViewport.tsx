@@ -1841,9 +1841,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             tooltip="Scale reference — stand the in-game player (1.65 m) next to your model to size it against a real human"
             style={{ ...STEP_BTN, backgroundColor: showScale ? '#1c3a2a' : '#0b1320dd', borderColor: showScale ? '#2f7a4f' : '#27364a' }}
           >
-            <Text fontSize={10} color={showScale ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>
-              {showScale ? `scale · player ${HMSC_SCALE.playerCapsuleHeightMeters.toFixed(2)} m` : '☖ scale'}
-            </Text>
+            <Row style={{ gap: 4, alignItems: 'center' }}>
+              <Icon name="PersonStanding" size={13} color={showScale ? '#7fd6a0' : T.dim} />
+              {showScale ? <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>{`${HMSC_SCALE.playerCapsuleHeightMeters.toFixed(2)} m`}</Text> : null}
+            </Row>
           </Pressable>
           {/* BACKDROPS (req_1280): reference images on the walls/floor to trace over. */}
           {(() => { const shown = backdrops.filter((b) => b.visible).length; return (
@@ -1852,9 +1853,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               tooltip="Reference backdrops — drop a blueprint/photo on a wall or the floor and model straight over it"
               style={{ ...STEP_BTN, backgroundColor: shown ? '#16324a' : '#0b1320dd', borderColor: shown ? '#4a7fb0' : '#27364a' }}
             >
-              <Text fontSize={10} color={shown ? '#9fcfff' : T.dim} style={{ fontFamily: 'monospace' }}>
-                {shown ? `▦ trace · ${shown}` : '▦ trace'}
-              </Text>
+              <Row style={{ gap: 4, alignItems: 'center' }}>
+                <Icon name="Image" size={13} color={shown ? '#9fcfff' : T.dim} />
+                {shown ? <Text fontSize={10} color="#9fcfff" style={{ fontFamily: 'monospace' }}>{shown}</Text> : null}
+              </Row>
             </Pressable>
           ); })()}
           {/* MIRROR (req_1183/1186): symmetric editing — pick the plane(s). X=left↔right,
@@ -1875,8 +1877,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         <Row style={{ gap: 6, alignItems: 'center' }}>
           {diagOn ? <FrameDiagBar logToTerminal={logOn} /> : null}
           <Pressable onPress={cycleSmooth} tooltip="Camera smoothing — cycle direct / eased follow (cosmetic; 'direct' is 1:1 like Blockbench)" style={STEP_BTN}><Text fontSize={9} color={T.text}>smooth: {smooth === 0 ? 'direct' : `${smooth}/s`}</Text></Pressable>
-          <Pressable onPress={() => setLogOn((v) => !v)} tooltip="Log camera angles to the terminal (debug aid for chasing camera jitter)" style={{ ...STEP_BTN, backgroundColor: logOn ? '#1c3a2a' : '#13233aee', borderColor: logOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={logOn ? '#7fd6a0' : T.dim}>log cam</Text></Pressable>
-          <Pressable onPress={() => setDiagOn((v) => !v)} tooltip="Show/hide the FRAMES performance readout (fps · frame ms · skips · gc · present)" style={{ ...STEP_BTN, backgroundColor: diagOn ? '#1c3a2a' : '#13233aee', borderColor: diagOn ? '#2f7a4f' : '#2c4a6a' }}><Text fontSize={9} color={diagOn ? '#7fd6a0' : T.dim}>fps</Text></Pressable>
+          <Pressable onPress={() => setLogOn((v) => !v)} tooltip="Log camera angles to the terminal (debug aid for chasing camera jitter)" style={{ ...STEP_BTN, backgroundColor: logOn ? '#1c3a2a' : '#13233aee', borderColor: logOn ? '#2f7a4f' : '#2c4a6a' }}><Icon name="ScrollText" size={12} color={logOn ? '#7fd6a0' : T.dim} /></Pressable>
+          <Pressable onPress={() => setDiagOn((v) => !v)} tooltip="Show/hide the FRAMES performance readout (fps · frame ms · skips · gc · present)" style={{ ...STEP_BTN, backgroundColor: diagOn ? '#1c3a2a' : '#13233aee', borderColor: diagOn ? '#2f7a4f' : '#2c4a6a' }}><Icon name="Gauge" size={12} color={diagOn ? '#7fd6a0' : T.dim} /></Pressable>
         </Row>
       </Row>
 
@@ -2533,7 +2535,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               tooltip="Textureize — unwrap the whole model into one packed sprite-sheet atlas you can paint / export / AI-fill"
               style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c6a4a' }}
             >
-              <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>textureize</Text>
+              <Icon name="Grid2x2" size={13} color="#7fd6a0" />
             </Pressable>
             {/* COMPILE (req_1122, Part 7): cook this model into a typed, installed
                 game asset (prop first). Choose the kind → fill its descriptor →
@@ -2543,7 +2545,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               tooltip="Compile — cook this model into a typed, installed game asset (prop/vehicle): pick the kind, fill its descriptor, it lands in the catalog"
               style={{ ...STEP_BTN, backgroundColor: '#16132aee', borderColor: '#8a6f3a' }}
             >
-              <Text fontSize={10} color="#e9c77f" style={{ fontFamily: 'monospace' }}>⚙ compile</Text>
+              <Icon name="Package" size={13} color="#e9c77f" />
             </Pressable>
             {tex ? (
               <>
@@ -2552,22 +2554,22 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   tooltip="Toggle the textured atlas vs solid part colours in the viewport"
                   style={{ ...STEP_BTN, backgroundColor: texView ? '#1c3a2a' : '#13233aee', borderColor: texView ? '#2f7a4f' : '#2c4a6a' }}
                 >
-                  <Text fontSize={10} color={texView ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>{texView ? 'textured' : 'solid'}</Text>
+                  <Icon name="Eye" size={13} color={texView ? '#7fd6a0' : T.dim} />
                 </Pressable>
                 {/* export PNG (req_1072): the whole sprite sheet, or ONE slice (the
                     selected face's island) — to cart/hmsc-int/exports/<name>.png. */}
                 <Pressable onPress={() => exportSprite()} tooltip="Export the whole texture atlas as a PNG (to cart/hmsc-int/exports/) to edit externally" style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
-                  <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>export sheet</Text>
+                  <Icon name="ImageDown" size={13} color={T.dim} />
                 </Pressable>
                 {/* re-upload PNG (req_1079): the edited/AI-generated sheet slips back
                     onto the model (cookie-cutter via the UVs), or one face's slice. */}
                 <Pressable onPress={() => setImportTex({})} tooltip="Import an edited/AI PNG back onto the model — re-applied through the UVs (cookie-cutter)" style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#3a2c6a' }}>
-                  <Text fontSize={10} color="#b9a8e9" style={{ fontFamily: 'monospace' }}>import sheet</Text>
+                  <Icon name="ImageUp" size={13} color="#b9a8e9" />
                 </Pressable>
                 {/* AI fill (req_1070/1110): generate the whole sheet via image-to-image
                     (the current atlas is the reference) — no leaving the app. */}
                 <Pressable onPress={() => setAiTex({})} tooltip="AI fill — generate the whole texture sheet via image-to-image (current atlas as reference), without leaving the app" style={{ ...STEP_BTN, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
-                  <Text fontSize={10} color="#cdbcff" style={{ fontFamily: 'monospace' }}>✦ ai fill</Text>
+                  <Icon name="Sparkles" size={13} color="#cdbcff" />
                 </Pressable>
                 {selMode === 'face' && activePart && sel.faces.size === 1 ? (
                   <>
@@ -2659,7 +2661,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           <Pressable onPress={() => setFov(fovRef.current + 2)} tooltip="Wider field of view (zoom out / more perspective)" style={STEP_BTN}><Text fontSize={13} color={T.text}>+</Text></Pressable>
         </Row>
         <Pressable onPress={reframe} tooltip="Reframe (F) — recenter the camera on the model" style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}>
-          <Text fontSize={10} color={T.text}>reframe (F)</Text>
+          <Icon name="Frame" size={13} color={T.text} />
         </Pressable>
       </Col>
 
@@ -2816,14 +2818,14 @@ export function StudioEditor() {
       {/* Branch-history verbs — top-left, the one viewport corner the compass /
           toolbar / mode-toggle don't claim. Disabled when the stack is empty. */}
       <Row style={{ position: 'absolute', left: 8, top: 8, gap: 4, zIndex: Z.chrome }}>
-        {([['undo', '↶ Undo', model.canUndo, () => model.undo()], ['redo', '↷ Redo', model.canRedo, () => model.redo()]] as const).map(([k, label, on, run]) => (
-          <Pressable key={k} onPress={on ? run : undefined} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, borderWidth: 1, backgroundColor: on ? '#13233aee' : '#0e1726aa', borderColor: on ? '#2c4a6a' : '#1c2a3c' }}>
-            <Text fontSize={10} color={on ? '#cfe2ff' : T.dim}>{label}</Text>
+        {([['undo', 'Undo2', 'Undo (Ctrl+Z)', model.canUndo, () => model.undo()], ['redo', 'Redo2', 'Redo (Ctrl+Y)', model.canRedo, () => model.redo()]] as const).map(([k, icon, tip, on, run]) => (
+          <Pressable key={k} onPress={on ? run : undefined} tooltip={tip} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, borderWidth: 1, backgroundColor: on ? '#13233aee' : '#0e1726aa', borderColor: on ? '#2c4a6a' : '#1c2a3c' }}>
+            <Icon name={icon} size={13} color={on ? '#cfe2ff' : T.dim} />
           </Pressable>
         ))}
         {/* Import a generated/external GLB (tools/genmesh) as a NEW paintable model. */}
         <Pressable onPress={() => setImportOpen(true)} tooltip="Import a 3D model (.glb) — converts it to an editable, paintable Studio model" style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 6, borderWidth: 1, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
-          <Text fontSize={10} color="#cdbcff">⬇ Import GLB</Text>
+          <Icon name="FileUp" size={13} color="#cdbcff" />
         </Pressable>
       </Row>
       {/* the OUTLINER (layers) docks on the RIGHT of the viewport (req_0981). */}
