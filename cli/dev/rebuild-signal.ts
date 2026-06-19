@@ -41,7 +41,12 @@ function nativeInputManifestScript(): string {
 set -eu
 cd "$1"
 {
-  find framework -type f -print 2>/dev/null || true
+  # framework/testing/** are zig 'test' modules pulled in ONLY by build.zig's
+  # test-* steps (b.addTest) - never by the 'app' step that builds the dev
+  # binary. Hashing them made any test-file touch (a test run, a git checkout,
+  # another worker editing tests) force a needless full dev rebuild on every
+  # start. Prune them: the fingerprint must reflect only the dev binary's inputs.
+  find framework -type d -name testing -prune -o -type f -print 2>/dev/null || true
   printf '%s\\n' build.zig v8_app.zig v8_cli.zig v8_hello.zig world_loader.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig
 } | LC_ALL=C sort -u | while IFS= read -r f; do
   [ -f "$f" ] || continue
