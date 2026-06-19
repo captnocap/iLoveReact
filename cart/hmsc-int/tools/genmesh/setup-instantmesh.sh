@@ -51,7 +51,7 @@ pip install \
   pytorch-lightning==2.1.2 \
   einops omegaconf torchmetrics \
   transformers==4.34.1 diffusers==0.20.2 \
-  accelerate==0.24.1 huggingface_hub==0.19.4 \
+  accelerate==0.24.1 huggingface_hub==0.17.3 \
   "imageio[ffmpeg]" rembg onnxruntime \
   trimesh PyMCubes xatlas plyfile opencv-python-headless ninja
 
