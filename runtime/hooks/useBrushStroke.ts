@@ -53,6 +53,11 @@ export interface BrushStrokeOpts {
   eraseColor?: string;
   /** static fallback clip when mapPoint doesn't carry a per-hit one. */
   clip?: ClipRect;
+  /** Optional symmetry hook (req_1538): given a stamped dab (atlas px + radius),
+   *  return its mirror image(s) — each its own atlas point + clip island — to stamp
+   *  alongside it. Applies to EVERY dab (freehand-interpolated and shape tools), so
+   *  symmetric 3D painting is gap-free on both sides. Same colour/brush as the dab. */
+  mirror?: (dab: Dab) => Array<{ x: number; y: number; clip: ClipRect | null }>;
   /** fired once when any stroke commits (undo checkpoints, dirty flags). */
   onStrokeEnd?: () => void;
 }
@@ -114,13 +119,15 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
     if (o.tool === 'eraser') rgb = hexToRgb01(o.eraseColor ?? '#0c0e14');
     else if (b.ink.kind === 'color') rgb = hexToRgb01(b.ink.hex);
     else rgb = [1, 1, 1]; // texture/shader inks resolve to color until Phase B
-    const c = clipRef.current ?? o.clip;
-    o.paint.brushColor(
-      dab.x, dab.y, dab.radius, rgb[0], rgb[1], rgb[2],
+    // one disc, scissored to a clip island — primary + each mirror image share this.
+    const stamp = (x: number, y: number, c: ClipRect | null) => o.paint.brushColor(
+      x, y, dab.radius, rgb[0], rgb[1], rgb[2],
       kindId, (b.angleDeg * Math.PI) / 180, b.aspect, b.hardness, b.flow, b.scatter,
-      jitterSeed(dab.x, dab.y),
+      jitterSeed(x, y),
       c?.x ?? 0, c?.y ?? 0, c?.w ?? 0, c?.h ?? 0,
     );
+    stamp(dab.x, dab.y, clipRef.current ?? o.clip ?? null);
+    if (o.mirror) for (const md of o.mirror(dab)) stamp(md.x, md.y, md.clip);
   };
 
   const stampMany = (dabs: Dab[]) => { for (const d of dabs) stampDab(d); };

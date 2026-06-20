@@ -5,7 +5,7 @@
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 import {
   addMount, addMountReflections, updateMountMirrored, bevelEdge, bevelVertex, connectVerts, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag, icosphere, sphere, ICOSPHERE_SUBDIV_MAX,
-  bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, newConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
+  bridgeEdges, centerMesh, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, newConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
   flipFace, mergeFaces, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel, validateMesh, meshHealth,
   type EditMesh, type MountPoint, type V3,
@@ -372,6 +372,22 @@ test('dragging a corner inward buckles a cube face → the guard detects it (req
   assert(findConcaveFaces(buckled).length > 0, 'the buckled quad is flagged concave (the alert would fire)');
   // and Split Quads clears it (the recommended resolution).
   assertEqual(findConcaveFaces(splitConcaveFaces(buckled)).length, 0, 'Split Quads resolves every offender');
+});
+
+test('centerMesh drops the bounds center on the origin + carries pivot/mounts (req_1538)', () => {
+  // an off-origin cube → its bounds center should land at (0,0,0) so the mirror plane bisects it.
+  const box = translateVerts(cuboid(2, 2, 2), cuboid(2, 2, 2).verts.map((_, i) => i), [5, 3, -4]);
+  const c0 = meshBoundsCenter(box);
+  assert(Math.hypot(c0[0], c0[1], c0[2]) > 1, 'the test cube starts off-origin');
+  const centered = centerMesh(box);
+  const c1 = meshBoundsCenter(centered);
+  assert(approx(c1[0], 0) && approx(c1[1], 0) && approx(c1[2], 0), 'bounds center is now the origin');
+  // pivot + a mount ride the same delta (stay attached to the geometry).
+  const rigged = { ...box, pivot: meshBoundsCenter(box) as [number, number, number], mounts: [{ name: 'm', kind: 'socket' as const, position: meshBoundsCenter(box) as [number, number, number] }] };
+  const rc = centerMesh(rigged);
+  assert(approx(rc.pivot![0], 0) && approx(rc.pivot![1], 0) && approx(rc.pivot![2], 0), 'pivot moved to the origin with the geometry');
+  assert(approx(rc.mounts![0].position[0], 0), 'the mount rode the same delta');
+  assertEqual(centerMesh(centered), centered, 'an already-centered mesh is returned unchanged (idempotent)');
 });
 
 test('newConcaveFaces ignores PRE-EXISTING concavity, flags only what the edit buckles (req_1514)', () => {

@@ -10,7 +10,8 @@
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import { cuboid } from './editMesh';
 import type { CameraSnap } from './meshSelect';
-import { screenRay, pickFaceCell, faceCellGrid, cellAtlasRect, brushCells, dabRadiusCells, uvToWorld, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintTarget } from './meshPaint';
+import { screenRay, pickFaceCell, faceCellGrid, cellAtlasRect, brushCells, dabRadiusCells, uvToWorld, mirrorPaintDabs, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintTarget } from './meshPaint';
+import type { EditMesh } from './editMesh';
 
 function nearly(a: number, b: number, eps = 1e-3): boolean { return Math.abs(a - b) <= eps; }
 
@@ -120,6 +121,32 @@ test('dabRadiusCells maps the detail slider to a footprint on the FIXED grid (re
   assertEqual(dabRadiusCells(PAINT_GRID_UNITS, 1), 0, 'a one-cell dab, brush 1 → radius 0 (single cell)');
   assertEqual(dabRadiusCells(PAINT_GRID_UNITS, 3), 2, 'brush 3 adds two rings → radius 2');
   assert(dabRadiusCells(1.2, 1) > dabRadiusCells(0.2, 1), 'a bigger dab covers more cells');
+});
+
+test('mirrorPaintDabs reflects a dab onto the symmetric face across X (req_1538)', () => {
+  // a minimal symmetric pair: the +X and −X faces of a unit-2 box, each with its OWN
+  // distinct UV island so faceTexelRect can tell them apart (island A: u 0..0.4, island
+  // B: u 0.5..0.9; both map y→u, z→v the same way). A dab on +X must mirror onto −X.
+  const T = 1024;
+  const mesh: EditMesh = {
+    verts: [
+      [1, -1, -1], [1, 1, -1], [1, 1, 1], [1, -1, 1],     // +X face (0..3)
+      [-1, -1, -1], [-1, 1, -1], [-1, 1, 1], [-1, -1, 1],  // −X face (4..7)
+    ],
+    faces: [
+      { loop: [0, 1, 2, 3], uv: [[0, 0], [0.4, 0], [0.4, 0.4], [0, 0.4]] },
+      { loop: [4, 5, 6, 7], uv: [[0.5, 0], [0.9, 0], [0.9, 0.4], [0.5, 0.4]] },
+    ],
+  };
+  const targets: PaintTarget[] = [{ partId: 'p', mesh, lift: 0 }];
+  // paint at world (1, 0.5, -0.5): UV (0.3,0.1) on island A → texel (307.2, 102.4).
+  const dabs = mirrorPaintDabs(targets, 0.3 * T, 0.1 * T, [0], T);
+  assertEqual(dabs.length, 1, 'one mirror image across a single plane');
+  // its reflection (−1,0.5,−0.5) is UV (0.8,0.1) on island B → texel (819.2, 102.4).
+  assert(nearly(dabs[0].x, 0.8 * T, 0.5) && nearly(dabs[0].y, 0.1 * T, 0.5), 'mirror dab lands on the −X island at the symmetric texel');
+  assert(!!dabs[0].clip && dabs[0].clip!.x0 >= 0.5 * T - 1, 'the mirror dab is scissored to the −X islands clip rect');
+  // a dab with no mirror plane returns nothing.
+  assertEqual(mirrorPaintDabs(targets, 0.3 * T, 0.1 * T, [], T).length, 0, 'no plane → no mirror');
 });
 
 finish('meshPaint');

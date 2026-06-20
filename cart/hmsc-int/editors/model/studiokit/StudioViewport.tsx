@@ -36,7 +36,7 @@ import { chordHintFor } from '../../controls';
 import { KeyLegend } from '../../KeyLegend';
 import { loadKeybinds } from '../../keybinds';
 import { HotkeysPanel } from './dialogs/HotkeysPanel';
-import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, newConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from '../editMesh';
+import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, centerMesh, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, newConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from '../editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from '../anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from '../wheelMount';
 import { useStudioModel, type StudioModel, type StudioPart } from '../studioModel';
@@ -59,7 +59,7 @@ import {
   SelectionOverlay, makeProjector, orbitalEyeJS, pickElement, applyPick, emptySelection, selectionCount,
   type SelMode, type Selection, type CameraSnap,
 } from '../meshSelect';
-import { pickFaceUV, paintUVsNeedRepack, type PaintCells, type PaintTarget, type FaceHit } from '../meshPaint';
+import { pickFaceUV, paintUVsNeedRepack, mirrorPaintDabs, type PaintCells, type PaintTarget, type FaceHit } from '../meshPaint';
 import { STUDIO_PAINT_KEY, PAINT_TEX, paintTex, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited } from '../meshPaintTexture';
 import { Paintable } from '@reactjit/runtime/primitives';
 // The PAINT panel + stamping are now the UNIVERSAL kit (runtime/paint) — the same
@@ -833,6 +833,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     props.onEditMesh(activePart.id, symmetrize(activePart.mesh, symReport.axis, keepPos));
     setSel(emptySelection()); setRigSel(null);
   };
+  // Center (req_1538): slide the part so its bounds center sits on the origin, so the
+  // x=0/y=0/z=0 mirror plane bisects it — the prerequisite for true mirror editing AND
+  // mirror painting. A no-op when already centered (centerMesh returns the same mesh).
+  const opCenter = () => {
+    if (!activePart) return;
+    const out = centerMesh(activePart.mesh);
+    if (out !== activePart.mesh) { props.onEditMesh(activePart.id, out); toast('centered on origin'); }
+    else toast('already centered');
+  };
 
   // Selection keys — folded into the EDITOR CONTROL CONTRACT ('studio' scope,
   // editors/controls.ts). The dispatcher owns the typing gate, so the old
@@ -1159,6 +1168,19 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     texW: PAINT_TEX, texH: PAINT_TEX,
     brush, tool,
     mapPoint: paintMapPoint,
+    // MIRROR PAINTING (req_1538): when a mirror plane is on, every dab is also stamped
+    // on the symmetric face(s). Reflects in LOCAL space about c=0 (same as mirror-edit),
+    // so the model must be centered first (the Center button). Returns the atlas point +
+    // island clip per image; the controller stamps them with the same brush/colour.
+    mirror: mirrorAxes.length
+      ? (dab: { x: number; y: number; radius: number }) =>
+          mirrorPaintDabs(paintTargets(), dab.x, dab.y, mirrorAxes, PAINT_TEX).map((md) => ({
+            x: md.x, y: md.y,
+            clip: md.clip
+              ? { x: Math.max(0, Math.floor(md.clip.x0)), y: Math.max(0, Math.floor(md.clip.y0)), w: Math.max(1, Math.ceil(md.clip.x1) - Math.max(0, Math.floor(md.clip.x0))), h: Math.max(1, Math.ceil(md.clip.y1) - Math.max(0, Math.floor(md.clip.y0))) }
+              : null,
+          }))
+      : undefined,
     // erase reveals the texture's base coat (no host alpha-erase until Phase B).
     eraseColor: tex?.color ?? '#c8ccd2',
     onPickColor: (hex) => setBrush((b) => ({ ...b, ink: { kind: 'color', hex } })),
@@ -2293,6 +2315,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           selection-gated, so the rail is empty — and invisible — until a part or a
           selection makes its ops relevant. */}
       <Row style={{ position: 'absolute', left: 8, top: 72, width: 168, gap: 4, rowGap: 4, flexWrap: 'wrap', alignItems: 'flex-start', alignContent: 'flex-start', zIndex: Z.chrome }}>
+        {/* CENTER (req_1538): drop the part onto the origin so the mirror plane bisects
+            it — do this BEFORE symmetrize / mirror-edit / mirror-paint. Shown in every
+            mode (it's the prerequisite for all the symmetric tools, paint included). */}
+        {activePart ? (
+          <Pressable onPress={opCenter} tooltip="Center on origin — slide the part so its bounds center sits at (0,0,0), so the X/Y/Z mirror plane bisects it. Do this before mirror editing or mirror painting." style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#3a6a9a' }}>
+            <Row style={{ gap: 4, alignItems: 'center' }}>
+              <Icon name="Crosshair" size={12} color="#9fcfff" />
+              <Text fontSize={10} color="#9fcfff" style={{ fontFamily: 'monospace' }}>center</Text>
+            </Row>
+          </Pressable>
+        ) : null}
         {/* SYMMETRIZE (req_1190/1201): a WHOLE-MESH op, so shown in EVERY mode (it
             used to be nested in the non-rig tool block → invisible in rig mode, where
             the user went looking for it). Pick the GOOD half → it rebuilds the other

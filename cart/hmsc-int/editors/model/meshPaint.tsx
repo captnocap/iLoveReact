@@ -286,6 +286,99 @@ export function pickFaceUV(targets: PaintTarget[], cam: CameraSnap, sx: number, 
   return bestUV;
 }
 
+// ── Mirror painting (req_1538) ──────────────────────────────────────────────
+// Symmetric painting: every brush dab is also stamped on the mesh's mirror-image
+// face(s), so painting the left half paints the right (and up/down, front/back).
+// Geometry mirror reflects in LOCAL space about c=0 (mirrorEditAxes/symmetrize); we
+// do the SAME, which is why centering the model first (centerMesh) matters — an
+// off-origin model would mirror onto empty space. A dab carries only its atlas
+// texel, so we invert UV→surface point on its source face, reflect that point, then
+// forward-map it back to whatever face now sits there and its atlas texel.
+
+/** Forward map: a LOCAL point → the uv-mapped face it lies ON (nearest plane that
+ *  contains it) and the interpolated atlas UV there. `eps` is the max distance off a
+ *  face's plane to count as "on" it. Skips glass/unmapped faces. */
+function localToFaceUV(mesh: EditMesh, p: V3, eps: number): { faceIndex: number; u: number; v: number } | null {
+  let best: { faceIndex: number; u: number; v: number } | null = null;
+  let bestDist = eps;
+  for (let fi = 0; fi < mesh.faces.length; fi += 1) {
+    const face = mesh.faces[fi];
+    if (face.glass || !face.uv || face.uv.length < 3 || face.loop.length < 3) continue;
+    const v0 = mesh.verts[face.loop[0]];
+    for (let i = 1; i < face.loop.length - 1; i += 1) {
+      const va = mesh.verts[face.loop[i]], vb = mesh.verts[face.loop[i + 1]];
+      const n = cross(sub(va, v0), sub(vb, v0));
+      const n2 = dot(n, n);
+      if (n2 < 1e-12) continue;
+      const dist = Math.abs(dot(sub(p, v0), n)) / Math.sqrt(n2);
+      if (dist >= bestDist) continue;
+      // barycentric of p projected onto the tri plane (areas via cross products).
+      const wa = dot(n, cross(sub(vb, va), sub(p, va))) / n2;
+      const wb = dot(n, cross(sub(v0, vb), sub(p, vb))) / n2;
+      const wc = 1 - wa - wb;
+      if (wa < -1e-3 || wb < -1e-3 || wc < -1e-3) continue;
+      const uv0 = face.uv[0], uva = face.uv[i], uvb = face.uv[i + 1];
+      best = { faceIndex: fi, u: wa * uv0[0] + wb * uva[0] + wc * uvb[0], v: wa * uv0[1] + wb * uva[1] + wc * uvb[1] };
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+/** Every non-empty reflection of `p` across the given local axes about c=0 — matches
+ *  the geometry mirror (one axis = 1 image, two = 3, three = 7). */
+function reflections(p: V3, axes: (0 | 1 | 2)[]): V3[] {
+  const out: V3[] = [];
+  for (let mask = 1; mask < (1 << axes.length); mask += 1) {
+    const q: V3 = [p[0], p[1], p[2]];
+    for (let k = 0; k < axes.length; k += 1) if (mask & (1 << k)) q[axes[k]] = -q[axes[k]];
+    out.push(q);
+  }
+  return out;
+}
+
+/** A mirror stamp: where (atlas px) + which UV island to scissor to. */
+export type MirrorDab = { x: number; y: number; clip: TexelRect | null };
+
+/** Given a primary dab at atlas texel (x,y), return the mirror dab(s) — its symmetric
+ *  image(s) across `axes` on the same part — to stamp alongside it (req_1538). The dab
+ *  has lost its face, so we find the source face by its UV island, invert to the local
+ *  surface point, reflect it, and forward-map each reflection to its face + atlas texel.
+ *  Empty when there's no symmetry plane or the dab sits on the plane (its own mirror). */
+export function mirrorPaintDabs(targets: PaintTarget[], x: number, y: number, axes: (0 | 1 | 2)[], texels: number): MirrorDab[] {
+  if (!axes.length) return [];
+  const qu = x / texels, qv = y / texels;
+  // resolve the source part+face: the UV island whose rect contains (qu,qv) AND whose
+  // polygon actually owns the point (rect is the cheap filter, uvToWorld is the test).
+  let src: { mesh: EditMesh; faceIndex: number; p: V3; scale: number } | null = null;
+  outer:
+  for (const tgt of targets) {
+    const m = tgt.mesh;
+    for (let fi = 0; fi < m.faces.length; fi += 1) {
+      const r = faceTexelRect(m, fi, texels);
+      if (!r || x < r.x0 - 0.5 || x > r.x1 + 0.5 || y < r.y0 - 0.5 || y > r.y1 + 0.5) continue;
+      const inv = uvToWorld(m, m.faces[fi], qu, qv);
+      if (!inv || !inv.inside) continue;
+      const p = inv.world;
+      // model scale → an on-plane epsilon proportional to it (handles props & cars).
+      let lo = Infinity, hi = -Infinity;
+      for (const v of m.verts) { for (let a = 0; a < 3; a += 1) { if (v[a] < lo) lo = v[a]; if (v[a] > hi) hi = v[a]; } }
+      src = { mesh: m, faceIndex: fi, p, scale: Math.max(1e-3, hi - lo) };
+      break outer;
+    }
+  }
+  if (!src) return [];
+  const eps = src.scale * 1e-3 + 1e-4;
+  const out: MirrorDab[] = [];
+  for (const q of reflections(src.p, axes)) {
+    const hit = localToFaceUV(src.mesh, q, eps);
+    if (!hit) continue;
+    if (hit.faceIndex === src.faceIndex) continue; // on the plane → its own mirror, skip
+    out.push({ x: hit.u * texels, y: hit.v * texels, clip: faceTexelRect(src.mesh, hit.faceIndex, texels) });
+  }
+  return out;
+}
+
 /** The cells a brush stamp covers, clamped to the face's cell bounds (so the stroke
  *  can't spill onto a neighbouring face — the per-face mask). `size` = brush RADIUS+1
  *  in cells: 1 → a single cell, 2 → a 3-wide disc, … A disc footprint keeps round

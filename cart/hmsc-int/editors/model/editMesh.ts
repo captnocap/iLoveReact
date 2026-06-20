@@ -150,6 +150,24 @@ export function meshBoundsCenter(m: EditMesh): V3 {
   return [(lox + hix) / 2, (loy + hiy) / 2, (loz + hiz) / 2];
 }
 
+/** Translate the whole mesh so its axis-aligned bounds center lands on the origin
+ *  — the "Center" button (req_1538). Mirror/symmetrize plant their plane at c=0, so
+ *  a model authored off to one side mirrors lopsidedly (or onto empty space); centering
+ *  first makes left↔right (and up/down, front/back) symmetric editing AND symmetric
+ *  painting land true. The pivot + every mount position ride the SAME delta so a rig
+ *  stays attached. `axes` restricts which axes recenter (default all three). Pure. */
+export function centerMesh(m: EditMesh, axes: (0 | 1 | 2)[] = [0, 1, 2]): EditMesh {
+  const c = meshBoundsCenter(m);
+  const d: V3 = [0, 0, 0];
+  for (const a of axes) d[a] = -c[a];
+  if (d[0] === 0 && d[1] === 0 && d[2] === 0) return m;
+  const shift = (p: V3): V3 => [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
+  const out: EditMesh = { ...m, verts: m.verts.map(shift) };
+  if (m.pivot) out.pivot = shift(m.pivot);
+  if (m.mounts) out.mounts = m.mounts.map((mt) => ({ ...mt, position: shift(mt.position) }));
+  return out;
+}
+
 /** Does this part HAVE a pivot? A pivot is OPT-IN (USER req_1054): only parts that
  *  rotate (a wheel, an arm) get one; a ROOT part (a car body) has joints and NO
  *  pivot — nothing on it spins. A fresh `cuboid()`/`cylinder()` has none. */
