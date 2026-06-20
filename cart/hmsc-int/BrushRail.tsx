@@ -5,6 +5,7 @@
 import { Box, Pressable, Text, TextInput } from '@reactjit/primitives';
 import type { TileKind, ZoneFlag } from './design';
 import { TILE_KINDS, tileKindDefinition } from './world/tileKinds';
+import { FLORA_KINDS, FLORA_KIND_DEFINITIONS } from './floraData';
 import { ZONE_FLAGS } from './world/zones';
 import { HEIGHT_LIMIT, type BrushProfile } from './heightData';
 import type { BrushMode, BrushShape } from './brush';
@@ -53,6 +54,23 @@ export function PaintSection(props: { tile: TileKind; onTile: (k: TileKind) => v
       <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
         {TILE_KINDS.map((k) => <Swatch key={k} color={tileKindDefinition(k).render.color} active={props.tile === k} onPress={() => { props.onTile(k); props.onPaint(); }} />)}
       </Box>
+    </Box>
+  );
+}
+
+// The FLORA palette (FLORADECOUPLE-0619): what GROWS on a cell — grass blades,
+// palms, bushes — painted into the flora channel over ANY ground. Labelled chips
+// (the greens read alike as bare swatches); `activeFlora` is the FLORA_KINDS index.
+export function FloraSection(props: { activeFlora: number; onActiveFlora: (i: number) => void; onPaint: () => void }) {
+  const items = FLORA_KINDS.map((k) => ({ id: k, label: FLORA_KIND_DEFINITIONS[k].label }));
+  return (
+    <Box style={{ gap: 5 }}>
+      <RailLabel text="flora" />
+      <ChipGrid
+        items={items}
+        value={FLORA_KINDS[props.activeFlora] ?? FLORA_KINDS[0]}
+        onPick={(id) => { props.onActiveFlora(Math.max(0, FLORA_KINDS.indexOf(id as (typeof FLORA_KINDS)[number]))); props.onPaint(); }}
+      />
     </Box>
   );
 }

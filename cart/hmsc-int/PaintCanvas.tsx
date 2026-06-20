@@ -37,6 +37,7 @@ import type { BrushRailSettings } from './BrushRail';
 import { PainterRail } from './PainterRail';
 import { TargetDock, channelVisible, type PainterChannels } from './TargetDock';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
+import { paintFlora, FLORA_KINDS, FLORA_KIND_DEFINITIONS } from './floraData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
 import { applyMergeGesture, clampProfile, deriveJunctions, laneFlowArrows, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, strokeWireFlip, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
 import { controlFor, planIntersectionProps, reconcileGenerated, resolveRoadNames, type GeneratedProp, type GenPoseOverride, type IntersectionControl } from './intersections';
@@ -63,7 +64,7 @@ type BrushVis = { x: number; y: number; d: number; color: string; on: boolean; s
 type BrushSink = { current: ((b: BrushVis) => void) | null };
 
 export type Tool = 'pointer' | 'brush' | 'eraser';
-export type Layer = 'paint' | 'height' | 'place' | 'zone' | 'road';
+export type Layer = 'paint' | 'flora' | 'height' | 'place' | 'zone' | 'road';
 export type { BrushMode, BrushShape, BrushProfile };
 export type BrushSettings = BrushRailSettings;
 
@@ -829,6 +830,11 @@ export function PaintCanvas(props: {
   const heightStamped = useRef<Set<string>>(new Set());
   const paintRef = useRef({ tile, tool, size: brushSize, mode: activeBrushMode, shape: brushShape });
   paintRef.current = { tile, tool, size: brushSize, mode: activeBrushMode, shape: brushShape };
+  // Active FLORA kind index (into FLORA_KINDS) — the flora target's brush. PaintCanvas
+  // owns it like activeZone; the rail picks it. A ref mirrors it for the stamp.
+  const [activeFlora, setActiveFlora] = useState(0);
+  const activeFloraRef = useRef(activeFlora);
+  activeFloraRef.current = activeFlora;
 
   // Height sculpt. The cone is stamped in a SHARED GLOBAL sample frame, not clipped to
   // the one chunk under the cursor — so a stroke straddling a chunk border deposits the
@@ -1064,6 +1070,25 @@ export function PaintCanvas(props: {
     });
     touched.add(c.k);
     tileDirty.current.add(c.k); // mirror the floor texture to the preview (synced by onBrush)
+  };
+
+  // FLORA target (FLORADECOUPLE-0619): paint what GROWS on a cell into chunk.flora,
+  // a SEPARATE channel from the ground tiles — so a population layers over any
+  // surface (beach grass = sand tile + grass flora). The 3D preview re-bakes the
+  // grass/palm/bush populations from this on the next region sync (tileDirty mirrors
+  // the floor, whose chunkToFloor now carries floraData).
+  const stampFloraAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
+    const c = resolveCell(gx, gy);
+    if (!c) return;
+    const p = paintRef.current;
+    const idx = p.tool === 'eraser' || p.mode === 'erase' ? -1 : activeFloraRef.current;
+    forEachFootprintCell(p.shape, p.size, c.cellX, c.cellZ, (x, z) => {
+      const s = strokeStats.current; s.stamps++;
+      if (x >= 0 && z >= 0 && x < CHUNK_TILES && z < CHUNK_TILES) s.cells.add(`${c.k}:${x}:${z}`);
+      paintFlora(c.chunk.flora, x, z, idx);
+    });
+    touched.add(c.k);
+    tileDirty.current.add(c.k); // flora rides the floor mirror → preview re-bakes populations
   };
 
   const stampZoneAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
@@ -1455,6 +1480,10 @@ export function PaintCanvas(props: {
       sample: stampTileAtGraph,
       note: () => ({ cat: 'tile', text: activeBrushMode === 'erase' ? 'erased tiles' : `painted ${tile}` }),
     },
+    flora: {
+      sample: stampFloraAtGraph,
+      note: () => ({ cat: 'tile', text: activeBrushMode === 'erase' ? 'erased flora' : 'painted flora' }),
+    },
     height: {
       sample: isWaterTool ? stampWaterAtGraph : isSmoothTool ? stampSmoothAtGraph : isRampTool || isSlopeTool || isWaterSlopeTool ? undefined : stampHeightAtGraph,
       note: () => ({ cat: 'height', text: isWaterTool ? (activeBrushMode === 'erase' ? 'cleared water' : 'painted water') : isWaterSlopeTool ? (activeBrushMode === 'erase' ? 'drained shoreline' : 'sloped water') : isRampTool ? 'stamped ramp' : isSlopeTool ? 'painted slope' : isSmoothTool ? 'smoothed terrain' : activeBrushMode === 'erase' ? 'lowered terrain' : 'raised terrain' }),
@@ -1732,6 +1761,7 @@ export function PaintCanvas(props: {
       : layer === 'height' ? '#fbbf24'
       : layer === 'place' ? (place.active?.color ?? '#a78bfa')
       : layer === 'zone' ? (zones[activeZone]?.color ?? '#22d3ee')
+      : layer === 'flora' ? (FLORA_KIND_DEFINITIONS[FLORA_KINDS[activeFlora]]?.color ?? '#4ade80')
       : tileKindDefinition(tile).render.color;
     if (showPlaceBrush && place.active) {
       // Ghost at the SNAPPED rect (placementCellRect — the same cells the drop
@@ -2111,6 +2141,8 @@ export function PaintCanvas(props: {
           target={layer}
           tile={tile}
           onTile={props.onTile}
+          activeFlora={activeFlora}
+          onActiveFlora={setActiveFlora}
           brush={{ size: brushSize, mode: activeBrushMode, shape: brushShape, profile: heightProfile, centerZ, heightMode, rampMin, rampMax, rampWide, rampLong, rampAngle, smoothStrength }}
           onBrushChange={setBrushPatch}
           onClearHeights={clearHeights}

@@ -17,7 +17,7 @@ import { Box, Pressable, ScrollView, Text } from '@reactjit/primitives';
 import type { TileKind } from './design';
 import type { BrushShape } from './brush';
 import { ChipGrid, RailLabel, SizeSlider, ToolBtn } from './railAtoms';
-import { HeightSection, PaintSection, ZoneSection, type BrushRailSettings } from './BrushRail';
+import { HeightSection, PaintSection, FloraSection, ZoneSection, type BrushRailSettings } from './BrushRail';
 import { RoadRail } from './RoadRail';
 import { painterToolUsable } from './painterBehavior';
 import type { Layer, PlaceProps, Tool } from './PaintCanvas';
@@ -272,6 +272,8 @@ export function PainterRail(props: {
   target: Layer;
   tile: TileKind;
   onTile: (k: TileKind) => void;
+  activeFlora: number;
+  onActiveFlora: (i: number) => void;
   brush: BrushRailSettings;
   onBrushChange: (p: Partial<BrushRailSettings>) => void;
   onClearHeights: () => void;
@@ -293,7 +295,7 @@ export function PainterRail(props: {
   // The brush footprint matters wherever a stroke sweeps cells — including the
   // object eraser (its delete radius IS the brush radius). Road clicks and the
   // object stamp (footprint = the object) don't use it.
-  const usesBrush = target === 'paint' || target === 'zone' || target === 'height' || (target === 'place' && tool === 'eraser');
+  const usesBrush = target === 'paint' || target === 'flora' || target === 'zone' || target === 'height' || (target === 'place' && tool === 'eraser');
   const inspector = <ObjectInspectorCard sel={props.selPlacement} buildSel={props.selBuild} place={props.place} />;
 
   return (
@@ -310,6 +312,7 @@ export function PainterRail(props: {
         <ScrollView showScrollbar style={{ width: '100%', flexGrow: 1, minHeight: 0 }} contentContainerStyle={{ gap: 7, paddingBottom: 10 }}>
           {usesBrush ? <BrushCard brush={props.brush} dim={props.brush.mode === 'erase' || tool === 'eraser'} onBrushChange={props.onBrushChange} /> : null}
           {target === 'paint' ? <PaintSection tile={props.tile} onTile={props.onTile} onPaint={onPaint} /> : null}
+          {target === 'flora' ? <FloraSection activeFlora={props.activeFlora} onActiveFlora={props.onActiveFlora} onPaint={onPaint} /> : null}
           {target === 'height' ? <TerrainCard brush={props.brush} onBrushChange={props.onBrushChange} onClearHeights={props.onClearHeights} /> : null}
           {target === 'zone' ? <ZoneSection zones={props.zones} activeZone={props.activeZone} onActiveZone={props.onActiveZone} onAddZone={props.onAddZone} onUpdateZone={props.onUpdateZone} onDeleteZone={props.onDeleteZone} onPaint={onPaint} /> : null}
           {target === 'place' && tool !== 'eraser' ? <ObjectBrushCard place={props.place} onTool={props.onTool} /> : null}
