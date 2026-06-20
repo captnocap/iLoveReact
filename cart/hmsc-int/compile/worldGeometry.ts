@@ -57,7 +57,9 @@ import {
 import { resolvePropParts } from './propRecipes/resolve';
 import { importedPropMesh, isImportedPropKind, type ImportedPropMesh } from '../game/kinds/importedProps';
 import { isCookedPropKind } from '../game/kinds/props';
-import { cookedAssetById, cookedMeshBlob } from '../editors/model/cookedAssets';
+import { cookedAssetById, cookedMeshBlob, cookedTextureBlob } from '../editors/model/cookedAssets';
+import { image } from '@reactjit/image';
+import { base64ToBytes } from '@reactjit/workspace';
 import { textBytes } from '@reactjit/workspace';
 
 export const INSTANCE_STRIDE = 13;
@@ -422,15 +424,32 @@ function pushPropParts(b: Build, prop: WorldProp, parts: readonly PropPartSpec[]
 // so the compiled mesh matches the grey of the editor preview (v1 is untextured).
 const COOKED_PROP_COLOR: readonly [number, number, number] = [0xc2 / 255, 0xc6 / 255, 0xcf / 255];
 
+/** The painted-atlas texture a cooked prop carries into the compiled game (req_1496):
+ *  the same mechanism the player/NPC models ship a baked mesh texture (tex_w/h/rgba in
+ *  the lump → world_loader sets scene3d_tex_rgba). Decoded from the asset's content-
+ *  addressed paint PNG and downscaled to 512² to match the editor render. */
+const COOKED_TEX_SIZE = 512;
+type MeshTex = { texW: number; texH: number; texRgba: Uint8Array };
+function cookedPropTexture(texRef: string | undefined): MeshTex | null {
+  if (!texRef) return null;
+  const blob = cookedTextureBlob(texRef);
+  if (!blob) return null;
+  const raw = image(base64ToBytes(blob)).resize(COOKED_TEX_SIZE, COOKED_TEX_SIZE).raw();
+  if (!raw || !raw.rgba || raw.rgba.length !== raw.width * raw.height * 4) return null;
+  return { texW: raw.width, texH: raw.height, texRgba: raw.rgba };
+}
+
 /** A Studio-cooked prop's baked mesh as an ImportedPropMesh, so it ships through
  *  the SAME MESH_PROPS lump + loader path as an OBJ/GLB import (the cook flattened
  *  the model to one content-addressed soup; CookedProp.tsx renders it the same way
- *  in the editor). Returns null when the asset/blob isn't in the cooked store. */
-function cookedPropMesh(kind: string): ImportedPropMesh | null {
+ *  in the editor). The painted atlas rides along as optional tex fields (OBJ/GLB
+ *  imports omit them). Returns null when the asset/blob isn't in the cooked store. */
+function cookedPropMesh(kind: string): (ImportedPropMesh & Partial<MeshTex>) | null {
   const asset = cookedAssetById(kind);
   if (!asset) return null;
   const verts = cookedMeshBlob(asset.meshRef);
   if (!verts || verts.length === 0) return null;
+  const tex = cookedPropTexture(asset.texRef);
   return {
     key: asset.meshRef,
     source: `cooked:${asset.id}`,
@@ -442,6 +461,7 @@ function cookedPropMesh(kind: string): ImportedPropMesh | null {
     heightMeters: asset.collision.heightMeters,
     solid: asset.descriptor.solid,
     vertices: verts,
+    ...(tex ? { texW: tex.texW, texH: tex.texH, texRgba: tex.texRgba } : {}),
   };
 }
 
@@ -1057,31 +1077,40 @@ export function buildWorldInstances(
   };
 }
 
-export const MESH_PROPS_LUMP_VERSION = 2;
+// v3 (req_1496): each mesh carries an optional painted-atlas texture after its
+// vertices — u32 texW | u32 texH | u8[texW*texH*4] rgba (0×0 = untextured, e.g. an
+// OBJ/GLB import). The loader (constructor.decodeMeshProps) reads v1/v2/v3.
+export const MESH_PROPS_LUMP_VERSION = 3;
 
-/** Encode imported OBJ/GLB prop meshes:
+/** Encode imported / cooked prop meshes:
  *  u32 version | u32 meshCount | u32 instanceCount
  *  mesh[]: u32 keyLen | utf8 key | f32 color3 | f32 bounds |
  *          f32 footprintWidth | f32 footprintDepth | f32 height |
- *          u32 solid | u32 vertexCount | f32[vertexCount*8]
+ *          u32 solid | u32 vertexCount | f32[vertexCount*8] |
+ *          u32 texW | u32 texH | u8[texW*texH*4]   (v3)
  *  instance[]: u32 meshIndex | f32 x,y,z,yawDegrees
  */
 export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
+  const meshes = sink.meshes as ReadonlyArray<ImportedPropMesh & Partial<MeshTex>>;
+  const texOf = (mesh: ImportedPropMesh & Partial<MeshTex>): MeshTex | null =>
+    (mesh.texRgba && mesh.texW && mesh.texH && mesh.texRgba.length === mesh.texW * mesh.texH * 4)
+      ? { texW: mesh.texW, texH: mesh.texH, texRgba: mesh.texRgba } : null;
   let bytes = 12;
-  const keyBytes = sink.meshes.map((mesh) => textBytes(mesh.key));
-  for (let i = 0; i < sink.meshes.length; i += 1) {
-    const mesh = sink.meshes[i]!;
-    bytes += 4 + keyBytes[i]!.byteLength + 36 + mesh.vertices.byteLength;
+  const keyBytes = meshes.map((mesh) => textBytes(mesh.key));
+  for (let i = 0; i < meshes.length; i += 1) {
+    const mesh = meshes[i]!;
+    const tex = texOf(mesh);
+    bytes += 4 + keyBytes[i]!.byteLength + 36 + mesh.vertices.byteLength + 8 + (tex ? tex.texRgba.byteLength : 0);
   }
   bytes += sink.instances.length * 20;
   const out = new Uint8Array(bytes);
   const view = new DataView(out.buffer);
   view.setUint32(0, MESH_PROPS_LUMP_VERSION, true);
-  view.setUint32(4, sink.meshes.length, true);
+  view.setUint32(4, meshes.length, true);
   view.setUint32(8, sink.instances.length, true);
   let at = 12;
-  for (let i = 0; i < sink.meshes.length; i += 1) {
-    const mesh = sink.meshes[i]!;
+  for (let i = 0; i < meshes.length; i += 1) {
+    const mesh = meshes[i]!;
     const key = keyBytes[i]!;
     view.setUint32(at, key.byteLength, true); at += 4;
     out.set(key, at); at += key.byteLength;
@@ -1097,6 +1126,11 @@ export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
     at += 36;
     out.set(new Uint8Array(mesh.vertices.buffer, mesh.vertices.byteOffset, mesh.vertices.byteLength), at);
     at += mesh.vertices.byteLength;
+    const tex = texOf(mesh);
+    view.setUint32(at + 0, tex ? tex.texW : 0, true);
+    view.setUint32(at + 4, tex ? tex.texH : 0, true);
+    at += 8;
+    if (tex) { out.set(tex.texRgba, at); at += tex.texRgba.byteLength; }
   }
   for (const inst of sink.instances) {
     view.setUint32(at + 0, inst.mesh, true);

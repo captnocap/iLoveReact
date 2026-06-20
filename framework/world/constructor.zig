@@ -39,7 +39,7 @@ const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
-const MESH_PROPS_VERSION: u32 = 2;
+const MESH_PROPS_VERSION: u32 = 3;
 const WATER_VERSION: u32 = 1;
 const TICKER_VERSION: u32 = 1;
 /// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
@@ -137,10 +137,16 @@ pub const MeshPropMesh = struct {
     solid: bool,
     vertices: []f32,
     vertex_count: u32,
+    // Painted-atlas texture (req_1496, MESH_PROPS v3) — the cooked prop's paint, the
+    // same shape the player/NPC models carry. 0×0 / null = untextured (OBJ/GLB).
+    tex_w: u32 = 0,
+    tex_h: u32 = 0,
+    tex_rgba: ?[]u8 = null,
 
     pub fn deinit(self: MeshPropMesh, allocator: std.mem.Allocator) void {
         allocator.free(self.key);
         allocator.free(self.vertices);
+        if (self.tex_rgba) |rgba| allocator.free(rgba);
     }
 };
 
@@ -886,7 +892,7 @@ fn decodeNpcSpawns(allocator: std.mem.Allocator, data: []const u8) Error![]NpcSp
 fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshProps {
     if (data.len < 12) return Error.BadMeshProps;
     const version = std.mem.readInt(u32, data[0..4], .little);
-    if (version != 1 and version != MESH_PROPS_VERSION) return Error.BadMeshProps;
+    if (version < 1 or version > MESH_PROPS_VERSION) return Error.BadMeshProps;
     const mesh_count_u32 = std.mem.readInt(u32, data[4..8], .little);
     const instance_count_u32 = std.mem.readInt(u32, data[8..12], .little);
     const mesh_count: usize = @intCast(mesh_count_u32);
@@ -926,6 +932,26 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
         var vi: usize = 0;
         while (vi < floats) : (vi += 1) vertices[vi] = readF32(data, at + vi * 4);
         at += vertex_bytes;
+        // v3 painted-atlas texture: u32 tex_w | u32 tex_h | u8[tex_w*tex_h*4] (0×0 =
+        // untextured). Mirrors readModelGroup's player/NPC texture read.
+        var tex_w: u32 = 0;
+        var tex_h: u32 = 0;
+        var tex_rgba: ?[]u8 = null;
+        if (version >= 3) {
+            if (at + 8 > data.len) return Error.BadMeshProps;
+            tex_w = std.mem.readInt(u32, data[at..][0..4], .little);
+            tex_h = std.mem.readInt(u32, data[at + 4 ..][0..4], .little);
+            at += 8;
+            const tex_bytes: usize = @as(usize, tex_w) * @as(usize, tex_h) * 4;
+            if (tex_bytes > 0) {
+                if (at + tex_bytes > data.len) return Error.BadMeshProps;
+                const rgba = try allocator.alloc(u8, tex_bytes);
+                errdefer allocator.free(rgba);
+                @memcpy(rgba, data[at .. at + tex_bytes]);
+                at += tex_bytes;
+                tex_rgba = rgba;
+            }
+        }
         meshes[mi] = .{
             .key = key,
             .color = color,
@@ -936,6 +962,9 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
             .solid = solid,
             .vertices = vertices,
             .vertex_count = vertex_count,
+            .tex_w = tex_w,
+            .tex_h = tex_h,
+            .tex_rgba = tex_rgba,
         };
         initialized_meshes += 1;
     }

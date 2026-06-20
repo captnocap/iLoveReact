@@ -2801,6 +2801,10 @@ pub const Runtime = struct {
             for (mp.instances) |inst| {
                 const mesh_index: usize = @intCast(inst.mesh);
                 const mesh = mp.meshes[mesh_index];
+                // A painted cooked prop (req_1496) carries its atlas as tex_rgba — wear
+                // it via scene3d_tex_rgba (the player/NPC textured-mesh path) and whiten
+                // the tint so it doesn't dim the texture. Untextured imports stay tinted.
+                const textured = mesh.tex_rgba != null;
                 try self.kid_list.append(self.allocator, .{
                     .scene3d_mesh = mesh.vertex_count > 0,
                     .scene3d_geom_key = mesh.key,
@@ -2811,10 +2815,13 @@ pub const Runtime = struct {
                     .scene3d_pos_y = inst.y,
                     .scene3d_pos_z = inst.z,
                     .scene3d_rot_y = inst.yaw_degrees,
-                    .scene3d_color_r = mesh.color[0],
-                    .scene3d_color_g = mesh.color[1],
-                    .scene3d_color_b = mesh.color[2],
+                    .scene3d_color_r = if (textured) 1 else mesh.color[0],
+                    .scene3d_color_g = if (textured) 1 else mesh.color[1],
+                    .scene3d_color_b = if (textured) 1 else mesh.color[2],
                     .scene3d_color_a = 1,
+                    .scene3d_tex_w = mesh.tex_w,
+                    .scene3d_tex_h = mesh.tex_h,
+                    .scene3d_tex_rgba = mesh.tex_rgba,
                 });
             }
             if (mp.instances.len > 0) {
