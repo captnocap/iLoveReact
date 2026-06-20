@@ -24,7 +24,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { callHost } from '@reactjit/runtime/ffi';
 import { useHotState, getHotState, setHotState, useInterval, useRerender } from '@reactjit/hooks';
-import { Box, Col, patchDynSlot, Pressable, Row, Scene3D, Text, TextInput } from '@reactjit/primitives';
+import { Box, Col, patchDynSlot, Pressable, Row, Scene3D, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { GAME_CAMERA, GAME_CHROME, GAME_FIGURE, GAME_NATIVE_CAMERA } from '../../../game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '../../../game/figure/render';
@@ -60,10 +60,18 @@ import {
   type SelMode, type Selection, type CameraSnap,
 } from '../meshSelect';
 import { pickFaceCell, pickFaceUV, paintUVsNeedRepack, brushCells, faceCellGrid, resamplePaint, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintCells, type PaintTarget, type FaceHit, type FaceUVHit } from '../meshPaint';
-import { STUDIO_PAINT_KEY, PAINT_TEX, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited } from '../meshPaintTexture';
+import { STUDIO_PAINT_KEY, PAINT_TEX, paintTex, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited } from '../meshPaintTexture';
 import { Paintable } from '@reactjit/runtime/primitives';
 import { PaintGridOverlay } from '../meshPaintOverlay';
-import { PaintPanel } from '../PaintPanel';
+// The PAINT panel + stamping are now the UNIVERSAL kit (runtime/paint) — the same
+// brush/tool/colour vocabulary every cart shares, instead of a Studio one-off
+// (USER ASK req_1487). BrushKit is the control surface; useBrushStroke is the
+// optimistic host-owned stamping engine; the model's saved palette stays the
+// source of truth, synthesised into the kit's palette shape.
+import {
+  BrushKit, useBrushStroke, DEFAULT_BRUSH,
+  type Brush, type BrushTool, type PaintTheme, type Palette as KitPalette, type PaletteEntry,
+} from '@reactjit/runtime/paint';
 import { defaultPalette, paletteWithColor, slotById, slotColor, type Palette } from '../modelStream';
 import {
   TransformGizmo, NormalHandle, AXIS_DIR, axisScreen, dragWorldDistance, pickGizmoHandle, pickNormalHandle, rotationSign, selectionVertIndices, selectionFaceIndices,
@@ -91,6 +99,16 @@ import { AddShapeDialog } from './dialogs/AddShapeDialog';
 
 
 // ── The viewport ─────────────────────────────────────────────────────────────
+
+// The paint kit is theme-agnostic; this maps it onto Studio's chrome so BrushKit
+// reads native in the viewport (dark navy panels, the same blue accent).
+const PAINT_THEME: PaintTheme = {
+  page: '#0a111c', panel: '#0c1626', control: '#13233a', frame: '#23364f',
+  ink: '#cfe2ff', dim: '#7f93b1', accent: '#4a90e2', bad: '#a14545',
+};
+// Studio's paint brush opens a touch smaller than the kit default (prop-scale
+// work wants a finer dab) and on a warm red so the first stroke is obvious.
+const STUDIO_DEFAULT_BRUSH: Brush = { ...DEFAULT_BRUSH, size: 18, ink: { kind: 'color', hex: '#c64b53' } };
 
 export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
   const { parts, revision, activePart, onSelectFaces } = props;
@@ -257,21 +275,20 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // still refreshes past the host's content-hashed image cache); sliceImages = per-face
   // re-uploads keyed "partId:faceIndex"; imageRev bumps each import to force a re-bake.
   const [tex, setTex] = useHotState<{ texels: number; type: TextureType; color: string; name: string; imageUrl?: string; sliceImages?: Record<string, string>; imageRev?: number; paint?: PaintCells; paintRev?: number; paintFit?: boolean; faceSig?: string } | null>('studio:tex', null);
-  // PAINT mode (the corrected painter, req_1288): you paint a SLOT id (a placement),
-  // not a colour — the model palette resolves slot → colour/material. Tool prefs are
-  // TWIG; the painted cells are BRANCH (on the part). `paintErase` drops cells under
-  // the brush; `paintView` toggles the colourless pseudo-slot view vs the painted one.
-  const [activeSlot, setActiveSlot] = useHotState<number>('studio:paintSlot', 0);
-  const [paintErase, setPaintErase] = useHotState<boolean>('studio:paintErase', false);
-  // FILL mode (req_1298): a click fills the WHOLE hovered face one colour — the
-  // 'I just want this face one colour' path, independent of cell size.
-  const [paintFill, setPaintFill] = useHotState<boolean>('studio:paintFill', false);
-  // PAINT cell size in MODEL UNITS (req_1301): adjustable so a small prop (a gun) can
-  // be painted at fine detail while a big surface stays coarse. Default ~1.5 cm — a
-  // gun face spans several cells, so brush-1 is a dab, not a whole-face fill.
+  // PAINT mode — now driven by the UNIVERSAL kit (req_1487). The brush (footprint,
+  // ink colour, size/hardness/flow/scatter/angle/blend) and the active tool ARE the
+  // kit's model, held as TWIG so they survive a hot reload but reset cold. `faceFill`
+  // keeps Studio's one-click whole-face flat-fill (a model-texture op the kit doesn't
+  // own); `paintRecents` backs the kit palette's recents ring. The model's saved
+  // palette (props.palette) stays the BRANCH source of truth for swatches + materials.
+  const [brush, setBrush] = useHotState<Brush>('studio:brush', STUDIO_DEFAULT_BRUSH);
+  const [tool, setTool] = useHotState<BrushTool>('studio:tool', 'brush');
+  const [faceFill, setFaceFill] = useHotState<boolean>('studio:paintFill', false);
+  const [paintRecents, setPaintRecents] = useHotState<PaletteEntry[]>('studio:paintRecents', []);
+  // PAINT cell size in MODEL UNITS (req_1301): kept for the pre-paint atlas preview
+  // (SceneTextureAtlas) only — the pixel painter resolution is fixed (PAINT_TEX) and
+  // the kit's size dial is the real detail control now, so there's no UI for this.
   const [paintCell, setPaintCell] = useHotState<number>('studio:paintCell', 0.06);
-  const [paintView, setPaintView] = useHotState<'pseudo' | 'painted'>('studio:paintView', 'painted');
-  const [paintBrush, setPaintBrush] = useHotState<number>('studio:paintBrush', 1);
   // PERF (req_1203): the lag was setTex on EVERY mouse-move (a React re-render +
   // JSON.stringify of the whole paint map per dab). The fix — the cutout painter's
   // proven shape: dabs accumulate in a REF (zero React per move); the atlas re-bakes
@@ -925,18 +942,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     setTex({ ...(tex ?? {}), texels: result.texels, type: 'solid', color: '#c8ccd2', name: 'paint-v4', paintRev: (tex?.paintRev ?? 0), paintFit: true, faceSig: paintFaceSig });
     setTexView(true);
   };
-  // The colour the brush lays down: the active slot resolved through the palette
-  // (the painted view), the pseudo placeholder (pseudo view), or — when erasing —
-  // the texture's base coat so erase reveals the background. PIXEL painter: a real
-  // RGBA colour, not a slot index. (req_1372)
-  const activePaintColor = (): string => {
-    if (paintErase) return tex?.color ?? '#c8ccd2';
-    if (paintView === 'pseudo') return slotById(livePalette, activeSlot)?.pseudo ?? '#ffffff';
-    return slotColor(livePalette, activeSlot) ?? slotById(livePalette, activeSlot)?.pseudo ?? '#ffffff';
-  };
-  // Brush radius in TEXTURE PIXELS, from the brush-size control. The PIXEL painter
-  // stamps a disc straight into the model's RGBA texture — no cell grid.
-  const brushRadiusPx = (): number => Math.max(2, Math.round(3 + (paintBrush - 1) * 6));
+  // The colour the brush lays down — straight off the kit brush's ink (req_1487). A
+  // texture/shader ink (Phase B) resolves to a neutral until the host stamp pass
+  // lands, so the fill / face-fill / base-coat ops always have a real hex.
+  const brushHex = (): string => (brush.ink.kind === 'color' ? brush.ink.hex : '#c8ccd2');
   // Track the face under the cursor (cursor pump reads this ref). Returns a FaceHit
   // (cu/cv unused by the pixel painter) so the existing in/out hover logic is intact.
   const paintProbe = (sx: number, sy: number): FaceHit | null => {
@@ -946,37 +955,28 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     paintHoverRef.current = fh;
     return fh;
   };
-  // Paint the texel under (sx,sy): raycast → face + interpolated UV → stamp a disc
-  // of the active colour straight into the model's RGBA paint texture, SCISSOR-
-  // clamped to the hit face's UV island so a round brush can't bleed onto the
-  // neighbour island packed beside it. NO boxes, NO StaticSurface, NO cell grid —
-  // the entire old bug class is gone (req_1372). FILL mode fills the whole face.
-  const paintAt = (sx: number, sy: number): FaceHit | null => {
-    if (!tex) return null;
+  // Whole-face flat-fill (the faceFill toggle, req_1487): raycast → the hit face's
+  // UV island → stamp a disc large enough to cover it, SCISSOR-clamped to the island
+  // so it can't bleed onto the neighbour packed beside it. A Studio model-texture op
+  // (the kit's flood-fill is a Phase-B host pass); returns whether a face was filled.
+  const faceFillAt = (sx: number, sy: number): boolean => {
+    if (!tex) return false;
     const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
-    if (!hit) { paintHoverRef.current = null; return null; }
+    if (!hit) return false;
     const tgt = paintTargets()[hit.partIndex];
-    if (!tgt) return null;
+    if (!tgt) return false;
     const island = faceIslandPx(tgt.mesh, hit.faceIndex);
-    const color = activePaintColor();
-    if (paintFill && island) {
-      // Whole-face fill: a disc large enough to cover the island, clamped to it.
-      const r = Math.hypot(island.x1 - island.x0, island.y1 - island.y0);
-      stampUV((hit.u), (hit.v), color, r, island);
-    } else {
-      stampUV(hit.u, hit.v, color, brushRadiusPx(), island);
-    }
+    const r = island ? Math.hypot(island.x1 - island.x0, island.y1 - island.y0) : PAINT_TEX;
+    stampUV(hit.u, hit.v, brushHex(), r, island);
     touchedRef.current.add(tgt.partId);
     paintDirtyRef.current = true;
-    const fh = { partIndex: hit.partIndex, faceIndex: hit.faceIndex, cu: 0, cv: 0 };
-    paintHoverRef.current = fh;
-    return fh;
+    return true;
   };
   // FILL ALL (req_1352): one click to make the whole model one colour. The PIXEL
   // painter flat-fills the entire texture (every face samples it) in one clear —
   // no per-face/per-cell walk, no orphans, no leak. Erase fills the base coat.
   const fillAllFaces = () => {
-    baseCoat(activePaintColor());
+    baseCoat(brushHex());
     for (const tgt of paintTargets()) touchedRef.current.add(tgt.partId);
     paintDirtyRef.current = true;
   };
@@ -994,21 +994,6 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     setPaintCell(next);
     paintDirtyRef.current = true;
     commitPaint();
-  };
-  // A drag paints a continuous STROKE: interpolate dabs along the segment from the last
-  // painted point to (sx,sy), stepping a few px, so a fast move fills instead of leaving
-  // gaps (the pinlines, req_1207). Each step raycasts (cheap JS, no React). The endpoint
-  // hit is returned so the hover/cursor stays in sync.
-  const paintStroke = (sx: number, sy: number): FaceHit | null => {
-    const last = lastPaintRef.current;
-    lastPaintRef.current = { x: sx, y: sy };
-    if (!last) return paintAt(sx, sy);
-    const dx = sx - last.x, dy = sy - last.y;
-    const dist = Math.hypot(dx, dy);
-    const steps = Math.max(1, Math.ceil(dist / STUDIO.paintStrokeStepPx));
-    let hit: FaceHit | null = null;
-    for (let i = 1; i <= steps; i += 1) hit = paintAt(last.x + (dx * i) / steps, last.y + (dy * i) / steps);
-    return hit;
   };
   // Cursor pump (req_1298): a Pressable's onMouseMove only fires while a button is
   // HELD (engine.zig gates .move on dragging_left), so a free-moving cursor delivered
@@ -1116,6 +1101,51 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // resolve paint against the model palette, falling back to the default so a stroke
   // shows live BEFORE the first commit mints the real (persisted) palette.
   const livePalette: Palette = props.palette ?? defaultPalette();
+
+  // ── The UNIVERSAL kit stamping engine (req_1487) ──
+  // mapPoint is the ONE thing a 3D paint surface has to supply: screen pixel →
+  // raycast the model → the hit face's interpolated UV in texture pixels, PLUS the
+  // face's UV-island as the dab scissor clip (so a round brush stays on the face it
+  // landed on, never bleeding onto the neighbour island). The kit's useBrushStroke
+  // then owns the whole experience — brush/eraser/line/rect/oval/pick, shift-straight
+  // lines, gap-free optimistic dabs straight to the host — identical to every other
+  // cart. The clip rect mirrors meshPaintTexture.stampUV's island rounding exactly.
+  const paintMapPoint = (screenX: number, screenY: number) => {
+    if (!tex) return null;
+    const r = rectRef.current;
+    const hit = pickFaceUV(paintTargets(), camSnap(), screenX - r.x, screenY - r.y);
+    if (!hit) return null;
+    const tgt = paintTargets()[hit.partIndex];
+    if (!tgt) return null;
+    touchedRef.current.add(tgt.partId);
+    const island = faceIslandPx(tgt.mesh, hit.faceIndex);
+    let clip: { x: number; y: number; w: number; h: number } | undefined;
+    if (island) {
+      const cx = Math.max(0, Math.floor(island.x0));
+      const cy = Math.max(0, Math.floor(island.y0));
+      clip = { x: cx, y: cy, w: Math.max(1, Math.ceil(island.x1) - cx), h: Math.max(1, Math.ceil(island.y1) - cy) };
+    }
+    return { x: hit.u * PAINT_TEX, y: hit.v * PAINT_TEX, clip };
+  };
+  const paintCtl = useBrushStroke({
+    paint: paintTex(),
+    texW: PAINT_TEX, texH: PAINT_TEX,
+    brush, tool,
+    mapPoint: paintMapPoint,
+    // erase reveals the texture's base coat (no host alpha-erase until Phase B).
+    eraseColor: tex?.color ?? '#c8ccd2',
+    onPickColor: (hex) => setBrush((b) => ({ ...b, ink: { kind: 'color', hex } })),
+    onStrokeEnd: () => { paintDirtyRef.current = true; commitPaint(); },
+  });
+  // The kit palette the BrushKit renders: the model's saved COLOUR slots are the
+  // swatches (so saved palettes survive), backed by a twig recents ring. Materials
+  // stay a Studio-side row (the pixel painter stamps their flat pseudo colour).
+  const kitPalette: KitPalette = {
+    swatches: livePalette.slots
+      .filter((s) => s.kind === 'color')
+      .map((s) => ({ id: `c${s.id}`, ink: { kind: 'color' as const, hex: slotColor(livePalette, s.id) ?? s.pseudo } })),
+    recents: paintRecents,
+  };
   // AUTO-ENSURE the texture in paint mode (req_1220): switching models resets the
   // (global twig) texture to null, but ensureTexture only ran on the mode-button press
   // — so after a switch the new model had NO texture → no grid, no paint. This re-makes
@@ -1199,16 +1229,28 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (selMode === 'paint') {
       const r = rectRef.current;
       const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
-      lastPaintRef.current = null; // start a fresh stroke (no interpolation from a prior one)
-      // Snapshot the PRE-stroke texture for undo (req_1379) — only when over a
-      // paintable face, and BEFORE paintStroke queues a dab (readback drains pending
-      // ops, so it must run before the first dab is enqueued).
-      if (pickFaceUV(paintTargets(), camSnap(), sx, sy)) paintSnapshotBegin();
-      const hit = paintStroke(sx, sy);
-      // the act of painting reveals the texture — if the view was toggled to solid,
-      // turn it back on so the stroke is visible immediately (req_1226).
-      if (hit) { paintingRef.current = true; if (!texView) setTexView(true); return; }
-      dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs();
+      // A press that MISSES the model falls through to orbit (spin the camera).
+      if (!pickFaceUV(paintTargets(), camSnap(), sx, sy)) {
+        dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs();
+        return;
+      }
+      // faceFill is Studio's one-click whole-face flat-fill (snapshot → fill → persist).
+      if (faceFill) {
+        paintSnapshotBegin();
+        faceFillAt(sx, sy);
+        if (!texView) setTexView(true);
+        commitPaint();
+        return;
+      }
+      // The eyedropper just samples — no stroke, no undo snapshot, no orbit.
+      if (tool === 'eyedropper') { paintCtl.handlers.onMouseDown(e); return; }
+      // Snapshot the PRE-stroke texture for undo (req_1379) BEFORE the kit queues a
+      // dab (readback drains pending ops, so it must run first), then hand the press
+      // to the kit — it owns the stroke from here (brush/eraser/line/rect/oval).
+      paintSnapshotBegin();
+      paintCtl.handlers.onMouseDown(e);
+      paintingRef.current = true;
+      if (!texView) setTexView(true); // the act of painting reveals the texture (req_1226)
       return;
     }
     // While the loop-cut popup is open, the SLIDE gizmo on the cut comes first
@@ -1379,8 +1421,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (selMode === 'paint') {
       const r = rectRef.current;
       const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
-      if (paintingRef.current) { paintStroke(sx, sy); return; } // interpolated stroke → ref (no React per move)
-      if (!dragRef.current) { paintProbe(sx, sy); return; } // hover → ref (overlay self-ticks)
+      if (paintingRef.current) { paintCtl.handlers.onMouseMove(e); return; } // kit owns the stroke (no React per move)
+      if (!dragRef.current) { paintProbe(sx, sy); return; } // hover → ref
       // else: a miss-drag in progress → continue to the orbit block (spin the camera).
     }
     // BACKDROP drag (req_1285): slide the active backdrop along the grabbed axis.
@@ -1582,8 +1624,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (gap > c.maxGap) c.maxGap = gap;
     l.yaw = nextYaw; l.pitch = nextPitch;
   };
-  const onUp = () => {
-    if (paintingRef.current) { paintingRef.current = false; lastPaintRef.current = null; commitPaint(); return; } // end a paint stroke → persist
+  const onUp = (e: any) => {
+    // end a paint stroke: the kit stamps the final dab + fires onStrokeEnd → commitPaint.
+    if (paintingRef.current) { paintingRef.current = false; lastPaintRef.current = null; paintCtl.handlers.onMouseUp(e); return; }
     // end a BACKDROP drag (req_1285): pos was written live to state already, so just
     // drop the grab + the readout. (No commit step — backdrops persist on every patch.)
     if (backdropDragRef.current) { backdropDragRef.current = null; setBackdropDragAxis(null); setGizmoReadout(null); return; }
@@ -1833,6 +1876,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       onMouseDown={onDown}
       onMouseMove={onMove}
       onMouseUp={onUp}
+      onMouseLeave={(e: any) => { if (paintingRef.current) { paintingRef.current = false; lastPaintRef.current = null; paintCtl.handlers.onMouseLeave(e); } }}
       onScroll={onWheel}
       style={{ flexGrow: 1, height: '100%', position: 'relative', overflow: 'hidden', backgroundColor: '#0a0e14' }}
     >
@@ -1940,9 +1984,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           imageUrl={tex.imageUrl}
           sliceImages={tex.sliceImages}
           palette={livePalette}
-          pseudo={paintView === 'pseudo'}
+          pseudo={false}
           paintCell={paintCell}
-          sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}.${paintBakeTick}.${paintView}.${livePalette.variant}.${livePalette.slots.length}`}
+          sig={`${props.meshRev}.${props.revision}.${tex.texels}.${tex.type}.${tex.color}.${tex.imageRev ?? 0}.${paintBakeTick}.${livePalette.variant}.${livePalette.slots.length}`}
         />
       ) : null}
 
@@ -2045,29 +2089,56 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         </Box>
       ) : null}
 
-      {/* PAINT controls (req_1297): the floating panel — normal colours + custom
-          colour, materials, brush/erase/view/variant/clear. Paint mode only. */}
+      {/* PAINT controls (req_1487): the floating panel IS the universal kit now —
+          BrushKit (tools · brush shapes · size/hardness/flow/scatter/angle dials ·
+          blend · the colour wheel · the saved palette), plus a Studio strip for the
+          model-texture ops the kit doesn't own (materials, whole-face fill, fill-all,
+          clear). Scrolls so the full kit fits any viewport height. Paint mode only. */}
       {selMode === 'paint' && tex ? (
-        <PaintPanel
-          palette={livePalette}
-          activeSlot={activeSlot}
-          erase={paintErase}
-          view={paintView}
-          brush={paintBrush}
-          brushSizes={PAINT_BRUSH_SIZES}
-          cell={paintCell}
-          onSetCell={setDetail}
-          fill={paintFill}
-          onToggleFill={() => { setPaintFill(!paintFill); setPaintErase(false); }}
-          onPickSlot={(id) => { setActiveSlot(id); setPaintErase(false); }}
-          onAddColor={(hex) => { const { palette, id } = paletteWithColor(livePalette, hex); props.onSetPalette(palette); setActiveSlot(id); setPaintErase(false); }}
-          onToggleErase={() => setPaintErase(!paintErase)}
-          onFillAll={fillAllFaces}
-          onToggleView={() => setPaintView(paintView === 'pseudo' ? 'painted' : 'pseudo')}
-          onSetBrush={(n) => { setPaintBrush(n); setPaintFill(false); }}
-          onCycleVariant={() => { const max = Math.max(1, ...livePalette.slots.map((s) => (s.kind === 'color' ? (s.colors?.length ?? 1) : 1))); props.onSetPalette({ ...livePalette, variant: (livePalette.variant + 1) % max }); }}
-          onClear={() => { props.parts.forEach((p) => { if (p.paint && Object.keys(p.paint).length) props.onEditPaint(p.id, {}); }); paintRef.current = {}; touchedRef.current.clear(); }}
-        />
+        <ScrollView style={{ position: 'absolute', left: 8, top: 72, width: 276, height: Math.max(280, (rectRef.current?.height ?? 700) - 128) }}>
+          <Col style={{ gap: 8, paddingRight: 4 }}>
+            <BrushKit
+              brush={brush}
+              onBrushChange={setBrush}
+              tool={tool}
+              onToolChange={setTool}
+              palette={kitPalette}
+              onPaletteChange={(p) => setPaintRecents(p.recents)}
+              theme={PAINT_THEME}
+              width={264}
+            />
+            {/* Studio model-texture strip */}
+            <Col style={{ gap: 8, padding: 10, backgroundColor: PAINT_THEME.panel, borderWidth: 1, borderColor: PAINT_THEME.frame, borderRadius: 8 }}>
+              {livePalette.slots.some((s) => s.kind === 'material') ? (
+                <Col style={{ gap: 5 }}>
+                  <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace', letterSpacing: 1 }}>MATERIALS</Text>
+                  <Row style={{ flexWrap: 'wrap', gap: 5 }}>
+                    {livePalette.slots.filter((s) => s.kind === 'material').map((s) => (
+                      <Pressable key={s.id} tooltip={`${s.name} (paints flat ${s.pseudo})`} onPress={() => setBrush((b) => ({ ...b, ink: { kind: 'color', hex: s.pseudo } }))} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 5, paddingRight: 7, height: 22, borderRadius: 4, backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: brushHex().toLowerCase() === s.pseudo.toLowerCase() ? PAINT_THEME.accent : PAINT_THEME.frame }}>
+                        <Box style={{ width: 11, height: 11, borderRadius: 3, backgroundColor: s.pseudo }} />
+                        <Text fontSize={10} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace' }}>{s.name}</Text>
+                      </Pressable>
+                    ))}
+                  </Row>
+                </Col>
+              ) : null}
+              <Row style={{ flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+                <Pressable tooltip="Fill the WHOLE hovered face one colour per click (the 'this face is just one colour' path)" onPress={() => setFaceFill((v) => !v)} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: faceFill ? PAINT_THEME.accent : PAINT_THEME.control, borderWidth: 1, borderColor: faceFill ? PAINT_THEME.accent : PAINT_THEME.frame }}>
+                  <Text fontSize={10} color={faceFill ? PAINT_THEME.page : PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>face fill</Text>
+                </Pressable>
+                <Pressable tooltip="Save the current colour as a palette swatch (grows the model's saved palette)" onPress={() => { const { palette } = paletteWithColor(livePalette, brushHex()); props.onSetPalette(palette); }} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame }}>
+                  <Text fontSize={10} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>+ save</Text>
+                </Pressable>
+                <Pressable tooltip="Fill the ENTIRE model with the current colour in one click (base coat)" onPress={() => { paintSnapshotBegin(); fillAllFaces(); if (!texView) setTexView(true); commitPaint(); }} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame }}>
+                  <Text fontSize={10} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>fill all</Text>
+                </Pressable>
+                <Pressable tooltip="Clear all paint on this model (back to the base coat)" onPress={() => { paintSnapshotBegin(); baseCoat(tex?.color ?? '#c8ccd2'); props.parts.forEach((p) => { if (p.paint && Object.keys(p.paint).length) props.onEditPaint(p.id, {}); }); paintRef.current = {}; touchedRef.current.clear(); commitPaint(); }} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: '#a14545' }}>
+                  <Text fontSize={10} color="#f0a0a0" style={{ fontFamily: 'monospace', fontWeight: '800' }}>clear</Text>
+                </Pressable>
+              </Row>
+            </Col>
+          </Col>
+        </ScrollView>
       ) : null}
 
       {/* PAINT diagnostics (req_1197): a compact readout — is a texture made + shown,
