@@ -10,7 +10,7 @@ import { floorTextureKey } from './tileSurface';
 import { Road } from './Road';
 import { CulDeSac, Intersection } from './RoadJunctions';
 import { Prop } from './Prop';
-import { GrassField, BushField, PalmFrondField, PalmTrunkField } from './GrassField';
+import { GrassField, FlowerField, BushField, PalmFrondField, PalmTrunkField } from './GrassField';
 import { Landform } from './Landform';
 import { WaterBodies } from './WaterBody';
 import { nearestLandformCameraHit } from '../world/landforms';
@@ -160,6 +160,7 @@ export const WorldStatics = memo(function WorldStatics(props: {
       {showFlora ? (
         <>
           <GrassField world={world} />
+          <FlowerField world={world} />
           <BushField world={world} />
           <PalmTrunkField world={world} />
           <PalmFrondField world={world} />

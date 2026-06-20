@@ -60,6 +60,21 @@ export const BUSH_CONFIG = {
   rootHi: { r: 0.22, g: 0.38, b: 0.14 },
 };
 
+// FLOWER globals — a companion population for the 'Flower Grass' flora kind.
+// The grass pass still emits the blade bed; this pass adds small colored heads
+// at blade-tip height using the normal lit mesh pipeline.
+export const FLOWER_CONFIG = {
+  density: 4,
+  height: { min: 0.38, max: 0.68 },
+  radius: { min: 0.035, max: 0.075 },
+  colors: {
+    pink: { r: 0.95, g: 0.35, b: 0.68 },
+    yellow: { r: 1.0, g: 0.82, b: 0.24 },
+    white: { r: 0.92, g: 0.88, b: 0.76 },
+    violet: { r: 0.55, g: 0.36, b: 0.9 },
+  },
+};
+
 // Sized to the GPU static-instance ceiling (framework/gpu/3d.zig
 // MAX_STATIC_INSTANCES = 1,048,576), the buffer the compiled loader plants grass
 // into — so the field never truncates before the hardware actually runs out.
@@ -98,11 +113,13 @@ const GRASS_KIND_LEVEL: Readonly<Record<string, DensityLevel>> = {
   grassMed: 'med',
   grassDry: 'med',
   grassLush: 'lush',
+  grassFlowers: 'lush',
 };
 const BUSH_KIND_LEVEL: Readonly<Record<string, DensityLevel>> = { bush: 'med' };
 
 export const GRASS_TILE_KINDS: ReadonlySet<string> = new Set(Object.keys(GRASS_KIND_LEVEL));
 export const BUSH_TILE_KINDS: ReadonlySet<string> = new Set(Object.keys(BUSH_KIND_LEVEL));
+export const FLOWER_TILE_KINDS: ReadonlySet<string> = new Set(['grassFlowers']);
 
 const GRASS_SPEC: FoliageSpec = { config: GRASS_CONFIG, kindLevel: GRASS_KIND_LEVEL, levelByIndex: levelByIndex(GRASS_KIND_LEVEL), warnLabel: 'grass' };
 const BUSH_SPEC: FoliageSpec = { config: BUSH_CONFIG, kindLevel: BUSH_KIND_LEVEL, levelByIndex: levelByIndex(BUSH_KIND_LEVEL), warnLabel: 'bush' };
@@ -124,6 +141,30 @@ const FOLIAGE_TUNABLE_SPECS = {
 } as const;
 editorTunables().register({ system: 'grass', route: 'render3d/grassPopulation', table: GRASS_CONFIG, specs: FOLIAGE_TUNABLE_SPECS });
 editorTunables().register({ system: 'bush', route: 'render3d/grassPopulation', table: BUSH_CONFIG, specs: FOLIAGE_TUNABLE_SPECS });
+editorTunables().register({
+  system: 'flowers',
+  route: 'render3d/grassPopulation',
+  table: FLOWER_CONFIG,
+  specs: {
+    density: { label: 'heads /cell', min: 0, max: 20, step: 1, precision: 0 },
+    'height.min': { label: 'head min (m)', min: 0.05, max: 2, step: 0.01, precision: 2 },
+    'height.max': { label: 'head max (m)', min: 0.05, max: 3, step: 0.01, precision: 2 },
+    'radius.min': { label: 'head small (m)', min: 0.01, max: 0.25, step: 0.005, precision: 3 },
+    'radius.max': { label: 'head large (m)', min: 0.01, max: 0.35, step: 0.005, precision: 3 },
+    'colors.pink.r': { label: 'pink R', min: 0, max: 1, step: 0.01, precision: 2 },
+    'colors.pink.g': { label: 'pink G', min: 0, max: 1, step: 0.01, precision: 2 },
+    'colors.pink.b': { label: 'pink B', min: 0, max: 1, step: 0.01, precision: 2 },
+    'colors.yellow.r': { label: 'yellow R', min: 0, max: 1, step: 0.01, precision: 2 },
+    'colors.yellow.g': { label: 'yellow G', min: 0, max: 1, step: 0.01, precision: 2 },
+    'colors.yellow.b': { label: 'yellow B', min: 0, max: 1, step: 0.01, precision: 2 },
+    'colors.white.r': { label: 'white R', min: 0, max: 1, step: 0.01, precision: 2 },
+    'colors.white.g': { label: 'white G', min: 0, max: 1, step: 0.01, precision: 2 },
+    'colors.white.b': { label: 'white B', min: 0, max: 1, step: 0.01, precision: 2 },
+    'colors.violet.r': { label: 'violet R', min: 0, max: 1, step: 0.01, precision: 2 },
+    'colors.violet.g': { label: 'violet G', min: 0, max: 1, step: 0.01, precision: 2 },
+    'colors.violet.b': { label: 'violet B', min: 0, max: 1, step: 0.01, precision: 2 },
+  },
+});
 
 export type GrassInstances = {
   data: Float32Array;
@@ -315,6 +356,75 @@ function populateFoliage(world: GameState['world'], spec: FoliageSpec): GrassIns
   // Right-size the result with a COPY (slice, not subarray): the geometric buffer
   // is up to 2× over-allocated, and subarray would keep that whole ArrayBuffer
   // alive behind the returned view. slice frees it.
+  return { data: buf.length === n * STRIDE ? buf : buf.slice(0, n * STRIDE), count: n, truncated, center, radius };
+}
+
+/** Flower heads over the 'Flower Grass' flora kind. The blade bed is emitted by
+ *  buildGrassInstances; this companion batch adds small colored tops at blade
+ *  height, using the same cell walk and deterministic hash as grass. */
+export function buildFlowerInstances(world: GameState['world']): GrassInstances {
+  const c = world.cellSizeMeters;
+  let cap = Math.min(MAX_INSTANCES, 4096);
+  let buf = new Float32Array(cap * STRIDE);
+  let n = 0;
+  let truncated = false;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  const palette = [FLOWER_CONFIG.colors.pink, FLOWER_CONFIG.colors.yellow, FLOWER_CONFIG.colors.white, FLOWER_CONFIG.colors.violet];
+
+  const emitHead = (wx: number, wz: number, top: number, cellKey: number): void => {
+    const headsPerCell = Math.max(0, Math.round(FLOWER_CONFIG.density));
+    const cellSeed = mix(cellKey ^ 0x54f4c5a7);
+    for (let k = 0; k < headsPerCell; k += 1) {
+      if (n >= cap) {
+        if (cap >= MAX_INSTANCES) { truncated = true; return; }
+        cap = Math.min(MAX_INSTANCES, cap * 2);
+        const grown = new Float32Array(cap * STRIDE);
+        grown.set(buf);
+        buf = grown;
+      }
+      const h0 = mix(cellSeed ^ Math.imul(k + 1, 0x9e3779b9));
+      const h1 = mix(h0 ^ 0x68bc21eb);
+      const h2 = mix(h1 ^ 0x7feb352d);
+      const h3 = mix(h2 ^ 0x846ca68b);
+      const px = wx + (unit(h0) - 0.5) * c * 0.9;
+      const pz = wz + (unit(h1) - 0.5) * c * 0.9;
+      const radius = lerp(FLOWER_CONFIG.radius.min, FLOWER_CONFIG.radius.max, unit(h2));
+      const py = top + lerp(FLOWER_CONFIG.height.min, FLOWER_CONFIG.height.max, unit(h3));
+      const color = palette[Math.floor(unit(mix(h3 ^ 0x91)) * palette.length)] ?? palette[0];
+      if (px - radius < minX) minX = px - radius;
+      if (py - radius < minY) minY = py - radius;
+      if (pz - radius < minZ) minZ = pz - radius;
+      if (px + radius > maxX) maxX = px + radius;
+      if (py + radius > maxY) maxY = py + radius;
+      if (pz + radius > maxZ) maxZ = pz + radius;
+      const o = n * STRIDE;
+      buf[o + 0] = px;
+      buf[o + 1] = py;
+      buf[o + 2] = pz;
+      buf[o + 3] = 0;
+      buf[o + 4] = unit(mix(h2 ^ 0x51)) * 360;
+      buf[o + 5] = 0;
+      buf[o + 6] = radius;
+      buf[o + 7] = radius;
+      buf[o + 8] = radius;
+      buf[o + 9] = color.r;
+      buf[o + 10] = color.g;
+      buf[o + 11] = color.b;
+      n += 1;
+    }
+  };
+
+  eachPaintedCell(world, (kind, wx, wz, top, cellKey) => {
+    if (kind !== 'grassFlowers') return;
+    emitHead(wx, wz, top, cellKey);
+  });
+
+  if (truncated) console.warn(`[grassPopulation] flower instance cap ${cap} hit — field truncated; raise MAX_INSTANCES`);
+  const center: [number, number, number] = n === 0
+    ? [0, 0, 0]
+    : [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2];
+  const radius = n === 0 ? 0 : Math.hypot(maxX - center[0], maxY - center[1], maxZ - center[2]);
   return { data: buf.length === n * STRIDE ? buf : buf.slice(0, n * STRIDE), count: n, truncated, center, radius };
 }
 

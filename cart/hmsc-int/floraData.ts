@@ -25,7 +25,8 @@ export type FloraKind =
   | 'palmSparse'
   | 'palmMed'
   | 'palmDense'
-  | 'bush';
+  | 'bush'
+  | 'grassFlowers';
 
 export type FloraLayer = 'grass' | 'tree' | 'bush';
 export const FLORA_LAYERS: readonly FloraLayer[] = ['grass', 'tree', 'bush'];
@@ -51,6 +52,7 @@ export const FLORA_KIND_DEFINITIONS: Record<FloraKind, FloraKindDefinition> = {
   palmMed: { kind: 'palmMed', label: 'Palm Trees', color: '#2f6b3a' },
   palmDense: { kind: 'palmDense', label: 'Palm Tree (Dense)', color: '#1f5230' },
   bush: { kind: 'bush', label: 'Bush', color: '#356326' },
+  grassFlowers: { kind: 'grassFlowers', label: 'Flower Grass', color: '#d77ab6' },
 };
 
 export const FLORA_KINDS = Object.keys(FLORA_KIND_DEFINITIONS) as FloraKind[];
@@ -64,6 +66,7 @@ export const FLORA_KIND_LAYER: Readonly<Record<FloraKind, FloraLayer>> = {
   palmMed: 'tree',
   palmDense: 'tree',
   bush: 'bush',
+  grassFlowers: 'grass',
 };
 
 export function floraKindDefinition(kind: FloraKind): FloraKindDefinition {

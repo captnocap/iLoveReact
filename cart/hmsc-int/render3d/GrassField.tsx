@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { GameState } from '../design';
-import { buildGrassInstances, buildBushInstances } from './grassPopulation';
+import { buildGrassInstances, buildBushInstances, buildFlowerInstances } from './grassPopulation';
 import { buildPalmFrondInstances, buildPalmTrunkInstances } from './palmPopulation';
 import { editorTunables } from '../editors/tunables';
 import type { GeometryDef } from '@reactjit/geometries';
@@ -56,6 +56,10 @@ function FoliageField(props: {
 // Grass: blades over the painted grass tiles.
 export const GrassField = memo(function GrassField(props: { world: GameState['world'] }) {
   return <FoliageField world={props.world} build={buildGrassInstances} geometry={Geometry.GrassBlade} params={Geometry.GRASS_BLADE_DEFAULTS} />;
+});
+
+export const FlowerField = memo(function FlowerField(props: { world: GameState['world'] }) {
+  return <FoliageField world={props.world} build={buildFlowerInstances} geometry={Geometry.Sphere} params={{ ...Geometry.SPHERE_DEFAULTS, radius: 1, segments: 8 }} textureKey={null} />;
 });
 
 // Bush: leafy clumps over the painted 'bush' tiles — the same foliage pipeline,

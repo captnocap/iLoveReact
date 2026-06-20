@@ -33,7 +33,7 @@ import { groundKindAt, HEIGHTFIELD_TILE_BODY, MARKER_KIND_INDICES, roadRibbonSec
 import { isParkingKind } from '../render3d/parkingStall';
 import type { ChunkFloor } from '../chunkFloor';
 import { floorToLandform } from '../chunkFloor';
-import { buildGrassInstances, buildBushInstances } from '../render3d/grassPopulation';
+import { buildGrassInstances, buildBushInstances, buildFlowerInstances } from '../render3d/grassPopulation';
 import { buildPalmInstances } from '../render3d/palmPopulation';
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
@@ -1060,6 +1060,7 @@ export function buildWorldInstances(
   if (opts.includeGroundLayers) pushWorldLayers(b, state);
   if (state?.world) {
     pushFoliage(b, state, floors, buildGrassInstances, INSTANCE_SHAPE_GRASS, 'grass');
+    pushFoliage(b, state, floors, buildFlowerInstances, INSTANCE_SHAPE_SPHERE, 'flowers');
     pushFoliage(b, state, floors, buildBushInstances, INSTANCE_SHAPE_BUSH, 'bush');
     pushPalms(b, state, floors);
   }
