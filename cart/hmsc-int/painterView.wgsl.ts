@@ -18,11 +18,13 @@
 // D[] layout (encodePainterSurface — EVERY section always emitted with explicit
 // headers, the GHOSTROAD-0610 rule: Effect buffers only grow, so an omitted
 // section leaves the previous tenant alive in the tail):
-//   [0] opRoad  [1] opHeight  [2] opZone  [3] reserved
+//   [0] opRoad  [1] opHeight  [2] opZone  [3] opFlora
 //   tile:   cols, rows, palN, palN*3 rgb, cols*rows cell indices
 //   road:   segN, crosswalkIdx, junctionIdx, laneStartIdx, medianIdx, segN*8 segs
 //   height: hcols, hrows, visRef, tilesX, tilesY, hcols*hrows z samples
 //   zone:   zcols, zrows, zpalN, zpalN*3 rgb, zcols*zrows zone indices
+//   flora:  fcols, frows, fpalN, fpalN*3 rgb, fcols*frows flora indices
+//   water:  wcols, wrows, visRef, tilesX, tilesY, wcols*wrows depth samples
 //
 // (WGSL: no unary plus, no backticks in comments.)
 
@@ -66,6 +68,7 @@ fn hSample(base: i32, ix: i32, iy: i32, cols: i32, rows: i32) -> f32 {
   let opRoad = D[0];
   let opHeight = D[1];
   let opZone = D[2];
+  let opFlora = D[3];
   let tBase = 4;
 
   // ── tile ground (the base channel, always on) ──────────────────────────────
@@ -209,12 +212,33 @@ fn hSample(base: i32, ix: i32, iy: i32, cols: i32, rows: i32) -> f32 {
   // layout as height; the section sits after zone. Always shown (it's the body
   // of water, not a tint channel).
   let zEnd = zBase + 3 + zpalN * 3 + i32(D[zBase]) * i32(D[zBase + 1]);
-  let wcols = i32(D[zEnd]);
-  let wrows = i32(D[zEnd + 1]);
+  let fBase = zEnd;
+  let fcols = i32(D[fBase]);
+  let frows = i32(D[fBase + 1]);
+  let fpalN = i32(D[fBase + 2]);
+  if (opFlora > 0.001 && fcols > 0 && frows > 0) {
+    let fx = clamp(i32(floor(in.uv.x * f32(fcols))), 0, fcols - 1);
+    let fy = clamp(i32(floor(in.uv.y * f32(frows))), 0, frows - 1);
+    let fCellBase = fBase + 3 + fpalN * 3;
+    let fkind = i32(D[fCellBase + fy * fcols + fx]);
+    if (fkind >= 0 && fkind < fpalN) {
+      let fb = fBase + 3 + fkind * 3;
+      let fc = vec3f(D[fb], D[fb + 1], D[fb + 2]);
+      let fp = fract(in.uv * vec2f(f32(fcols), f32(frows)));
+      let dotD = distance(fp, vec2f(0.5, 0.5));
+      let dotMask = 1.0 - smoothstep(0.18, 0.34, dotD);
+      rgb = mix(rgb, fc, (0.16 + dotMask * 0.46) * opFlora);
+      rgb = mix(rgb, vec3f(0.02, 0.03, 0.02), dotMask * 0.18 * opFlora);
+    }
+  }
+
+  let fEnd = fBase + 3 + fpalN * 3 + fcols * frows;
+  let wcols = i32(D[fEnd]);
+  let wrows = i32(D[fEnd + 1]);
   if (wcols > 1 && wrows > 1) {
     let wx = clamp(i32(in.uv.x * f32(wcols)), 0, wcols - 1);
     let wy = clamp(i32(in.uv.y * f32(wrows)), 0, wrows - 1);
-    let level = D[zEnd + 5 + wy * wcols + wx];
+    let level = D[fEnd + 5 + wy * wcols + wx];
     if (level > 0.02) {
       let deep = clamp(0.45 + level * 0.04, 0.45, 0.78);
       rgb = mix(rgb, vec3f(0.18, 0.50, 0.66), deep);

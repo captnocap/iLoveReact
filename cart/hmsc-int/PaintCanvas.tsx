@@ -733,6 +733,7 @@ export function PaintCanvas(props: {
     road: layer === 'road' || channelVisible(channels, 'road') ? 1 : 0,
     height: layer === 'height' ? 1 : channelVisible(channels, 'height') ? 0.3 : 0,
     zone: layer === 'zone' ? 1 : channelVisible(channels, 'zone') ? 0.25 : 0,
+    flora: layer === 'flora' ? 1 : channelVisible(channels, 'flora') ? 0.25 : 0,
   }), [layer, channels]);
   // [mapgone-probe MAPGONE2-0605] surface gate — stays until the user confirms
   useEffect(() => {

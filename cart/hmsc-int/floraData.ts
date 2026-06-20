@@ -91,3 +91,13 @@ export function encodeFloraMap(m: FloraMap): number[] {
   for (let i = 0; i < m.idx.length; i++) out.push(m.idx[i]);
   return out;
 }
+
+// Encode the flora section for the combined painter view: [cols, rows, floraCount,
+// flora rgb..., cells...]. This mirrors encodeZoneSection so the shader can tint
+// flora cells by the authoring swatch without hardcoding the palette in WGSL.
+export function encodeFloraSection(m: FloraMap): number[] {
+  const out: number[] = [m.cols, m.rows, FLORA_KINDS.length];
+  for (const c of FLORA_PALETTE) out.push(c[0], c[1], c[2]);
+  for (let i = 0; i < m.idx.length; i++) out.push(m.idx[i]);
+  return out;
+}

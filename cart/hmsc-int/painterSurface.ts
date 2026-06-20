@@ -9,6 +9,7 @@
 // tenant alive in the buffer tail — counts must overwrite).
 
 import type { Chunk } from './chunks';
+import { encodeFloraSection } from './floraData';
 import { encodeField } from './heightData';
 import { encodeTileMap } from './tileData';
 import { encodeZoneSection, type ZoneDef } from './zoneData';
@@ -20,23 +21,26 @@ export interface PainterEmphasis {
   road: number;
   height: number;
   zone: number;
+  flora: number;
 }
 
-export const PAINTER_EMPHASIS_FLOATS = 4; // opRoad, opHeight, opZone, reserved
+export const PAINTER_EMPHASIS_FLOATS = 4; // opRoad, opHeight, opZone, opFlora
 
 /** The combined buffer the painter view samples. Layout (see painterView.wgsl.ts):
- *  emphasis header, tile section, road-ribbon section, height section, zone section. */
+ *  emphasis header, tile section, road-ribbon section, height section, zone section,
+ *  flora section, water section. */
 export function encodePainterSurface(
   chunk: Chunk,
   zones: ZoneDef[],
   roads: number[] | undefined,
   emphasis: PainterEmphasis,
 ): number[] {
-  const out: number[] = [emphasis.road, emphasis.height, emphasis.zone, 0];
+  const out: number[] = [emphasis.road, emphasis.height, emphasis.zone, emphasis.flora];
   pushAll(out, encodeTileMap(chunk.tiles));
   pushAll(out, roadRibbonSection(roads));
   pushAll(out, encodeField(chunk.height));
   pushAll(out, encodeZoneSection(chunk.zones, zones));
+  pushAll(out, encodeFloraSection(chunk.flora));
   // Painted water surface level (the terrain water brush) — same encodeField
   // layout as height; the view tints blue where a sample is wet (> 0).
   pushAll(out, encodeField(chunk.water));
