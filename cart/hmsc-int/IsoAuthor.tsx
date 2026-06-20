@@ -343,6 +343,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const wholeBuildingRef = useRef(wholeBuilding);
   wholeBuildingRef.current = wholeBuilding;
   const [wallsVisible, setWallsVisible] = useRouteTwigState<boolean>(ISO_ROUTE, 'wallsVisible', true);
+  const [floraVisible, setFloraVisible] = useRouteTwigState<boolean>(ISO_ROUTE, 'floraVisible', true);
   // Show the WHOLE building stack (req_0721/req_0722). The floor-level cut-away
   // (storey ≥ the active level vanishes) is the "look into one floor" tool — show
   // the active floor and everything BELOW, hide what's above so you can see and
@@ -1438,8 +1439,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // and choked. Only a real world/skin change rebuilds these; camera + grid + pieces +
   // ghost stay live below.
   const worldStatics = useMemo(() => (
-    <WorldStatics world={state.world} skyConfig={state.config.sky} />
-  ), [state.world, state.config.sky]);
+    <WorldStatics world={state.world} skyConfig={state.config.sky} showFlora={floraVisible} />
+  ), [state.world, state.config.sky, floraVisible]);
   const sceneCaptures = useMemo(() => (
     <>
       <LandformSurfaceCaptures landforms={state.world.landforms ?? []} />
@@ -1550,6 +1551,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         <IsoBtn label="⌷" active={!showAllFloors} title={showAllFloors ? 'Showing ALL floors — click to cut away to the active floor (F)' : 'Cut-away ON (showing up to the active floor) — click to show ALL floors'} onPress={() => setShowAllFloors((v) => !v)} />
         <IsoBtn label={wholeBuilding ? '▦' : '▪'} title={wholeBuilding ? 'Select: whole building · Shift-click = one piece' : 'Select: one piece · Shift-click = whole building'} onPress={() => setWholeBuilding((v) => !v)} />
         <IsoBtn label="W" active={!wallsVisible} title={wallsVisible ? 'Hide walls in this iso view' : 'Show walls in this iso view'} onPress={() => setWallsVisible((v) => !v)} />
+        <IsoBtn label="Fl" active={!floraVisible} title={floraVisible ? 'Hide flora in this iso view' : 'Show flora in this iso view'} onPress={() => setFloraVisible((v) => !v)} />
         {selectedIds.size > 0 ? (
           <>
             <IsoBtn label="⊞" title="Save selection as a prefab" onPress={() => setPrefabNameDraft(nextCustomName())} />

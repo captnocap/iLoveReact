@@ -10,7 +10,7 @@ import { floorTextureKey } from './tileSurface';
 import { Road } from './Road';
 import { CulDeSac, Intersection } from './RoadJunctions';
 import { Prop } from './Prop';
-import { GrassField, BushField } from './GrassField';
+import { GrassField, BushField, PalmFrondField, PalmTrunkField } from './GrassField';
 import { Landform } from './Landform';
 import { WaterBodies } from './WaterBody';
 import { nearestLandformCameraHit } from '../world/landforms';
@@ -101,8 +101,10 @@ function Player(props: { state: GameState; animationSeconds: number; moving: boo
 export const WorldStatics = memo(function WorldStatics(props: {
   world: GameState['world'];
   skyConfig: GameState['config']['sky'];
+  showFlora?: boolean;
 }) {
   const world = props.world;
+  const showFlora = props.showFlora ?? true;
   const sky = useMemo(
     () => buildHmscSky(props.skyConfig.hour, props.skyConfig.weather, props.skyConfig.gloom),
     [props.skyConfig.hour, props.skyConfig.weather, props.skyConfig.gloom],
@@ -152,14 +154,17 @@ export const WorldStatics = memo(function WorldStatics(props: {
       {world.props.map((prop) => (
         <Prop key={prop.id} prop={prop} />
       ))}
-      {/* Grass: the painted 'grass'/'grassDry' tiles populated as one instanced
-          blade field (a surface population system, not props). Drawn after the
-          floors it stands on. */}
-      <GrassField world={world} />
-      {/* Bush: painted 'bush' tiles populated as leafy foliage clumps (the same
-          card-population system as grass, bushier geometry — replaces the old
-          solid-sphere bush prop). */}
-      <BushField world={world} />
+      {/* Flora: painted grass, bush, and palm lanes populated as instanced fields
+          (a surface population system, not props). Drawn after the floors they
+          stand on, and switchable in the iso editor when it occludes building work. */}
+      {showFlora ? (
+        <>
+          <GrassField world={world} />
+          <BushField world={world} />
+          <PalmTrunkField world={world} />
+          <PalmFrondField world={world} />
+        </>
+      ) : null}
       {/* Registry-driven landforms (mountains, hills, estates): ONE component for
           every kind — a Heightfield mesh baked from the kind's height function,
           tiled with the surface material, plus any kind decoration (crater lake,

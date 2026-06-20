@@ -5,7 +5,7 @@
 import { Box, Pressable, Text, TextInput } from '@reactjit/primitives';
 import type { TileKind, ZoneFlag } from './design';
 import { PAINTABLE_TILE_KINDS, tileKindDefinition } from './world/tileKinds';
-import { FLORA_KINDS, FLORA_KIND_DEFINITIONS } from './floraData';
+import { FLORA_KINDS, FLORA_KIND_DEFINITIONS, floraLayerForKindIndex } from './floraData';
 import { ZONE_FLAGS } from './world/zones';
 import { HEIGHT_LIMIT, type BrushProfile } from './heightData';
 import type { BrushMode, BrushShape } from './brush';
@@ -64,9 +64,10 @@ export function PaintSection(props: { tile: TileKind; onTile: (k: TileKind) => v
 // (the greens read alike as bare swatches); `activeFlora` is the FLORA_KINDS index.
 export function FloraSection(props: { activeFlora: number; onActiveFlora: (i: number) => void; onPaint: () => void }) {
   const items = FLORA_KINDS.map((k) => ({ id: k, label: FLORA_KIND_DEFINITIONS[k].label }));
+  const lane = floraLayerForKindIndex(props.activeFlora) ?? 'flora';
   return (
     <Box style={{ gap: 5 }}>
-      <RailLabel text="flora" />
+      <RailLabel text={`flora · ${lane} lane`} />
       <ChipGrid
         items={items}
         value={FLORA_KINDS[props.activeFlora] ?? FLORA_KINDS[0]}
