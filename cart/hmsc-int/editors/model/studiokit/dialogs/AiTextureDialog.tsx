@@ -7,6 +7,7 @@ import { buildTexturePrompt, enhanceViaNano, generateTexture, getNanoKey, setNan
 import { useAssistant } from '@reactjit/hooks/useAssistant';
 import { processCwd } from '../../../../assist3d/scene';
 import type { RasterSlice } from '../../textureize';
+import { LCField } from './dialogControls';
 
 
 // AI Fill (req_1070/1110, Phase 5d): automated image-to-image. The prompt is OPTIONALLY

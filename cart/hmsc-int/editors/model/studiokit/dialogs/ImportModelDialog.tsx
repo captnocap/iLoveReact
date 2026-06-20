@@ -6,6 +6,7 @@ import { Z } from '../chrome/zlayers';
 import { base64ToBytes, glbToEditMesh } from '../../importMesh';
 import type { EditMesh } from '../../editMesh';
 import { readFileBase64 } from '@reactjit/hooks/fs';
+import { LCField } from './dialogControls';
 
 
 // Import a generated/external GLB (tools/genmesh output, or any .glb) as a NEW

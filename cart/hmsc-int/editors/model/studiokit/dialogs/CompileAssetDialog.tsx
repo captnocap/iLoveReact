@@ -4,6 +4,7 @@ import { Box, Col, Pressable, Row, Text, TextInput } from '@reactjit/primitives'
 import { T } from '../config';
 import { Z } from '../chrome/zlayers';
 import type { PropDescriptorInput } from '../../cookedAsset';
+import { LCField, LCStepper } from './dialogControls';
 
 
 // ── Compile Asset dialog (req_1122, Part 7 — the asset compiler) ──────────────

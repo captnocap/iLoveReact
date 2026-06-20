@@ -2,6 +2,7 @@
 import { Box, Col, Pressable, Row, Text } from '@reactjit/primitives';
 import { STEP_BTN, T } from '../config';
 import { Z } from '../chrome/zlayers';
+import { LCField, LCStepper } from './dialogControls';
 
 
 // The bevel sizing popup (req_1266) — set up like the loop cut: the chamfer is

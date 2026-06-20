@@ -4,6 +4,7 @@ import { Box, Col, Pressable, Row, Text, TextInput } from '@reactjit/primitives'
 import { T } from '../config';
 import { Z } from '../chrome/zlayers';
 import type { RasterSlice } from '../../textureize';
+import { LCField } from './dialogControls';
 
 
 // ── Import Texture dialog (req_1079) ──────────────────────────────────────────

@@ -4,6 +4,7 @@ import { Box, Col, Pressable, Row, Text, TextInput } from '@reactjit/primitives'
 import { T } from '../config';
 import { Z } from '../chrome/zlayers';
 import { DEFAULT_TEXTURE_OPTIONS, PIXEL_DENSITIES, type TextureOptions, type TextureType } from '../../textureize';
+import { LCField, LCStepper } from './dialogControls';
 
 
 // ── Create Texture dialog (req_1068) ──────────────────────────────────────────
