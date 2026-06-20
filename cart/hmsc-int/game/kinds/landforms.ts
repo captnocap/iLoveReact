@@ -37,6 +37,10 @@ export type LandformField = {
   cell: number;
   heights: number[];
   tiles?: { cols: number; rows: number; idx: number[] };
+  // What GROWS over this landform — grass/palm/bush, a SEPARATE per-cell grid from
+  // `tiles` (FLORADECOUPLE-0619). The population builders read this; the ground
+  // formula reads `tiles`. Same cols/rows as `tiles`; idx into FLORA_KINDS, -1 none.
+  flora?: { cols: number; rows: number; idx: number[] };
 };
 
 // The placed-landform instance the pure helpers below operate on. The full

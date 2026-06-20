@@ -16,6 +16,7 @@
 import { columnIndex } from './address';
 import { makeHeightField, type HeightField } from './heightData';
 import { makeTileMap, type TileMap } from './tileData';
+import { makeFloraMap, type FloraMap } from './floraData';
 import { makeZoneMap, type ZoneMap } from './zoneData';
 
 export const CHUNK_TILES = 120;
@@ -38,6 +39,10 @@ export interface Chunk {
   // depth is derived against `height` (the bed). 0 = dry. So you paint water into
   // terrain and dig the bed under it for depth, exactly like a dropped body.
   water: HeightField;
+  // What GROWS on each cell — grass blades / palms / bushes (FLORADECOUPLE-0619).
+  // A SEPARATE channel from `tiles` so a population layers over ANY ground surface
+  // (beach grass = sand tile + grass flora). -1 = nothing grows. See floraData.ts.
+  flora: FloraMap;
   zones: ZoneMap;
 }
 
@@ -48,6 +53,7 @@ export function makeChunk(cx: number, cz: number): Chunk {
     tiles: makeTileMap(CHUNK_TILES, CHUNK_TILES),
     height: makeHeightField(CHUNK_TILES, CHUNK_TILES),
     water: makeHeightField(CHUNK_TILES, CHUNK_TILES),
+    flora: makeFloraMap(CHUNK_TILES, CHUNK_TILES),
     zones: makeZoneMap(CHUNK_TILES, CHUNK_TILES),
   };
 }

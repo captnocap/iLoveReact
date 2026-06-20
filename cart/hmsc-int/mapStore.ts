@@ -27,6 +27,7 @@
 
 import { encodeGrid, decodeGrid, type RleGrid } from '@reactjit/workspace';
 import { TILE_KINDS } from './world/tileKinds';
+import { FLORA_KINDS } from './floraData';
 import {
   chunkKey,
   makeChunk,
@@ -46,7 +47,25 @@ import { type GenPoseOverride, type IntersectionControl } from './intersections'
 // re-derives the road grid at load via planRoads (the same pure compiler the
 // editor runs at paint time). v1 snapshots still load (their tiles are already
 // composited; their `roadUnder` rides as before).
-const MAP_FORMAT_V = 2;
+// v3 (FLORADECOUPLE-0619) adds the flora channel (per-cell populations) + floraLegend.
+// A v2 snapshot has no flora grid; on load its population TILES (grass*/palm*/bush)
+// MIGRATE into the flora channel (POP_TILE_TO_FLORA) and the ground under them resets
+// to a plain surface, so existing maps keep their grass/palms over a separable ground.
+const MAP_FORMAT_V = 3;
+
+// v2→v3 migration: a population kind that used to live in the GROUND tile channel maps
+// to its flora kind + the plain ground it should sit on. Names match the saved v2
+// tileLegend on the left; FLORA_KINDS / TILE_KINDS names on the right.
+const POP_TILE_TO_FLORA: Readonly<Record<string, { flora: string; ground: string }>> = {
+  grassSparse: { flora: 'grassSparse', ground: 'grass' },
+  grass: { flora: 'grassMed', ground: 'grass' },
+  grassDry: { flora: 'grassDry', ground: 'grass' },
+  grassLush: { flora: 'grassLush', ground: 'grass' },
+  palmSparse: { flora: 'palmSparse', ground: 'grass' },
+  palm: { flora: 'palmMed', ground: 'grass' },
+  palmDense: { flora: 'palmDense', ground: 'grass' },
+  bush: { flora: 'bush', ground: 'grass' },
+};
 
 // Re-derive the road raster onto the base chunks from the stroke recipe — the
 // load-time half of the v2 "store recipe, not result" format. planRoads is
@@ -111,6 +130,7 @@ interface ChunkSnap {
   height: RleGrid;  // per-sample quantized height (round(z * HEIGHT_Q); 0 = flat)
   zones: RleGrid;   // per-cell index into `zones` list (-1 = unzoned)
   water?: RleGrid;  // per-sample quantized WATER surface level (>0 = wet); absent = dry
+  flora?: RleGrid;  // per-cell index into floraLegend (-1 = none); absent = bare
 }
 
 export interface MapSnapshot {
@@ -118,6 +138,9 @@ export interface MapSnapshot {
   v: number;
   /** Tile-kind NAMES in the index order the chunk tile grids reference. */
   tileLegend: string[];
+  /** Flora-kind NAMES the chunk flora grids reference (FLORADECOUPLE-0619). Absent
+   *  on pre-flora snapshots — those migrate population tiles into flora on load. */
+  floraLegend?: string[];
   /** This map's named areas (self-contained — not global). */
   zones: ZoneDef[];
   /** Focused chunk keys ("cx,cz"). */
@@ -172,6 +195,9 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
     let anyWater = false;
     const wq = new Array<number>(wz.length);
     for (let i = 0; i < wz.length; i++) { wq[i] = Math.round(wz[i] * HEIGHT_Q); if (wq[i] !== 0) anyWater = true; }
+    // Flora cells (mostly -1/none) → RLE, only when something grows on this chunk.
+    const fidx = Array.from(c.flora.idx);
+    const anyFlora = fidx.some((v) => v >= 0);
     const baseIdx = Array.from(c.tiles.idx);
     if (under && under.size) {
       const cx0 = c.cx * CHUNK_TILES;
@@ -191,11 +217,13 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
       height: encodeGrid(q, c.height.cols, c.height.rows),
       zones: encodeGrid(Array.from(c.zones.idx), c.zones.cols, c.zones.rows),
       ...(anyWater ? { water: encodeGrid(wq, c.water.cols, c.water.rows) } : {}),
+      ...(anyFlora ? { flora: encodeGrid(fidx, c.flora.cols, c.flora.rows) } : {}),
     });
   }
   return {
     v: MAP_FORMAT_V,
     tileLegend: [...TILE_KINDS],
+    floraLegend: [...FLORA_KINDS],
     zones: world.zones.map((z) => ({ ...z, flags: [...z.flags] })),
     focus: Array.from(world.focus),
     // Gen-tagged intersection props (stop signs / lights / street signs) PERSIST:
@@ -233,18 +261,53 @@ function buildTileRemap(legend: string[]): Int16Array {
   return remap;
 }
 
+// saved flora index → current FLORA_KINDS index, via the saved legend's name (twin of
+// buildTileRemap). A kind that no longer exists degrades to -1 (none).
+function buildFloraRemap(legend: string[]): Int16Array {
+  const remap = new Int16Array(legend.length);
+  for (let i = 0; i < legend.length; i++) {
+    remap[i] = FLORA_KINDS.indexOf(legend[i] as (typeof FLORA_KINDS)[number]);
+  }
+  return remap;
+}
+
 export function deserializeMap(snap: MapSnapshot): EditorWorld {
-  const remap = buildTileRemap(snap.tileLegend ?? [...TILE_KINDS]);
+  const savedTileLegend = snap.tileLegend ?? [...TILE_KINDS];
+  const remap = buildTileRemap(savedTileLegend);
+  const floraRemap = buildFloraRemap(snap.floraLegend ?? [...FLORA_KINDS]);
+  // v2→v3 migration map: saved tile index → its flora + ground split, for population
+  // kinds only (null for real ground tiles). Applied ONLY to chunks with no flora grid.
+  const tileMigration: ({ flora: number; ground: number } | null)[] = savedTileLegend.map((name) => {
+    const m = POP_TILE_TO_FLORA[name];
+    if (!m) return null;
+    return { flora: FLORA_KINDS.indexOf(m.flora as (typeof FLORA_KINDS)[number]), ground: TILE_KINDS.indexOf(m.ground as (typeof TILE_KINDS)[number]) };
+  });
   const chunks = new Map<ChunkKey, Chunk>();
 
   for (const cs of snap.chunks ?? []) {
     const c = makeChunk(cs.cx, cs.cz);
+    const hasFloraGrid = !!cs.flora;
 
     const tflat = decodeGrid(cs.tiles);
     for (let i = 0; i < c.tiles.idx.length && i < tflat.length; i++) {
       const v = tflat[i];
-      const idx = v == null || v < 0 ? -1 : (remap[v] ?? -1);
-      c.tiles.idx[i] = idx;
+      if (v == null || v < 0) { c.tiles.idx[i] = -1; continue; }
+      const mig = !hasFloraGrid ? tileMigration[v] : null;
+      if (mig) {
+        // Pre-flora map: this cell's GROUND tile was a population — split it.
+        c.flora.idx[i] = mig.flora;
+        c.tiles.idx[i] = mig.ground;
+      } else {
+        c.tiles.idx[i] = remap[v] ?? -1;
+      }
+    }
+
+    if (cs.flora) {
+      const fflat = decodeGrid(cs.flora);
+      for (let i = 0; i < c.flora.idx.length && i < fflat.length; i++) {
+        const v = fflat[i];
+        c.flora.idx[i] = v == null || v < 0 ? -1 : (floraRemap[v] ?? -1);
+      }
     }
 
     const hflat = decodeGrid(cs.height);

@@ -46,7 +46,7 @@ export const PALM_CONFIG = {
 type PalmDensity = keyof typeof PALM_CONFIG.density;
 const PALM_KIND_DENSITY: Readonly<Record<string, PalmDensity>> = {
   palmSparse: 'sparse',
-  palm: 'med',
+  palmMed: 'med',
   palmDense: 'dense',
 };
 

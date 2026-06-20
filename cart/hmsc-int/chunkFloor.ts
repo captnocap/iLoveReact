@@ -15,6 +15,7 @@
 import type { Landform, WaterBody } from './design';
 import { CHUNK_TILES, chunkKey, type Chunk, type ChunkKey } from './chunks';
 import { encodeTileMap } from './tileData';
+import { encodeFloraMap } from './floraData';
 import { roadRibbonSegments, type RoadStroke } from './roadData';
 import { WATER_LOOK } from './game/kinds/waterBodies';
 import { plog } from './perfLog';
@@ -34,6 +35,10 @@ export type ChunkFloor = {
   // same grid as `heights`; a sample > 0 is WET (water up to that level), 0 = dry.
   // Present only on chunks with painted water; stable ref unless water painted.
   water?: number[];
+  // Encoded FLORA channel (encodeFloraMap: [cols, rows, kindCount, ...cells]) — what
+  // GROWS on each cell, SEPARATE from tileData (FLORADECOUPLE-0619). The population
+  // builders read this; the ground texture reads tileData. Absent on bare chunks.
+  floraData?: number[];
   // Analytic road ribbon segments over this chunk (ROADCURVE-0610), chunk-local
   // cell space, 8 floats/segment — stable identity unless a road changed.
   roads?: number[];
@@ -75,9 +80,15 @@ function anyPositive(z: Float32Array): boolean {
   return false;
 }
 
+function anyFlora(idx: Int16Array): boolean {
+  for (let i = 0; i < idx.length; i++) if (idx[i] >= 0) return true;
+  return false;
+}
+
 export function chunkToFloor(c: Chunk, hver = 1, roads?: RoadStroke[]): ChunkFloor {
   const segs = roads?.length ? roadRibbonSegments(roads, c.cx, c.cz, CHUNK_TILES) : [];
   const hasWater = anyPositive(c.water.z);
+  const hasFlora = anyFlora(c.flora.idx);
   return {
     cx: c.cx,
     cz: c.cz,
@@ -87,6 +98,7 @@ export function chunkToFloor(c: Chunk, hver = 1, roads?: RoadStroke[]): ChunkFlo
     hrows: CHUNK_FLOOR_HF_RES,
     hver,
     ...(hasWater ? { water: downsampleChunkFloorHeights(c.water.z, c.water.cols, c.water.rows) } : {}),
+    ...(hasFlora ? { floraData: encodeFloraMap(c.flora) } : {}),
     ...(segs.length ? { roads: segs } : {}),
   };
 }
@@ -115,6 +127,12 @@ export function floorToLandform(f: ChunkFloor): Landform {
   const palCount = f.tileData[2] | 0;
   const idx = f.tileData.slice(3 + palCount * 3);
   const cell = CHUNK_TILES / (f.hcols - 1); // height samples span the whole chunk
+  // Flora cell grid (encodeFloraMap: [cols, rows, kindCount, ...cells]) — no palette,
+  // so the per-cell idx is everything after the 3-int header. The population builders
+  // read field.flora; absent floraData → no populations on this chunk.
+  const flora = f.floraData
+    ? { cols: f.floraData[0] | 0, rows: f.floraData[1] | 0, idx: f.floraData.slice(3) }
+    : undefined;
   return {
     id: `painted_${f.cx}_${f.cz}`,
     kind: 'heightfield',
@@ -126,6 +144,7 @@ export function floorToLandform(f: ChunkFloor): Landform {
     field: {
       cols: f.hcols, rows: f.hrows, cell, heights: f.heights,
       tiles: { cols: tcols, rows: trows, idx },
+      ...(flora ? { flora } : {}),
       ...(f.roads?.length ? { roads: f.roads } : {}),
     },
     createdByCommand: 'hmsc-int:paint',
