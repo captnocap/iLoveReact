@@ -49,7 +49,15 @@ pub const MAX_ENTITIES: usize = 128;
 // (~720KB at 16384), so the headroom is cheap. The per-step cost is the ACTUAL
 // rect count, not the cap, so unused headroom is free.
 pub const MAX_RECTS: usize = 16384;
-pub const MAX_ORIENTED: usize = 256;
+// 16384 (was 256): every prop now bakes a footprint collider, and a quarter-turn
+// prop still rides the ORIENTED lane (off-center/non-square footprints orbit the
+// pivot under yaw). A built-out map crossed 256 oriented (~300 on a real city),
+// so the tail of props silently lost collision — same walk-through-the-tail bug
+// that forced MAX_RECTS up from 4096. Matched to MAX_RECTS: the only static
+// buffer keyed to this is g_camera_occlusion_oriented_values (~850KB at 16384),
+// and the per-step cost is the ACTUAL oriented count, not the cap, so the
+// headroom is free. Don't set this low again.
+pub const MAX_ORIENTED: usize = 16384;
 pub const INPUT_HEADER_FLOATS: usize = 25;
 pub const ENTITY_FLOATS: usize = 8;
 // A rect is [minX, minZ, maxX, maxZ, top, solid, friction, restitution, floor].
@@ -78,6 +86,11 @@ pub const CAMERA_OCCLUSION_RECT_FLOATS: usize = RECT_FLOATS + 1;
 pub const CAMERA_OCCLUSION_ORIENTED_FLOATS: usize = ORIENTED_FLOATS + 1;
 pub const MAX_CAMERA_OCCLUSION_HITS: usize = 64;
 pub const CAMERA_OCCLUSION_OUTPUT_FLOATS: usize = 4 + MAX_CAMERA_OCCLUSION_HITS;
+// req_0938: a heightfield whose surface sits more than this ABOVE the camera
+// pivot is a CEILING/ROOF the player is under — it must not cap the spring-arm
+// eye (the rek when you walk under a roof a storey-plus overhead). Heightfields
+// are floors-you-stand-on; only those at/below ~head height cap the camera.
+pub const CAMERA_HEIGHTFIELD_CEILING_CLEARANCE_METERS: f32 = 1.0;
 
 pub const CameraOcclusionConfiguredHit = struct {
     nearest_target_distance: f32 = 0,
@@ -144,6 +157,24 @@ var g_camera_occlusion_rect_values: [MAX_RECTS * CAMERA_OCCLUSION_RECT_FLOATS]f3
 var g_camera_occlusion_oriented_values: [MAX_ORIENTED * CAMERA_OCCLUSION_ORIENTED_FLOATS]f32 = [_]f32{0} ** (MAX_ORIENTED * CAMERA_OCCLUSION_ORIENTED_FLOATS);
 var g_camera_occlusion_rect_count: usize = 0;
 var g_camera_occlusion_oriented_count: usize = 0;
+
+// --- Stair / locomotion diagnostic (RJIT_STAIRLOG=1) ---
+// The compiled game is no-V8: JS console.log never runs there. To prove the
+// "hold W, walk into an invisible wall at the top of a staircase" report we log
+// the locomotion step directly from the Zig sim. Gated behind RJIT_STAIRLOG so
+// it costs nothing in normal play; set the env var and the player's intent vs.
+// the actual horizontal delta — and WHICH branch zeroed the move — prints per
+// frame while they walk. -1 = env unread yet, 0 = off, 1 = on.
+var g_stairlog_state: i8 = -1;
+var g_stairlog_frame: u64 = 0;
+
+fn stairlogOn() bool {
+    if (g_stairlog_state < 0) {
+        const v = std.posix.getenv("RJIT_STAIRLOG") orelse "";
+        g_stairlog_state = if (v.len > 0 and v[0] != '0') 1 else 0;
+    }
+    return g_stairlog_state == 1;
+}
 
 fn clamp(n: f32, a: f32, b: f32) f32 {
     return @max(a, @min(b, n));
@@ -851,6 +882,11 @@ pub fn cameraOcclusionHeightfields(
         const sy = pivot_y + dy * s;
         const sz = pivot_z + dz * s;
         const surf = heightfieldSurfaceAt(sx, sz) orelse continue;
+        // A surface well above the player-side pivot is a ceiling/roof the
+        // player is UNDER — skip it, or it caps the eye right at the pivot and
+        // slams the camera into the player (req_0938). Floors (≤ ~head height)
+        // still cap so the eye never clips down through the ground/a ramp.
+        if (surf.height > pivot_y + CAMERA_HEIGHTFIELD_CEILING_CLEARANCE_METERS) continue;
         if (surf.height + margin >= sy) return segment_len * s;
     }
     return 0;
@@ -1355,7 +1391,14 @@ pub fn step(input: []const f32) ?[]f32 {
     px += pvx * dt;
     py += pvy * dt;
     pz += pvz * dt;
+    // Stairlog capture: where the integrator WANTED to land this frame, before
+    // any collision response. Compared against the final position below to see
+    // which branch (rect side-push vs. heightfield move-cancel) eats the move.
+    const desired_px = px;
+    const desired_pz = pz;
     collideSolidRects(&px, py, &pz, &pvx, &pvz, player_radius, player_height, rects, oriented, @max(wall_restitution, player_surface_restitution * 0.15), step_height, walkable_side_push_grace);
+    const rect_push_x = px - desired_px; // how far the rect/oriented side-push pulled us off the desired path
+    const rect_push_z = pz - desired_pz;
     var next_ground_y = groundAt(rects, oriented, px, pz, py, step_height);
     // Terrain hit detection on the real slope. The slope LIMIT is enforced by the
     // surface normal, not the step height: a single frame only nudges the player a
@@ -1367,6 +1410,10 @@ pub fn step(input: []const f32) ?[]f32 {
     //   • too-steep surface at/below the feet: stand on it (sidehill / descend,
     //     no fall-through) but you still can't gain height on it.
     // So the only way UP a steep cone is the gently-graded trail cut into it.
+    var hf_cancel = false; // stairlog: did the too-steep-terrain move-cancel fire?
+    var hf_height: f32 = 0;
+    var hf_normal_y: f32 = 0;
+    var hf_walk_cos: f32 = 0;
     if (heightfieldSurfaceAt(px, pz)) |s| {
         const walkable = s.normal_y >= s.walk_cos;
         if (!walkable and s.height > py + 0.02) {
@@ -1374,6 +1421,10 @@ pub fn step(input: []const f32) ?[]f32 {
             pz = prev_pz;
             pvx = 0;
             pvz = 0;
+            hf_cancel = true;
+            hf_height = s.height;
+            hf_normal_y = s.normal_y;
+            hf_walk_cos = s.walk_cos;
         }
     }
     next_ground_y = @max(next_ground_y, heightfieldFloorAt(px, pz, py, step_height));
@@ -1390,6 +1441,30 @@ pub fn step(input: []const f32) ?[]f32 {
         py = next_ground_y;
         pvy = 0;
         player_grounded = true;
+    }
+
+    // Stairlog (RJIT_STAIRLOG=1): one line per frame the player is actually
+    // trying to move. `want` is the horizontal distance the integrator asked
+    // for this frame; `moved` is what survived collision. When want is real but
+    // moved collapses to ~0 we tag "<< BLOCKED" and the columns say which branch
+    // ate it: rectpush=(...) means a solid rect/oriented wall side-pushed us;
+    // hfcancel=true means the too-steep heightfield (stair/cone face) cancelled
+    // the move, with hf(h=surface height, ny=normal.y, walkcos=climb limit).
+    // This is how the user proves "holding W into an invisible wall at the stair
+    // top": expect a run of BLOCKED frames with one branch flagged.
+    if (stairlogOn()) {
+        const intent_mag = @sqrt(move_x * move_x + move_z * move_z);
+        if (intent_mag > 0.01) {
+            g_stairlog_frame += 1;
+            const dx = px - prev_px;
+            const dz = pz - prev_pz;
+            const moved = @sqrt(dx * dx + dz * dz);
+            const wdx = desired_px - prev_px;
+            const wdz = desired_pz - prev_pz;
+            const want = @sqrt(wdx * wdx + wdz * wdz);
+            const blocked = want > 0.0005 and moved < want * 0.3;
+            std.debug.print("[stairlog f{d}] intent=({d:.2},{d:.2}) pos=({d:.2},{d:.2},{d:.2}) want={d:.3} moved={d:.3} vel=({d:.2},{d:.2},{d:.2}) grounded={} rectpush=({d:.3},{d:.3}) hfcancel={} hf(h={d:.2} ny={d:.2} walkcos={d:.2}) {s}\n", .{ g_stairlog_frame, move_x, move_z, px, py, pz, want, moved, pvx, pvy, pvz, player_grounded, rect_push_x, rect_push_z, hf_cancel, hf_height, hf_normal_y, hf_walk_cos, if (blocked) "<< BLOCKED" else "" });
+        }
     }
 
     var at: usize = OUTPUT_HEADER_FLOATS;
