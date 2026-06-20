@@ -441,6 +441,43 @@ test "head bonk: jumping into a ceiling caps the head and keeps horizontal speed
     try testing.expectEqual(@as(f32, 1), out[7]); // falls back and lands
 }
 
+test "head bonk: a low floor above the ground never drops the feet through it" {
+    // The head-bonk seats the head under an overhead slab — but a landing floor at
+    // the TOP of a staircase has its underside ABOVE your head while you climb, so
+    // ceiling - height lands BELOW the surface you stand on. Naively seating the
+    // head there pushed the feet through the steps (fly through the staircase,
+    // stuck under the floor). The clamp is bounded by the ground support, so the
+    // feet never sink below it. Jump in place on the heightfield (x fixed = stays
+    // on the 3x3 grid) under a low slab and assert the feet hold the surface.
+    registerSlope(0.6); // heightfield rising +x; at x=1 the surface is 0.2
+    defer physics.clearHeightfields();
+    const surface_y: f32 = 0.2;
+    // Slab underside at 1.0: ceiling - height = -0.7, far below the 0.2 support —
+    // exactly the case that used to yank the feet underground.
+    const landing = [physics.RECT_FLOATS]f32{ -2, -2, 5, 5, 1.2, 1, 0.5, 0, 1.0 };
+    var sim = Sim{
+        .dt = 0.016,
+        .jump = true,
+        .jump_speed = 5,
+        .gravity = 10,
+        .px = 1.0,
+        .py = surface_y,
+        .pz = 1.0,
+        .player_height = 1.7,
+        .rects = &.{landing},
+    };
+    var out = physics.step(sim.pack(&g_buf)).?;
+    sim.jump = false;
+    var frames: usize = 0;
+    while (frames < 120) : (frames += 1) {
+        sim.py = out[2];
+        sim.pvy = out[5];
+        out = physics.step(sim.pack(&g_buf)).?;
+        // Feet never sink below the surface they stand on (no fly-through).
+        try testing.expect(out[2] >= surface_y - 0.05);
+    }
+}
+
 // ── heightfield ──────────────────────────────────────────────────────
 
 // A 3×3 grid sloping up +x at 0.2/m: column heights 0, 0.2, 0.4.

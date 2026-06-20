@@ -1469,7 +1469,16 @@ pub fn step(input: []const f32) ?[]f32 {
     if (pvy > 0) {
         const ceiling = ceilingUndersideAt(rects, oriented, px, pz, player_radius, py, py + player_height);
         if (ceiling < py + player_height) {
-            py = ceiling - player_height;
+            // Clamp the head under the ceiling, but NEVER below the ground holding
+            // the feet up. A landing floor at the TOP of a staircase has its
+            // underside above your head while you climb — naively seating the head
+            // at it (py = ceiling - height) drops the feet through the steps and
+            // pins you under the floor. When there isn't headroom you're climbing
+            // ONTO that slab, not under a roof: stay on the support and let the
+            // step-up mount you (slope-walkable already skips the side-push there).
+            const support = @max(groundAt(rects, oriented, px, pz, py, step_height), heightfieldFloorAt(px, pz, py, step_height));
+            const limit = @max(ceiling - player_height, support);
+            if (limit < py) py = limit;
             pvy = 0;
         }
     }
