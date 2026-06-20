@@ -36,7 +36,7 @@ import { chordHintFor } from '../../controls';
 import { KeyLegend } from '../../KeyLegend';
 import { loadKeybinds } from '../../keybinds';
 import { HotkeysPanel } from './dialogs/HotkeysPanel';
-import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, centerMesh, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, newConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from '../editMesh';
+import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, centerMesh, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, newConcaveFaces, fitWheelCenter, addTextureSlot, assignFacesToSlot, clearFaceSlot, facesInSlot, slotOfFace, renameSlot, removeSlot, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from '../editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from '../anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from '../wheelMount';
 import { useStudioModel, type StudioModel, type StudioPart } from '../studioModel';
@@ -203,6 +203,18 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // bd.id — which is what was leaving the image offset/reshaped after an update
   // (req_1444: "just play it dumb, on updates unmount and remount it").
   const mountEpoch = useRef(Math.floor(nowMs())).current;
+  // BACKDROP RESET DIAGNOSTIC (req_1541): the trace image resets on a .ts hot reload
+  // but not a .tsx one. Theory: a .ts reload RE-MOUNTS StudioViewport, minting a new
+  // mountEpoch, which rotates every backdrop slot/version/texture key → the host
+  // re-bakes the image (the reset). A .tsx reload renders in place (same epoch → no
+  // re-bake). Trace mount/unmount with the epoch so a .ts edit prints a NEW epoch and
+  // a .tsx edit prints nothing — and mirror the epoch into an on-screen readout below
+  // (cart console may not reach the terminal). REMOVE once root-caused.
+  useEffect(() => {
+    console.warn(`[bd-diag] StudioViewport MOUNT epoch=${mountEpoch}`);
+    return () => console.warn(`[bd-diag] StudioViewport UNMOUNT epoch=${mountEpoch}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [backdrops, setBackdropsState] = useState<Backdrop[]>(() => localstore.getJson<Backdrop[]>(BACKDROPS_KEY, []));
   const setBackdrops = (u: Backdrop[] | ((p: Backdrop[]) => Backdrop[])) =>
     setBackdropsState((prev) => { const next = typeof u === 'function' ? (u as (p: Backdrop[]) => Backdrop[])(prev) : u; localstore.setJson(BACKDROPS_KEY, next); return next; });
@@ -634,6 +646,17 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // stays previewed (the draft) so the offender is visible — and the user chooses:
   // Split Quads (recommended) / Ignore (keep it concave) / Revert (drop the edit).
   const [autoFix, setAutoFix] = useState<null | { partId: string; mesh: EditMesh; count: number }>(null);
+  // TEXTURE SLOTS (req_1542): rename drafts keyed by slot id, committed on submit so
+  // a rename isn't an undo entry per keystroke (the FacePainter sign-text pattern).
+  const [slotDrafts, setSlotDrafts] = useState<Record<string, string>>({});
+  // Declare the current face selection as a new texture slot (a re-skinnable surface
+  // the cook carries → the iso editor skins). Auto-named; rename inline. Selects it.
+  const newSlotFromSelection = () => {
+    if (!activePart || selMode !== 'face' || sel.faces.size === 0) return;
+    const n = (activePart.mesh.slots?.length ?? 0) + 1;
+    const { mesh } = addTextureSlot(activePart.mesh, `surface ${n}`, sel.faces);
+    props.onEditMesh(activePart.id, mesh);
+  };
   const resolveAutoFix = (action: 'split' | 'ignore' | 'revert') => {
     setAutoFix((af) => {
       if (af) {
@@ -2257,6 +2280,21 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         </Box>
       ) : null}
 
+      {/* BACKDROP RESET DIAGNOSTIC (req_1541): on-screen so you can WATCH it change.
+          Shows the live mountEpoch + each backdrop's host slot / version / texture key
+          / pos. Edit a .ts file → if epoch changes, the viewport re-mounted (that's the
+          reset). Edit a .tsx file → epoch should hold. REMOVE once root-caused. */}
+      {backdrops.length > 0 ? (
+        <Box style={{ position: 'absolute', left: 8, bottom: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#1a0b20ee', borderWidth: 1, borderColor: '#9b7fd6', zIndex: Z.floating, pointerEvents: 'none' }}>
+          <Text fontSize={10} color="#e0c4ff" style={{ fontFamily: 'monospace', fontWeight: '800' }}>{`bd-diag · epoch=${mountEpoch}`}</Text>
+          {backdrops.map((b, i) => (
+            <Text key={b.id} fontSize={9} color="#b79fd6" style={{ fontFamily: 'monospace' }}>
+              {`slot studio.bd${i} v=${mountEpoch} · tex=studio.backdrop.${b.id}.${mountEpoch} · pos=[${b.pos.map((n) => n.toFixed(2)).join(', ')}]`}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+
       {/* Live drag readout (req_1024): floats by the gizmo anchor while dragging so
           the step amount can be read off and mirrored on the other side. */}
       {gizmoReadout ? (() => {
@@ -2608,6 +2646,64 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                       style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c6a4a' }}
                     >
                       <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>⊚ wheel from face</Text>
+                    </Pressable>
+                  ) : null}
+                </>
+              );
+            })() : null}
+            {/* TEXTURE SLOTS (req_1542): declare the selected face(s) as a named
+                re-skinnable surface. The slot rides the cook, so the iso build
+                editor exposes it as a texture target (skin it with any shader/image)
+                — the per-face texture placement now reaches mesh-editor props, not
+                just paint mode. Shown in face mode whenever there's a selection to
+                slot OR slots to manage; "pick" reselects a slot's faces to see it. */}
+            {selMode === 'face' && activePart && ((activePart.mesh.slots?.length ?? 0) > 0 || sel.faces.size > 0) ? (() => {
+              const slots = activePart.mesh.slots ?? [];
+              const faceList = [...sel.faces];
+              const selSlot = faceList.length ? slotOfFace(activePart.mesh, faceList[0]) : null;
+              return (
+                <>
+                  <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
+                  <Text fontSize={9} color={T.dim} style={{ width: '100%', fontFamily: 'monospace' }}>texture slots</Text>
+                  {/* new slot from the current face selection */}
+                  <Pressable
+                    onPress={newSlotFromSelection}
+                    tooltip="Declare the selected face(s) as a new texture slot — a re-skinnable surface the cook carries, so the iso build editor can drop any texture/shader on it"
+                    style={{ ...STEP_BTN, opacity: faceList.length ? 1 : 0.45, backgroundColor: '#1a2740', borderColor: '#3a6a9a' }}
+                  >
+                    <Text fontSize={10} color="#9fcfff" style={{ fontFamily: 'monospace' }}>+ slot from selection</Text>
+                  </Pressable>
+                  {slots.map((s) => {
+                    const count = facesInSlot(activePart.mesh, s.id).length;
+                    const isSel = selSlot === s.id && faceList.length > 0;
+                    return (
+                      <Row key={s.id} style={{ width: '100%', gap: 3, alignItems: 'center' }}>
+                        <TextInput
+                          text={slotDrafts[s.id] ?? s.label}
+                          onChangeText={(v: string) => setSlotDrafts((d) => ({ ...d, [s.id]: v }))}
+                          onSubmitEditing={() => { props.onEditMesh(activePart.id, renameSlot(activePart.mesh, s.id, slotDrafts[s.id] ?? s.label)); setSlotDrafts((d) => { const n = { ...d }; delete n[s.id]; return n; }); }}
+                          style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: isSel ? '#7dd3fc' : '#2c4a6a', borderRadius: 3, paddingLeft: 5, paddingRight: 4, paddingTop: 2, paddingBottom: 2, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
+                        />
+                        <Text fontSize={8} color={T.dim} style={{ fontFamily: 'monospace' }}>{`${count}f`}</Text>
+                        {/* pick — reselect this slot's faces so you SEE what it covers */}
+                        <Pressable onPress={() => setSel({ verts: new Set(), edges: new Set(), faces: new Set(facesInSlot(activePart.mesh, s.id)) })} tooltip={`Select the ${count} face(s) in "${s.label}"`} style={{ ...STEP_BTN, paddingLeft: 5, paddingRight: 5 }}>
+                          <Icon name="MousePointerClick" size={11} color={T.dim} />
+                        </Pressable>
+                        {/* add — assign the current selection to this slot */}
+                        <Pressable onPress={() => { if (faceList.length) props.onEditMesh(activePart.id, assignFacesToSlot(activePart.mesh, sel.faces, s.id)); }} tooltip="Add the selected face(s) to this slot" style={{ ...STEP_BTN, opacity: faceList.length ? 1 : 0.45, paddingLeft: 5, paddingRight: 5 }}>
+                          <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>+</Text>
+                        </Pressable>
+                        {/* delete the slot (faces lose membership, later slots re-key) */}
+                        <Pressable onPress={() => props.onEditMesh(activePart.id, removeSlot(activePart.mesh, s.id))} tooltip={`Delete the "${s.label}" slot (its faces become unslotted)`} style={{ ...STEP_BTN, paddingLeft: 5, paddingRight: 5, borderColor: '#a14545' }}>
+                          <Text fontSize={10} color="#f0a0a0" style={{ fontFamily: 'monospace' }}>×</Text>
+                        </Pressable>
+                      </Row>
+                    );
+                  })}
+                  {/* clear — drop the selection's slot membership without deleting a slot */}
+                  {selSlot ? (
+                    <Pressable onPress={() => props.onEditMesh(activePart.id, clearFaceSlot(activePart.mesh, sel.faces))} tooltip="Remove the selected face(s) from their slot (back to unslotted)" style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
+                      <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>unslot selection</Text>
                     </Pressable>
                   ) : null}
                 </>

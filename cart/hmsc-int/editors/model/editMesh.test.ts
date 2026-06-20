@@ -6,6 +6,7 @@ import { assert, assertClose, assertEqual, finish, test } from '../../game/_test
 import {
   addMount, addMountReflections, updateMountMirrored, bevelEdge, bevelVertex, connectVerts, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag, icosphere, sphere, ICOSPHERE_SUBDIV_MAX,
   bridgeEdges, centerMesh, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, newConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
+  addTextureSlot, assignFacesToSlot, clearFaceSlot, facesInSlot, slotOfFace, renameSlot, removeSlot, slotIndexById,
   flipFace, mergeFaces, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel, validateMesh, meshHealth,
   type EditMesh, type MountPoint, type V3,
@@ -372,6 +373,46 @@ test('dragging a corner inward buckles a cube face → the guard detects it (req
   assert(findConcaveFaces(buckled).length > 0, 'the buckled quad is flagged concave (the alert would fire)');
   // and Split Quads clears it (the recommended resolution).
   assertEqual(findConcaveFaces(splitConcaveFaces(buckled)).length, 0, 'Split Quads resolves every offender');
+});
+
+test('texture slots: author named face groups, membership survives a loop cut (req_1542)', () => {
+  const box = cuboid(2, 2, 2); // 6 faces, no slots
+  assert(box.slots === undefined, 'a fresh part has no slots');
+  // declare a slot from faces [0,1] and a second from [2].
+  const a = addTextureSlot(box, 'Screen', [0, 1]);
+  assertEqual(a.id, 'screen', 'the slot id is the slugged label');
+  const b = addTextureSlot(a.mesh, 'Trim', [2]);
+  assertEqual(b.mesh.slots!.length, 2, 'two slots declared');
+  assert(facesInSlot(b.mesh, 'screen').length === 2 && facesInSlot(b.mesh, 'trim').length === 1, 'faces routed to the right slots');
+  assertEqual(slotOfFace(b.mesh, 0), 'screen', 'face 0 reports its slot id');
+  assertEqual(slotOfFace(b.mesh, 5), null, 'an unassigned face has no slot');
+  // a duplicate label gets a distinct id; reassigning a face MOVES it between slots.
+  const c = addTextureSlot(b.mesh, 'Screen');
+  assertEqual(c.id, 'screen-2', 'a colliding label is suffixed');
+  const moved = assignFacesToSlot(c.mesh, [0], 'trim');
+  assertEqual(slotOfFace(moved, 0), 'trim', 'reassigning moves the face to the new slot');
+  // clearing drops membership.
+  assertEqual(slotOfFace(clearFaceSlot(moved, [1]), 1), null, 'cleared face leaves its slot');
+  // membership rides through a loop cut (face.material is carried by the split).
+  const cut = loopCut(b.mesh, 0, 1, 0.5);
+  assert(facesInSlot(cut, 'screen').length >= 2, 'the cut preserves slot membership (material rides the split)');
+});
+
+test('removeSlot re-keys faces so later slots stay aligned (req_1542)', () => {
+  const box = cuboid(2, 2, 2);
+  const a = addTextureSlot(box, 'A', [0]);
+  const b = addTextureSlot(a.mesh, 'B', [1]);
+  const c = addTextureSlot(b.mesh, 'C', [2]);
+  // remove the MIDDLE slot — A keeps its face, C shifts down one index but keeps its face.
+  const out = removeSlot(c.mesh, 'b');
+  assertEqual(slotIndexById(out, 'a'), 0, 'A stays at index 0');
+  assertEqual(slotIndexById(out, 'b'), -1, 'B is gone');
+  assertEqual(slotIndexById(out, 'c'), 1, 'C shifted to index 1');
+  assertEqual(slotOfFace(out, 0), 'a', 'A face intact');
+  assertEqual(slotOfFace(out, 2), 'c', 'C face still resolves after the re-key');
+  assertEqual(slotOfFace(out, 1), null, 'the removed slots face lost its membership');
+  // rename keeps the id (the skin-event key) stable.
+  assertEqual(slotOfFace(renameSlot(out, 'c', 'Ceiling'), 2), 'c', 'rename keeps the id stable');
 });
 
 test('centerMesh drops the bounds center on the origin + carries pivot/mounts (req_1538)', () => {

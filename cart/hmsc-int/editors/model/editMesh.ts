@@ -114,6 +114,22 @@ export type EditMesh = {
    *  ABSENT = the live bounds center (`pivotOf`); once SET it is STICKY —
    *  geometry edits (translate/scale/the gizmo) never move it, like `uv`. */
   pivot?: V3;
+  /** TEXTURE SLOTS (req_1542) — named groups of faces declared as re-skinnable
+   *  surfaces. A face joins a slot via its `material` index = position in THIS
+   *  table (slot 0 = first entry); a face with no `material` belongs to no slot.
+   *  Authored in the Studio rig menu; carried through the cook so the iso editor
+   *  exposes each slot as a texture target (the prop-part re-skin flow). Absent =
+   *  the part has no declared slots (renders/behaves exactly as before). */
+  slots?: TextureSlot[];
+};
+
+/** One named re-skinnable surface on a part (req_1542). The face set is implicit:
+ *  every face whose `material` indexes this slot's position in `mesh.slots`. */
+export type TextureSlot = {
+  /** stable id within the part — the key the cook + `partTextures` skin events use. */
+  id: string;
+  /** human label shown in the rig panel + the iso FacePainter row ('Screen', 'Trim'). */
+  label: string;
 };
 
 /** Does a `plug` seat into a `socket`? Type must match; if both declare a size,
@@ -1962,6 +1978,104 @@ export function facesWithTag(m: EditMesh, tag: number): number[] {
 export function clearFaceTags(m: EditMesh): EditMesh {
   if (!m.faces.some((f) => f.tag !== undefined)) return m;
   return { ...m, faces: m.faces.map((f) => (f.tag === undefined ? f : { ...f, tag: undefined })) };
+}
+
+// ── Texture slots: named re-skinnable face groups (req_1542) ──────────────────
+// A slot is a NAME in `mesh.slots`; a face joins it via `face.material` = the
+// slot's index in that table. `material` already rides every topology edit
+// (cut/extrude/bevel carry it), so slot membership survives edits for free. These
+// pure helpers are the authoring surface (the Studio rig panel) AND the cook reads
+// `face.material` to group triangles per slot. All return the input unchanged when
+// they would be a no-op (stable identity for memoised previews).
+
+function slugifySlot(s: string): string {
+  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** A slot id unique within the part: the label slugged, else `slot`, suffixed on
+ *  collision. Stable so re-adding the same label twice yields distinct ids. */
+function uniqueSlotId(slots: readonly TextureSlot[], label: string): string {
+  const taken = new Set(slots.map((s) => s.id));
+  const base = slugifySlot(label) || 'slot';
+  if (!taken.has(base)) return base;
+  let i = 2;
+  while (taken.has(`${base}-${i}`)) i += 1;
+  return `${base}-${i}`;
+}
+
+/** The index of a slot id in the table, or -1. (Faces store this index in `material`.) */
+export function slotIndexById(m: EditMesh, id: string): number {
+  return (m.slots ?? []).findIndex((s) => s.id === id);
+}
+
+/** Append a named texture slot, optionally assigning a face selection to it at once.
+ *  Returns the new mesh + the created slot's id (callers select it after). Pure. */
+export function addTextureSlot(m: EditMesh, label: string, faces?: Iterable<number>): { mesh: EditMesh; id: string } {
+  const slots = m.slots ?? [];
+  const id = uniqueSlotId(slots, label);
+  let out: EditMesh = { ...m, slots: [...slots, { id, label: label.trim() || id }] };
+  if (faces) out = assignFacesToSlot(out, faces, id);
+  return { mesh: out, id };
+}
+
+/** Assign a face selection to a slot (sets each face's `material` to the slot index). */
+export function assignFacesToSlot(m: EditMesh, faces: Iterable<number>, id: string): EditMesh {
+  const idx = slotIndexById(m, id);
+  if (idx < 0) return m;
+  const set = faces instanceof Set ? faces : new Set(faces);
+  if (set.size === 0) return m;
+  return { ...m, faces: m.faces.map((f, i) => (set.has(i) && f.material !== idx ? { ...f, material: idx } : f)) };
+}
+
+/** Remove a face selection from whatever slot it's in (drops `material`). */
+export function clearFaceSlot(m: EditMesh, faces: Iterable<number>): EditMesh {
+  const set = faces instanceof Set ? faces : new Set(faces);
+  if (set.size === 0) return m;
+  let touched = false;
+  const out = m.faces.map((f, i) => {
+    if (set.has(i) && f.material !== undefined) { touched = true; const { material, ...rest } = f; void material; return rest; }
+    return f;
+  });
+  return touched ? { ...m, faces: out } : m;
+}
+
+/** The slot id a face belongs to, or null (no slot / a dangling out-of-range index). */
+export function slotOfFace(m: EditMesh, faceIndex: number): string | null {
+  const f = m.faces[faceIndex];
+  if (!f || f.material === undefined) return null;
+  return m.slots?.[f.material]?.id ?? null;
+}
+
+/** The face indices that belong to a slot. */
+export function facesInSlot(m: EditMesh, id: string): number[] {
+  const idx = slotIndexById(m, id);
+  if (idx < 0) return [];
+  const out: number[] = [];
+  m.faces.forEach((f, i) => { if (f.material === idx) out.push(i); });
+  return out;
+}
+
+/** Rename a slot's label; the id (the skin-event key) stays stable. */
+export function renameSlot(m: EditMesh, id: string, label: string): EditMesh {
+  const slots = m.slots ?? [];
+  if (!slots.some((s) => s.id === id)) return m;
+  return { ...m, slots: slots.map((s) => (s.id === id ? { ...s, label: label.trim() || s.label } : s)) };
+}
+
+/** Remove a slot AND re-key faces: members of the removed slot lose their `material`;
+ *  members of later slots shift down by one so indices stay aligned to the table. */
+export function removeSlot(m: EditMesh, id: string): EditMesh {
+  const slots = m.slots ?? [];
+  const idx = slots.findIndex((s) => s.id === id);
+  if (idx < 0) return m;
+  const nextSlots = slots.filter((_, i) => i !== idx);
+  const faces = m.faces.map((f) => {
+    if (f.material === undefined) return f;
+    if (f.material === idx) { const { material, ...rest } = f; void material; return rest; }
+    if (f.material > idx) return { ...f, material: f.material - 1 };
+    return f;
+  });
+  return { ...m, slots: nextSlots.length ? nextSlots : undefined, faces };
 }
 
 // ── Delete: drop faces (or faces touching an edge/vertex selection) (req_1020) ──
