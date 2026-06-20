@@ -10,6 +10,7 @@
 import type { GameState } from '../design';
 import { mix, unit } from '../game/kinds/scatter';
 import { eachPaintedCell, type GrassInstances } from './grassPopulation';
+import { editorTunables } from '../editors/tunables';
 
 const STRIDE = 12; // pos3 | rot3 (pitch,yaw,roll) | scale3 | rootColor3 — the foliage row
 
@@ -48,6 +49,25 @@ const PALM_KIND_DENSITY: Readonly<Record<string, PalmDensity>> = {
   palm: 'med',
   palmDense: 'dense',
 };
+
+// P2 SETTINGS registry (req_1469): expose the palm-grove tunables on /settings so
+// the per-tile spawn chance, trunk size, and crown shape are slider-controlled. The
+// bake folds these overrides over the defaults (bakeGameFile applyOverrides), so a
+// compile picks up whatever the user tuned — no second copy. Twin of grass/bush.
+const PALM_TUNABLE_SPECS = {
+  'density.sparse': { label: 'sparse chance /cell', min: 0, max: 1, step: 0.01, precision: 2 },
+  'density.med': { label: 'grove chance /cell', min: 0, max: 1, step: 0.01, precision: 2 },
+  'density.dense': { label: 'wall chance /cell', min: 0, max: 1, step: 0.01, precision: 2 },
+  'trunkHeight.min': { label: 'trunk min (m)', min: 1, max: 20, step: 0.1, precision: 1 },
+  'trunkHeight.max': { label: 'trunk max (m)', min: 1, max: 24, step: 0.1, precision: 1 },
+  'trunkRadius.min': { label: 'trunk thin (m)', min: 0.05, max: 1, step: 0.01, precision: 2 },
+  'trunkRadius.max': { label: 'trunk thick (m)', min: 0.05, max: 1.5, step: 0.01, precision: 2 },
+  'fronds.min': { label: 'crown min fronds', min: 3, max: 40, step: 1, precision: 0 },
+  'fronds.max': { label: 'crown max fronds', min: 3, max: 48, step: 1, precision: 0 },
+  'frondLen.min': { label: 'frond min (m)', min: 0.5, max: 10, step: 0.1, precision: 1 },
+  'frondLen.max': { label: 'frond max (m)', min: 0.5, max: 12, step: 0.1, precision: 1 },
+} as const;
+editorTunables().register({ system: 'palm', route: 'render3d/palmPopulation', table: PALM_CONFIG, specs: PALM_TUNABLE_SPECS });
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
