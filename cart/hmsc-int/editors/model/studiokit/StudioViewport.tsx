@@ -2238,12 +2238,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       {/* Live drag readout (req_1024): floats by the gizmo anchor while dragging so
           the step amount can be read off and mirrored on the other side. */}
       {gizmoReadout ? (() => {
-        const anchor = lc ? lcGizmoAnchor : selMode === 'rig' ? rigAnchorWorld : gizmoAnchorWorld;
+        // Anchor to the BACKDROP while moving one (its gizmo is the live handle then,
+        // and the model gizmo is hidden) — otherwise the readout floated at the model
+        // and sat ON TOP of the backdrop arrows. pointerEvents:'none' so the readout
+        // can never eat the drag (the "tooltip blocks the gizmo, can't move" bug, req_1537).
+        const anchor = moveBackdrop ? (moveBackdrop.pos as MV3) : lc ? lcGizmoAnchor : selMode === 'rig' ? rigAnchorWorld : gizmoAnchorWorld;
         if (!anchor) return null;
         const p = makeProjector(camSnap())(anchor);
         if (!p.front) return null;
         return (
-          <Box style={{ position: 'absolute', left: p.x + 14, top: p.y - 34, paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#5b8fd6', zIndex: Z.floating }}>
+          <Box style={{ position: 'absolute', left: p.x + 14, top: p.y - 34, paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#5b8fd6', zIndex: Z.floating, pointerEvents: 'none' }}>
             <Text fontSize={11} color="#cfe2ff" style={{ fontFamily: 'monospace', fontWeight: '800' }}>{gizmoReadout}</Text>
           </Box>
         );

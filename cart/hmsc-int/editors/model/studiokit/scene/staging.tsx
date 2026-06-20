@@ -78,7 +78,7 @@ export function DragReadout(props: { textRef: { current: string | null }; anchor
   const p = makeProjector(props.camSnap())(anchor);
   if (!p.front) return null;
   return (
-    <Box style={{ position: 'absolute', left: p.x + 14, top: p.y - 34, paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#5b8fd6' }}>
+    <Box style={{ position: 'absolute', left: p.x + 14, top: p.y - 34, paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#5b8fd6', pointerEvents: 'none' }}>
       <Text fontSize={11} color="#cfe2ff" style={{ fontFamily: 'monospace', fontWeight: '800' }}>{text}</Text>
     </Box>
   );
