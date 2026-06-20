@@ -1060,10 +1060,19 @@ fn clampUphillSurfaceSpeed(vx: *f32, vz: *f32, x: f32, z: f32, y: f32, step_heig
     const next_z = z + vz.* * dt;
     const next_surface = heightfieldGroundSurfaceAt(next_x, next_z, y, step_height) orelse return;
     if (next_surface.height <= surface.height) return;
-    const horizontal_delta = horizontal_speed * dt;
-    if (horizontal_delta <= 0.0001) return;
-    const slope_along = (next_surface.height - surface.height) / horizontal_delta;
-    const max_horizontal = max_surface_speed / @sqrt(1 + slope_along * slope_along);
+    // Cap uphill speed by the surface GRADIENT (its up-normal), NOT by a finite
+    // difference over the player's own displacement. The old form divided the
+    // height rise by horizontal_speed*dt — so as the clamp slowed the player the
+    // *same* rise read as an ever-steeper slope, clamping harder: a positive-
+    // feedback death spiral that pinned the player at a stair crest (a tiny top-
+    // step lip, read as near-vertical, froze them with full forward intent —
+    // RJIT_STAIRLOG showed integ=2.4 collapsing to clamp=0.01). normal_y already
+    // encodes the true grade independent of speed: a surface with up-normal ny
+    // admits at most max_surface_speed*ny of horizontal travel (ny→1 flat = no
+    // cap; ny small = steep = slow), and it never collapses to zero, so a walk
+    // DOWN a staircase crest stays smooth.
+    const ny = clamp(next_surface.normal_y, 0.05, 1);
+    const max_horizontal = max_surface_speed * ny;
     if (horizontal_speed <= max_horizontal) return;
     const scale = max_horizontal / horizontal_speed;
     vx.* *= scale;
