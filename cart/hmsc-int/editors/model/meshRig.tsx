@@ -55,25 +55,25 @@ export function pickRigHandle(pivotW: V3 | null, joints: { name: string; pos: V3
 // ── overlay drawing ──────────────────────────────────────────────────────────
 
 function Ball(props: { x: number; y: number; r: number; color: string; hollow?: boolean }) {
-  return <Box style={{ position: 'absolute', left: props.x - props.r, top: props.y - props.r, width: props.r * 2, height: props.r * 2, borderRadius: props.r, backgroundColor: props.hollow ? '#0b1320cc' : props.color, borderWidth: 2, borderColor: props.color }} />;
+  return <Box style={{ position: 'absolute', left: props.x - props.r, top: props.y - props.r, width: props.r * 2, height: props.r * 2, borderRadius: props.r, backgroundColor: props.hollow ? '#0b1320cc' : props.color, borderWidth: 2, borderColor: props.color, pointerEvents: 'none' }} />;
 }
 
 // a FIXED-marker glyph (a hollow square) — reads as "doesn't rotate", vs Ball's
 // round joint handle. Used for anchors (seats / cargo slots, req_1244).
 function Square(props: { x: number; y: number; r: number; color: string }) {
-  return <Box style={{ position: 'absolute', left: props.x - props.r, top: props.y - props.r, width: props.r * 2, height: props.r * 2, borderRadius: 2, backgroundColor: '#0b1320cc', borderWidth: 2, borderColor: props.color }} />;
+  return <Box style={{ position: 'absolute', left: props.x - props.r, top: props.y - props.r, width: props.r * 2, height: props.r * 2, borderRadius: 2, backgroundColor: '#0b1320cc', borderWidth: 2, borderColor: props.color, pointerEvents: 'none' }} />;
 }
 
 function Line(props: { ax: number; ay: number; bx: number; by: number; color: string; thick?: number }) {
   const dx = props.bx - props.ax, dy = props.by - props.ay;
   const len = Math.hypot(dx, dy) || 0.001;
   const t = props.thick ?? 2;
-  return <Box style={{ position: 'absolute', left: (props.ax + props.bx) / 2 - len / 2, top: (props.ay + props.by) / 2 - t / 2, width: len, height: t, borderRadius: t / 2, backgroundColor: props.color, transform: { rotate: Math.atan2(dy, dx) / DEG } }} />;
+  return <Box style={{ position: 'absolute', left: (props.ax + props.bx) / 2 - len / 2, top: (props.ay + props.by) / 2 - t / 2, width: len, height: t, borderRadius: t / 2, backgroundColor: props.color, transform: { rotate: Math.atan2(dy, dx) / DEG }, pointerEvents: 'none' }} />;
 }
 
 function Tag(props: { x: number; y: number; text: string; color: string }) {
   return (
-    <Box style={{ position: 'absolute', left: props.x + 10, top: props.y - 8, paddingLeft: 5, paddingRight: 5, paddingTop: 1, paddingBottom: 1, borderRadius: 4, backgroundColor: '#0b1320e6', borderWidth: 1, borderColor: props.color }}>
+    <Box style={{ position: 'absolute', left: props.x + 10, top: props.y - 8, paddingLeft: 5, paddingRight: 5, paddingTop: 1, paddingBottom: 1, borderRadius: 4, backgroundColor: '#0b1320e6', borderWidth: 1, borderColor: props.color, pointerEvents: 'none' }}>
       <Text fontSize={9} color={props.color} style={{ fontFamily: 'monospace', fontWeight: '700' }}>{props.text}</Text>
     </Box>
   );

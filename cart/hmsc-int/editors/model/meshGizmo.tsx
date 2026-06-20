@@ -219,7 +219,7 @@ function Arm(props: { ax: number; ay: number; bx: number; by: number; color: str
   const dx = props.bx - props.ax, dy = props.by - props.ay;
   const len = Math.hypot(dx, dy) || 0.001;
   const angle = Math.atan2(dy, dx) / DEG;
-  return <Box style={{ position: 'absolute', left: (props.ax + props.bx) / 2 - len / 2, top: (props.ay + props.by) / 2 - GIZMO.shaftThick / 2, width: len, height: GIZMO.shaftThick, borderRadius: GIZMO.shaftThick / 2, backgroundColor: props.color, transform: { rotate: angle } }} />;
+  return <Box style={{ position: 'absolute', left: (props.ax + props.bx) / 2 - len / 2, top: (props.ay + props.by) / 2 - GIZMO.shaftThick / 2, width: len, height: GIZMO.shaftThick, borderRadius: GIZMO.shaftThick / 2, backgroundColor: props.color, transform: { rotate: angle }, pointerEvents: 'none' }} />;
 }
 
 /** An arrowhead at the tip — a chevron of two short lines opening back along the
@@ -237,7 +237,7 @@ function ArrowHead(props: { x: number; y: number; dx: number; dy: number; color:
 
 function Square(props: { x: number; y: number; color: string }) {
   const s = GIZMO.headPx;
-  return <Box style={{ position: 'absolute', left: props.x - s, top: props.y - s, width: s * 2, height: s * 2, borderRadius: 2, backgroundColor: props.color, borderWidth: 1, borderColor: '#0b1320' }} />;
+  return <Box style={{ position: 'absolute', left: props.x - s, top: props.y - s, width: s * 2, height: s * 2, borderRadius: 2, backgroundColor: props.color, borderWidth: 1, borderColor: '#0b1320', pointerEvents: 'none' }} />;
 }
 
 export function TransformGizmo(props: { anchorW: V3; tool: GizmoTool; camSnap: () => CameraSnap; activeAxis?: GizmoHit | null }) {
@@ -266,7 +266,7 @@ export function TransformGizmo(props: { anchorW: V3; tool: GizmoTool; camSnap: (
         }
       }
     }
-    out.push(<Box key="rhub" style={{ position: 'absolute', left: a.x - 3, top: a.y - 3, width: 6, height: 6, borderRadius: 3, backgroundColor: '#cfe2ff' }} />);
+    out.push(<Box key="rhub" style={{ position: 'absolute', left: a.x - 3, top: a.y - 3, width: 6, height: 6, borderRadius: 3, backgroundColor: '#cfe2ff', pointerEvents: 'none' }} />);
     return <>{out}</>;
   }
   for (let axis = 0; axis < 3; axis += 1) {
@@ -289,7 +289,7 @@ export function TransformGizmo(props: { anchorW: V3; tool: GizmoTool; camSnap: (
   out.push(
     <Box
       key="hub"
-      style={{ position: 'absolute', left: a.x - GIZMO.centerPx, top: a.y - GIZMO.centerPx, width: GIZMO.centerPx * 2, height: GIZMO.centerPx * 2, borderRadius: GIZMO.centerPx, backgroundColor: props.tool === 'resize' ? (uActive ? '#ffd24a' : '#bfe6ee') : '#0b1320', borderWidth: 2, borderColor: uActive ? '#ffd24a' : '#cfe2ff' }}
+      style={{ position: 'absolute', left: a.x - GIZMO.centerPx, top: a.y - GIZMO.centerPx, width: GIZMO.centerPx * 2, height: GIZMO.centerPx * 2, borderRadius: GIZMO.centerPx, backgroundColor: props.tool === 'resize' ? (uActive ? '#ffd24a' : '#bfe6ee') : '#0b1320', borderWidth: 2, borderColor: uActive ? '#ffd24a' : '#cfe2ff', pointerEvents: 'none' }}
     />,
   );
   return <>{out}</>;
