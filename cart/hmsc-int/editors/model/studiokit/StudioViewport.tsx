@@ -889,6 +889,22 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       'op.symmetrize': () => opSymmetrize(true),
     },
   });
+  // Pick a paint tool (hotkey or BrushKit) — also drops the faceFill overlay so the
+  // tool actually applies (faceFill is checked before the tool in the press handler).
+  const selectTool = (t: BrushTool) => { setTool(t); setFaceFill(false); };
+  // PAINT tool family hotkeys — a SEPARATE scope, live only while painting, so the
+  // kit's native b/e/l/r/o/i don't collide with the mesh-op letters in 'studio'.
+  useEditorControls('studio-paint', {
+    active: selMode === 'paint',
+    handlers: {
+      'paint.brush': () => selectTool('brush'),
+      'paint.eraser': () => selectTool('eraser'),
+      'paint.line': () => selectTool('line'),
+      'paint.rect': () => selectTool('rect'),
+      'paint.ellipse': () => selectTool('ellipse'),
+      'paint.eyedropper': () => selectTool('eyedropper'),
+    },
+  });
   // Tooltip prefix for a keyed action, read from the LIVE contract so it shows
   // the current (possibly rebound) chord — "F · ", "Ctrl+Z · ", or "" if unbound.
   const keyHint = (action: string, scope: 'studio' | 'bench' = 'studio') => {
@@ -2101,7 +2117,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               brush={brush}
               onBrushChange={setBrush}
               tool={tool}
-              onToolChange={setTool}
+              onToolChange={selectTool}
               palette={kitPalette}
               onPaletteChange={(p) => setPaintRecents(p.recents)}
               theme={PAINT_THEME}
@@ -2974,7 +2990,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       ) : null}
 
       {/* Self-serve rebind panel (req_1433): view + change the Studio shortcuts. */}
-      {hotkeysOpen ? <HotkeysPanel scope="studio" onClose={() => setHotkeysOpen(false)} /> : null}
+      {hotkeysOpen ? <HotkeysPanel scope={selMode === 'paint' ? ['studio', 'studio-paint'] : 'studio'} onClose={() => setHotkeysOpen(false)} /> : null}
     </Pressable>
   );
 }

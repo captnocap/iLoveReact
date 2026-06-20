@@ -36,7 +36,7 @@ import { callHost } from '@reactjit/ffi';
 /** Per-surface activation scope. A scope is a focus world: within it a chord
  *  means ONE thing; across scopes the same key may differ (E orbits the iso
  *  camera, E rotates the canvas brush) because only one is active per press. */
-export type EditorScope = 'canvas' | 'iso-build' | 'bench' | 'studio';
+export type EditorScope = 'canvas' | 'iso-build' | 'bench' | 'studio' | 'studio-paint';
 
 export type EditorBinding = {
   /** dot-namespaced action id, `<concern>.<verb>` (e.g. 'brush.rotate-cw') */
@@ -112,6 +112,18 @@ export const EDITOR_BINDINGS: EditorBinding[] = [
   { action: 'op.detach', scope: 'studio', keys: ['d'], label: 'Detach the selected face(s) into a panel', legend: null },
   { action: 'op.solidify', scope: 'studio', keys: ['o'], label: 'Solidify the selected face(s) in place', legend: null },
   { action: 'op.symmetrize', scope: 'studio', keys: ['y'], label: 'Symmetrize — keep +half, rebuild the mirror', legend: null },
+
+  // ── 'studio-paint' — the PAINT-mode tool family (req_1487) ─────────────────
+  // A DISTINCT focus world, active only while painting, so the kit's native tool
+  // keys (b/e/l/r/o/i — the same everywhere the kit ships) don't collide with the
+  // mesh-op keys that share those letters in the 'studio' scope. Brush size has no
+  // key (the bracket keys aren't valid chords here); the size dial owns it.
+  { action: 'paint.brush', scope: 'studio-paint', keys: ['b'], label: 'Brush tool', legend: null },
+  { action: 'paint.eraser', scope: 'studio-paint', keys: ['e'], label: 'Eraser tool', legend: null },
+  { action: 'paint.line', scope: 'studio-paint', keys: ['l'], label: 'Line tool (hold Shift to snap to 45°)', legend: null },
+  { action: 'paint.rect', scope: 'studio-paint', keys: ['r'], label: 'Rectangle tool (hold Shift for a square)', legend: null },
+  { action: 'paint.ellipse', scope: 'studio-paint', keys: ['o'], label: 'Oval tool (hold Shift for a circle)', legend: null },
+  { action: 'paint.eyedropper', scope: 'studio-paint', keys: ['i'], label: 'Eyedropper — sample a colour off the model', legend: null },
 ];
 
 const ACTION_ID_SHAPE = /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/;
