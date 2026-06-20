@@ -461,6 +461,9 @@ export type LandformField = {
   cell: number;
   heights: number[];
   tiles?: { cols: number; rows: number; idx: number[] };
+  // What GROWS over this landform — separate grass/tree/bush lanes so populations
+  // can stack over the same ground cell.
+  flora?: { cols: number; rows: number; layers: Record<'grass' | 'tree' | 'bush', number[]> };
   // Analytic road ribbon segments over this landform (ROADCURVE-0610), in the
   // tile grid's cell space: 8 floats per segment (ax az bx bz rightExt leftExt
   // twoWay phase — see hmsc-int/roadData roadRibbonSegments). The drape shader

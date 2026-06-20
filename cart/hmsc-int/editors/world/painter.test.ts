@@ -12,7 +12,7 @@
 import { resolvePainterBehavior, painterToolUsable, type PainterBehavior } from '../../painterBehavior';
 import { encodePainterSurface, PAINTER_EMPHASIS_FLOATS } from '../../painterSurface';
 import { makeChunk, CHUNK_TILES } from '../../chunks';
-import { paintFlora, floraKindIndex, FLORA_KINDS } from '../../floraData';
+import { FLORA_KIND_LAYER, FLORA_KINDS, FLORA_LAYERS, paintFlora, floraKindIndex } from '../../floraData';
 import { paintTile, tileKindIndex } from '../../tileData';
 import { paintZoneCell, type ZoneDef } from '../../zoneData';
 import type { Layer, Tool } from '../../PaintCanvas';
@@ -71,7 +71,9 @@ test('PAINTER-0610 + GHOSTROAD-0610: the combined surface buffer emits every sec
   const sidewalk = tileKindIndex('sidewalk');
   paintTile(chunk.tiles, 3, 5, sidewalk);
   const grassMed = floraKindIndex('grassMed');
+  const palmMed = floraKindIndex('palmMed');
   paintFlora(chunk.flora, 4, 6, grassMed);
+  paintFlora(chunk.flora, 4, 6, palmMed);
   paintZoneCell(chunk.zones, 2, 2, 0);
   chunk.height.z[7] = 4.5;
   const zones: ZoneDef[] = [{ id: 'z_1', name: 'Zone 1', color: '#22d3ee', flags: [] }];
@@ -116,11 +118,15 @@ test('PAINTER-0610 + GHOSTROAD-0610: the combined surface buffer emits every sec
   assertEqual(enc[fBase], cols, 'flora cols');
   assertEqual(enc[fBase + 1], rows, 'flora rows');
   assertEqual(enc[fBase + 2], FLORA_KINDS.length, 'flora palette count');
-  const fCellBase = fBase + 3 + FLORA_KINDS.length * 3;
-  assertEqual(enc[fCellBase + 6 * cols + 4], grassMed, 'painted flora cell rides the flora section');
+  assertEqual(enc[fBase + 3], FLORA_LAYERS.length, 'flora layer count');
+  const fCellBase = fBase + 4 + FLORA_KINDS.length * 3;
+  const grassLayer = FLORA_LAYERS.indexOf(FLORA_KIND_LAYER.grassMed);
+  const treeLayer = FLORA_LAYERS.indexOf(FLORA_KIND_LAYER.palmMed);
+  assertEqual(enc[fCellBase + grassLayer * cols * rows + 6 * cols + 4], grassMed, 'painted grass rides the grass flora layer');
+  assertEqual(enc[fCellBase + treeLayer * cols * rows + 6 * cols + 4], palmMed, 'painted tree rides the tree flora layer without clearing grass');
 
   // Water section closes the buffer exactly.
-  const wBase = fCellBase + cols * rows;
+  const wBase = fCellBase + FLORA_LAYERS.length * cols * rows;
   const wcols = enc[wBase]!, wrows = enc[wBase + 1]!;
   assert(wcols > 1 && wrows > 1, 'water grid present');
   assertEqual(enc.length, wBase + 5 + wcols * wrows, 'buffer ends exactly after the water cells — no trailing slack');

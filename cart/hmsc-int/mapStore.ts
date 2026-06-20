@@ -27,7 +27,7 @@
 
 import { encodeGrid, decodeGrid, type RleGrid } from '@reactjit/workspace';
 import { TILE_KINDS } from './world/tileKinds';
-import { FLORA_KINDS } from './floraData';
+import { FLORA_KINDS, FLORA_LAYER_COUNT, FLORA_LAYERS, paintFlora } from './floraData';
 import {
   chunkKey,
   makeChunk,
@@ -51,7 +51,8 @@ import { type GenPoseOverride, type IntersectionControl } from './intersections'
 // A v2 snapshot has no flora grid; on load its population TILES (grass*/palm*/bush)
 // MIGRATE into the flora channel (POP_TILE_TO_FLORA) and the ground under them resets
 // to a plain surface, so existing maps keep their grass/palms over a separable ground.
-const MAP_FORMAT_V = 3;
+// v4 makes flora additive by storing separate grass/tree/bush lanes in that channel.
+const MAP_FORMAT_V = 4;
 
 // v2→v3 migration: a population kind that used to live in the GROUND tile channel maps
 // to its flora kind + the plain ground it should sit on. Names match the saved v2
@@ -130,7 +131,8 @@ interface ChunkSnap {
   height: RleGrid;  // per-sample quantized height (round(z * HEIGHT_Q); 0 = flat)
   zones: RleGrid;   // per-cell index into `zones` list (-1 = unzoned)
   water?: RleGrid;  // per-sample quantized WATER surface level (>0 = wet); absent = dry
-  flora?: RleGrid;  // per-cell index into floraLegend (-1 = none); absent = bare
+  flora?: RleGrid;  // per-cell/layer index into floraLegend (-1 = none); absent = bare
+  floraLayerCount?: number;
 }
 
 export interface MapSnapshot {
@@ -196,8 +198,17 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
     const wq = new Array<number>(wz.length);
     for (let i = 0; i < wz.length; i++) { wq[i] = Math.round(wz[i] * HEIGHT_Q); if (wq[i] !== 0) anyWater = true; }
     // Flora cells (mostly -1/none) → RLE, only when something grows on this chunk.
-    const fidx = Array.from(c.flora.idx);
-    const anyFlora = fidx.some((v) => v >= 0);
+    // Stored by lane so grass + trees + bushes can stack in the same cell.
+    const fidx: number[] = [];
+    let anyFlora = false;
+    for (const layer of FLORA_LAYERS) {
+      const cells = c.flora.layers[layer];
+      for (let i = 0; i < cells.length; i++) {
+        const v = cells[i];
+        fidx.push(v);
+        if (v >= 0) anyFlora = true;
+      }
+    }
     const baseIdx = Array.from(c.tiles.idx);
     if (under && under.size) {
       const cx0 = c.cx * CHUNK_TILES;
@@ -217,7 +228,7 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
       height: encodeGrid(q, c.height.cols, c.height.rows),
       zones: encodeGrid(Array.from(c.zones.idx), c.zones.cols, c.zones.rows),
       ...(anyWater ? { water: encodeGrid(wq, c.water.cols, c.water.rows) } : {}),
-      ...(anyFlora ? { flora: encodeGrid(fidx, c.flora.cols, c.flora.rows) } : {}),
+      ...(anyFlora ? { flora: encodeGrid(fidx, c.flora.cols, c.flora.rows * FLORA_LAYER_COUNT), floraLayerCount: FLORA_LAYER_COUNT } : {}),
     });
   }
   return {
@@ -295,7 +306,7 @@ export function deserializeMap(snap: MapSnapshot): EditorWorld {
       const mig = !hasFloraGrid ? tileMigration[v] : null;
       if (mig) {
         // Pre-flora map: this cell's GROUND tile was a population — split it.
-        c.flora.idx[i] = mig.flora;
+        paintFlora(c.flora, i % c.flora.cols, Math.floor(i / c.flora.cols), mig.flora);
         c.tiles.idx[i] = mig.ground;
       } else {
         c.tiles.idx[i] = remap[v] ?? -1;
@@ -304,9 +315,25 @@ export function deserializeMap(snap: MapSnapshot): EditorWorld {
 
     if (cs.flora) {
       const fflat = decodeGrid(cs.flora);
-      for (let i = 0; i < c.flora.idx.length && i < fflat.length; i++) {
-        const v = fflat[i];
-        c.flora.idx[i] = v == null || v < 0 ? -1 : (floraRemap[v] ?? -1);
+      const cellN = c.flora.cols * c.flora.rows;
+      const layerCount = Math.max(1, cs.floraLayerCount ?? 1);
+      if (layerCount > 1) {
+        for (let li = 0; li < FLORA_LAYERS.length && li < layerCount; li += 1) {
+          const dst = c.flora.layers[FLORA_LAYERS[li]];
+          const offset = li * cellN;
+          for (let i = 0; i < dst.length && offset + i < fflat.length; i++) {
+            const v = fflat[offset + i];
+            dst[i] = v == null || v < 0 ? -1 : (floraRemap[v] ?? -1);
+          }
+        }
+      } else {
+        // v3 single-slot flora: preserve each cell by placing its kind into that
+        // kind's lane. This immediately allows later grass/tree/bush stacking.
+        for (let i = 0; i < cellN && i < fflat.length; i++) {
+          const v = fflat[i];
+          const kind = v == null || v < 0 ? -1 : (floraRemap[v] ?? -1);
+          if (kind >= 0) paintFlora(c.flora, i % c.flora.cols, Math.floor(i / c.flora.cols), kind);
+        }
       }
     }
 

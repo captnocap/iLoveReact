@@ -38,9 +38,9 @@ export interface Chunk {
   // The water layer fills negative terrain to surface 0, so depth is -height at
   // paint time. 0 = dry. Terrain height remains the bed.
   water: HeightField;
-  // What GROWS on each cell — grass blades / palms / bushes (FLORADECOUPLE-0619).
-  // A SEPARATE channel from `tiles` so a population layers over ANY ground surface
-  // (beach grass = sand tile + grass flora). -1 = nothing grows. See floraData.ts.
+  // What GROWS on each cell — grass blades / trees / bushes (FLORADECOUPLE-0619).
+  // A SEPARATE channel from `tiles`, with internal lanes so grass + trees + bushes
+  // can stack over ANY ground surface. See floraData.ts.
   flora: FloraMap;
   zones: ZoneMap;
 }

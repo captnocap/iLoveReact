@@ -26,7 +26,7 @@ import { mix, unit } from '../game/kinds/scatter';
 // as indices into THIS list (PaintCanvas + chunkFloor), so density must look up by
 // the same index space (the two tile tables are appended in lockstep, but reading
 // the encoding source directly keeps this correct even if they ever drift).
-import { FLORA_KINDS } from '../floraData';
+import { FLORA_KINDS, FLORA_LAYERS } from '../floraData';
 import { editorTunables } from '../editors/tunables';
 
 // THE grass globals — one mutable table the /settings rig tunes live (height,
@@ -81,7 +81,7 @@ type FoliageSpec = {
 };
 
 function levelByIndex(kindLevel: Readonly<Record<string, DensityLevel>>): ReadonlyMap<number, DensityLevel> {
-  // idx into FLORA_KINDS (what a landform `field.flora.idx` cell carries).
+  // idx into FLORA_KINDS (what a landform `field.flora.layers.*` cell carries).
   return new Map(
     Object.entries(kindLevel)
       .map(([k, lvl]) => [FLORA_KINDS.indexOf(k as any), lvl] as const)
@@ -195,8 +195,8 @@ export function eachPaintedCell(
   }
   for (const lf of world.landforms ?? []) {
     // Populations read the FLORA channel, NOT the ground tiles (FLORADECOUPLE-0619):
-    // grass/palms/bushes are what GROWS, decoupled from the surface beneath. A cell's
-    // flora index → FLORA_KINDS name → the builders' density-level maps.
+    // grass/trees/bushes are what GROWS, decoupled from the surface beneath. A cell's
+    // per-layer flora index → FLORA_KINDS name → the builders' density-level maps.
     const flora = lf.field?.flora;
     const f = lf.field;
     if (!flora || !f) continue;
@@ -204,13 +204,17 @@ export function eachPaintedCell(
     const fullD = (f.rows - 1) * f.cell;
     for (let tj = 0; tj < flora.rows; tj += 1) {
       for (let ti = 0; ti < flora.cols; ti += 1) {
-        const kind = FLORA_KINDS[flora.idx[tj * flora.cols + ti]];
-        if (!kind) continue;
         const wx = lf.centerX - fullW / 2 + ((ti + 0.5) / flora.cols) * fullW;
         const wz = lf.centerZ - fullD / 2 + ((tj + 0.5) / flora.rows) * fullD;
         const top = landformFieldTop(lf, wx, wz);
-        const key = mix(Math.imul(ti | 0, 0x27d4eb2f) ^ Math.imul(tj | 0, 0x165667b1) ^ hashStr(lf.id));
-        cb(kind, wx, wz, top, key);
+        const baseKey = Math.imul(ti | 0, 0x27d4eb2f) ^ Math.imul(tj | 0, 0x165667b1) ^ hashStr(lf.id);
+        for (let li = 0; li < FLORA_LAYERS.length; li += 1) {
+          const cells = flora.layers[FLORA_LAYERS[li]];
+          const kind = FLORA_KINDS[cells?.[tj * flora.cols + ti] ?? -1];
+          if (!kind) continue;
+          const key = mix(baseKey ^ Math.imul(li + 1, 0x9e3779b9));
+          cb(kind, wx, wz, top, key);
+        }
       }
     }
   }

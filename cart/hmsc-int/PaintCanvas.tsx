@@ -37,7 +37,7 @@ import type { BrushRailSettings } from './BrushRail';
 import { PainterRail } from './PainterRail';
 import { TargetDock, channelVisible, type PainterChannels } from './TargetDock';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
-import { paintFlora, FLORA_KINDS, FLORA_KIND_DEFINITIONS } from './floraData';
+import { paintFlora, floraLayerForKindIndex, FLORA_KINDS, FLORA_KIND_DEFINITIONS } from './floraData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
 import { applyMergeGesture, clampProfile, deriveJunctions, laneFlowArrows, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, strokeWireFlip, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
 import { controlFor, planIntersectionProps, reconcileGenerated, resolveRoadNames, type GeneratedProp, type GenPoseOverride, type IntersectionControl } from './intersections';
@@ -1056,11 +1056,14 @@ export function PaintCanvas(props: {
     const c = resolveCell(gx, gy);
     if (!c) return;
     const p = paintRef.current;
-    const idx = p.tool === 'eraser' || p.mode === 'erase' ? -1 : activeFloraRef.current;
+    const active = activeFloraRef.current;
+    const layer = floraLayerForKindIndex(active);
+    if (!layer) return;
+    const idx = p.tool === 'eraser' || p.mode === 'erase' ? -1 : active;
     forEachFootprintCell(p.shape, p.size, c.cellX, c.cellZ, (x, z) => {
       const s = strokeStats.current; s.stamps++;
       if (x >= 0 && z >= 0 && x < CHUNK_TILES && z < CHUNK_TILES) s.cells.add(`${c.k}:${x}:${z}`);
-      paintFlora(c.chunk.flora, x, z, idx);
+      paintFlora(c.chunk.flora, x, z, idx, layer);
     });
     touched.add(c.k);
     tileDirty.current.add(c.k); // flora rides the floor mirror → preview re-bakes populations

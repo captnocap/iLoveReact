@@ -215,23 +215,34 @@ fn hSample(base: i32, ix: i32, iy: i32, cols: i32, rows: i32) -> f32 {
   let fcols = i32(D[fBase]);
   let frows = i32(D[fBase + 1]);
   let fpalN = i32(D[fBase + 2]);
+  let fLayerN = max(i32(D[fBase + 3]), 1);
   if (opFlora > 0.001 && fcols > 0 && frows > 0) {
     let fx = clamp(i32(floor(in.uv.x * f32(fcols))), 0, fcols - 1);
     let fy = clamp(i32(floor(in.uv.y * f32(frows))), 0, frows - 1);
-    let fCellBase = fBase + 3 + fpalN * 3;
-    let fkind = i32(D[fCellBase + fy * fcols + fx]);
-    if (fkind >= 0 && fkind < fpalN) {
-      let fb = fBase + 3 + fkind * 3;
-      let fc = vec3f(D[fb], D[fb + 1], D[fb + 2]);
+    let fCellBase = fBase + 4 + fpalN * 3;
+    var fc = vec3f(0.0);
+    var fhits = 0;
+    let fcell = fy * fcols + fx;
+    for (var fl = 0; fl < fLayerN; fl = fl + 1) {
+      let fkind = i32(D[fCellBase + fl * fcols * frows + fcell]);
+      if (fkind >= 0 && fkind < fpalN) {
+        let fb = fBase + 4 + fkind * 3;
+        fc = fc + vec3f(D[fb], D[fb + 1], D[fb + 2]);
+        fhits = fhits + 1;
+      }
+    }
+    if (fhits > 0) {
+      fc = fc / f32(fhits);
       let fp = fract(in.uv * vec2f(f32(fcols), f32(frows)));
       let dotD = distance(fp, vec2f(0.5, 0.5));
       let dotMask = 1.0 - smoothstep(0.18, 0.34, dotD);
-      rgb = mix(rgb, fc, (0.16 + dotMask * 0.46) * opFlora);
+      let stackBoost = select(0.0, 0.12, fhits > 1);
+      rgb = mix(rgb, fc, (0.16 + stackBoost + dotMask * 0.46) * opFlora);
       rgb = mix(rgb, vec3f(0.02, 0.03, 0.02), dotMask * 0.18 * opFlora);
     }
   }
 
-  let fEnd = fBase + 3 + fpalN * 3 + fcols * frows;
+  let fEnd = fBase + 4 + fpalN * 3 + fLayerN * fcols * frows;
   let wcols = i32(D[fEnd]);
   let wrows = i32(D[fEnd + 1]);
   if (wcols > 1 && wrows > 1) {
