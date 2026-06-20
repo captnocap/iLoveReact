@@ -94,6 +94,14 @@ interface PlacementSnap {
   // Per-INSTANCE, not re-resolvable from the kind, so unlike footprint/colour it
   // must ride the snapshot or the pairing is lost on reload.
   spawnId?: string;
+  // Per-instance text (a street-name sign, channel letters) — instance data, not
+  // re-resolvable from the kind, so it must ride the snapshot.
+  text?: string;
+  // INTERSECTIONS-0619: the generated-prop id (gen:{junctionKey}:{side}:{role}).
+  // Generated intersection props DO persist (the compiled bake reads the saved
+  // world, which has no editor to re-derive them); the editor reconciles them on
+  // load. The tag preserves the manual-move override link.
+  gen?: string;
 }
 
 interface ChunkSnap {
@@ -190,12 +198,16 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
     tileLegend: [...TILE_KINDS],
     zones: world.zones.map((z) => ({ ...z, flags: [...z.flags] })),
     focus: Array.from(world.focus),
-    // Gen-tagged placements (intersection stop signs / lights / street signs) are
-    // DERIVED — excluded from the save and re-generated on load from roads + the
-    // control/override maps below, so the save stays the recipe, never the bake.
-    placements: world.placements.filter((p) => !p.gen).map((p) => ({
+    // Gen-tagged intersection props (stop signs / lights / street signs) PERSIST:
+    // the compiled bake reads the saved world (no editor to re-derive them), so
+    // filtering them out made the signs vanish in-game (req_1485). The editor
+    // reconciles them on load from roads + the control/override maps below; text
+    // and the gen tag ride along (instance data, not re-resolvable from the kind).
+    placements: world.placements.map((p) => ({
       id: p.id, cat: p.cat, kind: p.kind, gx: p.gx, gy: p.gy, rotation: p.rotation, locked: p.locked,
       ...(p.spawnId ? { spawnId: p.spawnId } : {}),
+      ...(p.text ? { text: p.text } : {}),
+      ...(p.gen ? { gen: p.gen } : {}),
     })),
     chunks,
     // The recipe: stroke centerlines + profile (+ name). The road raster is DERIVED
@@ -271,7 +283,7 @@ export function deserializeMap(snap: MapSnapshot): EditorWorld {
     // free positions; quantize to the cell rect so the resting node always shows
     // the exact tiles the compile lowers to.
     const snap = placementCellRect({ gx: p.gx, gy: p.gy, footW: base.footW, footD: base.footD });
-    return { id: p.id, cat: p.cat, kind: p.kind, gx: snap.snapGx, gy: snap.snapGy, rotation: p.rotation, locked: p.locked, ...base, ...(p.spawnId ? { spawnId: p.spawnId } : {}) };
+    return { id: p.id, cat: p.cat, kind: p.kind, gx: snap.snapGx, gy: snap.snapGy, rotation: p.rotation, locked: p.locked, ...base, ...(p.spawnId ? { spawnId: p.spawnId } : {}), ...(p.text ? { text: p.text } : {}), ...(p.gen ? { gen: p.gen } : {}) };
   });
 
   const focusKeys = (snap.focus ?? []).filter((k) => chunks.has(k));
