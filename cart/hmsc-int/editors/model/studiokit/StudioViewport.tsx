@@ -2947,9 +2947,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           onCancel={() => setCompileOpen(false)}
           onCook={(descriptor) => {
             const base = (props.sceneName || 'asset').replace(/[^a-z0-9_-]+/gi, '_').toLowerCase();
-            const result = cookProp({ id: `studio.${base}`, name: props.sceneName || 'Asset', parts: props.parts, descriptor });
+            // Carry the model's painted texture into the cooked asset (req_1496): the
+            // paint atlas (1024² PNG) is content-addressed by props.paintRef, and the
+            // baked mesh keeps its per-face UVs into that atlas — so texRef + the blob
+            // are exactly the texture factor the render/bake sample. Unpainted → no tex.
+            const texB64 = props.paintRef ? props.paintBlob(props.paintRef) : null;
+            const texRef = texB64 ? props.paintRef ?? undefined : undefined;
+            const result = cookProp({ id: `studio.${base}`, name: props.sceneName || 'Asset', parts: props.parts, descriptor, texRef });
             if (result.errors.length > 0) { toast(`can't compile: ${result.errors[0]}`); return; }
-            cooked.install(result);
+            cooked.install(result, texB64 ?? undefined);
             const d = result.asset.descriptor;
             const nature = d.dynamics ? `kickable r${d.dynamics.bodyRadiusMeters.toFixed(2)} b${d.dynamics.restitution.toFixed(2)}` : (d.solid ? 'static' : 'foliage');
             toast(`compiled ${result.asset.name} → prop · ${nature}  ${d.footprintWidthMeters.toFixed(1)}×${d.footprintDepthMeters.toFixed(1)}×${d.heightMeters.toFixed(1)}m`);
