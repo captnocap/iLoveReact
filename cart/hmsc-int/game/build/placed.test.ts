@@ -328,6 +328,10 @@ test('STAIRS-0607: rotated stairs register to their visible footprint and face t
   const bounds = pieceBounds(stairs);
   console.log(`[STAIRS-0607] yaw=90 bounds=x[${bounds.minX},${bounds.maxX}] z[${bounds.minZ},${bounds.maxZ}] rects=${rects.map((r) => `x[${r.minX},${r.maxX}]z[${r.minZ},${r.maxZ}] y[${r.floorMeters},${r.topMeters}]`).join(';')} field=slot${fields[0].slot} origin=(${fields[0].originX},${fields[0].originZ}) cell=${fields[0].cellSizeMeters} cols=${fields[0].cols} rows=${fields[0].rows} yaw=${fields[0].yawRadians} heights=${Array.from(fields[0].heights).join(',')}`);
   assertEqual(orientedRects.length, 0, 'quarter-turned stairs stay axis-aligned');
+  // STAIRWALLS (req_1501): stairs collide as the heightfield slope ONLY — no
+  // boundary-wall rects. The old invisible full-height side/far walls floated
+  // standable platforms beside the run and blocked the top transition.
+  assertEqual(rects.length, 0, 'stairs add NO solid rects — the slope is the whole collider');
   assertEqual(fields.length, 1, 'stairs register one walkable slope');
   assertEqual(fields[0].slot, 7, 'slots continue after world fields');
   assertClose(fields[0].cellSizeMeters, PLACED_TUNING.verticalLinkHeightfieldCellMeters, 1e-9, 'stairs use the vertical-link cell tuning');
@@ -336,10 +340,6 @@ test('STAIRS-0607: rotated stairs register to their visible footprint and face t
   assertClose(fields[0].originX, stairs.x - catalogEntry(stairs.pieceId).size.widthMeters / 2, 1e-9, 'local width starts at the visible stair side');
   assertClose(fields[0].originZ, stairs.z - catalogEntry(stairs.pieceId).size.depthMeters / 2, 1e-9, 'local depth starts at the low approach edge');
   assertClose(fields[0].yawRadians ?? 0, Math.PI / 2, 1e-9, 'host receives the placed yaw');
-  const highFace = rects.find((r) => r.minX >= bounds.maxX - 1e-9);
-  const lowApproach = rects.find((r) => r.maxX <= bounds.minX + 1e-9);
-  assert(!!highFace, 'the closed/high stair face is on the turned +v edge');
-  assertEqual(lowApproach, undefined, 'the low stair approach stays open');
   assertClose(fields[0].heights[0], 0, 1e-9, 'low row starts at base');
   assertClose(fields[0].heights[fields[0].heights.length - 1], catalogEntry(stairs.pieceId).size.heightMeters, 1e-9, 'high row reaches the next storey');
 });

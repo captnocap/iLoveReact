@@ -861,51 +861,9 @@ function signedRange(center: number, minLocal: number, maxLocal: number, sign: n
   return { min: Math.min(a, b), max: Math.max(a, b) };
 }
 
-function pushStairBoundaryRects(
-  rects: CollisionRect[],
-  orientedRects: OrientedCollisionRect[],
-  piece: PlacedBuildPiece,
-  def: BuildPieceDef,
-): void {
-  const size = def.size;
-  const halfW = size.widthMeters / 2;
-  const halfD = size.depthMeters / 2;
-  const wall = PLACED_TUNING.stairBoundaryWallThicknessMeters;
-  const top = piece.y + size.heightMeters;
-  const localRects: LocalPlanRect[] = [
-    // side walls sit outside the walkable slope footprint; their inner face is
-    // flush with the ramp edge, so slope walking stays unchanged.
-    { minU: -halfW - wall, maxU: -halfW, minV: -halfD, maxV: halfD },
-    { minU: halfW, maxU: halfW + wall, minV: -halfD, maxV: halfD },
-    // the far/high face is closed for cover from behind; the low approach
-    // edge stays open so the slope itself remains walkable.
-    { minU: -halfW - wall, maxU: halfW + wall, minV: halfD, maxV: halfD + wall },
-  ];
-  const base = {
-    topMeters: top,
-    floorMeters: piece.y,
-    blocksPlayer: true,
-    friction: PLACED_TUNING.pieceFriction,
-    restitution: PLACED_TUNING.pieceRestitution,
-  };
-  const quarter = quarterTurns(piece.yawDegrees);
-  for (const local of localRects) {
-    if (quarter !== null) {
-      rects.push({ ...base, ...localRectToAxisRect(piece, local) });
-    } else {
-      orientedRects.push({
-        ...base,
-        minX: piece.x + local.minU,
-        maxX: piece.x + local.maxU,
-        minZ: piece.z + local.minV,
-        maxZ: piece.z + local.maxV,
-        pivotX: piece.x,
-        pivotZ: piece.z,
-        yawRadians: piece.yawDegrees * DEG,
-      });
-    }
-  }
-}
+// (removed pushStairBoundaryRects — STAIRWALLS req_1501: stairs collide as their
+//  heightfield slope only; the old invisible full-height side/far walls floated
+//  standable platforms beside the run and walled off the top transition.)
 
 /** REQ-0647: one elevator storey's static solids — an OPEN-FRONT frame. The
  *  back and side walls (inside the module footprint, flush with its edges)
@@ -1037,10 +995,17 @@ export function placedPieceColliders(
   for (const piece of pieces) {
     const def = placedPieceDef(piece);
     if (def.kind === 'ramp' || def.kind === 'stairs') {
-      if (placedPieceTags(piece).collision) {
-        if (def.kind === 'ramp') pushRampSlabEdgeRects(rects, orientedRects, piece, def);
-        else pushStairBoundaryRects(rects, orientedRects, piece, def);
+      if (placedPieceTags(piece).collision && def.kind === 'ramp') {
+        pushRampSlabEdgeRects(rects, orientedRects, piece, def);
       }
+      // STAIRWALLS (req_1501): stairs no longer get boundary-wall rects. Those
+      // were INVISIBLE, full-height, flat-topped solids that extended 0.25m past
+      // the steps — so their tops were standable platforms floating at the
+      // stair's peak height beside the visible run (the "floating on an invisible
+      // wall" bug), and the far/high one was a solid wall right at the top step
+      // that blocked the landing transition ("stuck at the top"). The heightfield
+      // slope (placedPieceRamps) is the real walkable collision and matches the
+      // rendered stepped geometry — see-it == walk-it.
       continue;
     }
     if (def.kind === 'elevator') {
