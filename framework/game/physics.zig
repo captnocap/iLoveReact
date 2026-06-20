@@ -1367,6 +1367,11 @@ pub fn step(input: []const f32) ?[]f32 {
 
     // V7: the ONE host-side movement integrator, inside the physics step.
     movement.integrateHorizontal(&pvx, &pvz, move_x, move_z, speed, acceleration_multiplier, player_surface_friction, dt);
+    // Stairlog: the velocity the integrator produced, BEFORE the uphill speed
+    // clamp can scale it. If integ is large but the final move is ~0, the clamp
+    // (or a collision) ate it — see the clamp=() column below.
+    const integ_vx = pvx;
+    const integ_vz = pvz;
 
     // Ground support = highest of the rect floor and the heightfield mesh under
     // the feet. The terrain holds you up at ANY slope (a steep face is still
@@ -1381,9 +1386,22 @@ pub fn step(input: []const f32) ?[]f32 {
             clampUphillSurfaceSpeed(&pvx, &pvz, px, pz, py, step_height, dt, s, speed);
         }
     }
+    // Stairlog: velocity AFTER the uphill clamp. If clamp_v << integ_v while the
+    // player holds full intent and isn't gaining height, the clamp is misreading
+    // the crest cell as a near-vertical walkable slope (the stair-top stick).
+    const clamp_vx = pvx;
+    const clamp_vz = pvz;
     if (jump_down and player_grounded) {
         pvy = jump_speed;
         player_grounded = false;
+        // Stairlog jump marker: a loud, easy-to-grep line on the rising edge of a
+        // jump (fires once per launch — player_grounded clears until landing). The
+        // user jumps 3× at the staircase to bracket the repro, so the walk-up
+        // frames before it can be ignored.
+        if (stairlogOn()) {
+            g_stairlog_frame += 1;
+            std.debug.print("[stairlog f{d}] ===== JUMP ===== pos=({d:.2},{d:.2},{d:.2})\n", .{ g_stairlog_frame, px, py, pz });
+        }
     }
     pvy -= gravity * dt;
     const prev_px = px;
@@ -1463,7 +1481,11 @@ pub fn step(input: []const f32) ?[]f32 {
             const wdz = desired_pz - prev_pz;
             const want = @sqrt(wdx * wdx + wdz * wdz);
             const blocked = want > 0.0005 and moved < want * 0.3;
-            std.debug.print("[stairlog f{d}] intent=({d:.2},{d:.2}) pos=({d:.2},{d:.2},{d:.2}) want={d:.3} moved={d:.3} vel=({d:.2},{d:.2},{d:.2}) grounded={} rectpush=({d:.3},{d:.3}) hfcancel={} hf(h={d:.2} ny={d:.2} walkcos={d:.2}) {s}\n", .{ g_stairlog_frame, move_x, move_z, px, py, pz, want, moved, pvx, pvy, pvz, player_grounded, rect_push_x, rect_push_z, hf_cancel, hf_height, hf_normal_y, hf_walk_cos, if (blocked) "<< BLOCKED" else "" });
+            // integ=() is the velocity the movement integrator produced this frame;
+            // clamp=() is it after the uphill speed-clamp. integ big + clamp tiny =
+            // the clamp ate the move (the stair-top stick). rectpush/hfcancel name
+            // the other two killers.
+            std.debug.print("[stairlog f{d}] intent=({d:.2},{d:.2}) pos=({d:.2},{d:.2},{d:.2}) want={d:.3} moved={d:.3} integ=({d:.2},{d:.2}) clamp=({d:.2},{d:.2}) vel=({d:.2},{d:.2},{d:.2}) grounded={} rectpush=({d:.3},{d:.3}) hfcancel={} hf(h={d:.2} ny={d:.2} walkcos={d:.2}) {s}\n", .{ g_stairlog_frame, move_x, move_z, px, py, pz, want, moved, integ_vx, integ_vz, clamp_vx, clamp_vz, pvx, pvy, pvz, player_grounded, rect_push_x, rect_push_z, hf_cancel, hf_height, hf_normal_y, hf_walk_cos, if (blocked) "<< BLOCKED" else "" });
         }
     }
 
