@@ -5,7 +5,7 @@
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 import {
   addMount, addMountReflections, updateMountMirrored, bevelEdge, bevelVertex, connectVerts, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag, icosphere, sphere, ICOSPHERE_SUBDIV_MAX,
-  bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
+  bridgeEdges, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, newConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
   flipFace, mergeFaces, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel, validateMesh, meshHealth,
   type EditMesh, type MountPoint, type V3,
@@ -372,6 +372,22 @@ test('dragging a corner inward buckles a cube face → the guard detects it (req
   assert(findConcaveFaces(buckled).length > 0, 'the buckled quad is flagged concave (the alert would fire)');
   // and Split Quads clears it (the recommended resolution).
   assertEqual(findConcaveFaces(splitConcaveFaces(buckled)).length, 0, 'Split Quads resolves every offender');
+});
+
+test('newConcaveFaces ignores PRE-EXISTING concavity, flags only what the edit buckles (req_1514)', () => {
+  // An organic/carved mesh legitimately holds a concave quad. A rigid object-move
+  // (every vert translated equally) must NOT re-flag it — only an edit that turns a
+  // previously-convex corner reflex should fire the Auto-Fix dialog.
+  const box = cuboid(2, 2, 2);
+  const organic = translateVerts(box, [6], [-1.6, 0, -1.6]); // pre-buckle one quad
+  assert(findConcaveFaces(organic).length > 0, 'the test mesh already contains a concave face');
+  // 1) rigid move of the WHOLE mesh: shift every vert by the same offset.
+  const allIdx = organic.verts.map((_, i) => i);
+  const moved = translateVerts(organic, allIdx, [0, -3, 0]);
+  assertEqual(newConcaveFaces(organic, moved).length, 0, 'a rigid object-move introduces no NEW concave face → no dialog');
+  // 2) an edit that actually buckles a clean cube IS still caught.
+  const buckled = translateVerts(box, [6], [-1.6, 0, -1.6]);
+  assert(newConcaveFaces(box, buckled).length > 0, 'a corner pulled reflex is flagged as a new offender');
 });
 
 test('extrudeFace caps + walls a face, keeps the cap at the same index (req_1015)', () => {

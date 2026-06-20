@@ -36,7 +36,7 @@ import { chordHintFor } from '../../controls';
 import { KeyLegend } from '../../KeyLegend';
 import { loadKeybinds } from '../../keybinds';
 import { HotkeysPanel } from './dialogs/HotkeysPanel';
-import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from '../editMesh';
+import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, newConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from '../editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from '../anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from '../wheelMount';
 import { useStudioModel, type StudioModel, type StudioPart } from '../studioModel';
@@ -1707,8 +1707,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       // Concave Auto-Fix guard (req_0949/req_1016): a moved vert can buckle a quad
       // into a reflex (non-convex) face. If it did, DON'T silently triangulate —
       // keep the buckled preview on screen and raise the dialog for the user to
-      // resolve. A clean edit commits straight through.
-      const offenders = findConcaveFaces(result);
+      // resolve. A clean edit commits straight through. Diff vs the START mesh
+      // (req_1514): only faces this edit NEWLY buckled count — a rigid object-move
+      // of an organic mesh that already holds concave quads must not re-flag them.
+      const offenders = newConcaveFaces(g.startMesh, result);
       if (offenders.length === 0) { setDraft(null); props.onEditMesh(g.partId, result); }
       else {
         // keep the buckled preview on screen for the dialog: sync the draft to the

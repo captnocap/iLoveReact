@@ -700,6 +700,23 @@ export function findConcaveFaces(m: EditMesh): number[] {
   return out;
 }
 
+/** The faces an EDIT newly buckled — offenders in `after` that were NOT already
+ *  concave at the same index in `before`. This is what the gizmo guard wants: a
+ *  pure rigid object-move (or any transform that touches every vert equally)
+ *  changes no face's convexity, so an organic/carved mesh that legitimately
+ *  CONTAINS concave quads stays quiet — only a corner the edit actually reflexed
+ *  fires the Auto-Fix dialog. Face indices are preserved by translate/rotate/
+ *  scaleVerts; if the topology changed (count differs, e.g. a mirror that added
+ *  faces), correspondence is lost and we fall back to scanning the whole result. */
+export function newConcaveFaces(before: EditMesh, after: EditMesh): number[] {
+  if (before.faces.length !== after.faces.length) return findConcaveFaces(after);
+  const out: number[] = [];
+  for (let i = 0; i < after.faces.length; i += 1) {
+    if (isFaceConcave(after, after.faces[i]) && !isFaceConcave(before, before.faces[i])) out.push(i);
+  }
+  return out;
+}
+
 /** Split one quad into two triangles along the diagonal that yields two convex
  *  tris (the "Split Quads" fix). Non-quads are returned untouched. Pure: returns
  *  a new mesh, leaves the input alone. */
