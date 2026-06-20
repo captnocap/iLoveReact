@@ -85,7 +85,7 @@ export function emptyEditorWorld(): GameState {
 
 export function placeWorldProp(
   state: GameState,
-  opts: { kind: PropKind; x: number; z: number; yawDegrees?: number; partTextures?: WorldProp['partTextures'] },
+  opts: { kind: PropKind; x: number; z: number; yawDegrees?: number; partTextures?: WorldProp['partTextures']; text?: string },
 ): { state: GameState; prop: WorldProp } {
   const prop: WorldProp = {
     id: nextUniqueId('prop_int_', state.world.props.map((p) => p.id)),
@@ -96,6 +96,9 @@ export function placeWorldProp(
     z: opts.z,
     yawDegrees: opts.yawDegrees ?? 0,
     ...(opts.partTextures ? { partTextures: opts.partTextures } : {}),
+    // Per-instance text (INTERSECTIONS-0619: a street-name sign prints the road
+    // names; the parametric recipes — streetSign / blockText — lower it).
+    ...(opts.text ? { text: opts.text } : {}),
     createdByCommand: 'hmsc-int:place',
   };
   return { state: placeProp(state, prop), prop };

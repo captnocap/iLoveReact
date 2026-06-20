@@ -38,12 +38,14 @@ import { PainterRail } from './PainterRail';
 import { TargetDock, channelVisible, type PainterChannels } from './TargetDock';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
-import { applyMergeGesture, clampProfile, laneFlowArrows, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, strokeWireFlip, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
+import { applyMergeGesture, clampProfile, deriveJunctions, laneFlowArrows, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadRibbonSegments, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, strokeWireFlip, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
+import { controlFor, planIntersectionProps, reconcileGenerated, resolveRoadNames, type GeneratedProp, type GenPoseOverride, type IntersectionControl } from './intersections';
+import { IntersectionRail } from './IntersectionRail';
 import { ChunkSurface } from './ChunkSurface';
 import type { PainterEmphasis } from './painterSurface';
 import { resolvePainterBehavior } from './painterBehavior';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
-import { placementCellRect, type Placement, type PlaceCat } from './placements';
+import { placementCellRect, resolvePlaceable, worldToPlacementGraph, type Placement, type PlaceCat } from './placements';
 import { SCATTER_BRUSHES, scatterRollAt, type ScatterBrushId } from './game/kinds/scatter';
 import type { MapBuildFootprint } from './mapBuildPlacements';
 import type { EditorWorld } from './mapStore';
@@ -101,6 +103,9 @@ export interface PlaceProps {
   onClone: (id: string) => void;
   onDelete: (id: string) => void;
   onDeleteBuild?: (id: string) => void;
+  // INTERSECTIONS-0619: replace the derived intersection placements (gen-tagged)
+  // with a freshly-generated set, preserving hand placements.
+  onSyncGenerated?: (gen: Placement[]) => void;
 }
 
 const RAIL_W = 176;
@@ -206,6 +211,22 @@ function roadChevrons(r: RoadStroke): { gx: number; gz: number; glyph: string }[
 // Global cell → graph centre (the selection-highlight formula: chunk (cx,cz) is
 // CENTRED at cx·PATCH, so cell g sits at (g − CHUNK_TILES/2 + 0.5)·TILE_UNITS).
 const cellGraph = (g: number): number => (g - CHUNK_TILES / 2 + 0.5) * TILE_UNITS;
+
+// A generated intersection prop (global-cell-space center + yaw) → a real
+// Placement (INTERSECTIONS-0619): footprint/colour/label resolve from the kind
+// like any prop, position snaps to the cell rect the compile lowers to, and the
+// `gen` tag + per-instance `text` ride through render/compile/save unchanged.
+function genToPlacement(gp: GeneratedProp): Placement {
+  const base = resolvePlaceable('prop', gp.kind);
+  const g = worldToPlacementGraph(gp.gx, gp.gz);
+  const snap = placementCellRect({ gx: g.gx, gy: g.gy, footW: base.footW, footD: base.footD });
+  return {
+    id: `genpl:${gp.id}`, cat: 'prop', kind: gp.kind, label: base.label,
+    gx: snap.snapGx, gy: snap.snapGy, rotation: gp.rotationDeg, locked: false,
+    footW: base.footW, footD: base.footD, color: base.color,
+    gen: gp.id, ...(gp.text ? { text: gp.text } : {}),
+  };
+}
 
 // Road authoring wires as POLYLINE paths, not per-dot Canvas.Nodes (OVERFLOW-0610):
 // a long road's wire dots numbered in the hundreds, and with flow arrows ALSO on
@@ -1126,6 +1147,16 @@ export function PaintCanvas(props: {
   // Per-lane flow arrows (FLOWARROWS-0610, user ask): glyphs pointing each
   // lane's ACTUAL travel direction — the disambiguator colours can't be.
   const [showFlowArrows, setShowFlowArrows] = useState(true);
+  // INTERSECTIONS-0619 (req_1480): the authored control type per derived junction
+  // (keyed by stable junctionKey), and the per-id pose overrides that honor a
+  // manually-dragged generated prop. Both ride the map snapshot like roads.
+  const [intersectionControls, setIntersectionControls] = useState<Map<string, IntersectionControl>>(
+    () => new Map(props.initialWorld?.intersectionControls ?? []),
+  );
+  const [intersectionOverrides, setIntersectionOverrides] = useState<Map<string, GenPoseOverride>>(
+    () => new Map(props.initialWorld?.intersectionOverrides ?? []),
+  );
+  const [selJunctionKey, setSelJunctionKey] = useState<string | null>(null);
   const roadsRef = useRef(roads);
   roadsRef.current = roads;
   const roadDraftRef = useRef(roadDraft);
@@ -1262,6 +1293,47 @@ export function PaintCanvas(props: {
       setRoadProfile((p) => clampProfile({ ...p, ...patch }));
     }
   };
+  // Rename the selected road (INTERSECTIONS-0619) — no geometry change, so no
+  // restamp; just updates the stroke and lets the signage regenerate.
+  const editActiveName = (name: string) => {
+    if (!selRoad) return;
+    setRoads((rs) => rs.map((r) => (r.id === selRoad.id ? { ...r, name } : r)));
+    notifyEdit({ cat: 'road', text: `named road ${name.trim() || '(cleared)'}` });
+  };
+
+  // INTERSECTIONS-0619: derive junctions from the network, generate the control +
+  // street-name props per the authored types (honoring manual drags), and push
+  // them into the cart's placement store so render / iso preview / compile / save
+  // all consume them like hand placements (one store, one truth).
+  const junctions = useMemo(() => deriveJunctions(roads), [roads]);
+  const resolvedRoadNames = useMemo(() => resolveRoadNames(roads, junctions), [roads, junctions]);
+  const roadNameOf = (roadId: string, fallback?: string) => resolvedRoadNames.get(roadId) ?? fallback;
+  const generatedPlacements = useMemo(() => {
+    const fresh = reconcileGenerated(planIntersectionProps(junctions, intersectionControls, roads), intersectionOverrides);
+    return fresh.map(genToPlacement);
+  }, [junctions, intersectionControls, roads, intersectionOverrides]);
+  const syncGenRef = useRef(props.place.onSyncGenerated);
+  syncGenRef.current = props.place.onSyncGenerated;
+  useEffect(() => { syncGenRef.current?.(generatedPlacements); }, [generatedPlacements]);
+
+  const selJunction = selJunctionKey ? junctions.find((j) => j.key === selJunctionKey) ?? null : null;
+  const setJunctionControl = (key: string, ctrl: IntersectionControl) => {
+    setIntersectionControls((m) => { const n = new Map(m); n.set(key, ctrl); return n; });
+    notifyEdit({ cat: 'road', text: `intersection → ${ctrl}` });
+  };
+  // A manual drag of a generated prop records a pose override (settle-debounced,
+  // global-cell space) so the next re-derivation keeps the dragged pose.
+  const genMoveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordGenMove = (genIdStr: string, graphGx: number, graphGy: number, rotationDeg: number) => {
+    if (genMoveTimer.current) clearTimeout(genMoveTimer.current);
+    genMoveTimer.current = setTimeout(() => {
+      genMoveTimer.current = null;
+      const gx = graphGx / TILE_UNITS + CHUNK_TILES / 2;
+      const gz = graphGy / TILE_UNITS + CHUNK_TILES / 2;
+      setIntersectionOverrides((m) => { const n = new Map(m); n.set(genIdStr, { gx, gz, rotationDeg }); return n; });
+    }, 160);
+  };
+
   const commitRoadDraftRef = useRef(commitRoadDraft);
   commitRoadDraftRef.current = commitRoadDraft;
   const cancelRoadDraftRef = useRef(cancelRoadDraft);
@@ -1292,7 +1364,7 @@ export function PaintCanvas(props: {
     if (!center || !probe || probe.gx === center.gx) return null;
     return { x: center.gx, y: center.gy, zoom: 100 / (probe.gx - center.gx) };
   };
-  if (props.apiRef) props.apiRef.current = { getWorld: () => ({ chunks, zones, focus, roads, roadUnder: roadUnderRef.current! }), getView };
+  if (props.apiRef) props.apiRef.current = { getWorld: () => ({ chunks, zones, focus, roads, roadUnder: roadUnderRef.current!, intersectionControls, intersectionOverrides }), getView };
 
   // ── One Painter (PAINTER-0610, req_0593) ─────────────────────────────────────
   // One active tool (Select/Paint/Erase), one active target (`layer`). The pure
@@ -1900,6 +1972,22 @@ export function PaintCanvas(props: {
             <Box style={{ width: '100%', height: '100%', borderRadius: 3, borderWidth: 2, borderColor: '#22d3ee', backgroundColor: '#0e2a33cc' }} />
           </Canvas.Node>
         )) : null}
+        {/* Junction badges (INTERSECTIONS-0619): one clickable marker per derived
+            crossing; click selects it for the type card. Red = 4-way stop, green =
+            signals, grey = uncontrolled. */}
+        {layer === 'road' ? junctions.map((j) => {
+          const ctrl = controlFor(j, intersectionControls);
+          const sel = j.key === selJunctionKey;
+          const tint = ctrl === 'signals' ? '#22c55e' : ctrl === 'allWayStop' ? '#ef4444' : '#94a3b8';
+          const g = worldToPlacementGraph(j.centerGx, j.centerGz);
+          return (
+            <Canvas.Node key={`jx_${j.key}`} gx={g.gx} gy={g.gy} gw={TILE_UNITS * 2.6} gh={TILE_UNITS * 2.6}>
+              <Pressable onPress={() => { claimWasd?.(); setSelJunctionKey(sel ? null : j.key); }} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', borderRadius: 99, borderWidth: sel ? 3 : 2, borderColor: sel ? '#f8fafc' : tint, backgroundColor: `${tint}33` }}>
+                <Text fontSize={13} color={sel ? '#f8fafc' : tint} style={{ fontWeight: 900 }}>{ctrl === 'signals' ? '◉' : ctrl === 'allWayStop' ? '⬣' : '∘'}</Text>
+              </Pressable>
+            </Canvas.Node>
+          );
+        }) : null}
         {layer === 'road' && roadDraft.length >= 2 ? roadDots(roadDraft, 1.5).map((d, i) => (
           <Canvas.Node key={`rdraft_${i}`} gx={cellGraph(d.x)} gy={cellGraph(d.z)} gw={TILE_UNITS * 0.3} gh={TILE_UNITS * 0.3}>
             <Box style={{ width: '100%', height: '100%', borderRadius: 99, backgroundColor: '#86efacdd' }} />
@@ -1941,7 +2029,7 @@ export function PaintCanvas(props: {
               gw={p.footW * TILE_UNITS}
               gh={p.footD * TILE_UNITS}
               onPress={() => { claimWasd?.(); place.onSelectBuild?.(null); place.onSelect(p.id); }}
-              onMove={p.locked || showPlaceBrush ? undefined : (evt: any) => { claimWasd?.(); place.onSelectBuild?.(null); place.onMove(p.id, Number(evt?.gx ?? p.gx), Number(evt?.gy ?? p.gy)); if (p.id !== place.selId) place.onSelect(p.id); }}
+              onMove={p.locked || showPlaceBrush ? undefined : (evt: any) => { claimWasd?.(); place.onSelectBuild?.(null); const mgx = Number(evt?.gx ?? p.gx), mgy = Number(evt?.gy ?? p.gy); place.onMove(p.id, mgx, mgy); if (p.gen) recordGenMove(p.gen, mgx, mgy, p.rotation); if (p.id !== place.selId) place.onSelect(p.id); }}
             >
               <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: `${p.color}cc`, borderWidth: isSel ? 2 : 1, borderColor: isSel ? '#f8fafc' : '#0b1320', transform: { rotate: p.rotation } }}>
                 <Box style={{ position: 'absolute', top: 2, width: '40%', height: 3, borderRadius: 2, backgroundColor: isSel ? '#f8fafc' : '#0b1320' }} />
@@ -2040,7 +2128,7 @@ export function PaintCanvas(props: {
           road={{
             profile: selRoad ? selRoad.profile : roadProfile,
             onProfile: editActiveProfile,
-            editingLabel: selRoad ? `Road ${roads.indexOf(selRoad) + 1}` : null,
+            editingLabel: selRoad ? (selRoad.name?.trim() || `Road ${roads.indexOf(selRoad) + 1}`) : null,
             draftCount: roadDraft.length,
             onFinish: commitRoadDraft,
             onCancel: cancelRoadDraft,
@@ -2049,6 +2137,7 @@ export function PaintCanvas(props: {
             selId: selRoadId,
             onSelect: setSelRoadId,
             onDelete: deleteRoad,
+            onName: editActiveName,
             wires: showRoadWires,
             onWires: setShowRoadWires,
             arrows: showFlowArrows,
@@ -2056,6 +2145,20 @@ export function PaintCanvas(props: {
           }}
         />
       </Box>
+
+      {/* Intersection card (INTERSECTIONS-0619): floats beside the rail when a
+          junction badge is selected on the road layer. */}
+      {layer === 'road' && selJunction ? (
+        <Box style={{ position: 'absolute', left: RAIL_W + 8, top: 8 }}>
+          <IntersectionRail
+            junction={selJunction}
+            control={controlFor(selJunction, intersectionControls)}
+            onControl={(c) => setJunctionControl(selJunction.key, c)}
+            onClose={() => setSelJunctionKey(null)}
+            nameOf={roadNameOf}
+          />
+        </Box>
+      ) : null}
 
       {/* Right edge: chunk focus gutter (thin dock, keeps the centre clear). */}
       <ChunkGutter chunks={allChunks} focus={focus} onToggle={toggleFocus} onAll={focusAll} onNone={focusNone} />

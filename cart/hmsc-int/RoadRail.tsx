@@ -8,7 +8,7 @@
 // a delete. Tools live in the universal ToolCard (PainterRail); re-stamping
 // (the tile compile) lives in PaintCanvas; this card is pure controls.
 
-import { Box, Pressable, ScrollView, Text } from '@reactjit/primitives';
+import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { MiniStepper, RailLabel } from './railAtoms';
 import { clampProfile, isOneWay, profileLabel, ROAD_SPEED_PRESETS, roadWidthTiles, type RoadProfile, type RoadStroke } from './roadData';
 import type { Tool } from './PaintCanvas';
@@ -27,6 +27,9 @@ export function RoadRail(props: {
   selId: string | null;
   onSelect: (id: string | null) => void;
   onDelete: (id: string) => void;
+  /** rename the selected road (INTERSECTIONS-0619): the name prints on the
+   *  street signs auto-placed at its junctions. */
+  onName: (name: string) => void;
   /** the wire view: dotted centerlines + per-lane wires + endpoint squares */
   wires: boolean;
   onWires: (on: boolean) => void;
@@ -37,6 +40,7 @@ export function RoadRail(props: {
   const p = clampProfile(props.profile);
   const drawing = props.tool === 'brush'; // eraser clicks delete strokes, they don't draft
   const drafting = props.draftCount > 0;
+  const selRoad = props.roads.find((r) => r.id === props.selId) ?? null;
 
   return (
     <Box style={{ flexGrow: 1, gap: 8 }}>
@@ -45,6 +49,18 @@ export function RoadRail(props: {
         <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: '#f8fafc', backgroundColor: '#1e293b' }}>
           <Box style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#f59e0b' }} />
           <Text fontSize={8} color="#f8fafc" style={{ fontWeight: 700 }}>{`editing ${props.editingLabel} (live)`}</Text>
+        </Box>
+      ) : null}
+      {selRoad ? (
+        <Box style={{ gap: 3 }}>
+          <RailLabel text="NAME" />
+          <TextInput
+            value={selRoad.name ?? ''}
+            placeholder="name this road (e.g. Main St)"
+            onChangeText={(v: string) => props.onName(v)}
+            style={{ fontSize: 10, color: '#f8fafc', paddingLeft: 6, paddingRight: 6, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: '#334155', backgroundColor: '#0f1a2e' }}
+          />
+          <Text fontSize={7} color="#64748b">prints on street signs at this road's intersections</Text>
         </Box>
       ) : null}
       <MiniStepper
@@ -159,7 +175,7 @@ export function RoadRail(props: {
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 6, paddingRight: 4, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: sel ? '#f8fafc' : '#27364a', backgroundColor: sel ? '#1e293b' : '#0f1a2e' }}
               >
                 <Box style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: isOneWay(r.profile) ? '#f59e0b' : '#fbbf24' }} />
-                <Text fontSize={9} color={sel ? '#f8fafc' : '#cbd5e1'} style={{ fontFamily: 'monospace' }}>{`Road ${i + 1}`}</Text>
+                <Text fontSize={9} color={sel ? '#f8fafc' : '#cbd5e1'} style={{ fontFamily: 'monospace' }}>{r.name?.trim() || `Road ${i + 1}`}</Text>
                 <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>{profileLabel(r.profile)}</Text>
                 <Box style={{ flexGrow: 1 }} />
                 <Pressable onPress={() => props.onDelete(r.id)} style={{ width: 16, height: 16, alignItems: 'center', justifyContent: 'center', borderRadius: 3, borderWidth: 1, borderColor: '#7f1d1d', backgroundColor: '#1f0f12' }}>

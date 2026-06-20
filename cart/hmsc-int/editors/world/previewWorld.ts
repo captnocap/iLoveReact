@@ -89,7 +89,7 @@ export function assemblePreviewWorld(opts: {
     } else {
       // Props anchor at their CENTER (radial footprint) — the snapped rect's
       // centre, so the prop sits exactly where its canvas node draws.
-      s = placeWorldProp(s, { kind: p.kind as Parameters<typeof placeWorldProp>[1]['kind'], x: wx + p.footW / 2, z: wz + p.footD / 2, yawDegrees: p.rotation, partTextures: mergeKindTextures('prop', p.kind, p.partTextures) }).state;
+      s = placeWorldProp(s, { kind: p.kind as Parameters<typeof placeWorldProp>[1]['kind'], x: wx + p.footW / 2, z: wz + p.footD / 2, yawDegrees: p.rotation, partTextures: mergeKindTextures('prop', p.kind, p.partTextures), ...(p.text ? { text: p.text } : {}) }).state;
     }
   }
   // The world's default spawn — where a fresh game drops the player. The first

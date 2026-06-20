@@ -218,14 +218,30 @@ export function usePlacements(opts: {
     logEvent({ cat: 'object', text: `textured ${role} of ${cur.label}` });
   }, [selPlaceId, placements, updatePlacement, logEvent]);
 
+  // INTERSECTIONS-0619 (req_1480): replace the DERIVED intersection placements
+  // (`gen`-tagged: stop signs, lights, street-name signs) with a freshly-generated
+  // set, preserving hand placements. No undo snapshot — they're a pure function of
+  // the road network + control types, regenerated whenever those change. A no-op
+  // guard keeps an unchanged set from churning the store (and the canvas memo).
+  const syncGenerated = useCallback((gen: Placement[]) => {
+    setPlacements((ps) => {
+      const prevGen = ps.filter((p) => p.gen);
+      const same = prevGen.length === gen.length && prevGen.every((p, i) =>
+        p.id === gen[i].id && p.gx === gen[i].gx && p.gy === gen[i].gy &&
+        p.rotation === gen[i].rotation && p.kind === gen[i].kind && p.text === gen[i].text);
+      if (same) return ps;
+      return [...ps.filter((p) => !p.gen), ...gen];
+    });
+  }, [setPlacements]);
+
   // The `place` API the canvas + panels consume — one object, stable between
   // renders unless an input actually changed (the memoized canvas depends on it).
   const place = useMemo(() => ({
     items: placements, selId: selPlaceId, active: activePlaceable, buildItems: buildFootprints, buildSelId: selBuildId,
     onSelect: setSelPlaceId, onSelectBuild: setSelBuildId, onArm: armPlaceable, onRotateBrush: rotatePlaceBrush, onPaintAt: paintObjectAt,
     onMove: movePlacement, onUpdate: updatePlacement, onClone: clonePlacement, onDelete: removePlacement,
-    onDeleteBuild: removeBuildPlacement,
-  }), [placements, selPlaceId, activePlaceable, buildFootprints, selBuildId, setSelPlaceId, setSelBuildId, armPlaceable, rotatePlaceBrush, paintObjectAt, movePlacement, updatePlacement, clonePlacement, removePlacement, removeBuildPlacement]);
+    onDeleteBuild: removeBuildPlacement, onSyncGenerated: syncGenerated,
+  }), [placements, selPlaceId, activePlaceable, buildFootprints, selBuildId, setSelPlaceId, setSelBuildId, armPlaceable, rotatePlaceBrush, paintObjectAt, movePlacement, updatePlacement, clonePlacement, removePlacement, removeBuildPlacement, syncGenerated]);
 
   return { place, activePlaceable, armPlaceable, armScatter, placeObject, setFaceTexture };
 }

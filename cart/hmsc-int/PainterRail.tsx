@@ -259,6 +259,7 @@ export interface RoadCardProps {
   selId: string | null;
   onSelect: (id: string | null) => void;
   onDelete: (id: string) => void;
+  onName: (name: string) => void;
   wires: boolean;
   onWires: (on: boolean) => void;
   arrows: boolean;

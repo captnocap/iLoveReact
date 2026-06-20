@@ -42,6 +42,15 @@ export interface Placement {
   // respawns the player at (the manual save↔spawn link). Lowered to the spawn
   // cell's key on compile. Absent = unpaired (respawns at the save cell itself).
   spawnId?: string;
+  // Per-instance text for a parametric prop (street-name sign, channel letters).
+  // Lowered to the game's WorldProp.text on compile so the sign prints it.
+  text?: string;
+  // INTERSECTIONS-0619 (req_1480): the stable id of the generated intersection
+  // prop this placement materializes (gen:{junctionKey}:{side}:{role}). Presence
+  // marks a placement as DERIVED from the road network — regenerated when roads /
+  // names / control types change. A manual drag records a pose override keyed by
+  // this id, so the regeneration honors the move (see intersections.ts).
+  gen?: string;
 }
 
 export interface Placeable { label: string; footW: number; footD: number; color: string; }

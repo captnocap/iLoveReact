@@ -286,7 +286,7 @@ export function useMapSession(opts: {
     const api = paintApiRef.current;
     if (!api) return null; // canvas not mounted yet — skip this autosave tick
     const w = api.getWorld();
-    const world = ptime('autosave', `serializeMap chunks=${w.chunks.size}`, () => serializeMap({ chunks: w.chunks, zones: w.zones, focus: w.focus, placements, roads: w.roads, roadUnder: w.roadUnder }));
+    const world = ptime('autosave', `serializeMap chunks=${w.chunks.size}`, () => serializeMap({ chunks: w.chunks, zones: w.zones, focus: w.focus, placements, roads: w.roads, roadUnder: w.roadUnder, intersectionControls: w.intersectionControls, intersectionOverrides: w.intersectionOverrides }));
     // VIEWRUNAWAY-0605 write-side invariant: an autosaved view always passes
     // the sanity law — a camera that ran away (or read degenerate) is OMITTED
     // (the restore's painted-centre fallback then reframes, and the next sane

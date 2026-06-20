@@ -146,14 +146,29 @@ function normalizeText(raw: string | undefined): string {
  * GLYPH_DEPTH off the mounting plane.
  */
 export function blockLettersParts(capHeightMeters: number, text?: string): PropPartSpec[] {
-  const word = normalizeText(text);
+  return textLineParts(normalizeText(text), { capHeightMeters, color: BLOCK_COLOR, depthMeters: GLYPH_DEPTH_METERS });
+}
+
+/**
+ * One line of block letters as boxes, centred on x=0, baseline at y=`baseY`,
+ * front face at z=`frontZ` and extruding `depthMeters` toward −Z. The reusable
+ * core (INTERSECTIONS-0619): blockLetters lowers a sign with it, and the street-
+ * name sign stacks two small lines of it onto its panel.
+ */
+export function textLineParts(
+  text: string,
+  opts: { capHeightMeters: number; color: Color; depthMeters: number; baseY?: number; frontZ?: number },
+): PropPartSpec[] {
+  const { capHeightMeters, color, depthMeters } = opts;
+  const baseY = opts.baseY ?? 0;
+  const frontZ = opts.frontZ ?? 0;
   const cell = capHeightMeters / GLYPH_ROWS;
   const advance = (GLYPH_COLS + 1) * cell; // one empty column between letters
-  const totalWidth = word.length > 0 ? word.length * advance - cell : 0;
+  const totalWidth = text.length > 0 ? text.length * advance - cell : 0;
   const left = -totalWidth / 2;
   const parts: PropPartSpec[] = [];
-  for (let i = 0; i < word.length; i += 1) {
-    const rows = glyph(word[i]);
+  for (let i = 0; i < text.length; i += 1) {
+    const rows = glyph(text[i]);
     const glyphLeft = left + i * advance;
     for (let r = 0; r < GLYPH_ROWS; r += 1) {
       const row = rows[r] ?? '';
@@ -164,18 +179,25 @@ export function blockLettersParts(capHeightMeters: number, text?: string): PropP
         let run = 1;
         while (c + run < GLYPH_COLS && row[c + run] === '#') run += 1;
         const w = run * cell;
-        // cell centre: top row (r=0) is highest; y measured up from the base.
+        // cell centre: top row (r=0) is highest; y measured up from the baseline.
         const cx = glyphLeft + (c + run / 2) * cell;
-        const cy = capHeightMeters - (r + 0.5) * cell;
+        const cy = baseY + capHeightMeters - (r + 0.5) * cell;
         parts.push({
           shape: 'box',
-          local: [cx, cy, GLYPH_DEPTH_METERS / 2],
-          size: [w, cell, GLYPH_DEPTH_METERS],
-          color: BLOCK_COLOR,
+          local: [cx, cy, frontZ - depthMeters / 2],
+          size: [w, cell, depthMeters],
+          color,
         });
         c += run;
       }
     }
   }
   return parts;
+}
+
+/** Word width in metres at a given cap height (for fitting text to a panel). */
+export function textLineWidth(text: string, capHeightMeters: number): number {
+  const cell = capHeightMeters / GLYPH_ROWS;
+  const advance = (GLYPH_COLS + 1) * cell;
+  return text.length > 0 ? text.length * advance - cell : 0;
 }

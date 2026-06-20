@@ -8,7 +8,7 @@
 import { assert, assertClose, assertEqual, finish, test } from './game/_testkit';
 import {
   controlFor, defaultControl, deriveJunctions, junctionRoadNames,
-  planIntersectionProps, pruneOverrides, reconcileGenerated,
+  planIntersectionProps, pruneOverrides, reconcileGenerated, resolveRoadNames,
   type GenPoseOverride, type GeneratedProp, type IntersectionControl,
 } from './intersections';
 import type { RoadStroke } from './roadData';
@@ -109,6 +109,24 @@ test('a manually-moved prop keeps its pose but still refreshes text', () => {
   assert(after2.text!.includes('Broadway'), 'renamed road reprints on the moved sign');
   assertClose(after2.gx, 999, 1e-9, 'and the move still holds');
   assert(sign2 !== undefined, 'same id survives a rename (geometry unchanged)');
+});
+
+test('collinear segments across an intersection share one name (req_1481)', () => {
+  // Main runs W→E as TWO segments meeting at the cross street; only the west
+  // half is named. 5th crosses vertically. The east half must inherit "Main".
+  const mainW = road('mw', 'Main', [[10, 30], [30, 30]]);
+  const mainE: RoadStroke = { id: 'me', points: [[30, 30], [50, 30]].map(([gx, gz]) => ({ gx, gz })), profile: { lanesF: 1, lanesB: 1, sidewalks: false } }; // unnamed
+  const fifth = road('f', '5th', [[30, 10], [30, 50]]);
+  const net = [mainW, mainE, fifth];
+  const js = deriveJunctions(net);
+  assert(js.length >= 1, 'the cross street makes a junction');
+  const resolved = resolveRoadNames(net, js);
+  assertEqual(resolved.get('mw'), 'Main', 'the named half keeps its name');
+  assertEqual(resolved.get('me'), 'Main', 'the collinear east half inherits it across the intersection');
+  assertEqual(resolved.get('f'), '5th', 'the cross street is unaffected');
+  // and the generated street signs print the shared name
+  const props = planIntersectionProps(js, NO_CONTROLS, net);
+  assert(props.some((p) => p.role === 'sign' && (p.text ?? '').includes('Main')), 'signs print Main');
 });
 
 test('pruneOverrides drops orphans, keeps live ones', () => {

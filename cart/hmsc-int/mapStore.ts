@@ -37,6 +37,7 @@ import {
 import { type ZoneDef } from './zoneData';
 import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { cellKey, planRoads, type RoadStroke } from './roadData';
+import { type GenPoseOverride, type IntersectionControl } from './intersections';
 
 // Map format version. v1 stored the road RASTER baked into the tile grids plus a
 // `roadUnder` undercoat to reverse it — the recipe (roads) AND its result (tiles)
@@ -123,6 +124,11 @@ export interface MapSnapshot {
   /** Road undercoat: [gx, gz, priorLegendIdx] per road-stamped cell — the tile
    *  index (into tileLegend, -1 = empty) each cell held before the stamp. */
   roadUnder?: [number, number, number][];
+  /** INTERSECTIONS-0619: per-junction control overrides (junctionKey → type) and
+   *  per-id pose overrides for manually-dragged generated props. The generated
+   *  props themselves are NOT saved — they re-derive from roads+these on load. */
+  intersectionControls?: [string, IntersectionControl][];
+  intersectionOverrides?: [string, GenPoseOverride][];
 }
 
 export interface EditorWorld {
@@ -134,6 +140,9 @@ export interface EditorWorld {
   roads?: RoadStroke[];
   /** cellKey("gx,gz") → the tile index the cell held before the road stamp. */
   roadUnder?: Map<string, number>;
+  /** INTERSECTIONS-0619: authored junction control types + manual-move overrides. */
+  intersectionControls?: Map<string, IntersectionControl>;
+  intersectionOverrides?: Map<string, GenPoseOverride>;
 }
 
 // ── Encode ─────────────────────────────────────────────────────────────────
@@ -181,16 +190,21 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
     tileLegend: [...TILE_KINDS],
     zones: world.zones.map((z) => ({ ...z, flags: [...z.flags] })),
     focus: Array.from(world.focus),
-    placements: world.placements.map((p) => ({
+    // Gen-tagged placements (intersection stop signs / lights / street signs) are
+    // DERIVED — excluded from the save and re-generated on load from roads + the
+    // control/override maps below, so the save stays the recipe, never the bake.
+    placements: world.placements.filter((p) => !p.gen).map((p) => ({
       id: p.id, cat: p.cat, kind: p.kind, gx: p.gx, gy: p.gy, rotation: p.rotation, locked: p.locked,
       ...(p.spawnId ? { spawnId: p.spawnId } : {}),
     })),
     chunks,
-    // The recipe: stroke centerlines + profile. The road raster is DERIVED from
-    // this at load (planRoads), not stored. profile spreads whole so new fields
+    // The recipe: stroke centerlines + profile (+ name). The road raster is DERIVED
+    // from this at load (planRoads), not stored. profile spreads whole so new fields
     // (speedLimitKph, …) ride automatically. No roadUnder in v2 — the base IS the
     // un-stamped grid, and load rebuilds the undercoat by re-stamping.
-    ...(world.roads?.length ? { roads: world.roads.map((r) => ({ id: r.id, points: r.points.map((pt) => ({ ...pt })), profile: { ...r.profile } })) } : {}),
+    ...(world.roads?.length ? { roads: world.roads.map((r) => ({ id: r.id, ...(r.name ? { name: r.name } : {}), points: r.points.map((pt) => ({ ...pt })), profile: { ...r.profile } })) } : {}),
+    ...(world.intersectionControls?.size ? { intersectionControls: [...world.intersectionControls] } : {}),
+    ...(world.intersectionOverrides?.size ? { intersectionOverrides: [...world.intersectionOverrides] } : {}),
   };
 }
 
@@ -269,6 +283,7 @@ export function deserializeMap(snap: MapSnapshot): EditorWorld {
     .filter((r) => r && Array.isArray(r.points) && r.points.length >= 2 && r.profile)
     .map((r) => ({
       id: r.id,
+      ...(typeof r.name === 'string' && r.name.length ? { name: r.name } : {}),
       points: r.points.map((p) => ({ gx: Math.round(p.gx), gz: Math.round(p.gz) })),
       profile: {
         lanesF: r.profile.lanesF,
@@ -294,7 +309,10 @@ export function deserializeMap(snap: MapSnapshot): EditorWorld {
     }
   }
 
-  return { chunks, zones, focus, placements, roads, roadUnder };
+  const intersectionControls = new Map<string, IntersectionControl>(snap.intersectionControls ?? []);
+  const intersectionOverrides = new Map<string, GenPoseOverride>(snap.intersectionOverrides ?? []);
+
+  return { chunks, zones, focus, placements, roads, roadUnder, intersectionControls, intersectionOverrides };
 }
 
 // A fresh, blank map: one seed chunk (a0), focused, nothing painted.

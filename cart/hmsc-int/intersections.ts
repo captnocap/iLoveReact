@@ -87,13 +87,57 @@ const SIGN_GAP_TILES = 1;
 
 const genId = (key: string, side: JunctionSide, role: GeneratedRole): string => `gen:${key}:${side}:${role}`;
 
-/** Distinct, non-empty road names meeting at a junction (stable arm order). */
-export function junctionRoadNames(j: AuthorJunction): string[] {
+/** Distinct, non-empty road names meeting at a junction (stable arm order). An
+ *  optional resolver maps a leg's roadId → its EFFECTIVE name (the collinear
+ *  group's shared name, resolveRoadNames). */
+export function junctionRoadNames(
+  j: AuthorJunction,
+  resolve?: (roadId: string, fallback?: string) => string | undefined,
+): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const leg of j.legs) {
-    const n = leg.roadName?.trim();
+    const n = (resolve ? resolve(leg.roadId, leg.roadName) : leg.roadName)?.trim();
     if (n && !seen.has(n)) { seen.add(n); out.push(n); }
+  }
+  return out;
+}
+
+/** Roads that continue STRAIGHT through a junction (the two opposite arms sharing
+ *  an axis) are ONE road and share a name (user ruling, req_1481: "same exact
+ *  horizontal or vertical axis, but only between an intersection → same road
+ *  name"). Union the through-arms at every junction; a group's name is the first
+ *  member a human named. Returns roadId → effective name (named groups only). */
+export function resolveRoadNames(
+  strokes: readonly RoadStroke[],
+  junctions: readonly AuthorJunction[],
+): Map<string, string> {
+  const parent = new Map<string, string>();
+  for (const s of strokes) parent.set(s.id, s.id);
+  const find = (x: string): string => {
+    let r = x;
+    while ((parent.get(r) ?? r) !== r) r = parent.get(r)!;
+    let c = x;
+    while ((parent.get(c) ?? c) !== c) { const n = parent.get(c)!; parent.set(c, r); c = n; }
+    return r;
+  };
+  const union = (a: string, b: string) => { const ra = find(a), rb = find(b); if (ra !== rb && parent.has(ra) && parent.has(rb)) parent.set(ra, rb); };
+  for (const j of junctions) {
+    // the two arms continuing straight share an axis — same road across the box
+    const vert = j.legs.filter((l) => l.approach === 'posZ' || l.approach === 'negZ').map((l) => l.roadId);
+    const horiz = j.legs.filter((l) => l.approach === 'posX' || l.approach === 'negX').map((l) => l.roadId);
+    for (let i = 1; i < vert.length; i++) union(vert[0], vert[i]);
+    for (let i = 1; i < horiz.length; i++) union(horiz[0], horiz[i]);
+  }
+  const groupName = new Map<string, string>();
+  for (const s of strokes) {
+    const n = s.name?.trim();
+    if (n && !groupName.has(find(s.id))) groupName.set(find(s.id), n);
+  }
+  const out = new Map<string, string>();
+  for (const s of strokes) {
+    const nm = groupName.get(find(s.id));
+    if (nm) out.set(s.id, nm);
   }
   return out;
 }
@@ -107,11 +151,14 @@ export function planIntersectionProps(
   strokes: readonly RoadStroke[],
 ): GeneratedProp[] {
   const byId = new Map(strokes.map((s) => [s.id, s] as const));
+  // Collinear arms across an intersection share a name (req_1481).
+  const resolved = resolveRoadNames(strokes, junctions);
+  const nameOf = (roadId: string, fallback?: string) => resolved.get(roadId) ?? fallback;
   const out: GeneratedProp[] = [];
   for (const j of junctions) {
     if (j.legs.length === 0) continue;
     const ctrl = controlFor(j, controls);
-    const signText = junctionRoadNames(j).join('\n') || undefined;
+    const signText = junctionRoadNames(j, nameOf).join('\n') || undefined;
     for (const leg of j.legs) {
       const stroke = byId.get(leg.roadId);
       const halfCarriage = stroke ? carriagewayTiles(clampProfile(stroke.profile)) / 2 : LANE_TILES / 2;
