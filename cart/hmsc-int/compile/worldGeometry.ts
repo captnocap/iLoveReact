@@ -56,6 +56,8 @@ import {
 // (render3d/props/DataProp) so a prop's geometry lives in exactly one place.
 import { resolvePropParts } from './propRecipes/resolve';
 import { importedPropMesh, isImportedPropKind, type ImportedPropMesh } from '../game/kinds/importedProps';
+import { isCookedPropKind } from '../game/kinds/props';
+import { cookedAssetById, cookedMeshBlob } from '../editors/model/cookedAssets';
 import { textBytes } from '@reactjit/workspace';
 
 export const INSTANCE_STRIDE = 13;
@@ -416,10 +418,45 @@ function pushPropParts(b: Build, prop: WorldProp, parts: readonly PropPartSpec[]
 }
 
 
+// The cooked-prop flat tint — mirrors CookedProp.tsx's COOKED_PROP_TINT (#c2c6cf)
+// so the compiled mesh matches the grey of the editor preview (v1 is untextured).
+const COOKED_PROP_COLOR: readonly [number, number, number] = [0xc2 / 255, 0xc6 / 255, 0xcf / 255];
+
+/** A Studio-cooked prop's baked mesh as an ImportedPropMesh, so it ships through
+ *  the SAME MESH_PROPS lump + loader path as an OBJ/GLB import (the cook flattened
+ *  the model to one content-addressed soup; CookedProp.tsx renders it the same way
+ *  in the editor). Returns null when the asset/blob isn't in the cooked store. */
+function cookedPropMesh(kind: string): ImportedPropMesh | null {
+  const asset = cookedAssetById(kind);
+  if (!asset) return null;
+  const verts = cookedMeshBlob(asset.meshRef);
+  if (!verts || verts.length === 0) return null;
+  return {
+    key: asset.meshRef,
+    source: `cooked:${asset.id}`,
+    color: COOKED_PROP_COLOR,
+    count: verts.length / 8,
+    boundsRadius: asset.collision.boundsRadius,
+    footprintWidthMeters: asset.collision.footprintWidthMeters,
+    footprintDepthMeters: asset.collision.footprintDepthMeters,
+    heightMeters: asset.collision.heightMeters,
+    solid: asset.descriptor.solid,
+    vertices: verts,
+  };
+}
+
 function pushPropGeometry(b: Build, prop: WorldProp): number {
   b.interact.collect(prop);
   if (isImportedPropKind(prop.kind)) {
     const mesh = importedPropMesh(prop.kind);
+    if (mesh) collectImportedMeshProp(b.meshProps, prop, mesh);
+    return 0;
+  }
+  // Studio-cooked props (req_1134): a real baked mesh living in the cooked-asset
+  // content store, shipped through the SAME MESH_PROPS path as an imported mesh.
+  // Without this they fell through to resolvePropParts' placeholder box (req_1493).
+  if (isCookedPropKind(prop.kind)) {
+    const mesh = cookedPropMesh(prop.kind);
     if (mesh) collectImportedMeshProp(b.meshProps, prop, mesh);
     return 0;
   }
