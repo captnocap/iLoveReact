@@ -169,7 +169,7 @@ test('embedded = wall/door/bush; gameplay = spawn/save/vehicleSpawn; every kind 
 test('TILE_KINDS index order is locked (host pathing ships kind indices)', () => {
   assertEqual(
     TILE_KINDS.join(','),
-    'water,road,asphalt,sidewalk,mud,sand,wall,door,bush,marker,spawn,save,laneNorth,laneSouth,laneEast,laneWest,junction,crosswalk,median,grass,grassDry,parking,vehicleSpawn,parkingCross',
+    'water,road,asphalt,sidewalk,mud,sand,wall,door,bush,marker,spawn,save,laneNorth,laneSouth,laneEast,laneWest,junction,crosswalk,median,grass,parking,vehicleSpawn,parkingCross',
     'TILE_KINDS order',
   );
   for (const k of TILE_KINDS) {

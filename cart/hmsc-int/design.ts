@@ -63,11 +63,10 @@ export type TileKind =
   // palette, lowered to placedCells on compile.
   | 'spawn'
   | 'save'
-  // Living ground (GRASSTILE-0611, req_0642 "bush tiles but no grass tiles").
-  // Appended at the END — both tile tables ship kind INDICES in their own key
-  // order, so new kinds never enter the middle.
+  // Living ground: plain lawn/meadow surface only. Grass blades, palms, and
+  // painted bushes live in the separate flora channel so they can grow over any
+  // ground surface (sand + grass flora = beach grass).
   | 'grass'
-  | 'grassDry'
   // Parking (PARKSPAWN-0612, req_0694): painted parking-lot ground — asphalt
   // wearing white stall lines (3m bays drawn by the tile surface shaders).
   // Drivable but never a thoroughfare; where parked traffic lives.
@@ -79,18 +78,7 @@ export type TileKind =
   // Parking rotated 90° (req_0710): same lot ground as 'parking', but its bay
   // lines run across Z instead of X — the perpendicular stall orientation, so
   // a lot is not stuck to one direction. Appended LAST (indices stay stable).
-  | 'parkingCross'
-  // Grass DENSITY variants (paint low/med/high grass) — appended at the END so
-  // every prior kind index stays stable. Same ground as `grass`; only the grass
-  // population density differs (render3d/grassPopulation GRASS_DENSITY).
-  | 'grassSparse'
-  | 'grassLush'
-  // Palm grove: grassy ground that grows palms (PalmTrunk + a ~frond~ crown) via
-  // render3d/palmPopulation — the grass approach, leaf-shaped (req_1443). 'palm' is
-  // the MED grove; palmSparse/palmDense are the density variants (req_1467).
-  | 'palm'
-  | 'palmSparse'
-  | 'palmDense';
+  | 'parkingCross';
 
 // Altered-perception channel. Drives how building skins (and later other
 // surfaces) reinterpret themselves — e.g. being high scrambling facade text or

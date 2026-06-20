@@ -58,10 +58,6 @@ export type TileKind =
   // Living ground (GRASSTILE-0611, req_0642): paintable lawn/meadow surfaces —
   // the user had bush (an embedded foliage profile) but no grass GROUND.
   | 'grass'
-  | 'grassDry'
-  | 'grassSparse'
-  | 'grassLush'
-  | 'palm'
   // Parking + vehicle spawn (PARKSPAWN-0612, req_0694). Appended last — kind
   // indices stay stable. 'parking' is painted parking-lot ground (asphalt
   // wearing white stall lines); 'vehicleSpawn' is the gameplay marker where
@@ -613,10 +609,10 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     render: { color: '#46431f', heightMeters: 0.085, textureKey: TEX.road },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
-  // ── living ground (GRASSTILE-0611, req_0642) — appended LAST, indices stable ─
+  // ── living ground: plain lawn surface. Growth is flora, not ground. ────────
   // Quiet underfoot (the perception system's footstep-noise floor), slightly
-  // slow, bad for cars; thin concealment — standing in a LAWN hides nothing
-  // (hiding is the bush/grassTall PROP's job, not the ground's).
+  // slow, bad for cars; thin concealment. Grass blades, palms, and painted
+  // bushes live in the flora channel so they can grow over any surface.
   grass: {
     kind: 'grass',
     placement: 'surface',
@@ -630,21 +626,6 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
     surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
     render: { color: '#3f7d33', heightMeters: 0.06, textureKey: TEX.grass },
-    altitude: HEIGHTFIELD_ALTITUDE,
-  },
-  grassDry: {
-    kind: 'grassDry',
-    placement: 'surface',
-    label: 'Dry Grass',
-    flow: 'none',
-    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
-    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.8, preferredByVehicles: false, noise: 0.28 },
-    cover: NO_COVER,
-    door: NO_DOOR,
-    visibility: { ...OPEN_VISIBILITY, concealment: 0.1, lightTransmission: 0.97, soundOcclusion: 0.04 },
-    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.55 },
-    surface: { material: 'soil', walkSpeedMultiplier: 0.96, runSpeedMultiplier: 0.94, vehicleSpeedMultiplier: 0.55, accelerationMultiplier: 0.72, friction: 0.58, lateralGrip: 0.62, restitution: 0.2 },
-    render: { color: '#8a9a4a', heightMeters: 0.06, textureKey: TEX.grass },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   // ── parking + vehicle spawn (PARKSPAWN-0612, req_0694) — appended LAST ─────
@@ -699,95 +680,6 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 0.95 },
     surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 0.85, accelerationMultiplier: 0.95, friction: 0.2, lateralGrip: 0.9, restitution: 0.82 },
     render: { color: '#2a2f3a', heightMeters: 0.08, textureKey: TEX.parkingCross },
-    altitude: HEIGHTFIELD_ALTITUDE,
-  },
-  // ── grass DENSITY variants (req: paint low/med/high grass) — appended LAST so
-  // every prior tile index stays stable. Same ground as `grass` (med); the only
-  // difference is how many blades the grass population system scatters per cell
-  // (render3d/grassPopulation GRASS_DENSITY). Distinct swatch colours so the three
-  // densities read apart in the painter. `grass`/`grassDry` stay MEDIUM. ─────────
-  grassSparse: {
-    kind: 'grassSparse',
-    placement: 'surface',
-    label: 'Grass (Sparse)',
-    flow: 'none',
-    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
-    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.9, preferredByVehicles: false, noise: 0.2 },
-    cover: NO_COVER,
-    door: NO_DOOR,
-    visibility: { ...OPEN_VISIBILITY, concealment: 0.12, lightTransmission: 0.97, soundOcclusion: 0.04 },
-    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
-    surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
-    render: { color: '#5c8a40', heightMeters: 0.06, textureKey: TEX.grass },
-    altitude: HEIGHTFIELD_ALTITUDE,
-  },
-  grassLush: {
-    kind: 'grassLush',
-    placement: 'surface',
-    label: 'Grass (Lush)',
-    flow: 'none',
-    pathing: { walkable: true, movementCost: 1.18, blocksLineOfSight: false },
-    npc: { traversable: true, walkCost: 1.14, runCost: 1.12, vehicleCost: 2.0, preferredByVehicles: false, noise: 0.22 },
-    cover: NO_COVER,
-    door: NO_DOOR,
-    visibility: { ...OPEN_VISIBILITY, concealment: 0.16, lightTransmission: 0.96, soundOcclusion: 0.05 },
-    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.48 },
-    surface: { material: 'soil', walkSpeedMultiplier: 0.94, runSpeedMultiplier: 0.9, vehicleSpeedMultiplier: 0.48, accelerationMultiplier: 0.68, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
-    render: { color: '#2f6b28', heightMeters: 0.06, textureKey: TEX.grass },
-    altitude: HEIGHTFIELD_ALTITUDE,
-  },
-  // ── palm GROVE (req_1443) — appended LAST so every prior tile index stays stable.
-  // A paintable ground that GROWS palm trees the grass way: a painted 'palm' cell
-  // sparsely spawns a palm (PalmTrunk mesh + a crown of Frond cards) through the
-  // ~frond~ foliage pipeline (render3d/palmPopulation). The ground itself is grassy
-  // soil; the palms are the population, just like grass blades over a grass cell. ──
-  palm: {
-    kind: 'palm',
-    placement: 'surface',
-    label: 'Palm Grove',
-    flow: 'none',
-    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
-    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.9, preferredByVehicles: false, noise: 0.2 },
-    cover: NO_COVER,
-    door: NO_DOOR,
-    visibility: { ...OPEN_VISIBILITY, concealment: 0.12, lightTransmission: 0.95, soundOcclusion: 0.05 },
-    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
-    surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
-    render: { color: '#4f7a3a', heightMeters: 0.06, textureKey: TEX.grass },
-    altitude: HEIGHTFIELD_ALTITUDE,
-  },
-  // ── palm DENSITY variants (req_1467) — appended LAST so prior indices stay stable.
-  // Same grassy ground as 'palm' (which is the MED grove); only the palm population
-  // density differs (render3d/palmPopulation PALM_KIND_DENSITY): sparse = scattered,
-  // dense = a wall of palms. Distinct swatch colours so the three read apart. ──────
-  palmSparse: {
-    kind: 'palmSparse',
-    placement: 'surface',
-    label: 'Palm Grove (Sparse)',
-    flow: 'none',
-    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
-    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.9, preferredByVehicles: false, noise: 0.2 },
-    cover: NO_COVER,
-    door: NO_DOOR,
-    visibility: { ...OPEN_VISIBILITY, concealment: 0.12, lightTransmission: 0.95, soundOcclusion: 0.05 },
-    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
-    surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
-    render: { color: '#6f9a52', heightMeters: 0.06, textureKey: TEX.grass },
-    altitude: HEIGHTFIELD_ALTITUDE,
-  },
-  palmDense: {
-    kind: 'palmDense',
-    placement: 'surface',
-    label: 'Palm Grove (Dense)',
-    flow: 'none',
-    pathing: { walkable: true, movementCost: 1.2, blocksLineOfSight: true },
-    npc: { traversable: true, walkCost: 1.16, runCost: 1.14, vehicleCost: 2.4, preferredByVehicles: false, noise: 0.24 },
-    cover: NO_COVER,
-    door: NO_DOOR,
-    visibility: { ...OPEN_VISIBILITY, concealment: 0.3, lightTransmission: 0.85, soundOcclusion: 0.12 },
-    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.45 },
-    surface: { material: 'soil', walkSpeedMultiplier: 0.93, runSpeedMultiplier: 0.9, vehicleSpeedMultiplier: 0.45, accelerationMultiplier: 0.68, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
-    render: { color: '#356326', heightMeters: 0.06, textureKey: TEX.grass },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
 };

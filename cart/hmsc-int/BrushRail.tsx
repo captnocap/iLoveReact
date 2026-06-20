@@ -4,7 +4,7 @@
 
 import { Box, Pressable, Text, TextInput } from '@reactjit/primitives';
 import type { TileKind, ZoneFlag } from './design';
-import { TILE_KINDS, tileKindDefinition } from './world/tileKinds';
+import { PAINTABLE_TILE_KINDS, tileKindDefinition } from './world/tileKinds';
 import { FLORA_KINDS, FLORA_KIND_DEFINITIONS } from './floraData';
 import { ZONE_FLAGS } from './world/zones';
 import { HEIGHT_LIMIT, type BrushProfile } from './heightData';
@@ -52,7 +52,7 @@ export function PaintSection(props: { tile: TileKind; onTile: (k: TileKind) => v
     <Box style={{ gap: 5 }}>
       <RailLabel text="tiles" />
       <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-        {TILE_KINDS.map((k) => <Swatch key={k} color={tileKindDefinition(k).render.color} active={props.tile === k} onPress={() => { props.onTile(k); props.onPaint(); }} />)}
+        {PAINTABLE_TILE_KINDS.map((k) => <Swatch key={k} color={tileKindDefinition(k).render.color} active={props.tile === k} onPress={() => { props.onTile(k); props.onPaint(); }} />)}
       </Box>
     </Box>
   );
@@ -251,4 +251,3 @@ export function ZoneSection(props: {
     </Box>
   );
 }
-
