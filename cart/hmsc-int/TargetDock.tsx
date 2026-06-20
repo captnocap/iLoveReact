@@ -20,6 +20,7 @@ export function channelVisible(channels: PainterChannels | undefined, layer: Lay
 const TARGETS: { layer: Layer; label: string; color: string; eye: boolean }[] = [
   { layer: 'paint', label: 'TILE', color: '#86efac', eye: false }, // tiles are the base — always visible
   { layer: 'flora', label: 'FLORA', color: '#4ade80', eye: true },
+  { layer: 'water', label: 'WATER', color: '#2f7fa8', eye: false },
   { layer: 'road', label: 'ROAD', color: '#f59e0b', eye: true },
   { layer: 'height', label: 'TERRAIN', color: '#fbbf24', eye: true },
   { layer: 'place', label: 'OBJECT', color: '#a78bfa', eye: true },

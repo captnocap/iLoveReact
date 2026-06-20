@@ -23,6 +23,7 @@ test('PAINTER-0610: the behavior resolver truth table (tool × target)', () => {
     // Select is universal — except Object, where the native nodes own the pointer.
     ['pointer', 'paint', false, 'select'],
     ['pointer', 'flora', false, 'select'],
+    ['pointer', 'water', false, 'select'],
     ['pointer', 'height', false, 'select'],
     ['pointer', 'zone', false, 'select'],
     ['pointer', 'road', false, 'select'],
@@ -30,6 +31,7 @@ test('PAINTER-0610: the behavior resolver truth table (tool × target)', () => {
     // Paint strokes the brush targets, lays road points, stamps the armed object.
     ['brush', 'paint', false, 'stroke'],
     ['brush', 'flora', false, 'stroke'],
+    ['brush', 'water', false, 'stroke'],
     ['brush', 'height', false, 'stroke'],
     ['brush', 'zone', false, 'stroke'],
     ['brush', 'road', false, 'click'],
@@ -38,6 +40,7 @@ test('PAINTER-0610: the behavior resolver truth table (tool × target)', () => {
     // Erase works on EVERY target (the erase-everywhere ruling).
     ['eraser', 'paint', false, 'stroke'],
     ['eraser', 'flora', false, 'stroke'],
+    ['eraser', 'water', false, 'stroke'],
     ['eraser', 'height', false, 'stroke'],
     ['eraser', 'zone', false, 'stroke'],
     ['eraser', 'road', false, 'click'],
@@ -53,7 +56,7 @@ test('PAINTER-0610: the behavior resolver truth table (tool × target)', () => {
 });
 
 test('PAINTER-0610: tool usability — erase everywhere, Paint dims on an unarmed Object target', () => {
-  const targets: Layer[] = ['paint', 'flora', 'height', 'zone', 'place', 'road'];
+  const targets: Layer[] = ['paint', 'flora', 'water', 'height', 'zone', 'place', 'road'];
   for (const t of targets) {
     assert(painterToolUsable('pointer', t, false), `select usable on ${t}`);
     assert(painterToolUsable('eraser', t, false), `erase usable on ${t}`);

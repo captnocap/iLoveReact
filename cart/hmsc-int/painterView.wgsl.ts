@@ -207,10 +207,9 @@ fn hSample(base: i32, ix: i32, iy: i32, cols: i32, rows: i32) -> f32 {
     }
   }
 
-  // ── painted water (the terrain water brush): a clear blue where the water grid
-  // is wet (level > 0), so you SEE what you paint on the 2D map. Same encodeField
-  // layout as height; the section sits after zone. Always shown (it's the body
-  // of water, not a tint channel).
+  // ── painted water: a clear blue where the water grid is wet (depth > 0), so
+  // you SEE what you paint on the 2D map. Same encodeField layout as height.
+  // Always shown (it's the body of water, not a tint channel).
   let zEnd = zBase + 3 + zpalN * 3 + i32(D[zBase]) * i32(D[zBase + 1]);
   let fBase = zEnd;
   let fcols = i32(D[fBase]);

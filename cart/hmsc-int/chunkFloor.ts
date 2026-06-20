@@ -31,8 +31,8 @@ export type ChunkFloor = {
   hcols: number;      // height-sample columns / rows (cols*rows = heights.length)
   hrows: number;
   hver: number;       // height version — bumps each height edit; drives the host's dynamic-slot overwrite
-  // Painted WATER surface level per height-sample (the terrain tool's water brush),
-  // same grid as `heights`; a sample > 0 is WET (water up to that level), 0 = dry.
+  // Painted WATER depth per height-sample, same grid as `heights`; a sample > 0 is
+  // WET and resolves to surface bed + depth (the water painter fills negatives to 0).
   // Present only on chunks with painted water; stable ref unless water painted.
   water?: number[];
   // Encoded FLORA channel (encodeFloraMap: [cols, rows, kindCount, ...cells]) — what
@@ -189,13 +189,12 @@ export function floorsToLandforms(floors: ChunkFloor[]): Landform[] {
   return out;
 }
 
-// A painted-water chunk → a field-backed WaterBody (the terrain water brush's
-// twin of floorToLandform). The brush excavated a basin (the chunk's terrain
-// `heights` were dug down by the water DEPTH it stored in `water`), so the water
-// SURFACE per wet cell = bed + depth (≈ the original ground level — a flush pool).
-// Dry cells drop to `base` (just under the deepest basin floor) so the heightfield
-// skirt fills the whole basin and dry cells hide under the terrain. One body per
-// wet chunk; depth is derived against the bed at lookup.
+// A painted-water chunk → a field-backed WaterBody (the water layer's twin of
+// floorToLandform). The water grid stores depth; the surface per wet cell is
+// bed + depth. The painter writes depth = -bed for negative terrain, so painted
+// basins fill to world height 0. Dry cells drop to `base` (just under the deepest
+// basin floor) so the heightfield skirt fills the whole basin and dry cells hide
+// under the terrain. One body per wet chunk.
 export function floorToWaterBody(f: ChunkFloor): WaterBody {
   const cell = CHUNK_TILES / (f.hcols - 1);
   const water = f.water ?? [];
@@ -234,6 +233,9 @@ export function floorsToWaterBodies(floors: ChunkFloor[]): WaterBody[] {
   const out: WaterBody[] = [];
   for (const f of floors) {
     if (!f.water || f.water.length === 0) continue;
+    let wet = false;
+    for (let i = 0; i < f.water.length; i++) if (f.water[i]! > 0) { wet = true; break; }
+    if (!wet) continue;
     const id = chunkFloorId(f.cx, f.cz);
     live.add(id);
     const hit = waterCache.get(id);

@@ -93,7 +93,7 @@ export function waterHeightGrid(
   return flat;
 }
 
-/** Ripple a PAINTED water field (the terrain water brush) at time `t`: wet cells
+/** Ripple a PAINTED water field at time `t`: wet cells
  *  (surface above the basin floor `base`) get the travelling wave; dry cells (at
  *  base, hidden under the terrain) stay put. Returns the heightfield grid the
  *  editor render bakes, same shape as waterHeightGrid so WaterBodyMesh treats

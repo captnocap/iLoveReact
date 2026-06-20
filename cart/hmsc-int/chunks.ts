@@ -34,10 +34,9 @@ export interface Chunk {
   cz: number;
   tiles: TileMap;
   height: HeightField;
-  // Painted WATER surface level (the terrain tool's water brush). Same grid as
-  // `height`; a cell with z > 0 is WET and holds water up to that surface level —
-  // depth is derived against `height` (the bed). 0 = dry. So you paint water into
-  // terrain and dig the bed under it for depth, exactly like a dropped body.
+  // Painted WATER depth. Same grid as `height`; a sample with z > 0 is WET.
+  // The water layer fills negative terrain to surface 0, so depth is -height at
+  // paint time. 0 = dry. Terrain height remains the bed.
   water: HeightField;
   // What GROWS on each cell — grass blades / palms / bushes (FLORADECOUPLE-0619).
   // A SEPARATE channel from `tiles` so a population layers over ANY ground surface

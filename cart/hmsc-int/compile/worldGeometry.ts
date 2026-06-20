@@ -690,9 +690,8 @@ export const WATER_LUMP_VERSION = 1;
  *          per body: u32 cols,rows | f32 centerX,centerZ,base,width,depth | f32[cols*rows] heights */
 export function encodeWaterBodies(bodies: GameState['world']['waterBodies'] | undefined): Uint8Array {
   const list = bodies ?? [];
-  // A painted body (terrain water brush) ships its authored per-cell grid; a
-  // parametric body builds a still grid from its footprint. The host applies the
-  // wave either way.
+  // A painted body ships its authored per-cell grid; a parametric body builds a
+  // still grid from its footprint. The host applies the wave either way.
   const grids = list.map((b) =>
     b.field
       ? { cols: b.field.cols, rows: b.field.rows, base: b.field.base, heights: b.field.heights }
@@ -1039,9 +1038,11 @@ export function buildWorldInstances(
   const pieceCount = pushPlacedPieces(b, pieces);
   pushPaintedFloors(b, floors);
   if (opts.includeGroundLayers) pushWorldLayers(b, state);
-  pushFoliage(b, state, floors, buildGrassInstances, INSTANCE_SHAPE_GRASS, 'grass');
-  pushFoliage(b, state, floors, buildBushInstances, INSTANCE_SHAPE_BUSH, 'bush');
-  pushPalms(b, state, floors);
+  if (state?.world) {
+    pushFoliage(b, state, floors, buildGrassInstances, INSTANCE_SHAPE_GRASS, 'grass');
+    pushFoliage(b, state, floors, buildBushInstances, INSTANCE_SHAPE_BUSH, 'bush');
+    pushPalms(b, state, floors);
+  }
   // Bodies of water ship in their own WATER lump (encodeWaterBodies) as animated
   // translucent heightfields, not instances — so they're NOT pushed here.
   return {

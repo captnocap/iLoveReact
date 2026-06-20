@@ -12,7 +12,7 @@ import type { BrushMode, BrushShape } from './brush';
 import { ChipGrid, MiniStepper, RailLabel, RailSlider, Swatch, RAIL_CELL } from './railAtoms';
 import type { ZoneDef } from './zoneData';
 
-type HeightMode = 'brush' | 'ramp' | 'slope' | 'smooth' | 'water' | 'waterSlope';
+type HeightMode = 'brush' | 'ramp' | 'slope' | 'smooth';
 
 export type BrushRailSettings = {
   size: number;
@@ -32,6 +32,7 @@ export type BrushRailSettings = {
 const Z_STEP = 1;
 const RAMP_SIZE_MIN = 1, RAMP_SIZE_MAX = 120, RAMP_STEP = 1, ANGLE_STEP = 15;
 const FLAG_TAG: Record<ZoneFlag, string> = { private: 'PV', safe: 'SF', hostile: 'HO', restricted: 'RS', interior: 'IN' };
+const GROUND_PAINT_TILE_KINDS = PAINTABLE_TILE_KINDS.filter((k) => k !== 'water');
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
@@ -52,7 +53,7 @@ export function PaintSection(props: { tile: TileKind; onTile: (k: TileKind) => v
     <Box style={{ gap: 5 }}>
       <RailLabel text="tiles" />
       <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-        {PAINTABLE_TILE_KINDS.map((k) => <Swatch key={k} color={tileKindDefinition(k).render.color} active={props.tile === k} onPress={() => { props.onTile(k); props.onPaint(); }} />)}
+        {GROUND_PAINT_TILE_KINDS.map((k) => <Swatch key={k} color={tileKindDefinition(k).render.color} active={props.tile === k} onPress={() => { props.onTile(k); props.onPaint(); }} />)}
       </Box>
     </Box>
   );
@@ -103,49 +104,6 @@ function SlopeSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<Br
   );
 }
 
-// The water SLOPE (ocean shore): same graded stroke as the terrain slope, but the
-// two values are pool DEPTHS — shallow at the start of the drag, deep at the end —
-// so dragging from the beach out to sea makes a wadeable shoreline. rampMin = shore
-// depth, rampMax = deep depth; both non-negative (the bed digs to -depth).
-function WaterSlopeSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void }) {
-  const b = props.brush;
-  const set = props.onPatch;
-  return (
-    <Box style={{ gap: 5 }}>
-      <RailLabel text="shore" />
-      <ChipGrid items={PROFILES} value={b.profile} onPick={(profile) => set({ profile: profile as BrushProfile })} />
-      <MiniStepper label="shore z" value={Math.max(0, b.rampMin).toFixed(1)} onDec={() => set({ rampMin: clamp(b.rampMin - Z_STEP, 0, HEIGHT_LIMIT) })} onInc={() => set({ rampMin: clamp(b.rampMin + Z_STEP, 0, HEIGHT_LIMIT) })} />
-      <MiniStepper label="deep z" value={Math.max(0, b.rampMax).toFixed(1)} onDec={() => set({ rampMax: clamp(b.rampMax - Z_STEP, 0, HEIGHT_LIMIT) })} onInc={() => set({ rampMax: clamp(b.rampMax + Z_STEP, 0, HEIGHT_LIMIT) })} />
-    </Box>
-  );
-}
-
-// Flat water (heightMode 'water'). Water only exists IN a basin it's held by — it
-// never rises above the ground — so the only knob is DEPTH: how deep the dug pool
-// is. There is no negative (a signed "height z" here was meaningless and made the
-// brush paint water on negative values, which read as a bug); depth is a single
-// positive number in metres. The brush stores it in centerZ (and reads |centerZ|).
-function WaterSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void }) {
-  const b = props.brush;
-  const set = props.onPatch;
-  return (
-    <Box style={{ gap: 5 }}>
-      <RailLabel text="water" />
-      <RailSlider
-        label="depth"
-        value={Math.max(0.5, Math.abs(b.centerZ))}
-        min={0.5}
-        max={HEIGHT_LIMIT}
-        step={0.5}
-        valueText="m"
-        formatDraft={(n) => n.toFixed(1)}
-        inputWidth={42}
-        onValue={(depth) => set({ centerZ: clamp(Math.abs(depth), 0.5, HEIGHT_LIMIT) })}
-      />
-    </Box>
-  );
-}
-
 function SmoothSection(props: { brush: BrushRailSettings; onPatch: (p: Partial<BrushRailSettings>) => void }) {
   const b = props.brush;
   const set = props.onPatch;
@@ -177,10 +135,6 @@ export function HeightSection(props: { brush: BrushRailSettings; onPatch: (p: Pa
         <RampSection brush={b} onPatch={props.onPatch} />
       ) : b.heightMode === 'slope' ? (
         <SlopeSection brush={b} onPatch={props.onPatch} />
-      ) : b.heightMode === 'waterSlope' ? (
-        <WaterSlopeSection brush={b} onPatch={props.onPatch} />
-      ) : b.heightMode === 'water' ? (
-        <WaterSection brush={b} onPatch={props.onPatch} />
       ) : b.heightMode === 'smooth' ? (
         <SmoothSection brush={b} onPatch={props.onPatch} />
       ) : (

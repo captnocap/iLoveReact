@@ -31,7 +31,7 @@ import { tickerRecords, encodeTickers } from './compile/worldTicker';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './compile/playerModel';
 import { buildDefaultNpcPopulation, encodeNpcModelsLump, encodeNpcSpawnsLump } from './compile/npcModels';
-import type { ChunkFloor } from './chunkFloor';
+import { floorsToWaterBodies, type ChunkFloor } from './chunkFloor';
 import { GAME_BUILD, GAME_WORLD, type PlacedBuildPiece } from '@game';
 
 // Terrain top (metres) under a world point — the SAME column the editor's
@@ -228,6 +228,7 @@ export function createHmscMapfile(
   const materials = encodeMaterials(geometry.materials);
   const materialRefs = encodeMaterialRefs(geometry.materialRefs);
   const heightfields = encodeFloorHeightfields(floors);
+  const waterBodies = [...state.world.waterBodies, ...floorsToWaterBodies([...floors])];
 
   // The AUTHORED physics colliders — the same +-join-aware solids the editor's
   // play view steps against (placedPieceColliders / placedPieceRamps), so a "+"
@@ -336,7 +337,7 @@ export function createHmscMapfile(
     { type: MAP_LUMP.MESH_PROPS, encoding: 'raw', data: encodeMeshProps(geometry.meshProps) },
     // Bodies of water (world/water) — the loader renders each as a translucent
     // heightfield with a host-clock travelling wave (animated ripples).
-    { type: MAP_LUMP.WATER, encoding: 'raw', data: encodeWaterBodies(state.world.waterBodies) },
+    { type: MAP_LUMP.WATER, encoding: 'raw', data: encodeWaterBodies(waterBodies) },
     // Player-stats config (GAME_STATS) — the flat stat tuning the loader seeds
     // the compiled player's stats from (compile/playerStats.ts). The config
     // carries end to end; the engine stays dumb.

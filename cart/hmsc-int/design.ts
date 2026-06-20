@@ -574,10 +574,9 @@ export type WorldSurfaceRegion = {
 // surface-level float. Depth is never stored — it is derived (surfaceY minus the
 // terrain bed) at lookup. `shape` 'disc' = the footprint's inscribed ellipse.
 export type WaterBodyShape = 'rect' | 'disc';
-// A painted water grid (the terrain tool's water brush): a cols×rows grid of
-// per-cell water SURFACE level (≤ 0 = dry/no water there), `cell` metres apart,
-// centred on the body. When present it overrides the parametric footprint —
-// depth is still derived against the terrain bed, per cell.
+// A painted water grid: a cols×rows grid of per-cell water SURFACE height
+// (dry cells sit at `base`), `cell` metres apart, centred on the body. When
+// present it overrides the parametric footprint.
 export type WaterField = { cols: number; rows: number; cell: number; heights: number[]; base: number };
 export type WaterBody = {
   id: string;

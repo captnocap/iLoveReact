@@ -32,7 +32,7 @@ export function assemblePreviewWorld(opts: {
   mergeKindTextures: (cat: 'building' | 'prop', kind: string, inst?: Record<string, string>) => Record<string, string> | undefined;
 }): GameState {
   const { baseWorld, landforms, waterBodies, placements, mergeKindTextures } = opts;
-  // Painted water (the terrain water brush) becomes one field-backed WaterBody per
+  // Painted water becomes one field-backed WaterBody per
   // wet chunk; dropped water placements (below) append to the same layer.
   let s: GameState = { ...baseWorld, world: { ...baseWorld.world, landforms, waterBodies } };
   // Markers are single cells; precompute every marker's cell up front so a

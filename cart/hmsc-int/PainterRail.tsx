@@ -40,8 +40,6 @@ const TERRAIN_MODES = [
   { id: 'ramp', label: 'ramp', hint: '/' },
   { id: 'slope', label: 'slope', hint: '~' },
   { id: 'smooth', label: 'smooth', hint: 's' },
-  { id: 'water', label: 'water', hint: 'w' },
-  { id: 'waterSlope', label: 'shore', hint: '≈' },
 ];
 
 // Select / Paint / Erase — the whole tool surface, on every target. Erase is
@@ -295,7 +293,7 @@ export function PainterRail(props: {
   // The brush footprint matters wherever a stroke sweeps cells — including the
   // object eraser (its delete radius IS the brush radius). Road clicks and the
   // object stamp (footprint = the object) don't use it.
-  const usesBrush = target === 'paint' || target === 'flora' || target === 'zone' || target === 'height' || (target === 'place' && tool === 'eraser');
+  const usesBrush = target === 'paint' || target === 'flora' || target === 'water' || target === 'zone' || target === 'height' || (target === 'place' && tool === 'eraser');
   const inspector = <ObjectInspectorCard sel={props.selPlacement} buildSel={props.selBuild} place={props.place} />;
 
   return (

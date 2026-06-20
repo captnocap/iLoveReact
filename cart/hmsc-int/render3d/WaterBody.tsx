@@ -25,7 +25,7 @@ const WaterBodyMesh = memo(function WaterBodyMesh(props: { body: WaterBodyData }
   const b = props.body;
   const centerX = b.x + b.width / 2;
   const centerZ = b.z + b.depth / 2;
-  // FLAT still-water grid, baked once. A painted body (terrain water brush) ships
+  // FLAT still-water grid, baked once. A painted body from the water layer ships
   // its authored field verbatim; a parametric body builds a footprint grid. Both
   // yield {cols,rows,heights,base} — the host waves ride this flat surface.
   const field = useMemo(() => {

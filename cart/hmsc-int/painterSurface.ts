@@ -41,8 +41,8 @@ export function encodePainterSurface(
   pushAll(out, encodeField(chunk.height));
   pushAll(out, encodeZoneSection(chunk.zones, zones));
   pushAll(out, encodeFloraSection(chunk.flora));
-  // Painted water surface level (the terrain water brush) — same encodeField
-  // layout as height; the view tints blue where a sample is wet (> 0).
+  // Painted water depth — same encodeField layout as height; the view tints blue
+  // where a sample is wet (> 0).
   pushAll(out, encodeField(chunk.water));
   return out;
 }

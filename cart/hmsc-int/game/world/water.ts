@@ -30,7 +30,7 @@ export type WaterBodyShape = 'rect' | 'disc';
  * water surface height in metres — the single factor; depth is derived against
  * the terrain bed.
  */
-// A painted water grid (the terrain tool's water brush): per-cell surface level,
+// A painted water grid: per-cell surface level,
 // centred on the body, `cell` metres apart. A cell ≤ 0 is dry. When present it
 // overrides the parametric footprint (organic painted ponds, not just rect/disc).
 export type WaterField = { cols: number; rows: number; cell: number; heights: number[]; base: number };
