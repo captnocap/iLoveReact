@@ -16,10 +16,11 @@
 // (office glass / residential brick / plain wall). Pick a face, then a skin.
 
 import { useMemo, useState } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { Box, ScrollView, Text, Graph, Pressable, StaticSurface } from '@reactjit/primitives';
 import { PanelGroups, type FieldSpec, type PanelSpec } from './shell/fields';
 import type { Building, BuildingSkin, GameState, TileKind, WorldProp } from './design';
-import { tileKindDefinition } from './world/tileKinds';
+import { isTileKind, tileKindDefinition } from './world/tileKinds';
 import { tileAltitudeAtWorldPosition, type TileAltitudeSample } from './world/tileAltitude';
 import { buildingKindDefinition } from './world/buildingKinds';
 import { propKindDefinition } from './game/kinds/props';
@@ -300,6 +301,9 @@ function TileBody({ tile, cell, world, edit, group, onEdit }: {
   group?: { count: number; breakdown: string; cells: SelCell[]; overrides: OverrideStore };
   onEdit: () => void;
 }) {
+  if (!isTileKind(tile as string)) {
+    return <HeaderBar kind="TILE" title="missing tile kind" sub={String(tile)} />;
+  }
   const def = tileKindDefinition(tile);
   const altitude = summarizeAltitude(
     world,
@@ -605,9 +609,8 @@ export function PropertiesPanel(props: {
 }) {
   const { focus, world } = props;
   // PanelGroups' controls read through get()/set() closures; onEdit is the
-  // re-render tick after a write (the Workbench's own idiom).
-  const [, setRev] = useState(0);
-  const onEdit = () => setRev((r) => r + 1);
+  // re-render after a write (the Workbench's own idiom).
+  const onEdit = useRerender();
 
   let body: React.ReactNode;
   if (!focus) {

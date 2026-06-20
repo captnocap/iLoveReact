@@ -25,6 +25,7 @@ import {
   type SessionEnvelope,
 } from '@reactjit/workspace';
 import type { TileKind } from '../../design';
+import { PAINTABLE_TILE_KINDS, isTileKind } from '../../world/tileKinds';
 import { type ChunkFloor, floorsFromEditorWorld } from '../../chunkFloor';
 import type { PreviewCamera, PreviewCameraApi } from '../../IsoPreview';
 import type { Tool, Layer, PaintCanvasApi, BrushSettings, CanvasView2D } from '../../PaintCanvas';
@@ -96,6 +97,17 @@ const DEFAULT_BRUSH: BrushSettings = {
   rampAngle: 0,
   smoothStrength: 0.45,
 };
+
+const DEFAULT_PAINT_TILE: TileKind = 'sidewalk';
+
+function normalizePaintTile(value: unknown): TileKind {
+  return typeof value === 'string'
+    && isTileKind(value)
+    && value !== 'water'
+    && PAINTABLE_TILE_KINDS.includes(value)
+    ? value
+    : DEFAULT_PAINT_TILE;
+}
 
 function clampNum(n: unknown, lo: number, hi: number, fallback: number): number {
   const v = Number(n);
@@ -188,7 +200,7 @@ export function useMapSession(opts: {
   const [fy, setFy] = useState(() => initial.fy ?? 0.5);
   const [yaw, setYaw] = useState(() => initial.yaw ?? 45);
   const [tool, setTool] = useState<Tool>(() => initial.tool ?? 'pointer');
-  const [tile, setTile] = useState<TileKind>(() => initial.tile ?? 'sidewalk');
+  const [tile, setTile] = useState<TileKind>(() => normalizePaintTile(initial.tile));
   const [layer, setLayer] = useState<Layer>(() => initial.layer ?? 'paint');
   // Channel visibility (PAINTER-0610): which inactive painter channels stay
   // visible as dim landmarks. Absent key = visible; persisted per map.
@@ -312,7 +324,7 @@ export function useMapSession(opts: {
     if (applyTwig && typeof p.fy === 'number') setFy(p.fy);
     if (applyTwig && typeof p.yaw === 'number') setYaw(p.yaw);
     if (applyTwig && p.tool) setTool(p.tool);
-    if (applyTwig && p.tile) setTile(p.tile);
+    if (applyTwig) setTile(normalizePaintTile(p.tile));
     if (applyTwig && p.layer) setLayer(p.layer);
     if (applyTwig) setChannels(p.channels ?? {});
     // SET tab retired (SETFOLD-0610): old payloads may still say 'settings'.
