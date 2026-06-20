@@ -103,6 +103,15 @@ export const EDITOR_BINDINGS: EditorBinding[] = [
   { action: 'tool.move', scope: 'studio', keys: ['g'], label: 'Move tool', legend: null },
   { action: 'tool.rotate', scope: 'studio', keys: ['r'], label: 'Rotate tool', legend: null },
   { action: 'tool.resize', scope: 'studio', keys: ['s'], label: 'Resize / scale tool', legend: null },
+  // Mesh ops — fire only in their context (face selection, etc.); mnemonic
+  // defaults, all rebindable in the Hotkeys panel.
+  { action: 'op.extrude', scope: 'studio', keys: ['e'], label: 'Extrude the selected face', legend: null },
+  { action: 'op.loop-cut', scope: 'studio', keys: ['c'], label: 'Loop cut the selected face', legend: null },
+  { action: 'op.flip', scope: 'studio', keys: ['x'], label: 'Flip the selected face(s) winding', legend: null },
+  { action: 'op.glass', scope: 'studio', keys: ['b'], label: 'Toggle the selected face(s) as glass', legend: null },
+  { action: 'op.detach', scope: 'studio', keys: ['d'], label: 'Detach the selected face(s) into a panel', legend: null },
+  { action: 'op.solidify', scope: 'studio', keys: ['o'], label: 'Solidify the selected face(s) in place', legend: null },
+  { action: 'op.symmetrize', scope: 'studio', keys: ['y'], label: 'Symmetrize — keep +half, rebuild the mirror', legend: null },
 ];
 
 const ACTION_ID_SHAPE = /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/;

@@ -760,6 +760,53 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const [hotkeysOpen, setHotkeysOpen] = useState(false);
   useEffect(() => { loadKeybinds(); }, []);
 
+  // MESH OPS as shared functions (req_1446 follow-up): one body each, called by
+  // BOTH the rail button and the hotkey, so a key and its button never drift
+  // (rule of two). Each re-checks its own gate, so a key press in the wrong mode
+  // is a safe no-op.
+  const opExtrude = () => {
+    if (selMode !== 'face' || !activePart || sel.faces.size !== 1) return;
+    const faceIndex = [...sel.faces][0];
+    props.onEditMesh(activePart.id, splitConcaveFaces(extrudeFace(activePart.mesh, faceIndex, STUDIO.extrudeMeters)));
+    setGizmoTool('move'); // ready to drag the new cap in/out
+  };
+  const opLoopCut = () => {
+    if (selMode !== 'face' || !activePart || sel.faces.size !== 1) return;
+    const faceIndex = [...sel.faces][0];
+    const info = loopCutAxisInfo(activePart.mesh, faceIndex, 0);
+    if (!info) return;
+    setLc({ faceIndex, dir: 0, cuts: 1, offset: Math.round(info.sizeUnits / 2), unit: 'units' });
+  };
+  const opFlip = () => {
+    if (selMode !== 'face' || !activePart || sel.faces.size < 1) return;
+    let out = activePart.mesh;
+    for (const fi of sel.faces) out = flipFace(out, fi);
+    props.onEditMesh(activePart.id, out);
+  };
+  const opGlass = () => {
+    if (selMode !== 'face' || !activePart || sel.faces.size < 1) return;
+    const faceList = [...sel.faces];
+    const allGlass = faceList.every((i) => activePart.mesh.faces[i]?.glass);
+    props.onEditMesh(activePart.id, setFaceGlass(activePart.mesh, faceList, !allGlass));
+  };
+  const opDetach = () => {
+    if (selMode !== 'face' || !activePart || sel.faces.size < 1) return;
+    const { panel, body } = detachPanel(activePart.mesh, [...sel.faces], STUDIO.shellThicknessMeters);
+    props.onEditMesh(activePart.id, body);
+    props.onAddPart(panel, 'panel', activePart.lift);
+    setSel(emptySelection());
+  };
+  const opSolidify = () => {
+    if (selMode !== 'face' || !activePart || sel.faces.size < 1) return;
+    const out = solidifyFaces(activePart.mesh, [...sel.faces], STUDIO.shellThicknessMeters);
+    if (out !== activePart.mesh) { props.onEditMesh(activePart.id, out); setSel(emptySelection()); }
+  };
+  const opSymmetrize = (keepPos: boolean) => {
+    if (!activePart || !symReport || selMode === 'paint') return;
+    props.onEditMesh(activePart.id, symmetrize(activePart.mesh, symReport.axis, keepPos));
+    setSel(emptySelection()); setRigSel(null);
+  };
+
   // Selection keys — folded into the EDITOR CONTROL CONTRACT ('studio' scope,
   // editors/controls.ts). The dispatcher owns the typing gate, so the old
   // hand-written "a focused TextInput eats the key" guard (req_0978) is gone,
@@ -815,6 +862,14 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       'tool.move': () => { if (selMode !== 'rig' && selMode !== 'paint') setGizmoTool('move'); },
       'tool.rotate': () => { if (selMode !== 'rig' && selMode !== 'paint') setGizmoTool('rotate'); },
       'tool.resize': () => { if (selMode !== 'rig' && selMode !== 'paint') setGizmoTool('resize'); },
+      // Mesh ops — each gates itself, so the key is a no-op outside its context.
+      'op.extrude': opExtrude,
+      'op.loop-cut': opLoopCut,
+      'op.flip': opFlip,
+      'op.glass': opGlass,
+      'op.detach': opDetach,
+      'op.solidify': opSolidify,
+      'op.symmetrize': () => opSymmetrize(true),
     },
   });
   // Tooltip prefix for a keyed action, read from the LIVE contract so it shows
@@ -2142,18 +2197,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           const symAxis = symReport.axis; // explicit mirror plane, else the auto-detected most-symmetric axis
           const ax = STUDIO.mirrorAxisLabels[symAxis];
           const col = STUDIO.mirrorAxisColors[symAxis];
-          const doSym = (keepPos: boolean) => {
-            props.onEditMesh(activePart.id, symmetrize(activePart.mesh, symAxis, keepPos));
-            setSel(emptySelection()); setRigSel(null);
-          };
+          // shares opSymmetrize with the hotkey (rule of two)
           return (
             <>
               <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
               <Text fontSize={9} color={T.dim} style={{ width: '100%', fontFamily: 'monospace' }}>symmetrize</Text>
-              <Pressable onPress={() => doSym(true)} tooltip={`Symmetrize — keep the +${ax} half and rebuild the other side as its exact mirror (kills any drift)`} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
+              <Pressable onPress={() => opSymmetrize(true)} tooltip={`${keyHint('op.symmetrize')}Symmetrize — keep the +${ax} half and rebuild the other side as its exact mirror (kills any drift)`} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
                 <Text fontSize={10} color={col} style={{ fontFamily: 'monospace' }}>keep +{ax}</Text>
               </Pressable>
-              <Pressable onPress={() => doSym(false)} tooltip={`Symmetrize — keep the −${ax} half and rebuild the other side as its exact mirror (kills any drift)`} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
+              <Pressable onPress={() => opSymmetrize(false)} tooltip={`Symmetrize — keep the −${ax} half and rebuild the other side as its exact mirror (kills any drift)`} style={{ ...STEP_BTN, backgroundColor: '#241c3a', borderColor: col }}>
                 <Text fontSize={10} color={col} style={{ fontFamily: 'monospace' }}>keep −{ax}</Text>
               </Pressable>
               <Box style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: symReport.unmatched === 0 ? '#10261a' : '#2e1616', borderWidth: 1, borderColor: symReport.unmatched === 0 ? '#2f7a4f' : '#a14545' }}>
@@ -2307,26 +2359,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 {/* extrude — commits a thin lip; the move gizmo then pulls it in/out
                     (req_1015). The cap stays at the same index so it stays selected. */}
                 <Pressable
-                  onPress={() => {
-                    const faceIndex = [...sel.faces][0];
-                    const extruded = extrudeFace(activePart.mesh, faceIndex, STUDIO.extrudeMeters);
-                    props.onEditMesh(activePart.id, splitConcaveFaces(extruded));
-                    setGizmoTool('move'); // ready to drag the new cap in/out
-                  }}
-                  tooltip="Extrude — pull a new lip out of the selected face; then drag the orange normal arrow to set depth (push IN to inset/cut a recess)"
+                  onPress={opExtrude}
+                  tooltip={`${keyHint('op.extrude')}Extrude — pull a new lip out of the selected face; then drag the orange normal arrow to set depth (push IN to inset/cut a recess)`}
                   style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
                 >
                   <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>extrude</Text>
                 </Pressable>
                 {/* loop cut — a face click + this opens the cut popup (req_0984/0985) */}
                 <Pressable
-                  onPress={() => {
-                    const faceIndex = [...sel.faces][0];
-                    const info = loopCutAxisInfo(activePart.mesh, faceIndex, 0);
-                    if (!info) return;
-                    setLc({ faceIndex, dir: 0, cuts: 1, offset: Math.round(info.sizeUnits / 2), unit: 'units' });
-                  }}
-                  tooltip="Loop cut — slice parallel rings around the part to add edge loops (opens a popup for count + offset)"
+                  onPress={opLoopCut}
+                  tooltip={`${keyHint('op.loop-cut')}Loop cut — slice parallel rings around the part to add edge loops (opens a popup for count + offset)`}
                   style={{ ...STEP_BTN, backgroundColor: lc ? '#1c3a2a' : '#13233aee', borderColor: lc ? '#2f7a4f' : '#2c4a6a' }}
                 >
                   <Text fontSize={10} color={lc ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>loop cut</Text>
@@ -2345,12 +2387,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   {/* flip — reverse the selected face(s) so the normal points the other
                       way (fixes an upside-down Create Face). */}
                   <Pressable
-                    onPress={() => {
-                      let out = activePart.mesh;
-                      for (const fi of faceList) out = flipFace(out, fi);
-                      props.onEditMesh(activePart.id, out);
-                    }}
-                    tooltip="Flip — reverse the selected face(s) so the normal points the other way (un-inverts an upside-down Create Face)"
+                    onPress={opFlip}
+                    tooltip={`${keyHint('op.flip')}Flip — reverse the selected face(s) so the normal points the other way (un-inverts an upside-down Create Face)`}
                     style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
                   >
                     <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>flip</Text>
@@ -2377,8 +2415,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   {/* glass — toggle the face(s) between a textured surface and a
                       translucent window pane (renders see-through, skips texturing). */}
                   <Pressable
-                    onPress={() => props.onEditMesh(activePart.id, setFaceGlass(activePart.mesh, faceList, !allGlass))}
-                    tooltip="Glass — toggle the face(s) as a translucent window pane (renders see-through, skips texturing). For windshields/windows"
+                    onPress={opGlass}
+                    tooltip={`${keyHint('op.glass')}Glass — toggle the face(s) as a translucent window pane (renders see-through, skips texturing). For windshields/windows`}
                     style={{ ...STEP_BTN, backgroundColor: allGlass ? '#16314a' : '#13233aee', borderColor: allGlass ? '#5b9fd6' : '#2c4a6a' }}
                   >
                     <Text fontSize={10} color={allGlass ? '#a9cbe0' : T.dim} style={{ fontFamily: 'monospace' }}>{allGlass ? '▣ glass' : 'glass'}</Text>
@@ -2389,15 +2427,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                       pivot seated, ready to hinge/pop in rig mode. Hood, door, trunk,
                       light housing — every panel comes off this one button. */}
                   <Pressable
-                    onPress={() => {
-                      const { panel, body } = detachPanel(activePart.mesh, faceList, STUDIO.shellThicknessMeters);
-                      props.onEditMesh(activePart.id, body);
-                      // the panel inherits the BODY's lift so it renders in place, not
-                      // re-seated on its own lowest vert (which would float it off).
-                      props.onAddPart(panel, 'panel', activePart.lift);
-                      setSel(emptySelection());
-                    }}
-                    tooltip="Detach — peel the selected faces off the body into their own thin panel part (hood / door / trunk), pivot seated, ready to hinge"
+                    onPress={opDetach}
+                    tooltip={`${keyHint('op.detach')}Detach — peel the selected faces off the body into their own thin panel part (hood / door / trunk), pivot seated, ready to hinge`}
                     style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
                   >
                     <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>detach</Text>
@@ -2411,11 +2442,8 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                       only mirrors the faces you select and walls the open edges, so the
                       door opening stays open, just gains a real thickness frame. */}
                   <Pressable
-                    onPress={() => {
-                      const out = solidifyFaces(activePart.mesh, faceList, STUDIO.shellThicknessMeters);
-                      if (out !== activePart.mesh) { props.onEditMesh(activePart.id, out); setSel(emptySelection()); }
-                    }}
-                    tooltip="Solidify — give the selected faces thickness IN PLACE (inner skin + walled rim). Wraps a hollow box shell into solid walls; open holes (doors/windows) stay open with a thickness frame"
+                    onPress={opSolidify}
+                    tooltip={`${keyHint('op.solidify')}Solidify — give the selected faces thickness IN PLACE (inner skin + walled rim). Wraps a hollow box shell into solid walls; open holes (doors/windows) stay open with a thickness frame`}
                     style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}
                   >
                     <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>solidify</Text>
