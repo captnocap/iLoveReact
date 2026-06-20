@@ -29,7 +29,10 @@
 import { TRAFFIC_SIGNAL_CYCLE } from '../../world/traffic';
 import { planMotion, measurePath, sampleMotion, slicePoints, type MotionPlan, type MotionProfile, type MotionSample } from '@reactjit/motion';
 import { TILE_KIND_INDEX } from '../kinds';
+import type { ApproachDir } from '../../roadData';
 import type { PaintedGrid } from './navPublish';
+
+export type { ApproachDir };
 
 export const TRAFFIC_TUNING = {
   /** how far a control prop reaches to claim its junction box (meters) */
@@ -99,9 +102,6 @@ export function findJunctionBoxes(grid: PaintedGrid): JunctionBox[] {
 }
 
 // ── association (prop → box → the approach it governs) ──────────────────────
-
-/** travel direction INTO the box (matches PATH_FLOW axes) */
-export type ApproachDir = 'posX' | 'negX' | 'posZ' | 'negZ';
 
 export type PlacedTrafficControl = {
   control: 'stopSign' | 'signal';

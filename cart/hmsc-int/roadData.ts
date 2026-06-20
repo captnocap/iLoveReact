@@ -54,9 +54,22 @@ export interface RoadPoint {
 
 export interface RoadStroke {
   id: string;
+  /** The road's name (INTERSECTIONS-0619, req_1480). Optional so pre-name
+   *  strokes stay valid; carried on the stroke (identity), not the profile
+   *  (cross-section). Street-name signs at junctions print it. */
+  name?: string;
   points: RoadPoint[];
   profile: RoadProfile;
 }
+
+/** Travel direction INTO a junction box, snapped to the dominant world axis —
+ *  the SHARED vocabulary for road approaches. game/world/trafficControl.ts
+ *  (runtime right-of-way) and intersections.ts (authoring) both import this
+ *  ONE definition so a planned gate and an authored sign agree. */
+export type ApproachDir = 'posX' | 'negX' | 'posZ' | 'negZ';
+
+/** The four box edges, named by the world side they face. */
+export type JunctionSide = 'N' | 'E' | 'S' | 'W';
 
 // ── the ruled constants ──────────────────────────────────────────────────────
 
@@ -333,18 +346,7 @@ export function planRoads(strokes: RoadStroke[]): RoadPlan {
   // 2) junction boxes: cells covered by ≥2 strokes' carriageways whose travel
   //    axes CROSS. Parallel overlap (a road continued from an endpoint, or two
   //    roads drawn head-on) is one continuous road — later stroke wins, no box.
-  const junction = new Set<string>();
-  const cover = new Map<string, number>();
-  const coverAxes = new Map<string, number>();
-  for (const r of rasters) {
-    for (const [k, m] of r.axes) {
-      cover.set(k, (cover.get(k) ?? 0) + 1);
-      coverAxes.set(k, (coverAxes.get(k) ?? 0) | m);
-    }
-  }
-  for (const [k, n] of cover) {
-    if (n >= 2 && coverAxes.get(k) === (AXIS_X | AXIS_Z)) junction.add(k);
-  }
+  const junction = junctionCells(rasters);
   for (const k of junction) plan.set(k, 'junction');
 
   // 3) crosswalk bands: walking each stroke's centerline in draw order, the
@@ -374,6 +376,135 @@ export function planRoads(strokes: RoadStroke[]): RoadPlan {
   }
 
   return plan;
+}
+
+// ── junction derivation (authoring: where roads cross, and on which arms) ─────
+// INTERSECTIONS-0619 (req_1480): junctions are DERIVED, never authored. This is
+// the author-side companion to planRoads' junction stamp — it returns the boxes
+// AND each box's arms (legs): which road meets it from which side, the travel
+// direction into the box, and the centerline cell just outside the box (the prop
+// anchor). Policy (which prop, the corner offset, the sign text) lives in
+// intersections.ts; this stays pure geometry, over the same rasters planRoads uses.
+
+/** Cells the road network reads as junction (≥2 carriageways whose travel axes
+ *  CROSS — parallel overlap is one continuous road, never a box). Shared by
+ *  planRoads' stamp and deriveJunctions so they can never disagree. */
+function junctionCells(rasters: StrokeRaster[]): Set<string> {
+  const cover = new Map<string, number>();
+  const coverAxes = new Map<string, number>();
+  for (const r of rasters) {
+    for (const [k, m] of r.axes) {
+      cover.set(k, (cover.get(k) ?? 0) + 1);
+      coverAxes.set(k, (coverAxes.get(k) ?? 0) | m);
+    }
+  }
+  const out = new Set<string>();
+  for (const [k, n] of cover) {
+    if (n >= 2 && coverAxes.get(k) === (AXIS_X | AXIS_Z)) out.add(k);
+  }
+  return out;
+}
+
+export interface JunctionLeg {
+  /** travel direction INTO the box on this arm (what a stop sign here governs) */
+  approach: ApproachDir;
+  /** which edge of the box this arm crosses */
+  side: JunctionSide;
+  roadId: string;
+  roadName?: string;
+  /** centerline cell just OUTSIDE the box on this arm (global cells) — the prop
+   *  anchor; the right-hand curb offset is policy (intersections.ts). */
+  gx: number;
+  gz: number;
+}
+
+export interface AuthorJunction {
+  /** stable id: the box's rounded center cell (survives re-derivation in place) */
+  key: string;
+  /** inclusive global-cell bounds of the junction box */
+  minGx: number;
+  minGz: number;
+  maxGx: number;
+  maxGz: number;
+  centerGx: number;
+  centerGz: number;
+  cells: number;
+  legs: JunctionLeg[];
+}
+
+const approachForSide = (side: JunctionSide): ApproachDir =>
+  side === 'N' ? 'posZ' : side === 'S' ? 'negZ' : side === 'W' ? 'posX' : 'negX';
+
+/** Stable junction id from its box center (global cells). */
+export function junctionKey(centerGx: number, centerGz: number): string {
+  return cellKey(Math.round(centerGx), Math.round(centerGz));
+}
+
+/** Derive every junction box and its arms from the authored strokes. Pure —
+ *  strokes in, boxes-with-legs out, zero editor or GPU machinery. */
+export function deriveJunctions(strokes: RoadStroke[]): AuthorJunction[] {
+  const rasters = strokes.filter((s) => s.points.length >= 2).map(rasterizeStroke);
+  const junction = junctionCells(rasters);
+  if (!junction.size) return [];
+
+  // flood-fill junction cells → boxes (4-connected; bounds are the cluster rect)
+  const seen = new Set<string>();
+  const boxes: AuthorJunction[] = [];
+  for (const start of junction) {
+    if (seen.has(start)) continue;
+    let minGx = Infinity, minGz = Infinity, maxGx = -Infinity, maxGz = -Infinity, count = 0;
+    const stack = [start];
+    seen.add(start);
+    while (stack.length) {
+      const k = stack.pop()!;
+      const { gx, gz } = parseCellKey(k);
+      count++;
+      if (gx < minGx) minGx = gx;
+      if (gx > maxGx) maxGx = gx;
+      if (gz < minGz) minGz = gz;
+      if (gz > maxGz) maxGz = gz;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nk = cellKey(gx + dx, gz + dz);
+        if (junction.has(nk) && !seen.has(nk)) { seen.add(nk); stack.push(nk); }
+      }
+    }
+    const centerGx = (minGx + maxGx + 1) / 2;
+    const centerGz = (minGz + maxGz + 1) / 2;
+    boxes.push({
+      key: junctionKey(centerGx, centerGz),
+      minGx, minGz, maxGx, maxGz, centerGx, centerGz, cells: count, legs: [],
+    });
+  }
+
+  // legs: walk every stroke's centerline against each box; each boundary crossing
+  // is an arm. One leg per box SIDE (the last crossing on that side wins).
+  for (const box of boxes) {
+    const inBox = (gx: number, gz: number) =>
+      gx >= box.minGx && gx <= box.maxGx && gz >= box.minGz && gz <= box.maxGz;
+    const bySide = new Map<JunctionSide, JunctionLeg>();
+    for (const r of rasters) {
+      const c = r.center;
+      for (let i = 0; i + 1 < c.length; i++) {
+        const a = c[i], b = c[i + 1];
+        const aIn = inBox(a.gx, a.gz);
+        const bIn = inBox(b.gx, b.gz);
+        if (aIn === bIn) continue;
+        const outside = aIn ? b : a; // the cell just outside the box
+        const dir: Dir = aIn ? { dx: -b.dir.dx, dz: -b.dir.dz } : { dx: a.dir.dx, dz: a.dir.dz };
+        let side: JunctionSide;
+        if (outside.gz < box.minGz) side = 'N';
+        else if (outside.gz > box.maxGz) side = 'S';
+        else if (outside.gx < box.minGx) side = 'W';
+        else side = 'E';
+        const approach: ApproachDir = (dir.dx !== 0 || dir.dz !== 0)
+          ? (Math.abs(dir.dx) >= Math.abs(dir.dz) ? (dir.dx >= 0 ? 'posX' : 'negX') : (dir.dz >= 0 ? 'posZ' : 'negZ'))
+          : approachForSide(side);
+        bySide.set(side, { approach, side, roadId: r.stroke.id, roadName: r.stroke.name, gx: outside.gx, gz: outside.gz });
+      }
+    }
+    box.legs = [...bySide.values()];
+  }
+  return boxes;
 }
 
 // ── editor display helpers ───────────────────────────────────────────────────
