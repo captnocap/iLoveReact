@@ -135,6 +135,13 @@ export function pieceVisualShapes(
   pieces?: readonly PlacedBuildPiece[],
 ): VisualShape[] {
   const def = GAME_BUILD.catalog.get(piece.pieceId);
+  // WALLTOP (req_0099/1477): render the wall where it RESTS — on the floor at
+  // its cell — so the visual matches the lifted collider (see-it == walk-it).
+  // Read-time only; stored data is untouched. No floor → no lift (idempotent).
+  if (pieces) {
+    const restY = GAME_BUILD.placed.liftedWallBaseY({ id: key, ...piece } as PlacedBuildPiece, pieces);
+    if (restY !== piece.y) piece = { ...piece, y: restY };
+  }
   const look = MATERIAL_LOOK[def.material];
   const sides = visualLook(piece.skin?.sides, look.color, 'sides');
   const front = visualLook(piece.skin?.front, look.color, 'front');

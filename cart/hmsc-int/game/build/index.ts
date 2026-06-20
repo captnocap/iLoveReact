@@ -107,6 +107,8 @@ export {
   placedPieceDepthSpan,
   placedPieceWallEnds,
   pieceBounds,
+  liftedWallBaseY,
+  liftWallsOntoFloors,
   connectedPieceIds,
   raycastPieces,
   placedPieceCameraOccluders,
@@ -235,6 +237,8 @@ import {
   placedPieceDepthSpan,
   placedPieceWallEnds,
   pieceBounds,
+  liftedWallBaseY,
+  liftWallsOntoFloors,
   connectedPieceIds,
   raycastPieces,
   placedPieceCameraOccluders,
@@ -336,6 +340,11 @@ export const GAME_BUILD = {
     /** CORNERSEAM-0610: per-end corner joins (renderer slab-miter input) */
     wallEnds: placedPieceWallEnds,
     bounds: pieceBounds,
+    /** WALLTOP (req_0099/1477): the Y a wall RESTS at — on the floor at its cell
+     *  (read-time projection; geometry/collision use it, stored data stays raw) */
+    liftedWallBaseY,
+    /** the piece list with every wall lifted onto the floor beneath it */
+    liftWallsOntoFloors,
     /** SMARTSEL-0605: the connected shape under one click */
     connected: connectedPieceIds,
     raycast: raycastPieces,

@@ -13,6 +13,8 @@ import {
   placedPieceCameraOccluders,
   placedPieceColliders,
   placedPieceDepthSpan,
+  liftedWallBaseY,
+  liftWallsOntoFloors,
   placedPieceRamps,
   placedPieceTags,
   prefabFromPieces,
@@ -788,6 +790,29 @@ test('flush module neighbors touch: two grid-snapped plates are one shape', () =
 
 test('an unknown seed grabs nothing', () => {
   assertEqual(connectedPieceIds('ghost', [placed('floor.concrete.common', 0, 0)]).size, 0, 'empty, no crash');
+});
+
+// ── WALLTOP (req_0099 / req_1477): walls always rest ON the floor ─────────────
+test('a wall placed at ground Y lifts onto the floor at its cell (any order)', () => {
+  const floor = placed('floor.concrete.common', 0, 0); // base 0, top 0.2
+  const wall = placed('wall.concrete.common', 0, 1.5, { y: 0 }); // ground, on the floor's edge line
+  assertClose(liftedWallBaseY(wall, [floor, wall]), 0.2, 1e-6, 'wall rests on floor top 0.2');
+  // order-independent: same result if the wall comes first in the list
+  assertClose(liftedWallBaseY(wall, [wall, floor]), 0.2, 1e-6, 'placement order does not matter');
+  // the collider rises with it — base 0.2, top 3.2 (not the ground 0..3)
+  const lifted = liftWallsOntoFloors([floor, wall]).find((p) => p.id === wall.id)!;
+  assertClose(lifted.y, 0.2, 1e-6, 'lifted piece base');
+});
+
+test('the wall lift is idempotent and floorless walls stay grounded', () => {
+  const floor = placed('floor.concrete.common', 0, 0);
+  const onFloor = placed('wall.concrete.common', 0, 1.5, { y: 0.2 }); // already resting
+  assertClose(liftedWallBaseY(onFloor, [floor, onFloor]), 0.2, 1e-6, 'no double-lift');
+  const lone = placed('wall.concrete.common', 0, 1.5, { y: 0 });
+  assertClose(liftedWallBaseY(lone, [lone]), 0, 1e-6, 'no floor → stays on the ground');
+  // a floor a whole storey BELOW is not this wall's floor
+  const upper = placed('wall.concrete.common', 0, 1.5, { y: 3 });
+  assertClose(liftedWallBaseY(upper, [floor, upper]), 3, 1e-6, 'a ground floor does not pull a 2nd-storey wall down');
 });
 
 finish('build-placed');

@@ -249,6 +249,53 @@ export type PieceBounds = {
   topY: number;
 };
 
+// WALLTOP (req_0099 / req_1477/1478): wall-family pieces ALWAYS rest on the
+// floor at their cell, never on its side at ground Y. The prior fix patched one
+// placement path and line-drawn / floor-after-wall placements slipped through;
+// the durable cure derives the rest-Y at geometry time (render + collision) so
+// no placement path can miss it. This is a READ-TIME projection — the stored Y
+// is left untouched, so editing/selection never double-lifts, and it is
+// idempotent (a wall already on its floor is unchanged). Delete the floor and
+// the wall drops back to ground for free (no floor → no lift).
+const WALL_REST_KINDS: ReadonlySet<BuildPieceKind> = new Set(['wall', 'fence', 'railing', 'pillar', 'corner', 'arch']);
+// A floor counts as "under" a wall when its top sits at/just above the wall's
+// authored base (same storey) — not a plate a full storey below. 1.5m is well
+// under a 3m storey and well over any floor thickness.
+const WALL_REST_MAX_RISE_METERS = 1.5;
+const WALL_REST_EPSILON_METERS = 0.02;
+
+/** The Y a wall-family piece should REST at: the top of the highest floor/roof
+ *  plate overlapping its footprint at its own storey, else its authored Y. */
+export function liftedWallBaseY(piece: PlacedBuildPiece, pieces: readonly PlacedBuildPiece[]): number {
+  if (!WALL_REST_KINDS.has(placedPieceDef(piece).kind)) return piece.y;
+  const wall = pieceBounds(piece);
+  let restY = piece.y;
+  for (const other of pieces) {
+    if (other === piece || other.id === piece.id) continue;
+    if (!isSupportPlate(placedPieceDef(other).kind)) continue;
+    const plate = pieceBounds(other);
+    if (Math.min(wall.maxX, plate.maxX) <= Math.max(wall.minX, plate.minX)) continue; // no plan overlap (x)
+    if (Math.min(wall.maxZ, plate.maxZ) <= Math.max(wall.minZ, plate.minZ)) continue; // no plan overlap (z)
+    if (plate.topY < piece.y - WALL_REST_EPSILON_METERS) continue; // below the wall — not its floor
+    if (plate.topY > piece.y + WALL_REST_MAX_RISE_METERS) continue; // a storey up — not its floor
+    if (plate.topY > restY) restY = plate.topY;
+  }
+  return restY;
+}
+
+/** The piece list with every wall-family piece lifted onto the floor beneath it
+ *  (READ-TIME — geometry/collision only; stored data is unchanged). Idempotent. */
+export function liftWallsOntoFloors(pieces: readonly PlacedBuildPiece[]): PlacedBuildPiece[] {
+  let changed = false;
+  const out = pieces.map((piece) => {
+    const restY = liftedWallBaseY(piece, pieces);
+    if (restY <= piece.y + WALL_REST_EPSILON_METERS) return piece;
+    changed = true;
+    return { ...piece, y: restY };
+  });
+  return changed ? out : pieces.slice();
+}
+
 export type PlacedPieceDepthSpan = { minV: number; maxV: number };
 
 /** Axis-aligned world envelope of a placed piece (exact for quarter-turn yaw,
@@ -975,6 +1022,9 @@ export function placedPieceColliders(
     liveDoorPanels?: boolean;
   },
 ): PlacedPieceColliders {
+  // WALLTOP: walls collide where they REST — on the floor at their cell, not at
+  // the side/ground Y a placement path happened to author (req_0099/1477).
+  pieces = liftWallsOntoFloors(pieces);
   const rects: CollisionRect[] = [];
   const orientedRects: OrientedCollisionRect[] = [];
   // ramp plan footprints (quarter-turn exact; free-yaw ramps fall back to
