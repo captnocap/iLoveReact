@@ -8,12 +8,17 @@
 // with its base at y=0 (the cook baked each part's ground lift in), so it places at
 // the prop anchor like an imported prop.
 //
-// v1 is UNTEXTURED — a flat material colour. The compressed-WebP texture factor
-// (texRef → a sampled atlas) folds in with the @reactjit/image cook + the loader
-// texture wiring (the rebuild slice).
+// PAINTED ATLAS (req_1496): when the asset cooked WITH a texture, the model's paint
+// atlas (PNG, content-addressed by texRef) is sampled via the mesh's per-face UVs.
+// It rides the Scene3D.Mesh INLINE `texture={{width,height,hex}}` door — the same
+// mechanism the player/NPC models use (host parses the hex once, caches by content
+// hash). The earlier textureKey+<Paintable> attempt fell back to the 1×1 white
+// default because a cross-subtree uploaded paintable didn't bind.
 
 import { Scene3D } from '@reactjit/primitives';
 import type { GeometryData, GeometryDef } from '@reactjit/geometries';
+import { image } from '@reactjit/image';
+import { base64ToBytes } from '@reactjit/workspace';
 import type { WorldProp } from '../../design';
 import { cookedAssetById, cookedMeshBlob, cookedTextureBlob } from '../../editors/model/cookedAssets';
 
@@ -38,24 +43,47 @@ function geometryFor(meshRef: string, verts: Float32Array): GeometryDef {
 
 const COOKED_PROP_TINT = '#c2c6cf';
 
+// byte → 2-hex, for building the inline texture's RRGGBBAA string.
+const HEX2 = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, '0'));
+
+// The inline texture (width/height/hex) for a cooked texRef, decoded from the stored
+// paint PNG and downscaled to keep the hex string bounded (props are small in-world).
+// Memoised per texRef — the decode + hex build runs ONCE; the host then content-hash-
+// caches the GPU upload. A null is NOT cached (the blob may load async).
+type InlineTex = { width: number; height: number; hex: string };
+const TEX_CACHE = new Map<string, InlineTex>();
+const TEX_SIZE = 512;
+
+function cookedInlineTexture(texRef: string | undefined): InlineTex | null {
+  if (!texRef) return null;
+  const cached = TEX_CACHE.get(texRef);
+  if (cached) return cached;
+  const blob = cookedTextureBlob(texRef);
+  if (!blob) return null; // not loaded yet — retry on a later render, don't cache the miss
+  const raw = image(base64ToBytes(blob)).resize(TEX_SIZE, TEX_SIZE).raw();
+  if (!raw || !raw.rgba || raw.rgba.length !== raw.width * raw.height * 4) return null;
+  const n = raw.rgba.length;
+  const parts = new Array<string>(n);
+  for (let i = 0; i < n; i += 1) parts[i] = HEX2[raw.rgba[i]];
+  const tex: InlineTex = { width: raw.width, height: raw.height, hex: parts.join('') };
+  TEX_CACHE.set(texRef, tex);
+  return tex;
+}
+
 export function CookedProp(props: { prop: WorldProp }) {
   const asset = cookedAssetById(props.prop.kind);
   if (!asset) return null;
   const verts = cookedMeshBlob(asset.meshRef);
   if (!verts || verts.length === 0) return null;
-  // The painted atlas (req_1496): when the asset cooked WITH a texture, sample it by
-  // texRef (the GPU texture <CookedTexture> in PropSurfaceCaptures uploaded) with a
-  // white material so the paint shows true; otherwise the flat grey tint. The baked
-  // mesh's per-face UVs map straight into the atlas.
-  const textured = !!asset.texRef && !!cookedTextureBlob(asset.texRef);
+  const tex = cookedInlineTexture(asset.texRef);
   return (
     <Scene3D.Mesh
       geometry={geometryFor(asset.meshRef, verts)}
       params={{}}
       position={[props.prop.x, props.prop.y ?? 0, props.prop.z]}
       rotation={[0, props.prop.yawDegrees ?? 0, 0]}
-      material={textured ? '#ffffff' : COOKED_PROP_TINT}
-      textureKey={textured ? asset.texRef : undefined}
+      material={tex ? '#ffffff' : COOKED_PROP_TINT}
+      texture={tex ?? undefined}
     />
   );
 }
