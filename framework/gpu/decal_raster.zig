@@ -368,6 +368,37 @@ fn drawImageNode(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f32, ra
     }
 }
 
+/// MISSING-TEXTURE sentinel (req_1471): a Half-Life-style magenta/black checker
+/// drawn into an image node whose asset didn't ship (deleted source, key 0, or no
+/// installed payload). A missing texture must SHOUT, not vanish — an invisible
+/// wall reads as "fine" when it's actually broken. Opaque so it can't be missed.
+fn drawMissingChecker(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f32, opacity: f32) void {
+    if (w <= 0 or h <= 0) return;
+    // 8 checks across the node's shorter side — big squares that read as "missing"
+    // at any wall size, like the classic dev-texture grid.
+    const cell = @max(1.0, @min(w, h) / 8.0);
+    const magenta = [4]u8{ 255, 0, 220, 255 };
+    const black = [4]u8{ 0, 0, 0, 255 };
+    const op = std.math.clamp(opacity, 0, 1);
+    const x0: i64 = @intFromFloat(@floor(x));
+    const y0: i64 = @intFromFloat(@floor(y));
+    const x1: i64 = @intFromFloat(@ceil(x + w));
+    const y1: i64 = @intFromFloat(@ceil(y + h));
+    var yy = @max(y0, 0);
+    while (yy < @min(y1, @as(i64, @intCast(oh)))) : (yy += 1) {
+        var xx = @max(x0, 0);
+        while (xx < @min(x1, @as(i64, @intCast(ow)))) : (xx += 1) {
+            const cxi: i64 = @intFromFloat(@floor((@as(f32, @floatFromInt(xx)) - x) / cell));
+            const cyi: i64 = @intFromFloat(@floor((@as(f32, @floatFromInt(yy)) - y) / cell));
+            const checker = @mod(cxi + cyi, 2) == 0;
+            var color = if (checker) magenta else black;
+            color[3] = @intFromFloat(std.math.clamp(@as(f32, @floatFromInt(color[3])) * op, 0, 255));
+            const i: usize = (@as(usize, @intCast(yy)) * @as(usize, ow) + @as(usize, @intCast(xx))) * 4;
+            blend(out, i, color, 1.0);
+        }
+    }
+}
+
 // ── neon path (PARAMETRIC neon, req_0893) ───────────────────────────────────
 // Parse the SVG `d` to flat segments (curves flattened), then stroke them in
 // layered passes — wide soft glow under a bright core, the white-hot center on
@@ -723,11 +754,13 @@ pub fn rasterize(allocator: std.mem.Allocator, doc: []const u8, images: []const 
                 if (len > MAX_TEXT_BYTES) return fail(allocator, out);
                 const src = r.slice(len) orelse return fail(allocator, out);
                 if (asset_key == 0) {
-                    log.warn(.render, "[decal-raster] image node ('{s}') shipped no asset (empty/unreadable src at bake) — skipped", .{src});
+                    log.warn(.render, "[decal-raster] image node ('{s}') shipped no asset (empty/unreadable src at bake) — MISSING checkerboard", .{src});
+                    drawMissingChecker(out, ow, oh, x, y, w, h, opacity);
                 } else if (findImage(images, asset_key)) |payload| {
                     drawImageNode(out, ow, oh, x, y, w, h, radius, opacity, payload, src);
                 } else {
-                    log.warn(.render, "[decal-raster] image node ('{s}') references asset key {d} with no installed payload — skipped", .{ src, asset_key });
+                    log.warn(.render, "[decal-raster] image node ('{s}') references asset key {d} with no installed payload — MISSING checkerboard", .{ src, asset_key });
+                    drawMissingChecker(out, ow, oh, x, y, w, h, opacity);
                 }
             },
             NODE_PATH => {
