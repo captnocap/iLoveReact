@@ -95,18 +95,22 @@ const RGBA_LEN = PAINT_TEX * PAINT_TEX * 4;
  *  store, which interns the blob and points the model at it. */
 export type PaintBake = (paintRef: string, blobB64: string) => void;
 
-function bakeAndEmit(rgba: Uint8Array, emit: PaintBake): void {
+function bakeAndEmit(rgba: Uint8Array, emit: PaintBake): string | null {
   const png = encode(rgba, PAINT_TEX, PAINT_TEX, { format: 'png' });
-  if (!png || png.length === 0) return;
-  emit(sha256Hex(png), bytesToBase64(png));
+  if (!png || png.length === 0) return null;
+  const ref = sha256Hex(png);
+  emit(ref, bytesToBase64(png));
+  return ref;
 }
 
 /** Read the live paint texture back and bake it (PNG → hash → emit). Call at
- *  stroke-end / undo / redo — readback blocks on the GPU, so NOT per dab. */
-export function savePaint(emit: PaintBake): void {
+ *  stroke-end / undo / redo — readback blocks on the GPU, so NOT per dab. Returns
+ *  the paintRef it wrote (the texture's content hash) so the caller can mark the
+ *  shared texture as already holding that ref and skip a redundant reload. */
+export function savePaint(emit: PaintBake): string | null {
   const rgba = paintTex().readback();
-  if (!rgba || rgba.length !== RGBA_LEN) return;
-  bakeAndEmit(rgba, emit);
+  if (!rgba || rgba.length !== RGBA_LEN) return null;
+  return bakeAndEmit(rgba, emit);
 }
 
 /** Restore a saved paint blob (base64 PNG, resolved from the model's paintRef) into

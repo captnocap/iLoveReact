@@ -109,7 +109,18 @@ const PAINT_THEME: PaintTheme = {
 // work wants a finer dab) and on a warm red so the first stroke is obvious.
 const STUDIO_DEFAULT_BRUSH: Brush = { ...DEFAULT_BRUSH, size: 18, ink: { kind: 'color', hex: '#c64b53' } };
 
-export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
+// The PIXEL paint texture (STUDIO_PAINT_KEY) is ONE shared GPU texture for every
+// model, so it must be RELOADED whenever the open model changes — these track which
+// model's pixels currently sit in it and whether a real saved blob was loaded for it.
+// Module-scoped so they survive re-renders but reset on a full remount (texture
+// destroyed) and on hot reload (module re-eval). Keyed by model ID (names repeat).
+// This replaces the old once-per-session restore gate that left the shared texture
+// holding the PREVIOUS model's paint and never re-restored after a switch / restart
+// (the "paint carries over / goes white / lost on restart" bugs — req_1488/1492).
+let g_loadedPaintModel: string | null = null;
+let g_loadedHadBlob = false;
+
+export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; sceneId: string | null; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
   const { parts, revision, activePart, onSelectFaces } = props;
 
   // Lower each visible part once per structural revision (camera drags + fov
@@ -1017,29 +1028,40 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selMode]);
-  // PIXEL painter init + paint-active (req_1379b): the <Paintable> stays MOUNTED while
-  // a paint texture exists (not gated on paint mode), so the GPU texture survives
-  // paint→object→paint without being destroyed. So restore/base-coat runs only ONCE
-  // per model per session (paintInited) — re-running it on every paint re-entry would
-  // wipe the texture that's still sitting there. On the FIRST init we RESTORE the
-  // model's saved paint, else base-coat. A hot reload clears the inited set, so this
-  // re-restores from localstore then (rebuilding a texture the reload may have dropped).
   // Switching models shares ONE paint texture (STUDIO_PAINT_KEY) — drop the undo ring
   // so a new model doesn't inherit the previous model's stroke history.
-  useEffect(() => { clearPaintHistory(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [props.sceneName]);
+  useEffect(() => { clearPaintHistory(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [props.sceneId]);
+  // Reset the shared-texture load tracker when the viewport unmounts (the <Paintable>
+  // is destroyed with it, so on return the texture is blank and MUST be reloaded).
+  useEffect(() => () => { g_loadedPaintModel = null; g_loadedHadBlob = false; }, []);
+  // PIXEL painter init + paint-active (req_1488/1492). The shared STUDIO_PAINT_KEY
+  // texture holds ONE model's pixels at a time, so RELOAD it from the open model's
+  // saved blob whenever the open model changes — OR when that model's blob first
+  // arrives async (restart: the model opens before its paintRef materialises). The OLD
+  // once-per-session gate left the texture holding the previous model's paint and never
+  // re-restored, so paint carried over / got wiped / vanished on restart. We must NOT
+  // reload our OWN just-saved strokes (commitPaint advances g_loadedPaintModel/HadBlob),
+  // and never mid-stroke (paintingRef guard).
   useEffect(() => {
     setPaintActive(painting);
-    if (!painting || !tex) return;
-    const model = props.sceneName ?? null;
-    if (paintInited(model)) return; // texture already live for this model — leave it
+    if (!painting || !tex || paintingRef.current) return;
+    const model = props.sceneId ?? null;
     const base = tex.color ?? '#c8ccd2';
-    // Restore the model's content-addressed paint blob (resolved from its paintRef);
-    // base-coat only when the model has never been painted. (req_1382)
+    const modelChanged = g_loadedPaintModel !== model;
+    const blobArrived = !modelChanged && !g_loadedHadBlob && !!props.paintRef; // first saved blob for this model
+    if (!modelChanged && !blobArrived) { markPaintInited(props.sceneName ?? null); return; }
     const blob = props.paintRef ? props.paintBlob(props.paintRef) : null;
-    const id = setTimeout(() => { if (!restorePaint(blob)) baseCoat(base); markPaintInited(model); }, 80);
+    const id = setTimeout(() => {
+      if (paintingRef.current) return; // a stroke started while we waited — don't clobber it
+      const loaded = !!(blob && restorePaint(blob));
+      if (!loaded) baseCoat(base);
+      g_loadedPaintModel = model;
+      g_loadedHadBlob = loaded;
+      markPaintInited(props.sceneName ?? null);
+    }, 60);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [painting, props.sceneName, !!tex, props.paintRef]);
+  }, [painting, props.sceneId, props.sceneName, !!tex, props.paintRef, props.paintBlob]);
   // Seed the live buffer from the persisted paint whenever the open texture changes
   // (entering paint, a re-textureize, undo). Keyed on paintRev so an external change
   // re-syncs but our own per-dab writes (which don't touch tex) don't clobber the buffer.
@@ -1096,7 +1118,12 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const commitPaint = () => {
     if (touchedRef.current.size && !props.palette) props.onSetPalette(defaultPalette());
     touchedRef.current.clear();
-    savePaint(props.onBakePaint);
+    // savePaint returns the content hash it just wrote. The shared texture already
+    // holds exactly that, so advance the load tracker to it — otherwise the incoming
+    // props.paintRef change (our own save) would trigger the restore effect to reload
+    // and clobber the live painting. (req_1488/1492)
+    const ref = savePaint(props.onBakePaint);
+    if (ref) { g_loadedPaintModel = props.sceneId ?? null; g_loadedHadBlob = true; }
   };
   // resolve paint against the model palette, falling back to the default so a stroke
   // shows live BEFORE the first commit mints the real (persisted) palette.
@@ -3006,7 +3033,7 @@ export function StudioEditor() {
   }, []);
   return (
     <Row style={{ flexGrow: 1, height: '100%', minHeight: 0, position: 'relative' }}>
-      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} canUndo={model.canUndo} onUndo={() => model.undo()} canRedo={model.canRedo} onRedo={() => model.redo()} onImportModel={() => setImportOpen(true)} />
+      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} sceneId={model.openModelId} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} canUndo={model.canUndo} onUndo={() => model.undo()} canRedo={model.canRedo} onRedo={() => model.redo()} onImportModel={() => setImportOpen(true)} />
       {/* Branch-history verbs + import now live INSIDE the viewport's top bar
           (req_1430) — they used to be a separate absolute row colliding with the
           STUDIO info strip at the same corner. */}
