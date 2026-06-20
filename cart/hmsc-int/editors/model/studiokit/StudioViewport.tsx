@@ -59,10 +59,9 @@ import {
   SelectionOverlay, makeProjector, orbitalEyeJS, pickElement, applyPick, emptySelection, selectionCount,
   type SelMode, type Selection, type CameraSnap,
 } from '../meshSelect';
-import { pickFaceCell, pickFaceUV, paintUVsNeedRepack, brushCells, faceCellGrid, resamplePaint, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintCells, type PaintTarget, type FaceHit, type FaceUVHit } from '../meshPaint';
+import { pickFaceUV, paintUVsNeedRepack, type PaintCells, type PaintTarget, type FaceHit } from '../meshPaint';
 import { STUDIO_PAINT_KEY, PAINT_TEX, paintTex, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited } from '../meshPaintTexture';
 import { Paintable } from '@reactjit/runtime/primitives';
-import { PaintGridOverlay } from '../meshPaintOverlay';
 // The PAINT panel + stamping are now the UNIVERSAL kit (runtime/paint) — the same
 // brush/tool/colour vocabulary every cart shares, instead of a Studio one-off
 // (USER ASK req_1487). BrushKit is the control surface; useBrushStroke is the
@@ -72,13 +71,13 @@ import {
   BrushKit, useBrushStroke, DEFAULT_BRUSH,
   type Brush, type BrushTool, type PaintTheme, type Palette as KitPalette, type PaletteEntry,
 } from '@reactjit/runtime/paint';
-import { defaultPalette, paletteWithColor, slotById, slotColor, type Palette } from '../modelStream';
+import { defaultPalette, paletteWithColor, slotColor, type Palette } from '../modelStream';
 import {
   TransformGizmo, NormalHandle, AXIS_DIR, axisScreen, dragWorldDistance, pickGizmoHandle, pickNormalHandle, rotationSign, selectionVertIndices, selectionFaceIndices,
   type GizmoTool, type GizmoHit,
 } from '../meshGizmo';
 import { RigOverlay, pickRigHandle, rigHandles, type RigSel } from '../meshRig';
-import { T, STEP_BTN, SMOOTH_PRESETS, PAINT_SWATCHES, PAINT_BRUSH_SIZES, SCALE_FIGURE_SEED, SCALE_FIGURE_CART_KEY, STUDIO, type Vec3, type Rect } from './config';
+import { T, STEP_BTN, SMOOTH_PRESETS, SCALE_FIGURE_SEED, SCALE_FIGURE_CART_KEY, STUDIO, type Vec3, type Rect } from './config';
 import { Z } from './chrome/zlayers';
 import './registerTunables';
 import { clamp, sameRigSel, nextJointName, snapToStep, unitsToMeters, metersToUnits, fmtUnits, nowMs, schedFrame, partPlacement, loopCutAxisInfo, lcKeptFace, type LoopCutAxis } from './helpers';
@@ -288,7 +287,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // PAINT cell size in MODEL UNITS (req_1301): kept for the pre-paint atlas preview
   // (SceneTextureAtlas) only — the pixel painter resolution is fixed (PAINT_TEX) and
   // the kit's size dial is the real detail control now, so there's no UI for this.
-  const [paintCell, setPaintCell] = useHotState<number>('studio:paintCell', 0.06);
+  const [paintCell] = useHotState<number>('studio:paintCell', 0.06);
   // PERF (req_1203): the lag was setTex on EVERY mouse-move (a React re-render +
   // JSON.stringify of the whole paint map per dab). The fix — the cutout painter's
   // proven shape: dabs accumulate in a REF (zero React per move); the atlas re-bakes
@@ -995,21 +994,6 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     baseCoat(brushHex());
     for (const tgt of paintTargets()) touchedRef.current.add(tgt.partId);
     paintDirtyRef.current = true;
-  };
-  // Change the DETAIL grid (req_1358) — RESAMPLE every part's paint from the old cell
-  // size to the new one so the picture is preserved (finer subdivides, coarser samples),
-  // never scrambled. Then the bake/brush use the new grid.
-  const setDetail = (next: number) => {
-    if (Math.abs(next - paintCell) < 1e-6) return;
-    for (const tgt of paintTargets()) {
-      const p = paintRef.current[tgt.partId] ?? props.parts.find((pp) => pp.id === tgt.partId)?.paint;
-      if (!p || !Object.keys(p).length) continue;
-      paintRef.current[tgt.partId] = resamplePaint(tgt.mesh, p, paintCell, next);
-      touchedRef.current.add(tgt.partId);
-    }
-    setPaintCell(next);
-    paintDirtyRef.current = true;
-    commitPaint();
   };
   // Cursor pump (req_1298): a Pressable's onMouseMove only fires while a button is
   // HELD (engine.zig gates .move on dragging_left), so a free-moving cursor delivered
