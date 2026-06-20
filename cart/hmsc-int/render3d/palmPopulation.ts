@@ -22,12 +22,12 @@ const PALM_TRUNK_UNIT_RADIUS = 0.13;
 // Palm-grove globals. A future /settings rig (editorTunables, like grass/bush) can
 // swap these in; kept a plain table for now so the population stays pure data.
 export const PALM_CONFIG = {
-  // Sparsity: a painted palm cell spawns a palm with this probability — scattered
-  // trees, not a palm per square metre, but dense enough that a SMALL paint still
-  // shows a grove. At 0.06 a 25-cell test patch landed ~1.5 expected → often 0
-  // palms (the "I painted some and see nothing" bug, req_1465); 0.22 makes a
-  // 25-cell patch ~5 palms — a visible cluster — and a big field a real grove.
-  cellChance: 0.22,
+  // Per-DENSITY-LEVEL chance a painted palm cell spawns a palm (req_1467). Three
+  // paint tiles map to these — sparse (scattered), med (a grove), dense (a wall of
+  // palms). 0.06 was too low even for med: a small patch landed ~0 palms (req_1465).
+  // 'dense' is capped under 1.0 so a wall still has a little breathing room, not a
+  // rigid grid. Mirrors grass's sparse/med/lush density levels.
+  density: { sparse: 0.08, med: 0.22, dense: 0.7 },
   trunkHeight: { min: 4.2, max: 7.0 },
   trunkRadius: { min: 0.14, max: 0.2 },
   // Crown: `fronds` in the outer drooping ring; the inner ring is 0.6× that.
@@ -38,6 +38,15 @@ export const PALM_CONFIG = {
   rootHi: { r: 0.16, g: 0.4, b: 0.18 },
   // Palm-log trunk colour (the PalmTrunk geometry carries its own taper/scar rings).
   trunkColor: { r: 0.48, g: 0.38, b: 0.26 },
+};
+
+// Which density level each painted palm tile grows at — the parallel to grass's
+// GRASS_KIND_LEVEL. A new 'palm*' tile only needs a row here to light up (req_1467).
+type PalmDensity = keyof typeof PALM_CONFIG.density;
+const PALM_KIND_DENSITY: Readonly<Record<string, PalmDensity>> = {
+  palmSparse: 'sparse',
+  palm: 'med',
+  palmDense: 'dense',
 };
 
 function lerp(a: number, b: number, t: number): number {
@@ -76,9 +85,10 @@ export function buildPalmInstances(world: GameState['world']): PalmField {
   const tb = new Bounds();
 
   eachPaintedCell(world, (kind, wx, wz, top, cellKey) => {
-    if (kind !== 'palm') return;
+    const level = PALM_KIND_DENSITY[kind];
+    if (!level) return; // not a palm tile
     const seed = mix(cellKey ^ 0x9d2c5680);
-    if (unit(seed) > PALM_CONFIG.cellChance) return; // sparse: most palm cells stay bare
+    if (unit(seed) > PALM_CONFIG.density[level]) return; // density-gated: most cells stay bare
 
     const h0 = mix(seed ^ 0x1b56c4e9);
     const h1 = mix(h0 ^ 0x68bc21eb);

@@ -604,6 +604,37 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     render: { color: '#4f7a3a', heightMeters: 0.06, textureKey: HMSC_TILE_TEXTURE_KEYS.grass },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
+  // Palm DENSITY variants (req_1467) — appended LAST, indices in lockstep with
+  // game/kinds/tiles + design. Same ground as 'palm' (the MED grove); only the
+  // population density differs (render3d/palmPopulation PALM_KIND_DENSITY).
+  palmSparse: {
+    kind: 'palmSparse',
+    placement: 'surface',
+    label: 'Palm Grove (Sparse)',
+    pathing: { walkable: true, movementCost: 1.15, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.12, runCost: 1.1, vehicleCost: 1.9, preferredByVehicles: false, cover: 'none', noise: 0.2 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.12, lightTransmission: 0.95, soundOcclusion: 0.05 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
+    render: { color: '#6f9a52', heightMeters: 0.06, textureKey: HMSC_TILE_TEXTURE_KEYS.grass },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  palmDense: {
+    kind: 'palmDense',
+    placement: 'surface',
+    label: 'Palm Grove (Dense)',
+    pathing: { walkable: true, movementCost: 1.2, blocksLineOfSight: true },
+    npc: { traversable: true, walkCost: 1.16, runCost: 1.14, vehicleCost: 2.4, preferredByVehicles: false, cover: 'none', noise: 0.24 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: { ...OPEN_VISIBILITY, concealment: 0.3, lightTransmission: 0.85, soundOcclusion: 0.12 },
+    traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.45 },
+    surface: { material: 'soil', walkSpeedMultiplier: 0.93, runSpeedMultiplier: 0.9, vehicleSpeedMultiplier: 0.45, accelerationMultiplier: 0.68, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
+    render: { color: '#356326', heightMeters: 0.06, textureKey: HMSC_TILE_TEXTURE_KEYS.grass },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
 };
 
 export const TILE_KINDS = Object.keys(TILE_KIND_DEFINITIONS) as TileKind[];

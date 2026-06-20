@@ -85,9 +85,12 @@ export type TileKind =
   // population density differs (render3d/grassPopulation GRASS_DENSITY).
   | 'grassSparse'
   | 'grassLush'
-  // Palm grove: grassy ground that sparsely grows palms (PalmTrunk + a ~frond~
-  // crown) via render3d/palmPopulation — the grass approach, leaf-shaped (req_1443).
-  | 'palm';
+  // Palm grove: grassy ground that grows palms (PalmTrunk + a ~frond~ crown) via
+  // render3d/palmPopulation — the grass approach, leaf-shaped (req_1443). 'palm' is
+  // the MED grove; palmSparse/palmDense are the density variants (req_1467).
+  | 'palm'
+  | 'palmSparse'
+  | 'palmDense';
 
 // Altered-perception channel. Drives how building skins (and later other
 // surfaces) reinterpret themselves — e.g. being high scrambling facade text or
