@@ -884,15 +884,21 @@ const STAIR_SIDE_R = [physics.RECT_FLOATS]f32{ 3.0, 0.0, 3.25, 3.0, 3, 1, 0.85, 
 
 // Highest py the player reaches running up the standalone staircase from the
 // ground — 3.0 means the full crest, ~2.66 means walled out at the radius lip.
-fn stairClimbPeak(dt: f32, step_h: f32) f32 {
+// Highest py the player reaches running up the standalone staircase from the
+// ground with the user's REAL saved physics (gravity 13.5) at the worst-case
+// frame the game allows (dt = maxDriveFrameSeconds 0.05). 3.0 = full crest;
+// ~2.66 = walled out at the radius lip 0.34m below the top.
+fn stairClimbPeak(step_h: f32) f32 {
     registerStairSlope();
     var sim = Sim{
-        .dt = dt,
+        .dt = 0.05,
         .px = 1.5,
         .pz = -1.0,
         .py = 0,
         .move_z = 1,
         .speed = 5.8,
+        .gravity = 13.5,
+        .jump_speed = 5.65,
         .player_radius = 0.34,
         .player_height = 1.65,
         .step_height = step_h,
@@ -902,7 +908,7 @@ fn stairClimbPeak(dt: f32, step_h: f32) f32 {
     var out = physics.step(sim.pack(&g_buf)).?;
     var frame: usize = 0;
     var max_py: f32 = out[2];
-    while (frame < 240) : (frame += 1) {
+    while (frame < 120) : (frame += 1) {
         max_py = @max(max_py, out[2]);
         sim.px = out[1];
         sim.py = out[2];
@@ -916,18 +922,13 @@ fn stairClimbPeak(dt: f32, step_h: f32) f32 {
     return max_py;
 }
 
-test "stair crest: the player reaches the top of a staircase at every framerate" {
-    // The shipped step height must clear the 45° stair crest even at low fps.
-    // (HMSC_SCALE.playerStepHeightMeters — keep this >= ~0.45 or stairs wall out.)
-    const ship_step: f32 = 0.5;
-    const fps = [_]f32{ 60, 50, 40, 30, 20 };
-    for (fps) |f| {
-        const peak = stairClimbPeak(1.0 / f, ship_step);
-        try testing.expect(peak >= 2.97); // crested (3.0), not stuck at the lip
-    }
-    // Guard rail: the OLD 0.35 step height walled the climber out below 30fps —
-    // proof the crest depended on the step height we just raised.
-    try testing.expect(stairClimbPeak(1.0 / 30.0, 0.35) < 2.8);
+test "stair crest: the shipped step height clears a staircase top (req_1453/1470)" {
+    // The shipped step height (HMSC_SCALE.playerStepHeightMeters, floored onto
+    // legacy saves by reviveGameState) must clear the 45° stair crest even at
+    // the worst frame. With the OLD 0.35 the climber was walled out 0.34m short
+    // (the player-radius lip at the crest); 0.5 crests with margin.
+    try testing.expect(stairClimbPeak(0.5) >= 2.97); // crests the 3.0 top
+    try testing.expect(stairClimbPeak(0.35) < 2.8); // the bug: stuck at the lip
 }
 
 test "reach gate: an oriented thin wall between eye and prop blocks the E" {

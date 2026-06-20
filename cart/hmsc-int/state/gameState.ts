@@ -470,6 +470,20 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
     const revivedPlacedCells = parsedWorld
       ? stripLegacyBuildingEntryPads(parsedWorld.placedCells, removedLegacyBuildingIds)
       : initial.world.placedCells;
+    const revivedPhysics = {
+      ...initial.config.physics,
+      ...(parsed.config?.physics ?? {}),
+    };
+    // STAIRCREST (req_1470): legacy saves carry the old 0.35 step height, which
+    // walls the player out at the top of a 45°+ stair/ramp — the player-radius
+    // lip at the crest (radius*grade ≈ 0.34–0.45m) sits right at 0.35, so the
+    // climber bonks and only a jump gets over. Floor the step height to the
+    // current safe default (HMSC_SCALE, via initial config) so existing worlds
+    // get the fix on load while keeping their other tuned physics values.
+    revivedPhysics.playerStepHeightMeters = Math.max(
+      revivedPhysics.playerStepHeightMeters,
+      initial.config.physics.playerStepHeightMeters,
+    );
     return cloneGameState({
       ...initial,
       ...parsed,
@@ -477,10 +491,7 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
       config: {
         ...initial.config,
         ...(parsed.config ?? {}),
-        physics: {
-          ...initial.config.physics,
-          ...(parsed.config?.physics ?? {}),
-        },
+        physics: revivedPhysics,
         // Always load the default sky, NOT the stored one. The hour is a live
         // session value (driven by the optional day/night cycle), not save data
         // — persisting it made the sky load dark/drifted and made gv_reset look
