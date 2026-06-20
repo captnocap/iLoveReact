@@ -1296,6 +1296,45 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
     }
 }
 
+/// The lowest solid-rect underside the player's head would punch through this
+/// frame: a finite-floor band whose underside (rect_floor) sits ABOVE the feet
+/// but BELOW the head, with the body column inside the footprint. Returns a huge
+/// sentinel when the head is clear. Walls (floor = −∞) have no underside and are
+/// skipped — they belong to the horizontal side-push, not the vertical bonk.
+/// Used for the ceiling head-bonk: a ceiling is just a surface whose normal
+/// points down, so the response removes only the INTO-surface (upward) velocity
+/// and leaves horizontal momentum intact (Source-style — skim a low hallway at
+/// speed instead of getting side-shoved into glitchy jitter).
+fn ceilingUndersideAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, radius: f32, feet_y: f32, head_y: f32) f32 {
+    var lowest: f32 = 1e30;
+    var at: usize = 0;
+    while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
+        if (rects[at + 5] <= 0.5) continue; // solid only
+        const rf = rects[at + 8];
+        if (rf <= -100000) continue; // wall: no underside
+        if (rf <= feet_y + 0.04 or rf >= head_y) continue; // underside not between feet and head
+        if (x + radius < rects[at] or x - radius > rects[at + 2]) continue;
+        if (z + radius < rects[at + 1] or z - radius > rects[at + 3]) continue;
+        if (rf < lowest) lowest = rf;
+    }
+    var o: usize = 0;
+    while (o + ORIENTED_FLOATS <= oriented.len) : (o += ORIENTED_FLOATS) {
+        if (oriented[o + 5] <= 0.5) continue;
+        const rf = oriented[o + 8];
+        if (rf <= -100000) continue;
+        if (rf <= feet_y + 0.04 or rf >= head_y) continue;
+        const cs = @cos(oriented[o + 11]);
+        const sn = @sin(oriented[o + 11]);
+        var lx: f32 = undefined;
+        var lz: f32 = undefined;
+        worldToLocal(x, z, oriented[o + 9], oriented[o + 10], cs, sn, &lx, &lz);
+        if (lx + radius < oriented[o] or lx - radius > oriented[o + 2]) continue;
+        if (lz + radius < oriented[o + 1] or lz - radius > oriented[o + 3]) continue;
+        if (rf < lowest) lowest = rf;
+    }
+    return lowest;
+}
+
 fn resolveSpherePair(a: []f32, b: []f32) void {
     var dx = b[0] - a[0];
     var dy = b[1] - a[1];
@@ -1418,6 +1457,22 @@ pub fn step(input: []const f32) ?[]f32 {
     px += pvx * dt;
     py += pvy * dt;
     pz += pvz * dt;
+    // Head bonk: jumping under a ceiling (a floor/roof/deck overhead). A ceiling
+    // is a surface whose normal points DOWN, so the collision force removes only
+    // the velocity component INTO it — the upward part — and leaves horizontal
+    // momentum untouched. We clamp the head just below the lowest overhead
+    // underside and zero any rising velocity; pvx/pvz are deliberately preserved,
+    // so you skim a low hallway at speed (Source-style) instead of being shoved
+    // sideways. Doing this BEFORE collideSolidRects is also what kills the glitch:
+    // once the head sits at the underside, the body no longer overlaps the rect's
+    // solid band, so the horizontal circle-vs-rect push never fires on a ceiling.
+    if (pvy > 0) {
+        const ceiling = ceilingUndersideAt(rects, oriented, px, pz, player_radius, py, py + player_height);
+        if (ceiling < py + player_height) {
+            py = ceiling - player_height;
+            pvy = 0;
+        }
+    }
     // Stairlog capture: where the integrator WANTED to land this frame, before
     // any collision response. Compared against the final position below to see
     // which branch (rect side-push vs. heightfield move-cancel) eats the move.

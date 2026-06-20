@@ -397,6 +397,50 @@ test "jump arc: jump only fires from the ground" {
     try testing.expect(out[5] < 0); // airborne jump press: gravity only, no boost
 }
 
+test "head bonk: jumping into a ceiling caps the head and keeps horizontal speed" {
+    physics.clearHeightfields();
+    const dt: f32 = 0.016;
+    const player_height: f32 = 1.7;
+    // A solid ceiling slab over the play area, underside at y=2.0. A grounded
+    // 1.7m player jumping (apex 1.25) drives the head from 1.7 up into it.
+    const ceiling = [physics.RECT_FLOATS]f32{ -5, -5, 5, 5, 2.4, 1, 0.5, 0, 2.0 };
+    var sim = Sim{
+        .dt = dt,
+        .jump = true,
+        .jump_speed = 5,
+        .gravity = 10,
+        .move_x = 1,
+        .speed = 4,
+        .player_height = player_height,
+        .rects = &.{ GROUND, ceiling },
+    };
+    var out = physics.step(sim.pack(&g_buf)).?;
+    sim.jump = false;
+    var frames: usize = 0;
+    var bonked = false;
+    while (out[7] == 0 and frames < 500) : (frames += 1) {
+        sim.px = out[1];
+        sim.py = out[2];
+        sim.pz = out[3];
+        sim.pvx = out[4];
+        sim.pvy = out[5];
+        sim.pvz = out[6];
+        out = physics.step(sim.pack(&g_buf)).?;
+        // The head never punches through the ceiling underside.
+        try testing.expect(out[2] + player_height <= 2.0 + 0.001);
+        // At the bonk the upward velocity is removed (force is into the surface)
+        // but horizontal momentum is kept — the player still accelerates along +x
+        // toward speed, never side-shoved to a stop (the Source-style head-skim).
+        if (out[2] + player_height >= 2.0 - 0.02 and out[5] <= 0) {
+            bonked = true;
+            try testing.expect(out[5] <= 0.0001); // rising velocity zeroed
+            try testing.expect(out[4] > 1.0); // horizontal speed preserved through the bonk
+        }
+    }
+    try testing.expect(bonked);
+    try testing.expectEqual(@as(f32, 1), out[7]); // falls back and lands
+}
+
 // ── heightfield ──────────────────────────────────────────────────────
 
 // A 3×3 grid sloping up +x at 0.2/m: column heights 0, 0.2, 0.4.
