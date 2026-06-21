@@ -132,6 +132,35 @@ export type TextureSlot = {
   label: string;
 };
 
+/** A DEEP copy of a part's mesh — verts, faces (loop + uv + flags), mounts (with
+ *  nested position/axis/limit), pivot, and slots are all cloned, so the copy shares
+ *  NO array/object refs with the source. Used when pulling a part from one model
+ *  into another (req_1583): the imported part must be independently editable, never
+ *  a live alias mutating the source model. Plain data, so this is exhaustive yet
+ *  cheap; pairs with `addPart` (which mints a fresh id/tint/lift). */
+export function cloneMesh(m: EditMesh): EditMesh {
+  const out: EditMesh = {
+    verts: m.verts.map((v) => [v[0], v[1], v[2]] as V3),
+    faces: m.faces.map((f) => {
+      const nf: EditMeshFace = { loop: f.loop.slice() };
+      if (f.uv) nf.uv = f.uv.map((u) => [u[0], u[1]] as V2);
+      if (f.material != null) nf.material = f.material;
+      if (f.glass != null) nf.glass = f.glass;
+      if (f.tag != null) nf.tag = f.tag;
+      return nf;
+    }),
+  };
+  if (m.mounts) out.mounts = m.mounts.map((mt) => {
+    const nm: MountPoint = { ...mt, position: [mt.position[0], mt.position[1], mt.position[2]] };
+    if (mt.axis) nm.axis = [mt.axis[0], mt.axis[1], mt.axis[2]];
+    if (mt.limit) nm.limit = { ...mt.limit };
+    return nm;
+  });
+  if (m.pivot) out.pivot = [m.pivot[0], m.pivot[1], m.pivot[2]];
+  if (m.slots) out.slots = m.slots.map((s) => ({ ...s }));
+  return out;
+}
+
 /** Does a `plug` seat into a `socket`? Type must match; if both declare a size,
  *  the sizes must agree within tolerance. The rule that stops a tire mounting
  *  where a spoiler goes. The composition layer (assembling parts into a whole

@@ -43,6 +43,10 @@ export function LayerStackStrip(props: {
   emptyText?: string;
   onAdd?(): void;
   onPaste?(): void;
+  /** optional second add-source — the Studio outliner uses it to import a part
+   *  from another model (req_1583). Absent everywhere else. */
+  onImport?(): void;
+  importLabel?: string;
   onSelect(id: string): void;
   onRename(id: string, name: string): void;
   onAction(id: string, action: LayerStripAction): void;
@@ -57,6 +61,7 @@ export function LayerStackStrip(props: {
           {`${props.title ?? 'LAYERS'}${props.rows.length ? ` (${props.rows.length})` : ''}`}
         </Text>
         {props.onAdd ? <Chip label="+ add" color="good" onPress={props.onAdd} /> : null}
+        {props.onImport ? <Chip label={props.importLabel ?? 'import'} color="dim" onPress={props.onImport} /> : null}
         {props.onPaste ? <Chip label="paste" color="dim" onPress={props.onPaste} /> : null}
       </Row>
       <ScrollView style={bodyStyle}>

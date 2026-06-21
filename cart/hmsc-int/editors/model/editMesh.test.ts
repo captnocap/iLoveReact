@@ -5,7 +5,7 @@
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 import {
   addMount, addMountReflections, updateMountMirrored, bevelEdge, bevelVertex, connectVerts, cuboid, cutMeshByPlane, cylinder, deleteFaces, editMeshToGeometry, extrudeEdge, extrudeFace, faceNormal, faceCentroid, facesUsingEdges, facesUsingVerts, facesWithTag, icosphere, sphere, ICOSPHERE_SUBDIV_MAX,
-  bridgeEdges, centerMesh, clampSides, clearPivot, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, newConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
+  bridgeEdges, centerMesh, clampSides, clearPivot, cloneMesh, cone, createFaceFromEdges, createFaceFromVerts, findConcaveFaces, newConcaveFaces, hasPivot, isFaceConcave, jointTravelDegrees, loopCut, loopCutRange, loopCutPositions, meshBoundsCenter, meshEdges, mountsCompatible, pivotOf, plane, pyramid, removeMount, renameMount, rotateVerts, scaleVerts,
   addTextureSlot, assignFacesToSlot, clearFaceSlot, facesInSlot, slotOfFace, renameSlot, removeSlot, slotIndexById,
   flipFace, mergeFaces, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel, validateMesh, meshHealth,
@@ -1244,6 +1244,29 @@ test('mergeFaces refuses a single face and non-coplanar (perpendicular) faces', 
   const side = box.faces.findIndex((f) => faceNormal(box, f)[0] > 0.9);
   assertEqual(mergeFaces(box, [top]), null, 'under two faces → null');
   assertEqual(mergeFaces(box, [top, side]), null, 'a top + a perpendicular side → null');
+});
+
+test('cloneMesh deep-copies verts/faces/mounts/pivot — no shared refs (req_1583 cross-model import)', () => {
+  const src = cuboid(8, 8, 8);
+  src.pivot = [1, 2, 3];
+  src.mounts = [{ name: 'hub', kind: 'socket', position: [0, 0, 4], axis: [0, 1, 0], limit: { min: -90, max: 90 } }];
+  const copy = cloneMesh(src);
+  // structurally identical
+  assertEqual(copy.verts.length, src.verts.length, 'same vert count');
+  assertEqual(copy.faces.length, src.faces.length, 'same face count');
+  assert(approx(copy.pivot![0], 1) && approx(copy.pivot![2], 3), 'pivot copied');
+  assertEqual(copy.mounts![0].name, 'hub', 'mount copied');
+  // but NO shared references — mutating the copy must not touch the source
+  copy.verts[0][0] = 999;
+  assert(src.verts[0][0] !== 999, 'vert arrays are independent');
+  copy.faces[0].loop[0] = 7;
+  assert(src.faces[0].loop[0] !== 7, 'face loops are independent');
+  copy.pivot![0] = -50;
+  assert(src.pivot![0] === 1, 'pivot is independent');
+  copy.mounts![0].position[2] = -1;
+  assert(src.mounts![0].position[2] === 4, 'mount position is independent');
+  copy.mounts![0].limit!.max = 5;
+  assert(src.mounts![0].limit!.max === 90, 'mount limit is independent');
 });
 
 finish('editMesh');

@@ -95,6 +95,7 @@ import { ImportTextureDialog } from './dialogs/ImportTextureDialog';
 import { CompileAssetDialog } from './dialogs/CompileAssetDialog';
 import { CreateTextureDialog } from './dialogs/CreateTextureDialog';
 import { AddShapeDialog } from './dialogs/AddShapeDialog';
+import { ImportPartDialog } from './dialogs/ImportPartDialog';
 
 
 
@@ -3231,6 +3232,7 @@ export function StudioEditor() {
   const model: StudioModel = useStudioModel();
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [importPartOpen, setImportPartOpen] = useState(false); // cross-model part picker (req_1583)
   // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) step the parts-library branch history.
   // model.undo/redo are stable identities (MUTATORS) and read the live stacks,
   // so the mount-time closure stays correct. A focused TextInput consumes keys
@@ -3258,7 +3260,7 @@ export function StudioEditor() {
           STUDIO info strip at the same corner. */}
       {/* the OUTLINER (layers) docks on the RIGHT of the viewport (req_0981). */}
       <Box style={{ width: 236, minWidth: 236, height: '100%', borderLeftWidth: 1, borderColor: '#1c2a3c', backgroundColor: T.page }}>
-        <StudioOutliner model={model} height="100%" onAdd={() => setAddOpen(true)} />
+        <StudioOutliner model={model} height="100%" onAdd={() => setAddOpen(true)} onImport={() => setImportPartOpen(true)} />
       </Box>
       {addOpen ? (
         <AddShapeDialog
@@ -3271,6 +3273,12 @@ export function StudioEditor() {
           defaultPath={'cart/hmsc-int/data/generated/model.glb'}
           onCancel={() => setImportOpen(false)}
           onConfirm={(mesh, name) => { model.newModel(); model.addPart(mesh, name); setImportOpen(false); }}
+        />
+      ) : null}
+      {importPartOpen ? (
+        <ImportPartDialog
+          onClose={() => setImportPartOpen(false)}
+          onImport={(mesh, name, lift) => model.addPart(mesh, name, lift)}
         />
       ) : null}
     </Row>

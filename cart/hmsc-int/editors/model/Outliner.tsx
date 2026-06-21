@@ -28,7 +28,7 @@ function partRow(part: StudioPart, active: boolean, i: number, count: number): L
   };
 }
 
-export function StudioOutliner(props: { model: StudioModel; height?: number | string; onAdd?: () => void }) {
+export function StudioOutliner(props: { model: StudioModel; height?: number | string; onAdd?: () => void; onImport?: () => void }) {
   const { model } = props;
   const rows = model.parts.map((p, i) => partRow(p, p.id === model.activeId, i, model.parts.length));
   return (
@@ -38,6 +38,8 @@ export function StudioOutliner(props: { model: StudioModel; height?: number | st
       height={props.height}
       emptyText="No meshes yet — press + add to drop one on the grid."
       onAdd={props.onAdd ?? (() => model.addCuboid())}
+      onImport={props.onImport}
+      importLabel="⤓ part"
       onSelect={model.select}
       onRename={model.rename}
       onAction={model.runAction}
