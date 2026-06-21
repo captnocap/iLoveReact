@@ -196,6 +196,11 @@ export function paintRedo(emit: PaintBake): boolean {
   return true;
 }
 
+/** Pop the last pushed undo snapshot WITHOUT applying it — for cancelling an op
+ *  that called paintSnapshotBegin() but then restored the texture itself (e.g. the
+ *  text layer's Cancel, which uploads its own base). Keeps the undo ring honest. */
+export function paintDropUndoSnapshot(): void { g_undo.pop(); }
+
 /** Drop all paint undo/redo history (call when leaving paint / switching model). */
 export function clearPaintHistory(): void { g_undo.length = 0; g_redo.length = 0; }
 

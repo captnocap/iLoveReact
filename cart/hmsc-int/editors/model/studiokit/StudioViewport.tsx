@@ -60,7 +60,7 @@ import {
   type SelMode, type Selection, type CameraSnap,
 } from '../meshSelect';
 import { pickFaceUV, paintUVsNeedRepack, mirrorPaintDabs, faceUvPerWorld, surfaceBrushDabs, type PaintCells, type PaintTarget, type FaceHit, type TexelRect } from '../meshPaint';
-import { STUDIO_PAINT_KEY, PAINT_TEX, paintTex, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited } from '../meshPaintTexture';
+import { STUDIO_PAINT_KEY, PAINT_TEX, paintTex, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintDropUndoSnapshot, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited } from '../meshPaintTexture';
 import { Paintable } from '@reactjit/runtime/primitives';
 // The PAINT panel + stamping are now the UNIVERSAL kit (runtime/paint) — the same
 // brush/tool/colour vocabulary every cart shares, instead of a Studio one-off
@@ -69,7 +69,7 @@ import { Paintable } from '@reactjit/runtime/primitives';
 // source of truth, synthesised into the kit's palette shape.
 import {
   BrushKit, useBrushStroke, DEFAULT_BRUSH,
-  pushRecent, stampBrushDab, brushDabRgb, pressureRadius, layoutText,
+  pushRecent, stampBrushDab, brushDabRgb, pressureRadius, layoutText, GLYPH_H,
   type Brush, type BrushTool, type ClipRect, type PaintTheme, type Palette as KitPalette, type PaletteEntry,
 } from '@reactjit/runtime/paint';
 import { defaultPalette, paletteWithColor, slotColor, type Palette } from '../modelStream';
@@ -312,10 +312,25 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const [brush, setBrush] = useHotState<Brush>('studio:brush', STUDIO_DEFAULT_BRUSH);
   const [tool, setTool] = useHotState<BrushTool>('studio:tool', 'brush');
   const [faceFill, setFaceFill] = useHotState<boolean>('studio:paintFill', false);
+  // CONTAIN-TO-FACE (req_1611): the freehand brush/eraser cross atlas seams smoothly by
+  // default (req_1580), which is great for big surfaces but makes clean edge work hard —
+  // there's no way to keep paint inside ONE face. This toggle routes the brush through
+  // the per-face island-clipped path instead, so a dab only paints the face it's over
+  // (paint right up to an edge, no bleed onto the neighbour). Off = the smooth surface path.
+  const [lockFace, setLockFace] = useHotState<boolean>('studio:paintLockFace', false);
   const [paintRecents, setPaintRecents] = useHotState<PaletteEntry[]>('studio:paintRecents', []);
   // The string the TEXT tool stamps (req_1600). Twig — survives a hot reload but
   // resets cold; the click point + brush size/colour place and scale each stamp.
   const [textValue, setTextValue] = useHotState<string>('studio:paintText', 'TEXT');
+  // The TEXT LAYER (req_1609): text is placed as a MOVABLE layer, like a normal
+  // editor. `textLayerRef` holds the texture state BELOW the text (a base snapshot)
+  // plus the live anchor UV + face; dragging re-raycasts and re-composites
+  // (restore base → re-stamp) so the text glides over the surface. `textDragRef`
+  // gates the live move; `textPlacing` drives the panel's place/cancel buttons.
+  const textLayerRef = useRef<{ base: Uint8Array; u: number; v: number; partIndex: number; faceIndex: number } | null>(null);
+  const textDragRef = useRef(false);
+  const textComposeAtRef = useRef(0); // throttle the per-move full-texture re-composite
+  const [textPlacing, setTextPlacing] = useState(false);
   // PAINT cell size in MODEL UNITS (req_1301): kept for the pre-paint atlas preview
   // (SceneTextureAtlas) only — the pixel painter resolution is fixed (PAINT_TEX) and
   // the kit's size dial is the real detail control now, so there's no UI for this.
@@ -769,7 +784,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePart?.id]);
   // Leaving paint mode drops the grid overlay + any in-flight stroke.
-  useEffect(() => { if (selMode !== 'paint') { paintHoverRef.current = null; paintingRef.current = false; } }, [selMode]);
+  useEffect(() => { if (selMode !== 'paint') { paintHoverRef.current = null; paintingRef.current = false; if (textLayerRef.current) commitTextLayer(); } }, [selMode]);
   // The texture (+ its paint) is per-MODEL, but the `studio:tex` twig is one global
   // store — so opening a different model used to carry the prior model's paint over
   // (req_1208). Reset the texture + paint buffer when the open model changes (NOT on
@@ -950,7 +965,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   });
   // Pick a paint tool (hotkey or BrushKit) — also drops the faceFill overlay so the
   // tool actually applies (faceFill is checked before the tool in the press handler).
-  const selectTool = (t: BrushTool) => { setTool(t); setFaceFill(false); };
+  const selectTool = (t: BrushTool) => {
+    // leaving the text tool with a layer still up → bake it in place (don't lose work).
+    if (tool === 'text' && t !== 'text' && textLayerRef.current) commitTextLayer();
+    setTool(t); setFaceFill(false);
+  };
   // PAINT tool family hotkeys — a SEPARATE scope, live only while painting, so the
   // kit's native b/e/l/r/o/i don't collide with the mesh-op letters in 'studio'.
   useEditorControls('studio-paint', {
@@ -1048,21 +1067,21 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     paintDirtyRef.current = true;
     return true;
   };
-  // TEXT stamp (req_1600): raycast → the hit face's UV → lay the typed string out as
-  // 5×7 bitmap glyphs (runtime/paint glyphs) and stamp one filled SQUARE dab per lit
-  // cell, SCISSOR-clamped to the face island so it can't bleed onto a neighbour. The
-  // block centres on the click; the brush SIZE sets the glyph scale and the brush
-  // COLOUR the ink. A one-click model-texture op (not a stroke), so it's handled here
-  // like faceFill rather than through the kit's stroke controller. Returns true on a hit.
-  const stampTextAt = (sx: number, sy: number): boolean => {
-    if (!tex || !textValue.trim()) return false;
-    const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
-    if (!hit) return false;
-    const tgt = paintTargets()[hit.partIndex];
-    if (!tgt) return false;
+  // ── TEXT as a movable LAYER (req_1600/1609) ──
+  // Text behaves like a normal editor's text layer: clicking captures the texture
+  // BELOW it (a base snapshot) and lays the typed string on top; dragging re-raycasts
+  // and re-composites (restore base → re-stamp) so the text glides over the surface.
+  // "place" bakes it (one undo entry removes the whole text); "cancel" restores the
+  // base. Brush SIZE scales the glyphs, brush COLOUR inks them, editing the field
+  // re-stamps live. The string is laid out as 5×7 bitmap glyphs (runtime/paint glyphs),
+  // one filled SQUARE dab per lit cell, SCISSOR-clamped to the face's UV island.
+  //
+  // Stamp the typed string centred on (u,v) of one face, clipped to its island.
+  const stampTextAtUV = (u: number, v: number, mesh: EditMesh, faceIndex: number): void => {
+    if (!tex || !textValue.trim()) return;
     const layout = layoutText(textValue);
-    if (!layout.cells.length) return false;
-    const island = faceIslandPx(tgt.mesh, hit.faceIndex);
+    if (!layout.cells.length) return;
+    const island = faceIslandPx(mesh, faceIndex);
     let cx0 = 0, cy0 = 0, cw = 0, ch = 0;
     if (island) {
       cx0 = Math.max(0, Math.floor(island.x0));
@@ -1072,20 +1091,93 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     }
     const cell = Math.max(1, Math.round(brush.size / 4)); // texture px per font pixel
     const [r, g, b] = brushDabRgb(brush, tool, tex?.color ?? '#c8ccd2');
-    // centre the text block on the click point so the stamp lands where you aimed
-    const ox = hit.u * PAINT_TEX - (layout.width * cell) / 2;
-    const oy = hit.v * PAINT_TEX - (layout.height * cell) / 2;
+    // centre the block on the anchor so the text sits where you aimed
+    const ox = u * PAINT_TEX - (layout.width * cell) / 2;
+    const oy = v * PAINT_TEX - (layout.height * cell) / 2;
     const radius = cell * 0.6; // square half-extent: cells in a glyph merge seamlessly
+    const lineStep = GLYPH_H + 1; // matches glyphs.ts LINE_STEP (glyph height + 1px gap)
     for (const c of layout.cells) {
       const px = ox + (c.x + 0.5) * cell;
-      const py = oy + (c.y + 0.5) * cell;
+      // flip each glyph's rows: atlas-Y runs opposite to surface-up, so without this the
+      // text lands upside down (req_1609). Flip WITHIN the line so multi-line order holds.
+      const line = Math.floor(c.y / lineStep);
+      const fy = line * lineStep + (GLYPH_H - 1 - (c.y - line * lineStep));
+      const py = oy + (fy + 0.5) * cell;
       // kind 2 = square, hardness 1, aspect 1 → a crisp filled cell, clipped to the island.
       paintTex().brushColor(px, py, radius, r, g, b, 2, 0, 1, 1, 1, 0, 0, cx0, cy0, cw, ch);
     }
+  };
+  // Re-composite the active layer: restore the base (the texture below the text), then
+  // re-stamp the text on top at its current anchor. The single source of the live look.
+  const composeTextLayer = (): void => {
+    const L = textLayerRef.current;
+    if (!L) return;
+    const tgt = paintTargets()[L.partIndex];
+    if (!tgt) return;
+    paintTex().upload(L.base);
+    stampTextAtUV(L.u, L.v, tgt.mesh, L.faceIndex);
     touchedRef.current.add(tgt.partId);
     paintDirtyRef.current = true;
+  };
+  // Begin (or move) the layer at a screen point — raycast → UV anchor. On first
+  // placement it snapshots the texture below (for cancel + one undo entry). Returns
+  // true on a model hit (so the caller can begin a move drag), false on a miss.
+  const textPlaceAt = (sx: number, sy: number): boolean => {
+    if (!tex) return false;
+    const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
+    if (!hit) return false;
+    const tgt = paintTargets()[hit.partIndex];
+    if (!tgt) return false;
+    let L = textLayerRef.current;
+    if (!L) {
+      paintSnapshotBegin(); // pre-text state → undo ring (one undo removes the placed text)
+      const base = paintTex().readback();
+      if (!base) return false;
+      L = { base, u: hit.u, v: hit.v, partIndex: hit.partIndex, faceIndex: hit.faceIndex };
+      textLayerRef.current = L;
+      setTextPlacing(true);
+    } else {
+      L.u = hit.u; L.v = hit.v; L.partIndex = hit.partIndex; L.faceIndex = hit.faceIndex;
+    }
+    if (!texView) setTexView(true);
+    composeTextLayer();
     return true;
   };
+  // Move the live layer to a screen point during a drag — re-raycast (cheap) every move
+  // but THROTTLE the re-composite (a full-texture upload) to ~30fps so dragging stays
+  // smooth. A miss keeps the last anchor (no jump off the model).
+  const textMoveTo = (sx: number, sy: number): void => {
+    const L = textLayerRef.current;
+    if (!L || !tex) return;
+    const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
+    if (!hit) return;
+    L.u = hit.u; L.v = hit.v; L.partIndex = hit.partIndex; L.faceIndex = hit.faceIndex;
+    const t = nowMs();
+    if (t - textComposeAtRef.current >= 33) { textComposeAtRef.current = t; composeTextLayer(); }
+  };
+  // Place (bake) the active layer: it's already composited into the texture, so just
+  // persist + clear. The pre-text undo snapshot stays, so one undo lifts the whole text.
+  const commitTextLayer = (): void => {
+    if (!textLayerRef.current) return;
+    textLayerRef.current = null; textDragRef.current = false; setTextPlacing(false);
+    paintDirtyRef.current = true; commitPaint();
+  };
+  // Cancel the active layer: restore the base (remove the text), drop the undo snapshot
+  // we pushed on begin (nothing was placed), and persist the restored state.
+  const cancelTextLayer = (): void => {
+    const L = textLayerRef.current;
+    if (!L) return;
+    textLayerRef.current = null; textDragRef.current = false; setTextPlacing(false);
+    paintTex().upload(L.base);
+    paintDropUndoSnapshot();
+    paintDirtyRef.current = true; commitPaint();
+  };
+  // Re-stamp the live layer when the TEXT / SIZE / COLOUR changes (not mid-drag — the
+  // move handler composites then). Keeps the preview in sync with edits in the panel.
+  useEffect(() => {
+    if (textLayerRef.current && !textDragRef.current) composeTextLayer();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textValue, brush, textPlacing]);
   // FILL ALL (req_1352): one click to make the whole model one colour. The PIXEL
   // painter flat-fills the entire texture (every face samples it) in one clear —
   // no per-face/per-cell walk, no orphans, no leak. Erase fills the base coat.
@@ -1416,12 +1508,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
         commitPaint();
         return;
       }
-      // The text tool is a one-click stamp (snapshot → stamp the typed string → persist).
+      // The text tool places a MOVABLE layer (req_1609): a press places/moves it and
+      // begins a move-drag; it bakes only when you hit "place" in the panel. No commit
+      // here — the layer stays live so you can drag it around and edit the string.
       if (tool === 'text') {
-        paintSnapshotBegin();
-        stampTextAt(sx, sy);
-        if (!texView) setTexView(true);
-        commitPaint();
+        if (textPlaceAt(sx, sy)) textDragRef.current = true;
         return;
       }
       // The eyedropper just samples — no stroke, no undo snapshot, no orbit.
@@ -1430,9 +1521,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       // (readback drains pending ops, so it must run first).
       paintSnapshotBegin();
       // Freehand brush/eraser go through the 3D-SURFACE path (screen-space interpolation,
-      // multi-face stamping) so strokes stay continuous across atlas seams (req_1580). The
-      // atlas-space shape tools (line/rect/ellipse) stay on the kit.
-      if (tool === 'brush' || tool === 'eraser') {
+      // multi-face stamping) so strokes stay continuous across atlas seams (req_1580) —
+      // UNLESS "lock face" is on (req_1611), which routes them through the kit's per-face
+      // island-clipped path so a dab only paints the face it's over (clean edges, no
+      // bleed). The atlas-space shape tools (line/rect/ellipse) always stay on the kit.
+      if ((tool === 'brush' || tool === 'eraser') && !lockFace) {
         surfaceStrokeActiveRef.current = true;
         surfaceStrokeBegin(sx, sy, pressureOf(e));
       } else {
@@ -1611,6 +1704,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (selMode === 'paint') {
       const r = rectRef.current;
       const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
+      // TEXT tool: drag the live layer — re-raycast and re-composite so the text glides
+      // over the surface. A miss keeps the last position (no jump off the model).
+      if (tool === 'text' && textDragRef.current) { textMoveTo(sx, sy); return; }
       if (paintingRef.current) {
         if (surfaceStrokeActiveRef.current) surfaceStrokeMove(sx, sy, pressureOf(e)); // 3D-surface freehand
         else paintCtl.handlers.onMouseMove(e); // kit owns the atlas-space shape tools
@@ -1819,6 +1915,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     l.yaw = nextYaw; l.pitch = nextPitch;
   };
   const onUp = (e: any) => {
+    // end a TEXT-layer move: drop the drag but KEEP the layer live (place/cancel are
+    // explicit panel actions). Force a final composite so the resting position is exact
+    // (the drag throttles intermediate frames). A single click placed it; drag moved it.
+    if (textDragRef.current) { textDragRef.current = false; composeTextLayer(); return; }
     // end a paint stroke. Surface path: commit directly; kit path: it stamps the final
     // dab + fires onStrokeEnd → commitPaint.
     if (paintingRef.current) {
@@ -2324,7 +2424,21 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                   placeholder="type, then click the model"
                   style={{ height: 26, paddingLeft: 8, paddingRight: 8, borderRadius: 5, backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame, color: PAINT_THEME.ink, fontFamily: 'monospace', fontSize: 12 }}
                 />
-                <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace' }}>click a face to stamp · size = scale · colour = ink</Text>
+                {textPlacing ? (
+                  <>
+                    <Text fontSize={9} color="#9fe0ff" style={{ fontFamily: 'monospace' }}>drag on the model to move · then place it</Text>
+                    <Row style={{ gap: 6 }}>
+                      <Pressable tooltip="Bake the text into the texture here (one undo lifts the whole text)" onPress={commitTextLayer} style={{ flexGrow: 1, height: 26, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.accent, borderWidth: 1, borderColor: PAINT_THEME.accent }}>
+                        <Text fontSize={11} color={PAINT_THEME.page} style={{ fontFamily: 'monospace', fontWeight: '800' }}>place</Text>
+                      </Pressable>
+                      <Pressable tooltip="Discard the text and restore the surface underneath" onPress={cancelTextLayer} style={{ paddingLeft: 10, paddingRight: 10, height: 26, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: '#a14545' }}>
+                        <Text fontSize={11} color="#f0a0a0" style={{ fontFamily: 'monospace', fontWeight: '800' }}>cancel</Text>
+                      </Pressable>
+                    </Row>
+                  </>
+                ) : (
+                  <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace' }}>click a face to place · drag to move · size = scale · colour = ink</Text>
+                )}
               </Col>
             ) : null}
             {/* Studio model-texture strip */}
@@ -2348,6 +2462,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 </Pressable>
                 <Pressable tooltip="Fill the WHOLE hovered face one colour per click (the 'this face is just one colour' path)" onPress={() => setFaceFill((v) => !v)} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: faceFill ? PAINT_THEME.accent : PAINT_THEME.control, borderWidth: 1, borderColor: faceFill ? PAINT_THEME.accent : PAINT_THEME.frame }}>
                   <Text fontSize={10} color={faceFill ? PAINT_THEME.page : PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>face fill</Text>
+                </Pressable>
+                <Pressable tooltip="Lock the brush to ONE face — paint right up to an edge with no bleed onto the neighbour (off = strokes cross faces smoothly)" onPress={() => setLockFace((v) => !v)} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: lockFace ? PAINT_THEME.accent : PAINT_THEME.control, borderWidth: 1, borderColor: lockFace ? PAINT_THEME.accent : PAINT_THEME.frame }}>
+                  <Text fontSize={10} color={lockFace ? PAINT_THEME.page : PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>lock face</Text>
                 </Pressable>
                 <Pressable tooltip="Save the current colour as a palette swatch (grows the model's saved palette)" onPress={() => { const { palette } = paletteWithColor(livePalette, brushHex()); props.onSetPalette(palette); }} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame }}>
                   <Text fontSize={10} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>+ save</Text>
