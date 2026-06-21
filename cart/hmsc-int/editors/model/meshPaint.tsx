@@ -353,7 +353,7 @@ function baryOnTri(q: V3, a: V3, b: V3, c: V3): [number, number, number] {
 /** One stamp the surface brush lays onto a face: the atlas UV centre, the radius in
  *  TEXTURE PIXELS for THIS face's island (a world-uniform brush, so it's the correct
  *  px size per face), and the face's island rect to scissor to. */
-export type SurfaceDab = { u: number; v: number; radiusPx: number; clip: TexelRect | null };
+export type SurfaceDab = { u: number; v: number; radiusPx: number; clip: TexelRect | null; faceIndex: number };
 
 /** Every face of `mesh` the brush sphere (centre `p` in world space, `worldRadius`)
  *  reaches, as a stamp in that face's own UV island. `lift` is the part's render lift
@@ -395,6 +395,7 @@ export function surfaceBrushDabs(mesh: EditMesh, lift: number, p: V3, worldRadiu
       v: bary[0] * uv0[1] + bary[1] * uva[1] + bary[2] * uvb[1],
       radiusPx: Math.max(1, effR * upw * texels),
       clip: faceTexelRect(mesh, fi, texels),
+      faceIndex: fi,
     });
   }
   return out;

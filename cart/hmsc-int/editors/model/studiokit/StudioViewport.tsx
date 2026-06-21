@@ -126,7 +126,7 @@ const STUDIO_PAINT_TOOLS: BrushTool[] = ['brush', 'eraser', 'line', 'rect', 'ell
 let g_loadedPaintModel: string | null = null;
 let g_loadedHadBlob = false;
 
-export function StudioViewport(props: { parts: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; sceneId: string | null; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
+export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; sceneId: string | null; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
   const { parts, revision, activePart, onSelectFaces } = props;
 
   // Lower each visible part once per structural revision (camera drags + fov
@@ -1011,12 +1011,19 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // default full-square UV — which all overlap at one atlas region, so painting one
   // such face shows on every other (the mirrored-prong bug, req_1320). A mismatch vs
   // the packed tex's faceSig means "re-slot needed".
-  const paintFaceSig = props.parts.map((p) => `${p.id}:${p.mesh.faces.length}`).join('|');
+  // The paint atlas must be packed over ALL parts (visible + hidden), not just the
+  // visible set the viewport renders (req_1613): the viewport receives only visibleParts,
+  // so hiding a part used to shrink the pack set and re-slot the survivors' UV islands —
+  // their paint (and any stamped text) then sampled different texels and appeared to
+  // SHIFT. Packing over the full set keeps every part's island invariant to visibility.
+  // Falls back to the visible set if the host didn't pass allParts.
+  const atlasParts = props.allParts ?? props.parts;
+  const paintFaceSig = atlasParts.map((p) => `${p.id}:${p.mesh.faces.length}`).join('|');
   // req_1375: faces sharing an atlas island (congruent-face dedup, or a default
   // full-square UV) make one click paint several faces. faceSig only sees the face
   // COUNT, so it can't catch a shared/default UV layout — this does. When true, the
   // pack below MUST run (dedup off) so every face owns a unique, isolated island.
-  const paintRepackNeeded = painting && paintUVsNeedRepack(props.parts.map((p) => p.mesh));
+  const paintRepackNeeded = painting && paintUVsNeedRepack(atlasParts.map((p) => p.mesh));
   // Entering paint needs a texture (distinct per-face atlas slots — else every face
   // shares the full square and paint bleeds). Build/refresh the textureize pack, then
   // show it. Re-packs whenever the face topology changed since the last pack so NEW
@@ -1028,12 +1035,13 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     // PAINT pack: dedup OFF so EVERY face owns its own slot (independently paintable);
     // a SOLID neutral base so paint isn't buried in the pastel UV-debug template.
     const paintOpts = { ...DEFAULT_TEXTURE_OPTIONS, dedupIslands: false, combineIslands: false, type: 'solid' as const, color: '#c8ccd2', name: 'paint-v4' };
-    const result = textureizeScene(props.parts.map((p) => p.mesh), paintOpts, STUDIO.unitsPerTile, STUDIO.paintAtlasTexels);
+    const result = textureizeScene(atlasParts.map((p) => p.mesh), paintOpts, STUDIO.unitsPerTile, STUDIO.paintAtlasTexels);
     // Apply only the meshes whose UVs actually changed (textureize is idempotent now),
     // so re-slotting after adding ONE face doesn't churn every part. Paint is keyed in
     // face-relative cells, so it survives a re-slot — DON'T wipe it (it was being lost
-    // on every repack, req_1320); the seed effect re-reads it from the branch.
-    result.meshes.forEach((mesh, i) => { if (mesh !== props.parts[i].mesh) props.onEditMesh(props.parts[i].id, mesh); });
+    // on every repack, req_1320); the seed effect re-reads it from the branch. Packs over
+    // ALL parts (atlasParts) so hidden parts keep their slot and visible paint stays put.
+    result.meshes.forEach((mesh, i) => { if (mesh !== atlasParts[i].mesh) props.onEditMesh(atlasParts[i].id, mesh); });
     setTex({ ...(tex ?? {}), texels: result.texels, type: 'solid', color: '#c8ccd2', name: 'paint-v4', paintRev: (tex?.paintRev ?? 0), paintFit: true, faceSig: paintFaceSig });
     setTexView(true);
   };
@@ -1359,6 +1367,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (!(worldR > 0)) return true;
     const rgb = brushDabRgb(brush, tool, tex?.color ?? '#c8ccd2');
     for (const d of surfaceBrushDabs(tgt.mesh, tgt.lift, hit.world, worldR, PAINT_TEX)) {
+      // CONTAIN-TO-FACE (req_1611): when locked, only paint the face under the cursor —
+      // skip the other faces the brush sphere also reaches, so a stroke near an edge
+      // never bleeds onto the neighbour. Off = the smooth cross-seam brush (req_1580).
+      if (lockFace && d.faceIndex !== hit.faceIndex) continue;
       const px = d.u * PAINT_TEX, py = d.v * PAINT_TEX;
       stampBrushDab(paintTex(), brush, rgb, px, py, d.radiusPx, islandToClip(d.clip));
       if (mirrorAxes.length) {
@@ -1521,11 +1533,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       // (readback drains pending ops, so it must run first).
       paintSnapshotBegin();
       // Freehand brush/eraser go through the 3D-SURFACE path (screen-space interpolation,
-      // multi-face stamping) so strokes stay continuous across atlas seams (req_1580) —
-      // UNLESS "lock face" is on (req_1611), which routes them through the kit's per-face
-      // island-clipped path so a dab only paints the face it's over (clean edges, no
-      // bleed). The atlas-space shape tools (line/rect/ellipse) always stay on the kit.
-      if ((tool === 'brush' || tool === 'eraser') && !lockFace) {
+      // multi-face stamping) so strokes stay continuous across atlas seams (req_1580). The
+      // "lock face" toggle (req_1611) lives INSIDE that path — it just restricts each stamp
+      // to the face under the cursor — so locking keeps the same smooth brush, only
+      // contained. The atlas-space shape tools (line/rect/ellipse) stay on the kit.
+      if (tool === 'brush' || tool === 'eraser') {
         surfaceStrokeActiveRef.current = true;
         surfaceStrokeBegin(sx, sy, pressureOf(e));
       } else {
@@ -3441,7 +3453,7 @@ export function StudioEditor() {
   }, []);
   return (
     <Row style={{ flexGrow: 1, height: '100%', minHeight: 0, position: 'relative' }}>
-      <StudioViewport parts={model.visibleParts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} sceneId={model.openModelId} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} canUndo={model.canUndo} onUndo={() => model.undo()} canRedo={model.canRedo} onRedo={() => model.redo()} onImportModel={() => setImportOpen(true)} />
+      <StudioViewport parts={model.visibleParts} allParts={model.parts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} sceneId={model.openModelId} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} canUndo={model.canUndo} onUndo={() => model.undo()} canRedo={model.canRedo} onRedo={() => model.redo()} onImportModel={() => setImportOpen(true)} />
       {/* Branch-history verbs + import now live INSIDE the viewport's top bar
           (req_1430) — they used to be a separate absolute row colliding with the
           STUDIO info strip at the same corner. */}

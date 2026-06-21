@@ -171,6 +171,9 @@ test('surfaceBrushDabs: a brush spanning a shared EDGE paints BOTH faces — sea
   assertEqual(surfaceBrushDabs(box, 0, near, 0.3, T).length, 1, 'a 0.3u brush stays on the +Z face (edge is 0.5u away)');
   const both = surfaceBrushDabs(box, 0, near, 1.0, T);
   assert(both.length >= 2, 'a 1.0u brush reaches across the 0.5u-distant edge onto the +X face too');
+  // each dab carries its source faceIndex (req_1611: lock-face filters on it to contain
+  // a stroke to the one face under the cursor) — and the two faces here are distinct.
+  assertEqual(new Set(both.map((d) => d.faceIndex)).size, both.length, 'each dab names a distinct face');
 });
 
 test('surfaceBrushDabs: lift shifts the surface — a brush below the lifted face misses', () => {
