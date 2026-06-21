@@ -237,6 +237,48 @@ fn playerSolidOverlaps(rects: []const f32, oriented: []const f32, px: f32, py: f
     return count;
 }
 
+/// RJIT_COLLIDERLOG detail: print every collider whose XZ footprint the player
+/// stands in (solid OR not), with its band vs the player's feet/head — so the
+/// WRONG collider is obvious at a glance:
+///   UNDER  = its floor is above your head — you SHOULD pass beneath it (a roof /
+///            the sign's beam). If you're blocked while it says UNDER, the band
+///            skip isn't firing; if it says BLOCKS with band=(0.00..tall), the
+///            piece was baked solid-to-ground instead of as a high band.
+///   BLOCKS = its band straddles you (a real wall — correct).
+///   solid={} = a non-solid prop (foliage/flower) should be solid=false; solid=true
+///            on a flower is a bake bug. Capped at 6 so a dense spot can't flood.
+fn colliderlogDump(rects: []const f32, oriented: []const f32, px: f32, py: f32, pz: f32, radius: f32, height: f32) void {
+    const feet = py;
+    const head = py + height;
+    std.debug.print("    player feet={d:.2} head={d:.2}\n", .{ feet, head });
+    var shown: u32 = 0;
+    var r: usize = 0;
+    while (r + RECT_FLOATS <= rects.len and shown < 6) : (r += RECT_FLOATS) {
+        const ex = px - clamp(px, rects[r], rects[r + 2]);
+        const ez = pz - clamp(pz, rects[r + 1], rects[r + 3]);
+        if (ex * ex + ez * ez > radius * radius) continue;
+        const floor = bandFloor(rects[r + 8]);
+        const rel = if (head <= floor) "UNDER" else if (feet >= rects[r + 4]) "ABOVE" else "BLOCKS";
+        std.debug.print("    rect#{d} foot=({d:.1},{d:.1}..{d:.1},{d:.1}) band=({d:.2}..{d:.2}) solid={} {s}\n", .{ r / RECT_FLOATS, rects[r], rects[r + 1], rects[r + 2], rects[r + 3], floor, rects[r + 4], rects[r + 5] > 0.5, rel });
+        shown += 1;
+    }
+    var o: usize = 0;
+    while (o + ORIENTED_FLOATS <= oriented.len and shown < 6) : (o += ORIENTED_FLOATS) {
+        const cs = @cos(oriented[o + 11]);
+        const sn = @sin(oriented[o + 11]);
+        var lx: f32 = undefined;
+        var lz: f32 = undefined;
+        worldToLocal(px, pz, oriented[o + 9], oriented[o + 10], cs, sn, &lx, &lz);
+        const ex = lx - clamp(lx, oriented[o], oriented[o + 2]);
+        const ez = lz - clamp(lz, oriented[o + 1], oriented[o + 3]);
+        if (ex * ex + ez * ez > radius * radius) continue;
+        const floor = bandFloor(oriented[o + 8]);
+        const rel = if (head <= floor) "UNDER" else if (feet >= oriented[o + 4]) "ABOVE" else "BLOCKS";
+        std.debug.print("    orient#{d} foot=({d:.1},{d:.1}..{d:.1},{d:.1}) band=({d:.2}..{d:.2}) solid={} {s}\n", .{ o / ORIENTED_FLOATS, oriented[o], oriented[o + 1], oriented[o + 2], oriented[o + 3], floor, oriented[o + 4], oriented[o + 5] > 0.5, rel });
+        shown += 1;
+    }
+}
+
 fn clamp(n: f32, a: f32, b: f32) f32 {
     return @max(a, @min(b, n));
 }
@@ -1637,6 +1679,9 @@ pub fn step(input: []const f32) ?[]f32 {
                 const loaded_oriented = oriented.len / ORIENTED_FLOATS;
                 const tag = if (inside > 0 and push < 0.005 and intent_mag > 0.01) "<< WALKING THROUGH a solid collider" else if (inside > 0) "(inside, pushed)" else if (intent_mag > 0.01) "(clear — no collider here)" else "";
                 std.debug.print("[colliderlog] pos=({d:.2},{d:.2},{d:.2}) loaded(rects={d} oriented={d}) inside={d} nearestEdge={d:.2}m push={d:.3} {s}\n", .{ px, py, pz, loaded_rects, loaded_oriented, inside, nearest, push, tag });
+                // Detail: every collider footprint the player is standing in + its band
+                // relation (UNDER/BLOCKS/ABOVE) + solid flag — names the wrong collider.
+                colliderlogDump(rects, oriented, px, py, pz, player_radius, player_height);
             }
         }
     }
