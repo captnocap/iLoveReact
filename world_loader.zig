@@ -60,6 +60,7 @@ const SHAPE_GRASS: f32 = 6; // a grass blade clump — drawn by the grass pipeli
 const SHAPE_BUSH: f32 = 7; // a bush foliage clump — same foliage pipeline, bushier geometry
 const SHAPE_FROND: f32 = 8; // a palm-crown frond card — drawn by the ~frond~ pipeline (leaf cutout + wind)
 const SHAPE_PALMTRUNK: f32 = 9; // a palm trunk — tapered/curved/scar-ringed log, a normal lit mesh
+const SHAPE_FLOWER: f32 = 10; // flower heads — tiny cards drawn by the ~grass~ wind pipeline
 const SCAN_A: usize = 4;
 const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
@@ -617,6 +618,32 @@ fn buildGrassBlade() [36 * 8]f32 {
     return out;
 }
 
+/// Flower heads — compiled twin of runtime/geometries/FlowerHead.ts. These are
+/// tiny crossed cards in the grass shader's UV flower band (10..11), so the
+/// "~grass~" pipeline cuts them into colored blossoms and applies the same
+/// tip-weighted wind as grass blades.
+fn buildFlowerHead() [36 * 8]f32 {
+    var out: [36 * 8]f32 = undefined;
+    var i: usize = 0;
+    var b: usize = 0;
+    while (b < 3) : (b += 1) {
+        const theta = (@as(f32, @floatFromInt(b)) + 0.5) / 3.0 * std.math.pi;
+        const dx = @cos(theta);
+        const dz = @sin(theta);
+        const n = [3]f32{ dz, 0, -dx };
+        const nb = [3]f32{ -dz, 0, dx };
+        const bl = [3]f32{ -dx, -1, -dz };
+        const br = [3]f32{ dx, -1, dz };
+        const tr = [3]f32{ dx, 1, dz };
+        const tl = [3]f32{ -dx, 1, -dz };
+        pushTri(out[0..], &i, bl, br, tr, n, .{ 10, 10 }, .{ 11, 10 }, .{ 11, 11 });
+        pushTri(out[0..], &i, bl, tr, tl, n, .{ 10, 10 }, .{ 11, 11 }, .{ 10, 11 });
+        pushTri(out[0..], &i, bl, tr, br, nb, .{ 10, 10 }, .{ 11, 11 }, .{ 11, 10 });
+        pushTri(out[0..], &i, bl, tl, tr, nb, .{ 10, 10 }, .{ 10, 11 }, .{ 11, 11 });
+    }
+    return out;
+}
+
 /// A bush foliage clump — the compiled twin of runtime/geometries/BushClump.ts.
 /// 5 cards fanned a FULL circle, each leaning OUTWARD (tip splayed along its
 /// compass dir) so the silhouette reads as a leafy shrub, not a tuft. Double-sided;
@@ -866,6 +893,8 @@ const ShapeBatches = struct {
     gable_count: u32,
     grass: []f32,
     grass_count: u32,
+    flowers: []f32,
+    flower_count: u32,
     bush: []f32,
     bush_count: u32,
     frond: []f32,
@@ -881,6 +910,7 @@ const ShapeBatches = struct {
         allocator.free(self.spheres);
         allocator.free(self.gables);
         allocator.free(self.grass);
+        allocator.free(self.flowers);
         allocator.free(self.bush);
         allocator.free(self.frond);
         allocator.free(self.palmtrunks);
@@ -928,6 +958,8 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     errdefer gables.deinit(allocator);
     var grass: std.ArrayList(f32) = .{};
     errdefer grass.deinit(allocator);
+    var flowers: std.ArrayList(f32) = .{};
+    errdefer flowers.deinit(allocator);
     var bush: std.ArrayList(f32) = .{};
     errdefer bush.deinit(allocator);
     var frond: std.ArrayList(f32) = .{};
@@ -941,6 +973,7 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     var sphere_count: u32 = 0;
     var gable_count: u32 = 0;
     var grass_count: u32 = 0;
+    var flower_count: u32 = 0;
     var bush_count: u32 = 0;
     var frond_count: u32 = 0;
     var palmtrunk_count: u32 = 0;
@@ -968,6 +1001,9 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         } else if (@abs(shape - SHAPE_GRASS) < 0.5) {
             try grass.appendSlice(allocator, src);
             grass_count += 1;
+        } else if (@abs(shape - SHAPE_FLOWER) < 0.5) {
+            try flowers.appendSlice(allocator, src);
+            flower_count += 1;
         } else if (@abs(shape - SHAPE_BUSH) < 0.5) {
             try bush.appendSlice(allocator, src);
             bush_count += 1;
@@ -997,6 +1033,8 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         .gable_count = gable_count,
         .grass = try grass.toOwnedSlice(allocator),
         .grass_count = grass_count,
+        .flowers = try flowers.toOwnedSlice(allocator),
+        .flower_count = flower_count,
         .bush = try bush.toOwnedSlice(allocator),
         .bush_count = bush_count,
         .frond = try frond.toOwnedSlice(allocator),
@@ -2298,6 +2336,7 @@ pub const Runtime = struct {
     sphere: [12 * 8 * 6 * 8]f32 = undefined,
     gable_prism: [24 * 8]f32 = undefined,
     grass_blade: [36 * 8]f32 = undefined,
+    flower_head: [36 * 8]f32 = undefined,
     bush_clump: [60 * 8]f32 = undefined,
     frond_card: [144 * 8]f32 = undefined,
     palm_trunk: [1680 * 8]f32 = undefined,
@@ -2657,6 +2696,7 @@ pub const Runtime = struct {
         self.sphere = buildUnitSphere(12, 8);
         self.gable_prism = buildGablePrism();
         self.grass_blade = buildGrassBlade();
+        self.flower_head = buildFlowerHead();
         self.bush_clump = buildBushClump();
         self.frond_card = buildFrond();
         self.palm_trunk = buildPalmTrunk();
@@ -3130,6 +3170,19 @@ pub const Runtime = struct {
                 .scene3d_instance_stride = @intCast(self.stride),
                 .scene3d_instance_static = true,
             });
+            // Flower heads: same grass pipeline and wind, but UVs switch the
+            // shader to colored blossom cutouts.
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.flower_count > 0,
+                .scene3d_geom_key = "flower-head",
+                .scene3d_tex_key = "~grass~",
+                .scene3d_vertices = self.flower_head[0..],
+                .scene3d_vert_count = 36,
+                .scene3d_instance_data = self.shape_batches.flowers,
+                .scene3d_instance_count = self.shape_batches.flower_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
             // Bush clumps: same "~grass~" foliage pipeline, bushier geometry.
             try self.kid_list.append(self.allocator, .{
                 .scene3d_mesh = self.shape_batches.bush_count > 0,
@@ -3304,11 +3357,15 @@ pub const Runtime = struct {
         try fams.append(self.allocator, .{ .rows = self.shape_batches.gables, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "gable-prism", .verts = self.gable_prism[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.grass, .stride = @intCast(self.stride) });
-        try self.stream_protos.append(self.allocator, .{ .geom_key = "frond-card", .verts = self.frond_card[0..], .tex_key = "~frond~" });
-        try self.stream_protos.append(self.allocator, .{ .geom_key = "palm-trunk", .verts = self.palm_trunk[0..], .tex_key = null });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "grass-blade", .verts = self.grass_blade[0..], .tex_key = "~grass~" });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.flowers, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "flower-head", .verts = self.flower_head[0..], .tex_key = "~grass~" });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.bush, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "bush-clump", .verts = self.bush_clump[0..], .tex_key = "~grass~" });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.frond, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "frond-card", .verts = self.frond_card[0..], .tex_key = "~frond~" });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.palmtrunks, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "palm-trunk", .verts = self.palm_trunk[0..], .tex_key = null });
         for (self.material_batches) |batch| {
             if (batch.translucent or batch.textured_translucent or batch.count == 0) continue;
             // Shape-aware streaming proto (req_0939): same fix as the monolithic

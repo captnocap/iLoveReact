@@ -87,6 +87,9 @@ export const INSTANCE_SHAPE_FROND = 8;
 // rings (the real palm trunk, NOT a plain cylinder). A normal lit mesh; the row
 // colour tints it. (req_1452 — the trunk quality was the whole point of the work.)
 export const INSTANCE_SHAPE_PALMTRUNK = 9;
+// Flower heads — tiny cards routed through the same "~grass~" wind pipeline, so
+// the blossom moves with the blade tip instead of floating as a static sphere.
+export const INSTANCE_SHAPE_FLOWER = 10;
 
 // ── materials: ship the SHADER (the formula) — pixels only when there IS no formula ─
 // GUIDING_LIGHT: procedural content travels as its recipe. A face whose skin is
@@ -1060,7 +1063,7 @@ export function buildWorldInstances(
   if (opts.includeGroundLayers) pushWorldLayers(b, state);
   if (state?.world) {
     pushFoliage(b, state, floors, buildGrassInstances, INSTANCE_SHAPE_GRASS, 'grass');
-    pushFoliage(b, state, floors, buildFlowerInstances, INSTANCE_SHAPE_SPHERE, 'flowers');
+    pushFoliage(b, state, floors, buildFlowerInstances, INSTANCE_SHAPE_FLOWER, 'flowers');
     pushFoliage(b, state, floors, buildBushInstances, INSTANCE_SHAPE_BUSH, 'bush');
     pushPalms(b, state, floors);
   }

@@ -24,6 +24,7 @@ import * as HumanoidMod from './Humanoid';
 import * as VoxelMeshMod from './VoxelMesh';
 import * as GrassBladeMod from './GrassBlade';
 import * as BushClumpMod from './BushClump';
+import * as FlowerHeadMod from './FlowerHead';
 import * as FrondMod from './Frond';
 import * as PalmTrunkMod from './PalmTrunk';
 import * as PathTubeMod from './PathTube';
@@ -87,6 +88,9 @@ export const GrassBlade = def('GrassBlade', GrassBladeMod.generate, GrassBladeMo
 // BushClump — outward-splaying foliage cards (a leafy shrub), the bush sibling of
 // GrassBlade. Same foliage pipeline; per-instance scale/yaw/color give the field.
 export const BushClump = def('BushClump', BushClumpMod.generate, BushClumpMod.BUSH_CLUMP_DEFAULTS);
+// FlowerHead — tiny crossed cards in the grass shader's flower UV band. The
+// per-instance colour is the blossom colour; the "~grass~" pipeline supplies wind.
+export const FlowerHead = def('FlowerHead', FlowerHeadMod.generate, FlowerHeadMod.FLOWER_HEAD_DEFAULTS);
 // Frond — one arched palm/leaf card, UV base(0)→tip(1), style baked in uv.u.
 // Routed via "~frond~" to the foliage wind pipeline; a tree crown is many frond
 // instances radiating from the trunk top (the grass move, leaf-shaped).
@@ -111,6 +115,7 @@ export const HUMANOID_DEFAULTS = HumanoidMod.HUMANOID_DEFAULTS;
 export const VOXEL_MESH_DEFAULTS = VoxelMeshMod.VOXEL_MESH_DEFAULTS;
 export const GRASS_BLADE_DEFAULTS = GrassBladeMod.GRASS_BLADE_DEFAULTS;
 export const BUSH_CLUMP_DEFAULTS = BushClumpMod.BUSH_CLUMP_DEFAULTS;
+export const FLOWER_HEAD_DEFAULTS = FlowerHeadMod.FLOWER_HEAD_DEFAULTS;
 export const FROND_DEFAULTS = FrondMod.FROND_DEFAULTS;
 export const FLOWING_FROND_DEFAULTS = FrondMod.FLOWING_FROND_DEFAULTS;
 export const BROAD_FROND_DEFAULTS = FrondMod.BROAD_FROND_DEFAULTS;
@@ -141,6 +146,7 @@ export type { VoxelMeshParams, VoxelMeshBlock, VoxelMeshStats } from './VoxelMes
 export { voxelMeshStats } from './VoxelMesh';
 export type { GrassBladeParams } from './GrassBlade';
 export type { BushClumpParams } from './BushClump';
+export type { FlowerHeadParams } from './FlowerHead';
 
 /**
  * The registry keyed by id. The bake step serializes a def's `id` + resolved
@@ -148,5 +154,5 @@ export type { BushClumpParams } from './BushClump';
  * id through this map.
  */
 export const GEOMETRIES: Record<string, GeometryDef> = {
-  Box, Sphere, Head, Carve, Globe, Plane, Cylinder, Cone, Torus, Heightfield, Humanoid, VoxelMesh, GrassBlade, BushClump,
+  Box, Sphere, Head, Carve, Globe, Plane, Cylinder, Cone, Torus, Heightfield, Humanoid, VoxelMesh, GrassBlade, BushClump, FlowerHead,
 };

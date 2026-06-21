@@ -62,7 +62,7 @@ export const BUSH_CONFIG = {
 
 // FLOWER globals — a companion population for the 'Flower Grass' flora kind.
 // The grass pass still emits the blade bed; this pass adds small colored heads
-// at blade-tip height using the normal lit mesh pipeline.
+// at blade-tip height using the same "~grass~" wind pipeline as the blades.
 export const FLOWER_CONFIG = {
   density: 4,
   height: { min: 0.38, max: 0.68 },

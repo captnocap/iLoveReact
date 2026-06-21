@@ -4,6 +4,9 @@
 
 import { assert, assertClose, assertEqual, finish, test, withHost } from '../game/_testkit';
 import { GAME_BUILD, type PlacedBuildPiece } from '@game';
+import { makeChunk } from '../chunks';
+import { chunkToFloor } from '../chunkFloor';
+import { floraKindIndex, paintFlora } from '../floraData';
 import { dumpsterBodyMeters, propKindDefinition } from '../game/kinds/props';
 import { emptyDecalDoc } from '../game/textures/decal';
 import { BUILTIN_DECALS } from '../game/textures/builtinDecals';
@@ -19,6 +22,7 @@ import {
   INSTANCE_SHAPE_BOX,
   INSTANCE_SHAPE_CYLINDER8,
   INSTANCE_SHAPE_CYLINDER16,
+  INSTANCE_SHAPE_FLOWER,
   INSTANCE_SHAPE_SPHERE,
   INSTANCE_STRIDE,
   MATERIALS_DOC_TAIL_MAGIC,
@@ -174,6 +178,29 @@ test('compiled dumpster semantic recipe preserves the legacy box layout', () => 
   assertClose(rustyCornerPost[1], 0.5 * s, 1e-6, 'rusty corner post y');
   assertClose(rustyCornerPost[2], d * 0.46, 1e-6, 'rusty corner post z');
   assertColor(rustyCornerPost, colorHex('#7a5c3a'), 'rusty corner post');
+});
+
+test('compiled flower grass emits winded flower-card instances, not static spheres', () => {
+  const chunk = makeChunk(0, 0);
+  paintFlora(chunk.flora, 10, 12, floraKindIndex('grassFlowers'));
+  const state = {
+    world: {
+      cellSizeMeters: 1,
+      surfaceRegions: [],
+      roads: [],
+      junctions: [],
+      placedCells: {},
+      props: [],
+      landforms: [],
+      waterBodies: [],
+    },
+  };
+
+  const built = buildWorldInstances(state as any, [], [chunkToFloor(chunk)]);
+  const rows = Array.from({ length: built.instances.length / INSTANCE_STRIDE }, (_, i) => row(built.instances, i));
+  const flowerRows = rows.filter((r) => r[12] === INSTANCE_SHAPE_FLOWER);
+  assert(flowerRows.length > 0, 'flower grass bakes blossom heads as the grass-shader flower shape');
+  assertEqual(rows.filter((r) => r[12] === INSTANCE_SHAPE_SPHERE).length, 0, 'flower heads do not bake as static sphere instances');
 });
 
 test('compiled fire hydrant semantic recipe preserves the legacy part layout', () => {

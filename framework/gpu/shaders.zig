@@ -940,24 +940,39 @@ pub const grass_wgsl =
     \\
     \\@fragment
     \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    \\    let v = clamp(in.uv.y, 0.0, 1.0);
-    \\    // Three sub-blades across the card width — one card reads as many.
-    \\    let nbl = 3.0;
-    \\    let bid = floor(in.uv.x * nbl);
-    \\    let bu = fract(in.uv.x * nbl);
-    \\    let r0 = hash21(vec2f(bid, 1.0));
-    \\    let r1 = hash21(vec2f(bid, 2.0));
-    \\    let max_v = 0.65 + 0.35 * r0;        // each wisp stops at its own height
-    \\    let half_w = (0.30 - 0.26 * v) * (0.55 + 0.45 * r1); // tapers to a point
-    \\    let d = abs(bu - 0.5);
-    \\    var mask = smoothstep(half_w, half_w * 0.55, d);
-    \\    if (v > max_v) { mask = 0.0; }
-    \\    if (mask < 0.5) { discard; }
-    \\    // Dark per-instance root tint -> bright lime tip, varied per blade.
-    \\    let root_col = in.inst_color.rgb;
-    \\    let tip_var = hash21(floor(in.world_pos.xz));
-    \\    let tip_col = mix(vec3f(0.55, 0.78, 0.36), vec3f(0.78, 0.86, 0.42), tip_var);
-    \\    let albedo = mix(root_col, tip_col, pow(v, 1.2));
+    \\    var albedo: vec3f;
+    \\    if (in.uv.x > 5.0) {
+    \\        // FlowerHead geometry lives in UV band 10..11. It still gets the same
+    \\        // vertex wind as a blade tip (uv.y clamps to 1 in vs_main), but here
+    \\        // the card cuts to a round colored blossom instead of green wisps.
+    \\        let fuv = vec2f(in.uv.x - 10.0, in.uv.y - 10.0);
+    \\        let fp = fuv - vec2f(0.5);
+    \\        let r = length(fp);
+    \\        if (r > 0.5) { discard; }
+    \\        let center = 1.0 - smoothstep(0.11, 0.18, r);
+    \\        let rim = 1.0 - smoothstep(0.34, 0.5, r);
+    \\        let petal_col = in.inst_color.rgb * (0.72 + 0.28 * rim);
+    \\        albedo = mix(petal_col, vec3f(0.98, 0.78, 0.20), center);
+    \\    } else {
+    \\        let v = clamp(in.uv.y, 0.0, 1.0);
+    \\        // Three sub-blades across the card width — one card reads as many.
+    \\        let nbl = 3.0;
+    \\        let bid = floor(in.uv.x * nbl);
+    \\        let bu = fract(in.uv.x * nbl);
+    \\        let r0 = hash21(vec2f(bid, 1.0));
+    \\        let r1 = hash21(vec2f(bid, 2.0));
+    \\        let max_v = 0.65 + 0.35 * r0;        // each wisp stops at its own height
+    \\        let half_w = (0.30 - 0.26 * v) * (0.55 + 0.45 * r1); // tapers to a point
+    \\        let d = abs(bu - 0.5);
+    \\        var mask = smoothstep(half_w, half_w * 0.55, d);
+    \\        if (v > max_v) { mask = 0.0; }
+    \\        if (mask < 0.5) { discard; }
+    \\        // Dark per-instance root tint -> bright lime tip, varied per blade.
+    \\        let root_col = in.inst_color.rgb;
+    \\        let tip_var = hash21(floor(in.world_pos.xz));
+    \\        let tip_col = mix(vec3f(0.55, 0.78, 0.36), vec3f(0.78, 0.86, 0.42), tip_var);
+    \\        albedo = mix(root_col, tip_col, pow(v, 1.2));
+    \\    }
     \\    // Soft half-lambert so the blade's back side isn't black.
     \\    let N = normalize(in.world_normal);
     \\    let L = normalize(S.light_dir);

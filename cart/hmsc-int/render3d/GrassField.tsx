@@ -59,7 +59,7 @@ export const GrassField = memo(function GrassField(props: { world: GameState['wo
 });
 
 export const FlowerField = memo(function FlowerField(props: { world: GameState['world'] }) {
-  return <FoliageField world={props.world} build={buildFlowerInstances} geometry={Geometry.Sphere} params={{ ...Geometry.SPHERE_DEFAULTS, radius: 1, segments: 8 }} textureKey={null} />;
+  return <FoliageField world={props.world} build={buildFlowerInstances} geometry={Geometry.FlowerHead} params={Geometry.FLOWER_HEAD_DEFAULTS} />;
 });
 
 // Bush: leafy clumps over the painted 'bush' tiles — the same foliage pipeline,
