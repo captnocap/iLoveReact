@@ -21,23 +21,26 @@ import { image } from '@reactjit/image';
 import { base64ToBytes } from '@reactjit/workspace';
 import type { WorldProp } from '../../design';
 import { cookedAssetById, cookedMeshBlob, cookedTextureBlob } from '../../editors/model/cookedAssets';
+import { resolvePartTexture, type Part } from '../parts';
 
 const GEOMS = new Map<string, GeometryDef>();
 
-function geometryFor(meshRef: string, verts: Float32Array): GeometryDef {
-  const existing = GEOMS.get(meshRef);
+function geometryFor(meshRef: string, verts: Float32Array, start = 0, count = verts.length / 8): GeometryDef {
+  const key = start === 0 && count === verts.length / 8 ? meshRef : `${meshRef}:${start}:${count}`;
+  const existing = GEOMS.get(key);
   if (existing) return existing;
+  const slice = start === 0 && count === verts.length / 8 ? verts : verts.slice(start * 8, (start + count) * 8);
   let r2 = 0;
-  for (let i = 0; i + 2 < verts.length; i += 8) {
-    const d = verts[i] * verts[i] + verts[i + 1] * verts[i + 1] + verts[i + 2] * verts[i + 2];
+  for (let i = 0; i + 2 < slice.length; i += 8) {
+    const d = slice[i] * slice[i] + slice[i + 1] * slice[i + 1] + slice[i + 2] * slice[i + 2];
     if (d > r2) r2 = d;
   }
   const def: GeometryDef = {
-    id: `CookedProp:${meshRef}`,
+    id: `CookedProp:${key}`,
     defaults: {},
-    generate: (): GeometryData => ({ positions: verts, count: verts.length / 8, bounds: { radius: Math.sqrt(r2) } }),
+    generate: (): GeometryData => ({ positions: slice, count: slice.length / 8, bounds: { radius: Math.sqrt(r2) } }),
   };
-  GEOMS.set(meshRef, def);
+  GEOMS.set(key, def);
   return def;
 }
 
@@ -70,12 +73,60 @@ function cookedInlineTexture(texRef: string | undefined): InlineTex | null {
   return tex;
 }
 
+function slotPart(prop: WorldProp, slot: { id: string; label: string; defaultMaterial: string }): Part {
+  return {
+    id: slot.id,
+    label: slot.label,
+    geometry: 'Box',
+    params: { width: 1, height: 1, depth: 1 },
+    position: [prop.x, prop.y ?? 0, prop.z],
+    rotation: [0, prop.yawDegrees ?? 0, 0],
+    material: slot.defaultMaterial,
+    textureable: true,
+    tex: { cols: 1, floors: 1 },
+  };
+}
+
 export function CookedProp(props: { prop: WorldProp }) {
   const asset = cookedAssetById(props.prop.kind);
   if (!asset) return null;
   const verts = cookedMeshBlob(asset.meshRef);
   if (!verts || verts.length === 0) return null;
   const tex = cookedInlineTexture(asset.texRef);
+  const slots = asset.slots ?? [];
+  if (slots.length > 0) {
+    const firstSlotStart = Math.min(...slots.map((slot) => slot.start));
+    return (
+      <>
+        {firstSlotStart > 0 ? (
+          <Scene3D.Mesh
+            geometry={geometryFor(asset.meshRef, verts, 0, firstSlotStart)}
+            params={{}}
+            position={[props.prop.x, props.prop.y ?? 0, props.prop.z]}
+            rotation={[0, props.prop.yawDegrees ?? 0, 0]}
+            material={tex ? '#ffffff' : COOKED_PROP_TINT}
+            texture={tex ?? undefined}
+          />
+        ) : null}
+        {slots.map((slot) => {
+          if (slot.count <= 0) return null;
+          const resolved = resolvePartTexture(slotPart(props.prop, slot), props.prop.partTextures);
+          return (
+            <Scene3D.Mesh
+              key={slot.id}
+              geometry={geometryFor(asset.meshRef, verts, slot.start, slot.count)}
+              params={{}}
+              position={[props.prop.x, props.prop.y ?? 0, props.prop.z]}
+              rotation={[0, props.prop.yawDegrees ?? 0, 0]}
+              material={resolved ? '#ffffff' : (tex ? '#ffffff' : COOKED_PROP_TINT)}
+              texture={resolved ? undefined : (tex ?? undefined)}
+              textureKey={resolved?.key}
+            />
+          );
+        })}
+      </>
+    );
+  }
   return (
     <Scene3D.Mesh
       geometry={geometryFor(asset.meshRef, verts)}

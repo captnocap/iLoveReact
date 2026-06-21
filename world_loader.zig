@@ -2516,6 +2516,56 @@ pub const Runtime = struct {
         self.* = undefined;
     }
 
+    fn meshPropTexKey(self: *Runtime, material_ref: u32) !?[]const u8 {
+        if (material_ref == 0) return null;
+        const mi: usize = @intCast(material_ref - 1);
+        if (mi >= self.scene.materials.len) return null;
+        const material = self.scene.materials[mi];
+        if (material.wgsl.len == 0 and material.decal_doc.len == 0) return null;
+        const key = try std.fmt.allocPrint(self.allocator, "wmat-{d}", .{mi});
+        errdefer self.allocator.free(key);
+        try self.player_geom_keys.append(self.allocator, key);
+        return key;
+    }
+
+    fn appendMeshPropNode(
+        self: *Runtime,
+        mesh: constructor.MeshPropMesh,
+        inst: constructor.MeshPropInstance,
+        key: []const u8,
+        start: u32,
+        count: u32,
+        material_ref: u32,
+    ) !void {
+        if (count == 0) return;
+        const float_start: usize = @as(usize, @intCast(start)) * 8;
+        const float_count: usize = @as(usize, @intCast(count)) * 8;
+        if (float_start + float_count > mesh.vertices.len) return;
+        const tex_key = try self.meshPropTexKey(material_ref);
+        const material_index: usize = if (material_ref > 0) @intCast(material_ref - 1) else self.scene.materials.len;
+        const opacity = if (material_index < self.scene.materials.len) self.scene.materials[material_index].opacity else 1;
+        const textured = tex_key != null or mesh.tex_rgba != null;
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = count > 0,
+            .scene3d_geom_key = key,
+            .scene3d_vertices = mesh.vertices[float_start .. float_start + float_count],
+            .scene3d_vert_count = count,
+            .scene3d_bounds_radius = mesh.bounds_radius,
+            .scene3d_pos_x = inst.x,
+            .scene3d_pos_y = inst.y,
+            .scene3d_pos_z = inst.z,
+            .scene3d_rot_y = inst.yaw_degrees,
+            .scene3d_color_r = if (textured) 1 else mesh.color[0],
+            .scene3d_color_g = if (textured) 1 else mesh.color[1],
+            .scene3d_color_b = if (textured) 1 else mesh.color[2],
+            .scene3d_color_a = opacity,
+            .scene3d_tex_w = if (tex_key == null) mesh.tex_w else 0,
+            .scene3d_tex_h = if (tex_key == null) mesh.tex_h else 0,
+            .scene3d_tex_rgba = if (tex_key == null) mesh.tex_rgba else null,
+            .scene3d_tex_key = tex_key,
+        });
+    }
+
     fn build(self: *Runtime) !void {
         self.insts = self.scene.instances;
         self.inst_count = self.scene.instance_count;
@@ -2841,28 +2891,32 @@ pub const Runtime = struct {
             for (mp.instances) |inst| {
                 const mesh_index: usize = @intCast(inst.mesh);
                 const mesh = mp.meshes[mesh_index];
-                // A painted cooked prop (req_1496) carries its atlas as tex_rgba — wear
-                // it via scene3d_tex_rgba (the player/NPC textured-mesh path) and whiten
-                // the tint so it doesn't dim the texture. Untextured imports stay tinted.
-                const textured = mesh.tex_rgba != null;
-                try self.kid_list.append(self.allocator, .{
-                    .scene3d_mesh = mesh.vertex_count > 0,
-                    .scene3d_geom_key = mesh.key,
-                    .scene3d_vertices = mesh.vertices,
-                    .scene3d_vert_count = mesh.vertex_count,
-                    .scene3d_bounds_radius = mesh.bounds_radius,
-                    .scene3d_pos_x = inst.x,
-                    .scene3d_pos_y = inst.y,
-                    .scene3d_pos_z = inst.z,
-                    .scene3d_rot_y = inst.yaw_degrees,
-                    .scene3d_color_r = if (textured) 1 else mesh.color[0],
-                    .scene3d_color_g = if (textured) 1 else mesh.color[1],
-                    .scene3d_color_b = if (textured) 1 else mesh.color[2],
-                    .scene3d_color_a = 1,
-                    .scene3d_tex_w = mesh.tex_w,
-                    .scene3d_tex_h = mesh.tex_h,
-                    .scene3d_tex_rgba = mesh.tex_rgba,
-                });
+                if (mesh.slots.len == 0) {
+                    // A painted cooked prop (req_1496) carries its atlas as tex_rgba —
+                    // wear it via scene3d_tex_rgba and whiten the tint so it doesn't
+                    // dim the texture. Untextured imports stay tinted.
+                    try self.appendMeshPropNode(mesh, inst, mesh.key, 0, mesh.vertex_count, 0);
+                    continue;
+                }
+
+                const first_slot_start = mesh.slots[0].start;
+                if (first_slot_start > 0) {
+                    const key = try std.fmt.allocPrint(self.allocator, "{s}:base", .{mesh.key});
+                    self.player_geom_keys.append(self.allocator, key) catch |err| {
+                        self.allocator.free(key);
+                        return err;
+                    };
+                    try self.appendMeshPropNode(mesh, inst, key, 0, first_slot_start, 0);
+                }
+                for (mesh.slots, 0..) |slot, si| {
+                    const key = try std.fmt.allocPrint(self.allocator, "{s}:slot-{d}", .{ mesh.key, si });
+                    self.player_geom_keys.append(self.allocator, key) catch |err| {
+                        self.allocator.free(key);
+                        return err;
+                    };
+                    const material_ref = if (si < inst.slot_materials.len) inst.slot_materials[si] else 0;
+                    try self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, material_ref);
+                }
             }
             if (mp.instances.len > 0) {
                 log.print("[loader] built {d} imported prop mesh instance(s) from {d} mesh asset(s)\n", .{ mp.instances.len, mp.meshes.len });

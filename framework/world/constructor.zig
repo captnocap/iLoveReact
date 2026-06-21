@@ -44,7 +44,7 @@ const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
-const MESH_PROPS_VERSION: u32 = 4;
+const MESH_PROPS_VERSION: u32 = 5;
 const WATER_VERSION: u32 = 1;
 const TICKER_VERSION: u32 = 1;
 /// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
@@ -147,12 +147,19 @@ pub const MeshPropMesh = struct {
     tex_w: u32 = 0,
     tex_h: u32 = 0,
     tex_rgba: ?[]u8 = null,
+    slots: []MeshPropSlot = &.{},
 
     pub fn deinit(self: MeshPropMesh, allocator: std.mem.Allocator) void {
         allocator.free(self.key);
         allocator.free(self.vertices);
         if (self.tex_rgba) |rgba| allocator.free(rgba);
+        if (self.slots.len > 0) allocator.free(self.slots);
     }
+};
+
+pub const MeshPropSlot = struct {
+    start: u32,
+    count: u32,
 };
 
 pub const MeshPropInstance = struct {
@@ -161,6 +168,11 @@ pub const MeshPropInstance = struct {
     y: f32,
     z: f32,
     yaw_degrees: f32,
+    slot_materials: []u32 = &.{},
+
+    pub fn deinit(self: MeshPropInstance, allocator: std.mem.Allocator) void {
+        if (self.slot_materials.len > 0) allocator.free(self.slot_materials);
+    }
 };
 
 pub const MeshProps = struct {
@@ -169,6 +181,7 @@ pub const MeshProps = struct {
 
     pub fn deinit(self: MeshProps, allocator: std.mem.Allocator) void {
         for (self.meshes) |mesh| mesh.deinit(allocator);
+        for (self.instances) |inst| inst.deinit(allocator);
         allocator.free(self.meshes);
         allocator.free(self.instances);
     }
@@ -945,6 +958,8 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
         var tex_w: u32 = 0;
         var tex_h: u32 = 0;
         var tex_rgba: ?[]u8 = null;
+        var slots = try allocator.alloc(MeshPropSlot, 0);
+        errdefer if (slots.len > 0) allocator.free(slots);
         if (version == 3) {
             if (at + 8 > data.len) return Error.BadMeshProps;
             tex_w = std.mem.readInt(u32, data[at..][0..4], .little);
@@ -986,6 +1001,21 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
                 }
             }
         }
+        if (version >= 5) {
+            if (at + 4 > data.len) return Error.BadMeshProps;
+            const slot_count: usize = @intCast(std.mem.readInt(u32, data[at..][0..4], .little));
+            at += 4;
+            slots = try allocator.alloc(MeshPropSlot, slot_count);
+            if (slot_count > 0 and at + slot_count * 8 > data.len) return Error.BadMeshProps;
+            var si: usize = 0;
+            while (si < slot_count) : (si += 1) {
+                const start = std.mem.readInt(u32, data[at..][0..4], .little);
+                const count = std.mem.readInt(u32, data[at + 4 ..][0..4], .little);
+                if (start > vertex_count or count > vertex_count or @as(u64, start) + @as(u64, count) > @as(u64, vertex_count)) return Error.BadMeshProps;
+                slots[si] = .{ .start = start, .count = count };
+                at += 8;
+            }
+        }
         meshes[mi] = .{
             .key = key,
             .color = color,
@@ -999,6 +1029,7 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
             .tex_w = tex_w,
             .tex_h = tex_h,
             .tex_rgba = tex_rgba,
+            .slots = slots,
         };
         initialized_meshes += 1;
     }
@@ -1010,14 +1041,29 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
         if (at + 20 > data.len) return Error.BadMeshProps;
         const mesh = std.mem.readInt(u32, data[at..][0..4], .little);
         if (mesh >= mesh_count_u32) return Error.BadMeshProps;
+        const mesh_index: usize = @intCast(mesh);
+        const slot_count = meshes[mesh_index].slots.len;
+        var slot_materials = try allocator.alloc(u32, slot_count);
+        errdefer if (slot_materials.len > 0) allocator.free(slot_materials);
         instances[ii] = .{
             .mesh = mesh,
             .x = readF32(data, at + 4),
             .y = readF32(data, at + 8),
             .z = readF32(data, at + 12),
             .yaw_degrees = readF32(data, at + 16),
+            .slot_materials = slot_materials,
         };
         at += 20;
+        if (version >= 5) {
+            if (at + slot_count * 4 > data.len) return Error.BadMeshProps;
+            var si: usize = 0;
+            while (si < slot_count) : (si += 1) {
+                slot_materials[si] = std.mem.readInt(u32, data[at..][0..4], .little);
+                at += 4;
+            }
+        } else {
+            @memset(slot_materials, 0);
+        }
     }
     return .{ .meshes = meshes, .instances = instances };
 }

@@ -210,10 +210,15 @@ export type ImportedMeshPropInstance = {
   y: number;
   z: number;
   yawDegrees: number;
+  /** Per-mesh-slot material refs, aligned to ImportedMeshPropMesh.slots. */
+  slotMaterials?: number[];
 };
 
+export type MeshPropSlotRange = { start: number; count: number };
+export type ImportedMeshPropMesh = ImportedPropMesh & Partial<MeshTex> & { slots?: MeshPropSlotRange[] };
+
 export type ImportedMeshPropSink = {
-  meshes: ImportedPropMesh[];
+  meshes: ImportedMeshPropMesh[];
   instances: ImportedMeshPropInstance[];
 };
 
@@ -221,7 +226,7 @@ function createImportedMeshPropSink(): ImportedMeshPropSink {
   return { meshes: [], instances: [] };
 }
 
-function collectImportedMeshProp(sink: ImportedMeshPropSink, prop: WorldProp, mesh: ImportedPropMesh): void {
+function collectImportedMeshProp(sink: ImportedMeshPropSink, prop: WorldProp, mesh: ImportedMeshPropMesh, slotMaterials?: number[]): void {
   let slot = sink.meshes.findIndex((m) => m.key === mesh.key);
   if (slot < 0) {
     slot = sink.meshes.length;
@@ -233,6 +238,7 @@ function collectImportedMeshProp(sink: ImportedMeshPropSink, prop: WorldProp, me
     y: prop.y ?? 0,
     z: prop.z,
     yawDegrees: prop.yawDegrees ?? 0,
+    ...(slotMaterials?.length ? { slotMaterials } : {}),
   });
 }
 
@@ -447,7 +453,7 @@ function cookedPropTexture(texRef: string | undefined): MeshTex | null {
  *  the model to one content-addressed soup; CookedProp.tsx renders it the same way
  *  in the editor). The painted atlas rides along as optional tex fields (OBJ/GLB
  *  imports omit them). Returns null when the asset/blob isn't in the cooked store. */
-function cookedPropMesh(kind: string): (ImportedPropMesh & Partial<MeshTex>) | null {
+function cookedPropMesh(kind: string): ImportedMeshPropMesh | null {
   const asset = cookedAssetById(kind);
   if (!asset) return null;
   const verts = cookedMeshBlob(asset.meshRef);
@@ -465,6 +471,7 @@ function cookedPropMesh(kind: string): (ImportedPropMesh & Partial<MeshTex>) | n
     solid: asset.descriptor.solid,
     vertices: verts,
     ...(tex ? { png: tex.png } : {}),
+    ...(asset.slots?.length ? { slots: asset.slots.map((slot) => ({ start: slot.start, count: slot.count })) } : {}),
   };
 }
 
@@ -479,8 +486,15 @@ function pushPropGeometry(b: Build, prop: WorldProp): number {
   // content store, shipped through the SAME MESH_PROPS path as an imported mesh.
   // Without this they fell through to resolvePropParts' placeholder box (req_1493).
   if (isCookedPropKind(prop.kind)) {
+    const asset = cookedAssetById(prop.kind);
     const mesh = cookedPropMesh(prop.kind);
-    if (mesh) collectImportedMeshProp(b.meshProps, prop, mesh);
+    if (mesh) {
+      const slotMaterials = asset?.slots?.map((slot) => {
+        const textureId = prop.partTextures?.[slot.id];
+        return textureId ? internMaterial(b, { kind: 'material', id: textureId }) : 0;
+      });
+      collectImportedMeshProp(b.meshProps, prop, mesh, slotMaterials);
+    }
     return 0;
   }
   // A dynamics kind (ball/cone/can) is a BODY, not scenery: its parts ship in
@@ -1081,34 +1095,39 @@ export function buildWorldInstances(
   };
 }
 
+// v5 (req_1573/req_1542): cooked meshes can carry slot vertex ranges, and each
+// placed instance carries matching material refs for the FacePainter overrides.
 // v4 (req_1544): each mesh carries an optional painted-atlas texture after its
 // vertices as the ENCODED PNG bytes — u32 pngLen | u8[pngLen] (0 = untextured). The
 // loader stbi-decodes it at load (constructor.decodeMeshProps), so the headless
 // v8cli bake never needs an image-codec door (it just passes the bytes through). v3
 // shipped raw RGBA decoded at BAKE time, which silently failed in v8cli → grey props.
-// The loader still reads v1/v2 (legacy) + v3 (raw RGBA) + v4 (PNG).
-export const MESH_PROPS_LUMP_VERSION = 4;
+// The loader still reads v1/v2 (legacy) + v3 (raw RGBA) + v4 (PNG) + v5 slots.
+export const MESH_PROPS_LUMP_VERSION = 5;
 
 /** Encode imported / cooked prop meshes:
  *  u32 version | u32 meshCount | u32 instanceCount
  *  mesh[]: u32 keyLen | utf8 key | f32 color3 | f32 bounds |
  *          f32 footprintWidth | f32 footprintDepth | f32 height |
  *          u32 solid | u32 vertexCount | f32[vertexCount*8] |
- *          u32 pngLen | u8[pngLen]   (v4 — the paint atlas as PNG, loader-decoded)
- *  instance[]: u32 meshIndex | f32 x,y,z,yawDegrees
+ *          u32 pngLen | u8[pngLen]   (v4 — the paint atlas as PNG, loader-decoded) |
+ *          u32 slotCount | { u32 startVertex | u32 vertexCount }[slotCount] (v5)
+ *  instance[]: u32 meshIndex | f32 x,y,z,yawDegrees | u32 slotMaterial[mesh.slotCount] (v5)
  */
 export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
-  const meshes = sink.meshes as ReadonlyArray<ImportedPropMesh & Partial<MeshTex>>;
-  const pngOf = (mesh: ImportedPropMesh & Partial<MeshTex>): Uint8Array | null =>
+  const meshes = sink.meshes;
+  const pngOf = (mesh: ImportedMeshPropMesh): Uint8Array | null =>
     (mesh.png && mesh.png.byteLength > 0) ? mesh.png : null;
   let bytes = 12;
   const keyBytes = meshes.map((mesh) => textBytes(mesh.key));
   for (let i = 0; i < meshes.length; i += 1) {
     const mesh = meshes[i]!;
     const png = pngOf(mesh);
-    bytes += 4 + keyBytes[i]!.byteLength + 36 + mesh.vertices.byteLength + 4 + (png ? png.byteLength : 0);
+    bytes += 4 + keyBytes[i]!.byteLength + 36 + mesh.vertices.byteLength + 4 + (png ? png.byteLength : 0) + 4 + (mesh.slots?.length ?? 0) * 8;
   }
-  bytes += sink.instances.length * 20;
+  for (const inst of sink.instances) {
+    bytes += 20 + (meshes[inst.mesh]?.slots?.length ?? 0) * 4;
+  }
   const out = new Uint8Array(bytes);
   const view = new DataView(out.buffer);
   view.setUint32(0, MESH_PROPS_LUMP_VERSION, true);
@@ -1135,6 +1154,13 @@ export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
     const png = pngOf(mesh);
     view.setUint32(at, png ? png.byteLength : 0, true); at += 4;
     if (png) { out.set(png, at); at += png.byteLength; }
+    const slots = mesh.slots ?? [];
+    view.setUint32(at, slots.length, true); at += 4;
+    for (const slot of slots) {
+      view.setUint32(at + 0, slot.start, true);
+      view.setUint32(at + 4, slot.count, true);
+      at += 8;
+    }
   }
   for (const inst of sink.instances) {
     view.setUint32(at + 0, inst.mesh, true);
@@ -1143,6 +1169,11 @@ export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
     view.setFloat32(at + 12, inst.z, true);
     view.setFloat32(at + 16, inst.yawDegrees, true);
     at += 20;
+    const slotCount = meshes[inst.mesh]?.slots?.length ?? 0;
+    for (let i = 0; i < slotCount; i += 1) {
+      view.setUint32(at, inst.slotMaterials?.[i] ?? 0, true);
+      at += 4;
+    }
   }
   return out;
 }

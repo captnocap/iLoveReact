@@ -9,8 +9,25 @@ import type { WorldProp } from '../design';
 import type { Part } from './parts';
 import { streetSignParts } from './props/StreetSign';
 import { dataPropParts } from './props/DataProp';
+import { isImportedPropKind } from '../game/kinds/importedProps';
+import { cookedAssetById } from '../editors/model/cookedAssets';
 
 export function propParts(prop: WorldProp): Part[] {
+  if (isImportedPropKind(prop.kind)) return [];
+  const cooked = cookedAssetById(prop.kind);
+  if (cooked?.slots?.length) {
+    return cooked.slots.map((slot): Part => ({
+      id: slot.id,
+      label: slot.label,
+      geometry: 'Box',
+      params: { width: 1, height: 1, depth: 1 },
+      position: [prop.x, prop.y ?? 0, prop.z],
+      rotation: [0, prop.yawDegrees ?? 0, 0],
+      material: slot.defaultMaterial,
+      textureable: slot.count > 0,
+      tex: { cols: 1, floors: 1 },
+    }));
+  }
   switch (prop.kind) {
     case 'streetSign': return streetSignParts(prop);
     // PROPBATCH-0611: data-recipe kinds describe themselves — their image
