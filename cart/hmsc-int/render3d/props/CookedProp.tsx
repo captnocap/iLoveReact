@@ -25,11 +25,17 @@ import { resolvePartTexture, type Part } from '../parts';
 
 const GEOMS = new Map<string, GeometryDef>();
 
-function geometryFor(meshRef: string, verts: Float32Array, start = 0, count = verts.length / 8): GeometryDef {
-  const key = start === 0 && count === verts.length / 8 ? meshRef : `${meshRef}:${start}:${count}`;
+function geometryFor(meshRef: string, verts: Float32Array, start = 0, count = verts.length / 8, flipV = false): GeometryDef {
+  const whole = start === 0 && count === verts.length / 8;
+  const key = `${whole ? meshRef : `${meshRef}:${start}:${count}`}${flipV ? ':flip-v' : ''}`;
   const existing = GEOMS.get(key);
   if (existing) return existing;
-  const slice = start === 0 && count === verts.length / 8 ? verts : verts.slice(start * 8, (start + count) * 8);
+  const slice = whole && !flipV ? verts : verts.slice(start * 8, (start + count) * 8);
+  if (flipV) {
+    for (let i = 0; i + 7 < slice.length; i += 8) {
+      slice[i + 7] = 1 - slice[i + 7];
+    }
+  }
   let r2 = 0;
   for (let i = 0; i + 2 < slice.length; i += 8) {
     const d = slice[i] * slice[i] + slice[i + 1] * slice[i + 1] + slice[i + 2] * slice[i + 2];
@@ -114,7 +120,7 @@ export function CookedProp(props: { prop: WorldProp }) {
           return (
             <Scene3D.Mesh
               key={slot.id}
-              geometry={geometryFor(asset.meshRef, verts, slot.start, slot.count)}
+              geometry={geometryFor(asset.meshRef, verts, slot.start, slot.count, Boolean(resolved))}
               params={{}}
               position={[props.prop.x, props.prop.y ?? 0, props.prop.z]}
               rotation={[0, props.prop.yawDegrees ?? 0, 0]}

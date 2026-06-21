@@ -2347,6 +2347,7 @@ pub const Runtime = struct {
     material_batches: []MaterialBatch = &.{},
     materials_ready: bool = false,
     player_geom_keys: std.ArrayList([]u8) = .{},
+    mesh_prop_vertex_buffers: std.ArrayList([]f32) = .{},
     kid_list: std.ArrayList(Node) = .{},
     root: Node = .{},
     player_first_child: usize = 0,
@@ -2492,6 +2493,8 @@ pub const Runtime = struct {
     }
 
     pub fn deinit(self: *Runtime) void {
+        for (self.mesh_prop_vertex_buffers.items) |verts| self.allocator.free(verts);
+        self.mesh_prop_vertex_buffers.deinit(self.allocator);
         for (self.player_geom_keys.items) |key| self.allocator.free(key);
         self.player_geom_keys.deinit(self.allocator);
         self.npcs.deinit(self.allocator);
@@ -2542,13 +2545,22 @@ pub const Runtime = struct {
         const float_count: usize = @as(usize, @intCast(count)) * 8;
         if (float_start + float_count > mesh.vertices.len) return;
         const tex_key = try self.meshPropTexKey(material_ref);
+        const vertices = if (tex_key != null) blk: {
+            const copy = try self.allocator.alloc(f32, float_count);
+            errdefer self.allocator.free(copy);
+            @memcpy(copy, mesh.vertices[float_start .. float_start + float_count]);
+            var i: usize = 7;
+            while (i < copy.len) : (i += 8) copy[i] = 1 - copy[i];
+            try self.mesh_prop_vertex_buffers.append(self.allocator, copy);
+            break :blk copy;
+        } else mesh.vertices[float_start .. float_start + float_count];
         const material_index: usize = if (material_ref > 0) @intCast(material_ref - 1) else self.scene.materials.len;
         const opacity = if (material_index < self.scene.materials.len) self.scene.materials[material_index].opacity else 1;
         const textured = tex_key != null or mesh.tex_rgba != null;
         try self.kid_list.append(self.allocator, .{
             .scene3d_mesh = count > 0,
             .scene3d_geom_key = key,
-            .scene3d_vertices = mesh.vertices[float_start .. float_start + float_count],
+            .scene3d_vertices = vertices,
             .scene3d_vert_count = count,
             .scene3d_bounds_radius = mesh.bounds_radius,
             .scene3d_pos_x = inst.x,
