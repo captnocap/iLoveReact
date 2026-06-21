@@ -12,6 +12,11 @@
 const std = @import("std");
 const gamefile = @import("gamefile.zig");
 const mapfile = gamefile.mapfile;
+// stb_image — decode the cooked-prop paint PNG at load (req_1544, MESH_PROPS v4),
+// the same decoder the decal raster uses (gpu/decal_raster.zig). The bake passes
+// the encoded PNG through untouched because the headless v8cli bake has no image
+// codec; decoding here, in the game host that links stb, is the path that works.
+const c = @import("../c.zig").imports;
 
 pub const Error = gamefile.Error || error{
     NoMapTiles,
@@ -39,7 +44,7 @@ const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
-const MESH_PROPS_VERSION: u32 = 3;
+const MESH_PROPS_VERSION: u32 = 4;
 const WATER_VERSION: u32 = 1;
 const TICKER_VERSION: u32 = 1;
 /// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
@@ -932,12 +937,15 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
         var vi: usize = 0;
         while (vi < floats) : (vi += 1) vertices[vi] = readF32(data, at + vi * 4);
         at += vertex_bytes;
-        // v3 painted-atlas texture: u32 tex_w | u32 tex_h | u8[tex_w*tex_h*4] (0×0 =
-        // untextured). Mirrors readModelGroup's player/NPC texture read.
+        // Painted-atlas texture. v3: raw RGBA (u32 tex_w | u32 tex_h | u8[w*h*4]) —
+        // decoded at bake time, which silently failed under v8cli (req_1544). v4: the
+        // ENCODED PNG (u32 pngLen | u8[pngLen], 0 = untextured) decoded HERE with stbi,
+        // the same path face decals use (gpu/decal_raster.zig). A decode failure warns
+        // and ships untextured — a bad image never fails the whole load.
         var tex_w: u32 = 0;
         var tex_h: u32 = 0;
         var tex_rgba: ?[]u8 = null;
-        if (version >= 3) {
+        if (version == 3) {
             if (at + 8 > data.len) return Error.BadMeshProps;
             tex_w = std.mem.readInt(u32, data[at..][0..4], .little);
             tex_h = std.mem.readInt(u32, data[at + 4 ..][0..4], .little);
@@ -950,6 +958,32 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
                 @memcpy(rgba, data[at .. at + tex_bytes]);
                 at += tex_bytes;
                 tex_rgba = rgba;
+            }
+        } else if (version >= 4) {
+            if (at + 4 > data.len) return Error.BadMeshProps;
+            const png_len: usize = @intCast(std.mem.readInt(u32, data[at..][0..4], .little));
+            at += 4;
+            if (png_len > 0) {
+                if (at + png_len > data.len) return Error.BadMeshProps;
+                var iw: c_int = 0;
+                var ih: c_int = 0;
+                var channels: c_int = 0;
+                const pixels = c.stbi_load_from_memory(data[at..].ptr, @intCast(png_len), &iw, &ih, &channels, 4);
+                at += png_len;
+                if (pixels) |px| {
+                    defer c.stbi_image_free(px);
+                    const w: usize = @intCast(iw);
+                    const h: usize = @intCast(ih);
+                    const n: usize = w * h * 4;
+                    if (n > 0) {
+                        const rgba = try allocator.alloc(u8, n);
+                        errdefer allocator.free(rgba);
+                        @memcpy(rgba, px[0..n]);
+                        tex_w = @intCast(w);
+                        tex_h = @intCast(h);
+                        tex_rgba = rgba;
+                    }
+                }
             }
         }
         meshes[mi] = .{

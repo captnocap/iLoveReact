@@ -425,18 +425,18 @@ function pushPropParts(b: Build, prop: WorldProp, parts: readonly PropPartSpec[]
 const COOKED_PROP_COLOR: readonly [number, number, number] = [0xc2 / 255, 0xc6 / 255, 0xcf / 255];
 
 /** The painted-atlas texture a cooked prop carries into the compiled game (req_1496):
- *  the same mechanism the player/NPC models ship a baked mesh texture (tex_w/h/rgba in
- *  the lump → world_loader sets scene3d_tex_rgba). Decoded from the asset's content-
- *  addressed paint PNG and downscaled to 512² to match the editor render. */
-const COOKED_TEX_SIZE = 512;
-type MeshTex = { texW: number; texH: number; texRgba: Uint8Array };
+ *  the cooked paint's ENCODED PNG bytes, shipped THROUGH the lump untouched. We do
+ *  NOT decode here (req_1544): the headless v8cli bake has no image-codec door, so
+ *  `image().raw()` returns null and the texture was silently dropped → cooked props
+ *  rendered grey in the game while editor/iso showed them painted. The loader decodes
+ *  the PNG with stbi at load time instead — the SAME path face decals already use
+ *  (gpu/decal_raster.zig), which is why uploaded wall images work and paint didn't. */
+type MeshTex = { png: Uint8Array };
 function cookedPropTexture(texRef: string | undefined): MeshTex | null {
   if (!texRef) return null;
   const blob = cookedTextureBlob(texRef);
   if (!blob) return null;
-  const raw = image(base64ToBytes(blob)).resize(COOKED_TEX_SIZE, COOKED_TEX_SIZE).raw();
-  if (!raw || !raw.rgba || raw.rgba.length !== raw.width * raw.height * 4) return null;
-  return { texW: raw.width, texH: raw.height, texRgba: raw.rgba };
+  return { png: base64ToBytes(blob) };
 }
 
 /** A Studio-cooked prop's baked mesh as an ImportedPropMesh, so it ships through
@@ -461,7 +461,7 @@ function cookedPropMesh(kind: string): (ImportedPropMesh & Partial<MeshTex>) | n
     heightMeters: asset.collision.heightMeters,
     solid: asset.descriptor.solid,
     vertices: verts,
-    ...(tex ? { texW: tex.texW, texH: tex.texH, texRgba: tex.texRgba } : {}),
+    ...(tex ? { png: tex.png } : {}),
   };
 }
 
@@ -1078,30 +1078,32 @@ export function buildWorldInstances(
   };
 }
 
-// v3 (req_1496): each mesh carries an optional painted-atlas texture after its
-// vertices — u32 texW | u32 texH | u8[texW*texH*4] rgba (0×0 = untextured, e.g. an
-// OBJ/GLB import). The loader (constructor.decodeMeshProps) reads v1/v2/v3.
-export const MESH_PROPS_LUMP_VERSION = 3;
+// v4 (req_1544): each mesh carries an optional painted-atlas texture after its
+// vertices as the ENCODED PNG bytes — u32 pngLen | u8[pngLen] (0 = untextured). The
+// loader stbi-decodes it at load (constructor.decodeMeshProps), so the headless
+// v8cli bake never needs an image-codec door (it just passes the bytes through). v3
+// shipped raw RGBA decoded at BAKE time, which silently failed in v8cli → grey props.
+// The loader still reads v1/v2 (legacy) + v3 (raw RGBA) + v4 (PNG).
+export const MESH_PROPS_LUMP_VERSION = 4;
 
 /** Encode imported / cooked prop meshes:
  *  u32 version | u32 meshCount | u32 instanceCount
  *  mesh[]: u32 keyLen | utf8 key | f32 color3 | f32 bounds |
  *          f32 footprintWidth | f32 footprintDepth | f32 height |
  *          u32 solid | u32 vertexCount | f32[vertexCount*8] |
- *          u32 texW | u32 texH | u8[texW*texH*4]   (v3)
+ *          u32 pngLen | u8[pngLen]   (v4 — the paint atlas as PNG, loader-decoded)
  *  instance[]: u32 meshIndex | f32 x,y,z,yawDegrees
  */
 export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
   const meshes = sink.meshes as ReadonlyArray<ImportedPropMesh & Partial<MeshTex>>;
-  const texOf = (mesh: ImportedPropMesh & Partial<MeshTex>): MeshTex | null =>
-    (mesh.texRgba && mesh.texW && mesh.texH && mesh.texRgba.length === mesh.texW * mesh.texH * 4)
-      ? { texW: mesh.texW, texH: mesh.texH, texRgba: mesh.texRgba } : null;
+  const pngOf = (mesh: ImportedPropMesh & Partial<MeshTex>): Uint8Array | null =>
+    (mesh.png && mesh.png.byteLength > 0) ? mesh.png : null;
   let bytes = 12;
   const keyBytes = meshes.map((mesh) => textBytes(mesh.key));
   for (let i = 0; i < meshes.length; i += 1) {
     const mesh = meshes[i]!;
-    const tex = texOf(mesh);
-    bytes += 4 + keyBytes[i]!.byteLength + 36 + mesh.vertices.byteLength + 8 + (tex ? tex.texRgba.byteLength : 0);
+    const png = pngOf(mesh);
+    bytes += 4 + keyBytes[i]!.byteLength + 36 + mesh.vertices.byteLength + 4 + (png ? png.byteLength : 0);
   }
   bytes += sink.instances.length * 20;
   const out = new Uint8Array(bytes);
@@ -1127,11 +1129,9 @@ export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
     at += 36;
     out.set(new Uint8Array(mesh.vertices.buffer, mesh.vertices.byteOffset, mesh.vertices.byteLength), at);
     at += mesh.vertices.byteLength;
-    const tex = texOf(mesh);
-    view.setUint32(at + 0, tex ? tex.texW : 0, true);
-    view.setUint32(at + 4, tex ? tex.texH : 0, true);
-    at += 8;
-    if (tex) { out.set(tex.texRgba, at); at += tex.texRgba.byteLength; }
+    const png = pngOf(mesh);
+    view.setUint32(at, png ? png.byteLength : 0, true); at += 4;
+    if (png) { out.set(png, at); at += png.byteLength; }
   }
   for (const inst of sink.instances) {
     view.setUint32(at + 0, inst.mesh, true);
