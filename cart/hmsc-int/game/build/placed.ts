@@ -1019,6 +1019,33 @@ export function placedPieceColliders(
     // not a wall — it contributes no static rect; the play route owns its sim.
     if (def.kind === 'prop' && def.propKind && propDynamics(def.propKind)) continue;
     if (!placedPieceTags(piece).collision) continue;
+    // SHAPE-AWARE prop collider (req_1587): a cooked multi-part / multi-island prop
+    // (an archway: two posts + a high beam) carries one box PER component, each with
+    // its own vertical band — so the beam is a band the player walks UNDER instead of
+    // one ground-to-top wall that fills the gap. Local box coords map straight to
+    // world: the cooked mesh renders at the anchor in these same lifted local coords.
+    if (def.kind === 'prop' && def.propKind) {
+      const boxes = propKindDefinition(def.propKind).collisionBoxes;
+      if (boxes && boxes.length) {
+        for (const b of boxes) {
+          orientedRects.push({
+            topMeters: piece.y + b.maxY,
+            floorMeters: piece.y + b.minY,
+            blocksPlayer: true,
+            friction: PLACED_TUNING.pieceFriction,
+            restitution: PLACED_TUNING.pieceRestitution,
+            minX: piece.x + b.minX,
+            maxX: piece.x + b.maxX,
+            minZ: piece.z + b.minZ,
+            maxZ: piece.z + b.maxZ,
+            pivotX: piece.x,
+            pivotZ: piece.z,
+            yawRadians: piece.yawDegrees * DEG,
+          });
+        }
+        continue;
+      }
+    }
     // FOOTPRINT-0765: a data-recipe prop collides as its EXACT measured footprint
     // — width/depth span plus the model-center offset, so an off-center body (an
     // arcade cabinet whose mass sits forward of its anchor) tracks the drawn mesh

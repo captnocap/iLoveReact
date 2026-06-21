@@ -27,7 +27,7 @@
 
 import { editMeshToGeometry, type EditMesh, type MountPoint, type V3 } from './editMesh';
 import { sha256Hex } from '@reactjit/workspace/sha256';
-import type { PropContainer, PropKindDefinition, PropMount, PropSeat, PropTrafficControl, PropCoverClass } from '../../game/kinds/props';
+import type { PropCollisionBox, PropContainer, PropKindDefinition, PropMount, PropSeat, PropTrafficControl, PropCoverClass } from '../../game/kinds/props';
 import type { TileKind } from '../../game/kinds/tiles';
 
 /** The descriptor schema version — bumped when a descriptor's required-field set
@@ -87,6 +87,12 @@ export type CookCollision = {
   footprintRadiusMeters: number;
   heightMeters: number;
   boundsRadius: number;
+  /** SHAPE-AWARE collider: one box per connected component of the model (req_1587),
+   *  in prop-local meters (anchor at origin, Y up from ground — same space as the
+   *  flattened mesh). An archway cooks 3 boxes (two posts + a high beam) so the
+   *  player walks UNDER the beam instead of into one ground-to-top wall. A single
+   *  solid component cooks one box (≈ the footprint), so nothing regresses. */
+  boxes: PropCollisionBox[];
 };
 
 /** The PROP gameplay descriptor — a `PropKindDefinition` minus the MEASURED
@@ -276,7 +282,52 @@ export function flattenModel(parts: readonly CookPart[]): MeshBlob {
   return { hash: hashBytes(verts), verts, count: verts.length / 8, bounds: boundsOfSoup(verts), ...(slots.length ? { slots } : {}) };
 }
 
-function collisionFromBounds(b: CookBounds): CookCollision {
+/** Split a part's faces into vertex-CONNECTED components (union-find over the verts
+ *  each face touches), and box each — so an archway authored as one part but three
+ *  disjoint islands (two posts + a beam) still yields three colliders, and a single
+ *  welded shape yields one. Only verts USED by a face count (stray verts ignored). */
+function partCollisionBoxes(mesh: EditMesh): PropCollisionBox[] {
+  const n = mesh.verts.length;
+  if (n === 0 || mesh.faces.length === 0) return [];
+  const parent = new Array<number>(n);
+  for (let i = 0; i < n; i += 1) parent[i] = i;
+  const find = (a: number): number => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+  const union = (a: number, b: number): void => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+  for (const f of mesh.faces) for (let i = 1; i < f.loop.length; i += 1) union(f.loop[0], f.loop[i]);
+  const groups = new Map<number, number[]>();
+  for (const f of mesh.faces) for (const vi of f.loop) {
+    const r = find(vi);
+    let g = groups.get(r);
+    if (!g) { g = []; groups.set(r, g); }
+    g.push(vi);
+  }
+  const boxes: PropCollisionBox[] = [];
+  for (const g of groups.values()) {
+    let lox = Infinity, loy = Infinity, loz = Infinity, hix = -Infinity, hiy = -Infinity, hiz = -Infinity;
+    for (const vi of g) {
+      const v = mesh.verts[vi];
+      if (v[0] < lox) lox = v[0]; if (v[0] > hix) hix = v[0];
+      if (v[1] < loy) loy = v[1]; if (v[1] > hiy) hiy = v[1];
+      if (v[2] < loz) loz = v[2]; if (v[2] > hiz) hiz = v[2];
+    }
+    if (!Number.isFinite(lox)) continue;
+    boxes.push({ minX: lox, minY: loy, minZ: loz, maxX: hix, maxY: hiy, maxZ: hiz });
+  }
+  return boxes;
+}
+
+/** Every visible part's connected components, boxed in the flattened-mesh space
+ *  (the SAME ground-lifted local coords the cooked mesh renders in). */
+function collisionBoxesFromParts(parts: readonly CookPart[]): PropCollisionBox[] {
+  const out: PropCollisionBox[] = [];
+  for (const p of parts) {
+    if (!p.visible) continue;
+    for (const b of partCollisionBoxes(liftedMesh(p))) out.push(b);
+  }
+  return out;
+}
+
+function collisionFromBounds(b: CookBounds, parts: readonly CookPart[]): CookCollision {
   const width = b.size[0];
   const depth = b.size[2];
   return {
@@ -285,6 +336,7 @@ function collisionFromBounds(b: CookBounds): CookCollision {
     footprintRadiusMeters: Math.max(width, depth) / 2,
     heightMeters: b.size[1],
     boundsRadius: b.radius,
+    boxes: collisionBoxesFromParts(parts),
   };
 }
 
@@ -355,6 +407,9 @@ function fillPropDescriptor(input: PropDescriptorInput, c: CookCollision, id: st
     footprintWidthMeters: c.footprintWidthMeters,
     footprintDepthMeters: c.footprintDepthMeters,
     heightMeters: c.heightMeters,
+    // SHAPE-AWARE collider (req_1587) — one box per component, so an archway's gap
+    // stays walkable. Omitted when the cook produced none (degenerate/empty mesh).
+    ...(c.boxes.length ? { collisionBoxes: c.boxes } : {}),
     tileKind: input.tileKind,
     trafficControl: input.trafficControl ?? 'none',
     // KICKABLE physics body: the bounce is authored, the body radius is MEASURED
@@ -384,7 +439,7 @@ export type CookPropInput = {
  *  blob + the asset only when `errors` is empty. */
 export function cookProp(input: CookPropInput): CookResult {
   const blob = flattenModel(input.parts);
-  const collision = collisionFromBounds(blob.bounds);
+  const collision = collisionFromBounds(blob.bounds, input.parts);
   const descriptor = fillPropDescriptor(input.descriptor, collision, input.id, input.name);
   const mounts = gatherMounts(input.parts);
   const errors = validateProp(descriptor);

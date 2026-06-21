@@ -573,6 +573,18 @@ export type PropKind = BuiltinPropKind | ImportedPropKind;
 // runtime, never in the path graph).
 export type PropTrafficControl = 'none' | 'stopSign' | 'signal';
 
+/** A SHAPE-AWARE collision box, in prop-local meters (anchor at origin, Y up from
+ *  the ground the prop rests on — the SAME space the cooked mesh renders in). A
+ *  multi-part / multi-island prop (an archway: two posts + a high beam) cooks one
+ *  box PER connected component, so the collider follows the real shape instead of a
+ *  single ground-to-top box that fills the gap under the beam (req_1587). A box
+ *  whose `minY` sits above head height is one the player walks UNDER. Absent on a
+ *  prop = the legacy single-footprint box (built-in props are unchanged). */
+export type PropCollisionBox = {
+  minX: number; minY: number; minZ: number;
+  maxX: number; maxY: number; maxZ: number;
+};
+
 export type PropKindDefinition = {
   kind: PropKind;
   label: string;
@@ -598,6 +610,11 @@ export type PropKindDefinition = {
   // becomes a host physics sphere the player kicks around by running into it
   // (KICKPROP-0610). Dynamic props contribute NO static blocking rect.
   dynamics?: PropDynamics;
+  // SHAPE-AWARE collision (req_1587): one box per connected component of the cooked
+  // mesh, in prop-local meters. Present = physics uses these boxes (each with its own
+  // vertical band, so you can walk under a high beam) instead of the single
+  // ground-to-top footprint box. Absent = the legacy single-box behaviour.
+  collisionBoxes?: PropCollisionBox[];
   // PROPUSE-0610: the interaction bundle (all optional — plain scenery omits
   // everything). See the types below; helpers propMount/propSeat/propContainer/
   // propCoverClass resolve defaults.

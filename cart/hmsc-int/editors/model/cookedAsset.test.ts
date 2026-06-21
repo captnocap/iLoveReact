@@ -151,4 +151,31 @@ test('validation FAILS LOUD on an empty mesh (no measurable footprint)', () => {
   assert(errors.length >= 2, 'zero footprint AND zero height both flagged');
 });
 
+test('cookProp derives SHAPE-AWARE collision boxes — an archway keeps the gap walkable (req_1587)', () => {
+  // two posts (0.5×3×0.5, lifted to stand on the ground) + a high beam (4×0.5×0.5,
+  // lifted to y≈3) — three separate parts → three connected components → three boxes.
+  const post = () => cuboid(0.5, 3, 0.5);
+  const beam = cuboid(4, 0.5, 0.5);
+  const { asset } = cookProp({
+    id: 'studio.arch', name: 'Arch',
+    parts: [part(post(), 1.5), part(post(), 1.5), part(beam, 3.25)],
+    descriptor: PROP,
+  });
+  const boxes = asset.collision.boxes;
+  assertEqual(boxes.length, 3, 'one box per component (two posts + a beam)');
+  assertEqual(asset.descriptor.collisionBoxes?.length ?? 0, 3, 'boxes ride the descriptor for the physics consumer');
+  const high = boxes.filter((b) => b.minY > 2.5);
+  assertEqual(high.length, 1, 'exactly one HIGH band — the beam the player walks under');
+  assert(high[0].maxX - high[0].minX > 3.5, 'the beam box spans the full width');
+  const onGround = boxes.filter((b) => b.minY < 0.01);
+  assertEqual(onGround.length, 2, 'two posts rest on the ground (solid to the floor)');
+});
+
+test('a single welded component cooks ONE collision box — no regression for solid props', () => {
+  const { asset } = cookProp({ id: 'studio.block', name: 'Block', parts: [part(cuboid(2, 2, 2), 1)], descriptor: PROP });
+  assertEqual(asset.collision.boxes.length, 1, 'one welded shape = one box');
+  const b = asset.collision.boxes[0];
+  assert(b.minY < 0.01 && b.maxY > 1.9, 'box spans the full height, solid to the ground');
+});
+
 finish('cookedAsset');
