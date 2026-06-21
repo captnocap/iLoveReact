@@ -65,8 +65,11 @@ export const BUSH_CONFIG = {
 // at blade-tip height using the same "~grass~" wind pipeline as the blades.
 export const FLOWER_CONFIG = {
   density: 4,
-  height: { min: 0.38, max: 0.68 },
+  height: { min: 0.32, max: 0.52 },
   radius: { min: 0.035, max: 0.075 },
+  // How far the blossom center tucks below the grass canopy, as a fraction of
+  // its radius. This keeps the head visually attached to a blade tip.
+  tipTuck: 0.5,
   colors: {
     pink: { r: 0.95, g: 0.35, b: 0.68 },
     yellow: { r: 1.0, g: 0.82, b: 0.24 },
@@ -151,6 +154,7 @@ editorTunables().register({
     'height.max': { label: 'head max (m)', min: 0.05, max: 3, step: 0.01, precision: 2 },
     'radius.min': { label: 'head small (m)', min: 0.01, max: 0.25, step: 0.005, precision: 3 },
     'radius.max': { label: 'head large (m)', min: 0.01, max: 0.35, step: 0.005, precision: 3 },
+    tipTuck: { label: 'head tuck', min: 0, max: 2, step: 0.05, precision: 2 },
     'colors.pink.r': { label: 'pink R', min: 0, max: 1, step: 0.01, precision: 2 },
     'colors.pink.g': { label: 'pink G', min: 0, max: 1, step: 0.01, precision: 2 },
     'colors.pink.b': { label: 'pink B', min: 0, max: 1, step: 0.01, precision: 2 },
@@ -390,7 +394,9 @@ export function buildFlowerInstances(world: GameState['world']): GrassInstances 
       const px = wx + (unit(h0) - 0.5) * c * 0.9;
       const pz = wz + (unit(h1) - 0.5) * c * 0.9;
       const radius = lerp(FLOWER_CONFIG.radius.min, FLOWER_CONFIG.radius.max, unit(h2));
-      const py = top + lerp(FLOWER_CONFIG.height.min, FLOWER_CONFIG.height.max, unit(h3));
+      const stemHeight = lerp(FLOWER_CONFIG.height.min, FLOWER_CONFIG.height.max, unit(h3));
+      const canopyHeight = GRASS_CONFIG.height.max - radius * FLOWER_CONFIG.tipTuck;
+      const py = top + Math.max(GRASS_CONFIG.height.min, Math.min(stemHeight, canopyHeight));
       const color = palette[Math.floor(unit(mix(h3 ^ 0x91)) * palette.length)] ?? palette[0];
       if (px - radius < minX) minX = px - radius;
       if (py - radius < minY) minY = py - radius;
