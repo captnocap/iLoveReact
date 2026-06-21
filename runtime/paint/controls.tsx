@@ -9,7 +9,8 @@
 // at the low end) while the readout always shows the real value.
 
 import { useEffect, useState } from 'react';
-import { Box, Row, Text, Pressable, TextInput, Slider, Graph } from '../primitives';
+import { Box, Row, Text, Pressable, TextInput, Slider, Graph, SdfIcon } from '../primitives';
+import { BAKED_ICON_NAMES } from '../icons/baked-names';
 import { type PaintTheme, DARK_THEME } from './theme';
 import { sizeTrackToPx, sizePxToTrack } from './stroke';
 import { brushIconLayers, toolIconLayers, type IconLayer } from './icons';
@@ -144,10 +145,20 @@ export function PathIcon(props: { layers: IconLayer[]; size?: number; color: str
   );
 }
 
+// The kit can render dozens of these; a live <Graph.Path> re-parses + re-tessellates
+// its d-string EVERY frame (the per-frame cost that tanked paint-mode fps, req_1549).
+// So prefer the pre-baked SDF atlas — `brush.<shape>` / `tool.<tool>` are baked by
+// `rjit bake-icons` from the SAME runtime/paint/icons.ts paths, drawn as one batched
+// quad regardless of count. Falls back to the live path render if a glyph isn't baked
+// yet (atlas not regenerated), so the picker never goes blank.
 export function BrushIcon(props: { shape: BrushShape; size?: number; color: string }) {
+  const name = `brush.${props.shape}`;
+  if (BAKED_ICON_NAMES.has(name)) return <SdfIcon name={name} size={props.size ?? 26} color={props.color} />;
   return <PathIcon layers={brushIconLayers(props.shape)} size={props.size} color={props.color} />;
 }
 
 export function ToolIcon(props: { tool: BrushTool; size?: number; color: string }) {
+  const name = `tool.${props.tool}`;
+  if (BAKED_ICON_NAMES.has(name)) return <SdfIcon name={name} size={props.size ?? 26} color={props.color} />;
   return <PathIcon layers={toolIconLayers(props.tool)} size={props.size} color={props.color} />;
 }
