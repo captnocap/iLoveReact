@@ -69,6 +69,7 @@ import { Paintable } from '@reactjit/runtime/primitives';
 // source of truth, synthesised into the kit's palette shape.
 import {
   BrushKit, useBrushStroke, DEFAULT_BRUSH,
+  pushRecent,
   type Brush, type BrushTool, type PaintTheme, type Palette as KitPalette, type PaletteEntry,
 } from '@reactjit/runtime/paint';
 import { defaultPalette, paletteWithColor, slotColor, type Palette } from '../modelStream';
@@ -1176,7 +1177,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (!hit) return null;
     const tgt = paintTargets()[hit.partIndex];
     if (!tgt) return null;
-    touchedRef.current.add(tgt.partId);
+    if (tool !== 'eyedropper') touchedRef.current.add(tgt.partId);
     const island = faceIslandPx(tgt.mesh, hit.faceIndex);
     let clip: { x: number; y: number; w: number; h: number } | undefined;
     if (island) {
@@ -1186,6 +1187,12 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     }
     return { x: hit.u * PAINT_TEX, y: hit.v * PAINT_TEX, clip };
   };
+  const pickPaintColor = (hex: string) => {
+    const ink = { kind: 'color' as const, hex };
+    setBrush((b) => ({ ...b, ink }));
+    setPaintRecents((recents) => pushRecent({ swatches: [], recents }, ink).recents);
+  };
+
   const paintCtl = useBrushStroke({
     paint: paintTex(),
     texW: PAINT_TEX, texH: PAINT_TEX,
@@ -1206,7 +1213,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       : undefined,
     // erase reveals the texture's base coat (no host alpha-erase until Phase B).
     eraseColor: tex?.color ?? '#c8ccd2',
-    onPickColor: (hex) => setBrush((b) => ({ ...b, ink: { kind: 'color', hex } })),
+    onPickColor: pickPaintColor,
     onStrokeEnd: () => { paintDirtyRef.current = true; commitPaint(); },
   });
   // The kit palette the BrushKit renders: the model's saved COLOUR slots are the
@@ -2197,6 +2204,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 </Col>
               ) : null}
               <Row style={{ flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+                <Pressable tooltip="Sample a colour from the painted model under the next click" onPress={() => selectTool('eyedropper')} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: tool === 'eyedropper' ? PAINT_THEME.accent : PAINT_THEME.control, borderWidth: 1, borderColor: tool === 'eyedropper' ? PAINT_THEME.accent : PAINT_THEME.frame }}>
+                  <Text fontSize={10} color={tool === 'eyedropper' ? PAINT_THEME.page : PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>sample</Text>
+                </Pressable>
                 <Pressable tooltip="Fill the WHOLE hovered face one colour per click (the 'this face is just one colour' path)" onPress={() => setFaceFill((v) => !v)} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: faceFill ? PAINT_THEME.accent : PAINT_THEME.control, borderWidth: 1, borderColor: faceFill ? PAINT_THEME.accent : PAINT_THEME.frame }}>
                   <Text fontSize={10} color={faceFill ? PAINT_THEME.page : PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>face fill</Text>
                 </Pressable>
