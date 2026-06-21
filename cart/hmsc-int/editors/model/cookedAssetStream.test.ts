@@ -4,7 +4,7 @@
 // retrieval, and cold-reopen persistence (the modelStream.test.ts idiom).
 
 import { openStore } from '../../data';
-import { cuboid } from './editMesh';
+import { addTextureSlot, cuboid } from './editMesh';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import {
   cookedAssetStream, cookedAssetsByKind, installEvent, installedAssets, meshBlobFor, textureBlobFor,
@@ -70,6 +70,16 @@ test('the texture factor interns by texRef', () => {
   const r = cookProp({ id: 'studio.t', name: 'T', parts: [{ mesh: cuboid(1, 1, 1), lift: 0.5, visible: true }], texRef: 'tex-hash-1', descriptor: PROP });
   const s = fold([installEvent(r, 'V0VCUA==')]);
   assertEqual(textureBlobFor(s, 'tex-hash-1'), 'V0VCUA==', 'texture blob stored under its hash');
+});
+
+test('texture slot metadata round-trips through installEvent + apply', () => {
+  const mesh = addTextureSlot(cuboid(1, 1, 1), 'Screen', [0]).mesh;
+  const r = cookProp({ id: 'studio.slot', name: 'Slot', parts: [{ mesh, lift: 0.5, visible: true }], descriptor: PROP });
+  const s = fold([installEvent(r)]);
+  const asset = installedAssets(s)[0];
+  assertEqual(asset.slots?.length ?? 0, 1, 'one slot persisted on the asset');
+  assertEqual(asset.slots![0].label, 'Screen', 'slot label persisted');
+  assertEqual(asset.slots![0].count, 6, 'one quad face persisted as six vertices');
 });
 
 test('rename + remove edit the catalog', () => {

@@ -32,13 +32,18 @@ import type { TileKind } from '../../game/kinds/tiles';
 
 /** The descriptor schema version — bumped when a descriptor's required-field set
  *  changes; the loader hard-validates it (no silent old-shape acceptance). */
-export const COOK_SCHEMA = 1;
+export const COOK_SCHEMA = 2;
 
 export type CookKind = 'prop' | 'item' | 'vehiclePart' | 'vehicle' | 'clothing';
 
 /** The minimal slice of a Studio part the cook reads — `StudioPart`/`StoredPart`
  *  both satisfy it (rule of two: one shape, both callers). */
 export type CookPart = {
+  /** stable Studio part id, used only to disambiguate same-named texture slots
+   *  across parts once a whole model flattens into one cooked prop. */
+  id?: string;
+  /** human part name, used in cooked slot labels when duplicate slot ids collide. */
+  name?: string;
   mesh: EditMesh;
   /** ground lift applied in the viewport (parts sit ON the grid). Baked into the
    *  flattened soup so the cooked mesh sits where the user sees it. */
@@ -56,6 +61,21 @@ export type MeshBlob = {
   verts: Float32Array;
   count: number;
   bounds: CookBounds;
+  /** Re-skinnable sub-ranges in `verts`, in vertex units (not floats). Absent
+   *  when no authored faces belong to texture slots, preserving the old artifact. */
+  slots?: CookedTextureSlot[];
+};
+
+export const COOKED_SLOT_DEFAULT_MATERIAL = '#c2c6cf';
+
+export type CookedTextureSlot = {
+  id: string;
+  label: string;
+  defaultMaterial: string;
+  /** first vertex in the flattened soup for this slot. */
+  start: number;
+  /** vertex count in this slot's sub-mesh. */
+  count: number;
 };
 
 /** Collision/bounds DERIVED from the mesh — never hand-authored (Guiding Light:
@@ -103,6 +123,8 @@ export type CookedAsset = {
   texRef?: string;
   collision: CookCollision;
   mounts: MountPoint[];
+  /** Named re-skinnable face groups, keyed by WorldProp.partTextures[slot.id]. */
+  slots?: CookedTextureSlot[];
   descriptor: PropKindDefinition;
 };
 
@@ -146,6 +168,15 @@ function liftedMesh(part: CookPart): EditMesh {
   return { ...part.mesh, verts: part.mesh.verts.map((v): V3 => [v[0], v[1] + part.lift, v[2]]) };
 }
 
+function slugKey(s: string): string {
+  return s.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'part';
+}
+
+function faceSlotIndex(mesh: EditMesh, face: { material?: number }): number {
+  const idx = face.material;
+  return idx != null && idx >= 0 && idx < (mesh.slots?.length ?? 0) ? idx : -1;
+}
+
 function boundsOfSoup(verts: Float32Array): CookBounds {
   let lox = Infinity, loy = Infinity, loz = Infinity, hix = -Infinity, hiy = -Infinity, hiz = -Infinity;
   for (let i = 0; i + 7 < verts.length; i += 8) {
@@ -167,19 +198,82 @@ function boundsOfSoup(verts: Float32Array): CookBounds {
 /** Flatten every VISIBLE part into one content-addressed mesh blob. The geometry
  *  factor — interned once, referenced by id. */
 export function flattenModel(parts: readonly CookPart[]): MeshBlob {
+  const hasSlottedFaces = parts.some((p) => p.visible && (p.mesh.slots?.length ?? 0) > 0
+    && p.mesh.faces.some((f) => faceSlotIndex(p.mesh, f) >= 0));
+
+  if (!hasSlottedFaces) {
+    const chunks: Float32Array[] = [];
+    let total = 0;
+    for (const p of parts) {
+      if (!p.visible) continue;
+      const g = editMeshToGeometry(liftedMesh(p));
+      if (g.positions.length === 0) continue;
+      chunks.push(g.positions);
+      total += g.positions.length;
+    }
+    const verts = new Float32Array(total);
+    let off = 0;
+    for (const c of chunks) { verts.set(c, off); off += c.length; }
+    return { hash: hashBytes(verts), verts, count: verts.length / 8, bounds: boundsOfSoup(verts) };
+  }
+
+  type SlotSource = { id: string; label: string; mesh: EditMesh; slotIndex: number };
   const chunks: Float32Array[] = [];
+  const slotSources: SlotSource[] = [];
+  const used = new Set<string>();
   let total = 0;
-  for (const p of parts) {
+
+  for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+    const p = parts[partIndex];
     if (!p.visible) continue;
-    const g = editMeshToGeometry(liftedMesh(p));
+    const mesh = liftedMesh(p);
+    const unslotted = editMeshToGeometry(mesh, (f) => faceSlotIndex(mesh, f) < 0);
+    if (unslotted.positions.length > 0) {
+      chunks.push(unslotted.positions);
+      total += unslotted.positions.length;
+    }
+    for (let slotIndex = 0; slotIndex < (mesh.slots?.length ?? 0); slotIndex += 1) {
+      if (!mesh.faces.some((f) => f.material === slotIndex)) continue;
+      const slot = mesh.slots![slotIndex];
+      let id = slot.id;
+      let label = slot.label;
+      if (used.has(id)) {
+        const prefix = slugKey(p.id ?? p.name ?? `part-${partIndex + 1}`);
+        id = `${prefix}.${slot.id}`;
+        label = `${p.name ?? p.id ?? `Part ${partIndex + 1}`} ${slot.label}`;
+        let suffix = 2;
+        while (used.has(id)) {
+          id = `${prefix}.${slot.id}.${suffix}`;
+          suffix += 1;
+        }
+      }
+      used.add(id);
+      slotSources.push({ id, label, mesh, slotIndex });
+    }
+  }
+
+  const slots: CookedTextureSlot[] = [];
+  let vertexStart = total / 8;
+  for (const source of slotSources) {
+    const g = editMeshToGeometry(source.mesh, (f) => f.material === source.slotIndex);
     if (g.positions.length === 0) continue;
     chunks.push(g.positions);
     total += g.positions.length;
+    const count = g.positions.length / 8;
+    slots.push({
+      id: source.id,
+      label: source.label,
+      defaultMaterial: COOKED_SLOT_DEFAULT_MATERIAL,
+      start: vertexStart,
+      count,
+    });
+    vertexStart += count;
   }
+
   const verts = new Float32Array(total);
   let off = 0;
   for (const c of chunks) { verts.set(c, off); off += c.length; }
-  return { hash: hashBytes(verts), verts, count: verts.length / 8, bounds: boundsOfSoup(verts) };
+  return { hash: hashBytes(verts), verts, count: verts.length / 8, bounds: boundsOfSoup(verts), ...(slots.length ? { slots } : {}) };
 }
 
 function collisionFromBounds(b: CookBounds): CookCollision {
@@ -303,6 +397,7 @@ export function cookProp(input: CookPropInput): CookResult {
     texRef: input.texRef ?? null,
     descriptor,
     mounts,
+    slots: blob.slots ?? [],
   });
   const asset: CookedAsset = {
     id: input.id,
@@ -314,6 +409,7 @@ export function cookProp(input: CookPropInput): CookResult {
     ...(input.texRef ? { texRef: input.texRef } : {}),
     collision,
     mounts,
+    ...(blob.slots ? { slots: blob.slots } : {}),
     descriptor,
   };
   return { asset, blob, errors };

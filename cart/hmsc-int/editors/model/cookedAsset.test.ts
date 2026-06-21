@@ -4,7 +4,7 @@
 // shares the meshRef), MEASURED collision (derive, don't store twice), idempotent
 // re-cook (same input → same hash), and fail-loud validation.
 
-import { cuboid, addMount, type EditMesh } from './editMesh';
+import { addTextureSlot, cuboid, addMount, type EditMesh } from './editMesh';
 import { cookProp, flattenModel, validateProp, type CookPart, type PropDescriptorInput } from './cookedAsset';
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 
@@ -30,6 +30,36 @@ test('invisible parts are excluded from the flatten', () => {
   const both = flattenModel([part(cuboid(1, 1, 1)), part(cuboid(1, 1, 1))]);
   const one = flattenModel([part(cuboid(1, 1, 1)), part(cuboid(1, 1, 1), 0, false)]);
   assertEqual(one.count * 2, both.count, 'one hidden = half the verts');
+});
+
+test('texture slots cook into named vertex ranges after unslotted triangles', () => {
+  const added = addTextureSlot(cuboid(1, 1, 1), 'Screen', [0, 1]);
+  const blob = flattenModel([part(added.mesh)]);
+  assertEqual(blob.slots?.length ?? 0, 1, 'one cooked texture slot');
+  const slot = blob.slots![0];
+  assertEqual(slot.id, added.id, 'slot id carries');
+  assertEqual(slot.label, 'Screen', 'slot label carries');
+  assert(slot.start > 0, 'slotted range starts after unslotted triangles');
+  assertEqual(slot.count, 12, 'two quad faces = four triangles = twelve vertices');
+  assertEqual(slot.start + slot.count, blob.count, 'slot range ends at the soup end');
+});
+
+test('unassigned texture slots do not change the flattened mesh factor', () => {
+  const plain = flattenModel([part(cuboid(1, 1, 1))]);
+  const withEmptySlot = flattenModel([part(addTextureSlot(cuboid(1, 1, 1), 'Unused').mesh)]);
+  assertEqual(withEmptySlot.slots, undefined, 'no assigned faces means no cooked slots');
+  assertEqual(withEmptySlot.hash, plain.hash, 'mesh hash unchanged');
+  assertEqual(withEmptySlot.verts.length, plain.verts.length, 'same vertex buffer length');
+  assert(withEmptySlot.verts.every((v, i) => v === plain.verts[i]), 'vertex bytes unchanged');
+});
+
+test('cookProp carries texture slots and folds them into the asset identity', () => {
+  const added = addTextureSlot(cuboid(1, 1, 1), 'Screen', [0]);
+  const slotted = cookProp({ id: 'studio.screen', name: 'Screen', parts: [part(added.mesh)], descriptor: PROP });
+  const unslotted = cookProp({ id: 'studio.screen', name: 'Screen', parts: [part(cuboid(1, 1, 1))], descriptor: PROP });
+  assertEqual(slotted.errors.length, 0, 'slotted prop cooks clean');
+  assertEqual(slotted.asset.slots?.[0]?.id, added.id, 'asset carries the slot id');
+  assert(slotted.asset.hash !== unslotted.asset.hash, 'slot table participates in asset identity');
 });
 
 test('cookProp MEASURES footprint + height from the mesh (derive, not store)', () => {
