@@ -2322,7 +2322,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
                 <Icon name={icon} size={13} color={on ? '#cfe2ff' : T.dim} />
               </Pressable>
             ))}
-            <Pressable onPress={props.onImportModel} tooltip="Import a 3D model (.glb) — converts it to an editable, paintable Studio model" style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
+            <Pressable onPress={props.onImportModel} tooltip="Import a 3D model (.glb / .obj — e.g. InstantMesh) — converts it to an editable, paintable Studio model" style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, backgroundColor: '#1a1330ee', borderColor: '#6a4fb0' }}>
               <Icon name="FileUp" size={13} color="#cdbcff" />
             </Pressable>
           </Row>

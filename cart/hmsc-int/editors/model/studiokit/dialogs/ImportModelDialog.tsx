@@ -3,26 +3,35 @@ import { useState } from 'react';
 import { Box, Col, Pressable, Row, Text, TextInput } from '@reactjit/primitives';
 import { T } from '../config';
 import { Z } from '../chrome/zlayers';
-import { base64ToBytes, glbToEditMesh } from '../../importMesh';
+import { base64ToBytes, glbToEditMesh, objToEditMesh } from '../../importMesh';
 import type { EditMesh } from '../../editMesh';
-import { readFileBase64 } from '@reactjit/hooks/fs';
+import { readFile, readFileBase64 } from '@reactjit/hooks/fs';
 import { LCField } from './dialogControls';
 
 
-// Import a generated/external GLB (tools/genmesh output, or any .glb) as a NEW
-// paintable Studio model (req_1383/req_1384). Reads the file via the fs door,
-// converts triangle soup -> EditMesh + unwraps UVs (glbToEditMesh), and on success
-// hands (mesh, name) to the parent which mints a fresh model + addPart. The mesh is
-// unwrapped, so the pixel painter works on it immediately.
+// Import a generated/external mesh (tools/genmesh output, or any .glb / .obj) as
+// a NEW paintable Studio model (req_1383/req_1384). Reads the file via the fs door,
+// converts triangle soup -> EditMesh + unwraps UVs, and on success hands (mesh, name)
+// to the parent which mints a fresh model + addPart. The mesh is unwrapped, so the
+// pixel painter works on it immediately. OBJ support (req_1615): InstantMesh emits a
+// plain-text .obj; restored here after the req_1390 decomposition dropped the branch.
 export function ImportModelDialog(props: { defaultPath: string; onCancel: () => void; onConfirm: (mesh: EditMesh, name: string) => void }) {
   const [path, setPath] = useState(props.defaultPath);
   const [err, setErr] = useState<string | null>(null);
   const doImport = () => {
     try {
-      const b64 = readFileBase64(path);
-      if (!b64) throw new Error(`cannot read ${path}`);
-      const mesh = glbToEditMesh(base64ToBytes(b64));
-      if (!mesh.faces.length) throw new Error('no triangles in GLB');
+      // .obj is plain text (InstantMesh emits OBJ); .glb is binary (base64).
+      let mesh: EditMesh;
+      if (path.toLowerCase().endsWith('.obj')) {
+        const text = readFile(path);
+        if (!text) throw new Error(`cannot read ${path}`);
+        mesh = objToEditMesh(text);
+      } else {
+        const b64 = readFileBase64(path);
+        if (!b64) throw new Error(`cannot read ${path}`);
+        mesh = glbToEditMesh(base64ToBytes(b64));
+      }
+      if (!mesh.faces.length) throw new Error('no triangles in mesh');
       const name = (path.split('/').pop() || 'imported').replace(/\.[^.]+$/, '');
       props.onConfirm(mesh, name);
     } catch (e) {
@@ -32,9 +41,9 @@ export function ImportModelDialog(props: { defaultPath: string; onCancel: () => 
   return (
     <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#03060caa', zIndex: Z.modal }}>
       <Col style={{ width: 460, gap: 11, padding: 16, borderRadius: 10, backgroundColor: T.panelSolid, borderWidth: 1, borderColor: '#3a2c6a' }}>
-        <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>Import 3D model (GLB)</Text>
-        <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`a generated mesh (tools/genmesh) becomes a NEW editable, paintable model — UVs are unwrapped on import.`}</Text>
-        <LCField label="GLB path">
+        <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>Import 3D model (GLB / OBJ)</Text>
+        <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>{`a generated mesh (.glb or .obj — e.g. InstantMesh) becomes a NEW editable, paintable model — UVs are unwrapped on import.`}</Text>
+        <LCField label="mesh path">
           <Box style={{ flexGrow: 1 }}>
             <TextInput value={path} onChangeText={(t) => { setErr(null); setPath(t); }} style={{ height: 24, fontSize: 11, color: T.ink, backgroundColor: T.page, borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 4, paddingHorizontal: 6, fontFamily: 'monospace' }} />
           </Box>
