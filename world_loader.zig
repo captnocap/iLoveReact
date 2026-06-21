@@ -34,6 +34,7 @@ const layout = @import("framework/layout.zig");
 const text_engine = @import("framework/primitive/text.zig");
 const Node = layout.Node;
 const constructor = @import("framework/world/constructor.zig");
+const foliage = @import("framework/world/foliage.zig");
 const streaming = @import("framework/world/streaming.zig");
 const game_physics = @import("framework/game/physics.zig");
 
@@ -943,7 +944,7 @@ const MaterialBatch = struct {
 // their own per-material batch, so they're skipped here — the flat instanced
 // batch is the material-less remainder. `material_refs` may be empty (no
 // materials), in which case nothing is skipped.
-fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, material_refs: []const u32) !ShapeBatches {
+fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, material_refs: []const u32, flora: ?constructor.FloraCells) !ShapeBatches {
     var boxes: std.ArrayList(f32) = .{};
     errdefer boxes.deinit(allocator);
     var ramps: std.ArrayList(f32) = .{};
@@ -1016,6 +1017,33 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         } else {
             try boxes.appendSlice(allocator, src);
             box_count += 1;
+        }
+    }
+    // FOLIAGEFORMULA (req_1591): expand the grass/bush RECIPE into blade rows,
+    // appended to the SAME batches the INSTANCES loop fills, so the draw path is
+    // unchanged. The blades are a pure formula (foliage.zig, the bit-exact twin of
+    // grassPopulation.ts emitClump), so the file ships only the painted cells (the
+    // factors), not ~1M baked rows (the product). Rows are stride-13 (transform12 +
+    // shape) like every other instance row; the foliage shaders read the first 12.
+    if (flora) |fl| {
+        const c_size: f64 = fl.cell_size;
+        for (fl.cells) |cell| {
+            const is_grass = cell.spec_id == 0;
+            const cfg: *const foliage.FoliageConfig = if (is_grass) &foliage.GRASS else &foliage.BUSH;
+            const shape: f32 = if (is_grass) SHAPE_GRASS else SHAPE_BUSH;
+            var k: u32 = 0;
+            while (k < cell.count) : (k += 1) {
+                const r = foliage.bladeRow(cfg, @as(f64, cell.wx), @as(f64, cell.wz), @as(f64, cell.top), c_size, cell.cell_key, k);
+                if (is_grass) {
+                    try grass.appendSlice(allocator, &r);
+                    try grass.append(allocator, shape);
+                    grass_count += 1;
+                } else {
+                    try bush.appendSlice(allocator, &r);
+                    try bush.append(allocator, shape);
+                    bush_count += 1;
+                }
+            }
         }
     }
     return .{
@@ -1209,6 +1237,19 @@ fn instanceShapeId(insts: []const f32, row: usize, stride: usize) f32 {
 
 fn isRampInstance(insts: []const f32, row: usize, stride: usize) bool {
     return @abs(instanceShapeId(insts, row, stride) - SHAPE_RAMP) < 0.5;
+}
+
+/// Decorative foliage — grass blades, bush clumps, palm fronds, flower heads — is
+/// WALK-THROUGH and must NEVER become a physics collider (req_1607). The flora
+/// recipe (req_1591) expands tens of thousands of these into render instances; if
+/// the instance-derived physics paths (windowed huge maps + the pre-lump fallback)
+/// turned each into a collider, you'd bump invisible flowers AND the blades would
+/// saturate the MAX_ORIENTED budget, crowding REAL walls/props out of the near
+/// field. Palm TRUNKS (SHAPE_PALMTRUNK) and every structural shape still collide.
+fn isNonCollidingFoliage(insts: []const f32, row: usize, stride: usize) bool {
+    const s = instanceShapeId(insts, row, stride);
+    return @abs(s - SHAPE_GRASS) < 0.5 or @abs(s - SHAPE_BUSH) < 0.5 or
+        @abs(s - SHAPE_FROND) < 0.5 or @abs(s - SHAPE_FLOWER) < 0.5;
 }
 
 const GeomPick = struct { key: []const u8, verts: []const f32, vert_count: u32 };
@@ -1590,6 +1631,7 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
                 }
                 continue;
             }
+            if (isNonCollidingFoliage(insts, row, stride)) continue; // grass/bush/frond/flower = walk-through (req_1607)
             const scale_base: usize = if (stride >= 12) 6 else 3;
             const b = row * stride;
             const sx = @abs(insts[b + scale_base + 0]);
@@ -2762,7 +2804,12 @@ pub const Runtime = struct {
         self.bush_clump = buildBushClump();
         self.frond_card = buildFrond();
         self.palm_trunk = buildPalmTrunk();
-        self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.material_refs);
+        // Expanded foliage rows are stride-13 (transform12 + shape); if the INSTANCES
+        // lump was empty (stride 0) but a FLORA recipe ships, the grass/bush draw
+        // nodes still need the 13-wide stride. Real bakes always carry pieces, so
+        // this only matters for a foliage-only map.
+        if (self.scene.flora != null and self.stride < 13) self.stride = 13;
+        self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.material_refs, self.scene.flora);
         self.has_shape_batches = true;
         // The textured remainder: rows wearing a material, partitioned per slot.
         // The shaders run at first render (gpu isn't up yet); the nodes carry the
@@ -3583,6 +3630,7 @@ pub const Runtime = struct {
             if (hf.* < game_physics.MAX_HEIGHTFIELDS and registerRampHeightfield(self.insts, row, self.stride, hf.*)) hf.* += 1 else clipped.* += 1;
             return;
         }
+        if (isNonCollidingFoliage(self.insts, row, self.stride)) return; // grass/bush/frond/flower = walk-through (req_1607)
         const scale_base: usize = if (self.stride >= 12) 6 else 3;
         const b = row * self.stride;
         const sx = @abs(self.insts[b + scale_base + 0]);
