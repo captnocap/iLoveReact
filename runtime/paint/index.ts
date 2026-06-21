@@ -5,6 +5,7 @@
 
 export * from './model';
 export * from './colors';
+export * from './glyphs';
 export * from './stroke';
 export { stampBrushDab, brushDabRgb, jitterSeed } from './stamp';
 export * from './theme';

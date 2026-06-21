@@ -17,6 +17,7 @@ import {
   BRUSH_SHAPE_ID, pushRecent, defaultPalette, inkKey, DEFAULT_BRUSH,
 } from './model';
 import { hexToHsv, hsvToHex, hexToRgb01, normalizeHexColor, rgb01ToHex } from './colors';
+import { layoutText, hasGlyph, GLYPH_W, GLYPH_H } from './glyphs';
 
 // ── micro harness (self-contained; the repo has no test framework) ───────────
 let passed = 0, failed = 0;
@@ -156,6 +157,34 @@ test('rgb01 helpers round-trip and normalize shorthand hex', () => {
   assert(rgb01ToHex(r, g, b) === '#3da9ff', 'rgb01 round-trip');
   assert(normalizeHexColor('#abc') === '#aabbcc', 'shorthand expands');
   assert(normalizeHexColor('garbage') === '#ffffff', 'garbage → fallback');
+});
+
+// ── text tool bitmap font (req_1600) ─────────────────────────────────────────
+test('a glyph lays out into a 5×7 cell block', () => {
+  const a = layoutText('A');
+  assert(a.cells.length > 0, 'A has lit cells');
+  assert(a.width === GLYPH_W && a.height === GLYPH_H, `A is ${GLYPH_W}×${GLYPH_H}`);
+  assert(a.cells.every((c) => c.x < GLYPH_W && c.y < GLYPH_H), 'cells stay inside the grid');
+});
+
+test('glyphs advance with a 1px gap and lowercase folds to uppercase', () => {
+  const hi = layoutText('HI');
+  assert(hi.width === GLYPH_W * 2 + 1, 'two glyphs = 5 + gap + 5 = 11 wide');
+  assert(layoutText('hi').cells.length === hi.cells.length, 'lowercase renders as uppercase');
+});
+
+test('whitespace and unknown chars advance but light no cells', () => {
+  assert(layoutText('   ').cells.length === 0, 'spaces are blank');
+  assert(layoutText('').cells.length === 0 && layoutText('').width === 0, 'empty is empty');
+});
+
+test('newlines stack lines a glyph-height apart', () => {
+  assert(layoutText('A\nB').height === GLYPH_H * 2 + 1, 'two lines = 15 tall');
+});
+
+test('hasGlyph covers the painted ASCII set and rejects the rest', () => {
+  assert(hasGlyph('Z') && hasGlyph('9') && hasGlyph('_') && hasGlyph('?'), 'ASCII covered');
+  assert(!hasGlyph('☃'), 'non-ASCII rejected');
 });
 
 log(`\npaint kit: ${passed} passed, ${failed} failed`);

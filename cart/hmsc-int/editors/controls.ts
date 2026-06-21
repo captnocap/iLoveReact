@@ -124,6 +124,7 @@ export const EDITOR_BINDINGS: EditorBinding[] = [
   { action: 'paint.rect', scope: 'studio-paint', keys: ['r'], label: 'Rectangle tool (hold Shift for a square)', legend: null },
   { action: 'paint.ellipse', scope: 'studio-paint', keys: ['o'], label: 'Oval tool (hold Shift for a circle)', legend: null },
   { action: 'paint.eyedropper', scope: 'studio-paint', keys: ['i'], label: 'Eyedropper — sample a colour off the model', legend: null },
+  { action: 'paint.text', scope: 'studio-paint', keys: ['t'], label: 'Text tool — type a string and click to stamp it', legend: null },
 ];
 
 const ACTION_ID_SHAPE = /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/;

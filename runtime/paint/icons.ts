@@ -100,5 +100,7 @@ export function toolIconLayers(tool: BrushTool): IconLayer[] {
       return [{ d: 'M -9,3 L -3,-4 L 3,3 L 9,-4', fill: false }];
     case 'blur': // soft concentric rings
       return [{ d: circle(0, 0, 8), fill: false }, { d: circle(0, 0, 4), fill: false }];
+    case 'text': // a capital T: top bar + stem
+      return [{ d: 'M -8,-7 L 8,-7', fill: false }, { d: 'M 0,-7 L 0,8', fill: false }];
   }
 }

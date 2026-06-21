@@ -69,7 +69,7 @@ import { Paintable } from '@reactjit/runtime/primitives';
 // source of truth, synthesised into the kit's palette shape.
 import {
   BrushKit, useBrushStroke, DEFAULT_BRUSH,
-  pushRecent, stampBrushDab, brushDabRgb, pressureRadius,
+  pushRecent, stampBrushDab, brushDabRgb, pressureRadius, layoutText,
   type Brush, type BrushTool, type ClipRect, type PaintTheme, type Palette as KitPalette, type PaletteEntry,
 } from '@reactjit/runtime/paint';
 import { defaultPalette, paletteWithColor, slotColor, type Palette } from '../modelStream';
@@ -110,6 +110,10 @@ const PAINT_THEME: PaintTheme = {
 // Studio's paint brush opens a touch smaller than the kit default (prop-scale
 // work wants a finer dab) and on a warm red so the first stroke is obvious.
 const STUDIO_DEFAULT_BRUSH: Brush = { ...DEFAULT_BRUSH, size: 18, ink: { kind: 'color', hex: '#c64b53' } };
+// The paint tools Studio surfaces in the kit — the host-supported set PLUS `text`
+// (click-to-stamp a typed string into the texture, req_1600). text isn't a stroke,
+// so it's handled Studio-side in the press handler (like faceFill), not by the kit.
+const STUDIO_PAINT_TOOLS: BrushTool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'eyedropper', 'text'];
 
 // The PIXEL paint texture (STUDIO_PAINT_KEY) is ONE shared GPU texture for every
 // model, so it must be RELOADED whenever the open model changes — these track which
@@ -309,6 +313,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const [tool, setTool] = useHotState<BrushTool>('studio:tool', 'brush');
   const [faceFill, setFaceFill] = useHotState<boolean>('studio:paintFill', false);
   const [paintRecents, setPaintRecents] = useHotState<PaletteEntry[]>('studio:paintRecents', []);
+  // The string the TEXT tool stamps (req_1600). Twig — survives a hot reload but
+  // resets cold; the click point + brush size/colour place and scale each stamp.
+  const [textValue, setTextValue] = useHotState<string>('studio:paintText', 'TEXT');
   // PAINT cell size in MODEL UNITS (req_1301): kept for the pre-paint atlas preview
   // (SceneTextureAtlas) only — the pixel painter resolution is fixed (PAINT_TEX) and
   // the kit's size dial is the real detail control now, so there's no UI for this.
@@ -955,6 +962,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       'paint.rect': () => selectTool('rect'),
       'paint.ellipse': () => selectTool('ellipse'),
       'paint.eyedropper': () => selectTool('eyedropper'),
+      'paint.text': () => selectTool('text'),
     },
   });
   // Tooltip prefix for a keyed action, read from the LIVE contract so it shows
@@ -1036,6 +1044,44 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     const island = faceIslandPx(tgt.mesh, hit.faceIndex);
     const r = island ? Math.hypot(island.x1 - island.x0, island.y1 - island.y0) : PAINT_TEX;
     stampUV(hit.u, hit.v, brushHex(), r, island);
+    touchedRef.current.add(tgt.partId);
+    paintDirtyRef.current = true;
+    return true;
+  };
+  // TEXT stamp (req_1600): raycast → the hit face's UV → lay the typed string out as
+  // 5×7 bitmap glyphs (runtime/paint glyphs) and stamp one filled SQUARE dab per lit
+  // cell, SCISSOR-clamped to the face island so it can't bleed onto a neighbour. The
+  // block centres on the click; the brush SIZE sets the glyph scale and the brush
+  // COLOUR the ink. A one-click model-texture op (not a stroke), so it's handled here
+  // like faceFill rather than through the kit's stroke controller. Returns true on a hit.
+  const stampTextAt = (sx: number, sy: number): boolean => {
+    if (!tex || !textValue.trim()) return false;
+    const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
+    if (!hit) return false;
+    const tgt = paintTargets()[hit.partIndex];
+    if (!tgt) return false;
+    const layout = layoutText(textValue);
+    if (!layout.cells.length) return false;
+    const island = faceIslandPx(tgt.mesh, hit.faceIndex);
+    let cx0 = 0, cy0 = 0, cw = 0, ch = 0;
+    if (island) {
+      cx0 = Math.max(0, Math.floor(island.x0));
+      cy0 = Math.max(0, Math.floor(island.y0));
+      cw = Math.max(1, Math.ceil(island.x1) - cx0);
+      ch = Math.max(1, Math.ceil(island.y1) - cy0);
+    }
+    const cell = Math.max(1, Math.round(brush.size / 4)); // texture px per font pixel
+    const [r, g, b] = brushDabRgb(brush, tool, tex?.color ?? '#c8ccd2');
+    // centre the text block on the click point so the stamp lands where you aimed
+    const ox = hit.u * PAINT_TEX - (layout.width * cell) / 2;
+    const oy = hit.v * PAINT_TEX - (layout.height * cell) / 2;
+    const radius = cell * 0.6; // square half-extent: cells in a glyph merge seamlessly
+    for (const c of layout.cells) {
+      const px = ox + (c.x + 0.5) * cell;
+      const py = oy + (c.y + 0.5) * cell;
+      // kind 2 = square, hardness 1, aspect 1 → a crisp filled cell, clipped to the island.
+      paintTex().brushColor(px, py, radius, r, g, b, 2, 0, 1, 1, 1, 0, 0, cx0, cy0, cw, ch);
+    }
     touchedRef.current.add(tgt.partId);
     paintDirtyRef.current = true;
     return true;
@@ -1366,6 +1412,14 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       if (faceFill) {
         paintSnapshotBegin();
         faceFillAt(sx, sy);
+        if (!texView) setTexView(true);
+        commitPaint();
+        return;
+      }
+      // The text tool is a one-click stamp (snapshot → stamp the typed string → persist).
+      if (tool === 'text') {
+        paintSnapshotBegin();
+        stampTextAt(sx, sy);
         if (!texView) setTexView(true);
         commitPaint();
         return;
@@ -2252,11 +2306,27 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
               onBrushChange={setBrush}
               tool={tool}
               onToolChange={selectTool}
+              tools={STUDIO_PAINT_TOOLS}
               palette={kitPalette}
               onPaletteChange={(p) => setPaintRecents(p.recents)}
               theme={PAINT_THEME}
               width={264}
             />
+            {/* TEXT tool (req_1600): type a string, then click the model to stamp it.
+                Brush SIZE scales the glyphs, brush COLOUR inks them. Only while the
+                text tool is active — the rest of the panel is unchanged. */}
+            {tool === 'text' ? (
+              <Col style={{ gap: 6, padding: 10, backgroundColor: PAINT_THEME.panel, borderWidth: 1, borderColor: PAINT_THEME.frame, borderRadius: 8 }}>
+                <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace', letterSpacing: 1 }}>TEXT</Text>
+                <TextInput
+                  value={textValue}
+                  onChangeText={setTextValue}
+                  placeholder="type, then click the model"
+                  style={{ height: 26, paddingLeft: 8, paddingRight: 8, borderRadius: 5, backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame, color: PAINT_THEME.ink, fontFamily: 'monospace', fontSize: 12 }}
+                />
+                <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace' }}>click a face to stamp · size = scale · colour = ink</Text>
+              </Col>
+            ) : null}
             {/* Studio model-texture strip */}
             <Col style={{ gap: 8, padding: 10, backgroundColor: PAINT_THEME.panel, borderWidth: 1, borderColor: PAINT_THEME.frame, borderRadius: 8 }}>
               {livePalette.slots.some((s) => s.kind === 'material') ? (
