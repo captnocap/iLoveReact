@@ -114,15 +114,14 @@ export function faceTexelRect(mesh: EditMesh, faceIndex: number, texels: number)
 // the face's own scale (a thin face packs a thin slot). We derive the cell size in UV
 // from that scale so a cell is always `cell` model-units on EVERY face: cuv = cell /
 // (worldLen/uvLen) measured on the face's first edge (the box unwrap is isometric).
-export type CellGrid = { cuv: number; u0: number; v0: number; u1: number; v1: number; nu: number; nv: number };
-export function faceCellGrid(mesh: EditMesh, faceIndex: number, cell = PAINT_CELL_UNITS): CellGrid | null {
+/** uv units per WORLD unit on a face, measured on its LONGEST uv edge — robust where
+ *  the first edge happens to be degenerate (a thin/folded face), which used to return
+ *  null → an unpaintable face (req_1299). The box unwrap is isometric, so one number
+ *  describes the whole face. Shared by faceCellGrid (cell sizing) and surfaceBrushDabs
+ *  (per-face brush radius), so the paint canvas and the 3D brush agree on scale. */
+export function faceUvPerWorld(mesh: EditMesh, faceIndex: number): number {
   const face = mesh.faces[faceIndex];
-  if (!face?.uv || face.uv.length < 3 || face.loop.length < 3) return null;
-  let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
-  for (const [u, v] of face.uv) { if (u < u0) u0 = u; if (v < v0) v0 = v; if (u > u1) u1 = u; if (v > v1) v1 = v; }
-  // world↔uv scale from the LONGEST uv edge — robust where the first edge happens to
-  // be degenerate (a thin/folded face), which used to return null → an unpaintable
-  // face (req_1299). uvPerWorld = uvLen/worldLen on that edge.
+  if (!face?.uv || face.uv.length < 3 || face.loop.length < 3) return 0;
   let bestUv = 0, uvPerWorld = 0;
   const n = face.loop.length;
   for (let i = 0; i < n; i += 1) {
@@ -132,6 +131,17 @@ export function faceCellGrid(mesh: EditMesh, faceIndex: number, cell = PAINT_CEL
     const ul = Math.hypot(uvN[0] - uv[0], uvN[1] - uv[1]);
     if (ul > bestUv && wl > 1e-9) { bestUv = ul; uvPerWorld = ul / wl; }
   }
+  return uvPerWorld;
+}
+
+export type CellGrid = { cuv: number; u0: number; v0: number; u1: number; v1: number; nu: number; nv: number };
+export function faceCellGrid(mesh: EditMesh, faceIndex: number, cell = PAINT_CELL_UNITS): CellGrid | null {
+  const face = mesh.faces[faceIndex];
+  if (!face?.uv || face.uv.length < 3 || face.loop.length < 3) return null;
+  let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
+  for (const [u, v] of face.uv) { if (u < u0) u0 = u; if (v < v0) v0 = v; if (u > u1) u1 = u; if (v > v1) v1 = v; }
+  // world↔uv scale from the longest uv edge (see faceUvPerWorld).
+  const uvPerWorld = faceUvPerWorld(mesh, faceIndex);
   // cuv = uv units per cell; fall back to the whole face = 1 cell if no usable edge.
   let cuv = uvPerWorld > 1e-9 ? uvPerWorld * cell : Math.max(u1 - u0, v1 - v0, 1e-6);
   if (!(cuv > 1e-9) || !Number.isFinite(u0)) return null;
@@ -210,8 +220,10 @@ export function pickFaceCell(targets: PaintTarget[], cam: CameraSnap, sx: number
 }
 
 /** A face hit resolved to a continuous UV coordinate (0..1 atlas space), for the
- *  PIXEL painter — no cell grid. `u,v` is the exact texel the cursor sits on. */
-export type FaceUVHit = { partIndex: number; faceIndex: number; u: number; v: number };
+ *  PIXEL painter — no cell grid. `u,v` is the exact texel the cursor sits on;
+ *  `world` is the 3D point on the surface (lift included), so a 3D-surface brush can
+ *  reach the faces NEIGHBOURING the hit one across an atlas seam (req_1580). */
+export type FaceUVHit = { partIndex: number; faceIndex: number; u: number; v: number; world: V3 };
 
 /** True when the model's faces do NOT each own a UNIQUE atlas island — i.e.
  *  painting one would paint others (req_1375, the "1 click → green in 4 places"
@@ -275,6 +287,7 @@ export function pickFaceUV(targets: PaintTarget[], cam: CameraSnap, sx: number, 
             faceIndex: fi,
             u: ba * uv0[0] + hit.u * uva[0] + hit.v * uvb[0],
             v: ba * uv0[1] + hit.u * uva[1] + hit.v * uvb[1],
+            world: [ray.o[0] + ray.d[0] * hit.t, ray.o[1] + ray.d[1] * hit.t, ray.o[2] + ray.d[2] * hit.t],
           };
         } else {
           // A no-uv face is now the nearest surface — it OCCLUDES anything behind.
@@ -284,6 +297,107 @@ export function pickFaceUV(targets: PaintTarget[], cam: CameraSnap, sx: number, 
     }
   });
   return bestUV;
+}
+
+// ── 3D surface brush (req_1580) ─────────────────────────────────────────────
+// The pixel painter stamps into the atlas. A brush dab is a disc in UV/atlas space
+// SCISSORED to ONE face's island — fine WITHIN a face, but a continuous stroke on a
+// many-face mesh (a sphere has 256 tiny faces) crosses a face boundary almost every
+// pixel, and surface-adjacent faces are scattered to NON-adjacent atlas islands. So a
+// single-island dab leaves the seam unpainted (the stroke shreds, the "broken 67").
+//
+// The cure: treat the brush as a SPHERE of WORLD radius around the 3D hit point and
+// stamp into EVERY face it reaches — each in its own UV island. A face's painted
+// region is centred on the closest surface point to the hit and sized by how far the
+// brush sphere still reaches there (sqrt(r²−d²)), so the paint flows continuously
+// across the seam from both sides. The caller interpolates the stroke in SCREEN space
+// (raycasting each step) — never in atlas space — so there's no cross-island streak.
+
+function add3(a: V3, b: V3): V3 { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+function scale3(a: V3, s: number): V3 { return [a[0] * s, a[1] * s, a[2] * s]; }
+function dist2(a: V3, b: V3): number { const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2]; return dx * dx + dy * dy + dz * dz; }
+
+/** Closest point on triangle (a,b,c) to p (Ericson, Real-Time Collision Detection):
+ *  handles the vertex / edge / face Voronoi regions, so a brush near a shared edge
+ *  resolves to the edge — exactly where seam continuity needs it. */
+function closestOnTri(p: V3, a: V3, b: V3, c: V3): V3 {
+  const ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+  const d1 = dot(ab, ap), d2 = dot(ac, ap);
+  if (d1 <= 0 && d2 <= 0) return a;
+  const bp = sub(p, b);
+  const d3 = dot(ab, bp), d4 = dot(ac, bp);
+  if (d3 >= 0 && d4 <= d3) return b;
+  const vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) return add3(a, scale3(ab, d1 / (d1 - d3)));
+  const cp = sub(p, c);
+  const d5 = dot(ab, cp), d6 = dot(ac, cp);
+  if (d6 >= 0 && d5 <= d6) return c;
+  const vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) return add3(a, scale3(ac, d2 / (d2 - d6)));
+  const va = d3 * d6 - d5 * d4;
+  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) return add3(b, scale3(sub(c, b), (d4 - d3) / ((d4 - d3) + (d5 - d6))));
+  const denom = 1 / (va + vb + vc);
+  return add3(a, add3(scale3(ab, vb * denom), scale3(ac, vc * denom)));
+}
+
+/** Barycentric of q within triangle (a,b,c) — for mapping a surface point back to uv. */
+function baryOnTri(q: V3, a: V3, b: V3, c: V3): [number, number, number] {
+  const v0 = sub(b, a), v1 = sub(c, a), v2 = sub(q, a);
+  const d00 = dot(v0, v0), d01 = dot(v0, v1), d11 = dot(v1, v1), d20 = dot(v2, v0), d21 = dot(v2, v1);
+  const den = d00 * d11 - d01 * d01;
+  if (Math.abs(den) < 1e-14) return [1, 0, 0];
+  const wb = (d11 * d20 - d01 * d21) / den, wc = (d00 * d21 - d01 * d20) / den;
+  return [1 - wb - wc, wb, wc];
+}
+
+/** One stamp the surface brush lays onto a face: the atlas UV centre, the radius in
+ *  TEXTURE PIXELS for THIS face's island (a world-uniform brush, so it's the correct
+ *  px size per face), and the face's island rect to scissor to. */
+export type SurfaceDab = { u: number; v: number; radiusPx: number; clip: TexelRect | null };
+
+/** Every face of `mesh` the brush sphere (centre `p` in world space, `worldRadius`)
+ *  reaches, as a stamp in that face's own UV island. `lift` is the part's render lift
+ *  (verts are compared in the same lifted world space as the ray hit). Skips glass /
+ *  unmapped faces. The union of these stamps is a seam-continuous 3D brush. */
+export function surfaceBrushDabs(mesh: EditMesh, lift: number, p: V3, worldRadius: number, texels: number): SurfaceDab[] {
+  const out: SurfaceDab[] = [];
+  if (!(worldRadius > 0)) return out;
+  const r2 = worldRadius * worldRadius;
+  for (let fi = 0; fi < mesh.faces.length; fi += 1) {
+    const face = mesh.faces[fi];
+    if (face.glass || !face.uv || face.uv.length < 3 || face.loop.length < 3) continue;
+    const upw = faceUvPerWorld(mesh, fi);
+    if (!(upw > 1e-9)) continue;
+    // lifted face verts
+    const lv = face.loop.map((vi) => { const w = mesh.verts[vi]; return [w[0], w[1] + lift, w[2]] as V3; });
+    // cheap reject: centroid + bound radius vs the brush sphere.
+    let cx = 0, cy = 0, cz = 0;
+    for (const w of lv) { cx += w[0]; cy += w[1]; cz += w[2]; }
+    const centroid: V3 = [cx / lv.length, cy / lv.length, cz / lv.length];
+    let boundR = 0;
+    for (const w of lv) boundR = Math.max(boundR, Math.hypot(w[0] - centroid[0], w[1] - centroid[1], w[2] - centroid[2]));
+    const cd = Math.hypot(p[0] - centroid[0], p[1] - centroid[1], p[2] - centroid[2]);
+    if (cd > worldRadius + boundR) continue;
+    // closest surface point over the fan triangles (v0, vi, vi+1).
+    let bestD2 = Infinity, bestTri = -1; let bestQ: V3 | null = null;
+    for (let i = 1; i < lv.length - 1; i += 1) {
+      const q = closestOnTri(p, lv[0], lv[i], lv[i + 1]);
+      const d = dist2(p, q);
+      if (d < bestD2) { bestD2 = d; bestTri = i; bestQ = q; }
+    }
+    if (bestTri < 0 || !bestQ || bestD2 > r2) continue;
+    const effR = Math.sqrt(Math.max(0, r2 - bestD2)); // surface reach on this face
+    if (effR <= 0) continue;
+    const bary = baryOnTri(bestQ, lv[0], lv[bestTri], lv[bestTri + 1]);
+    const uv0 = face.uv[0], uva = face.uv[bestTri], uvb = face.uv[bestTri + 1];
+    out.push({
+      u: bary[0] * uv0[0] + bary[1] * uva[0] + bary[2] * uvb[0],
+      v: bary[0] * uv0[1] + bary[1] * uva[1] + bary[2] * uvb[1],
+      radiusPx: Math.max(1, effR * upw * texels),
+      clip: faceTexelRect(mesh, fi, texels),
+    });
+  }
+  return out;
 }
 
 // ── Mirror painting (req_1538) ──────────────────────────────────────────────

@@ -14,20 +14,20 @@ import { useEffect, useRef, useState } from 'react';
 import type { PaintableOps } from './usePaintable';
 import { useModifiers } from './useModifiers';
 import {
-  type Brush, type BrushTool, BRUSH_SHAPE_ID, TOOL_HOTKEY,
+  type Brush, type BrushTool, TOOL_HOTKEY,
 } from '../paint/model';
 import {
   createStrokeEngine, dabsAlongSegment, constrainLine, constrainSquare,
   stepSizeLadder, type Dab, type StrokeEngine,
 } from '../paint/stroke';
-import { hexToRgb01, rgb01ToHex } from '../paint/colors';
+import { rgb01ToHex } from '../paint/colors';
+import { type ClipRect, brushDabRgb, stampBrushDab } from '../paint/stamp';
 
 export type ShapePreview =
   | { tool: 'line'; ax: number; ay: number; bx: number; by: number }
   | { tool: 'rect' | 'ellipse'; ax: number; ay: number; bx: number; by: number };
 
-/** A clip rect in texture pixels — the UV island a dab is scissored to. */
-export interface ClipRect { x: number; y: number; w: number; h: number }
+export type { ClipRect };
 
 /** A pointer mapped onto the paint texture. For 3D surfaces, `mapPoint`
  *  raycasts the mesh and returns the hit's texture-pixel coords PLUS the hit
@@ -75,11 +75,6 @@ export interface BrushStrokeController {
   preview: ShapePreview | null;
 }
 
-function jitterSeed(x: number, y: number): number {
-  const h = (Math.floor(x) * 73856093) ^ (Math.floor(y) * 19349663);
-  return ((h >>> 0) % 1000) / 1000;
-}
-
 export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
   // Live opts behind a ref so the (stable) pointer handlers always see the
   // current brush/tool without re-binding listeners.
@@ -112,22 +107,10 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
 
   const stampDab = (dab: Dab) => {
     const o = ref.current;
-    const b = o.brush;
-    const shape = b.stamp.kind === 'analytic' ? b.stamp.shape : 'round';
-    const kindId = BRUSH_SHAPE_ID[shape] ?? 0;
-    let rgb: [number, number, number];
-    if (o.tool === 'eraser') rgb = hexToRgb01(o.eraseColor ?? '#0c0e14');
-    else if (b.ink.kind === 'color') rgb = hexToRgb01(b.ink.hex);
-    else rgb = [1, 1, 1]; // texture/shader inks resolve to color until Phase B
+    const rgb = brushDabRgb(o.brush, o.tool, o.eraseColor); // texture/shader inks → white until Phase B
     // one disc, scissored to a clip island — primary + each mirror image share this.
-    const stamp = (x: number, y: number, c: ClipRect | null) => o.paint.brushColor(
-      x, y, dab.radius, rgb[0], rgb[1], rgb[2],
-      kindId, (b.angleDeg * Math.PI) / 180, b.aspect, b.hardness, b.flow, b.scatter,
-      jitterSeed(x, y),
-      c?.x ?? 0, c?.y ?? 0, c?.w ?? 0, c?.h ?? 0,
-    );
-    stamp(dab.x, dab.y, clipRef.current ?? o.clip ?? null);
-    if (o.mirror) for (const md of o.mirror(dab)) stamp(md.x, md.y, md.clip);
+    stampBrushDab(o.paint, o.brush, rgb, dab.x, dab.y, dab.radius, clipRef.current ?? o.clip ?? null);
+    if (o.mirror) for (const md of o.mirror(dab)) stampBrushDab(o.paint, o.brush, rgb, md.x, md.y, dab.radius, md.clip);
   };
 
   const stampMany = (dabs: Dab[]) => { for (const d of dabs) stampDab(d); };

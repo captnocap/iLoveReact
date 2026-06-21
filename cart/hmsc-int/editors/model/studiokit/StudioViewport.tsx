@@ -59,7 +59,7 @@ import {
   SelectionOverlay, makeProjector, orbitalEyeJS, pickElement, applyPick, emptySelection, selectionCount,
   type SelMode, type Selection, type CameraSnap,
 } from '../meshSelect';
-import { pickFaceUV, paintUVsNeedRepack, mirrorPaintDabs, type PaintCells, type PaintTarget, type FaceHit } from '../meshPaint';
+import { pickFaceUV, paintUVsNeedRepack, mirrorPaintDabs, faceUvPerWorld, surfaceBrushDabs, type PaintCells, type PaintTarget, type FaceHit, type TexelRect } from '../meshPaint';
 import { STUDIO_PAINT_KEY, PAINT_TEX, paintTex, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited } from '../meshPaintTexture';
 import { Paintable } from '@reactjit/runtime/primitives';
 // The PAINT panel + stamping are now the UNIVERSAL kit (runtime/paint) — the same
@@ -69,8 +69,8 @@ import { Paintable } from '@reactjit/runtime/primitives';
 // source of truth, synthesised into the kit's palette shape.
 import {
   BrushKit, useBrushStroke, DEFAULT_BRUSH,
-  pushRecent,
-  type Brush, type BrushTool, type PaintTheme, type Palette as KitPalette, type PaletteEntry,
+  pushRecent, stampBrushDab, brushDabRgb, pressureRadius,
+  type Brush, type BrushTool, type ClipRect, type PaintTheme, type Palette as KitPalette, type PaletteEntry,
 } from '@reactjit/runtime/paint';
 import { defaultPalette, paletteWithColor, slotColor, type Palette } from '../modelStream';
 import {
@@ -328,6 +328,14 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // last painted screen point — a drag INTERPOLATES dabs along the segment to here so a
   // fast stroke fills continuously instead of leaving gaps (the "pinlines", req_1207).
   const lastPaintRef = useRef<{ x: number; y: number } | null>(null);
+  // 3D-SURFACE freehand stroke (req_1580): brush/eraser interpolate in SCREEN space and
+  // stamp a world-radius brush onto every face it touches (surfaceBrushDabs), so a stroke
+  // stays continuous across atlas-island seams. surfaceStrokeActiveRef gates move/up to
+  // this path vs the kit (which owns the atlas-space shape tools + eyedropper). paintUpw
+  // is the hit face's uv↔world scale latched on press, so the brush is one world size.
+  const surfaceStrokeActiveRef = useRef(false);
+  const lastPaintScreenRef = useRef<{ x: number; y: number } | null>(null);
+  const paintUpwRef = useRef(0);
   const [paintBakeTick, setPaintBakeTick] = useState(0);
   // DIAGNOSTIC (req_1376/1385): the model's UV layout, shown ON SCREEN in paint mode
   // (cart console.log doesn't reach the terminal). Reveals shared/overlapping islands.
@@ -1178,19 +1186,64 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     const tgt = paintTargets()[hit.partIndex];
     if (!tgt) return null;
     if (tool !== 'eyedropper') touchedRef.current.add(tgt.partId);
-    const island = faceIslandPx(tgt.mesh, hit.faceIndex);
-    let clip: { x: number; y: number; w: number; h: number } | undefined;
-    if (island) {
-      const cx = Math.max(0, Math.floor(island.x0));
-      const cy = Math.max(0, Math.floor(island.y0));
-      clip = { x: cx, y: cy, w: Math.max(1, Math.ceil(island.x1) - cx), h: Math.max(1, Math.ceil(island.y1) - cy) };
-    }
-    return { x: hit.u * PAINT_TEX, y: hit.v * PAINT_TEX, clip };
+    return { x: hit.u * PAINT_TEX, y: hit.v * PAINT_TEX, clip: islandToClip(faceIslandPx(tgt.mesh, hit.faceIndex)) ?? undefined };
   };
   const pickPaintColor = (hex: string) => {
     const ink = { kind: 'color' as const, hex };
     setBrush((b) => ({ ...b, ink }));
     setPaintRecents((recents) => pushRecent({ swatches: [], recents }, ink).recents);
+  };
+
+  // ── 3D-SURFACE freehand brush/eraser (req_1580) ──
+  // A UV-island rect → the host clip rect (rounded so a dab can't spill past the face).
+  const islandToClip = (r: TexelRect | null): ClipRect | null => {
+    if (!r) return null;
+    const x = Math.max(0, Math.floor(r.x0)), y = Math.max(0, Math.floor(r.y0));
+    return { x, y, w: Math.max(1, Math.ceil(r.x1) - x), h: Math.max(1, Math.ceil(r.y1) - y) };
+  };
+  const SURFACE_STEP_PX = 3; // screen-space interpolation step (gap-free, cheap raycasts)
+  const pressureOf = (e: any): number | undefined => { const p = Number(e?.pressure); return Number.isFinite(p) && p > 0 ? p : undefined; };
+  // Stamp the brush at ONE screen point: raycast → 3D surface point → every face within
+  // the brush's WORLD radius gets a disc in its own UV island (continuous across seams),
+  // plus the mirror image(s) when a symmetry plane is on. Returns false on a miss.
+  const surfaceStampAt = (sx: number, sy: number, pressure?: number): boolean => {
+    if (!tex) return false;
+    const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
+    if (!hit) return false;
+    const tgt = paintTargets()[hit.partIndex];
+    if (!tgt) return false;
+    touchedRef.current.add(tgt.partId);
+    const upw = paintUpwRef.current > 1e-9 ? paintUpwRef.current : faceUvPerWorld(tgt.mesh, hit.faceIndex);
+    // World radius from the brush's pixel radius at the hit face's scale, so the on-screen
+    // size matches the kit AND the brush is one uniform WORLD size across every face.
+    const worldR = upw > 1e-9 ? pressureRadius(brush.size, pressure) / PAINT_TEX / upw : 0;
+    if (!(worldR > 0)) return true;
+    const rgb = brushDabRgb(brush, tool, tex?.color ?? '#c8ccd2');
+    for (const d of surfaceBrushDabs(tgt.mesh, tgt.lift, hit.world, worldR, PAINT_TEX)) {
+      const px = d.u * PAINT_TEX, py = d.v * PAINT_TEX;
+      stampBrushDab(paintTex(), brush, rgb, px, py, d.radiusPx, islandToClip(d.clip));
+      if (mirrorAxes.length) {
+        for (const md of mirrorPaintDabs(paintTargets(), px, py, mirrorAxes, PAINT_TEX)) {
+          stampBrushDab(paintTex(), brush, rgb, md.x, md.y, d.radiusPx, islandToClip(md.clip));
+        }
+      }
+    }
+    return true;
+  };
+  const surfaceStrokeBegin = (sx: number, sy: number, pressure?: number) => {
+    const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
+    const tgt = hit ? paintTargets()[hit.partIndex] : null;
+    paintUpwRef.current = hit && tgt ? faceUvPerWorld(tgt.mesh, hit.faceIndex) : 0;
+    lastPaintScreenRef.current = { x: sx, y: sy };
+    surfaceStampAt(sx, sy, pressure);
+  };
+  const surfaceStrokeMove = (sx: number, sy: number, pressure?: number) => {
+    const last = lastPaintScreenRef.current;
+    lastPaintScreenRef.current = { x: sx, y: sy };
+    if (!last) { surfaceStampAt(sx, sy, pressure); return; }
+    const dx = sx - last.x, dy = sy - last.y;
+    const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / SURFACE_STEP_PX));
+    for (let i = 1; i <= steps; i += 1) surfaceStampAt(last.x + (dx * i) / steps, last.y + (dy * i) / steps, pressure);
   };
 
   const paintCtl = useBrushStroke({
@@ -1204,12 +1257,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     // island clip per image; the controller stamps them with the same brush/colour.
     mirror: mirrorAxes.length
       ? (dab: { x: number; y: number; radius: number }) =>
-          mirrorPaintDabs(paintTargets(), dab.x, dab.y, mirrorAxes, PAINT_TEX).map((md) => ({
-            x: md.x, y: md.y,
-            clip: md.clip
-              ? { x: Math.max(0, Math.floor(md.clip.x0)), y: Math.max(0, Math.floor(md.clip.y0)), w: Math.max(1, Math.ceil(md.clip.x1) - Math.max(0, Math.floor(md.clip.x0))), h: Math.max(1, Math.ceil(md.clip.y1) - Math.max(0, Math.floor(md.clip.y0))) }
-              : null,
-          }))
+          mirrorPaintDabs(paintTargets(), dab.x, dab.y, mirrorAxes, PAINT_TEX).map((md) => ({ x: md.x, y: md.y, clip: islandToClip(md.clip) }))
       : undefined,
     // erase reveals the texture's base coat (no host alpha-erase until Phase B).
     eraseColor: tex?.color ?? '#c8ccd2',
@@ -1323,11 +1371,19 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       }
       // The eyedropper just samples — no stroke, no undo snapshot, no orbit.
       if (tool === 'eyedropper') { paintCtl.handlers.onMouseDown(e); return; }
-      // Snapshot the PRE-stroke texture for undo (req_1379) BEFORE the kit queues a
-      // dab (readback drains pending ops, so it must run first), then hand the press
-      // to the kit — it owns the stroke from here (brush/eraser/line/rect/oval).
+      // Snapshot the PRE-stroke texture for undo (req_1379) BEFORE any dab queues
+      // (readback drains pending ops, so it must run first).
       paintSnapshotBegin();
-      paintCtl.handlers.onMouseDown(e);
+      // Freehand brush/eraser go through the 3D-SURFACE path (screen-space interpolation,
+      // multi-face stamping) so strokes stay continuous across atlas seams (req_1580). The
+      // atlas-space shape tools (line/rect/ellipse) stay on the kit.
+      if (tool === 'brush' || tool === 'eraser') {
+        surfaceStrokeActiveRef.current = true;
+        surfaceStrokeBegin(sx, sy, pressureOf(e));
+      } else {
+        surfaceStrokeActiveRef.current = false;
+        paintCtl.handlers.onMouseDown(e);
+      }
       paintingRef.current = true;
       if (!texView) setTexView(true); // the act of painting reveals the texture (req_1226)
       return;
@@ -1500,7 +1556,11 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (selMode === 'paint') {
       const r = rectRef.current;
       const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
-      if (paintingRef.current) { paintCtl.handlers.onMouseMove(e); return; } // kit owns the stroke (no React per move)
+      if (paintingRef.current) {
+        if (surfaceStrokeActiveRef.current) surfaceStrokeMove(sx, sy, pressureOf(e)); // 3D-surface freehand
+        else paintCtl.handlers.onMouseMove(e); // kit owns the atlas-space shape tools
+        return;
+      }
       if (!dragRef.current) { paintProbe(sx, sy); return; } // hover → ref
       // else: a miss-drag in progress → continue to the orbit block (spin the camera).
     }
@@ -1704,8 +1764,16 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     l.yaw = nextYaw; l.pitch = nextPitch;
   };
   const onUp = (e: any) => {
-    // end a paint stroke: the kit stamps the final dab + fires onStrokeEnd → commitPaint.
-    if (paintingRef.current) { paintingRef.current = false; lastPaintRef.current = null; paintCtl.handlers.onMouseUp(e); return; }
+    // end a paint stroke. Surface path: commit directly; kit path: it stamps the final
+    // dab + fires onStrokeEnd → commitPaint.
+    if (paintingRef.current) {
+      paintingRef.current = false; lastPaintRef.current = null;
+      if (surfaceStrokeActiveRef.current) {
+        surfaceStrokeActiveRef.current = false; lastPaintScreenRef.current = null;
+        paintDirtyRef.current = true; commitPaint();
+      } else paintCtl.handlers.onMouseUp(e);
+      return;
+    }
     // end a BACKDROP drag (req_1285): pos was written live to state already, so just
     // drop the grab + the readout. (No commit step — backdrops persist on every patch.)
     if (backdropDragRef.current) { backdropDragRef.current = null; setBackdropDragAxis(null); setGizmoReadout(null); return; }
@@ -1957,7 +2025,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
       onMouseDown={onDown}
       onMouseMove={onMove}
       onMouseUp={onUp}
-      onMouseLeave={(e: any) => { if (paintingRef.current) { paintingRef.current = false; lastPaintRef.current = null; paintCtl.handlers.onMouseLeave(e); } }}
+      onMouseLeave={(e: any) => { if (paintingRef.current) { paintingRef.current = false; lastPaintRef.current = null; if (surfaceStrokeActiveRef.current) { surfaceStrokeActiveRef.current = false; lastPaintScreenRef.current = null; paintDirtyRef.current = true; commitPaint(); } else paintCtl.handlers.onMouseLeave(e); } }}
       onScroll={onWheel}
       style={{ flexGrow: 1, height: '100%', position: 'relative', overflow: 'hidden', backgroundColor: '#0a0e14' }}
     >

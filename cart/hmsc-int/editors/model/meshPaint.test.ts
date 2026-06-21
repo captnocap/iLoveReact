@@ -10,7 +10,7 @@
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import { cuboid } from './editMesh';
 import type { CameraSnap } from './meshSelect';
-import { screenRay, pickFaceCell, faceCellGrid, cellAtlasRect, brushCells, dabRadiusCells, uvToWorld, mirrorPaintDabs, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintTarget } from './meshPaint';
+import { screenRay, pickFaceCell, faceCellGrid, cellAtlasRect, brushCells, dabRadiusCells, uvToWorld, mirrorPaintDabs, faceUvPerWorld, surfaceBrushDabs, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintTarget } from './meshPaint';
 import type { EditMesh } from './editMesh';
 
 function nearly(a: number, b: number, eps = 1e-3): boolean { return Math.abs(a - b) <= eps; }
@@ -147,6 +147,38 @@ test('mirrorPaintDabs reflects a dab onto the symmetric face across X (req_1538)
   assert(!!dabs[0].clip && dabs[0].clip!.x0 >= 0.5 * T - 1, 'the mirror dab is scissored to the −X islands clip rect');
   // a dab with no mirror plane returns nothing.
   assertEqual(mirrorPaintDabs(targets, 0.3 * T, 0.1 * T, [], T).length, 0, 'no plane → no mirror');
+});
+
+test('faceUvPerWorld is the longest-edge uv↔world scale (8u face, full-square uv → 1/8)', () => {
+  const box = cuboid(8, 8, 8); // fullFaceUV: each face uv fills [0,1], world edge = 8u
+  assert(nearly(faceUvPerWorld(box, 0), 1 / 8), 'upw = uvLen(1) / worldLen(8) = 0.125');
+});
+
+test('surfaceBrushDabs: a small brush on the +Z face paints ONLY that face, radiusPx world-scaled', () => {
+  const box = cuboid(8, 8, 8); // origin-centred, +Z face at z=4
+  const T = 1024;
+  // brush radius 1u at the +Z face centre — neighbour faces are 4u away, out of reach.
+  const dabs = surfaceBrushDabs(box, 0, [0, 0, 4], 1, T);
+  assertEqual(dabs.length, 1, 'one face touched by a 1u brush at the face centre');
+  // effR = full radius at the closest point (d=0): radiusPx = 1 * (1/8) * 1024 = 128.
+  assert(nearly(dabs[0].radiusPx, 128, 0.5), 'the dab radius is the world radius mapped into this face (128px)');
+});
+
+test('surfaceBrushDabs: a brush spanning a shared EDGE paints BOTH faces — seam continuity (req_1580)', () => {
+  const box = cuboid(8, 8, 8); // +Z face at z=4, +X face at x=4, sharing the x=4,z=4 edge
+  const T = 1024;
+  const near = [3.5, 0, 4]; // on +Z, 0.5u from the +X face plane
+  assertEqual(surfaceBrushDabs(box, 0, near, 0.3, T).length, 1, 'a 0.3u brush stays on the +Z face (edge is 0.5u away)');
+  const both = surfaceBrushDabs(box, 0, near, 1.0, T);
+  assert(both.length >= 2, 'a 1.0u brush reaches across the 0.5u-distant edge onto the +X face too');
+});
+
+test('surfaceBrushDabs: lift shifts the surface — a brush below the lifted face misses', () => {
+  const box = cuboid(8, 8, 8);
+  const T = 1024;
+  // the +Z face lifted by 100u sits far from a world point at the un-lifted height.
+  assertEqual(surfaceBrushDabs(box, 100, [0, 0, 4], 1, T).length, 0, 'no face within reach once lifted away');
+  assert(surfaceBrushDabs(box, 100, [0, 100, 4], 1, T).length >= 1, 'reaches the face at its lifted height');
 });
 
 finish('meshPaint');
