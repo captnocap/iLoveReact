@@ -827,6 +827,36 @@ pub fn frameCleanup() void {
     g_rt_cursor = 0;
 }
 
+/// Drop every retained-geometry registration so the next bundle re-interns
+/// from scratch. The dev hot-reload path calls this while tearing down the
+/// tree: the JS world re-evals in a fresh V8 context, so its ship-once-per-key
+/// set (runtime/geometries/intern.ts) resets and every first-per-key mesh
+/// re-ships its verts. The HOST intern caches, by contrast, are append-only
+/// bump allocators that NEVER evict (g_retained_top / g_static_inst_top) and
+/// persist across the reload — so without this reset they accumulate dead
+/// geometry from every prior map version across edit→reload cycles until they
+/// hit GEO_CACHE_SIZE / MAX_RETAINED_VERTS. Past that point internGeometry
+/// returns null and pass 1 SILENTLY DROPS the mesh, and because the shared Box
+/// geometry (the grid AND every building bucket) interns late in the fill
+/// order, every building + the grid vanish while props survive (req_0725/0727,
+/// reproduced as "turn the camera after a reload and the world disappears").
+/// Resetting the bump cursors here makes the re-shipped verts repopulate a
+/// clean cache, so geometry survives the reload exactly like a fresh boot.
+/// The GPU buffer memory is reused in place (cursors rewind to 0); no GPU
+/// resource is freed. The per-frame dynamic instance staging buffer and the
+/// content-hashed FIFO texture cache are NOT touched — they self-evict and
+/// never overflow-to-drop.
+pub fn resetForReload() void {
+    g_geo_cache_len = 0;
+    g_retained_top = 0;
+    for (&g_geo_cache) |*e| e.* = .{};
+    g_static_inst_cache_len = 0;
+    g_static_inst_top = 0;
+    for (&g_static_inst_cache) |*e| e.* = .{};
+    g_dyn_len = 0;
+    for (&g_dyn_slots) |*s| s.* = .{};
+}
+
 /// Acquire the next RT slot for this frame. Returns null on pool exhaustion
 /// or device failure. Slots are reused across frames; resized lazily when
 /// a tile's dimensions change.

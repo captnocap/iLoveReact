@@ -1064,6 +1064,13 @@ pub fn scene3dDiffuseSampler() ?*wgpu.Sampler {
     return scene3d.getDiffuseSampler();
 }
 
+/// Drop the retained 3D-geometry intern caches on dev hot-reload (see
+/// scene3d.resetForReload). Without it the append-only bump caches accumulate
+/// dead geometry across reloads until they overflow and silently drop meshes.
+pub fn scene3dResetForReload() void {
+    scene3d.resetForReload();
+}
+
 pub fn staticSurfaceBindGroup3D(key: []const u8) ?*wgpu.BindGroup {
     const idx = findStaticEntry(staticKeyHash(key), key.len) orelse {
         // Not a captured StaticSurface — try a paintable of the same key (the

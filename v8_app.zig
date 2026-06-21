@@ -76,6 +76,7 @@ const gpu = if (HEADLESS) struct {
     pub fn frameCounter() u64 {
         return 0;
     }
+    pub fn scene3dResetForReload() void {}
 } else @import("framework/gpu/gpu.zig");
 const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_options.has_game_camera) @import("framework/game/camera.zig") else struct {
     pub const Solved = struct {};
@@ -3344,6 +3345,14 @@ fn clearTreeStateForReload() void {
     latches.clearAll();
     g_window_owner_by_node_id.clearRetainingCapacity();
     g_scroll_prop_slots.clearRetainingCapacity();
+
+    // Drop the retained 3D-geometry intern caches. The new bundle re-evals in a
+    // fresh V8 context, so JS re-ships every first-per-key mesh's verts; the
+    // host caches are append-only bump allocators that never evict, so without
+    // this they accumulate dead geometry across reloads until they overflow and
+    // SILENTLY DROP meshes (grid + buildings vanish, props survive — req_0725/
+    // 0727, seen as "turn the camera after a reload and the world disappears").
+    gpu.scene3dResetForReload();
 
     // host_tree.clearAll above already cleared the root-child list.
 
