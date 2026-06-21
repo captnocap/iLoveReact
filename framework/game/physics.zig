@@ -176,6 +176,67 @@ fn stairlogOn() bool {
     return g_stairlog_state == 1;
 }
 
+// --- Collider diagnostic (RJIT_COLLIDERLOG=1) ---
+// "I walk right through the props/trees in the compiled game." Same no-V8 reason
+// as the stairlog: prove it from the Zig sim. Per frame the player moves (or
+// stands inside a collider), print how many solid colliders are LOADED and how
+// many the player capsule currently OVERLAPS, plus the side-push that fired.
+//   inside=0 next to a visible prop  → NO collider was baked for it (a bake bug).
+//   inside>0 while push≈0 and moving → a collider exists but isn't stopping you
+//                                       (a resolution/band bug) — tagged THROUGH.
+var g_colliderlog_state: i8 = -1;
+var g_colliderlog_tick: u64 = 0;
+
+fn colliderlogOn() bool {
+    if (g_colliderlog_state < 0) {
+        const v = std.posix.getenv("RJIT_COLLIDERLOG") orelse "";
+        g_colliderlog_state = if (v.len > 0 and v[0] != '0') 1 else 0;
+    }
+    return g_colliderlog_state == 1;
+}
+
+/// Count the SOLID colliders whose band + XZ footprint the player capsule
+/// overlaps — the same band test (feet<top, head>floor) and circle-vs-AABB the
+/// side-push uses, oriented rects un-rotated about their pivot first. `nearest_out`
+/// gets the distance to the nearest overlapped edge (−1 when none).
+fn playerSolidOverlaps(rects: []const f32, oriented: []const f32, px: f32, py: f32, pz: f32, radius: f32, height: f32, nearest_out: *f32) u32 {
+    var count: u32 = 0;
+    var nearest2: f32 = 1e30;
+    const feet = py;
+    const head = py + height;
+    var r: usize = 0;
+    while (r + RECT_FLOATS <= rects.len) : (r += RECT_FLOATS) {
+        if (rects[r + 5] <= 0.5) continue; // solid only
+        if (feet >= rects[r + 4] or head <= bandFloor(rects[r + 8])) continue; // band miss
+        const ex = px - clamp(px, rects[r], rects[r + 2]);
+        const ez = pz - clamp(pz, rects[r + 1], rects[r + 3]);
+        const d2 = ex * ex + ez * ez;
+        if (d2 <= radius * radius) {
+            count += 1;
+            if (d2 < nearest2) nearest2 = d2;
+        }
+    }
+    var o: usize = 0;
+    while (o + ORIENTED_FLOATS <= oriented.len) : (o += ORIENTED_FLOATS) {
+        if (oriented[o + 5] <= 0.5) continue;
+        if (feet >= oriented[o + 4] or head <= bandFloor(oriented[o + 8])) continue;
+        const cs = @cos(oriented[o + 11]);
+        const sn = @sin(oriented[o + 11]);
+        var lx: f32 = undefined;
+        var lz: f32 = undefined;
+        worldToLocal(px, pz, oriented[o + 9], oriented[o + 10], cs, sn, &lx, &lz);
+        const ex = lx - clamp(lx, oriented[o], oriented[o + 2]);
+        const ez = lz - clamp(lz, oriented[o + 1], oriented[o + 3]);
+        const d2 = ex * ex + ez * ez;
+        if (d2 <= radius * radius) {
+            count += 1;
+            if (d2 < nearest2) nearest2 = d2;
+        }
+    }
+    nearest_out.* = if (nearest2 >= 1e30) -1 else @sqrt(nearest2);
+    return count;
+}
+
 fn clamp(n: f32, a: f32, b: f32) f32 {
     return @max(a, @min(b, n));
 }
@@ -1559,6 +1620,24 @@ pub fn step(input: []const f32) ?[]f32 {
             // the clamp ate the move (the stair-top stick). rectpush/hfcancel name
             // the other two killers.
             std.debug.print("[stairlog f{d}] intent=({d:.2},{d:.2}) pos=({d:.2},{d:.2},{d:.2}) want={d:.3} moved={d:.3} integ=({d:.2},{d:.2}) clamp=({d:.2},{d:.2}) vel=({d:.2},{d:.2},{d:.2}) grounded={} rectpush=({d:.3},{d:.3}) hfcancel={} hf(h={d:.2} ny={d:.2} walkcos={d:.2}) {s}\n", .{ g_stairlog_frame, move_x, move_z, px, py, pz, want, moved, integ_vx, integ_vz, clamp_vx, clamp_vz, pvx, pvy, pvz, player_grounded, rect_push_x, rect_push_z, hf_cancel, hf_height, hf_normal_y, hf_walk_cos, if (blocked) "<< BLOCKED" else "" });
+        }
+    }
+
+    // Collider diagnostic (RJIT_COLLIDERLOG=1): prove "I walk through the props".
+    // Throttled to ~every 6th qualifying frame so a 240fps walk doesn't flood.
+    if (colliderlogOn()) {
+        const intent_mag = @sqrt(move_x * move_x + move_z * move_z);
+        var nearest: f32 = -1;
+        const inside = playerSolidOverlaps(rects, oriented, px, py, pz, player_radius, player_height, &nearest);
+        if (intent_mag > 0.01 or inside > 0) {
+            g_colliderlog_tick += 1;
+            if (g_colliderlog_tick % 6 == 0) {
+                const push = @sqrt(rect_push_x * rect_push_x + rect_push_z * rect_push_z);
+                const loaded_rects = rects.len / RECT_FLOATS;
+                const loaded_oriented = oriented.len / ORIENTED_FLOATS;
+                const tag = if (inside > 0 and push < 0.005 and intent_mag > 0.01) "<< WALKING THROUGH a solid collider" else if (inside > 0) "(inside, pushed)" else if (intent_mag > 0.01) "(clear — no collider here)" else "";
+                std.debug.print("[colliderlog] pos=({d:.2},{d:.2},{d:.2}) loaded(rects={d} oriented={d}) inside={d} nearestEdge={d:.2}m push={d:.3} {s}\n", .{ px, py, pz, loaded_rects, loaded_oriented, inside, nearest, push, tag });
+            }
         }
     }
 
