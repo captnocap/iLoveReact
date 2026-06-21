@@ -196,10 +196,23 @@ export const modelStream: StreamDef<ModelStreamState, ModelEvent> = Object.freez
         if (!m) return state;
         const blobs = state.paintBlobs ?? {};
         // intern the blob by its hash (dedup — a known hash re-uses the stored bytes).
-        const paintBlobs = event.blobB64 && !(event.paintRef in blobs)
+        let paintBlobs = event.blobB64 && !(event.paintRef in blobs)
           ? { ...blobs, [event.paintRef]: event.blobB64 }
           : blobs;
-        return { ...state, paintBlobs, models: { ...state.models, [event.model]: { ...m, paintRef: event.paintRef } } };
+        const models = { ...state.models, [event.model]: { ...m, paintRef: event.paintRef } };
+        // GC (req_1556): every stroke bakes a NEW full-atlas PNG, so the model's
+        // PRIOR blob is now superseded. Drop it UNLESS another model still references
+        // it (content-addressed → shared). Without this the store grew unbounded
+        // (~2 MB/stroke, 421 MB of orphans) and the 444 MB snapshot OOM'd the editor's
+        // boot, emptying the model roster. Keeps materialized state (and the snapshot)
+        // bounded to the live blobs; the append-only event log is compacted separately.
+        const prior = m.paintRef;
+        if (prior && prior !== event.paintRef && prior in paintBlobs
+            && !Object.values(models).some((mm) => mm.paintRef === prior)) {
+          const { [prior]: _superseded, ...rest } = paintBlobs;
+          paintBlobs = rest;
+        }
+        return { ...state, paintBlobs, models };
       }
       case 'partAdded':
       case 'partMeshUpdated':

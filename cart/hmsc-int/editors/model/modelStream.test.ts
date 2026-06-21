@@ -198,4 +198,26 @@ test('paint + palette are BRANCH data: round-trip reopen + apply/inverse (req_12
   assert(JSON.stringify(modelParts(back, M)[0].paint) === JSON.stringify(paint), 'the inverse paint restores the exact prior layer');
 });
 
+test('paint-blob GC: a re-bake drops the model superseded blob, keeps shared ones (req_1556)', () => {
+  // every stroke bakes a NEW full-atlas blob; the prior one is dead weight. The
+  // materializer must drop it (else the store grows ~2 MB/stroke → 444 MB snapshot
+  // OOM → empty roster, the bug this fixes).
+  const s1 = fold([
+    { kind: 'modelCreated', model: 'a', name: 'A' },
+    { kind: 'modelPaintBaked', model: 'a', paintRef: 'h1', blobB64: 'AAAA' },
+    { kind: 'modelPaintBaked', model: 'a', paintRef: 'h2', blobB64: 'BBBB' },
+  ] as ModelEvent[]);
+  assertEqual(Object.keys(s1.paintBlobs ?? {}).sort().join(','), 'h2', 'the superseded blob h1 is GC-dropped; only the live h2 remains');
+  assertEqual(s1.models['a'].paintRef, 'h2', 'the model points at its current paint');
+  // a blob SHARED by another model is NOT dropped when one model moves off it.
+  const s2 = fold([
+    { kind: 'modelCreated', model: 'a', name: 'A' },
+    { kind: 'modelCreated', model: 'b', name: 'B' },
+    { kind: 'modelPaintBaked', model: 'a', paintRef: 'shared', blobB64: 'XX' },
+    { kind: 'modelPaintBaked', model: 'b', paintRef: 'shared', blobB64: 'XX' },
+    { kind: 'modelPaintBaked', model: 'a', paintRef: 'anew', blobB64: 'YY' },
+  ] as ModelEvent[]);
+  assertEqual(Object.keys(s2.paintBlobs ?? {}).sort().join(','), 'anew,shared', 'shared blob survives because b still references it');
+});
+
 finish('modelStream');
