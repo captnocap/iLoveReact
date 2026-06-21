@@ -55,7 +55,7 @@ import {
   type SelMode, type Selection, type CameraSnap,
 } from './meshSelect';
 import { pickFaceCell, pickFaceUV, paintUVsNeedRepack, brushCells, faceCellGrid, resamplePaint, PAINT_CELL_UNITS, PAINT_GRID_UNITS, type PaintCells, type PaintTarget, type FaceHit, type FaceUVHit } from './meshPaint';
-import { STUDIO_PAINT_KEY, PAINT_TEX, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited } from './meshPaintTexture';
+import { STUDIO_PAINT_KEY, PAINT_TEX, baseCoat, stampUV, faceIslandPx, samplePaintHex, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited } from './meshPaintTexture';
 import { Paintable } from '@reactjit/runtime/primitives';
 import { PaintGridOverlay } from './meshPaintOverlay';
 import { PaintPanel } from './PaintPanel';
@@ -577,6 +577,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   const [paintCell, setPaintCell] = useHotState<number>('studio:paintCell', 0.06);
   const [paintView, setPaintView] = useHotState<'pseudo' | 'painted'>('studio:paintView', 'painted');
   const [paintBrush, setPaintBrush] = useHotState<number>('studio:paintBrush', 1);
+  const [paintSample, setPaintSample] = useHotState<boolean>('studio:paintSample', false);
   // PERF (req_1203): the lag was setTex on EVERY mouse-move (a React re-render +
   // JSON.stringify of the whole paint map per dab). The fix — the cutout painter's
   // proven shape: dabs accumulate in a REF (zero React per move); the atlas re-bakes
@@ -1158,6 +1159,22 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     paintHoverRef.current = fh;
     return fh;
   };
+  const samplePaintAt = (sx: number, sy: number): FaceHit | null => {
+    if (!tex) return null;
+    const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
+    if (!hit) { paintHoverRef.current = null; return null; }
+    const fh = { partIndex: hit.partIndex, faceIndex: hit.faceIndex, cu: 0, cv: 0 };
+    paintHoverRef.current = fh;
+    const hex = samplePaintHex(hit.u, hit.v);
+    if (!hex) { toast('sample missed paint'); return fh; }
+    const { palette, id } = paletteWithColor(livePalette, hex);
+    props.onSetPalette(palette);
+    setActiveSlot(id);
+    setPaintErase(false);
+    setPaintSample(false);
+    toast(`sampled ${hex}`);
+    return fh;
+  };
   // Paint the texel under (sx,sy): raycast → face + interpolated UV → stamp a disc
   // of the active colour straight into the model's RGBA paint texture, SCISSOR-
   // clamped to the hit face's UV island so a round brush can't bleed onto the
@@ -1402,6 +1419,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
     if (selMode === 'paint') {
       const r = rectRef.current;
       const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
+      if (paintSample) {
+        if (samplePaintAt(sx, sy)) return;
+      }
       lastPaintRef.current = null; // start a fresh stroke (no interpolation from a prior one)
       // Snapshot the PRE-stroke texture for undo (req_1379) — only when over a
       // paintable face, and BEFORE paintStroke queues a dab (readback drains pending
@@ -2238,13 +2258,15 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           view={paintView}
           brush={paintBrush}
           brushSizes={PAINT_BRUSH_SIZES}
+          sample={paintSample}
           cell={paintCell}
           onSetCell={setDetail}
           fill={paintFill}
-          onToggleFill={() => { setPaintFill(!paintFill); setPaintErase(false); }}
-          onPickSlot={(id) => { setActiveSlot(id); setPaintErase(false); }}
-          onAddColor={(hex) => { const { palette, id } = paletteWithColor(livePalette, hex); props.onSetPalette(palette); setActiveSlot(id); setPaintErase(false); }}
-          onToggleErase={() => setPaintErase(!paintErase)}
+          onToggleFill={() => { setPaintFill(!paintFill); setPaintErase(false); setPaintSample(false); }}
+          onToggleSample={() => { setPaintSample(!paintSample); setPaintErase(false); setPaintFill(false); }}
+          onPickSlot={(id) => { setActiveSlot(id); setPaintErase(false); setPaintSample(false); }}
+          onAddColor={(hex) => { const { palette, id } = paletteWithColor(livePalette, hex); props.onSetPalette(palette); setActiveSlot(id); setPaintErase(false); setPaintSample(false); }}
+          onToggleErase={() => { setPaintErase(!paintErase); setPaintSample(false); }}
           onFillAll={fillAllFaces}
           onToggleView={() => setPaintView(paintView === 'pseudo' ? 'painted' : 'pseudo')}
           onSetBrush={(n) => { setPaintBrush(n); setPaintFill(false); }}

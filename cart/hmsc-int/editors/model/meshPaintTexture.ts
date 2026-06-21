@@ -103,6 +103,26 @@ function bakeAndEmit(rgba: Uint8Array, emit: PaintBake): string | null {
   return ref;
 }
 
+function byteHex(n: number): string {
+  const b = Math.max(0, Math.min(255, Math.round(n)));
+  return b.toString(16).padStart(2, '0');
+}
+
+export function sampleRgbaHex(rgba: Uint8Array | null, u: number, v: number, w: number, h: number): string | null {
+  if (!rgba || w <= 0 || h <= 0 || rgba.length < w * h * 4) return null;
+  const x = Math.max(0, Math.min(w - 1, Math.floor(u * w)));
+  const y = Math.max(0, Math.min(h - 1, Math.floor(v * h)));
+  const i = (y * w + x) * 4;
+  if (rgba[i + 3] <= 0) return null;
+  return `#${byteHex(rgba[i])}${byteHex(rgba[i + 1])}${byteHex(rgba[i + 2])}`;
+}
+
+/** Sample the live pixel-paint texture at normalized atlas UV. One-shot eyedropper
+ *  use only: readback blocks, so never call from hover or per-frame code. */
+export function samplePaintHex(u: number, v: number): string | null {
+  return sampleRgbaHex(paintTex().readback(), u, v, PAINT_TEX, PAINT_TEX);
+}
+
 /** Read the live paint texture back and bake it (PNG → hash → emit). Call at
  *  stroke-end / undo / redo — readback blocks on the GPU, so NOT per dab. Returns
  *  the paintRef it wrote (the texture's content hash) so the caller can mark the

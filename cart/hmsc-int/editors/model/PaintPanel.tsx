@@ -18,10 +18,12 @@ export function PaintPanel(props: {
   view: 'pseudo' | 'painted';
   brush: number;
   brushSizes: number[];
+  sample: boolean;
   cell: number;
   onSetCell: (n: number) => void;
   fill: boolean;
   onToggleFill: () => void;
+  onToggleSample: () => void;
   onPickSlot: (id: number) => void;
   onAddColor: (hex: string) => void;
   onToggleErase: () => void;
@@ -96,6 +98,7 @@ export function PaintPanel(props: {
         {props.brushSizes.map((n) => <Tiny key={n} label={`${n}`} on={!props.fill && props.brush === n} tip={`Brush radius ${n}`} onPress={() => props.onSetBrush(n)} />)}
         <Tiny label="fill" on={props.fill} tip="Fill the WHOLE face one colour per click (paint a face flat)" onPress={props.onToggleFill} />
         <Tiny label="fill all" tip="Fill the ENTIRE model with the active colour in one click (or clears all if erase is on) — for one-colour base coats" onPress={props.onFillAll} />
+        <Tiny label="sample" on={props.sample} tip="Sample the painted colour under the next model click" onPress={props.onToggleSample} />
         <Tiny label="erase" on={props.erase} tip="Eraser — remove cells under the brush" onPress={props.onToggleErase} />
       </Box>
 
