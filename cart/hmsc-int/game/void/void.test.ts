@@ -3,7 +3,7 @@
 
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 import type { WorldState } from '../../design';
-import { worldCore, escapeDepth, distanceFromCore } from './distance';
+import { worldCore, escapeDepth, distanceOutsideCore } from './distance';
 import { voidDistortion, VOID_NULL, voidHash } from './distortion';
 import { buildShellBatch, SHELL_CHUNK_METERS } from './shell';
 
@@ -15,17 +15,23 @@ function aWorld(widthCells: number, depthCells: number, cell = 1): WorldState {
   } as unknown as WorldState;
 }
 
-test('escape_depth is zero everywhere inside the safe core', () => {
+test('escape_depth is zero everywhere inside the authored rectangle', () => {
   const core = worldCore(aWorld(600, 400));
-  // The center and any point within the authored rectangle are honest.
+  // The center, an edge, and a corner of the authored rectangle are all honest.
   assertEqual(escapeDepth(core.centerX, core.centerZ, core), 0, 'center is safe');
-  assertEqual(escapeDepth(300, 200, core), 0, 'a corner-ish point is safe');
+  assertEqual(escapeDepth(0, 0, core), 0, 'corner is safe');
+  assertEqual(escapeDepth(600, 400, core), 0, 'far corner is safe');
+  assertEqual(escapeDepth(599, 1, core), 0, 'a point inside near the edge is safe');
 });
 
-test('escape_depth climbs linearly past the safe radius', () => {
-  const core = worldCore(aWorld(200, 200));
-  const out = core.centerX + core.safeRadius + 1000; // 1km past the edge, due +x
-  assertClose(escapeDepth(out, core.centerZ, core), 1000, 1e-6, 'depth = distance past safe radius');
+test('escape_depth climbs linearly past the rectangle edge', () => {
+  const core = worldCore(aWorld(200, 200)); // [0,200] x [0,200]
+  // 1km past the +x edge, on-axis: distanceOutsideCore = 1000, minus the 40m
+  // grace margin = 960.
+  assertClose(escapeDepth(core.maxX + 1000, core.centerZ, core), 960, 1e-6, 'depth = gap past edge minus grace');
+  // distanceOutsideCore is zero inside, the straight gap outside.
+  assertEqual(distanceOutsideCore(100, 100, core), 0, 'inside → 0 distance');
+  assertClose(distanceOutsideCore(203, 204, core), 5, 1e-6, 'outside a corner → hypot of the gaps');
 });
 
 test('voidDistortion is null at the core and saturates outward', () => {
@@ -71,15 +77,17 @@ test('the shell is deterministic — same focus rebuilds the identical batch', (
   assert(a.data.every((v, i) => v === b.data[i]), 'every float identical on rebuild');
 });
 
-test('the shell skips the authored core — no procedural city on top of it', () => {
-  const core = worldCore(aWorld(100, 100));
-  // Focus AT the core center: every chunk in a small window is inside the safe
-  // radius, so nothing should be generated over the authored map.
-  const onCore = buildShellBatch(core.centerX, core.centerZ, core, 1);
-  assertEqual(onCore.count, 0, 'no shell instances over the core');
-  // Far out, the shell fills in.
-  const farOut = buildShellBatch(core.centerX + 30_000, core.centerZ, core, 2);
-  assert(farOut.count > 0, 'shell fills the void far from the core');
+test('the shell skips the authored core but fills in just past the edge', () => {
+  const core = worldCore(aWorld(2000, 2000)); // [0,2000] x [0,2000]
+  // Deep inside a large map: every chunk in the window is inside the rectangle,
+  // so nothing is drawn over the authored city.
+  const inside = buildShellBatch(core.centerX, core.centerZ, core, 3);
+  assertEqual(inside.count, 0, 'no shell instances over the core interior');
+  // Standing AT the +x edge: the window reaches past the rectangle, so the void
+  // fills the horizon immediately — this is the bug the rect-skip fixed (the old
+  // circumradius gate left it empty until far past the corners).
+  const atEdge = buildShellBatch(core.maxX, core.centerZ, core, 3);
+  assert(atEdge.count > 0, 'shell fills the void just past the authored edge');
 });
 
 test('shell rows are stride-9 and sit at/above ground', () => {
@@ -97,7 +105,9 @@ test('shell rows are stride-9 and sit at/above ground', () => {
 test('shell focus quantizes to chunks (caller keys the memo on chunk cells)', () => {
   // SHELL_CHUNK_METERS is the streaming grain VoidShell keys its useMemo on.
   assert(SHELL_CHUNK_METERS >= 80 && SHELL_CHUNK_METERS <= 320, 'chunk grain is city-block scaled');
-  assertEqual(distanceFromCore(3, 4, { centerX: 0, centerZ: 0, safeRadius: 0 }), 5, 'distance is plain hypot');
+  // distanceOutsideCore is the plain gap to the rectangle (0 inside).
+  const core = worldCore(aWorld(10, 10));
+  assertClose(distanceOutsideCore(13, 14, core), 5, 1e-6, 'gap past a corner is hypot of the per-axis gaps');
 });
 
 finish('void seam-1');

@@ -12,7 +12,7 @@
 // SAME hash the distortion layer uses, so the shell is fair and replayable.
 
 import { voidHash } from './distortion';
-import { distanceFromCore, type WorldCore } from './distance';
+import { distanceOutsideCore, type WorldCore } from './distance';
 
 // One procedural chunk is 160 m square — the lab's proven streaming grain.
 export const SHELL_CHUNK_METERS = 160;
@@ -135,18 +135,21 @@ export function buildShellBatch(
   const out: number[] = [];
   const fcx = Math.floor(focusX / SHELL_CHUNK_METERS);
   const fcz = Math.floor(focusZ / SHELL_CHUNK_METERS);
-  // A chunk is "core" (skip it) if its center is within the safe radius plus a
-  // chunk of grace, so the procedural sprawl starts cleanly outside the authored
-  // rectangle with no double-city overlap at the seam.
-  const skipRadius = core.safeRadius + SHELL_CHUNK_METERS;
+  // A chunk is "core" (skip it) if its CENTER still falls inside the authored
+  // rectangle — measured by distance-to-rect, so the procedural sprawl begins
+  // right at the authored edge (one chunk of grace) with no double-city overlap.
+  // The void fills everything outside the rectangle, so it is visible on the
+  // horizon the moment you look past the city's edge — not gated behind a circle
+  // that swallowed the whole reachable area (the earlier invisible-shell bug).
+  const edgeGrace = SHELL_CHUNK_METERS;
   for (let dz = -radiusChunks; dz <= radiusChunks; dz += 1) {
     for (let dx = -radiusChunks; dx <= radiusChunks; dx += 1) {
       const cx = fcx + dx;
       const cz = fcz + dz;
       const centerX = cx * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
       const centerZ = cz * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
-      const dist = distanceFromCore(centerX, centerZ, core);
-      if (dist < skipRadius) continue;
+      const dist = distanceOutsideCore(centerX, centerZ, core);
+      if (dist < edgeGrace) continue;
       generateChunk(out, cx, cz, dist);
     }
   }

@@ -23,7 +23,7 @@ export const skybox_void: DocIndex = {
       purpose: ['world_gen', 'game_loop'],
       kind: 'utility',
       description:
-        'The ONE scalar `max(0, distance_from_core - safe_radius)` that drives all void distortion. BUILT (seam 1): cart/hmsc-int/game/void/distance.ts — worldCore() derives center+safeRadius (circumradius) from the authored map layout; escapeDepth() reads REAL player distance. In the treadmill model (seam 2, not yet) it becomes a VIRTUAL accumulator NOT the odometer — true position clamped near the authored seam. Single source of truth: instruments are lying views over it, never their own truth.',
+        'The ONE scalar that drives all void distortion. BUILT (seam 1): cart/hmsc-int/game/void/distance.ts — worldCore() derives the authored map RECTANGLE (not a circle) from the layout; escapeDepth = max(0, distanceOutsideCore - grace) is the straight-line gap PAST the rectangle edge (0 inside), reading REAL player distance. (A circumradius circle was the first cut and was WRONG — it enclosed a huge margin beyond every edge, so the void never started until far past the reachable area and the shell was invisible; req_1655.) In the treadmill model (seam 2, not yet) escape_depth becomes a VIRTUAL accumulator NOT the odometer — true position clamped near the authored seam. Single source of truth: instruments are lying views over it.',
       status: 'live',
     },
     {
@@ -47,7 +47,7 @@ export const skybox_void: DocIndex = {
       purpose: ['world_gen', 'rendering'],
       kind: 'module',
       description:
-        'The hash-deterministic city wrapping the authored core as the OUTER RING of the one citywide map. BUILT (seam 1): cart/hmsc-int/game/void/shell.ts regenerates the archived hmsc_massive_map_lab pattern (pure fn of coords via voidHash, zero storage, stride-9 ground+roads+buildings) and buildShellBatch() streams a chunk window that SKIPS chunks inside safeRadius (no double-city over the authored map). render3d/VoidShell.tsx draws it as ONE Scene3D.Instances, memoized on the player CHUNK cell (re-rolls only on a 160m boundary crossing). Mounted in GameWorld3D so it shows in the live play/iso renderer. NOT YET: the no-V8 compiled bake, the treadmill fold-region recycle (seam 2), and the coast water-gap cluster.',
+        'The hash-deterministic city wrapping the authored core as the OUTER RING of the one citywide map. BUILT (seam 1): cart/hmsc-int/game/void/shell.ts regenerates the archived hmsc_massive_map_lab pattern (pure fn of coords via voidHash, zero storage, stride-9 ground+roads+buildings) and buildShellBatch() streams a chunk window that SKIPS chunks whose center is still inside the authored rectangle (no double-city over the authored map), so the void fills the horizon the moment you look past the edge. render3d/VoidShell.tsx draws it as ONE Scene3D.Instances, sized to the camera draw radius (geometry past it is culled) and memoized on the player CHUNK cell (re-rolls only on a 160m boundary crossing). Mounted in GameWorld3D so it shows in the live play/iso renderer. Visual proof: cart/void_probe.tsx (headless self-shot, since the heavy editor OOMs the boot watchdog). NOT YET: the no-V8 compiled bake, the treadmill fold-region recycle (seam 2), and the coast water-gap cluster.',
       dependsOn: ['escape_depth'],
       status: 'live',
     },

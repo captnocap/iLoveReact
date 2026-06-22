@@ -275,7 +275,7 @@ export function GameWorld3D(props: {
       {/* The procedural shell: the endless hash-city wrapping the authored core
           as the outer ring. Streams around the player; draws past the authored
           edge only (the seam skips core chunks). One instanced batch. */}
-      <VoidShell playerX={player.x} playerZ={player.z} core={core} />
+      <VoidShell playerX={player.x} playerZ={player.z} core={core} drawRadiusMeters={view.drawRadiusMeters} />
       <Player
         state={props.state}
         animationSeconds={props.animationSeconds}
