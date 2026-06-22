@@ -15,6 +15,10 @@ import { Landform } from './Landform';
 import { WaterBodies } from './WaterBody';
 import { nearestLandformCameraHit } from '../world/landforms';
 import { buildHmscSky } from './sky';
+import { driftSky } from './skyDrift';
+import { VoidShell } from './VoidShell';
+import { worldCore, escapeDepth } from '../game/void/distance';
+import { voidDistortion } from '../game/void/distortion';
 
 // How far to keep the camera off a wall it pulls in to, so it never clips through.
 const CAMERA_WALL_MARGIN_METERS = 0.35;
@@ -102,12 +106,28 @@ export const WorldStatics = memo(function WorldStatics(props: {
   world: GameState['world'];
   skyConfig: GameState['config']['sky'];
   showFlora?: boolean;
+  // Void sky-drift weight (0 honest → 1 corrupted). Caller quantizes it so this
+  // prop's identity is stable except when the drift has visibly stepped, keeping
+  // the sky useMemo from re-deriving every movement frame near the city edge.
+  skyDrift?: number;
 }) {
   const world = props.world;
-  const showFlora = props.showFlora ?? true;
+  const skyDrift = props.skyDrift ?? 0;
+  // Default OFF (req_1640): the flora fields materialise the WHOLE grass/palm field in
+  // JS (up to MAX_INSTANCES=1,048,576 blades) and ship it as ONE Scene3D.Instances
+  // command — a 1M-row data array whose JSON.stringify is hundreds of MB, which OOMs
+  // the editor heap on a grass-heavy map DURING serialization (no flush even logs).
+  // Every ungated WorldStatics mount (IsoPreview, Embodied, the gameplay rig) was
+  // building it; default off so the editor opens, and a caller opts in explicitly
+  // (IsoAuthor's "Fl" toggle) when the map is light enough. Durable fix = the flora
+  // refactor's shader preview (no million-row JS field / giant command).
+  const showFlora = props.showFlora ?? false;
   const sky = useMemo(
-    () => buildHmscSky(props.skyConfig.hour, props.skyConfig.weather, props.skyConfig.gloom),
-    [props.skyConfig.hour, props.skyConfig.weather, props.skyConfig.gloom],
+    () => driftSky(
+      buildHmscSky(props.skyConfig.hour, props.skyConfig.weather, props.skyConfig.gloom),
+      skyDrift,
+    ),
+    [props.skyConfig.hour, props.skyConfig.weather, props.skyConfig.gloom, skyDrift],
   );
   return (
     <>
@@ -195,6 +215,18 @@ export function GameWorld3D(props: {
 }) {
   const player = props.state.player.position;
 
+  // Void state (SKYBOX_PLAYBOOK seam 1): how far past the believable core the
+  // player has driven, and the corruption weights that flow from it. The core is
+  // derived from the authored map's own bounds; escape_depth reads REAL distance
+  // for now (the treadmill, seam 2, swaps the source). Memoized on the layout +
+  // player cell so it only recomputes when the map changes or the player moves.
+  const core = useMemo(() => worldCore(props.state.world), [props.state.world]);
+  const depth = escapeDepth(player.x, player.z, core);
+  const distortion = voidDistortion(depth);
+  // Quantize the sky-drift weight so WorldStatics' sky memo only re-derives when
+  // the drift has visibly stepped (every 0.04), not on every sub-step of motion.
+  const skyDrift = Math.round(distortion.skyDrift / 0.04) * 0.04;
+
   // Real third-person camera: orbits the player by the rig's mouse-look yaw,
   // tilts with pitch, and shifts over the shoulder while aiming. Same math the
   // shipped rig used. The rig owns yaw/pitch; this only consumes them.
@@ -239,7 +271,11 @@ export function GameWorld3D(props: {
           fogNear/Far override) melts geometry into the sky before the cull edge. */}
       <Scene3D.Camera position={resolvedCamera} target={cameraTarget} fov={cameraFov} far={view.drawRadiusMeters} />
       <Scene3D.Fog near={view.fogNearMeters} far={view.fogFarMeters} />
-      <WorldStatics world={props.state.world} skyConfig={props.state.config.sky} />
+      <WorldStatics world={props.state.world} skyConfig={props.state.config.sky} skyDrift={skyDrift} />
+      {/* The procedural shell: the endless hash-city wrapping the authored core
+          as the outer ring. Streams around the player; draws past the authored
+          edge only (the seam skips core chunks). One instanced batch. */}
+      <VoidShell playerX={player.x} playerZ={player.z} core={core} />
       <Player
         state={props.state}
         animationSeconds={props.animationSeconds}

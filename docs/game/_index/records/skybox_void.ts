@@ -1,10 +1,15 @@
 import type { DocIndex } from '../types';
 
-// The Skybox & The Void doctrine — DESIGN INTENT, banked, nothing built.
-// Source of truth: docs/game/SKYBOX_PLAYBOOK.md (consolidates USER ASKS
-// req_1095 → req_1105). Every interface here is status 'candidate' (design-
-// first, not implemented). The hazards are the load-bearing invariants a worker
-// is most likely to violate when a seam finally gets built.
+// The Skybox & The Void doctrine. Source of truth:
+// docs/game/SKYBOX_PLAYBOOK.md (consolidates USER ASKS req_1095 → req_1105).
+//
+// SEAM 1 BUILT (req_1653): the void-math + procedural shell + sky-drift are LIVE
+// in the editor play renderer. cart/hmsc-int/game/void/{distance,distortion,
+// shell}.ts + render3d/{VoidShell.tsx,skyDrift.ts}, wired in render3d/
+// GameWorld3D.tsx; tests in game/void/void.test.ts (9/9). escape_depth reads
+// REAL player distance for now (the treadmill, seam 2, swaps the source). The
+// remaining interfaces below stay 'candidate' (design-first) until their seam.
+// The hazards are the load-bearing invariants a worker must not violate.
 
 export const skybox_void: DocIndex = {
   name: 'skybox_void',
@@ -18,16 +23,16 @@ export const skybox_void: DocIndex = {
       purpose: ['world_gen', 'game_loop'],
       kind: 'utility',
       description:
-        'The ONE registered scalar `max(0, distance_from_core - safe_radius)` that drives all void distortion. In the treadmill model it is a VIRTUAL accumulator (advanced by forward intent, collapsed by reverse intent), NOT the odometer — true position stays clamped near the authored seam. Single source of truth: instruments are lying views over it, never their own truth.',
-      status: 'candidate',
+        'The ONE scalar `max(0, distance_from_core - safe_radius)` that drives all void distortion. BUILT (seam 1): cart/hmsc-int/game/void/distance.ts — worldCore() derives center+safeRadius (circumradius) from the authored map layout; escapeDepth() reads REAL player distance. In the treadmill model (seam 2, not yet) it becomes a VIRTUAL accumulator NOT the odometer — true position clamped near the authored seam. Single source of truth: instruments are lying views over it, never their own truth.',
+      status: 'live',
     },
     {
       name: 'voidDistortion',
       purpose: ['world_gen', 'rendering', 'perception'],
       kind: 'utility',
       description:
-        'Pure function escape_depth -> weight struct { trafficFlip, npcOrientCorrupt, controlInvert, skyDrift, dialogCorrupt, spawnWeird, roadRepeat, awarenessGlitch, instrumentLie }. Every consumer multiplies its behavior by its weight; NO consumer hardcodes a km threshold. Must be a seeded pure function (never Math.random) for a fair leaderboard + V30 f(seed,t,log).',
-      status: 'candidate',
+        'Pure function escape_depth -> weight struct { trafficFlip, npcOrientCorrupt, controlInvert, skyDrift, dialogCorrupt, spawnWeird, roadRepeat, awarenessGlitch, instrumentLie }. BUILT (seam 1): cart/hmsc-int/game/void/distortion.ts — ONE continuous smoothstep curve read at nine onset windows (skyDrift earliest ~10km, controlInvert latest ~100km); the named tier-bands are achievement milestones not step-functions. Ships voidHash() (seeded, never Math.random) shared with the shell. Seam 1 wires exactly ONE consumer (skyDrift -> render3d/skyDrift.ts); every other weight is defined awaiting its seam. NO consumer hardcodes a km threshold.',
+      status: 'live',
     },
     {
       name: 'VOID_TIERS',
@@ -42,9 +47,9 @@ export const skybox_void: DocIndex = {
       purpose: ['world_gen', 'rendering'],
       kind: 'module',
       description:
-        'The hash-deterministic city (regenerate the archived hmsc_massive_map_lab pattern: pure fn of coords, zero storage, one-batch Scene3D.Instances draw) wrapping the authored core as the OUTER RING of the one citywide map, streamed by the existing radius-bubble + LOD machinery. The treadmill recycles a bounded fold-region of it; the coast renders a denser cluster across a water gap.',
+        'The hash-deterministic city wrapping the authored core as the OUTER RING of the one citywide map. BUILT (seam 1): cart/hmsc-int/game/void/shell.ts regenerates the archived hmsc_massive_map_lab pattern (pure fn of coords via voidHash, zero storage, stride-9 ground+roads+buildings) and buildShellBatch() streams a chunk window that SKIPS chunks inside safeRadius (no double-city over the authored map). render3d/VoidShell.tsx draws it as ONE Scene3D.Instances, memoized on the player CHUNK cell (re-rolls only on a 160m boundary crossing). Mounted in GameWorld3D so it shows in the live play/iso renderer. NOT YET: the no-V8 compiled bake, the treadmill fold-region recycle (seam 2), and the coast water-gap cluster.',
       dependsOn: ['escape_depth'],
-      status: 'candidate',
+      status: 'live',
     },
     {
       name: 'Night Assassin / bounty-on-your-own-head',

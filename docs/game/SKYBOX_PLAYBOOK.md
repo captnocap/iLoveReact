@@ -1,12 +1,23 @@
 # The Skybox & The Void — playbook
 
-> **STATUS: DESIGN INTENT, banked — nothing built yet.** This is the master
-> record for the procedural-shell / "void" doctrine spilled across one design
-> session (USER ASKS req_1095 → req_1105). It exists so workers invoking the
-> oracle find ONE coherent doctrine instead of ten scattered ledger entries,
-> and so the **seams get built at the right times** (USER, req_1105: "keep this
-> as the master record that gets referenced when workers invoke the oracle so we
-> can build the seams at the right times").
+> **STATUS: SEAM 1 BUILT (req_1653); seams 2-5 are design intent, banked.** This
+> is the master record for the procedural-shell / "void" doctrine spilled across
+> one design session (USER ASKS req_1095 → req_1105). It exists so workers
+> invoking the oracle find ONE coherent doctrine instead of ten scattered ledger
+> entries, and so the **seams get built at the right times** (USER, req_1105:
+> "keep this as the master record that gets referenced when workers invoke the
+> oracle so we can build the seams at the right times").
+>
+> **Seam 1 (the proving slice) is live** in the editor play renderer: the
+> `escape_depth` scalar, the continuous `voidDistortion()` fan-out, the
+> hash-deterministic procedural shell streaming around the player as the outer
+> ring, and the first distortion consumer — **sky-drift**. Files:
+> `cart/hmsc-int/game/void/{distance,distortion,shell}.ts`,
+> `cart/hmsc-int/render3d/{VoidShell.tsx,skyDrift.ts}`, wired in
+> `render3d/GameWorld3D.tsx`; math proven in `game/void/void.test.ts` (9/9).
+> `escape_depth` reads REAL player distance for now — the treadmill (seam 2)
+> swaps the source. Everything below seam 1 in **Seam build order** is still
+> unbuilt; each remains DESIGN-GATED — confirm its shape with the user first.
 >
 > **DESIGN GATE — do not ad-hoc the seams.** Like the Studio playbook, every
 > system below has its *intent* and *data shape* sketched but is NOT ruled into
@@ -307,11 +318,15 @@ These are the invariants a worker is most likely to get wrong:
 
 Nothing is built. When the user says go, the proving-slice order:
 
-1. **Procedural shell + `escape_depth` scalar + `voidDistortion()` skeleton** —
-   the shell streams around the authored core; `escape_depth` reads real distance
-   for now. First visible distortion = **sky-drift** (cheapest — `sceneEnv` floats
-   already exist). This one slice lights up coast + road + nowhere geographies at
-   once.
+1. ✅ **BUILT (req_1653) — Procedural shell + `escape_depth` scalar +
+   `voidDistortion()` skeleton.** The shell streams around the authored core
+   (`game/void/shell.ts` + `render3d/VoidShell.tsx`, one instanced batch, skips
+   core chunks); `escape_depth` reads real distance for now
+   (`game/void/distance.ts`); `voidDistortion()` is the continuous fan-out
+   (`game/void/distortion.ts`). First visible distortion = **sky-drift**
+   (`render3d/skyDrift.ts`, warps the existing `HmscSky` floats), wired in
+   `GameWorld3D`. Drive past the authored edge in `rjit dev hmsc-int` to see it.
+   Tests: `game/void/void.test.ts`.
 2. **The treadmill** — swap `escape_depth` from real-distance to the virtual
    accumulator; clamp true position; recycle the fold-region. This is the genuine
    technical mechanic — the **seam must feel seamless**, so it warrants a tiny
