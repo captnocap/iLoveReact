@@ -1298,24 +1298,137 @@ fn orientedFloats(insts: []const f32, row: usize, stride: usize, solid: bool) [g
     };
 }
 
-fn meshPropOrientedFloats(inst: constructor.MeshPropInstance, mesh: constructor.MeshPropMesh) ?[game_physics.ORIENTED_FLOATS]f32 {
-    if (!mesh.solid or mesh.footprint_width <= 0 or mesh.footprint_depth <= 0) return null;
-    const hx = mesh.footprint_width / 2;
-    const hz = mesh.footprint_depth / 2;
+// A connected-vertex ISLAND of a cooked/imported mesh prop, boxed in the mesh's own
+// local frame (anchor-centered XZ, ground-based Y — the SAME frame the render node
+// is placed in). One island per disjoint piece, so a sign's two posts + overhead
+// board collide as three banded boxes you walk under, not one full-bounds wall.
+const MeshIsland = struct { lo: [3]f32, hi: [3]f32 };
+const MAX_MESH_ISLANDS: usize = 24;
+
+fn ufFind(parent: []u32, a0: u32) u32 {
+    var a = a0;
+    while (parent[a] != a) {
+        parent[a] = parent[parent[a]];
+        a = parent[a];
+    }
+    return a;
+}
+
+/// The whole mesh as ONE box — the legacy full-bounds collider (anchor-centered XZ,
+/// ground→height in Y). Used for a welded/degenerate mesh that won't cleanly split.
+fn meshFullBoundsIsland(mesh: constructor.MeshPropMesh) MeshIsland {
     return .{
-        inst.x - hx,
-        inst.z - hz,
-        inst.x + hx,
-        inst.z + hz,
-        inst.y + mesh.height,
+        .lo = .{ -mesh.footprint_width / 2.0, 0, -mesh.footprint_depth / 2.0 },
+        .hi = .{ mesh.footprint_width / 2.0, mesh.height, mesh.footprint_depth / 2.0 },
+    };
+}
+
+/// The 12 oriented-collider floats for one island of one placed mesh-prop instance —
+/// the island's local AABB offset to the anchor and banded by its OWN Y range (an
+/// overhead board bands high → walk-under), then yawed about the anchor like the mesh.
+fn islandOrientedFloats(inst: constructor.MeshPropInstance, isl: MeshIsland) [game_physics.ORIENTED_FLOATS]f32 {
+    return .{
+        inst.x + isl.lo[0],
+        inst.z + isl.lo[2],
+        inst.x + isl.hi[0],
+        inst.z + isl.hi[2],
+        inst.y + isl.hi[1], // top — the island's own ceiling
         1,
         PLAYER_SURFACE_FRICTION,
         PLAYER_SURFACE_RESTITUTION,
-        inst.y,
+        inst.y + isl.lo[1], // floor — the island's own base (banded: walk under a high one)
         inst.x,
         inst.z,
         inst.yaw_degrees * std.math.pi / 180.0,
     };
+}
+
+/// Split a cooked/imported mesh prop into connected vertex ISLANDS (weld coincident
+/// positions to a 1mm grid, union the three verts of every triangle) and box each, so
+/// a sign authored as two posts + an overhead board collides as three banded boxes the
+/// player walks under — instead of one full-bounds block (req_1624: "can't walk under
+/// the big sign"). A single welded mesh yields ONE island == the old full-bounds box
+/// (no regression). A soup too fractured to separate (> MAX_MESH_ISLANDS components)
+/// also falls back to the one box, so a degenerate mesh can't explode the oriented
+/// budget. Non-solid / empty meshes contribute nothing. Caller owns the returned slice.
+fn meshPropIslands(allocator: std.mem.Allocator, mesh: constructor.MeshPropMesh) ![]MeshIsland {
+    if (!mesh.solid or mesh.footprint_width <= 0 or mesh.footprint_depth <= 0) {
+        return allocator.alloc(MeshIsland, 0);
+    }
+    const vc: usize = mesh.vertex_count;
+    const oneBox = struct {
+        fn make(a: std.mem.Allocator, m: constructor.MeshPropMesh) ![]MeshIsland {
+            const out = try a.alloc(MeshIsland, 1);
+            out[0] = meshFullBoundsIsland(m);
+            return out;
+        }
+    }.make;
+    if (vc < 3 or mesh.vertices.len < vc * 8) return oneBox(allocator, mesh);
+
+    // Weld coincident vertex positions → a representative id per vertex.
+    var weld = std.AutoHashMap([3]i64, u32).init(allocator);
+    defer weld.deinit();
+    const rep = try allocator.alloc(u32, vc);
+    defer allocator.free(rep);
+    var uniq: u32 = 0;
+    var vi: usize = 0;
+    while (vi < vc) : (vi += 1) {
+        const b = vi * 8;
+        const key = [3]i64{
+            @intFromFloat(@round(mesh.vertices[b] * 1000.0)),
+            @intFromFloat(@round(mesh.vertices[b + 1] * 1000.0)),
+            @intFromFloat(@round(mesh.vertices[b + 2] * 1000.0)),
+        };
+        const gop = try weld.getOrPut(key);
+        if (!gop.found_existing) {
+            gop.value_ptr.* = uniq;
+            uniq += 1;
+        }
+        rep[vi] = gop.value_ptr.*;
+    }
+
+    // Union the three welded verts of every triangle.
+    const parent = try allocator.alloc(u32, uniq);
+    defer allocator.free(parent);
+    for (parent, 0..) |*p, i| p.* = @intCast(i);
+    var ti: usize = 0;
+    while (ti + 3 <= vc) : (ti += 3) {
+        const ra = ufFind(parent, rep[ti]);
+        const rb = ufFind(parent, rep[ti + 1]);
+        const rc = ufFind(parent, rep[ti + 2]);
+        if (ra != rb) parent[rb] = ra;
+        const rc2 = ufFind(parent, rc);
+        if (ra != rc2) parent[rc2] = ra;
+    }
+
+    // Accumulate each component's local AABB.
+    var roots = std.AutoHashMap(u32, usize).init(allocator);
+    defer roots.deinit();
+    var islands = std.ArrayList(MeshIsland){};
+    defer islands.deinit(allocator);
+    vi = 0;
+    while (vi < vc) : (vi += 1) {
+        const b = vi * 8;
+        const x = mesh.vertices[b];
+        const y = mesh.vertices[b + 1];
+        const z = mesh.vertices[b + 2];
+        const root = ufFind(parent, rep[vi]);
+        const gop = try roots.getOrPut(root);
+        if (!gop.found_existing) {
+            if (islands.items.len >= MAX_MESH_ISLANDS) return oneBox(allocator, mesh); // too fractured
+            gop.value_ptr.* = islands.items.len;
+            try islands.append(allocator, .{ .lo = .{ x, y, z }, .hi = .{ x, y, z } });
+        }
+        const isl = &islands.items[gop.value_ptr.*];
+        if (x < isl.lo[0]) isl.lo[0] = x;
+        if (x > isl.hi[0]) isl.hi[0] = x;
+        if (y < isl.lo[1]) isl.lo[1] = y;
+        if (y > isl.hi[1]) isl.hi[1] = y;
+        if (z < isl.lo[2]) isl.lo[2] = z;
+        if (z > isl.hi[2]) isl.hi[2] = z;
+    }
+    if (islands.items.len <= 1) return oneBox(allocator, mesh); // one piece → the clean full-bounds box
+    return islands.toOwnedSlice(allocator);
 }
 
 fn appendPhysicsRect(allocator: std.mem.Allocator, list: *std.ArrayList(f32), insts: []const f32, row: usize, stride: usize, solid: bool) !void {
@@ -1421,7 +1534,7 @@ fn heightfieldContentHash(field: constructor.HeightfieldMesh) u64 {
     return h.final();
 }
 
-fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene, insts: []const f32, inst_count: u32, stride: usize, entity_capacity: usize) !PhysicsColliders {
+fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene, insts: []const f32, inst_count: u32, stride: usize, entity_capacity: usize, mesh_islands: []const []MeshIsland) !PhysicsColliders {
     const entity_floats = entity_capacity * game_physics.ENTITY_FLOATS;
     var rects: std.ArrayList(f32) = .{};
     errdefer rects.deinit(allocator);
@@ -1473,15 +1586,17 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
         // measured local X/Z rectangle from the importer; a desk stays narrow on
         // its short axis instead of colliding as a radius square.
         if (scene.mesh_props) |mp| {
-            for (mp.instances, 0..) |inst, imported_index| {
-                const mesh = mp.meshes[@as(usize, @intCast(inst.mesh))];
-                const collider = meshPropOrientedFloats(inst, mesh) orelse continue;
-                if (oriented_count >= game_physics.MAX_ORIENTED) {
-                    clipped_rows += mp.instances.len - imported_index;
-                    break;
+            outer: for (mp.instances, 0..) |inst, imported_index| {
+                const mi: usize = @intCast(inst.mesh);
+                const isls = if (mi < mesh_islands.len) mesh_islands[mi] else &[_]MeshIsland{};
+                for (isls) |isl| {
+                    if (oriented_count >= game_physics.MAX_ORIENTED) {
+                        clipped_rows += mp.instances.len - imported_index;
+                        break :outer;
+                    }
+                    try oriented.appendSlice(allocator, &islandOrientedFloats(inst, isl));
+                    oriented_count += 1;
                 }
-                try oriented.appendSlice(allocator, &collider);
-                oriented_count += 1;
             }
         }
 
@@ -2390,6 +2505,9 @@ pub const Runtime = struct {
     materials_ready: bool = false,
     player_geom_keys: std.ArrayList([]u8) = .{},
     mesh_prop_vertex_buffers: std.ArrayList([]f32) = .{},
+    // Per cooked/imported mesh: its connected-component collision islands (req_1624),
+    // computed once and shared by the static + windowed collider builds.
+    mesh_prop_islands: []const []MeshIsland = &.{},
     kid_list: std.ArrayList(Node) = .{},
     root: Node = .{},
     player_first_child: usize = 0,
@@ -2537,6 +2655,8 @@ pub const Runtime = struct {
     pub fn deinit(self: *Runtime) void {
         for (self.mesh_prop_vertex_buffers.items) |verts| self.allocator.free(verts);
         self.mesh_prop_vertex_buffers.deinit(self.allocator);
+        for (self.mesh_prop_islands) |isls| self.allocator.free(isls);
+        if (self.mesh_prop_islands.len > 0) self.allocator.free(self.mesh_prop_islands);
         for (self.player_geom_keys.items) |key| self.allocator.free(key);
         self.player_geom_keys.deinit(self.allocator);
         self.npcs.deinit(self.allocator);
@@ -2664,7 +2784,17 @@ pub const Runtime = struct {
             log.print("[loader] dynamics layer: {d} kickable props\n", .{self.bodies.len});
         }
 
-        self.physics_colliders = try buildPhysicsColliders(self.allocator, self.scene, self.insts, self.inst_count, self.stride, self.bodies.len);
+        // Per-mesh collision ISLANDS for cooked/imported props (req_1624) — computed
+        // ONCE here (connected-component split), then reused by both the static baked
+        // build below and the per-frame windowed rebuild, so a multi-piece sign is
+        // walk-under without re-splitting the mesh every collider refresh.
+        if (self.scene.mesh_props) |mp| {
+            const islands = try self.allocator.alloc([]MeshIsland, mp.meshes.len);
+            for (mp.meshes, 0..) |mesh, mi| islands[mi] = try meshPropIslands(self.allocator, mesh);
+            self.mesh_prop_islands = islands;
+        }
+
+        self.physics_colliders = try buildPhysicsColliders(self.allocator, self.scene, self.insts, self.inst_count, self.stride, self.bodies.len, self.mesh_prop_islands);
         self.has_physics_colliders = true;
         log.print("[loader] built {d} physics rects + {d} oriented physics rects + {d} heightfields\n", .{ self.physics_colliders.rect_count, self.physics_colliders.oriented_count, self.physics_colliders.heightfield_count });
         if (self.physics_colliders.clipped_rows > 0) {
@@ -3692,14 +3822,17 @@ pub const Runtime = struct {
     fn emitMeshPropColliders(self: *Runtime, oriented_tmp: []f32, oc: *usize, clipped: *usize) void {
         const mp = self.scene.mesh_props orelse return;
         for (mp.instances) |inst| {
-            const mesh = mp.meshes[@as(usize, @intCast(inst.mesh))];
-            const collider = meshPropOrientedFloats(inst, mesh) orelse continue;
-            if (oc.* >= game_physics.MAX_ORIENTED) {
-                clipped.* += 1;
-                continue;
+            const mi: usize = @intCast(inst.mesh);
+            const isls = if (mi < self.mesh_prop_islands.len) self.mesh_prop_islands[mi] else &[_]MeshIsland{};
+            for (isls) |isl| {
+                if (oc.* >= game_physics.MAX_ORIENTED) {
+                    clipped.* += 1;
+                    continue;
+                }
+                const collider = islandOrientedFloats(inst, isl);
+                @memcpy(oriented_tmp[oc.* * game_physics.ORIENTED_FLOATS ..][0..game_physics.ORIENTED_FLOATS], &collider);
+                oc.* += 1;
             }
-            @memcpy(oriented_tmp[oc.* * game_physics.ORIENTED_FLOATS ..][0..game_physics.ORIENTED_FLOATS], &collider);
-            oc.* += 1;
         }
     }
 
