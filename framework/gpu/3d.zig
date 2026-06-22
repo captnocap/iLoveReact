@@ -13,6 +13,7 @@ const images = @import("images.zig");
 const math = @import("../math/root.zig");
 const layout = @import("../layout.zig");
 const effect_assemble = @import("effect_assemble.zig");
+const static_instance_policy = @import("static_instance_policy.zig");
 const Node = layout.Node;
 
 // ════════════════════════════════════════════════════════════════════════
@@ -176,25 +177,44 @@ var g_geo_cache_len: usize = 0;
 var g_retained_top: u64 = 0; // bump cursor (bytes) into g_retained_vbuf; persists across frames
 var g_dbg_frame: u64 = 0; // req_0727: rate-limit the r3d-census diagnostic print
 
-// ── Dynamic geometry slots ──────────────────────────────────────────────────
-// LIVE-edited geometry (a sculpted heightfield, etc.) cannot use the intern cache:
-// every edit is a new content key, so it would consume a permanent slot per edit
-// and fill the cache (then the mesh vanishes). Instead a mesh ships a key of the
-// form "~dyn~<slotId>~<version>": the host keeps ONE reused slot per slotId in a
-// reserved tail region of g_retained_vbuf, and OVERWRITES its verts in place when
-// the version changes. Bounded (DYN_SLOTS), never grows. The region lives in the
-// same buffer so the draw binding is unchanged.
-const DYN_SLOTS = 48; // distinct live meshes (e.g. focused chunks)
-// Per-slot vertex ceiling. The heightfield mesh is NON-indexed (6 verts/quad), so a
-// tile-resolution chunk — hmsc-int paints at one mesh vertex per tile, 121x121 over
-// a 120-tile chunk — is 120*120*6 = 86,400 top verts + perimeter skirt ≈ 89k. The
-// old 32,768 (sized for a 61x61 ≈ 23k mesh) silently dropped that whole mesh, so a
-// tile-res painted chunk vanished. 98,304 (= 3 * 32,768) fits it with headroom.
-// Cost is reserved GPU vbuf only (48 * 98,304 * 32 B ≈ 150 MB), not per-frame work —
-// uploads write only the verts a slot actually uses. (Indexed meshes would cut this
-// ~6x and are the real fix, but that's a vertex+index pipeline change for later.)
+// ── Dynamic geometry region (variable-size bump) ────────────────────────────
+// LIVE-edited or per-chunk geometry (a sculpted heightfield, a painted ground
+// chunk, an imported prop mesh) cannot use the intern cache: every edit is a new
+// content key, so interning would consume a PERMANENT block per edit and fill the
+// region (then the mesh vanishes). Instead a mesh ships a key of the form
+// "~dyn~<slotId>~<version>" (or "~hf~…"): the host keeps ONE entry per slotId and
+// OVERWRITES its verts in place when the version changes. The entry's GPU region is
+// bump-allocated by its ACTUAL vertex count out of the reserved dyn tail of
+// g_retained_vbuf — NOT a fixed per-slot reservation.
+//
+// WHY VARIABLE-SIZE (GROUNDVANISH-0622, req_1654): the old design gave every entry a
+// fixed MAX_DYN_VERTS slot and capped the entry COUNT at 48. A painted world emits
+// ONE heightfield mesh per chunk (worldGeometry.encodeFloorHeightfields, "EVERY
+// painted chunk"), and a real map has hundreds of chunks — far past 48. Slots claim
+// lazily on the first in-frustum draw and NEVER evict, so once 48 distinct ground/dyn
+// meshes had ever drawn, every further chunk's mesh resolved to null and SILENTLY did
+// not draw: walk so a fresh patch of ground (or the trees standing on it) comes into
+// view and the ground under you drops, permanently. A flat chunk bakes ~30 verts and
+// a full tile-res relief chunk ~89k; sizing each entry by its REAL count instead of a
+// flat 98,304-vert slot fits thousands of flat chunks (or ~53 max-res relief chunks,
+// or any mix) in the SAME tail — and exhaustion is now LOUD, never silent (the user's
+// standing rule against low silent caps, req_0892).
+//
+// Per-MESH vertex ceiling. The heightfield mesh is NON-indexed (6 verts/quad), so a
+// tile-resolution chunk — hmsc-int paints one mesh vertex per tile, 121x121 over a
+// 120-tile chunk — is 120*120*6 = 86,400 top verts + perimeter skirt ≈ 89k. Also
+// sizes g_hf_scratch. (Indexed meshes would cut this ~6x and are the real long-term
+// fix, but that's a vertex+index pipeline change for later.)
 const MAX_DYN_VERTS = 98304;
-const DYN_REGION_VERTS = DYN_SLOTS * MAX_DYN_VERTS;
+// Reserved vertex budget for the whole dyn tail, shared by ALL ~dyn~/~hf~ entries via
+// the bump allocator below. Same TOTAL as the old 48 fixed slots, so the single-buffer
+// layout and the 256 MiB comptime cap are unchanged — but now packed by real size
+// instead of one fat slot apiece.
+const DYN_REGION_VERTS = 48 * MAX_DYN_VERTS; // 4,718,592 verts of dyn tail
+// Max distinct live keys (metadata structs ONLY — ~40 B each, NOT a vert reservation),
+// so this is cheap to size generously; the real ceiling is DYN_REGION_VERTS above. A
+// max-extent map is 152*8 ≈ 1216 chunks + water + props, well under this.
+const DYN_META_SLOTS = 4096;
 
 // req_0731: g_retained_vbuf is ONE buffer = intern region + this dyn tail. Its
 // total alloc MUST stay within the WebGPU per-buffer cap, or the GPU allocation
@@ -208,21 +228,26 @@ comptime {
     }
 }
 
-const DynSlot = struct { id_hash: u64 = 0, version_hash: u64 = 0, count: u32 = 0, present: bool = false };
-var g_dyn_slots: [DYN_SLOTS]DynSlot = [_]DynSlot{.{}} ** DYN_SLOTS;
+const DynSlot = struct {
+    id_hash: u64 = 0,
+    version_hash: u64 = 0,
+    offset_bytes: u64 = 0, // this entry's region in g_retained_vbuf (set by dynEnsureRegion)
+    capacity: u32 = 0, // verts bump-allocated for it; reuse in place while count ≤ this
+    count: u32 = 0, // live vertex count actually uploaded
+    present: bool = false,
+};
+var g_dyn_slots: [DYN_META_SLOTS]DynSlot = [_]DynSlot{.{}} ** DYN_META_SLOTS;
 var g_dyn_len: usize = 0;
-fn dynSlotOffset(i: usize) u64 {
-    return (@as(u64, MAX_RETAINED_VERTS) + @as(u64, i) * MAX_DYN_VERTS) * @sizeOf(Vertex);
-}
+var g_dyn_bump_verts: u64 = 0; // bump cursor (verts) into the dyn tail [0, DYN_REGION_VERTS)
+var g_dyn_warned: bool = false; // one-shot LOUD warning when the region/table fills
 
 // Per-frame DYNAMIC instance cap. drawScene refills + re-uploads this buffer every
-// frame for instanced batches whose contents change. 65536 × 80 bytes = ~5.2 MB —
-// enough for world-scale per-frame fields (a 120x120 painted floor is 14,400 tiles).
-// STATIC world geometry does NOT ride here: a node flagged scene3d_instance_static
-// uploads ONCE to g_static_inst_buf below and never re-stages. That split is what
-// lets a 776k-instance city render flat-out without re-uploading ~59 MB/frame of a
-// world that never moves (the --massive scale-lab choke).
-const MAX_INSTANCES: u32 = 65536;
+// frame for instanced batches whose contents change, and for oversized streamed
+// static families that cannot fit in the retained static buffer. 262144 × 80 bytes
+// is ~20 MB: large enough for dense streamed city views without jumping to the
+// hundreds of MB a whole 4M-row world would require per frame.
+// STATIC world geometry that fits rides g_static_inst_buf below and never re-stages.
+const MAX_INSTANCES: u32 = 262144;
 const MAX_SCENE_MESHES: usize = 32768;
 
 // The instance staging buffer, off the stack (a large local risks stack overflow).
@@ -854,6 +879,8 @@ pub fn resetForReload() void {
     g_static_inst_top = 0;
     for (&g_static_inst_cache) |*e| e.* = .{};
     g_dyn_len = 0;
+    g_dyn_bump_verts = 0;
+    g_dyn_warned = false;
     for (&g_dyn_slots) |*s| s.* = .{};
 }
 
@@ -1114,49 +1141,79 @@ fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count
     return .{ .offset = off, .count = count };
 }
 
-/// Find (or claim) the reused slot for a dynamic key "<prefix><slotId>~<version>".
-/// Shared by every dynamic-geom path (verts-shipped and host-generated). Returns the
-/// slot index, its byte offset, and the version hash; null only if no slot is free.
-const DynLoc = struct { i: usize, off: u64, ver_hash: u64 };
+/// Find (or create) the metadata entry for a dynamic key "<prefix><slotId>~<version>"
+/// by its stable slotId. Shared by every dynamic-geom path (verts-shipped and host-
+/// generated). Does NOT allocate GPU space — the caller bump-allocates by real vertex
+/// count via dynEnsureRegion once it knows the count. Returns null only when the
+/// metadata table is full (LOUD, once).
+const DynLoc = struct { i: usize, ver_hash: u64 };
 fn dynSlotLocate(prefix_len: usize, key: []const u8) ?DynLoc {
     const rest = key[prefix_len..]; // "<slotId>~<version>"
     const sep = std.mem.lastIndexOfScalar(u8, rest, '~') orelse return null;
     const id_hash = hashKey(rest[0..sep]);
     const ver_hash = hashKey(rest[sep + 1 ..]);
-    var idx: ?usize = null;
     for (g_dyn_slots[0..g_dyn_len], 0..) |*s, i| {
-        if (s.present and s.id_hash == id_hash) {
-            idx = i;
-            break;
-        }
+        if (s.present and s.id_hash == id_hash) return .{ .i = i, .ver_hash = ver_hash };
     }
-    if (idx == null) {
-        if (g_dyn_len >= DYN_SLOTS) return null;
-        idx = g_dyn_len;
-        g_dyn_slots[g_dyn_len] = .{ .id_hash = id_hash, .present = true };
-        g_dyn_len += 1;
+    if (g_dyn_len >= DYN_META_SLOTS) {
+        dynWarnFull("metadata table", DYN_META_SLOTS);
+        return null;
     }
-    return .{ .i = idx.?, .off = dynSlotOffset(idx.?), .ver_hash = ver_hash };
+    const idx = g_dyn_len;
+    g_dyn_slots[idx] = .{ .id_hash = id_hash, .present = true };
+    g_dyn_len += 1;
+    return .{ .i = idx, .ver_hash = ver_hash };
 }
 
-/// Resolve a dynamic key "~dyn~<slotId>~<version>" to a reused slot, overwriting
+/// Ensure entry `s` owns a GPU region of at least `count` verts. Reuses its existing
+/// region in place when it already fits (the common case: a live edit keeps the same
+/// grid resolution, so nothing grows); otherwise bump-allocates a fresh block from the
+/// dyn tail (the old block leaks until resetForReload — the same bump-never-evict
+/// contract the intern region uses). Returns the byte offset, or null when the tail is
+/// full (LOUD, once). Callers guarantee 0 < count ≤ MAX_DYN_VERTS.
+fn dynEnsureRegion(s: *DynSlot, count: u32) ?u64 {
+    if (s.capacity >= count) return s.offset_bytes;
+    if (g_dyn_bump_verts + count > DYN_REGION_VERTS) {
+        dynWarnFull("vertex region", DYN_REGION_VERTS);
+        return null;
+    }
+    const off = (@as(u64, MAX_RETAINED_VERTS) + g_dyn_bump_verts) * @sizeOf(Vertex);
+    s.offset_bytes = off;
+    s.capacity = count;
+    g_dyn_bump_verts += count;
+    return off;
+}
+
+/// The entry's current drawable slice, or null if it has never uploaded anything.
+fn existingDyn(s: *const DynSlot) ?GeoSlice {
+    return if (s.count > 0) .{ .offset = s.offset_bytes, .count = s.count } else null;
+}
+
+/// LOUD one-shot warning that a dynamic-geometry ceiling was hit and a mesh was
+/// dropped — the user's standing rule is that truncation is never silent (req_0892).
+fn dynWarnFull(what: []const u8, cap: u64) void {
+    if (g_dyn_warned) return;
+    g_dyn_warned = true;
+    std.debug.print("[r3d] dynamic geometry {s} FULL (cap {d}) — a ground/live/imported mesh was DROPPED and will not draw. Raise DYN_META_SLOTS or DYN_REGION_VERTS in framework/gpu/3d.zig.\n", .{ what, cap });
+}
+
+/// Resolve a dynamic key "~dyn~<slotId>~<version>" to its reused entry, overwriting
 /// its verts in place when the version changed. `verts` may be null on a frame the
-/// node didn't re-ship (then we draw the slot's existing contents). Returns null
-/// only if there's no slot free and none yet uploaded.
+/// node didn't re-ship (then we draw the entry's existing contents). Returns null
+/// only if there's no room and nothing yet uploaded.
 fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, count: u32) ?GeoSlice {
     const loc = dynSlotLocate("~dyn~".len, key) orelse return null;
     const s = &g_dyn_slots[loc.i];
     if (s.version_hash != loc.ver_hash or s.count == 0) {
-        const v = verts orelse return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
-        if (count == 0 or count > MAX_DYN_VERTS or v.len < @as(usize, count) * 8) {
-            return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
-        }
+        const v = verts orelse return existingDyn(s);
+        if (count == 0 or count > MAX_DYN_VERTS or v.len < @as(usize, count) * 8) return existingDyn(s);
         const buf = g_retained_vbuf orelse return null;
-        queue.writeBuffer(buf, loc.off, @ptrCast(v.ptr), bu.bytesOfCount(Vertex, count));
+        const off = dynEnsureRegion(s, count) orelse return existingDyn(s);
+        queue.writeBuffer(buf, off, @ptrCast(v.ptr), bu.bytesOfCount(Vertex, count));
         s.version_hash = loc.ver_hash;
         s.count = count;
     }
-    return .{ .offset = loc.off, .count = s.count };
+    return .{ .offset = s.offset_bytes, .count = s.count };
 }
 
 /// Imperative dyn-slot patch (HOST-OWNED LIVE EDIT). Overwrites an EXISTING dyn
@@ -1173,11 +1230,14 @@ fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, 
 pub fn patchDynSlotById(id: []const u8, verts: []const f32, count: u32) bool {
     if (count == 0 or count > MAX_DYN_VERTS or verts.len < @as(usize, count) * 8) return false;
     const id_hash = hashKey(id);
-    for (g_dyn_slots[0..g_dyn_len], 0..) |*s, i| {
+    for (g_dyn_slots[0..g_dyn_len]) |*s| {
         if (!s.present or s.id_hash != id_hash) continue;
+        // Stream into the entry's existing region. It must already fit — this path
+        // never grows the region (a grow would need the bump allocator + a remount).
+        if (s.capacity < count) return false;
         const queue = core.getQueue() orelse return false;
         const buf = g_retained_vbuf orelse return false;
-        queue.writeBuffer(buf, dynSlotOffset(i), @ptrCast(verts.ptr), bu.bytesOfCount(Vertex, count));
+        queue.writeBuffer(buf, s.offset_bytes, @ptrCast(verts.ptr), bu.bytesOfCount(Vertex, count));
         s.count = count;
         return true;
     }
@@ -1345,16 +1405,19 @@ fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]co
     // clock so the ripple animates; static fields rebake only on version change.
     const animated = hfWaveActive(wave);
     if (animated or s.version_hash != loc.ver_hash or s.count == 0) {
-        const hs = heights orelse return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
+        const hs = heights orelse return existingDyn(s);
         const t: f32 = if (animated) @as(f32, @floatFromInt(@mod(std.time.milliTimestamp(), 1_000_000))) / 1000.0 else 0;
         const cnt = hfGen(hs, @intCast(cols), @intCast(rows), width, depth, base, wave, t);
-        if (cnt == 0) return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
+        if (cnt == 0) return existingDyn(s);
         const buf = g_retained_vbuf orelse return null;
-        bu.writeTypedBuffer(queue, buf, loc.off, Vertex, g_hf_scratch[0..cnt]);
+        // Bump-allocate by the mesh's REAL vert count: a flat chunk is ~30 verts, not a
+        // fixed 98k slot — that's what lets hundreds of painted ground chunks coexist.
+        const off = dynEnsureRegion(s, cnt) orelse return existingDyn(s);
+        bu.writeTypedBuffer(queue, buf, off, Vertex, g_hf_scratch[0..cnt]);
         s.version_hash = loc.ver_hash;
         s.count = cnt;
     }
-    return .{ .offset = loc.off, .count = s.count };
+    return existingDyn(s);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1530,9 +1593,13 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
         if (g_static_inst_buf == null) return null;
         g_static_inst_top = 0;
     }
-    const cap_bytes: u64 = @as(u64, MAX_STATIC_INSTANCES) * @sizeOf(InstanceData);
-    const max_fit: u32 = @intCast((cap_bytes - g_static_inst_top) / @sizeOf(InstanceData));
-    const n: u32 = @min(icount, max_fit);
+    const used_count: u32 = @intCast(g_static_inst_top / @sizeOf(InstanceData));
+    // Retained static uploads must be whole-array because streamed draw nodes
+    // address sub-ranges by scene3d_instance_first. A partial upload makes any
+    // later range clamp to count=0, so turning the camera can drop whole chunks.
+    // Oversized batches fall back to the dynamic sub-range path below instead.
+    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, MAX_STATIC_INSTANCES)) return null;
+    const n: u32 = icount;
     if (n == 0) return null;
     const base_offset = g_static_inst_top;
     const scale_base: usize = if (stride >= 12) 6 else 3;
@@ -2128,7 +2195,10 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
             pass.setBindGroup(0, g_bind_group.?, 0, null);
             var gp_i: usize = 0;
             while (gp_i < gcount) : (gp_i += 1) {
-                if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) { dbg_ground_broke = true; break; }
+                if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) {
+                    dbg_ground_broke = true;
+                    break;
+                }
                 const child = &scene_node.children[gidx[gp_i]];
                 const pool = gp_i; // gcount <= GROUND_POOL → one distinct buffer per draw
                 if (g_ground_data_buf[pool] == null or g_ground_data_bg[pool] == null) continue;
