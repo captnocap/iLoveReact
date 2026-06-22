@@ -33,7 +33,7 @@ import { groundKindAt, HEIGHTFIELD_TILE_BODY, MARKER_KIND_INDICES, roadRibbonSec
 import { isParkingKind } from '../render3d/parkingStall';
 import type { ChunkFloor } from '../chunkFloor';
 import { floorToLandform } from '../chunkFloor';
-import { buildGrassInstances, buildBushInstances, buildFlowerInstances } from '../render3d/grassPopulation';
+import { buildFlowerInstances, foliageCells } from '../render3d/grassPopulation';
 import { buildPalmInstances } from '../render3d/palmPopulation';
 import { GAME_BUILD } from '@game';
 import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
@@ -55,6 +55,8 @@ import {
 // PROPSINGLE-0782: the ONE prop→parts resolver, shared with the /test render
 // (render3d/props/DataProp) so a prop's geometry lives in exactly one place.
 import { resolvePropParts } from './propRecipes/resolve';
+import { worldCore } from '../game/void/distance';
+import { forEachShellRingBox, VOID_SHELL_RING_CHUNKS } from '../game/void/shell';
 import { importedPropMesh, isImportedPropKind, type ImportedPropMesh } from '../game/kinds/importedProps';
 import { isCookedPropKind } from '../game/kinds/props';
 import { cookedAssetById, cookedMeshBlob, cookedTextureBlob } from '../editors/model/cookedAssets';
@@ -1064,25 +1066,50 @@ function pushPalms(b: Build, state: GameState, floors: readonly ChunkFloor[]): v
   pushInstanceField(b, palm.fronds, INSTANCE_SHAPE_FROND);
 }
 
+// The procedural void shell (SKYBOX_PLAYBOOK §6): a finite baked ring of the
+// hash-deterministic city wrapping the authored map, so the void shows in the
+// no-V8 /compiled world (which runs no React — the editor's VoidShell never
+// executes there). Reuses the ONE shell generator (game/void/shell.ts) the live
+// editor batch uses; here each box lowers to a stride-13 gamefile instance row
+// (shapeId BOX, no material). The matching walkable ground is a single flat
+// collider baked in worldColliders.shellGroundHeightfield.
+function pushVoidShell(b: Build, state: GameState, groundY: number): void {
+  if (!state?.world) return;
+  const core = worldCore(state.world);
+  let n = 0;
+  forEachShellRingBox(core, VOID_SHELL_RING_CHUNKS, (cx, cy, cz, sx, sy, sz, r, g, bl) => {
+    pushBox(b, cx, cy, cz, sx, sy, sz, [r, g, bl]);
+    n += 1;
+  }, groundY);
+  console.warn(`[bake] void shell: ${n} procedural box(es) in the ${VOID_SHELL_RING_CHUNKS}-chunk ring around the authored map (groundY=${groundY.toFixed(2)})`);
+}
+
 export function buildWorldInstances(
   state: GameState,
   pieces: readonly PlacedBuildPiece[] = [],
   floors: readonly ChunkFloor[] = [],
-  opts: { includeGroundLayers?: boolean; decalAssets?: DecalAssetSink } = {},
+  opts: { includeGroundLayers?: boolean; decalAssets?: DecalAssetSink; voidGroundY?: number } = {},
 ): WorldInstanceResult {
   customByIdCache = null;
   const b = newBuild(opts.decalAssets);
   const pieceCount = pushPlacedPieces(b, pieces);
   pushPaintedFloors(b, floors);
   if (opts.includeGroundLayers) pushWorldLayers(b, state);
+  pushVoidShell(b, state, opts.voidGroundY ?? 0);
   if (state?.world) {
-    pushFoliage(b, state, floors, buildGrassInstances, INSTANCE_SHAPE_GRASS, 'grass');
+    // GRASS + BUSH are NOT baked as instance rows anymore (FOLIAGEFORMULA,
+    // req_1591): they ship as the FLORA recipe lump (encodeFlora) and the loader
+    // expands blades via framework/world/foliage.zig. That's ~99% of the foliage
+    // and was 56MB of the file. Flowers + palms still bake their rows for now (the
+    // next slice ports their formulas too).
     pushFoliage(b, state, floors, buildFlowerInstances, INSTANCE_SHAPE_FLOWER, 'flowers');
-    pushFoliage(b, state, floors, buildBushInstances, INSTANCE_SHAPE_BUSH, 'bush');
     pushPalms(b, state, floors);
   }
   // Bodies of water ship in their own WATER lump (encodeWaterBodies) as animated
   // translucent heightfields, not instances — so they're NOT pushed here.
+  // DIAG (req_1585): b.inst is a boxed number[] — log its size; in V8 a packed
+  // double array costs 8 bytes/element, so this is the instance buffer's heap cost.
+  console.warn(`[bake-mem] instance buffer: ${Math.floor(b.inst.length / INSTANCE_STRIDE)} instances, b.inst.length=${b.inst.length} (~${(b.inst.length * 8 / 1024 / 1024).toFixed(1)}MB boxed + ${(b.inst.length * 4 / 1024 / 1024).toFixed(1)}MB Float32 copy)`);
   return {
     instances: new Float32Array(b.inst),
     total: Math.floor(b.inst.length / INSTANCE_STRIDE),
@@ -1093,6 +1120,38 @@ export function buildWorldInstances(
     dynamicProps: b.dyn.props,
     meshProps: b.meshProps,
   };
+}
+
+export const FLORA_LUMP_VERSION = 1;
+const FLORA_RECORD_BYTES = 4 + 4 + 4 + 4 + 2 + 2; // cellKey | wx | wz | top | specId | count
+
+/** Encode the FLORA recipe lump (FOLIAGEFORMULA, req_1591): the painted grass/bush
+ *  CELLS the loader expands blades from, instead of the ~1M baked blade rows that
+ *  were 56MB of the file. One pass of the same eachPaintedCell walk the blade field
+ *  uses (foliageCells), so the loader's framework/world/foliage.zig expansion plants
+ *  the identical field. Layout mirrors MAP_LUMP.FLORA in runtime/workspace/lumps.ts:
+ *  u32 version | f32 cellSizeMeters | u32 cellCount | cell[]: u32 cellKey | f32 wx |
+ *  f32 wz | f32 top | u16 specId | u16 count. */
+export function encodeFlora(state: GameState, floors: readonly ChunkFloor[]): Uint8Array {
+  const world = worldWithFloorLandforms(state, floors);
+  const cells = foliageCells(world);
+  const out = new Uint8Array(12 + cells.length * FLORA_RECORD_BYTES);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, FLORA_LUMP_VERSION, true);
+  dv.setFloat32(4, world.cellSizeMeters, true);
+  dv.setUint32(8, cells.length, true);
+  let at = 12;
+  for (const cell of cells) {
+    dv.setUint32(at, cell.cellKey >>> 0, true); at += 4;
+    dv.setFloat32(at, cell.wx, true); at += 4;
+    dv.setFloat32(at, cell.wz, true); at += 4;
+    dv.setFloat32(at, cell.top, true); at += 4;
+    dv.setUint16(at, cell.specId & 0xffff, true); at += 2;
+    dv.setUint16(at, Math.min(0xffff, Math.max(0, cell.count | 0)), true); at += 2;
+  }
+  // stderr breadcrumb (parity with the other bake logs) — the factors, not the product.
+  console.warn(`[bake] flora recipe: ${cells.length} cell(s) → loader expands blades (was ~${Math.round(cells.length * 7 / 1000)}k baked rows)`);
+  return out;
 }
 
 // v5 (req_1573/req_1542): cooked meshes can carry slot vertex ranges, and each

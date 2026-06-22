@@ -16,11 +16,20 @@ import { distanceOutsideCore, type WorldCore } from './distance';
 
 // One procedural chunk is 160 m square — the lab's proven streaming grain.
 export const SHELL_CHUNK_METERS = 160;
+// How thick (in chunks) the COMPILE-side baked ring is around the authored map —
+// the finite band of procedural city the gamefile ships so /compiled shows the
+// void. 8 chunks ≈ 1.28 km past every edge: fills a generous horizon while the
+// baked instance count stays a perimeter band (cheap), not a filled area. The
+// truly-infinite streamed shell is a later seam (native loader).
+export const VOID_SHELL_RING_CHUNKS = 8;
 // Each chunk splits into a 2×2 block grid; each block holds up to this many lots.
 const BLOCKS_PER_AXIS = 2;
 const MAX_LOTS_PER_BLOCK = 4;
 // Ground slab sits flush with the authored ground (~y 0); a thin readable slab.
-const GROUND_TOP_Y = 0;
+// Exported so the compiled bake's walkable ground collider sits at the SAME
+// height the shell ground renders (see-it == walk-it).
+export const SHELL_GROUND_TOP_Y = 0;
+const GROUND_TOP_Y = SHELL_GROUND_TOP_Y;
 const GROUND_THICKNESS = 0.08;
 
 // stride-9 row count, asserted against the host's layout (scale_base=3,
@@ -34,16 +43,16 @@ export type ShellBatch = {
   radius: number;
 };
 
-// Push one axis-aligned box as a stride-9 instance row: world position (box
-// CENTER), full scale (footprint), and an RGB color in 0..1.
-function pushBox(
-  out: number[],
+// One emitted shell box: world CENTER (cx,cy,cz), full scale (sx,sy,sz), RGB
+// color in 0..1. The ONE box vocabulary every consumer of the shell shares — the
+// React streaming batch (stride-9 rows) and the compiled bake (pushBox into the
+// gamefile's stride-13 instances) both feed this same callback, so there is no
+// second copy of the generator to drift (rule of two).
+export type ShellBoxEmit = (
   cx: number, cy: number, cz: number,
   sx: number, sy: number, sz: number,
   r: number, g: number, b: number,
-): void {
-  out.push(cx, cy, cz, sx, sy, sz, r, g, b);
-}
+) => void;
 
 // Cold, slightly desaturated palette — the void city reads as the world THINNING
 // (playbook §2: early decay is the world thinning, not punishment), not as a
@@ -77,26 +86,27 @@ function chunkProfile(cx: number, cz: number, distMeters: number): { density: nu
   };
 }
 
-// Generate one chunk's boxes (ground slab + a street cross + buildings) into the
-// shared output array. Chunk origin is its min corner in world meters.
-function generateChunk(out: number[], cx: number, cz: number, distMeters: number): void {
+// Generate one chunk's boxes (ground slab + a street cross + buildings) by
+// calling `emit` per box. Chunk origin is its min corner in world meters.
+// `groundY` is the world height the shell's ground sits at — flush with the
+// authored map's ground so the seam at the edge doesn't step (see-it == walk-it).
+function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: number, groundY: number): void {
   const ox = cx * SHELL_CHUNK_METERS;
   const oz = cz * SHELL_CHUNK_METERS;
   const half = SHELL_CHUNK_METERS / 2;
   const profile = chunkProfile(cx, cz, distMeters);
 
   // Ground slab — one flat box per chunk, a muted asphalt grey.
-  pushBox(
-    out,
-    ox + half, GROUND_TOP_Y - GROUND_THICKNESS / 2, oz + half,
+  emit(
+    ox + half, groundY - GROUND_THICKNESS / 2, oz + half,
     SHELL_CHUNK_METERS, GROUND_THICKNESS, SHELL_CHUNK_METERS,
     0.20, 0.21, 0.24,
   );
 
   // A simple street cross through the chunk (sells "blocks" cheaply).
   const roadW = 9;
-  pushBox(out, ox + half, GROUND_TOP_Y + 0.03, oz + half, SHELL_CHUNK_METERS, GROUND_THICKNESS, roadW, 0.13, 0.13, 0.15);
-  pushBox(out, ox + half, GROUND_TOP_Y + 0.03, oz + half, roadW, GROUND_THICKNESS, SHELL_CHUNK_METERS, 0.13, 0.13, 0.15);
+  emit(ox + half, groundY + 0.03, oz + half, SHELL_CHUNK_METERS, GROUND_THICKNESS, roadW, 0.13, 0.13, 0.15);
+  emit(ox + half, groundY + 0.03, oz + half, roadW, GROUND_THICKNESS, SHELL_CHUNK_METERS, 0.13, 0.13, 0.15);
 
   // Buildings: 2×2 blocks, up to MAX_LOTS_PER_BLOCK lots each, hash-gated by the
   // chunk's density so sprawl thins with distance.
@@ -115,8 +125,32 @@ function generateChunk(out: number[], cx: number, cz: number, distMeters: number
         const px = blockX + rand(cx + bx, cz + bz, salt + 4, w / 2 + 4, blockSpan - w / 2 - 4);
         const pz = blockZ + rand(cx + bx, cz + bz, salt + 5, d / 2 + 4, blockSpan - d / 2 - 4);
         const [r, g, b] = colorForHeight(h, profile.tint);
-        pushBox(out, px, GROUND_TOP_Y + h / 2, pz, w, h, d, r, g, b);
+        emit(px, groundY + h / 2, pz, w, h, d, r, g, b);
       }
+    }
+  }
+}
+
+// Enumerate every shell chunk in a fixed RING around the authored rectangle —
+// the whole map footprint expanded by `ringChunks` chunks on every side, MINUS
+// the chunks still inside the rectangle (the void never overdraws the authored
+// city). This is the COMPILE-side emitter: a finite baked ring (not the infinite
+// player-streamed window) the gamefile ships so the void shows in /compiled.
+// `groundY` lifts the whole ring to the authored map's ground height (default 0).
+export function forEachShellRingBox(core: WorldCore, ringChunks: number, emit: ShellBoxEmit, groundY = SHELL_GROUND_TOP_Y): void {
+  const ringMeters = ringChunks * SHELL_CHUNK_METERS;
+  const minCX = Math.floor((core.minX - ringMeters) / SHELL_CHUNK_METERS);
+  const maxCX = Math.floor((core.maxX + ringMeters) / SHELL_CHUNK_METERS);
+  const minCZ = Math.floor((core.minZ - ringMeters) / SHELL_CHUNK_METERS);
+  const maxCZ = Math.floor((core.maxZ + ringMeters) / SHELL_CHUNK_METERS);
+  const edgeGrace = SHELL_CHUNK_METERS;
+  for (let cz = minCZ; cz <= maxCZ; cz += 1) {
+    for (let cx = minCX; cx <= maxCX; cx += 1) {
+      const centerX = cx * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
+      const centerZ = cz * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
+      const dist = distanceOutsideCore(centerX, centerZ, core);
+      if (dist < edgeGrace) continue;
+      generateChunk(emit, cx, cz, dist, groundY);
     }
   }
 }
@@ -142,6 +176,10 @@ export function buildShellBatch(
   // horizon the moment you look past the city's edge — not gated behind a circle
   // that swallowed the whole reachable area (the earlier invisible-shell bug).
   const edgeGrace = SHELL_CHUNK_METERS;
+  // Stride-9 emit (pos3 scale3 color3) — the live host instance layout.
+  const emit: ShellBoxEmit = (cx, cy, cz, sx, sy, sz, r, g, b) => {
+    out.push(cx, cy, cz, sx, sy, sz, r, g, b);
+  };
   for (let dz = -radiusChunks; dz <= radiusChunks; dz += 1) {
     for (let dx = -radiusChunks; dx <= radiusChunks; dx += 1) {
       const cx = fcx + dx;
@@ -150,7 +188,7 @@ export function buildShellBatch(
       const centerZ = cz * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
       const dist = distanceOutsideCore(centerX, centerZ, core);
       if (dist < edgeGrace) continue;
-      generateChunk(out, cx, cz, dist);
+      generateChunk(emit, cx, cz, dist, GROUND_TOP_Y);
     }
   }
   const count = (out.length / STRIDE) | 0;

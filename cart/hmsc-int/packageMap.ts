@@ -19,9 +19,10 @@ import {
   writeLumpContainer,
 } from '@reactjit/workspace';
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
-import { buildWorldInstances, encodeFloorHeightfields, encodeInstanceLump, encodeMaterialRefs, encodeMaterials, encodeMeshProps, encodeWaterBodies, INSTANCE_STRIDE } from './compile/worldGeometry';
+import { buildWorldInstances, encodeFloorHeightfields, encodeFlora, encodeInstanceLump, encodeMaterialRefs, encodeMaterials, encodeMeshProps, encodeWaterBodies, INSTANCE_STRIDE } from './compile/worldGeometry';
 import type { DecalAssetSink } from './compile/decalAssets';
-import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, paintedFloorTopAt, type BakedPhysicsConfig } from './compile/worldColliders';
+import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, paintedFloorTopAt, shellGroundHeightfield, type BakedPhysicsConfig } from './compile/worldColliders';
+import { worldCore } from './game/void/distance';
 import { encodeStatsConfigLump } from './compile/playerStats';
 import { encodeInteractables } from './compile/worldInteractables';
 import { encodeDynamicProps } from './compile/worldDynamicProps';
@@ -223,7 +224,12 @@ export function createHmscMapfile(
   // count rides in the lump so the loader frames the camera on the structures.
   // `decalAssets` (DECALIMG-0610) collects decal image payloads as content-
   // addressed assets while the materials intern — the gamefile bake ships them.
-  const geometry = buildWorldInstances(state, liftedPieces, floors, { decalAssets: opts.decalAssets });
+  // The void shell sits at the authored map's ground height so the seam at the
+  // edge is flush (the player walks out, not off a ledge). Sample the authored
+  // terrain at the map centre as the representative ground level.
+  const voidCore = worldCore(state.world);
+  const voidGroundY = bakeTerrainTopAt(voidCore.centerX, voidCore.centerZ);
+  const geometry = buildWorldInstances(state, liftedPieces, floors, { decalAssets: opts.decalAssets, voidGroundY });
   const instances = encodeInstanceLump(geometry.instances, geometry.pieces);
   const materials = encodeMaterials(geometry.materials);
   const materialRefs = encodeMaterialRefs(geometry.materialRefs);
@@ -237,7 +243,12 @@ export function createHmscMapfile(
   // ground travels as a handful of heightfields instead of thousands of per-cell
   // rects (which blew the host rect cap). Field slots start after the relief
   // heightfields the HEIGHTFIELDS lump owns. See compile/worldColliders.ts.
-  const colliders = encodeCollidersLump(buildBakedColliders(liftedPieces, floors, floors.length));
+  const baked = buildBakedColliders(liftedPieces, floors, floors.length);
+  // Walkable ground under the procedural void shell (so the player walks out past
+  // the authored edge instead of falling into nothing). ONE flat plane at the next
+  // free heightfield slot; matches the baked shell ground the gamefile renders.
+  baked.ramps.push(shellGroundHeightfield(voidCore, floors.length + baked.ramps.length, voidGroundY));
+  const colliders = encodeCollidersLump(baked);
   // The player physics config the editor play view uses (state.config.physics +
   // the active player's walk/run speed), baked so the shipped game moves and
   // collides identically instead of re-declaring constants in world_loader.zig.
@@ -313,6 +324,11 @@ export function createHmscMapfile(
     // loader reads this instead of hardcoding the look (compile/sceneEnv.ts).
     { type: MAP_LUMP.ENVIRONMENT, encoding: 'raw', data: encodeEnvironmentLump(env) },
     { type: MAP_LUMP.HEIGHTFIELDS, encoding: 'raw', data: heightfields },
+    // FOLIAGE RECIPE (FOLIAGEFORMULA, req_1591): the painted grass/bush CELLS, not
+    // the ~1M expanded blade rows (which were 56MB of the file). The loader expands
+    // blades from this at load via framework/world/foliage.zig — store the factors,
+    // not the product (compile/worldGeometry.ts encodeFlora).
+    { type: MAP_LUMP.FLORA, encoding: 'raw', data: encodeFlora(state, floors) },
     // The authored physics solids + player config (see above) — the loader steps
     // against THESE, not a guess re-derived from the render boxes.
     { type: MAP_LUMP.COLLIDERS, encoding: 'raw', data: colliders },

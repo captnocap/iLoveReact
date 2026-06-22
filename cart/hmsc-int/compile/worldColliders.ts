@@ -20,6 +20,8 @@ import { GAME_BUILD, type CollisionRect, type Heightfield, type OrientedCollisio
 import { CHUNK_TILES } from '../chunks';
 import { floorHasRelief } from './worldGeometry';
 import type { ChunkFloor } from '../chunkFloor';
+import { type WorldCore } from '../game/void/distance';
+import { SHELL_GROUND_TOP_Y, VOID_SHELL_RING_CHUNKS, SHELL_CHUNK_METERS } from '../game/void/shell';
 
 export const COLLIDERS_LUMP_VERSION = 1;
 export const PHYSICS_CONFIG_LUMP_VERSION = 1;
@@ -103,6 +105,37 @@ function flatChunkField(f: ChunkFloor, slot: number): Heightfield | null {
     yawRadians: 0,
     pivotX: f.cx * CHUNK_TILES,
     pivotZ: f.cz * CHUNK_TILES,
+  };
+}
+
+/** One big flat collision plane under the procedural void shell (SKYBOX_PLAYBOOK
+ *  §6), so the player can WALK out past the authored map instead of falling into
+ *  nothing — the compiled world has no ground beyond the authored edge otherwise.
+ *  A single 2×2 heightfield whose one cell spans the whole shell footprint (the
+ *  authored map expanded by the ring on every side) at the shell's ground height,
+ *  so it matches the rendered shell ground (see-it == walk-it) and costs ONE host
+ *  slot regardless of ring size. */
+export function shellGroundHeightfield(core: WorldCore, slot: number, groundY = SHELL_GROUND_TOP_Y): Heightfield {
+  const ringMeters = VOID_SHELL_RING_CHUNKS * SHELL_CHUNK_METERS;
+  const minX = core.minX - ringMeters;
+  const minZ = core.minZ - ringMeters;
+  // Square plane from the min corner; sized to the larger axis so it covers the
+  // whole map+ring on both axes (extra reach on the shorter axis is just more
+  // ground — harmless).
+  const span = Math.max(core.maxX - core.minX, core.maxZ - core.minZ) + 2 * ringMeters;
+  return {
+    slot,
+    originX: minX,
+    originZ: minZ,
+    cellSizeMeters: span, // (cols-1)=1 cell spans the whole footprint → a flat plane
+    cols: 2,
+    rows: 2,
+    baseY: groundY,
+    walkableSlopeCos: FLOOR_WALKABLE_SLOPE_COS,
+    heights: new Float32Array([0, 0, 0, 0]),
+    yawRadians: 0,
+    pivotX: minX,
+    pivotZ: minZ,
   };
 }
 
