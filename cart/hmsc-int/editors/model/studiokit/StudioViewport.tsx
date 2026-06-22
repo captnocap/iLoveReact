@@ -1003,8 +1003,13 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   // Paint mode active — the PIXEL painter owns the model texture while true.
   const painting = selMode === 'paint';
   // A painted model samples its RGBA paintable in ALL modes (req_1380) — so the
-  // box-atlas StaticSurface isn't needed and isn't baked for it.
-  const modelPainted = !!tex && (!!props.paintRef || paintInited(props.sceneName ?? null));
+  // box-atlas StaticSurface isn't needed and isn't baked for it. A REOPENED painted
+  // model carries its content-addressed blob (paintRef → paintBlob) even before any
+  // paint texture is built, so treat it as painted the moment its blob is resolvable
+  // — otherwise object/rig mode showed a blank block until you re-entered paint
+  // (the texture `tex` is only built on paint-enter; on reopen it's null). req_1661.
+  const havePaintBlob = !!props.paintRef && !!props.paintBlob(props.paintRef);
+  const modelPainted = havePaintBlob || (!!tex && paintInited(props.sceneName ?? null));
   // A signature of the scene's FACE topology: parts + per-part face counts. The paint
   // atlas must allocate one distinct slot per (part, face); when this changes (a part
   // added, a face extruded/mirrored), faces created AFTER the last pack carry their
@@ -1232,9 +1237,14 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   // and never mid-stroke (paintingRef guard).
   useEffect(() => {
     setPaintActive(painting);
-    if (!painting || !tex || paintingRef.current) return;
+    if (paintingRef.current) return;
+    // Restore the shared paint texture either when ENTERING paint (tex built) OR when a
+    // painted model is (re)opened in ANY mode (req_1661): its blob must land in the
+    // <Paintable> so object/rig show the painting too — not a blank block. With neither
+    // a live paint texture nor a saved blob there's nothing to restore.
+    if (!tex && !havePaintBlob) return;
     const model = props.sceneId ?? null;
-    const base = tex.color ?? '#c8ccd2';
+    const base = tex?.color ?? '#c8ccd2';
     const modelChanged = g_loadedPaintModel !== model;
     const blobArrived = !modelChanged && !g_loadedHadBlob && !!props.paintRef; // first saved blob for this model
     if (!modelChanged && !blobArrived) { markPaintInited(props.sceneName ?? null); return; }
@@ -1242,14 +1252,16 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     const id = setTimeout(() => {
       if (paintingRef.current) return; // a stroke started while we waited — don't clobber it
       const loaded = !!(blob && restorePaint(blob));
-      if (!loaded) baseCoat(base);
+      // Only lay the base coat for an ACTIVE paint session; never clobber a reopened
+      // view to grey when its blob simply hasn't resolved.
+      if (!loaded && painting) baseCoat(base);
       g_loadedPaintModel = model;
       g_loadedHadBlob = loaded;
       markPaintInited(props.sceneName ?? null);
     }, 60);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [painting, props.sceneId, props.sceneName, !!tex, props.paintRef, props.paintBlob]);
+  }, [painting, props.sceneId, props.sceneName, !!tex, props.paintRef, props.paintBlob, havePaintBlob]);
   // Seed the live buffer from the persisted paint whenever the open texture changes
   // (entering paint, a re-textureize, undo). Keyed on paintRev so an external change
   // re-syncs but our own per-dab writes (which don't touch tex) don't clobber the buffer.
@@ -2286,7 +2298,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
       {/* PIXEL painter (req_1372): the RGBA paint texture the model samples while in
           paint mode. Brush dabs (paintAt) and base coat (fillAllFaces) write straight
           into this GPU texture — no boxes, no StaticSurface capture. */}
-      {tex ? <Paintable id={STUDIO_PAINT_KEY} w={PAINT_TEX} h={PAINT_TEX} rgba /> : null}
+      {tex || havePaintBlob ? <Paintable id={STUDIO_PAINT_KEY} w={PAINT_TEX} h={PAINT_TEX} rgba /> : null}
 
       {/* TEXTURE (req_1068): the offscreen scene SPRITE-MAP atlas every part samples
           via textureKey. Mounted while texture view is on (and NOT painting — the
