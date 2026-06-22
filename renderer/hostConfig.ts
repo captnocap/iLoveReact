@@ -612,25 +612,68 @@ export function flushToHost(): void {
   debugLog.log('recon', `flushToHost pending=${pendingCommands.length} coalesced=${coalesced.length}`);
 
   try {
-    const payload = JSON.stringify(coalesced);
-    const t2 = (globalThis as any).performance?.now?.() ?? Date.now();
-    transportFlush(payload);
+    flushCoalesced(coalesced);
     const t3 = (globalThis as any).performance?.now?.() ?? Date.now();
     // Diagnostic gate: log only when the flush is BOTH unusually large
     // AND unusually slow (the interesting case — payload size driving
     // bridge cost). Big-but-fast and slow-but-small flushes are noise,
     // and animation-driven content updates spammed this log every frame
     // because the per-frame UPDATE batch easily clears 100KB on its own.
-    if (payload.length > 500000 && (t3 - t0) > 100) {
+    if ((t3 - t0) > 100) {
       const gh: any = globalThis as any;
       if (typeof gh.__hostLog === 'function') {
-        try { gh.__hostLog(0, `[flush-timing] pending=${pendingN} coalesced=${coalesced.length} bytes=${payload.length} coalesce=${(t1-t0).toFixed(1)}ms stringify=${(t2-t1).toFixed(1)}ms bridge=${(t3-t2).toFixed(1)}ms total=${(t3-t0).toFixed(1)}ms`); } catch {}
+        try { gh.__hostLog(0, `[flush-timing] pending=${pendingN} coalesced=${coalesced.length} coalesce=${(t1-t0).toFixed(1)}ms total=${(t3-t0).toFixed(1)}ms`); } catch {}
       }
     }
   } catch (e) {
     reportError(e, 'flushToHost (' + coalesced.length + ' commands)');
   }
   pendingCommands.length = 0;
+}
+
+// V8/QuickJS cap a single string near 2^29 chars. A flush whose JSON would exceed
+// that throws RangeError — and the WHOLE batch was being dropped, freezing/desyncing
+// the editor (USER report: "flushToHost (4740 commands): Invalid string length").
+// Serialize the batch; if it's too big to stringify, BISECT and flush each half in
+// order (the host applies batches sequentially, so splitting is transparent). A flush
+// that big means something upstream is dumping MBs into the command stream (a prop
+// carrying mesh verts / instance arrays / a paint atlas), so warn — and a single
+// command too large to split is NAMED (id/type/prop keys), surfacing the bloat rather
+// than hiding it behind a crash.
+const OVERSIZE_FLUSH_WARN_BYTES = 50_000_000;
+
+function flushCoalesced(cmds: Command[]): void {
+  let payload: string | null = null;
+  try { payload = JSON.stringify(cmds); } catch { payload = null; }
+  if (payload !== null) {
+    if (payload.length > OVERSIZE_FLUSH_WARN_BYTES) {
+      const gh: any = globalThis as any;
+      if (typeof gh.__hostLog === 'function') {
+        try { gh.__hostLog(0, `[flush-oversize] ${cmds.length} cmd(s) → ${payload.length} bytes. biggest: ${describeBiggestCommands(cmds, 3)}`); } catch {}
+      }
+    }
+    (transportFlush as unknown as (p: string) => void)(payload);
+    return;
+  }
+  if (cmds.length <= 1) {
+    reportError(new Error('single command exceeds the JSON string limit'), 'flushToHost oversized command: ' + describeBiggestCommands(cmds, 1));
+    return;
+  }
+  const mid = cmds.length >> 1;
+  flushCoalesced(cmds.slice(0, mid));
+  flushCoalesced(cmds.slice(mid));
+}
+
+/** Top-N commands by serialized size, named for the oversize diagnostic — op, id,
+ *  type, byte size, and which prop keys it carries (so the bloated prop is obvious). */
+function describeBiggestCommands(cmds: Command[], n: number): string {
+  const sized = cmds.map((c) => {
+    let len = 0;
+    try { len = JSON.stringify(c).length; } catch { len = Number.MAX_SAFE_INTEGER; }
+    const props = (c as any).props;
+    return { op: c.op, id: (c as any).id, type: (c as any).type, len, keys: props && typeof props === 'object' ? Object.keys(props) : [] };
+  }).sort((a, b) => b.len - a.len).slice(0, n);
+  return sized.map((s) => `${s.op} id=${s.id ?? '?'} type=${s.type ?? '?'} bytes=${s.len} props=[${s.keys.join(',')}]`).join(' | ');
 }
 
 // ── Flush scheduling ─────────────────────────────────────
