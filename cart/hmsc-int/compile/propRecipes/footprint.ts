@@ -3,7 +3,7 @@
 // just the old RECIPES kinds. Moved out of game/kinds/propModels.ts so it can
 // read the resolver without an import cycle (propModels is now pure kit).
 
-import { type PropKind } from '../../game/kinds/props';
+import { type PropCollisionBox, type PropKind } from '../../game/kinds/props';
 import { HMSC_SCALE } from '../../world/scale';
 import { resolvePartsForKind } from './resolve';
 
@@ -109,4 +109,73 @@ export function propModelFootprintMeters(kind: PropKind): PropModelFootprint | n
     offsetZMeters: (minZ + maxZ) / 2,
     round,
   };
+}
+
+/** The local-space AABB of ONE recipe part, its own Euler rotation baked in (the
+ *  SAME 8-corner spin propModelFootprintMeters measures the footprint with). */
+function partLocalBox(part: ReturnType<typeof resolvePartsForKind>[number]): PropCollisionBox {
+  const hx = part.size[0] / 2, hy = part.size[1] / 2, hz = part.size[2] / 2;
+  const rx = part.rotation?.[0] ?? 0, ry = part.rotation?.[1] ?? 0, rz = part.rotation?.[2] ?? 0;
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const ax of [-1, 1] as const) {
+    for (const ay of [-1, 1] as const) {
+      for (const az of [-1, 1] as const) {
+        const r = rotatePartPoint(ax * hx, ay * hy, az * hz, rx, ry, rz);
+        const x = part.local[0] + r.x, y = part.local[1] + r.y, z = part.local[2] + r.z;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+      }
+    }
+  }
+  return { minX, minY, minZ, maxX, maxY, maxZ };
+}
+
+/** Do two boxes overlap in plan (XZ), padded by eps so abutting parts count as
+ *  connected? Used to cluster the in-band parts a body actually runs into. */
+function xzOverlap(a: PropCollisionBox, b: PropCollisionBox, eps: number): boolean {
+  return a.minX - eps <= b.maxX && b.minX - eps <= a.maxX
+    && a.minZ - eps <= b.maxZ && b.minZ - eps <= a.maxZ;
+}
+
+/** SHAPE-AWARE prop collision (req_1587, extended to data-recipe props): one box
+ *  PER recipe part, in prop-local meters — the SAME thing the cooked-asset path
+ *  derives from authored parts (collisionBoxesFromParts). A walk-under prop (a
+ *  big sign / archway: two edge posts carrying an overhead board) collides as its
+ *  posts plus a high banded board box, so the gap between the posts stays open —
+ *  instead of the single footprint AABB that spans post-to-post and walls you out
+ *  at ground level (the "can't walk under the big sign" bug). Each box keeps its
+ *  own vertical band, so placedPieceColliders bands the overhead board high and the
+ *  player passes beneath it.
+ *
+ *  GATED narrowly to the shape that actually breaks: the in-band parts (the ones a
+ *  walking body touches) must form TWO OR MORE separated XZ clusters — the legs of
+ *  an archway / the posts of a sign — whose single AABB would wall in the gap
+ *  between them. A prop with ONE in-band cluster (a tree's trunk, a single pole, a
+ *  barrel) has no gap to fill, so it returns null and keeps its exact measured
+ *  footprint untouched — the round-circle/offset treatment and every compact and
+ *  single-stem prop's collision are unchanged. */
+export function propCollisionBoxes(kind: PropKind): PropCollisionBox[] | null {
+  const parts = resolvePartsForKind(kind);
+  if (!parts || parts.length === 0) return null;
+  const boxes = parts.map(partLocalBox).filter((b) => b.maxY > 0); // drop buried base parts
+  if (boxes.length === 0) return null;
+  // The parts a walking body runs into: spanning the ground→band slab in Y.
+  const inBand = boxes.filter((b) => b.minY < FOOTPRINT_BAND_METERS);
+  if (inBand.length < 2) return null; // single stem / compact → no gap, keep footprint
+  // Cluster the in-band parts by XZ adjacency (union–find). 2+ clusters = the
+  // post-and-gap shape; one merged cluster = a solid base with no walk-under gap.
+  const eps = 0.05;
+  const parent = inBand.map((_, i) => i);
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  for (let i = 0; i < inBand.length; i++) {
+    for (let j = i + 1; j < inBand.length; j++) {
+      if (xzOverlap(inBand[i], inBand[j], eps)) parent[find(i)] = find(j);
+    }
+  }
+  const clusters = new Set(inBand.map((_, i) => find(i)));
+  if (clusters.size < 2) return null;
+  // Per-part boxes: the posts block at their own band, the overhead board bands
+  // high (walk-under). Mirrors the cooked-asset collisionBoxes shape.
+  return boxes;
 }

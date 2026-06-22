@@ -39,7 +39,7 @@ import {
 } from './catalog';
 import { BUILD_KIND_CONTRACTS, type BuildGameplayTags, type BuildPieceKind } from './pieces';
 import { propDynamics, propKindDefinition } from '../kinds';
-import { propModelFootprintMeters } from '../../compile/propRecipes/footprint';
+import { propCollisionBoxes, propModelFootprintMeters } from '../../compile/propRecipes/footprint';
 import { wallEditDefinition, type WallEdit } from './edits';
 import type { BuildPrefabDef, PrefabPiece } from './prefabs';
 import { BUILD_FACE_SLOTS, resolveFaceSkin, type BuildSkinSet } from './skins';
@@ -1019,13 +1019,16 @@ export function placedPieceColliders(
     // not a wall — it contributes no static rect; the play route owns its sim.
     if (def.kind === 'prop' && def.propKind && propDynamics(def.propKind)) continue;
     if (!placedPieceTags(piece).collision) continue;
-    // SHAPE-AWARE prop collider (req_1587): a cooked multi-part / multi-island prop
-    // (an archway: two posts + a high beam) carries one box PER component, each with
-    // its own vertical band — so the beam is a band the player walks UNDER instead of
-    // one ground-to-top wall that fills the gap. Local box coords map straight to
-    // world: the cooked mesh renders at the anchor in these same lifted local coords.
+    // SHAPE-AWARE prop collider (req_1587): a multi-part / multi-island prop (an
+    // archway or big sign: two posts + a high board) carries one box PER part, each
+    // with its own vertical band — so the board is a band the player walks UNDER
+    // instead of one ground-to-top wall that fills the gap between the posts. Cooked
+    // assets author these boxes (collisionBoxes); data-recipe props derive them from
+    // the same recipe parts on demand (propCollisionBoxes, gated to walk-under shapes).
+    // Local box coords map straight to world: the mesh renders at the anchor in these
+    // same lifted local coords.
     if (def.kind === 'prop' && def.propKind) {
-      const boxes = propKindDefinition(def.propKind).collisionBoxes;
+      const boxes = propKindDefinition(def.propKind).collisionBoxes ?? propCollisionBoxes(def.propKind);
       if (boxes && boxes.length) {
         for (const b of boxes) {
           orientedRects.push({
