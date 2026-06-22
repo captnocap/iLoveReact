@@ -312,6 +312,18 @@ const GROUND_POOL = 128; // distinct D buffers (≈ max simultaneously-drawn gro
 const GROUND_DATA_FLOATS = 20000; // cap per chunk: 130*130 cells + palette + ribbon, ample
 var g_ground_data_buf: [GROUND_POOL]?*wgpu.Buffer = [_]?*wgpu.Buffer{null} ** GROUND_POOL;
 var g_ground_data_bg: [GROUND_POOL]?*wgpu.BindGroup = [_]?*wgpu.BindGroup{null} ** GROUND_POOL;
+// DEDICATED per-instance buffer for the ground-formula pass (GROUNDSTARVE-0622,
+// req_1659). The ground pass used to write its model instances into the SHARED
+// per-frame g_instance_buf at the running inst_top cursor — AFTER the dynamic
+// instanced batches. When a big world overflows the static instance buffer
+// (total rows > MAX_STATIC_INSTANCES), the overflow FOLIAGE families fall back to
+// that same per-frame buffer, and a view full of trees/grass filled inst_top to its
+// 262144 cap before the ground pass ran — so every painted ground chunk broke out on
+// the cap and VANISHED (view-dependent: look away from the trees and the ground came
+// back). The ground you stand on must always draw (mirrors the loader registering
+// floor colliders first), so it gets its OWN small buffer — one InstanceData per
+// drawn chunk, never contending with foliage. GROUND_POOL * 80 B ≈ 10 KB.
+var g_ground_inst_buf: ?*wgpu.Buffer = null;
 var g_ground_wgsl_buf: [96 * 1024]u8 = undefined; // scratch for the one-time assembled module
 var g_vertex_buffer: ?*wgpu.Buffer = null;
 var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned registry geometry
@@ -572,6 +584,14 @@ pub fn init() void {
             }
         }
     }
+    // The ground pass's own instance buffer — one InstanceData per drawn chunk, so the
+    // ground never competes with foliage for the shared per-frame g_instance_buf (req_1659).
+    g_ground_inst_buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("r3d_ground_instances"),
+        .size = GROUND_POOL * @sizeOf(InstanceData),
+        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
 
     const layouts = [_]?*wgpu.BindGroupLayout{ g_bind_group_layout.?, g_tex_bind_group_layout.? };
     const pipeline_layout = device.createPipelineLayout(&.{
@@ -832,6 +852,7 @@ pub fn deinit() void {
     if (g_bind_group_layout) |l| l.release();
     if (g_uniform_buffer) |b| b.release();
     if (g_instance_buf) |b| b.release();
+    if (g_ground_inst_buf) |b| b.release();
     if (g_vertex_buffer) |b| b.release();
     if (g_pipeline) |p| p.release();
     if (g_grass_pipeline) |p| p.release();
@@ -2185,22 +2206,19 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     //    so drawn after the opaque batch and before the transparent pass. Build the
     //    one pipeline lazily, then per chunk upload its D ref stream to a pool
     //    buffer, write the model instance, and draw. ──
-    const dbg_ground_inst_top_start = inst_top;
     var dbg_ground_drawn: u32 = 0;
-    var dbg_ground_broke = false;
-    if (gcount > 0 and scene_node.children[gidx[0]].scene3d_ground_formula != null) {
+    // The ground pass writes into its OWN g_ground_inst_buf (one InstanceData per drawn
+    // chunk, indexed by gp_i), so a view full of foliage that exhausted the shared
+    // per-frame inst_top can no longer starve the ground — the floor always draws (req_1659).
+    if (gcount > 0 and g_ground_inst_buf != null and scene_node.children[gidx[0]].scene3d_ground_formula != null) {
         ensureGroundPipeline(scene_node.children[gidx[0]].scene3d_ground_formula.?);
         if (g_ground_pipeline) |gp| {
             pass.setPipeline(gp);
             pass.setBindGroup(0, g_bind_group.?, 0, null);
             var gp_i: usize = 0;
             while (gp_i < gcount) : (gp_i += 1) {
-                if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) {
-                    dbg_ground_broke = true;
-                    break;
-                }
                 const child = &scene_node.children[gidx[gp_i]];
-                const pool = gp_i; // gcount <= GROUND_POOL → one distinct buffer per draw
+                const pool = gp_i; // gcount <= GROUND_POOL → one distinct D buffer per draw
                 if (g_ground_data_buf[pool] == null or g_ground_data_bg[pool] == null) continue;
                 if (child.scene3d_ground_data) |d| {
                     const n = @min(d.len, GROUND_DATA_FLOATS);
@@ -2212,8 +2230,8 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                     // so the class of bug can't recur (req_0871).
                     bu.writeTypedBuffer(queue, g_ground_data_buf[pool].?, 0, f32, d[0..n]);
                 }
-                const inst_index: usize = @intCast(inst_top / @sizeOf(InstanceData));
-                inst_scratch[inst_index] = makeInstance(
+                const gi_off: u64 = @as(u64, @intCast(gp_i)) * @sizeOf(InstanceData);
+                var gi_data = makeInstance(
                     child.scene3d_pos_x,
                     child.scene3d_pos_y,
                     child.scene3d_pos_z,
@@ -2228,13 +2246,12 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                     child.scene3d_color_b,
                     child.scene3d_color_a,
                 );
-                bu.writeValue(queue, g_instance_buf.?, inst_top, &inst_scratch[inst_index]);
+                bu.writeValue(queue, g_ground_inst_buf.?, gi_off, &gi_data);
                 pass.setBindGroup(1, g_ground_data_bg[pool].?, 0, null);
                 const geo_bytes: u64 = @as(u64, gslot[gp_i].count) * @sizeOf(Vertex);
                 pass.setVertexBuffer(0, g_retained_vbuf.?, gslot[gp_i].offset, geo_bytes);
-                pass.setVertexBuffer(1, g_instance_buf.?, inst_top, @sizeOf(InstanceData));
+                pass.setVertexBuffer(1, g_ground_inst_buf.?, gi_off, @sizeOf(InstanceData));
                 pass.draw(gslot[gp_i].count, 1, 0, 0);
-                inst_top += @sizeOf(InstanceData);
                 dbg_ground_drawn += 1;
                 g_telemetry.draw_calls += 1;
                 g_telemetry.instances += 1;
@@ -2242,9 +2259,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         }
     }
     if (g_dbg_frame % 120 == 1) {
-        const inst_used: u64 = dbg_ground_inst_top_start / @sizeOf(InstanceData);
-        const inst_cap: u64 = inst_cap_bytes / @sizeOf(InstanceData);
-        std.debug.print("[ground-pass] seen={d} collected(gcount)={d} drawn={d} pool_cap={d} inst_used_before_ground={d}/{d} broke_on_inst_cap={}\n", .{ dbg_ground_seen, gcount, dbg_ground_drawn, GROUND_POOL, inst_used, inst_cap, dbg_ground_broke });
+        std.debug.print("[ground-pass] seen={d} collected(gcount)={d} drawn={d} pool_cap={d} (dedicated inst buffer — foliage can't starve it)\n", .{ dbg_ground_seen, gcount, dbg_ground_drawn, GROUND_POOL });
     }
 
     // Glass and other alpha<1 meshes, drawn after every opaque draw so they read
