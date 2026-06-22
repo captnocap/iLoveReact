@@ -110,7 +110,15 @@ pub const CameraOcclusionConfiguredHit = struct {
 // desktop binary (one tile texture dwarfs it), and the per-frame step only samples
 // ACTIVE fields, so an empty slot is free. Headroom for many heightfield-floored
 // structures (garages, ramps, overpasses) on top of the terrain landforms.
-pub const MAX_HEIGHTFIELDS: usize = 64;
+// One slot per WALKABLE FIELD: every painted relief chunk, every ramp/stair slope,
+// and every flat piece-floor field. A normal authored city mixes all three and blows
+// far past a 64-slot budget (a 240² map measured ~70: 20 relief chunks + 32 ramp/stair
+// fields + flat floors). Overflow is doubly bad — the dropped fields are unwalkable
+// stairs (no collision under the steps), AND the overflow used to flip the whole map
+// into instance-derived collider WINDOWING, which re-derives floors as solid-to-ground
+// boxes (invisible walls under upper floors/roofs). Sized generously so real maps fit
+// without truncation; each slot is HF_MAX_SAMPLES f32 (~64KB), so 256 ≈ 16MB of BSS.
+pub const MAX_HEIGHTFIELDS: usize = 256;
 // Must fit hmsc-int's tile-resolution painted chunks: one collider sample per tile,
 // 121×121 = 14,641 over a 120-tile chunk (mesh and collider share the field, so
 // see-it==walk-it). The old 8192 cap rejected that whole field — count >

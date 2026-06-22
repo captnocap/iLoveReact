@@ -2768,11 +2768,23 @@ pub const Runtime = struct {
                 });
             }
         }
-        // The static collider set overflowed MAX_RECTS (a huge --massive map): switch
-        // to SPATIAL WINDOWING so collision follows the player and the whole world is
-        // solid in the near field. Build the grid, widen the physics input buffer to
-        // MAX capacity for in-place per-frame refills, and seed the window at spawn.
-        if (self.physics_colliders.clipped_rows > 0) {
+        // The SOLID collider set (rects/oriented) overflowed its host cap — a huge
+        // --massive city: switch to SPATIAL WINDOWING so collision follows the player
+        // and the whole world is solid in the near field. Build the grid, widen the
+        // physics input buffer to MAX capacity for in-place per-frame refills, and seed
+        // the window at spawn.
+        //
+        // Gate STRICTLY on the rect/oriented caps — NOT on clipped_rows. clipped_rows
+        // also counts dropped HEIGHTFIELDS (too many painted relief chunks / ramp-stair
+        // fields for MAX_HEIGHTFIELDS), and a heightfield overflow must not flip an
+        // otherwise-fitting authored map into windowing: the windowed path re-derives
+        // floors from render instances as solid-to-ground boxes (band floor = −∞), which
+        // turns every upper floor/roof into an invisible ground-level wall you can't walk
+        // under. As long as the rects/oriented fit, the banded baked colliders own the
+        // floors (raised floors stay walk-under) — keep them.
+        if (self.physics_colliders.rect_count >= game_physics.MAX_RECTS or
+            self.physics_colliders.oriented_count >= game_physics.MAX_ORIENTED)
+        {
             if (buildSpatialGrid(self.allocator, self.insts, self.inst_count, self.stride)) |g| {
                 const cap = self.physics_colliders.rectBase() + game_physics.MAX_RECTS * game_physics.RECT_FLOATS + game_physics.MAX_ORIENTED * game_physics.ORIENTED_FLOATS;
                 if (self.allocator.alloc(f32, cap)) |buf| {
