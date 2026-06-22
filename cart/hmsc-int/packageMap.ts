@@ -226,9 +226,14 @@ export function createHmscMapfile(
   // addressed assets while the materials intern — the gamefile bake ships them.
   // The void shell sits at the authored map's ground height so the seam at the
   // edge is flush (the player walks out, not off a ledge). Sample the authored
-  // terrain at the map centre as the representative ground level.
+  // terrain at the map centre as the representative ground level, then drop it a
+  // hair: the first ring of chunks straddles the edge so their GROUND reaches in
+  // to butt against the authored floor — sinking the shell ~10cm lets the
+  // authored floor win cleanly in that overlap (no z-fight) while the gap outside
+  // still reads as continuous ground.
   const voidCore = worldCore(state.world);
-  const voidGroundY = bakeTerrainTopAt(voidCore.centerX, voidCore.centerZ);
+  const SHELL_GROUND_SINK_METERS = 0.1;
+  const voidGroundY = bakeTerrainTopAt(voidCore.centerX, voidCore.centerZ) - SHELL_GROUND_SINK_METERS;
   const geometry = buildWorldInstances(state, liftedPieces, floors, { decalAssets: opts.decalAssets, voidGroundY });
   const instances = encodeInstanceLump(geometry.instances, geometry.pieces);
   const materials = encodeMaterials(geometry.materials);

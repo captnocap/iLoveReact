@@ -12,7 +12,7 @@
 // SAME hash the distortion layer uses, so the shell is fair and replayable.
 
 import { voidHash } from './distortion';
-import { distanceOutsideCore, type WorldCore } from './distance';
+import { distanceOutsideCore, pointInCore, type WorldCore } from './distance';
 
 // One procedural chunk is 160 m square — the lab's proven streaming grain.
 export const SHELL_CHUNK_METERS = 160;
@@ -90,7 +90,7 @@ function chunkProfile(cx: number, cz: number, distMeters: number): { density: nu
 // calling `emit` per box. Chunk origin is its min corner in world meters.
 // `groundY` is the world height the shell's ground sits at — flush with the
 // authored map's ground so the seam at the edge doesn't step (see-it == walk-it).
-function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: number, groundY: number): void {
+function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: number, groundY: number, core: WorldCore): void {
   const ox = cx * SHELL_CHUNK_METERS;
   const oz = cz * SHELL_CHUNK_METERS;
   const half = SHELL_CHUNK_METERS / 2;
@@ -124,6 +124,10 @@ function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: n
         const h = rand(cx + bx, cz + bz, salt + 3, 6, profile.maxHeight);
         const px = blockX + rand(cx + bx, cz + bz, salt + 4, w / 2 + 4, blockSpan - w / 2 - 4);
         const pz = blockZ + rand(cx + bx, cz + bz, salt + 5, d / 2 + 4, blockSpan - d / 2 - 4);
+        // A boundary chunk's GROUND fills the gap to the edge, but its BUILDINGS
+        // must not poke up inside the authored city — skip any lot landing in the
+        // rectangle.
+        if (pointInCore(px, pz, core)) continue;
         const [r, g, b] = colorForHeight(h, profile.tint);
         emit(px, groundY + h / 2, pz, w, h, d, r, g, b);
       }
@@ -143,14 +147,16 @@ export function forEachShellRingBox(core: WorldCore, ringChunks: number, emit: S
   const maxCX = Math.floor((core.maxX + ringMeters) / SHELL_CHUNK_METERS);
   const minCZ = Math.floor((core.minZ - ringMeters) / SHELL_CHUNK_METERS);
   const maxCZ = Math.floor((core.maxZ + ringMeters) / SHELL_CHUNK_METERS);
-  const edgeGrace = SHELL_CHUNK_METERS;
   for (let cz = minCZ; cz <= maxCZ; cz += 1) {
     for (let cx = minCX; cx <= maxCX; cx += 1) {
       const centerX = cx * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
       const centerZ = cz * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
+      // Skip ONLY chunks centred inside the authored rectangle — the first ring
+      // of chunks sits just outside the edge and its ground reaches in to butt
+      // against the authored map, so there is no empty gap between them.
+      if (pointInCore(centerX, centerZ, core)) continue;
       const dist = distanceOutsideCore(centerX, centerZ, core);
-      if (dist < edgeGrace) continue;
-      generateChunk(emit, cx, cz, dist, groundY);
+      generateChunk(emit, cx, cz, dist, groundY, core);
     }
   }
 }
@@ -169,13 +175,11 @@ export function buildShellBatch(
   const out: number[] = [];
   const fcx = Math.floor(focusX / SHELL_CHUNK_METERS);
   const fcz = Math.floor(focusZ / SHELL_CHUNK_METERS);
-  // A chunk is "core" (skip it) if its CENTER still falls inside the authored
-  // rectangle — measured by distance-to-rect, so the procedural sprawl begins
-  // right at the authored edge (one chunk of grace) with no double-city overlap.
-  // The void fills everything outside the rectangle, so it is visible on the
-  // horizon the moment you look past the city's edge — not gated behind a circle
-  // that swallowed the whole reachable area (the earlier invisible-shell bug).
-  const edgeGrace = SHELL_CHUNK_METERS;
+  // A chunk is skipped only if its CENTER falls inside the authored rectangle —
+  // so the procedural sprawl begins right at the authored edge (the first ring of
+  // chunks straddles it, ground reaching in to butt against the map) with no
+  // empty gap. The void fills everything outside the rectangle, visible the
+  // moment you look past the city's edge.
   // Stride-9 emit (pos3 scale3 color3) — the live host instance layout.
   const emit: ShellBoxEmit = (cx, cy, cz, sx, sy, sz, r, g, b) => {
     out.push(cx, cy, cz, sx, sy, sz, r, g, b);
@@ -186,9 +190,9 @@ export function buildShellBatch(
       const cz = fcz + dz;
       const centerX = cx * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
       const centerZ = cz * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
+      if (pointInCore(centerX, centerZ, core)) continue;
       const dist = distanceOutsideCore(centerX, centerZ, core);
-      if (dist < edgeGrace) continue;
-      generateChunk(emit, cx, cz, dist, GROUND_TOP_Y);
+      generateChunk(emit, cx, cz, dist, GROUND_TOP_Y, core);
     }
   }
   const count = (out.length / STRIDE) | 0;

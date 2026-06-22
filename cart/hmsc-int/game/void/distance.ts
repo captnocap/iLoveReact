@@ -58,3 +58,12 @@ export function distanceOutsideCore(x: number, z: number, core: WorldCore): numb
 export function escapeDepth(x: number, z: number, core: WorldCore): number {
   return Math.max(0, distanceOutsideCore(x, z, core) - SAFE_MARGIN_METERS);
 }
+
+// True when a point is inside the authored rectangle. The shell uses this to
+// decide what to skip: a chunk whose CENTER is inside is skipped (the void never
+// centres on the authored map), and a building whose centre is inside is skipped
+// (no procedural tower pokes up through the authored city) — while a boundary
+// chunk's GROUND still fills right up to the edge, so there is no gap.
+export function pointInCore(x: number, z: number, core: WorldCore): boolean {
+  return x >= core.minX && x <= core.maxX && z >= core.minZ && z <= core.maxZ;
+}
