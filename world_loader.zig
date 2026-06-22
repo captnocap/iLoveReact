@@ -3599,6 +3599,12 @@ pub const Runtime = struct {
         defer fams.deinit(self.allocator);
         errdefer self.stream_protos.clearAndFree(self.allocator);
 
+        // req_1665: short foliage (grass/flora/trees) draws to HALF the structural
+        // view distance — a dense field at full radius dominates per-frame instance
+        // staging + the wind shader, so cutting its draw distance is the main fps
+        // lever. Structure keeps the full bubble (draw_radius 0 = unlimited).
+        const flora_radius: f32 = self.stream_radius * 0.5;
+
         try fams.append(self.allocator, .{ .rows = self.shape_batches.boxes, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "box", .verts = self.cube[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.ramps, .stride = @intCast(self.stride) });
@@ -3611,15 +3617,15 @@ pub const Runtime = struct {
         try self.stream_protos.append(self.allocator, .{ .geom_key = "sphere12x8", .verts = self.sphere[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.gables, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "gable-prism", .verts = self.gable_prism[0..], .tex_key = null });
-        try fams.append(self.allocator, .{ .rows = self.shape_batches.grass, .stride = @intCast(self.stride) });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.grass, .stride = @intCast(self.stride), .draw_radius = flora_radius });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "grass-blade", .verts = self.grass_blade[0..], .tex_key = "~grass~" });
-        try fams.append(self.allocator, .{ .rows = self.shape_batches.flowers, .stride = @intCast(self.stride) });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.flowers, .stride = @intCast(self.stride), .draw_radius = flora_radius });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "flower-head", .verts = self.flower_head[0..], .tex_key = "~grass~" });
-        try fams.append(self.allocator, .{ .rows = self.shape_batches.bush, .stride = @intCast(self.stride) });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.bush, .stride = @intCast(self.stride), .draw_radius = flora_radius });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "bush-clump", .verts = self.bush_clump[0..], .tex_key = "~grass~" });
-        try fams.append(self.allocator, .{ .rows = self.shape_batches.frond, .stride = @intCast(self.stride) });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.frond, .stride = @intCast(self.stride), .draw_radius = flora_radius });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "frond-card", .verts = self.frond_card[0..], .tex_key = "~frond~" });
-        try fams.append(self.allocator, .{ .rows = self.shape_batches.palmtrunks, .stride = @intCast(self.stride) });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.palmtrunks, .stride = @intCast(self.stride), .draw_radius = flora_radius });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "palm-trunk", .verts = self.palm_trunk[0..], .tex_key = null });
         for (self.material_batches) |batch| {
             if (batch.translucent or batch.textured_translucent or batch.count == 0) continue;

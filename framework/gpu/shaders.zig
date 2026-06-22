@@ -924,7 +924,10 @@ pub const grass_wgsl =
     \\    let phase = world.x * 0.18 + world.z * 0.22 + S.time * 1.5;
     \\    let sway = sin(phase) + 0.4 * sin(phase * 2.7 + 1.3);
     \\    let gust = 0.10 + 0.10 * sin(S.time * 0.5 + world.x * 0.05);
-    \\    let bend = sway * gust * tipw;
+    \\    // req_1665: cut the wind beyond 60m from the camera (faded over 50..60) so a
+    \\    // full-radius grass field does not pay per-vertex sway for blades far away.
+    \\    let anim_fade = smoothstep(60.0, 50.0, distance(S.camera_pos, world.xyz));
+    \\    let bend = sway * gust * tipw * anim_fade;
     \\    let wind_dir = normalize(vec2f(0.8, 0.6));
     \\    world.x = world.x + wind_dir.x * bend;
     \\    world.z = world.z + wind_dir.y * bend;
@@ -1258,7 +1261,10 @@ pub const frond_wgsl =
     \\    let phase = world.x * 0.10 + world.z * 0.12 + S.time * 1.1;
     \\    let sway = sin(phase) + 0.35 * sin(phase * 2.3 + 1.1);
     \\    let gust = 0.18 + 0.16 * sin(S.time * 0.4 + world.x * 0.04);
-    \\    let bend = sway * gust * tipw;
+    \\    // req_1665: same 60m animation cut as grass (faded 50..60) — a distant palm
+    \\    // crown holds still rather than paying per-vertex wind across the whole map.
+    \\    let anim_fade = smoothstep(60.0, 50.0, distance(S.camera_pos, world.xyz));
+    \\    let bend = sway * gust * tipw * anim_fade;
     \\    let wind_dir = normalize(vec2f(0.8, 0.6));
     \\    world.x = world.x + wind_dir.x * bend;
     \\    world.z = world.z + wind_dir.y * bend;

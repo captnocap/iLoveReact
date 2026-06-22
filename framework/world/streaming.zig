@@ -25,7 +25,10 @@ pub const Range = struct { first: u32 = 0, count: u32 = 0 };
 
 /// One packed instance-row batch as the loader draws it. Stride ≥ 9:
 /// pos3 [+rot3 when stride ≥ 12] scale3 color3 [+shape id at 12].
-pub const FamilyRows = struct { rows: []const f32, stride: u32 };
+/// `draw_radius` (meters, 0 = unlimited) is a per-family view-distance: short
+/// foliage (grass/flora/trees) draws to HALF the structural view distance so a
+/// dense field doesn't pay full-radius staging + animation cost (req_1665).
+pub const FamilyRows = struct { rows: []const f32, stride: u32, draw_radius: f32 = 0 };
 
 pub const Camera = struct {
     pos: [3]f32,
@@ -48,6 +51,9 @@ pub const Family = struct {
     always: Range,
     /// Per chunk (grid order, z-major). count == 0 → no rows in that chunk.
     ranges: []Range,
+    /// Per-family view distance in meters (0 = unlimited). Foliage families set
+    /// this to half the structural radius so far grass/trees are not drawn (req_1665).
+    draw_radius: f32 = 0,
 
     fn deinit(self: *Family, allocator: std.mem.Allocator) void {
         allocator.free(self.rows);
@@ -121,6 +127,10 @@ pub const World = struct {
     /// Renderer slice of the V30 activation oracle. null until the mapfile
     /// ships a precomputed chunk-to-chunk VIS lump; null = all visible.
     vis: ?[]const u8 = null,
+    /// Player XZ from the last updateResidency — emitChunkRanges measures a
+    /// family's per-chunk distance against its draw_radius from here (req_1665).
+    last_player_x: f32 = 0,
+    last_player_z: f32 = 0,
     stats: BuildStats,
     // per-frame scratch (allocated once)
     visible: []bool,
@@ -158,6 +168,8 @@ pub const World = struct {
     /// draw distance): tall textured buildings promote from far away, props
     /// keep the base bubble.
     pub fn updateResidency(self: *World, player_x: f32, player_z: f32, radius: f32) void {
+        self.last_player_x = player_x;
+        self.last_player_z = player_z;
         const n = self.chunkCount();
         var i: usize = 0;
         while (i < n) : (i += 1) {
@@ -230,6 +242,11 @@ pub const World = struct {
             if (r.count == 0) continue;
             const wanted = if (lod) (!self.resident[i] and self.visible[i]) else (self.resident[i] and self.visible[i]);
             if (!wanted) continue;
+            // Per-family view distance (req_1665): a foliage family is drawn only
+            // within its draw_radius of the player, so far grass/trees vanish well
+            // inside the structural bubble — the dominant fps lever in dense fields.
+            if (!lod and family.draw_radius > 0 and
+                self.chunkDist2(i, self.last_player_x, self.last_player_z) > family.draw_radius * family.draw_radius) continue;
             if (pending) |*p| {
                 if (r.first == p.first + p.count) {
                     p.count += r.count;
@@ -445,6 +462,7 @@ pub fn build(
             .stride = stride,
             .always = .{ .first = 0, .count = spanning },
             .ranges = ranges,
+            .draw_radius = family.draw_radius,
         };
         built += 1;
     }
