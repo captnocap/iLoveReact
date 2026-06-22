@@ -41,8 +41,8 @@ import { addAnchor, isAnchor, nextAnchorName } from '../anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from '../wheelMount';
 import { useStudioModel, type StudioModel, type StudioPart } from '../studioModel';
 import { glbToEditMesh, base64ToBytes } from '../importMesh';
-import { cookProp, type PropDescriptorInput } from '../cookedAsset';
-import { useCookedAssets } from '../cookedAssets';
+import { cookProp, type PropDescriptorInput, type CookedAsset } from '../cookedAsset';
+import { useCookedAssets, cookedTextureBlob } from '../cookedAssets';
 import { StudioOutliner } from '../Outliner';
 import { SceneTextureAtlas, STUDIO_TEXTURE_KEY } from '../TextureAtlas';
 import { BackdropSurface, BackdropsPanel, backdropQuad, backdropTexKey, defaultBackdropPos, imageDims, type Backdrop } from '../Backdrops';
@@ -378,6 +378,27 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   // model into a typed, content-addressed, installed game asset. Transient (twig).
   const cooked = useCookedAssets();
   const [compileOpen, setCompileOpen] = useState(false);
+  // Load-from-prop picker (req_1667/1668): a painting compiled into a prop carries the
+  // SAME content-addressed texture blob (texRef === the model's paintRef), and the
+  // cooked-asset store NEVER GCs those blobs (unlike the model stream, req_1556) — so a
+  // compiled prop is the DURABLE backup of a painting. This picker pulls a prop's
+  // texture blob back onto the OPEN model so painting is never a one-shot: open the
+  // model, load its prop's texture, keep painting. null = closed.
+  const [loadPropOpen, setLoadPropOpen] = useState(false);
+  // Re-attach a compiled prop's painted texture to the open model. Persists onto THIS
+  // model (paintRef + interned blob) AND uploads into the live <Paintable> so it shows
+  // at once — works from any mode (the display path keys on the model's paintRef now).
+  const loadPaintFromAsset = (asset: CookedAsset) => {
+    if (!asset.texRef) { toast('that prop has no painted texture to load'); return; }
+    const blob = cookedTextureBlob(asset.texRef);
+    if (!blob) { toast(`"${asset.name}" texture is missing from the store`); return; }
+    props.onBakePaint(asset.texRef, blob); // persist onto the open model + intern the blob
+    restorePaint(blob);                    // show it now (parks until the Paintable mounts)
+    markPaintInited(props.sceneName ?? null);
+    setPaintBakeTick((t) => t + 1);
+    setLoadPropOpen(false);
+    toast(`loaded "${asset.name}" onto this model — paint away`);
+  };
 
   // Export the sprite sheet (req_1072): rasterize the atlas (whole, or ONE slice =
   // a selected face's island) → PNG → cart/hmsc-int/exports/<name>.png. The raster
@@ -2496,6 +2517,9 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
                 <Pressable tooltip="Fill the ENTIRE model with the current colour in one click (base coat)" onPress={() => { paintSnapshotBegin(); fillAllFaces(); if (!texView) setTexView(true); commitPaint(); }} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame }}>
                   <Text fontSize={10} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>fill all</Text>
                 </Pressable>
+                <Pressable tooltip="Load a painting back from a prop you compiled from this (or any) model — the compiled prop is the durable backup of its texture" onPress={() => setLoadPropOpen(true)} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame }}>
+                  <Text fontSize={10} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>load from prop</Text>
+                </Pressable>
                 <Pressable tooltip="Clear all paint on this model (back to the base coat)" onPress={() => { paintSnapshotBegin(); baseCoat(tex?.color ?? '#c8ccd2'); props.parts.forEach((p) => { if (p.paint && Object.keys(p.paint).length) props.onEditPaint(p.id, {}); }); paintRef.current = {}; touchedRef.current.clear(); commitPaint(); }} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: '#a14545' }}>
                   <Text fontSize={10} color="#f0a0a0" style={{ fontFamily: 'monospace', fontWeight: '800' }}>clear</Text>
                 </Pressable>
@@ -3388,6 +3412,41 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
           }}
         />
       ) : null}
+
+      {/* Load-from-prop picker (req_1667/1668): pull a compiled prop's painted texture
+          back onto the open model. The compiled prop is the durable backup of a
+          painting (the cooked store never GCs texture blobs), so a painting is never a
+          one-shot — open the model, load its prop's texture, keep painting. */}
+      {loadPropOpen ? (() => {
+        const textured = cooked.all.filter((a) => !!a.texRef);
+        return (
+          <Box style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000a', zIndex: Z.modal }}>
+            <Col style={{ width: 420, maxHeight: 420, backgroundColor: PAINT_THEME.panel, borderWidth: 1, borderColor: PAINT_THEME.frame, borderRadius: 8, padding: 14, gap: 10 }}>
+              <Row style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text fontSize={13} color={PAINT_THEME.ink} style={{ fontWeight: '800' }}>Load painting from a compiled prop</Text>
+                <Pressable onPress={() => setLoadPropOpen(false)} tooltip="Close"><Icon name="X" size={15} color={PAINT_THEME.dim} /></Pressable>
+              </Row>
+              <Text fontSize={10} color={PAINT_THEME.dim}>Pulls the prop's texture onto "{props.sceneName ?? 'this model'}" so you can keep editing. Works best on the model the prop was compiled from (its faces match the texture).</Text>
+              {textured.length === 0 ? (
+                <Text fontSize={11} color={PAINT_THEME.dim} style={{ paddingTop: 8, paddingBottom: 8 }}>No compiled props carry a painted texture yet. Paint a model, then Compile it to a prop — that prop becomes the painting's durable backup.</Text>
+              ) : (
+                <ScrollView style={{ maxHeight: 300 }}>
+                  <Col style={{ gap: 5 }}>
+                    {textured.map((a) => (
+                      <Pressable key={a.id} onPress={() => loadPaintFromAsset(a)} tooltip={`Load "${a.name}" texture onto this model`} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6, backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame }}>
+                        <Row style={{ alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                          <Text fontSize={11} color={PAINT_THEME.ink} style={{ fontWeight: '700' }}>{a.name}</Text>
+                          <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace' }}>{a.kind} · {a.texRef?.slice(0, 8)}</Text>
+                        </Row>
+                      </Pressable>
+                    ))}
+                  </Col>
+                </ScrollView>
+              )}
+            </Col>
+          </Box>
+        );
+      })() : null}
 
       {/* Import Texture (req_1079): re-upload an edited / AI-generated PNG. The
           default path is this scene's export, so the round-trip is one click. */}
