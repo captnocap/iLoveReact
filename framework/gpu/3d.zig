@@ -395,10 +395,27 @@ pub const TelemetryStats = struct {
     meshes_collected: u32 = 0,
     meshes_dropped: u32 = 0,
     instances: u32 = 0,
+    /// Of `instances`, how many were RE-STAGED into the per-frame buffer this frame
+    /// (overflow families that don't fit the static buffer — pure per-frame upload
+    /// waste). High + correlated with fps drop ⇒ the cost is CPU re-staging, not
+    /// GPU overdraw. req_1670 discriminator.
+    staged_dynamic: u32 = 0,
     draw_calls: u32 = 0,
     draw_us: u64 = 0,
 };
 var g_telemetry = TelemetryStats{};
+
+// Opt-in per-frame perf readout (RJIT_PERFLOG=1). cpu_draw_us measures CPU command
+// encoding + instance re-staging only — async GPU shading (overdraw) is NOT in it, so
+// the two numbers together separate a CPU re-stage choke from a GPU overdraw choke.
+var g_perflog_on: ?bool = null;
+var g_perf_frame: u64 = 0;
+fn perfLogOn() bool {
+    if (g_perflog_on) |v| return v;
+    const on = std.posix.getenv("RJIT_PERFLOG") != null;
+    g_perflog_on = on;
+    return on;
+}
 
 pub fn telemetryStats() TelemetryStats {
     return g_telemetry;
@@ -1493,6 +1510,11 @@ pub fn flushPending() void {
     for (g_pending[0..g_pending_count]) |p| drawScene(p.node, p.slot, p.w, p.h);
     const ended = std.time.microTimestamp();
     g_telemetry.draw_us = @intCast(@max(0, ended - started));
+    if (perfLogOn()) {
+        g_perf_frame += 1;
+        if (g_perf_frame % 30 == 0)
+            std.debug.print("[r3d-perf] cpu_draw_us={d} instances={d} restaged={d} draw_calls={d} | cpu_draw_us=encode+restage (GPU overdraw NOT counted): high here = re-stage choke, low+laggy = overdraw\n", .{ g_telemetry.draw_us, g_telemetry.instances, g_telemetry.staged_dynamic, g_telemetry.draw_calls });
+    }
     g_pending_count = 0;
 }
 
@@ -2198,6 +2220,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         pass.draw(group_slot.count, group_count, 0, 0);
         g_telemetry.draw_calls += 1;
         g_telemetry.instances += group_count;
+        g_telemetry.staged_dynamic += group_count; // re-staged this frame (overflow path)
     }
 
     // ── Transparent pass ──────────────────────────────────────────────────
