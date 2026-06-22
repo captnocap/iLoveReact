@@ -43,12 +43,19 @@ export type ShellBatch = {
   radius: number;
 };
 
-// One emitted shell box: world CENTER (cx,cy,cz), full scale (sx,sy,sz), RGB
-// color in 0..1. The ONE box vocabulary every consumer of the shell shares — the
-// React streaming batch (stride-9 rows) and the compiled bake (pushBox into the
-// gamefile's stride-13 instances) both feed this same callback, so there is no
-// second copy of the generator to drift (rule of two).
+// What a shell box IS, so the compiled bake can skin buildings with real facade
+// materials (brick/windows/shopfronts) while leaving ground/road flat. The live
+// React batch ignores the kind (it only ships flat color).
+export type ShellBoxKind = 'ground' | 'road' | 'building';
+
+// One emitted shell box: its kind, world CENTER (cx,cy,cz), full scale
+// (sx,sy,sz), RGB color in 0..1. The ONE box vocabulary every consumer of the
+// shell shares — the React streaming batch (stride-9 rows) and the compiled bake
+// (pushBox into the gamefile's stride-13 instances, plus a per-building material)
+// both feed this same callback, so there is no second copy of the generator to
+// drift (rule of two).
 export type ShellBoxEmit = (
+  kind: ShellBoxKind,
   cx: number, cy: number, cz: number,
   sx: number, sy: number, sz: number,
   r: number, g: number, b: number,
@@ -98,6 +105,7 @@ function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: n
 
   // Ground slab — one flat box per chunk, a muted asphalt grey.
   emit(
+    'ground',
     ox + half, groundY - GROUND_THICKNESS / 2, oz + half,
     SHELL_CHUNK_METERS, GROUND_THICKNESS, SHELL_CHUNK_METERS,
     0.20, 0.21, 0.24,
@@ -105,8 +113,8 @@ function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: n
 
   // A simple street cross through the chunk (sells "blocks" cheaply).
   const roadW = 9;
-  emit(ox + half, groundY + 0.03, oz + half, SHELL_CHUNK_METERS, GROUND_THICKNESS, roadW, 0.13, 0.13, 0.15);
-  emit(ox + half, groundY + 0.03, oz + half, roadW, GROUND_THICKNESS, SHELL_CHUNK_METERS, 0.13, 0.13, 0.15);
+  emit('road', ox + half, groundY + 0.03, oz + half, SHELL_CHUNK_METERS, GROUND_THICKNESS, roadW, 0.13, 0.13, 0.15);
+  emit('road', ox + half, groundY + 0.03, oz + half, roadW, GROUND_THICKNESS, SHELL_CHUNK_METERS, 0.13, 0.13, 0.15);
 
   // Buildings: 2×2 blocks, up to MAX_LOTS_PER_BLOCK lots each, hash-gated by the
   // chunk's density so sprawl thins with distance.
@@ -129,7 +137,7 @@ function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: n
         // rectangle.
         if (pointInCore(px, pz, core)) continue;
         const [r, g, b] = colorForHeight(h, profile.tint);
-        emit(px, groundY + h / 2, pz, w, h, d, r, g, b);
+        emit('building', px, groundY + h / 2, pz, w, h, d, r, g, b);
       }
     }
   }
@@ -180,8 +188,10 @@ export function buildShellBatch(
   // chunks straddles it, ground reaching in to butt against the map) with no
   // empty gap. The void fills everything outside the rectangle, visible the
   // moment you look past the city's edge.
-  // Stride-9 emit (pos3 scale3 color3) — the live host instance layout.
-  const emit: ShellBoxEmit = (cx, cy, cz, sx, sy, sz, r, g, b) => {
+  // Stride-9 emit (pos3 scale3 color3) — the live host instance layout. The live
+  // batch is flat-color, so it ignores the box kind (materials are a bake-only
+  // refinement).
+  const emit: ShellBoxEmit = (_kind, cx, cy, cz, sx, sy, sz, r, g, b) => {
     out.push(cx, cy, cz, sx, sy, sz, r, g, b);
   };
   for (let dz = -radiusChunks; dz <= radiusChunks; dz += 1) {

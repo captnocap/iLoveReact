@@ -56,6 +56,7 @@ import {
 // (render3d/props/DataProp) so a prop's geometry lives in exactly one place.
 import { resolvePropParts } from './propRecipes/resolve';
 import { worldCore } from '../game/void/distance';
+import { voidHash } from '../game/void/distortion';
 import { forEachShellRingBox, VOID_SHELL_RING_CHUNKS } from '../game/void/shell';
 import { importedPropMesh, isImportedPropKind, type ImportedPropMesh } from '../game/kinds/importedProps';
 import { isCookedPropKind } from '../game/kinds/props';
@@ -1066,22 +1067,44 @@ function pushPalms(b: Build, state: GameState, floors: readonly ChunkFloor[]): v
   pushInstanceField(b, palm.fronds, INSTANCE_SHAPE_FROND);
 }
 
+// Real facade/masonry looks the void buildings draw from (the brick / windows /
+// shopfront shaders the editor already authors with — game/textures/shaders.ts
+// 'Building Facades' + 'Walls & Masonry' boards). One is hash-picked per building
+// so the procedural skyline reads as a varied city, not flat-grey blocks. Each
+// distinct id interns ONCE into the gamefile material vocab (so the whole ring
+// costs only this many materials, shared across thousands of buildings).
+const VOID_SHELL_FACADES = [
+  'i-brick-apartment', 'i-brick-fire-escape', 'i-brick-shopfront',
+  'i-brick-entrance', 'i-brick-rollshutter', 'i-brick-bodega',
+  'a-brick', 'a-concrete', 'h-stone-wall', 'e-stucco-facade',
+] as const;
+
 // The procedural void shell (SKYBOX_PLAYBOOK §6): a finite baked ring of the
 // hash-deterministic city wrapping the authored map, so the void shows in the
 // no-V8 /compiled world (which runs no React — the editor's VoidShell never
 // executes there). Reuses the ONE shell generator (game/void/shell.ts) the live
 // editor batch uses; here each box lowers to a stride-13 gamefile instance row
-// (shapeId BOX, no material). The matching walkable ground is a single flat
-// collider baked in worldColliders.shellGroundHeightfield.
+// (shapeId BOX), and each BUILDING gets a hash-picked facade material so the
+// skyline has real brick/window/shopfront variety. The matching walkable ground
+// is a single flat collider baked in worldColliders.shellGroundHeightfield.
 function pushVoidShell(b: Build, state: GameState, groundY: number): void {
-  if (!state?.world) return;
+  // Needs the authored map's bounds to know where the void begins; prop-recipe
+  // unit tests build instances from a layout-less stub, so bail there.
+  if (!state?.world?.layout || !(state.world.cellSizeMeters > 0)) return;
   const core = worldCore(state.world);
   let n = 0;
-  forEachShellRingBox(core, VOID_SHELL_RING_CHUNKS, (cx, cy, cz, sx, sy, sz, r, g, bl) => {
-    pushBox(b, cx, cy, cz, sx, sy, sz, [r, g, bl]);
+  forEachShellRingBox(core, VOID_SHELL_RING_CHUNKS, (kind, cx, cy, cz, sx, sy, sz, r, g, bl) => {
+    let material = 0;
+    if (kind === 'building') {
+      // Deterministic facade pick from the box's footprint — same building, same
+      // look on every recompile (seeded, never random).
+      const pick = Math.floor(voidHash(Math.round(cx), Math.round(cz), 991) * VOID_SHELL_FACADES.length);
+      material = internMaterial(b, { kind: 'material', id: VOID_SHELL_FACADES[pick] });
+    }
+    pushBox(b, cx, cy, cz, sx, sy, sz, [r, g, bl], 0, material);
     n += 1;
   }, groundY);
-  console.warn(`[bake] void shell: ${n} procedural box(es) in the ${VOID_SHELL_RING_CHUNKS}-chunk ring around the authored map (groundY=${groundY.toFixed(2)})`);
+  console.warn(`[bake] void shell: ${n} procedural box(es) in the ${VOID_SHELL_RING_CHUNKS}-chunk ring around the authored map (groundY=${groundY.toFixed(2)}); ${VOID_SHELL_FACADES.length} facade looks`);
 }
 
 export function buildWorldInstances(
