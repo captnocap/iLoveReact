@@ -15,6 +15,7 @@ import {
   type DecalNode,
 } from '../../../game/textures/decal';
 import { defaultShaderData, paramDefaults, type ShaderParam, type ShaderSpec } from '../../../game/textures/shaders';
+import { missionCodePresets } from '../../../game/missions/codes';
 import type { MaterialsEvent } from '../../materials/stream';
 
 export type MaterialLens = 'preview' | 'shader' | 'compose';
@@ -60,7 +61,8 @@ export type MaterialRow =
   | { kind: 'react'; id: string; label: string; texture: TextureSummary }
   | { kind: 'stored'; id: string; label: string; material: StoredMaterialSummary }
   | { kind: 'decal'; id: 'new'; label: string; material?: undefined }
-  | { kind: 'decal'; id: string; label: string; material: StoredMaterialSummary };
+  | { kind: 'decal'; id: string; label: string; material: StoredMaterialSummary }
+  | { kind: 'mission'; id: string; label: string; doc: DecalDoc; key: string };
 
 export type MaterialSubject = {
   store: MaterialStore;
@@ -272,6 +274,11 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
       const material = customRows().find((t) => t.id === id && t.decal) ?? null;
       return material ? { kind: 'decal', id, label: material.label, material } : null;
     }
+    if (rowId.startsWith('mission:')) {
+      const key = rowId.slice('mission:'.length);
+      const preset = missionCodePresets().find((p) => p.key === key) ?? null;
+      return preset ? { kind: 'mission', id: key, label: preset.label, doc: preset.doc, key } : null;
+    }
     return null;
   };
 
@@ -279,6 +286,7 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
     if (row.kind === 'recipe') return `recipe:${row.id}`;
     if (row.kind === 'react') return `react:${row.id}`;
     if (row.kind === 'stored') return `stored:${row.id}`;
+    if (row.kind === 'mission') return `mission:${row.id}`;
     return row.id === 'new' ? 'decal:new' : `decal:${row.id}`;
   };
 
@@ -296,6 +304,20 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
     composeDoc = opened;
     composeName = material.label;
     composeEditingId = material.id;
+    selectedNodeId = null;
+    writeCompose();
+  };
+
+  // Load a freshly-generated DecalDoc (a mission code) into the compose surface as
+  // an UNSAVED draft — the user tweaks colours/size then Materializes it like any
+  // decal. composeEditingId stays null so saving mints a new material, never
+  // clobbers a stored one.
+  const openComposeDoc = (doc: DecalDoc, name: string) => {
+    const opened = validateDecalDoc(cloneDoc(doc));
+    if (!opened) return;
+    composeDoc = opened;
+    composeName = name;
+    composeEditingId = null;
     selectedNodeId = null;
     writeCompose();
   };
@@ -508,6 +530,7 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
       for (const t of customRows()) rows.push({ id: `stored:${t.id}`, label: t.label, icon: t.decal ? 'Image' : 'Palette' });
       rows.push({ id: 'decal:new', label: 'new decal', icon: 'SquarePen' });
       for (const t of customRows().filter((m) => m.decal)) rows.push({ id: `decal:${t.id}`, label: `${t.label} (decal)`, icon: 'ImagePlus' });
+      for (const p of missionCodePresets()) rows.push({ id: `mission:${p.key}`, label: p.label, icon: 'QrCode' });
       return rows;
     },
     defaultRow(rows) {
@@ -529,6 +552,9 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
         writeShaderSelection('custom', row.id);
         lens = row.material.decal ? 'compose' : 'preview';
         if (row.material.decal) openDecal(row.material);
+      } else if (row.kind === 'mission') {
+        lens = 'compose';
+        openComposeDoc(row.doc, row.label);
       } else {
         lens = 'compose';
         openDecal(row.id === 'new' ? null : row.material);

@@ -150,6 +150,13 @@ function PreviewStage(props: { subject: MaterialSubject }) {
       </StageShell>
     );
   }
+  if (row.kind === 'mission') {
+    return (
+      <StageShell caption={`${row.label} · code`}>
+        <DecalSurface doc={row.doc} width={300} height={Math.max(80, Math.round(300 * row.doc.height / row.doc.width))} />
+      </StageShell>
+    );
+  }
   const textureId = row.kind === 'react' ? row.id : row.material.id;
   const def = textureById(textureId);
   if (def) return <TexturePreview def={def} caption={`${def.label} · material`} />;

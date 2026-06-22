@@ -100,6 +100,20 @@ test('roster covers shader recipes, React textures, stored materials, and editab
   assert(rows.includes('decal:custom:sign'), 'saved decal compose row exists');
 });
 
+test('mission codes appear as importable rows and load into the compose surface', () => {
+  const { store } = rig();
+  const rows = store.listRows();
+  const mission = rows.find((r) => r.id === 'mission:delivery-gig');
+  assert(!!mission, 'a mission-code row exists for the shipped mission');
+  assert(mission!.label.startsWith('Mission · '), 'the row is labelled as a mission code');
+  store.pick('mission:delivery-gig');
+  assertEqual(store.lens, 'compose', 'picking a mission code opens the compose surface');
+  const doc = store.composeDoc;
+  assertEqual(doc.version, DECAL_DOC_VERSION, 'a valid decal doc is loaded');
+  assertEqual(doc.nodes.length, 1, 'the code is the one shader-filled node');
+  assertEqual((doc.nodes[0] as any).fillShaderId, 'mission-code', 'the node carries the mission-code fill');
+});
+
 test('picking a shader recipe owns the shader lens and writes the legacy /textures selection twig', () => {
   const { store, twigs } = rig();
   store.pick('recipe:brick');
