@@ -25,6 +25,11 @@ export const VOID_SHELL_RING_CHUNKS = 8;
 // Each chunk splits into a 2×2 block grid; each block holds up to this many lots.
 const BLOCKS_PER_AXIS = 2;
 const MAX_LOTS_PER_BLOCK = 4;
+// Buildings stack from slabs ~this tall so the facade texture repeats per floor
+// instead of stretching one tile over the whole tower; footprints cap to this
+// span so the facade isn't smeared horizontally either.
+const FACADE_TILE_METERS = 9;
+const MAX_BUILDING_SPAN = 22;
 // Ground slab sits flush with the authored ground (~y 0); a thin readable slab.
 // Exported so the compiled bake's walkable ground collider sits at the SAME
 // height the shell ground renders (see-it == walk-it).
@@ -127,8 +132,10 @@ function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: n
         const salt = (bx * 31 + bz * 17 + lot) | 0;
         // Hash gate: skip a fraction of lots so the city has gaps (parks, lots).
         if (voidHash(cx * 13 + bx, cz * 13 + bz, salt) > profile.density) continue;
-        const w = rand(cx + bx, cz + bz, salt + 1, 10, blockSpan * 0.42);
-        const d = rand(cx + bx, cz + bz, salt + 2, 10, blockSpan * 0.42);
+        // Footprints capped narrower than the block so the facade isn't smeared
+        // across a huge wall horizontally (one tile per ~MAX_BUILDING_SPAN face).
+        const w = Math.min(MAX_BUILDING_SPAN, rand(cx + bx, cz + bz, salt + 1, 10, blockSpan * 0.42));
+        const d = Math.min(MAX_BUILDING_SPAN, rand(cx + bx, cz + bz, salt + 2, 10, blockSpan * 0.42));
         const h = rand(cx + bx, cz + bz, salt + 3, 6, profile.maxHeight);
         const px = blockX + rand(cx + bx, cz + bz, salt + 4, w / 2 + 4, blockSpan - w / 2 - 4);
         const pz = blockZ + rand(cx + bx, cz + bz, salt + 5, d / 2 + 4, blockSpan - d / 2 - 4);
@@ -137,7 +144,16 @@ function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: n
         // rectangle.
         if (pointInCore(px, pz, core)) continue;
         const [r, g, b] = colorForHeight(h, profile.tint);
-        emit('building', px, groundY + h / 2, pz, w, h, d, r, g, b);
+        // Stack the building from FACADE_TILE_METERS-tall slabs instead of one
+        // monolith, so the facade texture (windows/brick) REPEATS up the tower
+        // instead of stretching a single tile over the whole height. Each slab is
+        // a full-footprint box sharing the building's material; the host maps the
+        // facade tile per slab, giving real floors.
+        const tiles = Math.max(1, Math.round(h / FACADE_TILE_METERS));
+        const tileH = h / tiles;
+        for (let t = 0; t < tiles; t += 1) {
+          emit('building', px, groundY + (t + 0.5) * tileH, pz, w, tileH, d, r, g, b);
+        }
       }
     }
   }

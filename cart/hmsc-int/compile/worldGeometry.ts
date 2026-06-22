@@ -93,6 +93,12 @@ export const INSTANCE_SHAPE_PALMTRUNK = 9;
 // Flower heads — tiny cards routed through the same "~grass~" wind pipeline, so
 // the blossom moves with the blade tip instead of floating as a static sphere.
 export const INSTANCE_SHAPE_FLOWER = 10;
+// A decorative box — renders exactly like a box (the loader's geomForShape falls
+// back to box) but NEVER becomes a physics collider (world_loader.zig
+// isNonCollidingFoliage skips it). The void shell's distant skyline bakes as
+// these so its thousands of boxes don't saturate the collider cap — you walk on
+// the shell's single ground heightfield, never into the towers.
+export const INSTANCE_SHAPE_SCENERY_BOX = 11;
 
 // ── materials: ship the SHADER (the formula) — pixels only when there IS no formula ─
 // GUIDING_LIGHT: procedural content travels as its recipe. A face whose skin is
@@ -1073,10 +1079,15 @@ function pushPalms(b: Build, state: GameState, floors: readonly ChunkFloor[]): v
 // so the procedural skyline reads as a varied city, not flat-grey blocks. Each
 // distinct id interns ONCE into the gamefile material vocab (so the whole ring
 // costs only this many materials, shared across thousands of buildings).
+// Only VERTICALLY-REPEATING looks: window-grid apartments, fire-escapes, and
+// plain masonry tile cleanly when stacked per floor. The ground-floor-specific
+// facades (shopfront / bodega / entrance / roll-shutter) are deliberately left
+// out — their storefront sits at one end of the tile, so stacked up a tower they
+// read wrong / upside-down. Distance scenery wants repeatable walls, not lobbies.
 const VOID_SHELL_FACADES = [
-  'i-brick-apartment', 'i-brick-fire-escape', 'i-brick-shopfront',
-  'i-brick-entrance', 'i-brick-rollshutter', 'i-brick-bodega',
+  'i-brick-apartment', 'i-brick-fire-escape',
   'a-brick', 'a-concrete', 'h-stone-wall', 'e-stucco-facade',
+  'b-mildew-brick', 'b-peel-paint',
 ] as const;
 
 // The procedural void shell (SKYBOX_PLAYBOOK §6): a finite baked ring of the
@@ -1101,7 +1112,9 @@ function pushVoidShell(b: Build, state: GameState, groundY: number): void {
       const pick = Math.floor(voidHash(Math.round(cx), Math.round(cz), 991) * VOID_SHELL_FACADES.length);
       material = internMaterial(b, { kind: 'material', id: VOID_SHELL_FACADES[pick] });
     }
-    pushBox(b, cx, cy, cz, sx, sy, sz, [r, g, bl], 0, material);
+    // SCENERY shape: render-only, never a collider (the shell's ground heightfield
+    // is what you walk on). Keeps the thousands of shell boxes off the collider cap.
+    pushShape(b, INSTANCE_SHAPE_SCENERY_BOX, cx, cy, cz, [0, 0, 0], sx, sy, sz, [r, g, bl], material);
     n += 1;
   }, groundY);
   console.warn(`[bake] void shell: ${n} procedural box(es) in the ${VOID_SHELL_RING_CHUNKS}-chunk ring around the authored map (groundY=${groundY.toFixed(2)}); ${VOID_SHELL_FACADES.length} facade looks`);
