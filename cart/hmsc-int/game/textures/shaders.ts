@@ -24,6 +24,7 @@
 // world render lane is captured.
 import { ROAD_TILE_SHADER } from '../../render3d/roadTileFill';
 import { FILL_SHADER } from '../../render3d/fillShader';
+import { packMissionData } from './missionCode';
 
 export interface ShaderParam {
   key: string;
@@ -176,6 +177,59 @@ const CUTOUT_STENCIL: ShaderSpec = {
     for (let i = 0; i < STENCIL_SLIDER_GRID * STENCIL_SLIDER_GRID; i++) data.push(1);
     return data;
   },
+};
+
+// ── Mission code (req_1620/1621) ─────────────────────────────────────────────
+// A unique, decodable code minted from a mission key (game/textures/missionCode.ts
+// owns the codec). The shader is a dumb grid sampler — finder patterns + payload
+// are already baked into the packed modules; this just reads a module's bit and
+// returns dark or light, with a quiet-zone border. data[] layout is documented in
+// missionCode.ts. The catalog form below previews a sample code; real codes are
+// generated per mission via missionCodeDoc() and ride the decal pipeline.
+export const MISSION_CODE_SHADER = `
+@group(0) @binding(1) var<storage, read> D: array<f32>;
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let N = max(D[0], 1.0);
+  let quiet = D[8];
+  let span = N + quiet * 2.0;
+  let mx = floor(in.uv.x * span) - quiet;
+  let my = floor(in.uv.y * span) - quiet;
+  let light = vec4f(D[4], D[5], D[6], D[7]);
+  if (mx < 0.0 || my < 0.0 || mx >= N || my >= N) {
+    return light;
+  }
+  let iN = u32(N);
+  let idx = u32(my) * iN + u32(mx);
+  let wordBits = u32(max(D[9], 1.0));
+  let word = u32(D[11u + idx / wordBits]);
+  let bit = (word >> (idx % wordBits)) & 1u;
+  if (bit == 1u) {
+    return vec4f(D[1], D[2], D[3], 1.0);
+  }
+  return light;
+}
+`;
+
+const MISSION_CODE: ShaderSpec = {
+  id: 'mission-code',
+  label: 'Mission Code',
+  group: 'Stencils',
+  blurb: 'A unique, scannable code minted from a mission — finder patterns + the mission key, CRC-checked and decodable. Generated per mission (not hand-tuned); the sliders here recolor a sample.',
+  shader: MISSION_CODE_SHADER,
+  base: [
+    { key: 'darkR', label: 'Module red', default: 0.04, min: 0, max: 1, step: 0.05 },
+    { key: 'darkG', label: 'Module green', default: 0.04, min: 0, max: 1, step: 0.05 },
+    { key: 'darkB', label: 'Module blue', default: 0.04, min: 0, max: 1, step: 0.05 },
+    { key: 'lightR', label: 'Field red', default: 0.96, min: 0, max: 1, step: 0.05 },
+    { key: 'lightG', label: 'Field green', default: 0.96, min: 0, max: 1, step: 0.05 },
+    { key: 'lightB', label: 'Field blue', default: 0.96, min: 0, max: 1, step: 0.05 },
+  ],
+  variants: [{ id: 'sample', label: 'Sample', value: 0, params: [] }],
+  buildData: (_variantValue, base) => packMissionData(
+    'preview',
+    [base.darkR ?? 0.04, base.darkG ?? 0.04, base.darkB ?? 0.04],
+    [base.lightR ?? 0.96, base.lightG ?? 0.96, base.lightB ?? 0.96],
+  ),
 };
 
 // ── The fill boards (effect_fills A–J) ───────────────────────────────────────
@@ -426,7 +480,7 @@ const FILL_SPECS: ShaderSpec[] = FILL_BOARDS.flatMap((b) => b.materials.map((m, 
 
 // ── The catalog ──────────────────────────────────────────────────────────────
 
-export const HMSC_SHADERS: ShaderSpec[] = [ROAD, CUTOUT_STENCIL, ...FILL_SPECS];
+export const HMSC_SHADERS: ShaderSpec[] = [ROAD, CUTOUT_STENCIL, MISSION_CODE, ...FILL_SPECS];
 
 export function shaderSpec(id: string): ShaderSpec | undefined {
   return HMSC_SHADERS.find((s) => s.id === id);
