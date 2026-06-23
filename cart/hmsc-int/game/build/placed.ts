@@ -651,9 +651,14 @@ function wallDepthWorldRangeAlong(piece: PlacedBuildPiece, axis: 'x' | 'z', piec
 /** A corner join at one end of a wall's run (CORNERSEAM-0610): a perpendicular
  *  wall meets this end with its run entirely on ONE side, leaving the opposite
  *  side an exposed (convex) corner. `outerV` is that exposed side as a local
- *  ±v sign — the face slab on that side is the one the renderer miters. A
+ *  ±v sign — the face slab on that side is the one the renderer miters.
+ *  `squareU` is the local-u CENTER of the corner square the miter must fill —
+ *  the midpoint of the joining wall's depth band projected onto this run. It
+ *  tracks where the partner's body actually sits (centered walls land on the
+ *  line; floor-offset walls sit half a thickness to one side), so the miter
+ *  lands on the real crossing instead of a hardcoded half-thickness guess. A
  *  T-junction (runs on both sides) exposes nothing and reports null. */
-export type WallEndJoin = { outerV: 1 | -1 };
+export type WallEndJoin = { outerV: 1 | -1; squareU: number };
 export type WallEnds = { axis: 'x' | 'z' | null; minU: WallEndJoin | null; maxU: WallEndJoin | null };
 const NO_WALL_ENDS: WallEnds = { axis: null, minU: null, maxU: null };
 
@@ -668,9 +673,14 @@ function wallJoinRunLimits(
   // Per world end: did a perpendicular wall join, and which side(s) of this
   // wall's line does its run occupy (one side = corner, both = T-junction).
   const sideTol = PLACED_TUNING.touchToleranceMeters;
+  const restY = (p: PlacedBuildPiece): number => liftedWallBaseY(p, pieces);
   let extMin = self.runMin, extMax = self.runMax;
   let minJoined = false, minPos = false, minNeg = false;
   let maxJoined = false, maxPos = false, maxNeg = false;
+  // World center (along this run) of the corner square each end must miter —
+  // the midpoint of the joining wall's depth band. Defaults to the run end (the
+  // partner's line) until a join refines it to where the partner body sits.
+  let minSqCenter = self.runMin, maxSqCenter = self.runMax;
   // An end a COLLINEAR same-line wall reaches and passes (or meets flush) is a
   // CONTINUATION, not a corner: the neighbor owns the geometry beyond, so
   // extending/mitering there would double it (coplanar slabs → z-fight).
@@ -695,9 +705,17 @@ function wallJoinRunLimits(
       if (candidate.runMin <= self.runMax + tolerance && candidate.runMax > self.runMax + sideTol) maxOwned = true;
       continue;
     }
+    // Run EXTENSION (collider closes the join gap) reads the partner's raw band
+    // — unchanged behavior. The miter SQUARE center, though, must match where
+    // the partner's body actually RENDERS: lifted onto its own floor (WALLTOP),
+    // the same depthSpan pieceVisualShapes resolves. A floor-offset partner read
+    // raw reports centered, so the two paired triangles would drift apart.
     const candidateDepth = wallDepthWorldRangeAlong(other, self.axis, pieces);
+    const otherRest = other.y === restY(other) ? other : { ...other, y: restY(other) };
+    const candidateDepthRest = otherRest === other ? candidateDepth : wallDepthWorldRangeAlong(otherRest, self.axis, pieces);
     if (Math.abs(candidate.line - self.runMin) <= tolerance && candidate.runMin <= self.line + tolerance && candidate.runMax >= self.line - tolerance) {
       extMin = Math.min(extMin, candidateDepth.min);
+      minSqCenter = (candidateDepthRest.min + candidateDepthRest.max) / 2;
       minJoined = true;
       if (candidate.runMin >= self.line - sideTol) minPos = true;
       else if (candidate.runMax <= self.line + sideTol) minNeg = true;
@@ -705,6 +723,7 @@ function wallJoinRunLimits(
     }
     if (Math.abs(candidate.line - self.runMax) <= tolerance && candidate.runMin <= self.line + tolerance && candidate.runMax >= self.line - tolerance) {
       extMax = Math.max(extMax, candidateDepth.max);
+      maxSqCenter = (candidateDepthRest.min + candidateDepthRest.max) / 2;
       maxJoined = true;
       if (candidate.runMin >= self.line - sideTol) maxPos = true;
       else if (candidate.runMax <= self.line + sideTol) maxNeg = true;
@@ -718,19 +737,20 @@ function wallJoinRunLimits(
   // the OPPOSITE side of the joining run.
   const vAxis = localOffset(0, 1, piece.yawDegrees);
   const vComp = self.axis === 'x' ? vAxis.dz : vAxis.dx;
-  const endJoin = (joined: boolean, pos: boolean, neg: boolean): WallEndJoin | null => {
-    if (!joined || pos === neg) return null; // nothing joins, or a T — no exposed corner
-    const joinV = (pos ? 1 : -1) * (vComp >= 0 ? 1 : -1);
-    return { outerV: joinV > 0 ? -1 : 1 };
-  };
-  const minEnd = minOwned ? null : endJoin(minJoined, minPos, minNeg);
-  const maxEnd = maxOwned ? null : endJoin(maxJoined, maxPos, maxNeg);
   // World run → local u. localOffset maps +u to the world NEGATIVE axis
   // direction for quarters 1 (yaw 90 → −z) and 2 (yaw 180 → −x); the world
   // ends swap under that mirror. (Was `quarter 2 || 3` — REQ_0474: yaw-90/270
   // walls grew their corner extension at the EMPTY end and left the joint
   // open, the "gap at the corner + overhang past the corner" screenshots.)
   const flip = self.quarter === 1 || self.quarter === 2 ? -1 : 1;
+  const toLocalU = (world: number): number => flip > 0 ? world - self.center : self.center - world;
+  const endJoin = (joined: boolean, pos: boolean, neg: boolean, sqCenterWorld: number): WallEndJoin | null => {
+    if (!joined || pos === neg) return null; // nothing joins, or a T — no exposed corner
+    const joinV = (pos ? 1 : -1) * (vComp >= 0 ? 1 : -1);
+    return { outerV: joinV > 0 ? -1 : 1, squareU: toLocalU(sqCenterWorld) };
+  };
+  const minEnd = minOwned ? null : endJoin(minJoined, minPos, minNeg, minSqCenter);
+  const maxEnd = maxOwned ? null : endJoin(maxJoined, maxPos, maxNeg, maxSqCenter);
   return flip > 0
     ? { minU: runMin - self.center, maxU: runMax - self.center, ends: { axis: self.axis, minU: minEnd, maxU: maxEnd } }
     : { minU: self.center - runMax, maxU: self.center - runMin, ends: { axis: self.axis, minU: maxEnd, maxU: minEnd } };

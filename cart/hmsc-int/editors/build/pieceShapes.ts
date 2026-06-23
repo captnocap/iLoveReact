@@ -291,13 +291,18 @@ export function pieceVisualShapes(
     const wallMinU = bands.length > 0 ? bands[0].u0 : 0;
     const wallMaxU = bands.length > 0 ? bands[bands.length - 1].u1 : 0;
     const jointButtInset = depthSize / 2;
+    const jointMiterInset = depthSize;
+    // A mitered end stops at the corner square's NEAR edge (squareU ∓ half the
+    // joint), so the trimmed core abuts the miter triangle that fills the
+    // square — wherever the partner's body actually sits. (A plain butt joint
+    // has no square, so it falls back to the nominal end minus the butt inset.)
     const visualU0 = (u0: number): number => {
       if (u0 !== wallMinU || wallMinU >= nominalMinU) return u0;
-      return nominalMinU + jointButtInset;
+      return ends.minU === null ? nominalMinU + jointButtInset : ends.minU.squareU + jointMiterInset / 2;
     };
     const visualU1 = (u1: number): number => {
       if (u1 !== wallMaxU || wallMaxU <= nominalMaxU) return u1;
-      return nominalMaxU - jointButtInset;
+      return ends.maxU === null ? nominalMaxU - jointButtInset : ends.maxU.squareU - jointMiterInset / 2;
     };
     const addCornerMiter = (
       label: string,
@@ -308,8 +313,16 @@ export function pieceVisualShapes(
     ): void => {
       const joinV = -end.outerV;
       const miterFace = joinV > 0 ? wallFront : wallBack;
-      const uCenter = (endSign < 0 ? nominalMinU : nominalMaxU) - endSign * jointButtInset / 2;
-      const vCenter = joinV * jointButtInset / 2;
+      // Fill the REAL corner square where the two bodies cross: centered on the
+      // joining wall's body along the run (end.squareU, which tracks the
+      // partner's depth offset) and on THIS wall's own depth band (depthCenter).
+      // The old hardcoded `nominalEnd − inset/2` / `joinV·inset/2` only landed
+      // right when both walls were floor-offset half a thickness toward the
+      // corner; centered walls (painted-tile floors, no support plate) got a
+      // miter shoved a half-thickness off — see-through gap on two sides, a
+      // sliver overhang on the other two (the corner-seam screenshots).
+      const uCenter = end.squareU;
+      const vCenter = depthCenter;
       const { dx, dz } = localOffset(uCenter, vCenter, yaw);
       shapes.push({
         kind: endSign === joinV ? 'cornerMiter' : 'cornerMiterMirror',
@@ -318,9 +331,9 @@ export function pieceVisualShapes(
           cx: piece.x + dx,
           cy: baseY + h / 2,
           cz: piece.z + dz,
-          sx: jointButtInset,
+          sx: jointMiterInset,
           sy: h,
-          sz: jointButtInset,
+          sz: jointMiterInset,
           yawDegrees: endSign > 0 ? yaw : yaw + 180,
           color: miterFace.color,
           textureKey: miterFace.textureKey,
@@ -514,7 +527,11 @@ export function wallJoinSignature(piece: PlacedBuildPiece, pieces: readonly Plac
   // End-corner state rides the digest (CORNERSEAM-0610): a neighbor can change
   // only the slab miter (not the bands), and the memo must still re-render.
   const ends = GAME_BUILD.placed.wallEnds(piece, pieces);
-  const endsKey = `#${ends.minU?.outerV ?? 0}:${ends.maxU?.outerV ?? 0}`;
+  // squareU rides the digest too: the miter (and the core's mitered trim) follow
+  // the partner's body position, so a neighbor that shifts the corner square must
+  // re-render even when this wall's own bands are unchanged.
+  const endKey = (e: typeof ends.minU): string => e === null ? '0' : `${e.outerV}@${e.squareU.toFixed(3)}`;
+  const endsKey = `#${endKey(ends.minU)}:${endKey(ends.maxU)}`;
   return GAME_BUILD.placed.bands(piece, pieces)
     .map((band) => `${band.u0.toFixed(3)}:${band.u1.toFixed(3)}:${band.top.toFixed(3)}`)
     .join('|') + endsKey;
