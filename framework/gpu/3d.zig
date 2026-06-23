@@ -10,6 +10,7 @@ const bu = @import("buffer_upload.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 const images = @import("images.zig");
+const build_options = @import("build_options");
 const math = @import("../math/root.zig");
 const layout = @import("../layout.zig");
 const effect_assemble = @import("effect_assemble.zig");
@@ -429,7 +430,18 @@ var g_last_flush_us: i64 = 0;
 var g_fps_ema: f32 = 0;
 fn fpsHudOn() bool {
     if (g_fpshud_on) |v| return v;
-    const on = std.posix.getenv("RJIT_FPS") != null or std.posix.getenv("RJIT_PERFLOG") != null;
+    // Default ON for the compiled no-V8 game (this is its window — an fps counter is
+    // always wanted there), OFF for the V8 editor. RJIT_FPS=0 force-hides; RJIT_FPS or
+    // RJIT_PERFLOG (any value) force-shows. req_1677: the user couldn't find the HUD
+    // because it required an env var — make it just appear in the game.
+    const fps_env = std.posix.getenv("RJIT_FPS");
+    if (fps_env) |v| {
+        const off = std.mem.eql(u8, v, "0") or std.mem.eql(u8, v, "");
+        g_fpshud_on = !off;
+        return !off;
+    }
+    const default_on = if (@hasDecl(build_options, "use_v8")) !build_options.use_v8 else false;
+    const on = default_on or std.posix.getenv("RJIT_PERFLOG") != null;
     g_fpshud_on = on;
     return on;
 }
