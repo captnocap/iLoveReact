@@ -27,7 +27,7 @@
 
 import { editMeshToGeometry, type EditMesh, type MountPoint, type V3 } from './editMesh';
 import { sha256Hex } from '@reactjit/workspace/sha256';
-import type { PropCollisionBox, PropContainer, PropKindDefinition, PropMount, PropSeat, PropTrafficControl, PropCoverClass } from '../../game/kinds/props';
+import type { PropBuildPlacement, PropCollisionBox, PropContainer, PropKindDefinition, PropMount, PropSeat, PropTrafficControl, PropCoverClass } from '../../game/kinds/props';
 import type { TileKind } from '../../game/kinds/tiles';
 
 /** The descriptor schema version — bumped when a descriptor's required-field set
@@ -119,6 +119,10 @@ export type PropDescriptorInput = {
   seat?: PropSeat;
   container?: PropContainer;
   coverClass?: PropCoverClass;
+  /** PIECE-COOK (req_1684): how the cooked model PLACES as a build piece — a railing
+   *  edge-snaps + gives cover, a wall-trim surface-snaps. Absent = free-snap scenery.
+   *  The asset stays kind:'prop'; only its catalog placement row changes. */
+  buildPlacement?: PropBuildPlacement;
 };
 
 /** The cooked asset: a thin record of REFERENCES (the heavy factors live in the
@@ -458,6 +462,9 @@ function fillPropDescriptor(input: PropDescriptorInput, c: CookCollision, id: st
     ...(input.seat ? { seat: input.seat } : {}),
     ...(input.container ? { container: input.container } : {}),
     ...(input.coverClass ? { coverClass: input.coverClass } : {}),
+    // PIECE-COOK (req_1684): carry the build-piece placement so the catalog row
+    // edge/surface-snaps; part of the descriptor, so it rides the asset identity hash.
+    ...(input.buildPlacement ? { buildPlacement: input.buildPlacement } : {}),
   };
 }
 
