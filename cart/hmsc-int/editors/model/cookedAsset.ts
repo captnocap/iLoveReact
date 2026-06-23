@@ -64,7 +64,14 @@ export type MeshBlob = {
   /** Re-skinnable sub-ranges in `verts`, in vertex units (not floats). Absent
    *  when no authored faces belong to texture slots, preserving the old artifact. */
   slots?: CookedTextureSlot[];
+  /** Trailing sub-range of glass-tagged faces (req_1673). Glass faces split out
+   *  of the opaque soup so the editor + compiled loader render them translucent
+   *  (the transparent pass) instead of the solid prop tint. Absent = no glass. */
+  glass?: MeshGlassRange;
 };
+
+/** A vertex sub-range (vertex units) carrying the model's see-through faces. */
+export type MeshGlassRange = { start: number; count: number };
 
 export const COOKED_SLOT_DEFAULT_MATERIAL = '#c2c6cf';
 
@@ -131,6 +138,9 @@ export type CookedAsset = {
   mounts: MountPoint[];
   /** Named re-skinnable face groups, keyed by WorldProp.partTextures[slot.id]. */
   slots?: CookedTextureSlot[];
+  /** Trailing glass sub-range (req_1673) — copied from the blob so render paths
+   *  read it without re-deriving. Absent = the model has no glass-tagged faces. */
+  glass?: MeshGlassRange;
   descriptor: PropKindDefinition;
 };
 
@@ -202,84 +212,112 @@ function boundsOfSoup(verts: Float32Array): CookBounds {
 }
 
 /** Flatten every VISIBLE part into one content-addressed mesh blob. The geometry
- *  factor — interned once, referenced by id. */
+ *  factor — interned once, referenced by id.
+ *
+ *  GLASS (req_1673): faces tagged glass in the Studio are excluded from the opaque
+ *  section here and appended as ONE trailing sub-range (`glass`), so the editor and
+ *  compiled loader render them through the transparent pass instead of baking them
+ *  into the solid prop tint. Glass skips texturing (it never belongs to a slot), so
+ *  the opaque/slot layout is unchanged for glass-free models — the meshRef of an
+ *  existing model only moves when it actually carries glass. */
 export function flattenModel(parts: readonly CookPart[]): MeshBlob {
   const hasSlottedFaces = parts.some((p) => p.visible && (p.mesh.slots?.length ?? 0) > 0
     && p.mesh.faces.some((f) => faceSlotIndex(p.mesh, f) >= 0));
 
+  const chunks: Float32Array[] = [];
+  let total = 0; // float length of the OPAQUE section (everything but glass)
+  let slots: CookedTextureSlot[] | undefined;
+
   if (!hasSlottedFaces) {
-    const chunks: Float32Array[] = [];
-    let total = 0;
     for (const p of parts) {
       if (!p.visible) continue;
-      const g = editMeshToGeometry(liftedMesh(p));
+      const g = editMeshToGeometry(liftedMesh(p), (f) => !f.glass);
       if (g.positions.length === 0) continue;
       chunks.push(g.positions);
       total += g.positions.length;
     }
-    const verts = new Float32Array(total);
-    let off = 0;
-    for (const c of chunks) { verts.set(c, off); off += c.length; }
-    return { hash: hashBytes(verts), verts, count: verts.length / 8, bounds: boundsOfSoup(verts) };
-  }
+  } else {
+    type SlotSource = { id: string; label: string; mesh: EditMesh; slotIndex: number };
+    const slotSources: SlotSource[] = [];
+    const used = new Set<string>();
 
-  type SlotSource = { id: string; label: string; mesh: EditMesh; slotIndex: number };
-  const chunks: Float32Array[] = [];
-  const slotSources: SlotSource[] = [];
-  const used = new Set<string>();
-  let total = 0;
-
-  for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-    const p = parts[partIndex];
-    if (!p.visible) continue;
-    const mesh = liftedMesh(p);
-    const unslotted = editMeshToGeometry(mesh, (f) => faceSlotIndex(mesh, f) < 0);
-    if (unslotted.positions.length > 0) {
-      chunks.push(unslotted.positions);
-      total += unslotted.positions.length;
-    }
-    for (let slotIndex = 0; slotIndex < (mesh.slots?.length ?? 0); slotIndex += 1) {
-      if (!mesh.faces.some((f) => f.material === slotIndex)) continue;
-      const slot = mesh.slots![slotIndex];
-      let id = slot.id;
-      let label = slot.label;
-      if (used.has(id)) {
-        const prefix = slugKey(p.id ?? p.name ?? `part-${partIndex + 1}`);
-        id = `${prefix}.${slot.id}`;
-        label = `${p.name ?? p.id ?? `Part ${partIndex + 1}`} ${slot.label}`;
-        let suffix = 2;
-        while (used.has(id)) {
-          id = `${prefix}.${slot.id}.${suffix}`;
-          suffix += 1;
-        }
+    for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+      const p = parts[partIndex];
+      if (!p.visible) continue;
+      const mesh = liftedMesh(p);
+      // Unslotted opaque = no texture slot AND not glass (glass skips texturing).
+      const unslotted = editMeshToGeometry(mesh, (f) => faceSlotIndex(mesh, f) < 0 && !f.glass);
+      if (unslotted.positions.length > 0) {
+        chunks.push(unslotted.positions);
+        total += unslotted.positions.length;
       }
-      used.add(id);
-      slotSources.push({ id, label, mesh, slotIndex });
+      for (let slotIndex = 0; slotIndex < (mesh.slots?.length ?? 0); slotIndex += 1) {
+        if (!mesh.faces.some((f) => f.material === slotIndex && !f.glass)) continue;
+        const slot = mesh.slots![slotIndex];
+        let id = slot.id;
+        let label = slot.label;
+        if (used.has(id)) {
+          const prefix = slugKey(p.id ?? p.name ?? `part-${partIndex + 1}`);
+          id = `${prefix}.${slot.id}`;
+          label = `${p.name ?? p.id ?? `Part ${partIndex + 1}`} ${slot.label}`;
+          let suffix = 2;
+          while (used.has(id)) {
+            id = `${prefix}.${slot.id}.${suffix}`;
+            suffix += 1;
+          }
+        }
+        used.add(id);
+        slotSources.push({ id, label, mesh, slotIndex });
+      }
     }
+
+    const built: CookedTextureSlot[] = [];
+    let vertexStart = total / 8;
+    for (const source of slotSources) {
+      const g = editMeshToGeometry(source.mesh, (f) => f.material === source.slotIndex && !f.glass);
+      if (g.positions.length === 0) continue;
+      chunks.push(g.positions);
+      total += g.positions.length;
+      const count = g.positions.length / 8;
+      built.push({
+        id: source.id,
+        label: source.label,
+        defaultMaterial: COOKED_SLOT_DEFAULT_MATERIAL,
+        start: vertexStart,
+        count,
+      });
+      vertexStart += count;
+    }
+    if (built.length) slots = built;
   }
 
-  const slots: CookedTextureSlot[] = [];
-  let vertexStart = total / 8;
-  for (const source of slotSources) {
-    const g = editMeshToGeometry(source.mesh, (f) => f.material === source.slotIndex);
+  // Glass pass — every glass-tagged face from every part, appended after the
+  // opaque section as one trailing sub-range. Built only when glass exists so a
+  // glass-free model pays nothing and keeps its old meshRef.
+  const glassChunks: Float32Array[] = [];
+  let glassFloats = 0;
+  for (const p of parts) {
+    if (!p.visible) continue;
+    const g = editMeshToGeometry(liftedMesh(p), (f) => !!f.glass);
     if (g.positions.length === 0) continue;
-    chunks.push(g.positions);
-    total += g.positions.length;
-    const count = g.positions.length / 8;
-    slots.push({
-      id: source.id,
-      label: source.label,
-      defaultMaterial: COOKED_SLOT_DEFAULT_MATERIAL,
-      start: vertexStart,
-      count,
-    });
-    vertexStart += count;
+    glassChunks.push(g.positions);
+    glassFloats += g.positions.length;
   }
+  const glassStart = total / 8;
 
-  const verts = new Float32Array(total);
+  const verts = new Float32Array(total + glassFloats);
   let off = 0;
   for (const c of chunks) { verts.set(c, off); off += c.length; }
-  return { hash: hashBytes(verts), verts, count: verts.length / 8, bounds: boundsOfSoup(verts), ...(slots.length ? { slots } : {}) };
+  for (const c of glassChunks) { verts.set(c, off); off += c.length; }
+
+  return {
+    hash: hashBytes(verts),
+    verts,
+    count: verts.length / 8,
+    bounds: boundsOfSoup(verts),
+    ...(slots ? { slots } : {}),
+    ...(glassFloats ? { glass: { start: glassStart, count: glassFloats / 8 } } : {}),
+  };
 }
 
 /** Split a part's faces into vertex-CONNECTED components (union-find over the verts
@@ -453,6 +491,7 @@ export function cookProp(input: CookPropInput): CookResult {
     descriptor,
     mounts,
     slots: blob.slots ?? [],
+    glass: blob.glass ?? null,
   });
   const asset: CookedAsset = {
     id: input.id,
@@ -465,6 +504,7 @@ export function cookProp(input: CookPropInput): CookResult {
     collision,
     mounts,
     ...(blob.slots ? { slots: blob.slots } : {}),
+    ...(blob.glass ? { glass: blob.glass } : {}),
     descriptor,
   };
   return { asset, blob, errors };

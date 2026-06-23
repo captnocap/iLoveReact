@@ -21,7 +21,13 @@ import { image } from '@reactjit/image';
 import { base64ToBytes } from '@reactjit/workspace';
 import type { WorldProp } from '../../design';
 import { cookedAssetById, cookedMeshBlob, cookedTextureBlob } from '../../editors/model/cookedAssets';
+import { Glass } from '../materials';
 import { resolvePartTexture, type Part } from '../parts';
+
+// Faces tagged glass in the Studio cook into a trailing sub-range (req_1673); they
+// render here through the SAME translucent material build-piece + storefront panes
+// ride, so a window authored in the model is see-through in-world, not solid tint.
+const COOKED_GLASS = Glass();
 
 const GEOMS = new Map<string, GeometryDef>();
 
@@ -93,13 +99,44 @@ function slotPart(prop: WorldProp, slot: { id: string; label: string; defaultMat
   };
 }
 
+// [propgone] probe (req_1632) — one line per distinct kind→outcome so an invisible
+// cooked prop names WHERE it fell off (no asset / no mesh blob / rendered).
+const _cookedSeen = new Set<string>();
+function cookedGone(msg: string): void {
+  if (_cookedSeen.has(msg)) return;
+  _cookedSeen.add(msg);
+  console.warn(`[propgone] CookedProp ${msg}`);
+}
+
 export function CookedProp(props: { prop: WorldProp }) {
   const asset = cookedAssetById(props.prop.kind);
-  if (!asset) return null;
+  if (!asset) {
+    cookedGone(`kind=${props.prop.kind} asset=MISSING (cookedAssetById null — registry not loaded?)`);
+    return null;
+  }
   const verts = cookedMeshBlob(asset.meshRef);
-  if (!verts || verts.length === 0) return null;
+  if (!verts || verts.length === 0) {
+    cookedGone(`kind=${props.prop.kind} meshRef=${asset.meshRef} verts=MISSING (blob not loaded?)`);
+    return null;
+  }
   const tex = cookedInlineTexture(asset.texRef);
   const slots = asset.slots ?? [];
+  const glass = asset.glass && asset.glass.count > 0 ? asset.glass : null;
+  // Opaque content ends where the glass sub-range begins; with no glass it spans
+  // the whole soup (the prior behaviour).
+  const opaqueEnd = glass ? glass.start : verts.length / 8;
+  cookedGone(`kind=${props.prop.kind} RENDER verts=${verts.length / 8} slots=${slots.length} glass=${glass ? glass.count : 0} tex=${tex ? 'y' : 'n'} at=(${props.prop.x.toFixed(1)},${(props.prop.y ?? 0).toFixed(1)},${props.prop.z.toFixed(1)})`);
+  // The translucent pane(s), drawn AFTER the opaque body in both branches.
+  const glassMesh = glass ? (
+    <Scene3D.Mesh
+      key="glass"
+      geometry={geometryFor(asset.meshRef, verts, glass.start, glass.count)}
+      params={{}}
+      position={[props.prop.x, props.prop.y ?? 0, props.prop.z]}
+      rotation={[0, props.prop.yawDegrees ?? 0, 0]}
+      material={COOKED_GLASS}
+    />
+  ) : null;
   if (slots.length > 0) {
     const firstSlotStart = Math.min(...slots.map((slot) => slot.start));
     return (
@@ -130,17 +167,21 @@ export function CookedProp(props: { prop: WorldProp }) {
             />
           );
         })}
+        {glassMesh}
       </>
     );
   }
   return (
-    <Scene3D.Mesh
-      geometry={geometryFor(asset.meshRef, verts)}
-      params={{}}
-      position={[props.prop.x, props.prop.y ?? 0, props.prop.z]}
-      rotation={[0, props.prop.yawDegrees ?? 0, 0]}
-      material={tex ? '#ffffff' : COOKED_PROP_TINT}
-      texture={tex ?? undefined}
-    />
+    <>
+      <Scene3D.Mesh
+        geometry={geometryFor(asset.meshRef, verts, 0, opaqueEnd)}
+        params={{}}
+        position={[props.prop.x, props.prop.y ?? 0, props.prop.z]}
+        rotation={[0, props.prop.yawDegrees ?? 0, 0]}
+        material={tex ? '#ffffff' : COOKED_PROP_TINT}
+        texture={tex ?? undefined}
+      />
+      {glassMesh}
+    </>
   );
 }

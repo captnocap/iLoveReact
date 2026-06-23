@@ -18,6 +18,11 @@ export type Material = {
   health?: number;
 };
 
+// The default pane alpha — one source so the editor (Glass()) and the compiled
+// bake (worldGeometry internTranslucent) draw cooked-prop glass at the same
+// see-through, no magic value drifting between them (req_1673).
+export const GLASS_OPACITY = 0.34;
+
 // Glass — a translucent, tinted, breakable pane. The default reads as a neutral
 // cool architectural glass; override per use:
 //   material={Glass()}                                   a plain pane
@@ -25,7 +30,7 @@ export type Material = {
 //   material={Glass({ color: '#cfe6f2', health: 60 })}   a thick showroom front
 export const Glass = (over: Partial<Material> = {}): Material => ({
   color: '#a9c8d8',
-  opacity: 0.34,
+  opacity: GLASS_OPACITY,
   breakable: true,
   health: 30,
   ...over,

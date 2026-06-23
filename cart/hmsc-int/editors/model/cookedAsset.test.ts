@@ -4,7 +4,7 @@
 // shares the meshRef), MEASURED collision (derive, don't store twice), idempotent
 // re-cook (same input → same hash), and fail-loud validation.
 
-import { addTextureSlot, cuboid, addMount, type EditMesh } from './editMesh';
+import { addTextureSlot, cuboid, addMount, setFaceGlass, type EditMesh } from './editMesh';
 import { cookProp, flattenModel, validateProp, type CookPart, type PropDescriptorInput } from './cookedAsset';
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 
@@ -51,6 +51,32 @@ test('unassigned texture slots do not change the flattened mesh factor', () => {
   assertEqual(withEmptySlot.hash, plain.hash, 'mesh hash unchanged');
   assertEqual(withEmptySlot.verts.length, plain.verts.length, 'same vertex buffer length');
   assert(withEmptySlot.verts.every((v, i) => v === plain.verts[i]), 'vertex bytes unchanged');
+});
+
+test('glass faces split into a trailing sub-range, out of the opaque section (req_1673)', () => {
+  // a cube (6 faces → 36 verts) with one face tagged glass: 5 opaque faces (30
+  // verts) then the glass face's 2 triangles (6 verts) appended at the end.
+  const glassy = setFaceGlass(cuboid(1, 1, 1), [0], true);
+  const blob = flattenModel([part(glassy)]);
+  assertEqual(blob.count, 36, 'every face still present (none dropped)');
+  assert(blob.glass != null, 'a glass range is recorded');
+  assertEqual(blob.glass!.count, 6, 'one glass face = two triangles = six vertices');
+  assertEqual(blob.glass!.start, 30, 'glass sits after the five opaque faces');
+  assertEqual(blob.glass!.start + blob.glass!.count, blob.count, 'glass is the trailing range');
+});
+
+test('a glass-free model carries no glass range and keeps its old factor', () => {
+  const plain = flattenModel([part(cuboid(1, 1, 1))]);
+  assertEqual(plain.glass, undefined, 'no glass faces means no glass range');
+});
+
+test('cookProp carries the glass range into the asset and its identity', () => {
+  const glassy = setFaceGlass(cuboid(1, 1, 1), [0], true);
+  const withGlass = cookProp({ id: 'studio.pane', name: 'Pane', parts: [part(glassy)], descriptor: PROP });
+  const solid = cookProp({ id: 'studio.pane', name: 'Pane', parts: [part(cuboid(1, 1, 1))], descriptor: PROP });
+  assertEqual(withGlass.errors.length, 0, 'glass prop cooks clean');
+  assertEqual(withGlass.asset.glass?.count, 6, 'asset carries the glass vertex count');
+  assert(withGlass.asset.hash !== solid.asset.hash, 'glass participates in asset identity');
 });
 
 test('cookProp carries texture slots and folds them into the asset identity', () => {

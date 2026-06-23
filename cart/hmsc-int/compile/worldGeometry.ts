@@ -31,6 +31,7 @@ import { CHUNK_TILES } from '../chunks';
 import { WATER_LOOK, WATER_WAVE, waterFlatHeights } from '../game/kinds/waterBodies';
 import { groundKindAt, HEIGHTFIELD_TILE_BODY, MARKER_KIND_INDICES, roadRibbonSection } from '../render3d/heightfieldSurface';
 import { isParkingKind } from '../render3d/parkingStall';
+import { GLASS_OPACITY } from '../render3d/materials';
 import type { ChunkFloor } from '../chunkFloor';
 import { floorToLandform } from '../chunkFloor';
 import { buildFlowerInstances, foliageCells } from '../render3d/grassPopulation';
@@ -61,6 +62,7 @@ import { forEachShellRingBox, VOID_SHELL_RING_CHUNKS } from '../game/void/shell'
 import { importedPropMesh, isImportedPropKind, type ImportedPropMesh } from '../game/kinds/importedProps';
 import { isCookedPropKind } from '../game/kinds/props';
 import { cookedAssetById, cookedMeshBlob, cookedTextureBlob } from '../editors/model/cookedAssets';
+import type { CookedAsset } from '../editors/model/cookedAsset';
 import { image } from '@reactjit/image';
 import { base64ToBytes } from '@reactjit/workspace';
 import { textBytes } from '@reactjit/workspace';
@@ -99,6 +101,9 @@ export const INSTANCE_SHAPE_FLOWER = 10;
 // these so its thousands of boxes don't saturate the collider cap — you walk on
 // the shell's single ground heightfield, never into the towers.
 export const INSTANCE_SHAPE_SCENERY_BOX = 11;
+// Wall L-corner miter filler — a vertical right-triangle prism, editor twin is
+// pieceMeshes' CornerMiterPrismGeometry and loader twin is buildCornerMiterPrism.
+export const INSTANCE_SHAPE_CORNER_MITER = 12;
 
 // ── materials: ship the SHADER (the formula) — pixels only when there IS no formula ─
 // GUIDING_LIGHT: procedural content travels as its recipe. A face whose skin is
@@ -468,6 +473,7 @@ function cookedPropMesh(kind: string): ImportedMeshPropMesh | null {
   const verts = cookedMeshBlob(asset.meshRef);
   if (!verts || verts.length === 0) return null;
   const tex = cookedPropTexture(asset.texRef);
+  const slotsWithGlass = cookedMeshSlotRanges(asset);
   return {
     key: asset.meshRef,
     source: `cooked:${asset.id}`,
@@ -480,8 +486,23 @@ function cookedPropMesh(kind: string): ImportedMeshPropMesh | null {
     solid: asset.descriptor.solid,
     vertices: verts,
     ...(tex ? { png: tex.png } : {}),
-    ...(asset.slots?.length ? { slots: asset.slots.map((slot) => ({ start: slot.start, count: slot.count })) } : {}),
+    // Glass faces (req_1673) ride as a trailing sub-range, the same MESH_PROPS slot
+    // machinery a texture slot uses — pushPropGeometry pairs it with a translucent
+    // material ref so the loader draws it see-through (appendMeshPropNode applies
+    // the ref's opacity as scene3d_color_a).
+    ...(slotsWithGlass.length ? { slots: slotsWithGlass } : {}),
   };
+}
+
+/** Mesh sub-ranges for a cooked prop: its texture slots, then (if present) the
+ *  trailing glass range as one more slot. Aligned index-for-index with the
+ *  slotMaterials pushPropGeometry builds. */
+function cookedMeshSlotRanges(asset: CookedAsset): MeshPropSlotRange[] {
+  const ranges: MeshPropSlotRange[] = asset.slots?.length
+    ? asset.slots.map((slot) => ({ start: slot.start, count: slot.count }))
+    : [];
+  if (asset.glass && asset.glass.count > 0) ranges.push({ start: asset.glass.start, count: asset.glass.count });
+  return ranges;
 }
 
 function pushPropGeometry(b: Build, prop: WorldProp): number {
@@ -498,11 +519,15 @@ function pushPropGeometry(b: Build, prop: WorldProp): number {
     const asset = cookedAssetById(prop.kind);
     const mesh = cookedPropMesh(prop.kind);
     if (mesh) {
-      const slotMaterials = asset?.slots?.map((slot) => {
+      // Texture-slot material refs, then (if the model has glass) one translucent
+      // ref for the trailing glass slot — aligned index-for-index with the slot
+      // ranges cookedMeshSlotRanges appended (req_1673).
+      const slotMaterials = (asset?.slots ?? []).map((slot) => {
         const textureId = prop.partTextures?.[slot.id];
         return textureId ? internMaterial(b, { kind: 'material', id: textureId }) : 0;
       });
-      collectImportedMeshProp(b.meshProps, prop, mesh, slotMaterials);
+      if (asset?.glass && asset.glass.count > 0) slotMaterials.push(internTranslucent(b, GLASS_OPACITY));
+      collectImportedMeshProp(b.meshProps, prop, mesh, slotMaterials.length ? slotMaterials : undefined);
     }
     return 0;
   }
@@ -777,10 +802,13 @@ function pushVisualShape(b: Build, piece: PlacedBuildPiece, baseMaterial: BuildM
     pushRamp(b, r.x, r.y, r.z, r.width, r.height, r.depth, hexColor(r.color), r.yawDegrees);
     return 1;
   }
-  // 'box' and 'gable' share the instance layout (pos+yaw+scale+skin); only the
-  // keyed geometry differs (a unit cube vs the triangular gable-end prism).
+  // Box-like primitives share the instance layout (pos+yaw+scale+skin); only the
+  // keyed geometry differs (cube vs gable prism vs wall corner miter prism).
   const v = shape.box;
-  const shapeId = shape.kind === 'gable' ? INSTANCE_SHAPE_GABLE : INSTANCE_SHAPE_BOX;
+  const shapeId =
+    shape.kind === 'gable' ? INSTANCE_SHAPE_GABLE :
+    shape.kind === 'cornerMiter' ? INSTANCE_SHAPE_CORNER_MITER :
+    INSTANCE_SHAPE_BOX;
   // DOORS-0611: the closed door/garage panel is LIVE state — it ships through
   // the DOORS lump (compile/worldDoors.ts) as a toggleable rect+node, never a
   // static row (a static panel could not open).
