@@ -18,7 +18,7 @@ import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog
 import { plog, ptime, useChurn } from './perfLog';
 import { Router, Route, useNavigate, useRoute } from '@reactjit/router';
 import { Assist3DRoute } from './assist3d';
-import { PlayRoute } from './editors/play/PlayRoute';
+import { PlayTestRoute } from './editors/play/PlayTestRoute';
 import { LabsRoute } from './shell/LabsRoute';
 import { WorkbenchRoute } from './shell/WorkbenchRoute';
 import { currentWorkbenchFamily, requestWorkbenchSource, subscribeWorkbenchFamily, type WorkbenchFamily } from './shell/workbenchDoor';
@@ -569,7 +569,7 @@ function EditorShell() {
             F1 test / F2 build flip it WITHOUT remounting, so the pose,
             camera, console, and placed pieces carry across the toggle.
             (The /build URL retired as a dupe of this surface.) */}
-        <Route path="/test">{() => <PlayRoute state={previewWorld} mapName={ws.stem} legacyPieceMapName={legacyPieceMapName} onExit={() => nav.push('/')} />}</Route>
+        <Route path="/test">{() => <PlayTestRoute state={previewWorld} mapName={ws.stem} legacyPieceMapName={legacyPieceMapName} floors={floors} onExit={() => nav.push('/')} />}</Route>
         {/* Labs cross into shell as plain data here — shell/ imports nothing
             game-specific; labs/index.ts is the registry rjit lab new maintains. */}
         <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>
