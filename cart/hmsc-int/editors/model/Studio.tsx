@@ -37,6 +37,7 @@ import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from './w
 import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { glbToEditMesh, objToEditMesh, base64ToBytes } from './importMesh';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
+import { seedMeshFromPiece, seedNameFromPiece } from './seedFromPiece';
 import { useCookedAssets } from './cookedAssets';
 import { StudioOutliner } from './Outliner';
 import { SceneTextureAtlas, STUDIO_TEXTURE_KEY } from './TextureAtlas';
@@ -3309,19 +3310,39 @@ const SHAPE_KINDS: { kind: ShapeKind; label: string }[] = [
 // height — and the 'sides' knob means longitude segments (icosphere uses subdiv).
 const ROUND_BODIES: ShapeKind[] = ['sphere', 'icosphere'];
 
+// START FROM A BUILD PRIMITIVE (req_1684/1693): the same wall/floor/stairs the iso
+// world editor places, opened as an editable mesh so you can cut a window, bolt on a
+// poster, or add a railing — then Compile it back out as a custom placeable piece.
+// Each seed lowers a real BUILD_CATALOG piece through seedMeshFromPiece (the shared
+// pieceVisualShapes decomposition), so the mesh matches what the world editor renders.
+const BUILD_SEEDS: { key: string; pieceId: string; edit?: string; label: string }[] = [
+  { key: 'wall', pieceId: 'wall.concrete.common', label: 'Wall' },
+  { key: 'halfwall', pieceId: 'wall.concrete.common', edit: 'halfHeight', label: 'Half Wall' },
+  { key: 'window', pieceId: 'wall.stucco.window', label: 'Window Wall' },
+  { key: 'floor', pieceId: 'floor.concrete.common', label: 'Floor' },
+  { key: 'stairs', pieceId: 'stairs.concrete.common', label: 'Stairs' },
+  { key: 'ramp', pieceId: 'ramp.concrete.common', label: 'Ramp' },
+];
+
 function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: EditMesh, name: string) => void }) {
   const u = STUDIO.unitsPerTile;
   const [shape, setShape] = useState<ShapeKind>('cube');
+  // When set, the part is SEEDED from a build piece instead of a parametric shape —
+  // the shape sliders hide (a catalog piece carries its own authored size).
+  const [seedKey, setSeedKey] = useState<string | null>(null);
+  const seed = seedKey ? BUILD_SEEDS.find((s) => s.key === seedKey) ?? null : null;
   const [dia, setDia] = useState(u);   // default 16 u = one tile
   const [hgt, setHgt] = useState(u);
   const [sides, setSides] = useState(16);
   const [subdiv, setSubdiv] = useState(1); // icosphere subdivisions
-  const hasHeight = shape !== 'plane' && !ROUND_BODIES.includes(shape);
-  const hasSides = shape === 'cylinder' || shape === 'cone' || shape === 'sphere';
-  const hasSubdiv = shape === 'icosphere';
+  const hasHeight = !seed && shape !== 'plane' && !ROUND_BODIES.includes(shape);
+  const hasSides = !seed && (shape === 'cylinder' || shape === 'cone' || shape === 'sphere');
+  const hasSubdiv = !seed && shape === 'icosphere';
   const fmtTiles = (units: number) => `${(units / u).toFixed(2)} tile`;
   const meta = SHAPE_KINDS.find((s) => s.kind === shape)!;
+  const confirmName = seed ? seedNameFromPiece(seed.pieceId) : meta.label;
   const build = (): EditMesh => {
+    if (seed) return seedMeshFromPiece(seed.pieceId, seed.edit);
     const d = unitsToMeters(dia), h = unitsToMeters(hgt), r = unitsToMeters(dia) / 2;
     switch (shape) {
       case 'cylinder': return cylinder(r, h, sides);
@@ -3339,23 +3360,33 @@ function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: EditMes
         <Text fontSize={13} color={T.text} style={{ fontWeight: '800' }}>Add Shape</Text>
         <Row style={{ gap: 5, flexWrap: 'wrap' }}>
           {SHAPE_KINDS.map((s) => {
-            const on = shape === s.kind;
-            return <Pressable key={s.kind} onPress={() => setShape(s.kind)} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderWidth: 1, borderColor: on ? '#5b8fd6' : '#2c4a6a' }}><Text fontSize={11} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{s.label}</Text></Pressable>;
+            const on = !seed && shape === s.kind;
+            return <Pressable key={s.kind} onPress={() => { setShape(s.kind); setSeedKey(null); }} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderWidth: 1, borderColor: on ? '#5b8fd6' : '#2c4a6a' }}><Text fontSize={11} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{s.label}</Text></Pressable>;
+          })}
+        </Row>
+        {/* START FROM A BUILD PIECE (req_1693): seed the editor with a real wall/floor/
+            stairs to modify + Compile back into a custom placeable piece. */}
+        <Text fontSize={10} color={T.dim} style={{ marginTop: 2 }}>From build piece</Text>
+        <Row style={{ gap: 5, flexWrap: 'wrap' }}>
+          {BUILD_SEEDS.map((s) => {
+            const on = seedKey === s.key;
+            return <Pressable key={s.key} onPress={() => setSeedKey(s.key)} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: on ? '#3a2f5e' : '#13233aee', borderWidth: 1, borderColor: on ? '#9b7fd6' : '#2c4a6a' }}><Text fontSize={11} color={on ? '#e2cfff' : T.dim} style={{ fontFamily: 'monospace' }}>{s.label}</Text></Pressable>;
           })}
         </Row>
         <Text fontSize={10} color={T.dim}>{`Units: ${u} = 1 tile (1 m). Same basis as per-face UV. The grid is unchanged.`}</Text>
-        <NumberField label="diameter" value={dia} onChange={setDia} min={1} max={u * STUDIO.gridTiles} step={1} snap={0.5} suffix="u" />
+        {seed ? null : <NumberField label="diameter" value={dia} onChange={setDia} min={1} max={u * STUDIO.gridTiles} step={1} snap={0.5} suffix="u" />}
         {hasHeight ? <NumberField label="height" value={hgt} onChange={setHgt} min={1} max={u * STUDIO.gridTiles * 2} step={1} snap={0.5} suffix="u" /> : null}
         {hasSides ? <NumberField label="sides" value={sides} onChange={(n) => setSides(clampSides(n))} min={SHAPE_SIDES_MIN} max={SHAPE_SIDES_MAX} step={1} snap={1} /> : null}
         {hasSubdiv ? <NumberField label="subdiv" value={subdiv} onChange={(n) => setSubdiv(Math.max(0, Math.min(ICOSPHERE_SUBDIV_MAX, Math.round(n))))} min={0} max={ICOSPHERE_SUBDIV_MAX} step={1} snap={1} /> : null}
         <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
-          {shape === 'plane' ? `= ${fmtTiles(dia)} × ${fmtTiles(dia)} flat`
+          {seed ? `= ${confirmName} — editable mesh from a build piece`
+            : shape === 'plane' ? `= ${fmtTiles(dia)} × ${fmtTiles(dia)} flat`
             : ROUND_BODIES.includes(shape) ? `= ${fmtTiles(dia)} ∅ ${shape}${hasSides ? ` · ${clampSides(sides)} sides` : ` · subdiv ${subdiv}`}`
             : `= ${fmtTiles(dia)} ∅ × ${fmtTiles(hgt)}${hasSides ? ` · ${clampSides(sides)} sides` : ''}`}
         </Text>
         <Row style={{ gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
           <Pressable onPress={props.onCancel} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}><Text fontSize={11} color={T.dim}>Cancel</Text></Pressable>
-          <Pressable onPress={() => props.onConfirm(build(), meta.label)} style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}><Text fontSize={11} color="#7fd6a0" style={{ fontWeight: '800' }}>Add</Text></Pressable>
+          <Pressable onPress={() => props.onConfirm(build(), confirmName)} style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}><Text fontSize={11} color="#7fd6a0" style={{ fontWeight: '800' }}>Add</Text></Pressable>
         </Row>
       </Col>
     </Box>
