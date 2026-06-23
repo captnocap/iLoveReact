@@ -1,6 +1,7 @@
 // editors/workbench/vehicles/PaintLens.tsx -- doorway into the shared PAINT bench.
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { Col, Text } from '@reactjit/runtime/primitives';
 import { GAME_CHROME } from '../../../game/chrome';
 import { modelWorkId } from '../../cutout/models';
@@ -12,8 +13,8 @@ const T = GAME_CHROME.tokens.color;
 
 export function VehiclePaintLens(props: { store: VehicleStore }) {
   const s = props.store;
-  const [, setTick] = useState(0);
-  useEffect(() => s.subscribe(() => setTick((t) => t + 1)), [s]);
+  const rerender = useRerender();
+  useEffect(() => s.subscribe(rerender), [s]);
 
   const docId = s.activeId;
   const part = s.view.selectedPart ?? 'body';

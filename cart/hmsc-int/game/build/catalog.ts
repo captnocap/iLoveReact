@@ -230,6 +230,11 @@ function propCatalogEntry(kind: PropKind): BuildPieceDef {
   const dumpsterBody = kind === 'dumpster' ? dumpsterBodyMeters() : null;
   const width = dumpsterBody?.widthMeters ?? model?.widthMeters ?? def.footprintWidthMeters ?? (def.kind === 'fence' ? def.footprintRadiusMeters * 1.9 : def.footprintRadiusMeters * 2);
   const depth = dumpsterBody?.depthMeters ?? model?.depthMeters ?? def.footprintDepthMeters ?? def.footprintRadiusMeters * 2;
+  // PIECE-COOK (req_1684): a cooked prop may declare HOW it places as a build piece
+  // (a railing edge-snaps + gives cover, a wall-trim surface-snaps) while staying
+  // kind:'prop'. Absent → the legacy free-snap scenery defaults, so every built-in
+  // prop is byte-identical to before.
+  const place = def.buildPlacement;
   return {
     id: `prop.${kind}`,
     kind: 'prop',
@@ -237,13 +242,13 @@ function propCatalogEntry(kind: PropKind): BuildPieceDef {
     theme: 'common',
     material: propMaterial(kind),
     size: { widthMeters: width, heightMeters: def.heightMeters, depthMeters: depth },
-    snap: 'free',
+    snap: place?.snap ?? 'free',
     propKind: kind,
     tags: {
       collision: def.solid,
-      blocksSight: def.tileKind === 'wall' && def.solid && def.heightMeters >= 1.2,
+      blocksSight: place?.blocksSight ?? (def.tileKind === 'wall' && def.solid && def.heightMeters >= 1.2),
       blocksSound: false,
-      cover: propCover(kind),
+      cover: place?.cover ?? propCover(kind),
       durability: null,
       climbable: kind === 'dumpster' || kind === 'rockLarge',
       vaultable: def.solid && def.heightMeters <= 1.5,
@@ -741,12 +746,27 @@ export const BUILD_CATALOG: Record<string, BuildPieceDef> = {
 
 export const BUILD_CATALOG_IDS = Object.keys(BUILD_CATALOG);
 
+// ── Cooked (Studio-compiled) prop catalog: a RUNTIME overlay (req_1134) ──────
+// The built-in PROP_CATALOG is generated from PROP_KINDS at module load. Studio-
+// cooked props are installed at runtime, so their `prop.<id>` catalog rows are
+// registered HERE (mirroring the prop-registry overlay in game/kinds/props). The
+// editor's cooked-asset store calls registerCookedCatalog with the cooked kinds
+// after it has registered their descriptors, so propCatalogEntry resolves their
+// MEASURED footprint through the prop overlay. The placement palette
+// (catalogEntriesByKind('prop')) then lists them like any built-in prop.
+const COOKED_CATALOG: Record<string, BuildPieceDef> = {};
+
+export function registerCookedCatalog(kinds: readonly PropKind[]): void {
+  for (const kind of kinds) COOKED_CATALOG[`prop.${kind}`] = propCatalogEntry(kind);
+}
+
 export function isCatalogId(value: string): boolean {
-  return Object.prototype.hasOwnProperty.call(BUILD_CATALOG, value);
+  return Object.prototype.hasOwnProperty.call(BUILD_CATALOG, value)
+    || Object.prototype.hasOwnProperty.call(COOKED_CATALOG, value);
 }
 
 export function catalogEntry(id: string): BuildPieceDef {
-  const entry = BUILD_CATALOG[id];
+  const entry = BUILD_CATALOG[id] ?? COOKED_CATALOG[id];
   if (!entry) throw new Error(`build catalog: unknown piece id '${id}'`);
   return entry;
 }
@@ -763,7 +783,10 @@ export function effectiveTags(entry: BuildPieceDef, edit?: WallEdit): BuildGamep
 }
 
 export function catalogEntriesByKind(kind: BuildPieceKind): BuildPieceDef[] {
-  return BUILD_CATALOG_IDS.map((id) => BUILD_CATALOG[id]).filter((entry) => entry.kind === kind);
+  const builtin = BUILD_CATALOG_IDS.map((id) => BUILD_CATALOG[id]).filter((entry) => entry.kind === kind);
+  // include runtime-registered cooked props (kind === 'prop') so the palette lists them.
+  const cooked = Object.keys(COOKED_CATALOG).map((id) => COOKED_CATALOG[id]).filter((entry) => entry.kind === kind);
+  return cooked.length ? [...builtin, ...cooked] : builtin;
 }
 
 export function catalogEntriesByTheme(theme: BuildTheme): BuildPieceDef[] {

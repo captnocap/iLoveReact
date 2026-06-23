@@ -26,6 +26,7 @@
 // on release into store.setPartGrid — the ONE truth the panel also edits.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { Box, Col, Effect, Paintable, Pressable, Row, Scene3D, ScrollView, Text } from '@reactjit/runtime/primitives';
 import { usePaintable, type PaintableHandle } from '@reactjit/runtime/hooks/usePaintable';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
@@ -94,8 +95,8 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   const s = props.store;
   const lens = props.lens;
   // re-render on every store tick (draft edits, view changes, status)
-  const [, setTick] = useState(0);
-  useEffect(() => s.subscribe(() => setTick((t) => t + 1)), [s]);
+  const rerender = useRerender();
+  useEffect(() => s.subscribe(rerender), [s]);
 
   const draft = s.draft;
   const v = s.view;

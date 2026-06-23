@@ -13,10 +13,12 @@
 // crosshair. Place a wall here, it stands in F2 and in the game.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { GAME_BUILD, GAME_NATIVE_CAMERA, buildingDefFromPieces, buildingPieceInstanceId, partitionBuildingSelection } from './game';
-import type { BuildEditEvent, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingInstance, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
+import type { BuildEditEvent, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingInstance, PlacedBuildPiece, Rect, WallEdit, WorldEvent, WorldGridState } from './game';
+import { landformGroundTopAt } from './game/world'; // [propgone] burial probe (req_1635)
 import { resolveSnapTarget, modulePitch, nearestWallLineAnchor, nearestPlateLatticeAnchor, anchoredRunCenter, SNAP_TUNING_DEFAULTS, type SnapTarget, type WallLineAnchor } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, GhostPiece, elevatorCarVisualShape, texturedPropsFromPieces } from './editors/build/pieceMeshes';
 import { perfMs, warnPlaceFreeze } from './editors/build/placeFreezeProbe';
@@ -33,7 +35,10 @@ import { WorldPartCaptures } from './render3d/PartCaptures';
 import { TextureCapture } from './game/textures/registry';
 import { groundColumnTop } from './Embodied';
 import { CHUNK_TILES } from './chunks';
+import { parseAddress, cellAddress } from './address';
+import { TILE_KINDS } from './world/tileKinds';
 import { PROP_CATEGORIES, PROP_CATEGORY_NAMES, isPropKind, propCategory, type PropCategory } from './game/kinds/props';
+import { useCookedAssets } from './editors/model/cookedAssets';
 import { WATER_BODY_PRESETS, WATER_BODY_PRESET_IDS } from './game/kinds/waterBodies';
 
 const FAR_CLIP = 4000;
@@ -226,6 +231,69 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     placedCells: state.world.placedCells as unknown as WorldGridState['placedCells'],
     landforms: (state.world.landforms ?? []) as unknown as WorldGridState['landforms'],
   }), [state.world.cellSizeMeters, state.world.surfaceRegions, state.world.placedCells, state.world.landforms]);
+
+  // [propgone] BURIAL PROBE (req_1635) — props render at piece.y but the painted
+  // floor may be raised above it; if so the mesh sits UNDER the terrain (clickable
+  // physics rect, no visible mesh). Logs the ground top vs y for each prop-kind
+  // piece, once per (kind,buried?) outcome.
+  useMemo(() => {
+    const seen = new Set<string>();
+    let buried = 0, ok = 0;
+    for (const p of pieces) {
+      if (GAME_BUILD.catalog.get(p.pieceId).kind !== 'prop') continue;
+      const top = landformGroundTopAt(worldGrid, p.x, p.z);
+      const isBuried = top !== undefined && top > (p.y ?? 0) + 0.05;
+      if (isBuried) buried += 1; else ok += 1;
+      const key = `${p.pieceId}:${isBuried ? 'BURIED' : 'ok'}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        console.warn(`[propgone] burial ${p.pieceId} y=${(p.y ?? 0).toFixed(2)} groundTop=${top === undefined ? 'none' : top.toFixed(2)} → ${isBuried ? 'BURIED under terrain' : 'visible'}`);
+      }
+    }
+    console.warn(`[propgone] burial summary: ${buried} buried, ${ok} on-or-above ground (of prop pieces)`);
+    return null;
+  }, [pieces, worldGrid]);
+
+  // Tile lookup (req_0823): type an address (e.g. "EI120") → highlight that exact
+  // tile in the 3D and report the kind the renderer resolves there. This is the
+  // ground-truth cross-reference between the editor address grid and what the iso
+  // pane actually draws — if the highlight box lands off the named tile, the
+  // address↔world mapping is the bug; if it lands ON it but the cell reads a
+  // different kind than the 2D, the tile data diverged.
+  const [lookupAddr, setLookupAddr] = useState('');
+  const [lookupCell, setLookupCell] = useState<{ gx: number; gz: number } | null>(null);
+  const lookup = useMemo(() => {
+    if (!lookupCell) return null;
+    const { gx, gz } = lookupCell;
+    const cx = Math.floor(gx / CHUNK_TILES), cz = Math.floor(gz / CHUNK_TILES);
+    const lf = (state.world.landforms ?? []).find((l: any) => l.id === `painted_${cx}_${cz}`) as any;
+    const tiles = lf?.field?.tiles;
+    let kind = 'no chunk';
+    let shaderKind = '-';
+    if (tiles && lf) {
+      const lx = gx - cx * CHUNK_TILES, lz = gz - cz * CHUNK_TILES;
+      const v = tiles.idx[lz * tiles.cols + lx];
+      kind = (v >= 0 && v < TILE_KINDS.length) ? TILE_KINDS[v] : 'empty';
+      // SHADER-PATH read (req_0828): reproduce exactly how the ground formula maps a
+      // world point → cell — world → mesh uv → floor(uv*tiles.cols). Uses the REAL
+      // mesh footprint (heightfield resolution+cell), not the tile grid. If this
+      // disagrees with the direct (lx,lz) read above, the heightfield-mesh↔tile-grid
+      // mapping is the bug.
+      const cs = state.world.cellSizeMeters || 1;
+      const hf = lf.field;
+      const meshW = (Math.max(hf.cols, hf.rows) - 1) * hf.cell; // bakeTerrainField width
+      const leftX = lf.centerX - meshW / 2, topZ = lf.centerZ - meshW / 2;
+      const wx = (gx + 0.5) * cs, wz = (gz + 0.5) * cs;
+      const uvx = (wx - leftX) / meshW, uvy = (wz - topZ) / meshW;
+      const scx = Math.floor(uvx * tiles.cols), scy = Math.floor(uvy * tiles.rows);
+      if (scx >= 0 && scx < tiles.cols && scy >= 0 && scy < tiles.rows) {
+        const sv = tiles.idx[scy * tiles.cols + scx];
+        shaderKind = `${(sv >= 0 && sv < TILE_KINDS.length) ? TILE_KINDS[sv] : 'empty'}@(${scx},${scy})`;
+      } else shaderKind = `oob(${scx},${scy})`;
+    }
+    return { gx, gz, cx, cz, kind, shaderKind };
+  }, [lookupCell, state.world.landforms, state.world.cellSizeMeters]);
+
   const groundTopAt = useMemo<(x: number, z: number) => number>(() => {
     const base = props.groundTopAt ?? ((x, z) => groundColumnTop(worldGrid, x, z));
     // Guard non-finite samples so the lift/cut never silently drop a piece (see
@@ -293,11 +361,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       ctl.disable();
     };
   }, [stage]);
-  const [, bump] = useState(0);
+  const rerender = useRerender();
   const redraw = useCallback(() => {
     pushNativeCamera();
-    bump((n) => (n + 1) & 0xffff);
-  }, [pushNativeCamera]);
+    rerender();
+  }, [pushNativeCamera, rerender]);
   // Persist the camera pose at REST points (drag/key release, wheel, button) — never
   // per frame — so a hot reload resumes the view. sculptCamera keeps the same discipline.
   const saveCamera = useCallback(() => { writeRouteTwigState(ISO_ROUTE, ISO_CAM_TWIG, { ...stage.pose }); }, [stage]);
@@ -343,7 +411,14 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const wholeBuildingRef = useRef(wholeBuilding);
   wholeBuildingRef.current = wholeBuilding;
   const [wallsVisible, setWallsVisible] = useRouteTwigState<boolean>(ISO_ROUTE, 'wallsVisible', true);
-  const [floraVisible, setFloraVisible] = useRouteTwigState<boolean>(ISO_ROUTE, 'floraVisible', true);
+  // Default OFF (req_1638): the flora PREVIEW builds the full grass/palm field in JS
+  // (up to MAX_INSTANCES=1,048,576 blades × STRIDE-12 floats + 200k+ palm fronds) on
+  // every cold start, which OOMs the editor heap on a grass-heavy map BEFORE it ever
+  // renders — so the user sees no grass yet the build still kills the editor. Cold
+  // start hidden; toggle "Fl" to populate it when the map is light enough. The durable
+  // fix (a lightweight shader preview that doesn't materialise a million JS rows) lives
+  // in the flora refactor.
+  const [floraVisible, setFloraVisible] = useRouteTwigState<boolean>(ISO_ROUTE, 'floraVisible', false);
   // Show the WHOLE building stack (req_0721/req_0722). The floor-level cut-away
   // (storey ≥ the active level vanishes) is the "look into one floor" tool — show
   // the active floor and everything BELOW, hide what's above so you can see and
@@ -364,12 +439,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // An in-progress move drag: the world (dx,dz) the selection is being dragged by on
   // the active level's plane, or null when not moving. Drives the move ghost; the
   // selection re-places (remove+place) on mouse-up.
-  const [moveDelta, setMoveDelta] = useState<{ dx: number; dz: number } | null>(null);
+  const [moveDelta, setMoveDelta] = useState<{ dx: number; dz: number; dy: number } | null>(null);
   const moveDeltaRef = useRef(moveDelta);
   moveDeltaRef.current = moveDelta;
   // An in-progress drag-paint: the placements a wall LINE or floor RECT would drop,
   // previewed as ghosts and batch-placed on mouse-up. null when not painting.
-  type Paint = { pieceId: string; x: number; y: number; z: number; yawDegrees: number };
+  type Paint = { pieceId: string; x: number; y: number; z: number; yawDegrees: number; roofSpan?: { widthMeters: number; depthMeters: number } };
   const [paintCells, setPaintCells] = useState<Paint[] | null>(null);
   const paintCellsRef = useRef(paintCells);
   paintCellsRef.current = paintCells;
@@ -530,12 +605,25 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // share ONE base y (terrain under the centroid) so the row/rect reads as a flat pad —
   // matching what liftBuildingsToTerrain does to it after placement.
   const PAINT_MAX_SPAN = 64; // cells per axis — a giant drag can't spawn thousands of pieces
-  const paintKindOf = (a: Armed): 'wall' | 'floor' | 'tower' | null => {
+  const paintKindOf = (a: Armed): 'wall' | 'floor' | 'tower' | 'roof' | null => {
     if (!a) return null;
     if (a.kind === 'tower') return 'tower';
     if (a.kind !== 'piece') return null;
     const k = GAME_BUILD.catalog.get(a.id).kind;
-    return k === 'wall' || k === 'floor' ? k : null;
+    return k === 'wall' || k === 'floor' || k === 'roof' ? k : null;
+  };
+  // The top of the standing pieces under a dragged roof footprint — so a roof
+  // dropped over a one-storey house RESTS ON its walls, not on the ground
+  // (req_0917: "make a roof the size of the entire base floor"). null = nothing
+  // under the rect, so the caller falls back to the terrain.
+  const roofRestHeight = (minX: number, maxX: number, minZ: number, maxZ: number): number | null => {
+    let top: number | null = null;
+    for (const piece of visiblePiecesRef.current) {
+      const b = GAME_BUILD.placed.bounds(piece);
+      if (b.maxX <= minX || b.minX >= maxX || b.maxZ <= minZ || b.minZ >= maxZ) continue;
+      if (top === null || b.topY > top) top = b.topY;
+    }
+    return top;
   };
   // The tower footprint's perimeter as wall cells, every FRONT facing outward —
   // shared by the drag preview (ground ring only) and the commit (all storeys).
@@ -574,6 +662,22 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const cellOf = (v: number) => Math.floor(v / pitch);
     const center = (c: number) => (c + 0.5) * pitch;
     const range = (a0: number, b0: number): [number, number] => { const lo = Math.min(a0, b0), hi = Math.max(a0, b0); return [lo, Math.min(hi, lo + PAINT_MAX_SPAN - 1)]; };
+    if (kind === 'roof') {
+      // req_0917: a roof drag is ONE roof piece sized to the dragged footprint
+      // (roofSpan), not a tiling of plates — so a gable rides ONE ridge across
+      // the whole base floor. It rests on the walls under the rect (or the
+      // terrain if open), and the profile (pieceShapes) scales to the span.
+      const [x0, x1] = range(cellOf(start.x), cellOf(end.x));
+      const [z0, z1] = range(cellOf(start.z), cellOf(end.z));
+      const minX = x0 * pitch, maxX = (x1 + 1) * pitch;
+      const minZ = z0 * pitch, maxZ = (z1 + 1) * pitch;
+      const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+      const y = roofRestHeight(minX, maxX, minZ, maxZ) ?? placeGroundAt(cx, cz);
+      return [{
+        pieceId: def.id, x: cx, y, z: cz, yawDegrees: ghostYawRef.current,
+        roofSpan: { widthMeters: maxX - minX, depthMeters: maxZ - minZ },
+      }];
+    }
     const cells: { x: number; z: number; yaw: number }[] = [];
     if (kind === 'floor') {
       // req_0672: the SAME plate-lattice law as single-click grid snap — a
@@ -759,12 +863,29 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
           }
         }
       } else if (d.mode === 'move') {
+        // Ctrl + drag a prop = VERTICAL (height) move, the Z-free placement analogue of
+        // Alt's freeform XY (req_0900: posters/signs need to ride up a wall, not sit on
+        // the ground). Gated to prop-only selections like freeform — props keep an
+        // authored height through the lift (restPropsOnSupport never pulls an elevated
+        // prop down), structural pieces stay grid-aligned. Screen up/down → world height
+        // via the camera-facing vertical plane through the drag-start ground point.
+        const onlyProps = selectionIsOnlyProps(selectedIdsRef.current, piecesRef.current);
+        const vertical = heldModifiers.current.ctrl && onlyProps;
+        if (vertical) {
+          const rawDy = stage.heightDelta({ x: d.gx0, z: d.gz0 }, d.x0, d.y0, p.x, p.y, rectRef.current);
+          if (rawDy != null) {
+            const dy = quantizeMeters(rawDy, FREEFORM_MOVE_SNAP_METERS);
+            const cur = moveDeltaRef.current;
+            if (!cur || cur.dy !== dy || cur.dx !== 0 || cur.dz !== 0) setMoveDelta({ dx: 0, dz: 0, dy });
+          }
+          return;
+        }
         const g = stage.groundPoint(p.x, p.y, rectRef.current);
         // Snap structural moves to whole grid cells so buildings stay aligned.
         // Prop-only moves may hold Alt for intentional freeform nudges against walls.
         if (g) {
           const cs = state.world.cellSizeMeters || 1;
-          const freeform = heldModifiers.current.alt && selectionIsOnlyProps(selectedIdsRef.current, piecesRef.current);
+          const freeform = heldModifiers.current.alt && onlyProps;
           const rawDx = g.x - d.gx0;
           const rawDz = g.z - d.gz0;
           const dx = freeform ? quantizeMeters(rawDx, FREEFORM_MOVE_SNAP_METERS) : Math.round(rawDx / cs) * cs;
@@ -774,7 +895,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
           // rebuilt the 179-piece move ghost even while the drag sat inside
           // one cell — the same no-op-update class the paint drag had.
           const cur = moveDeltaRef.current;
-          if (!cur || cur.dx !== dx || cur.dz !== dz) setMoveDelta({ dx, dz });
+          if (!cur || cur.dx !== dx || cur.dz !== dz || cur.dy !== 0) setMoveDelta({ dx, dz, dy: 0 });
         }
       } else {
         stage.rotateBy((p.x - d.x) * 0.3); // horizontal drag → yaw
@@ -862,6 +983,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // placementFor carries the row's defaultEdit (REQ-0647: Doorway/Window
     // walls land with their cut) — the SAME helper F2's place() uses.
     const placement = GAME_BUILD.placed.placementFor(def, t.placement);
+    // TEMP diagnostic (req_1142): why a cooked prop "won't place". Logs the gate.
+    if (a.id.startsWith('prop.studio.')) {
+      const probs = GAME_BUILD.placed.validatePlacement(placement);
+      console.warn(`[cooked-place] id=${a.id} isCatalogId=${GAME_BUILD.catalog.is(a.id)} y=${placement.y} problems=[${probs.join('; ')}]`);
+    }
     if (GAME_BUILD.placed.validatePlacement(placement).length > 0) return;
     logPiecePlaced('iso place', placement);
     // Keep the thing you just placed live for same-key editing. The stream
@@ -920,6 +1046,23 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     setSelectedIds(new Set());
     commitPerfRef.current = { t0: perfMs(), label: `delete (${hide.size} pieces, ${wholeInstances.length} buildings)` };
     setTimeout(() => { commitBatch(events); }, 0);
+  };
+  // Turn the selected wall(s) into a window/door/arch IN PLACE. A WallEdit is a
+  // CUTOUT on the same slab (game/build/edits) — pieceShapes cuts the opening
+  // from the wall's own bands, so the result is exactly flush and full-height.
+  // This is why "delete the wall, drop a window-wall module" left a gap at the
+  // bottom and sat recessed: that was a DIFFERENT, smaller piece re-snapped to
+  // its own origin. Here the piece id, footprint, height, and skin all stay put
+  // and only the cutout changes — the play-mode build editor's "E edit" verb
+  // (pieceEditSet, PLACEDEDIT-0613), brought to the iso pane as a toolbar verb
+  // because 'e' already orbits the camera in the iso-build control scope.
+  const setCutoutOnSelection = (edit: WallEdit) => {
+    const walls = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id) && GAME_BUILD.placed.acceptsEdits(p));
+    if (!walls.length) return;
+    commitBatch(walls.map((p) => ({
+      event: { kind: 'pieceEditSet', id: p.id, edit } as BuildEditEvent,
+      label: `${p.id}: cutout → ${edit}`,
+    })));
   };
   // Duplicate the selection beside itself, shifted clear along +x by the
   // selection's own width. A whole BUILDING clones as ONE buildingPlaced of
@@ -1074,7 +1217,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // slice-2 edit, and faking it with no-op events would corrupt the world.
   const commitMove = () => {
     const delta = moveDeltaRef.current;
-    if (!delta || (Math.abs(delta.dx) < 1e-3 && Math.abs(delta.dz) < 1e-3)) { setMoveDelta(null); return; }
+    if (!delta || (Math.abs(delta.dx) < 1e-3 && Math.abs(delta.dz) < 1e-3 && Math.abs(delta.dy) < 1e-3)) { setMoveDelta(null); return; }
     const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
     if (!sel.length) { setMoveDelta(null); return; }
     const { wholeInstances, partialInstances, loosePieceIds } = partitionBuildingSelection(selectedIdsRef.current, piecesRef.current);
@@ -1095,7 +1238,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // face material on move.)
     const looseSet = new Set(loosePieceIds);
     const loose = sel.filter((p) => looseSet.has(p.id));
-    const moves = loose.map((p) => { const { id, ...rest } = p; return { id, placement: { ...rest, x: p.x + delta.dx, z: p.z + delta.dz } }; });
+    const moves = loose.map((p) => { const { id, ...rest } = p; return { id, placement: { ...rest, x: p.x + delta.dx, y: p.y + delta.dy, z: p.z + delta.dz } }; });
     if (moves.some((m) => GAME_BUILD.placed.validatePlacement(m.placement).length > 0)) { setMoveDelta(null); return; }
     // OPTIMISTIC (req_0511): release costs nothing — the move ghost (already
     // mounted) turns SOLID at the new spot, the originals hide, and the store
@@ -1111,7 +1254,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     // One batch: building moves + (all removes then all places) → one undo
     // step, one store snapshot, so moving a whole building doesn't freeze.
     setTimeout(() => {
-      logPiecesPlaced(`iso move (dx=${delta.dx.toFixed(2)} dz=${delta.dz.toFixed(2)})`, moves.map((m) => m.placement));
+      logPiecesPlaced(`iso move (dx=${delta.dx.toFixed(2)} dy=${delta.dy.toFixed(2)} dz=${delta.dz.toFixed(2)})`, moves.map((m) => m.placement));
       commitBatch([
         ...events,
         ...moves.map((m) => ({ event: { kind: 'pieceRemoved', id: m.id } as BuildEditEvent, label: `moved ${m.id}` })),
@@ -1150,8 +1293,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     setPendingPaint(true);
     setTimeout(() => {
       // placementFor injects the row's defaultEdit (REQ-0647) so a drag-painted
-      // run of Window Walls lands with every pane cut, like a single click.
-      const placements = valid.map((c) => GAME_BUILD.placed.placementFor(GAME_BUILD.catalog.get(c.pieceId), c));
+      // run of Window Walls lands with every pane cut, like a single click. A
+      // roof drag carries its dragged footprint (roofSpan, req_0917) through —
+      // placementFor only knows the row + pose, so re-attach it here.
+      const placements = valid.map((c) => ({
+        ...GAME_BUILD.placed.placementFor(GAME_BUILD.catalog.get(c.pieceId), c),
+        ...(c.roofSpan ? { roofSpan: c.roofSpan } : {}),
+      }));
       logPiecesPlaced('iso drag-paint', placements);
       commitBatch(placements.map((placement) => ({
         event: { kind: 'piecePlaced', placement } as WorldEvent,
@@ -1233,6 +1381,18 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       // user's drag. Stalls outside an interaction window (no drag, no
       // pending commit, no input for 3s) say so on the line and report at
       // most once per 10s; interaction stalls keep req_0507's 1/s cadence.
+      // SUSPEND vs STALL (req_1634, USER report of "max=52494ms"): performance.now()
+      // counts wall-clock across process suspension, so when the machine sleeps or
+      // the host is paused, the very next tick shows a multi-second gap. That is not
+      // a frame stall — it's a clock jump — and reporting it as one is cry-wolf
+      // noise. Absorb any gap past a sane ceiling: advance the clock and skip the
+      // watchdog entirely for this tick (dt is already clamped to 0.05 below, so the
+      // simulation never lurches on resume).
+      if (now - last > 4000) {
+        last = now;
+        handle = sched(tick);
+        return;
+      }
       if (now - last > 150) {
         const idle = !dragRef.current && !commitPerfRef.current && now - lastInputAtRef.current > 3000;
         stallCount += 1;
@@ -1358,7 +1518,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const sel = pendingMove !== null ? pendingMoveSnapRef.current : displayPieces.filter((p) => ids.has(p.id));
     if (!sel.length) return null;
     // Carry skin + edit so the solid pending look matches the real building.
-    const moved = sel.map((p) => ({ pieceId: p.pieceId, x: p.x + moveDelta.dx, y: p.y, z: p.z + moveDelta.dz, yawDegrees: p.yawDegrees, skin: p.skin, edit: p.edit }));
+    const moved = sel.map((p) => ({ pieceId: p.pieceId, x: p.x + moveDelta.dx, y: p.y + moveDelta.dy, z: p.z + moveDelta.dz, yawDegrees: p.yawDegrees, skin: p.skin, edit: p.edit }));
     const solid = pendingMove !== null;
     const blocked = !solid && moved.some((m) => GAME_BUILD.placed.validatePlacement(m as any).length > 0);
     const color = solid ? undefined : blocked ? BUILD_UI.ghostBlockedColor : BUILD_UI.ghostColor;
@@ -1500,6 +1660,29 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         {ghostMeshes}
         {moveGhostMeshes}
         {paintGhostMeshes}
+        {/* tile-lookup highlight (req_0823): a magenta marker on the exact looked-up
+            cell, raised so it reads over the ground. Position = cell CENTRE in world
+            metres ((g+0.5)*cellSize), the same mapping the ground mesh uses. */}
+        {lookupCell ? (
+          <>
+            {/* flat magenta cap exactly over the one cell */}
+            <Scene3D.Mesh
+              geometry={Geometry.Box}
+              params={{ width: 1, height: 1, depth: 1 }}
+              scale={[(state.world.cellSizeMeters || 1), 0.3, (state.world.cellSizeMeters || 1)]}
+              position={[(lookupCell.gx + 0.5) * (state.world.cellSizeMeters || 1), level * METERS_PER_LEVEL + 0.15, (lookupCell.gz + 0.5) * (state.world.cellSizeMeters || 1)]}
+              material="#ff2bd6"
+            />
+            {/* tall beacon so the cell is findable from any zoom/angle */}
+            <Scene3D.Mesh
+              geometry={Geometry.Box}
+              params={{ width: 1, height: 1, depth: 1 }}
+              scale={[0.35, 40, 0.35]}
+              position={[(lookupCell.gx + 0.5) * (state.world.cellSizeMeters || 1), level * METERS_PER_LEVEL + 20, (lookupCell.gz + 0.5) * (state.world.cellSizeMeters || 1)]}
+              material="#ff2bd6"
+            />
+          </>
+        ) : null}
       </Scene3D>
 
       {/* pointer capture (near-transparent so it's hittable). onScroll rides the raw
@@ -1535,6 +1718,31 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
           <Text fontSize={9} color="#fbbf24" style={{ fontFamily: 'monospace' }}>confirming…</Text>
         </Box>
       ) : null}
+
+      {/* ── tile lookup (req_0823): type an address, highlight that exact tile.
+          Sits under the top-right control cluster so it never covers the
+          bottom/left editor panels. */}
+      <Box style={{ position: 'absolute', right: 8, top: 40, flexDirection: 'row', gap: 6, alignItems: 'center', backgroundColor: '#0b1220ee', borderWidth: 1, borderColor: '#1e3a5f', borderRadius: 6, paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5 }}>
+        <Text fontSize={10} color="#7dd3fc" style={{ fontFamily: 'monospace' }}>tile</Text>
+        <TextInput
+          text={lookupAddr}
+          onChangeText={(v: string) => {
+            setLookupAddr(v);
+            const p = parseAddress(v.trim());
+            setLookupCell(p ? { gx: p.x, gz: p.z } : null);
+            if (p) { // fly the iso camera to the tile so the beacon is on-screen
+              const cs = state.world.cellSizeMeters || 1;
+              stage.centerOn((p.x + 0.5) * cs, (p.z + 0.5) * cs);
+              redraw();
+              saveCamera();
+            }
+          }}
+          style={{ width: 84, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: '#27364a', borderRadius: 4, paddingLeft: 6, paddingRight: 6, paddingTop: 4, paddingBottom: 4, color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace' }}
+        />
+        <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>
+          {lookup ? `${cellAddress(lookup.gx, lookup.gz)} (${lookup.gx},${lookup.gz}) ch ${lookup.cx},${lookup.cz} · data=${lookup.kind} · shader-reads=${lookup.shaderKind}` : 'e.g. EI120'}
+        </Text>
+      </Box>
 
       {/* ── Sims control cluster (top-right): rotate · zoom · floor ────────── */}
       <Box style={{ position: 'absolute', right: 8, top: 8, flexDirection: 'row', gap: 4 }}>
@@ -1574,6 +1782,33 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         </Box>
       ) : null}
 
+      {/* ── cutout on the selected wall (req_1292/1293): a window or door is a
+          CUTOUT applied to the wall IN PLACE, never a separate "window-wall"
+          module. Swapping in a different module re-snapped it to its own origin
+          and shrank it — that was the gap at the bottom and the recessed face.
+          pieceEditSet keeps the same slab and just cuts the opening, so it stays
+          flush and full-height. Shows the shared cutout as active. ─────────── */}
+      {(() => {
+        const walls = pieces.filter((p) => selectedIds.has(p.id) && GAME_BUILD.placed.acceptsEdits(p));
+        if (!walls.length) return null;
+        const first = walls[0].edit ?? 'solid';
+        const shared = walls.every((p) => (p.edit ?? 'solid') === first) ? first : null;
+        return (
+          <Box style={{ position: 'absolute', left: 8, top: 64, flexDirection: 'row', flexWrap: 'wrap', gap: 4, maxWidth: 470, alignItems: 'center' }}>
+            <Box style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 4, paddingBottom: 4, backgroundColor: BUILD_UI.panelBg, borderRadius: 4 }}>
+              <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{`cutout · ${walls.length} wall${walls.length === 1 ? '' : 's'}`}</Text>
+            </Box>
+            {GAME_BUILD.edits.wallEdits.map((e) => (
+              <Pressable key={e} onPress={() => setCutoutOnSelection(e)} hoverable tooltip={GAME_BUILD.edits.wall[e].meaning}>
+                <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: shared === e ? '#12324f' : BUILD_UI.panelBg, borderWidth: shared === e ? 1 : 0, borderColor: '#38bdf8' }}>
+                  <Text fontSize={10} color={shared === e ? '#7dd3fc' : '#cbd5e1'} style={{ fontFamily: 'monospace' }}>{GAME_BUILD.edits.wall[e].label}</Text>
+                </Box>
+              </Pressable>
+            ))}
+          </Box>
+        );
+      })()}
+
       {/* face painter: NOT here anymore (req_0702) — it fills the cart's top-right
           PAINT tab, fed by the onSelectionChange mirror above. The map stays clear. */}
 
@@ -1586,9 +1821,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
             ? `tower: drag the footprint · ${towerFloors} floors (+/− top right) · hollow shell + roof, one building · Esc`
             : armed.kind === 'water'
               ? `water: ${WATER_BODY_PRESETS[armed.id]?.label ?? armed.id} · click the ground to drop a body of water · dig under it (Height brush) for a deeper pool · Esc`
-              : `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${armedPropCanFreeform ? ' · Alt freeform' : ''}${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : ' · drag rotate'} · R rotate · shift-click select · Esc`
+              : `place: ${(armed.kind === 'prefab' ? prefabById.get(armed.id)?.label ?? armed.id : GAME_BUILD.catalog.get(armed.id).label)} · click to place${armedPropCanFreeform ? ' · Alt freeform' : ''}${paintKindOf(armed) === 'wall' ? ' · drag = wall line' : paintKindOf(armed) === 'floor' ? ' · drag = floor area' : paintKindOf(armed) === 'roof' ? ' · drag = roof over base' : ' · drag rotate'} · R rotate · shift-click select · Esc`
           : selectedIds.size > 0
-            ? `${selectedIds.size} selected · drag to move${selectedPropsCanFreeform ? ' · Alt-drag freeform' : ''} · R rotate · paint in the PAINT panel above · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
+            ? `${selectedIds.size} selected · drag to move${selectedPropsCanFreeform ? ' · Alt-drag freeform · Ctrl-drag height' : ''} · R rotate · wall? cut a window/door top-left · paint in the PAINT panel above · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'} (shift inverts)`
             : `WASD pan · drag rotate · scroll zoom · F recenter · click = ${wholeBuilding ? 'building, shift = piece' : 'piece, shift = building'} · ${wallsVisible ? 'walls shown' : 'walls hidden'} · pick below to build`}
       </Text>
       {/* what's in the map — the "junk" is the real placed pieces + world props (the
@@ -1743,6 +1978,11 @@ const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: re
   // button wall was unusable, so a second chip row picks a registry category
   // (game/kinds/props PROP_CATEGORIES) and only that shelf's pieces list.
   const [propShelf, setPropShelf] = useRouteTwigState<PropCategory>(ISO_ROUTE, 'railShelf', 'street');
+  // Studio-cooked props (req_1134): subscribing here boot-syncs the cooked-prop
+  // overlay (so a cold-loaded editor lists them) AND re-renders the rail when a
+  // new asset is cooked. The cooked props live on the 'studio' shelf.
+  const cooked = useCookedAssets();
+  const cookedPropCount = cooked.byKind('prop').length;
   // 'prefabs' lists the named compositions (stamp → many pieces) — the FULL list the cart
   // passes (built-in + user-captured stream prefabs); every other tab lists that kind's
   // catalog pieces. Both feed the SAME rail, fed by the SAME GAME_BUILD.
@@ -1757,7 +1997,7 @@ const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: re
         return isPropKind(kind) && propCategory(kind) === propShelf;
       });
     },
-    [tab, propShelf, props.prefabs],
+    [tab, propShelf, props.prefabs, cookedPropCount],
   );
   const armKind: 'piece' | 'prefab' | 'water' = tab === 'prefabs' ? 'prefab' : tab === 'water' ? 'water' : 'piece';
   const armedId = props.armed && props.armed.kind !== 'tower' ? props.armed.id : null;
@@ -1790,7 +2030,7 @@ const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: re
           {PROP_CATEGORY_NAMES.map((cat) => (
             <Pressable key={cat} onPress={() => setPropShelf(cat)}>
               <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: cat === propShelf ? '#0e7490' : '#142031' }}>
-                <Text fontSize={10} color={cat === propShelf ? '#ecfeff' : '#8aa0b8'} style={{ fontFamily: 'monospace' }}>{`${cat} ${PROP_CATEGORIES[cat].length}`}</Text>
+                <Text fontSize={10} color={cat === propShelf ? '#ecfeff' : '#8aa0b8'} style={{ fontFamily: 'monospace' }}>{`${cat} ${cat === 'studio' ? cookedPropCount : PROP_CATEGORIES[cat].length}`}</Text>
               </Box>
             </Pressable>
           ))}

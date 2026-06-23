@@ -29,13 +29,13 @@ import { createHmscMapfile } from '../packageMap';
 import { INSTANCE_STRIDE, INSTANCE_SHAPE_BOX, encodeInstanceLump } from './worldGeometry';
 import {
   MAP_LUMP,
-  bytesToBase64,
   findLump,
   readLumpContainer,
   writeLumpContainer,
   type LumpInput,
 } from '@reactjit/workspace';
 import { writeGameFile } from '@reactjit/workspace/gamefile';
+import { emitBakedGameFile } from './emitGameFile';
 
 const warn = (msg: string): void => {
   (globalThis as any).console?.warn?.(msg);
@@ -201,5 +201,5 @@ if (file.byteLength >= 256 << 20) {
   warn('[massive] WARNING: game-file exceeds the loader 256MB read cap — lower --blocks or raise the cap in world_loader.zig loadGameFile');
 }
 
-const emit = (globalThis as any).print ?? console.log;
-emit(JSON.stringify({ gamefile: bytesToBase64(file), assets: [] }));
+// Hand the packed binary to the CLI on disk (no base64 — see emitGameFile.ts).
+emitBakedGameFile(file, []);

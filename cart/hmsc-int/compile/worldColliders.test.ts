@@ -5,6 +5,7 @@
 
 import { assert, assertClose, assertEqual, finish, test } from '../game/_testkit';
 import { GAME_BUILD, type PlacedBuildPiece } from '@game';
+import { dumpsterBodyMeters } from '../game/kinds/props';
 import {
   buildBakedColliders,
   encodeCollidersLump,
@@ -61,6 +62,17 @@ test('a flat painted chunk bakes to ONE collision heightfield, not per-cell rect
   assertEqual(baked.rects.length, 0, 'flat ground adds ZERO per-cell rects');
   assertEqual(baked.ramps.length, 1, 'flat chunk → exactly one collision heightfield');
   assert(baked.ramps[0]!.cols >= 2 && baked.ramps[0]!.rows >= 2, 'heightfield grid is valid');
+});
+
+test('a compiled dumpster collider uses the visible body footprint', () => {
+  const { widthMeters: w, depthMeters: d } = dumpsterBodyMeters();
+  const baked = buildBakedColliders([
+    { id: 'bp_dumpster', pieceId: 'prop.dumpster', x: 10, y: 0, z: 20, yawDegrees: 0 },
+  ], [], 0);
+  assertEqual(baked.oriented.length, 0, 'axis-aligned dumpster bakes as a plain rect');
+  assertEqual(baked.rects.length, 9, 'one host rect for the dumpster body');
+  assertClose(baked.rects[2] - baked.rects[0], w, 1e-6, 'compiled dumpster collision width matches visible body');
+  assertClose(baked.rects[3] - baked.rects[1], d, 1e-6, 'compiled dumpster collision depth matches visible body');
 });
 
 test('COLLIDERS lump round-trips (mirrors constructor.zig decodeColliders)', () => {

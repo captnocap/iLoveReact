@@ -3,6 +3,7 @@
 // overlays, captures, and the PAINT doorway.
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { Box, Pressable, Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import {
@@ -94,8 +95,8 @@ export function VehicleStage(props: { store: VehicleStore; lens: VehicleLens }) 
 
 function VehiclePreviewStage(props: { store: VehicleStore }) {
   const s = props.store;
-  const [, setTick] = useState(0);
-  useEffect(() => s.subscribe(() => setTick((t) => t + 1)), [s]);
+  const rerender = useRerender();
+  useEffect(() => s.subscribe(rerender), [s]);
 
   const doc = s.doc;
   const cameraRef = useRef<any>(null);

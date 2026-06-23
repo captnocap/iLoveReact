@@ -27,6 +27,7 @@ import {
 import type { TileKind } from '../../design';
 import { PAINTABLE_TILE_KINDS, isTileKind } from '../../world/tileKinds';
 import { type ChunkFloor, floorsFromEditorWorld } from '../../chunkFloor';
+import { startupMark } from '../../startupTimer';
 import type { PreviewCamera, PreviewCameraApi } from '../../IsoPreview';
 import type { Tool, Layer, PaintCanvasApi, BrushSettings, CanvasView2D } from '../../PaintCanvas';
 import type { PainterChannels } from '../../TargetDock';
@@ -332,6 +333,7 @@ export function useMapSession(opts: {
     if (typeof p.notes === 'string') setNotes(p.notes);
     if (applyTwig && typeof p.showGrid === 'boolean') setShowGrid(p.showGrid);
     // Decode the world and remount PaintCanvas onto it.
+    startupMark('applyPayload: decoding boot world');
     const w = p.world ? deserializeMap(p.world) : emptyMap();
     // [mapgone-probe MAPGONE2-0605] boot-path count — stays until the user confirms
     {
@@ -370,6 +372,7 @@ export function useMapSession(opts: {
         })();
     if (applyTwig) setSeedView(restoredView);
     console.warn(`[mapgone] applyPayload: view2d=${p.view2d ? (savedSane ? 'saved' : 'saved-INSANE') : 'absent'} → seedView=${applyTwig && restoredView ? `${restoredView.x.toFixed(0)},${restoredView.y.toFixed(0)}@${restoredView.zoom.toFixed(2)}` : applyTwig ? 'host default' : 'preserved (history apply)'}`);
+    startupMark(`applyPayload: world applied (chunks=${w.chunks.size}, placements=${w.placements.length})`);
     setSeedWorld(w);
     setWorldEpoch((e) => e + 1);
     // Build pieces ride the worldStream, not the map payload — so an undo/redo (history)

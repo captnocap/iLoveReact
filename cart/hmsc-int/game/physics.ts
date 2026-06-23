@@ -180,11 +180,15 @@ const CAMERA_OCCLUSION_MAX_HITS = 64;
 /** Host hard caps — exceeding one is a caller bug, surfaced at the boundary.
  *  Must mirror framework/game/physics.zig (MAX_RECTS / MAX_ORIENTED / MAX_ENTITIES).
  *  rects raised to 16384: a built-out city overran 4096, dropping the tail of
- *  recently-placed structures' colliders (walk-through walls). */
+ *  recently-placed structures' colliders (walk-through walls). orientedRects
+ *  raised to 16384 to match: every prop now bakes a footprint collider on the
+ *  oriented lane, and a real city crossed the old 256 cap → the tail of props
+ *  silently lost collision (the same walk-through-the-tail bug). Headroom is
+ *  free (per-step cost is the actual count). Don't set these low again. */
 export const PHYSICS_LIMITS = Object.freeze({
   bodies: 128,
   rects: 16384,
-  orientedRects: 256,
+  orientedRects: 16384,
 });
 
 /** floorMeters sentinel: the rect is solid all the way down. */

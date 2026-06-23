@@ -1,3 +1,4 @@
+import { type PropKindDefinition } from '../../game/kinds/props';
 import { box, cylinder8, hx, NEAR_BLACK, sphere, STEEL, WHITE, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
@@ -18,3 +19,14 @@ export function slotMachineParts(): PropPartSpec[] {
     cylinder8([0, 1.32 * s, 0], 0.07 * s, 0.24 * s, gold),
   ];
 }
+
+export const slotMachineDef: PropKindDefinition = {
+  kind: 'slotMachine',
+  label: 'Slot Machine',
+  solid: true,
+  footprintRadiusMeters: 0.3,
+  heightMeters: 1.45,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'valuables', capacity: 2, spawnFillChance: 0.4, searchSeconds: 3, access: 'locked' },
+};

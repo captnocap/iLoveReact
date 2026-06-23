@@ -21,6 +21,7 @@ export type PropBoxRecipePart = {
   size: PropRecipeSize;
   color: Color;
   rotation?: PropRecipeRotation;
+  opacity?: number;
 };
 
 export type PropCylinderRecipePart = {
@@ -31,6 +32,7 @@ export type PropCylinderRecipePart = {
   height: number;
   color: Color;
   rotation?: PropRecipeRotation;
+  opacity?: number;
 };
 
 export type PropSphereRecipePart = {
@@ -68,11 +70,11 @@ function recipeRotation(v: PropRecipeRotation | undefined): Rotation | undefined
 export function lowerRecipePart(part: PropRecipePart): PropPartSpec {
   switch (part.shape) {
     case 'box':
-      return box(recipeVec(part.position), recipeSize(part.size), part.color, recipeRotation(part.rotation));
+      return { shape: 'box', local: recipeVec(part.position), size: recipeSize(part.size), color: part.color, rotation: recipeRotation(part.rotation), opacity: part.opacity };
     case 'cylinder8':
-      return cylinder8(recipeVec(part.position), part.radius, part.height, part.color, recipeRotation(part.rotation));
+      return { shape: 'cylinder8', local: recipeVec(part.position), size: [part.radius * 2, part.height, part.radius * 2], color: part.color, rotation: recipeRotation(part.rotation), opacity: part.opacity };
     case 'cylinder16':
-      return cylinder16(recipeVec(part.position), part.radius, part.height, part.color, recipeRotation(part.rotation));
+      return { shape: 'cylinder16', local: recipeVec(part.position), size: [part.radius * 2, part.height, part.radius * 2], color: part.color, rotation: recipeRotation(part.rotation), opacity: part.opacity };
     case 'sphere':
       return {
         shape: 'sphere',

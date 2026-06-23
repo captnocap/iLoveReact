@@ -128,6 +128,28 @@ export const MAP_LUMP = {
   // scrolls + draws the lit LEDs per frame (the elevator-car pattern). Layout in
   // cart/hmsc-int/compile/worldTicker.ts encodeTickers. Absent → no tickers.
   TICKER: 23,
+  // NPC population (req_0935): the figures that walk the compiled world, baked
+  // as DATA the no-V8 loader renders with the player figure's own machinery.
+  // NPC_MODELS = u32 version | u32 modelCount | per model: u32 groupCount |
+  // groups[] (each group the SAME 68-byte header + verts(+texture) as
+  // PLAYER_MODEL — see cart/hmsc-int/compile/npcModels.ts). NPCs reuse
+  // PLAYER_ANIMATION unchanged (shared skeleton). Absent → no NPCs.
+  NPC_MODELS: 24,
+  // NPC_SPAWNS = u32 version | u32 count | per spawn: u32 modelIndex |
+  // f32 x,z,yaw | u32 kind | u32 faction. The loader grounds each on the
+  // terrain (no baked y) and animates it; kind/faction are reserved for the
+  // Stage-2 Zig combat AI. Layout: cart/hmsc-int/compile/npcModels.ts.
+  NPC_SPAWNS: 25,
+  // Foliage RECIPE (FOLIAGEFORMULA, req_1588/1591): grass/bush cover is a pure
+  // deterministic formula, so instead of baking ~1M expanded blade rows into
+  // INSTANCES (56MB of a 70MB file — 99.4% of the instances) we ship only the
+  // FACTORS — the painted foliage CELLS — and the loader expands blades at load
+  // via framework/world/foliage.zig (the bit-exact twin of grassPopulation.ts).
+  // Layout: u32 version | f32 cellSizeMeters | u32 cellCount | per cell:
+  // u32 cellKey | f32 wx | f32 wz | f32 top | u16 specId(0=grass,1=bush) | u16
+  // count(blades). Absent → no recipe foliage (legacy bakes still ship blades in
+  // INSTANCES). See cart/hmsc-int/compile/worldGeometry.ts encodeFlora.
+  FLORA: 26,
 } as const;
 
 export type LumpInput = {

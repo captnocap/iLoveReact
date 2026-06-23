@@ -19,6 +19,7 @@ import { logsSource } from './logs/source';
 import { requestsSource } from './requests/source';
 import { garmentsSource } from './clothing/source';
 import { storySource } from './story/source';
+import { modelSource } from './model/source';
 
 export function workbenchSources(): Array<WorkbenchSource<any>> {
   return [
@@ -26,6 +27,7 @@ export function workbenchSources(): Array<WorkbenchSource<any>> {
     garmentsSource(),   // CLOTHFLIP-0607 (req_0234) — THE clothing authority: items alone + the variant grid + the painter design spine; the cosplay clothing context is DEAD (user verdict; outfit/props are character/play domain)
     animationSource(),  // CLOTHSPLIT-0606 phase 2 — the rig/posing context (USER RULING req_0040)
     paintSource(),      // AGNOSTICPAINT-0606 — THE agnostic painting surface (/cutout DEAD — CUTOUTFLIP-0606)
+    modelSource(),      // STUDIO (req_0958) — the Blockbench-class part-mesh editor; first slice = viewport + host-owned orbit camera (editMesh keystone + Studio viewport)
     itemsSource(),      // WBSTEP5-0606 — item source + ruled-in voxel SCULPT mode (/items + /voxels DEAD — WBITEMS-FLIP-0606)
     vehiclesSource(),   // WBSTEP6-0606 — vehicle source (/vehicles DEAD — WBSTEP6-FLIP-0606)
     materialsSource(),  // WBSTEP7-0606 — material source (/textures + /compose DEAD — WBMATERIALS-FLIP-0607)

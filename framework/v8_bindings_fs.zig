@@ -440,6 +440,57 @@ fn fsWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setBool(info, true);
 }
 
+/// Raw bytes from a Uint8Array / ArrayBufferView arg, borrowed in place (zero
+/// copy). Pointer owned by V8 — valid only for the duration of the call.
+fn argView(info: v8.FunctionCallbackInfo, idx: u32) ?[]const u8 {
+    if (info.length() <= idx) return null;
+    const v = info.getArg(idx);
+    if (!v.isArrayBufferView()) return null;
+    const view: v8.ArrayBufferView = .{ .handle = @ptrCast(v.handle) };
+    const byte_len = view.getByteLength();
+    if (byte_len == 0) return &[_]u8{};
+    const byte_off = view.getByteOffset();
+    const ab = view.getBuffer();
+    var shared = ab.getBackingStore();
+    defer v8.BackingStore.sharedPtrReset(&shared);
+    const bs = v8.BackingStore.sharedPtrGet(&shared);
+    const base = bs.getData() orelse return null;
+    const base_bytes: [*]const u8 = @ptrCast(base);
+    return base_bytes[byte_off .. byte_off + byte_len];
+}
+
+/// __fs_write_bytes(path, Uint8Array) → bool. Writes the typed array's raw bytes
+/// straight to disk (creating parent dirs, truncating). The GL-compliant binary
+/// write door: no base64, no UTF-8 re-encoding — the bake hands the loader packed
+/// bytes without a text inflate pass (the path that OOM'd the JS heap, req_1586).
+fn fsWriteBytes(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path_buf = argStringAlloc(alloc, info, 0) orelse {
+        setBool(info, false);
+        return;
+    };
+    defer alloc.free(path_buf);
+    const bytes = argView(info, 1) orelse {
+        setBool(info, false);
+        return;
+    };
+
+    if (std.mem.lastIndexOfScalar(u8, path_buf, '/')) |idx| {
+        std.fs.cwd().makePath(path_buf[0..idx]) catch {};
+    }
+    const file = std.fs.cwd().createFile(path_buf, .{ .truncate = true }) catch {
+        setBool(info, false);
+        return;
+    };
+    defer file.close();
+    file.writeAll(bytes) catch {
+        setBool(info, false);
+        return;
+    };
+    setBool(info, true);
+}
+
 fn fsWriteBase64Atomic(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const alloc = std.heap.page_allocator;
@@ -752,6 +803,7 @@ pub fn registerFs(vm: anytype) void {
     v8_runtime.registerHostFn("__fs_read_base64", fsReadBase64);
     v8_runtime.registerHostFn("__fs_read_rjmp_entities", fsReadRjmpEntities);
     v8_runtime.registerHostFn("__fs_write", fsWrite);
+    v8_runtime.registerHostFn("__fs_write_bytes", fsWriteBytes);
     v8_runtime.registerHostFn("__fs_write_base64_atomic", fsWriteBase64Atomic);
     v8_runtime.registerHostFn("__fs_scandir", fsScandir);
     v8_runtime.registerHostFn("__fs_deletefile", fsDeletefile);

@@ -1,12 +1,16 @@
-import { box, hx, METAL, NEAR_BLACK, panel, type PropPartSpec } from '../../game/kinds/propModels';
-import { propKindDefinition } from '../../game/kinds/props';
-
+import {
+  lowerPropRecipe,
+  recipeColor,
+  type Color,
+  type PropPartSpec,
+  type PropRecipe,
+  type PropRecipePart,
+} from './types';
 import { type PropKindDefinition } from '../../game/kinds/props';
 
 export const vendingMachineDef: PropKindDefinition = {
   kind: 'vendingMachine',
   label: 'Vending Machine',
-  // Real ~1.83m × 1.15. The front panel is an image target (partId 'front').
   solid: true,
   footprintRadiusMeters: 0.5,
   heightMeters: 2.1,
@@ -16,19 +20,76 @@ export const vendingMachineDef: PropKindDefinition = {
   coverClass: 'hard',
 };
 
-export function vendingMachineParts(): PropPartSpec[] {
-  const s = propKindDefinition('vendingMachine').heightMeters / 2.1;
-  const red = hx('#c1272d');
-  const redDark = hx('#8e1d22');
-  return [
-    box([0, 1.02 * s, 0.02 * s], [0.94 * s, 2.0 * s, 0.78 * s], red),
-    box([-0.32 * s, 0.06 * s, -0.3 * s], [0.12 * s, 0.12 * s, 0.12 * s], NEAR_BLACK),
-    box([0.32 * s, 0.06 * s, -0.3 * s], [0.12 * s, 0.12 * s, 0.12 * s], NEAR_BLACK),
-    // the brandable front — image target (req_0635)
-    panel('front', [0, 1.12 * s, -0.38 * s], [0.86 * s, 1.7 * s, 0.03 * s], redDark),
-    // display window + coin column + dispense slot ride proud of the panel
-    box([-0.16 * s, 1.35 * s, -0.4 * s], [0.46 * s, 1.1 * s, 0.02 * s], hx('#15314e')),
-    box([0.28 * s, 1.5 * s, -0.4 * s], [0.16 * s, 0.4 * s, 0.02 * s], METAL),
-    box([0, 0.42 * s, -0.4 * s], [0.6 * s, 0.24 * s, 0.03 * s], NEAR_BLACK),
+const COLORS = {
+  shell: recipeColor('#c2362f'),
+  glass: recipeColor('#bcd3dd'),
+  trim: recipeColor('#1a1c1e'),
+  button: recipeColor('#e8b84a'),
+} satisfies Record<string, Color>;
+
+export function vendingMachineRecipe(): PropRecipe {
+  const h = 2.1;
+  const parts: PropRecipePart[] = [
+    {
+      id: 'case',
+      shape: 'box',
+      position: { x: 0, y: h * 0.5, z: 0 },
+      size: { width: 0.84, height: h, depth: 0.58 },
+      color: COLORS.shell,
+    },
+    {
+      id: 'glass',
+      shape: 'box',
+      position: { x: 0, y: h * 0.58, z: -0.28 },
+      size: { width: 0.64, height: h * 0.55, depth: 0.04 },
+      color: COLORS.glass,
+    },
+    {
+      id: 'productRow1',
+      shape: 'box',
+      position: { x: 0, y: h * 0.75, z: -0.3 },
+      size: { width: 0.5, height: 0.04, depth: 0.02 },
+      color: COLORS.trim,
+    },
+    {
+      id: 'productRow2',
+      shape: 'box',
+      position: { x: 0, y: h * 0.6, z: -0.3 },
+      size: { width: 0.5, height: 0.04, depth: 0.02 },
+      color: COLORS.trim,
+    },
+    {
+      id: 'productRow3',
+      shape: 'box',
+      position: { x: 0, y: h * 0.45, z: -0.3 },
+      size: { width: 0.5, height: 0.04, depth: 0.02 },
+      color: COLORS.trim,
+    },
+    {
+      id: 'buttonPanel',
+      shape: 'box',
+      position: { x: 0.28, y: h * 0.32, z: -0.28 },
+      size: { width: 0.16, height: h * 0.15, depth: 0.04 },
+      color: COLORS.trim,
+    },
+    {
+      id: 'button',
+      shape: 'box',
+      position: { x: 0.28, y: h * 0.35, z: -0.3 },
+      size: { width: 0.06, height: 0.06, depth: 0.02 },
+      color: COLORS.button,
+    },
+    {
+      id: 'dispense',
+      shape: 'box',
+      position: { x: -0.15, y: h * 0.18, z: -0.3 },
+      size: { width: 0.3, height: 0.1, depth: 0.04 },
+      color: COLORS.trim,
+    },
   ];
+  return { id: 'vendingMachine', parts };
+}
+
+export function vendingMachineParts(): PropPartSpec[] {
+  return lowerPropRecipe(vendingMachineRecipe());
 }

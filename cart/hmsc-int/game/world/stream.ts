@@ -264,6 +264,11 @@ export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freez
         // tolerant by contract (a dangling catalog id from a future/foreign
         // writer is noise, not a crash) — the authoring side validates
         // BEFORE it appends (game/build validatePlacement)
+        // TEMP diagnostic (req_1142): a cooked prop dropped here = the overlay
+        // wasn't synced when this fold ran.
+        if (event.placement?.pieceId?.startsWith?.('prop.studio.') && !isCatalogId(event.placement.pieceId)) {
+          (globalThis as any).console?.warn?.(`[cooked-place] worldStream DROPPED ${event.placement.pieceId} (isCatalogId=false at fold)`);
+        }
         if (!event.placement || !isCatalogId(event.placement.pieceId)) return state;
         if (event.placement.edit !== undefined && !isWallEdit(event.placement.edit)) return state;
         return appendPieces(state, [event.placement], event.mapName);

@@ -7,7 +7,7 @@
 // the full node graph is the deferred follow-up). The side panel (gutter 3) is
 // now metadata (last updated, previous mission, …).
 
-import { useState } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { Box, ScrollView, Text } from '@reactjit/primitives';
 import { PanelGroups } from '../../../shell/fields';
 import { accentFor } from '../../../shell/workbench.cls';
@@ -28,8 +28,7 @@ function Banner(props: { title: string; hint: string }) {
 
 export function StoryStage(props: { store: StoryStore }) {
   const { store } = props;
-  const [, force] = useState(0);
-  const onEdit = () => force((n) => n + 1);
+  const onEdit = useRerender();
 
   const key = store.selectedKey();
   if (key && store.draft(key)) {

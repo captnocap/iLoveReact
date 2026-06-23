@@ -9,12 +9,10 @@
 // Keep this cart tiny. It is a probe, not an app.
 
 import { useEffect, useRef, useState } from 'react';
-import { Box, Pressable, ScrollView, TextInput } from '@reactjit/runtime/primitives';
-import { installBrowserShims } from '@reactjit/runtime/hooks';
-import { useAssistant, type WorkerEvent } from '@reactjit/runtime/hooks/useAssistant';
-import { callHost, hasHost } from '@reactjit/runtime/ffi';
+import { Box, Pressable, ScrollView, TextInput } from '@reactjit/primitives';
 
-installBrowserShims();
+import { callHost, hasHost } from '@reactjit/ffi';
+
 
 const MODEL_PATH = '/home/siah/.lmstudio/models/lmstudio-community/GLM-4.6V-Flash-GGUF/GLM-4.6V-Flash-Q4_K_M.gguf';
 

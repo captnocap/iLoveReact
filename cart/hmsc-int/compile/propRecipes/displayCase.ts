@@ -1,3 +1,4 @@
+import { type PropKindDefinition } from '../../game/kinds/props';
 import { box, glassBox, hx, STEEL, WOOD_DARK, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
@@ -13,3 +14,14 @@ export function displayCaseParts(): PropPartSpec[] {
     box([w * 0.3, 0.62, -0.08], [0.16, 0.12, 0.24], hx('#56a85c')),
   ];
 }
+
+export const displayCaseDef: PropKindDefinition = {
+  kind: 'displayCase',
+  label: 'Display Case',
+  solid: true,
+  footprintRadiusMeters: 0.6,
+  heightMeters: 1.0,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'valuables', capacity: 3, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
+};

@@ -199,6 +199,33 @@ export class IsoStage {
     this.pose.centerZ += a.z - b.z;
   }
 
+  // World-Y delta for a VERTICAL (height) drag — the Z-free placement analogue of the
+  // horizontal grab. Intersect both screen rays with the vertical plane that passes
+  // through `anchor` (the dragged thing's x,z) and FACES the camera (normal = the eye's
+  // ground-forward), then return the change in the hit point's height. Constraining to a
+  // camera-facing vertical plane means screen up/down maps straight to world height with
+  // no zoom/rotation fudge factor — the same analytic plane-solve groundPoint runs, stood
+  // on its side. Null if a ray is parallel to the plane or the hit sits behind the eye.
+  heightDelta(anchor: { x: number; z: number }, fromX: number, fromY: number, toX: number, toY: number, rect: Rect): number | null {
+    const cam = this.solve();
+    let nx = cam.target[0] - cam.pos[0];
+    let nz = cam.target[2] - cam.pos[2];
+    const nl = Math.hypot(nx, nz) || 1;
+    nx /= nl; nz /= nl;                       // plane normal = horizontal ground-forward
+    const hitY = (sx: number, sy: number): number | null => {
+      const r = GAME_CAMERA.screenRay(sx, sy, rect, cam);
+      const denom = r.dir[0] * nx + r.dir[2] * nz;
+      if (Math.abs(denom) < 1e-6) return null; // ray parallel to the vertical plane
+      const t = ((anchor.x - r.origin[0]) * nx + (anchor.z - r.origin[2]) * nz) / denom;
+      if (t <= 0) return null;
+      return r.origin[1] + t * r.dir[1];
+    };
+    const a = hitY(fromX, fromY);
+    const b = hitY(toX, toY);
+    if (a == null || b == null) return null;
+    return b - a;
+  }
+
   // Screen pixel -> world cell on the active level. Level 0 follows painted terrain;
   // higher floors pick a flat slab at levelElevation() so upper-storey edits land on
   // a plane, not on whatever roof happens to be under the cursor.

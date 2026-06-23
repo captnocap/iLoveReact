@@ -54,7 +54,6 @@ export const SCATTER_BRUSHES: Record<ScatterBrushId, ScatterBrushDef> = {
       { kind: 'treeBirch', weight: 1 },
       { kind: 'treeOakYoung', weight: 1.5 },
       { kind: 'treePineYoung', weight: 1.5 },
-      { kind: 'bush', weight: 1.5 },
       { kind: 'grassPatch', weight: 4 },
       { kind: 'grassTall', weight: 2 },
       { kind: 'rockMossy', weight: 0.5 },
@@ -87,7 +86,10 @@ export function isScatterBrushId(value: string): value is ScatterBrushId {
 
 // ── the deterministic roll ───────────────────────────────────────────────────
 
-function mix(a: number): number {
+// Exported: the deterministic-paint roll is shared with the grass surface
+// population (render3d/grassField), which is a scatter of blades over grass-tile
+// cells — same pure hash, same repaint-stability guarantee.
+export function mix(a: number): number {
   let h = a >>> 0;
   h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
   h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
@@ -101,7 +103,7 @@ function seedOf(id: string): number {
 }
 
 /** hash → uniform [0,1) */
-function unit(h: number): number {
+export function unit(h: number): number {
   return (h >>> 8) / 0x1000000;
 }
 

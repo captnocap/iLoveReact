@@ -39,12 +39,25 @@ function FoliageField(props: {
   const field = useMemo(() => props.build(props.world), [props.world, rev, props.build]);
   if (field.count === 0) return null;
   const textureKey = props.textureKey === null ? undefined : props.textureKey ?? '~grass~';
+  // EDITOR-ONLY render cap (req_1645): the preview materialises one 12-float row PER
+  // BLADE in JS (up to MAX_INSTANCES=1,048,576) and ships the WHOLE buffer as ONE
+  // Scene3D.Instances command — a million-row array whose JSON.stringify is hundreds
+  // of MB and OOMs the editor heap. The COMPILED game has no such buffer: it ships the
+  // flora CELLS and the GPU expands blades (framework/world/foliage.zig). Until the
+  // editor preview does the same (the flora refactor), cap what we SHIP so a lush map
+  // still opens — a thinned-but-representative field, not a heap bomb. Slice (a copy)
+  // so the giant underlying buffer never reaches the command stream.
+  const cappedCount = Math.min(field.count, EDITOR_FOLIAGE_RENDER_CAP);
+  const data = cappedCount < field.count ? field.data.slice(0, cappedCount * 12) : field.data;
+  if (cappedCount < field.count) {
+    console.warn(`[grassPopulation] editor preview capped ${field.count} → ${cappedCount} blades shipped (GPU-expanded in the compiled game; raise EDITOR_FOLIAGE_RENDER_CAP if needed)`);
+  }
   return (
     <Scene3D.Instances
       geometry={props.geometry}
       params={props.params}
-      data={field.data}
-      count={field.count}
+      data={data}
+      count={cappedCount}
       stride={12}
       center={field.center}
       boundsRadius={field.radius}
@@ -52,6 +65,11 @@ function FoliageField(props: {
     />
   );
 }
+
+// How many foliage blades the EDITOR preview is allowed to ship in one instances
+// command. 64Ki blades ≈ a 786 KB buffer — plenty to read the field's shape, far under
+// the heap-bombing million-row command. Editor-only; the compiled game is uncapped (GPU).
+const EDITOR_FOLIAGE_RENDER_CAP = 65536;
 
 // Grass: blades over the painted grass tiles.
 export const GrassField = memo(function GrassField(props: { world: GameState['world'] }) {

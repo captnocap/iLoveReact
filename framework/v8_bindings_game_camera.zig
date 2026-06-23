@@ -452,6 +452,25 @@ fn hostProbeSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     info.getReturnValue().set(obj.toValue());
 }
 
+fn hostCameraRay(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ray = game_camera.activeCameraRay();
+    if (!ray.has) {
+        setReturnNull(info);
+        return;
+    }
+    const iso = info.getIsolate();
+    const ctx = iso.getCurrentContext();
+    const obj = iso.initObject();
+    setObjectNumber(ctx, obj, "ox", ray.pos.x);
+    setObjectNumber(ctx, obj, "oy", ray.pos.y);
+    setObjectNumber(ctx, obj, "oz", ray.pos.z);
+    setObjectNumber(ctx, obj, "dx", ray.dir.x);
+    setObjectNumber(ctx, obj, "dy", ray.dir.y);
+    setObjectNumber(ctx, obj, "dz", ray.dir.z);
+    info.getReturnValue().set(obj.toValue());
+}
+
 pub fn registerGameCamera(_: anytype) void {
     v8_runtime.registerHostFn("__game_camera_bind_node", hostBindNode);
     v8_runtime.registerHostFn("__game_camera_bind_first", hostBindFirst);
@@ -476,4 +495,5 @@ pub fn registerGameCamera(_: anytype) void {
     v8_runtime.registerHostFn("__game_camera_set_smoothing_node", hostSetSmoothingNode);
     v8_runtime.registerHostFn("__game_camera_active_node", hostActiveNode);
     v8_runtime.registerHostFn("__game_camera_probe", hostProbeSnapshot);
+    v8_runtime.registerHostFn("__game_camera_ray", hostCameraRay);
 }

@@ -47,6 +47,14 @@ export function writeFileBase64Atomic(path: string, contentBase64: string): bool
   return callHost<boolean>('__fs_write_base64_atomic', false, path, contentBase64);
 }
 
+/** Write a Uint8Array's raw bytes to a file, zero-copy (no base64 / UTF-8
+ *  re-encoding). The binary write door — use this for large binary payloads
+ *  (game-files, asset blobs) where base64-through-a-string would balloon the
+ *  JS heap. Returns true on success. */
+export function writeFileBytes(path: string, bytes: Uint8Array): boolean {
+  return callHost<boolean>('__fs_write_bytes', false, path, bytes);
+}
+
 /** True if a file or directory exists at `path`. */
 export function exists(path: string): boolean {
   return callHost<boolean>('__fs_exists', false, path);

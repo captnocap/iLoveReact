@@ -5,7 +5,7 @@ import { tileDefinitionAtWorldPosition } from '../world/grid';
 import { placedCellTopMeters, surfaceRegionTopMeters } from '../world/surfaceHeights';
 import { roadPhysicsBands, roadTopMeters } from '../world/roads';
 import { junctionPhysicsBands, junctionTopMeters } from '../world/roadJunctions';
-import { propPhysicsRect } from '../world/props';
+import { propOrientedPhysicsRect, propPhysicsRect } from '../world/props';
 import { propKindDefinition } from '../game/kinds/props';
 
 // Header gained slot 24 = oriented-rect count (after the legacy rect count at 13).
@@ -19,11 +19,10 @@ const ENTITY_FLOATS = 8;
 // (solid to the ground, the old behavior); raised platforms (parking decks, the
 // cars on them) carry their real bottom so you walk UNDER them.
 const RECT_FLOATS = 9;
-// An oriented rect is the same 9-float AABB in the building's OWN un-rotated
-// frame, then [pivotX, pivotZ, yawRadians]. Only a rotated box building emits
-// these; the host collides them as OBBs (transform the query point into the
-// frame, reuse the AABB math, rotate the push back out). yaw 0 stays an AABB rect
-// in the array above, so the entire flat city is byte-identical to before.
+// An oriented rect is the same 9-float AABB in the object's OWN un-rotated
+// frame, then [pivotX, pivotZ, yawRadians]. Rectangular props and rotated
+// structures use these so the host collides them as OBBs (transform the query
+// point into the frame, reuse the AABB math, rotate the push back out).
 const ORIENTED_FLOATS = 12;
 const MAX_ORIENTED = 256;
 const OUTPUT_HEADER_FLOATS = 9;
@@ -172,12 +171,12 @@ function physicsRects(state: GameState): number[] {
       );
     }
   }
-  // Each solid prop (hydrant, sign post, light pole, rock, traffic control) adds
-  // one small blocking rect at its footprint so the player bumps it. Non-solid
-  // props (bushes) add nothing — they are walk-through. Friction/restitution
-  // come from the prop's gameplay tile (wall), like the road/junction bands.
+  // Each solid prop adds one blocking footprint so the player bumps it.
+  // Rectangular props ride the oriented lane below; square/circular props stay
+  // here. Non-solid props (bushes) add nothing — they are walk-through.
   for (const prop of state.world.props) {
     if (rects.length / RECT_FLOATS >= MAX_RECTS) break;
+    if (propOrientedPhysicsRect(prop)) continue;
     const rect = propPhysicsRect(prop);
     if (!rect) continue;
     const tile = tileKindDefinition(propKindDefinition(prop.kind).tileKind);
@@ -201,8 +200,28 @@ function physicsRects(state: GameState): number[] {
 }
 
 function physicsOrientedRects(state: GameState): number[] {
-  void state;
-  return [];
+  const oriented: number[] = [];
+  for (const prop of state.world.props) {
+    if (oriented.length / ORIENTED_FLOATS >= MAX_ORIENTED) break;
+    const rect = propOrientedPhysicsRect(prop);
+    if (!rect) continue;
+    const tile = tileKindDefinition(propKindDefinition(prop.kind).tileKind);
+    oriented.push(
+      rect.minX,
+      rect.minZ,
+      rect.maxX,
+      rect.maxZ,
+      rect.topMeters,
+      1,
+      tile.surface.friction,
+      tile.surface.restitution,
+      RECT_SOLID_FLOOR,
+      rect.pivotX,
+      rect.pivotZ,
+      rect.yawRadians,
+    );
+  }
+  return oriented;
 }
 
 export function movementSurfaceForPlayer(state: GameState, running: boolean): MovementSurface {

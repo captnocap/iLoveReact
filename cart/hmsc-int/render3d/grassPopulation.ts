@@ -445,6 +445,40 @@ export function buildBushInstances(world: GameState['world']): GrassInstances {
   return populateFoliage(world, BUSH_SPEC);
 }
 
+/** specId in the FLORA recipe lump — index into the loader's spec table (the Zig
+ *  GRASS/BUSH configs in framework/world/foliage.zig). Keep in lockstep. */
+export const FOLIAGE_SPEC_GRASS = 0;
+export const FOLIAGE_SPEC_BUSH = 1;
+
+/** One painted foliage cell — the FACTORS the loader expands blades from
+ *  (FOLIAGEFORMULA): the same (cellKey, wx, wz, top, blades) `populateFoliage`
+ *  feeds `emitClump`, minus the expansion. Grass + bush only; flowers/palms still
+ *  bake their rows for now. */
+export type FoliageCell = { cellKey: number; wx: number; wz: number; top: number; specId: number; count: number };
+
+/** Walk the painted cells ONCE and emit the grass/bush foliage recipe — the cell
+ *  list the compiled loader expands into blades at load instead of carrying ~1M
+ *  baked rows. Mirrors what `populateFoliage` does per cell (kind→density level→
+ *  blade count) but stops at the cell, not the blades. Same eachPaintedCell walk,
+ *  so the recipe covers exactly the cells the blade field would. */
+export function foliageCells(world: GameState['world']): FoliageCell[] {
+  const cells: FoliageCell[] = [];
+  eachPaintedCell(world, (kind, wx, wz, top, cellKey) => {
+    const gLevel = GRASS_SPEC.kindLevel[kind];
+    if (gLevel) {
+      const count = bladesForLevel(GRASS_CONFIG, gLevel);
+      if (count > 0) cells.push({ cellKey: cellKey >>> 0, wx, wz, top, specId: FOLIAGE_SPEC_GRASS, count });
+      return;
+    }
+    const bLevel = BUSH_SPEC.kindLevel[kind];
+    if (bLevel) {
+      const count = bladesForLevel(BUSH_CONFIG, bLevel);
+      if (count > 0) cells.push({ cellKey: cellKey >>> 0, wx, wz, top, specId: FOLIAGE_SPEC_BUSH, count });
+    }
+  });
+  return cells;
+}
+
 function hashStr(s: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i += 1) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);

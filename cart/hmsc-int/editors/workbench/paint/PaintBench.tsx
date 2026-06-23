@@ -8,6 +8,7 @@
 // dispatch: one painting experience everywhere).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { Box, Col, Effect, Row, Text } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { GAME_CHROME } from '../../../game/chrome';
@@ -38,8 +39,8 @@ const T = GAME_CHROME.tokens.color;
 
 export function PaintBench(props: { store: PaintBenchStore }) {
   const store = props.store;
-  const [, setTick] = useState(0);
-  useEffect(() => store.subscribe(() => setTick((t) => t + 1)), [store]);
+  const rerender = useRerender();
+  useEffect(() => store.subscribe(rerender), [store]);
   // a fresh painter per working target (cutout's key law)
   return <BenchTarget key={`${store.work.docId}#${store.work.epoch}`} store={store} />;
 }
@@ -111,11 +112,11 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
   // Intensity (USER req_0074) drives the P2 tunable THROUGH the registry —
   // the strip slider, /settings, and the shader read the one table.
   const [showDepthHint, setShowDepthHint] = useRouteTwigState<boolean>('/workbench', 'depthHint', true);
-  const [, bumpHint] = useState(0);
+  const bumpHint = useRerender();
   const hintOpacity = PAINT_EDITOR_TUNING.depthHint.opacity;
   const setHintOpacity = (v: number) => {
     editorTunables().write('sculpt-camera.depthHint.opacity', v);
-    bumpHint((t) => t + 1);
+    bumpHint();
   };
   // BENCHHINT-0606 (the live <BenchTarget> crash): a figure target is a
   // PAINT TARGET — a part OR a limb segment ('lUpperArm' …). The hint reads

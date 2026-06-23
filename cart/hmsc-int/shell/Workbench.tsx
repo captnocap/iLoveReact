@@ -13,7 +13,8 @@
 // stays in each source's backing stores — the Workbench never saves anything.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Box, ScrollView } from '@reactjit/primitives';
+import { useRerender } from '@reactjit/runtime/hooks';
+import { Box, Pressable, ScrollView, Text } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { useEditorControls } from '../editors/useEditorControls';
 // twigs are workspace-persistence INFRA, not game knowledge — the LabsRoute
@@ -54,6 +55,16 @@ export interface WorkbenchSource<S = unknown> {
   /** the row to select when the frame has no memory (characters: the LAST
    *  roster entry is the working draft — AUTOSAVE-0605 mount restore) */
   defaultRow?(rows: RosterRow[]): string | undefined;
+  /** a roster row carries a DELETE affordance (a ✕ with a two-step confirm) when
+   *  this returns true — the source removes its own backing record in onDeleteRow.
+   *  The frame owns NO data, so deletion is the source's job (the Studio: drop a
+   *  saved model from the library). Absent → no delete affordance (the default). */
+  canDeleteRow?(rowId: string): boolean;
+  onDeleteRow?(rowId: string): void;
+  /** a source whose OWN store decides the highlighted row (the Studio: the open
+   *  model is a twig, so the roster must follow it — incl. 'new' on cold start —
+   *  not the shell's disk-persisted selBySrc). Takes precedence when present. */
+  selectedRow?(): string | undefined;
   /** controlled lens: a source whose SETTERS flip the view (wardrobe edits
    *  jump to the figure) owns the active lens; absent → frame-owned state */
   activeLens?(subject: S): string | undefined;
@@ -118,15 +129,17 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
   const [selBySrc, setSelBySrc] = useRouteTwigState<Record<string, string>>('/workbench', 'selBySource', {});
   const [lensBySrc, setLensBySrc] = useRouteTwigState<Record<string, string>>('/workbench', 'lensBySource', {});
   const [filter, setFilter] = useState('');
-  // edit revision: setters are the only write path; bumping re-reads every get()
-  const [, setRev] = useState(0);
-  const onEdit = () => setRev((r) => r + 1);
+  // a roster row armed for delete (its ✕ tapped once) — the two-step confirm.
+  // Transient like the filter; cleared on any source switch (pickSource resets it).
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // edit revision: setters are the only write path; a re-render re-reads every get()
+  const onEdit = useRerender();
   const shortcutRef = useRef<Record<WorkbenchShortcut, (() => void) | undefined>>({ save: undefined, undo: undefined, redo: undefined });
 
   // live sources tick the same revision (autosave → roster rows appear)
   useEffect(() => {
     const offs = sources
-      .map((s) => s.subscribe?.(() => setRev((r) => r + 1)))
+      .map((s) => s.subscribe?.(onEdit))
       .filter((off): off is () => void => typeof off === 'function');
     return () => { for (const off of offs) off(); };
   }, [sources]);
@@ -173,7 +186,9 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
   const roster = source.list();
   const rosterMs = props.perf ? props.perf.now() - rosterT0 : 0;
   const shown = filter ? roster.filter((r) => r.label.toLowerCase().includes(filter.toLowerCase())) : roster;
-  const selId = selBySrc[source.id] ?? source.defaultRow?.(roster) ?? roster[0]?.id ?? '';
+  // A source that owns its highlight (Studio: the open model is a twig) wins over
+  // the shell's disk-persisted selBySrc, so the roster follows the store.
+  const selId = source.selectedRow?.() ?? selBySrc[source.id] ?? source.defaultRow?.(roster) ?? roster[0]?.id ?? '';
   const selRow = roster.find((r) => r.id === selId) ?? roster[0];
 
   useEffect(() => {
@@ -193,6 +208,7 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
     props.perf?.mark('workbench.source.pick', { from: source.id, to: id, sourceCount: sources.length, rosterCount: roster.length });
     setSrcId(id);
     setFilter('');
+    setConfirmDeleteId(null);
   };
   const pickRow = (id: string) => {
     source.onPick?.(id); // the load event — render stays pure
@@ -300,6 +316,33 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
                 <Row key={r.id} onPress={() => pickRow(r.id)}>
                   <Icon name={r.icon ?? source.icon} size={13} color={on ? accentFor('primary') : accentFor('textFaint')} />
                   <T>{r.label}</T>
+                  {/* per-row delete (the source owns its data — the frame just
+                      shows the affordance): a ✕ that arms a two-step confirm. The
+                      inner Pressables take the click on their own (frontmost-leaf
+                      hit-test), so the row's onPress/select never fires from here. */}
+                  {source.canDeleteRow?.(r.id) ? (
+                    <>
+                      <Box style={{ flexGrow: 1 }} />
+                      {confirmDeleteId === r.id ? (
+                        <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Pressable
+                            onPress={() => { source.onDeleteRow?.(r.id); setConfirmDeleteId(null); }}
+                            tooltip="Confirm delete"
+                            style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 4, backgroundColor: '#3a1414', borderWidth: 1, borderColor: accentFor('error') }}
+                          >
+                            <Text fontSize={11} color={accentFor('error')} style={{ fontFamily: 'monospace' }}>delete</Text>
+                          </Pressable>
+                          <Pressable onPress={() => setConfirmDeleteId(null)} tooltip="Cancel" style={{ paddingLeft: 2, paddingRight: 2 }}>
+                            <Icon name="X" size={13} color={accentFor('textFaint')} />
+                          </Pressable>
+                        </Box>
+                      ) : (
+                        <Pressable onPress={() => setConfirmDeleteId(r.id)} tooltip="Delete" style={{ paddingLeft: 3, paddingRight: 3 }}>
+                          <Icon name="Trash2" size={13} color={accentFor('textFaint')} />
+                        </Pressable>
+                      )}
+                    </>
+                  ) : null}
                 </Row>
               );
             })}

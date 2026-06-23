@@ -31,6 +31,12 @@
         "clothing-variants"
       ]
     },
+    "cooked-asset": {
+      "path": "domains/cooked-asset",
+      "streams": [
+        "cooked-asset"
+      ]
+    },
     "cutout": {
       "path": "domains/cutout",
       "streams": [
@@ -53,6 +59,12 @@
       "path": "domains/missions",
       "streams": [
         "missions"
+      ]
+    },
+    "model": {
+      "path": "domains/model",
+      "streams": [
+        "model"
       ]
     },
     "sessions": {

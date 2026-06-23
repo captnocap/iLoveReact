@@ -79,6 +79,10 @@ export type VisualBox = {
    *  the two-state machine). The compile bake ships it through the DOORS lump
    *  as a LIVE toggleable rect+node, never a static instance row. */
   door?: true;
+  /** Internal run-end faces omitted for wall joins. A rectangular wall segment
+   *  trimmed back for a miter/butt joint must not still draw its cut end cap. */
+  openRunMin?: true;
+  openRunMax?: true;
 };
 
 export type VisualRamp = {
@@ -100,7 +104,13 @@ export type VisualShape =
   // unit prism is centered like the unit cube); only the keyed geometry differs
   // (pieceMeshes' GablePrismGeometry / world_loader's buildGablePrism). sx = the
   // thin width-thickness, sy = the ridge rise, sz = the eave-to-eave depth.
-  | { kind: 'gable'; box: VisualBox };
+  | { kind: 'gable'; box: VisualBox }
+  // CORNERSEAM-0610: the L-corner filler is a vertical right-triangle prism.
+  // Rectangular wall runs stop before the corner square; the two perpendicular
+  // walls each contribute one triangle, so painted skins meet on the diagonal
+  // instead of one wall crossing over the other at the floor tip.
+  | { kind: 'cornerMiter'; box: VisualBox }
+  | { kind: 'cornerMiterMirror'; box: VisualBox };
 
 /** local (u along width, v along depth) → world offset, R(+yaw) — the same
  *  frame the colliders/raycast/stamp rotate with. */
@@ -271,31 +281,73 @@ export function pieceVisualShapes(
     const openingH = BUILD_UI.editCutoutHeightMeters;
     const openingBottom = piece.y + size.heightMeters * 0.55 - openingH / 2;
     const openingTop = openingBottom + openingH;
-    // CORNERSEAM-0610: miter the face slabs where two walls corner. The core
-    // bodies already close (run limits extend through the joining wall), but
-    // each slab floats `lift` proud of its core, leaving an open vertical
-    // pocket at the convex corner. Closure: the x-axis wall's outer slab runs
-    // THROUGH to the joining wall's slab outer surface; the z-axis wall's
-    // BUTTS into the through slab's inner surface. One through + one butt =
-    // pocket filled, end caps meet edge-to-edge, no coplanar faces to z-fight.
+    // CORNERSEAM-0610: collider bodies extend through wall joins elsewhere.
+    // Rendered wall boxes stop before joined-end corner squares; L-corners fill
+    // those squares with two triangular miter prisms so the skins meet cleanly.
     const bands = GAME_BUILD.placed.bands(piece as PlacedBuildPiece, pieces);
     const ends = GAME_BUILD.placed.wallEnds(piece as PlacedBuildPiece, pieces);
-    const cornerExt = ends.axis === 'x' ? lift + slab / 2 : Math.max(0, lift - slab / 2);
+    const nominalMinU = -size.widthMeters / 2;
+    const nominalMaxU = size.widthMeters / 2;
     const wallMinU = bands.length > 0 ? bands[0].u0 : 0;
     const wallMaxU = bands.length > 0 ? bands[bands.length - 1].u1 : 0;
-    const slabU0 = (u0: number, vSign: 1 | -1): number =>
-      u0 === wallMinU && ends.minU?.outerV === vSign ? u0 - cornerExt : u0;
-    const slabU1 = (u1: number, vSign: 1 | -1): number =>
-      u1 === wallMaxU && ends.maxU?.outerV === vSign ? u1 + cornerExt : u1;
+    const jointButtInset = depthSize / 2;
+    const visualU0 = (u0: number): number => {
+      if (u0 !== wallMinU || wallMinU >= nominalMinU) return u0;
+      return nominalMinU + jointButtInset;
+    };
+    const visualU1 = (u1: number): number => {
+      if (u1 !== wallMaxU || wallMaxU <= nominalMaxU) return u1;
+      return nominalMaxU - jointButtInset;
+    };
+    const addCornerMiter = (
+      label: string,
+      end: NonNullable<ReturnType<typeof GAME_BUILD.placed.wallEnds>['minU']>,
+      endSign: -1 | 1,
+      baseY: number,
+      h: number,
+    ): void => {
+      const joinV = -end.outerV;
+      const miterFace = joinV > 0 ? wallFront : wallBack;
+      const uCenter = (endSign < 0 ? nominalMinU : nominalMaxU) - endSign * jointButtInset / 2;
+      const vCenter = joinV * jointButtInset / 2;
+      const { dx, dz } = localOffset(uCenter, vCenter, yaw);
+      shapes.push({
+        kind: endSign === joinV ? 'cornerMiter' : 'cornerMiterMirror',
+        box: {
+          key: `${key}.${label}.miter`,
+          cx: piece.x + dx,
+          cy: baseY + h / 2,
+          cz: piece.z + dz,
+          sx: jointButtInset,
+          sy: h,
+          sz: jointButtInset,
+          yawDegrees: endSign > 0 ? yaw : yaw + 180,
+          color: miterFace.color,
+          textureKey: miterFace.textureKey,
+          opacity: look.opacity,
+          slot: miterFace.slot,
+        },
+      });
+    };
     const addWallBox = (label: string, u0: number, u1: number, baseY: number, h: number): void => {
       if (u1 - u0 <= 0.001 || h <= 0.001) return;
-      shapes.push(box(`${label}.core`, (u0 + u1) / 2, depthCenter, baseY, u1 - u0, h, depthSize, sides));
-      const f0 = slabU0(u0, 1);
-      const f1 = slabU1(u1, 1);
-      shapes.push(box(`${label}.front`, (f0 + f1) / 2, frontV, baseY, f1 - f0, h, slab, wallFront));
-      const b0 = slabU0(u0, -1);
-      const b1 = slabU1(u1, -1);
-      shapes.push(box(`${label}.back`, (b0 + b1) / 2, backV, baseY, b1 - b0, h, slab, wallBack));
+      const vu0 = visualU0(u0);
+      const vu1 = visualU1(u1);
+      if (vu1 - vu0 <= 0.001) return;
+      const openRunMin = vu0 > u0;
+      const openRunMax = vu1 < u1;
+      const pushWallRunBox = (shape: VisualShape): void => {
+        if (shape.kind === 'box') {
+          if (openRunMin) shape.box.openRunMin = true;
+          if (openRunMax) shape.box.openRunMax = true;
+        }
+        shapes.push(shape);
+      };
+      pushWallRunBox(box(`${label}.core`, (vu0 + vu1) / 2, depthCenter, baseY, vu1 - vu0, h, depthSize, sides));
+      pushWallRunBox(box(`${label}.front`, (vu0 + vu1) / 2, frontV, baseY, vu1 - vu0, h, slab, wallFront));
+      pushWallRunBox(box(`${label}.back`, (vu0 + vu1) / 2, backV, baseY, vu1 - vu0, h, slab, wallBack));
+      if (u0 === wallMinU && wallMinU < nominalMinU && ends.minU !== null) addCornerMiter(label, ends.minU, -1, baseY, h);
+      if (u1 === wallMaxU && wallMaxU > nominalMaxU && ends.maxU !== null) addCornerMiter(label, ends.maxU, 1, baseY, h);
     };
     for (const [index, band] of bands.entries()) {
       const label = `band${index}`;

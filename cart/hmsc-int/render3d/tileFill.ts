@@ -7,7 +7,7 @@ import { tileKindDefinition } from '../world/tileKinds';
 // hmsc-int map quad both. Prepend TILE_FILL_WGSL to a shader, then call
 // tileMaterial(matId, uv, px, variant, seed) per cell.
 //
-// matId: 0 concrete (sidewalk), 1 road (road/asphalt), 2 sand (sand/mud).
+// matId: 0 concrete (sidewalk), 1 road (road/asphalt), 2 sand (sand/mud), 3 grass.
 export const TILE_FILL_WGSL = `
 fn sat(v: f32) -> f32 { return clamp(v, 0.0, 1.0); }
 fn sat3(v: vec3f) -> vec3f { return clamp(v, vec3f(0.0), vec3f(1.0)); }
@@ -59,10 +59,27 @@ fn fill_sand(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   return sat3(col);
 }
 
+// Living ground — a green grassy lawn (not the sand 'soil' fell through to before).
+// variant 0 = lush green (matches the painter swatch ~#3f7d33); variant 1 = dry,
+// shifted toward yellow-green (the grassDry tile). Patchy fbm tone + fine blade
+// speckle + scattered dirt flecks so it reads as turf, not flat paint.
+fn fill_grass(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // NB: do not name a var 'patch' here — it is a WGSL reserved keyword.
+  let tone = fbm(uv.x * 8.0 + seed, uv.y * 8.0 - seed, 5.0) * 0.5 + 0.5;
+  let fine = fbm(uv.x * 46.0, uv.y * 46.0 + seed, 3.0) * 0.5 + 0.5;
+  let lush = mix(vec3f(0.16, 0.40, 0.15), vec3f(0.30, 0.55, 0.22), tone);
+  let dry = mix(vec3f(0.40, 0.45, 0.20), vec3f(0.56, 0.58, 0.30), tone);
+  var col = mix(lush, dry, sat(variant));
+  col = col + vec3f(0.04, 0.06, 0.025) * fine;
+  col = col - vec3f(0.05, 0.05, 0.035) * speckle(px, 2.0, seed, 0.88);
+  return sat3(col);
+}
+
 fn tileMaterial(matId: f32, uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   if (matId < 0.5) { return fill_concrete(uv, px, variant, seed); }
   if (matId < 1.5) { return fill_road(uv, px, variant, seed); }
-  return fill_sand(uv, px, variant, seed);
+  if (matId < 2.5) { return fill_sand(uv, px, variant, seed); }
+  return fill_grass(uv, px, variant, seed);
 }
 `;
 
@@ -73,6 +90,10 @@ fn tileMaterial(matId: f32, uv: vec2f, px: vec2f, variant: f32, seed: f32) -> ve
 // through to concrete and the painted road vanished into the ground (req_0774).
 // One source of truth — a new road kind maps correctly with no edit here.
 export function tileFillMaterialId(kind: TileKind): number {
+  // Grass is a GREEN lawn, not the sand its 'soil' surface material would fall
+  // through to (the painter shows it green; the 3D ground must match). All grass
+  // density variants (grass/grassDry/grassSparse/grassLush) share the green fill.
+  if (kind.startsWith('grass')) return 3;
   const m = tileKindDefinition(kind).surface?.material;
   if (m === 'road') return 1; // asphalt
   if (m === 'sand' || m === 'soil') return 2; // sand / earth (no separate soil fill yet)
@@ -85,6 +106,8 @@ export function tileFillVariant(kind: TileKind): number {
       return 2;
     case 'road':
       return 0;
+    case 'grassDry':
+      return 1; // the dry grass tile reads yellow-green (fill_grass variant 1)
     default:
       return 0;
   }

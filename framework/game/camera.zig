@@ -471,6 +471,33 @@ fn activeSlot() ?*ControllerSlot {
     return getSlot(g_active_node_id);
 }
 
+/// The crosshair ray: the ACTIVE camera's resolved optical axis (pos →
+/// normalized look direction). This is the truth only the host has — the JS
+/// side never receives the smoothed/solved camera, so a cart that needs "what
+/// is under the crosshair" (a shot, an interact, a pick) reads it here instead
+/// of re-deriving a direction from yaw/pitch (which diverges from the real
+/// camera by meters at range). `has` is false when no camera is bound.
+pub const CameraRay = struct {
+    pos: Vec3 = .{},
+    dir: Vec3 = .{ .x = 0, .y = 0, .z = 1 },
+    has: bool = false,
+};
+
+pub fn activeCameraRay() CameraRay {
+    const slot = activeSlot() orelse return .{};
+    const c = slot.controller.current;
+    var dx = c.target.x - c.pos.x;
+    var dy = c.target.y - c.pos.y;
+    var dz = c.target.z - c.pos.z;
+    const len = @sqrt(dx * dx + dy * dy + dz * dz);
+    if (len > 1e-6) {
+        dx /= len;
+        dy /= len;
+        dz /= len;
+    }
+    return .{ .pos = c.pos, .dir = .{ .x = dx, .y = dy, .z = dz }, .has = true };
+}
+
 pub fn bindNode(node_id: u32) void {
     _ = ensureSlot(node_id);
 }

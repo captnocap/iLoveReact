@@ -115,6 +115,15 @@ export const Landform = memo(function Landform(props: { landform: LandformData }
   const tiles = lf.field?.tiles;
   const roads = lf.field?.roads;
   const groundData = useMemo(() => (tiles ? heightfieldTileData(tiles, roads) : null), [tiles, roads]);
+  // DIAG req_0829: for chunk (1,0), log the SHIPPED groundData cell at (18,112) vs
+  // the live field.tiles cell — if they differ, the groundData memo is stale.
+  if (lf.id === 'painted_1_0' && groundData && tiles) {
+    const pal = groundData[2] | 0;
+    const cb = 3 + pal * 3;
+    const shipped = groundData[cb + 112 * (tiles as any).cols + 18];
+    const live = (tiles as any).idx[112 * (tiles as any).cols + 18];
+    console.warn(`[ship-cell] painted_1_0 cell(18,112) shipped=${shipped} liveTiles=${live} (laneSouth=13 sidewalk=3) groundDataLen=${groundData.length}`);
+  }
   return (
     <>
       <Scene3D.Mesh

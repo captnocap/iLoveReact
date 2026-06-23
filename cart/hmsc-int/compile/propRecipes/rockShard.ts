@@ -1,12 +1,69 @@
-import { box, STONE, STONE_DARK, STONE_LIGHT, type PropPartSpec } from '../../game/kinds/propModels';
-import { propKindDefinition } from '../../game/kinds/props';
+import {
+  lowerPropRecipe,
+  recipeColor,
+  type Color,
+  type PropPartSpec,
+  type PropRecipe,
+  type PropRecipePart,
+} from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const rockShardDef: PropKindDefinition = {
+  kind: 'rockShard',
+  label: 'Rock Shard',
+  solid: true,
+  footprintRadiusMeters: 0.45,
+  heightMeters: 2.6,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
+
+const COLORS = {
+  base: recipeColor('#6b7079'),
+  light: recipeColor('#82868d'),
+  dark: recipeColor('#52565d'),
+} satisfies Record<string, Color>;
+
+export function rockShardRecipe(): PropRecipe {
+  const h = 2.6;
+  const r = 0.45;
+  const parts: PropRecipePart[] = [
+    {
+      id: 'spine',
+      shape: 'box',
+      position: { x: 0, y: h * 0.5, z: 0 },
+      size: { width: r * 0.5, height: h * 0.95, depth: r * 0.5 },
+      color: COLORS.base,
+      rotation: { pitch: 10, yaw: 0, roll: 8 },
+    },
+    {
+      id: 'shard1',
+      shape: 'box',
+      position: { x: r * 0.15, y: h * 0.65, z: r * 0.05 },
+      size: { width: r * 0.35, height: h * 0.7, depth: r * 0.3 },
+      color: COLORS.light,
+      rotation: { pitch: 25, yaw: 30, roll: -15 },
+    },
+    {
+      id: 'shard2',
+      shape: 'box',
+      position: { x: -r * 0.1, y: h * 0.55, z: -r * 0.1 },
+      size: { width: r * 0.4, height: h * 0.6, depth: r * 0.25 },
+      color: COLORS.dark,
+      rotation: { pitch: -20, yaw: -20, roll: 20 },
+    },
+    {
+      id: 'shard3',
+      shape: 'box',
+      position: { x: r * 0.05, y: h * 0.8, z: -r * 0.05 },
+      size: { width: r * 0.25, height: h * 0.45, depth: r * 0.2 },
+      color: COLORS.light,
+      rotation: { pitch: 35, yaw: -10, roll: 5 },
+    },
+  ];
+  return { id: 'rockShard', parts };
+}
 
 export function rockShardParts(): PropPartSpec[] {
-  const { heightMeters: h, footprintRadiusMeters: r } = propKindDefinition('rockShard');
-  return [
-    box([0, h * 0.5, 0], [r * 1.1, h * 1.0, r * 0.9], STONE, [4, 15, -6]),
-    box([r * 0.35, h * 0.38, r * 0.2], [r * 0.8, h * 0.76, r * 0.7], STONE_DARK, [-8, 50, 9]),
-    box([-r * 0.3, h * 0.42, -r * 0.25], [r * 0.7, h * 0.85, r * 0.6], STONE_LIGHT, [10, -30, -12]),
-    box([0, h * 0.1, 0], [r * 1.8, h * 0.2, r * 1.5], STONE_DARK, [0, 30, 0]),
-  ];
+  return lowerPropRecipe(rockShardRecipe());
 }

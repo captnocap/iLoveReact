@@ -37,6 +37,35 @@ type RampSlabParams = {
   thickness: number;
 };
 
+function openRunBoxGeometry(id: string, openMin: boolean, openMax: boolean): Geometry.GeometryDef<Record<string, never>> {
+  return {
+    id,
+    defaults: {},
+    generate: (): Geometry.GeometryData => {
+      const v0: Geometry.Vec3 = [-0.5, -0.5, -0.5];
+      const v1: Geometry.Vec3 = [0.5, -0.5, -0.5];
+      const v2: Geometry.Vec3 = [0.5, 0.5, -0.5];
+      const v3: Geometry.Vec3 = [-0.5, 0.5, -0.5];
+      const v4: Geometry.Vec3 = [-0.5, -0.5, 0.5];
+      const v5: Geometry.Vec3 = [0.5, -0.5, 0.5];
+      const v6: Geometry.Vec3 = [0.5, 0.5, 0.5];
+      const v7: Geometry.Vec3 = [-0.5, 0.5, 0.5];
+      const g = Geometry.mesh();
+      g.face(v4, v5, v6, v7, [0, 0, 1], [0, 0]);
+      g.face(v1, v0, v3, v2, [0, 0, -1], [0, 0]);
+      if (!openMax) g.face(v5, v1, v2, v6, [1, 0, 0], [0, 0]);
+      if (!openMin) g.face(v0, v4, v7, v3, [-1, 0, 0], [0, 0]);
+      g.face(v7, v6, v2, v3, [0, 1, 0], [0, 0]);
+      g.face(v0, v1, v5, v4, [0, -1, 0], [0, 0]);
+      return g.build();
+    },
+  };
+}
+
+const BoxOpenRunMinGeometry = openRunBoxGeometry('HmscBoxOpenRunMin', true, false);
+const BoxOpenRunMaxGeometry = openRunBoxGeometry('HmscBoxOpenRunMax', false, true);
+const BoxOpenRunBothGeometry = openRunBoxGeometry('HmscBoxOpenRunBoth', true, true);
+
 const RampSlabGeometry: Geometry.GeometryDef<RampSlabParams> = {
   id: 'HmscRampInclinedSlab',
   defaults: { width: 3, depth: 3, rise: 3, thickness: 0.2 },
@@ -68,9 +97,16 @@ const RampSlabGeometry: Geometry.GeometryDef<RampSlabParams> = {
 
 function VisualBoxMesh(props: { box: VisualBox; colorOverride?: string; opacityOverride?: number }) {
   const b = props.box;
+  const geometry = b.openRunMin && b.openRunMax
+    ? BoxOpenRunBothGeometry
+    : b.openRunMin
+      ? BoxOpenRunMinGeometry
+      : b.openRunMax
+        ? BoxOpenRunMaxGeometry
+        : Geometry.Box;
   return (
     <Scene3D.Mesh
-      geometry={Geometry.Box}
+      geometry={geometry}
       params={{ width: 1, height: 1, depth: 1 }}
       scale={[b.sx, b.sy, b.sz]}
       rotation={[0, b.yawDegrees, 0]}
@@ -136,8 +172,10 @@ function VisualGablePrismMesh(props: { box: VisualBox; colorOverride?: string; o
 
 // CORNERSEAM-0610: a unit vertical right-triangle prism, centered like a box.
 // Local footprint vertices are (-x,-z), (+x,-z), (-x,+z); sx/sz/yaw place it
-// into the wall-end corner square, and a signed sz mirrors the diagonal when a
-// reflected corner is needed.
+// into the wall-end corner square. The local -x face is intentionally omitted:
+// it sits against the trimmed wall body and drawing it creates the visible
+// vertical strip at L-corners. The diagonal split face is omitted too; it is an
+// internal boundary between the two painted miter halves, not a real wall face.
 const CornerMiterPrismGeometry: Geometry.GeometryDef<Record<string, never>> = {
   id: 'HmscWallCornerMiterPrism',
   defaults: {},
@@ -152,8 +190,6 @@ const CornerMiterPrismGeometry: Geometry.GeometryDef<Record<string, never>> = {
     g.tri(b0, [0, -1, 0], [0, 0], b2, [0, -1, 0], [0, 1], b1, [0, -1, 0], [1, 0]);
     g.tri(t0, [0, 1, 0], [0, 0], t1, [0, 1, 0], [1, 0], t2, [0, 1, 0], [0, 1]);
     g.face(b0, b1, t1, t0, [0, 0, -1], [0, 0]);
-    g.face(b1, b2, t2, t1, Geometry.normalize(1, 0, 1), [0, 0]);
-    g.face(b2, b0, t0, t2, [-1, 0, 0], [0, 0]);
     return g.build();
   },
 };
@@ -172,8 +208,6 @@ const CornerMiterMirrorPrismGeometry: Geometry.GeometryDef<Record<string, never>
     g.tri(b0, [0, -1, 0], [0, 0], b2, [0, -1, 0], [0, 1], b1, [0, -1, 0], [1, 0]);
     g.tri(t0, [0, 1, 0], [0, 0], t1, [0, 1, 0], [1, 0], t2, [0, 1, 0], [0, 1]);
     g.face(b0, b1, t1, t0, [0, 0, 1], [0, 0]);
-    g.face(b1, b2, t2, t1, Geometry.normalize(1, 0, -1), [0, 0]);
-    g.face(b2, b0, t0, t2, [-1, 0, 0], [0, 0]);
     return g.build();
   },
 };

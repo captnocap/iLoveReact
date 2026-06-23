@@ -184,6 +184,15 @@ test "ground collide: solid wall blocks horizontal motion" {
     }
 }
 
+test "ground collide: raised finite-band slabs are walk-under from below" {
+    physics.clearHeightfields();
+    const overhead = [physics.RECT_FLOATS]f32{ 1, -50, 2, 50, 3.2, 0, 0.5, 0, 3.0 };
+    const clear = physics.step((Sim{ .dt = 0.05, .px = 0.7, .py = 0, .pvx = 4, .rects = &.{GROUND} }).pack(&g_buf)).?;
+    const under = physics.step((Sim{ .dt = 0.05, .px = 0.7, .py = 0, .pvx = 4, .rects = &.{ GROUND, overhead } }).pack(&g_buf)).?;
+    try testing.expectApproxEqAbs(clear[1], under[1], 1e-5);
+    try testing.expect(under[1] > 0.7);
+}
+
 test "ground collide: flush floor seam is continuous when side-push grace is tuned on" {
     physics.clearHeightfields();
     const floor_a = [physics.RECT_FLOATS]f32{ -1.5, -1.5, 1.5, 1.5, 0.2, 1, 0.85, 0.02, 0 };

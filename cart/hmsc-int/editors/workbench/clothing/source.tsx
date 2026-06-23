@@ -12,7 +12,8 @@
 // garments). `+ new design` flips there; the SAVE lands the design on the
 // clothing-variants stream and this source flips back wearing it.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import type { WorkbenchSource } from '../../../shell/Workbench';
 import type { LensSpec } from '../../../shell/stage';
 import { subscribeLiveDoors } from '../livePoll';
@@ -35,8 +36,8 @@ const GARMENT_LENSES: LensSpec[] = [
 function GarmentDesignLens(props: { store: ClothingStore; garmentId: string }) {
   const s = props.store;
   const bench = paintBenchStore();
-  const [, setTick] = useState(0);
-  useEffect(() => s.subscribe(() => setTick((t) => t + 1)), [s]);
+  const rerender = useRerender();
+  useEffect(() => s.subscribe(rerender), [s]);
 
   const designIds = s.variantsOf(props.garmentId)
     .filter((v) => !v.seed && 'design' in v)

@@ -6,40 +6,57 @@ import {
   type PropRecipe,
   type PropRecipePart,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
 
-const PALETTE: Color[] = [recipeColor('#1f4a20'), recipeColor('#2f6b2f'), recipeColor('#43883a')];
+export const bushDef: PropKindDefinition = {
+  kind: 'bush',
+  label: 'Bush',
+  solid: false,
+  footprintRadiusMeters: 1.2,
+  heightMeters: 2.5,
+  tileKind: 'bush',
+  trafficControl: 'none',
+};
 
-type Blob = { cx: number; cy: number; cz: number; rh: number; rv: number; tint: number };
+const COLORS = {
+  mid: recipeColor('#3f7d33'),
+  light: recipeColor('#5a9a42'),
+  dark: recipeColor('#2f5f26'),
+} satisfies Record<string, Color>;
 
 export function bushRecipe(heightMeters: number, footprintRadiusMeters: number): PropRecipe {
-  const radius = footprintRadiusMeters;
-  const height = heightMeters;
-  const blobs: Blob[] = [
-    { cx: 0, cy: 0.18, cz: 0, rh: 0.86, rv: 0.82, tint: 1 },
-    { cx: 0.4, cy: 0.1, cz: 0.04, rh: 0.62, rv: 0.52, tint: 0 },
-    { cx: -0.38, cy: 0.12, cz: 0.12, rh: 0.64, rv: 0.52, tint: 2 },
-    { cx: 0.08, cy: 0.08, cz: -0.42, rh: 0.6, rv: 0.5, tint: 2 },
-    { cx: -0.14, cy: 0.1, cz: 0.4, rh: 0.62, rv: 0.5, tint: 0 },
-    { cx: 0.12, cy: 0.62, cz: 0.08, rh: 0.4, rv: 0.36, tint: 2 },
-    { cx: -0.16, cy: 0.66, cz: -0.06, rh: 0.36, rv: 0.34, tint: 0 },
+  const h = heightMeters;
+  const r = footprintRadiusMeters;
+  const parts: PropRecipePart[] = [
+    {
+      id: 'mass1',
+      shape: 'sphere',
+      position: { x: 0, y: h * 0.45, z: 0 },
+      size: { width: r * 1.4, height: h * 0.85, depth: r * 1.3 },
+      color: COLORS.mid,
+    },
+    {
+      id: 'mass2',
+      shape: 'sphere',
+      position: { x: r * 0.25, y: h * 0.55, z: r * 0.1 },
+      size: { width: r * 0.9, height: h * 0.6, depth: r * 0.8 },
+      color: COLORS.light,
+    },
+    {
+      id: 'mass3',
+      shape: 'sphere',
+      position: { x: -r * 0.2, y: h * 0.35, z: -r * 0.15 },
+      size: { width: r * 0.8, height: h * 0.55, depth: r * 0.75 },
+      color: COLORS.dark,
+    },
+    {
+      id: 'mass4',
+      shape: 'sphere',
+      position: { x: 0, y: h * 0.75, z: r * 0.15 },
+      size: { width: r * 0.6, height: h * 0.45, depth: r * 0.6 },
+      color: COLORS.light,
+    },
   ];
-  for (let i = 0; i < 9; i += 1) {
-    const a = (i / 9) * Math.PI * 2;
-    const rh = 0.6 + (i % 3) * 0.05;
-    blobs.push({ cx: Math.cos(a) * (rh - 0.04), cz: Math.sin(a) * (rh - 0.04), cy: 0.26 + (i % 2) * 0.14, rh, rv: 0.46, tint: i % 3 });
-  }
-  for (let i = 0; i < 6; i += 1) {
-    const a = (i / 6) * Math.PI * 2 + 0.4;
-    const rh = 0.42 + (i % 2) * 0.05;
-    blobs.push({ cx: Math.cos(a) * (rh - 0.06), cz: Math.sin(a) * (rh - 0.06), cy: 0.5 + (i % 2) * 0.1, rh, rv: 0.4, tint: (i % 2) === 0 ? 2 : 0 });
-  }
-  const parts: PropRecipePart[] = blobs.map((blob, i) => ({
-    id: `blob${i}`,
-    shape: 'sphere',
-    position: { x: blob.cx * radius, y: blob.cy * height, z: blob.cz * radius },
-    size: { width: blob.rh * radius * 2, height: blob.rv * height * 2, depth: blob.rh * radius * 2 },
-    color: PALETTE[blob.tint],
-  }));
   return { id: 'bush', parts };
 }
 

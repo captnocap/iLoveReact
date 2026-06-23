@@ -1,3 +1,4 @@
+import { type PropKindDefinition } from '../../game/kinds/props';
 import { box, cylinder8, hx, NEAR_BLACK, STEEL_DARK, WHITE, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
@@ -17,3 +18,15 @@ export function dinerBoothParts(): PropPartSpec[] {
     cylinder8([0, 0.37, 0], 0.06, 0.74, STEEL_DARK),
   ];
 }
+
+export const dinerBoothDef: PropKindDefinition = {
+  kind: 'dinerBooth',
+  label: 'Diner Booth',
+  solid: true,
+  footprintRadiusMeters: 0.8,
+  heightMeters: 1.35,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  seat: { pose: 'sit', seatHeightMeters: 0.45, capacity: 2 },
+  coverClass: 'soft',
+};

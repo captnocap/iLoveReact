@@ -35,6 +35,7 @@ const text_engine = @import("framework/primitive/text.zig");
 const Node = layout.Node;
 const constructor = @import("framework/world/constructor.zig");
 const foliage = @import("framework/world/foliage.zig");
+const instance_collider_policy = @import("framework/world/instance_collider_policy.zig");
 const streaming = @import("framework/world/streaming.zig");
 const game_physics = @import("framework/game/physics.zig");
 
@@ -62,6 +63,17 @@ const SHAPE_BUSH: f32 = 7; // a bush foliage clump — same foliage pipeline, bu
 const SHAPE_FROND: f32 = 8; // a palm-crown frond card — drawn by the ~frond~ pipeline (leaf cutout + wind)
 const SHAPE_PALMTRUNK: f32 = 9; // a palm trunk — tapered/curved/scar-ringed log, a normal lit mesh
 const SHAPE_FLOWER: f32 = 10; // flower heads — tiny cards drawn by the ~grass~ wind pipeline
+// A decorative box — renders exactly like SHAPE_BOX (geomForShape falls back to
+// box) but NEVER becomes a physics collider. The procedural void shell
+// (SKYBOX_PLAYBOOK) bakes thousands of these for the distant skyline; you never
+// bump them (its single ground heightfield is what you walk on), and keeping them
+// out of the collider build is what stops them saturating the rect/oriented cap.
+const SHAPE_SCENERY_BOX: f32 = 11;
+const SHAPE_CORNER_MITER: f32 = 12; // wall L-corner triangular miter prism
+const SHAPE_CORNER_MITER_MIRROR: f32 = 13; // reflected wall L-corner miter prism
+const SHAPE_BOX_OPEN_RUN_MIN: f32 = 14; // cube without local -x face
+const SHAPE_BOX_OPEN_RUN_MAX: f32 = 15; // cube without local +x face
+const SHAPE_BOX_OPEN_RUN_BOTH: f32 = 16; // cube without local +/-x faces
 const SCAN_A: usize = 4;
 const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
@@ -488,6 +500,28 @@ fn buildCube() [36 * 8]f32 {
     return out;
 }
 
+fn buildCubeOpenRun(comptime open_min: bool, comptime open_max: bool) [(36 - (if (open_min) 6 else 0) - (if (open_max) 6 else 0)) * 8]f32 {
+    const Corner = [3]f32;
+    const v0 = Corner{ -0.5, -0.5, -0.5 };
+    const v1 = Corner{ 0.5, -0.5, -0.5 };
+    const v2 = Corner{ 0.5, 0.5, -0.5 };
+    const v3 = Corner{ -0.5, 0.5, -0.5 };
+    const v4 = Corner{ -0.5, -0.5, 0.5 };
+    const v5 = Corner{ 0.5, -0.5, 0.5 };
+    const v6 = Corner{ 0.5, 0.5, 0.5 };
+    const v7 = Corner{ -0.5, 0.5, 0.5 };
+    const vert_count = 36 - (if (open_min) 6 else 0) - (if (open_max) 6 else 0);
+    var out: [vert_count * 8]f32 = undefined;
+    var i: usize = 0;
+    pushFace(out[0..], &i, v4, v5, v6, v7, .{ 0, 0, 1 });
+    pushFace(out[0..], &i, v1, v0, v3, v2, .{ 0, 0, -1 });
+    if (!open_max) pushFace(out[0..], &i, v5, v1, v2, v6, .{ 1, 0, 0 });
+    if (!open_min) pushFace(out[0..], &i, v0, v4, v7, v3, .{ -1, 0, 0 });
+    pushFace(out[0..], &i, v7, v6, v2, v3, .{ 0, 1, 0 });
+    pushFace(out[0..], &i, v0, v1, v5, v4, .{ 0, -1, 0 });
+    return out;
+}
+
 fn pushVertex(out: []f32, idx: *usize, p: [3]f32, n: [3]f32, uv: [2]f32) void {
     out[idx.* + 0] = p[0];
     out[idx.* + 1] = p[1];
@@ -585,6 +619,50 @@ fn buildGablePrism() [24 * 8]f32 {
     // triangular end caps
     pushTri(out[0..], &i, a0, b0, p0, neg_x, .{ 0, 0 }, .{ 1, 0 }, .{ 0.5, 1 });
     pushTri(out[0..], &i, a1, p1, b1, pos_x, .{ 0, 0 }, .{ 0.5, 1 }, .{ 1, 0 });
+    return out;
+}
+
+/// CORNERSEAM-0610: a unit vertical right-triangle prism for wall L-corner
+/// miters. Unit footprint is (-x,-z), (+x,-z), (-x,+z). The local -x face is
+/// omitted because it lies against the trimmed wall body; drawing it creates the
+/// visible vertical strip the miter is meant to remove. The diagonal split face
+/// is omitted too; it is only the internal boundary between two painted halves.
+fn buildCornerMiterPrism() [12 * 8]f32 {
+    const b0 = [3]f32{ -0.5, -0.5, -0.5 };
+    const b1 = [3]f32{ 0.5, -0.5, -0.5 };
+    const b2 = [3]f32{ -0.5, -0.5, 0.5 };
+    const t0 = [3]f32{ -0.5, 0.5, -0.5 };
+    const t1 = [3]f32{ 0.5, 0.5, -0.5 };
+    const t2 = [3]f32{ -0.5, 0.5, 0.5 };
+    const down = [3]f32{ 0, -1, 0 };
+    const up = [3]f32{ 0, 1, 0 };
+    const neg_z = [3]f32{ 0, 0, -1 };
+    var out: [12 * 8]f32 = undefined;
+    var i: usize = 0;
+    pushTri(out[0..], &i, b0, b2, b1, down, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 0 });
+    pushTri(out[0..], &i, t0, t1, t2, up, .{ 0, 0 }, .{ 1, 0 }, .{ 0, 1 });
+    pushFace(out[0..], &i, b0, b1, t1, t0, neg_z);
+    return out;
+}
+
+/// Reflected twin of buildCornerMiterPrism. This is a separate keyed primitive
+/// instead of negative instance scale, because the 3D pipeline back-face culls
+/// normal meshes.
+fn buildCornerMiterMirrorPrism() [12 * 8]f32 {
+    const b0 = [3]f32{ -0.5, -0.5, 0.5 };
+    const b1 = [3]f32{ 0.5, -0.5, 0.5 };
+    const b2 = [3]f32{ -0.5, -0.5, -0.5 };
+    const t0 = [3]f32{ -0.5, 0.5, 0.5 };
+    const t1 = [3]f32{ 0.5, 0.5, 0.5 };
+    const t2 = [3]f32{ -0.5, 0.5, -0.5 };
+    const down = [3]f32{ 0, -1, 0 };
+    const up = [3]f32{ 0, 1, 0 };
+    const pos_z = [3]f32{ 0, 0, 1 };
+    var out: [12 * 8]f32 = undefined;
+    var i: usize = 0;
+    pushTri(out[0..], &i, b0, b2, b1, down, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 0 });
+    pushTri(out[0..], &i, t0, t1, t2, up, .{ 0, 0 }, .{ 1, 0 }, .{ 0, 1 });
+    pushFace(out[0..], &i, b0, b1, t1, t0, pos_z);
     return out;
 }
 
@@ -882,6 +960,12 @@ fn extrudeTiles(allocator: std.mem.Allocator, scene: constructor.Scene) ![]f32 {
 const ShapeBatches = struct {
     boxes: []f32,
     box_count: u32,
+    boxes_open_run_min: []f32,
+    box_open_run_min_count: u32,
+    boxes_open_run_max: []f32,
+    box_open_run_max_count: u32,
+    boxes_open_run_both: []f32,
+    box_open_run_both_count: u32,
     ramps: []f32,
     ramp_count: u32,
     cylinder8s: []f32,
@@ -892,6 +976,10 @@ const ShapeBatches = struct {
     sphere_count: u32,
     gables: []f32,
     gable_count: u32,
+    corner_miters: []f32,
+    corner_miter_count: u32,
+    corner_miter_mirrors: []f32,
+    corner_miter_mirror_count: u32,
     grass: []f32,
     grass_count: u32,
     flowers: []f32,
@@ -905,11 +993,16 @@ const ShapeBatches = struct {
 
     pub fn deinit(self: ShapeBatches, allocator: std.mem.Allocator) void {
         allocator.free(self.boxes);
+        allocator.free(self.boxes_open_run_min);
+        allocator.free(self.boxes_open_run_max);
+        allocator.free(self.boxes_open_run_both);
         allocator.free(self.ramps);
         allocator.free(self.cylinder8s);
         allocator.free(self.cylinder16s);
         allocator.free(self.spheres);
         allocator.free(self.gables);
+        allocator.free(self.corner_miters);
+        allocator.free(self.corner_miter_mirrors);
         allocator.free(self.grass);
         allocator.free(self.flowers);
         allocator.free(self.bush);
@@ -947,6 +1040,12 @@ const MaterialBatch = struct {
 fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, material_refs: []const u32, flora: ?constructor.FloraCells) !ShapeBatches {
     var boxes: std.ArrayList(f32) = .{};
     errdefer boxes.deinit(allocator);
+    var boxes_open_run_min: std.ArrayList(f32) = .{};
+    errdefer boxes_open_run_min.deinit(allocator);
+    var boxes_open_run_max: std.ArrayList(f32) = .{};
+    errdefer boxes_open_run_max.deinit(allocator);
+    var boxes_open_run_both: std.ArrayList(f32) = .{};
+    errdefer boxes_open_run_both.deinit(allocator);
     var ramps: std.ArrayList(f32) = .{};
     errdefer ramps.deinit(allocator);
     var cylinder8s: std.ArrayList(f32) = .{};
@@ -957,6 +1056,10 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     errdefer spheres.deinit(allocator);
     var gables: std.ArrayList(f32) = .{};
     errdefer gables.deinit(allocator);
+    var corner_miters: std.ArrayList(f32) = .{};
+    errdefer corner_miters.deinit(allocator);
+    var corner_miter_mirrors: std.ArrayList(f32) = .{};
+    errdefer corner_miter_mirrors.deinit(allocator);
     var grass: std.ArrayList(f32) = .{};
     errdefer grass.deinit(allocator);
     var flowers: std.ArrayList(f32) = .{};
@@ -968,11 +1071,16 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     var palmtrunks: std.ArrayList(f32) = .{};
     errdefer palmtrunks.deinit(allocator);
     var box_count: u32 = 0;
+    var box_open_run_min_count: u32 = 0;
+    var box_open_run_max_count: u32 = 0;
+    var box_open_run_both_count: u32 = 0;
     var ramp_count: u32 = 0;
     var cylinder8_count: u32 = 0;
     var cylinder16_count: u32 = 0;
     var sphere_count: u32 = 0;
     var gable_count: u32 = 0;
+    var corner_miter_count: u32 = 0;
+    var corner_miter_mirror_count: u32 = 0;
     var grass_count: u32 = 0;
     var flower_count: u32 = 0;
     var bush_count: u32 = 0;
@@ -984,7 +1092,16 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         const b = row * stride;
         const src = insts[b .. b + stride];
         const shape = instanceShapeId(insts, row, stride);
-        if (@abs(shape - SHAPE_RAMP) < 0.5) {
+        if (@abs(shape - SHAPE_BOX_OPEN_RUN_MIN) < 0.5) {
+            try boxes_open_run_min.appendSlice(allocator, src);
+            box_open_run_min_count += 1;
+        } else if (@abs(shape - SHAPE_BOX_OPEN_RUN_MAX) < 0.5) {
+            try boxes_open_run_max.appendSlice(allocator, src);
+            box_open_run_max_count += 1;
+        } else if (@abs(shape - SHAPE_BOX_OPEN_RUN_BOTH) < 0.5) {
+            try boxes_open_run_both.appendSlice(allocator, src);
+            box_open_run_both_count += 1;
+        } else if (@abs(shape - SHAPE_RAMP) < 0.5) {
             try ramps.appendSlice(allocator, src);
             ramp_count += 1;
         } else if (@abs(shape - SHAPE_CYLINDER8) < 0.5) {
@@ -999,6 +1116,12 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         } else if (@abs(shape - SHAPE_GABLE) < 0.5) {
             try gables.appendSlice(allocator, src);
             gable_count += 1;
+        } else if (@abs(shape - SHAPE_CORNER_MITER) < 0.5) {
+            try corner_miters.appendSlice(allocator, src);
+            corner_miter_count += 1;
+        } else if (@abs(shape - SHAPE_CORNER_MITER_MIRROR) < 0.5) {
+            try corner_miter_mirrors.appendSlice(allocator, src);
+            corner_miter_mirror_count += 1;
         } else if (@abs(shape - SHAPE_GRASS) < 0.5) {
             try grass.appendSlice(allocator, src);
             grass_count += 1;
@@ -1049,6 +1172,12 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     return .{
         .boxes = try boxes.toOwnedSlice(allocator),
         .box_count = box_count,
+        .boxes_open_run_min = try boxes_open_run_min.toOwnedSlice(allocator),
+        .box_open_run_min_count = box_open_run_min_count,
+        .boxes_open_run_max = try boxes_open_run_max.toOwnedSlice(allocator),
+        .box_open_run_max_count = box_open_run_max_count,
+        .boxes_open_run_both = try boxes_open_run_both.toOwnedSlice(allocator),
+        .box_open_run_both_count = box_open_run_both_count,
         .ramps = try ramps.toOwnedSlice(allocator),
         .ramp_count = ramp_count,
         .cylinder8s = try cylinder8s.toOwnedSlice(allocator),
@@ -1059,6 +1188,10 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         .sphere_count = sphere_count,
         .gables = try gables.toOwnedSlice(allocator),
         .gable_count = gable_count,
+        .corner_miters = try corner_miters.toOwnedSlice(allocator),
+        .corner_miter_count = corner_miter_count,
+        .corner_miter_mirrors = try corner_miter_mirrors.toOwnedSlice(allocator),
+        .corner_miter_mirror_count = corner_miter_mirror_count,
         .grass = try grass.toOwnedSlice(allocator),
         .grass_count = grass_count,
         .flowers = try flowers.toOwnedSlice(allocator),
@@ -1245,11 +1378,20 @@ fn isRampInstance(insts: []const f32, row: usize, stride: usize) bool {
 /// the instance-derived physics paths (windowed huge maps + the pre-lump fallback)
 /// turned each into a collider, you'd bump invisible flowers AND the blades would
 /// saturate the MAX_ORIENTED budget, crowding REAL walls/props out of the near
-/// field. Palm TRUNKS (SHAPE_PALMTRUNK) and every structural shape still collide.
+/// field. Palm TRUNKS are decorative too (req_1676): a painted palm field grows
+/// tens of thousands of trunks and one collider each flooded MAX_RECTS on even a
+/// small map for no real gameplay value, so they're walk-through like the fronds.
 fn isNonCollidingFoliage(insts: []const f32, row: usize, stride: usize) bool {
     const s = instanceShapeId(insts, row, stride);
     return @abs(s - SHAPE_GRASS) < 0.5 or @abs(s - SHAPE_BUSH) < 0.5 or
-        @abs(s - SHAPE_FROND) < 0.5 or @abs(s - SHAPE_FLOWER) < 0.5;
+        @abs(s - SHAPE_FROND) < 0.5 or @abs(s - SHAPE_FLOWER) < 0.5 or
+        @abs(s - SHAPE_PALMTRUNK) < 0.5 or
+        // Decorative scenery (the void shell's distant skyline) renders but never
+        // collides — same reason as foliage: thousands of rows would saturate the
+        // collider cap and you're meant to walk past, not into, the horizon.
+        @abs(s - SHAPE_SCENERY_BOX) < 0.5 or
+        @abs(s - SHAPE_CORNER_MITER) < 0.5 or
+        @abs(s - SHAPE_CORNER_MITER_MIRROR) < 0.5;
 }
 
 const GeomPick = struct { key: []const u8, verts: []const f32, vert_count: u32 };
@@ -1259,10 +1401,15 @@ const GeomPick = struct { key: []const u8, verts: []const f32, vert_count: u32 }
 /// any unknown shape fall back to the box; foliage is never material-skinned.
 fn geomForShape(rt: *const Runtime, shape: f32) GeomPick {
     if (@abs(shape - SHAPE_RAMP) < 0.5) return .{ .key = "ramp-slab", .verts = rt.ramp_slab[0..], .vert_count = 36 };
+    if (@abs(shape - SHAPE_BOX_OPEN_RUN_MIN) < 0.5) return .{ .key = "box-open-run-min", .verts = rt.cube_open_run_min[0..], .vert_count = 30 };
+    if (@abs(shape - SHAPE_BOX_OPEN_RUN_MAX) < 0.5) return .{ .key = "box-open-run-max", .verts = rt.cube_open_run_max[0..], .vert_count = 30 };
+    if (@abs(shape - SHAPE_BOX_OPEN_RUN_BOTH) < 0.5) return .{ .key = "box-open-run-both", .verts = rt.cube_open_run_both[0..], .vert_count = 24 };
     if (@abs(shape - SHAPE_CYLINDER8) < 0.5) return .{ .key = "cylinder8", .verts = rt.cylinder8[0..], .vert_count = 8 * 12 };
     if (@abs(shape - SHAPE_CYLINDER16) < 0.5) return .{ .key = "cylinder16", .verts = rt.cylinder16[0..], .vert_count = 16 * 12 };
     if (@abs(shape - SHAPE_SPHERE) < 0.5) return .{ .key = "sphere12x8", .verts = rt.sphere[0..], .vert_count = 12 * 8 * 6 };
     if (@abs(shape - SHAPE_GABLE) < 0.5) return .{ .key = "gable-prism", .verts = rt.gable_prism[0..], .vert_count = 24 };
+    if (@abs(shape - SHAPE_CORNER_MITER) < 0.5) return .{ .key = "corner-miter-prism", .verts = rt.corner_miter_prism[0..], .vert_count = 12 };
+    if (@abs(shape - SHAPE_CORNER_MITER_MIRROR) < 0.5) return .{ .key = "corner-miter-mirror-prism", .verts = rt.corner_miter_mirror_prism[0..], .vert_count = 12 };
     return .{ .key = "box", .verts = rt.cube[0..], .vert_count = 36 };
 }
 
@@ -1275,7 +1422,7 @@ fn rectFloats(insts: []const f32, row: usize, stride: usize, solid: bool) [game_
     const sy = @abs(insts[b + scale_base + 1]);
     const sz = @abs(insts[b + scale_base + 2]);
     const top = insts[b + 1] + sy * 0.5;
-    const floor = if (solid) insts[b + 1] - sy * 0.5 else -1.0e9;
+    const floor = instance_collider_policy.bandFloorY(insts[b + 1], sy);
     return .{
         insts[b + 0] - sx * 0.5,
         insts[b + 2] - sz * 0.5,
@@ -1664,44 +1811,19 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
 
         // We DON'T derive any colliders from the render instances here — exactly
         // like /test, the pieces collide ONLY through the baked colliders above
-        // and the painted ground through the heightfields. This matters: a piece
-        // floor's BAKED rect is banded (floor = piece.y, so you walk UNDER a
-        // raised floor), whereas an instance-derived walkable rect is solid to the
-        // ground (floor = −∞) and, being too tall to step onto, side-pushes the
-        // player below it — an invisible wall under upper floors. Letting the
-        // banded baked collider own the floor is what keeps it standable from
-        // above AND passable from below. (Heightfields above handle the ground;
-        // baked rects/oriented handle every authored piece.)
+        // and the painted ground through the heightfields. The instance fallback
+        // now keeps real vertical bands too, but the baked colliders still own the
+        // authored semantics: door cuts, wall joins, half-height edits, and exact
+        // floor/roof slabs. (Heightfields above handle the ground; baked
+        // rects/oriented handle every authored piece.)
 
-        // Palm-trunk colliders (req_1454): a small AABB per palm trunk so you can't
-        // walk through the trees. The foliage cards (grass/bush/frond) stay
-        // collisionless — only SHAPE_PALMTRUNK rows register. The thin trunk's lean
-        // is ignored (a cheap axis-aligned box around the log).
-        {
-            const scale_base: usize = if (stride >= 12) 6 else 3;
-            var prow: usize = 0;
-            while (prow < @as(usize, @intCast(inst_count))) : (prow += 1) {
-                if (@abs(instanceShapeId(insts, prow, stride) - SHAPE_PALMTRUNK) >= 0.5) continue;
-                if (rect_count >= game_physics.MAX_RECTS) {
-                    clipped_rows += 1;
-                    continue;
-                }
-                const pb = prow * stride;
-                const x = insts[pb + 0];
-                const y = insts[pb + 1];
-                const z = insts[pb + 2];
-                const half = @abs(insts[pb + scale_base + 0]) * 0.15; // unit radius 0.13 + bulge margin
-                const height = @abs(insts[pb + scale_base + 1]);
-                try rects.appendSlice(allocator, &[_]f32{
-                    x - half, z - half, x + half, z + half,
-                    y + height, // top — the trunk's full height (blocks horizontally)
-                    1, // blocksPlayer
-                    0.6, 0.0, // bark friction, no restitution
-                    y, // floor — base rests on the ground
-                });
-                rect_count += 1;
-            }
-        }
+        // Palm trees are DECORATION (req_1676): no per-trunk colliders. A painted
+        // palm field grows tens of thousands of trunks; one rect collider each
+        // (req_1454) flooded MAX_RECTS on even a small authored map and gave no
+        // real gameplay value (you brush past palms in a grove, you don't path
+        // around 25k poles). isNonCollidingFoliage now skips SHAPE_PALMTRUNK too,
+        // so the windowed/instance paths agree. Re-enable here + remove the skip
+        // if a map ever needs solid individual trees.
 
         const values = try allocator.alloc(f32, game_physics.INPUT_HEADER_FLOATS + entity_floats + rects.items.len + oriented.items.len);
         @memset(values, 0);
@@ -1746,14 +1868,14 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
                 }
                 continue;
             }
-            if (isNonCollidingFoliage(insts, row, stride)) continue; // grass/bush/frond/flower = walk-through (req_1607)
+            if (isNonCollidingFoliage(insts, row, stride)) continue; // grass/bush/frond/flower/scenery = walk-through (req_1607)
             const scale_base: usize = if (stride >= 12) 6 else 3;
             const b = row * stride;
             const sx = @abs(insts[b + scale_base + 0]);
             const sy = @abs(insts[b + scale_base + 1]);
             const sz = @abs(insts[b + scale_base + 2]);
             if (sx <= 0.001 or sy <= 0.001 or sz <= 0.001) continue;
-            const solid = sy > PHYSICS_SOLID_HEIGHT_METERS;
+            const solid = instance_collider_policy.blocksPlayerByHeight(sy, PHYSICS_SOLID_HEIGHT_METERS);
             if (solid != want_solid) continue; // floors in pass 0, walls in pass 1
             const yaw = instanceYawRadians(insts, row, stride);
             if (@abs(yaw) > 0.0001) {
@@ -2487,11 +2609,16 @@ pub const Runtime = struct {
     windowed: bool = false,
     grid: ?SpatialGrid = null,
     cube: [36 * 8]f32 = undefined,
+    cube_open_run_min: [30 * 8]f32 = undefined,
+    cube_open_run_max: [30 * 8]f32 = undefined,
+    cube_open_run_both: [24 * 8]f32 = undefined,
     ramp_slab: [36 * 8]f32 = undefined,
     cylinder8: [8 * 12 * 8]f32 = undefined,
     cylinder16: [16 * 12 * 8]f32 = undefined,
     sphere: [12 * 8 * 6 * 8]f32 = undefined,
     gable_prism: [24 * 8]f32 = undefined,
+    corner_miter_prism: [12 * 8]f32 = undefined,
+    corner_miter_mirror_prism: [12 * 8]f32 = undefined,
     grass_blade: [36 * 8]f32 = undefined,
     flower_head: [36 * 8]f32 = undefined,
     bush_clump: [60 * 8]f32 = undefined,
@@ -2907,11 +3034,10 @@ pub const Runtime = struct {
         // Gate STRICTLY on the rect/oriented caps — NOT on clipped_rows. clipped_rows
         // also counts dropped HEIGHTFIELDS (too many painted relief chunks / ramp-stair
         // fields for MAX_HEIGHTFIELDS), and a heightfield overflow must not flip an
-        // otherwise-fitting authored map into windowing: the windowed path re-derives
-        // floors from render instances as solid-to-ground boxes (band floor = −∞), which
-        // turns every upper floor/roof into an invisible ground-level wall you can't walk
-        // under. As long as the rects/oriented fit, the banded baked colliders own the
-        // floors (raised floors stay walk-under) — keep them.
+        // otherwise-fitting authored map into windowing. As long as the
+        // rects/oriented fit, the baked colliders own door cuts, wall joins, and
+        // floor/roof bands; only true rect/oriented overflow should swap to the
+        // instance-derived near-field.
         if (self.physics_colliders.rect_count >= game_physics.MAX_RECTS or
             self.physics_colliders.oriented_count >= game_physics.MAX_ORIENTED)
         {
@@ -2936,11 +3062,16 @@ pub const Runtime = struct {
             .far = @max(far, bounds.radius * 4.0 + 64.0),
         };
         self.cube = buildCube();
+        self.cube_open_run_min = buildCubeOpenRun(true, false);
+        self.cube_open_run_max = buildCubeOpenRun(false, true);
+        self.cube_open_run_both = buildCubeOpenRun(true, true);
         self.ramp_slab = buildRampSlab();
         self.cylinder8 = buildUnitCylinder(8);
         self.cylinder16 = buildUnitCylinder(16);
         self.sphere = buildUnitSphere(12, 8);
         self.gable_prism = buildGablePrism();
+        self.corner_miter_prism = buildCornerMiterPrism();
+        self.corner_miter_mirror_prism = buildCornerMiterMirrorPrism();
         self.grass_blade = buildGrassBlade();
         self.flower_head = buildFlowerHead();
         self.bush_clump = buildBushClump();
@@ -3235,6 +3366,18 @@ pub const Runtime = struct {
                     if (shape_id == SHAPE_RAMP) {
                         geom_key = "ramp-slab";
                         verts = self.ramp_slab[0..];
+                    } else if (shape_id == SHAPE_BOX_OPEN_RUN_MIN) {
+                        geom_key = "box-open-run-min";
+                        verts = self.cube_open_run_min[0..];
+                        vert_count = 30;
+                    } else if (shape_id == SHAPE_BOX_OPEN_RUN_MAX) {
+                        geom_key = "box-open-run-max";
+                        verts = self.cube_open_run_max[0..];
+                        vert_count = 30;
+                    } else if (shape_id == SHAPE_BOX_OPEN_RUN_BOTH) {
+                        geom_key = "box-open-run-both";
+                        verts = self.cube_open_run_both[0..];
+                        vert_count = 24;
                     } else if (shape_id == SHAPE_CYLINDER8) {
                         geom_key = "cylinder8";
                         verts = self.cylinder8[0..];
@@ -3251,6 +3394,14 @@ pub const Runtime = struct {
                         geom_key = "gable-prism";
                         verts = self.gable_prism[0..];
                         vert_count = 24;
+                    } else if (shape_id == SHAPE_CORNER_MITER) {
+                        geom_key = "corner-miter-prism";
+                        verts = self.corner_miter_prism[0..];
+                        vert_count = 12;
+                    } else if (shape_id == SHAPE_CORNER_MITER_MIRROR) {
+                        geom_key = "corner-miter-mirror-prism";
+                        verts = self.corner_miter_mirror_prism[0..];
+                        vert_count = 12;
                     }
                     try self.kid_list.append(self.allocator, .{
                         .scene3d_mesh = true,
@@ -3363,6 +3514,36 @@ pub const Runtime = struct {
                 .scene3d_instance_static = true,
             });
             try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.box_open_run_min_count > 0,
+                .scene3d_geom_key = "box-open-run-min",
+                .scene3d_vertices = self.cube_open_run_min[0..],
+                .scene3d_vert_count = 30,
+                .scene3d_instance_data = self.shape_batches.boxes_open_run_min,
+                .scene3d_instance_count = self.shape_batches.box_open_run_min_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.box_open_run_max_count > 0,
+                .scene3d_geom_key = "box-open-run-max",
+                .scene3d_vertices = self.cube_open_run_max[0..],
+                .scene3d_vert_count = 30,
+                .scene3d_instance_data = self.shape_batches.boxes_open_run_max,
+                .scene3d_instance_count = self.shape_batches.box_open_run_max_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.box_open_run_both_count > 0,
+                .scene3d_geom_key = "box-open-run-both",
+                .scene3d_vertices = self.cube_open_run_both[0..],
+                .scene3d_vert_count = 24,
+                .scene3d_instance_data = self.shape_batches.boxes_open_run_both,
+                .scene3d_instance_count = self.shape_batches.box_open_run_both_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
+            try self.kid_list.append(self.allocator, .{
                 .scene3d_mesh = self.shape_batches.ramp_count > 0,
                 .scene3d_geom_key = "ramp-slab",
                 .scene3d_vertices = self.ramp_slab[0..],
@@ -3409,6 +3590,26 @@ pub const Runtime = struct {
                 .scene3d_vert_count = 24,
                 .scene3d_instance_data = self.shape_batches.gables,
                 .scene3d_instance_count = self.shape_batches.gable_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.corner_miter_count > 0,
+                .scene3d_geom_key = "corner-miter-prism",
+                .scene3d_vertices = self.corner_miter_prism[0..],
+                .scene3d_vert_count = 12,
+                .scene3d_instance_data = self.shape_batches.corner_miters,
+                .scene3d_instance_count = self.shape_batches.corner_miter_count,
+                .scene3d_instance_stride = @intCast(self.stride),
+                .scene3d_instance_static = true,
+            });
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = self.shape_batches.corner_miter_mirror_count > 0,
+                .scene3d_geom_key = "corner-miter-mirror-prism",
+                .scene3d_vertices = self.corner_miter_mirror_prism[0..],
+                .scene3d_vert_count = 12,
+                .scene3d_instance_data = self.shape_batches.corner_miter_mirrors,
+                .scene3d_instance_count = self.shape_batches.corner_miter_mirror_count,
                 .scene3d_instance_stride = @intCast(self.stride),
                 .scene3d_instance_static = true,
             });
@@ -3505,6 +3706,18 @@ pub const Runtime = struct {
                         geom_key = "cylinder8";
                         verts = self.cylinder8[0..];
                         vert_count = 8 * 12;
+                    } else if (shape_id == SHAPE_BOX_OPEN_RUN_MIN) {
+                        geom_key = "box-open-run-min";
+                        verts = self.cube_open_run_min[0..];
+                        vert_count = 30;
+                    } else if (shape_id == SHAPE_BOX_OPEN_RUN_MAX) {
+                        geom_key = "box-open-run-max";
+                        verts = self.cube_open_run_max[0..];
+                        vert_count = 30;
+                    } else if (shape_id == SHAPE_BOX_OPEN_RUN_BOTH) {
+                        geom_key = "box-open-run-both";
+                        verts = self.cube_open_run_both[0..];
+                        vert_count = 24;
                     } else if (shape_id == SHAPE_CYLINDER16) {
                         geom_key = "cylinder16";
                         verts = self.cylinder16[0..];
@@ -3520,6 +3733,14 @@ pub const Runtime = struct {
                         geom_key = "gable-prism";
                         verts = self.gable_prism[0..];
                         vert_count = 24;
+                    } else if (shape_id == SHAPE_CORNER_MITER) {
+                        geom_key = "corner-miter-prism";
+                        verts = self.corner_miter_prism[0..];
+                        vert_count = 12;
+                    } else if (shape_id == SHAPE_CORNER_MITER_MIRROR) {
+                        geom_key = "corner-miter-mirror-prism";
+                        verts = self.corner_miter_mirror_prism[0..];
+                        vert_count = 12;
                     }
                     try self.kid_list.append(self.allocator, .{
                         .scene3d_mesh = true,
@@ -3607,6 +3828,12 @@ pub const Runtime = struct {
 
         try fams.append(self.allocator, .{ .rows = self.shape_batches.boxes, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "box", .verts = self.cube[0..], .tex_key = null });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.boxes_open_run_min, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "box-open-run-min", .verts = self.cube_open_run_min[0..], .tex_key = null });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.boxes_open_run_max, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "box-open-run-max", .verts = self.cube_open_run_max[0..], .tex_key = null });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.boxes_open_run_both, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "box-open-run-both", .verts = self.cube_open_run_both[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.ramps, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "ramp-slab", .verts = self.ramp_slab[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.cylinder8s, .stride = @intCast(self.stride) });
@@ -3617,6 +3844,10 @@ pub const Runtime = struct {
         try self.stream_protos.append(self.allocator, .{ .geom_key = "sphere12x8", .verts = self.sphere[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.gables, .stride = @intCast(self.stride) });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "gable-prism", .verts = self.gable_prism[0..], .tex_key = null });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.corner_miters, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "corner-miter-prism", .verts = self.corner_miter_prism[0..], .tex_key = null });
+        try fams.append(self.allocator, .{ .rows = self.shape_batches.corner_miter_mirrors, .stride = @intCast(self.stride) });
+        try self.stream_protos.append(self.allocator, .{ .geom_key = "corner-miter-mirror-prism", .verts = self.corner_miter_mirror_prism[0..], .tex_key = null });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.grass, .stride = @intCast(self.stride), .draw_radius = flora_radius });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "grass-blade", .verts = self.grass_blade[0..], .tex_key = "~grass~" });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.flowers, .stride = @intCast(self.stride), .draw_radius = flora_radius });
@@ -3785,7 +4016,7 @@ pub const Runtime = struct {
         const sy = @abs(self.insts[b + scale_base + 1]);
         const sz = @abs(self.insts[b + scale_base + 2]);
         if (sx <= 0.001 or sy <= 0.001 or sz <= 0.001) return;
-        const solid = sy > PHYSICS_SOLID_HEIGHT_METERS;
+        const solid = instance_collider_policy.blocksPlayerByHeight(sy, PHYSICS_SOLID_HEIGHT_METERS);
         if (solid != want_solid) return;
         if (@abs(instanceYawRadians(self.insts, row, self.stride)) > 0.0001) {
             if (oc.* >= game_physics.MAX_ORIENTED) {
@@ -3860,6 +4091,16 @@ pub const Runtime = struct {
         game_physics.clearHeightfields();
         for (self.scene.heightfields) |field| {
             if (hf < game_physics.MAX_HEIGHTFIELDS and registerSceneHeightfield(field, hf)) hf += 1 else clipped += 1;
+        }
+        // Baked heightfields (authored stair/ramp slopes AND the void shell's ground
+        // plane) live in the COLLIDERS lump, NOT scene.heightfields. The static build
+        // registers them too (see buildPhysicsColliders); without re-registering them
+        // here, a window rebuild on a huge map DROPS them — you fall through the void
+        // ground and authored stairs stop catching you. (req_1669)
+        if (self.scene.baked_colliders) |bc| {
+            for (bc.ramps) |ramp| {
+                if (hf < game_physics.MAX_HEIGHTFIELDS and registerColliderField(ramp, hf)) hf += 1 else clipped += 1;
+            }
         }
 
         const pc = grid.cellXZ(center_x, center_z);

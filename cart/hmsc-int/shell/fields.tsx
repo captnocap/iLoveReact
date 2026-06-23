@@ -11,7 +11,7 @@
 // demonstrates). After any set() the renderer calls onEdit() so the frame
 // re-reads every get() — sources stay poll-free.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Box, Pressable, Slider, Text } from '@reactjit/primitives';
 import { C, accentFor } from './workbench.cls';
 import { colorRangeCells, type ColorRange } from './colorRange';
@@ -50,7 +50,13 @@ export type FieldSpec =
   // here"): a full-width WRAPPING text block — the detail surface for long
   // verbatim content (asks, resolution paragraphs). Read-only; the panel
   // column's own ScrollView makes it scrollable.
-  | { k: string; t: 'para'; get(): string; color?: string };
+  | { k: string; t: 'para'; get(): string; color?: string }
+  // node (req_0981): the escape hatch for a LIVE VISUAL surface in column 3 —
+  // a source-rendered ReactNode (the Studio's live UV atlas, a preview canvas)
+  // that the data-field protocol can't express. Renders full-width, bare (the
+  // group title is its header). Use sparingly: most editing is still typed
+  // fields (LAW 1) — this is for a demonstration the panel must host inline.
+  | { k: string; t: 'node'; render(): ReactNode };
 
 // layout (SETDENSE-0607, the density verdict: "TOOO dense … sitting ass to
 // mouth"): 'rows' renders the group's strip as a COLUMN — one field per row,
@@ -399,6 +405,15 @@ function FieldCell({ f, path, wide, onEdit }: { f: FieldSpec; path: string; wide
         <Text fontSize={10} color={accentFor(f.color ?? 'text')} style={{ fontFamily: 'monospace', width: '100%' }}>
           {f.get()}
         </Text>
+      </C.Field>
+    );
+  }
+  // node fields take the FULL strip width and render their ReactNode bare (the
+  // group title is the header) — the live-visual escape hatch (req_0981).
+  if (f.t === 'node') {
+    return (
+      <C.Field style={{ width: '100%', borderRightWidth: 0, flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+        {f.render()}
       </C.Field>
     );
   }

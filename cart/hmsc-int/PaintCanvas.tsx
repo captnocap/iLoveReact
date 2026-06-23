@@ -24,6 +24,7 @@ import { Box, Canvas, Pressable, ScrollView, Text } from '@reactjit/primitives';
 import { callHost } from '@reactjit/ffi';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { bindingsForScope } from './editors/controls';
+import { startupMark } from './startupTimer';
 import { useEditorControls, useHeldModifiers } from './editors/useEditorControls';
 import { KeyLegend } from './editors/KeyLegend';
 import { columnLabel } from './address';
@@ -738,6 +739,11 @@ export function PaintCanvas(props: {
   // [mapgone-probe MAPGONE2-0605] surface gate — stays until the user confirms
   useEffect(() => {
     console.warn(`[mapgone] PaintCanvas mount: seed=${props.initialWorld ? 'initialWorld' : 'blank'} chunks=${chunks.size} focus=${focus.size} focusedChunks=${focusedChunks.length} layer=${layer}`);
+    // Startup timing: both are phase MARKS now — the canvas mounting is not the map
+    // being loaded (chunk bakes/grass/3D still run after), so the real READY is the
+    // main-thread settle armed in EditorShell, not this mount.
+    if (props.initialWorld) startupMark(`PaintCanvas mounted real world (chunks=${chunks.size})`);
+    else startupMark('PaintCanvas first mount (blank)');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount probe
   }, []);
   const occupied = useCallback((cx: number, cz: number) => chunks.has(chunkKey(cx, cz)), [chunks]);
@@ -1317,7 +1323,17 @@ export function PaintCanvas(props: {
   }, [junctions, intersectionControls, roads, intersectionOverrides]);
   const syncGenRef = useRef(props.place.onSyncGenerated);
   syncGenRef.current = props.place.onSyncGenerated;
-  useEffect(() => { syncGenRef.current?.(generatedPlacements); }, [generatedPlacements]);
+  // Re-assert the road-derived gen props whenever EITHER the derived set changes OR
+  // the placement store is reverted (req_1505). An autosave/hot-reload restore or a
+  // map switch calls setPlacements(snapshot) — which brings back the SAVED gen set,
+  // STALE vs the live roads (e.g. a since-renamed street) — and the generatedPlacements
+  // memo won't re-fire on its own because roads are unchanged. Without re-syncing on
+  // the store identity, the editor renders the live signs (from a fresh previewWorld
+  // built after a later edit) while Compile ships the stale snapshot set — so the
+  // current intersection's signs are simply absent in-game. syncGenerated's no-op
+  // guard returns the same array when the store already matches, so an already-
+  // consistent store neither churns nor loops.
+  useEffect(() => { syncGenRef.current?.(generatedPlacements); }, [generatedPlacements, props.place.items]);
 
   const selJunction = selJunctionKey ? junctions.find((j) => j.key === selJunctionKey) ?? null : null;
   const setJunctionControl = (key: string, ctrl: IntersectionControl) => {

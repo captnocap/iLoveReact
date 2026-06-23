@@ -37,6 +37,7 @@
 // layers are this file's two halves. Substrate: ../../Embodied (SUBSTRATE-0605).
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import {
@@ -665,7 +666,7 @@ export function PlayRoute(props: {
   // with zero re-registration. `elevatorRev` publishes render updates only
   // while a car is actually moving (the dynamic-props idle discipline).
   const elevatorsRef = useRef<Map<string, ElevatorLive>>(new Map());
-  const [, setElevatorRev] = useState(0);
+  const rerenderElevators = useRerender();
   const elevatorFrameLastMsRef = useRef(0);
   const elevatorFrameRef = useRef<() => void>(() => undefined);
 
@@ -1058,7 +1059,7 @@ export function PlayRoute(props: {
       GAME_BUILD.elevators.updateCarRect(live.rect, live.carY);
       moved = true;
     }
-    if (moved) setElevatorRev((r) => r + 1);
+    if (moved) rerenderElevators();
   };
 
   // ── THE LIVE NAV PUBLISH (NAVLIVE-0610) ────────────────────────────────────
@@ -1242,13 +1243,13 @@ export function PlayRoute(props: {
   // Mirror the session's revision into React state so the overlay re-renders
   // on toggle/typing/output. The game KEEPS PLAYING — nothing here pauses the
   // frame loop; it only gates key reads while open (the substrate's isTyping).
-  const [, setConsoleRev] = useState(0);
+  const rerenderConsole = useRerender();
   const consoleOpen = gameConsole.session.isOpen();
   useEffect(() => {
     const offDown = GAME_INPUT.onKeyDown((event) => {
       const before = gameConsole.session.revision();
       gameConsole.session.handleKey(event ?? {});
-      if (gameConsole.session.revision() !== before) setConsoleRev(gameConsole.session.revision());
+      if (gameConsole.session.revision() !== before) rerenderConsole();
     });
     // keyups re-arm the toggle edge (one physical press = exactly one flip;
     // the engine bus delivers SDL key repeats unfiltered).
@@ -1263,7 +1264,7 @@ export function PlayRoute(props: {
       if (!gameConsole.session.isOpen() && gameConsole.session.watches().length === 0) return;
       const before = gameConsole.session.revision();
       gameConsole.session.update(0.5);
-      if (gameConsole.session.revision() !== before) setConsoleRev(gameConsole.session.revision());
+      if (gameConsole.session.revision() !== before) rerenderConsole();
     }, 500);
     return () => clearInterval(timer);
   }, [gameConsole]);
@@ -2070,7 +2071,7 @@ export function PlayRoute(props: {
         <PlacedPieceMeshes pieces={liftedPieces} markedIds={markedIds} targetId={showSelectionOverlay ? snapTarget?.targetPieceId ?? null : null} occludedIds={occludedPieceIds} placeFreezeProbe={placeFreezeProbeRef.current} skipDynamicProps />
         <DynamicPropMeshes bodies={dynamicBodiesRef.current} rev={dynamicBodiesRev} />
         {/* REQ-0647: the live elevator cars at their LIVE height (the ride's
-            setElevatorRev re-renders the route while a car moves; the shaft
+            rerenderElevators re-renders the route while a car moves; the shaft
             frames render with the standing pieces above). */}
         {[...elevatorsRef.current.values()].map((live) => (
           <VisualShapeMesh

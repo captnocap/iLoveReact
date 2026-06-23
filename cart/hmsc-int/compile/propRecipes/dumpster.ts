@@ -7,6 +7,18 @@ import {
   type PropPartSpec,
   type PropRecipe,
 } from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
+
+export const dumpsterDef: PropKindDefinition = {
+  kind: 'dumpster',
+  label: 'Dumpster',
+  solid: true,
+  footprintRadiusMeters: 0.9,
+  heightMeters: 1.57,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'junk', capacity: 6, spawnFillChance: 0.7, searchSeconds: 4, access: 'open' },
+};
 
 const DUMPSTER_COLORS = {
   frameDark: recipeColor('#3a4a30'),

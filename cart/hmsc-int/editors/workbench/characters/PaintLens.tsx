@@ -9,7 +9,8 @@
 // Figure saves route through the bench's MATERIALIZE wiring (the characters
 // channel + the open draft adopts — K3 lives in paint/live.ts charAdopt).
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { Col, Text } from '@reactjit/runtime/primitives';
 import { GAME_CHROME } from '../../../game/chrome';
 import type { PaintTargetId } from '../../../game/figure/shapes';
@@ -22,8 +23,8 @@ const T = GAME_CHROME.tokens.color;
 
 export function CharacterPaintLens(props: { store: CharacterStore }) {
   const s = props.store;
-  const [, setTick] = useState(0);
-  useEffect(() => s.subscribe(() => setTick((t) => t + 1)), [s]);
+  const rerender = useRerender();
+  useEffect(() => s.subscribe(rerender), [s]);
 
   const draftId = s.draftId;
   const part = s.view.selPart as PaintTargetId;

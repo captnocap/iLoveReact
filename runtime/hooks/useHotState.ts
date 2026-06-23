@@ -48,6 +48,19 @@ export function useHotState<T>(key: string, initial: T): [T, (v: Updater<T>) => 
   return [value, set];
 }
 
+/** Imperative read of a hot atom (non-hook), for module-level stores that need
+ *  twig state which survives a hot reload but resets on a cold process restart
+ *  (hotstate is in-process). Returns `fallback` when the key is unset. */
+export function getHotState<T>(key: string, fallback: T): T {
+  const stored = callHostJson<T | undefined>('__hot_get', undefined, key);
+  return stored === undefined ? fallback : stored;
+}
+
+/** Imperative write of a hot atom (non-hook). Survives hot reload, not restart. */
+export function setHotState<T>(key: string, value: T): void {
+  callHost('__hot_set', undefined, key, JSON.stringify(value));
+}
+
 /** Remove a single atom. Equivalent to "forget this key across reloads." */
 export function removeHotState(key: string): void {
   callHost('__hot_remove', undefined, key);

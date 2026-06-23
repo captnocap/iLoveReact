@@ -1,3 +1,4 @@
+import { type PropKindDefinition } from '../../game/kinds/props';
 import { box, hx, NEAR_BLACK, STEEL, WHITE, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
@@ -13,3 +14,14 @@ export function orderCounterParts(): PropPartSpec[] {
     box([-w * 0.2, 1.09, 0], [0.34, 0.05, 0.3], STEEL),
   ];
 }
+
+export const orderCounterDef: PropKindDefinition = {
+  kind: 'orderCounter',
+  label: 'Order Counter',
+  solid: true,
+  footprintRadiusMeters: 0.9,
+  heightMeters: 1.16,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'valuables', capacity: 2, spawnFillChance: 0.5, searchSeconds: 3, access: 'locked' },
+};

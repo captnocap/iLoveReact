@@ -691,6 +691,10 @@ pub const Scene = struct {
     /// LED ticker boards (req_0893 #3) — the loader scrolls + draws the lit LEDs
     /// per frame. null in pre-lump bakes / maps with no tickers.
     tickers: ?Tickers,
+    /// Foliage RECIPE (FOLIAGEFORMULA, req_1591) — the painted grass/bush cells the
+    /// loader expands blades from at load (framework/world/foliage.zig), instead of
+    /// ~1M baked rows. null in pre-lump bakes / maps with no painted foliage.
+    flora: ?FloraCells,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
@@ -719,6 +723,7 @@ pub const Scene = struct {
         if (self.mesh_props) |mp| mp.deinit(allocator);
         if (self.water) |w| w.deinit(allocator);
         if (self.tickers) |t| t.deinit(allocator);
+        if (self.flora) |fl| fl.deinit(allocator);
     }
 };
 
@@ -756,6 +761,44 @@ fn decodeInstances(allocator: std.mem.Allocator, data: []const u8) Error!Decoded
         values[i] = @bitCast(bits);
     }
     return .{ .values = values, .count = count, .stride = stride, .pieces = @min(pieces, count) };
+}
+
+/// One painted foliage cell from the FLORA recipe lump — the factors the loader
+/// expands blades from (FOLIAGEFORMULA, req_1591).
+pub const FloraCell = struct { cell_key: u32, wx: f32, wz: f32, top: f32, spec_id: u16, count: u16 };
+pub const FloraCells = struct {
+    cell_size: f32,
+    cells: []FloraCell,
+    pub fn deinit(self: FloraCells, allocator: std.mem.Allocator) void {
+        allocator.free(self.cells);
+    }
+};
+
+/// Decode the FLORA recipe lump: u32 version | f32 cellSizeMeters | u32 cellCount |
+/// per cell: u32 cellKey | f32 wx | f32 wz | f32 top | u16 specId | u16 count.
+/// Twin of compile/worldGeometry.ts encodeFlora.
+const FLORA_RECORD_BYTES: usize = 20;
+fn decodeFlora(allocator: std.mem.Allocator, data: []const u8) Error!FloraCells {
+    if (data.len < 12) return .{ .cell_size = 1, .cells = &.{} };
+    const cell_size = readF32(data, 4);
+    const count = std.mem.readInt(u32, data[8..12], .little);
+    const need = 12 + @as(usize, count) * FLORA_RECORD_BYTES;
+    if (count == 0 or need > data.len) return .{ .cell_size = cell_size, .cells = &.{} };
+    const cells = allocator.alloc(FloraCell, count) catch return Error.OutOfMemory;
+    errdefer allocator.free(cells);
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const o = 12 + i * FLORA_RECORD_BYTES;
+        cells[i] = .{
+            .cell_key = std.mem.readInt(u32, data[o..][0..4], .little),
+            .wx = readF32(data, o + 4),
+            .wz = readF32(data, o + 8),
+            .top = readF32(data, o + 12),
+            .spec_id = std.mem.readInt(u16, data[o + 16 ..][0..2], .little),
+            .count = std.mem.readInt(u16, data[o + 18 ..][0..2], .little),
+        };
+    }
+    return .{ .cell_size = cell_size, .cells = cells };
 }
 
 /// Read ONE mesh group at `at` and return it plus the next read offset. This is
@@ -1865,6 +1908,15 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     else
         .{ .values = &.{}, .count = 0, .stride = 0, .pieces = 0 };
 
+    // The foliage RECIPE (FOLIAGEFORMULA, req_1591): grass/bush cells the loader
+    // expands into blades at load instead of carrying ~1M baked rows. Optional —
+    // absent in pre-lump bakes / maps with no painted foliage.
+    const flora: ?FloraCells = if (mapfile.findLump(map_lumps, mapfile.LumpType.flora)) |lump|
+        try decodeFlora(allocator, lump.data)
+    else
+        null;
+    errdefer if (flora) |fl| fl.deinit(allocator);
+
     // The render environment (lighting / sky / camera) — data, defaulted when
     // the lump is absent.
     const env: SceneEnv = if (mapfile.findLump(map_lumps, mapfile.LumpType.environment)) |lump|
@@ -2044,5 +2096,6 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .mesh_props = mesh_props,
         .water = water,
         .tickers = tickers,
+        .flora = flora,
     };
 }

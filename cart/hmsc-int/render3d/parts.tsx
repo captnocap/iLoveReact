@@ -44,6 +44,7 @@ export type Part = {
   rotation?: Vec3;            // degrees (the descriptor bakes yaw)
   scale?: number | Vec3;
   material: string;           // default colour shown when no texture is applied
+  opacity?: number;           // < 1 = translucent (glass) when no texture is applied
   texturedFaces?: BoxFace[];  // which box faces sample the texture (broad faces)
   tex?: { cols: number; floors: number }; // capture grid; derived from scale if absent
   textureable?: boolean;      // false = structural-only (heightfield floor, a car) — not a texture target
@@ -104,6 +105,9 @@ export const PartMesh = memo(function PartMesh(props: { part: Part; textureKey?:
   const p = props.part;
   const key = props.textureKey ?? p.defaultTextureKey;
   const params = key && p.texturedFaces ? { ...p.params, texturedFaces: p.texturedFaces } : p.params;
+  // Untextured glass (opacity < 1) draws translucent, the same way build-piece
+  // panes do; a texture override is opaque (white base so the image reads true).
+  const material = key ? '#ffffff' : (p.opacity != null && p.opacity < 1 ? { color: p.material, opacity: p.opacity } : p.material);
   return (
     <Scene3D.Mesh
       geometry={Geometry.GEOMETRIES[p.geometry] ?? Geometry.Box}
@@ -111,7 +115,7 @@ export const PartMesh = memo(function PartMesh(props: { part: Part; textureKey?:
       position={p.position}
       rotation={p.rotation ?? [0, 0, 0]}
       scale={p.scale ?? 1}
-      material={key ? '#ffffff' : p.material}
+      material={material}
       textureKey={key}
     />
   );

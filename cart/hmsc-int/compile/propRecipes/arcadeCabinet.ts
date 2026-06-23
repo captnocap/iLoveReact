@@ -1,3 +1,4 @@
+import { type PropKindDefinition } from '../../game/kinds/props';
 import { box, cylinder8, hx, NEAR_BLACK, panel, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
@@ -16,3 +17,14 @@ export function arcadeCabinetParts(): PropPartSpec[] {
     cylinder8([0.1 * s, 1.06 * s, -0.46 * s], 0.025 * s, 0.04 * s, hx('#2e6fb0'), [12, 0, 0]),
   ];
 }
+
+export const arcadeCabinetDef: PropKindDefinition = {
+  kind: 'arcadeCabinet',
+  label: 'Arcade Cabinet',
+  solid: true,
+  footprintRadiusMeters: 0.38,
+  heightMeters: 2.0,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  coverClass: 'hard',
+};

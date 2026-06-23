@@ -1,31 +1,70 @@
-import { box, GRASS_DRY, GRASS_LIGHT, GRASS_MID, type Color, type PropPartSpec } from '../../game/kinds/propModels';
-import { propKindDefinition, type PropKind } from '../../game/kinds/props';
+import {
+  lowerPropRecipe,
+  recipeColor,
+  type Color,
+  type PropPartSpec,
+  type PropRecipe,
+  type PropRecipePart,
+} from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
 
-// A tuft is two crossed thin boxes — the PSX foliage cross, flat-shaded.
-function tuft(x: number, z: number, w: number, h: number, color: Color): PropPartSpec[] {
-  return [
-    box([x, h / 2, z], [w, h, 0.02], color, [0, 45, 0]),
-    box([x, h / 2, z], [w, h, 0.02], color, [0, -45, 0]),
-  ];
-}
+export const grassPatchDef: PropKindDefinition = {
+  kind: 'grassPatch',
+  label: 'Grass Patch',
+  solid: false,
+  footprintRadiusMeters: 0.7,
+  heightMeters: 0.3,
+  tileKind: 'bush',
+  trafficControl: 'none',
+  coverClass: 'none',
+};
 
-// The shared grass field — five tufts laid out by the kind's footprint, reused by
-// every grass prop (grassPatch, grassTall). Each grass prop is its own file; this
-// is the one field generator they share.
-export function grassField(kind: PropKind): PropPartSpec[] {
-  const def = propKindDefinition(kind);
-  const r = def.footprintRadiusMeters;
-  const h = def.heightMeters;
-  const spots: [number, number, number, Color][] = [
-    [0, 0, 1, GRASS_MID],
-    [r * 0.55, r * 0.2, 0.8, GRASS_LIGHT],
-    [-r * 0.5, -r * 0.3, 0.85, GRASS_MID],
-    [r * 0.15, -r * 0.55, 0.7, GRASS_DRY],
-    [-r * 0.3, r * 0.5, 0.75, GRASS_LIGHT],
+const COLORS = {
+  mid: recipeColor('#5a9a42'),
+  light: recipeColor('#8a9a4a'),
+  dark: recipeColor('#3f7d33'),
+} satisfies Record<string, Color>;
+
+export function grassPatchRecipe(): PropRecipe {
+  const h = 0.3;
+  const r = 0.7;
+  const parts: PropRecipePart[] = [
+    {
+      id: 'tuft1',
+      shape: 'box',
+      position: { x: r * 0.2, y: h * 0.5, z: r * 0.1 },
+      size: { width: r * 0.12, height: h * 0.9, depth: r * 0.08 },
+      color: COLORS.mid,
+      rotation: { pitch: 5, yaw: 0, roll: 8 },
+    },
+    {
+      id: 'tuft2',
+      shape: 'box',
+      position: { x: -r * 0.15, y: h * 0.45, z: r * 0.2 },
+      size: { width: r * 0.1, height: h * 0.8, depth: r * 0.07 },
+      color: COLORS.light,
+      rotation: { pitch: -7, yaw: 0, roll: -5 },
+    },
+    {
+      id: 'tuft3',
+      shape: 'box',
+      position: { x: r * 0.05, y: h * 0.55, z: -r * 0.2 },
+      size: { width: r * 0.11, height: h * 0.95, depth: r * 0.09 },
+      color: COLORS.dark,
+      rotation: { pitch: 6, yaw: 0, roll: 12 },
+    },
+    {
+      id: 'tuft4',
+      shape: 'box',
+      position: { x: -r * 0.25, y: h * 0.4, z: -r * 0.05 },
+      size: { width: r * 0.09, height: h * 0.75, depth: r * 0.08 },
+      color: COLORS.mid,
+      rotation: { pitch: -4, yaw: 0, roll: -10 },
+    },
   ];
-  return spots.flatMap(([x, z, t, color]) => tuft(x, z, r * 0.55, h * t, color));
+  return { id: 'grassPatch', parts };
 }
 
 export function grassPatchParts(): PropPartSpec[] {
-  return grassField('grassPatch');
+  return lowerPropRecipe(grassPatchRecipe());
 }

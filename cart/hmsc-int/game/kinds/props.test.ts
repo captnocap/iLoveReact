@@ -64,7 +64,7 @@ test('exactly the foliage + clutter families are non-solid', () => {
   const nonSolid = PROP_KINDS.filter((k) => !def(k).solid);
   assertEqual(
     nonSolid.join(','),
-    'bush,bushLarge,bushLow,bushSparse,grassPatch,grassTall,bookStack,recordPlayer,vinylRecord,albumCover,cassette,toiletPaper',
+    'bush,bushLarge,bushLow,bushSparse,grassPatch,grassTall,bookStack,recordPlayer,vinylRecord,albumCover,cassette,toiletPaper,makeupPalette,bong,bottle,bowl,can,cup,dice,fork,jar,keyboard,knife,makeup,phone,plate,router,tablet,towel,bushBamboo,bushBerry,bushBoxwood,bushFern,bushHedge,bushRose,fryBasket,grassDead,grassFlowers,grassMoss,grassReeds,grassShort,pebble,plantHanging,plantRose,plantSunflower,plantVine,sodaCup',
     'non-solid props',
   );
 });

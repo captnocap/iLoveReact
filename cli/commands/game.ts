@@ -443,53 +443,39 @@ function assertNoV8(root: string): boolean {
   return true;
 }
 
-/** Decode a bake's {gamefile, assets} base64 envelope (on stdout) to disk: the
- *  raw game-file at `gamefilePath` plus any content-addressed assets in the
- *  shared content store. Shared by the authored bake and the massive scale lab. */
-function installGameFileEnvelope(root: string, tapeTransport: string, gamefilePath: string): boolean {
-  let tapeBase64 = tapeTransport;
-  let assets: Array<{ hash: string; base64: string; bytes?: number }> = [];
-  if (tapeTransport.startsWith('{')) {
-    try {
-      const envelope = JSON.parse(tapeTransport);
-      tapeBase64 = String(envelope.gamefile ?? '');
-      assets = Array.isArray(envelope.assets) ? envelope.assets : [];
-    } catch (error: any) {
-      err(`[game] bake FAILED: malformed game-file envelope: ${String(error?.message ?? error)}`);
-      return false;
-    }
-  }
-  if (!tapeBase64) {
-    err('[game] bake FAILED: game-file envelope carried no game-file bytes');
+/** Validate a bake's MANIFEST (the small JSON the bake prints on stdout after it
+ *  has written the packed binary game-file + content-addressed asset blobs to
+ *  disk itself — GL: pack binary, not base64). The bytes are already in place;
+ *  this just confirms the files exist at the expected path and reports sizes.
+ *  Shared by the authored bake and the massive scale lab. */
+function installGameFileManifest(root: string, tapeTransport: string, gamefilePath: string): boolean {
+  let manifest: { gamefile?: { path?: string; bytes?: number }; assets?: Array<{ hash: string; path: string; bytes?: number }> };
+  try {
+    manifest = JSON.parse(tapeTransport);
+  } catch (error: any) {
+    err(`[game] bake FAILED: malformed game-file manifest: ${String(error?.message ?? error)}`);
     return false;
   }
   const absGamefile = `${root}/${gamefilePath}`;
-  fsMkdir(dirOf(absGamefile));
-  const write = spawnSync('sh', ['-c', `base64 -d > ${shellQuote(absGamefile)}`], tapeBase64);
-  if (write.stderr.trim()) err(write.stderr.trim());
-  if (write.code !== 0) {
-    err('[game] bake FAILED: could not write raw game-file bytes');
+  const stat = tryFsStat(absGamefile);
+  if (!stat || !stat.size) {
+    err(`[game] bake FAILED: game-file not written to ${gamefilePath}`);
     return false;
   }
-  const storeDir = `${root}/${CONTENT_STORE_DIR}`;
-  fsMkdir(storeDir);
+  const assets = Array.isArray(manifest.assets) ? manifest.assets : [];
   for (const asset of assets) {
-    if (!/^[0-9a-f]{64}$/.test(asset.hash) || !asset.base64) {
-      err('[game] bake FAILED: malformed content-addressed asset envelope');
+    if (!/^[0-9a-f]{64}$/.test(asset.hash)) {
+      err('[game] bake FAILED: manifest asset hash is not a sha256 hex');
       return false;
     }
-    const assetPath = `${storeDir}/${asset.hash}`;
-    const assetWrite = spawnSync('sh', ['-c', `base64 -d > ${shellQuote(assetPath)}`], asset.base64);
-    if (assetWrite.stderr.trim()) err(assetWrite.stderr.trim());
-    if (assetWrite.code !== 0) {
-      err(`[game] bake FAILED: could not write content-addressed asset ${asset.hash}`);
+    const assetStat = tryFsStat(`${root}/${CONTENT_STORE_DIR}/${asset.hash}`);
+    if (!assetStat || !assetStat.size) {
+      err(`[game] bake FAILED: content-addressed asset ${asset.hash} missing from the store`);
       return false;
     }
   }
-  const stat = tryFsStat(absGamefile);
-  const rawBytes = stat?.size ?? 0;
   const assetBytes = assets.reduce((n, asset) => n + (asset.bytes ?? 0), 0);
-  out(`[game] wrote raw game-file ${gamefilePath} (${rawBytes} bytes; b64 transport was ${tapeBase64.length} bytes; installed ${assets.length} asset(s), ${assetBytes} bytes)`);
+  out(`[game] wrote raw game-file ${gamefilePath} (${stat.size} bytes, binary; installed ${assets.length} asset(s), ${assetBytes} bytes)`);
   return true;
 }
 
@@ -500,14 +486,21 @@ function bakeRealGameFile(root: string): boolean {
     err('[game] bake FAILED: bakeGameFile does not bundle');
     return false;
   }
-  const gen = spawnSync(`${root}/tools/v8cli`, [`${root}/${BAKE_BUNDLE}`]);
+  // The bake writes the packed binary game-file + asset blobs STRAIGHT TO these
+  // paths (GL: pack binary, not base64 — emitGameFile.ts) and prints only a
+  // manifest. We pass the destinations so it never holds a megabyte-string copy.
+  const gen = spawnSync(`${root}/tools/v8cli`, [
+    `${root}/${BAKE_BUNDLE}`,
+    '--gamefile', `${root}/${BAKED_GAMEFILE}`,
+    '--store', `${root}/${CONTENT_STORE_DIR}`,
+  ]);
   if (gen.stderr.trim()) err(gen.stderr.trim());
   const tapeTransport = gen.stdout.trim();
   if (gen.code !== 0 || !tapeTransport) {
     err('[game] bake FAILED: no game-file produced from the authored world');
     return false;
   }
-  return installGameFileEnvelope(root, tapeTransport, BAKED_GAMEFILE);
+  return installGameFileManifest(root, tapeTransport, BAKED_GAMEFILE);
 }
 
 /** Bake a procedurally-generated HUGE city (the scale lab) into a game-file. The
@@ -518,7 +511,11 @@ function bakeMassiveGameFile(root: string, blocks?: number): boolean {
     err('[game] massive bake FAILED: bakeMassiveGameFile does not bundle');
     return false;
   }
-  const args = [`${root}/${MASSIVE_BAKE_BUNDLE}`];
+  const args = [
+    `${root}/${MASSIVE_BAKE_BUNDLE}`,
+    '--gamefile', `${root}/${MASSIVE_GAMEFILE}`,
+    '--store', `${root}/${CONTENT_STORE_DIR}`,
+  ];
   if (blocks && Number.isFinite(blocks)) args.push('--blocks', String(blocks));
   const gen = spawnSync(`${root}/tools/v8cli`, args);
   if (gen.stderr.trim()) err(gen.stderr.trim());
@@ -527,7 +524,7 @@ function bakeMassiveGameFile(root: string, blocks?: number): boolean {
     err('[game] massive bake FAILED: no game-file produced from the procedural city');
     return false;
   }
-  return installGameFileEnvelope(root, tapeTransport, MASSIVE_GAMEFILE);
+  return installGameFileManifest(root, tapeTransport, MASSIVE_GAMEFILE);
 }
 
 type GameFileChoice = { fixture?: boolean; massive?: boolean; blocks?: number };
@@ -584,10 +581,6 @@ function runLoaderRenderProof(root: string, outPath: string, gameFile: string): 
 function dirOf(path: string): string {
   const i = path.lastIndexOf('/');
   return i <= 0 ? '/' : path.slice(0, i);
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /** Parse the shared game-file selectors: --fixture (codec fixture), --massive

@@ -1,3 +1,4 @@
+import { type PropKindDefinition } from '../../game/kinds/props';
 import { box, hx, NEAR_BLACK, panel, STEEL, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
@@ -14,3 +15,13 @@ export function sodaMachineParts(): PropPartSpec[] {
     box([0, 0.3 * s, -0.28 * s], [0.6 * s, 0.05 * s, 0.12 * s], STEEL),
   ];
 }
+
+export const sodaMachineDef: PropKindDefinition = {
+  kind: 'sodaMachine',
+  label: 'Soda Machine',
+  solid: true,
+  footprintRadiusMeters: 0.35,
+  heightMeters: 1.7,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};

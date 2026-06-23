@@ -80,6 +80,23 @@ pub const LumpType = struct {
     /// scrolls + draws the lit LEDs per frame. Layout: runtime/workspace/lumps.ts
     /// TICKER + compile/worldTicker.ts encodeTickers.
     pub const ticker: u32 = 23;
+
+    /// NPC population (req_0935): the figures that walk the compiled world,
+    /// baked as DATA. NPC_MODELS carries one or more figure models in the SAME
+    /// 68-byte-header mesh-group layout as player_model; NPCs reuse the
+    /// player_animation clips (shared skeleton). Layout:
+    /// runtime/workspace/lumps.ts NPC_MODELS + compile/npcModels.ts.
+    pub const npc_models: u32 = 24;
+    /// NPC spawn rows: u32 modelIndex | f32 x,z,yaw | u32 kind | u32 faction.
+    /// The loader grounds each on the terrain and animates it. Layout:
+    /// runtime/workspace/lumps.ts NPC_SPAWNS + compile/npcModels.ts.
+    pub const npc_spawns: u32 = 25;
+    /// Foliage RECIPE (FOLIAGEFORMULA, req_1591): the painted grass/bush CELLS, not
+    /// the ~1M expanded blade rows. The loader expands blades at load via
+    /// framework/world/foliage.zig. Layout: u32 version | f32 cellSizeMeters |
+    /// u32 cellCount | per cell: u32 cellKey | f32 wx | f32 wz | f32 top |
+    /// u16 specId(0=grass,1=bush) | u16 count. runtime/workspace/lumps.ts FLORA.
+    pub const flora: u32 = 26;
 };
 
 pub const Lump = struct {

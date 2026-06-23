@@ -103,6 +103,35 @@ fn hf_tile_var(k: i32) -> f32 {
 }
 `;
 
+// Per-tile ROAD MARKINGS (PERTILEROAD-0813): the road grammar stamps a one-cell
+// 'median' centerline between the opposing lane trios (SSS|Y|NNN across a vertical
+// road, WWW|Y|EEE down a horizontal one). So a crisp dashed-yellow centerline is a
+// PER-TILE material on the median cell — no analytic ribbon, no bake — synthesised
+// at full shader resolution exactly like the placed road floor piece. The road
+// AXIS comes from the median's lane neighbours: lanes left/right ⇒ the road runs
+// up the screen (line vertical, dashed along world Z); lanes up/down ⇒ horizontal.
+const HF_MEDIAN_KIND = TILE_KINDS.indexOf('median');
+const HF_LANE_START = TILE_KINDS.indexOf('laneNorth'); // laneNorth/South/East/West are contiguous
+const HF_ROAD_MARKING_WGSL = `
+fn hf_is_lane(k: i32) -> bool { return k >= ${HF_LANE_START} && k < ${HF_LANE_START + 4}; }
+fn hf_median_marking(cellBase: i32, cols: i32, rows: i32, cx: i32, cy: i32, fc: vec2f, p: vec2f, base: vec3f) -> vec3f {
+  let lk = hf_cell_kind(cellBase, cols, rows, cx - 1, cy);
+  let rk = hf_cell_kind(cellBase, cols, rows, cx + 1, cy);
+  let vertical_road = hf_is_lane(lk) || hf_is_lane(rk); // lanes flank L/R ⇒ road runs along Z
+  let yellow = vec3f(0.93, 0.74, 0.18);
+  var line = 0.0;
+  var dash = 0.0;
+  if (vertical_road) {
+    line = 1.0 - smoothstep(0.09, 0.15, abs(fc.x - 0.5));
+    dash = step(fract(p.y / 1.6), 0.58);
+  } else {
+    line = 1.0 - smoothstep(0.09, 0.15, abs(fc.y - 0.5));
+    dash = step(fract(p.x / 1.6), 0.58);
+  }
+  return mix(base, yellow, line * dash * 0.95);
+}
+`;
+
 // The painted-ground FORMULA, as a reusable function `hf_ground_rgb(uv) -> vec3f`
 // that reads the module-global `D` reference stream ([cols,rows,pal, palette…,
 // cell idx…, ribbon section]). It does NOT declare D, VsOut, or fs_main — each
@@ -117,6 +146,7 @@ ${TILE_FILL_WGSL}
 ${HF_TILE_MATERIAL_WGSL}
 ${GROUND_RESOLVE_WGSL}
 ${PARKING_STALL_WGSL}
+${HF_ROAD_MARKING_WGSL}
 fn hf_ground_rgb(uv0: vec2f) -> vec3f {
   let cols = i32(D[0]);
   let rows = i32(D[1]);
@@ -150,90 +180,27 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
     } else if (kind == ${PARKING_CROSS_KIND_INDEX}) {
       rgb = parking_stall(p.y, rgb);
     }
-    // Slab joint at tile edges — the same grid read the placed pieces carry. Only
-    // bare ground tiles get it; the carriageway (painted by the ribbon below)
-    // overwrites rgb and stays seamless, as a real road should.
-    let je = min(min(fc.x, 1.0 - fc.x), min(fc.y, 1.0 - fc.y));
-    let jaa = max(fwidth(je), 0.0008);
-    rgb = mix(rgb, rgb * 0.5, (1.0 - smoothstep(0.012, 0.012 + jaa, je)) * 0.8);
+    // Slab joint at tile edges — concrete/sidewalk slabs carry it; ROAD-material
+    // cells skip it so the asphalt reads as one seamless carriageway across tiles
+    // (a real road has no per-tile grid), matching the placed road floor piece.
+    if (hf_tile_mat(kind) < 0.5) {
+      let je = min(min(fc.x, 1.0 - fc.x), min(fc.y, 1.0 - fc.y));
+      let jaa = max(fwidth(je), 0.0008);
+      rgb = mix(rgb, rgb * 0.5, (1.0 - smoothstep(0.012, 0.012 + jaa, je)) * 0.8);
+    }
   }
 
-  let cellEnd = cellBase + rows * cols;
-  let total = i32(arrayLength(&D));
-  if (cellEnd + 5 <= total) {
-    let segN = i32(D[cellEnd]);
-    let cwIdx = i32(D[cellEnd + 1]);
-    let jIdx = i32(D[cellEnd + 2]);
-    let laneIdx = i32(D[cellEnd + 3]);
-    let medIdx = i32(D[cellEnd + 4]);
-    if (segN > 0 && kind != cwIdx) {
-      var bestD = 1e9;
-      var signedD = 0.0;
-      var rExt = 0.0;
-      var lExt = 0.0;
-      var twoWay = 0.0;
-      var phase = 0.0;
-      var along = 0.0;
-      for (var s = 0; s < segN; s = s + 1) {
-        let b0 = cellEnd + 5 + s * 8;
-        let a = vec2f(D[b0], D[b0 + 1]);
-        let b = vec2f(D[b0 + 2], D[b0 + 3]);
-        let ab = b - a;
-        let len2 = dot(ab, ab);
-        var t = 0.0;
-        if (len2 > 0.000001) { t = clamp(dot(p - a, ab) / len2, 0.0, 1.0); }
-        let q = a + ab * t;
-        let d = distance(p, q);
-        if (d < bestD) {
-          bestD = d;
-          let ru = normalize(vec2f(0.0 - ab.y, ab.x));
-          signedD = dot(p - q, ru);
-          rExt = D[b0 + 4];
-          lExt = D[b0 + 5];
-          twoWay = D[b0 + 6];
-          phase = D[b0 + 7];
-          along = t * sqrt(len2);
-        }
-      }
-      // Longitudinal overshoot guard (RIBBONCAP-0610): signedD is only the
-      // PERPENDICULAR component, so a fragment past a segment's endpoint (q
-      // clamped to the end, p-q running ALONG the axis) reads signedD~=0 and
-      // would pass the band test — painting an INFINITE strip past the last
-      // point (the user's "massive road on a tiny paint"). bestD^2 - signedD^2
-      // is the squared longitudinal distance: 0 on the segment interior, >0
-      // once clamped to an endpoint. Cap it to square the polyline ends;
-      // interior joints stay covered by the neighbour (its perpendicular foot
-      // is the nearer point, so it wins selection with zero overshoot).
-      let overshoot2 = bestD * bestD - signedD * signedD;
-      let inside = bestD < 1e8 && signedD < rExt && signedD > (0.0 - lExt) && overshoot2 < 0.25;
-      if (inside) {
-        // The carriageway: real asphalt grain (the piece's fill_road) with the
-        // crisp analytic markings laid on top — not a flat slab.
-        var road = fill_road(fc, fc * 64.0, 0.0, seed);
-        let ad = abs(signedD);
-        if (kind != jIdx) {
-          if (twoWay > 0.5 && abs(ad - 0.17) < 0.07) { road = vec3f(0.76, 0.60, 0.11); }
-          let rel = ad - phase;
-          let k = floor(rel / 3.0 + 0.5);
-          let boundary = phase + k * 3.0;
-          let maxExt = max(rExt, lExt);
-          if (k >= 0.0 && abs(ad - boundary) < 0.06 && boundary < maxExt - 1.0 && (boundary > 0.3 || phase < 0.1)) {
-            if (fract(along / 6.0) < 0.5) { road = vec3f(0.82, 0.84, 0.86); }
-          }
-          let extHere = select(lExt, rExt, signedD >= 0.0);
-          if (extHere - ad < 0.28 && extHere - ad > 0.14) { road = vec3f(0.82, 0.84, 0.86); }
-        }
-        rgb = road;
-      } else {
-        // The curb apron: a road-stamped cell (lane / median / junction) whose
-        // fragment lies outside the analytic band is the stamp staircase at a
-        // curve — render it as concrete shoulder, not blocky asphalt tiles.
-        let isLane = kind >= laneIdx && kind < laneIdx + 4;
-        if (isLane || kind == jIdx || kind == medIdx) {
-          rgb = fill_concrete(fc, fc * 64.0, 0.0, seed);
-        }
-      }
-    }
+  // Per-tile road markings (PERTILEROAD-0813): the dashed-yellow centerline is a
+  // ONE-TILE material on the 'median' cell — no analytic ribbon, no bake. The lane
+  // and road cells already wear their asphalt base from tileMaterial above (their
+  // surface material is 'road' → fill_road), so the road reads like the placed
+  // road floor piece: crisp asphalt grain + a dashed yellow line down the centre,
+  // synthesised at full shader resolution. (The old analytic ribbon — a wider-than-
+  // one-tile shader — was removed: it never fired on the 3D mesh, so its curb-apron
+  // fallback concreted every road cell, and a multi-tile road shader violates the
+  // material-is-one-tile rule anyway.)
+  if (kind == ${HF_MEDIAN_KIND}) {
+    rgb = hf_median_marking(cellBase, cols, rows, cx, cy, fc, p, rgb);
   }
   return rgb;
 }

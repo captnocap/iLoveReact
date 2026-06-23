@@ -1203,9 +1203,224 @@
     return m.build();
   }
 
+  // runtime/geometries/GrassBlade.ts
+  var GRASS_BLADE_DEFAULTS = { blades: 3, width: 0.14, tipTaper: 0.25 };
+  function generate13(p) {
+    const g = mesh();
+    const halfW = p.width * 0.5;
+    const tipHalfW = halfW * p.tipTaper;
+    const count = Math.max(1, Math.floor(p.blades));
+    for (let b = 0; b < count; b += 1) {
+      const theta = (b + 0.5) / count * Math.PI;
+      const dx = Math.cos(theta);
+      const dz = Math.sin(theta);
+      const n = [dz, 0, -dx];
+      const nBack = [-dz, 0, dx];
+      const bl = [-dx * halfW, 0, -dz * halfW];
+      const br = [dx * halfW, 0, dz * halfW];
+      const tr = [dx * tipHalfW, 1, dz * tipHalfW];
+      const tl = [-dx * tipHalfW, 1, -dz * tipHalfW];
+      g.tri(bl, n, [0, 0], br, n, [1, 0], tr, n, [1, 1]);
+      g.tri(bl, n, [0, 0], tr, n, [1, 1], tl, n, [0, 1]);
+      g.tri(bl, nBack, [0, 0], tr, nBack, [1, 1], br, nBack, [1, 0]);
+      g.tri(bl, nBack, [0, 0], tl, nBack, [0, 1], tr, nBack, [1, 1]);
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/BushClump.ts
+  var BUSH_CLUMP_DEFAULTS = { cards: 5, width: 0.5, tipTaper: 0.3, splay: 0.5 };
+  function generate14(p) {
+    const g = mesh();
+    const halfW = p.width * 0.5;
+    const tipHalfW = halfW * p.tipTaper;
+    const count = Math.max(1, Math.floor(p.cards));
+    for (let b = 0; b < count; b += 1) {
+      const theta = (b + 0.5) / count * Math.PI * 2;
+      const dx = Math.cos(theta);
+      const dz = Math.sin(theta);
+      const perpX = -dz;
+      const perpZ = dx;
+      const n = [dx, 0.6, dz];
+      const nBack = [-dx, 0.6, -dz];
+      const tipX = dx * p.splay;
+      const tipZ = dz * p.splay;
+      const bl = [-perpX * halfW, 0, -perpZ * halfW];
+      const br = [perpX * halfW, 0, perpZ * halfW];
+      const tr = [tipX + perpX * tipHalfW, 1, tipZ + perpZ * tipHalfW];
+      const tl = [tipX - perpX * tipHalfW, 1, tipZ - perpZ * tipHalfW];
+      g.tri(bl, n, [0, 0], br, n, [1, 0], tr, n, [1, 1]);
+      g.tri(bl, n, [0, 0], tr, n, [1, 1], tl, n, [0, 1]);
+      g.tri(bl, nBack, [0, 0], tr, nBack, [1, 1], br, nBack, [1, 0]);
+      g.tri(bl, nBack, [0, 0], tl, nBack, [0, 1], tr, nBack, [1, 1]);
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/FlowerHead.ts
+  var FLOWER_HEAD_DEFAULTS = { cards: 3, radius: 1 };
+  function generate15(p) {
+    const g = mesh();
+    const count = Math.max(1, Math.floor(p.cards));
+    const r = Math.max(0.01, p.radius);
+    const u0 = 10, u1 = 11, v0 = 10, v1 = 11;
+    for (let b = 0; b < count; b += 1) {
+      const theta = (b + 0.5) / count * Math.PI;
+      const dx = Math.cos(theta);
+      const dz = Math.sin(theta);
+      const n = [dz, 0, -dx];
+      const nb = [-dz, 0, dx];
+      const bl = [-dx * r, -r, -dz * r];
+      const br = [dx * r, -r, dz * r];
+      const tr = [dx * r, r, dz * r];
+      const tl = [-dx * r, r, -dz * r];
+      g.tri(bl, n, [u0, v0], br, n, [u1, v0], tr, n, [u1, v1]);
+      g.tri(bl, n, [u0, v0], tr, n, [u1, v1], tl, n, [u0, v1]);
+      g.tri(bl, nb, [u0, v0], tr, nb, [u1, v1], br, nb, [u1, v0]);
+      g.tri(bl, nb, [u0, v0], tl, nb, [u0, v1], tr, nb, [u1, v1]);
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/Frond.ts
+  var FROND_DEFAULTS = { style: "feathered", width: 0.5, tipTaper: 0.1, arc: 0.8, sag: 0.18, segments: 12 };
+  var STYLE_OFFSET = { feathered: 0, broad: 10 };
+  function generate16(p) {
+    const g = mesh();
+    const segs = Math.max(2, Math.floor(p.segments));
+    const uOff = STYLE_OFFSET[p.style] ?? 0;
+    const spine = (t) => ({
+      y: t - p.sag * t * t,
+      z: p.arc * t * t,
+      halfW: p.width * 0.5 * (1 - (1 - p.tipTaper) * t)
+    });
+    for (let s = 0; s < segs; s += 1) {
+      const t0 = s / segs;
+      const t1 = (s + 1) / segs;
+      const a = spine(t0);
+      const b = spine(t1);
+      const slope = normalize(0, b.y - a.y, b.z - a.z);
+      const nf = normalize(0, -slope[2], slope[1]);
+      const nb = [-nf[0], -nf[1], -nf[2]];
+      const bl = [-a.halfW, a.y, a.z];
+      const br = [a.halfW, a.y, a.z];
+      const tr = [b.halfW, b.y, b.z];
+      const tl = [-b.halfW, b.y, b.z];
+      const uL = uOff + 0;
+      const uR = uOff + 1;
+      g.tri(bl, nf, [uL, t0], br, nf, [uR, t0], tr, nf, [uR, t1]);
+      g.tri(bl, nf, [uL, t0], tr, nf, [uR, t1], tl, nf, [uL, t1]);
+      g.tri(bl, nb, [uL, t0], tr, nb, [uR, t1], br, nb, [uR, t0]);
+      g.tri(bl, nb, [uL, t0], tl, nb, [uL, t1], tr, nb, [uR, t1]);
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/PalmTrunk.ts
+  var PALM_TRUNK_DEFAULTS = {
+    baseRadius: 0.13,
+    topRadius: 0.08,
+    curve: 0.16,
+    rings: 11,
+    ringDepth: 0.12,
+    sides: 10,
+    segments: 28
+  };
+  var TAU2 = Math.PI * 2;
+  function generate17(p) {
+    const g = mesh();
+    const segs = Math.max(2, Math.floor(p.segments));
+    const sides = Math.max(3, Math.floor(p.sides));
+    const at = (t) => {
+      const taper = p.baseRadius + (p.topRadius - p.baseRadius) * t;
+      const bulge = 1 + 0.18 * Math.exp(-((t - 0.12) * (t - 0.12)) / 0.01);
+      const ring = 1 + p.ringDepth * Math.cos(t * p.rings * TAU2);
+      const r = taper * bulge * ring;
+      const cx = p.curve * (t * t * 0.7 + Math.sin(t * 2.8) * 0.05);
+      return { r, cx };
+    };
+    const ringVerts2 = (t) => {
+      const { r, cx } = at(t);
+      const out2 = [];
+      for (let s = 0; s <= sides; s += 1) {
+        const a = s / sides * TAU2;
+        const dx = Math.cos(a);
+        const dz = Math.sin(a);
+        out2.push({ pos: [cx + dx * r, t, dz * r], nrm: normalize(dx, 0.15, dz), u: s / sides });
+      }
+      return out2;
+    };
+    let lower = ringVerts2(0);
+    for (let i = 1; i <= segs; i += 1) {
+      const t = i / segs;
+      const upper = ringVerts2(t);
+      const v0 = (i - 1) / segs;
+      const v1 = t;
+      for (let s = 0; s < sides; s += 1) {
+        const bl = lower[s], br = lower[s + 1], tr = upper[s + 1], tl = upper[s];
+        g.tri(bl.pos, bl.nrm, [bl.u, v0], tl.pos, tl.nrm, [tl.u, v1], tr.pos, tr.nrm, [tr.u, v1]);
+        g.tri(bl.pos, bl.nrm, [bl.u, v0], tr.pos, tr.nrm, [tr.u, v1], br.pos, br.nrm, [br.u, v0]);
+      }
+      lower = upper;
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/PathTube.ts
+  var PATH_TUBE_DEFAULTS = {
+    // a gently S-curved default trunk spine, base→tip
+    spine: [0, 0, 0.02, 0.25, 0.08, 0.5, 0.06, 0.75, 0.12, 1],
+    baseRadius: 0.12,
+    tipRadius: 0.07,
+    sides: 10
+  };
+  var TAU3 = Math.PI * 2;
+  function generate18(p) {
+    const g = mesh();
+    const sp = p.spine;
+    const n = Math.floor(sp.length / 2);
+    if (n < 2) return g.build();
+    const sides = Math.max(3, Math.floor(p.sides));
+    const tangent = (i) => {
+      const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1);
+      const tx = sp[b * 2] - sp[a * 2];
+      const ty = sp[b * 2 + 1] - sp[a * 2 + 1];
+      const L = Math.hypot(tx, ty) || 1;
+      return [tx / L, ty / L];
+    };
+    const ring = (i) => {
+      const cx = sp[i * 2];
+      const cy = sp[i * 2 + 1];
+      const t = i / (n - 1);
+      const r = p.baseRadius + (p.tipRadius - p.baseRadius) * t;
+      const [tx, ty] = tangent(i);
+      const nx = -ty, ny = tx;
+      const out2 = [];
+      for (let s = 0; s <= sides; s += 1) {
+        const ang = s / sides * TAU3;
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        out2.push({ pos: [cx + r * ca * nx, cy + r * ca * ny, r * sa], nrm: normalize(ca * nx, ca * ny, sa), u: s / sides });
+      }
+      return out2;
+    };
+    let lower = ring(0);
+    for (let i = 1; i < n; i += 1) {
+      const upper = ring(i);
+      const v0 = (i - 1) / (n - 1);
+      const v1 = i / (n - 1);
+      for (let s = 0; s < sides; s += 1) {
+        const bl = lower[s], br = lower[s + 1], tr = upper[s + 1], tl = upper[s];
+        g.tri(bl.pos, bl.nrm, [bl.u, v0], br.pos, br.nrm, [br.u, v0], tr.pos, tr.nrm, [tr.u, v1]);
+        g.tri(bl.pos, bl.nrm, [bl.u, v0], tr.pos, tr.nrm, [tr.u, v1], tl.pos, tl.nrm, [tl.u, v1]);
+      }
+      lower = upper;
+    }
+    return g.build();
+  }
+
   // runtime/geometries/index.ts
-  function def(id, generate13, defaults) {
-    return { id, generate: generate13, defaults };
+  function def(id, generate19, defaults) {
+    return { id, generate: generate19, defaults };
   }
   var Box = def("Box", generate, BOX_DEFAULTS);
   var Sphere = def("Sphere", generate2, SPHERE_DEFAULTS);
@@ -1219,6 +1434,12 @@
   var Heightfield = { ...def("Heightfield", generate10, HEIGHTFIELD_DEFAULTS), hostKind: "heightfield" };
   var Humanoid = def("Humanoid", generate11, HUMANOID_DEFAULTS);
   var VoxelMesh = def("VoxelMesh", generate12, VOXEL_MESH_DEFAULTS);
+  var GrassBlade = def("GrassBlade", generate13, GRASS_BLADE_DEFAULTS);
+  var BushClump = def("BushClump", generate14, BUSH_CLUMP_DEFAULTS);
+  var FlowerHead = def("FlowerHead", generate15, FLOWER_HEAD_DEFAULTS);
+  var Frond = def("Frond", generate16, FROND_DEFAULTS);
+  var PalmTrunk = def("PalmTrunk", generate17, PALM_TRUNK_DEFAULTS);
+  var PathTube = def("PathTube", generate18, PATH_TUBE_DEFAULTS);
   var GEOMETRIES = {
     Box,
     Sphere,
@@ -1231,7 +1452,10 @@
     Torus,
     Heightfield,
     Humanoid,
-    VoxelMesh
+    VoxelMesh,
+    GrassBlade,
+    BushClump,
+    FlowerHead
   };
 
   // runtime/geometries/_baked.generated.ts
@@ -1652,8 +1876,13 @@
     if (iconNames.length === 0) {
       return fail2("no icons discovered in runtime/icons/icons.ts");
     }
-    if (opts.ifNeeded && atlasIsCurrent(iconsTs, outZig, outPgmHex, outTs, iconNames)) {
-      log(`atlas current (${iconNames.length} icons)`, opts);
+    const glyphs = loadPaintGlyphs(root);
+    const glyphNames = glyphs.map((g) => g.name);
+    const paintIconsTs = `${root}/runtime/paint/icons.ts`;
+    const paintModelTs = `${root}/runtime/paint/model.ts`;
+    const expectedNames = [...iconNames, ...glyphNames];
+    if (opts.ifNeeded && atlasIsCurrent([iconsTs, paintIconsTs, paintModelTs], outZig, outPgmHex, outTs, expectedNames)) {
+      log(`atlas current (${expectedNames.length} icons)`, opts);
       return 0;
     }
     const polylines = {};
@@ -1667,18 +1896,22 @@
       polylines[name] = data;
     }
     if (missing.length) return fail2(`missing icons in icons.ts: ${missing.join(", ")}`);
+    const items = [
+      ...iconNames.map((name) => ({ name, raster: () => rasterizePolylines(polylines[name]) })),
+      ...glyphs.map((g) => ({ name: g.name, raster: () => rasterizeGlyph(g) }))
+    ];
     const cols = ATLAS_COLS;
-    const rows = Math.ceil(iconNames.length / cols);
+    const rows = Math.ceil(items.length / cols);
     const cellPx = TILE + PADDING * 2;
     const atlasW = cols * cellPx;
     const atlasH = rows * cellPx;
     const atlas = new Uint8Array(atlasW * atlasH);
     const meta = [];
-    log(`baking ${iconNames.length} icons into ${atlasW}x${atlasH} R8 atlas (tile ${TILE}, hires ${HIRES})`, opts);
-    for (let i = 0; i < iconNames.length; i++) {
-      const name = iconNames[i];
+    log(`baking ${items.length} icons (${iconNames.length} lucide + ${glyphs.length} paint) into ${atlasW}x${atlasH} R8 atlas (tile ${TILE}, hires ${HIRES})`, opts);
+    for (let i = 0; i < items.length; i++) {
+      const { name, raster } = items[i];
       const t0 = Date.now();
-      const mask = rasterizePolylines(polylines[name]);
+      const mask = raster();
       const sdf = distanceTransform(mask);
       const hi = encodeSdf(sdf);
       const tile = downsample(hi);
@@ -1692,7 +1925,7 @@
         }
       }
       meta.push({ name, u, v, w: TILE, h: TILE });
-      log(`  [${i + 1}/${iconNames.length}] ${name} (${Date.now() - t0}ms)`, opts);
+      log(`  [${i + 1}/${items.length}] ${name} (${Date.now() - t0}ms)`, opts);
     }
     fsWrite(outZig, emitZig(atlas, meta, atlasW, atlasH));
     log(`wrote ${outZig} (${meta.length} icons + ${atlas.length}-byte atlas inlined)`, opts);
@@ -1717,19 +1950,100 @@
     }
     return names;
   }
-  function atlasIsCurrent(iconsTs, outZig, outPgmHex, outTs, iconNames) {
-    const source = tryFsStat(iconsTs);
+  function atlasIsCurrent(sources, outZig, outPgmHex, outTs, expectedNames) {
     const zig = tryFsStat(outZig);
     const pgm = tryFsStat(outPgmHex);
     const ts = tryFsStat(outTs);
-    if (!source || !zig || !pgm || !ts) return false;
-    if (zig.mtimeMs < source.mtimeMs || pgm.mtimeMs < source.mtimeMs || ts.mtimeMs < source.mtimeMs) return false;
+    if (!zig || !pgm || !ts) return false;
+    let newest = 0;
+    for (const s of sources) {
+      const st = tryFsStat(s);
+      if (!st) return false;
+      newest = Math.max(newest, st.mtimeMs);
+    }
+    if (zig.mtimeMs < newest || pgm.mtimeMs < newest || ts.mtimeMs < newest) return false;
     const baked = readBakedNames(outTs);
-    if (baked.size !== iconNames.length) return false;
-    for (const name of iconNames) {
+    if (baked.size !== expectedNames.length) return false;
+    for (const name of expectedNames) {
       if (!baked.has(name)) return false;
     }
     return true;
+  }
+  function loadPaintGlyphs(root) {
+    const entry = `${root}/scripts/paint-glyph-source.ts`;
+    if (!tryFsStat(entry)) {
+      err("[bake-icons] scripts/paint-glyph-source.ts missing \u2014 skipping paint glyphs");
+      return [];
+    }
+    const bundled = spawnSync(`${root}/tools/esbuild`, [
+      "--bundle",
+      "--format=cjs",
+      "--platform=neutral",
+      "--target=es2022",
+      "--log-level=warning",
+      entry
+    ]);
+    if (bundled.stderr) __writeStderr(bundled.stderr);
+    if (bundled.code !== 0) throw new Error(`[bake-icons] esbuild failed bundling paint glyphs: ${bundled.code}`);
+    const moduleObj = { exports: {} };
+    new Function("module", "exports", bundled.stdout)(moduleObj, moduleObj.exports);
+    const glyphs = moduleObj.exports.default || moduleObj.exports;
+    if (!Array.isArray(glyphs)) throw new Error("[bake-icons] paint-glyph-source did not default-export an array");
+    return glyphs;
+  }
+  function fillPolygon(mask, flat, scale) {
+    const n = flat.length / 2;
+    if (n < 3) return;
+    const xs = new Array(n), ys = new Array(n);
+    let minY = HIRES, maxY = 0;
+    for (let i = 0; i < n; i++) {
+      xs[i] = flat[i * 2] * scale;
+      ys[i] = flat[i * 2 + 1] * scale;
+      minY = Math.min(minY, ys[i]);
+      maxY = Math.max(maxY, ys[i]);
+    }
+    const y0 = Math.max(0, Math.floor(minY));
+    const y1 = Math.min(HIRES - 1, Math.ceil(maxY));
+    for (let y = y0; y <= y1; y++) {
+      const sy = y + 0.5;
+      const xings = [];
+      for (let i = 0, j = n - 1; i < n; j = i++) {
+        const yi = ys[i], yj = ys[j];
+        if (yi <= sy && yj > sy || yj <= sy && yi > sy) {
+          xings.push(xs[i] + (sy - yi) / (yj - yi) * (xs[j] - xs[i]));
+        }
+      }
+      xings.sort((a, b) => a - b);
+      for (let k = 0; k + 1 < xings.length; k += 2) {
+        const xa = Math.max(0, Math.ceil(xings[k] - 0.5));
+        const xb = Math.min(HIRES - 1, Math.floor(xings[k + 1] - 0.5));
+        for (let x = xa; x <= xb; x++) mask[y * HIRES + x] = 1;
+      }
+    }
+  }
+  function rasterizeGlyph(glyph) {
+    const mask = new Uint8Array(HIRES * HIRES);
+    const scale = HIRES / VIEWBOX;
+    const r = STROKE_HIRES * 0.5;
+    for (const fill of glyph.fills) fillPolygon(mask, fill, scale);
+    for (const stroke of glyph.strokes) {
+      const n = stroke.length / 2;
+      if (n < 1) continue;
+      plotDisc(mask, HIRES, HIRES, stroke[0] * scale, stroke[1] * scale, r);
+      for (let i = 1; i < n; i++) {
+        plotSegment(
+          mask,
+          HIRES,
+          HIRES,
+          stroke[(i - 1) * 2] * scale,
+          stroke[(i - 1) * 2 + 1] * scale,
+          stroke[i * 2] * scale,
+          stroke[i * 2 + 1] * scale,
+          r
+        );
+      }
+    }
+    return mask;
   }
   function readBakedNames(outTs) {
     const raw = fsRead(outTs);
@@ -4973,7 +5287,12 @@ ${digest.stderr || digest.stdout}`);
 set -eu
 cd "$1"
 {
-  find framework -type f -print 2>/dev/null || true
+  # framework/testing/** are zig 'test' modules pulled in ONLY by build.zig's
+  # test-* steps (b.addTest) - never by the 'app' step that builds the dev
+  # binary. Hashing them made any test-file touch (a test run, a git checkout,
+  # another worker editing tests) force a needless full dev rebuild on every
+  # start. Prune them: the fingerprint must reflect only the dev binary's inputs.
+  find framework -type d -name testing -prune -o -type f -print 2>/dev/null || true
   printf '%s\\n' build.zig v8_app.zig v8_cli.zig v8_hello.zig world_loader.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig
 } | LC_ALL=C sort -u | while IFS= read -r f; do
   [ -f "$f" ] || continue
@@ -5889,50 +6208,34 @@ if (failures.length > 0) {
     out("[game] no-JS proof: loader binary carries 0 V8 symbols, 0 bundle markers, 0 V8 libs");
     return true;
   }
-  function installGameFileEnvelope(root, tapeTransport, gamefilePath) {
-    let tapeBase64 = tapeTransport;
-    let assets = [];
-    if (tapeTransport.startsWith("{")) {
-      try {
-        const envelope = JSON.parse(tapeTransport);
-        tapeBase64 = String(envelope.gamefile ?? "");
-        assets = Array.isArray(envelope.assets) ? envelope.assets : [];
-      } catch (error) {
-        err(`[game] bake FAILED: malformed game-file envelope: ${String(error?.message ?? error)}`);
-        return false;
-      }
-    }
-    if (!tapeBase64) {
-      err("[game] bake FAILED: game-file envelope carried no game-file bytes");
+  function installGameFileManifest(root, tapeTransport, gamefilePath) {
+    let manifest2;
+    try {
+      manifest2 = JSON.parse(tapeTransport);
+    } catch (error) {
+      err(`[game] bake FAILED: malformed game-file manifest: ${String(error?.message ?? error)}`);
       return false;
     }
     const absGamefile = `${root}/${gamefilePath}`;
-    fsMkdir(dirOf(absGamefile));
-    const write = spawnSync("sh", ["-c", `base64 -d > ${shellQuote2(absGamefile)}`], tapeBase64);
-    if (write.stderr.trim()) err(write.stderr.trim());
-    if (write.code !== 0) {
-      err("[game] bake FAILED: could not write raw game-file bytes");
+    const stat = tryFsStat(absGamefile);
+    if (!stat || !stat.size) {
+      err(`[game] bake FAILED: game-file not written to ${gamefilePath}`);
       return false;
     }
-    const storeDir = `${root}/${CONTENT_STORE_DIR}`;
-    fsMkdir(storeDir);
+    const assets = Array.isArray(manifest2.assets) ? manifest2.assets : [];
     for (const asset of assets) {
-      if (!/^[0-9a-f]{64}$/.test(asset.hash) || !asset.base64) {
-        err("[game] bake FAILED: malformed content-addressed asset envelope");
+      if (!/^[0-9a-f]{64}$/.test(asset.hash)) {
+        err("[game] bake FAILED: manifest asset hash is not a sha256 hex");
         return false;
       }
-      const assetPath = `${storeDir}/${asset.hash}`;
-      const assetWrite = spawnSync("sh", ["-c", `base64 -d > ${shellQuote2(assetPath)}`], asset.base64);
-      if (assetWrite.stderr.trim()) err(assetWrite.stderr.trim());
-      if (assetWrite.code !== 0) {
-        err(`[game] bake FAILED: could not write content-addressed asset ${asset.hash}`);
+      const assetStat = tryFsStat(`${root}/${CONTENT_STORE_DIR}/${asset.hash}`);
+      if (!assetStat || !assetStat.size) {
+        err(`[game] bake FAILED: content-addressed asset ${asset.hash} missing from the store`);
         return false;
       }
     }
-    const stat = tryFsStat(absGamefile);
-    const rawBytes = stat?.size ?? 0;
     const assetBytes = assets.reduce((n, asset) => n + (asset.bytes ?? 0), 0);
-    out(`[game] wrote raw game-file ${gamefilePath} (${rawBytes} bytes; b64 transport was ${tapeBase64.length} bytes; installed ${assets.length} asset(s), ${assetBytes} bytes)`);
+    out(`[game] wrote raw game-file ${gamefilePath} (${stat.size} bytes, binary; installed ${assets.length} asset(s), ${assetBytes} bytes)`);
     return true;
   }
   function bakeRealGameFile(root) {
@@ -5940,21 +6243,33 @@ if (failures.length > 0) {
       err("[game] bake FAILED: bakeGameFile does not bundle");
       return false;
     }
-    const gen = spawnSync(`${root}/tools/v8cli`, [`${root}/${BAKE_BUNDLE}`]);
+    const gen = spawnSync(`${root}/tools/v8cli`, [
+      `${root}/${BAKE_BUNDLE}`,
+      "--gamefile",
+      `${root}/${BAKED_GAMEFILE}`,
+      "--store",
+      `${root}/${CONTENT_STORE_DIR}`
+    ]);
     if (gen.stderr.trim()) err(gen.stderr.trim());
     const tapeTransport = gen.stdout.trim();
     if (gen.code !== 0 || !tapeTransport) {
       err("[game] bake FAILED: no game-file produced from the authored world");
       return false;
     }
-    return installGameFileEnvelope(root, tapeTransport, BAKED_GAMEFILE);
+    return installGameFileManifest(root, tapeTransport, BAKED_GAMEFILE);
   }
   function bakeMassiveGameFile(root, blocks) {
     if (!bundle(root, MASSIVE_BAKE_ENTRY, MASSIVE_BAKE_BUNDLE)) {
       err("[game] massive bake FAILED: bakeMassiveGameFile does not bundle");
       return false;
     }
-    const args = [`${root}/${MASSIVE_BAKE_BUNDLE}`];
+    const args = [
+      `${root}/${MASSIVE_BAKE_BUNDLE}`,
+      "--gamefile",
+      `${root}/${MASSIVE_GAMEFILE}`,
+      "--store",
+      `${root}/${CONTENT_STORE_DIR}`
+    ];
     if (blocks && Number.isFinite(blocks)) args.push("--blocks", String(blocks));
     const gen = spawnSync(`${root}/tools/v8cli`, args);
     if (gen.stderr.trim()) err(gen.stderr.trim());
@@ -5963,7 +6278,7 @@ if (failures.length > 0) {
       err("[game] massive bake FAILED: no game-file produced from the procedural city");
       return false;
     }
-    return installGameFileEnvelope(root, tapeTransport, MASSIVE_GAMEFILE);
+    return installGameFileManifest(root, tapeTransport, MASSIVE_GAMEFILE);
   }
   function resolveGameFile(root, choice = {}) {
     if (choice.massive) {
@@ -6003,9 +6318,6 @@ if (failures.length > 0) {
   function dirOf(path) {
     const i = path.lastIndexOf("/");
     return i <= 0 ? "/" : path.slice(0, i);
-  }
-  function shellQuote2(value) {
-    return `'${value.replace(/'/g, `'\\''`)}'`;
   }
   function parseChoice(argv) {
     const choice = {};
@@ -7064,7 +7376,7 @@ ${IMPORTS_MARKER}`).replace(
     fsWrite(`${packageDir}/manifest.json`, `${JSON.stringify(emitted.manifest, null, 2)}
 `);
     const mapPath = `${packageDir}/maps/city.map`;
-    const mapWrite = spawnSync("sh", ["-c", `base64 -d > ${shellQuote3(mapPath)}`], emitted.mapBase64);
+    const mapWrite = spawnSync("sh", ["-c", `base64 -d > ${shellQuote2(mapPath)}`], emitted.mapBase64);
     writeSpawnOutput3(mapWrite);
     if (mapWrite.code !== 0) return mapWrite.code || 1;
     const bundleOut = `${packageDir}/bundle.js`;
@@ -7088,7 +7400,7 @@ ${IMPORTS_MARKER}`).replace(
     if (result.stdout) __writeStdout(result.stdout);
     if (result.stderr) __writeStderr(result.stderr);
   }
-  function shellQuote3(value) {
+  function shellQuote2(value) {
     return `'${value.replace(/'/g, `'\\''`)}'`;
   }
 
@@ -7801,7 +8113,8 @@ ${IMPORTS_MARKER}`).replace(
       vterm: hasBuildFlag(flags, "has-terminal"),
       doom: hasBuildFlag(flags, "has-doom"),
       pathing: hasBuildFlag(flags, "has-pathing"),
-      compiled_world: hasBuildFlag(flags, "has-compiled-world")
+      compiled_world: hasBuildFlag(flags, "has-compiled-world"),
+      imageops: hasBuildFlag(flags, "has-imageops")
     };
     let mismatch = false;
     for (const [name, want] of Object.entries(expected)) {
@@ -8128,13 +8441,13 @@ __ARCHIVE__
     const env = [
       "ZIGOS_HEADLESS=1",
       "ZIGOS_SCREENSHOT=1",
-      `ZIGOS_SCREENSHOT_OUTPUT=${shellQuote4(png)}`,
+      `ZIGOS_SCREENSHOT_OUTPUT=${shellQuote3(png)}`,
       `ZIGOS_SCREENSHOT_FRAMES=${frames}`,
-      ...route ? [`RJIT_BOOT_ROUTE=${shellQuote4(route)}`] : []
+      ...route ? [`RJIT_BOOT_ROUTE=${shellQuote3(route)}`] : []
     ].join(" ");
     out(`[shot] booting ${name} hidden${route ? ` at ${route}` : ""}, capturing after ${frames} frames...`);
-    const argText = binaryArgs.map(shellQuote4).join(" ");
-    const cmd = `${env} timeout -s KILL ${timeoutS} ${shellQuote4(binary)} ${argText}`;
+    const argText = binaryArgs.map(shellQuote3).join(" ");
+    const cmd = `${env} timeout -s KILL ${timeoutS} ${shellQuote3(binary)} ${argText}`;
     out(`[shot] command: ${cmd}`);
     const result = spawnSync("sh", ["-c", `${cmd} 2>&1 | grep -E "SCREENSHOT|capture|RJIT_PLAYER_ARGV" || true`]);
     if (result.stdout) __writeStdout(result.stdout);
@@ -8158,7 +8471,7 @@ __ARCHIVE__
     return fsStat(binary).mtimeMs > fsStat(cartEntry).mtimeMs;
   }
   function pngDims(path) {
-    const dump = spawnSync("sh", ["-c", `head -c 24 ${shellQuote4(path)} | od -An -v -tu1`]);
+    const dump = spawnSync("sh", ["-c", `head -c 24 ${shellQuote3(path)} | od -An -v -tu1`]);
     const bytes = dump.stdout.trim().split(/\s+/).map((token) => Number(token));
     if (bytes.length < 24 || bytes.some((value) => !Number.isFinite(value))) return null;
     const magic = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -8177,7 +8490,7 @@ __ARCHIVE__
     const idx = path.lastIndexOf("/");
     return idx <= 0 ? "/" : path.slice(0, idx);
   }
-  function shellQuote4(value) {
+  function shellQuote3(value) {
     return `'${value.replace(/'/g, `'\\''`)}'`;
   }
   function usage5(message) {

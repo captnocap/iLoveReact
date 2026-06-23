@@ -1,3 +1,4 @@
+import { type PropKindDefinition } from '../../game/kinds/props';
 import { box, cylinder8, hx, WOOD, WOOD_DARK, type Color, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
@@ -22,3 +23,14 @@ export function liquorShelfParts(): PropPartSpec[] {
   });
   return parts;
 }
+
+export const liquorShelfDef: PropKindDefinition = {
+  kind: 'liquorShelf',
+  label: 'Liquor Shelf',
+  solid: true,
+  footprintRadiusMeters: 0.9,
+  heightMeters: 2.0,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'kitchen', capacity: 5, spawnFillChance: 0.7, searchSeconds: 2.5, access: 'open' },
+};

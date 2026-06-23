@@ -642,6 +642,26 @@ export function flushToHost(): void {
 // than hiding it behind a crash.
 const OVERSIZE_FLUSH_WARN_BYTES = 50_000_000;
 
+// [flush-bytes] data-transfer meter (req_1639): how many bytes actually cross to the
+// host. The user expects app load to move TENS of MB, not hundreds — this counts the
+// real serialized payload so we can see the running total and, on a fat flush, WHICH
+// op (CREATE/UPDATE/…) carries the weight (mesh verts / instance arrays / atlases).
+let g_totalFlushBytes = 0;
+let g_flushCount = 0;
+const FLUSH_LOG_MIN_BYTES = 4096; // skip the tiny per-frame UPDATE batches
+const FLUSH_BREAKDOWN_MIN_BYTES = 65536; // only re-stringify for an op breakdown when it's fat
+
+function opByteBreakdown(cmds: Command[]): string {
+  const by = new Map<string, { n: number; bytes: number }>();
+  for (const c of cmds) {
+    let len = 0;
+    try { len = JSON.stringify(c).length; } catch { len = 0; }
+    const e = by.get(c.op) ?? { n: 0, bytes: 0 };
+    e.n += 1; e.bytes += len; by.set(c.op, e);
+  }
+  return [...by.entries()].sort((a, b) => b[1].bytes - a[1].bytes).map(([op, e]) => `${op}=${e.n}/${(e.bytes / 1024).toFixed(0)}KB`).join(' ');
+}
+
 function flushCoalesced(cmds: Command[]): void {
   let payload: string | null = null;
   try { payload = JSON.stringify(cmds); } catch { payload = null; }
@@ -650,6 +670,15 @@ function flushCoalesced(cmds: Command[]): void {
       const gh: any = globalThis as any;
       if (typeof gh.__hostLog === 'function') {
         try { gh.__hostLog(0, `[flush-oversize] ${cmds.length} cmd(s) → ${payload.length} bytes. biggest: ${describeBiggestCommands(cmds, 3)}`); } catch {}
+      }
+    }
+    g_totalFlushBytes += payload.length;
+    g_flushCount += 1;
+    if (payload.length > FLUSH_LOG_MIN_BYTES) {
+      const gh: any = globalThis as any;
+      if (typeof gh.__hostLog === 'function') {
+        const big = payload.length > FLUSH_BREAKDOWN_MIN_BYTES;
+        try { gh.__hostLog(0, `[flush-bytes] +${(payload.length / 1024).toFixed(0)}KB → total ${(g_totalFlushBytes / 1024 / 1024).toFixed(1)}MB (#${g_flushCount}, ${cmds.length} cmd)${big ? ` :: ${opByteBreakdown(cmds)}` : ''}`); } catch {}
       }
     }
     (transportFlush as unknown as (p: string) => void)(payload);

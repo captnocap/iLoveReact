@@ -24,11 +24,11 @@ import { sceneEnvironmentFromSky } from './sceneEnv';
 import { buildHmscSky } from '../render3d/sky';
 import { deserializeMap } from '../mapStore';
 import { floorsFromEditorWorld, type ChunkFloor } from '../chunkFloor';
-import { bytesToBase64 } from '@reactjit/workspace';
+import { emitBakedGameFile } from './emitGameFile';
 import { writeGameFile } from '@reactjit/workspace/gamefile';
 import { sha256Hex } from '@reactjit/workspace/sha256';
 import { lastPointerPath, sessionPathFor } from '@reactjit/workspace';
-import { readFile } from '@reactjit/hooks/fs';
+import { readFile, writeFile as fsWriteDiag } from '@reactjit/hooks/fs';
 import { openStreamStore } from '../data';
 import { editorChannel } from '../editors/store';
 import { editorTunables, tuningStream } from '../editors/tunables';
@@ -51,6 +51,25 @@ const warn = (msg: string): void => {
   // severity-warn so it reaches the bake's stderr (the CLI captures it).
   (globalThis as any).console?.warn?.(msg);
 };
+
+// ── BAKE MEMORY PROBE (req_1585) ──────────────────────────────────────────────
+// The bake OOM'd (V8 JS heap ~1.4GB) after the user added chunks. To localize
+// WHERE the bytes blow up rather than guess, log RSS (real process memory) at
+// every stage by reading /proc/self/status — VmRSS is current, VmHWM is the
+// high-water mark. Pure diagnostic; reads a virtual file, allocates nothing big.
+function readProcKb(field: string): number {
+  try {
+    const status = readFile('/proc/self/status') ?? '';
+    const m = status.match(new RegExp(`${field}:\\s*(\\d+)\\s*kB`));
+    return m ? Number(m[1]) : -1;
+  } catch {
+    return -1;
+  }
+}
+const mb = (kb: number): string => (kb < 0 ? '?' : `${(kb / 1024).toFixed(0)}MB`);
+function memStage(label: string): void {
+  warn(`[bake-mem] ${label.padEnd(28)} rss=${mb(readProcKb('VmRSS'))} peak=${mb(readProcKb('VmHWM'))}`);
+}
 
 /** The active map stem — what /test shows (sessions/_last.txt). */
 function activeStem(): string | null {
@@ -134,8 +153,26 @@ try {
 
 const stem = activeStem();
 const state = loadEditorWorld();
+// TEMP DIAG (req_1505): record what the BOOT KEY actually carries when the bake
+// reads it — compared with the live-previewWorld diag, this localizes whether the
+// auto-generated signs are lost in the write/read (clobber) or never present.
+try {
+  const dp: any[] = (state as any).world?.props ?? [];
+  const signKinds = ['streetSign', 'stopSign', 'trafficLight', 'streetLight'];
+  const signs = dp.filter((p) => signKinds.includes(p.kind));
+  fsWriteDiag('/tmp/rjit-bake-diag.json', JSON.stringify({
+    when: 'bakeGameFile(loadEditorWorld boot key)',
+    stem,
+    props: dp.length,
+    signs: signs.length,
+    signTexts: [...new Set(signs.map((p) => p.text).filter(Boolean))],
+    studioProps: dp.filter((p) => String(p.kind).startsWith('studio.')).map((p) => p.kind),
+    roadNames: ((state as any).world?.roads ?? []).map((r: any) => r.name).filter(Boolean),
+  }, null, 2));
+} catch { /* diag best-effort */ }
 const pieces = readPlacedPieces(stem);
 const floors = readPaintedFloors(stem);
+memStage('after world load (state/pieces/floors)');
 // The render environment IS /test's: build it from the SAME buildHmscSky the
 // game's WorldStatics lights the scene with, so the loader's lighting/sky match.
 const sky = buildHmscSky(state.config.sky.hour, state.config.sky.weather, state.config.sky.gloom);
@@ -153,7 +190,10 @@ try {
 } catch {
   // no fs / empty store headless → registered code defaults; the bake still runs.
 }
+memStage('before createHmscMapfile');
 const mapContainer = createHmscMapfile(state, pieces, floors, env, { includePlayerLumps: false, decalAssets });
+warn(`[bake-mem] mapContainer = ${(mapContainer.byteLength / 1024 / 1024).toFixed(1)}MB`);
+memStage('after createHmscMapfile');
 for (const asset of decalAssets.assets) {
   warn(`[bake] prepared decal image asset ${asset.hashHex} (${asset.bytes.byteLength} bytes, key ${asset.key}, src '${asset.src}')`);
 }
@@ -182,13 +222,16 @@ const file = writeGameFile({
     ...decalAssets.assets.map((a) => ({ key: a.key, kind: ASSET_KIND_DECAL_IMAGE, bytes: a.bytes, embed: false })),
   ],
 });
+warn(`[bake-mem] writeGameFile = ${(file.byteLength / 1024 / 1024).toFixed(1)}MB`);
+memStage('after writeGameFile');
 
-const emit = (globalThis as any).print ?? console.log;
-emit(JSON.stringify({
-  gamefile: bytesToBase64(file),
-  assets: [
-    { hash: playerModelHash, base64: bytesToBase64(playerModel), bytes: playerModel.byteLength },
-    { hash: playerAnimationHash, base64: bytesToBase64(playerAnimation), bytes: playerAnimation.byteLength },
-    ...decalAssets.assets.map((a) => ({ hash: a.hashHex, base64: bytesToBase64(a.bytes), bytes: a.bytes.byteLength })),
-  ],
-}));
+// Hand the packed binary to the CLI ON DISK (GUIDING_LIGHT: pack binary, not
+// base64 text — see emitGameFile.ts). Writes the game-file + content-addressed
+// asset blobs straight to the paths the CLI passed (--gamefile / --store) and
+// prints only a small manifest. No base64, no megabyte JSON, no GC bomb.
+emitBakedGameFile(file, [
+  { hash: playerModelHash, bytes: playerModel },
+  { hash: playerAnimationHash, bytes: playerAnimation },
+  ...decalAssets.assets.map((a) => ({ hash: a.hashHex, bytes: a.bytes })),
+]);
+memStage('after emit (binary written to disk)');

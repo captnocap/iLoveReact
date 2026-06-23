@@ -135,6 +135,16 @@ test('dumpster collision uses the same body footprint as the visible model', () 
   assertClose(rects[0].maxZ - rects[0].minZ, d, 1e-9, 'dumpster collision depth matches visible body');
 });
 
+test('round tree trunks trim square collider corners so diagonal gaps stay open', () => {
+  const { rects, orientedRects } = placedPieceColliders([placed('prop.treeOak', 0, 0)]);
+  assertEqual(rects.length, 0, 'tree uses the oriented prop lane');
+  assert(orientedRects.length > 1, 'round trunk is approximated by local strips, not one square');
+  const covered = (x: number, z: number) => orientedRects.some((r) => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ);
+  assert(covered(0.49, 0), 'the visible trunk side still blocks');
+  assert(covered(0, 0.49), 'the visible trunk front still blocks');
+  assert(!covered(0.49, 0.49), 'the old square AABB corner is trimmed away');
+});
+
 test('REQ-0582: build props rest on heightfield terrain without moving structural pieces', () => {
   const prop = placed('prop.rock', 2, 4);
   const floor = placed('floor.concrete.common', 2, 4);

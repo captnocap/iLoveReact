@@ -2,9 +2,18 @@
 
 import { fsRead, fsWrite, tryFsStat } from '../host/fs.ts';
 import { err } from '../host/log.ts';
+import { spawnSync } from '../host/process.ts';
 
 type Polyline = number[];
 type IconPolylines = Polyline[];
+
+/** A paint-kit brush/tool glyph, sourced from runtime/paint/icons.ts at bake
+ *  time (see scripts/paint-glyph-source.ts). Coords are in 0..24 viewBox. */
+interface PaintGlyph {
+  name: string;
+  fills: number[][];   // closed polygons, flat [x0,y0,x1,y1,...]
+  strokes: number[][]; // polylines, flat [x0,y0,x1,y1,...]
+}
 
 interface IconMeta {
   name: string;
@@ -60,8 +69,20 @@ export function bakeIconAtlas(opts: BakeOptions = {}): number {
     return fail('no icons discovered in runtime/icons/icons.ts');
   }
 
-  if (opts.ifNeeded && atlasIsCurrent(iconsTs, outZig, outPgmHex, outTs, iconNames)) {
-    log(`atlas current (${iconNames.length} icons)`, opts);
+  // Paint-kit brush/tool glyphs (req_1549): sourced from runtime/paint/icons.ts
+  // via the same bundle-and-eval the firecracker recipe loader uses, so the
+  // BrushKit picker and the atlas can never drift. They're baked here so the kit
+  // draws each glyph as one SDF quad instead of a live <Graph.Path> that
+  // re-parses + re-tessellates every frame (that per-frame cost tanked paint-mode
+  // fps; framework/gpu/sdf_icons.zig is the cure this routes them through).
+  const glyphs = loadPaintGlyphs(root);
+  const glyphNames = glyphs.map((g) => g.name);
+  const paintIconsTs = `${root}/runtime/paint/icons.ts`;
+  const paintModelTs = `${root}/runtime/paint/model.ts`;
+  const expectedNames = [...iconNames, ...glyphNames];
+
+  if (opts.ifNeeded && atlasIsCurrent([iconsTs, paintIconsTs, paintModelTs], outZig, outPgmHex, outTs, expectedNames)) {
+    log(`atlas current (${expectedNames.length} icons)`, opts);
     return 0;
   }
 
@@ -77,20 +98,27 @@ export function bakeIconAtlas(opts: BakeOptions = {}): number {
   }
   if (missing.length) return fail(`missing icons in icons.ts: ${missing.join(', ')}`);
 
+  // Lucide icons + paint glyphs share one packed grid. Rasterization is deferred
+  // per-item (a thunk) so we never hold every HIRES mask in memory at once.
+  const items: { name: string; raster: () => Uint8Array }[] = [
+    ...iconNames.map((name) => ({ name, raster: () => rasterizePolylines(polylines[name]!) })),
+    ...glyphs.map((g) => ({ name: g.name, raster: () => rasterizeGlyph(g) })),
+  ];
+
   const cols = ATLAS_COLS;
-  const rows = Math.ceil(iconNames.length / cols);
+  const rows = Math.ceil(items.length / cols);
   const cellPx = TILE + PADDING * 2;
   const atlasW = cols * cellPx;
   const atlasH = rows * cellPx;
   const atlas = new Uint8Array(atlasW * atlasH);
   const meta: IconMeta[] = [];
 
-  log(`baking ${iconNames.length} icons into ${atlasW}x${atlasH} R8 atlas (tile ${TILE}, hires ${HIRES})`, opts);
+  log(`baking ${items.length} icons (${iconNames.length} lucide + ${glyphs.length} paint) into ${atlasW}x${atlasH} R8 atlas (tile ${TILE}, hires ${HIRES})`, opts);
 
-  for (let i = 0; i < iconNames.length; i++) {
-    const name = iconNames[i]!;
+  for (let i = 0; i < items.length; i++) {
+    const { name, raster } = items[i]!;
     const t0 = Date.now();
-    const mask = rasterizePolylines(polylines[name]!);
+    const mask = raster();
     const sdf = distanceTransform(mask);
     const hi = encodeSdf(sdf);
     const tile = downsample(hi);
@@ -105,7 +133,7 @@ export function bakeIconAtlas(opts: BakeOptions = {}): number {
       }
     }
     meta.push({ name, u, v, w: TILE, h: TILE });
-    log(`  [${i + 1}/${iconNames.length}] ${name} (${Date.now() - t0}ms)`, opts);
+    log(`  [${i + 1}/${items.length}] ${name} (${Date.now() - t0}ms)`, opts);
   }
 
   fsWrite(outZig, emitZig(atlas, meta, atlasW, atlasH));
@@ -135,20 +163,100 @@ function discoverIconNames(src: string): string[] {
   return names;
 }
 
-function atlasIsCurrent(iconsTs: string, outZig: string, outPgmHex: string, outTs: string, iconNames: string[]): boolean {
-  const source = tryFsStat(iconsTs);
+function atlasIsCurrent(sources: string[], outZig: string, outPgmHex: string, outTs: string, expectedNames: string[]): boolean {
   const zig = tryFsStat(outZig);
   const pgm = tryFsStat(outPgmHex);
   const ts = tryFsStat(outTs);
-  if (!source || !zig || !pgm || !ts) return false;
-  if (zig.mtimeMs < source.mtimeMs || pgm.mtimeMs < source.mtimeMs || ts.mtimeMs < source.mtimeMs) return false;
+  if (!zig || !pgm || !ts) return false;
+  let newest = 0;
+  for (const s of sources) {
+    const st = tryFsStat(s);
+    if (!st) return false;
+    newest = Math.max(newest, st.mtimeMs);
+  }
+  if (zig.mtimeMs < newest || pgm.mtimeMs < newest || ts.mtimeMs < newest) return false;
 
   const baked = readBakedNames(outTs);
-  if (baked.size !== iconNames.length) return false;
-  for (const name of iconNames) {
+  if (baked.size !== expectedNames.length) return false;
+  for (const name of expectedNames) {
     if (!baked.has(name)) return false;
   }
   return true;
+}
+
+// ── Paint-kit glyphs ──────────────────────────────────────────────────────
+// Bundle scripts/paint-glyph-source.ts (which re-uses runtime/paint/icons.ts)
+// and eval its default export — the same firecracker recipe loader pattern.
+function loadPaintGlyphs(root: string): PaintGlyph[] {
+  const entry = `${root}/scripts/paint-glyph-source.ts`;
+  if (!tryFsStat(entry)) {
+    err('[bake-icons] scripts/paint-glyph-source.ts missing — skipping paint glyphs');
+    return [];
+  }
+  const bundled = spawnSync(`${root}/tools/esbuild`, [
+    '--bundle', '--format=cjs', '--platform=neutral', '--target=es2022',
+    '--log-level=warning', entry,
+  ]);
+  if (bundled.stderr) __writeStderr(bundled.stderr);
+  if (bundled.code !== 0) throw new Error(`[bake-icons] esbuild failed bundling paint glyphs: ${bundled.code}`);
+  const moduleObj = { exports: {} as any };
+  // eslint-disable-next-line no-new-func
+  new Function('module', 'exports', bundled.stdout)(moduleObj, moduleObj.exports);
+  const glyphs = (moduleObj.exports.default || moduleObj.exports) as PaintGlyph[];
+  if (!Array.isArray(glyphs)) throw new Error('[bake-icons] paint-glyph-source did not default-export an array');
+  return glyphs;
+}
+
+// Scanline-fill one closed polygon (flat [x0,y0,...]) into the HIRES mask.
+function fillPolygon(mask: Uint8Array, flat: number[], scale: number): void {
+  const n = flat.length / 2;
+  if (n < 3) return;
+  const xs = new Array<number>(n), ys = new Array<number>(n);
+  let minY = HIRES, maxY = 0;
+  for (let i = 0; i < n; i++) {
+    xs[i] = flat[i * 2]! * scale;
+    ys[i] = flat[i * 2 + 1]! * scale;
+    minY = Math.min(minY, ys[i]!);
+    maxY = Math.max(maxY, ys[i]!);
+  }
+  const y0 = Math.max(0, Math.floor(minY));
+  const y1 = Math.min(HIRES - 1, Math.ceil(maxY));
+  for (let y = y0; y <= y1; y++) {
+    const sy = y + 0.5;
+    const xings: number[] = [];
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const yi = ys[i]!, yj = ys[j]!;
+      if ((yi <= sy && yj > sy) || (yj <= sy && yi > sy)) {
+        xings.push(xs[i]! + ((sy - yi) / (yj - yi)) * (xs[j]! - xs[i]!));
+      }
+    }
+    xings.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < xings.length; k += 2) {
+      const xa = Math.max(0, Math.ceil(xings[k]! - 0.5));
+      const xb = Math.min(HIRES - 1, Math.floor(xings[k + 1]! - 0.5));
+      for (let x = xa; x <= xb; x++) mask[y * HIRES + x] = 1;
+    }
+  }
+}
+
+// Rasterize a paint glyph: fills as solid polygons, strokes as centerline bands
+// (the SDF then renders fills solid and strokes ~2px wide, like Lucide icons).
+function rasterizeGlyph(glyph: PaintGlyph): Uint8Array {
+  const mask = new Uint8Array(HIRES * HIRES);
+  const scale = HIRES / VIEWBOX;
+  const r = STROKE_HIRES * 0.5;
+  for (const fill of glyph.fills) fillPolygon(mask, fill, scale);
+  for (const stroke of glyph.strokes) {
+    const n = stroke.length / 2;
+    if (n < 1) continue;
+    plotDisc(mask, HIRES, HIRES, stroke[0]! * scale, stroke[1]! * scale, r);
+    for (let i = 1; i < n; i++) {
+      plotSegment(mask, HIRES, HIRES,
+        stroke[(i - 1) * 2]! * scale, stroke[(i - 1) * 2 + 1]! * scale,
+        stroke[i * 2]! * scale, stroke[i * 2 + 1]! * scale, r);
+    }
+  }
+  return mask;
 }
 
 function readBakedNames(outTs: string): Set<string> {

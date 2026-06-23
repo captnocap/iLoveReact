@@ -1,14 +1,69 @@
-import { box, STONE, STONE_DARK, STONE_LIGHT, type PropPartSpec } from '../../game/kinds/propModels';
-import { propKindDefinition } from '../../game/kinds/props';
+import {
+  lowerPropRecipe,
+  recipeColor,
+  type Color,
+  type PropPartSpec,
+  type PropRecipe,
+  type PropRecipePart,
+} from './types';
+import { type PropKindDefinition } from '../../game/kinds/props';
 
-// jagged rock forms — rotated boxes give the sharp facets the sphere-blob rocks
-// can't (user: "more like jagged rocks")
-export function rockJaggedParts(): PropPartSpec[] {
-  const { heightMeters: h, footprintRadiusMeters: r } = propKindDefinition('rockJagged');
-  return [
-    box([0, h * 0.45, 0], [r * 1.5, h * 0.9, r * 1.2], STONE, [12, 25, -8]),
-    box([r * 0.4, h * 0.3, -r * 0.3], [r * 0.9, h * 0.7, r * 0.8], STONE_DARK, [-15, 60, 10]),
-    box([-r * 0.45, h * 0.35, r * 0.25], [r * 0.8, h * 0.8, r * 0.7], STONE_LIGHT, [8, -35, -18]),
-    box([r * 0.1, h * 0.8, r * 0.1], [r * 0.6, h * 0.55, r * 0.5], STONE, [22, 45, 15]),
+export const rockJaggedDef: PropKindDefinition = {
+  kind: 'rockJagged',
+  label: 'Jagged Rock',
+  solid: true,
+  footprintRadiusMeters: 0.7,
+  heightMeters: 1.4,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};
+
+const COLORS = {
+  base: recipeColor('#6b7079'),
+  light: recipeColor('#82868d'),
+  dark: recipeColor('#52565d'),
+} satisfies Record<string, Color>;
+
+export function rockJaggedRecipe(): PropRecipe {
+  const h = 1.4;
+  const r = 0.7;
+  const parts: PropRecipePart[] = [
+    {
+      id: 'spine',
+      shape: 'box',
+      position: { x: 0, y: h * 0.5, z: 0 },
+      size: { width: r * 0.5, height: h * 0.95, depth: r * 0.5 },
+      color: COLORS.base,
+      rotation: { pitch: 10, yaw: 0, roll: 8 },
+    },
+    {
+      id: 'shard1',
+      shape: 'box',
+      position: { x: r * 0.15, y: h * 0.65, z: r * 0.05 },
+      size: { width: r * 0.35, height: h * 0.7, depth: r * 0.3 },
+      color: COLORS.light,
+      rotation: { pitch: 25, yaw: 30, roll: -15 },
+    },
+    {
+      id: 'shard2',
+      shape: 'box',
+      position: { x: -r * 0.1, y: h * 0.55, z: -r * 0.1 },
+      size: { width: r * 0.4, height: h * 0.6, depth: r * 0.25 },
+      color: COLORS.dark,
+      rotation: { pitch: -20, yaw: -20, roll: 20 },
+    },
+    {
+      id: 'shard3',
+      shape: 'box',
+      position: { x: r * 0.05, y: h * 0.8, z: -r * 0.05 },
+      size: { width: r * 0.25, height: h * 0.45, depth: r * 0.2 },
+      color: COLORS.light,
+      rotation: { pitch: 35, yaw: -10, roll: 5 },
+    },
   ];
+  return { id: 'rockJagged', parts };
+}
+
+export function rockJaggedParts(): PropPartSpec[] {
+  return lowerPropRecipe(rockJaggedRecipe());
 }

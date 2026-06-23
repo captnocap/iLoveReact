@@ -1,3 +1,4 @@
+import { type PropKindDefinition } from '../../game/kinds/props';
 import { box, hx, NEAR_BLACK, type PropPartSpec } from '../../game/kinds/propModels';
 
 export function openSignParts(): PropPartSpec[] {
@@ -7,3 +8,15 @@ export function openSignParts(): PropPartSpec[] {
     box([0, 1.9, -0.055], [0.42, 0.12, 0.01], hx('#ffd9e0')),
   ];
 }
+
+export const openSignDef: PropKindDefinition = {
+  kind: 'openSign',
+  label: 'OPEN Sign',
+  solid: true,
+  footprintRadiusMeters: 0.06,
+  heightMeters: 2.2,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'wall',
+  coverClass: 'none',
+};

@@ -148,6 +148,16 @@ export const GAME_NATIVE_CAMERA = Object.freeze({
   activeNode(): number {
     return Number(callHost('__game_camera_active_node') ?? 0);
   },
+  /** The crosshair ray of the ACTIVE camera, resolved host-side (the real
+   *  smoothed optical axis — what's under screen center). Origin + unit dir, or
+   *  null when no camera is bound or the host binding is absent. Use this for
+   *  shots / interacts / picks instead of re-deriving a direction from yaw/pitch
+   *  (which diverges from the real camera). */
+  activeRay(): { origin: [number, number, number]; dir: [number, number, number] } | null {
+    const r = callHost('__game_camera_ray') as { ox?: number; oy?: number; oz?: number; dx?: number; dy?: number; dz?: number } | null;
+    if (!r || typeof r.dx !== 'number') return null;
+    return { origin: [Number(r.ox) || 0, Number(r.oy) || 0, Number(r.oz) || 0], dir: [Number(r.dx) || 0, Number(r.dy) || 0, Number(r.dz) || 0] };
+  },
   forNode(nodeId: number) {
     return Object.freeze({
       disable(): void {

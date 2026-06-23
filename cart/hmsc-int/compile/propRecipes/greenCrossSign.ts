@@ -1,3 +1,4 @@
+import { type PropKindDefinition } from '../../game/kinds/props';
 import { box, hx, WHITE, type PropPartSpec } from '../../game/kinds/propModels';
 
 export function greenCrossSignParts(): PropPartSpec[] {
@@ -8,3 +9,15 @@ export function greenCrossSignParts(): PropPartSpec[] {
     box([0, 2.3, -0.09], [0.78, 0.24, 0.025], green),
   ];
 }
+
+export const greenCrossSignDef: PropKindDefinition = {
+  kind: 'greenCrossSign',
+  label: 'Green Cross Sign',
+  solid: true,
+  footprintRadiusMeters: 0.1,
+  heightMeters: 2.8,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  mount: 'wall',
+  coverClass: 'none',
+};

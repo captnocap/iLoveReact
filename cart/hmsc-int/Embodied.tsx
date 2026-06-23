@@ -51,7 +51,7 @@
 // GAP(W-2) world render: WorldStatics + the surface-capture mounts.
 // GAP(W-3) game sky: hmsc config.sky has no captured home (chrome's LabSky is
 //   the lab environment, a different shape).
-// GAP(buildings) building/prop collision + interiors: its own NOT_YET lane.
+// GAP(buildings) building collision + interiors: its own NOT_YET lane.
 
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Pressable, Scene3D } from '@reactjit/primitives';
@@ -66,7 +66,11 @@ import { RoadSurfaceCaptures } from './render3d/Road'; // GAP(W-2)
 import { RoadJunctionCaptures } from './render3d/RoadJunctions'; // GAP(W-2)
 import { LandformSurfaceCaptures } from './render3d/Landform'; // GAP(W-2)
 import { PropSurfaceCaptures } from './render3d/PropCaptures'; // GAP(W-2)
+import { WorldPartCaptures } from './render3d/PartCaptures'; // GAP(W-2)
 import { hmscSkyBackgroundColor } from './render3d/sky'; // GAP(W-3) awaiting game sky
+import { propKindDefinition } from './game/kinds/props';
+import { propOrientedPhysicsRect, propPhysicsRect } from './world/props';
+import { tileKindDefinition } from './world/tileKinds';
 
 const DEG = Math.PI / 180;
 
@@ -186,7 +190,30 @@ export function worldGridOf(state: GameState): WorldGridState {
     surfaceRegions: state.world.surfaceRegions as unknown as WorldGridState['surfaceRegions'],
     placedCells: state.world.placedCells as unknown as WorldGridState['placedCells'],
     landforms: (state.world.landforms ?? []) as unknown as WorldGridState['landforms'],
+    waterBodies: (state.world.waterBodies ?? []) as unknown as WorldGridState['waterBodies'],
   };
+}
+
+function propCollisionSolids(state: GameState): { rects: CollisionRect[]; orientedRects: OrientedCollisionRect[] } {
+  const rects: CollisionRect[] = [];
+  const orientedRects: OrientedCollisionRect[] = [];
+  for (const prop of state.world.props) {
+    const def = propKindDefinition(prop.kind);
+    const tile = tileKindDefinition(def.tileKind);
+    const base = {
+      blocksPlayer: true,
+      friction: tile.surface.friction,
+      restitution: tile.surface.restitution,
+    };
+    const oriented = propOrientedPhysicsRect(prop);
+    if (oriented) {
+      orientedRects.push({ ...oriented, ...base });
+      continue;
+    }
+    const rect = propPhysicsRect(prop);
+    if (rect) rects.push({ ...rect, ...base });
+  }
+  return { rects, orientedRects };
 }
 
 // Ground column: the highest standable top at (x, z) regardless of the
@@ -405,20 +432,25 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
   // authored state; the world is static while playing.
   const worldGrid = useMemo(() => worldGridOf(state), [state]);
   // The flat solid bands of the captured layers (regions + placed cells —
-  // blocking tiles like walls now BLOCK). Buildings/props stay with their lane.
+  // blocking tiles like walls now BLOCK). Buildings stay with their lane.
   const worldColliders = useMemo(() => {
     const built = GAME_WORLD.collisionRects(worldGrid);
     if (built.dropped > 0) console.warn(`${options.logTag} world colliders past the host cap: ${built.dropped} dropped`);
     return built;
   }, [worldGrid]);
   const worldHeightfields = useMemo(() => GAME_WORLD.heightfields(worldGrid), [worldGrid]);
-  // The world's solids + the mode layer's (build: placed pieces) — host caps
-  // are wire facts: truncate loudly, never throw mid-frame.
+  // The world's solids + props + the mode layer's (build: placed pieces) —
+  // host caps are wire facts: truncate loudly, never throw mid-frame.
   const solids = useMemo(() => {
+    const props = propCollisionSolids(state);
     const extra = worldExtras?.solids;
-    if (!extra) return { rects: worldColliders.rects, orientedRects: [] as OrientedCollisionRect[] };
-    const rects = [...worldColliders.rects, ...extra.rects];
-    const orientedRects = [...extra.orientedRects];
+    // Placed pieces (walls/structure) BEFORE props: both lanes truncate at the
+    // host cap by dropping the tail, so structural collision must win the budget —
+    // a wall you walk through is a far worse bug than a prop you don't bump. The
+    // earlier order (props first) let a dense map's props push every wall past the
+    // cap, so the player walked through all of them (req_0738).
+    const rects = [...worldColliders.rects, ...(extra?.rects ?? []), ...props.rects];
+    const orientedRects = [...(extra?.orientedRects ?? []), ...props.orientedRects];
     if (rects.length > PHYSICS_LIMITS.rects) {
       console.warn(`${options.logTag} ${rects.length} rects past the host cap ${PHYSICS_LIMITS.rects} — newest dropped`);
       rects.length = PHYSICS_LIMITS.rects;
@@ -428,7 +460,7 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
       orientedRects.length = PHYSICS_LIMITS.orientedRects;
     }
     return { rects, orientedRects };
-  }, [worldColliders, worldExtras]);
+  }, [state, worldColliders, worldExtras]);
   // Terrain heightfields → host collider slots (see-it == walk-it: painted
   // hills are walkable, slopes resolve host-side), then the mode layer's
   // (build: ramp/stairs slopes continue where terrain stopped). No-op until
@@ -1213,6 +1245,9 @@ export function EmbodiedCaptures(props: { embodied: Embodied }) {
       <RoadJunctionCaptures junctions={sceneState.world.junctions} />
       <LandformSurfaceCaptures landforms={sceneState.world.landforms ?? []} />
       <PropSurfaceCaptures props={sceneState.world.props} />
+      {/* Click-to-pick PART textures (WorldProp/Building.partTextures) — empty
+          until a part is textured, so zero cost when unused. */}
+      <WorldPartCaptures buildings={sceneState.world.buildings} props={sceneState.world.props} />
       {/* The V2 figure's face/skin unwrap captures (replaces HumanoidFaceCaptures) */}
       <CharacterCaptures
         headTexKey={figure.parts.head.texKey}

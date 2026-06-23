@@ -1,3 +1,4 @@
+import { startupMark, startupWatchSettle, navStart, navReady } from './startupTimer';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text } from '@reactjit/primitives';
 import { execAsync } from '@reactjit/runtime/hooks/process';
@@ -34,6 +35,7 @@ import { useBuildUndo } from './editors/world/useBuildUndo';
 import { usePlacements } from './editors/world/usePlacements';
 import { assemblePreviewWorld } from './editors/world/previewWorld';
 import { worldToPlacementGraph } from './placements';
+import { writeFile as diagWriteFile } from '@reactjit/hooks/fs';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
 // one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
@@ -57,6 +59,10 @@ import { worldToPlacementGraph } from './placements';
 //   usePlacements   — the 'place' layer's CRUD verbs + the canvas `place` API
 //   previewWorld.ts — (floors, placements) → GameState, a pure assembler
 // — and the next feature lands as a module, not 40 more lines in a closure.
+
+// Boot phase: every module index.tsx pulls in has now evaluated (this is the
+// 5.7mb bundle's import cost, on top of t0 set in startupTimer).
+startupMark('index.tsx module graph evaluated');
 
 const GAME_BAKE_CMD = 'tools/rjit game bake 2>&1';
 
@@ -93,6 +99,18 @@ export default function HmscWorldEditorCart() {
 }
 
 function EditorShell() {
+  // Boot phase: React reached the cart's root component and is mounting (only the
+  // first render — re-renders during boot don't re-stamp).
+  const bootMarked = useRef(false);
+  if (!bootMarked.current) {
+    bootMarked.current = true;
+    startupMark('EditorShell first render (React mounting)');
+    // The honest READY: watch frames from here and report when the main thread
+    // settles (chunk bakes / grass / 3D preview all drained), not when the canvas
+    // merely mounts. This is the ~3s the user actually waits for.
+    startupWatchSettle();
+  }
+
   // The 3D preview world. baseWorld is the empty editor GameState (built once);
   // floors (the painted tile/height per chunk) are mirrored from PaintCanvas and
   // drive the preview's floor MESHES directly (not surfaceRegions). previewWorld
@@ -365,6 +383,22 @@ function EditorShell() {
     setCompileState('compiling');
     setCompileStatus('baking…');
     try {
+      // TEMP DIAG (req_1505): record what the LIVE previewWorld carries at compile
+      // time — to localize where the auto-generated signs are lost vs the bake.
+      try {
+        const dp: any[] = (previewWorld as any).world?.props ?? [];
+        const signKinds = ['streetSign', 'stopSign', 'trafficLight', 'streetLight'];
+        const signs = dp.filter((p) => signKinds.includes(p.kind));
+        diagWriteFile('/tmp/rjit-compile-diag.json', JSON.stringify({
+          when: 'compileToGame(live previewWorld)',
+          props: dp.length,
+          signs: signs.length,
+          signTexts: [...new Set(signs.map((p) => p.text).filter(Boolean))],
+          studioProps: dp.filter((p) => String(p.kind).startsWith('studio.')).map((p) => p.kind),
+          genPlacements: placements.filter((p) => p.gen).length,
+          totalPlacements: placements.length,
+        }, null, 2));
+      } catch { /* diag best-effort */ }
       compileEditorWorld(previewWorld);
       const bake = await execAsync(GAME_BAKE_CMD);
       const summary = lastMeaningfulLine(bake.stdout);
@@ -405,6 +439,10 @@ function EditorShell() {
   useEffect(() => subscribeWorkbenchFamily(setWbFamily), []);
   const activeRoute = route.path === '/workbench' ? (wbFamily === 'settings' ? 'workbench-settings' : 'workbench-assets') : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : route.path === '/compiled' ? 'compiled' : 'editor';
   const atEditor = activeRoute === 'editor';
+  // Route nav timing (req_1637): a route button calls navStart(path) on click; this
+  // effect fires after the new route's surface first renders, logging click→first-
+  // render and arming a settle watch for the fully-loaded number.
+  useEffect(() => { navReady(route.path); }, [route.path]);
 
   // The 3D preview camera settled (stopped flying) — trip the view autosave + log it
   // (coalesced so a long fly is one entry, not a stream).
@@ -434,13 +472,13 @@ function EditorShell() {
         onToggleMenu={toggleMenu}
         onToggleLog={toggleLog}
         onNew={() => { setMenuOpen(false); newMap(); }}
-        onEditor={() => nav.push('/')}
-        onTest={() => nav.push('/test')}
-        onLabs={() => nav.push('/labs')}
-        onWorkbench={() => nav.push('/workbench')}
-        onSettings={() => { requestWorkbenchSource('settings'); nav.push('/workbench'); }}
-        onAssist={() => nav.push('/assist3d')}
-        onCompiled={() => nav.push('/compiled')}
+        onEditor={() => { navStart('/'); nav.push('/'); }}
+        onTest={() => { navStart('/test'); nav.push('/test'); }}
+        onLabs={() => { navStart('/labs'); nav.push('/labs'); }}
+        onWorkbench={() => { navStart('/workbench'); nav.push('/workbench'); }}
+        onSettings={() => { navStart('/workbench'); requestWorkbenchSource('settings'); nav.push('/workbench'); }}
+        onAssist={() => { navStart('/assist3d'); nav.push('/assist3d'); }}
+        onCompiled={() => { navStart('/compiled'); nav.push('/compiled'); }}
         onUndo={ws.undo}
         onRedo={ws.redo}
         onCompile={compileToGame}

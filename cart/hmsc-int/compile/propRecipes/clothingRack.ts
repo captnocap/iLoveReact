@@ -1,3 +1,4 @@
+import { type PropKindDefinition } from '../../game/kinds/props';
 import { box, cylinder8, hx, STEEL, STEEL_DARK, type Color, type PropPartSpec } from '../../game/kinds/propModels';
 import { propKindDefinition } from '../../game/kinds/props';
 
@@ -19,3 +20,15 @@ export function clothingRackParts(): PropPartSpec[] {
   });
   return parts;
 }
+
+export const clothingRackDef: PropKindDefinition = {
+  kind: 'clothingRack',
+  label: 'Clothing Rack',
+  solid: true,
+  footprintRadiusMeters: 0.7,
+  heightMeters: 1.6,
+  tileKind: 'wall',
+  trafficControl: 'none',
+  container: { lootCategory: 'clothing', capacity: 4, spawnFillChance: 0.7, searchSeconds: 2.5, access: 'open' },
+  coverClass: 'soft',
+};

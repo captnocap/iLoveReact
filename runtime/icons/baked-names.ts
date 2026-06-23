@@ -1960,4 +1960,5 @@ export const BAKED_ICON_NAMES: ReadonlySet<string> = new Set([
   "tool.eyedropper",
   "tool.smudge",
   "tool.blur",
+  "tool.text",
 ]);

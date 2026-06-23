@@ -6,6 +6,7 @@
 //   VOXEL  -- the blockout builder that auto-feeds the sculpt base
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { Box, Col, Effect, Paintable, Pressable, Row, Scene3D, ScrollView, Text } from '@reactjit/primitives';
 import { usePaintable, type PaintableHandle } from '@reactjit/runtime/hooks/usePaintable';
 import * as Geometry from '@reactjit/geometries';
@@ -759,8 +760,8 @@ function SculptStage(props: { store: ItemStore }) {
 
 export function ItemStage(props: { store: ItemStore; lens: ItemLens }) {
   const s = props.store;
-  const [, setTick] = useState(0);
-  useEffect(() => s.subscribe(() => setTick((t) => t + 1)), [s]);
+  const rerender = useRerender();
+  useEffect(() => s.subscribe(rerender), [s]);
   const registry = s.selectedRegistryItem();
   if (registry) return <RegistryItemStage item={registry} />;
   if (props.lens === 'voxel') return <VoxelStage store={s} />;

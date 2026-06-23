@@ -112,7 +112,10 @@ test('flat parking floors route through the textured heightfield bake', () => {
   const mudMap = makeTileMap(8, 8);
   for (let y = 0; y < 8; y += 1) for (let x = 0; x < 8; x += 1) paintTile(mudMap, x, y, MUD);
   const mudFloor = flatFloor(encodeTileMap(mudMap));
-  assert(!floorNeedsHeightfieldRender(mudFloor), 'plain flat ground keeps the cheap slab path');
+  // FORMULAFLOOR-0615: plain flat ground now ALSO renders through the per-fragment
+  // formula (a cheap flat 2×2 mesh + the cell stream), so it wears the same grain
+  // + slab joints as the editor /test view — no separate flat box-slab look.
+  assert(floorNeedsHeightfieldRender(mudFloor), 'plain flat ground renders through the formula path too');
 });
 
 test('parkingCross rotates the bay lines 90° — perpendicular to parking (req_0710)', () => {

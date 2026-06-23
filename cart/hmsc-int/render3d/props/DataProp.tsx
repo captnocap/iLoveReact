@@ -1,19 +1,16 @@
-// DataProp — the generic renderer for DATA-recipe props (PROPBATCH-0611).
+// DataProp — the generic renderer for EVERY prop (PROPSINGLE-0782).
 //
-// game/kinds/propModels.ts authors a prop's parts once in the compiled
-// loader's shape vocabulary; this converts each PropPartSpec into a
-// render3d/parts.tsx Part and draws the lot through TexturedParts. That buys
-// every recipe the full part pipeline for free: parts with a `partId` (an
-// album cover's 'cover', a poster's 'face', the vending machine's 'front')
-// are click-to-pick image targets — apply any TEXTURE_REGISTRY id and the
-// same id ships in the compiled bake as the part's material (req_0635).
-//
-// Chassis parts (no partId) are textureable:false — the pick flow offers only
-// the faces that were authored to take an image, and part ids stay stable as
-// recipes evolve.
+// A prop's geometry lives in exactly ONE place: resolvePropParts(prop) (the
+// shared recipe resolver also used by the compile bake — render==bake by
+// construction). This converts each PropPartSpec into a render3d/parts.tsx Part
+// and draws the lot through TexturedParts, so EVERY prop — data-recipe kinds AND
+// the formerly-bespoke ones (payphone, dumpster, trees, furniture…) — gets the
+// full click-to-skin part pipeline for free: each part is a texture target, the
+// id ships in the bake as that part's material. No per-prop render code anywhere.
 
 import type { WorldProp } from '../../design';
-import { propModelParts, propPartId, cssColor, type PropPartSpec } from '../../game/kinds/propModels';
+import { propPartId, cssColor, type PropPartSpec } from '../../game/kinds/propModels';
+import { resolvePropParts } from '../../compile/propRecipes/resolve';
 import { type Part, TexturedParts } from '../parts';
 import { at } from './place';
 
@@ -33,10 +30,19 @@ function partGeometry(spec: PropPartSpec): { geometry: string; params: Record<st
   }
 }
 
-/** The Part[] for a data-recipe prop — [] when the kind has a bespoke model. */
+// [propgone] probe (req_1632) — one line per distinct kind→part-count so an
+// invisible recipe prop shows whether resolvePropParts returned NO geometry.
+const _dataSeen = new Set<string>();
+function dataGone(msg: string): void {
+  if (_dataSeen.has(msg)) return;
+  _dataSeen.add(msg);
+  console.warn(`[propgone] DataProp ${msg}`);
+}
+
+/** The Part[] for ANY prop — resolved from the one shared recipe source. */
 export function dataPropParts(prop: WorldProp): Part[] {
-  const specs = propModelParts(prop.kind);
-  if (!specs) return [];
+  const specs = resolvePropParts(prop);
+  dataGone(`kind=${prop.kind} parts=${specs.length}${specs.length === 0 ? ' (resolvePropParts EMPTY → no mesh)' : ''}`);
   return specs.map((spec, index): Part => {
     const g = partGeometry(spec);
     const image = spec.partId !== undefined;
@@ -49,6 +55,8 @@ export function dataPropParts(prop: WorldProp): Part[] {
       rotation: [spec.rotation?.[0] ?? 0, prop.yawDegrees + (spec.rotation?.[1] ?? 0), spec.rotation?.[2] ?? 0],
       scale: g.scale,
       material: cssColor(spec.color),
+      // a glass part (opacity < 1) draws translucent until a skin overrides it.
+      opacity: spec.opacity,
       // ONE WHOLE IMAGE per part, always (PARTSCALE-0772). An image panel puts it
       // on its broad faces; every other part (chassis boxes/cylinders) wraps it on
       // all faces. Both bake at a 1×1 grid — the SAME thing the compiled game does

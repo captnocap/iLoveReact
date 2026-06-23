@@ -14,6 +14,7 @@
 // redo) are workspace controls, the character stage's own convention.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { Box, Col, Pressable, Row, Scene3D, Text } from '@reactjit/runtime/primitives';
 import { GAME_ANIMATION } from '../../../game/animation';
 import { GAME_CHROME } from '../../../game/chrome';
@@ -53,8 +54,8 @@ export function DressedStage(props: {
 }) {
   const renderT0 = perfNow();
   const s = props.store;
-  const [, setTick] = useState(0);
-  useEffect(() => s.subscribe(() => setTick((t) => t + 1)), [s]);
+  const rerender = useRerender();
+  useEffect(() => s.subscribe(rerender), [s]);
   useEffect(() => {
     const sw = gDressedPerf.__hmsc_workbench_source_switch;
     const routeStart = gDressedPerf.__hmsc_workbench_route_start;

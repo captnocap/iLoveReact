@@ -209,6 +209,13 @@ export function FigureMeshes(props: {
   paint?: FigurePaint;
   cartKey?: string;
   skin?: string;
+  /** STATIC figure (an NPC / a roster member): intern the part geometry instead
+   *  of claiming a per-part DYN slot. The dyn pool (3d.zig DYN_SLOTS) is the
+   *  small, reserved tail for LIVE-edited meshes (sculpting) — one figure burns
+   *  ~7 of it, so a crowd starves it (dropped heads). Interned geometry lives in
+   *  the big retained buffer where hundreds of static figures fit. Leave OFF for
+   *  the one figure being actively sculpted; turn ON for everyone else. */
+  intern?: boolean;
 }) {
   const yawDeg = props.yawDeg ?? 0;
   const lift = props.lift ?? 0;
@@ -232,7 +239,7 @@ export function FigureMeshes(props: {
             key={`a${i}`}
             geometry={Geometry.Globe}
             params={p.params}
-            dynamicKey={p.dynKey}
+            dynamicKey={props.intern ? undefined : p.dynKey}
             material="#ffffff"
             textureKey={texFor(inst, p)}
             position={place(inst.position)}
@@ -248,7 +255,7 @@ export function FigureMeshes(props: {
             key={`n${i}`}
             geometry={Geometry.Globe}
             params={p.params}
-            dynamicKey={p.dynKey}
+            dynamicKey={props.intern ? undefined : p.dynKey}
             material="#ffffff"
             textureKey={texFor(inst, p)}
             position={place(inst.position)}

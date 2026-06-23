@@ -104,6 +104,10 @@ export const INSTANCE_SHAPE_SCENERY_BOX = 11;
 // Wall L-corner miter filler — a vertical right-triangle prism, editor twin is
 // pieceMeshes' CornerMiterPrismGeometry and loader twin is buildCornerMiterPrism.
 export const INSTANCE_SHAPE_CORNER_MITER = 12;
+export const INSTANCE_SHAPE_CORNER_MITER_MIRROR = 13;
+export const INSTANCE_SHAPE_BOX_OPEN_RUN_MIN = 14;
+export const INSTANCE_SHAPE_BOX_OPEN_RUN_MAX = 15;
+export const INSTANCE_SHAPE_BOX_OPEN_RUN_BOTH = 16;
 
 // ── materials: ship the SHADER (the formula) — pixels only when there IS no formula ─
 // GUIDING_LIGHT: procedural content travels as its recipe. A face whose skin is
@@ -808,6 +812,10 @@ function pushVisualShape(b: Build, piece: PlacedBuildPiece, baseMaterial: BuildM
   const shapeId =
     shape.kind === 'gable' ? INSTANCE_SHAPE_GABLE :
     shape.kind === 'cornerMiter' ? INSTANCE_SHAPE_CORNER_MITER :
+    shape.kind === 'cornerMiterMirror' ? INSTANCE_SHAPE_CORNER_MITER_MIRROR :
+    v.openRunMin && v.openRunMax ? INSTANCE_SHAPE_BOX_OPEN_RUN_BOTH :
+    v.openRunMin ? INSTANCE_SHAPE_BOX_OPEN_RUN_MIN :
+    v.openRunMax ? INSTANCE_SHAPE_BOX_OPEN_RUN_MAX :
     INSTANCE_SHAPE_BOX;
   // DOORS-0611: the closed door/garage panel is LIVE state — it ships through
   // the DOORS lump (compile/worldDoors.ts) as a toggleable rect+node, never a

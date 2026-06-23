@@ -1,3 +1,4 @@
+import { type PropKindDefinition } from '../../game/kinds/props';
 import { box, hx, NEAR_BLACK, type PropPartSpec } from '../../game/kinds/propModels';
 
 export function beerCaseParts(): PropPartSpec[] {
@@ -7,3 +8,13 @@ export function beerCaseParts(): PropPartSpec[] {
     box([0, 0.28, -0.01], [0.46, 0.03, 0.3], NEAR_BLACK),
   ];
 }
+
+export const beerCaseDef: PropKindDefinition = {
+  kind: 'beerCase',
+  label: 'Beer Cases',
+  solid: true,
+  footprintRadiusMeters: 0.25,
+  heightMeters: 0.55,
+  tileKind: 'wall',
+  trafficControl: 'none',
+};

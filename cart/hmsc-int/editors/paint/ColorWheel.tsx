@@ -13,6 +13,8 @@ const COLOR_WHEEL = Object.freeze({
   valueHeight: 16,
   marker: 10,
   valueMarker: 4,
+  blackValueEpsilon: 0.001,
+  wheelPickValueFromBlack: 1,
 } as const);
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -23,14 +25,13 @@ const TAU: f32 = 6.28318530718;
 @group(0) @binding(1) var<storage, read> P: array<f32>;
 
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
-  let value = P[0];
   let p = (in.uv - vec2f(0.5, 0.5)) * 2.0;
   let r = length(p);
   let aa = max(fwidth(r), 0.001);
   let alpha = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);
   if (alpha <= 0.001) { return vec4f(0.0); }
   let hue = fract(atan2(p.y, p.x) / TAU + 1.0);
-  let rgb = hsv2rgb(hue, clamp(r, 0.0, 1.0), value);
+  let rgb = hsv2rgb(hue, clamp(r, 0.0, 1.0), 1.0);
   return vec4f(rgb * alpha, alpha);
 }
 `;
@@ -69,7 +70,7 @@ function hsvWithWheelPoint(hsv: HsvColor, p: any, rect: Rect): HsvColor {
   return {
     h: ((Math.atan2(dy, dx) / TAU) + 1) % 1,
     s: clamp01(Math.hypot(dx, dy) / radius),
-    v: hsv.v,
+    v: hsv.v <= COLOR_WHEEL.blackValueEpsilon ? COLOR_WHEEL.wheelPickValueFromBlack : hsv.v,
   };
 }
 

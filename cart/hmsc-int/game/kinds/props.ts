@@ -18,7 +18,8 @@
 // is dead; a prop value edited here is the value everywhere.
 // (Originally a fresh capture of cart/hmsc/world/propKinds.ts.)
 
-import type { TileKind } from './tiles';
+import type { TileCoverHeight, TileKind } from './tiles';
+import type { BuildSnapMode } from '../build/pieces';
 import {
   IMPORTED_PROP_DEFINITIONS,
   IMPORTED_PROP_KINDS,
@@ -273,6 +274,192 @@ import { wineRackDef } from '../../compile/propRecipes/wineRack';
 import { wireShelfDef } from '../../compile/propRecipes/wireShelf';
 import { workbenchDef } from '../../compile/propRecipes/workbench';
 import { writingDeskDef } from '../../compile/propRecipes/writingDesk';
+
+import { arcadeAirHockeyDef } from '../../compile/propRecipes/arcadeAirHockey';
+import { arcadeChangeMachineDef } from '../../compile/propRecipes/arcadeChangeMachine';
+import { arcadeClawDef } from '../../compile/propRecipes/arcadeClaw';
+import { arcadeDanceDef } from '../../compile/propRecipes/arcadeDance';
+import { arcadeFightingDef } from '../../compile/propRecipes/arcadeFighting';
+import { arcadePinballDef } from '../../compile/propRecipes/arcadePinball';
+import { arcadePrizeDef } from '../../compile/propRecipes/arcadePrize';
+import { arcadeRacingDef } from '../../compile/propRecipes/arcadeRacing';
+import { arcadeShootingDef } from '../../compile/propRecipes/arcadeShooting';
+import { arcadeSkeeballDef } from '../../compile/propRecipes/arcadeSkeeball';
+import { baccaratTableDef } from '../../compile/propRecipes/baccaratTable';
+import { bakingSheetDef } from '../../compile/propRecipes/bakingSheet';
+import { barbedWireDef } from '../../compile/propRecipes/barbedWire';
+import { barrierJerseyDef } from '../../compile/propRecipes/barrierJersey';
+import { barrierPlasticDef } from '../../compile/propRecipes/barrierPlastic';
+import { benchBusDef } from '../../compile/propRecipes/benchBus';
+import { bicycleDef } from '../../compile/propRecipes/bicycle';
+import { bikeRackDef } from '../../compile/propRecipes/bikeRack';
+import { blackjackTableDef } from '../../compile/propRecipes/blackjackTable';
+import { bookcartDef } from '../../compile/propRecipes/bookcart';
+import { bookcaseFullDef } from '../../compile/propRecipes/bookcaseFull';
+import { breadBoxDef } from '../../compile/propRecipes/breadBox';
+import { brokenFurnitureDef } from '../../compile/propRecipes/brokenFurniture';
+import { bushBambooDef } from '../../compile/propRecipes/bushBamboo';
+import { bushBerryDef } from '../../compile/propRecipes/bushBerry';
+import { bushBoxwoodDef } from '../../compile/propRecipes/bushBoxwood';
+import { bushFernDef } from '../../compile/propRecipes/bushFern';
+import { bushHedgeDef } from '../../compile/propRecipes/bushHedge';
+import { bushRoseDef } from '../../compile/propRecipes/bushRose';
+import { campfireDef } from '../../compile/propRecipes/campfire';
+import { carDoorDef } from '../../compile/propRecipes/carDoor';
+import { cashRegisterDef } from '../../compile/propRecipes/cashRegister';
+import { chainLinkFenceSectionDef } from '../../compile/propRecipes/chainLinkFenceSection';
+import { coffeeMakerDef } from '../../compile/propRecipes/coffeeMaker';
+import { colanderDef } from '../../compile/propRecipes/colander';
+import { condimentStationDef } from '../../compile/propRecipes/condimentStation';
+import { coolerDrinkDef } from '../../compile/propRecipes/coolerDrink';
+import { coolerProduceDef } from '../../compile/propRecipes/coolerProduce';
+import { crapsTableDef } from '../../compile/propRecipes/crapsTable';
+import { crushedCarDef } from '../../compile/propRecipes/crushedCar';
+import { crystalDef } from '../../compile/propRecipes/crystal';
+import { cuttingBoardDef } from '../../compile/propRecipes/cuttingBoard';
+import { dishRackDef } from '../../compile/propRecipes/dishRack';
+import { dressFormDef } from '../../compile/propRecipes/dressForm';
+import { drumKitDef } from '../../compile/propRecipes/drumKit';
+import { dumpsterCardboardDef } from '../../compile/propRecipes/dumpsterCardboard';
+import { dumpsterIndustrialDef } from '../../compile/propRecipes/dumpsterIndustrial';
+import { dumpsterRecyclingDef } from '../../compile/propRecipes/dumpsterRecycling';
+import { dumpsterSmallDef } from '../../compile/propRecipes/dumpsterSmall';
+import { dumpsterTrashDef } from '../../compile/propRecipes/dumpsterTrash';
+import { easelDef } from '../../compile/propRecipes/easel';
+import { electricBoxDef } from '../../compile/propRecipes/electricBox';
+import { engineBlockDef } from '../../compile/propRecipes/engineBlock';
+import { fastFoodMenuDef } from '../../compile/propRecipes/fastFoodMenu';
+import { fireHydrantYellowDef } from '../../compile/propRecipes/fireHydrantYellow';
+import { freezerChestDef } from '../../compile/propRecipes/freezerChest';
+import { freezerUprightDef } from '../../compile/propRecipes/freezerUpright';
+import { fridgeSupermarketDef } from '../../compile/propRecipes/fridgeSupermarket';
+import { fruitBowlDef } from '../../compile/propRecipes/fruitBowl';
+import { fryBasketDef } from '../../compile/propRecipes/fryBasket';
+import { geodeDef } from '../../compile/propRecipes/geode';
+import { globeDef } from '../../compile/propRecipes/globe';
+import { grassDeadDef } from '../../compile/propRecipes/grassDead';
+import { grassFlowersDef } from '../../compile/propRecipes/grassFlowers';
+import { grassMossDef } from '../../compile/propRecipes/grassMoss';
+import { grassReedsDef } from '../../compile/propRecipes/grassReeds';
+import { grassShortDef } from '../../compile/propRecipes/grassShort';
+import { grillCharcoalDef } from '../../compile/propRecipes/grillCharcoal';
+import { grillGasDef } from '../../compile/propRecipes/grillGas';
+import { grillPitDef } from '../../compile/propRecipes/grillPit';
+import { grillPropaneDef } from '../../compile/propRecipes/grillPropane';
+import { grillSmokerDef } from '../../compile/propRecipes/grillSmoker';
+import { guitarDef } from '../../compile/propRecipes/guitar';
+import { gurneyDef } from '../../compile/propRecipes/gurney';
+import { hayBaleDef } from '../../compile/propRecipes/hayBale';
+import { hazardBarrelDef } from '../../compile/propRecipes/hazardBarrel';
+import { hoseDef } from '../../compile/propRecipes/hose';
+import { hvacUnitDef } from '../../compile/propRecipes/hvacUnit';
+import { kenoMachineDef } from '../../compile/propRecipes/kenoMachine';
+import { kettleDef } from '../../compile/propRecipes/kettle';
+import { knifeBlockDef } from '../../compile/propRecipes/knifeBlock';
+import { ladderDef } from '../../compile/propRecipes/ladder';
+import { lavaRockDef } from '../../compile/propRecipes/lavaRock';
+import { libraryShelfDef } from '../../compile/propRecipes/libraryShelf';
+import { lifeguardTowerDef } from '../../compile/propRecipes/lifeguardTower';
+import { luggageCartDef } from '../../compile/propRecipes/luggageCart';
+import { mailboxApartmentDef } from '../../compile/propRecipes/mailboxApartment';
+import { mailboxNewspaperDef } from '../../compile/propRecipes/mailboxNewspaper';
+import { mailboxResidentialDef } from '../../compile/propRecipes/mailboxResidential';
+import { mailboxWallDef } from '../../compile/propRecipes/mailboxWall';
+import { mannequinDef } from '../../compile/propRecipes/mannequin';
+import { merryGoRoundDef } from '../../compile/propRecipes/merryGoRound';
+import { microscopeDef } from '../../compile/propRecipes/microscope';
+import { mixerDef } from '../../compile/propRecipes/mixer';
+import { newspaperBoxDef } from '../../compile/propRecipes/newspaperBox';
+import { oxygenTankDef } from '../../compile/propRecipes/oxygenTank';
+import { pachinkoMachineDef } from '../../compile/propRecipes/pachinkoMachine';
+import { packageDropBoxDef } from '../../compile/propRecipes/packageDropBox';
+import { panDef } from '../../compile/propRecipes/pan';
+import { parkingMeterDef } from '../../compile/propRecipes/parkingMeter';
+import { parkingMeterDoubleDef } from '../../compile/propRecipes/parkingMeterDouble';
+import { pebbleDef } from '../../compile/propRecipes/pebble';
+import { pepperShakerDef } from '../../compile/propRecipes/pepperShaker';
+import { picnicBlanketDef } from '../../compile/propRecipes/picnicBlanket';
+import { plantCactusDef } from '../../compile/propRecipes/plantCactus';
+import { plantCactusLargeDef } from '../../compile/propRecipes/plantCactusLarge';
+import { plantFicusDef } from '../../compile/propRecipes/plantFicus';
+import { plantHangingDef } from '../../compile/propRecipes/plantHanging';
+import { plantMonsteraDef } from '../../compile/propRecipes/plantMonstera';
+import { plantPalmDef } from '../../compile/propRecipes/plantPalm';
+import { plantRoseDef } from '../../compile/propRecipes/plantRose';
+import { plantSucculentDef } from '../../compile/propRecipes/plantSucculent';
+import { plantSunflowerDef } from '../../compile/propRecipes/plantSunflower';
+import { plantVineDef } from '../../compile/propRecipes/plantVine';
+import { planterBoxDef } from '../../compile/propRecipes/planterBox';
+import { portaPottyDef } from '../../compile/propRecipes/portaPotty';
+import { potDef } from '../../compile/propRecipes/pot';
+import { roadSignBikeDef } from '../../compile/propRecipes/roadSignBike';
+import { roadSignConstructionDef } from '../../compile/propRecipes/roadSignConstruction';
+import { roadSignDoNotEnterDef } from '../../compile/propRecipes/roadSignDoNotEnter';
+import { roadSignNoParkingDef } from '../../compile/propRecipes/roadSignNoParking';
+import { roadSignOneWayDef } from '../../compile/propRecipes/roadSignOneWay';
+import { roadSignParkingDef } from '../../compile/propRecipes/roadSignParking';
+import { roadSignPedestrianDef } from '../../compile/propRecipes/roadSignPedestrian';
+import { roadSignSchoolDef } from '../../compile/propRecipes/roadSignSchool';
+import { roadSignSpeedLimitDef } from '../../compile/propRecipes/roadSignSpeedLimit';
+import { roadSignYieldDef } from '../../compile/propRecipes/roadSignYield';
+import { rockCoralDef } from '../../compile/propRecipes/rockCoral';
+import { rockGraniteDef } from '../../compile/propRecipes/rockGranite';
+import { rockLimestoneDef } from '../../compile/propRecipes/rockLimestone';
+import { rockObsidianDef } from '../../compile/propRecipes/rockObsidian';
+import { rockQuartzDef } from '../../compile/propRecipes/rockQuartz';
+import { rockSandstoneDef } from '../../compile/propRecipes/rockSandstone';
+import { rockSlateDef } from '../../compile/propRecipes/rockSlate';
+import { rollingPinDef } from '../../compile/propRecipes/rollingPin';
+import { rouletteTableDef } from '../../compile/propRecipes/rouletteTable';
+import { rugOrientalDef } from '../../compile/propRecipes/rugOriental';
+import { rugRoundDef } from '../../compile/propRecipes/rugRound';
+import { rugRunnerDef } from '../../compile/propRecipes/rugRunner';
+import { rustedBarrelDef } from '../../compile/propRecipes/rustedBarrel';
+import { saltShakerDef } from '../../compile/propRecipes/saltShaker';
+import { sandbagDef } from '../../compile/propRecipes/sandbag';
+import { satelliteDishDef } from '../../compile/propRecipes/satelliteDish';
+import { scaffoldDef } from '../../compile/propRecipes/scaffold';
+import { scarecrowDef } from '../../compile/propRecipes/scarecrow';
+import { scrapMetalDef } from '../../compile/propRecipes/scrapMetal';
+import { scrapPileDef } from '../../compile/propRecipes/scrapPile';
+import { sculptureDef } from '../../compile/propRecipes/sculpture';
+import { securityCameraDef } from '../../compile/propRecipes/securityCamera';
+import { shoppingBasketDef } from '../../compile/propRecipes/shoppingBasket';
+import { shoppingCartDef } from '../../compile/propRecipes/shoppingCart';
+import { slideDef } from '../../compile/propRecipes/slide';
+import { slotMachineDigitalDef } from '../../compile/propRecipes/slotMachineDigital';
+import { slotMachinePokerDef } from '../../compile/propRecipes/slotMachinePoker';
+import { slotMachineVintageDef } from '../../compile/propRecipes/slotMachineVintage';
+import { soccerGoalDef } from '../../compile/propRecipes/soccerGoal';
+import { sodaCupDef } from '../../compile/propRecipes/sodaCup';
+import { spiceRackDef } from '../../compile/propRecipes/spiceRack';
+import { streetLightVintageDef } from '../../compile/propRecipes/streetLightVintage';
+import { tentDef } from '../../compile/propRecipes/tent';
+import { toiletBidetDef } from '../../compile/propRecipes/toiletBidet';
+import { toiletPortableDef } from '../../compile/propRecipes/toiletPortable';
+import { toiletStallDef } from '../../compile/propRecipes/toiletStall';
+import { tombstoneDef } from '../../compile/propRecipes/tombstone';
+import { toolboxDef } from '../../compile/propRecipes/toolbox';
+import { trafficConeLargeDef } from '../../compile/propRecipes/trafficConeLarge';
+import { trampolineDef } from '../../compile/propRecipes/trampoline';
+import { trashCanRecyclingDef } from '../../compile/propRecipes/trashCanRecycling';
+import { treadmillDef } from '../../compile/propRecipes/treadmill';
+import { treeAcaciaDef } from '../../compile/propRecipes/treeAcacia';
+import { treeCherryDef } from '../../compile/propRecipes/treeCherry';
+import { treeDeadTwistedDef } from '../../compile/propRecipes/treeDeadTwisted';
+import { treeLogDef } from '../../compile/propRecipes/treeLog';
+import { treeMapleDef } from '../../compile/propRecipes/treeMaple';
+import { treeSpruceDef } from '../../compile/propRecipes/treeSpruce';
+import { treeStumpDef } from '../../compile/propRecipes/treeStump';
+import { treeWillowDef } from '../../compile/propRecipes/treeWillow';
+import { urinalDef } from '../../compile/propRecipes/urinal';
+import { urinalTroughDef } from '../../compile/propRecipes/urinalTrough';
+import { vendingDrinkDef } from '../../compile/propRecipes/vendingDrink';
+import { vendingSnackDef } from '../../compile/propRecipes/vendingSnack';
+import { warningLightDef } from '../../compile/propRecipes/warningLight';
+import { weatherVaneDef } from '../../compile/propRecipes/weatherVane';
+import { wheelbarrowDef } from '../../compile/propRecipes/wheelbarrow';
+import { wheelchairDef } from '../../compile/propRecipes/wheelchair';
 
 export type BuiltinPropKind =
   | 'rock'
@@ -561,7 +748,192 @@ export type BuiltinPropKind =
   | 'tvCRT'
   | 'tvFlat'
   | 'waterBottle'
-  | 'wineBottle';
+  | 'wineBottle'
+  | 'arcadeAirHockey'
+  | 'arcadeChangeMachine'
+  | 'arcadeClaw'
+  | 'arcadeDance'
+  | 'arcadeFighting'
+  | 'arcadePinball'
+  | 'arcadePrize'
+  | 'arcadeRacing'
+  | 'arcadeShooting'
+  | 'arcadeSkeeball'
+  | 'baccaratTable'
+  | 'bakingSheet'
+  | 'barbedWire'
+  | 'barrierJersey'
+  | 'barrierPlastic'
+  | 'benchBus'
+  | 'bicycle'
+  | 'bikeRack'
+  | 'blackjackTable'
+  | 'bookcart'
+  | 'bookcaseFull'
+  | 'breadBox'
+  | 'brokenFurniture'
+  | 'bushBamboo'
+  | 'bushBerry'
+  | 'bushBoxwood'
+  | 'bushFern'
+  | 'bushHedge'
+  | 'bushRose'
+  | 'campfire'
+  | 'carDoor'
+  | 'cashRegister'
+  | 'chainLinkFenceSection'
+  | 'coffeeMaker'
+  | 'colander'
+  | 'condimentStation'
+  | 'coolerDrink'
+  | 'coolerProduce'
+  | 'crapsTable'
+  | 'crushedCar'
+  | 'crystal'
+  | 'cuttingBoard'
+  | 'dishRack'
+  | 'dressForm'
+  | 'drumKit'
+  | 'dumpsterCardboard'
+  | 'dumpsterIndustrial'
+  | 'dumpsterRecycling'
+  | 'dumpsterSmall'
+  | 'dumpsterTrash'
+  | 'easel'
+  | 'electricBox'
+  | 'engineBlock'
+  | 'fastFoodMenu'
+  | 'fireHydrantYellow'
+  | 'freezerChest'
+  | 'freezerUpright'
+  | 'fridgeSupermarket'
+  | 'fruitBowl'
+  | 'fryBasket'
+  | 'geode'
+  | 'globe'
+  | 'grassDead'
+  | 'grassFlowers'
+  | 'grassMoss'
+  | 'grassReeds'
+  | 'grassShort'
+  | 'grillCharcoal'
+  | 'grillGas'
+  | 'grillPit'
+  | 'grillPropane'
+  | 'grillSmoker'
+  | 'guitar'
+  | 'gurney'
+  | 'hayBale'
+  | 'hazardBarrel'
+  | 'hose'
+  | 'hvacUnit'
+  | 'kenoMachine'
+  | 'kettle'
+  | 'knifeBlock'
+  | 'ladder'
+  | 'lavaRock'
+  | 'libraryShelf'
+  | 'lifeguardTower'
+  | 'luggageCart'
+  | 'mailboxApartment'
+  | 'mailboxNewspaper'
+  | 'mailboxResidential'
+  | 'mailboxWall'
+  | 'mannequin'
+  | 'merryGoRound'
+  | 'microscope'
+  | 'mixer'
+  | 'newspaperBox'
+  | 'oxygenTank'
+  | 'pachinkoMachine'
+  | 'packageDropBox'
+  | 'pan'
+  | 'parkingMeter'
+  | 'parkingMeterDouble'
+  | 'pebble'
+  | 'pepperShaker'
+  | 'picnicBlanket'
+  | 'plantCactus'
+  | 'plantCactusLarge'
+  | 'plantFicus'
+  | 'plantHanging'
+  | 'plantMonstera'
+  | 'plantPalm'
+  | 'plantRose'
+  | 'plantSucculent'
+  | 'plantSunflower'
+  | 'plantVine'
+  | 'planterBox'
+  | 'portaPotty'
+  | 'pot'
+  | 'roadSignBike'
+  | 'roadSignConstruction'
+  | 'roadSignDoNotEnter'
+  | 'roadSignNoParking'
+  | 'roadSignOneWay'
+  | 'roadSignParking'
+  | 'roadSignPedestrian'
+  | 'roadSignSchool'
+  | 'roadSignSpeedLimit'
+  | 'roadSignYield'
+  | 'rockCoral'
+  | 'rockGranite'
+  | 'rockLimestone'
+  | 'rockObsidian'
+  | 'rockQuartz'
+  | 'rockSandstone'
+  | 'rockSlate'
+  | 'rollingPin'
+  | 'rouletteTable'
+  | 'rugOriental'
+  | 'rugRound'
+  | 'rugRunner'
+  | 'rustedBarrel'
+  | 'saltShaker'
+  | 'sandbag'
+  | 'satelliteDish'
+  | 'scaffold'
+  | 'scarecrow'
+  | 'scrapMetal'
+  | 'scrapPile'
+  | 'sculpture'
+  | 'securityCamera'
+  | 'shoppingBasket'
+  | 'shoppingCart'
+  | 'slide'
+  | 'slotMachineDigital'
+  | 'slotMachinePoker'
+  | 'slotMachineVintage'
+  | 'soccerGoal'
+  | 'sodaCup'
+  | 'spiceRack'
+  | 'streetLightVintage'
+  | 'tent'
+  | 'toiletBidet'
+  | 'toiletPortable'
+  | 'toiletStall'
+  | 'tombstone'
+  | 'toolbox'
+  | 'trafficConeLarge'
+  | 'trampoline'
+  | 'trashCanRecycling'
+  | 'treadmill'
+  | 'treeAcacia'
+  | 'treeCherry'
+  | 'treeDeadTwisted'
+  | 'treeLog'
+  | 'treeMaple'
+  | 'treeSpruce'
+  | 'treeStump'
+  | 'treeWillow'
+  | 'urinal'
+  | 'urinalTrough'
+  | 'vendingDrink'
+  | 'vendingSnack'
+  | 'warningLight'
+  | 'weatherVane'
+  | 'wheelbarrow'
+  | 'wheelchair';
 
 export type PropKind = BuiltinPropKind | ImportedPropKind;
 
@@ -622,6 +994,27 @@ export type PropKindDefinition = {
   seat?: PropSeat;
   container?: PropContainer;
   coverClass?: PropCoverClass;
+  // How this prop PLACES as a build piece (req_1684 — the custom-piece cook). A
+  // mesh-backed placeable is always kind:'prop' (the one render/bake/collision
+  // substrate); `buildPlacement` is what lets the cook give it piece-like BEHAVIOUR
+  // without a parallel kind: a cooked railing carries `snap:'edge', cover:'low'`, a
+  // wall-decal trim `snap:'surface'`. Absent = free-snap scenery (the legacy
+  // default propCatalogEntry already produced). Read by propCatalogEntry only.
+  buildPlacement?: PropBuildPlacement;
+};
+
+/** How a cooked prop SNAPS + reads as cover when placed as a build piece (req_1684).
+ *  Pairs the build-side snap mode with the kinds-side cover height so a Studio model
+ *  can be cooked into a railing/trim/fence that behaves like a built-in piece while
+ *  staying on the uniform prop substrate. */
+export type PropBuildPlacement = {
+  /** 'edge' (railings/fences), 'surface' (trim/decals onto a face), 'grid', or
+   *  'free' (default scenery). */
+  snap?: BuildSnapMode;
+  /** cover height the placed piece grants — railings/walls give cover. */
+  cover?: TileCoverHeight;
+  /** does it block line of sight (a solid wall yes, an open railing no). */
+  blocksSight?: boolean;
 };
 
 /** The dynamic-body recipe for a kickable prop (host sphere body). */
@@ -634,7 +1027,7 @@ export type PropDynamics = {
 
 /** The dynamics recipe for a kind, or null for static scenery. */
 export function propDynamics(kind: PropKind): PropDynamics | null {
-  return PROP_KIND_DEFINITIONS[kind].dynamics ?? null;
+  return propKindDefinition(kind).dynamics ?? null;
 }
 
 // ── PROPUSE-0610: the interaction bundle — what a prop IS to gameplay ────────
@@ -685,21 +1078,21 @@ export type PropContainer = {
 export type PropCoverClass = 'none' | 'soft' | 'hard';
 
 export function propMount(kind: PropKind): PropMount {
-  return PROP_KIND_DEFINITIONS[kind].mount ?? 'floor';
+  return propKindDefinition(kind).mount ?? 'floor';
 }
 
 export function propSeat(kind: PropKind): PropSeat | null {
-  return PROP_KIND_DEFINITIONS[kind].seat ?? null;
+  return propKindDefinition(kind).seat ?? null;
 }
 
 export function propContainer(kind: PropKind): PropContainer | null {
-  return PROP_KIND_DEFINITIONS[kind].container ?? null;
+  return propKindDefinition(kind).container ?? null;
 }
 
 /** Authored class wins; otherwise derive: foliage conceals (soft), a solid
  *  prop at least chest height blocks (hard), everything else is open air. */
 export function propCoverClass(kind: PropKind): PropCoverClass {
-  const def = PROP_KIND_DEFINITIONS[kind];
+  const def = propKindDefinition(kind);
   if (def.coverClass) return def.coverClass;
   if (def.tileKind === 'bush') return 'soft';
   if (def.solid && def.heightMeters >= 0.9) return 'hard';
@@ -993,6 +1386,193 @@ export const PROP_KIND_DEFINITIONS: Record<PropKind, PropKindDefinition> = {
   workbench: workbenchDef,
   writingDesk: writingDeskDef,
 
+  // ── PROPBATCH-0613 extras: unwired recipe files now registered ───────
+  arcadeAirHockey: arcadeAirHockeyDef,
+  arcadeChangeMachine: arcadeChangeMachineDef,
+  arcadeClaw: arcadeClawDef,
+  arcadeDance: arcadeDanceDef,
+  arcadeFighting: arcadeFightingDef,
+  arcadePinball: arcadePinballDef,
+  arcadePrize: arcadePrizeDef,
+  arcadeRacing: arcadeRacingDef,
+  arcadeShooting: arcadeShootingDef,
+  arcadeSkeeball: arcadeSkeeballDef,
+  baccaratTable: baccaratTableDef,
+  bakingSheet: bakingSheetDef,
+  barbedWire: barbedWireDef,
+  barrierJersey: barrierJerseyDef,
+  barrierPlastic: barrierPlasticDef,
+  benchBus: benchBusDef,
+  bicycle: bicycleDef,
+  bikeRack: bikeRackDef,
+  blackjackTable: blackjackTableDef,
+  bookcart: bookcartDef,
+  bookcaseFull: bookcaseFullDef,
+  breadBox: breadBoxDef,
+  brokenFurniture: brokenFurnitureDef,
+  bushBamboo: bushBambooDef,
+  bushBerry: bushBerryDef,
+  bushBoxwood: bushBoxwoodDef,
+  bushFern: bushFernDef,
+  bushHedge: bushHedgeDef,
+  bushRose: bushRoseDef,
+  campfire: campfireDef,
+  carDoor: carDoorDef,
+  cashRegister: cashRegisterDef,
+  chainLinkFenceSection: chainLinkFenceSectionDef,
+  coffeeMaker: coffeeMakerDef,
+  colander: colanderDef,
+  condimentStation: condimentStationDef,
+  coolerDrink: coolerDrinkDef,
+  coolerProduce: coolerProduceDef,
+  crapsTable: crapsTableDef,
+  crushedCar: crushedCarDef,
+  crystal: crystalDef,
+  cuttingBoard: cuttingBoardDef,
+  dishRack: dishRackDef,
+  dressForm: dressFormDef,
+  drumKit: drumKitDef,
+  dumpsterCardboard: dumpsterCardboardDef,
+  dumpsterIndustrial: dumpsterIndustrialDef,
+  dumpsterRecycling: dumpsterRecyclingDef,
+  dumpsterSmall: dumpsterSmallDef,
+  dumpsterTrash: dumpsterTrashDef,
+  easel: easelDef,
+  electricBox: electricBoxDef,
+  engineBlock: engineBlockDef,
+  fastFoodMenu: fastFoodMenuDef,
+  fireHydrantYellow: fireHydrantYellowDef,
+  freezerChest: freezerChestDef,
+  freezerUpright: freezerUprightDef,
+  fridgeSupermarket: fridgeSupermarketDef,
+  fruitBowl: fruitBowlDef,
+  fryBasket: fryBasketDef,
+  geode: geodeDef,
+  globe: globeDef,
+  grassDead: grassDeadDef,
+  grassFlowers: grassFlowersDef,
+  grassMoss: grassMossDef,
+  grassReeds: grassReedsDef,
+  grassShort: grassShortDef,
+  grillCharcoal: grillCharcoalDef,
+  grillGas: grillGasDef,
+  grillPit: grillPitDef,
+  grillPropane: grillPropaneDef,
+  grillSmoker: grillSmokerDef,
+  guitar: guitarDef,
+  gurney: gurneyDef,
+  hayBale: hayBaleDef,
+  hazardBarrel: hazardBarrelDef,
+  hose: hoseDef,
+  hvacUnit: hvacUnitDef,
+  kenoMachine: kenoMachineDef,
+  kettle: kettleDef,
+  knifeBlock: knifeBlockDef,
+  ladder: ladderDef,
+  lavaRock: lavaRockDef,
+  libraryShelf: libraryShelfDef,
+  lifeguardTower: lifeguardTowerDef,
+  luggageCart: luggageCartDef,
+  mailboxApartment: mailboxApartmentDef,
+  mailboxNewspaper: mailboxNewspaperDef,
+  mailboxResidential: mailboxResidentialDef,
+  mailboxWall: mailboxWallDef,
+  mannequin: mannequinDef,
+  merryGoRound: merryGoRoundDef,
+  microscope: microscopeDef,
+  mixer: mixerDef,
+  newspaperBox: newspaperBoxDef,
+  oxygenTank: oxygenTankDef,
+  pachinkoMachine: pachinkoMachineDef,
+  packageDropBox: packageDropBoxDef,
+  pan: panDef,
+  parkingMeter: parkingMeterDef,
+  parkingMeterDouble: parkingMeterDoubleDef,
+  pebble: pebbleDef,
+  pepperShaker: pepperShakerDef,
+  picnicBlanket: picnicBlanketDef,
+  plantCactus: plantCactusDef,
+  plantCactusLarge: plantCactusLargeDef,
+  plantFicus: plantFicusDef,
+  plantHanging: plantHangingDef,
+  plantMonstera: plantMonsteraDef,
+  plantPalm: plantPalmDef,
+  plantRose: plantRoseDef,
+  plantSucculent: plantSucculentDef,
+  plantSunflower: plantSunflowerDef,
+  plantVine: plantVineDef,
+  planterBox: planterBoxDef,
+  portaPotty: portaPottyDef,
+  pot: potDef,
+  roadSignBike: roadSignBikeDef,
+  roadSignConstruction: roadSignConstructionDef,
+  roadSignDoNotEnter: roadSignDoNotEnterDef,
+  roadSignNoParking: roadSignNoParkingDef,
+  roadSignOneWay: roadSignOneWayDef,
+  roadSignParking: roadSignParkingDef,
+  roadSignPedestrian: roadSignPedestrianDef,
+  roadSignSchool: roadSignSchoolDef,
+  roadSignSpeedLimit: roadSignSpeedLimitDef,
+  roadSignYield: roadSignYieldDef,
+  rockCoral: rockCoralDef,
+  rockGranite: rockGraniteDef,
+  rockLimestone: rockLimestoneDef,
+  rockObsidian: rockObsidianDef,
+  rockQuartz: rockQuartzDef,
+  rockSandstone: rockSandstoneDef,
+  rockSlate: rockSlateDef,
+  rollingPin: rollingPinDef,
+  rouletteTable: rouletteTableDef,
+  rugOriental: rugOrientalDef,
+  rugRound: rugRoundDef,
+  rugRunner: rugRunnerDef,
+  rustedBarrel: rustedBarrelDef,
+  saltShaker: saltShakerDef,
+  sandbag: sandbagDef,
+  satelliteDish: satelliteDishDef,
+  scaffold: scaffoldDef,
+  scarecrow: scarecrowDef,
+  scrapMetal: scrapMetalDef,
+  scrapPile: scrapPileDef,
+  sculpture: sculptureDef,
+  securityCamera: securityCameraDef,
+  shoppingBasket: shoppingBasketDef,
+  shoppingCart: shoppingCartDef,
+  slide: slideDef,
+  slotMachineDigital: slotMachineDigitalDef,
+  slotMachinePoker: slotMachinePokerDef,
+  slotMachineVintage: slotMachineVintageDef,
+  soccerGoal: soccerGoalDef,
+  sodaCup: sodaCupDef,
+  spiceRack: spiceRackDef,
+  streetLightVintage: streetLightVintageDef,
+  tent: tentDef,
+  toiletBidet: toiletBidetDef,
+  toiletPortable: toiletPortableDef,
+  toiletStall: toiletStallDef,
+  tombstone: tombstoneDef,
+  toolbox: toolboxDef,
+  trafficConeLarge: trafficConeLargeDef,
+  trampoline: trampolineDef,
+  trashCanRecycling: trashCanRecyclingDef,
+  treadmill: treadmillDef,
+  treeAcacia: treeAcaciaDef,
+  treeCherry: treeCherryDef,
+  treeDeadTwisted: treeDeadTwistedDef,
+  treeLog: treeLogDef,
+  treeMaple: treeMapleDef,
+  treeSpruce: treeSpruceDef,
+  treeStump: treeStumpDef,
+  treeWillow: treeWillowDef,
+  urinal: urinalDef,
+  urinalTrough: urinalTroughDef,
+  vendingDrink: vendingDrinkDef,
+  vendingSnack: vendingSnackDef,
+  warningLight: warningLightDef,
+  weatherVane: weatherVaneDef,
+  wheelbarrow: wheelbarrowDef,
+  wheelchair: wheelchairDef,
+
   ...IMPORTED_PROP_DEFINITIONS,
 };
 
@@ -1006,23 +1586,30 @@ export const PROP_KINDS = Object.keys(PROP_KIND_DEFINITIONS) as PropKind[];
 export type PropCategory =
   | 'nature' | 'trees' | 'rocks' | 'street' | 'signs' | 'furniture'
   | 'household' | 'media' | 'commerce' | 'junkyard' | 'sport'
-  | 'park' | 'shops' | 'imported';
+  | 'park' | 'shops' | 'imported' | 'studio';
 
 export const PROP_CATEGORIES: Record<PropCategory, PropKind[]> = {
-  nature: ['bush', 'bushLarge', 'bushLow', 'bushSparse', 'grassPatch', 'grassTall'],
-  trees: ['treeOak', 'treeOakYoung', 'treeOakGiant', 'treePine', 'treePineYoung', 'treePineGiant', 'treeBirch', 'treeCypress', 'treePalm', 'treeDead'],
-  rocks: ['rock', 'rockLarge', 'rockSmall', 'boulder', 'rockFlat', 'rockSpire', 'rockMossy', 'rockPile', 'rockJagged', 'rockShard'],
-  street: ['fireHydrant', 'streetLight', 'payphone', 'mailbox', 'dumpster', 'fence', 'trafficCone', 'barrier', 'trashCan', 'bench', 'planter', 'telephonePole', 'fireExtinguisher'],
+  // 'bush' (the solid-sphere bush prop) retired — bushes are now the painted bush
+  // TILE populated as foliage cards (render3d/grassPopulation BushField). The other
+  // bush variants stay until they get the same treatment.
+  nature: ['bushLarge', 'bushLow', 'bushSparse', 'grassPatch', 'grassTall', 'bushBamboo', 'bushBerry', 'bushBoxwood', 'bushFern', 'bushHedge', 'bushRose', 'grassDead', 'grassFlowers', 'grassMoss', 'grassReeds', 'grassShort', 'plantSunflower'],
+  trees: ['treeOak', 'treeOakYoung', 'treeOakGiant', 'treePine', 'treePineYoung', 'treePineGiant', 'treeBirch', 'treeCypress', 'treePalm', 'treeDead', 'treeAcacia', 'treeCherry', 'treeDeadTwisted', 'treeLog', 'treeMaple', 'treeSpruce', 'treeStump', 'treeWillow'],
+  rocks: ['rock', 'rockLarge', 'rockSmall', 'boulder', 'rockFlat', 'rockSpire', 'rockMossy', 'rockPile', 'rockJagged', 'rockShard', 'crystal', 'geode', 'lavaRock', 'pebble', 'rockCoral', 'rockGranite', 'rockLimestone', 'rockObsidian', 'rockQuartz', 'rockSandstone', 'rockSlate', 'tombstone'],
+  street: ['fireHydrant', 'streetLight', 'payphone', 'mailbox', 'dumpster', 'fence', 'trafficCone', 'barrier', 'trashCan', 'bench', 'planter', 'telephonePole', 'fireExtinguisher', 'barrierJersey', 'barrierPlastic', 'benchBus', 'bikeRack', 'electricBox', 'fireHydrantYellow', 'hvacUnit', 'mailboxApartment', 'mailboxNewspaper', 'mailboxResidential', 'mailboxWall', 'newspaperBox', 'packageDropBox', 'parkingMeter', 'parkingMeterDouble', 'planterBox', 'portaPotty', 'roadSignBike', 'roadSignConstruction', 'roadSignDoNotEnter', 'roadSignNoParking', 'roadSignOneWay', 'roadSignParking', 'roadSignPedestrian', 'roadSignSchool', 'roadSignSpeedLimit', 'roadSignYield', 'streetLightVintage', 'trafficConeLarge', 'trashCanRecycling'],
   signs: ['streetSign', 'stopSign', 'trafficLight', 'businessSign', 'shopSign', 'poster', 'posterSmall', 'posterLarge', 'posterWide', 'posterTall', 'hospitalSign', 'policeSign', 'exitSign', 'neonSign', 'blockLetters', 'neonLogo', 'neonLogoDouble', 'ledTicker', 'noticeBoard', 'corkboard', 'whiteboard', 'chalkboard'],
-  furniture: ['diningChair', 'armchair', 'officeChair', 'foldingChair', 'couch', 'table', 'floorLamp', 'wallPainting', 'ledLight', 'mirror', 'barStool', 'beanBag', 'bookcase', 'chaiseLounge', 'coffeeTable', 'computerDesk', 'conferenceTable', 'consoleTable', 'cornerDesk', 'diningTable', 'directorsChair', 'displayShelf', 'draftingTable', 'dvdShelf', 'endTable', 'floatingShelf', 'futon', 'highChair', 'loveseat', 'magazineRack', 'nightstand', 'officeDesk', 'ottoman', 'patioChair', 'picnicTable', 'pokerTable', 'receptionDesk', 'recliner', 'rockingChair', 'sectional', 'sideTable', 'sofa', 'standingDesk', 'stool', 'storageShelf', 'toolShelf', 'tvStand', 'wallShelf', 'wineRack', 'wireShelf', 'workbench', 'writingDesk', 'classroomDesk', 'daybed'],
-  household: ['bedSingle', 'bedDouble', 'cupboard', 'sink', 'oven', 'fridge', 'computer', 'toiletPaper', 'bathtub', 'blender', 'bottle', 'bowl', 'broom', 'bucket', 'bunkBed', 'can', 'cardboardBox', 'ceilingLamp', 'clock', 'coatRack', 'cup', 'curtain', 'deskLamp', 'dresser', 'dryer', 'filingCabinet', 'fishOnWall', 'fishWall', 'fishtank', 'fork', 'hospitalBed', 'jar', 'knife', 'mattress', 'microwave', 'mug', 'plate', 'pottedPlant', 'radiator', 'rug', 'safe', 'shower', 'sodaCan', 'soupCan', 'spoon', 'storageBin', 'toaster', 'toilet', 'toolCabinet', 'towel', 'towelRack', 'vase', 'wallSconce', 'wardrobe', 'washingMachine', 'waterBottle', 'waterCooler', 'wineBottle'],
-  media: ['bookStack', 'recordPlayer', 'vinylRecord', 'albumCover', 'cassette', 'speaker', 'speakerStack', 'gameConsole', 'keyboard', 'laptop', 'monitor', 'phone', 'printer', 'router', 'serverRack', 'tablet', 'tv', 'tvCRT', 'tvFlat'],
-  commerce: ['vendingMachine', 'gasPump', 'storeShelf', 'crate', 'pallet', 'palletStack'],
-  junkyard: ['shippingContainer', 'concretePipe', 'pipeStack', 'corrugatedSheet', 'cableSpool', 'lockerSet', 'oilTank', 'tire', 'tireStack', 'barrel', 'steelDrum', 'propaneTank', 'jerryCan', 'cinderBlock', 'brick', 'rubblePile', 'radioTower'],
-  sport: ['ballBeach', 'ballSoccer', 'ballBasketball', 'basketballHoop'],
-  park: ['fountain', 'drinkingFountain', 'loungeChair', 'swingset', 'sandCastle', 'picketFence', 'appleTree', 'apple', 'monument'],
-  shops: ['arcadeCabinet', 'slotMachine', 'clothingRack', 'displayCase', 'liquorShelf', 'beerCase', 'dinerBooth', 'orderCounter', 'menuBoard', 'sodaMachine', 'openSign', 'greenCrossSign', 'bong', 'dice', 'katana', 'makeup', 'makeupPalette', 'stage'],
+  furniture: ['diningChair', 'armchair', 'officeChair', 'foldingChair', 'couch', 'table', 'floorLamp', 'wallPainting', 'ledLight', 'mirror', 'barStool', 'beanBag', 'bookcase', 'chaiseLounge', 'coffeeTable', 'computerDesk', 'conferenceTable', 'consoleTable', 'cornerDesk', 'diningTable', 'directorsChair', 'displayShelf', 'draftingTable', 'dvdShelf', 'endTable', 'floatingShelf', 'futon', 'highChair', 'loveseat', 'magazineRack', 'nightstand', 'officeDesk', 'ottoman', 'patioChair', 'picnicTable', 'pokerTable', 'receptionDesk', 'recliner', 'rockingChair', 'sectional', 'sideTable', 'sofa', 'standingDesk', 'stool', 'storageShelf', 'toolShelf', 'tvStand', 'wallShelf', 'wineRack', 'wireShelf', 'workbench', 'writingDesk', 'classroomDesk', 'daybed', 'bookcart', 'bookcaseFull', 'dishRack', 'libraryShelf', 'spiceRack', 'toiletPortable', 'wheelchair'],
+  household: ['bedSingle', 'bedDouble', 'cupboard', 'sink', 'oven', 'fridge', 'computer', 'toiletPaper', 'bathtub', 'blender', 'bottle', 'bowl', 'broom', 'bucket', 'bunkBed', 'can', 'cardboardBox', 'ceilingLamp', 'clock', 'coatRack', 'cup', 'curtain', 'deskLamp', 'dresser', 'dryer', 'filingCabinet', 'fishOnWall', 'fishWall', 'fishtank', 'fork', 'hospitalBed', 'jar', 'knife', 'mattress', 'microwave', 'mug', 'plate', 'pottedPlant', 'radiator', 'rug', 'safe', 'shower', 'sodaCan', 'soupCan', 'spoon', 'storageBin', 'toaster', 'toilet', 'toolCabinet', 'towel', 'towelRack', 'vase', 'wallSconce', 'wardrobe', 'washingMachine', 'waterBottle', 'waterCooler', 'wineBottle', 'bakingSheet', 'bicycle', 'breadBox', 'coffeeMaker', 'colander', 'cuttingBoard', 'dumpsterCardboard', 'dumpsterIndustrial', 'dumpsterRecycling', 'dumpsterSmall', 'dumpsterTrash', 'easel', 'fruitBowl', 'fryBasket', 'globe', 'gurney', 'hose', 'kettle', 'knifeBlock', 'microscope', 'mixer', 'oxygenTank', 'pan', 'pepperShaker', 'plantCactus', 'plantCactusLarge', 'plantFicus', 'plantHanging', 'plantMonstera', 'plantPalm', 'plantRose', 'plantSucculent', 'pot', 'rollingPin', 'rugOriental', 'rugRound', 'rugRunner', 'saltShaker', 'securityCamera', 'sodaCup', 'toiletBidet', 'toiletStall', 'treadmill', 'urinal', 'urinalTrough', 'weatherVane'],
+  media: ['bookStack', 'recordPlayer', 'vinylRecord', 'albumCover', 'cassette', 'speaker', 'speakerStack', 'gameConsole', 'keyboard', 'laptop', 'monitor', 'phone', 'printer', 'router', 'serverRack', 'tablet', 'tv', 'tvCRT', 'tvFlat', 'drumKit', 'guitar', 'plantVine'],
+  commerce: ['vendingMachine', 'gasPump', 'storeShelf', 'crate', 'pallet', 'palletStack', 'cashRegister', 'condimentStation', 'coolerDrink', 'coolerProduce', 'fastFoodMenu', 'freezerChest', 'freezerUpright', 'fridgeSupermarket', 'shoppingBasket', 'shoppingCart', 'vendingDrink', 'vendingSnack'],
+  junkyard: ['shippingContainer', 'concretePipe', 'pipeStack', 'corrugatedSheet', 'cableSpool', 'lockerSet', 'oilTank', 'tire', 'tireStack', 'barrel', 'steelDrum', 'propaneTank', 'jerryCan', 'cinderBlock', 'brick', 'rubblePile', 'radioTower', 'barbedWire', 'brokenFurniture', 'carDoor', 'chainLinkFenceSection', 'crushedCar', 'engineBlock', 'hazardBarrel', 'ladder', 'rustedBarrel', 'sandbag', 'satelliteDish', 'scaffold', 'scrapMetal', 'scrapPile', 'toolbox', 'warningLight', 'wheelbarrow'],
+  sport: ['ballBeach', 'ballSoccer', 'ballBasketball', 'basketballHoop', 'arcadePinball', 'arcadeSkeeball', 'soccerGoal', 'trampoline'],
+  park: ['fountain', 'drinkingFountain', 'loungeChair', 'swingset', 'sandCastle', 'picketFence', 'appleTree', 'apple', 'monument', 'campfire', 'grillCharcoal', 'grillGas', 'grillPit', 'grillPropane', 'grillSmoker', 'hayBale', 'lifeguardTower', 'merryGoRound', 'picnicBlanket', 'scarecrow', 'sculpture', 'slide', 'tent'],
+  shops: ['arcadeCabinet', 'slotMachine', 'clothingRack', 'displayCase', 'liquorShelf', 'beerCase', 'dinerBooth', 'orderCounter', 'menuBoard', 'sodaMachine', 'openSign', 'greenCrossSign', 'bong', 'dice', 'katana', 'makeup', 'makeupPalette', 'stage', 'arcadeAirHockey', 'arcadeChangeMachine', 'arcadeClaw', 'arcadeDance', 'arcadeFighting', 'arcadePrize', 'arcadeRacing', 'arcadeShooting', 'baccaratTable', 'blackjackTable', 'crapsTable', 'dressForm', 'kenoMachine', 'luggageCart', 'mannequin', 'pachinkoMachine', 'rouletteTable', 'slotMachineDigital', 'slotMachinePoker', 'slotMachineVintage'],
   imported: [...IMPORTED_PROP_KINDS],
+  // Studio-cooked props (req_1134) are RUNTIME-registered (the cooked-asset
+  // overlay), so this static shelf is empty; the palette lists them live via
+  // catalogEntriesByKind('prop') + propCategory → 'studio'.
+  studio: [],
 };
 
 export const PROP_CATEGORY_NAMES = Object.keys(PROP_CATEGORIES) as PropCategory[];
@@ -1030,13 +1617,40 @@ export const PROP_CATEGORY_NAMES = Object.keys(PROP_CATEGORIES) as PropCategory[
 const CATEGORY_BY_KIND: Record<string, PropCategory> = {};
 for (const cat of PROP_CATEGORY_NAMES) for (const k of PROP_CATEGORIES[cat]) CATEGORY_BY_KIND[k] = cat;
 
-/** The shelf a kind lives on (every kind has one — the suite enforces it). */
+/** The shelf a kind lives on (every BUILT-IN kind has one — the suite enforces
+ *  it). A runtime cooked kind has no static shelf, so it lands on 'studio'. */
 export function propCategory(kind: PropKind): PropCategory {
-  return CATEGORY_BY_KIND[kind];
+  return CATEGORY_BY_KIND[kind] ?? (isCookedPropKind(kind) ? 'studio' : (undefined as unknown as PropCategory));
+}
+
+// ── Cooked (Studio-compiled) prop descriptors: a RUNTIME overlay (req_1134) ──
+// Built-in kinds live in PROP_KIND_DEFINITIONS (static). STUDIO-COOKED props are
+// installed at RUNTIME (the cooked-asset content store, editors/model/cookedAssetStream),
+// so their descriptors are registered HERE and merged into every resolver. Same
+// shape as the imported-prop merge above, but populated live instead of build-time
+// generated. Empty by default (the game/headless paths never register); the editor
+// populates it from the cooked-asset stream on load. Keyed by the asset id, which
+// IS a placed prop's `kind`.
+const COOKED_PROP_DEFS: Record<string, PropKindDefinition> = {};
+
+/** Register (or replace) cooked prop descriptors into the runtime overlay — the
+ *  editor calls this from the cooked-asset store so physics/palette/render/bake all
+ *  resolve a cooked kind through the SAME lookup as a built-in. */
+export function registerCookedProps(defs: readonly PropKindDefinition[]): void {
+  for (const d of defs) COOKED_PROP_DEFS[d.kind] = d;
+}
+
+/** Is this a Studio-cooked prop kind (in the runtime overlay, not built-in)? */
+export function isCookedPropKind(value: string): boolean {
+  return Object.prototype.hasOwnProperty.call(COOKED_PROP_DEFS, value);
+}
+
+export function cookedPropKinds(): PropKind[] {
+  return Object.keys(COOKED_PROP_DEFS) as PropKind[];
 }
 
 export function isPropKind(value: string): value is PropKind {
-  return Object.prototype.hasOwnProperty.call(PROP_KIND_DEFINITIONS, value);
+  return Object.prototype.hasOwnProperty.call(PROP_KIND_DEFINITIONS, value) || isCookedPropKind(value);
 }
 
 // ── PARAMETRIC props (req_0893): kinds whose recipe/material is a function of
@@ -1051,7 +1665,19 @@ export function propTakesText(kind: PropKind): boolean {
 }
 
 export function propKindDefinition(kind: PropKind): PropKindDefinition {
-  return PROP_KIND_DEFINITIONS[kind];
+  return PROP_KIND_DEFINITIONS[kind] ?? COOKED_PROP_DEFS[kind] ?? COOKED_PROP_FALLBACK(kind);
+}
+
+// A defensive placeholder for a cooked kind referenced before its descriptor has
+// been registered (a load race) — a 1 m solid box, so a stale reference renders a
+// cube instead of crashing on `undefined.footprint…`. Should be rare; the editor
+// registers cooked descriptors on store load, before any placement resolves.
+function COOKED_PROP_FALLBACK(kind: PropKind): PropKindDefinition {
+  return {
+    kind, label: String(kind), solid: true,
+    footprintRadiusMeters: 0.5, footprintWidthMeters: 1, footprintDepthMeters: 1,
+    heightMeters: 1, tileKind: 'wall', trafficControl: 'none',
+  };
 }
 
 export function propKindNamesForConsole(): string {
