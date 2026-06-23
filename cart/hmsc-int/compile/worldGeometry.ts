@@ -478,6 +478,13 @@ function cookedPropMesh(kind: string): ImportedMeshPropMesh | null {
   if (!verts || verts.length === 0) return null;
   const tex = cookedPropTexture(asset.texRef);
   const slotsWithGlass = cookedMeshSlotRanges(asset);
+  // STAIRS/RAMP (req_1701): a cooked staircase/ramp piece collides as its WALKABLE
+  // slope — placedPieceRamps bakes a heightfield into the COLLIDERS lump (req_1700).
+  // Ship its mesh NON-solid so the compiled loader skips the instance-derived box
+  // islands (world_loader.meshPropIslands returns none for !solid); otherwise that
+  // box would re-block the slope you just made walkable. Render is unaffected.
+  const pk = asset.descriptor.buildPlacement?.pieceKind;
+  const collidesAsSlope = pk === 'stairs' || pk === 'ramp';
   return {
     key: asset.meshRef,
     source: `cooked:${asset.id}`,
@@ -487,7 +494,7 @@ function cookedPropMesh(kind: string): ImportedMeshPropMesh | null {
     footprintWidthMeters: asset.collision.footprintWidthMeters,
     footprintDepthMeters: asset.collision.footprintDepthMeters,
     heightMeters: asset.collision.heightMeters,
-    solid: asset.descriptor.solid,
+    solid: collidesAsSlope ? false : asset.descriptor.solid,
     vertices: verts,
     ...(tex ? { png: tex.png } : {}),
     // Glass faces (req_1673) ride as a trailing sub-range, the same MESH_PROPS slot
