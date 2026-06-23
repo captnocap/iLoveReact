@@ -14,6 +14,7 @@ import { registerCookedProps } from '../../game/kinds/props';
 import { registerCookedCatalog } from '../../game/build/catalog';
 import { registerCookedAssetLookup } from '../../compile/propRecipes/resolve';
 import { editorChannel } from '../store';
+import { horizontalSurfacesFromMesh } from './mountSurfaces';
 import type { CookedAsset, CookKind, CookResult } from './cookedAsset';
 import {
   cookedAssetStream, cookedAssetsByKind, installEvent, installedAssets,
@@ -79,6 +80,24 @@ export function cookedAssetById(id: string): CookedAsset | null { return channel
 registerCookedAssetLookup(cookedAssetById);
 export function cookedMeshBlob(meshRef: string): Float32Array | null { return meshBlobFor(channel().state(), meshRef); }
 export function cookedTextureBlob(texRef: string): string | null { return textureBlobFor(channel().state(), texRef); }
+
+// req_1687: the prop-local Y of every flat surface a cooked model can hold a prop
+// on (a shelf's boards), derived from the mesh and cached by meshRef (geometry is
+// content-addressed, so a ref pins one surface set forever). Placement maps these
+// to world (piece.y + y) so a prop drops on the LAYER under the cursor, not the
+// box top. <2 surfaces → null (an ordinary single-top prop keeps box-top behavior).
+const surfaceYCache = new Map<string, number[]>();
+export function cookedPropSurfaceYs(kind: string): number[] | null {
+  const asset = cookedAssetById(kind);
+  if (!asset) return null;
+  const cached = surfaceYCache.get(asset.meshRef);
+  if (cached) return cached.length >= 2 ? cached : null;
+  const verts = cookedMeshBlob(asset.meshRef);
+  if (!verts) return null;
+  const ys = horizontalSurfacesFromMesh(verts).map((s) => s.y);
+  surfaceYCache.set(asset.meshRef, ys);
+  return ys.length >= 2 ? ys : null;
+}
 
 /** Subscribe a non-React consumer (a workbench source) to catalog changes. */
 export function subscribeCookedAssets(fn: () => void): () => void {

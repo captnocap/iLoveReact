@@ -38,7 +38,7 @@ import { CHUNK_TILES } from './chunks';
 import { parseAddress, cellAddress } from './address';
 import { TILE_KINDS } from './world/tileKinds';
 import { PROP_CATEGORIES, PROP_CATEGORY_NAMES, isPropKind, propCategory, type PropCategory } from './game/kinds/props';
-import { useCookedAssets } from './editors/model/cookedAssets';
+import { useCookedAssets, cookedPropSurfaceYs } from './editors/model/cookedAssets';
 import { WATER_BODY_PRESETS, WATER_BODY_PRESET_IDS } from './game/kinds/waterBodies';
 
 const FAR_CLIP = 4000;
@@ -548,6 +548,18 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     return level > 0 ? level * METERS_PER_LEVEL : groundTopAt(x, z);
   }, [stage, groundTopAt]);
 
+  // req_1687: the WORLD-Y of every flat surface a placed prop can hold a prop on
+  // (a multi-layer model's boards), so the snap resolver lands a prop on the LAYER
+  // under the crosshair instead of the box top. The prop-local levels come from the
+  // cooked mesh (cached by meshRef); piece.y lifts them to world. Non-multi-layer
+  // props return null and keep box-top placement.
+  const propSurfacesFor = useCallback((piece: PlacedBuildPiece): number[] | null => {
+    const def = GAME_BUILD.catalog.get(piece.pieceId);
+    if (def.kind !== 'prop' || !def.propKind) return null;
+    const local = cookedPropSurfaceYs(def.propKind);
+    return local ? local.map((y) => piece.y + y) : null;
+  }, []);
+
   // Resolve the cursor to a snap target with the SAME inputs F2 uses (the armed
   // catalog entry's snap mode + size, the ghost yaw, the standing pieces).
   const resolveAt = useCallback((sx: number, sy: number): SnapTarget | null => {
@@ -587,10 +599,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       size,
       yawDegrees: ghostYawRef.current,
       freeform,
+      propSurfacesFor, // req_1687: land a prop on the shelf layer under the cursor
       ...(prefabAnchor ? { anchorLocal: { x: prefabAnchor.x, z: prefabAnchor.z } } : {}),
       tuning: ISO_SNAP_TUNING,
     });
-  }, [stage, placeGroundAt]);
+  }, [stage, placeGroundAt, propSurfacesFor]);
   // The per-frame ghost poll (below) reads the latest resolveAt through this ref, so it
   // never snaps against a stale world/terrain after a paint edit.
   const resolveAtRef = useRef(resolveAt);

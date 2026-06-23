@@ -415,4 +415,48 @@ test('REQ-0650: fine centers keep even-celled spans edge-aligned to tile lines',
   assertClose(fineModuleCenter(5.2, 0.6, 1), 5.5, 1e-9, 'sub-module spans ride the substrate cell center');
 });
 
+// ── req_1687: a prop lands on the multi-layer surface UNDER the crosshair ──────
+
+// a stand-in shelf: a 3×3×0.25 wall at z=5 whose front face spans y∈[0,3], with
+// three injected board levels (the cooked-mesh surfaces in the real editor).
+const SHELF_LEVELS = [0.5, 1.0, 1.5];
+const shelfSurfaces = (_piece: PlacedBuildPiece) => SHELF_LEVELS;
+function shelfInput(over: Partial<SnapInput>): SnapInput {
+  const shelf = placed('wall.concrete.common', 0, 5);
+  return snapInput({ pieces: [shelf], snap: 'free', propSurfacesFor: shelfSurfaces, ...over });
+}
+
+test('a prop drops on the board the crosshair points into, not the box top', () => {
+  // a level horizontal ray keeps y constant, so the front-face hit is at y=1.25 —
+  // the open space above the 1.0 board; the prop lands ON that 1.0 board.
+  const ray = { origin: { x: 0, y: 1.25, z: 0 }, dir: norm(0, 0, 1) };
+  const t = resolveSnapTarget(shelfInput({ ray }));
+  assert(!!t, 'the shelf face resolves');
+  assertEqual(t!.surface, 'pieceFace', 'on the prop, not the ground');
+  assertClose(t!.placement.y, 1.0, 1e-6, 'the layer under the cursor, not the box top (3)');
+});
+
+test('aiming at the top of a shelf lands on its top board', () => {
+  const ray = { origin: { x: 0, y: 4, z: 5 }, dir: norm(0, -1, 0) };
+  const t = resolveSnapTarget(shelfInput({ ray }));
+  assertClose(t!.placement.y, 1.5, 1e-6, 'the highest board, picked from the top-face hit');
+});
+
+test('aiming below the lowest board still lands on the shelf, never the box top', () => {
+  const ray = { origin: { x: 0, y: 0.2, z: 0 }, dir: norm(0, 0, 1) };
+  const t = resolveSnapTarget(shelfInput({ ray }));
+  assertClose(t!.placement.y, 0.5, 1e-6, 'the lowest board, not a punch-through to the top');
+});
+
+test('without injected surfaces the same ray uses the legacy box path (no layer pick)', () => {
+  // the layer pick is the ONLY thing that changes: with surfaces the 1.25 hit
+  // lands on the 1.0 board; without them the placement falls back to the
+  // unchanged gridFacePlacementY box behavior (not a board level).
+  const ray = { origin: { x: 0, y: 1.25, z: 0 }, dir: norm(0, 0, 1) };
+  const withS = resolveSnapTarget(shelfInput({ ray }))!.placement.y;
+  const without = resolveSnapTarget(shelfInput({ ray, propSurfacesFor: undefined }))!.placement.y;
+  assertClose(withS, 1.0, 1e-6, 'the feature picks the 1.0 board');
+  assert(Math.abs(without - 1.0) > 0.1, 'no surfaces → the unchanged box path, never the board pick');
+});
+
 finish('build-snap');

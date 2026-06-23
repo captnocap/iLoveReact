@@ -43,6 +43,10 @@ export type SnapTuning = {
    *  whose lattice it joins (the floor/roof twin of the wall magnet) before
    *  falling back to the world lattice */
   plateAnchorMagnetMeters: number;
+  /** req_1687: how far ABOVE a model's surface level the crosshair may sit and
+   *  still land a prop on that layer — the air gap between a shelf's boards is
+   *  the slack a body-height cursor needs to pick the board it points into */
+  surfacePickToleranceMeters: number;
 };
 
 export const SNAP_TUNING_DEFAULTS: SnapTuning = {
@@ -55,6 +59,7 @@ export const SNAP_TUNING_DEFAULTS: SnapTuning = {
   wallEndpointSnapMeters: 0.5,
   wallAnchorMagnetMeters: 1,
   plateAnchorMagnetMeters: 3,
+  surfacePickToleranceMeters: 0.2,
 };
 
 export type SnapTarget = {
@@ -94,6 +99,11 @@ export type SnapInput = {
    *  1–2 tiles off every natively-placed floor. `size` should be the anchor
    *  piece's own size so the pitch is its module pitch. */
   anchorLocal?: { x: number; z: number };
+  /** req_1687: the WORLD-Y of each flat surface a hit prop can hold a prop on (a
+   *  shelf's boards), low → high. When the ray lands on such a multi-layer prop,
+   *  placement drops onto the layer UNDER the crosshair instead of the box top.
+   *  undefined / <2 surfaces → unchanged single-top behavior. */
+  propSurfacesFor?: (piece: PlacedBuildPiece) => number[] | null;
   tuning?: SnapTuning;
 };
 
@@ -453,6 +463,20 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
     if (originV !== null && pitch > grid) return originV + Math.round((hitV + a - originV) / pitch) * pitch - a;
     return snapToCellCenter(hitV + a, pitch) - a;
   };
+  // req_1687: on a MULTI-LAYER prop (a shelf), land on the board UNDER the
+  // crosshair — the highest authored surface at or just below the hit, within a
+  // body-height pick window — instead of the whole-box top. A single-top prop
+  // (no surfaces, or one) keeps the box-top placement exactly as before.
+  const onFacePlacementY = (wx: number, wz: number): number => {
+    const boxY = gridFacePlacementY(pieceHit!.piece, input.size, wx, wz, yaw);
+    const surfaces = input.propSurfacesFor?.(pieceHit!.piece);
+    if (!surfaces || surfaces.length < 2) return boxY;
+    let pick: number | null = null;
+    for (const sy of surfaces) {
+      if (sy <= hit.y + tuning.surfacePickToleranceMeters && (pick === null || sy > pick)) pick = sy;
+    }
+    return pick ?? surfaces[0]; // below the lowest board → the lowest board, never the box top
+  };
   const substratePlacement = () => {
     const x = snapAxis(hit.x, ax, spanX, pitchX, plateAnchor ? plateAnchor.x : null);
     const z = snapAxis(hit.z, az, spanZ, pitchZ, plateAnchor ? plateAnchor.z : null);
@@ -460,7 +484,7 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
     // set), so the piece sits on the terrain it covers
     const y = common.surface === 'ground'
       ? input.groundTopAt(x + ax, z + az)
-      : gridFacePlacementY(pieceHit!.piece, input.size, x + ax, z + az, yaw);
+      : onFacePlacementY(x + ax, z + az);
     return { x, y, z, yawDegrees: yaw };
   };
 
@@ -471,7 +495,7 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
         const z = quantize(hit.z, tuning.freeformSnapMeters);
         const y = common.surface === 'ground'
           ? input.groundTopAt(x, z)
-          : gridFacePlacementY(pieceHit!.piece, input.size, x, z, yaw);
+          : onFacePlacementY(x, z);
         return { ...common, placement: { x, y, z, yawDegrees: yaw } };
       }
       return { ...common, placement: substratePlacement() };
