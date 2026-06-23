@@ -226,6 +226,26 @@ test('REQ-0466: unsupported ground walls keep the old centered thickness', () =>
   assertClose(span.maxV, 0.125, 1e-9, 'freestanding wall keeps centered front half');
 });
 
+test('req_1713: a neighbor-room floor touching a wall END does not center it — the run stays aligned', () => {
+  // Two collinear walls along z on the same +x floor edge; both should sit onto
+  // that floor (offset +x). The first wall has the SOUTH room's floor butting
+  // its z=0 end on the −x side — it only TOUCHES the end, never runs along the
+  // wall, so it must not count as −x support (which would center just that
+  // segment and step the run). The screenshots' misaligned wall.
+  const floorA = placed('floor.concrete.common', 4.5, 1.5, { y: 0 }); // +x, under wallA run z[0,3]
+  const floorB = placed('floor.concrete.common', 4.5, 4.5, { y: 0 }); // +x, under wallB run z[3,6]
+  const endFloor = placed('floor.concrete.common', 1.5, -1.5, { y: 0 }); // −x, z[-3,0]: touches wallA's z=0 end only
+  const wallA = placed('wall.concrete.common', 3, 1.5, { y: 0.2, yawDegrees: 90 });
+  const wallB = placed('wall.concrete.common', 3, 4.5, { y: 0.2, yawDegrees: 90 });
+  const all = [floorA, floorB, endFloor, wallA, wallB];
+  const a = placedPieceDepthSpan(wallA, all);
+  const b = placedPieceDepthSpan(wallB, all);
+  assertClose(a.minV, b.minV, 1e-9, 'both collinear segments offset the SAME way — no step');
+  assertClose(a.maxV, b.maxV, 1e-9, 'both collinear segments offset the SAME way — no step');
+  assertClose(a.minV, 0, 1e-9, 'wallA sits onto its +x floor, not centered by the end-touching room floor');
+  assertClose(a.maxV, 0.25, 1e-9, 'wallA full thickness on the +x floor');
+});
+
 test('REQ-0472: floor-supported wall joins stop at the supported intersection face', () => {
   const floor = placed('floor.concrete.common', 1.5, 1.5);
   const horizontal = placed('wall.concrete.common', 1.5, 0, { y: 0.2, yawDegrees: 0 });

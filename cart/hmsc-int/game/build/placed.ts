@@ -620,10 +620,17 @@ export function placedPieceDepthSpan(piece: PlacedBuildPiece, pieces: readonly P
       ? (Math.abs(self.line - b.minZ) <= tolerance || Math.abs(self.line - b.maxZ) <= tolerance)
       : (Math.abs(self.line - b.minX) <= tolerance || Math.abs(self.line - b.maxX) <= tolerance);
     if (!onEdge) continue;
-    const withinRun = self.axis === 'x'
-      ? rangesOverlap(self.runMin, self.runMax, b.minX, b.maxX, tolerance)
-      : rangesOverlap(self.runMin, self.runMax, b.minZ, b.maxZ, tolerance);
-    if (!withinRun) continue;
+    // A plate supports this side only if it runs ALONG the wall — a REAL run
+    // overlap, not a plate that merely touches the wall's END (the floor of the
+    // perpendicular room next door shares just the end line). Tolerant overlap
+    // counted that end-touch as support, so a wall with a neighbor-room floor
+    // off one end read as supported-both-sides → centered, while its collinear
+    // run-mates (no end neighbor) offset onto their floor → the run stepped /
+    // misaligned (req_1713). Require the overlap LENGTH to exceed the touch tol.
+    const overlapLen = self.axis === 'x'
+      ? Math.min(self.runMax, b.maxX) - Math.max(self.runMin, b.minX)
+      : Math.min(self.runMax, b.maxZ) - Math.max(self.runMin, b.minZ);
+    if (overlapLen <= tolerance) continue;
     const cx = (b.minX + b.maxX) / 2;
     const cz = (b.minZ + b.maxZ) / 2;
     const side = (cx - piece.x) * vAxis.dx + (cz - piece.z) * vAxis.dz;
