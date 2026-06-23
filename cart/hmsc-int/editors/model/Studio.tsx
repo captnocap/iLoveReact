@@ -3519,13 +3519,14 @@ const COMPILE_NATURES: { nature: PropNature; label: string; hint: string }[] = [
 // others make it a piece-like placeable (a railing edge-snaps onto stairs, a wall
 // panel blocks sight, a trim sticks onto a face) — the SAME behaviour built-in pieces
 // have, on the uniform prop substrate. The map → PropBuildPlacement {snap,cover,blocksSight}.
-type PiecePlacement = 'free' | 'wall' | 'railing' | 'fence' | 'floor' | 'trim';
+type PiecePlacement = 'free' | 'wall' | 'railing' | 'fence' | 'floor' | 'stairs' | 'trim';
 const COMPILE_PLACEMENTS: { placement: PiecePlacement; label: string; hint: string; build?: PropDescriptorInput['buildPlacement'] }[] = [
   { placement: 'free', label: 'Prop', hint: 'free scenery — place anywhere' },
   { placement: 'wall', label: 'Wall', hint: 'lists under walls — swap a placed wall to this · full cover, blocks sight', build: { pieceKind: 'wall', snap: 'edge', cover: 'full', blocksSight: true } },
   { placement: 'railing', label: 'Railing', hint: 'edge-snaps onto stairs/balcony · low cover', build: { pieceKind: 'railing', snap: 'edge', cover: 'low', blocksSight: false } },
   { placement: 'fence', label: 'Fence', hint: 'edge-snaps · low cover', build: { pieceKind: 'fence', snap: 'edge', cover: 'low', blocksSight: false } },
   { placement: 'floor', label: 'Floor', hint: 'lists under floors — swap a placed floor to this', build: { pieceKind: 'floor', snap: 'grid', cover: 'none', blocksSight: false } },
+  { placement: 'stairs', label: 'Stairs', hint: 'lists under stairs — swap a placed staircase to this', build: { pieceKind: 'stairs', snap: 'grid', cover: 'none', blocksSight: false } },
   { placement: 'trim', label: 'Trim', hint: 'sticks onto a face (posters, moldings)', build: { pieceKind: 'trim', snap: 'surface', cover: 'none', blocksSight: false } },
 ];
 
