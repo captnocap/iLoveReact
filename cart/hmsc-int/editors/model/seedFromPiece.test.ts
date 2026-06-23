@@ -73,6 +73,35 @@ test('a ramp seeds a wedge whose top slopes (low end ≠ high end)', () => {
   assert(topSpread > 0.4, 'top edge is higher than the low edge (a true wedge)');
 });
 
+test('a door wall seeds a REAL carved opening + an editable door slab (no black block)', () => {
+  const m = seedMeshFromPiece('wall.concrete.doorway');
+  // jambs (2) + header (1) + door slab (1) = 4 boxes × 8 verts.
+  assertEqual(m.verts.length, 8 * 4, 'two jambs + header + door slab');
+  const b = bounds(m);
+  assertClose(b.size[0], 3, 1e-6, 'still a full 3m-wide wall');
+  assertClose(b.size[1], 3, 1e-6, 'still 3m tall');
+  assertClose(b.min[1], 0, 1e-6, 'sits on the ground');
+  // the opening is real: the door slab is thinner than the wall, so the wall depth
+  // (z extent) is the jamb thickness, and there IS a gap (the slab does not fill the
+  // jamb span). Assert a vertical band exists with no full-thickness wall — i.e. some
+  // verts sit at the thin door depth, distinct from the jamb depth.
+  const zexts = new Set(m.verts.map((v) => Math.abs(v[2]).toFixed(3)));
+  assert(zexts.size >= 2, 'the door slab depth differs from the jamb depth (a real opening, not a solid wall)');
+});
+
+test('a garage door seeds a wider opening than a walk door', () => {
+  const walk = seedMeshFromPiece('wall.concrete.doorway');
+  const garage = seedMeshFromPiece('wall.metal.garageDoor');
+  // both are 4 boxes; the garage opening is wider, so its jambs are narrower.
+  assertEqual(garage.verts.length, 8 * 4, 'garage wall: jambs + header + slab');
+  // width of the left jamb = leftmost vert span; garage jamb is narrower than walk jamb.
+  const jambW = (mesh: ReturnType<typeof seedMeshFromPiece>): number => {
+    const xs = mesh.verts.map((v) => v[0]).filter((x) => x < 0);
+    return Math.max(...xs) - Math.min(...xs); // span of the left-side verts ≈ jamb width
+  };
+  assert(jambW(garage) < jambW(walk), 'a garage opening is wider → narrower jambs');
+});
+
 test('seedNameFromPiece reads the catalog label, falls back to the id', () => {
   assertEqual(seedNameFromPiece('wall.concrete.common'), 'Concrete Wall', 'uses the catalog label');
   assertEqual(seedNameFromPiece('not.a.real.piece'), 'not.a.real.piece', 'unknown id → the id itself');

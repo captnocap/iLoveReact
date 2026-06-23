@@ -102,6 +102,33 @@ function seedableShapes(shapes: readonly VisualShape[]): VisualShape[] {
   });
 }
 
+/** A wall with a REAL doorway carved out + an editable door slab — the seed for a
+ *  Door/Garage Wall (req_1698). The live door edit renders a SOLID wall plus a flat
+ *  near-black panel (the "black block" with no actual opening); pieceVisualShapes
+ *  never carves it. So we build the doorway ourselves: two jambs + a header around a
+ *  floor-to-`Ho` opening, plus a thin door slab IN the opening as a normal editable
+ *  box (not the black panel) — a wall-with-a-door the user details into a real door. */
+function carveDoorWall(def: { size: { widthMeters: number; heightMeters: number; depthMeters: number } }, edit: string): EditMesh {
+  const W = def.size.widthMeters, H = def.size.heightMeters, D = def.size.depthMeters;
+  const t = GAME_BUILD.placed.tuning;
+  const vehicle = edit === 'garageDoor';
+  const Wo = Math.min(W * 0.9, vehicle ? t.vehicleOpeningWidthMeters : t.walkOpeningWidthMeters);
+  const Ho = Math.min(H * 0.95, vehicle ? t.garageDoorPanelHeightMeters : t.walkDoorPanelHeightMeters);
+  const verts: V3[] = [];
+  const faces: EditMeshFace[] = [];
+  const spanX = (x0: number, x1: number, y0: number, y1: number, depth: number, cz = 0): void => {
+    const sx = x1 - x0, sy = y1 - y0;
+    if (sx <= 1e-4 || sy <= 1e-4) return;
+    mergeInto(verts, faces, cuboid(sx, sy, depth), (v) => [v[0] + (x0 + x1) / 2, v[1] + (y0 + y1) / 2, v[2] + cz]);
+  };
+  spanX(-W / 2, -Wo / 2, 0, H, D);        // left jamb
+  spanX(Wo / 2, W / 2, 0, H, D);          // right jamb
+  spanX(-Wo / 2, Wo / 2, Ho, H, D);       // header above the opening
+  // the door leaf — a real, editable, slightly-inset slab (replaces the black block)
+  spanX(-Wo / 2 + 0.03, Wo / 2 - 0.03, 0, Ho - 0.02, Math.min(D * 0.6, 0.08));
+  return { verts, faces };
+}
+
 /** Lower a BUILD_CATALOG piece into one editable mesh — the "start from this piece"
  *  seed. `edit` optionally pre-applies a wall edit (e.g. seed the wall already
  *  cut for a window). Returns an empty-but-valid mesh for an unknown id (fail soft;
@@ -113,6 +140,9 @@ export function seedMeshFromPiece(pieceId: string, edit?: string): EditMesh {
   // unless the caller overrides — so the seed matches what the palette shows.
   const def = GAME_BUILD.catalog.is(pieceId) ? GAME_BUILD.catalog.get(pieceId) : null;
   const seedEdit = edit ?? (def as { defaultEdit?: string } | null)?.defaultEdit;
+  // Doors/garage doors: carve a real opening (the live render leaves the wall solid
+  // behind a black panel) so the seed is a wall-with-a-door, not a flat block.
+  if (def && (seedEdit === 'door' || seedEdit === 'garageDoor')) return carveDoorWall(def, seedEdit);
   const piece = { pieceId, x: 0, y: 0, z: 0, yawDegrees: 0, ...(seedEdit ? { edit: seedEdit as never } : {}) };
   for (const shape of seedableShapes(pieceVisualShapes(piece, 'seed'))) {
     if (shape.kind === 'ramp') addRamp(verts, faces, shape.ramp);

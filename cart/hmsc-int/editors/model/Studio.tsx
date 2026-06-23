@@ -3319,6 +3319,8 @@ const BUILD_SEEDS: { key: string; pieceId: string; edit?: string; label: string 
   { key: 'wall', pieceId: 'wall.concrete.common', label: 'Wall' },
   { key: 'halfwall', pieceId: 'wall.concrete.common', edit: 'halfHeight', label: 'Half Wall' },
   { key: 'window', pieceId: 'wall.stucco.window', label: 'Window Wall' },
+  { key: 'door', pieceId: 'wall.concrete.doorway', label: 'Door Wall' },
+  { key: 'garage', pieceId: 'wall.metal.garageDoor', label: 'Garage Door' },
   { key: 'floor', pieceId: 'floor.concrete.common', label: 'Floor' },
   { key: 'stairs', pieceId: 'stairs.concrete.common', label: 'Stairs' },
   { key: 'ramp', pieceId: 'ramp.concrete.common', label: 'Ramp' },
