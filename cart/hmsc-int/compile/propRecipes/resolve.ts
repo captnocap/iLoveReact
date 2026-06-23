@@ -11,7 +11,7 @@
 // new prop is a new file + one import + one case, like dropping in a download.
 
 import type { WorldProp } from '../../design';
-import { propKindDefinition, type PropKind } from '../../game/kinds/props';
+import { isCookedPropKind, propKindDefinition, type PropCollisionBox, type PropKind } from '../../game/kinds/props';
 import { type Color, type PropPartSpec } from '../../game/kinds/propModels';
 import { ballBasketballParts } from './ballBasketball';
 import { ballBeachParts } from './ballBeach';
@@ -484,8 +484,47 @@ export function resolvePropParts(prop: WorldProp): PropPartSpec[] {
 /** Resolve a kind's parts directly, with no WorldProp instance — the footprint
  *  derivation calls this so EVERY prop gets a measured collision footprint, not
  *  just the old RECIPES kinds. */
+// LATE-BOUND cooked-asset lookup (req_1682). resolve.ts is imported early and very
+// widely (the prop catalog builds at module-init); statically importing the heavy
+// cooked-asset registry module here created an init CYCLE that left the colors
+// palette undefined when the catalog ran (bed recipe → COLORS undefined). So the
+// registry REGISTERS its getter at its own init instead — built-in kinds never
+// reach this, and a cooked prop is only ever resolved long after init.
+type CookedBoxes = { collision: { boxes: readonly PropCollisionBox[] } };
+let cookedAssetLookup: ((kind: string) => CookedBoxes | null) | null = null;
+export function registerCookedAssetLookup(fn: (kind: string) => CookedBoxes | null): void {
+  cookedAssetLookup = fn;
+}
+
+/** A Studio-cooked prop's collision boxes, lowered to part specs (req_1681). The
+ *  cook already derived shape-aware boxes from the model's LIFTED parts
+ *  (collisionBoxesFromParts) — the same lifted local space the cooked mesh renders
+ *  in — so these boxes line up with the visual exactly. Without this a cooked prop
+ *  fell to the default placeholder, a single box planted at the GROUND from
+ *  heightMeters, which floats below a prop whose geometry sits high (a picture
+ *  frame, a hanging sign): you then had to click empty ground to grab it. */
+function cookedPropParts(kind: PropKind): PropPartSpec[] | null {
+  const asset = cookedAssetLookup?.(kind);
+  const boxes = asset?.collision.boxes;
+  if (!boxes || boxes.length === 0) return null;
+  const color = propColor(kind);
+  return boxes.map((b: PropCollisionBox): PropPartSpec => ({
+    shape: 'box',
+    local: [(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2],
+    size: [Math.max(b.maxX - b.minX, 0), Math.max(b.maxY - b.minY, 0), Math.max(b.maxZ - b.minZ, 0)],
+    color,
+  }));
+}
+
 export function resolvePartsForKind(kind: PropKind): PropPartSpec[] {
   const def = propKindDefinition(kind);
+  // Studio-cooked props carry their own derived collision boxes — use them so the
+  // collider matches the rendered mesh (incl. props whose geometry sits high off
+  // the ground), instead of the ground-planted placeholder the default mints.
+  if (isCookedPropKind(kind)) {
+    const cooked = cookedPropParts(kind);
+    if (cooked) return cooked;
+  }
   switch (kind) {
     case 'bush':
     case 'bushLarge':

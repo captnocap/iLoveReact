@@ -12,6 +12,7 @@ import { useEffect } from 'react';
 import { useRerender } from '@reactjit/hooks';
 import { registerCookedProps } from '../../game/kinds/props';
 import { registerCookedCatalog } from '../../game/build/catalog';
+import { registerCookedAssetLookup } from '../../compile/propRecipes/resolve';
 import { editorChannel } from '../store';
 import type { CookedAsset, CookKind, CookResult } from './cookedAsset';
 import {
@@ -73,6 +74,9 @@ export function removeCookedAsset(id: string): void {
 export function cookedAssetCatalog(): CookedAsset[] { return installedAssets(channel().state()); }
 export function cookedPropCatalog(): CookedAsset[] { return cookedAssetsByKind(channel().state(), 'prop'); }
 export function cookedAssetById(id: string): CookedAsset | null { return channel().state().assets?.[id] ?? null; }
+// Hand the prop resolver our lookup at init (req_1682) — inverts the import so the
+// early/widely-loaded resolve.ts never statically depends on this heavy module.
+registerCookedAssetLookup(cookedAssetById);
 export function cookedMeshBlob(meshRef: string): Float32Array | null { return meshBlobFor(channel().state(), meshRef); }
 export function cookedTextureBlob(texRef: string): string | null { return textureBlobFor(channel().state(), texRef); }
 

@@ -8,6 +8,7 @@ import { HMSC_SCALE } from '../../world/scale';
 import { resolvePartsForKind } from './resolve';
 
 const FOOTPRINT_DEG = Math.PI / 180;
+const ROUND_COLLISION_STRIPS = 7;
 
 // A walking player only collides with what stands in its own height band — the
 // canopy 5m up, the blade sign overhead, a high shelf's top are visual, not
@@ -131,11 +132,87 @@ function partLocalBox(part: ReturnType<typeof resolvePartsForKind>[number]): Pro
   return { minX, minY, minZ, maxX, maxY, maxZ };
 }
 
+/** The prop's full VISUAL vertical band — min..max local Y over EVERY part, NOT
+ *  just the in-band footprint (req_1681). This is the span the editor selection
+ *  highlight + crosshair pick must cover so they track a prop whose geometry sits
+ *  OFF the ground (a hung picture frame, a blade sign on a high arm) instead of a
+ *  box planted from the ground up. `baseY` is the gap below the lowest geometry,
+ *  `height` its real vertical extent — both 0/heightMeters for an ordinary
+ *  ground-resting prop, so existing props are unaffected. Null with no parts. */
+export function propVerticalBand(kind: PropKind): { baseY: number; height: number } | null {
+  const parts = resolvePartsForKind(kind);
+  if (!parts || parts.length === 0) return null;
+  let minY = Infinity, maxY = -Infinity;
+  for (const part of parts) {
+    const box = partLocalBox(part);
+    if (box.minY < minY) minY = box.minY;
+    if (box.maxY > maxY) maxY = box.maxY;
+  }
+  if (!Number.isFinite(minY) || maxY <= minY) return null;
+  return { baseY: minY, height: maxY - minY };
+}
+
 /** Do two boxes overlap in plan (XZ), padded by eps so abutting parts count as
  *  connected? Used to cluster the in-band parts a body actually runs into. */
 function xzOverlap(a: PropCollisionBox, b: PropCollisionBox, eps: number): boolean {
   return a.minX - eps <= b.maxX && b.minX - eps <= a.maxX
     && a.minZ - eps <= b.maxZ && b.minZ - eps <= a.maxZ;
+}
+
+function boxSpan(boxes: readonly PropCollisionBox[]): PropCollisionBox {
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const b of boxes) {
+    if (b.minX < minX) minX = b.minX; if (b.maxX > maxX) maxX = b.maxX;
+    if (b.minY < minY) minY = b.minY; if (b.maxY > maxY) maxY = b.maxY;
+    if (b.minZ < minZ) minZ = b.minZ; if (b.maxZ > maxZ) maxZ = b.maxZ;
+  }
+  return { minX, minY, minZ, maxX, maxY, maxZ };
+}
+
+function isRoundInBandCluster(inBand: readonly { box: PropCollisionBox; shape: string }[]): boolean {
+  if (inBand.length === 0) return false;
+  let roundVolume = 0;
+  let boxVolume = 0;
+  for (const item of inBand) {
+    const w = item.box.maxX - item.box.minX;
+    const h = item.box.maxY - item.box.minY;
+    const d = item.box.maxZ - item.box.minZ;
+    const volume = w * h * d;
+    if (item.shape === 'box') boxVolume += volume;
+    else roundVolume += volume;
+  }
+  if (roundVolume <= boxVolume) return false;
+  const span = boxSpan(inBand.map((item) => item.box));
+  const width = span.maxX - span.minX;
+  const depth = span.maxZ - span.minZ;
+  return Math.abs(width - depth) < 0.15 * Math.max(width, depth);
+}
+
+function roundCollisionBoxes(fp: PropModelFootprint, inBand: PropCollisionBox[]): PropCollisionBox[] {
+  const radius = Math.max(fp.widthMeters, fp.depthMeters) / 2;
+  const stripDepth = radius * 2 / ROUND_COLLISION_STRIPS;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const b of inBand) {
+    if (b.minY < minY) minY = b.minY;
+    if (b.maxY > maxY) maxY = b.maxY;
+  }
+  const boxes: PropCollisionBox[] = [];
+  for (let i = 0; i < ROUND_COLLISION_STRIPS; i += 1) {
+    const minZ = -radius + i * stripDepth;
+    const maxZ = minZ + stripDepth;
+    const centerZ = (minZ + maxZ) / 2;
+    const halfWidth = Math.sqrt(Math.max(0, radius * radius - centerZ * centerZ));
+    boxes.push({
+      minX: fp.offsetXMeters - halfWidth,
+      maxX: fp.offsetXMeters + halfWidth,
+      minY,
+      maxY,
+      minZ: fp.offsetZMeters + minZ,
+      maxZ: fp.offsetZMeters + maxZ,
+    });
+  }
+  return boxes;
 }
 
 /** SHAPE-AWARE prop collision (req_1587, extended to data-recipe props): one box
@@ -151,18 +228,23 @@ function xzOverlap(a: PropCollisionBox, b: PropCollisionBox, eps: number): boole
  *  GATED narrowly to the shape that actually breaks: the in-band parts (the ones a
  *  walking body touches) must form TWO OR MORE separated XZ clusters — the legs of
  *  an archway / the posts of a sign — whose single AABB would wall in the gap
- *  between them. A prop with ONE in-band cluster (a tree's trunk, a single pole, a
- *  barrel) has no gap to fill, so it returns null and keeps its exact measured
- *  footprint untouched — the round-circle/offset treatment and every compact and
- *  single-stem prop's collision are unchanged. */
+ *  between them. A prop with ONE in-band cluster usually keeps its exact measured
+ *  footprint; round single-stem props are the exception, because a square collider
+ *  gives trees/barrels artificial corner mass that closes diagonal gaps. Those use
+ *  narrow local strips to approximate the circular footprint without changing the
+ *  host wire format. */
 export function propCollisionBoxes(kind: PropKind): PropCollisionBox[] | null {
   const parts = resolvePartsForKind(kind);
   if (!parts || parts.length === 0) return null;
-  const boxes = parts.map(partLocalBox).filter((b) => b.maxY > 0); // drop buried base parts
+  const shapedBoxes = parts
+    .map((part) => ({ box: partLocalBox(part), shape: part.shape }))
+    .filter((item) => item.box.maxY > 0); // drop buried base parts
+  const boxes = shapedBoxes.map((item) => item.box);
   if (boxes.length === 0) return null;
   // The parts a walking body runs into: spanning the ground→band slab in Y.
-  const inBand = boxes.filter((b) => b.minY < FOOTPRINT_BAND_METERS);
-  if (inBand.length < 2) return null; // single stem / compact → no gap, keep footprint
+  const shapedInBand = shapedBoxes.filter((item) => item.box.minY < FOOTPRINT_BAND_METERS);
+  const inBand = shapedInBand.map((item) => item.box);
+  if (inBand.length === 0) return null;
   // Cluster the in-band parts by XZ adjacency (union–find). 2+ clusters = the
   // post-and-gap shape; one merged cluster = a solid base with no walk-under gap.
   const eps = 0.05;
@@ -174,7 +256,10 @@ export function propCollisionBoxes(kind: PropKind): PropCollisionBox[] | null {
     }
   }
   const clusters = new Set(inBand.map((_, i) => find(i)));
-  if (clusters.size < 2) return null;
+  if (clusters.size < 2) {
+    const fp = propModelFootprintMeters(kind);
+    return fp && isRoundInBandCluster(shapedInBand) ? roundCollisionBoxes(fp, inBand) : null;
+  }
   // Per-part boxes: the posts block at their own band, the overhead board bands
   // high (walk-under). Mirrors the cooked-asset collisionBoxes shape.
   return boxes;

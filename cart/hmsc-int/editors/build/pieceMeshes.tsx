@@ -18,7 +18,7 @@ import type { PlacedBuildPiece } from '@game';
 import type { WorldProp } from '../../design';
 import { Prop } from '../../render3d/Prop';
 import { propDynamics } from '../../game/kinds/props';
-import { propModelFootprintMeters } from '../../compile/propRecipes/footprint';
+import { propModelFootprintMeters, propVerticalBand } from '../../compile/propRecipes/footprint';
 import { BUILD_UI, pieceVisualShapes, wallJoinSignature } from './pieceShapes';
 import type { VisualBox, VisualShape } from './pieceShapes';
 import { CAMERA_OCCLUSION_TUNING } from './buildUi';
@@ -134,6 +134,65 @@ function VisualGablePrismMesh(props: { box: VisualBox; colorOverride?: string; o
   );
 }
 
+// CORNERSEAM-0610: a unit vertical right-triangle prism, centered like a box.
+// Local footprint vertices are (-x,-z), (+x,-z), (-x,+z); sx/sz/yaw place it
+// into the wall-end corner square, and a signed sz mirrors the diagonal when a
+// reflected corner is needed.
+const CornerMiterPrismGeometry: Geometry.GeometryDef<Record<string, never>> = {
+  id: 'HmscWallCornerMiterPrism',
+  defaults: {},
+  generate: (): Geometry.GeometryData => {
+    const b0: Geometry.Vec3 = [-0.5, -0.5, -0.5];
+    const b1: Geometry.Vec3 = [0.5, -0.5, -0.5];
+    const b2: Geometry.Vec3 = [-0.5, -0.5, 0.5];
+    const t0: Geometry.Vec3 = [-0.5, 0.5, -0.5];
+    const t1: Geometry.Vec3 = [0.5, 0.5, -0.5];
+    const t2: Geometry.Vec3 = [-0.5, 0.5, 0.5];
+    const g = Geometry.mesh();
+    g.tri(b0, [0, -1, 0], [0, 0], b2, [0, -1, 0], [0, 1], b1, [0, -1, 0], [1, 0]);
+    g.tri(t0, [0, 1, 0], [0, 0], t1, [0, 1, 0], [1, 0], t2, [0, 1, 0], [0, 1]);
+    g.face(b0, b1, t1, t0, [0, 0, -1], [0, 0]);
+    g.face(b1, b2, t2, t1, Geometry.normalize(1, 0, 1), [0, 0]);
+    g.face(b2, b0, t0, t2, [-1, 0, 0], [0, 0]);
+    return g.build();
+  },
+};
+
+const CornerMiterMirrorPrismGeometry: Geometry.GeometryDef<Record<string, never>> = {
+  id: 'HmscWallCornerMiterMirrorPrism',
+  defaults: {},
+  generate: (): Geometry.GeometryData => {
+    const b0: Geometry.Vec3 = [-0.5, -0.5, 0.5];
+    const b1: Geometry.Vec3 = [0.5, -0.5, 0.5];
+    const b2: Geometry.Vec3 = [-0.5, -0.5, -0.5];
+    const t0: Geometry.Vec3 = [-0.5, 0.5, 0.5];
+    const t1: Geometry.Vec3 = [0.5, 0.5, 0.5];
+    const t2: Geometry.Vec3 = [-0.5, 0.5, -0.5];
+    const g = Geometry.mesh();
+    g.tri(b0, [0, -1, 0], [0, 0], b2, [0, -1, 0], [0, 1], b1, [0, -1, 0], [1, 0]);
+    g.tri(t0, [0, 1, 0], [0, 0], t1, [0, 1, 0], [1, 0], t2, [0, 1, 0], [0, 1]);
+    g.face(b0, b1, t1, t0, [0, 0, 1], [0, 0]);
+    g.face(b1, b2, t2, t1, Geometry.normalize(1, 0, -1), [0, 0]);
+    g.face(b2, b0, t0, t2, [-1, 0, 0], [0, 0]);
+    return g.build();
+  },
+};
+
+function VisualCornerMiterPrismMesh(props: { box: VisualBox; mirrored?: boolean; colorOverride?: string; opacityOverride?: number }) {
+  const b = props.box;
+  return (
+    <Scene3D.Mesh
+      geometry={props.mirrored ? CornerMiterMirrorPrismGeometry : CornerMiterPrismGeometry}
+      params={{}}
+      scale={[b.sx, b.sy, b.sz]}
+      rotation={[0, b.yawDegrees, 0]}
+      position={[b.cx, b.cy, b.cz]}
+      material={{ color: props.colorOverride ?? b.color, opacity: props.opacityOverride ?? b.opacity ?? 1 }}
+      textureKey={props.colorOverride ? undefined : b.textureKey}
+    />
+  );
+}
+
 function VisualRampMesh(props: { ramp: VisualRamp; colorOverride?: string; opacityOverride?: number }) {
   const r = props.ramp;
   return (
@@ -158,6 +217,10 @@ export function VisualShapeMesh(props: { shape: VisualShape; colorOverride?: str
     return <VisualRampMesh ramp={props.shape.ramp} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />;
   if (props.shape.kind === 'gable')
     return <VisualGablePrismMesh box={props.shape.box} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />;
+  if (props.shape.kind === 'cornerMiter')
+    return <VisualCornerMiterPrismMesh box={props.shape.box} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />;
+  if (props.shape.kind === 'cornerMiterMirror')
+    return <VisualCornerMiterPrismMesh box={props.shape.box} mirrored colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />;
   return <VisualBoxMesh box={props.shape.box} colorOverride={props.colorOverride} opacityOverride={props.opacityOverride} />;
 }
 
@@ -309,6 +372,12 @@ function propSelectionShape(piece: PlacedBuildPiece, color: string, opacity: num
   // the model-center offset, rotated about the anchor (matching localOffset/yaw),
   // so the highlight tracks the mesh under rotation like its collider does.
   const fp = def.propKind ? propModelFootprintMeters(def.propKind) : null;
+  // Vertical band of the actual geometry (req_1681): a prop whose mesh floats off
+  // the ground (a hung frame) gets a highlight that tracks it, not a ground box.
+  // baseY/height fall back to 0/heightMeters for ordinary ground-resting props.
+  const band = def.propKind ? propVerticalBand(def.propKind) : null;
+  const baseY = band?.baseY ?? 0;
+  const heightY = band?.height ?? def.size.heightMeters;
   const yaw = piece.yawDegrees * Math.PI / 180;
   const ox = fp?.offsetXMeters ?? 0, oz = fp?.offsetZMeters ?? 0;
   const dx = ox * Math.cos(yaw) + oz * Math.sin(yaw);
@@ -318,10 +387,10 @@ function propSelectionShape(piece: PlacedBuildPiece, color: string, opacity: num
     box: {
       key: `${piece.id}.prop-select`,
       cx: piece.x + dx,
-      cy: piece.y + def.size.heightMeters / 2,
+      cy: piece.y + baseY + heightY / 2,
       cz: piece.z + dz,
       sx: fp?.widthMeters ?? def.size.widthMeters,
-      sy: def.size.heightMeters,
+      sy: heightY,
       sz: fp?.depthMeters ?? def.size.depthMeters,
       yawDegrees: piece.yawDegrees,
       color,

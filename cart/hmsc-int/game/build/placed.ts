@@ -39,7 +39,7 @@ import {
 } from './catalog';
 import { BUILD_KIND_CONTRACTS, type BuildGameplayTags, type BuildPieceKind } from './pieces';
 import { propDynamics, propKindDefinition } from '../kinds';
-import { propCollisionBoxes, propModelFootprintMeters } from '../../compile/propRecipes/footprint';
+import { propCollisionBoxes, propModelFootprintMeters, propVerticalBand } from '../../compile/propRecipes/footprint';
 import { wallEditDefinition, type WallEdit } from './edits';
 import type { BuildPrefabDef, PrefabPiece } from './prefabs';
 import { BUILD_FACE_SLOTS, resolveFaceSkin, type BuildSkinSet } from './skins';
@@ -461,14 +461,21 @@ export function raycastPieces(
 ): PieceHit | null {
   let best: PieceHit | null = null;
   for (const piece of pieces) {
-    const size = placedPieceDef(piece).size;
+    const def = placedPieceDef(piece);
+    const size = def.size;
     const depthSpan = placedPieceDepthSpan(piece, pieces);
     const depthCenter = (depthSpan.minV + depthSpan.maxV) / 2;
     const depthSize = depthSpan.maxV - depthSpan.minV;
     const yawRadians = piece.yawDegrees * DEG;
     const cos = Math.cos(-yawRadians);
     const sin = Math.sin(-yawRadians);
-    const centerY = piece.y + size.heightMeters / 2;
+    // A prop whose mesh floats off the ground (a hung frame) is pickable where it
+    // is DRAWN: its vertical band tracks the geometry (req_1681). Non-props and
+    // ground-resting props keep [piece.y, piece.y+heightMeters] — band is null/0.
+    const band = def.propKind ? propVerticalBand(def.propKind) : null;
+    const baseY = band?.baseY ?? 0;
+    const heightY = band?.height ?? size.heightMeters;
+    const centerY = piece.y + baseY + heightY / 2;
     // ray → piece frame (translate to center, rotate by -yaw about +Y)
     const relX = ray.origin.x - piece.x;
     const relZ = ray.origin.z - piece.z;
@@ -478,7 +485,7 @@ export function raycastPieces(
     const dx = ray.dir.x * cos - ray.dir.z * sin;
     const dy = ray.dir.y;
     const dz = ray.dir.x * sin + ray.dir.z * cos;
-    const half = [size.widthMeters / 2, size.heightMeters / 2, depthSize / 2];
+    const half = [size.widthMeters / 2, heightY / 2, depthSize / 2];
     const origin = [ox, oy, oz];
     const dir = [dx, dy, dz];
     // slab test
