@@ -1,0 +1,28 @@
+{
+  "id": "req_0351",
+  "at": "2026-06-08T13:54:37.426Z",
+  "origin": "codex:019ea612",
+  "text": "Ok it is now rendering the correct thing inside of the route. you can reexpand the route view port, it should be fine. from here, you need to get the camera in still. im still confused how its in one and not the other. movement and eveyrthing else made it in just fine",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:54:59.431Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:58:04.868Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Expanded /compiled back to a full-panel WorldLoader host primitive and wired editor mouse input into the mounted world_loader runtime: hover mouse motion now forwards xrel/yrel to the same loader camera math, and RMB over the primitive enters/leaves the loader aim mode while SDL relative mouse mode is held. Verified hmsc-int builds with has-compiled-world, /compiled renders at the expanded 1280x800 route, and tools/rjit game shot still renders the no-V8 standalone loader with 76 pieces, 175 instances, 42 heightfields, and zero V8 symbols.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T13:58:04.868Z"
+}

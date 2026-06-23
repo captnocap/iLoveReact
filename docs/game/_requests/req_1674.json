@@ -1,0 +1,30 @@
+{
+  "id": "req_1674",
+  "at": "2026-06-23T00:26:24.832Z",
+  "origin": "session:06fe423a",
+  "text": "hm.... will you put in a fps reader on the compiled game path so i can track it better",
+  "status": "review",
+  "sessionId": "06fe423a-d6e6-4bdd-a7f5-e511298cc05a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T00:26:48.400Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T00:36:03.878Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an on-screen fps HUD to the compiled game path (RJIT_FPS=1 or RJIT_PERFLOG=1): a top-left readout of fps / draw(us) / inst / restage / dc, so the user can track fps on-screen instead of terminal logs. fps is wall-clock frame-to-frame (so it reflects GPU overdraw stalls and the SDL 60fps cap, unlike the CPU-only draw_us), and 'restage' is the per-frame re-uploaded instance count — together they let the user see at a glance whether a slow view is a CPU re-stage choke or GPU overdraw. Implemented entirely in framework/gpu/3d.zig (clean file, no world_loader.zig edit). Key correctness fix: the HUD text is queued from scene3d.render() (the paint walk, before gpu.frame), NOT from flushPending — gpu.frame uploads the text buffer BEFORE calling flushPending, so glyphs queued in flushPending upload too late and never draw (first attempt showed a blank HUD; moving to render() fixed it). Verified the HUD renders via rjit game shot (text visible top-left). Self-gated, zero behavior change when the env vars are unset.",
+  "shas": [
+    "7c88a8ee1"
+  ],
+  "resolvedAt": "2026-06-23T00:36:03.878Z"
+}

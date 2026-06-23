@@ -1,0 +1,33 @@
+{
+  "id": "req_0599",
+  "at": "2026-06-11T01:58:55.290Z",
+  "origin": "session:da94d3e7",
+  "text": "this is great! fixes landed clean! so, in terms of things like a computer, can we define the prop as 'sits on a surface' so that we can place it on a table for example., and can we setup for containers can be searched\nseats can be sat in\nsoft cover can hide you\nhard cover blocks bullets/LoS\ntrash/utility objects can contain junk\nappliances contain category-appropriate loot\nstreet objects affect movement/perception\nyou will want to do a quick survey before building but you can look at the animation system and take account of the pre existing positions like sit and lay for chairs and beds. and then searching can be simple loading bars. and if you account for it now, you will want to have the storage capacity, the spawn rate of the capacity, and can it be accessed at all (locked, needs key for example on a safe) \n\nthe items that will go in here, are not in full made, but they are next in line after the matter",
+  "status": "review",
+  "sessionId": "da94d3e7-791d-4eab-8e13-a3f2c1e8c371",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T01:59:48.314Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T02:04:35.180Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Set up the prop interaction layer as data on the kind registries, after surveying the animation/figure system (sit + lay posture actions already exist in game/figure/skeleton.ts and pose the body correctly — seats reference those by name), the items registry (items not built yet, as you said — so containers carry a lootCategory naming the slot the item system fills next), and the cover/perception contracts (coverFraction in chance.ts, exposure in perception.ts). Every kind now answers your taxonomy: SEATS (chairs sit 1; couch + bench sit 3; single bed lays 1, double lays 2 — with pelvis-height anchors), CONTAINERS with the three knobs you called for authored now — storage capacity, spawn fill rate, and access (open / locked / keyed — the mailbox spawns locked; 'keyed' is reserved for safes) plus searchSeconds for the simple loading bar; trash + dumpster hold junk, fridge/oven kitchen loot, cupboard clothing, sink bathroom, computer + mailbox office. COVER got an explicit class: soft conceals you but shoots through (furniture, foliage, thin metal), hard blocks bullets/LoS (boulders, dumpsters, appliances, jersey barriers) — derived from solidity/height, hand-corrected where wrong (a painting is air). MOUNTS: the computer is 'sits on a surface' so it places on table tops (the snap resolver already stacks props on piece faces), wall decor is 'wall'. Street objects affect movement today via collision + the kick dynamics; perception hooks ride the tile bundle when that system integrates. All helpers exported through the kinds door, 5 new behavior tests (13/13 green, build 18/18, bundles clean). NOT yet wired live: the E-to-search loading bar (the 'interact' binding exists but is reserved) and the actual sit-down player state — both are the named next slice and now have all their data waiting.",
+  "shas": [
+    "22826bea6"
+  ],
+  "resolvedAt": "2026-06-11T02:04:35.179Z",
+  "tags": [
+    "ask"
+  ]
+}

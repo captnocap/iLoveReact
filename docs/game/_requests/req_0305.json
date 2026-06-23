@@ -1,0 +1,13 @@
+{
+  "id": "req_0305",
+  "at": "2026-06-08T09:45:56.713Z",
+  "origin": "session:f48e9dac",
+  "text": "Resume from /tmp/handoff-20260608-093942-render-real-hmsc-world-in-3d-by-default-in-the-no-v8-loader.md — read it FULLY, then execute. It has the complete context, the prior session's overclaim warning, and the implementation plan (dense bake → extrude tiles to 3D boxes → many instances; generalize the working cube template to N instances from data; kill the silent fixture fallback; assert on real geometry).\n\nTHE BAR (non-negotiable, repeated because the last session violated it): ONLY the user running `tools/rjit game play` with NO flags and seeing their real 3D world counts as done. Never report GREEN from a self-check. A PNG-exists / no-V8 check is NOT proof the pixels are the world. When you believe it's ready, tell me EXACTLY what the user should run and what they should see — I relay, the user verifies. Do not claim it works.\n\nDo all of it in your own context — no Task tool, no subagents (a subagent hides exactly the work that keeps going wrong here). tools/rjit only. No reset/revert. Commit your progress with explicit paths (NOT git add -A — ~388 set-aside files in the tree). If you cross ~55% context, /hand-over rather than degrade.\n",
+  "status": "new",
+  "sessionId": "f48e9dac-15a7-4cf5-a2e4-26a5d851461c",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

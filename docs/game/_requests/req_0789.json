@@ -1,0 +1,18 @@
+{
+  "id": "req_0789",
+  "at": "2026-06-13T17:14:39.303Z",
+  "origin": "session:a695a492",
+  "text": "idk i have 17 roads. export the data and figure out why they dont show up",
+  "status": "doing",
+  "sessionId": "a695a492-4a9c-4889-a141-0e50e2e7918a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T17:15:01.354Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

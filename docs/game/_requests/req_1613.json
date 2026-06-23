@@ -1,0 +1,30 @@
+{
+  "id": "req_1613",
+  "at": "2026-06-21T17:38:17.004Z",
+  "origin": "session:da8be261",
+  "text": "nice uh one thing i notice is when i turn off a layer like in here [Image #84] like i disable its visibility the whole paint on the other layer shifts and so does the text",
+  "status": "review",
+  "sessionId": "da8be261-4ec5-49b6-a7ad-54d2b446b7ac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T17:38:30.879Z",
+      "actor": "da8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T17:46:57.135Z",
+      "actor": "da8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the bug where toggling a part's visibility in the outliner shifted the paint (and stamped text) on the OTHER part. Root cause: StudioEditor passes only model.visibleParts to the viewport, and the paint atlas is packed from that set — so hiding a part shrank the pack set and re-slotted the surviving parts' UV islands (textureizeScene reassigns islands, applied back via onEditMesh), making their fixed-texture pixels sample different texels = a visible shift. Fix: pack the paint atlas over ALL parts via a new allParts prop (model.parts), so every part's UV island is invariant to which parts are currently shown. paintFaceSig, paintRepackNeeded, and ensureTexture's textureizeScene+apply all key on the full set now; the visible set still drives render/hit-test/paint targeting. Verified: hmsc-int bundles clean (real esbuild flags), meshPaint suite 15/15. Note: the standalone Studio.tsx route has a pre-existing duplicate viewport that didn't get this (or the text/lock-face work); the user is on the studiokit/workbench path which is fixed.",
+  "shas": [
+    "b4d463911"
+  ],
+  "resolvedAt": "2026-06-21T17:46:57.135Z"
+}

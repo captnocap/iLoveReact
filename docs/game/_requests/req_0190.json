@@ -1,0 +1,12 @@
+{
+  "id": "req_0190",
+  "at": "2026-06-07T05:45:44.781Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT on your vehicle source: the data model FAILS, it is inverted. Verbatim: \"its acting like i need to declare every single car like i would for the in-game character models. so i see car-1 style: ambulance which is really stupid. it should be ambulance as the name not as a style. it already has a service type soooo yeah this has its ass on backwards\". THE RESPEC: a vehicle's IDENTITY is what it is — the roster lists AMBULANCE, not \"car-1\" with style=ambulance. Kill the numbered-generic-plus-style indirection: name/identity is primary (ambulance, taxi, truck), the service-type field that already exists stays as its own attribute, and \"style\" as an identity-bearing field dies. If style was carrying visual variation, that is the VARIANT pattern (same vehicle, many materials/skins — exactly how clothing and buildings now model it; the shared material chooser is the vocabulary), never identity. Check the census rows you captured for what the old /vehicles route actually modeled and align with the user's framing, not the old quirk if the quirk is the source of this. Post the corrected model shape before rebuilding the panel around it.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

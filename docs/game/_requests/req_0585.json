@@ -1,0 +1,34 @@
+{
+  "id": "req_0585",
+  "at": "2026-06-10T18:14:57.612Z",
+  "origin": "session:7a5b02e7",
+  "text": "no. it is not here look. here is a bush in the compiled [Image #14] and here is what it supopose to look like [Image #15]",
+  "status": "review",
+  "sessionId": "7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T18:16:06.935Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T18:23:35.848Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Both visible compiled-game faults fixed (commits 828666228 + 210d61013). (1) Bushes-as-flat-shards / missing prop backs: streamed draws were truncated to 36 vertices regardless of shape — spheres lost everything past the top polar ring; the bake data was proven healthy by probing the real gamefile, so the fix is loader-side: per-family vertex counts from the proto's own slice. (2) The 180°-rotated decals from your earlier screenshot: the world box's face samples textures rotated relative to the raster origin (shader materials are rotation-agnostic so it was never visible before); the rasterizer now rotates its output once at the end — text reads upright in the compiled game. Verify: rjit game play, walk to the bushes and the sign wall. Note: NET CAFE walls are a separate pre-existing gap — they're hand-coded react facades, not decals, and were never in the MATERIALS lump; they retire with the V24 building work.",
+  "shas": [
+    "828666228",
+    "210d61013"
+  ],
+  "resolvedAt": "2026-06-10T18:23:35.848Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_0791",
+  "at": "2026-06-13T17:34:31.128Z",
+  "origin": "session:a695a492",
+  "text": "I decoded and measured the whole chunk, and there\n  are four levels of redundancy stacked here, escalating to\n  one that should make you laugh:\n\n  Level 1 — within-row RLE. Already done (that's the\n  [count, value] runs).\n\n  Level 2 — the [2,3] is part of a bigger motif. The road\n  cross-section (3,13)(18)(3,12) repeats 190 times; the\n  full sidewalk-bracketed profile\n  (4,3)(3,13)(18)(3,12)(41,3) repeats 74 times. So [2,3]\n  isn't the pattern — it's the shoulder of one recurring\n  road-profile token that's getting re-spelled ~190×.\n\n  Level 3 — whole rows repeat. 120 rows decode to only 34 \n  unique rows. 77 of 119 consecutive rows are byte-for-byte\n  identical. The per-row RLE re-spells every row even when\n  it's identical to the one above it — because the roads\n  run vertically, and 1D row-RLE is blind to vertical\n  coherence. (This is the 2D-vs-1D thing: you're RLE-ing\n  one axis of a two-axis-coherent grid.)\n\n  Level 4 — and here's the \"even more than that\": you're \n  storing the roads twice. Look at what's in the same file:\n  - roads: 17 segments, 2.6KB, every one an axis-aligned \n  straight line ((30,5)→(30,57), etc.), and all 17 share \n  the exact same profile {1 lane each way, sidewalks, \n  50kph}.\n  - tiles: 11.6KB — 82% of the file — which is the \n  rasterization of those exact roads stamped onto a\n  background (value 3 is 54.5% of the grid = the base\n  ground; the road cells are ~20%).\n  \n  That 190×-repeated cross-section motif IS that one shared\n  profile, stamped along the polylines. The tiles are the\n  baked raster of the roads vector that's sitting right \n  next to them in the same JSON. You have the recipe\n  (roads, 18% of the file) and its baked result (tiles,\n  82%) stored side by side.\n\n  So the reason it \"still isn't doing the right thing\": the\n  extractor rasterizes the vector roads into the tile grid\n  and then stores both. That's\n  storing-the-result-when-the-recipe-is-right-there — the\n  exact move the whole architecture says don't. It's the\n  raster-vs-vector map-tile thing from before, in\n  miniature: tiles = raster (baked, huge), roads = vector\n  (recipe, tiny).\n\n  The fix, escalating:\n\n  - Mechanical (stay in tile format): dedup rows → 34\n  unique + 120 indices (~3.5× on the row data), and\n  tokenize that road cross-section motif. This compresses\n  the symptom.\n  - The actual fix (store recipe, not result): don't \n  rasterize roads into tiles at bake. Store: (a) the base \n  terrain only — the non-road background, which is ~54% one\n  value and RLEs to almost nothing; (b) the roads vector —\n  already there, and since all 17 share one profile, dedup\n  it to a single profile entry so each road is just\n  (start, end, profileRef) ≈ a few hundred bytes total; (c)\n  a \"rasterize at load\" flag. The loader stamps profile →\n  cross-section along each polyline onto the base. The\n  cross-section is a pure function of the profile; the\n  stamp is a pure function of the line — fully\n  deterministic, fully derivable. 11.6KB of tiles → ~2–3KB\n  of base + a few hundred bytes of roads.\n\n  The tell is poetic: the redundant motif you spotted is\n  literally the shape of the one road profile that's \n  already stored as data three feet away in the same file.\n  The extractor is doing the bake the loader should be\n  doing at load.",
+  "status": "doing",
+  "sessionId": "a695a492-4a9c-4889-a141-0e50e2e7918a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T17:36:07.245Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0540",
+  "at": "2026-06-10T14:08:00.094Z",
+  "origin": "session:51f18581",
+  "text": "uh so the car is driving at me with w key lol and i have no camera spin around the car like i do player",
+  "status": "review",
+  "sessionId": "51f18581-610e-4479-8d18-625e56e6d9c2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:08:41.442Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T14:15:04.951Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed three issues the user hit driving the vehicle handling lab. (1) 'Car drives at me with W': the chase cam locked orbit yaw to heading+180, which (per orbitalEye) put the eye in FRONT of the car so forward came toward the viewer. (2) 'No camera spin like the player': there was no look control at all. Both fixed by switching to a player-style user-orbit — a lookRef{yaw,pitch} dragged via GAME_INPUT.onCursorMove + a transparent input overlay (scroll dollies distance), with the orbit target following the car each frame; default yaw 0 sits behind the car and reset recenters. (3) 'Top speed low but still 38km/h': real physics bugs in GAME_DRIVING — the quadratic drag term was missing its dt (framerate-dependent) AND resistance was heavy enough that terminal velocity (~10.5 m/s ≈ 38 km/h) sat below the topSpeed clamp, so the clamp never engaged and the knob did nothing. Added ·step to drag, lightened rollResist 0.9→0.4 / drag 0.0026→0.0008, raised enginePower 11→14 so terminal exceeds topSpeed and the clamp is the real cap; lowering top speed now lowers max speed. Verified: bundles clean with full @game+runtime resolution.",
+  "shas": [
+    "9dda9f381"
+  ],
+  "resolvedAt": "2026-06-10T14:15:04.951Z",
+  "tags": [
+    "bug"
+  ]
+}

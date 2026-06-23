@@ -1,0 +1,31 @@
+{
+  "id": "req_0408",
+  "at": "2026-06-09T06:57:14.926Z",
+  "origin": "codex:019eab0d",
+  "text": "why does the building still not have them in the test route but i see them in the building workspace",
+  "status": "review",
+  "sessionId": "019eab0d-d55e-7810-97e2-0dfa7c7254f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T06:57:44.537Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T07:00:29.355Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed why building materials showed in the building workspace but not in /test: stamped prefab pieces were snapshots, so later prefabDefined skin edits updated the workbench preview but left already placed test-route pieces with stale/no skins. Stamped pieces now carry prefabId + prefabPieceIndex, prefabDefined refreshes skins on matching placed pieces across global/map scopes, and /test polls the shared world stream length so workbench commits trigger a re-read while the route stays mounted. Added a world-stream regression proving already stamped test-map pieces refresh front/back/sides skins. Verified build-placed 41/41 and hmsc-int bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T07:00:29.355Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0484",
+  "at": "2026-06-10T09:10:08.855Z",
+  "origin": "session:2e5197b8",
+  "text": "The camera occlusion, we did the walls. and roof. we need to do the heightfields next. just realized it is going inside of the msh",
+  "status": "review",
+  "sessionId": "2e5197b8-1894-4144-a6e1-1e2bfb997258",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T09:10:51.624Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T09:14:26.128Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Camera spring-arm now collides with terrain/ramp HEIGHTFIELDS, not just wall/roof boxes — the camera was dipping inside hills/slopes because heightfields are a separate sampled collider type absent from the rect buffer the spring-arm tested. Added framework/game/physics.zig cameraOcclusionHeightfields: a bounded march (8..64 samples) of the camera->pivot segment against heightfieldSurfaceAt, returning the distance from the pivot where terrain first rises into the line of sight (0 = clear) — catches a hill blocking the view AND the eye sitting inside a slope. world_loader.zig springArmEye now queries both the wall colliders and the heightfields and pulls the eye to the most-restrictive (min) cap, and runs even with no wall colliders (terrain-only areas). Needs a loader rebuild (rjit game play/shot). Verified loader builds clean (zig build app -Duse-v8=false), physics 15/15 + cameraOcclusion 3/3, zig fmt clean. world_loader.zig also swept another active session's in-progress buildPhysicsColliders work (compiled clean). The editor's JS spring-arm can take the same heightfield query for parity next. Commit 10f82997b.",
+  "shas": [
+    "10f82997b"
+  ],
+  "resolvedAt": "2026-06-10T09:14:26.128Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_0784",
+  "at": "2026-06-13T16:51:53.628Z",
+  "origin": "session:a695a492",
+  "text": "Yes. The circle is me showing that the map on the 2d side shows a road and the iso3d side does not it shows sidewalk",
+  "status": "doing",
+  "sessionId": "a695a492-4a9c-4889-a141-0e50e2e7918a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T16:53:08.188Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

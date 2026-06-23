@@ -1,0 +1,33 @@
+{
+  "id": "req_0616",
+  "at": "2026-06-11T07:36:40.352Z",
+  "origin": "session:9361f55b",
+  "text": "do some research for all those items in the real world, and their average size, compare to what the game items size is",
+  "status": "review",
+  "sessionId": "9361f55b-0780-4569-bbc9-0034d03a84cc",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T07:37:32.867Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T07:39:58.322Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Researched real-world average sizes for all 54 prop kinds (web research: MUTCD specs for stop sign/traffic signal mounting, street light pole standards, utility pole 35ft standard, 4-yd dumpster, fire hydrant 24-42in; regulation soccer/basketball sizes; standard furniture dims) and compared to the game's propKinds.ts values via tools/prop-scale. Wrote docs/game/_reports/PROP-REALWORLD-AUDIT.md with full per-prop tables. Headline: ~80% of the catalog is real-world accurate (several exact to the cm); trees are ~HALF real size (the one family contradicting R4 scale-verticals-UP); street light 35% short; fire hydrant 30% tall; beach ball is giant-novelty size. Systematic: real-scale props read ~13% small against the stylized-tall 2.01m player (real adult ~1.75m). No code changed — analysis only; decisions on trees/streetlight/hydrant left to the user.",
+  "shas": [
+    "2a20cceef"
+  ],
+  "resolvedAt": "2026-06-11T07:39:58.322Z",
+  "tags": [
+    "ask"
+  ]
+}

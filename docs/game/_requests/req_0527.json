@@ -1,0 +1,33 @@
+{
+  "id": "req_0527",
+  "at": "2026-06-10T13:02:34.915Z",
+  "origin": "session:87a47e7e",
+  "text": "Nice hell yeah. uhm. one thing that would help a lot in this paint mode is if you present where the buildings are laid out otherwise feels kinda blind",
+  "status": "review",
+  "sessionId": "87a47e7e-58c5-4ade-8b65-3201c99fe4d2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T13:03:09.264Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T13:03:52.125Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Placement ghosts landed (commit 75f3a2366): on every 2D canvas layer except PLACE, all placements (buildings/props/markers) and build-piece footprints now render as dim, non-interactive outlines — 1px color-keyed border, faint fill, small label — drawn beneath the authoring affordances so selection highlights, road dots, and drafts stay on top. The active layer's click overlay still owns all input, so the ghosts are pure landmarks and can never steal a click. This unblinds the road/paint/zone/height layers: roads route around the actual city footprints instead of from memory. TSX-only change, hot-reloads into the running dev host; full cart bundles clean.",
+  "shas": [
+    "75f3a2366"
+  ],
+  "resolvedAt": "2026-06-10T13:03:52.125Z",
+  "tags": [
+    "ask"
+  ]
+}

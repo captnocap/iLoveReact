@@ -1,0 +1,30 @@
+{
+  "id": "req_1612",
+  "at": "2026-06-21T17:32:25.068Z",
+  "origin": "session:0593a75d",
+  "text": "hello. ok this is a very annoying bug i need you to track down. so pay attention, it has a very specific way it occurs.\n\nso here is the game [Image #33] \n\nthe game renders fine. \n\nwhen a file is updated, the app reloads, thats just react. when that happens. the game resets. and then looks like this. [Image #34] \n\nsame game. thats good. except, if i turn my camera at all [Image #35] everything starts to disappear",
+  "status": "review",
+  "sessionId": "0593a75d-7559-4968-b88f-ca0d76f3992a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T17:32:42.459Z",
+      "actor": "session-0593",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T17:49:51.773Z",
+      "actor": "session-0593",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Tracked the post-reload 'turn the camera and the world disappears' bug to the host retained-geometry intern caches. On dev hot reload only the V8 context is torn down and re-eval'd (v8_app.evalActiveTab -> clearTreeStateForReload), so the JS ship-once-per-key set (runtime/geometries/intern.ts) resets and re-ships verts, but the Zig host's append-only, never-evicting intern caches (g_geo_cache + the g_retained_vbuf bump cursor g_retained_top, plus the static-instance cache) persist and accumulate dead geometry from every prior map version across edit->reload cycles. Once they hit GEO_CACHE_SIZE/MAX_RETAINED_VERTS, internGeometry returns null and pass 1 silently drops the mesh; the shared Box geometry (grid + every building bucket) interns late, so grid + buildings vanish while props survive (matches the screenshots and the documented req_0725/0727 failure). Fix: new scene3d.resetForReload() rewinds the bump cursors and clears cache entries, exposed via gpu.scene3dResetForReload() and called from clearTreeStateForReload() (mirrors the JS resetShipped() that existed but was never wired); headless gpu stub got a no-op. Verification build of hmsc-int compiles clean. Needs the user to confirm live in tools/rjit dev hmsc-int since the trigger is hot-reload + camera input (not headless-reproducible).",
+  "shas": [
+    "23bc3b197"
+  ],
+  "resolvedAt": "2026-06-21T17:49:51.773Z"
+}

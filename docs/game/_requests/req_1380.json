@@ -1,0 +1,30 @@
+{
+  "id": "req_1380",
+  "at": "2026-06-19T04:38:13.469Z",
+  "origin": "session:be97e48f",
+  "text": "ok and then why does rig have a completely different painted face than the paint mode",
+  "status": "review",
+  "sessionId": "be97e48f-9627-4113-86b2-bb34b58ed45b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T04:39:18.430Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T04:57:22.609Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rig/object mode showed a different painted face than paint mode because paint mode sampled the RGBA <Paintable> while every other mode sampled the stale box-atlas StaticSurface (STUDIO_TEXTURE_KEY) — two different textures. Now a PAINTED model (has a paintRef, or inited this session) samples the paintable in ALL modes via a single modelPainted flag, and the box-atlas StaticSurface is no longer baked for a painted model. Same texture everywhere, so the face you painted shows identically in rig, object, and paint.",
+  "shas": [
+    "1a74fac95"
+  ],
+  "resolvedAt": "2026-06-19T04:57:22.609Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0545",
+  "at": "2026-06-10T14:24:17.274Z",
+  "origin": "session:0a09e641",
+  "text": "however, in the test route, i fall thru floors lmao and i dont do that in the compiled route so huge mismatch actually in the test route i just walk thru walls entirely",
+  "status": "review",
+  "sessionId": "0a09e641-a769-495b-a0fd-4a909d25af7a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:26:12.631Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T14:33:35.028Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed: /test (F2 walk mode) had NO collision — walk through walls, fall through floors. Root cause found via headless diagnostic on the user's real map: the liftedPieces terrain-lift in PlayRoute. It was authored (req_0444) against state.world, but state was the WorldStreamState (no .world), so liftToTerrain silently ran on undefined → NaN → a harmless no-op since req_0444. The crash fix (req_0541) repointed it to props.state.world, which made the lift ACTUALLY run for the first time — but props.state is the STATIC GameState with no painted terrain (paint lives in the build stream), so groundColumnTop returns 0 under all 4390 pieces and liftToTerrain DROPPED buildings onto y=0, moving 3537 pieces >5m (max 47.8m). Render+colliders move together, so buildings render where you see them but collide ~48m away → total walk-through. Fix: disable the lift here (liftedPieces = pieces); buildings collide where the user authored them, restoring the pre-crash working behavior. Proper F2 terrain-padding needs the live painted world (embodied worldGrid, defined below) — left as a separate tracked change, not faked. TSX hot-reloads; no rebuild. groundColumnTop still used elsewhere with worldGrid.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T14:33:35.028Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_1082",
+  "at": "2026-06-15T22:41:22.481Z",
+  "origin": "session:6de4f048",
+  "text": "i think this is from ur change :V [loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2514: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2514: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2514: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2514: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2514: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2514: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2514: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2514: error.BadHeightfields\n^C\n\nthat or i just need to rebuild",
+  "status": "new",
+  "sessionId": "6de4f048-c04d-4674-87c7-dff1d1416eb1",
+  "captureMode": "hook",
+  "events": []
+}

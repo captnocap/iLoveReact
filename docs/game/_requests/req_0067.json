@@ -1,0 +1,16 @@
+{
+  "id": "req_0067",
+  "at": "2026-06-06T07:50:37.004Z",
+  "origin": "supervisor-relay",
+  "text": "ui design principle: 4 buttons wide with the 5th wrapping below = horrible, more dead space than 1/2/3-wide arrangements. pick widths that fit the set. brush size can live elsewhere or vertically. and the color section below: conditionally render it instead of all the time. also pay attention to duplication of the same shit on the interface at the same time - cutout enforced that before it was ported",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T08:48:46.042Z",
+  "resolution": "The three chrome laws (the SCULPTKIT addendum), applied where they were actually broken and standing for everything touched since: (1) NO WRAP ORPHANS — the painter rail's TOOLS (5) and MODE/MASK (5) grids ride ONE row each (tile 34px + 3px gaps fits the 200px rail; the transient lasso-confirm is its own row, so no set ever wraps 4+1); every sculpt-rail grid's width divides its set size by construction (4-verb MODE, 4-verb ACTIONS, 2 TOGGLES, 2-3 SURFACE). (2) CONDITIONAL SECTIONS — the COLOR stack (slots/wheel/palette) now renders ONLY when the active mode consumes color (the paint band on a color canvas; image-source mask work never reads it), and every sculpt-rail section gates on its context (SURFACE non-head, MODE/ACTIONS/PASSES in detail, NODES only with the toggle, the node slider only with a selection). (3) NO SIMULTANEOUS DUPLICATION — audited the sculpt+paint surfaces: mirror appeared TWICE on the SCULPT lens (viewport chip + toolbar); its one home is now the rail toggle and the viewport chip yields on that lens; the depth-hint intensity slider's one-off lookalike was deleted and folded into the kit's LinearRailSlider. Landed with 91a0414f7.",
+  "shas": [
+    "91a0414f7"
+  ],
+  "tags": [
+    "ux"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_1093",
+  "at": "2026-06-15T23:14:22.027Z",
+  "origin": "session:6de4f048",
+  "text": "OH the persistant state makes sense. this also happens. i open a door, i literally go and close the app, turn off pc, touch grass outside, come back. press compile, go to that building in the game, and the door is open. lol so its definitely that sort of same persistence bug in some fashion",
+  "status": "new",
+  "sessionId": "6de4f048-c04d-4674-87c7-dff1d1416eb1",
+  "captureMode": "hook",
+  "events": []
+}

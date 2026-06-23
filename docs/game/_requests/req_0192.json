@@ -1,0 +1,12 @@
+{
+  "id": "req_0192",
+  "at": "2026-06-07T05:55:27.181Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT on the item source: STATE DIVERGENCE, the item lies. Evidence, same item in both: /home/siah/.claude/image-cache/42677ed6-e8fa-4672-83bf-b68e46d28bef/20.png (VOXEL lens: a real tower blockout, W5/D6/H7, custom blocks) vs .../21.png (SCULPT lens: an untouched blank-sphere default). User verbatim: \"the current state is lying. the item in voxels vs the item in sculpt. same item\". The lenses edit disconnected stores (voxel blockout vs sphere sculpt grid) with only the manual import-voxel button as a bridge, yet both render as THE item's current shape. Requirement: the item tells ONE truth. Two acceptable shapes — propose which (or a better one) BEFORE building: (A) AUTO-FLOW — the voxel blockout auto-bakes into the sculpt base whenever it changes (sculpt edits layer on top; re-bake policy needs care re: destroying sculpt work); (B) EXPLICIT-BRIDGE WITH HONEST STATUS — import stays manual but the lenses stop lying: the SCULPT lens visibly states \"voxel blockout has unimported changes — [import]\" and the ITEM lens shows which shape source is live; no lens ever silently presents stale/default state as the item. Whichever shape, the blank-sphere default must never masquerade as an item that has a real blockout. Post your proposal + the user rules if it is a coin-flip.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

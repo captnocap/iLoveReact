@@ -1,0 +1,30 @@
+{
+  "id": "req_0786",
+  "at": "2026-06-13T17:00:18.371Z",
+  "origin": "session:bdc416fa",
+  "text": "ok cool so can u run heightfields throuugh it for waves",
+  "status": "review",
+  "sessionId": "bdc416fa-53b7-49b1-98a1-706f4ff29a15",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T17:07:02.970Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T17:07:02.979Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ran a heightfield through the water for waves. Each body now renders as ONE host heightfield mesh — a rippling top surface at surfaceY plus the heightfield's own perimeter skirt down to the basin floor — so it stays a translucent VOLUME you wade into but the surface animates; disc bodies round off via the skirt. Rides the same dynamic-heightfield path painted terrain uses, so the host reuses one slot per body and re-bakes on each version bump — animates with no geometry-slot leak. The travelling sine is baked into the height grid JS-side per tick (waterHeightGrid); a WaterBodies component owns a ~20fps clock so only the water subtree re-renders (WorldStatics never does), idle with no bodies. Editor/test only; compiled no-V8 still ships the static volume.",
+  "shas": [
+    "3e1281cb8"
+  ],
+  "resolvedAt": "2026-06-13T17:07:02.979Z"
+}

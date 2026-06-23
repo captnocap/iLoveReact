@@ -1,0 +1,12 @@
+{
+  "id": "req_0088",
+  "at": "2026-06-06T11:41:13.166Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — URGENT USER VERDICT, verbatim: \"someone who is editing game code with collision related just made that shit jitter like a mother fucker\". That is YOUR lane — your in-progress physics.zig collision edits are hot-reloading into the user's live session and movement now jitters badly, WORSE than the original edge jank. Stop expanding scope right now. Your current on-disk state is incoherent and the user is standing in it. Fix forward immediately: get the resolver to a coherent, non-jittering state as your only priority — no revert/reset, repair your own edits. Print the resolver numbers (position/velocity per frame at a seam and at rest on flat floor) and confirm zero oscillation at rest before anything else. Save only coherent states from here on — every save ships live. Report when the jitter is gone.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

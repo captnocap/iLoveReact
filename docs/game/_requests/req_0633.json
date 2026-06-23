@@ -1,0 +1,33 @@
+{
+  "id": "req_0633",
+  "at": "2026-06-11T11:40:40.180Z",
+  "origin": "session:7de3e0b0",
+  "text": "[Image #2] hello. i am going to send u images of some props to make. do your best job. [Image #3] [Image #4] and here are some by name: lets get a radio tower, books, record player, records, speakers, vending machines, gas pump, cassettes crates pallet stacks store shelves, building props like hospital and police station, signs to put up on the street like in front of a business and then more variety of what already exists. thanks have fun make sure you keep it real scale",
+  "status": "review",
+  "sessionId": "7de3e0b0-06ef-431e-b04d-b0c6f97a7c65",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T11:40:57.081Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T12:05:11.961Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "44 new prop kinds landed across BOTH render paths from the reference images + named list: the junkyard set (shipping container, concrete pipe, pipe stack, corrugated sheet, cable spool, lockers, oil tank, tire+stack, wooden barrel, steel drum, propane tank, jerry can, cinder block, brick, rubble pile), radio tower, gas pump, vending machine, store shelf, crates/pallets/pallet stacks, sign family (A-frame, blade, poster, hospital, police), media set (books, record player, vinyl, album cover, speakers, cassette), toilet paper — all real scale x1.15. A new kind is ONE data recipe (game/kinds/propModels.ts) rendered identically by /test (DataProp via TexturedParts) and the compiled bake (worldGeometry default case). New dynamics kinds roll/kick via lump 17; new containers searchable via lump 16; zero Zig changes — a normal Compile ships them. Suites 14/14, 3/3, 3/3, 7/7 green.",
+  "shas": [
+    "c7986b11c"
+  ],
+  "resolvedAt": "2026-06-11T12:05:11.961Z",
+  "tags": [
+    "ask"
+  ]
+}

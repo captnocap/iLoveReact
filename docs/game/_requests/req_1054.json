@@ -1,0 +1,28 @@
+{
+  "id": "req_1054",
+  "at": "2026-06-15T19:24:24.651Z",
+  "origin": "session:00a3ce8a",
+  "text": "when selecting a pivot or a joint. it seems to automatically default to placing a pivot but something like a car body is only going to have joints. nothing on the car itself spins even if u get to doing doors (which idk if we will or not) u still only get joints on the body then",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T19:25:56.282Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T19:39:57.633Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Pivot is now OPT-IN (req_1054). A part no longer auto-has a pivot: a car body is joints-only because nothing on it spins (doors would be joints too). The data was already pivot-optional (cuboid sets none); the bug was the UI conjuring a phantom pivot from pivotOf's bounds-center fallback and auto-selecting it on rig entry. Added hasPivot/clearPivot to editMesh; the viewport overlay, pick, and gizmo now show the pivot only when hasPivot; rig-mode entry selects the pivot only if it exists (else nothing); a + pivot button (viewport toolbar and the column-3 panel) opts a rotating part in, and Delete on the selected pivot drops it. Also wired branch/twig per the user's request: rig DATA stays BRANCH (rides EditMesh -> partMeshUpdated -> persisted V20 + undoable), and the tool-state became a proper TWIG (selMode/gizmoTool/rigSel/smooth swapped to useHotState so they survive a hot reload but reset on cold restart; the reset-on-part-change effect now skips its first run so a reload remount doesn't wipe the restored selection). editMesh 42/42, modelStream 7/7, Studio + full sources chain bundle clean; hot-reload TSX, uncommitted. PLAYBOOK Part 6 + memory updated.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T19:39:57.633Z"
+}

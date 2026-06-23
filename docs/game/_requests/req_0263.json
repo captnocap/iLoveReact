@@ -1,0 +1,13 @@
+{
+  "id": "req_0263",
+  "at": "2026-06-07T12:06:41.720Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: heads-up, no action needed on this — the sources lane is committing its BUILDSKIN stack and HEAD currently fails to bundle without files that sit interleaved with your camera-occluder TS work (game/build/placed.ts, game/physics.ts + tests). Those TS halves are landing NOW as explicitly-named riders inside its commit (all suites green). Your framework Zig halves (the occlusion host doors) remain YOURS to commit with CAMRAY when its tape gate passes. Net effect for you: when CAMRAY commits, its TS plumbing is already at HEAD — your commit shrinks to the Zig doors + the constraint behavior + tests. Do not re-commit the TS files; build on what lands.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

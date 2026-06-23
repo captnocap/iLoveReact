@@ -1,0 +1,12 @@
+{
+  "id": "req_0101",
+  "at": "2026-06-06T12:21:32.914Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — PRIORITY ZERO, your PROJSCOPE save un-floored the user's live session. Evidence from the live dev log, in order: [watch] build started (change: \"cart/hmsc-int/editors/play/PlayRoute.tsx\") → [dev 5:18:46 AM] rebuilt - pushed → [play] live floor probe {\"owner\":1,\"hostReady\":true,\"surfaceRegions\":0,\"placedCells\":0,\"landforms\":0,\"worldRects\":0,\"solidRects\":0,\"heightfields\":0,\"spawnGround\":0} and [mapgone] applyPayload: world=present chunks=4 focus=4 painted=5733 placements=0. The world payload now arrives with ZERO placements and zero landforms/heightfields — the user's existing world was saved under the PRE-scoping key, and your per-project lookup finds nothing, so the ground does not exist. The diagnosis to confirm with data: print which key the live session's active project resolves to vs which key the user's existing world/placements are stored under. The fix law: existing legacy/global data MUST remain loadable — the default/current project must see the pre-scoping world until the user rules on a migration; scoping may never make existing user data invisible. Also report what quarantined at sessions.jsonl:884 (CORRUPT RECORD, 184 bytes, same moment) — say what is in it, touch nothing. Floor back in the user's live session is the only done-bar.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

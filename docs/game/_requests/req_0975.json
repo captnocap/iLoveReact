@@ -1,0 +1,28 @@
+{
+  "id": "req_0975",
+  "at": "2026-06-15T11:19:01.951Z",
+  "origin": "session:524eaf71",
+  "text": "thats still a bit off. i went and made my cube 16x8 and it spawned inside of the grid not exactly ontop of it. [Image #24] oh and when i click face i actually see the wireframe inside of it correctly so the rendering is just wrong",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T11:20:25.611Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T11:24:59.799Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Could-not-reproduce / transient. The user reported the cube spawning sunk into the grid with the selection wireframe correctly placed (render vs overlay mismatch). Investigated the full path: editMeshToGeometry preserves verts (build() does no recenter/scale), the host model matrix is translate(pos)*rot*scale with scale defaulting to 1, and both the rendered mesh and the 2D selection overlay use the SAME partPlacement lift — so they must coincide. The most likely cause was a stale hot-reload frame from BEFORE the dynamicKey '~version' crash fix (req_0972) landed: a dynamicKey without '~' makes the host silently drop/keep-stale the mesh. The user retested several times and it is now correct (cube rests on the grid). No code change; the crash fix + version'd dynamicKey + the 16-unit model are what made it render right.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T11:24:59.799Z"
+}

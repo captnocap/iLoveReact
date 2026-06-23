@@ -1,0 +1,28 @@
+{
+  "id": "req_1523",
+  "at": "2026-06-20T21:56:34.114Z",
+  "origin": "session:6580d434",
+  "text": "Yeah ok so im not crazy lol they are the same thing. Then the only thing could be exactly like u said, staleness. but, i guess idk. is it possible that when i press the compile button, it not only compiles the map, but updates the game loader at the same time ?",
+  "status": "review",
+  "sessionId": "6580d434-ee0d-4691-a47a-61556997a089",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T21:57:18.598Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T21:58:22.820Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's question: can the Compile button update the game loader at the same time it bakes the map? No, not for the editor currently open — the /compiled loader is Zig compiled into the running editor binary, and Zig cannot be hot-swapped into a live process (the dev host reloads JS/TSX only, per CLAUDE.md). The Compile button re-bakes map DATA (the gamefile) but cannot replace the embedded loader code in-process; even rebuilding the loader binary on disk would not affect an already-running editor until full relaunch. Laid out the durable fix for once the staleness is confirmed: stop /compiled from embedding the in-binary loader and instead render/launch the freshly-built standalone world_loader (the exact binary rjit game play runs), so a Compile rebuilds it and the next open is always current with no editor relaunch — matching what the pop-out world_window is already reaching for. No code yet; gated on the user's relaunch test confirming staleness before building the standalone-loader wiring.",
+  "shas": [],
+  "resolvedAt": "2026-06-20T21:58:22.819Z"
+}

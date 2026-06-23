@@ -1,0 +1,31 @@
+{
+  "id": "req_0354",
+  "at": "2026-06-08T14:12:02.031Z",
+  "origin": "codex:019ea612",
+  "text": "something broke here im pretty sure from your earlier work [loader] constructed map 360x360 from zig-out/game/hmsc.gamefile (no JS)\n[loader] built 175 mesh instances (76 placed pieces)\n[loader] built 105 physics rects + 28 oriented physics rects + 42 heightfields\n[js.warn] [play] 2091 rects past the host cap 2048 — newest dropped\n[js.err] The above error occurred in the <PlayRoute> component:\n\n    at PlayRoute (<anonymous>:60374:57)\n    at Route (<anonymous>:7952:5)\n    at View\n    at Box (<anonymous>:7201:48)\n    at View\n    at Box (<anonymous>:7201:48)\n    at EditorShell (<anonymous>:77821:50)\n    at Router (<anonymous>:7887:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:78949:29)\n\nReact will try to recreate this component tree from scratch using the error boundary you provided, GlobalErrorBoundary.\n[js.err] [react-uncaught] Error: configureCameraOcclusion: 2074 rects exceeds the host cap of 2048\n    at Object.configureCameraOcclusion (<anonymous>:32620:13)\n    at <anonymous>:60434:20\n    at wrappedCreate (<anonymous>:26018:34)\n    at wrappedCreate (<anonymous>:26018:34)\n    at commitHookEffectListMount (<anonymous>:21225:36)\n    at commitPassiveMountOnFiber (<anonymous>:22516:19)\n    at commitPassiveMountEffects_complete (<anonymous>:22484:19)\n    at commitPassiveMountEffects_begin (<anonymous>:22474:17)\n    at commitPassiveMountEffects (<anonymous>:22464:13)\n    at flushPassiveEffectsImpl (<anonymous>:24209:13)\ncomponent-stack:\n    at PlayRoute (<anonymous>:60374:57)\n    at Route (<anonymous>:7952:5)\n    at View\n    at Box (<anonymous>:7201:48)\n    at View\n    at Box (<anonymous>:7201:48)\n    at EditorShell (<anonymous>:77821:50)\n    at Router (<anonymous>:7887:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:78949:29)",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T14:12:25.225Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T14:16:46.826Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Raised the shared hmsc-int/game physics rect cap from 2048 to 4096 on both sides of the bridge: cart/hmsc-int/game/physics.ts now exports PHYSICS_LIMITS.rects=4096 and framework/game/physics.zig now accepts MAX_RECTS=4096. Verified the native physics unit suite, the full tools/rjit game verify run, a fresh SHIP_RUN_PACKAGE=0 tools/rjit ship hmsc-int rebuild, and fresh headless shots for /test and /compiled. This fixes the PlayRoute configureCameraOcclusion crash caused by the current map producing 2074 camera occlusion rects while preserving boundary rejection for counts above the raised host cap.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T14:16:46.826Z",
+  "tags": [
+    "bug"
+  ]
+}

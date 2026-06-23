@@ -1,0 +1,10 @@
+{
+  "id": "req_1335",
+  "at": "2026-06-18T23:22:43.461Z",
+  "origin": "session:d6961119",
+  "text": "there is a script codex made that imported @../../Desk.glb into the space",
+  "status": "new",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": []
+}

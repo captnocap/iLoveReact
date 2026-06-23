@@ -10,5 +10,9 @@
   "resolution": "CAMFOCUS-0606 fixed in commit a5d086305. Measured cause: the sculpt camera (shared by /characters, /items, and the workbench character stage via editors/sculptCamera.ts) booted in fly mode and restored the persisted noclip pose verbatim — the on-disk twig held a pose aimed off-subject (orbit's pan was pinned at its clamp, yaw at -365 deg), so the camera loaded offset every time and never reframed on model/part switch. Fix, with NEITHER camera removed: (1) deterministic subject framing — new pure-math editors/sculptFraming.ts (V26-clean) frames the subject's bounds at a fov-fitted distance at boot, on model load/generate/import and part switch, in BOTH rigs; (2) the orbit/fly toggle made discoverable — explicit orbit + fly chips (active lit) plus the C key, taught in both hint lines; (3) a refocus verb — the 'focus · F' chip and the F key reframe from any lost position. Framing margin is a P2 tunable (TUNE.frame.margin); pose persistence machinery untouched. Verify: new sculptFraming suite 7/7, characters 13/13, full game verify 55/56 (the one RED is the paint lane's uncommitted brush work, unrelated). READY FOR USER TEST: load a model — it frames centered every time; F recenters; C or the chips flip cameras.",
   "shas": [
     "a5d086305"
+  ],
+  "tags": [
+    "bug",
+    "ruling"
   ]
 }

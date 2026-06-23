@@ -1,0 +1,30 @@
+{
+  "id": "req_0614",
+  "at": "2026-06-11T05:43:12.861Z",
+  "origin": "session:0fdc6000",
+  "text": "hey its just you. you can go for it full send. the document is thorough",
+  "status": "review",
+  "sessionId": "0fdc6000-801c-433a-96cc-cc2aaffb481e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T05:43:49.669Z",
+      "actor": "demolition-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T05:53:22.895Z",
+      "actor": "demolition-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "THE DEMOLITION ORDER executed full-send (d4c4b5030). Both capture blockers were already resolved on disk (cutout modules in editors/cutout/ since 77726e201, V6 animation parser in game/animation/); the one live import left (compile/playerModel.ts → cart/animationDsl.ts) repointed to @game/animation. Deleted all 30 kill-list carts plus user-approved adjacents (hmsc-int-old, scape3d, heads, deadcode, untracked input_bench). Per-cart docs + index records retired to docs/game/_archive/; _index/index.ts now registers only the live corpus. Verified: ship hmsc-int green, game bake PASS (player animation bakes through the capture), oracle rebuilds clean, straggler sweep clean.",
+  "shas": [
+    "d4c4b5030"
+  ],
+  "resolvedAt": "2026-06-11T05:53:22.895Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1058",
+  "at": "2026-06-15T20:04:40.823Z",
+  "origin": "session:00a3ce8a",
+  "text": "Nice yeah if u turn it to object mode is auto rotate for the whole piece that would be slick. also, if u can fix the ctrl + a focus, it hits all the text on the app also not just the studio",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T20:05:14.090Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T20:13:24.834Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Object-mode whole-piece transform + Ctrl+A scope fix (req_1058). (1) Object mode now drives the WHOLE part: the gizmo targets every vert in object mode (anchored at the part center), so move/resize/rotate reorient the whole piece with no select-all; the move/resize/rotate toggle now shows in object mode, and entering object mode arms the rotate tool (the common reorient need). gizmoSelVerts resolves to all verts in object mode, [] in rig, the selection in element modes; the onDown gizmo-grab branch and the toolbar gate were updated to match. This is hot-reload TSX, live now. (2) Ctrl+A scope: the host's Ctrl+A also set selection.zig sel_all, which selects ALL text across the whole app tree, so the Studio's select-all-faces was flashing every label in the app. Added a __selection_clear host door in v8_bindings_core.zig (calls selection.clear()) and the Studio's Ctrl+A handler now calls it via callHost right after taking the key, so the app-wide highlight never renders. The TSX call is a safe no-op on an un-rebuilt host. IMPORTANT: this door is a framework (Zig) change, so it needs a HOST REBUILD to take effect — the object-mode rotate works on hot reload, but the Ctrl+A highlight fix activates after the next rebuild. Studio + full workbench source chain bundle clean; the binding passes zig ast-check. PLAYBOOK Part 6 + memory updated.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T20:13:24.834Z"
+}

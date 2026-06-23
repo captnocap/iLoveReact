@@ -1,0 +1,33 @@
+{
+  "id": "req_0721",
+  "at": "2026-06-13T05:50:23.715Z",
+  "origin": "session:e13c74b5",
+  "text": "yeah i keep restarting it. its not there. [Image #26]",
+  "status": "review",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T05:52:00.088Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T06:01:52.423Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the vanishing buildings: the iso pane's floor-level cut-away (visiblePieces drops any piece whose storey p.y-groundTopAt >= (level+1)*METERS_PER_LEVEL) was stripping the entire multi-storey city. A render census proved it — at level 0, 1036 of 1472 pieces cut (673 walls, 104 roofs, 221 floors; cutStorey 3..33m), only ground-floor pieces survived. The cut-away is a look-inside-one-floor tool and reveals only one level at a time, so raising the level never showed whole buildings. Fix (79da84357): a showAllFloors twig defaulting ON gates the cut-away, so the pane shows the full building stack by default; the cut-away is opt-in via a new ⌷ toggle. Restart ruled out the host geometry cache; dedup/stairs were unrelated. POSSIBLE follow-up: the transient 'rounded/cylinder' rendering (req_0720) is a separate geometry issue if it recurs.",
+  "shas": [
+    "79da84357"
+  ],
+  "resolvedAt": "2026-06-13T06:01:52.423Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "req_0247",
+  "at": "2026-06-07T11:10:42.177Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: AIMPITCH-0607 user PASS confirmed — commit it now. Explicit paths: only the files of the aim/3rd-person orientation fix and its regression test, nothing from the CAMRAY work in the same area if separable (if the same file carries both and they cannot be split cleanly, say so BEFORE committing instead of bundling silently). Post the hash. CAMRAY stays uncommitted on its tape gate.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

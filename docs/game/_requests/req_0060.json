@@ -1,0 +1,16 @@
+{
+  "id": "req_0060",
+  "at": "2026-06-06T07:09:32.623Z",
+  "origin": "supervisor-relay",
+  "text": "this camera in here is still just a fighting nightmare. the biggest problem with the freeroam is that it has the dpi of like a million so a small movement goes like 720 degree spin lmao",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T07:28:37.490Z",
+  "resolution": "CAMSENS-0606. Measured the rig seam first (sculptCamera.orbitMove — the ONE shared drag path): the freeroam/fly look was NOT raw pointer deltas; both rigs scale per-pixel (orbit 0.4°/px yaw / 0.3 pitch, fly 0.3°/px). The mis-scale was geometric: an fps look rotates the VIEW DIRECTION — the subject leaves a 45° fov after ~75px of drag, so orbit's rate feels like million-DPI in fly (a fast high-DPI flick sweeps multiple full turns). Fix at the seam: fly lookPerPx 0.3 → 0.08 (~4× under orbit), inherited by every fly-cam surface (workbench Stage, DressedStage, /characters, /items). The camera feel numbers are now P2 tunables: paintKit registers the sculpt-camera cluster (orbit yaw/pitch °/px, fly look °/px, fly speed, fly wheel step, frame margin) into editors/tunables — write-through, live on /settings (7 systems · 69 knobs, selfshot /tmp/camsens-settings.png), so the user dials their own DPI feel. Data line stays: the first look-drag per rig logs its measured px-in → °-out ratio to the dev terminal. V26 untouched (rig parameter scaling only; host drive unchanged). sculptFraming P4 8/8; game verify 57/58 (the one RED is the cutout/paint lane's brush-shape WIP, not this lane's).",
+  "shas": [
+    "d597f379c"
+  ],
+  "tags": [
+    "ux"
+  ]
+}

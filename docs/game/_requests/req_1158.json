@@ -1,0 +1,10 @@
+{
+  "id": "req_1158",
+  "at": "2026-06-16T08:17:33.409Z",
+  "origin": "session:740b1ca5",
+  "text": "oh also the textures are not rendering thats what else is doing it. so lets get this down, the ground textures reverted back to extra low render, walls missing, and grass blades all gone. physics still work tho is there a cap on heightfields being 48? i dont even have 48 heightfields in the map as far as im concerned. idk tho the annoying part is this was totally fine the last time i was sitting down and wanted to load the route. so between like 7pm and 1am something fucked up but again you wont find it in commits, no one keeps it up to speed",
+  "status": "new",
+  "sessionId": "740b1ca5-cbef-4fcf-8763-930c121a774b",
+  "captureMode": "hook",
+  "events": []
+}

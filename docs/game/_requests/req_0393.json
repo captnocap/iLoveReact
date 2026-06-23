@@ -1,0 +1,31 @@
+{
+  "id": "req_0393",
+  "at": "2026-06-09T05:47:12.688Z",
+  "origin": "codex:019eaa55",
+  "text": "need a better approach, this is still unusable [Image #1]",
+  "status": "review",
+  "sessionId": "019eaa55-1779-7bd0-be5d-1b2b9ee9e13e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T05:47:34.061Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T05:49:53.948Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the unusable inline material picker in the buildings panel with a dedicated MATERIALS lens in the wide preview column. The panel now only chooses the face target and shows current material as a readout; Browse material opens a searchable wide material browser with large texture preview and Apply to target. Paint target still opens the shared painter. Added tests pinning that materials no longer open as a narrow panel dropdown, plus handoff/apply behavior. Verified buildings suite 15/15 and full hmsc-int bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T05:49:53.948Z",
+  "tags": [
+    "ux"
+  ]
+}

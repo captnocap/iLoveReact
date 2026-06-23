@@ -1,0 +1,18 @@
+{
+  "id": "req_1687",
+  "at": "2026-06-23T02:38:36.310Z",
+  "origin": "session:f1efdf51",
+  "text": "hello. i made this shelf [Image #6] and i was hoping i could place props on each shelve layer but seems that i am shit out of luck, i thought it was prop size, but even the smallest prop i cant get it to place on another layer here so im wondering how we could solve it",
+  "status": "doing",
+  "sessionId": "f1efdf51-5d87-4faa-a7ee-5aadcc825e3b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T02:38:43.768Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

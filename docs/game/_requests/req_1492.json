@@ -1,0 +1,30 @@
+{
+  "id": "req_1492",
+  "at": "2026-06-20T19:33:07.403Z",
+  "origin": "session:89c172a4",
+  "text": "also, this flow breaks it:\n\npaint some model -> lift the brush -> wait several seconds -> switch to any other model -> paint carries over -> click paint tool -> model is now white -> go back to the one u started painting -> its white also now",
+  "status": "review",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T19:44:54.549Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T19:44:54.558Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same root cause and fix as req_1488 (distinct repro: paint model A, switch to model B, B shows A's paint, then B goes white and A goes white too). All three symptoms were the one shared STUDIO_PAINT_KEY texture restored once per model per session. The per-model reload tracker (reload on model-identity change / async blob arrival, base-coat only truly-unpainted models, never clobber own/in-progress strokes, reset on unmount) fixes carry-over and white-out together. User-confirmed working.",
+  "shas": [
+    "2f4e382f3"
+  ],
+  "resolvedAt": "2026-06-20T19:44:54.558Z"
+}

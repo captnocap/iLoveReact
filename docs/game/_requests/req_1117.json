@@ -1,0 +1,28 @@
+{
+  "id": "req_1117",
+  "at": "2026-06-16T01:29:59.083Z",
+  "origin": "codex:019ecd7a",
+  "text": "write this all into a document for me please",
+  "status": "review",
+  "sessionId": "019ecd7a-9cba-73d0-9fee-7dc6959b72e2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T01:30:04.872Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T01:31:42.386Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added docs/game/HMSC_INT_ASSET_PIPELINE.md as a focused design report capturing the hmsc-int architecture context, Studio.tsx modeling role, Compile-button workflow, prop/item/vehicle/vehicle-part/clothing descriptor fields, and the BSP-for-assets cooked lump-container model with content-addressed installation and no per-asset scripts. This creates a canonical written reference for the discussed asset pipeline without changing runtime code.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T01:31:42.385Z"
+}

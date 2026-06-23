@@ -1,0 +1,31 @@
+{
+  "id": "req_0349",
+  "at": "2026-06-08T13:45:31.955Z",
+  "origin": "codex:019ea612",
+  "text": "also you didnt land the camera in here. but the view port changed nothing about the broken render",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:45:45.917Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:58:27.458Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added the missing editor-to-loader camera input bridge: editor SDL mouse motion over WorldLoader now forwards xrel/yrel to world_loader.Runtime.mouseLook, and RMB over the primitive enters/leaves the same loader aim mode while relative mouse mode is held.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T13:58:27.458Z",
+  "tags": [
+    "bug"
+  ]
+}

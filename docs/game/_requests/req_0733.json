@@ -1,0 +1,39 @@
+{
+  "id": "req_0733",
+  "at": "2026-06-13T07:33:04.134Z",
+  "origin": "session:b2985164",
+  "text": "well idk tbh we are trying to figure out why the iso3d map editor all of a sudden stopped showing a grid and buildings but inside of the compiled game route its totally fine",
+  "status": "review",
+  "sessionId": "b2985164-7aad-4573-accc-12a386983e72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T07:35:56.549Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T07:35:56.557Z",
+      "actor": "opus",
+      "kind": "note",
+      "text": "Editor grid+buildings vanish / compiled route fine. Confirmed in framework/gpu/3d.zig: drawScene pass-1 (line ~1568) does 'if internGeometry()==null continue' — when g_retained_vbuf (the intern vertex buffer) is full, the mesh is silently dropped. The compiled route is fine because it draws baked g_static_inst_buf, not the live intern cache. CAVEAT: the 'cache-full degrade path' the line-113 comment promises is a PHANTOM — g_vertex_buffer is allocated+released but never written or bound, so there is NO fallback. ALSO: the prior session's comment blaming the imported mesh is wrong — Desk.glb is only 498 verts, not the cliff. So either (a) accumulated carve/humanoid geometry fills the 512k cap, or (b) the vanish is unrelated to intern (note recent iso-pane 'vanishing' fixes). Definitive test: rebuild (now boots since the 400MiB buffer crash is fixed) and read the [r3d-census] line — inst_seen>0 inst_collected==0 + retained near cap == intern-full confirmed. My buffer fix also raised usable intern from 16MiB to 112MiB (7x), which may already resolve it."
+    },
+    {
+      "at": "2026-06-13T07:52:12.721Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Iso-pane grid + buildings vanished while the compiled route was fine. Root cause (census-proven, not the prior session's buffer theory): the bridge-cost geometry dedup gates a mesh's verts behind a GLOBAL optimistic markShipped(key) set; JS flips it at render time but the host interns at paint time, so any box-keyed mesh that renders without reaching the host intern call desyncs the set and every later mesh with that key ships key-only, misses lookupGeometry, and is dropped. Census showed inst_seen=15 inst_collected=0 with retained=32k/3670k (buffer 0.9% full), killing the buffer-size theory. Fix: instanced buckets always ship their one geometry payload (the dedup saves nothing for an instanced bucket), so they self-describe and repopulate the shared Box key the grid lines cache-hit off. Verified: grid + buildings returned on hot-reload.",
+  "shas": [
+    "504bb53ca"
+  ],
+  "resolvedAt": "2026-06-13T07:52:12.721Z",
+  "tags": [
+    "bug"
+  ]
+}

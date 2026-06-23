@@ -1,0 +1,30 @@
+{
+  "id": "req_1145",
+  "at": "2026-06-16T07:57:00.246Z",
+  "origin": "session:071f59a8",
+  "text": "oh nice that latest set is svg? the curve is much better",
+  "status": "review",
+  "sessionId": "071f59a8-18c9-4044-84f1-a1913885c085",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T07:57:51.778Z",
+      "actor": "claude-opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T07:58:25.133Z",
+      "actor": "claude-opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User confirmed the SVG-path trunk (PathTube, sha 7b2e3255f) reads much better than the parametric PalmTrunk — 'the curve is much better'. This validates the SVG-path-to-trunk approach as the trunk method going forward (and its generalization to branches for non-palm trees). No new code beyond the already-committed PathTube; this entry captures the user's approval of that direction.",
+  "shas": [
+    "7b2e3255f"
+  ],
+  "resolvedAt": "2026-06-16T07:58:25.133Z"
+}

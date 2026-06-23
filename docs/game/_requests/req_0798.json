@@ -1,0 +1,18 @@
+{
+  "id": "req_0798",
+  "at": "2026-06-13T18:05:37.073Z",
+  "origin": "session:6e5908e6",
+  "text": "so a few things about this still very wrong. one its not painting my roads and two look here also [Image #13] the two areas i circled are the same area, but ehere is the sand ??? same thing is happening with roads all over the place",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T18:05:49.842Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

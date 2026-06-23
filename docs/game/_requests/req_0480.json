@@ -1,0 +1,31 @@
+{
+  "id": "req_0480",
+  "at": "2026-06-10T07:59:34.484Z",
+  "origin": "codex:019eb06a",
+  "text": "so here is what happens when i paint [Image #1][Image #2]",
+  "status": "review",
+  "sessionId": "019eb06a-e6fb-7280-bdb5-0483b03d47b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T07:59:53.325Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T08:05:51.337Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the slope painter from repeated dabs into a continuous height ribbon. Added a heightData segment stamp that projects each height sample onto the painted path segment, removing the terraced plate/sawtooth footprint artifact shown in the screenshots. Verified with focused heightData tests and fast hmsc-int ship build.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T08:05:51.337Z",
+  "tags": [
+    "bug"
+  ]
+}

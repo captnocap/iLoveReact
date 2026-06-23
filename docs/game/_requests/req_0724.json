@@ -1,0 +1,21 @@
+{
+  "id": "req_0724",
+  "at": "2026-06-13T06:14:59.778Z",
+  "origin": "session:e13c74b5",
+  "text": "[js.warn] [iso-bbox] cam center=(81,43) level=0 zoom=0.49 showAll=true visible=1472/1472 | buildings=n=1276 x[23..305] y[0.0..33.6] z[-29..158] | props=n=196 x[8..110] y[0.0..24.2] z[0..119]",
+  "status": "doing",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T06:16:07.871Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ],
+  "tags": [
+    "perf-log"
+  ]
+}

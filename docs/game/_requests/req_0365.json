@@ -1,0 +1,31 @@
+{
+  "id": "req_0365",
+  "at": "2026-06-08T20:23:02.699Z",
+  "origin": "session:67746dc2",
+  "text": "haha so 512 the map is blank xD and 220 the floor is gone. can u increase the cap on those to render?",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T20:26:13.843Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T20:26:13.851Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the blank-map (512 blocks) and missing-floor (220 blocks) symptoms on the --massive scale lab — both were ONE root cause: the no-V8 loader's 3D render path capped instanced draws at MAX_INSTANCES=65536 (framework/gpu/3d.zig). The whole world is one instanced unit-cube batch with the ground rendered LAST, so crossing 65536 truncated the tail (the floor vanished at 220 blocks=143,548 instances) and far past it only the first 65k buildings rendered, clustered in one corner while the camera framed the full 22 km world (the 'blank' map at 512 blocks=776,084 instances). Raised MAX_INSTANCES 65536 -> 1,048,576 (covers the 512-block max with headroom) and, critically, moved the per-frame instance staging buffer (inst_scratch) OFF THE STACK into a BSS-resident global g_inst_scratch — at 1M instances it is 80MB, which would blow the stack as a local; as lazily-committed BSS a small map touches none of it. Cost is ~80MB reserved GPU buffer + up to 80MB BSS, purely a ceiling, not per-instance/per-frame work (still one draw). The truncation path was already memory-safe so this is a clean ceiling raise. Collision is unchanged (separate MAX_RECTS=4096, floors-first so you still never fall through); making buildings solid at scale is the still-offered spatial-windowing pass. Pending the user's loader rebuild + playtest.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T20:26:13.851Z",
+  "tags": [
+    "ask"
+  ]
+}

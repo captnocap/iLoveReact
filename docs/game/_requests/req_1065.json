@@ -1,0 +1,28 @@
+{
+  "id": "req_1065",
+  "at": "2026-06-15T21:22:42.666Z",
+  "origin": "session:760f9f8d",
+  "text": "go all the way, and this is how you shape it. @GUIDING_LIGHT.md Yeah, this is a good find. The core approach is exactly the one that makes grass stop looking like a flat green carpet:\n\nInstance a small grass blade/tuft mesh many times over a surface, then animate and color it in the shader.\n\nThe repo’s key move is in `addGrass()`: it builds a `MeshSurfaceSampler` over the terrain mesh, samples random positions and normals, aligns each grass instance to the surface normal, adds random Y rotation, and writes each transform into a `THREE.InstancedMesh` with `grassCount = 8000` . That is the shape you want for HMSC too: generate a compact instance stream, not individual React/scene nodes.\n\nThe material side is also the right kind of trick. The grass material injects shader code via `onBeforeCompile`, uses a noise texture plus time for wind displacement, mixes base/tip colors with noise variation, uses an alpha texture for blade shape, and can darken under shadows . That gives the grass depth and motion without every blade being bespoke.\n\nFor your engine, I’d translate the idea like this:\n\nAuthor/runtime data:\n\n`grass_surface_id`\n`seed`\n`density`\n`blade_mesh_ref` or `blade_family`\n`surface_mask` / biome mask\n`height_range`\n`color_palette`\n`wind_params`\n`lod_radius`\n\nBake/loader step:\n\nsample terrain/heightfield/painted grass tiles\nemit grass instance rows: position, normal or slope basis, random yaw, scale, color/noise seed\ngroup by chunk\nstream like your other instance families\n\nShader:\n\nvertex bends blade tips using `uTime`, world position noise, and per-instance seed\nfragment uses alpha mask/cutout, base-to-tip gradient, noise color variation\nLOD can fade density or swap to cheaper cards/far-shell color\n\nThe important part: don’t make grass a prop list. Make it a **surface population system**. Painted terrain says “grass can live here,” the loader generates instances for active chunks, and the shader makes them feel alive.\n\nThis fits your data thesis cleanly. Grass is not millions of authored objects. It is:\n\n`surface + seed + density + blade vocab + shader`\n\nTiny data, huge visual result.\n\nOne adjustment for your world: since you already have chunk streaming, don’t generate/place all grass globally like the example does. Generate per chunk, and only keep nearby grass instance buffers resident. Far grass can be terrain color/noise, not geometry. For roads/sidewalks/building interiors, grass masks should be clipped by tile kinds so it doesn’t spawn through asphalt unless you explicitly want overgrowth.\n\nThis is absolutely the route I’d take. Instanced blades + shader wind + chunk masks is the sweet spot.\n",
+  "status": "review",
+  "sessionId": "760f9f8d-dc0f-4592-9807-536386b8fe20",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T21:23:19.415Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:03:48.065Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built fluffy grass as a surface population system (FluffyGrass technique). Phase 1: GrassBlade crossed-quad geometry + grassPopulation.ts deterministic per-cell roll over painted grass/grassDry tiles (reuses scatter.ts hash) + GrassField (one Scene3D.Instances) wired into WorldStatics. Phase 2: grass_wgsl scene3d pipeline in 3d.zig (vertex wind tip-weighted world-noise gust, fragment procedural wisp cutout + root-to-tip gradient), routed via ~grass~ tex-key sentinel; time written to the former _pad3 uniform slot. Built clean (SHIP_RUN_PACKAGE=0), self-shot PASS, shows in editor iso/play 3D. Phase 3 (no-V8 /compiled bake) PENDING: the streaming.zig/constructor.zig shapeId->geometry seam needs mapping to add GrassBlade to the native loader. NOT committed — shared hot files (3d.zig/shaders.zig) co-edited by parallel sessions; needs commit coordination. Full handoff in memory project_grass_system.md.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:03:48.065Z"
+}

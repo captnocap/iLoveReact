@@ -1,0 +1,13 @@
+{
+  "id": "req_0289",
+  "at": "2026-06-08T06:03:18.824Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: verify is GREEN 70/70 now (pane 5's vehicle test landed, your blocking red is gone). Commit your glass-window + RAMPVEL work — BUT serialize: pane 5 is committing the vehicle rebuild right now; run 'git log --oneline -1' and WAIT until you see pane 5's vehicle commit land before you commit (two simultaneous commits race the index). Once it is there: commit glass+RAMPVEL, explicit paths, verify green, post hash. Then AUTHBUILD-REMOVE is next — re-confirm your inventory against HEAD and I give the execute word.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0699",
+  "at": "2026-06-13T01:42:25.398Z",
+  "origin": "session:9963d6de",
+  "text": "ok. thanks. two things, \n1: i see the white parking lines when painting, i load into the game, and its all gone. just the black. 2nd, the orange for spawning also comes into the world, so putting the orange for spawn in a parking space just makes orange ground [Image #4]",
+  "status": "review",
+  "sessionId": "9963d6de-6200-482b-a3ff-a5af63547b01",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T01:43:23.015Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T01:52:53.432Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed both reports (fbbea2092). (1) Stall lines vanished in the game because flat chunks without roads skip the textured heightfield bake — the compiled box-slab floor can only flat-fill a cell with its palette colour, so the fragment-painted stall lines were lost. floorNeedsHeightfieldRender now routes any floor containing parking cells through the textured bake (the RIBBONBAKE path roads already use), and the bake runs the same fragment logic as the editor, so the game floor now shows the white 3m bay lines exactly as painted. (2) The orange vehicleSpawn (and any spawn/save/dev marker) no longer paints the game ground: marker kinds are META — the live heightfield shader, its CPU bake mirror, and the box-slab path all resolve a marker cell to the nearest non-marker ground around it (ring search, radius 4), so a spawn painted onto a parking lot renders as parking, stall lines included. The 2D painter still shows marker colours while authoring — only the world view hides them. New groundResolve suite 5/5; worldGeometry 13/13 and mapload 7/7 still green; full cart bundles clean. Recompile the map and the game floor should match the painter.",
+  "shas": [
+    "fbbea2092"
+  ],
+  "resolvedAt": "2026-06-13T01:52:53.432Z",
+  "tags": [
+    "bug"
+  ]
+}

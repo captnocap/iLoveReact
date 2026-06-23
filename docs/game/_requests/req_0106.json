@@ -1,0 +1,17 @@
+{
+  "id": "req_0106",
+  "at": "2026-06-06T12:42:35.866Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — UIFLAP-0606. The user's player-jitter report is now diagnosed by their own gv_perflog run: NOT physics, NOT animations. The spikewatch fingerprint, repeating every ~95-100 frames: CONTENT SWAP — a React update changes ~8-11 nodes / ~76-80 glyphs / 0 meshes; frame_hash toggles between exactly TWO values (2202120404354886000 <-> 13058729130966792000 and variants); glyph_count flips 1007<->929; PLUS GLYPH RASTERIZE events (+12 atlas glyphs, static text re-rendered at a NEW size); worst frames 10-30ms vs 4.1ms baseline (one hit 29.57ms / 7.15x). Diagnosis: some UI subtree is rhythmically mounting/unmounting (or re-rendering text at a changing size), and every flap forces a full GPU re-upload + CPU glyph raster — that periodic hitch is the \"jittery as fuck\" player. Steps: 1. Identify the EXACT component: instrument React commits (or use the existing perflog channels) to log which subtree mounts/unmounts with that ~11-node/~78-glyph signature — a blinking indicator, a once-per-second text update, a pulsing/scaling label are the likely shapes. Name it, file:line, post the evidence. 2. Fix the flap at the source: the subtree stays mounted and updates content in place; no text re-rendered at changing sizes per tick (no glyph re-bakes — fixed-size text or pre-baked digits); a routine text update must not flip the whole frame hash into a full re-upload. 3. Prove at the consumption layer: spikewatch armed at the same baseline stays SILENT for 60+ seconds of normal play in the witness. Build via tools/rjit only; never revert anything. DONE-BAR: the named component + before/after spikewatch evidence + verify green + READY. DO NOT COMMIT. Only the user's live confirmation (smooth player, no hitching) makes this a PASS.",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:12:03.168Z",
+  "resolution": "Resolved in b91a941962eeb56e3cbc631f1ac39f2ce59f10d7. Added switchable spikewatch/churntrace diagnostics, native text/static-capture traces, exact host-spike evidence, and stabilized the React/UI prop-identity churn path that was causing StaticSurface/text rebakes; the user confirmed the performance problem is solved and walking is no longer choppy.",
+  "shas": [
+    "b91a941962eeb56e3cbc631f1ac39f2ce59f10d7"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

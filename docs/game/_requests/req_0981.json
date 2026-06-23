@@ -1,0 +1,28 @@
+{
+  "id": "req_0981",
+  "at": "2026-06-15T11:42:12.813Z",
+  "origin": "session:d91c8b8f",
+  "text": "ok so the ui work is rather simple here. its just some small tweaks. for the layers, bring that panel to the right side of the page, and then for the performance logs you can place that as a thin toolbar on the view, with the other buttons like smooth: log cam fps, etc. the buttons like face edge vertex those can stay there for now. that is fine. and then the uv mesh we are going to bring in, you are going to show the live preview of it in column 3 of the workspace shell that this is using. if you are unclear of what that is, look for the place where it currently hardcodes '1 tile = 1 m' on the current page in discussion",
+  "status": "review",
+  "sessionId": "d91c8b8f-6568-469d-83d0-62ea4b4091c6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T11:42:52.814Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T11:53:08.389Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two legs, both hot-reload TSX in the Studio (cart/hmsc-int/editors/model). (1) Viewport UI cleanup: the OUTLINER (layers) now docks on the RIGHT of the viewport (StudioEditor); the FRAMES diagnostics readout + the smooth/log cam/fps levers fold into ONE thin top-right toolbar (new FrameDiagBar/StatCell replace the tall FrameDiagOverlay/DiagLine box); fov+reframe stay bottom-right, face/edge/vertex stays top-center, compass bottom-left. (2) Live UV preview in workspace column 3 (the panel where '1 tile = 1 m' was hardcoded): a read-only UV atlas FORMED FROM the live mesh. Added pure unwrapMesh(mesh, unitsPerMeter) to editMesh.ts (box-projection by dominant face normal, sized on the 16-units basis, shelf-packed; 3 new tests, 12/12 pass), and UVPanel.tsx (StudioUVPanel) draws packed face rects (X red/Y green/Z blue) + projected corner loops, recomputed on the active part version. To reach column 3, the studio model became a shared module store (studioModel.ts useStudioModel — one source of truth for col 3 + col 4), and the panel renderer gained a minimal t:'node' field (shell/fields.tsx, the live-visual escape hatch) so model/source.tsx panel() hosts the UV component. editMeshToGeometry still pins UVs flat (no textured display consumes them yet; baking real per-face UVs is the noted follow-up). Bundle-verified all four TSX entry points; editMesh test 12/12. Nothing committed — user leads on commits.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T11:53:08.389Z"
+}

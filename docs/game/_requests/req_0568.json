@@ -1,0 +1,31 @@
+{
+  "id": "req_0568",
+  "at": "2026-06-10T16:51:48.012Z",
+  "origin": "codex:019eb272",
+  "text": "why is my log just spamming this im not even doing anything [js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [DRAGDRAW] frame stalls ×2 max=184ms\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [DRAGDRAW] frame stalls ×2 max=202ms\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)",
+  "status": "review",
+  "sessionId": "019eb272-4fd3-7152-a9dc-58e2c0a1c25f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T16:51:53.020Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:52:49.411Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigated the repeated [decal-bake] / [DRAGDRAW] warnings. Root cause: DecalPixelBaker is mounted at the hmsc-int shell root and auto-bakes stale custom decal docs while idle. The pixel payloads for custom:dicks/custom:claudes-closet are 52-71KB before JSON/base64 overhead, but the Zig localstore path only accepts 8KB values and the V8 host binding swallows BufferTooSmall. The warning logs before saveDecalPixels, so it claims stored even though persistence fails; the next read still sees stale decals and bakes again, causing idle frame stalls.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T16:52:49.411Z",
+  "tags": [
+    "perf-log"
+  ]
+}

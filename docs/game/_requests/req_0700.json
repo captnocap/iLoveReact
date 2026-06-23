@@ -1,0 +1,28 @@
+{
+  "id": "req_0700",
+  "at": "2026-06-13T01:43:10.674Z",
+  "origin": "session:3db4e705",
+  "text": "nice thanks so when it comes to images / assets i assume they are saved somewhere in the app files but im not sure if i can find it. maybe its elsewhere",
+  "status": "review",
+  "sessionId": "3db4e705-cae9-4e5f-8874-7aa6ce30faf5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T01:43:38.065Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T01:44:16.292Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Informational ask — answered with verified paths. Three tiers: (1) the editor does NOT copy a dropped image; the image layer / decal node stores the PATH to the original file and loads it in place, so moving/deleting the original breaks the editor render and the next bake skips it with a warning. (2) The material record (decal doc carrying the path + paint stack) lives in the shared localstore sqlite at ~/.local/share/reactjit/localstore.db, hmsc namespace, custom-textures key. (3) The compiled game owns a real copy: the bake installs the image bytes content-addressed (sha256 filename) into zig-out/game/contentstore/ — verified the user's jpg there (319444aa…, 51,809 bytes, JPEG 976x850), referenced by hash from the gamefile so the compiled world is self-contained. Flagged the practical caveat (keep source images somewhere stable) and offered an import-copies-into-app-data feature if they want the editor to take ownership of dropped images.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T01:44:16.292Z"
+}

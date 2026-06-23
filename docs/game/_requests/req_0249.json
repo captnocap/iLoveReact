@@ -1,0 +1,13 @@
+{
+  "id": "req_0249",
+  "at": "2026-06-07T11:13:11.809Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: RAMPHOLLOW live FAIL — USER, verbatim: \"i also fall thru the world when under a ramp lol\". Standing/walking UNDER a ramp drops the player through the WORLD itself. Your underside-block test passed in the harness, but live the ground under the ramp footprint is gone — smells like the ramp's heightfield/collision registration REPLACES the ground resolution in its cells instead of layering over it (under the slab there should be: ground below you, slab above you; you have neither). This is the green-at-wrong-layer pattern — the harness asserted the slab, not the world under it. Print the live ground resolution + player y + active collision surfaces while standing under a ramp footprint, read the data, fix the layering so ground and ramp coexist in the same cells. Regression: a live-shaped test that walks UNDER the ramp and asserts the player stands on the real ground the whole way. This outranks everything else in your queue — the user is falling through the world.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

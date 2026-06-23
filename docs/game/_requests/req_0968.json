@@ -1,0 +1,28 @@
+{
+  "id": "req_0968",
+  "at": "2026-06-15T10:40:47.086Z",
+  "origin": "session:524eaf71",
+  "text": "that is much better yeah that is way better. you can silence the logs, keep them around in the event tho it happens again",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T10:41:27.282Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T10:43:19.527Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Spin-skip confirmed FIXED by the direct camera (user: 'way better'). Per the user's follow-up, silenced the diagnostics by default while keeping them one tap away for recurrence: logOn (the 'log cam' toggle) now defaults FALSE, which gates BOTH the [studio-cam] per-frame angle trace AND the [studio-frames]/[studio-cam-host] terminal summary (FrameDiagOverlay now takes a logToTerminal prop wired to logOn). The FRAMES box stays visible as a quiet visual readout and all toggles (smooth/log cam/fps) remain, so the full probe re-arms in one tap. Recorded the lesson in the playbook build log and saved memory native_camera_direct_not_smoothed (direct camera for modeling tools; the diagnostic doors). Hot-reload TSX, fps untouched.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T10:43:19.527Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_0748",
+  "at": "2026-06-13T11:07:16.359Z",
+  "origin": "session:33a033b1",
+  "text": "on the iso3d when u click on something it shows a menu in another panel for configuring the skin, however it doesnt have the full picture. can u get these settings in there also [Image #1] [Image #2] \n\nthe place in discussion: [Image #3]",
+  "status": "review",
+  "sessionId": "33a033b1-66d8-4d02-9d2f-e58e1f48ec9c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T11:07:48.392Z",
+      "actor": "33a0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T11:23:07.334Z",
+      "actor": "33a0",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The iso build pane's PAINT panel (FacePainter, the menu that opens when you click a piece) was skin-only — it could paint faces and browse materials but had none of the buildings-gutter controls the user showed (piece type, cutout, x/y/z/yaw, per-face provenance). Brought those into the PAINT panel for a single-piece selection, reusing the SAME FieldSpec/PanelGroups widgets the workbench gutter uses (no re-rolled sliders) so it matches the reference exactly; a multi-select stays a pure painter. Placed pieces had no in-place pose/type events (the loose-piece path remove+replaces with a fresh id, which would thrash the selection on every keystroke from a detached panel), so added three additive world-stream events keyed by id: pieceMoved (x/y/z/yaw, refuses non-finite), pieceSwapped (catalog type — keeps skin, drops an editless cutout like the buildings store), and pieceEditSet now accepts edit:null to clear the cutout to none. Wired the new kinds through scopeBuildEvent, updated the game_world index record, and added 3 behavior tests (54/54 placed suite green); cart bundles clean. The existing brush + N/E/S/W/Top/In painter + material browser still cover the color/material/target side, so the panel now carries the full picture.",
+  "shas": [
+    "a009f2dd0"
+  ],
+  "resolvedAt": "2026-06-13T11:23:07.333Z"
+}

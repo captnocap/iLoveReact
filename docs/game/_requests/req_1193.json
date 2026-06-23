@@ -1,0 +1,30 @@
+{
+  "id": "req_1193",
+  "at": "2026-06-16T23:26:06.712Z",
+  "origin": "session:8e058574",
+  "text": "can you add the gizmo for when extruding to set the thickness of the face that comes when extruding in. like so i can cut into a tire without cutting through it entirely",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T23:27:04.670Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T23:34:57.876Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an extrude-depth gizmo that drags along a face's NORMAL, so you can sink a recess into an angled face (a tire sidewall) without cutting through. The existing move gizmo only drags along world X/Y/Z, which can't push straight into a non-axis-aligned face. Now a single selected face in the move tool shows an orange double-ended arrow along its normal (meshGizmo NormalHandle + pickNormalHandle hit-test): pull out = extrude the face, push in = inset/cut a recess. Implementation: GizmoHit gained an optional dir; onDown hit-tests the normal arrow before the world gizmo and starts a move drag whose direction is the face normal (frozen screen frame via axisScreen(normal)); the move-drag branch uses g.hit.dir instead of AXIS_DIR[axis], reusing the same snap-to-step math, and shows a '↕ depth ±Nu' readout (negative = sunk into the surface). Enabled mirror planes still apply so insets stay symmetric. Verified: full hmsc-int cart bundles clean; editMesh suite 65/65 (logic rides the already-tested translateVerts). Committed 0ba41b465.",
+  "shas": [
+    "0ba41b465"
+  ],
+  "resolvedAt": "2026-06-16T23:34:57.876Z"
+}

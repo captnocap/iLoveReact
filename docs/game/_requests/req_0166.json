@@ -1,0 +1,12 @@
+{
+  "id": "req_0166",
+  "at": "2026-06-06T18:49:47.738Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — bundle with SLIDERKIT (same sweep): PATHFIELD-0606. User verbatim: \"they added that open image button in painter and then kept the path to image also? -_-\". The IMGOPEN-0606 wave (commit 1e8c89bdd) ruled: open an image with a PICKER or a DROP — no path typing, EVER. The painter now has BOTH the open-image button AND the legacy path-to-image text input. That is a duplicate-controls breach plus a the-old-way-must-die violation. DELETE the path input outright — no flag, no fallback; picker + drop are the only two ways in. Check the other paint/import surfaces for the same leftover pair while sweeping. Coordination: another lane (Claude, cutout flip) is extracting EffectModal into editors/workbench/paint/ right now — if your edit touches the same file as the extraction, reconcile from disk before saving. Fold into your commit batch, SELFSHOT of the cleaned painter chrome. User eyes are the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

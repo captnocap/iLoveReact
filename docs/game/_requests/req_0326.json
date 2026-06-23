@@ -1,0 +1,30 @@
+{
+  "id": "req_0326",
+  "at": "2026-06-08T11:59:18.065Z",
+  "origin": "codex:019ea612",
+  "text": "here is a side by side [Image #1] yours is t he world_loader window. the model in part landed, the camera is far off. but its a step there. lets keep at it",
+  "status": "review",
+  "sessionId": "019ea612-258b-7013-b887-0bcd6a4954ea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T11:59:27.441Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T12:00:58.230Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Adjusted the no-V8 loader camera from wide map-inspection orbit to the existing HMSC player-scale third-person chase shape: 5.9m back, 3.05m high, 48 FOV, target at player head height with pitch target shift. Fixed WASD basis to move relative to the chase camera look direction. Verified with tools/rjit game shot and inspected zig-out/game/player-camera-close.png; not marked done, awaiting user verification via tools/rjit game play.",
+  "shas": [
+    "df4daa634"
+  ],
+  "resolvedAt": "2026-06-08T12:00:58.230Z"
+}

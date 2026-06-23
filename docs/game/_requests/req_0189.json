@@ -1,0 +1,12 @@
+{
+  "id": "req_0189",
+  "at": "2026-06-07T05:38:37.196Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — discoverability FAIL on your item source, fold into your queue: the user could not find voxel authoring at all (\"i see the sculpting part but what about the voxel stacking part\"). It is your VOXEL lens — but with the roster empty (the legacy-items loading bug, another lane) the lens entry is effectively invisible; the only voxel affordance showing is Import Voxels. Fix: the path INTO voxel authoring must be discoverable even with an empty roster — e.g. the +New flow lands somewhere the ITEM/SCULPT/VOXEL lens switch is immediately visible, and/or a \"+ Voxel blockout\" affordance sits next to +New. The user looking at the ITEMS panel and knowing where to stack voxels is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

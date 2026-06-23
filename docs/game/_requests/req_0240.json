@@ -1,0 +1,13 @@
+{
+  "id": "req_0240",
+  "at": "2026-06-07T10:59:03.720Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: VEHCOHERE-0607 — USER VERDICT round 2 on the vehicle source. The req_0190 identity fix landed but missed the actual point. User verbatim: \"those are all there, yes. in any shape that makes sense, no. and that is the problem. is the port was suppose to be: - we ported this in from an isolated lab - it was its own route - it was still acting like its own isolated thing - the purpose of the then again new rewrite (this) is to make this coherent. this isnt. I effectively have 1 car but we somehow have 8 car models\". The vehicle source preserved the OLD ISOLATED-LAB SHAPE: a roster fabricating 8 standalone vehicle documents when the game has effectively ONE car. Coherence is the bar: vehicles must speak the same vocabulary as the rest of the workbench — the way clothing is one tee with many designs and buildings are pieces with shared materials. PROPOSAL FIRST, do not rebuild yet: post (1) what the GAME actually consumes from vehicles today (how many real models, where ambulance/pickup/etc actually differ — geometry vs paint vs service), (2) the coherent model shape: one vehicle model + variation through the SHARED vocabulary (variants/materials via THE chooser, service as attribute) — no vehicle-only subsystems surviving unless the game genuinely needs them, (3) what dies from the current source. I review the proposal against the user's framing before you touch the panel. Your ghost-fix/ramp queue continues meanwhile.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

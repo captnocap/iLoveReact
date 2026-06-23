@@ -1,0 +1,15 @@
+{
+  "id": "req_0146",
+  "at": "2026-06-06T17:26:45.892Z",
+  "origin": "codex:019e9ca9",
+  "text": "Good. Just want to make sure. You can delete it for us so there is no confusion of what the characters route is at all before we find the problem to fix",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:31:06.747Z",
+  "resolution": "Removed the standalone non-workspace /characters route surface: deleted the CharactersRoute import and route registration from cart/hmsc-int/index.tsx, removed the characters nav prop/button/type from cart/hmsc-int/shell/chrome.tsx, and deleted cart/hmsc-int/editors/characters/CharactersRoute.tsx. Shared editors/characters modules were left intact, so the workspace/workbench character source still has its preview, paint, grab, and store dependencies. tools/rjit game verify hmsc-int is green.",
+  "shas": [],
+  "tags": [
+    "ask"
+  ]
+}

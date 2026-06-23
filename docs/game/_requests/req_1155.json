@@ -1,0 +1,10 @@
+{
+  "id": "req_1155",
+  "at": "2026-06-16T08:11:14.292Z",
+  "origin": "session:740b1ca5",
+  "text": "huh... ok... so that loads now. but the grass we made earlier today is all not rendering now oh actually lots of shit is weird. walls missing on buildings. etc. its gotta be something out of order in the compile, this is usually the issue. but i am not smart enough to tell you exactly what it is i just know from the amount of times its happened usually falls into that basket",
+  "status": "new",
+  "sessionId": "740b1ca5-cbef-4fcf-8763-930c121a774b",
+  "captureMode": "hook",
+  "events": []
+}

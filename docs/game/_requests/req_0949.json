@@ -1,0 +1,18 @@
+{
+  "id": "req_0949",
+  "at": "2026-06-15T08:08:12.086Z",
+  "origin": "session:832d7b44",
+  "text": "now, the thing about the one that appears when you click a face, is that it normally steps in grid size by 1 in the direction, it also lets you get sub steps with shift or free form with alt. the other thing that blockbench does that would be absolutely killer to have is if the move you make ends up concaving the shape, before it confirms the change, it does this [Image #16] which is absolutely a life saver that should be a first class idea in the studio",
+  "status": "doing",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T08:09:03.809Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

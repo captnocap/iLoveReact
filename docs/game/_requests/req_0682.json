@@ -1,0 +1,31 @@
+{
+  "id": "req_0682",
+  "at": "2026-06-12T12:58:20.115Z",
+  "origin": "codex:019ebbe8",
+  "text": "our world geometry, is it possible to convert from obj/glb/fbx ?",
+  "status": "review",
+  "sessionId": "019ebbe8-ba1e-74d1-bd7a-0274b58ea604",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T12:58:25.092Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T12:59:13.571Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the world-geometry import feasibility question after checking oracle rulings and the current Scene3D/compiled-world contracts. Conclusion: yes, OBJ/glTF/GLB can be converted offline into the existing vertex/asset shapes; FBX should be converted through Assimp/Blender to glTF first. No code changes.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T12:59:13.571Z",
+  "tags": [
+    "ask"
+  ]
+}

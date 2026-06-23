@@ -1,0 +1,28 @@
+{
+  "id": "req_0628",
+  "at": "2026-06-11T10:54:46.656Z",
+  "origin": "codex:019eb64a",
+  "text": "ok so click on a piece. click paint target. [Image #1] ok i painted this. from here i click on what? apply paint?",
+  "status": "review",
+  "sessionId": "019eb64a-e1ff-7e91-9b0e-abf0f10f5bd6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T10:54:54.268Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T10:55:02.438Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained the building paint-target workflow. After painting from a building face target, the correct next action is Apply paint, which materializes the current painted mask into a custom material and assigns that material id to the selected wall/floor face target. Save to library only stores an editable painter document and does not apply it to building skins. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-06-11T10:55:02.438Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_0790",
+  "at": "2026-06-13T17:15:38.930Z",
+  "origin": "session:bdc416fa",
+  "text": "yeah do the next step. i only really care about the compiled view for seeing it anyways thats the actual game",
+  "status": "review",
+  "sessionId": "bdc416fa-53b7-49b1-98a1-706f4ff29a15",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T17:16:12.980Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T17:34:07.949Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Animated water in the compiled no-V8 game. Each body ships a WATER lump (a flat surface-level height grid per body + shared look/wave in the header); world_loader.zig renders each as a translucent heightfield and gpu/3d.zig's hfGen applies a travelling sine wave sourced from the host clock, re-baked every frame by resolveDynamicHeightfield (a non-zero wave amplitude forces the re-bake) — so the surface ripples with no per-frame data/JS in the shipped game. The heightfield skirt to the basin floor keeps it a wadeable volume, color_a<1 routes it through the existing transparent pass, and water is kept out of scene.heightfields so it never becomes a collider. Touched lumps.ts/mapfile.zig (WATER id 21), worldGeometry.encodeWaterBodies (dropped the static instance bake), packageMap, constructor.zig (WaterField/decodeWater/Scene.water), layout.zig (Node wave fields), 3d.zig (HfWave+hfGen+rebake), world_loader.zig (water node). zig fmt clean; encode/decode byte layout verified. NEEDS the no-V8 loader rebuilt to see it. Shared framework files also carried a co-session MESH_PROPS feature (complete) that rode along.",
+  "shas": [
+    "55367cb8c"
+  ],
+  "resolvedAt": "2026-06-13T17:34:07.949Z"
+}

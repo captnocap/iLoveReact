@@ -1,0 +1,30 @@
+{
+  "id": "req_1583",
+  "at": "2026-06-21T14:28:34.373Z",
+  "origin": "session:aa8b38c4",
+  "text": "ok cool now for the mesh editor, is it possible to be able to cross copy/import one into another. so i can make one piece and pull it into another",
+  "status": "review",
+  "sessionId": "aa8b38c4-bcf4-4724-9069-0ebd209628e0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T14:28:46.135Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T14:36:45.330Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added cross-model part import to the Studio mesh editor. The parts library was already cross-model (each saved model carries its parts inline) but there was no UI to pull one model's part into another — you could only add fresh shapes or import an external GLB into a NEW model. Now the outliner header has a '⤓ part' chip opening ImportPartDialog: it lists every OTHER library model and its parts, and clicking a part drops a deep-cloned copy into the currently-open model via the existing addPart (fresh id/tint/lift), staying open so you can pull several. Geometry + UV + mounts + pivot transfer; the model-level PIXEL paint texture does not (it is packed per-model), noted in the dialog. New editMesh.cloneMesh does the deep copy with no shared refs (verts/faces/uv/flags/mounts/pivot/slots) so the import is independently editable, never a live alias of its source; LayerStrip gained an optional onImport chip (paint editor unaffected), Outliner passes it through, StudioEditor renders the dialog. editMesh 97/97 (added a clone deep-copy test), StudioViewport bundles clean; hot-reload TSX, no store schema change.",
+  "shas": [
+    "d6bdb4b14"
+  ],
+  "resolvedAt": "2026-06-21T14:36:45.330Z"
+}

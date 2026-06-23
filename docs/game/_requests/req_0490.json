@@ -1,0 +1,33 @@
+{
+  "id": "req_0490",
+  "at": "2026-06-10T10:18:57.178Z",
+  "origin": "session:15205e38",
+  "text": "these are good. you can do the same thing for fake entryways and difference in storefronts. also, you can make some wall props like a flag that hangs off or u can do fire escape  or plants. bilboards, signs. all that",
+  "status": "review",
+  "sessionId": "15205e38-16b3-4754-8409-eab3e4f0eb2e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T10:22:35.604Z",
+      "actor": "session-1520",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T10:27:17.214Z",
+      "actor": "session-1520",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extended the painted-tile facade approach per the user's ask for fake entryways, storefront variety, and wall props. Board I / Facades gained 3 materials in cart/hmsc-int/render3d/fillShader.ts: brick_entrance (stone-surround door + transom light + coach lamp + upper window; Stoop/Recessed/Glazed Double Door), brick_rollshutter (closed corrugated shutter with graffiti tags; Plain/Tagged/Graffitied), and brick_bodega (open corner-store with barred glass, side door, striped awning, neon sign bar; Bodega/Laundromat/Diner). A new Board J / Wall Props (board id 9) adds five mounted street-furniture materials, each rendered over its own brick-apartment background so the tile is one opaque face: wall_flag (a swaying hung banner), wall_plants (window boxes / hanging vines / climbing ivy via shared leaf_cover+leaf_color helpers), wall_billboard (poster/faded/torn with light bar + struts), wall_sign (blade / vertical neon / wooden shingle), and wall_ac (window AC / louvered vent / conduit+meter). Boards 8 and 9 are wired through the fs_main dispatch, quality_pass (kept crisp), the editor texture catalog (hmsc-int/game/textures/shaders.ts) so each appears as a pickable, seed/detail-grade-tunable shader, and the effect_fills eval cart for parity. All three files transpile clean; no unary-plus WGSL violations; helper declaration order verified. User runs the build to view.",
+  "shas": [
+    "b34d0499a"
+  ],
+  "resolvedAt": "2026-06-10T10:27:17.214Z",
+  "tags": [
+    "ask"
+  ]
+}

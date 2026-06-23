@@ -1,0 +1,31 @@
+{
+  "id": "req_0573",
+  "at": "2026-06-10T17:07:33.854Z",
+  "origin": "session:1b2ce00d",
+  "text": "so how come when i do a road the length of what my nodes are here it is absurdly longer? [Image #1]",
+  "status": "review",
+  "sessionId": "1b2ce00d-1639-40fe-8b5a-0f2b48b361f4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T17:08:44.793Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T17:11:17.993Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified against the live map data: the user's strokes and stamped tiles span exactly his nodes (z 529-584; roadUnder count matches the 4 current roads), and the over-long stretch above the top node has NO data behind it — it is the GHOSTROAD GPU-buffer artifact from before the 10:04 bundle rebuild picked up the f003fc06d fix (stale ribbon section in the chunk quad's never-shrinking Effect buffer). Told the user the one-step clear (paint any tile on the stretch / any road edit forces the chunk re-upload through the fixed encoder) and to report back if a freshly drawn road still over-renders, which would implicate the hot-push not re-evaluating the new bundle. No code changed for this entry.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T17:11:17.993Z",
+  "tags": [
+    "bug"
+  ]
+}

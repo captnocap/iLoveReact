@@ -1,0 +1,28 @@
+{
+  "id": "req_1595",
+  "at": "2026-06-21T15:18:59.337Z",
+  "origin": "session:6e3404e7",
+  "text": "curious, when you just changed the whole compile step, did that potentially affect the physics of items, because i can now walk through some props and trees but i also had another worker working on physics already, i just want to make sure your change didnt silently affect the system so i can put it back on them",
+  "status": "review",
+  "sessionId": "6e3404e7-9c3d-4b02-be2b-4b93ea47d0fe",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T15:19:48.886Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T15:21:16.098Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked whether my compile-step change could have silently broken prop/tree physics (they can now walk through some), since another worker is concurrently editing physics. Verified it cannot: my diff is 6 files, all transport + one console.warn log line (worldGeometry.ts) — zero collider/physics/footprint logic. The gamefile's COLLIDERS + PHYSICS_CONFIG lumps are produced by worldColliders.ts/createHmscMapfile/writeGameFile, none of which I touched; my code only runs after file=writeGameFile(...) and writes that exact Uint8Array to disk. Old base64-on-stdout and new raw binary write are both lossless, so for identical bake input the installed gamefile is byte-identical, colliders included. The real cause: my re-bake (run to test the fix) regenerated the gamefile from the current working tree, which has another worker's UNCOMMITTED edits to exactly the collider/footprint sources — game/kinds/props.ts, game/physics.ts, state/hostPhysics.ts, game/build/catalog.ts, render3d/props/DataProp.tsx, plus new untracked imported-props files. worldColliders.ts bakes colliders from those, so their in-progress work got baked in. Walk-through-props is theirs surfaced by the re-bake, not my transport change — safe to hand back. Flagged that my compile fix remains uncommitted in the shared tree, so commits must stage by explicit path.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T15:21:16.098Z"
+}

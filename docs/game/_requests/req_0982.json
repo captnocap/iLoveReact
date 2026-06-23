@@ -1,0 +1,28 @@
+{
+  "id": "req_0982",
+  "at": "2026-06-15T11:55:42.108Z",
+  "origin": "session:d91c8b8f",
+  "text": "Nice. ok so uh let me just ask you does this look correct? [Image #25] nothing has changed on the cube its just a normal cube still 16x16",
+  "status": "review",
+  "sessionId": "d91c8b8f-6568-469d-83d0-62ea4b4091c6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T11:56:47.494Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T11:57:24.312Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered: the cube being a plain 16x16 cube is CORRECT — the UV atlas is derived FROM the mesh and an unedited cube's box-unwrap is exactly 6 flat 16x16 squares; the UV view does not (and should not) change the cube. The 33x50 u atlas + the 2x3 axis-tinted face layout + labels were all right. The ONE real bug: the per-face outline segments rendered as stray offset vertical lines because Seg positioned the rotated box by its start point with transformOrigin:'0% 50%', which the framework ignores (it rotates around the box center, like ViewCompass). Fixed Seg to center the box on the segment midpoint then rotate — so each face now traces a clean square outline in its axis color. UVPanel.tsx bundle-verified; hot-reload TSX. Nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T11:57:24.312Z"
+}

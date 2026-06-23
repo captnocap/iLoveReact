@@ -1,0 +1,28 @@
+{
+  "id": "req_1685",
+  "at": "2026-06-23T02:27:21.027Z",
+  "origin": "codex:019ef182",
+  "text": "so close [Image #1] but look at the end it has a extrusion going in and creating extra faces",
+  "status": "review",
+  "sessionId": "019ef182-d012-70f2-8579-97076088563d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T02:27:28.879Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T02:30:57.419Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the remaining inward-looking extra face at wall L-corner ends. The artifact was the diagonal vertical split face on the miter filler; that face is an internal boundary between two 45-degree painted halves, not a visible wall surface. Editor and world_loader miter primitives now omit it and use 12 vertices instead of 18. Verified wallSlabs, worldParity, placed, snap, world_loader ReleaseFast, and hmsc-int ship.",
+  "shas": [],
+  "resolvedAt": "2026-06-23T02:30:57.418Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0582",
+  "at": "2026-06-10T18:05:09.004Z",
+  "origin": "codex:019eb2b5",
+  "text": "props to not respect heightfields when being placed and just fall through",
+  "status": "review",
+  "sessionId": "019eb2b5-5762-73f3-8cef-5157dc41c7dc",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T18:05:16.053Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T18:09:42.040Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Build-mode prop pieces now lift to the live heightfield at their anchor for render, collision, raycast, and selection, without moving structural pieces. Added a placed-piece regression test for REQ-0582 and verified the hmsc-int bundle.",
+  "shas": [
+    "37033d24f"
+  ],
+  "resolvedAt": "2026-06-10T18:09:42.040Z",
+  "tags": [
+    "bug"
+  ]
+}

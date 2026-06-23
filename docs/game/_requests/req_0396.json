@@ -1,0 +1,31 @@
+{
+  "id": "req_0396",
+  "at": "2026-06-09T06:01:19.495Z",
+  "origin": "codex:019eaa55",
+  "text": "so where should i find them? I am not seeing them yet [Image #1]",
+  "status": "review",
+  "sessionId": "019eaa55-1779-7bd0-be5d-1b2b9ee9e13e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T06:01:36.820Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T06:05:54.793Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resolved the material-location confusion by separating the piece type picker from material browsing: the selected-piece structural picker is now labeled 'piece type', while material browsing opens a grouped material chooser sourced from the assignable material catalog. The building material browser now keeps the material list visible as a chooser lane instead of hiding material choices behind the piece picker.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T06:05:54.793Z",
+  "tags": [
+    "ask"
+  ]
+}

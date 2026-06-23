@@ -1,0 +1,30 @@
+{
+  "id": "req_1407",
+  "at": "2026-06-19T15:42:00.379Z",
+  "origin": "session:d6961119",
+  "text": "so how do you generate it ? i see how to import, and how to text prompt, what about image prompt",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T15:42:54.616Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T15:47:17.631Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered how to generate from an image and wired the convenience the user asked for. Image input is the SAME command with a file path: tools/genmodel ./pic.png (or tools/genprop ./pic.png --kind ...) — auto-detected as image when the first arg is an existing file; image-only (Shap-E img2img), no combined text+image mode. Added root-level shims tools/genmodel and tools/genprop that exec the real cart/hmsc-int/tools/ scripts, so the short 'tools/genmodel ...' I'd been quoting actually resolves from repo root like rjit/v8cli (verified: no-arg prints the real usage). Also clarified (req_1408/1409): with an image you provide NO text prompt, and you do NOT need a transparent cutout — the pipeline auto-runs rembg (u2net) to strip the background and composite on white, with --no-rembg to skip for already-clean/transparent inputs. Committed 9e4727843. Standing caveat reiterated: Shap-E img2img collapses depth (flat results); SF3D/Hunyuan is the image->3D quality upgrade still on offer.",
+  "shas": [
+    "9e4727843"
+  ],
+  "resolvedAt": "2026-06-19T15:47:17.631Z"
+}

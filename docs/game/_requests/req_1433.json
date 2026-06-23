@@ -1,0 +1,30 @@
+{
+  "id": "req_1433",
+  "at": "2026-06-19T20:58:28.440Z",
+  "origin": "session:671785ab",
+  "text": "ts better. we can move to the next piece",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T20:58:46.997Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T21:07:17.879Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the self-serve rebindable hotkeys the user asked for ('if i dont like the hotkey i dont have to go ask anyone — its in the settings'), on the existing editor control contract. controls.ts gains a user-override map layering over the defaults (resolve/legend/tooltips all read bindingsForScope so a rebind updates every surface), setUserBinding validates + rejects in-scope clashes as a warning not a crash, plus load/export, a capture-suppression flag (so binding Delete can't also delete), and prettyChord — all pure/import-free so the contract stays headless-testable. keybinds.ts persists the map via localstore (kept out of controls.ts); loadKeybinds() hydrates at boot. HotkeysPanel.tsx is a modal listing each action's name + chord + Rebind(press-a-key) + Reset, conflict shown inline, opened by a new Keyboard toolbar button. Added 5 P4 cases to controls.test.ts (11/11 pass via esbuild+v8cli). Built green + self-shot boots clean. Needs a live check: open the Keyboard button, rebind a key, reload, confirm it sticks (modal interaction can't be self-shot headless). SHAs e35a4210c.",
+  "shas": [
+    "e35a4210c"
+  ],
+  "resolvedAt": "2026-06-19T21:07:17.879Z"
+}

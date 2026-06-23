@@ -1,0 +1,10 @@
+{
+  "id": "req_0902",
+  "at": "2026-06-14T05:32:13.078Z",
+  "origin": "session:1b18f3aa",
+  "text": "Right. so, is there an actual mechanical reason that v8 cant be on another thread",
+  "status": "new",
+  "sessionId": "1b18f3aa-3b63-4388-a182-cd1168ae04f8",
+  "captureMode": "hook",
+  "events": []
+}

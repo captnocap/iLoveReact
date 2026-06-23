@@ -1,0 +1,31 @@
+{
+  "id": "req_0688",
+  "at": "2026-06-12T13:28:13.057Z",
+  "origin": "codex:019eba54",
+  "text": "that worked. ok so. just from here, and with how big this entire file will grow to, wouldnt it be better to break the props out into item groups that get imported. like StreetProps.ts and it has dumpsters and firehydrants etc.",
+  "status": "review",
+  "sessionId": "019eba54-122c-7b03-9a58-37a88189321a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:28:19.442Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T13:28:34.537Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the structure question: yes, as semantic prop recipes grow, they should move out of worldGeometry into focused recipe modules imported by the compiler. Recommended keeping compile/packing in worldGeometry and extracting only data-shaped prop recipes plus lowering helpers, with group modules such as street furniture, vegetation, rocks/natural, and industrial/urban fixtures. Clarified that module splitting helps readability, but prop-viewer editing still depends on retaining part ids/schema before lowering rather than only emitting anonymous PropPartSpec arrays.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T13:28:34.536Z",
+  "tags": [
+    "ask"
+  ]
+}

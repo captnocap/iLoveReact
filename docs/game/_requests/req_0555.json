@@ -1,0 +1,39 @@
+{
+  "id": "req_0555",
+  "at": "2026-06-10T15:10:46.951Z",
+  "origin": "session:51f18581",
+  "text": "i just realized lol the a and d is backwards",
+  "status": "review",
+  "sessionId": "51f18581-610e-4479-8d18-625e56e6d9c2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T15:11:30.815Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T15:12:04.271Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-10T15:15:20.563Z",
+      "actor": "51f1",
+      "kind": "note",
+      "text": "Follow-up in same thread: added Shift foot brake. GAME_DRIVING gained an optional back-compatible footBrake input — firm decel to a stop from either direction (1.4x brakePower), holds at zero, never reverses (unlike S). Wired to keys.shift() in the lab; controls help + P6 notes updated. S=brake+reverse, Space=drift handbrake unchanged. sha 4fdec304a."
+    }
+  ],
+  "resolution": "A/D steering read backwards. The GAME_DRIVING model is internally consistent (front wheels follow the turn direction), so the bug was purely the lab's key→steer sign mapping under the chase camera: A/← was sending -1 and D/→ +1, which turned the car opposite to the expected screen direction. Flipped it — A/← now sends positive steer (screen-left) and D/→ negative (screen-right). One-line change in the input poll, model untouched.",
+  "shas": [
+    "3fc64eed8"
+  ],
+  "resolvedAt": "2026-06-10T15:12:04.271Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "id": "req_0591",
+  "at": "2026-06-10T19:20:43.700Z",
+  "origin": "pane",
+  "text": "oh i notice having both flow arrow and wires on makes neither show up",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-10T19:20:54.587Z",
+      "actor": "session:a8fb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T19:21:04.926Z",
+      "actor": "session:a8fb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed both-overlays-vanish bug: with the lane wires AND flow arrows both on, neither showed. Root cause was the host's 512-children-per-container cap (layout_refactor.zig MAX_CHILDREN, a deliberate stack-safety limit that SILENTLY drops the overflow). The road authoring overlay sprayed one Canvas.Node per dot — a long road was ~124 centerline + ~166 lane-wire dots; adding ~98 arrow glyphs tipped the Canvas (chunks + ~hundreds of building ghosts already consuming the budget) past 512, so the road overlay (rendered after the ghosts) was dropped wholesale. Fix: render the centerline and each lane wire as ONE Canvas.Path polyline (SVG d in graph space) instead of a Canvas.Node per dot — ~290 nodes collapse to ~3, with the same canonical green/red flow colours and per-segment axis-quantized lane offsets; it scales to any road length. Arrows stay glyph nodes. Removed the now-orphaned laneWireDots. Bundle-checks clean. Visual note for the user: lane wires are now clean continuous lines rather than dot-trails (arguably clearer for lining lanes up) — flag if dots are preferred.",
+  "shas": [
+    "cc8a725de"
+  ],
+  "resolvedAt": "2026-06-10T19:21:04.926Z",
+  "tags": [
+    "bug"
+  ]
+}

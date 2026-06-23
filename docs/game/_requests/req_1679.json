@@ -1,0 +1,28 @@
+{
+  "id": "req_1679",
+  "at": "2026-06-23T00:46:46.550Z",
+  "origin": "session:14b40edc",
+  "text": "or do i just rotate it actually in the studio ?",
+  "status": "review",
+  "sessionId": "14b40edc-087f-40bd-9abb-de8f806a4e4f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T00:49:08.351Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T00:49:08.359Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked whether to fix the upside-down texture-slot image in code or just rotate it in the Studio. Answered: rotating works per-model but if every slot image arrives upside-down it's a systematic V-orientation convention worth a one-line code flip; user chose to rotate in Studio and it fixed their case. No code change. Same underlying item as req_1678.",
+  "shas": [],
+  "resolvedAt": "2026-06-23T00:49:08.359Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1543",
+  "at": "2026-06-20T23:38:40.763Z",
+  "origin": "session:0b8abe45",
+  "text": "sorry let me ask you a question, did you disable the paint layer or something? because i would still like to have that if that was removed. if not, then im just getting weird results with the prop i just painted but il try compile again",
+  "status": "review",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T23:39:19.296Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T23:42:26.667Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnostic question: did recent work disable paint? Answer: NO. Verified (1) texture slots store membership in face.material and NOTHING in the paint/atlas/textureize pipeline reads face.material, so authoring slots cannot affect painting; (2) the only paint-controller change (req_1538 mirror hook) leaves the primary brush stamp byte-identical and only mirrors when a plane is toggled. Paint mode is fully intact. The user then clarified the ACTUAL problem: a painted cooked prop shows its paint in the editor (req_1496 inline mesh texture) but renders GRAY in the compiled game — i.e. the texture doesn't survive Compile into the no-V8 loader. That is tracked as req_1544.",
+  "shas": [],
+  "resolvedAt": "2026-06-20T23:42:26.667Z"
+}

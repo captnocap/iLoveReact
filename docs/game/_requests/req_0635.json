@@ -1,0 +1,33 @@
+{
+  "id": "req_0635",
+  "at": "2026-06-11T11:43:05.767Z",
+  "origin": "session:7de3e0b0",
+  "text": "if you make things like record album covers and stuff where i can give it a image for the prop that would be awesome basically just a flat tho for that type of thing. you can go totally psx style but like make more like jagged rocks or different heights of the same trees or that sort of thing and just rip it",
+  "status": "review",
+  "sessionId": "7de3e0b0-06ef-431e-b04d-b0c6f97a7c65",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T11:43:44.761Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T12:05:11.969Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Image-flat props are in: parts carrying a partId are flat image targets — apply any texture id via the click-to-pick flow (WorldProp.partTextures) and it renders live in /test AND ships in the compiled bake (the id's shader/decal recipe interns as the part's material through the same channel face skins use). Album cover ('cover'), poster + A-frame + blade sign ('face'), vending machine front ('front'). PSX variety also landed: jagged rocks + shards from rotated boxes, young/giant oak+pine variants, all registry-scaled. shas c7986b11c.",
+  "shas": [
+    "c7986b11c"
+  ],
+  "resolvedAt": "2026-06-11T12:05:11.969Z",
+  "tags": [
+    "ask"
+  ]
+}

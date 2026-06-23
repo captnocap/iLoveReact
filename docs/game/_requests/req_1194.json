@@ -1,0 +1,30 @@
+{
+  "id": "req_1194",
+  "at": "2026-06-16T23:31:34.670Z",
+  "origin": "session:ee607c38",
+  "text": "inside of the @cart/hmsc-int/editors/model/Studio.tsx we are going to add in paint mode. how it works, is every face of a texture turns into a normalized grid. grid spaces will be slivers to whole pieces because of the geometry of a shape and that is expected. when painting on a face, hitting the edges does not spill over into another face. you can review @cart/hmsc-int/editors/MESH_EDITOR_PLAYBOOK.md for all the progress so far. this task should be relatively simply",
+  "status": "review",
+  "sessionId": "ee607c38-a6df-4547-aa9a-facb41f8319d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T23:31:40.937Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T23:49:01.609Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added Studio PAINT mode (Phase 5c). A 6th mode where every face of the texture becomes a normalized grid of atlas texels — slivers on thin/slanted geometry as the user said is expected — painted directly on the 3D model faces. The key requirement (a stroke at a face edge must NOT spill into a neighbouring face) is guaranteed structurally: pickFaceTexel raycasts (Möller–Trumbore) to one frontmost uv-mapped face, and brushTexels clamps the brush stamp to that face's atlas slot, which textureize packs disjoint + padded. New meshPaint.tsx holds the pure math (screenRay = the inverse of meshSelect's projector, the raycast, the slot-clamped brush, per-row run-merge) + the hovered-face grid overlay. Studio.tsx wires the mode (auto-textureizes on entry so per-face slots exist), down/drag/hover painting, a swatch palette + eraser + brush sizes + clear-paint; painted texels persist on tex.paint (studio:tex twig) with paintRev in the atlas sig; TextureAtlas.tsx draws the runs over the base art so the model shows paint live. meshPaint.test.ts 6/6, editMesh 65/65, cart + full sources chain bundle clean. Hot-reload TSX (no rebuild).",
+  "shas": [
+    "e1c69e851"
+  ],
+  "resolvedAt": "2026-06-16T23:49:01.608Z"
+}

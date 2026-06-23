@@ -1,0 +1,33 @@
+{
+  "id": "req_0600",
+  "at": "2026-06-11T02:06:04.006Z",
+  "origin": "session:bb35c712",
+  "text": "oh hey i just realized lmao all the actual shader based materials are all upside down lol. wondered why the door looked weird xD",
+  "status": "review",
+  "sessionId": "bb35c712-386c-4c78-bace-9baff86c8ae3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T02:07:13.933Z",
+      "actor": "fable-img",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T02:18:42.107Z",
+      "actor": "fable-img",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused and fixed the upside-down shader materials in the compiled game. The loader's hand-rolled cube (world_loader.zig buildCube) carried v=0 at world BOTTOM, while the editor's geometry registry box flips V so a top-down texture stays upright (runtime/geometries/_util.ts face() — buildCube's corner orders were already identical to Box.ts; ONLY the uv row differed). So every materialized shader recipe rendered upside-down on compiled faces (the door the user noticed), and the decal pipeline had calibrated against the wrong cube: the DECALFLIP-0610 180° rotation in decal_raster fixed decal v but silently MIRRORED u (caught in hindsight via the DECALIMG image proof — the source's right-side road rendered on the left). Fix at the root: buildCube now wears the registry's exact uv row ((0,1),(1,1),(1,0),(0,0) for BL,BR,TR,TL) and the rasterizer's 180° compensation is DELETED — one convention, fixed at the sampling geometry, never per producer. Editor untouched (it was already correct). Proof: a 3-box calibration gamefile through the production writers renders the brick-entrance facade upright (door at the BOTTOM), decal text 'ABC' reading left-to-right with its red marker top-left, and the decal image upright AND unmirrored (road on the right, matching the source); both ±Z faces verified readable from their own outside; rjit game shot GREEN on the real world. Docs: hmsc-int.md UVFLIP-0610 section + _index record updated in the same commit.",
+  "shas": [
+    "712ae38d5"
+  ],
+  "resolvedAt": "2026-06-11T02:18:42.107Z",
+  "tags": [
+    "bug"
+  ]
+}

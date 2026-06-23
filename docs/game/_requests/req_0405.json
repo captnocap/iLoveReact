@@ -1,0 +1,31 @@
+{
+  "id": "req_0405",
+  "at": "2026-06-09T06:31:39.401Z",
+  "origin": "codex:019eab0d",
+  "text": "[Image #1] i cannot apply materials to anything but the front face this side face does not take them",
+  "status": "review",
+  "sessionId": "019eab0d-d55e-7810-97e2-0dfa7c7254f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T06:31:46.836Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T06:34:57.277Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the building material side-face bug in the workbench stage. The stage render used the opposite 90°/270° yaw convention from game/build raycastPieces, so clicking a turned side wall selected one face slot while the textured front/back slab was drawn on the other side. Extracted pure stage face math, aligned stageQuarterNormal with the build-system yaw frame, made Stage use the shared helper for slab placement and face picking, and added a regression pin proving yaw-90 side clicks target the same slot the render slab displays. Verified focused workbench/buildings suite 21/21 and full hmsc-int cart bundle. No commit made; working-tree fix only.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T06:34:57.276Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0658",
+  "at": "2026-06-12T05:47:52.049Z",
+  "origin": "codex:019eba54",
+  "text": "ok the other question i have is wouldnt a number of these benefit from some better namespace of what the part is. like just for example, case 'dumpster': {\n      // Body box + scale from the registry's ONE definition (req_0623) —\n      // host physics and the live model consume the same numbers.\n      const { scale: s, widthMeters: w, depthMeters: d } = dumpsterBodyMeters();\n      return [\n        box([0, 0.03 * s, 0], [w * 0.85, 0.06 * s, d * 0.8], [0x3a / 255, 0x4a / 255, 0x30 / 255]),\n        box([0, 0.45 * s, 0], [w, 0.78 * s, d], [0x4a / 255, 0x5d / 255, 0x3f / 255]),\n        box([0, 0.87 * s, 0], [w + 0.04 * s, 0.06 * s, d + 0.04 * s], [0x3a / 255, 0x4a / 255, 0x30 / 255]),\n        box([0, 0.96 * s, d * 0.22], [w + 0.02 * s, 0.08 * s, d * 0.55], [0x55 / 255, 0x66 / 255, 0x49 / 255], [18, 0, 0]),\n        box([0, 0.96 * s, -d * 0.22], [w + 0.02 * s, 0.08 * s, d * 0.55], [0x45 / 255, 0x55 / 255, 0x3a / 255], [-18, 0, 0]),\n        box([0, 0.62 * s, 0], [w + 0.02 * s, 0.04 * s, d + 0.02 * s], [0x3a / 255, 0x4a / 255, 0x30 / 255]),\n        box([0, 0.32 * s, 0], [w + 0.02 * s, 0.04 * s, d + 0.02 * s], [0x3a / 255, 0x4a / 255, 0x30 / 255]),\n        box([w * 0.46, 0.5 * s, d * 0.46], [0.06 * s, 0.5 * s, 0.06 * s], [0x7a / 255, 0x5c / 255, 0x3a / 255]),\n      ];\n    } this is a good one, because you have all these boxes but unless you decrypt this mentally its only identifyable by actually looking at it or its name. nothing here says lid for example. or same for this fire hydrant, its kinda in the right step, it says cap color, so u know from the cylinder line that has cap in it that likely is the cap, but there are other parts identifyable by name. It atleast feels like, if the name of things were more aparant then you would mentally save a lot more time trying to understand the shape of it. maybe not for llms, idk. maybe just as much case 'fireHydrant': {\n      // Mirrors the live model (hmsc/render3d/props/FireHydrant.tsx): base\n      // flange, barrel, squashed-sphere dome, bonnet + cap nut (the live\n      // cone reads as a small cylinder here — no cone instance shape),\n      // front pumper nozzle, two side outlets. Prop yaw rides propRotation.\n      const s = def.heightMeters / 0.78;\n      const red: Color = [0xc2 / 255, 0x36 / 255, 0x2f / 255];\n      const redDark: Color = [0x9c / 255, 0x2a / 255, 0x25 / 255];\n      const cap: Color = [0xc9 / 255, 0xcc / 255, 0xd1 / 255];\n      return [\n        cylinder16([0, 0.03 * s, 0], 0.2 * s, 0.06 * s, redDark),\n        cylinder16([0, 0.31 * s, 0], 0.13 * s, 0.46 * s, red),\n        sphere([0, 0.56 * s, 0], [0.31 * s, 0.217 * s, 0.31 * s], red),\n        cylinder8([0, 0.67 * s, 0], 0.075 * s, 0.1 * s, redDark),\n        cylinder8([0, 0.75 * s, 0], 0.07 * s, 0.08 * s, cap),\n        cylinder8([0, 0.42 * s, -0.15 * s], 0.055 * s, 0.14 * s, cap, [90, 0, 0]),\n        cylinder8([0.15 * s, 0.46 * s, 0], 0.05 * s, 0.12 * s, cap, [0, 0, 90]),\n        cylinder8([-0.15 * s, 0.46 * s, 0], 0.05 * s, 0.12 * s, cap, [0, 0, 90]),\n      ];",
+  "status": "review",
+  "sessionId": "019eba54-122c-7b03-9a58-37a88189321a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T05:47:57.041Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T05:48:02.276Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the design question directly. The user is right that named prop parts improve readability: source recipes should expose semantic part names like base, barrel, lid, bonnet, pumperNozzle, and sideOutlet while still lowering to the same anonymous primitive rows for the packed bake output. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T05:48:02.275Z",
+  "tags": [
+    "ask"
+  ]
+}

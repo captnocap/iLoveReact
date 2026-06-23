@@ -1,0 +1,12 @@
+{
+  "id": "req_0215",
+  "at": "2026-06-07T09:46:18.573Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: two owed commits, then CAMRAY.\n\n(1) PERF-CLUSTER COMMIT — ordered long ago and still outstanding: the user-passed perf rounds 1-2 work (chrome churn, heightfield re-registration). Explicit paths, your lane's files only.\n\n(2) AGENTS.md frame-time gate addition — separate docs commit.\n\nPost both hashes. Then JITTER ROUND 3 continues. Prime suspect remains your own CAMRAY per-frame raycast. CAMRAY ships ONLY as the respec: camera constraint is primary (pull the camera inside the room along the ray, smoothed, with a min-distance clamp); any residual see-through must be translucent-but-present — a hidden wall is a lie. Done-bar: tape flat at 4.1ms, spikewatch silent through 60s+ at baseline. Proof shots must show the player actually occluded — I open every SELFSHOT and bounce theatre.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

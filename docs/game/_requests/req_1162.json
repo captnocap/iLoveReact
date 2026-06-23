@@ -1,0 +1,28 @@
+{
+  "id": "req_1162",
+  "at": "2026-06-16T08:25:51.694Z",
+  "origin": "session:740b1ca5",
+  "text": "well no.... so i had the textures, the npcs, the grass, all loaded and rendering on compile. Now it has half of those things all broken. why i do NOT know but i know it doesnt work. if its stale then just rebuild the binary the time it took to tell me it could be stale is the same time u could just rebuild it and tell me to try again",
+  "status": "review",
+  "sessionId": "740b1ca5-cbef-4fcf-8763-930c121a774b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T08:26:08.545Z",
+      "actor": "740b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T08:29:33.217Z",
+      "actor": "740b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User reported textures/NPCs/grass that previously rendered in the compiled /compiled route were half-broken after a rebuild. Investigation showed the baked gamefile + standalone no-V8 loader rendered everything correctly (4566 instances, 11 materials, 7 terrain meshes, render proof GREEN) — so the bake/compile was intact. The breakage was a stale/mid-race editor binary: the prior build compiled while parallel sessions were live-editing framework/world/constructor.zig and mapfile.zig (NPC lumps + heightfield v2->v3 migration), producing a bad binary. Rebuilding hmsc-int from settled source (tools/rjit ship hmsc-int, with the req_1148 heightfield-gate fix included) restored textures, NPCs, and walls. User confirmed: 'that fixed it'.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T08:29:33.217Z"
+}

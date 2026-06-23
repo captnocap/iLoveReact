@@ -1,0 +1,18 @@
+{
+  "id": "req_0120",
+  "at": "2026-06-06T13:34:43.079Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — UIFLAP escalation: the user is STILL getting GLYPH RASTERIZE spam live (\"27 new glyphs baked... 242fps -> 77fps\" every beat), and the witness cannot reproduce it. Stop trying to reproduce — instrument the USER's session instead: expose your recon-churn naming trace as a console verb (or extend gv_perflog) so the user can flip it on in their live session and the next CONTENT SWAP / GLYPH RASTERIZE spike logs WHICH component/subtree and WHICH text string + size requested the new glyphs. The glyph path is the strongest lead: 27 new glyphs at a NEW size every ~0.4s means some text's size or content is continuously changing — when the trace names the string, we have the component. Make the spike report itself print the offending text/node when the trace is armed. DONE-BAR: a verb the user can run, then their next spike names the culprit in the log line.",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:12:25.124Z",
+  "resolution": "Resolved in b91a941962eeb56e3cbc631f1ac39f2ce59f10d7. Exposed the recon-churn owner trace and attached recent component/text/font-size evidence to spike reports, then moved the final owner payload to host-spike output so the user's live session can name exact glyph and StaticSurface offenders on the bad frame.",
+  "shas": [
+    "b91a941962eeb56e3cbc631f1ac39f2ce59f10d7"
+  ],
+  "tags": [
+    "perf-log",
+    "ruling"
+  ]
+}

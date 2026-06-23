@@ -1,0 +1,33 @@
+{
+  "id": "req_0415",
+  "at": "2026-06-10T02:37:47.776Z",
+  "origin": "session:2e5197b8",
+  "text": "when i launch, im getting this error. siah@busiah ~/creative/reactjit $ tools/rjit dev hmsc-int\n[dev] bundling /home/siah/creative/reactjit/cart/hmsc-int/index.tsx -> /home/siah/creative/reactjit/.cache/bundle-hmsc-int.js\n\n  .cache/bundle-hmsc-int.js  3.3mb ⚠️\n\n⚡ Done in 41ms\n[dev] host child=1 - run 'rjit dev <other>' from another terminal to add tabs\n[log] ensureInit called\n[dev] watching /home/siah/creative/reactjit/cart/hmsc-int/index.tsx - edits rebuild + push automatically (ctrl-c to stop)\n[watch] build finished, watching for changes...\n[err/default] [v8 run] failure detected (hasCaught=true)\n[err/default] [v8 run] Error: tunables: \"play-camera-occlusion.residualOpacity\" default 0.34 is outside [0.4, 1]\n[err/default] [v8 run source-line]             throw new Error(`tunables: \"${id}\" default ${value} is outside [${spec.min}, ${spec.max}]`);\n[err/default] [v8 run location] line=61238 col=12\n[err/default] [v8 run stack-string] Error: tunables: \"play-camera-occlusion.residualOpacity\" default 0.34 is outside [0.4, 1]\n    at Object.register (<anonymous>:61238:19)\n    at <anonymous>:61333:20\n    at <anonymous>:80362:3\n[err/default] [v8 run] no StackTrace object on exception\n[dev 7:37:07 PM] rebuilt - pushed 'hmsc-int'\n[err/default] [v8 run] failure detected (hasCaught=true)\n[err/default] [v8 run] Error: tunables: \"play-camera-occlusion.residualOpacity\" default 0.34 is outside [0.4, 1]\n[err/default] [v8 run source-line]             throw new Error(`tunables: \"${id}\" default ${value} is outside [${spec.min}, ${spec.max}]`);\n[err/default] [v8 run location] line=61238 col=12\n[err/default] [v8 run stack-string] Error: tunables: \"play-camera-occlusion.residualOpacity\" default 0.34 is outside [0.4, 1]\n    at Object.register (<anonymous>:61238:19)\n    at <anonymous>:61333:20\n    at <anonymous>:80362:3\n[err/default] [v8 run] no StackTrace object on exception\n[warn/default] [dev] bundle failed — no last good to restore",
+  "status": "review",
+  "sessionId": "2e5197b8-1894-4144-a6e1-1e2bfb997258",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T02:38:35.169Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T02:38:35.178Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cart failed at load with 'tunables: play-camera-occlusion.residualOpacity default 0.34 is outside [0.4, 1]'. The residualOpacity default was lowered to 0.34 (see-through interior walls) but the editorTunables spec for that field still pinned the slider min to 0.4, so register() rejected the default during ensureInit. Lowered the spec min from 0.4 to 0.1 in PlayRoute.tsx so the default validates and the wall alpha can be dialed even more transparent. Verified PlayRoute bundles clean; the dev watcher re-pushes automatically.",
+  "shas": [
+    "db89735c0"
+  ],
+  "resolvedAt": "2026-06-10T02:38:35.178Z",
+  "tags": [
+    "bug"
+  ]
+}

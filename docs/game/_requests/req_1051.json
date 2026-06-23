@@ -1,0 +1,28 @@
+{
+  "id": "req_1051",
+  "at": "2026-06-15T19:03:44.554Z",
+  "origin": "session:00a3ce8a",
+  "text": "nice! i should have said, the best way for these joint/pivot placements are to spawn a gizmo and let me place it with this, that way i can control the depth of where it sits, this lets us set a pivot in the middle of a tire, and then the joint in the center deadspace of the wheel base, and they both will connect at the point",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T19:04:55.294Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T19:05:41.790Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rig placement is gizmo-driven with depth control (req_1051 refinement on req_1025). Confirmed the selected pivot/joint wears the existing 3-axis TransformGizmo (move), so dragging the into-screen axis in the orbit view sets DEPTH — a pivot buried in the middle of a tire, a joint floating in the wheelbase deadspace. The only gap was needing a click-to-select to summon the gizmo; now entering rig mode default-selects the pivot (an effect keyed on selMode entry, so Esc still leaves nothing selected), so the gizmo spawns immediately and is there to grab. Studio.tsx bundles clean; hot-reload TSX, uncommitted. PLAYBOOK Part 6 build log updated.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T19:05:41.790Z"
+}

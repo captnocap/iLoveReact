@@ -1,0 +1,30 @@
+{
+  "id": "req_0871",
+  "at": "2026-06-13T23:28:42.359Z",
+  "origin": "session:ac60258b",
+  "text": "make a tiny helper and ban ad hoc byte math:\n\nbytesOf(T, slice)\nwriteTypedBuffer(buffer, slice)\n\nSo no caller ever does count * sizeOf(T) manually again. The helper casts wide, checks overflow, checks expected size, and logs in debug. Same thing for row uploads, terrain vertices, instance rows, animation curves, everything.",
+  "status": "review",
+  "sessionId": "ac60258b-2e2e-4a0c-a6c8-3ebae4aa1c72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T23:29:21.146Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T23:44:48.339Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Banned ad-hoc GPU byte math. The req_0842 road bug was a class bug: count*@sizeOf(T) where count came from @min(usize, COMPTIME_CONST) — Zig narrows that result to a u15 (fits 20000), so *4 overflowed and the upload truncated. New framework/gpu/buffer_upload.zig provides bytesOf(T,slice)/bytesOfCount(T,count) (size computed in u64, cannot overflow), writeTypedBuffer(queue,buf,offset,T,slice) (size derived from the slice's element type, bounds-checked + logged in safety builds), and writeValue(queue,buf,offset,&value) for single structs. Converted every queue.writeBuffer and every setVertexBuffer byte-range across the gpu layer (rects, capsules, curves, polys, sdf_icons, text glyphs, gcurve_fill, image quads, effect storage data, filter/brush/scene/sky uniforms, terrain vertices, instance rows, ground D stream) — no caller does count*@sizeOf by hand now. Builds clean (rjit ship). Verified the 3D mesh/instance path via the road-render-test gate (still PASS, asphalt everywhere); the 2D-primitive conversions are mechanically equivalent (same bytes for all non-overflowing cases) and compile, not separately eyeballed. Committed aad52d073.",
+  "shas": [
+    "aad52d073"
+  ],
+  "resolvedAt": "2026-06-13T23:44:48.339Z"
+}

@@ -1,0 +1,13 @@
+{
+  "id": "req_0514",
+  "at": "2026-06-10T12:18:45.352Z",
+  "origin": "session:8f492126",
+  "text": "ok so why does this fire when im doing nothing at all? [js.warn] [DRAGDRAW] frame stall max=1500ms\n[js.warn] [DRAGDRAW] frame stalls ×3 max=179ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=205ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=180ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=193ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=177ms",
+  "status": "new",
+  "sessionId": "8f492126-2685-4bb0-ad7d-82b25fa10ec6",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "perf-log"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1195",
+  "at": "2026-06-16T23:47:37.181Z",
+  "origin": "session:8e058574",
+  "text": "see if u can write a script that can tell me where in @cart/hmsc-int/model.json my car is not symmmetric i can see it but i dont know which vertex it is lol",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T23:48:13.812Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T23:49:55.349Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote scripts/check-symmetry.js, a reusable v8cli script that pinpoints where a Studio model.json is not symmetric. It reads the model, auto-picks the symmetry axis (the one with the fewest offenders about the origin plane — for the user's car that is Z, left/right) or takes an explicit x|y|z arg, and lists every vertex with no mirror twin within tolerance: its index, position, where its twin should be, and the nearest actual vertex with the distance off, sorted worst-first so the most visible asymmetry is at the top. Ran it on cart/hmsc-int/model.json: symmetric axis = Z, 44 verts off, worst = vert 97 (off 0.39) and the pair vert 72/94 (off 0.29), clustered near the centre/nose. Committed 8155eeaa2.",
+  "shas": [
+    "8155eeaa2"
+  ],
+  "resolvedAt": "2026-06-16T23:49:55.349Z"
+}

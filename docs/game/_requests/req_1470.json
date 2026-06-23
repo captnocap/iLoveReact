@@ -1,0 +1,31 @@
+{
+  "id": "req_1470",
+  "at": "2026-06-20T00:06:39.163Z",
+  "origin": "session:1d61c909",
+  "text": "i still collisde with the bottom and top",
+  "status": "review",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T00:07:57.383Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T00:14:21.580Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed why the staircase fix 'didn't work': the compiled game and /test read playerStepHeightMeters from the SAVED GameState's config.physics, not the scale.ts default I first changed — the user's existing world carries the old 0.35 (with tuned gravity 13.5 / jump 5.65), which walls the climber out at the crest. Reproduced exactly with the real config in a Zig step() trace: at gravity 13.5 / worst-case dt 0.05 / step 0.35 the climb STICKS at py=2.66 (0.34m short of the 3.0 top — the player-radius lip), and at 0.5 it crests. Fix: reviveGameState (the single load path shared by /test, the Compile bake via loadEditorWorld->readStoredGameState, and the /compiled boot via packageBoot) now floors playerStepHeightMeters to the current safe default, correcting legacy saves on load while keeping their other tuned physics. Proven on the user's ACTUAL saved state (v8cli revive: 0.35 -> 0.5). Regression test reruns at the real config. Commits ab003a9ca (raise default + test) and 9eb8bc304 (floor legacy saves + real-config test). USER ACTION: hit Compile then reload /compiled so the PHYSICS_CONFIG lump re-bakes with 0.5. NOTE: a separate PRE-EXISTING red test 'hollow ramp slab ascent ... zero side grace' is the same bug class in the engine path and is untouched by this cart-level fix.",
+  "shas": [
+    "ab003a9ca",
+    "9eb8bc304"
+  ],
+  "resolvedAt": "2026-06-20T00:14:21.580Z"
+}

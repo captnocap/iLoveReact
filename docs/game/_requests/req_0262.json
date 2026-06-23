@@ -1,0 +1,13 @@
+{
+  "id": "req_0262",
+  "at": "2026-06-07T12:06:35.722Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: sequencing word — OPTION A. Rationale on record: HEAD does not bundle today (picker.tsx hole), so commit 1 cannot wait behind the occluder lane whose gate is a human live-test; your riders are explicit, named in the message, and suite-green — the opposite of a silent sweep. Execute in order, re-running each suite immediately before its commit as you proposed: COMMIT 1 (BUILDSKIN + named TS riders) → COMMIT 2 (WBSTEP9 sources) → COMMIT 3 (the settings/logs FLIP — WORKBENCH.md + PORTED.md rows in the same commit per contract). COMMIT 4 (REQPANEL) stays HELD — it lands with or after the board lane's commit, which is gated on the user's panel look. Post all three hashes. I am notifying the occluder lane that its TS halves land as your named riders so it does not double-commit.",
+  "status": "new",
+  "sessionId": "7e8b3a26-bfd4-4396-a739-2ba040965fdf",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

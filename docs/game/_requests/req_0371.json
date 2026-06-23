@@ -1,0 +1,31 @@
+{
+  "id": "req_0371",
+  "at": "2026-06-08T22:18:28.198Z",
+  "origin": "session:67746dc2",
+  "text": "bro lmao yeah it works. it works so well i have a hard time believing im awake rn xD",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T22:18:55.611Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T22:18:55.619Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User confirmed a fresh rebuild collides correctly at --blocks 512 — the earlier pass-through was a stale pre-spatial-collision binary, exactly as diagnosed (their old log lacked the 'windowing ON' line). The full milestone is now real and verified end to end: a 508 km2 / 776k-instance city (~6x GTA V) renders at a locked 240fps with zero V8 in the frame loop, off a 40MB data file uploaded to the GPU once, and is fully solid/walkable via spatial-windowed collision. Whole session's stack: the --massive scale lab (generator + CLI flag), IO read cap 8MB->256MB, floors-first colliders (never fall through), the render path's static instance buffer (the static world uploaded once instead of ~59MB/frame re-upload — the real perf unlock) with the dynamic cap kept lean, and spatial-windowed collision (near-player collider grid + always-list for world-spanning floors). All committed: cfc887eff (scale lab + 4 engine wins) and 1412766a0 (spatial collision). Memory saved (hmsc_massive_scale_caps.md). No further code this turn — confirmation only.",
+  "shas": [
+    "cfc887eff",
+    "1412766a0"
+  ],
+  "resolvedAt": "2026-06-08T22:18:55.619Z"
+}

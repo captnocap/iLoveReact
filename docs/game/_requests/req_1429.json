@@ -1,0 +1,43 @@
+{
+  "id": "req_1429",
+  "at": "2026-06-19T18:59:15.128Z",
+  "origin": "session:671785ab",
+  "text": "sorry what exactly do u wnat me to check",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T19:07:45.347Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T19:07:45.355Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-19T19:26:35.739Z",
+      "actor": "session-6717",
+      "kind": "note",
+      "text": "Icon vocabulary (8fe9ce7a7): iconified unambiguous buttons (undo/redo, import GLB, scale/trace/log/fps toggles, textureize/compile/textured/export/import/ai-fill, reframe); kept text for mode tabs + cryptic mesh ops + slice trio. All names verified baked."
+    },
+    {
+      "at": "2026-06-19T19:26:35.748Z",
+      "actor": "session-6717",
+      "kind": "note",
+      "text": "Hotkey contract fold (b0c60b987): added 'studio' scope to controls.ts, replaced the hand-rolled selection-key listener with useEditorControls('studio'); F now actually reframes; Ctrl+Z/Y kept out (bench owns history, would double-fire); KeyLegend rendered. Boots clean (validate passed). REMAINING: the self-serve user-rebind panel (override persistence + settings capture UI) — needs live verification, riskiest piece, deferred for the user to verify the foundation first."
+    }
+  ],
+  "resolution": "Track B chrome dock-shell, second half (the context rail): committed the live-swap line (source.tsx -> studiokit, 4e68fc7b5) per the user's word, then fixed the user's core cram complaint — tier-2's tools bar flexWrap'd DOWN into the 3D scene on dense selections. Split the one wrapping row into three docked containers by swapping wrappers at two boundaries (no 460-line relocation): mode tabs top-left (content-sized, never balloons), file/texture ops top-right, and the per-mode/per-selection CONTEXT edit ops as a vertical left rail (selection-gated, invisible until relevant). Dividers converted to horizontal section rules. Logic byte-identical — same handlers/state/closures, only the parent container changed. Built green (SHIP_RUN_PACKAGE=0); self-shot /workbench renders the rail populated (transform tools stacked left) with the top bar on a single line. Needs live verification of the populated rail since selection-gated ops can't be self-shot headless. SHAs 4e68fc7b5,2f95935c9.",
+  "shas": [
+    "4e68fc7b5",
+    "2f95935c9"
+  ],
+  "resolvedAt": "2026-06-19T19:07:45.355Z"
+}

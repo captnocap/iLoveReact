@@ -1,0 +1,33 @@
+{
+  "id": "req_0523",
+  "at": "2026-06-10T12:51:03.988Z",
+  "origin": "session:8f492126",
+  "text": "still falling thru the world :/\n\n[js.warn] [mapgone] PaintCanvas mount: seed=initialWorld chunks=33 focus=33 focusedChunks=33 layer=paint\n[js.warn] [materials] baked 0 material(s): 0 shader, 0 translucent\n[loader] constructed map 360x360 from zig-out/game/hmsc.gamefile (no JS)\n[loader] built 20069 mesh instances (14877 placed pieces)\n[loader] built 4096 physics rects + 0 oriented physics rects + 50 heightfields\n[loader] physics collider cap clipped 1411 rendered instance rows\n[loader] spatial collider windowing ON — 3219 spanning + grid 13x10; near-field 4096 rects + 256 oriented\n[loader] 16 face material(s) → 16 batch(es), 240 translucent meshes\n^C",
+  "status": "review",
+  "sessionId": "8f492126-2685-4bb0-ad7d-82b25fa10ec6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T12:51:35.787Z",
+      "actor": "session-8f49",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T12:56:45.209Z",
+      "actor": "session-8f49",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user's log line '[loader] constructed map ... (no JS)' showed they were in the COMPILED game (world_loader), not /test — a different spawn path from req_0521. chooseSpawn picks the top of the nearest flat INSTANCE ROW (a floor box) near the map centre and never consults the scene's 50 painted-terrain heightfields, so on a map with painted hills the spawn sat under the terrain surface; below a heightfield's top no collider can catch a body, so the player fell through the world on every load. Fix 60f687afd (world_loader.zig): new sceneTerrainTopAt samples the highest covering heightfield at the spawn (x,z); spawn y clamps up to that surface and then drops in from SPAWN_DROP_CLEARANCE_METERS (0.35m) so an imprecise sample still settles ONTO the ground — the 'raise my spawn drop' the user asked for. zig ast-check + a full ReleaseFast loader build are green; 'rjit game play' rebuilds the loader on launch, so the user just runs it again.",
+  "shas": [
+    "60f687afd"
+  ],
+  "resolvedAt": "2026-06-10T12:56:45.208Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1321",
+  "at": "2026-06-18T22:21:48.994Z",
+  "origin": "session:9e041fa8",
+  "text": "there is still something wrong with this man idk how to put it other than what it is exactly but look here for example. [Image #41] this green isnt even suppose to be there. i go to paint that black, it stays green. i go to paint it green, and the whole thing turns green. so it clearly can paint [Image #42] \n\nsecondly. look here. these are white lines. i drew on this image purple so u can see them clearly. [Image #43] [Image #44] \n\nbut the whole thing is painted. so why is it doing this [Image #45] ???",
+  "status": "review",
+  "sessionId": "9e041fa8-bb4b-47e8-9250-ce5cf71d3fa9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T22:27:18.115Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T22:27:18.124Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Studio paint atlas showed thin off-colour seam lines at every face boundary plus a neighbour slot's paint bleeding onto a face corner (a green sliver that refused black). Root cause was bilinear sampling: framework/gpu/3d.zig g_diffuse_sampler was .linear, so a face's UV-edge texels averaged with the adjacent gutter / neighbour slot in the packed atlas — the soft-edged green and the white seams. The code comment said it should be nearest; the value had drifted. Flipped g_diffuse_sampler to nearest (mag+min) and the bind-group layout sampler entry to .non_filtering to match. Scene-composite sampler left linear. Global to all 3D diffuse textures (matches the PSX aesthetic); can be made per-texture later. Compiles+links clean via SHIP_RUN_PACKAGE=0 rjit ship hmsc-int.",
+  "shas": [
+    "3bd62a0d0"
+  ],
+  "resolvedAt": "2026-06-18T22:27:18.124Z"
+}

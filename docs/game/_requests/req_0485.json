@@ -1,0 +1,33 @@
+{
+  "id": "req_0485",
+  "at": "2026-06-10T09:18:16.528Z",
+  "origin": "session:e11a01ef",
+  "text": "alright. log the drag time since its horrible still, but i have no way to prove that, when it says this [js.warn] [PLACEFREEZE] visualBoxes pieces=4844.00 boxes=4844.00 ms=43.09",
+  "status": "review",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T09:19:13.162Z",
+      "actor": "session:e11a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T09:24:48.144Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The drag itself now proves its own lag (24fd5a404): every paint drag prints ONE [DRAGDRAW] summary on release — total drag ms, mouse moves, cell-set updates, per-move event-gap avg/max, computePaint avg/max, ghost-build avg/max, and the JS render+commit latency behind each update. The event GAP is the key number: when the engine's frame chokes, mouse events arrive late, so gapMax exposes native stalls JS timers can't see — if gap is huge while compute/ghost/render read low, the cost is the native frame (likely the 4844-piece mesh scene itself), which points at the already-approved static-instance renderer as the real fix. Release-to-standing latency also prints ([DRAGDRAW] paint commit -> standing ms=...), which the 43ms visualBoxes line only partially covered. Drag a long wall and paste the [DRAGDRAW] lines.",
+  "shas": [
+    "24fd5a404"
+  ],
+  "resolvedAt": "2026-06-10T09:24:48.144Z",
+  "tags": [
+    "perf-log"
+  ]
+}

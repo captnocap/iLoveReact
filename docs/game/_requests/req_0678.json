@@ -1,0 +1,31 @@
+{
+  "id": "req_0678",
+  "at": "2026-06-12T09:34:27.006Z",
+  "origin": "codex:019eba70",
+  "text": "still does it. watch. step 1: [Image #1] step 2: [Image #2] step 3: [Image #3] step 4: [Image #4]",
+  "status": "review",
+  "sessionId": "019eba70-af1b-7633-a9f1-ba5a8c22c607",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T09:34:45.186Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T09:38:42.851Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the compiled-game gray fallback for painted wall stencils by making the no-JS Zig loader recognize the cutout-stencil material recipe, rebuild its RGBA tile from the shipped mask/color data, and install it through the same keyed material texture path used by decal materials. The earlier alpha-pass routing stays in place so transparent stencil pixels do not write an opaque wall face.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T09:38:42.851Z",
+  "tags": [
+    "bug"
+  ]
+}

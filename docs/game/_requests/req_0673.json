@@ -1,0 +1,31 @@
+{
+  "id": "req_0673",
+  "at": "2026-06-12T07:00:27.081Z",
+  "origin": "codex:019eba70",
+  "text": "[js.err] [ffi] __keydown listener error: normalizeYawDegrees is not defined\n[js.err] [ffi] __keydown listener error: normalizeYawDegrees is not defined\n[js.err] [ffi] __keydown listener error: normalizeYawDegrees is not defined\n[js.err] [ffi] __keydown listener error: normalizeYawDegrees is not defined\n[js.err] [ffi] __keydown listener error: normalizeYawDegrees is not defined",
+  "status": "review",
+  "sessionId": "019eba70-af1b-7633-a9f1-ba5a8c22c607",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T07:00:33.637Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T07:01:04.089Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the iso keydown crash by restoring a local normalizeYawDegrees helper in IsoAuthor.tsx. The selected-rotation path uses it when R rotates loose pieces/buildings; without the helper, every keydown listener threw before rotate handling could complete. Verified hmsc-int bundles cleanly.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T07:01:04.089Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1538",
+  "at": "2026-06-20T22:44:29.254Z",
+  "origin": "session:0b8abe45",
+  "text": "ok cool it works could you get me a button to exact center my model so i can then do mirror symmetry correctly. also, is possible that you can give mirror painting also",
+  "status": "review",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T22:44:48.137Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:56:31.183Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added two symmetry tools to the Studio model editor. (1) CENTER: new editMesh.centerMesh(m) translates a part so its axis-aligned bounds center sits on the origin (pivot + every mount ride the same delta so a rig stays attached; idempotent — already-centered returns the same mesh). Mirror-edit and symmetrize plant their plane at c=0, so an off-origin model mirrors lopsidedly or onto empty space; Center is the prerequisite. Surfaced as a 'center' button (Crosshair icon) at the top of the symmetry panel, shown in every mode. (2) MIRROR PAINTING: when a mirror plane (the existing ⇄ X/Y/Z toggles) is on, every brush dab is also stamped on the symmetric face(s). useBrushStroke gained an optional mirror(dab) hook that stamps each image with its OWN atlas clip island, so it covers freehand-interpolated dabs AND the line/rect/ellipse tools, gap-free on both sides, same brush/colour/eraser. The geometry lives in meshPaint.mirrorPaintDabs: a dab carries only its atlas texel, so it finds the source face by UV island, inverts UV→local surface point (reusing the existing uvToWorld), reflects in LOCAL space about c=0 (matching mirrorEditAxes: 1 axis→1 image, 2→3, 3→7), and forward-maps each reflection to its face + atlas texel via a new point→face plane lookup. Tests added: centerMesh (origin + rig carry + idempotent) and mirrorPaintDabs (a +X dab reflects onto the −X island); editMesh 94/94 and meshPaint 11/11 green, and the hmsc-int cart bundles clean. Live paint verification (rjit dev) is the user's to do since headless shot can't capture Paintable content.",
+  "shas": [
+    "e236ee7ab"
+  ],
+  "resolvedAt": "2026-06-20T22:56:31.183Z"
+}

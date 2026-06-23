@@ -1,0 +1,13 @@
+{
+  "id": "req_0298",
+  "at": "2026-06-08T08:12:26.523Z",
+  "origin": "session:9e14f7ea",
+  "text": "what am i suppose to see here? just want to verify its what i do or do not see",
+  "status": "new",
+  "sessionId": "9e14f7ea-dafd-486f-b26a-2a7b9c5fcb05",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ask"
+  ]
+}

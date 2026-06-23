@@ -1,0 +1,10 @@
+{
+  "id": "req_1410",
+  "at": "2026-06-19T15:47:54.155Z",
+  "origin": "session:d6961119",
+  "text": "ok cool. do these diffusion models have inference control like diffusion image models",
+  "status": "new",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": []
+}

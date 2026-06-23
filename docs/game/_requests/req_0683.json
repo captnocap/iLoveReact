@@ -1,0 +1,31 @@
+{
+  "id": "req_0683",
+  "at": "2026-06-12T13:01:03.706Z",
+  "origin": "codex:019ebbe8",
+  "text": "Right. so can you make either a script or interface in the hmsc-int app to import from obj or glb and add to props",
+  "status": "review",
+  "sessionId": "019ebbe8-ba1e-74d1-bd7a-0274b58ea604",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:01:10.208Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T13:12:12.976Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an hmsc-int OBJ/GLB prop import path that bakes external meshes into the imported prop registry, includes Desk.glb as imported.desk, exposes imported props in the editor palette, and ships them through a new compiled map mesh-props lump so the native loader can render static imported prop meshes.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T13:12:12.976Z",
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1664",
+  "at": "2026-06-22T23:18:29.096Z",
+  "origin": "session:06fe423a",
+  "text": "ok its not breaking the texture anymore. but lets talk about this LoD and view distance because its a real problem st ill. i can tell because at certain areas where i look my fps goes to shit. and i suspect that all the grass and tree animations are in full effect at full distance, also, this change seem to break the skybox physics ? idk. they worked last load.",
+  "status": "review",
+  "sessionId": "06fe423a-d6e6-4bdd-a7f5-e511298cc05a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T23:19:36.549Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T23:36:42.867Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the fps/LOD problem in the compiled world. Three compounding causes confirmed in code: (1) ~2.6M grass/tree rows overflow the 1.05M static instance buffer so visible foliage is re-staged into the per-frame buffer EVERY frame; (2) streaming used ONE 240m residency radius for all families so short grass drew to full distance; (3) the grass/frond wind shader animated every drawn blade with no distance gate. All three scale with visible foliage count, hence the directional fps drop. Also flagged: the empty far-field (lod shell 0 rows) is the same root number (3.5M rows > MAX_STATIC_INSTANCES). Implemented the fix under req_1665 (per-family foliage view distance + animation cut). Skybox/physics shift the user noticed is a DIFFERENT lane (2117) mid-work on SKYBOX_PLAYBOOK void-shell in world_loader.zig+camera.zig, not my change.",
+  "shas": [
+    "afb9c0fa4"
+  ],
+  "resolvedAt": "2026-06-22T23:36:42.867Z"
+}

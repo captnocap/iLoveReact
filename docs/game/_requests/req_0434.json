@@ -1,0 +1,13 @@
+{
+  "id": "req_0434",
+  "at": "2026-06-10T03:51:35.451Z",
+  "origin": "session:0a09e641",
+  "text": "hey help me figure something out. why is it that the game engine that uses a compile feature to load the game (the no v8) happens to have different collision physics and player speed than the test route. doesnt the test route have its physics from a zig host, so why wouldnt it be the same physics",
+  "status": "new",
+  "sessionId": "0a09e641-a769-495b-a0fd-4a909d25af7a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ask"
+  ]
+}

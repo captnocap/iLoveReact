@@ -1,0 +1,12 @@
+{
+  "id": "req_0090",
+  "at": "2026-06-06T11:46:01.152Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — WALLTOP-0606 (resolves req_0086, already in the ledger). User verbatim: \"there is two 'edges' for wall placement and i hate it. there is an outer-wall placement where you place the wall on the actual edge/side of the floor, and one on the top of it.\" USER RULING on which survives: \"i dont really care what it is, side or top, all the same to me. [...] so pick one lol i think top is better. if u do side, u always get weird space cuz u have a gap for wall to floors.\" THE pick is TOP: walls have exactly ONE placement anchor — standing on top of the floor surface at its perimeter. The side/outer-edge anchor is removed entirely, not hidden behind a flag (the old way is going away; no compatibility path, no dead snap branch left behind). Steps: 1. Find the wall placement/snap logic in build mode (you just worked the floor resolver in framework/game — same territory) and identify both anchor paths; post the file:line of each. 2. Collapse to the single top anchor: every wall placement lands on the floor's top surface; delete the side-anchor code path. 3. Check existing placed walls/saved maps: if any stored wall was placed with the side anchor, say so in your report — do NOT silently migrate data; the supervisor will surface it. 4. Regression test at the consumption layer: placing a wall on any floor edge yields the top anchor position; there is no input or state that produces the old side placement. Build via tools/rjit only; the dirty working tree elsewhere is the source of truth, never revert anything. DONE-BAR: tools/rjit game verify green + file:line of the removed side path + test + READY report. DO NOT COMMIT — supervisor instructs commits. Do not shrink or stub beyond the named side-anchor removal. Only the user's live confirmation makes this a PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

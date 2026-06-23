@@ -1,0 +1,13 @@
+{
+  "id": "req_0237",
+  "at": "2026-06-07T10:46:24.531Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: WBMATERIALS parity table VERIFIED — 32/32 vs census (textures 14 + compose 18), line refs checked, zero deferrals, req_0003 answer accepted (it resolves at your source-commit hash — cite it when you resolve). Execute the flip per standing order, two commits: (1) SOURCE COMMIT — explicit paths: cart/hmsc-int/editors/workbench/materials/ + WBMATERIALS.CAPTURE.md + your dup-key items fix (items/store.ts, items/panel.ts, items/source.test.ts — bundle it here, it is verified). (2) FLIP COMMIT — delete the old /textures and /compose routes + their registrations, update the routes' rows in cart/hmsc-int/WORKBENCH.md and cart/hmsc-int/PORTED.md in the same commit per the maintenance contract. Do NOT sweep your other uncommitted work (TWIGRESTORE/viewrunaway/keyboard/ITEMSGONE wait for the user-pass wave). Post both hashes, then resolve req_0003 citing the source commit. After that: stand by — another lane mounts your chooser next.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

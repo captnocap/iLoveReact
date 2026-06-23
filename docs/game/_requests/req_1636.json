@@ -1,0 +1,10 @@
+{
+  "id": "req_1636",
+  "at": "2026-06-22T17:12:54.749Z",
+  "origin": "session:0d310aad",
+  "text": "add logs for the time it takes between me clicking on a route button and it takes to load",
+  "status": "new",
+  "sessionId": "0d310aad-1355-489d-ab3f-6188d489fc95",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,15 @@
+{
+  "id": "req_0145",
+  "at": "2026-06-06T17:25:49.293Z",
+  "origin": "codex:019e9ca9",
+  "text": "No. I mean there are two routes. one of them is characters and the other is workspace/characters im asking if you remove the one that is not workspace/* does it break",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:26:09.324Z",
+  "resolution": "Answered the specific routing question: removing the standalone non-workspace /characters route registration and CharactersRoute component should not break the workspace character route, because workspace/characters does not mount CharactersRoute. It would break only if the deletion also removes shared modules under editors/characters that workspace imports, such as preview, paintKit, grabKit, smoothKit, gridData, draft, generate, roster, animPresets, and regions. No code changed.",
+  "shas": [],
+  "tags": [
+    "ask"
+  ]
+}

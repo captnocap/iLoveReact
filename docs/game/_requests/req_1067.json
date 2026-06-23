@@ -1,0 +1,28 @@
+{
+  "id": "req_1067",
+  "at": "2026-06-15T21:25:37.919Z",
+  "origin": "session:760f9f8d",
+  "text": "yeah sorry to stop u again, but if u look at that world tile painter, there is already a 'grass' tile, so u could just generate it where there is this tile painted, not worry about height, and leave height for me to do with the height tool already made",
+  "status": "review",
+  "sessionId": "760f9f8d-dc0f-4592-9807-536386b8fe20",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T21:25:54.491Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:03:48.074Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built fluffy grass as a surface population system (FluffyGrass technique). Phase 1: GrassBlade crossed-quad geometry + grassPopulation.ts deterministic per-cell roll over painted grass/grassDry tiles (reuses scatter.ts hash) + GrassField (one Scene3D.Instances) wired into WorldStatics. Phase 2: grass_wgsl scene3d pipeline in 3d.zig (vertex wind tip-weighted world-noise gust, fragment procedural wisp cutout + root-to-tip gradient), routed via ~grass~ tex-key sentinel; time written to the former _pad3 uniform slot. Built clean (SHIP_RUN_PACKAGE=0), self-shot PASS, shows in editor iso/play 3D. Phase 3 (no-V8 /compiled bake) PENDING: the streaming.zig/constructor.zig shapeId->geometry seam needs mapping to add GrassBlade to the native loader. NOT committed — shared hot files (3d.zig/shaders.zig) co-edited by parallel sessions; needs commit coordination. Full handoff in memory project_grass_system.md.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:03:48.074Z"
+}

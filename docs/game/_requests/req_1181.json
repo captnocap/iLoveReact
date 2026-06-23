@@ -1,0 +1,30 @@
+{
+  "id": "req_1181",
+  "at": "2026-06-16T16:05:37.446Z",
+  "origin": "session:8e058574",
+  "text": "oh i am crazy. hey so is there a way i can get a method to say that a face is to be glass and not textured. since like i want to put a windshield and windows and thats not really possible when u paint over those parts for the texture [Image #4]",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T16:06:11.213Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T16:13:40.524Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added per-face GLASS to the Studio mesh editor so windshields/windows can be authored as translucent panes instead of textured surfaces (the user couldn't make windows because texturing painted over them). New EditMeshFace.glass flag; editMeshToGeometry takes a face filter; studioModel lowers each part into an opaque geo (non-glass) plus a glassGeo (glass faces, null when none); the viewport renders the glass pass as a second see-through Scene3D.Mesh (color + opacity 0.34, the materials.ts Glass look) over the opaque mesh, and glass faces are excluded from both the textured opaque mesh and the drag draft so they never take the atlas. A face-mode 'glass' toggle marks/clears the selected face(s). Verified: editMesh suite 56/56, full hmsc-int cart bundles clean. Committed cc4b0ca15. Follow-up flagged: carry glass through cookedAsset so compiled in-game props render the panes translucent (editor authoring done; cook parity pending).",
+  "shas": [
+    "cc4b0ca15"
+  ],
+  "resolvedAt": "2026-06-16T16:13:40.523Z"
+}

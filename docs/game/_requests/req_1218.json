@@ -1,0 +1,30 @@
+{
+  "id": "req_1218",
+  "at": "2026-06-17T01:11:58.826Z",
+  "origin": "session:faeb0705",
+  "text": "i would take the edges extrude them inward and then a face between them all. so that its a thin model, no need to go more than that",
+  "status": "review",
+  "sessionId": "faeb0705-bc55-47ba-a9d7-6a95888034b9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T01:15:00.142Z",
+      "actor": "faeb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T01:19:54.580Z",
+      "actor": "faeb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the Studio 'detach' op the user specified for car panels (hood/door/trunk/lights): select a face-group on the body, click detach, and it peels off into its own thin solid part. Three pure+headless editMesh functions — subMeshFromFaces (extract a face-group into a compact standalone mesh), solidifyFaces (outer skin + per-vert inward-normal inner skin + silhouette-only rim walls = watertight thin slab; interior shared edges get no wall), and detachPanel (extract+solidify+seat a pivot, return {panel, body} with the faces removed from the body so there is no coincident z-fighting skin). Wired into Studio.tsx as a 'detach' button beside glass in face mode (≥1 face), a new onAddPart viewport prop to model.addPart, and STUDIO.shellThicknessMeters (2/16 m). Glass carries onto the inner cap so a window stays see-through both sides. 4 new tests, editMesh suite 71/71 green; full hmsc-int cart bundles clean. Pure TSX/TS so it hot-reloads, no Zig rebuild. Answers the 'how much skeleton is there' question: wheels are the one generated helper, every other panel is now a peeled face-group + joint.",
+  "shas": [
+    "40c01635a"
+  ],
+  "resolvedAt": "2026-06-17T01:19:54.580Z"
+}

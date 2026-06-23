@@ -1,0 +1,32 @@
+{
+  "id": "req_1477",
+  "at": "2026-06-20T01:48:47.480Z",
+  "origin": "session:1d61c909",
+  "text": "maybe. i dont think that is it. i think its the wall is the actual culprit. notice the floor in all examples is always going to fill 3x3 tile space, its just when the wall is first in the sequence, the floor is now colliding into the wall. meaning the problem maker here is the wall. the wall needs to always shift up and sit ontop of a floor. but then you might be thinking, well no because that means the top of a stairs going on to a floor is going to have that extra step, and that is correct. \n\nso you can go two ways here really. the problem if you dont put walls ontop of floors is you will never have a nice even grid space because think if u place a floor then a wall and then a floor on the other side, delete the wall, well if the wall was between them at ground level, now there is a gap in floors. if the wall sits ontop of them, where it sits evenly between the two floors. is ideal. but be very careful! this means, you also can NOT just put walls halfway on the edge of a floor, that makes us get weird edges on the outsides of it",
+  "status": "review",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T01:50:01.449Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T02:21:38.912Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused and fixed the build-piece Y mismatch behind the staircase collisions. The long-open WALLTOP-0606 bug (req_0099): a wall stored its Y from whatever surface the placement hit, so single walls aimed at a floor top rested ON the floor while line-drawn walls and floor-after-wall placements stayed at ground/side Y — a mix that misaligned everything stacked above (the extra/short step where a staircase lands on a floor). Durable cure (24bcfca88): DERIVE the wall rest-Y from the floor beneath it at geometry time via liftedWallBaseY/liftWallsOntoFloors, applied read-time in placedPieceColliders (collision/nav/bake) and pieceVisualShapes (render) so no placement path can miss it and see-it==walk-it. Stored data stays raw (no double-lift on edit), idempotent, delete-floor drops the wall, fixes EXISTING walls on load. 56/56 placed tests. Combined with the earlier stair-crest step-height fix (0.35->0.5, commits ab003a9ca/9eb8bc304). REMAINING (the user's Path A part 2): auto-place a floor under stairs — deferred pending a live recompile+test of the wall fix, since it may already resolve the walk and the floor-under-stairs Y bookkeeping is best verified against real behavior.",
+  "shas": [
+    "24bcfca88",
+    "ab003a9ca",
+    "9eb8bc304"
+  ],
+  "resolvedAt": "2026-06-20T02:21:38.912Z"
+}

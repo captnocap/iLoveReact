@@ -1,0 +1,16 @@
+{
+  "id": "req_0064",
+  "at": "2026-06-06T07:34:27.768Z",
+  "origin": "supervisor-relay",
+  "text": "this is the smallest brush size, single click on the canvas, no drag, 0.3 strength [screenshot: dab covers ~4-6 cells] - supervisor opinion requested and given: floor too high + falloff dishonest",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T07:52:56.029Z",
+  "resolution": "BRUSHFLOOR-0606 landed (0d6b72480). Root cause of the 4-cell-core-bleeding-to-6: the stroke engine treats brushPx as a RADIUS scale (mouse dab radius = brushPx × 1.0 via pressureRadius base 0.35 + fallback 0.5 × gain 1.3) while the cursor ring drew brushPx/2 — landed footprint was 2× nominal, and the '4px' floor was really an 8px disc averaged across cells by the grid downsample. THE FLOOR: the sculpt brush speaks DIAMETER now; the knob floor (4px) is exactly ONE paint cell (192/48), and at the floor every dab snaps to the center of the cell under it — one click = one cell core, zero neighbor bleed, wherever in the cell the click lands; above the floor the hand stays free. The 18-detent ladder turned out to be /cutout's painter (bottoms at 1) — not the lie, untouched. FALLOFF HONESTY: the cursor ring and the landed dab derive from the SAME function (sculptEffectiveRadiusPx riding the engine's own pressureRadius curve) — nominal == drawn == landed; both routes share the semantics. Grab/smooth drag stamps keep their own 3D shell indicator — scoped out, reported. P4 pins: floor==one cell, in-cell snap-to-center, no snap above floor, cursor==landed verified against a real engine dab across 4 sizes. characters 17/17. Tunables (pressure curve, knob spec) remain P2.",
+  "shas": [
+    "0d6b72480"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

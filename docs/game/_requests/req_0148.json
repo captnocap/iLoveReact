@@ -1,0 +1,12 @@
+{
+  "id": "req_0148",
+  "at": "2026-06-06T17:38:10.529Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — small sanctioned task, user-authorized deletion: \"so why dont they just delete it ? lol\" — remove the dead record at cart/hmsc-int/data/streams/sessions.jsonl line 884 (the 184-byte torn-write fragment you inspected earlier; invalid JSON, quarantined on every ingest). Delete EXACTLY that one line, nothing else — verify before/after by line count (n-1) and by re-running an ingest: the CORRUPT RECORD warning must be gone and every previously-valid record still loads. This is the one-time cleanup of the jsonl-crash scar; the archive files otherwise stay as they are. Commit just that file with an explicit path when verified, message noting user authorization. Post the sha.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

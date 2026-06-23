@@ -1,0 +1,10 @@
+{
+  "id": "req_1502",
+  "at": "2026-06-20T20:04:04.426Z",
+  "origin": "session:89c172a4",
+  "text": "ok so\n\ngo into the editor -> paint a prop -> export it to the game -> go into the iso3d -> place the prop -> should be textured -> go into compiled -> should be textured, is the flow i am expecting?",
+  "status": "new",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": []
+}

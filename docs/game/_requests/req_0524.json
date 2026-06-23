@@ -1,0 +1,39 @@
+{
+  "id": "req_0524",
+  "at": "2026-06-10T12:53:56.764Z",
+  "origin": "session:38fbe83f",
+  "text": "hello. so for the game, we want to take the exact idea that was utilized from gta 3 / vice city / san andreas era engine and stream the content in based on a radius from the player + LoS + LOD, so we can get the most performance and have a sprawling city feel while only giving parts of t he game at a time. we have draw distance but this is not the same thing",
+  "status": "review",
+  "sessionId": "38fbe83f-8ce3-4182-8fe1-3332cbea2263",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T12:54:45.391Z",
+      "actor": "38fb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T13:25:53.967Z",
+      "actor": "38fb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-10T14:03:06.372Z",
+      "actor": "38fb",
+      "kind": "note",
+      "text": "User live-play feedback: material faces flat at distance + phantom merged buildings. Mechanism: LOD quadrant union-AABB invents mass in gaps; uniform 240m radius too short for big textured faces. Rework under req_0537."
+    }
+  ],
+  "resolution": "Built the GTA3/VC/SA-era content streaming for the compiled game (the no-V8 loader, standalone + embedded): full-detail geometry now streams in by RADIUS around the player (promotion instant, demotion hysteretic per V30), draws are culled by LINE OF SIGHT (frustum now — the Compile-precomputed VIS lump has a reserved seam in the same chunk oracle), and a derived LOD shell (coarse merged boxes per chunk, volume-weighted colors, nested inside the real geometry so the swap can never z-fight) keeps the whole skyline visible to the horizon — the sprawling-city feel — while only the bubble pays full price. Draw distance unchanged, exactly as asked. New pure engine module framework/world/streaming.zig (partition + LOD + per-frame draw set, 4 unit tests green); gpu/3d.zig static batches gained sub-range draws (one upload, per-chunk draws, zero re-staging); world_loader feeds its batches through it when the world outgrows the 240m detail radius (RJIT_STREAM=0 kill switch, RJIT_STREAM_RADIUS knob; tiny maps keep the old monolithic path bit-for-bit). Physics already streamed (collider windowing) — render now matches. Evidence on the 512-block 507km2 lab (776,084 rows): first frame submits 30 draws = 1,196 detail + 54,836 shell instances (~7% of the city), visually identical to monolithic at spawn (shots/req0524-massive512.png vs -off.png); authored map proof + rjit game verify GREEN (73/73 suites). Next slices: Compile-side VIS lump (chunk-to-chunk visibility for renderer+NPC+audio per V30), bake-side CHUNKS lump (pre-sorted rows so the loader skips its load-time sort), disk-level residency (decode only resident chunk lumps).",
+  "shas": [
+    "50732ca31"
+  ],
+  "resolvedAt": "2026-06-10T13:25:53.967Z",
+  "tags": [
+    "ruling"
+  ]
+}

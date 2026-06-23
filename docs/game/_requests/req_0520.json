@@ -1,0 +1,30 @@
+{
+  "id": "req_0520",
+  "at": "2026-06-10T12:36:43.627Z",
+  "origin": "session:87a47e7e",
+  "text": " the session is you, you will be doing it",
+  "status": "review",
+  "sessionId": "87a47e7e-58c5-4ade-8b65-3201c99fe4d2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T12:37:06.096Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T13:00:33.342Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "BUILT phase 1 of the road design end-to-end (commit 3b0d4d155): the ROAD layer in hmsc-int. roadData.ts = pure stroke→tile planner (user-ruled 3-tile lanes, right-hand flow from draw direction, median kind between opposing groups, sidewalk rings, junction boxes + crosswalk bands at stroke crossings) with 9 passing P4 cases; new flow-neutral 'median' tile kind appended last in both registries (vehicleCost 6 closes the wrong-way loophole; locked-order test updated for the sanctioned append); PaintCanvas gains the ROAD layer + RoadRail (per-side lane steppers, one-way toggle with flow chevrons on canvas, click-to-lay points, Enter stamps / Esc cancels, pointer selects, delete restores undercoat); stamps write destructively into the chunk tile grids with an undercoat map so edits/deletes restore prior paint via global restamp; strokes + undercoat persist in MapSnapshot (3 passing round-trip cases incl. legend remap). Affected suites green (tiles 19/19, pathing 8/8, painted 11/11, sessions 8/8); full cart bundles clean. Docs: hmsc-int.md road-layer section + _index record in the same commit. REMAINING (next slices, on the task list): per-tile material stamping (yellow/white overlays), floor 3×3 micro-grid, elevation modes (grade/deck/approach strips/tunnel hole-mask), surface nav in the host.",
+  "shas": [
+    "3b0d4d155"
+  ],
+  "resolvedAt": "2026-06-10T13:00:33.342Z"
+}

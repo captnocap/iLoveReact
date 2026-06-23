@@ -1,0 +1,17 @@
+{
+  "id": "req_0136",
+  "at": "2026-06-06T17:08:44.410Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT, verbatim: \"the performance problem is solved. it is no longer choppy walking around\" — that is a PASS on your jitter cluster. COMMIT ORDER: commit your perf work now with EXPLICIT PATHS, your exclusive files only — the spikewatch/perflog/churntrace diagnostics, the BrushCursor/chrome prop-identity fixes, the native text trace, noclip, gv_perflog 2, and your console-surface wiring. Do NOT include cart/hmsc-int/editors/play/PlayRoute.tsx in this commit — it carries another lane's untested project-scoping work; it commits separately once the user tests project switching. Do NOT touch game/commands/console.ts or vocabulary.ts (CONPORT lanes own those). One commit, conventional message crediting the user verdict, then resolve the request-ledger entries your lane owns (the jitter/noclip/perflog asks — match by verbatim text, never guess ids) with the sha. Post the sha when done.",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:12:51.854Z",
+  "resolution": "Resolved in b91a941962eeb56e3cbc631f1ac39f2ce59f10d7. Committed the jitter/perf lane after the user's PASS verdict: spikewatch/perflog/churntrace diagnostics, native text/static-capture host traces, React prop-identity stabilization, BrushCursor/property-panel churn fixes, player movement/noclip support, and rubberband/live-floor safeguards. The explicitly excluded PlayRoute.tsx, console.ts, and vocabulary.ts were not staged in this commit.",
+  "shas": [
+    "b91a941962eeb56e3cbc631f1ac39f2ce59f10d7"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

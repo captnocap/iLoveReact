@@ -1,0 +1,18 @@
+{
+  "id": "req_0848",
+  "at": "2026-06-13T22:17:11.396Z",
+  "origin": "session:d660addf",
+  "text": "yep. so the end goal has not changed. which means, all the props you have made are not entirely correct either. one prop = one file. if a prop needs to let images be used as textures, has physics, and etc, then all of them have it. no exceptions",
+  "status": "doing",
+  "sessionId": "d660addf-2f24-4882-9a4e-be2b36812b1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T22:18:39.370Z",
+      "actor": "opus-props",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

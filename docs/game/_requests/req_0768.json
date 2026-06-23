@@ -1,0 +1,36 @@
+{
+  "id": "req_0768",
+  "at": "2026-06-13T14:45:02.394Z",
+  "origin": "session:a695a492",
+  "text": "ya so i dont understand why its really a problem. i showed u the floor piece that has the shader right. so they work. it just for some reason they dont on the mesh. but theres no mechanical reason for that",
+  "status": "review",
+  "sessionId": "a695a492-4a9c-4889-a141-0e50e2e7918a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T14:45:58.949Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:03:57.901Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered why the piece looked better and unified it: the piece and ground now share one formula (HEIGHTFIELD_TILE_BODY / tileFill), evaluated per-fragment on the mesh so the painted ground reads with the same crisp asphalt grain + markings the placed floor piece has. No mechanical barrier — it was a flat-color shader + low-res bake + stale pipeline. Committed; rebuild verification pending (see handoff file).",
+  "shas": [
+    "ecd542b5e",
+    "ca88f3ca2",
+    "fb1f066be",
+    "a45d42ae8",
+    "ca19e07e8",
+    "ec7ebaa82",
+    "00660b84b"
+  ],
+  "resolvedAt": "2026-06-13T18:03:57.901Z"
+}

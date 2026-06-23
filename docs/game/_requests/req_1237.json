@@ -1,0 +1,28 @@
+{
+  "id": "req_1237",
+  "at": "2026-06-17T14:02:04.498Z",
+  "origin": "session:c885b7cc",
+  "text": "hm....  ok so i detached the hood so that it can fly off from damage and that made it easier to close in on the front of the body actually but[Image #18] i still dont know how to really close that end off without just doing the entire seat/dash model [Image #19] see what i mean",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T14:02:47.137Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T14:02:47.146Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User detached the hood (for a fly-off-on-damage part) which exposed/eased the front of the cab, and asked how to close that front end off without building an entire seat/dash model. Advised — no code changed. Reframed it: closing the front is not a dash-modeling problem, it's a fill-the-opening problem, identical to the back wall. The fix is a single FIREWALL panel — one Create-face across the front opening (the near-vertical gap between the windshield's bottom edge and the cab-floor front edge, spanning cab width): edge mode select the edge loop (fills as one n-gon) or vert mode pick the 4 corners, then Flip to face into the cab. That seals the cab from the engine bay so the windshield no longer shows straight through. Noted the hood-off engine bay staying open is fine/intended. Optional upgrade: Extrude that firewall face a few cm inward for a dash lip/shelf, still one op and no real dash model. Conclusion: flat firewall + cab floor fully solves the 'floating through the window' look.",
+  "shas": [],
+  "resolvedAt": "2026-06-17T14:02:47.146Z"
+}

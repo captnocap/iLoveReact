@@ -1,0 +1,30 @@
+{
+  "id": "req_0766",
+  "at": "2026-06-13T14:34:02.142Z",
+  "origin": "session:ef4fbf70",
+  "text": "ok. so now same thing for props. but instead of the faces, you show the parts of the prop, so i can skin it",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T14:34:31.832Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T14:46:37.292Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Brought the redesigned PAINT panel to PROPS: when the iso selection is prop pieces, the panel shows the prop's PARTS (from the SAME propParts the renderer + bake use) instead of the front/back/sides face row — each part shows its real current look, click one to target it (a texture then skins just that part), none targeted = skin every part. This is per-INSTANCE skinning, mirroring the build-piece pieceSkinSet flow. New plumbing: PlacedBuildPiece gains a partTextures field; a new piecePartTextureSet world event + stream reducer merges/clears partTextures[partId] (id stays stable so the selection survives part-by-part skinning); the event was added to the useBuildUndo + PlayRoute map-scoping switches; propFromPiece (now exported) and the compile bridge pushPlacedPieces thread partTextures into the derived WorldProp so a placed prop renders (DataProp + TexturedParts) AND bakes its part skins; WorldPartCaptures in IsoAuthor now also covers the placed prop pieces (texturedPropsFromPieces) so the iso pane bakes the part textures. In prop mode the colour swatches + brush readout hide (a prop part wears a texture, not a flat colour); the material browser + image upload + painter button drive it. This commit also folds in the held req_0757 foundation it builds on. Verified by a clean full-graph esbuild pass (exit 0). WHERE TO TEST: select a placed prop in the iso /route, the PAINT panel shows its parts; pick a texture to skin one or all. Still open (next): the graffiti painter to the right of the skin list, for props AND faces.",
+  "shas": [
+    "2f5d9e399"
+  ],
+  "resolvedAt": "2026-06-13T14:46:37.292Z"
+}

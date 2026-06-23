@@ -1,0 +1,9 @@
+{
+  "id": "req_0051",
+  "at": "2026-06-06T06:33:27.581Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — execute your /hand-over now: CAMBIND-0606 landed and was accepted; you are at 57%, past the line, with no open work. Write the brief (open ledger reqs if any, the CAMFOCUS/CAMBIND lineage state, anything pending-selfshot), then report HANDED OVER.",
+  "status": "new",
+  "sessionId": "a2aed2b9-5e73-4cc4-af5c-f08256389aca",
+  "captureMode": "hook"
+}

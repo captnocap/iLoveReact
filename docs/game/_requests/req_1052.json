@@ -1,0 +1,28 @@
+{
+  "id": "req_1052",
+  "at": "2026-06-15T19:09:27.131Z",
+  "origin": "session:00a3ce8a",
+  "text": "nice!!! now, so when adding a pivot or joint, we need to give it a name. like front left or front right. that way we can just assign them later by saying something like a binding of tires.offroad_left.pivot to trucks.tundra.joint.back_left\nthe thing is that, a wheel has one correct outward face, so we have to save a wheel for example as both views, unless we want to script it, but that doesnt always work for everythingk, just for tires it does",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T19:12:44.413Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T19:22:31.582Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Naming pivots + joints for bindings (req_1052). Established the binding addressing scheme: <library>.<model>.pivot (the part's single pivot) and <library>.<model>.joint.<name> (named sockets, many per part) — e.g. tires.offroad_left.pivot bound to trucks.tundra.joint.back_left. A joint's NAME is its binding key (must be unique; added renameMount to editMesh which auto-suffixes a clash, loud not silent), while TYPE stays the compatibility class (axle/shoulder, mountsCompatible) so a truck's four axle joints share a type but differ by name. Joints are now editable (name/type/axis/limit) in the column-3 metadata panel (see req_1053). The left/right mirror problem (a wheel has one correct outward face) is resolved as a workflow decision: save both views as separate models (general), script-mirror as a tires-only shortcut; a + mirror duplicate helper is noted as a follow-up. editMesh 41/41 (+renameMount test), bundles clean, hot-reload, uncommitted. Spec in PLAYBOOK Part 6.1a/6.1b.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T19:22:31.582Z"
+}

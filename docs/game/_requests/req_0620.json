@@ -1,0 +1,30 @@
+{
+  "id": "req_0620",
+  "at": "2026-06-11T08:09:56.872Z",
+  "origin": "session:5ebbec1e",
+  "text": "dont worry about the live session im not doing anything im just idle",
+  "status": "review",
+  "sessionId": "5ebbec1e-1621-4557-b49a-71ce7bc39398",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T08:10:24.761Z",
+      "actor": "structure-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T08:26:05.565Z",
+      "actor": "structure-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the host-driven Slider primitive — handoff item 1, the L1 law (RULED req_0604) closed with real framework work. The engine owns the thumb while the button is down (the V23/movePlacement precedent applied to scrubbing): framework/engine.zig grabs via a scroll-aware hitTestSlider next to the scrollbar grab, motion writes the pool node's slider_value and repaints with zero JS in the loop, the value streams to JS throttled ~60Hz change-deduped via __dispatchSliderChange, and __dispatchSliderCommit fires once on release as the authoritative settle. paintSlider draws track/fill/knob host-side (track = style background, fill = color). v8_app.zig ignores mid-drag sliderValue prop echoes (slider_dragging gate) so controlled values never fight the engine thumb. runtime grew <Slider value min max step onChange onCommit>; cart/hmsc-int/shell/fields.tsx WorkbenchSlider now renders THROUGH it, so NumField, SliderField, the shader lab, and the cutout tool rail all upgraded in the one place — commit-on-release (WBCHAR-0606) and nonlinear toTrack/fromTrack semantics kept. Verified: ship green, shot /workbench PASS, throwaway demo cart shot shows track/fill/knob/step/tints correct (demo deleted), P4 panelGrammar 6/6 + workbench 1/1 + buildings 23/23. Drag FEEL needs the user's hand — headless shots can't drag.",
+  "shas": [
+    "2063a8d00"
+  ],
+  "resolvedAt": "2026-06-11T08:26:05.565Z"
+}

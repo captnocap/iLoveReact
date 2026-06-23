@@ -1,0 +1,31 @@
+{
+  "id": "req_0346",
+  "at": "2026-06-08T13:40:05.528Z",
+  "origin": "codex:019ea612",
+  "text": "so what just happened to everything then? why are all the buildings gone ? and wtf is happening here? [Image #1]",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:40:22.996Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:58:27.440Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the disappearing buildings/geometry issue caused by runtime-by-value dangling scene3d vertex slices by making the loader runtime stable-owned before wiring the node tree. Standalone render proof now shows buildings, ramps, painted floor, and player again.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T13:58:27.440Z",
+  "tags": [
+    "bug"
+  ]
+}

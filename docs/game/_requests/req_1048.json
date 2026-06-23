@@ -1,0 +1,28 @@
+{
+  "id": "req_1048",
+  "at": "2026-06-15T18:44:34.671Z",
+  "origin": "session:00a3ce8a",
+  "text": "yeah so the joint would be like saying ok here is an arm and here is a torso. the torso gets a joint point up in the area of the body where it would be considerably your arm pit, and then the arm itself, gets a pivot point that says i will connect to a joint right here. i can swing on the joints axis. so the joint is what says you can rotate this far this way, or this way, or full rotate (tires) where the pivot says 'here is where i connect, everything downstream from me is affected by the joint control' so that an arm for example, has a pivot, the body has a joint. the joint says it can turn 90deg forward and 90deg backward, that gives the pivot 180deg of rotation it can follow",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T18:46:53.165Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T19:00:05.720Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Capture of the user's clarification that pivot+joint are asymmetric (pivot on child = rotation origin; joint on parent = axis + rotation limit; nests, e.g. wheel+spinner). This shaped req_1025's confirmed model and is fully implemented there (MountPoint.limit + jointTravelDegrees, the rig mode UI). No separate deliverable — see req_1025.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T19:00:05.719Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_1450",
+  "at": "2026-06-19T22:42:26.451Z",
+  "origin": "session:89c172a4",
+  "text": "oh one more thing look at git history at the cart we had for cutout if it ever made it im pretty sure and it will have an approach for shader brushes worth taking part of its shape from in tandem with the shaders in general from hmsc-int",
+  "status": "review",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T22:42:38.556Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T23:24:03.493Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Located the deleted cutout cart's shader-brush approach (it was never in git history under that path — found it via docs/game/_archive/cutout.md as you suggested) and folded its shape into the kit. The reusable concept is the MaskQuad shader-surface registry: built-in surfaces (rainbow/plasma/voronoi/fbm/solid/edges) plus custom WGSL share ONE SurfaceId/CustomSurface model assembled from a COMMON_PRELUDE + per-surface body, with color slots and a BlendMode. That shape is now reflected in the kit's model as StampSource {kind:'shader', surface} and PaintInk {kind:'shader'}, and the surviving EffectModal (editors/workbench/paint) is the WGSL-authoring reference. The actual host shader-brush rendering is Phase B work.",
+  "shas": [
+    "23ee165dc",
+    "5034bb056"
+  ],
+  "resolvedAt": "2026-06-19T23:24:03.493Z"
+}

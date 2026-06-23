@@ -1,0 +1,42 @@
+{
+  "id": "req_0513",
+  "at": "2026-06-10T11:49:20.707Z",
+  "origin": "session:e11a01ef",
+  "text": "Thats reassuring, glad it backs my intentions here, lets make it happen. you are at 45% context, so il let you pass this off as a /hand-over",
+  "status": "review",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T11:49:38.850Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T11:51:11.512Z",
+      "actor": "session:e11a01ef",
+      "kind": "note",
+      "text": "GO received; slice-1 continuation brief written to /tmp/handoff-20260610-114938-buildings-own-their-history-slice-1-buildings-stream-promote.md — next session claims this req and builds the buildings stream + promote + one-event move. Left in DOING deliberately: the baton is passing, not finishing."
+    },
+    {
+      "at": "2026-06-10T11:52:33.780Z",
+      "actor": "session-8f49",
+      "kind": "note",
+      "text": "Resumed via handoff /tmp/handoff-20260610-114938; building slice 1: buildings stream + derivation + promote + one-event move + tower-births-building"
+    },
+    {
+      "at": "2026-06-10T12:16:35.200Z",
+      "actor": "session-8f49",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Slice 1 of 'buildings own their history' landed (abd13ca22, verify GREEN 73/73). New V20 'buildings' stream (game/world/buildings.ts): a building is ONE BuildingDef (shared global, the BuildPrefabDef family) + ONE per-map instance reference {defId,x,y,z,yaw} — its history is its event subsequence (buildingDefined/Placed/Moved/Removed). World pieces are now DERIVED: loose pieces ⊕ stamped instances with deterministic ids (bld:<inst>:<idx>) and per-instance stampId, so iso/F2/footprints/colliders/compile all keep reading the ONE pieces view — no second render path; the bake sees through instances (V24/V29 aligned). IsoAuthor grew the ⌂+ promote button (capture selection → def+instance+remove originals, one batch, visually seamless), the tower tool births a building, and a whole-building move/clone/delete is now ONE event on the building's branch — no 358-event storm, derived ids survive a move. Ctrl+Z appends REVERSE building events (never rewinds shared history, V20). 15 new P4 meaning-tests; docs/game/hmsc-int.md + _index record updated. Deferred per the approved plan: slice 2 piece-scoped building edits (FacePainter on a promoted building currently no-ops silently), slice 3 timeline UI, slice 4 native compile instances.",
+  "shas": [
+    "abd13ca22"
+  ],
+  "resolvedAt": "2026-06-10T12:16:35.200Z"
+}

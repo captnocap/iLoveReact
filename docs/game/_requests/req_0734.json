@@ -1,0 +1,13 @@
+{
+  "id": "req_0734",
+  "at": "2026-06-13T07:37:17.567Z",
+  "origin": "session:b2985164",
+  "text": "no i did the rebuild. i wouldnt have told you it was the problem we were hunting if it had fixed the problem. it doesnt crash now. sure. but that was never the problem to being with in the buildings going missing. and the crash was because of trying to figure out that so its the same problem",
+  "status": "new",
+  "sessionId": "b2985164-7aad-4573-accc-12a386983e72",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

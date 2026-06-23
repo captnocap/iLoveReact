@@ -1,0 +1,13 @@
+{
+  "id": "req_0356",
+  "at": "2026-06-08T14:56:22.985Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR COMMIT ORDER: commit your stranded camera-bridge + rect-cap work NOW — uncommitted work is not acceptable. The files are contaminated with other lanes' edits, so use HUNK-LEVEL staging: git add -p (or git add -p <file>) and stage ONLY your own hunks — the camera-input bridge lines (framework/game/camera.zig + the game-camera binding + engine/primitive wiring you added) and the rect-cap raise in cart/hmsc-int/game/physics.ts. Do NOT stage the neighbor lanes' unrelated hunks in those same files. Verify with git diff --cached that only YOUR lines are staged, then commit with a message listing what's in it. If two logical changes (camera bridge vs cap), make two commits. Report the SHA(s) + the staged hunk summary. Leave reqs in review.",
+  "status": "new",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

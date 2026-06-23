@@ -1,0 +1,33 @@
+{
+  "id": "req_0712",
+  "at": "2026-06-13T03:24:16.962Z",
+  "origin": "session:e13c74b5",
+  "text": "hm. so i actually am having a bit of a problem with skins/textures clashing. so look here. idk if u can see its hard to show it without a video but [Image #14] [Image #15] [Image #16] see how these two floor spaces share the same 1x3 space, even tho its the same texture, they are fighting for which one renders, and it is causing it to glitch and be very jittery in how it renders",
+  "status": "review",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T03:24:48.464Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T03:43:56.932Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Floors sharing the same 1x3 footprint z-fought (coplanar tops flickering, very jittery). validatePlacement never rejected colocated placements, so painting a floor area over an existing one — or clicking a floor onto a floor — stacked two coplanar pieces that fight in the depth buffer. Fixed with dedupeColocatedPieces (placed.ts): collapses pieces sharing pieceId+position(1mm)+yaw+edit+stampId to one, keeping the last placed. Run inside liftBuildingsToTerrain, the single render-prep step both the editor (IsoAuthor displayPieces) and the compiled bake (packageMap render + colliders) flow through, so the user's existing broken map self-heals on next render AND the compiled world is clean — no double colliders either. Different y (stacked storeys), footprint (corners), or building stamp (two instances) are left untouched. Bundle-check passes.",
+  "shas": [
+    "f9d488a50"
+  ],
+  "resolvedAt": "2026-06-13T03:43:56.931Z",
+  "tags": [
+    "bug"
+  ]
+}

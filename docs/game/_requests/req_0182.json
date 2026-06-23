@@ -1,0 +1,12 @@
+{
+  "id": "req_0182",
+  "at": "2026-06-07T04:55:23.076Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — your CAMRAY proof shot is REJECTED as non-probative. The supervisor reviewed the image: the player stands in the open with a wall BESIDE them — no geometry intersects the camera->player sight line, so the occlusion path cannot fire in that frame; the shot proves the capture pipeline, not the feature. New standing policy, effective now: every SELFSHOT you cite gets opened and content-checked by the supervisor; a shot that does not exercise the dispatched scenario fails the proof step automatically. For the camera-constraint respec in your queue, the required scene is explicit: the PLAYER fully enclosed in a built room, the camera orbit positioned so a wall sits ON the sight line — the shot must show the camera pulled inside the room (or the translucent-but-present wall in the min-distance case). Build the test room in the witness if needed; standing next to a wall is not standing behind one.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

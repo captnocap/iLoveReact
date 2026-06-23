@@ -1,0 +1,34 @@
+{
+  "id": "req_0391",
+  "at": "2026-06-09T05:23:43.520Z",
+  "origin": "session:9440c2b7",
+  "text": "do the extraction, keep F2 behavior identical",
+  "status": "review",
+  "sessionId": "9440c2b7-fcc6-4745-a2a5-309cd273e004",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T05:24:01.071Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T05:37:05.143Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extracted the V24 placed-build-piece renderer out of the 2000-line PlayRoute into three shared editors/build/ modules so the coming iso authoring pane draws walls with the SAME renderer F2 uses (one renderer, change-once). pieceMeshes.tsx holds pieceVisualShapes + VisualBox/Ramp/ShapeMesh + PlacedPieceMeshes + RampSlabGeometry + MATERIAL_LOOK; buildUi.ts holds BUILD_UI + CAMERA_OCCLUSION_TUNING; placeFreezeProbe.ts holds perfMs + the place-freeze probe helpers. PlayRoute re-imports all of them. F2 behavior is identical by construction: every definition moved VERBATIM, the editorTunables().register() live-tuning side-effects stay in PlayRoute referencing the imported objects, and the global probe sequence is preserved. Verified the hmsc-int cart bundles clean (esbuild exit 0) and PlayRoute's diff is pure extraction (24 ins / 450 del, no other lane's work mixed in). Foundation isoStage.ts (the iso camera) committed alongside.",
+  "shas": [
+    "c34ada30a",
+    "6fc242e4e"
+  ],
+  "resolvedAt": "2026-06-09T05:37:05.142Z",
+  "tags": [
+    "ask"
+  ]
+}

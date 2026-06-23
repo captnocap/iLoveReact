@@ -1,0 +1,13 @@
+{
+  "id": "req_0649",
+  "at": "2026-06-12T03:58:18.610Z",
+  "origin": "session:c61d302f",
+  "text": "siah@busiah ~/creative/reactjit $ tools/rjit dev hmsc-int\n[dev] bundling /home/siah/creative/reactjit/cart/hmsc-int/index.tsx -> /home/siah/creative/reactjit/.cache/bundle-hmsc-int.js\n✘ [ERROR] No matching export in \"cart/hmsc-int/game/build/prefabs.ts\" for import \"elevatorPrefabDefinition\"\n\n    cart/hmsc-int/game/build/index.ts:175:2:\n      175 │   elevatorPrefabDefinition,\n          ╵   ~~~~~~~~~~~~~~~~~~~~~~~~\n\n✘ [ERROR] No matching export in \"cart/hmsc-int/game/build/prefabs.ts\" for import \"prefabPlacementBasis\"\n\n    cart/hmsc-int/game/build/index.ts:176:2:\n      176 │   prefabPlacementBasis,\n          ╵   ~~~~~~~~~~~~~~~~~~~~\n\n2 errors",
+  "status": "new",
+  "sessionId": "c61d302f-e1c3-4475-b1f6-ef3b9201d8d3",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

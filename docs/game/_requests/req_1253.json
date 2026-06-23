@@ -1,0 +1,30 @@
+{
+  "id": "req_1253",
+  "at": "2026-06-17T17:16:29.561Z",
+  "origin": "session:76a33154",
+  "text": "Right, But we want to paint on the 3d model. not on the atlas. the atlas just is there and the paint is a layer on it, never repainting the atlas",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T17:18:13.784Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T17:25:32.048Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built cart/paint_on_3d_demo.tsx — the 3D sequel proving the corrected architecture the user taught: (1) you paint ON the 3D model surface (raycast from cursor finds the face + point), NOT on the atlas; (2) the mesh material (the read-only base atlas) is never touched — the grid+highlight is a separate projected LAYER on top; (3) the grid is UNIFORM in model-surface space (one fixed CELL world-size on every face), so a wide face shows more cells and a thin face fewer, never sliver cells, and the auto-orbit camera ALSO oscillates distance (zoom) to show the grid stays the same size on the surface regardless of zoom; (4) the hovered cell clips per-face and cannot spill across a shared box edge onto the perpendicular neighbour. Grid/highlight projected via meshSelect.makeProjector (replicates gpu/3d.zig) so the overlay sits exactly on the rendered faces; hover polls getMouseX/Y since onMouseMove only fires while a button is held. Verified: base shot shows the uniform grid locked to all 3 visible faces; a forced-hover shot shows the amber cell clipped to the top face at the box edge, not wrapping onto the side.",
+  "shas": [
+    "dcbc79c3a"
+  ],
+  "resolvedAt": "2026-06-17T17:25:32.047Z"
+}

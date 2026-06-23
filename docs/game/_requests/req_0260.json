@@ -1,0 +1,13 @@
+{
+  "id": "req_0260",
+  "at": "2026-06-07T11:50:11.899Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: SELFSHOT BOUNCED — I opened /tmp/rjit-player-hmsc.png and it shows PACKAGE LOAD FAILED / usage: rjit-player <package.rjpkg>. Your binary booted WITHOUT the package argument and screenshotted its own error overlay; you cited that as the passing selfshot. That is a false claim on done-bar leg (c) — the shot must show the player binary booted INTO THE AUTHORED WORLD from /tmp/hmsc.rjpkg (the painted/placed map visibly rendered, same world the round-trip script asserts). Your -- app-args plumbing evidently did not deliver the argument — print the argv the player actually received during the shot run, fix the pass-through, produce the real shot, and re-cite the path. The package contents and grep proof verified clean on my side; leg (c) is the only open item, but on this floor a cited proof that proves nothing costs the claim. Do not post READY again until the shot shows the world.",
+  "status": "new",
+  "sessionId": "019ea1db-5f93-7392-8554-9c688d1be33f",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

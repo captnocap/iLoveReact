@@ -1,0 +1,33 @@
+{
+  "id": "req_0650",
+  "at": "2026-06-12T04:18:32.949Z",
+  "origin": "session:204127f6",
+  "text": "hey idk how we can overcome this problem, but its increasingly annoying. let me try to explain what it is. so look here, u can see my ghost piece placement and a line i drew, the line is the line of the road. and u can see the ghost is extended over.[Image #1] ok. but the one step back is not just the 1 tile space, its 3, so my next step back looks like this: [Image #2] ok so its not over the line. good. but how about now behind it. well, [Image #3] now im back another 3 spots. which isnt so much an issue. except for now i have uneven sides. and if i want to have both sides of the street have the same distance between the road and a building, i can never actually get there, unless i pre plan every single road to be at minimum the same distance apart to fit both on each side. which, is an option to go with that is easy and solves it right away, but its also a pain in the ass because there is really no reason why it has to be this way",
+  "status": "review",
+  "sessionId": "204127f6-a0bd-41ff-a021-74c242611d87",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T04:18:43.250Z",
+      "actor": "fable-iso-snap",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T04:26:42.021Z",
+      "actor": "fable-iso-snap",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ghost placement stepped 3 tiles because GRIDSNAP-0605 snaps a 3m module on its own world-anchored 3m lattice — so a building could stand 0/3/6 tiles from a road line, never 1 or 2, and equal setbacks on both sides of a street were unreachable. Fix: holding Alt while placing now steps the ghost ONE tile at a time for everything armed (extending REQ-0596's Alt-for-props convention). fineModuleCenter in editors/build/snap.ts keeps piece edges locked to tile lines (odd spans center on a cell, even spans on a line) so the original 'slightly offset from everything else' sub-tile positions still cannot happen; edge-snap wall lines also reach any 1m tile edge under Alt. Default (no Alt) placement is byte-identical to before. 3 new P4 tests, suite 22/22. The one-line IsoAuthor.tsx freeform-flag change is in the working tree riding with the REQ-0647 elevator lane's uncommitted edits to the same file.",
+  "shas": [
+    "c041f24e2"
+  ],
+  "resolvedAt": "2026-06-12T04:26:42.020Z",
+  "tags": [
+    "bug"
+  ]
+}

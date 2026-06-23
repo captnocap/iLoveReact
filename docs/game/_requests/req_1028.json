@@ -1,0 +1,10 @@
+{
+  "id": "req_1028",
+  "at": "2026-06-15T18:05:15.596Z",
+  "origin": "session:de42f85d",
+  "text": "ok. now the thing i wonder is, so does data in that format degrade for llms? or no? because like for instance i have heard of before some projects that will effectively take all ur code and compress it into one message for an llm to digest, but i bet that is a disaster. never tried it tho",
+  "status": "new",
+  "sessionId": "de42f85d-94df-4add-951f-a1f5bdd46a23",
+  "captureMode": "hook",
+  "events": []
+}

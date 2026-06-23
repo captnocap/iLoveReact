@@ -1,0 +1,30 @@
+{
+  "id": "req_0919",
+  "at": "2026-06-14T15:55:57.285Z",
+  "origin": "session:7d6df128",
+  "text": "lets work on the storyline builder a bit. its got a scuffed start and id like to make sure it lands correctly. As it stands right now, what i need you to do is remove all the missions another made, (there is just 1) and then we need to start with some basics here on this, first being a button for new to start with haha. \nNow, here is the hierarchy of how this will work\n\nwe start always 100% must pick a quest line. if there are no existing, we make one. so, give me a button for creating questlines. Questlines have the highest order because it keeps organization. even for one off quests, they can be put into misc/extra/random events. The current approach asks me to provide a string for the questline. this is wrong, the questline needs to be a created object\n\nwhat is a questline\nbasic: \n- core array of missions\n- summary\n- requirements (this is a greater dependency, as missions inside of these will have their own)\n- rewards (extra reward for finishing entire line)",
+  "status": "review",
+  "sessionId": "7d6df128-10bb-42ff-aa62-398eb578b34f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T15:56:06.099Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T16:05:29.084Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rebuilt the storyline builder to be questline-first per the user's ruling. The prior start was scuffed: it seeded the single Claude-placeholder mission and treated 'questline' as a bare string field on each quest. Now a questline is a created OBJECT (title, summary, requirements=the greater dependency, rewards=finish-the-line bonus, and the core array of missions). The builder starts EMPTY — createStoryStore() takes no seed; the substrate's ruled DELIVERY_GIG is untouched, only the builder stopped auto-seeding it. New Questline is the only move on a blank board (emptyActions); New Mission/Delete appear once a line is selected. Roster lists lines with nested missions; the panel dispatches questline-panel vs mission-panel; the board scopes to the selected line. Files: store.ts/panel.ts/source.tsx/StoryBoard.tsx (model.ts pure-derivation unchanged, tests stay green).",
+  "shas": [
+    "ed0193a1e"
+  ],
+  "resolvedAt": "2026-06-14T16:05:29.084Z"
+}

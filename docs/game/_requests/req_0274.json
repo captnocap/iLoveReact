@@ -1,0 +1,13 @@
+{
+  "id": "req_0274",
+  "at": "2026-06-08T04:55:29.456Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: STAIRVIS-0608 — USER, live, verbatim: \"staircases could use a better look on them. or something. idk how u solve it. because clearly it wants there to be steps but my legs go thru them, but it does also ramp me up, so\". Image /home/siah/.claude/image-cache/65a3b158-192d-4949-99b0-83b2b071ce2a/22.png: player standing mid-staircase, legs CLIPPING THROUGH the step risers, but ascending fine. DIAGNOSIS: the staircase RENDERS as discrete steps (treads + risers) but its COLLISION is a smooth ramp/slope (that's why you ramp up smoothly AND clip through — the player rides an invisible incline while the visual treads pass through the legs). Collision and visual disagree. THE FIX (your call to confirm with data, but the shape): stair collision should be STEPPED to match the visual — the player stands ON each tread (using stepHeight to climb riser-to-riser), not on a hidden slope. Either make the collision real steps, or if stepped collision is janky for movement, the alternative is the reverse — but the user's words 'clearly it wants there to be steps' mean the STEPS are the intended truth; the ramp collision is the lie. Print what collision surface the staircase actually registers (slope vs stepped heightfield) vs what the mesh renders, read it, align them. Frame-time gate applies (per-frame collision). This is its own slice AFTER the building-bug cluster diagnosis you're on — queue it, do not drop the building cluster.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1079",
+  "at": "2026-06-15T22:38:41.898Z",
+  "origin": "session:34f4e405",
+  "text": "hell friggin yes dude this is great. alright now can you give an approach that lets me reupload a new texture map for the shape so it can capture the visual changes. :) however u think that works best; i would treat it as you cookie cutter everything to be safe or something of the sorts. idk. this is the one part i was not so sure how it just slips right back in, but its possible i know t hat lol",
+  "status": "review",
+  "sessionId": "34f4e405-3e9d-47f6-b883-15900052c2df",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T22:39:59.009Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:45:19.764Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the texture re-upload round-trip — the return half of export. import sheet (whole edited/AI map) + import slice (one face's regenerated island, shown in face mode with one face selected) open an ImportTextureDialog pre-filled with this scene's export path, so export -> edit -> import is one click. The model captures the upload because every face samples ONLY its UV slot: the cookie cutter is automatic — a whole-sheet upload slips back into place with overshoot outside the islands ignored, a slice drops into its slot (rect-clipped). Mechanism: the PNG is read to a data: URL via readFileBase64 (NOT a bare file path) because the host image cache (framework/gpu/image_cache.zig) is keyed on the source bytes — a same-path re-import would otherwise hit the stale cached texture; the data URL's payload changes with the file content, and an imageRev counter bump forces the StaticSurface to re-bake. SceneTextureAtlas now renders the uploaded <Image> in place of the procedural template when imageUrl is set (the cutout ModelPreview idiom that the textureKey pipeline already proves), with per-slice <Image>s composited over it at their slot rects; all carried on the studio:tex twig (imageUrl / sliceImages / imageRev). Re-running textureize resets to a fresh template. Caveat: the data URL lives in hot state — fine for the small sprite sheets here (64-256px), heavier for very large textures. textureize 9/9, editMesh 48/48, modelStream 8/8, Studio + TextureAtlas + sources bundle clean. Hot-reload TSX, nothing committed (user leads commits).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:45:19.764Z"
+}

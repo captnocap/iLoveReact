@@ -1,0 +1,34 @@
+{
+  "id": "req_1129",
+  "at": "2026-06-16T02:39:47.664Z",
+  "origin": "session:eef64544",
+  "text": "any part is fine first, i will end up testing them more so after they are all made. but one thing to make clear is to follow the @GUIDING_LIGHT.md approach in your implementation",
+  "status": "review",
+  "sessionId": "eef64544-c672-4883-add8-12dffa52f94c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T02:40:32.769Z",
+      "actor": "eef6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T02:52:40.624Z",
+      "actor": "eef6",
+      "kind": "note",
+      "text": "Applied GUIDING_LIGHT to the asset compiler: spec Part 7.3/7.9 reframed the cooked-asset envelope as SEPARABLE content-addressed FACTORS (mesh blob / texture blob / descriptor) referenced by hash — never a baked product; hash IS the cache key (idempotent re-cook); declarative-not-code (no per-asset scripts); derive-don't-store-twice (collision MEASURED from the mesh). The Phase 7a code (cookedAsset.ts/cookedAssetStream.ts) implements exactly this — blobs interned once by sha256, one model→prop+item shares meshRef. Standing directive going forward."
+    },
+    {
+      "at": "2026-06-16T02:53:17.318Z",
+      "actor": "eef6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Applied the GUIDING_LIGHT.md discipline to the whole asset-compiler design and implementation. The Part 7 spec was reframed (§7.3 + a new §7.9) so the cooked-asset envelope is a SUM of separable, content-addressed FACTORS — the mesh blob and texture blob interned once by their own sha256 and referenced, the descriptor the only per-kind factor — never a baked product; the shipped artifact is the existing flat binary (MESH_PROPS + content-addressed assets[]), not JSON at runtime; the hash IS the cache key so re-cooking an unchanged model is a no-op; descriptors stay declarative data parameterizing fixed engine capabilities (no per-asset scripts); collision/footprint are MEASURED from the mesh (derive, don't store twice). The Phase 7a code implements exactly this — cookedAsset.ts hashes factors by reference, cookedAssetStream.ts dedups blobs by hash so one model cooked as prop + item shares the meshRef. This is a standing directive carried forward into the remaining slices.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T02:53:17.318Z"
+}

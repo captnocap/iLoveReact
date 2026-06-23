@@ -1,0 +1,30 @@
+{
+  "id": "req_0840",
+  "at": "2026-06-13T21:37:01.366Z",
+  "origin": "session:d660addf",
+  "text": "Yes. I want them to be their own prop files. Please. There are other agents i just stopped because i saw them all dumping into one file im pretty damn sure and that is the last thing we want to do. i do not want that. that is going to be impossible to scale. they all need to be like their own individual prop like i downloaded it and added it type of gig",
+  "status": "review",
+  "sessionId": "d660addf-2f24-4882-9a4e-be2b36812b1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T21:37:22.890Z",
+      "actor": "opus-props",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T21:45:24.681Z",
+      "actor": "opus-props",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extracted all ~15 props whose box/cylinder/sphere geometry was written inline inside resolve.ts (trafficCone, barrier, trashCan, planter, bed, cupboard, mirror, sink, oven, fridge, computer, telephonePole, basketballHoop, and the bush blob builder) into their own per-prop recipe files in compile/propRecipes/, matching the existing bench/chair/tree/rock one-file-per-prop pattern. resolve.ts is now a pure dispatch carrying ZERO geometry — a new prop is a new file + one import + one case, like dropping in a download. Geometry is byte-identical (recipe parts lower 1:1 through lowerRecipePart, recipeColor hex equals the old 0xXX/255 arrays via hx(), part ids dropped on lowering); bundle-checked clean.",
+  "shas": [
+    "01346d136"
+  ],
+  "resolvedAt": "2026-06-13T21:45:24.681Z"
+}

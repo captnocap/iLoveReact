@@ -1,0 +1,10 @@
+{
+  "id": "req_1405",
+  "at": "2026-06-19T08:49:02.067Z",
+  "origin": "session:08e68a04",
+  "text": "that still makes no sense. git restore or any of that is all blocked, and therefore they only work based on the on-disk code, 100% of the time, meaning it had to be intentionally removed",
+  "status": "new",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": []
+}

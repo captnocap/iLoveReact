@@ -1,0 +1,35 @@
+{
+  "id": "req_0892",
+  "at": "2026-06-14T01:10:29.861Z",
+  "origin": "session:4cab176d",
+  "text": "ya they are suppose to have a footprint collider. ya make the change also why is it that again every time we have a problem its always some limit that is ass like 256 stop setting low limits just juice them til its a problem",
+  "status": "done",
+  "sessionId": "4cab176d-967d-40aa-9c35-1e3ca14b886a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T01:11:08.382Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T01:13:44.150Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-14T01:16:09.242Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Raised MAX_ORIENTED from 256 to 16384 (matching MAX_RECTS) in framework/game/physics.zig and PHYSICS_LIMITS.orientedRects in cart/hmsc-int/game/physics.ts. Root cause of the compiled-game walk-through-walls: the prop-physics refactor makes every prop bake a footprint collider on the ORIENTED lane; a real city reached ~300 oriented colliders, over the old 256 cap, so world_loader.zig:1039 silently clamped to 256 and dropped the tail (44 colliders) = pieces you walk through. The sibling MAX_RECTS had already been raised 4096->16384 for the identical bug; MAX_ORIENTED was left low. Only static buffer keyed to it is g_camera_occlusion_oriented_values (~850KB, free headroom; per-step cost is the actual count). game/physics suite 16/16 green. Needs a host rebuild (fresh rjit dev) + the loader rebuilds on rjit game play; no re-bake required. NOT committed (left in working tree).",
+  "shas": [],
+  "resolvedAt": "2026-06-14T01:13:44.150Z"
+}

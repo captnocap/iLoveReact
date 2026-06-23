@@ -1,0 +1,10 @@
+{
+  "id": "req_0904",
+  "at": "2026-06-14T05:34:58.132Z",
+  "origin": "session:1b18f3aa",
+  "text": "Right. so, is there an actual mechanical reason that v8 cant be on another thread, or its not even the same process. two processes running. one headless being v8, its just the game server, we can utilize something like @tsz/ to compile react into zig ui, and deliver data to it from the other process. ipc between the two of them or something",
+  "status": "new",
+  "sessionId": "1b18f3aa-3b63-4388-a182-cd1168ae04f8",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1257",
+  "at": "2026-06-17T17:46:29.458Z",
+  "origin": "session:c885b7cc",
+  "text": "thanks :D can u give me a easy way to connect this? [Image #26] this is a steering wheel and the block its next to is t he dashboard [Image #27]",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T17:47:12.171Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T17:48:26.621Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked for an easy way to 'connect' a steering-wheel part to the dashboard part (mesh-assembly sense, NOT the data useConnection sense — the vocab hook was a false positive). Answered as analysis — no code changed. Investigated the editor: StudioPart has no parent/binding field, and while mounts/joints are authored metadata with a mountsCompatible predicate, NOTHING consumes them to articulate a child part yet (the composition layer the code flags as a deliberate unbuilt design step). The only built combine is Merge / re-attach (weld, req_1224): in object mode with the wheel active and the dash as the prior part, the 'merge → <dash>' button fuses them into one static part. So gave two paths: (1) decorative/static → Merge, one click, works today; (2) functional steering → the rig path (pivot on the wheel hub + axle joint on the dash, name-bound) is authorable now but the articulation that DRIVES the spin is not yet built. Recommended Merge if they just want it mounted, and offered to build the part-to-part articulation binding (bind a part to a joint + rotate on its pivot) as the logical sequel to the joints/anchors work. Awaiting the user's choice.",
+  "shas": [],
+  "resolvedAt": "2026-06-17T17:48:26.621Z"
+}

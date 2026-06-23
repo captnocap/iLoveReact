@@ -1,0 +1,37 @@
+{
+  "id": "req_0505",
+  "at": "2026-06-10T11:11:50.506Z",
+  "origin": "session:87a47e7e",
+  "text": "so inside of hmsc-int we have a tile system. in that tile system, it has certain tiles like, asphalt, and it also has road, in directions, for npc pathing. the problem is that the NESW is pretty hard to author. secondly, im having a hard time in general with how to do roads. i have a bit of an idea for what it should look like though. ok so \n\nwe also have floors, these are for buildings.\nand we have ramps\n\nbut we also dont really have any clear way to make, lets say a bridge.\n\nhowever, painting tiles, applys to heightfields, and so if i do a smooth heightfield, and then paint the tiles, i can make it start to look like a road\n\nexcept the road shader lives seperate from the tile\nand then therefore i cant use them\n\nand even still, the road shader has yellow lines for seperating,\nbut a tile is one direction\nand a tile is 1m\n\nbut a vehicle is ~2-3m wide, so you need 3 tiles min for 1 lane\n\nbut a floor is 3 tiles wide\n\nsee how much in a loop im talking already lol. \n\nwe need to solve this problem.",
+  "status": "review",
+  "sessionId": "87a47e7e-58c5-4ade-8b65-3201c99fe4d2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T11:12:07.366Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T11:14:51.022Z",
+      "actor": "session-87a4",
+      "kind": "note",
+      "text": "Assessed the road knot: four systems each own a slice of 'road' (direction=lane tile kinds, look=materials pipeline, elevation=heightfield/pieces, width=scale). Proposal delivered: ROAD STROKE as first-class authored object (centerline + cross-section profile) compiling down to tile kinds (flow from drag direction — kills NESW authoring), per-tile materials (the already-decomposed asphalt+overlay set), and elevation modes drape/grade/deck — deck = bridge, built from V24 floor/ramp/railing pieces. Awaiting user ruling on lane width (2 vs 3 tiles) and stroke re-editability."
+    },
+    {
+      "at": "2026-06-10T11:15:35.555Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design assessment delivered (no code changed). Diagnosed the road loop as one idea split across four systems — direction in lane tile kinds, look in the materials pipeline, elevation in heightfield/pieces, width in the 1m-tile vs 3.5m-lane scale fight — forcing authoring at per-tile altitude. Proposed the ROAD STROKE: a first-class authored centerline + cross-section profile that compiles to tile kinds (flow derived from drag direction, killing NESW authoring and subsuming req_0384), per-tile materials (the already-decomposed asphalt+overlay set, landing the texture-slot TODO), and per-segment elevation modes drape/grade/deck — where deck = bridge, built from V24 floor/ramp/railing pieces since a heightfield mathematically cannot have an underside. Junctions/crosswalks auto-emit at stroke crossings. Three rulings requested from the user: lane width 3 tiles (vs yesterday's 2, req_0385), strokes stored+re-editable vs fire-and-forget, bridges via piece grammar vs bespoke geometry.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T11:15:35.555Z",
+  "tags": [
+    "ask"
+  ]
+}

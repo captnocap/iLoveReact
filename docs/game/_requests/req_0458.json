@@ -1,0 +1,31 @@
+{
+  "id": "req_0458",
+  "at": "2026-06-10T05:18:21.448Z",
+  "origin": "session:0a09e641",
+  "text": "Im still getting stuck under floors. what am i suppose to do about it D: stuck meaning invisible wall",
+  "status": "review",
+  "sessionId": "0a09e641-a769-495b-a0fd-4a909d25af7a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:20:28.904Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:24:09.349Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed 'stuck under floors / invisible wall under upper floors'. Root cause: my belt-and-suspenders instance-derived walkable rect for built floor PLATES used rectFloats, which sets band-bottom floor=-1e9 (solid to ground) for non-solid rects. game_physics.step side-pushes a WALKABLE rect when it is too tall to step onto (the can't-climb-a-high-ledge rule), and with floor=-inf that 3rd-level floor blocked the ground player from below — an invisible wall under the floor. Fix: deleted the instance-derivation in world_loader's baked branch entirely. Pieces now collide ONLY through the baked placedPieceColliders (which set floor=piece.y, properly banded so you stand on top AND walk under), and the painted ground only through heightfields — exactly what /test does. Verified against the user's REAL map (untitled-3) by baking its colliders headlessly: 573 pieces (275 wall/272 floor/8 ramp/5 roof/12 fence), 30 flat painted chunks → 30 heightfields, BAKED 957 rects / 0 oriented / 38 heightfields — all under host caps (957/4096, 0/256, 38/64) so NO windowing (windowing was what kept dropping the baked colliders), and 0 elevated solid rects with floor=-inf (every floor up to 12.2m banded correctly). TS 4/4, Zig ast-check clean. Needs rebuild + re-Compile to confirm in-game. Nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T05:24:09.349Z",
+  "tags": [
+    "bug"
+  ]
+}

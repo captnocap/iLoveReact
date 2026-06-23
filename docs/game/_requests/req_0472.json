@@ -1,0 +1,31 @@
+{
+  "id": "req_0472",
+  "at": "2026-06-10T06:33:28.855Z",
+  "origin": "codex:019eaf3e",
+  "text": "i see the problem. OK so it is now on the floor. i was placing t hem not on the floor. so ok thats my own bad. but here is the new problem i see. the floor introduced this: [Image #1] and here is me painting on it so u know what im trying to demonstrate [Image #2] do you see how the green overhangs after the 2nd intersection of red. it should end at the intersection",
+  "status": "review",
+  "sessionId": "019eaf3e-0282-7ba1-99cd-6b025b307dea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T06:33:41.995Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T06:35:53.570Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the supported-wall intersection overhang shown in the screenshots. The old join extender assumed perpendicular walls were centered and extended by half-depth; with one-sided floor support that pushed a wall past the second intersection face. Join limits now use the perpendicular wall's actual placed.depthSpan in world space, preserving unsupported centered-wall notch closure while stopping floor-supported walls at the real face. Added REQ-0472 coverage. Verified build-placed 46/46, build-snap 18/18, and full hmsc-int esbuild bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T06:35:53.570Z",
+  "tags": [
+    "bug"
+  ]
+}

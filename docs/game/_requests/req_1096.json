@@ -1,0 +1,28 @@
+{
+  "id": "req_1096",
+  "at": "2026-06-15T23:27:48.091Z",
+  "origin": "session:9f19b605",
+  "text": "oh and so the other one was, if u see in our history about the generated massive map lab @docs/game/_archive/hmsc_massive_map_lab.md  this could be one part of the skybox where it looks massive and there is literally nothing there but just endless procedural buildings xD",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T23:28:36.236Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T23:39:27.390Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Folded the archived hmsc_massive_map_lab (docs/game/_archive/) into the skybox doctrine as the procedural-shell engine. The lab's hash-deterministic city (pure function of coords, zero storage, one-batch instanced draw, 4000-chunk Miami-scale stream) IS the skybox filler: it wraps the authored core as the outer ring of the same citywide map, streamed by the existing radius-bubble + LOD machinery (project_world_streaming). 'Looks massive, literally nothing there but endless procedural buildings' is exactly what the generator already does. Regenerate-don't-port per repo rule (lab is archived). No code this turn — design composition only.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T23:39:27.390Z"
+}

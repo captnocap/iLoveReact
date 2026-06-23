@@ -1,0 +1,30 @@
+{
+  "id": "req_1226",
+  "at": "2026-06-17T03:58:01.648Z",
+  "origin": "session:faeb0705",
+  "text": "oh hm. i see it saying how many cells im painting but i do not see the paint at all",
+  "status": "review",
+  "sessionId": "faeb0705-bc55-47ba-a9d7-6a95888034b9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T04:03:06.880Z",
+      "actor": "faeb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T04:03:06.889Z",
+      "actor": "faeb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Paint registered cells (count rose) but no paint showed on the model. Traced the full paint pipeline and found every stage correct — paintRef dab accumulation, paintRuns run-merging, the atlas paint-run boxes drawn on top at the right scale (paintGrid==texels), the StaticSurface re-capture (driven by subtree_last_mutated_frame when the run boxes change on each paintBakeTick), and the mesh material '#ffffff'+textureKey sampling. The ONLY gate that hides paint is texView: paint renders solely through the atlas via textureKey, so with the textured view off the model shows flat solid colors and the strokes are invisible — the exact symptom. Paint mode and texView were decoupled (the status bar literally hints 'solid (toggle on!)'), so the view could sit off while painting. Fix couples them: the paint-mode auto-ensure effect now forces texView on (builds the texture if missing, which already turned it on, else explicitly setTexView(true)), and starting a stroke turns the view back on if it was toggled to solid — so the act of painting always reveals what you paint. TSX-only, hot-reloads, no rebuild. If paint STILL doesn't appear after this, the next suspect is the StaticSurface not re-capturing on paintBakeTick, but that path read as correct.",
+  "shas": [
+    "bbb41c50a"
+  ],
+  "resolvedAt": "2026-06-17T04:03:06.889Z"
+}

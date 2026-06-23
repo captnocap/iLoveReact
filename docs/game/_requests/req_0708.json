@@ -1,0 +1,33 @@
+{
+  "id": "req_0708",
+  "at": "2026-06-13T02:54:58.365Z",
+  "origin": "session:691d2b0e",
+  "text": "so uh we the other day added the vehicle lab and were messing with the handling. the claude who did it tho, put in a thing where when the car rolls over it just stops the whole thing / resets the car. but thats wrong, we want it to just keep playing out. also, the sensitivity on it is insane i cant even make a turn and it jsut says i rolled over and i didnt xD",
+  "status": "review",
+  "sessionId": "691d2b0e-1a0f-45b7-afb1-6cf084c80b43",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T02:55:06.978Z",
+      "actor": "691d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T03:08:39.890Z",
+      "actor": "691d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same task as req_0709 (your first phrasing of it). Fixed in commit 4a6c7351f: the vehicle-lab rollover now plays out and self-rights instead of freezing the car into a 'FLIPPED — press R' lock or resetting it. The over-sensitive flicker came from a trip kick too weak to clear the ±π/2 peak (half-lean-and-snap-back); the kick now commits the roll, light airborne damping carries it over, and it auto-rights on rest. See req_0709 for the full writeup.",
+  "shas": [
+    "4a6c7351f"
+  ],
+  "resolvedAt": "2026-06-13T03:08:39.889Z",
+  "tags": [
+    "bug"
+  ]
+}

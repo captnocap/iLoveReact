@@ -1,0 +1,32 @@
+{
+  "id": "req_0483",
+  "at": "2026-06-10T08:57:51.491Z",
+  "origin": "supervisor-relay",
+  "text": "we want to next work on a proper paint faces system in the editor. you have it incredibly scoped so far, which we will want to extend from and make it more friendly, easier to navigate the materials and all that. also, tower button has a weird left padding. also: when drawing the wall/building shape in the editor, it is incredibly laggy when drawing. likely need to do a different system so it doesnt lag i have to wait multiple seconds to place a wall. the MS says its low but its not accounting for the entire part where im still drawing, its only counting the wall placement time itself",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-10T08:57:59.388Z",
+      "actor": "session:handoff-0610-paintfaces",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T09:10:59.229Z",
+      "actor": "session:handoff-0610-paintfaces",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Three deliverables landed in aaf8eb581. (1) Drag-draw lag: the paint preview rebuilt its supportPieces array INSIDE the per-cell flatMap, so every cell of every mouse-move forced an O(N) spatial-grid rebuild (the WeakMap caches on array identity); hoisted to ONE array per update so all cells share one cached grid. Also the preview now re-renders only when the dragged-to cell set actually changes (signature-keyed like the hover ghost), and the per-frame hover-poll re-snap is suppressed during a live paint drag — three per-move costs removed. PLACEFREEZE probes (paintCompute/paintGhost) warn on any >16ms residue. (2) Proper paint-faces: extracted to editors/build/FacePainter.tsx, rebuilt around material navigation — grouped swatches with live previews (my-materials first, materialFamily groups, only the open group mounts), custom #rrggbb input, recent-brushes row, visible current-brush readout, per-face worn-skin dots. (3) Tower chip metrics now match the kind tabs (border+emoji dropped — that was the weird left padding). Bundle clean, placed 47/47, game verify GREEN 72/72.",
+  "shas": [
+    "aaf8eb581"
+  ],
+  "resolvedAt": "2026-06-10T09:10:59.229Z",
+  "tags": [
+    "ux"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1281",
+  "at": "2026-06-18T12:37:16.306Z",
+  "origin": "session:18fe5c79",
+  "text": "im not going to type in a path to an image will you sert it to open a system window",
+  "status": "review",
+  "sessionId": "18fe5c79-d15f-47c8-ade6-d65531bd83af",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T12:39:23.879Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T12:41:12.148Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the type-a-path import for backdrops with a NATIVE file-open window per the user's ask ('im not going to type in a path... set it to open a system window'). The Backdrops panel's primary action is now a 'Choose image...' button that opens the desktop GTK picker via zenity, driven through the existing process door (has-process, same subprocess door useAssistant uses) — no rebuild, pure TSX. On pick, the chosen path flows straight into addBackdrop (reads the file, derives aspect, places it). Cancel is a no-op; if no picker binary is on PATH the UI gracefully reveals a manual path field and says so. Built into Backdrops.tsx alongside req_1280. Verified: bundle + native build clean with -Dhas-process=true.",
+  "shas": [
+    "554c19ead"
+  ],
+  "resolvedAt": "2026-06-18T12:41:12.147Z"
+}

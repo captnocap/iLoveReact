@@ -1,0 +1,33 @@
+{
+  "id": "req_0358",
+  "at": "2026-06-08T15:08:11.197Z",
+  "origin": "codex:019ea612",
+  "text": "heightfield landed. the one thing i just noticed still not to land, is the staircase is a block render like the ramp was doing before",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T15:08:18.514Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T15:12:24.414Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Baked stair pieces into the compiled instance stream using the same four-step visual decomposition that /test uses. The compiled loader no longer receives a single bounding box for stairs; ramps still use the ramp slab shape and stair collision remains the existing walkable heightfield.",
+  "shas": [
+    "f4c174141"
+  ],
+  "resolvedAt": "2026-06-08T15:12:24.413Z",
+  "tags": [
+    "bug"
+  ]
+}

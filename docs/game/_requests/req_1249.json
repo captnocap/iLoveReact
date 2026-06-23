@@ -1,0 +1,30 @@
+{
+  "id": "req_1249",
+  "at": "2026-06-17T16:45:05.880Z",
+  "origin": "session:76a33154",
+  "text": "ok now on hover highlight the grid space in the mask, then add in a few more triangles that all sit with this one, the key thing is that when hovering one triangle next to another, even if its just a sliver of grid space, it cant spill over into the touching triangle next to it",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T16:46:37.996Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T16:51:24.521Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a hover-highlight that proves the no-spill law. The demo now renders a cluster of 6 touching triangles (a square split by both diagonals into 4, meeting at center M, plus 2 outer caps each sharing an outer edge), grid masked to their union. Wrapped the Effect in a Pressable; onMouseMove converts screen coords to surface uv (via onLayout rect) and feeds the mouse position + triangle verts into the shader as a flat data buffer. In WGSL: each fragment finds its owning triangle (argmin of IQ per-triangle signed distance) and the mouse's owning triangle; the hovered grid cell highlights a fragment ONLY if (sameCell AND fragTri==hovTri). So a cell straddling a shared edge lights just the hovered triangle's half — the neighbour's half stays dark. This is a true per-pixel geometric mask, NOT the bounding-box clamp the current Studio painter uses (which is why it leaks across slanted shared edges). Verified with a forced-hover capture on the B-M diagonal: the highlight is a triangular sliver that stops exactly at the shared edge. Builds + self-shot PASS.",
+  "shas": [
+    "b4bda6276"
+  ],
+  "resolvedAt": "2026-06-17T16:51:24.521Z"
+}

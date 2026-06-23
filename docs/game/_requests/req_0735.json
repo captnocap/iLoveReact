@@ -1,0 +1,33 @@
+{
+  "id": "req_0735",
+  "at": "2026-06-13T07:40:37.657Z",
+  "origin": "session:b2985164",
+  "text": "[r3d-census] children=2167 inst_seen=15 inst_collected=0 mcount=1799 tcount=0 geo_cache_len=146 retained=32k/3670k verts\n[r3d-census] children=2167 inst_seen=15 inst_collected=0 mcount=1799 tcount=0 geo_cache_len=146 retained=32k/3670k verts\n[r3d-census] children=2167 inst_seen=15 inst_collected=0 mcount=1799 tcount=0 geo_cache_len=146 retained=32k/3670k verts\n[r3d-census] children=2167 inst_seen=15 inst_collected=0 mcount=1799 tcount=0 geo_cache_len=146 retained=32k/3670k verts\n[r3d-census] children=2167 inst_seen=15 inst_collected=0 mcount=1799 tcount=0 geo_cache_len=146 retai",
+  "status": "review",
+  "sessionId": "b2985164-7aad-4573-accc-12a386983e72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T07:52:29.480Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T07:52:29.503Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Census paste pinned the diagnosis: inst_seen=15 inst_collected=0 retained=32k/3670k geo_cache_len=146 — intern buffer 0.9% full (buffer-full theory dead), shared Box key never interned despite room: a markShipped/host-intern desync. Fixed by making instanced buckets always ship verts in runtime/primitives.tsx (504bb53ca). Buildings + grid confirmed back.",
+  "shas": [
+    "504bb53ca"
+  ],
+  "resolvedAt": "2026-06-13T07:52:29.503Z",
+  "tags": [
+    "perf-log"
+  ]
+}

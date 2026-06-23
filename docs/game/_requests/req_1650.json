@@ -1,0 +1,28 @@
+{
+  "id": "req_1650",
+  "at": "2026-06-22T20:41:52.185Z",
+  "origin": "codex:019ef106",
+  "text": "it could be physics, i cant walk under roofs/floors but i can walk under props",
+  "status": "review",
+  "sessionId": "019ef106-bfb2-75c0-b3e8-6be886d1fbc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T20:42:01.521Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T20:49:17.706Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the compiled-loader fallback/windowed collider rule for raised floors/roofs: instance-derived colliders now keep their real finite vertical band instead of using solid-to-ground for thin walkable slabs, so overhead floors/roofs can be walked under like shape-aware props. Added a pure policy helper/test plus a host physics regression for walking under a raised finite-band slab. Verified focused tests and no-JS loader screenshot.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T20:49:17.706Z"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "req_0703",
+  "at": "2026-06-13T01:54:31.245Z",
+  "origin": "session:a33d60ed",
+  "text": "hey for the building pieces, the roof tops, can u give some triangle roofs or something more residential, slants, something like this.",
+  "status": "doing",
+  "sessionId": "a33d60ed-a2dd-4aee-9864-bf4be2148d31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T01:54:38.722Z",
+      "actor": "a33d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ],
+  "tags": [
+    "ask"
+  ]
+}

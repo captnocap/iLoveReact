@@ -1,0 +1,30 @@
+{
+  "id": "req_1254",
+  "at": "2026-06-17T17:19:31.318Z",
+  "origin": "session:c885b7cc",
+  "text": "I see. ok the other question i have is, based on the @GUIDING_LIGHT.md and the uv numbers im looking at here, maybe im wrong but it looks like a ton of repetition that could be reduced down because i get to 255 and then it says ...and 93 more but i think there are dupes in this set im pretty sure or they are all so similar it just looks like it",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T17:20:05.877Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T17:32:54.030Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User's analysis question (are the UV islands dupes that could be reduced, per GUIDING_LIGHT) was confirmed and acted on: yes — the unwrap packed one island per face with zero dedup, which is the 'store the product not the factors' anti-pattern. Decision: build a dedup/instanced unwrap. Implemented under req_1255 (commit 44c581ef7) — congruent faces now share one atlas island. This entry captured the diagnosis + the go-decision; the build + tests live in req_1255.",
+  "shas": [
+    "44c581ef7"
+  ],
+  "resolvedAt": "2026-06-17T17:32:54.030Z"
+}

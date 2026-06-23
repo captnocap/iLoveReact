@@ -1,0 +1,30 @@
+{
+  "id": "req_1616",
+  "at": "2026-06-21T18:58:59.075Z",
+  "origin": "session:e36112e0",
+  "text": "can u change the dialog to be to pick the model from the system menu i dont want to type in a path",
+  "status": "review",
+  "sessionId": "e36112e0-5303-4202-ba4f-5d93412ec821",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T18:59:07.612Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T19:03:28.699Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Superseded/fulfilled together with req_1617 (same task: pick the import model via the native system file dialog instead of typing a path). Implemented by reusing the existing image-selection door -- zenity --file-selection via execAsync (cutout/sources.ts pickImageFile) -- adding editors/model/pickModelFile.ts (model sibling, *.glb/*.obj filter) and rewiring studiokit/dialogs/ImportModelDialog.tsx to a 'Choose file…' button with the chosen filename shown and Import gated until a file is picked. tsc-check bundles clean. See req_1617 for full detail. Committed e39d8d066.",
+  "shas": [
+    "e39d8d066"
+  ],
+  "resolvedAt": "2026-06-21T19:03:28.699Z"
+}

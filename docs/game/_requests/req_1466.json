@@ -1,0 +1,10 @@
+{
+  "id": "req_1466",
+  "at": "2026-06-19T23:58:31.779Z",
+  "origin": "session:08e68a04",
+  "text": "oh yeah its reading 3 chunks not 9 because i toggled 6 of them off thats not a bug btw",
+  "status": "new",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,27 @@
+{
+  "id": "req_0963",
+  "at": "2026-06-15T10:02:12.593Z",
+  "origin": "pane",
+  "text": "also, will you add some diagnostics on like dropped frames or something, it seems when spinning it here i am getting not the same as like i would say happens with gc and js its more like its literally just skipping it",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-15T10:04:44.609Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T10:08:57.541Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Frame-drop diagnostics for the Studio viewport. The user spinning the camera sees frames 'literally just skipping' — a hard skip, not soft GC/JS jank. A JS-side timer can't see that (it ticks slower than the host renders, so a single dropped host frame falls between ticks), so editors/model/frameProbe.ts reads the HOST per-frame ring instead: __tel_history(n) lands every host frame (up to 120, newest first) and __tel_frame() attributes the current frame. useFrameProbe computes rolling median + worst, counts hard skips (frames >=2x median AND >=4ms slower), and LATCHES peak worst-ms and total skips so a one-off spin hitch is caught even after the 1s fps average recovers; it also surfaces gc-ms vs present-ms to name the culprit (GC stall vs present/vsync stall). Rendered as a togglable corner readout in the viewport with a reset. Reuses the same telemetry door as useTelemetry/perfWatch (survey-before-build). Bundle-clean, hot-reloadable; a future compiled Studio must import useTelemetry to gate the __tel_* bindings.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T10:08:57.541Z"
+}

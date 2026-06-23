@@ -1,0 +1,32 @@
+{
+  "id": "req_0637",
+  "at": "2026-06-11T12:04:16.894Z",
+  "origin": "session:7de3e0b0",
+  "text": "oh also can u just make patches of grass also lol",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-11T12:04:28.442Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T12:05:11.985Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Grass patches landed: grassPatch (low walk-through tufts, 0.3m) and grassTall (waist-high savanna grass, 1m, conceals via the bush tile bundle) — PSX crossed-plane tufts in both /test and the compiled game, non-solid so you walk straight through. Placeable from the new 'nature' shelf in the build rail and the OBJECTS palette. sha c7986b11c.",
+  "shas": [
+    "c7986b11c"
+  ],
+  "resolvedAt": "2026-06-11T12:05:11.985Z",
+  "tags": [
+    "ask"
+  ]
+}

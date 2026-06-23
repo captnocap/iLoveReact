@@ -1,0 +1,13 @@
+{
+  "id": "req_0034",
+  "at": "2026-06-06T06:02:14.759Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT, Law 3 violation on the SCULPT lens. Marker: DEADSPACE-0606, ledger req_0032.\n\nUSER (with screenshot — read it): /home/siah/.claude/image-cache/c73c0a8c-84f9-4fad-b702-d4288adbf7bb/18.png — \"the massive elephant in the room... the whole dead space under the mesh painter.\"\n\nWhat it shows: the SCULPT lens's unwrap canvas occupies the top ~third of its column; sculpt verbs + brush sliders sit under it; below that, a giant BLACK VOID to the bottom of the page. That is WORKBENCH.md Law 3 verbatim: \"No dead space. Column 4's content is the point of the page — it reads at full size... idle width gets spent on demonstrative dashboards, never left black.\"\n\nFix on the lens layout: the unwrap canvas EARNS THE COLUMN — aspect-preserving fill of the available height/width (it is the work surface; make it as big as the space allows), tools + sliders as a compact strip (top or side, whichever preserves the most canvas), zero black void. If after a true full-size fit there is still leftover space, Law 3's own answer applies: demonstrative use (e.g. the grid stats/sample strip), never blankness. Same data, layout only. Explicit paths, verify green, resolve req_0032. READY when the canvas reads at full size.\n",
+  "status": "new",
+  "sessionId": "749ea40a-8b61-47c3-8d6c-5bde9e2a5c99",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ux"
+  ]
+}

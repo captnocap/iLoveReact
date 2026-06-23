@@ -1,0 +1,12 @@
+{
+  "id": "req_0137",
+  "at": "2026-06-06T17:09:11.374Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT, verbatim: \"the performance problem is solved. it is no longer choppy walking around\" — combined with the earlier floor pass, that is a PASS on your collision/registration cluster: FLOOREDGE seam fix, the registration dep-array fix, the gated live-floor watchdog, fall recovery, and the stale-engine bridge. COMMIT ORDER: commit now with EXPLICIT PATHS, your exclusive files only — framework/game/physics.zig, cart/hmsc-int/Embodied.tsx, your liveFloor/physics test files, and your build/placed + snap work that the user already passed (top anchor, floor-floor flush, wall-on-floor). EXCLUDE: editors/play/PlayRoute.tsx (another lane's untested scoping work lives there), game/commands/* (CONPORT lanes), and anything in editors/paint or framework/gpu/paintable* (PAINTLIVE lane). Note in the commit message that the wall-wall corner fix is included but still pending the user's corner re-test — if the user fails it later, we fix forward. One commit, post the sha, then resolve the ledger reqs your lane owns (floor-edge, wall-anchor, ramp-side asks — match verbatim text).",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

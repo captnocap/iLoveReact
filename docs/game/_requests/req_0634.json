@@ -1,0 +1,33 @@
+{
+  "id": "req_0634",
+  "at": "2026-06-11T11:42:14.395Z",
+  "origin": "session:7de3e0b0",
+  "text": "if you make things like record album covers and stuff where i can give it a image for the prop that would be awesome basically just a flat tho for that type of thing. you can go totally psx style",
+  "status": "review",
+  "sessionId": "7de3e0b0-06ef-431e-b04d-b0c6f97a7c65",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T12:04:28.459Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T12:05:11.977Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Duplicate capture of req_0635 (same message logged twice by the hook). The work landed under req_0635: partId image-flat props rendering in /test and interning into the compiled bake, plus the PSX variety (jagged rocks, tree size variants). See req_0635's resolution and sha c7986b11c.",
+  "shas": [
+    "c7986b11c"
+  ],
+  "resolvedAt": "2026-06-11T12:05:11.977Z",
+  "tags": [
+    "ask"
+  ]
+}

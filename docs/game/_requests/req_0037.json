@@ -1,0 +1,16 @@
+{
+  "id": "req_0037",
+  "at": "2026-06-06T06:05:59.195Z",
+  "origin": "supervisor-relay",
+  "text": "i see. this is why its so confusing. they have 3 tabs that are all showing the exact same thing. lol. it has figure part and sculpt and all of them can sculpt ??? [RULING: three distinct views - but give me the camera on all of them]",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T06:08:14.531Z",
+  "resolution": "LENSCLARITY-0606: three distinct lens views, view-layer only. FIGURE = assembled body posed, full-bleed, captioned ASSEMBLED FIGURE; PART = isolated selected part close-up, full-bleed, captioned ISOLATED PART · <part>; SCULPT = the 2D unwrap LARGE (canvas column is the page per DEADSPACE) with a SMALL 340px live 3D beside it captioned LIVE 3D · <part>. No two lenses render the same composition; lens bar labels/order unchanged. Camera fence honored: binding wiring untouched and unmoved — the single Scene3D.Camera mount is in viewportPane() (Stage.tsx, marked 'LENSCLARITY-0606: CAMERA MOUNT' comment); all three lenses share that one pane so pane 2's binding fix lands once for all of them. Verify green (15/15, 7/7, bundles); READY FOR USER TEST after pane 2 lands the camera fix on this structure.",
+  "shas": [
+    "4999bfd4a"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

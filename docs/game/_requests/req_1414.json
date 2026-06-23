@@ -1,0 +1,30 @@
+{
+  "id": "req_1414",
+  "at": "2026-06-19T16:15:30.410Z",
+  "origin": "session:d6961119",
+  "text": "i can run it if u pass me the command / setup script",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T16:19:03.442Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T16:19:03.452Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User offered to run the install themselves (sandbox blocks the agent cloning/building external code). Delivered the self-contained setup script setup-instantmesh.sh they run with one command; survey confirmed headless-safe (RasterizeCudaContext) and clean conda py3.10 isolation. Same work as req_1413; committed together.",
+  "shas": [
+    "6db88a35b"
+  ],
+  "resolvedAt": "2026-06-19T16:19:03.451Z"
+}

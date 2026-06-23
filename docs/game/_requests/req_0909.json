@@ -1,0 +1,10 @@
+{
+  "id": "req_0909",
+  "at": "2026-06-14T05:54:15.832Z",
+  "origin": "session:1b18f3aa",
+  "text": "Yeah. The whole reason the document forbids it though is because it was written explicitly to ensure the game was made from a quick and fast renderer for large maps. we are looking to handle quest lines and delivery of dynamic content and mp, npc pathing, tick rate,  physics, all of that is still baked into the game loader, assets, all of that. none of that changes at all.",
+  "status": "new",
+  "sessionId": "1b18f3aa-3b63-4388-a182-cd1168ae04f8",
+  "captureMode": "hook",
+  "events": []
+}

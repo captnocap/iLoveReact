@@ -1,0 +1,13 @@
+{
+  "id": "req_0729",
+  "at": "2026-06-13T07:23:40.174Z",
+  "origin": "session:b2985164",
+  "text": "hey i just went and took a piss and came back and my machine was in a kernel panic state. i left to go to the bathroom with claude trying to fix something about the game, u could look at the recent requests to disect if related or what",
+  "status": "new",
+  "sessionId": "b2985164-7aad-4573-accc-12a386983e72",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

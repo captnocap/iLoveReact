@@ -1,0 +1,36 @@
+{
+  "id": "req_0935",
+  "at": "2026-06-14T19:27:42.610Z",
+  "origin": "session:2b1b8d6b",
+  "text": "Cool. So yes, lets do that #2, and while you are in there making changes, lets expose some of the combat variables like bullet physics, LoS rays, and npc vision cone settings and audio settings (which should come from the tiles)",
+  "status": "doing",
+  "sessionId": "2b1b8d6b-2adf-4239-aed8-88f228d4f8a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T19:28:35.355Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T20:14:44.615Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "Scoping pass complete + de-risked. Plan written (/home/siah/.claude/plans) with GUIDING_LIGHT alignment folded in. Fully traced the no-V8 loader figure render path: world_loader.zig updatePlayerModelNodes (1769) + sampleClipTransform (1735) + build block (~2352); constructor.zig Scene.player_model/player_animation; compile/playerModel.ts bake format. NPCs are a direct mirror reusing PLAYER_ANIMATION (shared skeleton). Turnkey Stage-1 spec (lump layout, constructor parse, loader render mirror, bake wiring) captured in the plan. Cones-backwards bug fixed in the lab (req_0940). Next: the multi-file TS+Zig build per the spec (recommend a focused pass — an encode/parse mismatch silently breaks the compiled game)."
+    },
+    {
+      "at": "2026-06-15T04:58:15.746Z",
+      "actor": "e4e7",
+      "kind": "note",
+      "text": "Picked up via handoff in session e4e7. Starting Stage 1 build (NPC bake + lumps + Zig parse + loader render)."
+    },
+    {
+      "at": "2026-06-15T05:11:26.514Z",
+      "actor": "e4e7",
+      "kind": "note",
+      "text": "Stage 1 IMPLEMENTED (uncommitted, awaiting user rebuild+verify). NPC population now bakes + parses + renders/animates in the no-V8 loader. TS: refactored playerModel.ts (extracted buildFigureModel + writeModelGroup/modelGroupByteLength, shared with NPCs); new compile/npcModels.ts (buildDefaultNpcPopulation + encodeNpcModelsLump/encodeNpcSpawnsLump); NPC_MODELS=24/NPC_SPAWNS=25 in lumps.ts; packageMap.ts emits both inline (anchor=instance centroid). Zig: NPC_* version consts + NpcSpawn struct + readModelGroup extracted/shared + decodeNpcModels/decodeNpcSpawns + Scene.npc_models/npc_spawns (parse+deinit) in constructor.zig; mapfile.zig lump ids; world_loader.zig NpcRuntime + node build (per spawn x group, terrain-grounded y) + updateNpcModelNodes + refreshNpcNodes at both per-frame sites. Bundle clean, all 3 zig files ast-check clean, byte layouts verified matching. Clip=IDLE first cut (figures stand). Not moved to review: needs user build to confirm render."
+    }
+  ]
+}

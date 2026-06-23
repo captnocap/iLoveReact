@@ -1,0 +1,30 @@
+{
+  "id": "req_0915",
+  "at": "2026-06-14T08:33:41.054Z",
+  "origin": "session:5ae129b5",
+  "text": "does the black on the neon sign stay there? [Image #2]",
+  "status": "review",
+  "sessionId": "5ae129b5-1bb5-49d0-b549-22770bd7fe48",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T08:35:00.692Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T08:42:40.724Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The neon sign was a black board with the logo inset; the user wants only the floating glowing tubes. Removed the board: neonLogo is now just a thin SQUARE face panel (square so a square-fit logo decal isn't stretched horizontally as it was before), 2-sided keeps two back-to-back faces. The neon decal now ships a TRANSPARENT background, and scene3d_wgsl alpha-cuts fully-transparent texels (out_a<=0.01 -> discard) so empty areas write neither color nor depth and the wall behind shows through. This works in BOTH the editor (the static-surface capture clears to transparent, gpu.zig:1610) and the compiled game (decal_raster starts at alpha-0 bg) because both render through the same scene3d shader. The discard is harmless to everything else (opaque meshes sample the 1x1 white default, alpha 1). REBUILD REQUIRED since the shader is compiled into the binary. neon.test 3/3, props.test 14/14, cart bundles + shaders.zig ast-check clean.",
+  "shas": [
+    "ddafdace0"
+  ],
+  "resolvedAt": "2026-06-14T08:42:40.724Z"
+}

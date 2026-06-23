@@ -1,0 +1,10 @@
+{
+  "id": "req_1400",
+  "at": "2026-06-19T08:18:30.555Z",
+  "origin": "session:08e68a04",
+  "text": "why is the cap a problem. the reason it is so high was because we we were getting like 1/16th of any of it to render. what i dont quite understand is, is it a memory problem or what? and memory isnt even a problem as it stands so idk why its a problem but u can figure it out. what binary do u think im running btw? i have the up to date dev binary atleast it doesnt trigger a build. i compile the game map in the app, and then load it and same thing. the ground is still the low res texture and not the higher quality one",
+  "status": "new",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": []
+}

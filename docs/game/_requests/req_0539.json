@@ -1,0 +1,21 @@
+{
+  "id": "req_0539",
+  "at": "2026-06-10T14:06:02.745Z",
+  "origin": "session:0a09e641",
+  "text": "idk what u mean, im saying i cant enter this building or go under a floor that is lifted by a ramp. so idk. and that is actually a ceiling/roof on the building so collision is all fucked but it wasnt long ago, i use to go in tha building  [Image #4]",
+  "status": "doing",
+  "sessionId": "0a09e641-a769-495b-a0fd-4a909d25af7a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:09:05.951Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ],
+  "tags": [
+    "bug"
+  ]
+}

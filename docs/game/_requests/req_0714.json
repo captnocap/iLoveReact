@@ -1,0 +1,30 @@
+{
+  "id": "req_0714",
+  "at": "2026-06-13T03:39:25.089Z",
+  "origin": "session:691d2b0e",
+  "text": "why does it have a whole recovery phase. it shouldnt do that. it should just roll over and the player has to get out and find a new car if it doesnt roll itself and eventually would catch on fire and blow up",
+  "status": "review",
+  "sessionId": "691d2b0e-1a0f-45b7-afb1-6cf084c80b43",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T03:40:15.040Z",
+      "actor": "691d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T03:41:58.395Z",
+      "actor": "691d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Dropped the self-righting recovery phase I'd added in req_0709 — a rolled car should stay rolled, not flop itself back upright. In game/driving/index.ts the flipped branch is now just the bistable tumble: the committed kick + light damping (0.12) still carry the car fully over the on-its-side peak so it genuinely rolls (no half-lean flicker), then gravity settles it roof-down and it STAYS there. It only returns to drivable if its own momentum happens to carry it all the way back onto its wheels — never forced. Verified by sim: after a 2s hard turn then input release + 6s coast, sedan and van rest inverted with flipped=true (~170°, on the roof); sports/fire_truck never trip (slide instead). handling.test.ts 7/7 green. Lab banner updated to 'ROLLED OVER — reset for a new car (R to right)' — reset stands in for getting out and finding a new car, R is a manual right for handling testing. The 'totaled car eventually catches fire and blows up' behavior is noted as a follow-up feature, not implemented here.",
+  "shas": [
+    "a62886b62"
+  ],
+  "resolvedAt": "2026-06-13T03:41:58.395Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_0922",
+  "at": "2026-06-14T16:15:45.001Z",
+  "origin": "session:7d6df128",
+  "text": "yeah and notes you honestly could like attach to everything to be fair. rather have post it notes all over the place to keep my thoughts rather than dumping all into one god note pad if that make sense. so like, leave notes on questlines, on missions, and then just in general",
+  "status": "review",
+  "sessionId": "7d6df128-10bb-42ff-aa62-398eb578b34f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T16:41:10.703Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T16:41:10.712Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Post-it notes attach to EVERYTHING, not one god-notepad: a general board pad (a fixed top roster row), every questline, every mission, and every event each carry a Note[] with multiple add/remove post-its, rendered through one shared notesFields builder (rule-of-two). Persisted with the rest of the board to the twig file. Files: notes.ts, store.ts, panel.ts, source.tsx.",
+  "shas": [
+    "d57ec1afb"
+  ],
+  "resolvedAt": "2026-06-14T16:41:10.712Z"
+}

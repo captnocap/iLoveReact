@@ -1,0 +1,15 @@
+{
+  "id": "req_0202",
+  "at": "2026-06-07T06:39:28.094Z",
+  "origin": "session:f2302907",
+  "text": "hm. ok so what if then you have the best of both worlds here:\n\nyou author some code to make a shape in the same approach we are doing now, that bakes into a referencable shape, a mapfile is a bundled set, that installs its assets to the game first, so that the map that comes with it can just be rle reference. also in this approach, i dont see how you everr have 'dynamic' shapes, everything is effectively packed into installable game assets or is referenced from computed dynamism during compile time for the map so that its runtime dynamics can stay as thin as possible, letting us get a huge map and then using Apriori mining to reduce from it being our compile setup for the rle",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:41:17.550Z",
+  "resolution": "Affirmed and sharpened the user's best-of-both-worlds synthesis (no code): shapes stay code-authored but the bake EXECUTES the TSX at compile time and snapshots output as installable assets (kills the doomed static-analysis path in bake-geometry-auto — evaluation handles the .map()/spread/const cases scanning can't); mapfile = bundle that installs its assets into the game content store first, leaving the map body as pure binary-RLE small-int references; recommended content-addressed asset ids for idempotent installs and cross-map dedup (street+interior maps share assets under changelevel). Confirmed the no-runtime-dynamic-shapes rule with three lawful channels (transforms/instance params, shader data[] uniforms, runtime-authored content installs as new assets — GMod dupes model) and cited the geometry-intern OOM ruling as prior evidence. Translated the Apriori idea to 2D frequent k-window mining producing a pattern dictionary that is itself an installable shared asset (expected to rediscover the road grammar from paint), grid re-expressed as pattern stamps + RLE residual. Saved design to memory project_map_format.md + MEMORY.md index; DECISIONS.md verdict + plan still pending go-ahead.",
+  "shas": [],
+  "tags": [
+    "ruling"
+  ]
+}

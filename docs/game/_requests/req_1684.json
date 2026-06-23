@@ -1,0 +1,37 @@
+{
+  "id": "req_1684",
+  "at": "2026-06-23T02:09:43.666Z",
+  "origin": "session:103f47f2",
+  "text": " [Image #1] i learned how to curve it without breaking it haha. so i was thinking uh well so we have walls and half walls and stuff, but we could use the primitive piece as a starting point in the mesh editor and then be able to export/compile it into a placable piece, this would for instance let me use this i just made on a staircase as a railing or similar, also i could make walls that have parts bolted onto them already like posters or pictures, i can cut out window shapes, etc",
+  "status": "review",
+  "sessionId": "103f47f2-9b77-4e37-bcad-10dbde6fbd60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T02:10:03.130Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T02:34:48.830Z",
+      "actor": "103f",
+      "kind": "note",
+      "text": "Built both layers of the custom-piece loop. (1) seed-from-primitive: editors/model/seedFromPiece.ts lowers any BUILD_CATALOG piece (wall/window-wall/floor/stairs/ramp) into one editable EditMesh via the shared pieceVisualShapes decomposition; 6/6 v8cli — committed 8addfde76. (2) cook-as-piece: a cooked model carries an optional buildPlacement {snap,cover,blocksSight} so it edge/surface-snaps + grants cover while staying kind:'prop' (no engine-kind fork; reuses all existing prop render/bake/collision); 3/3 v8cli. cookedAsset.ts plumbing + cookedPiece.test committed 950cdb0d1. BLOCKER: the matching reads in props.ts (PropBuildPlacement type+field) and catalog.ts (propCatalogEntry) are GREEN but uncommitted — both files co-occupied by other live sessions' big uncommitted batches (props.ts +650 lines failing its own shelf test; catalog.ts COOKED_CATALOG overlay). Remaining: two Studio.tsx UI hooks ('Start from piece' seed entry + a 'Build piece' placement picker in the Compile dialog) — Studio.tsx also co-occupied."
+    },
+    {
+      "at": "2026-06-23T02:35:26.078Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built both layers of the 'mesh-editor primitive -> placeable custom piece' loop the user asked for (railings on stairs, walls with cut windows / bolted-on posters). Layer 1 seed-from-primitive: editors/model/seedFromPiece.ts lowers any BUILD_CATALOG piece (wall, window-wall already cut, floor, stairs, ramp-as-wedge) into one editable EditMesh via the SAME pieceVisualShapes decomposition the editor + compile bake share — 6/6 v8cli, committed 8addfde76. Layer 2 cook-as-real-piece: a cooked model carries an optional buildPlacement {snap,cover,blocksSight} so it edge/surface-snaps and grants cover while staying kind:'prop' (the engine treats every mesh-backed placeable as a prop and the validator forbids propKind on other kinds, so a literal kind:'railing' would have fought the grain across ~20 render/bake/collision branches; snap+cover deliver the piece BEHAVIOUR with none of that churn) — 3/3 v8cli; cookedAsset.ts plumbing + cookedPiece.test committed 950cdb0d1. The cook->catalog->editor-render->/compiled-bake path already existed for prop-kind assets, so this is the minimal durable bridge. BLOCKED/HANDOFF: the matching reads in game/kinds/props.ts (PropBuildPlacement type+field) and game/build/catalog.ts (propCatalogEntry) are implemented + GREEN but left uncommitted because both files are co-occupied by other live sessions' large uncommitted batches (props.ts +650 lines, currently failing its own shelf test; catalog.ts COOKED_CATALOG overlay) and cannot be isolated for a clean atomic commit without interactive staging. Remaining for the user-visible loop: two Studio.tsx UI hooks (a 'Start from piece' seed entry + a 'Build piece' placement picker in the Compile dialog) — Studio.tsx also co-occupied. Asked the user whether to hold until those sessions land or push into the co-occupied files now.",
+  "shas": [
+    "8addfde76",
+    "950cdb0d1"
+  ],
+  "resolvedAt": "2026-06-23T02:35:26.078Z"
+}

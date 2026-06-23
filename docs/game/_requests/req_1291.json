@@ -1,0 +1,28 @@
+{
+  "id": "req_1291",
+  "at": "2026-06-18T16:20:22.594Z",
+  "origin": "session:9751f4ba",
+  "text": "oh hey. i just realized also when painting more grass as u investigated, that grass / bushes have a cap :( [Image #3] it cut off right here lmao",
+  "status": "review",
+  "sessionId": "9751f4ba-6a5a-4d0d-aef7-a69eb17d42ca",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T16:20:39.800Z",
+      "actor": "claude-grass",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T16:44:09.586Z",
+      "actor": "claude-grass",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Grass/bush foliage truncated at a hard diagonal wall (req_1291). Root cause found with data: the bake's bush field needs 224,392 clumps but grassPopulation.ts capped MAX_INSTANCES at 80,000 — so bush was cut ~3x (grass was only 42,320, never hit it). A single lush chunk is 14,400 tiles x 26 cards = ~374k, far over 80k. Raised the cap to the GPU static-instance ceiling (framework/gpu/3d.zig MAX_STATIC_INSTANCES = 1,048,576), the buffer the compiled loader plants grass into, so the field never truncates before the hardware does. Switched the allocation from a flat MAX_INSTANCES pre-alloc (would be 50MB upfront + retained behind subarray) to geometric growth from 16k with a right-sized slice() copy on return. Verified: re-bake now plants all 224,392 bush + 42,320 grass (was 80,000 capped), total world instances 126,897 -> 271,429, render proof GREEN. Editor /test still uses the dynamic 65536 path (compiled-first workflow is unaffected). File: cart/hmsc-int/render3d/grassPopulation.ts (uncommitted, interwoven with a parallel session's grass system).",
+  "shas": [],
+  "resolvedAt": "2026-06-18T16:44:09.586Z"
+}

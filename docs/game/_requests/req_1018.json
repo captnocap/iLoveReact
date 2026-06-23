@@ -1,0 +1,28 @@
+{
+  "id": "req_1018",
+  "at": "2026-06-15T16:49:23.739Z",
+  "origin": "session:46d99bcc",
+  "text": "nice hell yeah. yes please lets go ahead and do that anywhere you see it!! thanks",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T16:49:34.272Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T17:00:57.496Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Umbrella sweep request — the user scoped it to cart/hmsc-int/ only (see req_1019, where the actual work landed). No additional changes here beyond what req_1019 covers; the broader repo-wide sweep (app/claudewrap/pixel_mmo/demos/runtime-hooks) was explicitly declined by the user.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T17:00:57.496Z"
+}

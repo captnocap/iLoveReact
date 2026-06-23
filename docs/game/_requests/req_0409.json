@@ -1,0 +1,31 @@
+{
+  "id": "req_0409",
+  "at": "2026-06-09T07:00:29.449Z",
+  "origin": "codex:019eab0d",
+  "text": "apply button still is half-baked. i click apply and it sometimes works sometimes doesnt work",
+  "status": "review",
+  "sessionId": "019eab0d-d55e-7810-97e2-0dfa7c7254f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T07:00:36.438Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T07:01:42.255Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the flaky building material Apply path. The button was applying through the target captured by the React render, so if the active face target moved via stage click/face chip before the material lens re-rendered, Apply could write the old target or silently no-op. Added a store-level applyPaintTargetSkin() that always reads the current paintTarget at click time, switched the material lens Apply/double-click path to use it, and added a regression proving Apply hits the current clicked face while leaving the stale roof target alone. Verified workbench/buildings 22/22 and hmsc-int bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T07:01:42.255Z",
+  "tags": [
+    "bug"
+  ]
+}

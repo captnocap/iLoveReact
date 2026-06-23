@@ -1,0 +1,17 @@
+{
+  "id": "req_0121",
+  "at": "2026-06-06T13:38:40.549Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — PRIME SUSPECT for UIFLAP, from the user's own screenshot (/home/siah/.claude/image-cache/42677ed6-e8fa-4672-83bf-b68e46d28bef/9.png): the play-mode HUD HINT LINE, top-left: \"untitled-7 - TEST (F2 build) - WASD move - Space jump - Shift run - mouse look (click to capture) - ` console - RMB aim\". That string is ~78 drawable glyphs — matching the CONTENT SWAP flap signature (~11 nodes / ~78 glyphs) almost exactly — and it renders FADED, suggesting an animated fade/pulse. The user's screen has essentially no other text in play mode. Check FIRST: how is that hint line's fade implemented — if its animation touches scale/font-size (or it remounts on a timer to restart a fade), every beat bakes a fresh glyph set at a new fractional size = the GLYPH RASTERIZE spam + CONTENT SWAP + REPAINT trio. Also remember glyphs need not be visible — mounted-invisible or mount-unmount-same-beat still bakes. Verify with data (your naming trace or a direct read of the hint component's animation), then fix: fade via alpha only, no size animation, stays mounted. The naming-trace verb remains wanted regardless — it confirms this or catches the real one.",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:12:25.132Z",
+  "resolution": "Resolved in b91a941962eeb56e3cbc631f1ac39f2ce59f10d7. The hint-line suspect was checked with churn/text tracing instead of content guessing; the diagnostic path distinguished static text from identity/size churn and the eventual fix targeted the actual chrome/StaticSurface prop churn path.",
+  "shas": [
+    "b91a941962eeb56e3cbc631f1ac39f2ce59f10d7"
+  ],
+  "tags": [
+    "perf-log"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_1027",
+  "at": "2026-06-15T18:01:42.487Z",
+  "origin": "session:de42f85d",
+  "text": "hey this repo here is going nuclear. wondering if u can dissect it and tell me how it works, and if we can try it ourselves and see a result instantly or not https://github.com/chopratejas/headroom",
+  "status": "new",
+  "sessionId": "de42f85d-94df-4add-951f-a1f5bdd46a23",
+  "captureMode": "hook",
+  "events": []
+}

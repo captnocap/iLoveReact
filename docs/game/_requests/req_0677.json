@@ -1,0 +1,31 @@
+{
+  "id": "req_0677",
+  "at": "2026-06-12T09:25:36.663Z",
+  "origin": "codex:019eba70",
+  "text": "so i painted on a texture. i see the texture in the world building but then i compile the game and run it and its blank",
+  "status": "review",
+  "sessionId": "019eba70-af1b-7633-a9f1-ba5a8c22c607",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T09:25:45.561Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T09:29:57.009Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed compiled painted textures going blank by marking transparent cutout-stencil shader materials for the compiled loader alpha path and rendering textured-alpha material rows as transparent textured meshes instead of opaque instanced rows that write invisible depth. Added compile coverage proving custom painted stencil materials ship their shader recipe and mask data.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T09:29:57.009Z",
+  "tags": [
+    "bug"
+  ]
+}

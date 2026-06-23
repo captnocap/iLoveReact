@@ -1,0 +1,28 @@
+{
+  "id": "req_1577",
+  "at": "2026-06-21T13:23:19.769Z",
+  "origin": "session:e36112e0",
+  "text": "no there is one for instantmesh also, i know because we setup one and i didnt like it so we setup another and it was instant mesh thats why its in the deps",
+  "status": "review",
+  "sessionId": "e36112e0-5303-4202-ba4f-5d93412ec821",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T13:23:28.732Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T13:24:20.613Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User believed a single-verb InstantMesh command already existed (they recall setting up two image->3D backends, disliking the first). Investigated exhaustively: grepped tools/, scripts/, cli/, genmesh.py, git history (all branches), untracked files, shell rc aliases, and bash history. Finding: there is NO pre-existing InstantMesh verb. What exists is (1) genprop, whose backend is locked to shap-e only -- the disliked one; and (2) deps/InstantMesh/ (conda env + weights, still untracked) usable ONLY via the upstream run.py smoke-test line from setup-instantmesh.sh -- which is the manual command the user remembers, never a wrapper. The setup script's final line confirms 'genmodel --backend instantmesh' was planned but never wired. Conclusion relayed to user: my new tools/instantmesh (req_1574) is not a duplicate but the missing verb; offered to instead wire InstantMesh into genprop as --backend instantmesh. Awaiting user direction.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T13:24:20.612Z"
+}

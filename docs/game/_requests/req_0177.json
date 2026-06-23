@@ -1,0 +1,12 @@
+{
+  "id": "req_0177",
+  "at": "2026-06-07T04:25:07.838Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT: REBUILDNOTIFY-0606 PASSES LIVE. Verbatim: \"hey this actually works haha i never saw it til now\" — the overlay fired in their session on a real native/wire mismatch (running dfe6763029dd / disk 8556e002c43b) with the restart instruction, exactly the silent-floor-vanish killer it was built to be. Mark it user-passed; include it in your commit batch with explicit paths when you batch your accepted work.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

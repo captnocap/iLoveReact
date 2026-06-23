@@ -1,0 +1,30 @@
+{
+  "id": "req_1656",
+  "at": "2026-06-22T21:34:37.819Z",
+  "origin": "session:2117ddf4",
+  "text": "i dont understand what im suppose to see when its just blue. and i fall off the world. im loading the application -> press compile on the map -> it finishes -> go to the /compiled path -> blue sky[Image #2]",
+  "status": "review",
+  "sessionId": "2117ddf4-165f-4c7a-8fbe-15f442892c87",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T21:35:08.800Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T21:52:16.067Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused why the void was invisible: the user verifies via Compile → /compiled, which renders the native Zig <WorldLoader> (no React) — so seam 1's editor-side VoidShell/GameWorld3D never executed there, and there was no ground past the authored edge (falling off). Fix bakes the shell into the gamefile at compile time, data-only, no Zig change: refactored game/void/shell.ts behind ONE ShellBoxEmit callback so the live editor batch and the bake share the generator (no divergence); added forEachShellRingBox (a finite 8-chunk ~1.28km ring around the authored rectangle) with a groundY so it sits flush with the authored ground; compile/worldGeometry.pushVoidShell lowers the ring into the gamefile instances; compile/worldColliders.shellGroundHeightfield bakes ONE flat walkable plane over the whole footprint so the player walks out instead of falling; packageMap samples bakeTerrainTopAt at map centre and threads voidGroundY into both. Verified: rjit game bake logs '3902 procedural box(es) ... groundY=0.10'; the no-V8 loader renders them (rjit game shot — grey procedural skyline visible in shots/world_loader.png); game/void/void.test.ts 9/9; compile suites green (worldGeometry 13/13, worldColliders 6/6, worldParity 15/15, worldDynamicProps 3/3). User should re-Compile and re-open /compiled, then walk to the map edge: the grey procedural city now fills past the edge and the ground continues so you don't fall off.",
+  "shas": [
+    "722df2c70"
+  ],
+  "resolvedAt": "2026-06-22T21:52:16.067Z"
+}

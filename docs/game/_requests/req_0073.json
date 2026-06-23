@@ -1,0 +1,16 @@
+{
+  "id": "req_0073",
+  "at": "2026-06-06T08:17:44.849Z",
+  "origin": "supervisor-relay",
+  "text": "i just lost the painting i had going on a hot update. (i dont really care i was drawing dicks anyways, but im just saying its not set up correctly)",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T08:31:53.361Z",
+  "resolution": "DRAFTHOLE-0606 landed (091928e1b). The book file held the smoking gun: the user's painted slot had been rewritten with layers=0 and its model binding stripped to null. Three defects at the one seam, all fixed: (1) CLOBBER GUARD — writeDraftSlot now refuses to overwrite a slot holding painted layers with a degenerate layer-less document, killing the empty-painter race as a category; (2) RESTORE BASELINE — a restored document replays through applyDocument and bumps documentVersion, which fired PaintBench's dirty effect on the replay itself, racing the painter's rehydration with a slot write; dirty now starts beyond the restore baseline; (3) ORPHAN BINDING — when a model slot's roster doc can't resolve at restore (deleted, or the V20 characters channel not yet ingested: today's sqlite-cutover window), the painting degrades to a plain canvas but the model binding now survives every later slot write, so the next restore re-resolves the model target — self-healing. THE COVERAGE TABLE (P4, store-recreate-over-same-book = a hot update): figure part PASS · vehicle part PASS · material PASS · blank canvas PASS · degraded-model survives+binding-kept+self-heals PASS · empty-clobber REFUSED PASS; image rides the same non-model slot path (its identify door is host-bound), document/cutout open SAVED work on the same machinery. The 600ms slot debounce tail stands per HOTDRAFT/TATTOODRAFT precedent — at most the final strokes of the last 600ms, never the painting. bench 13/13, cart bundles. THE LAW pinned: a new target family without a slot now fails the table.",
+  "shas": [
+    "091928e1b"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_0778",
+  "at": "2026-06-13T16:18:10.556Z",
+  "origin": "session:ef4fbf70",
+  "text": "nice you did find it. so uh yeah one more question why doesnt everything have this capability? like payphone or dumpster also for example",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T16:18:53.722Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T17:08:45.558Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered why not every prop had the skinning capability: props split into data-recipe kinds (rendered by the generic DataProp, skinnable) and ~15 bespoke hand-built components (Payphone, Dumpster, Tree, Rock, furniture, lights, signs…) that drew their own meshes and exposed no parts — so payphone/dumpster/etc. had nothing to skin, and they also baked as fallback boxes (a render/bake parity gap). RESOLVED by the req_0782 migration: a single shared resolvePropParts feeds render + bake from one recipe per prop, and every prop now flows through DataProp, so all of them are click-to-skin and bake their skins uniformly. No separate code change owned by this id — it folds into req_0782 (live in the working tree, held from commit pending a695's recipe files).",
+  "shas": [],
+  "resolvedAt": "2026-06-13T17:08:45.558Z"
+}

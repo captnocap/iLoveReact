@@ -1,0 +1,39 @@
+{
+  "id": "req_0569",
+  "at": "2026-06-10T16:53:44.246Z",
+  "origin": "session:7a5b02e7",
+  "text": "hm. so a few things. one. my terminal is just getting spammed with: -bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512x512 (71284b stored)\n[js.warn] [decal-bake] custom:claudes-closet baked 512x512 (52796b stored)\n[js.warn] [decal-bake] custom:dicks baked 512 and second: i try to compile the map and i get [Image #11]",
+  "status": "review",
+  "sessionId": "7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T16:55:23.677Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T17:02:34.178Z",
+      "actor": "fable-mat",
+      "kind": "note",
+      "text": "Root cause: storage/localstore.zig MAX_VALUE=8192 — the custom-textures value with inline pixel payloads (~125KB) silently failed every write (hostLocalstoreSet catch {}), so pixels never persisted: the baker re-baked forever (the alternating spam) and the compile correctly found none. Fix: pixels move OUT of the store value into files (user-directed format: the cart/pixel_icons rows-of-runs JSON), record carries {w,h,docHash,file}; baker gains a persist-verification park guard."
+    },
+    {
+      "at": "2026-06-10T17:09:37.293Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the re-bake spam and the 'no baked pixels' compile in one root cause (commit 412506717): the first cut stored the pixel RLE inline on the custom-textures record, but storage/localstore.zig caps values at 8KB (MAX_VALUE, fixed-width records) and hostLocalstoreSet swallows the failure silently — so ~50KB captures never persisted; the baker reloaded the store, saw the other decal still pixel-less, and re-baked in an endless alternating loop while the compile correctly found nothing. Pixels now live as files under cart/hmsc-int/data/decal-pixels/<id>.json in the repo's rows-of-runs pixel JSON format (per your pointer at cart/pixel_icons/), the record carries only {w,h,docHash,file}, and the baker verifies the store round-trip after every save — a failed persist parks the record with ONE console.error instead of spinning. Tests 13/13 green; cart + bake bundles clean. Verify: editor terminal should show each decal baked ONCE ([decal-bake] ... → file), then Compile should report 'N decal-pixel' in the [materials] line with no flat-color warning, then rjit game play shows the signs.",
+  "shas": [
+    "412506717"
+  ],
+  "resolvedAt": "2026-06-10T17:09:37.293Z",
+  "tags": [
+    "perf-log"
+  ]
+}

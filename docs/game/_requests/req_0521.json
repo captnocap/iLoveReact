@@ -1,0 +1,33 @@
+{
+  "id": "req_0521",
+  "at": "2026-06-10T12:45:41.962Z",
+  "origin": "session:8f492126",
+  "text": "Lol. thats awesome xD not. hey so uh i keep falling thru the world when trying to just load it :? it honestly looks like im spawning like just below it in height and then falling because im below the ground. maybe raise my spawn drop or something",
+  "status": "review",
+  "sessionId": "8f492126-2685-4bb0-ad7d-82b25fa10ec6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T12:46:15.711Z",
+      "actor": "session-8f49",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T12:50:04.338Z",
+      "actor": "session-8f49",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed from the user's own saved data: sessions/_route-twigs.json holds the /test player pose at y=0 (x 3.4, z 3.75, saved ~8h earlier, grounded) — from BEFORE the terrain there was painted up. PlayRoute's pose restore only snapped to the live floor when the saved y was more than a full capsule height (~1.8m) below groundColumnTop, so a ~1m burial kept the stale y and restored the player INSIDE the painted heightfield — below its top, where no collider can catch a body — and they fell through the world on every load (the pose kept re-saving, so it never self-healed). Fix 865cfe050 (PlayRoute.tsx): terrain is the world's minimum — nothing legitimate stands under groundColumnTop — so the burial slack shrinks from capsuleHeight to 0.05m float noise; ANY below-ground restore now lands ON the live floor, grounded, and the existing '[play] restored player pose was below the live floor; snapping to ground' warn names it when it fires. Saves go live via the hot-reload watcher; the user should just press Play again and spawn standing on the painted ground.",
+  "shas": [
+    "865cfe050"
+  ],
+  "resolvedAt": "2026-06-10T12:50:04.338Z",
+  "tags": [
+    "bug"
+  ]
+}

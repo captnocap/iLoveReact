@@ -1,0 +1,28 @@
+{
+  "id": "req_0691",
+  "at": "2026-06-12T13:38:41.484Z",
+  "origin": "codex:019eba54",
+  "text": "Cool. So, go ahead and start doing so for a handful of props one by one, as you create it, remove it from the file and import it in, then do the next one. should go pretty smooth",
+  "status": "review",
+  "sessionId": "019eba54-122c-7b03-9a58-37a88189321a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:38:49.574Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T13:40:58.845Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extracted a handful of adjacent prop recipes one by one into per-prop files under compile/propRecipes: streetSign, stopSign, streetLight, trafficLight, payphone, and mailbox. Each file keeps named semantic parts and named colors while preserving the previous numeric geometry/color values, and worldGeometry now imports the corresponding *Parts function instead of carrying those inline arrays. Verified with the focused compile/worldGeometry bundle and v8 test: 13/13 passed.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T13:40:58.845Z"
+}

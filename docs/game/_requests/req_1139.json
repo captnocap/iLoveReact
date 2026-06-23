@@ -1,0 +1,30 @@
+{
+  "id": "req_1139",
+  "at": "2026-06-16T07:32:51.737Z",
+  "origin": "session:071f59a8",
+  "text": "haha wait yooo there is this big ass ocean in the compiled map all over my road haha nice job !! looks like need to do a better way to place that and the math i think needs some adjusting but nice job haha as for the trees look good. this is the good fern but the log is still lookin like a black n mild xD",
+  "status": "review",
+  "sessionId": "071f59a8-18c9-4044-84f1-a1913885c085",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T07:34:20.878Z",
+      "actor": "claude-opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T07:41:28.801Z",
+      "actor": "claude-opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Feedback round on the compiled map: a vivid dithered 'ocean' appeared over the road and the trees read well except the trunk. Investigated the ocean — confirmed my temporary verification water-injection was already reverted (encodeWaterBodies is clean) and the map has no painted water, so the ocean is a stale/broken bake artifact (the user's bakes were failing while other workers ran), not a real placement or a regression. Addressed the trunk critique ('black n mild') with a new PalmTrunk geometry (taper + bulge + lean + scar rings) in e1dc7e937. Water-placement/level-math tuning deferred until a clean bake confirms whether anything real needs fixing.",
+  "shas": [
+    "e1dc7e937"
+  ],
+  "resolvedAt": "2026-06-16T07:41:28.801Z"
+}

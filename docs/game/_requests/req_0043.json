@@ -1,0 +1,12 @@
+{
+  "id": "req_0043",
+  "at": "2026-06-06T06:15:33.434Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — standing rule (user): at 55-60% context, /hand-over at your next coherent boundary. You are at 56% — when the camera lens-switch fix lands (finish it properly first), write the /hand-over brief before taking anything new.",
+  "status": "new",
+  "sessionId": "a2aed2b9-5e73-4cc4-af5c-f08256389aca",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

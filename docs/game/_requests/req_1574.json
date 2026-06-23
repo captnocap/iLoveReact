@@ -1,0 +1,30 @@
+{
+  "id": "req_1574",
+  "at": "2026-06-21T13:17:07.607Z",
+  "origin": "session:e36112e0",
+  "text": "hey we had setup uh instantmesh for 3d generation but i dont remember the command to run it lol can u make  a better command for it so its just a single verb and then path to the image i am using, i know the config file used was instant-mesh-large.yaml",
+  "status": "review",
+  "sessionId": "e36112e0-5303-4202-ba4f-5d93412ec821",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T13:17:18.051Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T13:18:47.848Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Created tools/instantmesh: a single-verb wrapper for the InstantMesh image->3D pipeline so the user no longer needs to remember the verbose 'conda activate instantmesh && cd deps/InstantMesh && python run.py configs/instant-mesh-large.yaml <img> --output_path outputs --export_texmap' incantation. Usage is now just 'tools/instantmesh ./photo.png'. The wrapper resolves the image to an absolute path, activates the instantmesh conda env, cd's into deps/InstantMesh, runs run.py against instant-mesh-large.yaml with texmap export on by default, and prints the resulting .obj path. Friendly flags (--out/--config/--no-rembg/--no-texmap/--seed/--steps/--views/--video) translate to run.py's flags and any unknown flag is forwarded verbatim. Syntax-checked and error paths (missing/nonexistent input) verified; did not run a full multi-minute generation.",
+  "shas": [
+    "c703bc12f"
+  ],
+  "resolvedAt": "2026-06-21T13:18:47.848Z"
+}

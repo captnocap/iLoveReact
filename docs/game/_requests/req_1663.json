@@ -1,0 +1,10 @@
+{
+  "id": "req_1663",
+  "at": "2026-06-22T23:17:46.665Z",
+  "origin": "session:06fe423a",
+  "text": "ok its not breaking the texture anymore. but lets talk about this LoD and view distance because its a real problem st ill. i can tell because at certain areas where i look my fps goes to shit. and i suspect that all the grass and tree animations are in full effect at full distance",
+  "status": "new",
+  "sessionId": "06fe423a-d6e6-4bdd-a7f5-e511298cc05a",
+  "captureMode": "hook",
+  "events": []
+}

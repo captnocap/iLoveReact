@@ -1,0 +1,31 @@
+{
+  "id": "req_0446",
+  "at": "2026-06-10T04:48:14.358Z",
+  "origin": "session:0a09e641",
+  "text": "im noticing a cap on the physics rects. [loader] built 4096 physics rects + 256 oriented physics rects + 8 heightfields\n[loader] physics collider cap clipped 1218 rendered instance rows\n[loader] spatial collider windowing ON — 3600 spanning + grid 11x10; near-field 4096 rects + 256 oriented \n\nis that a problem? the map is barely made",
+  "status": "review",
+  "sessionId": "0a09e641-a769-495b-a0fd-4a909d25af7a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T04:49:07.500Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:00:40.015Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The 4096-rect cap + 'windowing ON' on a barely-made map was the PAINTED GROUND being rasterized to one collision rect per render cell, blowing the host rect cap. Worse, spatial windowing then rebuilds colliders from instances every frame, silently dropping the baked +-join wall colliders — so the wall fix was defeated on this map too. Fix: the bake now emits ONE collision heightfield per FLAT painted chunk (a 2x2 plane lifted to the painted slab top), exactly how /test colliders each painted chunk, instead of per-cell rects. world_loader's baked branch derives instance rects ONLY for piece rows now (built floor plates) and skips the painted-ground rows. Net: a small map produces a handful of heightfields + the piece colliders, stays far under the cap, no windowing, baked walls intact. Files: worldColliders.ts (flatChunkField + buildBakedColliders takes floors), packageMap.ts (passes floors), world_loader.zig (piece-rows-only loop), floorHasRelief exported. TS 4/4 pass, Zig ast-check clean. Needs rebuild + re-Compile to confirm. Nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T05:00:40.015Z",
+  "tags": [
+    "perf-log"
+  ]
+}

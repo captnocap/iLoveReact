@@ -1,0 +1,10 @@
+{
+  "id": "req_1642",
+  "at": "2026-06-22T17:30:36.050Z",
+  "origin": "session:909e44f4",
+  "text": "can you make a clone of it in javascript? the reason why, is we keep having OOM problems with the map builder but i dont really understand why, because the game data exported is quite small, something like tens of mb not hundreds but load times keep getting longer and longer and now crashing. i have a theory that it could all be curved if the editor loaded game data all the same",
+  "status": "new",
+  "sessionId": "909e44f4-7c1b-4b26-b9e4-4364c93081b0",
+  "captureMode": "hook",
+  "events": []
+}

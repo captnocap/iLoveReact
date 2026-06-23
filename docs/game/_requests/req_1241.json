@@ -1,0 +1,30 @@
+{
+  "id": "req_1241",
+  "at": "2026-06-17T14:20:43.759Z",
+  "origin": "session:c885b7cc",
+  "text": "i think im breaking the ui lmao things are starting to disappear the more and more the model is made like this compass now no longer has the direction letters to click on  D: [Image #22]",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T14:21:03.533Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T14:25:55.823Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User reported the viewport orientation compass lost its clickable X/Y/Z direction letters (ball + axis lines still render) and that 'things disappear the more the model is made'. Diagnosed as the layout MAX_CHILDREN=512 cap: framework/layout_refactor.zig + layout.zig lay out children into a fixed [512]ChildSlot array and silently drop any overflow (flex and absolute). The mesh-select overlay was already isolated into one child (req_1179/1180), so the remaining always-on growth source was the ShapePanel 'faces · vertex loops' list, which rendered a Row per face with no cap and grew directly with model complexity — flooding the child/glyph budget and evicting trailing UI like the compass letters. Fixed by collapsing + capping that list (see req_1242, sha 7df18f5a5). Expectation: with the panel collapsed by default the compass letters return. Asked the user to confirm after hot reload; if letters are still missing we have a second flood source to find (next candidates: the mounts list or a shared-ancestor container).",
+  "shas": [
+    "7df18f5a5"
+  ],
+  "resolvedAt": "2026-06-17T14:25:55.823Z"
+}

@@ -1,0 +1,40 @@
+{
+  "id": "req_0468",
+  "at": "2026-06-10T06:00:10.386Z",
+  "origin": "session:0ce255e1",
+  "text": "Nice give me a place to name it here also when saving it but it saved as Custom1. after you are done with that, i need you to fix the 'floor' placement. by that i mean, this lets you raise the camera a floor right, ok so when i raise a floor, and then im trying to put down walls or something. it places on the first floor still",
+  "status": "review",
+  "sessionId": "0ce255e1-e6f7-4640-95b6-c6054e1a2eb6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T06:03:35.283Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T06:03:35.293Z",
+      "actor": "iso-author",
+      "kind": "note",
+      "text": "BLOCKED on concurrent edit. Both asks (floor-level placement fix: resolveAt/computePaint must use the active level's slab elevation not the level-0 terrain sampler; + a name field on save-as-prefab) live in IsoAuthor.tsx, which another session (2e51) has 46 lines of UNCOMMITTED native-camera work in (GAME_NATIVE_CAMERA/cameraRef/pushNativeCamera) plus matching isoStage.ts changes. Editing+committing now would clobber their in-flight work and risk applying against a stale base (two edits already failed mid-type). The fix is designed and ready; waiting for that session to commit/pause IsoAuthor.tsx so I work on a clean base."
+    },
+    {
+      "at": "2026-06-10T06:30:33.986Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two asks. (1) Floor-level placement: pieces ignored the active floor and always landed on the ground because resolveAt fed resolveSnapTarget the level-0 terrain sampler. Added a level-aware placeGroundAt (terrain at level 0, else the flat slab at level*storyHeight) wired into both the click path (resolveAt) and the drag-paint (computePaint), so raising a floor with ▲ snaps placement to that floor. (2) Prefab naming: the ⊞ save button now opens a name prompt (TextInput overlay, defaults to the next 'Custom N', Save/Cancel) and saveSelectionAsPrefab takes the typed name. Committed ad59c4578 (alongside the finished native iso-camera integration the files sit on), bundles clean.",
+  "shas": [
+    "ad59c4578"
+  ],
+  "resolvedAt": "2026-06-10T06:30:33.985Z",
+  "tags": [
+    "bug",
+    "ask"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0476",
+  "at": "2026-06-10T07:25:10.405Z",
+  "origin": "codex:019eb06a",
+  "text": "in the tile height painter, give me a tool that lets me just start from one point and as i paint it slowly is increasing the intensity of the height field so i can easily make a proper slope that can wrap around a mountain",
+  "status": "review",
+  "sessionId": "019eb06a-e6fb-7280-bdb5-0483b03d47b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T07:25:18.176Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T07:30:47.836Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a height slope brush mode to hmsc-int. The new slope tool starts at a configured start height and increases toward an end height over the painted run distance, so freehand strokes can form wraparound grades around terrain while reusing the existing heightfield brush path and preview sync. Added focused heightData tests and verified with the fast hmsc-int ship build.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T07:30:47.836Z",
+  "tags": [
+    "ask"
+  ]
+}

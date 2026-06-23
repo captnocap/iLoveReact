@@ -1,0 +1,18 @@
+{
+  "id": "req_0801",
+  "at": "2026-06-13T18:20:04.070Z",
+  "origin": "session:6e5908e6",
+  "text": "s[Image #14] look at what is missing. [Image #15] [Image #16] [Image #17]",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T18:22:02.897Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

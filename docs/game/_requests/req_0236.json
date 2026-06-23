@@ -1,0 +1,28 @@
+{
+  "id": "req_0236",
+  "at": "2026-06-07T10:44:33.084Z",
+  "origin": "session:09015194",
+  "text": "the secretary next to it says 225 untagged and then running it says 10/12",
+  "status": "review",
+  "sessionId": "09015194-0a9b-4ae6-acf8-d964ee783d82",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-07T10:45:02.100Z",
+      "actor": "session-0901",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-07T10:54:12.097Z",
+      "actor": "session-0901",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the secretary stopping after one batch (the '225 untagged, 10/12' finding): SecretaryBar now loops bounded SECRETARY_BATCH turns until nextBatch() drains, with a live tally and unsure entries marked attempted so they never re-queue within a run (a fresh run may retry them). Then killed the infinite capture loop the user screenshotted (req_0235): the repo UserPromptSubmit hook fires on the app's own claude_code workers, so the secretary's prompt was being ledgered and fed back into its next batch — added machinePrefixes to LedgerConfig (secretary preamble, handoff briefs, assist3d viewer preamble; tunable in _config.json), gated FIRST in hookCapturePrompt, made the prompt's first line the shared SECRETARY_PROMPT_PREFIX sentinel, and excluded machine echoes from batching as defense in depth. Also added the user's comment box: noteByUser on the store → the same noteRequest door (actor 'user', any state, even done), input in the wide detail, history shows it. Suites: ledger 26/26, workbench 16/16; commit pending supervisor's word.",
+  "shas": [],
+  "resolvedAt": "2026-06-07T10:54:12.096Z"
+}

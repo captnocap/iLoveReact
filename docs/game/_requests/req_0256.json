@@ -1,0 +1,13 @@
+{
+  "id": "req_0256",
+  "at": "2026-06-07T11:32:38.466Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: the user gave the GO on slice 1. Commit your ruled plan-doc update now (docs/game/PLATMOD_PLAN.md + the ledger entries your edits touched, message citing the rulings). Slice 1 executes on a different lane reading the doc — your lane's job is done after the commit; post the hash and stand by.",
+  "status": "new",
+  "sessionId": "35559ffc-268f-4d59-ac07-d76ecb143bac",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

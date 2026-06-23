@@ -1,0 +1,17 @@
+{
+  "id": "req_0122",
+  "at": "2026-06-06T13:41:24.072Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — addendum on the hint-line suspect, from the user: \"ok but those dont change. im not moving. they dont update.\" Correct — the TEXT is static. So the only mechanisms left are: (1) IDENTITY LOSS — the heartbeat re-render recreates the subtree (flipping key, conditional mount, unstable parent), same chars but new node instances -> re-capture -> repaint; (2) FRACTIONAL SIZE JITTER — supporting evidence in the logs: atlas_glyph_count climbs monotonically (388->400->557->559) while screen text is static, i.e. the SAME characters keep entering the atlas as NEW size buckets — a layout-derived font size recomputing to 13.9999 vs 14.0001 per remount. Check: the hint component's key/conditional identity across the heartbeat, and whether its font size is computed from layout floats instead of a constant. And find what ticks every ~0.4s re-rendering the play HUD at all. Content-diffing is a dead end — diff IDENTITY and SIZE KEYS.",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:12:25.355Z",
+  "resolution": "Resolved in b91a941962eeb56e3cbc631f1ac39f2ce59f10d7. Added identity/size-key focused tracing: React churn records component identity changes, text traces include requested and rendered font-size buckets, and stale recovered-frame deltas are no longer misattributed to the spike.",
+  "shas": [
+    "b91a941962eeb56e3cbc631f1ac39f2ce59f10d7"
+  ],
+  "tags": [
+    "perf-log"
+  ]
+}

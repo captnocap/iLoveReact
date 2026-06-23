@@ -1,0 +1,30 @@
+{
+  "id": "req_0926",
+  "at": "2026-06-14T16:38:40.871Z",
+  "origin": "session:7d6df128",
+  "text": "ok. now, what i would do, is well two things, one i would move a good number of these properties out of the panel here and into the main panel, and treat the side for metadata like last updated, previous mission, etc. and then we will want to have a full scene graph to visually see\nwe can wait on the scenegraph for now while we still shape it \nbut, anyways\n\nso a mission, and this is why you need to move it out\n\nwe need to be able to set up triggers in the world for the quest. things like 'go to ...' and then 'grab the package' ... and however long. with at any step can play a cutscene mid mission, or trigger dialog from some map trigger setup, etc. which npcs are involved (could be many) and place to write in script for dialog that will later be used for subtitles also",
+  "status": "review",
+  "sessionId": "7d6df128-10bb-42ff-aa62-398eb578b34f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T16:40:49.672Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T16:54:44.738Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Restructured the storyline editor so the MAIN panel (gutter 4) is the mission authoring canvas and the SIDE (gutter 3) is metadata, per the user's ruling (overriding the workbench's old 'gutter 4 only demonstrates' law for this source; full scene graph deferred). A step now carries a world trigger (kind+target: go-to/grab/talk/deliver/take-out/wait/custom) — the mission spine the user described; missions gained an NPC roster (id+role, many) and an updatedAt stamp. The side shows identity + METADATA (questline, last updated, status, previous mission from upstream edges) + constraints/unlocks/reward/notes/transitions/wiring; the main shows STEPS + NPCS + SCRIPT (the dialog read-through for subtitles), reusing the PanelGroups field renderer in the wide gutter. Files: store.ts, panel.ts, source.tsx, StoryStage.tsx (new). Pending the user's visual confirmation.",
+  "shas": [
+    "942de888f"
+  ],
+  "resolvedAt": "2026-06-14T16:54:44.738Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1184",
+  "at": "2026-06-16T16:36:48.975Z",
+  "origin": "session:8e058574",
+  "text": "[Image #5] lmaoooo can we make a real toolbar now this shit is all over the place on top of other shit xD",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T16:37:33.064Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T16:42:51.700Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rebuilt the Studio editor toolbar, which had three absolute Rows all pinned to top:12 so they overlapped (scale/player text drawn over the mode buttons, the fps/FRAMES readout over the texture-export buttons). Re-tiered into two non-overlapping strips: tier 1 (top:8) carries info + view toggles (STUDIO status, scale ghost, mirror) on the left and diagnostics (smooth/log/fps + FrameDiagBar) on the right via justify space-between; tier 2 (top:40) carries all the actual tools (selection modes, transform, contextual edit ops, textureize/compile/export) on their own line in one faint unified bar, left-aligned with flexWrap so a dense selection wraps instead of overflowing off-screen or colliding with tier 1. Pure layout — only the container Rows changed, every button's onPress/logic is untouched; the full hmsc-int cart bundles clean. Committed 7e103d5a0. Best judged live (hot-reloadable); happy to tweak spacing/grouping once seen.",
+  "shas": [
+    "7e103d5a0"
+  ],
+  "resolvedAt": "2026-06-16T16:42:51.700Z"
+}

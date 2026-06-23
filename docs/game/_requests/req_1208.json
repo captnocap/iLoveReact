@@ -1,0 +1,31 @@
+{
+  "id": "req_1208",
+  "at": "2026-06-17T00:30:01.937Z",
+  "origin": "session:ee607c38",
+  "text": "the thing still paints pin stripes. and the paint is carrying over from one model to another  also zoom completely decouples the grid from the paint location",
+  "status": "review",
+  "sessionId": "ee607c38-a6df-4547-aa9a-facb41f8319d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T00:31:48.593Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T00:53:06.537Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Paint reworked across the lag, grid, bleed, and cross-model bugs. (1) Lag: dabs now accumulate in a ref with a throttled atlas re-bake (the cutout painter's clock) + a self-ticking ref-driven grid overlay, so painting/hovering never re-renders the viewport. (2) Pinstripes + paint-lands-far-from-cursor + zoom-decouple were ONE root cause: a coarse fixed paint grid over a finely-packed (1024-texel) atlas meant each cell straddled many faces' UV slots, scattering colour across faces. Fixed by making the atlas ITSELF the fixed grid — textureizeScene gains fitTexels so the packed atlas is ~model-independent (paintGridCells target), grid = packed atlas = one cell per padded texel in ONE face's slot, no bleed. (3) Cross-model carryover: the studio:tex twig is global, so the texture+paint buffer now reset when the open model changes. textureAtlasPx 256 to 512 for crisper cells; interpolated strokes + distinct brush sizes fill continuously. NOTE: due to the shared git index across parallel sessions, this code landed in commit b3bef7ec8 (another session's commit swept up my staged files) plus 2889db1d4 — the code is in HEAD and verified (textureize 10/10, meshPaint 6/6, bundles clean).",
+  "shas": [
+    "2889db1d4",
+    "b3bef7ec8"
+  ],
+  "resolvedAt": "2026-06-17T00:53:06.537Z"
+}

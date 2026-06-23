@@ -1,0 +1,13 @@
+{
+  "id": "req_0246",
+  "at": "2026-06-07T11:09:14.735Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: PLATMOD-PLAN-0607. Context cold-start: read docs/game/DECISIONS.md verdicts V28, V29, V30 (lines ~896-1100) plus tools/oracle \"platform mod map format frozen world\" before anything — they are the complete ruling set from the BSP design session (req_0194-req_0207); nothing lives outside them. The user's word today, verbatim: \"first establishing the game engine binary that can load our map format we look then compile out from here. since we have it all inside of this app, and we are also using this app to build the same engine, that gives us the proper seperation of conerns where we can immediately test engine changes in the test route and then finalize them into the built game engine\". TASK — plan only, no implementation: draft docs/game/PLATMOD_PLAN.md covering (1) SLICE 1 = the standalone player/engine binary that loads a map package, scoped against the existing dev host (V28 rules the dev host already IS that client — packaging is the gap); (2) the lump container + Compile transcode + loader build order; (3) the dev loop the user named: engine changes tested in THIS app's test route first, then finalized/promoted into the built engine — spell out the promotion mechanic (check the ruled engine-channel discipline bleeding→nightly→stable for fit); (4) sequencing against the in-flight workbench fold (what blocks on its step 10, what does not); (5) the FIRST testable artifact and its done-bar. Do the work yourself, no subagents. Post when the doc is on disk; I review, the user rules, then slice 1 goes to a dedicated lane.",
+  "status": "new",
+  "sessionId": "35559ffc-268f-4d59-ac07-d76ecb143bac",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

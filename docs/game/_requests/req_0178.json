@@ -1,0 +1,12 @@
+{
+  "id": "req_0178",
+  "at": "2026-06-07T04:37:02.385Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — third in your queue (WBSTEP9 -> BUILDSKIN -> this): REQPANEL-0606. User verbatim: \"for the request method we have been doing where its recorded, we should get someone to make a simple interface for us from the data. just so i can see what is left unresolved and can click it was resolved or not\". A simple workbench surface over the request ledger (docs/game/_requests/ + tools/request, REQUESTS.md): list every request — id, date, origin, the verbatim ask, status — with UNRESOLVED filtered to the top/default view, and a click toggles resolved/unresolved. ONE SOURCE OF TRUTH: the interface drives the SAME machinery as tools/request (resolve semantics — a user-click resolve records \"resolved by user via interface\" as the para; unresolve if supported, or surface that resolve is one-way if the ledger says so — do not invent a parallel status store). Supervisor dispatches (the marker-tracked ones) stay hidden by default like request list --open does. Keep it SIMPLE — list + filter + click, no dashboard ambitions; the settings/logs source patterns you just built are the kit. Tests at the consumption layer. READY when the user can see what is left and click it done. DO NOT COMMIT.\n",
+  "status": "new",
+  "sessionId": "d3e600d5-0069-46ee-baf8-1d77b7de69a3",
+  "captureMode": "hook",
+  "tags": [
+    "ask"
+  ]
+}

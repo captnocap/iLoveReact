@@ -1,0 +1,28 @@
+{
+  "id": "req_1678",
+  "at": "2026-06-23T00:45:59.488Z",
+  "origin": "session:14b40edc",
+  "text": "nice hell yeah haha [Image #3] uh so you knnow the texture slots u can put on faces. looks like its upside down haha can u turn it ride side up",
+  "status": "review",
+  "sessionId": "14b40edc-087f-40bd-9abb-de8f806a4e4f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T00:46:26.760Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T00:49:00.124Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User reported a texture-slot image rendering upside-down on a cooked-prop face (a picture frame). Resolved by the user rotating the image in the Studio — no code change. Noted the latent possibility that this is a systematic texture V-flip convention (the editor textureKey slot path flips V via geometryFor flipV / the compiled appendMeshPropNode flips when tex_key!=null, but the inline paint-atlas path does not), so if future slot images also arrive upside-down it would be a one-line flip fix rather than per-model Studio rotation. Left as-is per the user's choice; flagged for follow-up only if it recurs.",
+  "shas": [],
+  "resolvedAt": "2026-06-23T00:49:00.124Z"
+}

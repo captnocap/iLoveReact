@@ -1,0 +1,34 @@
+{
+  "id": "req_0625",
+  "at": "2026-06-11T10:35:00.400Z",
+  "origin": "session:a83ab298",
+  "text": "ok. that landed. next look at the prop physics and have them land. things like balls should be able to roll around and be moved by the player. cones. anything the like",
+  "status": "review",
+  "sessionId": "a83ab298-79ae-4206-aa31-2a4949adb669",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T10:35:25.315Z",
+      "actor": "a83a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T10:55:03.195Z",
+      "actor": "a83a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The compiled game now carries /test's KICKPROP-0610 prop dynamics end to end — run into a ball and it flies, cones and trash cans shove around — plus the heightfield grounding from the mid-task report. DATA: new DYNAMIC_PROPS map lump 17 (compile/worldDynamicProps.ts + lumps.ts + RLE_FORMAT.md): per kickable prop the sphere-body recipe (the kind registry's authored dynamics — radius/restitution) and its render parts as LOCAL 13-float rows; pushPropGeometry routes dynamics kinds out of the static instance buffer, mirroring /test's skipDynamicProps split. ENGINE: world_loader reserves an entity section in the host physics input (every rect writer/reader and the camera fallback shifted) and steps the bodies through the SAME game_physics.step /test uses — gravity, world collision, bounce, sphere-sphere, and the player kick all come from the one host integrator; bodies render as live per-frame nodes (player-model pattern) so a rolling ball never re-stages the one-time-uploaded static world; while seated an intent-less ghost step keeps kicked balls rolling. HEIGHTFIELDS (the 'props in general are not respecting heightfields' report), both halves: physics.zig's entity loop now samples heightfieldGroundAt so bodies land on painted terrain (fixes /test too), and the bake now applies liftPropsToTerrain (the per-prop lift /test already uses) after the building lift, so stored y=0 props ship resting ON painted hills — render, colliders, interactables, and body anchors all see the lifted y. Proof: rjit game shot GREEN with 'dynamics layer: 5 kickable props' booting from the real map; worldDynamicProps 3/3, worldColliders 4/4, test-game-physics and world codec steps green; loader and editor binaries build clean. The seated-facing-backwards review note on req_0624 was also fixed (e6ad9f675). Zig changes — the editor binary needs a rebuild to feel it.",
+  "shas": [
+    "966722562",
+    "e6ad9f675"
+  ],
+  "resolvedAt": "2026-06-11T10:55:03.195Z",
+  "tags": [
+    "ask"
+  ]
+}

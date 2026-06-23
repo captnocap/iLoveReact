@@ -1,0 +1,12 @@
+{
+  "id": "req_0110",
+  "at": "2026-06-06T12:55:01.190Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — CONVERBS-0606. The user has now hit TWO console verbs that exist in the reference implementation but were never ported (gv_perflog mode 2, noclip). Build the parity table: every console command/verb in the reference (love2d tree console + the original source the hmsc-int console was ported from), line-referenced, vs what the current hmsc-int console actually implements, mode-by-mode (a verb counts as ported only if ALL its modes/arguments work — gv_perflog existing but missing mode 2 is a NOT-PORTED row). Output: a table — verb | reference file:line | current status (ported / partial: what is missing / absent) — posted in your pane. Do NOT implement anything; this is a census. Another lane is already porting noclip and perflog mode 2 — mark those rows as in-flight. The table is the deliverable; the supervisor takes it to the user to choose what gets ported next.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

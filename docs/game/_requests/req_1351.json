@@ -1,0 +1,28 @@
+{
+  "id": "req_1351",
+  "at": "2026-06-19T00:47:03.233Z",
+  "origin": "session:d6961119",
+  "text": "Right. I know its an ai model. Thats exactly what im asking about is what model and how i know the app doesnt ship a model with it, i specifically said when i came in here that how does it work. just an ai model? where do u run the model? there are many things still unanswered here. Is it a diffusion model ? is it a text model? and again, im well aware that there would be a lot of work to and edit things generated from it, the goal is exactly to not do that. but im not going to go sculpt every single model either. for example, no r eason for me to go and model a fire hydrant. and a fire hydrant has no reason to be worked on past its first generation.",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T00:49:00.384Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T00:49:00.395Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's grounded questions about modly's AI model by reading the actual backend code. Findings: (1) modly ships NO model weights — api/requirements.txt has no torch/diffusers, only fastapi+huggingface_hub+trimesh/pymeshlab; models download at runtime to ~/.modly/models from each extension manifest's hf_repo. (2) Each model is an external GitHub extension (manifest.json + generator.py + own venv) run as an ISOLATED SUBPROCESS over newline-delimited JSON on stdin/stdout (extension_process.py); torch lives only in the extension venv. (3) Runs locally on the user's GPU (_detect_gpu_sm reads torch.cuda capability), never cloud. (4) Official models (Hunyuan3D-2 Mini/Turbo/Fast, TripoSG, Trellis2 GGUF) are all DIFFUSION/flow-matching 3D generators, image-conditioned (generate(image_bytes,params)->GLB), NOT text LLMs. Reframed integration to the user's goal (generate-and-use, not sculpt): existing importPropMesh.mjs already bakes a GLB into a placeable static ImportedProp (as with Desk.glb), so no Studio editing needed for props like a fire hydrant; replicating generation = mirror modly's thin-host + GPU-venv-subprocess + HF-download as an OFFLINE tool emitting GLB into the existing importer. Flagged GPU/VRAM feasibility as the open question. No code changed; assessment only.",
+  "shas": [],
+  "resolvedAt": "2026-06-19T00:49:00.394Z"
+}

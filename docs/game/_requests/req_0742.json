@@ -1,0 +1,33 @@
+{
+  "id": "req_0742",
+  "at": "2026-06-13T08:11:35.410Z",
+  "origin": "session:b2985164",
+  "text": "ok hold on. so i can walk thru walls. i can walk up stairs, i can walk thru dumpsters, but i can push oil barrels. so i have some collision in some places not others",
+  "status": "review",
+  "sessionId": "b2985164-7aad-4573-accc-12a386983e72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T08:26:08.222Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T08:26:08.245Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Player walked through every wall in both the live host and the compiled no-V8 game (but stairs/heightfields and dynamic barrels still collided). Root cause: collideSolidRects' slope_walkable side-push skip (framework/game/physics.zig) lacked the 'rect_height <= y + step_height' low-enough-to-step-onto guard that its sibling grace_walkable has. Walls carry a finite floor on purpose (so an upper-storey wall doesn't block lower floors), and finite_floor_band makes them eligible for the slope skip. Once the map ground became painted HEIGHTFIELD terrain, heightfieldSlopeGroundAt tripped everywhere, so every tall finite-floor wall (and solid prop) had its horizontal push skipped. Fix: add the same height guard to slope_walkable so tall walls are never slope-skipped while ramp-edge downhill-snap is preserved. One shared routine, so it fixes both builds. Verified by the user: walls block again.",
+  "shas": [
+    "8f5b03607"
+  ],
+  "resolvedAt": "2026-06-13T08:26:08.245Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "id": "req_0624",
+  "at": "2026-06-11T08:35:50.952Z",
+  "origin": "session:a83ab298",
+  "text": "hey the compiled game output is not carrying the same capability of searching or interacting with props like the test route is, lets get it fixed. make sure you follow the @GUIDING_LIGHT.md when you /survey-before-build",
+  "status": "review",
+  "sessionId": "a83ab298-79ae-4206-aa31-2a4949adb669",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T08:36:13.137Z",
+      "actor": "a83a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T09:13:55.410Z",
+      "actor": "a83a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-11T10:36:51.638Z",
+      "actor": "a83a",
+      "kind": "note",
+      "text": "Review feedback 'sit actions are backwards' fixed: the loader's model render adds 180° to player.yaw, so the seat pin now bakes yaw-180 into the state — the seated figure faces the prop's authored way. Commit follows on main."
+    }
+  ],
+  "resolution": "The compiled game output now carries /test's prop interaction capability end to end, per V28/GUIDING_LIGHT (capability in the engine, parameterized by data — no JS in the loop). DATA: new INTERACTABLES map lump 16 (compile/worldInteractables.ts + lumps.ts + RLE_FORMAT.md §2), factored as an archetype table (one row per interactive prop kind: label, sit/lay pose+height, search seconds, open/locked/keyed access, loot category — the same registry data game/kinds/props.ts authors) plus thin instance refs; collected once in pushPropGeometry so build-piece AND painted props both ship. ENGINE: constructor.zig decodes it into Scene.interactables; world_loader.stepInteract mirrors PlayRoute's interact frame exactly (reach 2.2m, E edge, search timer with move-cancel, searched set, locked denial, seat pins the player + posture until WASD/Space stands up); sit/lay ship as baked player clips 3/4 from the skeleton's posture actions. HUD: the loader draws the InteractOverlay natively (prompt pill / loading bar / notice) through the shared 2D batches in ALL THREE views — embedded /compiled, the WORLDWIN pop-out (post-main-frame batch use + globals size override/restore), and the standalone binary (TextEngine init added). Proof: rjit game shot GREEN with '14 archetypes, 30 interactable props' parsed at boot from the real map; worldInteractables 3/3, kinds/props 13/13, test-world-gamefile/mapfile green, editor ship clean. Part of the work was adopted mid-lane into checkpoint bec163c9f on the user's word; the HUD slice landed as d8ea2febf.",
+  "shas": [
+    "bec163c9f",
+    "d8ea2febf"
+  ],
+  "resolvedAt": "2026-06-11T09:13:55.410Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_1044",
+  "at": "2026-06-15T18:34:39.927Z",
+  "origin": "session:de42f85d",
+  "text": "Right, so then is the better approach to then send all of what claude would want to grep for in your own message, so that the input cant just be reprocessed over and over ?",
+  "status": "new",
+  "sessionId": "de42f85d-94df-4add-951f-a1f5bdd46a23",
+  "captureMode": "hook",
+  "events": []
+}

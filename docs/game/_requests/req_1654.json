@@ -1,0 +1,30 @@
+{
+  "id": "req_1654",
+  "at": "2026-06-22T21:15:17.271Z",
+  "origin": "session:06fe423a",
+  "text": "hello. we have been for quite some time chasing this bug where the ground just disappears, its now very clear what causes the problem, it is t he @framework/world/streaming.zig i know because when in the distance some trees came into view the ground below me disappeared",
+  "status": "review",
+  "sessionId": "06fe423a-d6e6-4bdd-a7f5-e511298cc05a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T21:29:25.682Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T21:38:07.137Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced the 'ground disappears' bug. It is NOT a streaming.zig cull: the painted ground is a non-streamed heightfield mesh in the scene prefix, so streaming's residency/LOD/draw-cap cannot remove it. The real cause is GPU mesh-slot exhaustion in framework/gpu/3d.zig — the dyn-slot pool was 48 fixed MAX_DYN_VERTS slots shared by every ~hf~ ground chunk + ~dyn~/imported mesh, claimed lazily on first in-frustum draw, never evicted, and SILENT past 48. A painted world bakes one heightfield mesh per chunk (worldGeometry.encodeFloorHeightfields) and a real map has far more than 48, so once 48 distinct meshes had drawn, every further chunk's ground mesh resolved to null and did not draw — walking so new ground (or the trees on it) came into view dropped the ground under you, permanently. That is why it looked like streaming (streaming is the trigger that brings content into view, not the culprit). Fix: turned the dyn tail into a variable-size bump allocator keyed by slotId — each entry allocates its REAL vert count (flat chunk ~30 verts vs a fat 98,304-vert slot), reused in place on same-size re-version, same total tail budget so buffer layout + 256 MiB comptime cap are unchanged; fits thousands of flat chunks. Exhaustion is now a LOUD one-shot log per req_0892. Verified: no-V8 loader builds clean and 'rjit game shot' renders the authored world headless to a PASS PNG. NOTE for review: a secondary cap GROUND_POOL=128 (per-frame ground-formula D-buffers) gates the same meshes and may need raising for very large in-view chunk counts; left untouched this pass.",
+  "shas": [
+    "b7a4a2520"
+  ],
+  "resolvedAt": "2026-06-22T21:38:07.136Z"
+}

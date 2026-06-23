@@ -1,0 +1,16 @@
+{
+  "id": "req_0038",
+  "at": "2026-06-06T06:09:27.443Z",
+  "origin": "supervisor-relay",
+  "text": "reset part button does not reset the part",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T06:11:33.802Z",
+  "resolution": "RESETPART-0606: the button fired and the DATA reset; the VIEW was stale — the 3D mesh slot is content-addressed (partDynKey ← seqs[part]) and the workbench store's resetPart dropped the route's bumpSeq(selPart), so the key never changed and the mesh kept the old sculpt (textures cleared via installRev, which masked it further). Fixed at the true layer: resetPart bumps the part seq again (one line) — no second refresh path, not the camera lane's remount-staleness family, pane 2's seam untouched. P4 pin: sculpt+outline+region → reset → grid zeroed/factory profile/regions cleared AND seq+installRev bumped (the view re-key signals) AND undo returns the sculpt. 16/16 green, full verify green except the paint lane's pre-existing WIP suite.",
+  "shas": [
+    "a7778e183"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

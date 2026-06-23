@@ -1,0 +1,28 @@
+{
+  "id": "req_1566",
+  "at": "2026-06-21T12:13:58.493Z",
+  "origin": "session:0b8abe45",
+  "text": "OK. so now, when i go into the model. and pick the paint layer, the paint is not there.",
+  "status": "review",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T12:15:08.437Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T12:35:34.623Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Paint not showing in the mesh editor on open. Verified the data is 100% intact: every painted model's current paintRef maps to a present, valid 1024x1024 PNG blob in the compacted store (pepes mdl-mqjo0ys2-3sw paintRef 13582d0470 confirmed). So this is NOT data loss and NOT caused by the store compaction (req_1556) — it's a restore-on-open gap that is PRE-EXISTING (the prior 444MB snapshot already contained only 1 of 6 current paint blobs). The compiled prop shows paint because that reads the separate, intact cooked-asset store; the editor restores from model-stream state. A fully rebuilt fresh host (zig-out/bin/hmsc-int, includes the paint-GC) still showed the old model grey, while NEWLY painted models save AND restore fine — so the system works going forward; only pre-existing blobs fail to restore on a cold open. User accepted this for now ('i painted a new one tho and it seems to save which is fine'). Full diagnosis + a fix-investigation starting point (StudioViewport restore useEffect ~line 1077 + meshPaintTexture restorePaint) is documented in the handoff /tmp/handoff-20260621-123338-texture-slots-req-1542-phases-2-3.md under 'Known open issue'. Store backup at ~/store-backup-20260621-050018-model/. Not chasing further unless asked.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T12:35:34.623Z"
+}

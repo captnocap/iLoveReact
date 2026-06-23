@@ -1,0 +1,40 @@
+{
+  "id": "req_1386",
+  "at": "2026-06-19T05:08:40.072Z",
+  "origin": "session:1863e7ee",
+  "text": "Heres what i want you to do, the current @cart/hmsc-int/editors/model/Studio.tsx file is getting massive. and there is still a number of things we are looking to get packed into here that, quite frankly, the file structure is just starting to get a bit rough. so, ideally what id like to be done is that you dont change anything about it, and propose a side-by-side replacement of it that takes what the current capability is into account as a first class thought process both in ui and file structure. This does not mean that anything at all about how it works will change, so this is not an ask to make a new approach, its to better structure the application so that it doesnt become a massive pain in the ass to do any changes",
+  "status": "review",
+  "sessionId": "1863e7ee-a8ed-4cf3-85a6-49a899536c18",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T05:08:49.528Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T05:47:49.955Z",
+      "actor": "session-1863",
+      "kind": "note",
+      "text": "Execution STARTED (user: 'ok do it'). Building studio/ side-by-side; Studio.tsx stays frozen/untouched; swap is the final one-line import in source.tsx after parity self-shot."
+    },
+    {
+      "at": "2026-06-19T08:12:24.817Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Decomposed the 3915-line editors/model/Studio.tsx side-by-side into editors/model/studiokit/ (18 files: config/helpers/StudioViewport + scene/overlays/panels/dialogs subdirs), a VERBATIM split — no logic changed, every carve verified by build. Studio.tsx stays byte-identical and untouched (proven by a body diff, exit 0). The new tree swaps in via ONE import line in source.tsx (model/Studio -> model/studiokit) and is now live + self-shot verified rendering identically to the original; the non-swapped escape hatch also verified. Deferred the risky internal hook-extraction (42 interleaved state/18 effects can't be reordered safely without runtime verification a headless build can't give). SHAs 662e7e02c,80b8ce21b,73c3d0e21,14254e9ed,1401ba757.",
+  "shas": [
+    "662e7e02c",
+    "80b8ce21b",
+    "73c3d0e21",
+    "14254e9ed",
+    "1401ba757"
+  ],
+  "resolvedAt": "2026-06-19T08:12:24.817Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0271",
+  "at": "2026-06-08T04:47:31.114Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: REQBOARD-0607 (the four-state request board: marker/secretary capture, new/doing/review/done, dispatch filter, readable detail panel + swapped layout) is USER-PASSED — the kanban is good. It is uncommitted and ORPHANED in the tree (its builder session was cleared). You own the board/platform lineage — commit it now. Explicit paths ONLY for the request system: docs/game/_index/requests.ts + docs/game/_index/requestCli.ts + docs/game/_index/requests.test.ts + cart/hmsc-int/editors/workbench/requests/ (the whole untracked dir) + docs/game/_requests/_config.json if changed + the hook files (tools/request-hook-prompt/-stop, .claude/settings.json) IF they carry board changes + the secretary/useAssistant wiring + REQUESTS.md/CLAUDE.md ledger-rule docs. git diff --staged against that list before committing — do NOT grab any cart/hmsc-int/editors/workbench source from other lanes. Re-run tools/rjit game verify green first (the requests + _index suites must pass). Post hash + file list. NOTE: REQPANEL (the in-workbench requests surface) is SEPARATE and stays held — this commit is the board model + CLI + capture, not the workbench panel.",
+  "status": "review",
+  "sessionId": "35559ffc-268f-4d59-ac07-d76ecb143bac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T04:56:08.928Z",
+      "actor": "session-3555",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T04:56:08.936Z",
+      "actor": "session-3555",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Committed the orphaned REQBOARD-0607 four-state request board as 5a178c7f8 (17 files, explicit paths). The board model + CLI + capture (docs/game/_index/{requests,requestCli,requests.test,oracle}.ts, records/request_ledger.ts, tools/request, REQUESTS.md, CLAUDE.md ledger-rule rewrite to new→doing→review→done, _config.json secretary/machine prefixes) landed together with the in-workbench source (cart/hmsc-int/editors/workbench/requests/ — board panel + secretary strip, swapped master-detail layout). This REPAIRS main: STEP10 c71bf53fd already imported requestsSource into committed sources.ts while the requests/ dir stayed untracked, so a clean checkout could not build the workbench. Per supervisor Option-A ruling the obsolete REQPANEL hold was lifted (user passed the board UI). Verified tools/rjit game verify GREEN — 70/70 suites incl. requests + _index, 3/3 scripts. No other workbench sources staged; only the requests import line was mine and it was already at HEAD.",
+  "shas": [
+    "5a178c7f8"
+  ],
+  "resolvedAt": "2026-06-08T04:56:08.936Z",
+  "tags": [
+    "ruling"
+  ]
+}

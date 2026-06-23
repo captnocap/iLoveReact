@@ -1,0 +1,30 @@
+{
+  "id": "req_0914",
+  "at": "2026-06-14T08:11:12.347Z",
+  "origin": "session:2dd06f71",
+  "text": "❯ i still am more leaning towards more of the shape i\n  came in with, at least, from this page made, the\n  settings are not comprehensive to the degree i like\n  it.\ntitle\nid\nauthor\nquestline\nfromNPC\ndesc\nreward\ndependents\nconstraints\nevents with cutscene, location, order of events, dialog, etc.",
+  "status": "review",
+  "sessionId": "2dd06f71-5b8f-48bc-94cb-c94891fc4fa3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T08:13:14.693Z",
+      "actor": "2dd0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T08:16:44.529Z",
+      "actor": "2dd0",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rebuilt the storyline authoring panel to the user's own quest-object shape after they said the page wasn't comprehensive and they preferred the shape they came in with. The panel was MissionDef-shaped and thin; it is now their exact field list in their order — IDENTITY (title/id/author/questline/fromNPC/desc), CONSTRAINTS (affordance-picked unlock gates), DEPENDENTS (derived downstream), REWARD, and EVENTS (an ordered beat list where clicking a beat expands it into location/cutscene/dialog editing, with reorder and remove). Added the fields MissionDef lacked (author, questline, desc, per-event location/cutscene/dialog) to the editable QuestDraft, making the draft the authoring truth and the runtime MissionDef the projection the compile step makes. Demoted verb/binding/expiry into a substrate WIRING group per the user's note that verb is the wrong level of hierarchy to lead with. The board now groups by the author's named questline (questlineLabel), falling back to the derived component when unnamed. Verified: model 6/6, missions 30/30, hmsc-int cart bundle clean. Still in-session; V20 'storyline' stream persistence and objective target-pickers from the affordance roster are the named follow-ups.",
+  "shas": [
+    "17c1017ed"
+  ],
+  "resolvedAt": "2026-06-14T08:16:44.529Z"
+}

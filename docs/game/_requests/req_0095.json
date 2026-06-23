@@ -1,0 +1,12 @@
+{
+  "id": "req_0095",
+  "at": "2026-06-06T11:57:24.060Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — live floor update, user verbatim: \"the floor is there. [...] as i was typing this the floor just disappeared agaion ????\". So the rebuild brought it back and then it VANISHED AGAIN minutes later — this is a RECURRING stale window, not a one-shot. Catch it in the act: the live diagnostics jsonl around the disappearance moment — what changed (heightfield/collision rect count drop, wire mismatch re-opening when a lane save or background package build landed, engine swap mid-session). Identify the exact trigger that un-floors the running session and what guarantees it stays floored. The user should not need to rebuild every few minutes. Post the trigger with evidence.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

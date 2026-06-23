@@ -1,0 +1,15 @@
+{
+  "id": "req_0143",
+  "at": "2026-06-06T17:21:52.395Z",
+  "origin": "codex:019e9ca9",
+  "text": "its not fixed. its faster. its not fixed. there is still a hang, certainly not as long though, but enough to notice its a problem; why is that",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:25:09.279Z",
+  "resolution": "Diagnosed why the WORKFREEZE fix was faster but not fully fixed: the first patch removed duplicate dynamic geometry shipments, dropping /workbench mount hostFlush from ~712MB to later traces around 29.6MB, but /workbench still cold-mounts a fresh Scene3D character stage with unique Globe geometry. The remaining hang is the transport path: real first-use vertex buffers are still serialized as decimal JSON arrays through __hostFlush, then copied and parsed in v8_app.zig before the host retained-geometry cache can help. No code change was completed for this second-stage fix because the turn was interrupted; the next targeted fix is to pack scene3dVertices/height buffers before hostFlush or move Globe generation host-side.",
+  "shas": [],
+  "tags": [
+    "bug"
+  ]
+}

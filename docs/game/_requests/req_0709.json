@@ -1,0 +1,33 @@
+{
+  "id": "req_0709",
+  "at": "2026-06-13T02:57:53.153Z",
+  "origin": "session:691d2b0e",
+  "text": "oh u know what i didnt even look at those settings. thanks. but regardless, still stands about what i said with rolling over, should just let the car roll over",
+  "status": "review",
+  "sessionId": "691d2b0e-1a0f-45b7-afb1-6cf084c80b43",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T02:58:59.713Z",
+      "actor": "691d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T03:08:22.223Z",
+      "actor": "691d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the vehicle-lab rollover so it plays out instead of stopping/resetting. Root cause was two-fold: (1) on a tip the car latched 'flipped', cut all controls, and waited for a manual R/reset — the sim froze; (2) the 2.6 trip kick couldn't clear the on-its-side energy peak (±π/2), so the body only half-leaned ~33° and snapped back each frame, flickering flipped on/off — exactly the 'it says I rolled over and I didn't' over-sensitivity. Fix in game/driving/index.ts: the trip kick now clears the peak (sqrt(2·rolloverGravity·0.7)·1.15) so the car genuinely goes over onto its roof; the airborne tumble runs on light damping (0.12) so it carries through rather than stalling; and the moment it comes to rest inverted it self-rights (eases roll back to 0) and restores control. No freeze, no reset, no mandatory keypress. Verified by sim across all 9 styles: tippy bodies go fully over (179°) and recover in ~2s, sports/fire_truck still slide instead of tipping; handling.test.ts 7/7 green. Banner updated to 'ROLLED OVER — recovering…'. NOTE for the user: the default sedan still trips on a hard turn because its baseline cgHeight (0.95) sits above the tip line — that's a feel-table tuning dial (WEIGHT/ROLLOVER: cg height / lat g in the lab), left untouched per your call to handle settings yourself.",
+  "shas": [
+    "4a6c7351f"
+  ],
+  "resolvedAt": "2026-06-13T03:08:22.223Z",
+  "tags": [
+    "bug"
+  ]
+}

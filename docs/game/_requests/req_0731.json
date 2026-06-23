@@ -1,0 +1,31 @@
+{
+  "id": "req_0731",
+  "at": "2026-06-13T07:24:57.121Z",
+  "origin": "session:b2985164",
+  "text": "well my entire machine said kernel panic all over the monitor and was looping the audio of a video i was playing so idk this muyst have caused it",
+  "status": "review",
+  "sessionId": "b2985164-7aad-4573-accc-12a386983e72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T07:30:53.068Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T07:30:53.077Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the kernel panic: an uncommitted change (req_0725/0728) raised MAX_RETAINED_VERTS to 8M verts = exactly 256 MiB, but g_retained_vbuf is ONE buffer that also carries the DYN_REGION tail (48 slots x 98304 verts = 144 MiB) on top, so its alloc requested ~400 MiB — over WebGPU's 256 MiB default maxBufferSize (we pass null limits at device creation in gpu.zig). In a validation build that aborts cleanly (the SIGABRT the user pasted); in a non-validation build the oversized per-frame GPU allocation hard-locks the driver -> kernel panic + looping audio. Fix in framework/gpu/3d.zig: MAX_RETAINED_VERTS now derives as MAX_BUFFER_VERTS - DYN_REGION_VERTS so intern+tail fill exactly the 256 MiB cap (112 MiB intern), introduced MAX_BUFFER_BYTES/VERTS naming the per-buffer API cap (not VRAM), and added a comptime assert that fails the BUILD instead of the machine if either constant is ever bumped past the cap. zig ast-check passes. Needs a full rebuild (framework change, not hot-reloadable). Uncommitted: the file also holds another lane's req_0725/0728 work, left for the user to commit.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T07:30:53.077Z",
+  "tags": [
+    "bug"
+  ]
+}

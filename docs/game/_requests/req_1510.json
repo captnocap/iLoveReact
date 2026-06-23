@@ -1,0 +1,30 @@
+{
+  "id": "req_1510",
+  "at": "2026-06-20T21:23:07.626Z",
+  "origin": "codex:019ee6ab",
+  "text": "0.19,0.13,0.14,0.18\n[js.err] The above error occurred in the <TileBody> component:\n\n    at TileBody (<anonymous>:87967:23)\n    at ScrollView\n    at ScrollView (<anonymous>:7236:30)\n    at View\n    at Box (<anonymous>:7212:48)\n    at C3 (StudioBg:5216:38)\n    at PropertiesPanel (<anonymous>:88174:13)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at QuadSplit (<anonymous>:83702:13)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at EditorShell (<anonymous>:121753:51)\n    at Router (<anonymous>:7913:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:122665:29)\n\nReact will try to recreate this component tree from scratch using the error boundary you provided, GlobalErrorBoundary.\n[js.err] [react-uncaught] TypeError: Cannot read properties of undefined (reading 'pathing')\n    at TileBody (<anonymous>:88013:28)\n    at renderWithHooks (<anonymous>:17116:28)\n    at mountIndeterminateComponent (<anonymous>:20494:23)\n    at beginWork (<anonymous>:21482:24)\n    at beginWork$1 (<anonymous>:25998:24)\n    at performUnitOfWork (<anonymous>:25446:22)\n    at workLoopSync (<anonymous>:25382:15)\n    at renderRootSync (<anonymous>:25361:17)\n    at performSyncWorkOnRoot (<anonymous>:25088:30)\n    at flushSyncCallbacks (<anonymous>:14492:32)\ncomponent-stack:\n    at TileBody (<anonymous>:87967:23)\n    at ScrollView\n    at ScrollView (<anonymous>:7236:30)\n    at View\n    at Box (<anonymous>:7212:48)\n    at C3 (StudioBg:5216:38)\n    at PropertiesPanel (<anonymous>:88174:13)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at QuadSplit (<anonymous>:83702:13)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at EditorShell (<anonymous>:121753:51)\n    at Router (<anonymous>:7913:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:122665:29)\n[js.err] Warning: %s: Error boundaries should implement getDerivedStateFromError(). In that method, return a state update to display an error message or fallback UI.%s GlobalErrorBoundary \n    at GlobalErrorBoundary (<anonymous>:122665:29)\n[dev 2:22:55 PM] rebuilt - pushed 'hmsc-int'\n[js.warn] [mapgone] ChunkSurface 0,0 encLen=159483 painted=0 cellHist=[] palette[0..3]=0.31,0.63,0.87,0.12,0.15,0.19,0.13,0.14,0.18\n[js.err] The above error occurred in the <TileBody> component:\n\n    at TileBody (<anonymous>:87967:23)\n    at ScrollView\n    at ScrollView (<anonymous>:7236:30)\n    at View\n    at Box (<anonymous>:7212:48)\n    at C3 (StudioBg:5216:38)\n    at PropertiesPanel (<anonymous>:88174:13)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at QuadSplit (<anonymous>:83702:13)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at EditorShell (<anonymous>:121753:51)\n    at Router (<anonymous>:7913:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:122665:29)\n\nReact will try to recreate this component tree from scratch using the error boundary you provided, GlobalErrorBoundary.\n[js.err] [react-uncaught] TypeError: Cannot read properties of undefined (reading 'pathing')\n    at TileBody (<anonymous>:88013:28)\n    at renderWithHooks (<anonymous>:17116:28)\n    at mountIndeterminateComponent (<anonymous>:20494:23)\n    at beginWork (<anonymous>:21482:24)\n    at beginWork$1 (<anonymous>:25998:24)\n    at performUnitOfWork (<anonymous>:25446:22)\n    at workLoopSync (<anonymous>:25382:15)\n    at renderRootSync (<anonymous>:25361:17)\n    at performSyncWorkOnRoot (<anonymous>:25088:30)\n    at flushSyncCallbacks (<anonymous>:14492:32)\ncomponent-stack:\n    at TileBody (<anonymous>:87967:23)\n    at ScrollView\n    at ScrollView (<anonymous>:7236:30)\n    at View\n    at Box (<anonymous>:7212:48)\n    at C3 (StudioBg:5216:38)\n    at PropertiesPanel (<anonymous>:88174:13)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at QuadSplit (<anonymous>:83702:13)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at EditorShell (<anonymous>:121753:51)\n    at Router (<anonymous>:7913:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:122665:29)\n[js.err] Warning: %s: Error boundaries should implement getDerivedStateFromError(). In that method, return a state update to display an error message or fallback UI.%s GlobalErrorBoundary \n    at GlobalErrorBoundary (<anonymous>:122665:29)",
+  "status": "review",
+  "sessionId": "019ee6ab-af32-7462-bc98-fece61170df4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T21:23:13.639Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T21:24:16.552Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the TileBody crash caused by stale persisted active tile names after the population-tile cleanup. Session restore now normalizes old active paint tiles to a real ground paint surface, excluding water and embedded profiles, and PropertiesPanel now guards stale tile focus values instead of dereferencing an undefined tile definition.",
+  "shas": [
+    "795f08b3b"
+  ],
+  "resolvedAt": "2026-06-20T21:24:16.552Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1637",
+  "at": "2026-06-22T17:13:38.228Z",
+  "origin": "session:0d310aad",
+  "text": "add logs for the time it takes between me clicking on a route button and it takes to load also this startup time is kinda legit kinda lying, because its started up but its not loaded everything  still startup is 3s",
+  "status": "review",
+  "sessionId": "0d310aad-1355-489d-ab3f-6188d489fc95",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T17:15:49.566Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T17:17:26.427Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two additions to the hmsc-int timing instrumentation. (1) Honest startup READY: the user noted the old READY fired at PaintCanvas mount but the map was not actually loaded (chunk bakes, grass, 3D preview still run after) and real startup is ~3s. Replaced the mount-time startupDone with a frame-settle detector — startupWatchSettle() armed at EditorShell first render watches requestAnimationFrame deltas and declares 'fully loaded — main thread settled ◀ READY' once a run of calm frames (6 frames each <32ms) is seen, i.e. when boot work has drained; a 12s deadline is the safety cap. PaintCanvas mounts are now phase MARKS, not READY. This reports the number the user feels. (2) Route navigation timing: route buttons in the chrome call navStart(path) on click ('[route] → /x (clicked)'); a useEffect keyed on route.path calls navReady() which logs click→first-render ('[route] /x first render +Nms') then arms the same settle watch to log click→fully-loaded ('[route] /x loaded +Nms'). All console.warn so it reaches the rjit dev terminal. Files: startupTimer.ts (rewritten — shared watchSettle, frozen clock from req_1633 kept), index.tsx (import, settle arm, route effect, navStart on the 7 chrome buttons), PaintCanvas.tsx (startupDone→startupMark). Pure diagnostics, no behavioural effect; verified all three transform via tools/esbuild. Not committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T17:17:26.426Z"
+}

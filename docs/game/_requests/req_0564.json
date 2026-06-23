@@ -1,0 +1,31 @@
+{
+  "id": "req_0564",
+  "at": "2026-06-10T16:08:35.281Z",
+  "origin": "codex:019eb242",
+  "text": "also the wall size is only covering 1 quarter of the wall",
+  "status": "review",
+  "sessionId": "019eb242-3ff1-73a2-b202-5d99e580829d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T16:08:43.218Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:12:20.744Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Stored decal texture capture now carries the requested capture width and height through TextureRenderCtx and into DecalSurface. That removes the fallback to the 128px one-cell render size, which was why a wall-applied decal only covered the top-left quarter of the intended wall texture.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T16:12:20.744Z",
+  "tags": [
+    "bug"
+  ]
+}

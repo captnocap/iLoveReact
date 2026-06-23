@@ -1,0 +1,10 @@
+{
+  "id": "req_1401",
+  "at": "2026-06-19T08:20:51.024Z",
+  "origin": "session:08e68a04",
+  "text": "well yeah the texture has to bake. regardless if its the low or higher res its the same texture end to end, so for whatever reason it just bumps itself down to the low res and we dont want that to happen. we know that its not a total texture problem, because i literally can texture a floor with the road texture and see it right next to this low res render. so side by side, and ive seen it on the actual ground before the first screenshot i sent u",
+  "status": "new",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": []
+}

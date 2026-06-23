@@ -1,0 +1,32 @@
+{
+  "id": "req_0429",
+  "at": "2026-06-10T03:31:58.052Z",
+  "origin": "session:0ce2",
+  "text": "also, zooming in i realized doesnt make the map go away but it resets position so hard ur out in the middle of no where when u do it same with zooming out",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-10T03:32:13.309Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T03:32:13.324Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Zoom-to-cursor was flinging the iso camera into empty space on both zoom-in and zoom-out. Root cause: zoomToCursor anchored the cursor's world point with unprojectGround, which marches the ray only to MAX_T≈400m, but the iso eye sits BASE_DIST/zoom metres from the target — up to ~750m at MIN_ZOOM — so a zoomed-out cursor ray never reached the ground and the march bailed to its cam.target fallback; the before/after delta was then garbage and shoved centreX/Z far off the map. Fix replaces the anchor with an analytic ray/plane intersection at the active level elevation (new IsoStage.groundPoint), which is distance-independent and has no march cap, and no-ops the shift if either solve is degenerate; dragPan now rides the same path. The map never disappeared (that was a separate report) — this is purely the position-reset-on-zoom. Committed in 3be6fb8b9, bundles clean.",
+  "shas": [
+    "3be6fb8b9"
+  ],
+  "resolvedAt": "2026-06-10T03:32:13.324Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1630",
+  "at": "2026-06-22T16:37:31.600Z",
+  "origin": "session:7a8f00d4",
+  "text": "ok so i got it to load, by navigating to another route first then coming back, but i dont see props that are placed",
+  "status": "review",
+  "sessionId": "7a8f00d4-327a-4595-a613-6ceb3eb4cdb8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T16:38:13.622Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T17:50:45.087Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "RESOLVED by the OOM fix chain. The 'placed props invisible' symptom was the editor OOM-crashing during render before a stable frame — the [propgone] probes proved every prop dispatches and produces geometry (CookedProp RENDER verts=N for all studio props, DataProp parts>0 for recipe props) and the burial probe showed 0 buried / 41 on-or-above ground, so nothing was actually missing or underground. Once the grass-render cap (req_1645) stopped the million-row Scene3D.Instances command that OOM'd the heap, the editor opens and props render (the compiled-world view now shows the sign, vending machine, structures). No prop-specific draw bug existed; it was the crash. Diagnostic probes ([propgone] in Prop/CookedProp/DataProp + the burial probe in IsoAuthor) remain in the tree and should be removed in cleanup.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T17:50:45.087Z"
+}

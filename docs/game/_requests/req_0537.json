@@ -1,0 +1,33 @@
+{
+  "id": "req_0537",
+  "at": "2026-06-10T13:57:52.655Z",
+  "origin": "session:38fbe83f",
+  "text": "Streaming is choppy. i am getting faces that are just disappearing their material when im looking right at it. i think the problem is you are taking LoS first before distance when distance should trump LoS and LoS should be a after distance so that far things dont draw\nlet me show u example\n\nthis building i have arrows pointed at the face not in render [Image #1] \n\n[Image #2] now its in render. but i just had to walk a fuck load of distance to make that happen when i saw it the whole time, and the other face was always in render also and it shows up\n\nalso this keeps happening, some weird building that doesnt exist keeps showing up. look\n\nnormal: [Image #3] \n\nweird: [Image #4] \n\nnotice how the space fills in with something, but thats actually nothing in that gap [Image #5]",
+  "status": "review",
+  "sessionId": "38fbe83f-8ce3-4182-8fe1-3332cbea2263",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:03:06.363Z",
+      "actor": "38fb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T14:11:33.443Z",
+      "actor": "38fb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed all three streaming defects the user caught live, one root: the LOD shell. (1) FACE-EATER (brick face vanishing while standing next to it, ~1m brick strip left at the bottom): the draw-range gap-merge bridged LOD ranges ACROSS a resident chunk, drawing its merged dark LOD box over the live textured detail — the bottom strip was the 4% LOD shrink lifting the box off the ground; range coalescing is now contiguous-only (never bridges an occupied-but-unwanted chunk) with a counted warn-once overflow instead of range-widening. (2) PHANTOM BUILDING filling a real gap: the quadrant union-AABB LOD invented mass between separate buildings; the shell is now VERBATIM copies of real rows — a far building is its own exact box in its own color (material rows copy their fallback color before whitening, so brick reads brick-ish at any distance), nothing merged or shrunk; survivors picked by a height ladder auto-raised to fit the GPU budget (user map keeps everything >=2m; 512-block lab keeps the >=16m skyline). (3) WALK-A-LOT before a face textures: promotion radius now scales with chunk content height (6 m-per-meter, the era's per-model draw distance — an 80m tower textures from ~480m). Draw order was already distance-then-sight as the user suspected it should be; these were LOD-tier defects masquerading as ordering. 4 unit tests green incl. the bridge regression; rjit game verify GREEN 73/73; massive lab submits ~5% of 776k rows/frame in 213 draws. User should rebuild + replay to confirm the brick building stays put.",
+  "shas": [
+    "feb00e91e"
+  ],
+  "resolvedAt": "2026-06-10T14:11:33.443Z",
+  "tags": [
+    "bug"
+  ]
+}

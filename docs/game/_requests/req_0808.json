@@ -1,0 +1,10 @@
+{
+  "id": "req_0808",
+  "at": "2026-06-13T18:45:55.206Z",
+  "origin": "session:6e5908e6",
+  "text": "thread '<unnamed>' panicked at src/lib.rs:417:5:\nwgpu uncaptured error:\nValidation Error\n\nCaused by:\n  In wgpuDeviceCreateShaderModule, label = 'effect_gpu_shader'\n    \nShader validation error: Function [29] 'hf_ground_rgb' is invalid\n    ┌─ effect_gpu_shader:267:1\n    │  \n267 │ ╭ fn hf_ground_rgb(uv0: vec2f) -> vec3f {\n268 │ │   let cols = i32(D[0]);\n269 │ │   let rows = i32(D[1]);\n270 │ │   let pal = i32(D[2]);\n    · │\n290 │ │   let p = uv0 * vec2f(f32(cols), f32(rows));\n    │ │           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ instructions after return\n    · │\n393 │ │   }\n394 │ │   return rgb;\n    │ ╰─────────────^ naga::ir::Function [29]\n    │  \n    = There are instructions after `return`/`break`/`continue`\n\n\n      Function [29] 'hf_ground_rgb' is invalid\n        There are instructions after `return`/`break`/`continue`\n\n\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n",
+  "status": "new",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_1243",
+  "at": "2026-06-17T14:37:42.540Z",
+  "origin": "session:c885b7cc",
+  "text": "[Image #23] ok so im thinking, for vehicles we need to have a tool for assigning faces to a name space so that we can make different parts of the entire body take different damage values",
+  "status": "new",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1072",
+  "at": "2026-06-15T21:58:45.815Z",
+  "origin": "session:34f4e405",
+  "text": "Alright. this looks right. except for a few things. one, notice how you gave every face a different color but then the UV shows only 3 colors. this is a bad a pproach, it should be exactly what is shown on the model also. and then i need an export to sprite sheet button so i can get a png either via the whole thing or one specific slice",
+  "status": "review",
+  "sessionId": "34f4e405-3e9d-47f6-b883-15900052c2df",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T21:59:50.668Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:16:06.739Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the color mismatch + added PNG sprite-sheet export. (1) Color: the model showed per-face colors but the UV panel showed only 3 (axis tints); the user wants the UV to be exactly what's on the model. Unified on ONE source — islandColorFor(partId, faceIndex) in textureize.ts (a stable FNV-hash-of-id + faceIndex pick into ISLAND_PALETTE, cycling per face so consecutive faces differ) — now used by the 3D atlas render (SceneTextureAtlas), the UV panel (StudioUVPanel, which dropped AXIS_TINT), AND the PNG export, so all three are identical (rule of two). (2) Export to sprite sheet: a dependency-free PNG encoder editors/model/png.ts (encodePng = STORED-deflate zlib + CRC32 + Adler32, pure/headless) + rasterizeAtlas(parts, texels, type, color, slice?) in textureize.ts (point-in-poly fill of each island's stored-UV silhouette with its islandColorFor color on a transparent ground; a slice crops to ONE face's island = the cookie cutter for the image-to-image flow). Studio gained an 'export sheet' button (whole atlas) and an 'export slice' button (the selected face's island, shown in face mode with one face selected); both write cart/hmsc-int/exports/<name>.png via bytesToBase64 + writeFileBase64Atomic, with a confirmation toast. The atlas name now rides the studio:tex twig. textureize 9/9 (+islandColorFor stable, rasterize whole+slice, encodePng signature/IHDR), editMesh 48/48, modelStream 8/8, Studio+TextureAtlas+UVPanel+sources bundle clean. Hot-reload TSX, nothing committed (user leads commits).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:16:06.739Z"
+}

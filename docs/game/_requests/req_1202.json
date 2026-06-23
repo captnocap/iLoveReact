@@ -1,0 +1,30 @@
+{
+  "id": "req_1202",
+  "at": "2026-06-17T00:05:24.241Z",
+  "origin": "session:8e058574",
+  "text": "you think if we take the points of a wheel well, and then distance from the ground, to triangulate the exact center for tires to sit? also this worked btw so thanks.",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T00:07:16.061Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T00:09:39.434Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the user's wheel-centre idea (find the exact tire centre from the wheel-well geometry) the clean way: instead of triangulating from arch points + ground distance, fit a CIRCLE to the arch verts — the circle centre is the axle and the radius is the tire size, with the ground distance falling out (centre height = radius when the tire rests on the ground). New pure fitWheelCenter(pts): a Kåsa algebraic least-squares circle fit performed in the well's plane (the flat/least-variance axis is taken as the well normal, the other two as the fit plane), mean-centred for conditioning, returns {center, radius, axis} or null for <3/collinear points. Studio: a '⌖ wheel center' button in vertex mode when 3+ verts are selected — fit the selection, drop a 'wheel' socket joint at the centre (mirror-aware: addMountReflections places both/all wheels when a mirror plane is on), switch to rig mode with the new joint selected, and toast the tire radius so the user sizes the wheel to match. Verified: editMesh suite 66/66 (synthetic arch recovers centre+radius; <3 and collinear return null), full hmsc-int cart bundles clean. Committed 2f577fd7f.",
+  "shas": [
+    "2f577fd7f"
+  ],
+  "resolvedAt": "2026-06-17T00:09:39.434Z"
+}

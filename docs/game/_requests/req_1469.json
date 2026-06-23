@@ -1,0 +1,30 @@
+{
+  "id": "req_1469",
+  "at": "2026-06-20T00:04:32.938Z",
+  "origin": "session:08e68a04",
+  "text": "cool put the value control into the game compile settings so i can control it",
+  "status": "review",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T00:04:46.809Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T00:06:48.844Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Exposed the palm grove on /settings so the user controls it at compile time (committed). Registered PALM_CONFIG with editorTunables (the same P2 settings door grass/bush use): sliders for the three per-tile spawn chances (density.sparse/med/dense, 0-1), trunk height + radius range, and crown frond count + length — 11 entries under a 'palm' system group. No new plumbing needed: bakeGameFile already folds /settings overrides over the registered defaults (applyOverrides), and the population reads the live PALM_CONFIG, so a compile picks up the tuned values. Verified end-to-end: applying palm.density.med=0.5 changed the live config 0.22→0.5 and a 40×40 field 353→799 palms; 11 palm entries register alongside grass's 11; bake green.",
+  "shas": [
+    "6b6391a89"
+  ],
+  "resolvedAt": "2026-06-20T00:06:48.844Z"
+}

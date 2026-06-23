@@ -1,0 +1,24 @@
+{
+  "id": "req_1472",
+  "at": "2026-06-20T01:04:54.324Z",
+  "origin": "session:08e68a04",
+  "text": "ok cool. now lets do water. since the water and trees were a package combo sorta, you see the water that has waves and the dithering?",
+  "status": "doing",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T01:05:11.294Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T20:06:37.961Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "Folded into the flora+water rework (req_1473, approved plan ~/.claude/plans/recursive-cooking-bentley.md). 'Do water' became Phase 2 of that plan: replace the disliked painted-water look with the stylized ~water~ pipeline, make painted water reach the compiled game, and fill negative heightfield. Phase 1 (flora layer) committed (f10508a3b + 7be4f9c86); water is the next phase. Tracking under req_1473; this stays in flight as its sibling."
+    }
+  ]
+}

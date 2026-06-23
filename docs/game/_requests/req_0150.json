@@ -1,0 +1,12 @@
+{
+  "id": "req_0150",
+  "at": "2026-06-06T17:42:30.699Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — WBSTEP6-0606, the workbench fold resumes on the user's word. You build the VEHICLE SOURCE per cart/hmsc-int/WORKBENCH.md — read sections 1-4 (the shape, the three laws, the WorkbenchSource contract, the nav) and section 6 step 6 before writing anything. Input: the census capability table at cart/hmsc-int/editors/workbench/census/vehicles.md — 14 capabilities (1 accounted, 13 pending), every row is your coverage law. Pattern to copy: the CHARACTER source (editors/workbench/characters/{store.ts,panel.ts,source.tsx,Stage.tsx,PaintLens.tsx} + parity table editors/workbench/WBCHAR.CAPTURE.md + its 13-test suite) — same file shape under editors/workbench/vehicles/, separate files/stores. Deliverables: (1) WBVEHICLES.CAPTURE.md parity table, every census row line-referenced to the dying /vehicles route source and marked with workbench coverage — supervisor verifies the table independently; (2) the source live on /workbench; (3) test suite; (4) your census rows flip PENDING->ACCOUNTED in WORKBENCH.md (single-writer: only your rows). LAWS: additive only — the /vehicles route is UNTOUCHED (it dies in a later flip commit on the user's word); reuse shell/fields + the stage kit, a second field renderer/painter/stage implementation is a review-blocker; the three chrome laws. Build via tools/rjit; verify green; READY with the capture table path. DO NOT COMMIT — supervisor sequences commits. Only the user's hands PASS it.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

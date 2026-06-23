@@ -1,0 +1,28 @@
+{
+  "id": "req_0953",
+  "at": "2026-06-15T08:56:54.754Z",
+  "origin": "session:832d7b44",
+  "text": "one more thing also, it makes it a free feature for customization in the game, and it makes it so i can do things for the assassination part of the game really uniquely like chop the body up and hide it, or i can have a tire blow off the side from a car because its just a joint for example.  but yeah i think the customization part alone is huge some people all they like to do is customize a car or their player model that can be just a game itself lol",
+  "status": "review",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T08:57:45.474Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T09:15:34.338Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured in Part 0a: a joint assembled can be severed — the same typed-connector data drives runtime decomposition, so mounts need an attached|detached state plus a break trigger, not a one-way weld bake. Free payoffs recorded: in-game customization, dismemberment/assassination, vehicle part-loss. Logged as a constraint on the gated composition spec so it isn't designed out. User-confirmed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T09:15:34.338Z"
+}

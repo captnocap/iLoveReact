@@ -1,0 +1,33 @@
+{
+  "id": "req_0329",
+  "at": "2026-06-08T12:02:30.280Z",
+  "origin": "codex:019ea612",
+  "text": "Just do the next step. There is no micro step here to slightly improve. Thats a waste of time and tokens. Just do the next proper step",
+  "status": "review",
+  "sessionId": "019ea612-258b-7013-b887-0bcd6a4954ea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T12:02:41.980Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T12:12:35.922Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the proper data path for the no-V8 player model: hmsc-int now bakes the V2 figure kit into a PLAYER_MODEL map lump, the Zig map constructor decodes local-coordinate mesh groups/textures, and world_loader instantiates those groups at the live player transform while keeping the drivable camera path. Verified with ./tools/rjit game shot --out zig-out/game/player-model-baked.png; this exercised the TS bake and no-V8 Zig loader and rendered the baked model. The active local map currently baked 0 scoped world instances, so the shot is model-over-sky rather than a world-layout comparison. User must verify interactively with tools/rjit game play; not marked done, awaiting your verification.",
+  "shas": [
+    "8ba038a0e"
+  ],
+  "resolvedAt": "2026-06-08T12:12:35.922Z",
+  "tags": [
+    "ruling"
+  ]
+}

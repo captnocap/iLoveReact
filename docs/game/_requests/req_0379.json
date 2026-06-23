@@ -1,0 +1,13 @@
+{
+  "id": "req_0379",
+  "at": "2026-06-08T23:05:15.169Z",
+  "origin": "session:67746dc2",
+  "text": "took a shower and was thinking... \n  what if i dont remove v8? what if the game data is as it   \n  stands now, but the game logic, like damage, or any of t   \n  hat. is still inside of the v8 ? ok, i know where this     \n  goes. 'your right back to the whole problem u escaped'     \n  except, its not. think about it this way. in a browser, if \n  you have a css animation vs a js animation, and the js     \n  needs to gc, what happens. well the js animation stutters, \n  the css animation just keeps going. ok. now, how long is   \n  a gc in v8? lets say 30-50ms just to overshoot it. maybe   \n  its longer, ive not ever really seen it to be. this is a   \n  generous amount. ok, now, what is worse. you as the player \n  are lagging. or your shots that you shoot, land a frame    \n  or two late? well, as a matter of fact, this is already    \n  how gamers have trained their brain. Playing online games  \n  is exactly this delay. think about it. i quit the game if  \n  i go to awp down mid and i jump and rubber band back to my \n  spot. I keep playing if i awp down mid if i cant feel the  \n  lag myself, but i question if the other player is on a     \n  toaster. gc can be the exact same muscle memory of network \n  latency, as long as the gc can never affect the actual     \n  input behavior of the player. now, v8 is still going to    \n  just emit me back some data that goe into my loaders, but  \n  it doesnt need to recompile the entire game, it just needs \n  to get a new array in there somewhere or change some       \n  values of an existing. but as it stands, i dont see it     \n  ever being something worse than 5-10ms of playing online   \n  brings also  ",
+  "status": "new",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "idea"
+  ]
+}

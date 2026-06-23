@@ -1,0 +1,30 @@
+{
+  "id": "req_1373",
+  "at": "2026-06-19T02:53:20.628Z",
+  "origin": "session:be97e48f",
+  "text": "remove the grid if its not apart of the painting constraints its just noise this is painting though but i keep also again, and this doesnt make any sense, but say i have a patch at the clip, and then another say on the stock, i have a open space im painting on the clip and it wont paint wont paint wont paint. i paint the stock and now the clip paints its color, based on the patch on the stock. note, i am just giving arbitrary locations because that is how it acts, is completely arbitrary",
+  "status": "review",
+  "sessionId": "be97e48f-9627-4113-86b2-bb34b58ed45b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T02:54:53.407Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T03:18:58.959Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the paint cell-grid overlay (PaintGridOverlay) — the pixel painter has no cells, so the grid was pure visual noise on the model. Also made pickFaceUV occlusion-correct: it now tests every non-glass face and the nearest one wins; a no-uv front face BLOCKS rather than letting the ray punch through to a hidden back face (the 'paint lands somewhere arbitrary' half of the report).",
+  "shas": [
+    "c1461c146"
+  ],
+  "resolvedAt": "2026-06-19T03:18:58.959Z"
+}

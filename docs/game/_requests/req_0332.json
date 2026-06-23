@@ -1,0 +1,33 @@
+{
+  "id": "req_0332",
+  "at": "2026-06-08T12:35:48.914Z",
+  "origin": "codex:019ea612",
+  "text": "NEXT KEYSTONE BATCH (user's words): \"evaluate the actual in-editor camera for the test route, and the animations for jumping and walking, and have them land.\" Once these land, this is EVERYTHING the user knows the data-shape needs to move forward. Build to docs/game/GUIDING_LIGHT.md — game = data, no code/VM in the loop, content-address, declarative. Continue in your own context; /hand-over if you get low.\n\nTHREE ITEMS:\n\n1. CAMERA — EXACT /test PARITY. The loader has *a* camera, but NOT /test's. GO EVALUATE the real /test route camera (the in-editor play camera): find exactly how /test drives it — follow/orbit behavior, offset, smoothing/lag, pitch, FOV, how it tracks the player. Reimplement THAT math in Zig in the loader. NO V8, NO @reactjit/cameras registry call — reimplement it natively, the same way you mirrored buildHmscSky for lighting. The bar is \"feels like /test's camera,\" not a hand-tuned approximation. The authored START pose stays data (the env lump); the live driven camera matches /test's behavior.\n\n2. WALK + JUMP ANIMATIONS — as DATA. Find /test's player animations (walk cycle, jump pose/arc); the head_lab / Characters3D rig is the reference. Bake the animation clips (skeletal keyframes/poses) into a lump the loader plays by INTERPOLATION (lerp between keyframes by time — the arithmetic primitive). NO animation interpreter/VM in the loop: the clips are DATA, the system just plays them. Content-address the clips. Walk plays when moving, idle when still, jump pose during the jump arc.\n\n3. JUMPING (mechanic) — a physics verb on the collision you just built (5def17f1d). grounded && jump-key -> upward velocity; the existing gravity (10 m/s^2) + surface collision already handle the arc and the landing. Small addition.\n\nBAR (enforced): ONLY the user running `tools/rjit game play` and seeing it counts. NEVER self-declare GREEN/PASS/done. When ready, tell the supervisor EXACTLY: what to run, what the user should see (walk animation while moving, a jump, the /test-matching camera), and the controls. The supervisor relays; the USER verifies.\n\nGUARDS: no stubs/placeholders/shortcuts — don't fake an animation with a hardcoded pose-swap if the real clip is the ask; don't approximate the camera and call it parity. ZERO V8 in the loader. Stay in your OWN context — NO Task tool, NO subagents (the supervisor watches your pane; a subagent hides the work). tools/rjit only. Commit with EXPLICIT paths (NOT git add -A; ~400 set-aside files in the tree). No reset/revert.",
+  "status": "review",
+  "sessionId": "019ea612-258b-7013-b887-0bcd6a4954ea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T12:35:56.843Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T12:46:30.541Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the no-V8 loader keystone batch as data-driven runtime behavior: the loader now uses the /test Orbit camera constants and smoothing, bakes the V2 head_lab player as per-node mesh groups, emits a content-addressed player animation lump with idle/walk/jump transform keyframes, interpolates those clips in Zig, and advances walk/jump animation clocks from movement and airborne state. The existing host physics jump path is wired through Space, and the no-V8 loader still constructs/render-captures without V8. Verification run locally used tools/rjit game shot --out zig-out/game/camera-aim.png, tools/rjit game verify, zig build test-world-mapfile, zig build test-world-gamefile, zig build test-game-camera, and zig build test-game-physics; not marked done, awaiting user verification via tools/rjit game play.",
+  "shas": [
+    "e9eb9c078"
+  ],
+  "resolvedAt": "2026-06-08T12:46:30.541Z",
+  "tags": [
+    "ruling"
+  ]
+}

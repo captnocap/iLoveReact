@@ -1,0 +1,21 @@
+{
+  "id": "req_0546",
+  "at": "2026-06-10T14:26:05.092Z",
+  "origin": "session:eb4f2023",
+  "text": "seems the camera entirely reverted now it is doing it on walls i use to say were good",
+  "status": "doing",
+  "sessionId": "eb4f2023-4d97-4dcf-8ed4-0e2de48c4b21",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:32:39.444Z",
+      "actor": "claude-eb4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ],
+  "tags": [
+    "bug"
+  ]
+}

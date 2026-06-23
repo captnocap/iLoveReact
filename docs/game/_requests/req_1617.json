@@ -1,0 +1,30 @@
+{
+  "id": "req_1617",
+  "at": "2026-06-21T18:59:59.917Z",
+  "origin": "session:e36112e0",
+  "text": "same way images are selected in  the same interface",
+  "status": "review",
+  "sessionId": "e36112e0-5303-4202-ba4f-5d93412ec821",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T19:03:28.681Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T19:03:28.690Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked to pick the model from the 'system menu' instead of typing a path (req_1616), clarifying (req_1617) it should work the SAME way images are selected in the same interface. Found the existing image-selection mechanism: editors/cutout/sources.ts pickImageFile spawns the native OS file picker via 'zenity --file-selection' through execAsync (the iso PAINT panel's image upload uses it). That IS the system picker -- no host dialog door or framework rebuild needed. Added editors/model/pickModelFile.ts as the model sibling of pickImageFile (same zenity-via-execAsync idiom, filtered to *.glb *.obj, optional startDir seeding the dialog at the generated-models folder). Rewired studiokit/dialogs/ImportModelDialog.tsx: removed the typed-path TextInput/LCField, added a 'Choose file…' button that opens the system picker and displays the chosen filename; Import is disabled (guarded + dimmed) until a file is chosen. Existing .obj/.glb detection + UV-unwrap import logic unchanged. Verified tools/tsc-check hmsc-int bundles clean (exit 0); rides the identical proven door as the working image upload. Could not self-shot the interactive GUI dialog headlessly. Committed e39d8d066.",
+  "shas": [
+    "e39d8d066"
+  ],
+  "resolvedAt": "2026-06-21T19:03:28.690Z"
+}

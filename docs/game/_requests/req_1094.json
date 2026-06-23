@@ -1,0 +1,28 @@
+{
+  "id": "req_1094",
+  "at": "2026-06-15T23:18:18.211Z",
+  "origin": "session:760f9f8d",
+  "text": "curious, our bush approach looks like abad science project compared to this LMFAO is there anything we can gain for our bush and green parts of a tree",
+  "status": "review",
+  "sessionId": "760f9f8d-dc0f-4592-9807-536386b8fe20",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T23:18:36.379Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T23:34:53.779Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Took over the bush TILE with the grass card-population approach and retired the ugly solid-sphere bush prop. Generalized render3d/grassPopulation into one populateFoliage(world, spec) roll driven by a FoliageSpec (config + tile→density-level map); grass and bush are two specs (rule of two, no duplicate roll). Added BUSH_CONFIG (taller/wider/denser leafier clumps, own greens) registered as its own 'bush' /settings tunable group (height/density/ColorWheel, same rig). New BushClump geometry (runtime/geometries): 5 cards fanned a full circle, tips splayed OUTWARD so it reads as a leafy shrub, not a tuft. BushField (GrassField.tsx, shared FoliageField inner) renders it through the same '~grass~' foliage pipeline (wind+cutout+gradient), wired into WorldStatics. Compiled parity: world_loader.zig SHAPE_BUSH=7 + buildBushClump() + bucket + static node + streaming family/proto (tex_key '~grass~', whitened-skip already covers it); worldGeometry pushFoliage() emits grass+bush. Retired the 'bush' prop from the scatter forest brush + the nature palette (def left dormant). Verified: editor bundle + ship + self-shot PASS; rjit game shot PASS (grass 19344 + bush bakes; bush 0 only because the saved map has no bush painted yet). Trees (canopy cards, lifted higher) are the next slice the user flagged. Not committed (shared files).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T23:34:53.779Z"
+}

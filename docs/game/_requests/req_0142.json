@@ -1,0 +1,15 @@
+{
+  "id": "req_0142",
+  "at": "2026-06-06T17:18:27.162Z",
+  "origin": "codex:019e9ca9",
+  "text": "so then thats just a failure to write good code. fix it",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:20:56.939Z",
+  "resolution": "Implemented the WORKFREEZE host-flush fix without committing: dynamic Scene3D geometry now ships heavy vertex buffers once per dynamic key, then key-only; character preview anatomy meshes reuse their part dynamicKey instead of minting fake per-anatomy versions. This targets the measured cause: /workbench mount hostFlush went from 712,304,674 bytes total and a 142,460,237-byte/788,280us drain to 85,709,787 bytes total over 6 batches, with steady /workbench frame at 4.13ms/240fps and 35 Scene3D meshes/0 dropped. tools/rjit game verify hmsc-int is green. No commit yet; awaiting user live pass per supervisor.",
+  "shas": [],
+  "tags": [
+    "ruling"
+  ]
+}

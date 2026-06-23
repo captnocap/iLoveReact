@@ -1,0 +1,13 @@
+{
+  "id": "req_0267",
+  "at": "2026-06-08T04:45:27.051Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: VEHICLE MODEL — USER RULING that corrects BOTH the lab shape AND my earlier one-Car proposal (VEHCOHERE was wrong, discard it). User verbatim, how it should be: \"i have sedans, coupes, wagons, vans, pickups, sports, a fire truck, a police car, an ambulance. i do not set the service of the type of vehicle, it is inferred by the car. i can set spawn rates, rarity, speed, color variations.\" And the bug he named in the current shape verbatim: \"why would i have a car named ambulance, that is the car type ambulance?\" and \"the current approach assumes i have 1 car and adding another makes it so there is only that variety of that said model. that is wrong.\"\n\nTHE CORRECT MODEL: the vehicle TYPES ARE the roster entities — sedan, coupe, wagon, van, pickup, sports, fire truck, police car, ambulance are each a distinct roster row (NOT one Car with the types as variants, NOT a car-N doc named after a type). Per vehicle: (1) SERVICE IS INFERRED from the vehicle, never set by hand — ambulance→medical, police car→police, fire truck→fire, the rest→civilian; kill the service selector. (2) Authoring fields are POPULATION/SPAWN params: spawn rate, rarity, speed, and color variations. This is a vehicle-population table (GTA-style), not a single-vehicle editor. Color variations stay as the per-type variant pattern via the shared chooser; geometry/identity is the type itself.\n\nPROPOSAL FIRST — do not rebuild the panel yet (my last proposal was wrong, so we get this one right before code): post (1) the corrected VehicleType model shape against what the game's builder actually exposes (the 8 geometry presets + service livery you already mapped — service becomes a derived property of the type, spawn/rarity/speed are new authoring fields, check if the world's vehicle spawner already consumes any of these so we author what's real), (2) what dies (the service selector, the car-N identity minting, the one-Car collapse idea), (3) where spawn-rate/rarity/speed live if the spawner doesn't read them yet (propose, do not invent silently). I review against the user's words before you touch the panel.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

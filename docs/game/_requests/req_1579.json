@@ -1,0 +1,30 @@
+{
+  "id": "req_1579",
+  "at": "2026-06-21T13:24:58.966Z",
+  "origin": "codex:019eea3c",
+  "text": "now, note, this does not happen with walls or other things that have this capability already, only this new prop i just did it to",
+  "status": "review",
+  "sessionId": "019eea3c-80f5-79b0-84df-c00c449c7a7e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T13:25:16.557Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T13:28:19.992Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Handled the clarification that walls and existing textured surfaces were already correct by scoping the fix exclusively to new cooked-prop slot overrides. Existing wall/part texture orientation and baked cooked-prop atlas rendering are untouched; only external slot texture rendering now follows the established upright convention.",
+  "shas": [
+    "033075ef4"
+  ],
+  "resolvedAt": "2026-06-21T13:28:19.992Z"
+}

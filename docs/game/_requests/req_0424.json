@@ -1,0 +1,34 @@
+{
+  "id": "req_0424",
+  "at": "2026-06-10T02:58:40.442Z",
+  "origin": "session:9440c2b7",
+  "text": "fuck yeah that landed clean as hell. uh can you get the prefabs in here? and then also can you remove the inspect. toggle here, just keep the build. (inspect is broken anyways) and then also is it possible to get a grid that isnt so choppy in how it behaves. this just is dull and needs thicker lines or something to make it more pronounced",
+  "status": "review",
+  "sessionId": "9440c2b7-fcc6-4745-a2a5-309cd273e004",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T02:59:59.887Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T03:05:55.869Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Three asks from req_0424: (1) PREFABS in the iso pane — the catalog rail gains a 'prefabs' tab listing GAME_BUILD.prefabs.definitions; arming a prefab previews ALL its stamped pieces (placed.stamp at the snapped origin) as the translucent ghost and commits ONE prefabStamped WorldEvent (the same path F2's place() uses), with Armed now {kind:'piece'|'prefab', id} so the two can't be confused. (2) Removed the inspect|build toggle from the bottom-right pane — it's build-only now (on-foot inspect was broken anyway; the embodied view still lives on /test F1/F2). (3) Grid is thicker + less choppy — recentres every single tile instead of 4-tile jumps (stable keys = position UPDATEs, no churn) and lines are bold/bright with a heavier major line every 8 tiles, raised above the floor so no z-fight. IsoAuthor.tsx committed (25897c529, bundles clean). The index.tsx toggle-removal is LIVE in the working tree (dev build has it) but intentionally NOT committed because another session has uncommitted pieceMutationMapName work in index.tsx — held to avoid sweeping their change; that one file needs a coordinated commit.",
+  "shas": [
+    "25897c529"
+  ],
+  "resolvedAt": "2026-06-10T03:05:55.869Z",
+  "tags": [
+    "ask",
+    "ux"
+  ]
+}

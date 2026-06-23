@@ -1,0 +1,30 @@
+{
+  "id": "req_1463",
+  "at": "2026-06-19T23:42:33.198Z",
+  "origin": "session:c455375c",
+  "text": "there is currently no one worker doing anything right now, they are all idle. i have rebuilt the dev binary now several times over because every time i start it up, it says rebuild needed. but it rebuilds on every time i restart it. so idk what to do",
+  "status": "review",
+  "sessionId": "c455375c-a92d-45f4-b375-64c50bd96f2a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T23:42:40.445Z",
+      "actor": "c455",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T23:45:23.203Z",
+      "actor": "c455",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed and fixed 'rjit dev rebuilds every restart'. Root cause: the dev-host staleness fingerprint (cli/dev/rebuild-signal.ts nativeInputManifestScript) sha256-hashed the ENTIRE framework/ tree, including framework/testing/** (21 of 332 files). Those are zig 'test' modules consumed ONLY by build.zig's test-* steps via b.addTest - never by the 'app' step that builds the dev binary. framework/testing/unit/game_physics.zig had its mtime bumped to 16:36 (after the 16:29 build) with clean git status - a test run, git op, or another worker rewrote it with identical bytes - which flipped the fingerprint and made devHostNeedsBuild() return true on every start, forcing a full ~442MB rebuild that never re-baselined the cause. Fix: prune framework/testing/ from the manifest (find ... -type d -name testing -prune -o -type f -print) so the fingerprint reflects only the dev binary's real inputs. Verified: manifest 339->318 files, fresh fingerprint now matches stored build_id (no rebuild on next dev start), and touching a test file no longer changes the fingerprint. Also re-baselined zig-out/bin/reactjit-dev.dev-build.json to the new-formula hash (guarded: aborts if any non-test input was newer than the binary) so the user does not eat one more rebuild. Committed 8748887d9.",
+  "shas": [
+    "8748887d9"
+  ],
+  "resolvedAt": "2026-06-19T23:45:23.203Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0676",
+  "at": "2026-06-12T09:21:47.923Z",
+  "origin": "codex:019eba70",
+  "text": "can you fix this error also [js.err] [dispatch] error id=5312 type=onClick: buildings: 'custom:override-back-material' is not a registry material — skins assign THE material system Error: buildings: 'custom:override-back-material' is not a registry material — skins assign THE material system\n    at checkSkin (<anonymous>:86539:15)\n    at writeTargetSkin (<anonymous>:86591:7)\n    at Object.applyPaintTargetSkin (<anonymous>:86687:9)\n    at Object.run (<anonymous>:87358:40)\n    at runSourceAction (<anonymous>:73038:9)\n    at onPress (<anonymous>:73127:1159)\n    at dispatchAliases (<anonymous>:91120:9)\n    at globalThis.__dispatchEvent (<anonymous>:91160:7)\n    at <anonymous>:1:1",
+  "status": "review",
+  "sessionId": "019eba70-af1b-7633-a9f1-ba5a8c22c607",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T09:21:54.097Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T09:29:57.002Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the building paint apply error by keeping newly saved custom materials visible in-process immediately after save; the building validator can now resolve custom:override-back-material through the material system instead of throwing before localstore catches up. Added a regression for stale same-dispatch localstore reads.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T09:29:57.002Z",
+  "tags": [
+    "bug"
+  ]
+}

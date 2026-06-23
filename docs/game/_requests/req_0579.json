@@ -1,0 +1,39 @@
+{
+  "id": "req_0579",
+  "at": "2026-06-10T17:54:05.301Z",
+  "origin": "session:7a5b02e7",
+  "text": "also. what did u just change a lot of things kinda broke. like the bushes and the backs of props",
+  "status": "review",
+  "sessionId": "7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T17:55:20.754Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T17:56:41.020Z",
+      "actor": "fable-mat",
+      "kind": "note",
+      "text": "In flight — blocked on the user's answer (live editor vs compiled game?). Investigation so far: my commits' blast radius is (1) bake+loader only (decalPack/worldGeometry/constructor/decal_raster/world_loader — only the 2 decal materials change behavior; props/bushes ride the untouched flat batch), (2) editor host: copy_src usage added to static-surface textures (the only live-render-path delta; would affect ALL captures, not selectively bushes/prop-backs), (3) data-shape TS (baker unmount, pixels field removed). Meanwhile ANOTHER session has large UNCOMMITTED edits hot-reloading into the live editor right now: workbench/items/Stage.tsx (+482), workbench/buildings/source.tsx (+218), buildings/live.ts mid-swap to assignableMaterialCatalog — exactly the buildings/items/props material-resolution territory. If breakage is in the live editor, the in-flight workbench rework is the prime suspect; if in the compiled game, it's mine and I dig immediately."
+    },
+    {
+      "at": "2026-06-10T18:23:35.839Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Accounting + root cause delivered. The bush/prop-back breakage was NOT from the decal commits: the baked instance data was verified healthy (Zig probe of the real gamefile: full sphere blob clusters with correct scales), and the fault was world_loader's refreshStreamNodes hardcoding vert_count=36 (a box) for EVERY streamed draw — spheres (576 verts) drew only their first polar ring (the flat leaf shards), cylinders drew 3 of 8 segments (props lost their backs). Boxes are exactly 36, so walls/roads never showed it; it surfaced when the recent prop-models commits put real shapes into streamed families. Fixed in 828666228: vert_count now derives from the family proto's own vertex slice. rjit game shot GREEN.",
+  "shas": [
+    "828666228"
+  ],
+  "resolvedAt": "2026-06-10T18:23:35.839Z",
+  "tags": [
+    "bug"
+  ]
+}

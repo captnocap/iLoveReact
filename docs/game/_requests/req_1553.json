@@ -1,0 +1,10 @@
+{
+  "id": "req_1553",
+  "at": "2026-06-21T00:18:18.190Z",
+  "origin": "session:0b8abe45",
+  "text": "<task-notification>\n<task-id>bexyvsnnz</task-id>\n<tool-use-id>toolu_015yvXkQ3mDtUZ22r2WawuW2</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/0b8abe45-3eab-457f-ba52-c843df8c5cd7/tasks/bexyvsnnz.output</output-file>\n<status>completed</status>\n<summary>Background command \"Compile-check the loader change via fast ship build\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": []
+}

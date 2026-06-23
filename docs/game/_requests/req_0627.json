@@ -1,0 +1,31 @@
+{
+  "id": "req_0627",
+  "at": "2026-06-11T10:52:33.557Z",
+  "origin": "codex:019eb64a",
+  "text": "help me understand something. so in the painter. i go and i paint some random scribbles, i save it as sss, and i see it now in my material list. how come i cannot use this for skins on walls/floors now ?",
+  "status": "review",
+  "sessionId": "019eb64a-e1ff-7e91-9b0e-abf0f10f5bd6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T10:52:41.406Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T10:53:31.389Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained the current painter/material/skin routing. A saved painter document is editable library source data, not a texture-registry material id; building skins only accept color or material ids that resolve through textureById/assignableMaterialCatalog. The existing usable paths are materialize/apply from a building paint target, or extract a cutout then materialize it into a custom: texture. No code changed for this explanatory request.",
+  "shas": [],
+  "resolvedAt": "2026-06-11T10:53:31.388Z",
+  "tags": [
+    "bug"
+  ]
+}

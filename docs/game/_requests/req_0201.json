@@ -1,0 +1,15 @@
+{
+  "id": "req_0201",
+  "at": "2026-06-07T06:32:09.880Z",
+  "origin": "session:f2302907",
+  "text": "did you have another format in mind, i have to think there is even better but idk. or even further compression of that alone, and more so what about where the majority of it is already pre-defined data from the host for the map, since my approach assumes its all in the one mapfile",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:33:14.316Z",
+  "resolution": "Answered the format-alternatives question and the user's pre-defined-host-data insight (no code). Ruled-in their point as the dominant win: the mapfile should store REFERENCES into platform registries (GEOMETRIES, materials, kinds, thingymajiggers, shaders) via a string-table lump + small-int index grids, embedding only map-authored content in a pakfile-style lump — the GoldSrc WAD-reference / Source VPK+pakfile precedent; the reference list doubles as a dependency manifest for load-time validation. On 'even better than RLE': surveyed palette+bitpack+RLE vs LZ4 vs zstd; concluded no codec beats restructuring — order of wins is reference-not-embed (100x+), default-value sparse chunks, palette indexing, then RLE mopping up; zstd would trade 10x decode speed for scraps. Added the principle: compress for transport (whole-blob lz4/zstd at distribution), lay out for runtime (RLE/raw mmap-able) — never bake general compression inside the format. One-mapfile shape preserved.",
+  "shas": [],
+  "tags": [
+    "ask"
+  ]
+}

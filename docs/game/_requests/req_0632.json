@@ -1,0 +1,18 @@
+{
+  "id": "req_0632",
+  "at": "2026-06-11T11:28:09.892Z",
+  "origin": "session:a83ab298",
+  "text": "Nice job. landed clean. /hand-over and lets work on more props",
+  "status": "doing",
+  "sessionId": "a83ab298-79ae-4206-aa31-2a4949adb669",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T11:28:49.815Z",
+      "actor": "a83a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

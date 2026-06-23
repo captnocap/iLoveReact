@@ -1,0 +1,30 @@
+{
+  "id": "req_1505",
+  "at": "2026-06-20T20:10:37.773Z",
+  "origin": "session:4e481f48",
+  "text": "Thats weird. They are NOT here. Let me confirm. Here is the iso3d world editor \n\nthe editor:[Image #23] \ni put that prop next to it so you know where that space is in the game world. so u can see the signs right here. ok, compile the game and load [Image #24] \n\nno signs",
+  "status": "doing",
+  "sessionId": "4e481f48-88ee-489e-9362-130a372fc4f5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T20:11:32.827Z",
+      "actor": "4e48",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T20:25:35.600Z",
+      "actor": "4e48",
+      "kind": "note",
+      "text": "Added temp diagnostics (compileToGame live-previewWorld → /tmp/rjit-compile-diag.json; bakeGameFile boot-key → /tmp/rjit-bake-diag.json) to localize where auto-gen signs are lost. Bake reads loadEditorWorld which is being clobbered by parallel sessions (shows Wendy Ave/no-pepe vs user's HMSC/pepe). Awaiting user compile to capture live-session truth."
+    },
+    {
+      "at": "2026-06-20T21:35:40.065Z",
+      "actor": "4e48",
+      "kind": "note",
+      "text": "ROOT CAUSE found via live-session diag: compile diag showed placements stuck on stale 'Wendy Ave' gen set (60) while editor renders live 'HMSC AVE' roads — the gen-sign sync effect only re-fired on generatedPlacements change, NOT when a restore (autosave/hot-reload, frequent due to parallel-session edits) reverts setPlacements to the saved snapshot. So Compile shipped the stale snapshot signs (at old locations) — absent at the user's current intersection. Fix: PaintCanvas sync effect now also depends on props.place.items, re-asserting live gen props after any store revert (no-op guard keeps it loop-safe). Awaiting user verify compile."
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1014",
+  "at": "2026-06-15T16:05:12.264Z",
+  "origin": "session:46d99bcc",
+  "text": "ok. now, there are some dots that appear when u are selecting faces, but they are entirely off. by like half. as in the dot for the top face is actualyl dead center of the model. and the dot for the bottom face is the same distance, outside of the model",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T16:05:31.619Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T16:07:00.352Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed face-selection dots being off by half the model height (top-face dot landed at the model center, bottom-face dot a half-height below/outside the model). Cause: SelectionOverlay in meshSelect.tsx added the part's render lift (parts sit ON the grid, so an origin-centered cube is lifted by half its height when rendered) to the projected VERTS but projected the face CENTROID from un-lifted local space — so face dots were off by exactly the lift. Fix: bake the lift into the projector once (proj = p => baseProj([p0, p1+partLift, p2])) so verts, edges, and face-centroid dots all share one lift point and cannot drift — matching the one-lift-point pattern the picking path already uses. Studio.tsx bundles clean; 2D overlay projection so no headless test applies. Updated PLAYBOOK build log. Hot-reloadable.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T16:07:00.352Z"
+}

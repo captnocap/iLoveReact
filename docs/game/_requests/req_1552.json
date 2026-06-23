@@ -1,0 +1,28 @@
+{
+  "id": "req_1552",
+  "at": "2026-06-21T00:11:03.949Z",
+  "origin": "session:0b8abe45",
+  "text": "ok so then if that doesnt work then how does this ? [Image #6]",
+  "status": "review",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T00:12:06.253Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T00:13:01.775Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's screenshot showing textured wall posters working in the compiled game while a painted cooked prop is gray. The posters are FacePainter decal/material images that decode in the Zig loader (gpu/decal_raster.zig stbi_load_from_memory; the game host links stb_image via framework/c.zig). Cooked-prop paint takes a different path (MESH_PROPS lump, decoded at BAKE time under v8cli, which lacks the image-codec door) so it ships textureless. The two are not contradictory: load-time decode works, bake-time decode does not. Fix (folds into req_1544): ship the cooked-prop paint PNG bytes through MESH_PROPS as passthrough and decode in the loader with stbi, mirroring the decal path; this also avoids rebuilding the shared v8cli binary.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T00:13:01.775Z"
+}

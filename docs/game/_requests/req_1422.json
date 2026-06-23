@@ -1,0 +1,30 @@
+{
+  "id": "req_1422",
+  "at": "2026-06-19T16:35:10.791Z",
+  "origin": "session:d6961119",
+  "text": "damn can you just offload mem to the ram here ? 100%|███████████████████████████████████████████████████████████████████████| 75/75 [00:28<00:00,  2.66it/s]\nImage saved to outputs/instant-mesh-large/images/blue_cat.png\n[1/1] Creating blue_cat ...\nTraceback (most recent call last):\n  File \"/home/siah/creative/reactjit/deps/InstantMesh/run.py\", line 216, in <module>\n    mesh_out = model.extract_mesh(\n  File \"/home/siah/creative/reactjit/deps/InstantMesh/src/models/lrm_mesh.py\", line 357, in extract_mesh\n    mesh_v, mesh_f, sdf, deformation, v_deformed, sdf_reg_loss = self.get_geometry_prediction(planes)\n  File \"/home/siah/creative/reactjit/deps/InstantMesh/src/models/lrm_mesh.py\", line 165, in get_geometry_prediction\n    sdf, deformation, sdf_reg_loss, weight = self.get_sdf_deformation_prediction(planes)\n  File \"/home/siah/creative/reactjit/deps/InstantMesh/src/models/lrm_mesh.py\", line 110, in get_sdf_deformation_prediction\n    sdf, deformation, weight = torch.utils.checkpoint.checkpoint(\n  File \"/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/torch/_compile.py\", line 32, in inner\n    return disable_fn(*args, **kwargs)\n  File \"/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py\", line 745, in _fn\n    return fn(*args, **kwargs)\n  File \"/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/torch/utils/checkpoint.py\", line 496, in checkpoint\n    ret = function(*args, **kwargs)\n  File \"/home/siah/creative/reactjit/deps/InstantMesh/src/models/renderer/synthesizer_mesh.py\", line 132, in get_geometry_prediction\n    sdf, deformation, weight = self.decoder.get_geometry_prediction(sampled_features, flexicubes_indices)\n  File \"/home/siah/creative/reactjit/deps/InstantMesh/src/models/renderer/synthesizer_mesh.py\", line 76, in get_geometry_prediction\n    grid_features = torch.index_select(input=sampled_features, index=flexicubes_indices.reshape(-1), dim=1)\ntorch.OutOfMemoryError: CUDA out of memory. Tried to allocate 15.00 GiB. GPU 0 has a total capacity of 11.64 GiB of which 7.55 GiB is free. Including non-PyTorch memory, this process has 4.09 GiB memory in use. Of the allocated memory 3.63 GiB is allocated by PyTorch, and 327.96 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)\n(instantmesh) siah@busiah ~/creative/reactjit/deps/InstantMesh $ \n\n\nalso, i literally do not use the nvidia card, so it can take 100% of its vram",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T16:37:33.227Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T16:37:33.236Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "InstantMesh ran the multiview diffusion fine but OOM'd at FlexiCubes mesh extraction: a single ~15GB GPU alloc (index_select over the grid_res=128 grid) vs the 3060's 12GB. Explained RAM offload can't fix it (it's a tensor op, not offloadable weights) and 12<15 so even full VRAM is short. Fix = lower the extraction grid_res (memory ~ cube of it): edit configs/instant-mesh-large.yaml grid_res 128->64 (safe, ~2GB; 96 for more detail). Gave the user the manual edit + PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True, and baked a sed (128->64 on both configs) into setup-instantmesh.sh so it's 12GB-friendly OOTB. Noted base config is identical to large (same grid_res/dims) so it wouldn't have helped. Committed.",
+  "shas": [
+    "fd8d109f2"
+  ],
+  "resolvedAt": "2026-06-19T16:37:33.236Z"
+}

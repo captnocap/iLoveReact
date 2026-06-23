@@ -1,0 +1,28 @@
+{
+  "id": "req_0964",
+  "at": "2026-06-15T10:03:47.018Z",
+  "origin": "session:524eaf71",
+  "text": "also if u log the exact camera angle as i move it so i can show u how it is jumping in one smooth movement would be clear",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T10:04:44.617Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T10:08:57.550Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Camera-angle trace so the user can show the jump. On every drag move event the viewport logs (console.warn, so it reaches the dev terminal — console.log severity 0 stays in the in-memory ring) a [studio-cam] line with the COMMANDED yaw/pitch, the per-event delta (dyaw/dpitch), the raw dx/dy, and the inter-event gap in ms. In one smooth physical drag a large gap paired with a large dyaw between events means input is arriving in bursts (the camera 'jumps' because events batch), which reads differently from a host present stall (the frame readout from req_0963 catches that). The trace is opt-in via a 'log cam' toggle in the viewport corner (default on for now so the user can capture it immediately). Data-gathering only — no fix to the orbit yet; the log + frame readout together will tell us whether the jump is bursty input or host smoothing/present. Bundle-clean, hot-reloadable.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T10:08:57.550Z"
+}

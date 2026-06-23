@@ -1,0 +1,30 @@
+{
+  "id": "req_0794",
+  "at": "2026-06-13T17:46:33.376Z",
+  "origin": "session:bdc416fa",
+  "text": "cool. give me on the terrain tool the ability to paint water into terrain",
+  "status": "review",
+  "sessionId": "bdc416fa-53b7-49b1-98a1-706f4ff29a15",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T18:00:37.384Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:00:37.393Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a WATER mode to the terrain tool so you paint organic water straight onto the ground (not just drop rect/disc bodies). Pick water in the terrain modes, set the height slider to the level, and brush — wherever you paint, terrain fills with water to that level; depth derives against the bed (dig under it for deeper), erase clears it. Reuses the whole water pipeline: the chunk gained a water HeightField (painted via stampBrush, wet where level greater than 0), carried through the chunk-to-floor bridge as a field-backed WaterBody per wet chunk (floorsToWaterBodies, identity-cached), flowing into world.waterBodies beside dropped bodies. Renders (editor wavy heightfield + compiled WATER lump with ZERO new Zig — painted water is just another grid the loader already animates), wades via footing, persists (RLE in mapStore). WaterBody gained optional field; resolvers sample it per cell. 8 water tests pass; modules parse clean. Compiled needs only a game bake.",
+  "shas": [
+    "947d31bb1"
+  ],
+  "resolvedAt": "2026-06-13T18:00:37.393Z"
+}

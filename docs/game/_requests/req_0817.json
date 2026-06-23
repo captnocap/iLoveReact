@@ -1,0 +1,10 @@
+{
+  "id": "req_0817",
+  "at": "2026-06-13T19:28:24.721Z",
+  "origin": "session:6e5908e6",
+  "text": "Is that what the iso3d does for rendering? it reads encoded data? i dont think thats right",
+  "status": "new",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1011",
+  "at": "2026-06-15T15:56:18.784Z",
+  "origin": "session:46d99bcc",
+  "text": "looks good. seems to be working correctly. the cuts however persist across clicking new so thats a problem",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T15:56:26.940Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T15:59:26.678Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed loop-cut state bleeding across models (cuts persisting after clicking 'new'). The loop-cut popup state (lc) and its live preview draft are transient StudioViewport useState. Selection already reset on activePart?.id changes, but lc/draft did not, and the preview effect was keyed on [lc, activePart?.id]. So opening a model, leaving a cut half-open in the popup, then clicking '+ new' (which mints a fresh part) re-ran the preview effect on the NEW part using the stale face index, re-drawing phantom cuts and re-opening the popup on the fresh cube. Fix (TSX-only, Studio.tsx): the preview effect now keys on [lc] only — a popup is bound to one face of one part, so switching parts must CLOSE it, never re-preview the stale cut onto the new part. Added a reset effect on [activePart?.id] that tears down lc/draft/activeGizmo whenever the active part changes (selecting another part, switching models, or new). Bundles clean; transient React state so no headless test applies. Updated PLAYBOOK build log + project_studio_mesh_editor memory. Hot-reloadable.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T15:59:26.678Z"
+}

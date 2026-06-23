@@ -1,0 +1,33 @@
+{
+  "id": "req_0489",
+  "at": "2026-06-10T10:14:27.095Z",
+  "origin": "session:e11a01ef",
+  "text": "this cant be correct yet. because its taking a full 2 seconds at least. [js.warn] [PLACEFREEZE] session.commitMany route=/ channel=world count=358 mode=defer totalMs=841.56 \n\nalso i realized, when im moving any building, it says 4871 pieces. [js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=45.63\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=43.68\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=42.77\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=42.50\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=43.13\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=43.05\n[js.warn] [PLACEFREEZE] session.commitMany route=/ channel=world count=58 mode=defer totalMs=135.33\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=45.91\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=43.28\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=42.59\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=49.95\n[js.warn] [PLACEFREEZE] session.commitMany route=/ channel=world count=358 mode=defer totalMs=841.56\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=48.62\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=44.40\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=43.21\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=44.18\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=42.80\n[js.warn] [PLACEFREEZE] session.commitMany route=/ channel=world count=358 mode=defer totalMs=874.43\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=44.08\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=43.47\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=42.69\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=42.03\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=42.94\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=42.27\n[js.warn] [PLACEFREEZE] session.commitMany route=/ channel=world count=58 mode=defer totalMs=139.51\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=49.13\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=42.39\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=42.05\n",
+  "status": "review",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T10:15:06.395Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T10:21:39.470Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The log named both stalls and both are fixed in 2e3e4ec02. (1) commitMany count=358 totalMs=841: every event append ran its own sqlite transaction (BEGIN IMMEDIATE + MAX(seq) + INSERT + COMMIT) and each item appends TWICE (world event + session marker) = 716 transactions per move. The store now has a batch() door — appends inside share ONE write transaction per touched domain DB (begun lazily, committed once); sessions.commitMany wraps its loop in it, so a 358-event move pays 2 commits instead of 716. Expect that 841ms line to drop to tens of ms. (2) visualBoxes ms=43 spamming 6x per commit: the standing-city renderer redid the wall-join signature pass over all 4871 pieces on every re-render, and one commit re-renders several times. The pass is now WeakMap-cached on the pieces array identity — computed once per actual world change, cache hits silent and free. game verify GREEN 72/72 including the data-store and sessions suites. Move a big building and re-read the console: one commitMany line (small), one visualBoxes line (not six).",
+  "shas": [
+    "2e3e4ec02"
+  ],
+  "resolvedAt": "2026-06-10T10:21:39.470Z",
+  "tags": [
+    "perf-log"
+  ]
+}

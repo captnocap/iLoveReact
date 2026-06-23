@@ -1,0 +1,28 @@
+{
+  "id": "req_1559",
+  "at": "2026-06-21T11:53:26.895Z",
+  "origin": "session:0b8abe45",
+  "text": "ok. so yeah 703mb sounds absurd. what is in all that data",
+  "status": "review",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T11:54:12.680Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T11:55:24.777Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered what is consuming the ~703MB model store. Measured the model snapshot (444MB) and store.db (703MB): the 20 models themselves are only 773KB; the bloat is paint-atlas blobs — 223 PNGs at ~2.2MB each (423MB). Critically, only 1 blob is LIVE (referenced by a model's current paintRef); 222 are ORPHANED dead paint history (~421MB reclaimable). Root cause: every paint save interns a NEW content-addressed PNG blob and repoints the model, but the previous blob is never garbage-collected, so each painted model leaks ~one 2MB blob per save (6 painted models accumulated 222 dead blobs). This dead weight is also the likely reason the rebuilt editor shows an empty model roster (req_1556): the host loads the whole model store (~444MB of blobs) into the V8 heap at boot and OOMs/fails, returning empty model state. Proposed fix: (1) back up store.db + snapshot, reclaim the 222 orphaned blobs to shrink the store to a few MB so models load again; (2) add paint-blob GC so a save drops the prior blob when unreferenced. Awaiting go-ahead before touching the live store.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T11:55:24.777Z"
+}

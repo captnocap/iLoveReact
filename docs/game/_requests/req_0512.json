@@ -1,0 +1,31 @@
+{
+  "id": "req_0512",
+  "at": "2026-06-10T11:44:33.835Z",
+  "origin": "session:e11a01ef",
+  "text": "I have a proposal for a different approach, currently: lets say i start on a building today. make some changes on it. and then get a side tracked into something else. i end up coming back to the building later, and the entire history of it is completely decoupled from before. \n\ninstead: give buildings their own branch of history rather than storing as a global state. and then the building itself can just say 'i am here at this position' \nthis approach says that every building is its own history, the updates at this point are never optimistic. every edit to a building is only making incredibly scoped edits in a map the size of vice city.",
+  "status": "review",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T11:45:19.109Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T11:46:35.335Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Evaluated the proposal against the rulings (design deliverable; no code — shas none). VERDICT: aligned, and it is the authoring-side completion of already-ruled ground. V29 already rules defs+placement-references for the COMPILED map (the Vice City IDE/IPL shape); the proposal applies the same law at authoring time. V24 makes prefabs first-class with a Prefab Edit mode but today a stamp DECOMPOSES instantly into global pieces — which is exactly why a building's history dissolves (a move re-mints 179 ids). Fix: keep instances LIVE as references; decompose only at bake (V24's 'bake sees through' invariant intact). V20 blesses storage: new 'buildings' stream, events carry buildingId — a building's 'branch' is its event subsequence; per-building undo appends REVERSE events so V20's unbreakable total chain is never rewound. V28's game-data shape literally starts with buildings[]. Payoffs: a move = ONE buildingMoved event (no 358-event storm; optimism becomes unnecessary, exactly as the user said); returning to a building later finds its full scoped history; world pieces become DERIVED (stamped instances ⊕ loose pieces, deterministic per-instance ids) so F2/iso/colliders/footprints/Compile keep reading pieces unchanged. Slice plan: (1) buildings stream + derivation + promote-to-building + one-event move; (2) scoped edit routing in building-local coords; (3) per-building history timeline UI; (4) F2 parity + Compile on the derivation. Awaiting the user's GO before rewiring stream.ts (shared, co-edited, constitution-adjacent).",
+  "shas": [],
+  "resolvedAt": "2026-06-10T11:46:35.335Z",
+  "tags": [
+    "idea"
+  ]
+}

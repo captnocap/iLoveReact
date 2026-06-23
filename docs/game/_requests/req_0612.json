@@ -1,0 +1,33 @@
+{
+  "id": "req_0612",
+  "at": "2026-06-11T05:30:00.679Z",
+  "origin": "session:e9bdce32",
+  "text": "Great. Yep i want to stress how important it is that anything that is used even twice should be a helper/component and not private. also that all the game values are not magic numbers. thats how things fall apart from one thing to another",
+  "status": "review",
+  "sessionId": "e9bdce32-4d43-433c-9b7c-e64529ad18a7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T05:30:50.372Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T05:31:58.172Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user's two standing laws as §14 of the structure review (commit 2f36a0775), the closing frame: LAW 1 — the rule of two: anything used even twice becomes a shared helper/component, never a second private copy (stricter than the conventional rule-of-three, and now RULED); LAW 2 — no magic game values anywhere (P2 re-affirmed with teeth: a game-affecting number appears once, in a registered table the tool edits and the compile consumes — editorTunables/GAME_KINDS are the proven homes). Mapped every finding in the review back to one of the two laws (three color groups, two panel renderers, three settings doors, two lab registries, two prop registries with split consumers, three keyboard transports, the 4x-pasted commitMany cast) and named the shared failure both laws prevent: divergence — two places that must agree with no mechanism making them agree, with the §13 props registry split as the live proof. Closed with the standing worker instruction: survey before building; on the second use, extraction is not optional.",
+  "shas": [
+    "2f36a0775"
+  ],
+  "resolvedAt": "2026-06-11T05:31:58.172Z",
+  "tags": [
+    "ruling"
+  ]
+}

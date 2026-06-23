@@ -1,0 +1,28 @@
+{
+  "id": "req_0900",
+  "at": "2026-06-14T04:36:57.658Z",
+  "origin": "session:c2160fa8",
+  "text": "for props, i have the capability to control placement freely with alt. but i have no control of the Z value of this, and i have some posters/signs that need to go on the wall, and they sit on the ground. can u give me a z free placement",
+  "status": "review",
+  "sessionId": "c2160fa8-64fe-4583-9e29-f94c46f41dec",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T04:37:06.366Z",
+      "actor": "c216",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T04:44:44.327Z",
+      "actor": "c216",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added free Z (height) placement for props in the iso build pane — the vertical analogue of Alt-freeform XY. New IsoStage.heightDelta() intersects the cursor ray with a camera-facing vertical plane through the drag-start ground point, so screen up/down maps straight to world height across any zoom/rotation. In IsoAuthor, moveDelta gained a dy field: Ctrl-drag on a prop-only selection now moves it vertically (snapped to the freeform step), gated like Alt-freeform so structural pieces stay grid-aligned. commitMove/ghost-preview/threshold all carry dy; the committed y survives the lift because restPropsOnSupport never pulls an elevated prop down (REQ-0582) and wall-mount props keep authored height. Status hint shows 'Ctrl-drag height'. Workflow: place prop on ground, then Ctrl-drag up onto the wall. Verified: cart bundles clean with full alias set. NOTE: changes are in the working tree but UNCOMMITTED — sibling session 5ae1 is co-editing IsoAuthor.tsx with unrelated req_0823/0828 tile-lookup work, so committing the file would sweep their in-progress edits. isoStage.ts is isolated/mine. Awaiting the call on how to commit.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T04:44:44.326Z"
+}

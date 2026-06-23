@@ -1,0 +1,10 @@
+{
+  "id": "req_0879",
+  "at": "2026-06-14T00:24:00.978Z",
+  "origin": "session:4cab176d",
+  "text": "i keep restarting the dev build and then i get into the app and it says build needs to be updated but it wont update",
+  "status": "new",
+  "sessionId": "4cab176d-967d-40aa-9c35-1e3ca14b886a",
+  "captureMode": "hook",
+  "events": []
+}

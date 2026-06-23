@@ -1,0 +1,30 @@
+{
+  "id": "req_1382",
+  "at": "2026-06-19T04:44:08.433Z",
+  "origin": "session:be97e48f",
+  "text": "why dont u just store it exactly how @GUIDING_LIGHT.md says to, already its going to have to go that way anyways to be able to go from here to in game assets",
+  "status": "review",
+  "sessionId": "be97e48f-9627-4113-86b2-bb34b58ed45b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T04:44:50.182Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T04:57:22.629Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Stored paint the GUIDING_LIGHT way (content-address, store once + reference) instead of the localstore base64 hack — and the same form the in-game asset bake reads, so it's the right path forward not a throwaway. The painted texture is PNG-compressed, sha256-hashed (= paintRef), and the model stream interns the blob once (modelStream.paintBlobs) and points the model at it (StoredModel.paintRef via the modelPaintBaked event); studioModel exposes bakePaint/paintRef/paintBlob; meshPaintTexture save/restore/undo/redo now emit (ref, blobB64) bakes instead of writing localstore. Durable across restart, deduped by hash, and proven end-to-end via a probe wipe+restore roundtrip. Adds the imageops (PNG codec) build gate to hmsc-int.",
+  "shas": [
+    "1a74fac95"
+  ],
+  "resolvedAt": "2026-06-19T04:57:22.629Z"
+}

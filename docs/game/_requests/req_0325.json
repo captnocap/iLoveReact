@@ -1,0 +1,33 @@
+{
+  "id": "req_0325",
+  "at": "2026-06-08T11:52:13.014Z",
+  "origin": "codex:019ea612",
+  "text": "Pick up the no-V8 loader keystone. FIRST read this handoff FULLY, then execute it:\n/tmp/handoff-20260608-114833-player-model-and-camera-in-the-no-v8-loader.md\n\nIt is complete and accurate — the prior lane (Claude) wrote it well. Your task per the handoff: a DRIVABLE camera + a PLAYER MODEL in the no-V8 loader so the user can move through the world it already renders. Follow it; it has the file map (with line numbers), the SDL input hook, the camera-math notes, the sun-direction gotcha, and the build commands.\n\nCODEX-SPECIFIC GUARDS (you are being trusted with a lane that already burned a Claude session on overclaims — do not add to that):\n1. NO STUBS, NO PLACEHOLDERS, NO SHORTCUTS. Do not fake a result. A prior lane tilted the CAMERA to make broken geometry \"read as\" correct and it was rejected on sight — do not do anything like that. If the real thing is hard, do it anyway or STOP and say why; never paper over it.\n2. NEVER self-declare GREEN/PASS/done. A passing build / PNG-exists / no-V8 check is NOT proof it works. Only the USER running `tools/rjit game play` and seeing it counts. When you think it's ready, message the supervisor with EXACTLY: (1) `tools/rjit game play`, (2) what the user should see + the controls to try, (3) \"not marked done, awaiting your verification.\" The supervisor relays; the user verdicts.\n3. Stay in your OWN context — NO Task tool, NO subagents, NO Explore agents. The supervisor monitors your pane buffer; a subagent makes the work invisible and that is where this keeps going wrong.\n4. tools/rjit only for build/run. Commit with EXPLICIT paths (NOT git add -A — ~400 unrelated set-aside files in the tree). No git reset/revert.\n5. Don't regress the working render: each map renders its OWN scoped pieces (no global-pool merge), env/lighting/camera-start are DATA not hardcode, zero V8 in the loader. /test is the ground-truth comparison.\n\nReport to the supervisor when you have a real build for the user to drive. Nothing is done until the user confirms with their eyes.",
+  "status": "review",
+  "sessionId": "019ea612-258b-7013-b887-0bcd6a4954ea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T11:52:21.997Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T11:56:56.335Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a runtime box-avatar instance batch to the no-V8 world loader and a third-person drivable camera: WASD moves the player camera-relative, Shift sprints, mouse drag orbits, wheel zooms. Spawn selects baked floor/low surface data and the camera mutates the existing Scene3D camera node per frame, preserving the no-V8 loader/render path and scoped map instance stream. Built/rendered a headless PNG for inspection; not marked done, awaiting user verification via tools/rjit game play.",
+  "shas": [
+    "a3ca8158d"
+  ],
+  "resolvedAt": "2026-06-08T11:56:56.335Z",
+  "tags": [
+    "ruling"
+  ]
+}

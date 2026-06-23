@@ -1,0 +1,13 @@
+{
+  "id": "req_0357",
+  "at": "2026-06-08T15:01:38.064Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — loader heightfield mesh is broken. User verdict (verbatim): the compiled view is BROKEN, the test view is CORRECT. Symptom: an authored heightfield (a smooth solid dome/hill) renders in /test as one continuous solid surface, but in /compiled (the no-V8 WorldLoader) the SAME heightfield renders as a series of thin flat horizontal ribbons/slats at stepped heights with sky-gaps between them — no continuous surface, no geometry stitching adjacent height rows together. The DATA round-trips fine (position correct, sits next to the same buildings as /test) — it's the loader's general-grid heightfield TRIANGULATION that's wrong.\n\nImportant clue: ramps (small heightfields) ALREADY render correctly as wedge slopes in the loader. So there are likely TWO heightfield paths and only the general-grid mesh build is broken — find why ramps stitch into a solid wedge but the general heightfield emits disconnected flat strips.\n\n/test is the ground-truth reference — it builds this exact heightfield into a correct solid surface. Method (no theory-crafting on broken code): print the height-sample grid the loader reads for this heightfield, print the vertices/indices the loader emits for it, then print/inspect what /test's heightfield→mesh build produces for the same data. Diff them. The loader is almost certainly emitting a flat quad per row without connecting adjacent rows into a triangulated surface — fix the stitching so it matches /test.\n\nVerify with a fresh /compiled shot of the dome and put it next to a /test shot — but DO NOT self-declare PASS; the user confirms visually. Report what the data showed and what you changed. Commit when it renders as a solid surface.",
+  "status": "new",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

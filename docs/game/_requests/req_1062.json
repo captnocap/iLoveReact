@@ -1,0 +1,28 @@
+{
+  "id": "req_1062",
+  "at": "2026-06-15T21:04:47.741Z",
+  "origin": "session:34f4e405",
+  "text": "The paint mode will look a few ways. lets get the texture mapping down first before we touch the paint portion,",
+  "status": "review",
+  "sessionId": "34f4e405-3e9d-47f6-b883-15900052c2df",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T21:05:25.722Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T21:14:05.225Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Studio texture MAPPING (Phase 5c step 1). USER deferred the paint UI ('lets get the texture mapping down first before we touch the paint portion'; 'the paint mode will look a few ways'), so the UV->atlas->mesh path is wired + visible WITHOUT a painter. (1) A 'create texture' viewport-toolbar button (any mode, active part) applies unwrap() — the box-net packer that remaps every face to its OWN atlas region (vs the fullFaceUV default where every face samples the whole square) — as a partMeshUpdated BRANCH edit (persisted + undoable), then flips texture view on. (2) editors/model/TextureAtlas.tsx (StudioTextureAtlas, key studio.texture.live) renders the active part's box-net into ONE offscreen StaticSurface as a UV-test GUIDE: a checkerboard (scale/stretch/seam read) + per-face region tint (X red/Y green/Z blue) + face label + a UV-origin corner marker (orientation). Reuses storedUVLayout (the same box-net the UV panel draws) and re-bakes only on the active part id~version (sig memo — the StaticSurface inline-prop rebake hazard harnessed, the cutout ModelPreview idiom). (3) The active part's Scene3D.Mesh samples it (material #ffffff + textureKey) under a textured/solid toggle (a TWIG, studio:texView); other parts stay solid. editMeshToGeometry already passes per-corner UVs through, so the mesh samples the atlas with no geometry change. STUDIO.textureAtlasPx=256/textureCheckerCells=8 (P2). editMesh 48/48, modelStream 8/8, Studio + full sources chain bundle clean. Hot-reload TSX (verify the wrap visually; if v-flipped, flip the rect/marker in TextureAtlas — one place). The PAINT portion is the deferred next step. Nothing committed (user leads commits).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T21:14:05.225Z"
+}

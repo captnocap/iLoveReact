@@ -1,0 +1,28 @@
+{
+  "id": "req_1333",
+  "at": "2026-06-18T23:20:28.945Z",
+  "origin": "session:d6961119",
+  "text": "hey clone this repo, and tell me how it works, and if we can get an attempt to recreate the same approach for our 3d modeling @cart/hmsc-int/editors/model/Studio.tsx or what https://github.com/lightningpixel/modly",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T23:20:47.143Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T23:24:47.146Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cloned lightningpixel/modly and analyzed its architecture: Electron+React frontend (Three.js viewport, @xyflow node-graph) over a Python FastAPI backend that runs open-source GPU diffusion models (Hunyuan3D-2 Mini, TripoSG, Trellis2) as installable GitHub extensions; image->dense-triangle-GLB, with mesh-remesher/optimizer/uv_unwrapper/texture_baker post-process nodes. Assessed reuse for cart/hmsc-int/editors/model/Studio.tsx: do NOT embed the generator (Electron + GPU Python server is incompatible with our V8-only no-node cart runtime) — keep generation offline like the existing importPropMesh.mjs CLI. The high-value bridge is import-into-editable-Studio: the GLB/OBJ parser already exists (importPropMesh.mjs, 624 lines, used for Desk.glb) but only bakes static render-only ImportedProp triangle soup; Studio's editable model is EditMesh (verts + n-gon faces) and addPart() already accepts any EditMesh (addCube is just addPart(cuboid())). The single missing piece is a trianglesToEditMesh() converter (~100 lines, inverse of existing editMeshToGeometry), plus a Studio Import action. Key caveat surfaced: raw AI meshes are dense blobs needing decimation/retopo (modly's own remesher) before they are hand-editable low-poly. Recommended minimal slice = the import bridge verified on Desk.glb (316 verts), generator deferred. No code changed; this is an assessment/answer.",
+  "shas": [],
+  "resolvedAt": "2026-06-18T23:24:47.145Z"
+}

@@ -1,0 +1,37 @@
+{
+  "id": "req_0295",
+  "at": "2026-06-08T07:46:34.583Z",
+  "origin": "session:9e14f7ea",
+  "text": "Step 2 VERIFIED GREEN on my side — ran `tools/rjit game verify` (2/2 round-trips, 71/71, 3/3), confirmed the Zig reader hashes in Zig (std.crypto sha256, not JS), the bad-hash + dangling-ref controls bite, and the three stream ids are frozen in RLE_FORMAT.md §7. Clean work.\n\nFIRST: commit step 2, explicit paths only (367 set-aside files in the tree — do NOT git add -A):\n\n  git add runtime/workspace/sha256.ts runtime/workspace/gamefile.ts framework/world/gamefile.zig framework/testing/unit/world_gamefile.zig framework/testing/fixtures/gen_gamefile.ts framework/testing/fixtures/gamefile_roundtrip.b64 docs/game/RLE_FORMAT.md build.zig cli/commands/game.ts tools/rjit.js\n  git commit -m \"feat(platmod): RLEKEY-STEP2-0608 — three-stream game-file + content store, TS<->Zig round-trip, green (keystone spine)\n\nreq_0294. game-file carries STREAM_LOGIC/MAP/SKINS + content-addressed asset\nmanifest/blobs in one RJMP container. Zig reader resolves every reference and\nsha256-verifies every blob in Zig; bad-hash and dangling-reference negative\ncontrols bite. Folded into tools/rjit game verify.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>\"\n\nConfirm the sha back to me.\n\nTHEN STEP 3 — THE CONSTRUCTOR + THE RENDER PROOF. This is the keystone moment: prove the stateless Zig engine constructs and RENDERS a world from RLE data with NO JS in the construct/render path. The user will see this shot, so it must be real — a shot that secretly routes through the V8 dev host is the exact slice-1 trap and is a FAIL.\n\nDo this in TWO parts, and STOP at the gate in between if needed:\n\nPART A — survey the render path FIRST, report before building blind:\n1. Identify the EXACT path that produces a rendered PNG today (what `tools/rjit shot` drives). Determine whether a Zig-NATIVE headless render-to-PNG exists (the stateless render capability driven without the V8 dev host), or whether the only existing render path goes through the V8/JS host.\n2. If a Zig-native headless render path EXISTS: proceed to Part B.\n3. If the ONLY render path is V8-hosted: STOP and report that as the real architectural finding — do NOT fake a shot through V8, and do NOT claim a render proof you can't honestly produce. We decide the headless-Zig-render scope with the user. (This is a legitimate outcome, not a failure on your part.)\n\nPART B — the constructor (only if Part A finds a clean Zig render path):\n1. Build the CONSTRUCTOR: read the fixture game-file's three streams (the gen_gamefile.ts fixture already carries logic+map+skins+manifest+blobs), install/validate the assets into the content store, resolve every tape reference against the installed vocab, and hand the composed data to the EXISTING stateless Zig capabilities (camera/map-render — the smallest renderable: the map stream's tiles/a building piece is enough). No per-game script path — data only.\n2. Render the constructed scene to a PNG via the Zig-native path and capture it with `tools/rjit shot` (SELFSHOT-0606 conventions, cite the PNG path).\n3. Prove no JS in the construct/render path: grep/inventory that the binary doing the construct+render carries no bundle.js / V8 eval.\n\nREPORT BACK: Part A's finding first. If you reach Part B: the constructor file path, the cited PNG path, the no-JS proof, and `tools/rjit game verify` GREEN. Do NOT wire the editor Compile bake yet — that swaps the hand-authored fixture for editor-emitted streams and is the next step.\n\nStay in your own context — no Task tool, no subagents. tools/rjit only. No reset/revert. Commit only on my word.\n",
+  "status": "review",
+  "sessionId": "9e14f7ea-dafd-486f-b26a-2a7b9c5fcb05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T07:46:53.336Z",
+      "actor": "9e14",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T07:50:23.391Z",
+      "actor": "9e14",
+      "kind": "note",
+      "text": "PART A finding (render-path survey): the ONLY render-to-PNG path is V8-hosted. rjit shot boots the shipped cart binary (zig-out/bin/<cart>) = v8_app.zig, which @embedFile's bundle-<cart>.js and evals it in V8; the reconciler emits CREATE/APPEND/UPDATE mutations; host_tree.applyCommandBatch (host_tree.zig:627) builds the *Node tree SOLELY from that V8 mutation stream; engine.run (engine.zig:3261) is the GPU shell that paints the tree and capture.tick(root:*Node)->gpu.captureScreenshot->stbi_write_png writes the PNG. capture.zig + witness.zig both render the V8-built tree. The HEADLESS/!has_gpu build stubs engine/gpu/capture to empty structs (no render at all). NO Zig-native headless render binary exists. STOPPING at the Part A gate per the task contract — will NOT fake a shot through V8. The feasible Zig-native route (to decide scope with user): a new app-source built WITHOUT V8 but WITH has_gpu, where a constructor synthesizes a host_tree command batch from the gamefile streams (applyCommandBatch already takes plain JSON bytes, not V8 types) then drives gpu+capture; that binary is new work, not existing. Awaiting scope ruling before Part B."
+    },
+    {
+      "at": "2026-06-08T08:05:16.439Z",
+      "actor": "9e14",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "PLATMOD spine step 3 — the CONSTRUCTOR + the honest render proof. PART A finding: the only existing render-to-PNG path is V8-hosted (v8_app.zig @embedFile's bundle-<cart>.js and evals it; host_tree builds the Node tree solely from the reconciler mutation stream; engine.run paints it; capture reads back). User chose 'build the no-V8 loader binary'. PART B delivered: framework/world/constructor.zig reads the baked game-file via gamefile.zig, runs the dependency gate (installAndValidate: sha256-verify + atomic-install every asset, resolve every reference), then decodes the map stream's tile grid into a renderable Scene — data only, no per-game script. world_loader.zig (new root app-source) is a binary built with -Duse-v8=false: it links the GPU substrate (SDL3+wgpu+framework draw pipelines+capture) and ZERO V8/zero embedded bundle; it constructs the Scene and renders the tiles as colored rects via gpu.zig+rects.zig, then captures its own hidden-window frame to PNG via capture.zig (SELFSHOT-0606). The render is faithful: the fixture's 3x2 tiles [0,0,1,1,1,1] paint as row0 teal/teal/orange, row1 all orange. No-JS proof: the binary carries 0 v8:: symbols, 0 react-reconciler/bundle markers, 0 V8 shared libs, and -Duse-v8=false skips the v8 module + libc_v8.a by construction (build.zig:172-178). One framework change: capture.tick(root:*Node)->?*Node so the loader passes null (no crop); engine's caller coerces, backward-compatible. Wired into tools/rjit: new 'rjit game shot [--out]' verb + folded into 'rjit game verify' (builds loader, renders, asserts PNG+no-V8). GREEN: rjit game verify VERDICT GREEN 1/1 oracle, 2/2 round-trips, 1/1 render, 71/71 suites, 3/3 scripts. PNG: shots/world_loader-keystone.png (+ zig-out/game/world_loader-verify.png in verify). NOT committed (awaiting user word). Editor Compile bake NOT touched (next step). New files: world_loader.zig, framework/world/constructor.zig; modified: framework/gpu/capture.zig, cli/commands/game.ts, tools/rjit.js.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T08:05:16.439Z",
+  "tags": [
+    "ruling"
+  ]
+}

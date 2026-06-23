@@ -1,0 +1,28 @@
+{
+  "id": "req_1205",
+  "at": "2026-06-17T00:13:19.366Z",
+  "origin": "session:8e058574",
+  "text": "nice that is pretty slick. uh, so i guess the question is, do i keep the car on the ground, (body touching ground) and wheel will lift it, or do i lift the body to where i want it to sit based on the wheels also being attached (they arnt rn)",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T00:14:37.058Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T00:15:18.815Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered a modeling-convention question (build the car body touching the ground, or lift it to ride height with wheels below). Verified the editor/compile seats a part by its LOWEST point at the ground (studioModel liftToGround returns -minY, putting the lowest vert at y=0), so whatever is lowest is the ground-contact point. Recommendation: author at ride height — the WHEELS are the lowest thing and touch the ground, with the axle (the ⌖ wheel center joint) sitting at height = tire radius. Building it body-flush and relying on the wheel to lift it does not work, because nothing in the pipeline auto-raises the assembly by the wheel radius; the model is planted by its lowest vert exactly as authored, so wheels mounted below a grounded body would sink into the ground. No code changed (guidance). Offered a follow-up 'sit on wheels' button that would lift the body so the wheel joints land at y=R automatically, which would also have the ⌖ wheel center button store the fitted radius on the joint's size field — awaiting the user's go-ahead.",
+  "shas": [],
+  "resolvedAt": "2026-06-17T00:15:18.815Z"
+}

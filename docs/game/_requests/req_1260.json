@@ -1,0 +1,29 @@
+{
+  "id": "req_1260",
+  "at": "2026-06-17T18:04:21.933Z",
+  "origin": "pane",
+  "text": "look at all the shaders/textures inside of the game editor, we want to paint* with these, but its a different approach than just a solid color, because you dont want it to repeat for every cell, you want the texture to spread across the entire grid and only apply at that painted section",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-17T18:04:33.267Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T18:04:33.276Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built cart/paint_texture_demo.tsx — painting WITH a material shader instead of a solid colour, addressing the per-cell-repeat gotcha. Grounded in the game texture catalog (game/textures/shaders.ts: brick/concrete/grass/water/wood/road... each a WGSL fn of a tile-local uv). The demo is triangle_mask's pattern x mask with the pattern being a real material: final = material(uv) * paintMask(cell). The crux is which uv the material samples — CONTINUOUS mode samples surface uv so the texture spreads across the whole grid (a painted region shows ONE brick wall flowing across its cells, masked to where you painted), while a Per-cell toggle samples fract(uv*cells), cramming a full tile into every cell so it repeats — the ugly approach the user warned against. Drag to paint; chips switch material (Brick/Grass) and mode (Continuous/Per-cell) and Clear. Verified with a seeded blob: continuous shot = a single coherent brick wall clipped to the painted blob; per-cell shot = dense micro-brick repeat. Same principle plugs into the 3D model: the mesh samples the chosen material in its FACE-surface uv (continuous), masked by the paint layer.",
+  "shas": [
+    "4854f01e6"
+  ],
+  "resolvedAt": "2026-06-17T18:04:33.276Z"
+}

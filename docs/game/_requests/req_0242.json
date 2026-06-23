@@ -1,0 +1,13 @@
+{
+  "id": "req_0242",
+  "at": "2026-06-07T11:03:54.967Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: AIMPITCH-0607 — USER bug, live session, verbatim: \"so the 3rd person normal camera, if you have it where its a normal view, you go into aim, you are aiming at the sky. if you come out of aim, now you are back in 3rd person looking at the ground and everything is all fucked lol\". The aim/3rd-person transition corrupts pitch BOTH ways — enter aim: pitched at sky; exit aim: pitched at ground. Smells like the two rigs keep pitch in different spaces (offset/sign/origin) and the mode switch transplants the raw value instead of mapping it — each round trip compounds the error. No theory crafting: print pitch/yaw in BOTH rig spaces at the transition boundary (before/after, both directions), read the prints, fix the mapping so a round trip is identity — normal view → aim → exit lands you exactly where you started, aim entry preserves where you were actually looking. Regression test at the camera-math level: pitch round-trip identity across N enter/exit cycles. This touches the per-frame camera path so the frame-time gate applies to your fix. Your CAMRAY tape gate is unchanged and separate.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1547",
+  "at": "2026-06-20T23:44:21.584Z",
+  "origin": "session:6580d434",
+  "text": "hm no that makes it now so when im jumping up a staircase because there is a floor just about to be there at the landing i literally fly thru the staircase and stay under the floor xD but it does work the way we thought it would otherwise haha",
+  "status": "review",
+  "sessionId": "6580d434-ee0d-4691-a47a-61556997a089",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T23:46:51.455Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T23:50:36.625Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the fly-through regression the ceiling head-bonk (aee4d158a) introduced: jumping while climbing a staircase toward a landing dropped the player through the steps and pinned them under the floor. Cause: the bonk seated the head at the overhead underside via py = ceiling - player_height, but a landing floor at the TOP of a stair has its underside above your head while you climb, so ceiling - height computes below the stair surface and the clamp yanked the feet underground. Fix (framework/game/physics.zig): bound the downward clamp by the ground support — py = min(py, max(ceiling - player_height, support)) where support = max(groundAt, heightfieldFloorAt) under the feet. Real headroom (jump into a roof from open ground) still seats the head at the ceiling; no headroom means you're climbing ONTO the slab, so the feet stay on the support and the normal step-up mounts you (slope-walkable already skips the side-push). Upward velocity still zeroed. Added test 'head bonk: a low floor above the ground never drops the feet through it'. no-V8 loader builds clean; game-physics 41/42 (the one red, hollow-ramp-slab, predates this work). SHA f11187303. Needs Compile + relaunch (loader Zig change).",
+  "shas": [
+    "f11187303"
+  ],
+  "resolvedAt": "2026-06-20T23:50:36.625Z"
+}

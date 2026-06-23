@@ -1,0 +1,30 @@
+{
+  "id": "req_1224",
+  "at": "2026-06-17T01:35:03.576Z",
+  "origin": "session:faeb0705",
+  "text": "ah yeah so its all numbers game really and if u can read a mistake in numbers then there is probably a way to programatically say hey ur shit is scuffed lil cuz i have to assume also how do i re-attach this mf if the first pass was badge",
+  "status": "review",
+  "sessionId": "faeb0705-bc55-47ba-a9d7-6a95888034b9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T01:43:20.181Z",
+      "actor": "faeb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T01:43:20.191Z",
+      "actor": "faeb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two asks: a programmatic 'your shit is scuffed' checker, and how to re-attach a panel after a bad detach. Built validateMesh/meshHealth in editMesh.ts — a pure topological linter that proves every defect from the numbers: repeated corners (the doubled-vertex class from req_1222), degenerate/zero-area faces, non-manifold edges (>2 faces on one edge), open/boundary edges (info), duplicate-position verts (weldable), orphan verts, and concave n-gons; each issue carries the faces+verts it implicates plus a severity. Surfaced as a live '✓ clean / ⚠ NE NW' badge in the Studio toolbar (shown in every mode beside symmetrize, memoized on the committed mesh so camera moves don't re-lint); pressing a dirty badge selects the offending faces in face mode and console.warns the full breakdown. Re-attach: the instant revert for a bad pass is undo×2 (detach is deleteFaces+addPart, so two undos restore the original skin) — documented to the user; the durable weld is mergeActive, which folds the active part DOWN into the part before it via mergeMesh in the shared model frame, exposed as a 'merge -> <name>' button in object mode (also combines any two parts). Also fixed a real detach bug found while wiring merge: a detached panel was re-seated on its own lowest vert (liftToGround) and rendered floating off the body, because partMeshUpdated keeps lift and only addPart set it; addPart gained an optional lift arg and detach now passes the source part's lift so the panel renders in place. editMesh suite 77/77 green (5 new lint tests); full hmsc-int cart bundles clean. Pure TSX/TS, hot-reloads, no Zig rebuild.",
+  "shas": [
+    "294159f56"
+  ],
+  "resolvedAt": "2026-06-17T01:43:20.190Z"
+}

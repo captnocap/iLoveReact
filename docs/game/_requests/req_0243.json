@@ -1,0 +1,13 @@
+{
+  "id": "req_0243",
+  "at": "2026-06-07T11:04:32.996Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: AIMPITCH-0607 — USER bug, live session, verbatim: \"so the 3rd person normal camera, if you have it where its a normal view, you go into aim, you are aiming at the sky. if you come out of aim, now you are back in 3rd person looking at the ground and everything is all fucked lol\" — plus the addendum: \"oh also it turns the players head around xD maybe the full body actually lmao\". So the aim/3rd-person transition corrupts BOTH axes: pitch (enter aim = sky, exit = ground) AND yaw/orientation (the player's head — possibly full body — spins ~180 on the transition). Smells like the two rigs keep orientation in different spaces (sign/origin/offset — a camera-behind vs camera-forward 180 in yaw, an inverted or offset pitch) and the mode switch transplants raw values instead of mapping; each round trip compounds. No theory crafting: print pitch+yaw in BOTH rig spaces AND the player body/head facing at every transition boundary (enter and exit), read the prints, fix the mapping so a round trip is identity — normal → aim → exit lands exactly where you started, aim entry preserves the actual look direction, and the body never flips. Regression test at the camera-math level: orientation round-trip identity across N enter/exit cycles. This touches the per-frame camera path so the frame-time gate applies. Your CAMRAY tape gate is unchanged and separate.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1657",
+  "at": "2026-06-22T22:07:25.138Z",
+  "origin": "session:2117ddf4",
+  "text": "nice i see it now, can youy close the gap between the map? for example, [Image #3] heres what i see. now if i look at this from the 2d map editor [Image #4] this is the edge of the map anyways",
+  "status": "review",
+  "sessionId": "2117ddf4-165f-4c7a-8fbe-15f442892c87",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T22:09:41.616Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T22:12:47.153Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Closed the visible gap between the authored map edge and the procedural void shell (USER: 'close the gap between the map'). Cause: the shell skipped a full 160m chunk of 'edge grace' before starting, so there was a band with no rendered ground where the background showed through (the blue/dark strip between the authored ground and the void city). Fix in game/void/shell.ts + distance.ts: (1) added pointInCore and changed the chunk skip to drop only chunks whose CENTRE is inside the authored rectangle (removing the 160m grace), so the first ring straddles the edge and its ground reaches in to meet the authored floor; (2) skip individual BUILDINGS whose centre lands inside the rectangle so a straddling chunk fills the ground gap without poking grey towers up through the authored city; (3) in packageMap, sink the shell ~10cm below the sampled authored ground so the authored floor wins cleanly in the boundary overlap (no z-fight) while the ground reads continuous. Verified: game/void/void.test.ts 9/9; rjit game bake logs '3960 procedural box(es)' (the edge ring now included, up from 3902); no-V8 loader renders clean. The fixed game-shot camera can't frame the seam headlessly, so the user confirms by re-Compiling and walking to the edge.",
+  "shas": [
+    "f7e169b75"
+  ],
+  "resolvedAt": "2026-06-22T22:12:47.153Z"
+}

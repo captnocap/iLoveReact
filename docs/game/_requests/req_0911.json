@@ -1,0 +1,30 @@
+{
+  "id": "req_0911",
+  "at": "2026-06-14T06:14:22.859Z",
+  "origin": "session:2dd06f71",
+  "text": "yep i said all that with etc. ;) so we are on the same page because ive stated all of this before extensively it should be in the oracle lol",
+  "status": "review",
+  "sessionId": "2dd06f71-5b8f-48bc-94cb-c94891fc4fa3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T06:14:35.523Z",
+      "actor": "2dd0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T06:29:33.712Z",
+      "actor": "2dd0",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built slice 1 of the storyline authoring tool the user asked for: a conditional state-machine board in the hmsc-int workbench. Key finding surfaced first — the entire quest substrate already exists and is V22-ruled (game/missions/defs.ts MissionDef IS the quest-object shape: title/id/verb/client=fromNPC/binding person|position/stages->objectives/reward/hooks=(text,worldDelta); game/story/ is the arcs/conditions/dialog/rules state machine; rows.ts already has the affordance validator). So the tool authors INTO that, not a parallel schema. Added the one missing spine field: requires?: StoryCondition[] on MissionDef (the user's 'constraints', reusing the story predicate vocabulary, validated in defineMission). Built editors/workbench/story/: a pure graph model (a quest provides the flags its hooks set, requires the flags it gates on; provider->requirer is the edge; depth=longest prereq chain; questline=connected island; unmet gates surfaced as external) with a 6/6 test, plus the WorkbenchSource (roster by questline, per-quest MissionDef panel with a gate-picker whose options ARE the affordances, board stage in dependency columns), registered in workbenchSources(). Verified: model 6/6, missions 30/30 (no regression), headless game + hmsc-int cart bundle clean. Follow-ups noted: localstore/V20-stream persistence, stage/objective/hook depth editing, affordance-validation gutter, free-form SVG edges.",
+  "shas": [
+    "ca4ee02ac"
+  ],
+  "resolvedAt": "2026-06-14T06:29:33.712Z"
+}

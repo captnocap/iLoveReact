@@ -1,0 +1,30 @@
+{
+  "id": "req_1661",
+  "at": "2026-06-22T22:42:26.818Z",
+  "origin": "session:f97cafe1",
+  "text": "hey so i have this painting i did on a mesh called big_block [Image #1] and when i place it, its there, but when i go back into the studio to paint more its back to just a big blank block",
+  "status": "review",
+  "sessionId": "f97cafe1-eced-4a8c-b209-7c447bcc1a39",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T22:42:37.450Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T22:49:23.040Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the studio showing a blank block when reopening an already-painted model. Root cause: in cart/hmsc-int/editors/model/studiokit/StudioViewport.tsx the mesh only sampled its RGBA <Paintable> (modelPainted) and the <Paintable> only mounted while local 'tex' state was set, but 'tex' is built solely on paint-mode ENTRY and is null on reopen — so object/rig mode showed the unpainted base coat and the saved blob was never restored. The placed copy looked correct only because cookProp snapshots the paint atlas at compile time. Fix derives havePaintBlob from the model's content-addressed paintRef->paintBlob, treats the model as painted whenever its blob resolves, mounts the Paintable on (tex || havePaintBlob), and lets the restore effect run on reopen in any mode (base-coat reserved for an active paint session so an unresolved blob can't grey the view). Bundles clean (esbuild 6.3mb, no errors).",
+  "shas": [
+    "47e9736e5"
+  ],
+  "resolvedAt": "2026-06-22T22:49:23.040Z"
+}

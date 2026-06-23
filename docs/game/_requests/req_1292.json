@@ -1,0 +1,10 @@
+{
+  "id": "req_1292",
+  "at": "2026-06-18T16:24:27.589Z",
+  "origin": "session:7c2ec055",
+  "text": "hi. in the iso3d editor, this is a real problem i have. i dont know how to best explain it other than this. so, [Image #8] this is a flat wall. you can see i selected a face of the wall [Image #9] ok i want it to be a window, so to do this, i have to delete the wall [Image #10] ok and now put in the window wall [Image #11] but notice this gap at the bottom of it [Image #12] its impossible to close D:",
+  "status": "new",
+  "sessionId": "7c2ec055-7a95-46d0-92f3-748b884f2dc4",
+  "captureMode": "hook",
+  "events": []
+}

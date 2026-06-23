@@ -1,0 +1,28 @@
+{
+  "id": "req_1017",
+  "at": "2026-06-15T16:29:17.960Z",
+  "origin": "session:46d99bcc",
+  "text": "I dont know how to even cause a non-planar quad to occur lmao so il tell u when i somehow do or dont ever figure it out xD  but a few things one, great job. but two. uh, this shit in the code is sloppy as hell imo. maybe im old fashion but 'destructuring' is ugly. im looking at the const [, force] = useState(0); line and going wtf is that shit",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T16:31:09.703Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T16:34:27.045Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cleaned up the ugly force-rerender idiom the user flagged: const [, force] = useState(0) (empty-slot array destructuring + a throwaway counter + cryptic one-letter name). Created a single named, documented hook runtime/hooks/useRerender.ts — useRerender() returns a stable repaint/forceRender-style callback; the one remaining empty-slot useState now lives ONLY inside that hook, never scattered in app code. Exported useRerender + useInterval (already existed) from @reactjit/hooks. Replaced every instance in the Studio mesh-editor files I own: Studio.tsx (the fov/reframe ref-repaint + the ViewCompass self-tick), meshSelect.tsx (SelectionOverlay self-tick), meshGizmo.tsx (TransformGizmo self-tick), studioModel.ts (the store-subscribe rerender). Self-tick overlays now read 'const repaint = useRerender(); useInterval(repaint, 33)' instead of a hand-rolled setInterval(()=>tick(n=>n+1)). All four bundle clean; editMesh tests 32/32. Saved the durable code-style preference as a feedback memory (named helpers over clever idioms). Scoped to the files under active work; the same idiom appears in ~16 other files (PlayRoute, vehicles, characters, items, clothing, story, paint, + 3 runtime hooks) which I left to avoid churning other lanes — offered to sweep them as a follow-up. Hot-reload TSX.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T16:34:27.045Z"
+}

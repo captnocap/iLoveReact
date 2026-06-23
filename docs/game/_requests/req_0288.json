@@ -1,0 +1,34 @@
+{
+  "id": "req_0288",
+  "at": "2026-06-08T06:03:02.430Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: vehicle rebuild VERIFIED at my level (70/70 green, vehicles 14/14) and the selfshot matches the user's model exactly. COMMIT IT NOW — explicit paths (editors/workbench/vehicles/ + the vehicle.test.ts you updated + game/vehicle if touched). Verify is green, go. Post the hash. It is user-facing so it lands in REVIEW pending the user's visual verdict — do not mark done.",
+  "status": "review",
+  "sessionId": "019ea1db-5f93-7392-8554-9c688d1be33f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T06:03:43.832Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing",
+      "text": "Committed the supervisor-verified vehicle population rebuild."
+    },
+    {
+      "at": "2026-06-08T06:03:43.842Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Committed the supervisor-verified vehicle rebuild as one scoped commit. The commit contains only the vehicle Workbench source rebuild and the game vehicle table/test updates requested for review; the user-facing visual verdict remains pending.",
+  "shas": [
+    "cc14670c0"
+  ],
+  "resolvedAt": "2026-06-08T06:03:43.842Z",
+  "tags": [
+    "ruling"
+  ]
+}

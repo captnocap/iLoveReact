@@ -1,0 +1,28 @@
+{
+  "id": "req_1020",
+  "at": "2026-06-15T17:11:10.093Z",
+  "origin": "session:46d99bcc",
+  "text": "nice work. next thing is getting in ctrl A to select all faces/vertex/edges. also delete key for deleting faces or faces connected to edges or vertexes.",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T17:11:52.462Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T17:17:41.865Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added Ctrl/Cmd+A (select-all in the active mode) and Delete/Backspace (remove selected faces, or the faces a selected vertex/edge belongs to) to the Studio mesh editor. Pure ops in editMesh.ts: facesUsingVerts, facesUsingEdges (selection->faces resolution), and deleteFaces (removes faces, prunes orphaned verts, reindexes survivors into a compact mesh). selectionFaceIndices in meshGizmo.tsx resolves the current selection by mode (face->selected faces; vertex/edge->connected faces). Wired both keys into the StudioViewport keydown bus listener alongside Esc: Ctrl+A fills the current mode's selection set; Delete commits deleteFaces and clears the stale selection. Guarded against firing while a loop-cut popup or concave dialog is open, and (like Esc) a focused TextInput consumes keys first so typing a name never triggers them. Tests: editMesh 34/34 (+2: facesUsingVerts/Edges resolution, deleteFaces prune+reindex incl. delete-all). Studio + meshGizmo bundle clean. Hot-reload TSX. NOTE: separate from this, the user flagged two hot-reload state issues (tool mode resets; cuts vanish from the 3D mesh but persist in the UV) now tracked as req_1021.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T17:17:41.865Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1296",
+  "at": "2026-06-18T16:51:18.642Z",
+  "origin": "session:685abc12",
+  "text": "in the @cart/hmsc-int/editors/model/Studio.tsx can u give me capability to merge layers together",
+  "status": "review",
+  "sessionId": "685abc12-ce97-4627-bbd3-f4d7e8841686",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T16:51:27.351Z",
+      "actor": "685a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T16:55:40.176Z",
+      "actor": "685a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a per-row 'merge' verb to the Studio OUTLINER (the layer list) so layers can be merged together. Each layer row now shows a Merge button that folds that layer down into the one above it (disabled on the topmost row). Implementation reuses the existing weld: generalized studioModel.mergeActive() into mergeDown(id) — the viewport 'merge → <target>' button and the new outliner verb now share one mergeMesh path so they can never diverge. Wired runAction('merge-down') → mergeDown, added 'merge-down' to LayerStripAction and a canMerge flag to LayerStripRowModel, and rendered the Merge button in GenericLayerRow gated on canMerge!==undefined so the other LayerStackStrip consumer (materials source) is unaffected. esbuild bundle compiles clean; the ship's LABEL MISMATCH/destroy is a pre-existing manifest.json capability drift from another session, unrelated to this change.",
+  "shas": [
+    "487bb31df"
+  ],
+  "resolvedAt": "2026-06-18T16:55:40.176Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_0803",
+  "at": "2026-06-13T18:33:45.309Z",
+  "origin": "supervisor-relay",
+  "text": "i fall thru the heightfield of the walls. not the floor of the pool. just the edge. and its heightfields in other places also. + need to add a slope tool for water to be able to do a proper ocean",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-13T18:33:49.847Z",
+      "actor": "session-5de2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:42:19.401Z",
+      "actor": "session-5de2",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two follow-ups for the bodies-of-water feature. TASK 1 (heightfield edge fall-through): the player fell through the steep dug WALLS of a painted water basin (and any heightfield edge) — not the flat floor. Root cause was in framework/game/physics.zig: ground support sampled only WALKABLE heightfield cells (normal_y >= walk_cos), so a steep face returned NO support and dropped you into the void; the code comment already described the intended 'stand on it, no fall-through' behavior but it was never implemented. Split the concern — new heightfieldFloorAt stands you on the highest mesh surface at/below the feet regardless of slope, while the slope LIMIT (can you climb) stays enforced by the existing move-cancel wall-block + walkable-only query for speed clamping. Fixes editor /test and compiled (same physics.step). TASK 2 (water slope tool): added a 'waterSlope' height-mode ('shore' in the terrain rail) reusing the slope-stroke machinery to dig a graded shore→deep basin and fill water flush, for a wadeable ocean shoreline instead of a flat-walled pit; floorToWaterBody handles the graded bed with no model change, 6/6 water tests pass.",
+  "shas": [
+    "bc58a29bb",
+    "f20fe449c"
+  ],
+  "resolvedAt": "2026-06-13T18:42:19.401Z"
+}

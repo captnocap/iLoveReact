@@ -1,0 +1,30 @@
+{
+  "id": "req_1600",
+  "at": "2026-06-21T15:40:19.137Z",
+  "origin": "session:da8be261",
+  "text": "inside of the painting tools [Image #83] (the one in my image) can u give a text tool for typing",
+  "status": "review",
+  "sessionId": "da8be261-4ec5-49b6-a7ad-54d2b446b7ac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T15:40:26.134Z",
+      "actor": "da8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T15:52:31.454Z",
+      "actor": "da8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a TEXT tool to the model paint panel (the painter in the user's image). Selecting it (or pressing T) reveals a TEXT input; typing a string and clicking a face lays the text out as 5x7 bitmap glyphs and stamps one filled square dab per lit cell into the paint texture, scissor-clamped to the hit face's UV island so it can't bleed onto a neighbour. Brush SIZE sets the glyph scale and brush COLOUR the ink; the block centres on the click. Implemented as a one-click model-texture op handled Studio-side (like faceFill), not through the kit stroke engine, since text is a stamp not a stroke. The bitmap font + layoutText() live in the universal paint kit (runtime/paint/glyphs.ts) and 'text' is now a first-class BrushTool (icon=T glyph, hotkey t, label), so any BrushKit-based cart can offer it; Studio surfaces it via an explicit tools list. Verified: full hmsc-int cart bundles clean via the real esbuild flags, and the paint kit test suite passes 21/21 including 5 new glyph-layout tests. Live in-app paint needs rjit dev (headless shot can't capture Paintable content).",
+  "shas": [
+    "e46c975b3"
+  ],
+  "resolvedAt": "2026-06-21T15:52:31.454Z"
+}

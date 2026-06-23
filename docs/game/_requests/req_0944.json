@@ -1,0 +1,10 @@
+{
+  "id": "req_0944",
+  "at": "2026-06-15T06:33:16.273Z",
+  "origin": "session:832d7b44",
+  "text": "yeah and  so to build on that real fast, we also have the voxel block builder which had a per-face recognition at least in terms of when placing the next piece, idk how much of that is relatable, but yeah, we have had the 'core' kinda all broken up which is a benefit for us now but its also a curse because you do have everything so isolated from another like the player model vs prop models vs clothing models vs item models  vs car model vs building models vs world model all are different modeling techniques right now as far as im concerned",
+  "status": "new",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": []
+}

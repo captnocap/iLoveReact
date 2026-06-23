@@ -1,0 +1,13 @@
+{
+  "id": "req_0181",
+  "at": "2026-06-07T04:48:48.863Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — JITTER IS BACK with a NEW signature, and your own CAMRAY work is the prime suspect. User live data: ~0.4s-period spikes of 12-17ms, but counters CLEAN (no node/glyph/draw deltas — your chrome fixes hold), mostly SPIKE IN HOST TAPE (too transient for owner sampling), one caught frame shows other=17.1ms — native bridge/GC, outside every render phase. Distinctive tape signature: a burst of sub-millisecond frames (0.3-0.8ms) immediately BEFORE each stall — frame pacing disruption, not draw cost. Check IN ORDER: (1) your camera raycast — it is per-frame in the bridge and landed right before this report; measure its actual per-call cost and allocation behavior live (you promised microseconds — prove it with the spikewatch you built); also whether the occlusion RESPONSE (fade/material change on hit pieces) triggers scene re-uploads on a rhythm; (2) the burst-then-stall pacing shape — what coalesces frames then stalls (timer alignment, bridge batch flush, GC pressure from per-frame allocations); (3) any remaining 0.4s ticker doing bridge work with clean draw counters. Use the native text trace + a bridge-call-per-frame log to catch the stall frame red-handed. If CAMRAY is the cause, fix its cost — do not disable the feature. Same done-bar as every jitter round: the user's tape flat at 4.1ms during normal play.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "perf-log"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0779",
+  "at": "2026-06-13T16:25:04.280Z",
+  "origin": "supervisor-relay",
+  "text": "make water that has depth for the hmsc-int editor and compiled game, give a tool for making bodies of water",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-13T16:25:15.163Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T16:25:15.171Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Bodies of water with DEPTH for both the hmsc-int editor and the compiled no-V8 game, plus a tool to make them. GUIDING_LIGHT-aligned factored model (game/world/water.ts): a body = an AABB footprint (rect|disc) + ONE surfaceY float; depth is DERIVED at lookup (surfaceY-bed), never a stored grid — dig the bed under one and it reads deeper. Tool: a WATER shelf in the OBJECTS catalog drops thin placements (presets in game/kinds/waterBodies.ts) that re-resolve by kind, so they persist with zero mapStore changes. Editor renders a translucent slab (render3d/WaterBody) with the bed showing through as depth and the player wades (footingKindAtWorldPosition). Compiled game: NO new lump — water bakes as translucent slab instances on the existing INSTANCES/MATERIALS path glass uses (worldGeometry pushWaterBodies); world_loader.zig translucent render made shape-aware so discs draw round. 8 behavior tests pass. Follow-ups: compiled wade-slowdown + collider-fallback water-awareness.",
+  "shas": [
+    "ea164ff3b",
+    "f74bf558c",
+    "c0a1ca5ae"
+  ],
+  "resolvedAt": "2026-06-13T16:25:15.171Z"
+}

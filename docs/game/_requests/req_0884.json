@@ -1,0 +1,10 @@
+{
+  "id": "req_0884",
+  "at": "2026-06-14T00:40:59.477Z",
+  "origin": "session:4cab176d",
+  "text": "does it have to do with this change that was made on the last bug fix   framework/gpu/buffer_upload.zig — the one sanctioned\n  upload module:\n  - bytesOf(T, slice) / bytesOfCount(T, count) — byte\n  size computed in u64, so the multiply can't overflow\n  for any real buffer.\n  - writeTypedBuffer(queue, buf, offset, T, slice) —\n  size derived from the slice's own element type (count\n  and element size can't disagree), bounds-checked \n  against the destination buffer and logs the offender\n  in safety builds.\n  - writeValue(queue, buf, offset, &value) —\n  single-struct uploads (uniforms, lone rows).\n  \n  Every queue.writeBuffer and every setVertexBuffer\n  byte-range across the GPU layer now routes through it\n  — rects, capsules, curves, polys, SDF icons, glyph\n  text, gcurve fill, image quads, effect storage data,\n  all the uniform structs, terrain vertices, instance\n  rows, the ground D stream. A grep confirms zero count \n  * @sizeOf(T) left outside the helper.\n",
+  "status": "new",
+  "sessionId": "4cab176d-967d-40aa-9c35-1e3ca14b886a",
+  "captureMode": "hook",
+  "events": []
+}

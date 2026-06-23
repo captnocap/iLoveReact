@@ -1,0 +1,39 @@
+{
+  "id": "req_0690",
+  "at": "2026-06-12T13:30:57.697Z",
+  "origin": "codex:019eba54",
+  "text": "You can even just go further and do dumpster.ts firehydrant.ts and import them all this way. then there is no need to group them til they hit this world geo file",
+  "status": "done",
+  "sessionId": "019eba54-122c-7b03-9a58-37a88189321a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:31:09.308Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T13:33:05.256Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-13T08:43:16.683Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done",
+      "text": "accepted by the user via the workbench board"
+    }
+  ],
+  "resolution": "Changed the extraction from grouped modules to one file per prop as requested: added compile/propRecipes/dumpster.ts and fireHydrant.ts, plus a small shared types.ts for semantic recipe types and lowering. worldGeometry now imports dumpsterParts and fireHydrantParts and no longer carries those recipes inline. Verified with the focused worldGeometry bundle/test: 13/13 passed.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T13:33:05.256Z",
+  "tags": [
+    "idea"
+  ]
+}

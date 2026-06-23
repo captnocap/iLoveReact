@@ -1,0 +1,39 @@
+{
+  "id": "req_0745",
+  "at": "2026-06-13T08:27:46.656Z",
+  "origin": "session:b2985164",
+  "text": "correct. the barrels should have collision physics and gravity, i have them in the air and they dont fall on the compiled side but do on the js side",
+  "status": "review",
+  "sessionId": "b2985164-7aad-4573-accc-12a386983e72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T08:34:25.080Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T08:34:25.088Z",
+      "actor": "opus",
+      "kind": "note",
+      "text": "Barrels (dynamic kickable props) don't fall or collide in the COMPILED game; do in JS. Traced the full compiled path in world_loader.zig: createDynamicPropSink/worldDynamicProps.ts bakes any prop whose propDynamics(kind) is non-null (barrel IS dynamic, props.ts:1257) into the DYNAMIC_PROPS lump (type 17); the loader allocs one PropBody per prop spawned in the air at anchor_y+radius (world_loader.zig:2076-2091), runPlayerPhysics packs them into game_physics.step's entity section and steps with gravity EVERY frame (2909), and updateDynamicPropNodes follows the bodies (2926). Machinery looks correct and the loader logs '35 kickable props'. So it's not a missing feature. Two leading hypotheses needing one runtime observation: (1) body falls but render stays — barrel still in the STATIC instance buffer (pushPropGeometry skipDynamicProps split misfired) so a frozen copy hangs in the air while the body drops away (explains no-fall AND no-collision-where-seen); (2) bodies never step / barrels not in self.bodies. NEXT: add a 3-line loader diagnostic (dynamic prop kinds + first body Y over frames) to discriminate, then fix precisely. Not guessing a fix blind. Separately: barrels-collide-in-JS-only is the same root (compiled dynamic sim)."
+    },
+    {
+      "at": "2026-06-13T11:30:31.639Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "tags": [
+    "bug"
+  ],
+  "resolution": "Investigated 'barrels don't fall/collide in the compiled game.' Added a temporary [kickdbg] probe to world_loader.zig's stepNow and (after unblocking the build, see below) confirmed the dynamic-prop sim WORKS in compiled: bodies step with gravity (grav=13.50, posture=none) and body0 fell and rests on the ground (y=0.160, vy=0). So it is NOT a gravity/collision-missing bug. The real remaining issue is a JS-vs-compiled COLLIDER PARITY divergence in a specific 'strange setup' the user has: those barrels rest on something solid in the compiled world's baked colliders that is absent in the JS /test play view, so they fall in JS but sit in compiled — the documented compiled-physics-parity class (world_loader baked colliders vs placedPieceColliders). UNBLOCKER (committed 54e2c0022): the probe never compiled at first because rjit dev's nativeBuildFingerprint hashed framework/** + named root files but NOT root-level world_loader.zig/v8_cli.zig/v8_hello.zig — so world_loader.zig edits never marked the dev binary stale and were silently dropped until a framework/ change forced a full rebuild. Added all three to the fingerprint manifest and rebundled rjit.js. Temporary probe removed; world_loader.zig back to clean. Remaining open thread: the parity divergence for the user's specific barrel arrangement (needs the setup detail — what surface they rest on).",
+  "shas": [
+    "54e2c0022"
+  ],
+  "resolvedAt": "2026-06-13T11:30:31.639Z"
+}

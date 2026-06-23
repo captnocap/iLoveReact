@@ -1,0 +1,30 @@
+{
+  "id": "req_1460",
+  "at": "2026-06-19T23:26:12.187Z",
+  "origin": "session:89c172a4",
+  "text": "this is really good one more thing again i would say the exact same thing for your brush eraser line rect oval and pick tools or pick an icon that can ship with the tool as standard",
+  "status": "review",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T23:27:04.636Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T23:30:43.187Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Tool picker now ships standard icons, matching the brush-shape picker (same request the user made for shapes). icons.ts gains toolIconLayers with a glyph for every BrushTool (brush=handle+bristle, eraser=block, line, rect, oval, eyedropper=pipette+drop, plus fill/smudge/blur); controls.tsx factors BrushIcon and ToolIcon over one shared PathIcon renderer; BrushKit's Tool section is now an icon grid (tooltip carries the name + hotkey). Verified in rjit shot — all tool glyphs render crisply. Commit c91910bd1.",
+  "shas": [
+    "c91910bd1"
+  ],
+  "resolvedAt": "2026-06-19T23:30:43.187Z"
+}

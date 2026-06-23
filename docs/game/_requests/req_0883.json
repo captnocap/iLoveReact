@@ -1,0 +1,30 @@
+{
+  "id": "req_0883",
+  "at": "2026-06-14T00:38:07.863Z",
+  "origin": "session:5de2c418",
+  "text": "why is the water rendering again when im doing a negative value",
+  "status": "review",
+  "sessionId": "5de2c418-75b9-4d35-8158-25b1c471529e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T00:38:39.393Z",
+      "actor": "session-5de2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T00:46:24.071Z",
+      "actor": "session-5de2",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user asked why water still renders on a negative slider value and explained the model: water only ever exists IN a basin that holds it, never above ground, so the slider is just pool DEPTH and a negative is meaningless. Root cause: water mode reused the generic terrain 'height z' slider (signed, -HEIGHT_LIMIT..HEIGHT_LIMIT); since the brush reads |centerZ| as depth, a negative value still painted a pool, which read as a bug. Fixed in 7f7fbfc25 by giving water mode a dedicated WaterSection with a single positive 'depth' slider (0.5..HEIGHT_LIMIT metres, stored in centerZ). Pure UI change — the brush already excavates+fills a flush basin, so positive-value behavior is unchanged; negatives simply can no longer be entered. Editor hot-reloads, no rebuild/bake needed for the rail.",
+  "shas": [
+    "7f7fbfc25"
+  ],
+  "resolvedAt": "2026-06-14T00:46:24.071Z"
+}

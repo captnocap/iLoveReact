@@ -1,0 +1,30 @@
+{
+  "id": "req_1265",
+  "at": "2026-06-18T08:04:34.457Z",
+  "origin": "session:7abb2b22",
+  "text": "in the @cart/hmsc-int/editors/model/Studio.tsx can you give me a sphere, icosphere for shapes and then bevel tool and create edge from vertexes",
+  "status": "review",
+  "sessionId": "7abb2b22-4c02-47f2-b4bc-7e5ee55a0f6a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T08:04:42.373Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T08:15:48.045Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added the four requested Studio mesh tools, all as pure+headless editMesh ops with unit tests (editMesh.test.ts 84/84). sphere() = UV sphere with one sides knob (3..48), derived latitude rings, outward-wound faces. icosphere() = subdivided icosahedron projected to the sphere (subdiv 0..3, even triangle distribution). bevelEdge() chamfers a MANIFOLD edge: both adjacent faces slide their shared corners inward along their in-face edges, a chamfer quad bridges, and a tri caps each end corner (boundary/non-manifold edges are a clean no-op). connectVerts() implements 'create edge from vertexes' — since edges are face-derived here (no loose-edge primitive), it splits the face the two non-adjacent corners share along the new edge (Blender's Connect Vertex), yielding a real selectable/extrudable edge. UI: AddShapeDialog gains Sphere + Icosphere (sphere uses the sides knob, icosphere a new subdiv knob; round bodies sized by diameter alone); edge mode (1 edge) gets a 'bevel' button beside extrude; vertex mode (2 verts) gets a 'create edge' button. STUDIO.bevelMeters tunable added. Verified: editMesh suite 84/84, and the full hmsc-int cart bundles cleanly (4.9mb, no errors).",
+  "shas": [
+    "f1387cc8d"
+  ],
+  "resolvedAt": "2026-06-18T08:15:48.045Z"
+}

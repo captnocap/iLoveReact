@@ -1,0 +1,31 @@
+{
+  "id": "req_0466",
+  "at": "2026-06-10T05:55:28.345Z",
+  "origin": "codex:019eaf3e",
+  "text": "[Image #1] do you see the red line i drew. this is t he overhang of a wall when placed on the floor. which is right but also wrong. I think the problem we have is that the wall has any thickness at all maybe. because it should be flush, but then you would say well what happens then when you place a floor on the other side, you can only have one flush. which is right, and which means there is a space we can call uncanny valley that is the wall gap that somehow has to normalize. i would assume you make thickness based on the amount of floor it needs to sit on. if that makes sense",
+  "status": "review",
+  "sessionId": "019eaf3e-0282-7ba1-99cd-6b025b307dea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:55:39.647Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T06:01:42.240Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented support-derived wall depth: one-sided floor/roof support puts wall thickness fully onto the plate, two-sided support splits across the seam, and unsupported walls stay centered. Render boxes, raycast targets, live colliders, camera occluders, and editor/play ghost previews now share placed.depthSpan. Verified build-snap 15/15, build-placed 45/45, and full hmsc-int esbuild bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T06:01:42.240Z",
+  "tags": [
+    "bug"
+  ]
+}

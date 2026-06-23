@@ -1,0 +1,13 @@
+{
+  "id": "req_0266",
+  "at": "2026-06-07T12:51:27.145Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: USER live verdicts on the collision wave, verbatim: \"staircase = works, ramp = i cant walk up it, camera cant brake if i cant walk up it so i cant answer to if it still does. it doesnt on the staircase tho\". Scoreboard: STAIRS PASS (walk-up works, camera clean on stairs). RAMP ASCENT FAIL — the player cannot walk up the ramp at all. Note: ramp walk-up was user-passed long ago (ccc486e50 era), so this is either (a) a regression from your all-walkable-surfaces resolver change, (b) the thin-slab RAMPREAL geometry change altering the ascent path, or (c) the user's session still running the STALE native build (the rebuild-needed overlay was still up at 5:22 — though stairs passing suggests at least some of the wave is live). Determine which FIRST: confirm what native build id the live session reports vs disk, then print the ramp ascent data live-shaped — player position, the surface the resolver selects underfoot, the slope/walkableSlopeCos values the step sees as the player pushes into the ramp (the register log showed walkableSlopeCos 0.6 — if the slab's slope exceeds the walkable threshold the resolver calls it a wall and you get exactly this). Read the prints, fix, and your live-shaped regression must include ASCENT (walk up the ramp to the top), not just under/beside. Camera-on-ramp stays unanswerable until ascent works — sequence it after.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

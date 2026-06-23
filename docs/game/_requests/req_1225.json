@@ -1,0 +1,30 @@
+{
+  "id": "req_1225",
+  "at": "2026-06-17T01:47:09.671Z",
+  "origin": "session:ee607c38",
+  "text": "hm. so its working much better now. but it doesnt show up on shapes like [Image #7]",
+  "status": "review",
+  "sessionId": "ee607c38-a6df-4547-aa9a-facb41f8319d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T01:48:35.053Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T01:52:21.046Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The paint grid only rendered on axis-aligned quads — the overlay used a 4-corner bilerp, so angled panels and triangular/n-gon faces (windshield, sloped body) showed no grid and no cursor cell. Replaced the bilerp with uvToWorld: a barycentric map over the face's fan triangulation that turns any atlas-UV point into a world point ON the face, for ANY shape. Grid lines are sampled at the integer-texel boundaries (the req_1219 alignment) and clipped to the face's UV hull so a triangle's lines stop at its edges; the cursor cell + centre dot map through the same function. Painting itself already worked on these faces (the raycast is per-triangle) — this restores the missing visual feedback. meshPaint 7/7 (+uvToWorld covering quad + triangle), Studio bundles clean, hot-reload.",
+  "shas": [
+    "6203ddf10"
+  ],
+  "resolvedAt": "2026-06-17T01:52:21.046Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_0661",
+  "at": "2026-06-12T05:52:44.353Z",
+  "origin": "codex:019eba54",
+  "text": "so, ok, lets then atleast see one of the things, the dumpster is a good start, in this corrected format, and if it holds the same shape (as it should normally) start with one. if it works, then we can progress through the file, before we deprecate the current approach",
+  "status": "review",
+  "sessionId": "019eba54-122c-7b03-9a58-37a88189321a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T05:52:50.532Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T05:55:38.507Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the dumpster-only semantic recipe spike in cart/hmsc-int/compile/worldGeometry.ts. The dumpster now has named object-shaped source parts (baseSkid, bodyTub, topRim, frontLid, rearLid, middleRib, lowerRib, rustyCornerPost) with named position/size/rotation/color fields, then lowers back to the existing PropPartSpec box rows. Added a focused compile/worldGeometry.test.ts regression proving the dumpster still emits the same eight box rows and representative dimensions, rotations, and colors. Focused suite passed; full game verify passed bake/render/all suites/scripts but remains red on the unrelated built-in oracle smoke query 'kinds' returning no RULINGS.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T05:55:38.506Z"
+}

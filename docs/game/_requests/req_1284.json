@@ -1,0 +1,30 @@
+{
+  "id": "req_1284",
+  "at": "2026-06-18T12:56:52.571Z",
+  "origin": "session:18fe5c79",
+  "text": "look let me show u. this is me sitting at exact +z camera and the image use to align with it but it no longer does and i cant get it to [Image #34]",
+  "status": "review",
+  "sessionId": "18fe5c79-d15f-47c8-ade6-d65531bd83af",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T13:01:23.418Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T13:11:38.585Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the 'image used to align with +Z, now stuck top-left and can't recover' report: the top-left rectangle IS the real 3D plane (textured correctly) viewed head-on, but hot reload reset the camera (lives in plain refs) which reframed onto the small model and left the big plane cornered, and the plane+offset slider model made it un-recoverable. Fix shipped under req_1285 (gizmo placement) + req_1283 (disk persistence so a reload no longer wipes the image/placement). Confirmed StaticSurface composite is NOT clamped, so left:-99999 genuinely hides the source — the leak theory was wrong.",
+  "shas": [
+    "50c35b193"
+  ],
+  "resolvedAt": "2026-06-18T13:11:38.585Z"
+}

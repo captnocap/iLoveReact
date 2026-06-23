@@ -1,0 +1,13 @@
+{
+  "id": "req_0292",
+  "at": "2026-06-08T06:49:51.625Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: MAPBUILD verified at my level (shot probative — PLACE mode, building in Objects picker + place button, footprint on 2D map; verify green 71/71 incl the new mapBuildPlacements test). COMMIT IT — explicit paths (the map-editor place-mode files, game/world/stream.ts, mapBuildPlacements.test.ts, the footprint render + delete affordance). Verify green, post hash. Lands in REVIEW pending the user's hands-on test (place a prefab in the map editor → see footprint → delete it). One source of truth confirmed (delete removes streamed pieces the game consumes) — good.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "req_0204",
+  "at": "2026-06-07T06:45:41.980Z",
+  "origin": "session:f2302907",
+  "text": "Ya so the whole point of the tile system and the line of sight is that we dont have to make anything we cant literally see active",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:46:33.840Z",
+  "resolution": "Confirmed the user's tile+LoS residency thesis as independently-derived PVS (the vis lump — closing the loop with the original BSP question) and sharpened it into rulings (no code): (1) split render residency from simulation residency — LoS picks the simulation LANE rather than existence, with the already-ruled 45/min coarse state-tick as the unseen lane and fast-forward-on-visible, avoiding the GTA stage-set failure for a witnesses-and-schedules game; (2) visibility belongs PRECOMPUTED in the mapfile as a VIS lump (chunk-to-chunk potential visibility computed by Compile), and the perception system + renderer + witness logic + audio occlusion share that one visibility oracle — in a stealth game residency and gameplay visibility are the same table queried both directions; (3) the exception rider: tile-noise hearing means events still propagate into unseen regions via the event channel, which gates promotion to active. Assembled the full residency ladder: changelevel interior unloaded -> sparse default chunk nonexistent -> loaded-but-not-visible coarse-tick -> visible fully active.",
+  "shas": [],
+  "tags": [
+    "ruling"
+  ]
+}

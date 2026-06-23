@@ -1,0 +1,31 @@
+{
+  "id": "req_0716",
+  "at": "2026-06-13T03:41:15.900Z",
+  "origin": "session:e13c74b5",
+  "text": "huh. you made the whole walls disappear with the last edit i think. i dont see any of them now lol D: oh nevermind. i see them in the compiled game, not in the iso3d",
+  "status": "review",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T03:44:26.185Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T03:44:26.192Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Not a bug — no code change. User saw walls vanish in the iso3d build pane but present in the compiled game, and self-resolved ('oh nevermind'). Confirmed the cause in source: the iso pane has a 'W' hide-walls toggle (IsoAuthor wallsVisible, line 1377 — when off it filters every wall out of visiblePieces) plus a floor-level cut-away (geometry above the active F-level is hidden). Both are editor-view-only conveniences for seeing inside buildings and have zero effect on the compiled world, which is exactly the asymmetry observed. The concurrent z-fight dedup (req_0712/0713, sha f9d488a50) was ruled out as the cause: it runs identically in the compiled path where the walls render fine. Resolution: click 'W' to restore walls in the iso view.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T03:44:26.192Z",
+  "tags": [
+    "bug"
+  ]
+}

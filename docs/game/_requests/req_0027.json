@@ -1,0 +1,11 @@
+{
+  "id": "req_0027",
+  "at": "2026-06-06T05:54:57.832Z",
+  "origin": "supervisor-relay",
+  "text": "this header is crowded, and there is a button in that array u cant even see, also, notice how the buttons are tight for space in their own container here. have this whole thing cleaned up / different shape but same data. because this is just poor thinking. put the buttons as a row on the bottom or top of this, and then do a row with the icon and name and then under than another row with columns of the meta data details",
+  "status": "new",
+  "captureMode": "manual",
+  "tags": [
+    "ux"
+  ]
+}

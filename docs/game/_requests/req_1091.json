@@ -1,0 +1,28 @@
+{
+  "id": "req_1091",
+  "at": "2026-06-15T23:00:42.961Z",
+  "origin": "codex:019ecd7a",
+  "text": "yes i am wanting it to behave all the same as something like .bsp files but for game assets",
+  "status": "review",
+  "sessionId": "019ecd7a-9cba-73d0-9fee-7dc6959b72e2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T23:00:47.286Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T23:01:19.172Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the BSP-for-assets framing against oracle rulings V28/V29. Explained that Studio-compiled .prop/.item/.vehicle/.clothing assets should be cooked, content-addressed, installable binary lump containers with mesh/material/collision/mount/gameplay descriptor lumps, map/world files referencing them by asset id rather than embedding, and behavior limited to engine-supported data parameters. No source changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T23:01:19.172Z"
+}

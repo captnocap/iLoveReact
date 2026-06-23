@@ -1,0 +1,33 @@
+{
+  "id": "req_0675",
+  "at": "2026-06-12T09:18:26.631Z",
+  "origin": "session:c61d302f",
+  "text": "hm. its still showing up thru a wall did u fix the compiled loader ?",
+  "status": "review",
+  "sessionId": "c61d302f-e1c3-4475-b1f6-ef3b9201d8d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:24:55.660Z",
+      "actor": "c61d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T13:33:03.563Z",
+      "actor": "c61d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user was right — the editor fix (req_0674) never touched what they play: the /compiled pane and standalone player run world_loader.zig's NATIVE interact scan (stepInteract), distance-only like the editor's was. Added game_physics.reachBlockedStepColliders (sibling of the spring-arm camera query, same packed collider wire): blocked when a THIN solid collider (wall slab, closed door panel, window strip — open doors already drop their solid flag in setDoorOpen) crosses the chest-height eye→target segment; props are chunky in both plan extents so a candidate's own collider never self-blocks, and a box containing the aimed target (a door's own panel) is skipped so doors work from both sides. Loader gates both its prop and door loops. Six unit tests pin the law; test-game-physics green; world_loader ast-checks clean. ZIG CHANGE — needs the host/loader rebuilt (restart rjit dev for the /compiled pane; rjit game play rebuilds the standalone player). Hot reload alone will NOT show it.",
+  "shas": [
+    "f2e12b5f2"
+  ],
+  "resolvedAt": "2026-06-12T13:33:03.563Z",
+  "tags": [
+    "bug"
+  ]
+}

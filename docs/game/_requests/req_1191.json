@@ -1,0 +1,30 @@
+{
+  "id": "req_1191",
+  "at": "2026-06-16T22:36:08.374Z",
+  "origin": "session:8e058574",
+  "text": "possible to make a function that shows if its symetric based on the center of the radius",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T22:36:59.412Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T22:39:02.232Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a live symmetry indicator to the Studio editor so asymmetry is caught at a glance rather than by hunting for a stray vertex. New pure symmetryReport(m, axis): places the symmetry plane at the bbox CENTRE on that axis ('centre of the radius' per the ask) and counts how many verts have no mirror twin there — 0 means symmetric, and a single drifted vertex reads as 2 (itself plus its now-orphaned twin). Studio shows it as a badge beside the symmetrize keep-+/keep- buttons: green '✓ symmetric X' when clean, red '⚠ N off X' when not; the axis follows the symmetrize axis (first enabled mirror plane, else X). It is memoized on the committed mesh id+version+axis so camera drags don't recompute it. Verified: editMesh suite 64/64 (clean box = 0 off, drift detected, symmetrize clears it back to 0), full hmsc-int cart bundles clean. Committed 2bbe04d55.",
+  "shas": [
+    "2bbe04d55"
+  ],
+  "resolvedAt": "2026-06-16T22:39:02.232Z"
+}

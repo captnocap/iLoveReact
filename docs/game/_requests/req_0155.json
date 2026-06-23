@@ -1,0 +1,12 @@
+{
+  "id": "req_0155",
+  "at": "2026-06-06T17:52:59.689Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — small standing-rule addition for your queue (after your commit + WORKFREEZE): add a TESTING PARITY rule to the worker-facing standing doc (AGENTS.md, the authority doc): \"Test at the layer where the logic lives. Any change touching framework/*.zig or engine-side code requires Zig-side unit tests (framework/testing/unit/, run via zig build test-*) IN ADDITION to consumption-layer TS tests. A TS test asserting across the bridge proves the bridge contract, not the Zig internals — TS-only coverage of Zig logic is green-at-wrong-layer.\" User-ordered (verbatim: \"no one seems to even make a single zig test... it just feels bias\"). Cite framework/testing/unit/game_physics.zig (commit 6d21dd74c) as the exemplar pattern next to the rule. One short section, explicit-path commit of just that doc. Post the sha.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

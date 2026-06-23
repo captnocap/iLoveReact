@@ -1,0 +1,33 @@
+{
+  "id": "req_0710",
+  "at": "2026-06-13T03:02:25.870Z",
+  "origin": "session:9963d6de",
+  "text": "that worked. is there a way to rotate it so im not only stuck to the one direction",
+  "status": "review",
+  "sessionId": "9963d6de-6200-482b-a3ff-a5af63547b01",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T03:02:59.157Z",
+      "actor": "opus-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T03:13:37.804Z",
+      "actor": "opus-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a perpendicular parking orientation so a lot is no longer stuck to one direction (commit 2808bf0d0). The floor bake reads only cell kind indices — there's no per-cell rotation channel and the stall axis was hardcoded to X — so the idiomatic fix is a second tile kind, matching how the road grammar expresses direction as separate lane kinds. New kind 'parkingCross' (label 'Parking ⟂') is identical lot ground to 'parking' (same gameplay profile: walkable, drivable, vehicleCost 1.4 destination pricing) but its bay lines run across Z instead of X. To avoid 6-copy duplication of the stall math across the three lockstep sites, I factored it into one pure home — render3d/parkingStall.ts — exporting PARKING_STALL_WGSL (the parking_stall WGSL helper), parkingStallColor (CPU bake mirror), the kind indices, and isParkingKind; the game heightfield shader, its CPU mirror, and the editor painter view all call it and differ only in which axis (uv.x*cols vs uv.y*rows) they feed. Magic numbers (bay spacing, the 0.16-tile line core from req_0704, color) now live in exactly one place. The user paints either 'Parking' or 'Parking ⟂' as a swatch. Appended LAST in all three registries so kind indices stay stable. Tests: groundResolve 7/7 including a new perpendicularity check (parking lines along X, parkingCross along Z, each dark on the other's axis) + a parkingCross-only floor routing to the textured bake; kinds/tiles 20/20 with the lock-list + profile-parity assertion; worldGeometry 13/13, painter 3/3, mapload 7/7; full cart bundles clean. Generated WGSL verified well-formed (f32 literals). Note: this gives 0°/90°; angled (45°) parking would be a larger follow-up needing a per-region rotation channel.",
+  "shas": [
+    "2808bf0d0"
+  ],
+  "resolvedAt": "2026-06-13T03:13:37.804Z",
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "id": "req_1449",
+  "at": "2026-06-19T22:39:38.170Z",
+  "origin": "session:89c172a4",
+  "text": "Yeah also you can do brushes from effect shaders, like, you could have bitmap paint brushes or dithering paint brushes. also while we are here, its only natural to properly give it blending tools and that with it since it all comes together with painting",
+  "status": "review",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T22:40:34.445Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T10:44:13.950Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Folded shader-driven and blending capability into the paint kit's vocabulary as part of Phase A. StampSource in runtime/paint/model.ts now admits analytic | mask (SVG-path) | texture | shader sources, and PaintInk admits color | texture | shader, so effect-shader brushes (bitmap/dithering style) and texture stamps are first-class in the model rather than one-offs. BlendMode is a full enum (normal/multiply/screen/overlay/add/subtract/darken/lighten/erase) wired through the Brush.blend field and surfaced in BrushKit's blend section, so blending tools ship with painting as the user asked. The cutout/MaskQuad shader-surface approach (from docs/game/_archive/cutout.md) informed the SurfaceId/CustomSurface shape. The host realization of these source/blend kinds — the actual shader dab pass binding a source texture and applying blend modes in framework/gpu/paintable.zig — is Phase B and still pending; Phase A lands the complete model and UI surface for them.",
+  "shas": [
+    "23ee165dc",
+    "b655f4e58",
+    "a46e75d2a",
+    "5034bb056",
+    "c91910bd1",
+    "10ca3ab78"
+  ],
+  "resolvedAt": "2026-06-20T10:44:13.950Z"
+}

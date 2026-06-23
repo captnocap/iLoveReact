@@ -1,0 +1,28 @@
+{
+  "id": "req_1059",
+  "at": "2026-06-15T20:32:35.268Z",
+  "origin": "session:00a3ce8a",
+  "text": "Great. now one last part of this slice to wrap up first is we want a create face / edge tool. so how it works. i select an edge, i select another edge, i click create face, now the two edges are connected with a face.",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T20:33:39.812Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T20:37:55.023Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Create face / bridge edges (req_1059) — the slice's last edit op. User flow: select an edge, select another edge, click create face, and a quad bridges the two edges. Pure ops in editMesh.ts: bridgeEdges(m, e0, e1) builds a quad from two edges, ordering the loop to avoid a self-crossing bowtie (of the two ways to join the edges it takes the pairing with the shorter new edges; two edges sharing a vert are a no-op), and createFaceFromVerts(m, verts) fills 3 verts into a triangle or 4 into a quad, ring-ordered by angle in the verts' best-fit plane (null for anything other than 3-4 distinct verts). New faces receive the default per-face square UV (faceSquareUV, the extrude side-wall pattern). Note: standalone edges aren't a primitive in this mesh model (edges are derived from face loops), so 'create edge' is the same op with a face as the result. Studio: a 'create face' button in the element toolbar, shown when exactly 2 edges are selected (edge mode) or 3-4 verts (vertex mode); it commits via onEditMesh and clears the selection. editMesh 48/48 (+bridgeEdges, +createFaceFromVerts tests), modelStream 7/7, Studio + full workbench source chain bundle clean; hot-reload TSX, uncommitted. This completes the design-gated edit-ops slice (loop cut, extrude, delete, create face) alongside the transforms (move/resize/rotate, per-element and whole-object) and the shape set. PLAYBOOK Part 6 + memory updated.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T20:37:55.023Z"
+}

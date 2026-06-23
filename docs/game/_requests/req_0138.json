@@ -1,0 +1,17 @@
+{
+  "id": "req_0138",
+  "at": "2026-06-06T17:09:41.111Z",
+  "origin": "codex:019e9ca8",
+  "text": "ADDENDUM — the user just also passed the junction work, verbatim: \"also, the wall/floor flush problem is solved\" — that includes the wall-wall corner. Drop the pending-retest caveat from the commit message; the whole junction cluster is user-PASSED.",
+  "status": "done",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:18:08.063Z",
+  "resolution": "The user-passed junction cluster is included without any pending-retest caveat: floor-floor, wall-on-floor, and wall-wall corner lattice joins were committed in the accepted collision/build commit after user confirmation that the wall/floor flush problem is solved.",
+  "shas": [
+    "6d21dd74c67d4925d327caa6f5d2a843c6db4162"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

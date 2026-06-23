@@ -1,0 +1,12 @@
+{
+  "id": "req_0164",
+  "at": "2026-06-06T18:32:00.782Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — WBITEMS.CAPTURE.md verified independently: 22/22 rows line-referenced, zero deferrals, census flips correct. The user's standing order applies (\"as soon as they are ready get them out of here\"). Execute in TWO commits before starting SCULPTPICK: COMMIT 1 — the WBSTEP5 source, explicit paths, exactly your touched-files list. COMMIT 2 — THE FLIP: delete cart/hmsc-int/editors/items/ItemsRoute.tsx and cart/hmsc-int/VoxelHybridRoute.tsx (and any route-only satellites), remove their nav icons + route registrations, update the WORKBENCH.md ledger (step 5 done, route rows closed) and docs/game/ per the maintenance contract — all in that one flip commit. Verify green after the flip (nothing may reference the dead routes; the suite count must not shrink). Post both shas. The voxel standalone surface is confirmed disposable (census: zero unplanned rows; user ordered all old routes out).",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

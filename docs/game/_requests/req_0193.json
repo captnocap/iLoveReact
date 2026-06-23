@@ -1,0 +1,12 @@
+{
+  "id": "req_0193",
+  "at": "2026-06-07T05:55:43.365Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER RULING on the state-divergence question: OPTION A, AUTO-FLOW. Verbatim: \"i just want it to not feel like you cant understand how to do it immediately. i made a voxel shape under the exact same item name so it should carry through to the sculpting.\" The voxel blockout carries into the SCULPT lens automatically — same item = one shape, zero manual import steps to discover. Design within that: blockout changes re-bake the sculpt base automatically; protect existing sculpt detail sensibly on re-bake (layer sculpt deltas on top if feasible; if a re-bake must invalidate sculpt work, warn at the moment of the voxel edit, not silently). The import-voxel button disappears as a required step (it may remain as an explicit re-bake control only if auto-flow makes it redundant-but-harmless — prefer deleting it). Test: build blockout in VOXEL -> switch to SCULPT -> the blockout IS the sculptable mesh, immediately, no clicks. That immediacy is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

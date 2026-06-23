@@ -1,0 +1,30 @@
+{
+  "id": "req_1261",
+  "at": "2026-06-17T18:04:34.622Z",
+  "origin": "session:c885b7cc",
+  "text": "Nice that is the right plan and i think if you are going to joint it with pivots that create a connection, we could do the exact same for wheels but with the vertex wheel well positioning since it already finds the middle, \n\nso notice for example, this wheel well. i selected the back face of it [Image #28] and then here is the joint from the well [Image #29] so if we just take the connectior from the joint location, we can generate the axel from the center of that face that is the back of it and then connect the wheel there right in the center all in one function.",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T18:07:00.644Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T18:10:26.742Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User approved the steering-wheel articulation plan and refined the WHEEL case: a wheel well's flat back face already gives the axle center (centroid) + spin axis (normal), so seating a wheel should be one function reusing the existing center-finding — select face → axle joint at the center → connected wheel, all at once. Built it. New pure module wheelMount.ts: faceWheelFit (centroid + dominant normal axis + radius from the face's IN-PLANE extent — deliberately NOT fitWheelCenter, which fits a circumscribed circle to ARCH verts and would oversize a flat rectangular face), axleSpinAxis, buildWheelPart (wheelMesh seated at the hub via mergeMesh + a pivot at center = its rotation origin), mirroredCenters (original + reflections across the enabled mirror planes). 5/5 unit tests pass via esbuild+v8cli. Studio.tsx: '⊚ wheel from face' button in the face-ops cluster (face mode, single face) — drops an axle socket joint at each (mirror-aware) center on the body AND adds a connected wheel as its OWN pivoted part there; not merged, so it's set up for the future articulation runtime to spin. Both touched files transpile clean. Commit edf917538. The general part→joint binding (steering wheel ↔ dash) + the runtime that actually SPINS bound parts (steer→wheel→road-wheels→hands) remain the next slices of the req_1259 plan; this delivers the wheel-specific authoring shortcut. Hot-reloads in the dev host; not yet visually confirmed by the user.",
+  "shas": [
+    "edf917538"
+  ],
+  "resolvedAt": "2026-06-17T18:10:26.742Z"
+}

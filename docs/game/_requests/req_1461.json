@@ -1,0 +1,10 @@
+{
+  "id": "req_1461",
+  "at": "2026-06-19T23:38:23.110Z",
+  "origin": "session:1d61c909",
+  "text": "i saw you do something with git stashes but that command should be blocked idk how its not, are you sure you didnt just wipe a bunch of uncommitted work ?",
+  "status": "new",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": []
+}

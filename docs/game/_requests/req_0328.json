@@ -1,0 +1,31 @@
+{
+  "id": "req_0328",
+  "at": "2026-06-08T12:01:26.001Z",
+  "origin": "codex:019ea612",
+  "text": "OK. lets look at it side by side. [Image #1] here is where we landed.",
+  "status": "review",
+  "sessionId": "019ea612-258b-7013-b887-0bcd6a4954ea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T12:01:37.770Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T12:13:00.823Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "This checkpoint was superseded by the follow-up implementation request. The side-by-side feedback led first to the player-scale camera adjustment, then to the proper baked V2 player model data path in the no-V8 loader. No separate code path remains in flight for this checkpoint; user verification is still via tools/rjit game play, not marked done by agent.",
+  "shas": [
+    "df4daa634",
+    "8ba038a0e"
+  ],
+  "resolvedAt": "2026-06-08T12:13:00.823Z"
+}

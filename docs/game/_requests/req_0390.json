@@ -1,0 +1,59 @@
+{
+  "id": "req_0390",
+  "at": "2026-06-09T03:36:47.514Z",
+  "origin": "session:9440c2b7",
+  "text": "It should feel like this [Image #1] [Image #2] [Image #3] [Image #4] but for the entire map. not for just a lot",
+  "status": "review",
+  "sessionId": "9440c2b7-fcc6-4745-a2a5-309cd273e004",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T03:38:11.189Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T03:38:11.196Z",
+      "actor": "iso-author",
+      "kind": "note",
+      "text": "Reference: The Sims build mode feel (4 images) but for the WHOLE city map, not a single lot. Decomposed: locked iso cam (rotate/zoom/floor up-down, top-right cluster) [IsoStage done]; cursor GHOST + green placement grid, click to place [new]; grid overlay on active floor [new]; cut-away walls to edit interiors [reuse cameraOcclusion/placedPieceCameraOccluders]; bottom catalog rail [reuse BUILD_CATALOG/prefabs]. Whole-map unbounded is the differentiator vs Sims lots."
+    },
+    {
+      "at": "2026-06-09T03:43:38.338Z",
+      "actor": "iso-author",
+      "kind": "note",
+      "text": "STILL IN FLIGHT — paused for user decision. Foundation isoStage.ts built; full Sims-feel build recipe verified to the metal (screenRay→resolveSnapTarget→validatePlacement→session.commit on worldStream; cutaway via cameraOcclusion; groundColumnTop already exported from Embodied.tsx). One blocking decision surfaced: PlacedPieceMeshes renderer + its cluster (pieceVisualShapes/VisualShapeMesh/wallJoinSignature/BUILD_UI/occlusion) is LOCAL to the 2000-line PlayRoute. Recommended extracting it to editors/build/pieceMeshes.tsx (behavior-preserving, own commit) so F2 + iso share one renderer; alt is a lean second renderer (model still syncs via worldStream, only mesh code duplicates). Awaiting greenlight before touching the working F2 renderer."
+    },
+    {
+      "at": "2026-06-09T05:37:05.151Z",
+      "actor": "iso-author",
+      "kind": "note",
+      "text": "Renderer extraction DONE + committed (c34ada30a); iso camera foundation committed (6fc242e4e). Next: build IsoAuthor.tsx pane (IsoStage + WorldStatics terrain + shared PlacedPieceMeshes + grid overlay + cursor ghost via resolveSnapTarget + click-commit to worldStream + floor/rotate/zoom controls + cutaway), then the bottom-right authoring-mode toggle in index.tsx."
+    },
+    {
+      "at": "2026-06-09T05:48:39.562Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-09T06:03:15.573Z",
+      "actor": "iso-author",
+      "kind": "note",
+      "text": "Kept going down the list. Added (all in sync via worldStream, all bundle clean): terrain-following picks c99497492 (same groundColumnTop as F2); select+delete+clone 3f80055bd (raycastPieces + connected + pieceRemoved + piecePlaced-offset clone); cut-away walls 071f2cd65 (fade pieces above the active floor, the Sims view-this-level move). BLOCKER for the rest: wall SKINNING and SPAWNER/pathing placement both need NEW worldStream event kinds (a pieceSkinSet event; marker storage+events - WorldMarker is defined in build/markers.ts but not wired into worldStream; only legacy placements.ts has spawn/save markers). Adding stream events touches shared model + F2 + compile, not a unilateral fork - needs user's call. Roads = separate tile-based directional-grammar system (large). Iso pane core (place/select/edit/clone/cutaway/terrain) complete and additive."
+    }
+  ],
+  "resolution": "Built the Sims-style whole-map build view: the bottom-right 3D pane now has an inspect|build toggle; build mode (IsoAuthor.tsx) is a locked iso camera over hmsc's real world — rotate in 90° detents (Q/E), zoom, grab-pan, floor up/down — where you pick a BUILD_CATALOG piece from the bottom rail and click the ground to place it, with a green/red cursor ghost previewing the snap. Matches the reference images' feel but unbounded across the whole city map, not a single lot. isoStage.ts is the pure iso camera (Isometric rig + unprojectGround + pieceRay). Verified the cart bundles clean (esbuild exit 0); camera uses the standard declarative Scene3D.Camera form. This is a FIRST WORKING SLICE for runtime feedback — remaining per the same vision: terrain-following picks (level 0 is flat y=0 for now), wall skinning, spawner markers, pathing routes, cloning, and cut-away walls.",
+  "shas": [
+    "125fdf0f1",
+    "6fc242e4e",
+    "c34ada30a"
+  ],
+  "resolvedAt": "2026-06-09T05:48:39.562Z",
+  "tags": [
+    "ux"
+  ]
+}

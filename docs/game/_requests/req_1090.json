@@ -1,0 +1,28 @@
+{
+  "id": "req_1090",
+  "at": "2026-06-15T22:58:24.297Z",
+  "origin": "codex:019ecd7a",
+  "text": "nice. so, if the idea was to take a built shape in this studio, hit a 'compile' button on it, and that prompts for if its a prop, a item, a vehicle or vehicle part like tires or fenders etc. and then clothing. that menu then has fields to fill out for the shape needed for the compile point like if its a prop does it have storage, is it locked, is it static. or for item is it one handed or two, ammo, damage, etc. clothing the same, vehicle the same. and then that all compiles out to a .item or .prop file like its an .obj or similar, should work?",
+  "status": "review",
+  "sessionId": "019ecd7a-9cba-73d0-9fee-7dc6959b72e2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T22:58:30.451Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:58:51.283Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the Studio compile-shape design question after checking the required game oracle and current prop/item/vehicle/clothing data doors. Clarified that the workflow should work as a typed asset compiler: Studio mesh/UV/mount data plus a selected role schema compiles to installable content-addressed data such as .prop/.item/.vehiclepart/.clothing descriptors, with behavior expressed as engine-supported parameters rather than per-asset scripts. No source changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:58:51.283Z"
+}

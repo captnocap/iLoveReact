@@ -1,0 +1,33 @@
+{
+  "id": "req_0583",
+  "at": "2026-06-10T18:06:58.650Z",
+  "origin": "session:a8fb6853",
+  "text": "uh no the arrows are not there on the over extended parts",
+  "status": "review",
+  "sessionId": "a8fb6853-54be-4d2c-84e4-cf67a28fe891",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T18:07:11.638Z",
+      "actor": "session:a8fb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T18:11:15.925Z",
+      "actor": "session:a8fb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the oversized-road render bug (reported twice, 'massive road on a tiny little paint'). Root cause was render-side, not the stale-ghost theory from last session: the analytic ribbon shader (heightfieldSurface.tsx HEIGHTFIELD_TILE_SHADER, shared by the editor 2D chunk quads via TILE_FIELD_WGSL and the 3D drape capture) tested 'inside the band' using only the perpendicular signed distance. A fragment past a segment endpoint clamps its nearest point to the endpoint, so p-q runs along the road axis and signedD reads ~0, passing the band test — painting asphalt as an infinite rectangular strip from the last centerline point out to the chunk edge. The flow arrows were absent on the overshoot (they only mark the authored r.points span), which is exactly what proved this render-side. Fix: bestD^2-signedD^2 is the squared longitudinal distance (0 on the segment interior, >0 once clamped); cap it (<0.25, half a tile) to square the polyline ends, while interior joints stay covered by the neighbour segment whose perpendicular foot wins selection with zero overshoot. TS shader, hot-reloads. Bundle-check clean; docs/game/hmsc.md + index record updated (RIBBONCAP-0610).",
+  "shas": [
+    "e8858c890"
+  ],
+  "resolvedAt": "2026-06-10T18:11:15.925Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0542",
+  "at": "2026-06-10T14:17:11.517Z",
+  "origin": "session:51f18581",
+  "text": "haha oh shit yeah u will want to follow behind it with the camera and use my camera movements to positionally look but always return back  to center haha otherwise im zip zip zipping around xD",
+  "status": "review",
+  "sessionId": "51f18581-610e-4479-8d18-625e56e6d9c2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:17:58.198Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T14:22:22.514Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two follow-ups from driving the lab. (1) 'Follow behind it but let my camera movements peek and always return to center — otherwise I'm zip-zip-zipping around': replaced the free user-orbit with a GTA-style auto-centering chase cam. Base orbit yaw now trails behind the car's heading (yaw = heading*RAD); mouse drag adds only a PEEK offset (offsetRef) that eases back to zero each frame via RECENTER_RATE, so you can look around but always settle behind the car. Scroll still dollies distance; reset snaps the peek back. (2) 'No drag on turning, I just go full-speed donuts': the model scrubbed lateral velocity but never bled FORWARD speed in a turn, so you could hold top speed around any radius. Added corneringDrag to GAME_DRIVING — forward speed bleeds proportional to steer fraction (|steer|/maxSteer), always toward zero, never reversing the car — and exposed it as a 'cornering' knob (default 0.55). Verified: bundles clean with full @game+runtime resolution, no stale refs.",
+  "shas": [
+    "ace17446b"
+  ],
+  "resolvedAt": "2026-06-10T14:22:22.514Z",
+  "tags": [
+    "ask"
+  ]
+}

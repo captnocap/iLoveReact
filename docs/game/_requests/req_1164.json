@@ -1,0 +1,40 @@
+{
+  "id": "req_1164",
+  "at": "2026-06-16T14:23:56.228Z",
+  "origin": "session:8e058574",
+  "text": "And create face, is it restricted to only 1 to 1 ? like i have a side of 4 edges and then another of 2, i cant create a face between the two parts, but i dont see why not",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T14:24:07.307Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T14:29:19.804Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "Generalized 'create face' beyond 1-edge-to-1-edge. Added createFaceFromEdges() to editMesh.ts: assembles selected edges into chains, fills a closed loop as one n-gon, or lofts two chains (quads for equal vert counts, two-pointer triangle strip for unequal — so a 4-edge side bridges to a 2-edge side). UI now enables create-face for >=2 edges. 4 new tests pass (54/54). NOT committed: editors/model/ untracked — flagged to user."
+    },
+    {
+      "at": "2026-06-16T14:29:49.495Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-16T14:56:45.335Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "Committed in d2ac77028 (editors/model/ now tracked)."
+    }
+  ],
+  "resolution": "Generalized the Studio 'create face' op, which was restricted to bridging exactly one edge to one edge (bridgeEdges) or filling 3-4 verts. The restriction lived only in the entry points, not the mesh model — n-gon faces are already first-class (cylinder caps are n-gons) and editMeshToGeometry fan-triangulates any loop. New createFaceFromEdges() in editMesh.ts assembles the selected edges into chains by shared verts, then either fills a single closed loop as one n-gon face, or lofts a strip between two open chains: quads when the two sides have equal vert counts, a two-pointer triangle strip when they differ — so the user's 4-edge side now bridges cleanly to a 2-edge side. Studio.tsx enables create-face for >=2 edges in edge mode (was exactly 2), routing through the new function; this subsumes the old two-edge quad bridge. Four new headless tests pass (suite 54/54). NOT committed for the same reason as req_1163: editors/model/ is untracked; flagged to the user.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T14:29:49.495Z"
+}

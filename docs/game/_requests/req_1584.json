@@ -1,0 +1,28 @@
+{
+  "id": "req_1584",
+  "at": "2026-06-21T14:39:55.009Z",
+  "origin": "session:6e3404e7",
+  "text": "hey uh. so a few things, all related i think. but one, i just added some more chunks to my map, the and now i press compile, and the compile is failing. i restarted, but that didnt help fix it. and the app itself is taking several seconds to start up now so i would first investigate why the compile is not working. it just worked literally before i added the extra chunks",
+  "status": "review",
+  "sessionId": "6e3404e7-9c3d-4b02-be2b-4b93ea47d0fe",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T14:40:00.564Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T15:01:43.026Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigated the compile failure (= 'tools/rjit game bake') the user hit after adding map chunks. Root-caused with memory instrumentation, NOT guessing: the bake OOM'd the v8cli JS heap at ~1.36GB. World generation itself was fine (peak 490MB). The death was in the stdout transport: the 70MB packed game-file was base64-encoded via bytesToBase64's per-char 'out += chars[...]' loop (~94M ConsString rope allocations), then JSON.stringified, blowing the GC. Fixed at the architecture level (see req_1586): the bake now writes the binary game-file + asset blobs straight to disk via a new zero-copy binary fs door, emitting only a tiny manifest. Bake now PASSES at 493MB peak (was 1.69GB OOM). 5 compile-path suites green. NOT committed — bakeGameFile.ts carries another session's uncommitted diagnostic; user leads the commit boundary.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T15:01:43.026Z"
+}

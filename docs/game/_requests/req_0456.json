@@ -1,0 +1,31 @@
+{
+  "id": "req_0456",
+  "at": "2026-06-10T05:17:26.666Z",
+  "origin": "session:441dd1a1",
+  "text": "ok. it is not being edited anymore. the glass still hasnt landed as far as i can see either, erm. nevermind. it did inside of the standalone launcher but not the compiled route. whats different ?",
+  "status": "review",
+  "sessionId": "441dd1a1-1f5b-429e-9681-e92889f5a0e6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:18:25.207Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:21:47.221Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosis (no code change): glass renders in the standalone 'rjit game play' but not the editor /compiled route. Traced both paths — scene3d.render is identical (it records the scene to an offscreen RT; the real opaque+transparent drawScene runs in flushPending from gpu.frame), so the transparent glass pass is the same code in both. The structural difference: standalone builds world_loader as its OWN binary fresh each run, while /compiled renders world_loader COMPILED INTO the dev host (v8_app @import world_loader.zig, dispatched via renderEmbedded). framework/world_loader.zig changes do NOT hot-reload, so a running rjit dev host still embeds the OLD world_loader (no translucent emission → tcount 0 → no glass) while rjit game play rebuilt with the new code. Both read the same gamefile (glass materials are baked in). Fix: rebuild/restart the dev host. Awaiting the user's rebuild test — if glass still differs after a clean dev-host rebuild, there is a genuine embedded-vs-standalone drawScene difference to chase.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T05:21:47.220Z",
+  "tags": [
+    "bug"
+  ]
+}

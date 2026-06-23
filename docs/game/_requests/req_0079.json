@@ -1,0 +1,39 @@
+{
+  "id": "req_0079",
+  "at": "2026-06-06T11:27:31.809Z",
+  "origin": "supervisor-relay",
+  "text": "clicking on the clothing route takes several seconds to resolve. ?? massive data transfer or something? idk",
+  "status": "done",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-07T10:16:03.073Z",
+      "actor": "workbench",
+      "kind": "state",
+      "from": "new",
+      "to": "doing",
+      "text": "claimed by the workbench request panel for user closure"
+    },
+    {
+      "at": "2026-06-07T10:16:03.073Z",
+      "actor": "workbench",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-07T10:16:03.079Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done",
+      "text": "Resolved by the user via the workbench request panel (REQPANEL-0606): the user reviewed this ask in the interface and marked it done by hand. No commit SHAs attached from the panel — the work, if any, lives in the surrounding commits of the same date."
+    }
+  ],
+  "resolution": "Resolved by the user via the workbench request panel (REQPANEL-0606): the user reviewed this ask in the interface and marked it done by hand. No commit SHAs attached from the panel — the work, if any, lives in the surrounding commits of the same date.",
+  "shas": [],
+  "resolvedAt": "2026-06-07T10:16:03.073Z",
+  "tags": [
+    "bug"
+  ]
+}

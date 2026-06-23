@@ -1,0 +1,31 @@
+{
+  "id": "req_0665",
+  "at": "2026-06-12T06:07:14.362Z",
+  "origin": "codex:019eba70",
+  "text": "in the iso3d editor, can you give me a toggle to hide walls so i can place things in a room easier",
+  "status": "review",
+  "sessionId": "019eba70-af1b-7633-a9f1-ba5a8c22c607",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T06:07:19.331Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T06:09:24.167Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an iso build-view wall visibility toggle. The W button in the top-right control cluster now persists per iso route, highlights when walls are hidden, and filters wall-kind build pieces out of the same visible list used for rendering, selection, grab, and placement raycasts. This keeps authored wall data intact while letting interior placement clicks pass into rooms instead of hitting wall faces.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T06:09:24.167Z",
+  "tags": [
+    "ask"
+  ]
+}

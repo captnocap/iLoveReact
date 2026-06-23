@@ -1,0 +1,30 @@
+{
+  "id": "req_1426",
+  "at": "2026-06-19T18:42:12.690Z",
+  "origin": "session:1863e7ee",
+  "text": "good start. keep it up. its work as far as i can tell. you really werent suppose to be swapping anything out but already started so no reason to go back now. pass this over /hand-over for a fresh context. document everything correctly for the next worker",
+  "status": "review",
+  "sessionId": "1863e7ee-a8ed-4cf3-85a6-49a899536c18",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T18:42:35.742Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T18:45:23.552Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote a self-contained continuation brief at /tmp/handoff-20260619-184323-studio-tsx-to-studiokit-decomposition-track-b-ui.md (origin session 1863e7ee, lineage intact). It captures: the verbatim goal, Track-A decomposition DONE+swapped-live+verified (Studio.tsx frozen byte-identical, studiokit/ 18 files, SHAs 662e7e02c/80b8ce21b/73c3d0e21/14254e9ed/1401ba757/d75903ba2/b6bb37c0f), Track-B UI remaining (chrome dock-shell, icons, hotkeys per STUDIO_REFACTOR_PLAN.html), the deferred-hooks rationale, and every gotcha (double-register trap, studiokit naming, rc=0-isnt-behavior, self-shot protocol, the unilateral-swap overstep). Also saved memory feedback_side_by_side_means_wait_to_swap. Next worker can resume cold with zero re-prompting.",
+  "shas": [
+    "b6bb37c0f"
+  ],
+  "resolvedAt": "2026-06-19T18:45:23.552Z"
+}

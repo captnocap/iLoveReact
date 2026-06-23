@@ -1,0 +1,15 @@
+{
+  "id": "req_0194",
+  "at": "2026-06-07T06:00:03.456Z",
+  "origin": "session:f2302907",
+  "text": "so for games like counter strike, is there a reason why they would have their own map system like bsp, if i can also just turn bsp into json or obj (done, u did it for me before for both 1.6 and source maps) but why are the maps stored in those formats to begin with, performance? or what",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:00:48.993Z",
+  "resolution": "Answered conceptually (no code): BSP is a compiled format, not a storage format — .map/.vmf is the editable source and qbsp/vis/rad bake in the BSP tree (O(log n) spatial queries), PVS visibility, fast hitscan/hull traces (load-bearing for CS servers), radiosity lightmaps, and clipnode collision hulls, all memory-mappable in one file. OBJ/JSON keep only the triangle soup and discard those acceleration structures. Noted CS2/Source 2 dropped BSP but kept the compile-to-baked-format pattern, and that hmsc's TSX→bake pipeline is the same architecture.",
+  "shas": [],
+  "tags": [
+    "ask"
+  ]
+}

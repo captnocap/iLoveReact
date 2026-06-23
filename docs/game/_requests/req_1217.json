@@ -1,0 +1,10 @@
+{
+  "id": "req_1217",
+  "at": "2026-06-17T01:08:53.418Z",
+  "origin": "session:faeb0705",
+  "text": "Right. so this is what i was wondering. is wouldnt it make sense to for one get that ability to select faces and detatch it like u said and then wrap it into a solid again for inside faces. but also like for a bumper or the hood just select the faces, they turn into a thin 3d plane and no need to author the car parts apart from one another they just end up getting transformed into a part that is attached, that way we can for example have the hood pop off or the door open or the trunk open or place for front and back lights. like. so here is the model i have right now im working on [Image #2] [Image #3] [Image #4] [Image #5] so like i have all those places as faces already and the windows already set as glass",
+  "status": "new",
+  "sessionId": "faeb0705-bc55-47ba-a9d7-6a95888034b9",
+  "captureMode": "hook",
+  "events": []
+}

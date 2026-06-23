@@ -1,0 +1,31 @@
+{
+  "id": "req_1658",
+  "at": "2026-06-22T22:17:20.183Z",
+  "origin": "session:2117ddf4",
+  "text": "So, there is a bunch of textures claude has made in the past, where it is brick shope and windows and all of that, you can give them real variety, there is also a bunch of props you can place around also but yeah great start",
+  "status": "review",
+  "sessionId": "2117ddf4-165f-4c7a-8fbe-15f442892c87",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T22:17:47.757Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T22:26:31.768Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Gave the procedural void-shell buildings real variety (USER ASK). Each baked shell building now draws a hash-picked material from the editor's OWN facade/masonry shaders (game/textures/shaders.ts 'Building Facades' + 'Walls & Masonry'): i-brick-apartment, i-brick-shopfront, i-brick-bodega, i-brick-fire-escape, i-brick-rollshutter, i-brick-entrance, a-brick, a-concrete, h-stone-wall, e-stucco-facade — 10 looks, so the skyline reads as a varied brick/window/shopfront city instead of flat grey blocks. Mechanism: game/void/shell.ts ShellBoxEmit now tags each box with its kind (ground/road/building) so the bake skins only buildings (ground/road stay flat); compile/worldGeometry.pushVoidShell picks a facade per building via voidHash (seeded — stable across recompiles) and interns it through the SAME internMaterial path the authored buildings use, so each distinct id interns once and is shared across the whole ring. The live React batch ignores the kind (flat-color), so one generator still serves both with no divergence. Also hardened the layout guard so prop-recipe unit tests (layout-less stubs) skip the shell. Verified: rjit game bake logs '3960 box(es) ... 10 facade looks', materials 16 shader (up from 9), no-V8 loader batches them; void.test.ts 9/9; compile suites green (worldGeometry 14/14, worldParity 15/15). Same instanced-material path the user's authored buildings (brick praying-hands wall, billboard) already render textured through. NOT done in this unit: scattering PROPS in the shell — deliberately deferred to its own step because the headless compiled shot can't frame the shell to verify prop placement/scale, and prop count/kind must be chosen against the compiled collider-cap budget (documented saturation hazard). Proposed as the immediate next step with the user able to eyeball placement.",
+  "shas": [
+    "33f17053c",
+    "bdc48b393"
+  ],
+  "resolvedAt": "2026-06-22T22:26:31.768Z"
+}

@@ -1,0 +1,16 @@
+{
+  "id": "req_0074",
+  "at": "2026-06-06T08:18:59.371Z",
+  "origin": "pane",
+  "text": "thats a cool mask, can u make it a toggle state or intensity slider",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T08:22:36.062Z",
+  "resolution": "Both options delivered in the same landing (9883047a4): the depth hint has a toggle STATE (the 'depth hint' chip in the bench verb strip, twigged, figure targets only) AND an INTENSITY slider that appears next to the chip while the hint is on — a continuous 0..1 slide in the painter's own track visuals. The slider writes the P2 tunable through the tunables registry ('sculpt-camera.depthHint.opacity'), so the strip slider, the /settings 'depth hint α' knob, and the shader all read the one live table — no second opacity state anywhere. The slider's visuals get folded into the ONE kit slider when SCULPTKIT-0606's cohesion pass lands (noted in code).",
+  "shas": [
+    "9883047a4"
+  ],
+  "tags": [
+    "ask"
+  ]
+}

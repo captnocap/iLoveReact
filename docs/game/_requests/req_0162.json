@@ -1,0 +1,12 @@
+{
+  "id": "req_0162",
+  "at": "2026-06-06T18:23:24.284Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — queue after WBSTEP5: SCULPTPICK-0606, a sculpt-kit UX ask from the user, verbatim: \"on the sculpt mode when you click on a node on the 3d it should light up on the grid below exactly where its at before u even have to pull on it\". Selection feedback: clicking a node on the 3D model immediately highlights the corresponding grid point below — before any drag. The 3D<->grid correspondence already exists (the sculpt wave landed grid nodes + per-point correspondence flags, commit f2ba9af16) — this wires CLICK-select to it: 3D node click -> the matching grid cell lights up (and stays lit while selected); ideally symmetric, grid-point click -> the 3D node glints too, since the correspondence is one mapping (one source of truth, both directions consume it). This lands in the SHARED sculpt kit (SCULPTKIT one-control-kit law) so characters, items, and every sculpt surface get it together — no per-surface special case. Visual proof via SELFSHOT (full path) showing a clicked 3D node + its lit grid cell. Verify green. DO NOT COMMIT. The user clicking a node and seeing the grid light up is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "ask"
+  ]
+}

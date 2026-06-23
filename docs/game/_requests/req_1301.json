@@ -1,0 +1,30 @@
+{
+  "id": "req_1301",
+  "at": "2026-06-18T18:13:10.513Z",
+  "origin": "session:76a33154",
+  "text": "how can i have fill toggled on if there is only 1 state between fill and then brush sizes. i have it on brush size 1",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T18:14:38.583Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T18:17:53.346Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed 'brush 1 fills the whole face'. The user correctly pointed out brush/fill are one mutually-exclusive group (a brush shows active only when fill is off) and brush 1 was active — so fill was NOT on; my earlier 'fill stuck on' theory was wrong. Real cause: Studio passed STUDIO.paintCellUnits=2 (about 12.5 cm) to every paint call, and the gun is proportional to a 1.65m player, so its faces are smaller than ONE cell — one cell equals the whole face, so brush 1 (exactly one cell) fills it. The meshPaint default of 0.5 was dead because Studio overrode it everywhere. Fix: cell size is now an adjustable paintCell state (default 0.25 model-units, about 1.5 cm, fine enough that a prop face spans several cells so brush 1 is a small dab), threaded through pick/brush/bake/overlay; PaintPanel gains a 'detail' row (fine/med/coarse/XL) to tune the paint resolution per model. Also made the tools cleanly exclusive: picking a brush size turns fill off, toggling fill turns erase off. Build clean; meshPaint 8/8. Needs rjit dev to confirm live: with the gun, brush 1 should now be a small dab (pick 'fine' detail if needed); 'fill' fills the whole face. NOTE: changing detail after painting reinterprets stored cells (paint shifts) — best set before painting a part.",
+  "shas": [
+    "0b40b402f"
+  ],
+  "resolvedAt": "2026-06-18T18:17:53.346Z"
+}

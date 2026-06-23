@@ -1,0 +1,28 @@
+{
+  "id": "req_1161",
+  "at": "2026-06-16T08:23:55.389Z",
+  "origin": "session:760f9f8d",
+  "text": "Ya the tree work is expected, its not news to me. and the uncommitted work, again, not news to me. im just trying to again figure out why it wont render any more. trees render fine in isolattion tho",
+  "status": "review",
+  "sessionId": "760f9f8d-dc0f-4592-9807-536386b8fe20",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T08:24:19.204Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T08:29:07.671Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Found why grass/bush stopped rendering in /compiled while trees rendered: another session committed cart/hmsc-int/compile/worldGeometry.ts from a checkout PREDATING the grass work, silently reverting it — the committed file was back to max shapeId GABLE=5 with NO pushFoliage/grass emission, no INSTANCE_SHAPE_GRASS/BUSH, no grassPopulation import. The grass FRAMEWORK (3d.zig pipeline + routing, shaders.zig grass_wgsl, world_loader.zig SHAPE_GRASS/BUSH + geometry) survived because it got committed alongside another session's ~frond~ work (8c1ab8284), so the loader still knew shapeId 6/7 — but the bake handed it zero grass rows. Trees rendered because they're props (a separate emission path). Diagnosis was decisive via rjit game shot: the '[bake] grass: N' line was absent and world instances had dropped 23910→4566. FIX: re-applied pushFoliage (grass+bush emission) + the two shape-id constants + the floorToLandform/grassPopulation imports to the current worldGeometry.ts. Verified: rjit game shot now bakes 42320 grass + 1960 bush cards, 48846 instances, PASS. ROOT CAUSE is structural: the grass work is uncommitted, so shared-file commits from other sessions keep clobbering it (worldGeometry.ts is uncommitted again now). Recommended committing the grass/bush work to HEAD to stop the recurrence; awaiting the user's go-ahead to stage+commit.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T08:29:07.671Z"
+}

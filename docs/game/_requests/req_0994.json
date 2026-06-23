@@ -1,0 +1,28 @@
+{
+  "id": "req_0994",
+  "at": "2026-06-15T13:42:55.169Z",
+  "origin": "session:8c2aee6a",
+  "text": "ok. cool. now the very next thing before we go anywhere is i want to press on this uv live preview and compare it to blockbench since ours looks just a bit wrong honestly. so what im going to do is make the EXACT same edits in both, and show you the uv grid at each step. so we can compare. lets get started\n\nhere is blockbench clean slate\n[Image #57] \n\nhere is ours\n[Image #58] \n\ngood. clean. lets add a cube. 16 radius, 16 height\n\nblock bench\n[Image #59] \n\nours\n[Image #60] \n\nhm. that is radically different already. alright well lets just see what happens. we will start with grabbing an edge and pulling on its Y upwards by 2 ticks\n\nblockbench\n[Image #62] \n\nours\n[Image #63] \n\nok, still very different. notice how blockbench does not change at all. ours did though. so then alright, lets pull on a vertex from here. we will grab the left vertex point and pull its Z outwards 2 spaces\n\nblockbench\n[Image #64] \n\nand ours\n[Image #65] \n\nok. same thing. so why isnt blockbench uv changing at all? and what makes it change/ well. lets just see\n\nif we go back to face select, and click on a face, lets give it a loop cut. \n\nblockbench\n[Image #66] \n\nours\n[Image #67] \n\nok well this t ime look, blockbench updated, its now showing segmented outlines in the uv. ours did not change though\n\nthis is good data.\n\nso lets see now what happens in blockbench when we pull on that new edge\nblock bench:\n[Image #68] \n\nus:\n[Image #69] \n\n\nnow lets look. blockbench, nothing changed from the last update. us, we did.\n\nbut how do you know its the same shape at all? well, here you go\n[Image #70] \n\nside by side, the same shape.\n\nlets get our uv preview on the same match",
+  "status": "review",
+  "sessionId": "8c2aee6a-d17a-4edb-bc4f-f7a458ee4293",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T13:45:17.090Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T13:59:03.220Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnostic + spec thread on the Studio UV live preview vs Blockbench, driven by the user across many side-by-side frames. Root cause established and grounded in source: our editMesh.ts unwrapMesh() re-derives UVs from the LIVE mesh every render (box-projection by dominant normal, sized to current face dims, shelf-packed), so UVs mutate on every vertex/edge edit and never form a stable atlas — whereas Blockbench stores UVs as per-corner DATA in a fixed square texture space, assigned once and sticky, restructuring only on TOPOLOGY change (a loop cut subdivides within the parent's UV rectangle; shared-edge cut verts create boundary notches on neighbor islands; the UV editor is selection-scoped). The why: the UV atlas IS the paintable texture — paint surface + image-to-image export guide + sampled texture on the mesh — so a live-derived atlas can never be painted/generated against. Locked the corrected model and a four-phase build (5a stored per-corner UVs + selection-scoped panel rewrite; 5b one square atlas + guide export; 5c route the existing painter at the atlas + bake content-addressed via game/textures; 5d image-to-image) into cart/hmsc-int/editors/MESH_EDITOR_PLAYBOOK.md Part 5, per the design gate. No code yet — Phase 5a is the next build, pending the user's green light. Nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T13:59:03.220Z"
+}

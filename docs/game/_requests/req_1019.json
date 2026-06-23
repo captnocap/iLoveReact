@@ -1,0 +1,28 @@
+{
+  "id": "req_1019",
+  "at": "2026-06-15T16:51:59.252Z",
+  "origin": "session:46d99bcc",
+  "text": "oh u only need to worry about inside of hmsc-int specifically, no where else",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T16:52:35.561Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T17:00:57.487Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Swept the empty-slot force-rerender idiom (const [, force] = useState(0)) out of ALL of cart/hmsc-int/ onto the useRerender() hook, scoped per the user to hmsc-int ONLY (not the app/claudewrap/pixel_mmo/demo carts or the 3 runtime hooks, which still carry the idiom by the user's choice). 14 files this round on top of the 4 already done (Studio.tsx, meshSelect.tsx, meshGizmo.tsx, studioModel.ts): PropertiesPanel.tsx, IsoAuthor.tsx, shell/Workbench.tsx, labs/combat-arena.tsx, editors/workbench/paint/PaintBench.tsx (2 idioms), editors/workbench/vehicles/PaintLens.tsx, editors/workbench/story/StoryStage.tsx, editors/workbench/items/Stage.tsx, editors/workbench/vehicles/Stage.tsx, editors/workbench/characters/DressedStage.tsx, editors/workbench/clothing/source.tsx, editors/workbench/characters/Stage.tsx, editors/workbench/characters/PaintLens.tsx, editors/play/PlayRoute.tsx. Subscribe-pattern overlays became 'const rerender = useRerender(); useEffect(() => s.subscribe(rerender), [s])'; event handlers became 'const onEdit = useRerender()'. Where one component had two distinct rerenders (PlayRoute), named them by purpose (rerenderElevators, rerenderConsole) and fixed the stale comment. Dropped now-unused useState from the 4 files whose only useState was the hole. All 14 bundle clean; grep confirms zero empty-slot holes remain in cart/hmsc-int/. Updated the feedback memory with the hmsc-int-only scope. Hot-reload TSX.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T17:00:57.487Z"
+}

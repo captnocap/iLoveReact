@@ -1,0 +1,30 @@
+{
+  "id": "req_0572",
+  "at": "2026-06-10T17:01:13.187Z",
+  "origin": "session:7a5b02e7",
+  "text": "if you need a format look here @cart/pixel_icon_gallery.tsx @cart/pixel_icons/",
+  "status": "review",
+  "sessionId": "7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T17:02:34.170Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T17:09:41.022Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Adopted the format you pointed at (commit 412506717): decal pixel files are written in the cart/pixel_icons rows-of-runs pixel JSON — {width, height, palette, rows} with [count,value] runs, null = transparent, 6-digit hex for opaque colors and #rrggbbaa when a pixel carries alpha — sized rectangular for billboard decals, palette-indexed and human-debuggable like the gallery's icons. The files live under cart/hmsc-int/data/decal-pixels/<id>.json (gitignored derived cache, regenerated from the stored DecalDocs) and are read by both the editor host and the headless v8cli bake through plain __fs_read; the gamefile lump still ships compact PackBits, re-encoded at bake time, so the Zig loader needed no change. Codec round-trips incl. alpha/transparency and malformed-document rejection are pinned in decalPixels.test.ts (9 cases).",
+  "shas": [
+    "412506717"
+  ],
+  "resolvedAt": "2026-06-10T17:09:41.022Z"
+}

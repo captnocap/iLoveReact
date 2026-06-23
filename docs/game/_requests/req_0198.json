@@ -1,0 +1,15 @@
+{
+  "id": "req_0198",
+  "at": "2026-06-07T06:14:38.793Z",
+  "origin": "session:f2302907",
+  "text": "Well the reason i ask is because the more and more the tooling as gotten better the more i realize that it would be silly to only retain it in a means for a one off game, and effectively can get away with still building the same game, but its just a 'mod' on the underlying game engine we are making",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:16:08.255Z",
+  "resolution": "Affirmed and recorded the user's platform/mod direction: the tooling stops being one-off-game infrastructure — hmsc becomes the FIRST MOD on the game platform being built, exactly the Half-Life→Counter-Strike layering (clean game-DLL boundary + Hammer made CS possible without HL being designed for it). Laid out the boundary lines: framework-level versioned map format, entity key-values opaque to the platform and bound by the mod, world systems (pathing/perception/physics/characters/materials) as the base-game SDK tier, hmsc-int as the platform's Hammer with a per-map Compile, mod-defined GameState/persistence contract. Order discipline: keep building hmsc, extract boundaries as the game pulls on them, never speculatively. Saved memory project_platform_mod_split.md + MEMORY.md index line; DECISIONS.md verdict + re-scoped Compile plan still pending explicit go-ahead.",
+  "shas": [],
+  "tags": [
+    "ruling"
+  ]
+}

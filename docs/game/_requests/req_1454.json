@@ -1,0 +1,30 @@
+{
+  "id": "req_1454",
+  "at": "2026-06-19T23:02:28.127Z",
+  "origin": "session:08e68a04",
+  "text": "Ok. looks good. now that i can actually get up to them and see them. they are hollow haha. can u solidify them [Image #82] notice how its making that C its because its hollow or u cant see the face u look at or something idk. also, can u give them collision",
+  "status": "review",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T23:03:40.878Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T23:09:55.685Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Solidified the hollow trunk + gave palms collision (dbac45e3f). HOLLOW: the trunk read as a 'C' because its winding (mirrored from PalmTrunk.ts) culled the OUTER wall under cull_mode=.back/front_face=.ccw, so you saw through to the back wall; flipped to CCW-outward in BOTH buildPalmTrunk and PalmTrunk.ts (the probe never caught it, never viewing a trunk up close). COLLISION: a per-trunk AABB in buildPhysicsColliders' baked-collider path (the path real maps take), keyed on SHAPE_PALMTRUNK so grass/bush/frond cards stay collisionless — verified physics rects rise one-per-trunk. NOTE: couldn't frame it in the headless proof camera (only frames spawn); user verifies solid+walk-blocking in-game after recompile.",
+  "shas": [
+    "dbac45e3f"
+  ],
+  "resolvedAt": "2026-06-19T23:09:55.685Z"
+}

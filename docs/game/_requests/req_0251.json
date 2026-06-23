@@ -1,0 +1,13 @@
+{
+  "id": "req_0251",
+  "at": "2026-06-07T11:17:38.367Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: more from the user's live walk, verbatim: \"stairs are also backwards, and i also fall thru the world on them\". Two findings for your current wave: (1) STAIRS ORIENTATION — placed stairs face the wrong way (note your own earlier heightfield register log showed yawRadians=3.14159 — check whether placement yaw/pivot is double-applying or baked backwards); (2) stairs share the fall-through — consistent with your highest-heightfield-only + rect-cap findings, verify stairs are covered by the same layering fix and live-shaped regression (walk up, stand under, walk beside). The user's rect count is climbing as they build (659→858 past the 512 cap) so the capacity answer is becoming urgent — post your proposal.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

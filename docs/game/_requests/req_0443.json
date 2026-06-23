@@ -1,0 +1,34 @@
+{
+  "id": "req_0443",
+  "at": "2026-06-10T04:29:19.649Z",
+  "origin": "session:441dd1a1",
+  "text": "Right. I just gave it skins. it is not rendering with them though. look [Image #7] vs [Image #8]",
+  "status": "review",
+  "sessionId": "441dd1a1-1f5b-429e-9681-e92889f5a0e6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T04:29:57.544Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T04:43:01.399Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User applied brick skins but the compiled world still showed flat gray. Diagnosed: the skins are 'custom:' Materialized looks (custom:a-brick-v0 etc.) living in the editor's localstore.db, and (1) the bake only resolved built-in shaderSpec ids, and (2) the headless bake runtime v8cli had NO localstore binding, so loadCustomTextures returned 0. Fixed both: worldGeometry.resolveMaterialShader now resolves custom SHADER looks via loadCustomTextures (base shaderId WGSL + frozen tuned data), and a new light host module v8_bindings_localstore.zig wires __localstore* into v8cli over the same localstore.db the editor writes (tools/v8cli rebuilt). Verified end-to-end: bake finds 5 custom textures, ships 3 brick materials; loader decodes '3 face material(s) → 3 textured batch(es)' with no crash. The forced-default-data proof earlier already rendered the brick shader; couldn't frame the building in the headless auto-shot to re-confirm, so the user's navigable run is the visual check. Decal/react customs still fall back to flat color (no WGSL to ship).",
+  "shas": [
+    "6b0216648",
+    "caf3f9fea"
+  ],
+  "resolvedAt": "2026-06-10T04:43:01.399Z",
+  "tags": [
+    "bug"
+  ]
+}

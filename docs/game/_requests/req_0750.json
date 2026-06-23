@@ -1,0 +1,10 @@
+{
+  "id": "req_0750",
+  "at": "2026-06-13T11:25:19.294Z",
+  "origin": "session:b2985164",
+  "text": "[kickdbg] bodies=35 cap=35 rects=1093 dt=0.0042 grav=13.50 posture=none windowed=false body0 y=0.160 vy=0.000\n[kickdbg] bodies=35 cap=35 rects=1093 dt=0.0042 grav=13.50 posture=none windowed=false body0 y=0.160 vy=0.000\n[r3d-census] children=323 inst_seen=20 inst_collected=20 mcount=249 tcount=69 geo_cache_len=223 retained=67k/3670k verts\n[kickdbg] bodies=35 cap=35 rects=1093 dt=0.0042 grav=13.50 posture=none windowed=false body0 y=0.160 vy=0.000\n[kickdbg] bodies=35 cap=35 rects=1093 dt=0.0042 grav=13.50 posture=none windowed=false body0 y=0.160 vy=0.000\n[r3d-census] children=323 inst_seen=20 inst_collected=20 mcount=249 tcount=69 geo_cache_len=223 retained=67k/3670k verts",
+  "status": "new",
+  "sessionId": "b2985164-7aad-4573-accc-12a386983e72",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_0029",
+  "at": "2026-06-06T05:56:27.176Z",
+  "origin": "supervisor-relay",
+  "text": "also tell someone to end the race war [screenshot: the skin swatch row - 4 fixed skin tones]",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T06:01:40.810Z",
+  "resolution": "SKINRANGE-0606: the skin picker is a full tone continuum. shell/colorRange.ts (pure, P4-pinned) generates a gradient grid — 6-stop melanin curve lerped across 14 columns, 5 rows fanning warm/cool — every cell a real value, any human tone reachable; the color FieldSpec gained the deliberate 'range' extension in the one renderer; quick-pick presets ride on top, widened 4→8 with the original four values kept verbatim (existing docs' tones stay quick-picks; saved values untouched per V20). The skin swatch data lives where it always did (DRAFT_DEFAULTS.skins, the figure kit's P2 data). Tests: generator dims/hex/endpoints/warmth + panel-spec carries the range + arbitrary tone lands on the draft (15/15). Renderer half rode the ENUMWRAP commit (same file).",
+  "shas": [
+    "1959599f0",
+    "d6d603ac9"
+  ],
+  "tags": [
+    "ux"
+  ]
+}

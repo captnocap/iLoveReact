@@ -1,0 +1,16 @@
+{
+  "id": "req_0063",
+  "at": "2026-06-06T07:32:45.695Z",
+  "origin": "supervisor-relay",
+  "text": "i want to see every single point on the grid down here as a node that i can click on, and can have a slider value that lets me fine tune that one specific point. also, the intersecting white lines that are the greater grid, those points on the grid should have a color like green or red or blue there, and then there should be a visual flag on the 3d model that shows where that point is",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T07:41:59.504Z",
+  "resolution": "GRIDNODES-0606 landed (f2ba9af16). Every sculpt-grid point is a visible, clickable NODE: the overlay shader draws a dot at all 48×24 cell centers (one Pressable maps clicks — 1152 React nodes would violate the scatter limit), the 'nodes' chip (twigged view state) routes canvas clicks to selection, the selected node rings bright cyan on the canvas, and a 'node value' knob (-1..1, 0.02 steps) fine-tunes exactly that cell — writes ride the same one-truth doors as brush/grab/smooth (setPartGrid + paint-texture upload, one undo entry per gesture, session-noted). The greater-grid crossings (meridians × equator) carry distinct green/red/blue dots on the canvas AND same-color sphere flags ON the 3D model at the SAME surface uv via grabPointWorld — 2D position ↔ 3D location reads instantly; the selected node flies its own cyan flag. P4 pins: uv→node mapping + center round-trip, one-cell pure clamped edits, greater points on the guide crossings with shader-embedded colors and finite 3D flag resolution, the widened 10-float overlay data contract. characters 16/16, full cart bundles.",
+  "shas": [
+    "f2ba9af16"
+  ],
+  "tags": [
+    "ask"
+  ]
+}

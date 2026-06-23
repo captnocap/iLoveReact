@@ -1,0 +1,33 @@
+{
+  "id": "req_0590",
+  "at": "2026-06-10T19:14:48.487Z",
+  "origin": "session:da94d3e7",
+  "text": "no. you edited the wrong file space. we do not use the hmsc/ dir at all, its stale. it should be deleted to stop exactly what just happened to  you. if the existing props are importing from there, lets fix that",
+  "status": "review",
+  "sessionId": "da94d3e7-791d-4eab-8e13-a3f2c1e8c371",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T19:15:18.438Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T19:34:52.945Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "cart/hmsc/ is dissolved per the ruling. Its live library (design.ts, world/, render3d/, state/, commands/, events/, gameplay/, input/, npc/, render/, ui/, tools/, labs scenes) moved wholesale into cart/hmsc-int/ preserving structure, so every internal import kept working; the dead cart shell became cart/hmsc-int/gameShell.tsx (kept because rjit pack bundles it as the game package script entry); cart.json and stale docs deleted — there is no cart/hmsc directory anymore and no bootable hmsc cart. All 105 stale imports inside hmsc-int rewritten to local paths; the six consumer carts (pathing_lab, vehicle_lab, combat_lab, effect_fills, hmsc_scale_lab, hmsc_massive_map_lab) plus hmsc-int-old re-pointed to ../hmsc-int/; cli pack.ts, scripts/hmsc-check, zig comment references, and 549 docs/game path references updated; tools/rjit.js rebundled. Zero references to cart/hmsc remain repo-wide. The new-props work from req_0588 rode along into the moved files. Verified by bundling all 8 affected cart entries through the real cart bundler (all OK) and running the kinds/props + build suites (green).",
+  "shas": [
+    "77726e201"
+  ],
+  "resolvedAt": "2026-06-10T19:34:52.945Z",
+  "tags": [
+    "ruling"
+  ]
+}

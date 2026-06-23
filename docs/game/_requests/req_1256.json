@@ -1,0 +1,34 @@
+{
+  "id": "req_1256",
+  "at": "2026-06-17T17:28:33.901Z",
+  "origin": "session:76a33154",
+  "text": "ok seems to be right. next thing is the other attempt when painting, the paint would paint pinstripes, [Image #10] and its ugly. how do you plan to solve that problem",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T17:29:11.019Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T17:30:59.668Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-17T17:37:54.388Z",
+      "actor": "76a3",
+      "kind": "note",
+      "text": "Built the proof: paint_on_3d_demo is now FILLABLE. Drag on the model paints cells into a paint-layer set (raycast pick per cell); each painted cell renders as ONE solid Graph.Path polygon from its projected face corners. Adjacent cells share exact projected corners so the fills tile seamlessly — a continuous layer with no per-row boxes and no fractional-rounding gaps, hence NO pinstripes (the contrast with the old paintRuns row-boxes baked into the atlas). The auto-orbit camera freezes while a stroke is held so the target holds still; the grid stays uniform model-space; fills clip per-face. Verified with a seeded block (top face, cu2..6 x cv0..4): a solid red region, seamless, clipped exactly at the face edge — no banding. Commit b1d5041a6."
+    }
+  ],
+  "resolution": "Diagnosed the paint 'pinstripes' artifact and laid out the fix plan. Root cause is in TextureAtlas.tsx:130: paint cells are merged by paintRuns into one horizontal run-box PER ROW and rasterized into the offscreen atlas at top=r.y*tpx, height=max(1,tpx). tpx (atlas-pixels per paint cell) is almost always fractional, and each row-box's top and height round to device pixels independently, so row y's bottom rarely meets row y+1's top — periodically a 1px gap opens, the layer beneath shows through, and the periodic error reads as evenly-spaced horizontal pinstripes (runs merge along x, so columns stay seamless — hence horizontal-only). Plan: stop rasterizing paint as boxes baked into the packed atlas; make paint a CONTINUOUS layer — either a real GPU paint texture (paintable.zig brush passes, like paintable_demo) or an analytic per-fragment composite (like triangle_mask_demo), composited as base_atlas + paint_layer in the mesh shader with the atlas left read-only. A GPU/shader fill has no rows, so no gap, so no stripes — and the same single change also retires the slivers (uniform model-space grid) and the spill (per-pixel face mask). Stopgap if the box approach must ship today: set each row box height = round((y+1)*tpx) - round(y*tpx) so each box's bottom equals the next box's top (gap impossible). Recommended the continuous-layer fix. No code committed yet — offered to prove it by making paint_on_3d_demo fillable (solid stripe-free fill compositing over the untouched material); awaiting go-ahead.",
+  "shas": [],
+  "resolvedAt": "2026-06-17T17:30:59.668Z"
+}

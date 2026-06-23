@@ -1,0 +1,30 @@
+{
+  "id": "req_1285",
+  "at": "2026-06-18T12:58:30.045Z",
+  "origin": "session:18fe5c79",
+  "text": "if u just give me the gizmo tool to move it around that would solve it",
+  "status": "review",
+  "sessionId": "18fe5c79-d15f-47c8-ade6-d65531bd83af",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T13:01:23.426Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T13:11:38.577Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked backdrops so the reference image is a freely-placed 3D object dragged with the transform gizmo, per the user's ask ('if u just give me the gizmo tool to move it around that would solve it'). Each backdrop row has a 'move' button that arms a 3-axis TransformGizmo on the quad in the viewport; dragging an arrow slides it (snapped, with a readout), empty-drag/scroll still orbits, Esc/done exits. The quad is centered at origin and placed via the mesh position (bd.pos), so dragging never re-bakes geometry. Replaced the confusing plane+offset sliders with this. Built clean; merge logic suite green.",
+  "shas": [
+    "50c35b193"
+  ],
+  "resolvedAt": "2026-06-18T13:11:38.577Z"
+}

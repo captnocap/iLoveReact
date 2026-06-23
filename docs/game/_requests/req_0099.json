@@ -1,0 +1,12 @@
+{
+  "id": "req_0099",
+  "at": "2026-06-06T12:16:15.290Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT on WALLTOP-0606: FAIL. User verbatim: \"walls are still going and sitting on the side look. see how that blue wall is lower than the one placed? its cuz its on the side\". Screenshot evidence: /home/siah/.claude/image-cache/42677ed6-e8fa-4672-83bf-b68e46d28bef/2.png — the blue wall's top edge sits LOWER than the adjacent gray wall because its base is at the floor's side face, not on the floor top. This is live, post-rebuild, with your fix in the running bundle. Your regression test claimed no input or state can produce the old side placement — the user just produced it by placing a wall normally. Your test asserted upstream of the live placement path: find the OTHER code path that still computes the side anchor (a second placement route, a ghost-preview-to-commit divergence, or a snap branch you missed) — there is at least one more, and your test does not cover it. Reproduce the user's live result first (place a wall in the running app or its headless witness, show the side-anchored y in the placed data), then collapse that path into the single top anchor and extend the test to cover the path the user actually hit. Post the file:line of the path you missed.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

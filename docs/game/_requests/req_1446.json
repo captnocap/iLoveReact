@@ -1,0 +1,36 @@
+{
+  "id": "req_1446",
+  "at": "2026-06-19T22:24:50.323Z",
+  "origin": "session:671785ab",
+  "text": "ok now lets get back to this ui. so, whats going on here. i know your jumping to move on but this is still just a shit storm when i open paint [Image #16]",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T22:25:33.676Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T22:28:19.447Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-20T00:11:35.205Z",
+      "actor": "session-6717",
+      "kind": "note",
+      "text": "Follow-on (same studiokit thread): mesh-op hotkeys shipped in 66b175f7f — extrude/loop-cut/flip/glass/detach/solidify/symmetrize bound (E/C/X/B/D/O/Y), each extracted to a shared guarded function used by both button and key, tooltips show the live chord, all rebindable in the Hotkeys panel. 11/11 controls tests pass."
+    }
+  ],
+  "resolution": "Paint mode was a clutter/overlap mess: the context rail (left:8 top:72) rendered symmetrize + the lint badge — whole-mesh ops with no use while painting — directly on top of the floating PaintPanel (left:8 top:84: colours/materials/brush/detail/clear), so they interleaved in the top-left column. Fix: gate the symmetrize cluster and the lint badge on selMode !== 'paint', leaving the rail empty in paint mode so the PaintPanel owns the left column alone. They still appear in every mesh mode including rig (the req_1190 reason they were every-mode). Built green; can't self-shot paint mode (cold boot starts in object mode), so it needs a live look. SHA c1c7dc05f.",
+  "shas": [
+    "c1c7dc05f"
+  ],
+  "resolvedAt": "2026-06-19T22:28:19.447Z"
+}

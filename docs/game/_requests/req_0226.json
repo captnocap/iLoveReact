@@ -1,0 +1,13 @@
+{
+  "id": "req_0226",
+  "at": "2026-06-07T10:22:02.506Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: reconciliation notice for REQBOARD-0607 — before my stop order landed, another lane briefly edited the workbench requests consumer. Its exact report: store.ts (resolve(id,paragraph,shas) → move(id,to,input); views open/resolved → status!==done/done; markResolvedByUser walks new→doing→review→done), live.ts (resolveRequest → moveRequest), panel.ts (action visibility status===open → status!==done; row status type → RequestStatus), RequestList.tsx (row tone: done=success else warning), requests.test.ts (fixtures → moveRequest, statuses → new/done), source.tsx (comment wording only). It did NOT touch docs/game/_index/requests.ts or requestCli.ts. Those consumer files on disk now carry its changes — read them as they are and reconcile into your slice; keep what matches your spec, correct what does not (e.g. markResolvedByUser jumping straight through the states is fine ONLY as a user-initiated action — the user-gate on review→done must hold; and your detail-view/full-text + dispatch-filter orders stand). No reverts — fix forward from disk state.",
+  "status": "new",
+  "sessionId": "09015194-0a9b-4ae6-acf8-d964ee783d82",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

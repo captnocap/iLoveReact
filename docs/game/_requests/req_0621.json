@@ -1,0 +1,46 @@
+{
+  "id": "req_0621",
+  "at": "2026-06-11T08:29:23.073Z",
+  "origin": "session:5ebbec1e",
+  "text": "ok one thing i would like to express so far with all the changes that have been made from my starting arguments to now is that while the code might be getting better behind the scenes, the ui is just getting worse. no awareness of horizontal width for example is one of the worst. im not saying this is the immediate next thing but the more you account for it now less we are doing later. also shallow capability surfaces like the objects is better organized but still just as useless if i cant do anything with the properties presented. so keep in mind, go for it",
+  "status": "review",
+  "sessionId": "5ebbec1e-1621-4557-b49a-71ce7bc39398",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T08:29:55.915Z",
+      "actor": "structure-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T08:45:30.891Z",
+      "actor": "structure-lane",
+      "kind": "note",
+      "text": "Feedback memorialized (memory feedback_ui_control_laws.md escalation: width-awareness L3 + rows-need-verbs are now a standing lens on every UI change, UI outcome is the bar). Program continues: SHELLFOLD landed 876cda236 — EditorShell cut along review §2's four seams (useMapSession/useBuildUndo/usePlacements/previewWorld), index.tsx 1287→501 wiring-only, commitMany casts deleted, boot single-parse; bundle+7 P4 suites+ship+shot all green. Next: §13.1 prop registry unification."
+    },
+    {
+      "at": "2026-06-11T08:47:42.661Z",
+      "actor": "structure-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-11T09:06:01.225Z",
+      "actor": "structure-lane",
+      "kind": "note",
+      "text": "PROPMERGE landed: a790d8ea4 — world/propKinds.ts retired, game/kinds/props.ts is THE ONE table (54/54 keys verified zero value-diff first; PropKind union moved into the registry, design.ts re-exports; req_0623 dumpster block moved with it; 22 consumers repointed incl. all 15 render3d prop meshes + tools/prop-scale). Preceded by checkpoint bec163c9f adopting the finished lanes uncommitted work per the user word (\"they are done. so its all you\"): the whole req_0624 PROPUSE interactables feature (worldInteractables pair + worldGeometry sink + packageMap INTERACTABLES lump + playerModel sit/lay clips + lumps.ts + 3 zig files) + every untracked file tracked code imports (worldColliders pair, cameraOcclusion pair, colonConsole, LayerStrip, stageMath, materials catalog, snap trio 19/19). Verified: bundle, 8 suites green, ship, editor shot, REAL rjit game bake PASS. DISCOVERED for the queue: landforms is the same disease one layer deeper — world/landforms/registry.ts LANDFORMS and game/kinds/landforms.ts LANDFORM_KIND_DEFINITIONS are two parallel registries sharing a duplicated LandformKindDef type with formula copies; needs the props-grade value-diff treatment as its own item."
+    }
+  ],
+  "resolution": "The feedback is pinned as a standing lens (memory feedback_ui_control_laws.md escalation: UI outcome is the bar; width-awareness L3 and rows-need-verbs now apply to every UI-touching change, not as a separate work item) — and the program kept rolling under it. Landed: (1) SHELLFOLD 876cda236 — review §2 / handoff §9.6: EditorShell cut along its four seams into editors/world/{useMapSession,useBuildUndo,usePlacements,previewWorld}; index.tsx 1287→501 lines wiring-only; the four commitMany structural casts deleted (it IS the RouteSession contract); boot single-parse (⅓ of review §1's triple-parse fixed in passing); bundle + 7 P4 suites + ship + editor shot all green, painted map and placements restore intact. (2) 9b29c869e — review §5's QoL bug: workbench actions no longer steal the selected roster row (re-target only when the acted-on row disappeared). DEFERRED with reason: §13.1 prop-registry unification — the props lane (req_0619/req_0623, PROPSCALE-0611) is actively landing scale-law work across BOTH registries right now and restored world/propScaleCli.ts (a real consumer my fallow sweep missed: the tools/prop-scale bash wrapper builds the path dynamically); unifying under their feet would collide. It is next once that lane settles.",
+  "shas": [
+    "876cda236",
+    "9b29c869e"
+  ],
+  "resolvedAt": "2026-06-11T08:47:42.661Z",
+  "tags": [
+    "ux"
+  ]
+}

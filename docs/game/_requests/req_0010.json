@@ -1,0 +1,16 @@
+{
+  "id": "req_0010",
+  "at": "2026-06-06T05:02:00.533Z",
+  "origin": "supervisor-relay",
+  "text": "they need to add in workspace twigs to remember exactly what route/panel/state im in so hot reload doesnt take me from painting on a texture to viewing a 3d model",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T05:08:53.351Z",
+  "resolution": "TWIGSTATE-0606: deep view-state twigs across the whole restore chain — route (Router hotKey, pre-existing), active source + selected roster row + lens fallback (shell/Workbench, new /workbench twigs), the characters working row (/characters wbDraftId — the module singleton resets on hot reload and used to restore the NEWEST entry instead of yours), lens/part/brush/tool state (pre-existing /characters + /paint/wbchr-paint twigs, now protected by loadFromRoster's keepView so a restore never flips a twig'd PAINT lens back to figure). Roster filter/hover/anim-clocks/status/undo-stack deliberately transient — documented in CAPTURE. P4 round-trip test proves: fresh store over the same twig bag returns to lens=paint, the same part, the same brush, the same row; stale row ids degrade to newest. Mid-painting hot reload now provably returns to the same brush on the same part.",
+  "shas": [
+    "8cc27ef6f"
+  ],
+  "tags": [
+    "ask"
+  ]
+}

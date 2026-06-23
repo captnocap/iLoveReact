@@ -1,0 +1,13 @@
+{
+  "id": "req_0091",
+  "at": "2026-06-06T11:49:19.143Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — STORELAG-0606. New user report, verbatim: \"yeah so there is some serious lag happening when trying to load some existing data. i have a feeling its the db they connected from the crash of the jsonl from earlier\". Context: the V20 store moved to sqlite behind openStore() (commit d95877cdd) after the jsonl corruption crash; the user suspects the database that came out of that migration. You have the PERFLOG probes from CLOTHSLOW — reuse them. Print the data before any theory: 1. Inspect the actual sqlite db: file size, row counts per table, and whether the jsonl-crash migration left pathological data (duplicate/orphaned rows, giant blobs from recovered partial writes, missing indexes — read the schema and the query plans with EXPLAIN QUERY PLAN on the load paths). 2. Time the exact load the user means: loading existing data (saved characters/paint/maps) — instrument the load path end-to-end with your diagnostic channels and post WHERE the time goes, numbers first. 3. Fix the dominant cost only. If the migrated data itself is bad (crash artifacts), report exactly what is in there — do NOT delete or rewrite stored user data without supervisor approval; surface it. 4. Re-measure, post before/after from the same channel. Build via tools/rjit only; the dirty tree elsewhere is the source of truth, never revert anything. DONE-BAR: before/after load timings + the db findings (sizes, counts, plan output) in your READY report + tools/rjit game verify green. DO NOT COMMIT. Do not shrink or stub any file. Only the user's live confirmation makes this a PASS.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

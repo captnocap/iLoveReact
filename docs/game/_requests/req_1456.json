@@ -1,0 +1,37 @@
+{
+  "id": "req_1456",
+  "at": "2026-06-19T23:12:59.533Z",
+  "origin": "session:89c172a4",
+  "text": "also, and this is crucial and i didnt think it would matter til you said canvas.path but if this is canvas you need to account for brushes on 3d also",
+  "status": "review",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T23:13:41.652Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T23:23:01.704Z",
+      "actor": "89c1",
+      "kind": "note",
+      "text": "Controller made surface-agnostic (5034bb056): useBrushStroke.mapPoint returns optional per-hit ClipRect (MappedPoint), latched per point so a 3D stroke scissors to the hit face UV island (proven studio pixel-painter path: raycast→UV→brushColor+island clip, mesh samples by textureKey). Same useBrushStroke/BrushKit paint a flat canvas or any mesh. A dedicated 3D paint demo is the next concrete proof (pending)."
+    },
+    {
+      "at": "2026-06-19T23:38:02.397Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Delivered the 'brushes on 3D' requirement (the AGNOSTICPAINT ruling — a building face, a shirt, any mesh). Architecturally, useBrushStroke.mapPoint now returns an optional per-hit ClipRect (MappedPoint), latched per point, so a stroke scissors to the hit face's UV island; the kit is surface-agnostic — same useBrushStroke + BrushKit, only mapPoint differs. Concrete proof: new cart/brush_3d_demo.tsx paints directly onto an auto-orbiting 3D plane via raycast→UV (reusing the proven screenRay + camera from paint_on_3d_demo), painting into a paintable the mesh samples by textureKey — the exact studio-pixel-painter mechanism, now driven by the shared kit. UV formula matches the Plane geometry's face winding by derivation. Build verified via rjit shot; the 3D viewport (like every GPU surface — Effect and Scene3D) is not headless-capturable, so live-verify via rjit dev brush_3d_demo. Commits 5034bb056 (controller), 10ca3ab78 (demo).",
+  "shas": [
+    "5034bb056",
+    "10ca3ab78"
+  ],
+  "resolvedAt": "2026-06-19T23:38:02.397Z"
+}

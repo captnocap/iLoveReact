@@ -1,0 +1,30 @@
+{
+  "id": "req_1527",
+  "at": "2026-06-20T22:09:54.042Z",
+  "origin": "session:6580d434",
+  "text": "if u can, log when i jump. and then that way i can make it over to the staircase when i load the game, il jump 3 times to signal im at the staircase, and then il repro the bug, that way there is no confusion of where im at trying to walk into what, because idk how many of the logs showed me walking to get to the staircase alone",
+  "status": "review",
+  "sessionId": "6580d434-ee0d-4691-a47a-61556997a089",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T22:10:19.828Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:12:45.235Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a loud, greppable jump marker to the stairlog so the user can bracket the repro. On the rising edge of each jump (jump_down and player_grounded, fires once per launch until landing) the no-V8 sim now prints '[stairlog fN] ===== JUMP ===== pos=(x,y,z)'. The user's plan: walk to the staircase, jump 3 times to drop three markers, then perform the repro, so the walk-up frames before the markers can be ignored and there is no ambiguity about which staircase/wall is being walked into. Rebuilt the world_loader binary clean and committed (86f5f35c8); run with RJIT_STAIRLOG=1 ./zig-out/bin/world_loader ./zig-out/bin/hmsc.gamefile.",
+  "shas": [
+    "86f5f35c8"
+  ],
+  "resolvedAt": "2026-06-20T22:12:45.235Z"
+}

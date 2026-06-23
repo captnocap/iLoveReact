@@ -1,0 +1,31 @@
+{
+  "id": "req_0560",
+  "at": "2026-06-10T16:00:13.322Z",
+  "origin": "codex:019eb242",
+  "text": "also, you should give me a size that is a perfect wall fit",
+  "status": "review",
+  "sessionId": "019eb242-3ff1-73a2-b202-5d99e580829d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T16:00:19.526Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:04:26.631Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a wall-fit decal size preset for the 3m x 3m wall face: wall fit 3m 768x768, giving a clean 256 px/m square canvas. The preset is validated in the compose decal behavior suite.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T16:04:26.631Z",
+  "tags": [
+    "ask"
+  ]
+}

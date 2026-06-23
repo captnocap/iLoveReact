@@ -1,0 +1,31 @@
+{
+  "id": "req_0395",
+  "at": "2026-06-09T05:56:13.020Z",
+  "origin": "codex:019eaa55",
+  "text": "so why do i have 67 materials but only like 11 choices here in the building mode",
+  "status": "review",
+  "sessionId": "019eaa55-1779-7bd0-be5d-1b2b9ee9e13e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T05:56:21.607Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T06:00:37.221Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained and fixed the material count mismatch in Buildings: the Materials workspace roster includes shader recipe rows, React texture rows, saved material rows, plus authoring-only decal rows, while Buildings was wired through a narrower flat material surface. Added a live assignable material catalog for Buildings that includes shader recipes, facade React textures, and stored shader/decal materials with source groups, then changed the building material browser to show grouped sections and filtered/total assignable counts so the full catalog is visible and searchable.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T06:00:37.221Z",
+  "tags": [
+    "ask"
+  ]
+}

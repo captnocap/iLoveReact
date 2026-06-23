@@ -1,0 +1,31 @@
+{
+  "id": "req_0399",
+  "at": "2026-06-09T06:09:04.598Z",
+  "origin": "codex:019eaa55",
+  "text": "I keep clicking on this face here and it edits the roof ???? [Image #1]",
+  "status": "review",
+  "sessionId": "019eaa55-1779-7bd0-be5d-1b2b9ee9e13e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T06:09:17.835Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T06:11:35.641Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected the initial hit-test diagnosis after the user showed the visual selection was lighting the correct face. The real issue was stale material-target state: clicking a wall selected/highlighted it, but the material browser could still be pointed at an older roof target. The fix is covered by the follow-up change that ties stage face selection to the active material target.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T06:11:35.641Z",
+  "tags": [
+    "bug"
+  ]
+}

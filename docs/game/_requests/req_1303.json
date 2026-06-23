@@ -1,0 +1,30 @@
+{
+  "id": "req_1303",
+  "at": "2026-06-18T18:24:15.187Z",
+  "origin": "session:76a33154",
+  "text": "k. now how about this problem [Image #21] pin stripes of a different flavor this time",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T18:26:03.724Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T18:30:45.930Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Killed the new 'pinstripes'. Diagnosed via an offscreen atlas dump: a filled face baked as hundreds of ~2px per-ROW boxes (the run-merge only merged horizontally), and at fine cells those adjacent row-boxes left thin horizontal seams between every row despite shared-edge rounding. Fix: replaced the per-row run-merge with a greedy 2D RECTANGLE merge — cellRects() extends a cell right then down while the full width is present, so a solid region becomes ONE box (a fully-filled face = 1 box, zero internal seams); a brush region collapses to a few rects. Added rectAtlasRect() (seamless shared-edge rounding for a cell rectangle) and swapped the bake to use them. Verified with the atlas dump: the previously-striped full face now renders as a single solid box. Build clean; meshPaint 8/8. Needs rjit dev to confirm live on the gun: a painted/filled face should be flat colour with no horizontal seams. shas dc9b7347b.",
+  "shas": [
+    "dc9b7347b"
+  ],
+  "resolvedAt": "2026-06-18T18:30:45.930Z"
+}

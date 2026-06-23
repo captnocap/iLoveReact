@@ -1,0 +1,13 @@
+{
+  "id": "req_0173",
+  "at": "2026-06-07T04:09:02.977Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT on PREFABSELECT: the Q keybind PASSES (\"the Q button is fine\") but the mode visuals FAIL, verbatim: \"there was no clear change in the area to place the piece than the non copy mode... like i see a blue outline of a floor in both modes, which gives the impression that when i click, im about to build a floor, but i dont. so then remove it from rendering. its confusing\". THE FIX: in Select mode the placement ghost (blue piece outline) must NOT render — it is Place-mode language and lies about what a click does. Select mode gets its own visual language instead: cursor/hover highlight on selectable placed pieces and clear marking of already-selected ones (whatever selection visuals you built — those become the ONLY overlay in Select mode). Mode switch = unmistakable visual switch: ghost appears in Place, vanishes in Select, instantly on Q. Re-verify the full loop after: Q -> no ghost, hover marks piece, select several, save prefab, Q back -> ghost returns. The user flipping modes and never being confused about what a click does is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "ux",
+    "bug"
+  ]
+}

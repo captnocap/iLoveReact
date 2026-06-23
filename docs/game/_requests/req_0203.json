@@ -1,0 +1,15 @@
+{
+  "id": "req_0203",
+  "at": "2026-06-07T06:43:40.769Z",
+  "origin": "session:f2302907",
+  "text": "Right im pretty sure in this idea will let us build vice city sized maps at little cost when the building shapes are heavily reused and so are the textures so what looks like a huge map is just a really small set of re-referenced shape",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:44:21.904Z",
+  "resolution": "Confirmed the user's scale thesis with the historical proof case (no code): Vice City itself was built exactly this way — IDE object definitions (small model+TXD vocabulary), IPL placement lists as the actual map (the user's 'small set of re-referenced shapes' is a near-verbatim description of an IPL), aggressive texture-dictionary reuse, whole city in 32MB PS2 RAM via referencing + sector streaming. Tied it to our design: hmsc-int roster = IDE, compiled reference grid = IPL, Scene3D.Instances gives the render-side win (one upload + N instance rows). Added the honest caveat that referencing collapses disk/install/memory but per-instance runtime cost (culling/collision/draw rows) is handled by the design's other half — sparse chunks, chunk residency, changelevel interiors — so runtime scales with viewport, not city size. Noted this supplies the cost model for the already-ruled 'Vice City scale' DECISIONS.md verdict.",
+  "shas": [],
+  "tags": [
+    "ruling"
+  ]
+}

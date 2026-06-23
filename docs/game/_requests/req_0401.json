@@ -1,0 +1,31 @@
+{
+  "id": "req_0401",
+  "at": "2026-06-09T06:14:19.728Z",
+  "origin": "codex:019eaa55",
+  "text": "i can only edit one face of the building + apply to target button does nothing + nothing is persisting.",
+  "status": "review",
+  "sessionId": "019eaa55-1779-7bd0-be5d-1b2b9ee9e13e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T06:14:29.639Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T06:18:07.371Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the broken building material workflow across the three reported symptoms. The material browser now has explicit face target chips for all/front/back/sides so the user can retarget without returning to the side panel, and the selected material stays selected when moving between bare faces so Apply has a material to write. Apply now writes through the store target path and the store keeps an optimistic local prefab copy after each edit, so the building stage updates immediately even if the session/world stream is unavailable or lagging; the normal prefabDefined commit still runs for durable persistence. Added regression coverage for face retargeting, sessionless immediate visibility, stale target repair, preview-without-commit, and clear target behavior.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T06:18:07.371Z",
+  "tags": [
+    "bug"
+  ]
+}

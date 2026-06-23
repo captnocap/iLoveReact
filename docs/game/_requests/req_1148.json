@@ -1,0 +1,28 @@
+{
+  "id": "req_1148",
+  "at": "2026-06-16T08:00:27.497Z",
+  "origin": "session:740b1ca5",
+  "text": "oh nice ok cool so alright i just recompiled my map didnt fail but then loading it i got [loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields\n[loader] construct FAILED: error.BadHeightfields\n[loader] embedded mount/render failed for node 2704: error.BadHeightfields",
+  "status": "review",
+  "sessionId": "740b1ca5-cbef-4fcf-8763-930c121a774b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T08:00:34.062Z",
+      "actor": "740b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T08:24:39.693Z",
+      "actor": "740b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "BadHeightfields on the /compiled route is fixed and verified. Root cause: a parallel session's in-flight heightfield v2->v3 migration (FORMULAFLOOR-0615, uncommitted in framework/world/constructor.zig) tightened the version-acceptance gate to 'version != 1 and != HEIGHTFIELDS_VERSION(=3)', which rejected v2 — the format worldGeometry.ts still emits — while every v2 decode branch in the body remained intact. Every freshly compiled painted-terrain map hit decodeHeightfields -> Error.BadHeightfields -> construct FAILED, so nothing rendered. Fix: widen the gate to 'version < 1 or version > HEIGHTFIELDS_VERSION' so v1/v2/v3 all decode (the body is already version-gated). Verified: user's editor /compiled route now loads, and a standalone 'rjit game shot' decodes 49 heightfields + 7 terrain meshes GREEN. NOT committed: the one-line fix is entangled in the same file as the parallel session's uncommitted NPC+v3 work, so committing would sweep up their in-flight changes (against 'only commit your own work'); the line needs to land as part of their migration commit or after they commit.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T08:24:39.692Z"
+}

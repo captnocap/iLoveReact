@@ -1,0 +1,40 @@
+{
+  "id": "req_1395",
+  "at": "2026-06-19T07:55:29.025Z",
+  "origin": "session:08e68a04",
+  "text": "also, a few other things im now spotting, some stair cases just are not showing up / invisible, but i still collide with them, and i have something like 6 in total on the map so idk what that means. also, a hill i have grass on, has no grass as of right now when im looking at it, but grass is on the ground otherwise",
+  "status": "review",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T07:55:58.787Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T08:12:22.933Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "DIAGNOSED (no code changed; in flight). Invisible-but-collidable staircases + hill-with-no-grass + NPCs creeping down-map every compile = same in-flight foliage/instance/FORMULAFLOOR WIP. NPC CREEP root cause FOUND with certainty: packageMap.ts:270-283 sets NPC spawn anchor to the CENTROID of every instance row; the new foliage bake dumps 265k cards clustered over grass into that average -> centroid yanked to grass field (NPCs 'halfway down map'), and shifts every compile as foliage card count changes (user's authored data unchanged). Fix = anchor NPCs to player spawn/fixed point, not centroid (keeps foliage). Stairs: collider baked (ramp/heightfield) but render instance dropped. Hill grass: bake reads floor chunks not landform tile grid."
+    },
+    {
+      "at": "2026-06-19T22:11:44.660Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-19T22:17:52.873Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "NPC anchor fix committed in 4690d572c (verified). Stairs-invisible + hill-no-grass still diagnosed-only, not fixed (separate foliage/instance WIP)."
+    }
+  ],
+  "resolution": "PARTIAL: the NPC-creep bug is FIXED + verified; invisible-stairs and hill-no-grass remain diagnosed-only (separate in-flight foliage/instance work, not touched). NPC fix: packageMap.ts anchored the Stage-1 test crowd to the PLACED-PIECE centroid (the first geometry.pieces instance rows = authored structures) instead of the centroid of ALL instances. The old all-instance centroid was dominated by ~265k foliage cards (33968 grass + 231700 bush = 98% of 270385 instances) clustered over painted grass, dragging NPCs 'halfway down the map' and shifting them every compile as foliage changed — even with unchanged authored data. Piece centroid is foliage-independent + stable, so the crowd stays put across compiles. Verified: rjit game bake PASS, 8 NPCs built, render GREEN. Commit pending (bundle entangles ground-formula + foliage + NPC-crowd WIP across sessions; needs user OK).",
+  "shas": [],
+  "resolvedAt": "2026-06-19T22:11:44.660Z"
+}

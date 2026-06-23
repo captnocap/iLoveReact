@@ -1,0 +1,31 @@
+{
+  "id": "req_0563",
+  "at": "2026-06-10T16:07:29.628Z",
+  "origin": "codex:019eb242",
+  "text": "and the layers... why is this not using the same painter approach honestly??",
+  "status": "review",
+  "sessionId": "019eb242-3ff1-73a2-b202-5d99e580829d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T16:07:39.301Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:12:20.680Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compose decal layers now use the same painter-style LayerStackStrip control instead of the old bespoke layer field group. The shared strip renders layer previews and routes rename, visibility, duplicate, move, select, and delete actions through MaterialStore methods so compose and paint expose the same layer workflow.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T16:12:20.680Z",
+  "tags": [
+    "ux"
+  ]
+}

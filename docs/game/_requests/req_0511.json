@@ -1,0 +1,33 @@
+{
+  "id": "req_0511",
+  "at": "2026-06-10T11:26:43.764Z",
+  "origin": "session:e11a01ef",
+  "text": "its much better now. still could use some love. just wondering, wouldnt it be a better approach if the user interface had 0 delay, and everything just resolves its whole scene graph behind the scenes. i see something like 'confirming...' in the top corner but its never putting me in any delayed state",
+  "status": "review",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T11:29:12.286Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T11:34:57.773Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the optimistic-UI flow the user specified (00c20d9ab): release costs zero, the scene resolves behind the scenes, an amber 'confirming…' pill (top-left of the iso pane) is the only sign anything is still landing. Mechanism: the drag ghost is already mounted with stable keys, so on mouse-up it simply turns SOLID with its real skins/edits — it IS the building — while the originals hide from the instanced standing render and the store batch defers one tick (setTimeout 0). When the standing pieces reflect the change, the overlay drops — confirm is a prop swap, never a remount, so there is no blink and no frozen release. Covers move (solid ghost at destination + originals hidden), wall-line/floor-rect paint (cells stay rendered solid), tower (ground ring holds while the full shell lands), and delete (selection vanishes this frame). Validation still runs synchronously BEFORE anything optimistic so a refused edit never shows a phantom; any pieces change (undo, co-session) clears overlays while the deferred batch still applies — eventually consistent. Bundle clean; heavy verify deferred per the no-builds-during-live-session protocol. Try: drag a wall line or move the building — it should stand the instant you let go, with only the pill blinking.",
+  "shas": [
+    "00c20d9ab"
+  ],
+  "resolvedAt": "2026-06-10T11:34:57.773Z",
+  "tags": [
+    "ux"
+  ]
+}

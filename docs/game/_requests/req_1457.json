@@ -1,0 +1,30 @@
+{
+  "id": "req_1457",
+  "at": "2026-06-19T23:14:55.119Z",
+  "origin": "session:1d61c909",
+  "text": "nno it is not. there is terrain maybe ~15-20 tiles away that is a spike but not on this staircase and that doesnt change the fact that a staircase anywhere else also does the same thing",
+  "status": "review",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T23:15:28.613Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T23:41:20.201Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Correction to req_1453: the staircase is a real stairs build piece (not the painted terrain spike ~15-20 tiles away I first mis-identified), and the block repros on ANY grid-aligned staircase. That re-aim is what led to the actual root cause and fix — see req_1453. Net: the staircase collision bug is fixed by raising HMSC_SCALE.playerStepHeightMeters 0.35->0.5 so the radius-induced crest lip on every walkable 45-53 degree stair/ramp clears at any framerate, with a Zig regression test pinning it (commit ab003a9ca).",
+  "shas": [
+    "ab003a9ca"
+  ],
+  "resolvedAt": "2026-06-19T23:41:20.200Z"
+}

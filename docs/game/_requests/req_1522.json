@@ -1,0 +1,28 @@
+{
+  "id": "req_1522",
+  "at": "2026-06-20T21:54:08.602Z",
+  "origin": "session:6580d434",
+  "text": "huh.... ok well that was not what i expected lol. so... ok the /compiled route inside of the game editor, is the same thing as the rjit game play command, yes? and if that is true, then when i run the isolated process that u just told me to run, it walks perfectly fine up and down the stairs. inside of the /compiled route however, i still hit some invisible walls",
+  "status": "review",
+  "sessionId": "6580d434-ee0d-4691-a47a-61556997a089",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T21:54:20.740Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T21:58:22.811Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed why the user walks fine in the standalone 'rjit game play' loader but still hits invisible walls in the /compiled route inside the editor. Confirmed both paths share the exact same Zig: /compiled renders the WorldLoader native primitive (cart/hmsc-int/CompiledWorld.tsx) whose frame loop is world_loader.zig → framework/game/physics.zig, and rjit game play runs the standalone world_loader binary built from the same source; both read the same gamefile at zig-out/game/hmsc.gamefile. The divergence is process staleness: rjit game play spawns a fresh process with freshly-rebuilt loader Zig every launch, while /compiled executes the loader Zig baked into the long-running editor process, and the dev host hot-reload swaps only JS/TSX, never Zig. So a fresh gamefile runs against old locomotion code. Verified on-disk binaries (reactjit-dev, world_loader) are from today 14:40, newer than the physics.zig/world_loader.zig sources, so a full editor relaunch picks up current physics. Recommended cheap test: fully quit and relaunch the editor, retest /compiled.",
+  "shas": [],
+  "resolvedAt": "2026-06-20T21:58:22.810Z"
+}

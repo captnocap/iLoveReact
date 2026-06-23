@@ -1,0 +1,30 @@
+{
+  "id": "req_1133",
+  "at": "2026-06-16T03:18:14.837Z",
+  "origin": "session:be6306de",
+  "text": "yeah so like. when i say explosives i mean, a few things. one, i want a fire effect that can burn a car during its 'GTFO' phase or the player dies. (explosion), and then gotta have an RPG what is a sandbox gta like game without the rpg. but otherwise, things like propane tank explosions, shooting a line of gasoline and it starting a fire, maybe breach a door",
+  "status": "review",
+  "sessionId": "be6306de-e52e-45cd-af18-d6fcb6199eab",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T03:18:45.105Z",
+      "actor": "be63",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T07:33:20.141Z",
+      "actor": "be63",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Foundation for the 'epic explosives' feature, scoped with the user to two pure, fully-tested game doors (no host rebuild) since every named effect is the same mechanic at different settings. game/explosion.ts (GAME_EXPLOSION) is the instant radial-blast solver: center+radius+peak impulse/damage over a target list returns falloff impulse (for physics velocity), falloff damage, and ignition flags, with near-edge distance (wide cars catch near misses), upward debris throw, mass resistance, and cover shielding via the same world-LoS contract chance.ts uses. game/fire.ts (GAME_FIRE) is the lingering/spreading model: a Combustible burns fuel then cooks off into a blast or extinguishes (propane = fuel~0 + cookoff = instant boom; car = multi-second GTFO window + cookoff), and a sparse FireField does tile-grid gasoline-trail spread that crawls cell-to-cell and stops where fuel stops, deterministic under a seeded rng. Both own one registered P2 tuning table; magnitudes are per-call. 26/26 behavior tests pass, wired into the game barrel. User chose 'both' spread models and 'foundation + tests' scope. Follow-up layers (own requests): prop/vehicle combustible tags, RPG projectile + gas-trail trigger, fireball Effect VFX + camera shake.",
+  "shas": [
+    "acd8f61ef"
+  ],
+  "resolvedAt": "2026-06-16T07:33:20.140Z"
+}

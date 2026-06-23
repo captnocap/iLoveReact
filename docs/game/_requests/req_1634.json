@@ -1,0 +1,28 @@
+{
+  "id": "req_1634",
+  "at": "2026-06-22T17:09:54.430Z",
+  "origin": "session:0d310aad",
+  "text": "[js.warn] [DRAGDRAW] frame stall max=52494ms (idle — external load on this machine, e.g. builds/bundler; not your editing)",
+  "status": "review",
+  "sessionId": "0d310aad-1355-489d-ab3f-6188d489fc95",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T17:12:03.649Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T17:12:03.659Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Addressed the [DRAGDRAW] 'frame stall max=52494ms' cry-wolf report. Diagnosed it is NOT a clock-mixing bug like the startup timer (both readings come from the same performance.now() in one rAF loop; the fallback is last+16 which can only yield a tiny gap). A 52s gap between animation-frame ticks is the process being suspended / the machine sleeping — performance.now() counts wall-clock across suspend, so the first tick on resume shows a multi-second jump. Reporting that as a frame stall is meaningless noise. Fix in IsoAuthor.tsx tick(): any inter-tick gap past a 4000ms ceiling is treated as a suspend/clock-jump — advance last, reschedule, and skip the watchdog for that tick (dt is already clamped to 0.05 so the sim never lurches on resume). The real <4s starvation stalls still report as before. Verified the file transforms via tools/esbuild. Not committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T17:12:03.659Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1539",
+  "at": "2026-06-20T22:47:42.885Z",
+  "origin": "session:3ffba6a0",
+  "text": "hey, the other guy just tried to fix this, didnt work, but his context is blasted. your turn. idk why, but, somewhere, somehow, when i am now trying to move the image i have added to the scene for tracing around, by clicking the move button inside of the menu for the area for it, it spawns the gizmo and some stupid ass tooltip right over the center of it. the image refuses to move now. idk how or why. but it just doesnt move",
+  "status": "review",
+  "sessionId": "3ffba6a0-bfb0-4b53-954f-6fcbbda73737",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T22:47:51.796Z",
+      "actor": "3ffb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:57:37.102Z",
+      "actor": "3ffb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the trace-image Move gizmo: clicking the move arrows did nothing because this framework lets a handler-less Box hit-test above the viewport and swallow the mousedown (the same class as req_1537's readouts). The TransformGizmo's arms/arrowheads/squares/hubs were plain Boxes with no pointerEvents:none, so a click on the gizmo (which sits dead-centre on the backdrop image) was eaten before onDown's math-based pickGizmoHandle could run. Made every gizmo overlay primitive pointer-transparent in meshGizmo.tsx, and fixed the identical holdout in meshRig.tsx's RigOverlay (ball/square/line/tag). Built clean via SHIP_RUN_PACKAGE=0 rjit ship hmsc-int.",
+  "shas": [
+    "5cc46bbe5"
+  ],
+  "resolvedAt": "2026-06-20T22:57:37.101Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1147",
+  "at": "2026-06-16T07:59:23.702Z",
+  "origin": "session:be6306de",
+  "text": "whatever path is most intune with @GUIDING_LIGHT.md i would follow",
+  "status": "review",
+  "sessionId": "be6306de-e52e-45cd-af18-d6fcb6199eab",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T08:00:56.413Z",
+      "actor": "be63",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T08:05:15.628Z",
+      "actor": "be63",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the 'what about a real particle system like this THREE.js reference' question by letting GUIDING_LIGHT.md decide the architecture (user's explicit instruction). The north star overruled my own recommendation: a per-frame JS particle sim re-uploading buffers is 'code in the loop', which discipline #2 forbids — so the sim belongs in the host, and a particle system is DATA (declarative emitter specs) run by a fixed host system (the continuous tier, pos += vel·dt), not new engine code. Per the Order of Work ('Format first'), slice 1 is the narrow data waist, not a prototype sim. Built runtime/particles/ (new platform package, sibling to @reactjit/effects): format.ts (the EmitterSpec as a sum of factors with no closures/conditionals; packEmitter to a zero-copy Float32Array load form; the columnar SoA particle-pool contract the host integrates; face/axis/stretch billboard modes naming the reference's quaternion.w trick), presets.ts (fire/smoke/spark/explosion emitters, each stored once and referenced by name, retuned from the reference with HDR additive colors), events.ts (the separable seam — producers like GAME_FIRE/GAME_EXPLOSION emit light/burst events on a ref-backed bus, zero coupling to the renderer), index.ts barrel, and a self-contained 7/7 behavior suite (field-order parity, enum codes, preset well-formedness, bus drain). No host rebuild. Next slices (own requests): simulate.ts reference integrator (authoring/preview + the host's executable spec) then the host billboard GPU pipeline in framework/gpu (a ~grass~ sibling) + the <Particles> surface, which replaces the explosives lab's placeholder flame cones.",
+  "shas": [
+    "8b3b5bab8"
+  ],
+  "resolvedAt": "2026-06-16T08:05:15.628Z"
+}

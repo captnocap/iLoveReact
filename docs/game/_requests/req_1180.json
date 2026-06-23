@@ -1,0 +1,30 @@
+{
+  "id": "req_1180",
+  "at": "2026-06-16T15:42:41.725Z",
+  "origin": "session:8e058574",
+  "text": "wait wtf i just got it back but only from going to another route after deleting my last edit so yeah its got to be some cap or i just was in the twilight zone",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T15:46:35.114Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T15:46:35.122Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Studio mesh-editor 'all my tools disappeared after a loop cut' = a layout cap, confirmed by the user (revert last edit + route-remount restored them). Root cause: SelectionOverlay returned a bare fragment, flattening its hundreds of per-edge Line boxes + per-vert/face Dots into the viewport Pressable's DIRECT children; the element-mode toolbar renders after it, so once a dense (loop-cut) mesh pushed the child count past layout.zig MAX_CHILDREN=512, the trailing toolbar siblings were evicted from the layout frame (no crash, hence remount fixed it). MAX_CHILDREN=512 is a deliberate stack-safety cap (its own comment notes 2048 overflowed the Debug layout stack), so the fix is structural, not raising the cap: wrap the overlay output in one full-fill pointerEvents:none overflow:visible Box so it is a SINGLE child — tools can never be evicted again, picking/orbit pass through. JS-only (meshSelect.tsx), hot-reloadable, full cart bundles clean. Residual: a few wireframe lines may drop INSIDE a >512-element overlay (cosmetic); long-term fix is batching the wireframe into a Graph.Polyline.",
+  "shas": [
+    "d941273b5"
+  ],
+  "resolvedAt": "2026-06-16T15:46:35.122Z"
+}

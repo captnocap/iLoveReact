@@ -1,0 +1,28 @@
+{
+  "id": "req_0969",
+  "at": "2026-06-15T10:43:42.986Z",
+  "origin": "session:524eaf71",
+  "text": "ok this is the next thing to get in. is this part of the camera, this should sit in the corner of the entire surface, and it shows exactly the angle the camera is at. and lets you face it very easily by clicking on the circle of that end [Image #22]",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T10:44:38.501Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T10:50:27.205Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added the Blockbench view-orientation compass (playbook Part 4b #1): a corner widget (ViewCompass in editors/model/Studio.tsx, bottom-left of the viewport) that always shows the exact camera angle and lets you face an axis by clicking its ball. It projects the six ±X/Y/Z axis ends through the LIVE camera basis (forward derived from camera.zig's orbit convention F=(sin·cos, -sin, cos·cos), with right=cross(F,up)/up=cross(R,F)), so the gizmo rotates 1:1 with the orbit; positive ends are bright + labeled X/Y/Z, negatives are dim rings, all depth-sorted so near overlaps far, lines drawn to the positive ends, an origin dot in the middle. Clicking any ball calls faceAxis(yaw,pitch) which eases the orbit along the SHORTEST yaw path to look straight down that axis (yaw=atan2(-ox,-oz)/pitch=asin(oy); poles keep current yaw), with a generation token that cancels the tween if the user grabs the camera mid-snap. It self-ticks at 30Hz to mirror the host/ref-driven spin and is isolated so it never re-renders the Scene3D tree. 2D projection for now (hot-reload, no rebuild); graduates to the host screen-stable overlay with the transform gizmo. Bundle-clean, fps untouched.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T10:50:27.204Z"
+}

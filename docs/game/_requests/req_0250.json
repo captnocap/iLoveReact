@@ -1,0 +1,13 @@
+{
+  "id": "req_0250",
+  "at": "2026-06-07T11:14:29.443Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: second collision-loss mechanism found in the user's dev log, your lane: [js.warn] [play] 659 rects past the host cap 512 — newest dropped. The world is over the host's 512 solid-rect cap and SILENTLY dropping the newest 147 — independent of (and compounding) your highest-heightfield-only bug. A dropped rect = a missing floor/wall somewhere, so this is plausibly part of the under-ramp fall-through and will keep biting as the user builds more. Fold into your fix: (1) the cap must stop being silent — it already warns once, but the failure mode is invisible holes; (2) propose the real fix (raise the cap / spatial paging / culling by distance — your call to propose, the user rules if it is a behavior law). Also FYI the user's session runs a STALE native build (rebuild-needed overlay active), so your Zig host fixes will not reach them until a dev-host restart — do not interpret continued live failure after your fix as the fix failing until they restart.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

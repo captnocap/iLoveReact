@@ -1,0 +1,36 @@
+{
+  "id": "req_1455",
+  "at": "2026-06-19T23:10:47.405Z",
+  "origin": "session:89c172a4",
+  "text": "this is good. the brush variety is actually not bad. i would however, not ship this with the approach u have for the brush choice, i would turn the svg into an icon and use that icon as the brush choice over a name oh also the one thing with this color wheel that is a problem and has always been a problem is you click on a color and unless you bring the mouse out of focus and back into focus u cant select a new color.",
+  "status": "review",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T23:12:15.967Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T23:23:01.696Z",
+      "actor": "89c1",
+      "kind": "note",
+      "text": "Done (5034bb056): brush picker is now SVG-path icons (paint/icons.ts + BrushIcon, verified in shot — all 11 shapes render as glyphs); ColorField long-standing click bug fixed (stuck drag-overlay on a no-move click → per-element drag refs, no overlay)."
+    },
+    {
+      "at": "2026-06-19T23:24:03.483Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Delivered both pieces of UI feedback on the paint kit. (1) The brush picker is now SVG-path ICONS instead of names: runtime/paint/icons.ts draws each of the 11 brush shapes as path layers (brushIconLayers), rendered by a new BrushIcon (Graph.Path) and laid out as an icon grid in BrushKit — verified in rjit shot, all shapes render as crisp glyphs; the same path is the seed for the Phase B host stamp mask. (2) Fixed the long-standing ColorField click bug (click a color, couldn't pick another until moving focus out/in): root cause was a no-move click setting dragging=true on mousedown while the 'only-when-dragging' overlay hadn't mounted to reset it, so it stuck and ate the next click — replaced the overlay with per-element drag refs on the wheel/value Pressables. The click fix needs a live rjit dev confirm (not headless-testable).",
+  "shas": [
+    "5034bb056"
+  ],
+  "resolvedAt": "2026-06-19T23:24:03.483Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1680",
+  "at": "2026-06-23T00:49:13.291Z",
+  "origin": "session:14b40edc",
+  "text": "ya its not always upside down so it must be the face itself, idk.",
+  "status": "review",
+  "sessionId": "14b40edc-087f-40bd-9abb-de8f806a4e4f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T00:49:27.757Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T00:50:15.513Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the 'texture sometimes upside-down on a face' report: confirmed the user's intuition that it's per-face, not a global flip. Each face's default UVs come from faceSquareUV (editMesh.ts) which projects the face loop onto its dominant axis and normalizes to [0,1]² — the resulting U/V orientation falls out of the loop winding + normal sign, which differs across a box's six faces, so the same image lands upright on some faces and rotated/flipped on others. No 'up' convention is applied anywhere. User's workaround (rotate the image in the Studio) is therefore legitimate, not a hack. Offered an optional quality-of-life fix: make box/side faces get a consistent upright default (world-up→V top, world-right→U) in faceSquareUV so posters/signs/frame-backs land upright by default, with top/bottom faces pinned to a fixed orientation. No code changed yet — awaiting the user's call on whether to implement (applies to newly-cooked models) or leave as rotate-when-needed.",
+  "shas": [],
+  "resolvedAt": "2026-06-23T00:50:15.513Z"
+}

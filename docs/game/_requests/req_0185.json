@@ -1,0 +1,17 @@
+{
+  "id": "req_0185",
+  "at": "2026-06-07T05:07:53.346Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — URGENT, top of your queue: your CUTOUTFLIP extraction broke the live paint bench. The user's session is throwing: \"The above error occurred in the <BenchTarget> component: at BenchTarget at PaintBench at PreviewCol at Workbench at WorkbenchRoute\" — caught by GlobalErrorBoundary, right after your EffectModal extraction landed in editors/workbench/paint/. Fix forward now: read the actual error above the component stack in the user's dev log (pane 6 scrollback), repair BenchTarget, verify the agnostic paint bench renders again. Your flip commit does not land until the bench is alive.",
+  "status": "done",
+  "sessionId": "cac9001b-5622-4bd2-b46d-222534f25a0c",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T09:42:01.339Z",
+  "resolution": "BENCHHINT-0606 fixed forward inside the CUTOUTFLIP commit 12d36473c. Root cause: depthHintGrid indexed per-PART grids with a SEGMENT paint target (e.g. lUpperArm), hitting undefined.slice() and killing <BenchTarget> behind GlobalErrorBoundary. PaintBench now resolves the owning part via paintTargetPart() before grid lookup, and depthHintGrid gained boundary hardening (foreign id -> flat hint, rides the FOOTMESH wave in paintKit.ts). Verified alive headlessly on the formerly-crashing target; proof shot /tmp/benchfix-fixed.png.",
+  "shas": [
+    "12d36473c"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

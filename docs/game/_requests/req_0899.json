@@ -1,0 +1,30 @@
+{
+  "id": "req_0899",
+  "at": "2026-06-14T04:31:34.728Z",
+  "origin": "session:5ae129b5",
+  "text": "will this take an svg like this: [Image #1] or is it expecting one path",
+  "status": "review",
+  "sessionId": "5ae129b5-1bb5-49d0-b549-22770bd7fe48",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T04:32:23.296Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T04:39:11.933Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The neon import now accepts a WHOLE multi-<path> SVG, not just a single d. extractSvgPaths pulls every <path d=… fill=…> (or treats a bare string as one d); each path is flattened to polylines, the COMBINED bounding box is fit to the decal canvas, and each becomes its own glowing DecalPathNode in its own fill color. The neon color field is now optional — blank keeps each path's logo color, a set color overrides all. parseSvgColor handles rgb()/#hex/none. FacePainter's neon input became a multiline paste box so a full SVG fits. Capped at 240 paths (< decal MAX_NODES 256) with loud truncation. Both renderers already loop nodes (editor Graph.Path, compiled decal_raster), so multi-path renders end to end. neon.test 3/3, cart bundles clean. Same commit as req_0898.",
+  "shas": [
+    "4daf18a82"
+  ],
+  "resolvedAt": "2026-06-14T04:39:11.933Z"
+}

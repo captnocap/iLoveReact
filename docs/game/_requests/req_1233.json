@@ -1,0 +1,28 @@
+{
+  "id": "req_1233",
+  "at": "2026-06-17T13:38:45.148Z",
+  "origin": "session:c885b7cc",
+  "text": "ohhh shit that was pretty clean i didnt select enough of the pieces because i still got some hollow spots but im pretty sure i got the jist of it [Image #13] now just wondering is there any reason to just NOT do this to everything ?? what harm is that?",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T13:39:18.080Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T13:39:42.081Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User got a clean solid cab from the new solidify button, noted some hollow spots remain from under-selecting, and asked whether there's any harm in just solidifying everything. Answered as a technical clarification — no code changed. Verified against editMesh.ts solidifyFaces that each vert is pushed inward by a fixed thickness (STUDIO.shellThicknessMeters = 0.125m), then laid out three real harms: (1) geometry/UV/collider roughly doubles per solidified face, pure waste on parts you never see inside (fenders, underbody, bumpers); (2) THE footgun — parts thinner than ~0.25m (2x the inward push) have their inner skin overshoot the opposite wall and self-intersect/invert (z-fighting, flipped normals), so thin panels/signs/glass break; (3) already-detached panels (doors) are already solid and would double-thicken. Gave the rule of thumb: only solidify shells you can see into (cab, open bed, anything with a window/door); leave solid masses, sub-0.25m thin parts, and detached doors alone. Told them missed hollow spots can be fixed by re-selecting and hitting solidify again (incremental + undoable). Offered to add a thin-part guard (auto-skip or clamp thickness) so 'select everything and hit it' becomes safe.",
+  "shas": [],
+  "resolvedAt": "2026-06-17T13:39:42.081Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0587",
+  "at": "2026-06-10T18:31:03.600Z",
+  "origin": "session:7a5b02e7",
+  "text": "what about this fire hydrant [Image #16] and also this bush is not smooth like the game has it in the editor so there is some disconnect [Image #17] [Image #18]",
+  "status": "review",
+  "sessionId": "7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T18:32:06.643Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T18:35:18.739Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Both prop disconnects fixed (commit fd88026a4). (1) Fire hydrant: worldGeometry's propParts had no fireHydrant case, so the compiled bake shipped the box fallback — one red box. The live model (render3d/props/FireHydrant.tsx) is now transcribed into compiled parts: base flange, barrel, dome, bonnet, cap nut, front pumper, two side outlets; the bake's instance count moved +7 exactly as expected (8 parts replace 1 box). (2) Faceted bushes: the loader's sphere/cylinder mesh builders assigned one normal per triangle (flat shading) where the editor's geometry registry uses per-vertex normals — spheres now shade fully smooth and cylinder barrels smooth around the rim with flat caps, matching the editor look. rjit game shot GREEN with 17061 instances; worldGeometry tests 4/4. Verify: rjit game play — the hydrant should be a real hydrant and bushes should read as smooth blobs like /test.",
+  "shas": [
+    "fd88026a4"
+  ],
+  "resolvedAt": "2026-06-10T18:35:18.739Z",
+  "tags": [
+    "bug"
+  ]
+}

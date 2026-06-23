@@ -1,0 +1,10 @@
+{
+  "id": "req_1156",
+  "at": "2026-06-16T08:13:00.600Z",
+  "origin": "session:740b1ca5",
+  "text": "Ya my machine got reset like 2 times yesterday so all the work was all over the place. not committed, on disk. this and that, but the uncommitted is also pretty standard. i would not take it as a discovery but as expected to be",
+  "status": "new",
+  "sessionId": "740b1ca5-cbef-4fcf-8763-930c121a774b",
+  "captureMode": "hook",
+  "events": []
+}

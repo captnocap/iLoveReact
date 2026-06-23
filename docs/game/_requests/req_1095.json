@@ -1,0 +1,28 @@
+{
+  "id": "req_1095",
+  "at": "2026-06-15T23:25:55.417Z",
+  "origin": "session:9f19b605",
+  "text": "hey dude so i was thinking about the skybox and how we can make it legendary. well, at least one part of i know how we handle, effectively i was thinking, we can author a sub map that our map is wrapped around, and il make some bussin city skylines that look like a point of interest to the player, and we will let them travel out far to them by boat or land, but at some point we instantly flip their notoriety to full and now they wont even make it, they have an apache helicopitor tailing them lol",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T23:26:18.600Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T23:39:27.383Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Skybox-as-legendary design thread (no code). Established the 'skybox is real' doctrine: the far horizon is reachable geometry, not a faked backdrop. Grounded it in existing systems — V30 one-citywide-map outer ring (NOT a separate changelevel map), the existing 0-100 notoriety blend in game/perception.ts, and 'heat' as a ruled global-state axis. Seeded the coast-city-gauntlet beat: a tempting distant city you can boat toward, heat ramps as you cross, an ENGAGED apache pursuer (V30 pins hunting NPCs online) — diegetic boundary, no invisible wall. Resolved the early hard-kill-vs-escapable fork toward escapable. Awaiting user's call to pin as a DECISIONS verdict (skybox currently undecided) or spike slice 1.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T23:39:27.382Z"
+}

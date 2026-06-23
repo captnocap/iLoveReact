@@ -1,0 +1,36 @@
+{
+  "id": "req_0764",
+  "at": "2026-06-13T14:24:27.384Z",
+  "origin": "session:ef4fbf70",
+  "text": "what is this piece type that shows up above it still doing here",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T14:24:51.005Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T14:25:58.479Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-13T14:26:07.834Z",
+      "actor": "ef4f",
+      "kind": "note",
+      "text": "Correction: the cleanup commit is a00482478 (the earlier 623e45ff6 is the face-row redesign, req_0758/req_0762). req_0764's change = a00482478."
+    }
+  ],
+  "resolution": "Removed the piece type / cutout / x-y-z / yaw / per-face provenance config strip that showed above the face row in the iso PAINT panel. The user asked 'what is this piece type that shows up above it still doing here' — it was the single-piece config added in req_0748, which predates the texture redesign and is clutter in a paint-focused panel: piece type/cutout/placement edits belong to the focus/properties panel, and the provenance readout is now redundant because the redesigned face row already shows each face wearing its actual look. Deleted configPiece/anchor/bumpConfig/onConfigEdit/configSpec and the PanelGroups render, plus the now-unused PanelGroups/FieldSpec/PanelSpec import. PAINT is pure texturing again (faces + brush + colours + texture upload/painter + material browser). Verified by a clean full-graph esbuild pass (exit 0).",
+  "shas": [
+    "623e45ff6"
+  ],
+  "resolvedAt": "2026-06-13T14:25:58.479Z"
+}

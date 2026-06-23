@@ -1,0 +1,10 @@
+{
+  "id": "req_0901",
+  "at": "2026-06-14T05:30:21.203Z",
+  "origin": "session:1b18f3aa",
+  "text": "hey so in the hmsc-int compiled route, it doesnt use v8. this was planned, the plan also, was to once established with the core game render loop, we would look at reintroducing v8 for gameplay logic. the goal is, hopefully, that by having the main game seperate, that we can treat v8 gc like online server latency when it occurs, and not freeze the player input, but can for instance, delay the damage from something by a single frame like during a gc. this all has one big caveat that it doesnt cause problems. and further more its only for handling like runtime events and game state, ideally through a host fn of useIFTTT; that being all said. thoughts",
+  "status": "new",
+  "sessionId": "1b18f3aa-3b63-4388-a182-cd1168ae04f8",
+  "captureMode": "hook",
+  "events": []
+}

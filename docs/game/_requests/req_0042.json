@@ -1,0 +1,12 @@
+{
+  "id": "req_0042",
+  "at": "2026-06-06T06:15:12.143Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — CONTEXT ORDER (standing rule from the user, effective now): you are at 90% context, well past the 55-60% handover line. Finish ONLY your current coherent step (no new queue items), then use the /hand-over skill: write the continuation brief covering your open queue (anything from HEROBAR/SKINRANGE/ENUMWRAP/DEADSPACE/LENSCLARITY not fully landed, ledger reqs unresolved, the agnostic-paint verify state, the /cutout flip readiness), then report HANDED OVER. A fresh session resumes from your brief. This is not a criticism — quality degrades past 55% and yours has been a long excellent run.",
+  "status": "new",
+  "sessionId": "749ea40a-8b61-47c3-8d6c-5bde9e2a5c99",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

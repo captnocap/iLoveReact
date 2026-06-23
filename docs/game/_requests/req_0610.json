@@ -1,0 +1,33 @@
+{
+  "id": "req_0610",
+  "at": "2026-06-11T05:21:59.940Z",
+  "origin": "session:e9bdce32",
+  "text": "and finally, first thing that whole doc needs to address before anything else is done: delete all the floating loose labs and the direct hmsc/ directory. its all junk / old, as far as im concerned, we have ported in the capability from them, now its just causing trauma, i saw a claude making edits in the wrong space today, not again",
+  "status": "review",
+  "sessionId": "e9bdce32-4d43-433c-9b7c-e64529ad18a7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T05:22:57.182Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T05:26:42.704Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote §0 of the structure review (commit 2e2f7841f) — THE DEMOLITION ORDER, placed ahead of every other finding per the user's ruling: delete all floating loose lab carts + the hmsc/ directory (hmsc/ verified already gone at 77726e201). Enumerated the exact kill list from docs/game/*.md per req_0611's clarification (30 carts, every path verified on disk), separated the meta docs that stay, and found TWO load-bearing blockers that must be captured BEFORE rm or the surviving tool breaks: cart/cutout/ (~20 live imports from editors/workbench paint/characters/items/vehicles/materials — the CUTOUTFLIP capture killed the route but left the implementation in the old cart) and cart/animationDsl.ts (compile/playerModel.ts imports the parser/sampler; capture into game/animation per V6). Flagged hmsc-int-old/, scape3d/, heads/, deadcode/ as adjacent junk needing one user word. Wrote the execution order: coordinate parallel lanes → two captures → git rm by explicit path → retire the per-cart .md + _index records in the same commit → ship + bake verify.",
+  "shas": [
+    "2e2f7841f"
+  ],
+  "resolvedAt": "2026-06-11T05:26:42.704Z",
+  "tags": [
+    "ruling"
+  ]
+}

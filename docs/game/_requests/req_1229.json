@@ -1,0 +1,28 @@
+{
+  "id": "req_1229",
+  "at": "2026-06-17T13:21:44.879Z",
+  "origin": "session:c885b7cc",
+  "text": "hey so how do i uh go about getting inside this mf and making the interior not hollow. i have the doors already detached, and i have windows on the front and the left door so far but u can see from looking thru the front there is no back wall to the back of the cab and the cab floor is empty but there is also a underbody so [Image #10] [Image #11] [Image #12]",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T13:22:02.535Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T13:24:04.004Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked how to make a detached-door truck cab's interior not hollow (no back wall visible through the windshield, empty cab floor over the underbody). This was a how-to question answered against the actual Studio mesh editor capabilities (editMesh.ts + Studio.tsx toolbar) — no code changed. Explained the root cause: faces are single-sided, so peering through a window shows straight through walls whose normals face outward. Gave the concrete workflow: switch to edge/vert select mode, select the rim of the open rear rectangle and the four bottom-interior corners, use Create face to fill them, and Flip to point each normal into the cab. Noted that if Create face z-fights, the wall already exists facing the wrong way (Flip the existing one instead), that Glass stays only on window panes, and that single-sided created faces are correct for interior surfaces. Flagged a gap: solidifyFaces (true thick walls in place) exists but is only wired behind Detach, which peels the panel off — offered to expose a standalone Solidify toolbar button if the user wants thick walls.",
+  "shas": [],
+  "resolvedAt": "2026-06-17T13:24:04.004Z"
+}

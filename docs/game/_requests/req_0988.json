@@ -1,0 +1,28 @@
+{
+  "id": "req_0988",
+  "at": "2026-06-15T12:51:37.625Z",
+  "origin": "session:d91c8b8f",
+  "text": "sorry. finish up didnt mean to stop u there",
+  "status": "review",
+  "sessionId": "d91c8b8f-6568-469d-83d0-62ea4b4091c6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T12:52:30.901Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T12:52:30.911Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Non-substantive continuation nudge ('sorry, finish up, didnt mean to stop you') — no separate work item; the in-flight task was completing the req_0986 face-highlight crash fix tracked under req_0987.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T12:52:30.910Z"
+}

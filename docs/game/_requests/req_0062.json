@@ -1,0 +1,13 @@
+{
+  "id": "req_0062",
+  "at": "2026-06-06T07:23:30.519Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — SCULPTSPLIT-0606 design RULINGS (user):\n\nQ1 answered with a LAYOUT RULING that supersedes the side-by-side divider entirely, verbatim: \"put everything on the same interface. put the mesh up top and then a row of the two other tools below it. this side by side column approach is ass.\" So: VERTICAL STACK — the 3D mesh view on TOP (full width), and below it ONE ROW holding the two other tools (the unwrap canvas + the sculpt toolset/samples). The drag-divider work re-orients to this stack (top/bottom split) or simplifies away — side-by-side columns are dead on this lens. (The original depth-read question went unanswered — your default Q1(b) contours may ride, low ceremony, user can veto on sight.)\nQ2: ALWAYS-ON faint lattice — \"keep the lattice on, there is no reason to not.\"\nQ3: circle + mode tint (your default).\nQ4: smart — smooth at rest, chunky while the grid overlay is on (your default).\n\nLand it as the layout restructure + the three visual treatments; Stage.tsx is clear now (CLOTHSPLIT landed); resolve req_0057 with these shas. READY FOR USER TEST.\n",
+  "status": "new",
+  "sessionId": "066cd07a-7039-4d0f-b6de-a778ce2c6d24",
+  "captureMode": "hook",
+  "tags": [
+    "ruling",
+    "ux"
+  ]
+}

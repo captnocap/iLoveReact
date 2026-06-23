@@ -1,0 +1,28 @@
+{
+  "id": "req_1683",
+  "at": "2026-06-23T01:50:13.905Z",
+  "origin": "codex:019ef182",
+  "text": "[Image #1][Image #2] still not working. check it out",
+  "status": "review",
+  "sessionId": "019ef182-d012-70f2-8579-97076088563d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T01:50:26.002Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T01:57:13.395Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the remaining visible wall-corner strip shown in the latest screenshots. The root cause was that trimmed wall boxes still rendered their cut end caps, so even after triangular miters the renderer showed a vertical crossing strip. Wall boxes trimmed for L/T joins now carry openRunMin/openRunMax flags, the editor renderer uses open-ended box geometries for those joined ends, and the compiled world stream/world_loader has matching open-box shape IDs and geometry batches. Also removed the internal trim face from the triangular miter prisms. Added focused wallSlabs coverage asserting painted L-corner colors, miter halves, and omitted cut caps. Verified wallSlabs 2/2, compile/world-parity 15/15, build-placed 57/57, build-snap 29/29, ReleaseFast world_loader build, and SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-int.",
+  "shas": [],
+  "resolvedAt": "2026-06-23T01:57:13.395Z"
+}

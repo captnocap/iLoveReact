@@ -1,0 +1,30 @@
+{
+  "id": "req_1411",
+  "at": "2026-06-19T15:51:00.149Z",
+  "origin": "session:d6961119",
+  "text": "haha shit ground=11/65536 broke_on_inst_cap=false\n[js.err] The above error occurred in the <ImportModelDialog> component:\n\n    at ImportModelDialog (<anonymous>:115112:65)\n    at View\n    at Row (<anonymous>:7214:56)\n    at StudioEditor (<anonymous>:117222:19)\n    at View\n    at Box (<anonymous>:7212:48)\n    at C3 (PreviewCol:5216:38)\n    at View\n    at Box (<anonymous>:7212:48)\n    at Workbench (<anonymous>:94791:28)\n    at View\n    at Box (<anonymous>:7212:48)\n    at WorkbenchRoute (<anonymous>:94968:34)\n    at Route (<anonymous>:7978:5)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at EditorShell (<anonymous>:119917:51)\n    at Router (<anonymous>:7913:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:120814:29)\n\nReact will try to recreate this component tree from scratch using the error boundary you provided, GlobalErrorBoundary.\n[js.err] [react-uncaught] ReferenceError: LCField is not defined\n    at ImportModelDialog (<anonymous>:115126:711)\n    at renderWithHooks (<anonymous>:17116:28)\n    at mountIndeterminateComponent (<anonymous>:20494:23)\n    at beginWork (<anonymous>:21482:24)\n    at beginWork$1 (<anonymous>:25998:24)\n    at performUnitOfWork (<anonymous>:25446:22)\n    at workLoopSync (<anonymous>:25382:15)\n    at renderRootSync (<anonymous>:25361:17)\n    at performSyncWorkOnRoot (<anonymous>:25088:30)\n    at flushSyncCallbacks (<anonymous>:14492:32)\ncomponent-stack:\n    at ImportModelDialog (<anonymous>:115112:65)\n    at View\n    at Row (<anonymous>:7214:56)\n    at StudioEditor (<anonymous>:117222:19)\n    at View\n    at Box (<anonymous>:7212:48)\n    at C3 (PreviewCol:5216:38)\n    at View\n    at Box (<anonymous>:7212:48)\n    at Workbench (<anonymous>:94791:28)\n    at View\n    at Box (<anonymous>:7212:48)\n    at WorkbenchRoute (<anonymous>:94968:34)\n    at Route (<anonymous>:7978:5)\n    at View\n    at Box (<anonymous>:7212:48)\n    at View\n    at Box (<anonymous>:7212:48)\n    at EditorShell (<anonymous>:119917:51)\n    at Router (<anonymous>:7913:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:120814:29)\n[js.err] Warning: %s: Error boundaries should implement getDerivedStateFromError(). In that method, return a state update to display an error message or fallback UI.%s GlobalErrorBoundary \n    at GlobalErrorBoundary (<anonymous>:120814:29)\n[js.warn] [PLACEFREEZE] snapshot flush reason=close mode=defer streams=13 delayMs=0.00 ms=70.47\n[js.warn] [PLACEFREEZE] snapshot flush reason=close mode=defer streams=13 delayMs=0.00 ms=47.67",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T15:51:44.273Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T15:55:34.435Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the 'LCField is not defined' crash in ImportModelDialog: NOT a real code bug — LCField is a hoisted top-level helper used by ImportTextureDialog and a dozen other dialogs before its definition, and current source bundles clean (tsc-check passes). It was a stale/mid-race dev bundle from when two sessions were hot-reloading Studio.tsx concurrently. Fix = a clean re-bundle (reload the dev host). While in there, fixed a real UX bug I'd left: ImportModelDialog's default path was hardcoded to model.glb which never matches genmodel's <slug>.glb output — it now self-computes the default by listing cart/hmsc-int/data/generated for the newest .glb (added listDir import). The edit also forces the fresh re-bundle that clears the crash. tsc-check passes. Committed; user should reload/re-ship the dev host then retry Import GLB.",
+  "shas": [
+    "025934845"
+  ],
+  "resolvedAt": "2026-06-19T15:55:34.435Z"
+}

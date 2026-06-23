@@ -1,0 +1,28 @@
+{
+  "id": "req_1076",
+  "at": "2026-06-15T22:26:52.863Z",
+  "origin": "session:34f4e405",
+  "text": "nice!! can u make sure that it doesnt always export to just texture.png because i dont want to overwrite others if i can avoid it. make it export by the name of the scene or somehting",
+  "status": "review",
+  "sessionId": "34f4e405-3e9d-47f6-b883-15900052c2df",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T22:27:18.528Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:28:42.756Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Export filenames no longer default to texture.png (which silently overwrote prior exports). Two changes to exportSprite in Studio.tsx: (1) the base name is now the SCENE/model name — StudioViewport gained a sceneName prop wired from model.modelName — falling back to the dialog texture name, then 'texture', all sanitized to [a-z0-9_-]. (2) Before writing, it probes exists() and appends a numeric suffix (_1, _2, …) until it finds a free filename, so a repeat export of the same scene writes <scene>_1.png rather than clobbering <scene>.png; slices follow the same rule as <scene>_face<N>[_k].png. Files still land in cart/hmsc-int/exports/. textureize 9/9, Studio + sources bundle clean. Hot-reload TSX, nothing committed (user leads commits).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:28:42.756Z"
+}

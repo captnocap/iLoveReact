@@ -1,0 +1,28 @@
+{
+  "id": "req_1024",
+  "at": "2026-06-15T17:45:44.274Z",
+  "origin": "session:46d99bcc",
+  "text": "nice!!! works great. can u show a quick tooltip that says how many steps are being moved so i dont have to mentally track it i just see it and know to do the same on the other side for parity or whatever i need it for",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T17:50:06.964Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T17:50:06.972Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a live drag readout to the Studio gizmos: while you drag, a small monospace tooltip floats by the gizmo anchor showing how far the active gizmo has moved in modeling units, so you can read the amount and mirror it on the other side for parity instead of mentally tracking it. New gizmoReadout state set in onMove and cleared on mouse-up, loop-cut close, and active-part change. Formats by gizmo type: move -> 'X +3u' (axis letter + signed units via new metersToUnits + fmtUnits helpers), per-axis resize -> 'X delta +2u' (the half-extent delta), uniform center-hub -> 'x1.20' (the scale factor), loop-cut slide -> 'cut +1u' (the world delta the cut moved). The label is positioned by projecting the active anchor (lcGizmoAnchor while a cut is open, else gizmoAnchorWorld) through the meshSelect projector and offsetting up-right so it never sits under the cursor. Studio.tsx and the full workbench sources chain bundle clean. Updated the PLAYBOOK build log. Hot-reload TSX.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T17:50:06.972Z"
+}

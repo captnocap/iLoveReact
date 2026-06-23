@@ -1,0 +1,33 @@
+{
+  "id": "req_0548",
+  "at": "2026-06-10T14:38:42.297Z",
+  "origin": "session:38fbe83f",
+  "text": "i would raise the max draws up a ladder since we will hit it very quick once the density starts packing in",
+  "status": "review",
+  "sessionId": "38fbe83f-8ce3-4182-8fe1-3332cbea2263",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:39:54.333Z",
+      "actor": "38fb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T14:41:10.469Z",
+      "actor": "38fb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Raised the streaming per-frame draw cap MAX_DRAWS from 4096 to 16384 in framework/world/streaming.zig, per the user's call that dense maps will hit it fast: contiguous-only merging (the req_0537 correctness fix) fragments ranges more by design, and every material family multiplies them. Cost is trivial — the Draw scratch is 16 bytes/draw and small worlds allocate min(actual-need, cap) regardless; only dense massive worlds touch the new ceiling (worst-case loader node reserve ~13MB on the 124k-chunk lab). Documented the REAL ceilings beyond this constant in the comment: gpu/3d.zig's per-scene mesh collection (MAX_SCENE_MESHES=32768 children) and per-frame command-encode cost — if the warn-once dropped-draws log ever fires at 16384, the right next move is distance-priority eviction of far LOD ranges, not a bigger number. Unit tests 4/4 green, loader rebuilt, 512-block lab verified unchanged (213 draws, no cap warning).",
+  "shas": [
+    "b3b63d3e7"
+  ],
+  "resolvedAt": "2026-06-10T14:41:10.469Z",
+  "tags": [
+    "idea"
+  ]
+}

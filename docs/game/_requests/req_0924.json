@@ -1,0 +1,30 @@
+{
+  "id": "req_0924",
+  "at": "2026-06-14T16:25:52.274Z",
+  "origin": "session:7d6df128",
+  "text": "Oh i see the problem. you need to set the width of this panel to be at minimum the width of your content. i dont want to horizontal scroll",
+  "status": "review",
+  "sessionId": "7d6df128-10bb-42ff-aa62-398eb578b34f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T16:26:33.534Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T16:41:03.656Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Panel field clipping fix: rows-layout groups kept the base flexWrap:'wrap' while switching to flexDirection:column, so fields spilled into a second column past the fixed 290px props panel and were only reachable by horizontal scroll. Forced flexWrap:'nowrap' on rows groups in shell/fields.tsx so fields always stack vertically, and widened PropsCol 290→360 in shell/workbench.cls.ts. Shared across all workbench panels (all are stack-intended).",
+  "shas": [
+    "d57ec1afb"
+  ],
+  "resolvedAt": "2026-06-14T16:41:03.656Z"
+}

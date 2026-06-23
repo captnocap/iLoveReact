@@ -1,0 +1,21 @@
+{
+  "id": "req_0725",
+  "at": "2026-06-13T06:31:59.496Z",
+  "origin": "session:e13c74b5",
+  "text": "[js.warn] [bucket-census] buckets=15 props=196 loose=69 | FLAT=4150 bldskin:custom:shitbrick1=229 bldskin:d-pdx-carpet=2 bldskin:b-linoleum=4 bldskin:custom:shitbrick0=147 bldskin:d-motel-carpet=36 bldskin:d-rotten-rug=6 bldskin:b-mold-wall=3 bldskin:custom:override-back-material-image=6 bldskin:b-peel-paint=3 bldskin:b-rot-siding=4 bldskin:custom:whitebrick1=25 bldskin:custom:whitebrick0=18 bldskin:h-stone-wall=5 bldskin:h-sidewalk=21",
+  "status": "doing",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T06:33:49.713Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ],
+  "tags": [
+    "perf-log"
+  ]
+}

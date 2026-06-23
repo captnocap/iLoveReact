@@ -1,0 +1,30 @@
+{
+  "id": "req_1116",
+  "at": "2026-06-16T01:21:54.763Z",
+  "origin": "session:a996a941",
+  "text": "hey can u make us a framework/runtime png/jpeg/etc encoder/decoder like something similar to sharp since we dont have node/bun but will want the same capability for upcoming purposes and because a lot of newer image models generate high res images need a good way to resolve this in a format that isnt 30mb of b64 or yeah",
+  "status": "review",
+  "sessionId": "a996a941-a211-4bf9-a57f-07ba5431be8d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T01:22:10.282Z",
+      "actor": "a996",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T01:56:45.850Z",
+      "actor": "a996",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built @reactjit/image, a Sharp-equivalent codec door, since the repo has no node/bun for runtime image work. New gated 'imageops' ingredient (auto-triggers -Dhas-imageops when a cart imports runtime/image.ts via the metafile gate). framework/image/codec.zig decodes (stb_image), resizes (newly-vendored stb_image_resize2), and encodes PNG/JPEG (stb_image_write) + WebP (libwebp dlopen'd lazily, sqlite3-style so PNG/JPEG carts never load it). The design keeps the heavy raw RGBA entirely inside Zig — carts pass compressed bytes or a base64 string in and get small compressed bytes back, which is the direct fix for the user's '30MB of b64' pain. JS API runtime/image.ts is chainable: image(input).resize(w,h,{fit}).webp({quality}).toBuffer()/.toFile(path)/.metadata()/.raw(). Wired build.zig + v8_ingredients.zig + dependency-registry.json (incl. libwebp dynamic-library entry) + ship.ts label. Verified via cart/image_demo.tsx with ./tools/rjit shot: ALL PASS — 1024KB raw RGBA -> 59.9KB PNG -> 1.7KB JPEG -> 0.6KB WebP, and toFile wrote a valid 128x128 JPEG to disk.",
+  "shas": [
+    "bb15e3558"
+  ],
+  "resolvedAt": "2026-06-16T01:56:45.850Z"
+}

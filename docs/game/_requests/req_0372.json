@@ -1,0 +1,28 @@
+{
+  "id": "req_0372",
+  "at": "2026-06-08T22:19:49.803Z",
+  "origin": "session:67746dc2",
+  "text": "haha dude..... imagine the surf map you could make at this scale holy shit",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T22:20:28.821Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T22:21:07.501Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User riffed on building a surf map at the --massive scale. Assessed feasibility against the codebase (no code change, analysis + offer): the bones already exist — ramps render via INSTANCE_SHAPE_RAMP (worldGeometry.ts pushRamp) and the no-V8 loader collides them as walkable-slope heightfields (registerRampHeightfield, RAMP_WALKABLE_SLOPE_COS), and spatial windowing already handles ramp heightfields, so a kilometers-long surf ribbon is just more static instances = effectively free to render at 240fps (a scale Source BSP surf maps physically cannot reach). What's missing is the surf MOVEMENT: framework/game/movement.zig only has integrateHorizontal (ground accel + friction). Surf needs (1) slide-along-plane on steep faces — project gravity down the ramp normal with near-zero friction instead of treating >~53deg as a wall, using the heightfield surface normal already available; and (2) Source-style air-strafe — capped air acceleration perpendicular to view while airborne, wired into game_physics.step when off-ground. Offered to build a surf movement mode + a procedural --surf ribbon generator (game play --surf), starting with the movement feel on a short test ramp then scaling to a ribbon. Awaiting the user's go-ahead.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T22:21:07.500Z"
+}

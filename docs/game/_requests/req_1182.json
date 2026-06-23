@@ -1,0 +1,29 @@
+{
+  "id": "req_1182",
+  "at": "2026-06-16T16:13:19.042Z",
+  "origin": "supervisor-relay",
+  "text": "oh also, can u give me a simple way to flip the face when creating one. seems to be im always picking the wrong edge first and then it makes it upside down just annoying",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-16T16:13:40.533Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T16:13:40.541Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a 'flip' face op to the Studio editor: Create Face winds the new face from edge-pick order, so picking the wrong edge first makes it inside-out/upside-down. New pure flipFace() reverses a face's loop and its per-corner UV in lockstep so the normal flips with the mapping intact; a face-mode 'flip' button reverses every selected face (works on any face, not just freshly-created ones). Verified by a headless test (negated normal, uv reversed in lockstep) in the 56/56 editMesh suite; full cart bundles clean. Committed cc4b0ca15.",
+  "shas": [
+    "cc4b0ca15"
+  ],
+  "resolvedAt": "2026-06-16T16:13:40.541Z"
+}

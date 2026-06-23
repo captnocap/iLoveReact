@@ -10,5 +10,9 @@
   "resolution": "Same landing as req_0010 (this prompt was the TWIGSTATE-0606 dispatch itself): deep workspace twigs for the workbench — frame source/row/lens twigs, store working-row twig with keepView restore, adapter-injectable twig deps, CAPTURE twigged-vs-transient table, 14/14 P4 green incl. the round-trip test.",
   "shas": [
     "8cc27ef6f"
+  ],
+  "tags": [
+    "ruling",
+    "ask"
   ]
 }

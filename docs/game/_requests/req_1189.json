@@ -1,0 +1,30 @@
+{
+  "id": "req_1189",
+  "at": "2026-06-16T21:24:07.214Z",
+  "origin": "session:8e058574",
+  "text": "can u uh add mirror placement for joints so i can place front tires and back tires on the same exact spot proportionally",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T21:24:44.600Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T21:28:32.659Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extended the multi-plane mirror to rig joints so a wheel/tire mount placed once gets its symmetric partners, instead of hand-placing each. New pure helpers in editMesh: mirrorMount() reflects a MountPoint's position AND spin axis across a set of planes and suffixes a unique name; addMountReflections() adds a named joint's reflections across every non-empty subset of the enabled planes (X = left/right, X+Z = front-right + rear-left + rear-right from one front-left placement) keeping names unique; updateMountMirrored() moves a joint to a new spot AND its position-matched mirror partners so adjusting one wheel keeps the set symmetric. Studio wiring: a '⇄ mirror joint' button appears in rig mode when a joint is selected and at least one mirror plane (the existing X/Y/Z chip cluster) is enabled — it reflects the selected joint into its partners; commitRig now routes joint drags through updateMountMirrored when planes are on. Verified: editMesh suite 62/62 (4-wheel placement + synced drag), full hmsc-int cart bundles clean. Committed 50cae452a.",
+  "shas": [
+    "50cae452a"
+  ],
+  "resolvedAt": "2026-06-16T21:28:32.659Z"
+}

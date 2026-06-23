@@ -1,0 +1,33 @@
+{
+  "id": "req_0607",
+  "at": "2026-06-11T05:14:12.757Z",
+  "origin": "session:e9bdce32",
+  "text": "why dont you just move it all to the gpu instead? i mean look at @cart/boxxx_demo.tsx for example",
+  "status": "review",
+  "sessionId": "e9bdce32-4d43-433c-9b7c-e64529ad18a7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T05:15:25.928Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T05:16:51.981Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified the user's GPU instinct against the engine and wrote §12.1 of the structure review (commit eaf1a0881), superseding §12's React-capture compositing plan. paintRectBatch (engine.zig:2420) already has a FLAT-SPEC path — boxes as pure 14-float data rows, no nodes, no layout, straight into the instanced SDF-rect pipeline (gpu/rects.zig) — and a DecalRectNode is exactly one such row; decal.ts is already data-only, so DecalDoc → instance rows is a direct serialization with no JSX walk. Revised merged-painter plan: mask layers stay on GPU paintables, node layers lower to instanced rows, z-order = draw order between two GPU pipelines; StaticSurface capture leaves the edit loop entirely (also removing the per-keystroke compose re-bake and the editor's dependency on the suspected /test-lag mechanism). Real dependency list: glyph-atlas emit (the already-named Boxxx next layer — building it unblocks Boxxx v2 for every cart), textured-quad instances for images, frozen shader fills baked once to content-addressed textures (V29), selection chrome stays React. Materialize = one GPU readback via the existing capture.zig.",
+  "shas": [
+    "eaf1a0881"
+  ],
+  "resolvedAt": "2026-06-11T05:16:51.981Z",
+  "tags": [
+    "ask"
+  ]
+}

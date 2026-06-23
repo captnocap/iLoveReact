@@ -1,0 +1,36 @@
+{
+  "id": "req_0807",
+  "at": "2026-06-13T18:44:43.421Z",
+  "origin": "session:5de2c418",
+  "text": "k i dont fall thru the map anymore. good. so two things one. i can not see wave action for shit when it is going in the ground which is sadge. and two this gap between the ground and the water is very weird [Image #4]",
+  "status": "review",
+  "sessionId": "5de2c418-75b9-4d35-8158-25b1c471529e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T18:45:28.829Z",
+      "actor": "session-5de2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:55:25.999Z",
+      "actor": "session-5de2",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-14T00:51:39.153Z",
+      "actor": "session-5de2",
+      "kind": "note",
+      "text": "REVERTED in 751626804 (see req_0810/req_0887) — fix over-corrected; restored original water look."
+    }
+  ],
+  "resolution": "Same task as req_0810 (this was the initial capture; req_0810 captured the user's clarification that the recessed water is expected and the real bug is an open-air WEDGE between water and the basin wall). Fixed in bb19793b0: floorToWaterBody now dilates the flat water surface 2 cells into the dry ring so the downward skirt tucks under the opaque terrain wall (waterline meets the wall, no air wedge), and the surface is forced flat. Also bumped WATER_WAVE (amp 0.1->0.25, len 5->4, speed 0.22->0.32) so ripples are visible in a recessed basin. Editor hot-reloads; compiled needs a game bake. 6/6 water tests pass. See req_0810 for full detail.",
+  "shas": [
+    "bb19793b0"
+  ],
+  "resolvedAt": "2026-06-13T18:55:25.999Z"
+}

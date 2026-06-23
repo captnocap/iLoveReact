@@ -1,0 +1,33 @@
+{
+  "id": "req_0491",
+  "at": "2026-06-10T10:33:19.172Z",
+  "origin": "session:15205e38",
+  "text": "The current category system that is doing letter based categories. that shit sucks. it is a bad habit carried on from a demo that lived outside of the internal editor. you should change it so that its not so silly",
+  "status": "review",
+  "sessionId": "15205e38-16b3-4754-8409-eab3e4f0eb2e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T10:35:43.444Z",
+      "actor": "session-1520",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T10:42:22.257Z",
+      "actor": "session-1520",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Killed the letter-based category system in the internal editor's texture catalog. The rail was grouping materials by the effect_fills demo's authoring batches — 'A · Environment', 'B · Condemned', … 'J · Wall Props' — letter-prefixed boards that were a habit carried in from that standalone eval cart; the batch letter tells a world-builder nothing about where a material belongs. Replaced it in cart/hmsc-int/game/textures/shaders.ts with a purpose-based taxonomy keyed by material slug (TEXTURE_CATEGORIES + CATEGORY_BY_SLUG): Ground & Roads, Walls & Masonry, Building Facades, Wall Props, Floors & Interiors, Surfaces & Glass, Cloth & Materials, Objects & Clutter, Stencils. fillSpec now sets group = textureCategory(slug); the ROAD and Cutout Stencil one-offs moved to Ground & Roads / Stencils; shaderGroups() sorts the rail by the declared category order. Crucially the material IDs are untouched (a-brick, i-brick-apartment, …) — letter/board still drive the stable id and the demo swatch layout, so stored materials and references keep resolving; only the visible grouping changed. effect_fills (the demo, which lives outside the editor) keeps its A–J letter boards since that cart IS a board-layout evaluator. Verified: shaders.ts transpiles; the workbench materials (6/6), buildings (22/22), and cutout (10/10) P4 suites all pass against the new catalog. Did not touch catalog.ts/chooser.ts (another session's in-flight untracked files).",
+  "shas": [
+    "40ec8692e"
+  ],
+  "resolvedAt": "2026-06-10T10:42:22.257Z",
+  "tags": [
+    "ux"
+  ]
+}

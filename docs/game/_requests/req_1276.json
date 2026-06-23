@@ -1,0 +1,30 @@
+{
+  "id": "req_1276",
+  "at": "2026-06-18T09:22:51.863Z",
+  "origin": "session:47c6ef45",
+  "text": "this works great. only problem and maybe its the model not the wireframe but its hard to tell which are on the face you are looking at vs the ones on the other side of the object",
+  "status": "review",
+  "sessionId": "47c6ef45-886b-4a68-a568-e624c3124d48",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T09:24:12.698Z",
+      "actor": "47c6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T09:27:44.088Z",
+      "actor": "47c6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a facing-based depth cue to the batched wireframe overlay. The 2D overlay has no depth test against the solid 3D mesh, so far-side edges drew at full strength on top of near ones — you couldn't tell the face you're looking at from the back of the object. Now every face is classified front- or back-facing (outward normal dotted against the eye vector); edges and verts that touch ANY camera-facing face draw bright, geometry only on far faces is ghosted (~0.17 alpha wire, faded dot rings) so the near side reads crisp and the far side recedes. Selected geometry always draws bright so the selection shows through. Pure TSX (meshSelect.tsx), hot-reloadable — no rebuild. Alpha values (frontWireColor e6, backWireColor 2b, back-dot 5e) are easy to tune if the contrast wants adjusting.",
+  "shas": [
+    "11e2d6b23"
+  ],
+  "resolvedAt": "2026-06-18T09:27:44.088Z"
+}

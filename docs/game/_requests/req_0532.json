@@ -1,0 +1,30 @@
+{
+  "id": "req_0532",
+  "at": "2026-06-10T13:32:57.251Z",
+  "origin": "session:87a47e7e",
+  "text": "so this might resolve with the micro grid of tiles, but the merge i think landed cleanly however i realize what the problem is. i should really click C and then if im going the direction of A click A after or B if that direction, that way the two lanes that are coming in turn the rest of that road into 3 lanes on that side",
+  "status": "review",
+  "sessionId": "87a47e7e-58c5-4ade-8b65-3201c99fe4d2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T13:34:43.456Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T13:36:51.664Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The merge gesture landed (commit 37c6a9244) — the user's described flow IS now the tool's behavior. Drawing a one-way ramp that ends [..., C, A] — C snapped onto a road's wire mid-span, A that road's endpoint — automatically: splits the road at C, widens the C→A half on the side the merging traffic flows (his case: northbound 1 + 2 incoming = 3, southbound untouched), and trims the ramp to end at C. The same gesture at the draft's HEAD reads as an exit ramp (widens the deceleration side before C). Two-way drafts and free-standing ends never trigger it (plain split/stamp behavior unchanged). applyMergeGesture is pure in roadData.ts; 19/19 planner cases green including a test that is literally his A/B/C screenshot scenario; cart bundles clean; TSX-only, hot-reloads. His note that the micro-grid may also bear on this is right for the LOOK of the merge mouth (taper) — that remains with the analytic-render slice; this commit delivers the data/gameplay side of the merge.",
+  "shas": [
+    "37c6a9244"
+  ],
+  "resolvedAt": "2026-06-10T13:36:51.664Z"
+}

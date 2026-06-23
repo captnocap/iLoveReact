@@ -1,0 +1,32 @@
+{
+  "id": "req_0486",
+  "at": "2026-06-10T09:24:34.296Z",
+  "origin": "session:e11a01ef",
+  "text": "hm. also, i click on a piece to skin it, and i click the skin/material, it doesnt apply it though",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-10T09:24:48.127Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T09:24:48.135Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clicking a swatch in the new FacePainter only ARMED the brush; applying required a second click on a face button — to a Sims-builder that reads as 'it doesnt apply'. Fixed in 24fd5a404: picking any swatch (color, material, recent, valid #rrggbb) now paints the WHOLE selection immediately (pieceSkinSet on every slot front/back/sides, one batch = one undo step, ids stay stable), and the face buttons N/E/S/W/Top/In refine a single side with the same brush afterward. Panel title now says so. Bundle clean; no game/ code changed.",
+  "shas": [
+    "24fd5a404"
+  ],
+  "resolvedAt": "2026-06-10T09:24:48.135Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1465",
+  "at": "2026-06-19T23:55:32.390Z",
+  "origin": "session:08e68a04",
+  "text": "ok i just painted some and they still are not showing up",
+  "status": "review",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T23:58:57.518Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T23:58:57.526Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "FIXED (c87a7a423). User painted palm tiles and saw nothing. Traced end-to-end: NOT a path bug — data correct (live session scan: palm tile index 26, 25 cells painted in the 3 active chunks; grass/bush populate through the identical floor→landform→eachPaintedCell walk). Root cause was sparsity: cellChance 0.06 (~1 palm/16 cells) over 25 cells expects ~1.5 and hits exactly 0 ~21% of the time — confirmed buildPalmInstances returned 0 on the real map. Raised to 0.22 → same patch now bakes 10 palms / 234 fronds (verified live), a visible grove, while big fields stay scattered. '3 vs 9 chunks' was the user toggling 6 off, not a bug. Action: recompile to see the grove.",
+  "shas": [
+    "c87a7a423"
+  ],
+  "resolvedAt": "2026-06-19T23:58:57.526Z"
+}

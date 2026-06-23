@@ -1,0 +1,33 @@
+{
+  "id": "req_0698",
+  "at": "2026-06-12T15:38:50.899Z",
+  "origin": "session:3db4e705",
+  "text": "hm. seems that my image cased all the skins to strip in the compiled path",
+  "status": "review",
+  "sessionId": "3db4e705-cae9-4e5f-8874-7aa6ce30faf5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T15:39:56.595Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T15:43:07.754Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused and fixed. The image didn't break the bake — it exposed a stale host binary. Chain: the user's rebuilt editor (req_0695 fix) now actually persists materials, so the localstore 'custom-textures' value grew to 69,223 bytes (stencils + the new image decal). But tools/v8cli — the TRACKED prebuilt host that 'rjit game bake' spawns — was still the Jun 9 build with the old fixed 64KB localstore read buffer, so its read of the >64KB value returned EMPTY: zero custom materials reached the bake ([materials] 8 baked, 0 decal recipes) and every custom-skinned face shipped flat. Adding the image is exactly what pushed the list over 64KB, hence 'my image caused all the skins to strip'. Fix: rebuilt v8cli from the fixed framework (alloc-based reads, no read cap) and refreshed the tracked tools/v8cli copy (mv-over; the old one was mid-execution). Re-ran the bake: [materials] now bakes 11 (9 shader, 1 translucent, 1 decal) and the decal image asset ships content-addressed (key 3001, 51,809 bytes from the user's Desktop jpg). zig-out/game/hmsc.gamefile is freshly baked with everything in — the next Compile/world entry shows the skins and the image.",
+  "shas": [
+    "3292d42bc"
+  ],
+  "resolvedAt": "2026-06-12T15:43:07.754Z",
+  "tags": [
+    "bug"
+  ]
+}

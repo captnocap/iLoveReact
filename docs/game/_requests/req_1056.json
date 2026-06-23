@@ -1,0 +1,28 @@
+{
+  "id": "req_1056",
+  "at": "2026-06-15T19:45:26.409Z",
+  "origin": "session:00a3ce8a",
+  "text": "Nice. now the next thing is i need you to survey all of the various authoring types we have used, and locate all the shapes we can add to our add just beyond a cube. also, for things like cylinder, the blockbench approach is perfect cylinder for example has diameter and height all the same, but then has sides. with a minimum of 3 and max of 48. this is exactly how our cylinder should work also",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T19:45:58.820Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T19:54:50.340Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Shapes beyond the cube + Blockbench cylinder (req_1056). SURVEY: the only topological (editable) shape builders were cuboid + cylinder; the @reactjit/geometries registry has more (Sphere/Cone/Torus/Plane/Globe/Head/Heightfield/Humanoid/Carve/VoxelMesh) but those are render-only triangle soups that can't be loop-cut/extruded/rigged, so each Studio shape needs its own EditMesh builder. Added builders (all centered, all unwrapped at mint via fullFaceUV): cylinder reworked to Blockbench's knobs — diameter + height + a strict 'sides' count 3..48 (clampSides / SHAPE_SIDES_MIN/MAX); cone (n-side base ring tapering to one apex — the cylinder with its top ring collapsed); pyramid (axis-aligned square base to an apex — the cuboid with its 4 top verts collapsed, so it inherits the proven outward winding); plane (a single +Y quad). The Add Cube dialog became AddShapeDialog: a shape picker (Cube/Cylinder/Cone/Pyramid/Plane) with per-shape params (diameter always, height except plane, sides 3..48 for cylinder/cone) that builds the EditMesh and addParts it. editMesh 45/45 (+3 shape tests), modelStream 7/7, Studio + full workbench source chain bundle clean; hot-reload TSX, uncommitted. Surveyed follow-up shapes (heavier ring topology): sphere, torus, circle. PLAYBOOK Part 6 build log + memory updated.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T19:54:50.340Z"
+}

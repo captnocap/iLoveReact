@@ -1,0 +1,28 @@
+{
+  "id": "req_1004",
+  "at": "2026-06-15T15:04:10.307Z",
+  "origin": "session:8c2aee6a",
+  "text": "Well so before you go too far lets get down to the key details here. look how i have this one face clicked, and i see the whole uv outlined from the one face [Image #87] ok so im going to click a new face, and look. the uv is the same outlined shape. doesnt care what face im clicking on from the base cube. its all the same thing. [Image #88] \n\nyou might be asking yourself well thats dumb how do they paint each face then? well the difference is that i click on texture create and when i do that this is what happens in blockbench [Image #89] \n\nyou are confusing two different steps here, the uv mesh is not the same as the texture mesh that comes from it",
+  "status": "review",
+  "sessionId": "8c2aee6a-d17a-4edb-bc4f-f7a458ee4293",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T15:06:49.905Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T15:15:50.301Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The UV-layout slice, with a key conceptual correction from the user: the UV MESH is NOT the texture. (1) The UV mesh (the mapping the UV editor shows): a base cube maps EVERY face to the FULL unit square — clicking any face shows the whole 16x16 outline because every face samples the entire texture. New fullFaceUV(m) in editMesh.ts (each face's own projection normalized to fill [0,1]^2) is now the default; cuboid()/cylinder() call it. (2) The texture (the box-net colored regions, Blockbench image 89): a downstream artifact created by 'create texture' that packs faces into atlas regions AND remaps their UVs — that is unwrap() (the box-net packer, kept) and is Phase 5c, not the default. So req_1002 (box-net) and req_1003 (fill the square) were both this confusion and now belong to 5c; the panel's button became 'Reset UV' (fullFaceUV) instead of Unwrap. editMesh 25/25 (the fresh-cuboid test now asserts every face fills the full unit square; the box-net contiguity test now calls unwrap() explicitly). Hot-reload TSX, nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T15:15:50.301Z"
+}

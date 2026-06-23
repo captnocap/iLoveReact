@@ -1,0 +1,18 @@
+{
+  "id": "req_0805",
+  "at": "2026-06-13T18:36:37.722Z",
+  "origin": "session:6e5908e6",
+  "text": "Right. The reason we are here is because of this: [Image #18] the compiled game has the tiles (road) look like the blurry shitty road and then the floor piece i have here next to it has the high detail shader. we want the high detail shaders, across the entire ground otherwise im going to paint the entire ground in floors and then we ha ve to move pathing onto floors",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T18:37:48.080Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

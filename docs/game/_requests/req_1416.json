@@ -1,0 +1,30 @@
+{
+  "id": "req_1416",
+  "at": "2026-06-19T16:21:04.263Z",
+  "origin": "session:d6961119",
+  "text": "Lol -_-   Getting requirements to build wheel ... error\n  error: subprocess-exited-with-error\n  \n  × Getting requirements to build wheel did not run successfully.\n  │ exit code: 1\n  ╰─> [10 lines of output]\n      \n      \n      **********************************************************************\n      ERROR! Cannot compile nvdiffrast CUDA extension. Please ensure that:\n      \n      1. You have PyTorch installed\n      2. You run 'pip install' with --no-build-isolation flag\n      **********************************************************************\n      \n      \n      [end of output]\n  \n  note: This error originates from a subprocess, and is likely not a problem with pip.\nERROR: Failed to build 'git+https://github.com/NVlabs/nvdiffrast' when getting requirements to build wheel\nsiah@busiah ~/creative/reactjit $ ",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T16:21:58.633Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T16:21:58.644Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "InstantMesh setup hit nvdiffrast build error ('Cannot compile nvdiffrast CUDA extension ... run pip install with --no-build-isolation'). Cause: nvdiffrast's build imports torch but pip build-isolation hides it. Steps 1-4 of the script (clone, conda py3.10 env, torch cu124, deps) succeeded; only the nvdiffrast step failed. Gave the user the immediate one-liner (conda activate instantmesh && pip install --no-build-isolation git+.../nvdiffrast) and fixed setup-instantmesh.sh to add --no-build-isolation. Committed.",
+  "shas": [
+    "1255b4379"
+  ],
+  "resolvedAt": "2026-06-19T16:21:58.643Z"
+}

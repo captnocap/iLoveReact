@@ -1,0 +1,30 @@
+{
+  "id": "req_0797",
+  "at": "2026-06-13T18:03:49.848Z",
+  "origin": "session:bdc416fa",
+  "text": "huh. i dont see it at all to be honest with u i am using the water paint tool and it is not painting anything on either 2d or 3d",
+  "status": "review",
+  "sessionId": "bdc416fa-53b7-49b1-98a1-706f4ff29a15",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T18:10:49.707Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:10:49.715Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The water brush WAS painting into the chunk water grid, but the 2D painter view had no water channel, so brushing looked like nothing happened (and that was the surface the user judged by). Added a water section to encodePainterSurface (encodeField(chunk.water), same layout as height) and a clear-blue tint in painterView.wgsl wherever a sample is wet (level > 0), shown always (a body of water, not a tint channel). A water stroke now shows blue on the 2D map immediately via the existing touchChunk re-encode, matching the 3D preview. If 3D still shows nothing after this confirms the brush works, that is the next thing to chase.",
+  "shas": [
+    "9bdd5b625"
+  ],
+  "resolvedAt": "2026-06-13T18:10:49.715Z"
+}

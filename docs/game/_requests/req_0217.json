@@ -1,0 +1,12 @@
+{
+  "id": "req_0217",
+  "at": "2026-06-07T09:58:26.043Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: your Globe bake ceiling proposal is on the user's desk — the ruling gates the sculpt-representation work only. Your queue is NOT blocked. Work it in order while the ruling is pending:\n\n(1) LAYER STATE BUG — clicking up/down on a painted layer still duplicates/multiplies it. The user's diagnosis: \"state update problem... as always\". No theory crafting: print the setter call sequence, read the prints, fix with an idempotent functional update. Also check whether a third strip copy renders in the sculpt paint lens.\n\n(2) SLIDERKIT — the homegrown JS slider in sculpt paint tools dies; use THE kit slider.\n\n(3) PATHFIELD — delete the legacy path-to-image text input; picker + drop only.\n\n(4) IMGLAYER — an opened image becomes a REAL paint layer: persists, paint-over works.\n\n(5) SCULPTPICK — clicking a 3D node lights up the matching grid cell, shared kit, both directions.\n\nStop at each boundary, post evidence (prints for #1, before/after for the rest), verify green. No commits without my word. Do the work yourself — no subagents.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

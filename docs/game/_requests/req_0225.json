@@ -1,0 +1,13 @@
+{
+  "id": "req_0225",
+  "at": "2026-06-07T10:14:34.724Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: USER FAIL on the requests panel detail view, verbatim: \"i still cant read anything here\" / \"this is me 'expanding' it -_-\" — screenshot at /home/siah/.claude/image-cache/65a3b158-192d-4949-99b0-83b2b071ce2a/3.png. What it shows: the dispatches view (136) with every row still a single ellipsis-truncated line, and the EXPANDED detail panel (left) rendering ONLY metadata — id, asked, origin, status, a mark-resolved button — with NO ask text body at all. The fix bar: selecting/expanding an entry must show the FULL text, wrapped and scrollable — that is the entire point of the surface. Row truncation in the list is fine; the detail view truncating is not. Also visible: the detail still says 'mark resolved' — that's the dead two-state vocabulary; the detail's actions must be the board moves (and review→done stays user-gated). The left-rail filters (unresolved/resolved/all asks/dispatches) are good — keep them.",
+  "status": "new",
+  "sessionId": "09015194-0a9b-4ae6-acf8-d964ee783d82",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

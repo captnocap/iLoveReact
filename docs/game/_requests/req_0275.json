@@ -1,0 +1,13 @@
+{
+  "id": "req_0275",
+  "at": "2026-06-08T04:57:50.679Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: RAMPCHAIN-0608 — USER, build placement adjacency gap, verbatim: \"as it stands, you cant do this: ramp -> ramp / ramp -> floor. you can do tho wall -> ramp -> floor. but you should be able to do the first two also. and note its not like im saying 2 ramps next to each other. im saying running up the ramp, and then placing another ramp at the top of it to keep going up. or a floor.\" DIAGNOSIS: the placement/snap grammar does not expose a ramp's TOP (high) edge as an attach anchor. You can attach a ramp to a wall below it (wall->ramp->floor works), but from the top of a ramp you cannot continue with another ramp (keep ascending) or a floor (land flat at the new height). Add the ramp's top edge as a valid snap SOURCE for both ramp (continue up at the elevated height) and floor (cap it flat). This is NOT side-by-side ramps — it is vertical chaining off the high end: the next piece starts at the ramp top's elevation. Print the ramp's registered snap anchors vs what wall/floor expose, find why the top edge is absent, add it. Frame-time gate applies if collision registration changes. Queue this with the building-bug cluster you are on (it is the same placement/build domain) — do not drop the cluster diagnosis.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

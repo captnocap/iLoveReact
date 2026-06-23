@@ -1,0 +1,30 @@
+{
+  "id": "req_1248",
+  "at": "2026-06-17T14:57:52.050Z",
+  "origin": "session:76a33154",
+  "text": "why is the triangle moving around make it stay steady but this is effectively correct so do u understand how this is fundamentally transferable to 3d or no because the current in place approach is far from a mask",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T14:58:02.796Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T14:59:23.391Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Held the triangle steady per user: removed the U.time rotation (let pr = rot(p, U.time*0.3) -> sdTriangle(p, ...)), deleted the now-dead rot() WGSL helper, and dropped the setInterval/useState tick loop since nothing animates — the mask is a steady analytic function of uv. Rebuilt + self-shot (PASS, /tmp/trimask2.png): upright centered triangle with the grid clipped cleanly to its three edges, empty surface everywhere else.",
+  "shas": [
+    "7a0851cb1"
+  ],
+  "resolvedAt": "2026-06-17T14:59:23.391Z"
+}

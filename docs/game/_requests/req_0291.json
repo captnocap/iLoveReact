@@ -1,0 +1,13 @@
+{
+  "id": "req_0291",
+  "at": "2026-06-08T06:33:27.838Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: MAPBUILD-0608 — the map editor (2D, not-playing) ALREADY HAS a place mode. Buildings simply are not in it. Make them exist there. NO new layer/subsystem — extend the EXISTING place mode to include buildings exactly like the things it already places. Concretely: in the existing map-editor place mode, the user must be able to (1) SEE placed buildings on the 2D map (their footprints/markers), (2) PLACE a building prefab from the building roster onto the map, (3) DELETE a placed building from the map. CRITICAL — ONE PLACEMENT SOURCE OF TRUTH: buildings placed in the 3D test mode already work and live in the placement stream; the map editor must read/write that SAME stream, so a building placed in test mode shows on the map, and one placed/deleted on the map shows in the game. No separate building list for the editor. Old buildings are GONE — this is only the user-authored prefab buildings, no migration. Find how the existing place mode renders+places its current items, add buildings to that same path. Verify green, selfshot the map editor showing a placed building footprint + the place/delete affordance. Do it yourself, no subagents. Report when ready for the user to test (place a prefab in the map editor, see it, delete it).",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

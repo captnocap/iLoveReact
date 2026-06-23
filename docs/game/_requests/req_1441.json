@@ -1,0 +1,30 @@
+{
+  "id": "req_1441",
+  "at": "2026-06-19T22:10:28.920Z",
+  "origin": "session:671785ab",
+  "text": "Nevermind. I was wrong. This is still broken. Lets look. \n\nHere is my PoV before an update: [Image #10] \n\nand after: [Image #12]\n\nsame camera angle, same distance. image is completely offset\n\ndont look at my box t hat is unrelated, i was just moving it around the problem is the iamge",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T22:24:14.882Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T22:24:14.891Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Folded into req_1444: the 'image offset after update' was a stale host-side backdrop bake (geometry/texture cached under the stable bd.id surviving the hot reload), NOT the camera (which the user proved identical via the fixed crosshair/box/grid). Resolved by force-remounting the backdrop with a per-mount epoch busting the geometry id + textureKey + staticKey. See e9a69e9de.",
+  "shas": [
+    "e9a69e9de"
+  ],
+  "resolvedAt": "2026-06-19T22:24:14.890Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0492",
+  "at": "2026-06-10T10:34:52.949Z",
+  "origin": "session:e11a01ef",
+  "text": "hm. still not getting the full story here for the time it actually takes [js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=49.90\n[js.warn] [mapgone] PaintCanvas mount: seed=initialWorld chunks=33 focus=33 focusedChunks=33 layer=height\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=47.92\n[js.warn] [PLACEFREEZE] session.commitMany route=/ channel=world count=358 mode=defer totalMs=895.33\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=44.63\n[js.warn] [PLACEFREEZE] session.commitMany route=/ channel=world count=358 mode=defer totalMs=910.33\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=45.31\n",
+  "status": "review",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T10:35:33.814Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T10:39:41.936Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Found why the batch fix didn't dent the 900ms: transactions were never the dominant cost. Seq allocation reads MAX(seq) on EVERY append and the events table had NO index on seq — a full table scan per append. Measured on the user's live DBs: world log = 27,508 rows, sessions log = 33,832 rows; a 358-event move does 716 appends = 716 scans of ~30k rows each, which IS the ~900ms. Fix (595e3a9ce): CREATE INDEX events_seq — the MAX read measured sub-millisecond on the live world DB afterward. Also delivered the full story the user asked for: commitMany's [PLACEFREEZE] line now prints channelMs/markerMs plus a per-append breakdown (seqMs/jsonMs/insertMs/foldMs via the data layer's new appendProbe), so any future stall names its component instead of one opaque totalMs. game verify GREEN 72/72. Next move of that building should print a commitMany line in the tens of ms with the breakdown visible — if foldMs dominates what's left, the per-event O(N) pieces-array fold is the next target.",
+  "shas": [
+    "595e3a9ce"
+  ],
+  "resolvedAt": "2026-06-10T10:39:41.936Z",
+  "tags": [
+    "perf-log"
+  ]
+}

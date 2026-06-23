@@ -1,0 +1,28 @@
+{
+  "id": "req_0958",
+  "at": "2026-06-15T09:28:56.322Z",
+  "origin": "session:832d7b44",
+  "text": "Nice, do blockbench like defaults and tune control",
+  "status": "review",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T09:29:44.492Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T09:37:55.676Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the Studio viewport (editors/model/Studio.tsx — StudioViewport/StudioRoute) with Blockbench-like defaults and tuning control, wired as a STUDIO workbench tab (editors/workbench/model/source.tsx + one line in sources.ts). It renders the cuboid EditMesh via Scene3D's dynamic-geometry path (live verts, no rebuild) on a 1m ground grid + origin axes, with the HOST-OWNED orbit camera driven through GAME_NATIVE_CAMERA.forNode (setOrbit/setInputDeltas — framework/game/camera.zig's orbit Controller, the same host camera the compiled no-JS path uses), Blockbench-ish 3/4 boot framing, an fov knob + reframe, and a registered STUDIO P2 tunables table at /model (grid extent, boot yaw/pitch, fov, orbit sensitivity, fit distance) for live tuning. Verified by bundling: editMesh 9/9 headless, Studio.tsx and the full workbench sources.ts chain bundle clean. Solid mode only; hot-reloadable with no framework rebuild. Wireframe + the editing gutters (outliner/add-mesh/transform/selection/gizmo) are the next increments. Pending the user's eyeball on camera feel + grid scale to tune.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T09:37:55.675Z"
+}

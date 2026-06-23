@@ -1,0 +1,28 @@
+{
+  "id": "req_0929",
+  "at": "2026-06-14T16:54:25.195Z",
+  "origin": "session:2b1b8d6b",
+  "text": "Its not around anymore. Im saying it did work. Its not in git history either so you wont find it but yeah. also, i would suggest you get a host based system in there since we will 100% have to go that route anyways",
+  "status": "review",
+  "sessionId": "2b1b8d6b-2adf-4239-aed8-88f228d4f8a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T17:08:42.575Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T17:08:42.600Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the host-based aim system the user asked for (we will need it game-wide anyway). New host binding __game_camera_ray (framework/v8_bindings_game_camera.zig) backed by camera.zig activeCameraRay(), which returns the ACTIVE camera's resolved optical axis (pos -> normalized target-pos) from the controller's smoothed current Solved — the crosshair truth only the host has. Exposed as GAME_NATIVE_CAMERA.activeRay() in nativeCamera.ts. combat-arena's player fire now casts that exact ray (fixes diagonal bullets), falling back to GAME_CAMERA.orientation when the binding is absent so it works before the rebuild. Also: NPCs render as hitboxes (head fix), crosshair centered, crash-proof onFrame. zig ast-check clean on both Zig files; esbuild bundle clean. NEEDS A ZIG REBUILD for the host ray path (JS changes hot-reload now).",
+  "shas": [],
+  "resolvedAt": "2026-06-14T17:08:42.600Z"
+}

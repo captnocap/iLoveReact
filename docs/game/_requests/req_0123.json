@@ -1,0 +1,17 @@
+{
+  "id": "req_0123",
+  "at": "2026-06-06T13:50:35.978Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — UIFLAP IS NAMED. The user ran gv_churntrace 1 and every spike shows the same commit, repeating every beat: update NavBtn x15 Pressable detail=hoverStyle; update GraphBase x12 Graph.Polyline + 1 Polygon detail=points; update WindowControls x3 Pressable detail=hoverStyle; update Chrome x4 Pressable detail=hoverStyle (texts untitled-7 / New map / Compile / saved). 37 nodes, glyphs=0, pure prop-identity churn — while atlas_glyph_count climbs +50ish per beat and glyph_count flips 975<->929, i.e. the chrome bar StaticSurface capture invalidates and re-bakes its ~46-50 glyphs every beat. Diagnosis: a ~0.4s ticker (the titlebar GraphBase sparkline updating its points is the likely driver) re-renders the whole top chrome; every Pressable gets a NEW inline hoverStyle object identity and every polyline a NEW points array, flipping the frame hash and re-baking the chrome text. FIX, in order: 1. Find the ticker feeding GraphBase points (the titlebar graph) — file:line. 2. Stable identities: hoist/memoize hoverStyle objects on NavBtn/Chrome/WindowControls so an unrelated re-render does not change their props; memoize the graph subtree so its tick cannot re-render siblings. 3. Polylines whose points did not actually change keep their array identity; the graph updates only what moved. 4. The chrome StaticSurface must not re-bake when only the sparkline ticked. Done-bar: gv_churntrace shows the heartbeat commit reduced to ONLY the graph nodes that genuinely changed; spikewatch silent for 60s of idle; verify green. The user has the trace running and will confirm live. DO NOT COMMIT.",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:12:34.095Z",
+  "resolution": "Resolved in b91a941962eeb56e3cbc631f1ac39f2ce59f10d7. Stabilized the prop-identity churn path that gv_churntrace named: style-object props are diffed structurally instead of by identity, classifier token styles are memoized, graph/text traces are stabilized, and chrome/property StaticSurface recapture evidence is available on host spikes.",
+  "shas": [
+    "b91a941962eeb56e3cbc631f1ac39f2ce59f10d7"
+  ],
+  "tags": [
+    "perf-log"
+  ]
+}

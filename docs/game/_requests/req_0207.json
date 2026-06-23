@@ -1,0 +1,17 @@
+{
+  "id": "req_0207",
+  "at": "2026-06-07T06:56:48.980Z",
+  "origin": "session:f2302907",
+  "text": "write about it in the decisions file since codex is not available to just your memory, and also make sure if you have any questions you ask me them",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T07:08:00.466Z",
+  "resolution": "Wrote the full design session into the constitution as three verdicts: V28 PLATMOD-0607 (Roblox/GMod-tier platform/mod split — hmsc is the first mod, games are script+data packages on one player binary, V15 amended so the canonical compile output is the game package), V29 MAPFORMAT-0607 (bake-by-execution into content-addressed installable assets, mapfile as BSP-style lump bundle of binary row-RLE reference grids, Apriori mining from v1, no runtime dynamic shapes), V30 FREEZE-0607 (one citywide map + Vice City-style interior maps via changelevel markers, persistence by derivation per the rain example, frozen world with activation = engaged∪zone∪tile-distance∪VIS, residency ladder). Per the user's instruction I asked four open questions first (map granularity, compile output shape, changelevel persistence, mining scope) and folded the answers in verbatim. Updated docs/game/_index/decisions.ts in the same commit per the maintenance contract and verified the oracle ranks the new rulings; memory files repointed at the verdicts.",
+  "shas": [
+    "017a8ddc7"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

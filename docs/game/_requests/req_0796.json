@@ -1,0 +1,18 @@
+{
+  "id": "req_0796",
+  "at": "2026-06-13T17:57:03.867Z",
+  "origin": "session:ef4fbf70",
+  "text": "i want it to be so that they are single file. think of it like self contained assets. at compile time, you find all the assets used and then pull in their shapes, mine them down  and store  then the positional and size data for example",
+  "status": "doing",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T17:59:34.817Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

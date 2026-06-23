@@ -1,0 +1,31 @@
+{
+  "id": "req_0406",
+  "at": "2026-06-09T06:46:26.140Z",
+  "origin": "codex:019eab0d",
+  "text": "ok in the game they are only showing on t he one face buit in the editor its on hte many faces",
+  "status": "review",
+  "sessionId": "019eab0d-d55e-7810-97e2-0dfa7c7254f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T06:46:32.872Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T06:51:14.849Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the game-side face-skin collapse: live /test piece meshes now render floor/roof skins as edge core + top/bottom slabs instead of one front-skinned body, and the compiled no-V8 instance bake emits wall/plate core + face slabs so front/back/sides or top/bottom/edges survive into the loader. Added compile/worldGeometry coverage for skinned walls and floors. Verified wb_buildings 21/21, compile/world-geometry 2/2, and hmsc-int bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T06:51:14.849Z",
+  "tags": [
+    "bug"
+  ]
+}

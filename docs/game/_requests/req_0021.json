@@ -1,0 +1,12 @@
+{
+  "id": "req_0021",
+  "at": "2026-06-06T05:29:22.219Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — resume AGNOSTICPAINT-0606 (the stop was about desktop screenshots, now a standing ban): NO desktop/X11 capture, NO import -window, no reading the user's system — a SELFSHOT capability (app captures its own frame headless) is being built in another lane; until it lands, verify via tests/logs/code and mark visual rows pending-selfshot. Continue your remaining rungs: the PAINT source + ledger updates + req resolutions (req_0013, req_0018 layerflip). Context note: you are at 76% — if the remaining work will not fit comfortably, STOP at the next coherent commit and write a handoff summary instead of compressing quality; the supervisor will carry the remainder to a fresh lane.",
+  "status": "new",
+  "sessionId": "749ea40a-8b61-47c3-8d6c-5bde9e2a5c99",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

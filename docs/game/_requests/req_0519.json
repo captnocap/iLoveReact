@@ -1,0 +1,31 @@
+{
+  "id": "req_0519",
+  "at": "2026-06-10T12:34:30.799Z",
+  "origin": "session:87a47e7e",
+  "text": "Yeah, so that is the last part of it i guess to ask is a ramp does pretty much a strict 45 angle so how would we do a bridge then since a heightfield can smooth its incline with distance but it lifts the ground under it unlike a ramp does",
+  "status": "review",
+  "sessionId": "87a47e7e-58c5-4ade-8b65-3201c99fe4d2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T12:34:54.552Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T12:35:28.022Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the bridge-approach question (no code changed): the premise that a heightfield lifts the ground under it is false — heightfield colliders are floating surface skins, not filled volumes; physics.zig explicitly anticipates garages/ramps/overpasses as heightfield floors ON TOP of terrain, the current_y+step gating makes the space under any heightfield traversable, and the parking garage already uses a rotated floating heightfield as its drivable ramp. Bridge approaches therefore = thin floating heightfield strips the road stroke generates, climbing from ground to deck height at a road grade (~10-15 percent, approach run visualized in the tool), open underneath, with a matching rendered slab and lane kinds on its 1m surface cells. The 45-degree catalog ramp stays buildings-only. This closes the last gap: all four road bases (trail/tunnel/subway/bridge incl. getting onto it) compile from one stroke painter out of three surface primitives (painted ground, lifted 3x3 floors, floating heightfield strips) + the terrain hole mask.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T12:35:28.022Z",
+  "tags": [
+    "ask"
+  ]
+}

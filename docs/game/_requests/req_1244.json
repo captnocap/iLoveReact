@@ -1,0 +1,30 @@
+{
+  "id": "req_1244",
+  "at": "2026-06-17T14:39:22.028Z",
+  "origin": "session:c885b7cc",
+  "text": "also. uh if u see i put joints for like the seats, but that might not be the best idea since joints are for rotation with pivots, so maybe also with this either extend joints to allow for 0 rotation or make a different rig marker when ur making this one",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T14:56:36.156Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T15:06:22.441Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the dedicated ANCHOR rig marker for seats/fixed mounts (user picked the dedicated-marker option over a 0-travel joint flag). Rationale: a seat doesn't rotate — it's a fixed placement a runtime occupant attaches to, facing a direction — so overloading joints (axis + travel) is wrong UX. Design insight: an anchor IS a MountPoint (kind:'anchor'), so it reuses the entire existing mount machinery (store round-trip, drag, pick, rename, remove, even mirror) — only rendering + the panel row branch. Honored the 'extend' directive by putting all anchor logic in a NEW pure module (anchors.ts) instead of growing the Studio.tsx god file. Changes: editMesh.ts extends MountPoint.kind with 'anchor' + adds role + ANCHOR_ROLES (driver/passenger/cargo/mount); anchors.ts (new) = addAnchor/splitMounts/isAnchor/anchorFacing/anchorRole/nextAnchorName/ANCHOR_FACINGS; meshRig.tsx draws anchors as a teal SQUARE + facing arrow + role tag (vs joint ring + travel); RigMetaPanel.tsx splits joints vs anchors into separate sections with an AnchorRow (role buttons + 6-way facing picker, no spin/travel) and a '+ anchor' button; Studio.tsx adds a '+ seat' toolbar button and makes the rig selection status anchor-aware. Verified: anchors.test.ts 5/5 pass (construction defaults, explicit facing/role, splitMounts partition+order, name uniqueness across the joint+anchor namespace, kind-agnostic mutator reuse) via tools/esbuild+v8cli; all three TSX files transpile clean. Hot-reloads in the dev host; not yet visually confirmed by the user. Commit 25db9b03b. Runtime/compile consumption of anchors (driver seat grants control, etc.) is a deliberate follow-up (author-first, like the storyline board).",
+  "shas": [
+    "25db9b03b"
+  ],
+  "resolvedAt": "2026-06-17T15:06:22.441Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1391",
+  "at": "2026-06-19T07:20:50.729Z",
+  "origin": "session:1863e7ee",
+  "text": "ya you can use agents also only as long as you give them the exact steps rather than leaving anything up for interpretation, otherwise dont use them if you arnt going to be exact  but go for it",
+  "status": "review",
+  "sessionId": "1863e7ee-a8ed-4cf3-85a6-49a899536c18",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T07:22:33.766Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T08:12:24.833Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Used a fork for the dialog-tier carve with a fully-exact, build-gated spec per your rule. It no-op'd (0 tool uses, no commit) — caught by verifying git log rather than trusting its 'completed' status (the exact agent-unreliability the repo warns of), then did the carve myself reliably. Conclusion recorded: the remaining work (hooks/UI) is interpretive and can't be specified exactly enough to delegate, so it stays with me.",
+  "shas": [
+    "14254e9ed"
+  ],
+  "resolvedAt": "2026-06-19T08:12:24.832Z"
+}

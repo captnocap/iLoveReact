@@ -1,0 +1,28 @@
+{
+  "id": "req_1535",
+  "at": "2026-06-20T22:34:55.413Z",
+  "origin": "codex:019ee6ab",
+  "text": "and am i suppose to be able to stack grass layers? i assume not, but just want o verify",
+  "status": "review",
+  "sessionId": "019ee6ab-af32-7462-bc98-fece61170df4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T22:35:04.490Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:35:04.498Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified the flora layer model for the user: cells can stack different flora lanes such as grass plus trees plus bushes, but grass variants are mutually exclusive within the grass lane. Painting another grass density replaces the prior grass density in that same cell, which is intentional for now.",
+  "shas": [],
+  "resolvedAt": "2026-06-20T22:35:04.498Z"
+}

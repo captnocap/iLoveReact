@@ -1,0 +1,12 @@
+{
+  "id": "req_0041",
+  "at": "2026-06-06T06:12:29.411Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — clothing and animation decouple from the mesh editor. Marker: CLOTHSPLIT-0606, ledger req_0040.\n\nUSER RULING, verbatim: \"have someone move clothing into its own thing that is decoupled from the body. i dont like it / find it useful to go to the body editor and then have to turn off the clothing that is in place just to edit the mesh, and clothing should effectively be a prop that is seperate but tightly related, not entirely coupled. same with animation. the fact that when im on the mesh editor and i have animation commands to see is a problem.\"\n\nTwo concerns, two phases:\n\nPHASE 1 (yours now, figure-kit data): CLOTHING AS ATTACHMENTS — restructure the figure kit so clothing is a prop-like attachment family: separate documents/data attached TO a body (tightly related — follows rig, anchors to parts incl. your new pelvis) but not interleaved IN the body's mesh/draft editing model. Read game/figure/clothing.ts + body/draft coupling first; V20-additive (old .body docs with embedded clothing keep loading via a deterministic mapping); the attachment family mirrors how props attach (V2 anchors). Surface in CAPTURE anything constitution-grade. P4: attach/detach round-trip, old-doc compat, rig-follow equality with today.\n\nPHASE 2 (GATED — do not start until the supervisor says GO; another lane has in-flight commits on the workbench source files): EDITOR SEPARATION — the mesh/sculpt editing context shows MESH THINGS ONLY (no clothing toggles, no animation commands); CLOTHING becomes its own editing context (its own panel group-set/lens or source — propose the shape in CAPTURE from the attachment model, simplest honest fit); ANIMATION likewise its own context (rig/posing view — where animation commands belong). Same capabilities, relocated; the parity discipline applies (nothing the old layout could do disappears — every control has a named new home).\n\nNo desktop capture; explicit paths; docs+_index; verify green; resolve req_0040 phase-wise. Report when phase 1 lands and you are holding for the phase-2 GO.",
+  "status": "new",
+  "sessionId": "f707bd9b-5c91-4673-b562-95ffb9a8d155",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

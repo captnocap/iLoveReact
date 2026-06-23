@@ -1,0 +1,33 @@
+{
+  "id": "req_0738",
+  "at": "2026-06-13T07:55:18.156Z",
+  "origin": "session:b2985164",
+  "text": "also; i can walk thru every single wall now",
+  "status": "review",
+  "sessionId": "b2985164-7aad-4573-accc-12a386983e72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T08:26:08.192Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T08:26:08.253Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Part of the walk-through-walls investigation resolved by 8f5b03607 (guard the slope side-push skip in framework/game/physics.zig). Earlier steps in the same hunt ruled out the buffer/cap-truncation theory (Embodied.tsx prop-vs-wall ordering, left as a correct-on-its-own improvement) and the player-capsule-radius theory (radius is a normal 0.34m). The actual cause was the unguarded slope_walkable skip dropping tall finite-floor walls' side-push on painted heightfield terrain. Verified by the user. NOTE: barrels not colliding in the COMPILED build remains separately open (a dynamic-prop bake gap).",
+  "shas": [
+    "8f5b03607"
+  ],
+  "resolvedAt": "2026-06-13T08:26:08.252Z",
+  "tags": [
+    "bug"
+  ]
+}

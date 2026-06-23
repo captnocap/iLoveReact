@@ -1,0 +1,32 @@
+{
+  "id": "req_0441",
+  "at": "2026-06-10T04:19:09.676Z",
+  "origin": "session:0ce255e1",
+  "text": "also camera dragging is cooked. if u spin around in a 360 it chokes bad",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-10T04:19:23.030Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T04:19:23.039Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Spinning the iso view 360 with drag-rotate choked. A drag-rotate issues a redraw per mouse-move, and the static scene content (WorldStatics terrain/landforms/props plus the texture-capture mounts) was rendered inline with no memoization, so every redraw re-ran and re-reconciled the entire world tree dozens of times a second. Hoisted that static content into useMemo keyed on the world/skin inputs so a camera-only redraw skips it entirely — only the camera, grid, pieces, and ghost stay live. PlacedPieceMeshes was already memoized with stable props, so the un-memoized world statics were the remaining per-tick cost. Committed 8d9643b03, bundles clean.",
+  "shas": [
+    "8d9643b03"
+  ],
+  "resolvedAt": "2026-06-10T04:19:23.039Z",
+  "tags": [
+    "perf-log"
+  ]
+}

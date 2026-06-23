@@ -1,0 +1,28 @@
+{
+  "id": "req_0498",
+  "at": "2026-06-10T10:42:03.035Z",
+  "origin": "codex:019eb11a",
+  "text": "thats not what we want at all. i dont know who would think its smart to keep it mounted. what benefit is that",
+  "status": "review",
+  "sessionId": "019eb11a-609c-7012-8b21-a57c9a570e4c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T10:42:15.035Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T10:43:51.135Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained that the only benefit of keeping editor panes mounted under route surfaces was preserving transient editor component state and avoiding remounts, but that tradeoff is wrong because hmsc-int already persists durable world/view state through workspace sessions. Changed cart/hmsc-int/index.tsx so the QuadSplit editor panes mount only on the editor route; /compiled and other routes now replace the editor pane subtree inside the persistent shell instead of overlaying a live editor. Verified with SHIP_RUN_PACKAGE=0 tools/rjit ship hmsc-int.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T10:43:51.135Z"
+}

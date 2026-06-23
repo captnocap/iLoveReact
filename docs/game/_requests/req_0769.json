@@ -1,0 +1,28 @@
+{
+  "id": "req_0769",
+  "at": "2026-06-13T14:50:40.660Z",
+  "origin": "session:ef4fbf70",
+  "text": "ok. seems to work for some props is like a chair all one piece or something?",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T14:51:29.109Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T14:57:34.832Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed why some props skin and others (a chair) look like 'one piece': props split into DATA-RECIPE models (propModels.ts → DataProp, e.g. soda machine, vending) which expose parts, and ~15 BESPOKE hand-built components (render3d/props/Furniture, Tree, Rock, Fence, lights…) which build their own meshes and return [] from propParts — so the PAINT panel shows no parts for them. Worse, the bespoke ones also had no compile recipe, so a compiled chair fell back to a single box (render/bake parity gap). Fixed the CHAIR family as the pattern + proof: migrated chair/chairRed/chairBlue/chairGreen out of the bespoke Furniture component into a faithful data recipe (4 legs + seat + a -6° tilted backrest, exact geometry/colours) in propModels.ts, remapped them chair→DataProp in Prop.tsx, and removed the now-dead Chair fn + CHAIR_PAINT from Furniture (its default now returns null; every kind it still handles has a case). Result: chairs now expose skinnable PARTS in the PAINT panel AND bake faithfully. Verified by a clean full-graph esbuild pass. NOT COMMITTED (--shas none): Prop.tsx carries another session's in-flight ImportedProp work, and the three files (propModels/Prop/Furniture) are one unit, so committing would sweep their work or leave a broken partial — held in the working tree (hot-reloads for testing). NEXT: roll the same migration out to the rest of the bespoke props (couch/table/bed/cupboard/sink/oven/fridge/computer/bench, then trees/rocks/fences/lights) so every prop skins by part.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T14:57:34.832Z"
+}

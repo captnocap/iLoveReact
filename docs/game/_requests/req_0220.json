@@ -1,0 +1,13 @@
+{
+  "id": "req_0220",
+  "at": "2026-06-07T10:05:45.631Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: STOP — you are editing the request-ledger files (requests tests, resolve→move renames). That is ANOTHER LANE's in-flight work (REQBOARD-0607, four-state board, being built right now on a different pane). The red verifier suites are its mid-flight state — the standing rule is REPORT cross-lane verifier blockers, never fix them. Two lanes in those files will clobber each other. Do this now: (1) STOP touching docs/game/_index/requests* and any workbench/requests files. (2) Post the EXACT list of request-system files you modified and what you changed in each — I will hand it to the owning lane to reconcile. Do NOT revert anything. (3) Resume YOUR task: TWIGRESTORE phase 2 (undo boundary trace, shell keys driving the history machinery) — for your verify step, run your focused suites and treat the ledger reds as reported-unrelated, like the other lanes are doing.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

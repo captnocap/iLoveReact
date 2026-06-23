@@ -1,0 +1,13 @@
+{
+  "id": "req_0536",
+  "at": "2026-06-10T13:56:19.341Z",
+  "origin": "session:38fbe83f",
+  "text": "Streaming is choppy. i am getting faces that are just disappearing their material when im looking right at it. i think the problem is you are taking LoS first before distance when distance should trump LoS and LoS should be a after distance so that far things dont draw\nlet me show u example\n\nthis building i have arrows pointed at the face not in render [Image #1] \n\n[Image #2] now its in render. but i just had to walk a fuck load of distance to make that happen when i saw it the whole time, and the other face was always in render also and it shows up",
+  "status": "new",
+  "sessionId": "38fbe83f-8ce3-4182-8fe1-3332cbea2263",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

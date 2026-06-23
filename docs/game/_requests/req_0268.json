@@ -1,0 +1,13 @@
+{
+  "id": "req_0268",
+  "at": "2026-06-08T04:45:30.696Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: GLOBE A/B ruling — user wants BOTH built side by side to compare, verbatim: \"i dont really know tbh. give me both, if one is far worse than another, il say so, we delete it.\" Build both representations so the user can switch between them on the SAME blockout and judge: A = sculpt as displacement over the voxel blockout's surface mesh; B = real voxelMesh shape in ItemShapeDoc (exposed-face/greedy mesh, sculpt edits the mesh directly, persists through save/load). Make them selectable on one item (a representation toggle) so the comparison is apples-to-apples on the same authored tower, not two different items. The tower-stays-a-tower test applies to whichever path(s) survive. This is framework-grade — work it in your own context, no subagents, post at each boundary, commits on my word. The loser gets deleted on the user's verdict; until then both live behind the toggle.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

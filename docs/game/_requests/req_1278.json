@@ -1,0 +1,30 @@
+{
+  "id": "req_1278",
+  "at": "2026-06-18T09:51:38.416Z",
+  "origin": "session:7abb2b22",
+  "text": "seems bevel was removed from edge. still works on vertex but on edge isnt doing anything now",
+  "status": "review",
+  "sessionId": "7abb2b22-4c02-47f2-b4bc-7e5ee55a0f6a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T09:52:44.229Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T09:58:12.188Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Edge bevel doing nothing was a CRASH regression from req_1272: the rewritten bevelEdge passed the all-degree-3 cube tests but threw on the meshes the user actually has, so the edge bevel buttons pre-check (which runs the full op) threw and the click silently did nothing, while vertex bevel (a different function) kept working. Found three issues by beveling every manifold edge of cube/cylinder/cone/loop-cut/malformed-uv meshes: (1) endpoint() iterated faces.length but indexed m.faces[fi] — once the first endpoint pushed a corner cap, faces grew and the second endpoint read past the original face list, hitting undefined.loop; fixed to iterate m.faces.length. (2) splice1 read uv[i] which is undefined on a face whose uv array is shorter than its loop (heavy edits leave these), crashing; fixed with a [0.5,0.5] fallback. (3) a FLAT edge (two coplanar faces, e.g. a loop-cut seam) has no dihedral angle to chamfer, so the corner caps folded into zero-area degenerate faces; now refused via a parallel-normal check (no-op, like a boundary edge) and the button toast was reworded to say a sharp edge is needed. Verified: beveling every manifold edge across cube/cylinder/cone/two loop-cut cubes/truncated-uv cube yields 0 throws and 0 topological errors, with flat seam edges correctly no-op. editMesh suite 90/90 (3 new regression cases) and the hmsc-int cart bundles clean.",
+  "shas": [
+    "06760e9d3"
+  ],
+  "resolvedAt": "2026-06-18T09:58:12.188Z"
+}

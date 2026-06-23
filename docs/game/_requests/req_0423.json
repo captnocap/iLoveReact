@@ -1,0 +1,33 @@
+{
+  "id": "req_0423",
+  "at": "2026-06-10T02:56:18.666Z",
+  "origin": "session:2e5197b8",
+  "text": "Honestly. i didnt think of it til now, but you know the aiming camera, that is pretty much what u need to do when there is a wall / roof in the way, but just it wouldnt be aiming. if that makes sense. though i just tried that, and it still is getting fked by the wall. so same idea, both need to have the wall push it in tho. :)",
+  "status": "review",
+  "sessionId": "2e5197b8-1894-4144-a6e1-1e2bfb997258",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T02:57:26.363Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T03:05:27.065Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User rejected the see-through wall fade and asked for spring-arm camera collision (push the camera in to the player's side of a wall/roof, aim-like tight framing when needed) working for BOTH the walk and aim cameras. Root cause of aim clipping: the occlusion query always cast from the orbit (walk) eye, so ADS tested the wrong camera. Added embodied.desiredCamera() returning the live rig's natural eye + player-side pivot + base distance (walk Orbit / ADS Aim shoulder pivot). Rewrote updateCameraOcclusion to cast pivot->eye for the active rig and pull the distance in to just inside the nearest wall/roof, removing the fade entirely; lowered minDistanceMeters 1.6->0.7 so it reaches the player's side of tight interior walls. JS-only (reuses existing cameraOcclusionConfiguredHit + setDistanceConstraint host fns), hot-reloads with no Zig rebuild. Verified the cart bundles clean via the real bundler. Commit 40012e1ae.",
+  "shas": [
+    "40012e1ae"
+  ],
+  "resolvedAt": "2026-06-10T03:05:27.065Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1437",
+  "at": "2026-06-19T21:53:53.189Z",
+  "origin": "session:671785ab",
+  "text": "Right. but also, you didnt catch what i was trying to point out with the follow up was that the image is also entirely offset",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T22:06:05.284Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T22:06:05.294Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Part of the working-view persistence set (req_1435/1436/1437): the backdrop appearing offset after a reload was the tell that the camera must be restored EXACTLY (parallax between the near model and far trace plane). Camera + selection now persist through hotstate (survives hot reload, resets cold). Shipped in f03e5c74b; the backdrop-needs-readd case was a separate stale-image issue the user resolved.",
+  "shas": [
+    "f03e5c74b"
+  ],
+  "resolvedAt": "2026-06-19T22:06:05.293Z"
+}

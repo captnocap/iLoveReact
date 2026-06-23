@@ -1,0 +1,30 @@
+{
+  "id": "req_1360",
+  "at": "2026-06-19T01:12:24.762Z",
+  "origin": "session:8eec90e3",
+  "text": "Hey we have had this problem before, and its happening again, the start up time and load time for a single edit at all in the game map editor is taking forever. like 3-4s for it to update any tile coloring. whats the deal ?",
+  "status": "review",
+  "sessionId": "8eec90e3-a271-4058-b417-c9fc47cb9271",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T01:12:36.104Z",
+      "actor": "8eec",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T01:25:33.948Z",
+      "actor": "8eec",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed and fixed the 3-4s-per-tile-colour-edit (and same-cost startup) choke in the hmsc-int map editor. Root cause: index.tsx memoized previewWorld on `floors`, so every tile-colour dab re-ran assemblePreviewWorld's placement walk, which is O(placements^2) — placeWorldProp immutably re-appends the props array and nextUniqueId scans every existing id, per placement. On a grown map that quadratic dominated. Fix (PAINTCHOKE-0618): split the preview world so floors->landforms/water (already cached per chunk) overlays cheaply every paint, while the expensive placement walk is keyed on a per-chunk HEIGHT signature + placements, NOT tile colour — prop Y depends only on terrain height, so colour edits skip the walk entirely. The assembler holds only placement water (base []); the overlay merges painted floors-water on top so placed water is never dropped. Added previewWorld.test.ts (3/3 green) pinning the water-merge + landform-passthrough contracts. Two SHIP_RUN_PACKAGE=0 ships build clean (exit 0).",
+  "shas": [
+    "7923c7485"
+  ],
+  "resolvedAt": "2026-06-19T01:25:33.948Z"
+}

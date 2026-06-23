@@ -1,0 +1,33 @@
+{
+  "id": "req_0663",
+  "at": "2026-06-12T05:58:29.941Z",
+  "origin": "session:5fe47a3e",
+  "text": "ok, well. so the doors show up. i can open them. i cant walk through the open door. i can walk through the open doorway that has no door though",
+  "status": "review",
+  "sessionId": "5fe47a3e-97b1-49a1-8770-0ebda5f10304",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T05:58:56.075Z",
+      "actor": "fable-doors",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T06:01:04.214Z",
+      "actor": "fable-doors",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Open doors now admit the body in the compiled game. Root cause was a host-physics law, not the door machine: collideSolidRects (framework/game/physics.zig) side-pushes ANY rect too tall to step onto even when non-solid — that is what makes walkable platforms push you off their sides — so the first cut's toggle, which only flipped the blocksPlayer float, left a 2.2m phantom rect standing in the open doorway. The toggle now PARKS the door rect 1e9m out of the world while open and restores the exact closed bounds on close; startOpen doors boot parked the same way; doorHalfExtents is the single bounds source for build+toggle. Loader rebuilt, rjit game shot GREEN (door layer: 2 live doors, no-JS proof intact); the walk-through itself is yours to confirm in play.",
+  "shas": [
+    "e3dde777f"
+  ],
+  "resolvedAt": "2026-06-12T06:01:04.214Z",
+  "tags": [
+    "bug"
+  ]
+}

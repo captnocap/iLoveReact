@@ -1,0 +1,13 @@
+{
+  "id": "req_0170",
+  "at": "2026-06-06T19:12:15.030Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — UX correction on PREFABSELECT (in your queue), user verbatim: \"they always gotta do shit the complicated way dont they. the select tool for the building pieces.... just make it a key why do i have to go out of the game focus to click a button to go back into the game focus and do this whole song and dance\". THE RULE: the select tool is a KEY, inside game focus — build mode already speaks keys (1-9/0 pick pieces, F1/F2 switch modes); select joins that vocabulary as a keybind toggle. NO UI-button round trip that breaks mouse capture; the user never leaves game focus to enter select mode. Pick the obvious unclaimed key, show it in the build-mode hint line like the other binds, and expose the binding as tuning the P2 way if bindings are configurable. If you already built a button path, delete it — the key IS the way in.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "ux",
+    "ruling"
+  ]
+}

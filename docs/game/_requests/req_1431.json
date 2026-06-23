@@ -1,0 +1,30 @@
+{
+  "id": "req_1431",
+  "at": "2026-06-19T20:32:39.019Z",
+  "origin": "session:671785ab",
+  "text": "this vertical stack looks really bad when you dont have any normalized size to the buttons. rethink that because i dont think you are thinking about it at all [Image #2] also the tooltips to nnot have the key on them which is usually the first thing you would show for a tooltip is the hotkey",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T20:33:44.840Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T20:42:21.473Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Normalized the context-rail button sizing and put hotkeys in tooltips. First pass made the rail uniform-width (stretch); the user found full-width buttons had too much dead space for short labels. Final: rail is a wrapping Row (width 168) where text ops size to content and pack horizontally like a tool palette, with the move/resize/rotate trio kept as a full-width 3-across equal group (the part the user liked); dividers + the symmetrize header force line breaks. Tooltips that have a hotkey now lead with it (Ctrl+Z · Undo, Ctrl+Y · Redo, F · Reframe). Built green; self-shot confirms the trio sizing. Face-mode op packing needs a live screenshot to confirm. SHA 18d22be84.",
+  "shas": [
+    "18d22be84"
+  ],
+  "resolvedAt": "2026-06-19T20:42:21.473Z"
+}

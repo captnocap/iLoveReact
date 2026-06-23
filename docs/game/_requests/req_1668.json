@@ -1,0 +1,31 @@
+{
+  "id": "req_1668",
+  "at": "2026-06-22T23:29:23.141Z",
+  "origin": "session:f97cafe1",
+  "text": "are you saying there is a store.db for the texture to be stored in but its not there for any of them",
+  "status": "review",
+  "sessionId": "f97cafe1-eced-4a8c-b209-7c447bcc1a39",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T23:37:31.918Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T23:37:31.928Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same change as req_1667 (these captured the same conversation thread): added a 'load from prop' picker to the Studio paint toolbar that pulls a compiled prop's content-addressed texture blob back onto the open model, making painting recoverable rather than one-shot. The compiled prop is the durable texture backup because the cooked-asset store never GCs blobs while the model stream does (req_1556). Implemented in cart/hmsc-int/editors/model/studiokit/StudioViewport.tsx (loadPaintFromAsset + picker modal), paired with display fix 47e9736e5 so reopened painted models show their paint in any mode.",
+  "shas": [
+    "22dad9f45",
+    "47e9736e5"
+  ],
+  "resolvedAt": "2026-06-22T23:37:31.928Z"
+}

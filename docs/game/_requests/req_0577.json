@@ -1,0 +1,30 @@
+{
+  "id": "req_0577",
+  "at": "2026-06-10T17:20:34.360Z",
+  "origin": "session:7a5b02e7",
+  "text": "ok lets follow the guiding light then. glad i checked in",
+  "status": "review",
+  "sessionId": "7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T17:22:11.073Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T17:48:10.972Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Followed the guiding light (commit 8b07e1c30): decals now ship their RECIPE — the packed DecalDoc itself — instead of baked pixels, and the no-V8 loader rasterizes it once at load, the exact materialize-at-load shape shader materials already use. compile/decalPack.ts lowers the validated doc to flat binary (colors resolved to RGBA bytes at pack time, hidden nodes dropped, shader-fill rects substitute their flat color with a warn; image payloads are the marked bake-lever follow-up via the content-addressed asset store); the MATERIALS lump gains an optional DOCS tail; framework/gpu/decal_raster.zig parses + CPU-rasterizes (rounded-rect SDF fills/borders, FreeType text with bold/align/letterSpacing) and installs through the same wmat key path. The entire editor-bake layer — DecalPixelBaker, pixel files, staleness hashing — is deleted; the bake is pure data to data and headless-green with zero editor dependency. Proof on your real map: rjit game shot GREEN, '2 decal recipe(s)' baked, both docs parsed end-to-end by the loader; decalPack tests pin the byte layout 5/5, worldGeometry 4/4. Verify visually: hit Compile (or just rjit game play — it rebakes) and walk to the signs.",
+  "shas": [
+    "8b07e1c30"
+  ],
+  "resolvedAt": "2026-06-10T17:48:10.972Z"
+}

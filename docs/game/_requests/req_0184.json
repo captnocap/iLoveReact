@@ -1,0 +1,13 @@
+{
+  "id": "req_0184",
+  "at": "2026-06-07T05:03:09.769Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT on BUILDSKIN: the buildings path itself PASSES (\"the new Buildings path is good\") but two FAILS, verbatim: \"the skybox or camera for the 3d preview is extremely dark and the side menu is an actual joke lmao -_- what the fuck is that\". Screenshot: /home/siah/.claude/image-cache/42677ed6-e8fa-4672-83bf-b68e46d28bef/16.png. FAIL 1 — the 3D preview stage is nearly black: use THE stage kit lighting/skybox the other workbench stages use (the character stage is lit correctly — same kit, no hand-rolled scene). FAIL 2 — the panel dumps the ENTIRE material roster as inline chip walls, repeated for EVERY face group (\"all faces\" then \"front\" then presumably each side): hundreds of chips, unscannable, a chrome-laws massacre. Replace with a PICKER pattern: each face-group row shows ONE compact control — current material swatch + name — and clicking it opens a single material chooser (searchable/grouped by the a-/b-/c- families), one chooser instance shared by every row, never inlined per group. The piece list (#12 wall ... #26 roof) groups by type with counts (walls 5, roofs 9), expandable, not a flat chip flood. COORDINATION: the material chooser should be THE materials-source chooser — another lane is building the materials source; sync through the supervisor so there is exactly one material-picking component in the app (one implementation, both consume). Re-shot both fixes (lit preview, compact panel) — and per new policy the supervisor opens the shots.\n",
+  "status": "new",
+  "sessionId": "d3e600d5-0069-46ee-baf8-1d77b7de69a3",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

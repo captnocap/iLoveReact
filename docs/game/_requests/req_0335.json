@@ -1,0 +1,33 @@
+{
+  "id": "req_0335",
+  "at": "2026-06-08T12:48:56.228Z",
+  "origin": "codex:019ea612",
+  "text": "MAP-FORMAT FIX — the game-file is bloated and B64-wrapped. Diagnosis (measured): the baked game-file is 2.22MB B64 = 1.67MB raw, and the ENTIRE 1.67MB is ONE lump — the MAP — stored enc=raw (uncompressed). Everything else (skins/logic/manifest) is 8 bytes. The map is a DENSE 360x360 tile grid written in full even though the world is near-empty. That is the Guiding-Light violation: storing the product, not the factors. Build to docs/game/GUIDING_LIGHT.md (the fork table: \"store the dense form → store the references\"; \"JSON/base64 at runtime → pack binary, zero-copy\").\n\nTWO FIXES, in priority order:\n\n1. RLE THE MAP LUMP — the 100x win. The format ALREADY has rle8/rle16 encodings (see the lump directory + RLE_FORMAT.md); the bake just writes the map as `raw`. Encode the MAP lump with the existing RLE codec so a near-empty 360x360 grid collapses from 1.67MB to a few KB. The loader's map decode must read the RLE'd lump (the Zig codec already supports rle8/rle16 — wire the map path through it). Do NOT change what the map MEANS — same world, just compressed. Round-trip identical.\n\n2. DROP B64 -> RAW PACKED BINARY for the ship/loader artifact. The .b64 text wrapper forces a decode pass and adds 33%. The loader should read raw bytes zero-copy (it already decodes lumps from bytes — the B64 is just a transport wrapper). Keep whatever's needed for the dev/bake path, but the artifact the loader loads should be packed binary, used in place.\n\nVERIFY (report numbers): bake the same world, report the game-file size BEFORE vs AFTER (expect MB -> KB). `tools/rjit game play` must render the IDENTICAL world (RLE + binary round-trip exactly — same pieces, floor, player, sky). Zero V8 in the loader. If size doesn't drop dramatically, the RLE isn't actually engaging — don't report done.\n\nBAR: ONLY the user running `tools/rjit game play` and seeing the same world render (now from a tiny file) counts. Report the before/after byte sizes + what to run. NEVER self-declare GREEN.\n\nGUARDS: no stubs — real RLE encoding that actually shrinks the file, not a rename. Zero V8 in the loader. Own context — NO Task tool, NO subagents. tools/rjit only. Commit EXPLICIT paths (NOT git add -A; ~400 set-aside files). No reset/revert.",
+  "status": "review",
+  "sessionId": "019ea612-258b-7013-b887-0bcd6a4954ea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T12:49:08.021Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:01:24.911Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the map-format fix in commit 7500609fc. The runtime artifact is now raw packed binary at zig-out/game/hmsc.gamefile instead of hmsc.gamefile.b64, and the CLI installs content-addressed player assets into zig-out/game/contentstore before launching the no-V8 loader. The map stream now references the full player model/animation by asset key instead of embedding them as map lumps; the figure geometry was restored to the original full V2/Characters3D bake, not reduced. Measured baseline was 2,271,324 bytes b64 / 1,703,492 bytes decoded raw; current bake is 39,852 bytes raw game-file / 53,136 bytes b64 transport, with 1,665,796 bytes installed as two verified content-addressed assets. Nested STREAM_MAP is 39,616 bytes; TILES remains rle16 at 3,372 bytes and HEIGHTS rle16 at 1,452 bytes. Local checks run: tools/rjit game shot, tools/rjit game verify, zig build test-world-gamefile, zig build test-world-mapfile. User should run tools/rjit game play and confirm the same world renders with the restored detailed player figure; not marked done, awaiting your verification.",
+  "shas": [
+    "7500609fc"
+  ],
+  "resolvedAt": "2026-06-08T13:01:24.911Z",
+  "tags": [
+    "bug"
+  ]
+}

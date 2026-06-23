@@ -1,0 +1,31 @@
+{
+  "id": "req_0609",
+  "at": "2026-06-11T05:20:06.318Z",
+  "origin": "session:9361f55b",
+  "text": "so then compare a chair to the player model. what is the verdict",
+  "status": "review",
+  "sessionId": "9361f55b-0780-4569-bbc9-0034d03a84cc",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T05:20:17.563Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T05:20:47.281Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Analysis only, no code changed: ran tools/prop-scale chair and rendered the verdict. Chair is 0.95m tall (0.47x the measured 2.01m player head-top), back tops out just above the waist (0.90m). Seat at 0.45m exactly matches the player's knee (0.44m) — sitting ergonomics are correct. But vs a real human a chairback is ~0.54x of height, so against the stylized-tall figure the chair reads ~15% short; an R4-true chair would be ~1.1m with seat ~0.50m. Flagged the coupling: raising seatHeightMeters moves the sit pose, so seat height must move with the skeleton's sit posture or stay knee-locked. Awaiting the user's call on whether to rescale the chair family.",
+  "shas": [],
+  "resolvedAt": "2026-06-11T05:20:47.281Z",
+  "tags": [
+    "ask"
+  ]
+}

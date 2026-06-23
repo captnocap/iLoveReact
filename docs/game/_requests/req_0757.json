@@ -1,0 +1,34 @@
+{
+  "id": "req_0757",
+  "at": "2026-06-13T13:45:40.447Z",
+  "origin": "session:ef4fbf70",
+  "text": "Well. first thing first, is get it set up to do it. once that is ready, we can go from there. and this isnt specific to the soda machine. this is just props in general",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T13:46:14.464Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T13:57:00.036Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-13T14:46:37.284Z",
+      "actor": "ef4f",
+      "kind": "note",
+      "text": "Foundation landed in commit 2f5d9e399 (folded into the req_0766 prop-skin commit, since both touch the same files). Still uncommitted: Embodied.tsx's WorldPartCaptures mount only — held because that file carries another session's collision work. /test embodied view aside, the OBJ tab + iso author + compile all carry it now."
+    }
+  ],
+  "resolution": "Set up per-part texturing for props IN GENERAL (not just the soda machine), so any part of any data-recipe prop can be clicked and skinned end-to-end. Root finding: the machinery existed but (a) DataProp.tsx gated 'textureable' on a part having a partId, so only image-panel parts (e.g. a vending front) were targets — chassis boxes/cylinders were textureable:false; (b) the compile bake (worldGeometry.pushPropPart) keyed textures by partId only, so chassis parts never baked a texture; and (c) WorldPartCaptures (the offscreen surface that bakes a part's texture) was mounted ONLY in the OBJ-tab inspector, never in the live world rigs, so an applied prop texture would not even render in the iso build pane or in play. Changes: (1) propModels.ts adds propPartId(spec,index) — a single shared id (a panel's own partId, else its recipe index) that the preview and the bake both call, so a baked texture lands on the mesh the user clicked. (2) DataProp.tsx marks every part textureable:true; panels keep whole-image (1x1, broad faces), chassis parts wrap the whole mesh and tile by footprint. (3) worldGeometry.pushPropPart keys by propPartId for every part (safe for bespoke kinds: their non-partId parts never get a stored texture). (4) Mounted WorldPartCaptures in IsoAuthor (build pane), IsoPreview, HmscGameplayRig, and Embodied; made its perception optional with a neutral default so rigs need not spell the magic value. Empty world -> zero buckets -> zero cost. Verified by a clean full-graph esbuild resolution/syntax pass (exit 0). NOT COMMITTED (--shas none): two of the eight touched files (Embodied.tsx, IsoAuthor.tsx) currently carry another session's in-flight work, so committing would sweep it; the edits are live in the working tree and hot-reload for testing. WHERE TO TEST: open a prop in the OBJ (right-rail Objects) tab, click any part, pick a texture — it applies globally per kind and now shows in the build pane too. Per-instance authoring + the PAINT-panel redesign are the next phase (req_0755).",
+  "shas": [],
+  "resolvedAt": "2026-06-13T13:57:00.036Z"
+}

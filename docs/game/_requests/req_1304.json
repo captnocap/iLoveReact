@@ -1,0 +1,30 @@
+{
+  "id": "req_1304",
+  "at": "2026-06-18T18:33:24.292Z",
+  "origin": "session:76a33154",
+  "text": "hm. still doing it. here is after painting over it all it is clearly full of lines [Image #22]",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T18:50:20.031Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T18:50:20.041Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Face-boundary seams addressed as part of the seam-fix chain (see req_1305/1306). Net committed state (ddf600d37): rect-merged fills + a 1px edge-bleed on a default-gutter paint-v4 atlas — paintable, no red-on-black overrun, faint residual seams possible. Root cause is bilinear sampling across the per-face atlas; definitive fix = nearest-neighbour sampling (global Scene3D sampler change, pending user OK).",
+  "shas": [
+    "ddf600d37"
+  ],
+  "resolvedAt": "2026-06-18T18:50:20.041Z"
+}

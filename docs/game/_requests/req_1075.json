@@ -1,0 +1,28 @@
+{
+  "id": "req_1075",
+  "at": "2026-06-15T22:17:25.568Z",
+  "origin": "session:6de4f048",
+  "text": "hello claude. the other day, i asked what i thought would be a simple request, which turned into a really really long bug hunt and we did find  the bug, but never finished the feature. so il come to you now to do so; look at this with me for a moment so i can give u a brief of the task. \n\nso there is tiles and there are floors. a floor = 3x3 tile space. but a floor has a very high quality texture that we can use on it.\n\nnow the tiles themselves , they use this same texture, but it gets insanely distored/low res and look nothing alike. \n\nso i asked for them to match, so the painted tile had the same texture\n\nthis opened a world of kick ass on us, trying to figure out why half of them would just disappear. we spent 7 hours or so hunting and found it. made a helper so it never happens again. but we never finished the job. currently the JS version loads the texture in now perfect, but the compiled is still loading in dogshit for the world ground. here is a side by side compare:\n\nhere is what the game bakes on the world: [Image #1] \n\nhere is the actual texture on a floor [Image #2] \n\ntwo different worlds of quality. we want the 2nd one, can u wire it up for us",
+  "status": "review",
+  "sessionId": "6de4f048-c04d-4674-87c7-dff1d1416eb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T22:17:34.628Z",
+      "actor": "6de4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:46:48.925Z",
+      "actor": "6de4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compiled world ground now renders through the per-fragment ground FORMULA (HEIGHTFIELD_TILE_BODY) instead of a baked 4px/tile pixel texture — the blurry RIBBONBAKE path. Bumped the floor heightfield lump to v3: it ships the formula ONCE plus each chunk's per-cell reference stream (worldGeometry.ts encodeFloorHeightfields), constructor.zig decodes it into HeightfieldMesh.ground_formula/ground_data, and world_loader.zig feeds the existing g_ground_pipeline (3d.zig) — the same path the editor /test view already uses. Unified flat + road chunks onto one path (parity with /test); flat chunks ship a cheap 2x2 mesh + full cell stream so they wear real grain/slab-joints. Verified end-to-end via 'rjit game shot' on the user's map=main (9 chunks) — crisp, shot PASS; user confirmed in-game. UNCOMMITTED: the touched files (worldGeometry.ts, constructor.zig, world_loader.zig) carry other live sessions' grass/NPC work, so committing must be supervisor-coordinated to avoid sweeping up unrelated changes.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:46:48.925Z"
+}

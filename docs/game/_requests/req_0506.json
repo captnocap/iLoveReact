@@ -1,0 +1,13 @@
+{
+  "id": "req_0506",
+  "at": "2026-06-10T11:16:20.385Z",
+  "origin": "session:e11a01ef",
+  "text": "Hm. one of the like very last edits u made, made it go from perfectly smooth to now its just spamming this every frame [js.warn] [DRAGDRAW] frame stall ms=169\n[js.warn] [DRAGDRAW] frame stall ms=162\n[js.warn] [DRAGDRAW] frame stall ms=178\n[js.warn] [DRAGDRAW] frame stall ms=199\n[js.warn] [DRAGDRAW] frame stall ms=183\n[js.warn] [DRAGDRAW] frame stall ms=175\n[js.warn] [DRAGDRAW] frame stall ms=167\n[js.warn] [DRAGDRAW] frame stall ms=181\n[js.warn] [DRAGDRAW] frame stall ms=178\n[js.warn] [DRAGDRAW] frame stall ms=184\n[js.warn] [DRAGDRAW] frame stall ms=174\n[js.warn] [DRAGDRAW] frame stall ms=179\n[js.warn] [DRAGDRAW] frame stall ms=172\n[js.warn] [DRAGDRAW] frame stall ms=182\n[js.warn] [DRAGDRAW] frame stall ms=186\n[js.warn] [DRAGDRAW] frame stall ms=193\n[js.warn] [DRAGDRAW] frame stall ms=185",
+  "status": "new",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "perf-log"
+  ]
+}

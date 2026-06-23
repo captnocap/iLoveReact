@@ -1,0 +1,28 @@
+{
+  "id": "req_1061",
+  "at": "2026-06-15T20:52:07.151Z",
+  "origin": "session:34f4e405",
+  "text": "hello. get the next steps done. review previous conversations to find any details regarding how to execute, they are rich in context",
+  "status": "review",
+  "sessionId": "34f4e405-3e9d-47f6-b883-15900052c2df",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T20:52:14.515Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T21:13:50.672Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Studio req_1060 items 1+2 + the item-3 design-gate survey. (1) Encoded-shape readout: new column-3 SHAPE panel (editors/model/ShapePanel.tsx = StudioShapePanel) — a read-only view of the active part's encoded EditMesh under UV+RIG: counts (verts/faces/edges/uv'd/mounts), pivot (or bounds-center fallback), every face's vertex loop + uv/material flags, named mounts, and the EXACT JSON StoredPart.mesh persists (pretty-printed, show/hide toggle), recomputed on the part id~version key. Sibling of UVPanel/RigMetaPanel. (2) Delete saved meshes: deleteModel(id) in studioModel.ts commits the already-existing modelDeleted BRANCH event + falls back to blank 'new' (setOpen(null)) if the open model was deleted; exposed as studioDeleteModel. The roster RosterRow ({id,label,icon}) can't host a trash button + the shell is shared infra, so the delete affordance is a new column-3 LIBRARY panel (ModelManagePanel.tsx) listing every saved model with a two-step inline confirm (X then delete? check/x) — clears trash saves in place without opening each. (3) Item 3 (export-to-texture/painter) surveyed + specced into PLAYBOOK Part 5.5 (the cutout ModelPreview paint->StaticSurface->textureKey loop is a near-exact template), build deferred under the design gate. editMesh 48/48, modelStream 8/8 (+modelDeleted test), Studio + full sources chain bundle clean. Hot-reload TSX, nothing committed (user leads commits).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T21:13:50.672Z"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "req_0104",
+  "at": "2026-06-06T12:40:10.977Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — additional evidence for the junction-gap work, user verbatim: \"this also is apart of that\". Second screenshot: /home/siah/.claude/image-cache/42677ed6-e8fa-4672-83bf-b68e46d28bef/5.png — WALL junctions this time, not just floor tiles: a wall-corner shows a sliver notch where two walls meet, and a wall-to-floor-edge junction shows the same sliver. The lattice fix must cover wall-wall corners and wall-floor edges too — every placed-piece junction shares exact coordinates, one lattice for all piece types.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

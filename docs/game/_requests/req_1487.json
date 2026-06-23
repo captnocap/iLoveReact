@@ -1,0 +1,32 @@
+{
+  "id": "req_1487",
+  "at": "2026-06-20T10:47:42.220Z",
+  "origin": "session:89c172a4",
+  "text": "there now you know where to go from here use /marathon",
+  "status": "review",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T10:47:48.249Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T11:12:11.497Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Integrated the universal paint kit (runtime/paint) into Studio model-editor paint mode, replacing the bespoke pipeline end-to-end. BrushKit is now the paint panel (tools, brush shapes, size/hardness/flow/scatter/angle dials, blend, the colour wheel, and the saved palette — all as icons, killing the old fixed size-buttons inconsistency), and useBrushStroke is the optimistic host-owned stamping engine, driven by a mapPoint that wraps the existing pickFaceUV → UV-pixel + the hit face's UV-island clip. Everything that worked is preserved: crisp nearest pixels, per-face island clamping (no bleed), the paint undo/redo ring, and content-addressed PNG persistence; the model's saved palette + materials stay the branch source of truth (colour slots become kit swatches, materials a flat-pseudo row, new colours mint back via + save). Studio gains the full tool family it lacked (line/rect/oval/eyedropper, shift-straight lines), plus paint-tool hotkeys (b/e/l/r/o/i) via a new paint-only 'studio-paint' control scope so the kit's native keys don't collide with the mesh-op letters; HotkeysPanel now lists+rebinds both scopes in paint mode. Dropped the dead slot/cell resample machinery the pixel painter made obsolete. Three commits, all build-green (SHIP_RUN_PACKAGE=0 rjit ship hmsc-int) and boot-clean (rjit shot /workbench PASS 372KB). Paint BEHAVIOUR must be live-verified (rjit dev hmsc-int) — paint mode can't be self-shot (object-mode boot only). PaintPanel.tsx is now dead, imported only by the dead Studio.tsx breadcrumb (deletion gated on your word per the handoff).",
+  "shas": [
+    "4ea2d0c52",
+    "f9ec3ac77",
+    "74955f92b"
+  ],
+  "resolvedAt": "2026-06-20T11:12:11.497Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_0940",
+  "at": "2026-06-14T20:06:46.733Z",
+  "origin": "session:2b1b8d6b",
+  "text": "be sure you also @GUIDING_LIGHT.md in your plan",
+  "status": "review",
+  "sessionId": "2b1b8d6b-2adf-4239-aed8-88f228d4f8a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T20:09:03.900Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T20:09:03.908Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two things from the user: (1) folded GUIDING_LIGHT.md into the approved loader plan as a governing 'Guiding Light alignment' section — the loader move is the creed (delete the VM from the frame loop; combat as flat content-addressed lumps run by fixed Zig systems; Stage 2 is systems-driven-by-data not ported code; keep the chance/perception tables as FACTORS not a baked product; declarative never Turing-complete). (2) Fixed the backwards NPC vision cones in combat-arena.tsx: ConeMesh offset/rotation used the perception-heading convention (yaw+180), which put the cone BEHIND the figure; now it uses the figure facing (-Z at yaw0 = [-sin yaw,-cos yaw]) so the cone points where the NPC actually looks and where inVisionCone checks. esbuild bundle clean.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T20:09:03.908Z"
+}

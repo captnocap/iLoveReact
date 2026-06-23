@@ -1,0 +1,28 @@
+{
+  "id": "req_1576",
+  "at": "2026-06-21T13:20:35.514Z",
+  "origin": "codex:019eea3c",
+  "text": "Oh i see it. slot from selection. il try it",
+  "status": "review",
+  "sessionId": "019eea3c-80f5-79b0-84df-c00c449c7a7e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T13:20:46.183Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T13:20:46.192Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User found the existing texture-slot authoring control in Studio: it is currently exposed as 'slot from selection' in face mode. No code change was made because they decided to try the existing UI first.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T13:20:46.192Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1013",
+  "at": "2026-06-15T16:03:36.940Z",
+  "origin": "session:46d99bcc",
+  "text": "i am extremely confused by what that even means. i never asked for it so politely can u remove it, since i dont think resetting it is what we want to have as a capability at all. maybe im entirely wrong but i dont know what in my flow would need it the way u just explained it",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T16:03:45.694Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T16:07:00.342Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the 'Reset UV' button from the UV panel per the user (they never asked for it and resetting the UV mapping is not a step in their authoring flow). Removed both Pressable instances from UVPanel.tsx (the header button and the no-faces fallback), dropped the now-unused fullFaceUV and Pressable imports, simplified the no-faces branch back to a plain message Box, and updated the file header comment. The panel is now a pure read-only view of the stored UVs. fullFaceUV remains in editMesh.ts (it is the default UV applied at cuboid()/cylinder() mint, still tested) — only the button is gone. UVPanel.tsx and the full sources.ts chain bundle clean. Updated PLAYBOOK build log + project_studio_mesh_editor memory. Hot-reloadable.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T16:07:00.342Z"
+}

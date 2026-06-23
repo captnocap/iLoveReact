@@ -1,0 +1,28 @@
+{
+  "id": "req_0972",
+  "at": "2026-06-15T11:07:29.773Z",
+  "origin": "session:524eaf71",
+  "text": "i cant. its broken. but before we get there. lets make sure we make it correctly. so the first shape that we add is a cube. that cube we need to pick its diameter and height right away and confirm it. this changes nothing about the existing grid size. and the sizes of the grid directly translate to these control roke_on_inst_cap=false\n[js.err] The above error occurred in one of your React components:\n\n    at Scene3DBase.Mesh (<anonymous>:7423:9)\n    at View\n    at Scene3DBase (<anonymous>:7372:27)\n    at Pressable\n    at Pressable (<anonymous>:7226:59)\n    at StudioViewport (<anonymous>:109325:13)\n    at View\n    at Row (<anonymous>:7207:56)\n    at StudioEditor (<anonymous>:109584:19)\n    at View\n    at Box (<anonymous>:7205:48)\n    at C3 (PreviewCol:5216:38)\n    at View\n    at Box (<anonymous>:7205:48)\n    at Workbench (<anonymous>:93643:28)\n    at View\n    at Box (<anonymous>:7205:48)\n    at WorkbenchRoute (<anonymous>:93808:34)\n    at Route (<anonymous>:7969:5)\n    at View\n    at Box (<anonymous>:7205:48)\n    at View\n    at Box (<anonymous>:7205:48)\n    at EditorShell (<anonymous>:111638:51)\n    at Router (<anonymous>:7904:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:112524:29)\n\nReact will try to recreate this component tree from scratch using the error boundary you provided, GlobalErrorBoundary.\n[js.err] [react-uncaught] Error: <Scene3D.Mesh dynamicKey=\"studio.part0\"> must be \"<slotId>~<version>\" — the '~' separator is required (e.g. \"mycart.head~3\"). Without it the host finds no dyn slot and silently drops the mesh.\n    at Scene3DBase.Mesh (<anonymous>:7470:21)\n    at renderWithHooks (<anonymous>:16783:28)\n    at mountIndeterminateComponent (<anonymous>:20161:23)\n    at beginWork (<anonymous>:21149:24)\n    at beginWork$1 (<anonymous>:25665:24)\n    at performUnitOfWork (<anonymous>:25113:22)\n    at workLoopSync (<anonymous>:25049:15)\n    at renderRootSync (<anonymous>:25028:17)\n    at performSyncWorkOnRoot (<anonymous>:24755:30)\n    at flushSyncCallbacks (<anonymous>:14159:32)\ncomponent-stack:\n    at Scene3DBase.Mesh (<anonymous>:7423:9)\n    at View\n    at Scene3DBase (<anonymous>:7372:27)\n    at Pressable\n    at Pressable (<anonymous>:7226:59)\n    at StudioViewport (<anonymous>:109325:13)\n    at View\n    at Row (<anonymous>:7207:56)\n    at StudioEditor (<anonymous>:109584:19)\n    at View\n    at Box (<anonymous>:7205:48)\n    at C3 (PreviewCol:5216:38)\n    at View\n    at Box (<anonymous>:7205:48)\n    at Workbench (<anonymous>:93643:28)\n    at View\n    at Box (<anonymous>:7205:48)\n    at WorkbenchRoute (<anonymous>:93808:34)\n    at Route (<anonymous>:7969:5)\n    at View\n    at Box (<anonymous>:7205:48)\n    at View\n    at Box (<anonymous>:7205:48)\n    at EditorShell (<anonymous>:111638:51)\n    at Router (<anonymous>:7904:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:112524:29)\n[js.err] Warning: %s: Error boundaries should implement getDerivedStateFromError(). In that method, return a state update to display an error message or fallback UI.%s GlobalErrorBoundary \n    at GlobalErrorBoundary (<anonymous>:112524:29)\n[js.warn] [PLACEFREEZE] snapshot flush reason=close mode=defer streams=11 delayMs=0.00 ms=25.01\n[js.warn] [PLACEFREEZE] snapshot flush reason=close mode=defer streams=11 delayMs=0.00 m",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T11:09:14.102Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T11:18:29.968Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the crash + added the add-mesh dialog. The crash: my earlier 'placed' memo refactor dropped the required '~<version>' separator from the Scene3D.Mesh dynamicKey (it was 'studio.part0'), and the host drops/throws on a dynamicKey without '~' — added a per-part version field in studioModel (init 0, bumps on future mesh edits) and the key is now 'studio.<id>~<version>'. The dialog (AddCubeDialog in Studio.tsx, opened by the outliner +add): pick the first cube's diameter (= width = depth) and height and confirm; model.addCube builds cuboid(diameter,height,diameter). Adding does not change the grid. Bundle-clean, hot-reload.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T11:18:29.968Z"
+}

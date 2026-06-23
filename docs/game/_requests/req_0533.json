@@ -1,0 +1,31 @@
+{
+  "id": "req_0533",
+  "at": "2026-06-10T13:37:48.959Z",
+  "origin": "codex:019eb1ac",
+  "text": "inside of the tile painter, there is wasd camera panning, howeever, it locks up when there is 'something in focus' which is really nothing, its the tile space that holds the grid, and its really fucking frustrating, can u just give me a key global to lock and unlock the canvas here so i can wasd easily without losing my fking mind",
+  "status": "review",
+  "sessionId": "019eb1ac-c636-7bc3-b34f-322257462a34",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T13:37:55.338Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T13:41:15.553Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an F8 global pan-focus lock in hmsc-int PaintCanvas so the tile painter can keep WASD panning even when the host reports the canvas/grid node as focused. The toggle claims canvas WASD ownership, bypasses the focused_id typing gate only while locked, clears drift when unlocked, and is covered by the viewrunaway pan test. Verified focused suite and hmsc-int bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T13:41:15.553Z",
+  "tags": [
+    "bug"
+  ]
+}

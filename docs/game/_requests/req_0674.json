@@ -1,0 +1,33 @@
+{
+  "id": "req_0674",
+  "at": "2026-06-12T07:03:52.188Z",
+  "origin": "session:c61d302f",
+  "text": "Ok that did work. walls get kinda scuffed but they resolve if y ou repaint them. ok so the next problem im having is with item LoS and walls. as in, i put lets say a fridge against a wall, i go on the other side of it, i can see the interact button for it but i cant see it physically",
+  "status": "review",
+  "sessionId": "c61d302f-e1c3-4475-b1f6-ef3b9201d8d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T07:04:09.038Z",
+      "actor": "c61d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T07:09:35.586Z",
+      "actor": "c61d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed interact-through-walls: PlayRoute's interact frame picked the nearest seat/container/door by straight-line distance only, so a fridge against a wall offered its E prompt to a player on the wall's far side. The scan now collects nearby blocker walls in the same pass and takes the NEAREST candidate the player can actually reach: a chest-height ray (GAME_BUILD.placed.raycast, exact oriented boxes) from player to candidate mid-height must not cross a blocking wall. Blocking semantics ride the existing tags: portal walls with no closed panel (arch/open doorway) and doors standing OPEN pass; closed doors and window walls block (see through glass, can't grab through it). Candidate doors hitting themselves don't count, so doors work from both sides. New INTERACT_EYE_HEIGHT_METERS=1.4 const beside INTERACT_REACH_METERS. Cart bundle-checks clean; hot reload picks it up — stand on the far side of the wall and the prompt should be gone.",
+  "shas": [
+    "a1e31e64f"
+  ],
+  "resolvedAt": "2026-06-12T07:09:35.586Z",
+  "tags": [
+    "bug"
+  ]
+}

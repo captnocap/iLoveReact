@@ -1,0 +1,30 @@
+{
+  "id": "req_1399",
+  "at": "2026-06-19T08:10:36.848Z",
+  "origin": "session:1863e7ee",
+  "text": "<task-notification>\n<task-id>b1onqptzb</task-id>\n<tool-use-id>toolu_01G2iy7nYwMz3tYiwU7ZYGNv</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/a996a941-a211-4bf9-a57f-07ba5431be8d/tasks/b1onqptzb.output</output-file>\n<status>completed</status>\n<summary>Background command \"Verify both paths, leave cart swapped\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "review",
+  "sessionId": "1863e7ee-a8ed-4cf3-85a6-49a899536c18",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T08:12:24.849Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T08:12:24.857Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Auto-captured from a task-notification (the both-paths verification background build), not a user ask. That verification confirmed swapped + non-swapped both build rc=0 with a single register and full render; a transient concurrent-build LABEL MISMATCH race was cleared by a clean re-ship.",
+  "shas": [
+    "1401ba757"
+  ],
+  "resolvedAt": "2026-06-19T08:12:24.857Z"
+}

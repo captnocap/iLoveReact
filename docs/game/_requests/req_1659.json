@@ -1,0 +1,30 @@
+{
+  "id": "req_1659",
+  "at": "2026-06-22T22:20:13.270Z",
+  "origin": "session:06fe423a",
+  "text": "It still happens. and it definitely is trees that causes it at this point because if i have my camera not looking at trees the ground is fine but if there is a lot of trees then its broken, also. the LoD and view distance doesnt seem to come into play in the compiled game world, which could be a large part",
+  "status": "review",
+  "sessionId": "06fe423a-d6e6-4bdd-a7f5-e511298cc05a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T22:21:11.457Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T22:27:20.687Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Found and fixed the REAL 'ground disappears when trees come into view' bug (the earlier dyn-slot fix b7a4a2520 was a different latent cap, 20<48 here so it never triggered). Mechanism: the ground-formula pass wrote its per-chunk model instances into the SHARED per-frame g_instance_buf at the running inst_top cursor, AFTER the dynamic instanced-batch pass and gated on the 262144 inst_cap. On a large world whose total instance rows (3.5M in the authored bake) overflow the static instance buffer (MAX_STATIC_INSTANCES=1.05M), the overflow FOLIAGE families fall back to that same per-frame buffer; a view full of trees/grass filled inst_top to the cap before the ground pass ran, so every painted ground chunk broke out on the cap and vanished — exactly view-dependent (look away from the trees and the ground returns). Fix: the ground pass now writes into its OWN dedicated g_ground_inst_buf (one InstanceData per drawn chunk, ~10KB), decoupled from foliage, so the floor you stand on always draws — mirrors the loader registering floor colliders first. Verified: no-V8 loader builds clean and rjit game shot renders the 3.5M-row world (45x45 grid, 1646 chunks) headless to render-proof GREEN / shot PASS. SEPARATE follow-up the user explicitly flagged ('LOD/view distance doesnt come into play'): total rows 3.5M > MAX_STATIC_INSTANCES 1.05M forces streaming lod_budget=0 ('lod shell 0 rows'), so there is no far field — needs a decision (raise the static cap ~280MB+, or exclude grass population from the static budget, or cap density).",
+  "shas": [
+    "14219176c"
+  ],
+  "resolvedAt": "2026-06-22T22:27:20.687Z"
+}

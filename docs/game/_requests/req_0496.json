@@ -1,0 +1,31 @@
+{
+  "id": "req_0496",
+  "at": "2026-06-10T10:39:58.236Z",
+  "origin": "codex:019eb11a",
+  "text": "sorry, did you say that they arnt using a router?",
+  "status": "review",
+  "sessionId": "019eb11a-609c-7012-8b21-a57c9a570e4c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T10:40:08.868Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T10:40:23.645Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified that hmsc-int does use the repo Router/Route system. The lag hypothesis was not 'no router'; it was that the editor panes are intentionally kept mounted under route overlays, so /compiled can still pay hidden editor layout/paint cost unless that subtree is hidden or paused. No code changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T10:40:23.645Z",
+  "tags": [
+    "ask"
+  ]
+}

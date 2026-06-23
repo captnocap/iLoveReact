@@ -1,0 +1,24 @@
+{
+  "id": "req_1541",
+  "at": "2026-06-20T23:08:15.260Z",
+  "origin": "session:3ffba6a0",
+  "text": "yep see if u can figure it out then best way to do so is just add logs that say what slot it is in and then update a ts file and watch it say something new",
+  "status": "doing",
+  "sessionId": "3ffba6a0-bfb0-4b53-954f-6fcbbda73737",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T23:09:15.848Z",
+      "actor": "3ffb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T23:13:54.961Z",
+      "actor": "3ffb",
+      "kind": "note",
+      "text": "In flight. Added temporary diagnostic to StudioViewport.tsx: on-screen bd-diag (bottom-left) showing live mountEpoch + each backdrop's slot/version/texKey/pos, plus a [bd-diag] MOUNT/UNMOUNT console.warn. Compiles clean (SHIP_RUN_PACKAGE=0 ship). Hypothesis: a .ts hot reload RE-MOUNTS StudioViewport → new mountEpoch → rotates every backdrop slot/texture key → host re-bakes image (the reset); .tsx renders in place so epoch holds. Deeper root cause of the ORIGINAL offset bug (which the per-mount nonce works around): BackdropSurface StaticSurface bakes with warmupFrames:0, so on a remount it likely captures before the <Image> decodes → blank/offset bake, marked ready, never re-captured. Proper fix = give BackdropSurface warmupFrames + stable keys, then delete mountEpoch so the image survives every reload like the camera. WAITING on user to edit a .ts vs .tsx file and report whether the on-screen epoch changes, before applying the fix."
+    }
+  ]
+}

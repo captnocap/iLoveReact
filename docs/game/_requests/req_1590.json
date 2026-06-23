@@ -1,0 +1,10 @@
+{
+  "id": "req_1590",
+  "at": "2026-06-21T15:11:12.355Z",
+  "origin": "session:6e3404e7",
+  "text": "ok cool. now, so that huge amount of data still, is that is what is causing the huge delay in loading the map editor to begin with, and can it be fixed on that end also from the same approach",
+  "status": "new",
+  "sessionId": "6e3404e7-9c3d-4b02-be2b-4b93ea47d0fe",
+  "captureMode": "hook",
+  "events": []
+}

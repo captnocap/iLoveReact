@@ -1,0 +1,31 @@
+{
+  "id": "req_0471",
+  "at": "2026-06-10T06:25:57.017Z",
+  "origin": "codex:019eaf3e",
+  "text": "can u see it? [Image #1] look, its not snapping :( swa[Image #2][Image #3] see what its doing",
+  "status": "review",
+  "sessionId": "019eaf3e-0282-7ba1-99cd-6b025b307dea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T06:26:12.087Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T06:29:33.711Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the visible wall-face snap miss by adding a wall-specific edge-snap path. Wall hits now use the target wall's authored line/endpoints instead of the shifted physical face: end-cap hits extend collinearly, side-face hits near an endpoint turn the corner on the aimed side, and side-face hits away from endpoints stay on the same wall line/base Y. Floor/roof side faces remain blocked for wall-on-floor. Added REQ-0471 regression tests. Verified build-snap 18/18, build-placed 45/45, and full hmsc-int esbuild bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T06:29:33.711Z",
+  "tags": [
+    "bug"
+  ]
+}

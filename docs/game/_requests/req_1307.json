@@ -1,0 +1,10 @@
+{
+  "id": "req_1307",
+  "at": "2026-06-18T21:34:16.189Z",
+  "origin": "session:9e041fa8",
+  "text": "hey so im wanting to paint this model i made and its turned into a bit of a headache here because well \nso here is the problem, [Image #28] all the white you see on there, is technically 'painted black' but because of some shit that doesnt really make much sense to me, it is 'sampling the nearest color' or whatever. I dont really know, but claude suggests \nThe seams are bilinear filtering\n  blending across atlas slot\n  boundaries: at a face's UV edge the\n  GPU averages its texel with the\n  neighbor's texel (gutter or the next\n  face's slot), drawing a thin\n  off-color line. Nearest sampling \n  samples exactly one texel — no \n  averaging — so a face's edge can only\n  ever be its own paint. No blend = no\n  seam, no bleed, no red-on-black. And\n  since paint is flat colors, nearest\n  loses nothing visually (you don't\n  want smoothing on flat fills anyway).\n  That's why this is the real fix and\n  the padding/bleed tuning never could\n  be — those fight the symptom, nearest\n  removes the mechanism.\n\n  Two honest caveats, so I don't\n  over-promise again:\n  1. It's global. It flips the Scene3D\n  texture sampler for every mesh, so\n  the whole game's textures become\n  crisp/blocky instead of smooth. Given\n  the PSX-style look that's probably\n  fine (the code even anticipates\n  this), but it's a visible change —\n  your call.\n  2. Mipmaps. If the sampler does\n  mipmapped minification, faces seen at\n  a distance could still average\n  neighbor texels. If so I'll disable\n  mips for this texture too — same fix,\n  one extra line.\n\nwhich i dont really even know what that means. what does 'turns everything blocky and crisp' mean",
+  "status": "new",
+  "sessionId": "9e041fa8-bb4b-47e8-9250-ce5cf71d3fa9",
+  "captureMode": "hook",
+  "events": []
+}

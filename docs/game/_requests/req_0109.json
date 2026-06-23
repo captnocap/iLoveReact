@@ -1,0 +1,13 @@
+{
+  "id": "req_0109",
+  "at": "2026-06-06T12:53:29.446Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT on the junction repair, split: floor-top flush PASSES (\"the flush for sitting ontop of the floor is good\"), but wall-to-wall corners still FAIL: \"but this is not on the wall to wall connect\". Screenshot: /home/siah/.claude/image-cache/42677ed6-e8fa-4672-83bf-b68e46d28bef/7.png — at a corner where two walls meet, there is a visible notch/step at the joint (arrow): one wall's end face does not reach the other wall's outer face, leaving a stepped corner instead of a clean closed L. Your earlier data showed wall thickness 0.25 (x[2.875,3.125]) — at a corner, one wall must extend to cover the other's thickness (or both mitre), otherwise the outer corner always shows this notch. Print the placed bounds of both walls at the user's corner case, show the uncovered 0.25 sliver, then fix the corner join rule in the lattice: wall-end-to-wall-side junctions close the outer corner exactly. Extend the junction test to L-corners (and T-junctions while you are in there — assert closed outer faces, exact coordinates). Verify + seam/snap tests stay green. User's corner is the PASS gate.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

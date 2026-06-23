@@ -1,0 +1,28 @@
+{
+  "id": "req_1672",
+  "at": "2026-06-22T23:47:30.738Z",
+  "origin": "codex:019ef182",
+  "text": "ok, better still not best. give it one more go [Image #1] look here now",
+  "status": "review",
+  "sessionId": "019ef182-d012-70f2-8579-97076088563d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T23:47:43.643Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T23:49:27.546Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cleaned up the remaining wall-corner visual overlap. The prior fixes stopped endpoint tabs, but perpendicular rendered wall boxes still overlapped in plan by wall thickness, causing top-face hatching/crossing at corners. Changed the shared piece visual decomposition so rendered wall boxes make butt joints: collision bands still extend through joins, but visual bodies pull back by half wall thickness where needed so top faces do not overlap. Expanded wallSlabs tests with plan-rect no-overlap assertions for L-corners and T-junctions. Reran wallSlabs, placed, snap, and compile world parity suites.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T23:49:27.546Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_0655",
+  "at": "2026-06-12T05:13:45.577Z",
+  "origin": "session:5fe47a3e",
+  "text": " before you fix it, can produce a test that fails, we need to improve the test approach for this exact type of mismatch behavior because all green is effectively useless when it isnt true end to end",
+  "status": "review",
+  "sessionId": "5fe47a3e-97b1-49a1-8770-0ebda5f10304",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T05:14:05.465Z",
+      "actor": "fable-doors",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T05:26:49.661Z",
+      "actor": "fable-doors",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the EDITOR↔COMPILED render parity harness the all-green gap demanded: compile/worldParity.test.ts classifies a 0.1m probe grid as opaque/open against BOTH the editor's pieceVisualShapes and the baked instance rows and requires agreement at every probe, plus the player's invariant (a body-passable point must never be opaquely rendered — walk-through implies see-through, the exact req_0654 hidden-wall repro). To let a headless suite import the editor's look, the pure shape math moved out of pieceMeshes.tsx into React-free editors/build/pieceShapes.ts (BUILD_UI included; old surfaces re-export, no import site changed, adjacent suites stay green). Committed RED by design at 4feaa90bb: 3/15 pass — all 7 wall edits + open door fail parity, the arch is opaquely rendered at walk-through probes, the window ships no pane, and the harness even caught an unknown 26-probe elevator-header divergence. The fix (req_0654) turns it green next; the suite then stands guard against this whole mismatch class.",
+  "shas": [
+    "4feaa90bb"
+  ],
+  "resolvedAt": "2026-06-12T05:26:49.661Z"
+}

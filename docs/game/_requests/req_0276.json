@@ -1,0 +1,13 @@
+{
+  "id": "req_0276",
+  "at": "2026-06-08T04:59:03.639Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: RAMPGAP-0608 — USER, verbatim: \"the edge of the ramp at the top is invisible/empty\". Image /home/siah/.claude/image-cache/65a3b158-192d-4949-99b0-83b2b071ce2a/23.png: the thin-slab ramp's TOP edge has an open gap/wedge — the geometry doesn't seal where the inclined slab meets its top elevation, you see through/into emptiness at the high edge. This is the RAMPREAL thin-slab ramp geometry missing a cap face at the top edge (and possibly the side end-caps). Print/inspect the ramp mesh faces the builder emits — confirm the top edge (and side ends) of the inclined slab have closing faces; add the missing cap(s) so the ramp is a closed solid, not an open ribbon. Pairs naturally with RAMPCHAIN (same ramp piece, same high edge) — do them together when you reach the ramp work; keep it on the build queue behind the building-bug cluster. Material/skin must apply to the new cap faces too (do not leave them untextured).",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

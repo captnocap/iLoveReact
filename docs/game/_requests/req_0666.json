@@ -1,0 +1,31 @@
+{
+  "id": "req_0666",
+  "at": "2026-06-12T06:15:12.716Z",
+  "origin": "codex:019eba70",
+  "text": "nice now look here for me. notice how in the building workspace the skin looks like this [Image #1] [Image #2] in the iso3d editor, the front/back of the window is not the same as the front/back of the window in this building workspace. [Image #3] [Image #4]",
+  "status": "review",
+  "sessionId": "019eba70-af1b-7633-a9f1-ba5a8c22c607",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T06:15:19.013Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T06:19:04.732Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Aligned iso/test/compiled wall face skins with the building workspace. The shared pieceVisualShapes wall decomposition now swaps front/back semantic face slots for odd quarter-turn walls, matching BuildingStage's yaw-90 convention where front is world -X. This fixes window walls and doorway walls because both use the same wall-family cutout decomposition. Added a compile/worldGeometry regression that checks yaw-90 window and doorway walls put front/back skins on the same sides as the building workspace.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T06:19:04.732Z",
+  "tags": [
+    "bug"
+  ]
+}

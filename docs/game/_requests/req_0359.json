@@ -1,0 +1,33 @@
+{
+  "id": "req_0359",
+  "at": "2026-06-08T15:11:44.950Z",
+  "origin": "codex:019ea612",
+  "text": "woh thats wild it updated without me reloading in the compiled route. nice. so another thing you dont have all the paint shape or something here. look at my map see the black [Image #1] on it well its not here [Image #2]",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T15:12:03.088Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T15:16:30.160Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compiled relief floors now carry their authored paint mask instead of collapsing to one averaged material. The bake writes a v2 heightfields lump containing the regular height grid plus a 4px-per-tile RGBA texture made from the chunk tileData palette; constructor.zig decodes and owns that texture; world_loader.zig registers the terrain heightfield for physics and binds the texture on the native Scene3D heightfield mesh. Verified with tools/rjit game verify and a fresh /compiled screenshot at zig-out/game/hmsc-int-compiled-painted-heightfield.png showing the black painted band on the terrain.",
+  "shas": [
+    "271d5711c"
+  ],
+  "resolvedAt": "2026-06-08T15:16:30.160Z",
+  "tags": [
+    "bug"
+  ]
+}

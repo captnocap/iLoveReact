@@ -1,0 +1,17 @@
+{
+  "id": "req_0130",
+  "at": "2026-06-06T14:17:37.322Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — your UIFLAP fix did NOT kill the churn at the consumption layer. Evidence from the user's live dev log AFTER your fix was pushed (rebuilt-pushed 7:13:00 AM, spikewatch re-armed after): host-spike frame=2573 total=14049us paint=12571; frame=2632 paint=12420; frame=2692 paint=13463 — same paint-dominant 12-14ms spikes, same cadence, post-push. Either the heartbeat re-render has a second consumer you did not stabilize, or the StaticSurface re-bake fires regardless of your prop-identity fixes, or your fix is not actually in the running bundle (verify the push at 7:13 contains your edits). Do not guess: read the live trace yourself — the diagnostics jsonl at /tmp/hmsc-int-diagnostics.jsonl carries the recon-churn records if the user's gv_churntrace survived the reload (if churntrace state resets on hot reload, fix that too — diagnostic arming must survive pushes). Pull the post-push churn records, name what is STILL mutating per beat, and fix that. Done-bar unchanged and now stricter: host-spike lines stop appearing in the dev log during idle, post-push, in the user's session.",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:12:34.146Z",
+  "resolution": "Resolved in b91a941962eeb56e3cbc631f1ac39f2ce59f10d7. The remaining post-push host-spike path was handled by moving atlas-miss, text-trace, and StaticSurface capture reporting to the exact native host spike frame and by avoiding stale JS recovered-frame attribution. The user subsequently confirmed the performance problem is solved and walking is no longer choppy.",
+  "shas": [
+    "b91a941962eeb56e3cbc631f1ac39f2ce59f10d7"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

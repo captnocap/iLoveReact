@@ -1,0 +1,13 @@
+{
+  "id": "req_0286",
+  "at": "2026-06-08T05:39:27.209Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: VEHICLE REBUILD — user confirmed live the vehicle source is STILL the old wrong model (one vehicle named 'ambulance', pick-the-type + set-the-service selectors). Rebuild it to the user's ruled model. This is NOT a new design question — the user specced it fully; build exactly this:\n\nTHE MODEL (a vehicle POPULATION table, GTA-style — NOT one Car with variants):\n- The vehicle TYPES ARE the roster entities. Roster shows MULTIPLE rows, one per type: sedan, coupe, wagon, van, pickup, sports, fire truck, police car, ambulance. Each is its own row. NOT a single 'ambulance' doc with a type picker.\n- SERVICE IS INFERRED from the type, never set by hand: ambulance->medical, police car->police, fire truck->fire, all others->civilian. DELETE the service selector entirely.\n- Per-type AUTHORING FIELDS = population params: spawn rate, rarity, speed, and color variations (color variations via THE shared material chooser, the same variant pattern clothing/buildings use).\n- KILL: the car-N identity minting, the 'vehicle' type-enum-as-identity-selector, the standalone service selector, the one-Car-collapse idea.\n\nContext: pane 10 already posted a grounded VEHCOHERE proposal (the game consumes VehicleDoc -> GAME_VEHICLE.build; the 8 'types' are geometry presets in one builder; service adds livery). Read the existing source editors/workbench/vehicles/ (store.ts, panel.ts, source.tsx, stream.ts) and that proposal, then rebuild the source+panel to the model above. If spawn-rate/rarity/speed have no consumer in the world spawner yet, expose them as authored fields anyway (P2 tuning data) and note where the spawner would read them — do not invent silent behavior. Census-style: every old capability still reachable. Verify green, post a parity note + a SELFSHOT of the new multi-row roster. NO commit until I + the user see it. Do it yourself, no subagents.",
+  "status": "new",
+  "sessionId": "019ea1db-5f93-7392-8554-9c688d1be33f",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

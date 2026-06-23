@@ -1,0 +1,28 @@
+{
+  "id": "req_0961",
+  "at": "2026-06-15T09:50:52.277Z",
+  "origin": "session:832d7b44",
+  "text": "ok. so pass a /hand-over and tell them to start by looking at the painter we have right now that has a layers component, we are going to use that for meshes. we want t o start with an empty grid no mesh on it at all",
+  "status": "review",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T09:51:31.113Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T09:53:47.895Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote a hand-over brief (/tmp/handoff-20260615-095147-studio-mesh-editor-outliner-from-paint-layers-empty-grid-sta.md, original_conversation_id 832d7b44-5500-43d9-a885-879b9e42b507) directing the next session to: (1) make the Studio start with an EMPTY grid, no default mesh (StudioRoute currently boots cuboid(1,1,1); change to an empty parts list and guard StudioViewport's no-mesh path); (2) build the mesh OUTLINER by reusing the paint layers component — the generic LayerStackStrip in editors/paint/LayerStrip.tsx (LayerStripRowModel/LayerStripAction) fed the Studio parts list; (3) continue the first slice (add-mesh dialog, transform, face/edge/vertex selection + gizmo) per the playbook design gate. The brief carries full state (editMesh keystone + Studio viewport landed, all hot-reloadable), the bundle/test commands, the host-owned-camera and Lego-composition constraints, navigation, request-board contract, and user profile, so the next session resumes with zero re-prompting.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T09:53:47.895Z"
+}

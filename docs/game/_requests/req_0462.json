@@ -1,0 +1,31 @@
+{
+  "id": "req_0462",
+  "at": "2026-06-10T05:41:33.957Z",
+  "origin": "session:2e5197b8",
+  "text": "so the grid problem is still a mystery to me. so if a tile is 1m and a floor is 3x3 tiles, then the grid should be exact. but look [Image #3] the building is not on the grid at all ? notice that",
+  "status": "review",
+  "sessionId": "2e5197b8-1894-4144-a6e1-1e2bfb997258",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:42:08.405Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:52:19.887Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigated 'building not on the grid' in the iso build pane. Confirmed the live system is correct: the iso grid draws lines on integer/tile-edge coordinates (Math.round(center/step)*step, step holds at 1 in the building-zoom range after the req_0440 LOD fix), and IsoAuthor places pieces through the SAME exact resolveSnapTarget + analytic unproject as F2, so clean whole-tile pieces (3m floors/walls/cubes) land on the grid. Walls intentionally edge-snap centered on the line (~0.125m straddle), and non-whole-tile pieces (pillar 0.6m, stairs 1.2m, props/signs 1.9/2.4m) can't align to a 1m grid. ROOT CAUSE per the user: the building was authored before placement normalization, so its STORED positions predate the current snap and now read off-grid — stale data, not a code bug. No code change. Resolution options offered: rebuild (prefab/clone) or a one-time re-snap migration of existing pieces (awaiting user decision).",
+  "shas": [],
+  "resolvedAt": "2026-06-10T05:52:19.887Z",
+  "tags": [
+    "bug"
+  ]
+}

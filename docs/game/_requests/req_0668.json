@@ -1,0 +1,33 @@
+{
+  "id": "req_0668",
+  "at": "2026-06-12T06:22:54.535Z",
+  "origin": "session:c61d302f",
+  "text": "ok that fixed it. here is another problem im having. so i have this prefab im working on. and i want to build another room. except i cant seem to get it to grid snap anywhere its like prefabs are on a completely different axis than floors are entirely",
+  "status": "review",
+  "sessionId": "c61d302f-e1c3-4475-b1f6-ef3b9201d8d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T06:23:09.384Z",
+      "actor": "c61d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T06:32:44.822Z",
+      "actor": "c61d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed prefab grid-snap misalignment: prefabs armed in F2 and the iso pane snapped by their ORIGIN (the capture's min piece center — often a wall line) on the 1m substrate, while floors snap module-centered on their own 3m lattice, so a stamped room's floors landed 1-2 tiles off every natively placed floor. Added prefabGridAnchor (game/build/prefabs.ts): the prefab's first floor (else roof) plate center + module size; resolveSnapTarget (editors/build/snap.ts) gains anchorLocal — that point snaps to the module lattice instead of the origin, rotating with the ghost in the same R(+yaw) frame the stamp composes with. Both placement surfaces wired (PlayRoute refreshSnapTarget, IsoAuthor resolveAt). Plateless (walls-only) prefabs keep origin snapping. Tests: snap suite 26/26 + build suite 25/25 incl. new req_0668 cases (flush floors at all four stamp rotations; anchor selection floor>roof>null). TSX-only — hot reload picks it up, no rebuild.",
+  "shas": [
+    "5ecbd146a"
+  ],
+  "resolvedAt": "2026-06-12T06:32:44.822Z",
+  "tags": [
+    "bug"
+  ]
+}

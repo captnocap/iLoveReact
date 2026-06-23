@@ -1,0 +1,13 @@
+{
+  "id": "req_0156",
+  "at": "2026-06-06T18:00:35.922Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — PLACEFREEZE-0606, queue this as your NEXT task (WBSTEP6 continues after). User report with spike evidence, verbatim conclusion: \"the moment i start to go place a floor... this is what my performance does... this isnt as bad as it was before i will say that. but its still concerning, when i have an empty map\". The data: placing ONE floor piece on an EMPTY map = a 201.34ms frame (caught: GC/NATIVE, other=200.65ms — outside every render phase; scene3d_instances 72->73 +1; pieces 12->13) and one placement-adjacent frame hit 472.31ms. Smaller 6-17ms host-tape blips also correlate with placement/hover (+1 instance, +17-19 glyphs each). The 200-470ms class is the target. Measure, do not guess: instrument the placement COMMIT path end-to-end with a diagnostic channel — placement accept -> collision re-register -> scene3d/world geometry rebuild -> StaticSurface work -> autosave/store write — and post WHERE the 200ms goes on a single empty-map placement. Suspects to check with data: whole-world collision/scene rebuild per placement instead of incremental add (your gated watchdog re-fires legitimately on world change — does it rebuild EVERYTHING?); the autosave write being synchronous on the frame (the text trace shows \"autosaving\"). Fix the dominant hop only — incremental add or off-frame write, whichever the data names. Zig-side logic gets Zig-side unit tests (framework/testing/unit/, zig build test-*) in addition to consumption-layer TS tests — standing rule. DONE-BAR: timeline numbers + named hop + placement cost back to single-digit ms in the live session + verify green. DO NOT COMMIT. The user placing pieces smoothly is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "perf-log",
+    "bug"
+  ]
+}

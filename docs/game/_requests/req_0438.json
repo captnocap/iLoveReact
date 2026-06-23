@@ -1,0 +1,30 @@
+{
+  "id": "req_0438",
+  "at": "2026-06-10T03:59:20.964Z",
+  "origin": "session:0ce255e1",
+  "text": "this: [Image #1] [Image #2] what is the difference of these two images",
+  "status": "review",
+  "sessionId": "0ce255e1-e6f7-4640-95b6-c6054e1a2eb6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T04:01:44.543Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T04:01:44.551Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The two screenshots showed the grid problem: zoomed IN the iso grid is a bold clean lattice that fills the view; zoomed OUT it's a tiny speck near centre and the map reads grid-less. Cause: IsoGrid drew a FIXED 26-tile (~52m) patch around the camera with 0.08m-thick lines, so when zoomed out over the large map the patch covered a sliver and the thin lines fell below a pixel. Replaced it with an adaptive-LOD grid: the cell size, the coverage extent, and the line thickness all scale with the eye distance (stage.distance()) — 1-tile cells up close, coarse 8/16/32-tile cells far out — with the line count bounded (~114 boxes), the centre snapped to the cell step so lines stay world-anchored and don't shimmer on pan, and steps kept to nice 1·2·4·8 multiples of the 1 tile = 1 m grid so they always fall on real cells. Committed 696381509, bundles clean.",
+  "shas": [
+    "696381509"
+  ],
+  "resolvedAt": "2026-06-10T04:01:44.551Z"
+}

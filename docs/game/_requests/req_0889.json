@@ -1,0 +1,18 @@
+{
+  "id": "req_0889",
+  "at": "2026-06-14T00:54:32.752Z",
+  "origin": "session:5de2c418",
+  "text": "this is not the same. this is what u have right now [Image #5] this is what it used to look like [Image #6] do you notice the difference",
+  "status": "doing",
+  "sessionId": "5de2c418-75b9-4d35-8158-25b1c471529e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T00:56:28.346Z",
+      "actor": "session-5de2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

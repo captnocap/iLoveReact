@@ -1,0 +1,12 @@
+{
+  "id": "req_0113",
+  "at": "2026-06-06T12:59:53.599Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — CONPORT-B-0606. The user ruled ALL missing console verbs get ported (\"ya port them all it should have been anyways\"). You own part B, from the census another lane built (reference pointers included): (1) :watch / :unwatch / :watches — live value watching, love2d/lua/console.lua:318-320, impl :774-800; (2) :record / :stop / :play / :macros — input macro record/replay, console.lua:322-325, impl :812-854; (3) :template / :templates — console.lua:326-327, impl :869-890; (4) wv_validate — currently a stubbed notYet placeholder at cart/hmsc-int/commands/registry.ts:1386: implement it for real per its reference. Port FAITHFULLY from the love2d reference — copy behavior and argument semantics verb by verb, do not invent. Mode-by-mode parity; a verb is done only when every reference mode works. Real test file at the console consumption layer. Part A (:tree/:perf/:dump etc) belongs to another lane; noclip + gv_perflog 2 to a third — touch none of those. Build via tools/rjit only; never revert anything. DONE-BAR: every part-B verb live with reference semantics + tests + tools/rjit game verify green + READY with a per-verb checklist. DO NOT COMMIT. User confirmation is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

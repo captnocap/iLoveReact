@@ -1,0 +1,31 @@
+{
+  "id": "req_0350",
+  "at": "2026-06-08T13:46:11.690Z",
+  "origin": "codex:019ea612",
+  "text": "Which. im confused. How is there any divergence between one or t he other if its the same thing just now loaded into a react component ?",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:46:19.787Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:58:27.467Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Closed the divergence by removing the generic Scene3D substitution seam: /compiled is now a native WorldLoader node painted by the engine directly through world_loader.zig. Remaining camera divergence was identified as event-loop ownership and fixed by forwarding editor mouse input into the loader runtime.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T13:58:27.467Z",
+  "tags": [
+    "ask"
+  ]
+}

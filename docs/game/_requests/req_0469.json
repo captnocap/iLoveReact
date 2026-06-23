@@ -1,0 +1,33 @@
+{
+  "id": "req_0469",
+  "at": "2026-06-10T06:14:53.544Z",
+  "origin": "session:0ce255e1",
+  "text": "I am placing a floor/wall on a floor that isnt the bottom and the wall just places on the bottom. it now follows the floor grid im on but the peice just falls through",
+  "status": "review",
+  "sessionId": "0ce255e1-e6f7-4640-95b6-c6054e1a2eb6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T06:19:58.382Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T06:30:33.994Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "After the level fix made placement follow the active floor, a piece placed on an upper floor fell to the bottom: liftBuildingsToTerrain pads a group's lowest piece DOWN to the terrain under its footprint, and an upper-floor piece's base sits ABOVE terrain (negative offset) so it was dropped. Fix: only ever lift a group UP (apply when offset>0), never push it down — a ground building under a painted hill still rises (the offset is keyed on its ground floor, so upper floors ride along), but an upper-floor piece is never dropped to the ground. Committed ad59c4578, bundles clean.",
+  "shas": [
+    "ad59c4578"
+  ],
+  "resolvedAt": "2026-06-10T06:30:33.993Z",
+  "tags": [
+    "bug"
+  ]
+}

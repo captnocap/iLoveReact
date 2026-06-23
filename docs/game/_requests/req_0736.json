@@ -1,0 +1,33 @@
+{
+  "id": "req_0736",
+  "at": "2026-06-13T07:48:42.585Z",
+  "origin": "session:b2985164",
+  "text": "hey whatever the very last thing u did was brought it back",
+  "status": "review",
+  "sessionId": "b2985164-7aad-4573-accc-12a386983e72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T07:52:29.488Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T07:52:29.511Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User confirmed the always-ship-verts change brought the iso-pane grid + buildings back. Instanced buckets no longer depend on the poisoned global shipped-set; they self-describe, the host interns the shared Box key, and the grid's key-only lines cache-hit off it. Committed as 504bb53ca.",
+  "shas": [
+    "504bb53ca"
+  ],
+  "resolvedAt": "2026-06-13T07:52:29.511Z",
+  "tags": [
+    "bug"
+  ]
+}

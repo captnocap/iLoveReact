@@ -1,0 +1,33 @@
+{
+  "id": "req_0595",
+  "at": "2026-06-11T01:38:39.762Z",
+  "origin": "session:da94d3e7",
+  "text": "as for the ball props. and really, most of these things, they should all carry collision physics and move, like a cone, ball, etc. i want to be able to kick around the ball for example by just running into it",
+  "status": "review",
+  "sessionId": "da94d3e7-791d-4eab-8e13-a3f2c1e8c371",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T01:39:04.368Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T01:51:07.367Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Kickable props are in. The host physics integrator already stepped dynamic sphere bodies (gravity, world collision, bouncing, body-vs-body) but never resolved them against the PLAYER — so nothing could ever be kicked. Added capsule-vs-sphere contact in framework/game/physics.zig: running into a dynamic prop pushes it out of the player and transfers your approach velocity along the contact normal (scaled by the authored bodyRestitution tuning, 0.72), with a small upward pop on hard kicks — sprint into the soccer ball and it flies, bounces off walls and rolls out with per-kind bounciness. Which props are dynamic is data: a dynamics { bodyRadiusMeters, restitution } recipe on the kind definition — wired on all 3 balls (bouncy), the traffic cone and the trash can (low bounce, they shove/slide); adding more kinds (chairs etc.) is one line each. Placed dynamic props no longer emit static collision walls; the play route simulates them as host bodies, renders them live at their physics position, and keeps the resting-body idle discipline (no re-render storm). IMPORTANT: the Zig host changed, so the editor binary needs a rebuild before the kick is feelable — hot reload alone won't pick it up. Scope notes: wv_-painted world-layer props remain static for now; compiled no-V8 game parity for dynamic props is a follow-up. Verified: kinds/props 8/8, build 18/18, game/physics 15/15, zig ast-check, editor cart bundles clean.",
+  "shas": [
+    "88e739c81"
+  ],
+  "resolvedAt": "2026-06-11T01:51:07.367Z",
+  "tags": [
+    "ask"
+  ]
+}

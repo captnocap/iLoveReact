@@ -1,0 +1,18 @@
+{
+  "id": "req_0824",
+  "at": "2026-06-13T19:59:23.735Z",
+  "origin": "session:6e5908e6",
+  "text": "horrible spot there is a panel right there i cant interact with ur interface",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T19:59:57.263Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

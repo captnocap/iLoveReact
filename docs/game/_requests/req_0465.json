@@ -1,0 +1,32 @@
+{
+  "id": "req_0465",
+  "at": "2026-06-10T05:52:47.887Z",
+  "origin": "session:0ce255e1",
+  "text": "oh! and when building, and i select a whole combined structure, can u let me save it as a prefab. please :D",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-10T05:52:59.228Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:52:59.237Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added save-as-prefab to the iso build pane. When a selection is active, a new ⊞ button (beside clone/delete) turns it into a reusable prefab: GAME_BUILD.placed.prefabFromPieces builds an origin-relative BuildPrefabDef preserving each piece's per-face skin and wall edit, and a prefabDefined WorldEvent registers it on the same worldStream the cart already merges into the prefabs rail (buildingPrefabs, index.tsx) — so it shows up in the PREFABS tab immediately, ready to stamp again (and it flat-pads onto terrain like any prefab). Auto-named 'Custom N' since the pane has no inline text input; theme is taken from the selection's first piece. Works for any selection — single piece, hand-built structure, or whole building. Committed bf626e050, bundles clean.",
+  "shas": [
+    "bf626e050"
+  ],
+  "resolvedAt": "2026-06-10T05:52:59.237Z",
+  "tags": [
+    "ask"
+  ]
+}

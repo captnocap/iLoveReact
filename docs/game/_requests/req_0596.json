@@ -1,0 +1,31 @@
+{
+  "id": "req_0596",
+  "at": "2026-06-11T01:43:56.096Z",
+  "origin": "codex:019eb459",
+  "text": "on the iso3d builder in hmsc-int can you let me, when moving around props, since everything is grid locked, let me override with a key to place it free form so i can get flush against the wall",
+  "status": "review",
+  "sessionId": "019eb459-2638-7361-831d-b91e29d984a0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T01:44:01.240Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T01:47:35.348Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an Alt-held freeform override for iso authoring props. The shared snap resolver now has an explicit freeform flag that keeps default free props on the 1m substrate but can place at the cursor hit when requested. IsoAuthor passes that flag only for armed prop pieces, lets Alt-drag move prop-only selections by raw world delta instead of whole cells, and shows contextual Alt hints. Structural pieces remain grid/module locked. Added a snap regression test and documented the interaction in editors/build/CAPTURE.md. Verified build-snap 19/19 and direct IsoAuthor bundle; full hmsc-int cart bundle is still blocked by unrelated existing BrushRail export mismatch.",
+  "shas": [],
+  "resolvedAt": "2026-06-11T01:47:35.347Z",
+  "tags": [
+    "ask"
+  ]
+}

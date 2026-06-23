@@ -1,0 +1,28 @@
+{
+  "id": "req_1111",
+  "at": "2026-06-16T00:43:32.044Z",
+  "origin": "session:9f19b605",
+  "text": "yeah also, so u know in hitman u have the vision toggle to basically get wall hacks. well i was thinking how do i do this. and ive also been thinking it would be good idea to treat drugs as temporary hacks with consequences. and then now it is clear. we give these sorts of perks through drugs, we give the player stats some tolerance that builds up with use, so becomes less effective. and each drug has its own type of conseqences and benfit. like ketamine = noclip temporary but everyone is sus of the player, they are stumbling thru walls, or benzos = invisibility but the time of day flies by so using it for missions would require real strategy since time will fly around the player, amphetamines for wireframe wall hacks but your aim is twitchy and you cant steady focus it. these types of things",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T00:44:06.095Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T00:45:24.496Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design exchange (no code) — DRUGS AS TEMPORARY HACKS WITH CONSEQUENCES + the Hitman vision toggle. Surveyed first: greenfield (oracle confirms undecided; no drugs/tolerance system, no x-ray/vision render mode), but every effect plugs into a system that already exists. THE VISION TOGGLE ('how do I do this'): not geometry/wallhacks — an engine RENDER PASS (draw perception-flagged entities a second time with depth-test DISABLED + a wireframe/silhouette/emissive shader, gated by one flag) in framework/gpu, parameterized by data per V28 (a missing capability extends the engine, never a per-game script). THE MODEL: every drug is a (benefit, cost, tolerance) data triple — benefit = an engine hack capability (noclip / invisibility / x-ray vision, same family as the vision pass), cost = a MANDATORY consequence wired to an existing system (no pure-upside drug), tolerance = a per-drug stat axis that builds with use and decays potency / escalates cost. One registered DRUGS P2 table (like STATS_TUNING), each drug a row, no per-drug code. The three examples mapped to existing systems to REUSE not fork: ketamine = noclip + perception.ts suspicion spike + control wobble; benzos = invisibility (suppress perception input, not a new stealth system) + loop.ts clock acceleration (time flies = real mission timing strategy); amphetamines = x-ray wireframe vision + aim instability. Tolerance is a DERIVED multiplier per the stats law (base × f(tolerance), never stored), and escalating-cost-with-use is the addiction spiral that RHYMES with the void's escape-that-dead-ends spine (the shortcut that gets you ahead also degrades you; could let drugs aid a void run while accelerating decay). DISCIPLINES: drugs are data + effects are engine capabilities; benefit/cost always paired; tolerance derived not stored; effects compose with perception/clock/aim/collision; the vision toggle is a render pass. Offered to spin its own DRUGS_PLAYBOOK.md + oracle-indexed record like the void doctrine — awaiting the user's go vs more spilling.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T00:45:24.496Z"
+}

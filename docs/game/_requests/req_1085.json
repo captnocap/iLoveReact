@@ -1,0 +1,18 @@
+{
+  "id": "req_1085",
+  "at": "2026-06-15T22:46:25.951Z",
+  "origin": "session:6de4f048",
+  "text": "oh one more thing u can answer for me also, not a problem but... creepy, every time i compile the map, the npcs that are placed on here step like a few meters forward every time... like persistant they are gonna at some point exit the bottom of the map. why?",
+  "status": "doing",
+  "sessionId": "6de4f048-c04d-4674-87c7-dff1d1416eb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T22:46:48.943Z",
+      "actor": "6de4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

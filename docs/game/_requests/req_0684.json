@@ -1,0 +1,28 @@
+{
+  "id": "req_0684",
+  "at": "2026-06-12T13:02:25.334Z",
+  "origin": "codex:019ebbe8",
+  "text": "i added a cart/hmsc-int/Desk.glb for you to test with",
+  "status": "review",
+  "sessionId": "019ebbe8-ba1e-74d1-bd7a-0274b58ea604",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:02:38.742Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T13:12:12.985Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Tested the importer with cart/hmsc-int/Desk.glb using the repo v8cli host, regenerated the imported prop manifest and generated TypeScript, then verified the hmsc-int bundle plus focused Zig parse and world mapfile/gamefile tests all pass.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T13:12:12.985Z"
+}

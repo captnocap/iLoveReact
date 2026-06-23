@@ -1,0 +1,20 @@
+{
+  "id": "req_0270",
+  "at": "2026-06-08T04:47:11.969Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: FOOTMESH user-PASSED live (feet are good). Commit FOOTMESH + PAINTLIVE now — explicit paths for both waves only, nothing from other lanes. Re-run tools/rjit game verify green immediately before. These resolve req_0160 (FOOTMESH) and req_0080 (PAINTLIVE) — resolve both citing the commit hash(es). Post hash + file list.",
+  "status": "new",
+  "sessionId": "d5986127-0bb0-45d7-8075-c2a7cb6691a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T05:29:03.916Z",
+      "actor": "session:d5986127",
+      "kind": "note",
+      "text": "Superseded by req_0281 COMMIT UNWIND. FOOTMESH 94a71655f + PAINTLIVE 9c38a67fb landed; req_0160 + req_0080 in REVIEW."
+    }
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

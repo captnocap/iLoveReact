@@ -1,0 +1,28 @@
+{
+  "id": "req_1649",
+  "at": "2026-06-22T20:36:50.061Z",
+  "origin": "codex:019ef106",
+  "text": "That made it so that they do no render at all on load now",
+  "status": "review",
+  "sessionId": "019ef106-bfb2-75c0-b3e8-6be886d1fbc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T20:37:05.115Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T20:49:37.164Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Backed out the prior streaming/frustum change that made the compiled load render nothing. The replacement fix is in the renderer static-instance path: retained uploads are now whole-batch only, with oversized streamed batches falling back to dynamic subrange rendering instead of partially caching invalid rows. Verified the compiled no-JS loader screenshot renders again after the replacement path.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T20:49:37.164Z"
+}

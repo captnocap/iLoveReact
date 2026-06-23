@@ -1,0 +1,30 @@
+{
+  "id": "req_1318",
+  "at": "2026-06-18T21:53:24.670Z",
+  "origin": "session:9e041fa8",
+  "text": "wtf [Image #35] and now its right back to it [Image #36]\n\noh its just going back and forth. it isnt fixed. its because i went to coarse detail after reloading and that changes the paint layout entirely",
+  "status": "review",
+  "sessionId": "9e041fa8-bb4b-47e8-9250-ce5cf71d3fa9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T22:03:39.518Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T22:19:03.994Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed two root-cause paint bugs in the Studio model painter. req_1318: the detail slider doubled as the storage grid size, so changing it re-keyed every stored cell against a different-sized grid (paint scrambled / half-vanished / couldn't reach the end of big faces). Paint now stores on a FIXED grid (PAINT_GRID_UNITS in meshPaint.tsx); the slider only sizes the brush dab via the new dabRadiusCells helper, and faceCellGrid coarsens the cell when a face would exceed GRID_MAX so the grid always spans the whole face (no dropped tail). Overlay + bake routed through the fixed grid. Tests meshPaint 10/10.",
+  "shas": [
+    "eca6b2815"
+  ],
+  "resolvedAt": "2026-06-18T22:19:03.994Z"
+}

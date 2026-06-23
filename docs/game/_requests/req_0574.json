@@ -1,0 +1,37 @@
+{
+  "id": "req_0574",
+  "at": "2026-06-10T17:12:40.121Z",
+  "origin": "session:7a5b02e7",
+  "text": "hm. i think that is in part wrong a bit. read here @GUIDING_LIGHT.md and see if this aligns",
+  "status": "review",
+  "sessionId": "7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T17:14:16.812Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T17:14:58.040Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-10T17:48:10.980Z",
+      "actor": "fable-mat",
+      "kind": "note",
+      "text": "Rework landed as ruled — see req_0577 (commit 8b07e1c30): recipe in the lump, Zig rasterizer at load, baker layer deleted."
+    }
+  ],
+  "resolution": "Audited the decal pixel pipeline against GUIDING_LIGHT.md as asked. Verdict: partly misaligned — it ships the PRODUCT (baked 512x512 pixels, ~50KB) where the doc says ship the RECIPE: the DecalDoc itself is a ~1KB declarative document the host's fixed systems (rect fill, FreeType text, image loading) can rasterize once at load, the exact shape shader materials already use (materialize-at-load). The bake-lever exception covers only image nodes (captured content) and shader-fill rects — those should be content-addressed blobs in the gamefile asset store, not inline lump bytes. The 'open the editor once to bake' wart is the tell: recipes bake headless with no editor/GPU dependency. Aligned parts kept: no code in the frame loop, binary lump packing, load-once materialization. Proposed rework (awaiting the user's word): pack the DecalDoc into the MATERIALS lump, add a small Zig doc rasterizer (text via the already-linked FreeType is the meat, ~200 lines), delete the DecalPixelBaker/pixel-file/staleness layer. No code changed in this pass — assessment only.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T17:14:58.040Z",
+  "tags": [
+    "ask"
+  ]
+}

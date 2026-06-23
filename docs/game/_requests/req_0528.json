@@ -1,0 +1,39 @@
+{
+  "id": "req_0528",
+  "at": "2026-06-10T13:07:12.764Z",
+  "origin": "session:87a47e7e",
+  "text": "Also, so im looking at this, this tool is great really, but a few things i would change one of them not so big one of them much larger\n\nso i would have a toggle that is going to show just the wire points in total ive placed, so that i can continue from existing roads and make one whole system by the end of it, that should be relatively simple\n\nthe thing i also would like to change is, and this might be a lot more work, but look here [Image #1] notice how it is very sharp, and the roat has only 2 space on the curve. we need to deliver roads and pathing on a much finer grid within the tile system. where its still 3 tiles wide, but in those 3 wide its really like 10 wide inside of each tile width, like 10x10 would give us perfect curves for our roads",
+  "status": "review",
+  "sessionId": "87a47e7e-58c5-4ade-8b65-3201c99fe4d2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T13:08:52.699Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T13:13:42.810Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-10T13:55:25.150Z",
+      "actor": "session-87a4",
+      "kind": "note",
+      "text": "The LARGE half (fine-grid curves) landed in commit 92f3ae1dd: corner fillets (stamp + render share the arc) + the analytic road ribbon — per-chunk segment lists ride the shared tile-field shader, painting asphalt/double-yellow/dashed dividers/edge lines from distance-to-centerline, sub-tile sharp in both the 2D canvas and the 3D drape. No grid densification needed: gameplay tiles stay 1m; the look renders at the capture's ~4px/m. 22/22 planner cases; both carts bundle clean. WGSL not yet GPU-validated — first hot-reload will surface any shader error."
+    }
+  ],
+  "resolution": "Wire view + network continuation landed (commit fb886ae25): rail toggle (default ON) shows dotted centerlines, per-LANE wires at each lane's 3-tile group centre (green = with draw direction, red = opposing — the lane-merge ask from the follow-up message), and cyan endpoint connect-squares; new clicks snap to a stroke endpoint within 2.5 cells so roads continue into one network. Critical companion fix: the junction rule now requires CROSSING travel axes, so continuing from an endpoint (or drawing two roads head-on) reads as ONE continuous road instead of stamping a phantom junction box + zebras mid-road. 13/13 planner cases green, cart bundles clean, TSX-only (hot-reloads). The FINE-GRID ask (10x10 sub-tile curves) is NOT in this commit — design answer delivered in chat: gameplay tiles stay 1m (V4 scale economics), the smooth look comes from rendering the road analytically FROM the stroke (distance-to-centerline shader on the terrain drape, sub-tile sharp at any zoom) and traffic follows lane offset splines derived from the same stroke; that plus corner fillets is the next major slice alongside material stamping.",
+  "shas": [
+    "fb886ae25"
+  ],
+  "resolvedAt": "2026-06-10T13:13:42.810Z",
+  "tags": [
+    "ux"
+  ]
+}

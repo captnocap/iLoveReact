@@ -1,0 +1,15 @@
+{
+  "id": "req_0197",
+  "at": "2026-06-07T06:11:01.726Z",
+  "origin": "session:f2302907",
+  "text": "Right, but again, the compile from that button in the internal tool was from the intentions of that builds the whole game, and if cs had its maps baked into the game as one whole program then that would not have brought me to the convo but there is clearly a seperation of concerns im trying to ask about that you are overlooking here. the map format and all of that for cs is independant of the game itself. thats why the parsing script isnt just 1.6 and source, its hl1 and hl2 era maps. there is a difference between the two that ties into the whole inside-of-a-building is another world thing. the game loading between maps on a 'server' (the game state)",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:12:12.960Z",
+  "resolution": "Conceptual clarification (no code): acknowledged I'd collapsed the architecture to program+data when the user was pointing at the three-layer split — engine owns the map format (BSP is GoldSrc's, not CS's; one parser per engine era proves it), game DLL interprets opaque entity lumps and holds durable state (the 'server' persists across changelevel; the world is the transient thing), maps are hot-swappable assets. Tied in trigger_changelevel+landmarks as the literal 'inside a building is another world' mechanism with game-defined persistence contracts. Mapped onto our stack: map format belongs in framework/ not hmsc, hmsc is the game DLL + state holder, Compile button must split from whole-game to per-map compiler, doors = changelevel. Asked whether to record this as a DECISIONS.md verdict before re-scoping the Compile path.",
+  "shas": [],
+  "tags": [
+    "ask"
+  ]
+}

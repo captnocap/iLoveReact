@@ -1,0 +1,28 @@
+{
+  "id": "req_1632",
+  "at": "2026-06-22T16:43:46.895Z",
+  "origin": "session:7a8f00d4",
+  "text": "just add logging rather than trying to guess, that would tell you if you log it correctly",
+  "status": "review",
+  "sessionId": "7a8f00d4-327a-4595-a613-6ceb3eb4cdb8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T16:44:19.754Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T16:46:05.990Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked to add logging instead of guessing the prop-invisible cause. Added a [propgone] probe at every prop-render decision point: render3d/Prop.tsx (which renderer each kind dispatches to — ImportedProp/CookedProp/DataProp), render3d/props/CookedProp.tsx (names the exit: asset MISSING / mesh-blob MISSING / RENDER with vert+slot counts), and render3d/props/DataProp.tsx (resolvePropParts part count, flags EMPTY). Each line is deduped per kind→outcome so 108 props across frames yield one line each, not spam. All three bundle clean. Left UNCOMMITTED on purpose: they sit atop the other session's in-flight PROPSINGLE-0782 prop refactor and are temporary diagnostics. Awaiting the user's [propgone] output to pinpoint and fix the actual failure (reqs 1630/1631).",
+  "shas": [],
+  "resolvedAt": "2026-06-22T16:46:05.990Z"
+}

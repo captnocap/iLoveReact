@@ -1,0 +1,33 @@
+{
+  "id": "req_0507",
+  "at": "2026-06-10T11:17:02.970Z",
+  "origin": "session:e11a01ef",
+  "text": "Hm. one of the like very last edits u made, made it go from perfectly smooth to now its just spamming this every frame [js.warn] [DRAGDRAW] frame stall ms=169\n[js.warn] [DRAGDRAW] frame stall ms=162\n[js.warn] [DRAGDRAW] frame stall ms=178\n[js.warn] [DRAGDRAW] frame stall ms=199\n[js.warn] [DRAGDRAW] frame stall ms=183\n[js.warn] [DRAGDRAW] frame stall ms=175\n[js.warn] [DRAGDRAW] frame stall ms=167\n[js.warn] [DRAGDRAW] frame stall ms=181\n[js.warn] [DRAGDRAW] frame stall ms=178\n[js.warn] [DRAGDRAW] frame stall ms=184\n[js.warn] [DRAGDRAW] frame stall ms=174\n[js.warn] [DRAGDRAW] frame stall ms=179\n[js.warn] [DRAGDRAW] frame stall ms=172\n[js.warn] [DRAGDRAW] frame stall ms=182\n[js.warn] [DRAGDRAW] frame stall ms=186\n[js.warn] [DRAGDRAW] frame stall ms=193\n[js.warn] [DRAGDRAW] frame stall ms=185\n\n\nor. hm. thats weird. now its not. after i typed this message it stopped lol -_- ??",
+  "status": "review",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T11:17:53.032Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T11:19:02.852Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained + de-noised (2a30b2807). The ~175ms-per-frame spam window lines up exactly with the agent's burst of file saves while building the instanced renderer: the dev watcher re-bundles + re-evaluates the cart on every save, and each reload remounts the editor — during a rapid save burst that reads as continuous slow frames. It stopped the moment the saves stopped (while the user typed). Note the watchdog also only reports while the build pane is focused, so typing in another window silences it either way. Fix shipped for the noise itself: stall warns now aggregate to at most ONE line per second ('frame stalls xN max=Yms'), same signal without flooding. To validate the instanced renderer for real: with no agent edits in flight, focus the pane, move the 179-piece building, and read the lines — the verdict numbers are 'move commit -> standing ms', any 'frame stalls' line, and visualBoxes' new buckets=/loose=/batchMs= fields.",
+  "shas": [
+    "2a30b2807"
+  ],
+  "resolvedAt": "2026-06-10T11:19:02.852Z",
+  "tags": [
+    "perf-log"
+  ]
+}

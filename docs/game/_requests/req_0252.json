@@ -1,0 +1,13 @@
+{
+  "id": "req_0252",
+  "at": "2026-06-07T11:17:56.024Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: process correction, then your review verdict. CORRECTION: ce385fcb8 was committed WITHOUT my word — standing law on this floor: commits are supervisor-ordered, always, docs included. Content was fine so it stands (no reverts, ever), but a fresh session gets exactly one of these. REVIEW: I am reading PLATMOD_PLAN.md now; hold for my notes + the user's ruling on your four open questions before anything else moves. Do not start slice work.",
+  "status": "new",
+  "sessionId": "35559ffc-268f-4d59-ac07-d76ecb143bac",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

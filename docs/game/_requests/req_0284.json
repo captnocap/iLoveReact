@@ -1,0 +1,13 @@
+{
+  "id": "req_0284",
+  "at": "2026-06-08T05:36:45.961Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: STOP — DO NOT COMMIT bug-1 as passed. The user retracted: verbatim 'the windows in the game are not windows. they are just a weird cutout now. that is still the wall.' Image /home/siah/.claude/image-cache/65a3b158-192d-4949-99b0-83b2b071ce2a/26.png: the window renders as a DARKER TINTED SQUARE on a still-solid wall — not an actual opening. Your fix carried the skin (good) and the window EDIT, but the render makes a shaded patch instead of a real cutout. The window must be an ACTUAL opening — a hole through the wall you can see through (or a real window: frame + transparent/empty pane), NOT a tinted band on the same solid wall band. If you already committed bug-1, report the hash and we fix forward in a follow-up (NO revert); if not committed, fold this into the same fix before committing. Print what the window edit emits in the world render — is it punching a hole in the wall geometry or just shading a sub-rect of the wall band? It is clearly the latter. Make it real geometry: the wall band must be split around the window opening (top/bottom/side bands) leaving an actual gap, same as the editor preview shows a square hole. Re-shoot close-up proof through the window (you should see the interior/outside through it). Skin-applies part stays. RAMPVEL + AUTHBUILD still queued behind this.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

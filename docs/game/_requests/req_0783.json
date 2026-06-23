@@ -1,0 +1,30 @@
+{
+  "id": "req_0783",
+  "at": "2026-06-13T16:50:05.317Z",
+  "origin": "session:bdc416fa",
+  "text": "it shows up. but its not even covering me or anythiong. how do i give it depth",
+  "status": "review",
+  "sessionId": "bdc416fa-53b7-49b1-98a1-706f4ff29a15",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T16:52:16.724Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T16:54:56.475Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the reported 'pond doesn't cover me / has no depth': water was rendered as a thin 0.12m surface film floating at the surface level, so on flat ground it read as a faint blue sheet at chest height, not a body. Now water renders as a translucent VOLUME filling from the ground plane up to surfaceY (new shared waterBodyVolume helper, used by both render3d/WaterBody and the compiled bake pushWaterBodies), tucked 0.3m under the bed so the shoreline has no gap. Walking into it now surrounds you with water up to the surface — a Pond (1.5m) is wade/chest depth, a Lake (2.5m) goes over the player's head; depth is the surface level so a deeper preset = deeper water. Editor/test live now; /compiled needs the no-V8 loader rebuilt (shape-aware translucent render shipped earlier).",
+  "shas": [
+    "f9ccfec37"
+  ],
+  "resolvedAt": "2026-06-13T16:54:56.474Z"
+}

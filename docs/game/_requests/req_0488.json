@@ -1,0 +1,33 @@
+{
+  "id": "req_0488",
+  "at": "2026-06-10T09:43:37.898Z",
+  "origin": "session:15205e38",
+  "text": "look at the current shaders for brick walls, and add a few more in with variety like a fake window painted in it so that i can make the sides of these walls have a apartment building effect. [Image #1]",
+  "status": "review",
+  "sessionId": "15205e38-16b3-4754-8409-eab3e4f0eb2e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T09:43:48.131Z",
+      "actor": "session-1520",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T09:51:26.319Z",
+      "actor": "session-1520",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a new procedural fill board (Board I / Facades) to give brick walls apartment-building variety with windows painted directly into the tile, per the user's ask. Three materials in cart/hmsc-int/render3d/fillShader.ts: brick_facade (brick wall + a 2x2 grid of mullioned windows with cast-stone sills/lintels; Red/Buff/Sooted variants), brick_fire_escape (red brick + a painted fire-escape of stringers, landings, rail pickets and a drop ladder; Black Iron/Rust/Worn), and brick_shopfront (ground-floor mixed-use storefront with plate glass, bulkhead, sign band and a striped scalloped awning; Green/Red/Blue). Shared rect_mask/brick_wall/paint_window helpers; each tile tiles seamlessly so a stack of faces composes a tenement facade. Wired board 8 through the fs_main dispatch, quality_pass (crisp grade), the editor texture catalog (hmsc-int/game/textures/shaders.ts FILL_BOARDS) so they appear as pickable, tunable shaders, and the effect_fills eval cart for parity. All three files transpile clean. User runs the build to see them.",
+  "shas": [
+    "9349a22c8"
+  ],
+  "resolvedAt": "2026-06-10T09:51:26.319Z",
+  "tags": [
+    "ask"
+  ]
+}

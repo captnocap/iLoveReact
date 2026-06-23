@@ -1,0 +1,33 @@
+{
+  "id": "req_0445",
+  "at": "2026-06-10T04:45:53.224Z",
+  "origin": "session:441dd1a1",
+  "text": "im getting encoding errors / segfaults Caused by:\n  In wgpuRenderPassEncoderEnd\n    In a set_bind_group command\n      Texture with 'effect' label has been destroyed\n",
+  "status": "review",
+  "sessionId": "441dd1a1-1f5b-429e-9681-e92889f5a0e6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T04:50:09.983Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T04:50:09.992Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Encoding errors / segfault 'Texture with effect label has been destroyed' in wgpuRenderPassEncoderEnd set_bind_group. Root cause: a materialized face shader (effects.renderShaderToTexture) lives in the shared effects instance pool but is painted only ONCE at load; effects.update()'s idle sweep reaped it after STALE_INSTANCE_GRACE frames and destroyed its GPU texture, which a StaticSurface bind group keeps sampling for the whole run — so the next frame's set_bind_group referenced a dead texture. Only bit the engine-paint-loop path (dev host /compiled embedded route); the standalone loader never calls update(), which is why headless shots never reproduced it. Fix: exempt is_material instances from the reap sweep (load-once, freed only at cart teardown via deinitAll). Verified: world_loader + v8_app both rebuild clean ReleaseFast; standalone renders 3 textured batches, no regression.",
+  "shas": [
+    "c1c62acde"
+  ],
+  "resolvedAt": "2026-06-10T04:50:09.992Z",
+  "tags": [
+    "bug"
+  ]
+}

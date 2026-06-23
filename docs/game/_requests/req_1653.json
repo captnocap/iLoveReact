@@ -1,0 +1,30 @@
+{
+  "id": "req_1653",
+  "at": "2026-06-22T21:00:28.903Z",
+  "origin": "session:2117ddf4",
+  "text": "hey we once wrote a @docs/game/SKYBOX_PLAYBOOK.md and we should start to build it now",
+  "status": "review",
+  "sessionId": "2117ddf4-165f-4c7a-8fbe-15f442892c87",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T21:00:40.823Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T21:14:32.716Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built SKYBOX_PLAYBOOK seam 1 (the proving slice) end-to-end: the void-math, the procedural shell, and the first distortion consumer (sky-drift), live in the editor play renderer. Added cart/hmsc-int/game/void/{distance,distortion,shell}.ts (escape_depth scalar derived from the authored map bounds, voidDistortion() as ONE continuous smoothstep fan-out to 9 weights, and a hash-deterministic stride-9 shell that skips the authored core), render3d/VoidShell.tsx (one Scene3D.Instances streamed on the player chunk cell) and render3d/skyDrift.ts (warps HmscSky by the skyDrift weight), all wired in render3d/GameWorld3D.tsx. Scope was design-gate-confirmed with the user (full seam 1 incl. the procedural shell, not just the math). Invisible in normal authored play (count 0, identity sky inside the core) so purely additive; escape_depth reads REAL distance for now (treadmill = seam 2). Verified: game/void/void.test.ts 9/9 pass + full rjit ship hmsc-int green (exit 0). Live visual (drive past the edge to see the city thin) is a rjit dev check — headless can't drive the player and the heavy editor OOMs the boot watchdog regardless. Docs updated per the maintenance contract (SKYBOX_PLAYBOOK.md status + seam-1 marked built; _index/records/skybox_void.ts three interfaces flipped candidate→live).",
+  "shas": [
+    "727f6ad87"
+  ],
+  "resolvedAt": "2026-06-22T21:14:32.716Z"
+}

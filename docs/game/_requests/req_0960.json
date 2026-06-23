@@ -1,0 +1,28 @@
+{
+  "id": "req_0960",
+  "at": "2026-06-15T09:42:51.841Z",
+  "origin": "session:832d7b44",
+  "text": "oh cool. i found it. ok. so, first things first. camera is backwards on zoom for the scroll so fix that. second, the grid space, we want to have a clean 9 segment grid where there is only grid lines in the center tile space. like so [Image #17]",
+  "status": "review",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T09:44:30.426Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T09:49:07.343Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Four Studio viewport fixes after the user's first eyeball, all hot-reloadable TSX in editors/model/Studio.tsx (bundle-verified): (1) flipped scroll-zoom direction (wheel up = zoom in); (2) rebuilt the ground grid into a clean 9-segment 3x3 floor (1 big tile = 1 game tile = tileMeters; total = one floor) with the fine subdivision ONLY in the center tile, matching the user's reference image — gridTiles/tileMeters/fineDivisions are registered STUDIO tunables; (3) fixed the fov control breakage by replacing GAME_CHROME.Knob (its spec shape differs from the purpose-built zoomSpec VoxelStage feeds it) with robust -/+ steppers; (4) removed the camera floor — camera.zig's orbit solve has no ground clamp, the floor was the local +-85deg pitch limit, widened to +-89.9deg so the user can orbit directly under and over the part. Pending the user's next eyeball.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T09:49:07.343Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0487",
+  "at": "2026-06-10T09:27:07.857Z",
+  "origin": "codex:019eb06a",
+  "text": "[Image #1] its having a hard time if u can see",
+  "status": "review",
+  "sessionId": "019eb06a-e6fb-7280-bdb5-0483b03d47b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T09:27:30.415Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T09:29:35.791Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the smooth tool's chunk-boundary behavior. The smooth brush no longer fits a separate plane per chunk; PaintCanvas now gathers all focused height samples under the brush in shared world/sample space, fits one plane, and applies that same target across every touched chunk. This prevents the hard square seam visible in the screenshot. Reused the same brush falloff profile, kept the heightData local smooth helper/tests, and verified focused heightData tests plus fast hmsc-int ship build.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T09:29:35.791Z",
+  "tags": [
+    "bug"
+  ]
+}

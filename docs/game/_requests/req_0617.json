@@ -1,0 +1,33 @@
+{
+  "id": "req_0617",
+  "at": "2026-06-11T07:43:53.444Z",
+  "origin": "session:9361f55b",
+  "text": "hm. interesting. so some of these im going to contest. for example. the dumpster, you say it is exact, ok. so if i look at images of dumpsters you can fit like 2-3 people inside of [Image #1] [Image #2] but look at the game [Image #3] thats why all the sizes feel all wrong. i mean i disagree with every single one of them tbh",
+  "status": "review",
+  "sessionId": "9361f55b-0780-4569-bbc9-0034d03a84cc",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T07:44:47.843Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T07:48:41.640Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User contested the real-world audit (every verdict) using dumpster reference photos vs the game render. Verified they are right, found and documented two compounding causes: (1) wrong yardstick — the audit compared absolute meters, but perceived size is the prop/player ratio; props carry real meters while the player is stylized-tall 2.01m vs real 1.75m, so the ENTIRE catalog renders at ~87% of real presence (trees 37-44%, streetLight 65%); (2) model honesty — the dumpster model normalizes by AUTHORED_HEIGHT=1.2 but its parts only reach ~1.05 of that, rendering ~1.18m vs the 1.35m registry, with depth 0.96m vs real 1.37m (half the interior volume — why 2-3 people fit in a real one and barely 1 in ours); FireHydrant/Fence verified honest, ~15 models unaudited, dumpster part tables duplicated between Dumpster.tsx and worldGeometry.ts (rule-of-two). Corrected presence table + proposed x1.15 registry targets written into docs/game/_reports/PROP-REALWORLD-AUDIT.md. No code changed — the 54-kind sweep awaits the user's ruling on the x1.15 law and tree band.",
+  "shas": [
+    "151fe2d87"
+  ],
+  "resolvedAt": "2026-06-11T07:48:41.640Z",
+  "tags": [
+    "bug"
+  ]
+}

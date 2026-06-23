@@ -1,0 +1,28 @@
+{
+  "id": "req_0928",
+  "at": "2026-06-14T16:51:53.993Z",
+  "origin": "session:2b1b8d6b",
+  "text": "what do u mean its a known repo problem? we had aim work in a lab previous that didnt do this",
+  "status": "review",
+  "sessionId": "2b1b8d6b-2adf-4239-aed8-88f228d4f8a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T16:52:08.815Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T17:08:42.592Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "On 'aim worked in a previous lab': acknowledged — that lab is gone and not in git, so I could not copy it, and I should not have called the crosshair-corner a known repo problem dismissively. The crosshair-in-corner was a real bug in my code (absolute children consume left/top RAW, not percent, so left:'50%' pinned it to the corner) — now centered via a full-area flex box. The diagonal bullets were my JS aim-ray deriving direction from yaw/pitch instead of the real camera; fixed by the host ray (req_0929). Verified bundle clean.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T17:08:42.592Z"
+}

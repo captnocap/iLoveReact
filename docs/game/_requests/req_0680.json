@@ -1,0 +1,31 @@
+{
+  "id": "req_0680",
+  "at": "2026-06-12T12:47:32.614Z",
+  "origin": "codex:019eba70",
+  "text": "hm. i rebuilt, i redid the painting, same result",
+  "status": "review",
+  "sessionId": "019eba70-af1b-7633-a9f1-ba5a8c22c607",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T12:47:51.411Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T12:54:26.888Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the compiled painted-wall gray fallback by keeping repaint targets tied to the real underlay material and by making the bake ship stencil underlay chains. Paint target normalization now remembers the inherited type material under a piece override; opening paint peels existing cutout-stencil overlays back to that base; materializeCurrent records the chosen underlay; buildWorldInstances clears the custom-material cache per bake and emits all stencil underlays before the active overlay. Added regression coverage for repaint underlay selection, nested stencil bake, and material underlay-chain lookup. Verified with focused TS suites, zig build, test-world-mapfile, test-world-gamefile, and hmsc-int bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T12:54:26.887Z",
+  "tags": [
+    "bug"
+  ]
+}

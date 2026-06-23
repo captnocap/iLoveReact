@@ -1,0 +1,39 @@
+{
+  "id": "req_0618",
+  "at": "2026-06-11T07:52:06.781Z",
+  "origin": "session:5ebbec1e",
+  "text": "inside of cart/hmsc-int start with running npx fallow in that directory, and read the report",
+  "status": "review",
+  "sessionId": "5ebbec1e-1621-4557-b49a-71ce7bc39398",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T07:52:16.029Z",
+      "actor": "structure-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T07:57:26.907Z",
+      "actor": "structure-lane",
+      "kind": "note",
+      "text": "fallow run on cart/hmsc-int reconciled against the structure review: 140 'dead files' = ~85 test files (P4 harness, false positive) + 28 alive via alternate entry points fallow can't see (gameShell.tsx is the rjit pack cartEntry, compile/main+bake* are the rjit game CLI entries, hostPhysics via zig bindings) + 23 truly dead (npc/ whole dir superseded by game/kinds capture, labs scenes orphaned, assetPrompt/assets/worldFile/worldTree/propScaleCli, wgsl.ts strays, driveInScreen pair, characters/controls.tsx, game/textures/index.ts barrel). Fallow independently confirms §13: props.ts↔propKinds.ts is the #1 clone (709 lines) + NEW same-disease finding: game/kinds/landforms.ts↔world/landforms/registry.ts (103-line dup). Full report /tmp/fallow-hmsc-int.txt."
+    },
+    {
+      "at": "2026-06-11T08:07:42.135Z",
+      "actor": "structure-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ran npx fallow inside cart/hmsc-int and reconciled its dead-code report against the structure review. Of 140 flagged 'unused files', ~85 are P4 test suites (harness-run, false positives), 28 are alive via entry points fallow cannot model (gameShell.tsx is the rjit pack cartEntry with a whole pre-fold gameplay island behind it; compile/main+bake*+packPackage are rjit game/pack CLI entries; labs/_scaffold.tsx is the rjit-lab-new template; hostPhysics via zig bindings), and 22 were dead from EVERY entry point — deleted in 03da19d9c with docs+index updated in the same commit: the whole npc/ dir (superseded by the game/kinds capture), 3 orphaned lab scenes, the unwired worldFile/assets/assetPrompt lane, the tileField.wgsl shim (test repointed), heightField.wgsl, NpcFigure/driveInScreen pair, and stragglers. Verified: cart bundle green on BOTH entries, roadData 26/26, kinds suites 32/32. Fallow also independently confirms §13 (props.ts↔propKinds.ts is the #1 clone, 709 lines) and surfaced a NEW same-disease dup: game/kinds/landforms.ts↔world/landforms/registry.ts (103 lines). WORLDWIN pop-out confirmed rendering correctly by user (closes handoff item 0). OPEN: the gameShell/rjit-pack island — user says he never used the command; demolition candidate awaiting a ruling.",
+  "shas": [
+    "03da19d9c"
+  ],
+  "resolvedAt": "2026-06-11T08:07:42.135Z",
+  "tags": [
+    "ask"
+  ]
+}

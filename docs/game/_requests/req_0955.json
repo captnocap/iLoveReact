@@ -1,0 +1,28 @@
+{
+  "id": "req_0955",
+  "at": "2026-06-15T09:11:10.612Z",
+  "origin": "session:832d7b44",
+  "text": "yes, and actually to seam it all together in the doc, you should account into that, that props already have a searchable system and locks setup. no keys yet or items that go inside (well, kinda, items are made but only just slightly right now, not given any stats or anything like that)",
+  "status": "review",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T09:11:26.942Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T09:15:34.355Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured in Parts 0c/0d: props already carry searchable containers with item slots plus access locks (open/locked/keyed) in props.ts, and a key is the matching typed connector (key-to-lock equals plug-to-socket). Added the unifying 'one model everywhere' table seaming mesh parts, bones, clothing, inventory, containers, and roads under one typed-match predicate. User-confirmed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T09:15:34.355Z"
+}

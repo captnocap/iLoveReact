@@ -1,0 +1,28 @@
+{
+  "id": "req_0761",
+  "at": "2026-06-13T14:16:50.268Z",
+  "origin": "session:aec89f3e",
+  "text": "yes some of them look near perfect. some are far off",
+  "status": "review",
+  "sessionId": "aec89f3e-12a8-4481-9f79-5c47d9a8c376",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T14:17:37.758Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T14:24:48.805Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered 'why isn't the collision exact?' for props (vending machine, signs): the footprint was a hand-tuned number or a radius-derived SQUARE, never measured from the model — so a box prop's collider overhung the visible mesh. Fix (FOOTPRINT-0759): added propModelFootprintMeters() in game/kinds/propModels.ts that MEASURES the exact XZ footprint from a data-recipe prop's own box/cylinder parts (rotation-aware corner sweep), limited to the player's walking height band (HMSC_SCALE.playerCapsuleHeightMeters) so overhead mass (an appleTree's 5m canopy, a hanging blade sign) does not project a phantom ground wall — those fall back to the radius. Wired world/props.ts physics AND game/build/catalog.ts size (the build-piece collider) to read it; deleted the 15 now-dead recipe footprintDepthMeters fields. Bespoke TSX props (furniture/rocks/trees) keep their measured field; props with neither stay a radius square. Result is EXACT for centered models (vending 0.94x0.83 vs the old 1.0 square; liquorShelf 1.80x0.45; appleTree trunk 0.70). Known residual: ~6 OFF-CENTER recipe models (arcadeCabinet, toiletPaper, menuBoard, poster, openSign, drinkingFountain) slightly over-cover on the far side because the build-piece collider is centered on the anchor — still better than the old square (which under-covered and let the player clip the front); exact off-center would need an offset threaded through the centered build-piece collider path. Verified: hmsc-int bundles clean; 129 tests pass across 7 suites (world/props, kinds/props, build, placed, worldColliders, worldGeometry, worldParity). NOT committed: same entanglement as req_0756 — props.ts is co-modified with a parallel session's untracked imported-props feature (imports importedProps.generated.ts), so no clean isolated commit; deferring to supervisor.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T14:24:48.805Z"
+}

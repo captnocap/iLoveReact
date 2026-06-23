@@ -1,0 +1,30 @@
+{
+  "id": "req_1682",
+  "at": "2026-06-23T01:05:01.877Z",
+  "origin": "session:14b40edc",
+  "text": "siah@busiah ~/creative/reactjit $ tools/rjit dev hmsc-int\n[dev] bundling /home/siah/creative/reactjit/cart/hmsc-int/index.tsx -> /home/siah/creative/reactjit/.cache/bundle-hmsc-int.js\n\n  .cache/bundle-hmsc-int.js  5.7mb ⚠️\n\n⚡ Done in 85ms\n[dev] host child=1 - run 'rjit dev <other>' from another terminal to add tabs\n[log] ensureInit called\n[dev] watching /home/siah/creative/reactjit/cart/hmsc-int/index.tsx - edits rebuild + push automatically (ctrl-c to stop)\n[watch] build finished, watching for changes...\n[err/default] [v8 run] failure detected (hasCaught=true)\n[err/default] [v8 run] TypeError: Cannot read properties of undefined (reading 'blanketSingle')\n[err/default] [v8 run source-line]     const blanket = double ? COLORS295.blanketDouble : COLORS295.blanketSingle;\n[err/default] [v8 run location] line=54329 col=65\n[err/default] [v8 run stack-string] TypeError: Cannot read properties of undefined (reading 'blanketSingle')\n    at bedRecipe (<anonymous>:54329:66)\n    at bedParts (<anonymous>:54387:28)\n    at resolvePartsForKind (<anonymous>:54533:16)\n    at propModelFootprintMeters (<anonymous>:55324:19)\n    at propCatalogEntry (<anonymous>:51832:19)\n    at <anonymous>:51857:83\n    at Array.map (<anonymous>)\n    at <anonymous>:51857:52\n    at <anonymous>:125136:3\n[err/default] [v8 run] no StackTrace object on exception\n[err/default] [v8 run] failure detected (hasCaught=true)\n[err/default] [v8 run] TypeError: Cannot read properties of undefined (reading 'blanketSingle')\n[err/default] [v8 run source-line]     const blanket = double ? COLORS295.blanketDouble : COLORS295.blanketSingle;\n[err/default] [v8 run location] line=54329 col=65\n[err/default] [v8 run stack-string] TypeError: Cannot read properties of undefined (reading 'blanketSingle')\n    at bedRecipe (<anonymous>:54329:66)\n    at bedParts (<anonymous>:54387:28)\n    at resolvePartsForKind (<anonymous>:54533:16)\n    at propModelFootprintMeters (<anonymous>:55324:19)\n    at propCatalogEntry (<anonymous>:51832:19)\n    at <anonymous>:51857:83\n    at Array.map (<anonymous>)\n    at <anonymous>:51857:52\n    at <anonymous>:125136:3\n[err/default] [v8 run] no StackTrace object on exception\n[warn/default] [dev] bundle failed — no last good to restore\n[dev 6:04:45 PM] rebuilt - pushed 'hmsc-int'",
+  "status": "review",
+  "sessionId": "14b40edc-087f-40bd-9abb-de8f806a4e4f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T01:06:13.246Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T01:08:46.014Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the module-init cycle my req_1681 fix introduced. Importing the cooked-asset registry (editors/model/cookedAssets) into compile/propRecipes/resolve.ts — an early, very widely-imported module whose prop catalog builds at module-init — created an init-order cycle that left the colors palette (COLORS) undefined when the bed recipe ran during catalog construction, crashing the hmsc-int bundle at eval ('Cannot read properties of undefined (reading blanketSingle)'). Inverted the dependency instead: resolve.ts now exposes registerCookedAssetLookup(fn) and holds a late-bound getter (null until registered); editors/model/cookedAssets registers cookedAssetById at its own module init, the same late-binding pattern the file already uses for registerCookedProps/registerCookedCatalog. resolve.ts no longer statically depends on the heavy cooked-asset module, breaking the cycle; built-in kinds never reach the lookup and a cooked prop is only resolved long after init. Verified: full hmsc-int dev-equivalent bundle now evaluates past the catalog-init crash (only a benign setInterval-undefined remains, an artifact of bare v8cli lacking host timers); build-placed 57/57, worldColliders 6/6, meshProps 1/1, worldGeometry 14/14, worldParity 15/15, cookedAsset 21/21. Committed c2918a61c.",
+  "shas": [
+    "c2918a61c"
+  ],
+  "resolvedAt": "2026-06-23T01:08:46.014Z"
+}

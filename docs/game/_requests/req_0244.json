@@ -1,0 +1,13 @@
+{
+  "id": "req_0244",
+  "at": "2026-06-07T11:05:47.355Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: word given — req_0053 and req_0054 are session-boot prompts, same artifact class, noise-close them with the same note. Then hold for the user's live panel look; that remains the commit gate.",
+  "status": "new",
+  "sessionId": "09015194-0a9b-4ae6-acf8-d964ee783d82",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

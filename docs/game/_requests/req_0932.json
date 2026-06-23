@@ -1,0 +1,28 @@
+{
+  "id": "req_0932",
+  "at": "2026-06-14T17:45:07.959Z",
+  "origin": "session:2b1b8d6b",
+  "text": "wait, what slot cap, and why is there one to begin with. just raise it. if we cant get npc models in here then we are surely fucked for the actual game",
+  "status": "review",
+  "sessionId": "2b1b8d6b-2adf-4239-aed8-88f228d4f8a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T17:53:05.490Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T17:53:05.506Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The 'slot cap' is DYN_SLOTS=48 in framework/gpu/3d.zig — a small reserved tail in the single 256MiB vertex buffer for LIVE-edited meshes (sculpting, focused terrain chunks); each slot reserves a huge per-slot vert budget so it physically can't be raised far. Raising it was the wrong move and I should not have framed NPC models as blocked on it. The real branch (3d.zig:1735-1748): a mesh with a dynamicKey takes a dyn slot; without one it INTERNS into the big 3.6M-vert retained buffer (GEO_CACHE_SIZE=2048 entries) that the whole world already uses. FigureMeshes always tagged a dynamicKey (for the sculpt editor), which is the only reason figures touched the scarce pool. So NPCs are NOT blocked — they intern. No cap raise.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T17:53:05.506Z"
+}

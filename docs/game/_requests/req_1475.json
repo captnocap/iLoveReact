@@ -1,0 +1,32 @@
+{
+  "id": "req_1475",
+  "at": "2026-06-20T01:20:46.747Z",
+  "origin": "session:1d61c909",
+  "text": "i see a problem here. so ok this is a building piece problem entirely. look here. so pay attention\n\nthis first image, the top 'step' is actually this one on this staircase [Image #5] notice it. ok. so even on the last step, there is actually another step. being the floor of the next level. alright but this next staircase. [Image #6] notice the last step is actually flush with the floor. now, why is it like this? i dont know, but there is clearly a mismatch on a building where it was built in the same session, and both of them have a staircase starting ontop of a floor piece but the bottom floor piece is clearly not a floor that sits ontop of a wall like the 2nd or higher stories",
+  "status": "review",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T01:21:45.949Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T02:21:38.893Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused and fixed the build-piece Y mismatch behind the staircase collisions. The long-open WALLTOP-0606 bug (req_0099): a wall stored its Y from whatever surface the placement hit, so single walls aimed at a floor top rested ON the floor while line-drawn walls and floor-after-wall placements stayed at ground/side Y — a mix that misaligned everything stacked above (the extra/short step where a staircase lands on a floor). Durable cure (24bcfca88): DERIVE the wall rest-Y from the floor beneath it at geometry time via liftedWallBaseY/liftWallsOntoFloors, applied read-time in placedPieceColliders (collision/nav/bake) and pieceVisualShapes (render) so no placement path can miss it and see-it==walk-it. Stored data stays raw (no double-lift on edit), idempotent, delete-floor drops the wall, fixes EXISTING walls on load. 56/56 placed tests. Combined with the earlier stair-crest step-height fix (0.35->0.5, commits ab003a9ca/9eb8bc304). REMAINING (the user's Path A part 2): auto-place a floor under stairs — deferred pending a live recompile+test of the wall fix, since it may already resolve the walk and the floor-under-stairs Y bookkeeping is best verified against real behavior.",
+  "shas": [
+    "24bcfca88",
+    "ab003a9ca",
+    "9eb8bc304"
+  ],
+  "resolvedAt": "2026-06-20T02:21:38.893Z"
+}

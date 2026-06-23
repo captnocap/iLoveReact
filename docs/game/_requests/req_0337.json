@@ -1,0 +1,33 @@
+{
+  "id": "req_0337",
+  "at": "2026-06-08T13:08:49.550Z",
+  "origin": "codex:019ea612",
+  "text": "PIECE-SHAPE FIDELITY (ramps render/collide as boxes) — user-caught: in the editor a RAMP is a sloped ramp; in the compiled loader it renders as a BLOCK (and collides as one too).\n\nROOT: the bake (worldGeometry.ts pushPlacedPieces) emits EVERY placed piece as a scaled unit CUBE instance — one shared box geometry. A ramp's true geometry is a WEDGE (sloped prism), so it collapses to its bounding box. Both render (flat block) and collision (5def17f1d treats it as a box top) lose the slope.\n\nTHE FIX — asset-vocabulary by SHAPE (Guiding-Light One Law; the format ALREADY supports it via scene3d_geom_key / interned geometry):\n1. Each distinct piece SHAPE is a mesh stored ONCE, content-addressed/keyed (cube, ramp-wedge, and any other non-box shapes in the catalog). Instances reference the right geom_key + transform. Don't embed per-instance vertices — reference the shared shape (store the factor, not the product).\n2. Bake the RAMP's real wedge geometry (from the catalog/piece definition — the same shape /test renders) and key it; ramp instances reference it.\n3. COLLISION must use the real shape too: a ramp is a walkable SLOPE, not a box top — the player should walk UP it. Wire the wedge into the collision solve (slope surface, not bounding-box top). If full per-shape collision is large, at minimum make the ramp's walkable surface follow the slope.\n\nPARITY: match /test — the ramp should look and behave (walk up it) like the editor/test route. Go look at how /test defines the ramp geometry and mirror it.\n\nBAR: ONLY the user running `tools/rjit game play`, seeing the ramp render AS a ramp, and walking UP it. NEVER self-declare GREEN. Report what to run + what to try.\n\nGUARDS: reference shared shapes by key (no per-instance vertex bloat — this also helps the map-size problem). Zero V8. Own context — no Task/subagents. tools/rjit only. Commit EXPLICIT paths (NOT git add -A). No reset/revert.",
+  "status": "review",
+  "sessionId": "019ea612-258b-7013-b887-0bcd6a4954ea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:08:57.507Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:14:26.637Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented ramp shape fidelity in commit 6a11b72fc. The bake now writes stride-13 instance rows with a shapeId factor: boxes remain shape 0, placed ramp pieces are shape 1 and keep the catalog width/rise/depth/yaw instead of becoming scaled cubes. The no-V8 loader splits the single compact instance stream into keyed shared geometry batches: cube rows render with geom_key box and ramp rows render with a native mirror of /test's RampSlabGeometry under geom_key ramp-slab. Collision no longer treats ramp rows as flat box tops; each ramp row registers a rotated 0.6m-cell heightfield with the same 0.6 walkable slope cosine used by /test, so the player physics samples a slope and can walk up it. Local checks run: tools/rjit game shot --out zig-out/game/ramp-shape.png, tools/rjit game verify, zig build test-game-physics, zig build test-world-gamefile. Current bake measured 40,556 raw bytes, 175 instance rows at stride 13, 42 ramp shape rows, and loader logs 105 physics rects + 28 oriented physics rects + 42 heightfields. User should run tools/rjit game play, find a ramp, verify it renders as an inclined slab rather than a block, and walk up it; not marked done, awaiting your verification.",
+  "shas": [
+    "6a11b72fc"
+  ],
+  "resolvedAt": "2026-06-08T13:14:26.637Z",
+  "tags": [
+    "bug"
+  ]
+}

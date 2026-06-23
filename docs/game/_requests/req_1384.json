@@ -1,0 +1,31 @@
+{
+  "id": "req_1384",
+  "at": "2026-06-19T04:59:06.984Z",
+  "origin": "session:d6961119",
+  "text": "oh yeah dont mind them. they are dicking around trying to figure out how to properly save edits with the branch/twig system u can just go in there an hook it up",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T04:59:41.787Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T05:07:56.078Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wired the GLB->EditMesh bridge into the Studio so a generated mesh becomes a PAINTABLE model (the user's 'how do I paint it'). Studio.tsx: a top-left '⬇ Import GLB' button opens a new ImportModelDialog that reads a .glb via readFileBase64, runs glbToEditMesh (parse+weld+unwrap), and mints a fresh model (model.newModel()+addPart) — unwrapped so the pixel painter works immediately. Added tools/genmodel: generates a paint-ready GLB (default 800 faces = bigger UV islands for the per-face painter) into cart/hmsc-int/data/generated/ (gitignored), the dialog's default dir. Verified: tools/genmodel 'fire hydrant' wrote a 410v/800f GLB; tsc-check passes; importMesh.test.ts 5/5 + real-GLB probe already proved the conversion. Edited Studio.tsx only after the user stopped the parallel session that was editing it; the final diff is purely the import feature (the other session's branch/twig work was discarded). Committed b96036807 (+ bridge 04bb64cb5). NOT done: live click-path confirmation in the running Studio (headless can't drive the dialog) — for the user; and painting a dense mesh is coarse (per-face islands), so lower --faces helps.",
+  "shas": [
+    "b96036807",
+    "04bb64cb5"
+  ],
+  "resolvedAt": "2026-06-19T05:07:56.078Z"
+}

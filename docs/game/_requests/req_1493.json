@@ -1,0 +1,30 @@
+{
+  "id": "req_1493",
+  "at": "2026-06-20T19:36:16.125Z",
+  "origin": "session:4e481f48",
+  "text": "hello. in the mesh editing studio, there is an export to props. it is wired up, but it is not working as it  should. best way for me to explain is to just show you exactly what i mean. \n\nso here is a mesh [Image #17] \n\nand i go to export it\n[Image #18] \n\ni see it now in the map editor, as pepes1 [Image #19] \n\nsee the shape when i go to place it [Image #20] \n\nand then compile and go into the world \n[Image #21] \n\nannnnnd its gone",
+  "status": "review",
+  "sessionId": "4e481f48-88ee-489e-9362-130a372fc4f5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T19:36:30.211Z",
+      "actor": "4e48",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T19:45:42.298Z",
+      "actor": "4e48",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Studio-cooked props (e.g. pepes1) rendered correctly in the map editor but compiled to a placeholder box in the no-V8 world. Root cause: the bake's pushPropGeometry (compile/worldGeometry.ts) handled only isImportedPropKind and dynamics kinds before falling through to resolvePropParts' default footprint-sized box; a Studio-cooked kind matched neither branch, so its baked mesh never reached the MESH_PROPS lump. Fix adds a cooked branch that resolves the cooked asset's content-addressed mesh blob from the cooked-asset store and ships it through the SAME MESH_PROPS lump + loader path the imported (OBJ/GLB) props already use — exactly what CookedProp.tsx does on the editor side. Verified end-to-end: injecting a studio.pepes placement through the real buildWorldInstances now emits 1 mesh prop (372 verts, src=cooked:studio.pepes, solid) encoding to a 12040-byte MESH_PROPS lump instead of a box; user confirmed it renders in-world.",
+  "shas": [
+    "a83df8fd3"
+  ],
+  "resolvedAt": "2026-06-20T19:45:42.298Z"
+}

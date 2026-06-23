@@ -1,0 +1,28 @@
+{
+  "id": "req_1053",
+  "at": "2026-06-15T19:13:56.527Z",
+  "origin": "session:00a3ce8a",
+  "text": "yeah so under the UV unwrapping in this route, is a perfect place to store the meta data of the layer. since a layer carries the pivot/joint but our layer component is not really built for this type of extra data",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T19:15:35.800Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T19:22:31.592Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Layer rig metadata moved to workspace column 3, under the UV unwrap (req_1053). The outliner is a reused paint LayerStrip (name + visibility only) and isn't built to hold the extra per-layer data a part now carries (pivot + named joints). New RigMetaPanel.tsx renders as the RIG group in workbench/model/source.tsx, directly under the UV group: it shows the active part's pivot (address .pivot, position read-only) and its joints as an inline editor — editable name (the binding key, committed on blur, auto-uniquified), type, axis (X/Y/Z), and rotation limit (min/max degrees or a full toggle), plus add/remove. It reads and writes the shared studio store via updatePartMesh, so it never diverges from the column-4 viewport. This sets a clean split: column 3 = the metadata (names/types/limits), the viewport gizmo = spatial placement. The old floating viewport joint panel was removed to avoid duplication. editMesh 41/41, Studio + full workbench source chain bundle clean; hot-reload TSX, uncommitted. Spec in PLAYBOOK Part 6.1c.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T19:22:31.592Z"
+}

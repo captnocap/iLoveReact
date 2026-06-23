@@ -1,0 +1,36 @@
+{
+  "id": "req_0425",
+  "at": "2026-06-10T03:02:48.243Z",
+  "origin": "session:441dd1a1",
+  "text": "no. you are going to capture it following this principle, its just a wgsl shader quad anyways @GUIDING_LIGHT.md",
+  "status": "review",
+  "sessionId": "441dd1a1-1f5b-429e-9681-e92889f5a0e6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T03:03:55.265Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T04:09:54.427Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compiled-world materials now carry through: the native world_loader (rjit game play) renders material-skinned faces with their actual WGSL shader instead of a flat fallback color. Producer (worldGeometry) ships each {kind:'material'} face skin's shader recipe (WGSL + data[]) content-addressed into new MATERIALS/MATERIAL_REFS map-lumps; the Zig loader decodes them and, via a new SHARED framework primitive gpu/material_tex.zig (run a shader to a texture, install under a key the 3D pipeline samples), materializes each into a 1-tile texture sampled on the faces. Fixed a hard SIGABRT: a face recipe is only fs_main, so the full Effect shader assembly (header+math+recipe, formerly v8_app-only) was extracted to a pure shared gpu/effect_assemble.zig used by BOTH the V8 host and the no-V8 loader. Verified: forced-material render proof shows real brick on every face; clean render proof PASS; V8 host + loader both build. Note: only built-in shader-catalog materials resolve in the headless bake; custom-Materialized/react looks still fall back to color (follow-up).",
+  "shas": [
+    "7e795a765",
+    "8eea76e7e",
+    "749c6977b",
+    "caf3f9fea"
+  ],
+  "resolvedAt": "2026-06-10T04:09:54.427Z",
+  "tags": [
+    "ruling"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_1591",
+  "at": "2026-06-21T15:12:28.668Z",
+  "origin": "session:6e3404e7",
+  "text": "Right, I know they are different load paths. I am saying though and this is what the @GUIDING_LIGHT.md also says is to only do one approach, so why cant the editor load in the assets and map all the same as the game loader",
+  "status": "doing",
+  "sessionId": "6e3404e7-9c3d-4b02-be2b-4b93ea47d0fe",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T15:15:24.562Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

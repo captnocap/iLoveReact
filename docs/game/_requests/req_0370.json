@@ -1,0 +1,30 @@
+{
+  "id": "req_0370",
+  "at": "2026-06-08T22:00:26.631Z",
+  "origin": "session:67746dc2",
+  "text": "haha oh hmm.. im walking thru buildings xD im sure that isnt ur intention haha or was it ? ;O il try on 220 see if they collide or not",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T22:03:07.502Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T22:16:10.054Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigated the report that buildings collide at 220 blocks but not 512. Built a headless collision self-test in the loader that mimics stepNow EXACTLY (live per-frame rebuildWindow recenter, then runPlayerPhysics) and shoved a test player straight into the nearest SOLID building rect at three centers spanning the map — origin, 0.4*radius, 0.85*radius (up to ~9570m from center at 512). Result: BLOCKED at every center, at BOTH 220 and 512 (player stops exactly at face minus radius; one case even pushed back). Also confirmed via diagnostics that colliders are correctly built everywhere at 512 (~290 solid building rects per 448m window, identical to 220) and the spawn is (0,0,0) on the central road intersection. Could NOT reproduce the pass-through headless — collision resolves correctly at 512 across the whole map. The user's earlier 512 log (pasted in req_0369) lacked the '[loader] spatial collider windowing ON' line, so that test almost certainly ran a pre-spatial-collision binary. Removed all diagnostics; the committed spatial collision (1412766a0) is verified to build (ReleaseFast) and block. Need the user to re-test 512 FRESH and confirm the 'windowing ON' line appears in the terminal; if pass-through persists with that line present, next step is a live on-terminal position+near-field-solids readout to capture the failing case.",
+  "shas": [
+    "1412766a0"
+  ],
+  "resolvedAt": "2026-06-08T22:16:10.054Z"
+}

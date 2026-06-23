@@ -1,0 +1,33 @@
+{
+  "id": "req_0589",
+  "at": "2026-06-10T19:11:49.784Z",
+  "origin": "session:7a5b02e7",
+  "text": "so, why doesnt this one show up? [Image #19] in the compiled game",
+  "status": "review",
+  "sessionId": "7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T19:13:05.093Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T19:17:05.381Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "NET CAFE now compiles (commit 10e82086b). WHY it didn't: it's not a decal — it's one of the hand-coded React facade textures (buildingSkins REACT_TEXTURES), which are code, not data: no WGSL recipe and no DecalDoc, so the bake had nothing to ship and the face fell to flat color (the documented retiring-catalog GAP). THE FIX: a built-in DecalDoc transcription table (game/textures/builtinDecals.ts) — internetCafe is transcribed faithfully (monitor grid colors computed from the facade's own cellHash: teal/dark/purple over dark/dark/pink, plus the neon-bordered NET CAFE sign band) and the bake resolves built-ins right after custom decals, through the exact same recipe pipe the /compose decals use. Bake now reports 3 decal recipe(s); shot GREEN; tests 6/6. Verify: rjit game play and look at the NET CAFE walls. Note: other react facades (office/retail/gunShop/mall...) still ship flat until transcribed — each is one more entry in the same table, or re-author them in /compose; the catalog itself is still slated to retire with V24.",
+  "shas": [
+    "10e82086b"
+  ],
+  "resolvedAt": "2026-06-10T19:17:05.380Z",
+  "tags": [
+    "bug"
+  ]
+}

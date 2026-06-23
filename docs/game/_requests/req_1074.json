@@ -1,0 +1,28 @@
+{
+  "id": "req_1074",
+  "at": "2026-06-15T22:11:10.126Z",
+  "origin": "session:34f4e405",
+  "text": "sorry, my pc had to restart, was right in the middle of this and it went down lol. u can pick it back up code is on disk",
+  "status": "review",
+  "sessionId": "34f4e405-3e9d-47f6-b883-15900052c2df",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T22:11:29.086Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:16:06.748Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Crash-recovery continuation marker for req_1072 (the user's PC restarted mid-build: 'sorry, my pc had to restart… code is on disk'). No separate work — I re-read the on-disk state (png.ts, the textureize rasterizer + islandColorFor were already saved; the TextureAtlas/UVPanel color switch and the Studio export buttons were half/not applied), finished the color unification across SceneTextureAtlas + StudioUVPanel, wired the export sheet/slice buttons, added the textureize tests, and bundle-verified. All of that landed under req_1072 (see its review note). This req is just the resume hook; nothing additional to land. textureize 9/9, editMesh 48/48, modelStream 8/8 green; everything hot-reload TSX, uncommitted (user leads commits).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:16:06.748Z"
+}

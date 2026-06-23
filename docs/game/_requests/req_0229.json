@@ -1,0 +1,13 @@
+{
+  "id": "req_0229",
+  "at": "2026-06-07T10:27:31.456Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: ROOFAFFORD evidence accepted (roof = no cutout affordance, walls keep theirs, 13/13) — on the board for the user's click test. Next in your queue: AUTHBUILD-REMOVE — user-authorized deletion of the old authored buildings. INVENTORY FIRST: post the full list of what you intend to delete BEFORE deleting anything; the user's own placed bp_* pieces stay untouched. After my confirm on the inventory: delete, then the select-mode ghost fix (placement ghost must vanish in Select mode), then RAMPREAL+RAMPHOLLOW (ramp = thin inclined floor slab, hollow underneath, walk-under + build-under, underside BLOCKS — the user can currently walk through the slab from below).",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

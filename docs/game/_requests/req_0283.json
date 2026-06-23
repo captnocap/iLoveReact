@@ -1,0 +1,13 @@
+{
+  "id": "req_0283",
+  "at": "2026-06-08T05:35:24.281Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: user live-tested the building work. TWO results for you:\n\n(1) BUG 1 PASSED — user verbatim: 'in the test game space: i now see the texture on the building, and the window resolved to the cutout.' Your prefab stamp fix (skins + window cutout carried to placed pieces) WORKS. COMMIT IT NOW — explicit paths (placed.ts, placed.test.ts, PlayRoute.tsx render path, whatever the fix touched), verify green first, post hash. Resolve its ledger entry.\n\n(2) NEW BUG — RAMPVEL-0608, user verbatim: 'ramp/stairs: good, seems velocity on going up tho is faster than normally running.' Ascending a ramp gives faster-than-run horizontal speed. Likely the ground-projection in your walkable-surface resolver adds speed instead of preserving it — when movement projects onto the incline, horizontal velocity should be conserved/clamped to run speed, not amplified. Print the player speed on flat vs on-ramp-ascent, read it, clamp ramp ascent to normal run speed. Frame-time gate applies. Queue behind the bug-1 commit.\n\nNOTE: bugs 2/3 (ghost buildings on homepage, new buildings not on map) the user just re-confirmed live — that is AUTHBUILD-REMOVE, still authorized. HOLD execution one more beat: pane 5 is finishing its commit batch and AUTHBUILD touches shared files (index.tsx etc) — I give the execute word the moment pane 5's index is clear, to avoid a git race. Re-confirm your AUTHBUILD inventory against current HEAD while you wait so it fires clean.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

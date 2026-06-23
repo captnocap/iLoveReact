@@ -1,0 +1,12 @@
+{
+  "id": "req_0195",
+  "at": "2026-06-07T06:01:16.402Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — further USER VERDICT on the items SCULPT lens: ONE-KIT VIOLATION. Verbatim: \"the sculpt method on this page is nothing the same of the sculpt method inside of the character route so it needs to be fixed also\". Your items sculpt is a different method from the character sculpt — the SCULPTKIT law (one control kit, one sculpt experience) says there is exactly ONE sculpt method in this app: the character source's (grid nodes + per-point correspondence + the shared control kit — the same kit your SCULPTPICK click-highlight task targets). Replace the items lens's bespoke sphere-pull method with THE kit, consuming it the way the character source does; delete the bespoke implementation (no second sculpt path survives). This composes with the auto-flow ruling: blockout bakes into the kit's sculptable representation. One sculpt method, learned once, identical on characters and items — that sameness in the user's hands is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

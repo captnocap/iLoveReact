@@ -1,0 +1,30 @@
+{
+  "id": "req_1242",
+  "at": "2026-06-17T14:23:45.395Z",
+  "origin": "session:c885b7cc",
+  "text": "one thing u can do. is in the panel there is a thing that says face - vertex loops. it always shows everything and my list is fucking massive. an insane amount of text that doesnt need to always be on show",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T14:24:03.882Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T14:25:55.814Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User reported the column-3 'faces · vertex loops' panel always shows the full per-face topology — an insane wall of text — and tied it to UI vanishing as the model grows. Root cause: ShapePanel.tsx rendered a Row per face (each 2-4 Text children) always-on with no toggle or cap, so a dense solidified mesh (hundreds of faces) piled hundreds/thousands of children + glyphs permanently into the layout, flooding the per-container MAX_CHILDREN=512 cap (a fixed stack array that silently drops overflow) and the glyph load. Fix (sha 7df18f5a5): made the loops list collapsed by DEFAULT behind a show/hide toggle mirroring the existing JSON block, header now shows the face count 'faces · vertex loops (N)', and when expanded it caps at LOOP_ROW_CAP=256 rows with a '…and N more — use copy / show json' footer so it can never spill past the cap again. Full topology remains available via the copy button and show-json. Hot-reloads in the dev host; not yet visually confirmed by the user.",
+  "shas": [
+    "7df18f5a5"
+  ],
+  "resolvedAt": "2026-06-17T14:25:55.814Z"
+}

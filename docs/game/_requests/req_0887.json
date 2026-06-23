@@ -1,0 +1,30 @@
+{
+  "id": "req_0887",
+  "at": "2026-06-14T00:48:39.865Z",
+  "origin": "session:5de2c418",
+  "text": "im confused on what ur doing. we had water already going into the ground, i came to you said there is a crack between the water and the ground. that somehow turned into making water a jello brick. i said wtf is that, water is in the ground, now the ground doesnt look like water at all but i just fall into it",
+  "status": "review",
+  "sessionId": "5de2c418-75b9-4d35-8158-25b1c471529e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T00:50:24.190Z",
+      "actor": "session-5de2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T00:51:39.136Z",
+      "actor": "session-5de2",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User was frustrated that the wedge/crack fix (bb19793b0) over-corrected: forcing the water surface flat + dilating it under the wall + bolder waves turned painted water into a jiggling 'jello brick' that no longer read as water, so the dug region just looked like a hole they fall into. Reverted floorToWaterBody to the original per-cell surface (bed+depth per wet cell) and WATER_WAVE to the gentle ripple (0.1/5/0.22) — exactly the bb8ac1388 state the user had and liked (water sitting in the ground). Commit 751626804. The original small edge crack between water and the basin wall is back; it should be addressed minimally and separately WITHOUT changing the water's appearance. Kept the unrelated depth-only slider (7f7fbfc25). 6/6 water tests pass; editor hot-reloads, compiled needs a game bake to drop the reverted grid.",
+  "shas": [
+    "751626804"
+  ],
+  "resolvedAt": "2026-06-14T00:51:39.136Z"
+}

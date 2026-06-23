@@ -1,0 +1,33 @@
+{
+  "id": "req_0611",
+  "at": "2026-06-11T05:23:30.010Z",
+  "origin": "session:e9bdce32",
+  "text": "if u do an ls on docs/game the markdown files are t he names of every external standalone that needs to be now deleted",
+  "status": "review",
+  "sessionId": "e9bdce32-4d43-433c-9b7c-e64529ad18a7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T05:23:45.973Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T05:26:42.713Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The req_0610 demolition order's scope clarification — docs/game/*.md ARE the kill list — is incorporated verbatim into §0.1 of the structure review (commit 2e2f7841f): a 30-row table mapping every per-cart markdown to its cart path, each verified on disk, with the non-cart meta docs (DECISIONS, GUIDING_LIGHT, STRUCTURE, BUILDING-GRAMMAR, REQUESTS, RLE_FORMAT, PLATMOD_PLAN, bake-geometry, physics3d, hmsc-int) explicitly excluded, and the per-cart docs + _index records scheduled for archive-tier retirement in the same commit as the deletion per the maintenance contract.",
+  "shas": [
+    "2e2f7841f"
+  ],
+  "resolvedAt": "2026-06-11T05:26:42.713Z",
+  "tags": [
+    "ask"
+  ]
+}

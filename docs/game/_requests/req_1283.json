@@ -1,0 +1,30 @@
+{
+  "id": "req_1283",
+  "at": "2026-06-18T12:52:40.871Z",
+  "origin": "session:18fe5c79",
+  "text": "it did but it didnt and i cant get it back idk how to explain. so i first time around loaded image and it was basically full screen, nice. hot reload hit and it caused the camera to reset which idk if that then caused the image to get scuffed but it then now only renders in the top left corner and increasing the size is just bringing it forward instead which is what offset does anyways",
+  "status": "review",
+  "sessionId": "18fe5c79-d15f-47c8-ade6-d65531bd83af",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T12:56:00.867Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T13:11:38.593Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed 'hot reload reset the entire image location and size': backdrops were stored in useHotState, which the project's own notes flag as currently wiping on every hot reload — so each reload blew away the image source + its placement. Moved backdrop state to disk-backed localstore (key studio:backdrops via getJson/setJson), which survives both hot reload AND cold restart; you also no longer re-import a blueprint each session. Note: the prior in-memory backdrop won't migrate, so it must be re-added once after this lands.",
+  "shas": [
+    "50c35b193"
+  ],
+  "resolvedAt": "2026-06-18T13:11:38.593Z"
+}

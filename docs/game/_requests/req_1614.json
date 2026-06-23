@@ -1,0 +1,29 @@
+{
+  "id": "req_1614",
+  "at": "2026-06-21T17:46:23.034Z",
+  "origin": "session-relay",
+  "text": "hm. also, sorry i keep piling them on, but your change to the paint for faces is making it now in some areas i cant paint it at all im not sure why",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-21T17:46:38.542Z",
+      "actor": "da8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T17:46:57.143Z",
+      "actor": "da8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed 'in some areas I can't paint at all', which the lock-face change (req_1611) introduced by routing the locked brush through the kit's atlas-space path — that path relies on a clean per-face UV island and fails to paint faces with shared/degenerate/full-square UVs that the 3D-surface path handles fine. Reworked lock-face to live INSIDE the surface path instead: surfaceBrushDabs now tags each dab with its source faceIndex, and surfaceStampAt skips dabs whose face isn't the one under the cursor when locked. So locking reuses the exact same robust world-radius brush machinery (no more dead faces), just contained to one face for clean edge work; unlocked stays the smooth cross-seam brush. Verified: hmsc-int bundles clean, meshPaint suite 15/15 incl. a new faceIndex assertion.",
+  "shas": [
+    "b4d463911"
+  ],
+  "resolvedAt": "2026-06-21T17:46:57.143Z"
+}

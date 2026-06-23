@@ -1,0 +1,28 @@
+{
+  "id": "req_0300",
+  "at": "2026-06-08T08:14:38.517Z",
+  "origin": "session:9e14f7ea",
+  "text": "I see. That is more clear. then yes it is that map file.",
+  "status": "review",
+  "sessionId": "9e14f7ea-dafd-486f-b26a-2a7b9c5fcb05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T08:15:41.247Z",
+      "actor": "9e14",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T08:23:08.891Z",
+      "actor": "9e14",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Step 4 — wire hmsc-int's authored world into the no-V8 loader so it renders the REAL map, not the synthetic fixture. User confirmed understanding (the 6 tiles were a hand-typed test fixture) and said yes to making it the real map file. Found the infra mostly exists: createHmscMapfile(state) already bakes a GameState into the exact RJMP map container the loader reads, and loadEditorWorld() returns the user's saved world (readStoredGameState) else the demo city. New bake cart/hmsc-int/compile/bakeGameFile.ts: loadEditorWorld -> createHmscMapfile -> writeGameFile (map stream = real container; logic/skins/assets empty for now) -> base64. Wired 'rjit game play' and 'rjit game shot' to bake the authored world by default (--fixture flag still renders the test fixture; verify's render proof stays on the fixture as the stable codec/plumbing gate). Loader updated: skip tile index 0 (hmsc 'null'/empty convention) and palette real tile kinds. Proven headless: 'constructed map 360x360 from hmsc.gamefile.b64' (vs the old 3x2 fixture) — rendered + captured a valid PNG; the demo/default world is near-empty (MILESTONE-0) so it shows two surface-region blocks in a mostly-empty grid, faithfully. To see their own detail: paint + Compile (persists to boot key) then rjit game play. Full rjit game verify GREEN (1/1 oracle, 2/2 round-trips, 1/1 render, 71/71 suites, 3/3 scripts). NOT committed (awaiting user word). New: cart/hmsc-int/compile/bakeGameFile.ts; modified: world_loader.zig (palette/skip-empty), cli/commands/game.ts (bake wiring + play/shot --fixture), tools/rjit.js (rebundle). Heights/placements/props + logic/skins streams remain empty in the bake (next layers).",
+  "shas": [],
+  "resolvedAt": "2026-06-08T08:23:08.891Z"
+}

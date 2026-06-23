@@ -1,0 +1,30 @@
+{
+  "id": "req_0793",
+  "at": "2026-06-13T17:38:31.831Z",
+  "origin": "session:bdc416fa",
+  "text": "+- install reactjit-dev\n   +- compile exe reactjit-dev ReleaseFast native 1 errors\nframework/gpu/3d.zig:1113:17: error: name shadows primitive 'i2'\n            var i2: usize = 0;\n                ^~\nframework/gpu/3d.zig:1113:17: note: consider using @\"i2\" to disambiguate\nerror: the following command failed with 1 compilation errors:",
+  "status": "review",
+  "sessionId": "bdc416fa-53b7-49b1-98a1-706f4ff29a15",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T17:39:16.057Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T17:39:24.818Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the ReleaseFast compile error in the compiled-waves work: hfGen's wave-precompute loop used 'i2' as a loop variable, which shadows Zig's i2 primitive (2-bit int) — a hard compile error that zig fmt does not catch. Renamed i2/j2 to wi/wj; no behavior change. Also scanned all my Zig additions for other primitive-name vars (none). Rebuild the no-V8 loader again to pick it up.",
+  "shas": [
+    "81652ceff"
+  ],
+  "resolvedAt": "2026-06-13T17:39:24.818Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0448",
+  "at": "2026-06-10T04:54:01.828Z",
+  "origin": "session:2e5197b8",
+  "text": "The camera changes you are making dont seem to hit the compile method at all. walls just ignore my camera",
+  "status": "review",
+  "sessionId": "2e5197b8-1894-4144-a6e1-1e2bfb997258",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T04:54:36.229Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:06:19.976Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The camera occlusion work was only in the editor's /test PlayRoute (V8/React); the user tests the COMPILED game, which runs via rjit game play/shot as the stateless no-V8 world_loader (native Zig, no React) — so its third-person camera clipped through walls. Added framework/game/physics.zig cameraOcclusionStepColliders: a spring-arm query against the SAME packed collider buffer the physics step consumes (rects at INPUT_HEADER_FLOATS, oriented after), reusing the internal segment-AABB math, returning the nearest solid distance from the player-side pivot. In world_loader.zig, CameraSolve now carries the rig pivot (orbit target / aim shoulder pivot) and springArmEye pulls the eye in to the wall's near side (min 0.7m / 0.14m skin / 0.08m probe, parity with editor tuning) before the existing smoothing; updateCameraNode takes optional colliders and no-ops until they're built, so both walk and aim cameras collide. Needs a loader rebuild (rjit game play/shot). Verified the loader builds (zig build app -Duse-v8=false), physics 15/15 + cameraOcclusion 3/3, zig fmt clean. NOTE: world_loader.zig also swept another active session's in-progress loader work (material batches / collider fields / player physics), which type-checked clean. Commit c99540615.",
+  "shas": [
+    "c99540615"
+  ],
+  "resolvedAt": "2026-06-10T05:06:19.975Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0397",
+  "at": "2026-06-09T06:02:33.469Z",
+  "origin": "codex:019eaa55",
+  "text": "I see. There are two things here that are confusing as shit. you have piece and then material on piece problem is when i go to browse a material . it goes to a whole ass new interface, i want to see the maqterial on the building. not as some standalone image. i already know what it looks like",
+  "status": "review",
+  "sessionId": "019eaa55-1779-7bd0-be5d-1b2b9ee9e13e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T06:02:44.183Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T06:05:54.802Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed the building material browsing flow so selecting a material previews it directly on the target faces of the live building stage, without committing until Apply is pressed. Removed the standalone texture-image preview from the Materials lens, kept the building visible while browsing, started the browser with no arbitrary default material unless the face already has one, and fixed Clear target so it clears both the saved face skin and the active material target preview state.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T06:05:54.802Z",
+  "tags": [
+    "ux"
+  ]
+}

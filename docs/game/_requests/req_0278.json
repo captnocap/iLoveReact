@@ -1,0 +1,13 @@
+{
+  "id": "req_0278",
+  "at": "2026-06-08T05:02:20.614Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: GLOBEAB-0607 implementation accepted at my level (70/70 green, three representations: globe / voxel-surface [A] / voxel-mesh [B]). But this is a VISUAL comparison the user must judge — your READY has no proof shot. Produce SELFSHOTs of the SAME authored tower blockout (the user's crisp 5x6x7 tower, the one that melts under old globe) rendered in each representation so the user can compare apples-to-apples: (1) globe — the known-bad blob for reference, (2) voxel-surface [A], (3) voxel-mesh [B]. Same camera angle on all three. Cite the three PNG paths. I open every one before relaying — a shot where the tower isn't actually the subject gets bounced. The user's verdict picks the survivor; the loser gets deleted. Hold commit for that verdict. Post the three paths.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

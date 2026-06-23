@@ -1,0 +1,12 @@
+{
+  "id": "req_0081",
+  "at": "2026-06-06T11:32:39.841Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — PAINTLAYERS-0606 (req_0076 + req_0077). Two user-reported bugs on the paint layer surface, verbatim: (1) req_0076: \"animations work on mouth, eyes, other 'layers'; earlier i said i need those layers as layers. they moved to being a layer. but not a layer that i have any control over. bad. needs to be fixed.\" (2) req_0077: \"clicking the up or down arrow on a painted layer causes the layer to just duplicate, not move at all.\" Context: the working tree has uncommitted changes on cart/hmsc-int/editors/paint/ (layers.ts, PaintControls.tsx, usePaintEditor.ts, index.ts, paint.test.ts) — disk is the source of truth, build on what is there, never revert or reset anything. FILE BOUNDARY: do NOT edit PaintSurface.tsx, framework/gpu/paintable.zig, framework/v8_bindings_paintable.zig, or runtime/hooks/usePaintable.ts — those belong to lane PAINTLIVE; if your fix needs them, STOP and report to supervisor. Steps: 1. Read cart/hmsc-int/editors/paint/layers.ts and usePaintEditor.ts, find the reorder handler the layer up/down arrows call, and trace the duplicate-instead-of-move in the actual data (print the layer array before/after — no theory, read the data). 2. Fix reorder: up/down MOVES the layer one slot; layer count never changes. 3. Animation layers (mouth, eyes, etc.) render as layers but expose no controls — give them the same control surface as painted layers (reorder, visibility, selection, delete where sensible). A layer is a layer; no special-cased dead rows. 4. Extend cart/hmsc-int/editors/paint/paint.test.ts: reorder keeps count and changes order; animation layers expose the control set. 5. Build via tools/rjit only; the user's dev server (pane 6) hot-reloads your saves — save coherent states. DONE-BAR: tools/rjit game verify green + tests pass + you post READY with the exact file list you touched and the before/after layer-array evidence. DO NOT COMMIT — supervisor instructs commits. Do not shrink or stub any file; any deletion must be justified line-by-line in your report. Only the user's live confirmation makes this a PASS; supervisor routes it for testing when you post READY.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0461",
+  "at": "2026-06-10T05:27:46.353Z",
+  "origin": "session:2e5197b8",
+  "text": "camera is really good if i could describe the last stretch effort is you know how a wall is really a hollow box. well, the camera is just barely clipping the inner half of that 2nd wall that is inside of the building. if that makes sense. so like \n\n\nx = player\n| = wall\n< = camera\n\nit sits like this \n\nx|<| \n\nwhere its not stuck in the box, but its clipping into that part of the wall if that makes sense",
+  "status": "review",
+  "sessionId": "2e5197b8-1894-4144-a6e1-1e2bfb997258",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:30:19.347Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:32:49.661Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Final-stretch camera polish: in the compiled loader the spring-arm pulled the eye to a wall's CAMERA-facing (entry) face minus skin, so for any wall thicker than the 0.14m skin the eye landed INSIDE the wall box and clipped its inner half (user's x|<| sketch). cameraOcclusionStepColliders now uses a new segmentAabbSpan helper to take the wall's PIVOT-facing (exit) face instead, aggregated by the smallest inner-face distance so a wall near the player wins over the outer shell — the eye settles just on the player's side of the whole wall box. Loader springArmEye unchanged (only the returned reference face moved; it still does clamp(result - skin, min, base)). Needs a loader rebuild (rjit game play/shot). The editor's JS spring-arm shares the same entry-based query and can get the same parity fix later if wanted. Verified: loader builds clean (zig build app -Duse-v8=false), physics 15/15 + cameraOcclusion 3/3, zig fmt clean. Commit 661928f87.",
+  "shas": [
+    "661928f87"
+  ],
+  "resolvedAt": "2026-06-10T05:32:49.661Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1435",
+  "at": "2026-06-19T21:49:18.579Z",
+  "origin": "session:671785ab",
+  "text": "alright the very next thing we are going to do is stop this shit from happening. to demonstrate exactly what i am talking about here are some images:\n\nalright so lets say i am in the middle of working, doing anything in this route. here is what my workspace looks like: [Image #6]\n\nok first off lets start with identifying the exact location of my camera, what i have selected, and the image in the background. alright. now, lets say there is any code update that happens, my working view goes from what you just saw there, to this: \n\n[Image #7] \n\nalright so what changed",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T21:50:16.287Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T22:00:07.233Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Studio working view now survives a hot reload. Root cause: a code update re-mounts StudioViewport; the camera lived in plain useRefs (reset to defaults) and the selection in plain useState (wiped) — and a hand-restored camera still showed the trace backdrop offset because the backdrop is a plane behind the model, so any angle imprecision shifts the near/far parallax. Fix: persist camera (yaw/pitch/dist/fov) + selection through hotstate (in-process: survives hot reload, resets on cold restart = correct twig semantics). Camera refs initialize from the saved value; persistCam() writes on every move via sendOrbit + the orbit-drag end in onUp. Selection restores from arrays (Sets aren't JSON) and syncs on change. The two mount effects that would clobber the restore (the [revision] re-fit and the [activePart] selection-clear) skip their first run when a view was restored. selMode/gizmoTool already survived via useHotState. Built green + self-shot boots; the hot-reload behavior needs a live check since it can't be self-shot. SHA f03e5c74b.",
+  "shas": [
+    "f03e5c74b"
+  ],
+  "resolvedAt": "2026-06-19T22:00:07.233Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1146",
+  "at": "2026-06-16T07:58:07.288Z",
+  "origin": "session:740b1ca5",
+  "text": "hey so IDK what or how or why but for some reason the compile game button is broken in hmsc-int :V",
+  "status": "review",
+  "sessionId": "740b1ca5-cbef-4fcf-8763-930c121a774b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T07:58:13.576Z",
+      "actor": "740b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T08:00:09.891Z",
+      "actor": "740b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compile button in hmsc-int was broken: it shells out to 'rjit game bake', which runs bakeGameFile.ts in a fresh v8cli process. That process never called ensureCookedRegistry(), so Studio-cooked props (req_1134) were missing from COOKED_CATALOG. A map with a placed cooked mesh ('prop.new_mesh_017') threw 'build catalog: unknown piece id' mid-bake, failing every Compile. Fix: bakeGameFile.ts now calls ensureCookedRegistry() before resolving placements (mirrors the editor boot in index.tsx), against the same EDITOR_DATA_ROOT store, idempotent + headless-tolerant. Verified: 'rjit game bake' now reports bake PASS and writes hmsc.gamefile.",
+  "shas": [
+    "ed704cb62"
+  ],
+  "resolvedAt": "2026-06-16T08:00:09.891Z"
+}

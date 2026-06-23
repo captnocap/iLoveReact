@@ -1,0 +1,31 @@
+{
+  "id": "req_0565",
+  "at": "2026-06-10T16:13:48.508Z",
+  "origin": "codex:019eb242",
+  "text": "cmon lets pull it together a bit more, there are a TON of shitty ux approaches in this part of the ui that need real love. everything that has a number and is incremented with + and - is a fucking pain in the ass",
+  "status": "review",
+  "sessionId": "019eb242-3ff1-73a2-b202-5d99e580829d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T16:13:56.152Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:15:46.603Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the shared workbench numeric field renderer so numbers are no longer tiny plus/minus steppers. Every FieldSpec num now renders as a direct numeric text input with snapping/clamping plus a drag scrubber for broad changes, and the material compose CANVAS/NODE PROPERTIES group uses row layout so x/y/w/h/radius/border controls have enough room to be usable.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T16:15:46.603Z",
+  "tags": [
+    "ux"
+  ]
+}

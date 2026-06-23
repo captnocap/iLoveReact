@@ -1,0 +1,30 @@
+{
+  "id": "req_0330",
+  "at": "2026-06-08T12:12:44.856Z",
+  "origin": "codex:019ea612",
+  "text": "Correction: you have ~200 lines of YOUR OWN further store-split work still UNCOMMITTED, and you mislabeled it as \"other lanes' pre-existing changes.\" It is NOT — these three files are your domain-split work:\n- cart/hmsc-int/data/index.ts (+93 beyond the a658bbc4f commit)\n- cart/hmsc-int/editors/store.ts (+42)\n- cart/hmsc-int/editors/workbench/items/store.ts (+75)\n\nThe set-aside dirty tree (other lanes' ~400 files) is real, but those three store files are yours. Do this:\n1. `tools/rjit game verify` first — confirm the split is GREEN with this uncommitted work present (you may have verified an earlier state).\n2. Commit ONLY those three files (+ manifest.json if its newline matters) with EXPLICIT paths — NOT git add -A. Honest message; if this continuation is incomplete, say \"wip\" in it.\n3. Report the new SHA and the verify result.\n\nDo not touch world_loader.zig / framework/gpu / constructor.zig (pane 5's lane). Commit-to-prevent-loss is standing here — don't leave your own work uncommitted thinking it belongs to someone else.",
+  "status": "review",
+  "sessionId": "019ea612-17a3-7a12-a580-7a480d70f05a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T12:12:59.069Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T12:13:45.236Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified the current dirty store-split state before committing: tools/rjit game verify was GREEN (oracle 1/1, round-trips 2/2, render 1/1, suites 71/71, scripts 3/3). Then committed only the remaining store-split files explicitly: data/index.ts telemetry/domain timing continuation, editors/store.ts env/probe continuation, workbench/items/store.ts domain-store continuation, plus the manifest formatting delta. Protected loader/render lane files were not touched by this commit.",
+  "shas": [
+    "a7621e030"
+  ],
+  "resolvedAt": "2026-06-08T12:13:45.236Z"
+}

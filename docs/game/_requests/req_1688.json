@@ -1,0 +1,18 @@
+{
+  "id": "req_1688",
+  "at": "2026-06-23T02:39:27.662Z",
+  "origin": "session:103f47f2",
+  "text": "you can just commit everyone, no one is committing at all and soon its gonna bite us all in the ass",
+  "status": "doing",
+  "sessionId": "103f47f2-9b77-4e37-bcad-10dbde6fbd60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T02:40:01.693Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0494",
+  "at": "2026-06-10T10:37:28.818Z",
+  "origin": "codex:019eb11a",
+  "text": "so is the WorldLoader the same as the world_loader ?",
+  "status": "review",
+  "sessionId": "019eb11a-609c-7012-8b21-a57c9a570e4c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T10:37:32.312Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T10:37:51.651Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered that WorldLoader and world_loader are the same core loader implementation but different entry surfaces: WorldLoader is the React/native host primitive mounted inside hmsc-int and it calls into world_loader.zig via v8_bindings_compiled_world.zig, while world_loader is also built as the standalone no-V8 binary for tools/rjit game play. No code changes were needed.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T10:37:51.651Z",
+  "tags": [
+    "ask"
+  ]
+}

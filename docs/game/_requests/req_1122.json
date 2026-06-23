@@ -1,0 +1,28 @@
+{
+  "id": "req_1122",
+  "at": "2026-06-16T02:25:32.788Z",
+  "origin": "session:88826cd6",
+  "text": "nice drop a /hand-over and the next slice is going to pick up The current compile direction already treats the game as baked data:\n\n- Editor data is staged in hmsc-int.\n- Compile produces runtime-loadable game data.\n- Map/world output uses reference-oriented binary/RLE concepts.\n- The loader constructs the game from data.\n\nThe Studio asset compiler should become another compile input beside world,\nbuild, items, vehicles, clothing, and texture/material data.\n\nConceptually:\n\n```\nhmsc-int data streams/snapshots\n  world data\n  build pieces\n  model sources\n  item descriptors\n  vehicle descriptors\n  clothing descriptors\n  materials/textures\n        |\n        v\nCompile\n        |\n        v\ninstallable assets + map/game RLE data\n        |\n        v\nZig loader/runtime\n```\n\n## Authoring Capability Target\n\nThe full authoring target is:\n\n- Build a shape in Studio.\n- Define pivots and sockets.\n- Paint or assign textures.\n- Preview collision and bounds.\n- Choose compile kind.\n- Fill out kind-specific gameplay fields.\n- Validate required fields before compile.\n- Generate a cooked asset file.\n- Install it into the content store.\n- Make it available in the relevant palette/catalog.\n- Place it in the world or equip/attach/use it through the game system that owns\n  that asset kind.\n\nThe editor should make the asset's meaning explicit at compile time. A tire is\nnot just a cylinder mesh. It is a vehicle part with wheel/tire mount rules and\nmaybe handling implications. A jacket is not just a torso mesh. It is clothing\nwith slots, layers, body fit, and figure attachment data.",
+  "status": "review",
+  "sessionId": "88826cd6-9907-405c-a0c3-be8a9e585a1e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T02:25:57.710Z",
+      "actor": "session-8882",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T02:31:12.580Z",
+      "actor": "session-8882",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Produced the continuation handoff for the next slice (the Studio ASSET COMPILER — Studio model output becomes another compile input beside world/build/items/vehicles/clothing/texture; cook → install → catalog → place/equip, with the asset's MEANING explicit at compile time via a kind selector + kind-specific descriptor schemas). Wrote /tmp/handoff-20260616-022631-studio-asset-compiler-...md with the user's spec quoted verbatim, the current shipped state (AI fill + file-ref + native key, in review), the compile architecture to extend, files in play, the design-gate + no-commit + bundle/test constraints, and the horizon. CRITICAL: preserved the handoff lineage across the PC reset that wiped /tmp — original_conversation_id=832d7b44 (the Studio arc origin) kept exact, full 8-session chain reconstructed with this session appended.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T02:31:12.580Z"
+}

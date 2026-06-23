@@ -1,0 +1,31 @@
+{
+  "id": "req_0659",
+  "at": "2026-06-12T05:50:03.003Z",
+  "origin": "codex:019eba54",
+  "text": "ok because the last question i had is, if you semantically name them, does that make it any step closer to where say i have a prop viewer, i can isolate a piece of it, modify its size/color whatever and it can be stored, or is there still a gap like in the values, as a lot of the numbers feel 'magic'",
+  "status": "review",
+  "sessionId": "019eba54-122c-7b03-9a58-37a88189321a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T05:50:07.444Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T05:50:13.994Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the prop-authoring design question. Semantic part names are a real first step toward a prop viewer because they create stable selectable part IDs, but they are not sufficient by themselves; the magic numbers also need to move into editable recipe fields with units, constraints, defaults, and persisted overrides that compile back to the same primitive rows. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T05:50:13.994Z",
+  "tags": [
+    "ask"
+  ]
+}

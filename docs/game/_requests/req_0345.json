@@ -1,0 +1,31 @@
+{
+  "id": "req_0345",
+  "at": "2026-06-08T13:39:07.202Z",
+  "origin": "codex:019ea612",
+  "text": "what just happened to the comamnd when i run it? did u somehow nuke it from working in this setup? if so, t hat was not the intended goal.",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:39:15.648Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:58:27.429Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Restored and verified tools/rjit game shot after the earlier runtime storage bug: standalone again bakes and renders the authored hmsc world with 76 pieces, 175 instances, 42 heightfields, player, ramps, and zero V8 symbols.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T13:58:27.429Z",
+  "tags": [
+    "bug"
+  ]
+}

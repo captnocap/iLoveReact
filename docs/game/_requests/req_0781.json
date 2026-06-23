@@ -1,0 +1,18 @@
+{
+  "id": "req_0781",
+  "at": "2026-06-13T16:40:29.887Z",
+  "origin": "session:a695a492",
+  "text": "better [Image #7] now missing the line in the road",
+  "status": "doing",
+  "sessionId": "a695a492-4a9c-4889-a141-0e50e2e7918a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T16:41:16.414Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

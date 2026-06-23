@@ -1,0 +1,30 @@
+{
+  "id": "req_1379",
+  "at": "2026-06-19T04:29:10.212Z",
+  "origin": "session:be97e48f",
+  "text": "the undo history just resets the brush color to white but does not revert the last change",
+  "status": "review",
+  "sessionId": "be97e48f-9627-4113-86b2-bb34b58ed45b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T04:29:50.943Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T04:37:14.352Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two paint-persistence bugs. (1) Ctrl-Z reset the brush colour to white but didn't revert the stroke — paint lives in the GPU texture outside studioModel's undoable event stream, so model.undo() only reverted a stray palette mint. Added a paint-only snapshot ring (readback the texture before each stroke; undo restores the prior state, redo re-applies); the parent Ctrl-Z/Y prefers paint undo/redo while paint mode is active, else falls through to model history. (2) paint->object->paint wiped everything because the <Paintable> was gated on paint mode, so leaving paint unmounted it and destroyed the GPU texture; it now stays mounted whenever a paint texture exists (the mesh still only samples it in paint mode), and restore/base-coat runs only once per model per session so re-entering paint no longer re-coats over the live texture.",
+  "shas": [
+    "b571130cb"
+  ],
+  "resolvedAt": "2026-06-19T04:37:14.352Z"
+}

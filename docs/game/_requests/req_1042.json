@@ -1,0 +1,10 @@
+{
+  "id": "req_1042",
+  "at": "2026-06-15T18:31:38.584Z",
+  "origin": "session:de42f85d",
+  "text": "i think the 19.9 is the output, not the total. the total is the input from the last send as the context window, and u can tell. every tool call is incrementally sending more tokens but output is always between 200-2500.  Recent Requests Last 10 — click row to expand\n    Time     Model     Input     Output     Saved     Latency\n+\n2m ago\nclaude-opus-4-8\n115.2k\n3.2k\n2%\n47055ms\n+\n2m ago\nclaude-opus-4-8\n117.6k\n546\n2%\n11750ms\n+\n2m ago\nclaude-opus-4-8\n118.2k\n1.5k\n2%\n25756ms\n+\n2m ago\nclaude-opus-4-8\n119.2k\n773\n2%\n11720ms\n+\n1m ago\nclaude-opus-4-8\n120.0k\n2.1k\n2%\n30915ms\n+\n1m ago\nclaude-opus-4-8\n121.4k\n306\n2%\n7179ms\n+\n1m ago\nclaude-opus-4-8\n121.8k\n1.1k\n2%\n13792ms\n+\n1m ago\nclaude-opus-4-8\n122.5k\n505\n2%\n7973ms\n+\n57s ago\nclaude-opus-4-8\n25.9k\n7\n0%\n2775ms\n+\n22s ago\nclaude-opus-4-8\n123.3k\n2.2k\n2%\n34883ms\n",
+  "status": "new",
+  "sessionId": "de42f85d-94df-4add-951f-a1f5bdd46a23",
+  "captureMode": "hook",
+  "events": []
+}

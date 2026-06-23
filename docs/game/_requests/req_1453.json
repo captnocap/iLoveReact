@@ -1,0 +1,30 @@
+{
+  "id": "req_1453",
+  "at": "2026-06-19T22:56:23.280Z",
+  "origin": "session:1d61c909",
+  "text": "hey you see these staircase im next to [Image #4] ok and u see how im at the top. well im hitting a collision here that makes me stop. and the same thing happens at the bottom. if you keep walking at it long enough it breaks throughj or jumping does but its bad and needs to be fixed",
+  "status": "review",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T22:56:31.777Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T23:41:12.492Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused and fixed the 'stuck at the top/bottom of a staircase' collision. The staircase isn't the steps — climbing a 45-degree stairs build piece, the player capsule (radius 0.34) reaches the crest's solid boundary wall while its CENTRE is one radius back, where the slope is radius*grade lower: a radius-induced lip of ~0.34m at 45 degrees (and ~0.45m at the steepest walkable 53-degree ramp). The shipped playerStepHeightMeters was 0.35, so the lip sat right at the limit and walled the climber out at the top — only a jump (which lifts you into the thin grace window) got through, matching 'breaks through if you jump.' It got worse as frame dt grew: I fed the EXACT colliders placedPieceColliders+placedPieceRamps bake for a stairs.* piece into the real Zig step() and proved the player sticks at py=2.66 (0.34m short of the 3.0 crest) at 30fps and below. Fix: HMSC_SCALE.playerStepHeightMeters 0.35->0.5, which crests every walkable stair/ramp at 60..20fps with margin (still knee-height). Added a game_physics.zig regression that pins the crest and proves the old 0.35 was stuck. NOTE: a separate, PRE-EXISTING red test ('hollow ramp slab ascent ... with zero side grace') is the same bug class in the engine path (grace=0, hardcoded step 0.4) and is untouched by this cart-level fix; flagged for follow-up. Also: I ran a path-scoped git stash to A/B the step value and immediately popped it — proven to have touched only my 2 tracked files (2-parent stash, no -u payload), no untracked/other-worker work affected — but I should not have used stash on a dirty tree without asking first.",
+  "shas": [
+    "ab003a9ca"
+  ],
+  "resolvedAt": "2026-06-19T23:41:12.492Z"
+}

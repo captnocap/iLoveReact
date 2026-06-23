@@ -1,0 +1,30 @@
+{
+  "id": "req_0412",
+  "at": "2026-06-10T02:26:49.753Z",
+  "origin": "session:2e5197b8",
+  "text": "hey where we last were my power went out. i am resuming the conversation now, i dont know if you were done or what but you can finish now if not",
+  "status": "review",
+  "sessionId": "2e5197b8-1894-4144-a6e1-1e2bfb997258",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T02:27:05.848Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T02:30:37.417Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resume of req_0407 after a power outage; same camera-occlusion work. Fixed third-person camera occlusion inside buildings (could not see the player). Root cause: the per-frame camera query returned only the single NEAREST occluder, and PlayRoute faded just that one piece (and only when pinned at min distance), so inside an enclosed room the other walls plus the roof/ceiling stayed opaque. Added host fn cameraOcclusionConfiguredHits (framework/game/physics.zig + v8 binding __game_physics_camera_occlusion_hits) returning EVERY owner the camera->player segment crosses, reusing the existing hit machinery with no per-frame array repacking. PlayRoute now keeps the nearest-driven distance pull-in but fades ALL wall/roof occluders on the segment (floor/ramp you stand on never fades), with graceful fallback to the legacy single-hit path on an un-rebuilt host. Lowered residualOpacity 0.62->0.34 so stacked faded layers read see-through. Verified: physics 15/15, placed 42/42, PlayRoute bundles clean, zig fmt clean. NOTE: framework change needs a Zig rebuild to take effect. User OK with the commit also persisting pre-existing uncommitted occlusion binding wiring from another lane.",
+  "shas": [
+    "a4480696a"
+  ],
+  "resolvedAt": "2026-06-10T02:30:37.417Z"
+}

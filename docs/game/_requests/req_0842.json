@@ -1,0 +1,30 @@
+{
+  "id": "req_0842",
+  "at": "2026-06-13T22:01:10.819Z",
+  "origin": "session:ac60258b",
+  "text": "yes. dont come back to me til you have an actual fix for the bug i dont want to waste another 5 hours that have been spent on this one problem",
+  "status": "review",
+  "sessionId": "ac60258b-2e2e-4a0c-a6c8-3ebae4aa1c72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T22:02:58.255Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T23:28:08.636Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "FIXED the painted-roads-render-as-concrete bug. Root cause: framework/gpu/3d.zig uploaded each chunk's ground D reference stream with queue.writeBuffer using a byte size of `n * @sizeOf(f32)` WITHOUT a u64 cast, which overflowed a narrow integer (n=14528 gave 25344 bytes instead of 58112), so only ~6336 of 14528 floats reached the GPU buffer. Every cell past that read 0 = tile kind 0 (water) = material id 0 (concrete), so road/median/junction cells rendered concrete past ~local row 53 in each chunk. The vertex/instance writeBuffers already cast to u64; this one didn't. One-line fix: @as(u64, n) * @sizeOf(f32). Found by instrumenting the real ground formula and printing the write size (gn=14528 inline_bytes=25344 wbytes=58112 — the smoking gun) after a long bisection that ruled out data, the formula, uv mapping, normals, specular, and the staging. Verified on real GPU pixels via the road-render-test gate across z~10/52-173/111-114 and chunks (1,0)/(1,1): all render dark asphalt, gate PASSES; user confirmed on screen. Committed 1a66b5ac8.",
+  "shas": [
+    "1a66b5ac8"
+  ],
+  "resolvedAt": "2026-06-13T23:28:08.636Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0428",
+  "at": "2026-06-10T03:31:58.043Z",
+  "origin": "supervisor-relay",
+  "text": "pick up with better tooling to move placed buildings around, and lets get tooltips on the buttons and maybe a some twigs for camera placement so hot updates dont reset it",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-10T03:32:13.300Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T03:32:13.316Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Three iso-pane deliverables, all in cart/hmsc-int/IsoAuthor.tsx (+ isoStage.ts). MOVE TOOLING: an unarmed drag that begins on an already-selected piece now moves the whole selection along the active level's ground plane, showing a translucent ghost (blocked-red if invalid) and committing on release as pieceRemoved+piecePlaced per piece — no new pieceMoved stream event (that would touch F2 + compile), the same two events delete/clone already emit; drag on empty ground still rotates the view. TOOLTIPS: every cryptic IsoBtn icon (recenter/rotate/zoom/floor/select-mode/clone/delete) now carries an engine-native hover tooltip via the Pressable tooltip prop (framework/primitive/tooltip.zig). CAMERA TWIGS: the IsoStage pose persists per route through editors/twigs — seeded from the saved pose on mount and written at rest points (rotate/pan key release, wheel, control buttons) so a hot reload restores the view instead of snapping back to the content centroid. Bundles clean.",
+  "shas": [
+    "3be6fb8b9"
+  ],
+  "resolvedAt": "2026-06-10T03:32:13.316Z",
+  "tags": [
+    "ask",
+    "ux"
+  ]
+}

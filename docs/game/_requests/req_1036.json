@@ -1,0 +1,10 @@
+{
+  "id": "req_1036",
+  "at": "2026-06-15T18:18:55.023Z",
+  "origin": "session:de42f85d",
+  "text": "Ah right, thats true. you know you are claude. but i guess like you arnt trained on claude code specifics, otherwise u would know it for harnesses that people use the api for that isnt CC. anyways. getting into the weeds of shit that i will never use anyways LMFAOOO just was curious. so ok, lets set that headroom up and tell me how to delete/disable it if i find that context just starts to degrade",
+  "status": "new",
+  "sessionId": "de42f85d-94df-4add-951f-a1f5bdd46a23",
+  "captureMode": "hook",
+  "events": []
+}

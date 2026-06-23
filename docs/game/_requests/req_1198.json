@@ -1,0 +1,28 @@
+{
+  "id": "req_1198",
+  "at": "2026-06-16T23:51:36.188Z",
+  "origin": "session:8e058574",
+  "text": "Yeah do that lets see what it does for outcome",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T23:53:29.140Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T23:54:23.925Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ran the real Studio symmetrize (the exact editMesh.ts function, bundled + run under v8cli — not a re-port) on cart/hmsc-int/model.json to preview the outcome the user asked to see. It auto-picked Z as the symmetry axis, kept the -Z half (the side carrying the front_left wheel mount so it survived), and rebuilt +Z as its exact mirror: 110->117 verts, 108->122 faces, 1->2 wheel mounts, and crucially 44 asymmetric verts -> 0 (independently re-verified by scripts/check-symmetry.js, which reports '✓ SYMMETRIC across z'). Output written non-destructively to cart/hmsc-int/model_symmetrized.json; the original model.json was left untouched. No code committed (this was a one-shot preview via a /tmp bundle entry; the symmetrize logic itself already ships in the editor and in commit a3e4ae6d2). Awaiting the user's choice: promote it to model.json with a model_old.json backup, regenerate keeping +Z instead, or discard.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T23:54:23.925Z"
+}

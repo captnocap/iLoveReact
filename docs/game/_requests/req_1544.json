@@ -1,0 +1,30 @@
+{
+  "id": "req_1544",
+  "at": "2026-06-20T23:41:44.609Z",
+  "origin": "session:0b8abe45",
+  "text": "No i mean, like, ok so i painted this [Image #3] right. and i go into the iso3d editor and its right here [Image #4] ok and then i go and click on compile and go into the game and it is now gone [Image #5] but literally just before you, got this added. so it was added and  then now its not working in the same like 2 hour window",
+  "status": "review",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T23:42:26.677Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T00:21:58.971Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed: a painted Studio prop rendered grey in the compiled game though it showed painted in the editor/iso. Root cause was that the MESH_PROPS lump shipped the paint atlas as raw RGBA decoded from PNG at BAKE time via @reactjit/image, but the bake runs under v8cli which never registers the image-codec door (verified: __imageops_* undefined and image().raw() returns null on the actual stored paint blob), so the decode silently failed and the prop shipped untextured. Face decals/uploaded wall images worked because they decode in the Zig loader (decal_raster stbi), not the bake. Fix routes cooked-prop paint through that same working path: MESH_PROPS bumped to v4 carrying the ENCODED PNG bytes (u32 pngLen|u8[pngLen]); the bake passes the stored bytes straight through (no decode) and the loader (constructor.decodeMeshProps) stbi-decodes at load into tex_rgba. The game host already links stb (-Dhas-imageops on the app), so no v8cli rebuild. v1/v2/v3 still read for back-compat. Added a round-trip test locking the byte layout; the app build compiles (SHIP_RUN_PACKAGE=0 rjit ship hmsc-int) and the bake runs. To SEE it: run the freshly-built host (restart the dev host / re-ship), place a painted prop, Compile, view /compiled. Couldn't self-verify pixels end-to-end because the current boot-key world has no cooked props placed.",
+  "shas": [
+    "83b39ed01"
+  ],
+  "resolvedAt": "2026-06-21T00:21:58.971Z"
+}

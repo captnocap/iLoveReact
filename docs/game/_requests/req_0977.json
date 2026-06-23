@@ -1,0 +1,28 @@
+{
+  "id": "req_0977",
+  "at": "2026-06-15T11:26:20.459Z",
+  "origin": "session:524eaf71",
+  "text": "Ok so before we finish up with your portion, the part that needs to land a bit cleaner is the selection of the thing and spinning the camera, currently, i click on something like a face, spin the camera and its deselected. also, i need to be able to select multiple faces or edges or vertex at a time, so we need there to be shift control to group them together",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T11:27:39.821Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T11:31:24.632Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Selection persistence + multi-select grouping. Two fixes in Studio.tsx onDown: (1) a MISS (clicking empty space) no longer clears the selection — it just falls through to the orbit drag, so spinning the camera by dragging off in empty space keeps your selection. Deselect now comes only from picking a new element (plain click = replace) or Esc. (2) The add-modifier is now shift OR ctrl (or meta) so you can group multiple faces/edges/vertices: applyPick toggles each into the per-mode set. Clicking on an element still does NOT orbit (you can't spin by dragging on a face — the user confirmed that is correct). Bundle-clean, hot-reload, fps untouched.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T11:31:24.632Z"
+}

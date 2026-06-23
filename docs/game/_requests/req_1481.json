@@ -1,0 +1,31 @@
+{
+  "id": "req_1481",
+  "at": "2026-06-20T02:01:53.501Z",
+  "origin": "session:ccd83b97",
+  "text": "its cheap. very cheap. every prop face can be skinned, skins can be react. pretty straight forwards",
+  "status": "review",
+  "sessionId": "ccd83b97-8a50-41e1-9076-824a01c74989",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T02:19:25.668Z",
+      "actor": "ccd8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T02:50:04.764Z",
+      "actor": "ccd8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the collinear-name rule: roads continuing straight through an intersection (the two opposite arms sharing an axis) are ONE road and share a name. resolveRoadNames(strokes, junctions) union-finds the through-arms at every junction and resolves each group's name to the first segment a human named; planIntersectionProps + the IntersectionRail display use it, so naming one segment of Main propagates its name to the collinear continuation across the cross street and onto every street sign. Covered by a P4 test (named west half + unnamed east half across a vertical cross street → both resolve to Main). Part of the same feature as req_1480; shas shared.",
+  "shas": [
+    "8b0ccb660",
+    "d7cc04eb8"
+  ],
+  "resolvedAt": "2026-06-20T02:50:04.764Z"
+}

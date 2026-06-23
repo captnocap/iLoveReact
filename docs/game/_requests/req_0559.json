@@ -1,0 +1,31 @@
+{
+  "id": "req_0559",
+  "at": "2026-06-10T15:59:52.502Z",
+  "origin": "codex:019eb242",
+  "text": "inside of the compose method for materials in hmsc-int can you make the decal approach better to work with. like, give me drag to size the rectangle and shit. its a pain in the ass clicking the + button a few hundred times t o get the right size",
+  "status": "review",
+  "sessionId": "019eb242-3ff1-73a2-b202-5d99e580829d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T15:59:59.317Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:04:26.597Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Improved the hmsc-int material compose decal editor by adding direct drag resize handles on selected decal nodes. The stage now distinguishes move drags from resize drags, and the material store exposes tested resize math with minimum-size clamping so rectangles can be sized directly instead of stepped by buttons.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T16:04:26.596Z",
+  "tags": [
+    "ux"
+  ]
+}

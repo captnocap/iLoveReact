@@ -1,0 +1,28 @@
+{
+  "id": "req_1008",
+  "at": "2026-06-15T15:21:31.932Z",
+  "origin": "session:8c2aee6a",
+  "text": "I cant figure out why when i click new, and then i click on a face, it does not highlight it. but if i restart the app. it works fine.",
+  "status": "review",
+  "sessionId": "8c2aee6a-d17a-4edb-bc4f-f7a458ee4293",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T15:25:27.835Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T15:36:10.050Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reported: clicking 'new' then a face doesn't highlight it, but a restart fixes it. Root cause (confirmed in framework/gpu/3d.zig): DYN_SLOTS=48 dynamic-mesh slots, allocated by key-hash and NEVER freed (g_dyn_len only grows); once full, dynSlotLocate returns null and new dynamic meshes are DROPPED. The Studio rendered EVERY part AND its face-highlight AND the drag-draft with a per-part dynamicKey (studio.<partId>~..., studio.<partId>.hi~...), so each part/model ever created over a session permanently burned slots — after enough new+add churn (the user had reached new_mesh_006) the pool exhausted and the highlight (allocated last) dropped. A process restart resets g_dyn_len to 0, hence 'restart fixes it'. Fix (TSX-only, no Zig rebuild): bound the slot ids so the 48 slots are REUSED, not leaked — parts now key by RENDER INDEX (studio.s<index>~<partId>.<version>: id-hash bounded by the max parts shown at once, reused across parts/models; the version part re-uploads when the part at that slot changes/edits); the drag-draft uses ONE fixed slot (studio.draft~...); the face-highlight uses ONE fixed slot (studio.hi~...). Total Studio dyn-slot use is now (parts in the open model)+2, reused across the whole session, so it never exhausts under new+add churn. Studio.tsx + full chain bundle clean. Hot-reload TSX, nothing committed. Note: this is a host-resource-management fix in the cart; the deeper option (free a dyn slot when its key stops rendering) would be a framework/3d.zig change requiring a rebuild — not done.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T15:36:10.050Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1201",
+  "at": "2026-06-16T23:57:12.143Z",
+  "origin": "session:8e058574",
+  "text": "huh i just dont see it then what is the name of the button [Image #9]",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T23:59:40.989Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T23:59:40.998Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The symmetrize feature already existed (the keep +Z / keep −Z buttons + live symmetry badge from req_1190/1191) but was nested inside the non-rig tool block, so it was invisible in rig mode — exactly where the user was (placing wheel joints) when they went looking for it, and easy to miss in the cramped toolbar otherwise. Symmetrize is a whole-mesh operation that does not depend on the selection mode, so moved the whole cluster out of the selMode!=='rig' gate to right after the selection-mode buttons, making it visible in every mode (object/vertex/edge/face/rig/paint), and relabelled the leading 'sym' to 'symmetrize' so it is findable by name. Behaviour unchanged: it auto-targets the model's symmetry axis (Z for the car), you click keep +Z or keep −Z to choose the good half and it rebuilds the other as an exact mirror, with the ✓ symmetric / ⚠ N off badge alongside. Full hmsc-int cart bundles clean. Committed 0ceb24286.",
+  "shas": [
+    "0ceb24286"
+  ],
+  "resolvedAt": "2026-06-16T23:59:40.997Z"
+}

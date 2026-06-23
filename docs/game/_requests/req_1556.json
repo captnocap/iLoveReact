@@ -1,0 +1,30 @@
+{
+  "id": "req_1556",
+  "at": "2026-06-21T11:47:18.741Z",
+  "origin": "session:0b8abe45",
+  "text": "ok. so.... the props now have the painted faces on them. but now the entirety of all of the models i have made no longer show up in the editor [Image #7]",
+  "status": "review",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T11:48:02.723Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T12:10:09.674Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Models vanished from the Studio roster (only '+ new') after a host rebuild, though all 20 were intact on disk. Root cause: the model store ballooned to 674MB / 444MB snapshot because every paint stroke bakes a NEW full-atlas ~2MB PNG into a modelPaintBaked event and the prior blob was never GC'd (774 orphaned blobs, 421MB). On boot (SNAPBOOT) the host JSON.parses the 444MB snapshot and OOMs, so model state loads empty. Two-part fix. (1) RECOVERY of the live store (out-of-band sqlite, backup taken to ~/store-backup-20260621-050018-model): drop orphan modelPaintBaked events keeping the latest per model, VACUUM, move the stale snapshot aside so the host rebuilds it small — 674MB→127MB, 20 models + 7 live paint blobs preserved/verified. (2) PREVENTION (committed 3f235623b): modelStream.apply now GCs a model's prior paint blob on re-bake unless another model still references it (shared, content-addressed), so materialized state + the snapshot stay bounded and the boot can't OOM again; added a GC unit test (modelStream 10/10). User must RESTART the editor to load the compacted store (roster returns); the GC takes effect on the next host rebuild. Follow-ups: debounce paint saves (stop ~2MB/stroke event growth) + periodic event-log compaction (the 127MB residue is legit partMeshUpdated branch history). Undo is a separate RAM ring, untouched.",
+  "shas": [
+    "3f235623b"
+  ],
+  "resolvedAt": "2026-06-21T12:10:09.674Z"
+}

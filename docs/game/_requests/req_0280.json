@@ -1,0 +1,14 @@
+{
+  "id": "req_0280",
+  "at": "2026-06-08T05:07:19.703Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: BUG 1 diagnosis ACCEPTED — clean root cause: PlacedBuildPiece (placed.ts:45) carries no skin/face-material field, stampPrefabPieces (placed.ts:754) copies only pieceId/position/yaw/edit (dropping skins), and the world render (PlayRoute.tsx:390) draws the whole wall band instead of the window cutout. GO on the bug-1 fix: (1) PlacedBuildPiece carries the per-face skin/material + the window edit; (2) stampPrefabPieces copies them through; (3) the world render honors window cutouts AND applies the skins, so placed == editor preview exactly. This is the one-source-of-truth fix — the placement bake must consume the same skin+cutout data the editor preview does, not a lossy subset. Evidence: before/after of the SAME prefab placed (windows as cutouts, skins present). Frame-time gate if render path changes.\n\nTHEN post the BUG 2 + BUG 3 diagnosis (ghost 'deleted' buildings + editor/game desync) — those determine whether AUTHBUILD-REMOVE is the fix or a broken delete. I need that data before I give the AUTHBUILD deletion word. Keep RAMPCHAIN/RAMPGAP/STAIRVIS queued behind the cluster.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "id": "req_1163",
+  "at": "2026-06-16T14:16:50.910Z",
+  "origin": "session:8e058574",
+  "text": "Hey i didnt realize til now but in the studio mesh editor we gave extrude to faces but didnt give it to edges and need to do so",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T14:16:57.611Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T14:29:19.796Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "Implemented edge extrude in the Studio mesh editor (was face-only). Added extrudeEdge() to editMesh.ts + an 'extrude' button in edge mode (1 edge selected) in Studio.tsx that pulls a new edge off, bridges with a quad, and re-selects the new edge for the move gizmo. 2 new tests pass (50/50 suite). NOT committed: editors/model/ is entirely untracked in this tree — flagged to user."
+    },
+    {
+      "at": "2026-06-16T14:29:49.487Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-16T14:56:45.326Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "Committed in d2ac77028 (editors/model/ now tracked)."
+    }
+  ],
+  "resolution": "Added edge extrude to the Studio mesh editor, which previously only extruded faces. New extrudeEdge() in editors/model/editMesh.ts copies the selected edge's two verts, pushes the copy out along the average adjacent-face normal, and bridges the gap with one quad wound to share the edge opposite its neighbor face (so the new flap faces outward consistently; a normal-based away-from-center flip is degenerate because the quad normal is always perpendicular to the bisector extrude direction). Studio.tsx now shows an 'extrude' button in edge mode when exactly one edge is selected; it extrudes, re-selects the freshly-created edge, and switches to the move gizmo so the user can immediately pull it in/out — mirroring the existing face-extrude flow. Two new headless tests pass (suite 50/50 then 54/54 after req_1164). NOT committed: editors/model/ is entirely untracked in this working tree (another lane's uncommitted keystone), so a clean own-work-only commit isn't possible; flagged to the user for a git decision.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T14:29:49.487Z"
+}

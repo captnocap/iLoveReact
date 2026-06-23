@@ -1,0 +1,31 @@
+{
+  "id": "req_0581",
+  "at": "2026-06-10T18:02:10.827Z",
+  "origin": "session:1b2ce00d",
+  "text": "Also. did u ever do the tunnels / bridges ?",
+  "status": "review",
+  "sessionId": "1b2ce00d-1639-40fe-8b5a-0f2b48b361f4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T18:02:25.574Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T18:02:25.583Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's question directly: no — tunnels/bridges did NOT land this session. Of the four elevation modes in the agreed design (grade / deck / approach strips / tunnel hole-mask), only GRADE landed (685d7eb8d: roads smooth the terrain under their bed). Bridges (= deck mode: floor pieces over water/gaps + gentle heightfield approach strips; physics already supports walk-under stacked heightfields) and tunnels (= terrain hole-mask + deck tube) are still queued — they are in the handoff brief's item 4 standing queue and the project_road_grammar memory horizon. No code changed for this entry.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T18:02:25.583Z",
+  "tags": [
+    "ask"
+  ]
+}

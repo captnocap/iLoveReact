@@ -1,0 +1,17 @@
+{
+  "id": "req_0022",
+  "at": "2026-06-06T05:33:13.977Z",
+  "origin": "supervisor-relay",
+  "text": "i thought i asked someone earlier to make the torso and the pelvis not the same mesh but it seems to be the same and i dont see a pelvis mesh to edit",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T06:00:39.627Z",
+  "resolution": "PELVISMESH-0606 landed: the pelvis is a real mesh part, not a paint segment. 'pelvis' joined PartId (preset = the torso preset verbatim so an unsculpted pelvis looks exactly like the old socket), the anatomy pelvisSocket died and the pelvis became an ASSEMBLY instance on the pelvis bone with the socket's exact sizing — so it is sculpt-, grab-, and paint-editable like any part and appears in every part roster: /characters part tabs, the workbench character stage, and the /cutout MODELS rail. The LIMBPAINT pelvis paint segment folded into the part (the string 'pelvis' keeps meaning; same unwrap dims, now sampled by the pelvis's own mesh — the torso-paint cascade is dead structurally and the bare-torso capture machinery was removed). V20 compat: partsWithPelvisFallback maps pre-split documents deterministically (pelvis = torso sculpt+profile copy, exactly what the socket displayed) at parseBody/draftFromDocument/bakeBodyDocument/ModelPreview; generated citizens copy the torso's profile/grid with zero extra rand draws so old seeds keep their look. Damage zones (pelvis bone stays 'torso'), bottoms (already pelvis-bone-driven), and hitboxes are deliberately unchanged — a 'pelvis' damage zone would be constitution-grade and is surfaced in game/figure/CAPTURE.md, not assumed. P4: documents.test grew the PELVISMESH suite (roster, old-doc round-trip, copy-not-alias, paint-segment-to-mesh 1:1), rig.test pins 27 assembly/8 anatomy; figure+editors+workbench suites green. READY FOR USER TEST: select 'pelvis' in /characters or the workbench — it is its own mesh, separately editable from the torso.",
+  "shas": [
+    "185863d86",
+    "8c467a57a"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_1346",
+  "at": "2026-06-19T00:25:38.588Z",
+  "origin": "session:1429fa0c",
+  "text": "wtf is a co-planar face? is this not that? [Image #8] why cant i merge the two",
+  "status": "doing",
+  "sessionId": "1429fa0c-8304-48a7-a318-cb15d58c0388",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T00:25:51.033Z",
+      "actor": "session-1429",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

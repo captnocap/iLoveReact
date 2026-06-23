@@ -1,0 +1,12 @@
+{
+  "id": "req_0147",
+  "at": "2026-06-06T17:28:11.033Z",
+  "origin": "codex:019e9ca9",
+  "text": "Loooks to be good. so now back to the hang",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:31:06.755Z",
+  "resolution": "Returned to the /workbench hang and fixed the remaining measured host-flush path by moving first-use Scene3D vertex payloads off JSON arrays. Added __hostUploadFloatBuffer in framework/v8_bindings_core.zig, a one-shot content-store take path in v8_app.zig for scene3dVerticesHandle, and runtime/primitives.tsx now sends typed-array handles for first registration of static/dynamic Scene3D geometry while preserving the old JSON array fallback. This targets the cold workbench character mount's vertex-buffer stringify/parse/copy cost; tools/rjit game verify hmsc-int is green. Live confirmation is still needed because native host changes require a dev-host restart/rebuild, not just JS hot reload.",
+  "shas": []
+}

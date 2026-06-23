@@ -1,0 +1,28 @@
+{
+  "id": "req_1648",
+  "at": "2026-06-22T20:31:37.397Z",
+  "origin": "codex:019ef106",
+  "text": "Hello. I have this bug, im not sure what you name it, but here it is. So here is a screenshot of the compiled game loaded in. [Image #1] looks exactly as it should, If i turn my camera just slightly, this occurs, where the world starts to disappear [Image #2] i have not moved the player only the camera. when i walk around, i dont fall through the map. and at some camera angles the textures reappear",
+  "status": "review",
+  "sessionId": "019ef106-bfb2-75c0-b3e8-6be886d1fbc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T20:31:46.497Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T20:36:12.734Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the compiled-world camera-turn disappearance at the streaming layer. The streamer was allowed to frustum-cull resident detail chunks, so an approximate visibility false negative could drop nearby floors/roads while collision remained. Resident chunks now stay visible and only nonresident far-field chunks use the frustum cull. Added a Zig regression test proving resident detail rows still draw when the camera turns away.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T20:36:12.734Z"
+}

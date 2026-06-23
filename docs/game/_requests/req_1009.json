@@ -1,0 +1,27 @@
+{
+  "id": "req_1009",
+  "at": "2026-06-15T15:35:54.198Z",
+  "origin": "session-relay",
+  "text": "OK so i see a problem here again. and its in the selection which is not even letting the uv update correctly. i have a cut in place, i have 1 side selected. lets do another cut. can you tell that there is a new cut? neither can i. but there is, evidently. but i dont see it. [Blockbench: the second cut updates the uv highlight AND the selection] also be very aware. it cut on the face only selected. it didnt reconsider it all as one face.",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-15T15:35:54.207Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T15:35:54.216Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The second loop cut on an already-cut face was invisible (mesh, UV, and selection all unchanged), and it 'reconsidered it all as one face' instead of cutting the selected sub-face. Root cause: loopCutAxisInfo computed the cut span (lo/hi on the cut axis) from ALL mesh verts — the whole cube's 16-unit extent — not the selected face's. So a second cut on an 8-unit half still used the 16-unit range with a default offset of 8, placing the new plane exactly at the first cut's plane → no new geometry → nothing changed (so lcKeptFace returned the same face and the selection/UV didn't update either). Fix: loopCutAxisInfo now computes lo/hi from the SELECTED FACE's loop verts; new editMesh.ts loopCutRange(m,axis,lo,hi,cuts,offset) applies the cut within that explicit span (loopCut refactored to call it with the whole-mesh range for the bare-cuboid case). So a cut on a cut half now subdivides THAT half — visible, and the UV + selection update. editMesh 26/26 (added a test proving a sub-span cut adds faces while a whole-range cut at the existing plane is a no-op). Studio.tsx + full chain bundle clean. Hot-reload TSX, nothing committed. KNOWN REMAINING DIFFERENCE: cutMeshByPlane still splits the whole loop at that plane (the parallel faces), where Blockbench confines the cut to the single selected face — flagged as the next refinement (single-face cut) if the user wants exact parity.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T15:35:54.216Z"
+}

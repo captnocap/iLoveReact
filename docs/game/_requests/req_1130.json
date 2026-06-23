@@ -1,0 +1,36 @@
+{
+  "id": "req_1130",
+  "at": "2026-06-16T02:47:43.755Z",
+  "origin": "session:071f59a8",
+  "text": "oh yeah thats way better on the leaves haha yesss [Image #4] the body now just needs effectively like a spaghetti generator for the curves of them haha",
+  "status": "review",
+  "sessionId": "071f59a8-18c9-4044-84f1-a1913885c085",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T02:48:44.885Z",
+      "actor": "claude-opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T03:12:30.332Z",
+      "actor": "claude-opus",
+      "kind": "note",
+      "text": "Spaghetti curve generator DONE: per-frond seed (from instance transform) curves each frond uniquely — droop+sag+2-harmonic sideways snake, tip-weighted, in the vertex shader so it sways in wind too. Curve SHAPE factored to geometry presets (arc+sag): classic coconut palm + weeping/flowing palm + broad leaf, all approved by user ('I like both'). Sha 8c1ab8284."
+    },
+    {
+      "at": "2026-06-16T03:13:07.825Z",
+      "actor": "claude-opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the per-frond 'spaghetti generator' the user asked for: each frond derives a unique seed from its instance transform (constant across one frond's verts, varies frond-to-frond) and the vertex shader curves its body its own way — forward droop + downward sag + a two-harmonic sideways snake, all tip-weighted so the base stays planted at the crown. Because it lives in the vertex stage it also sways in the wind. The base curve SHAPE (palm vs weeping) was factored out to geometry presets (Frond.ts arc+sag), so the shader adds only per-frond variety; the user approved both the classic coconut palm and the long-flowing weeping palm ('I like both'). Verified via cart/tree_probe self-shots.",
+  "shas": [
+    "8c1ab8284"
+  ],
+  "resolvedAt": "2026-06-16T03:13:07.825Z"
+}

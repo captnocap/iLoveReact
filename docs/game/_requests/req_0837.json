@@ -1,0 +1,32 @@
+{
+  "id": "req_0837",
+  "at": "2026-06-13T21:13:57.400Z",
+  "origin": "session:ac60258b",
+  "text": "No. i dont need to probe. i an see it witrh my eyes. you cant. you are blind. you need to probe it. I just gave you coordinates that render correctly. the reasaon i did that is so you have a baseline in your same test that says it passes on these points. so we know your test is correct",
+  "status": "review",
+  "sessionId": "ac60258b-2e2e-4a0c-a6c8-3ebae4aa1c72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T21:14:53.173Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T21:59:10.783Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Honored the ruling that I am blind and must PROBE with real pixels, not eyeball or reproduce in JS. Built the probe as a headless real-GPU test: it renders the actual WGSL on the iso-3D mesh path and reads the swapchain back at named cells, with a 2D /quad control proving the data is road. Used the user-supplied known-good points as a baseline to verify the probe itself is correct (centroid-fiducial fix landed here), and the user-supplied current pass/fail to confirm the verdicts match what they see on screen (6/6). The probe is the durable mechanism for all subsequent road-render verification and the fix gate.",
+  "shas": [
+    "cf550a5dc",
+    "fdd8c791f",
+    "17fa983b9"
+  ],
+  "resolvedAt": "2026-06-13T21:59:10.782Z"
+}

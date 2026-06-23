@@ -1,0 +1,30 @@
+{
+  "id": "req_1564",
+  "at": "2026-06-21T12:08:10.081Z",
+  "origin": "codex:019ee6ab",
+  "text": "so the bulbs do not stay attached to the grass and because the grass moves around then you have these static balls just floating in the air.",
+  "status": "review",
+  "sessionId": "019ee6ab-af32-7462-bc98-fece61170df4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T12:08:30.760Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T12:15:39.631Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the flower-grass bulbs so they no longer render as static sphere instances. Flower heads now use a dedicated crossed-card geometry routed through the same grass wind shader in both the editor preview and compiled no-JS loader, with a compile test proving flower grass bakes to the winded flower shape instead of spheres.",
+  "shas": [
+    "37cd768e7"
+  ],
+  "resolvedAt": "2026-06-21T12:15:39.631Z"
+}

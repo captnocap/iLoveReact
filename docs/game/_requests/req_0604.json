@@ -1,0 +1,33 @@
+{
+  "id": "req_0604",
+  "at": "2026-06-11T05:00:42.109Z",
+  "origin": "session:e9bdce32",
+  "text": "here are more problems. look at this. for example. why do i have 3 color swatches. further why dont i have the color wheel here? [Image #2] [Image #3] [Image #4] that is how repetitive and horribly thought about the ui is right now. heres more: [Image #5] [Image #6] [Image #7] [Image #8] [Image #9] genuinely look at all the images and evaluate from what you can see if it looks straight forward or confusing as fuck [Image #10] [Image #11] [Image #12] also this route that has the assistant model generating panel is ass [Image #13] also. the settings button is in two places. but there is a lot of neglect to space awareness and strong ux. anywhere that i have a javascript slider and not a host slider is bad. anywhere i have a +- stepper with no slider or direct value change is bad. anywhere where the width of a container isnt constrained is bad.",
+  "status": "review",
+  "sessionId": "e9bdce32-4d43-433c-9b7c-e64529ad18a7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T05:02:13.305Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T05:05:03.695Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited all 13 screenshots and wrote §11 of the structure review (commit a9b09f2b3). Codified the user's four UX laws (L1 host sliders — verified NO native slider primitive exists, every slider is JS WorkbenchSlider; L2 no bare ± steppers — zoom/threshold steppers cited; L3 constrained widths; L4 one settings door — found THREE). Answered the 3-swatches/no-wheel question: the buildings source emits walls/roofs/props as three identical groups each with its own palette copy, while FieldSpec t:'color' already supports wheel+range (fields.tsx:40) — the fix is data, not new UI. Per-screenshot findings for all 13 (two categories both named FACADES, vehicles debug-jargon-as-UI, dead TV panel, 77-row ungrouped paint roster with hash names, animation 35-button chip wall already ruled against in req_0184, characters LAW-1 violated both directions, assist3d as the last pre-fold shell incl. a doubled-MODEL-input bug at BackendBar.tsx:70). Structural diagnosis: panels mirror the data shape, not the task — proposed an 8-rule PANEL GRAMMAR enforced in the one renderer (shell/fields.tsx + spec validator) so every source inherits the fix at once.",
+  "shas": [
+    "a9b09f2b3"
+  ],
+  "resolvedAt": "2026-06-11T05:05:03.695Z",
+  "tags": [
+    "ux"
+  ]
+}

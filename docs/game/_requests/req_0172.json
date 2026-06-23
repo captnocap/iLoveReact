@@ -1,0 +1,12 @@
+{
+  "id": "req_0172",
+  "at": "2026-06-07T04:01:42.233Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — CAMRAY-0606, user asked THREE times in a row (top priority for your lane after the in-flight items): \"we need to add the wall/camera ray casting so we can see inside of the building\". Third-person camera occlusion: when placed wall/roof pieces sit between the CAMERA and the PLAYER, the player must stay visible — ray/sweep from camera position to player position against the wall-class collision world each frame; pieces the ray hits become see-through (fade/cutaway per whatever the renderer supports cleanly — pick the mechanism the existing rendering supports, post your choice before building if ambiguous). Constraints: the raycast belongs in the physics host where the wall rects already live — if a ray-vs-rects binding is missing, expose it (mirror the v8_bindings pattern, doors-only); Zig-side logic gets Zig-side unit tests (zig build test-*) per the standing rule, plus consumption-layer TS tests (camera behind wall -> piece reports occluded). PERF: this runs per frame — budget it (you know the 4.1ms baseline; the occlusion query must be microseconds, not a spike — reuse your spikewatch to prove no regression). Tuning: fade amount/radius are tuning data on the P2 surface. Visual proof: SELFSHOT inside a building with the camera outside, player visible through the faded wall (full path). DO NOT COMMIT. The user seeing inside their building is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

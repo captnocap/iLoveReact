@@ -1,0 +1,28 @@
+{
+  "id": "req_0970",
+  "at": "2026-06-15T10:53:39.920Z",
+  "origin": "session:524eaf71",
+  "text": "Great. That works well. Next is to create the tools for selecting. faces, vertex, and edges lets do that now.",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T10:54:43.415Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T11:04:11.283Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added face/edge/vertex selection (playbook Part 4 #5) as a PERSISTENT mode toggle per the user's Blockbench clarification (object/vertex/edge/face toolbar, top-center; each mode keeps its own selection set; mode stays until switched, not select-pick-reset). New editors/model/meshSelect.tsx: a JS replica of the host projection (makeProjector = m4lookAt+m4perspective from gpu/3d.zig, eye from camera.zig orbitalEye, near 0.02/fov from the Scene3D.Camera) so the 2D overlay dots/lines sit exactly on the rendered mesh and draw ON TOP (back-facing elements are pickable, like Blockbench); the derived screen-right is identical to the already-confirmed compass R, so handedness matches the render. SelectionOverlay draws a faint wireframe always, vertex dots in vertex mode, edge highlight in edge mode, and face centroid dots + selected-face outline in face mode; selected = orange. Picking runs in the viewport onMouseDown (vertex=nearest projected dot within 11px, edge=nearest segment within 8px, face=point-in-projected-polygon choosing the frontmost): a hit selects and suppresses the orbit drag, a miss clears unless shift, then falls through so empty-drag still rotates. Shift=add/toggle, plain click=replace; clicks map window->local via e.x-rect.x like IsoAuthor; e.shiftKey read for the modifier. Overlay self-ticks at 30Hz to mirror the host-driven spin and is isolated from the Scene3D tree; selection resets when the active part changes. Move-the-selection gizmo is the next first-slice step. Bundle-clean, hot-reload, fps untouched.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T11:04:11.282Z"
+}

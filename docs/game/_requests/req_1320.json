@@ -1,0 +1,30 @@
+{
+  "id": "req_1320",
+  "at": "2026-06-18T22:12:53.550Z",
+  "origin": "session:9e041fa8",
+  "text": "i dont see how dedupe can be a problem when done correctly. \n\nif i have a face that is \n\nidk ABC\nand then it appears again as ABC somewhere else\n\nthat doesnt change anything about the paint on it. we never said the paint was the same yet, all we said was that both are ABC but one of them could have colors 123 and the other 456 doesnt change they are both ABC",
+  "status": "review",
+  "sessionId": "9e041fa8-bb4b-47e8-9250-ce5cf71d3fa9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T22:19:04.005Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T22:19:04.015Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Mirrored/added faces shared a single atlas slot (they kept the default full-square UV), so painting one prong showed on its mirror and the other stayed white — congruent SHAPE was wrongly collapsing to shared PAINT pixels. The paint pack only ran on first paint-entry or part-count change, never when a new FACE was extruded/mirrored. Now the atlas re-slots whenever a face-topology signature changes (per-part face counts); textureizeScene is idempotent (faces/meshes with unchanged UVs keep their refs, so re-slotting one new face doesn't churn every part), and a re-slot PRESERVES existing paint because cells are face-relative. Tests textureize 11/11; cart bundles clean.",
+  "shas": [
+    "eca6b2815"
+  ],
+  "resolvedAt": "2026-06-18T22:19:04.015Z"
+}

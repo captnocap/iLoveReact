@@ -1,0 +1,33 @@
+{
+  "id": "req_0459",
+  "at": "2026-06-10T05:19:54.182Z",
+  "origin": "session:0ce255e1",
+  "text": "ok the next thing is when i click on something preexisting, it selects the entire building and i cant for instance edit anything ive placed that touches anything else",
+  "status": "review",
+  "sessionId": "0ce255e1-e6f7-4640-95b6-c6054e1a2eb6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:22:51.371Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:23:09.686Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clicking a placed piece selected the WHOLE connected building, so a piece touching anything else couldn't be edited individually. Flipped the default select scope to SINGLE piece (the ▦/▪ toggle still sets the default), and added Shift/Alt-click to invert the scope for that one click — so a single piece is always one click away even when touching others, and the whole building is one modifier away without flipping the toggle. Mouse events in this host carry no modifier flags, so shift/alt-held is tracked off the __keydown/__keyup bus (which exposes shiftKey/altKey) and read at click time. Toggle tooltip + the on-screen hint updated to say so. Committed f07fbdf9b, bundles clean.",
+  "shas": [
+    "f07fbdf9b"
+  ],
+  "resolvedAt": "2026-06-10T05:23:09.686Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "req_0174",
+  "at": "2026-06-07T04:18:08.036Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — BUILDSKIN-0606, queue AFTER WBSTEP9 completes. User spec, near-verbatim, for a new WORKBENCH BUILDING SOURCE (menu outside game testing, e.g. workspace/building): (1) a saved PREFAB becomes a BUILDING type — the buildings roster lists every prefab-building with its total piece count; (2) GLOBAL skin controls per piece TYPE — there are 4 building piece types — e.g. \"all walls -> green\" in one action; (3) PER-PIECE OVERRIDE on top of globals — \"set global green, then change one wall to red\" — resolution order: piece override beats type global; (4) skins are PER-FACE with the side rule: a piece is a 3D box with 6 faces but only the 2 major faces matter individually; the side/edge faces are ONE group, uniform all the way around; (5) NOTHING IS IMMUTABLE — from a building you can swap a wall piece to a door, remove a piece, add a window; buildings stay live editable structures, never baked. DESIGN CONSTRAINT, non-negotiable: the skin vocabulary IS the material system — another lane is building the materials source (stored materials + shader recipes + decals) and the painter already produces live textures; skinning a face = assigning a material, one source of truth, NO parallel texture path (coordinate through the supervisor if you need the materials lane's contract before it lands). Build as a proper WorkbenchSource per WORKBENCH.md sections 1-4 (the items/characters sources are the pattern), parity-style capture doc, tests, three chrome laws. Additive; verify green; READY with capture path. DO NOT COMMIT. The user skinning a building green then one wall red is the PASS.\n",
+  "status": "new",
+  "sessionId": "d3e600d5-0069-46ee-baf8-1d77b7de69a3",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

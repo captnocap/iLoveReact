@@ -1,0 +1,10 @@
+{
+  "id": "req_1557",
+  "at": "2026-06-21T11:49:54.187Z",
+  "origin": "session:0b8abe45",
+  "text": "what? how are there 1975 files uncommitted but the entire directory has 1240 files",
+  "status": "new",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": []
+}

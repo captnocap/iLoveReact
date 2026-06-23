@@ -1,0 +1,28 @@
+{
+  "id": "req_1021",
+  "at": "2026-06-15T17:15:06.629Z",
+  "origin": "session:46d99bcc",
+  "text": "erm nevermind. its the fact the t ool is not on a twig (hotreload) so it deselects the mode im on",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T17:17:41.879Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T17:23:19.237Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigated the two hot-reload state issues the user raised: (1) the viewport tool mode (selMode) resetting on hot reload because it is component useState not a hotstate twig, and (2) loop cuts vanishing from the 3D mesh while still showing in the UV panel after a hot reload. Traced the geometry path: the UV reads part.mesh directly while the 3D mesh goes through the host dynamic-geometry slot keyed by dynamicKey 'studio.s<index>~<id>.<version>'; version increments deterministically in the modelStream materializer (partMeshUpdated: prev.version+1) so it is identical after a stream replay, meaning the host keeps stale slot geometry across the reload. The user confirmed it was a hot-reload stale bug and that it is now fixed/fine, so no code change landed from this session for req_1021. The selMode-twig follow-up remains open (deferred 'twig the viewport tool-state' work) if the user wants the mode to survive hot reload.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T17:23:19.237Z"
+}

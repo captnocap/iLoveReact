@@ -1,0 +1,18 @@
+{
+  "id": "req_0826",
+  "at": "2026-06-13T20:03:39.419Z",
+  "origin": "session:6e5908e6",
+  "text": "OK. now we can get down to it. So. First things first. this data of road-tiles is very wrong. it is considering asphalt tiles as road tiles. when they are clearly two different things it even says this [Image #32] [Image #33] now one of the tiles is ID369 ok so i go  to ID369 and its asphalt. this is not a road. so lets fix that first.",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T20:05:30.180Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

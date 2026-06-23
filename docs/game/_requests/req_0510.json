@@ -1,0 +1,31 @@
+{
+  "id": "req_0510",
+  "at": "2026-06-10T11:24:44.491Z",
+  "origin": "session:87a47e7e",
+  "text": "Ok. so, i would say a lane is 3 tiles yes. and the road tool, ideally looks like this shape:\n\ni can pick the lane count per side, or i can disable a side (for a one way road), but the one way roads need to show some sort of a one way marker and the direction it goes. also, the one part with tiles i still have a hard time with for roads is how do we do a bridge? because i only know how to so far get off the ground via a ramp, but that cant get tile paintings on it as it stands right now. which, is actually also just a problem in general, because we need npc pathing inside of buildings also, but i figured to just allow them to walk on floors in general, so that would solve the problem. however you cant just allow that for a bridge when it comes to lanes of traffic. \n\nalso, on the note of bridge, i should lump in tunnels also, as i would like to tunnel through a mountain range to be able to split zones, and thats the same for the bridge. think like gta, where you have segments of the map locked up. and there was always bridges between the islands or so, same idea id like to achieve",
+  "status": "review",
+  "sessionId": "87a47e7e-58c5-4ade-8b65-3201c99fe4d2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T11:25:39.638Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T11:27:03.569Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design continuation (no code changed): registered the lane=3-tiles ruling + per-side lane counts with one-way disable (direction shown via editor chevrons + in-game arrow decal overlay). Answered the bridge question: physics already supports stacked walk-under heightfields (physics.zig heightfieldGroundSurfaceAt gates eligible ground on current_y+step; 64 slots; overpasses anticipated in the comment), so the real gap is SURFACE NAV — pathing is one-kind-per-(x,z); the fix is floors/ramps/decks contributing nav surface cells at elevation that CARRY tile kinds, which solves bridge traffic lanes AND NPC pathing in multi-story buildings with one mechanism (formalizing the user's walk-on-floors intuition). Tunnels = terrain hole mask (collider+mesh skip masked cells) + piece-built tube with lane surface cells + mouth arches. Bridges/tunnels double as GTA-style zone-gate chokepoints via a gate flag on stroke segments (barrier prop + path blocker + trigger tied to game state). Memory project_road_grammar.md updated with the agreed stroke design.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T11:27:03.569Z",
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_0153",
+  "at": "2026-06-06T17:46:34.733Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — CUTOUTFLIP-0606. USER RULING, verbatim: \"cutout needs work but its at least got everything from the route in there so its g2g nuke that shit.\" The /cutout flip (WORKBENCH.md section 6 step 8) is GO. Execute exactly per the ledger: (1) extract EffectModal from the frozen route into the workbench agnostic-paint surface (editors/workbench/paint/) — the one remaining flip prerequisite; (2) delete the /cutout route file(s) (cart/hmsc-int/editors/cutout/CutoutRoute.tsx and any route-only files — shared internals consumed by the workbench stay), remove its nav icon + route registration; (3) update WORKBENCH.md: step 8 done, the route ledger row, AGNOSTICPAINT capture note unfrozen; (4) docs/game/ per the maintenance contract, same commit. ONE commit for the whole flip, explicit paths. CAUTION: the working tree carries uncommitted changes in cutout/paint files from earlier lanes (including a 37-line CutoutRoute.tsx delta and the PAINTLIVE wave) — disk is the source of truth; the deletion supersedes the CutoutRoute delta, but do NOT sweep unrelated paint-lane work into the flip commit: commit only deletion + extraction + ledger + docs paths. Any editors/paint or framework paintable changes stay uncommitted (they await their own pass). Verify green after the deletion (nothing may reference the dead route). Post the sha. Do the work yourself, no subagents.\n",
+  "status": "done",
+  "sessionId": "cac9001b-5622-4bd2-b46d-222534f25a0c",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T09:41:51.849Z",
+  "resolution": "CUTOUTFLIP-0606 landed as 12d36473c: /cutout route killed per the user's ruling ('nuke that shit'). CutoutRoute.tsx deleted, the EffectModal it owned extracted to editors/workbench/paint/EffectModal.tsx so the workbench PAINT bench is THE painting surface; route/nav deregistered, vehicle paint deep-links retargeted to /workbench; WORKBENCH.md step 8 marked DONE, AGNOSTICPAINT.CAPTURE.md unfrozen, cutout CAPTURE noted, docs/game (hmsc-int.md + _index/records/hmsc_int.ts) updated in the same commit per the maintenance contract.",
+  "shas": [
+    "12d36473c"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

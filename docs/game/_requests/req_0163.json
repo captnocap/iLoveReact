@@ -26,5 +26,9 @@
   "shas": [
     "4115d9db0"
   ],
-  "resolvedAt": "2026-06-08T05:36:48.998Z"
+  "resolvedAt": "2026-06-08T05:36:48.998Z",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
 }

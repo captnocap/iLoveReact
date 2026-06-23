@@ -1,0 +1,16 @@
+{
+  "id": "req_0071",
+  "at": "2026-06-06T08:12:23.718Z",
+  "origin": "supervisor-relay",
+  "text": "on the paint surface, we need a light overlay or something that shows the depth painting grid for the surface so i can be aware and not blind to where im painting",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T08:22:36.053Z",
+  "resolution": "DEPTHOVERLAY-0606 landed (9883047a4). The PAINT surface carries a LIGHT depth overlay: DEPTH_HINT_WGSL renders faint contour rings in the sculpt canvas's own color language (blue raised / orange carved), bilinear over the part's 48×24 grid carried in data[] — no paintable dependency, so it works even when the sculpt stage isn't mounted. One truth: depthHintGrid reads the SAME data the sculpt canvas shows (the stored sculpt plus the head's face-layer depth — painting a face, the sculpted nose location is visible, the stated PASS). Mounted in the bench's existing underlay slot (rides the canvas pan/zoom; zero painter fork per §8), above the model base and face layers so paint covers it only where paint exists. A 'depth hint' chip in the bench verb strip toggles it (figure targets only — the conditional-render law), default ON per the ask, twigged. Opacity is the P2 tunable 'depth hint α' (sculpt-camera cluster, /settings) AND — per the user's follow-up req_0074 — an intensity slider sits next to the chip writing the same tunable through the registry: slider, /settings, and shader read one table. P4: hint==stored sculpt one-scale, head face-fold, data contract with the live opacity. characters 19/19.",
+  "shas": [
+    "9883047a4"
+  ],
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_1372",
+  "at": "2026-06-19T01:55:08.049Z",
+  "origin": "session:9e041fa8",
+  "text": "sorry continue i just had to stop u when u said there were wins because all we really did is just push a bug around into different shapes and sizes",
+  "status": "review",
+  "sessionId": "9e041fa8-bb4b-47e8-9250-ce5cf71d3fa9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T02:46:41.671Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T02:46:41.682Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rebuilt the Studio model painter on direct RGBA pixel painting, replacing the box-atlas renderer (boxes->StaticSurface->texture) that produced every seam/leak/vanish bug. Phase A (framework): added an RGBA8 variant to gpu/paintable.zig (was R8-only) — per-paintable format, coloured brush ops with a scissor clip rect, two brush pipelines (one shader, two target formats), bpp-aware upload/readback, and a resolver registered with gpu.zig so a Scene3D mesh textureKey resolves to the paintable's view (paintable owns+caches its own 3D bind group). Phase B (cart): Studio paints in paint mode by raycasting to a face + interpolated UV (pickFaceUV) and stamping a coloured disc straight into the RGBA Paintable the mesh samples, clamped to the hit face's UV island; base coat = one clear. Proven on a real cube via cart/studio_paint_probe.tsx + tools/rjit shot (red base + adjacent crisp blue/green, no seam, clip respected). Commits 2 (framework + cart). NEEDS live AK paint test by user; Phase C (delete dead box-atlas PaintCells code) held until confirmed.",
+  "shas": [
+    "920d92b77",
+    "e9b6db84e"
+  ],
+  "resolvedAt": "2026-06-19T02:46:41.682Z"
+}

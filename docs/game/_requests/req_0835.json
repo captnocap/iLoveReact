@@ -1,0 +1,36 @@
+{
+  "id": "req_0835",
+  "at": "2026-06-13T20:57:49.848Z",
+  "origin": "session:ac60258b",
+  "text": "what is this test file suppose to show exactly. i have it loaded right now. it is not showing the same thing that the iso3d is showing, so its not the same test you are about to test it and get a passing test and it needs to be a failing test",
+  "status": "review",
+  "sessionId": "ac60258b-2e2e-4a0c-a6c8-3ebae4aa1c72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T20:58:30.503Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T21:08:06.732Z",
+      "actor": "ac60",
+      "kind": "note",
+      "text": "Real-GPU failing test written + committed (cf550a5dc): cart/road-render-test.{tsx,sh}. Boots headless, shoots /mesh (iso-3D Landform groundFormula path in 3d.zig) + /quad (2D Effect control), reads swapchain pixels at EK111 EI111 EI112 EI113 EI114 EJ111. /quad=dark asphalt (data IS road), /mesh=CONCRETE rgb~120-133. Bug isolated to 3D mesh ground path, not data/formula. Test exits 1 until mesh draws asphalt."
+    },
+    {
+      "at": "2026-06-13T21:08:44.647Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User flagged that the initial quad-only test did not match what the iso-3D shows, so it could not be a failing test. Rebuilt it to render the EXACT iso-3D ground component (Landform groundFormula mesh) via the real IsoStage camera, with four pure-colour ground fiducials so the checker solves a ground-plane->pixel homography and samples the precise cells without trusting camera internals. Validated it is not a false negative by keeping a /quad control (same formula+data) that reads dark asphalt at the same cells. Result on real pixels: /mesh draws the road cells as concrete (rgb~120-133), test exits 1. Committed cf550a5dc. Bug isolated to the 3D mesh ground path, not data/formula; fix not yet attempted.",
+  "shas": [
+    "cf550a5dc"
+  ],
+  "resolvedAt": "2026-06-13T21:08:44.647Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0722",
+  "at": "2026-06-13T05:55:30.652Z",
+  "origin": "session:e13c74b5",
+  "text": "[js.warn] [iso-census] level=0 cut=2.99 display=1472 visible=436 stamped=854 kinds={\"wall\":869,\"roof\":104,\"prop\":196,\"floor\":280,\"elevator\":12,\"stairs\":5,\"pillar\":6} removed{plane:1036,walls:0,pending:0} cutKinds={\"wall\":673,\"roof\":104,\"elevator\":9,\"floor\":221,\"prop\":28,\"pillar\":1} cutStorey=[3.0..33.0] sample={wall@(55,73) y=3.0 ground=0.0 storey=3.0 stamp=bps_194}",
+  "status": "review",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T06:02:05.525Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T06:02:05.533Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Census paste that pinned the buildings-gone root cause to the iso floor cut-away (level=0 cut=2.99, 1036/1472 pieces removed by the level plane; cutKinds walls/roofs/floors; cutStorey 3..33m; sample wall y=3 ground=0 storey=3). Fixed by a showAllFloors twig (default ON) that bypasses the cut-away so the whole multi-storey city renders, with the cut-away as an opt-in ⌷ toggle by the F-level controls (79da84357).",
+  "shas": [
+    "79da84357"
+  ],
+  "resolvedAt": "2026-06-13T06:02:05.533Z",
+  "tags": [
+    "perf-log"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0692",
+  "at": "2026-06-12T13:41:56.995Z",
+  "origin": "codex:019ebbe8",
+  "text": "that doesnt make much sense. i can get this close on the side [Image #1] but still on the front or back its huge [Image #2]",
+  "status": "review",
+  "sessionId": "019ebbe8-ba1e-74d1-bd7a-0274b58ea604",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:42:03.494Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T13:46:10.700Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the side-vs-front desk collision mismatch by removing the remaining radius-square prop path from live host physics. Rectangular props now expose propOrientedPhysicsRect with their measured local X/Z half extents, embodied play includes prop solids directly, and the older state/hostPhysics packer sends rectangular props through the oriented-rect wire instead of the flat radius/AABB rect path. Added a focused world/props test asserting imported.desk uses the 2.309897m by 1.149652m measured rectangle and not the coarse radius square.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T13:46:10.700Z",
+  "tags": [
+    "bug"
+  ]
+}

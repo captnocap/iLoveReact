@@ -1,0 +1,28 @@
+{
+  "id": "req_1575",
+  "at": "2026-06-21T13:19:51.040Z",
+  "origin": "codex:019eea3c",
+  "text": "ok so how does it work, i know the request was that i want to be able to rig the faces that should be the slots for it but i dont see the capability to do so",
+  "status": "review",
+  "sessionId": "019eea3c-80f5-79b0-84df-c00c449c7a7e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T13:20:01.606Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T13:20:46.229Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified that texture-slot authoring already exists as the face-mode 'slot from selection' control, not in the literal rig menu. User found the control before any UI relocation was made, so no source changes were needed for this clarification.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T13:20:46.228Z"
+}

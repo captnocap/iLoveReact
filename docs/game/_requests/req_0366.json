@@ -1,0 +1,28 @@
+{
+  "id": "req_0366",
+  "at": "2026-06-08T20:27:13.131Z",
+  "origin": "session:67746dc2",
+  "text": "hahahaha 512 it finllay gets choppy. at 220, no lag tho",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T20:27:59.313Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T20:29:17.840Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the 512-block choppiness (the user's found ceiling: 507 km2 / 776k instances chops, 220 blocks / 143k is glass-smooth at 240fps). Root cause is NOT draw cost — it is the per-INSTANCE buffer g_instance_buf in framework/gpu/3d.zig drawScene being re-staged (makeInstance loop) and queue.writeBuffer RE-UPLOADED EVERY FRAME for a world that never moves: ~11MB/frame at 143k (fine), ~59MB/frame at 776k (chops). The framework already uploads VERTEX geometry once and caches it (g_retained_vbuf, 'upload that never runs again'), but the instance batch has no such static path. The fix (offered, not yet built) is a static/retained instance buffer mirroring g_retained_vbuf: upload the world's instance batch once at load, redraw each frame without restage/re-upload — the player is separate mesh nodes so the world batch is genuinely static. That removes the per-frame cost and pushes the ceiling to GPU vertex throughput (millions of instances). Saved the full caps map + choke to memory (hmsc_massive_scale_caps.md) so it is not re-derived. No code changed this turn — diagnosis only.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T20:29:17.840Z"
+}

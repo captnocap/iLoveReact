@@ -1,0 +1,31 @@
+{
+  "id": "req_0481",
+  "at": "2026-06-10T08:03:18.422Z",
+  "origin": "codex:019eb06a",
+  "text": "i think i also see the problem. lets look here[Image #1] see how it reaches the tallest point pretty early on and then stays there. it should evaluate after the paint, for the run length, so that its one continous upward path from start to finish if its long or short",
+  "status": "review",
+  "sessionId": "019eb06a-e6fb-7280-bdb5-0483b03d47b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T08:03:34.084Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T08:05:51.359Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed slope painting to evaluate after the stroke using the actual painted path length. During drag the slope tool records the path; on release it stamps the whole path from start height to end height across the measured run, so long strokes no longer hit max early and flatten. Removed the misleading slope run knob. Verified with focused heightData tests and fast hmsc-int ship build.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T08:05:51.358Z",
+  "tags": [
+    "bug"
+  ]
+}

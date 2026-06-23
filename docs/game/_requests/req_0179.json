@@ -1,0 +1,12 @@
+{
+  "id": "req_0179",
+  "at": "2026-06-07T04:40:43.577Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT on CAMRAY: the see-through implementation FAILS as shipped. Evidence: /home/siah/.claude/image-cache/42677ed6-e8fa-4672-83bf-b68e46d28bef/13.png — user verbatim: \"this looks like i have no wall infront of me right? wrong, i am in a enclosed space.\" Your occlusion response FULLY HIDES the hit wall — the player reads as standing in the open when they are enclosed; all spatial awareness is destroyed. THE RESPEC, per the user's model: (1) PRIMARY behavior is CAMERA CONSTRAINT — when the player->camera ray hits a wall, the camera pulls IN, sliding along the ray to sit just inside the occluding surface (small skin offset), so inside a room the camera stays inside the room; smooth the pull-in/out (no popping), clamp to a min distance from the player so it never jams into their head. The raycast you built is reused — only the RESPONSE changes. (2) If any see-through remains for tight edge cases (camera clipping a corner pillar at min-distance), it must keep the wall VISIBLY PRESENT — a clearly-readable translucency, never full removal; a hidden wall is a lie. (3) Tuning on P2: pull-in smoothing, min distance, skin offset, residual translucency amount. Tests: enclosed room -> camera inside, walls all visible; min-distance corner case -> wall translucent-but-present, never invisible. SELFSHOT from inside an enclosed space showing walls present. The user standing in a box and KNOWING it is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

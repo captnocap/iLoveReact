@@ -1,0 +1,12 @@
+{
+  "id": "req_0158",
+  "at": "2026-06-06T18:10:42.580Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — queue behind PLACEFREEZE: AUTHBUILD-REMOVE-0606, a user-authorized deletion. Verbatim: \"the current in-game buildings, not the ones that i can build with the walls, but the ones that claude had built days ago, we are going to remove those, because i can make buildings now\". Scope precisely: the AUTHORED buildings — the ones generated/hardcoded into the game world days ago (world-gen/landform/authored-content code or seed data), NOT the user's placed bp_* pieces and NOT the build-mode system itself. The old way is going away entirely: delete the authored-building code/data outright — no flags, no commented-out remains, no \"legacy buildings\" toggle. Steps: 1. Locate every authored building source (code + any seed/snapshot data that spawns them) — post the file:line inventory BEFORE deleting so the supervisor can confirm scope. 2. Delete, including their collision registration and any references. 3. Verify green + the world still loads with the user's own placed pieces intact (clear-map and owner-map guarantees stay green). DONE-BAR: inventory posted first, then deletion, verify green, user sees their world without the old buildings. DO NOT COMMIT until the user confirms the right things died.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

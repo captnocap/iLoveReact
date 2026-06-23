@@ -1,0 +1,41 @@
+{
+  "id": "req_0080",
+  "at": "2026-06-06T11:27:31.816Z",
+  "origin": "supervisor-relay",
+  "text": "painting with the shader on the painter doesnt make sense if the model doesnt have an active effect texture also. so? pick one, and pick the one where the model can get the live texture.",
+  "status": "done",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-08T05:28:06.140Z",
+      "actor": "session:d5986127",
+      "kind": "state",
+      "from": "new",
+      "to": "doing",
+      "text": "PAINTLIVE landed 9c38a67fb; moving to resolve"
+    },
+    {
+      "at": "2026-06-08T05:28:34.062Z",
+      "actor": "session:d5986127",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-08T06:46:14.718Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done",
+      "text": "user PASS live: paintlive good (model wears live effect texture). commit 9c38a67fb"
+    }
+  ],
+  "resolution": "PAINTLIVE-0606 landed as 9c38a67fb. The user's ruling ('pick the one where the model can get the live texture') is implemented: a painting saved onto a model bakes each layer's LOOK to a self-contained effect recipe and the model mounts that Effect verbatim — the same shader the painter shows, not a flattened color. editors/paint/surfaces.ts bakeLayerLook() is the one compose authority (packHeaderGrid cols x rows refactor); game/painted.ts adds validated PaintedLayerLook + packPaintedLookData() splicing header(8) ++ dense cell grid ++ colors (malformed look drops to the legacy flat fill, strokes never rejected); paintedRender.tsx mounts the per-layer shader; cutout/models.ts bakes per-layer looks; painted.test.ts + models.test.ts pin the round-trip. framework/gpu/paintable.zig carries the parked-uploads cold-boot fix (pre-mount mask uploads park by key and flush at ensure(), curing the blank-restore race). game/index.ts was deliberately EXCLUDED — its only PAINTLIVE delta is barrel re-exports nothing imports via @game, and it also re-exports an untracked cameraOcclusion module, so committing it whole would open a fresh hole; it stays with the cameraOcclusion/map-pieces lanes. Named riders per BUILDSKIN precedent 5f81e66e4: PAINTLAYERS' 10-shape brush pipeline rides in paintable.zig, and its brushKinds.ts (new file) landed because models.test.ts imports DEFAULT_PAINT_BRUSH_SETTINGS from it. Gate: tools/rjit game verify GREEN 70/70 before commit.",
+  "shas": [
+    "9c38a67fb"
+  ],
+  "resolvedAt": "2026-06-08T05:28:34.062Z",
+  "tags": [
+    "idea"
+  ]
+}

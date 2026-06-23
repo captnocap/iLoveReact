@@ -1,0 +1,33 @@
+{
+  "id": "req_0417",
+  "at": "2026-06-10T02:44:23.760Z",
+  "origin": "session:441dd1a1",
+  "text": "inside of hmsc-int the front page quad in the top corner for objects some one pretty much nuked it when we removed the old buildings types like a reeeetard idk why but [Image #1] that is all it is now which is absolutely useless cant even do anything with it lol it should have building data",
+  "status": "review",
+  "sessionId": "441dd1a1-1f5b-429e-9681-e92889f5a0e6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T02:44:32.136Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T02:50:38.870Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The Objects (OBJ) tab's building branch had been gutted to a flat 'Motel Room / 6 semantic pieces / + place' card when the old Building type was removed — no 3D, no real data, useless. Restored it to inspect like every other object: buildings are V24 prefabs that DECOMPOSE to semantic pieces, so buildPrefabView() stamps the prefab to real placed pieces (GAME_BUILD.placed.stamp), recentres them on the union envelope so the orbit camera frames the whole composition, and the ModelViewer now draws them via the same PlacedPieceMeshes renderer F2/iso use. ModelViewer/ModelScene gained an optional 'pieces' prop. Below the viewer a new PrefabInfo panel lists the building's data (theme, piece count, and each decomposed piece's label/kind/material/cutout-edit/grid-cell). The + on the viewer drops the prefab into the place layer. Verified the cart bundles clean (esbuild, exit 0).",
+  "shas": [
+    "deadfacea"
+  ],
+  "resolvedAt": "2026-06-10T02:50:38.869Z",
+  "tags": [
+    "bug"
+  ]
+}

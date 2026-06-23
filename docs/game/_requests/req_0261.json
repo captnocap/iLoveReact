@@ -1,0 +1,13 @@
+{
+  "id": "req_0261",
+  "at": "2026-06-07T11:57:48.315Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: reshoot verified — I opened the new /tmp/rjit-player-hmsc.png myself: world booted from the package, avatar/road/trees/HUD/minimap visible, argv trace clean. SLICE 1 DONE-BAR MET, all four legs independently verified. COMMIT NOW, one commit, explicit paths: every file of this slice (player cart, lump container + transcode + loader, rjit pack/play + shot app-args plumbing, the codec suites both sides, the round-trip verify script, the argv trace you added) — post the exact file list with the hash. Nothing under cart/hmsc-int/editors/, nothing from the unrelated dirty tree. Message should cite PLATMOD_PLAN.md slice 1 and the plan commit ce385fcb8. Then stand by — slice 2 sequencing comes after the user sees the shot.",
+  "status": "new",
+  "sessionId": "019ea1db-5f93-7392-8554-9c688d1be33f",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

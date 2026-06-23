@@ -1,0 +1,28 @@
+{
+  "id": "req_0979",
+  "at": "2026-06-15T11:32:28.058Z",
+  "origin": "session:524eaf71",
+  "text": "the multi select is not working yet. try that again. the spin works with select tho",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T11:32:45.137Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T11:33:48.793Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed multi-select: the mouse-press event in this framework does NOT carry modifier flags (shiftKey/ctrlKey were always falsy on the press, so shift/ctrl-click always replaced instead of grouping). Switched to the held-modifier ref from the key bus — useHeldModifiers() (the same source IsoAuthor uses; tracked via __keydown/__keyup). onDown now reads heldMods.current.shift/ctrl/meta as the add modifier, so shift OR ctrl-click toggles each element into the per-mode set and groups multiple. Spin+select and Esc-clear are unchanged. Bundle-clean, hot-reload, fps untouched.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T11:33:48.793Z"
+}

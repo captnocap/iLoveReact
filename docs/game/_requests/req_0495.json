@@ -1,0 +1,31 @@
+{
+  "id": "req_0495",
+  "at": "2026-06-10T10:38:26.931Z",
+  "origin": "codex:019eb11a",
+  "text": "hm. inside of the compiled route it is incredibly laggy, inside of the standalone, it isnt.",
+  "status": "review",
+  "sessionId": "019eb11a-609c-7012-8b21-a57c9a570e4c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T10:38:31.765Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T10:40:34.157Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigated the reported lag difference between hmsc-int /compiled and standalone world_loader. Found that both paths use the same world_loader.zig render core, but /compiled runs inside the full hmsc-int V8/editor host frame while standalone runs as a dedicated no-V8 binary. The likely cause is route-shell overhead: hmsc-int keeps editor panes mounted under route overlays so /compiled can still pay hidden editor layout/paint/timer cost. No code change was completed because the user interrupted to clarify the router point.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T10:40:34.157Z",
+  "tags": [
+    "perf-log"
+  ]
+}

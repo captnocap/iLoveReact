@@ -1,0 +1,30 @@
+{
+  "id": "req_1277",
+  "at": "2026-06-18T09:33:06.407Z",
+  "origin": "session:47c6ef45",
+  "text": "oh weird. so drag is great til i loop cut and then the loop cut drag is ass",
+  "status": "review",
+  "sessionId": "47c6ef45-886b-4a68-a568-e624c3124d48",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T09:33:47.619Z",
+      "actor": "47c6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T09:37:51.467Z",
+      "actor": "47c6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Converted the loop-cut SLIDE drag to the host-owned path. The gizmo drag went host-owned in req_1270, but the loop-cut slide reuses the same TransformGizmo handle while routing through lcDragRef → setLc per move → the [lc] useEffect that re-cuts the entire mesh (lcCutMesh) + setDraft uploads — i.e. the exact per-event React storm the gizmo no longer has, and heavier because re-cutting beats re-translating. User: 'drag is great til i loop cut and then the loop cut drag is ass', and noted it reuses the gizmo. Fix: added lcCutMeshAt(info, offset) to bake the cut at an explicit offset without state, so the slide's onMove streams the cut verts straight to the already-mounted studio.draft dyn slot via patchDynSlot and writes live mesh + readout refs (no setState/move); the final offset syncs to lc ONCE on release (the [lc] effect re-previews at it so the React draft matches the slot, and Apply reads it). The wireframe overlay (liveMeshRef) and DragReadout track the slide off-React like the gizmo. Pure TSX (Studio.tsx), hot-reloadable — patchDynSlot door already shipped in req_1270, no rebuild.",
+  "shas": [
+    "bf6e3b452"
+  ],
+  "resolvedAt": "2026-06-18T09:37:51.467Z"
+}

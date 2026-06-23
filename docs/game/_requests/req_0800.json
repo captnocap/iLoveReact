@@ -1,0 +1,30 @@
+{
+  "id": "req_0800",
+  "at": "2026-06-13T18:14:11.089Z",
+  "origin": "session:bdc416fa",
+  "text": "the negative height just did a huge block of water above ground. logically that makes no sense. water sits in a pool. it cant gelatin lol. this looks like a jello cube because of it",
+  "status": "review",
+  "sessionId": "bdc416fa-53b7-49b1-98a1-706f4ff29a15",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T18:22:15.761Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:22:15.769Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the jello-cube: painted water rose above flat ground because the surface was an arbitrary positive level over un-dug terrain. Water now POOLS — the brush excavates a basin (digs terrain down by the slider-magnitude depth) AND fills it flush to the surrounding ground (surface = bed + depth = original ground level). The chunk water grid stores DEPTH; floorToWaterBody derives per-cell surface = bed + depth and sets the field base to the deepest basin floor so the skirt fills the whole pit and dry cells hide under the terrain. Erase drains (clears water + raises bed). WaterField gained a base the wet-test/ripple/bake key off. Editor + compiled (game bake). 8 water tests pass; modules clean.",
+  "shas": [
+    "bb8ac1388"
+  ],
+  "resolvedAt": "2026-06-13T18:22:15.769Z"
+}

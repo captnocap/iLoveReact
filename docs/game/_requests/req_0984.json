@@ -1,0 +1,28 @@
+{
+  "id": "req_0984",
+  "at": "2026-06-15T12:24:10.403Z",
+  "origin": "session:d91c8b8f",
+  "text": "fantastic. so, next thing is going to be loop cut tool. now how this works in blockbench is exactly how we want to do it here. how it works: I click a face, i click on loop cut, i get a small non invasive popup that says direction 0 and cuts 1. going to direction 1 changes from a vertical cut to a horizontal. changing the cut counts does equal spacing cuts from the center of the face. it also has offset, which for a 16 radius cube it defaults to 8m, so lets look at this again. 0 1 8 is default in block bench if i default at 16 radius. and this shows up like this visually: [Image #34] when i change direction to 1 it looks then like so [Image #35] and i add some more cuts [Image #36] and now im going to offset it some [Image #37] \n\nnotice in the screenshots the changes of values on each one and the highlighted space",
+  "status": "review",
+  "sessionId": "d91c8b8f-6568-469d-83d0-62ea4b4091c6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T12:27:25.668Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T13:00:19.266Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Loop cut tool (Blockbench parity), built across req_0984/0985/0989. Pure ops in editMesh.ts: cutMeshByPlane (general axis-aligned planar split, interns shared ring verts, leaves parallel caps), loopCutPositions (default offset=size/2 → equal slabs; raising it shrinks the clicked face's end slab, interior stays equal), loopCut, and face tags that survive a cut (tagOneFace/facesWithTag/clearFaceTags). Tested 19/19. Studio.tsx: select a face → 'loop cut' opens a small popup (Direction/Cuts/Offset/Unit) that previews live through the draft path and commits on Apply; direction 0 cuts perpendicular to the clicked face normal; offset mirrors for a +end face; selection persists onto the cut face's pieces via the tag. Mechanics confirmed with the user via screenshots. Bundle-clean; hot-reload TSX; nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T13:00:19.266Z"
+}

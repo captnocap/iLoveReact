@@ -1,0 +1,18 @@
+{
+  "id": "req_0820",
+  "at": "2026-06-13T19:43:58.014Z",
+  "origin": "session:6e5908e6",
+  "text": "thats not true. stop tap dancing aropund the fact that its clearly not rendering the same side by side. show me exactly the 2d tile data. i want to see the exact tile coordinates it passes over",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T19:44:40.587Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

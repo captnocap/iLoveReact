@@ -1,0 +1,33 @@
+{
+  "id": "req_1495",
+  "at": "2026-06-20T19:41:23.794Z",
+  "origin": "session:1d61c909",
+  "text": "ok so uh, do i need to remake my buildings or something to get the stairs to work correctly? the bottom of the staircase i walk right up it now, which is great. i still am having that problem right at the top of the staircase, and i see in this staircase at least that it has the problem i poionted out where the floor is still sitting higher than the last step. and then the inverse, coming down the steps, i have problems getting onto the stairscase still. i can go place now pieces if that would help but i am saying the already placed pieces didnt really change from what it seems",
+  "status": "review",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T19:43:46.020Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T20:10:18.273Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resolved 'do I need to remake my buildings' for stairs. Confirmed on the live map 'main' (9 staircases) that the bottom-of-stairs walk was fixed by the step-height crest fix, and the remaining top problems were (a) the floor-thickness gap on stairs not sitting on a floor and (b) the real culprit — invisible stair boundary walls (req_1501). No remake needed: all fixes are read-path/bake so existing stairs are corrected on next Compile. Fixes: step height 0.35->0.5 (ab003a9ca/9eb8bc304), walls rest on floors (24bcfca88), stairs collide as slope only (92690b54c).",
+  "shas": [
+    "ab003a9ca",
+    "9eb8bc304",
+    "24bcfca88",
+    "92690b54c"
+  ],
+  "resolvedAt": "2026-06-20T20:10:18.273Z"
+}

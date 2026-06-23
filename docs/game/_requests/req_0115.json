@@ -1,0 +1,12 @@
+{
+  "id": "req_0115",
+  "at": "2026-06-06T13:09:15.363Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — boundary rule, no action needed on past work: you edited colonConsole.ts and vocabulary.test.ts to unblock verify — those files are another lane's ACTIVE in-flight work (console-verb ports). Never edit another lane's in-flight files, even to fix verifier blockers — two writers on one file mid-flight clobber each other under hot reload. Next time: report the blocker to the supervisor and run your suite-scoped tests instead. Your watchdog fix itself is accepted pending the user's hands.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0517",
+  "at": "2026-06-10T12:25:21.855Z",
+  "origin": "session:8f492126",
+  "text": "oh. also, uhm. so ok this building has multiple floors. when i see the floor im trying to place before placing it, it looks like this: [Image #15] but then when i actually place it, it looks like this [Image #16] \n\nthis is happening i think because of the floors. it doesnt do this same thing when im not in the building placing floors, so the placement is currently corrent, the behavior of the placement tool pre placement is being a pain tho",
+  "status": "review",
+  "sessionId": "8f492126-2685-4bb0-ad7d-82b25fa10ec6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T12:25:52.585Z",
+      "actor": "session-8f49",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T12:43:07.112Z",
+      "actor": "session-8f49",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed via the live store's event log + screenshot measurement: the giant cyan 'floor preview' was NOT the placement ghost at all — it was a STALE drag-paint preview from an earlier area-drag whose mouse-up never reached the iso pane. The engine pointer-captures drags, but a few BUTTON_UP paths eat the dispatch before capture fires (render-surface forwarding, chrome drag, off-window release); with dragRef stuck, the [pieces] effect refuses to clear paintCells (guarded for live drags) and ghostMeshes returns null whenever paintCells exist — so the stale slab REPLACED the real one-tile hover ghost. Clicks still placed correctly (the user's observation). Fix b2b2c85f8 (IsoAuthor): (1) orphaned-gesture watchdog in the per-frame loop — the engine flips its button state FIRST on every BUTTON_UP, so getMouseDown() is truth even when dispatch was eaten; a drag whose button reads UP for ~250ms cancels (clears dragRef/paintCells/moveDelta, warns '[iso-author] drag canceled'; never commits, since a release the pane never saw must not place pieces); (2) any fresh press retires a stale non-confirming paint preview. Event log confirmed drag-area commits themselves were always landing (multi-plate batches at the right cells).",
+  "shas": [
+    "b2b2c85f8"
+  ],
+  "resolvedAt": "2026-06-10T12:43:07.111Z",
+  "tags": [
+    "bug"
+  ]
+}

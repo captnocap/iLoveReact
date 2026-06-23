@@ -1,0 +1,30 @@
+{
+  "id": "req_1375",
+  "at": "2026-06-19T03:08:59.998Z",
+  "origin": "session:be97e48f",
+  "text": "undo/redo history also. and let me show you a real problem that needs a real solution because this shit is continuation of before and for no reason at all. look at this image. you agree that the model is all brown [Image #76] if not, speak up. if so, then im going to click on the spot that i pointed the 4 purple arrows at, being the tip of the nozzle, and im going to use green. ok [Image #77] now from 1 click on the nozzle tip, i have green now in 4 places",
+  "status": "review",
+  "sessionId": "be97e48f-9627-4113-86b2-bb34b58ed45b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T03:09:46.199Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T03:18:58.983Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root cause of 'one click on the nozzle painted green on 4 faces': DEFAULT_TEXTURE_OPTIONS dedupIslands/combineIslands collapse congruent faces onto ONE shared atlas island, so painting that island paints every face mapped to it. Confirmed with a dedup-ON probe (one stamp lit all 6 congruent cube faces). Fix: paintUVsNeedRepack() detects a shared layout (missing uv, ~full-square default uv, or two faces on the same slot) and forces a dedup-OFF re-pack on paint entry so each face owns a UNIQUE island — the old faceSig gate only checked face COUNT and let a shared layout slip through. Proven: detector true on the shared cube, false after the dedup-off re-pack, and one stamp then isolates to a single face (the other five stay pure base colour).",
+  "shas": [
+    "c1461c146"
+  ],
+  "resolvedAt": "2026-06-19T03:18:58.983Z"
+}

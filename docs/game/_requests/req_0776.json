@@ -1,0 +1,28 @@
+{
+  "id": "req_0776",
+  "at": "2026-06-13T15:43:34.768Z",
+  "origin": "session:aec89f3e",
+  "text": "still floats. why doesnt it and everything just have the same physics as like the barrel does?",
+  "status": "review",
+  "sessionId": "aec89f3e-12a8-4481-9f79-5c47d9a8c376",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T15:45:26.560Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T15:56:16.804Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered 'why doesn't everything just have the same physics as the barrel?': there were TWO separate prop-resting paths that disagreed — the iso editor lifts via liftBuildingsToTerrain (which got the req_0771 rest pass) but PlayRoute and the compiled bake lift via liftPropsToTerrain (which only lifted props onto terrain, never onto a desk and never dropping a floater). So a prop rested in the editor but floated in /test and /compiled. Fix (req_0776): ONE shared rule, restPropsOnSupport(), now run by BOTH lift paths. Every prop (the barrel, the computer, all of them — except wall-hung signs) rests on the HIGHEST solid surface beneath its anchor — a desk/floor/another prop (spatially hashed; non-solid props like a bush are not supports) — within a snap-up grace (0.35m) and a drop reach (1.2m, under one storey). Terrain only lifts a BURIED prop up; it never pulls an elevated prop down, so REQ-0582 (an intentionally elevated prop stays elevated) is preserved — reconciled by capping the drop reach so a high prop is never yanked onto a low piece far below it. Result: a thing set on a desk sits on the desk identically in the editor, /test, and the bake. Verified: hmsc-int bundles clean; 129 tests pass across 7 suites (placed 54/54 incl REQ-0582); a probe rests a computer floating at y=1.4 onto a desk at 0.8, keeps an elevated barrel at y=8, and lifts a buried barrel onto 0.5 terrain. NOTE: if the computer's STORED y is already correct (0.8) and it still visually floats after a rebuild, the cause is a render offset I haven't been able to find headlessly, and I'd need the prop's actual y from the editor to pinpoint it. GIT: change is in game/build/placed.ts, uncommitted on disk (coherent, tested), entangled with the parallel session's recent commits — commit sequencing deferred to the supervisor.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T15:56:16.804Z"
+}

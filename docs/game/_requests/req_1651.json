@@ -1,0 +1,28 @@
+{
+  "id": "req_1651",
+  "at": "2026-06-22T20:46:05.451Z",
+  "origin": "codex:019ef106",
+  "text": "whatever changes have been made now are making the textures retain 'better', i can rotate the camera more without it breaking, but it still has break points",
+  "status": "review",
+  "sessionId": "019ef106-bfb2-75c0-b3e8-6be886d1fbc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T20:46:15.154Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T20:49:17.705Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Continued the compiled camera-breakpoint rendering fix. Retained static instance uploads are now all-or-nothing so streamed subranges beyond MAX_STATIC_INSTANCES fall back to the dynamic subrange path instead of clamping to zero; the dynamic instance staging cap was raised from 65,536 to 262,144 rows for dense streamed camera views. Added static upload policy test and verified no-JS loader screenshot builds/renders.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T20:49:17.705Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_0756",
+  "at": "2026-06-13T13:43:55.886Z",
+  "origin": "session:aec89f3e",
+  "text": "so ok look here. see this magenta line i drew. [Image #7] that is the gap between me and the shelf for example, well. oddly enough if i look at the shelf in iso3d it has [Image #8] what looks to be the same exact amount of collision space as a ghost here.",
+  "status": "review",
+  "sessionId": "aec89f3e-12a8-4481-9f79-5c47d9a8c376",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T13:44:10.608Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T14:03:28.659Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root cause: a prop placed in the iso build pane becomes a PlacedBuildPiece and collides via GAME_BUILD.placed.colliders, which lowers the build-catalog def.size. The catalog set a prop's size.depthMeters = footprintRadiusMeters*2 (a fat SQUARE) for any kind not hand-listed in PROP_DEPTH_OVERRIDES — and shelves weren't listed. So liquorShelf's collider was 1.8m deep while its model is ~0.5m, parking the player ~1m off the face (the magenta gap), and the iso pane drew that same fat footprint. The footprint was defined in THREE drifting tables (props.footprintRadius, world/props SEGMENT_HALF_THICKNESS, catalog PROP_DEPTH_OVERRIDES). Per the user's ruling I unified to ONE source: added a canonical footprintDepthMeters on each rectangular prop def (34 props, reconciled from SEGMENT*2 ∪ overrides), deleted both side tables, and wired catalog size + placement grid + world/props physics to read the def field (width derives from footprintRadiusMeters*2). Build-piece collision for shelves goes fat→thin (the fix); /test world.props physics for segment props is unchanged; signs/appliances gain a more-accurate thin oriented footprint. Verified: hmsc-int bundles clean and 7 suites pass (world/props, kinds/props, worldColliders, worldGeometry, worldParity, build, placed). NOT committed: the three edited files are mid-flight with a parallel session's untracked imported-props feature (props.ts imports untracked importedProps.generated.ts), so a clean isolated commit isn't possible without sweeping in or breaking that work — deferring commit sequencing to the supervisor.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T14:03:28.659Z"
+}

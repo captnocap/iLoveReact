@@ -1,0 +1,28 @@
+{
+  "id": "req_1652",
+  "at": "2026-06-22T20:55:58.453Z",
+  "origin": "codex:019ef11d",
+  "text": "the tree physics feel a bit clunky, like i can get through the purple gap here but not the red [Image #1]",
+  "status": "review",
+  "sessionId": "019ef11d-72f3-77f2-9321-86da57e693c6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T20:56:07.013Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T21:02:54.380Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed data-recipe prop collision so compact round in-band props, including tree trunks, no longer fall back to one square footprint. The collider generator now emits seven narrow local strips for round single-cluster footprints, trimming the artificial square corners that were closing diagonal gaps while keeping side/front trunk blocking. Added a placed-piece test proving oak trunks still block on their visible sides but no longer occupy the old AABB corner. Verified the focused build-placed suite is green and hmsc-int ships successfully; the broader game verify remains red from pre-existing unrelated oracle/Workbench alias failures.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T21:02:54.379Z"
+}

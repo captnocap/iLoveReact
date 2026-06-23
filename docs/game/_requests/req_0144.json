@@ -1,0 +1,15 @@
+{
+  "id": "req_0144",
+  "at": "2026-06-06T17:24:23.317Z",
+  "origin": "codex:019e9ca9",
+  "text": "So. if i gather what you said correctly. if u removed the old characters route. the existing one would break",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:24:54.673Z",
+  "resolution": "Answered the route-coupling question with source-backed import data: /workbench does not directly mount CharactersRoute, but it imports many modules from editors/characters (preview, paintKit, grabKit, smoothKit, gridData, draft, generate, roster, animPresets, regions). Therefore deleting only the /characters route entry/component would not inherently break /workbench, but deleting the old editors/characters module tree would break /workbench, /items, /cutout, and paint/workbench consumers. No code changed.",
+  "shas": [],
+  "tags": [
+    "ask"
+  ]
+}

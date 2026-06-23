@@ -1,0 +1,31 @@
+{
+  "id": "req_0363",
+  "at": "2026-06-08T20:17:48.111Z",
+  "origin": "session:67746dc2",
+  "text": "haha FUCK i fell right thru the map cuz there is no collision xD but i fell thru the map with 240fps",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T20:20:22.962Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T20:20:47.687Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the fall-through on the --massive scale-lab map: the no-V8 loader's buildPhysicsColliders (world_loader.zig) had a flat MAX_RECTS=4096 collider cap and walked the instance buffer in order, so the ~28k building rects (which lead the buffer) filled the cap before the ground rows were reached — the player spawned on a ground slab whose collider had been clipped and fell through (at a triumphant 240fps, proving the one-big-mesh render path flies). Reworked the collider build into two passes: pass 0 registers WALKABLE FLOORS (sy <= step height), pass 1 registers SOLID WALLS, so the floor always wins the cap. The generator lays one world-spanning base slab as the first ground row, so it now always claims a collider slot and the player has solid ground under the entire map at any size; worst case at extreme scale is distant buildings going walk-through, never the floor. No-op for real bakes under 4096 instances. Pending the user's loader rebuild + playtest. Honest next step flagged: static whole-world collision should become spatial windowing (GTA-style near-player collider refresh) to make buildings solid at huge scale.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T20:20:47.687Z",
+  "tags": [
+    "bug"
+  ]
+}

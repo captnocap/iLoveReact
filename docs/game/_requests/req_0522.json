@@ -1,0 +1,33 @@
+{
+  "id": "req_0522",
+  "at": "2026-06-10T12:50:03.736Z",
+  "origin": "session:51f18581",
+  "text": "create a vehicle handling lab, this will be the first introduction of driving vehicles in the game engine",
+  "status": "review",
+  "sessionId": "51f18581-610e-4479-8d18-625e56e6d9c2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T12:50:12.082Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T13:06:13.140Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the vehicle handling lab as the FIRST driving model in the engine. Corrected course mid-build: it lives in the editor's labs route (cart/hmsc-int/labs/vehicle-handling.tsx, registered via rjit lab new — the first lab there), NOT a standalone cart. New game system GAME_DRIVING (cart/hmsc-int/game/driving/) is a pure React-free kinematic bicycle model (engine/brake/drag longitudinal, exp-decay lateral grip → drift, speed-scaled heading turn that reverses correctly); cart-side per DECISIONS V1 to find the feel before graduating to the one host physics system, exposed via the @game door. The lab drives a real GAME_VEHICLE body around a cone slalom, V23 native chase camera (GAME_NATIVE_CAMERA orbit, since V26 bans JS viewport cameras on lab surfaces), GAME_INPUT keys (WASD/arrows + space handbrake), GAME_LOOP frame clock. Left panel is a tunable feel bench (engine/top-speed/brake/grip/steer/drag/cam-dist) + body picker (sedan/sports/pickup/van/police/fire truck, wheelbase feeds turn radius); HUD shows km/h, gear, slip. Verified: both new files transform clean and the lab bundles with full @game+runtime resolution (792KB). Paired P6 notes + game/driving CAPTURE.md included.",
+  "shas": [
+    "ecbf93b54"
+  ],
+  "resolvedAt": "2026-06-10T13:06:13.140Z",
+  "tags": [
+    "ask"
+  ]
+}

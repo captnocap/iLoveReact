@@ -1,0 +1,28 @@
+{
+  "id": "req_0368",
+  "at": "2026-06-08T20:51:26.060Z",
+  "origin": "session:67746dc2",
+  "text": "oh thats just fucking sick man. how big is the 512? [Image #1] it renders great, and again, 240 no hiccups LOL",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T20:51:54.682Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T20:52:20.773Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the static-instance-buffer fix landed: user playtested --blocks 512 and reported it renders great at 240fps with zero hiccups (screenshot shows the player in a downtown skyline). Answered the size question for the 512-block world: 22.53 km x 22.53 km = 508 km2, 776,084 instances drawn as ONE instanced call, ~40MB game-file uploaded to the GPU once and never re-touched, a 32 km corner-to-corner diagonal (~83 min to walk one edge at 4.5 m/s). Framed it against real footprints: ~6.3x GTA V, ~14x San Andreas, ~8.6x Manhattan, ~5x Paris, ~4x San Francisco — a city 6x Los Santos at flat 240fps because the loader does the same per-frame work for 776k static instances as for one cube (V8 nowhere in the frame loop). Informational, no code change. Remaining scale-with-size factors are on-disk file and collision coverage (still static 4096-rect floors-first, so distant buildings are walk-through); spatial-windowed collision is the offered next step to make all 508 km2 solid. Whole session is 7 files / 4 engine wins, still uncommitted pending the user's go-ahead.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T20:52:20.773Z"
+}

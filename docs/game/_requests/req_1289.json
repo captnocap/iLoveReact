@@ -1,0 +1,30 @@
+{
+  "id": "req_1289",
+  "at": "2026-06-18T16:00:37.609Z",
+  "origin": "session:76a33154",
+  "text": "and make sure you setup for undo history properly. but yes, its all fair game to run on. hit it with /marathon skill",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T16:13:01.404Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T16:50:23.455Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Brought the corrected painter into the live Studio, full scope, undoable. WHAT: (W1) paint is now BRANCH data — StoredPart.paint (surface-cell→slot id) + StoredModel.palette, with new modelStream events partPaintUpdated/modelPaletteSet routed through studioModel.commit() so strokes + recolours are persisted AND undoable (editPaint/setPalette, one stroke = one undo entry on mouse-up); this fixes the called-out gap that paint lived in twig useHotState (never saved, never undoable). (W2) meshPaint re-keyed from atlas texels to UNIFORM model-surface cells (faceCellGrid derives cell size from each face's own world↔uv scale) — kills slivers; pickFaceCell/brushCells clamp per-face (no spill). (W3) TextureAtlas bakes each cell as a seamless atlas rect (cellAtlasRect shared-edge rounding) — kills pinstripes. (W4) you paint a SLOT (pseudo-colour) resolved through the palette to a colour set; recolour the same paint by cycling the variant; pseudo/painted view toggle; toolbar = slot chips + variant + view + eraser + brush. (W5) material slots bake the catalog material (FILL_FUNCS split out of fillShader, FILL_SHADER behaviour unchanged) sampled in continuous surface-uv at worldPerTile, masked to the slot's cells (MaterialFill) — no per-cell repeat, world-scaled. Split meshPaintOverlay out so the math is import-clean. VERIFIED: hmsc-int builds clean; the /studio route boots without crash; meshPaint pure-math tests 8/8 (uniform grid, SEAMLESS tiling = no-pinstripe invariant, per-face clamp); added a modelStream paint+palette cold-reopen + inverse test. NOT yet verified headlessly (needs rjit dev): live interactive painting and the MaterialFill Effect-in-StaticSurface bake (the flagged risk — colour slots work via Box fills regardless). Files: modelStream.ts, studioModel.ts, meshPaint.tsx, meshPaintOverlay.tsx, TextureAtlas.tsx, MaterialFill.tsx, Studio.tsx, render3d/fillShader.ts + 2 tests.",
+  "shas": [
+    "5cdf35915"
+  ],
+  "resolvedAt": "2026-06-18T16:50:23.455Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0387",
+  "at": "2026-06-09T03:03:32.137Z",
+  "origin": "codex:019eaa55",
+  "text": "hey i need youy to turn the workspace/buildings route into something that doesnt just suck like this does. let me show you an image of what im faced with and you be the judge if that looks pleasant to use [Image #1]",
+  "status": "review",
+  "sessionId": "019eaa55-1779-7bd0-be5d-1b2b9ee9e13e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T03:03:38.160Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T03:09:31.511Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the buildings workspace without changing the four-column workbench shell: compacted the face/material controls into target-driven rows, added a MODEL/PAINT lens, wired selected building face targets into the shared PaintBench, and added an apply path that materializes the painted canvas back into the building skin/material channel. Verified with the focused buildings workbench suite and a full hmsc-int cart bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T03:09:31.511Z",
+  "tags": [
+    "ux"
+  ]
+}

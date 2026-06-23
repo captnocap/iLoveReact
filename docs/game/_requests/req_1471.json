@@ -1,0 +1,30 @@
+{
+  "id": "req_1471",
+  "at": "2026-06-20T00:14:54.778Z",
+  "origin": "session:08e68a04",
+  "text": "nice. now one thing u can do also for something i found to be a problem. i had a texture from an image, then i deleted the image, i have not yet reset the texture, not really a problem except the wall it is on renders invisible, as expected. but that means we should introduce a checkerboard pink and black like half life maps would use on untextured / missing asset textures so we just know right away if there is something missing",
+  "status": "review",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T00:15:09.313Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T00:20:06.234Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a Half-Life-style magenta/black missing-texture checkerboard to the compiled game (committed 1a365ff40). A decal image node whose asset didn't ship (deleted source image, key 0, or no installed payload) previously warned + SKIPPED → the wall rendered invisible, which reads as 'fine' when it's broken. Now framework/gpu/decal_raster.zig fills that node's rect with an opaque magenta/black checker (drawMissingChecker, ~8 checks across the short side) in BOTH miss branches, so a missing texture shouts. Scope: the compiled no-V8 game (constructor.zig is the only rasterize caller) — exactly the user's reported case (they deleted an image, the wall went invisible in /compiled). Verification: compiles; the user's map already carries a missing brick png that ships key 0 so the path is exercised, but the headless proof camera only frames spawn so I couldn't frame the wall — user confirms visually in-game. The editor /test decal path is separate JS (decalRender) — a possible follow-up if they want the checker there too.",
+  "shas": [
+    "1a365ff40"
+  ],
+  "resolvedAt": "2026-06-20T00:20:06.234Z"
+}

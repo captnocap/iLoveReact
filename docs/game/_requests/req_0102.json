@@ -1,0 +1,12 @@
+{
+  "id": "req_0102",
+  "at": "2026-06-06T12:31:22.283Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — the floor bug is NOT fixed and the user just out-debugged the entire fleet. User verbatim: \"still happens. i solved it myself and no one else seems to be able to figure it out which is crazy. i made one change to something entirely unrelated in the source code -> hot update -> ground disappears\". THE REPRO IS DETERMINISTIC AND TRIVIAL: touch ANY unrelated source file -> hot update -> ground gone. Your owner-map fix and the prior lane's recovery did not survive it, because the bug is in the HOT-UPDATE APPLICATION PATH itself, upstream of everything patched so far. Note every push logs [mapgone] applyPayload: world=present chunks=4 painted=5733 placements=0 — placements is ZERO in the payload on hot update. Do it exactly like the user: start the live witness with the ground present, touch one unrelated file, capture the live floor probe + applyPayload before/after, and trace where the ground registration is lost across the hot-update lifecycle — payload build side (does the dev push serialize placements/world at all?), apply side (does applyPayload clear-then-partially-reapply?), or registration side (does re-registration never re-run after apply?). Print the lifecycle data at each hop; the hop where the pool goes from 107 to 0 is the bug. No more downstream patches — fix the hop itself. Floor surviving an unrelated-file hot update, demonstrated in the witness AND then by the user live, is the only done-bar.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

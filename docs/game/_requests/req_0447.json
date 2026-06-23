@@ -1,0 +1,28 @@
+{
+  "id": "req_0447",
+  "at": "2026-06-10T04:52:33.193Z",
+  "origin": "session:0a09e641",
+  "text": "oh is it the floor i have on the 3rd level",
+  "status": "review",
+  "sessionId": "0a09e641-a769-495b-a0fd-4a909d25af7a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T04:54:51.259Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:00:40.025Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered + fixed: two different floors. The floor you FELL THROUGH was your 3rd-level BUILD floor (a piece) — my first collider fix only rebuilt floor collision from the painted-ground rows (which come after the piece rows), so the built floor plate got no collider. The 4096-rect CAP is the painted GROUND, not your build — my second fix derived collision from every instance row, which turned every painted cell into a collision box and blew the cap. Final fix decouples them: painted ground travels as one heightfield per chunk (cheap, like /test), and built floor plates get an instance-derived walkable rect (rows < piece_count) on top of their baked collider so they stay solid. Same change set as req_0446 (worldColliders.ts / packageMap.ts / world_loader.zig). Verified TS 4/4 + ast-check; needs rebuild + re-Compile in-game. Nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T05:00:40.025Z"
+}

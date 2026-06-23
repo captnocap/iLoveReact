@@ -1,0 +1,31 @@
+{
+  "id": "req_0552",
+  "at": "2026-06-10T14:43:24.304Z",
+  "origin": "session:0a09e641",
+  "text": "no i just still am walking  thru walls on test oh not all walls.. 'hotel walls' i walk thru which is silly",
+  "status": "review",
+  "sessionId": "0a09e641-a769-495b-a0fd-4a909d25af7a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:44:04.052Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T14:49:18.154Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed 'I walk through hotel/motel walls in /test' — a SCALE limit, not a per-wall bug. Headless dump of the user's real map: 2927 wall-family pieces (all with collision tag, all quarter-yaw) → placedPieceColliders emits 4928 rects, but the host rect cap was 4096 (framework/game/physics.zig MAX_RECTS + cart/hmsc-int/game/physics.ts PHYSICS_LIMITS.rects, mirrored). GAME_WORLD.collisionRects drops the overflow in layer order, so the tail — the most recently built structure (wall.stucco.motel ×55, the 'hotel') — silently lost its colliders and became walk-through ('it wasnt long ago' = the map just crossed 4096). Raised the cap to 16384 in both the Zig host and the TS mirror. Only one static buffer scales with it (g_camera_occlusion_rect_values, ~720KB at 16384); per-step cost is the actual rect count not the cap, so headroom is free. Helps the compiled game too (world_loader clamps to the same MAX_RECTS → less collider windowing). Zig change → needs a dev-host rebuild AND a compiled rebuild to take effect (NOT a hot-reload). ast-check clean on physics.zig + world_loader.zig. Very large maps will still need spatial windowing in /test eventually (compiled already has it) — noted, not done here.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T14:49:18.154Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0737",
+  "at": "2026-06-13T07:50:11.029Z",
+  "origin": "session:b2985164",
+  "text": "hm. tho that made it come back in an annoying way. i cant see what is on a floor because of the floor above it where it use to only show the floor and below it",
+  "status": "review",
+  "sessionId": "b2985164-7aad-4573-accc-12a386983e72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T07:52:29.495Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T07:52:29.519Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "After buildings returned, all floors showed at once so an upper floor occluded the floor being edited. Cause: commit 79da84357 forced showAllFloors=true as a band-aid for the mis-diagnosed vanishing-buildings bug. With the real cause fixed, restored the cut-away default (showAllFloors=false): pane shows the active floor and below; toggle still reveals the whole city. NOTE: showAllFloors is a persisted route twig, so an existing saved true needs one toggle click to clear before the default applies.",
+  "shas": [
+    "27bb0b1e1"
+  ],
+  "resolvedAt": "2026-06-13T07:52:29.519Z",
+  "tags": [
+    "ux"
+  ]
+}

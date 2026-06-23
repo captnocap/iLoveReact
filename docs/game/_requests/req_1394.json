@@ -1,0 +1,30 @@
+{
+  "id": "req_1394",
+  "at": "2026-06-19T07:52:58.993Z",
+  "origin": "session:1863e7ee",
+  "text": "<task-notification>\n<task-id>b1ibp76rn</task-id>\n<tool-use-id>toolu_01SkY2477czxYQovpMZuymts</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/a996a941-a211-4bf9-a57f-07ba5431be8d/tasks/b1ibp76rn.output</output-file>\n<status>completed</status>\n<summary>Background command \"Capture runtime error from swapped binary, revert\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "review",
+  "sessionId": "1863e7ee-a8ed-4cf3-85a6-49a899536c18",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T07:55:26.998Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T08:12:24.842Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Auto-captured from a task-notification (the diagnostic run), not a user ask. The work it covers — capturing the swapped binary's runtime error (tunables double-register) and root-causing the blank render — is folded into the req_1390/1394 fix commit 1401ba757.",
+  "shas": [
+    "1401ba757"
+  ],
+  "resolvedAt": "2026-06-19T08:12:24.841Z"
+}

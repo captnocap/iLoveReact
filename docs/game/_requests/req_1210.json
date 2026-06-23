@@ -1,0 +1,31 @@
+{
+  "id": "req_1210",
+  "at": "2026-06-17T00:39:02.970Z",
+  "origin": "session:ee607c38",
+  "text": "i was painting the dead center of a very large face",
+  "status": "review",
+  "sessionId": "ee607c38-a6df-4547-aa9a-facb41f8319d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T00:53:21.365Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T00:53:21.374Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The 'dead-center of a large face paints up-left' clarification confirmed the diagnosis: a coarse fixed paint grid over a finely-packed atlas made each cell straddle multiple face slots, so even a center click scattered onto a neighbour face. Fixed by making the atlas itself the fixed grid (textureize fitTexels → grid = packed atlas = one cell per padded texel in one slot, no bleed). Landed with the paint-grid rework (see req_1209). Code in HEAD (b3bef7ec8 + 2889db1d4), verified bundling + tests.",
+  "shas": [
+    "2889db1d4",
+    "b3bef7ec8"
+  ],
+  "resolvedAt": "2026-06-17T00:53:21.374Z"
+}

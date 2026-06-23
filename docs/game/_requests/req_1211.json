@@ -1,0 +1,10 @@
+{
+  "id": "req_1211",
+  "at": "2026-06-17T00:48:55.210Z",
+  "origin": "session:8e058574",
+  "text": "if you are naming joints and you also need to declare the rotation for forward like a car, do you look at it head on, and then say left when if the camera is trailing that actually is the right or",
+  "status": "new",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": []
+}

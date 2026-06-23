@@ -1,0 +1,28 @@
+{
+  "id": "req_0948",
+  "at": "2026-06-15T08:04:22.042Z",
+  "origin": "session:832d7b44",
+  "text": "yep. the one other thing with the studio is we want to have these key features - this always on positonal compas [Image #13] and then when clicking an edge / face / vertex you have [Image #14] this 3 arrow that is always fixed no matter the camera angle and then the grid below where anything sits at all [Image #15] these are crucial for the studio space",
+  "status": "review",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T08:05:10.566Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T09:15:34.320Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured in Part 4b: the three studio overlays — always-on corner positional compass, the fixed screen-size world-axis 3-arrow transform gizmo on selection, and the ground grid plus origin axes everything rests on. All are host-rendered screen-stable overlays owned by the Studio primitive (the reason host-ownership matters); the render stack is documented bottom-to-top. Requirement capture complete and user-confirmed; building rides the active first-slice work.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T09:15:34.320Z"
+}

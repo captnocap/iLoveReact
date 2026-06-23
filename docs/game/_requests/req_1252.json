@@ -1,0 +1,28 @@
+{
+  "id": "req_1252",
+  "at": "2026-06-17T17:15:40.525Z",
+  "origin": "session:c885b7cc",
+  "text": "Is this too complex? like does this show i have too many faces for what is really here? [Image #24] [Image #25]",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T17:16:32.484Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T17:16:32.492Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked whether the truck is 'too complex' / has too many faces for what's really there, showing a sliver-heavy UV atlas (349 faces per the SHAPE panel) and the textured model. Answered as analysis — no code changed. Verdict: NOT too complex — 349 faces (~700 tris) is low-poly for a game vehicle; no performance concern. Explained the face count honestly: a bare boxy truck needs ~80-120 faces; the extra ~230 come from solidify (each solidified panel adds a full inner-skin copy PLUS thin rim-wall edge bands) and detach. The busy UV atlas is exactly those rim-wall slivers, each getting a tiny island — cosmetic to the unwrap, not a perf issue. It only matters if hand-painting the texture (slivers annoying) or wanting a tidy mesh; neither affects function. Lever for leaner meshes next time: only solidify panels you see INTO (cab interior), leave can't-see-behind exterior panels single-sided. Offered to add a non-destructive 'merge coplanar faces' cleanup button to Studio to collapse slivers/flat splits and reduce the count + tidy UVs; awaiting the user's decision.",
+  "shas": [],
+  "resolvedAt": "2026-06-17T17:16:32.492Z"
+}

@@ -24,5 +24,8 @@
   ],
   "resolution": "The bless-system adaptation in PLATMOD_PLAN.md §3 is specified as a TS CLI command, not shell scripts: 'rjit player bless' lives in cli/commands/ and rebundles into tools/rjit.js like every CLI change, per the rjit-cli pipeline. Only the PRINCIPLE is lifted from the frozen tsz/scripts/bless-compiler reference (build-fresh-or-refuse, blessed copy + stamp with commit/date/binary-sha/source-hash, --status and --diff verbs, HUMAN-ONLY promotion); the bash implementation stays dead. §6 item 1 records the ruling verbatim. Doc edited on disk only; commit awaits supervisor order.",
   "shas": [],
-  "resolvedAt": "2026-06-07T11:29:33.091Z"
+  "resolvedAt": "2026-06-07T11:29:33.091Z",
+  "tags": [
+    "ruling"
+  ]
 }

@@ -1,0 +1,10 @@
+{
+  "id": "req_1338",
+  "at": "2026-06-18T23:49:31.709Z",
+  "origin": "session:9e041fa8",
+  "text": "there is no json file being saved at all",
+  "status": "new",
+  "sessionId": "9e041fa8-bb4b-47e8-9250-ce5cf71d3fa9",
+  "captureMode": "hook",
+  "events": []
+}

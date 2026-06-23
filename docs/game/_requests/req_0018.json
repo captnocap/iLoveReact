@@ -1,0 +1,16 @@
+{
+  "id": "req_0018",
+  "at": "2026-06-06T05:16:37.038Z",
+  "origin": "supervisor-relay",
+  "text": "for the paint surface thing also, this is just a nit but the layer stack on the panels travels backwards. so layers that are actually above on the image, are below in the list its so annoying lol",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T05:30:47.969Z",
+  "resolution": "LAYERFLIP-0606: the shared Inspector LayersPanel (the one panel both /cutout and the workbench bench mount) now renders top-of-image at the top of the list — display order only, the bottom-up data stack and add/merge semantics untouched. Move arrows remapped to the flipped display (visual up = +1 toward the stack end, verified against moveLayerInStack); merge-down already targets i-1 which is now the visually-below row, coherent as-is. Both surfaces inherit from the one module. Visual check marked pending-selfshot per the capture ban.",
+  "shas": [
+    "2435737aa"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

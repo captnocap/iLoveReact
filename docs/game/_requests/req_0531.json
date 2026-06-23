@@ -1,0 +1,28 @@
+{
+  "id": "req_0531",
+  "at": "2026-06-10T13:29:14.112Z",
+  "origin": "session:38fbe83f",
+  "text": "ok so. just to verify, we have two chunking systems now. effectively, since we have a 120x120 tile chunk space which is 1 tile = 1 meter",
+  "status": "review",
+  "sessionId": "38fbe83f-8ce3-4182-8fe1-3332cbea2263",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T13:29:56.081Z",
+      "actor": "38fb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T13:30:53.347Z",
+      "actor": "38fb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verification answered, no code: confirmed TWO chunk vocabularies coexist. (1) The authoring/persistence chunk: 120x120 tiles = 120m (cart/hmsc-int/chunks.ts CHUNK_TILES=120, 1 tile = 1m per R4); sparse world grid, each painted chunk compiles to one heightfield landform mesh + tile grid. (2) The runtime residency cell: 64m in the loader, used by two structures — the pre-existing collider window (COLLIDER_CELL_METERS) and req_0524's streaming grid (STREAM_CELL_METERS); both derived at load, absent from the file format. Assessment: authoring-unit vs runtime-unit split is legitimate (same as GTA's IPL sectors vs streaming radius), BUT 64 does not nest into 120, painted-terrain heightfields are not yet streamed (one mesh node per 120m chunk, 48-slot dynamic cache = ceiling ~48 painted chunks; user map has 33), and V29/V30's VIS lump assumes ONE canonical chunk. Recommended ruling offered to user: align runtime cell to subdivide the paint chunk (60m = 2x2 per chunk, behaviorally ~identical to 64) so paint chunk -> stream cells -> VIS share one model; awaiting the user's unit verdict before changing constants.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T13:30:53.347Z"
+}

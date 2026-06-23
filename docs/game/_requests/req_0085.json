@@ -1,0 +1,16 @@
+{
+  "id": "req_0085",
+  "at": "2026-06-06T11:35:38.292Z",
+  "origin": "supervisor-relay",
+  "text": "so the floors/walls in build mode, well for the floors i keep noticing if i land on the edge of a floor even when its pieces with another floor or not, the edge seems to want to reject the character placement and causes some jank to happen.",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T17:18:08.023Z",
+  "resolution": "Build-mode floor edge collision now treats flush adjacent floor pieces as one continuous walkable surface, supports the player up to true outer bounds without edge rejection jitter, exposes the edge grace tuning on the P2 surface, and has regression coverage for seam crossing and at-rest outer-edge stability. User confirmed the collision/registration cluster is no longer choppy.",
+  "shas": [
+    "6d21dd74c67d4925d327caa6f5d2a843c6db4162"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

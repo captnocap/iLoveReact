@@ -1,0 +1,30 @@
+{
+  "id": "req_1609",
+  "at": "2026-06-21T17:20:42.520Z",
+  "origin": "session:da8be261",
+  "text": "that landed but it landed upside down haha also can u make it work like text in any normal editor, where i can place it and move it around, just treat it like a layer",
+  "status": "review",
+  "sessionId": "da8be261-4ec5-49b6-a7ad-54d2b446b7ac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T17:22:02.199Z",
+      "actor": "da8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T17:31:34.111Z",
+      "actor": "da8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the text tool from a one-click bake into a movable LAYER, like a normal editor, and fixed the upside-down landing. Clicking a face captures the texture beneath the text (a base snapshot) and composites the typed string on top; dragging re-raycasts and re-composites (restore base then re-stamp) so the text glides over the 3D surface. The panel gains 'place' (bakes it; one undo lifts the whole text) and 'cancel' (restores the surface). Editing the string, brush size, or colour re-stamps live. Leaving the text tool or paint mode auto-bakes a pending layer so work isn't lost; the per-move full-texture re-composite is throttled to ~30fps. Upside-down fix: each glyph's rows are flipped within its line (atlas-Y runs opposite to surface-up), preserving multi-line order. Added paintDropUndoSnapshot() to meshPaintTexture for the cancel path. Verified: hmsc-int bundles clean via the real esbuild flags, paint kit suite 21/21. Live drag/orientation needs rjit dev (headless shot can't capture Paintable).",
+  "shas": [
+    "79049fc51"
+  ],
+  "resolvedAt": "2026-06-21T17:31:34.111Z"
+}

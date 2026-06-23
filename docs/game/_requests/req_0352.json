@@ -1,0 +1,13 @@
+{
+  "id": "req_0352",
+  "at": "2026-06-08T14:02:24.051Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR COMMIT ORDER: embed-unify is verified working — the user confirmed /compiled renders the real world (player + ramps + painted floor + follow camera) and the diff confirms framework/world/compiled_world.zig is deleted. Commit it NOW to lock it before any drift. CRITICAL: the working tree is contaminated with OTHER lanes' uncommitted work — use EXPLICIT git add paths ONLY, NEVER git add -A or git add . . DO NOT stage any of these (NOT yours): framework/diag/telemetry.zig, framework/v8_bindings_telemetry.zig, framework/diag/dev_ipc.zig, v8_hello.zig (pane 3 telemetry lane); framework/gpu/icon_atlas.zig, framework/gpu/icon_atlas_debug.ppm.txt, runtime/icons/baked-names.ts (a 240k-line icon-atlas bake artifact — must NOT enter this commit); framework/v8_bindings_game_physics.zig, framework/v8_bindings_paintable.zig, runtime/hooks/usePaintable.ts, runtime/classifier.tsx, runtime/geometries/index.ts, sdk/dependency-registry.json (other lanes). Stage ONLY the files your WorldLoader-host-primitive correction actually touched: world_loader.zig, framework/world/compiled_world.zig (the deletion), framework/v8_bindings_compiled_world.zig, framework/gpu/3d.zig, cart/hmsc-int/CompiledWorld.tsx, cart/hmsc-int/Embodied.tsx, build.zig, plus the exact engine/layout/camera/host-node wiring + v8 binding + React primitive registration files YOU added for the native WorldLoader node — you know which ones, do NOT sweep in a neighbor's edit. Put the full staged path list in your commit message body. Report the SHA and the staged file list back to me. Leave reqs in review — only the user flips review->done.",
+  "status": "new",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

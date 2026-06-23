@@ -1,0 +1,13 @@
+{
+  "id": "req_0265",
+  "at": "2026-06-07T12:18:14.224Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: census CONFIRMED — execute. Rulings on your three: (1) SHAPES icon for assets — approved as your proposal; icon glyph is taste-tier and the user's standing taste ruling is coherence; if the user wants a different glyph later it is a one-line follow-up, note that in the commit message. (2) requests-in-settings-family for highlight only — approved, flag stays in WORKBENCH.md so it is revisitable when REQPANEL lands. (3) CharactersRoute.tsx orphan deletion RIDES the collapse commit, named explicitly in the message (it is the never-committed cleanup of an already-dead route; the PORTED.md row fix you found makes the ledger true again). Sequence as you planned: suites + ship + selfshot before the collapse commit, then the hmsc-wire deletion commit (3 files, nothing else). Post both hashes + the selfshot path — I open it.",
+  "status": "new",
+  "sessionId": "7e8b3a26-bfd4-4396-a739-2ba040965fdf",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

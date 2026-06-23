@@ -1,0 +1,33 @@
+{
+  "id": "req_0713",
+  "at": "2026-06-13T03:33:14.348Z",
+  "origin": "session:e13c74b5",
+  "text": "gah. sorry didnt mean to stop u but i also just found that stairs when skinned just drop them. and the same clash problem with walls that floors have",
+  "status": "review",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T03:33:56.305Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T03:44:02.395Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two follow-ups to the floor clash. (1) Walls clash the same coplanar way floors do — the same dedupeColocatedPieces fix is kind-agnostic (keys on pieceId+position+yaw+edit+stampId), so colocated duplicate walls collapse too, in both the editor and the compiled world via liftBuildingsToTerrain. (2) Stairs lost their skin when baked/compiled — they shipped flat (their 'drop'): the bake's shape lowering reads piece.skin[box.slot], but the stairs step boxes in pieceShapes.ts were built inline WITHOUT a slot field (unlike the box() helper), so internMaterial got undefined and the step shipped as raw white with no material. The steps now carry their top/front slot, so skinned stairs ship their material like every other plate. Bundle-check passes. NOTE the separate 'walls not visible in iso3d but present in compiled' observation (req_0716) is the iso pane's W hide-walls toggle / floor-level cut-away, not a bug — no code change.",
+  "shas": [
+    "f9d488a50"
+  ],
+  "resolvedAt": "2026-06-13T03:44:02.395Z",
+  "tags": [
+    "bug"
+  ]
+}

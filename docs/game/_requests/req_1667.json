@@ -1,0 +1,31 @@
+{
+  "id": "req_1667",
+  "at": "2026-06-22T23:27:52.399Z",
+  "origin": "session:f97cafe1",
+  "text": "sorryt so how do i load it then? i think i know what u are saying, there are multiple textures for the same model, but how do i r eload the previous since i just get a blank model still because i know what happened kinda. so i used the big_block model but it is compiled/installed as praise_block but how do i reload the praise_block texture on the big_block model",
+  "status": "review",
+  "sessionId": "f97cafe1-eced-4a8c-b209-7c447bcc1a39",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T23:28:23.335Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T23:37:25.439Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built a 'load from prop' recovery path in the Studio paint toolbar so painting is never a one-shot. Root insight: a model's paint blob lives in the model stream which GCs blobs aggressively (req_1556), but the SAME blob is copied into any prop compiled from the model (content-addressed: cooked texRef === the model's paintRef) and the cooked-asset store NEVER GCs texture blobs — so a compiled prop (e.g. praise_block) is the durable backup of its painting. The new picker lists every compiled prop carrying a texture; picking one re-attaches its texture to the OPEN model via onBakePaint (persists paintRef + interns the blob) and restorePaint (uploads into the live Paintable so it shows immediately), from any mode. This pairs with the earlier display fix 47e9736e5 (a model's saved paint now displays on reopen in object/rig mode, not just paint mode) so the full loop place -> reopen -> keep painting works. Bundles clean; user is on the dev host so it hot-reloads. Files: cart/hmsc-int/editors/model/studiokit/StudioViewport.tsx.",
+  "shas": [
+    "22dad9f45",
+    "47e9736e5"
+  ],
+  "resolvedAt": "2026-06-22T23:37:25.439Z"
+}

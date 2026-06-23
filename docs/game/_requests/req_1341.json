@@ -1,0 +1,10 @@
+{
+  "id": "req_1341",
+  "at": "2026-06-18T23:55:03.432Z",
+  "origin": "session:9e041fa8",
+  "text": "{\n  \"texelsProp\": 1024,\n  \"atlasPx\": 512,\n  \"type\": \"solid\",\n  \"color\": \"#c8ccd2\",\n  \"hasWhole\": false,\n  \"sliceCount\": 0,\n  \"name\": \"paint-v4\",\n  \"paintFit\": true,\n  \"faceSig\": \"pt-mqk5bssf-101s:6\",\n  \"liveDims\": [\n    512,\n    512\n  ],\n  \"parts\": [\n    {\n      \"id\": \"pt-mqk5bssf-101s\",\n      \"faces\": 6\n    }\n  ]\n}[Image #61]",
+  "status": "new",
+  "sessionId": "9e041fa8-bb4b-47e8-9250-ce5cf71d3fa9",
+  "captureMode": "hook",
+  "events": []
+}

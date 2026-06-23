@@ -1,0 +1,28 @@
+{
+  "id": "req_0986",
+  "at": "2026-06-15T12:47:55.897Z",
+  "origin": "session:d91c8b8f",
+  "text": "still not correct. lets start by doing this, when i click on a face, make the face an entirely different shade than every other face so we can track it easier",
+  "status": "review",
+  "sessionId": "d91c8b8f-6568-469d-83d0-62ea4b4091c6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T12:48:57.712Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T12:50:31.761Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a vivid solid shade over the SELECTED face(s) so the active face is unmistakable while we debug loop cut. facesGeometry(mesh, faceIndices, push) in editMesh.ts builds a thin overlay geometry of just the selected faces, fan-triangulated and pushed out along each face normal by STUDIO.selectFacePushMeters (0.004m) to avoid z-fighting. Studio.tsx renders it as an extra Scene3D.Mesh in STUDIO.selectFaceColor (#ff8a3d, distinct from the pastel part tints), keyed on a stable face signature so it only re-uploads when the selection or part geometry changes. Shown in face mode whenever faces are selected; suppressed during loop-cut preview (the face index no longer maps onto the cut mesh). Bundle-clean; hot-reload TSX; nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T12:50:31.761Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0669",
+  "at": "2026-06-12T06:25:33.208Z",
+  "origin": "session:5fe47a3e",
+  "text": "ok i can open and close them still like before. i cant go thru them. i can in the test route. i cant in the compiled route. so if the test says the compiled game can go through an open door its not true",
+  "status": "review",
+  "sessionId": "5fe47a3e-97b1-49a1-8770-0ebda5f10304",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T06:27:03.044Z",
+      "actor": "fable-doors",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T06:29:35.457Z",
+      "actor": "fable-doors",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "You were right on both counts. (1) There was no test that walked a body through an open door in the compiled path — the prior 'proof' was a boot/render proof and a by-construction argument. Now it is stepped for real: zig build test-game-physics packs the exact rect floats world_loader.zig writes for a door leaf and runs the body at the doorway through framework/game/physics.zig — closed blocks at the panel face, open(parked) walks clean through, and a canary pins the req_0663 bug (a de-flagged non-solid 2.2m rect STILL blocks, the walkable-platform side-push law). All green at 89c60847d. (2) Why you still could not walk through: the /compiled route is the WorldLoader primitive INSIDE the editor host binary — the Compile button re-bakes data only; the open-door fix (e3dde777f, park the rect instead of de-flagging) is a Zig change and only reaches you when the editor binary itself is rebuilt. Your binary has the doors slice (you can see/toggle them) but predates the park fix, which reproduces 'still like before' exactly. Rebuild the editor host, then Compile and load in.",
+  "shas": [
+    "89c60847d"
+  ],
+  "resolvedAt": "2026-06-12T06:29:35.456Z",
+  "tags": [
+    "bug"
+  ]
+}

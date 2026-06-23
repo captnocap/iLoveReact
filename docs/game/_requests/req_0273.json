@@ -1,0 +1,13 @@
+{
+  "id": "req_0273",
+  "at": "2026-06-08T04:54:53.353Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: ruling — OPTION A, commit everything including the requests/ dir. Your read is correct: the STEP10 commit already wired requestsSource into committed sources.ts, so clean-checkout main is broken without the dir — committing it REPAIRS main. The REQPANEL hold predates that wiring and is obsolete; the user passed the board UI, so the panel going live is intended, not a hold violation. Commit the model/CLI/capture layer + the requests/ dir together, explicit paths, verify green (requests + _index suites must pass), post hash + file list, and resolve the REQBOARD ledger entry. Do NOT grab other workbench sources from sources.ts neighbors — only the requests import line is yours and it's already at HEAD.",
+  "status": "new",
+  "sessionId": "35559ffc-268f-4d59-ac07-d76ecb143bac",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0711",
+  "at": "2026-06-13T03:04:23.716Z",
+  "origin": "session:e13c74b5",
+  "text": "nice, can we get in the capability to paint the textures and see the entire textures menu from the workspace. so i dont have to travel back and forth so much, especially since inside of there i can only edit a prefab building but i can do all buildings from this pov",
+  "status": "review",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T03:05:09.990Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T03:09:31.827Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Brought the full textures menu into the PAINT workspace tab so the user stops bouncing to the Objects tab (which only skins one inspected prefab) to apply textures — the PAINT panel already paints onto any selected placed building, so it just needed the complete menu in reach. FacePainter now has: (1) a live search box that filters EVERY texture flat by label/id across shader recipes + building skins + Materialized customs, and (2) an 'all' group prepended to the family chips so the entire menu is one click to browse. Perf-conscious per the existing 'only the open group mounts live previews' guard: search renders only its hits, 'all' is opt-in and explicitly excluded from being the default open group, so a fresh open still lands on a small family rather than mounting ~87 live <Effect> previews at once. Bundle-check passes (esbuild exit 0).",
+  "shas": [
+    "75c57df03"
+  ],
+  "resolvedAt": "2026-06-13T03:09:31.827Z",
+  "tags": [
+    "ask"
+  ]
+}

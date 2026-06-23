@@ -1,0 +1,30 @@
+{
+  "id": "req_0601",
+  "at": "2026-06-11T02:07:27.947Z",
+  "origin": "session:da94d3e7",
+  "text": "nice that looks exactly right. lets go with it",
+  "status": "review",
+  "sessionId": "da94d3e7-791d-4eab-8e13-a3f2c1e8c371",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T02:07:58.608Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T02:17:54.101Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wired the interaction layer live, per the go-ahead. In test mode (F1), walk up to any interactable prop and a bottom-center prompt appears: 'E — sit on the Couch', 'E — lie down on the Single Bed', 'E — search the Fridge'. SEATS: pressing E pins the player to the seat and the figure plays the skeleton's existing sit or lay posture action (chairs/couches/benches sit, beds lay, facing follows the prop's placement yaw); WASD or Space stands you back up. While seated the world keeps simulating — a kicked ball still rolls past you. SEARCHING: E starts the loading bar (each container's authored searchSeconds — dumpster 4s, sink 2s, etc.); walking away cancels with 'Search interrupted'; finishing marks the container searched for the session and posts the result — currently 'empty for now (kitchen loot lands with the item system)', naming the exact lootCategory slot the items will drop into. Locked containers (the mailbox) deny with 'needs a key'. The reserved E/F 'interact' binding is now implemented in the bindings table. All TSX/TS, so hot reload picks it up — no rebuild needed. Verified: game/input 15/15, kinds/props 13/13, figure/rig 7/7, cart bundles clean. Tuning knobs if anything reads wrong by eye: seat heights and search times are per-kind data in the registries; the seated figure's vertical alignment on chairs/beds may want a nudge once you look at it — say the word and I'll tune seatHeightMeters.",
+  "shas": [
+    "4ac77b7c6"
+  ],
+  "resolvedAt": "2026-06-11T02:17:54.101Z"
+}

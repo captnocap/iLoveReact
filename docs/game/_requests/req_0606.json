@@ -1,0 +1,33 @@
+{
+  "id": "req_0606",
+  "at": "2026-06-11T05:08:09.654Z",
+  "origin": "session:e9bdce32",
+  "text": "ok so look one more time though at like the way you make decals and tell me why this cant be apart of the normal painter",
+  "status": "review",
+  "sessionId": "e9bdce32-4d43-433c-9b7c-e64529ad18a7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T05:08:44.551Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T05:11:12.976Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Read both stacks end-to-end (editors/paint/ layer model + game/textures/decal.ts DecalDoc + the materials compose lens) and answered the question in §12 of the structure review (commit ab7ff87b8): NOTHING structural separates the decal composer from the normal painter — they are the vector half and raster half of one editor, split only by lineage (cutout cart vs /compose route). Both are layer stacks with the same strip verbs, both already have image layers, both exit through Materialize into the same materials store. Proposed the unified model: the paint document's layer gains a kind (mask | text | rect | image), node layers stay parametric with a rasterize verb, the merged doc rides the material losslessly both ways (existing DecalDoc = merged doc with zero mask layers, so migration is trivial). Named the honest costs: the compositor interleave (React-captured node layers z-ordered between GPU paintable mask quads — the real work), a move/select tool in the painter, history unification per V20. The locked shader|decal|image→Materialize vocabulary survives — sources become layer kinds, Materialize stays the one exit.",
+  "shas": [
+    "ab7ff87b8"
+  ],
+  "resolvedAt": "2026-06-11T05:11:12.975Z",
+  "tags": [
+    "ask"
+  ]
+}

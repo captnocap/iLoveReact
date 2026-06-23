@@ -1,0 +1,30 @@
+{
+  "id": "req_1580",
+  "at": "2026-06-21T13:30:20.735Z",
+  "origin": "session:aa8b38c4",
+  "text": "Hello. On the painter tooling for the mesh studio, when i am trying to paint a sphere, i am having trouble. here is my sphere. i am trying to paint '67' on, and this is from clean strokes [Image #10] :( i think because it is crossing faces it is getting dunked on and wont be clean because thats the only thing that makes sense, if i look at the faces but idk [Image #11]",
+  "status": "review",
+  "sessionId": "aa8b38c4-bcf4-4724-9069-0ebd209628e0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T13:30:36.774Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T13:49:23.339Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the broken sphere strokes: the studio painter drives freehand brush/eraser through the universal useBrushStroke kit, which interpolates dabs in atlas/texture space and scissors each to ONE face's UV island. On an atlas-mapped 3D mesh, surface-adjacent faces map to NON-adjacent atlas islands, so a stroke crossing a face boundary (constant on a 256-face sphere) interpolated across unrelated islands (clipped to nothing) and never painted the seam from a shared brush position -> shredded glyphs. Fix: freehand brush/eraser now paint in 3D -- the stroke interpolates in SCREEN space (raycasting each step) and each dab is a world-radius sphere stamped onto EVERY face it reaches, each in its own island, sized by sqrt(r^2-d^2) so paint flows across seams from both sides; the brush is also now a uniform WORLD size per face. Added runtime/paint/stamp.ts (shared stampBrushDab chokepoint, refactored the kit onto it), faceUvPerWorld + surfaceBrushDabs + world-point pickFaceUV in meshPaint, and routed StudioViewport's brush/eraser through a screen-space surface stroke (eyedropper/shape tools stay on the kit). 15/15 meshPaint tests + 16/16 paint-kit tests pass; cart bundles clean. Live paint not auto-shottable (Paintable headless limit) -- needs a quick rjit dev confirm.",
+  "shas": [
+    "f6c2fdf59"
+  ],
+  "resolvedAt": "2026-06-21T13:49:23.339Z"
+}

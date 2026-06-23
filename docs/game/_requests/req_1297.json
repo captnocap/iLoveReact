@@ -1,0 +1,30 @@
+{
+  "id": "req_1297",
+  "at": "2026-06-18T17:15:20.008Z",
+  "origin": "session:76a33154",
+  "text": "ok. so, i still need normal paint colors. not everything is getting the same treatment, for example, i have no reason to paint this anything but one color [Image #13] also, not your fault, but this top tool bar is getting extremely crowded [Image #14] so if u can give a better approach or icons instead something because its just so full",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T17:17:24.543Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T17:23:05.481Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Addressed both: normal flat-colour painting + decluttered the top toolbar. NORMAL COLOURS — the default palette is now a swatch row of plain single colours (Slate/Red/Orange/Yellow/Green/Blue/Purple/Black/White) plus a custom-colour wheel (new paletteWithColor() mints a single-colour slot for any hex and selects it), so the common case is 'pick a colour, paint flat' — the slot/recolour/material paradigm is no longer forced on everything (the AK is just one colour). Materials (Brick/Grass) stay as a secondary section; their slugs were corrected to the catalog spec ids (a-brick/a-grass) so MaterialFill resolves them; the recolour 'variant' control now only appears when a slot actually carries multiple colours. DECLUTTER — the whole paint chip block is removed from the overcrowded top toolbar and moved into a compact floating PaintPanel.tsx (paint mode only): COLOURS swatches + custom wheel, MATERIALS, brush+erase, and view/variant/clear; the top bar now keeps only the mode tabs. Builds clean; /studio boots without crash. Not verified headlessly: the live panel interaction + custom-colour wheel (needs rjit dev). Files: modelStream.ts (defaultPalette rewritten to colours+materials, paletteWithColor added), PaintPanel.tsx (new), Studio.tsx (toolbar block removed, panel rendered, imports).",
+  "shas": [
+    "300056a7e"
+  ],
+  "resolvedAt": "2026-06-18T17:23:05.481Z"
+}

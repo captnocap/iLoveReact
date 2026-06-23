@@ -1,0 +1,28 @@
+{
+  "id": "req_1524",
+  "at": "2026-06-20T21:59:31.095Z",
+  "origin": "session:6580d434",
+  "text": "Ok. so then the only other question is, there is a notification pop up that appears when the game needs to be rebuilt, i see it often, and i restart the dev server, it rebuilds, and then it goes away. Does the game loader itself trigger this, because if yes, then I am already continuing to use the most updated game loader every time",
+  "status": "review",
+  "sessionId": "6580d434-ee0d-4691-a47a-61556997a089",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T21:59:44.189Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:01:26.070Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered whether the game loader triggers the dev host's 'Rebuild needed' popup. Yes: the popup is driven by nativeBuildFingerprint in cli/dev/rebuild-signal.ts, whose input manifest (lines 49-50) hashes world_loader.zig explicitly AND every file under framework/ except framework/testing — which includes framework/game/physics.zig. When either changes, the disk fingerprint diverges from the running dev host's build_id (read over the /tmp/reactjit.sock INFO command) and sendRebuildNotice posts the persistent 'restart rjit dev' notice; restarting rebuilds the app step and re-embeds fresh loader+physics. So restarting on that popup DOES give the user the latest /compiled loader — their instinct was right. Two caveats surfaced: the check only runs when the watcher re-pushes or a fresh rjit dev starts (a just-landed change may not have surfaced yet), and the editor TS under cart/hmsc-int is NOT in the fingerprint (correct: it hot-reloads and bakes into the gamefile, which both loaders read; confirmed Compile and rjit game play both bake from loadEditorWorld so data is identical). This weakens the staleness theory: decisive test proposed — note whether the popup is showing when the wall is hit in /compiled (showing=stale, restart fixes; clear=real code-path divergence to hunt with RJIT_STAIRLOG).",
+  "shas": [],
+  "resolvedAt": "2026-06-20T22:01:26.070Z"
+}

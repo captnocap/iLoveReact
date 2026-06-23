@@ -1,0 +1,51 @@
+{
+  "id": "req_0893",
+  "at": "2026-06-14T02:15:09.233Z",
+  "origin": "session:5ae129b5",
+  "text": "hey do you think for the hmsc-int game props, could be possible to do a few things:\n\n1: get block letter props for buisness names\n2: take an svg, and turn it into a neon sign for buildings that is either 1 or 2 faced (double sided) \nsomething like uh, u take like a svg of a logo, and turn that into a business led sign \n3: a LED ticker tape that i can put message in, it just scrolls by",
+  "status": "review",
+  "sessionId": "5ae129b5-1bb5-49d0-b549-22770bd7fe48",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T02:15:22.315Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T02:40:47.710Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "Stage 1 (block-letter business-name signs) built + verified: new parametric prop kind 'blockLetters' (compile/propRecipes/blockText.ts — 5x7 block font, run-merged box geometry, per-instance text). Shared per-instance 'text' channel added to WorldProp + PlacedBuildPiece, plumbed through stream (new pieceTextSet event), all 3 WorldProp synth sites (ghost/propFromPiece/compile bake), and a SIGN TEXT input in FacePainter (propTakesText predicate). resolvePropParts now reads prop.text for parametric kinds; footprint path lowers the default word. Verified: cart bundles clean; props.test 14/14 PASS, worldGeometry.test 13/13 PASS. Commit HELD — props.ts/resolve.ts etc carry a parallel lane's uncommitted req_0869 refactor (861/272-line diffs); committing those paths would sweep foreign work. #2 (SVG neon) + #3 (LED ticker, incl compiled animated material) still to build."
+    },
+    {
+      "at": "2026-06-14T03:05:46.807Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "Stage 2 (#2 SVG neon, 1/2-faced) DONE + COMPILED: new 'path' DecalNode + glow render (decalRender NeonPathView via Graph.Path); neon.ts builds a neon decal from a pasted SVG d; neonLogo/neonLogoDouble props; FacePainter 'NEON FROM SVG' paste-d affordance. Compiled parity built: decalPack serializes the path node, framework/gpu/decal_raster.zig parses d (M/L/H/V/C/S/Q/T/Z; A->line) and strokes it with layered glow at load (ast-check clean). Commits b1b6604f1 (#1) + the #2 commit. Verified: bundle clean, props 14/14, decalPack 6/6, worldGeometry 13/13. #3 (LED ticker) findings: 'rjit game play' is the PURE no-V8 world_loader.zig (use-v8=false); compiled materials BAKE ONCE (material_tex 'no frame needed'), so a live scroll needs a per-frame hook — which EXISTS (world_loader steps elevator cars per frame). So compiled scroll is feasible modeled on the elevator pattern (new TICKER lump + per-frame scroll in the loader + a baked LED strip), but it's a sizable new subsystem. Pausing to confirm approach before building it in the compiled runtime."
+    },
+    {
+      "at": "2026-06-14T03:36:05.140Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "Stage 3 (#3 LED ticker) BUILT — editor + compiled. ledTicker parametric prop (text=message): editor LedTicker.tsx scrolls lit LEDs via a Scene3D.Instances bucket off a wall-clock offset; ONE column recipe (blockText.textColumns) shared. Compiled (the user's hard requirement): since materials bake once, the ticker rides the elevator-car live-entity pattern — new TICKER lump (worldTicker.ts encode + packageMap), constructor.zig decodeTickers->Scene.tickers, world_loader.zig stepTickers rebuilds a mutable instances bucket per ticker each frame (Zig twin of ledLitDots). Commits: 3a editor + 3b compiled. Verified so far: worldTicker.test 2/2 (wire round-trips f32-exact), props 14/14, cart+compile bundles clean, all touched Zig ast-checks clean. Running 'rjit game verify' now as the final compiled gate (compiles the no-V8 loader + bakes + boots + suites)."
+    },
+    {
+      "at": "2026-06-14T03:40:22.587Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built all three signage features the user asked for, each working in BOTH /test and the compiled no-V8 game (the user's hard requirement). #1 block-letter business names: a parametric 'blockLetters' prop spelling per-instance text as extruded 3D channel letters (5x7 run-merged box font), plus a shared per-instance prop 'text' channel (WorldProp+PlacedBuildPiece+pieceTextSet event+SIGN TEXT field) the other signs reuse. #2 SVG neon (1/2-faced): a new glowing 'path' DecalNode (editor via Graph.Path, compiled via a new SVG-path stroke+glow rasterizer in framework/gpu/decal_raster.zig + decalPack serialization), neonLogo/neonLogoDouble panel props, and a FacePainter 'NEON FROM SVG' paste-d affordance. #3 LED ticker: a 'ledTicker' prop whose message scrolls — editor via a Scene3D.Instances bucket, compiled via a NEW TICKER map lump (worldTicker.ts/constructor.zig) that world_loader.zig scrolls per frame (the elevator-car live-entity pattern), since compiled materials bake-once. Verified: rjit game verify COMPILED the no-V8 loader green (booted/ticked/rendered, round-trips 2/2 incl the ticker wire), props.test 14/14, worldTicker.test 2/2, decalPack 6/6, worldGeometry 13/13, all Zig ast-checks clean. The verify's overall RED is two PRE-EXISTING/parallel-lane suite reds (materials.test setInterval under v8cli from runtime/hooks/ifttt/permission.ts; painter.test GHOSTROAD surface-buffer count) + the docs oracle self-check — my 4 commits touch none of those files.",
+  "shas": [
+    "b1b6604f1",
+    "d48a2d63a",
+    "7f16a8768",
+    "e4ea2bdd7"
+  ],
+  "resolvedAt": "2026-06-14T03:40:22.586Z"
+}

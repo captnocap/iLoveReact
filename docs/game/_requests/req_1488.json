@@ -1,0 +1,30 @@
+{
+  "id": "req_1488",
+  "at": "2026-06-20T19:22:21.259Z",
+  "origin": "session:89c172a4",
+  "text": "ok it works. problem is that it does not save/store. i paint anything -> change page -> come back its all gone",
+  "status": "review",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T19:23:45.280Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T19:44:41.810Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "FIXED + user-confirmed. Studio paint persistence was broken across model-switch and restart because STUDIO_PAINT_KEY is ONE shared GPU texture restored only once per model per session: switching models left the prior model's pixels in the texture, an unpainted model's base-coat wiped it, and on restart the gate plus async paintRef arrival skipped the restore. Diagnosed via the durable store (modelPaintBaked blobs were present and valid — save always worked; restore was the bug). Replaced the once-per-session gate with a load tracker (model id + whether a blob was loaded) that reloads the shared texture whenever the open model changes or its blob first arrives async, base-coats only a genuinely unpainted model, never reloads our own just-saved strokes (commitPaint advances the tracker; savePaint returns the ref) or mid-stroke, and resets on unmount. Keyed by a new sceneId prop since model names repeat.",
+  "shas": [
+    "2f4e382f3"
+  ],
+  "resolvedAt": "2026-06-20T19:44:41.809Z"
+}

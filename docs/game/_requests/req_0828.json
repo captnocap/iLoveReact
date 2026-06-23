@@ -1,0 +1,18 @@
+{
+  "id": "req_0828",
+  "at": "2026-06-13T20:16:39.432Z",
+  "origin": "session:6e5908e6",
+  "text": "the red you see. is not offset. that is actual red road that is correctly rendering. this part is not",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T20:20:53.720Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1381",
+  "at": "2026-06-19T04:39:34.079Z",
+  "origin": "session:be97e48f",
+  "text": "also. i just painted, quit the app, restarted it, and the paint is gone",
+  "status": "review",
+  "sessionId": "be97e48f-9627-4113-86b2-bb34b58ed45b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T04:40:04.500Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T04:57:22.619Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Paint vanished after quitting and restarting. Root cause: persistence stored the texture as raw base64 (1024x1024 RGBA = ~5.3MB base64), which exceeds localstore's 4MB MAX_VALUE cap (storage/localstore.zig) — every set was silently rejected (error.BufferTooSmall) so nothing was ever saved. Fixed by the content-addressed PNG persistence in req_1382 (tens of KB, durable V20 stream). Verified via a probe roundtrip: paint -> bake (PNG+sha256) -> wipe texture to black -> restore from blob -> paint reconstructs intact.",
+  "shas": [
+    "1a74fac95"
+  ],
+  "resolvedAt": "2026-06-19T04:57:22.619Z"
+}

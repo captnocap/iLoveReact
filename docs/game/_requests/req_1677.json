@@ -1,0 +1,30 @@
+{
+  "id": "req_1677",
+  "at": "2026-06-23T00:44:11.650Z",
+  "origin": "session:06fe423a",
+  "text": "i dont see the live gameplay readings where are they ? am i looking in the wrong place",
+  "status": "review",
+  "sessionId": "06fe423a-d6e6-4bdd-a7f5-e511298cc05a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T00:44:32.929Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T00:49:47.487Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed 'I don't see the live gameplay fps readings.' The HUD added in req_1674 was gated behind RJIT_FPS=1, so launching 'rjit game play' normally showed nothing. Diagnosed the env path (tools/rjit execs, __spawnSync inherits env, play() aborts on build failure) and confirmed propagation actually works — the real friction was just that it required an env var the user didn't set. Fix: the HUD now defaults ON whenever build_options.use_v8 is false (i.e. THIS binary is the compiled no-V8 game, whose own window always wants an fps counter) and stays OFF for the V8 editor; RJIT_FPS=0 force-hides and RJIT_FPS/RJIT_PERFLOG force-show as overrides. Implemented entirely in framework/gpu/3d.zig via @import(build_options) + @hasDecl guard. Verified: rebuilt the no-V8 loader clean and 'rjit game shot' with NO env var renders the HUD top-left (fps/draw/inst/restage/dc). So 'rjit game play' now shows fps automatically.",
+  "shas": [
+    "87b0e4904"
+  ],
+  "resolvedAt": "2026-06-23T00:49:47.487Z"
+}

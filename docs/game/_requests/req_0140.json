@@ -1,0 +1,17 @@
+{
+  "id": "req_0140",
+  "at": "2026-06-06T17:14:32.149Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — URGENT USER VERDICT before you finish: RAMPSIDE FAILS, verbatim: \"uh. ramps, broken now. i cant even walk up them. seems they made them entirely blocked off\". Your side/back wall-class bands are blocking the SLOPE itself — the character cannot walk up a ramp at all. The catalog rule was hard cover from the far side and solid SIDES — the walk-up face and the slope surface must remain fully walkable. If your commit has not landed yet: fix this FIRST, then commit the cluster in a working state. If it already landed: fix forward immediately in a follow-up commit — no revert. Print the ramp registration again (the bands vs the slope heightfield footprint) and show which band intrudes into the approach/slope path — likely the low/back band covers the entry edge or the band height exceeds step height at the slope base. Walk-up must work in the witness (character ascends the slope, blocked only on sides/back) before you post READY. The user's walk-up is the PASS.",
+  "status": "done",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:18:15.456Z",
+  "resolution": "The ramp walk-up failure was fixed forward by moving the hard cover band from the low approach edge to the far/high face. The witness now prints side/far bands against the slope heightfield, shows the old approach band as the intruder, and verifies the character ascends from the ramp base to the crest while only the sides/back block.",
+  "shas": [
+    "ccc486e50dc58cff9e05088bfe52e0cc3f5d9a3b"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

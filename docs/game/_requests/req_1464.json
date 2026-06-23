@@ -1,0 +1,30 @@
+{
+  "id": "req_1464",
+  "at": "2026-06-19T23:47:26.303Z",
+  "origin": "session:08e68a04",
+  "text": "ok i just painted some and they still are not showing up",
+  "status": "review",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T23:55:42.769Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T23:58:47.843Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same investigation as req_1465 (duplicate capture of 'painted palms not showing'). Root cause = grove sparsity too low for a small paint (0.06 → often 0 palms on 25 cells); fixed by raising cellChance to 0.22, verified 10 palms bake from the live map. See req_1465 for the full trace. Also confirmed with the user that the bake reading 3 painted chunks instead of 9 is expected (they toggled 6 chunks off), not a bug.",
+  "shas": [
+    "c87a7a423"
+  ],
+  "resolvedAt": "2026-06-19T23:58:47.843Z"
+}

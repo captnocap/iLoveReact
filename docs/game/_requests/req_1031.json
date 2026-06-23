@@ -1,0 +1,10 @@
+{
+  "id": "req_1031",
+  "at": "2026-06-15T18:08:43.873Z",
+  "origin": "session:de42f85d",
+  "text": "Oh OH ok i see. wait thats kinda wild, so its effectively in some fashion, changing the format of the jsonl that goes out on the request",
+  "status": "new",
+  "sessionId": "de42f85d-94df-4add-951f-a1f5bdd46a23",
+  "captureMode": "hook",
+  "events": []
+}

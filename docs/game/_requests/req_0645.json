@@ -1,0 +1,33 @@
+{
+  "id": "req_0645",
+  "at": "2026-06-11T12:52:33.330Z",
+  "origin": "session:7de3e0b0",
+  "text": "will u on the iso 3d make it so when i click on something i can rotate with r. i can only rotate before place",
+  "status": "review",
+  "sessionId": "7de3e0b0-06ef-431e-b04d-b0c6f97a7c65",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T12:53:00.669Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T12:59:09.737Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Click-then-R now rotates placed things in the iso pane. The blocker was the armed brush: after placing, the piece stayed armed, so every click placed ANOTHER copy and R turned the ghost — placed objects were unreachable without knowing Esc. Fixes: (1) R is selection-first — a live selection rotates even while a piece is armed; the ghost only gets R when nothing is selected. (2) shift-click while armed SELECTS the piece under the cursor instead of placing (Alt stays freeform-place; the hint bar advertises the chord), and placing clears stale selections. (3) Rotation keeps the selection — a rotated loose piece gets a fresh stream id from remove+place, so the pane re-acquires it by placement signature, meaning R,R,R turns the same prop 270° without re-clicking. Hot reload picks it up.",
+  "shas": [
+    "f5a65f426"
+  ],
+  "resolvedAt": "2026-06-11T12:59:09.736Z",
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_1619",
+  "at": "2026-06-22T13:33:03.888Z",
+  "origin": "session:e36112e0",
+  "text": "yes. so hands.obj imported but looks bad. so i tried the example file they provide which is the blue cat which is what crashed the ui",
+  "status": "doing",
+  "sessionId": "e36112e0-5303-4202-ba4f-5d93412ec821",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T13:33:25.101Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

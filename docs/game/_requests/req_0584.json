@@ -1,0 +1,33 @@
+{
+  "id": "req_0584",
+  "at": "2026-06-10T18:11:38.915Z",
+  "origin": "session:a8fb6853",
+  "text": "also this is a big problem. look at the ingame road vs the road when painting it [Image #1] [Image #2] looks nothing the same",
+  "status": "review",
+  "sessionId": "a8fb6853-54be-4d2c-84e4-cf67a28fe891",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T18:12:23.624Z",
+      "actor": "session:a8fb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T19:12:01.833Z",
+      "actor": "session:a8fb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed compiled-game road ribbon parity: the standalone game showed roads as blocky stamped tiles (navy lanes + staircased yellow median) instead of the editor's smooth analytic ribbon. Root cause was the BAKE, in two parts. (1) The compiled game ships a BAKED floor texture (it can't run the Effect shader at load); the baker heightfieldTextureBytes painted ONLY per-cell tile-kind palette colours, never the analytic ribbon. Fixed by porting HEIGHTFIELD_TILE_SHADER's fragment function to JS (heightfieldTexelColor, beside the WGSL) and baking through it over [...tileData, ...roadRibbonSection(roads)] at 4px/tile = the editor capture resolution, so the textures are pixel-identical (incl. the RIBBONCAP overshoot guard). (2) FLAT painted floors render as per-cell flat-colour box slabs which structurally cannot show a ribbon; routed road-bearing flat chunks through the textured heightfield quad (floorNeedsHeightfieldRender = relief OR road), the same path relief floors + the editor use. Walkability untouched (flat chunk collider is the whole-chunk plane, independent of render; HEIGHTFIELDS slots disjoint from flatFields). No Zig change. Tests: worldGeometry 5/5 (new RIBBONBAKE test), worldColliders 4/4, roadData 26/26. User must re-run/re-compile the map to see it.",
+  "shas": [
+    "c9236e337"
+  ],
+  "resolvedAt": "2026-06-10T19:12:01.833Z",
+  "tags": [
+    "bug"
+  ]
+}

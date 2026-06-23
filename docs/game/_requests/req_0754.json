@@ -1,0 +1,30 @@
+{
+  "id": "req_0754",
+  "at": "2026-06-13T13:36:00.438Z",
+  "origin": "session:aec89f3e",
+  "text": "when placing props, this is what a ghost piece looks like: [Image #5] and here is the prop: [Image #6] they look nothing alike. this happens on every prop. u have no idea what it is til its placed",
+  "status": "review",
+  "sessionId": "aec89f3e-12a8-4481-9f79-5c47d9a8c376",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T13:36:06.953Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T13:40:51.726Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Prop placement ghosts in the iso build pane were a thin def.size box that looked nothing like the placed prop ('you have no idea what it is til its placed'). Root cause: all three iso ghost paths (placement/move/paint) ran every armed piece through pieceVisualShapes, which has no shape decomposition for props and falls through to one def.size slab, while a PLACED prop renders via the real <Prop> model. Fix: added a shared GhostPiece component (editors/build/pieceMeshes.tsx) that mounts the SAME <Prop> renderer the standing world uses for prop pieces, keeping the translucent box/ramp decomposition for walls/floors/ramps/stairs/elevators; blocked placements lay the red def.size footprint over the model so the refusal still reads. Routed all three ghost useMemos in IsoAuthor.tsx through it. Verified: cart bundles clean (esbuild exit 0, no warnings).",
+  "shas": [
+    "6b13935ef"
+  ],
+  "resolvedAt": "2026-06-13T13:40:51.726Z"
+}

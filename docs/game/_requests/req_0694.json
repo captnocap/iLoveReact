@@ -1,0 +1,57 @@
+{
+  "id": "req_0694",
+  "at": "2026-06-12T13:53:41.186Z",
+  "origin": "session:9963d6de",
+  "text": "so if you look at the settings that are available for driving inside of the lab, those are what we want to use to tune each type of vehicle for its handling. so that not every one of them feels the same. so we can set up that next. after that, we can move into setting up some parking space paint and a texture for the park spaces, and add in some spawn points and rates for vehicles",
+  "status": "review",
+  "sessionId": "9963d6de-6200-482b-a3ff-a5af63547b01",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:53:52.000Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T14:01:24.255Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Per-style handling LANDED (c5814b5dc): VEHICLE_HANDLING table in game/driving/handling.ts, tuningForStyle() door, all 9 bodies drivable in the lab w/ stock-per-pick + stock reset, 7 behavior tests pass. Moving to parking space paint/texture + vehicle spawn points/rates."
+    },
+    {
+      "at": "2026-06-12T14:01:25.603Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-12T14:07:29.249Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "Mis-targeted resolution: a parallel session attached a treePalm/rock-recipes paragraph that belongs to a different req. This req is vehicle handling + parking paint + vehicle spawns; handling already landed (c5814b5dc), rework = finish parking/spawn slices."
+    },
+    {
+      "at": "2026-06-12T14:07:29.257Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T14:17:33.053Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "Done in two committed slices. (1) Per-style vehicle handling (c5814b5dc): the lab's CarTuning knobs are now a per-type feel table — game/driving/handling.ts authors VEHICLE_HANDLING overrides for all nine body styles on the GTA-4 baseline (sports fast/low/darty and below the rollover line; van/ambulance/fire truck slow, understeery, genuinely tippable), tuningForStyle() lifts wheelbase/track from the body dims, the handling lab offers all nine bodies, loads each pick's stock tune, and gains a stock reset; 7 new behavior tests assert completeness, distinctness, speed order, and designed tippability. (2) Parking + vehicle spawns (ca3bbe607): new paintable 'parking' ground kind — asphalt wearing white 3m stall lines drawn in lockstep by the game heightfield shader, its CPU bake mirror, and the editor painter view; priced as a destination so traffic never shortcuts through lots. New 'vehicleSpawn' gameplay marker in the MARKERS palette; GAME_WORLD.vehicleSpawnCells lists the authored points and GAME_VEHICLE.pickSpawn does the spawnRate-weighted which-vehicle pick over the authored garage (the per-style spawn rates already authored in editors/vehicles). Suites: handling 7/7, kinds/tiles 20/20, world 22/22, vehicle 9/9; full cart bundles clean. The live traffic loop that consumes spawn points (materialize + drive NPC cars) is the next slice."
+    }
+  ],
+  "resolution": "Moved treePalm plus the rock set out of worldGeometry into per-prop recipe files: treePalm, rock/rockLarge/rockSmall family, boulder, rockFlat, rockSpire, rockMossy, and rockPile. Extended the shared prop recipe type/lowering so sphere recipe parts can carry rotation, preserving treePalm's rotated fronds. worldGeometry now delegates those cases to imported *Parts functions. Verified with the focused compile/worldGeometry bundle and v8 test: 13/13 passed.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T14:01:25.603Z"
+}

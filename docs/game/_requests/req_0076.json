@@ -1,0 +1,11 @@
+{
+  "id": "req_0076",
+  "at": "2026-06-06T11:27:31.781Z",
+  "origin": "supervisor-relay",
+  "text": "animations work on mouth, eyes, other 'layers'; earlier i said i need those layers as layers. they moved to being a layer. but not a layer that i have any control over. bad. needs to be fixed.",
+  "status": "new",
+  "captureMode": "manual",
+  "tags": [
+    "bug"
+  ]
+}

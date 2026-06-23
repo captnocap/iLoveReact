@@ -1,0 +1,30 @@
+{
+  "id": "req_1418",
+  "at": "2026-06-19T16:28:43.656Z",
+  "origin": "session:d6961119",
+  "text": "fak (instantmesh) siah@busiah ~/creative/reactjit/deps/InstantMesh $ python run.py configs/instant-mesh-large.yaml /home/siah/creative/reactjit/deps/InstantMesh/examples/blue_cat.png --output_path outputs --export_texmap\n2026-06-19 09:28:35.755492758 [W:onnxruntime:Default, device_discovery.cc:164 DiscoverDevicesForPlatform] GPU device discovery failed: device_discovery.cc:89 ReadFileContents Failed to open file: \"/sys/class/drm/card5/device/vendor\"\n/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/lightning_fabric/__init__.py:40: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.\nTraceback (most recent call last):\n  File \"/home/siah/creative/reactjit/deps/InstantMesh/run.py\", line 13, in <module>\n    from diffusers import DiffusionPipeline, EulerAncestralDiscreteScheduler\n  File \"/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/diffusers/__init__.py\", line 3, in <module>\n    from .configuration_utils import ConfigMixin\n  File \"/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/diffusers/configuration_utils.py\", line 34, in <module>\n    from .utils import (\n  File \"/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/diffusers/utils/__init__.py\", line 21, in <module>\n    from .accelerate_utils import apply_forward_hook\n  File \"/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/diffusers/utils/accelerate_utils.py\", line 24, in <module>\n    import accelerate\n  File \"/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/accelerate/__init__.py\", line 16, in <module>\n    from .accelerator import Accelerator\n  File \"/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/accelerate/accelerator.py\", line 34, in <module>\n    from huggingface_hub import split_torch_state_dict_into_shards\nImportError: cannot import name 'split_torch_state_dict_into_shards' from 'huggingface_hub' (/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/huggingface_hub/__init__.py)",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T16:30:22.173Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T16:30:22.183Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "InstantMesh smoke test: ImportError split_torch_state_dict_into_shards from huggingface_hub — latest accelerate needs it but the old hf_hub (pulled by transformers 4.34.1) lacks it (added in hf_hub 0.23). Fix = align to the 2023 stack: pin accelerate==0.24.1 + huggingface_hub==0.19.4 (both compatible with transformers 4.34.1/diffusers 0.20.2). Gave the user the immediate pip command and pinned both in setup-instantmesh.sh. Note: run.py only uses pytorch_lightning.seed_everything, so lightning 2.1.2 + the newer torch 2.6 should be fine for inference despite the era gap. Committed.",
+  "shas": [
+    "56e9fcf1d"
+  ],
+  "resolvedAt": "2026-06-19T16:30:22.183Z"
+}

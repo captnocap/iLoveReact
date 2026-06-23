@@ -1,0 +1,31 @@
+{
+  "id": "req_0613",
+  "at": "2026-06-11T05:39:50.532Z",
+  "origin": "session:e9bdce32",
+  "text": "Good. Now write a /hand-over for the next guy to take over and start getting it done",
+  "status": "review",
+  "sessionId": "e9bdce32-4d43-433c-9b7c-e64529ad18a7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T05:40:37.782Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T05:42:11.223Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Produced the continuation handoff at /tmp/handoff-20260611-054037-execute-the-hmsc-int-structure-review-work-program-demolitio.md via the hand-over scaffold (lineage: original_conversation_id e9bdce32-4d43-433c-9b7c-e64529ad18a7, this session as chain origin). The brief hands the next session the full execution program: §0 demolition first (parallel-lane check → capture cart/cutout's ~20 workbench imports into editors/paint → capture animationDsl parser into game/animation → git rm the 30-cart kill list by explicit path → retire per-cart docs + _index records in the same commit → ship + bake verify), the ONE open user decision (hmsc-int-old/scape3d/heads/deadcode fates), then §9 in order starting with the data/index.ts snapshot-boot fix. Carries all repo constraints (no subagents, main-only, explicit-path staging, no node, req-id citations, board protocol), the user's standing laws (§14 rule-of-two + no magic values, §11.1 control laws), and the compiled-first workflow fact.",
+  "shas": [],
+  "resolvedAt": "2026-06-11T05:42:11.223Z",
+  "tags": [
+    "ask"
+  ]
+}

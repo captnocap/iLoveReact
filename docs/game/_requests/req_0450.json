@@ -1,0 +1,31 @@
+{
+  "id": "req_0450",
+  "at": "2026-06-10T05:05:41.141Z",
+  "origin": "codex:019eaf3e",
+  "text": "how big is a floor vs a tile in hmsc-int tooling",
+  "status": "review",
+  "sessionId": "019eaf3e-0282-7ba1-99cd-6b025b307dea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:05:48.223Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:06:35.259Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the scale question by consulting the game oracle first, then verifying hmsc-int source constants. Confirmed that a painted/world tile is 1m x 1m, a build floor plate is a 3m x 3m semantic piece with 0.2m thickness, and an iso/build floor level is one 3m storey. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T05:06:35.259Z",
+  "tags": [
+    "ask"
+  ]
+}

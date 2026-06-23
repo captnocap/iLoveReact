@@ -1,0 +1,33 @@
+{
+  "id": "req_0695",
+  "at": "2026-06-12T13:57:24.923Z",
+  "origin": "session:3db4e705",
+  "text": "hey so i go into the building workspace, i click on a wall, i click on paint for the single face. i paint on the face, i hit apply paint and it then shows my paint on the texture on the building all applied. i look at the building in the iso3d and it looks good. i go and hit compile, i go into the world and the face is blank. i go back to the iso3d and its there still. i restart the app and its gone",
+  "status": "review",
+  "sessionId": "3db4e705-cae9-4e5f-8874-7aa6ce30faf5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:57:36.096Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T14:16:35.070Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused: painted face materials never persisted. Apply-paint packs the painting as a cutout-stencil material (~33KB JSON, 128x128 cells) into the single 'custom-textures' localstore value, but framework/storage/localstore.zig had MAX_VALUE=8192 and every host binding swallowed the set error with catch{}. The editor's in-process session cache kept it visible (iso3d looked right), the skin commit itself persisted on the world stream, but the headless 'rjit game bake' process read localstore.db, found no material, and shipped the face flat — and restart lost the record everywhere. Fixed in framework: write queue/cache now hold heap-backed values (MAX_VALUE is a 4MB guard), reads use a new size-unbounded getAlloc (the fixed 64KB read buffers were the same bug on the read side), set failures print loud stderr warnings, delete/clear purge the session cache (deleted keys kept serving dead values), keys() merges pending writes. Added 'zig build test-localstore' with regression tests pinning large-value persistence across restart (19/19 pass); v8cli and app targets compile. NEEDS HOST REBUILD; the lost painting itself is unrecoverable — repaint+apply once after rebuilding and it will survive compile and restart.",
+  "shas": [
+    "50c9920d5"
+  ],
+  "resolvedAt": "2026-06-12T14:16:35.070Z",
+  "tags": [
+    "bug"
+  ]
+}

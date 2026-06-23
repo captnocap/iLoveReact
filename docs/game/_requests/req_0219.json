@@ -1,0 +1,13 @@
+{
+  "id": "req_0219",
+  "at": "2026-06-07T10:00:27.376Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: ITEMSGONE + resurrection + camera slice all verified at my level — evidence accepted, on the board for the user's eyes. Held uncommitted with the keyboard work until the user passes. Next, in order:\n\n(1) TWIGRESTORE phase 2 — finish the undo/branching port from the jsonl-era reference (git history pre-d95877cdd; twigs.ts is in the tree). The STROKEUNDO granularity law is ruling: ONE completed action = ONE undo entry (stroke end, layer op, placement) — the user must be able to undo a stroke, not just a layer. Your earlier tests demonstrated 3-strokes→undo-kills-last-only; confirm whether that whole slice is actually live end-to-end in the workbench (the shell ctrl+z/ctrl+y keys you wired must drive THIS machinery), and close whatever gap remains. Evidence: a printed undo-stack trace across stroke/layer/placement actions.\n\n(2) WBSTEP7 MATERIALS source — the fold's last big source (this carries req_0003, skins/materials unification). Census-driven parity table at editors/workbench/ level like WBVEHICLES: every census row ACCOUNTED with line refs, zero deferrals. Materials ARE the one source of truth — the shared chooser everything else (buildings skins, vehicle variants, clothing variants) mounts. No parallel texture path survives. Post READY with the parity table; I verify it myself before any flip.\n\nNo commits without my word. Do the work yourself — no subagents.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1673",
+  "at": "2026-06-23T00:24:27.702Z",
+  "origin": "session:14b40edc",
+  "text": "here is a prop i made [Image #1] that white, is actually suppose to be glass. [Image #2] i selected glass as the face when i made the prop, but it renders solid when i place it in the world. but glass also works in general, like storefront glass, or windows. so this just isnt picking it up",
+  "status": "review",
+  "sessionId": "14b40edc-087f-40bd-9abb-de8f806a4e4f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T00:24:35.020Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T00:37:15.665Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Studio-authored glass faces rendered solid grey when a cooked prop was placed in the world because flattenModel baked glass-tagged faces into the opaque triangle soup with every other face — the glass flag only ever lived in the Studio's own viewport split (studioModel.glassGeo), and was dropped at cook time. Fixed by splitting glass faces into ONE trailing sub-range on the mesh blob (MeshBlob.glass / CookedAsset.glass), reusing the existing texture-slot machinery: cookedAsset.flattenModel excludes glass from the opaque/slot sections and appends it as a {start,count} range (built only when glass exists, so glass-free models keep their old meshRef); CookedProp.tsx draws that range translucent with Glass() in the editor world; worldGeometry.ts ships the glass range as one more MESH_PROPS slot paired with a translucent material ref so /compiled renders it see-through too (the loader already applies a sub-range material's opacity as scene3d_color_a — no Zig change, full editor↔compiled parity); materials.ts exports GLASS_OPACITY as the single source both paths read. All TS/TSX so hot reload + bake pick it up. Verified: cookedAsset 21/21 (3 new glass cases), worldGeometry 14/14, worldParity 15/15, worldColliders 6/6; CookedProp.tsx and worldGeometry.ts bundle clean.",
+  "shas": [
+    "11ff4d6cd"
+  ],
+  "resolvedAt": "2026-06-23T00:37:15.665Z"
+}

@@ -1,0 +1,69 @@
+{
+  "id": "req_0602",
+  "at": "2026-06-11T04:36:17.093Z",
+  "origin": "session:e9bdce32",
+  "text": "go over and review the current state of @cart/hmsc-int/ and its structure. review against the @docs/game/DECISIONS.md and @GUIDING_LIGHT.md, as you go through the code, write me a strong report for places where you can locate opportunity for following these priniciples stated in both /readable-code and /deep-interfaces ; Some things i really want you to make sure of are high performance, tons of quality of life features, infact, the app has a strong feeling at times that you have to be a bit autistic to even understand what to do. This is largely because: nearly every part of it was its own isolated lab before, and we have been folding seams left and right getting it better and better. Some problems i know ive been having, are just menus that reset on hot updates, some things not having the same keyboard controls in one place but not another, weird panels that feel the same and some panels that feel useless. and the start up behavior is getting longer and longer. also, i would like to see the use of framework primitives like <window> for handling multiple open routes or similar. so take a dive in",
+  "status": "review",
+  "sessionId": "e9bdce32-4d43-433c-9b7c-e64529ad18a7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T04:36:33.050Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T04:46:12.235Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-11T06:02:20.083Z",
+      "actor": "demolition-lane",
+      "kind": "note",
+      "text": "§9.1 SNAPBOOT landed (8978f452e): defineStream boots snapshot+tail with a folded-event-count seam guard; open.events no longer resident; stateAt pages history from the DB. 19/19 data suite + 7 dependent suites green."
+    },
+    {
+      "at": "2026-06-11T06:25:23.708Z",
+      "actor": "demolition-lane",
+      "kind": "note",
+      "text": "§9.2 EDITORCTL landed (82b30ab74): one bindings table + one dispatcher + boot-time conflict detection + table-derived KeyLegend; PaintCanvas/IsoAuthor/Workbench adopted; two latent no-typing-gate bugs fixed by construction. controls suite 6/6."
+    },
+    {
+      "at": "2026-06-11T06:27:43.477Z",
+      "actor": "demolition-lane",
+      "kind": "note",
+      "text": "§9.3 TWIGSWEEP landed: ObjectsTab's six palette states (sel/palCat/catOpen/itemOpen/selPart/texOpen) are twigs — the menus-reset-on-hot-reload complaint is dead at its named source. Bundle green, twigs suite 2/2."
+    },
+    {
+      "at": "2026-06-11T06:36:39.693Z",
+      "actor": "demolition-lane",
+      "kind": "note",
+      "text": "§9.4 parts 1+2 landed: SETFOLD d9eec92e4 (SET tab retired — grid toggle to the painter rail, pane reset to double-press the QuadSplit knob, notes clear to NotesTab; one settings door) and BOM (PrefabInfo factored: class counts + edit tallies + footprint/levels rollup + show-all disclosure)."
+    },
+    {
+      "at": "2026-06-11T06:44:12.561Z",
+      "actor": "demolition-lane",
+      "kind": "note",
+      "text": "§9.4 part 3 PROPSFOLD landed (d57400737): PropertiesPanel emits PanelSpec through shell/fields.tsx — second renderer dead, override rows are real entry+slider num fields with reset-rider clear-to-default, bool grew the reset rider in the one renderer. §9.2/§9.3/§9.4 now all in review-ready state."
+    },
+    {
+      "at": "2026-06-11T07:09:34.793Z",
+      "actor": "demolition-lane",
+      "kind": "note",
+      "text": "PANELGRAMMAR landed (7f353f7c5): composition laws in the one renderer (G1 dup-groups, G2 color caps, G3 verb caps, G4 shell verbs once; tier:debug collapsed) + buildings folded to ONE SKINS·GLOBAL group with class enum + wheel/range color. §9.5 (/compiled pop-out) BLOCKED as specced: framework/primitive/windows.zig — in-process secondary windows are SDL3 2D ONLY (gpu.zig is a one-surface singleton); the WorldLoader wgpu viewport cannot paint there. Proposed alternative for the user: pop-out = spawn the standalone compiled-world player process (own wgpu, V28 path, has-process already in the build)."
+    }
+  ],
+  "resolution": "Deep structural review of cart/hmsc-int against DECISIONS.md + GUIDING_LIGHT through the readable-code/deep-interfaces lens; report committed at docs/game/_reports/HMSC-INT-STRUCTURE-REVIEW-0610.md. Found the startup-growth root cause (data/index.ts defineStream replays full event history at boot; snapshots written but never read — boot is O(everything ever done), sessions stream alone 9.6MB), the menus-reset cause (ObjectsTab palette state in bare useState while twigs exist), the keyboard inconsistency map (3 transport systems, E means rotate/edit/erase/interact per surface; editor control contract proposed), the panel-dup inventory (two settings surfaces, two property-panel renderers, two lab registries, four bespoke rails, dead gameShell.tsx), EditorShell god-component extraction seams, and the unused <Window> primitive as the multi-route answer (pop-out /test beside the editor). Prioritized 8-step order in §9.",
+  "shas": [
+    "c15e7d4fd"
+  ],
+  "resolvedAt": "2026-06-11T04:46:12.235Z",
+  "tags": [
+    "ask"
+  ]
+}

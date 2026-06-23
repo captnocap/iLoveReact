@@ -1,0 +1,30 @@
+{
+  "id": "req_1425",
+  "at": "2026-06-19T16:46:45.292Z",
+  "origin": "session:d6961119",
+  "text": "came out as obj u might have said that also i lowered the texture to 512 and removed that flag but it still gave me one it looks like. all good! this is great [Image #10] uh we have obj importing tho or :?",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T16:51:08.205Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T16:51:08.215Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "InstantMesh produced a clean textured blue_cat.obj (user confirmed, looks great) but the Studio importer was GLB-only. Added OBJ support: importMesh.ts objToTriangles + objToEditMesh (parse v/f, fan-triangulate n-gons, weld coincident verts, unwrap so it's paintable); the Studio ImportModelDialog now routes by extension (.obj via readFile text, .glb via readFileBase64), labels/title updated to GLB/OBJ, default-path finder includes .obj. Texture/MTL ignored by design (user paints fresh in Studio). Added an OBJ unit test; importMesh 6/6 pass, tsc-check clean. Committed. User: reload the dev host, click 'Import mesh', point at deps/InstantMesh/outputs/instant-mesh-large/meshes/blue_cat.obj. genmodel --backend instantmesh auto-pipe still pending.",
+  "shas": [
+    "e9de0db44"
+  ],
+  "resolvedAt": "2026-06-19T16:51:08.215Z"
+}

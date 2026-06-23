@@ -1,0 +1,18 @@
+{
+  "id": "req_1259",
+  "at": "2026-06-17T17:59:52.487Z",
+  "origin": "session:c885b7cc",
+  "text": "so, uh, heres the thing, we have joints and pivots. so i was thinking put a pivot in the center of a wheel and joint it to the dash, and then we can also put placement on the rim of the steeringwheel as a way to then come and bind the players hands to the wheel and the wheel is bound to the actual driving and wheels so it looks all in sync",
+  "status": "doing",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T18:00:41.248Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

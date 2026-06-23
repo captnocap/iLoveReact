@@ -1,0 +1,12 @@
+{
+  "id": "req_0154",
+  "at": "2026-06-06T17:51:47.571Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — REGRESSION IN YOUR SCOPING/HOT-RESTORE WORK, priority over WBSTEP7. User verbatim: \"the /test route during hot reload: ive got nothing placed, clear map. -> code update -> hot reload -> some buildings show up that i made earlier before that global fix appear -_-\". On a CLEAR map, a hot reload resurrects pieces from the LEGACY GLOBAL POOL (the pre-scoping 107-piece pool). Fresh mount is clean; only the hot-update restore path leaks. Likely shape: your applyPayload/floors-restore path (the hot-update fix) bypasses the owner-map scoping rule — on restore, the current map is treated as the legacy owner (or the payload is built from the global pool without the scope filter), so old global pieces re-enter a map that owns none of them. Print the data first: on a clear map, capture the restore payload across a hot reload — show which bp_* ids arrive and which store/key they came from. Then fix at the source: the restore path applies the SAME owner-map scope filter as fresh mount — one filter, one rule, both paths consume it (no second implementation). Regression test: clear map -> hot update -> zero pieces, AND legacy owner map -> hot update -> its pieces survive. The earlier ground-fix guarantees must stay green (floor still survives hot update). DONE-BAR: verify green + the payload evidence + test + READY. DO NOT COMMIT. User does the live clear-map reload as the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

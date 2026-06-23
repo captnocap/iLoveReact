@@ -1,0 +1,31 @@
+{
+  "id": "req_0297",
+  "at": "2026-06-08T08:08:22.297Z",
+  "origin": "session:aaf6a34c",
+  "text": "DEV-ENV INSTRUMENTATION FIX — make the frame spikewatch tell us EXACTLY what fired, no guessing. This runs PARALLEL to the keystone (pane 8) and is independent: you touch the V8 dev-host frame loop + spikewatch, NOT the game loader.\n\nTHE PROBLEM (user, verbatim frustration): the spikewatch prints ambiguous garbage like\n  \"WHAT FIRED: GC / NATIVE — time outside every render phase (V8 GC, vsync wait, or native bridge). Not our draw tree.\"\nIt GUESSES between three different causes and lumps them into one bucket. We own the whole stack — we should KNOW which one fired, not offer multiple choice. User: \"why do we have to guess what it is? silly instrumenting that helps no one.\"\n\nTHE FIX: split that one catch-all \"outside render phases\" bucket into THREE separately-MEASURED, definitively-attributed timers, each instrumented at its REAL boundary — not inferred, not labeled-by-elimination:\n\n1. V8 GC — instrument V8's GC prologue/epilogue callbacks (v8::Isolate::AddGCPrologueCallback / AddGCEpilogueCallback, or the embedder equivalent in our v8 binding). Accumulate real GC wall-time per frame, and capture the GC type (scavenge / mark-sweep / incremental) if available.\n2. vsync / present wait — time the ACTUAL swap/present/vsync-wait call in the GPU path (the block where we wait on the compositor), measured directly around that call.\n3. native bridge — time spent crossing the FFI/native bridge (enter/exit timestamps around the bridge boundary).\n\nThen when a spike fires, the report names the ONE real source with measured ms, e.g. \"WHAT FIRED: V8 GC 11.3ms (mark-sweep)\" — not \"GC / NATIVE, could be one of three.\"\n\nHARD REQUIREMENTS (the user is frustrated precisely by lazy instrumentation — do NOT reproduce it):\n- Each bucket MEASURED at its boundary. Do NOT just rename the label or split by subtraction/elimination — that is the same guess with more words and will be rejected.\n- If a span genuinely can't be attributed after real instrumentation, it gets its OWN explicit \"UNATTRIBUTED\" bucket, never folded into a real cause.\n- The buckets must sum honestly against the frame's outside-render time (sanity check: measured + unattributed ≈ the old catch-all total).\n- This is the dev-host (V8) path. Changes need a dev-host restart to reach the user's live session — NOTE that in your report; do NOT restart pane 6 yourself (it is the user's running game).\n\nSTART: grep for \"WHAT FIRED\", \"GC / NATIVE\", \"outside every render phase\" to find the spikewatch classifier. Read how the current frame-phase timing is structured, then add the three real boundary timers alongside it.\n\nREPORT BACK: the files touched, HOW each of the three is measured (the exact callback/call you instrumented), and a sample spike line showing a single definitive cause. Do NOT commit yet — my word.\n\nStay in your own context — no Task tool, no subagents. tools/rjit only. No reset/revert.\n",
+  "status": "review",
+  "sessionId": "aaf6a34c-a68a-4cf4-8329-f2a2d56e9758",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T08:08:34.078Z",
+      "actor": "aaf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T08:31:36.401Z",
+      "actor": "aaf6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Split the spikewatch's catch-all 'GC / NATIVE — could be one of three' bucket into three separately-MEASURED timers at their real boundaries. (1) V8 GC: a new mangled-symbol shim (framework/ffi/v8_gc_shim.cpp) hangs prologue/epilogue callbacks on the isolate and accumulates real pause wall-time + GC type per frame; installed once in v8_runtime.initVM. (2) vsync/present: gpu.zig times the actual swapchain getCurrentTexture()+present() calls. (3) native bridge: v8_runtime.callGlobalWithArgs (the single Zig→JS chokepoint, where the V8 dev-host spends per-frame JS time) is timed around call+microtask-drain. All three flow through telemetry.collect → __tel_frame (gc_us/gc_type/present_us/bridge_us). Both spikewatch classifiers (cart/hmsc-int/state/perfWatch.ts, cart/hmsc-int/game/telemetry.ts) now name the ONE measured cause with ms (e.g. 'V8 GC 11.3ms (mark-sweep)'), with an explicit UNATTRIBUTED bucket for what no timer covers, and an honest outside-render breakdown line. telemetry test suite green 32/32 incl. 3 new attribution tests. NOT committed (user's word); dev-host needs a rebuild+restart to reach the live session — did NOT restart pane 6.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T08:31:36.401Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_0749",
+  "at": "2026-06-13T11:24:15.671Z",
+  "origin": "session:33a033b1",
+  "text": "cool. that in part landed, i was hoping though to be able to paint on textures, upload images from here etc.",
+  "status": "review",
+  "sessionId": "33a033b1-66d8-4d02-9d2f-e58e1f48ec9c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T11:24:37.400Z",
+      "actor": "33a0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T11:41:01.773Z",
+      "actor": "33a0",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The iso PAINT panel could browse the texture library but had no way to bring NEW textures in. Added a TEXTURE row with two doors. 'open image…' runs the native file picker, reads the image's pixel size, wraps it as a full-bleed decal material through the SAME saveDecalTexture door /compose uses, and sets it as the BRUSH — deliberately NOT auto-painting every side, because an uploaded image is usually for one face (a poster/sign), so the natural next click is a face button (N/E/S/W/Top/In) that paints just that side; the upload also lands in the browser live so its swatch can cover all sides if wanted. 'paint a texture…' opens the full /workbench painter (draw/layer/smart-select/save-to-library), whose saved output shows up in the browser to apply. The material browser now subscribes to the custom-texture store (useCustomTextures) so uploads/painted textures appear instantly with no reload. This also answers the follow-up 'how do I control if it's only on one face' — upload sets the brush, then a single face button places it on exactly that side. The pure doc-builder (faceTextureDoc.ts) is split from the host-coupled upload and tested headless against the decal validator (4/4 green, no IFTTT/timer chain pulled). Note: the pre-existing untracked materials.test.ts pulls a setInterval-at-load IFTTT chain that bare v8cli lacks — that is another lane's file, not touched here.",
+  "shas": [
+    "583154b62"
+  ],
+  "resolvedAt": "2026-06-13T11:41:01.773Z"
+}

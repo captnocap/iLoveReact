@@ -1,0 +1,10 @@
+{
+  "id": "req_1268",
+  "at": "2026-06-18T08:29:44.173Z",
+  "origin": "session:47c6ef45",
+  "text": "ok one more question. the thing that renders edge lines / wire frames, there has to be a cap on it because i have this icosphere with 1280 faces and i only get the wireframe over like 1/3rd of the space maybe a bit less",
+  "status": "new",
+  "sessionId": "47c6ef45-886b-4a68-a568-e624c3124d48",
+  "captureMode": "hook",
+  "events": []
+}

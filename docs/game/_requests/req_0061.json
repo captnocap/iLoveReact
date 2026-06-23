@@ -1,0 +1,12 @@
+{
+  "id": "req_0061",
+  "at": "2026-06-06T07:09:37.745Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — resume the camera lane from handoff: /tmp/handoff-20260606-061623-camera-lane-cambind-user-verify-standby.md (read it first). Then your job, marker CAMSENS-0606:\n\nUSER, verbatim: \"this camera in here is still just a fighting nightmare. the biggest problem with the freeroam is that it has the dpi of like a million so a small movement goes like 720 degree spin lmao.\"\n\nThe freeroam/fly rig's look sensitivity is mis-scaled by orders of magnitude — likely raw pointer deltas applied without the per-pixel rate scaling the orbit path has (compare them: the orbit rig's yaw/pitch-per-pixel tuning vs what the fly rig multiplies). Data first: log delta-in vs rotation-out for one small mouse move on both rigs, post the ratio. Fix the scaling at the rig seam (all fly-rig consumers inherit), default tuned to feel like the orbit rig's rate, and the sensitivity is a P2 TUNABLE registered to the tunables registry (it exists — editors/tunables.ts — so it shows in /settings and the user can dial their own DPI feel). V26: host drive untouched, this is rig parameter scaling. Explicit paths, verify green, resolve both this req (verbatim match) and honor the brief's standby items. READY FOR USER TEST — one small mouse movement reading as a small look everywhere the fly cam exists.\n",
+  "status": "new",
+  "sessionId": "c65e4ab9-9918-416c-bc25-023112834927",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

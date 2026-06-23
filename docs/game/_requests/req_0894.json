@@ -1,0 +1,30 @@
+{
+  "id": "req_0894",
+  "at": "2026-06-14T02:43:57.420Z",
+  "origin": "session:48b3aca2",
+  "text": "lets put together a player stats lab. this is going to include the following:\ncore stats:\nhit points - health (100 hp default, always 100hp)\narmor points - armor (100 ap, default is 0)\nenergy points - energy (100 default, falls when running, jumping)\nmonetary value (how much money in total assets they have being cash, crypto, and purchased assets)\nwanted level / notoriety (6 star system, persistant unless properly evaded)\ninventory size (pockets, backpack, suitcase)\noutfit (head, shirt, pants, backpack, shoes. pants will dictate things like pocket size. backpack the same there)\n\nand then we can move into a small set of gained stats like, vehicle handling, aim handling for weapons, stealth leveling for dropping notoriety easier, etc.s (these level up overtime by just playing the game) things like \nstamina (energy point upgrade), player gets stamina from just walking so many steps. this will give them a better rate at which energy degrades, run longer",
+  "status": "review",
+  "sessionId": "48b3aca2-c5c6-44bc-a677-133a51467e99",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T02:44:09.380Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T03:17:43.527Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the player stats lab as one complete package, holding the Guiding Light line (stats are DATA: one declarative STATS_TUNING table + fixed arithmetic, derived values as sums of factors never stored products). New game/stats GAME_STATS door defines core stats (health, armor, energy, money=cash+crypto+assets, 6-star wanted, factored carry capacity, 5-slot outfit) and gained skills (stamina/vehicle/aim/stealth) under ONE uniform xp-curve+effect-lerp type. Bridged to the existing heat/notoriety and figure OutfitDocument rather than forking. Wired into PlayerState (fixing the (player as any).armor gap, schema 16->17), built render/StatsHud.tsx as the complete readout and repointed render/Hud.tsx, and labs/player-stats.tsx tunes everything + previews outfit + embeds the shipped HUD + simulates energy/xp/wanted live. Carries end to end: STATS_CONFIG lump (MAP_LUMP 22) baked from the tuning and decoded+logged by the no-V8 loader (constructor.zig + world_loader.zig), compiled game stays React-free. Tests green (stats 7, playerStats lump 2, worldParity/worldColliders unaffected); full cart bundles clean.",
+  "shas": [
+    "12d4a553b"
+  ],
+  "resolvedAt": "2026-06-14T03:17:43.527Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1548",
+  "at": "2026-06-20T23:46:40.962Z",
+  "origin": "session:0b8abe45",
+  "text": "I would check, that the seperate props arnt trying to bake into the same painted slot abecause that was already a problem at some step and likely is again because it worked on the 1 prop i had now i added the 2nd its not working",
+  "status": "review",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T23:47:24.131Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T23:58:25.382Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Checked the user's hypothesis that two cooked props bake into the same painted slot. They do NOT. Inspected the persisted cooked-asset store (data/domains/cooked-asset snapshot): four distinct assets each with a distinct content-addressed meshRef, and the two PAINTED ones (pepes, poop_king) each carry their own distinct texRef with the texture blob present and a valid PNG header. No id collision (ids are studio.pepes / studio.poop_king), no shared mesh/texture blob. So the gray-in-game symptom is not a slot collision. The real cause (tracked in req_1544) is that the headless Compile bake runs under v8cli, which lacks the @reactjit/image codec door, so the paint PNG fails to decode at bake time and the prop ships untextured. One latent collision worth fixing alongside the real fix: the bake's mesh-prop sink dedups by meshRef alone with the texture riding the mesh entry, so two props with identical geometry but different paint WOULD collide — keying the sink on (meshRef,texRef) closes that. Not biting now since the user's props have distinct geometry.",
+  "shas": [],
+  "resolvedAt": "2026-06-20T23:58:25.382Z"
+}

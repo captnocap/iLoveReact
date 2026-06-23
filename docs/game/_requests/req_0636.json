@@ -1,0 +1,33 @@
+{
+  "id": "req_0636",
+  "at": "2026-06-11T11:46:41.973Z",
+  "origin": "session:9b81947b",
+  "text": "dude im going to lose my mind the map painter just locks up the wasd movement and f8 doesnt do jack fucking shit i cant drag the map ar ound or do anything im gridlocked half the time",
+  "status": "review",
+  "sessionId": "9b81947b-dfb9-45d1-994c-d2ca2886d5b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T11:46:53.419Z",
+      "actor": "session-9b81",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T12:00:51.835Z",
+      "actor": "session-9b81",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the map painter gridlock: the engine has a built-in Canvas.Node click-to-select (engine.zig background-click path) and paintCanvasContainer FREEZES drift — the WASD pan — whenever a node is selected. Every chunk surface in the painter IS a Canvas.Node, so any click that missed an interactive handler silently toggled a phantom selection: WASD dead until another click toggled it off (the 'half the time' lockup). F8 was powerless because it only bypasses the JS typing gate; the freeze lived host-side. Fix: new Canvas prop selectNodes={false} (layout.canvas_node_select) — skips the click-select toggle, the hover/selected rings, and the drift-freeze check; PaintCanvas sets it. Bundle-checked + zig ast-check clean; NEEDS A ZIG REBUILD to take effect.",
+  "shas": [
+    "f2678316b"
+  ],
+  "resolvedAt": "2026-06-11T12:00:51.835Z",
+  "tags": [
+    "bug"
+  ]
+}

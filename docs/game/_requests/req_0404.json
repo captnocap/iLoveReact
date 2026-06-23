@@ -1,0 +1,31 @@
+{
+  "id": "req_0404",
+  "at": "2026-06-09T06:27:58.127Z",
+  "origin": "codex:019eab0d",
+  "text": "why do they still suck ass. i grab on to it, and the whole slider resets, and its annoying as shit",
+  "status": "review",
+  "sessionId": "019eab0d-d55e-7810-97e2-0dfa7c7254f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T06:28:05.702Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T06:29:06.250Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the shared WorkbenchSlider drag reset: mouse-leave no longer clears the in-progress preview. Dragging now opens a full-surface capture overlay, keeps the value alive while the pointer leaves the track, and commits the last finite x-position on release. This addresses the grab-then-snap-back behavior on hmsc-int shared sliders. No commit made; working-tree fix only.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T06:29:06.250Z",
+  "tags": [
+    "bug"
+  ]
+}

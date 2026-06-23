@@ -1,0 +1,37 @@
+{
+  "id": "req_1622",
+  "at": "2026-06-22T14:54:29.190Z",
+  "origin": "session:7a8f00d4",
+  "text": "hello. so yesterday we tried to debug this problem, and didnt really get anywhere: somewhere, collision broke and i can no longer walk under floors/roofs. this was introduced when trying to fix prop collision from being just one big block. it somehow turned into for a moment that i could walk through anything, and then that turned into i was colliding with things like flowers, to now its neither of those, but i cant walk under floors/roofs now or walk up stairs",
+  "status": "done",
+  "sessionId": "7a8f00d4-327a-4595-a613-6ceb3eb4cdb8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T14:54:43.971Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T15:04:55.490Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-22T15:07:42.874Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Diagnosed the 'cannot walk under floors/roofs, cannot climb stairs' regression via RJIT_COLLIDERLOG on the user's compiled city. Root cause was MAX_HEIGHTFIELDS=64: the map needs ~70 walkable fields (20 painted relief chunks + 32 ramp/stair slopes + flat floor fields), so 6 overflowed and were dropped (unwalkable stairs), and that 6-row clip flipped the whole map into spatial collider windowing — which re-derives floors from render instances as solid-to-ground boxes, turning a y=6 upper floor into an invisible ground-level wall (log: band=(-1e9..6.19) BLOCKS at feet=0.00). Fix 1: raised MAX_HEIGHTFIELDS 64->256 so real maps fit without dropping stair/floor fields. Fix 2: gated windowing strictly on rect/oriented cap saturation, not clipped_rows, so heightfield overflow never discards the banded baked colliders that keep raised floors walk-under. No-V8 loader compiles clean; awaiting the user's re-run of the collider log to confirm.",
+  "shas": [
+    "877735cfc"
+  ],
+  "resolvedAt": "2026-06-22T15:04:55.490Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_0910",
+  "at": "2026-06-14T06:07:43.698Z",
+  "origin": "session:2dd06f71",
+  "text": "hey lets build a tool for authoring the storyline. We will want to do this:\n\nsetup some conditional state machine board, that each object in the tree has a shape like:\ntitle\nid\nauthor\nquestline\nfromNPC\ndesc\nreward\ndependents\nconstraints\nevents with cutscene, location, order of events, dialog, etc.\nam i missing anything",
+  "status": "review",
+  "sessionId": "2dd06f71-5b8f-48bc-94cb-c94891fc4fa3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T06:07:56.429Z",
+      "actor": "2dd0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T06:29:33.719Z",
+      "actor": "2dd0",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Companion to req_0911 (same build). The user's quest-object schema (title/id/author/questline/fromNPC/desc/reward/dependents/constraints/events with cutscene/location/order/dialog) was mapped against the existing ruled substrate and confirmed near-1:1 with game/missions MissionDef + game/story; the genuine gaps were named and grounded in V22 rulings (outcomes-not-single-reward, fail/expiry gates, person|position binding, offer channel, effect-events for PROTECT-THE-ZERO, branch/exclusivity, P2 numbers, provenance tag, per-step typed location) plus the one non-field requirement (live affordance validation against the queryable world). The build landed slice 1: the conditional state-machine board over that substrate, adding the first-class requires gate that makes constraints/dependents real edges. See req_0911 for the file-level detail and verification.",
+  "shas": [
+    "ca4ee02ac"
+  ],
+  "resolvedAt": "2026-06-14T06:29:33.719Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0641",
+  "at": "2026-06-11T12:33:32.726Z",
+  "origin": "codex:019eb6aa",
+  "text": "in hmsc-int build tools like floor ramp etc. the stairs are ugly as hell. and like 1/3rd with. and so can u give me some more models for this, also, can you give me an elevator method, something that would let me set up like the height of how many floors and it just has a stop at every floor and is only 1 wide wall and floor space so fits right in. also, i need doors and doorways that are interactable and open and close. and also there is a window method but there isnt a like non storefront window method, so lets get more of those",
+  "status": "review",
+  "sessionId": "019eb6aa-0c65-7230-a007-a74c041f2116",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T12:33:40.139Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T12:40:37.890Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented build-piece stair/door/elevator/window expansion. Default stairs are now full 3m module width with concrete/industrial/full/narrow variants and 10-step visuals. Added door/garage toggle interaction semantics, pieceDoorSet world-stream state, closed-door collision panels, and PlayRoute E/F interaction toggles. Added direct door/open-doorway/residential-window prefabs plus elevatorPrefabDefinition(floors) and 2/4-floor seed prefabs. Covered with build/build-placed/workbench tests and hmsc-int bundle verification.",
+  "shas": [],
+  "resolvedAt": "2026-06-11T12:40:37.890Z",
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "id": "req_0648",
+  "at": "2026-06-12T03:47:13.073Z",
+  "origin": "session:c61d302f",
+  "text": "inside of hmsc-int, when walking down any slope, like a very very mild heightfield to a steep one, or even stair cases, the player model is basically 'falling' if that makes sense. like walking upwards is normal, walking downwards shows like you are just landing from a fall on every step",
+  "status": "done",
+  "sessionId": "c61d302f-e1c3-4475-b1f6-ef3b9201d8d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T03:47:32.541Z",
+      "actor": "c61d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T03:51:35.649Z",
+      "actor": "c61d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-12T06:23:09.376Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Fixed downhill 'falling on every step': framework/game/physics.zig ground resolution only snapped the player UP when below ground, so any descent (mild slope, steep heightfield, stairs) went ballistic each frame — gravity accumulated, then a hard landing, repeated per step. Added a downhill snap: a grounded player whose ground dropped by at most step_height (0.35m default) is glued back to the surface with vy zeroed; bigger drops are real ledges and still fall. Covers editor play view AND compiled game (both run the same Zig step). Two regression tests added (glued 60fps descent; >step ledge still airborne); verified the descent test fails without the fix. Needs a host rebuild — Zig change, hot reload won't pick it up.",
+  "shas": [
+    "8763cac01"
+  ],
+  "resolvedAt": "2026-06-12T03:51:35.649Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1434",
+  "at": "2026-06-19T21:38:02.048Z",
+  "origin": "session:671785ab",
+  "text": "did u say there were keybindings? none of them work if so or i have no idea what htey are since they still are not in the tool tips",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T21:39:13.290Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T21:46:36.401Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the two real gaps behind 'none of them work / not in tooltips': (1) the keys a user reaches for had none bound, and (2) no tooltip showed a key. Verified the typing gate wasn't the culprit (focused_input_id defaults to -1, so the existing 4 keys do fire). Bound modes 1-6 and transform tools G/R/S through the contract (same guards as their buttons), added chordHintFor() and prefixed every keyed tooltip (mode tabs, transform tools, reframe, undo/redo) with the LIVE chord so it's truthful and updates on rebind. New keys appear in the Hotkeys panel and are rebindable. controls.test.ts updated to free-key fixtures (the old test picked 'g', now a real binding) — 11/11 pass via esbuild+v8cli; built green + self-shot. Needs live confirmation that the keys fire (1-6, G/R/S, F, Esc, Ctrl+A, Del) and the tooltips show them. Mesh ops (extrude/flip/etc.) intentionally still unbound — wire next if wanted. SHA ea4fd1f5a.",
+  "shas": [
+    "ea4fd1f5a"
+  ],
+  "resolvedAt": "2026-06-19T21:46:36.401Z"
+}

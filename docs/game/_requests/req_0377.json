@@ -1,0 +1,28 @@
+{
+  "id": "req_0377",
+  "at": "2026-06-08T22:44:58.659Z",
+  "origin": "session:67746dc2",
+  "text": "Right. actually some of the disguise stuff is there, just not ported over entirely yet. check here @cart/scape3d/ since this is where a good part of game logic still resides we will port over",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T22:45:27.400Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T22:47:48.038Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited cart/scape3d/ per the user's correction that the disguise/systemic depth already exists (awaiting port). Found a complete, sophisticated crime-sim contract in cart/scape3d/design.ts plus partial live implementation in state/ + systems/ — MORE systemic than Hitman, so my prior 'missing verbs' list was wrong. Key systems catalogued: (1) Suspicion = 5-axis evidence vector (visual/fund/pattern/digital/location, 0..100) -> notoriety (player.ts: zeroSuspicion/computeNotoriety/adjustSuspicionAxis live; world.ts wires witnessed kills -> visual heat). (2) Disguise = VisualSignature (silhouette/color/accessory) as the unit of recognition; player.body.costume + setCostume live; witnesses store sawSignature w/ certainty; costumes burnable; Hazard.armedBySignature ties planted traps back to your look. (3) Interactions = universal verb system (instant/cast/qte, interruptible->witnessed) with effects kill/arm(trigger)/lure/disable/access/social/loot/stash — murder is just an effect; environmental kills are 'arm' interactions + Hazards (the systemic-not-authored model already in the contract). (4) MurderType = consequence profile (witnessRadius/loudness/discovery instant|delayed|hidden/per-axis evidence/style). (5) NPC = one identity x four projections (world body+appearance/tier/schedule/perception, framework/sim economic actor, dead-internet persona w/ accounts, UI face) + WitnessMemory; ActivationTier dormant(sim)/active(BT)/focal(LLM) = living-city LOD + soul personas. (6) Assets (safehouse/vehicle/business/launderer/mixer/fake_id) w/ upkeep + per-axis suspicion suppression = the roguelite cash<->freedom loop, deeper than Freelancer. (7) Zones amplify specific evidence axes (plaza->visual, darknet_cafe->digital). (8) Dead-internet websites + persistent InternetArtifacts (rumor/news_item/listing) where the investigation Case plays out publicly; crime-as-a-service app = a darknet marketplace surface. (9) HighState altered-state system (the opening 'high'). Conclusion: the work is PORT this spine onto the live 3D world (baked 508km2 city + no-V8 loader) + wire the job board, NOT invent depth. Offered to write a sequenced port plan (suspicion -> signature/witness -> interactions/murder -> schedules -> internet/Case). No code/files written; audit only.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T22:47:48.038Z"
+}

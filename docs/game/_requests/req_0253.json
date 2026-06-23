@@ -1,0 +1,13 @@
+{
+  "id": "req_0253",
+  "at": "2026-06-07T11:19:08.170Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: clarification on my last note — the commit was FINE and is fully accepted; there is nothing to undo, fix, or revisit about it. Never run git reset or git revert for any reason — the working tree carries several lanes' in-progress work. Just hold for my plan review notes as before. Continue normally.",
+  "status": "new",
+  "sessionId": "35559ffc-268f-4d59-ac07-d76ecb143bac",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_1569",
+  "at": "2026-06-21T12:27:36.563Z",
+  "origin": "session:0b8abe45",
+  "text": "<task-notification>\n<task-id>b0c3shvjh</task-id>\n<tool-use-id>toolu_01LsbPzxQtAmhT269cx1ggYr</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/0b8abe45-3eab-457f-ba52-c843df8c5cd7/tasks/b0c3shvjh.output</output-file>\n<status>completed</status>\n<summary>Background command \"Rebuild fresh host binary (incl. GC)\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": []
+}

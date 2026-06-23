@@ -1,0 +1,30 @@
+{
+  "id": "req_1501",
+  "at": "2026-06-20T20:02:04.381Z",
+  "origin": "session:1d61c909",
+  "text": "i dont know if this has anything at all to do with it, but this is also true, notice how i am just floating here. [Image #28] this is an invisible wall that is on the staircase",
+  "status": "review",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T20:03:52.673Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T20:10:18.264Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Found and fixed the invisible-wall float (and the matching 'stuck at the top'): every staircase got three collision-only boundary rects (pushStairBoundaryRects) — two side walls + a far/high wall, all SOLID, FULL-HEIGHT, FLAT-TOPPED, never rendered, with the sides extending 0.25m beyond the steps and all tops sitting at the stair's PEAK height for the whole run. So beside the low end there was an invisible peak-height platform to stand on (req_1501's image 28), and the far/high one was a wall right at the top step blocking the landing transition even on a flush floor-backed staircase. Removed them (commit 92690b54c) — stairs collide as their heightfield slope only, which matches the rendered steps (see-it==walk-it). placed.test STAIRS-0607 updated, 56/56. Tradeoff: free-standing stairs no longer block side entry at ground (moot against walls). Recompile to apply.",
+  "shas": [
+    "92690b54c"
+  ],
+  "resolvedAt": "2026-06-20T20:10:18.264Z"
+}

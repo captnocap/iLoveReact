@@ -1,0 +1,13 @@
+{
+  "id": "req_0224",
+  "at": "2026-06-07T10:13:50.594Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: status check on your 5-item queue (LAYER STATE BUG / SLIDERKIT / PATHFIELD / IMGLAYER / SCULPTPICK). Your last post showed focused greens (paint 39/39, bench 15/15, characters 19/19) but not an item-by-item accounting. Post per item: done-with-evidence / in-progress / not-started. For the layer bug specifically I want the printed setter sequence that identified the duplication, and confirmation on whether a third strip copy rendered in the sculpt paint lens. Then continue down the queue — the ledger reds stay reported-unrelated.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

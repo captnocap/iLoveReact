@@ -1,0 +1,30 @@
+{
+  "id": "req_1272",
+  "at": "2026-06-18T08:48:48.098Z",
+  "origin": "session:7abb2b22",
+  "text": "hm. so i keep getting pointy vertexes when i bevel any edge and it cuts the edge into a face but if u delete the face the other entire face is still there in place of it. [Image #32] [Image #33]",
+  "status": "review",
+  "sessionId": "7abb2b22-4c02-47f2-b4bc-7e5ee55a0f6a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T08:52:27.255Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T08:56:38.871Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the two edge-bevel bugs the user reported (pointy vertexes; deleting the chamfer reveals the whole face still in place). Root cause: the old bevelEdge slid each corner TOWARD an arbitrary neighbour vertex, clamped to that neighbour edge length, and added a triangle corner-cap at each end. On non-rectangular or loop-cut faces that skewed the chamfer, and a short neighbour edge collapsed it to a near-zero sliver (so the incident faces barely receded == looked like the full face was untouched), while the two corner caps were the pointy slivers. Rewrote it: each incident face's edge now recedes PERPENDICULAR to the edge within the face plane by the requested width (clamped to 0.9x the faces reach so it stays inside), giving an even chamfer regardless of face shape; the corner is ABSORBED into the adjacent face (degree-3 -> clean pentagon) instead of capped, with a single triangle cap only for a degree-2 fold or a high-valence (>=4 face) corner where absorption leaves a residual gap to close manifold; and the freed sharp-corner verts are pruned so no orphan dots remain. Added faceHasEdge + pruneOrphanVerts helpers. Tests updated + a stacked-bevel watertight case added; editMesh suite 87/87 and the hmsc-int cart bundles clean.",
+  "shas": [
+    "6ce1b75d6"
+  ],
+  "resolvedAt": "2026-06-18T08:56:38.871Z"
+}

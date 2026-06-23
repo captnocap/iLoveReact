@@ -1,0 +1,31 @@
+{
+  "id": "req_0294",
+  "at": "2026-06-08T07:30:47.437Z",
+  "origin": "session:9e14f7ea",
+  "text": "Step 1 VERIFIED GREEN on my side — I ran `tools/rjit game verify` myself (1/1 oracle, 1/1 round-trip, 71/71 suites, 3/3 scripts), read RLE_FORMAT.md (real byte contract), confirmed the negative control bites and no V8 in the codec. Good work.\n\nFIRST: commit step 1, explicit paths only (the tree has set-aside work on other files — do NOT git add -A):\n\n  git add docs/game/RLE_FORMAT.md framework/world/mapfile.zig framework/testing/unit/world_mapfile.zig framework/testing/fixtures/gen_roundtrip.ts framework/testing/fixtures/mapfile_roundtrip.b64 build.zig cli/commands/game.ts tools/rjit.js\n  git commit -m \"feat(platmod): RLEKEY-STEP1-0608 — frozen RLE/lump wire contract + TS<->Zig round-trip codec, green (keystone spine)\n\nreq_0293. Byte-level RJMP/row-RLE contract frozen in docs/game/RLE_FORMAT.md;\nZig packed reader round-trips a TS-written tape byte/value-identical, negative\ncontrol proves assertions bite. Folded into tools/rjit game verify.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>\"\n\nConfirm the commit sha back to me.\n\nTHEN STEP 2 — the reader side, all three streams. Still NO constructor render, NO editor bake yet (those are step 3). Do ONLY this, then STOP and report; I verify before step 3.\n\nThe frozen contract (RLE_FORMAT.md) already specs the RJMP lump container and mapfile.zig already reads the directory. Step 2 completes the reader so it can ingest a full game file carrying all three streams:\n\n1. Define the three stream lump types in the contract + reader: (a) game-logic stream, (b) game-map stream, (c) items/skins (custom-asset) stream. Add their lump type ids to RLE_FORMAT.md §2 and the Zig reader. Map stream already has a shape — extend, don't reinvent.\n2. Content store + addressing (PLATMOD §4.3): install/validate the vocab assets the streams reference, keyed by payload hash; atomic write (temp -> fsync -> rename); hash IS the corruption check. The tape's reference list is the dependency manifest, validated before anything is constructed.\n3. Round-trip proof, extended: a single fixture game-file carrying all THREE stream lumps + a tiny asset vocab -> TS writes it -> Zig reads every lump and resolves every reference -> byte/value identical, missing-reference and bad-hash both fail loudly (negative controls). Fold into `tools/rjit game verify` GREEN.\n\nREPORT BACK: the new lump type ids + RLE_FORMAT.md section, the content-store file path, the extended fixture path, and the exact verify command + GREEN output. Do NOT build the constructor or touch the editor Compile bake — step 3, gated on this.\n\nStay in your own context — no Task tool, no subagents. tools/rjit only. No reset/revert. Commit only on my word.",
+  "status": "review",
+  "sessionId": "9e14f7ea-dafd-486f-b26a-2a7b9c5fcb05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T07:31:26.735Z",
+      "actor": "9e14",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T07:43:56.246Z",
+      "actor": "9e14",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "PLATMOD spine step 2: built the READER side for all three streams + the content store, no constructor (gated to step 3). New top-level game-file lump ids in RLE_FORMAT.md §2.1 + gamefile.zig: STREAM_LOGIC=16, STREAM_MAP=17, STREAM_SKINS=18, ASSET_MANIFEST=19, ASSET_BLOB=20 (distinct from the map sub-lumps 1-6, which now live INSIDE the nested map stream — extended, not reinvented). RLE_FORMAT.md §7 freezes the full game-file contract: stream payload (refCount|refs|dataLen|data), 44-byte manifest entries (key/kind/length/sha256), asset blob (claimedHash|payload), and the load-time dependency gate. Content store + addressing in framework/world/gamefile.zig (readGameFile + GameFile.installAndValidate): sha256-verify each blob (hash IS the corruption check), atomic temp->fsync->rename install keyed by hex(hash), then confirm every manifest asset landed and every stream reference resolves. Hash agreement is cross-language: TS writer uses a new host-independent runtime/workspace/sha256.ts (validated vs NIST vectors; v8cli has no privacy door), Zig uses std.crypto. Extended round-trip fixture framework/testing/fixtures/gamefile_roundtrip.b64 (full game file: 3 streams + 3-asset vocab) written by gen_gamefile.ts, read+validated by framework/testing/unit/world_gamefile.zig: 4/4 GREEN incl. two negative controls — a corrupted blob -> BadAssetHash, a dangling ref -> MissingReference. Folded into tools/rjit game verify (rebundled tools/rjit.js; round-trip table now runs both rle + game-file). GREEN: zig build test-world-gamefile 4/4; full verify VERDICT GREEN 1/1 oracle, 2/2 round-trips, 71/71 suites, 3/3 scripts. NOT committed (awaiting user word). New files: runtime/workspace/{sha256.ts,gamefile.ts}, framework/world/gamefile.zig, framework/testing/unit/world_gamefile.zig, framework/testing/fixtures/{gen_gamefile.ts,gamefile_roundtrip.b64}; modified: docs/game/RLE_FORMAT.md, build.zig, cli/commands/game.ts, tools/rjit.js.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T07:43:56.246Z",
+  "tags": [
+    "ruling"
+  ]
+}

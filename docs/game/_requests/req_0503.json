@@ -1,0 +1,33 @@
+{
+  "id": "req_0503",
+  "at": "2026-06-10T11:00:56.404Z",
+  "origin": "session:e11a01ef",
+  "text": "[js.warn] [mapgone] PaintCanvas mount: seed=initialWorld chunks=33 focus=33 focusedChunks=33 layer=paint\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4886.00 boxes=4886.00 ms=44.29\n[js.warn] [DRAGDRAW] frame stall ms=2091\n[js.warn] [DRAGDRAW] frame stall ms=157\n[js.warn] [DRAGDRAW] frame stall ms=216\n[js.warn] [DRAGDRAW] frame stall ms=1342\n[js.warn] [PLACEFREEZE] session.commitMany route=/ channel=world count=358 mode=defer channelMs=25.81 markerMs=13.70 | seqMs=13.63 jsonMs=0.48 insertMs=14.78 foldMs=9.95 totalMs=39.90\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4886.00 boxes=4886.00 ms=46.05\n[js.warn] [DRAGDRAW] move commit (179 pieces) -> standing ms=210.7 pieces=4886\n[js.warn] [DRAGDRAW] frame stall ms=1055\n[js.warn] [DRAGDRAW] frame stall ms=166\n[js.warn] [DRAGDRAW] frame stall ms=226\n[js.warn] [DRAGDRAW] frame stall ms=263",
+  "status": "review",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T11:02:17.516Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T11:05:55.487Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The stall watchdog + a bench against the user's real 4,886-piece map (live world snapshot) split the remaining time. JS passes are all fast now: footprints 14ms uncached/0ms cached, liftToTerrain 3ms, joinKeys 50ms, move-ghost update 2ms/event, 179-remove fold 8ms — and the new move probe showed move->standing at 210ms JS-side. The 1-2s frame stalls (2091/1342/1055) are therefore HOST-side: ~4,886 retained Scene3D.Mesh nodes, and a 179-piece move unmounts+remounts ~1,800 of them in one update — per-node host work at that scale is the seconds. That is exactly the already-approved static-instance renderer work (hmsc_massive_scale_caps / react-3d-is-authoring); piecemeal JS fixes can't move it further. One last app-side waste fixed in ce5d5a47a: setMoveDelta pushed a fresh {dx,dz} per raw mouse event even when the cell-snapped delta hadn't changed, re-rendering the pane + rebuilding the 179-piece ghost while the drag sat inside one cell — now skipped (same no-op class as the paint fix). Note: the 2091ms stall at the top of the user's log sits right after a PaintCanvas mount (layer switch) — that's the known StaticSurface chunk re-bake cost, separate from the move. Bench scratch at zig-out/game/bench/move-stall.ts (gitignored).",
+  "shas": [
+    "ce5d5a47a"
+  ],
+  "resolvedAt": "2026-06-10T11:05:55.487Z",
+  "tags": [
+    "perf-log"
+  ]
+}

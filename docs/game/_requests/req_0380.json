@@ -1,0 +1,13 @@
+{
+  "id": "req_0380",
+  "at": "2026-06-08T23:08:56.356Z",
+  "origin": "session:67746dc2",
+  "text": "what if though the v8 or whatever it is, is not in the process at all. its a ipc to a 'game server'",
+  "status": "new",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "idea"
+  ]
+}

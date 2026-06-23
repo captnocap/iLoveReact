@@ -1,0 +1,28 @@
+{
+  "id": "req_1438",
+  "at": "2026-06-19T22:00:25.249Z",
+  "origin": "session:671785ab",
+  "text": "my image is still offset, do i need to add it back again or something or",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T22:01:46.648Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T22:06:05.275Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resolved: the 'image still offset' was NOT the camera-persistence fix — the camera/selection working-view restore (f03e5c74b) works. The backdrop itself was stale and just needed re-adding; once the user re-added the reference image it persisted correctly across reloads. No code change required for this one; diagnosis only.",
+  "shas": [],
+  "resolvedAt": "2026-06-19T22:06:05.275Z"
+}

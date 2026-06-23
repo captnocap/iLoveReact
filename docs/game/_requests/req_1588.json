@@ -1,0 +1,28 @@
+{
+  "id": "req_1588",
+  "at": "2026-06-21T15:05:30.484Z",
+  "origin": "session:6e3404e7",
+  "text": "493mb still feels massive for what the actual scope of what the game data is to be honest. so what is causing so much bloat ?",
+  "status": "review",
+  "sessionId": "6e3404e7-9c3d-4b02-be2b-4b93ea47d0fe",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T15:06:30.125Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T15:08:00.360Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered 'what is causing so much bloat?' with verified numbers, not hand-waving. The 70MB game-file / 490MB bake peak is NOT real game data: the authored city (buildings, roads, props) is only 6,872 instances = 0.4MB (0.6%). 99.4% — 1,050,792 instances, 56MB — is FOLIAGE (705k grass + 200k palm fronds + 132k bush + 8k trunks + 3k flowers) baked as explicit 56-byte per-blade transform rows. Every blade is a pure deterministic formula: populateFoliage hashes (cell, blade-index, seed) to derive position/yaw/height/width/color, and the only real inputs (which cells are grass) are already in the file as painted floor chunks. So 56MB is the expanded PRODUCT of a formula whose factors are a few KB — the GUIDING_LIGHT 'store the recipe not the dense form' anti-pattern. Confirmed the Zig loader consumes baked rows (has the GrassBlade geometry but reads per-blade placement from the instance buffer; no regeneration). Recommended fix #1 (GL-correct): port populateFoliage into world_loader.zig so it expands blades from the recipe at load time → file 70MB→~14MB, peak→~150MB. Secondary cheap win #2: b.inst is a boxed number[] (105MB) duplicating a 52MB Float32Array; accumulate into a typed array → ~150MB off bake peak (file unchanged). Awaiting user go-ahead before touching the Zig render path.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T15:08:00.359Z"
+}

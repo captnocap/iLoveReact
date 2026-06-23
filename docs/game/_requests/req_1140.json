@@ -1,0 +1,30 @@
+{
+  "id": "req_1140",
+  "at": "2026-06-16T07:34:47.892Z",
+  "origin": "session:be6306de",
+  "text": "yeah so we can just start with a propane tank for starters. lets do that and gasoline fire. you can throw it in a lab in the @cart/hmsc-int/labs/",
+  "status": "review",
+  "sessionId": "be6306de-e52e-45cd-af18-d6fcb6199eab",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T07:35:08.534Z",
+      "actor": "be63",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T07:44:47.789Z",
+      "actor": "be63",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the first vertical slice on the explosives foundation: an embodied lab at cart/hmsc-int/labs/explosives.tsx (+ paired explosives.notes.md, registered in labs/index.ts) demonstrating a propane-tank cookoff and a gasoline fire on the REAL player substrate. It rides useEmbodiedPlayer exactly like combat-arena (real movement, V23 host camera, host-stepped dynamic bodies) and layers explosives in onFrame. The propane tank is a GAME_FIRE Combustible with a ~0.06s fuse + cookoff: shoot it (host-camera ray vs its box) or press detonate, and it fires one GAME_EXPLOSION.blastAt — loose barrels carried on worldExtras.bodies take falloff impulse straight into their physics velocity and launch, while the player (the last blast target) takes falloff damage. The gasoline trail is a GAME_FIRE FireField over a hand-poured L-shaped fuel path: light the west end and the front crawls cell-to-cell, turns the corner, reaches the tank and chain-detonates it; the blast also lights gasoline within its radius. VFX is host-free (expanding fireball sphere + screen flash + flame cones). Validated via a clean full cart bundle (4.1MB, all imports resolve) plus the 26/26 foundation door tests; NOT yet shot live since the embodied scene needs the running host and the game-physics gate for the barrels. Follow-ups: tag the real propaneTank/jerryCan/oilTank props, the RPG projectile, and the real fireball Effect shader + camera shake.",
+  "shas": [
+    "a1063d8c3"
+  ],
+  "resolvedAt": "2026-06-16T07:44:47.789Z"
+}

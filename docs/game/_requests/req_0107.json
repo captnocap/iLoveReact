@@ -1,0 +1,12 @@
+{
+  "id": "req_0107",
+  "at": "2026-06-06T12:46:32.392Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT on your junction-gap fix: FAIL, live regression. User verbatim: \"the worker who is fixing the floor/wall flush mismatch just made the floor tiny and now the wall wont even place because its not wide enough of a surface\". Your change shrank the FLOOR pieces themselves in the live session — floors now render/place tiny, and wall placement rejects on them because the top surface is no longer wide enough for the wall snap. Your posted after-data claimed floor=x[0,3] z[0,3], but the user's screen says otherwise — the screen wins. Likely you normalized piece EXTENTS to close the junction sliver (shaving the overhang/skirt into the body) instead of snapping ORIGINS to the lattice — the gap fix must move pieces onto exact shared edges, never resize them. Reproduce in the live witness: place a floor, read its rendered extent vs pre-change; place a wall on it; show the placement rejection. Then fix: piece sizes are untouched, junction flushness comes from exact lattice origins. Re-run the seam-walk, wall-snap, and your junction tests after. Floor size + wall placement + flush junctions all working in the user's hands is the PASS gate.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_0009",
+  "at": "2026-06-06T04:54:25.394Z",
+  "origin": "session:749ea40a",
+  "text": "damn holy shit lmao how small is this torso material? even 1px brush size is what i would say is quite large. cant do anything that is finely painted",
+  "status": "done",
+  "sessionId": "749ea40a-8b61-47c3-8d6c-5bde9e2a5c99",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T05:01:52.438Z",
+  "resolution": "RESBAKE-0606: the torso wasn't small — the canvas is the full 512x256 unwrap — but every stroke quantized through a square 96x96 bake grid stretched over the 2:1 canvas (fat 5.3x2.7px anisotropic texels). Fixed end to end: sampleToCells gained an optional rowsRes (canonical sampler extended, square callers untouched), the overlay bake is now aspect-true (cols=res, rows follow canvas shape) and the default went 96->256 cols — a torso bakes 256x128 square 2px texels, ~7x finer; tunable max raised to 512 (1:1 with the unwrap) live-crankable in /settings. Also BRUSHTWIG (the follow-up message): brush size reset on hot updates because the painter's document restore overwrote the twig'd brushPx with the doc's embedded value; the lens re-asserts the twig'd size post-restore — hot updates keep your brush. Verify: paint 33/33, workbench characters 13/13, bake-shape test green; cutout-models' two remaining fails are the paint lane's uncommitted brush-defaults WIP.",
+  "shas": [
+    "a4ad0f8f3"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

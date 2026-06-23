@@ -1,0 +1,12 @@
+{
+  "id": "req_0176",
+  "at": "2026-06-07T04:21:40.005Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — spec refinement on RAMPREAL (queued on you), user verbatim: \"ideally, a ramp is hollow underneath it. like that of fortnite. so you know you dont have to make everything suffer if u want a tall ramp, u can still have things under it so really a floor at a 45 degree angle or something like that\". THE MODEL: a ramp is an INCLINED FLOOR SLAB — a thin floor tilted to span its rise (~45 nominal; the slab thickness matches the floor piece), NOT a solid wedge. Underneath is OPEN, usable space: pieces can be placed under it, characters walk under it (head clearance permitting). This refines your earlier side-band work: the catalog's \"hard cover from the far side\" rule is satisfied by the slab ITSELF (you cannot pass through the inclined plane) — the full-height solid side/back mass goes away; collision = the slab (walkable on top, solid through) plus its thin slab edges only. Update visual AND collision together (coherence law): hollow under-space in both. Tests: walk up the top; walk UNDER a tall ramp; place a piece under it; cannot pass through the slab itself. Slab thickness/angle are tuning data. Same SELFSHOT proof — include the under-side view. Stairs unchanged.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

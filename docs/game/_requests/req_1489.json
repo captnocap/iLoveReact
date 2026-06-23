@@ -1,0 +1,10 @@
+{
+  "id": "req_1489",
+  "at": "2026-06-20T19:26:13.210Z",
+  "origin": "session:89c172a4",
+  "text": "ok if it is setup then i am using it wrong or something. Tell me the exact flow i need to demonstrate to confirm or deny that it is working",
+  "status": "new",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": []
+}

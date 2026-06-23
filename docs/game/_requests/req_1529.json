@@ -1,0 +1,30 @@
+{
+  "id": "req_1529",
+  "at": "2026-06-20T22:18:19.948Z",
+  "origin": "session:6580d434",
+  "text": "haha hell yeah that seemed to be it. shitty as bug lmao",
+  "status": "review",
+  "sessionId": "6580d434-ee0d-4691-a47a-61556997a089",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T22:19:54.339Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:19:54.349Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User confirmed the stair-top stick fix works in-game ('that seemed to be it'). The fix (commit 0f89be46a) replaces the velocity-dependent finite-difference slope estimate in clampUphillSurfaceSpeed — which death-spiralled the player to a standstill at a staircase crest — with a velocity-independent surface-gradient cap (max_surface_speed*normal_y). Verified the lingering game-physics test red (hollow ramp slab ascent) is pre-existing and unrelated: it fails on total 3D surface_speed including a rect step-up teleport, not the heightfield horizontal clamp my change touches, and my clamp value is algebraically identical to the old one on a uniform ramp. no-V8 loader builds clean.",
+  "shas": [
+    "0f89be46a"
+  ],
+  "resolvedAt": "2026-06-20T22:19:54.348Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1108",
+  "at": "2026-06-16T00:18:36.654Z",
+  "origin": "session:9f19b605",
+  "text": "yes i love your 'hint at escape' and it makes me think back to the end of spun, when he is driving for what is it like 18 hours with the girl high on meth to first drop this girl off in a city hours away and then 2nd show up to see his ex who is living a better life. getting t here to have literally no reason to be there at all. so i was thinking, one of the best ties i could do is have some npc event system where you walk by or whatever, they have a market on them for a mission, you interact. they ask for a ride into the void. the mission never ends, but the npc dialog just keeps going and going. and going. and because i have the capability of useAssistant i want to include as a toggle on for game enrichment, this is perfect, the dialog can literally go on forever from a model generating it as the player drives and drives and drives",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T00:19:15.200Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T00:20:38.610Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added §8 The Endless Passenger to the void playbook + index. The narrative payload of the void (Spun-ending reference — the pointless 18-hour drive): an NPC asks for a ride into the void, the mission NEVER ENDS (a treadmill mission whose destination is always ahead and the fold guarantees no arrival — the recursion field makes never-arriving diegetic, not a softlock), and the passenger talks forever via useAssistant (verified real: runtime/hooks/useAssistant.ts streams, has a local_ai .gguf backend so it runs OFFLINE, already proven in codex-chat/kimi-chat/assistant3d_demo). Toggled on as opt-in 'game enrichment'; prompt the model with current wrongness so coherence rides voidDistortion.dialogCorrupt (lucid near the city, unhinged deep out). THE GUARDRAIL (V22 P2, added as a HIGH hazard): the LLM outputs TEXT ONLY — never sets flags/completes missions/spends money/steers mechanics except via a validated (text, world_delta) hook; enrichment is opt-in with a canned/looping fallback so the game ships and plays offline without any model. Added a candidate 'Endless Passenger' interface (consumes useAssistant) + the P2 hazard to the _index record. Verified the oracle surfaces both (Passenger 48.7, guardrail HIGH alongside the V22 ruling). Committed dc6390d45.",
+  "shas": [
+    "dc6390d45"
+  ],
+  "resolvedAt": "2026-06-16T00:20:38.610Z"
+}

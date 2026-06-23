@@ -1,0 +1,37 @@
+{
+  "id": "req_1625",
+  "at": "2026-06-22T15:11:31.963Z",
+  "origin": "session:7a8f00d4",
+  "text": "if it makes it any better, you could put into the editor itself physics rigging for faces that should clear the gap",
+  "status": "done",
+  "sessionId": "7a8f00d4-327a-4595-a613-6ceb3eb4cdb8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T15:13:01.845Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T15:56:20.353Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-22T17:50:45.079Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "User proposed editor-side physics rigging for faces that clear the gap. Per GUIDING_LIGHT (derive, don't store twice) the auto path was implemented first by their direction: imported/cooked mesh props now collide per connected mesh ISLAND in world_loader.zig, so a cleanly-modelled sign (separate posts + board) walks-under with zero authoring. The explicit editor-rigging control is intentionally DEFERRED: it's only needed when a sign mesh is a single welded island that connected-component splitting can't separate. Recommend confirming the auto path against the real sign before building the rig UI; if needed, the rig would mark per-part 'overhead/clears-gap' and feed the same island collider path.",
+  "shas": [
+    "734b72beb"
+  ],
+  "resolvedAt": "2026-06-22T15:56:20.353Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0463",
+  "at": "2026-06-10T05:43:08.339Z",
+  "origin": "session:0ce255e1",
+  "text": "nice this is good. so can you give a tool that lets me draw out like a straight line for example and that turns into a line of walls, or for floor, i can cover a rectangle of space, and it does a floor",
+  "status": "review",
+  "sessionId": "0ce255e1-e6f7-4640-95b6-c6054e1a2eb6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:49:57.223Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:50:12.273Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added drag-to-build in the iso pane. With a WALL armed, dragging paints a straight line of walls along the drag's dominant axis (yaw 0 along x / 90 along z); with a FLOOR armed, dragging fills the swept rectangle with floor tiles. A live translucent ghost previews every piece (blocked-red where the validator refuses it) and the whole run commits as ONE batch (one undo step, one store snapshot via commitMany). The cell math mirrors resolveSnapTarget's conventions exactly — 3m module pitch, floors on cell centres, walls run-centred on cells and line-snapped to the 3m edges — so drag-placed pieces land identically to click-placed ones; all cells share a single terrain-pad base y so the run reads flat and matches the post-placement liftToTerrain. Capped at 64 cells/axis so a huge drag can't spawn thousands of pieces. Click still single-places, and drag still rotates the camera for non-wall/floor tools and when nothing is armed. Hint text shows 'drag = wall line / floor area' for the armed kind. Committed e7374e10a, bundles clean.",
+  "shas": [
+    "e7374e10a"
+  ],
+  "resolvedAt": "2026-06-10T05:50:12.273Z",
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1012",
+  "at": "2026-06-15T16:01:41.963Z",
+  "origin": "session:46d99bcc",
+  "text": "ok now explain to me what the reset uv button does as it doesnt reset it in any way i expected it to",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T16:07:07.344Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T16:07:07.353Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked what the UV panel's 'Reset UV' button does because it did not behave as expected. Explained: it called fullFaceUV(part.mesh), which rewrites every face's UV to map to the full texture square [0,1] (the Blockbench base-cube default). It does NOT touch geometry, does NOT undo loop cuts, and does NOT unfold the box-net atlas (that is the separate unwrap() 'create texture' step, Phase 5c, unwired). Because the default UV is already full-square-per-face, pressing it usually looked like nothing changed. This explanation led directly to req_1013 (the user asked to remove the button).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T16:07:07.353Z"
+}

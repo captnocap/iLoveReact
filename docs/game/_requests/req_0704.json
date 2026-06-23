@@ -1,0 +1,33 @@
+{
+  "id": "req_0704",
+  "at": "2026-06-13T01:57:00.437Z",
+  "origin": "session:9963d6de",
+  "text": "Idk if it is yet working in terms of the paint lines. the orange does not show tho. hm. [Image #5] [Image #6]",
+  "status": "review",
+  "sessionId": "9963d6de-6200-482b-a3ff-a5af63547b01",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T01:58:03.932Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T02:29:35.002Z",
+      "actor": "opus-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Parking stall lines now survive the compiled floor bake. The painter drew the white bay lines but the loaded game showed none: the floor texture bakes at 4 px/tile, so texel centres sit 0.25 tiles apart and the nearest one to a 3-tile bay line is up to 0.125 tiles away, while the line only painted within 0.10 tiles — it fell between texels and was never sampled (classic sub-texel aliasing). Fix widens the full-white core to 0.16 tiles (clearing the 0.125 worst case) at all three lockstep sites: the game heightfield shader, its CPU bake mirror (heightfieldTexelColor), and the editor painter view, so painter==game stays exact. The prior test false-passed by sampling exactly on the line; it now walks the real 4 px/tile texel grid the bake uses. Resolution-bump was rejected (would blow texture memory on a full city). The orange-marker half of the original report (markers no longer paint the game ground) was already confirmed working by the user. groundResolve 5/5, cart bundles clean. Committed 7c4722d90.",
+  "shas": [
+    "7c4722d90"
+  ],
+  "resolvedAt": "2026-06-13T02:29:35.001Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0333",
+  "at": "2026-06-08T12:43:57.482Z",
+  "origin": "codex:019ea612",
+  "text": "This is good.  one thing to check on the camera parity is look at the editor and it has a right click to aim camera also, u need that",
+  "status": "review",
+  "sessionId": "019ea612-258b-7013-b887-0bcd6a4954ea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T12:44:04.115Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T12:46:30.709Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added the missing /test right-click ADS camera behavior to the no-V8 loader: RMB hold switches from walk Orbit to the native Aim-rig math with shoulder offset, 2.4m distance, 47 degree FOV, wider aim pitch limits, smoothed position/target/FOV transition, and body yaw pinned to camera yaw while aiming. Releasing RMB returns to the walk Orbit clamp. This is committed with the broader no-V8 player camera and animation batch; not marked done, awaiting user verification via tools/rjit game play.",
+  "shas": [
+    "e9eb9c078"
+  ],
+  "resolvedAt": "2026-06-08T12:46:30.709Z",
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1212",
+  "at": "2026-06-17T00:49:06.887Z",
+  "origin": "session:8e058574",
+  "text": "if you are naming joints and you also need to declare the rotation for forward like a car, do you look at it head on, and then say left when if the camera is trailing that actually is the right or i assume probably not after typing that out but idk lol",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T00:50:42.624Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T00:51:30.580Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked the joint-naming/orientation convention question (do you name left/right head-on or from a trailing camera, and how to declare forward rotation). Answered the convention (name from the vehicle's own/driver frame, which equals a trailing chase cam; head-on is the only view that mirrors left/right; the mirror plane separates left from right; the wheel spin axis is the lateral axle, set automatically). While explaining, fixed a real correctness nit it surfaced: the ⌖ wheel center button hardcoded the joint spin axis to [0,0,1] (Z), which is only right when the car's axle happens to be Z — changed it to use fit.axis (the fitted well's normal = the actual axle) so the declared spin axis is correct for any model orientation. Full hmsc-int cart bundles clean. Committed b3bef7ec8.",
+  "shas": [
+    "b3bef7ec8"
+  ],
+  "resolvedAt": "2026-06-17T00:51:30.580Z"
+}

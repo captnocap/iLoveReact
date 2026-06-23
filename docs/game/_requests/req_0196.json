@@ -1,0 +1,15 @@
+{
+  "id": "req_0196",
+  "at": "2026-06-07T06:03:22.091Z",
+  "origin": "session:f2302907",
+  "text": "Yeah the problem though is that our 'bake' is not baking jack for shit though, and secondly our entire thing comes out as one program. where cs is a program itself, the maps are assets to it",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:04:52.491Z",
+  "resolution": "Verified both critiques against source: bake-geometry-auto/bake-geometry only pre-warm the geometry intern cache for inline-literal Scene3D.Mesh params (header comment admits no const refs/spreads/.map loops — 'the citymap case'), so no spatial structure, vis, lighting, collision, or scene flattening is baked — agreed it's memoization, not a map compiler. On engine/asset split: ship fuses engine+game via @embedFile, but the localstore 'hmsc'/'game-state' boot key is already a map-as-asset channel — it just carries an uncompiled GameState draft (shipping the .vmf, not the .bsp). Sketched the CS-shaped fix: hmsc-int Compile becomes the map compiler emitting a baked binary blob (heightfields, GPU-ready buffers, chunk index, entities), hmsc binary becomes the engine loading any map blob. Offered to write the plan; awaiting direction.",
+  "shas": [],
+  "tags": [
+    "bug"
+  ]
+}

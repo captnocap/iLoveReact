@@ -1,0 +1,28 @@
+{
+  "id": "req_0660",
+  "at": "2026-06-12T05:50:57.453Z",
+  "origin": "codex:019eba54",
+  "text": "thats what looked missing. is they are just array values and not an object",
+  "status": "review",
+  "sessionId": "019eba54-122c-7b03-9a58-37a88189321a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T05:51:03.468Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T05:51:08.613Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the user's diagnosis: the problem is not only unnamed colors or unnamed parts, it is that authoring intent is represented as positional arrays rather than object-shaped recipe data. The right direction is semantic objects with named fields that lower to the existing packed arrays at compile time. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T05:51:08.613Z"
+}

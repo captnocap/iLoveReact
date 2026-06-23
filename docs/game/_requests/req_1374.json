@@ -1,0 +1,30 @@
+{
+  "id": "req_1374",
+  "at": "2026-06-19T03:02:41.531Z",
+  "origin": "session:be97e48f",
+  "text": "now i can not see parts of it that are not painted. just fyi. so an unpainted face is just invisible now",
+  "status": "review",
+  "sessionId": "be97e48f-9627-4113-86b2-bb34b58ed45b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T03:18:58.968Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T03:18:58.976Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Unpainted faces were invisible because the base-coat effect was keyed on [painting] and early-returned while tex was still null on first paint entry, so it never re-ran and the RGBA paint texture was never opaque-filled. Re-keyed on [painting, sceneName, !!tex] and made it RESTORE saved paint (else base-coat). Added persistence: stroke-end reads the texture back and stores it as raw RGBA base64 in localstore keyed by model, restored on entry — survives hot reload AND full restart, with no @reactjit/image dependency so it stays pure cart hot-reload (no host rebuild). This is what stops hot reload from wiping the paint.",
+  "shas": [
+    "c1461c146"
+  ],
+  "resolvedAt": "2026-06-19T03:18:58.975Z"
+}

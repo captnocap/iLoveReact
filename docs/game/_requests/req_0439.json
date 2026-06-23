@@ -1,0 +1,33 @@
+{
+  "id": "req_0439",
+  "at": "2026-06-10T04:10:44.499Z",
+  "origin": "session:0ce255e1",
+  "text": "Alright. Lets look at something here. so this is the 2d tile painting map that lives next to this: [Image #3] ok you see the buildings placed on the other map also. cool so when i zoom in on it look at how poorly this is lining up with the tile system. [Image #4] [Image #5] now, im not sure which one is the problem. the map you are working on or the one that has existed. but the alignment is clearly messed up and one more thing further on that is look at the building im in reference about anyways. look at the shape and then look at what it shows the shape as[Image #6] so can you make these be speaking the same language. the grid update looks good. it wasnt in my first screenshot here  but notice again, if i zoom in look this isnt aligned at all on this grid but it was on the zoomed out one [Image #7] that or im doing something wrong",
+  "status": "review",
+  "sessionId": "0ce255e1-e6f7-4640-95b6-c6054e1a2eb6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T04:19:52.272Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T04:19:52.281Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The visible 'alignment is messed up between the 2D paint map and the 3D iso pane' was the iso GRID coarsening too early (fixed in 739223361 / req_0440): pieces snap to the real 1 tile = 1 m grid (the same grid the 2D map and game use — verified: WORLD_TUNING.defaultCellSizeMeters=1, snap gridMeters=1, graphToBuildWorld offsets by the even CHUNK_TILES/2=60 so no half-cell skew), they just didn't sit on the visibly-drawn coarse lines until zoomed in. With the grid holding 1-tile pitch through the build range, pieces read as on-grid at the zooms you place at. SEPARATE remaining item (not a coordinate bug): the 2D place layer draws each building as its bounding RECTANGLE (footW x footD), so an L-shaped building shows as a rectangle in 2D while the 3D shows the true piece shape — making the 2D footprint render the real piece outline is a distinct follow-up, surfaced for prioritization. Grid alignment committed 739223361.",
+  "shas": [
+    "739223361"
+  ],
+  "resolvedAt": "2026-06-10T04:19:52.281Z",
+  "tags": [
+    "bug"
+  ]
+}

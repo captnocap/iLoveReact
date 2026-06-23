@@ -1,0 +1,37 @@
+{
+  "id": "req_0293",
+  "at": "2026-06-08T07:15:07.527Z",
+  "origin": "session:9e14f7ea",
+  "text": "KEYSTONE LANE — prove the stateless-Zig-engine + RLE-data + Zig-loader spine. This is the make-or-break for the whole game direction; the bar is REAL proof, not \"it compiles.\"\n\nARCHITECTURE (law — docs/game/PLATMOD_PLAN.md §2-4, DECISIONS.md V28/V29): a game is DATA — an asset vocabulary {buildings, textures, models, map} plus an RLE tape composing them BY REFERENCE (piece -> shape -> position -> face-materials, each a tape entry). The Zig engine capabilities (camera/movement/physics/render/behaviors) are STATELESS and already built; the loader feeds data -> capabilities -> running game. SHIP = Zig loader + baked RLE, ZERO JS. The slice-1 `rjit-player` that loads a bundle.js through V8 is the WRONG loader — do NOT extend it; mine only its data-side codec SHAPE.\n\nSTEP 1 of the spine — do ONLY this, then STOP and report. I verify before authorizing step 2.\n\n1. Read runtime/workspace/rle.ts and runtime/workspace/lumps.ts (slice-1, commit 92c703fa2 lineage) as the source-of-truth FORMAT shape. Read framework/world/mapfile.zig for the existing Zig-side lump work.\n2. Write a short format-contract note at docs/game/RLE_FORMAT.md: the EXACT byte layout of the binary row-RLE stream + the lump container directory (magic, version, lump table, raw|rle8|rle16|text encodings, alignment, unknown-lumps-skipped tolerance). This FREEZES the contract so the editor-bake lane can follow it later with zero drift.\n3. Build the Zig binary RLE codec — a packed reader for that scheme. Decode straight into typed buffers, no parser/eval.\n4. Prove it with a round-trip test: a TS-written fixture tape -> Zig reads it -> byte/value identical. Wire it so `tools/rjit game verify` (or a targeted `zig test`) runs it GREEN.\n\nREPORT BACK: the RLE_FORMAT.md path, the codec file path, and the exact verify command + its GREEN output. Do NOT touch the editor Compile bake or the constructor yet — those are later, gated on this.\n\nStay entirely in your own context — no Task tool, no subagents. This is the keystone; invisible work here is unacceptable. Build/verify via tools/rjit only. No git reset/revert. Commit only on my word.",
+  "status": "review",
+  "sessionId": "9e14f7ea-dafd-486f-b26a-2a7b9c5fcb05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T07:15:14.364Z",
+      "actor": "9e14",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T07:24:16.981Z",
+      "actor": "9e14",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-08T07:31:26.745Z",
+      "actor": "9e14",
+      "kind": "note",
+      "text": "committed as 4c284f85e (user-verified green: 1/1 oracle, 1/1 round-trip, 71/71 suites, 3/3 scripts)"
+    }
+  ],
+  "resolution": "Keystone spine step 1: proved the TS-writer <-> Zig-reader binary RLE/mapfile contract with a REAL cross-language round-trip, not a compile check. Froze the wire format in docs/game/RLE_FORMAT.md (RJMP 16B header + 24B directory entries, raw/rle8/rle16/text encodings, the 12B-header binary row-RLE grid stream with the +1 null sentinel, 16B alignment, version + unknown-lump-skip tolerance). Added decodeRle8 to framework/world/mapfile.zig (decodeRle16 already existed) so the Zig packed reader covers both value widths, decoding straight into typed []?u16 buffers. Added framework/testing/fixtures/gen_roundtrip.ts which builds a container via the PRODUCTION runtime/workspace codec (lumps.ts + rle.ts) and emits it as base64; the Zig test framework/testing/unit/world_mapfile.zig decodes that exact tape and asserts byte/value identity for STRINGS/TILES(rle16)/HEIGHTS(rle8) including null cells. Wired into tools/rjit game verify (rebundled tools/rjit.js) AND runnable standalone as zig build test-world-mapfile. GREEN: targeted test 5/5 passed; full verify VERDICT GREEN 1/1 oracle, 1/1 round-trip, 71/71 suites, 3/3 scripts. Negative control: corrupting one byte of the tape fails exactly the round-trip test (4/5). NOT committed (awaiting user word). Editor Compile bake + constructor untouched, gated on this. Files: docs/game/RLE_FORMAT.md, framework/testing/fixtures/{gen_roundtrip.ts,mapfile_roundtrip.b64}, framework/world/mapfile.zig, framework/testing/unit/world_mapfile.zig, build.zig, cli/commands/game.ts, tools/rjit.js.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T07:24:16.981Z",
+  "tags": [
+    "ruling"
+  ]
+}

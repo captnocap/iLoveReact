@@ -1,0 +1,33 @@
+{
+  "id": "req_0615",
+  "at": "2026-06-11T07:18:12.873Z",
+  "origin": "session:0fdc6000",
+  "text": "Do the real framework work to achieve it.",
+  "status": "review",
+  "sessionId": "0fdc6000-801c-433a-96cc-cc2aaffb481e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T07:18:45.703Z",
+      "actor": "demolition-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T07:39:47.352Z",
+      "actor": "demolition-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "WORLDWIN built as real framework work (63d269066): multi-window wgpu via extra surfaces on the one device (gpu.createWindowSurface/configureExtraSurface), caller-owned detached render targets (scene3d.DetachedTarget/renderDetached — drawScene is encoder-self-contained so nothing re-plumbed), and framework/gpu/world_window.zig blitting the world RT into its own swapchain, driven from the engine loop. Door __compiled_world_window/_close/_status rides the existing compiled-world ingredient; cart gets POP OUT on /compiled and Compile auto-reloads an open window — paint → Compile → second window live, zero flips. In-window: click captures mouse-look, WASD walks (process-wide key state), Esc releases, RMB aims, events consumed so editor hotkeys never fire. Verified: full ship + ingredient label check green, shot boot PASS, cart bundle green; the one red ship was a manifest race with the user's just-launched dev host (by-design self-destruct). Needs eyes on a display: press POP OUT on /compiled.",
+  "shas": [
+    "63d269066"
+  ],
+  "resolvedAt": "2026-06-11T07:39:47.352Z",
+  "tags": [
+    "ask"
+  ]
+}

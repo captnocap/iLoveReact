@@ -1,0 +1,12 @@
+{
+  "id": "req_0039",
+  "at": "2026-06-06T06:09:29.543Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — bug, USER verbatim: \"reset part button does not reset the part.\" Marker: RESETPART-0606 (resolve the req matching this text).\n\nData first, three hops: (1) does the button's handler fire (log it), (2) does the underlying draft/grid data actually reset (inspect before/after), (3) does the VIEW refresh after the data resets — note the camera lane just found lens views holding stale state until remount; if reset works at the data layer but the view shows stale, it is the same staleness family — coordinate with pane 2's seam fix rather than patching a second refresh path. Fix at the true layer, P4 pin (reset → data equals defaults → view reflects it), explicit paths, verify green, resolve the req. READY FOR USER TEST.",
+  "status": "new",
+  "sessionId": "749ea40a-8b61-47c3-8d6c-5bde9e2a5c99",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

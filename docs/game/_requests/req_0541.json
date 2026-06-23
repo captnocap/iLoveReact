@@ -1,0 +1,31 @@
+{
+  "id": "req_0541",
+  "at": "2026-06-10T14:15:45.661Z",
+  "origin": "session:0a09e641",
+  "text": "no. only cuz its broken lol -_- [loader] streaming ON — grid 13x10 (24 occupied chunks), 12891 local + 3600 spanning rows, lod shell 8574 rows (≥2m verbatim), detail radius 240m (cell 64m)\n[loader] 16 face material(s) → 16 batch(es), 240 translucent meshes\n[loader] streaming first frame — 6 draws: 6486 detail + 0 lod shell instances (of 16491 total rows)\n[js.err] The above error occurred in the <PlayRoute> component:\n\n    at PlayRoute (<anonymous>:65140:57)\n    at Route (<anonymous>:7952:5)\n    at View\n    at Box (<anonymous>:7201:48)\n    at View\n    at Box (<anonymous>:7201:48)\n    at EditorShell (<anonymous>:82952:50)\n    at Router (<anonymous>:7887:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:84208:29)\n\nReact will try to recreate this component tree from scratch using the error boundary you provided, GlobalErrorBoundary.\n[js.err] [react-uncaught] ReferenceError: state is not defined\n    at PlayRoute (<anonymous>:65207:16)\n    at renderWithHooks (<anonymous>:15590:28)\n    at mountIndeterminateComponent (<anonymous>:18968:23)\n    at beginWork (<anonymous>:19956:24)\n    at beginWork$1 (<anonymous>:24472:24)\n    at performUnitOfWork (<anonymous>:23920:22)\n    at workLoopSync (<anonymous>:23856:15)\n    at renderRootSync (<anonymous>:23835:17)\n    at performSyncWorkOnRoot (<anonymous>:23562:30)\n    at flushSyncCallbacks (<anonymous>:12966:32)\ncomponent-stack:\n    at PlayRoute (<anonymous>:65140:57)\n    at Route (<anonymous>:7952:5)\n    at View\n    at Box (<anonymous>:7201:48)\n    at View\n    at Box (<anonymous>:7201:48)\n    at EditorShell (<anonymous>:82952:50)\n    at Router (<anonymous>:7887:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:84208:29)\n[js.err] Warning: %s: Error boundaries should implement getDerivedStateFromError(). In that method, return a state update to display an error message or fallback UI.%s GlobalErrorBoundary \n    at GlobalErrorBoundary (<anonymous>:84208:29)",
+  "status": "review",
+  "sessionId": "0a09e641-a769-495b-a0fd-4a909d25af7a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:16:17.024Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T14:18:54.977Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed PlayRoute crash 'ReferenceError: state is not defined' that killed the editor /test play view on mount. The liftedPieces useMemo (terrain-lift, req_0444 lineage) referenced groundColumnTop(state.world ...) and listed state.world in its deps, but 'state' only exists as a local const inside the streamState useMemo above it — out of scope here, so it threw at mount and GlobalErrorBoundary caught it. Repointed both the call and the dep to props.state.world (the component's GameState prop, line 349 'state: GameState'), matching how the other groundColumnTop call sites resolve the world. TSX hot-reloads (no rebuild). Verified no other out-of-scope 'state' tokens remain in PlayRoute. This unblocks the /test bisect for the doorway-collision question (req_0539).",
+  "shas": [],
+  "resolvedAt": "2026-06-10T14:18:54.977Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "req_0218",
+  "at": "2026-06-07T09:58:41.374Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: commits 192fe8a48 + 7fb5eab43 verified and accepted — paths clean, PropertiesPanel hunks are attributably yours. One gap: 192fe8a48 modifies framework/engine.zig (+217), gpu/gpu.zig (+66), gpu/text.zig (+102) but the commit carries only TS-side tests (telemetry.test.ts). The testing-parity rule in AGENTS.md: Zig-touching work needs Zig-side tests, not just TS-across-the-bridge. Existing test-game-physics green does not cover NEW attribution paths. Either name the Zig-side tests that exercise your new engine/gpu code, or add them as a follow-up commit before CAMRAY lands. CAMRAY itself stays on the live 60s spikewatch done-bar — correct read.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

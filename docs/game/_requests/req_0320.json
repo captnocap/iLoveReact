@@ -1,0 +1,13 @@
+{
+  "id": "req_0320",
+  "at": "2026-06-08T11:30:43.095Z",
+  "origin": "session:f48e9dac",
+  "text": "ok i now see what is happening here. Lets go over it. So look here. I went and switched the map to be a new map, its completely empty from my point of view. however, look at the rendered map file. [Image #19] it shows buildings that do not exist on my map at all. but i do remember making those buildings. they exist in another map somewhere. but this isnt not grabbing all the maps. i know this because now look. if i swtich the maps, and reload it. see what happens [Image #20] [Image #21]",
+  "status": "new",
+  "sessionId": "f48e9dac-15a7-4cf5-a2e4-26a5d851461c",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

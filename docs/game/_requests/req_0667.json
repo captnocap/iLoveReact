@@ -1,0 +1,31 @@
+{
+  "id": "req_0667",
+  "at": "2026-06-12T06:17:26.071Z",
+  "origin": "codex:019eba70",
+  "text": "and one more for you, can you add a update prefab button that will let me overwrite an existing one from the iso3d editor",
+  "status": "review",
+  "sessionId": "019eba70-af1b-7633-a9f1-ba5a8c22c607",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T06:17:33.116Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T06:19:11.716Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an iso3d update-prefab flow. When a selection is active, the new ↻ button opens an existing-prefab picker; choosing a prefab captures the current selection with prefabFromPieces using that prefab's existing id, label, and theme, then commits prefabDefined. This overwrites the palette definition through the existing stream upsert instead of creating a parallel prefab.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T06:19:11.716Z",
+  "tags": [
+    "ask"
+  ]
+}

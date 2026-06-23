@@ -1,0 +1,33 @@
+{
+  "id": "req_0687",
+  "at": "2026-06-12T13:24:34.034Z",
+  "origin": "session:c61d302f",
+  "text": "hm. its still showing up thru a wall did u fix the compiled loader ?",
+  "status": "review",
+  "sessionId": "c61d302f-e1c3-4475-b1f6-ef3b9201d8d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:33:18.314Z",
+      "actor": "c61d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T13:33:18.322Z",
+      "actor": "c61d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Duplicate capture of req_0675 (the same user message was logged twice by the hook). All work, rationale, and shas live on req_0675: the compiled no-V8 loader's interact scan gained the wall reach gate via game_physics.reachBlockedStepColliders, gating both the prop and door loops in world_loader.zig stepInteract. See req_0675 for the full paragraph and review.",
+  "shas": [
+    "f2e12b5f2"
+  ],
+  "resolvedAt": "2026-06-12T13:33:18.322Z",
+  "tags": [
+    "bug"
+  ]
+}

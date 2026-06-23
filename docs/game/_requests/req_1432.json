@@ -1,0 +1,30 @@
+{
+  "id": "req_1432",
+  "at": "2026-06-19T20:37:01.732Z",
+  "origin": "session:671785ab",
+  "text": "you had the right idea with the 3 inline but then lost me on the stacked ones that have a ton of dead space [Image #3] [Image #4]",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T20:38:59.430Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T20:42:21.483Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same change set as req_1431 (they're the same feedback): the stacked full-width rail buttons had dead space; reworked the rail into a wrapping content-sized toolbar so buttons pack horizontally like the 3-across transform trio the user approved, instead of one tall full-width column. See 18d22be84.",
+  "shas": [
+    "18d22be84"
+  ],
+  "resolvedAt": "2026-06-19T20:42:21.483Z"
+}

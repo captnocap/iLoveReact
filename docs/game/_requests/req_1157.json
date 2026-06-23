@@ -1,0 +1,10 @@
+{
+  "id": "req_1157",
+  "at": "2026-06-16T08:13:56.315Z",
+  "origin": "session:740b1ca5",
+  "text": "oh also the textures are not rendering thats what else is doing it. so lets get this down, the ground textures reverted back to extra low render, walls missing, and grass blades all gone. physics still work tho",
+  "status": "new",
+  "sessionId": "740b1ca5-cbef-4fcf-8763-930c121a774b",
+  "captureMode": "hook",
+  "events": []
+}

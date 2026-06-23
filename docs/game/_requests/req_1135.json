@@ -1,0 +1,28 @@
+{
+  "id": "req_1135",
+  "at": "2026-06-16T03:23:12.063Z",
+  "origin": "session:eef64544",
+  "text": "Oh ok. thats fine. lets keep pressing on then. no need to stop",
+  "status": "review",
+  "sessionId": "eef64544-c672-4883-add8-12dffa52f94c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T03:38:12.242Z",
+      "actor": "eef6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T03:38:12.251Z",
+      "actor": "eef6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Pressed straight on with the placement slice per the user's 'keep pressing, no need to stop' (rather than pausing at the data spine). Delivered the editor placement+render for cooked props: a runtime overlay in game/kinds/props.ts + game/build/catalog.ts so a cooked kind resolves like a built-in, a new 'studio' prop shelf, CookedProp.tsx mesh-soup render dispatched in Prop.tsx (ghost + standing), and IsoAuthor wiring (boot-sync + live shelf count). cookedAsset 13/13, build 25, store 8, editMesh/modelStream/textureize green; bundles clean; hot-reloadable. The /compiled bake + texture fold remain (one rebuild). Uncommitted by the user's lead.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T03:38:12.251Z"
+}

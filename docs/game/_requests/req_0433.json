@@ -1,0 +1,39 @@
+{
+  "id": "req_0433",
+  "at": "2026-06-10T03:48:00.019Z",
+  "origin": "session:0ce255e1",
+  "text": "and i still cant figure out this whole grid system. first and foremost, is this grid doing the same grid the game is doing?",
+  "status": "review",
+  "sessionId": "0ce255e1-e6f7-4640-95b6-c6054e1a2eb6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T03:50:52.938Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T03:50:52.946Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-10T03:51:19.170Z",
+      "actor": "iso-author",
+      "kind": "note",
+      "text": "NOTE: req_0433's captured text is the GRID QUESTION; the zoom-fling fix (4da4364d2) cited above addressed the concurrent 'zoom shifts view up-left' report that arrived in the same exchange. Grid answer for the question itself: the iso build grid IS the game's grid — world-scale contract is 1 tile = 1 meter (WORLD_TUNING.defaultCellSizeMeters=1), the build-piece snap pitch is gridMeters=1 (snap.ts), and the iso visual grid draws a line every 1 tile (bold every 8). All three coincide, so pieces snap to the same cells the game and F2 use. Likely perceptual snag: grid LINES sit on cell EDGES (integers) while piece CENTERS sit on cell CENTERS (N+0.5), so a piece reads as half a cell off the lines; awaiting the user on what specifically is confusing before changing the visual."
+    }
+  ],
+  "resolution": "Zooming flung the whole iso view up-left by a huge amount. Root cause: the onScroll event payload provides scrollX/scrollY/deltaX/deltaY but NO x/y, so local(e) read the cursor as (0,0) and zoomToCursor anchored on (-rect.x,-rect.y) — a far off-screen pixel for the bottom-right pane, whose ground-plane intersection lands way off the map, dragging centre with it. Fixed by reading the engine cursor via getMouseX/getMouseY (the authoritative source the placement-ghost poll already uses) and converting to pane-local coords, with a pane-centre fallback. Zoom now keeps the point under the pointer fixed in and out. Committed 4da4364d2, bundles clean.",
+  "shas": [
+    "4da4364d2"
+  ],
+  "resolvedAt": "2026-06-10T03:50:52.946Z",
+  "tags": [
+    "ask"
+  ]
+}

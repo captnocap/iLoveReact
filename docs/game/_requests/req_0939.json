@@ -1,0 +1,30 @@
+{
+  "id": "req_0939",
+  "at": "2026-06-14T19:36:13.160Z",
+  "origin": "session:dc5986f6",
+  "text": "erm. well. also, i cant skin it so if u can expose the faces of it also that would be nice",
+  "status": "review",
+  "sessionId": "dc5986f6-d53d-46b2-b433-a343515365ab",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T19:44:33.028Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T19:44:33.037Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Gable roof now skins as one surface. The two slopes wore the front/back face slots while the gable-end walls wore sides, so painting the roof's 'top' only skinned half of it ('i cant skin it'). Both slopes now wear front (top) — painting 'top' skins the whole roof surface as one — and the gable-end walls keep sides (edges), exposing them as a distinct paintable face. pieceShapes.ts; 9 roof tests + cart bundle green; editor hot-reloads.",
+  "shas": [
+    "8f6fafe5a"
+  ],
+  "resolvedAt": "2026-06-14T19:44:33.037Z"
+}

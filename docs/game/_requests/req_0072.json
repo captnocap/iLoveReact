@@ -1,0 +1,16 @@
+{
+  "id": "req_0072",
+  "at": "2026-06-06T08:14:27.391Z",
+  "origin": "supervisor-relay",
+  "text": "there should be a import/open image file to use here so i can use existing images / paint over them. oh there is, its just in a weird spot. yeah its broken / ux is shit and wants me to pass an image path. im not going to type a path",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T08:39:33.399Z",
+  "resolution": "IMGOPEN-0606 landed (1e8c89bdd). The original cutout app's ingest is restored to the bench: (1) PICKER — an 'open image…' chip in the bench verb strip (the hero actions, not 'a weird spot') shells the SAME zenity file-selection the original used (cart/cutout/state.ts:1232 reference; surveyed the framework first — no host file-dialog door exists today, so the shell picker is the honest path, stated per the dispatch; zenity verified present). (2) DROP — useFileDrop→openImage was already wired on the bench; it now survives real payloads. (3) THE SHARED LOAD PATH, diagnosed not buried: typed/dropped paths arrive shell-quoted, file://-prefixed (DE drops), or whitespace-wrapped — magick identify then fails and the old status said nothing. cleanImagePath() now sits INSIDE store.openImage so the picker, the drop, and the typed field share one load door (headless, P4-pinned across quote/file-uri/whitespace cases), and the failure status points the user at the picker/drop instead of dying quietly; magick itself verified working on this host. Opened images land as paintable documents exactly like the original (native dims, srcPath source — paint over, extract from) and the DRAFTHOLE slot law covers them across hot updates. bench 14/14. PASS script: press 'open image…' → pick a file → it's the canvas; or drag any image file onto the bench window.",
+  "shas": [
+    "1e8c89bdd"
+  ],
+  "tags": [
+    "ux"
+  ]
+}

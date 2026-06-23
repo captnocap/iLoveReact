@@ -1,0 +1,28 @@
+{
+  "id": "req_1638",
+  "at": "2026-06-22T17:16:23.674Z",
+  "origin": "session:7a8f00d4",
+  "text": "siah@busiah ~/creative/reactjit $ \n<--- Last few GCs --->\n, [2064451:0x5c814000]    49049 ms: Mark-Compact (reduce) 1396.9 (1398.0) -> 1396.9 (1398.0) MB, pooled: 0.0 MB, 265.49 / 0.00 ms (+ 0.8 ms in 2 steps since start of marking, biggest step 0.8 ms, walltime since start of marking 269 ms) (average mu = 0.219, [2064451:0x5c814000]    49361 ms: Mark-Compact (reduce) 1398.4 (1399.5) -> 1398.4 (1399.5) MB, pooled: 0.0 MB, 261.97 / 0.00 ms (+ 0.0 ms in 3 steps since start of marking, biggest step 0.0 ms, walltime since start of marking 264 ms) (average mu = 0.190, \n\n\n#\n# Fatal JavaScript out of memory: Ineffective mark-compacts near heap limit\n#\n==== C stack trace ===============================\n\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0xa2c9b73]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0xa2c912b]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x8232d68]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x82081a6]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x82f9ab7]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x82fd078]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x830c6cd]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x830bf8f]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x82880b3]\n\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n!!!  CRASH: SIGTRAP (breakpoint / unreachable hit)  !!!\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\ninstruction ptr: 0x8232252\nRebuild with --debug for symbols, then:\n  addr2line -e zig-out/bin/APP 0xADDRESS\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n\n<--- Last few GCs --->\n, [2066187:0x425f2000]    36813 ms: Mark-Compact (reduce) 1398.7 (1399.5) -> 1398.7 (1399.5) MB, pooled: 0.0 MB, 217.38 / 0.00 ms (+ 0.0 ms in 3 steps since start of marking, biggest step 0.0 ms, walltime since start of marking 220 ms) (average mu = 0.219, [2066187:0x425f2000]    37088 ms: Mark-Compact (reduce) 1399.4 (1400.2) -> 1399.4 (1400.2) MB, pooled: 0.0 MB, 227.46 / 0.00 ms (+ 0.0 ms in 2 steps since start of marking, biggest step 0.0 ms, walltime since start of marking 230 ms) (average mu = 0.196, \n\n\n#\n# Fatal JavaScript out of memory: Ineffective mark-compacts near heap limit\n#\n==== C stack trace ===============================\n\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0xa2c9b73]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0xa2c912b]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x8232d68]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x82081a6]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x82f9ab7]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x82fd078]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x830c6cd]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x830bf8f]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x82880b3]\n\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n!!!  CRASH: SIGTRAP (breakpoint / unreachable hit)  !!!\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\ninstruction ptr: 0x8232252\nRebuild with --debug for symbols, then:\n  addr2line -e zig-out/bin/APP 0xADDRESS this was my latest startup",
+  "status": "review",
+  "sessionId": "7a8f00d4-327a-4595-a613-6ceb3eb4cdb8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T17:17:50.059Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T17:23:08.755Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Editor OOM-crashed at ~1.4GB ('Ineffective mark-compacts near heap limit') on cold start of a grass-heavy map. Diagnosed: the flora PREVIEW (render3d/GrassField FoliageField) builds the whole grass/palm field in JS unconditionally when mounted — up to MAX_INSTANCES=1,048,576 blades × STRIDE-12 floats plus 200k+ palm fronds — and GameWorld3D gates that build on showFlora=floraVisible, which cold-starts to true (twig state resets on restart). So every dev launch materialises the million-row field BEFORE rendering and exhausts the heap, which is exactly why the user sees no grass yet the editor still dies. Unblock: defaulted floraVisible to false in IsoAuthor.tsx (hot-reloadable, does NOT touch the other session's in-flight grassPopulation.ts); toggle 'Fl' re-enables it. Left uncommitted because IsoAuthor is tangled with the other session's prop/flora refactor. Awaiting the user's restart to confirm the OOM clears; if it persists with flora off, the hog is the ~512MB command-stream flush instead. Durable fix = the flora refactor's lightweight shader preview (no million JS rows).",
+  "shas": [],
+  "resolvedAt": "2026-06-22T17:23:08.754Z"
+}

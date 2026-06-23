@@ -1,0 +1,31 @@
+{
+  "id": "req_0342",
+  "at": "2026-06-08T13:32:00.200Z",
+  "origin": "codex:019ea612",
+  "text": "no. your wrong. your not going to extract anything. your going to start with deleting this shitty approach u just made and then you are going to turn the existing one to be verbatim a host primitive so that it can be a react component. Its pretty plain cut",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:32:13.915Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:58:27.413Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Deleted the bad second renderer approach and stopped using a Scene3D child substitution path for /compiled. The React route now creates WorldLoader, which the engine paints by calling world_loader.zig directly.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T13:58:27.412Z",
+  "tags": [
+    "ruling"
+  ]
+}

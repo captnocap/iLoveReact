@@ -1,0 +1,28 @@
+{
+  "id": "req_0936",
+  "at": "2026-06-14T19:32:47.992Z",
+  "origin": "session:dc5986f6",
+  "text": "oh. i dont even use the test route, the js camera is actually more borked than the other one also lol. honestly we need to get rid of that test route since it is always the focal point and i dont even use it, its unusable, the js in the loop lags so hard",
+  "status": "review",
+  "sessionId": "dc5986f6-d53d-46b2-b433-a343515365ab",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T19:33:17.946Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T19:44:59.048Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "/test (PlayRoute — the JS-in-the-loop embodied play view, the app's focal/landing route) is unusable from reconciler-in-the-loop lag and the user wants it GONE, but explicitly clarified 'im not telling u to remove it' — a standing removal target, NOT an authorized task. No code changed. Captured the intent to memory (user-workflow-compiled-first): don't invest in /test polish; bug fixes belong in the /compiled path; removal (when ruled) also needs a new default route (the iso build pane / workbench the user actually uses). Closing this out of 'doing' since nothing is in flight here — awaiting a future go.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T19:44:59.048Z"
+}

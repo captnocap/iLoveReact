@@ -1,0 +1,30 @@
+{
+  "id": "req_1383",
+  "at": "2026-06-19T04:45:38.221Z",
+  "origin": "session:d6961119",
+  "text": "so does it not make it into the @cart/hmsc-int/editors/model/Studio.tsx then? how do i paint it",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T04:49:01.102Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T04:55:47.928Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered 'how do I paint it': today the generated mesh does NOT enter Studio — genprop bakes a static render-only ImportedProp; painting requires a Studio EditMesh with UVs. Built and committed the durable bridge that closes that gap: cart/hmsc-int/editors/model/importMesh.ts (glbToTriangles + trianglesToEditMesh weld + glbToEditMesh convenience = unwrap(trianglesToEditMesh(...))), the inverse of editMeshToGeometry. Confirmed all the Studio machinery needed already exists: addPart() injects any EditMesh, unwrap() handles arbitrary triangle meshes (shelf-packs a per-face UV island; box-net only for clean 6-face boxes), and the pixel painter just needs face.uv. Proven: importMesh.test.ts 5/5 PASS + a temp probe over the REAL generated hydrant GLB (converts, welds, every face unwrapped -> paintable). Committed 04bb64cb5. LAST MILE NOT DONE: the Studio import entry point (a small button/dialog calling readFileBase64 -> glbToEditMesh -> studioNewModel + addPart) requires editing Studio.tsx, which session be97 is ACTIVELY editing (mtime 21:54, 36 lines uncommitted) — I refused to edit it concurrently to avoid clobbering unstaged work. Needs coordination or a go-ahead once that file is free; alternative store-injection path was rejected as fragile (couples to V20 event store).",
+  "shas": [
+    "04bb64cb5"
+  ],
+  "resolvedAt": "2026-06-19T04:55:47.928Z"
+}

@@ -24,5 +24,8 @@
   ],
   "resolution": "Clarified the §1a confusion in PLATMOD_PLAN.md and folded in all four rulings. §1a now states unmistakably that NOTHING loads a map/game file today — no lump container, binary RLE, package, content store, or player boot exists; the table is the parts bin (host bones to build into), not a claim the goal works; the only current loading is the localstore testing channel. Rulings recorded in §3+§6: (1) channel discipline established on the Smith bless principle — bleeding/blessed, human-only promotion, build+verify gate, stamp with shas; (2) package naming stands, coherence the only bar; (3) content store = own content-addressed dir, atomic temp+fsync+rename writes, hash-verified on install (most performant, corruption-checked by construction); (4) was a real question — answered and pinned: Compile dual-writes the boot key until the §5 done-bar passes, retirement then scheduled like any route flip on the user's word. Doc edited on disk only; commit awaits supervisor order.",
   "shas": [],
-  "resolvedAt": "2026-06-07T11:29:29.234Z"
+  "resolvedAt": "2026-06-07T11:29:29.234Z",
+  "tags": [
+    "ask"
+  ]
 }

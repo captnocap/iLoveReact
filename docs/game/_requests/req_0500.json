@@ -1,0 +1,31 @@
+{
+  "id": "req_0500",
+  "at": "2026-06-10T10:47:37.625Z",
+  "origin": "session:986e27e7",
+  "text": "Ok. now, if that is possible. so lets say\n\nit turns into 1 quad when its idle. but i want to change tile 3 to plasma after the fact\n\ncan it still identify where the tile 3 space is",
+  "status": "review",
+  "sessionId": "986e27e7-9a52-4a1d-bbee-e5e4ecc81fc4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T10:48:30.748Z",
+      "actor": "claude-986e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T10:48:30.758Z",
+      "actor": "claude-986e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Follow-up answered: after collapsing to one quad, tile 3 remains addressable because the shader re-derives the tile grid from UV every frame — the per-tile effect assignment lives in the Effect data array, not the geometry. Swapping tile 3 to plasma is a single data[2] write; border blending updates automatically. Caveat noted: inside a StaticSurface a data change costs one re-bake. Click-to-tile mapping works in reverse via the same math.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T10:48:30.758Z",
+  "tags": [
+    "ask"
+  ]
+}

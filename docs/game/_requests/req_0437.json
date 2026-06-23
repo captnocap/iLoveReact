@@ -1,0 +1,37 @@
+{
+  "id": "req_0437",
+  "at": "2026-06-10T03:57:40.823Z",
+  "origin": "session:0a09e641",
+  "text": "yes you should bake them in. also, one thing to check and this is why i came to complain, is when i make a wall do a + format right so [Image #1] u see that well here it is in game, i drew u red lines. this becomes invisible walls [Image #2]",
+  "status": "review",
+  "sessionId": "0a09e641-a769-495b-a0fd-4a909d25af7a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T03:58:06.606Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T04:22:52.092Z",
+      "actor": "0a09",
+      "kind": "note",
+      "text": "Root-caused invisible '+' walls + speed diff: compiled game (world_loader.zig) re-derived wall colliders from render boxes (no wall-join/door/half-height) and hardcoded its own player radius/speed/gravity, while the editor play view uses placedPieceColliders (+-join aware) + state.config.physics. Fix: bake authored colliders + player config into two new map lumps (COLLIDERS=14, PHYSICS_CONFIG=15); world_loader consumes them, instance-derived path is now the fallback. TS round-trip verified (3/3), Zig ast-check clean. Needs a rebuild to confirm in-game."
+    },
+    {
+      "at": "2026-06-10T04:23:55.261Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused two symptoms (invisible '+' walls and a faster player in the compiled no-V8 game) to ONE cause: world_loader.zig fed the shared Zig physics solver from a different source than the editor play view — it re-derived wall colliders by guessing from the rendered boxes (no wall-join at a '+', no door/half-height/ramp-trim) and hardcoded its own player radius/speed/gravity, while /test uses placedPieceColliders (+-join aware) plus state.config.physics. Fix bakes the authored colliders + player config into two new map lumps (COLLIDERS=14, PHYSICS_CONFIG=15): new encoder cart/hmsc-int/compile/worldColliders.ts, emitted by packageMap.ts; decoded onto constructor.Scene and consumed by world_loader.buildPhysicsColliders + runPlayerPhysics, with the old instance-derived path kept only as a fallback. Flat painted floors still derive walkable rects from non-piece instance rows (else fall-through); the --massive bake drops COLLIDERS to keep instance windowing. TS round-trip + +-wall bake verified 3/3 under v8cli, all three Zig files ast-check clean. NOT yet confirmed in-game: needs a full Zig rebuild AND a map re-Compile (old game files lack the lumps and silently fall back). Per-tile surface friction not yet baked (flat baseline); speed/radius/gravity/walls now match the editor. Nothing committed (--shas none).",
+  "shas": [],
+  "resolvedAt": "2026-06-10T04:23:55.260Z",
+  "tags": [
+    "bug"
+  ]
+}

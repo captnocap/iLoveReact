@@ -1,0 +1,31 @@
+{
+  "id": "req_0355",
+  "at": "2026-06-08T14:53:36.242Z",
+  "origin": "codex:019ea612",
+  "text": "where is that compiled_world.zig file u mentioned earlier?",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T14:53:42.240Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T14:53:55.610Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Checked the current tree and git history for compiled_world.zig. framework/world/compiled_world.zig is no longer present; it was added in 35a1923ae as the duplicate 345-line renderer and deleted in ea5c673e2 when the embed was converted to the shared WorldLoader primitive. The only current compiled-world-named file is framework/v8_bindings_compiled_world.zig, which is the binding adapter, not the deleted renderer.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T14:53:55.609Z",
+  "tags": [
+    "ask"
+  ]
+}

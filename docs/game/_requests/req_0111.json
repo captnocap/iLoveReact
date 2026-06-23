@@ -1,0 +1,12 @@
+{
+  "id": "req_0111",
+  "at": "2026-06-06T12:57:12.038Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — new idle-session evidence implicates YOUR live-floor watchdog. The user sat IDLE and the dev log shows heightfield.register for slots 0 and 1 (58564 heightBytes each) firing repeatedly — at least 5 pairs in under a minute, with NO hot update involved — on a ~0.4s rhythm. Your recovery/live-floor.sync logic appears to re-register heightfields EVERY tick instead of only when registration is actually missing. Each re-register ships 58KB over the native bridge (matching the user's rhythmic 10-20ms GC/NATIVE spikes with the time in \"other\"/bridge) and can re-resolve the ground under the player — prime suspect for the movement rubberband. Print the data: log WHY your sync fires each time (what condition it evaluated); then gate it — re-register ONLY when the floor probe actually shows heightfields missing (post-push recovery), idempotent no-op otherwise; zero register calls during steady idle play is the assertion. Add that as a test/witness check. This outranks the wall-corner work in your queue.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

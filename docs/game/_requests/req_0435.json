@@ -1,0 +1,36 @@
+{
+  "id": "req_0435",
+  "at": "2026-06-10T03:52:17.184Z",
+  "origin": "session:441dd1a1",
+  "text": "something you changed is making it segfault. js.warn] [mapgone] ChunkSurface 1,2 layer=place encLen=14457 painted=14400 cellHist=[4:14400] palette[0..3]=0.31,0.63,0.87,0.12,0.15,0.19,0.13,0.14,0.18\n[js.warn] [mapgone] PaintCanvas mount: seed=initialWorld chunks=11 focus=11 focusedChunks=11 layer=place\n[loader] constructed map 360x360 from zig-out/game/hmsc.gamefile (no JS)\n[loader] built 2970 mesh instances (1468 placed pieces)\n[loader] built 1944 physics rects + 256 oriented physics rects + 9 heightfields\n[loader] physics collider cap clipped 761 rendered instance rows\n[loader] spatial collider windowing ON — 1320 spanning + grid 7x6; near-field 1944 rects + 256 oriented\n[loader] 1 face material(s) → 1 textured batch(es)\n\nthread '<unnamed>' panicked at src/lib.rs:417:5:\nwgpu uncaptured error:\nValidation Error\n\nCaused by:\n  In wgpuDeviceCreateShaderModule, label = 'effect_gpu_shader'\n    \nShader 'effect_gpu_shader' parsing error: no definition in scope for identifier: `fbm`\n   ┌─ wgsl:38:13\n   │\n38 │   let rag = fbm(uv.x * 16.0 + seed, uv.y * 16.0 - seed, 4.0) * 0.040;\n   │             ^^^ unknown identifier\n\n\n      no definition in scope for identifier: `fbm`",
+  "status": "review",
+  "sessionId": "441dd1a1-1f5b-429e-9681-e92889f5a0e6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T03:52:46.731Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T04:09:54.451Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compiled-world materials now carry through: the native world_loader (rjit game play) renders material-skinned faces with their actual WGSL shader instead of a flat fallback color. Producer (worldGeometry) ships each {kind:'material'} face skin's shader recipe (WGSL + data[]) content-addressed into new MATERIALS/MATERIAL_REFS map-lumps; the Zig loader decodes them and, via a new SHARED framework primitive gpu/material_tex.zig (run a shader to a texture, install under a key the 3D pipeline samples), materializes each into a 1-tile texture sampled on the faces. Fixed a hard SIGABRT: a face recipe is only fs_main, so the full Effect shader assembly (header+math+recipe, formerly v8_app-only) was extracted to a pure shared gpu/effect_assemble.zig used by BOTH the V8 host and the no-V8 loader. Verified: forced-material render proof shows real brick on every face; clean render proof PASS; V8 host + loader both build. Note: only built-in shader-catalog materials resolve in the headless bake; custom-Materialized/react looks still fall back to color (follow-up).",
+  "shas": [
+    "7e795a765",
+    "8eea76e7e",
+    "749c6977b",
+    "caf3f9fea"
+  ],
+  "resolvedAt": "2026-06-10T04:09:54.451Z",
+  "tags": [
+    "bug"
+  ]
+}

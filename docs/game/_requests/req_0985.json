@@ -1,0 +1,28 @@
+{
+  "id": "req_0985",
+  "at": "2026-06-15T12:33:51.869Z",
+  "origin": "session:d91c8b8f",
+  "text": "ah let me show you more then inside of blockbench through screenshots. \n\ndefault: [Image #38] so this is 16 radius, defaults to 8 offset, which means it gets the cut exactly in the center of the face\n\n+1 offset: [Image #39] so still 16 radius, 9 on the offset, you can see the cut is now larger on one half and smaller on the other, based on the grid spacng\n\nok so lets introduce +1 cuts but go back to the default offset\n\nso nnow 2 cuts: [Image #40] and its still 8 offset, but look, it is cut at an increment of the grid size [Image #41] see that\n\nnnow lets add +1 offset to this [Image #42] \nnotice now, my selected face is actually the smaller of 3 faces. the other two look to be the same size and i get the short end of the stick. lets do another \n[Image #43] and same thing again, i get smaller and smaller, the other slices from the loop cut are all the same size still. \n\nlets add a few more cuts \n\nhere we go at 5 cuts, and still 10 offset\n[Image #44] \n\n\nso does that make more sense",
+  "status": "review",
+  "sessionId": "d91c8b8f-6568-469d-83d0-62ea4b4091c6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T12:38:33.348Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T13:00:19.275Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same deliverable as req_0984 (the user's additional Blockbench screenshots clarifying offset/direction semantics for loop cut). Captured into the loop-cut implementation: direction = the clicked face's normal axis first; offset default = half-size (centered) with raising it shrinking the clicked face's slab while interior slabs stay equal; Size Units vs Percent unit toggle. Implemented + tested under req_0984/0989.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T13:00:19.275Z"
+}

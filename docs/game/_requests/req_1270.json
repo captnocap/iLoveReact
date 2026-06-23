@@ -1,0 +1,30 @@
+{
+  "id": "req_1270",
+  "at": "2026-06-18T08:36:01.439Z",
+  "origin": "session:47c6ef45",
+  "text": "I see. Now, not really a question more of a statement. but even when there is lets say just a single cube on screen. nothing else. and i go to drag a face back and forth rapidly the entire app just freezes and is non functional. im sure you can deduct logically then that as anything is even made, slight movements also take very very long to update without stalling. i know this is another quirk of javascript, the problem i have with it is that if your gonna do in js then why not do it optimisitically otherwise im basically just accepting to be a shit eater. so that all being said what can we do to not eat shit",
+  "status": "review",
+  "sessionId": "47c6ef45-886b-4a68-a568-e624c3124d48",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T08:41:28.973Z",
+      "actor": "47c6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T09:11:01.958Z",
+      "actor": "47c6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Host-owned live drag for Studio. The gizmo move/resize/rotate path used to call setDraft() on every pointer-move, which re-lowered the dragged part's geometry, bumped the dynamicKey, and forced a reconciler-driven host upload PER EVENT — a React storm that froze the app even on a single cube and stalled hundreds of ms on real meshes. Added an imperative host door __scene3d_patch_dyn (framework/gpu/3d.zig patchDynSlotById) that overwrites an already-mounted dyn slot's verts in place WITHOUT bumping its version, mirroring how camera orbit ships deltas to camera.zig per frame. Studio now mounts the draft ONCE at grab (claims slot studio.draft), streams baked verts straight to the slot each move via runtime patchDynSlot (no setState), and commits ONCE on release; the wireframe overlay (SelectionOverlay liveMeshRef) and step readout (self-ticking DragReadout) read live refs so they track at 30Hz with zero parent renders. User confirmed 'way better'. Compiles + bundles clean; generated-bindings kept mine-only (did not commit another session's uncommitted __game_camera_ray sweep).",
+  "shas": [
+    "4ee7c4e29"
+  ],
+  "resolvedAt": "2026-06-18T09:11:01.958Z"
+}

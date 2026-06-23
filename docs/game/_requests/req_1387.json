@@ -1,0 +1,30 @@
+{
+  "id": "req_1387",
+  "at": "2026-06-19T05:15:09.294Z",
+  "origin": "session:1863e7ee",
+  "text": "i want you to write out a plan in single file html, what you think is best approach, and how it should be executed without affecting anything in place, and allow for instant swap out when ready and working",
+  "status": "review",
+  "sessionId": "1863e7ee-a8ed-4cf3-85a6-49a899536c18",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T05:15:35.745Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T05:19:20.013Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote a single-file, self-contained HTML decomposition plan at cart/hmsc-int/editors/model/STUDIO_REFACTOR_PLAN.html. It maps the 3915-line Studio.tsx (real monolith = the 2680-line StudioViewport: 42 state + 32 refs + 18 effects; only StudioEditor is imported externally) into a new studio/ subdir mirroring the UI layout (scene/overlays/panels/dialogs/hooks). Documents a full Tier1+Tier2 decomposition, a hard parity contract (Studio.tsx untouched, all useHotState/localstore keys byte-identical, hook/effect order preserved), a one-line build-time instant swap + one-line revert in source.tsx, and a 9-step build-green-at-each-checkpoint execution sequence that stops for user verification before deleting the old file. No in-place code changed; only the plan was written.",
+  "shas": [
+    "026456f6a"
+  ],
+  "resolvedAt": "2026-06-19T05:19:20.013Z"
+}

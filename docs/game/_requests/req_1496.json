@@ -1,0 +1,36 @@
+{
+  "id": "req_1496",
+  "at": "2026-06-20T19:44:20.499Z",
+  "origin": "session:89c172a4",
+  "text": "Ok that works. Now, one more step here in the painting proceedure, when i go to press compile and install the asset to the game, it does not seem to carry the painted texture to the game world, it does the shape",
+  "status": "review",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T19:44:41.824Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:42:12.727Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cooked Studio props now carry their painted texture into BOTH the iso3D editor and the compiled game (user-confirmed both). Three layers: (1) the Compile-Asset cook now passes the model's paint atlas (texRef + blob) through cookProp/install — it was hardcoded untextured. (2) Editor render: CookedProp samples the atlas via Scene3D.Mesh's inline texture={{width,height,hex}} door (decode PNG, downscale 512, memoised hex; the host content-hash-caches the upload) — the first textureKey+<Paintable> attempt fell back to the 1x1 white default. (3) Compiled game: MESH_PROPS lump bumped to v3 carrying each mesh's 512² RGBA atlas; constructor.decodeMeshProps reads it into MeshPropMesh.tex_rgba; world_loader sets scene3d_tex_w/h/rgba on the prop node and whitens the tint — mirroring the player/NPC textured-mesh path, so gpu/3d.zig samples it with no new GPU code. OBJ/GLB imports ship 0x0 (untextured), unchanged. Also fixed two upstream blockers found en route: paint persistence across model-switch/restart (shared-texture per-model reload, req_1488/1492) and the paint-kit integration itself.",
+  "shas": [
+    "4ea2d0c52",
+    "f9ec3ac77",
+    "74955f92b",
+    "2f4e382f3",
+    "51c193679",
+    "3f6a2c364",
+    "0d6394154"
+  ],
+  "resolvedAt": "2026-06-20T22:42:12.727Z"
+}

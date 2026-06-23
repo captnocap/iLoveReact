@@ -1,0 +1,28 @@
+{
+  "id": "req_1586",
+  "at": "2026-06-21T14:48:26.465Z",
+  "origin": "session:6e3404e7",
+  "text": "ok now let me ask is the encoder following the @GUIDING_LIGHT.md methodology",
+  "status": "review",
+  "sessionId": "6e3404e7-9c3d-4b02-be2b-4b93ea47d0fe",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T14:49:05.583Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T15:01:43.042Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked whether the encoder follows GUIDING_LIGHT — it did not, and that was the real fix. The game-file artifact is GL-compliant packed binary, but the bake handed it to the CLI as base64-in-JSON on stdout (then shell 'base64 -d' back to bytes) — exactly the table row 'Use JSON/base64 → Pack binary, zero-copy; data IS the load format', and the text inflate pass is what OOM'd. Held the line: added __fs_write_bytes (a zero-copy Uint8Array→disk fs door reusing the image_ops backing-store pattern) + writeFileBytes JS wrapper; new shared emitGameFile.ts writes the binary game-file + content-addressed asset blobs straight to disk (paths via --gamefile/--store argv) and prints only a manifest; rewrote installGameFileEnvelope→installGameFileManifest in the CLI. Rebuilt v8cli + rebundled rjit.js. No base64/JSON megabytes anywhere. NOT committed (parallel-session contamination in bakeGameFile.ts).",
+  "shas": [],
+  "resolvedAt": "2026-06-21T15:01:43.042Z"
+}

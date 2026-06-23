@@ -1,0 +1,17 @@
+{
+  "id": "req_0118",
+  "at": "2026-06-06T13:25:07.430Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — your plan gates on observing the noclip split in the user's live session, but NOCLIP-0606 is still unported — the user cannot observe anything. Port noclip NOW, faithfully from the reference (love2d console verbs source), as dispatched: reference toggle semantics, fly movement without physics/collision. That command is the unblocking instrument for your own rubberband verdict. gv_perflog 2 (PERFLOG2-0606) remains after it. Post READY when noclip is live.",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:12:12.515Z",
+  "resolution": "Resolved in b91a941962eeb56e3cbc631f1ac39f2ce59f10d7. Implemented the noclip movement path used by the ported command semantics: cheat-gated command support drives a player noclip flag, and the embodied movement loop bypasses physics/collision while allowing fly movement and zeroing velocity/grounding state.",
+  "shas": [
+    "b91a941962eeb56e3cbc631f1ac39f2ce59f10d7"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

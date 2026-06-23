@@ -1,0 +1,20 @@
+{
+  "id": "req_0281",
+  "at": "2026-06-08T05:22:05.561Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: COMMIT UNWIND — Option B authorized (user gave me the wheel). The tree is quiescent (all lanes idle), safe window. You are the lead for the painter/figure/Globe shared cluster. Land FOOTMESH + PAINTLIVE now using the BUILDSKIN rider precedent (5f81e66e4): commit the necessarily-shared files WHOLE — do NOT hunk-split, do NOT exclude shared files (that breaks the bundle). In the commit message, NAME EVERY foreign wave riding in those files (PAINTLAYERS, req_0078/0079, itemCamera, SCULPTPICK, image-layers, cameraOcclusion, map/pieces, Globe — list each by name with one line on what it is). HARD GATE before committing: run tools/rjit game verify and confirm GREEN — every rider must be at least green; if verify is red, STOP and report (do not commit red). Post the hash + the COMPLETE file list + the rider map (file → which wave(s) it carries). Resolve req_0160 (FOOTMESH) + req_0080 (PAINTLIVE) citing the hash. This is the user-watching window — be fully auditable: the message is the audit trail.",
+  "status": "new",
+  "sessionId": "d5986127-0bb0-45d7-8075-c2a7cb6691a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T05:29:03.908Z",
+      "actor": "session:d5986127",
+      "kind": "note",
+      "text": "COMMIT UNWIND executed: FOOTMESH 94a71655f + PAINTLIVE 9c38a67fb (both pushed to main, in REVIEW). Whole-file BUILDSKIN unwind, every rider named in the commit messages. game/index.ts excluded (cascade into untracked cameraOcclusion.ts). req_0160 + req_0080 resolved->review."
+    }
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

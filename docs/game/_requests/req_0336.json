@@ -1,0 +1,13 @@
+{
+  "id": "req_0336",
+  "at": "2026-06-08T12:55:53.388Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR CORRECTION: the user caught that the player figure's HEAD is now a featureless egg — you reduced the figure's geometry to save bytes. That is the WRONG lever and it violates GUIDING_LIGHT.\n\nThe figure is HIGH-RANK AUTHORED CONTENT — the \"soul\" you PAY for (the bake lever, used sparingly for the parts where the soul is the point). KEEP its real geometry: the proper head with features, the real V2/Characters3D figure. Do NOT dumb it down.\n\nThe size win comes ENTIRELY from FACTORING the LOW-RANK map: (1) RLE the dense MAP lump (the 1.67MB raw grid — that is the bloat), (2) reference shared piece geometry by geom_key instead of embedding per-instance vertices. NOT from cutting the figure's polys.\n\nRestore the figure's real head/geometry. Get the bytes from the map. Don't trade the soul for the skeleton — that's the exact fork the doc warns about. Re-verify: file size still drops (from the MAP RLE), AND the figure looks like /test again.",
+  "status": "new",
+  "sessionId": "019ea612-258b-7013-b887-0bcd6a4954ea",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

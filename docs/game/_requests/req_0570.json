@@ -1,0 +1,31 @@
+{
+  "id": "req_0570",
+  "at": "2026-06-10T16:55:01.137Z",
+  "origin": "session:1b2ce00d",
+  "text": "Great! you want to give me a little tutorial on how it all works",
+  "status": "review",
+  "sessionId": "1b2ce00d-1639-40fe-8b5a-0f2b48b361f4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T16:55:29.744Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:56:10.479Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote the user a full tutorial of the road system as it stands after this session: drawing strokes (brush/Enter/rail cross-section), network connection gestures (endpoint snap, mid-span split, merge gesture, auto junctions+crosswalks), what stamping does (tiles+undercoat, analytic ribbon look, NEW grade-mode earthworks), traffic control placement semantics (12m junction attach, facing governs the approach, stop-sign full stop vs lamp-synced signal waits), per-stroke speed limits (strictest-along-route, clamp down only), the workbench 3x3 floor cell painter, and the 0.5m nav bake with the 64m window caveat — closing with what's NOT visible yet (no NPC driver consumes the gates/limits; that's the next slice). Documentation-only response, no code changed.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T16:56:10.479Z",
+  "tags": [
+    "ask"
+  ]
+}

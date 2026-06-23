@@ -1,0 +1,30 @@
+{
+  "id": "req_1655",
+  "at": "2026-06-22T21:21:31.137Z",
+  "origin": "session:2117ddf4",
+  "text": "I do not see it in the game world its still just a blue skybox at every end [Image #1]",
+  "status": "review",
+  "sessionId": "2117ddf4-165f-4c7a-8fbe-15f442892c87",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T21:23:19.494Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T21:31:29.266Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the invisible void shell the user reported ('still just a blue skybox at every end'). Two compounding bugs: (1) the shell-skip used the authored map's CIRCUMRADIUS as the safe zone — a circle enclosing the rectangle's corners also encloses a large margin beyond every edge, so from any reachable/standable position the entire streaming window fell inside it and zero chunks generated. Replaced the circle with the authored RECTANGLE model: distance.ts worldCore now derives minX/minZ/maxX/maxZ + center, escapeDepth = straight-line gap past the rect edge (0 inside), and shell.ts skips only chunks whose center is still inside the rectangle, so the void fills the horizon the instant you look past the city edge. (2) VoidShell streamed a fixed 6-chunk window regardless of the camera's draw radius (default 140m, up to 4km), so it could under/over-reach the visible horizon; it now sizes the window to view.drawRadiusMeters (geometry past the far plane is culled anyway), passed down from GameWorld3D. Verified VISUALLY this round via a new headless proof cart cart/void_probe.tsx — mounts VoidShell alone with the camera parked at the map edge and self-shots a full cold-grey procedural skyline (the heavy hmsc-int editor OOMs its boot watchdog headless, so the probe is the proof). game/void/void.test.ts rewritten to the rect model, 9/9 pass; full rjit ship hmsc-int green (exit 0). The user should reload/rebuild and walk to the map edge to see the procedural city + washed-out sky-drift.",
+  "shas": [
+    "149c8d4b7"
+  ],
+  "resolvedAt": "2026-06-22T21:31:29.266Z"
+}

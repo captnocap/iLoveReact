@@ -1,0 +1,13 @@
+{
+  "id": "req_0509",
+  "at": "2026-06-10T11:23:34.554Z",
+  "origin": "session:87a47e7e",
+  "text": "Ok. so, i would say a lane is 3 tiles yes. and the road tool, ideally looks like this shape:\n\ni can pick the lane count per side, or i can disable a side (for a one way road), but the one way roads need to show some sort of a one way marker and the direction it goes. also, the one part with tiles i still have a hard time with for roads is how do we do a bridge? because i only know how to so far get off the ground via a ramp, but that cant get tile paintings on it as it stands right now. which, is actually also just a problem in general, because we need npc pathing inside of buildings also, but i figured to just allow them to walk on floors in general, so that would solve the problem. however you cant just allow that for a bridge when it comes to lanes of traffic",
+  "status": "new",
+  "sessionId": "87a47e7e-58c5-4ade-8b65-3201c99fe4d2",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ask"
+  ]
+}

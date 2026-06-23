@@ -1,0 +1,34 @@
+{
+  "id": "req_0933",
+  "at": "2026-06-14T17:48:23.906Z",
+  "origin": "session:2b1b8d6b",
+  "text": "idk what that means. but are u saying its a problem for us to have these? [Image #3] why would we author the player model this way but not all the others",
+  "status": "review",
+  "sessionId": "2b1b8d6b-2adf-4239-aed8-88f228d4f8a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T17:49:15.946Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T17:53:05.515Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-14T17:53:18.586Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "NPCs are now full distinct figures via an intern opt-in on FigureMeshes (render.tsx): when set, it omits the per-part dynamicKey so geometry interns into the retained buffer instead of a live-sculpt dyn slot. Each NPC has its own seed (face/outfit) + CharacterCaptures; player stays the substrate live figure and keeps its head. Pure JS + one render.tsx prop, hot-reloads, no cap raise, no rebuild. esbuild clean."
+    }
+  ],
+  "resolution": "Made NPCs full distinct figures (the screenshot-quality humanoid), same system as the player. Added an opt-in  prop to FigureMeshes (cart/hmsc-int/game/figure/render.tsx): when set it omits the per-part dynamicKey so the Globe geometry interns into the retained buffer instead of claiming a live-sculpt dyn slot. The lab now renders each NPC as a real figure (own seed → own face/outfit) with intern + its own CharacterCaptures; the player stays the substrate's live figure and keeps its head because only it uses dyn slots. Pure JS + one render.tsx prop — hot-reloads, no cap raise, no Zig rebuild. Verified: esbuild bundle of labs/index.ts and render.tsx both clean. Recorded the static-figures-intern lesson in memory.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T17:53:05.514Z"
+}

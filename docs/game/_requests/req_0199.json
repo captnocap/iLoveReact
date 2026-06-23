@@ -1,0 +1,15 @@
+{
+  "id": "req_0199",
+  "at": "2026-06-07T06:19:25.326Z",
+  "origin": "session:f2302907",
+  "text": "right, effectively think of i want to treat it where the ability to make a game is like that of roblox/gmod esque",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:21:27.050Z",
+  "resolution": "Sharpened the platform direction to the user's stated tier: Roblox/GMod-esque game creation. Articulated what that adds beyond the HL/CS mod framing — the mod layer is SCRIPT+DATA, never a compiled binary; a game = a package (bundle.js + map blobs + assets + manifest) loaded at runtime by ONE shipped player binary; hmsc-int plays Studio (creation tool as product surface, with AI as the scripter per the existing one-liner philosophy). Key observation grounded in the repo: the dev host already IS the universal client (persistent V8 host, runtime cart loading, ~300ms hot-swap, tabs) — only the packaging shape is missing, since rjit ship fuses per-cart binaries and needs a game-bundle sibling plus a shipped player. Updated memory project_platform_mod_split.md and its MEMORY.md index line to record the Roblox/GMod tier; DECISIONS.md verdict + re-scoped Compile plan still pending explicit go-ahead.",
+  "shas": [],
+  "tags": [
+    "ruling"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1444",
+  "at": "2026-06-19T22:20:48.036Z",
+  "origin": "session:671785ab",
+  "text": "so then just remount it then. dont try to figure it out, just play it dumb, on updates, unmount and remount it",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T22:21:34.254Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T22:24:07.996Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Forced the trace backdrop to remount fresh on every mount, per the user's directive to stop diagnosing and just remount it. The image kept returning offset/reshaped after a code update while the camera was provably identical (crosshair/box/grid in the same screen spot); its localstore data round-trips fine, so the leftover was a host-cached geometry/texture bake keyed by the STABLE bd.id surviving the reload. Fix: a per-mount epoch (nowMs at mount, via useRef) folded into the backdrop mesh geometry id, dynamicKey, textureKey, and React key, plus the matching BackdropSurface staticKey — so each mount bakes the image fresh and no stale bake can be reused. Verified the textureKey still matches the surface staticKey via self-shot (image renders, not blank); built green. Hot-reload behavior needs a live confirm (can't self-shot an update). SHA e9a69e9de. NOTE for follow-up: this is the 'play dumb' remount; the underlying stale-bake cause (host geometry/texture cache reuse across hot reload on a stable id) is still unexplained and may bite other persisted Scene3D content.",
+  "shas": [
+    "e9a69e9de"
+  ],
+  "resolvedAt": "2026-06-19T22:24:07.996Z"
+}

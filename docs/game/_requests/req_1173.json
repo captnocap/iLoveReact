@@ -1,0 +1,28 @@
+{
+  "id": "req_1173",
+  "at": "2026-06-16T15:15:48.180Z",
+  "origin": "session:8e058574",
+  "text": "uh there is actually others that do destructive ive seen it i dont remember the names  reflog or some shit and bisect i think it is idk man lol i once iad to convince claude that the command he ran actually did destroy days of work because the files were not staged and so he kept saying no the files here are the same ones that were on git and yeah thats cool when u got all the files on git but it was like 3 days of work not staged or anything thats why i always say dont trust git but agents seem trained to use git over anything on disk as truth. so yeah anyways you got it all fixed or ? xD",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T15:17:04.052Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T15:17:04.061Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User recounted being burned by a prior agent that ran a destructive git command (reset --hard / clean class) wiping ~3 days of UNSTAGED work, then insisted nothing was lost because the working files matched git — blind to unstaged work being invisible to git. Validated this as real data loss and an agent failure, corrected the command taxonomy (reset --hard/checkout --/clean -fd/stash are the disk-killers; reflog is recovery not destruction; bisect clobbers only a dirty tree), and saved the durable rule feedback_disk_is_truth_never_destroy_unstaged: the on-disk working tree is the source of truth, never run index/HEAD/working-tree-destructive git without confirm+backup, never reassure 'nothing lost' from git matching. No code or git state changed for this req — it is a behavioral ruling captured to memory + index.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T15:17:04.061Z"
+}

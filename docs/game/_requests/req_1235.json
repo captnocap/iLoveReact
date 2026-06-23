@@ -1,0 +1,28 @@
+{
+  "id": "req_1235",
+  "at": "2026-06-17T13:44:24.624Z",
+  "origin": "session:c885b7cc",
+  "text": "oh actually, if i just put in a seat model, it shouldnt matter huh, it would be sitting over it",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T13:45:03.864Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T13:45:03.873Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User realized that placing a seat model in the cab would sit over the hollow recess they were about to solidify, so it wouldn't matter visually, and asked for confirmation. Affirmed — no code changed. Confirmed the instinct is correct and is the leaner choice than solidifying every interior face: an opaque seat/dash occupying the cab volume occludes the void, and there's no need to seal a shell you can't see behind. Gave two practical caveats: (1) occlusion is sightline-dependent, not just volume — check the actual view through the windshield/windows a player uses, since an angle that slips past the seat will still show the hollow; (2) the cab FLOOR is still worth a one-shot Create-face since a narrow/pedestal seat base may not cover a downward sightline to the open underbody, and it's cheap insurance. Concluded the back-wall recess specifically can be left hollow if a seatback sits in front of it.",
+  "shas": [],
+  "resolvedAt": "2026-06-17T13:45:03.873Z"
+}

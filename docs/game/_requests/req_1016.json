@@ -1,0 +1,28 @@
+{
+  "id": "req_1016",
+  "at": "2026-06-15T16:19:55.320Z",
+  "origin": "session:46d99bcc",
+  "text": "Ok looks good. Lets now step back and make sure that we are following one of our number one rules of concave changes and alerts. so i will do the same edits side by side in our app vs blockbench. i will make 'illegal' changes in blockface that will trigger it. if ours doesnt trigger. thats a problem. that, or you can tell me that its non existant as of right now anyways and implement it first",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T16:21:20.121Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T16:24:05.771Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Honest finding: the concave-change ALERT did not exist. Detection (findConcaveFaces/isFaceConcave) and the fix (splitConcaveFaces) existed and ran on every gizmo commit, but SILENTLY auto-triangulated with no dialog — the req_0949 Revert/Ignore dialog had been deferred. A side-by-side would show Blockbench warning while ours quietly fixed it, violating the loud-not-silent rule. Implemented the alert. onUp now runs findConcaveFaces on the released mesh: a clean edit commits straight through; if any face buckled into a reflex/non-convex shape it does NOT commit — it keeps the buckled mesh previewed (the draft) so the offender stays visible and raises a ConcaveFixPopup with three choices: Split Quads (recommended -> splitConcaveFaces), Ignore (commit it concave), Revert (commit nothing — the store still holds the pre-edit mesh because we only commit on release). The transform gizmo is hidden while the dialog is open, and autoFix resets on active-part change (same transient-state discipline as the loop-cut popup, req_1011). Added findConcaveFaces to the Studio import and a STUDIO-free autoFix state + resolveAutoFix handler. Tests: editMesh 32/32 (+1: dragging a cube corner inward buckles the face -> findConcaveFaces flags it (the exact gizmo trigger), and Split Quads clears it). Studio.tsx bundles clean. Updated PLAYBOOK build log + project_studio_mesh_editor memory. Hot-reload TSX. The user can now run the side-by-side: a buckling edit should pop the alert.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T16:24:05.771Z"
+}

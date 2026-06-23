@@ -1,0 +1,30 @@
+{
+  "id": "req_1258",
+  "at": "2026-06-17T17:51:21.802Z",
+  "origin": "session:76a33154",
+  "text": "ok. that works. now, last thing is going to be we need paint that has no color* meaning we can paint it with psudeo colors, and then come back over that same layer to give that placement another color or any set of possible colors, so that we dont have to paint blue and green and white trucks for example we paint one truck with some detail, and then pass back over it with a tool that lets us say what colors are possible",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T17:53:50.694Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T17:57:46.341Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added pseudo-colour/palette painting to paint_on_3d_demo: you paint a SLOT (Body/Trim/Glass placement id), never an RGB colour — the paint layer stores the slot index, shown in placeholder pseudo-colours so the colourless slot layer is visible while painting. A separate palette (VARIANTS: Blue/Green/White) maps slot -> real colour; cycling the variant recolours the SAME painted cells with zero repainting (paint one truck with detail, get blue/green/white trucks). Toolbar exposes: slot picker, a Pseudo/Painted view toggle, and a variant cycler. colorOf(slot) resolves to the pseudo hue or the active variant's colour for that slot. Verified with seeded shots: the Pseudo view shows Body(red)/Trim(blue stripe)/Glass(green patch); flipping to Painted+White recolours the identical cells to white body / dark trim / cyan glass. This is the indexed/team-colour model — paint = placement, palette = appearance, decoupled.",
+  "shas": [
+    "1223eea82"
+  ],
+  "resolvedAt": "2026-06-17T17:57:46.341Z"
+}

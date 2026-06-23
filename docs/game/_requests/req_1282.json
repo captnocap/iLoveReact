@@ -1,0 +1,30 @@
+{
+  "id": "req_1282",
+  "at": "2026-06-18T12:47:13.809Z",
+  "origin": "session:18fe5c79",
+  "text": "thats fine it works can u add a merge faces so i can turn some cuts into one clean face again",
+  "status": "review",
+  "sessionId": "18fe5c79-d15f-47c8-ade6-d65531bd83af",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T12:47:26.767Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T13:11:38.568Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a 'merge' button to the Studio face-mode toolbar (shows when >=2 faces are selected): it calls the new pure editMesh.mergeFaces, which dissolves a coplanar, edge-connected face group back into one clean face — the inverse of a loop cut. It extracts the region's outer boundary from the selected faces' directed edges (shared/internal edges cancel), chains it into one loop, drops the leftover collinear seam verts, builds a single face with the shared normal + appearance, and compacts the freed interior verts. Rejects under-2, non-coplanar, or disconnected/holey selections (toasts why). Verified by 2 new editMesh.test.ts cases; full suite 92/92.",
+  "shas": [
+    "50c35b193"
+  ],
+  "resolvedAt": "2026-06-18T13:11:38.567Z"
+}

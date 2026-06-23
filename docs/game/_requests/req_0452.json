@@ -1,0 +1,31 @@
+{
+  "id": "req_0452",
+  "at": "2026-06-10T05:08:52.026Z",
+  "origin": "codex:019eaf3e",
+  "text": "ok so i need it to only be on top of the floor, because the option of both is really annoying and im getting walls mismatched because of it",
+  "status": "review",
+  "sessionId": "019eaf3e-0282-7ba1-99cd-6b025b307dea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:09:05.910Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:11:28.265Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed hmsc-int build wall snapping so floor/roof top anchoring only happens when the crosshair hits the actual top face. Side-face hits on a floor/roof and ground hits beside a floor perimeter now return no floor-top wall placement, removing the ambiguous alternate path that caused wall mismatches. Updated snap tests and build capture notes; targeted build-snap suite passes 15/15 and the hmsc-int entry bundles with repo aliases. No commit made.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T05:11:28.265Z",
+  "tags": [
+    "ask"
+  ]
+}

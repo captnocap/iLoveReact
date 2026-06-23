@@ -1,0 +1,13 @@
+{
+  "id": "req_0308",
+  "at": "2026-06-08T10:27:15.718Z",
+  "origin": "session:f48e9dac",
+  "text": "i see it, the fidelity / color of it is very off, the shape of it is there though [Image #8]",
+  "status": "new",
+  "sessionId": "f48e9dac-15a7-4cf5-a2e4-26a5d851461c",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

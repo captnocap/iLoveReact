@@ -1,0 +1,33 @@
+{
+  "id": "req_0360",
+  "at": "2026-06-08T15:34:41.882Z",
+  "origin": "codex:019ea612",
+  "text": "good. on the camera, if you notice the test route does esc -> releases camera, and then the unfocused mouse doesnt rotate camera still. the compiled, is however still spinning when i have unfocused. can u solve for it",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T15:34:49.419Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T15:37:21.317Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Matched /compiled WorldLoader input capture to /test: host mouse motion now reaches world_loader.mouseLook only while the WorldLoader has explicit pointer capture, so merely hovering or moving an unfocused mouse over the compiled route cannot rotate the camera. SDL window focus loss also releases the WorldLoader capture and relative mouse mode, just like Esc already did. Verified the hmsc-int binary rebuilds and /compiled still boots/renders via a smoke screenshot.",
+  "shas": [
+    "631354835"
+  ],
+  "resolvedAt": "2026-06-08T15:37:21.317Z",
+  "tags": [
+    "bug"
+  ]
+}

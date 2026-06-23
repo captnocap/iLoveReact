@@ -1,0 +1,34 @@
+{
+  "id": "req_0367",
+  "at": "2026-06-08T20:29:47.382Z",
+  "origin": "session:67746dc2",
+  "text": "Yes do that do exactly that static buffer",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T20:30:22.315Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T20:37:40.915Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-08T21:09:39.120Z",
+      "actor": "session-6774",
+      "kind": "note",
+      "text": "Committed. Milestone (scale lab + 4 engine wins) = cfc887eff. Spatial-windowed collision = 1412766a0 (verified: builds ReleaseFast, boots the 40MB/776k game-file headless, windowing engages grid 353x353 + 1027 spanning + 1421 near-field rects, render proof GREEN). Awaiting user playtest to confirm building collision feels right in-window."
+    }
+  ],
+  "resolution": "Implemented the static instance buffer (the fix for the 776k-instance per-frame re-upload choke). Added a retained INSTANCE path mirroring the existing g_retained_vbuf vertex cache: new Node flag scene3d_instance_static (framework/layout.zig); the no-V8 loader sets it on its box+ramp world batches (world_loader.zig, both built once at construct and never mutated). In framework/gpu/3d.zig drawScene Pass 2, a static batch routes to a new resolveStaticInstances() which stages + uploads it ONCE to a lazily-created g_static_inst_buf (MAX_STATIC_INSTANCES=1,048,576, ~80MB, keyed by data pointer, streamed in MAX_INSTANCES-sized chunks through g_inst_scratch), then every subsequent frame just binds + draws from it with ZERO restage/upload. Correct because makeInstance builds a model-only matrix (the camera lives in per-frame SceneUniforms), so a cached instance still tracks the moving camera. Also refined the req_0365 raise: reverted MAX_INSTANCES (the DYNAMIC per-frame buffer) from 1M back to 65536 — the static world no longer rides it, so every cart's dynamic buffer is lean 5.2MB again — and kept the staging scratch off the stack as the BSS global g_inst_scratch. Net memory: non-static carts ~10MB; the scale lab +80MB lazy static. First frame still pays one upload (~12 chunks at 776k); frames 2+ are free, which should take 512 blocks from choppy to flat-out. ast-check passes on all three Zig files; full type-check is the user's loader rebuild. Files: framework/gpu/3d.zig, framework/layout.zig, world_loader.zig. Pending the user's rebuild + playtest at --blocks 512.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T20:37:40.915Z"
+}

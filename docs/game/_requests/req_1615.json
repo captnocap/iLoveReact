@@ -1,0 +1,30 @@
+{
+  "id": "req_1615",
+  "at": "2026-06-21T18:52:23.458Z",
+  "origin": "session:e36112e0",
+  "text": "i dont need the color. i can paint it myself",
+  "status": "review",
+  "sessionId": "e36112e0-5303-4202-ba4f-5d93412ec821",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T18:52:46.018Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T18:56:10.673Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User said they don't need InstantMesh color (will paint it themselves), which reframed the gap: the missing piece wasn't color, it was that the LIVE Studio editor couldn't import a .obj at all. Traced the live path (workbench/model/source.tsx -> studiokit -> StudioViewport -> studiokit/dialogs/ImportModelDialog) and found the req_1390 'lifted verbatim, no behavior change' decomposition had silently DROPPED the .obj branch: the extracted dialog only imported glbToEditMesh and always did glbToEditMesh(base64ToBytes(...)), so an InstantMesh .obj got decoded as base64 garbage and threw 'not a GLB file'. The frozen Studio.tsx breadcrumb still had the correct .obj-vs-.glb detection. Fix: restored the branch in the extracted dialog (objToEditMesh on text for .obj, glb path otherwise), re-imported readFile + objToEditMesh, and updated the dialog title/description + StudioViewport import-button tooltip to say 'GLB / OBJ'. objToEditMesh imports geometry only with UVs unwrapped fresh -- exactly the import-then-paint-myself flow. Verified: tools/tsc-check hmsc-int bundles clean (exit 0); importMesh.test.ts runs 6/6 PASS including the OBJ-quad parse case. Committed f3198147f (2 files: ImportModelDialog.tsx, StudioViewport.tsx).",
+  "shas": [
+    "f3198147f"
+  ],
+  "resolvedAt": "2026-06-21T18:56:10.673Z"
+}

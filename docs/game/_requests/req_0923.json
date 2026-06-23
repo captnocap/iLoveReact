@@ -1,0 +1,30 @@
+{
+  "id": "req_0923",
+  "at": "2026-06-14T16:21:51.817Z",
+  "origin": "session:7d6df128",
+  "text": "i see you added a general notes but am i wrong that u didnt add any way to write a note or am i blind",
+  "status": "review",
+  "sessionId": "7d6df128-10bb-42ff-aa62-398eb578b34f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T16:22:51.068Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T16:41:03.647Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The '+ add note' affordance existed in the spec (field count showed 2) but rendered invisibly because it was laid out off the panel's right edge — diagnosed jointly with the user as a width/clip issue, fixed under req_0924. Confirmed the notes group always ends with a writable add-note chip plus per-note text fields.",
+  "shas": [
+    "d57ec1afb"
+  ],
+  "resolvedAt": "2026-06-14T16:41:03.647Z"
+}

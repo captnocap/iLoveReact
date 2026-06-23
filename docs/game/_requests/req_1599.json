@@ -1,0 +1,30 @@
+{
+  "id": "req_1599",
+  "at": "2026-06-21T15:33:15.473Z",
+  "origin": "session:aa8b38c4",
+  "text": "Yes. Lets be more clear, i only use the compiled game path, because the js path is incredibly laggy",
+  "status": "review",
+  "sessionId": "aa8b38c4-bcf4-4724-9069-0ebd209628e0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T15:43:20.482Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T15:43:20.492Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarification absorbed into req_1598: the user plays ONLY the compiled no-V8 game (the JS/editor path is too laggy). Confirmed that reframes the prop walk-through hunt — the compiled path reads the baked COLLIDERS lump + host physics, not the JS cap. Delivered RJIT_COLLIDERLOG (commit bd3eb6bcd): an env-gated Zig diagnostic printing loaded collider counts + how many the player capsule overlaps + the side-push, so the user can prove whether props bake colliders at all in the compiled game. Same work item as req_1598.",
+  "shas": [
+    "bd3eb6bcd"
+  ],
+  "resolvedAt": "2026-06-21T15:43:20.492Z"
+}

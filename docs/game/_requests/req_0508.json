@@ -1,0 +1,31 @@
+{
+  "id": "req_0508",
+  "at": "2026-06-10T11:19:44.655Z",
+  "origin": "session:e11a01ef",
+  "text": "interesting. this happens when u commit lol [js.warn] [DRAGDRAW] frame stall max=1329ms\n[js.warn] [DRAGDRAW] frame stall max=189ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=186ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=182ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=191ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=197ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=190ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=185ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=187ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=180ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=181ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=185ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=187ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=196ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=190ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=180ms",
+  "status": "review",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T11:20:41.417Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T11:23:12.746Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the 'stalls when u commit' correlation; no code change needed (shas none). Both stall episodes began exactly when the agent's pipeline ran on the user's box (file-save bursts → hot-reload remounts, git push packing objects on all cores, rjit game verify = full zig build + 72 suites) and self-resolved when the agent went idle. Ruled out: no git hooks exist; the dev watcher (esbuild --watch + 200ms output-mtime poll) only rebuilds on cart/runtime input changes, so board writes and git operations don't trigger reloads; nothing in the shipped editor runs on a 500ms period. The 2Hz ~185ms pattern matches periodic file-graph rescans + editor reads hitting cold caches while git/zig churn CPU and disk — environmental contention from the agent's own tooling, not the instanced renderer. Decisive check handed to the user: with the agent fully idle, sit in the pane 30s then move the building — no stall lines = environmental (case closed); persistent ×2 lines = real in-app periodic cost, next step a GC/alloc probe. Protocol change adopted: no full game verify per commit while the user is actively editing — bundle-check + targeted tests during sessions, heavy verify batched to quiet moments.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T11:23:12.746Z",
+  "tags": [
+    "perf-log"
+  ]
+}

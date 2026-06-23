@@ -1,0 +1,24 @@
+{
+  "id": "req_1120",
+  "at": "2026-06-16T01:53:58.187Z",
+  "origin": "session:071f59a8",
+  "text": "oh one lst thing just to let u know we want to follow the @GUIDING_LIGHT.md because we need this to transfer into the compiled game loader :) so will need some elbow grease but i know u can do it",
+  "status": "doing",
+  "sessionId": "071f59a8-18c9-4044-84f1-a1913885c085",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T01:54:19.814Z",
+      "actor": "claude-opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T02:16:04.230Z",
+      "actor": "claude-opus",
+      "kind": "note",
+      "text": "GUIDING_LIGHT honored: water travels as DATA (WATER lump = footprint + flat grid); the look is the dumb fixed ~water~ host system, no game code in the loop, identical in /test + compiled no-V8 loader."
+    }
+  ]
+}

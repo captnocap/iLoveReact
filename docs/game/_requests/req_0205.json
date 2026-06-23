@@ -1,0 +1,15 @@
+{
+  "id": "req_0205",
+  "at": "2026-06-07T06:52:30.300Z",
+  "origin": "session:f2302907",
+  "text": "Right, so if you also see how i said something about a ~45tick/min system, this ties directly into that LoS comment i just said with compute. npc activity only has to progress a state in the immediate LoS so effectively the world around the player stays still. this lets us setup something like this npc has a very specific behavior like fighting other npcs but none of that needs to occur until the player is directly in LoS of that other NPC.",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:55:45.895Z",
+  "resolution": "Adopted the user's stronger simulation ruling (no code): the unseen world is FROZEN, not slowly simulated — offline NPCs are thin state rows with no behavior/perception/pathing executing; the 45/min state-tick and the event channel are the only movers of frozen state. The user's fighting-NPC example formalized as LATENT dispositions: 'this NPC fights that NPC' is editor-authored entity data that only materializes as running behavior when the activation gate reaches it, hydrating mid-action so the world never reads as booting. Named the shipped precedent (STALKER A-Life online/offline split) and the compute consequence: simulation cost is O(active bubble), constant in city size. Recorded in memory project_map_format.md.",
+  "shas": [],
+  "tags": [
+    "ruling"
+  ]
+}

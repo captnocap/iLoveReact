@@ -1,0 +1,30 @@
+{
+  "id": "req_1603",
+  "at": "2026-06-21T17:02:16.075Z",
+  "origin": "session:aa8b38c4",
+  "text": "hm. well now im colliding with it, so that is good. keep the log around, but were back to i cant go under the thing, its an invisible wall under the sign again.",
+  "status": "review",
+  "sessionId": "aa8b38c4-bcf4-4724-9069-0ebd209628e0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T17:02:51.192Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T17:12:55.534Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Superseded by req_1606 and folded into it. req_1603 reported the sign's walk-under regressing again (invisible wall under the beam) after the parallel prop-collision refactor landed. Before isolating that specific case, the user re-tested and found broader collision regressions (stairs block, flowers block, can't walk under floors/roofs) plus asked to push the diagnostic further. Confirmed nothing in the COMMITTED compiled-collision path changed since my req_1587 walk-under worked (only an inert log commit + an unrelated text-tool commit), so the regressions originate in the half-finished refactor in the dirty working tree (bakeGameFile.ts etc.), which is why symptoms shift each rebuild. Delivered the RJIT_COLLIDERLOG per-collider detail dump (commit 668f0c4a5) to surface the actual baked bands/solid flags at runtime regardless of the churn; awaiting the user's log output to fix each mis-baked collider at the source. No separate code change under this id.",
+  "shas": [
+    "668f0c4a5"
+  ],
+  "resolvedAt": "2026-06-21T17:12:55.534Z"
+}

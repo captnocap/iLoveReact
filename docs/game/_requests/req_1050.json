@@ -1,0 +1,10 @@
+{
+  "id": "req_1050",
+  "at": "2026-06-15T18:51:12.211Z",
+  "origin": "session:de42f85d",
+  "text": "haha yeah it went from 2% all of the calls to this  Recent Requests Last 10 — click row to expand\n    Time     Model     Input     Output     Saved     Latency\n+\n3m ago\nclaude-opus-4-8\n121.2k\n445\n14%\n8002ms\n+\n2m ago\nclaude-opus-4-8\n121.7k\n809\n13%\n12044ms\n+\n2m ago\nclaude-opus-4-8\n122.3k\n477\n13%\n9002ms\n+\n2m ago\nclaude-opus-4-8\n122.9k\n139\n13%\n7025ms\n+\n2m ago\nclaude-opus-4-8\n124.9k\n1.5k\n13%\n24048ms\n+\n2m ago\nclaude-opus-4-8\n124.5k\n585\n14%\n11785ms\n+\n1m ago\nclaude-opus-4-8\n126.7k\n416\n14%\n8969ms\n+\n1m ago\nclaude-opus-4-8\n127.0k\n2.8k\n14%\n33441ms\n+\n1m ago\nclaude-opus-4-8\n129.1k\n374\n14%\n11782ms\n+\n1m ago\nclaude-opus-4-8\n29.0k\n7\n0%\n3404ms\n haha! 'anthropic HATES this one trick' meme is deserved",
+  "status": "new",
+  "sessionId": "de42f85d-94df-4add-951f-a1f5bdd46a23",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1671",
+  "at": "2026-06-22T23:42:29.752Z",
+  "origin": "session:2117ddf4",
+  "text": "my map isnt even that dense to be honest with oyu. i mean i have 6 buildings that have walls and thats it and then a handful of props and some trees to push it",
+  "status": "review",
+  "sessionId": "2117ddf4-165f-4c7a-8fbe-15f442892c87",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T23:44:16.623Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T23:49:02.523Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed why a small map (USER: '6 buildings + a handful of props + some trees') reports ~28k colliders. Instrumented the bake with a shapeId histogram: shape 9 (PALM TRUNK) = 25,601, shape 0 (boxes: the 6 buildings + floors + props) = 9,404, shapes 8/10 (fronds/flowers) ~850k but non-colliding foliage, shape 11 (void shell) = 17,109 confirmed SCENERY = ZERO colliders. So the collider count is PALM TRUNKS: req_1454 registers one rect collider per palm trunk so you can't walk through trees, and the user's painted palm tiles grew ~25,601 palms (palmPopulation density is a per-cell chance 0.08/0.22/0.7 — a modest painted area at med/dense becomes thousands of trees). The loader registers AUTHORED colliders first (~2,931, all fit) THEN palm trunks until MAX_RECTS=16384, so the ~12,150 'clipped' rows are EXCESS FAR PALM TRUNKS, NOT walls/floors — the authored buildings all collide, and the runtime windowed rebuild re-adds near-field palm colliders anyway, so gameplay is unaffected. This CORRECTS my earlier claim that authored walls were walk-through (they are not). The void shell is innocent. The actual fall-through symptom was the separate req_1669 bug (the void ground heightfield being dropped by the windowed rebuild — fixed there). No code change needed for this diagnosis; removed the temporary histogram probe (worldGeometry.ts back to committed state). Optional follow-ups offered to the user: reduce palm density if 25k trees is more than intended, or make far palm-trunk collision windowed/non-colliding so the scary clip log goes away and a forest never pressures the cap.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T23:49:02.523Z"
+}

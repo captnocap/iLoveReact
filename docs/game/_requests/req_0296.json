@@ -1,0 +1,31 @@
+{
+  "id": "req_0296",
+  "at": "2026-06-08T08:07:46.650Z",
+  "origin": "session:9e14f7ea",
+  "text": "i mean like how do i test it, like test it test it. or are we not at that point here. i cant test a png",
+  "status": "review",
+  "sessionId": "9e14f7ea-dafd-486f-b26a-2a7b9c5fcb05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T08:09:11.871Z",
+      "actor": "9e14",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T08:15:41.237Z",
+      "actor": "9e14",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Live window delivered + key clarification given. world_loader.zig now has a visible mode (SDL3 event loop: quit on QUIT/WINDOW_CLOSE/ESC, 60fps cap) alongside the unchanged headless screenshot path; added 'rjit game play' verb. Crucially, clarified to the user that the 6 rendered tiles are a HAND-TYPED TEST FIXTURE (gen_gamefile.ts encodeGrid([0,0,1,1,1,1],3,2)), NOT their hmsc-int world — steps 1-3 proved the data->loader->render plumbing on a stand-in, deliberately decoupled from the editor (user ruled 'don't wire the Compile bake yet' x3). User now understands and wants step 4: wire hmsc-int's Compile to emit a real game-file so the loader renders THEIR painted map. That is the next unit (new req). Not committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T08:15:41.237Z",
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0348",
+  "at": "2026-06-08T13:44:32.378Z",
+  "origin": "codex:019ea612",
+  "text": "Ok lets take a look at what the outcome is here. Here is the game play command: [Image #1] and here is the in-app route[Image #2] these are not the same thing",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:44:51.399Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:58:27.448Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Matched the embedded /compiled output to the standalone loader by replacing the separate render path with the loader-backed WorldLoader primitive. Verified an 800x600 viewport crop from /compiled against the standalone PNG with ImageMagick RMSE 0 (0) before later re-expanding the viewport.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T13:58:27.448Z",
+  "tags": [
+    "bug"
+  ]
+}

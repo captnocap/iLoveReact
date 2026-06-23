@@ -1,0 +1,28 @@
+{
+  "id": "req_1022",
+  "at": "2026-06-15T17:22:29.981Z",
+  "origin": "session:46d99bcc",
+  "text": "it was a hot reload stale bug. it is fixed/fine. so now before we close out. one more thing on the loopcut that we have. so, when doing a loop cut, we want to have the gizmo pop up on the model to be able to displace our cut. let me show u on blockbench what i mean\nnormal cut:\n[Image #111] \n\nand now i will slide it with the X [Image #112] \n\nnotice, smaller selection, still only 1 cut. we need the gizmo for the cut step",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T17:23:19.246Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T17:28:21.054Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a slide gizmo to the loop-cut step (Blockbench parity): while the loop-cut popup is open, a move gizmo is drawn ON the model at the cut plane, and dragging the cut-axis arrow slides the cut, with the live preview and the gizmo anchor following. The anchor (lcGizmoAnchor) is the selected face's centroid pinned onto the middle cut plane (computed via loopCutPositions). The drag maps screen motion to world distance along the cut axis (dragWorldDistance) and converts it to lc.offset: a +axis drag lowers the offset because a higher offset shrinks the -side end, so the cut visibly follows the cursor; the value is converted to the popup's unit, clamped [0,max], and rounded to 1 dp so the popup readout stays tidy. Implemented with a dedicated lcDragRef + lcDragAxis (separate from the vertex gizmo's gizmoDragRef): onDown grabs the slide handle before falling back to orbit (only the cut axis is interactive; other arrows orbit), onMove updates the offset, onUp drops the drag (Apply still commits the whole cut). The popup's Direction/Cuts/Offset/Unit controls remain — the gizmo is an additional on-model offset control. Slide state is cleared on close and on active-part change. Imported loopCutPositions into Studio.tsx. Studio.tsx and the full workbench sources chain bundle clean. Updated the PLAYBOOK build log. Hot-reload TSX — the user can drag the X (or cut-axis) arrow to displace a single cut, exactly like the Blockbench reference.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T17:28:21.054Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1606",
+  "at": "2026-06-21T17:06:44.856Z",
+  "origin": "session:aa8b38c4",
+  "text": "OK nevermind. its broken in a different way now. ugh. ok so no one is going to work but you. prop collision is back in. good. but stairs now im hitting walls, and flowers i am hitting them also. so are the logs going to show u that or do u need to push them further and i cant get under floors/roofs",
+  "status": "review",
+  "sessionId": "aa8b38c4-bcf4-4724-9069-0ebd209628e0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T17:09:04.411Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T17:12:15.648Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Enhanced RJIT_COLLIDERLOG with a per-collider DETAIL DUMP so the moving collision regressions (stairs block, flowers block, can't walk under floors/roofs/sign) can be diagnosed precisely against a working tree several sessions are refactoring at once. The summary line already showed loaded counts + inside + push; now when the player overlaps any collider it dumps each one's footprint, BAND (floor..top), solid flag, and relation to the player capsule: UNDER = floor above head (should pass beneath — a roof/the sign beam; blocked-while-UNDER or band=(0..tall) BLOCKS = baked solid-to-ground instead of a high band), BLOCKS = band straddles you (a real wall), solid=false expected on foliage/flowers (solid=true = bake bug). One walk past a flower / up stairs / under a roof now prints exactly which collider is wrong and why. Purely additive (45 lines, gated behind the env var, capped 6/frame). Host compiles (zig build test-game-physics 41/42; the ramp-ascent failure pre-exists in f11187303, unrelated — my code is inert unless RJIT_COLLIDERLOG is set). Confirmed nothing in the COMMITTED compiled-collision path changed since walk-under worked (only my inert log + an unrelated text-tool commit) — the regressions live in the dirty working tree (bakeGameFile.ts etc.), which is why symptoms shift per rebuild; the detail dump surfaces whatever the current bake produced.",
+  "shas": [
+    "668f0c4a5"
+  ],
+  "resolvedAt": "2026-06-21T17:12:15.648Z"
+}

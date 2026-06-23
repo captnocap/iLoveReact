@@ -1,0 +1,30 @@
+{
+  "id": "req_1192",
+  "at": "2026-06-16T22:39:49.521Z",
+  "origin": "session:8e058574",
+  "text": "strange it says i have 110 off but i dont think its that bad lmfao",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T22:43:10.171Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T22:45:15.712Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the symmetry badge reporting '110 off' on a model that looked nearly symmetric. Two causes: (1) symmetryReport measured about the bbox CENTRE on the axis, which drifts away from the true mirror plane as soon as the model is even slightly asymmetric and then mis-flags every vertex pair — switched it to measure about the ORIGIN (c=0), the same plane mirror/symmetrize operate on, and replaced exact-position key matching with an eps-tolerance spatial grid so accumulated float noise from edits no longer false-flags symmetric verts; (2) the badge defaulted to the X axis, but a car is symmetric left/right and NOT front/back, so X correctly-but-uselessly reported almost everything off — the Studio badge now auto-picks the axis the model is most symmetric about when no mirror plane is enabled (and uses the enabled plane when one is), and the symmetrize keep-+/keep-- buttons follow that same axis. Verified: editMesh suite 65/65 (a Z-symmetric/X-asymmetric box reports correctly per-axis; sub-eps float noise reads symmetric), full hmsc-int cart bundles clean. Committed 030de680e.",
+  "shas": [
+    "030de680e"
+  ],
+  "resolvedAt": "2026-06-16T22:45:15.712Z"
+}

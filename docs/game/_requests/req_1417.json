@@ -1,0 +1,30 @@
+{
+  "id": "req_1417",
+  "at": "2026-06-19T16:26:36.563Z",
+  "origin": "session:d6961119",
+  "text": "hm. ok i got installed and went to run a test and failed D: (instantmesh) siah@busiah ~/creative/reactjit/deps/InstantMesh $ python run.py configs/instant-mesh-large.yaml home/siah/creative/reactjit/deps/InstantMesh/examples/blue_cat.png --output_path outputs --export_texmap\n2026-06-19 09:26:26.996157307 [W:onnxruntime:Default, device_discovery.cc:164 DiscoverDevicesForPlatform] GPU device discovery failed: device_discovery.cc:89 ReadFileContents Failed to open file: \"/sys/class/drm/card5/device/vendor\"\nTraceback (most recent call last):\n  File \"/home/siah/creative/reactjit/deps/InstantMesh/run.py\", line 8, in <module>\n    from pytorch_lightning import seed_everything\n  File \"/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/pytorch_lightning/__init__.py\", line 25, in <module>\n    from lightning_fabric.utilities.seed import seed_everything  # noqa: E402\n  File \"/home/siah/miniconda3/envs/instantmesh/lib/python3.10/site-packages/lightning_fabric/__init__.py\", line 40, in <module>\n    __import__(\"pkg_resources\").declare_namespace(__name__)\nModuleNotFoundError: No module named 'pkg_resources'",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T16:27:27.400Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T16:27:27.411Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "InstantMesh smoke test hit 'No module named pkg_resources': pytorch-lightning 2.1.2/lightning_fabric calls pkg_resources.declare_namespace but setuptools>=81 removed pkg_resources. Gave the user the immediate fix (pip install 'setuptools<81') and pinned it in setup-instantmesh.sh. Also flagged a path typo in their command (missing leading / — use relative examples/blue_cat.png from the repo dir). onnxruntime DRM warning is harmless. Committed.",
+  "shas": [
+    "be42c7568"
+  ],
+  "resolvedAt": "2026-06-19T16:27:27.410Z"
+}

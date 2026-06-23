@@ -1,0 +1,31 @@
+{
+  "id": "req_0686",
+  "at": "2026-06-12T13:23:45.546Z",
+  "origin": "codex:019ebbe8",
+  "text": "huh. that didnt change shit lmao wonder if the model just has bad collision or ?? wtf lol this is as close as i can get to it [Image #1]",
+  "status": "review",
+  "sessionId": "019ebbe8-ba1e-74d1-bd7a-0274b58ea604",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:23:49.875Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T13:26:15.110Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigated the Desk.glb collision report after the screenshot. The imported kind was already carrying the measured 2.309897m by 1.149652m footprint, so this was not bad GLB collision data. I fixed the compiled loader path by centralizing imported mesh collider packing and re-emitting imported prop oriented colliders during spatial-window collider rebuilds, so the desk keeps the measured rectangular footprint after the runtime swaps into near-field collision mode. Verified with Zig ast-check, world map/gamefile tests, and the hmsc-int bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T13:26:15.110Z",
+  "tags": [
+    "bug"
+  ]
+}

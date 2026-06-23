@@ -1,0 +1,10 @@
+{
+  "id": "req_1295",
+  "at": "2026-06-18T16:44:58.830Z",
+  "origin": "session:9751f4ba",
+  "text": "this might help you out, so turns out, when i do a full restart of the program after adding a heightfield it will then render, but in the same running process it will not",
+  "status": "new",
+  "sessionId": "9751f4ba-6a5a-4d0d-aef7-a69eb17d42ca",
+  "captureMode": "hook",
+  "events": []
+}

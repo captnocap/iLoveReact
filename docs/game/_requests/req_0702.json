@@ -1,0 +1,33 @@
+{
+  "id": "req_0702",
+  "at": "2026-06-13T01:51:47.900Z",
+  "origin": "session:e13c74b5",
+  "text": "this menu [Image #11] can we move it here [Image #12] the place i circled. this panel i circled above the iso3d world editor, is fkn useless. and i want the full capability of editing the skin of a surface without needing to leave the route and the one over the map itself is getting crowded",
+  "status": "review",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T01:52:06.383Z",
+      "actor": "e13c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T02:28:22.621Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Moved the iso build pane's face painter off the floating overlay that was crowding the map into a first-class PAINT tab in the top-right quadrant (the panel the user circled as useless). FacePainter now fills its pane (width/height 100%, material browser takes remaining height with its own scroll) instead of floating absolute; IsoAuthor drops the FacePainter mount and instead mirrors its selection up via a new onSelectionChange prop; the cart (index.tsx) holds isoSelectedIds and auto-opens the PAINT tab when a selection is gained, feeding FacePainter the build pieces + selection + commitBuildEvents. RightPanel gained the PAINT tab (Paintbrush icon, first in the rail). Full skin editing without leaving the route; map stays clear. Bundle-check passes. Fable 5 started this; finished by Opus 4.8 after the model handoff.",
+  "shas": [
+    "8c1865b5b"
+  ],
+  "resolvedAt": "2026-06-13T02:28:22.621Z",
+  "tags": [
+    "ux"
+  ]
+}

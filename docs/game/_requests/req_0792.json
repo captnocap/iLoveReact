@@ -1,0 +1,18 @@
+{
+  "id": "req_0792",
+  "at": "2026-06-13T17:37:18.374Z",
+  "origin": "session:a695a492",
+  "text": "what do you mean it contradicts a verdict",
+  "status": "doing",
+  "sessionId": "a695a492-4a9c-4889-a141-0e50e2e7918a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T17:38:21.881Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

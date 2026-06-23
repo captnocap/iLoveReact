@@ -1,0 +1,12 @@
+{
+  "id": "req_0152",
+  "at": "2026-06-06T17:42:32.730Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — WBSTEP9-0606, the workbench fold resumes on the user's word. You build the SETTINGS + LOGS SOURCES per cart/hmsc-int/WORKBENCH.md — read sections 1-4 (shape, three laws, WorkbenchSource contract, nav) and section 6 step 9 before writing anything. Scope per the ledger: settings panel GENERATED from the tunables registry (the proof-of-concept already exists — editors/workbench/tunablesSource.ts was step 3's live source; extend that pattern to the full settings domains + rigs, including the camera-feel cluster: 7 systems, 69 knobs); logs source = log stream with dashboard band + select/copy, log actions/lens. Inputs: census tables at cart/hmsc-int/editors/workbench/census/settings.md (9 capabilities) and census/log.md (7 capabilities) — every row is your coverage law. Pattern: the CHARACTER source discipline (parity table like editors/workbench/WBCHAR.CAPTURE.md, line-referenced; test suite). Files under editors/workbench/{settings,logs}/. Deliverables: (1) WBSETTINGS.CAPTURE.md + WBLOGS.CAPTURE.md parity tables, every census row line-referenced to the dying /settings and /log route sources — supervisor verifies independently; (2) both sources live on /workbench; (3) tests; (4) your census rows flip PENDING->ACCOUNTED in WORKBENCH.md (only your rows). LAWS: additive only — /settings and /log routes UNTOUCHED (they die in a later flip on the user's word); reuse shell/fields — one field renderer, duplication is a review-blocker; the three chrome laws; no subagents, do all work in your own context. Build via tools/rjit; verify green; READY with capture paths. DO NOT COMMIT — supervisor sequences commits. Only the user's hands PASS it.\n",
+  "status": "new",
+  "sessionId": "d3e600d5-0069-46ee-baf8-1d77b7de69a3",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "id": "req_0473",
+  "at": "2026-06-10T06:53:16.275Z",
+  "origin": "supervisor-relay",
+  "text": "[js.warn] [PLACEFREEZE] visualBoxes pieces=785.00 boxes=785.00 ms=967.78\n[js.warn] [PLACEFREEZE] visualBoxes pieces=785.00 boxes=785.00 ms=973.74\n[js.warn] [PLACEFREEZE] visualBoxes pieces=785.00 boxes=785.00 ms=969.30\n... (repeats every frame, count creeping 785→788 as pieces are added)",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-10T06:53:25.144Z",
+      "actor": "session:11ea",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T06:54:19.626Z",
+      "actor": "session:11ea",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the iso build pane's per-frame ~970ms PLACEFREEZE visualBoxes stall at 785 pieces. Root cause was two compounding O(N²) scans per render: (1) the wall join/depth-span questions in placed.ts scanned the entire piece array for EVERY piece (wallJoinRunLimits + placedPieceDepthSpan, with depthSpan re-scanned per matched candidate), and (2) liftBuildingsToTerrain's loose-piece union-find bounds-tested every pair. Replaced both with spatial-grid candidate narrowing: a footprint grid built once per distinct pieces array (WeakMap-cached on array identity) feeds depthSpan/run-limits/smart-select; the lift buckets loose pieces into a spatial hash and only tests cell-sharing pairs. Exact predicates unchanged → identical behavior (placed.test.ts 46/46, rjit game verify GREEN 71/71). Also keyed IsoAuthor's worldGrid memo on world fields instead of state so a state-identity tick can't cascade into a full lift+re-render every frame. Bench at 786 pieces: bands-for-all-pieces 4ms cold/~1ms warm, lift ~1ms (was ~970ms). User confirmed resolved live in the editor.",
+  "shas": [
+    "4fe02ab74"
+  ],
+  "resolvedAt": "2026-06-10T06:54:19.625Z",
+  "tags": [
+    "perf-log"
+  ]
+}

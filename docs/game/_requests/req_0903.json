@@ -1,0 +1,10 @@
+{
+  "id": "req_0903",
+  "at": "2026-06-14T05:33:13.030Z",
+  "origin": "session:1b18f3aa",
+  "text": "Right. so, is there an actual mechanical reason that v8 cant be on another thread, or its not even the same process. two processes running. one headless being v8, its just the game server",
+  "status": "new",
+  "sessionId": "1b18f3aa-3b63-4388-a182-cd1168ae04f8",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1686",
+  "at": "2026-06-23T02:28:23.105Z",
+  "origin": "codex:019ef182",
+  "text": "yeah i dont understand why they both arnt just doing 45 degree cuts on the end t hey connect",
+  "status": "review",
+  "sessionId": "019ef182-d012-70f2-8579-97076088563d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T02:28:37.161Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T02:30:57.433Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Applied the user's 45-degree-cut clarification to the wall-corner rendering: connected wall ends now behave as two painted 45-degree miter halves without a rendered internal diagonal face. Kept the open-ended joined wall boxes so their cut caps do not show, and removed the miter wedge's diagonal split face from both editor and compiled-world loader geometry. Verified wallSlabs 2/2, compile/world-parity 15/15, build-placed 57/57, build-snap 29/29, ReleaseFast world_loader build, and SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-int.",
+  "shas": [],
+  "resolvedAt": "2026-06-23T02:30:57.433Z"
+}

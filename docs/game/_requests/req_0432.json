@@ -1,0 +1,33 @@
+{
+  "id": "req_0432",
+  "at": "2026-06-10T03:36:10.444Z",
+  "origin": "session:2e5197b8",
+  "text": "well, the values should be adjustable from the game configuration menus we have really. if you can give me all the capability to control how strong it is i can handle the values, just default to something sane",
+  "status": "review",
+  "sessionId": "2e5197b8-1894-4144-a6e1-1e2bfb997258",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T03:36:28.485Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T03:44:33.080Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked to control the camera (esp. how strong the wall push-in is) from the settings menu, handling the values themselves with sane defaults. The spring-arm strength knobs already lived in the auto-listed 'play-camera-occlusion' tunable cluster; cleaned it to the live knobs only (minDistanceMeters push-in floor widened to 0.3..6, wall gap, push-in speed, probe thickness, ramp tol) and dropped the dead fade knobs (residualOpacity/maxHits/playerTargetHeightMeters) left over from removing the fade. Added a new 'play-camera-feel' cluster exposing the previously-hardcoded base camera (distance, fov, look height, pitch up/down limits, look sensitivity X/Y): PLAYER_CAMERA is now a live write-through table, pitch limits + sensitivity read live in applyLook, and Embodied.resendCameraParams() (called from PlayRoute onFrame on a tunables-revision change) re-pushes distance/fov/height so edits land the same frame. Defaults unchanged. JS-only, hot-reloads. Verified bundles + settings 8/8 + cameraOcclusion 3/3. Commit a30a3a79c.",
+  "shas": [
+    "a30a3a79c"
+  ],
+  "resolvedAt": "2026-06-10T03:44:33.080Z",
+  "tags": [
+    "ask"
+  ]
+}

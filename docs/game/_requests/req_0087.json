@@ -1,0 +1,13 @@
+{
+  "id": "req_0087",
+  "at": "2026-06-06T11:37:07.455Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — FLOOREDGE-0606 (resolves req_0085, already in the ledger). User verbatim: \"so the floors/walls in build mode, well for the floors i keep noticing if i land on the edge of a floor even when its pieces with another floor or not, the edge seems to want to reject the character placement and causes some jank to happen.\" Scope: build-mode floors in the game (cart/hmsc-int + framework/game — the game lives ONLY there). The symptom: a character landing on or walking onto a floor edge gets rejected/shoved — including across the seam where two floor pieces meet flush, where the surface should behave as one continuous floor. Steps: 1. Find the floor collision/placement resolution in framework/game and print the actual data at the edge: character position, floor piece bounds, and what the resolver returns when landing on (a) an outer edge and (b) a seam between two flush floor pieces. No theory — log the rejection happening, post the numbers. 2. Fix: a seam between flush floors is not an edge — contact resolution must treat coplanar adjacent floors as one continuous walkable surface; an outer edge must support the character up to the actual bound without jitter/eject jank. 3. Any tolerance/epsilon you introduce is tuning data, not a constant to bury: expose it on the P2 tuning surface so the user can dial it live. 4. Regression test as a real test file at the consumption layer (character stays planted across a seam; character at the true outer edge does not oscillate). Build via tools/rjit only; working-tree uncommitted changes elsewhere are the source of truth, never revert anything; the user's dev server (pane 6) hot-reloads your saves. DONE-BAR: tools/rjit game verify green + logged before/after numbers in your READY report + the test. DO NOT COMMIT — supervisor instructs commits. Do not shrink or stub any file. Only the user's live confirmation makes this a PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

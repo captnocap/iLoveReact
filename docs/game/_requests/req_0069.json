@@ -1,0 +1,12 @@
+{
+  "id": "req_0069",
+  "at": "2026-06-06T07:57:21.792Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — MIRROR SYMMETRY BREAK, USER report with the perfect test case. Marker: MIRRORSYM-0606 (resolve req by match).\n\nUSER, verbatim: \"does this even make sense? why is the two sides of the mesh different if its a mirror image drawing?\" Screenshots: 34.png (the mesh: LEFT side smooth rounded bumps, RIGHT side sharp angular shards — visibly different) and 35.png (the canvas: a cleanly mirror-symmetric drawing around the center meridian).\n\nA symmetric grid MUST produce a symmetric mesh. Diagnose with their exact drawing as the repro, numerically: sample mirrored cell pairs (u, 1-u) — equal grid values? Then mirrored VERTEX displacements on the mesh — equal? Find where symmetry dies:\n(a) the grid→mesh mapping (seam topology: does u=0/1 wrap meet a different vertex density than the u=0.5 mirror line?),\n(b) the BASE mesh already asymmetric from prior grab-sculpts (depth compounds on existing geometry — test: reset part, redraw the symmetric shape, still asymmetric?),\n(c) the apply path (mirror stamp sign/scale/rounding differing per side),\n(d) display vs data (smooth shading hiding that the data IS symmetric — check before assuming).\nPost the numbers, then fix at the true layer. P4 pin: symmetric grid in → mirrored vertex pairs equal within epsilon. READY FOR USER TEST with their own drawing.",
+  "status": "new",
+  "sessionId": "066cd07a-7039-4d0f-b6de-a778ce2c6d24",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

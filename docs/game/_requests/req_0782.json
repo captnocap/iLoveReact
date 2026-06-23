@@ -1,0 +1,28 @@
+{
+  "id": "req_0782",
+  "at": "2026-06-13T16:41:33.051Z",
+  "origin": "session:ef4fbf70",
+  "text": "then find a better way to do it. every prop is going to undergo the exact same thing. and you are going to do it, you have nothing else to do",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T16:43:00.472Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T17:08:16.594Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the better way (per GUIDING_LIGHT: store each thing once, reference everywhere — kill the duplication). Every prop's geometry now lives in ONE place and is read by every consumer through a single resolver, instead of existing twice (a bespoke render component + a separate bake recipe). New cart/hmsc-int/compile/propRecipes/resolve.ts exports resolvePropParts(prop): the one kind→PropPartSpec[] switch, consolidated out of worldGeometry (moved its inline cases + bushParts + propColor here) and reusing a695's per-prop recipe builders. worldGeometry's bake now calls resolvePropParts (its 280-line switch + the bespoke-builder imports deleted). render3d/props/DataProp.dataPropParts now calls resolvePropParts too, so the ONE generic DataProp renders EVERY prop. render3d/Prop.tsx collapsed: every kind falls through to DataProp (streetSign kept special for its route-plate defaultTextureKey; imported GLB props keep ImportedProp). Net effect: render==bake by construction, and because the existing part-texturing pipeline (req_0757/0766) makes any DataProp prop skinnable, EVERY prop — payphone, dumpster, trees, furniture, lights, signs, rocks, balls… — is now click-to-skin in the PAINT panel and bakes its skins, uniformly, with zero per-prop code. Verified by a clean full-graph esbuild pass (exit 0); resolver coverage spot-checked across box/cylinder/sphere/furniture/tree kinds. NOT COMMITTED (--shas none): resolve.ts builds on a695's still-untracked compile/propRecipes/*.ts recipe files, so a self-consistent commit needs those to land together; everything is live in the working tree and hot-reloads for testing now. FOLLOW-UP CLEANUP (non-blocking): the now-unused bespoke component files (Payphone/Dumpster/Tree/Rock/Bush/Fence/Ball/WallDecor/Furniture/StreetFurniture/etc.) are dead and can be deleted; my earlier propModels chair recipe (req_0769) is now superseded by resolve's chair case; and propRecipes ideally relocates from compile/ to game/kinds/ so the import direction is forward (render→data, not render→compile). Also folds in/answers req_0778.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T17:08:16.594Z"
+}

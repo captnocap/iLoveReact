@@ -1,0 +1,28 @@
+{
+  "id": "req_1101",
+  "at": "2026-06-15T23:44:06.891Z",
+  "origin": "session:9f19b605",
+  "text": "OK this is genuinely too good and it makes a game for free and idk anyone who does this. but we can do this! At 10km: repeated buildings become obvious, same shop names, same NPC face variants.\n\nAt 25km: roads start looping subtly, signs point to places that don’t exist, radio repeats old lines.\n\nAt 50km: traffic patterns get wrong, cars drive too slowly, pedestrians path into fields, doors don’t open.\n\nAt 75km: skybox glitches, NPCs stare at you, same motel appears every few blocks, street names become nonsense.\n\nAt 100km: Truman tax activates — cars reverse, people float upside down, controls invert, gravity pulses, police radios mention you by name.\n\nAt 150km: the world becomes openly hostile, like the simulation is trying to eject you.\n\nThe important thing is: don’t make it a normal punishment at first. Make it feel like the procedural layer is decaying because the player exceeded the believable bounds of the world. That turns a technical limitation into lore.\n\nAnd if somebody somehow survives or keeps going, give them a stupid achievement:\n\n“Went Nowhere”\n“Truman Tax Paid”\n“100km From Meaning”\n“Escape Attempt Logged”\n“The City Does Not End”\n\nMechanically, this is cheap too. You can drive it from distance-from-authored-core:\n\nescape_depth = max(0, distance_from_core - safe_radius)\n\nThen systems read that as a distortion parameter:\n\ntraffic direction chance\nNPC gravity/orientation corruption\ncontrol inversion probability\nsky/fog color drift\nradio/dialogue corruption\nspawn table weirdness\nroad generator repetition strength\nnotoriety/awareness weirdness gives this instinct that they must go further, and that alone could be a tracked leaderboard. who went the furthest into the void LMAO Void Distance\n“How far did you get before the city broke you?”\n\nAnd it has that perfect cursed speedrun energy because the optimal strategy becomes stupid:\n\nbest vehicle\nfuel route\nrepair kit\nfood/drugs\navoid cops\nmanage sleep\ndrive for hours into repeating suburbs\nsurvive control inversions\ndodge backwards traffic\nkeep going after physics starts lying\n\nThe game can track:\n\nfurthest distance from authored core\ntime survived beyond safe radius\nvehicle used\nseed / route direction\nwhether cheats/mods enabled\nwrongness tier reached\ncause of failure: crash, apache, starvation, void ejection, car folded, player gave up",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T23:45:07.939Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T23:46:10.694Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Capstone of the skybox doctrine: the VOID DISTANCE / believability-decay system. One registered scalar escape_depth = max(0, distance_from_core - safe_radius) drives a single continuous distortion curve; six named tier-bands (10/25/50/75/100/150km) trigger achievement toasts but are NOT step-functions. A pure voidDistortion(escape_depth) returns a weight struct {trafficFlip, npcOrientCorrupt, controlInvert, skyDrift, dialogCorrupt, spawnWeird, roadRepeat, awarenessGlitch}; every consumer multiplies its behavior by its weight and NONE hardcodes a km check (repo's no-magic-values law). Grounded each symptom on existing stacks: sky glitch = sceneEnv haze/cloud/night float drift; speedrun survival = existing game/vehicle + stats.ts energy/stamina (no new mode); achievements = one-shot story flags; Void Distance leaderboard = V20 store run records {depth,time,vehicle,dir,seed,cause}. KEY DISCIPLINES flagged: (1) believability-decay is a SEPARATE axis from notoriety — coast=overt punishment, road void=covert no-UI horror, never conflate; (2) all distortion must be a seeded pure function of (depth,seed,pos,t) for fair leaderboard + V30 f(seed,t,log) compliance, never Math.random; (3) the reframe 'world decays because you exceeded believable bounds' is load-bearing lore, not punishment. Two open micro-decisions returned to user: world heals on turn-back (recommended yes, free), and the 150km terminal = diegetic 'simulation ejects you' forced respawn logged as void_ejection (the only hard cap, dressed as lore) vs uncapped for masochists. Recommended pinning the whole skybox doctrine as a DECISIONS verdict + design doc before any code. No code this turn.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T23:46:10.694Z"
+}

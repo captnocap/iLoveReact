@@ -1,0 +1,30 @@
+{
+  "id": "req_1183",
+  "at": "2026-06-16T16:23:03.115Z",
+  "origin": "session:8e058574",
+  "text": "can you also make a mirror toggle, so that changes on one side make the same changes to another but mirrored so pulling left on one side pulls right on the other side for example",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T16:24:25.030Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T16:27:23.475Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added mirror / symmetric editing to the Studio mesh editor: a 'mirror' toggle (top-left viewport) reflects any gizmo transform on one side of the model onto the other across X=0 — pull a vert left, its twin pulls right. Implemented op-agnostically: new mirrorEdit() runs AFTER move/resize/rotate produce the transformed mesh and sets each moved vert's mirror partner to the reflected final position, so all three tools mirror through one path with no per-op reflection math; mirrorPartners() pairs verts by original position (stable across a drag). Seam verts (own partner) and both-sides selections are skipped to avoid double-apply, which also makes object-mode an automatic no-op. The toggle is snapshotted into the gizmo drag ref at grab time and is twig hot-state (survives reload). Verified: editMesh suite 58/58 (incl. mirror-pull + seam/both-sides guards), full hmsc-int cart bundles clean. Committed cfb7c38b8. Follow-up: mirroring topology ops (extrude/loop-cut) and a Y/Z axis picker.",
+  "shas": [
+    "cfb7c38b8"
+  ],
+  "resolvedAt": "2026-06-16T16:27:23.475Z"
+}

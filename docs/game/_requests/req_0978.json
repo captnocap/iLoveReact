@@ -1,0 +1,28 @@
+{
+  "id": "req_0978",
+  "at": "2026-06-15T11:29:01.229Z",
+  "origin": "session:524eaf71",
+  "text": "well, to correct you. your click on the face and no longer can spin approach is right, i shouldnnt be able to spin by clicking on a face, but its when i click on the face, and click off elsewhere to drag the camera is it deselects. but deselect should only come from a new face selected or esc",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T11:29:28.198Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T11:31:24.640Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Refined per the user's correction: keep 'can't spin by dragging on a face' (an element hit selects and suppresses orbit), but an empty-space drag must NOT deselect, and deselect should come ONLY from selecting a new element or pressing Esc. Implemented: onDown only mutates selection on a HIT (replace, or add/toggle with shift/ctrl); a miss leaves selection untouched and orbits. Added an Esc handler via busOn('__keydown') that clears the whole selection (a focused TextInput consumes keys first, so typing a name never clears). Playbook selection entry updated with the interaction model. Bundle-clean, hot-reload.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T11:31:24.640Z"
+}

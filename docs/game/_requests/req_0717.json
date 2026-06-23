@@ -1,0 +1,35 @@
+{
+  "id": "req_0717",
+  "at": "2026-06-13T03:48:46.922Z",
+  "origin": "session:e13c74b5",
+  "text": "uh. now the grid is gone. and t he buildings. here is what my iso3d map looks like [Image #17] and here is the compiled view: [Image #18]",
+  "status": "review",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T03:50:05.478Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T06:01:52.432Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The 'grid + buildings gone' report resolved across several fixes. Grid: it draws 4cm above ground so a fully-painted floor occludes it (not a bug). Buildings: the iso floor-level cut-away was hiding the whole multi-storey city at the low active level — fixed by a showAllFloors default-ON toggle (79da84357). Also landed on this thread: colocated z-fight dedup scoped loose-only (6704c3a80) and a non-finite ground-sample guard (2f73ae81f). The dedup and host geometry cache were investigated and ruled out as the building-vanish cause.",
+  "shas": [
+    "79da84357",
+    "6704c3a80",
+    "2f73ae81f"
+  ],
+  "resolvedAt": "2026-06-13T06:01:52.432Z",
+  "tags": [
+    "bug"
+  ]
+}

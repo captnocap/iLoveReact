@@ -1,0 +1,28 @@
+{
+  "id": "req_0927",
+  "at": "2026-06-14T16:43:32.637Z",
+  "origin": "session:2b1b8d6b",
+  "text": "[Image #2] xD idk whats happening but i have no head lmao",
+  "status": "review",
+  "sessionId": "2b1b8d6b-2adf-4239-aed8-88f228d4f8a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T16:44:49.339Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T17:08:42.583Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the missing head: it was dyn-mesh slot starvation. The figure preview path uses one DYN_SLOTS slot per body part (cap 48, shared with the editor's live 3D); 5 figures overran it and the player (rendered last) lost its head. Fix: NPCs no longer render as full figures — they render as their OWN rig hitboxes (solid faction-colored boxes, zero dyn slots, see-it==hit-it), and the player keeps the one full figure (the substrate's). Verified esbuild bundle clean.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T17:08:42.583Z"
+}

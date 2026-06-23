@@ -1,0 +1,32 @@
+{
+  "id": "req_0567",
+  "at": "2026-06-10T16:28:56.472Z",
+  "origin": "session:1b2c",
+  "text": "oh one thing about the current traffic lights you will need to address. they place like this: [Image #5] so the light part of it just needs a rotate 90 degree so it can be correct on it",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-10T16:29:09.221Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:29:09.230Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed in commit bcafd0015 (already pushed before this entry was logged): the traffic light's mast arm and lamp head both pointed the same way (-Z), leaving the head a quarter turn off a real signal. The arm now cantilevers sideways (+X) over the road with the head hanging at its end, lamps still facing -Z at yaw 0 — which is exactly the facing world/traffic.ts uses to decide which approach the signal governs, so the lamp now LOOKS at the lane it gates. Fixed in both the live model (hmsc/render3d/props/TrafficLight.tsx) and the compiled geometry (hmsc-int/compile/worldGeometry.ts); hot reload shows it in the editor, the compiled game needs a re-compile.",
+  "shas": [
+    "bcafd0015"
+  ],
+  "resolvedAt": "2026-06-10T16:29:09.230Z",
+  "tags": [
+    "bug"
+  ]
+}

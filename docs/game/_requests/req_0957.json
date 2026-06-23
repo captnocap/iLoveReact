@@ -1,0 +1,28 @@
+{
+  "id": "req_0957",
+  "at": "2026-06-15T09:24:54.119Z",
+  "origin": "session:832d7b44",
+  "text": "Right, the one thing i was reading through the file and wanted to also make sure you are aware of all the capability that lives inside of the '/compiled' route or when you run 'tools/rjit game play' since that is all no js already",
+  "status": "review",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T09:25:16.361Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T09:28:23.479Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Surveyed the compiled no-JS path (tools/rjit game play) per the user's pointer and confirmed framework/game/camera.zig (V23) is a complete host-owned orbit camera — Mode.orbit, solveOrbit, a Controller with per-frame solve+smoothing+distance-constraint and applyInputDeltas, binding a Scene3D.Camera node; gpu/3d.zig renders host-side. This means the Studio reuses the existing host camera (already driven by sculptCamera via GAME_CAMERA) rather than building a new one. Captured in MESH_EDITOR_PLAYBOOK.md build log + the project memory; it de-scoped Increment 2 so most of the first slice is hot-reloadable and only the wireframe render mode needs a rebuild.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T09:28:23.479Z"
+}

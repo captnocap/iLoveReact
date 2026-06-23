@@ -1,0 +1,31 @@
+{
+  "id": "req_0388",
+  "at": "2026-06-09T03:04:24.745Z",
+  "origin": "codex:019eaa55",
+  "text": "dont break the layout. this just needs a way better one. look at all the workspaces, they are all uniform. the problem here is that this one doesnt seem to have any painter for painting textures or anythging for the buildings",
+  "status": "review",
+  "sessionId": "019eaa55-1779-7bd0-be5d-1b2b9ee9e13e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T03:04:35.396Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T03:09:31.738Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Kept workspace layout uniform and fixed the actual buildings problem: the route now has a shared painter lens for building texture/material work, per-face paint target handoff, and an Apply paint action that assigns the materialized texture to the selected building face/global scope. The old repeated color/material stack is collapsed behind a target picker so the panel is usable.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T03:09:31.738Z",
+  "tags": [
+    "ux"
+  ]
+}

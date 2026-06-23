@@ -1,0 +1,28 @@
+{
+  "id": "req_1104",
+  "at": "2026-06-16T00:00:22.222Z",
+  "origin": "session:9f19b605",
+  "text": "hahahaa ok great :D glad these are landing hard that last one is even more evil than before ecause now the procedural shell is not physical distance — it is psychological distance.\n\nThe player drives for what feels like 40 minutes. They pass gas stations, motels, houses, dead intersections, repeating NPC traffic, maybe the wrongness starts ramping. They finally panic, turn around, floor it back toward the city…\n\n…and the skyline is right there.\n\nThey were never 100km away. They were two blocks out.\n\nThat is evil because it makes the player distrust the map itself. The road-side “infinity” becomes a spatial trap, not a literal huge map. The city edge is a recursion field.\n\nMechanically, you can do this cleanly with a procedural displacement layer:\n\nPlayer crosses road boundary.\nWorld starts generating “outward” chunks in front of them.\nBut their true position relative to authored core is clamped / folded / slowly reprojected.\nDistance meter, odometer, GPS, and minimap can lie independently.\nWhen they turn around, the route collapses back to a nearby seam.\n\nSo you get the feeling of endless travel without actually letting them drift infinitely across coordinates. That’s huge for performance and design control.\n\nEven better: make it inconsistent. Sometimes turning around works immediately. Sometimes the road takes three turns before the real city appears. Sometimes the same gas station appears behind them. Sometimes the GPS says they are 87km out, but the city skyline is visible over a fence.\n\nThis should be the road-side rule:\n\nOutward travel stretches space. Inward travel folds it.\n\nThat one sentence is the whole mechanic.\n\nThe player thinks they’re escaping because forward motion keeps producing new road. But the system is basically a treadmill with procedural scenery. When they reverse intent, the treadmill snaps them back near the authored boundary.",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T00:01:24.884Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T00:02:06.846Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Banked design idea (no code). THE TREADMILL / RECURSION FIELD — refines The Fold (req_1103) from physical to PSYCHOLOGICAL distance. LAW: 'Outward travel stretches space. Inward travel folds it.' The road-void is a treadmill with procedural scenery, NOT real coordinate drift: the player's true position stays clamped/folded in a bounded fold-region near the authored seam; forward intent recycles scenery and advances the instruments, reverse intent collapses the route to a nearby seam. This DISSOLVES the earlier always-on-vs-depth-gated fork (req_1103) with a better answer: resources stay REAL while distance goes FAKE — you burn fuel/food on the treadmill, and if you run dry you die having been 2 blocks from the city the whole time (rationing for a 100km drive home that was never more than a turn away). Endurance is psychological, death is literal; leaderboard measures depth-of-self-delusion, not coordinate drift. ARCHITECTURE (single-source-of-truth preserved): ONE true virtual escape_depth accumulator drives the wrongness curve; the instruments (odometer/GPS/minimap/distance meter — render/Hud.tsx + EmbodiedHud.tsx already exist) are LYING VIEWS over it, each with its own corruption function (a new voidDistortion weight 'instrumentLie'), so they can disagree with each other and reality ('GPS says 87km, skyline visible over the fence'); they lie, they never decide. The recycle SEAM is the doppelganger tell, leaned into, not hidden ('same gas station behind you'). INCONSISTENCY (sometimes immediate, sometimes 3 turns, sometimes the gas station reappears) must be a SEEDED function of (position, run-seed), never Math.random — fair/reproducible leaderboard + V30 f(seed,t,log). Two wins locked: bounded simulation regardless of perceived distance (perf/control), and 'distrust the map itself' / road edge = recursion field not a big map. CONSTRAINT still holds: treadmill is ROAD-VOID ONLY; the coast stays Euclidean (real water-gap crossing + real achievement, can never fold). Genuine technical mechanic worth a small proof-of-concept when built — the seam must feel seamless.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T00:02:06.846Z"
+}

@@ -1,0 +1,13 @@
+{
+  "id": "req_0455",
+  "at": "2026-06-10T05:17:01.585Z",
+  "origin": "session:441dd1a1",
+  "text": "ok. it is not being edited anymore. the glass still hasnt landed as far as i can see either",
+  "status": "new",
+  "sessionId": "441dd1a1-1f5b-429e-9681-e92889f5a0e6",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

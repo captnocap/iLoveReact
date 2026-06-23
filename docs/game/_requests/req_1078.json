@@ -1,0 +1,28 @@
+{
+  "id": "req_1078",
+  "at": "2026-06-15T22:30:55.485Z",
+  "origin": "session:760f9f8d",
+  "text": "sorry  im not sure i see the density painter i see a grass tile type and a dry grass but none that says this is a dense patch vs a non dense one",
+  "status": "review",
+  "sessionId": "760f9f8d-dc0f-4592-9807-536386b8fe20",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T22:31:16.426Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:39:11.177Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the density tiles not appearing: I'd added grassSparse/grassLush only to game/kinds/tiles.ts, but the PAINTER reads a SEPARATE tile table — world/tileKinds.ts (definitions) + design.ts (the TileKind union); BrushRail.tsx maps world/tileKinds TILE_KINDS into the swatch rail. Added grassSparse ('Grass (Sparse)') and grassLush ('Grass (Lush)') to design.ts union AND world/tileKinds.ts, appended LAST in the same order as game/kinds/tiles.ts so all three index spaces stay aligned. Pointed grassPopulation's density-by-index lookup at world/tileKinds TILE_KINDS (the table the painter encodes landform cells against) so it's correct even if the two tables drift. Density lives in GRASS_DENSITY (grassSparse=3, grass/grassDry=7, grassLush=16 blades/cell); both grass sources read it per cell. hmsc-int rebuilt clean, boot self-shot PASS, bundle confirms the new kinds. world_loader needs no rebuild (density is bake-side TS).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:39:11.177Z"
+}

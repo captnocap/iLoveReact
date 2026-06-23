@@ -1,0 +1,33 @@
+{
+  "id": "req_0449",
+  "at": "2026-06-10T04:55:39.875Z",
+  "origin": "session:441dd1a1",
+  "text": "ok next thing that goes with this is the glass/window material is not compiling through, they just come in as white walls like concrete",
+  "status": "review",
+  "sessionId": "441dd1a1-1f5b-429e-9681-e92889f5a0e6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T04:56:25.102Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:09:15.439Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Glass/window pieces baked as opaque near-white boxes ('white walls like concrete') because the instance buffer carries color but no alpha — /test's glass opacity (0.3) / chainlink (0.45) was dropped. Fixed through the existing MATERIALS path: a base BuildMaterial with opacity<1 and no shader skin (glass/chainlink) interns a TRANSLUCENT FLAT material (empty wgsl + an opacity field added to the MATERIALS lump); the no-V8 loader renders those rows as individual see-through meshes (scene3d_color_a) through the existing transparent single-mesh pass, keeping the glass tint — shader materials still force white + sample their texture. MaterialAsset/Material gained opacity; ensureMaterials skips empty-wgsl (no shader to run). Verified: bake ships 5 materials, loader emits '237 translucent meshes' with no crash (the headless auto-shot frames the player away from the glass building, so visual confirm is the navigable run). The constructor.zig change in this commit also carried a parallel session's in-flight collider decode that the already-landed loader commit needed, unbreaking HEAD.",
+  "shas": [
+    "59e8e495e"
+  ],
+  "resolvedAt": "2026-06-10T05:09:15.439Z",
+  "tags": [
+    "bug"
+  ]
+}

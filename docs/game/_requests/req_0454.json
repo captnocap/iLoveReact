@@ -1,0 +1,33 @@
+{
+  "id": "req_0454",
+  "at": "2026-06-10T05:13:57.868Z",
+  "origin": "session:0ce255e1",
+  "text": "works! for the prefab buildings. if its not a prefab, does it not move from the heightfield?",
+  "status": "review",
+  "sessionId": "0ce255e1-e6f7-4640-95b6-c6054e1a2eb6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:16:16.531Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:16:41.684Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User found the gap: the flat-pad lift only followed terrain for PREFAB buildings (grouped by stampId); pieces placed one-by-one have no stampId so they kept their authored y and ignored painted height. Fixed by grouping loose (non-stamped) pieces into connected components via union-find over bounds-touch (the same adjacency the smart-select uses) and lifting each component as one flat pad — so a hand-built structure rides the terrain exactly like a prefab, and a lone piece sits on the ground beneath it. The pass is O(loose^2) bounds-touch but every caller memoizes the lift (recompute only on pieces/terrain change), which is fine at editor scale. Lives in the one shared GAME_BUILD.placed.liftToTerrain helper, so build pane + F2 + compile all get it. Committed 9e2390da9, bundles clean.",
+  "shas": [
+    "9e2390da9"
+  ],
+  "resolvedAt": "2026-06-10T05:16:41.684Z",
+  "tags": [
+    "ask"
+  ]
+}

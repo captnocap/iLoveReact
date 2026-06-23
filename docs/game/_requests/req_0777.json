@@ -1,0 +1,36 @@
+{
+  "id": "req_0777",
+  "at": "2026-06-13T15:51:46.677Z",
+  "origin": "session:a695a492",
+  "text": "right but thats a bad excuse tho. the compiled game wont choke from getting the finer paint, its just reused surfaces. so the world chunk is just setup wrong",
+  "status": "review",
+  "sessionId": "a695a492-4a9c-4889-a141-0e50e2e7918a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T15:53:22.600Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:03:57.918Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the compiled game won't choke — the ground is reused recipes + a tiny per-cell reference stream, not a unique baked raster. Implemented the formula-as-mesh-surface engine system feeding the per-cell tileData ref stream to a pooled storage buffer. Editor path committed; compiled parity (ship recipe + retire CPU mirror) is Task #4, carried in the handoff file.",
+  "shas": [
+    "ecd542b5e",
+    "ca88f3ca2",
+    "fb1f066be",
+    "a45d42ae8",
+    "ca19e07e8",
+    "ec7ebaa82",
+    "00660b84b"
+  ],
+  "resolvedAt": "2026-06-13T18:03:57.918Z"
+}

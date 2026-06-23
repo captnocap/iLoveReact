@@ -1,0 +1,31 @@
+{
+  "id": "req_0403",
+  "at": "2026-06-09T06:25:10.820Z",
+  "origin": "codex:019eab0d",
+  "text": "all these tiny little shitty sliders around the entire hmsc-int app need a better slider. these all blow asshole [Image #1] this is NOT limited to just the one screenshot. there all over the place",
+  "status": "review",
+  "sessionId": "019eab0d-d55e-7810-97e2-0dfa7c7254f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T06:25:16.941Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T06:29:06.241Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the tiny hmsc-int shared studio slider chrome with a wider 124px/20px track and larger 14px thumb, updated the old properties panel readout math to match it, and moved ShaderLab's local parameter slider onto the shared WorkbenchSlider so material sliders inherit the same control instead of staying as a separate tiny copy. No commit made; working-tree fix only.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T06:29:06.241Z",
+  "tags": [
+    "ux"
+  ]
+}

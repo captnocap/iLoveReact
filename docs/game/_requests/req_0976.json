@@ -1,0 +1,28 @@
+{
+  "id": "req_0976",
+  "at": "2026-06-15T11:24:30.756Z",
+  "origin": "session:524eaf71",
+  "text": "huh. its actually fine. i must have got a weird time or something cuz i just tried it several times over and they all were fine",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T11:25:08.828Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T11:25:08.838Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User confirmation that cube add/render works after retesting ('its actually fine, i must have got a weird time'). No action needed — pairs with req_0975 (transient mis-render, resolved). The 16-unit add-mesh dialog, the dynamicKey crash fix, and the cube resting on the grid are all confirmed good in-session.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T11:25:08.838Z"
+}

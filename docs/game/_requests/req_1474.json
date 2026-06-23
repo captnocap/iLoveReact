@@ -1,0 +1,32 @@
+{
+  "id": "req_1474",
+  "at": "2026-06-20T01:16:52.093Z",
+  "origin": "session:1d61c909",
+  "text": "i still keep hitting it so what do i need to do on my config ?",
+  "status": "review",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T01:21:45.939Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T02:21:38.886Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused and fixed the build-piece Y mismatch behind the staircase collisions. The long-open WALLTOP-0606 bug (req_0099): a wall stored its Y from whatever surface the placement hit, so single walls aimed at a floor top rested ON the floor while line-drawn walls and floor-after-wall placements stayed at ground/side Y — a mix that misaligned everything stacked above (the extra/short step where a staircase lands on a floor). Durable cure (24bcfca88): DERIVE the wall rest-Y from the floor beneath it at geometry time via liftedWallBaseY/liftWallsOntoFloors, applied read-time in placedPieceColliders (collision/nav/bake) and pieceVisualShapes (render) so no placement path can miss it and see-it==walk-it. Stored data stays raw (no double-lift on edit), idempotent, delete-floor drops the wall, fixes EXISTING walls on load. 56/56 placed tests. Combined with the earlier stair-crest step-height fix (0.35->0.5, commits ab003a9ca/9eb8bc304). REMAINING (the user's Path A part 2): auto-place a floor under stairs — deferred pending a live recompile+test of the wall fix, since it may already resolve the walk and the floor-under-stairs Y bookkeeping is best verified against real behavior.",
+  "shas": [
+    "24bcfca88",
+    "ab003a9ca",
+    "9eb8bc304"
+  ],
+  "resolvedAt": "2026-06-20T02:21:38.886Z"
+}

@@ -1,0 +1,19 @@
+{
+  "id": "req_0054",
+  "at": "2026-06-06T06:42:19.714Z",
+  "origin": "session:6708b336",
+  "text": "You drive a live, hot-reloaded 3D viewer by writing ONE file.\nWhenever I ask for a scene or an edit, OVERWRITE this exact file with the full scene as JSON (use your Write tool, replace the entire file): /home/siah/creative/reactjit/cart/hmsc-int/assist3d/scene.json\n\nSchema:\n{\n  \"background\": \"#rrggbb\",\n  \"meshes\": [\n    { \"id\": \"short-lowercase-name\", \"geometry\": \"Box|Sphere|Cylinder|Cone|Torus|Plane\",\n      \"params\": { ... }, \"material\": \"#rrggbb\",\n      \"position\": [x, y, z], \"rotation\": [degX, degY, degZ] }\n  ]\n}\n\nParams by geometry:\n  Box: {width,height,depth}   Sphere: {radius}   Cylinder/Cone: {radius,height}\n  Torus: {radius,tube}        Plane: {width,height}\n\nRules: +Y is up, 1 unit = 1 meter. The meshes ARE the model — author ONLY the\nobject(s) the user asked for. Do NOT add a ground, floor, base slab, grass plane,\nor backdrop: the viewer already draws its own reference floor, and anything you add\nwould ship with the model on export. The model rests on or above y=0 (its lowest\npoint near y=0 so it sits ON the viewer floor). Use 4-25 meshes so the result is\nrecognizable. Give every mesh a unique descriptive id and a tasteful hex color.\n\nDo NOT print the JSON in chat — just write the file and end with a one-line summary.\n\nRequest: In the scene file, make it taller — applied to the mesh whose id is \"foot-left\" (a Box at position [-0.1, 0.04, 0], material #8B4513). Keep the rest of the scene unchanged unless the change requires it.",
+  "status": "done",
+  "sessionId": "6708b336-cfa3-4eb5-abab-0e95821d66b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-07T11:06:14.695Z",
+      "actor": "supervisor",
+      "kind": "state",
+      "from": "new",
+      "to": "done",
+      "text": "noise-close (REQSEC-0607 artifact class): the sibling assist3d session-boot prompt — same machine-capture artifact, same machinePrefixes gate now covering it. A record, not an ask."
+    }
+  ]
+}

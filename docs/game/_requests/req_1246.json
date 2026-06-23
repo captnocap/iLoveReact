@@ -1,0 +1,30 @@
+{
+  "id": "req_1246",
+  "at": "2026-06-17T14:50:29.726Z",
+  "origin": "session:76a33154",
+  "text": "hey so we need to do a quick demo to understand how to do this painting on 3d right because the last guy cant comprehend how to do it correctly and its currently in a horrible state for the @cart/hmsc-int/editors/model/Studio.tsx \n\nhere is what you need to do\nmake a quick demo file, put down a triangle in the center of a grid, and mask it, so that the grid is only shown on the triangle and no where else",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T14:50:45.039Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T14:54:01.546Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built cart/triangle_mask_demo.tsx — the smallest honest demo of 'paint a pattern onto a shape', the thing the Studio painter keeps getting wrong. It draws a grid pattern across the whole Effect quad (pure function of uv, blind to the shape) and an analytic equilateral-triangle SDF mask (inside=1/outside=0, AA'd via fwidth), then composes them with a single multiply: final = gridLine * inside. The grid therefore shows ON the triangle and nowhere else. Lesson encoded in the header: painting a face is NOT a CPU texel array dodging neighbours; it is pattern*mask in the fragment shader — swap the triangle SDF for a face's UV hull and you get correct bleed-free face painting, pixel-perfect at any zoom, ~30 lines of WGSL. Shipped + self-shot (PASS, /tmp/trimask.png) confirming the grid is clipped to the triangle.",
+  "shas": [
+    "7a0851cb1"
+  ],
+  "resolvedAt": "2026-06-17T14:54:01.546Z"
+}

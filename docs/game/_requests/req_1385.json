@@ -1,0 +1,30 @@
+{
+  "id": "req_1385",
+  "at": "2026-06-19T05:00:48.439Z",
+  "origin": "session:be97e48f",
+  "text": "i dont see that log tbh. i restarted and everything but i just see r3d-census and ground-pass but no paintdiag",
+  "status": "review",
+  "sessionId": "be97e48f-9627-4113-86b2-bb34b58ed45b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T05:01:41.060Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T05:23:30.767Z",
+      "actor": "claude-painter",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The [paintdiag] console.log never reached the user's terminal — cart console.log isn't routed there (only Zig logs like r3d-census/ground-pass are). Replaced it with an on-screen readout: a bottom-left overlay shown in paint mode displaying faces/noUV/fullSquare/overlap/maxUV/repack/tex, so the user can read the live model's UV layout directly. This unblocks diagnosing req_1376 (the one-click-paints-4-faces bleed): overlap>0 or fullSquare>0 means faces share atlas islands. Cart-only, hot-reloads.",
+  "shas": [
+    "ec8984a02"
+  ],
+  "resolvedAt": "2026-06-19T05:23:30.767Z"
+}

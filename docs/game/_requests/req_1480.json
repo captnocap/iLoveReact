@@ -1,0 +1,31 @@
+{
+  "id": "req_1480",
+  "at": "2026-06-20T01:58:27.188Z",
+  "origin": "session:ccd83b97",
+  "text": "alright inside of hmsc-int for road system, i would like to build on it. Here is how: \n\nthe roads are genuinely good, that so much doesnt need too much more work if any, really from here its all just detailing. by that i mean i want to ideally be able to do the following:\n\nname roads\ndeclare intersection type (4 way stop, light controlled intersection)\n\nthese two things piece together nicely, because this next part then wants you to further setup this road tool to where at intersections, use the prop for either a stop sign or a stop light at each corresponding location, and the names let us use the road signs to further automatically print the name of the road on the street sign when it gets placed at intersections",
+  "status": "review",
+  "sessionId": "ccd83b97-8a50-41e1-9076-824a01c74989",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T01:58:34.487Z",
+      "actor": "ccd8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T02:50:04.756Z",
+      "actor": "ccd8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the intersection authoring layer on the road system. roadData.deriveJunctions() derives each junction box + its arms (which road meets it from which side, the approach into the box) purely from strokes; intersections.ts owns policy — the authored control type (uncontrolled/allWayStop/signals) keyed by stable junctionKey, and planIntersectionProps() generating a stop sign or traffic light + a street-name sign on each arm, facing back against its traffic so the existing trafficControl.ts runtime gate consumes them unchanged. Editor: name roads in RoadRail; click a junction badge on the road layer to open IntersectionRail and pick the type. Generated props are derived+regenerated but manual drags are honored (pose overrides, no snap-back). streetSign is now parametric and prints the crossing road names (reuses blockText glyphs; WorldProp.text threaded through placeWorldProp→previewWorld for iso/test/compile). Persistence: road name + controls + overrides ride the map snapshot, props re-derive on load. 9/9 intersections + 26/26 roadData + 8/8 trafficControl + previewWorld/mapload green; editor cart + headless game compile clean.",
+  "shas": [
+    "8b0ccb660",
+    "d7cc04eb8"
+  ],
+  "resolvedAt": "2026-06-20T02:50:04.756Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0631",
+  "at": "2026-06-11T11:01:57.941Z",
+  "origin": "session:a83ab298",
+  "text": "I am also getting partial renders. i dont know why. but look [Image #1] it even happens in tools/rjit game play command",
+  "status": "review",
+  "sessionId": "a83ab298-79ae-4206-aa31-2a4949adb669",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T11:02:50.893Z",
+      "actor": "a83a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T11:25:16.364Z",
+      "actor": "a83a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The partial renders were a framework drawScene grouping bug that KICKPROP's live prop nodes exposed — bisected by building the pre-dynamics loader against the SAME gamefile (frames differ; boot logs identical). scene3d Pass 2 groups meshes by (geometry, texture) and only the group LEADER takes the static fast path: a plain mesh sharing a streamed family's geometry key (a kickable prop's box beside the streamed world's box family) became leader and folded the STATIC sub-range chunk draws into the dynamic path, which staged idata[0..count] and IGNORED scene3d_instance_first — so every chunk drew the family's FIRST rows instead of its own range: walls vanished, phantom gray slabs appeared elsewhere, while textured material families (own groups) stayed correct — exactly the screenshot. Fix in framework/gpu/3d.zig: static-instanced batches are never folded into another leader's dynamic group, and the dynamic path now honors instance_first (also fixing the designed static-to-dynamic degrade when the retained buffer fills). Proof: three frames over one gamefile — pre-commit, broken, fixed — the wall behind spawn returns with the prop nodes live; rjit game shot GREEN, editor ship clean. Needs the user's rebuild.",
+  "shas": [
+    "ef5fe0a8e"
+  ],
+  "resolvedAt": "2026-06-11T11:25:16.364Z",
+  "tags": [
+    "bug"
+  ]
+}

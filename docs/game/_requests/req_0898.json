@@ -1,0 +1,30 @@
+{
+  "id": "req_0898",
+  "at": "2026-06-14T04:23:11.620Z",
+  "origin": "session:5ae129b5",
+  "text": "led sign works nice but to change the text i think u forgot an apply text button or somethingi typed in it and it never applied\n\nfor neon sign its just showing me a black rectangle.",
+  "status": "review",
+  "sessionId": "5ae129b5-1bb5-49d0-b549-22770bd7fe48",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T04:24:08.467Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T04:39:11.924Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed both reported bugs. (1) The SIGN TEXT field silently did nothing: scopeBuildEvent (in useBuildUndo AND PlayRoute) attached the owning map's name for pieceSkinSet/piecePartTextureSet but had no case for pieceTextSet, so it shipped unscoped and the stream reducer looked in the wrong piece bucket — a no-op. Added pieceTextSet to both scoping switches. Also added an explicit APPLY button (plus Enter via onSubmitEditing): typing edits a draft, Apply commits it (no per-keystroke undo spam; matches what the user expected). (2) The neon sign rendered as a black rectangle because the import sized the decal canvas to the MAX coordinate in the path, so a logo authored at large offsets (~700-1400) drew as a tiny shape in a near-black canvas. The import now fits the path's bounding box to the canvas. Verified: neon.test 3/3, props.test 14/14, cart bundles clean. Graph DOES capture into the face texture (confirmed in engine.zig: the StaticSurface capture paints graph_container children via the normal paintNode walk), so the framing fix is the real cause.",
+  "shas": [
+    "4daf18a82"
+  ],
+  "resolvedAt": "2026-06-14T04:39:11.924Z"
+}

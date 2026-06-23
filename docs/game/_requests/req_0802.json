@@ -1,0 +1,18 @@
+{
+  "id": "req_0802",
+  "at": "2026-06-13T18:30:53.898Z",
+  "origin": "session:6e5908e6",
+  "text": "That 'new code' is exactly why we are here. I dont quite understand the problem. Its clearly some instance cap though on the mesh which means the javascript side for setting up texture for meshes is genuinely cursed compared to the compiled approach",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T18:31:58.138Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

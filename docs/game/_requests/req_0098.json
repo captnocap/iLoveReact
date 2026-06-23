@@ -1,0 +1,12 @@
+{
+  "id": "req_0098",
+  "at": "2026-06-06T12:06:27.735Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — PRIORITY ZERO, your lane broke the user's dev rebuild. They ran tools/rjit dev hmsc-int and the dev binary compile FAILED on your code: v8_app.zig:3428:31: error: root source file struct 'json' has no member named 'stringifyAlloc' — referenced by processIncomingPushes (v8_app.zig:3414) and appTick (v8_app.zig:3580). std.json.stringifyAlloc does not exist in Zig 0.15.2 (the API changed in 0.15; use the current std.json stringify surface — check how OTHER call sites in this repo serialize JSON in Zig and mirror the established pattern, do not invent a new one). Your game-verify green never compiled the dev-binary config, so it asserted upstream of the thing the user actually runs — that is the green-at-wrong-layer law. Fix now, then PROVE it by building the exact dev binary the user builds (run the same compile tools/rjit dev performs for zig-out/bin/reactjit-dev) and post that result. The user is fully blocked on this — the rebuild they need to fix the stale floor cannot run until you land this.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

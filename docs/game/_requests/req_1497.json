@@ -1,0 +1,18 @@
+{
+  "id": "req_1497",
+  "at": "2026-06-20T19:47:04.894Z",
+  "origin": "session:4e481f48",
+  "text": "here is another one you can work on for me please, so yesterday i asked to have the road system to automatically props road signs, street lights, and stop signs right, and gave roads names. And then I can see the road sign props getting placed in the map editor right [Image #22] here they are. but i compile and load the game, they arnt there. but the weird part is, if i place the prop myself. it shows up just fine",
+  "status": "doing",
+  "sessionId": "4e481f48-88ee-489e-9362-130a372fc4f5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T19:47:17.779Z",
+      "actor": "4e48",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "id": "req_0431",
+  "at": "2026-06-10T03:34:10.303Z",
+  "origin": "session:0ce255e1",
+  "text": "Lol uh so next is i need ctrl z undo and redo history. also, i moved a building, and it stripped ALL of its materials on its faces D:",
+  "status": "review",
+  "sessionId": "0ce255e1-e6f7-4640-95b6-c6054e1a2eb6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T03:40:06.505Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T03:40:06.514Z",
+      "actor": "iso-author",
+      "kind": "note",
+      "text": "Materials-strip half DONE + shipped (216fba960): iso move/clone now spread the whole PlacedBuildPiece (minus id) into the placement, preserving per-face skin + wall edit; only x/z shift. Undo/redo half PENDING a design call: ctrl+z/ctrl+y are ALREADY globally bound by useWorkspace but they snapshot the map payload (paint/placements/view) only — build pieces ride a separate worldSession event stream not in that snapshot, so ctrl+z won't undo a building move today. Proper fix = fold worldStream build state into the workspace undo timeline (one ctrl+z covers both), which lives in the contended index.tsx (commitBuildEvent/buildPayload/applyPayload) and is cross-cutting (affects F2 too). Surfaced to user for go/no-go on touching the shared shell file."
+    },
+    {
+      "at": "2026-06-10T04:21:50.548Z",
+      "actor": "iso-author",
+      "kind": "note",
+      "text": "STILL IN FLIGHT. Materials-strip half shipped (216fba960) + grid-lock move (dd7199f83). Undo/redo half NOT started — it needs the workspace-timeline fold in index.tsx (Ctrl+Z is already globally bound by useWorkspace to the map-payload undo; build pieces ride a separate worldSession stream, so build edits must be folded into that one timeline to avoid a double-undo). Paused to clear the user's higher-priority iso bugs this session: materials (216fba960), grid-lock move (dd7199f83), zoom-fling (4da4364d2), adaptive grid (696381509), rotate-choke memoization (8d9643b03), grid 1-tile-pitch retune (739223361), and commitMany batch-save groundwork (05d3fbc0d). Awaiting user: resume freeze-fix wiring + undo, or test grid first."
+    },
+    {
+      "at": "2026-06-10T04:38:41.680Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "All of req_0431 done. (1) Materials strip on move/clone fixed (216fba960): bulk ops spread the whole PlacedBuildPiece minus id, preserving per-face skin + wall edit. (2) Moves grid-lock (dd7199f83). (3) Ctrl+Z/Ctrl+Y undo+redo for buildings (5f7a6d491): build edits were on a separate worldSession stream the workspace undo didn't cover; now every build commit snapshots the pre-edit state, the workspace snapshot carries this map's pieces, and a history apply reconciles the live worldStream to the snapshot by appending the minimal place/remove events (matched by value since replay mints fresh ids), running on 'history' only so restore/map-switch leaves the stream alone. Same change adds batch commits (commitMany) so a 352-piece move/clone/delete is one snapshot + one undo step instead of freezing.",
+  "shas": [
+    "216fba960",
+    "dd7199f83",
+    "5f7a6d491"
+  ],
+  "resolvedAt": "2026-06-10T04:38:41.679Z",
+  "tags": [
+    "bug",
+    "ask"
+  ]
+}

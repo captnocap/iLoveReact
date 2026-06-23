@@ -1,0 +1,28 @@
+{
+  "id": "req_0364",
+  "at": "2026-06-08T20:21:18.881Z",
+  "origin": "session:67746dc2",
+  "text": "so how big is this in size? also, literally perfect performance not a SINGLE hiccup",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T20:21:44.854Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T20:22:16.116Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's size question for the --massive scale lab (informational, no code change). Computed both world size and file size from the generator constants (BLOCK_METERS=44, 1 tile=1m) and the measured bakes: default 120 blocks = 5.28x5.28km / 27.9 km2 / 42,889 instances / 3.75MB; 160 = 7.04km / 49.6 km2 / 5.39MB; 200 = 8.8km / 77.4 km2 / 7.51MB; the 512-block max extrapolates to ~22.5km / 507 km2 / ~780k instances / ~40MB. Framed against GTA III (~few km2), San Andreas (~36 km2), and GTA V (~81 km2): the default already exceeds SA in a 3.75MB file, ~blocks 220 hits GTA V footprint, and 512 is ~6x GTA V. Reinforced the why behind 'not a single hiccup': render cost is constant regardless of map size (one instanced draw, zero V8 in the frame loop) — only on-disk size (~52 bytes/instance) and physics collider coverage scale. Offered next steps: probe past 512 for the real GPU ceiling, or wire spatial-windowed collision.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T20:22:16.116Z"
+}

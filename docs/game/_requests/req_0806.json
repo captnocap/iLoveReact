@@ -1,0 +1,18 @@
+{
+  "id": "req_0806",
+  "at": "2026-06-13T18:42:23.635Z",
+  "origin": "session:6e5908e6",
+  "text": "[r3d-census] children=2350 inst_seen=20 inst_collected=20 mcount=2059 tcount=278 geo_cache_len=188 retained=12k/3670k verts\n[ground-diag] pool=0 dataLen=14560 cols=120 rows=120 pal=24 cellEnd=14475 segN=10 writ=14560\n[ground-diag] pool=1 dataLen=14528 cols=120 rows=120 pal=24 cellEnd=14475 segN=6 writ=14528\n[ground-diag] pool=2 dataLen=14528 cols=120 rows=120 pal=24 cellEnd=14475 segN=6 writ=14528\n[ground-diag] pool=3 dataLen=14504 cols=120 rows=120 pal=24 cellEnd=14475 segN=3 writ=14504\n[ground-diag] pool=4 dataLen=14480 cols=120 rows=120 pal=24 cellEnd=14475 segN=0 writ=14480\n[ground-diag] pool=5 dataLen=14480 cols=120 rows=120 pal=24 cellEnd=14475 segN=0 writ=14480\n[ground-diag] pool=6 dataLen=14480 cols=120 rows=120 pal=24 cellEnd=14475 segN=0 writ=14480\n[ground-diag] pool=7 dataLen=14480 cols=120 rows=120 pal=24 cellEnd=14475 segN=0 writ=14480\n[r3d-census] children=2350 inst_seen=20 inst_collected=20 mcount=2059 tcount=278 geo_cache_len=188 retained=12k/3670k verts\n[ground-diag] pool=0 dataLen=14560 cols=120 rows=120 pal=24 cellEnd=14475 segN=10 writ=14560\n[ground-diag] pool=1 dataLen=14528 cols=120 rows=120 pal=24 cellEnd=14475 segN=6 writ=14528\n[ground-diag] pool=2 dataLen=14528 cols=120 rows=120 pal=24 cellEnd=14475 segN=6 writ=14528\n[ground-diag] pool=3 dataLen=14504 cols=120 rows=120 pal=24 cellEnd=14475 segN=3 writ=14504\n[ground-diag] pool=4 dataLen=14480 cols=120 rows=120 pal=24 cellEnd=14475 segN=0 writ=14480\n[ground-diag] pool=5 dataLen=14480 cols=120 rows=120 pal=24 cellEnd=14475 segN=0 writ=14480\n[ground-diag] pool=6 dataLen=14480 cols=120 rows=120 pal=24 cellEnd=14475 segN=0 writ=14480",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T18:44:40.072Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

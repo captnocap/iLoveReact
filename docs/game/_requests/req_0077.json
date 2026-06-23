@@ -1,0 +1,11 @@
+{
+  "id": "req_0077",
+  "at": "2026-06-06T11:27:31.790Z",
+  "origin": "supervisor-relay",
+  "text": "clicking the up or down arrow on a painted layer causes the layer to just duplicate, not move at all.",
+  "status": "new",
+  "captureMode": "manual",
+  "tags": [
+    "bug"
+  ]
+}

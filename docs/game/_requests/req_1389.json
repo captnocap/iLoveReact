@@ -1,0 +1,30 @@
+{
+  "id": "req_1389",
+  "at": "2026-06-19T05:34:05.541Z",
+  "origin": "session:1863e7ee",
+  "text": "well. the other thing i want to be sure of is setting up hotkeys, but ideally in a fashion where if i dont like the hotkey i dont have to go ask anyone to change it for me its just in the settings, and to use icons over text. and to rethink about how to use space. for example, one of the worst is layers. i cant even see a layers name because there are so many buttons in the tight space. lmao",
+  "status": "review",
+  "sessionId": "1863e7ee-a8ed-4cf3-85a6-49a899536c18",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T05:34:27.573Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T05:41:08.427Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Folded three UI asks into the plan, grounded in existing infra. Self-serve hotkeys: Studio hand-rolls two busOn('__keydown') listeners (lines 1056/3866) — the exact anti-pattern editors/controls.ts ('THE BINDINGS ARE THE TABLE', + useEditorControls dispatcher + self-rendering KeyLegend + settings P2/'tuning' persistence) was built to cure; plan adds a 'studio' scope, replaces the listeners, adds a user-override layer + a settings Hotkeys rebind panel so the user rebinds without asking. Icons-over-text: adopt the existing @reactjit/icons/Icon (already used by LayerStrip) across the toolbars; tooltips carry the live chord. Space rethink: the Outliner/LayerStrip row crams 6 inline verbs into 236px and truncates the name — redesigned name-first with verbs on hover/overflow. Plus a narration cull (drag-off-model=orbit, toggle-on!, redundant mesh-editor/OUTLINER labels) into legend/empty-states.",
+  "shas": [
+    "0612eab15"
+  ],
+  "resolvedAt": "2026-06-19T05:41:08.427Z"
+}

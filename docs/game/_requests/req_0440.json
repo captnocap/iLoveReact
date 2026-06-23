@@ -1,0 +1,33 @@
+{
+  "id": "req_0440",
+  "at": "2026-06-10T04:15:24.123Z",
+  "origin": "session:0ce255e1",
+  "text": "I see the problem. i think its your grid still actually. look here. i am looking to place a wall. see how its on the grid line and its spans 3 [Image #8] ok so lets zoom out on that exact same spot [Image #9] not on any grid line at all at this point which i think is the problem. worth fixing at least",
+  "status": "review",
+  "sessionId": "0ce255e1-e6f7-4640-95b6-c6054e1a2eb6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T04:19:23.046Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T04:19:23.054Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User pinned it: a wall on the 1-tile grid read as ON the line zoomed in but OFF it zoomed out (same spot). The LOD grid coarsened far too early — at default zoom (~90m eye) the formula chose a 4-tile cell, so 1-tile-snapped pieces sat between the visible coarse lines and only landed on lines once zoomed in enough for the grid to drop to 1-tile cells. Retuned: size the grid coverage to the VISIBLE ground (~0.31x eye distance instead of 0.65x) and raise the line budget (HALF_LINES 28->56), so the grid holds the true 1 tile = 1 m pitch down to ~zoom 0.5 (the whole practical building range) and only coarsens to 2/4/8 cells when surveying a district where single cells aren't placeable. Bounded ~226 boxes, memoized. Committed 739223361.",
+  "shas": [
+    "739223361"
+  ],
+  "resolvedAt": "2026-06-10T04:19:23.054Z",
+  "tags": [
+    "bug"
+  ]
+}

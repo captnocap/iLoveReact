@@ -1,0 +1,28 @@
+{
+  "id": "req_1131",
+  "at": "2026-06-16T03:12:53.268Z",
+  "origin": "session:eef64544",
+  "text": "I checked it out. So far, looks decent. but you gave it only two options, one being static other being hollow. but what about items that have physics like a barrel already does from the current prop stack",
+  "status": "review",
+  "sessionId": "eef64544-c672-4883-add8-12dffa52f94c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T03:13:42.065Z",
+      "actor": "eef6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T03:18:13.820Z",
+      "actor": "eef6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the Compile dialog's missing third prop nature. The first cut offered only Static (solid/blocks) vs Foliage (walk-through) and missed the prop stack's kickable PHYSICS bodies — the KICKPROP dynamics system (steelDrum/cans/balls/cones carry dynamics:{bodyRadiusMeters,restitution}). Replaced the solid toggle + 2-option donor with a single Nature selector (Static / Foliage / Physics) that maps the user's mental model onto the table's granular fields. A Physics prop authors only the bounce (restitution 0..1, via a stepper); the cook MEASURES the body radius from the footprint (derive-don't-store-twice per GUIDING_LIGHT) and emits dynamics:{bodyRadiusMeters=footprintRadius, restitution}. Changed PropDescriptorInput.dynamics → physics:{restitution}; fillPropDescriptor builds the measured dynamics; validateProp rejects a restitution outside 0..1 or a zero body radius (fail loud). cookedAsset 13/13 (+3: physics body measured, static carries no dynamics, bad bounce rejected); store 8, editMesh 48, modelStream 8, textureize 9 all green; Studio + sources bundle clean; fully hot-reloadable. Spec Part 7.6 + the build log + the memory updated. NB the user's barrel example is actually static in the current stack (steelDrum is the dynamic drum) but the gap was real. Uncommitted by the user's lead.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T03:18:13.820Z"
+}

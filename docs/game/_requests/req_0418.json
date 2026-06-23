@@ -1,0 +1,21 @@
+{
+  "id": "req_0418",
+  "at": "2026-06-10T02:45:39.089Z",
+  "origin": "session:2e5197b8",
+  "text": "when i zoom out everything kinda disappears/grid goes away. and if i zoom in too much then the whole world just turns into skybox",
+  "status": "doing",
+  "sessionId": "2e5197b8-1894-4144-a6e1-1e2bfb997258",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T02:45:54.643Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ],
+  "tags": [
+    "bug"
+  ]
+}

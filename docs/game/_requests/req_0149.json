@@ -1,0 +1,12 @@
+{
+  "id": "req_0149",
+  "at": "2026-06-06T17:42:29.671Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — WBSTEP5-0606, the workbench fold resumes on the user's word (\"now everything is caught up... we should finish that job\"). You build the ITEM SOURCE (+ ruled-in voxel SCULPT mode) per cart/hmsc-int/WORKBENCH.md — read sections 1-4 (the shape, the three laws, the WorkbenchSource contract, the nav) and section 6 step 5 before writing anything. Inputs: the census capability tables at cart/hmsc-int/editors/workbench/census/items.md and census/voxels.md — every row there is your coverage law; /items has 10 capabilities (2 partial), /voxels 12 (ITEMSCULPT-0606 already made voxel blockouts the item input). Pattern to copy: the CHARACTER source (editors/workbench/characters/{store.ts,panel.ts,source.tsx,Stage.tsx,PaintLens.tsx} + its parity table editors/workbench/WBCHAR.CAPTURE.md and 13-test suite) — same file shape, same discipline, separate files/stores under editors/workbench/items/. Deliverables: (1) WBITEMS.CAPTURE.md parity table, every census row line-referenced to the dying route source and marked with where the workbench covers it — the /cutout 44-row-audit-missed-icons failure is the cautionary tale, the supervisor verifies your table independently; (2) the source live on /workbench including the voxel SCULPT mode; (3) P4-style test suite; (4) census rows flip PENDING->ACCOUNTED in WORKBENCH.md (single-writer: edit only your rows). LAWS: additive only — the /items and /voxels routes are UNTOUCHED (no edits, ever; they die in a later flip commit on the user's word); no second implementation of field renderer/painter/stage kit (reuse shell/fields, stage kit — duplication is a review-blocker); the three chrome laws. Note: the census oddity at census/items.md:30 (save unavailable due to sessions.jsonl corruption) is being cured by another lane right now — re-verify that row once their commit lands. Build via tools/rjit; verify green; READY report with the capture table path. DO NOT COMMIT — supervisor sequences commits. Only the user's hands PASS it.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

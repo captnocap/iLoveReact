@@ -1,0 +1,12 @@
+{
+  "id": "req_0175",
+  "at": "2026-06-07T04:18:13.575Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — add to your queue: RAMPREAL-0606. User verbatim: \"with the building pieces in general, the ramp, we need to make it an actual ramp lol. we currently have 2 things, ramp and stairs, but the ramp is also a staircase and not a ramp\". The RAMP piece renders/reads as a staircase — make it an actual ramp: one smooth inclined plane (flat sloped surface, no steps), visually and physically distinct from STAIRS (which keeps its steps). Your collision slope heightfield is likely already a smooth incline — the VISUAL geometry is the lie; fix the mesh to match the collision (visual-collision coherence law). Keep your ramp side/back solid bands and walk-up guarantees green. Stairs stays as-is. Quick SELFSHOT of ramp vs stairs side by side. The user looking at a ramp and seeing a ramp is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

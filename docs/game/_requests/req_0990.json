@@ -1,0 +1,28 @@
+{
+  "id": "req_0990",
+  "at": "2026-06-15T13:02:45.832Z",
+  "origin": "session:d91c8b8f",
+  "text": "Great. Now lets go back to the same exact test because it shows why this is still exactly what i said, you are slicing the wrong face. so. lets look at block bench:\n\nso i have this side picked\n[Image #50] \n\ni do a loop cut \n[Image #51] \nsame side is still selected, just the slice is in half. i change direction \n[Image #52] \nstill the same face\n\nlets look at ours now\n\nface selected \n[Image #53] \n\nnext hit loop cut \n[Image #54] \n\nhm thats weird, our face is still the exact same size. it didnt half. we must be cutting the wrong face\n\nand we are. look. the cut is right here\n[Image #55]",
+  "status": "review",
+  "sessionId": "d91c8b8f-6568-469d-83d0-62ea4b4091c6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T13:04:16.236Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T13:06:43.392Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the core loop-cut bug exposed by the side-by-side: the cut must SPLIT the selected face (the face halves), so the cut axis is one of the face's two IN-PLANE axes — NOT its normal. I had wrongly 'corrected' it to the normal axis earlier (which slabbed toward the face and left it whole, the exact symptom: 'our face is still the exact same size'). loopCutAxisInfo now derives the two in-plane axes (excluding the face normal) and Direction 0/1 picks between them. Because an in-plane cut splits the selected face into two tagged pieces, added lcKeptFace to keep just the −side (lo-centroid) half as the selection + highlight, so the face visibly halves and shrinks as offset rises (matching 'I get the short end of the stick') instead of both halves re-covering it. Removed the now-moot fromHi mirroring. Preview highlight + Apply both use lcKeptFace; tag still rides through the cut so the selection persists onto the right half. editMesh 19/19; Studio bundle-clean; hot-reload TSX; nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T13:06:43.391Z"
+}

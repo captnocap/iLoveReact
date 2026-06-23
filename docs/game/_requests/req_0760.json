@@ -1,0 +1,10 @@
+{
+  "id": "req_0760",
+  "at": "2026-06-13T14:16:00.412Z",
+  "origin": "session:ef4fbf70",
+  "text": "each already owns its own slot so it shouldnt be a change",
+  "status": "new",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": []
+}

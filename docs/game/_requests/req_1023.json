@@ -1,0 +1,28 @@
+{
+  "id": "req_1023",
+  "at": "2026-06-15T17:32:54.313Z",
+  "origin": "session:46d99bcc",
+  "text": "ok. last thing is the stepping. so using the gizmo without modifier should always step increment,s shift is a smaller set, and alt is freeform. this all across the board for gizmo use is freeform. lets fix that and then we can be done with this slice",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T17:33:44.659Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T17:36:28.361Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made every gizmo drag STEPPED by default instead of freeform (USER ruling): no modifier = whole modeling units, Shift = a finer step, Alt = freeform (no snap) — across the board. Added one module helper snapToStep(value, step, fine, mods) in Studio.tsx (Alt -> value unchanged; Shift -> fine step; else default step; rounds value to the nearest multiple). Applied it to every gizmo drag in onMove: the vertex/edge/face MOVE snaps the translation distance; per-axis RESIZE snaps the resulting half-extent (so sizes land on whole units); uniform center-hub resize snaps the scale factor; and the loop-cut SLIDE gizmo (req_1022) snaps its world delta. Steps are P2 tunables in the STUDIO table: gizmoStepMeters = 1/16 (1 unit), gizmoStepFineMeters = 1/64 (quarter unit), gizmoUniformStep/Fine = 0.1/0.05. Modifiers are read live from the heldMods key bus, which tracks keyup as well as keydown so Shift/Alt take effect mid-drag. Studio.tsx bundles clean. Updated the PLAYBOOK build log and corrected the project_studio_mesh_editor memory (the old 0.1/0.01/0.001 snap plan is superseded). Hot-reload TSX. This closes the first design-gated edit-ops slice.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T17:36:28.360Z"
+}

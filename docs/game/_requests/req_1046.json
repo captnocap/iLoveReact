@@ -1,0 +1,10 @@
+{
+  "id": "req_1046",
+  "at": "2026-06-15T18:38:46.557Z",
+  "origin": "session:de42f85d",
+  "text": "Right. ok cache reads kinda kill that. but cache also is on a time. so then the real benefit is when its a session already ongoing, and u need a new feature that is part of the same context but u dont want them to go and search for it, so you provide it, and say just go write the change rather than them searching",
+  "status": "new",
+  "sessionId": "de42f85d-94df-4add-951f-a1f5bdd46a23",
+  "captureMode": "hook",
+  "events": []
+}

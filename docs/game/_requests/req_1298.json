@@ -1,0 +1,36 @@
+{
+  "id": "req_1298",
+  "at": "2026-06-18T17:25:31.015Z",
+  "origin": "session:76a33154",
+  "text": "oh hm. ok so i have a color picked. i am trying to paint this face and i dont see grid lines or anything at all what am i doing wrong [Image #15]",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T17:27:19.472Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T17:30:49.888Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-18T17:40:56.513Z",
+      "actor": "76a3",
+      "kind": "note",
+      "text": "Follow-up commit 973343fe1: the hovered red box in the screenshot was the whole-face CELL — at 2u (~12.5cm) cells a small gun face is smaller than one cell, so it collapsed to a single cell with no interior grid. Fixed: (1) PAINT_CELL_UNITS 2→0.5 (~3cm) so prop faces show a real grid (GRID_MAX caps huge faces; only painted cells render); (2) added FILL mode — a 'fill' toggle in the PaintPanel makes one click paint the WHOLE face one colour (the 'just one colour per face' path, cell-size-independent). Build clean; meshPaint 8/8 (count test pinned to explicit 2u/cell)."
+    }
+  ],
+  "resolution": "Fixed 'I'm in paint mode with a colour but see no grid lines and nothing paints'. Root cause: there was no cursor poll — a Pressable's onMouseMove only fires while a mouse button is HELD (engine.zig gates .move on dragging_left), so a free-moving cursor delivered no hover, paintProbe never ran, and the grid overlay (which reads paintHoverRef) had nothing to show. I'd ported the painter but not the hover-poll fix the demos use. Added a paint-mode cursor pump that polls getMouseX/getMouseY every 33ms and calls paintProbe for the hovered face/cell (probeRef keeps tex/camSnap fresh since the effect runs once per mode change); outside the viewport it clears the hover. Verified out-of-band that pickFaceCell + faceCellGrid resolve on a TEXTUREIZED mesh (6/6 cuboid faces get valid 16×16 grids, centre ray hits face 3 cell 8,8) — so press-and-drag painting already worked; this restores the missing hover grid so you can see the cells before painting. Builds clean. Needs rjit dev to confirm the live hover visually. shas 1ef84ed9c.",
+  "shas": [
+    "1ef84ed9c"
+  ],
+  "resolvedAt": "2026-06-18T17:30:49.887Z"
+}

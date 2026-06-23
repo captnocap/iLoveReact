@@ -1,0 +1,33 @@
+{
+  "id": "req_0504",
+  "at": "2026-06-10T11:06:32.445Z",
+  "origin": "session:e11a01ef",
+  "text": "Here are some things i think will help. So, look here. you see how this one selected (the darker brick) is just one slab. [Image #9] well, thats one slab in a large building [Image #10] and so when moving or even baking. this whole building should turn into one object not 179 that it currently is",
+  "status": "review",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T11:07:17.973Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T11:15:50.789Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built what the user called for (74ca964f4): the standing city no longer renders one Scene3D.Mesh per visual box. PlacedPieceMeshes now buckets every OPAQUE box into Scene3D.Instances nodes keyed by texture (the framework's existing instancing door — stride 12: pos+rot+scale+rgb, one texture per bucket) — the whole ~4.9k-piece city is a handful of GPU-instanced nodes, and a building move is a data-array update instead of ~1,800 mesh unmounts+mounts (the measured 1-2s host stalls). Per-piece shapes cache on the immutable piece object + join digest so a 1-piece edit recomputes 1 piece. Ramps, glass, window panes and anything translucent stay individual meshes (instance batches draw opaque); selection tint rides per-instance color. The iso cut-away switches from FADE to HIDE (Sims floor view) because faded pieces can't ride the buckets — and raycasts now pick only what's visible while whole-building select still grabs hidden storeys so moves never tear a building. F2's camera-occlusion fade is unchanged. Same renderer serves iso + F2 + ModelViewer; one semantic piece model intact (V24 — render-side aggregation only). game verify GREEN 72/72; bundle clean. User should reload, move that 179-piece building, and read the watchdog: stalls should collapse; visualBoxes now also prints buckets=/loose=/batchMs=.",
+  "shas": [
+    "74ca964f4"
+  ],
+  "resolvedAt": "2026-06-10T11:15:50.788Z",
+  "tags": [
+    "idea"
+  ]
+}

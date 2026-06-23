@@ -1,0 +1,33 @@
+{
+  "id": "req_0502",
+  "at": "2026-06-10T10:53:30.536Z",
+  "origin": "session:e11a01ef",
+  "text": "its still not giving legit times. i just:\n\nmoved a building -> clicked start on a stop watch -> it got to 3.01s before the move resolved\n\ni started the stopwatch AFTER dragging it so its even longer than the 3.01 that i got but it shows me: [js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=43.33\n[js.warn] [PLACEFREEZE] session.commitMany route=/ channel=world count=358 mode=defer channelMs=22.01 markerMs=12.54 | seqMs=13.67 jsonMs=0.52 insertMs=10.93 foldMs=8.77 totalMs=34.92\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=44.40\n[js.warn] [PLACEFREEZE] session.commitMany route=/ channel=world count=358 mode=defer channelMs=21.92 markerMs=13.05 | seqMs=12.93 jsonMs=0.50 insertMs=11.66 foldMs=9.44 totalMs=35.29\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=44.83\n[js.warn] [PLACEFREEZE] session.commitMany route=/ channel=world count=358 mode=defer channelMs=22.34 markerMs=12.31 | seqMs=12.27 jsonMs=0.51 insertMs=10.44 foldMs=11.03 totalMs=34.89\n[js.warn] [PLACEFREEZE] visualBoxes pieces=4871.00 boxes=4871.00 ms=44.64",
+  "status": "review",
+  "sessionId": "e11a01ef-3d5e-4748-959c-a67fdd32b894",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T10:54:17.641Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T10:58:33.449Z",
+      "actor": "session:e11a01ef",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Found the multi-second gap the stopwatch caught and the probes missed (dd1445d9f). mapBuildFootprints — the 2D map's building-footprint grouping — runs on EVERY shell render (index.tsx:600, unmemoized), and for non-prefab pieces its grouping did an O(N) pieces.find PER MEMBER ID: one big connected building at ~4.9k pieces = millions of string-compare scans, re-run on every render, fired again right after every move. It is now WeakMap-cached on the pieces array identity (computed once per actual world change; an id Map kills the nested find) and prints [PLACEFREEZE] mapFootprints when a real pass exceeds a frame. Also closed the measurement holes: moves now stamp the release-to-standing probe (only paint had it) so a move prints '[DRAGDRAW] move commit (N pieces) -> standing ms=..'; liftToTerrain is probed; and a frame-stall watchdog in the iso pane prints '[DRAGDRAW] frame stall ms=..' for ANY >150ms main-thread gap — so whatever time remains will name itself instead of hiding. game verify GREEN 72/72. Repro: move the same building, stopwatch it, and paste the lines — expect the stall to be mostly gone, and any leftover to show as a named stall line.",
+  "shas": [
+    "dd1445d9f"
+  ],
+  "resolvedAt": "2026-06-10T10:58:33.449Z",
+  "tags": [
+    "perf-log"
+  ]
+}

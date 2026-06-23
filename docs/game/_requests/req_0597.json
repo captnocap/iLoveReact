@@ -1,0 +1,32 @@
+{
+  "id": "req_0597",
+  "at": "2026-06-11T01:51:34.439Z",
+  "origin": "session:da94-interrupt",
+  "text": "oh also, im trying to place a bed in a room that has a roof. the bed keeps placing on the roof tho xD god damnit",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-11T01:51:45.719Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T01:54:11.912Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the bed-on-the-roof placement. Root cause: in the iso editor, the level cutaway hides everything above the active floor from RENDERING and from the grab/move raycasts, but the PLACEMENT snap resolver (resolveSnapTarget in IsoAuthor's resolveAt) still ran against the full piece list — so placing furniture at floor 0 inside a roofed room raycast the invisible roof and stacked the bed on top of it. The resolver now snaps against the same visiblePieces (cut-away) list as grabbing — you can't snap onto what you can't see. Placing on upper storeys still works since the active level's own floor tops remain in the visible list. Heads up that the placement ghost also benefits: the preview now shows the bed on the room floor, not floating at roof height. Editor is hot-reload territory (TSX only), so it should be live on your next reload — no rebuild needed.",
+  "shas": [
+    "b61cc89c1"
+  ],
+  "resolvedAt": "2026-06-11T01:54:11.912Z",
+  "tags": [
+    "bug"
+  ]
+}

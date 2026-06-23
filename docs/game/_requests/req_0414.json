@@ -1,0 +1,28 @@
+{
+  "id": "req_0414",
+  "at": "2026-06-10T02:30:23.423Z",
+  "origin": "session:2e5197b8",
+  "text": "ya i dont care if the commit swept other work it doesnt matter",
+  "status": "review",
+  "sessionId": "2e5197b8-1894-4144-a6e1-1e2bfb997258",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T02:30:42.798Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T02:30:42.808Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User ruling: do not care that commit a4480696a swept in another lane's pre-existing uncommitted camera-occlusion binding wiring — it does not matter, leave it as-is. No code change; recording the disposition of the commit-scope question raised while finishing the camera-occlusion fix (req_0407/req_0412).",
+  "shas": [],
+  "resolvedAt": "2026-06-10T02:30:42.808Z"
+}

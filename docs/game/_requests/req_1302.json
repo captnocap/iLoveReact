@@ -1,0 +1,30 @@
+{
+  "id": "req_1302",
+  "at": "2026-06-18T18:18:28.006Z",
+  "origin": "session:76a33154",
+  "text": "the fine is still not fine enough. the item is barely 1m in length. the smallest paint is 0.8 that is effectively still the whole damn thing",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T18:20:36.555Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T18:23:26.561Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made paint detail go much finer for a small (~1m) item. Two limits caused 'the finest is still the whole face': (1) GRID_MAX capped a face at 64 cells, so a metre-scale face could never get smaller cells no matter the setting; (2) the finest preset (0.12u) was still coarse for the small detail faces a gun is made of. Fixes: raised GRID_MAX 64->256 (safe because only PAINTED cells bake and they are run-merged, and the hover overlay now STRIDES its grid lines to ~40 per axis so a many-cell face stays cheap to draw); made the 'detail' presets genuinely fine — ultra 0.03u (~0.2cm) / fine 0.08 / med 0.2 / coarse 0.5 / XL 1.2 — and lowered the default to 0.08. Verified the cell math out-of-band: a 1m face now yields 200x200 cells at default, a 12cm face 25x25, a 3cm face 7x7 (17x17 at ultra), so brush-1 is a small dab at every scale (vs the old 1-cell-per-face). Build clean; meshPaint 8/8. Needs rjit dev to confirm live: on the gun, brush-1 should now be a small dab; tap detail->ultra for the finest. shas 85e8358e8.",
+  "shas": [
+    "85e8358e8"
+  ],
+  "resolvedAt": "2026-06-18T18:23:26.560Z"
+}

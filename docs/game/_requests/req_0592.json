@@ -1,0 +1,39 @@
+{
+  "id": "req_0592",
+  "at": "2026-06-10T19:24:39.532Z",
+  "origin": "session:7a5b02e7",
+  "text": "ok and so images? whats the point of me being able to add an image if i cant ship it in the game, pass it over /hand-over",
+  "status": "review",
+  "sessionId": "7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T19:25:38.254Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T19:28:09.571Z",
+      "actor": "fable-mat",
+      "kind": "note",
+      "text": "HANDED OVER to a fresh session (user-invoked /hand-over): full continuation brief at /tmp/handoff-20260610-192615-ship-decal-image-nodes-via-the-content-addressed-asset-store.md (original_conversation_id 7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb). Task: ship decal IMAGE nodes via the gamefile's content-addressed asset store (blobs+manifest already exist in gamefile.zig; pack image bytes as sha256 blobs at bake, reference by key in the doc's image record, stbi-decode + blit in decal_raster at load). Stays in doing until the next session lands it."
+    },
+    {
+      "at": "2026-06-11T02:03:14.280Z",
+      "actor": "fable-img",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Decal IMAGE nodes now ship and render in the compiled no-V8 game via the content-addressed asset store (V29). Bake side: new compile/decalAssets.ts sink — packDecalDoc interns each visible image node's file (readFileBase64 cwd-relative, the same path the editor's Image primitive loads; sha256 is the address so identical content ships ONE blob; keys count from 3001, manifest kind 11, 8MB cap) and the packed image record carries the manifest key (u32 assetKey | f32 borderRadius | u16 srcLen | src-for-diagnostics). The sink threads buildWorldInstances → createHmscMapfile → bakeGameFile, which ships each payload as a manifest entry + tape-envelope asset (embed:false, the player-model precedent) and declares the keys in map.refs so installAndValidate gates them. Loader side: constructor.zig reads every kind-11 manifest asset into Scene.decal_assets; decal_raster NODE_IMAGE stbi-decodes and bilinear-blits into the node rect with the same rounded-rect SDF coverage rect fills use (borderRadius + opacity honored), before the global 180° flip. Every failure mode (empty src, unreadable, oversized, invalid transport, undecodable, missing payload) degrades to a warn + skipped node — never a failed bake or construct. Proof: a synthetic gamefile carrying a real PNG as an embedded kind-11 blob rendered the image ON a box face in the headless loader with zero skip warns (rounded corners visible); rjit game shot stays GREEN on the real world; suites decalAssets 2/2, decalPack 6/6, worldGeometry 7/7, worldColliders 4/4 all pass. NOTE for the user: both saved decals (claudes-closet, dicks) have EMPTY-src image nodes — re-pick a real image in /compose and Compile to see it on the wall. Docs: hmsc-int.md DECALIMG-0610 + _index record updated same commit.",
+  "shas": [
+    "79c25fc4d"
+  ],
+  "resolvedAt": "2026-06-11T02:03:14.279Z",
+  "tags": [
+    "ask"
+  ]
+}

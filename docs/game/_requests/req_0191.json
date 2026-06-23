@@ -1,0 +1,12 @@
+{
+  "id": "req_0191",
+  "at": "2026-06-07T05:48:21.265Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — add to your items-source queue: VOXELSCALE-0606. User verbatim: \"the voxels, im pretty sure they are defaulted as 1m x 1m x 1m which if that is true, is going to be a problem, i need it to scale way down for the sake of item size, or have an approach that lets me set the scale of the voxel. because i then have an impossible task of carving for anything that isnt massive scale\". First print the data: what IS the current voxel cell size in the VOXEL lens (user says probably 1m cube — confirm from the store/stage, post the number). Then: voxel cell size becomes a SETTABLE per-blockout parameter in the VOXEL lens panel (numbers are tuning data — never hardcoded), with the DEFAULT scaled for item-sized work, not building-sized (pick a sane item default and say what you picked; the user dials from there). The whole pipeline must respect the cell size: stage rendering, face math, W/D/H dims, and critically the voxel->item Globe bake import — an item built from 10cm cells must bake at 10cm cells. Test: author a blockout at a small cell size -> import to item -> resulting item dimensions match cell*count. The user carving an item-sized thing without fighting meter cubes is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

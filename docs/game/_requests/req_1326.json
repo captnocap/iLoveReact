@@ -1,0 +1,30 @@
+{
+  "id": "req_1326",
+  "at": "2026-06-18T22:51:52.309Z",
+  "origin": "session:9e041fa8",
+  "text": "no they arnt. they are right there. [Image #48] [Image #49]",
+  "status": "review",
+  "sessionId": "9e041fa8-bb4b-47e8-9250-ce5cf71d3fa9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T22:55:16.591Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T22:55:16.601Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The persistent dark lines on the painted receiver were neither paint nor geometry gaps but flat-shading creases: editMeshToGeometry assigned every vertex its own face's Newell normal, so a curved low-poly part (the receiver: 284 faces, ~54 distinct normals confirmed from the mesh dump) showed a per-facet lighting seam at each edge — bilinear had smeared paint over them, and the nearest-sampler fix (req_1321) exposed them. Reworked editMeshToGeometry to emit SMOOTH vertex normals with a crease angle (SMOOTH_CREASE_DEG=40): each vertex averages only the adjacent faces within the crease angle of the current face, so gentle curve facets shade smoothly (seams vanish) while box corners stay hard. Hot-reloadable cart .ts; editMesh 92/92, cart bundles clean.",
+  "shas": [
+    "e7df0739f"
+  ],
+  "resolvedAt": "2026-06-18T22:55:16.601Z"
+}

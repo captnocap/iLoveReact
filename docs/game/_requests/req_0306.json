@@ -1,0 +1,13 @@
+{
+  "id": "req_0306",
+  "at": "2026-06-08T10:05:44.294Z",
+  "origin": "session:f48e9dac",
+  "text": "PARITY-WITH-/test CORRECTION — found the real data. The user showed their world in /test: a city of tall 3D towers + a labeled \"Building 1\". The no-V8 loader renders tiny specks and reports buildings:[] empty. The bug is the bake reading the WRONG field.\n\nTHE REAL DATA — the world's structures are PLACED PIECES, not \"buildings\":\n- The build editor (cart/hmsc-int/editors/build/) commits `{ kind: 'piecePlaced', placement: { pieceId, x, y, z, yawDegrees } }` to the WORLD channel. The channel materializes them as `world.state().pieces` — an array of placed pieces. pieceId looks like `wall.concrete.common`, `floor.concrete.common`, etc. (see cart/hmsc-int/editors/build/commits.test.ts).\n- A prefab (e.g. \"Building 1\") is ONE commit that stamps N semantic pieces.\n- The tall towers the user sees in /test = stacked wall pieces. The 2D icon-clusters = the top-down view of these same placements.\n\nTHE FIX:\n1. The bake (bakeGameFile.ts / worldGeometry.ts) must read the PLACED-PIECE world stream (`world.state().pieces`), NOT the empty `buildings:[]` field. Find exactly how /test gets its pieces and renders them, and feed the loader the same.\n2. Emit each placed piece as a Scene3D.Mesh instance: geometry per pieceId (reuse the SAME piece meshes /test renders — wall/floor/etc.), positioned at the piece's x,y,z with yawDegrees. This IS the keystone architecture: piece meshes = asset vocabulary, placements = the RLE tape.\n3. Keep 3D-by-default and the real-geometry assertion you already built — now the instance count should match the real piece count (hundreds), and FAIL if it's near-zero again.\n\nGROUND TRUTH = /test. The loader window must render PARITY with what the user sees in /test — the same walls/towers/Building 1, at the same scale. Go look at how /test (the build editor's 3D play view) turns pieces into meshes and mirror that geometry from baked data.\n\nBAR: ONLY the user running `tools/rjit game play` and seeing their actual structures — the towers from /test, not specks — counts as done. Do NOT self-declare GREEN. When ready, tell me exactly what the user should run and what they should see; I relay, the user verifies.\n\nCommit with explicit paths (NOT git add -A; ~389 set-aside files). Your own context — no Task tool, no subagents. tools/rjit only. No reset/revert. /hand-over if you cross ~55% context.",
+  "status": "new",
+  "sessionId": "f48e9dac-15a7-4cf5-a2e4-26a5d851461c",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

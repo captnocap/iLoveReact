@@ -1,0 +1,30 @@
+{
+  "id": "req_1526",
+  "at": "2026-06-20T22:07:34.193Z",
+  "origin": "session:6580d434",
+  "text": "here is a question i have that could help or be a red herring, but, look at the staircase. what exactly is it? because, if i look at it, it looks like one big solid slant right. but thats not the case. i know this because for a long time we had t he problem where i could walk under the stairs through an invisible wall. So, that must mean, from what im thinking, is that there is a wall piece inside of the staircase, maybe causing the problem",
+  "status": "review",
+  "sessionId": "6580d434-ee0d-4691-a47a-61556997a089",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T22:08:37.925Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:12:45.227Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's hypothesis that a wall piece hidden inside the staircase causes the stick (recalling the old walk-under-the-stairs invisible-wall bug). The stairlog data rules a solid wall out: a solid-rect block would show a non-zero rectpush column (the side-push pulling the player off the desired path), but it reads (0.000,0.000) on every stuck frame, and hfcancel=false rules out the too-steep terrain move-cancel. The staircase collides as a heightfield slope (placedPieceRamps/registerStairSlope), not a wall piece, and the evidence points at the uphill speed-clamp misreading the crest cell rather than any collider. Added integ=()/clamp=() velocity instrumentation to confirm (commit 86f5f35c8); if integ is large while clamp is tiny, the speed-clamp is the cause.",
+  "shas": [
+    "86f5f35c8"
+  ],
+  "resolvedAt": "2026-06-20T22:12:45.227Z"
+}

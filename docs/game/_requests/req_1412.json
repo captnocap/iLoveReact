@@ -1,0 +1,28 @@
+{
+  "id": "req_1412",
+  "at": "2026-06-19T16:08:44.631Z",
+  "origin": "session:d6961119",
+  "text": "is there only one model for generating or ? also, do u know if there could be anything bit more robust. this works. but curious what model is t his? and what else is there around? im now checking out HF and some of these recent models seem way more up to speed but to be honest with you these models make it very obtuse in how to determine if i can even load its weights or not but  https://github.com/TencentARC/InstantMesh  https://github.com/buaacyw/MeshAnythingV2 both of these models are the exact quality range that our player model is already made at. the meshanything i think is 8gb vram ? i think",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T16:09:58.012Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T16:19:03.415Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Researched the 3D-model landscape (gating/license/size via HF API) and answered 'what model / what else / can I load it'. Findings + the gated/license decode rule delivered; saved to memory. We run Shap-E (placeholder). User's finds: InstantMesh (image->3D, Apache-2.0) and MeshAnythingV2 (a RETOPOLOGIZER to artist low-poly, MIT) — the player-model-quality path = image->3D THEN MeshAnythingV2 retopo. No code; research answer.",
+  "shas": [],
+  "resolvedAt": "2026-06-19T16:19:03.415Z"
+}

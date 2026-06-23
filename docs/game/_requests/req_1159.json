@@ -1,0 +1,28 @@
+{
+  "id": "req_1159",
+  "at": "2026-06-16T08:19:29.586Z",
+  "origin": "session:760f9f8d",
+  "text": "hey just verify for me, because we are having weird bugs, that grass you shipped 8 hours ago. the code is on disk correct",
+  "status": "review",
+  "sessionId": "760f9f8d-dc0f-4592-9807-536386b8fe20",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T08:20:33.217Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T08:23:12.907Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified the grass/bush code is all on disk and intact. Confirmed every layer: geometry (GrassBlade.ts, BushClump.ts registered in geometries/index.ts), population (grassPopulation.ts populateFoliage + GRASS_CONFIG/BUSH_CONFIG), render (GrassField.tsx GrassField+BushField+FoliageField wired in GameWorld3D), pipeline (3d.zig g_grass_pipeline + time uniform + ~grass~ routing, shaders.zig grass_wgsl), ground (tileFill.ts fill_grass), density tiles (world/tileKinds.ts + design.ts), settings (rigs.tsx ColorWheel rig + tunables), and compiled (world_loader.zig SHAPE_GRASS/SHAPE_BUSH + buildGrassBlade/buildBushClump, worldGeometry pushFoliage, bakeGameFile applyOverrides). KEY FINDING — split state: the FRAMEWORK files (3d.zig/shaders.zig/world_loader.zig) are now CLEAN/committed in HEAD (their grass symbols are in HEAD), carried in by another session's commit 8c1ab8284 'feat(hmsc-int): ~frond~ foliage pipeline — palm trees the grass way (req_1119/1130)'; the cart/TS layer is still on disk but UNCOMMITTED (untracked/working-tree). Nothing missing; build runs off disk. Flagged the likely cause of the user's 'suddenly broke': commit 8c1ab8284 refactored the SHARED foliage pipeline 'the grass way', touching the same ~grass~ routing/grass_wgsl my grass+bush depend on — a prime regression suspect. Offered to diff that commit vs my TS expectations; user had not yet decided.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T08:23:12.907Z"
+}

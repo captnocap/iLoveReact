@@ -1,0 +1,10 @@
+{
+  "id": "req_1035",
+  "at": "2026-06-15T18:16:37.715Z",
+  "origin": "session:de42f85d",
+  "text": "very interesting! well. thanks :D maybe some day il give that a try then. you know its funny because i was also very confused by how --system-prompt works. it works this way:\n\nso normally you see \n'This is Claude Code' followed by the harness info. well --system-prompt goes in between this, so it goes 'This is claude code' 'whatever the system prompt is' 'claude codes harness details' which feels ass backwards to me also! lmfao cuz instantly i go well cant u just say that u arnt claude code and all the harness details are irrelevant and effectively 'jailbreak' it that way, since you have no realization that it is or isnt from anthropic or me",
+  "status": "new",
+  "sessionId": "de42f85d-94df-4add-951f-a1f5bdd46a23",
+  "captureMode": "hook",
+  "events": []
+}

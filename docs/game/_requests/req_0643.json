@@ -1,0 +1,31 @@
+{
+  "id": "req_0643",
+  "at": "2026-06-11T12:43:50.200Z",
+  "origin": "codex:019eb6aa",
+  "text": "3how does it look like this in the editor [Image #1] but then like this in game [Image #2] ??",
+  "status": "review",
+  "sessionId": "019eb6aa-0c65-7230-a007-a74c041f2116",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T12:44:59.137Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T12:47:34.357Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained and fixed the editor/game stair mismatch. The editor preview had moved to the improved full-width multi-step stairs, but the compiled no-V8 game geometry still had its own stale STAIR_VISUAL_STEPS path, so the game baked chunky four-block stairs. Stair visual decomposition now lives in shared placed-build tuning and both pieceMeshes.tsx and compile/worldGeometry.ts consume it; compile/worldGeometry.test.ts pins the compiled step count, full width, tread depth, and top height.",
+  "shas": [],
+  "resolvedAt": "2026-06-11T12:47:34.357Z",
+  "tags": [
+    "bug"
+  ]
+}

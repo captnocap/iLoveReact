@@ -1,0 +1,16 @@
+{
+  "id": "req_0086",
+  "at": "2026-06-06T11:35:38.300Z",
+  "origin": "supervisor-relay",
+  "text": "there is two 'edges' for wall placement and i hate it. there is an outer-wall placement where you place the wall on the actual edge/side of the floor, and one on the top of it.",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T17:18:08.026Z",
+  "resolution": "Wall placement now has one top-of-floor perimeter anchor only; the side/outer-edge anchor path was removed, placed wall/floor junctions use the shared build lattice, and the user confirmed the wall no longer sits on the side and the wall/floor flush problem is solved.",
+  "shas": [
+    "6d21dd74c67d4925d327caa6f5d2a843c6db4162"
+  ],
+  "tags": [
+    "ux"
+  ]
+}

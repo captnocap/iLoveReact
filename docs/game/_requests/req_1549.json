@@ -1,0 +1,36 @@
+{
+  "id": "req_1549",
+  "at": "2026-06-20T23:58:44.078Z",
+  "origin": "session:fc02d21a",
+  "text": "hello. we have been working on a lot of things there is a lot of work in progress, but il pass to you something to work on and check for me is when i click to load the paint mode in the studio mesh editor, im dropping a significant amount of frames, and i thought at first it was just my painting i was doing, but i switch to object select which removes the paint tools. and my painting still shows and my fps goes right back to 240. so im thinking, its the paint tools obviously, i mean it is because i just proved it was but idk why. i assume maybe the icons, but are the icons sdf baked ? if not, then its 100000% the icons",
+  "status": "review",
+  "sessionId": "fc02d21a-4f07-4cc8-94e3-f03c1410338a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T23:58:52.304Z",
+      "actor": "opus-paintfps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T00:06:20.903Z",
+      "actor": "opus-paintfps",
+      "kind": "note",
+      "text": "DIAGNOSED: paint-mode fps drop is the brush/tool ICONS, exactly as the user guessed. BrushKit (cart/hmsc-int/editors/model/studiokit/StudioViewport.tsx:2174, mounted only when selMode==='paint') renders ~21 icons (15 BRUSH_PRESETS + ~6 tools) via runtime/paint/controls.tsx PathIcon -> a full <Graph>+<Graph.Path> per icon. <Graph.Path> is NOT baked: every frame it re-parses the SVG d-string, rebuilds curve segments, and tessellates via drawStrokeCurves. framework/gpu/sdf_icons.zig says this verbatim: 'a toolbar with 50 icons does 50x that work every frame'. Object-select unmounts BrushKit -> 240fps; the painted texture persists because it is a baked Paintable (independent of the icon UI). The framework ALREADY has the baked path: <Icon>/<SdfIcon> -> sdf_icons.zig + icon_atlas.zig (Lucide SDF atlas), bake via scripts/bake-icons.js. The brush/tool glyphs are custom paths in runtime/paint/icons.ts and just don't use it. Fix = route BrushIcon/ToolIcon through the SDF atlas instead of live Graph paths."
+    },
+    {
+      "at": "2026-06-21T00:23:11.928Z",
+      "actor": "opus-paintfps",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User's instinct was exactly right: paint-mode fps drop in the Studio mesh editor is the brush/tool ICONS, not the painting. BrushKit renders ~21 icons as live <Graph.Path> surfaces, each re-parsing its SVG d-string and re-tessellating curves every frame (framework/gpu/sdf_icons.zig documents this exact cost); object-select unmounts the kit so fps returns to 240, while the baked Paintable texture keeps the painting visible. Fix routes the glyphs through the framework's existing SDF atlas: new tracked scripts/paint-glyph-source.ts re-uses runtime/paint/icons.ts and flattens each path into fill polygons + stroke polylines; the (untracked) cli/commands/bake-icons.ts baker bundle+evals it, scanline-fills, and packs 20 glyphs beside the 1936 lucide icons (lucide UV table byte-identical, no churn); runtime/paint/controls.tsx BrushIcon/ToolIcon now draw <SdfIcon name='brush.X'/'tool.X'> with a live-path fallback. icon_atlas.zig + baked-names.ts regenerated; hmsc-int rebuilt clean. Needs a dev-host RESTART to pick up the compiled-in atlas, then verify via the FRAMES bar in paint mode. CAVEAT: re-running stock 'rjit bake-icons' would drop the glyphs unless the untracked baker change persists (cli/ is untracked by design).",
+  "shas": [
+    "b616fac82"
+  ],
+  "resolvedAt": "2026-06-21T00:23:11.928Z"
+}

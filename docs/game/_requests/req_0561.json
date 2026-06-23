@@ -1,0 +1,31 @@
+{
+  "id": "req_0561",
+  "at": "2026-06-10T16:02:13.675Z",
+  "origin": "codex:019eb242",
+  "text": "also the image source u should give me a better approach than just a raw path, like let me pick a file or something easier",
+  "status": "review",
+  "sessionId": "019eb242-3ff1-73a2-b202-5d99e580829d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T16:02:21.466Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:04:26.669Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced image-node raw-path-only workflow with the existing native image picker path. The live materials source wires + image and image node properties to pickImageFile, keeps the raw src field as fallback, and tests cover file:// path cleanup.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T16:04:26.669Z",
+  "tags": [
+    "ux"
+  ]
+}

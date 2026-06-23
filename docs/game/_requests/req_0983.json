@@ -1,0 +1,28 @@
+{
+  "id": "req_0983",
+  "at": "2026-06-15T12:03:26.422Z",
+  "origin": "session:d91c8b8f",
+  "text": "Ok. That looks better haha the lines were the problem. Ok. now, when selecting an element (vertex, edge, face) next introduce the move or resize tool. this is again, the same XYZ green red blue element but you pull on this elements direction to control the point in reference. so, this is what we add next. is this tool [Image #26] \n\nthis state is the move tool [Image #27] \nthis state is the resize tool [Image #28] \n\nwhere this appears:\n\non a face directly in the center of the face [Image #29] \non a vertex its directly on the vertex [Image #30] \nand then on an edge directly on the center of the edge. [Image #31] \n\nnow what happens when you get multiple faces, vertex, or edges [Image #32] it just finds the best center. importantly, the red green and blue arrows never ever ever are hidden by the geometry. always on top",
+  "status": "review",
+  "sessionId": "d91c8b8f-6568-469d-83d0-62ea4b4091c6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T12:04:22.186Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T12:18:14.573Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the transform gizmo (move + resize) — the last first-slice Studio piece. Pure ops in editMesh.ts: vertsCentroid/vertsHalfExtent/translateVerts/scaleVerts (3 new tests; editMesh now 15/15). New meshGizmo.tsx holds the 2D overlay (TransformGizmo: RGB arrows for move, square handles + center hub for resize), the handle hit-test (pickGizmoHandle), selection->verts gather (selectionVertIndices), and the screen-drag->world mapping (axisScreen/dragWorldDistance, frozen at mouse-down so perspective at the anchor is honored). The gizmo anchors on the selection's best center (the vertex itself / edge midpoint / face center / centroid of a multi-select) and is drawn through the meshSelect projector as the viewport's last 2D children, so the arrows are NEVER occluded by geometry (USER hard rule). Studio.tsx viewport: a move|resize toggle joins the element toolbar; onDown checks the gizmo before pick/orbit; a drag mutates a viewport-local draft (re-lowered live, only the dragged part) and commits to the store on mouse-up, running the concave Auto-Fix guard (splitConcaveFaces) on commit — commit-on-release, no per-move store write that would melt the frame. Two store changes made it correct: per-part lift is now FROZEN at mint (editing verts no longer slides the part to re-seat on the grid), and a meshRev counter re-lowers committed geometry without refitting the camera (separate from revision). Auto-Fix auto-splits (the recommended action); the Revert/Ignore dialog is a later refinement. All four TSX files bundle clean; user confirmed it looks good in-app. Hot-reload TSX, nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T12:18:14.573Z"
+}

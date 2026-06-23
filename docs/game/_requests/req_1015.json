@@ -1,0 +1,28 @@
+{
+  "id": "req_1015",
+  "at": "2026-06-15T16:11:04.557Z",
+  "origin": "session:46d99bcc",
+  "text": "Nice good shit alright the next tool is extrude. what does this look like in block bench:\n\nso, from a fresh cube, i click a face, i click extrude. you can see the face stays selected, but look at the cuts [Image #107] [Image #108] \n\nok, so now, if i pull the extrusion inside of the model. this happens\n[Image #109] \n\nnotice me pulling it in didnt change the uv at all but the extrude in general did\n\nnow pull it out\n[Image #110] \n\nsame thing. uv didnt change. model is changing. \n\nlets get extrude in now",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T16:14:50.607Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T16:17:33.349Z",
+      "actor": "46d9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented extrude (design-gated edit op #2), specced from the user's Blockbench side-by-side. Core insight the user drilled: the extrude OP changes UV, but pulling the cap in/out does NOT — because the in/out is a pure vertex move, which the move gizmo (translateVerts) already never lets touch uv. So extrude is a pure topology op and the shaping reuses the existing gizmo. Added extrudeFace(mesh, faceIndex, distance) to editMesh.ts: copies the face boundary, offsets the copy along the face normal, caps it with the moved face (the cap REPLACES the original at the same index so the selection follows it — 'the face stays selected'), and bridges the old boundary to the cap with side-wall quads wound outward (Newell-normal vs face-centroid test). UV: the cap inherits the original face's UV (the end keeps its texture); each new side wall gets the default full-square UV via faceSquareUV, which I extracted from fullFaceUV so the default mapping lives in one place (rule of two). A negative distance insets (cavity). Wired an 'extrude' button in Studio.tsx (face mode, 1 face selected, beside loop cut) that commits a thin default lip (STUDIO.extrudeMeters = 1/16 m = Blockbench 'Extend 1') and arms the move gizmo, so the user drags the cap in/out (out = longer box, in = inset), neither changing UV. Tests: editMesh 31/31 (+4: caps+walls and same-index cap, UV inherit + outward walls, in/out drag leaves all UV identical, negative = inset). Studio.tsx bundles clean. Updated PLAYBOOK build log + project_studio_mesh_editor memory. Hot-reload TSX. Follow-ups noted: Extend/Direction popup for numeric precision, extrude on a general (non-axis-aligned) face, extrude edge.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T16:17:33.349Z"
+}

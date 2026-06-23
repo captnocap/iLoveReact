@@ -1,0 +1,33 @@
+{
+  "id": "req_0603",
+  "at": "2026-06-11T04:51:16.816Z",
+  "origin": "session:e9bdce32",
+  "text": "So one thing i honestly will say is i dont even use the test route in comparison to the compiled route. the test route is just unreliably laggy, the compiled route is smooth. i use the iso3d for building everything. and the map tile painter.. also, the / route has a dump of useless shit on it here: [Image #1] this panel is worthless at this point, its all just literal noise and un helpful. it would be better if it actually had useful data on it but it doesnt, it just a huge list of rects that dont let me do anything about it.",
+  "status": "review",
+  "sessionId": "e9bdce32-4d43-433c-9b7c-e64529ad18a7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T04:51:40.565Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T04:53:26.897Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Pinned the user's two corrections into the structure review as §10 (committed 482de8ee5). (1) The 'worthless panel' is PrefabInfo (tabs/ObjectsTab.tsx:123-146): it maps prefabs.decompose() straight to one row per piece — 281 dead rects for a 281-piece building. Diagnosed as GUIDING_LIGHT violated in UI form (rendering the outer product instead of the factors); proposed rework = a bill of materials (count per distinct kind/material/edit class + footprint/height/materials rollups) with rows as verbs (click→highlight in the 3D view, re-skin door to buildingsSource, isolate class), flat list demoted behind a disclosure. (2) Workflow correction recorded: /test is avoided as 'unreliably laggy', /compiled is the daily driver — §6's Window pop-out re-targets /compiled, the /test lag is flagged as likely the OPEN StaticSurface re-bake spike hunt, and the felt JS-vs-baked difference is noted as P1/V28 confirmed in practice.",
+  "shas": [
+    "482de8ee5"
+  ],
+  "resolvedAt": "2026-06-11T04:53:26.897Z",
+  "tags": [
+    "ux"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1681",
+  "at": "2026-06-23T00:51:58.484Z",
+  "origin": "session:14b40edc",
+  "text": "lol. so, i rotated it, that made it right side up in the game, in the world editor, its now upside down [Image #4] and also, heres another problem. notice where it sits vs the outline of it (its physics collider) that is a problem. for me to move this thing around, i have to click in an invisible space (the collider space i cant see normally until i click it) and i always miss it",
+  "status": "review",
+  "sessionId": "14b40edc-087f-40bd-9abb-de8f806a4e4f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T00:53:00.778Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T01:09:03.340Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two problems reported on a placed Studio-cooked picture-frame prop. FIXED (Bug B, the collider/selection offset): the collider, selection highlight, and click-pick all sat on the ground while the mesh floated where authored, so you had to click empty space to grab it. Cooked props weren't in resolvePartsForKind's switch and fell to a ground-planted placeholder box; the editor pick (raycastPieces) and highlight (propSelectionShape) anchored to that. Now a cooked prop lowers its own derived collision boxes (asset.collision.boxes, in the lifted space the mesh renders in) and a new propVerticalBand(kind) gives both pick and highlight the prop's true vertical extent, so an off-ground prop is selectable/outlined where it is drawn (0/heightMeters for ordinary props = no change). Committed c2918a61c; cycle-regression follow-up in req_1682. STILL OPEN (Bug A, texture orientation): you rotated the paint so it reads right-side-up in the compiled game but it now shows upside-down in the world editor — that's an editor-vs-compiled V-origin mismatch on the cooked paint atlas (the editor's inline-texture path vs the compiled stb decode/upload disagree on vertical origin), a separate, deeper parity bug I did NOT touch here. Recommend handling it on its own so a wrong V-flip doesn't silently invert every cooked-prop texture; flagged for the user's call.",
+  "shas": [
+    "c2918a61c"
+  ],
+  "resolvedAt": "2026-06-23T01:09:03.340Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0331",
+  "at": "2026-06-08T12:21:15.243Z",
+  "origin": "codex:019ea612",
+  "text": "ok so [Image #1] nice job. next is physics/collision.",
+  "status": "review",
+  "sessionId": "019ea612-258b-7013-b887-0bcd6a4954ea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T12:21:20.492Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T12:24:30.707Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added real no-V8 loader player collision/physics. The loader now imports the existing framework/game/physics.zig capability, builds static flat and oriented rect colliders from the baked world instance rows, and sends SDL input through the host physics step each frame instead of integrating position directly. This adds wall pushback, floor support, gravity/fall-off edges, jump input, velocity-based yaw, and keeps movement camera-relative through the canonical host movement math. Verified with zig build test-game-physics and ./tools/rjit game shot --out zig-out/game/player-physics-collision.png; the shot path built the no-V8 loader and reported 45 physics rects plus 3 oriented physics rects for the current baked map. User still must verify interactively with tools/rjit game play; not marked done, awaiting your verification.",
+  "shas": [
+    "5def17f1d"
+  ],
+  "resolvedAt": "2026-06-08T12:24:30.707Z",
+  "tags": [
+    "ask"
+  ]
+}

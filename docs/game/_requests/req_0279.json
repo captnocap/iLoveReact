@@ -1,0 +1,13 @@
+{
+  "id": "req_0279",
+  "at": "2026-06-08T05:05:42.568Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: JITTER ROUND 3 — the tape has the smoking gun, this supersedes the vague 'jitter' hunt. Diagnostics /tmp/hmsc-int-diagnostics.jsonl spikes channel, live right now: baseline is ROCK SOLID 4.1ms (~241fps); spikes fire to 14-17ms (~57-72fps) in CLUSTERS OF ~4, roughly every 1.2 seconds, and recover instantly. The classifier says verbatim: 'WHAT FIRED: GC / NATIVE — time outside every render phase (V8 GC, vsync wait, or native bridge). Not our draw tree.' Phase breakdown on a caught spike: tick 0us, layout 63us, paint 45us, gpu 244us, OTHER 16.24ms. The cost is entirely in 'other' = outside render = V8 GC pause. NOT CAMRAY, NOT the draw tree.\n\nPRIME SUSPECT (strong): periodic GC = something allocates steadily until the nursery fills. The step wire is the candidate — the host log shows __game_physics_step with wireFloats:7756 EVERY frame. If that typed array (and/or the heightfield/rect wire) is freshly ALLOCATED per step, that is ~31KB/frame × ~240fps ≈ 7MB/s of garbage → GC every ~1-1.2s, which EXACTLY matches the observed spike period. \n\nDO THIS: (1) instrument allocations in the per-frame step/wire path — confirm whether the step wire, rect packing, heightfield wire, or telemetry encoding allocates fresh each frame. Print bytes-allocated-per-frame. (2) The fix is buffer REUSE: a persistent scratch buffer for the step wire sized to max, refilled in place, never reallocated. Same for any per-frame typed-array/object churn you find. (3) Prove it on the tape: after the fix, spikewatch silent through 60s+ — no recurring GC spike class, baseline stays 4.1ms. This IS the CAMRAY tape gate's sibling; do this FIRST (it is the user's actual pain), the under-ramp camera fix second. Frame-time gate is literally the deliverable here. Print allocation data before fixing — no theory commits.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "perf-log"
+  ]
+}

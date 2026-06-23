@@ -1,0 +1,12 @@
+{
+  "id": "req_0112",
+  "at": "2026-06-06T12:59:52.612Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — CONPORT-A-0606. USER RULING on your census, verbatim: \"ya port them all it should have been anyways\". You own part A: the core colon-console diagnostics. Port from the love2d reference FAITHFULLY — copy the reference behavior verb by verb (your census already has the exact pointers: love2d/lua/console.lua :310-:334 with impls :490-:902); do not invent, do not redesign. Your verbs: :help (full colon-console help, completing the partial), :clear, :tree, :nodes, :perf, :find, :style, :lua, :dump, :highlight, :measure, :env, :log (complete the partial to reference semantics). Mode-by-mode parity — a verb is done only when every argument/mode from the reference works. Real test file covering each verb at the console consumption layer. Another lane has part B (watch/macros/templates/wv_validate); noclip + gv_perflog 2 are with a third — touch none of those. Build via tools/rjit only; never revert anything. DONE-BAR: every part-A verb working in the live console with reference semantics + tests + tools/rjit game verify green + READY with a per-verb checklist. DO NOT COMMIT. User confirmation is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

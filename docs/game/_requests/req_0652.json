@@ -1,0 +1,32 @@
+{
+  "id": "req_0652",
+  "at": "2026-06-12T04:29:08.668Z",
+  "origin": "session:8177f24b",
+  "text": "yo nice elevator!! it works only in the test route. next add the method to the compiled game loader",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-12T04:29:16.820Z",
+      "actor": "claude-fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T04:56:05.336Z",
+      "actor": "claude-fable",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The compiled game now RIDES the elevator. New ELEVATORS lump (MAP_LUMP 18): compile/worldElevators.ts derives per-shaft car/module footprint + stops from the SAME GAME_BUILD.elevators source the editor uses; constructor.zig decodes it; world_loader.zig appends one LIVE car rect per shaft and stepElevators re-aims it in place before each physics step (the host's ground resolution carries the rider), with a live render node per car and the board/call E prompts in stepInteract. The static parked-car stopgap is removed. Also fixed the user's occlusion parity report (placedPieceCameraOccluders now emits the shaft frame; PlayRoute counts 'elevator' as occluding) and a verify hole: cart/hmsc-int/compile joined SUITE_ROOTS — its five suites never ran before; 87/87 green. Proof: rjit game shot GREEN with '[loader] elevator layer: 2 live car(s) across 2 shaft(s)' on the user's map. Rebuild the loader (rjit game play) to ride it.",
+  "shas": [
+    "180784ff1"
+  ],
+  "resolvedAt": "2026-06-12T04:56:05.336Z",
+  "tags": [
+    "bug"
+  ]
+}

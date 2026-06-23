@@ -1,0 +1,13 @@
+{
+  "id": "req_0277",
+  "at": "2026-06-08T05:01:10.613Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: CAMRAY refinement — USER, verbatim: \"u know how i said the camera breaks going up the ramp. good thats fixed, but now it doesnt also close in when under the ramp. for example, i am under the ramp in the image here, u cant see me tho, the camera doesnt consider the bottom side as a barrier\". Image /home/siah/.claude/image-cache/65a3b158-192d-4949-99b0-83b2b071ce2a/24.png: player is UNDER the ramp, the opaque slab fills the view and hides the player, and the camera does NOT pull in — the ramp underside is not treated as an occluder. DIAGNOSIS: your ramp-ascent false-zoom fix over-corrected — to stop the ramp zooming the camera while walking UP it, you excluded ramp/walkable surfaces from occlusion too broadly. The correct distinction: the surface the player is STANDING ON is not an occluder (no false zoom on ascent), BUT a ramp slab BETWEEN the camera and the player IS an occluder (must pull in when under it). It is not 'is this a ramp' — it is 'is this surface underfoot vs is it a barrier on the camera-to-player ray'. Re-add ramp surfaces as occluders when they sit on the cam→player ray and are NOT the player's current ground. Honor the standing ruling: if the camera can't clear it, pull in; any residual see-through must be translucent-but-present (a hidden wall is a lie). Print the ray hit + whether the hit surface is the player's ground vs a between-barrier, read it, fix the classification. Frame-time gate applies. This is the same CAMRAY slice — fold it in, keep the ascent fix intact (regression: ascent = no false zoom AND under-ramp = pulls in).",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

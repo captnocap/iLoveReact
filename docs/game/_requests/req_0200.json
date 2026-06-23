@@ -1,0 +1,15 @@
+{
+  "id": "req_0200",
+  "at": "2026-06-07T06:27:16.432Z",
+  "origin": "session:f2302907",
+  "text": "right so format wise i would likely opt for a custom rle format like we did with pixel icon data. and it looks pretty simple to be honest, something that can be authored from ts and then loaded from zig because its just really a json format but maybe you know one better. the thing is that rle is fast as shit something like 26gb/s was what i recently found, and for the sake of 3d and textures and all of that shit its the perfect format imo",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:28:38.005Z",
+  "resolution": "Format discussion grounded in source: read runtime/workspace/rle.ts (the row-RLE codec promoted from cutout, already carrying hmsc-int per-chunk tile/height/zone buffers) and endorsed the user's RLE choice — it's ideal for the grid-dominated map data and the ~26GB/s class decode is real for binary byte-RLE. Proposed three refinements: (1) keep JSON row-RLE as the editor SOURCE format but have Compile transcode to binary RLE lumps (count,value pairs via DataView, packed Zig reader) since JSON.parse is the actual bottleneck, not RLE; (2) RLE only where it works — raw aligned little-endian float buffers for mesh/instance lumps (floats don't run; GoldSrc BSP itself is uncompressed, speed is layout), quantize heightfields to u16+scale before RLE; (3) wrap it all in a BSP-style versioned lump directory (magic RJMP, lump table with per-lump encoding flags, unknown-lump skip for format evolution, text keyvalue entity lump opaque to framework). No code changes; awaiting go-ahead on verdict + plan.",
+  "shas": [],
+  "tags": [
+    "ruling"
+  ]
+}

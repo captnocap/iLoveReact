@@ -1,0 +1,10 @@
+{
+  "id": "req_1345",
+  "at": "2026-06-19T00:18:31.138Z",
+  "origin": "session:9e041fa8",
+  "text": "k that fixed it for a simple shape. simple meaning a literal cube. i still see leaking on anything 'complex' and complex here means anything that isnt a simple cube",
+  "status": "new",
+  "sessionId": "9e041fa8-bb4b-47e8-9250-ce5cf71d3fa9",
+  "captureMode": "hook",
+  "events": []
+}

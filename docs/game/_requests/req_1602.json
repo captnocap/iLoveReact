@@ -1,0 +1,28 @@
+{
+  "id": "req_1602",
+  "at": "2026-06-21T16:58:12.961Z",
+  "origin": "session:e36112e0",
+  "text": "right but if u dont use the --textmap or whatever it comes out just as one .obj file i know because i did it yesterday",
+  "status": "review",
+  "sessionId": "e36112e0-5303-4202-ba4f-5d93412ec821",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T16:58:25.179Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T16:59:11.136Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User clarified that running InstantMesh WITHOUT --export_texmap yields a single .obj (what they did yesterday). Verified in deps/InstantMesh/src/utils/mesh_util.py: save_obj (no-texmap path) builds a trimesh with vertex_colors and exports OBJ, so it writes a single .obj with per-vertex RGB on extended 'v x y z r g b' lines (no .mtl, no .png). Confirmed the importer drops color in BOTH modes: vertex-color mode -- importPropMesh.mjs parseObj does parts.slice(0,3) on v lines, discarding trailing r g b; texmap mode -- no .mtl/.png handling, falls back to flat --color (#9b8066). Also noted prop vertex format is stride-8 (pos3+normal3+uv2) with NO color channel, so carrying vertex colors needs a format extension to stride-11 (RGB) or baking colors into a texture. No code changed (check/report). Presented two fix options: A) support single-obj vertex-color path (read rgb, extend vertex format, shader reads it) -- recommended, matches user usage; B) support texmap path (parse mtl map_Kd, decode png via @reactjit/image, bake as textureKey/material on parsed UVs). Awaiting user choice.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T16:59:11.136Z"
+}

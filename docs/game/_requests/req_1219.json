@@ -1,0 +1,30 @@
+{
+  "id": "req_1219",
+  "at": "2026-06-17T01:17:30.932Z",
+  "origin": "session:ee607c38",
+  "text": "hm. no not really. well so the paint is hitting the brush outline, but the brush is not hitting the grid correctly.",
+  "status": "review",
+  "sessionId": "ee607c38-a6df-4547-aa9a-facb41f8319d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T01:18:16.288Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T01:19:23.742Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The brush cell snapped to integer texel boundaries while the grid LINES were drawn as round(slotWidth) equal divisions of the face's UV slot. After fit-scaling, the slot width isn't a whole number of texels, so the equal divisions drifted off the real cell boundaries — the brush 'didn't hit the grid.' Fixed the overlay to draw grid lines at the actual integer-texel positions (a = (k − rect.x0)/rw), which are exactly the cell edges — so the grid lines, the brush cursor cell, and the painted result all coincide. meshPaint 6/6, Studio bundles clean, hot-reload.",
+  "shas": [
+    "e508cebbb"
+  ],
+  "resolvedAt": "2026-06-17T01:19:23.742Z"
+}

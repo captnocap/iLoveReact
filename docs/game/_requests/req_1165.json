@@ -1,0 +1,34 @@
+{
+  "id": "req_1165",
+  "at": "2026-06-16T14:32:14.629Z",
+  "origin": "session:8e058574",
+  "text": "nice can u add in a button or preview or something that will place the player model against the model being made for scale",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T14:32:21.935Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T14:39:14.261Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-16T14:56:45.344Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "Committed in d2ac77028 (editors/model/ now tracked)."
+    }
+  ],
+  "resolution": "Added a scale-reference 'player ghost' to the Studio mesh editor so the user can size a model against a real person. A new 'scale' toggle in the viewport's top-left overlay mounts THE in-game player figure (same seed) standing on the grid just past the model's bounding radius, with feet at y=0 and the height readout (1.65 m collider, RULED R4) on the button. It reuses the proven Embodied render path verbatim — GAME_FIGURE.generateFace + buildPartRender + buildRigFrame, rendered via FigureMeshes (intern=true, so the static figure uses the retained geometry buffer and never competes for the sculpt DYN slots) plus CharacterCaptures for the face/skin textures, under a unique 'studio-scale' cartKey so its captures don't collide with /test's player. The figure is built once (useMemo) and placed via a frame.radius-derived offset; the toggle is twig hot-state (studio:showScale). Files: editors/model/Studio.tsx (imports GAME_FIGURE + figure/render + world/scale; new SCALE_FIGURE_SEED/CART_KEY consts, scaleFigureGapMeters tunable, showScale state, scaleFigure memo, Scene3D figure block, toggle button). Verified by bundling the full hmsc-int cart through esbuild with the real ship alias set: exit 0, no errors. NOT committed: editors/model/ is entirely untracked in this tree (another lane's uncommitted work), so a clean own-work-only commit isn't possible; flagged to the user.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T14:39:14.261Z"
+}

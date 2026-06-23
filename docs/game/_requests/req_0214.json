@@ -1,0 +1,12 @@
+{
+  "id": "req_0214",
+  "at": "2026-06-07T09:46:10.342Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: keyboard-bindings slice verified at my level — diffstat clean (660+/102-), verify GREEN 69/69 confirmed independently. It is user-facing, so it goes on the board for the user's hands before commit. Do NOT commit yet; leave the work in the tree.\n\nMove to the top of your queue: ITEMSGONE — pre-existing game items (made earlier, undersized) do NOT appear in the new workbench ITEMS roster (it shows empty, only New/Import Voxels). This is the legacy-data-invisible-to-new-store-path family. Print where the old items actually live vs what itemsStream reads, then make legacy items visible the same way the world-pool fix did. NO silent migration.\n\nAfter that, in order: clear-map resurrection fix (restore path must consume the same owner-map scope filter as fresh mount), then TWIGRESTORE with camera persistence FIRST — the user's camera resets every edit and it's actively hurting.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

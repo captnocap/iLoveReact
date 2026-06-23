@@ -1,0 +1,33 @@
+{
+  "id": "req_0525",
+  "at": "2026-06-10T12:55:51.234Z",
+  "origin": "session:51f18581",
+  "text": "is this building into the labs route in the editor?",
+  "status": "review",
+  "sessionId": "51f18581-610e-4479-8d18-625e56e6d9c2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T13:06:34.898Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T13:06:34.909Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarifying question on req_0522 ('is this building into the labs route in the editor?'). Answer: yes — and it caught a course error. I had started it as a standalone cart (cart/vehicle_handling_lab/, OrbitCamera); redirected into the editor's labs route as the first lab there, using the @game door + V23 native camera per the labs import rule and V26. Resolved by the same commit as req_0522.",
+  "shas": [
+    "ecbf93b54"
+  ],
+  "resolvedAt": "2026-06-10T13:06:34.909Z",
+  "tags": [
+    "ask"
+  ]
+}

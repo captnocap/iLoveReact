@@ -1,0 +1,31 @@
+{
+  "id": "req_0646",
+  "at": "2026-06-11T13:04:46.270Z",
+  "origin": "codex:019eb6aa",
+  "text": "it doesnt line up with the walls tho. it should be a wall type",
+  "status": "review",
+  "sessionId": "019eb6aa-0c65-7230-a007-a74c041f2116",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T13:04:53.804Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T13:08:13.499Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the door alignment issue by making one-piece origin prefabs place as their contained catalog piece instead of using generic prefab grid snap. Door Wall, Open Doorway, and residential window wall methods now inherit wall edge snap/size so they line up with normal walls; multi-piece elevator prefabs still use grid-origin composition placement. Added build grammar coverage for the wall-type placement basis and documented the fix in CAPTURE.md.",
+  "shas": [],
+  "resolvedAt": "2026-06-11T13:08:13.499Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1388",
+  "at": "2026-06-19T05:29:27.874Z",
+  "origin": "session:1863e7ee",
+  "text": "ok now i want you to, while you can, go through the file and the path that it takes to render on screen, and look at how many things there are just on the one route alone. Take this into consideration becasue the ui genuinely is just as important and if you port it verbatim on the UI then thats a net loss tbh because we already are strapped for space, plans to expand on it, and things already are just literally being overlayed on other elements and i cant get to them",
+  "status": "review",
+  "sessionId": "1863e7ee-a8ed-4cf3-85a6-49a899536c18",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T05:29:40.469Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T05:41:08.420Z",
+      "actor": "session-1863",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced the /model render path (StudioRoute→StudioEditor→StudioViewport) and inventoried the on-route UI: ~13 absolutely-positioned overlay layers + 46 Pressables sharing one viewport rectangle with exactly ONE zIndex, so they stack by mount order and collide (undo/redo over tier-1; backdrop banner inside tier-2; paintdiag over the compass; tier-2 flexWraps down into the scene). 43 controls are tooltip-only. Folded this into STUDIO_REFACTOR_PLAN.html as a co-equal UI track: a StudioChrome dock-zone shell + z-token scale so panels can't overlap, with verification that nothing sits on top of anything. Diagnosis: the cramming is the absence of a layout system, so a verbatim port is a net loss; the component split is when to fix it.",
+  "shas": [
+    "0612eab15"
+  ],
+  "resolvedAt": "2026-06-19T05:41:08.420Z"
+}

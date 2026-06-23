@@ -1,0 +1,28 @@
+{
+  "id": "req_1643",
+  "at": "2026-06-22T17:32:16.842Z",
+  "origin": "session:7a8f00d4",
+  "text": "tell me what happens at start up. how is game data loaded. how is anything loaded. because same problem",
+  "status": "review",
+  "sessionId": "7a8f00d4-327a-4595-a613-6ceb3eb4cdb8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T17:32:57.486Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T17:38:33.337Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked to trace the startup/load pipeline because the OOM persists. Traced and explained: index.tsx mounts EditorShell → editorStore() opens the umbrella workspace store; each domain loads lazily SNAPSHOT-first (SNAPBOOT, data/index.ts) replaying only the tail beyond the snapshot seq, NOT the full store.db; ensureCookedRegistry loads the cooked-asset domain (12MB); useMapSession reads the persisted map file → deserializeMap → seedWorld → applyPayload (world=present, 72178 painted cells, 108 placements); then render. Key findings: (1) the data load is small (~tens of MB of snapshots + tail) and is NOT the 1.4GB OOM. (2) model/store.db is 532MB — the paint-blob-bloat bomb from project history — but it is NOT opened at world-editor boot (no modelStream in the boot path), so it's a separate hygiene problem (vacuum it) not this OOM. (3) The real OOM is the flora field: up to 1,048,576 grass blades materialized and shipped as ONE Scene3D.Instances command whose JSON.stringify is hundreds of MB → heap dies mid-stringify (explains no [flush-bytes] log, the hundreds-not-tens MB, and the 30s climb). My GameWorld3D.tsx showFlora default-false gates every WorldStatics mount (GrassField is only reached through those). Awaiting a fresh log with that change live — specifically whether 'grass instance cap 1048576 hit' still prints — to confirm the gate caught all paths or name the one it missed.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T17:38:33.337Z"
+}

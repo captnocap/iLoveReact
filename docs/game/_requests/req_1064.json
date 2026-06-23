@@ -1,0 +1,28 @@
+{
+  "id": "req_1064",
+  "at": "2026-06-15T21:14:52.074Z",
+  "origin": "session:34f4e405",
+  "text": "oh. so the library, you can edit that part out. let me show u why. [Image #1] this is my ui. its now double",
+  "status": "review",
+  "sessionId": "34f4e405-3e9d-47f6-b883-15900052c2df",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T21:15:23.970Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T21:21:16.410Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the duplicate column-3 LIBRARY panel and moved model delete onto the roster row itself + added a copy button to the SHAPE data face. USER showed the column-3 LIBRARY panel duplicated the column-2 roster ('is now double'). Fix: the delete affordance now lives ON the roster row. The shell RosterRow shape stayed {id,label,icon}; the capability went on WorkbenchSource as canDeleteRow?(id)/onDeleteRow?(id), and shell/Workbench.tsx renders a per-row trash ✕ with a two-step inline confirm (confirmDeleteId shell state, reset on source switch). Frontmost-leaf hit-test means the inner ✕ takes the click without firing the row's select (the LayerStrip row-button precedent). The Studio source sets canDeleteRow = rowId.startsWith('model:') (exempts '+ new') + onDeleteRow -> studioDeleteModel. Deleted ModelManagePanel.tsx (the duplicate). Also added a 'copy' button on the SHAPE panel's encoded-JSON row -> @reactjit/hooks/clipboard set(json) with a 1.2s 'copied ✓' flash (USER: 'a copy button on the data face would be nice'). editMesh 48/48, modelStream 8/8, Studio + shell + full sources chain bundle clean. Hot-reload TSX, nothing committed (user leads commits).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T21:21:16.410Z"
+}

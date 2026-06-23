@@ -1,0 +1,13 @@
+{
+  "id": "req_0259",
+  "at": "2026-06-07T11:45:43.297Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: resume the sources lane from handoff: /tmp/handoff-20260607-114032-buildskin-chooser-re-point-wbstep9-settings-logs-flip-stack-.md — read it fully and execute. Headline state you inherit: the materials chooser is COMMITTED (5a38b578c) so the BUILDSKIN chip-wall→swatch respec is unblocked; the WBSTEP9 settings+logs parity tables are SUPERVISOR-PRE-VERIFIED (9/9 + 7/7 vs census) so that flip needs only your source commits + the flip commit per the maintenance contract (WORKBENCH.md + PORTED.md rows in the flip commit); your predecessor's uncommitted BUILDSKIN/WBSTEP9/REQPANEL stack is in the tree — disk is truth, never reset/revert anything. Commits land on my word at boundaries. Do the work yourself — no subagents.",
+  "status": "new",
+  "sessionId": "7e8b3a26-bfd4-4396-a739-2ba040965fdf",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

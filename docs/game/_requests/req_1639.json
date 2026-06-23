@@ -1,0 +1,28 @@
+{
+  "id": "req_1639",
+  "at": "2026-06-22T17:23:30.286Z",
+  "origin": "session:7a8f00d4",
+  "text": "will you log how much data is being transfered when loading the app, because it should be megabytes not hundreds but tens",
+  "status": "review",
+  "sessionId": "7a8f00d4-327a-4595-a613-6ceb3eb4cdb8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T17:23:52.615Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T17:25:10.779Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User wants to see how much data crosses to the host on app load (expects tens of MB, suspects hundreds). Added a [flush-bytes] meter in renderer/hostConfig.ts at the real transport boundary (flushCoalesced → transportFlush): a cumulative g_totalFlushBytes counter that logs '+XKB → total YMB (#N, M cmd)' per non-trivial flush (>4KB), with a per-op byte breakdown (CREATE/UPDATE/… = count/KB) for fat flushes (>64KB) so the bloated command type is named. Tiny per-frame UPDATE batches (<4KB) are skipped to avoid steady-state spam. Hot-reloadable (bundled into the cart); left uncommitted alongside the other [propgone]/[flush] diagnostics on the dirty tree. Awaiting the user's startup log — the plateau total answers tens-vs-hundreds and the breakdown surfaces whether CREATE commands hauling mesh verts/instance arrays/atlases are the weight (and tests the ~512MB-flush suspicion with real numbers).",
+  "shas": [],
+  "resolvedAt": "2026-06-22T17:25:10.779Z"
+}

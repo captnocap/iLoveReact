@@ -1,0 +1,31 @@
+{
+  "id": "req_0562",
+  "at": "2026-06-10T16:04:34.853Z",
+  "origin": "codex:019eb242",
+  "text": "and give the color wheel component here instead of these hard-coded colors",
+  "status": "review",
+  "sessionId": "019eb242-3ff1-73a2-b202-5d99e580829d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T16:04:51.599Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:06:43.451Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced compose material color swatches with the shared ColorWheel control by adding wheel support to the generic FieldSpec color renderer and using it for decal canvas, rect, border, and text colors. Also added rect material effect fills: rect nodes can store a shader recipe id plus frozen data[], DecalSurface renders those via the existing texture shader catalog, and the compose panel exposes the effect-fill picker from the canonical fill-board recipes.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T16:06:43.451Z",
+  "tags": [
+    "ask"
+  ]
+}

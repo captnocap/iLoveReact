@@ -1,0 +1,30 @@
+{
+  "id": "req_0895",
+  "at": "2026-06-14T02:44:37.856Z",
+  "origin": "session:48b3aca2",
+  "text": "oh. and there might be other stats already defined and those all come with some may overlap",
+  "status": "review",
+  "sessionId": "48b3aca2-c5c6-44bc-a677-133a51467e99",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T02:45:08.656Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T03:17:43.535Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Addressed as part of req_0894. Surveyed the overlap before building: health/heat(=wanted source)/money/inventory already existed on PlayerState (armor was read by the HUD but never a real field), the wanted inputs already exist (activities heat + GAME_PERCEPTION notoriety), and the figure already has an OutfitDocument. The new GAME_STATS model BRIDGES to all of these (one source of truth) instead of duplicating: wanted derives from the live heat/notoriety scalar, outfit slots map onto OutfitDocument, and only the genuinely-missing pieces (armor, energy, wallet breakdown, carry-capacity factors, gained skills) are added. Documented in game/stats/CAPTURE.md.",
+  "shas": [
+    "12d4a553b"
+  ],
+  "resolvedAt": "2026-06-14T03:17:43.535Z"
+}

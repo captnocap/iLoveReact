@@ -1,0 +1,10 @@
+{
+  "id": "req_1554",
+  "at": "2026-06-21T00:27:51.857Z",
+  "origin": "session:0b8abe45",
+  "text": "<task-notification>\n<task-id>b41ib4xvy</task-id>\n<summary>Monitor event: \"cooked-prop paint loader build (constructor.zig v4)\"</summary>\n<event>[Monitor timed out — re-arm if needed.]</event>\n</task-notification>",
+  "status": "new",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,16 @@
+{
+  "id": "req_0068",
+  "at": "2026-06-06T07:56:30.966Z",
+  "origin": "supervisor-relay",
+  "text": "does this even make sense? why is the two sides of the mesh different if its a mirror image drawing? [symmetric trident drawing on canvas, asymmetric mesh: left smooth bumps, right angular shards]",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T08:12:41.615Z",
+  "resolution": "MIRRORSYM-0606 diagnosed numerically on the user's exact drawing and fixed at the true layer (ef36c87b1). THE NUMBERS: (a) mirrored cell pairs in the live grid (V20 store, autosave seq 5308 — the trident sits on the TORSO at full ±127 range): EQUAL, exactly, asymPairs=0. (b) mirrored vertex pairs through the real analytic surface with the real live params: equal to 8.5e-15 — machine epsilon. (c) no asymmetric base residue (every part's pair-error 0 in the live doc). (d) the u-wrap seam pairs symmetrically — verified algebraically and numerically; the engine mirror (axis*2-x), GPU dab rasterization (center-sampled), stampGrid/relaxStamp mirrors all exact. (e) WAS the answer: the data is symmetric — the LOOK lied. Root cause: the bake LODs undersample the 48×24 sculpt grid (torso renders 24×12 — every vertex averages a cell PAIR), so single-cell sculpt lines (their min-size trident) alias into irregular spikes, and the rotated camera puts different longitudes on the two silhouettes: symmetric mesh, asymmetric read. Fix: editorPartParams (the documented editor-exception seam shared by both routes) resolves the grid at 2× (96×48) — a vertex on every cell center (full-value tents) and boundary; see-it == sculpt-it; editor-only, game bake LODs untouched. P4 with the trident as the canonical case: mirrored vertex pairs < 1e-9 across the full editor sampling, a single sculpted cell visible at full value and identical to its mirror twin. characters 18/18. READY FOR USER TEST: redraw or just re-open their character — the trident now renders as drawn, both sides identical; face the model dead-on to confirm.",
+  "shas": [
+    "ef36c87b1"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

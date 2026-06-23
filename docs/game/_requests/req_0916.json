@@ -1,0 +1,28 @@
+{
+  "id": "req_0916",
+  "at": "2026-06-14T14:36:38.778Z",
+  "origin": "session:2b1b8d6b",
+  "text": "❯ hey lets build a lab for both aiming / combat / collision. if you check inside of @docs/game/_archive/ragdoll_lab.md and there was a combat_lab also, lets bring it in one. we want to be able to test fall damage, LoS, aiming with items, and then combat with npcs. check the other existing labs in place on how to scaffold it",
+  "status": "review",
+  "sessionId": "2b1b8d6b-2adf-4239-aed8-88f228d4f8a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T14:36:51.813Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T14:52:14.589Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built cart/hmsc-int/labs/combat-arena.tsx (+ paired notes, registered in labs/index.ts): one lab merging the archived ragdoll_lab and combat_lab onto the graduated @game door. Four pillars fire together — (1) fall damage off a 10-step/4m ledge priced from the GAME_PHYSICS airborne→grounded transition; (2) line of sight via GAME_PERCEPTION FoV cones + bone-riding cover sampling (crouch genuinely hides); (3) aiming with GAME_ITEMS weapons through a geometric ray vs GAME_FIGURE oriented per-bone hitboxes (skill, not dice); (4) NPC combat from GAME_KINDS with the perception ladder + GAME_CHANCE dice for incoming fire. Native ADS camera (V26), sim-in-refs loop, crash-proof tick. Lab-local tables (FALL/ZONE_MULT/weapon profiles/skill) carry graduate-me notes; death is a laid-down stand-in until the host ragdoll lands. Verified: esbuild bundle of labs/index.ts is clean (exit 0).",
+  "shas": [],
+  "resolvedAt": "2026-06-14T14:52:14.589Z"
+}

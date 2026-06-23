@@ -1,0 +1,12 @@
+{
+  "id": "req_0213",
+  "at": "2026-06-07T09:46:01.756Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: WBSTEP6 parity table VERIFIED — 14/14 rows vs census, line refs checked, zero deferrals. Full verify is GREEN 69/69 under my own independent run; the items/voxels reds you reported are gone. Execute the flip per standing order, two commits:\n\n(1) SOURCE COMMIT — explicit paths only: cart/hmsc-int/editors/workbench/vehicles/ + cart/hmsc-int/editors/workbench/WBVEHICLES.CAPTURE.md + the sources.ts wiring line your lane touched. Nothing from any other lane.\n\n(2) FLIP COMMIT — delete cart/hmsc-int/editors/vehicles/ (the old route), remove its route registration, and in the SAME commit update the route's row in cart/hmsc-int/WORKBENCH.md and in cart/hmsc-int/PORTED.md per the maintenance contract.\n\nPost both hashes when done. Then next in your queue: PLACEFREEZE — the 200-470ms stall per placement. Measure FIRST: collision re-register vs scene rebuild vs sync autosave. Numbers before fixes.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

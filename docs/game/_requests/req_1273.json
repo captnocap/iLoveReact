@@ -1,0 +1,30 @@
+{
+  "id": "req_1273",
+  "at": "2026-06-18T09:01:30.921Z",
+  "origin": "session:47c6ef45",
+  "text": "oh yeah so uh back to the wireframe lines. still getting fucked. also it makes the framerate genuinely dogshit also when it is in wireframe modes. if u change it to rig instantly 240 fps again, so its purely the wireframe",
+  "status": "review",
+  "sessionId": "47c6ef45-886b-4a68-a568-e624c3124d48",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T09:02:20.230Z",
+      "actor": "47c6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T09:28:05.022Z",
+      "actor": "47c6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same wireframe issue as req_1275 (duplicate capture of the same ask: wireframe only drawing ~1/3 of the mesh AND tanking fps to 22fps/54ms, while rig mode held 240fps). Root cause: the selection overlay drew one Box per edge + per dot (~2000 reconciler nodes) which hit the layout MAX_CHILDREN=512 cap (dropping ~2/3 of the wireframe) and melted the frame laying out + painting 512 absolute boxes every frame. Fixed in 11e2d6b23 by batching the whole wireframe into ONE Graph.Polyline (new 'segments' mode draws N disjoint instanced capsule lines) + ONE Boxxx dot batch — cap gone, fps restored. User confirmed 'works great'. See req_1275 for the mechanism detail and req_1276 for the follow-on depth cue.",
+  "shas": [
+    "11e2d6b23"
+  ],
+  "resolvedAt": "2026-06-18T09:28:05.022Z"
+}

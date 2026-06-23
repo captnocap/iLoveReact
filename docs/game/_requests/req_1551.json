@@ -1,0 +1,28 @@
+{
+  "id": "req_1551",
+  "at": "2026-06-21T00:03:35.523Z",
+  "origin": "session:0b8abe45",
+  "text": "That doesnt make sense tho right you understand when i said that i saw them already working that it meant it was working right? so like heres the series of events today: got the painted texture from inside the editor to match in the iso3d to match in the compiled game. this was ~20 minutes before i then started this convo. somewhere in there, it stopped working. you can check the requests like right before you showing me say 'its working '",
+  "status": "review",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T00:04:28.250Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T00:13:01.766Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigated the user's report that cooked-prop paint WAS working in the compiled game and regressed. Verified there is no recent regression in the bake/loader code (only a flora commit touched worldGeometry.ts and it didn't touch the texture path). The real situation: the compiled game has TWO image paths. Face decals/uploaded images (FacePainter) ship raw encoded bytes in the MATERIALS lump and decode in the Zig loader via c.stbi_load_from_memory (decal_raster.zig) — this WORKS (proven by the user's wall-poster screenshot). Cooked-prop PAINT ships raw RGBA in the MESH_PROPS lump, requiring the v8cli bake to decode the PNG via @reactjit/image image().raw() — which returns null because v8cli never registers the __imageops_* door (proven by decoding the user's actual stored paint blob under v8cli). So cooked-prop paint renders gray while decals render fine. The correct fix routes cooked-prop paint through the working loader-decode path: ship PNG bytes in MESH_PROPS, decode in constructor.zig with stbi like decals — no v8cli rebuild.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T00:13:01.766Z"
+}

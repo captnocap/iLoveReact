@@ -1,0 +1,30 @@
+{
+  "id": "req_1427",
+  "at": "2026-06-19T18:47:14.804Z",
+  "origin": "session:671785ab",
+  "text": "all yours, you can read up and then get the next slice done",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T18:47:25.273Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T18:55:13.465Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Track B chrome dock-shell, first half (§4.1 z-scale): the Studio viewport had exactly ONE zIndex across ~1000 lines of JSX, so its ~13 absolute overlays stacked by accident of mount order and physically collided (paint-diag readout covered the compass; undo/redo landed on the tier-1 info strip). Added studiokit/chrome/zlayers.ts — a named token scale (scene 0 / overlay 10 / chrome 20 / floating 30 / popup 40 / modal 50) — and tagged every overlay container in StudioViewport.tsx plus the 9 popups/dialogs with its concern tier. Layout-only, zero behavior change; built green (SHIP_RUN_PACKAGE=0) and self-shot /workbench at 231KB full render (studio-viewport=1, STUDIO2=0). Second half (the context rail moving tier-2 ops off the wrapping top bar) is NOT done — it is selection-gated so it cannot be self-shot headless and needs live verification; paused for the user.",
+  "shas": [
+    "1f90c094a"
+  ],
+  "resolvedAt": "2026-06-19T18:55:13.465Z"
+}

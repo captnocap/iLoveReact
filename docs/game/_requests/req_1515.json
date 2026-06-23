@@ -1,0 +1,30 @@
+{
+  "id": "req_1515",
+  "at": "2026-06-20T21:36:15.739Z",
+  "origin": "session:6580d434",
+  "text": "hello. lets add the logs. the logs need to be in the compiled game mode, so no v8 logging can save u here",
+  "status": "review",
+  "sessionId": "6580d434-ee0d-4691-a47a-61556997a089",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T21:36:25.553Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T21:40:42.852Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added RJIT_STAIRLOG=1 per-frame locomotion logging directly in the no-V8 sim (framework/game/physics.zig step()), since the compiled game runs no V8 and JS console.log never executes there. Each frame the player is moving prints intent, position, the horizontal distance wanted vs. what survived collision, velocity, grounded, and which branch ate a blocked move: rectpush=(dx,dz) for a solid rect/oriented side-push or hfcancel=true with hf(height,normal_y,walk_cos) for the too-steep-heightfield move-cancel (stair/cone face). Frames where the move collapses are auto-tagged '<< BLOCKED'. Gated behind the env var so it costs nothing in normal play. Verified: no-V8 world_loader builds clean (zig build app -Duse-v8=false), game-physics test suite 39/40 (the one red is the pre-existing out-of-scope hollow-ramp case). User runs RJIT_STAIRLOG=1 ./tools/rjit game play, walks into the wall, and reads off the blocking branch; the real stair-top fix follows once the logs name the cause.",
+  "shas": [
+    "d65f77456"
+  ],
+  "resolvedAt": "2026-06-20T21:40:42.852Z"
+}

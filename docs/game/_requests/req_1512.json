@@ -1,0 +1,10 @@
+{
+  "id": "req_1512",
+  "at": "2026-06-20T21:28:55.080Z",
+  "origin": "session:1d61c909",
+  "text": "Hm. do this for me, pass a /hand-over and have the next guy start with adding runtime logs to when im in the game, i want to demonstrate how i am holding down the W key and walking into an invisible wall at the top of a staircase since its still just not translating correctly",
+  "status": "new",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": []
+}

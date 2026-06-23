@@ -1,0 +1,13 @@
+{
+  "id": "req_0241",
+  "at": "2026-06-07T11:00:56.810Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: REQBOARD verification status — the 68/69 red is ANOTHER lane (workbench/clothing, mid-build by design), not yours; your slice verifies at my level: board CLI confirmed (NEW 127→11 real asks, dispatch filter working, tags rendering). Two leftovers before the commit word: (1) req_0235 sitting in NEW is the secretary's OWN categorization prompt captured as a job — the loop fix must also cover the artifact class: noise-close req_0235, and confirm with evidence that a fresh secretary run captures nothing. (2) req_0211 (a 55k-char session handoff brief) is in NEW as a job — handoff briefs are records, not asks; add them to the capture noise rule (frontmatter starting with handoff_version skips capture) and noise-close req_0211 + req_0212's sibling if present. Final commit gate after that: the user's live look at the swapped panel layout — that is theirs alone. Post when both leftovers are done.",
+  "status": "new",
+  "sessionId": "09015194-0a9b-4ae6-acf8-d964ee783d82",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

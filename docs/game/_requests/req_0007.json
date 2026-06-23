@@ -1,0 +1,17 @@
+{
+  "id": "req_0007",
+  "at": "2026-06-06T04:42:53.642Z",
+  "origin": "session:749ea40a",
+  "text": "SUPERVISOR — WBCHAR-0606 PAINT lens REJECTION, USER VERDICT. Marker: ONEPAINTER-0606.\n\nUSER, verbatim: \"the correct paint tools such as layers and color wheel picker and many others in terms of what already existed today\" were missing — then, on inspection: \"Oh i see what they did. they added it but they just did it a completely new way that looks really bad.\"\n\nYou re-implemented the painter's chrome instead of mounting it. That is the ledger's own §8 review-blocker, verbatim: \"No duplication: one field renderer, one painter, one stage kit. A second implementation of any of these appearing during migration is a review-blocker.\" The painter's chrome — PaintControls, ColorWheel, the layers/look panels, the tool rail, status surfaces — IS part of \"one painter.\" Your parity row K2 even said it: \"PaintEditor one-liner (tool rail · viewport · layers+look) over usePaintEditor — ONE painter, no fork.\"\n\nFix:\n1. DELETE your new implementations of layers/color-wheel/tools chrome — outright, no compatibility remnants.\n2. Mount the EXISTING components the /cutout surface uses today: editors/paint PaintControls.tsx, ColorWheel.tsx, the layers+look panels, the tool rail — the exact same modules, so a fix or feature in the painter lands in BOTH surfaces forever.\n3. If the workbench stage/gutter shape genuinely cannot host a component as-is, the answer is a thin LAYOUT wrapper around the same component — never a redraw. If even that fails for something, STOP and report the specific conflict.\n4. Update the ledger/CAPTURE row honestly: what was duplicated, now deleted, what mounts instead.\nVerify green, explicit paths, resolve the hook-captured req for this. READY FOR USER TEST again — the user seeing the SAME paint tools they know from /cutout, in the lens, is the PASS.\n",
+  "status": "done",
+  "sessionId": "749ea40a-8b61-47c3-8d6c-5bde9e2a5c99",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T04:48:44.990Z",
+  "resolution": "ONEPAINTER-0606: deleted the lens's generic PaintEditor mount (the second-painter experience the user rejected) and mounted /cutout's EXACT chrome modules instead — CutoutToolRail with the ColorWheel, PaintSurface with the model underlay, ModelPreview3D above CutoutInspector (TOOL/FX/SOURCE tabs + resizable LAYERS panel, cutout's own model-target arrangement), CutoutStatusBar — so painter fixes/features land in both surfaces forever. Only lens-owned surface is a thin save strip (host verb). Two directive-3 conflicts reported in CAPTURE K2a/K2b instead of redrawn: EffectModal is route-local in CutoutRoute.tsx (paint lane's live-WIP file; custom-WGSL button defers to /cutout until exportable) and the SOURCE-tab document verbs are host callbacks wired to guidance. CAPTURE K2 row rewritten with the honest record; generic PaintEditor kit now has zero consumers (keep/delete = paint lane's call on their file). Verify: characters suite 13/13 green, full cart bundles; cutout/models.test.ts RED remains the paint lane's uncommitted brush WIP.",
+  "shas": [
+    "772e6344d"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

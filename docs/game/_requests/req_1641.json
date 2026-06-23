@@ -1,0 +1,10 @@
+{
+  "id": "req_1641",
+  "at": "2026-06-22T17:28:14.422Z",
+  "origin": "session:909e44f4",
+  "text": "the zig world_loader, is there an equivilant of it in typescript or only the compiler for the game data",
+  "status": "new",
+  "sessionId": "909e44f4-7c1b-4b26-b9e4-4364c93081b0",
+  "captureMode": "hook",
+  "events": []
+}

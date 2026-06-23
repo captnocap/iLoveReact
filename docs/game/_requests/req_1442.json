@@ -1,0 +1,30 @@
+{
+  "id": "req_1442",
+  "at": "2026-06-19T22:15:30.876Z",
+  "origin": "session:671785ab",
+  "text": "nope here let me do it a 3rd t ime, because you are still focusing on not the image and im saying itys the image you need to focus on\n\nbefore an update:[Image #13] \nafter update: [Image #14]",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T22:24:14.900Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T22:24:14.910Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Folded into req_1444: the 'image offset after update' was a stale host-side backdrop bake (geometry/texture cached under the stable bd.id surviving the hot reload), NOT the camera (which the user proved identical via the fixed crosshair/box/grid). Resolved by force-remounting the backdrop with a per-mount epoch busting the geometry id + textureKey + staticKey. See e9a69e9de.",
+  "shas": [
+    "e9a69e9de"
+  ],
+  "resolvedAt": "2026-06-19T22:24:14.910Z"
+}

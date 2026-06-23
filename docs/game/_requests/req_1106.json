@@ -1,0 +1,30 @@
+{
+  "id": "req_1106",
+  "at": "2026-06-16T00:04:37.176Z",
+  "origin": "session:9f19b605",
+  "text": "u can continue ijsut exported also to safe keep but get in the oracle also",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T00:05:14.964Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T00:08:33.289Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the playbook oracle-discoverable (the oracle reads the typed _index, not raw .md). Authored docs/game/_index/records/skybox_void.ts as a DocIndex with status:'candidate' interfaces (escape_depth, voidDistortion, VOID_TIERS, procedural shell generator, Night Assassin, Void Distance leaderboard), three recurring patterns, and five high/medium hazards encoding the must-not-break invariants (decay != notoriety, instruments lie but never decide, seeded not random, no hand-outs, coast stays Euclidean). Wired it into _index/index.ts (import + ALL_DOCS). Verified: bundle rebuilt without type errors and the oracle surfaces it — 'skybox void' returns the candidate interfaces + patterns, 'hit on player own head' returns Night Assassin at top. Committed d7331b8c3 (doc + record + index together per the maintenance contract). Session also self-exported the conversation for safekeeping.",
+  "shas": [
+    "d7331b8c3"
+  ],
+  "resolvedAt": "2026-06-16T00:08:33.288Z"
+}

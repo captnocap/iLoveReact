@@ -1,0 +1,30 @@
+{
+  "id": "req_0772",
+  "at": "2026-06-13T15:10:39.270Z",
+  "origin": "session:ef4fbf70",
+  "text": "hey here is one thing u can do before we close out. can u figure out why this happens:\n\nso i add a image for a texture -> i see it on the item [Image #11] \ni compile the map -> i load the compiled route -> i see the skin [Image #12] \ni go back to the editor -> i go to the same prop -> it looks like this [Image #13] \n\nactually fuck that was a horrible example LMAO that is suppose to be glass. LMAO so that neeeds to be fixed\n\nbut let me find another example\n\nok look here. why is the image so small in the floor [Image #14] but in game [Image #15]",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T15:11:50.400Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T15:14:22.906Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Found and fixed the editor↔compiled SCALE mismatch on prop part textures (image small/tiled in the iso editor #14, but full-size in the compiled game #15). Root cause: req_0757's DataProp gave non-panel ('chassis') parts a SIZE-DERIVED capture grid — tex = { cols: skinGridCols(max(w,d)), floors: skinGridFloors(h) }, and skinGridCols = clampInt(width/3,1,10) — so any part bigger than ~3m tiled the image into multiple small copies in the /test editor. The COMPILED path (worldGeometry.pushPropPart) interns the material by texture id with NO grid at all, so the engine samples one whole image per face — the look the user wanted. Fix: every prop part now bakes at a 1x1 grid (one whole image per face), identical to the compiled path; removed the now-unused skinGridCols/skinGridFloors import. Verified by a clean full-graph esbuild pass. Committed fd67ed8d2. SEPARATE ISSUE the user also flagged (#11-13): a prop that is supposed to be GLASS renders wrong after an apply→compile→return-to-editor round-trip — that is a glass-transparency interaction, NOT this scale bug; logged as a distinct follow-up, not fixed here.",
+  "shas": [
+    "fd67ed8d2"
+  ],
+  "resolvedAt": "2026-06-13T15:14:22.905Z"
+}

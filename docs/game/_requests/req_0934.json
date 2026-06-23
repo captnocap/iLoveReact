@@ -1,0 +1,28 @@
+{
+  "id": "req_0934",
+  "at": "2026-06-14T18:18:13.709Z",
+  "origin": "session:2b1b8d6b",
+  "text": "still just lagging lol D: yeah idk if this is something that can really be tested in js because of how choppy it is. need to test it in the zig loader approach but i see the npc skins so nice",
+  "status": "review",
+  "sessionId": "2b1b8d6b-2adf-4239-aed8-88f228d4f8a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T18:19:48.917Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T18:21:24.638Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Agreed with the user: a multi-figure combat sim re-evaluating rigs through the React reconciler every frame is the editor-PREVIEW path (V2-AMENDED: per-figure-per-frame JS rig eval never ships; the game path is the bake), so it is inherently choppy and the real test belongs in the compiled Zig loader. Cheap win applied so the lab is usable for LOGIC testing meanwhile: NpcFigure is now React.memo'd on primitive props with its rig built on an internal useMemo, so an NPC that is not moving costs nothing per frame (props equal -> skipped, no rig rebuild, no mesh re-diff); only NPCs whose pose actually changed re-render. Removed the per-render npcRigs map. This does not make active firefights smooth in JS — that needs the host path. esbuild bundle clean. What the JS lab DID validate: the combat LOGIC (GAME_CHANCE odds, GAME_PERCEPTION ladder + cover sampling, GAME_PHYSICS fall, GAME_FIGURE hitboxes/zones) all wired together correctly. Next phase (not yet authorized): graduate NPCs to host entities (baked figures + host animation/instancing) and run combat in the compiled game loader.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T18:21:24.638Z"
+}

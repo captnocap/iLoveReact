@@ -1,0 +1,13 @@
+{
+  "id": "req_0285",
+  "at": "2026-06-08T05:39:03.319Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: window progress, user verbatim: 'the window cutout landed, but there is no glass in it. so we went from: glass in the window but as the entire wall -> cutout but its fake -> real cutout no glass.' GOOD: the real cutout works now. MISSING: the glass pane. The window = the cutout opening + a GLASS PANE filling it (a thin transparent/translucent quad in the opening, the glass material). Right now the opening is empty. Add the glass: a pane mesh in the cutout, transparent material (you have the material/skin path now from the skin fix), so you see through it but it reads as glass. The earlier 'glass as the entire wall' bug means the glass material was being applied to the whole wall band instead of just the window pane — so now apply it ONLY to the pane quad inside the opening. Re-shoot close-up: real opening + visible glass pane. This completes the window; then RAMPVEL, then AUTHBUILD (still held for index-clear).",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

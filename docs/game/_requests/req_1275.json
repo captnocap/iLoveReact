@@ -1,0 +1,30 @@
+{
+  "id": "req_1275",
+  "at": "2026-06-18T09:14:47.416Z",
+  "origin": "session:47c6ef45",
+  "text": "ok, i rebuilt, and it still is choking out. i drop to 22 fps with 54.7ms average",
+  "status": "review",
+  "sessionId": "47c6ef45-886b-4a68-a568-e624c3124d48",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T09:15:25.939Z",
+      "actor": "47c6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T09:27:44.080Z",
+      "actor": "47c6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Batched the Studio selection/wireframe overlay. It drew one Box per edge + per dot (~2000 reconciler nodes), capped at MAX_CHILDREN=512 (only ~1/3 of a dense wireframe showed) and melting fps to 22fps/54ms; rig mode at 240fps proved the overlay was the choke. Added a 'segments' mode to Graph.Polyline — a polyline_segments node flag (framework/layout.zig), parsed from polylineSegments in v8_app.zig, consumed in engine.zig paint by stepping the point array in PAIRS so ONE node draws N disjoint capsule lines (instanced, analytic AA, no cap) instead of a connected strip. The wireframe is now one Graph.Polyline segments node and the dots one Boxxx instanced-rect batch — ~2000 nodes collapse to a handful of batched GPU draws. User confirmed 'works great'. TSX + framework change (user rebuilt).",
+  "shas": [
+    "11e2d6b23"
+  ],
+  "resolvedAt": "2026-06-18T09:27:44.080Z"
+}

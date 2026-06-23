@@ -1,0 +1,30 @@
+{
+  "id": "req_0917",
+  "at": "2026-06-14T15:08:59.465Z",
+  "origin": "session:dc5986f6",
+  "text": "can you give me some options for building roofs. i currently only have flat and that falls apart fast on residential",
+  "status": "review",
+  "sessionId": "dc5986f6-d53d-46b2-b433-a343515365ab",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T15:09:05.540Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T15:41:30.918Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Phase 1 of pitched roofs (USER ASK: 'options for building roofs … only flat falls apart on residential'). A roof now carries roofShape (flat/shed/gable/hip/pyramid) + roofPitch (rise:run); a placed roof carries a roofSpan footprint so ONE roof covers a whole base floor with the ridge/apex scaling to the span — the 'like the tower tool, paint multiple width at a time' ask. shed+gable decompose through the existing ramp primitive in pieceShapes, so they render in /test AND stream to the compiled bake with full parity (no new instance shape), and collide as walkable slope heightfields (never a phantom flat eave slab). Catalog adds Gable/Shed in semi- and full-slant pitches; legacy Shingle Roof upgraded to the gable it always meant to be. The iso Roof drag-tool (drag a rect over a house -> one spanning roof resting on the walls) is wired in IsoAuthor.tsx but LEFT UNCOMMITTED because that file holds another lane's uncommitted req_0823 work; whoever lands IsoAuthor picks it up. 8 new roof tests + all existing suites green (placed 54, buildings 24, worldGeometry 13, worldParity 15, worldColliders 6). Phase 2 (hip + pyramid + dormer/window roof) needs a triangular roof panel and is not yet built.",
+  "shas": [
+    "9e3e918a8"
+  ],
+  "resolvedAt": "2026-06-14T15:41:30.918Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1206",
+  "at": "2026-06-17T00:16:22.587Z",
+  "origin": "session:8e058574",
+  "text": "I see. Now, in terms of a wheel then. would a better idea then be to where i can create a wheel of any size. and it can be sized to fit the car model from the wheel well from this equation",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T00:17:22.175Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T00:25:18.876Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built 'create a wheel sized to the well from the fit'. New pure helpers: wheelMesh(radius,width,sides,axle) = a cylinder reoriented so its axle runs along the well normal (loops reversed after the coord swap so tread normals stay outward); mergeMesh(a,b,delta) appends b's verts (reindexed) + faces into a at an offset. Studio '⊚ make wheel' button (vertex mode, 3+ arch verts): fit the well, generate a tire of exactly that radius (width=radius*0.5, 16 sides) and merge it into the body at the centre. Merged → liftToGround re-seats the car on the tire bottoms = ride height (also resolves req_1205). Mirror-aware: a reflected copy per non-empty subset of enabled planes (one well + Z = both wheels, X+Z = all four). editMesh suite 67/67, cart bundles clean. Committed 92db3543e.",
+  "shas": [
+    "92db3543e"
+  ],
+  "resolvedAt": "2026-06-17T00:25:18.876Z"
+}

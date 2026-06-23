@@ -1,0 +1,29 @@
+{
+  "id": "req_1626",
+  "at": "2026-06-22T15:56:20.361Z",
+  "origin": "supervisor-relay",
+  "text": "flushToHost (4740 commands): RangeError: Invalid string length at JSON.stringify — editor command bridge crashing on an oversized flush",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-22T15:56:30.806Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T15:56:30.816Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The editor command bridge crashed when a coalesced flush exceeded V8/QuickJS's ~2^29-char string limit: JSON.stringify threw RangeError and flushToHost dropped the ENTIRE batch, freezing/desyncing the editor. Fixed in renderer/hostConfig.ts: flushCoalesced serializes the batch and, if it won't stringify, bisects and flushes each half in order (the host applies batches sequentially so a split is transparent) — the editor no longer hard-fails on size. Because a 4740-command, half-gigabyte flush means something upstream is dumping MBs into the command stream (a prop carrying mesh verts / instance arrays / a paint atlas), oversized flushes now log [flush-oversize] with the top commands by byte size + their prop keys, and an un-splittable single command is named — surfacing the real bloat for a targeted follow-up instead of hiding it. Safety net committed; root-cause prop still to be identified from the diagnostic.",
+  "shas": [
+    "fdfb90b2c"
+  ],
+  "resolvedAt": "2026-06-22T15:56:30.816Z"
+}

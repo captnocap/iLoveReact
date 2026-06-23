@@ -1,0 +1,12 @@
+{
+  "id": "req_0208",
+  "at": "2026-06-07T07:06:40.130Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — bundle with your one-kit sculpt fix: the items SCULPT camera FAILS too. User verbatim: \"the camera inside of the items sculpt is not the full camera approach still. i cant get close to the item at all\". The lens must use THE full stage camera (the shared kit camera the character stage uses — orbit + wheel zoom with a near range that lets the user get right up close to item-scale objects; the camera-feel knobs already exist on the settings surface). No bespoke camera with clamped zoom. Min-zoom/near-clip for item scale are tuning data. Comes for free if your one-kit replacement consumes the character stage kit wholesale — verify zoom-to-close works on an item-sized mesh as part of that. The user nose-to-nose with their item is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

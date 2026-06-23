@@ -1,0 +1,30 @@
+{
+  "id": "req_1533",
+  "at": "2026-06-20T22:32:18.679Z",
+  "origin": "codex:019ee6ab",
+  "text": "oh also, the eraser for the flora painter doesnt seem to erase",
+  "status": "review",
+  "sessionId": "019ee6ab-af32-7462-bc98-fece61170df4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T22:32:58.195Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:35:04.505Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Checked the flora eraser path and confirmed it is lane-based under the stacked flora model: erasing with a grass swatch clears the grass lane while leaving tree and bush lanes intact, and erasing with a tree or bush swatch clears that selected lane. Added a visible flora lane label in the rail so the active erase target is clearer.",
+  "shas": [
+    "9ecf6a297"
+  ],
+  "resolvedAt": "2026-06-20T22:35:04.505Z"
+}

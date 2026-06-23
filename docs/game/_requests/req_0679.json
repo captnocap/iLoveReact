@@ -1,0 +1,31 @@
+{
+  "id": "req_0679",
+  "at": "2026-06-12T09:43:31.405Z",
+  "origin": "codex:019eba70",
+  "text": "huh. i did that, rebuilt/relaunched and same thing",
+  "status": "review",
+  "sessionId": "019eba70-af1b-7633-a9f1-ba5a8c22c607",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T09:43:46.832Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T09:50:52.150Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the remaining gray compiled-wall case by preserving the material-under-paint relationship. Paint materialization now stores the underlay texture id, the compiler emits the underlay material row plus the transparent cutout-stencil overlay row for painted faces, and the native transparent 3D pass accepts coplanar overlays with less_equal depth. This matches the editor/test preview where the brush strokes sit over the brick instead of replacing the whole face with a transparent shader fallback.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T09:50:52.150Z",
+  "tags": [
+    "bug"
+  ]
+}

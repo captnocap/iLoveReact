@@ -1,0 +1,13 @@
+{
+  "id": "req_0036",
+  "at": "2026-06-06T06:03:48.609Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — CAMFOCUS-0606 RE-REOPENED, and the stand-down was wrong: the user was testing the HEAD when they said \"now it did.\" The real state, USER verbatim: \"the camera is fucked. in any model view except for the head u cant do shit.\"\n\nTHE SYMPTOM IS THE DIAGNOSIS LEAD: head part view = camera works; EVERY OTHER part view (torso/pelvis/arms/legs/figure?) = camera completely unresponsive. That shape says the camera binding/controller only engages for one subject type — not an offset bug, an engagement bug (the CAMGONE family: bound-to-wrong-or-no-node, per subject).\n\nData first: open each part view, log per part — does the controller bind (which node), do inputs arrive, does the solve run (the consumption-layer fields move?). The per-part table IS the deliverable before any fix. Then fix at the seam so ALL subject views ride one binding path — head must not be special. Coordinate: if the seam lives in editors/workbench files, STOP and report which file (pane 10 mid-work there); SELFSHOT for visual proof; no desktop capture.\n\nAmend req_0031's resolution (it recorded a false alarm — the truth: head-only worked) and resolve the new req for this message by verbatim match. READY FOR USER TEST — the user orbiting EVERY part view is the PASS, and I will not accept a head-only demo.\n",
+  "status": "new",
+  "sessionId": "a2aed2b9-5e73-4cc4-af5c-f08256389aca",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

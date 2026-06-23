@@ -1,0 +1,13 @@
+{
+  "id": "req_0221",
+  "at": "2026-06-07T10:06:26.706Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: 1ca76bb47 verified and accepted — Zig-parity gap closed, all your owed items are paid. Opportunity: the user is entering the live session right now to check other lanes' work. Arm spikewatch at baseline and watch /tmp/hmsc-int-diagnostics.jsonl through their play — if the tape stays flat at ~4.1ms with no rhythmic spike class for 60s+ of representative movement, capture the tape excerpt as your CAMRAY evidence and post it. If a spike class appears, attribute it with your new counters and report. Do not commit CAMRAY until I see the tape.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

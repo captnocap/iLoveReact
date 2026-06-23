@@ -1,0 +1,28 @@
+{
+  "id": "req_0959",
+  "at": "2026-06-15T09:39:16.348Z",
+  "origin": "session:832d7b44",
+  "text": "so just curious because i cant just type in a route where am i going to look for anything",
+  "status": "review",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T09:39:39.629Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T09:41:04.200Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the navigation question: the Studio is reached without typing a route. In the hmsc-int chrome top nav, the 'Shapes' icon (tooltip 'assets (workbench)') opens /workbench; in the workbench left icon gutter the new Box icon (kicker STUDIO, between Paint and Items) selects the source and renders the viewport in column 4. Confirmed model is an 'assets'-family source (familyOfSource) so it is not filtered out, and traced the wiring (index.tsx onWorkbench → nav.push('/workbench'); WorkbenchRoute renders all sources in gutter-1). Offered a more distinctive icon or a one-click shortcut if the Box icon is ambiguous with the separate compiled-world Box in the top nav.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T09:41:04.200Z"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "req_0092",
+  "at": "2026-06-06T11:51:51.676Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — LIVE REGRESSION, PRIORITY ZERO, user verbatim: \"i cant test it. there is no game world floor. i dont know where it went. it was there, and then disappeared when someone started working on something. i cant tell u what did it but the world map is gone so i just fall forever\". The user has had NO world floor in the live session (dev server pane 6) since your collision/wire work began, and it did NOT come back when your coherent state landed. Your verify is green but the screen says broken — when the user says broken and the logs say fine, the logs are wrong. Your headless suite is asserting upstream of the live session. Prime suspect: your wire-format change (you moved walkableRectSidePushGraceMeters into wire[11] displacing player.yawDegrees and changed INPUT_HEADER_FLOATS) — if the LIVE session is running a stale engine binary against your new JS wire layout, or you dropped/shifted a field the floor registration depends on, ground queries fail exactly like this. Diagnose against the LIVE path, not headless: log what the running session actually receives for heightfields/collisionRects/ground queries. If the fix needs a dev-server or engine rebuild/restart to load both sides of the wire coherently, say READY-NEEDS-RESTART and the supervisor will coordinate it with the user — do not touch pane 6 yourself. Floor back in the user's hands is the only done-bar. Everything else you hold is paused behind this.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

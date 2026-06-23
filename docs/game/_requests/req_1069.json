@@ -1,0 +1,28 @@
+{
+  "id": "req_1069",
+  "at": "2026-06-15T21:34:48.045Z",
+  "origin": "session:34f4e405",
+  "text": "Right. Now let me give you one more part of this before we close in on it. but save the outline of the shapefrom the uv, as a cookie cutter, and you then can say send only like this for example to ann image model in image 2 image and generate a texture for it. , if the model overshoots the lines, its fine, use the outline to define the bounds, mask it, then scale that back into the total texture. so everything can be piece by piece[Image #6]",
+  "status": "review",
+  "sessionId": "34f4e405-3e9d-47f6-b883-15900052c2df",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T21:35:42.935Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T21:49:07.833Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Folded the cookie-cutter / piece-by-piece architecture into the texture packer so the downstream image-to-image flow needs no re-pack. Per USER: save each UV island's OUTLINE as a cookie cutter, so a single piece can be sent to an image model, the result masked to the silhouette (overshoot is fine), and scaled back into its atlas slot — everything piece by piece. Implemented at the foundation: textureize.ts's TextureIsland carries, per island, its outline (the cookie cutter, in atlas texels) + its normalized uv + its slot rect + a stable color — exactly the data the mask->generate->clip->composite step consumes. The packer is global (whole scene) so every island is an addressable independent piece. The actual image-to-image call + masked composite + hand-painting is Phase 5d (documented in PLAYBOOK Part 5.6a), deliberately deferred but architected: because the outlines + slots are saved, 5d builds on top without re-packing. textureize 6/6 (asserts every island carries an outline). Hot-reload TSX, nothing committed (user leads commits).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T21:49:07.833Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_0470",
+  "at": "2026-06-10T06:21:23.510Z",
+  "origin": "codex:019eaf3e",
+  "text": "did someone just change the snap? i was literally in the middle of putting walls together and now the walls dont snap to the ones i was just editing. this was after you fixed it lmao",
+  "status": "review",
+  "sessionId": "019eaf3e-0282-7ba1-99cd-6b025b307dea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T06:21:31.227Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T06:23:18.504Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed snap regression from the wall-on-floor changes: edge snap now stacks only from actual top faces, while wall side/end faces keep the target wall base Y for wall-to-wall continuation. Floor/roof side faces and beside-floor ground hits remain blocked as alternate wall-on-floor anchors. Added a regression test for wall side-face edge snap. Verified build-snap 16/16, build-placed 45/45, and full hmsc-int esbuild bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T06:23:18.504Z",
+  "tags": [
+    "bug"
+  ]
+}

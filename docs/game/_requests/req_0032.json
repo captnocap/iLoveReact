@@ -5,5 +5,8 @@
   "text": "SUPERVISOR — CAMFOCUS-0606 REOPENED, USER VERDICT verbatim: \"the camera for sculpting never got fixed.\" Your a5d086305 claimed deterministic framing + toggle + F refocus and I accepted it on the commit — the user's hands say otherwise, and their hands are the only PASS.\n\nFirst hypothesis to CHECK (not assume): the user sculpts in the WORKBENCH character stage now (editors/workbench CharacterStage — the WBCHAR lane's mount), not the old /characters preview. Did your fix land on the surface the user actually uses? If the stage has its own camera mount that never got the fix, that is the gap — and the fix belongs at the shared seam so BOTH mounts ride it (coordinate with the workbench lane's files: if the fix means touching editors/workbench/*, STOP and report which file so the supervisor sequences it; pane 10 is mid-work there).\n\nData first as always: boot, open the sculpting surface, log the boot pose vs subject bounds ON THAT SURFACE, demonstrate the offset, then fix. Use the new SELFSHOT capture (rjit shot / the shot verb — you built it) for visual proof — NO desktop capture. Also: there is a stray report of a /workbench CharacterStage CRASH (unconfirmed) — if you hit a crash while reproducing, capture it fully (stack/logs) and report; do not fix another lane's crash silently.\n\nResolve the new req this message captures + re-resolve req_0008 honestly (its resolution claimed a fix the user rejects — amend it). READY FOR USER TEST — the user sculpting with a correctly-framed camera is the PASS, on THEIR surface.\n",
   "status": "new",
   "sessionId": "a2aed2b9-5e73-4cc4-af5c-f08256389aca",
-  "captureMode": "hook"
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
 }

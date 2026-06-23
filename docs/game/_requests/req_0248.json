@@ -1,0 +1,13 @@
+{
+  "id": "req_0248",
+  "at": "2026-06-07T11:12:37.679Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: CAMRAY scope addition — USER bug, live session, verbatim: \"camera actually has some raycasting problems with going up ramps where it zooms way the fuck in for no reaason\". Walking up a ramp triggers the camera constraint hard — the camera zooms way in with nothing actually occluding the player. Likely the constraint ray is hitting the ramp surface (the new thin-slab ramps and/or their heightfield) and classifying walkable ground as an occluding wall. Print what the ray actually hits during a ramp ascent (surface id/kind, hit distance, the resulting clamp), read the data, fix the classification: walkable surfaces — especially the surface the player stands on — are not occluders; the constraint exists for WALLS between camera and player. This joins the CAMRAY done-bar: tape flat AND ramp ascent/descent with no false zoom, no see-through. Coordinate with the ramp lane only by READING its committed/in-tree collision shapes — do not edit ramp files; if the bug needs a ramp-side change, report it to me.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

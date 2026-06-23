@@ -1,0 +1,31 @@
+{
+  "id": "req_0353",
+  "at": "2026-06-08T14:04:08.440Z",
+  "origin": "codex:019ea612",
+  "text": "Nice this is getting there. one thing missing, is this needs to consume my pointer, and it only does when i right click",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T14:04:46.535Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T14:06:38.299Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed the embedded WorldLoader input model so normal gameplay can consume the pointer without holding RMB. Left-clicking the WorldLoader viewport now captures SDL relative mouse mode, mouse motion continues to drive the loader camera, RMB only toggles the loader aim mode, and Escape releases pointer capture back to the editor shell. Verified hmsc-int builds with has-compiled-world and /compiled still renders after the change.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T14:06:38.299Z",
+  "tags": [
+    "bug"
+  ]
+}

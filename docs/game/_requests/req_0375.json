@@ -1,0 +1,31 @@
+{
+  "id": "req_0375",
+  "at": "2026-06-08T22:35:39.937Z",
+  "origin": "session:67746dc2",
+  "text": "yep. i have planned it all out in my head how im going to do it also. here it is:\n\nso you create your own player, its yourself. Starting mission, you know that like gta-samp / vcmp era where every fucking server was a sky ramp and u just drive into the city at a million miles an hour.  start there. feels just like one of those mod servers. get in a fast car. take off. as the player hits the ground -> cell phone ring, player wakes up, in their room. high as a kite. phone ringing. late for work by 30 minutes.player gets into their shitty beat down car, high, drives to work. shows up to get fired. Thats the first mission. 2nd Mission is applying for jobs, doing some just going around the city to learn it and where things are but disguised as job applications. by t he last one, you hear about a doordash type of gig. you have a car. you need to make rent. you take it. the next missions. you are deliverying food, and its all clean cut. but it doesnt pay for shit. and then the last order you have, the guy is just a dick for no reason. gets the player to automatically hate their job because of things they cant control. get in their car, drive off. well, now in the car, suddenly a tweaker sits up in the back seat. player loses control of driving. crashes car. totals it. now is out of a car for doordash, and no money for rent. and the tweaker goes 'hey your looking for work? yeah i know a guy who pays really well. some new internet based service thing. You should check it out.' the tweaker gives a number, the player ends up calling it. its big jerry, and jerry runs two things. a record shop and a sprawling online crime as a service business, and he is looking for workers. The gig is simple. Open the app on your phone as a provider, look for jobs from paying clients. Take a bid on them. And then if they take you. Your in. Now its your job. Delivery of narcotics, to hitman attempts, to just the silly bull shit that criminals get them selves into, but all the time. the player becomes a freelancer. and from here, this is how they will end up meeting further main story characters through the line of work ",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T22:36:21.389Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T22:37:14.866Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User shared the full canonical opening/onboarding arc for the GTA-x-Hitman game (verbatim in req_0375.json): SA-MP/VC-MP sky-ramp fake-out that resolves into the player waking high/late for work -> gets fired -> job-applications-as-map-learning -> a clean DoorDash delivery loop -> a scripted inciting incident (dick customer, tweaker in the back seat, totaled car, rent due, no income) -> Big Jerry (record shop + crime-as-a-service app) -> freelance contract loop (open app as provider, bid on jobs, get picked) where authored main-story characters are met through procedural gigs. Engaged with it as a tutorial-as-story onboarding funnel and mapped each beat to systems: it leans on EXISTING machinery (the 508km2 city; the high/altered-state perception system in cart/scape*/systems/perception.ts + state/player.ts HighState; co-op gig = a multiplayer session/crew) and identifies the NEW systems needed (a scripted-event sequencer for the crash beat, the diegetic phone app for crime-as-a-service, and the bid-on-jobs loop). No story/narrative doc exists yet and none of this canon (Big Jerry, crime-as-a-service, doordash, freelancer) appears in cart/ or docs/ — it currently lives only in the user's head + the ledger. Offered to write it up as a canonical opening-arc design doc beside cart/scape3d/design.ts + TONE.md, mapping each beat to the system it teaches and the system it still needs. Awaiting the user's go-ahead (no files written yet).",
+  "shas": [],
+  "resolvedAt": "2026-06-08T22:37:14.865Z",
+  "tags": [
+    "ruling"
+  ]
+}

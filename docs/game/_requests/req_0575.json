@@ -1,0 +1,32 @@
+{
+  "id": "req_0575",
+  "at": "2026-06-10T17:14:44.474Z",
+  "origin": "session:1b2c",
+  "text": "also, something looks wrong here. lets look. you see how it goes from red to green on the top part of the intersection but stays red to red and green to green on the bottom part [Image #2]",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-10T17:14:57.998Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T17:14:58.007Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the red/green flip at the junction: the lane wires coloured by flow RELATIVE TO DRAW DIRECTION, so the two halves of the horizontal road (drawn outward from the junction, one east one west) flipped colours at the seam while the actual stamped lane flows were correct on both halves (right-hand traffic held — the legend lied, not the lanes). Fixed display-only in e464f5e80: strokeWireFlip canonicalizes wire colours to absolute directions (green = east/south flow, red = west/north) so one road reads one continuous colour no matter how its strokes were drawn; rail hint text updated; pinned with the user's exact intersection shape in roadData.test.ts (25/25).",
+  "shas": [
+    "e464f5e80"
+  ],
+  "resolvedAt": "2026-06-10T17:14:58.007Z",
+  "tags": [
+    "bug"
+  ]
+}

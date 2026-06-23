@@ -1,0 +1,13 @@
+{
+  "id": "req_0159",
+  "at": "2026-06-06T18:13:16.555Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — third in your queue (after PLACEFREEZE and AUTHBUILD-REMOVE): PREFABSELECT-0606. User verbatim: \"there is a prefab method inside of the new build tool, but i dont see any obvious way to switch to the tool that lets me select which parts go together in a prefab, and i know i had asked about it earlier though it might have never got done anyways\" — confirmed never done (predates the request ledger; the piece list shows a \"0 Prefabs\" category with no way to author one). Build the missing half: a SELECT tool in build mode — the user selects placed pieces (click/click-drag multi-select with clear visual marking), groups the selection into a named prefab, and it appears under the Prefabs category for placement like any other piece (placing a prefab stamps all its parts with their relative offsets, snapping to the same lattice). Survey first: how the Prefabs category is currently wired (something put that slot there — find what exists vs what is missing, post it before building). Respect the build-tool conventions on selection visuals and the three chrome laws; prefab placement composes with everything placement already does (yaw, anchor, validation) — no special-case path. Storage: prefabs persist the V20 way, scoped per the owner-map rules. Tests at the consumption layer: select N pieces -> save prefab -> place it on a clear area -> identical relative layout; plus a Zig-side test if any Zig logic changes. DONE-BAR: survey posted, then the working tool + tests + verify green + READY. DO NOT COMMIT. The user authoring and stamping a prefab is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ux"
+  ]
+}

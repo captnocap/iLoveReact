@@ -1,0 +1,33 @@
+{
+  "id": "req_0642",
+  "at": "2026-06-11T12:35:20.097Z",
+  "origin": "session:7de3e0b0",
+  "text": "nice now can u give me like a procedural paint tool for grass trees and rocks, also if you look at the tile types, it has like bush tiles but no grass tiles so would need to expand on that also",
+  "status": "review",
+  "sessionId": "7de3e0b0-06ef-431e-b04d-b0c6f97a7c65",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T12:36:03.648Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T12:50:31.987Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two halves landed. GRASS TILES: 'grass' and 'grassDry' are real paintable surface tiles now (the registry only had bush, an embedded foliage profile, not ground) — appended at the end of BOTH tile tables so kind indices stay stable; quiet underfoot, thin concealment (a lawn hides nothing — hiding stays the bush/tall-grass prop's job), bad for cars; they appear in the TILES palette automatically. SCATTER BRUSHES: a procedural nature paint tool — Meadow / Forest / Rocky brushes in the OBJECTS tab's new SCATTER BRUSHES group; arm one and paint, and the stroke rolls a weighted grass/tree/rock mix per tile across the brush footprint, stamping ordinary prop placements (erase/move/select/compile unchanged). The roll is deterministic per tile and occupied tiles are skipped, so repainting the same ground never double-fills. Suites: scatter 4/4, tiles 19/19, props 14/14, geometry 8/8, colliders 5/5, painter 3/3.",
+  "shas": [
+    "101377352"
+  ],
+  "resolvedAt": "2026-06-11T12:50:31.987Z",
+  "tags": [
+    "ask"
+  ]
+}

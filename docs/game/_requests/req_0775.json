@@ -1,0 +1,18 @@
+{
+  "id": "req_0775",
+  "at": "2026-06-13T15:42:25.685Z",
+  "origin": "session:ef4fbf70",
+  "text": "the glass is fixed. the one thing about the whole texture going away is still happening. look. [Image #16] [Image #17] see why is the texture breaking in the editor",
+  "status": "doing",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T15:44:04.825Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

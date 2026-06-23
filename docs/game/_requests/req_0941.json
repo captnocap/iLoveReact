@@ -1,0 +1,28 @@
+{
+  "id": "req_0941",
+  "at": "2026-06-15T04:57:41.498Z",
+  "origin": "session:e4e78ac1",
+  "text": "hello, you can pick up where they left off",
+  "status": "review",
+  "sessionId": "e4e78ac1-1379-42e3-b910-34a2484254bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T04:58:15.737Z",
+      "actor": "e4e7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T05:11:54.584Z",
+      "actor": "e4e7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Pickup request: resumed the in-flight Combat-in-the-Zig-loader task (req_0935) from the /tmp handoff brief in a fresh session. Read the approved plan + turnkey spec, traced the player figure's bake→parse→render path, then implemented Stage 1 end to end: NPC population now bakes to NPC_MODELS/NPC_SPAWNS lumps (compile/npcModels.ts, sharing buildFigureModel/writeModelGroup with playerModel.ts), parses in framework/world/constructor.zig (NpcSpawn + shared readModelGroup + decodeNpcModels/decodeNpcSpawns + Scene fields), and renders/animates in world_loader.zig (NpcRuntime + node build + updateNpcModelNodes + refreshNpcNodes at both per-frame sites). Bundle clean, all Zig ast-check clean, byte layouts verified. The substantive deliverable lives under req_0935 (still in doing, awaiting the user's rebuild+verify before review); this pickup ack itself is complete.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T05:11:54.584Z"
+}

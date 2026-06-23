@@ -1,0 +1,30 @@
+{
+  "id": "req_1299",
+  "at": "2026-06-18T17:41:09.561Z",
+  "origin": "session:76a33154",
+  "text": "Why can i not see the grid at all  or any color still? [Image #18] [Image #19] and yes its small the player model is only 1.65m tall, this is proportional to the player model",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T17:42:23.512Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T18:05:57.491Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused 'painting registers cells but shows no colour' using offscreen atlas dumps (rendered the baked atlas to PNG directly). Chain of bugs, all fixed: (1) DEDUP — the paint atlas was packed with dedupIslands/combineIslands ON, so congruent faces SHARED one slot (a cube's 6 faces all mapped to u[0,0.64]); a face could not be painted independently and writes overwrote neighbours. Now the paint pack uses dedup OFF → every face owns a distinct slot (verified: 6 faces → 6 separate uv rects). (2) ATLAS SIZE — it was still fit to the obsolete paintGridCells=64, packing a gun's many faces sub-pixel; now fit to paintAtlasTexels=1024 (paint cells are world-uniform + atlas-independent, so the old coupling was wrong). (3) BASE — the per-island pastel 'template' base buried paint in debug colour; switched the paint texture to a flat neutral 'solid' base so paint pops. (4) faceCellGrid took the FIRST uv edge for the world↔uv scale → returned null on a degenerate first edge (an unpaintable face); now scans for the longest uv edge and falls back to a single cell, so every uv'd face is paintable. (5) BAKE emitted one box PER CELL → a filled face = thousands of boxes → the layout child cap dropped most; added run-merging (cellRuns/runAtlasRect) so a filled face is a handful of boxes. (6) texture name 'paint-v2' forces a one-time repack of stale deduped atlases; the diagnostics readout now counts real cells (paintRef became per-part) and shows 'atlas Nx'. Verified via offscreen atlas dumps: three faces filled with three colours land in three DISTINCT slots. Build clean; meshPaint 8/8. Needs rjit dev to confirm live on the gun: enter paint (it repacks once to paint-v2), pick a colour, fill/paint a face → it should show. shas 3d42c49c4.",
+  "shas": [
+    "3d42c49c4"
+  ],
+  "resolvedAt": "2026-06-18T18:05:57.491Z"
+}

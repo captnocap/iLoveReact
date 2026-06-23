@@ -1,0 +1,30 @@
+{
+  "id": "req_0897",
+  "at": "2026-06-14T02:50:42.191Z",
+  "origin": "session:48b3aca2",
+  "text": "yes. now, there is the compiled game to think about as the main confirmation it carrys end to end.  and also @../../GUIDING_LIGHT.md will help guide you for the lab correctly so there is the correct work now and less reworking later. hows that sound",
+  "status": "review",
+  "sessionId": "48b3aca2-c5c6-44bc-a677-133a51467e99",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T02:51:26.107Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T03:17:43.544Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Addressed as part of req_0894. The compiled (no-V8) game is the end-to-end confirmation: STATS_TUNING bakes into a fixed STATS_CONFIG lump (MAP_LUMP 22, u32 version | f32[43]) via compile/playerStats.ts, mirroring PHYSICS_CONFIG; the Zig loader decodes it (framework/world/constructor.zig decodeStatsConfig) and world_loader.zig logs it ('[loader] player stats config: ... carries end to end'), proving the data reaches the compiled game. Designed per GUIDING_LIGHT.md: declarative data, factored into sums (money/capacity/skills are factor sums, not baked products), content-referenced outfit, no code in the loop. Per the user's ruling the HUD is React in dev/test only — the compiled game stays React-free and the native compiled HUD is a deliberate later effort, not a JS slopfest.",
+  "shas": [
+    "12d4a553b"
+  ],
+  "resolvedAt": "2026-06-14T03:17:43.544Z"
+}

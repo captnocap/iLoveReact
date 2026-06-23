@@ -1,0 +1,53 @@
+{
+  "id": "req_1393",
+  "at": "2026-06-19T07:51:51.733Z",
+  "origin": "session:08e68a04",
+  "text": "hello claude. uh this screenshot was taken on 6/15/2026 at 4:31 pm [Image #78] this is in the compiled game method, and u can see the level of detail on the ground texture. now fast forward today, [Image #79] and idk what happened to the textures. got any idea",
+  "status": "done",
+  "sessionId": "08e68a04-ed08-4a1c-918f-35cb63b16803",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T07:52:06.411Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T08:12:18.459Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "DIAGNOSED (no code changed yet; awaiting user scope decision). Compiled-game regressions trace to days-old UNCOMMITTED multi-session WIP: FORMULAFLOOR ground-shader rewrite (constructor.zig/heightfieldSurface.tsx dirty) + baked NPC crowd (npcModels.ts, untracked) + foliage bake (grassPopulation.ts untracked + worldGeometry.ts pushFoliage). Rebaked the REAL map: 270385 instances of which 265668 are foliage (33968 grass + 231700 bush). Texture: headless render shows textured road/asphalt grain WORKS in current tree (47 heightfields built) -> user's flat-ground binary is likely a STALE compile from an earlier broken state (v2-heightfield-rejection bug, fix sitting uncommitted in constructor.zig). Recommend: recompile first."
+    },
+    {
+      "at": "2026-06-19T08:24:17.502Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "CORRECTION + refined dx (still in flight, no code changed). RETRACTED 'foliage count is a bug/memory problem' — user raised foliage cap to ~231k DELIBERATELY because renderer was truncating to ~1/16; memory is fine. Foliage rides the STATIC instance buffer (uploads once, cached by ptr key 3d.zig:1487-1489, NOT per-frame) — render proof drew all 270385 GREEN, so no VRAM/perf cost. High count is fine. TEXTURE low-res pinned precisely: painted ground bakes to a 4px/tile raster (HEIGHTFIELD_TEXTURE_PIXELS_PER_TILE=4, MAX_PX=512, worldGeometry.ts) = low-res; the crisp version is the PER-FRAGMENT ground formula (FORMULAFLOOR-0615). Zig side ready (g_ground_pipeline + v3 ground_formula decode) but TS writer never emits it (HEIGHTFIELD_LUMP_VERSION=2; git log -S ground_formula in bake = none). Fix = wire writer to emit v3 formula lump."
+    },
+    {
+      "at": "2026-06-19T08:43:55.407Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "PROVEN mechanism (was asserted, now verified). req_1075 wrote BOTH the v3 formula writer (worldGeometry.ts) AND a test (worldGeometry.test.ts 'FORMULAFLOOR-0615'). On disk now: the TEST survives + DEMANDS v3/formula+flat-chunk-routing; the SOURCE is back to v2 baked 4px. Ran the suite (esbuild bundle + v8cli): 3/13 pass, FORMULAFLOOR-0615 FAILS 'a plain flat chunk renders through the formula path'. So req_1075's source changes are provably absent while its test changes remain. Mechanism = uncommitted-overlay loss: the foliage session edited worldGeometry.ts from committed HEAD (which never had the never-committed v3 writer), saved HEAD+foliage, silently erasing the overlay (no conflict). Test file survived only because that session didn't touch it. RECOVERY: redo the writer to make worldGeometry.test.ts green, then COMMIT immediately. Spec lives in the surviving test."
+    },
+    {
+      "at": "2026-06-19T22:11:35.089Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-19T22:17:52.865Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "FIXED + verified in the working tree (commit pending user OK). Rebuilt req_1075's lost FORMULAFLOOR-0615 writer half in worldGeometry.ts: bumped the floor heightfield lump to v3, ship the HEIGHTFIELD_TILE_BODY ground formula ONCE in the header (textBytes ASCII encode) + each painted chunk's cell stream as groundData ([...tileData, ...roadRibbonSection]); floorNeedsHeightfieldRender now routes EVERY painted chunk (flat/road/relief/parking) through the formula path, so flat ground no longer falls to blurry box-slabs; flat chunks ship a cheap 2x2 mesh. Removed the dead 4px baker (heightfieldTextureBytes/Size + MAX_PX/PIXELS_PER_TILE). The Zig consumer (constructor.zig v3 decode + world_loader g_ground_pipeline) was already in the tree. Verified: worldGeometry.test FORMULAFLOOR-0615 PASS + groundResolve 7/7; rjit game bake PASS, loader decoded 9 v3 terrain heightfields (no BadHeightfields), render proof GREEN. Crisp ground is back. NOT yet committed — buildable commit entangles foliage/NPC WIP (see req_1395).",
+  "shas": [],
+  "resolvedAt": "2026-06-19T22:11:35.089Z"
+}

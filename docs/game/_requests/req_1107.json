@@ -1,0 +1,30 @@
+{
+  "id": "req_1107",
+  "at": "2026-06-16T00:13:04.700Z",
+  "origin": "session:9f19b605",
+  "text": "yesss and this helps because i can make a lot of t he core narrative of the game that the player is always 'looking to get away from this shitty place' so it looks like they have the capability in reach but both ends end up a dead one LMAO",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T00:13:29.399Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T00:14:13.371Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added the NARRATIVE SPINE to the void playbook — the thematic why that should set the tone for every seam. The protagonist is always 'looking to get away from this shitty place'; the world is built so escape always LOOKS in reach but both ends dead-end (the coast kills you for reaching across the water; the road folds you back two blocks from start). Geography as metaphor for the life that won't let you leave (ties to the opening arc req_0375 — broke/high/fired/trapped in the gig-crime CaaS loop), and PROTECT-THE-ZERO (V22) expressed as level design: no chosen one, no triumphant exit. Framed the void as the central metaphor the rest of the game is the setup for ('build the seams bleak'), not a bolted-on boundary. Added a new section to SKYBOX_PLAYBOOK.md and a matching 'The escape that dead-ends (narrative spine)' pattern to the _index record so the oracle surfaces it (verified — tops the 'looking to get away' query at 37.8). Committed 0fa2171b0.",
+  "shas": [
+    "0fa2171b0"
+  ],
+  "resolvedAt": "2026-06-16T00:14:13.371Z"
+}

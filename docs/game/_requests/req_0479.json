@@ -1,0 +1,31 @@
+{
+  "id": "req_0479",
+  "at": "2026-06-10T07:57:36.193Z",
+  "origin": "codex:019eb06a",
+  "text": "the slope button is it a seperate brush or what? its in the brush area but it doesnt highlight when clicking on it",
+  "status": "review",
+  "sessionId": "019eb06a-e6fb-7280-bdb5-0483b03d47b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T07:57:45.276Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T07:59:06.438Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified and fixed the slope tool selection behavior. Slope is a separate height mode using the same brush engine, not a separate layer; PaintCanvas was incorrectly normalizing heightMode='slope' back to 'brush', so the slope chip could not stay highlighted. Updated mode normalization to preserve slope, then reran the focused heightData test and fast hmsc-int ship build.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T07:59:06.438Z",
+  "tags": [
+    "bug"
+  ]
+}

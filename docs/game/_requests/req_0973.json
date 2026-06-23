@@ -1,0 +1,28 @@
+{
+  "id": "req_0973",
+  "at": "2026-06-15T11:15:24.755Z",
+  "origin": "session:524eaf71",
+  "text": "oh thats a bit off, so yours asks how big in tiles ok, so 1 tile by 1 but the problem here is that if we have per face uv, what is the uv size. and then also in blockbench the default 16 diameter is what exactly fills their center grid because it is a 16x16 line inside of the 3x3 greater grid, so that is what the mesh sizes by. and that is what we should follow. our 1 tile = 1 meter is the same idea, just now make it so that 16 defaults to 1 tile in the grid space for example",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T11:16:25.781Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T11:18:29.978Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Adopted Blockbench's unit model for the add-mesh dialog per the user. Modeling units are now 'pixels': STUDIO.unitsPerTile=16, so 16 units = 1 tile = 1 m (unitsToMeters converts on confirm), and the center tile's fine grid is 16x16 (fineDivisions 10->16) to match — the default 16-unit cube fills exactly the center tile, exactly like Blockbench's 16 diameter filling its center grid. This 16-unit basis is also the per-face UV/texel basis going forward (the user's stated reason: a per-face UV needs a defined unit-to-texel size). The dialog reads in units (default 16, suffix 'u') and shows the tile equivalent live; NumberField gained a snap param. The grid itself is unchanged — it is the ruler the units read against. Bundle-clean, hot-reload, fps untouched.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T11:18:29.977Z"
+}

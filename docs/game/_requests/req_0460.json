@@ -1,0 +1,33 @@
+{
+  "id": "req_0460",
+  "at": "2026-06-10T05:23:45.571Z",
+  "origin": "session:441dd1a1",
+  "text": "still not working. is it the compile button? honestly there is absolutely 0 ux on the button so i dont even know if it is most up to date but still not seeing them in that compiled route",
+  "status": "review",
+  "sessionId": "441dd1a1-1f5b-429e-9681-e92889f5a0e6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:25:04.341Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:31:36.996Z",
+      "actor": "441d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compile button had zero feedback ('0 ux on the button'), and glass renders in standalone rjit game play but not the editor /compiled route. Two parts: (1) UX — the pill now shows compiling/done/error + a readable one-liner carrying the bake's new [materials] breadcrumb (encodeMaterials logs 'N material(s): X shader, Y translucent', captured via 2>&1), so the user can confirm glass IS in the gamefile, with a note that Compile re-bakes DATA only. (2) Root cause of glass not in /compiled: the /compiled route renders world_loader EMBEDDED in the dev host (v8_app), a different binary than the freshly-built standalone; rjit dev fingerprints native inputs and the running host is STALE after the world_loader.zig glass change — its detector even says 'STALE DEV HOST … kill the running dev host (ctrl-c its terminal) and rerun this command'. Clicking Compile cannot fix that (data only). Fix for the user: Ctrl-C the rjit dev terminal and re-run rjit dev hmsc-int to rebuild the host with the glass loader. All changes hot-reloadable TSX + re-bundled bake.",
+  "shas": [
+    "620d5fc83"
+  ],
+  "resolvedAt": "2026-06-10T05:31:36.996Z",
+  "tags": [
+    "bug"
+  ]
+}

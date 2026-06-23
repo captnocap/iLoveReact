@@ -1,0 +1,31 @@
+{
+  "id": "req_0598",
+  "at": "2026-06-11T01:53:05.832Z",
+  "origin": "codex:019eb459",
+  "text": "another thing. when in the ghost placement u can rotate, when u have selected an item after placement, u have no easy way to rotate, give the same key",
+  "status": "review",
+  "sessionId": "019eb459-2638-7361-831d-b91e29d984a0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T01:53:15.563Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T01:54:41.131Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Handled selected placed-item rotation in the iso authoring builder. Current IsoAuthor now uses R mode-sensitively: armed placement still rotates the ghost, and with no armed tool it rotates the current selection. Whole-building selections rotate through one buildingMoved yaw update; loose pieces use the existing remove+place world-stream path with yawDegrees +90 while preserving placement metadata. Added the REQ-0598 capture note. Verified direct IsoAuthor bundle, build-snap 19/19, and full hmsc-int cart bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-11T01:54:41.131Z",
+  "tags": [
+    "ask"
+  ]
+}

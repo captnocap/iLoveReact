@@ -1,0 +1,12 @@
+{
+  "id": "req_0188",
+  "at": "2026-06-07T05:27:20.436Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — HANDOVER NOTICE, you are at 53% and rising. Finish EXACTLY two things: the BenchTarget crash repair (in flight) and the CUTOUTFLIP commit (already fully specified — deletion + extraction + ledger + docs, explicit paths, bench must render first). Then run /hand-over IMMEDIATELY and write your brief to /tmp covering: the flip commit sha, FOOTMESH state (built — Globe shiftZ+floorY deformers, FootShape dials — awaiting user eyes, uncommitted), any other uncommitted paint-lane work and what it awaits. No new work after the commit. Post the brief path; the supervisor boots your successor.",
+  "status": "new",
+  "sessionId": "cac9001b-5622-4bd2-b46d-222534f25a0c",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

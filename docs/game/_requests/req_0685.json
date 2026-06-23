@@ -1,0 +1,31 @@
+{
+  "id": "req_0685",
+  "at": "2026-06-12T13:16:46.204Z",
+  "origin": "codex:019ebbe8",
+  "text": "that worked pretty well, only thing is the hitbox or collision of it is massivelike width. i think because the desk its a rectangle it took the longest side and is using it for both ways",
+  "status": "review",
+  "sessionId": "019ebbe8-ba1e-74d1-bd7a-0274b58ea604",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:16:55.155Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T13:21:07.354Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed imported prop collision from radius-square to measured rectangular footprints. The importer now records local X/Z extents, Desk.glb regenerates as a 2.309897m by 1.149652m footprint, live editor prop footprint/picking uses the rectangle, and the compiled mesh-props lump/loader now ships and collides imported meshes as oriented rectangles.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T13:21:07.353Z",
+  "tags": [
+    "bug"
+  ]
+}

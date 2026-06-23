@@ -1,0 +1,33 @@
+{
+  "id": "req_0594",
+  "at": "2026-06-11T01:23:05.452Z",
+  "origin": "session:da94d3e7",
+  "text": "yo these rock hell yeah. how about some beds, cupboards, mirror, sink, oven, fridge, telephone pole, maybe some different color chairs. maybe a basket ball hoop, computer. nice work so far tho",
+  "status": "review",
+  "sessionId": "da94d3e7-791d-4eab-8e13-a3f2c1e8c371",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T01:24:33.729Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T01:32:56.463Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added the requested household + utility batch: 13 new prop kinds end-to-end. Beds (single with teal blanket + one pillow; double widens to 1.5m with two pillows + maroon blanket; headboard at +X; both get yaw-aware thin collision so you can walk alongside), cupboard (tall two-door wardrobe with knobs, thin AABB), mirror (wall-decor family: metal frame, pale glass, diagonal glint stripe), sink (pedestal + basin + faucet), oven (four burners, door window, handle bar), fridge (two-door with seam + bar handles), computer (CRT monitor + keyboard + tower at its anchor so it drops onto tables/desks or the floor), three painted chair variants (red/blue/green diner chairs with metal legs, same body as the wood chair), telephone pole (8.5m timber with two crossarms + insulator pegs — wires left for a future catenary pass), and a basketball hoop (pole, white backboard with target square, orange torus rim at the regulation 3.05m). Every kind has defs in both registries (world/propKinds.ts + game/kinds/props.ts), a live Scene3D model, compiled instance-part recipes in worldGeometry.ts, and catalog material/cover/depth tags so it auto-appears in the build palette. Verified: kinds/props 8/8, build 18/18, editor cart + gameShell + compile entry bundle clean.",
+  "shas": [
+    "43c844b4d"
+  ],
+  "resolvedAt": "2026-06-11T01:32:56.463Z",
+  "tags": [
+    "ask"
+  ]
+}

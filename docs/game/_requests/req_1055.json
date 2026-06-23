@@ -1,0 +1,28 @@
+{
+  "id": "req_1055",
+  "at": "2026-06-15T19:37:43.869Z",
+  "origin": "session:00a3ce8a",
+  "text": "whoops sorry fat fingered the esc key my b",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T19:38:55.850Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T19:39:57.641Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Joint type handling, resolved across req_1055->1057. First made the joint type a strict choice (req_1055) instead of a free string. Then the user, seeing that type was a connector vocabulary (not the joint-vs-pivot distinction they'd assumed), ruled it out of authoring entirely (req_1057): joints bind by their explicit NAME (model.joint.<name>), so type-matching is unnecessary and 'generic covers all the bases'. End state: MountPoint.type is now OPTIONAL and dormant (absent = generic; mountsCompatible tolerates a missing type), kept STRICT (JOINT_TYPES) for a possible future composition layer but no longer surfaced in the UI; the type chooser was removed from the column-3 panel and both + joint buttons create typeless joints. Also (req_1056) the viewport overlay now labels each handle by its placement NAME ('back_left', not 'joint'/'generic') plus its travel, and the pivot is always labeled, so binding targets read off the model. editMesh 42/42, bundles clean; hot-reload TSX, uncommitted. PLAYBOOK Part 6 + memory updated.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T19:39:57.641Z"
+}

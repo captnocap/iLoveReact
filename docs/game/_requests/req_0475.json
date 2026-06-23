@@ -1,0 +1,33 @@
+{
+  "id": "req_0475",
+  "at": "2026-06-10T07:05:17.659Z",
+  "origin": "session:11eafc6e",
+  "text": "seems fixed. this is the last seam of it to close. look at the outter edge [Image #3] and heres my painting [Image #4] the purple is the inner pocket that forms at the end",
+  "status": "review",
+  "sessionId": "11eafc6e-a623-4de3-9c44-7288f18f3e9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T07:23:49.773Z",
+      "actor": "session:11ea",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T07:23:49.781Z",
+      "actor": "session:11ea",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Closed the last corner seam — the thin vertical pocket (the purple sliver) at convex wall corners. The face slabs float faceSlabLiftMeters (12mm) proud of the wall core and never mitered, leaving an open ~22mm channel running the full corner height. Added placedPieceWallEnds (per-end corner-join report: which end joins a perpendicular wall and which side is the exposed corner) and a renderer miter in pieceMeshes: the x-axis wall's outer slab runs THROUGH to the joining wall's slab outer surface while the z-axis wall's slab BUTTS into its inner surface — one through + one butt fills the pocket with caps meeting edge-to-edge and no coplanar faces to z-fight when the two walls are skinned differently. wallJoinSignature now digests the end state so neighbor changes re-render the memoized piece. Verified by box dumps over all corner orientations + Ts + straight runs; 46/46 placed tests; game verify GREEN. Commit 31be83e15.",
+  "shas": [
+    "31be83e15"
+  ],
+  "resolvedAt": "2026-06-10T07:23:49.781Z",
+  "tags": [
+    "bug"
+  ]
+}

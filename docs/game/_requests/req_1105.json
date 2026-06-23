@@ -1,0 +1,30 @@
+{
+  "id": "req_1105",
+  "at": "2026-06-16T00:02:47.184Z",
+  "origin": "session:9f19b605",
+  "text": "Nice. lets write this up into a playbook like we did with the studio playbook to dump all the ideas into, we can keep this as the master record that gets referenced when workers invoke the oracle so we can buiuld the seams at the right times! :D",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T00:03:03.334Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T00:08:33.281Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote the master playbook docs/game/SKYBOX_PLAYBOOK.md (matching the Studio playbook's rulings-header + design-gate + build-order shape) consolidating the whole session's skybox/void doctrine (req_1095-1104) into one coherent record: the law (outward stretches, inward folds), one-generator-four-jobs, the two halves, Void Distance believability-decay, the Void Run roguelite, the Treadmill/recursion field, living nowhere, mod canvas, and the Night Assassin — plus the load-bearing design disciplines, the open forks, and a DESIGN-GATED seam build order. Per the user's intent (master record referenced when workers invoke the oracle so seams get built at the right times).",
+  "shas": [
+    "d7331b8c3"
+  ],
+  "resolvedAt": "2026-06-16T00:08:33.281Z"
+}

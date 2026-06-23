@@ -1,0 +1,31 @@
+{
+  "id": "req_0344",
+  "at": "2026-06-08T13:34:23.155Z",
+  "origin": "codex:019ea612",
+  "text": "Yep. Now all you need to do is next turn that loader into a host primitive. Thats it. Then it can render inside of a react component. Is t hat not clear by just looking at it",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:34:36.435Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:58:27.421Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Turned the loader into a host primitive visible from React as WorldLoader. The primitive mounts in hmsc-int /compiled and renders via the loader-owned native runtime with no per-frame React reconciliation.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T13:58:27.421Z",
+  "tags": [
+    "ruling"
+  ]
+}

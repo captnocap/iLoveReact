@@ -1,0 +1,31 @@
+{
+  "id": "req_0339",
+  "at": "2026-06-08T13:28:49.623Z",
+  "origin": "codex:019ea612",
+  "text": "HARD CORRECTION — the user put the /compiled embed side-by-side with the standalone and they are NOT the same. You REINVENTED the renderer instead of embedding the real loader.\n\nEVIDENCE (user's two screenshots):\n- Standalone world_loader: player figure + ramps (sloped geometry) + third-person follow camera — the real compiled game.\n- /compiled route: grey BOXES (no ramps), NO player figure, wrong/overview camera — a different, lesser scene.\n\nROOT: framework/world/compiled_world.zig is a SECOND, separate render path you wrote from scratch (345 lines). It does not run the same construct+render the standalone loader runs, so it renders a different/older/simpler world (no player, no ramps, no follow camera). This is the exact \"reinvented it again\" the user is frustrated by, and it violates GUIDING_LIGHT (the engine is ONE fixed capability; do not build a second copy) and one-source-of-truth.\n\nTHE FIX — make the embed run THE EXACT SAME render the standalone loader uses:\n1. world_loader.zig is now UNBLOCKED (pane 5 finished ramps). Extract the loader's ACTUAL construct+render core from world_loader.zig into a SHARED module/function: read the game-file -> constructor.zig Scene (pieces incl. ramp wedges, painted floor, env) -> build the Scene3D tree (player model + animation + the exact follow camera + occlusion) -> gpu/3d.zig render. This is ONE function.\n2. BOTH callers use it: world_loader.zig (standalone main) AND the embed binding (v8_bindings_compiled_world.zig / compiled_world.zig) call that SAME core, only differing in the render target (window vs editor texture) and the input source. NO duplicated render logic.\n3. DELETE the reinvented render in compiled_world.zig — it becomes a thin adapter (target + input) around the shared core, nothing more.\n4. Same game-file (zig-out/game/hmsc.gamefile, current — with ramps + player), same content-store, same camera/player/animation/physics.\n\nTHE BAR: the user opens /compiled and sees a render PIXEL-IDENTICAL to the standalone loader — same player, same ramps, same follow camera, same everything — just inside the editor. If it differs in ANY way (missing player, boxes-not-ramps, different camera), it's NOT done. NEVER self-declare GREEN; the user verifies side-by-side.\n\nGUARDS: ONE render path shared by both — if you find yourself writing render code that the standalone doesn't also use, STOP, you're reinventing again. No stubs. Native Zig render (no per-frame V8). Own context — NO Task/subagents. tools/rjit only. Commit EXPLICIT paths. No reset/revert. world_loader.zig is now yours to refactor (pane 5 is off it) — but keep the standalone working identically.",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:28:54.689Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:58:27.396Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the mismatched /compiled render path with a true WorldLoader host primitive backed by world_loader.zig. The old separate framework/world/compiled_world.zig renderer was deleted, gpu/3d.zig no longer has a global scene-substitution hook, and both standalone and embedded rendering now use the same world_loader Runtime scene/camera/player/ramp path. Verified standalone no-V8 shot and embedded /compiled route render.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T13:58:27.396Z",
+  "tags": [
+    "bug"
+  ]
+}

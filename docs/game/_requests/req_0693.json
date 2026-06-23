@@ -1,0 +1,28 @@
+{
+  "id": "req_0693",
+  "at": "2026-06-12T13:42:55.987Z",
+  "origin": "codex:019eba54",
+  "text": "nice go ahead and sweep through another set",
+  "status": "review",
+  "sessionId": "019eba54-122c-7b03-9a58-37a88189321a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T13:43:04.550Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T13:45:06.559Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Swept another adjacent set of prop recipes out of worldGeometry into one-file-per-prop modules: fence, treeOak variants, treePine variants, treeBirch, treeCypress, and treeDead. Each extraction preserves the existing dimensions/colors/part order while adding semantic part ids inside the recipe file. worldGeometry now imports those *Parts functions and delegates the matching switch cases. Verified with the focused compile/worldGeometry bundle and v8 test: 13/13 passed.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T13:45:06.559Z"
+}

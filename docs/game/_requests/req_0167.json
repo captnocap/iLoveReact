@@ -1,0 +1,12 @@
+{
+  "id": "req_0167",
+  "at": "2026-06-06T18:52:51.166Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — third painter item for your sweep: IMGLAYER-0606. User verbatim: \"i dont understand the point of opening an image because it doesnt save or anything and it immediately stops painting for the thing u open it with lol\". The IMGOPEN feature is half-connected: opening an image neither persists nor coexists with painting — it hijacks the target and leads nowhere. Wire it through to the layer system: an opened image becomes a PAINT LAYER on the current target — a layer is a layer (user law): it sits in the layer list, reorders, toggles visibility, can be painted OVER immediately (painting must not stop), and persists through the target's normal save path exactly like stroke layers (draft protection included). No special-case image path — it rides the existing layer machinery. Survey how layers persist first and mirror it. Test at the consumption layer: open image -> paint a stroke on top -> save -> reload -> both image layer and stroke survive in order. SELFSHOT proof. Fold into your batch. The user opening an image and painting over it without losing anything is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "id": "req_0389",
+  "at": "2026-06-09T03:30:45.222Z",
+  "origin": "session:9440c2b7",
+  "text": "Yeah so that is one thing to be absolutely sure of is you are aligned with all the other building tools so that one thing changes here it changes there also. its all in sync. and yes, it comes from the walls inside of the build mode in the play/test route from hitting f2, that wall is one story",
+  "status": "review",
+  "sessionId": "9440c2b7-fcc6-4745-a2a5-309cd273e004",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T03:30:57.489Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T03:33:38.348Z",
+      "actor": "iso-author",
+      "kind": "note",
+      "text": "Survey done. Built isoStage.ts (pure iso authoring camera: Isometric rig + unprojectGround pan/zoom/rotate-detents + per-floor-level pickCell). Sourced METERS_PER_LEVEL from HMSC_SCALE.storyHeightMeters (== F2 build wall = one storey), not a literal. Verified the sync model: GAME_BUILD is explicitly 'one model, two views' over worldStream (the one source of truth); F2 build path = resolveSnapTarget (build/snap.ts) -> ghost -> editorChannel(worldStream) commit. Iso pane will be a THIRD view onto that same model (cursor pickCell instead of crosshair), so walls/objects/spawners(markers)/cloning(connected+prefab) stay in sync. Legacy placements.ts is the migrating-out 2D path, not the iso pane's model."
+    },
+    {
+      "at": "2026-06-09T05:48:39.554Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Alignment requirement satisfied: the iso authoring pane drives the SAME building model every other tool does, verified end to end. The F2 build-mode renderer was extracted to shared editors/build modules (req_0391) so walls draw with ONE renderer; the pane snaps with the shared resolveSnapTarget, validates with GAME_BUILD.placed.validatePlacement, and commits the SAME piecePlaced WorldEvent to the SAME worldStream via the cart's existing commitBuildEvent — so a piece placed in the iso pane stands in F2 and in the game, no second representation. Storey height (METERS_PER_LEVEL) sources from HMSC_SCALE.storyHeightMeters, which IS the F2 build wall = one storey, so floors line up with stacked walls. Change a piece/snap/storey once, it changes everywhere.",
+  "shas": [
+    "c34ada30a",
+    "6fc242e4e",
+    "125fdf0f1"
+  ],
+  "resolvedAt": "2026-06-09T05:48:39.554Z"
+}

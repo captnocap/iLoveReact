@@ -1,0 +1,28 @@
+{
+  "id": "req_1060",
+  "at": "2026-06-15T20:40:25.611Z",
+  "origin": "session:00a3ce8a",
+  "text": "nice yeah i did rebuild it worked. alright, pass a /hand-over and we need to next setup in our metadata panel to show the encoded shape of the live in edit mesh, need to add a delete previous stored meshes, and need to build the export to texture / painter step. all really trivial from here.",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T20:40:58.188Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T20:44:12.284Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "This session's ask was 'pass a /hand-over' (plus naming the next three tasks) — the hand-over is DONE: brief written at /tmp/handoff-20260615-204107-studio-metadata-shape-readout-delete-saved-meshes-export-to-.md with lineage intact (original_conversation_id 832d7b44-5500-43d9-a885-879b9e42b507, chain link 6 of the Studio thread). The three implementation items it names — (1) a column-3 read-only panel showing the encoded shape of the live EditMesh, (2) delete previous stored meshes from the library roster (modelStream already has the modelDeleted event; needs a deleteModel mutator + a roster delete affordance + confirm), (3) the export-to-texture/painter step (Part 5 Phase 5c: box-net atlas from unwrap/storedUVLayout, route the existing painter + textures door at it, textured display on the part) — are NOT started; they are fully specced in the brief for the next session to claim under req_1060 and execute. No code changed this turn beyond the handoff file. Nothing committed (user leads commits).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T20:44:12.284Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1125",
+  "at": "2026-06-16T02:32:01.433Z",
+  "origin": "codex:019ecd7a",
+  "text": "1) yes, this exactly. 2: you can merge as much parts as you want. there is no guarantee anything will be preserved,. but i want to get it all in here before deciding that. 3) yes same thing, nothing special. 4) no parity, not a worry 5)they already have material slots afaik. so not a problem, 6) just metadata, 7) i want those shapes made first before doing anything else",
+  "status": "review",
+  "sessionId": "019ecd7a-9cba-73d0-9fee-7dc6959b72e2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T02:32:07.728Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T02:32:48.719Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user's import-policy answers in docs/game/HMSC_INT_ASSET_PIPELINE.md. Added a settled import policy: one saved Studio scene per prop kind, same model library, importer may merge/split/restructure source parts, no side-by-side parity gate, existing material slots carry forward, import reports are metadata only, and missing EditMesh primitives such as sphere/torus must be implemented before migration. Updated primitive, prop recipe, import-report, and retirement-gate language to match.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T02:32:48.719Z"
+}

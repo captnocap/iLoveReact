@@ -1,0 +1,28 @@
+{
+  "id": "req_0622",
+  "at": "2026-06-11T08:31:44.219Z",
+  "origin": "session:9361f55b",
+  "text": "oh ok so did you update every model or just the ones i referenfced",
+  "status": "review",
+  "sessionId": "9361f55b-0780-4569-bbc9-0034d03a84cc",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T08:32:28.723Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T08:38:29.045Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's question (no code under this req; the physics follow-up landed as req_0623): the scale sweep updated the REGISTRY for the 21 contested kinds, and the model audit covered ALL prop models — every model was checked for rendered-vs-registry honesty, and the five broken ones (dumpster, payphone, mailbox, bench back, hoop rim) were fixed in both renderers; the rest scale honestly off heightMeters so the registry change resized them automatically. Deliberately untouched: seat/counter-locked furniture (chair/couch/table/beds/sink/oven — locked to the figure's skeleton so sitting keeps working), rocks/bushes (no real-world standard, art-sized), beach ball (already oversized), streetSign and fridge (already at target). Two silhouette items remain candidates if the user wants full consistency: cupboard 1.9->2.2 and floorLamp 1.7->1.95 — flagged, awaiting their word.",
+  "shas": [],
+  "resolvedAt": "2026-06-11T08:38:29.045Z"
+}

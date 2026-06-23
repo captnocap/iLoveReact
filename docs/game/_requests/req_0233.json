@@ -1,0 +1,13 @@
+{
+  "id": "req_0233",
+  "at": "2026-06-07T10:36:29.991Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: USER FAIL on the clothing surface, verbatim: \"The clothing route is still doing a character cosplay … where i want to just have to select a t shirt, and then i can go through the designs, add a new design, brings me to the painter save, done now that shirt exists i can give it a name, and all that important meta data. not this shit where its asking me about a prop … or any of this nonsense\". Screenshots: /home/siah/.claude/image-cache/65a3b158-192d-4949-99b0-83b2b071ce2a/5.png (the surface they reached: NEW CHARACTER · clothing — dressed figure, OUTFIT chips, EXTRAS toggles), 6.png (a PROP/held list with Knife/Pistol/Pitchfork… inside CLOTHING), 7.png (print/extras chips). The user reached a clothing view that is still the character-cosplay model — a CHARACTER roster dressed in outfits, with held-prop selection, in the clothing context. Your garment-centric CLOTHSOURCE is THE correct model — the job now: (1) find which surface the user landed on (old clothing lens on the character source, or a stale clothing route/lens still mounted) and make the garment source THE one clothing surface — the cosplay view dies from the clothing context (character-outfit assembly belongs to the CHARACTER source if anywhere; held props are play/character domain, never clothing). (2) Verify the user's exact flow works end-to-end in your source: select tee → browse designs (variants) → ADD NEW DESIGN → lands in the painter → save → the design exists → name + metadata editable. The painter handoff and the save-back path are the spine — if any hop is missing, build it. Evidence: the route/lens census of how the user could reach clothing, what each now shows, and a walkthrough proof of the add-design flow. This outranks BUILDSKIN holds in your queue.",
+  "status": "new",
+  "sessionId": "e9dc6618-5ee0-4700-9c68-ac6eabf40635",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

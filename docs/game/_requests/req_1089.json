@@ -1,0 +1,27 @@
+{
+  "id": "req_1089",
+  "at": "2026-06-15T22:56:56.873Z",
+  "origin": "pane",
+  "text": "the grass is painting this same dead grass color for all grass as the underlying default. can we fix that, we have a nice green grass texture. idk why this is the color it is. and for reference here is the tile painter, which has a sane green color",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-15T22:56:56.881Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:56:56.890Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The grass GROUND rendered dead-yellow in 3D while the 2D painter showed green. Cause: grass tiles declare surface.material 'soil', and render3d/tileFill tileFillMaterialId mapped 'soil' (and 'sand') to the SAND fill (matId 2, yellow) — 'no separate soil fill yet'. Both the editor heightfield surface and the compiled ground bake colour cells through that same tileMaterial, so grass everywhere wore sand. Added fill_grass (a green lawn: patchy fbm green tone + fine blade speckle + dirt flecks, matching the painter swatch ~#3f7d33) as matId 3, routed every grass kind (grass/grassDry/grassSparse/grassLush) to it via kind.startsWith('grass'), and made grassDry use the drier yellow-green variant. One fix covers editor + compiled. Verified: hmsc-int self-shot PASS, rjit game shot PASS (19344 blades, no shader crash). Follow-up crash fix tracked in req_1087.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:56:56.889Z"
+}

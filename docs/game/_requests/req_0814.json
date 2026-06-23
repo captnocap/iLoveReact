@@ -1,0 +1,18 @@
+{
+  "id": "req_0814",
+  "at": "2026-06-13T19:20:59.059Z",
+  "origin": "session:6e5908e6",
+  "text": "ok that in part landed. i still, am not having my roads connect. they now have some yellow dashed lines in the iso3d tho yes. but thats not helpful with half or more of the roads are just flat out not showing up. [Image #29] \n\nfurther, you can even see its an instance cap like i said. look at this road right here. it literally stops painting in the middle of its path because its hitting a cap [Image #30]",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T19:21:51.005Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

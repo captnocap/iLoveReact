@@ -1,0 +1,10 @@
+{
+  "id": "req_1408",
+  "at": "2026-06-19T15:44:58.669Z",
+  "origin": "session:d6961119",
+  "text": "ok so tools/genmodel  path/to/pic.png \n\ndo i also provide a prompt with image ?",
+  "status": "new",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": []
+}

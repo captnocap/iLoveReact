@@ -1,0 +1,31 @@
+{
+  "id": "req_1621",
+  "at": "2026-06-22T14:51:49.951Z",
+  "origin": "session:80dde2b3",
+  "text": "I think, to add on that, the best approach is, so we have the mission / story system in place. create a mission, and be able to generate a unique scannable in-game code for it that can then be imported into the studio mesh editor, to place during the paint layer. and that way its already tied to something tangible and is unique",
+  "status": "review",
+  "sessionId": "80dde2b3-9f78-4a97-bdcc-426fd9cd0d6a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T14:52:26.552Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T15:23:36.486Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the AUTHORING HALF of the QR-mission idea (phone-independent). A real mission now mints a unique, decodable in-world code that imports into the editor as a decal. New game/textures/missionCode.ts is a round-trippable codec (finder patterns + payload + CRC8 + checkerboard mask) emitting ONE shader-filled DecalRectNode — bit-packed because a decal caps at MAX_NODES=256 and fillData at 64 floats, so a per-module grid is impossible; 20 bits/f32 word, N<=31 modules. Registered a 'mission-code' ShaderSpec in shaders.ts (grid sampler w/ quiet zone, modeled on cutout-stencil) that renders through decalRender's existing fillShaderId->Effect path, so the code rides the proven decal pipeline. game/missions/codes.ts binds one code to each real MISSION_DEFINITIONS entry; the materials/compose picker (store.ts+source.tsx) lists 'Mission · <title>' rows that load the code into compose for Materialize->apply-to-mesh like any decal. Tests: missionCode.test.ts (7 incl encode/decode round-trip, CRC-reject, uniqueness, validateDecalDoc, fillData<=64) and +1 in materials/source.test.ts, all green under v8cli; cart bundles clean via tsc-check. NOT a spec-compliant ISO QR (own codec matches the in-world look-at+interact model; a real QR encoder can drop in behind the same interface later). Resolve half (in-game scan->phone) and compiled-world shader lowering are noted follow-ups gated on the unbuilt phone system. Visual check best done live in rjit dev.",
+  "shas": [
+    "82d4670a3",
+    "d132f5771"
+  ],
+  "resolvedAt": "2026-06-22T15:23:36.485Z"
+}

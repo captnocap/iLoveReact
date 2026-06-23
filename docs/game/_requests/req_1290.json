@@ -1,0 +1,51 @@
+{
+  "id": "req_1290",
+  "at": "2026-06-18T16:17:21.412Z",
+  "origin": "session:9751f4ba",
+  "text": "ha hey i just came into a bug with grass. uh, look here, i have a heightfield, and it has grass painted on the side of it and its got the grass floating but the mesh itself is blank, [Image #2] and it seems that heightfields in general are just doing this. this is in the compiled world. and they use to not be invisible, so idk. kinda weird",
+  "status": "review",
+  "sessionId": "9751f4ba-6a5a-4d0d-aef7-a69eb17d42ca",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T16:17:29.603Z",
+      "actor": "claude-grass",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T16:44:21.985Z",
+      "actor": "claude-grass",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-18T16:46:37.188Z",
+      "actor": "claude-grass",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "reopening: real cause is runtime GPU-cache staleness, not stale binary — see new clue"
+    },
+    {
+      "at": "2026-06-18T16:46:37.198Z",
+      "actor": "claude-grass",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T16:54:21.985Z",
+      "actor": "claude-grass",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "FIXED (correcting my earlier stale-binary guess). Real cause: the compiled world keyed each heightfield's GPU geometry '~hf~loader-floor-{i}~1' with a CONSTANT version. The host dyn-slot cache (framework/gpu/3d.zig resolveDynamicHeightfield) only rebuilds on a version-hash change, and those caches are process-lifetime — they survive the unmount+mount a Compile->reload performs. So an added/edited heightfield recompiled into a running process reused the FIRST mount's mesh and stayed invisible until a full restart cleared the cache. That is exactly the user's signature ('full restart renders it, same process won't') — which is why my fresh standalone shots always rendered it. Fix: the ~hf~ key's version is now a Wyhash of the field content (cols/rows/heights); the id stays stable so the slot is reused, only the version flips on change, forcing one rebuild on reload. Flat painted-floor heightfields get it too. Proven with an A/B double-mount harness (reverted): OLD constant key -> remount rebuilt=false (stale 86400 verts); NEW content key -> key changes, rebuilt=true (89280 verts). Build clean, cold mount still renders 7 fields. Commit 101772bed (world_loader.zig only)."
+    }
+  ],
+  "resolution": "Compiled-world heightfields render invisible/blank (surface gone, grass floats), 'right next to me', 'heightfields in general'. Investigated the exact compiled render path: /compiled mounts a <WorldLoader> primitive that @imports world_loader.zig and calls drawScene in framework/gpu/3d.zig — the same code as the standalone loader. Built that fresh from current source against the user's actual baked map and instrumented the draw with hard data (debug code since reverted): all 7 heightfields issue draw calls (86,400 verts each, valid texture, alpha=1.0, +Y winding matching buildCube). Ruled out by data: dyn-slot cap (7<48), dynamic instance exhaustion (529/65536), texture-cache eviction (0 evictions), texture/inst alpha (255 / 1.0), fog (it's up close), back-face culling (winding cross-product = +Y, same convention as the cube which renders). Forced hf surfaces to magenta and measured 53.6% of the frame painted = heightfields ARE fully rendered in current source. Conclusion: the current source renders heightfields correctly; the user's binary is stale/mid-race — the Studio host-owned live-drag work (commit 4ee7c4e29) landed in 3d.zig's dynamic-vertex path minutes earlier. Fix = rebuild the editor binary + recompile, then retry. If still invisible after a clean rebuild it's a real bug and the magenta/draw-count harness reproduces it. No code change.",
+  "shas": [],
+  "resolvedAt": "2026-06-18T16:44:21.985Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1000",
+  "at": "2026-06-15T14:26:08.394Z",
+  "origin": "session:8c2aee6a",
+  "text": "auto save. the way it works:\n\ni just started the program -> i go to the route -> its on 'new' right away. i click on add and get a mesh -> i see this as 'new scene' or whatever on the side -> i click the name twice -> i can change the name of it -> hot reloads come thru -> i was last on scene_id_whatever, persist it -> every update on this scene persists to a branch, every camera movement persists to a twig. we dont care about keeping camera on restarts. we care about it on hot reloads. same for tools. we dont care about if it was face edge or vertex on fresh starts. we do care on hot reloads. this is very important to nail. i drag a face, i make a loop cut, i do ANYTHING, that is a branch save. i move my camera, i select a different tool, i click on a face/vertex/edge or multiple at a time these are twig saves, they only matter during the time of working, we dont restore this state on a brand new load though.\nvery key because undo history only is applicable to branches. twigs do NOT follow undo at all\n\nhow this looks in the real world:\n\ni am working, i have 3 faces selected, im making edits on this new mesh i dont have a name for yet, but all of its history is being saved. i ask for u to make a code change, hot update hits, i still have the same faces selected on the same mesh. turns out you also need me to restart the app, so i do, i come back the route is fresh, new mesh. no branch or twig loaded. i see the one i was working on named new_mesh_002 or whatever, it has the history of all my edits still, camera and selected faces are all reset, as expected",
+  "status": "review",
+  "sessionId": "8c2aee6a-d17a-4edb-bc4f-f7a458ee4293",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T14:27:48.522Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T14:47:32.801Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Restructured the Studio persistence to the user's branch/twig law (saved to memory feedback_studio_branch_twig_cold_hot). The req_0993 shortcut made the live scene the persisted stream so it auto-restored on cold start — wrong. Now: cold start boots to 'new' (blank); branch = persisted + undoable per-model (every mesh edit); twig = working-state (camera/tool/selection/which-model-open), hot-reload-only, never undone, reset cold. Mechanism: hotstate.zig is in-process (survives V8 re-eval, cleared on restart), so the open-model twig lives there via new imperative getHotState/setHotState in runtime/hooks. modelStream is now a LIBRARY of saved models (each {id,name,parts,order}, events scoped to their model id — the map-editor mapName idiom); studioModel is a working scene over one open model, boots 'new', auto-creates+names a model (new_mesh_NNN) on first add, branch-scoped undo. The workbench roster (model/source.tsx) is the library: a '+ new' row + saved models, onPick opens; a new shell hook selectedRow() makes the highlight follow the store (so the roster reads 'new' on cold start, not the disk twig). Rename via the MODEL panel name field. Crash fix (req_1001): the old flat-parts snapshot shape made selectors read undefined.models on boot — the reducer + selectors now normalize/guard, discarding the pre-req_0998 shape (boot-to-new wants those throwaway cubes gone). Tests: modelStream 6/6 (round-trip, per-model isolation, order, passthrough, inverse, old-shape tolerance), editMesh 25/25, full sources.ts chain + shell bundle clean. Hot-reload TSX, nothing committed. Deferred (twig other half): camera/tool/selection survive hot reload — still useState, reset on hot reload for now; the open-model already survives.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T14:47:32.801Z"
+}

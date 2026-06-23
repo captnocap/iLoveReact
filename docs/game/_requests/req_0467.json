@@ -1,0 +1,31 @@
+{
+  "id": "req_0467",
+  "at": "2026-06-10T05:58:22.829Z",
+  "origin": "codex:019eaf3e",
+  "text": "the camera in the iso3d building tool, is ass. is it javascript? why does it lag so hard ;_;",
+  "status": "review",
+  "sessionId": "019eaf3e-5849-7f32-a724-4d5b615d3f8f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:58:30.052Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T06:03:08.079Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the clarified IsoAuthor building pane as the old JS-driven camera path: it was mutating IsoStage, bumping React, and rendering Scene3D.Camera position/target/fov from stage.solve(). Converted the author viewport to V23 native camera drive by binding the actual camera node id via GAME_NATIVE_CAMERA.forNode(nodeId), sending IsoStage native orbit params into the host controller, mounting Scene3D.Camera nativeCamera with a static boot pose, and setting smoothing to 0 so authoring pan/zoom/rotate does not trail. Kept IsoStage.solve for semantic boot/picking math only and added a nativeViewport guard for IsoAuthor. Verified hmsc-int bundles; nativeViewport guard passes for IsoAuthor, but the full nativeViewport suite remains red on pre-existing /voxels source state in this dirty worktree.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T06:03:08.079Z",
+  "tags": [
+    "perf-log"
+  ]
+}

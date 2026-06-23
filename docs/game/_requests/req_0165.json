@@ -1,0 +1,12 @@
+{
+  "id": "req_0165",
+  "at": "2026-06-06T18:41:43.556Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — add to your queue after the flip commits: SLIDERKIT-0606. User verbatim: \"oh my god they did a horrible javascript slider on the paint tools in the mesh sculpting lol -_-\". Someone shipped a homegrown web-style slider in the sculpt-mode paint tools instead of THE control kit — that is a SCULPTKIT one-control-kit violation and a duplicate-controls law breach. Find it (sculpt-mode paint tool controls), post file:line + which lane/commit introduced it, replace it with the framework control-kit slider every other surface uses (studio.cls / workbench kit — one slider, one look), delete the homegrown one entirely. Check the SAME surface for any sibling homegrown controls while you are in there — they travel in packs. Verify green + SELFSHOT of the corrected paint tools (full path). DO NOT COMMIT separately — fold into your next commit batch with explicit paths. User eyes are the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

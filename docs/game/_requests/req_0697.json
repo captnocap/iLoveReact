@@ -1,0 +1,33 @@
+{
+  "id": "req_0697",
+  "at": "2026-06-12T15:16:27.704Z",
+  "origin": "session:3db4e705",
+  "text": "ok. how about for images? doesnt seem to work for them though i can add them to the painter",
+  "status": "review",
+  "sessionId": "3db4e705-cae9-4e5f-8874-7aa6ce30faf5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T15:16:56.201Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T15:29:49.158Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Images added to the painter never reached the material: openImage makes an image LAYER, but materializeCurrent only shipped the cutout-stencil mask + two colors — the pixels were dropped, so an image-backed painting applied to a building face showed none of the image. Fixed along the locked vocabulary's IMAGE leg (shader|decal|image → Materialize → material): materializeCurrent now routes visible image layers through the decal pipeline — one full-bleed DecalImageNode per layer, exactly how the canvas draws them — via a new materializeDecal door (live: saveDecalTexture). A pure image canvas (no strokes) materializes as the image material itself and applies straight to the face; painted strokes stack OVER the image as a stencil whose underlayId is the image material. Also made TextureCapture bake a stencil's underlay BENEATH it live (one level), so iso3d now matches what the compile ships (worldGeometry overlayUnderlaySkins already followed underlay chains) — closing the live/compiled divergence for every painted-over-material face. Committed together with the in-flight underlay plumbing it builds on (materials.ts underlayId + buildings paint-target underlay flow) since HEAD's saveCustomTexture had no opts param. Paint bench 17/17 incl. two new IMGMAT tests, buildings 24/24, cart bundles clean. NOTE: persistence of these records still needs the req_0695 host rebuild.",
+  "shas": [
+    "eea12eaf8"
+  ],
+  "resolvedAt": "2026-06-12T15:29:49.158Z",
+  "tags": [
+    "bug"
+  ]
+}

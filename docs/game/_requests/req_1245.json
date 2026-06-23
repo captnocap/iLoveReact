@@ -1,0 +1,28 @@
+{
+  "id": "req_1245",
+  "at": "2026-06-17T14:47:14.765Z",
+  "origin": "session:c885b7cc",
+  "text": "oh also can u answer for me do i need to lift the body from the ground here for wheels or not, im pretty sure someone answered this for me already and it was lift it to the height u want it to be when its got wheels which would mean i need to be able to select all layers to get it to lift as one piece which i cant do",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T14:48:50.301Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T14:48:50.309Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked whether the vehicle body needs to be lifted off the ground for wheels, recalling prior advice to 'lift it to ride height' and noting they can't select all layers to lift the model as one piece. Answered as a how-to clarification — no code changed. Verified against the Make Wheel tool (req_1206) in Studio.tsx: it fits the well, generates a tire of that radius, and merges it into the body at the well center, so the tire bottoms become the lowest geometry and the vehicle auto-seats on them (ride height = wheel radius) when placed — confirmed by the tool comment/tooltip and the mergeMesh-at-centers code. Conclusion: do NOT manually pre-lift; the wheels define ride height. Workflow: leave the body where it sits (editor grid is just a ruler, not baked), place wheel wells, Make Wheel (mirror-on for all four), tires drop below to their radius = the gap. Tires poking through the grid line is cosmetic; baked geometry is relative (tires lowest). Separately flagged that the missing multi-part 'select-all / move-all-together' is a real gap but not needed for the wheel workflow, and offered to add it alongside the damage-zone + anchor-marker vehicle-authoring work.",
+  "shas": [],
+  "resolvedAt": "2026-06-17T14:48:50.309Z"
+}

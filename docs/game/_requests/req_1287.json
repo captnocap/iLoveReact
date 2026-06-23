@@ -1,0 +1,30 @@
+{
+  "id": "req_1287",
+  "at": "2026-06-18T13:43:29.750Z",
+  "origin": "session:18fe5c79",
+  "text": "can u give me all layer select im trying to resize and i can only get one layer at a time and that fucks it all up",
+  "status": "review",
+  "sessionId": "18fe5c79-d15f-47c8-ade6-d65531bd83af",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T13:43:58.860Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T13:51:43.236Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an 'all parts' toggle to the Studio object-mode toolbar (shows with 2+ parts) so the whole model resizes/moves/rotates as one. Before, the object gizmo only transformed the active layer about its OWN centroid — resizing layers one at a time scaled each toward a different center and broke the assembly (the user's 'fucks it all up'). With 'all' on, grabbing the gizmo (now anchored at the model's COMMON world centroid) transforms EVERY part together: move translates all by the same delta, per-axis + uniform resize scale all about the shared anchor, rotate spins all about the shared axis — proportions and relative placement hold. Implemented as a self-contained parallel to the single-part drag (multiGizmoDragRef + a multiDraft live preview that re-uses each part's own dyn slot, commits per part on release). No concave guard needed since a whole-model affine transform can't buckle a convex quad. Built clean; /model boots (self-shot PASS).",
+  "shas": [
+    "ea8fec732"
+  ],
+  "resolvedAt": "2026-06-18T13:51:43.236Z"
+}

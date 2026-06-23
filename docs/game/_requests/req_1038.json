@@ -1,0 +1,28 @@
+{
+  "id": "req_1038",
+  "at": "2026-06-15T18:22:58.822Z",
+  "origin": "session:00a3ce8a",
+  "text": "hello claude. lets get back at it! this should give you all the info u need to know, read previous convos in the set if u need reference",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T18:23:28.663Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T19:00:05.711Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Session-start capture for the same work as req_1025 (Studio pivot points + joints). All work tracked and delivered under req_1025 (the 'rig' mode: data layer + viewport, editMesh 40/40, modelStream 7/7, bundles clean, hot-reload). No separate deliverable — see req_1025's review note.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T19:00:05.711Z"
+}

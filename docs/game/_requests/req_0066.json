@@ -1,0 +1,16 @@
+{
+  "id": "req_0066",
+  "at": "2026-06-06T07:46:26.562Z",
+  "origin": "supervisor-relay",
+  "text": "they should look at the brushes lab/demo and the painter existing brush controls and have the same in here. make it cohesive. we have two different button languages going on also, and different bg colors etc [4 screenshots: panel chips vs sculpt toolbar chips vs stepper rows vs the painter icon-rail with real slider]",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T08:48:46.033Z",
+  "resolution": "SCULPTKIT-0606 landed (91a0414f7). ONE kit, the painter's: RailSlider extracted from the cutout BrushSlider (same track/thumb/ticks/nudge visuals, now with pluggable value↔track mapping — log for the paint ladder, linear for ranges); BrushSlider is its paint-ladder instantiation and LinearRailSlider the ranged one; the sculpt -/+ steppers are dead — brush size (with the one-cell-floor tooltip), strength, smooth passes, and the node-value fine-tune all ride THE slider with live value readouts. The sculpt toolset is a RAIL now: IconTile verbs with mode tints (raise blue / carve orange / flatten gray / smooth green; fill/soften/smooth-part/clear; mirror/nodes toggles), SectionLabels and dividers, the painter rail's exact width/bg/border — the sculpt and paint surfaces speak one component family and one background, zero third dialect (§8: the pieces are EXPORTED from ToolRail.tsx, a shared-chrome edit named per the freeze protocol). The brushes lab (cart/brush_shapes, the paint lane's WIP): took its verb-color-per-mode, visual-first presentation instinct; its shape gallery is brush-kind content, not control chrome — stated per the dispatch. The divider ask had self-resolved. 689 P4 PASS, full cart bundles.",
+  "shas": [
+    "91a0414f7"
+  ],
+  "tags": [
+    "ux"
+  ]
+}

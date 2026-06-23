@@ -1,0 +1,13 @@
+{
+  "id": "req_0231",
+  "at": "2026-06-07T10:34:09.910Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: small correction queued behind your materials work, your ITEMSGONE slice: the live session spams [js.err] duplicate React key — two roster children keyed 'blockout item' (stack: PanelGroups/PropsCol/Workbench). The roster mixing legacy + stream items is keying by display name; an item present in both sources (or two same-named items) collides. Key by the stable id (the game:* namespacing you built exists for exactly this), never by name. One-line-ish fix + a test that a legacy/stream name collision renders two distinct rows. Do it at your next natural boundary — do not derail the materials parity work.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "req_0239",
+  "at": "2026-06-07T10:53:54.927Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: ITEMLENS-0607 — USER walked the items flow and it is broken. Verbatim sequence: \"i come to the page / i see this horrible looking item / it is made from this voxel / ??? / click on tv / click on sculpt / click on voxel / click back on sculpt / im still on tv\" — screenshots 11-17 at /home/siah/.claude/image-cache/65a3b158-192d-4949-99b0-83b2b071ce2a/ (11=melted blob on page load, 12=the crisp voxel tower it came from, 13=TV selected renders fine, 14=SCULPT lens shows the BLOB not the TV, 15=VOXEL lens shows the tower, 16=back to SCULPT still the blob, 17=panel says TV/identity TV/status 'Added Wall — sculpt auto-baked from 23 blocks' but the stage renders the blob). THE BUG: the SCULPT lens does not re-bind to the selected roster item — selection says TV, sculpt stage state belongs to a different item (the blockout). State bug discipline: print the selection id + the lens-bound item id at every hop of the user's exact click path, read the prints, fix the binding so every lens always renders THE selected item, regression test: select A → lens → select B → lens shows B. Note: the melted-blob LOOK is the Globe bake ceiling — that stays gated on the user's voxelMesh ruling, do NOT start the representation work; this dispatch is selection/lens binding only. Also report (no fix yet): the roster shows two TVs and two blockout items — state whether that is legacy+stream both visible by design from ITEMSGONE or a real duplication.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

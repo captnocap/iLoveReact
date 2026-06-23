@@ -1,0 +1,30 @@
+{
+  "id": "req_1532",
+  "at": "2026-06-20T22:29:21.098Z",
+  "origin": "codex:019ee6ab",
+  "text": "Cool now it renders perfectly in the compiled game output, but i do not get to see any preview of the flora when looking at the iso3d map editor, could you give a toggle for it like there is for walls and floors already",
+  "status": "review",
+  "sessionId": "019ee6ab-af32-7462-bc98-fece61170df4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T22:29:33.207Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:35:04.510Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an iso-editor flora visibility toggle beside the existing wall and floor view controls, routed through WorldStatics as a showFlora prop. The shared static renderer now draws the full flora population set in the editor preview, including grass, bushes, palm trunks, and palm fronds, so the iso map view matches the compiled flora output while still allowing flora to be hidden during building work.",
+  "shas": [
+    "9ecf6a297"
+  ],
+  "resolvedAt": "2026-06-20T22:35:04.510Z"
+}

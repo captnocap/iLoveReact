@@ -1,0 +1,13 @@
+{
+  "id": "req_0023",
+  "at": "2026-06-06T05:33:46.736Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — the pelvis is a real mesh, not a paint segment. Marker: PELVISMESH-0606, ledger req_0022.\n\nUSER, verbatim: \"i thought i asked someone earlier to make the torso and the pelvis not the same mesh but it seems to be the same and i dont see a pelvis mesh to edit.\"\n\nWhat actually happened (verified): 2b0547d9c (LIMBPAINT) implemented the pelvis as a PAINT SEGMENT — its own commit message says \"paint now addresses limb SEGMENTS while geometry [stays unified]\". The user's intent was the GEOMETRY: torso and pelvis as separate meshes, separately editable.\n\nDo:\n1. Read first: game/figure/ (parts/shapes/body/skeleton/CAPTURE — V2: the head_lab kit is THE figure stack), the LIMBPAINT commit, and how parts couple to rig bones, clothing attachment (bottoms!), hitboxes (V2: oriented boxes, lLeg/rLeg spelling), paint targets, and the bake (V2-AMENDED). tools/oracle for V2 and its amendments.\n2. Implement the SPLIT: pelvis becomes a real part in the figure kit — its own mesh, sculpt/grab-editable like any part, visible in the parts roster (/characters and the workbench character stage both list it). Torso and pelvis are two parts from here on.\n3. Honest coupling pass — every system that addresses parts gets the split treated deliberately, not incidentally: rig/bone mapping, clothing (bottoms attach to pelvis now? surface the choice), hitbox volumes, the existing paint segments (pelvis paint target maps onto the new mesh 1:1), the bake. Anything constitution-grade (e.g. damage-zone vocabulary changing) gets SURFACED in CAPTURE for a ruling, not silently reshaped.\n4. V20: existing saved .body/.hed documents and streams keep parsing — schema evolution by addition; old saves render correctly (the unified-torso fallback maps to the two parts deterministically).\n5. NO desktop capture (standing ban — SELFSHOT is being built; verify via tests/code, mark visual rows pending-selfshot). P4 tests: part roster includes pelvis, old-doc compat round-trip, paint-segment→mesh mapping. Explicit paths, docs+_index contract, verify green, resolve req_0022. READY FOR USER TEST — the user selecting and editing a pelvis mesh distinct from the torso is the PASS.\n",
+  "status": "new",
+  "sessionId": "f707bd9b-5c91-4673-b562-95ffb9a8d155",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

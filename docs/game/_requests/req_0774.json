@@ -1,0 +1,36 @@
+{
+  "id": "req_0774",
+  "at": "2026-06-13T15:38:33.207Z",
+  "origin": "session:a695a492",
+  "text": "so. before we get ahead of ourselves here. \n\n1: this looks better, not the same. [Image #3] \n2: the compiled game still looks like [Image #4] \n3: this is what it looks like in js [Image #5] \n\nstill a radical quality diff",
+  "status": "review",
+  "sessionId": "a695a492-4a9c-4889-a141-0e50e2e7918a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T15:40:52.697Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:03:57.908Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The 'better not the same' gap was resolution: the bake stretched 512px over a 120-tile chunk. Replaced baking with a per-fragment engine system (scene3d_ground_prefix/epilogue in shaders.zig + the ground pipeline in 3d.zig) so the ground is crisp at any zoom, O(1) memory, no resolution cap. Editor wired via Landform.tsx. Committed; needs a framework rebuild to take effect (see handoff file for Task #4 + verify steps).",
+  "shas": [
+    "ecd542b5e",
+    "ca88f3ca2",
+    "fb1f066be",
+    "a45d42ae8",
+    "ca19e07e8",
+    "ec7ebaa82",
+    "00660b84b"
+  ],
+  "resolvedAt": "2026-06-13T18:03:57.908Z"
+}

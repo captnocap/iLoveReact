@@ -1,0 +1,30 @@
+{
+  "id": "req_0921",
+  "at": "2026-06-14T16:10:53.912Z",
+  "origin": "session:7d6df128",
+  "text": "ok. now, when it comes to this interface. I would like for you to give me a place to write down notes, that will save, and can be things like game features that need t o be made to make the mission possible, for example. \n\nnow, for missions, and for questlines as a whole, i need you to setup for a system now that will let us say 'this is a transitional world state'; meaning, so lets say i have 5 missions. and on mission 3 complete, i want the player to now have their apartment building catch on fire. well so i want to use these points after the fact to be able to come back and author the state changes from a timeline if this makes sense. \n\nso \n\nauthor the world first -> write the questlines -> set parts in the story that change the world -> will be able to then write updates to the map that persist forward from the point",
+  "status": "review",
+  "sessionId": "7d6df128-10bb-42ff-aa62-398eb578b34f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T16:12:11.203Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T16:41:03.630Z",
+      "actor": "opus-storyline",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "World-transition infra + persistence. Added WorldTransition/WorldChange types anchored at mission (accept/event/complete) and line (start/complete) story points, with a store seam (add/remove/edit transitions and changes) the deferred timeline editor will drive. The whole storyline board now persists to the twig file (sessions/_route-twigs.json) via readRouteTwigState/writeRouteTwigState — the same door materials uses — so notes and everything else survive reload, closing the 'notes that save' requirement. Files: notes.ts (new shared impl), store.ts, panel.ts.",
+  "shas": [
+    "d57ec1afb"
+  ],
+  "resolvedAt": "2026-06-14T16:41:03.630Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_0925",
+  "at": "2026-06-14T16:27:58.104Z",
+  "origin": "session:2b1b8d6b",
+  "text": "why is it so laggy? i dont think you are using the same anything from the game the camera is scuffed the movement is scuffed the whole point of the lab being built in is so we dont do this",
+  "status": "review",
+  "sessionId": "2b1b8d6b-2adf-4239-aed8-88f228d4f8a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T16:28:35.578Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T16:38:54.116Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rewrote combat-arena onto the game's REAL player substrate per the user's correction (laggy / scuffed camera+movement / 'the whole point of the lab being built in is so we dont do this'). The first cut hand-rolled its own rAF loop, camera params, WASD movement, and rebuilt 5 figures every frame — that was the lag and the scuffed feel. Now the lab mounts useEmbodiedPlayer + EmbodiedScene/EmbodiedCaptures/EmbodiedMouseSurface (the exact controller PlayRoute uses), so movement, the V23 host orbit/ADS camera, the frame loop, and the player figure are the game's own. Combat (fall damage off the real airborne->grounded transition, GAME_PERCEPTION LoS cones + bone-sample cover, GAME_ITEMS aim ray vs GAME_FIGURE hitboxes, GAME_KINDS NPCs returning fire via GAME_CHANCE dice) runs in the substrate's onFrame hook reading the real player pose; stairs/cover colliders ride worldExtras.solids; the arena is the default world stripped to its flat chunk floor. No second loop, no per-frame multi-figure rebuild. Old version removed (was uncommitted). Verified esbuild bundle clean (exit 0). Recorded a memory that on-foot labs must reuse useEmbodiedPlayer and that it should graduate to a GAME_* door.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T16:38:54.116Z"
+}

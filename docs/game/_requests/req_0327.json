@@ -1,0 +1,33 @@
+{
+  "id": "req_0327",
+  "at": "2026-06-08T11:59:50.522Z",
+  "origin": "codex:019ea612",
+  "text": "TASK: break the editor's MONOLITHIC store into SEPARATE per-domain databases under an umbrella, with a master reference. USER RULING — it's simple, just break it out.\n\nTHE PROBLEM: `cart/hmsc-int/data/store.db` (opened via `openStore('cart/hmsc-int/data')`) holds ALL content streams together — world, items, characters, voxels, etc. One file = single point of failure: a corrupt map can take items down with it, and you can't wipe one domain without risking the others. WRONG.\n\nTHE FIX:\n1. An UMBRELLA namespace (a folder) containing ONE database per domain — `world`/maps, `items`, `characters`, `voxels`, and any other streams currently in the store (inspect what streams exist; cover them all). Each domain = its own store file.\n2. A MASTER REFERENCE at the umbrella level — a manifest/locator that names and locates each domain DB so they compose into one workspace without sharing a file. Keep it simple — a locator/index is enough unless there are real cross-domain links (a map referencing item IDs etc.); if there are, preserve them by id.\n3. Route every store caller to its domain DB via the master reference. `openStore` becomes per-domain. Find ALL callers (editors: build/items/characters/voxels/paint; the bake; sessions) and point each at the right domain store.\n\nDATA IS ALL THROWAWAY — wipe and rebuild the layout clean, NO migration. The user is authoring nothing real until the write→play loop works, and told you explicitly to stop treating the data as sacred. Don't preserve the old store.db contents; start fresh in the new layout. (The old monolith goes AWAY, not wrapped.)\n\nCRITICAL CROSS-LANE GUARD — DO NOT BREAK THE KEYSTONE:\n- Codex pane 5 is concurrently working the no-V8 loader (`world_loader.zig` + the render path). DO NOT touch `world_loader.zig`, `framework/gpu/*`, `framework/world/constructor.zig`, or the loader render. That's not your lane.\n- The keystone bake (`cart/hmsc-int/compile/bakeGameFile.ts`) reads the WORLD store to build the game-file. After you separate the stores, the bake MUST still read the world DB correctly — `tools/rjit game play` must STILL render the user's world. This is the user's lifeline (write-map→play); breaking it is the worst outcome. Update the bake's open path to the new world DB location, verify `tools/rjit game play` still works, and STOP there on the bake.\n- If you must edit `bakeGameFile.ts` or `cli/commands/game.ts` (shared with the keystone lane), tell the supervisor BEFORE committing so commits get serialized.\n\nVERIFY (your own check, then report — do NOT self-declare done): the editors still load each domain, the master reference resolves all domains, and `tools/rjit game play` still renders the world after the split. Report what to check; the user verifies the editor/play loop.\n\nGUARDS: no stubs/placeholders — a real working split, not a renamed wrapper around the same file. Stay in your OWN context — NO Task tool, NO subagents. tools/rjit only. Commit with EXPLICIT paths (NOT git add -A — ~400 set-aside files). No git reset/revert.",
+  "status": "review",
+  "sessionId": "019ea612-17a3-7a12-a580-7a480d70f05a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T11:59:59.205Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T12:07:44.251Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Split hmsc-int persistence into an umbrella manifest plus per-stream/domain SQLite stores. Added cart/hmsc-int/data/manifest.json as the master locator for world, items, characters, voxels, sessions, tuning, cutout, materials, vehicles, clothing-variants, activities, missions, and assist3d; routed the live editor through openWorkspaceStore and the bake/headless persistence through openStreamStore so the bake reads the world DB directly. Removed the old tracked root stream archive file and ignored per-domain runtime snapshots. Verified tools/rjit game verify GREEN after cleanup, including bake of the authored world and no-JS loader render proof; bounded tools/rjit game play reached live-window launch after baking the authored world.",
+  "shas": [
+    "a658bbc4f"
+  ],
+  "resolvedAt": "2026-06-08T12:07:44.251Z",
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1102",
+  "at": "2026-06-15T23:55:15.081Z",
+  "origin": "session:9f19b605",
+  "text": "No. haha no hand outs. damage is healed by food / items. which will get in place when time is due. but hey so i am just gonna spill some beans on u cuz thinking of this idea made me think of another few things worth documenting. so first the skybox almost like its own fucking roguelite inside of the game and i love itIt’s not just “outside the map.” It’s a procedural endurance layer wrapped around the real game:\n\nThe authored city is the campaign.\nThe procedural shell is the void run.\nThe coast city is the forbidden challenge.\nThe road-side infinity is the roguelite descent into nowhere.\n\nThat’s sick because it gives the world a second axis of play without needing a separate mode menu. Players discover it diegetically by refusing to stop driving.\n\nThe loop could be:\n\nprep vehicle, supplies, weapons, drugs, gas\nchoose escape vector: road, coast, rail, boat\nleave authored city\nprocedural shell starts normal\ndistance increases wrongness tier\nevents get stranger and more dangerous\nresources degrade\nleaderboard tracks deepest escape\ndeath/return produces a storyand so one other thing i was thinking. i was looking at schedule 1, and at first i thought the night time and cops are on your ass system was lame, forces player to go inside. but i was thinking there has to be some cool event that happens at night time the player has to avoid. and then it hit me. alright so the game core loop is doing crime from an app right, well, once the player starts doing hit missions, they themselves now are also a hit target from someone who is hiring. and so instead of a curfew its spawn this npc on the other side of the map at night. they slowly work their way to the player to try and assassinate them. over time the player will learn they have a hit out on their own name, or just die and wonder wtf yep and  even that so the player kills that assassin, they end up seeing a job posting for their own head with other bidders. and obviously they cant take the job to assassinate themselves so it can never be a bid job for the player but they see the others who are bidding to kill them hahaha",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T23:56:07.861Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T23:57:16.566Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two banked design systems (no code, user explicitly deferring build to 'when time is due'). (A) VOID RUN as a roguelite: structural framing — authored city=campaign, procedural shell=void run, coast city=forbidden boss gauntlet, road infinity=roguelite descent; a SECOND axis of play with NO mode menu, discovered diegetically by refusing to stop driving. Run loop: prep vehicle/supplies/weapons/gas -> choose escape vector (road/coast/rail/boat, open set) -> wrongness escalates with escape_depth -> resources degrade -> death/return mints a story (V22 narrative hook text+world_delta from the run record). CORRECTED my earlier auto-heal proposal: no hand-outs — environmental wrongness is positional f(escape_depth) so it eases as you drive back (not a refund, just where you are), but player damage/resources do NOT refund; healing is by consuming prepped food/items only. This dissolves the 150km hard-wall question: RESOURCE EXHAUSTION (fuel/food/repair/sleep) is the natural governor — the return trip is the real boss, over-commit and you can't get back. (B) NIGHT ASSASSIN / hit-on-your-own-head: replaces a Schedule-1-style go-inside curfew. Because the core loop is crime-for-hire from an app, the player is a POSITION in someone else's contract (missions/defs.ts already has client + typed target). At night an assassin spawns far across the map and pathes toward the player (V30 ENGAGED hunter pinned online = one moving state row with an ETA, hydrates in-bubble). Kill them -> open the SAME app to find a posting for your own head with rival bidders you can never outbid (validator rule: target != self). Self-balancing: bid size / lethality / bidder count scale with CaaS activity + notoriety (your success IS the difficulty curve), cross-linking the coast notoriety axis into the bounty market. The losing bidders are an emergent recurring rogues' gallery. On-doctrine with V22 PROTECT THE ZERO (you're a harvestable node, not a chosen one). Cruel diegetic detail to protect: the player sees their own head in the exact app UI they use to ruin others. Both systems ride existing stacks (contracts, ENGAGED hunters, notoriety, survival/vehicle). Both are clean future DECISIONS verdicts + design docs.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T23:57:16.566Z"
+}

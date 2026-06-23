@@ -1,0 +1,33 @@
+{
+  "id": "req_0420",
+  "at": "2026-06-10T02:50:40.367Z",
+  "origin": "session:2e5197b8",
+  "text": "this is what the camera is doing. [Image #2]  it makes it so i can see thru the wall which is wrong. it should settle a camera above me from that angle",
+  "status": "review",
+  "sessionId": "2e5197b8-1894-4144-a6e1-1e2bfb997258",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T03:05:33.884Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T03:05:33.893Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Superseded/reframed by req_0423. This entry captured the intermediate 'settle a camera above me' direction; the user then clarified the desired behavior is the aim-style spring-arm push-in (camera pushed to the player's side of the wall), not a pitch lift. Implemented under req_0423 (commit 40012e1ae): mode-aware spring-arm collision for walk + aim, no see-through fade. No separate code change belongs to this id.",
+  "shas": [
+    "40012e1ae"
+  ],
+  "resolvedAt": "2026-06-10T03:05:33.893Z",
+  "tags": [
+    "bug"
+  ]
+}

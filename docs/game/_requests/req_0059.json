@@ -1,0 +1,16 @@
+{
+  "id": "req_0059",
+  "at": "2026-06-06T07:07:46.311Z",
+  "origin": "supervisor-relay",
+  "text": "changing the skin tone makes the grid change colors on the 2d mesh part and then u cant even see the grid lines lol. shouldnt change anything about the grid",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T07:18:11.133Z",
+  "resolution": "The sculpt unwrap canvas is a MEASUREMENT surface now, per the ruling: paintKit.ts exports SCULPT_CANVAS (fixed base #0a1322, lathe silhouette token, light guide ink rgb(0.55,0.66,0.84)) and NOTHING on the canvas derives from draft.skin anymore — UnwrapContent gets the fixed base in both the workbench SCULPT lens and the live /characters route, the lathe bars dropped backgroundColor:draft.skin for the token, and the depth-overlay shader's gridline ink is interpolated FROM the palette (one truth) with alpha pinned (0.3/0.22) so the grid always reads on the dark field. Skin tone shows only in the 3D views and the PAINT lens. P4 contrast pin added to characters.test.ts (guide-ink and silhouette luminance vs base; shader embeds the palette ink) — 14/14 green. Note: the workbench Stage.tsx hunk is live in the working tree but rides behind the figure lane's in-flight CLOTHSPLIT phase-2 commit (their untracked figureFrame.tsx import fences the file); it lands with theirs.",
+  "shas": [
+    "d454f7a34"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

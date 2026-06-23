@@ -1,0 +1,12 @@
+{
+  "id": "req_0050",
+  "at": "2026-06-06T06:32:35.393Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — roster-empty diagnosis RESOLVED elsewhere, stand down on it: the cause is a corrupt record at data/streams/sessions.jsonl:884 killing the whole store (\"store unavailable\") — a fresh lane (STOREDB-0606) owns the tolerant-reader fix + the SQLite/pg migration. Your draft.ts was innocent. Resume CLOTHSPLIT-0606 phase 1; keep your tree coherent (the user is live).",
+  "status": "new",
+  "sessionId": "f707bd9b-5c91-4673-b562-95ffb9a8d155",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

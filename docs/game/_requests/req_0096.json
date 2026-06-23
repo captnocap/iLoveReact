@@ -1,0 +1,13 @@
+{
+  "id": "req_0096",
+  "at": "2026-06-06T11:57:31.552Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — PROJSCOPE-0606. New user bug, verbatim: \"So in the top of the app there is a drop down and i click it, it has projects, and they have different maps. cool. however, the building floors/walls all persist also\" — placed build-mode pieces (floors/walls) PERSIST across project/map switches. Each project/map must own its placed pieces; switching projects must swap them out. This is the same disease you just killed in NEWBUTTON-0606: state keyed globally that must be keyed per-target — this time the target is the project/map. Steps: 1. Find where placed build pieces live (cart/hmsc-int/data/snapshots/world.snapshot.json holds bp_* wall/floor entries — note whether it is one global file regardless of project) and how the top-of-app project dropdown switches maps. Post the file:line of the keying. 2. Print the data: switch projects headlessly, show the same bp_* rows surviving the switch. 3. Fix: placement store scoped per project/map, same pattern as your character fix. Switching projects loads that project's pieces only. 4. Existing placed pieces currently in the global pool: do NOT silently migrate or delete them — report what exists and which project they should belong to (likely the map they were built on); the supervisor will surface the call to the user. 5. Regression test at the consumption layer: place a piece in project A, switch to B, assert B has no pieces; switch back, A's piece is there. Build via tools/rjit only; never revert anything; pane 10 is mid-flight in framework/game/physics.zig — do not touch that file; coordinate through supervisor if the fix needs it. DONE-BAR: tools/rjit game verify green + the before/after switch evidence + test + READY report. DO NOT COMMIT. Do not shrink or stub any file. Only the user's live confirmation makes this a PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

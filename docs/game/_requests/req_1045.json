@@ -1,0 +1,10 @@
+{
+  "id": "req_1045",
+  "at": "2026-06-15T18:36:32.132Z",
+  "origin": "session:de42f85d",
+  "text": "Right. but thats what im saying. i know it resends every timel. but its resending you know 10 times up to 100k so that in total is over 1m input vs if i frontload everything, maybe its one big 100k message, but its only processed that one time. both have to reprocess as the time continues, that is expected",
+  "status": "new",
+  "sessionId": "de42f85d-94df-4add-951f-a1f5bdd46a23",
+  "captureMode": "hook",
+  "events": []
+}

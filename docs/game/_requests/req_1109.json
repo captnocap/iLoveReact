@@ -1,0 +1,10 @@
+{
+  "id": "req_1109",
+  "at": "2026-06-16T00:30:16.570Z",
+  "origin": "session:6de4f048",
+  "text": "holy shit i just hit the bong and im dying. alright man so a few things. one the cutout is solved. nice. but it made it so this top of the roof texture now doesnt load or is glitching idk, it flickers a bunch, this is what i see in the compiled route: [Image #8] and this is the iso3d editor: [Image #9] so u can see the roof top texture is getting borked in the compiled for some reason :/",
+  "status": "new",
+  "sessionId": "6de4f048-c04d-4674-87c7-dff1d1416eb1",
+  "captureMode": "hook",
+  "events": []
+}

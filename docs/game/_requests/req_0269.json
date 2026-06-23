@@ -1,0 +1,13 @@
+{
+  "id": "req_0269",
+  "at": "2026-06-08T04:47:06.224Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: ramp ascent + ramp camera + stairs all USER-PASSED live. Commit the collision wave now — explicit paths: framework/game/physics.zig + the cart-side physics/resolver files of THIS wave (the all-walkable-surfaces ground resolver, the ramp ascent fix, multi-heightfield layering, rect-cap raise) + their live-shaped regression tests (the one that walks UP the ramp, stands under, walks beside) + any CAPTURE.md/WORKBENCH rows the wave touched. Do NOT sweep other lanes' uncommitted files — git diff --staged against your wave's path list before committing. Re-run zig build test-game-physics + tools/rjit game verify green immediately before. Post the hash + the exact file list.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

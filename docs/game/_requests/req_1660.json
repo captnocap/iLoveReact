@@ -1,0 +1,30 @@
+{
+  "id": "req_1660",
+  "at": "2026-06-22T22:30:19.634Z",
+  "origin": "session:2117ddf4",
+  "text": "i think some of them are upside down and also a number of them are stretched, where u could tile it out a bit more [Image #6]",
+  "status": "review",
+  "sessionId": "2117ddf4-165f-4c7a-8fbe-15f442892c87",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T22:31:04.171Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T22:54:29.954Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the void shell texture issues the user reported (upside-down + stretched). TILING: game/void/shell.ts now stacks each building from ~9m FACADE_TILE_METERS slabs instead of one monolith, so the facade texture repeats per floor instead of stretching a single tile over the whole tower; footprints cap to MAX_BUILDING_SPAN (22m) so the facade isn't smeared horizontally either — buildings read as proper narrower towers (confirmed via the void_probe self-shot). UPSIDE-DOWN: worldGeometry VOID_SHELL_FACADES curated to vertically-repeating looks only (window-grid apartments, fire-escapes, plain brick/concrete/stone/stucco/mildew/peel); dropped the ground-floor-specific shopfront/bodega/entrance/rollshutter whose storefront sits at one tile-end and reads wrong stacked up a tower. COLLIDERS: shell boxes now bake as a new render-only SHAPE_SCENERY_BOX so the multiplied stacked-tower count never feeds the windowed near-field collider rebuild (you walk past the horizon, not into it). Committed TS in f9addc7c8. NOTE 1: the loader half of SHAPE_SCENERY_BOX (world_loader.zig isNonCollidingFoliage) is in the working tree but NOT committed because session 06fe has unrelated uncommitted WIP in that same file — the bake is forward-compatible (an old loader renders shape 11 as a plain box via geomForShape fallback), so this is safe and just needs a clean loader commit later. NOTE 2: observed the loader clips 12150 collider rows hitting MAX_RECTS=16384 — that is the user's DENSE AUTHORED map's own baked piece colliders exceeding the cap (the baked-COLLIDERS branch derives nothing from shell instances), a PRE-EXISTING issue unrelated to the shell, but worth flagging (some authored walls may be walk-through). Verified: void.test.ts 9/9; bake + no-V8 render clean (grounded). The facade tiling/orientation look is compiled-material-only and the headless camera is locked to the player spawn, so the user verifies the final look in /compiled.",
+  "shas": [
+    "f9addc7c8"
+  ],
+  "resolvedAt": "2026-06-22T22:54:29.954Z"
+}

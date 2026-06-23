@@ -1,0 +1,12 @@
+{
+  "id": "req_0045",
+  "at": "2026-06-06T06:17:36.453Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — CENSUS-VEH-0606 is REASSIGNED to a codex lane (budget balance, user rule) — drop it from your queue entirely. Your remaining scope: finish/land any MESHSMOOTH tail, then at your next coherent boundary (you are at ~52%, the handover line is 55-60%) use the /hand-over skill and report HANDED OVER. Take nothing new.",
+  "status": "new",
+  "sessionId": "159435dc-74b2-4e0e-9c32-2dff9bacc5d1",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

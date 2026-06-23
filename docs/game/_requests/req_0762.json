@@ -1,0 +1,30 @@
+{
+  "id": "req_0762",
+  "at": "2026-06-13T14:17:51.982Z",
+  "origin": "session:ef4fbf70",
+  "text": "each already owns its own slot so it shouldnt be a change oh yeah front back sides is fine that way",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T14:19:24.035Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T14:26:37.254Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the user's ruling that build-piece faces keep the existing front/back/sides slot model ('each already owns its own slot so it shouldnt be a change ... front back sides is fine'). The redesigned PAINT face row is now the piece's REAL skin slots (front/back/sides; a plate reads top/bottom/edges) instead of the old N/E/S/W/Top/In compass mapping — no engine change. Each face renders its ACTUAL current look (the material's own preview, or its colour), not a status dot. Clicking a face TARGETS that slot (a skin then paints only it); with no target a skin paints every slot, matching 'click a face to change it, otherwise edit every face'. Removed the now-dead faceSlotOf/FaceId/FACE_BUTTONS compass code. Verified by a clean full-graph esbuild pass.",
+  "shas": [
+    "623e45ff6"
+  ],
+  "resolvedAt": "2026-06-13T14:26:37.254Z"
+}

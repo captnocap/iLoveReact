@@ -1,0 +1,28 @@
+{
+  "id": "req_0400",
+  "at": "2026-06-09T06:09:43.809Z",
+  "origin": "codex:019eaa55",
+  "text": "Its not a hit test. the hit lights up perfect. see [Image #1]",
+  "status": "review",
+  "sessionId": "019eaa55-1779-7bd0-be5d-1b2b9ee9e13e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T06:09:59.525Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T06:11:35.650Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the selected-face versus edit-target mismatch in the Buildings stage. Stage click selection now maps the raycast hit normal to a face slot and calls a new store-level selectPieceTarget action, which selects the piece, sets the active face row, and repoints the material browser/paint target to that clicked piece face. Added a regression test where a stale roof material target is replaced by a clicked wall-front target before applying, proving the wall changes and the roof keeps its material.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T06:11:35.650Z"
+}

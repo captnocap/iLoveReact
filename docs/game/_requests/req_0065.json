@@ -1,0 +1,16 @@
+{
+  "id": "req_0065",
+  "at": "2026-06-06T07:43:01.169Z",
+  "origin": "supervisor-relay",
+  "text": "the mesh is altered but the hot update is showing this grid down below as not edited at all. also notice no color on the actual grid for the color on the mesh [screenshot: 3D shows sculpt + colored flags, canvas shows empty grid + uncolored points]",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T07:48:23.850Z",
+  "resolution": "Both desyncs fixed (92be9f63a). (1) HOT-UPDATE GRID DESYNC, root-caused to a mount-order seam: the host paintable entry is created only when the <Paintable> CREATE command drains (next frame), but the installRev restore effect uploads immediately — paintable.zig queueUpload silently drops ops for unknown ids (findEntry orelse return), so every mount/hot-reload restore left the canvas texture all-zero (zero byte = max carve = the solid orange field, which also explains the standing 'massive orange box') while the mesh read draft.grids directly. Fixed at the JS seam (the Zig files are the paint lane's live WIP — fenced, reported instead of touched): the restore effect re-asserts all part uploads + the relief until the entry answers readback (existence probe, 40ms ticks, bounded at 30), so the queued upload is guaranteed to land after the entry exists. (2) CORRESPONDENCE COLOR: the shader composed the greater-point dots additively over the orange heat (green+orange=white) — markers (greater dots, selection ring, brush footprint) now mix OVER the field, keeping true hue. P4 pins color IDENTITY across views: each GREATER_POINTS hex equals its shader ink channel-for-channel (0.011 tolerance). characters 16/16, cart bundles.",
+  "shas": [
+    "92be9f63a"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

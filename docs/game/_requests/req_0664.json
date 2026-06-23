@@ -1,0 +1,31 @@
+{
+  "id": "req_0664",
+  "at": "2026-06-12T06:00:39.668Z",
+  "origin": "codex:019eba54",
+  "text": "It halfway worked. the one part that didnt seem to carry over are the collision physics of it. [Image #1]",
+  "status": "review",
+  "sessionId": "019eba54-122c-7b03-9a58-37a88189321a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T06:00:47.615Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T06:03:30.783Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the dumpster collision follow-up. The visual semantic recipe was correct, but static prop collision comes from the build catalog/placed-piece collider path, which still used the generic prop footprint square. Updated prop.dumpster's catalog size to use the shared dumpsterBodyMeters() helper, so placed-piece bounds, live collision, and compiled COLLIDERS lump now match the visible dumpster body. Added catalog, placed-collider, and compiled-collider regressions; focused suites pass. Full tools/rjit game verify still reports overall red only because its built-in oracle smoke query 'kinds' returns no RULINGS, while render proof, 89/89 suites, and 3/3 scripts are green.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T06:03:30.783Z",
+  "tags": [
+    "bug"
+  ]
+}

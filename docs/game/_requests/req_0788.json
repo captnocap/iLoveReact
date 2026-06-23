@@ -1,0 +1,28 @@
+{
+  "id": "req_0788",
+  "at": "2026-06-13T17:11:21.352Z",
+  "origin": "session:ef4fbf70",
+  "text": "so ok im trying to understand what that means exactly. are u saying that the single file props are to go away?",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T17:11:56.500Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:08:04.446Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified what the migration means: only the per-prop RENDER CODE goes away (the ~15 bespoke React components that hand-draw meshes, replaced by one generic renderer), while each prop's SHAPE stays as a self-contained single-file asset. The user confirmed the intent (single-file self-contained assets) and refined it into req_0796: the compiler MINES each asset's shape into flat positional/size data rather than anyone hand-writing a recipe. No code owned by this id — it's a Q&A that set the direction now realized by req_0796's mineProp (committed a04e7a1e7). No commit.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T18:08:04.446Z"
+}

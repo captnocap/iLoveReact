@@ -1,0 +1,33 @@
+{
+  "id": "req_0558",
+  "at": "2026-06-10T15:55:21.822Z",
+  "origin": "session:51f18581",
+  "text": "haha this is fun. so, u know the handling of uh gta 4 where it was just like suuuuper fucked compared to the other games, u would have to turn wide and shit and cars were just unrelenting. we want that type of handling and we want cars to be able to flip over from the physics as well as collision, thats why we added the damage states to the car bodies",
+  "status": "review",
+  "sessionId": "51f18581-610e-4479-8d18-625e56e6d9c2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T15:58:14.552Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:07:41.868Z",
+      "actor": "51f1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "GTA-4 handling + rollover pass on the vehicle handling lab. GAME_DRIVING gained a rigid-body roll/pitch layer over the bicycle model and a GTA-4 default tune (heavy, low grip, slow steering, turn-wide, tippable). Cornering is now GRIP-LIMITED: the kinematic turn is capped at maxLatG and excess demand becomes understeer (the car runs wide instead of pivoting), which also keeps lateral g bounded instead of producing instant flips. Rollover is real: cosmetic body lean scales with cornering load, and when that load beats gravity's stabilizing moment about the outer wheels (g·halfTrack/cgHeight) the car tips past recovery and FLIPS onto its side/roof — gravity then tumbles it to a wheels-down or roof-down rest (bistable -sin(2·roll)), traction is cut while flipped, and rightCar()/the R key (or button) sets it back on its wheels. Pitch adds squat/dive weight transfer. The lab renders body roll (about the length axis), pitch (lateral axis) and a |sin(roll)|·halfWidth ride-height lift so a rolled shell rests on the deck instead of sinking; HUD shows roll angle + a FLIPPED banner; new knobs: cg height, lat g, steer spd. A flip escalates the body damage states (cabin/glass/panels, capped at broken) — exactly what those states were added for — so doc is now component state. Track width + wheelbase derive from the chosen body, so a wide fire truck turns wide and tips later than a top-heavy pick. Verified: bundles clean with full @game+runtime resolution, no stale refs. Deferred and noted in the P6 notes: collision-driven flips (hitting walls/curbs) — the cones are still decorative; that is the next slice.",
+  "shas": [
+    "f2fe2407f"
+  ],
+  "resolvedAt": "2026-06-10T16:07:41.868Z",
+  "tags": [
+    "ask"
+  ]
+}

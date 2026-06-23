@@ -1,0 +1,10 @@
+{
+  "id": "req_1503",
+  "at": "2026-06-20T20:05:01.417Z",
+  "origin": "session:89c172a4",
+  "text": "You said rebuild but i just restarted the dev server, and it didnt force a rebuild, so... are you sure it needs a rebuild or ? and if so, then its not automatically doing so on startup",
+  "status": "new",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": []
+}

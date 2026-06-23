@@ -1,0 +1,15 @@
+{
+  "id": "req_0141",
+  "at": "2026-06-06T17:17:18.683Z",
+  "origin": "codex:019e9ca9",
+  "text": "why though. why is it suddenly a massive host flush? what happens on the workspace/character route that doesnt happen on the old /character route ?",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:17:55.969Z",
+  "resolution": "Explained the WORKFREEZE host-flush cause with measured data and source comparison: /workbench mounts the character stage through the workbench character source with fresh workbench-scoped state/paintable ids, while /characters uses the old route state/chr-* namespace. The old and workbench stages share PartMeshes, but /workbench first visit replays dynamic Globe mesh CREATE payloads under fresh dynamic geometry keys, so the host receives a huge reconciler drain (measured 142,460,237 bytes in 788,280us; total mount 712,304,674 bytes over 18 batches) even though store/panel/render timings are 0ms. No source change or commit was made for this explanatory ask.",
+  "shas": [],
+  "tags": [
+    "bug"
+  ]
+}

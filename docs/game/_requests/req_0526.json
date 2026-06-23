@@ -1,0 +1,37 @@
+{
+  "id": "req_0526",
+  "at": "2026-06-10T13:00:39.717Z",
+  "origin": "session:8f492126",
+  "text": "haha god damnit im still falling thru the world ffs.",
+  "status": "review",
+  "sessionId": "8f492126-2685-4bb0-ad7d-82b25fa10ec6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T13:01:32.367Z",
+      "actor": "session-8f49",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T13:16:21.159Z",
+      "actor": "session-8f49",
+      "kind": "note",
+      "text": "world_loader.zig is co-edited (req_0524 streaming lane, uncommitted) — my spawn/collider fix is verified in the shared working tree (headless run: grounded=true on a city floor plate, /tmp/spawn-probe.png); deferring the git commit until that lane lands to avoid sweeping foreign hunks"
+    },
+    {
+      "at": "2026-06-10T13:16:21.168Z",
+      "actor": "session-8f49",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused with loader probes run against the user's real baked map. THREE stacked failures: (1) chooseSpawn picked the nearest FLAT instance to the all-instance centre — a 61×1m road paint stripe in the void (no width filter, and the wanted centre wasn't the city); (2) the near-field collider window (±3 cells × 64m over a 14,877-piece city) emits more floors than MAX_RECTS=4096 and scanned cells in raw lo→hi order, so even the player's OWN cell lost the cap race — probes showed underCol=0: literally zero rects under the player, a guaranteed fall regardless of spawn height; (3) scene.heightfields=0 in this bake, so the earlier terrain clamp had nothing to clamp to. Fixes (working tree, verified headless: player grounded=true on an authored floor plate at the city, screenshot /tmp/spawn-probe.png): rebuildWindow now emits rings 0-1 around the player FIRST, then the spanning list, then outer rings — the cap only ever drops the far field; chooseSpawn aims at the authored-piece bbox centre, scans ALL rows including piece plates, and requires a real >=2x2m floor (a stripe can't be the spawn floor); boot-time spawn/spawn-column probes + screenshot-gated per-frame ground probes stay in for the next hunt. COMMIT DEFERRED: world_loader.zig is co-edited by the req_0524 streaming lane (uncommitted foreign hunks); the fix rides the shared tree now and commits when that lane lands.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T13:16:21.168Z",
+  "tags": [
+    "bug"
+  ]
+}

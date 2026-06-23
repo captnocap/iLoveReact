@@ -1,0 +1,28 @@
+{
+  "id": "req_0913",
+  "at": "2026-06-14T08:08:04.044Z",
+  "origin": "session:2dd06f71",
+  "text": "i see. i think the verb usage is wrong tbh. or at least its in the wrong level of hierarchy because none of these says its a core story mission or not",
+  "status": "review",
+  "sessionId": "2dd06f71-5b8f-48bc-94cb-c94891fc4fa3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T08:08:29.490Z",
+      "actor": "2dd0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T08:13:14.703Z",
+      "actor": "2dd0",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design exchange folded into req_0914: established that the activities 'verb' (role/rob/chase/evade/race/jump/accumulate) is the gameplay-flavor / distribution-preset axis and is orthogonal to a mission's narrative tier — nothing in MissionDef states 'core story vs side/daily'. Surfaced that the doctrine already implies tiers (opening-arc=main, seed=daily, binding=contract, delivery-gig=tutorial) but never as a first-class field. User resolved the direction: rather than a new 'track' enum, they want their original quest-object shape (title/id/author/questline/fromNPC/desc/reward/dependents/constraints/events) made comprehensive, with questline as the organizing field. No code in this req; the build lands under req_0914.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T08:13:14.702Z"
+}

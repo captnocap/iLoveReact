@@ -1,0 +1,10 @@
+{
+  "id": "req_0303",
+  "at": "2026-06-08T09:07:02.692Z",
+  "origin": "session:9e14f7ea",
+  "text": "everything exports to a rle-like encoded, and apriori mined data shape. the existing systems live inside of the host, and are loaded. this lets you do everything this way. you can capture 3d mesh and heightfield, map positional data, shaders, physics and gameplay mechanics all into encoded shapes. this makes it so you go from typescript/react -> encoded data -> loaded into the game engine",
+  "status": "new",
+  "sessionId": "9e14f7ea-dafd-486f-b26a-2a7b9c5fcb05",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_0822",
+  "at": "2026-06-13T19:49:21.319Z",
+  "origin": "session:6e5908e6",
+  "text": "what do u mean . they already are in the coordinate system i just said. [Image #31]",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T19:54:28.962Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

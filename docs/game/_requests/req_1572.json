@@ -1,0 +1,30 @@
+{
+  "id": "req_1572",
+  "at": "2026-06-21T12:46:54.654Z",
+  "origin": "codex:019eea34",
+  "text": "[Image #1] its in this set? I dont see it",
+  "status": "review",
+  "sessionId": "019eea34-13c9-7663-9035-2e93b4802f63",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T12:47:03.664Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T12:48:39.305Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Moved the mesh paint sampler into the actual decomposed Studio paint panel shown in the screenshot. The existing eyedropper icon still works, and there is now an explicit sample button beside face fill/+ save/fill all/clear. Sampled colors are also pushed into the paint RECENT ring immediately, and eyedropper hits no longer mark a part as touched/dirty.",
+  "shas": [
+    "41c281d07"
+  ],
+  "resolvedAt": "2026-06-21T12:48:39.305Z"
+}

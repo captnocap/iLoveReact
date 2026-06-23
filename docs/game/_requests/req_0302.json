@@ -1,0 +1,21 @@
+{
+  "id": "req_0302",
+  "at": "2026-06-08T08:45:07.086Z",
+  "origin": "session:9e14f7ea",
+  "text": "tools/rjit game play ? thats it? [Image #1] this is what i see. which, is again, not a map but i dont know if you know that or not",
+  "status": "doing",
+  "sessionId": "9e14f7ea-dafd-486f-b26a-2a7b9c5fcb05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T08:46:01.367Z",
+      "actor": "9e14",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ],
+  "tags": [
+    "bug"
+  ]
+}

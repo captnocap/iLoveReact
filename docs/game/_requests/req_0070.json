@@ -1,0 +1,12 @@
+{
+  "id": "req_0070",
+  "at": "2026-06-06T07:58:15.564Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — MIRROR SYMMETRY BREAK, USER report with the perfect test case. Marker: MIRRORSYM-0606 (resolve req_0068).\n\nUSER, verbatim: \"does this even make sense? why is the two sides of the mesh different if its a mirror image drawing?\"\nScreenshots — READ BOTH:\n  /home/siah/.claude/image-cache/c73c0a8c-84f9-4fad-b702-d4288adbf7bb/34.png — the MESH: left side smooth rounded bumps, right side sharp angular shards, visibly different.\n  /home/siah/.claude/image-cache/c73c0a8c-84f9-4fad-b702-d4288adbf7bb/35.png — the CANVAS: a cleanly mirror-symmetric drawing around the center meridian.\n\nA symmetric grid MUST produce a symmetric mesh. Diagnose with their exact drawing, numerically:\n(a) sample mirrored cell pairs (u, 1-u) — equal grid values?\n(b) mirrored VERTEX displacements on the mesh — equal?\n(c) base-mesh test: reset part, redraw the symmetric shape — still asymmetric? (prior grab-sculpts may have left an asymmetric base the depth compounds on)\n(d) seam topology: does the u=0/1 wrap meet different vertex density than the u=0.5 mirror line?\n(e) display-vs-data: confirm the data is actually asymmetric before assuming (smooth shading can deceive).\nPost the numbers, fix at the true layer. P4 pin: symmetric grid in → mirrored vertex pairs equal within epsilon, their trident as the canonical case. READY FOR USER TEST with their own drawing.\n",
+  "status": "new",
+  "sessionId": "066cd07a-7039-4d0f-b6de-a778ce2c6d24",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

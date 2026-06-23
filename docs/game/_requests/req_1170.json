@@ -1,0 +1,30 @@
+{
+  "id": "req_1170",
+  "at": "2026-06-16T15:02:45.547Z",
+  "origin": "session:8e058574",
+  "text": "uh so i would say, an i know this might be a bit radical  but the code is all there as far as im concerned at this point in time, on my disk. no one uses this shit but me. so there is no breaking changes other than my heart  every time i have to think about why github is discriminating against my inability to keep a clean commit history like a chad. anyways can u just override it ? or wat.",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T15:03:42.596Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T15:11:41.941Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The git push to origin/main was blocked by 12 zero-byte objects in .git/objects — debris from kernel-panic-interrupted writes (not source corruption; working tree fully intact). Diagnosed read-only, moved the 12 empty objects aside to /tmp (reversible), and git fetch from origin refilled the ONE blob (d50508) that main/HEAD actually referenced. The remaining 11 are reachable only from a crash-dead local branch 'edit-trail' (its tip 0a236 is itself a missing object), not from main. Confirmed main walks clean, then pushed: 2808bf0d0..d2ac77028 main -> main. Working tree untouched throughout (1610 changed files unchanged). Code now exists in 3 places: disk, local git, GitHub. Optional remaining cleanup (pending user nod): delete the dead edit-trail branch pointer so the 11 orphans become unreferenced and fsck/gc go clean.",
+  "shas": [
+    "d2ac77028"
+  ],
+  "resolvedAt": "2026-06-16T15:11:41.941Z"
+}

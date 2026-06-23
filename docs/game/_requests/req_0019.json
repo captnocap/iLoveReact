@@ -9,5 +9,8 @@
   "resolution": "SELFSHOT-0606, commit cd910e6e1. Desktop/X11 capture of the user's system is now BANNED (conduct block in CLAUDE.md, 'Screenshots: the App Captures ITSELF') and replaced by a first-class self-capture capability that reads back the frame the GPU already composed — never the screen. Three doors, all demonstrated with zero desktop access: (1) __capture_frame(path), a V18-gated host fn (has-capture flips when a cart imports the @reactjit/capture captureFrame door) that writes the live app's next rendered frame to a PNG; (2) the in-app console verb 'shot [path]' in the V19 vocabulary (headless boots report unavailable, never fake success); (3) 'rjit shot <cart> [--out p.png] [--route /r] [--frames N]' — boots the cart's binary with a HIDDEN window (ZIGOS_HEADLESS, never shown on any desktop), navigates via the new RJIT_BOOT_ROUTE boot override, captures its own swapchain, exits, and asserts a well-formed PNG (exit 0 = PASS, so the verb doubles as the smoke test). Proven artifacts: /tmp/selfshot-door.png (49KB, live door), /tmp/selfshot-cli.png (51KB, CLI flow on the new selfshot_smoke cart), /tmp/selfshot-route.png (219KB, hmsc-int /settings fully rendered headless). Built ON the existing readback machinery (gpu.captureScreenshot + gpu/capture.zig + the witness hidden-window pattern), not parallel to it. P4 21/21; the binary at zig-out/bin/hmsc-int carries the console verb for the user's live test.",
   "shas": [
     "cd910e6e1"
+  ],
+  "tags": [
+    "ruling"
   ]
 }

@@ -1,0 +1,28 @@
+{
+  "id": "req_0962",
+  "at": "2026-06-15T09:57:21.274Z",
+  "origin": "session:524eaf71",
+  "text": "hello. the next thing to do is clear. get the proper layer system in place for 3d meshes, and have the slate blank",
+  "status": "review",
+  "sessionId": "524eaf71-fd67-4daa-b9bc-3acd50ba661d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T09:57:32.706Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T10:08:57.533Z",
+      "actor": "524e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Blank slate + proper 3D-mesh layer system. The Studio scene is now an ordered LIST of EditMesh parts (editors/model/studioModel.ts useStudioModel: parts/activeId/revision with add, duplicate, reorder, rename, delete, visibility), and the viewport boots EMPTY — just the grid + axes, no mesh — per the user's 'start with an empty grid no mesh on it at all'. The OUTLINER reuses the paint editor's LayerStackStrip exactly (editors/model/Outliner.tsx maps parts to LayerStripRowModel rows and wires the same row verbs + +add), honoring 'use that layers component for meshes' with no bespoke list. StudioEditor docks the outliner beside a multi-part viewport (each visible part lowered once per structural revision); +add drops a 1m cuboid for now (the shape dialog is the next slice). The workbench STUDIO tab and StudioRoute both mount StudioEditor; the source.tsx gutter is now thin (one Scene row + a brief global panel). Bundle-clean (Studio.tsx + full sources.ts chain), hot-reloadable, no rebuild.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T10:08:57.533Z"
+}

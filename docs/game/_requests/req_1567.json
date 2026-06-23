@@ -1,0 +1,30 @@
+{
+  "id": "req_1567",
+  "at": "2026-06-21T12:18:19.497Z",
+  "origin": "codex:019ee6ab",
+  "text": "looks good! just got some floating in the air still but it follows the movement. [Image #1]",
+  "status": "review",
+  "sessionId": "019ee6ab-af32-7462-bc98-fece61170df4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T12:18:29.851Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T12:19:43.779Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Adjusted flower grass placement so blossoms no longer float above the blade bed. Flower head height now defaults below the grass max, clamps against the grass canopy, and uses a tunable tuck factor so the lower edge overlaps the grass tips while keeping the winded flower-card rendering from the prior fix.",
+  "shas": [
+    "5970f3e64"
+  ],
+  "resolvedAt": "2026-06-21T12:19:43.779Z"
+}

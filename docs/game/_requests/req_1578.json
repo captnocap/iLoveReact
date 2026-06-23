@@ -1,0 +1,30 @@
+{
+  "id": "req_1578",
+  "at": "2026-06-21T13:24:17.866Z",
+  "origin": "codex:019eea3c",
+  "text": "ok. it does work, it also puts them upside down from what the editor shows as rightside up [Image #1]",
+  "status": "review",
+  "sessionId": "019eea3c-80f5-79b0-84df-c00c449c7a7e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T13:24:31.015Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T13:28:19.987Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the cooked Studio prop texture-slot orientation regression by flipping V only when a slot is rendered with an external FacePainter registry material, leaving baked Studio atlas UVs unchanged. Applied the same rule in editor preview and compiled world loader, then verified mesh prop encoding and hmsc-int native build.",
+  "shas": [
+    "033075ef4"
+  ],
+  "resolvedAt": "2026-06-21T13:28:19.987Z"
+}

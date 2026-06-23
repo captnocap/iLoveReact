@@ -1,0 +1,31 @@
+{
+  "id": "req_0670",
+  "at": "2026-06-12T06:28:49.716Z",
+  "origin": "codex:019eba70",
+  "text": "one more thing i place a prop and i cant rotate it after. i can rotate it before. its annoying asf",
+  "status": "review",
+  "sessionId": "019eba70-af1b-7633-a9f1-ba5a8c22c607",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T06:29:03.794Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T06:30:07.817Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made placed props immediately rotatable after placement in the iso3d editor. Single piece placement now parks the placed pose in the existing reselect-by-signature path before committing piecePlaced, so once the stream mints the id the landed prop becomes selected. Because selected objects win the R key over the still-armed ghost, you can place a prop and press R to rotate the placed prop instead of only rotating the next ghost.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T06:30:07.817Z",
+  "tags": [
+    "bug"
+  ]
+}

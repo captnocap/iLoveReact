@@ -1,0 +1,31 @@
+{
+  "id": "req_0394",
+  "at": "2026-06-09T05:50:39.858Z",
+  "origin": "codex:019eaa55",
+  "text": "ok you gotta look at the other things around it doing the same thing and solve the problem not avoid it [Image #1][Image #2] both of these u can see dont even fit in view, the blue expanded area doesnt have a right hand edge, its just overflowing, all the way  through, and you solved 1 of the many problems",
+  "status": "review",
+  "sessionId": "019eaa55-1779-7bd0-be5d-1b2b9ee9e13e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T05:50:49.678Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T05:52:46.065Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the root shared workbench picker overflow instead of treating one building field at a time. Open pick fields now render as full-width vertical blocks with the label above the chooser, so the chooser is no longer laid out beside a 104px label gutter. PickerChooser now uses bounded containers, a local bounded TextInput, bounded option rows, and one-line option labels so the blue expanded area keeps its right edge inside the properties column. Verified focused buildings suite and full hmsc-int bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T05:52:46.065Z",
+  "tags": [
+    "ux"
+  ]
+}

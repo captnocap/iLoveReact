@@ -1,0 +1,10 @@
+{
+  "id": "req_0705",
+  "at": "2026-06-13T02:23:09.824Z",
+  "origin": "session:e13c74b5",
+  "text": "Lol. looks like u get to take over. they just banned that model i was using xD https://www.anthropic.com/news/fable-mythos-access says: Statement on the US government directive to suspend access to Fable 5 and Mythos 5\nJun 12, 2026\n\nThe US government, citing national security authorities, has issued an export control directive to suspend all access to Fable 5 and Mythos 5 by any foreign national, whether inside or outside the United States, including foreign national Anthropic employees. The net effect of this order is that we must abruptly disable Fable 5 and Mythos 5 for all our customers to ensure compliance. Access to all other Anthropic models will not be affected. \n\nlmao it was mid task. looks like its your job now.",
+  "status": "new",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_1484",
+  "at": "2026-06-20T02:11:34.385Z",
+  "origin": "session:1d61c909",
+  "text": "no it doesnt. you need to still fix walls. walls are still apart of this greather problem with the mismatch, either you can take the approach i gave and do the walls to be correct so we dont have a mix of on top of floors or not, or you can do the walls and floors while not placing a floor with the stairs and solve it a harder way.",
+  "status": "review",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T02:13:25.792Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T20:10:18.281Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Walls fixed as demanded: walls now always rest ON the floor at their cell via a read-time lift in collision + render (commit 24bcfca88, closes the long-open WALLTOP-0606/req_0099), killing the on-floor-vs-not mix that misaligned stacked geometry. This was part 1 of the greater stair mismatch; the stair side completed via the boundary-wall removal (92690b54c).",
+  "shas": [
+    "24bcfca88",
+    "92690b54c"
+  ],
+  "resolvedAt": "2026-06-20T20:10:18.281Z"
+}

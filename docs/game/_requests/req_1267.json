@@ -1,0 +1,10 @@
+{
+  "id": "req_1267",
+  "at": "2026-06-18T08:26:51.036Z",
+  "origin": "session:47c6ef45",
+  "text": "the walls in the editor that have a doorway that can open, what is the size of the doorway. i am asking because i am trying to model a door and all i have for reference really is the player model which fits through a door but that doesnt mean much",
+  "status": "new",
+  "sessionId": "47c6ef45-886b-4a68-a568-e624c3124d48",
+  "captureMode": "hook",
+  "events": []
+}

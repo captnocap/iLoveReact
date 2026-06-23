@@ -1,0 +1,30 @@
+{
+  "id": "req_0753",
+  "at": "2026-06-13T11:42:07.805Z",
+  "origin": "session:33a033b1",
+  "text": "do u know why when adding image to face it does this [Image #4]",
+  "status": "review",
+  "sessionId": "33a033b1-66d8-4d02-9d2f-e58e1f48ec9c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T11:43:03.920Z",
+      "actor": "33a0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T11:50:25.151Z",
+      "actor": "33a0",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the 'small floating image' bug. A placed face's texture capture is SQUARE (cols=floors=1), but a decal <Image> preserves its aspect ratio — so a landscape upload (e.g. the bliss wallpaper) filled the square's width but underfilled its height, and because the decal background is transparent, the wall rendered SEE-THROUGH in the gap, leaving only a small image patch floating. It read fine in the browser swatch because that box is landscape (66x38) so the image overflows-and-clips there, hiding the gap. Fix: imageDecalDoc now builds a SQUARE canvas that the image COVERS (fills, center-cropped) instead of an aspect-matched full-bleed canvas — the image node carries the image's own aspect (so no shrink) and the canvas overflow:hidden crops the overhang, so the face reads fully clothed like a wallpaper. The change is isolated to the pure doc-builder (faceTextureDoc.ts); 5/5 headless tests green (cover/contain, portrait, large-clamp, tiny, label); cart bundles clean. Note this covers (center-crops) rather than fits the whole image — /compose remains the route for precise framing/positioning.",
+  "shas": [
+    "8c9212922"
+  ],
+  "resolvedAt": "2026-06-13T11:50:25.150Z"
+}

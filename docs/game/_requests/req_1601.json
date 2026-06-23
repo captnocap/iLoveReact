@@ -1,0 +1,28 @@
+{
+  "id": "req_1601",
+  "at": "2026-06-21T16:56:21.888Z",
+  "origin": "session:e36112e0",
+  "text": "ok cool. now iirc this does obj output and we have glb import but obj was added i think but not entirely? check",
+  "status": "review",
+  "sessionId": "e36112e0-5303-4202-ba4f-5d93412ec821",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T16:56:30.924Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T16:57:42.165Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Checked OBJ vs GLB import support per user's recollection that OBJ was 'added but not entirely'. Confirmed: there are two import paths and both accept .obj, but neither consumes InstantMesh's baked texture. (1) tools/importPropMesh.mjs (genprop bake to placeable prop) has a fully-implemented parseObj -- reads v/vn/vt, full v/vt/vn face refs, n-gon fan-triangulation, negative indices, dispatched by extension at line 423, and even keeps UVs in the stride-8 vertex buffer. BUT it has ZERO mtl/texture/png/material handling (grep returns nothing); the prop is built with only a flat --color (default #9b8066, buildEntry line 476), so the parsed UVs are dead data. (2) editors/model/importMesh.ts (Studio import) parses positions+faces only, UV/normal/material intentionally discarded since Studio re-unwraps and paints fresh -- by design, not a gap. The real hole: InstantMesh --export_texmap emits obj+mtl+albedo.png, but the importer reads only the obj geometry and drops the mtl + texture PNG, so InstantMesh props arrive untextured/flat-colored, contradicting the props-uniform-capability ruling. No code changed (check/report task). Proposed fix relayed: parse mtl map_Kd, load the PNG via the @reactjit/image codec door, bake onto the prop as a textureKey/material using the already-parsed UVs. Awaiting user go-ahead to implement.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T16:57:42.165Z"
+}

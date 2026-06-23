@@ -1,0 +1,12 @@
+{
+  "id": "req_0127",
+  "at": "2026-06-06T14:06:50.611Z",
+  "origin": "codex:019e9ca9",
+  "text": "just fyi. the live console doesnt render anyt of those logs. those all come from terminal",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T14:09:20.943Z",
+  "resolution": "Acknowledged the user's correction: the GAME PERF SPIKE blocks are terminal logs, not live console-rendered logs. The relevant data was the recon owner label PlayRoute type=Text, which indicates React text nodes in the app tree from command transcript handling, not the terminal output itself. I kept the fix scoped to diagnostic self-noise by suppressing live transcript rendering for gv_perflog/gv_churntrace while leaving terminal logging intact. Verified green with tools/rjit game verify; no commit.",
+  "shas": []
+}

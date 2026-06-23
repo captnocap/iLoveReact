@@ -1,0 +1,12 @@
+{
+  "id": "req_0183",
+  "at": "2026-06-07T05:00:39.162Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — standing rule addition, fold into your current jitter work and your next doc commit: add a FRAME-TIME GATE rule to AGENTS.md next to the testing-parity rule: \"Smooth basic play is a permanent invariant. Any change running per-frame or touching the runtime path (bindings, camera, physics, HUD, hot-reload pipeline) must prove no frame-time regression before READY: spikewatch armed at baseline stays silent through 60s+ of representative play. A new rhythmic spike class appearing after your change is an automatic FAIL of that change.\" User-ordered after the third jitter wave today: \"need to stay on top of that all the way through because if its laggy when im just trying to test something like walking around or jumping then we just have a problem overall.\" This rule applies to YOUR camray/jitter work right now — it ships only tape-flat.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

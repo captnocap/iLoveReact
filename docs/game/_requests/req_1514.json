@@ -1,0 +1,30 @@
+{
+  "id": "req_1514",
+  "at": "2026-06-20T21:34:27.268Z",
+  "origin": "session:0b8abe45",
+  "text": "hey claude here is something that... i dont really understand lol. so i have this model. its exactly waht i want it to be [Image #1] and looks clean. i want to move the model now down to the ground of this view so that it is at ground level in the game. so i put it in object mode, select move, and then when i move it at all. i get this message [Image #2] conncave face 2 faces bukcled not convex",
+  "status": "review",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T21:34:42.698Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T21:39:10.866Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the spurious 'Concave face — N faces buckled' dialog that fired whenever an object was moved in the Studio mesh editor. The gizmo commit guard ran findConcaveFaces() over the ENTIRE result mesh, so any organic/carved part (the user's tree) that legitimately contains concave quads got re-flagged on every move — even though object-mode move is a rigid translation of all verts (indices = mesh.verts.map) that changes no face's convexity. Added newConcaveFaces(before, after) to editMesh.ts which flags only faces the edit NEWLY buckled (concave in after, not concave at the same index in before; falls back to a full scan if face topology changed). StudioViewport.tsx's gizmo-drag commit now diffs against g.startMesh instead of scanning the whole result. A genuine corner-pull that reflexes a quad still raises the Split Quads dialog. Added a regression test; all 93 editMesh suites pass. Studio.tsx is the frozen breadcrumb and was left untouched.",
+  "shas": [
+    "cd163c74c"
+  ],
+  "resolvedAt": "2026-06-20T21:39:10.866Z"
+}

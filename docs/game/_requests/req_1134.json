@@ -1,0 +1,28 @@
+{
+  "id": "req_1134",
+  "at": "2026-06-16T03:22:19.129Z",
+  "origin": "session:eef64544",
+  "text": "ok cool. so i made just a simple cube. compiled/installed it. where would i find it now in the prop menu to place",
+  "status": "review",
+  "sessionId": "eef64544-c672-4883-add8-12dffa52f94c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T03:22:59.421Z",
+      "actor": "eef6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T03:37:59.328Z",
+      "actor": "eef6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered 'where do I find the cooked prop to place' by building the editor placement+render vertical (hot-reload, no rebuild). A cooked prop now appears in the iso build pane's prop tab under a new 'studio' shelf and places/renders like any built-in, mirroring the imported-prop precedent. Built a runtime overlay in game/kinds/props.ts (registerCookedProps/isCookedPropKind; propKindDefinition + helper accessors fall back to it; new 'studio' PropCategory), a matching overlay in game/build/catalog.ts (registerCookedCatalog → prop.<id> rows with measured footprint; catalogEntry/isCatalogId/catalogEntriesByKind include them), syncCookedRegistry in editors/model/cookedAssets.ts mirroring into both overlays on channel boot + after install, render3d/props/CookedProp.tsx (cooked mesh soup via cookedMeshBlob, dispatched in Prop.tsx before DataProp — covers ghost + standing), and IsoAuthor subscribing useCookedAssets for boot-sync + the live studio-shelf count. Fixed the cooked descriptor kind to be the asset id (placement key). Tests: cookedAsset 13/13, store 8, editMesh 48, modelStream 8, textureize 9, build 25 — all green; IsoAuthor+Prop+Studio bundle clean. v1 renders untextured; the /compiled bake (worldGeometry/bakeGameFile cooked-prop → MESH_PROPS) + the @reactjit/image texture fold are the remaining slice (one dev-host rebuild). NOTE: props.test has a pre-existing/other-lane failure ('bush has a shelf') from another session's 627-line props.ts edit — not caused by this work. Uncommitted by the user's lead.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T03:37:59.328Z"
+}

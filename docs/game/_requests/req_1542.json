@@ -1,0 +1,31 @@
+{
+  "id": "req_1542",
+  "at": "2026-06-20T23:12:15.706Z",
+  "origin": "session:0b8abe45",
+  "text": "hey nice thanks. ok so uh heres a thing i can also ask from you, so inside of the iso3d editor, you select a prop, or a wall, floor, etc. and it lets you do a per-face texture placement on the thing. well, that doesnt quite translate from this mesh editor when they export into the game props, and im wondering if we can solve for  that. I would treat this as doing this if you ask me: in the rig menu, give a rig for face selection that can accept a texture, we can use either multiple faces or just one to declare it is a texturable face from the shaders or images, and then its not just restrained to the paint mode inside the mesh editor",
+  "status": "review",
+  "sessionId": "0b8abe45-3eab-457f-ba52-c843df8c5cd7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T23:13:00.324Z",
+      "actor": "0b8a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T13:00:43.091Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed phases 2 and 3 for texture slots: cooked Studio assets now include slot metadata and vertex ranges, the iso FacePainter exposes those slots as prop texture targets, CookedProp renders per-slot overrides in the editor, and the compiled MESH_PROPS v5 loader renders placed cooked-prop slot overrides using material refs while keeping the baked atlas fallback. Verified with the focused TS tests and a ReleaseFast hmsc-int ship build.",
+  "shas": [
+    "2e21ec9df",
+    "ad32d8f69"
+  ],
+  "resolvedAt": "2026-06-21T13:00:43.091Z"
+}

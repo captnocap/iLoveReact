@@ -1,0 +1,30 @@
+{
+  "id": "req_1598",
+  "at": "2026-06-21T15:31:15.459Z",
+  "origin": "session:aa8b38c4",
+  "text": "i rebuilt, and recompiled the game, i am still colliding with the props. you should add logging to show that i can walk right through the objects",
+  "status": "review",
+  "sessionId": "aa8b38c4-bcf4-4724-9069-0ebd209628e0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T15:32:19.394Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T15:43:07.949Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added RJIT_COLLIDERLOG — a no-V8 collision diagnostic (the user plays ONLY the compiled game; the JS path is too laggy, so console.log is unavailable). Mirrors the existing RJIT_STAIRLOG: set RJIT_COLLIDERLOG=1 and the Zig sim prints, per frame the player moves or stands inside a collider, how many solid colliders are LOADED (rects+oriented), how many the player capsule currently OVERLAPS (inside=N), the nearest edge, and the side-push that fired. inside=0 next to a visible prop = no collider was baked (bake bug); inside>0 with push~0 while moving = a collider exists but is not stopping you (resolution/band bug), tagged 'WALKING THROUGH'. playerSolidOverlaps reuses the exact band test (feet<top, head>floor) + circle-vs-AABB the real side-push uses, un-rotating oriented rects about their pivot, so the readout matches what collision sees. Purely additive (79 lines, gated → zero cost off). Host compiles (zig build test-game-physics 41/42; the 1 ramp-ascent failure pre-exists in f11187303, unrelated — my code is inert unless the env var is set). Usage: rebuild, run the compiled game with RJIT_COLLIDERLOG=1, walk into a prop, read the [colliderlog] lines to see whether props bake colliders at all.",
+  "shas": [
+    "bd3eb6bcd"
+  ],
+  "resolvedAt": "2026-06-21T15:43:07.949Z"
+}

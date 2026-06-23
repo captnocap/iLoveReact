@@ -1,0 +1,28 @@
+{
+  "id": "req_1669",
+  "at": "2026-06-22T23:33:42.967Z",
+  "origin": "session:2117ddf4",
+  "text": "yeah i started to fall through the skybox, which means the colliders are not large enough. also, how are the collider numbers so big. what is a 'collider'? is it a single amount of defined space or something",
+  "status": "review",
+  "sessionId": "2117ddf4-165f-4c7a-8fbe-15f442892c87",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T23:34:49.487Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T23:39:00.433Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed falling through the void ground (USER report). Root cause: the void shell's walkable ground is a single baked heightfield that lives in the COLLIDERS lump (baked ramps), and the loader's WINDOWED collider rebuild (rebuildWindow, used on big maps where 'spatial collider windowing' turns on) re-registered only scene.heightfields — NOT the baked ramps — so every window rebuild on the now-large map DROPPED the shell ground (and would drop authored stair/ramp slopes too), and since req_1660 had also made the shell's thin ground SLABS non-colliding scenery, nothing held the player up out there. Fix in world_loader.zig rebuildWindow: after re-registering scene.heightfields, also re-register self.scene.baked_colliders.ramps (mirroring the static buildPhysicsColliders path) — MAX_HEIGHTFIELDS=256, only 76 in use, so no cap pressure. Loader rebuilds clean (zig exit 0) and renders grounded. This also fixes a latent bug where authored stairs would stop catching the player on huge maps. NOT COMMITTED: world_loader.zig currently carries an unrelated in-flight collider-fallback change (bandFloorY / instance_collider_policy import) from a parallel session plus my req_1660 SHAPE_SCENERY_BOX addition, all uncommitted in the same file; I did not commit it to avoid sweeping up another session's WIP. The fix is LIVE in the working-tree loader binary the user runs, and needs a clean commit once the parallel session's changes land. Separately flagged: the user's dense authored map bakes ~28.5k solid colliders, exceeding MAX_RECTS=16384, so ~12,150 are clipped (walk-through walls on the authored map) — a pre-existing capacity issue independent of the void, candidate for its own task (raise the cap / improve windowing).",
+  "shas": [],
+  "resolvedAt": "2026-06-22T23:39:00.433Z"
+}

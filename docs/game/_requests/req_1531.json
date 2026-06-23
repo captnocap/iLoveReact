@@ -1,0 +1,30 @@
+{
+  "id": "req_1531",
+  "at": "2026-06-20T22:26:13.723Z",
+  "origin": "session:6580d434",
+  "text": "yeah, now i think, to be honest, because the game movement and jumping feels exactly like css bhop before zblock hit (which is intentional) we should treat the collision as a force that would push back against the player, and therefore would let you get faster movement through a hallway for example because you hold down space and so your just hitting the head against it and getting all the velocity. lol could be fun xD",
+  "status": "review",
+  "sessionId": "6580d434-ee0d-4691-a47a-61556997a089",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T22:27:09.301Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:29:29.591Z",
+      "actor": "session-6580",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the head-into-ceiling glitch and shaped it to the user's CSS-bhop feel. Jumping under a floor/roof/deck placed overhead made the player's head poke into the piece's solid band; the physics step had no vertical (head-bonk) response, so collideSolidRects treated the overlap as a horizontal intrusion and side-pushed the player around (the glitchy jitter). A ceiling is a surface whose normal points down, so the correct response removes only the velocity component INTO it (the upward part) and keeps horizontal momentum. Added ceilingUndersideAt() (framework/game/physics.zig) which finds the lowest solid-rect underside, finite-floor band only — walls have none, with the body column inside the footprint, axis-aligned and oriented rects alike; step() clamps the head just below it and zeroes rising velocity BEFORE collideSolidRects so the band overlap is gone and the horizontal push never fires on a ceiling. pvx/pvz are deliberately preserved per the user's request — you skim a low hallway at full speed (Source-style head-skim, bhop-feel) instead of being shoved to a stop. Added deterministic test 'head bonk: jumping into a ceiling caps the head and keeps horizontal speed' asserting the head never punches through, rising velocity zeroed at contact, and +x speed survives. no-V8 world_loader builds clean; game-physics 40/41 (the one red, hollow-ramp-slab rect step-up surface_speed, predates this work). SHA aee4d158a. Needs Compile + relaunch (loader Zig change).",
+  "shas": [
+    "aee4d158a"
+  ],
+  "resolvedAt": "2026-06-20T22:29:29.590Z"
+}

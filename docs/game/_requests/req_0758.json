@@ -1,0 +1,31 @@
+{
+  "id": "req_0758",
+  "at": "2026-06-13T14:04:47.572Z",
+  "origin": "session:ef4fbf70",
+  "text": "OK. so. this paint panel above the iso3d on the / route; \n\nthings it must do:\nshow the current focused piece or ghost inside of the iso3d\nlet me update the texture of the focus \nlet me control the faces for textures\n\n\nthe ui:\n\nfor wall/floor pieces, show a row of 6 faces, each face show what the face actually shows. to change a face, click it. otherwise, editing the piece edits every face of it. below the row, array of potential skins 1:1 image icons. (kinda what it does now)\nwhen clicking on a skin, open open to the right side of the list the paint panel so i can graffiti over the top of existing textures / uploaded images",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T14:05:29.878Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T14:26:37.263Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Redesigned the iso /route PAINT panel toward the user's spec. DONE: (1) the face row is the piece's real slots, each shown wearing its actual look, click-to-target one or leave none to paint all (commit 623e45ff6, req_0762); (2) removed the piece type/cutout/placement/provenance config strip that predated the redesign and cluttered a paint panel (commit a00482478, req_0764). The panel is now pure texturing: faces + brush + colours + texture upload/painter button + the full material browser (the 1:1 skin icon grid the spec calls for). STILL OPEN (next build, flagged to the user): (a) clicking a skin should open a graffiti painter to the RIGHT of the list to draw over the chosen texture/uploaded image — the painter engine + underlay concept already exist (editors/paint + editors/workbench/paint/PaintBench), so this is an embed+seed job; (b) the spec's 'show the focused piece/ghost in the iso3d' — the iso3d build pane below already renders the focus and the placement ghost, so this may be satisfied; asked the user whether they want a dedicated orbitable viewer inside the panel instead. Both committed slices verified by clean esbuild passes.",
+  "shas": [
+    "623e45ff6",
+    "a00482478"
+  ],
+  "resolvedAt": "2026-06-13T14:26:37.263Z"
+}

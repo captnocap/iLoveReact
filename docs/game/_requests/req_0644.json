@@ -1,0 +1,32 @@
+{
+  "id": "req_0644",
+  "at": "2026-06-11T12:49:51.310Z",
+  "origin": "session:7de3e0b0",
+  "text": "also will you please add some twigs to the menu for props when hot reloads hit its annoying have it reset",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-11T12:50:15.847Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T12:50:31.997Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The iso build rail's menus are twig state now: the active piece tab (floor/wall/.../prop) and the prop category shelf both persist as route twigs, so a hot reload restores the menu exactly where it was instead of snapping back to 'wall'. The ObjectsTab palette was already twigged from an earlier sweep (TWIGSWEEP-0610); the CatalogRail in the iso pane was the remaining useState holdout.",
+  "shas": [
+    "101377352"
+  ],
+  "resolvedAt": "2026-06-11T12:50:31.997Z",
+  "tags": [
+    "ask"
+  ]
+}

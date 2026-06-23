@@ -1,0 +1,33 @@
+{
+  "id": "req_0653",
+  "at": "2026-06-12T04:44:43.524Z",
+  "origin": "session:204127f6",
+  "text": "cool thanks :D uh so let me show u another weird bug with building placement. so if i draw a single wall, and lets say i have a 1x2 so 6 walls to wrap it. if i place single walls, the edges do not align. if i however place multiple walls at a time, like by just tracing a long stroke, the walls then align. that can be seen here [Image #4] the bottom floor is the single wall placement when the floor above isnt. the bottom floor is all off because of it",
+  "status": "review",
+  "sessionId": "204127f6-a0bd-41ff-a021-74c242611d87",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T04:46:11.039Z",
+      "actor": "fable-iso-snap",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T05:03:12.742Z",
+      "actor": "fable-iso-snap",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Single-click walls misaligned because EVERY wall placement path snapped its line to the WORLD-anchored 3m module lattice (round(hit/3)*3) — never to the building being extended. For buildings sitting on that lattice the two coincide, but an off-lattice building (Alt fine placement from req_0650, a 1-tile building move, corner-turned runs at edge+1.5) makes each single click re-derive its own lattice line 1-2 tiles off the pad and off each other, while a drag stroke pins ONE line at drag start and stays self-consistent — exactly the reported symptom. Fix: nearestWallLineAnchor in editors/build/snap.ts — edge snap prefers REAL geometry: plate-top clicks anchor to that plate's edges + its own run lattice, wall-top clicks stack on the wall below's exact line/run, ground clicks within 1m (new wallAnchorMagnetMeters P2 tuning row) of an existing wall line or plate edge inherit it; world lattice is only the open-space fallback. Iso drag strokes (computePaint) anchor through the same helper so singles and strokes agree by construction. Alt fine mode opts out. 3 new P4 tests; suite 25/25 incl. all 19 pre-existing behaviors.",
+  "shas": [
+    "e0209fe1c"
+  ],
+  "resolvedAt": "2026-06-12T05:03:12.742Z",
+  "tags": [
+    "bug"
+  ]
+}

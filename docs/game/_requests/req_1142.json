@@ -1,0 +1,18 @@
+{
+  "id": "req_1142",
+  "at": "2026-06-16T07:39:56.616Z",
+  "origin": "session:eef64544",
+  "text": "i am getting this problem [Image #1] would u know anything about that ? also placement still same bug. not placeing. i see a ghost of the prop i never see it place",
+  "status": "doing",
+  "sessionId": "eef64544-c672-4883-add8-12dffa52f94c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T07:41:01.696Z",
+      "actor": "eef6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

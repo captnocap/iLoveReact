@@ -1,0 +1,31 @@
+{
+  "id": "req_0442",
+  "at": "2026-06-10T04:28:11.245Z",
+  "origin": "session:0a09e641",
+  "text": "Uh, im going to assume you just removed the collision with the ground because i fell thru the map. ???",
+  "status": "review",
+  "sessionId": "0a09e641-a769-495b-a0fd-4a909d25af7a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T04:29:30.386Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T04:33:05.863Z",
+      "actor": "0a09",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the fall-through I introduced in the baked-collider branch of world_loader.buildPhysicsColliders. My first cut rebuilt walkable floor colliders ONLY from instance rows AFTER the pieces (row >= scene.piece_count), on the assumption the ground was always the painted floor. But a built floor PLATE is a PIECE (row < piece_count), so its walkable rect was never derived and the player dropped through. Rewrote the branch to be a strict superset of the pre-bake instance collision: iterate ALL instance rows and reproduce the old behavior (non-solid -> walkable rect for built floor plates AND painted ground cells; non-piece solid -> solid rect; non-piece ramp -> heightfield), skipping ONLY piece SOLIDS (rows < piece_count, sy > step height) because those authored walls are replaced by the +-join baked colliders (the invisible-wall fix). Relief ground stays a heightfield (registered before the branch); piece ramps stay baked heightfields. Net: nothing that was standable before can fall through, while walls still use the editor's authored colliders. Zig ast-check clean. Still needs a full rebuild + map re-Compile to confirm in-game. Nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T04:33:05.863Z",
+  "tags": [
+    "bug"
+  ]
+}

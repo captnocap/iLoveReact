@@ -1,0 +1,31 @@
+{
+  "id": "req_1255",
+  "at": "2026-06-17T17:21:34.747Z",
+  "origin": "session:c885b7cc",
+  "text": "yeah i think we absolutely should, because the document says we should and it will make the performance even better and better file storage",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T17:23:08.288Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T17:32:54.038Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built UV island dedup (GUIDING_LIGHT 'store each distinct thing once, reference everywhere'). A boxy model has hundreds of faces but a handful of distinct SHAPES (matching panels + solidify rim slivers); the per-face unwrap packed one island per face (the product). Now congruent faces share one island (the factors), shrinking the atlas and making matching panels paint uniformly. Key insight exploited: a face's island poly is min-normalized, so congruent faces have an identical point set — placing each at the shared slot lands every corner by spatial position, needing NO rotation transform (provably non-distorting). New pure module uvDedup.ts (faceShapeKey invariant to loop-start + winding, NOT 90° rotation = the v1 bound; + groupByShape), 4/4 tests. textureize.ts: dedupIslands option (default ON), packs one slot per distinct shape with members sharing it and emits one island per shape; raster/slice path untouched since it reads stored per-face uv; existing 2 count-assertion tests pinned to dedupIslands:false and a new dedup test added — 11/11 pass. Studio.tsx: 'Dedupe Islands (shared)' toggle in the Create Texture dialog. Verified via tools/esbuild+v8cli; all touched files transpile clean. Commit 44c581ef7. ALSO in this session: mirror now works on anchors (commit bcbabe3e7) — mirrorMount already preserved kind+role and mirrored the facing, so the existing button was relabeled kind-aware ('⇄ mirror seat' for anchors). Hot-reloads; user should re-textureize to see the smaller atlas.",
+  "shas": [
+    "44c581ef7",
+    "bcbabe3e7"
+  ],
+  "resolvedAt": "2026-06-17T17:32:54.038Z"
+}

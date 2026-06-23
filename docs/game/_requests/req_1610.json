@@ -1,0 +1,30 @@
+{
+  "id": "req_1610",
+  "at": "2026-06-21T17:25:00.096Z",
+  "origin": "session:aa8b38c4",
+  "text": "just commit all the work its not a problem",
+  "status": "review",
+  "sessionId": "aa8b38c4-bcf4-4724-9069-0ebd209628e0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T17:25:44.293Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T17:25:59.146Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compiled-game (no-V8) root cause found via RJIT_COLLIDERLOG and fixed. The log showed loaded(oriented=16384) — the MAX_ORIENTED cap — while the bake built only 33 oriented colliders; the other ~16k were DECORATIVE FOLIAGE. The flora recipe (req_1591, a parallel session) expands tens of thousands of grass/bush/frond/flower cells into render instances, and the loader's instance-derived physics paths (emitRowCollider for windowed huge maps + the buildPhysicsColliders fallback) turned EACH render instance into a physics collider with no foliage filter. So the player bumped invisible flowers (taller blade colliders exceed step height), and the blades saturated the oriented budget, crowding real walls/props and the sign's elevated beam box out of the near-field window — producing the phantom walls on stairs and the lost walk-under under the sign/roofs. Fix: new isNonCollidingFoliage(SHAPE_GRASS/BUSH/FROND/FLOWER) skips those rows in BOTH instance-collider paths; palm TRUNKS and all structural shapes still collide; foliage is walk-through (cards + concealment). Loader compiles (zig build -Dapp-source=world_loader.zig -Duse-v8=false -Dhas-gpu=true -Doptimize=ReleaseFast, exit 0). world_loader.zig was committed whole at the user's direction — it also carries the parallel flora-recipe instance expansion and builds clean together. Diagnostic shipped earlier this thread: RJIT_COLLIDERLOG summary (bd3eb6bcd) + per-collider detail dump (668f0c4a5) that named the wrong colliders by band/solid flag. User must rebuild + recompile to pick this up.",
+  "shas": [
+    "9b6a0edac"
+  ],
+  "resolvedAt": "2026-06-21T17:25:59.146Z"
+}

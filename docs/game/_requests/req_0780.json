@@ -1,0 +1,30 @@
+{
+  "id": "req_0780",
+  "at": "2026-06-13T16:38:05.114Z",
+  "origin": "session:bdc416fa",
+  "text": "that flow is already confusing as hell lol. so you want me to go to the top right, ok i added this water i think [Image #2] lol",
+  "status": "review",
+  "sessionId": "bdc416fa-53b7-49b1-98a1-706f4ff29a15",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T16:38:50.026Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T16:45:53.983Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a WATER tab to the iso build pane's palette (the PIECES rail the user actually builds in), so a body of water drops by clicking the ground — same gesture as a floor/prop — instead of the confusing OBJ-tab → 2D-canvas → iso-pane round trip. The tab arms a water preset; a ground click fires onPlaceWaterBody(kind,x,z), which the cart lowers to an ordinary water placement (cat 'water') at that world position via worldToPlacementGraph + place.onPaintAt. This reuses the entire existing pipeline (persistence, assemblePreviewWorld → world.waterBodies, translucent render, footing, compiled bake) — no new authoring system. Guarded the iso pane's piece-catalog lookups (ghost, status text, paintKindOf) against water preset ids so nothing crashes. The OBJ-tab WATER catalog still works as a secondary path.",
+  "shas": [
+    "32479703d"
+  ],
+  "resolvedAt": "2026-06-13T16:45:53.983Z"
+}

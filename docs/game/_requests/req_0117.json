@@ -1,0 +1,9 @@
+{
+  "id": "req_0117",
+  "at": "2026-06-06T13:09:17.457Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — heads-up, not a correction: another lane patched small verifier blockers in colonConsole.ts and vocabulary.test.ts while you were working (your intermediate saves had verify RED fleet-wide). Reconcile from what is on disk now before your next save so you do not clobber those patches.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook"
+}

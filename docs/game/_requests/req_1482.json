@@ -1,0 +1,31 @@
+{
+  "id": "req_1482",
+  "at": "2026-06-20T02:04:21.156Z",
+  "origin": "session:ccd83b97",
+  "text": "oh my god sorry i thought i had another claude in focus xD re ask me the questions",
+  "status": "review",
+  "sessionId": "ccd83b97-8a50-41e1-9076-824a01c74989",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T02:19:25.677Z",
+      "actor": "ccd8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T02:50:04.773Z",
+      "actor": "ccd8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured as the clarifying-questions step of req_1480/req_1481 (the user re-requested the two design questions after an accidental focus switch). Resolved by AskUserQuestion: intersection type is set by clicking a derived junction badge → a card (4-way stop / signals / uncontrolled), and generated props are auto-managed/regenerated but honor manual drags (no snap-back). No separate code; folded into the feature commits.",
+  "shas": [
+    "8b0ccb660",
+    "d7cc04eb8"
+  ],
+  "resolvedAt": "2026-06-20T02:50:04.773Z"
+}

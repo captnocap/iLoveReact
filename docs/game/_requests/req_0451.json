@@ -1,0 +1,31 @@
+{
+  "id": "req_0451",
+  "at": "2026-06-10T05:07:32.432Z",
+  "origin": "codex:019eaf3e",
+  "text": "ok and then for the wall from the pieces, does it sit on the edge of the floor or on top of the floor",
+  "status": "review",
+  "sessionId": "019eaf3e-0282-7ba1-99cd-6b025b307dea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T05:07:39.357Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T05:08:03.442Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the wall-vs-floor placement question by checking the game oracle and hmsc-int build snap/placement source. Confirmed walls are edge-snapped in x/z to the floor/roof perimeter, while their base y is anchored to the top of that floor/roof plate, so the wall stands on the floor top edge rather than on a side face or floating on the floor center. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T05:08:03.441Z",
+  "tags": [
+    "ask"
+  ]
+}

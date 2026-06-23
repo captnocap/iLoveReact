@@ -1,0 +1,28 @@
+{
+  "id": "req_0701",
+  "at": "2026-06-13T01:48:31.922Z",
+  "origin": "session:3db4e705",
+  "text": "ok just making sure so if i remove / move / rename the image, its going to fail",
+  "status": "review",
+  "sessionId": "3db4e705-cae9-4e5f-8874-7aa6ce30faf5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T01:48:52.775Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T01:48:52.784Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmation Q&A, no code change. Confirmed: removing/moving/renaming the source image breaks the EDITOR immediately (painter/iso3d load the image by path every render — the face goes blank) and the NEXT bake warns + skips it (degrades, never crashes), so the new gamefile loses the image. Exception spelled out: already-compiled gamefiles keep working forever because the bake installed the bytes content-addressed in zig-out/game/contentstore/ — the original is load-bearing for authoring only, not for playing what is already baked. Re-offered the import-copies-into-app-data feature as the durable cure if they want the app to own dropped images.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T01:48:52.783Z"
+}

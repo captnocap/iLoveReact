@@ -1,0 +1,38 @@
+{
+  "id": "req_0755",
+  "at": "2026-06-13T13:40:17.679Z",
+  "origin": "session:ef4fbf70",
+  "text": "I want to apply textures to props. i also want to change this panel significantly in how it works / looks. first thing to start with, is identify if i can for example, click on these specific parts of a prop, and put a texture on it. if not, that is the first start. [Image #7] [Image #8] \n\nthat is the soda machine, there are 1 2 3 4 5 6 7 parts of it so it looks. can i skin any 7 of those parts. currently, if i can, i dont know where i go to do so",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T13:40:29.704Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T13:57:00.027Z",
+      "actor": "ef4f",
+      "kind": "note",
+      "text": "Foundational enabling done under req_0757 (all prop parts now texturable + visible end-to-end). The 'change this panel significantly' half is the next phase, still pending the user's go."
+    },
+    {
+      "at": "2026-06-13T14:47:05.724Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The umbrella ask — 'apply textures to props' + 'change this PAINT panel significantly' — is substantially delivered across the session's work: (1) req_0757, prop-part texturing made general + visible + bakeable end-to-end (every prop part is a texture target, captures mounted in the world rigs); (2) req_0758/req_0762, the PAINT panel face row redesigned to the piece's real slots (front/back/sides), each showing its actual look, click-to-target one or none = paint all, replacing the old N/E/S/W compass; (3) req_0764, removed the stale piece type/cutout/placement/provenance strip so PAINT is pure texturing; (4) req_0766, the panel now skins PROP parts the same way (per-instance piecePartTextureSet), showing a prop's parts when one is selected. Committed: 623e45ff6, a00482478, 2f5d9e399 (plus the held Embodied.tsx mount). So you can apply textures to any prop's parts and any build piece's faces from the iso /route PAINT panel, and it renders + bakes. ONE item the user flagged remains for a follow-up: clicking a skin should open a graffiti painter to the RIGHT of the list to draw over the chosen texture (wanted for both faces and parts) — the painter engine + underlay concept already exist (editors/paint + PaintBench), so it's an embed+seed job, tracked as the next build.",
+  "shas": [
+    "623e45ff6",
+    "a00482478",
+    "2f5d9e399"
+  ],
+  "resolvedAt": "2026-06-13T14:47:05.724Z"
+}

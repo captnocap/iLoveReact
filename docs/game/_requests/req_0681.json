@@ -1,0 +1,28 @@
+{
+  "id": "req_0681",
+  "at": "2026-06-12T12:52:17.207Z",
+  "origin": "codex:019eba54",
+  "text": "ok dumpster seems to be in shape now. so lets do another item, pick one",
+  "status": "review",
+  "sessionId": "019eba54-122c-7b03-9a58-37a88189321a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T12:52:28.641Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T12:54:34.535Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Converted fireHydrant to the semantic prop recipe format after dumpster: named colors, named parts, object-shaped position/size/radius/rotation fields, and lowering through lowerRecipePart. Added a regression covering the eight hydrant parts and representative legacy geometry values. Focused worldGeometry test command bundles and the new hydrant test passes; the full file currently still reports two unrelated painted-stencil material failures from existing dirty changes.",
+  "shas": [],
+  "resolvedAt": "2026-06-12T12:54:34.535Z"
+}

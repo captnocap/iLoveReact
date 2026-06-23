@@ -1,0 +1,10 @@
+{
+  "id": "req_1262",
+  "at": "2026-06-17T18:09:49.996Z",
+  "origin": "session:76a33154",
+  "text": "Yeah exactly right and i would also make sure that the texture scales, and isnt defaulted to a size. since if u for example u make a big ass bridge, u dont want to stretch that one 512 texture across a huge surface",
+  "status": "new",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": []
+}

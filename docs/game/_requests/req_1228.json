@@ -1,0 +1,30 @@
+{
+  "id": "req_1228",
+  "at": "2026-06-17T04:16:18.018Z",
+  "origin": "session:037e2c05",
+  "text": "something in the @cart/hmsc-int/editors/model/Studio.tsx and how it handles loading one model to another is scuffed. i have the outline of the trunk showing from one model on the start of another one and i cant get rid of it unless i restart",
+  "status": "review",
+  "sessionId": "037e2c05-00df-45af-8177-49ecdb1642a7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T04:16:24.815Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T04:23:51.265Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the Studio 'ghost mesh from another model' bug (the trunk outline persisting onto a freshly-loaded model until restart). Root cause was a desync between two caches on the Scene3D dynamic-geometry path in runtime/primitives.tsx: the host reuses a fixed pool of dyn slots keyed by slotId (everything before the final '~'), and Studio keys those slots by RENDER INDEX (studio.s<i>), which is SHARED across every model. The JS dedup, however, keyed its 'skip shipping verts, the host still has them' decision by the FULL per-part key (the old per-key shipped flag). So toggling model A->B->A let JS skip shipping verts for a (slot,version) the host slot no longer held — a different model had reused that index slot in between — and the host's resolveDynamicGeom fell back to drawing the slot's STALE verts (the previous model's trunk), clearing only on a full restart that wipes both caches. Fix: replaced the per-key shipped flag with a per-host-slot shipment ledger (_dynSlotShipped: slotId -> last full key shipped) that re-ships verts whenever the slot's last-shipped version differs, mirroring the host's single-slot truth exactly; _dynGeomCache stays a pure verts content cache. Verified: SHIP_RUN_PACKAGE=0 rjit ship hmsc-int exits 0 (bundle + ReleaseFast binary both built). runtime/ change, so it hot-reloads — no Zig rebuild needed to pick it up in a running dev host.",
+  "shas": [
+    "28ccabbd2"
+  ],
+  "resolvedAt": "2026-06-17T04:23:51.264Z"
+}

@@ -1,0 +1,35 @@
+{
+  "id": "req_1611",
+  "at": "2026-06-21T17:28:35.579Z",
+  "origin": "session-relay",
+  "text": "and then uh earlier i was trying to paint a sphere, it kept hitting other faces when crossing and fucking up, so the worker i told about it fixed it so i could cross faces cleanly with brushes, its really nice. except now i have no ability to contain paint within one face when i want to and so doing edges of things is really fkn hard to do now",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-21T17:28:39.607Z",
+      "actor": "da8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T17:31:34.120Z",
+      "actor": "da8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-21T17:46:57.152Z",
+      "actor": "da8b",
+      "kind": "note",
+      "text": "Revised the lock-face implementation (sha b4d463911): moved it OFF the kit atlas path and INTO the 3D-surface path (per-dab faceIndex filter in surfaceStampAt), because the kit path couldn't paint some faces (req_1614). Same toggle/UX; more robust mechanism."
+    }
+  ],
+  "resolution": "Added a 'lock face' toggle to the model paint panel so paint can be contained to a single face again. The freehand brush/eraser cross atlas seams smoothly by default (req_1580), which is great for big surfaces but left no way to keep paint inside one face — making clean edge work hard. With lock face ON, brush/eraser route through the kit's per-face island-clipped path instead of the multi-face surface path, so each dab only paints the face it's over: you can paint right up to an edge with no bleed onto the neighbour. OFF keeps the smooth cross-face behaviour. It's a toggle next to 'face fill', persisted as twig. No change to the smooth path itself, so the nice cross-face brushing the user liked is untouched. Verified: hmsc-int bundles clean via the real esbuild flags. Live edge-painting needs rjit dev.",
+  "shas": [
+    "79049fc51"
+  ],
+  "resolvedAt": "2026-06-21T17:31:34.120Z"
+}

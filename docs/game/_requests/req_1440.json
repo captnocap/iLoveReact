@@ -1,0 +1,10 @@
+{
+  "id": "req_1440",
+  "at": "2026-06-19T22:09:32.034Z",
+  "origin": "session:671785ab",
+  "text": "Nevermind. I was wrong. This is still broken. Lets look. \n\nHere is my PoV before an update: [Image #10] \n\nand after: [Image #12]\n\nsame camera angle, same distance. image is completely offset",
+  "status": "new",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": []
+}

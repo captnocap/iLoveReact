@@ -1,0 +1,17 @@
+{
+  "id": "req_0058",
+  "at": "2026-06-06T07:06:11.639Z",
+  "origin": "session:066cd07a",
+  "text": "[Image #16]SUPERVISOR — USER VERDICT, the DEADSPACE fix overcorrected. Marker: SCULPTSPLIT-0606 (resolve req by verbatim match).\nUSER (laughing, but it's a FAIL), verbatim: \"whoever edited the sculpt is funny and fucked it up bad lmao. bro what is this. ok so look how tiny of a space that the model is now.\" Screenshot (read it):\nWhat it shows: the SCULPT lens unwrap canvas now eats ~80% of the stage width; the 3D model is a clipped sliver falling off the right edge; ALSO the top-right chips (grid/mirror/hitboxes/fly) overlap the DIVE 3D · HEAD\n/ undo text — two layers of toolbar colliding.\nThe fix — LENSCLARITY's own spec, balanced: \"the 2D unwrap canvas LARGE with a SMALL live 3D beside\" means BOTH visible and usable: make the canvas⇄3D split a DRAG-RESIZABLE divider (the Inspector's resizable-panel pattern exists — reuse it) with a sane default (~62/38), divider position twigged (view state law). The 3D side must never clip off-stage at any size. Fix the top-right toolbar collision (one row, or proper stacking — nothing overlaps). Law 3 still holds — no dead space returns — but Law 3 never meant amputating the model. Same data, layout only, explicit paths, verify green. READY when the user can sculpt with both the canvas AND a real model view.",
+  "status": "done",
+  "sessionId": "066cd07a-7039-4d0f-b6de-a778ce2c6d24",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T07:18:56.196Z",
+  "resolution": "SCULPTSPLIT-0606 dispatch, both halves built and live on the user's tree. (1) The split: the fixed-340 3D pane is replaced by a drag-resizable divider (the Inspector's resizable-panel pattern — handle + full-stage capture overlay while dragging), default 62/38, fraction twigged on the /characters route keys ('sculptSplit'), clamped 0.35-0.78 with minWidths (canvas 360 / 3D pane 300) so the 3D side never clips to a sliver at any window size. (2) The toolbar collision: the viewport chips and the lens caption merged into ONE wrapping strip (left 14 / right 14) — at any pane width content wraps to new lines, nothing overlaps. (3) The addendum (req_0059) committed as d454f7a34: fixed sculpt-canvas palette, skin-independent, guide contrast pinned + P4 test. CAVEAT for the record: the Stage.tsx layout hunks are functionally live (hot reload) but the FILE is fenced — it carries the figure lane's uncommitted CLOTHSPLIT phase-2 rewrite (their untracked figureFrame.tsx import); committing now would sweep their WIP and break HEAD. The layout half lands in its own SCULPTSPLIT commit immediately after their lane commits; req_0057 (the user's verbatim) stays open until that sha exists.",
+  "shas": [
+    "d454f7a34"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

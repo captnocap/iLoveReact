@@ -1,0 +1,31 @@
+{
+  "id": "req_0340",
+  "at": "2026-06-08T13:29:45.410Z",
+  "origin": "codex:019ea612",
+  "text": "why would u do  that? why cant you literally take that exact code that is there and just embed it verbatim, no 2 different things that have mismatch",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:29:53.963Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:30:00.081Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the correction directly: the previous embed diverged because I treated world_loader.zig's orchestration as unavailable/recreated a native Scene3D source instead of stopping until the real loader core could be shared. Confirmed the right fix is to extract the exact loader construct/render state into one shared module and have both standalone and /compiled call it.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T13:30:00.081Z",
+  "tags": [
+    "ruling"
+  ]
+}

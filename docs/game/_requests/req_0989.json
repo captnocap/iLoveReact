@@ -1,0 +1,28 @@
+{
+  "id": "req_0989",
+  "at": "2026-06-15T12:54:54.828Z",
+  "origin": "session:d91c8b8f",
+  "text": "alright. so lets do a side by side and see the difference so we know the problem. \n\nalright, so we have block bench and we select the face [Image #46] ok and then here is ours [Image #47] \n\ngood. same thing. next, click loop cut\n\nhere is block bench [Image #48]  we see we still have the selected piece from the cut on the side we picked. \n\nand now ours \n\n[Image #49] \n\nselection is gone, and cut is not even on the same face it hsould apply to",
+  "status": "review",
+  "sessionId": "d91c8b8f-6568-469d-83d0-62ea4b4091c6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T12:57:00.216Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T13:00:19.257Z",
+      "actor": "d91c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Side-by-side with Blockbench revealed the loop-cut bug: the selection highlight vanished on cut (I had suppressed it + cleared selection) because the pre-cut face index does not map onto the cut mesh. Fixed by tracking the face THROUGH the cut: added a transient EditMeshFace.tag that cutMeshByPlane now propagates onto every split child (test: a tag rides one or both halves depending on whether the cut crosses the face; 19/19). Studio loop-cut now tags the clicked face (tagOneFace), cuts the tagged mesh for both the live preview and the commit, highlights the TAGGED pieces during preview (the 3D orange fill follows facesWithTag on the draft, not the stale index), and on Apply re-points the selection to facesWithTag(cut,1) after clearFaceTags (indices preserved) so the selection persists onto the same face's pieces exactly like Blockbench. direction 0 cuts perpendicular to the clicked face's normal, so that face stays whole + highlighted with the cut crossing the adjacent faces. Bundle-clean; hot-reload TSX; nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T13:00:19.257Z"
+}

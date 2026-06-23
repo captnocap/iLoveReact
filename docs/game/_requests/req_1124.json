@@ -1,0 +1,28 @@
+{
+  "id": "req_1124",
+  "at": "2026-06-16T02:28:39.255Z",
+  "origin": "codex:019ecd7a",
+  "text": "WHen we say 'import' we mean we want those existing props for example, to turn into a scene that is saved. not that we want to introduce another authoring approach to this editor",
+  "status": "review",
+  "sessionId": "019ecd7a-9cba-73d0-9fee-7dc6959b72e2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T02:28:44.576Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T02:29:19.947Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified docs/game/HMSC_INT_ASSET_PIPELINE.md so import means one-way capture into a saved StudioModel scene made of EditMesh parts, not adding another authoring approach. Updated the consolidation language, per-source import rules, import report requirements, and retirement gate to require modelStream persistence and to state that merely rendering old sources in Studio is incomplete.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T02:29:19.947Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0608",
+  "at": "2026-06-11T05:18:43.916Z",
+  "origin": "session:e9bdce32",
+  "text": "k one more thing. check props vs items. props, where are they in the workspaces? hint: they arnt",
+  "status": "review",
+  "sessionId": "e9bdce32-4d43-433c-9b7c-e64529ad18a7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T05:19:35.095Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T05:21:31.215Z",
+      "actor": "reviewer-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified the user's hint and wrote §13 of the structure review (commit cfae782cd): props have ZERO workspace existence (no workbench source, no stream, no data domain, no roster) while items got the full treatment (itemsSource + items/voxels streams + voxel sculpt). Props instead live in FOUR hand-synced code homes: world/propKinds.ts (722 lines, legacy) + game/kinds/props.ts (791 lines, the V17 capture) + render3d/props/*.tsx hand-written mesh per prop + compile/worldGeometry.ts re-encoded colors/geometry. Worse: the two registries have SPLIT consumers — the live editor (ObjectsTab/PropertiesPanel/placements) AND compile read the LEGACY file while the game door reads the capture — a live divergence hazard. Proposed three-step fold: (1) unify on game/kinds/props.ts and retire the legacy file (hazard fix, priority right after §9.1); (2) a props workbench source on the tunables pattern (code defaults + V20 props override stream); (3) prop models from the items/voxel/carve pipeline per V24's existing ruling ('prop entries fill from the existing items/model pipelines'), retiring the hand-written .tsx meshes.",
+  "shas": [
+    "cfae782cd"
+  ],
+  "resolvedAt": "2026-06-11T05:21:31.215Z",
+  "tags": [
+    "ask"
+  ]
+}

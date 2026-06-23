@@ -1,0 +1,18 @@
+{
+  "id": "req_0028",
+  "at": "2026-06-06T05:55:00.198Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT on the workbench hero/header bar (gutter 3 top). Marker: HEROBAR-0606, resolve the req the hook captures (or req_0028 if relayed).\n\nUSER, verbatim: \"this header is crowded, and there is a button in that array u cant even see, also, notice how the buttons are tight for space in their own container here. have this whole thing cleaned up / different shape but same data. because this is just poor thinking. put the buttons as a row on the bottom or top of this, and then do a row with the icon and name and then under than another row with columns of the meta data details.\"\n\nTheir SCREENSHOT (read it): /home/siah/.claude/image-cache/c73c0a8c-84f9-4fad-b702-d4288adbf7bb/15.png — shows the crowding: icon + \"character 16uawcw\" squeezed beside Save/Generate chips, at least one action clipped invisible, meta lines (character · 9 groups · 65 fields) cramped under.\n\nThe PRESCRIBED layout (build exactly this, same data, shell-level so every source inherits):\nRow 1: icon + name (full width, room to breathe).\nRow 2: the metadata details as COLUMNS (kind · groups · fields ...).\nRow 3 (top or bottom — pick what reads best with the gutter, state your pick): ALL the action buttons in their own full-width row — every action visible, never clipped.\nThis lives in the shell (Workbench.tsx hero area / workbench.cls classes) — one fix, every category inherits. No data changes, no new actions. Small commit, explicit paths, verify green. READY when the user sees every button and nothing crowded.\n",
+  "status": "done",
+  "sessionId": "749ea40a-8b61-47c3-8d6c-5bde9e2a5c99",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T05:57:24.004Z",
+  "resolution": "HEROBAR-0606: the gutter-3 hero restructured to the user's prescribed stack at the SHELL level (every source inherits, same data, no new actions): row 1 icon+name full-width; row 2 metadata as columns (value over tiny label — SOURCE/GROUPS/FIELDS); row 3 all action buttons in a full-width WRAPPING row at the bottom (pick stated: identity → facts → verbs, verbs adjacent to the panel they act on; flexWrap guarantees no button is ever clipped). New Hero* classes in workbench.cls; studio's HeroBar kit untouched for the map editor's panel. Bundle green; suites unaffected (display-only). Visual confirmation pending-selfshot.",
+  "shas": [
+    "f7d3ff765"
+  ],
+  "tags": [
+    "ruling",
+    "ux"
+  ]
+}

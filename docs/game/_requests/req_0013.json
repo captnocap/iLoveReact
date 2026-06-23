@@ -1,0 +1,20 @@
+{
+  "id": "req_0013",
+  "at": "2026-06-06T05:08:40.774Z",
+  "origin": "supervisor-relay",
+  "text": "it currently is treated like its isolated for characters is the problem. it needs to be treated as 'this is an agnostic painting surface, put whatever u want here' since the reality is this: any thing at all is all just the same thing at this level. from here we materialize something and it gets then put on the face of a building or a shirt, or anything.",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T05:35:46.219Z",
+  "resolution": "AGNOSTICPAINT-0606 landed: (1) parity table re-derived from CutoutRoute's current 1160-line tree (AGNOSTICPAINT.CAPTURE.md — every target-open path, every output route, 3 deferrals listed: roster swatches, EffectModal-extracts-at-flip, modelPick obviated). (2) The agnostic target model + headless bench store (editors/workbench/paint/): PaintTarget names any paintable thing; MATERIALIZE routes by family — figure→characters channel + open-draft adopt, vehicle→vehicles channel, cutout asset→material door (cutout-stencil), else→library stream; workbench-scoped draft book (K5), TATTOODRAFT/OPEN-SLOT/mount-restore laws line-true; 7/7 P4 (open round-trip per family + routing per consumer through a folding fake channel). (3) PAINT is a top-level workbench source: roster = blank/figures/vehicles/materials/recipes/documents/cutouts, panel carries the PART enum (the workbench sub-selection idiom), the stage is THE bench (cutout's exact chrome per ONEPAINTER); the character PAINT lens became a doorway driving the same bench — zero forked mounts. (4) Ledger: WORKBENCH.md §3 ruling text + §6 step-8 resequence (cutout dies at the user's pass); /cutout CAPTURE frozen. Verify: paint 7/7, characters 14/14, full cart bundles; the lone suite RED remains the paint lane's uncommitted brush WIP. Visual rows pending-selfshot per the capture ban. READY FOR USER TEST: open a shirt, a car door, a material, and a blank canvas in ONE surface and materialize from it.",
+  "shas": [
+    "da163c12f",
+    "d32b84e12",
+    "2435737aa",
+    "ea9a0a634",
+    "c0db7c19d"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

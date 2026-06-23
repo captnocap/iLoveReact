@@ -1,0 +1,31 @@
+{
+  "id": "req_0930",
+  "at": "2026-06-14T17:05:35.961Z",
+  "origin": "session:dc5986f6",
+  "text": "oknice they landed in part. can u seal these gaps? [Image #1]",
+  "status": "review",
+  "sessionId": "dc5986f6-d53d-46b2-b433-a343515365ab",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T17:07:06.277Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T17:43:43.242Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two fixes on the pitched-roof feature. (1) SEALED the gable-end gaps: the stepped-box fill left see-through notches (boxes can't tile a diagonal), so I added a real GABLE-END PRISM — a solid isoceles-triangle wall (base = eave-to-eave depth, apex = ridge rise) extruded thin across the roof width. Wired as a new keyed primitive (SHAPE_GABLE=5) through all three layers that must agree: pieceShapes emits one 'gable' VisualShape per end, pieceMeshes' GablePrismGeometry renders it in the editor, worldGeometry lowers it to INSTANCE_SHAPE_GABLE, and world_loader.zig's buildGablePrism + SHAPE_GABLE batch render it compiled (mirrors SHAPE_RAMP exactly; same verts/normals/winding so editor==compiled). Render-only; the roof's slope heightfield still owns footing. Editor seals on hot-reload, /compiled after a rebuild. Also the groundwork for hip/pyramid. (2) CAMERA: a roof a storey-plus overhead was yanking the /test spring-arm because the elevated chase-cam sweeps through it; roofs now occlude only when the player's head is within roofOverheadClearanceMeters (3m) of the eave (on/just under it), so a 2-storeys-up roof no longer reks the camera (mirrors the ramp isPlayerGround guard). NOTE: the compiled camera uses the COLLIDERS lump, not this /test path — if the rek shows compiled too, that's a follow-up. 9 roof tests + worldParity/colliders/buildings/placed all green; zig ast-check clean. SHAs: gable 2bb427547, camera d23365fce.",
+  "shas": [
+    "2bb427547",
+    "d23365fce"
+  ],
+  "resolvedAt": "2026-06-14T17:43:43.242Z"
+}

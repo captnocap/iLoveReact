@@ -1,0 +1,13 @@
+{
+  "id": "req_0307",
+  "at": "2026-06-08T10:22:37.545Z",
+  "origin": "session:f48e9dac",
+  "text": "PROGRESS CONFIRMED by the user: the placed pieces now bake and place in the CORRECT positions — the cluster arrangement matches their 2D map / /test layout. Position-parity landed. But each piece renders at the WRONG SCALE — thin sticks and tiny cubes — instead of the solid walls/pillars /test shows. User verbatim: \"those specs of color you see scattered around are the pillars i placed but they are not rendering correctly.\"\n\nTHE FIX — per-piece real dimensions from the catalog (the SAME source /test uses):\n- Each pieceId's real size lives in `GAME_BUILD.catalog` (rows in game/build/ tables). `GAME_BUILD.catalog.get('wall.concrete.common').size` -> `{ widthMeters, heightMeters, depthMeters }`. See cart/hmsc-int/editors/build/snap.test.ts:11-12 — that is exactly how the editor/`/test` sizes pieces.\n- The bake (worldGeometry.ts / bakeGameFile.ts) must look up each placed piece's pieceId in the catalog and emit its mesh instance SCALED to widthMeters x heightMeters x depthMeters, at its x,y,z + yawDegrees. Right now pieces get a default/unit scale -> thin sticks/specks. Use the catalog size.\n- Most pieces are boxes (walls/floors/pillars) — a box scaled to catalog size matches /test for those. Get that baseline right first; it's the bulk of the world. Distinct prop meshes (e.g. prop.fireHydrant) can follow as a later fidelity layer.\n\nThis is SHAPE+SCALE parity; position parity is already done. Go confirm how /test reads `catalog.get(pieceId).size` per piece and mirror it exactly — same dimensions, same world units.\n\nBAR: ONLY the user running `tools/rjit game play` and seeing the pieces as solid walls/pillars at /test scale — not sticks or specks — counts. Do NOT self-declare GREEN. When ready, tell me exactly what the user should run and what they should see; I relay, the user verifies.\n\nCommit explicit paths (NOT git add -A; ~390 set-aside files). Own context — no Task tool, no subagents. tools/rjit only. No reset/revert. /hand-over if you cross ~55% context.\n",
+  "status": "new",
+  "sessionId": "f48e9dac-15a7-4cf5-a2e4-26a5d851461c",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

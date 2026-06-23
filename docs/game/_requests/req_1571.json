@@ -1,0 +1,30 @@
+{
+  "id": "req_1571",
+  "at": "2026-06-21T12:43:12.171Z",
+  "origin": "codex:019eea34",
+  "text": "inside of the mesh painting tool for the studio editor can u give me a paint color picking tool. like, i want to sample from a color i already used, but its not showing in my recent history",
+  "status": "review",
+  "sessionId": "019eea34-13c9-7663-9035-2e93b4802f63",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T12:43:19.574Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T12:46:00.261Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a one-shot sample control to the Studio mesh paint panel. The sample button now makes the next face click read the live RGBA paint texture at that UV, mint or reuse that exact color as a palette swatch, select it, and avoid painting during the sample click. This gives mesh painting an eyedropper path independent of recent color history.",
+  "shas": [
+    "ddba77265"
+  ],
+  "resolvedAt": "2026-06-21T12:46:00.261Z"
+}

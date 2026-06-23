@@ -1,0 +1,31 @@
+{
+  "id": "req_0410",
+  "at": "2026-06-09T07:04:07.584Z",
+  "origin": "codex:019eab31",
+  "text": "x to delete button only works on some pieces places in the build mode in hmsc-int",
+  "status": "review",
+  "sessionId": "019eab31-dfd3-7e40-b716-4198751e772b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T07:04:14.338Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T07:07:51.047Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed build-mode piece delete/edit scoping for hmsc-int. The bug was that visible pieces can come from either the active map stream or the legacy global pool, but X/E always emitted map-scoped mutations, so legacy-visible pieces stayed standing. Added pieceMutationMapName to resolve the source pool for a visible target, wired PlayRoute and the editor build commit path to use it for pieceRemoved/pieceEditSet, and added REQ-0410 regression coverage. Verified with placed.test and a hmsc-int cart bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T07:07:51.047Z",
+  "tags": [
+    "bug"
+  ]
+}

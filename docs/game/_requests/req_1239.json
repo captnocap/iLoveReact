@@ -1,0 +1,28 @@
+{
+  "id": "req_1239",
+  "at": "2026-06-17T14:06:04.717Z",
+  "origin": "session:c885b7cc",
+  "text": "haha SHIT it buckled 10 faces but i think i just create face instead maybe",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T14:06:27.633Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T14:06:27.642Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User reported that solidify buckled ~10 faces on the front opening and suspected they should have used Create face instead. Advised — no code changed. Confirmed: this is exactly the thin/tight self-intersection footgun flagged earlier (solidify insets each face inward 0.125m, so faces collide and invert on a tight spot). For closing an opening the correct tool is Create face, which adds zero thickness and cannot buckle. Recovery: Ctrl+Z once (solidify is a single undoable commit, so one undo removes all buckled faces), then Create face across the front opening and Flip if needed. Gave the durable rule: Create face = close a hole/add a wall (flat, never buckles); solidify = thicken an existing shell (only where there's room, never thin/tight faces). Re-offered to add a thin-part guard to solidify (refuse or auto-thin) now that the user has hit the failure for real.",
+  "shas": [],
+  "resolvedAt": "2026-06-17T14:06:27.642Z"
+}

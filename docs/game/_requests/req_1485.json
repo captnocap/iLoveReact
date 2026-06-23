@@ -1,0 +1,30 @@
+{
+  "id": "req_1485",
+  "at": "2026-06-20T02:55:39.915Z",
+  "origin": "session:ccd83b97",
+  "text": "so what am i misunderstanding here, i see in the map editor that there are stop sign props. i compiled the world and go into it, nothing there for signs, but i go to place a sign prop, and its there just fine",
+  "status": "review",
+  "sessionId": "ccd83b97-8a50-41e1-9076-824a01c74989",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T02:56:19.097Z",
+      "actor": "ccd8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T03:01:56.191Z",
+      "actor": "ccd8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed: auto-placed intersection props (stop signs / lights / street-name signs) showed in the editor but were missing from the compiled world, while manually-placed props worked. Root cause was in serializeMap — I had FILTERED gen-tagged placements out of the saved snapshot (meaning to re-derive them on load), but the no-V8 bake reads the saved world (loadEditorWorld) with no editor to regenerate them, and an autosave/hot-reload restore (setPlacements(snapshot.placements)) also wiped the synced gen props out of the live placements array before Compile baked previewWorld, since the generation memo doesn't re-fire when roads are unchanged. Now gen props persist in the snapshot (with their per-instance text, which was previously dropped for every sign, generated or hand-placed); the editor still reconciles them on load so road edits keep regenerating. Re-Compile and re-enter the world to see the signs. mapload 7/7, previewWorld 3/3, intersections 9/9, headless game compile clean. sha a7dcc0c90.",
+  "shas": [
+    "a7dcc0c90"
+  ],
+  "resolvedAt": "2026-06-20T03:01:56.190Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_0849",
+  "at": "2026-06-13T22:21:20.148Z",
+  "origin": "session:d660addf",
+  "text": "well. so, one prop = one file, but if a chair for example has different types of chairs, then you need to still follow the one prop = one file, and start giving the other chairs some names",
+  "status": "doing",
+  "sessionId": "d660addf-2f24-4882-9a4e-be2b36812b1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T22:23:31.758Z",
+      "actor": "opus-props",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

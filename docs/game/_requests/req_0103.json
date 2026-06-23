@@ -1,0 +1,15 @@
+{
+  "id": "req_0103",
+  "at": "2026-06-06T12:37:38.127Z",
+  "origin": "codex:019e9ca8",
+  "text": "`SUPERVISOR — USER VERDICT on WALLTOP-0606: the top-anchor fix itself PASSES (\"ok and the wall not on the side thing. good\"). But a new placement defect, user verbatim: \"but this is a problem. its a nit pick but its annoying\". Screenshot: /home/siah/.claude/image-cache/42677ed6-e8fa-4672-83bf-b68e46d28bef/4.png — two floor-tile junctions, annotated: one has a visible sliver gap between adjacent tiles (\"weird gap\"), the other meets flush (\"no gap\"). Adjacent placed floor tiles do not meet consistently — some junctions flush, some leave a sliver. This is snap/placement precision in your territory (snap.ts). Print the data: the placed positions/extents of tiles on both sides of a gapped junction vs a flush junction — show why the gap exists (float drift in snap origin, per-tile size vs grid pitch mismatch, parity/rounding by region, anything). Then fix so tile junctions are uniformly flush — placement snaps to one exact lattice; two tiles sharing an edge share identical coordinates on it. Regression test: a grid of adjacent placements produces zero inter-tile gaps anywhere (assert exact shared-edge coordinates, not epsilon-close). Keep the seam-walk guarantees green. DONE-BAR: verify green + the junction data + test + READY. DO NOT COMMIT. Only the user's live confirmation makes this a PASS.",
+  "status": "done",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T12:39:54.000Z",
+  "resolution": "Fixed the floor junction sliver caused by edge-hit floor placement stacking the adjacent tile by one floor thickness. The resolver now keeps grid/free placements on the hit piece base plane when the snapped footprint is adjacent with no plan-area overlap, while true overlapping placements still stack on top. Added snap tests that print the gapped edge-hit data and assert exact shared-edge coordinates across a floor grid; tools/rjit game verify is green, including the floor seam/outer-edge physics guarantees.",
+  "shas": [],
+  "tags": [
+    "bug"
+  ]
+}

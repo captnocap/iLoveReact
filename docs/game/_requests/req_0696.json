@@ -1,0 +1,33 @@
+{
+  "id": "req_0696",
+  "at": "2026-06-12T14:43:23.317Z",
+  "origin": "session:3db4e705",
+  "text": "do  you know what bug this is where the prefab just doesnt show up here [Image #10]",
+  "status": "review",
+  "sessionId": "3db4e705-cae9-4e5f-8874-7aa6ce30faf5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T14:43:37.895Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T14:53:29.873Z",
+      "actor": "3db4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the blank building stage for shitty_hotel. The prefab itself is healthy — pulled its latest prefabDefined def from the world stream sqlite and verified all 104 pieces have finite coords (0..15), valid yaws, and known catalog ids. What is unique about it: it is skinned with stored + painted materials (d-pdx-carpet, b-linoleum, custom:shitbrick0/1, b-rot-siding), so the stage mounts ~6 offscreen TextureCaptures where color-skinned buildings mount 0. That capture list was a BARE variable-length array directly before the fixed Pressable+Scene3D sibling — the documented reconciler array-sibling-shift trap: switching to a building with a different capture count shifts the Scene3D's host child index and the host DROPS the scene node permanently (React thinks it is still mounted, the engage-once native camera cannot recover it). Fix: each variable-length capture list now renders inside its own zero-size container Box so fixed siblings keep their indices — applied to BuildingStage and to GarmentStage which carried the same bare pattern. Bundle-checked hmsc-int with the real alias set (clean); dev host hot-reload should show shitty_hotel rendering on next look. Note: the custom:shitbrick0/1 painted materials may ALSO be missing from the store (the req_0695 8KB localstore bug ate painted material writes) — those faces will render bare until repainted after the host rebuild.",
+  "shas": [
+    "74f9a7bca"
+  ],
+  "resolvedAt": "2026-06-12T14:53:29.873Z",
+  "tags": [
+    "bug"
+  ]
+}

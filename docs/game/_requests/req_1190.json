@@ -1,0 +1,30 @@
+{
+  "id": "req_1190",
+  "at": "2026-06-16T21:37:15.201Z",
+  "origin": "session:8e058574",
+  "text": "i think i found my problem. look at left vertex vs right [Image #8]",
+  "status": "review",
+  "sessionId": "8e058574-5935-403e-befb-5137d7aace8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T21:39:53.328Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T21:41:28.468Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a one-click 'symmetrize' to the Studio editor to fix EXISTING asymmetry (the user found a single vertex drifted from its mirror twin from a mirror-off edit; the live mirror prevents new drift but can't repair old). New pure symmetrize(m, axis, keepPositive): cuts the mesh at the symmetry plane (reusing cutMeshByPlane so no face straddles), discards the far half, then emits each kept face plus its reflected reverse-wound twin; seam verts merge by interned position so the two halves stitch watertight, UV/material/glass ride along, and kept-side joints are mirrored too (unique names). UI: a 'sym  keep +X / keep −X' button pair in the tier-2 toolbar, axis taken from the first enabled mirror plane (else X) and axis-coloured — two concrete buttons so the good half is chosen by result, not an abstract popup (the multi-choice prompt I tried first was the wrong call); selection clears after. Verified: editMesh suite 63/63 (drift erased, x-bounds symmetric, keeping the clean half drops the drift), full hmsc-int cart bundles clean. Committed a3e4ae6d2.",
+  "shas": [
+    "a3e4ae6d2"
+  ],
+  "resolvedAt": "2026-06-16T21:41:28.468Z"
+}

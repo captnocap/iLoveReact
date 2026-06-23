@@ -1,0 +1,10 @@
+{
+  "id": "req_0945",
+  "at": "2026-06-15T06:41:37.420Z",
+  "origin": "session:832d7b44",
+  "text": "Yeah so if you look, the @cart/hmsc-int/Desk.glb is imported and works, so i know that works for sure. I can export this to obj glTF fbx there doesnt seem to be glb at least here in this blockbench editor. so there is that",
+  "status": "new",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": []
+}

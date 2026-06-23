@@ -1,0 +1,28 @@
+{
+  "id": "req_1633",
+  "at": "2026-06-22T17:09:06.189Z",
+  "origin": "session:0d310aad",
+  "text": "[js.warn] [startup] +-1782148114941ms  Δ0ms  PaintCanvas mounted real world (chunks=20)  ◀ READY (total -1782148114941ms)",
+  "status": "review",
+  "sessionId": "0d310aad-1355-489d-ab3f-6188d489fc95",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T17:09:29.584Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T17:11:55.548Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the startup timer printing a garbage negative total (-1782148114941ms). Root cause: startupTimer.ts re-resolved the clock per call via performance.now() ?? Date.now(); at the earliest module-eval performance.now was not yet installed so t0 fell back to Date.now() (epoch ms ~1.78e12), but later marks got performance.now() (small monotonic ms) — subtracting the two clocks produced the huge negative. Fix: pick ONE source at module load (use performance.now only if it is a function then, else Date.now for every mark including t0) so all marks share a clock. Boot spans are 100s of ms so Date.now 1ms resolution is fine. Verified transforms via tools/esbuild. Not committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T17:11:55.548Z"
+}

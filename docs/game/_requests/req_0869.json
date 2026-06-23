@@ -1,0 +1,18 @@
+{
+  "id": "req_0869",
+  "at": "2026-06-13T23:12:23.057Z",
+  "origin": "session:d660addf",
+  "text": "ya so i want to be abundantly clear again\n- one prop\n- one file\nwhich file has the most data about the prop, that one is the one that gets to own all of it",
+  "status": "doing",
+  "sessionId": "d660addf-2f24-4882-9a4e-be2b36812b1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T23:14:31.489Z",
+      "actor": "opus-props",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

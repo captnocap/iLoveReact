@@ -1,0 +1,30 @@
+{
+  "id": "req_1587",
+  "at": "2026-06-21T14:58:59.447Z",
+  "origin": "session:aa8b38c4",
+  "text": "ok nice now the last part of this, is so i made this sign [Image #13] so that the player model would be able to fit under it. only problem is it seems the collision of the entire mesh is not based on its shape but based on the total coverered distance as just one big cube so i cant walk under it at all",
+  "status": "review",
+  "sessionId": "aa8b38c4-bcf4-4724-9069-0ebd209628e0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T14:59:25.804Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T15:14:05.611Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed prop collision being one big ground-to-top box that filled the gap under an archway-shaped sign. Root cause: a cooked prop emitted a single oriented collision rect spanning its whole footprint from piece.y to piece.y+height (placed.ts), so the open space under a sign's beam was solid. The collision system already supports walk-under bands (CollisionRect.floorMeters = a band's bottom), props just never used it. Now the cook derives one collision box PER connected component of the model (union-find over each visible part's verts, in the ground-lifted local space the mesh renders in) and rides them on the descriptor as collisionBoxes; placedPieceColliders emits one oriented rect per box with floorMeters/topMeters from the box Y-range, so the two posts stay solid to the ground and the beam becomes a high band the player walks under (see-it==walk-it). A single welded shape still cooks one box (no regression). Crucially this is ONE source of truth: placedPieceColliders feeds BOTH the editor play view AND the compiled COLLIDERS lump (worldColliders bakes its output with floorMeters preserved in rectFloats/orientedFloats), so editor and shipped game agree with no second code path. New PropCollisionBox type + optional collisionBoxes field on PropKindDefinition. cookedAsset 18/18 (archway->3 boxes incl. one high beam band; solid->1 box); placed.ts + cookedAsset bundle clean; type-clean. Committed only my hunks of props.ts (a parallel session had a 644-line prop expansion in the same file — left untouched). USER ACTION: re-compile (the cog) an already-cooked model to pick up boxes; new cooks get them automatically.",
+  "shas": [
+    "1caf9f441"
+  ],
+  "resolvedAt": "2026-06-21T15:14:05.611Z"
+}

@@ -1,0 +1,16 @@
+{
+  "id": "req_0033",
+  "at": "2026-06-06T06:02:12.643Z",
+  "origin": "supervisor-relay",
+  "text": "this is looking a lot better but the massive elephant in the room: the whole dead space under the mesh painter [SCULPT lens - unwrap canvas top third, black void below]",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T06:06:07.150Z",
+  "resolution": "DEADSPACE-0606: the SCULPT lens's unwrap canvas now earns its column — it aspect-fits (2:1 preserved) a measured flexGrow box instead of sitting fixed at 768x384 over a black void; tools+sliders collapsed to one compact wrapping strip on TOP (stated pick: width is the canvas's scarce axis, a side rail would cost more canvas than a top strip); the MESHSMOOTH grid-samples strip rides under the canvas as Law 3's demonstrative filler — zero blankness. Stroke/lathe math was already rect-normalized; the outline lathe's profile latches now follow the live width and re-write on resize. Canvas column flex 3 vs the 3D's 2. Same data, same verbs, layout only. Bundle + suites green; visual pending-selfshot.",
+  "shas": [
+    "de116c913"
+  ],
+  "tags": [
+    "ux"
+  ]
+}

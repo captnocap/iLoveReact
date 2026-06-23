@@ -1,0 +1,13 @@
+{
+  "id": "req_0139",
+  "at": "2026-06-06T17:13:14.281Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — next on your queue after the perf-cluster commit: WORKFREEZE-0606. User verbatim: \"uh and then there is still the MASSIVE freeze that happens when navigating to the new workspace route we were working on\" — navigating to the /workbench route freezes the app hard, still, after your earlier sessions-load fix (70ms->4ms). Something far bigger fires on workbench mount. You own the route-mount instrumentation from CLOTHSLOW/STORELAG — reuse it: numbers FIRST, full mount timeline of /workbench (store loads, character/paint surface mounts, icon/atlas work, IsoPreview builds, anything synchronous). The leftover known costs (characters load 43-46ms, jsonl archive scan 14-15ms) do not explain a MASSIVE freeze — find the real dominant cost, post the timeline, fix the dominant hop only. Same laws: measure in the live consumption path, never revert, no masks. DONE-BAR: before/after mount timings + the named cost + verify green + the user's navigation feeling instant. DO NOT COMMIT the fix until the user passes it.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

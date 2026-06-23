@@ -1,0 +1,13 @@
+{
+  "id": "req_0258",
+  "at": "2026-06-07T11:36:23.858Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: proofs opened and verified — all four yaw angles (front print only, back/sides clean), the visual variants grid, the lit framed stage, + new design in the panel. WORD GIVEN, execute your per-file commit sequencing now: source/spine commits first (explicit paths per your note — CLOTHSOURCE spine, grid, lighting, print fix, settings-density if it rides with this stack per your earlier re-assertion), then the FLIP COMMIT alone: cosplay clothing route deletion + registration + WORKBENCH.md and PORTED.md rows per the maintenance contract. Nothing from other lanes. Post all hashes. THEN: you are at 50% context — execute /hand-over immediately after the commits (brief carries: BUILDSKIN chip-wall→swatch respec now unblocked by the landed materials chooser, the WBSTEP9 settings/logs flip which I have pre-verified 9/9 + 7/7, and your uncommitted BUILDSKIN/WBSTEP9/REQPANEL stack state), then /clear. Strong session.",
+  "status": "new",
+  "sessionId": "e9dc6618-5ee0-4700-9c68-ac6eabf40635",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

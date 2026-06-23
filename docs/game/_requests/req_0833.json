@@ -1,0 +1,30 @@
+{
+  "id": "req_0833",
+  "at": "2026-06-13T20:47:17.591Z",
+  "origin": "session:ac60258b",
+  "text": "ok before you do anything. i am tired of chasing this bug now for several hours. so, the first thing you are going to do. is you are going to write a test that says at these exact points right now on the iso3d, even if the data says it is suppose to render a road, that it is not rendering a road. if u keep getting results t hat say its rendering a road, your test sucks, make a better one. \nEK111 EI111 EI112 EI113 EI114 EJ111",
+  "status": "review",
+  "sessionId": "ac60258b-2e2e-4a0c-a6c8-3ebae4aa1c72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T20:47:44.552Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T21:08:44.637Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote the failing real-GPU test the user demanded as the first action: cart/road-render-test.{tsx,sh}. It boots a headless cart, renders the ACTUAL WGSL on the GPU (no JS reproduction), captures the swapchain, and reads pixels back at the six named cells EK111 EI111 EI112 EI113 EI114 EJ111. It deliberately FAILS (exit 1): on the iso-3D mesh path (Landform groundFormula per-fragment in framework/gpu/3d.zig, real IsoStage camera) all six render CONCRETE rgb~120-133, while the 2D /quad control with the same formula+data renders dark asphalt rgb~15-43. So the data is road and the formula draws road; the 3D mesh path is what concretes it.",
+  "shas": [
+    "cf550a5dc"
+  ],
+  "resolvedAt": "2026-06-13T21:08:44.637Z"
+}

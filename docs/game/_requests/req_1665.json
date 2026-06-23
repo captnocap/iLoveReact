@@ -1,0 +1,30 @@
+{
+  "id": "req_1665",
+  "at": "2026-06-22T23:25:17.840Z",
+  "origin": "session:06fe423a",
+  "text": "I would:\n\nput view distance at 240\nand Level of Detail at half of that for world textures/flora, so the ground, and for grass. and then cut animations off at half of that. so that would put animation from flora at a draw distance of 60 tile spaces around the player",
+  "status": "review",
+  "sessionId": "06fe423a-d6e6-4bdd-a7f5-e511298cc05a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T23:27:06.727Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T23:36:42.875Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the user's three-tier LOD ladder for the compiled world. View distance stays 240 for structure. Foliage (grass/flowers/bush/frond/palmtrunk) now draws only within 120m (half) via a new per-family draw_radius in streaming.zig (emitChunkRanges skips a foliage family's chunks beyond draw_radius of the player; world_loader setupStreaming tags the 5 foliage families with stream_radius*0.5). Flora animation cut at 60m (half again): the grass + frond wind shaders fade bend out over 50..60m from S.camera_pos so far foliage holds still. Result at the same spawn: streaming detail instances 660507 -> 6607 (the 120-240m shell fans out and held the bulk of far grass) — the dominant per-frame staging + animation cost is gone. Build clean; rjit game shot GREEN/PASS, near scene intact (ground + structures present, no void). Deliberately HELD the ground-geometry cull at 120 (would make you walk on invisible floor past it, breaks see-it==walk-it, ~0 fps gain — only 20 ground meshes); ground texture-detail LOD offered as a follow-up. Committed only my 3 files; lane 2117's uncommitted world_loader.zig skybox work preserved via selective git apply --cached.",
+  "shas": [
+    "afb9c0fa4"
+  ],
+  "resolvedAt": "2026-06-22T23:36:42.874Z"
+}

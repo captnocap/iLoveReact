@@ -1,0 +1,28 @@
+{
+  "id": "req_0931",
+  "at": "2026-06-14T17:40:34.805Z",
+  "origin": "session:2b1b8d6b",
+  "text": "oh lol ok so my model is in, these other models tho are they suppose to be the same models or different",
+  "status": "review",
+  "sessionId": "2b1b8d6b-2adf-4239-aed8-88f228d4f8a2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T17:41:07.204Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T17:53:05.498Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's question about NPC models: they should be full distinct humanoid figures (same GAME_FIGURE system as the player, different individuals — own face/outfit per kind), not copies and not a different model type. The blocky proxies were a stopgap I introduced to dodge a slot limit; superseded — see req_0933.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T17:53:05.498Z"
+}

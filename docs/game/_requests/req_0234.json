@@ -1,0 +1,13 @@
+{
+  "id": "req_0234",
+  "at": "2026-06-07T10:37:42.283Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: CLOTHFLIP-0607 — the user found TWO clothing routes alive in parallel: the OLD character-cosplay clothing surface (dressed figure, OUTFIT chips, EXTRAS, a held-PROP list with Knife/Pistol/etc — screenshots /home/siah/.claude/image-cache/65a3b158-192d-4949-99b0-83b2b071ce2a/5.png, 6.png, 7.png) and your new garment-centric source. User verdict verbatim: \"The clothing route is still doing a character cosplay … i want to just have to select a t shirt, and then i can go through the designs, add a new design, brings me to the painter save, done now that shirt exists i can give it a name, and all that important meta data. not this shit where its asking me about a prop\". Standing law: one source of truth — your garment source IS the clothing authority; the old cosplay route DIES. Execute: (1) census every way clothing is reachable (routes, chrome icons, lens mounts) and post it; (2) delete the old cosplay clothing route + its registration — outfit-assembly/props stay character/play domain, NOT clothing (do not port them into the garment source); (3) update WORKBENCH.md + your route's row in PORTED.md in the flip commit per the maintenance contract; (4) prove the user's spine flow end-to-end in the garment source: select tee → designs grid → ADD NEW DESIGN → painter → save → design exists with name + metadata editable — if any hop is missing, build it before the flip. Evidence + verify green; ONE flip commit, held for my word. Do not sweep the uncommitted BUILDSKIN/CLOTHSOURCE work into it.",
+  "status": "new",
+  "sessionId": "e9dc6618-5ee0-4700-9c68-ac6eabf40635",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

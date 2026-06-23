@@ -1,0 +1,30 @@
+{
+  "id": "req_0843",
+  "at": "2026-06-13T22:02:56.692Z",
+  "origin": "session:d660addf",
+  "text": "idk what the answer is other than this: \n- props are their own single file\n- they live in one file\n- there is one file for each prop\n- solo filo",
+  "status": "review",
+  "sessionId": "d660addf-2f24-4882-9a4e-be2b36812b1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T22:03:43.246Z",
+      "actor": "opus-props",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T22:23:55.507Z",
+      "actor": "opus-props",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Deleted the dead 'component-as-source' prop subsystem: 15 bespoke render components in render3d/props/ (Ball, Bush, Dumpster, Fence, FireHydrant, Furniture, Mailbox, Payphone, Rock, StopSign, StreetFurniture, StreetLight, TrafficLight, Tree, WallDecor) plus mineProp.ts and mineProp.test.ts — 17 files. They held a second copy of every prop's geometry, superseded by the single recipe source (propRecipes/resolve.ts -> resolvePropParts) that both DataProp render and the worldGeometry bake read. The 8 fully-dead components had zero imports; the other 7 + mineProp.ts were referenced only by the self-test. StreetSign kept (live, route-plate texture), as were signFace/place/DataProp/ImportedProp. No dangling imports; render path bundles green. This is the first checkpoint of the larger one-prop-one-file refactor (req_0846/0848/0849 still in doing).",
+  "shas": [
+    "d9ccd7788"
+  ],
+  "resolvedAt": "2026-06-13T22:23:55.506Z"
+}

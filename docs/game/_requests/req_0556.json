@@ -1,0 +1,32 @@
+{
+  "id": "req_0556",
+  "at": "2026-06-10T15:18:11.654Z",
+  "origin": "session:1b2c",
+  "text": "Also, one thing to tag on there, some roads are not showing up in my roads placed menu [Image #4]",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-10T15:18:29.189Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T15:44:07.772Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the ghost: the Effect GPU data buffer never shrinks (framework/gpu/effects.zig grows capacity only) and the ribbon shader gates on arrayLength(&D) = bind-group capacity. roadRibbonSection encoded 'no roads' by OMITTING the section, so deleting a road uploaded shorter data and the old ribbon section stayed alive in the buffer tail — the deleted road kept rendering while menu/state/disk were correctly empty. Your eventlog shows 6 rapid deletes at 08:15:59-08:16:01: each delete looked like it did nothing (ghost stayed), so repeat clicks silently ate the rest of the roster as rows re-flowed. Fix: the 5-float section header is now ALWAYS emitted with segN=0 when empty, overwriting the slot; shared encoder covers the 2D chunk quads and the 3D drape. Test guard added, roadData 23/23 green. Strokes deleted at 08:16 are genuinely gone (undercoat restored the ground correctly) and need redrawing.",
+  "shas": [
+    "f003fc06d"
+  ],
+  "resolvedAt": "2026-06-10T15:44:07.772Z",
+  "tags": [
+    "bug"
+  ]
+}

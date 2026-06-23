@@ -1,0 +1,10 @@
+{
+  "id": "req_1604",
+  "at": "2026-06-21T17:04:52.876Z",
+  "origin": "session:6e3404e7",
+  "text": "OK cool. so they fixed the collision, and u changed the flora, so both of u are overlapping in one spot so im sending it to you. i now am colliding with flowers, but not normal grass. and the other worker fixed the prop collision problem. so i have to imagine it has been introduced in the flora rework but idk",
+  "status": "new",
+  "sessionId": "6e3404e7-9c3d-4b02-be2b-4b93ea47d0fe",
+  "captureMode": "hook",
+  "events": []
+}

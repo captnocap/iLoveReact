@@ -1,0 +1,28 @@
+{
+  "id": "req_1100",
+  "at": "2026-06-15T23:38:06.199Z",
+  "origin": "session:9f19b605",
+  "text": "yep and we can even just path the npcs into the endless city that is generated to make it feel like its alive for some reason but there is literally nothing but the same shit just over and over LOL so evil but so good also lets people who later want to mod the game have a massive space bolted onto the main map",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T23:38:29.519Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T23:39:27.406Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added two final dimensions to the skybox doctrine. (1) Living nowhere: NPCs path through the endless procedural city, but ride V30's frozen-world activation predicate — frozen state rows everywhere, hydrate to full behavior only inside the local bubble, so global cost is zero. Because spawns are hash-deterministic, the SAME NPC recurs on the SAME corner blocks apart — the doppelganger is the intentional glitch-in-the-matrix tell, the horror payload, not a flaw to hide. (2) Mod canvas: the bolted-on Vice-City-scale shell is the V28 platform/mod affordance — procedural fill is the default, modders override chunks with authored content per V29 reference-not-embed, getting a huge pre-wired canvas for free. Full doctrine: one generator, four jobs (coast gauntlet / silent infinite roads / living-doppelganger nowhere / mod canvas). No code; awaiting pin-verdict or build-slice-1 go.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T23:39:27.406Z"
+}

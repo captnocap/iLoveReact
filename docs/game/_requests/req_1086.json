@@ -1,0 +1,28 @@
+{
+  "id": "req_1086",
+  "at": "2026-06-15T22:51:13.333Z",
+  "origin": "codex:019ecd7a",
+  "text": "get me a full report of the hmsc-int architecture, explain the game systems and authoring capability and game compile features",
+  "status": "review",
+  "sessionId": "019ecd7a-9cba-73d0-9fee-7dc6959b72e2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T22:51:21.071Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:53:05.790Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Inspected hmsc-int architecture inline using the required game oracle first, then read the cart contract, BUILDING-GRAMMAR ruling, current editor shell, world/session/build-stream hooks, GAME_* door, build grammar data layer, authoring surfaces, package/mapfile/gamefile bake path, and native compiled-world loader integration. Produced a no-code architecture report covering game systems, authoring capability, compile/gamefile features, and current verification status; no source changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:53:05.789Z"
+}

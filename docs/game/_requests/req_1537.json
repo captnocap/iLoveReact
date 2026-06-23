@@ -1,0 +1,30 @@
+{
+  "id": "req_1537",
+  "at": "2026-06-20T22:41:43.099Z",
+  "origin": "session:89c172a4",
+  "text": "hey this works now. in the painter can you fix this annoying bug: i add image to trace, i want to move the image, it is spawning some tooltip in the way of the gizmo and i cant move the mf anymore",
+  "status": "review",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T22:42:12.737Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T22:45:58.536Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Moving a trace-image backdrop was blocked because the gizmo's live drag readout (DragReadout in scene/staging.tsx + the inline gizmoReadout box in StudioViewport) rendered as an absolutely-positioned Box at the gizmo anchor WITHOUT pointerEvents:'none' — so it hit-tested above the viewport Pressable and swallowed the drag; the readout sat on the move arrows and the user couldn't grab them. Every other editor overlay (SelectionOverlay, PaintGridOverlay) is pointer-transparent for this exact reason (meshSelect.tsx documents it). Added pointerEvents:'none' to both readout boxes, and anchored the readout to moveBackdrop.pos while moving a backdrop (its gizmo is the live handle and the model gizmo is hidden then) so it floats by the correct arrows. Cart-only change, hot-reloads, bundle-checked.",
+  "shas": [
+    "b28dceda5"
+  ],
+  "resolvedAt": "2026-06-20T22:45:58.536Z"
+}

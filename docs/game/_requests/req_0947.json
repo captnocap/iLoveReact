@@ -1,0 +1,28 @@
+{
+  "id": "req_0947",
+  "at": "2026-06-15T07:58:49.352Z",
+  "origin": "session:832d7b44",
+  "text": "Right, so the thing about the camera that we lack are a few things. first are foremost, i think the entire canvas for working on the model needs to be a host primitive like <canvas> or <graph> is, but for 3d modeling. this includes the camera with it, that way there is butter smooth movement. and how i see it looking is exactly how blockbench works, camera is pinned to the center of the empty grid and then we can sculpt our object on it. have settings for displaying as solid, textured, wireframe, uv, face orientation.",
+  "status": "review",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T08:00:05.530Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T09:15:34.313Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured in MESH_EDITOR_PLAYBOOK.md Part 4a: the Studio viewport becomes a host primitive so the camera is host-owned and butter-smooth, mirroring how Canvas owns pan/zoom (canvas_type/applyPropView) rather than Scene3D's JS-round-tripped camera control. Approach B (extend Canvas view-control into 3D), the display modes, and the framework-rebuild reality are recorded. Requirement capture complete and user-confirmed; the primitive itself is the active first-slice build.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T09:15:34.313Z"
+}

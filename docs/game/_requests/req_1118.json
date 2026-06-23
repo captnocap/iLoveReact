@@ -1,0 +1,28 @@
+{
+  "id": "req_1118",
+  "at": "2026-06-16T01:31:52.778Z",
+  "origin": "session:88826cd6",
+  "text": "bring the api key store into this app natively so its all in house please",
+  "status": "review",
+  "sessionId": "88826cd6-9907-405c-a0c3-be8a9e585a1e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T01:36:36.357Z",
+      "actor": "session-8882",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T01:37:52.917Z",
+      "actor": "session-8882",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Brought the API key store fully in-house (req_1118). The nano-gpt key now lives in hmsc-int's OWN localstore (nsGet/nsSet, 'hmsc' namespace, key nano-gpt-api-key; getNanoKey/setNanoKey in textureGen.ts), entered once in a new 'api key' field in the AI Fill dialog and remembered across sessions — no longer read from the image-gen app's Postgres store. To remove the Postgres dependency cleanly, the pure network client was split out into a DB-free cart/image-gen/client.ts (buildPayload + generateToBase64 with the API key passed IN as a param); image-gen's generate.ts keeps generateBatch, looking its key up in Postgres and passing it through (the image-gen app is unchanged). hmsc-int now imports client.ts only, so the Studio bundle has ZERO __pg_ references (was 4) and 4 __localstore refs — meaning NO dev-host rebuild is needed anymore (the prior caveat is gone). Verified: editMesh 48/48, modelStream 8/8, textureize 9/9; client + generate + textureGen + Studio + sources + the image-gen Generate/Queue pages all bundle clean. PLAYBOOK 5.6b + build log + project_studio_mesh_editor memory updated to drop the rebuild caveat. Fully hot-reloadable.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T01:37:52.917Z"
+}

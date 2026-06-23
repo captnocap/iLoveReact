@@ -1,0 +1,18 @@
+{
+  "id": "req_0105",
+  "at": "2026-06-06T12:41:00.061Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — PLAYERJIT-0606. User report, verbatim: \"so i ran gv_perflog because the player seems jittery as fuck. and maybe it was lag idk. and from the looks of it. no fps is fine. everything is fine. the model is just jittery for some reason. and its horrible to look at when moving tbh. what is it? the animations? or what ?\". FPS is confirmed fine by the user — this is visual jitter on the MOVING player model. Diagnose with data, no theory: instrument per-RENDER-frame and log side by side: (a) the player model's rendered world position, (b) the latest physics-step position (note the wire logs show physics dt=0.05 = 20Hz), (c) the camera position, (d) the active animation pose/frame. One diagnostic channel, ~120 frames of straight-line walking in the witness. The jitter will be visible in the numbers: if (a) only changes every Nth render frame while the camera moves every frame, it is the physics-rate stair-step (20Hz position, no render interpolation); if (a) is smooth but the pose snaps, it is animation; if (a) oscillates around the path, it is the resolver. Post the frame table FIRST, name the source, then propose the fix to the supervisor BEFORE building it (a render-interpolation change is framework-level and the supervisor wants the shape approved). Any smoothing constant you end up with is tuning data — expose it on the P2 surface. Build via tools/rjit only; never revert anything. DO NOT COMMIT. DONE-BAR for this phase: the frame table + named source + proposed fix shape.",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:12:03.165Z",
+  "resolution": "Resolved in b91a941962eeb56e3cbc631f1ac39f2ce59f10d7. Added the player-jitter witness path that records rendered player pose, physics pose, camera position, animation state, input intent, and correction source, then carried the movement fixes forward without simulation slow-motion. The user later confirmed walking is no longer choppy.",
+  "shas": [
+    "b91a941962eeb56e3cbc631f1ac39f2ce59f10d7"
+  ],
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

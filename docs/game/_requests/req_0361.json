@@ -1,0 +1,33 @@
+{
+  "id": "req_0361",
+  "at": "2026-06-08T19:48:22.022Z",
+  "origin": "codex:019ea612",
+  "text": "so what is it that occurs when you run tools/rjit game play that is different than when you go to the route for the compiled game ? and if you can, the compile button that is used up in the window chrome in hmsc-int you can turn this into this function so that the map can recompile to load in the route",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T19:48:33.874Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T19:54:19.619Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained and fixed the remaining difference between tools/rjit game play and the /compiled route: game play rebakes zig-out/game/hmsc.gamefile before launching world_loader, while /compiled was only mounting the embedded WorldLoader primitive against whatever baked file was already present. Added rjit game bake as a bake-only CLI command reusing the existing authored-world bake path, regenerated tools/rjit.js, and wired the hmsc-int chrome Compile button to persist the editor world, run that bake asynchronously, and bump a compiled-route reload key so the embedded WorldLoader remounts against the refreshed gamefile when /compiled is open or next entered. Verified with tools/rjit game bake, SHIP_RUN_PACKAGE=0 tools/rjit ship hmsc-int, tools/rjit game verify, and a /compiled route screenshot smoke test.",
+  "shas": [
+    "a3fd0c7b3"
+  ],
+  "resolvedAt": "2026-06-08T19:54:19.619Z",
+  "tags": [
+    "ask"
+  ]
+}

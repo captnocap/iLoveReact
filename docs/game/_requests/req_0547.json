@@ -1,0 +1,36 @@
+{
+  "id": "req_0547",
+  "at": "2026-06-10T14:28:53.434Z",
+  "origin": "session:87a47e7e",
+  "text": "yep im glad u saw it ! we can clean that up most likely in the micro grid, because it wont have to paint there in the space",
+  "status": "review",
+  "sessionId": "87a47e7e-58c5-4ade-8b65-3201c99fe4d2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T14:29:19.591Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T14:32:24.332Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-10T16:28:56.463Z",
+      "actor": "session:1b2c",
+      "kind": "note",
+      "text": "Grade mode landed (685d7eb8d): roads now smooth the painted terrain under their bed on every stamp — longitudinal moving-average profile (irons potholes, keeps climbs), zero crossfall curb-to-curb, 3-tile feathered shoulders. Pure + tested (roadGrade 4/4), wired in restampRoads with heightDirty so the 3D drape and colliders follow. Deck/approach-strips/tunnel modes remain."
+    }
+  ],
+  "resolution": "Closed the visible half now rather than waiting for the micro-grid (commit 473e83f86): the ribbon section header gained laneStart/median kind indices, and any road-stamped cell (lane/median/junction) whose fragment falls OUTSIDE the analytic band now renders as a concrete curb apron instead of the blocky asphalt staircase — the exact artifact visible in the user's screenshot at curve edges. Look-layer only: the 1m gameplay stamps are untouched, so when the micro-grid later tightens the stamped footprint around the ribbon, this apron simply shrinks with it — the two compose. Both road suites green (22/22 + 3/3), cart bundles clean, hot-reloads. The FLOOR 3x3 micro-grid itself (paintable per-cell kinds on pieces, prop footprint auto-stamping, road decks) remains the next major slice on the task board — it wants a fresh session paired with the host surface-nav design since pathing-on-floors is its real consumer.",
+  "shas": [
+    "473e83f86"
+  ],
+  "resolvedAt": "2026-06-10T14:32:24.332Z"
+}

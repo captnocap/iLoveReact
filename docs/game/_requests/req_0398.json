@@ -1,0 +1,33 @@
+{
+  "id": "req_0398",
+  "at": "2026-06-09T06:06:39.210Z",
+  "origin": "session:9440c2b7",
+  "text": "I see. yeah so this camera needs a lot of work. Get it as best you can to the one i showed you at the start of this convo. this has no zoom in our out, no wasd movement, its very hard to get anywhere in the current approach or know where/what im even looking at",
+  "status": "review",
+  "sessionId": "9440c2b7-fcc6-4745-a2a5-309cd273e004",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T06:07:18.674Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T06:12:47.632Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the iso camera navigation to match the Sims reference, fixing 'no zoom, no WASD, hard to get anywhere'. Added: WASD + arrow-key panning (held-key rAF loop in IsoAuthor; isoStage.nudge slides the centre across the ground along the view's own forward/right axes so 'up' = into the screen at any 90deg facing; speed scales with eye distance via stage.distance()); scroll-wheel zoom-TO-CURSOR (onScroll/e.deltaY -> isoStage.zoomToCursor keeps the ground point under the pointer fixed, the maps/Sims feel) with a widened zoom range (0.12-10); the view now opens centred on the content centroid instead of an empty chunk corner, plus an F-key and ⌂-button recenter as the lost-position escape hatch. Drag-pan, Q/E rotate, +/- buttons, floor up/down unchanged. Bundles clean (esbuild exit 0). Not yet runtime-tested by me (user runs the host) — wheel/pan sign may need a flip.",
+  "shas": [
+    "8fac6e532"
+  ],
+  "resolvedAt": "2026-06-09T06:12:47.632Z",
+  "tags": [
+    "ux"
+  ]
+}

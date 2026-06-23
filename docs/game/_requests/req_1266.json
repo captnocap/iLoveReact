@@ -1,0 +1,30 @@
+{
+  "id": "req_1266",
+  "at": "2026-06-18T08:19:26.668Z",
+  "origin": "session:7abb2b22",
+  "text": "can you pass bevel to vertex also and when beveling, set it up like how we loop cut, so that i can increase the size of a bevel before confirming it",
+  "status": "review",
+  "sessionId": "7abb2b22-4c02-47f2-b4bc-7e5ee55a0f6a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T08:19:39.308Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T08:28:45.809Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Bevel now works on vertices too AND is set up like the loop cut — a live preview you size before confirming. editMesh.ts gains bevelVertex(vi, width): a true corner chamfer (one new vert per incident edge pulled back along that edge, every incident face clips its corner to the two new verts, a cap face fills the ring; needs a real 3+-edge corner, declines a degree-2 tip; per-edge slide clamped so it can't pass the far vert). In Studio.tsx the bevel is no longer instant: a new  preview state ({kind, index, width}) re-lowers the chamfer through the SAME draft path the loop cut uses, so changing the width in the popup updates the model live. The edge-mode 'bevel' button now opens BevelPopup, and vertex mode (1 vertex selected) gets its own 'bevel' button opening the same popup. BevelPopup is a width stepper in modeling units, clamped to bevelMaxUnits (the shortest incident edge x0.45, so the slider maps 1:1), plus Apply/Cancel; Esc cancels. While the popup is open it behaves exactly like the loop cut: a press only orbits (so you can spin to inspect the live chamfer), the transform gizmo + normal handle + size readout hide, and keyboard/picking are gated so nothing fights the popup. Verified: editMesh suite 86/86 (incl. 2 new bevelVertex cases), and the full hmsc-int cart bundles clean (4.9mb).",
+  "shas": [
+    "7e121c1ed"
+  ],
+  "resolvedAt": "2026-06-18T08:28:45.809Z"
+}

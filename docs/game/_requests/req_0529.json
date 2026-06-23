@@ -1,0 +1,33 @@
+{
+  "id": "req_0529",
+  "at": "2026-06-10T13:22:32.449Z",
+  "origin": "session:87a47e7e",
+  "text": "ok so this looks right, but i need your help just understanding where would be the right place to connect. so, lets look here [Image #2] i have 3 lanes on one side, and 1 on the other. i put A B C on the road. if i want to bring in a 0 on one side and 2 on the other so that i merge into a 3x3 lane where would i click to merge, a b or c? or none of them",
+  "status": "review",
+  "sessionId": "87a47e7e-58c5-4ade-8b65-3201c99fe4d2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T13:24:22.469Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T13:27:02.802Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the A/B/C question and closed the gap it exposed (commit 7254c0857). Answer: A and B were the only connect points before this commit (endpoint snap); C was the RIGHT place but mid-stroke connections didn't exist. Now they do: clicking within 1.5 cells of a road's centerline snaps onto the wire, and committing a stroke that ENDS there splits the underlying road at that point — the split seam stays one continuous road via the parallel-axes rule (tested: a split road never boxes at its own seam). Companion capability the merge needs: the rail's lane steppers now LIVE-edit the SELECTED road (restamp on every change, 'editing Road N' badge) instead of only shaping the next draft. The user's exact merge recipe: click C to split, draw the 2-lane one-way into C flowing toward the direction it feeds, select the downstream half (toward A for the northbound side), bump its opposing-lane count 1→3. 16/16 planner cases green, cart bundles clean, TSX-only (hot-reloads).",
+  "shas": [
+    "7254c0857"
+  ],
+  "resolvedAt": "2026-06-10T13:27:02.802Z",
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "req_0457",
+  "at": "2026-06-10T05:18:11.829Z",
+  "origin": "session:0a09e641",
+  "text": "Im still getting stuck under floors. what am i suppose to do about it D:",
+  "status": "new",
+  "sessionId": "0a09e641-a769-495b-a0fd-4a909d25af7a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

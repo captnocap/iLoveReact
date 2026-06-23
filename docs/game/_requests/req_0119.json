@@ -1,0 +1,17 @@
+{
+  "id": "req_0119",
+  "at": "2026-06-06T13:29:13.026Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — noclip READY is noted, good. One item left on your queue: PERFLOG2-0606 — gv_perflog 2, ported faithfully from the reference (post what reference mode 2 does first, then implement). Close it out and post READY; after that your lane holds for the user's movement/noclip verdicts.",
+  "status": "done",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:12:12.566Z",
+  "resolution": "Resolved in b91a941962eeb56e3cbc631f1ac39f2ce59f10d7. Closed the remaining PERFLOG2 queue item by wiring gv_perflog mode 2 to the spike recorder plus host-side ground-truth frame tracing, with telemetry tests and verify passing before commit.",
+  "shas": [
+    "b91a941962eeb56e3cbc631f1ac39f2ce59f10d7"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

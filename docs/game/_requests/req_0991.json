@@ -1,0 +1,28 @@
+{
+  "id": "req_0991",
+  "at": "2026-06-15T13:08:21.865Z",
+  "origin": "session:d91c8b8f",
+  "text": "nice job. [Image #56] lets pass in a /hand-over and the next thing to do is get in the workspace branch/twig history before we go further.",
+  "status": "review",
+  "sessionId": "d91c8b8f-6568-469d-83d0-62ea4b4091c6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T13:29:55.752Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T13:29:55.761Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Delivered by the same work as req_0992/0993: the Studio now lives in the V20 workspace branch/twig history as a parts library independent of the map project. New editors/model/modelStream.ts per-concern stream + studioModel.ts rewired to a stream projection that commits each edit as a labeled undo point on the one cross-session chain; parts survive reload; undo/redo append inverse events (Ctrl+Z/Y + visible control); active part rides the twigs file. Tests modelStream 4/4, editMesh 19/19 regression, Studio + sources bundle clean. Hot-reload TSX, nothing committed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T13:29:55.760Z"
+}

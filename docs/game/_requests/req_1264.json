@@ -1,0 +1,30 @@
+{
+  "id": "req_1264",
+  "at": "2026-06-17T18:13:04.564Z",
+  "origin": "session:c885b7cc",
+  "text": "oh haha ok what if my face is slanted xD i should have said that LMAO [Image #30] hm. so i should just do flat then i assume",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T18:17:19.662Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T18:17:19.672Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User pointed out their wheel well sits on a SLANTED body panel and asked if they should just flatten it. Answered + fixed — no flattening needed. Two-part response: (1) the axle correctly snaps to the dominant cardinal axis so the wheel stays VERTICAL and rolls — a wheel is never tilted to match a slanted fender, exactly like a real car, so the well's slant should NOT tilt the tire; (2) the only thing the slant broke was the RADIUS, which faceWheelFit measured from cardinal in-plane extent (foreshortened by the slant). Fixed faceWheelFit to size the radius from the median 3D distance centroid→rim verts, which is slant-INDEPENDENT and correct for a round well (the well's n-gon cap) at any angle. Center stays the centroid, axle stays the dominant-cardinal snap. Updated wheelMount.test.ts: replaced the in-plane-extent radius assertion with a round-well (hexagon) radius/axle test and added a slant-independence test (a flat vs ~20°-tilted hexagon of the same circumradius size the identical radius). 6/6 pass via esbuild+v8cli; wheelMount.ts transpiles clean. Commit b746467c2. So the user can use slanted wheel wells directly — '⊚ wheel from face' now sizes them right and keeps the tire vertical.",
+  "shas": [
+    "b746467c2"
+  ],
+  "resolvedAt": "2026-06-17T18:17:19.672Z"
+}

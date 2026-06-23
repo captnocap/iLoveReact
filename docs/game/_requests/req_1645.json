@@ -1,0 +1,28 @@
+{
+  "id": "req_1645",
+  "at": "2026-06-22T17:42:23.183Z",
+  "origin": "session:7a8f00d4",
+  "text": "so tell me how the grass data is stored because i dont have much of an understanding of it but when i think of it, it should just be like 1 simple table of referenced tile locations and if it should have grass or no grass",
+  "status": "review",
+  "sessionId": "7a8f00d4-327a-4595-a613-6ceb3eb4cdb8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T17:43:39.317Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T17:44:52.147Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked how grass data is stored (intuiting it should be a simple per-tile grass/no-grass table). Confirmed their model is correct: flora is stored as a sparse per-cell grid — flora.layers.<layer>[tj*cols+ti] = a small flora-kind int (grassPopulation.ts eachFloraCell) — tens of KB. The OOM came from the EDITOR RENDER exploding that table: populateFoliage scatters bladesPerCell (~15) 12-float blade rows PER grass cell → up to MAX_INSTANCES=1,048,576 rows, shipped as ONE Scene3D.Instances command whose JSON.stringify is hundreds of MB → heap dies mid-serialize (explains the persistent OOM even after gating showFlora, since the iso floraVisible twig persisted true). The compiled game already does it right (ships FLORA cells, GPU-expands blades in framework/world/foliage.zig). Immediate fix in GrassField.tsx (clean file): FoliageField now caps what it SHIPS to EDITOR_FOLIAGE_RENDER_CAP=65536 blades (slice copy so the giant buffer never reaches the command stream) — a thinned preview that opens instead of OOMing, regardless of the toggle state. Durable fix = make the preview GPU-expand from cells like the compiled game (the flora refactor in flight). Awaiting the user's restart to confirm it opens + whether props now draw.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T17:44:52.147Z"
+}

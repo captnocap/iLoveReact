@@ -1,0 +1,30 @@
+{
+  "id": "req_1413",
+  "at": "2026-06-19T16:11:10.944Z",
+  "origin": "session:d6961119",
+  "text": "also, this setup here is pretty fire  https://huggingface.co/spaces/ThomasSimonini/Roblox-3D-Assets-Generator-v1 [Image #2]",
+  "status": "review",
+  "sessionId": "d6961119-1251-4c1f-b16d-bb0d4b6fc5f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T16:19:03.424Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T16:19:03.433Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User chose InstantMesh (showed the ThomasSimonini Roblox-3D-Assets HF Space, 'pretty fire' — it IS InstantMesh: image->Zero123++ multiview->mesh, OBJ/GLB, remove-bg/seed/steps controls that map 1:1 to our flags). Surveyed the repo: uses RasterizeCudaContext so it's HEADLESS-safe (biggest risk gone); pins old diffusers 0.20.2/transformers 4.34.1 (needs its own env). Sandbox blocked the agent from cloning/building, so delivered a user-run setup script (cart/hmsc-int/tools/genmesh/setup-instantmesh.sh): clones deps/InstantMesh + clean conda py3.10 env + torch cu124 + trimmed deps + nvdiffrast; weights auto-download on first run.py. genmodel --backend instantmesh wiring pending the user's smoke-test result.",
+  "shas": [
+    "6db88a35b"
+  ],
+  "resolvedAt": "2026-06-19T16:19:03.433Z"
+}

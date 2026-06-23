@@ -1,0 +1,43 @@
+{
+  "id": "req_0554",
+  "at": "2026-06-10T15:02:35.155Z",
+  "origin": "session:87a47e7e",
+  "text": "Great. Yes, these all need it. also, look at the prop that is a stop sign and a intersection light, we need to connect those to props into the system, along with road speeds so we can set city vs rural speeds. id start with finishing what you have on the plate and then tack the asks on to it in a hand-over document",
+  "status": "review",
+  "sessionId": "87a47e7e-58c5-4ade-8b65-3201c99fe4d2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T15:03:20.884Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T15:06:43.825Z",
+      "actor": "session-87a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-10T16:17:41.696Z",
+      "actor": "session:1b2c",
+      "kind": "note",
+      "text": "Right-of-way landed (bcafd0015): game/world/trafficControl.ts — junction boxes flood-filled from painted junction cells, stopSign/trafficLight props associate to the nearest box governing the approach they face against, and planMotionWithStops gates the deterministic schedule at the crosswalk stop line (stop sign = full stop at rest + 1.5s hold; signal = wait for its axis' green on the lamp's own cycle; green never splits). 8/8 tests. ALSO fixed the traffic-light model head (user report this session): mast arm now cantilevers sideways with lamps facing the governed lane, in both the live model and compiled geometry. Speed limits next."
+    },
+    {
+      "at": "2026-06-10T16:23:42.957Z",
+      "actor": "session:1b2c",
+      "kind": "note",
+      "text": "Speed limits landed (08f9364a9): RoadProfile.speedLimitKph on the stroke; city 50 / rural 90 chips + 5-km/h stepper in RoadRail (live-edits the selected road); persists in the map snapshot; strokeAtPoint/routeSpeedLimitMps look up the governing road from the filleted centerline; roadMotionProfile clamps a driving profile's maxSpeed down to the route's strictest posted limit. Both req_0554 halves (signs/signals + speeds) are now in. roadData 24/24."
+    }
+  ],
+  "resolution": "Per the user's direction ('finish what you have on the plate and then tack the asks on to it in a hand-over document'): the plate was finished and committed through f6bd5046f (stroke painter, wire view, merge gesture, fillets + analytic ribbon, curb apron, floor 3x3 micro-grid + the nav bake — all suites green, all in review), and the new asks are now specified in a full continuation brief at /tmp/handoff-20260610-150414-road-system-continuation-nav-publish-cell-painter-traffic-co.md. Survey findings baked into the brief: stopSign and trafficLight prop kinds ALREADY exist in game/kinds/props.ts with trafficControl 'stopSign'/'signal' but have ZERO consumers — the brief specifies the runtime consumer (props associate with the nearest junction box; stop = halt at the crosswalk stop line per the locked grammar, signal = phased yield; wired at motion-plan time, not per-frame). Road speeds have no prior art anywhere — the brief puts speedLimitKph on RoadProfile (the stroke is the carrier; tiles are shared kinds and cannot carry it) with city/rural presets in RoadRail and the motion planner as first consumer. The brief also orders the in-flight remainders first: live nav publish (bakeNavGrid → publishGrid at play boot) and the floor cell-painter UI, then elevation modes. Lineage: original_conversation_id 87a47e7e-58c5-4ade-8b65-3201c99fe4d2.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T15:06:43.825Z",
+  "tags": [
+    "ask"
+  ]
+}

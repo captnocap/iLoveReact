@@ -1,0 +1,28 @@
+{
+  "id": "req_1073",
+  "at": "2026-06-15T22:08:25.908Z",
+  "origin": "session:760f9f8d",
+  "text": "thats weird there is @world_loader.zig can u find it now",
+  "status": "review",
+  "sessionId": "760f9f8d-dc0f-4592-9807-536386b8fe20",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T22:08:36.694Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:25:05.868Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Found world_loader.zig (it's at the REPO ROOT, not framework/ — that's why earlier greps missed it). Completed Phase 3: grass now bakes into the no-V8 /compiled world. world_loader.zig: added SHAPE_GRASS=6, buildGrassBlade() geometry (mirrors GrassBlade.ts), a grass bucket in ShapeBatches/buildShapeBatches, a static grass instance node tagged scene3d_tex_key='~grass~' (routes to the grass pipeline), the streaming family+proto, and a whiten-skip for the ~grass~ sentinel so blades keep their per-blade root tint. worldGeometry.ts: INSTANCE_SHAPE_GRASS=6 + pushGrass() emitting blade rows. KEY FIX: discovered grass is painted into ChunkFloor/landform tile grids, not surfaceRegions, so grassPopulation.ts now reads world.landforms[].field.tiles (the real source) in addition to surfaceRegions, and pushGrass converts floors->landforms to match. Verified end-to-end: rjit game shot bakes 1988 blades (world instances 4566->6554), loader render proof GREEN, shot PASS; both hmsc-int and world_loader binaries rebuilt clean with self-shots PASS. Not committed (shared hot files touched by parallel sessions).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:25:05.868Z"
+}

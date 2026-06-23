@@ -1,0 +1,12 @@
+{
+  "id": "req_0046",
+  "at": "2026-06-06T06:21:26.094Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — STABILIZE CHECK (all lanes): the USER's live session reports the NEW (workbench) character page went DEAD. The tree currently has uncommitted edits to: editors/characters/draft.ts, editors/paint/{PaintControls,PaintSurface,index,layers,paint.test,usePaintEditor}, editors/cutout/CutoutRoute.tsx. In ONE line each: which of those files are YOURS, and is your set currently coherent (would the bundle build)? If yours is mid-thought, finish to coherence or restore to HEAD NOW — the user is live on this tree. Also: CutoutRoute.tsx is under the freeze — whoever is editing it, justify (shared-chrome fix = fine, feature work = violation). Reply immediately, work after.",
+  "status": "new",
+  "sessionId": "066cd07a-7039-4d0f-b6de-a778ce2c6d24",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

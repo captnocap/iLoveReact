@@ -1,0 +1,33 @@
+{
+  "id": "req_0647",
+  "at": "2026-06-12T03:43:32.735Z",
+  "origin": "session:8177f24b",
+  "text": "i tried to get codex to make walls that have door ways and a 'ramp' that is really an elevator in the build tools for hmsc-int but they came out completely unusable. First thing is i kept saying dont put it in prefabs but it keeps being put into prefabs. lol. the wall piece for door ways doesnt even align with the walls and the elevator when placed is just a solid 1x* box that isnt an elevator at all. You give it a shot this time and clean up their mess",
+  "status": "review",
+  "sessionId": "8177f24b-3297-4cf2-a324-8270bcf2ed9a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-12T03:43:42.132Z",
+      "actor": "claude-fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-12T04:28:52.026Z",
+      "actor": "claude-fable",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cleaned up the codex prefab delivery and shipped the user-ruled shape. Door/doorway/garage/window methods are now CATALOG WALL ROWS (BuildPieceDef.defaultEdit + placed.placementFor stamps the cut at every placement site; edge snap = they align like any wall) — all prefab machinery (prefab.doorWall etc., elevatorPrefabDefinition, prefabPlacementBasis) deleted. The elevator is a first-class vertical-link PIECE KIND: one 3m storey module, stacked storeys derive a shaft with a stop per storey (game/build/elevators.ts), open-front frame colliders, and a LIVE car rect PlayRoute re-aims in place per frame so the host physics carries the rider; E rides/calls. Kept codex's 3m stairs + door interaction; repaired their fallout (STAIRS-0607 physics test, navGrid doorway pathability, PLAYFOLD viewport guard via embodied.actionDown). 80/80 suites green; compiled bake ships the shaft frame + car parked at the bottom stop (live compiled ride is the follow-up req). Docs: CAPTURE.md REQ-0647, hmsc-int.md, _index record.",
+  "shas": [
+    "e3a67be05"
+  ],
+  "resolvedAt": "2026-06-12T04:28:52.026Z",
+  "tags": [
+    "bug"
+  ]
+}

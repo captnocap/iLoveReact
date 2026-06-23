@@ -1,0 +1,30 @@
+{
+  "id": "req_1305",
+  "at": "2026-06-18T18:37:55.392Z",
+  "origin": "session:76a33154",
+  "text": "better. but look at this area real fast [Image #23] [Image #24] this is all black all the way around so why is red showing up",
+  "status": "review",
+  "sessionId": "76a33154-94bc-46a2-8218-5d2e2d18171a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T18:39:00.689Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T18:50:08.442Z",
+      "actor": "76a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Paint face-boundary seams: stabilized to a paintable state. History: rect-merge (req_1303) fixed intra-face row seams; a 3px edge-bleed (req_1304) hid face-boundary seams but, with the default 1-texel (~0.5px) gutter, overran into adjacent slots → red showed on an all-black neighbour (req_1305); widening the gutter to padTexels=6 then shrank face slots so the grey base dominated and faces wouldn't take visible paint (req_1306). Reverted to the default gutter (slots stay full-size + paintable) with a small 1px edge-bleed that covers most of the bilinear face-edge sample without the neighbour overrun. Texture repacked to name paint-v4 (one-time; resets paint). This is a stable, paintable compromise — faint residual seams may remain because the underlying cause is BILINEAR sampling across a per-face atlas at 512px. The DEFINITIVE fix is nearest-neighbour sampling of the paint texture (flat colours need no filtering → zero seams/bleed/overrun) — that is a global Scene3D sampler change (3d.zig g_diffuse_sampler is linear, shared with game textures; the game is PSX-styled so crisp/nearest likely suits it). Pending the user's call on flipping to nearest. Build clean; meshPaint 8/8. shas ddf600d37.",
+  "shas": [
+    "ddf600d37"
+  ],
+  "resolvedAt": "2026-06-18T18:50:08.442Z"
+}

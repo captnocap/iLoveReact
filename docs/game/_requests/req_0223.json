@@ -1,0 +1,13 @@
+{
+  "id": "req_0223",
+  "at": "2026-06-07T10:12:48.136Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: USER bug report from the live session, verbatim: \"not that i need a window on a roof exactly but the fact that it even shows up and then fails is problematic\" — with per-click console errors: [js.err] [dispatch] error type=onClick: buildings: refusing a malformed def — prefab.test[20]: kind 'roof' accepts no edits (stack: redefine → setPieceEdit → onPress in the buildings panel). The def validator is CORRECT to refuse; the bug is the panel OFFERING an edit control for a piece kind whose def accepts no edits. Marker: ROOFAFFORD-0607. Fix the affordance, not the validator: the buildings panel must derive which edit controls it shows from the def's actual editability — non-editable kinds get no edit affordance, nothing renders that can only fail. Do NOT touch the chip-wall→swatch panel respec (that's another lane's queued slice) — this is scoped to affordance derivation only. Evidence: before/after of the panel on a roof piece + a test that a no-edits kind yields no edit affordances. This slots ahead of AUTHBUILD-REMOVE in your queue.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "bug"
+  ]
+}

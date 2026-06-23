@@ -1,0 +1,18 @@
+{
+  "id": "req_0727",
+  "at": "2026-06-13T06:59:27.081Z",
+  "origin": "session:e13c74b5",
+  "text": "no i rebuilt. thats not the problem evidently",
+  "status": "doing",
+  "sessionId": "e13c74b5-2bfb-4273-ad89-a4b29b898b4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T07:00:52.657Z",
+      "actor": "opus-e13c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

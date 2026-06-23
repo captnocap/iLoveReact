@@ -1,0 +1,18 @@
+{
+  "id": "req_0827",
+  "at": "2026-06-13T20:08:12.861Z",
+  "origin": "session:6e5908e6",
+  "text": "OK now lets look. ei112, it says it is laneSouth, ok but lets look at it here on the iso 3d. [Image #34] that doesnt look like any lane south to me does it",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T20:09:43.295Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

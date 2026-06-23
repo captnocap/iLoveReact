@@ -1,0 +1,28 @@
+{
+  "id": "req_1103",
+  "at": "2026-06-15T23:57:46.312Z",
+  "origin": "session:9f19b605",
+  "text": "haha oh FUCK i was thinking what if the procedural city when ur going outwards feels endless but u turn around and ur just 2 blocks away from the city",
+  "status": "review",
+  "sessionId": "9f19b605-885d-450d-884c-bc838101be1b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T23:58:29.457Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T23:59:03.606Z",
+      "actor": "9f19",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Banked design idea (no code, design thread continues). THE FOLD / non-Euclidean return: driving outward into the procedural void feels endless, but turning around reveals you're only ~2 blocks from the authored city. Implementable for free because the world is a pure hash function — 'distance from core' is an owned parameter, not the odometer, and nothing behind the player is ever stored, so the rear hemisphere was never committed and can collapse without contradiction (paint endless chunks ahead, resolve the core right behind on turn). Horror reframe: the void only maintains the illusion of geography while you flee deeper (feeding the compulsion to push on); the instant you give up and turn back, the lie drops — an hour of driving into nothing and it was right there. The ultimate doppelganger: the same CITY right behind you, not just the same motel. ONE design fork surfaced to user: (a) ALWAYS-ON pure dream logic (maximally cursed but guts the endurance run — return is always free, no stranding, leaderboard degrades to 'how far out' not 'survived the round trip'); vs (b) DEPTH-GATED FOLD (recommended) — outbound is honest (resources burn, real risk of being stranded and dying out there), the fold only triggers on RETURN past a wrongness tier, preserving the no-hand-outs resource-exhaustion governor AND landing the gag; the sim only fakes geography once you're deep enough to be lost, then spits you out when you reject it (the mercy is the horror). HARD CONSTRAINT locked: the fold is ROAD-VOID ONLY, never the coast — the coast is a real water-gap destination with an achievement, so its geography must stay Euclidean/honest or surviving the crossing means nothing. Awaiting user's always-on-vs-depth-gated call.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T23:59:03.606Z"
+}

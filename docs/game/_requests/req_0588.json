@@ -1,0 +1,33 @@
+{
+  "id": "req_0588",
+  "at": "2026-06-10T19:02:58.894Z",
+  "origin": "session:da94d3e7",
+  "text": "hey we have some props but we need more props more props in  the game. i need things like: road cones, trees (lots of tree shapes), rocks (lots of rocks !!), balls (collision physics!), wall props like a wall painting or a led light, chairs, couch, a ton of things! can you do some",
+  "status": "review",
+  "sessionId": "da94d3e7-791d-4eab-8e13-a3f2c1e8c371",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T19:03:04.655Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T19:34:47.918Z",
+      "actor": "props-worker",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added 25 new prop kinds across the full pipeline: street furniture (trafficCone, jersey barrier, trashCan, park bench, planter), 6 tree shapes (oak/pine/birch/cypress/palm/dead — trunk-sized collision so you walk under the canopy), 5 rock forms (boulder/flat slab/spire/mossy/pile), 3 balls (beach/soccer/basketball — solid colliders the player bumps; rolling/kick dynamics is a separate future system since props are static world geometry today), wall props (framed wallPainting, glowing ledLight — anchor at wall base, decor hangs at height), and furniture (chair, couch, table, floorLamp). Each kind has: registry definitions in BOTH cart/hmsc-int/world/propKinds.ts and game/kinds/props.ts, a live Scene3D model (new Tree/Ball/WallDecor/Furniture/StreetFurniture model files + Rock variants), compiled instance-part recipes in compile/worldGeometry.ts so compiled maps get real models not blocks, build-catalog material/cover/depth tags (auto-appears in the build palette), and yaw-aware thin segment collision generalized from fence to barrier/bench/couch. Verified: kinds/props suite 8/8, build suite 18/18, all affected carts bundle clean.",
+  "shas": [
+    "77726e201"
+  ],
+  "resolvedAt": "2026-06-10T19:34:47.918Z",
+  "tags": [
+    "ask"
+  ]
+}

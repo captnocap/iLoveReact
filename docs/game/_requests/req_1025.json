@@ -1,0 +1,28 @@
+{
+  "id": "req_1025",
+  "at": "2026-06-15T17:52:01.058Z",
+  "origin": "session:46d99bcc",
+  "text": "Amazing! thanks! /hand-over and the next thing they are going t o pick up on is setting pivot points for a layer, this pivot point is going to also require  joints. so like the center of a wheel is a pivot point, and then the location in the wheelbase of t he model, is the joint. this lets us put pivots inside of things that will rotate like shoulders, or tires. and their joint locations.",
+  "status": "review",
+  "sessionId": "46d99bcc-bc80-4a5e-88d5-808817d040f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T18:23:28.653Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T19:00:05.703Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Studio pivot points + joints (Part 6, the 'rig' mode). Confirmed the user's asymmetric model side-by-side: pivot lives on the CHILD (rotation origin + upstream connection point), joint lives on the PARENT and owns the spin axis AND rotation limit (e.g. shoulder -90..+90 = 180 deg of travel, or full for tires); a part can be both and they nest (wheel = pivot on the body's axle joint + its own joint for a spinner). Data layer (editMesh.ts): EditMesh.pivot?:V3 (absent=bounds center, sticky once set like uv), MountPoint.limit + jointTravelDegrees, pure helpers meshBoundsCenter/pivotOf/setPivot/addMount/updateMount/removeMount. Persistence + undo came free by folding pivot+mounts onto EditMesh so they ride the existing partMeshUpdated event (zero new stream/studioModel code). Viewport: a 5th toolbar mode (object/vertex/edge/face/rig) with meshRig.tsx overlay (pivot crosshair-ball + joint rings with axis arrow + type/travel label), reusing the existing TransformGizmo + drag/snap/readout machinery; + joint button, RigJointPanel for type/kind/axis/limit, Delete removes a joint, Esc deselects. editMesh 40/40, modelStream 7/7, Studio + full sources chain bundle clean; hot-reload TSX, uncommitted per the user's lead. Spec in PLAYBOOK Part 6; memory project_studio_mesh_editor updated.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T19:00:05.703Z"
+}

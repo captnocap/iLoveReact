@@ -1,0 +1,41 @@
+{
+  "id": "req_1447",
+  "at": "2026-06-19T22:31:36.630Z",
+  "origin": "session:89c172a4",
+  "text": "hey we are gonna build in a demo some universal and framework wide paint brushes and hooks that can go with them + color pallete picker that also can account for painting textures. the main thing here is that we want brush variety, color variety, strong controls like shift for straight line type shit and high performance meaning absolutely has to be optimisitic and a host owned. we will end up using it inside of the internal game editor but there have been several times ive wanted brushes on different demos or in tools we make and we are always reinventing it and it always t akes a while to land on the right setup every time. lets do it one time",
+  "status": "review",
+  "sessionId": "89c172a4-0f57-4dfc-9c49-92717a0e9a06",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T22:31:52.959Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T23:05:31.558Z",
+      "actor": "89c1",
+      "kind": "note",
+      "text": "Phase A landed (commits 23ee165dc, b655f4e58, a46e75d2a): runtime/paint universal kit — model/stroke/colors/theme, useBrushStroke controller, useModifiers, BrushScalar+ChipRow+ColorField+BrushKit, demo cart/brush_studio, 16 pure-core tests green. Chrome verified via rjit shot; paintable painting not headless-capturable (same as paintable_demo). Phase B (host stamp/shader/texture/blend pass) pending user go-ahead."
+    },
+    {
+      "at": "2026-06-20T10:44:08.242Z",
+      "actor": "89c1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the universal framework-wide paint kit under runtime/paint/: the unified vocabulary (model.ts: BlendMode, BrushTool family with hotkeys, 11 BrushShapes, StampSource, PaintInk, Brush interface, 11 presets, Palette), the gap-free optimistic stroke engine (stroke.ts: log size ladder, pressure curve, 45-degree shift line/square constraints), dependency-free HSV/hex color math (colors.ts), the surface-agnostic stroke controller (useBrushStroke.ts: mapPoint->MappedPoint drives 2D and 3D via per-hit UV-island clip), live modifier state off the key bus (useModifiers.ts), the fixed HSV ColorField (per-element dragRef replaces the stuck-dragging overlay bug), the drop-in BrushKit panel with icon grids for tools and shapes, and the one-number BrushScalar idiom that kills the slider/button/incrementer inconsistency. Demos cart/brush_studio.tsx (2D) and cart/brush_3d_demo.tsx (3D paint on a Plane via raycast). 16 passing v8cli tests. Phase B host dab pass (blend modes, alpha-erase, texture/shader/SVG brushes) and hmsc-int adoption remain.",
+  "shas": [
+    "23ee165dc",
+    "b655f4e58",
+    "a46e75d2a",
+    "5034bb056",
+    "c91910bd1",
+    "10ca3ab78"
+  ],
+  "resolvedAt": "2026-06-20T10:44:08.242Z"
+}

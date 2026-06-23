@@ -1,0 +1,12 @@
+{
+  "id": "req_0056",
+  "at": "2026-06-06T06:57:20.867Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — resume from handoff: /tmp/handoff-20260606-063748-clothsplit-0606-phase-2-editor-separation-mesh-clothing-anim.md — read it fully, then execute CLOTHSPLIT-0606 PHASE 2 (the user's GO is standing): the editor separation — mesh/sculpt context shows MESH ONLY, clothing gets its own editing context (built on the phase-1 attachment family), animation commands move to their own rig/posing context. Full parity discipline per the brief (every old control has a named new home). Standing rules: no desktop capture (SELFSHOT for visuals), explicit paths, docs+_index same commit, verify green, /hand-over at 55%, resolve the open reqs the brief lists. Coordinate: pane 10 owns shell/workbench core files — if separation needs them, name the file and hold for supervisor sequencing.",
+  "status": "new",
+  "sessionId": "4c75065a-51c2-41c8-820b-546880ce127c",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

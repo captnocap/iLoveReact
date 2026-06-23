@@ -1,0 +1,13 @@
+{
+  "id": "req_0245",
+  "at": "2026-06-07T11:08:03.276Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: the user gave the word on the PLATMOD implementation plan you offered after V28-V30. Their framing, verbatim: \"first establishing the game engine binary that can load our map format we look then compile out from here. since we have it all inside of this app, and we are also using this app to build the same engine, that gives us the proper seperation of conerns where we can immediately test engine changes in the test route and then finalize them into the built game engine\". Draft the work breakdown NOW as a durable doc at docs/game/PLATMOD_PLAN.md (constitution-adjacent, maintenance contract applies): (1) SLICE 1 per the user = the standalone player/engine binary that loads a map package — scope exactly what 'engine binary skeleton + package loader' means against the existing dev host (which V28 rules is already the client; packaging is the gap); (2) the lump container + Compile transcode + loader build order from your session's scoping; (3) the dev loop the user named as the point: engine changes are tested IN THIS APP's test route first, then finalized/promoted into the built engine — spell out that promotion mechanic (the ruled engine-channel discipline, bleeding→stable, if it still fits); (4) sequencing against the in-flight workbench fold (what blocks on step 10, what doesn't); (5) what the FIRST testable artifact is and its done-bar. Plan only — no implementation. This is a doc draft, so it does not violate your REQBOARD commit gate (still the user's panel look). Post when the doc is on disk; I review, the user rules, then slice 1 goes to a dedicated lane.",
+  "status": "new",
+  "sessionId": "09015194-0a9b-4ae6-acf8-d964ee783d82",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

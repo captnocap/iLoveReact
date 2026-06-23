@@ -1,0 +1,13 @@
+{
+  "id": "req_0171",
+  "at": "2026-06-06T19:13:09.528Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — user diagnosis steer on the layer FAIL, verbatim: \"the layer multiplication problem is a state update problem... as always.\" Redirect your hunt: this is not (primarily) hit targets or a missed strip copy — inspect the REORDER STATE UPDATE itself. The class the user means, seen repeatedly in this stack: non-functional setState against a stale snapshot, double-applied updates (strict/double-invoke or an event firing twice), or move implemented as remove+insert where the insert re-runs against already-updated state and APPENDS a copy, or an effect echoing the reorder back into the array. Print the state update sequence on one up-click: every setter call with its input array and output array, in order. The duplication will be visible in one capture. Fix with an idempotent functional update (move = one pure reorder of prev). Then still verify on the user's actual sculpt-paint surface, and keep the one-strip unification if the inventory found copies — but the state bug is the root.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

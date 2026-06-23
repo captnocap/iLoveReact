@@ -1,0 +1,48 @@
+{
+  "id": "req_0444",
+  "at": "2026-06-10T04:30:28.380Z",
+  "origin": "session:0ce255e1",
+  "text": "Wire it up. also, one thing need to build into the entire system is there is a problem the moment i paint height fields for buildings, they do not have any awareness of it",
+  "status": "review",
+  "sessionId": "0ce255e1-e6f7-4640-95b6-c6054e1a2eb6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T04:31:07.985Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T04:38:41.688Z",
+      "actor": "iso-author",
+      "kind": "note",
+      "text": "Two parts in this message. PART 1 'wire it up' (batch-save + undo) DONE in 5f7a6d491 (see req_0431). PART 2 'paint height fields for buildings, they do not have any awareness of it' = pieces/buildings don't sit on the painted heightfield terrain — STILL TO DO, investigating now."
+    },
+    {
+      "at": "2026-06-10T04:44:41.769Z",
+      "actor": "iso-author",
+      "kind": "note",
+      "text": "STILL IN FLIGHT. 'Wire it up' half DONE (5f7a6d491: batch commitMany so big-building move/clone/delete is one snapshot not a per-piece freeze; Ctrl+Z/Ctrl+Y undo for buildings folded into the workspace timeline). Heightfield-awareness half PENDING a user decision: the flat-pad lift (user ruled 'sit on a flat pad') must be applied at render+collide+compile from a terrain-relative stored base — NOT baked into stored piece y (would double-lift on edit) and NOT iso-only (would break preview==game). Asked user A (full cross-system flat-pad lift, needs coordinating the shared pieceMeshes renderer) vs B (down payment: building MOVES re-snap to terrain now, full lift after). Awaiting that choice + their freeze/undo test result."
+    },
+    {
+      "at": "2026-06-10T05:05:03.610Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Both halves of req_0444 done. (1) 'Wire it up' (5f7a6d491): batch commitMany so a 352-piece move/clone/delete is one snapshot not a per-piece freeze; Ctrl+Z/Ctrl+Y undo for buildings folded into the workspace timeline. (2) Heightfield awareness — USER RULED 'sit on a flat pad' — built as a shared, pure, idempotent helper GAME_BUILD.placed.liftToTerrain that lifts each stamped building (stampId group) as one level pad so its lowest piece sits on the terrain height under its footprint centre (paint a hill, it rides up, never warps). Applied at EVERY consumption site so editor and game never drift: build pane (IsoAuthor render+hit-test+ghost lift; edits keep raw y so move/clone re-lift with no double-lift; clone mints a fresh stampId), compile (packageMap.createHmscMapfile lifts once feeding both baked geometry AND colliders), and F2 walk-mode (render+occluders+colliders lift). Idempotent + read-only (stored y never changes). Loose single pieces keep authored y. Commits ce4fb8090 (helper+iso+compile) and 475db573a (F2); all bundle clean.",
+  "shas": [
+    "5f7a6d491",
+    "ce4fb8090",
+    "475db573a"
+  ],
+  "resolvedAt": "2026-06-10T05:05:03.610Z",
+  "tags": [
+    "bug",
+    "ask"
+  ]
+}

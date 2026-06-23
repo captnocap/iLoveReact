@@ -1,0 +1,30 @@
+{
+  "id": "req_1430",
+  "at": "2026-06-19T20:23:35.272Z",
+  "origin": "session:671785ab",
+  "text": "no this is not ready you have things sitting on top of other things still [Image #1] and thats just on load without getting deeper",
+  "status": "review",
+  "sessionId": "671785ab-534a-4abb-b19a-cd9fa0a485ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-19T20:25:29.109Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-19T20:32:05.494Z",
+      "actor": "session-6717",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the overlaps the user caught. Root cause: the z-index tokens order things that share a spot but cannot SEPARATE them. (1) Load-time: the undo/redo/import row and the tier-1 STUDIO info strip were both absolutely pinned at top:8/left:8, so the history icons sat on top of the info text. Folded undo/redo/import INTO the tier-1 left group as one flex bar (threaded canUndo/onUndo/canRedo/onRedo/onImportModel from StudioEditor) and deleted the separate absolute row, so self-overlap is now structurally impossible — verified by self-shot of the exact load state. (2) Paint mode: the paintdiag readout (left:8/bottom:8) covered the compass (left:14/bottom:14); moved to the free bottom-right above the camera dock. Built green. Cannot self-shot paint-mode / dense-selection states headless, so the user needs to confirm the deeper states (esp. whether the left context rail in face mode stays clear of the bottom-left compass/size-readout). SHA 4a15d5a4d.",
+  "shas": [
+    "4a15d5a4d"
+  ],
+  "resolvedAt": "2026-06-19T20:32:05.494Z"
+}

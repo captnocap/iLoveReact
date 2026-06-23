@@ -1,0 +1,31 @@
+{
+  "id": "req_0301",
+  "at": "2026-06-08T08:44:38.767Z",
+  "origin": "session:aaf6a34c",
+  "text": "SPIKEWATCH round 2 — the user (verbatim) asked \"how is the v8 gc always 0?\" and it's the right question. Two real gaps to close. Do NOT commit yet.\n\nGAP 1 — the GC bucket is VALUE-AMBIGUOUS, the same sin we just removed from the label. `GC 0us` can't be told apart from \"callback never fired.\" Fix:\n- Expose a GC INVOCATION COUNT from the shim (e.g. rjit_v8_gc_take_count) alongside the time. The callback increments it per prologue/epilogue pair.\n- Keep SUB-MICROSECOND resolution — rjit_v8_gc_take_us does accum_ns/1000 (integer), so a sub-µs scavenge floors to 0. Report ns or µs-with-decimal so a real tiny GC shows as e.g. \"0.7µs\", not \"0us\".\n- The attribution line must show BOTH: \"V8 GC 0.7µs (scavenge ×3)\" vs \"V8 GC — (×0, never fired)\". After this, \"GC 0\" is never ambiguous: it's either \"fired N times, tiny\" or \"fired 0 times, binding dead.\"\n\nGAP 2 — we are only ever seeing RECOVERED frames, never the actual spike frame. Every live line is tagged \"SPIKE IN HOST TAPE — worst frame already recovered before owner counters were sampled; do not attribute stale counter deltas.\" So the buckets are sampled AFTER the spike frame passed — useless for catching what fires during a movement rubber-band. Fix:\n- LATCH the per-bucket counters (GC us+count+type, present/vsync us, bridge us, unattributed us) per-frame so that when a spike frame is detected, the report shows THAT frame's latched buckets — not the current post-recovery frame's stale deltas.\n- The whole point is: user moves the player → it rubber-bands → the spike line names the real cause for the BAD frame. If the host-tape architecture makes per-frame latching genuinely impossible, STOP and report exactly why (don't fake it) — but first try latching the bucket snapshot at the same point the tape captures the worst-frame phase data.\n\nVERIFY before reporting: confirm the GC callback actually FIRES — the count must be > 0 in a running session with allocation (if it's 0, the mangled-symbol registration silently failed and THAT is the real bug to chase: wrong isolate handle, wrong mangled name, or callbacks not invoked). Don't report \"done\" with a 0 fire-count unexplained.\n\nREPORT BACK: the shim's new count/resolution API, how you latched the spike-frame buckets, and — if you can get a build/run — a sample spike line showing GC fire-count. Note that the user must rebuild+restart the dev host to see it live (Zig/framework changes don't hot-reload); do NOT touch pane 6.\n\nStay in your own context — no Task tool, no subagents. tools/rjit only, ast-check not full build. No reset/revert. Commit only on my word.",
+  "status": "review",
+  "sessionId": "aaf6a34c-a68a-4cf4-8329-f2a2d56e9758",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T08:45:24.634Z",
+      "actor": "aaf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T09:03:25.888Z",
+      "actor": "aaf6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Closed both spikewatch gaps from 'how is the v8 gc always 0?'. GAP 1 (value-ambiguity): the GC shim now exposes invocation COUNT (rjit_v8_gc_take_count) and NANOSECOND resolution (rjit_v8_gc_take_ns, replacing the floor-to-µs take_us) — a sub-µs scavenge reads '700ns ×3 (scavenge)', and a true zero reads 'V8 GC — (×0, never fired)', so 0 is never ambiguous. Wired gc_ns+gc_count through telemetry.Snapshot/CollectArgs → __tel_frame. GAP 2 (recovered-frame sampling): added __tel_frame_at(n) returning a historical snapshot from the host ring (which already latches per-frame buckets); both spikewatches now find the WORST frame by matching its total time (drift-tolerant: host ~240Hz vs JS ~60Hz) and report THAT frame's latched gc/present/bridge, labeled 'SPIKE FRAME CAUGHT (latched from host ring)', instead of the post-recovery current frame. The !countersReliable path now still names measured causes (GC/present/bridge) since boundary timers are independent of the stale owner counters. VERIFIED THE BINDING FIRES: extended v8_hello smoke target with a GC probe under heavy allocation → 'count=41 ns=6113239 last_type=1 PASS' (also pinned v8_hello to ReleaseFast — a Debug V8 binary hits the known lld CREL .init_array launch crash). telemetry suite 36/36 incl. new latch + sub-µs + count tests; perfWatch bundles; all Zig ast-checks clean. NOT committed (user's word). Dev host needs rebuild+restart to see it live; did NOT touch pane 6.",
+  "shas": [],
+  "resolvedAt": "2026-06-08T09:03:25.888Z",
+  "tags": [
+    "bug"
+  ]
+}

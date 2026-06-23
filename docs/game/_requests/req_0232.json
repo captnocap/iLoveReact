@@ -1,0 +1,13 @@
+{
+  "id": "req_0232",
+  "at": "2026-06-07T10:34:52.725Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: AUTHBUILD inventory ACCEPTED — scope is exactly right (legacy world.buildings system dies; the user's 107 bp_* pieces and game/build/* stay; your live-store zero-count checks are good evidence). EXECUTION IS SEQUENCED, not immediate: your consumer-edit list runs through files carrying other lanes' uncommitted work (index.tsx, PropertiesPanel.tsx, IsoPreview.tsx, Embodied.tsx), and this deletion must be atomic with its consumer edits — doing it now would entangle lanes. So: HOLD AUTHBUILD until I give the word (right after the pending commit wave lands, likely soon). Reorder your queue meanwhile: (1) select-mode ghost fix — the placement ghost must vanish in Select mode; (2) RAMPREAL+RAMPHOLLOW — ramp = thin inclined floor slab, Fortnite-style, hollow underneath, walk-under + build-under works, and the underside BLOCKS (user can currently walk up through the slab from below). Evidence + focused greens per item; frame-time gate applies to the ramp collision work.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

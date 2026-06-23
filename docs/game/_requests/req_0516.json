@@ -1,0 +1,33 @@
+{
+  "id": "req_0516",
+  "at": "2026-06-10T12:19:38.100Z",
+  "origin": "session:8f492126",
+  "text": "ok so why does this fire when im doing nothing at all? [js.warn] [DRAGDRAW] frame stall max=1500ms\n[js.warn] [DRAGDRAW] frame stalls ×3 max=179ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=205ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=180ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=193ms\n[js.warn] [DRAGDRAW] frame stalls ×2 max=177ms\n\n\nalso the drag is perfect now so i dont know why its saying that log when im not doing anything at all but hwen im dragging it doesnt say it lmao",
+  "status": "review",
+  "sessionId": "8f492126-2685-4bb0-ad7d-82b25fa10ec6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T12:21:17.957Z",
+      "actor": "session-8f49",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T12:23:56.639Z",
+      "actor": "session-8f49",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained + fixed. The idle [DRAGDRAW] frame stall lines were REAL main-thread starvation but not from the user's editing: they fired exactly while the agent ran the slice-1 'rjit game verify' suite twice plus bundle checks on the same machine (the ~185ms ×2/s signature matches the twice-reported no-heavy-builds-during-live-session pattern; the 1500ms one was the dev watcher re-bundling after agent file saves). The watchdog loop ticks even at idle, so external load showed up indistinguishable from drag lag — and drags stayed silent because the drag genuinely is clean now. Fix (caedae7e3, IsoAuthor.tsx): lastInputAtRef marks mouse/key/wheel input on the watchdog's own performance.now clock; a stall with no drag, no pending commit, and no input for 3s is labeled '(idle — external load on this machine, e.g. builds/bundler; not your editing)' and reports at most once per 10s, while interaction-window stalls keep the 1/s cadence (req_0507) untouched.",
+  "shas": [
+    "caedae7e3"
+  ],
+  "resolvedAt": "2026-06-10T12:23:56.639Z",
+  "tags": [
+    "perf-log"
+  ]
+}

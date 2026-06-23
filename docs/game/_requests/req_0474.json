@@ -1,0 +1,33 @@
+{
+  "id": "req_0474",
+  "at": "2026-06-10T06:57:36.298Z",
+  "origin": "session:11eafc6e",
+  "text": "Ok. Those last things stated, are good to do. and let me show you a problem that is happening with walls at intersections. so this is what i see [Image #1] and here is me painting on it to give u a better look. see how there is this coverage gap on the green edge [Image #2] this is when you are making a corner piece. so when i go to skin this, that wall is going to show weird side piece of the other wall",
+  "status": "review",
+  "sessionId": "11eafc6e-a623-4de3-9c44-7288f18f3e9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T06:59:33.411Z",
+      "actor": "session:11ea",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T07:23:49.765Z",
+      "actor": "session:11ea",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Closed the wall-corner coverage gap. Root cause: wallJoinRunLimits' u→world flip mirrored quarters 2|3 while localOffset actually mirrors quarters 1|2 — so yaw-90/270 walls grew their corner-join extension at the EMPTY end of the run (the overhang sticking past the corner) and left the real joint open (the green-edge gap that would skin wrong). Fixed the flip and aligned colliders + camera occluders, which carried the same mirrored mapping (two wrongs canceled for collision; the renderer maps through localOffset and showed it). Also ruled that an end a collinear wall continues past is a continuation, not a corner — no extension there, preventing doubled coplanar slabs between collinear neighbors. Verified with visual-box dumps across yaw 0/90/180/270 corner orientations, T-junctions, and straight runs; placed.test.ts 46/46; rjit game verify GREEN 71/71. Commit 31be83e15.",
+  "shas": [
+    "31be83e15"
+  ],
+  "resolvedAt": "2026-06-10T07:23:49.765Z",
+  "tags": [
+    "bug"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_0954",
+  "at": "2026-06-15T09:05:18.218Z",
+  "origin": "session:832d7b44",
+  "text": "yes. and it extends into clothing, look at how the one lab for player stats is set up and it has a inventory system based on the clothing. for example it just binds at slots, which means that lets us even start to do some funny shit like real world inconveniences of you change outfits but all your shit is still in the pockets of the other outfit. this makes it also already give us the capability of hitman, take someone out -> steal their outfit as a disguise. anyways. uh. not something you need to worry about at this point but the idea is already shaped into that lab in some fashion",
+  "status": "review",
+  "sessionId": "832d7b44-5500-43d9-a885-879b9e42b507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T09:05:37.381Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T09:15:34.346Z",
+      "actor": "claude-modeling",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured in Part 0b: clothing already IS the slot model (outfit.ts rules clothing-as-attachments bound to bone slots); slot-bound inventory yields pockets-stay-with-the-other-outfit and steal-a-disguise. Grounded in the actual outfit/clothing code rather than asserted. Marked explicitly as forward context, not current build scope, per the user's instruction. User-confirmed.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T09:15:34.346Z"
+}

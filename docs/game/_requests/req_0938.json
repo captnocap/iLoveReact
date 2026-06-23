@@ -1,0 +1,28 @@
+{
+  "id": "req_0938",
+  "at": "2026-06-14T19:35:20.674Z",
+  "origin": "session:dc5986f6",
+  "text": "so u can go do the camera fix on the zig code and yeah the roof came out nice tho",
+  "status": "review",
+  "sessionId": "dc5986f6-d53d-46b2-b433-a343515365ab",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-14T19:35:40.818Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-14T19:44:20.547Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compiled (no-V8) camera no longer gets yanked when walking under a roof a storey-plus overhead. Root cause: world_loader springArmEye caps the eye against heightfields via game_physics.cameraOcclusionHeightfields, which marches pivot->eye and caps when ANY heightfield surface is above the ray — but a pitched roof's slope heightfield (the walkable collider, the only thing a pitched roof contributes since its flat band collider is skipped) sits 6m up at the player's xz, so surf>=sy fires at the first step and slams the camera into the player. Fix: skip a heightfield whose surface is more than CAMERA_HEIGHTFIELD_CEILING_CLEARANCE_METERS (1.0m) above the camera pivot — it's a ceiling the player is under, not a floor to cap against; ground/ramps you stand on (<=head height) still cap so the eye never clips through them. framework/game/physics.zig; zig ast-check clean. NOT COMMITTED: physics.zig carries another lane's uncommitted MAX_ORIENTED 256->16384 change; I won't sweep it. The fix is in the working tree and active on the user's next rebuild; whoever owns physics.zig commits, or supervisor coordinates.",
+  "shas": [],
+  "resolvedAt": "2026-06-14T19:44:20.547Z"
+}

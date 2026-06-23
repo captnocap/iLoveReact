@@ -1,0 +1,28 @@
+{
+  "id": "req_1596",
+  "at": "2026-06-21T15:21:21.646Z",
+  "origin": "session:aa8b38c4",
+  "text": "oh now i just go through all the props / trees but i do be able to walk under it because of that lol",
+  "status": "review",
+  "sessionId": "aa8b38c4-bcf4-4724-9069-0ebd209628e0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T15:22:44.991Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T15:27:56.272Z",
+      "actor": "aa8b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed: walking through all props/trees is NOT from my req_1587 walk-under change (that is guarded to cooked props carrying collisionBoxes — built-in props/trees skip it and keep their existing footprint collider). The real cause is a PARALLEL session's in-flight refactor moving prop collision onto the rotatable 'oriented' collider lane (state/hostPhysics.ts now routes rectangular props through propOrientedPhysicsRect with a  at MAX_ORIENTED). That oriented lane was capped at 256; a built-out city has >256 props, so once every prop baked onto the oriented lane the overflow past 256 silently lost collision (the walk-through-the-tail / low-cap-truncation trap). The fix already exists in that session's working tree: game/physics.ts PHYSICS_LIMITS.orientedRects raised 256->16384 to match the host (framework/game/physics.zig MAX_ORIENTED=16384, committed 6/20 d65f77456) — a hot-reload JS number, NO rebuild. Action for user: reload the dev host / recompile to pick it up; collision returns while walk-under stays. I did NOT edit those files — they are a parallel session's atomic refactor (hostPhysics.ts/physics.ts/world/props.ts) and committing a slice would break the build. No code change from me; this is a diagnosis + routing.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T15:27:56.272Z"
+}

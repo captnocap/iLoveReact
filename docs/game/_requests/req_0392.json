@@ -1,0 +1,31 @@
+{
+  "id": "req_0392",
+  "at": "2026-06-09T05:45:22.243Z",
+  "origin": "codex:019eaa55",
+  "text": "the building preview in this route seems to have been changed, i dont see any building but its there [Image #1]",
+  "status": "review",
+  "sessionId": "019eaa55-1779-7bd0-be5d-1b2b9ee9e13e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-09T05:45:32.557Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-09T05:47:06.173Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the buildings workbench preview framing bug: BuildingStage now computes bounds from the actual rotated piece dimensions, centers on the true vertical extent, derives a fresh fallback camera from the current frame, and resends native orbit whenever the frame changes. This prevents the preview from staying framed on a single wall/old piece when selecting a larger saved building like Tower-thin. Verified the buildings workbench suite and full hmsc-int bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-09T05:47:06.172Z",
+  "tags": [
+    "bug"
+  ]
+}

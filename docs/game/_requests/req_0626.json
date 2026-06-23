@@ -1,0 +1,31 @@
+{
+  "id": "req_0626",
+  "at": "2026-06-11T10:47:19.396Z",
+  "origin": "codex:019eb64a",
+  "text": "hey something is wrong with this color wheel  for the color picker in the game tooling [Image #1]",
+  "status": "review",
+  "sessionId": "019eb64a-e1ff-7e91-9b0e-abf0f10f5bd6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T10:47:24.667Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T10:53:49.264Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the color wheel dead-black state in the shared hmsc-int paint ColorWheel component. The wheel shader now renders hue/saturation at full brightness instead of multiplying the wheel by the current value, so selecting #000000 no longer makes the whole wheel black. A wheel pick from true black also lifts value to full brightness so clicking the wheel actually chooses a usable color. Verification: the paint suite passed during game verify, and hmsc-int bundling succeeded before the native Zig step hit the unrelated Zig cache manifest_create error. Commit was interrupted before completion, so no SHA is attached.",
+  "shas": [],
+  "resolvedAt": "2026-06-11T10:53:49.264Z",
+  "tags": [
+    "bug"
+  ]
+}

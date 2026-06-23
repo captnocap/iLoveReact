@@ -1,0 +1,12 @@
+{
+  "id": "req_0169",
+  "at": "2026-06-06T19:05:36.207Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT: PAINTLAYERS-0606 (req_0077) FAILS LIVE, hours after your READY. Verbatim: \"clicking the up and down on layers still just spawns more layers -_-\". The user is hitting this in the MESH-SCULPT paint tools layer list — your morning fix targeted editors/paint (PaintLayerStrip + inspector action bar) with shared layer-action metadata. Prime suspect: there is ANOTHER layer-strip implementation in the sculpt PAINT lens that never consumed your shared metadata — a third copy of the controls, which is exactly the no-duplication law breach. Steps: 1. Inventory EVERY layer-strip/layer-controls implementation in the tree (paint editor, inspector, workbench PaintLens, sculpt paint tools, anything) — post the file:line list. 2. Reproduce the user's exact path: the sculpt-mode paint tools layer list, click up/down, show the layer array duplicating. 3. Unify: ONE layer strip component consuming your shared layer-action metadata, every surface mounts THAT — delete the copies. 4. Re-test on the surface the user actually uses, not just the one you fixed this morning. This outranks everything in your queue except the in-flight commits. The user clicking up/down on THEIR strip and seeing a MOVE is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

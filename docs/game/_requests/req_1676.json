@@ -1,0 +1,28 @@
+{
+  "id": "req_1676",
+  "at": "2026-06-23T00:41:14.087Z",
+  "origin": "session:2117ddf4",
+  "text": "dthat doesnt make much sense tho i cant even reach the top where the fronds are so why would they have collision",
+  "status": "review",
+  "sessionId": "2117ddf4-165f-4c7a-8fbe-15f442892c87",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T00:43:32.191Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T00:48:52.014Z",
+      "actor": "skybox-builder",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made palm trees decorative (non-colliding), fixing the collider explosion the user correctly pushed back on. Ground truth (req_1671 histogram): the ~28k colliders were 25,601 PALM TRUNK rects — req_1454 registered one collider per trunk, and a painted palm field grows tens of thousands of trunks, flooding MAX_RECTS=16384 on even a 6-building map for no real gameplay value (you brush past palms, you don't path around 25k poles). Clarified for the user: fronds never collided (only the thin trunk pole did). Fix in world_loader.zig: removed the static per-palm-trunk collider loop in the baked-COLLIDERS branch AND added SHAPE_PALMTRUNK to isNonCollidingFoliage so the windowed/instance-derived paths agree — palms are now walk-through scenery like grass/bush/frond/flower. Verified via standalone loader: collider count dropped 16384 (capped, 12150 clipped) -> 3014 rects + 203 oriented + 76 heightfields, NO clipping, grounded. Reversible (re-add the loop + remove the skip) if a map ever wants solid trees; offered the user near-field windowing as an alternative. CRITICAL DELIVERY NOTE: the editor's /compiled view EMBEDS world_loader.zig (framework/v8_bindings_compiled_world.zig @import '../world_loader.zig'), so rjit game shot (standalone loader) verifies the logic but does NOT update the editor — the editor binary must be rebuilt. I rebuilt it (rjit ship hmsc-int, exit 0), so ALL THREE loader fixes (req_1660 scenery-box, req_1669 void-ground heightfield re-register, req_1676 palm decorative) are now in zig-out/bin/hmsc-int; the user must RESTART their editor/dev host to pick up the new binary (this is likely why req_1669's fall-through fix hadn't shown — they were still on the old editor binary). COMMIT NOTE: world_loader.zig carries my 3 fixes LIVE in the rebuilt binary but UNCOMMITTED in source, intermixed with heavy active parallel WIP (bandFloorY + a corner-miter shape feature, 14 markers) from other sessions — I did not commit to avoid capturing their in-flight feature; needs multi-session coordination to land cleanly.",
+  "shas": [],
+  "resolvedAt": "2026-06-23T00:48:52.014Z"
+}

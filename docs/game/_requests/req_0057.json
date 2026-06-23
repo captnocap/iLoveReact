@@ -1,0 +1,19 @@
+{
+  "id": "req_0057",
+  "at": "2026-06-06T07:06:09.535Z",
+  "origin": "supervisor-relay",
+  "text": "whoever edited the sculpt fucked it up bad lmao. look how tiny of a space that the model is now [SCULPT lens: unwrap canvas eats ~80% width, 3D model clipped off right edge, top-right chips overlap]",
+  "status": "done",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T07:32:39.147Z",
+  "resolution": "SCULPTSPLIT-0606, fully landed across three commits. (1) d454f7a34: the sculpt canvas became a fixed-palette MEASUREMENT surface (the addendum). (2) 462a43389 carried the first layout application (divider + the toolbar collision fix: chips + lens caption merged into ONE wrapping strip — nothing overlaps at any pane width; the clipped-sliver 3D pane died with the fixed-340 box). (3) 997fe9f36: the v2 design rulings — SCULPT is a VERTICAL STACK per the user's layout ruling (mesh full-width on top, one row below = unwrap canvas + toolset column), the divider drags the top/bottom split (twigged 'sculptSplitY', default 55/45, min heights keep both real), plus the three visual treatments: always-on faint cell lattice, mode-tinted brush footprint with mirror twin, and smart depth display (cell-bilinear smooth at rest, cell-snapped chunky while aiming). The shader half rode d597f379c via the shared index. Verify: characters 15/15 incl. the palette-contrast and data-contract pins; full cart bundles; the one standing RED remains the paint lane's cutout/models.test.ts WIP.",
+  "shas": [
+    "d454f7a34",
+    "462a43389",
+    "997fe9f36",
+    "d597f379c"
+  ],
+  "tags": [
+    "bug"
+  ]
+}

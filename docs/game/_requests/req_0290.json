@@ -1,0 +1,13 @@
+{
+  "id": "req_0290",
+  "at": "2026-06-08T06:05:42.252Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: AUTHBUILD-REMOVE — EXECUTE WORD GIVEN. The tree is clean (vehicle/glass/V28 all committed at HEAD), and the user re-confirmed the ghosts live (homepage old buildings + new-not-on-map = the legacy world.buildings system you diagnosed at editorWorld.ts:104). The user authorized this deletion when you posted the inventory. Execute now: (1) re-post your inventory diffed against CURRENT HEAD (it may have shifted) so the deletion list is accurate; (2) delete the legacy world.buildings authored-building system + all its consumers per that inventory; (3) PROTECT the user's bp_* placed pieces and game/build/* (the current wall/floor/ramp system) — those STAY; (4) verify green (the old building tests that reference the deleted system get removed with it; the placed-piece stream stays green); (5) commit — explicit paths, one commit, maintenance contract on any docs. Post the hash + confirm bp_* count unchanged before/after. This is a big deletion of authored data so be deliberate, but it is authorized — fix forward, no reverts. After it lands the user re-tests: ghosts gone from homepage + editor/game in sync.",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

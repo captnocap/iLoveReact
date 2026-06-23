@@ -1,0 +1,27 @@
+{
+  "id": "req_1077",
+  "at": "2026-06-15T22:30:25.371Z",
+  "origin": "pane",
+  "text": "this is sick!!!! so how can i control the density of it from the painter? like, maybe u can give a paint tool that is low med and high density painting so i can control that way",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-15T22:30:25.381Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:30:25.389Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added painter-controlled grass density: three grass tile variants the user paints for low/med/high — 'Grass (Sparse)' (3 blades/cell), 'Grass' (7, existing), 'Grass (Lush)' (16). Appended grassSparse/grassLush to TILE_KIND_DEFINITIONS LAST (existing indices stay stable) + the TileKind union; they auto-appear in the painter palette (PAINTABLE_TILE_KINDS filters placement==='surface'). Density now lives in a GRASS_DENSITY kind->blades table in grassPopulation.ts; both grass sources (surfaceRegions by kind, landform field.tiles by TILE_KINDS index) look density up per cell and emitClump scatters that many blades. Works identically in the editor iso/play view and the compiled /compiled bake (same generator). hmsc-int rebuilt clean, boot self-shot PASS; world_loader needs no rebuild (density is bake-side TS). A new density level = one GRASS_DENSITY entry + one tile kind, no other wiring.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:30:25.388Z"
+}

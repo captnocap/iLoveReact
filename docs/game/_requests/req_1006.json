@@ -1,0 +1,28 @@
+{
+  "id": "req_1006",
+  "at": "2026-06-15T15:17:38.472Z",
+  "origin": "session:8c2aee6a",
+  "text": "Still not it. This is still showing a full highlight of the uv after doing a loop cut",
+  "status": "review",
+  "sessionId": "8c2aee6a-d17a-4edb-bc4f-f7a458ee4293",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T15:18:28.422Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T15:20:31.536Z",
+      "actor": "8c2a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reported as 'loop cut still shows a full UV highlight' — resolved as not-a-bug: the studio's loop cut requires Apply (the confirm popup designed in req_0984-0990) for the cut to commit, after which the selection-scoped UV correctly shows the kept half-square. The user confirmed 'working as intended now.' The only divergence from Blockbench is the confirm step itself — Blockbench's loop cut is immediate (no Apply). Noted as a known difference the user accepted for now; can be made live (commit-on-change / drop the Apply button) later if exact parity is wanted. No code change needed; selection-scoping (req_1005) validated working.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T15:20:31.536Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1280",
+  "at": "2026-06-18T12:24:27.956Z",
+  "origin": "session:18fe5c79",
+  "text": "can you add imagebased backdrops on the @cart/hmsc-int/editors/model/Studio.tsx so i can trace it while modeling",
+  "status": "review",
+  "sessionId": "18fe5c79-d15f-47c8-ade6-d65531bd83af",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T12:24:33.216Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-18T12:41:04.389Z",
+      "actor": "opus-studio",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added image-based reference backdrops to the Studio mesh editor so you can trace blueprints/photos while modeling. New cart/hmsc-int/editors/model/Backdrops.tsx renders each backdrop as a double-sided translucent quad on a chosen cardinal plane (front/back/left/right/top/bottom), textured through Scene3D's existing image path (offscreen StaticSurface -> Mesh textureKey, the same mechanism the sprite atlas uses) and routed to the back-to-front transparent pass so the grid + model read through it. A toolbar 'trace' toggle opens a setup panel with per-backdrop plane picker + live size/offset/opacity/flip sliders + show/hide/remove. Backdrops are twig state (survive hot reload, reset cold), like the scale ghost. Studio.tsx wires the state, loader, and render. Pure TSX (hot-reloadable). Verified: bundle + native build clean, /model route self-shot PASS.",
+  "shas": [
+    "554c19ead"
+  ],
+  "resolvedAt": "2026-06-18T12:41:04.389Z"
+}

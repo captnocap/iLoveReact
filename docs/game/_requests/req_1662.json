@@ -1,0 +1,74 @@
+{
+  "id": "req_1662",
+  "at": "2026-06-22T22:46:08.882Z",
+  "origin": "codex:019ef182",
+  "text": "hey solve this bug, it was once fixed, it came back somehow. but placing walls, this happens at the ends [Image #1] see how it is crossing, bad bad",
+  "status": "review",
+  "sessionId": "019ef182-d012-70f2-8579-97076088563d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T22:46:30.578Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T22:52:40.656Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-22T23:32:11.877Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "User review feedback: the visual wall-end tab still protruded in the live view. The first pass kept an exposed-face miter extension; that still read as crossing. Rework expected: no visible wall skin should extend past the authored endpoint."
+    },
+    {
+      "at": "2026-06-22T23:32:18.990Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T23:32:18.999Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "Tightened the wall-end visual fix after review feedback. The shared hmsc-int piece shape decomposition now clamps every decorative front/back wall skin at the authored endpoint whenever the core band extends for a join; no exposed-face miter extension remains, so visible wall skins cannot leave a tab or cross past the end. The collision/core band still extends through L/T wall joins, preserving the existing blocker closure. Expanded wallSlabs regression coverage to assert both walls in an L-corner and the stem in a T-junction have no visible endpoint tabs, plus reran placed, snap, and compile parity suites."
+    },
+    {
+      "at": "2026-06-22T23:44:50.893Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "User review feedback: still crossing. Root cause was the rendered wall core/end-cap strip also using the extended join band; previous rework only clamped the front/back face slabs."
+    },
+    {
+      "at": "2026-06-22T23:44:50.902Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T23:44:50.912Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "Fixed the remaining wall-end crossing by clamping every rendered wall box, including the core/end-cap strip, to the authored wall endpoint when the gameplay/collision band extends through a join. Collision math remains unchanged and is still covered by placed tests; only the shared visual decomposition now hides the join extension. Updated wallSlabs regression coverage so L-corner and T-junction rendered cores plus front/back skins all fail if any visible endpoint tab returns. Reran wallSlabs, placed, snap, and compile world parity suites."
+    }
+  ],
+  "resolution": "Fixed the wall-end visual crossing in the shared hmsc-int piece shape decomposition. The wall core still extends through perpendicular joins for collision closure, but front/back decorative slabs now clamp at the authored endpoint on joined sides; only the exposed outside face keeps the tiny miter extension. Added a focused wallSlabs regression suite covering L-corners and T-junctions, and verified the existing placed/snap/compile parity paths.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T22:52:40.656Z"
+}

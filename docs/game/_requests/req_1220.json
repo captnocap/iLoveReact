@@ -1,0 +1,30 @@
+{
+  "id": "req_1220",
+  "at": "2026-06-17T01:19:32.492Z",
+  "origin": "session:ee607c38",
+  "text": "also. u gotta fix something a bout the paint carrying over to another model or whatever it happening idk what it is but i keep testing on a basic cube. and then go back to my model of a car im working on and there is a cube in the center of it and its got paint on it and i cant see the grid for paint or paint at all on the car model yet still im assuming something is a problem idk",
+  "status": "review",
+  "sessionId": "ee607c38-a6df-4547-aa9a-facb41f8319d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T01:20:27.134Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T01:24:51.408Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two parts. (1) BUG FIXED — 'can't see grid/paint on the car': switching models resets the global studio:tex twig to null (so paint doesn't carry over), but ensureTexture only ran on the paint-mode button press, so returning to a model while already in paint mode left it textureless → no grid, no paint. Added an effect that auto-ensures a paint-fit texture whenever paint mode is active and the open model lacks one, using an explicit paintFit flag (a texel-size compare would loop since the fit's nextPow2 size varies). (2) The 'cube in the center of the car' is almost certainly a real part added to the car model via the +add button (it adds a cube to the OPEN model) — parts ARE correctly scoped per-model (modelStream.modelParts only returns that model's parts; events carry the model id), so it isn't leaking across models. The user can delete it from the outliner ✕. Studio bundles clean, textureize 10/10, meshPaint 6/6.",
+  "shas": [
+    "96ccefd99"
+  ],
+  "resolvedAt": "2026-06-17T01:24:51.408Z"
+}

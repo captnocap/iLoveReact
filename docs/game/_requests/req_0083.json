@@ -1,0 +1,12 @@
+{
+  "id": "req_0083",
+  "at": "2026-06-06T11:32:41.900Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — CLOTHSLOW-0606 (req_0079). User verbatim: \"clicking on the clothing route takes several seconds to resolve. ?? massive data transfer or something? idk\" Diagnose with data first, then fix. Steps: 1. Use the PERFLOG diagnostic channels (13 switchable channels; console verbs: log on / log off / log dump) to time the clothing route mount end-to-end. Find where the seconds actually go — measure, do not guess. Post the numbers BEFORE writing any fix. 2. Fix the dominant cost only. Candidates to check with data (not assumption): store reads pulling everything instead of the clothing context (store is sqlite behind openStore(), d95877cdd; clothing got its own context in the CLOTHSPLIT wave), synchronous mesh/texture loads on mount, redundant per-item work. 3. Re-measure the same channel; post before/after numbers. Build via tools/rjit only; uncommitted working-tree changes elsewhere are the source of truth, never revert anything; the user's dev server (pane 6) hot-reloads your saves. DONE-BAR: clothing route resolves visibly fast + before/after timing numbers in your READY report + tools/rjit game verify green. DO NOT COMMIT — supervisor instructs commits. Do not shrink or stub any file. Only the user's live confirmation makes this a PASS.",
+  "status": "new",
+  "sessionId": "019e9ca9-503d-7aa0-8845-3d272c209e4e",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

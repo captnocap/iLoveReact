@@ -1,0 +1,10 @@
+{
+  "id": "req_0787",
+  "at": "2026-06-13T17:01:05.283Z",
+  "origin": "session:a695a492",
+  "text": "js.warn] [ground-formula] lf=painted_0_0 tiles=120x120 roadSegs=10\n[js.warn] [ground-formula] lf=painted_1_0 tiles=120x120 roadSegs=6\n[js.warn] [ground-formula] lf=painted_0_1 tiles=120x120 roadSegs=6\n[js.warn] [ground-formula] lf=painted_1_1 tiles=120x120 roadSegs=3\n[js.warn] [ground-formula] lf=painted_1_2 tiles=120x120 roadSegs=0\n[js.warn] [ground-formula] lf=painted_1_3 tiles=120x120 roadSegs=0\n[js.warn] [ground-formula] lf=painted_0_2 tiles=120x120 roadSegs=0\n[js.warn] [ground-formula] lf=painted_0_3 tiles=120x120 roadSegs=0\n[js.warn] [road-bounds] strokes=17 points=34 gx=[30..227] gz=[1..198]\n[js.warn] [mapgone] PaintCanvas mount: seed=initialWorld chunks=8 focus=8 focusedChunks=8 layer=place\n[js.warn] [ground-formula] lf=painted_0_0 tiles=120x120 roadSegs=10\n[js.warn] [ground-formula] lf=painted_1_0 tiles=120x120 roadSegs=6\n[js.warn] [ground-formula] lf=painted_0_1 tiles=120x120 roadSegs=6\n[js.warn] [ground-formula] lf=painted_1_1 tiles=120x120 roadSegs=3\n[js.warn] [ground-formula] lf=painted_1_2 tiles=120x120 roadSegs=0\n[js.warn] [ground-formula] lf=painted_1_3 tiles=120x120 roadSegs=0\n[js.warn] [ground-formula] lf=painted_0_2 tiles=120x120 roadSegs=0\n[js.warn] [ground-formula] lf=painted_0_3 tiles=120x120 roadSegs=0\n[r3d-census] children=2369 inst_seen=20 inst_collected=20 mcount=207",
+  "status": "new",
+  "sessionId": "a695a492-4a9c-4889-a141-0e50e2e7918a",
+  "captureMode": "hook",
+  "events": []
+}

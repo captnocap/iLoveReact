@@ -1,0 +1,31 @@
+{
+  "id": "req_0427",
+  "at": "2026-06-10T03:09:39.986Z",
+  "origin": "session:9440c2b7",
+  "text": "[js.warn] [mapgone] ChunkSurface 0,2 layer=paint encLen=14457 painted=14400 cellHist=[4:14400] palette[0..3]=0.31,0.63,0.87,0.12,0.15,0.19,0.13,0.14,0.18\n[js.warn] [mapgone] ChunkSurface 1,2 layer=paint encLen=14457 painted=14400 cellHist=[4:14400] palette[0..3]=0.31,0.63,0.87,0.12,0.15,0.19,0.13,0.14,0.18\n[js.warn] [mapgone] PaintCanvas mount: seed=initialWorld chunks=11 focus=11 focusedChunks=11 layer=paint\n[js.err] The above error occurred in the <CatalogRail2> component:\n\n    at CatalogRail2 (<anonymous>:54010:55)\n    at View\n    at Box (<anonymous>:7201:48)\n    at IsoAuthor2 (<anonymous>:53673:13)\n    at View\n    at Box (<anonymous>:7201:48)\n    at Pane (<anonymous>:79051:141)\n    at View\n    at Box (<anonymous>:7201:48)\n    at View\n    at Box (<anonymous>:7201:48)\n    at View\n    at Box (<anonymous>:7201:48)\n    at QuadSplit (<anonymous>:54030:13)\n    at View\n    at Box (<anonymous>:7201:48)\n    at View\n    at Box (<anonymous>:7201:48)\n    at EditorShell (<anonymous>:79058:50)\n    at Router (<anonymous>:7887:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:80209:29)\n\nReact will try to recreate this component tree from scratch using the error boundary you provided, GlobalErrorBoundary.\n[js.err] [react-uncaught] TypeError: GAME_BUILD.prefabs.definitions.map is not a function\n    at <anonymous>:54012:64\n    at updateMemo (<anonymous>:16252:29)\n    at Object.useMemo (<anonymous>:16768:26)\n    at useMemo48 (<anonymous>:1134:31)\n    at CatalogRail2 (<anonymous>:54011:48)\n    at renderWithHooks (<anonymous>:15590:28)\n    at updateFunctionComponent (<anonymous>:18624:30)\n    at updateSimpleMemoComponent (<anonymous>:18505:20)\n    at beginWork (<anonymous>:20022:24)\n    at beginWork$1 (<anonymous>:24472:24)\ncomponent-stack:\n    at CatalogRail2 (<anonymous>:54010:55)\n    at View\n    at Box (<anonymous>:7201:48)\n    at IsoAuthor2 (<anonymous>:53673:13)\n    at View\n    at Box (<anonymous>:7201:48)\n    at Pane (<anonymous>:79051:141)\n    at View\n    at Box (<anonymous>:7201:48)\n    at View\n    at Box (<anonymous>:7201:48)\n    at View\n    at Box (<anonymous>:7201:48)\n    at QuadSplit (<anonymous>:54030:13)\n    at View\n    at Box (<anonymous>:7201:48)\n    at View\n    at Box (<anonymous>:7201:48)\n    at EditorShell (<anonymous>:79058:50)\n    at Router (<anonymous>:7887:5)\n    at HmscWorldEditorCart\n    at GlobalErrorBoundary (<anonymous>:80209:29)\n[js.err] Warning: %s: Error boundaries should implement getDerivedStateFromError(). In that method, return a state update to display an error message or fallback UI.%s GlobalErrorBoundary \n    at GlobalErrorBoundary (<anonymous>:80209:29)",
+  "status": "review",
+  "sessionId": "9440c2b7-fcc6-4745-a2a5-309cd273e004",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T03:10:02.057Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T03:17:52.038Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the prefabs-tab crash plus the two follow-ups in the same breath. (1) Crash: GAME_BUILD.prefabs.definitions is a Record, not an array — .map threw and the CatalogRail crashed the whole pane; Object.values() it (424e5d2a7). (2) Materials 'went away': the iso pane never mounted the build-skin TextureCapture, so a piece skinned with a material rendered flat because nothing bound its bldskin:<id> texture — now mounts one TextureCapture per referenced skin id (skinTextureIds mirrors F2's skinTextureIdsFromSet), same as F2 (1697b4e44). (3) Prefabs list: only the 1 built-in (Motel Room) showed because F2's 3 = built-ins MERGED with user-captured stream prefabs; IsoAuthor now takes the full buildingPrefabs list the cart already computes and resolves prefab defs from it for the ghost/stamp/label (a stream prefab isn't in GAME_BUILD.prefabs). index.tsx passes prefabs={buildingPrefabs} — live in the working tree, held out of the commit because another session has uncommitted work in index.tsx. Bundles clean (esbuild exit 0).",
+  "shas": [
+    "424e5d2a7",
+    "1697b4e44"
+  ],
+  "resolvedAt": "2026-06-10T03:17:52.038Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1121",
+  "at": "2026-06-16T02:24:34.550Z",
+  "origin": "codex:019ecd7a",
+  "text": "can you spec into that doc to do as much of a import of existing 3d approaches into the editmesh pipeline. so that we can resolve with removing the old, keeping the only approach for the new and no confusions and full coherency",
+  "status": "review",
+  "sessionId": "019ecd7a-9cba-73d0-9fee-7dc6959b72e2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T02:24:41.809Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T02:26:27.531Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extended docs/game/HMSC_INT_ASSET_PIPELINE.md with an EditMesh consolidation spec. The new section makes EditMesh the single asset modeling IR, lists existing 3D approaches to import (Studio native meshes, raw Scene3D primitives, Assist3D JSON, prop recipes/DataProp, OBJ/GLB props, item sculpt/voxel blockouts, building/structure meshes, humanoid/clothing parts, vehicle parts/labs, and runtime primitives), defines import adapter requirements, adds a retirement gate for old 3D paths, and preserves the native-camera viewport rule. No runtime code changed.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T02:26:27.531Z"
+}

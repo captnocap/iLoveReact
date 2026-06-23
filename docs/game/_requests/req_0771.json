@@ -1,0 +1,28 @@
+{
+  "id": "req_0771",
+  "at": "2026-06-13T15:03:06.709Z",
+  "origin": "session:aec89f3e",
+  "text": "do i need to just replace this on the desk or something? look how far the computer hovers over the desk [Image #13]",
+  "status": "review",
+  "sessionId": "aec89f3e-12a8-4481-9f79-5c47d9a8c376",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T15:03:29.227Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T15:40:26.267Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The computer (and other mount:'surface' props) floated above the desk. I traced the placement/lift chain headlessly and found NO bug — every path lands a dropped prop on the desk's bounds-top (0.8m), so the float came from stray/stale placement data I couldn't see, not the code. Per the user's pick, implemented the robust fix (req_0771): restSurfaceMountProps() runs at the end of liftBuildingsToTerrain (game/build/placed.ts) — the ONE render-prep chokepoint both the editor displayPieces and the compiled bake flow through — and drops every mount:'surface' prop onto the HIGHEST solid piece-top beneath its anchor (a desk/counter/shelf), else the terrain. A 0.35m upward grace snaps a slightly-buried item up onto its surface; surfaces ABOVE the prop are never grabbed. Because it's a lift-time pass, EXISTING floating placements self-correct on both display and bake — no re-placement needed. Verified: hmsc-int bundles clean; 129 tests pass across 7 suites; a probe placing a computer floating at y=1.6 over a desk rests it at y=0.8 (desk top), and one buried at 0.5 snaps up to 0.8. GIT: change is in placed.ts, which the parallel session's recent commits already swept — this edit is uncommitted on disk (coherent, tested); commit sequencing deferred to the supervisor as with the other footprint work.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T15:40:26.267Z"
+}

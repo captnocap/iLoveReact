@@ -1,0 +1,28 @@
+{
+  "id": "req_0376",
+  "at": "2026-06-08T22:42:43.137Z",
+  "origin": "session:67746dc2",
+  "text": "yeah i fucking LOVED the hitman freelancer portion of world of assassination, its arguably like the best fkn rogue lite system around. i want that, but i also hate how hitman is the same damn 7 maps. and all closed from one another. on the flip. gta open world is great. you can do missions. or you can say fuck the missions and do whatever u want. game doesnt give a shit. the downfall of gta is there is not any real unique way to do anything. you have a target. you kill them. mission over. the loop is rewarding but its not replayable at all unless you are just speed running really. hitman gives you the million ways to resolve the mission, and gta gives the world is your oyster. so i think even capturing a bit of both of that even if its just a slice should turn up strong",
+  "status": "review",
+  "sessionId": "67746dc2-6248-408a-8f80-164ef9cc6b7b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T22:43:30.280Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T22:45:27.393Z",
+      "actor": "session-6774",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design discussion sharpening the game's core pillars (no code). Articulated the unoccupied gap: Hitman = deep resolution (many ways) but shallow world (7 closed authored maps, repeat); GTA = deep open world (ignore missions, do anything) but shallow resolution (target->kill->done). Both are limited by ONE trade-off seen from opposite ends — depth-per-square-meter vs square-meters — because Hitman's depth is AUTHORED density (too expensive to scale, so maps stay closed) while GTA's openness is affordable precisely because its missions are cheap kill-boxes. The load-bearing bet for this game: make Hitman depth SYSTEMIC not authored — environmental kills as object PROPERTIES (gas main, poisonable drink, fuse box), uniform across the city, so every location is a sandbox and the 508km2 world does the work 7 maps used to. Replayability is multiplication: many places x many ways (x co-op) vs Hitman's one-map-x-many or GTA's many-x-one. Audited existing systemic bones (perception.ts, chance.ts, actions.ts, interactions.ts, inventory.ts, doors.ts, ContextMenu action menu all present; flagged disguise/NPC-routines/body-discovery as gaps — user corrected that disguise is partly in cart/scape3d/ awaiting port, now auditing). Recommended the slice should stress-test the systemic-vs-authored depth question directly. Offered to fold the pillars + missing-verb priority + slice-as-thesis-test into the opening-arc design doc. Continues in req_0377 (scape3d audit).",
+  "shas": [],
+  "resolvedAt": "2026-06-08T22:45:27.393Z"
+}

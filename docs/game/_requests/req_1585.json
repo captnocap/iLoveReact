@@ -1,0 +1,28 @@
+{
+  "id": "req_1585",
+  "at": "2026-06-21T14:44:59.268Z",
+  "origin": "session:6e3404e7",
+  "text": "i would log it as a starting point, log all of it and see what the problem is",
+  "status": "review",
+  "sessionId": "6e3404e7-9c3d-4b02-be2b-4b93ea47d0fe",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T14:45:19.326Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T15:01:43.034Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Per the user's instruction to 'log it as a starting point, log all of it and see what the problem is', added staged memory + size instrumentation to the bake instead of theorizing: a /proc/self/status RSS+peak probe (memStage) at each pipeline stage in bakeGameFile.ts, byte-size logs for mapContainer/writeGameFile/base64/JSON, and an instance-buffer size log in worldGeometry.ts. Run under /usr/bin/time -v this localized the OOM precisely to the base64+JSON emit stage (world gen peaked at a comfortable 490MB; crash came right after writeGameFile at 70MB). The logging stays in (bake-only, stderr) as early-warning telemetry for a growing world. This directly drove the req_1584/req_1586 fix.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T15:01:43.034Z"
+}

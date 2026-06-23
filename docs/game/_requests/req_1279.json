@@ -1,0 +1,18 @@
+{
+  "id": "req_1279",
+  "at": "2026-06-18T10:47:24.968Z",
+  "origin": "session:47c6ef45",
+  "text": "hm... seems as i progress through this car model the compass gizmo has lost its letters [Image #1]",
+  "status": "doing",
+  "sessionId": "47c6ef45-886b-4a68-a568-e624c3124d48",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-18T10:48:07.029Z",
+      "actor": "47c6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

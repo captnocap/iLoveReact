@@ -1,0 +1,12 @@
+{
+  "id": "req_0151",
+  "at": "2026-06-06T17:42:31.708Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — WBSTEP7-0606, queued after your dead-record task: the workbench fold resumes on the user's word. You build the MATERIAL SOURCE per cart/hmsc-int/WORKBENCH.md — read sections 1-4 (shape, three laws, WorkbenchSource contract, nav) and section 6 step 7 before writing anything. Scope per the ledger: roster = stored materials + shader recipes + decals; stage modes PREVIEW / SHADER LAB / COMPOSE; Materialize = action. Inputs: census tables at cart/hmsc-int/editors/workbench/census/textures.md (14 capabilities) and census/compose.md (18 capabilities) — every row is your coverage law; this is the biggest remaining source, 31 pending rows. Also read tools/request show req_0003 (paintable-shaders vs game materials unification) — the ledger expects this ask to surface at the material-source fold; report how your design answers it BEFORE building the shader-lab mode, and flag to the supervisor if it needs a user ruling. Pattern: the CHARACTER source (editors/workbench/characters/* + WBCHAR.CAPTURE.md + test suite) and the AGNOSTIC PAINT surface (editors/workbench/paint/, AGNOSTICPAINT.CAPTURE.md) — your COMPOSE/painting must consume THE agnostic paint surface, not reimplement painting (one painter; duplication is a review-blocker). Files under editors/workbench/materials/. Deliverables: (1) WBMATERIALS.CAPTURE.md parity table, every census row line-referenced to the dying /textures and /compose route sources — supervisor verifies independently; (2) the source live on /workbench with the three stage modes; (3) test suite; (4) your census rows flip PENDING->ACCOUNTED in WORKBENCH.md (only your rows). LAWS: additive only — /textures and /compose routes UNTOUCHED (they die in a later flip on the user's word); /cutout remains FROZEN, never touch it; the three chrome laws. Build via tools/rjit; verify green; READY with capture path + your req_0003 answer. DO NOT COMMIT. Only the user's hands PASS it.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}

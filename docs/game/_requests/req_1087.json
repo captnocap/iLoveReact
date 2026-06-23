@@ -1,0 +1,28 @@
+{
+  "id": "req_1087",
+  "at": "2026-06-15T22:52:59.668Z",
+  "origin": "session:760f9f8d",
+  "text": "seggy D: thread '<unnamed>' panicked at src/lib.rs:417:5:\nwgpu uncaptured error:\nValidation Error\n\nCaused by:\n  In wgpuDeviceCreateShaderModule, label = 'effect_gpu_shader'\n    \nShader 'effect_gpu_shader' parsing error: name `patch` is a reserved keyword\n    ┌─ wgsl:223:7\n    │\n223 │   let patch = fbm(uv.x * 8.0 + seed, uv.y * 8.0 - seed, 5.0) * 0.5 + 0.5;\n    │       ^^^^^ definition of `patch`\n\n\n      name `patch` is a reserved keyword\n\n\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\nthread '<unnamed>' panicked at library/core/src/panicking.rs:218:5:\npanic in a function that cannot unwind\nstack backtrace:",
+  "status": "review",
+  "sessionId": "760f9f8d-dc0f-4592-9807-536386b8fe20",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T22:56:36.269Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T22:56:36.277Z",
+      "actor": "760f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the WGSL crash from the grass-ground fix: fill_grass used 'patch' as a variable name (a WGSL reserved keyword) AND a backtick in a comment (which closed the JS template literal holding the WGSL string). Renamed the var to 'tone', removed the backtick. Re-bundled clean; rebuilt hmsc-int + self-shot PASS; rjit game shot PASS (the compiled heightfield material assembles the same fill, so it would have crashed there too). Root cause of the ground-color issue itself: grass tiles' surface.material is 'soil', and tileFillMaterialId mapped soil->sand fill (id 2, yellow), so the 3D ground painted grass with the sand shader while the 2D painter showed the green render.color. Added fill_grass (green lawn, matId 3) and routed all grass kinds to it (grassDry uses the drier variant 1).",
+  "shas": [],
+  "resolvedAt": "2026-06-15T22:56:36.277Z"
+}

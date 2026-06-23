@@ -1,0 +1,32 @@
+{
+  "id": "req_1483",
+  "at": "2026-06-20T02:09:24.834Z",
+  "origin": "session:1d61c909",
+  "text": "so here is where it gets weird and how u solve it while just passing the weird effect since idk what to say really\n\nbut if i place a floor under a staircase but there is no floor leading up to it, meaning i have to clear from the ground a floor + the first step, u would think, thats not going to happen. yet it works fine. \n\nthis quirk helps because\n\nall stairs need to be placed with a floor underneath, that solves the problem all the time. if there is a floor there, then it just places normally, if no floor, include a floor under the stairs first",
+  "status": "review",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T02:10:15.559Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T20:10:18.290Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The stair/floor weirdness is resolved without needing the floor-under-stairs auto-placement: the actual blocker was the invisible stair boundary walls (removed in 92690b54c), plus the step-height crest fix and walls-rest-on-floors. Stairs now collide as their visible slope. If the user still wants auto-floor-under-stairs as an authoring nicety, that remains an optional follow-up, but it is no longer required for stairs to work.",
+  "shas": [
+    "92690b54c",
+    "ab003a9ca",
+    "24bcfca88"
+  ],
+  "resolvedAt": "2026-06-20T20:10:18.289Z"
+}

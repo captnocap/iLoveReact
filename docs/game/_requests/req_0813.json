@@ -1,0 +1,18 @@
+{
+  "id": "req_0813",
+  "at": "2026-06-13T19:07:56.588Z",
+  "origin": "session:6e5908e6",
+  "text": "so....? what are we going to do about the roads. i want this texture right here for the road and there is 0 reason why that cant happen. i want this: [Image #24] and this is what i have instead: [Image #25] \n\nfurther more i now have this which fucking blows ass [Image #26] wheres the road? we arnt done til i have this: [Image #27] in placement of this: [Image #28]",
+  "status": "doing",
+  "sessionId": "6e5908e6-760d-4c9a-9102-7162255e11ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T19:08:43.714Z",
+      "actor": "6e59",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

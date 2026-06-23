@@ -1,0 +1,13 @@
+{
+  "id": "req_0227",
+  "at": "2026-06-07T10:24:54.650Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: REQBOARD amendment from the user — REQSEC-0607, the SECRETARY. User verbatim: \"we can use the useAssistant hook and hit a model who can evaluate and categorize and all that jazz. since the mix of them is a shit show. something like tags or whatever, that way can search by tag or etc. and if model doesnt know they dont do nada. but would keep it far more organized and can do it for free effectively and that way, we keep the hook on all the same, nothing changes, we just have a secretary\". What this changes in your slice: (1) CAPTURE POLICY REVERTS — the user's words are law: the hook captures as it originally did (blanket, keeping only the original trivial-ack/minChars noise rule). If you already built marker-only capture (jobMarkers), remove it — capture changes NOTHING. The dispatch-origin exemption and board filter stay. (2) SECRETARY: survey the framework's existing useAssistant hook FIRST and use its existing wiring — the requests surface runs untagged entries through the model, which returns category tags (seed vocabulary: bug, perf-log, ask, ruling, ux, idea — model may extend). Model unsure → NO tags, entry untouched, never an error. Tagging is async and NEVER blocks or delays capture; model unavailable → everything still works untagged. (3) Tags persist via the same store door as everything else (append-only; one source of truth — no parallel tag file). (4) SEARCH: by tag in the panel (rail/filter chips) and CLI (board --tag X, list --tag X). (5) Tags are organization ONLY: states, resolution discipline, and the user-only done gate are untouched by the secretary. Tests: tag persistence, unsure→untouched, search-by-tag, capture works with model absent. Fold this into your READY — the detail-view fix, dispatch filter, and verifier green all still come first.",
+  "status": "new",
+  "sessionId": "09015194-0a9b-4ae6-acf8-d964ee783d82",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "idea"
+  ]
+}

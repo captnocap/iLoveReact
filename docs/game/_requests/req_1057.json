@@ -1,0 +1,28 @@
+{
+  "id": "req_1057",
+  "at": "2026-06-15T19:55:30.145Z",
+  "origin": "session:00a3ce8a",
+  "text": "Fantastic!! next, i need you to add in rotate tool. so can rotate the object to the correct oreientation",
+  "status": "review",
+  "sessionId": "00a3ce8a-053c-413f-9b47-41786a81e969",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T19:57:25.475Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T20:03:33.561Z",
+      "actor": "00a3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rotate tool added — the move/resize/rotate gizmo triad (req_1057), to spin a part to the correct orientation (e.g. a freshly-added cylinder onto its side). Pure op rotateVerts(mesh, indices, anchor, axis, angle) in editMesh.ts (right-handed about +X/+Y/+Z, positions-only so faces/UV/mounts are untouched). The gizmo (meshGizmo.tsx) renders three RGB axis rings (one world circle per axis, sized to ~armPx on screen like the move arms, back half depth-hidden); pickGizmoHandle gained a rotate branch (nearest ring within the grab radius). Drag math: screen-angle about the anchor mapped to a world rotation about the picked axis, with the spin direction frozen at mousedown via rotationSign (derived from the projected ring's signed-area winding, so no camera view-direction is needed). It SNAPS like every other gizmo (req_1023): default 15 deg (STUDIO.rotateStepDeg), Shift = 1 deg, Alt = freeform, with a live degree readout. Reuses the existing gizmoDragRef + commit-on-release draft flow, and is twigged via the existing gizmoTool hotstate. It operates on the current selection, so whole-object reorient = Ctrl+A (select all) then rotate. editMesh 46/46 (+rotateVerts test), Studio + full workbench source chain bundle clean; hot-reload TSX, uncommitted. Follow-up: an object-mode rotate that targets the whole part without select-all. PLAYBOOK Part 6 + memory updated.",
+  "shas": [],
+  "resolvedAt": "2026-06-15T20:03:33.561Z"
+}

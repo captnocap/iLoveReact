@@ -1,0 +1,33 @@
+{
+  "id": "req_0478",
+  "at": "2026-06-10T07:28:12.338Z",
+  "origin": "session:11eafc6e",
+  "text": "clean. nice job. now, can you give me a tool for building sky scrapers easier. i have the capability to draw walls in run length but not in height and so doing several layers of height is a timely task also since these will be hollow the could be painted in a 3 dimesion space with 6 faces for skins",
+  "status": "review",
+  "sessionId": "11eafc6e-a623-4de3-9c44-7288f18f3e9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T07:29:18.219Z",
+      "actor": "session:11ea",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T07:50:38.977Z",
+      "actor": "session:11ea",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Skyscraper tooling in the iso build pane, two capabilities. (1) TOWER tool — a 🏙 chip in the catalog rail: drag a footprint rectangle and get a HOLLOW shell (perimeter walls stacked N floors high + a flat roof cap) committed as ONE stamp — one undo step, one flat-pad terrain lift, one building under select/move/clone/save-as-prefab. A +/− floors control (1–30, default 8) shows while the tool is armed; a plain click drops a 1×1-cell tower. Walls are oriented front-outward (N/E/S/W) so the shell is a clean 6-face box. (2) FACE PAINTER — with a building selected, a panel offers N/E/S/W/Top/In buttons plus a brush (12 color swatches + a registry-material cycler incl. Materialized customs); each button paints that world-facing side of the selection in one click, using geometric exterior detection so hand-built shells paint correctly too. Backed by a new worldStream event pieceSkinSet (mirrors pieceEditSet; merges slots, keeps the piece id stable so the selection survives painting face after face), validated at the materializer and map-scoped in both commit paths. placed.test.ts 47/47 incl. a new pieceSkinSet behavior test; rjit game verify GREEN 72/72; bundle clean. Commit 15d8bec33 (note: includes a co-editing lane's completed prefab-skin-refresh hunks in stream.ts/placed.test.ts that rode the shared files, per the land-it ruling).",
+  "shas": [
+    "15d8bec33"
+  ],
+  "resolvedAt": "2026-06-10T07:50:38.977Z",
+  "tags": [
+    "ask"
+  ]
+}

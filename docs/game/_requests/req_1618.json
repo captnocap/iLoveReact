@@ -1,0 +1,18 @@
+{
+  "id": "req_1618",
+  "at": "2026-06-22T13:28:06.804Z",
+  "origin": "session:e36112e0",
+  "text": "huh. so i imported a model and the entire ui goes blank [Image #1] i assume cuz it says 15872 faces lmao",
+  "status": "doing",
+  "sessionId": "e36112e0-5303-4202-ba4f-5d93412ec821",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T13:28:46.739Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

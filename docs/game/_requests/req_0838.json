@@ -1,0 +1,32 @@
+{
+  "id": "req_0838",
+  "at": "2026-06-13T21:23:06.827Z",
+  "origin": "session:ac60258b",
+  "text": "good.  now two more areas for you to test and use this as the test for fixing the shit correctly. \n\ntest \n\nek52 = pass\nek53 = fail\nek100 = fail \nek121 = pass\nek173 = fail\nek170 = pass\n\n\nnote: all of these should be PASS but look at the back and forth",
+  "status": "review",
+  "sessionId": "ac60258b-2e2e-4a0c-a6c8-3ebae4aa1c72",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T21:24:37.552Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T21:58:42.485Z",
+      "actor": "ac60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extended the road-render gate to arbitrary cells across multiple chunks (renders all painted chunks; groups cells per chunk for the /quad control and into tight z-clusters for /mesh so adjacent flips resolve; accepts =pass/=fail tags to cross-check against the user's eyes). Fixed a real determinism bug: frame 90 captured before the async heightfield-mesh bake settled (two shots differed 0.86%), so bumped capture to frame 200 (now 0.01% noise). Validated on EK52..EK173 across chunks (1,0)/(1,1): all 6 verdicts match the user's observed state. Characterized the bug reliably from the real /mesh render: a hard, KIND-INDEPENDENT, per-chunk-local cliff at cy~53 — road-family cells (median/crosswalk/junction) render correctly for cy<53 and uniformly as concrete material for cy>=53. Ruled out: tile data, the shared formula (/quad draws asphalt everywhere), D-buffer upload (full 14480 floats, no truncation), mesh extent/resolution (121 verts over 120m, correct), and vertex-buffer truncation (89k<98k cap). Mechanism not yet pinned: a /diag probe route was added but its DiagLandform replica diverges from the real mesh's uv, so it gave contradictory readings and cannot be trusted. Next: instrument the real HEIGHTFIELD_TILE_BODY directly. Committed cf550a5dc, fdd8c791f, 17fa983b9.",
+  "shas": [
+    "cf550a5dc",
+    "fdd8c791f",
+    "17fa983b9"
+  ],
+  "resolvedAt": "2026-06-13T21:58:42.485Z"
+}

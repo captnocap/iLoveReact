@@ -1,0 +1,28 @@
+{
+  "id": "req_1136",
+  "at": "2026-06-16T07:28:42.663Z",
+  "origin": "session:eef64544",
+  "text": "huh. i see the prop. i cant place it tho. idk why but i cant. its there tho",
+  "status": "review",
+  "sessionId": "eef64544-c672-4883-add8-12dffa52f94c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T07:29:18.818Z",
+      "actor": "eef6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-16T07:37:37.394Z",
+      "actor": "eef6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed 'the cooked prop shows in the palette but won't place.' Root cause was a sync-ordering bug, not logic: game/world/stream.ts:267 drops a piecePlaced whose pieceId isn't a known catalog id, and a V20 stream's state() is a cached fold (snapshot + incremental appends), so when the worldStream folded buildPieces BEFORE the cooked-prop overlay was synced (it was synced lazily by the deep CatalogRail, which renders after the fold), the placed cooked prop was dropped and stayed gone. Verified with a new headless repro (editors/model/cookedPlacement.test.ts, 4/4) that walks the exact chain — overlay resolves, catalog lists, validatePlacement passes, and the worldStream materializer KEEPS the cooked piecePlaced — proving the logic is correct given sync order. Fix: added ensureCookedRegistry() to editors/model/cookedAssets.ts (registers the persisted cooked props into the prop + build-catalog overlays) and call it in index.tsx in a useMemo BEFORE editorChannel(worldStream) is created, so the overlay is populated ahead of every fold and the placement apply. This makes a cooked prop placeable now AND survive a cold reload. cookedPlacement 4/4, cookedAsset 13, cookedAssetStream 8, build 25 all green; index.tsx + IsoAuthor bundle clean; hot-reloadable. The /compiled bake + texture fold remain. Uncommitted by the user's lead.",
+  "shas": [],
+  "resolvedAt": "2026-06-16T07:37:37.394Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_0578",
+  "at": "2026-06-10T17:27:42.706Z",
+  "origin": "session:1b2ce00d",
+  "text": "I see , its more correct now, it still though gives a weird effect. lets look i made this a bit more clear. your map has the right turn of the up and down lanes color weird. so i put these arrows in the picture. if u could somehow get arrows as a toggle overlay in here that would be really nice [Image #3]",
+  "status": "review",
+  "sessionId": "1b2ce00d-1639-40fe-8b5a-0f2b48b361f4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T17:28:27.132Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T17:31:45.125Z",
+      "actor": "session:1b2c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the requested arrow overlay (79aa594a7): laneFlowArrows in roadData.ts emits a glyph every ~5 tiles on each lane's centerline pointing the lane's TRUE travel direction (right-hand-traffic side assignment pinned in tests against the user's exact vertical road), rendered as small badge dots colour-matched to the canonical wire legend. New 'flow arrows (per lane)' toggle in the road rail, default ON, independent of the wires toggle. This is the disambiguator the colours couldn't be — at junctions every lane now literally points where it drives. roadData 26/26, full cart bundles, hot-reloads.",
+  "shas": [
+    "79aa594a7"
+  ],
+  "resolvedAt": "2026-06-10T17:31:45.125Z",
+  "tags": [
+    "bug"
+  ]
+}

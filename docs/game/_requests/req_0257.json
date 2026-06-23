@@ -1,0 +1,13 @@
+{
+  "id": "req_0257",
+  "at": "2026-06-07T11:33:18.553Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: PLATMOD SLICE 1 — the player binary that loads a game package. User-ruled GO. Cold-start reading order, before any code: (1) docs/game/PLATMOD_PLAN.md IN FULL — it is the plan AND carries the user's fresh rulings inline (naming stands: .rjpkg / rjit pack / rjit play; content store = content-addressed dir in the player's data dir, atomic temp+fsync+rename writes, hash IS the corruption check, mmap reads; Compile dual-writes boot key + mapfile through this slice). (2) docs/game/DECISIONS.md verdicts V28/V29/V30. (3) tools/oracle \"platform mod map format player binary package\".\n\nExecute §1 + §2 of the plan in its stated build order: lump container → Compile transcode → loader → package shape → player binary boot. The done-bar is §5, all four, none waived: (a) round-trip equality verify script (mapfile-boot vs boot-key-boot, same world facts) added to the verify corpus and GREEN; (b) codec suites BOTH sides — TS and Zig (the testing-parity rule is law); (c) SELFSHOT of the player binary booted on the package, PNG path cited (the app shoots itself, never the desktop); (d) second-mod grep proof: zero cart/hmsc imports in the player boot path.\n\nExplicitly NOT in this slice (§1d): mining, VIS, changelevel, content store beyond the one map. Do not grow scope.\n\nWorking rules: do everything yourself in your own context — no subagents. Build via tools/rjit only. The workbench fold is live on other lanes — touch nothing under cart/hmsc-int/editors/ beyond what Compile transcode requires, and report (never fix) any cross-lane verifier red. Post progress at each build-order boundary with evidence; commits land on my word at boundaries I name. If the plan turns out wrong somewhere, say so and stop — the plan amends before the code bends.",
+  "status": "new",
+  "sessionId": "019ea1db-5f93-7392-8554-9c688d1be33f",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

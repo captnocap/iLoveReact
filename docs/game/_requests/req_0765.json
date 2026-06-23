@@ -1,0 +1,28 @@
+{
+  "id": "req_0765",
+  "at": "2026-06-13T14:33:22.590Z",
+  "origin": "session:aec89f3e",
+  "text": "so what about this one ? [Image #11] or this [Image #12] or actuall that last one is right but i rotated it or something and its off",
+  "status": "review",
+  "sessionId": "aec89f3e-12a8-4481-9f79-5c47d9a8c376",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T14:34:43.056Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T14:48:59.480Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Stage A of the round+offset footprint work (FOOTPRINT-0765): the EXACT model-measured footprint now carries the model-center OFFSET so an off-center body (arcade cabinet, whose mass sits forward of its anchor) tracks the drawn mesh under rotation instead of a centered box that swings off — the 'right but off when I rotated it' case. propModelFootprintMeters() in game/kinds/propModels.ts now returns {width,depth,offsetX,offsetZ,round} (true span + center + a round-base flag); world/props.ts applies the rotated offset to the prop footprint AABB and the oriented physics rect (off-center props now ride the oriented lane even when square); game/build/placed.ts builds the iso/compiled build-piece prop collider as one offset-aware oriented rect about the anchor; editors/build/pieceMeshes.tsx propSelectionShape offsets the selection box to match. The rotation convention was matched to pieceShapes.localOffset / the host oriented-rect parity but NEEDS in-engine confirmation (cannot be verified headlessly). Verified headlessly: hmsc-int bundles clean; 129 tests pass across 7 suites. Stage B — circular colliders for round props (fountain/barrel/drum: the square-over-circle in image 11) — is NOT started; it requires a new round-collider lane in the host (framework/game/physics.zig), the JS packer (state/hostPhysics.ts), the compiled bake (compile/worldColliders.ts + framework/world/constructor.zig), and a Zig rebuild, so it is deferred as the next step pending Stage A in-engine verification. GIT: the shared-index hazard split this work — my propModels.ts/placed.ts/pieceMeshes.tsx edits were swept into the parallel session's req_0764/req_0766 commits (committed intact, no diff); world/props.ts/catalog.ts/props.ts remain uncommitted on disk (coherent, tested). HEAD already depends on the parallel session's untracked importedProps.* files, so commit sequencing of the remainder is deferred to the supervisor.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T14:48:59.480Z"
+}

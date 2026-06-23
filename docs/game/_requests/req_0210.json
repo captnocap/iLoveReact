@@ -1,0 +1,12 @@
+{
+  "id": "req_0210",
+  "at": "2026-06-07T07:10:31.531Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — CRITICAL on your item-source rework, supersedes the bake details of auto-flow: THE GLOBE BAKE IS UNACCEPTABLE for voxel shapes. User evidence, same item: voxel /home/siah/.claude/image-cache/42677ed6-e8fa-4672-83bf-b68e46d28bef/22.png (crisp tower: slab base, rectangular column, cube cap) vs the bake .../23.png (melted radial blob, the cap reduced to a spike, grab spheres floating in it). User: \"does this look right to you?\" — it does not. Root cause is the representation: the Globe is a radial star-shaped heightfield and cannot hold flat faces, sharp edges, overhangs — the star-wrap limit your own capture table cites. With AUTO-FLOW ruled (the blockout IS the sculpt base), this representation ceiling is now THE item pipeline blocker. Do not patch around it — bring a PROPOSAL with honest costs, options to evaluate: (a) sculpt operates on the voxel SURFACE MESH directly (sculpt = displacement on the actual blocky mesh; no Globe in the item path); (b) items gain a real mesh representation alongside Globe (framework-level; we own the whole stack — \"not possible\" is not a thing here); (c) any better shape you find. Constraint from the ruling that stays: blockout carries into sculpt immediately and faithfully — faithful means it still LOOKS like the tower. Post the proposal; the user rules if framework-grade. This blocks your auto-flow implementation — do not ship a melted-tower version of it.",
+  "status": "new",
+  "sessionId": "019e9ca8-c139-7760-ae81-79cc076c6cc0",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

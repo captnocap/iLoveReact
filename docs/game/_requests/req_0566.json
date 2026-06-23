@@ -1,0 +1,39 @@
+{
+  "id": "req_0566",
+  "at": "2026-06-10T16:17:33.968Z",
+  "origin": "session:7a5b02e7",
+  "text": "hey inside of the compiled game output i am not getting these to show up [Image #8] [Image #9] D: can u solve for the problem the same the other materials already come in",
+  "status": "review",
+  "sessionId": "7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T16:17:56.108Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T16:31:21.638Z",
+      "actor": "fable-mat",
+      "kind": "note",
+      "text": "Root cause found: decal materials (DecalDoc — composed text/rect/image) ship NO WGSL recipe, so worldGeometry.ts internMaterial drops them to flat color in the compiled bake (the documented 'captured-pixel tail' gap at worldGeometry.ts:54). Fix in flight: bake-by-execution (V29) — editor captures decal pixels via a new __surface_readback door, pixels ride the material record + MATERIALS lump PIXS tail, loader uploads them as the face texture."
+    },
+    {
+      "at": "2026-06-10T16:52:10.992Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Decal materials now reach the compiled game (commit c75521af3). Root cause: decals are authored React content with no WGSL recipe, so the headless bake dropped decal-skinned faces to flat color (the documented gap at worldGeometry.ts internMaterial). Fix is V29 bake-by-execution end to end: a DecalPixelBaker mounted in the editor shell renders every saved decal offscreen and reads its pixels back through a new __capture_surface_pixels host door (gpu.readbackStaticSurface), persisting an RLE pixel payload with a doc-hash staleness key on the material record; the bake ships those pixels in a backward-compatible PIXS tail of the MATERIALS lump; constructor.zig decodes it and material_tex.materializePixels uploads it under the same wmat key shader materials use, so textured batching/streaming are shared. Existing decals backfill automatically the next time the editor runs (no re-save needed). Tests: decalPixels.test.ts 7/7 + worldGeometry.test.ts 4/4 incl. tail layout and no-pixels byte-compat; world_loader binary builds clean; hmsc-int cart bundles clean. NOTE for verification: the editor host binary needs one rebuild (new Zig host fn — hot reload alone will not add it), then open the editor once so the baker backfills, then rjit game play.",
+  "shas": [
+    "c75521af3"
+  ],
+  "resolvedAt": "2026-06-10T16:52:10.992Z",
+  "tags": [
+    "bug"
+  ]
+}

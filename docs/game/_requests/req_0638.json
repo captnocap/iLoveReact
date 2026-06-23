@@ -1,0 +1,32 @@
+{
+  "id": "req_0638",
+  "at": "2026-06-11T12:04:16.904Z",
+  "origin": "session:7de3e0b0",
+  "text": "hey when u get done with all of those, forgot this is getting comical lmao we need a better approach for this tool [Image #5] the millions of buttons is insane",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-11T12:04:28.450Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T12:05:11.992Z",
+      "actor": "7de3",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The button wall is gone: PROP_CATEGORIES in the prop registry shelves all ~100 kinds into 11 categories (nature, trees, rocks, street, signs, furniture, household, media, commerce, junkyard, sport — a suite-enforced total disjoint partition), and the iso build rail's prop tab now shows a category chip row first, listing only the selected shelf's pieces (max 17 buttons instead of 98). The shelving is registry data, so any future picker (ObjectsTab roster etc) can group the same way. sha c7986b11c.",
+  "shas": [
+    "c7986b11c"
+  ],
+  "resolvedAt": "2026-06-11T12:05:11.992Z",
+  "tags": [
+    "ux"
+  ]
+}

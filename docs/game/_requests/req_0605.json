@@ -1,0 +1,33 @@
+{
+  "id": "req_0605",
+  "at": "2026-06-11T05:06:41.496Z",
+  "origin": "session:9361f55b",
+  "text": "for the props in the hmsc-int world, make a script that will let you get a size comparison to the player model as a static readout so we can get instant validation on size",
+  "status": "review",
+  "sessionId": "9361f55b-0780-4569-bbc9-0034d03a84cc",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T05:06:51.936Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T05:13:42.105Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built tools/prop-scale: a static prop-vs-player size readout for the hmsc-int world. New entry cart/hmsc-int/world/propScaleCli.ts measures the player reference from the LIVE stand-pose skeleton (head-top 2.01m, eyes/chest/waist/knee landmarks) rather than a constant, then prints every PROP_KIND_DEFINITIONS kind with height, ratio vs head-top, the body landmark it tops out at, collision footprint diameter vs the physics capsule, and a bar chart with the player line marked in every row — instant validation by reading one table, no editor boot. Supports substring filters, --sort name, and --json. Wrapper follows the tools/oracle pattern (auto-rebundle via tools/esbuild, runs under tools/v8cli, bundle gitignored). docs/game/hmsc.md + _index/records/hmsc.ts updated per the maintenance contract; oracle self-parse verified.",
+  "shas": [
+    "93ff713af"
+  ],
+  "resolvedAt": "2026-06-11T05:13:42.105Z",
+  "tags": [
+    "ask"
+  ]
+}

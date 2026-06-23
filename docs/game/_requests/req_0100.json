@@ -1,0 +1,18 @@
+{
+  "id": "req_0100",
+  "at": "2026-06-06T12:19:01.360Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — NEXT IN YOUR QUEUE, after the WALLTOP side-anchor fix lands: RAMPSIDE-0606. User verbatim: \"hey so why do ramps always seem to be able to walk thru the side wall of them? like here in the build tools but also in other ramps claude has made. the slope is fine, then the side of the them is just hollow. ??? they have a side wall but its entirely walk thru ble\". Systemic, not one ramp: every ramp (build-tool ramps and older hand-built ones) has a visually present but collision-hollow side face. Likely shape given your heightfield work: ramps register ground height only (slope = heightfield column, which is why the slope works) and never register solid rects for their side/back faces. Print the data first: a ramp's actual collision registration (heightfield columns + any solid rects) vs its visual geometry — show the side face missing. Then fix: ramp side and back faces are solid, same collision class as walls. Regression test at the consumption layer: character walking into a ramp side face is blocked, slope walk still works, and the FLOOREDGE seam/at-rest guarantees stay green. DONE-BAR: verify green + before/after registration data + test + READY. DO NOT COMMIT. Only the user's live confirmation makes this a PASS.",
+  "status": "done",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T17:18:15.416Z",
+  "resolution": "Ramps now register the walkable slope heightfield plus wall-class solid blockers on the two sides and far/high back face. The first landed blocker exposed a live walk-up regression, then the follow-up moved the hard band off the low approach edge so the slope remains walkable while side/back faces block.",
+  "shas": [
+    "6d21dd74c67d4925d327caa6f5d2a843c6db4162",
+    "ccc486e50dc58cff9e05088bfe52e0cc3f5d9a3b"
+  ],
+  "tags": [
+    "ruling"
+  ]
+}

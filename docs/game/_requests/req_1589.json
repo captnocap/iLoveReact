@@ -1,0 +1,28 @@
+{
+  "id": "req_1589",
+  "at": "2026-06-21T15:08:59.601Z",
+  "origin": "session:6e3404e7",
+  "text": "so that sounds more correct but the one thing i question is u said the 'rest is v8s runtime heap' but what does that mean because v8 isnt in the game data so ?",
+  "status": "review",
+  "sessionId": "6e3404e7-9c3d-4b02-be2b-4b93ea47d0fe",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-21T15:09:35.799Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-21T15:10:17.588Z",
+      "actor": "6e34",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected a conflation the user rightly challenged: I had quoted the bake's 490MB peak RSS as if it bore on 'game data scope', and called 113MB of it 'V8 runtime heap'. Measured bare v8cli = 14.5MB, so that label was wrong. Separated the two axes clearly: (1) GAME DATA = the 70MB game-file the shipped Zig no-V8 loader reads — zero V8 in the game — of which 56MB is foliage product bloat and ~14MB real; this is the true 'scope' number and drops to ~14MB after the foliage-as-formula fix. (2) BAKE TOOL memory = the 490MB peak, the compiler's transient working set (GL rule #2: a compiler, not a runtime; never ships), composed of ~14MB V8 engine + ~98MB loaded bake program & input map parsed to JS objects (288k painted cells + 2247 pieces) + the instance-buffer build (boxed number[] 105MB + 52MB Float32 copy) + 70MB output container. No code change — a measurement+clarification answer; V8 is not in the game and is only ~14MB of the bake tool.",
+  "shas": [],
+  "resolvedAt": "2026-06-21T15:10:17.588Z"
+}

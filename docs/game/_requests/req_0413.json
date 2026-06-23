@@ -1,0 +1,30 @@
+{
+  "id": "req_0413",
+  "at": "2026-06-10T02:28:50.021Z",
+  "origin": "session:9440c2b7",
+  "text": "hey where we last were, my power went out. i am resuming the convo now, looks like i sent the last message so we can pick up from there",
+  "status": "review",
+  "sessionId": "9440c2b7-fcc6-4745-a2a5-309cd273e004",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T02:29:28.146Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T02:34:23.377Z",
+      "actor": "iso-author",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resumed after the user's power outage. Two gaps from before: no grid, and the piece palette wasn't obvious. Root cause on the grid: Scene3D's showGrid prop is a NO-OP (nothing in framework/ or runtime/ draws it), so it never rendered — replaced it with a real tile grid drawn as thin line-box meshes on the active floor, world-anchored and recentred in coarse 4-tile steps (memoized on the snapped centre + level) so a pan doesn't churn the mesh list and a zoomed-out view doesn't spawn thousands of lines; major line every 8 tiles; the grid rides the active floor height so changing levels lifts it. The catalog rail already rendered (the catalog has 7 wall pieces etc.) but read as dark-on-dark text; made it unmistakable with a 'PIECES — <kind> (<n>) · click one, then click the ground' header and larger/brighter/higher-contrast kind tabs + piece chips. Bundles clean (esbuild exit 0). Not runtime-verified by me.",
+  "shas": [
+    "9eda7514e"
+  ],
+  "resolvedAt": "2026-06-10T02:34:23.377Z"
+}

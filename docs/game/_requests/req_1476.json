@@ -1,0 +1,32 @@
+{
+  "id": "req_1476",
+  "at": "2026-06-20T01:43:39.713Z",
+  "origin": "session:1d61c909",
+  "text": "this problem is actually bigger if we want to really nab it. let me show you. prepare yourself\n\n1: [Image #7] this wall you cant see the floor, but there is a floor, look [Image #8] \n2: this is another wall, [Image #10] but look, you can see the floor on this side of it. same wall piece, same floor piece\n3: here is a wall piece that has no floor[Image #11] \n\n\nnow, you might be asking right away, why does that one have the wall on the floor and the others do not. idk. i actually dont know. its dumb isnt it. to tell you how i got there is what matters and its what shows on this next example. \n\nso lets set down a floor piece first. and then a wall. and then lets set down a wall first, and then a floor. see what happens\n\nfloor first: [Image #12] \nwall first: [Image #13] \n\nok so its decisive here, that if a floor is first, then the wall for it, is placed ontop but if the wall came first the floor just sits **inside of it** and not beside it. meaning, the floor is what is wanting to be the most dominant piece here, so much so it will collide with the wall but not push it upwards when its placed after the fact\n\nnow the interesting part here, lets expand\n\nso when  you are drawing walls, you can do them one by one or you can draw a line of them. ok so how does the line drawing affect this? \n lets see\n\nso the walls first, then floors [Image #14] \nand then reverse that [Image #15] \n\nand... they are the same now.. ? ok\n\nso then what happens when you place the floors, and then place the walls one by one vs in a line? \n\n[Image #17] \n\noh, thats a problem.\n\nso from this we now also know, line drawing of walls, always places the wall on the side of the floor and collides with it, single pieces do on top of the floor. \n\nnow why the fuck does any of this matter for stairs\n\nwell, first staircase is always going to be either from a ground or a floor. but the 2nd floor is always going to be either the floor is made after the walls or before, it could truly go either way\n\nso then, stairs, lets see what happens if we put floor -> stair -> floor vs stair -> floor vs stair -> wall -> floor \n\nstair -> wall -> floor [Image #18] \nfloor -> stair -> floor [Image #19] \nstair -> floor [Image #20] \n\nalright, so from this, we can see very clearly the only one to align at the t op of the stairs is the floor -> stair -> floor, but thats weird, we have the floor -> step -> floor exactly at the spot i was complaining about? so what is it then? idk. but i think this gives u enough info to figure it out. you are welcome",
+  "status": "review",
+  "sessionId": "1d61c909-7a15-4b3e-920a-b1df27f5309d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-20T01:44:30.923Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-20T02:21:38.903Z",
+      "actor": "1d61",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused and fixed the build-piece Y mismatch behind the staircase collisions. The long-open WALLTOP-0606 bug (req_0099): a wall stored its Y from whatever surface the placement hit, so single walls aimed at a floor top rested ON the floor while line-drawn walls and floor-after-wall placements stayed at ground/side Y — a mix that misaligned everything stacked above (the extra/short step where a staircase lands on a floor). Durable cure (24bcfca88): DERIVE the wall rest-Y from the floor beneath it at geometry time via liftedWallBaseY/liftWallsOntoFloors, applied read-time in placedPieceColliders (collision/nav/bake) and pieceVisualShapes (render) so no placement path can miss it and see-it==walk-it. Stored data stays raw (no double-lift on edit), idempotent, delete-floor drops the wall, fixes EXISTING walls on load. 56/56 placed tests. Combined with the earlier stair-crest step-height fix (0.35->0.5, commits ab003a9ca/9eb8bc304). REMAINING (the user's Path A part 2): auto-place a floor under stairs — deferred pending a live recompile+test of the wall fix, since it may already resolve the walk and the floor-under-stairs Y bookkeeping is best verified against real behavior.",
+  "shas": [
+    "24bcfca88",
+    "ab003a9ca",
+    "9eb8bc304"
+  ],
+  "resolvedAt": "2026-06-20T02:21:38.903Z"
+}

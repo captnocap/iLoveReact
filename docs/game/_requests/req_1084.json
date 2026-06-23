@@ -1,0 +1,24 @@
+{
+  "id": "req_1084",
+  "at": "2026-06-15T22:45:22.139Z",
+  "origin": "session:6de4f048",
+  "text": "yep  u were damn right haha ok and nice!!! the textures landed great :D !! [Image #4] thanks dude. i have one thing i can get u to fix on top of this since u are in the weeds of it. an agent the other morning added the different roof types. and then this came with me asking for the ability to skin the faces, got that. and it skins. well i didnt look til later on that the compiled route does this with the skin [Image #5]  lmfao idk if it has collision because of it or what cuz i cant get to that roof but there is that, and then i also realized it does this too to props, this is suppose to be a cylinder[Image #6] xD",
+  "status": "doing",
+  "sessionId": "6de4f048-c04d-4674-87c7-dff1d1416eb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-15T22:46:48.934Z",
+      "actor": "6de4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-15T23:38:35.959Z",
+      "actor": "6de4",
+      "kind": "note",
+      "text": "ROOF half DONE + verified. Root cause: the compiled loader drew every material-skinned instance as a textured BOX (world_loader.zig opaque material batch + streaming proto both hardcoded geom_key=box), so a brick-skinned gable roof became a flat brick wall (Image 5). Fix: buildMaterialBatches now partitions skinned rows per (material, shape) and a new geomForShape() helper feeds the real keyed geometry (gable-prism/cylinder8/16/sphere/ramp) to both the monolithic opaque draw AND the streaming proto, all sampling the same wmat-<i> texture. Verified via rjit game shot on map=main: shot PASS, and '11 face material(s) -> 12 batch(es)' proves the brick material split into a box batch + a gable batch. Collision is unaffected (render-only change). CYLINDER half (Image 6, beige sphere that should be a cylinder) is a SEPARATE prop-recipe issue — an unskinned part shipping shape='sphere'; needs the prop name to fix. UNCOMMITTED (shares world_loader.zig with other sessions' grass/NPC/bush + the floor work)."
+    }
+  ]
+}

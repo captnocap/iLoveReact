@@ -1,0 +1,28 @@
+{
+  "id": "req_1234",
+  "at": "2026-06-17T13:41:34.882Z",
+  "origin": "session:c885b7cc",
+  "text": "ok so u see this empty space im pointing at [Image #14] so that is the inside of an extruded face, so there is no piece there to select and get it, or do i need to solidify that entire face which is actually the truck bed ?",
+  "status": "review",
+  "sessionId": "c885b7cc-ff13-4e61-9758-b31eadd12c25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-17T13:42:11.001Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T13:42:57.308Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User pointed at a dark empty wedge between the cab rear and the truck bed front and asked whether there is no piece there to select, or whether they must solidify the entire truck-bed face. Answered as a clarification — no code changed. Verified in meshSelect.tsx (pickElement) that face picking is screen-space-nearest to the centroid dot and explicitly supports back-facing elements (Blockbench-style, per the file's own comment). Explained: that gap is the BACKSIDE of an existing single-sided wall from their extrusion (not an empty hole), so there IS a face to grab; they can click its centroid dot from the current angle without orbiting to its front; and they do NOT need to solidify the whole bed — solidify takes any face subset, so they select just the wall(s) bounding the gap. Added the thin-channel caution: if the cab/bed slot is narrower than ~0.25m, solidifying both opposing walls (each insetting 0.125m) will self-intersect/invert, so solidify only the one wall they see into.",
+  "shas": [],
+  "resolvedAt": "2026-06-17T13:42:57.308Z"
+}

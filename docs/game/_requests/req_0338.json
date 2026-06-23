@@ -1,0 +1,33 @@
+{
+  "id": "req_0338",
+  "at": "2026-06-08T13:11:19.577Z",
+  "origin": "codex:019ea612",
+  "text": "TASK: turn the no-V8 game loader into a REACT COMPONENT that renders the compiled world INSIDE the internal game tool (the hmsc-int editor). The user wants to SEE the loader render embedded in the tool, and confirm it performs as well as the standalone window — it should, because the render is NATIVE ZIG (no per-frame V8), even though it's now hosted inside the V8/React editor stack. This is the \"compiled-world-as-embedded-primitive\": React hosts the surface; the Zig loader does the rendering. Build to docs/game/GUIDING_LIGHT.md.\n\nARCHITECTURE:\n- The loader's render CAPABILITY is reusable and lives in: framework/world/constructor.zig (decode a game-file -> Scene) + framework/world/gamefile.zig + framework/gpu/3d.zig (render a Scene3D node tree). The standalone main()/event-loop lives in world_loader.zig — that's the part you must NOT touch right now (see collision guard).\n- The editor renders via react-reconciler + a hostConfig -> the gpu shell (v8_app.zig) -> framework/gpu/3d.zig. So the editor ALREADY has gpu/3d.zig. Your job: a React component (e.g. <CompiledWorld gameFile=...> in cart/hmsc-int) that, instead of going through React reconciliation per element, hands a baked game-file to the native loader path and renders the constructed Scene3D into the editor's viewport (a render target / texture composited into the editor frame, or a dedicated panel/route). Reuse constructor.zig + gpu/3d.zig; add a NEW Zig host-binding/entry (new file) the editor calls to construct+render a game-file into a target.\n- It reads the baked game-file (zig-out/game/hmsc.gamefile, the tiny raw RJMP) + the content-store. No V8 in the render path itself.\n\nCRITICAL COLLISION GUARD: pane 5 (codex) is RIGHT NOW editing world_loader.zig AND cart/hmsc-int/compile/worldGeometry.ts for the ramp fix. DO NOT edit those two files. If the render orchestration you need only exists inside world_loader.zig main() and you must refactor it out, STOP and tell the supervisor — do not edit world_loader.zig while pane 5 is in it; the supervisor will serialize that step after ramps land. constructor.zig may be shared too — make only ADDITIVE changes there and FLAG the supervisor BEFORE committing anything in a file pane 5 might also touch. Build everything you CAN on the editor/React side + a new Zig binding first.\n\nBAR: ONLY the user running the editor and SEEING the loader render the compiled world inside the internal game tool, performing as well as standalone, counts. NEVER self-declare GREEN. When ready, tell the supervisor exactly what to run/open and what to look for (the embedded render + that it's smooth).\n\nGUARDS: native Zig render (no per-frame V8/GC in the render path — that's the whole point; if you find yourself routing the world through React reconciliation per-frame, STOP, that defeats it). No stubs. Own context — NO Task tool, NO subagents. tools/rjit only. Commit EXPLICIT paths (NOT git add -A; ~400 set-aside files). No reset/revert. /hand-over if low on context.",
+  "status": "review",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T13:11:27.317Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T13:23:47.968Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented compiled-world-as-embedded-primitive for hmsc-int: React mounts a single /compiled Scene3D viewport and calls a new __compiled_world_* binding; Zig loads zig-out/game/hmsc.gamefile + contentstore via framework/world/constructor.zig, retains a synthetic native Scene3D tree, and framework/gpu/3d.zig renders that retained scene inside the editor frame without per-frame V8/React reconciliation. Added source-gated build metadata and hmsc-int chrome/route wiring. Verified standalone game shot, hmsc-int ReleaseFast build, /compiled self-shot, metafile gate, and world gamefile Zig test.",
+  "shas": [
+    "35a1923ae"
+  ],
+  "resolvedAt": "2026-06-08T13:23:47.968Z",
+  "tags": [
+    "ask"
+  ]
+}

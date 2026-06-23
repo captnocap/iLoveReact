@@ -1,0 +1,28 @@
+{
+  "id": "req_0773",
+  "at": "2026-06-13T15:18:50.231Z",
+  "origin": "session:ef4fbf70",
+  "text": "we have glass already in windows so just change this to the same glass",
+  "status": "review",
+  "sessionId": "ef4fbf70-80d5-4234-8299-287d3ad47a05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T15:19:35.578Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T15:24:31.291Z",
+      "actor": "ef4f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the displayCase's glass pane REAL translucent glass — the same glass build-piece windows wear — instead of the solid blue box it was. Root: the displayCase recipe drew its pane as box(..., hx('#cfe6f2')) (opaque), because the prop-part model had no translucency. Fix, reusing the existing transparent path (no new glass system): PropPartSpec gains an optional opacity; a glassBox() helper builds a pane at the window glass tint (#bcd3dd) + opacity 0.3 (mirrors render3d/materials Glass / BuildingWindows, kept as local consts since game/kinds must not import the render layer); the displayCase pane now uses glassBox. Threaded opacity through render3d/parts.tsx (Part.opacity + PartMesh draws material={{color,opacity}} when untextured — like VisualBoxMesh's build-piece panes), DataProp (passes spec.opacity), and the compile bake (pushPropPart interns internTranslucent(b, opacity) for an untextured glass part — the SAME translucent flat-material path build-piece panes ride), so it reads as glass in BOTH /test and the compiled game. A skin still overrides the glass (the part stays textureable). Verified by a clean full-graph esbuild pass. NOT COMMITTED (--shas none): the glass edit is in propModels.ts, which also holds the still-blocked req_0769 chair recipe (its Prop.tsx routing is co-edited with another session's ImportedProp work). Committing the recipe without the routing would re-introduce a chair render/bake mismatch, so the whole set (req_0769 chairs + req_0773 glass + the opacity plumbing in parts/DataProp/worldGeometry) stays in the working tree until Prop.tsx frees up, then lands together. Live + hot-reloading now for testing.",
+  "shas": [],
+  "resolvedAt": "2026-06-13T15:24:31.291Z"
+}

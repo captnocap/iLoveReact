@@ -1,0 +1,28 @@
+{
+  "id": "req_1631",
+  "at": "2026-06-22T16:39:00.425Z",
+  "origin": "session:7a8f00d4",
+  "text": "the props are still there technically, i can click where i know the placement of it is, and it outlines its physics rect",
+  "status": "review",
+  "sessionId": "7a8f00d4-327a-4595-a613-6ceb3eb4cdb8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T16:39:29.884Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T17:50:45.097Z",
+      "actor": "7a8f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same resolution as req_1630: the clickable-physics-rect-but-no-mesh symptom was the OOM crashing before render, not a draw bug. Probes confirmed all props produce geometry and none are buried; the grass-render cap (req_1645) unblocked the editor and props now render. Cleanup of the [propgone] probes pending.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T17:50:45.096Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1627",
+  "at": "2026-06-22T16:31:18.811Z",
+  "origin": "session:0d310aad",
+  "text": "can you add a log to time the startup time im pretty sure i broke it",
+  "status": "review",
+  "sessionId": "0d310aad-1355-489d-ab3f-6188d489fc95",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T16:31:27.122Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-22T16:35:59.695Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added phased startup timing for the hmsc-int editor so the suspected boot-time regression is measurable. New leaf module cart/hmsc-int/startupTimer.ts captures t0 at module-eval and exposes startupMark()/startupDone(), each emitting a console.warn (severity-1 reaches the rjit dev terminal next to the [mapgone] trace; severity-0 console.log does not). Marks placed at: index.tsx module-graph evaluated (5.7mb bundle import cost), EditorShell first render (React mounting), applyPayload decode + world-applied phases (useMapSession), PaintCanvas blank first mount, and PaintCanvas real-world remount which fires startupDone (◀ READY total). Each line shows +Nms since t0 and ΔNms since the prior mark, so the slow phase is the big Δ. done-flag silences marks after READY so a later map open/undo (same applyPayload path) does not re-log. Pure diagnostics, no behavioural effect, grep startupTimer to remove. Verified the module transforms via tools/esbuild and all relative import paths resolve; cart-only edits hot-reload in the running dev host. Not committed. Original vague capture; superseded by the clarified hmsc-int scope in req_1628.",
+  "shas": [],
+  "resolvedAt": "2026-06-22T16:35:59.695Z"
+}

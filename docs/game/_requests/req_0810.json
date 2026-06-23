@@ -1,0 +1,36 @@
+{
+  "id": "req_0810",
+  "at": "2026-06-13T18:51:04.062Z",
+  "origin": "session:5de2c418",
+  "text": "its not that water is below the ground. that is expected. its that there is a wedge of open air between the ground and the water",
+  "status": "review",
+  "sessionId": "5de2c418-75b9-4d35-8158-25b1c471529e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T18:53:02.825Z",
+      "actor": "session-5de2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:54:57.024Z",
+      "actor": "session-5de2",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-14T00:51:39.145Z",
+      "actor": "session-5de2",
+      "kind": "note",
+      "text": "REVERTED in 751626804 — this wedge fix over-corrected into a 'jello brick' that didn't read as water; restored the original look. Crack to be re-addressed minimally."
+    }
+  ],
+  "resolution": "Two follow-ups on painted water after the fall-through fix landed. (1) WEDGE OF AIR: floorToWaterBody dropped the water surface straight to the basin floor 'base' at the first DRY cell, so the heightfield surface ramped downward right at the wet/dry boundary while the dug terrain wall rose upward — leaving a triangular open-air gap between the water's edge and the wall. Fixed by dilating the flat surface 2 cells into the surrounding dry ring (WATER_SURFACE_DILATE), tucking that downward skirt UNDER the higher opaque terrain so the waterline meets the wall cleanly; the surface is also forced flat (one fill level) since water is flat, not per-cell. Recessed-below-ground pools are intended and untouched. (2) INVISIBLE WAVES: bumped WATER_WAVE amplitude 0.1->0.25, length 5->4, speed 0.22->0.32 so the ripple actually reads, including in a recessed basin. Both editor (rippleWaterField) and compiled (encodeWaterBodies ships the same field + WATER_WAVE header) consume these; editor hot-reloads, compiled needs only a game bake, no loader rebuild. 6/6 water tests pass.",
+  "shas": [
+    "bb19793b0"
+  ],
+  "resolvedAt": "2026-06-13T18:54:57.024Z"
+}

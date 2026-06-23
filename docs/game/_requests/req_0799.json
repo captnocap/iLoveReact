@@ -1,0 +1,30 @@
+{
+  "id": "req_0799",
+  "at": "2026-06-13T18:12:06.023Z",
+  "origin": "session:bdc416fa",
+  "text": "im confused it still doesnt work the way you say it should. im on terrain, im on square brush, water, flat, -9.5 height and im painting. im not expecting it to show up on the 2d like you said. its still not there on the 3d",
+  "status": "review",
+  "sessionId": "bdc416fa-53b7-49b1-98a1-706f4ff29a15",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T18:13:17.415Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:13:26.291Z",
+      "actor": "session-bdc4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root cause of the water brush painting nothing: the level was Math.max(0, centerZ), and the user was painting with the height slider at -9.5, which clamps to 0 (dry) so no wet cells were ever written — hence nothing in 2D or 3D. The slider's sign is meant for digging terrain; for a water SURFACE a negative is meaningless. Changed the level to max(1, |centerZ|) so any slider value paints visible water (-9.5 becomes a 9.5 m surface) and the brush never silently no-ops; erase still clears to dry. One-line fix in stampWaterAtGraph.",
+  "shas": [
+    "4a5fa45ba"
+  ],
+  "resolvedAt": "2026-06-13T18:13:26.290Z"
+}

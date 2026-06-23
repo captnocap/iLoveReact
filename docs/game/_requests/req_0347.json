@@ -1,0 +1,13 @@
+{
+  "id": "req_0347",
+  "at": "2026-06-08T13:41:50.390Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: Your diagnosis is correct — the Runtime-by-value copy leaves scene3d_vertices pointing at the old stack storage, so box/ramp geometry dangles while the heap-owned player survives. Apply your fix now: make the runtime heap-owned (or init-in-place) BEFORE wiring the node tree, so self.cube[0..]/self.ramp_slab[0..] reference stable storage. Restore the standalone to full fidelity (76 pieces, 175 instances, 42 ramps, painted floor, player). This same runtime is the ONE shared core both the standalone main and the /compiled embed call — no second render copy. Once standalone is restored, we get the user's eyes on standalone vs /compiled side-by-side. Go.",
+  "status": "new",
+  "sessionId": "019ea612-2a84-7843-9ba9-61491e15e206",
+  "captureMode": "hook",
+  "events": [],
+  "tags": [
+    "ruling"
+  ]
+}

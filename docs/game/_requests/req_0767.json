@@ -1,0 +1,36 @@
+{
+  "id": "req_0767",
+  "at": "2026-06-13T14:37:00.042Z",
+  "origin": "session:a695a492",
+  "text": "hello. here is a problem i have with the current tile approach. see here this road that is painted. [Image #1] nice road huh. well. not really. look at this floor piece i placed that has the road texture instead. [Image #2] way nicer. except this cant be used for the ground for some reason. well it can, depending on what u call the ground. but yeah -_- so what do we do",
+  "status": "review",
+  "sessionId": "a695a492-4a9c-4889-a141-0e50e2e7918a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-13T14:37:20.720Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-13T18:03:57.891Z",
+      "actor": "a695",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed + fixed the painted-ground-looks-worse-than-a-piece problem. Root cause was a flat-color ground shader vs the piece's procedural tileMaterial, plus a stale cached GPU pipeline. Built the data-shape ground: a per-fragment ground-formula mesh pipeline (Scene3D.Mesh groundFormula/groundData) that synthesises asphalt grain + markings, replacing the baked capture. Committed; framework rebuild + visual confirm pending. Full state in /tmp/handoff-20260613-180126-hmsc-data-shape-ground-compiled-parity-verify.md.",
+  "shas": [
+    "ecd542b5e",
+    "ca88f3ca2",
+    "fb1f066be",
+    "a45d42ae8",
+    "ca19e07e8",
+    "ec7ebaa82",
+    "00660b84b"
+  ],
+  "resolvedAt": "2026-06-13T18:03:57.891Z"
+}

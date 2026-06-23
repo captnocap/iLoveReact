@@ -1,0 +1,30 @@
+{
+  "id": "req_0623",
+  "at": "2026-06-11T08:32:54.418Z",
+  "origin": "session:9361f55b",
+  "text": "ok cool. one thing need to do is update all the physics rects also [Image #5]",
+  "status": "review",
+  "sessionId": "9361f55b-0780-4569-bbc9-0034d03a84cc",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-11T08:33:21.564Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-11T08:38:29.037Z",
+      "actor": "fable-9361",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Physics rects now follow the resized props. The clip in the user's screenshot was the dumpster: physics still blocked the old 1.8m footprint SQUARE while the body renders 2.07m wide x 1.56m deep after PROPSCALE-0611. Fixed at the root per rule-of-two: the body box is defined ONCE in the registry (propKinds.dumpsterBodyMeters() + DUMPSTER_AUTHORED_HEIGHT) and consumed by all three users — world/props.ts propFootprint (dumpster now gets a yaw-aware rotated-rect AABB like the fence family), render3d/props/Dumpster.tsx, and compile/worldGeometry.ts — so the box you see is exactly the box you bump. Audited the rest of the rect layer: every other solid prop's rect already derives live from footprintRadius/heightMeters (so the scale sweep flowed through automatically, including tree trunks and the kicked-body radii), and the SEGMENT_HALF_THICKNESS table (fence/barrier/bench/couch/beds/cupboard) was re-verified against its models — all still match. navGrid and placementCheck inherit via propFootprint. 7 suites green (86 cases), cart bundle clean.",
+  "shas": [
+    "81381e03a"
+  ],
+  "resolvedAt": "2026-06-11T08:38:29.037Z"
+}

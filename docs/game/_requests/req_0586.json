@@ -1,0 +1,30 @@
+{
+  "id": "req_0586",
+  "at": "2026-06-10T18:16:28.795Z",
+  "origin": "session:7a5b02e7",
+  "text": "to my understanding that was a wgsl shader",
+  "status": "review",
+  "sessionId": "7a5b02e7-0774-4d92-ab80-a8a62cf9c9cb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T18:17:30.658Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T18:23:35.857Z",
+      "actor": "fable-mat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarification absorbed into the bush investigation: the bush look in the editor is plain Scene3D sphere shading (worldGeometry bushParts emits sphere blob clusters with flat palette colors — no WGSL shader and no material refs on the prop path), which is what made the data-vs-render bisect decisive: the baked rows were healthy, so the truncated streamed draw (vert_count hardcoded to a box's 36) was the fault. Fixed in 828666228.",
+  "shas": [
+    "828666228"
+  ],
+  "resolvedAt": "2026-06-10T18:23:35.857Z"
+}

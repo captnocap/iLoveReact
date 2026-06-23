@@ -1,0 +1,15 @@
+{
+  "id": "req_0206",
+  "at": "2026-06-07T06:54:33.080Z",
+  "origin": "session:f2302907",
+  "text": "Oh let me refine that, LoS + tile distance + zone, we dont want an npc to go inactive just because we are hiding behind a wall in their house. or we dont want the most immediate roads traffic to be at a stall just because we have not made the turn around the building yet.",
+  "status": "done",
+  "sessionId": "f2302907-b96a-4b10-be68-5c34af1ebb88",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-07T06:55:45.904Z",
+  "resolution": "Refined the activation gate per the user's correction (no code): pure LoS fails two ways the user named — a pursuer NPC going inactive because the player hides behind a wall in their house, and immediate-road traffic stalling until the player rounds a corner. Formalized the predicate as active = engaged ∪ zone ∪ tile-distance ∪ VIS: distance bubble keeps near-but-unseen traffic moving (STALKER switch_distance / GTA traffic-bubble precedent), zone containment keeps a whole building active while the player is inside regardless of walls (zone grids already exist as painted per-chunk buffers), VIS covers long sightlines beyond any radius, and ENGAGED pins alerted/hunting/witness NPCs online until perception decays — directly fixing the house case. Added hysteresis on demotion to prevent boundary thrash. All four checks are cheap (arithmetic, grid lookup, precomputed lump, existing perception flag). Updated memory project_map_format.md with the full ruling.",
+  "shas": [],
+  "tags": [
+    "ruling"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "req_0082",
+  "at": "2026-06-06T11:32:40.855Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR DISPATCH — NEWBUTTON-0606 (req_0078). User verbatim: \"there is no 'new' button for creating anything. or if there is, then something is very wrong. because every 'new' is carrying the same shape as another made thing, for instance, i made a abdomen on one character, now the 'new' character has it.\" Two symptoms: (a) no visible New affordance anywhere; (b) the deeper bug — state contamination: a brand-new character inherits mesh edits made on a different character. Per-target state is leaking across targets. Relevant recent commits: 091928e1b (DRAFTHOLE — draft protection on ALL targets) and d95877cdd (V20 store -> sqlite behind openStore()). Suspect draft/working-state keying is global where it must be per-target-id. Steps: 1. Run git show 091928e1b --stat and read the draft-system files it touched; find exactly how drafts/working state are keyed. 2. Trace the new-character flow in the workbench character source: where does a fresh target pick up another target's data? Print the actual store rows / draft keys involved — no theorizing. 3. Fix: a new target starts pristine; per-target keying everywhere the leak exists. 4. Add a visible New control on the workbench character source (and any sibling source where new exists but is invisible), respecting the three chrome laws: no wrap orphans, conditional sections, no duplicate controls. 5. Regression test at the consumption layer: create target A, edit it, create target B, assert B is pristine — a real test file, not an inline one-liner. Build via tools/rjit only; uncommitted working-tree changes are the source of truth, never revert anything. DONE-BAR: tools/rjit game verify green + the regression test passing + you post READY with the exact keying bug you found (file:line) and the file list you touched. DO NOT COMMIT — supervisor instructs commits. Do not shrink or stub any file; deletions must be justified line-by-line. Only the user's live confirmation makes this a PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "tags": [
+    "bug"
+  ]
+}

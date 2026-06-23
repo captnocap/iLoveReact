@@ -1,0 +1,31 @@
+{
+  "id": "req_0501",
+  "at": "2026-06-10T10:48:59.096Z",
+  "origin": "session:986e27e7",
+  "text": "Ok. so now scale it up. say you have 10,000 tiles. and you have 300 different effects across them at different locations, sparse. can that still blend into one quad",
+  "status": "review",
+  "sessionId": "986e27e7-9a52-4a1d-bbee-e5e4ecc81fc4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-10T10:50:02.858Z",
+      "actor": "claude-986e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-10T10:50:02.866Z",
+      "actor": "claude-986e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Scaling question answered: 10,000 tiles in one Effect quad is free — shader cost is per screen pixel, not per tile; per-tile lookup is O(1) and the data buffer is sized dynamically (effects.zig:791), 40KB for 10k tiles. The real budget is 300 DISTINCT effects: WGSL has no dynamic dispatch, so truly-unique programs need a 300-way switch (huge module, slow compile, 4x cost at blend borders). Recommended pattern: collapse to ~10-20 effect families x per-tile params in the data array, matching the hmsc shader-recipe approach; static effects can bake to textures if needed.",
+  "shas": [],
+  "resolvedAt": "2026-06-10T10:50:02.866Z",
+  "tags": [
+    "ask"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "id": "req_1197",
+  "at": "2026-06-16T23:51:11.278Z",
+  "origin": "session:ee607c38",
+  "text": "so. lets look at what we have. so first of all. i click paint. and my camera is now disabled. is that intended? next. I dont see the grid showing up over the model to paint on, clicking a color to then paint just selects the face but doesnt paint anything",
+  "status": "review",
+  "sessionId": "ee607c38-a6df-4547-aa9a-facb41f8319d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-16T23:53:23.894Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-17T00:03:26.050Z",
+      "actor": "ee60",
+      "kind": "note",
+      "text": "Camera-disabled FIXED (paint branch returned early on every press → never orbited; now orbits on a miss). Paint/grid-not-showing not reproduced via headless verification (ray inverts projector to 1e-16, pickFaceTexel hits + returns in-slot texel, grid corner-match valid, brush clamps, framework re-bakes StaticSurface on subtree change). Added a live paint-mode HUD (tex?/texels/textured?/cell count/last hit) to pinpoint the runtime failure. Fixes are on disk (hot-reload). AWAITING user retest + HUD readout before finalizing — still in flight."
+    },
+    {
+      "at": "2026-06-17T00:53:21.383Z",
+      "actor": "ee60",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Camera-disabled-in-paint fixed (a press that misses the model now orbits instead of being swallowed by the paint branch) and a paint-mode diagnostic HUD added (texture present? / grid size / textured? / cell count). These shipped as part of the paint rework; superseded in feel by the later lag + grid fixes (req_1203/1207/1209). Code in HEAD.",
+  "shas": [
+    "2889db1d4",
+    "b3bef7ec8"
+  ],
+  "resolvedAt": "2026-06-17T00:53:21.383Z"
+}

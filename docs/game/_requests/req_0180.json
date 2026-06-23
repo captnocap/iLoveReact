@@ -1,0 +1,13 @@
+{
+  "id": "req_0180",
+  "at": "2026-06-07T04:42:23.473Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — USER VERDICT on ramps, split, folds into your RAMPHOLLOW work: slope walk-up PASSES, side blocking PASSES, but verbatim: \"walking at the ramp from under it you can walk right through it\" — the slab has NO collision from below; characters phase up/through the underside. The slab must be solid from EVERY direction: walkable on top, blocking from the sides, and blocking from BELOW — approaching under a low section stops you when your body/head reaches the slab; only genuinely open air beneath a tall section is passable (that is the hollow-ramp point). Likely shape: the slope is heightfield-only (ground-height semantics — things below it just get NO ground, not an obstruction). The slab needs a ceiling/solid-volume representation for its underside, not just a walkable top. Add the from-below case to your test set explicitly: character under the low end walks toward the rising slab -> blocked at head height; character under the high end walks freely. Zig-side tests if the fix is in physics.zig",
+  "status": "new",
+  "sessionId": "019e9ca8-d290-75f2-a6d7-7604ccd2a29a",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

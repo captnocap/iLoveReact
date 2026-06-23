@@ -1,0 +1,13 @@
+{
+  "id": "req_0186",
+  "at": "2026-06-07T05:08:02.867Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — insert at the top of your queue (user explicitly wants a lane OTHER than the items-source author on this): ITEMSGONE-0606. User verbatim: \"we have game items already made, they are undersized the last i saw them, but they were made\" — screenshot shows the workbench ITEMS roster EMPTY (only New / Import Voxels buttons). The pre-existing game items are not loading into the new itemsStream-backed roster. This is your disease family: legacy data invisible to a new store path (same as the legacy global pieces and the pre-scoping world). Print the data first: where do the existing items live (old store/stream/file), what key does the new roster read, show the mismatch. Then make the legacy items visible through the roster the same owner/default way you solved the world pool — no silent migration without supervisor word if data must move. The user seeing their existing items in the ITEMS list is the PASS.",
+  "status": "new",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "tags": [
+    "bug",
+    "ruling"
+  ]
+}

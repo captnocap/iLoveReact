@@ -1,0 +1,18 @@
+{
+  "id": "req_1670",
+  "at": "2026-06-22T23:39:03.607Z",
+  "origin": "session:06fe423a",
+  "text": "ok so, this is clearly better on spawn, however, now when i actually get close to a render for example lets say this patch of trees. for one, im at a disnace right now that they are not animating, but i am getting arguably worse performance here than i have ever before and the telling part is that i can stand right next t o it actually and then turn away and look the other way and my performance goes back up drastically [Image #1]",
+  "status": "doing",
+  "sessionId": "06fe423a-d6e6-4bdd-a7f5-e511298cc05a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-22T23:41:09.411Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

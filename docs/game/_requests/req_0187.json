@@ -1,0 +1,12 @@
+{
+  "id": "req_0187",
+  "at": "2026-06-07T05:24:58.147Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — add to your queue: CLOTHSOURCE-0606. User verbatim: \"the clothing workspace needs work. workspace is not really any different than the character workspace, and just shows the character in clothing. it should just show the clothing items, and then the variety in that same item (shirt with many materials type of ordeal)\". The clothing source must be CLOTHING-CENTRIC, not a character-viewer clone: the roster lists clothing ITEMS themselves (shirt, pants, ...) rendered as the garment alone on the stage (no body unless a try-on lens is explicitly added later); within an item, its VARIANTS — the same shirt across many materials/skins — displayed as a variant row/grid, selectable, each variant a material assignment per the one-source-of-truth materials rule (no parallel texture path; same chooser as BUILDSKIN). Reuse the source kit (store/panel/source/Stage pattern); CLOTHSPLIT already gave clothing its own context — build on it. Parity-capture discipline against whatever the current clothing surface does so nothing silently drops. This queues behind your BUILDSKIN fixes + REQPANEL; it will travel in your handover brief when the supervisor rotates you.\n",
+  "status": "new",
+  "sessionId": "d3e600d5-0069-46ee-baf8-1d77b7de69a3",
+  "captureMode": "hook",
+  "tags": [
+    "ruling"
+  ]
+}
