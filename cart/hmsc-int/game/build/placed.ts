@@ -858,7 +858,13 @@ function trimBandRect<R extends PlanRect>(rect: R, ramp: PieceBounds): R | null 
   moves.sort((a, b) => a.cost - b.cost);
   const out = { ...rect, [moves[0].key]: moves[0].value } as R;
   const min = PLACED_TUNING.rampTrimMinBandMeters;
-  if (out.maxX - out.minX <= min || out.maxZ - out.minZ <= min) return null;
+  // A WALL MUST NEVER BECOME WALK-THROUGH (USER RULING req_1711). When the trim
+  // would collapse the band to nothing — a wall whose whole footprint sits
+  // inside a ramp's (e.g. a side rail offset onto its floor, fully under a
+  // staircase's plan footprint) — keep the wall solid rather than deleting its
+  // collider. We forgo trimming the slope here; a wall deliberately placed
+  // across a stair foot now re-blocks (author a doorway/gap there instead).
+  if (out.maxX - out.minX <= min || out.maxZ - out.minZ <= min) return rect;
   return out;
 }
 

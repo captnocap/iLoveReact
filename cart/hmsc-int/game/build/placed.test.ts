@@ -765,13 +765,17 @@ test('a landing plate over the crest keeps full collision (floors deliver, never
   assertClose(landingRects[0].maxZ - landingRects[0].minZ, catalogEntry('floor.concrete.common').size.depthMeters, 1e-9, 'full footprint — the crest delivery surface');
 });
 
-test('the surfaced edge case: a wall sandwiched between two ramps trims away entirely', () => {
+test('a wall fully inside a ramp footprint stays SOLID, never trims to nothing (req_1711)', () => {
+  // A wall whose whole footprint falls inside ramp plans (here sandwiched
+  // between two) used to trim to zero rects — a walk-through hole. USER RULING:
+  // a wall must never become passable; keep it solid rather than deleting it.
   const wall = placed('wall.concrete.common', 6, 4.5);
   const rampA = placed('ramp.concrete.common', 6, 6);
   const rampB = placed('ramp.concrete.common', 6, 3);
   const { rects } = placedPieceColliders([rampA, rampB, wall]);
   const wallRects = rects.slice(placedPieceColliders([rampA, rampB]).rects.length);
-  assertEqual(wallRects.length, 0, 'both overhangs trimmed — the band degenerates (documented in CAPTURE.md)');
+  assertEqual(wallRects.length, 1, 'the wall keeps a blocking band — never walk-through');
+  assert(wallRects[0].maxX - wallRects[0].minX > 0 && wallRects[0].maxZ - wallRects[0].minZ > 0, 'the band has real extent');
 });
 
 // ── SMARTSEL-0605: one click grabs the connected shape ───────────────────────
