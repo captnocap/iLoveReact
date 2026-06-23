@@ -417,6 +417,43 @@ fn perfLogOn() bool {
     return on;
 }
 
+// On-screen fps HUD (RJIT_FPS=1, or RJIT_PERFLOG=1). Queued from render() — which
+// runs in the paint WALK, BEFORE gpu.frame() does its text.upload — so the glyphs
+// make it into this frame's 2D pass (queuing from flushPending is too late: the text
+// buffer is already uploaded by then). fps is WALL-CLOCK frame-to-frame (so it
+// reflects GPU overdraw stalls and the 60fps SDL cap, unlike draw_us which is
+// CPU-encode only; the telemetry shown is the PREVIOUS frame's, a harmless 1-frame
+// lag). req_1674.
+var g_fpshud_on: ?bool = null;
+var g_last_flush_us: i64 = 0;
+var g_fps_ema: f32 = 0;
+fn fpsHudOn() bool {
+    if (g_fpshud_on) |v| return v;
+    const on = std.posix.getenv("RJIT_FPS") != null or std.posix.getenv("RJIT_PERFLOG") != null;
+    g_fpshud_on = on;
+    return on;
+}
+
+pub fn drawFpsHud() void {
+    if (!fpsHudOn()) return;
+    const now = std.time.microTimestamp();
+    if (g_last_flush_us != 0) {
+        const dt_us = now - g_last_flush_us;
+        if (dt_us > 0) {
+            const inst_fps = 1_000_000.0 / @as(f32, @floatFromInt(dt_us));
+            g_fps_ema = if (g_fps_ema <= 0) inst_fps else g_fps_ema * 0.9 + inst_fps * 0.1;
+        }
+    }
+    g_last_flush_us = now;
+    var buf: [160]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "fps {d:.0}   draw {d}us   inst {d}   restage {d}   dc {d}", .{
+        g_fps_ema, g_telemetry.draw_us, g_telemetry.instances, g_telemetry.staged_dynamic, g_telemetry.draw_calls,
+    }) catch return;
+    // Shadow + bright text so it reads over any background.
+    core.drawTextLine(line, 9, 9, 14, 0, 0, 0, 0.8);
+    core.drawTextLine(line, 8, 8, 14, 0.3, 1.0, 0.45, 1.0);
+}
+
 pub fn telemetryStats() TelemetryStats {
     return g_telemetry;
 }
@@ -1496,6 +1533,7 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
         // image compositor applies (correct for top-down sprite sources)
         // would invert the scene.
         images.queueQuadNoFlip(x, y, w, h, opacity, bg);
+        drawFpsHud(); // self-gated (RJIT_FPS); queued here so it lands before gpu.frame's text upload
         return true;
     }
     return false;
