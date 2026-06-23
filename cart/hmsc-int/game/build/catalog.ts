@@ -760,6 +760,18 @@ export function registerCookedCatalog(kinds: readonly PropKind[]): void {
   for (const kind of kinds) COOKED_CATALOG[`prop.${kind}`] = propCatalogEntry(kind);
 }
 
+/** The runtime-cooked pieces as swap-pick rows, grouped by the build-piece FAMILY
+ *  each declares (req_1698): a wall-seeded custom piece reports `kind:'wall'` so a
+ *  placed wall's "swap it out" pick lists it under walls. Falls back to the entry's
+ *  raw kind ('prop') when the cook declared no `buildPlacement.pieceKind`. */
+export function cookedCatalogPickEntries(): { id: string; label: string; kind: BuildPieceKind }[] {
+  return Object.keys(COOKED_CATALOG).map((id) => {
+    const entry = COOKED_CATALOG[id];
+    const family = entry.propKind ? propKindDefinition(entry.propKind).buildPlacement?.pieceKind : undefined;
+    return { id, label: entry.label, kind: family ?? entry.kind };
+  });
+}
+
 export function isCatalogId(value: string): boolean {
   return Object.prototype.hasOwnProperty.call(BUILD_CATALOG, value)
     || Object.prototype.hasOwnProperty.call(COOKED_CATALOG, value);

@@ -46,6 +46,7 @@ export {
   effectiveTags,
   catalogEntriesByKind,
   catalogEntriesByTheme,
+  cookedCatalogPickEntries,
   validateCatalogEntry,
   validateCatalog,
   catalogIdsForConsole,

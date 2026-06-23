@@ -22,6 +22,7 @@ import {
   buildKindContract,
   carriesMicroGrid,
   catalogEntry,
+  cookedCatalogPickEntries,
   describeFaceSkin,
   faceSlotLabels,
   FLOOR_DEFAULT_CELL_KIND,
@@ -111,12 +112,16 @@ export function piecePickOptions(def: BuildPrefabDef): PickOption[] {
   });
 }
 
-/** the catalog, grouped by kind — the swap chooser */
+/** the catalog, grouped by kind — the swap chooser. Includes Studio-cooked custom
+ *  pieces (req_1698) under the build-piece family each declared, so a placed wall can
+ *  be swapped to your custom wall right here. */
 export function catalogPickOptions(): PickOption[] {
-  return BUILD_CATALOG_IDS.map((id) => {
+  const builtin = BUILD_CATALOG_IDS.map((id) => {
     const row = catalogEntry(id);
     return { id, label: row.label, group: `${row.kind}s` };
   });
+  const cooked = cookedCatalogPickEntries().map((e) => ({ id: e.id, label: e.label, group: `${e.kind}s` }));
+  return cooked.length ? [...builtin, ...cooked] : builtin;
 }
 
 /** one color row + ONE compact material pick per face slot — the slot holds

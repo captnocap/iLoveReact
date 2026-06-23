@@ -37,16 +37,19 @@ const COMPILE_NATURES: { nature: PropNature; label: string; hint: string }[] = [
   { nature: 'physics', label: 'Physics', hint: 'kickable body — you knock it around (a barrel/can/ball)' },
 ];
 
-// HOW THE COOKED PIECE PLACES (req_1684): 'free' is the default scenery snap; the
-// others make it a piece-like placeable (a railing edge-snaps onto stairs, a wall
-// panel blocks sight, a trim sticks onto a face) — the SAME behaviour built-in pieces
-// have, on the uniform prop substrate. The map → PropBuildPlacement {snap,cover,blocksSight}.
-type PiecePlacement = 'free' | 'railing' | 'wall' | 'trim';
+// THE PIECE TYPE (req_1684/1698): what build piece this cooked model PRESENTS as.
+// 'Prop' is free scenery; the others tag a `pieceKind` so the model lists UNDER that
+// family in a placed piece's "swap it out" pick (catalogPickOptions) — so you can
+// replace a placed Wall with your custom wall — and carry that family's snap + cover.
+// The asset stays kind:'prop' (the uniform mesh substrate); this is its presentation.
+type PiecePlacement = 'free' | 'wall' | 'railing' | 'fence' | 'floor' | 'trim';
 const COMPILE_PLACEMENTS: { placement: PiecePlacement; label: string; hint: string; build?: PropDescriptorInput['buildPlacement'] }[] = [
-  { placement: 'free', label: 'Free', hint: 'place anywhere (default scenery)' },
-  { placement: 'railing', label: 'Railing', hint: 'snaps to edges (stairs/balcony) · low cover', build: { snap: 'edge', cover: 'low', blocksSight: false } },
-  { placement: 'wall', label: 'Wall panel', hint: 'snaps to edges · full cover, blocks sight', build: { snap: 'edge', cover: 'full', blocksSight: true } },
-  { placement: 'trim', label: 'Trim / decal', hint: 'sticks onto a face (posters, moldings)', build: { snap: 'surface', cover: 'none', blocksSight: false } },
+  { placement: 'free', label: 'Prop', hint: 'free scenery — place anywhere' },
+  { placement: 'wall', label: 'Wall', hint: 'lists under walls — swap a placed wall to this · full cover, blocks sight', build: { pieceKind: 'wall', snap: 'edge', cover: 'full', blocksSight: true } },
+  { placement: 'railing', label: 'Railing', hint: 'edge-snaps onto stairs/balcony · low cover', build: { pieceKind: 'railing', snap: 'edge', cover: 'low', blocksSight: false } },
+  { placement: 'fence', label: 'Fence', hint: 'edge-snaps · low cover', build: { pieceKind: 'fence', snap: 'edge', cover: 'low', blocksSight: false } },
+  { placement: 'floor', label: 'Floor', hint: 'lists under floors — swap a placed floor to this', build: { pieceKind: 'floor', snap: 'grid', cover: 'none', blocksSight: false } },
+  { placement: 'trim', label: 'Trim', hint: 'sticks onto a face (posters, moldings)', build: { pieceKind: 'trim', snap: 'surface', cover: 'none', blocksSight: false } },
 ];
 
 /** Map a nature + bounce + placement → the granular PropDescriptorInput the cook fills. */
@@ -113,7 +116,7 @@ export function CompileAssetDialog(props: { sceneName: string | null; onCancel: 
             ) : null}
             {/* PLACEMENT (req_1684): make the cooked model a real piece — a railing that
                 edge-snaps onto stairs, a wall panel, a face decal — not just free scenery. */}
-            <LCField label="Placement">
+            <LCField label="Piece type">
               <Row style={{ gap: 5, flexWrap: 'wrap' }}>
                 {COMPILE_PLACEMENTS.map((p) => {
                   const on = placement === p.placement;

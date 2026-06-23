@@ -13,7 +13,7 @@ import { assert, assertEqual, finish, test } from '../../game/_testkit';
 import { cuboid, type EditMesh } from './editMesh';
 import { cookProp, type CookPart, type PropDescriptorInput } from './cookedAsset';
 import { registerCookedProps } from '../../game/kinds/props';
-import { registerCookedCatalog, catalogEntry, isCatalogId } from '../../game/build/catalog';
+import { registerCookedCatalog, catalogEntry, isCatalogId, cookedCatalogPickEntries } from '../../game/build/catalog';
 
 function part(mesh: EditMesh, lift = 0, visible = true): CookPart {
   return { mesh, lift, visible };
@@ -50,6 +50,23 @@ test('a cooked wall-trim surface-snaps onto a face', () => {
   const entry = catalogEntry('prop.studio.test_trim');
   assertEqual(entry.snap, 'surface', 'trim sticks to a surface');
   assertEqual(entry.tags.collision, false, 'a decal trim has no collision mass');
+});
+
+test('a cooked WALL piece lists under walls in the swap pick (req_1698)', () => {
+  cookAndRegister('studio.test_customwall', {
+    label: 'Custom Wall', solid: true, tileKind: 'wall',
+    buildPlacement: { pieceKind: 'wall', snap: 'edge', cover: 'full', blocksSight: true },
+  });
+  const row = cookedCatalogPickEntries().find((e) => e.id === 'prop.studio.test_customwall');
+  assert(!!row, 'the custom wall is a swap-pick row');
+  assertEqual(row!.kind, 'wall', 'it groups UNDER walls, so a placed wall can be swapped to it');
+});
+
+test('a cooked piece with no pieceKind falls back to its raw kind (props) in the swap pick', () => {
+  cookAndRegister('studio.test_plainprop', { label: 'Plain', solid: true, tileKind: 'wall' });
+  const row = cookedCatalogPickEntries().find((e) => e.id === 'prop.studio.test_plainprop');
+  assert(!!row, 'present in the pick');
+  assertEqual(row!.kind, 'prop', 'no pieceKind → groups under props');
 });
 
 test('a plain cook (no buildPlacement) stays free-snap scenery — legacy default intact', () => {

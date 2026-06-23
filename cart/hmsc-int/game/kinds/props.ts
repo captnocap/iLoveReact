@@ -19,7 +19,7 @@
 // (Originally a fresh capture of cart/hmsc/world/propKinds.ts.)
 
 import type { TileCoverHeight, TileKind } from './tiles';
-import type { BuildSnapMode } from '../build/pieces';
+import type { BuildPieceKind, BuildSnapMode } from '../build/pieces';
 import {
   IMPORTED_PROP_DEFINITIONS,
   IMPORTED_PROP_KINDS,
@@ -1015,6 +1015,13 @@ export type PropBuildPlacement = {
   cover?: TileCoverHeight;
   /** does it block line of sight (a solid wall yes, an open railing no). */
   blocksSight?: boolean;
+  /** the build-piece FAMILY this custom piece presents as (req_1698) — a Studio
+   *  model seeded from a wall cooks `pieceKind:'wall'`, so it lists UNDER walls in a
+   *  placed piece's "swap it out" pick (catalogPickOptions groups by this), and you
+   *  can replace a placed wall with your custom one. The asset stays kind:'prop'
+   *  (the uniform mesh substrate); this is presentation/grouping only. Absent → it
+   *  lists under its raw kind ('props'). */
+  pieceKind?: BuildPieceKind;
 };
 
 /** The dynamic-body recipe for a kickable prop (host sphere body). */
