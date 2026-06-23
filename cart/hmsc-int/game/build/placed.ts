@@ -977,6 +977,20 @@ function pushRampSlabEdgeRects(
   );
 }
 
+/** The walkable-slope FAMILY a placed piece collides as (req_1700): a real ramp/stairs
+ *  by kind, OR a cooked custom piece that declared `buildPlacement.pieceKind` of
+ *  'stairs'/'ramp' — so a Studio staircase you compiled gets the walkable heightfield
+ *  slope (placedPieceRamps) instead of a solid prop box you cannot climb. null = not a
+ *  slope (a real prop, wall, floor…). */
+export function pieceSlopeKind(def: BuildPieceDef): 'ramp' | 'stairs' | null {
+  if (def.kind === 'ramp' || def.kind === 'stairs') return def.kind;
+  if (def.kind === 'prop' && def.propKind) {
+    const pk = propKindDefinition(def.propKind).buildPlacement?.pieceKind;
+    if (pk === 'ramp' || pk === 'stairs') return pk;
+  }
+  return null;
+}
+
 export function placedPieceColliders(
   pieces: readonly PlacedBuildPiece[],
   opts?: {
@@ -996,8 +1010,7 @@ export function placedPieceColliders(
   // their envelope — bounds() already covers both)
   const rampPlans: PieceBounds[] = [];
   for (const piece of pieces) {
-    const kind = placedPieceDef(piece).kind;
-    if (kind === 'ramp' || kind === 'stairs') rampPlans.push(pieceBounds(piece));
+    if (pieceSlopeKind(placedPieceDef(piece))) rampPlans.push(pieceBounds(piece));
   }
   for (const piece of pieces) {
     const def = placedPieceDef(piece);
@@ -1025,6 +1038,9 @@ export function placedPieceColliders(
     // KICKPROP-0610: a dynamic prop (ball, cone, can) is a host sphere BODY,
     // not a wall — it contributes no static rect; the play route owns its sim.
     if (def.kind === 'prop' && def.propKind && propDynamics(def.propKind)) continue;
+    // A cooked staircase/ramp piece (req_1700) collides as its walkable slope
+    // (placedPieceRamps), NOT a solid prop box — so you can walk up your custom stairs.
+    if (def.kind === 'prop' && pieceSlopeKind(def)) continue;
     if (!placedPieceTags(piece).collision) continue;
     // SHAPE-AWARE prop collider (req_1587): a multi-part / multi-island prop (an
     // archway or big sign: two posts + a high board) carries one box PER part, each
@@ -1220,7 +1236,9 @@ export function placedPieceRamps(pieces: readonly PlacedBuildPiece[], startSlot:
     const def = placedPieceDef(piece);
     const roofRise = roofRiseMeters(piece);
     const isPitchedRoof = def.kind === 'roof' && roofRise > 0.01;
-    if (def.kind !== 'ramp' && def.kind !== 'stairs' && !isPitchedRoof) continue;
+    // Real ramps/stairs AND cooked custom stairs/ramp pieces (req_1700) bake a walkable
+    // slope here; everything else (pitched roofs excepted) is solid collision elsewhere.
+    if (!pieceSlopeKind(def) && !isPitchedRoof) continue;
     // A pitched roof collides as its own SLOPE surface — the same heightfield
     // mechanism a ramp uses, so a gable/shed is walkable in /test AND compiled
     // and never a phantom flat slab at the eave (req_0917). The height function

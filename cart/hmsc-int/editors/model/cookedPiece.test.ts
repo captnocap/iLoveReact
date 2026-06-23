@@ -14,6 +14,7 @@ import { cuboid, type EditMesh } from './editMesh';
 import { cookProp, type CookPart, type PropDescriptorInput } from './cookedAsset';
 import { registerCookedProps } from '../../game/kinds/props';
 import { registerCookedCatalog, catalogEntry, isCatalogId, cookedCatalogPickEntries } from '../../game/build/catalog';
+import { placedPieceColliders, placedPieceRamps } from '../../game/build/placed';
 
 function part(mesh: EditMesh, lift = 0, visible = true): CookPart {
   return { mesh, lift, visible };
@@ -67,6 +68,31 @@ test('a cooked piece with no pieceKind falls back to its raw kind (props) in the
   const row = cookedCatalogPickEntries().find((e) => e.id === 'prop.studio.test_plainprop');
   assert(!!row, 'present in the pick');
   assertEqual(row!.kind, 'prop', 'no pieceKind → groups under props');
+});
+
+test('a cooked STAIRS piece collides as a walkable slope, not a solid box (req_1700)', () => {
+  cookAndRegister('studio.test_stairs', {
+    label: 'Custom Stairs', solid: true, tileKind: 'wall',
+    buildPlacement: { pieceKind: 'stairs', snap: 'grid' },
+  });
+  const piece = { id: 's1', pieceId: 'prop.studio.test_stairs', x: 0, y: 0, z: 0, yawDegrees: 0 } as never;
+  const { rects, orientedRects } = placedPieceColliders([piece]);
+  assertEqual(rects.length + orientedRects.length, 0, 'no solid box — the walkable slope IS the collider');
+  const ramps = placedPieceRamps([piece], 0);
+  assertEqual(ramps.length, 1, 'one walkable heightfield slope');
+  const h = ramps[0];
+  assert(h.heights[h.heights.length - 1] > h.heights[0], 'heights rise along depth (you walk UP it)');
+});
+
+test('a cooked WALL piece still collides as a solid box, never a slope', () => {
+  cookAndRegister('studio.test_wallsolid', {
+    label: 'Solid Wall', solid: true, tileKind: 'wall',
+    buildPlacement: { pieceKind: 'wall', cover: 'full', blocksSight: true },
+  });
+  const piece = { id: 'w1', pieceId: 'prop.studio.test_wallsolid', x: 0, y: 0, z: 0, yawDegrees: 0 } as never;
+  const { rects, orientedRects } = placedPieceColliders([piece]);
+  assert(rects.length + orientedRects.length > 0, 'a custom wall is solid');
+  assertEqual(placedPieceRamps([piece], 0).length, 0, 'a wall is not a walkable slope');
 });
 
 test('a plain cook (no buildPlacement) stays free-snap scenery — legacy default intact', () => {
