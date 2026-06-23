@@ -775,7 +775,10 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
   // them toward different centers and breaks the assembly. With this ON, the object
   // gizmo grabs EVERY part at once and transforms them about the model's COMMON
   // centroid, so the whole thing scales/moves/rotates as one and proportions hold.
-  const [allParts, setAllParts] = useState(false);
+  // Twig state (req_1692): the choice STICKS across hot reloads so you set "all
+  // layers" once and keep it — the prior per-session reset is why the buried
+  // toggle felt missing.
+  const [allParts, setAllParts] = useHotState('studio:allParts', false);
   // the in-flight all-parts grab: the frozen common anchor + screen frame + each
   // part's start mesh. A self-contained parallel to gizmoDragRef.
   const multiGizmoDragRef = useRef<null | {
@@ -2384,6 +2387,24 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
             </Pressable>
           );
         })}
+        {/* SCOPE toggle (req_1692): sit it RIGHT NEXT TO the object tab — the most
+            prominent spot in the editor — so "size the whole model" is impossible to
+            miss. It was a dim chip buried at the far end of this wrapping row, so the
+            user never found it and merged every layer just to resize the assembly. In
+            object mode with 2+ layers it offers "size all N layers together"; ON, the
+            gizmo scales/moves/rotates the whole model about its shared center. */}
+        {selMode === 'object' && props.partCount >= 2 ? (
+          <>
+            <Box style={{ width: 1, height: 16, backgroundColor: '#2c4a6a', marginLeft: 2, marginRight: 2 }} />
+            <Pressable
+              onPress={() => setAllParts((v) => !v)}
+              tooltip="Size the WHOLE model — the gizmo moves/resizes/rotates every layer together about the model's shared center, so the assembly scales as one and proportions hold. Off = just the active layer. (No need to merge layers to resize the whole thing.)"
+              style={{ ...STEP_BTN, paddingLeft: 9, paddingRight: 9, backgroundColor: allParts ? '#1c4a30' : '#163a2a99', borderColor: allParts ? '#39a065' : '#2f7a4f' }}
+            >
+              <Text fontSize={11} color={allParts ? '#9bf0bd' : '#7fd6a0'} style={{ fontFamily: 'monospace' }}>{allParts ? `▣ all ${props.partCount} layers` : `▢ size all ${props.partCount} layers`}</Text>
+            </Pressable>
+          </>
+        ) : null}
         {/* PAINT controls moved OUT of this toolbar into the floating PaintPanel
             (req_1297 — the bar was overcrowded); only the mode tabs stay here. */}
         {/* SYMMETRIZE (req_1190/1201): a WHOLE-MESH op, so shown in EVERY mode (it
@@ -2538,18 +2559,9 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
                 </Pressable>
               );
             })}
-            {/* ALL-PARTS toggle (req_1287): in object mode with 2+ parts, transform the
-                WHOLE model together about its common center (so resizing keeps the
-                assembly's proportions instead of scaling one layer about its own hub). */}
-            {selMode === 'object' && props.partCount >= 2 ? (
-              <Pressable
-                onPress={() => setAllParts((v) => !v)}
-                tooltip="All parts — move/resize/rotate EVERY layer together about the model's shared center, so the whole thing scales as one and proportions hold"
-                style={{ ...STEP_BTN, backgroundColor: allParts ? '#1c3a2a' : '#13233aee', borderColor: allParts ? '#2f7a4f' : '#2c4a6a' }}
-              >
-                <Text fontSize={10} color={allParts ? '#7fd6a0' : T.dim} style={{ fontFamily: 'monospace' }}>{allParts ? `▣ all · ${props.partCount}` : '▢ all parts'}</Text>
-              </Pressable>
-            ) : null}
+            {/* ALL-PARTS toggle relocated next to the mode tabs (req_1692) — it was
+                buried at the end of this wrapping row and vanished at 1 part, so the
+                user never found it and merged layers instead. */}
             {/* face-only edit ops: extrude + loop cut (a single selected face). */}
             {selMode === 'face' && activePart && sel.faces.size === 1 ? (
               <>
