@@ -95,10 +95,15 @@ export function LoaderIsoView(props: {
     return () => { offDown(); offUp(); heldPanRef.current = {}; };
   }, [stage, pushCamera, props.centerX, props.centerZ]);
 
-  // One rAF loop: apply held-key pan (stage.nudge) then push the camera every frame.
-  // The host pending table also holds the last pose across the lazy mount / Compile
-  // remounts, so the pose survives even where rAF is absent (headless).
+  // The per-frame loop: apply held-key pan (stage.nudge) then push the camera. CRITICAL
+  // (req_1777): schedule via requestAnimationFrame OR a setTimeout FALLBACK — exactly
+  // like IsoAuthor. This host doesn't always expose requestAnimationFrame as a global,
+  // so a bare rAF call silently never ran and WASD did nothing (drag/zoom worked because
+  // they push the camera directly, not through this loop).
   useEffect(() => {
+    const sched: (fn: () => void) => any = g.requestAnimationFrame
+      ? g.requestAnimationFrame.bind(g)
+      : (fn: () => void) => setTimeout(fn, 16);
     let alive = true;
     let last = g.performance?.now?.() ?? 0;
     pushCamera(); // once synchronously so the pose is set before the first paint
@@ -115,9 +120,9 @@ export function LoaderIsoView(props: {
         stage.nudge(forward * speed * dt, strafe * speed * dt);
       }
       pushCamera();
-      g.requestAnimationFrame?.(tick);
+      sched(tick);
     };
-    g.requestAnimationFrame?.(tick);
+    sched(tick);
     return () => {
       alive = false;
       const nodeId = Number(loaderRef.current?.id ?? 0);
