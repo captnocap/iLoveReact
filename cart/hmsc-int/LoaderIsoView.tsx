@@ -227,10 +227,13 @@ export function LoaderIsoView(props: {
         s.fov,
       );
     }
-    // Redraw the 2D HUD (ghost / selection / just-placed boxes) to track the camera.
-    // pushCamera is only ever called on actual camera movement (drag/zoom/pan-key), never
-    // idle, so this never storms re-renders while the view sits still.
-    rerenderRef.current();
+    // Redraw the 2D HUD ONLY when it has something to track (a ghost, a selection, or a
+    // paint preview). req_1806: an unconditional React re-render per camera frame
+    // reconciled the whole pane on every drag/pan tick, throttling the editor frame loop
+    // the loader renders embedded in — so plain navigation went choppy while the same
+    // loader is butter-smooth in the standalone game. Pure navigation now just pushes the
+    // 8-float pose (cheap, no React); the host re-applies it each renderEmbedded frame.
+    if (armedRef.current || selectedIdsRef.current.size || paintCellsRef.current) rerenderRef.current();
   }, [stage]);
 
   // ── snap resolution: the cursor → a placement, with the SAME inputs F2/IsoAuthor use.
