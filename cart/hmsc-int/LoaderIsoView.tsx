@@ -37,6 +37,7 @@ import { GAME_BUILD, partitionBuildingSelection } from './game';
 import type { BuildEditEvent, BuildPrefabDef, BuildingInstance, PlacedBuildPiece, Rect, WorldGridState } from './game';
 import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
+import { pieceInstanceRows } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
 import type { GameState } from './design';
 
@@ -429,6 +430,28 @@ export function LoaderIsoView(props: {
     bakedIdsRef.current = new Set(piecesRef.current.map((p) => p.id));
   }, [props.reloadToken]);
 
+  // LIVEHOST req_1798: push the just-placed-but-unbaked pieces to the native loader as a
+  // LIVE box overlay, so a placement/move shows as a real solid mesh the instant you
+  // commit — no full ~5s rebake. Recomputed whenever the piece set changes (a commit
+  // mints a fresh pieces array) or after a reload re-baselines what's baked. Runs AFTER
+  // the reload effect above (declared earlier → fires first), so on a reload bakedIdsRef
+  // is already current and the overlay clears. The pending table in world_loader is keyed
+  // by node id and survives unmount, so a push during a remount still lands next frame.
+  useEffect(() => {
+    if (!editable) return;
+    const nodeId = Number(loaderRef.current?.id ?? 0);
+    if (!nodeId) return;
+    const baked = bakedIdsRef.current!;
+    const pending = (props.pieces ?? []).filter((p) => !baked.has(p.id));
+    if (!pending.length) {
+      if (typeof g.__compiled_world_clear_live_pieces === 'function') g.__compiled_world_clear_live_pieces(nodeId);
+      return;
+    }
+    if (typeof g.__compiled_world_set_live_pieces === 'function') {
+      g.__compiled_world_set_live_pieces(nodeId, pieceInstanceRows(pending));
+    }
+  }, [editable, props.pieces, props.reloadToken]);
+
   // ── pointer: rotate (drag empty), move (drag a selected piece), click = place/select.
   // gx0/gz0 hold the down point on the active plane so a move tracks the cursor's world
   // delta, not pixels; turned tells a drag from a click (>4px travel).
@@ -510,24 +533,18 @@ export function LoaderIsoView(props: {
       ghostSegs.push(...boxSegments(stage, rect, snap.placement.x, snap.placement.y, snap.placement.z, 0, 2, 0.3, 2));
     }
   }
+  // Selection outlines only. Just-placed-but-unbaked pieces no longer draw a 2D box here:
+  // LIVEHOST (req_1798) renders them as REAL solid meshes via the native live overlay
+  // (the live-push effect above), so the 2D amber placeholder is gone.
   const selSegs: number[] = [];
-  const pendingSegs: number[] = [];
-  if (editable) {
+  if (editable && selectedIds.size) {
     const dx = moveDelta?.dx ?? 0, dz = moveDelta?.dz ?? 0;
-    const baked = bakedIdsRef.current!;
     for (const pc of piecesRef.current) {
-      const isSel = selectedIds.has(pc.id);
-      // A piece committed since the last bake isn't in the native render yet — draw it as
-      // an instant amber box so a placement shows the moment you click (req_1797), until
-      // the bake reload swaps in the real mesh. Selected pieces use the selection box.
-      const isPending = !isSel && !baked.has(pc.id);
-      if (!isSel && !isPending) continue;
+      if (!selectedIds.has(pc.id)) continue;
       const b = GAME_BUILD.placed.bounds(pc);
-      const cx = (b.minX + b.maxX) / 2 + (isSel ? dx : 0);
-      const cz = (b.minZ + b.maxZ) / 2 + (isSel ? dz : 0);
-      (isSel ? selSegs : pendingSegs).push(
-        ...boxSegments(stage, rect, cx, b.baseY, cz, 0, b.maxX - b.minX, b.topY - b.baseY, b.maxZ - b.minZ),
-      );
+      const cx = (b.minX + b.maxX) / 2 + dx;
+      const cz = (b.minZ + b.maxZ) / 2 + dz;
+      selSegs.push(...boxSegments(stage, rect, cx, b.baseY, cz, 0, b.maxX - b.minX, b.topY - b.baseY, b.maxZ - b.minZ));
     }
   }
 
@@ -546,10 +563,9 @@ export function LoaderIsoView(props: {
 
       {/* 2D projected overlay — identity view so points are plain pane pixels; never
           eats input (pointerEvents off). Selection under the ghost in paint order. */}
-      {editable && (selSegs.length || ghostSegs.length || pendingSegs.length) ? (
+      {editable && (selSegs.length || ghostSegs.length) ? (
         <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
           <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
-            {pendingSegs.length ? <Graph.Polyline segments points={pendingSegs} stroke="#fbbf24" strokeWidth={1.8} /> : null}
             {selSegs.length ? <Graph.Polyline segments points={selSegs} stroke="#7dd3fc" strokeWidth={2.4} /> : null}
             {ghostSegs.length ? <Graph.Polyline segments points={ghostSegs} stroke="#34d399" strokeWidth={1.6} /> : null}
           </Graph>

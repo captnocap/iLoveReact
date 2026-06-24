@@ -2709,6 +2709,13 @@ pub const Runtime = struct {
     /// owned, sized for the max lit dots ((windowCols+1)*rows).
     ticker_first_child: usize = 0,
     ticker_buffers: [][]f32 = &.{},
+    /// Live editor-placed overlay (LIVEHOST req_1798): ONE mutable box-instance node in
+    /// the stable prefix whose buffer applyPendingLive refreshes from the per-node pending
+    /// rows the editor pushes. null until build() reserves it. live_buf is owned; live_gen
+    /// tracks the last pending generation copied so a still view never re-uploads.
+    live_kid: ?usize = null,
+    live_buf: []f32 = &.{},
+    live_gen: u64 = 0,
     ticker_seconds: f32 = 0,
     last_ns: i64 = 0,
     frame: u32 = 0,
@@ -2843,6 +2850,7 @@ pub const Runtime = struct {
         if (self.cars.len > 0) self.allocator.free(self.cars);
         for (self.ticker_buffers) |buf| self.allocator.free(buf);
         if (self.ticker_buffers.len > 0) self.allocator.free(self.ticker_buffers);
+        if (self.live_buf.len > 0) self.allocator.free(self.live_buf); // LIVEHOST req_1798
         self.scene.deinit(self.allocator);
         self.* = undefined;
     }
@@ -3534,6 +3542,22 @@ pub const Runtime = struct {
                 });
             }
         }
+        // LIVEHOST req_1798: reserve ONE mutable box-instance node for the editor's
+        // live overlay (just-placed-but-unbaked pieces). Empty until applyPendingLive
+        // points it at the runtime's live_buf. In the stable prefix (like the tickers)
+        // so streaming's static/stream tail never clobbers it. Box geom + 12-stride rows
+        // = the same unit-box instance path the world batches and pieceInstanceRows use.
+        self.live_kid = self.kid_list.items.len;
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = false,
+            .scene3d_geom_key = "box",
+            .scene3d_vertices = self.cube[0..],
+            .scene3d_vert_count = 36,
+            .scene3d_instance_data = &.{},
+            .scene3d_instance_count = 0,
+            .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
+            .scene3d_instance_static = false,
+        });
         // The world batches are STATIC (built once at construct, never mutated) —
         // flag them so the host uploads each ONCE and redraws from the retained
         // instance buffer with no per-frame restage/upload. This is what makes a
@@ -4698,6 +4722,64 @@ const PendingCam = struct {
 };
 var g_pending_cams: [MAX_EMBEDDED_LOADERS]PendingCam = [_]PendingCam{.{}} ** MAX_EMBEDDED_LOADERS;
 
+// Live-pieces overlay (LIVEHOST req_1798): the editor pushes instance rows for pieces
+// it has placed-but-not-yet-baked, and the loader draws them as real solid box meshes
+// THIS frame — no rebake. Keyed by node id and INDEPENDENT of mount state (same reason
+// as PendingCam: the push can arrive before the lazy first-render mount), applied each
+// renderEmbedded. `gen` bumps on every set so a mounted runtime re-copies only on change.
+// Owns its `rows` allocation (page_allocator), grown on demand and freed on clear/replace.
+const PendingLive = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    rows: []f32 = &.{}, // 12-stride instance rows (cx,cy,cz, 0,yaw,0, sx,sy,sz, r,g,b)
+    count: usize = 0, // instance count (rows.len / INSTANCE_STRIDE)
+    gen: u64 = 0,
+};
+var g_pending_live: [MAX_EMBEDDED_LOADERS]PendingLive = [_]PendingLive{.{}} ** MAX_EMBEDDED_LOADERS;
+
+fn pendingLiveFor(node_id: u32) ?*PendingLive {
+    for (&g_pending_live) |*p| {
+        if (p.set and p.node_id == node_id) return p;
+    }
+    return null;
+}
+
+/// Replace the live overlay rows for a node (LIVEHOST req_1798). `bytes` is the raw
+/// Float32Array backing (12 floats per instance); we own a copy so the JS array can be
+/// freed. Bumps gen so applyPendingLive re-uploads on the next frame.
+pub fn setLivePieces(node_id: u32, bytes: []const u8) void {
+    const alloc = std.heap.page_allocator;
+    var slot: ?*PendingLive = pendingLiveFor(node_id);
+    if (slot == null) {
+        for (&g_pending_live) |*p| {
+            if (!p.set) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    const p = slot orelse return;
+    const float_count = bytes.len / 4;
+    const new_rows = alloc.alloc(f32, float_count) catch return;
+    @memcpy(std.mem.sliceAsBytes(new_rows), bytes[0 .. float_count * 4]);
+    if (p.rows.len > 0) alloc.free(p.rows);
+    p.node_id = node_id;
+    p.set = true;
+    p.rows = new_rows;
+    p.count = float_count / INSTANCE_STRIDE;
+    p.gen +%= 1;
+}
+
+/// Drop the live overlay for a node (after a bake reload folds the pieces into the
+/// baked world). Keeps the slot so gen keeps advancing; frees the row allocation.
+pub fn clearLivePieces(node_id: u32) void {
+    const p = pendingLiveFor(node_id) orelse return;
+    if (p.rows.len > 0) std.heap.page_allocator.free(p.rows);
+    p.rows = &.{};
+    p.count = 0;
+    p.gen +%= 1;
+}
+
 fn pendingCamFor(node_id: u32) ?*PendingCam {
     for (&g_pending_cams) |*p| {
         if (p.set and p.node_id == node_id) return p;
@@ -4730,6 +4812,30 @@ fn applyPendingCam(runtime: *Runtime) void {
     runtime.camera.ext_pos = p.pos;
     runtime.camera.ext_look = p.look;
     runtime.camera.ext_fov = p.fov;
+}
+
+// Copy the node's pending live-overlay rows into the runtime's own buffer and point the
+// live render node at them (LIVEHOST req_1798). Only re-copies when the pending gen moved
+// (a placement/move/delete or a clear), so a still view costs nothing. The live node was
+// reserved in build() at live_kid in the STABLE node prefix, so streaming never clobbers it.
+fn applyPendingLive(runtime: *Runtime) void {
+    const kid = runtime.live_kid orelse return;
+    const p = pendingLiveFor(runtime.node_id) orelse return;
+    if (runtime.live_gen == p.gen) return;
+    const floats = p.count * INSTANCE_STRIDE;
+    if (floats > runtime.live_buf.len) {
+        if (runtime.live_buf.len > 0) runtime.allocator.free(runtime.live_buf);
+        runtime.live_buf = runtime.allocator.alloc(f32, floats) catch {
+            runtime.live_buf = &.{};
+            return;
+        };
+    }
+    if (floats > 0) @memcpy(runtime.live_buf[0..floats], p.rows[0..floats]);
+    const node = &runtime.kid_list.items[kid];
+    node.scene3d_instance_data = runtime.live_buf[0..floats];
+    node.scene3d_instance_count = @intCast(p.count);
+    node.scene3d_mesh = p.count > 0;
+    runtime.live_gen = p.gen;
 }
 
 fn findMounted(node_id: u32) ?*MountedLoader {
@@ -4782,6 +4888,7 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
     };
     runtime.last_aspect = w / @max(h, 1); // streaming's sight culling needs the real pane shape
     applyPendingCam(runtime); // LOADERVIEW req_1757: editor iso pose, re-applied each frame
+    applyPendingLive(runtime); // LIVEHOST req_1798: just-placed pieces, drawn without a rebake
     runtime.stepNow();
     runtime.ensureMaterials();
     const ok = scene3d.render(&runtime.root, x, y, w, h, opacity);

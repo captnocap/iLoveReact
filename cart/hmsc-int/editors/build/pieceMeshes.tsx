@@ -446,6 +446,33 @@ function pushBoxInstance(bucket: InstanceBucket, b: VisualBox, rgb: readonly [nu
   if (half > bucket.maxHalf) bucket.maxHalf = half;
 }
 
+// Pack placed pieces into a flat Float32Array of unit-box instance rows — 12 floats
+// each (cx,cy,cz, 0,yaw,0, sx,sy,sz, r,g,b), the SAME layout pushBoxInstance batches
+// and the bake's worldGeometry emits. The loader iso pane (LIVEHOST req_1798) pushes
+// these to world_loader as a LIVE render overlay, so a just-placed piece appears as a
+// real solid mesh instantly with no full rebake. Ramps/gables approximate as their box
+// (the exact keyed geometry lands on the next Compile); props are skipped here — they
+// need baked mesh assets, not a unit box, so they show on Compile.
+export function pieceInstanceRows(pieces: readonly PlacedBuildPiece[]): Float32Array {
+  const rows: number[] = [];
+  for (const piece of pieces) {
+    if (propFromPiece(piece)) continue;
+    const sig = wallJoinSignature(piece, pieces) ?? '';
+    for (const shape of pieceVisualShapes(piece, sig, pieces)) {
+      if (shape.kind === 'ramp') {
+        const r = shape.ramp;
+        const rgb = rgbOf(r.color);
+        rows.push(r.x, r.y + r.height / 2, r.z, 0, r.yawDegrees, 0, r.width, r.height, r.depth, rgb[0], rgb[1], rgb[2]);
+      } else {
+        const b = shape.box;
+        const rgb = rgbOf(b.color);
+        rows.push(b.cx, b.cy, b.cz, 0, b.yawDegrees, 0, b.sx, b.sy, b.sz, rgb[0], rgb[1], rgb[2]);
+      }
+    }
+  }
+  return new Float32Array(rows);
+}
+
 // The join-signature pass over the whole piece array, cached on the ARRAY
 // IDENTITY (PLACEPERF-0610): every render of PlacedPieceMeshes used to redo it
 // (43ms at ~4.8k pieces), and a single commit re-renders several times

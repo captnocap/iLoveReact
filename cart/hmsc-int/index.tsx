@@ -488,11 +488,11 @@ function EditorShell() {
     };
     arm();
     return () => { if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current); };
-    // buildPieces is in the deps so a PLACEMENT in the loader iso pane (commitBuildEvent
-    // bumps the build stream, NOT worldRev) re-arms the debounce — without it the loader
-    // only refreshed on a 2D-canvas edit (worldRev) and a placed piece stayed invisible
-    // until a manual reload (req_1797).
-  }, [loaderView, worldRev, placements, buildPieces, ws.stem, compileToGame]);
+    // NOT keyed on buildPieces (LIVEHOST req_1798): a piece PLACEMENT shows instantly via
+    // the loader's live overlay (LoaderIsoView pushes __compiled_world_set_live_pieces), so
+    // it must NOT trigger the ~5s whole-world rebake+reload flash. Placements fold into the
+    // gamefile on the next bake (a 2D-canvas/terrain edit via worldRev, or manual Compile).
+  }, [loaderView, worldRev, placements, ws.stem, compileToGame]);
 
   // The /workbench source registry (WORKBENCH.md §6) — built once per mount.
   const wbSources = useMemo(workbenchSources, []);

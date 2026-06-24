@@ -121,6 +121,51 @@ fn hostClearCamera(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     setReturnString(info, "ok");
 }
 
+// ── live editor overlay (LIVEHOST req_1798) ─────────────────────────────────
+// __compiled_world_set_live_pieces(nodeId, Float32Array rows) draws just-placed pieces
+// as real box meshes WITHOUT a rebake; _clear_live_pieces drops them after a bake reload
+// folds them into the baked world. The rows are the 12-stride unit-box instance layout
+// pieceInstanceRows emits; world_loader owns a copy.
+
+/// Raw bytes of a Float32Array / ArrayBufferView arg, borrowed in place (the loader
+/// copies them straight away). Null if the arg isn't an array buffer view.
+fn argView(info: v8.FunctionCallbackInfo, idx: u32) ?[]const u8 {
+    if (info.length() <= idx) return null;
+    const v = info.getArg(idx);
+    if (!v.isArrayBufferView()) return null;
+    const view: v8.ArrayBufferView = .{ .handle = @ptrCast(v.handle) };
+    const byte_len = view.getByteLength();
+    if (byte_len == 0) return &[_]u8{};
+    const byte_off = view.getByteOffset();
+    const ab = view.getBuffer();
+    var shared = ab.getBackingStore();
+    defer v8.BackingStore.sharedPtrReset(&shared);
+    const bs = v8.BackingStore.sharedPtrGet(&shared);
+    const base = bs.getData() orelse return null;
+    const base_bytes: [*]const u8 = @ptrCast(base);
+    return base_bytes[byte_off .. byte_off + byte_len];
+}
+
+fn hostSetLivePieces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const bytes = argView(info, 1) orelse {
+        setReturnString(info, "error:BadRows");
+        return;
+    };
+    world_loader.setLivePieces(node_id, bytes);
+    setReturnString(info, "ok");
+}
+
+fn hostClearLivePieces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (argToNodeId(info, 0)) |node_id| world_loader.clearLivePieces(node_id);
+    setReturnString(info, "ok");
+}
+
 // ── the pop-out window (WORLDWIN-0611) ──────────────────────────────────────
 // __compiled_world_window(gameFile, storeDir, width, height) opens the
 // second OS window (or reloads its gamefile when already open — the Compile
@@ -179,6 +224,8 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_status", hostStatus);
     v8_runtime.registerHostFn("__compiled_world_set_camera", hostSetCamera);
     v8_runtime.registerHostFn("__compiled_world_clear_camera", hostClearCamera);
+    v8_runtime.registerHostFn("__compiled_world_set_live_pieces", hostSetLivePieces);
+    v8_runtime.registerHostFn("__compiled_world_clear_live_pieces", hostClearLivePieces);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
     v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);
     v8_runtime.registerHostFn("__compiled_world_window_status", hostWindowStatus);
