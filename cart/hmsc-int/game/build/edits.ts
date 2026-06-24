@@ -20,6 +20,7 @@ export type WallEdit =
   | 'doubleWindow'
   | 'brokenWindow'
   | 'garageDoor'
+  | 'slidingDoor'
   | 'arch'
   | 'halfHeight';
 
@@ -29,7 +30,9 @@ export type WallEdit =
 export type EditPortalKind = 'none' | 'walk' | 'vehicle';
 
 export type DoorInteractionDefinition = {
-  action: 'toggle';
+  // 'toggle' = an E/F press flips the leaf; 'auto' = the door opens ITSELF when a
+  // body comes near and closes when it leaves (req_1725, the grocery-store door).
+  action: 'toggle' | 'auto';
   defaultState: 'closed';
   states: readonly ['closed', 'open'];
   reachMeters: number;
@@ -37,7 +40,17 @@ export type DoorInteractionDefinition = {
   blocksMovementWhenClosed: boolean;
   blocksSightWhenClosed: boolean;
   blocksSoundWhenClosed: boolean;
+  /** 'auto' only (req_1725): a body within this distance of the door center
+   *  opens it; once every body is beyond it (plus a small hysteresis) it closes.
+   *  Absent for 'toggle' doors (they wait for a press). */
+  autoOpenRadiusMeters?: number;
 };
+
+// How the leaf MOVES when it opens (req_1725). 'swing' = the panel simply clears
+// the opening (the original door behaviour); 'slide' = the leaves retract along
+// the wall into the jambs (the automatic grocery door). Visual + collision both
+// read this; only meaningful when a door `interaction` is present.
+export type DoorPanelStyle = 'swing' | 'slide';
 
 export type WallEditDefinition = {
   edit: WallEdit;
@@ -54,6 +67,17 @@ export type WallEditDefinition = {
   // The live interaction contract. Door-like cutouts expose an E/F toggle;
   // open archways/windows do not.
   interaction: DoorInteractionDefinition | null;
+  // How the leaf moves when it opens (req_1725) — 'swing' (default) or 'slide'.
+  // Only read when `interaction` is set; absent ⇒ 'swing'.
+  panelStyle?: DoorPanelStyle;
+  // How many leaves fill the opening (req_1725): 1 (single, default) or 2 (a
+  // bi-parting / double door). Two leaves each cover half the opening and, when
+  // sliding, retract to opposite jambs.
+  panelCount?: 1 | 2;
+  // Opening-width override in meters (req_1725). Absent ⇒ the portalKind default
+  // (walkOpeningWidthMeters / vehicleOpeningWidthMeters). A double-wide auto door
+  // declares its own wider opening here.
+  openingWidthMeters?: number;
 };
 
 const WALK_DOOR_INTERACTION: DoorInteractionDefinition = {
@@ -70,6 +94,21 @@ const WALK_DOOR_INTERACTION: DoorInteractionDefinition = {
 const GARAGE_DOOR_INTERACTION: DoorInteractionDefinition = {
   ...WALK_DOOR_INTERACTION,
   openSeconds: 0.65,
+};
+
+// The grocery-store automatic door (req_1725): no press — proximity opens it.
+// Glass leaves, so it never blocks sight even closed; it parts a touch faster
+// than a swung door and re-closes once everyone clears the trigger radius.
+const AUTO_SLIDING_DOOR_INTERACTION: DoorInteractionDefinition = {
+  action: 'auto',
+  defaultState: 'closed',
+  states: ['closed', 'open'],
+  reachMeters: 2.6,
+  openSeconds: 0.45,
+  blocksMovementWhenClosed: true,
+  blocksSightWhenClosed: false,
+  blocksSoundWhenClosed: false,
+  autoOpenRadiusMeters: 2.6,
 };
 
 export const WALL_EDIT_DEFINITIONS: Record<WallEdit, WallEditDefinition> = {
@@ -134,6 +173,19 @@ export const WALL_EDIT_DEFINITIONS: Record<WallEdit, WallEditDefinition> = {
     sightline: true,
     traversable: true,
     interaction: GARAGE_DOOR_INTERACTION,
+  },
+  slidingDoor: {
+    edit: 'slidingDoor',
+    label: 'Sliding Door',
+    meaning: 'A grocery-store automatic door: a double-wide walk portal whose two glass leaves slide apart when a body comes near and close again once it clears.',
+    overrides: { portal: true, blocksSight: false }, // glass leaves see through even closed
+    portalKind: 'walk',
+    sightline: true,
+    traversable: true,
+    interaction: AUTO_SLIDING_DOOR_INTERACTION,
+    panelStyle: 'slide',
+    panelCount: 2,
+    openingWidthMeters: 2.4, // double-wide (a single walk door opening is 1.2 m)
   },
   arch: {
     edit: 'arch',
