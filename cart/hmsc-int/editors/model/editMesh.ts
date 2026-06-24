@@ -729,6 +729,111 @@ export function icosphere(radius: number, subdiv = 1): EditMesh {
   return fullFaceUV({ verts, faces });
 }
 
+// ── Lattice / grille panel (req_1722) ─────────────────────────────────────────
+// A thin panel full of openings — chainlink fence, railing infill, vents, speaker
+// grilles, the decorative slot band atop a fence — built in ONE op so you never
+// hand-cut + re-face every hole again. The panel lies in the XY plane, `depth`
+// thick along Z, centered at the origin (so it drops in like any Add-Shape
+// primitive). Geometry is just crossed BARS (each a correctly-wound `cuboid`
+// rotated into place + merged), so the walls of every opening exist for free and
+// the mesh stays light + crisp (one box per bar, not a quad per cell). Bar
+// crossings overlap — the overlap faces are interior/hidden, which is fine for a
+// game prop and keeps the part fully editable like every other primitive.
+
+export type LatticePattern = 'grid' | 'diamond';
+export const LATTICE_PATTERNS: LatticePattern[] = ['grid', 'diamond'];
+export const LATTICE_COUNT_MAX = 64; // a generous cap on openings per axis (LOUD, not silent)
+
+/** Clip the infinite line through the inner rect to its [x0,x1]×[y0,y1] extent,
+ *  returning the inside segment endpoints or null if it misses. `vert` true =>
+ *  a vertical bar at x=a (param by y); otherwise the line is y = slope·x + a with
+ *  slope ±1 or 0 (param by x). Pure helper for `latticePanel`. */
+function clipBarToRect(a: number, slope: number, vert: boolean, x0: number, x1: number, y0: number, y1: number): { ax: number; ay: number; bx: number; by: number } | null {
+  if (vert) { if (a < x0 || a > x1) return null; return { ax: a, ay: y0, bx: a, by: y1 }; }
+  if (slope === 0) { if (a < y0 || a > y1) return null; return { ax: x0, ay: a, bx: x1, by: a }; }
+  // y = slope·x + a, slope = ±1 → x where y hits the horizontal edges, intersected with [x0,x1].
+  const xAtY0 = (y0 - a) / slope, xAtY1 = (y1 - a) / slope;
+  const lo = Math.max(x0, Math.min(xAtY0, xAtY1));
+  const hi = Math.min(x1, Math.max(xAtY0, xAtY1));
+  if (hi - lo < 1e-6) return null;
+  return { ax: lo, ay: slope * lo + a, bx: hi, by: slope * hi + a };
+}
+
+export function latticePanel(opts: {
+  width: number; height: number; depth: number;
+  pattern: LatticePattern;
+  cols: number; rows: number;
+  bar: number;   // solid wire / mullion width
+  frame: number; // border thickness (0 = no border)
+}): EditMesh {
+  const { width: W, height: H, depth: D } = opts;
+  const pattern = opts.pattern;
+  const bar = Math.max(1e-3, opts.bar);
+  const frame = Math.max(0, opts.frame);
+  const cols = Math.max(1, Math.min(LATTICE_COUNT_MAX, Math.round(opts.cols)));
+  const rows = Math.max(1, Math.min(LATTICE_COUNT_MAX, Math.round(opts.rows)));
+  const hx = W / 2, hy = H / 2;
+  // inner rect the openings live in — inset by the frame so bars tuck under it.
+  const ix0 = -hx + frame, ix1 = hx - frame, iy0 = -hy + frame, iy1 = hy - frame;
+
+  // each bar = a cuboid (length along X) rotated by `angle` about Z, dropped at the
+  // bar midpoint. cuboid carries correct outward windings + per-face UV, so merging
+  // gives a clean, paintable panel.
+  let out: EditMesh = { verts: [], faces: [] };
+  const addBar = (ax: number, ay: number, bx: number, by: number, w: number) => {
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) return;
+    const angle = Math.atan2(dy, dx);
+    // bars run end-to-end exactly; crossing bars overlap at their intersection
+    // (no length extension — that would poke past the panel bounds).
+    let piece = cuboid(len, w, D);
+    const all = piece.verts.map((_, i) => i);
+    if (Math.abs(angle) > 1e-6) piece = rotateVerts(piece, all, [0, 0, 0], 2, angle);
+    out = mergeMesh(out, piece, [(ax + bx) / 2, (ay + by) / 2, 0]);
+  };
+
+  // BORDER FRAME — four bars hugging the outer edge (rendered first so it reads as
+  // the panel's rim). Skipped when frame === 0.
+  if (frame > 0) {
+    addBar(-hx, hy - frame / 2, hx, hy - frame / 2, frame);   // top
+    addBar(-hx, -hy + frame / 2, hx, -hy + frame / 2, frame); // bottom
+    addBar(-hx + frame / 2, iy0, -hx + frame / 2, iy1, frame); // left
+    addBar(hx - frame / 2, iy0, hx - frame / 2, iy1, frame);   // right
+  }
+
+  if (pattern === 'grid') {
+    // internal mullions only — the frame (or open edge) is the border. `cols`
+    // openings across ⇒ cols-1 vertical bars between them; same for rows.
+    const innerW = ix1 - ix0, innerH = iy1 - iy0;
+    for (let i = 1; i < cols; i += 1) { const x = ix0 + (innerW * i) / cols; addBar(x, iy0, x, iy1, bar); }
+    for (let j = 1; j < rows; j += 1) { const y = iy0 + (innerH * j) / rows; addBar(ix0, y, ix1, y, bar); }
+  } else {
+    // DIAMOND (chainlink): two families of ±45° wires. `gap` = the perpendicular-ish
+    // intercept spacing, derived so ~cols diamonds span the width and ~rows the height.
+    const gap = ((ix1 - ix0) / cols + (iy1 - iy0) / rows) / 2;
+    if (gap > 1e-4) {
+      // family A: y = x + c   (c = y - x), stepping c through the rect's range.
+      const aMin = iy0 - ix1, aMax = iy1 - ix0;
+      for (let c = Math.ceil(aMin / gap) * gap; c <= aMax + 1e-9; c += gap) {
+        const s = clipBarToRect(c, 1, false, ix0, ix1, iy0, iy1);
+        if (s) addBar(s.ax, s.ay, s.bx, s.by, bar);
+      }
+      // family B: y = -x + c  (c = y + x).
+      const bMin = iy0 + ix0, bMax = iy1 + ix1;
+      for (let c = Math.ceil(bMin / gap) * gap; c <= bMax + 1e-9; c += gap) {
+        const s = clipBarToRect(c, -1, false, ix0, ix1, iy0, iy1);
+        if (s) addBar(s.ax, s.ay, s.bx, s.by, bar);
+      }
+    }
+  }
+
+  // a panel with no border + a single opening + tiny bars could come back empty;
+  // guarantee at least the frame OR a degenerate-safe thin slab so Add never yields nothing.
+  if (out.faces.length === 0) return fullFaceUV(cuboid(Math.max(W, 1e-3), Math.max(H, 1e-3), D));
+  return fullFaceUV(out);
+}
+
 // ── The concave-quad Auto-Fix guard (USER req_0949 — a first-class idea) ───────
 // After a gizmo move, before committing, the Studio checks whether any face went
 // concave (a reflex corner — convex ⇒ every consecutive-edge cross product points

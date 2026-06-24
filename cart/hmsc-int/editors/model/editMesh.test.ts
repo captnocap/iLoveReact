@@ -9,6 +9,7 @@ import {
   addTextureSlot, assignFacesToSlot, clearFaceSlot, facesInSlot, slotOfFace, renameSlot, removeSlot, slotIndexById,
   flipFace, mergeFaces, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel, validateMesh, meshHealth,
+  latticePanel,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
 
@@ -1267,6 +1268,46 @@ test('cloneMesh deep-copies verts/faces/mounts/pivot — no shared refs (req_158
   assert(src.mounts![0].position[2] === 4, 'mount position is independent');
   copy.mounts![0].limit!.max = 5;
   assert(src.mounts![0].limit!.max === 90, 'mount limit is independent');
+});
+
+// ── Lattice / grille panel (req_1722) ──────────────────────────────────────────
+test('latticePanel grid: a frame + internal mullions, all quads, well-formed', () => {
+  const m = latticePanel({ width: 2, height: 2, depth: 0.1, pattern: 'grid', cols: 3, rows: 2, bar: 0.05, frame: 0.1 });
+  // 4 frame bars + (cols-1=2) verticals + (rows-1=1) horizontal = 7 cuboids × 8 verts / 6 faces.
+  assertEqual(m.verts.length, 7 * 8, 'grid lattice vert count = 7 bars × 8');
+  assertEqual(m.faces.length, 7 * 6, 'grid lattice face count = 7 bars × 6');
+  assert(m.faces.every((f) => f.loop.length === 4), 'every lattice face is a quad');
+  assert(m.faces.every((f) => f.uv && f.uv.length === 4), 'every lattice face is UV-mapped');
+  // panel stays within its declared bounds (centered, never bigger than W×H×D).
+  for (const v of m.verts) {
+    assert(Math.abs(v[0]) <= 1 + 1e-6 && Math.abs(v[1]) <= 1 + 1e-6 && Math.abs(v[2]) <= 0.05 + 1e-6, 'vert inside panel bounds');
+  }
+});
+
+test('latticePanel grid: more openings ⇒ more mullion bars', () => {
+  const few = latticePanel({ width: 2, height: 2, depth: 0.1, pattern: 'grid', cols: 2, rows: 2, bar: 0.05, frame: 0 });
+  const many = latticePanel({ width: 2, height: 2, depth: 0.1, pattern: 'grid', cols: 6, rows: 6, bar: 0.05, frame: 0 });
+  assert(many.faces.length > few.faces.length, 'denser grid has more geometry');
+  // cols=2,rows=2,frame=0 ⇒ 1 vertical + 1 horizontal = 2 bars.
+  assertEqual(few.faces.length, 2 * 6, 'sparse grid is exactly 2 mullion bars');
+});
+
+test('latticePanel diamond (chainlink): crossed ±45° wires, clipped to bounds', () => {
+  const m = latticePanel({ width: 4, height: 2, depth: 0.05, pattern: 'diamond', cols: 12, rows: 6, bar: 0.03, frame: 0.08 });
+  assert(m.faces.length > 6, 'diamond lattice has many wire bars');
+  assert(m.faces.every((f) => f.loop.length === 4), 'every diamond wire face is a quad');
+  // diagonal wires are clipped to the inner rect → nothing pokes past the panel.
+  for (const v of m.verts) {
+    assert(Math.abs(v[0]) <= 2 + 1e-6 && Math.abs(v[1]) <= 1 + 1e-6, 'diamond wire vert inside panel bounds');
+  }
+  // a real prop: lowers to a whole-triangle soup with positive bounds.
+  const geo = editMeshToGeometry(m);
+  assert(geo.count % 3 === 0 && geo.bounds.radius > 0, 'diamond lattice lowers cleanly');
+});
+
+test('latticePanel never yields an empty mesh (degenerate params fall back to a slab)', () => {
+  const m = latticePanel({ width: 1, height: 1, depth: 0.1, pattern: 'grid', cols: 1, rows: 1, bar: 0.05, frame: 0 });
+  assert(m.faces.length >= 6, 'a single opening with no frame still produces a solid slab, not nothing');
 });
 
 finish('editMesh');

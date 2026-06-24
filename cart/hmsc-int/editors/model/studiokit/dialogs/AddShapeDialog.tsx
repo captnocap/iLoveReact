@@ -5,7 +5,7 @@ import { STUDIO, T } from '../config';
 import { Z } from '../chrome/zlayers';
 import { unitsToMeters } from '../helpers';
 import { NumberField } from '../panels/NumberField';
-import { clampSides, cone, cuboid, cylinder, icosphere, ICOSPHERE_SUBDIV_MAX, plane, pyramid, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, sphere, type EditMesh } from '../../editMesh';
+import { clampSides, cone, cuboid, cylinder, icosphere, ICOSPHERE_SUBDIV_MAX, latticePanel, LATTICE_COUNT_MAX, plane, pyramid, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, sphere, type EditMesh, type LatticePattern } from '../../editMesh';
 import { seedMeshFromPiece, seedNameFromPiece } from '../../seedFromPiece';
 
 // ── Add-mesh dialog (req_0972/0973) ───────────────────────────────────────────
@@ -21,11 +21,12 @@ import { seedMeshFromPiece, seedNameFromPiece } from '../../seedFromPiece';
 // the round shapes — and confirm. Builds the topological EditMesh so the new part
 // is fully editable (loop cut / extrude / rig), unlike the render-only geometry
 // registry. cuboid/cylinder/cone/pyramid/plane share the 16-units basis.
-type ShapeKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere';
+type ShapeKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere' | 'lattice';
 const SHAPE_KINDS: { kind: ShapeKind; label: string }[] = [
   { kind: 'cube', label: 'Cube' }, { kind: 'cylinder', label: 'Cylinder' }, { kind: 'cone', label: 'Cone' },
   { kind: 'pyramid', label: 'Pyramid' }, { kind: 'plane', label: 'Plane' },
   { kind: 'sphere', label: 'Sphere' }, { kind: 'icosphere', label: 'Icosphere' },
+  { kind: 'lattice', label: 'Lattice' },
 ];
 // round-bodied shapes (sphere/icosphere) are sized by DIAMETER alone — no separate
 // height — and the 'sides' knob means longitude segments (icosphere uses subdiv).
@@ -58,12 +59,22 @@ export function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: 
   const [hgt, setHgt] = useState(u);
   const [sides, setSides] = useState(16);
   const [subdiv, setSubdiv] = useState(1); // icosphere subdivisions
+  // LATTICE / grille (req_1722): a thin panel full of openings — chainlink fence,
+  // railing infill, vents, a fence-top slot band — instead of hand-cutting holes.
+  const [pattern, setPattern] = useState<LatticePattern>('diamond');
+  const [cols, setCols] = useState(10); // openings across (diamond default reads as chainlink)
+  const [rows, setRows] = useState(8);  // openings up
+  const [barU, setBarU] = useState(1);  // wire / mullion width, units
+  const [frameU, setFrameU] = useState(1); // border thickness, units (0 = no frame)
+  const [depthU, setDepthU] = useState(1); // panel thickness, units
+  const isLattice = !seed && shape === 'lattice';
   const hasHeight = !seed && shape !== 'plane' && !ROUND_BODIES.includes(shape);
   const hasSides = !seed && (shape === 'cylinder' || shape === 'cone' || shape === 'sphere');
   const hasSubdiv = !seed && shape === 'icosphere';
   const fmtTiles = (units: number) => `${(units / u).toFixed(2)} tile`;
   const meta = SHAPE_KINDS.find((s) => s.kind === shape)!;
   const confirmName = seed ? seedNameFromPiece(seed.pieceId) : meta.label;
+  const clampCount = (n: number) => Math.max(1, Math.min(LATTICE_COUNT_MAX, Math.round(n)));
   const build = (): EditMesh => {
     if (seed) return seedMeshFromPiece(seed.pieceId, seed.edit);
     const d = unitsToMeters(dia), h = unitsToMeters(hgt), r = unitsToMeters(dia) / 2;
@@ -74,6 +85,7 @@ export function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: 
       case 'plane': return plane(d, d);
       case 'sphere': return sphere(r, sides);
       case 'icosphere': return icosphere(r, subdiv);
+      case 'lattice': return latticePanel({ width: d, height: h, depth: unitsToMeters(depthU), pattern, cols, rows, bar: unitsToMeters(barU), frame: unitsToMeters(frameU) });
       default: return cuboid(d, h, d);
     }
   };
@@ -97,12 +109,30 @@ export function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: 
           })}
         </Row>
         <Text fontSize={10} color={T.dim}>{`Units: ${u} = 1 tile (1 m). Same basis as per-face UV. The grid is unchanged.`}</Text>
-        {seed ? null : <NumberField label="diameter" value={dia} onChange={setDia} min={1} max={u * STUDIO.gridTiles} step={1} snap={0.5} suffix="u" />}
+        {seed ? null : <NumberField label={isLattice ? 'width' : 'diameter'} value={dia} onChange={setDia} min={1} max={u * STUDIO.gridTiles} step={1} snap={0.5} suffix="u" />}
         {hasHeight ? <NumberField label="height" value={hgt} onChange={setHgt} min={1} max={u * STUDIO.gridTiles * 2} step={1} snap={0.5} suffix="u" /> : null}
         {hasSides ? <NumberField label="sides" value={sides} onChange={(n) => setSides(clampSides(n))} min={SHAPE_SIDES_MIN} max={SHAPE_SIDES_MAX} step={1} snap={1} /> : null}
         {hasSubdiv ? <NumberField label="subdiv" value={subdiv} onChange={(n) => setSubdiv(Math.max(0, Math.min(ICOSPHERE_SUBDIV_MAX, Math.round(n))))} min={0} max={ICOSPHERE_SUBDIV_MAX} step={1} snap={1} /> : null}
+        {/* LATTICE controls (req_1722): pick the opening pattern + density, then the
+            wire/border/thickness — one Add replaces hand-cutting + re-facing every hole. */}
+        {isLattice ? (
+          <>
+            <Row style={{ gap: 5 }}>
+              {([['diamond', 'Diamond (chainlink)'], ['grid', 'Grid (slots)']] as [LatticePattern, string][]).map(([p, lbl]) => {
+                const on = pattern === p;
+                return <Pressable key={p} onPress={() => setPattern(p)} style={{ flexGrow: 1, alignItems: 'center', paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: on ? '#2a3f5e' : '#13233aee', borderWidth: 1, borderColor: on ? '#5b8fd6' : '#2c4a6a' }}><Text fontSize={11} color={on ? '#cfe2ff' : T.dim} style={{ fontFamily: 'monospace' }}>{lbl}</Text></Pressable>;
+              })}
+            </Row>
+            <NumberField label="openings across" value={cols} onChange={(n) => setCols(clampCount(n))} min={1} max={LATTICE_COUNT_MAX} step={1} snap={1} />
+            <NumberField label="openings up" value={rows} onChange={(n) => setRows(clampCount(n))} min={1} max={LATTICE_COUNT_MAX} step={1} snap={1} />
+            <NumberField label="wire width" value={barU} onChange={setBarU} min={0.25} max={u} step={0.25} snap={0.25} suffix="u" />
+            <NumberField label="frame" value={frameU} onChange={setFrameU} min={0} max={u} step={0.5} snap={0.5} suffix="u" />
+            <NumberField label="thickness" value={depthU} onChange={setDepthU} min={0.5} max={u} step={0.5} snap={0.5} suffix="u" />
+          </>
+        ) : null}
         <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>
           {seed ? `= ${confirmName} — editable mesh from a build piece`
+            : isLattice ? `= ${fmtTiles(dia)} × ${fmtTiles(hgt)} ${pattern} · ${cols}×${rows} openings · ${fmtTiles(depthU)} thick`
             : shape === 'plane' ? `= ${fmtTiles(dia)} × ${fmtTiles(dia)} flat`
             : ROUND_BODIES.includes(shape) ? `= ${fmtTiles(dia)} ∅ ${shape}${hasSides ? ` · ${clampSides(sides)} sides` : ` · subdiv ${subdiv}`}`
             : `= ${fmtTiles(dia)} ∅ × ${fmtTiles(hgt)}${hasSides ? ` · ${clampSides(sides)} sides` : ''}`}
