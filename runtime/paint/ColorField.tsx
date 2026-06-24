@@ -64,6 +64,13 @@ function hsvFromValue(hsv: HsvColor, p: any, rect: Rect): HsvColor {
 export interface ColorFieldProps {
   value: string;
   onChange: (hex: string) => void;
+  /** Fired when a colour is SETTLED ON — pointer-up after a wheel/value drag (or
+   *  a single click), and on hex-entry submit. `onChange` fires continuously while
+   *  dragging (for live preview); `onCommit` fires once, at the end. Use this to
+   *  record a "recent" so dragging the value slider doesn't flood the recents ring
+   *  with every intermediate step (req_1729). Falls back to onChange behaviour if
+   *  omitted. */
+  onCommit?: (hex: string) => void;
   size?: number;
   showHex?: boolean;
   theme?: PaintTheme;
@@ -100,14 +107,16 @@ export function ColorField(props: ColorFieldProps) {
     if (isFullHexColor(draft) || (done && isHexColor(draft))) {
       const next = normalizeHexColor(draft);
       props.onChange(next);
-      if (done) { setHexDraft(next.toUpperCase()); setEditingHex(false); }
+      if (done) { setHexDraft(next.toUpperCase()); setEditingHex(false); props.onCommit?.(next); }
     } else if (done) { setHexDraft(value.toUpperCase()); setEditingHex(false); }
   };
   const commitWheel = (p: any) => { if (wheelRect) commit(hsvFromWheel(hsvRef.current, p, wheelRect)); };
   const commitValue = (p: any) => { if (valueRect) commit(hsvFromValue(hsvRef.current, p, valueRect)); };
   const startDrag = (t: DragTarget, p: any) => { dragRef.current = t; if (t === 'wheel') commitWheel(p); else commitValue(p); };
   const moveDrag = (t: DragTarget, p: any) => { if (dragRef.current !== t) return; if (t === 'wheel') commitWheel(p); else commitValue(p); };
-  const endDrag = () => { dragRef.current = null; };
+  // Pointer-up (or leave) ends the drag and COMMITS the settled colour once — the
+  // recents ring records the colour you landed on, not every value-slider step.
+  const endDrag = () => { if (dragRef.current) props.onCommit?.(hsvToHex(hsvRef.current)); dragRef.current = null; };
 
   const radius = size / 2;
   const markerX = radius + Math.cos(hsv.h * TAU) * hsv.s * radius - marker / 2;

@@ -79,9 +79,17 @@ export function BrushKit(props: BrushKitProps) {
   const tools = props.tools ?? DEFAULT_TOOLS;
   const blendOpts: ChipOption<string>[] = BLEND_MODES.map((m) => ({ value: m, label: m }));
 
+  // Record an ink in the recents ring (a DELIBERATE choice — a swatch click or a
+  // settled colour), kept separate from setting the live brush ink. The colour
+  // wheel fires onChange continuously while dragging; pushing a recent on every
+  // tick floods the 12-cap ring and wipes your history (req_1729), so the live
+  // drag only sets the ink and the recent is recorded once on commit.
+  const recordRecent = (ink: PaintInk) => {
+    if (props.onPaletteChange) props.onPaletteChange(pushRecent(props.palette, ink));
+  };
   const selectInk = (ink: PaintInk) => {
     patch({ ink });
-    if (props.onPaletteChange) props.onPaletteChange(pushRecent(props.palette, ink));
+    recordRecent(ink);
   };
 
   const colorHex = b.ink.kind === 'color' ? b.ink.hex : '#ffffff';
@@ -156,7 +164,13 @@ export function BrushKit(props: BrushKitProps) {
 
       {show('color') ? (
         <Section title="Color" theme={T}>
-          <ColorField value={colorHex} onChange={(hex) => selectInk({ kind: 'color', hex })} theme={T} size={150} />
+          <ColorField
+            value={colorHex}
+            onChange={(hex) => patch({ ink: { kind: 'color', hex } })}
+            onCommit={(hex) => recordRecent({ kind: 'color', hex })}
+            theme={T}
+            size={150}
+          />
         </Section>
       ) : null}
 

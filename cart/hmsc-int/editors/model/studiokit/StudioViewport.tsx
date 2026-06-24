@@ -73,6 +73,7 @@ import {
   type Brush, type BrushTool, type ClipRect, type PaintTheme, type Palette as KitPalette, type PaletteEntry,
 } from '@reactjit/runtime/paint';
 import { defaultPalette, paletteWithColor, slotColor, type Palette } from '../modelStream';
+import { loadRecents, saveRecents, loadSavedPalettes, saveNamedPalette, deleteSavedPalette, type SavedPalette } from '../paintPalettes';
 import {
   TransformGizmo, NormalHandle, AXIS_DIR, axisScreen, dragWorldDistance, pickGizmoHandle, pickNormalHandle, rotationSign, selectionVertIndices, selectionFaceIndices,
   type GizmoTool, type GizmoHit,
@@ -319,6 +320,31 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   // (paint right up to an edge, no bleed onto the neighbour). Off = the smooth surface path.
   const [lockFace, setLockFace] = useHotState<boolean>('studio:paintLockFace', false);
   const [paintRecents, setPaintRecents] = useHotState<PaletteEntry[]>('studio:paintRecents', []);
+  // DURABLE palettes (req_1729): the recents ring + named saved colour sets live in
+  // the shared 'reactjit' localstore, so colours follow you across models and survive
+  // a restart (twig recents used to wipe on every cold boot). savedPalettes mirrors
+  // localstore for reactive rendering; recordRecents below write-throughs the ring.
+  const [savedPalettes, setSavedPalettes] = useState<SavedPalette[]>(() => loadSavedPalettes());
+  const [paletteName, setPaletteName] = useState('');
+  // Hydrate the recents ring from localstore once on mount when twig is empty (cold
+  // boot): the persisted history becomes this session's recents. Map hex → entry.
+  const recentsHydrated = useRef(false);
+  useEffect(() => {
+    if (recentsHydrated.current) return;
+    recentsHydrated.current = true;
+    if (paintRecents.length > 0) return;
+    const hexes = loadRecents();
+    if (hexes.length) setPaintRecents(hexes.map((hex) => ({ id: `color:${hex}`, ink: { kind: 'color' as const, hex } })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Commit recents to the kit's ring AND localstore (one write-through). The kit only
+  // emits this on a DELIBERATE colour choice now (swatch click / wheel pointer-up),
+  // not per drag-tick, so the durable history isn't flooded (the recordRecent split
+  // in BrushKit, req_1729).
+  const onRecents = (recents: PaletteEntry[]) => {
+    setPaintRecents(recents);
+    saveRecents(recents.filter((e) => e.ink.kind === 'color').map((e) => (e.ink as { hex: string }).hex));
+  };
   // The string the TEXT tool stamps (req_1600). Twig — survives a hot reload but
   // resets cold; the click point + brush size/colour place and scale each stamp.
   const [textValue, setTextValue] = useHotState<string>('studio:paintText', 'TEXT');
@@ -1457,6 +1483,26 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
       .map((s) => ({ id: `c${s.id}`, ink: { kind: 'color' as const, hex: slotColor(livePalette, s.id) ?? s.pseudo } })),
     recents: paintRecents,
   };
+  // ── Saved palettes (req_1729): named colour sets in the shared localstore. SAVE
+  // captures the colours you're working with (this model's swatches + recents + the
+  // active colour); LOAD folds a set into the OPEN model's swatches so the same
+  // colours are one click away on a different asset; a swatch click paints with it.
+  const saveCurrentPalette = () => {
+    const colors = [
+      brushHex(),
+      ...kitPalette.swatches.map((e) => (e.ink as { hex: string }).hex),
+      ...paintRecents.filter((e) => e.ink.kind === 'color').map((e) => (e.ink as { hex: string }).hex),
+    ];
+    const name = paletteName.trim() || `Palette ${savedPalettes.length + 1}`;
+    setSavedPalettes(saveNamedPalette(name, colors));
+    setPaletteName('');
+  };
+  const applySavedPalette = (pal: SavedPalette) => {
+    let next = livePalette;
+    for (const hex of pal.colors) next = paletteWithColor(next, hex).palette;
+    props.onSetPalette(next);
+  };
+  const removeSavedPalette = (id: string) => setSavedPalettes(deleteSavedPalette(id));
   // AUTO-ENSURE the texture in paint mode (req_1220): switching models resets the
   // (global twig) texture to null, but ensureTexture only ran on the mode-button press
   // — so after a switch the new model had NO texture → no grid, no paint. This re-makes
@@ -2453,10 +2499,47 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
               onToolChange={selectTool}
               tools={STUDIO_PAINT_TOOLS}
               palette={kitPalette}
-              onPaletteChange={(p) => setPaintRecents(p.recents)}
+              onPaletteChange={(p) => onRecents(p.recents)}
               theme={PAINT_THEME}
               width={264}
             />
+            {/* SAVED PALETTES (req_1729): named colour sets in the shared localstore,
+                so a set of colours you like is reusable across every model — not lost
+                when the ephemeral recents ring wipes or you switch assets. */}
+            <Col style={{ gap: 6, padding: 10, backgroundColor: PAINT_THEME.panel, borderWidth: 1, borderColor: PAINT_THEME.frame, borderRadius: 8 }}>
+              <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace', letterSpacing: 1 }}>PALETTES</Text>
+              <Row style={{ gap: 6, alignItems: 'center' }}>
+                <TextInput
+                  value={paletteName}
+                  onChangeText={setPaletteName}
+                  placeholder="name this set"
+                  style={{ flexGrow: 1, height: 24, paddingLeft: 8, paddingRight: 8, borderRadius: 5, backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame, color: PAINT_THEME.ink, fontFamily: 'monospace', fontSize: 11 }}
+                />
+                <Pressable tooltip="Save the colours you're using (this model's swatches + recents + current colour) as a named set you can load onto any model" onPress={saveCurrentPalette} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.accent, borderWidth: 1, borderColor: PAINT_THEME.accent }}>
+                  <Text fontSize={10} color={PAINT_THEME.page} style={{ fontFamily: 'monospace', fontWeight: '800' }}>save</Text>
+                </Pressable>
+              </Row>
+              {savedPalettes.length === 0 ? (
+                <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace' }}>no saved sets yet — save your colours to reuse them anywhere</Text>
+              ) : savedPalettes.map((pal) => (
+                <Col key={pal.id} style={{ gap: 4 }}>
+                  <Row style={{ gap: 6, alignItems: 'center' }}>
+                    <Text fontSize={10} color={PAINT_THEME.ink} style={{ fontFamily: 'monospace', fontWeight: '700', flexGrow: 1 }} numberOfLines={1}>{pal.name}</Text>
+                    <Pressable tooltip={`Load "${pal.name}" onto this model — its colours become swatches here`} onPress={() => applySavedPalette(pal)} style={{ paddingLeft: 7, paddingRight: 7, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame }}>
+                      <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>load</Text>
+                    </Pressable>
+                    <Pressable tooltip={`Delete "${pal.name}"`} onPress={() => removeSavedPalette(pal.id)} style={{ paddingLeft: 7, paddingRight: 7, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: '#a14545' }}>
+                      <Text fontSize={9} color="#f0a0a0" style={{ fontFamily: 'monospace', fontWeight: '800' }}>✕</Text>
+                    </Pressable>
+                  </Row>
+                  <Row style={{ flexWrap: 'wrap', gap: 4 }}>
+                    {pal.colors.map((hex, i) => (
+                      <Pressable key={`${pal.id}:${i}`} tooltip={`Paint with ${hex}`} onPress={() => setBrush((b) => ({ ...b, ink: { kind: 'color', hex } }))} style={{ width: 16, height: 16, borderRadius: 3, backgroundColor: hex, borderWidth: brushHex().toLowerCase() === hex.toLowerCase() ? 2 : 1, borderColor: brushHex().toLowerCase() === hex.toLowerCase() ? '#ffffff' : '#0008' }} />
+                    ))}
+                  </Row>
+                </Col>
+              ))}
+            </Col>
             {/* TEXT tool (req_1600): type a string, then click the model to stamp it.
                 Brush SIZE scales the glyphs, brush COLOUR inks them. Only while the
                 text tool is active — the rest of the panel is unchanged. */}
