@@ -18,12 +18,13 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Effect, Pressable, ScrollView, Text, TextInput, TextArea } from '@reactjit/primitives';
+import { Icon } from '@reactjit/icons/Icon';
 import { GAME_BUILD } from '@game';
 import { propTakesText } from '../../game/kinds';
 import type { BuildFaceSkin, BuildFaceSlot, BuildSkinSet, PlacedBuildPiece, WorldEvent } from '@game';
 import type { WorldProp } from '../../design';
 import { allTextures, type TextureDef } from '@game/textures/registry';
-import { useCustomTextures, saveDecalTexture } from '@game/textures/materials';
+import { useCustomTextures, saveDecalTexture, removeCustomTexture } from '@game/textures/materials';
 import { neonDecalDoc } from '@game/textures/neon';
 import { materialFamily } from '../workbench/materials/chooser';
 import { propParts } from '../../render3d/propParts';
@@ -102,16 +103,51 @@ function matKey(skin: BuildFaceSkin): string {
   return skin.kind === 'color' ? `c:${skin.value}` : `m:${skin.id}`;
 }
 
-const MatSwatch = memo(function MatSwatch(props: { def: TextureDef; active: boolean; onPick: (id: string) => void }) {
+const MatSwatch = memo(function MatSwatch(props: {
+  def: TextureDef;
+  active: boolean;
+  deleteArmed: boolean;
+  onPick: (id: string) => void;
+  onArmDelete: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
   const { def } = props;
   const short = def.label.length > 11 ? `${def.label.slice(0, 10)}…` : def.label;
+  const canDelete = def.id.startsWith('custom:');
+  const deleteTip = props.deleteArmed ? `delete ${def.label}` : `arm delete for ${def.label}`;
   return (
     <Pressable onPress={() => props.onPick(def.id)} hoverable tooltip={def.label}>
       <Box style={{ width: 66, gap: 2 }}>
-        <Box style={{ width: 66, height: 38, borderRadius: 4, borderWidth: props.active ? 2 : 1, borderColor: props.active ? '#7dd3fc' : '#3a4f6b', backgroundColor: '#0f1a2e', overflow: 'hidden' }}>
+        <Box style={{ width: 66, height: 38, borderRadius: 4, borderWidth: props.active ? 2 : 1, borderColor: props.active ? '#7dd3fc' : '#3a4f6b', backgroundColor: '#0f1a2e', overflow: 'hidden', position: 'relative' }}>
           {def.source.kind === 'shader'
             ? <Effect shader={def.source.shader} data={def.source.data} style={SWATCH_FILL} />
             : def.source.render(SWATCH_CTX)}
+          {canDelete ? (
+            <Pressable
+              onPress={() => (props.deleteArmed ? props.onDelete(def.id) : props.onArmDelete(def.id))}
+              hoverable
+              tooltip={deleteTip}
+              style={{
+                position: 'absolute',
+                right: 2,
+                top: 2,
+                minWidth: props.deleteArmed ? 38 : 16,
+                height: 16,
+                borderRadius: 3,
+                borderWidth: 1,
+                borderColor: props.deleteArmed ? '#ef4444' : '#475569',
+                backgroundColor: props.deleteArmed ? '#3a1414' : '#07111fdd',
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingLeft: props.deleteArmed ? 4 : 0,
+                paddingRight: props.deleteArmed ? 4 : 0,
+              }}
+            >
+              {props.deleteArmed
+                ? <Text fontSize={8} color="#fca5a5" style={{ fontFamily: 'monospace', fontWeight: 700 }}>delete</Text>
+                : <Icon name="Trash2" size={10} color="#cbd5e1" />}
+            </Pressable>
+          ) : null}
         </Box>
         <Text fontSize={8} color={props.active ? '#7dd3fc' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{short}</Text>
       </Box>
@@ -173,6 +209,7 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   // narrows to the hits, flat — the fast path to any texture without scrolling
   // families. Only the hits mount, so the search view stays cheap.
   const [query, setQuery] = useState('');
+  const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
   const q = query.trim().toLowerCase();
   const matchHits = useMemo(
     () => (q ? materials.filter((m) => m.label.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)) : null),
@@ -299,7 +336,18 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   };
 
   // A texture pick routes by mode: a prop's PART, or a build piece's face slot.
-  const pickMaterial = (id: string) => { if (propModeRef.current) applyPropTexture(id); else applyBrush({ kind: 'material', id }); };
+  const pickMaterial = (id: string) => {
+    setArmedDeleteId(null);
+    if (propModeRef.current) applyPropTexture(id); else applyBrush({ kind: 'material', id });
+  };
+
+  const deleteMaterial = (id: string) => {
+    if (!id.startsWith('custom:')) return;
+    removeCustomTexture(id);
+    setArmedDeleteId(null);
+    setRecent((list) => list.filter((b) => b.kind !== 'material' || b.id !== id));
+    setBrush((b) => (b.kind === 'material' && b.id === id ? { kind: 'color', value: '#d8cdb8' } : b));
+  };
 
   // Upload an image (req_0749): the picker → a stored decal material → set as
   // the BRUSH (not auto-painted onto every side — an uploaded image is usually
@@ -541,7 +589,15 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
               <ScrollView style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
                 <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
                   {matchHits.map((def) => (
-                    <MatSwatch key={def.id} def={def} active={brush.kind === 'material' && brush.id === def.id} onPick={pickMaterial} />
+                    <MatSwatch
+                      key={def.id}
+                      def={def}
+                      active={brush.kind === 'material' && brush.id === def.id}
+                      deleteArmed={armedDeleteId === def.id}
+                      onPick={pickMaterial}
+                      onArmDelete={setArmedDeleteId}
+                      onDelete={deleteMaterial}
+                    />
                   ))}
                 </Box>
                 {matchHits.length === 0 ? (
@@ -565,7 +621,15 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
                 <ScrollView style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
                   <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
                     {openGroup.items.map((def) => (
-                      <MatSwatch key={def.id} def={def} active={brush.kind === 'material' && brush.id === def.id} onPick={pickMaterial} />
+                      <MatSwatch
+                        key={def.id}
+                        def={def}
+                        active={brush.kind === 'material' && brush.id === def.id}
+                        deleteArmed={armedDeleteId === def.id}
+                        onPick={pickMaterial}
+                        onArmDelete={setArmedDeleteId}
+                        onDelete={deleteMaterial}
+                      />
                     ))}
                   </Box>
                 </ScrollView>
