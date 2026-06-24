@@ -33,9 +33,9 @@ import { useRerender } from '@reactjit/runtime/hooks';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { IsoStage, METERS_PER_LEVEL } from './isoStage';
 import { editorTypingFocused } from './editors/controls';
-import { GAME_BUILD, partitionBuildingSelection } from './game';
+import { GAME_BUILD, buildingPieceInstanceId, partitionBuildingSelection } from './game';
 import type { BuildEditEvent, BuildPrefabDef, BuildingInstance, PlacedBuildPiece, Rect, WorldGridState } from './game';
-import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
+import { modulePitch, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
 import { pieceInstanceRows } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
@@ -168,6 +168,12 @@ export function LoaderIsoView(props: {
   const [moveDelta, setMoveDelta] = useState<{ dx: number; dz: number } | null>(null);
   const moveDeltaRef = useRef(moveDelta);
   moveDeltaRef.current = moveDelta;
+  // Drag-paint preview (req_1801): the cells an armed wall/floor would lay along the
+  // current drag — drawn as a green ghost run, committed as ONE batch on release.
+  type PaintCell = { pieceId: string; x: number; y: number; z: number; yawDegrees: number };
+  const [paintCells, setPaintCells] = useState<PaintCell[] | null>(null);
+  const paintCellsRef = useRef(paintCells);
+  paintCellsRef.current = paintCells;
   const modRef = useRef({ shift: false, alt: false, ctrl: false });
   // Last cursor in pane pixels — so R (rotate ghost) re-resolves the preview IN PLACE
   // instead of waiting for the next mouse-move.
@@ -366,6 +372,92 @@ export function LoaderIsoView(props: {
     setSelectedIds(new Set());
   }, [commitMany]);
 
+  // ── clone (req_1801): duplicate the selection shifted clear along +x by its own width
+  // — whole buildings as ONE buildingPlaced of the same def (its own instance/history),
+  // loose pieces re-emit piecePlaced (fresh stream ids). A pure ADD, so the live overlay
+  // shows the copies instantly with no settle bake. Same shape as IsoAuthor's cloneSelected.
+  const cloneSelected = useCallback(() => {
+    const ids = selectedIdsRef.current;
+    const sel = piecesRef.current.filter((p) => ids.has(p.id));
+    if (!sel.length) return;
+    let minX = Infinity, maxX = -Infinity;
+    for (const p of sel) { const b = GAME_BUILD.placed.bounds(p); minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX); }
+    const dx = (maxX - minX) + (props.state?.world.cellSizeMeters ?? 1);
+    const { wholeInstances } = partitionBuildingSelection(ids, piecesRef.current);
+    const whole = new Set(wholeInstances);
+    const events: Array<{ event: BuildEditEvent; label: string }> = [];
+    for (const instId of wholeInstances) {
+      const inst = buildingsRef.current?.[instId];
+      if (!inst) continue;
+      events.push({ event: { kind: 'buildingPlaced', defId: inst.defId, x: inst.x + dx, y: inst.y, z: inst.z, yawDegrees: inst.yawDegrees } as BuildEditEvent, label: `cloned building ${instId}` });
+    }
+    const cloneStampId = `clone-${Date.now().toString(36)}`;
+    for (const p of sel) {
+      const inst = buildingPieceInstanceId(p.id);
+      if (inst && whole.has(inst)) continue; // cloned above as one instance
+      const { id, ...rest } = p;
+      events.push({ event: { kind: 'piecePlaced', placement: { ...rest, x: p.x + dx, stampId: cloneStampId } } as BuildEditEvent, label: `cloned ${p.pieceId}` });
+    }
+    if (!events.length) return;
+    commitMany(events);
+  }, [commitMany, props.state]);
+
+  // ── drag-paint (req_1801): an armed WALL drags a straight run along the dominant axis;
+  // an armed FLOOR fills the dragged rectangle. World-lattice cells at the module pitch,
+  // one flat base y under the centroid — the SAME cell math IsoAuthor's computePaint uses
+  // (minus the existing-geometry anchoring, a later refinement). Committed as ONE batch.
+  const PAINT_MAX_SPAN = 64;
+  const paintKindOf = useCallback((a: Armed): 'wall' | 'floor' | null => {
+    if (!a || a.kind !== 'piece') return null;
+    const k = GAME_BUILD.catalog.get(a.id).kind;
+    return k === 'wall' || k === 'floor' ? k : null;
+  }, []);
+  const computePaintCells = useCallback((a: Armed, start: { x: number; z: number }, end: { x: number; z: number }): PaintCell[] => {
+    const kind = paintKindOf(a);
+    if (!kind || !a || a.kind !== 'piece') return [];
+    const def = GAME_BUILD.catalog.get(a.id);
+    const pitch = modulePitch(def.size.widthMeters, 1);
+    const cellOf = (v: number) => Math.floor(v / pitch);
+    const center = (c: number) => (c + 0.5) * pitch;
+    const range = (a0: number, b0: number): [number, number] => { const lo = Math.min(a0, b0), hi = Math.max(a0, b0); return [lo, Math.min(hi, lo + PAINT_MAX_SPAN - 1)]; };
+    const cells: { x: number; z: number; yaw: number }[] = [];
+    if (kind === 'floor') {
+      const [x0, x1] = range(cellOf(start.x), cellOf(end.x));
+      const [z0, z1] = range(cellOf(start.z), cellOf(end.z));
+      for (let cx = x0; cx <= x1; cx += 1) for (let cz = z0; cz <= z1; cz += 1) cells.push({ x: center(cx), z: center(cz), yaw: 0 });
+    } else {
+      const dx = Math.abs(end.x - start.x), dz = Math.abs(end.z - start.z);
+      if (dx >= dz) {
+        const lineZ = Math.round(start.z / pitch) * pitch;
+        const [c0, c1] = range(cellOf(start.x), cellOf(end.x));
+        for (let c = c0; c <= c1; c += 1) cells.push({ x: center(c), z: lineZ, yaw: 0 });
+      } else {
+        const lineX = Math.round(start.x / pitch) * pitch;
+        const [c0, c1] = range(cellOf(start.z), cellOf(end.z));
+        for (let c = c0; c <= c1; c += 1) cells.push({ x: lineX, z: center(c), yaw: 90 });
+      }
+    }
+    if (!cells.length) return [];
+    let sx = 0, sz = 0;
+    for (const c of cells) { sx += c.x; sz += c.z; }
+    const y = placeGroundAt(sx / cells.length, sz / cells.length);
+    return cells.map((c) => ({ pieceId: def.id, x: c.x, y, z: c.z, yawDegrees: c.yaw }));
+  }, [paintKindOf, placeGroundAt]);
+  const computePaintCellsRef = useRef(computePaintCells);
+  computePaintCellsRef.current = computePaintCells;
+  const commitPaint = useCallback(() => {
+    const cells = paintCellsRef.current;
+    setPaintCells(null);
+    if (!cells || !cells.length) return;
+    const valid = cells.filter((c) => GAME_BUILD.placed.validatePlacement(c).length === 0);
+    if (!valid.length) return;
+    if (selectedIdsRef.current.size) setSelectedIds(new Set());
+    commitMany(valid.map((c) => {
+      const placement = GAME_BUILD.placed.placementFor(GAME_BUILD.catalog.get(c.pieceId), c);
+      return { event: { kind: 'piecePlaced', placement } as BuildEditEvent, label: `painted ${c.pieceId}` };
+    }));
+  }, [commitMany]);
+
   // ── keys: WASD/arrows pan, Q/E orbit, F recenter (camera) + R rotate ghost, Del
   // delete, Esc disarm/clear (editing). Direct key-bus subscription (req_1777): the
   // editor control contract swallowed WASD here; the raw bus is the host's own source.
@@ -392,6 +484,7 @@ export function LoaderIsoView(props: {
         else setGhostYaw((y) => (y + 90) % 360);
       }
       else if (editable && (k === 'delete' || k === 'backspace')) { deleteSelected(); }
+      else if (editable && k === 'c' && selectedIdsRef.current.size) { cloneSelected(); }
       else if (editable && k === 'escape') {
         if (armedRef.current) setArmed(null);
         else setSelectedIds(new Set());
@@ -400,7 +493,7 @@ export function LoaderIsoView(props: {
     const offDown = busOn('__keydown', onKey(true));
     const offUp = busOn('__keyup', onKey(false));
     return () => { offDown(); offUp(); heldPanRef.current = {}; modRef.current = { shift: false, alt: false, ctrl: false }; };
-  }, [stage, pushCamera, props.centerX, props.centerZ, editable, deleteSelected, rotateSelected]);
+  }, [stage, pushCamera, props.centerX, props.centerZ, editable, deleteSelected, rotateSelected, cloneSelected]);
 
   // Re-resolve the hover ghost after R turns it, so the preview spins in place at the
   // last known cursor instead of waiting for the next mouse-move.
@@ -506,7 +599,7 @@ export function LoaderIsoView(props: {
   // ── pointer: rotate (drag empty), move (drag a selected piece), click = place/select.
   // gx0/gz0 hold the down point on the active plane so a move tracks the cursor's world
   // delta, not pixels; turned tells a drag from a click (>4px travel).
-  const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean; mode: 'rotate' | 'move'; gx0: number; gz0: number } | null>(null);
+  const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean; mode: 'rotate' | 'move' | 'paint'; gx0: number; gz0: number } | null>(null);
   const local = useCallback((e: any) => {
     const r = rectRef.current;
     return { x: Number(e?.x ?? 0) - r.x, y: Number(e?.y ?? 0) - r.y };
@@ -514,9 +607,13 @@ export function LoaderIsoView(props: {
   const onDown = useCallback((e: any) => {
     const p = local(e);
     lastCursorRef.current = p;
-    let mode: 'rotate' | 'move' = 'rotate';
+    let mode: 'rotate' | 'move' | 'paint' = 'rotate';
     let gx0 = 0, gz0 = 0;
-    if (editable && !armedRef.current && selectedIdsRef.current.size) {
+    if (editable && armedRef.current && paintKindOf(armedRef.current)) {
+      // an armed wall/floor → a drag PAINTS a run/rect; record the start ground point.
+      const gp = stage.groundPoint(p.x, p.y, rectRef.current);
+      if (gp) { mode = 'paint'; gx0 = gp.x; gz0 = gp.z; }
+    } else if (editable && !armedRef.current && selectedIdsRef.current.size) {
       const hit = GAME_BUILD.placed.raycast(stage.pieceRay(p.x, p.y, rectRef.current), piecesRef.current, ISO_SNAP_TUNING.reachMeters);
       if (hit && selectedIdsRef.current.has(hit.piece.id)) {
         const gp = stage.groundPoint(p.x, p.y, rectRef.current);
@@ -525,14 +622,20 @@ export function LoaderIsoView(props: {
     }
     dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false, mode, gx0, gz0 };
     if (armedRef.current) setSnap(resolveAt(p.x, p.y));
-  }, [local, stage, editable, resolveAt]);
+  }, [local, stage, editable, resolveAt, paintKindOf]);
   const onMove = useCallback((e: any) => {
     const p = local(e);
     lastCursorRef.current = p;
     const d = dragRef.current;
     if (d && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
       d.turned = true;
-      if (d.mode === 'move') {
+      if (d.mode === 'paint') {
+        const gp = stage.groundPoint(p.x, p.y, rectRef.current);
+        if (gp) {
+          const cells = computePaintCellsRef.current(armedRef.current, { x: d.gx0, z: d.gz0 }, gp);
+          setPaintCells(cells.length ? cells : null);
+        }
+      } else if (d.mode === 'move') {
         const gp = stage.groundPoint(p.x, p.y, rectRef.current);
         if (gp) {
           const cs = props.state?.world.cellSizeMeters || 1;
@@ -556,8 +659,10 @@ export function LoaderIsoView(props: {
     if (!d) return;
     if (d.turned) {
       if (d.mode === 'move') commitMove();
+      else if (d.mode === 'paint') commitPaint();
       return;
     }
+    if (paintCellsRef.current) setPaintCells(null); // a click, not a drag — drop any preview
     if (!editable) return;
     // A click (no travel): place the armed piece, or (re)select under the cursor.
     if (armedRef.current) {
@@ -567,7 +672,7 @@ export function LoaderIsoView(props: {
     } else {
       selectPieceAt(d.x0, d.y0, modRef.current.shift || modRef.current.alt); // shift/alt = whole building
     }
-  }, [editable, commitMove, resolveAt, placeAt, selectPieceAt]);
+  }, [editable, commitMove, commitPaint, resolveAt, placeAt, selectPieceAt]);
 
   // ── 2D projected HUD (Approach B): the armed ghost box + selection outlines, drawn
   // each render through the SAME iso solve the loader renders with. Computed in the body
@@ -582,6 +687,15 @@ export function LoaderIsoView(props: {
     } else {
       // prefab / water: a 2m footprint marker at the snapped point (no plan size here).
       ghostSegs.push(...boxSegments(stage, rect, snap.placement.x, snap.placement.y, snap.placement.z, 0, 2, 0.3, 2));
+    }
+  }
+  // Drag-paint preview (req_1801): the run/rect of cells the current wall/floor drag
+  // would lay, drawn as green ghost boxes; committed as real meshes on release.
+  const paintSegs: number[] = [];
+  if (editable && paintCells) {
+    for (const c of paintCells) {
+      const sz = GAME_BUILD.catalog.get(c.pieceId).size;
+      paintSegs.push(...boxSegments(stage, rect, c.x, c.y, c.z, c.yawDegrees, sz.widthMeters, sz.heightMeters, sz.depthMeters));
     }
   }
   // Selection outlines only. Just-placed-but-unbaked pieces no longer draw a 2D box here:
@@ -614,10 +728,11 @@ export function LoaderIsoView(props: {
 
       {/* 2D projected overlay — identity view so points are plain pane pixels; never
           eats input (pointerEvents off). Selection under the ghost in paint order. */}
-      {editable && (selSegs.length || ghostSegs.length) ? (
+      {editable && (selSegs.length || ghostSegs.length || paintSegs.length) ? (
         <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
           <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
             {selSegs.length ? <Graph.Polyline segments points={selSegs} stroke="#7dd3fc" strokeWidth={2.4} /> : null}
+            {paintSegs.length ? <Graph.Polyline segments points={paintSegs} stroke="#34d399" strokeWidth={1.4} /> : null}
             {ghostSegs.length ? <Graph.Polyline segments points={ghostSegs} stroke="#34d399" strokeWidth={1.6} /> : null}
           </Graph>
         </Box>
