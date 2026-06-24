@@ -141,6 +141,9 @@ type ElevatorLive = {
 };
 
 const INTERACT_REACH_METERS = 2.2;
+// req_1725: how far PAST an auto door's trigger radius the player must step before
+// it closes — a deadband so standing on the threshold doesn't strobe it open/shut.
+const AUTO_DOOR_CLOSE_HYSTERESIS_METERS = 0.6;
 // req_0674: where the reach ray starts — roughly the standing chest/eye line,
 // so counters and half walls read correctly against prop mid-heights.
 const INTERACT_EYE_HEIGHT_METERS = 1.4;
@@ -522,6 +525,15 @@ export function PlayRoute(props: {
     () => (build.buildings ? build.buildings.state() : null),
     [build, piecesRev],
   );
+  // ── req_1725: AUTOMATIC sliding doors ──────────────────────────────────────
+  // An auto door's open state is TRANSIENT (proximity-derived), never a world
+  // commit — same philosophy as the elevator car's height. We keep it route-local
+  // in a map keyed by piece id and overlay it onto the live pieces below; the
+  // proximity frame (autoDoorFrameRef) bumps autoDoorRev when a door flips so the
+  // colliders + render recompute, while the persisted stream stays clean.
+  const autoDoorOpenRef = useRef<Map<string, boolean>>(new Map());
+  const [autoDoorRev, setAutoDoorRev] = useState(0);
+  const autoDoorFrameRef = useRef<() => void>(() => undefined);
   const pieces = useMemo(() => {
     const t0 = perfMs();
     // loose world pieces ⊕ derived building stamps — the ONE pieces view
@@ -540,8 +552,19 @@ export function PlayRoute(props: {
   // Structural pieces keep their authored y; the broader flat-pad building lift
   // remains separate from this prop-specific fix.
   const liftedPieces = useMemo(
-    () => GAME_BUILD.placed.liftPropsToTerrain(pieces, (x, z) => groundColumnTop(placementWorldGrid, x, z)),
-    [pieces, placementWorldGrid],
+    () => {
+      const lifted = GAME_BUILD.placed.liftPropsToTerrain(pieces, (x, z) => groundColumnTop(placementWorldGrid, x, z));
+      // req_1725: overlay transient auto-door open state. Only auto doors are in
+      // the map, so committed (manual) doors are untouched; a no-op map returns
+      // the lifted list unchanged.
+      const auto = autoDoorOpenRef.current;
+      if (auto.size === 0) return lifted;
+      return lifted.map((p) => {
+        const open = auto.get(p.id);
+        return open === undefined || (p.doorOpen === true) === open ? p : { ...p, doorOpen: open };
+      });
+    },
+    [pieces, placementWorldGrid, autoDoorRev],
   );
   const placedSkinTextureIds = useMemo(() => {
     const ids = new Set<string>();
@@ -800,6 +823,7 @@ export function PlayRoute(props: {
     onFrame: () => {
       updateCameraOcclusionRef.current();
       elevatorFrameRef.current(); // rides advance first so prompts read fresh car heights
+      autoDoorFrameRef.current(); // req_1725: proximity opens/closes auto doors
       interactFrameRef.current();
       if (modeRef.current !== 'build') return;
       refreshSnapRef.current();
@@ -1060,6 +1084,34 @@ export function PlayRoute(props: {
       moved = true;
     }
     if (moved) rerenderElevators();
+  };
+
+  // req_1725: AUTOMATIC sliding doors open on proximity — no E press. Each frame,
+  // an auto door opens when the player is within its trigger radius and closes
+  // once they clear it (a small hysteresis margin past the radius stops it from
+  // fluttering right at the boundary). State lives in the route-local map; a flip
+  // bumps autoDoorRev so the live pieces (colliders + render) recompute.
+  autoDoorFrameRef.current = () => {
+    if (modeRef.current !== 'test') return; // only the embodied play view
+    const pose = playerRef.current;
+    const map = autoDoorOpenRef.current;
+    let changed = false;
+    for (const piece of piecesRef.current) {
+      if (!piece.edit) continue;
+      const meaning = GAME_BUILD.edits.wall[piece.edit];
+      const interaction = meaning?.interaction;
+      if (!interaction || interaction.action !== 'auto') continue;
+      const def = GAME_BUILD.catalog.get(piece.pieceId);
+      if (Math.abs(piece.y - pose.y) > def.size.heightMeters + 1) continue; // a door on another floor
+      const radius = interaction.autoOpenRadiusMeters ?? interaction.reachMeters;
+      const distance = Math.hypot(piece.x - pose.x, piece.z - pose.z);
+      const open = map.get(piece.id) === true;
+      const want = open
+        ? distance <= radius + AUTO_DOOR_CLOSE_HYSTERESIS_METERS
+        : distance <= radius;
+      if (want !== open) { map.set(piece.id, want); changed = true; }
+    }
+    if (changed) setAutoDoorRev((r) => r + 1);
   };
 
   // ── THE LIVE NAV PUBLISH (NAVLIVE-0610) ────────────────────────────────────

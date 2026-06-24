@@ -407,8 +407,11 @@ export function pieceVisualShapes(
     const interaction = edit ? GAME_BUILD.edits.wall[edit]?.interaction : null;
     if (edit !== undefined && interaction && piece.doorOpen !== true) {
       const tuning = GAME_BUILD.placed.tuning;
-      const vehicle = GAME_BUILD.edits.wall[edit].portalKind === 'vehicle';
-      const panelW = vehicle ? tuning.vehicleOpeningWidthMeters : tuning.walkOpeningWidthMeters;
+      const editDef = GAME_BUILD.edits.wall[edit];
+      const vehicle = editDef.portalKind === 'vehicle';
+      // req_1725: the leaf fills the edit's own opening (a double-wide sliding
+      // door declares openingWidthMeters) so the panel and its collision agree.
+      const panelW = editDef.openingWidthMeters ?? (vehicle ? tuning.vehicleOpeningWidthMeters : tuning.walkOpeningWidthMeters);
       const panelH = Math.min(size.heightMeters, vehicle ? tuning.garageDoorPanelHeightMeters : tuning.walkDoorPanelHeightMeters);
       const panel = box('door', 0, depthCenter, piece.y, panelW, panelH, depthSize + 0.06, { color: DOOR_PANEL_COLOR });
       if (panel.kind === 'box') panel.box.door = true;
