@@ -171,6 +171,44 @@ fn paintBrushRGBA(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     paintable.queueBrushColor(id, cx, cy, r, cr, cg, cb, kind, angle, aspect, hardness, flow, scatter, seed, clip_x, clip_y, clip_w, clip_h);
 }
 
+/// __paintable_brush_erase(id, cx, cy, r, kind, angle, aspect, hardness, flow,
+///   scatter, seed, clipX, clipY, clipW, clipH) — a DEST-OUT eraser dab (req_1729):
+/// carves transparency into an RGBA layer so the layer below shows through.
+fn paintBrushErase(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 11) return;
+    const id = argStrAlloc(info, 0) orelse return;
+    defer alloc.free(id);
+    const cx = argF32(info, 1) orelse return;
+    const cy = argF32(info, 2) orelse return;
+    const r = argF32(info, 3) orelse return;
+    const kind = argF32(info, 4) orelse return;
+    const angle = argF32(info, 5) orelse return;
+    const aspect = argF32(info, 6) orelse return;
+    const hardness = argF32(info, 7) orelse return;
+    const flow = argF32(info, 8) orelse return;
+    const scatter = argF32(info, 9) orelse return;
+    const seed = argF32(info, 10) orelse return;
+    const clip_x = argU32(info, 11);
+    const clip_y = argU32(info, 12);
+    const clip_w = argU32(info, 13);
+    const clip_h = argU32(info, 14);
+    paintable.queueBrushErase(id, cx, cy, r, kind, angle, aspect, hardness, flow, scatter, seed, clip_x, clip_y, clip_w, clip_h);
+}
+
+/// __paintable_composite(dstId, srcId, opacity) — flatten a source layer into a
+/// destination paintable premultiplied-OVER × opacity (LAYERS, req_1729).
+fn paintComposite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 3) return;
+    const dst = argStrAlloc(info, 0) orelse return;
+    defer alloc.free(dst);
+    const src = argStrAlloc(info, 1) orelse return;
+    defer alloc.free(src);
+    const opacity = argF32(info, 2) orelse 1.0;
+    paintable.queueComposite(dst, src, opacity);
+}
+
 /// __paintable_clear_rgba(id, r, g, b, a) — flat-colour clear (base coat).
 fn paintClearRGBA(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -285,6 +323,8 @@ pub fn registerPaintable(_: anytype) void {
     v8_runtime.registerHostFn("__paintable_circle_edge", paintCircleEdge);
     v8_runtime.registerHostFn("__paintable_brush", paintBrush);
     v8_runtime.registerHostFn("__paintable_brush_rgba", paintBrushRGBA);
+    v8_runtime.registerHostFn("__paintable_brush_erase", paintBrushErase);
+    v8_runtime.registerHostFn("__paintable_composite", paintComposite);
     v8_runtime.registerHostFn("__paintable_polygon", paintPolygon);
     v8_runtime.registerHostFn("__paintable_clear", paintClear);
     v8_runtime.registerHostFn("__paintable_clear_rgba", paintClearRGBA);

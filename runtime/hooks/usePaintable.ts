@@ -78,6 +78,20 @@ export interface PaintableOps {
     flow: number, scatter: number, seed: number,
     clipX?: number, clipY?: number, clipW?: number, clipH?: number,
   ): void;
+  /** Eraser dab (DEST-OUT) into an RGBA paintable: the footprint's coverage carves
+   *  TRANSPARENCY into the texture (rather than painting a colour), so a layer erased
+   *  here reveals whatever composites below it (req_1729). Same footprint params as
+   *  `brushColor`, no colour. The clip rect scissors to the hit face's UV island. */
+  brushErase(
+    cx: number, cy: number, r: number,
+    kind: number, angle: number, aspect: number, hardness: number,
+    flow: number, scatter: number, seed: number,
+    clipX?: number, clipY?: number, clipW?: number, clipH?: number,
+  ): void;
+  /** Composite a SOURCE paintable into THIS one, premultiplied-OVER × `opacity`
+   *  (LAYERS, req_1729). Drive a clearColor(0,0,0,0) then composite each visible
+   *  layer bottom→top to flatten a layer stack into the texture a mesh samples. */
+  composite(srcId: string, opacity: number): void;
   /** Replace every pixel of an RGBA paintable with a flat colour (base coat). */
   clearColor(r: number, g: number, b: number, a: number): void;
   /** Polygon fill via interleaved [x0, y0, x1, y1, ...] Float32Array. */
@@ -128,6 +142,10 @@ function makeOps(id: string): PaintableOps {
     brushColor(cx, cy, r, cr, cg, cb, kind, angle, aspect, hardness, flow, scatter, seed, clipX = 0, clipY = 0, clipW = 0, clipH = 0) {
       callHost('__paintable_brush_rgba', undefined, id, cx, cy, r, cr, cg, cb, kind, angle, aspect, hardness, flow, scatter, seed, clipX, clipY, clipW, clipH);
     },
+    brushErase(cx, cy, r, kind, angle, aspect, hardness, flow, scatter, seed, clipX = 0, clipY = 0, clipW = 0, clipH = 0) {
+      callHost('__paintable_brush_erase', undefined, id, cx, cy, r, kind, angle, aspect, hardness, flow, scatter, seed, clipX, clipY, clipW, clipH);
+    },
+    composite(srcId, opacity) { callHost('__paintable_composite', undefined, id, srcId, opacity); },
     clearColor(r, g, b, a) { callHost('__paintable_clear_rgba', undefined, id, r, g, b, a); },
     polygon(verts, value) {
       callHost('__paintable_polygon', undefined, id, verts, value);

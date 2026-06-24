@@ -44,6 +44,12 @@ const OpKind = enum(u8) {
     brush,
     polygon,
     upload,
+    // Composite ANOTHER paintable's texture into this one (LAYERS, req_1729). The
+    // source is named by `src_hash`; `value` is its opacity 0..1. Premultiplied
+    // OVER, so a stack of clear→composite(L0)→composite(L1)… flattens the layers
+    // into the display texture the mesh samples. Run in a SECOND drain pass so the
+    // sources reflect this frame's dabs (see drainAll).
+    composite,
 };
 
 /// One enqueued brush op. Variants are pulled by `kind`.
@@ -75,6 +81,12 @@ const Op = struct {
     // circle_edge: id of the gray reference paintable + sobel threshold
     gray_id_hash: u64 = 0,
     grad_threshold: f32 = 0,
+    // brush: erase mode — dest-out blend carves transparency into the layer (so an
+    // erased region reveals the layer BELOW after compositing) instead of painting a
+    // colour (req_1729, layer erase-through).
+    erase: bool = false,
+    // composite: key-hash of the SOURCE paintable to blend in (`value` = opacity).
+    src_hash: u64 = 0,
     // polygon
     poly_off: u32 = 0, // offset into Paintable.poly_pool
     poly_count: u32 = 0,
@@ -131,10 +143,19 @@ var g_generation: u64 = 0;
 /// colour-target format (r8_unorm vs rgba8_unorm). drainEntry picks by e.rgba.
 var g_brush_pipeline_r8: ?*wgpu.RenderPipeline = null;
 var g_brush_pipeline_rgba: ?*wgpu.RenderPipeline = null;
+/// RGBA brush with a DEST-OUT blend — the eraser. Carves alpha by dab coverage so
+/// an erased region of a layer becomes transparent (reveals the layer below).
+var g_brush_pipeline_rgba_erase: ?*wgpu.RenderPipeline = null;
 var g_brush_bgl: ?*wgpu.BindGroupLayout = null;
 var g_brush_uniform_buf: ?*wgpu.Buffer = null;
 var g_brush_bind_group: ?*wgpu.BindGroup = null;
 var g_sampler_default: ?*wgpu.Sampler = null;
+/// Composite pipeline (LAYERS, req_1729): samples a source paintable and blends it
+/// premultiplied-OVER into the destination, scaled by an opacity uniform.
+var g_composite_pipeline: ?*wgpu.RenderPipeline = null;
+var g_composite_bgl: ?*wgpu.BindGroupLayout = null;
+var g_composite_uniform_buf: ?*wgpu.Buffer = null;
+var g_composite_sampler: ?*wgpu.Sampler = null;
 /// Registered once (lazily, from ensure) so a Scene3D mesh whose textureKey
 /// names a paintable resolves to its view. See resolve3D / gpu.setPaintableResolver.
 var g_resolver_registered: bool = false;
@@ -294,16 +315,26 @@ pub fn deinit() void {
     }
     if (g_brush_pipeline_r8) |p| p.release();
     if (g_brush_pipeline_rgba) |p| p.release();
+    if (g_brush_pipeline_rgba_erase) |p| p.release();
     if (g_brush_bgl) |b| b.release();
     if (g_brush_uniform_buf) |b| b.release();
     if (g_brush_bind_group) |b| b.release();
     if (g_sampler_default) |s| s.release();
+    if (g_composite_pipeline) |p| p.release();
+    if (g_composite_bgl) |b| b.release();
+    if (g_composite_uniform_buf) |b| b.release();
+    if (g_composite_sampler) |s| s.release();
     g_brush_pipeline_r8 = null;
     g_brush_pipeline_rgba = null;
+    g_brush_pipeline_rgba_erase = null;
     g_brush_bgl = null;
     g_brush_uniform_buf = null;
     g_brush_bind_group = null;
     g_sampler_default = null;
+    g_composite_pipeline = null;
+    g_composite_bgl = null;
+    g_composite_uniform_buf = null;
+    g_composite_sampler = null;
 }
 
 fn releaseEntry(e: *Paintable) void {
@@ -506,7 +537,7 @@ fn ensureTexture(e: *Paintable) bool {
 // ─── Brush pipeline ──────────────────────────────────────────────────────
 
 fn ensureBrushPipeline() bool {
-    if (g_brush_pipeline_r8 != null and g_brush_pipeline_rgba != null) return true;
+    if (g_brush_pipeline_r8 != null and g_brush_pipeline_rgba != null and g_brush_pipeline_rgba_erase != null) return true;
     const device = gpu_core.getDevice() orelse return false;
 
     const bgl_entries = [_]wgpu.BindGroupLayoutEntry{
@@ -587,6 +618,125 @@ fn ensureBrushPipeline() bool {
         }) orelse return false;
         if (fi == 0) g_brush_pipeline_r8 = pipeline else g_brush_pipeline_rgba = pipeline;
     }
+
+    // The ERASER (req_1729): same brush footprint shader, but a DEST-OUT blend so a
+    // dab's coverage SUBTRACTS the layer's alpha (rgb scaled with it) instead of
+    // adding colour. Erasing a layer reveals whatever layer composites below it.
+    const erase_blend = wgpu.BlendState{
+        .color = .{ .operation = .add, .src_factor = .zero, .dst_factor = .one_minus_src_alpha },
+        .alpha = .{ .operation = .add, .src_factor = .zero, .dst_factor = .one_minus_src_alpha },
+    };
+    const erase_target = wgpu.ColorTargetState{
+        .format = .rgba8_unorm,
+        .blend = &erase_blend,
+        .write_mask = wgpu.ColorWriteMasks.all,
+    };
+    const erase_fragment = wgpu.FragmentState{
+        .module = shader,
+        .entry_point = wgpu.StringView.fromSlice("fs_main"),
+        .target_count = 1,
+        .targets = @ptrCast(&erase_target),
+    };
+    g_brush_pipeline_rgba_erase = device.createRenderPipeline(&.{
+        .layout = pipeline_layout,
+        .vertex = .{
+            .module = shader,
+            .entry_point = wgpu.StringView.fromSlice("vs_main"),
+            .buffer_count = 0,
+            .buffers = &[0]wgpu.VertexBufferLayout{},
+        },
+        .primitive = .{ .topology = .triangle_list },
+        .multisample = .{},
+        .fragment = &erase_fragment,
+    }) orelse return false;
+    return true;
+}
+
+// ─── Composite pipeline (LAYERS, req_1729) ───────────────────────────────────
+// A full-screen blit that samples a SOURCE paintable and premultiplied-OVER blends
+// it into the destination, scaled by an opacity uniform. JS drives a clear→
+// composite(L0)→composite(L1)… sequence to flatten the visible layer stack into the
+// display texture the mesh samples.
+
+const COMPOSITE_WGSL =
+    \\struct CU { opacity: f32, pad0: f32, pad1: f32, pad2: f32 };
+    \\@group(0) @binding(0) var src_tex: texture_2d<f32>;
+    \\@group(0) @binding(1) var src_samp: sampler;
+    \\@group(0) @binding(2) var<uniform> U: CU;
+    \\struct VsOut { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
+    \\@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
+    \\  var corners = array<vec2f, 6>(
+    \\    vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0),
+    \\    vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0),
+    \\  );
+    \\  let c = corners[vi];
+    \\  var o: VsOut;
+    \\  o.pos = vec4f(c, 0.0, 1.0);
+    \\  // NDC y is up, texture v is down — flip v so the blit is identity (no flip).
+    \\  o.uv = vec2f(c.x * 0.5 + 0.5, -c.y * 0.5 + 0.5);
+    \\  return o;
+    \\}
+    \\@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+    \\  let c = textureSampleLevel(src_tex, src_samp, in.uv, 0.0);
+    \\  // The source is stored premultiplied; scaling both rgb and a by opacity keeps
+    \\  // it premultiplied, so the premultiplied-OVER blend composites it correctly.
+    \\  return c * U.opacity;
+    \\}
+;
+
+const CompositeUniforms = extern struct { opacity: f32, pad0: f32 = 0, pad1: f32 = 0, pad2: f32 = 0 };
+
+fn ensureCompositePipeline() bool {
+    if (g_composite_pipeline != null) return true;
+    const device = gpu_core.getDevice() orelse return false;
+
+    const bgl_entries = [_]wgpu.BindGroupLayoutEntry{
+        .{ .binding = 0, .visibility = wgpu.ShaderStages.fragment, .texture = .{ .sample_type = .float, .view_dimension = .@"2d", .multisampled = 0 } },
+        .{ .binding = 1, .visibility = wgpu.ShaderStages.fragment, .sampler = .{ .type = .filtering } },
+        .{ .binding = 2, .visibility = wgpu.ShaderStages.fragment, .buffer = .{ .type = .uniform, .has_dynamic_offset = 0, .min_binding_size = @sizeOf(CompositeUniforms) } },
+    };
+    const bgl = device.createBindGroupLayout(&.{ .entry_count = bgl_entries.len, .entries = &bgl_entries }) orelse return false;
+    g_composite_bgl = bgl;
+
+    g_composite_uniform_buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("paintable_composite_uniforms"),
+        .size = @sizeOf(CompositeUniforms),
+        .usage = wgpu.BufferUsages.uniform | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    }) orelse return false;
+
+    g_composite_sampler = device.createSampler(&.{
+        .address_mode_u = .clamp_to_edge,
+        .address_mode_v = .clamp_to_edge,
+        .mag_filter = .nearest,
+        .min_filter = .nearest,
+    }) orelse return false;
+
+    const module_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "paintable_composite", .code = COMPOSITE_WGSL });
+    const shader = device.createShaderModule(&module_desc) orelse return false;
+    defer shader.release();
+
+    const pipeline_layout = device.createPipelineLayout(&.{
+        .bind_group_layout_count = 1,
+        .bind_group_layouts = @ptrCast(&bgl),
+    }) orelse return false;
+    defer pipeline_layout.release();
+
+    const blend_state = wgpu.BlendState.premultiplied_alpha_blending;
+    const color_target = wgpu.ColorTargetState{ .format = .rgba8_unorm, .blend = &blend_state, .write_mask = wgpu.ColorWriteMasks.all };
+    const fragment_state = wgpu.FragmentState{
+        .module = shader,
+        .entry_point = wgpu.StringView.fromSlice("fs_main"),
+        .target_count = 1,
+        .targets = @ptrCast(&color_target),
+    };
+    g_composite_pipeline = device.createRenderPipeline(&.{
+        .layout = pipeline_layout,
+        .vertex = .{ .module = shader, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = 0, .buffers = &[0]wgpu.VertexBufferLayout{} },
+        .primitive = .{ .topology = .triangle_list },
+        .multisample = .{},
+        .fragment = &fragment_state,
+    }) orelse return false;
     return true;
 }
 
@@ -703,6 +853,55 @@ pub fn queueBrushColor(
         .clip_w = clip_w,
         .clip_h = clip_h,
     });
+}
+
+/// Eraser dab (req_1729): same footprint as queueBrushColor, but DEST-OUT — its
+/// coverage subtracts the layer's alpha so the region goes transparent and the
+/// layer below shows through after compositing. Colour is irrelevant (ignored).
+pub fn queueBrushErase(
+    key: []const u8,
+    cx: f32,
+    cy: f32,
+    r: f32,
+    kind: f32,
+    angle: f32,
+    aspect: f32,
+    hardness: f32,
+    flow: f32,
+    scatter: f32,
+    seed: f32,
+    clip_x: u32,
+    clip_y: u32,
+    clip_w: u32,
+    clip_h: u32,
+) void {
+    const e = findEntry(key) orelse return;
+    pushOp(e, .{
+        .kind = .brush,
+        .erase = true,
+        .cx = cx,
+        .cy = cy,
+        .r = r,
+        .brush_kind = kind,
+        .angle = angle,
+        .aspect = @max(0.05, aspect),
+        .hardness = std.math.clamp(hardness, 0.0, 1.0),
+        .flow = std.math.clamp(flow, 0.0, 1.0),
+        .scatter = @max(0.0, scatter),
+        .seed = seed,
+        .clip_x = clip_x,
+        .clip_y = clip_y,
+        .clip_w = clip_w,
+        .clip_h = clip_h,
+    });
+}
+
+/// Composite a SOURCE paintable into `dst_key` premultiplied-OVER, scaled by
+/// `opacity` (LAYERS, req_1729). JS drives clear→composite(L0)→composite(L1)… to
+/// flatten the visible layer stack into the display texture the mesh samples.
+pub fn queueComposite(dst_key: []const u8, src_key: []const u8, opacity: f32) void {
+    const e = findEntry(dst_key) orelse return;
+    pushOp(e, .{ .kind = .composite, .src_hash = hashKey(src_key), .value = std.math.clamp(opacity, 0.0, 1.0) });
 }
 
 pub fn queueCircle(key: []const u8, cx: f32, cy: f32, r: f32, value: f32) void {
@@ -824,14 +1023,32 @@ pub fn drainAll() void {
     }
     if (!any) return;
     if (!ensureBrushPipeline()) return;
+    _ = ensureCompositePipeline(); // best-effort; composite ops no-op if it failed
 
+    // TWO PHASES (req_1729): phase 1 runs every op EXCEPT composite (the brush dabs
+    // that write the layer textures); phase 2 runs the composite ops, so a display's
+    // clear→composite(layers) reads layer textures that already reflect this frame's
+    // dabs regardless of entry iteration order. Phase 2 also resets the op queues.
     for (&g_entries) |*e| {
         if (!e.active or e.op_count == 0) continue;
-        drainEntry(e);
+        drainEntry(e, false, false);
+    }
+    for (&g_entries) |*e| {
+        if (!e.active or e.op_count == 0) continue;
+        drainEntry(e, true, true);
     }
 }
 
-fn drainEntry(e: *Paintable) void {
+fn findEntryByHash(h: u64) ?*Paintable {
+    for (&g_entries) |*e| {
+        if (e.active and e.key_hash == h) return e;
+    }
+    return null;
+}
+
+/// Run an entry's queued ops. `composite_phase` selects which ops run (false = all
+/// but composite; true = composite only). `reset` clears the op queue afterwards.
+fn drainEntry(e: *Paintable, composite_phase: bool, reset: bool) void {
     const device = gpu_core.getDevice() orelse return;
     const queue = gpu_core.getQueue() orelse return;
     const target = e.view orelse return;
@@ -844,6 +1061,8 @@ fn drainEntry(e: *Paintable) void {
     var i: usize = 0;
     while (i < op_count) : (i += 1) {
         const op = e.ops[i];
+        // Gate by phase: composite ops only in phase 2, everything else in phase 1.
+        if ((op.kind == .composite) != composite_phase) continue;
         switch (op.kind) {
             .clear => {
                 // Submit a render pass that just clears to op.value (in R8Unorm,
@@ -920,7 +1139,10 @@ fn drainEntry(e: *Paintable) void {
                     encoder.release();
                     continue;
                 };
-                pass.setPipeline(pipeline);
+                // The eraser uses the dest-out pipeline (carves alpha) — RGBA only;
+                // an R8 mask has no alpha to erase, so it falls back to the normal pass.
+                const dab_pipeline = if (op.erase and e.rgba) (g_brush_pipeline_rgba_erase orelse pipeline) else pipeline;
+                pass.setPipeline(dab_pipeline);
                 pass.setBindGroup(0, bg, 0, null);
                 // Per-face scissor: clamp the dab to the hit face's UV island so
                 // a round brush near an island edge can't bleed onto a neighbour
@@ -961,10 +1183,72 @@ fn drainEntry(e: *Paintable) void {
                     e.dirty = true;
                 }
             },
+            .composite => {
+                // Blend a source paintable into this one premultiplied-OVER × opacity.
+                compositeInto(e, target, op.src_hash, op.value);
+            },
         }
     }
-    e.op_count = 0;
-    e.poly_used = 0;
+    // Phase 2 owns the reset (both phases share the queue; resetting in phase 1 would
+    // drop composite ops before phase 2 sees them).
+    if (reset) {
+        e.op_count = 0;
+        e.poly_used = 0;
+    }
+}
+
+/// Render the `src_hash` paintable's texture into `target` (premultiplied-OVER ×
+/// opacity). Builds a one-shot bind group sampling the source view; no-ops if the
+/// source/pipeline isn't ready. Caller clears `target` first for a full flatten.
+fn compositeInto(dst: *Paintable, target: *wgpu.TextureView, src_hash: u64, opacity: f32) void {
+    if (opacity <= 0.0) return;
+    const device = gpu_core.getDevice() orelse return;
+    const queue = gpu_core.getQueue() orelse return;
+    const pipeline = g_composite_pipeline orelse return;
+    const bgl = g_composite_bgl orelse return;
+    const uniform_buf = g_composite_uniform_buf orelse return;
+    const sampler = g_composite_sampler orelse return;
+    const src = findEntryByHash(src_hash) orelse return;
+    if (src == dst) return; // never sample the target we're writing
+    const src_view = src.view orelse return;
+
+    const u = CompositeUniforms{ .opacity = opacity };
+    bu.writeValue(queue, uniform_buf, 0, &u);
+
+    const entries = [_]wgpu.BindGroupEntry{
+        .{ .binding = 0, .texture_view = src_view },
+        .{ .binding = 1, .sampler = sampler },
+        .{ .binding = 2, .buffer = uniform_buf, .offset = 0, .size = @sizeOf(CompositeUniforms) },
+    };
+    const bind = device.createBindGroup(&.{ .layout = bgl, .entry_count = entries.len, .entries = &entries }) orelse return;
+    defer bind.release();
+
+    const encoder = device.createCommandEncoder(&.{ .label = wgpu.StringView.fromSlice("paintable_composite") }) orelse return;
+    const pass = encoder.beginRenderPass(&.{
+        .color_attachment_count = 1,
+        .color_attachments = @ptrCast(&wgpu.ColorAttachment{
+            .view = target,
+            .load_op = .load, // accumulate over the prior composites in the sequence
+            .store_op = .store,
+            .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+        }),
+    }) orelse {
+        encoder.release();
+        return;
+    };
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bind, 0, null);
+    pass.draw(6, 1, 0, 0);
+    pass.end();
+    pass.release();
+    const cmd = encoder.finish(&.{ .label = wgpu.StringView.fromSlice("paintable_composite_cmd") }) orelse {
+        encoder.release();
+        return;
+    };
+    encoder.release();
+    queue.submit(&.{cmd});
+    cmd.release();
+    dst.dirty = true;
 }
 
 fn uploadBytes(e: *Paintable, bytes: []const u8) void {
@@ -1095,10 +1379,10 @@ fn rasterizePolygonCpu(e: *Paintable, op: Op) void {
 /// copy + map. ONLY call at save / export points.
 pub fn readbackSync(key: []const u8) ?[]u8 {
     const e = findEntry(key) orelse return null;
-    // Drain any pending ops so the readback reflects the latest writes.
-    if (e.op_count > 0) {
-        if (ensureBrushPipeline()) drainEntry(e);
-    }
+    // Drain ALL paintables (both phases) so the readback reflects the latest writes —
+    // for a composited DISPLAY texture that means its source LAYERS are flushed first,
+    // then the composite runs, so the flattened result is current (req_1729).
+    drainAll();
     const device = gpu_core.getDevice() orelse return null;
     const queue = gpu_core.getQueue() orelse return null;
     const tex = e.texture orelse return null;
