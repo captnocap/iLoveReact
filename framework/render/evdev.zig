@@ -11,17 +11,44 @@
 //! SDL button indices. Keyboard is intentionally out of scope here (milestone:
 //! a clickable desktop); text input is a follow-up.
 
+const builtin = @import("builtin");
 const std = @import("std");
 const c = @import("../c.zig").imports;
 
-const ie = @cImport({
-    @cInclude("linux/input.h");
-    @cInclude("linux/input-event-codes.h");
-});
+// evdev reads raw Linux kernel input devices (/dev/input/event*) via
+// <linux/input.h> — Linux-only. Off Linux the whole implementation lives in a
+// comptime-dead branch so the @cImport never runs; the engine only uses evdev
+// under the dummy SDL video driver (kms mode), which is itself Linux-only.
+const is_linux = builtin.os.tag == .linux;
 
-const linux = std.os.linux;
+pub fn deviceCount() usize {
+    return if (is_linux) Impl.deviceCount() else 0;
+}
+pub fn mouseX() f32 {
+    return if (is_linux) Impl.mouseX() else 0;
+}
+pub fn mouseY() f32 {
+    return if (is_linux) Impl.mouseY() else 0;
+}
+pub fn init(window: *c.SDL_Window, width: f32, height: f32) void {
+    if (is_linux) Impl.init(window, width, height);
+}
+pub fn poll() void {
+    if (is_linux) Impl.poll();
+}
+pub fn deinit() void {
+    if (is_linux) Impl.deinit();
+}
 
-const MAX_DEVS = 32;
+const Impl = if (is_linux) struct {
+    const ie = @cImport({
+        @cInclude("linux/input.h");
+        @cInclude("linux/input-event-codes.h");
+    });
+
+    const linux = std.os.linux;
+
+    const MAX_DEVS = 32;
 
 const Device = struct {
     fd: i32,
@@ -220,3 +247,4 @@ pub fn deinit() void {
     for (g_devs[0..g_ndev]) |dev| _ = linux.close(dev.fd);
     g_ndev = 0;
 }
+} else struct {};

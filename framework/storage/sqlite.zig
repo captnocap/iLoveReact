@@ -50,7 +50,10 @@ const SQLITE_BLOB: c_int = 4;
 const SQLITE_NULL: c_int = 5;
 
 // SQLITE_TRANSIENT = ((sqlite3_destructor_type)-1) — tell sqlite to copy data.
-const SQLITE_TRANSIENT: ?*const fn (?*anyopaque) callconv(.c) void =
+// align(1): on aarch64 a plain fn pointer has alignment >1, so @ptrFromInt of
+// the all-ones sentinel (never actually called — sqlite only compares it) trips
+// Zig's "requires aligned address" check. align(1) drops that constraint.
+const SQLITE_TRANSIENT: ?*align(1) const fn (?*anyopaque) callconv(.c) void =
     @ptrFromInt(std.math.maxInt(usize));
 
 // Opaque handle types
@@ -85,7 +88,7 @@ const FnBindText = *const fn (
     idx: c_int,
     text: [*]const u8,
     n: c_int,
-    destructor: ?*const fn (?*anyopaque) callconv(.c) void,
+    destructor: ?*align(1) const fn (?*anyopaque) callconv(.c) void,
 ) callconv(.c) c_int;
 const FnBindInt64 = *const fn (stmt: *Sqlite3Stmt, idx: c_int, val: i64) callconv(.c) c_int;
 const FnBindDouble = *const fn (stmt: *Sqlite3Stmt, idx: c_int, val: f64) callconv(.c) c_int;

@@ -81,10 +81,13 @@ pub const UdsServer = struct {
         );
         errdefer std.posix.close(fd);
 
+        // sun_path is [108]u8 on Linux but [104]u8 on macOS — zero the field
+        // by its actual length instead of hardcoding 108 so both platforms build.
         var sa = std.posix.sockaddr.un{
             .family = std.posix.AF.UNIX,
-            .path = [_]u8{0} ** 108,
+            .path = undefined,
         };
+        @memset(&sa.path, 0);
         @memcpy(sa.path[0..path.len], path);
 
         // sockaddr_un size: family (2 bytes) + path (variable). We pass

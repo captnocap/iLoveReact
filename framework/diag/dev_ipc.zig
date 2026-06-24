@@ -78,7 +78,10 @@ pub fn start() void {
         return;
     };
 
-    var addr: std.posix.sockaddr.un = .{ .family = std.posix.AF.UNIX, .path = [_]u8{0} ** 108 };
+    // sun_path is [108]u8 on Linux, [104]u8 on macOS — undefined + memset zeroes
+    // the field by its real length so this builds on both.
+    var addr: std.posix.sockaddr.un = .{ .family = std.posix.AF.UNIX, .path = undefined };
+    @memset(&addr.path, 0);
     const path = SOCKET_PATH;
     if (path.len >= addr.path.len) {
         log.warn("socket path too long", .{});

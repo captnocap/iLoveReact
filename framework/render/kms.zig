@@ -17,15 +17,43 @@
 //! bpp 32), whose 32-bit little-endian word is 0x00RRGGBB == bytes [B,G,R,X].
 //! The first three bytes line up, so presenting is a plain per-row memcpy.
 
+const builtin = @import("builtin");
 const std = @import("std");
 const log = @import("../diag/log.zig");
 
-const c = @cImport({
-    @cInclude("drm/drm.h");
-    @cInclude("drm/drm_mode.h");
-});
+// DRM/KMS is a Linux-only kernel interface (<drm/drm.h> ships only on Linux).
+// On every other platform the whole implementation lives in a comptime-dead
+// branch so the @cImport never runs, and the public API degrades to no-ops:
+// kms scanout is never active off Linux (the engine only enters kms_mode on a
+// bare Linux VT). Public dispatchers forward to Impl on Linux, stub elsewhere.
+const is_linux = builtin.os.tag == .linux;
 
-const linux = std.os.linux;
+pub fn isActive() bool {
+    return if (is_linux) Impl.isActive() else false;
+}
+pub fn width() u32 {
+    return if (is_linux) Impl.width() else 0;
+}
+pub fn height() u32 {
+    return if (is_linux) Impl.height() else 0;
+}
+pub fn init() !void {
+    return if (is_linux) Impl.init() else error.NoUsableCard;
+}
+pub fn present(src: [*]const u8, src_w: u32, src_h: u32, src_pitch: u32) void {
+    if (is_linux) Impl.present(src, src_w, src_h, src_pitch);
+}
+pub fn deinit() void {
+    if (is_linux) Impl.deinit();
+}
+
+const Impl = if (is_linux) struct {
+    const c = @cImport({
+        @cInclude("drm/drm.h");
+        @cInclude("drm/drm_mode.h");
+    });
+
+    const linux = std.os.linux;
 
 const MAX_IDS = 64; // connectors / crtcs / encoders per card — generous
 const MAX_MODES = 256;
@@ -87,7 +115,7 @@ pub fn init() !void {
         const path = std.fmt.bufPrintZ(&path_buf, "/dev/dri/card{d}", .{card}) catch continue;
         const fd = openCard(path) orelse continue;
         if (setupCard(fd)) {
-            log.print("[kms] scanning out on {s}: {d}x{d}\n", .{ path, width(), height() });
+            log.print("[kms] scanning out on {s}: {d}x{d}\n", .{ path, Impl.width(), Impl.height() });
             return;
         } else |err| {
             log.print("[kms] {s}: {s}\n", .{ path, @errorName(err) });
@@ -269,3 +297,4 @@ pub fn deinit() void {
     _ = linux.close(d.fd);
     g_display = null;
 }
+} else struct {};

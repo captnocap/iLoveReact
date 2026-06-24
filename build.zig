@@ -40,9 +40,17 @@ pub fn build(b: *std.Build) void {
     ) orelse b.pathFromRoot("deps/v8-prebuilt/libc_v8.a");
 
     // ── wgpu-native ────────────────────────────────────────────
+    // macOS links wgpu dynamically. Zig 0.15.2's self-hosted MachO linker
+    // panics ("unexpected pointer encoding") while parsing the 387 __eh_frame
+    // sections in the Rust-built libwgpu_native.a; the prebuilt .dylib sidesteps
+    // that entirely (a dylib's eh_frame isn't parsed into __unwind_info at link
+    // time). Linux keeps the static archive (LLD/ELF handles it fine).
+    const wgpu_link_mode: std.builtin.LinkMode =
+        if (target.result.os.tag == .macos) .dynamic else .static;
     const wgpu_dep = b.dependency("wgpu_native_zig", .{
         .target = target,
         .optimize = optimize,
+        .link_mode = wgpu_link_mode,
     });
     const wgpu_mod = wgpu_dep.module("wgpu");
 
@@ -61,11 +69,20 @@ pub fn build(b: *std.Build) void {
     // .system=false → zluajit compiles LuaJIT from the source it bundles
     // (cached at tools/zig/cache/p/zluajit-...). With .system=true, zluajit
     // calls linkSystemLibrary("luajit") which expects a generic libluajit.so
-    // — distros only ship libluajit-5.1.so, so the link fails everywhere.
+    // — Linux distros only ship libluajit-5.1.so, so the link fails there.
+    //
+    // macOS is the exception: Homebrew DOES provide /opt/homebrew/lib/
+    // libluajit.dylib, and we MUST use it. The source build emits a static
+    // liblua.a whose hand-written arm64 VM assembly carries __eh_frame pointer
+    // encodings that Zig 0.15.2's self-hosted MachO linker can't parse (it
+    // panics "unexpected pointer encoding"). Linking the system dylib skips the
+    // static archive entirely. brew luajit headers live at the include path the
+    // macOS branch below already adds.
+    const zluajit_system = target.result.os.tag == .macos;
     const zluajit_dep = b.dependency("zluajit", .{
         .target = target,
         .optimize = optimize,
-        .system = false,
+        .system = zluajit_system,
     });
 
     // ── Build options ──────────────────────────────────────────
@@ -272,6 +289,19 @@ pub fn build(b: *std.Build) void {
             exe.linkFramework("Cocoa");
             exe.linkFramework("IOKit");
             exe.linkFramework("CoreVideo");
+            // wgpu is dynamic on macOS (see wgpu_link_mode): the dep doesn't
+            // addObjectFile the .a in dynamic mode, it exposes the prebuilt
+            // dylib through its named write-files "lib" (the real .dylib lives
+            // in wgpu-native's nested binary-release package, not in this repo's
+            // deps/wgpu_native_zig/lib). Link it from there, install it into
+            // zig-out/lib next to the binary, and rpath @loader_path/../lib so
+            // the @rpath/libwgpu_native.dylib install_name resolves at runtime.
+            const wgpu_lib_dir = wgpu_dep.namedWriteFiles("lib").getDirectory();
+            exe.addLibraryPath(wgpu_lib_dir);
+            root_mod.linkSystemLibrary("wgpu_native", .{ .preferred_link_mode = .dynamic });
+            const wgpu_dylib_install = b.addInstallLibFile(wgpu_lib_dir.path(b, "libwgpu_native.dylib"), "libwgpu_native.dylib");
+            exe.step.dependOn(&wgpu_dylib_install.step);
+            exe.addRPath(.{ .cwd_relative = "@loader_path/../lib" });
         }
     }
 
@@ -444,7 +474,10 @@ pub fn build(b: *std.Build) void {
     // framework/ml/ to run small inference models (currently MobileSAM
     // for image segmentation in cart/cutout). No build-from-source —
     // Microsoft's prebuilt is the supported path. See deps/onnxruntime/README.md.
-    const has_onnx = b.option(bool, "has-onnx", "Link onnxruntime + register __onnx_* / __segment_* bindings") orelse false;
+    // Linux-only: the only supported onnxruntime payload is the prebuilt
+    // libonnxruntime.so (deps/onnxruntime/lib). No macOS prebuilt exists, so
+    // the fat dev host gates it off on macOS rather than fail the link.
+    const has_onnx = (b.option(bool, "has-onnx", "Link onnxruntime + register __onnx_* / __segment_* bindings") orelse false) and os_tag == .linux;
     if (has_onnx) {
         root_mod.addIncludePath(b.path("deps/onnxruntime/include"));
         root_mod.addLibraryPath(b.path("deps/onnxruntime/lib"));
@@ -461,7 +494,9 @@ pub fn build(b: *std.Build) void {
     // (same path the bench used). $ORIGIN rpath so scripts/ship can
     // bundle the .so next to the cart binary.
     const has_pg = b.option(bool, "has-pg", "Register __pg_* bindings (pg.zig client + embedded postgres)") orelse false;
-    const has_embed = b.option(bool, "has-embed", "Register __embed_* bindings (llama.cpp + pgvector store; implies has-pg)") orelse false;
+    // Linux-only: links the prebuilt libllama_ffi.so (zig-out/lib or tsz/zig-out/lib).
+    // No macOS build of that .so exists, so the fat dev host gates it off on macOS.
+    const has_embed = (b.option(bool, "has-embed", "Register __embed_* bindings (llama.cpp + pgvector store; implies has-pg)") orelse false) and os_tag == .linux;
     if (has_embed) {
         // Prefer root zig-out/lib (a recent libllama_ffi.so dropped here wins
         // over the frozen tsz copy — needed for newer arches like gemma4).
@@ -490,7 +525,9 @@ pub fn build(b: *std.Build) void {
     // Source-driven: cart bundle that imports usePrivacy gets libsodium
     // linked + bundled. Cart that doesn't, doesn't pay for it. scripts/ship
     // greps the bundle and passes -Dhas-privacy.
-    const has_privacy = b.option(bool, "has-privacy", "Link libsodium + privacy bindings") orelse false;
+    // Linux-only: the bundled libsodium payloads are Linux .so builds; no macOS
+    // prebuilt is vendored, so the fat dev host gates privacy off on macOS.
+    const has_privacy = (b.option(bool, "has-privacy", "Link libsodium + privacy bindings") orelse false) and os_tag == .linux;
     options.addOption(bool, "has_privacy", has_privacy);
     if (has_privacy) {
         exe.linkSystemLibrary("sodium");

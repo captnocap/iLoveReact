@@ -3553,8 +3553,14 @@ pub fn run(config_in: AppConfig) !void {
     // alongside the physical mics. Carts that don't care about this still
     // pay nothing — the hint only affects enumeration. Must run BEFORE
     // SDL_Init.
-    _ = c.SDL_SetHint("SDL_AUDIO_DRIVER", "pulseaudio");
-    _ = c.SDL_SetHint("SDL_AUDIO_INCLUDE_MONITORS", "1");
+    // Linux-only: forcing the pulseaudio driver (PipeWire's pulse compat) and
+    // the monitor-source hint is a Linux/PipeWire concern. On macOS there is no
+    // pulseaudio driver, so setting it makes SDL_Init(AUDIO) — and thus the
+    // whole VIDEO|AUDIO init below — fail; let SDL pick CoreAudio there.
+    if (@import("builtin").os.tag == .linux) {
+        _ = c.SDL_SetHint("SDL_AUDIO_DRIVER", "pulseaudio");
+        _ = c.SDL_SetHint("SDL_AUDIO_INCLUDE_MONITORS", "1");
+    }
 
     // KMS / no-display-server mode: reactjit IS the display server. Take over
     // the console via DRM scanout (framework/render/kms.zig) and run SDL with
@@ -3572,7 +3578,10 @@ pub fn run(config_in: AppConfig) !void {
     }
     defer if (kms_mode) kms.deinit();
 
-    if (!c.SDL_Init(c.SDL_INIT_VIDEO | c.SDL_INIT_AUDIO)) return error.SDLInitFailed;
+    if (!c.SDL_Init(c.SDL_INIT_VIDEO | c.SDL_INIT_AUDIO)) {
+        log.print("[engine] SDL_Init failed: {s}\n", .{c.SDL_GetError()});
+        return error.SDLInitFailed;
+    }
     defer {
         // Release any held SDL captures BEFORE SDL_Quit so the X server (or
         // equivalent on macOS/Wayland) drops the pointer grab. SDL_Quit alone

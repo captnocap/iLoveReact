@@ -14,7 +14,10 @@
 //!   child.close();      // reap + deregister
 
 const std = @import("std");
+const builtin = @import("builtin");
 const log = @import("../diag/log.zig");
+
+const is_macos = builtin.os.tag == .macos;
 
 // ════════════════════════════════════════════════════════════════════════
 // POSIX externs (libc — linked by build.zig)
@@ -32,18 +35,36 @@ extern fn getpid() c_int;
 extern fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
 extern fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
 extern fn setsid() c_int;
+// pipe2 is Linux-only; macOS has just pipe(2) + fcntl. cloexecPipe() below
+// dispatches so this extern is referenced only in the Linux branch.
 extern fn pipe2(fds: *[2]c_int, flags: c_int) c_int;
+extern fn pipe(fds: *[2]c_int) c_int;
 extern fn dup2(oldfd: c_int, newfd: c_int) c_int;
 
-const O_NONBLOCK: c_int = 0o4000;
-const O_CLOEXEC: c_int = 0o2000000;
+// O_* bit values differ between the Linux and macOS/BSD ABIs — pick per target.
+const O_NONBLOCK: c_int = if (is_macos) 0x0004 else 0o4000;
+const O_CLOEXEC: c_int = if (is_macos) 0x1000000 else 0o2000000;
+const FD_CLOEXEC: c_int = 1;
+
+/// pipe2(fds, O_CLOEXEC) with a macOS fallback (pipe + fcntl FD_CLOEXEC).
+/// Returns 0 on success, nonzero on failure — same contract as pipe2.
+fn cloexecPipe(fds: *[2]c_int) c_int {
+    if (is_macos) {
+        if (pipe(fds) != 0) return -1;
+        _ = std.posix.fcntl(fds[0], std.posix.F.SETFD, FD_CLOEXEC) catch {};
+        _ = std.posix.fcntl(fds[1], std.posix.F.SETFD, FD_CLOEXEC) catch {};
+        return 0;
+    } else {
+        return pipe2(fds, O_CLOEXEC);
+    }
+}
 
 const WNOHANG: c_int = 1;
 const SIGTERM: c_int = 15;
 const SIGKILL: c_int = 9;
 const O_WRONLY: c_int = 1;
-const O_CREAT: c_int = 0x40;
-const O_TRUNC: c_int = 0x200;
+const O_CREAT: c_int = if (is_macos) 0x0200 else 0x40;
+const O_TRUNC: c_int = if (is_macos) 0x0400 else 0x200;
 
 // ════════════════════════════════════════════════════════════════════════
 // Process handle
@@ -226,17 +247,17 @@ pub fn spawnPiped(opts: PipedSpawnOptions) !PipedProcess {
     var err_pipe: [2]c_int = .{ -1, -1 };
 
     if (opts.pipe_stdin) {
-        if (pipe2(&in_pipe, O_CLOEXEC) != 0) return error.PipeFailed;
+        if (cloexecPipe(&in_pipe) != 0) return error.PipeFailed;
     }
     if (opts.pipe_stdout) {
-        if (pipe2(&out_pipe, O_CLOEXEC) != 0) {
+        if (cloexecPipe(&out_pipe) != 0) {
             if (in_pipe[0] >= 0) _ = close(in_pipe[0]);
             if (in_pipe[1] >= 0) _ = close(in_pipe[1]);
             return error.PipeFailed;
         }
     }
     if (opts.pipe_stderr) {
-        if (pipe2(&err_pipe, O_CLOEXEC) != 0) {
+        if (cloexecPipe(&err_pipe) != 0) {
             if (in_pipe[0] >= 0) _ = close(in_pipe[0]);
             if (in_pipe[1] >= 0) _ = close(in_pipe[1]);
             if (out_pipe[0] >= 0) _ = close(out_pipe[0]);

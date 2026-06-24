@@ -145,12 +145,29 @@ extern "C" float phys_body_get_linear_velocity_y(PhysBody body) {
 
 // ── Collider (Shape) ───────────────────────────────────────────
 
+// Box2D 3.1.1 moved friction/restitution out of b2ShapeDef into a nested
+// b2SurfaceMaterial (def.material.friction); 3.0/3.1.0 kept them as direct
+// members. SFINAE picks whichever the installed headers expose — the `int`
+// overload (material) is preferred, falling back to the `long` overload
+// (direct) when material.friction doesn't exist. Call with a literal 0.
+template <typename Def>
+static auto setSurface(Def& def, float friction, float restitution, int)
+    -> decltype((void)def.material.friction) {
+    def.material.friction = friction;
+    def.material.restitution = restitution;
+}
+template <typename Def>
+static auto setSurface(Def& def, float friction, float restitution, long)
+    -> decltype((void)def.friction) {
+    def.friction = friction;
+    def.restitution = restitution;
+}
+
 extern "C" PhysFixture phys_collider_box(PhysBody body, float half_w, float half_h,
                                           float density, float friction, float restitution) {
     b2ShapeDef def = b2DefaultShapeDef();
     def.density = density;
-    def.friction = friction;
-    def.restitution = restitution;
+    setSurface(def, friction, restitution, 0);
     b2Polygon box = b2MakeBox(half_w, half_h);
     return packShape(b2CreatePolygonShape(unpackBody(body), &def, &box));
 }
@@ -159,8 +176,7 @@ extern "C" PhysFixture phys_collider_circle(PhysBody body, float radius,
                                              float density, float friction, float restitution) {
     b2ShapeDef def = b2DefaultShapeDef();
     def.density = density;
-    def.friction = friction;
-    def.restitution = restitution;
+    setSurface(def, friction, restitution, 0);
     b2Circle circle = {{0.0f, 0.0f}, radius};
     return packShape(b2CreateCircleShape(unpackBody(body), &def, &circle));
 }

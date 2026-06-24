@@ -68,11 +68,14 @@ fn webp() ?*Webp {
     }
     if (h == null) return null;
     g_webp.handle = h;
-    g_webp.encode = @ptrCast(dlsym(h, "WebPEncodeRGBA"));
-    g_webp.encode_lossless = @ptrCast(dlsym(h, "WebPEncodeLosslessRGBA"));
-    g_webp.decode = @ptrCast(dlsym(h, "WebPDecodeRGBA"));
-    g_webp.get_info = @ptrCast(dlsym(h, "WebPGetInfo"));
-    g_webp.free = @ptrCast(dlsym(h, "WebPFree"));
+    // @alignCast: dlsym returns ?*anyopaque (align 1); on aarch64 a fn pointer
+    // has alignment >1, so @ptrCast alone trips "increases pointer alignment".
+    // Real function addresses are properly aligned, so the alignCast is sound.
+    g_webp.encode = @ptrCast(@alignCast(dlsym(h, "WebPEncodeRGBA")));
+    g_webp.encode_lossless = @ptrCast(@alignCast(dlsym(h, "WebPEncodeLosslessRGBA")));
+    g_webp.decode = @ptrCast(@alignCast(dlsym(h, "WebPDecodeRGBA")));
+    g_webp.get_info = @ptrCast(@alignCast(dlsym(h, "WebPGetInfo")));
+    g_webp.free = @ptrCast(@alignCast(dlsym(h, "WebPFree")));
     // All five are required; a partial resolve means a broken/foreign lib.
     if (g_webp.encode == null or g_webp.encode_lossless == null or g_webp.decode == null or g_webp.get_info == null or g_webp.free == null) {
         g_webp.handle = null;
