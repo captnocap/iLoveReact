@@ -68,7 +68,7 @@ import { Paintable } from '@reactjit/runtime/primitives';
 // optimistic host-owned stamping engine; the model's saved palette stays the
 // source of truth, synthesised into the kit's palette shape.
 import {
-  BrushKit, useBrushStroke, DEFAULT_BRUSH,
+  BrushKit, useBrushStroke, DEFAULT_BRUSH, constrainLine, constrainSquare,
   pushRecent, stampBrushDab, brushDabRgb, pressureRadius, layoutText, GLYPH_H,
   type Brush, type BrushTool, type ClipRect, type PaintTheme, type Palette as KitPalette, type PaletteEntry,
 } from '@reactjit/runtime/paint';
@@ -383,6 +383,13 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   // this path vs the kit (which owns the atlas-space shape tools + eyedropper). paintUpw
   // is the hit face's uv↔world scale latched on press, so the brush is one world size.
   const surfaceStrokeActiveRef = useRef(false);
+  // SHAPE-TOOL GHOST (req_1729): line/rect/ellipse stamped on release with no
+  // drag-time feedback — you couldn't see the shape until it was committed. Track the
+  // press anchor + live point in SCREEN (container-relative) coords and draw a rubber
+  // band so the shape previews while you drag. Cleared on up/leave. The constraints
+  // (shift = straight line / square) mirror the kit's so the ghost matches the stamp.
+  const shapeGhostAnchorRef = useRef<{ x: number; y: number } | null>(null);
+  const [shapeGhost, setShapeGhost] = useState<{ tool: 'line' | 'rect' | 'ellipse'; ax: number; ay: number; bx: number; by: number } | null>(null);
   const lastPaintScreenRef = useRef<{ x: number; y: number } | null>(null);
   const paintUpwRef = useRef(0);
   const [paintBakeTick, setPaintBakeTick] = useState(0);
@@ -1621,6 +1628,10 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
         surfaceStrokeBegin(sx, sy, pressureOf(e));
       } else {
         surfaceStrokeActiveRef.current = false;
+        if (tool === 'line' || tool === 'rect' || tool === 'ellipse') {
+          shapeGhostAnchorRef.current = { x: sx, y: sy };
+          setShapeGhost({ tool, ax: sx, ay: sy, bx: sx, by: sy });
+        }
         paintCtl.handlers.onMouseDown(e);
       }
       paintingRef.current = true;
@@ -1800,7 +1811,17 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
       if (tool === 'text' && textDragRef.current) { textMoveTo(sx, sy); return; }
       if (paintingRef.current) {
         if (surfaceStrokeActiveRef.current) surfaceStrokeMove(sx, sy, pressureOf(e)); // 3D-surface freehand
-        else paintCtl.handlers.onMouseMove(e); // kit owns the atlas-space shape tools
+        else {
+          paintCtl.handlers.onMouseMove(e); // kit owns the atlas-space shape tools
+          // rubber-band the on-screen ghost so the shape previews as you drag.
+          const a = shapeGhostAnchorRef.current;
+          if (a && (tool === 'line' || tool === 'rect' || tool === 'ellipse')) {
+            let bx = sx, by = sy;
+            if (tool === 'line') { const c = constrainLine(a.x, a.y, sx, sy, heldMods.current.shift); bx = c.x; by = c.y; }
+            else if (heldMods.current.shift) { const c = constrainSquare(a.x, a.y, sx, sy); bx = c.x; by = c.y; }
+            setShapeGhost({ tool, ax: a.x, ay: a.y, bx, by });
+          }
+        }
         return;
       }
       if (!dragRef.current) { paintProbe(sx, sy); return; } // hover → ref
@@ -2018,6 +2039,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
         surfaceStrokeActiveRef.current = false; lastPaintScreenRef.current = null;
         paintDirtyRef.current = true; commitPaint();
       } else paintCtl.handlers.onMouseUp(e);
+      shapeGhostAnchorRef.current = null; setShapeGhost(null);
       return;
     }
     // end a BACKDROP drag (req_1285): pos was written live to state already, so just
@@ -2271,7 +2293,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
       onMouseDown={onDown}
       onMouseMove={onMove}
       onMouseUp={onUp}
-      onMouseLeave={(e: any) => { if (paintingRef.current) { paintingRef.current = false; lastPaintRef.current = null; if (surfaceStrokeActiveRef.current) { surfaceStrokeActiveRef.current = false; lastPaintScreenRef.current = null; paintDirtyRef.current = true; commitPaint(); } else paintCtl.handlers.onMouseLeave(e); } }}
+      onMouseLeave={(e: any) => { if (paintingRef.current) { paintingRef.current = false; lastPaintRef.current = null; if (surfaceStrokeActiveRef.current) { surfaceStrokeActiveRef.current = false; lastPaintScreenRef.current = null; paintDirtyRef.current = true; commitPaint(); } else paintCtl.handlers.onMouseLeave(e); shapeGhostAnchorRef.current = null; setShapeGhost(null); } }}
       onScroll={onWheel}
       style={{ flexGrow: 1, height: '100%', position: 'relative', overflow: 'hidden', backgroundColor: '#0a0e14' }}
     >
@@ -2474,6 +2496,27 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
 
       {/* PIXEL painter (req_1373): the cell-grid overlay is gone — there are no
           cells anymore, it was just noise on the model. You paint pixels. */}
+
+      {/* SHAPE-TOOL GHOST (req_1729): a screen-space rubber band for line/rect/ellipse
+          so you can SEE the shape while dragging, before it commits on release. A line
+          is a rotated bar; rect/ellipse are an outlined box (ellipse = full radius). */}
+      {selMode === 'paint' && shapeGhost ? (() => {
+        const g = shapeGhost;
+        const stroke = '#ffffff';
+        if (g.tool === 'line') {
+          const dx = g.bx - g.ax, dy = g.by - g.ay;
+          const len = Math.hypot(dx, dy) || 0.001;
+          const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+          return (
+            <Box style={{ position: 'absolute', left: (g.ax + g.bx) / 2 - len / 2, top: (g.ay + g.by) / 2 - 1, width: len, height: 2, borderRadius: 1, backgroundColor: stroke, opacity: 0.85, transform: { rotate: angle }, pointerEvents: 'none', zIndex: Z.overlay }} />
+          );
+        }
+        const x = Math.min(g.ax, g.bx), y = Math.min(g.ay, g.by);
+        const w = Math.abs(g.bx - g.ax), h = Math.abs(g.by - g.ay);
+        return (
+          <Box style={{ position: 'absolute', left: x, top: y, width: w, height: h, borderWidth: 1.5, borderColor: stroke, borderRadius: g.tool === 'ellipse' ? Math.max(w, h) : 2, opacity: 0.85, backgroundColor: '#ffffff14', pointerEvents: 'none', zIndex: Z.overlay }} />
+        );
+      })() : null}
 
       {/* DIAGNOSTIC readout (req_1385): the model's UV layout, on screen since cart
           console.log doesn't reach the terminal. overlap>0 or fullSquare>0 = shared
