@@ -1,6 +1,6 @@
 import { startupMark, startupWatchSettle, navStart, navReady } from './startupTimer';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, Pressable } from '@reactjit/primitives';
+import { Box, Text } from '@reactjit/primitives';
 import { execAsync } from '@reactjit/runtime/hooks/process';
 import type { GameState } from './design';
 import { compileEditorWorld, emptyEditorWorld } from './editorWorld';
@@ -521,6 +521,8 @@ function EditorShell() {
         onToggleMenu={toggleMenu}
         onToggleLog={toggleLog}
         onNew={() => { setMenuOpen(false); newMap(); }}
+        onProbeDump={dumpTransfer}
+        probeMsg={dumpMsg}
         onEditor={() => { navStart('/'); nav.push('/'); }}
         onTest={() => { navStart('/test'); nav.push('/test'); }}
         onLabs={() => { navStart('/labs'); nav.push('/labs'); }}
@@ -647,21 +649,6 @@ function EditorShell() {
       ) : null}
 
       <NotificationOverlayHost simulateRebuildNotice={route.path === '/__rebuild-notify'} />
-
-      {/* [transfer dump] req_1751: the "I MADE IT" probe button. Lives only on the
-          editor route, pinned top-center over everything, so the user can click it the
-          instant the boot finally yields and capture exactly what crossed the host
-          boundary to get there. Remove with the __flushReport / __storeReadReport
-          meters once the boot-cost hunt is done. */}
-      {atEditor ? (
-        <Pressable
-          onPress={dumpTransfer}
-          style={{ position: 'absolute', top: 44, left: '50%', marginLeft: -90, width: 180, paddingTop: 8, paddingBottom: 8, borderRadius: 8, borderWidth: 2, borderColor: '#ff5d73', backgroundColor: '#2a0f16', alignItems: 'center', zIndex: 99999 }}
-        >
-          <Text style={{ color: '#ff8b9c', fontSize: 14, fontWeight: 'bold' }}>I MADE IT</Text>
-          {dumpMsg ? <Text style={{ color: '#9fb2c8', fontSize: 10, marginTop: 3 }}>{dumpMsg}</Text> : null}
-        </Pressable>
-      ) : null}
     </Box>
   );
 }

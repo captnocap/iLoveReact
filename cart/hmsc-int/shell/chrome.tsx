@@ -42,6 +42,12 @@ interface ChromeProps {
   onToggleMenu: () => void;
   onToggleLog: () => void;
   onNew: () => void;
+  // [transfer dump] req_1751/req_1754: the "I MADE IT" startup-probe pill, parked
+  // beside New map. Click it the instant the slow boot yields → dumps every byte that
+  // crossed the host boundary to reach / into /tmp/rjit-startup-transfer.log; probeMsg
+  // is the post-click result line. Remove with the __flushReport/__storeReadReport meters.
+  onProbeDump: () => void;
+  probeMsg?: string;
   onEditor: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -126,6 +132,15 @@ export function Chrome(props: ChromeProps) {
         <Icon name="Plus" size={13} color={accentFor('success')} />
         <C.ChromePillText>New map</C.ChromePillText>
       </C.ChromePill>
+
+      {/* [transfer dump] req_1754: the "I MADE IT" startup probe, parked beside New map. */}
+      <C.ChromePill onPress={props.onProbeDump}>
+        <Icon name="Flag" size={13} color={accentFor('error')} />
+        <C.ChromePillText>I MADE IT</C.ChromePillText>
+      </C.ChromePill>
+      {props.probeMsg ? (
+        <C.ChromePillFaint>{props.probeMsg}</C.ChromePillFaint>
+      ) : null}
 
       {/* The dead middle — this IS the titlebar grab area (borderless host). */}
       <C.ChromeDragSpace windowDrag={true} />
