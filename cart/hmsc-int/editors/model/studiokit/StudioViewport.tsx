@@ -60,8 +60,10 @@ import {
   type SelMode, type Selection, type CameraSnap,
 } from '../meshSelect';
 import { pickFaceUV, paintUVsNeedRepack, mirrorPaintDabs, faceUvPerWorld, surfaceBrushDabs, type PaintCells, type PaintTarget, type FaceHit, type TexelRect } from '../meshPaint';
-import { STUDIO_PAINT_KEY, PAINT_TEX, paintTex, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintDropUndoSnapshot, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited } from '../meshPaintTexture';
+import { STUDIO_PAINT_KEY, PAINT_TEX, paintTex, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintDropUndoSnapshot, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited, layerKey, activeLayerOps, recompositeDisplay, setLayers as syncPaintLayers, setActiveLayerId as syncActiveLayer, clearLayerTransparent, BASE_LAYER_ID, type PaintLayerMeta } from '../meshPaintTexture';
 import { Paintable } from '@reactjit/runtime/primitives';
+import { paintableOps } from '@reactjit/runtime/hooks/usePaintable';
+import { LayerStackStrip, type LayerStripAction, type LayerStripRowModel } from '../../paint/LayerStrip';
 // The PAINT panel + stamping are now the UNIVERSAL kit (runtime/paint) — the same
 // brush/tool/colour vocabulary every cart shares, instead of a Studio one-off
 // (USER ASK req_1487). BrushKit is the control surface; useBrushStroke is the
@@ -392,6 +394,18 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   const [shapeGhost, setShapeGhost] = useState<{ tool: 'line' | 'rect' | 'ellipse'; ax: number; ay: number; bx: number; by: number } | null>(null);
   const lastPaintScreenRef = useRef<{ x: number; y: number } | null>(null);
   const paintUpwRef = useRef(0);
+  // PAINT LAYERS (req_1729): a stack of independent paint surfaces composited into the
+  // display the mesh samples — paint a fresh layer over the base without being exact,
+  // hide/reorder/delete, set opacity, erase THROUGH to the layer below. Session-scoped
+  // (twig: survives a hot reload, resets cold to one layer), flattened to the durable
+  // paintRef on every commit so the picture is never lost. Stored bottom→top.
+  const [paintLayers, setPaintLayers] = useHotState<PaintLayerMeta[]>('studio:paintLayers', [{ id: BASE_LAYER_ID, name: 'Base', visible: true, opacity: 1 }]);
+  const [activeLayer, setActiveLayer] = useHotState<string>('studio:activeLayer', BASE_LAYER_ID);
+  // Mirror the stack into the GPU plumbing (meshPaintTexture) BEFORE any paintTex() /
+  // recomposite this render reads it — so a dab targets the right layer and the
+  // composite uses the current order/opacity/visibility.
+  syncPaintLayers(paintLayers);
+  syncActiveLayer(paintLayers.some((l) => l.id === activeLayer) ? activeLayer : (paintLayers[0]?.id ?? BASE_LAYER_ID));
   const [paintBakeTick, setPaintBakeTick] = useState(0);
   // DIAGNOSTIC (req_1376/1385): the model's UV layout, shown ON SCREEN in paint mode
   // (cart console.log doesn't reach the terminal). Reveals shared/overlapping islands.
@@ -426,6 +440,10 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     const blob = cookedTextureBlob(asset.texRef);
     if (!blob) { toast(`"${asset.name}" texture is missing from the store`); return; }
     props.onBakePaint(asset.texRef, blob); // persist onto the open model + intern the blob
+    // A loaded prop texture is a flattened picture → collapse to a single base layer
+    // and restore it there (req_1729).
+    const base = [{ id: BASE_LAYER_ID, name: 'Base', visible: true, opacity: 1 }];
+    setPaintLayers(base); setActiveLayer(BASE_LAYER_ID); syncPaintLayers(base); syncActiveLayer(BASE_LAYER_ID);
     restorePaint(blob);                    // show it now (parks until the Paintable mounts)
     markPaintInited(props.sceneName ?? null);
     setPaintBakeTick((t) => t + 1);
@@ -850,6 +868,13 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
       paintRef.current = {};
       paintHoverRef.current = null;
       setTex(null);
+      // Reset the paint LAYER stack to a single base layer (req_1729) — the layer twig
+      // is global, so a new model must not inherit the prior model's stack; its
+      // flattened paintRef restores into the base layer on paint-enter.
+      setPaintLayers([{ id: BASE_LAYER_ID, name: 'Base', visible: true, opacity: 1 }]);
+      setActiveLayer(BASE_LAYER_ID);
+      syncPaintLayers([{ id: BASE_LAYER_ID, name: 'Base', visible: true, opacity: 1 }]);
+      syncActiveLayer(BASE_LAYER_ID);
     }
     prevSceneRef.current = scene;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1171,7 +1196,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
       const fy = line * lineStep + (GLYPH_H - 1 - (c.y - line * lineStep));
       const py = oy + (fy + 0.5) * cell;
       // kind 2 = square, hardness 1, aspect 1 → a crisp filled cell, clipped to the island.
-      paintTex().brushColor(px, py, radius, r, g, b, 2, 0, 1, 1, 1, 0, 0, cx0, cy0, cw, ch);
+      activeLayerOps().brushColor(px, py, radius, r, g, b, 2, 0, 1, 1, 1, 0, 0, cx0, cy0, cw, ch);
     }
   };
   // Re-composite the active layer: restore the base (the texture below the text), then
@@ -1181,8 +1206,12 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     if (!L) return;
     const tgt = paintTargets()[L.partIndex];
     if (!tgt) return;
-    paintTex().upload(L.base);
+    // The text rides the ACTIVE layer: restore the layer's pre-text state, re-stamp the
+    // text on it, then recomposite so the display reflects it without smearing trails
+    // (the fan-out would leave each drag step on the display — req_1729).
+    activeLayerOps().upload(L.base);
     stampTextAtUV(L.u, L.v, tgt.mesh, L.faceIndex);
+    recompositeDisplay();
     touchedRef.current.add(tgt.partId);
     paintDirtyRef.current = true;
   };
@@ -1198,7 +1227,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     let L = textLayerRef.current;
     if (!L) {
       paintSnapshotBegin(); // pre-text state → undo ring (one undo removes the placed text)
-      const base = paintTex().readback();
+      const base = activeLayerOps().readback();
       if (!base) return false;
       L = { base, u: hit.u, v: hit.v, partIndex: hit.partIndex, faceIndex: hit.faceIndex };
       textLayerRef.current = L;
@@ -1235,7 +1264,8 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     const L = textLayerRef.current;
     if (!L) return;
     textLayerRef.current = null; textDragRef.current = false; setTextPlacing(false);
-    paintTex().upload(L.base);
+    activeLayerOps().upload(L.base);
+    recompositeDisplay();
     paintDropUndoSnapshot();
     paintDirtyRef.current = true; commitPaint();
   };
@@ -1379,6 +1409,68 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     const ref = savePaint(props.onBakePaint);
     if (ref) { g_loadedPaintModel = props.sceneId ?? null; g_loadedHadBlob = true; }
   };
+
+  // ── Paint layer ops (req_1729) ──
+  // Every op mirrors the new stack into the GPU plumbing, recomposites the display,
+  // and commits (flattens to the durable paintRef). Bottom→top order; the UI shows
+  // top→bottom. New layers start transparent (the GPU texture is zero-initialised).
+  const layerById = (id: string) => paintLayers.find((l) => l.id === id);
+  const nextLayerId = (): string => {
+    const ids = new Set(paintLayers.map((l) => l.id));
+    let n = paintLayers.length + 1;
+    while (ids.has(`L${n}`)) n += 1;
+    return `L${n}`;
+  };
+  const applyLayers = (next: PaintLayerMeta[], active?: string) => {
+    const act = active ?? (next.some((l) => l.id === activeLayer) ? activeLayer : (next[next.length - 1]?.id ?? BASE_LAYER_ID));
+    setPaintLayers(next);
+    setActiveLayer(act);
+    syncPaintLayers(next);
+    syncActiveLayer(act);
+    recompositeDisplay();
+    paintDirtyRef.current = true;
+    commitPaint();
+  };
+  const addLayer = () => {
+    const id = nextLayerId();
+    applyLayers([...paintLayers, { id, name: `Layer ${paintLayers.length + 1}`, visible: true, opacity: 1 }], id);
+  };
+  const selectLayer = (id: string) => { if (layerById(id)) { setActiveLayer(id); syncActiveLayer(id); } };
+  const renameLayer = (id: string, name: string) => setPaintLayers(paintLayers.map((l) => (l.id === id ? { ...l, name } : l)));
+  const setLayerOpacity = (id: string, opacity: number) => applyLayers(paintLayers.map((l) => (l.id === id ? { ...l, opacity: Math.max(0, Math.min(1, opacity)) } : l)));
+  const onLayerAction = (id: string, action: LayerStripAction) => {
+    const i = paintLayers.findIndex((l) => l.id === id);
+    if (i < 0) return;
+    const L = paintLayers[i];
+    if (action === 'visibility') { applyLayers(paintLayers.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l))); return; }
+    if (action === 'delete') {
+      if (paintLayers.length <= 1) { clearLayerTransparent(id); recompositeDisplay(); paintDirtyRef.current = true; commitPaint(); return; } // last layer → just empty it
+      const next = paintLayers.filter((l) => l.id !== id);
+      applyLayers(next, id === activeLayer ? next[Math.min(i, next.length - 1)].id : activeLayer);
+      return;
+    }
+    if (action === 'duplicate') {
+      const src = paintableOps(layerKey(id)).readback();
+      const nid = nextLayerId();
+      const next = [...paintLayers.slice(0, i + 1), { id: nid, name: `${L.name} copy`, visible: true, opacity: L.opacity }, ...paintLayers.slice(i + 1)];
+      setPaintLayers(next); setActiveLayer(nid); syncPaintLayers(next); syncActiveLayer(nid);
+      if (src) paintableOps(layerKey(nid)).upload(src); // parks until the new <Paintable> mounts
+      recompositeDisplay(); paintDirtyRef.current = true; commitPaint();
+      return;
+    }
+    if (action === 'move-up' && i < paintLayers.length - 1) { const n = [...paintLayers]; [n[i], n[i + 1]] = [n[i + 1], n[i]]; applyLayers(n, activeLayer); return; }
+    if (action === 'move-down' && i > 0) { const n = [...paintLayers]; [n[i], n[i - 1]] = [n[i - 1], n[i]]; applyLayers(n, activeLayer); return; }
+  };
+  // Top→bottom rows for the strip (data is bottom→top).
+  const layerRows: LayerStripRowModel[] = paintLayers.map((_, idx) => paintLayers[paintLayers.length - 1 - idx]).map((L) => {
+    const di = paintLayers.findIndex((l) => l.id === L.id);
+    return {
+      id: L.id, name: L.name, meta: `${Math.round(L.opacity * 100)}%`,
+      active: L.id === activeLayer, muted: !L.visible,
+      preview: <Box style={{ width: '100%', height: '100%', backgroundColor: '#0e1726' }} />,
+      canMoveUp: di < paintLayers.length - 1, canMoveDown: di > 0,
+    };
+  });
   // resolve paint against the model palette, falling back to the default so a stroke
   // shows live BEFORE the first commit mints the real (persisted) palette.
   const livePalette: Palette = props.palette ?? defaultPalette();
@@ -1432,16 +1524,18 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     const worldR = upw > 1e-9 ? pressureRadius(brush.size, pressure) / PAINT_TEX / upw : 0;
     if (!(worldR > 0)) return true;
     const rgb = brushDabRgb(brush, tool, tex?.color ?? '#c8ccd2');
+    const erase = tool === 'eraser'; // carves transparency in the active layer (req_1729)
+    const fan = paintTex();
     for (const d of surfaceBrushDabs(tgt.mesh, tgt.lift, hit.world, worldR, PAINT_TEX)) {
       // CONTAIN-TO-FACE (req_1611): when locked, only paint the face under the cursor —
       // skip the other faces the brush sphere also reaches, so a stroke near an edge
       // never bleeds onto the neighbour. Off = the smooth cross-seam brush (req_1580).
       if (lockFace && d.faceIndex !== hit.faceIndex) continue;
       const px = d.u * PAINT_TEX, py = d.v * PAINT_TEX;
-      stampBrushDab(paintTex(), brush, rgb, px, py, d.radiusPx, islandToClip(d.clip));
+      stampBrushDab(fan, brush, rgb, px, py, d.radiusPx, islandToClip(d.clip), erase);
       if (mirrorAxes.length) {
         for (const md of mirrorPaintDabs(paintTargets(), px, py, mirrorAxes, PAINT_TEX)) {
-          stampBrushDab(paintTex(), brush, rgb, md.x, md.y, d.radiusPx, islandToClip(md.clip));
+          stampBrushDab(fan, brush, rgb, md.x, md.y, d.radiusPx, islandToClip(md.clip), erase);
         }
       }
     }
@@ -2384,10 +2478,13 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
         <BackdropSurface key={`${b.id}~${mountEpoch}`} id={`${b.id}.${mountEpoch}`} source={b.source} aspect={b.aspect} />
       ))}
 
-      {/* PIXEL painter (req_1372): the RGBA paint texture the model samples while in
-          paint mode. Brush dabs (paintAt) and base coat (fillAllFaces) write straight
-          into this GPU texture — no boxes, no StaticSurface capture. */}
+      {/* PIXEL painter (req_1372): the RGBA texture the model samples = the DISPLAY,
+          the GPU composite of the paint LAYERS (req_1729). Each layer is its own
+          paintable that dabs accumulate into; the display is recomposited from the
+          visible layers. Brush dabs fan to the active layer + the display for instant
+          feedback — no boxes, no StaticSurface capture. */}
       {tex || havePaintBlob ? <Paintable id={STUDIO_PAINT_KEY} w={PAINT_TEX} h={PAINT_TEX} rgba /> : null}
+      {tex || havePaintBlob ? paintLayers.map((L) => <Paintable key={L.id} id={layerKey(L.id)} w={PAINT_TEX} h={PAINT_TEX} rgba />) : null}
 
       {/* TEXTURE (req_1068): the offscreen scene SPRITE-MAP atlas every part samples
           via textureKey. Mounted while texture view is on (and NOT painting — the
@@ -2546,6 +2643,32 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
               theme={PAINT_THEME}
               width={264}
             />
+            {/* PAINT LAYERS (req_1729): a stack of independent surfaces so you don't
+                have to be exact — paint over a base on a fresh layer, hide/reorder/
+                delete it, set opacity, erase THROUGH to reveal what's below. */}
+            <Col style={{ gap: 6, padding: 10, backgroundColor: PAINT_THEME.panel, borderWidth: 1, borderColor: PAINT_THEME.frame, borderRadius: 8 }}>
+              <LayerStackStrip
+                title="LAYERS"
+                rows={layerRows}
+                maxHeight={180}
+                onAdd={addLayer}
+                onSelect={selectLayer}
+                onRename={renameLayer}
+                onAction={onLayerAction}
+              />
+              {/* opacity for the ACTIVE layer (LayerStackStrip rows are management only) */}
+              <Row style={{ gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace' }}>opacity</Text>
+                {[25, 50, 75, 100].map((pct) => {
+                  const on = Math.round((layerById(activeLayer)?.opacity ?? 1) * 100) === pct;
+                  return (
+                    <Pressable key={pct} tooltip={`Set the active layer's opacity to ${pct}%`} onPress={() => setLayerOpacity(activeLayer, pct / 100)} style={{ paddingLeft: 7, paddingRight: 7, height: 22, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? PAINT_THEME.accent : PAINT_THEME.control, borderWidth: 1, borderColor: on ? PAINT_THEME.accent : PAINT_THEME.frame }}>
+                      <Text fontSize={10} color={on ? PAINT_THEME.page : PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>{pct}</Text>
+                    </Pressable>
+                  );
+                })}
+              </Row>
+            </Col>
             {/* SAVED PALETTES (req_1729): named colour sets in the shared localstore,
                 so a set of colours you like is reusable across every model — not lost
                 when the ephemeral recents ring wipes or you switch assets. */}
@@ -2646,7 +2769,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
                 <Pressable tooltip="Load a painting back from a prop you compiled from this (or any) model — the compiled prop is the durable backup of its texture" onPress={() => setLoadPropOpen(true)} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame }}>
                   <Text fontSize={10} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>load from prop</Text>
                 </Pressable>
-                <Pressable tooltip="Clear all paint on this model (back to the base coat)" onPress={() => { paintSnapshotBegin(); baseCoat(tex?.color ?? '#c8ccd2'); props.parts.forEach((p) => { if (p.paint && Object.keys(p.paint).length) props.onEditPaint(p.id, {}); }); paintRef.current = {}; touchedRef.current.clear(); commitPaint(); }} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: '#a14545' }}>
+                <Pressable tooltip="Clear all paint on this model (back to the base coat, one layer)" onPress={() => { const base = [{ id: BASE_LAYER_ID, name: 'Base', visible: true, opacity: 1 }]; setPaintLayers(base); setActiveLayer(BASE_LAYER_ID); syncPaintLayers(base); syncActiveLayer(BASE_LAYER_ID); baseCoat(tex?.color ?? '#c8ccd2'); props.parts.forEach((p) => { if (p.paint && Object.keys(p.paint).length) props.onEditPaint(p.id, {}); }); paintRef.current = {}; touchedRef.current.clear(); commitPaint(); }} style={{ paddingLeft: 8, paddingRight: 8, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: '#a14545' }}>
                   <Text fontSize={10} color="#f0a0a0" style={{ fontFamily: 'monospace', fontWeight: '800' }}>clear</Text>
                 </Pressable>
               </Row>

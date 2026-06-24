@@ -35,13 +35,22 @@ export function brushDabRgb(brush: Brush, tool: BrushTool, eraseColor?: string):
 export function stampBrushDab(
   paint: PaintableOps, brush: Brush, rgb: [number, number, number],
   x: number, y: number, radius: number, clip: ClipRect | null,
+  erase = false,
 ): void {
   const shape = brush.stamp.kind === 'analytic' ? brush.stamp.shape : 'round';
   const kindId = BRUSH_SHAPE_ID[shape] ?? 0;
+  const angle = (brush.angleDeg * Math.PI) / 180;
+  const seed = jitterSeed(x, y);
+  const cx = clip?.x ?? 0, cy = clip?.y ?? 0, cw = clip?.w ?? 0, ch = clip?.h ?? 0;
+  // The eraser carves transparency (DEST-OUT) so it reveals the layer below, instead
+  // of painting a colour (req_1729). brushErase has no colour args.
+  if (erase) {
+    paint.brushErase(x, y, radius, kindId, angle, brush.aspect, brush.hardness, brush.flow, brush.scatter, seed, cx, cy, cw, ch);
+    return;
+  }
   paint.brushColor(
     x, y, radius, rgb[0], rgb[1], rgb[2],
-    kindId, (brush.angleDeg * Math.PI) / 180, brush.aspect, brush.hardness, brush.flow, brush.scatter,
-    jitterSeed(x, y),
-    clip?.x ?? 0, clip?.y ?? 0, clip?.w ?? 0, clip?.h ?? 0,
+    kindId, angle, brush.aspect, brush.hardness, brush.flow, brush.scatter, seed,
+    cx, cy, cw, ch,
   );
 }

@@ -196,8 +196,9 @@ fn paintBrushErase(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     paintable.queueBrushErase(id, cx, cy, r, kind, angle, aspect, hardness, flow, scatter, seed, clip_x, clip_y, clip_w, clip_h);
 }
 
-/// __paintable_composite(dstId, srcId, opacity) — flatten a source layer into a
-/// destination paintable premultiplied-OVER × opacity (LAYERS, req_1729).
+/// __paintable_composite(dstId, srcId, opacity, clearFirst) — flatten a source layer
+/// into a destination paintable premultiplied-OVER × opacity (LAYERS, req_1729).
+/// clearFirst clears the destination to transparent before blending (sequence start).
 fn paintComposite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 3) return;
@@ -206,7 +207,8 @@ fn paintComposite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const src = argStrAlloc(info, 1) orelse return;
     defer alloc.free(src);
     const opacity = argF32(info, 2) orelse 1.0;
-    paintable.queueComposite(dst, src, opacity);
+    const clear_first = (argF32(info, 3) orelse 0) > 0.5;
+    paintable.queueComposite(dst, src, opacity, clear_first);
 }
 
 /// __paintable_clear_rgba(id, r, g, b, a) — flat-colour clear (base coat).

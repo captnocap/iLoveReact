@@ -87,6 +87,11 @@ const Op = struct {
     erase: bool = false,
     // composite: key-hash of the SOURCE paintable to blend in (`value` = opacity).
     src_hash: u64 = 0,
+    // composite: clear the destination to transparent BEFORE blending this source.
+    // Set on the FIRST composite of a recomposite sequence so the whole sequence runs
+    // in the composite phase (one FIFO) — a later sequence's clear then wipes an
+    // earlier one, making repeated recomposites in a frame idempotent (last wins).
+    clear_first: bool = false,
     // polygon
     poly_off: u32 = 0, // offset into Paintable.poly_pool
     poly_count: u32 = 0,
@@ -899,9 +904,11 @@ pub fn queueBrushErase(
 /// Composite a SOURCE paintable into `dst_key` premultiplied-OVER, scaled by
 /// `opacity` (LAYERS, req_1729). JS drives clear→composite(L0)→composite(L1)… to
 /// flatten the visible layer stack into the display texture the mesh samples.
-pub fn queueComposite(dst_key: []const u8, src_key: []const u8, opacity: f32) void {
+pub fn queueComposite(dst_key: []const u8, src_key: []const u8, opacity: f32, clear_first: bool) void {
     const e = findEntry(dst_key) orelse return;
-    pushOp(e, .{ .kind = .composite, .src_hash = hashKey(src_key), .value = std.math.clamp(opacity, 0.0, 1.0) });
+    // An empty source key (hash of "") with clear_first = a pure clear (no visible
+    // layers) — src lookup misses, so only the clear runs.
+    pushOp(e, .{ .kind = .composite, .src_hash = hashKey(src_key), .value = std.math.clamp(opacity, 0.0, 1.0), .clear_first = clear_first });
 }
 
 pub fn queueCircle(key: []const u8, cx: f32, cy: f32, r: f32, value: f32) void {
@@ -1184,8 +1191,9 @@ fn drainEntry(e: *Paintable, composite_phase: bool, reset: bool) void {
                 }
             },
             .composite => {
-                // Blend a source paintable into this one premultiplied-OVER × opacity.
-                compositeInto(e, target, op.src_hash, op.value);
+                // Blend a source paintable into this one premultiplied-OVER × opacity,
+                // optionally clearing first (the start of a recomposite sequence).
+                compositeInto(e, target, op.src_hash, op.value, op.clear_first);
             },
         }
     }
@@ -1200,15 +1208,32 @@ fn drainEntry(e: *Paintable, composite_phase: bool, reset: bool) void {
 /// Render the `src_hash` paintable's texture into `target` (premultiplied-OVER ×
 /// opacity). Builds a one-shot bind group sampling the source view; no-ops if the
 /// source/pipeline isn't ready. Caller clears `target` first for a full flatten.
-fn compositeInto(dst: *Paintable, target: *wgpu.TextureView, src_hash: u64, opacity: f32) void {
-    if (opacity <= 0.0) return;
+fn compositeInto(dst: *Paintable, target: *wgpu.TextureView, src_hash: u64, opacity: f32, clear_first: bool) void {
     const device = gpu_core.getDevice() orelse return;
     const queue = gpu_core.getQueue() orelse return;
+    // Clear the destination to transparent first (start of a recomposite sequence).
+    if (clear_first) {
+        const enc = device.createCommandEncoder(&.{ .label = wgpu.StringView.fromSlice("paintable_composite_clear") }) orelse return;
+        if (enc.beginRenderPass(&.{
+            .color_attachment_count = 1,
+            .color_attachments = @ptrCast(&wgpu.ColorAttachment{ .view = target, .load_op = .clear, .store_op = .store, .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 0 } }),
+        })) |pass| {
+            pass.end();
+            pass.release();
+            if (enc.finish(&.{ .label = wgpu.StringView.fromSlice("paintable_composite_clear_cmd") })) |cmd| {
+                enc.release();
+                queue.submit(&.{cmd});
+                cmd.release();
+                dst.dirty = true;
+            } else enc.release();
+        } else enc.release();
+    }
+    if (opacity <= 0.0) return;
     const pipeline = g_composite_pipeline orelse return;
     const bgl = g_composite_bgl orelse return;
     const uniform_buf = g_composite_uniform_buf orelse return;
     const sampler = g_composite_sampler orelse return;
-    const src = findEntryByHash(src_hash) orelse return;
+    const src = findEntryByHash(src_hash) orelse return; // empty/missing source ⇒ clear only
     if (src == dst) return; // never sample the target we're writing
     const src_view = src.view orelse return;
 

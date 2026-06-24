@@ -89,9 +89,11 @@ export interface PaintableOps {
     clipX?: number, clipY?: number, clipW?: number, clipH?: number,
   ): void;
   /** Composite a SOURCE paintable into THIS one, premultiplied-OVER × `opacity`
-   *  (LAYERS, req_1729). Drive a clearColor(0,0,0,0) then composite each visible
-   *  layer bottom→top to flatten a layer stack into the texture a mesh samples. */
-  composite(srcId: string, opacity: number): void;
+   *  (LAYERS, req_1729). Pass `clearFirst` on the FIRST composite of a flatten
+   *  sequence to clear the destination to transparent first; the rest accumulate.
+   *  Folding the clear into the first composite keeps the whole sequence in one op
+   *  phase so repeating it within a frame stays idempotent (last wins). */
+  composite(srcId: string, opacity: number, clearFirst?: boolean): void;
   /** Replace every pixel of an RGBA paintable with a flat colour (base coat). */
   clearColor(r: number, g: number, b: number, a: number): void;
   /** Polygon fill via interleaved [x0, y0, x1, y1, ...] Float32Array. */
@@ -145,7 +147,7 @@ function makeOps(id: string): PaintableOps {
     brushErase(cx, cy, r, kind, angle, aspect, hardness, flow, scatter, seed, clipX = 0, clipY = 0, clipW = 0, clipH = 0) {
       callHost('__paintable_brush_erase', undefined, id, cx, cy, r, kind, angle, aspect, hardness, flow, scatter, seed, clipX, clipY, clipW, clipH);
     },
-    composite(srcId, opacity) { callHost('__paintable_composite', undefined, id, srcId, opacity); },
+    composite(srcId, opacity, clearFirst = false) { callHost('__paintable_composite', undefined, id, srcId, opacity, clearFirst ? 1 : 0); },
     clearColor(r, g, b, a) { callHost('__paintable_clear_rgba', undefined, id, r, g, b, a); },
     polygon(verts, value) {
       callHost('__paintable_polygon', undefined, id, verts, value);

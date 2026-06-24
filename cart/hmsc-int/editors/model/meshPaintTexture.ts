@@ -13,22 +13,91 @@
 // (u*TEX, v*TEX), SCISSOR-clamped to the face's UV island so a round brush can't
 // bleed onto a neighbour island packed beside it in the atlas.
 
-import { paintableOps } from '@reactjit/runtime/hooks/usePaintable';
+import { paintableOps, type PaintableOps } from '@reactjit/runtime/hooks/usePaintable';
 import { bytesToBase64, base64ToBytes } from '@reactjit/workspace';
 import { sha256Hex } from '@reactjit/workspace/sha256';
 import { encode, image } from '@reactjit/image';
 import { faceTexelRect, type TexelRect } from './meshPaint';
 import { type EditMesh } from './editMesh';
 
-/** The one RGBA paint texture every part's mesh samples while painting. */
+/** The composite RGBA texture every part's mesh samples — the flattened stack of
+ *  paint LAYERS (req_1729). Painting writes the ACTIVE layer; this is recomposited
+ *  from the visible layers and is what the mesh reads + what bakes to the paintRef. */
 export const STUDIO_PAINT_KEY = 'studio.paint.live';
 /** Fixed paint resolution (px). Resolution-independent storage (PNG), so this is
  *  just the working canvas — generous so a many-face gun resolves fine detail. */
 export const PAINT_TEX = 1024;
 
-/** Imperative ops for the model paint texture (calls straight into V8, no React). */
-export function paintTex() {
-  return paintableOps(STUDIO_PAINT_KEY);
+// ── Paint LAYERS (req_1729) ──────────────────────────────────────────────────
+// Each layer is its OWN RGBA paintable; painting targets the ACTIVE one, and the
+// display texture (STUDIO_PAINT_KEY, sampled by the mesh) is the GPU composite of
+// the visible layers — so you can paint a fresh layer over a base without being
+// exact, hide/reorder/delete a layer, set its opacity, and erase THROUGH a layer to
+// reveal the one below. The layer stack is owned by the editor (StudioViewport) and
+// mirrored here via setLayers/setActiveLayerId so the GPU plumbing has one source.
+
+export type PaintLayerMeta = { id: string; name: string; visible: boolean; opacity: number };
+export const BASE_LAYER_ID = 'base';
+
+let g_layers: PaintLayerMeta[] = [{ id: BASE_LAYER_ID, name: 'Base', visible: true, opacity: 1 }];
+let g_activeLayerId = BASE_LAYER_ID;
+
+/** The GPU paintable key for a layer id. */
+export function layerKey(id: string): string { return `studio.paint.L.${id}`; }
+/** Mirror the editor's layer stack here (bottom→top order). */
+export function setLayers(layers: PaintLayerMeta[]): void { if (layers.length) g_layers = layers; }
+export function getLayers(): PaintLayerMeta[] { return g_layers; }
+export function setActiveLayerId(id: string): void { g_activeLayerId = id; }
+export function activeLayerId(): string { return g_activeLayerId; }
+/** Ops for the ACTIVE layer's texture (what a dab accumulates into). */
+export function activeLayerOps(): PaintableOps { return paintableOps(layerKey(g_activeLayerId)); }
+/** Ops for the DISPLAY/composite texture (what the mesh samples + what bakes). */
+export function displayOps(): PaintableOps { return paintableOps(STUDIO_PAINT_KEY); }
+
+/** Flatten the visible layers into the display texture (clear → composite each
+ *  visible layer bottom→top × its opacity). Cheap GPU passes; call at stroke-end
+ *  and on any layer-stack change, not per dab (live dabs fan to the display). */
+export function recompositeDisplay(): void {
+  const d = displayOps();
+  const vis = g_layers.filter((L) => L.visible && L.opacity > 0);
+  if (vis.length === 0) { d.composite('', 0, true); return; } // pure clear (nothing visible)
+  // clearFirst on the first layer folds the clear INTO the composite sequence, so
+  // calling this twice in a frame stays idempotent (the second clear wipes the first).
+  vis.forEach((L, i) => d.composite(layerKey(L.id), L.opacity, i === 0));
+}
+
+// paintTex() fans a STAMP to BOTH the active layer (the durable, isolated source)
+// AND the display (instant on-screen feedback, no per-frame recomposite needed);
+// clear/upload/readback act on the active layer only. savePaint/undo bake the
+// DISPLAY (the flattened picture) via displayOps explicitly.
+function fanOps(): PaintableOps {
+  const a = activeLayerOps();
+  const d = displayOps();
+  return {
+    id: a.id,
+    circle: (cx, cy, r, v) => { a.circle(cx, cy, r, v); d.circle(cx, cy, r, v); },
+    circleEdgeAware: (cx, cy, r, v, g, t) => a.circleEdgeAware(cx, cy, r, v, g, t),
+    brush: (cx, cy, r, v, k, an, asp, h, f, s, sd) => { a.brush(cx, cy, r, v, k, an, asp, h, f, s, sd); d.brush(cx, cy, r, v, k, an, asp, h, f, s, sd); },
+    brushColor: (cx, cy, r, cr, cg, cb, k, an, asp, h, f, s, sd, clx, cly, clw, clh) => {
+      a.brushColor(cx, cy, r, cr, cg, cb, k, an, asp, h, f, s, sd, clx, cly, clw, clh);
+      d.brushColor(cx, cy, r, cr, cg, cb, k, an, asp, h, f, s, sd, clx, cly, clw, clh);
+    },
+    brushErase: (cx, cy, r, k, an, asp, h, f, s, sd, clx, cly, clw, clh) => {
+      a.brushErase(cx, cy, r, k, an, asp, h, f, s, sd, clx, cly, clw, clh);
+      d.brushErase(cx, cy, r, k, an, asp, h, f, s, sd, clx, cly, clw, clh);
+    },
+    composite: (src, op) => d.composite(src, op),
+    clearColor: (r, g, b, al) => a.clearColor(r, g, b, al),
+    polygon: (verts, v) => a.polygon(verts, v),
+    clear: (v) => a.clear(v),
+    upload: (bytes) => a.upload(bytes),
+    readback: () => a.readback(),
+  };
+}
+
+/** Imperative ops for the active paint layer + live display (calls into V8). */
+export function paintTex(): PaintableOps {
+  return fanOps();
 }
 
 /** Hex (`#rrggbb`) → linear-ish 0..1 RGB triplet for the brush colour. */
@@ -39,10 +108,19 @@ export function hexToRgb(hex: string): [number, number, number] {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
-/** Base coat: flat-fill the whole texture (the "fill all" / new-texture start). */
+/** Base coat: flat-fill the ACTIVE layer (the "fill all" / new-texture start), then
+ *  recomposite so the display reflects it. */
 export function baseCoat(hex: string): void {
   const [r, g, b] = hexToRgb(hex);
-  paintTex().clearColor(r, g, b, 1);
+  activeLayerOps().clearColor(r, g, b, 1);
+  recompositeDisplay();
+}
+
+/** Clear the active layer to fully TRANSPARENT (a fresh, empty layer to paint on
+ *  without touching what's below), then recomposite. */
+export function clearLayerTransparent(id: string): void {
+  paintableOps(layerKey(id)).clearColor(0, 0, 0, 0);
+  recompositeDisplay();
 }
 
 /** The hit face's UV island rect in TEXTURE PIXELS — the scissor clamp so a dab
@@ -117,30 +195,33 @@ export function sampleRgbaHex(rgba: Uint8Array | null, u: number, v: number, w: 
   return `#${byteHex(rgba[i])}${byteHex(rgba[i + 1])}${byteHex(rgba[i + 2])}`;
 }
 
-/** Sample the live pixel-paint texture at normalized atlas UV. One-shot eyedropper
- *  use only: readback blocks, so never call from hover or per-frame code. */
+/** Sample the VISIBLE painted colour (the composited display) at normalized atlas
+ *  UV. One-shot eyedropper use only: readback blocks, so never per-frame. */
 export function samplePaintHex(u: number, v: number): string | null {
-  return sampleRgbaHex(paintTex().readback(), u, v, PAINT_TEX, PAINT_TEX);
+  recompositeDisplay();
+  return sampleRgbaHex(displayOps().readback(), u, v, PAINT_TEX, PAINT_TEX);
 }
 
-/** Read the live paint texture back and bake it (PNG → hash → emit). Call at
- *  stroke-end / undo / redo — readback blocks on the GPU, so NOT per dab. Returns
- *  the paintRef it wrote (the texture's content hash) so the caller can mark the
- *  shared texture as already holding that ref and skip a redundant reload. */
+/** Recomposite the layers, read the flattened DISPLAY back and bake it (PNG → hash →
+ *  emit) — the durable picture the mesh + compile read. Call at stroke-end / undo /
+ *  redo (readback blocks on the GPU, so NOT per dab). Returns the paintRef it wrote. */
 export function savePaint(emit: PaintBake): string | null {
-  const rgba = paintTex().readback();
+  recompositeDisplay();
+  const rgba = displayOps().readback();
   if (!rgba || rgba.length !== RGBA_LEN) return null;
   return bakeAndEmit(rgba, emit);
 }
 
-/** Restore a saved paint blob (base64 PNG, resolved from the model's paintRef) into
- *  the texture. Returns true if there was a blob (so the caller skips the base coat).
- *  Upload parks until the <Paintable> CREATE drains — safe to call on paint-enter. */
+/** Restore a saved (flattened) paint blob into the BASE layer, then recomposite so
+ *  it shows on the display. Returns true if there was a blob (caller skips the base
+ *  coat). Upload parks until the <Paintable> CREATE drains — safe on paint-enter. */
 export function restorePaint(blobB64: string | null): boolean {
   if (!blobB64) return false;
   const raw = image(base64ToBytes(blobB64)).raw();
   if (!raw || raw.width !== PAINT_TEX || raw.height !== PAINT_TEX || raw.rgba.length !== RGBA_LEN) return false;
-  paintTex().upload(raw.rgba);
+  const baseId = g_layers[0]?.id ?? BASE_LAYER_ID;
+  paintableOps(layerKey(baseId)).upload(raw.rgba);
+  recompositeDisplay();
   return true;
 }
 
@@ -153,8 +234,11 @@ export function restorePaint(blobB64: string | null): boolean {
 
 const UNDO_CAP = 24; // ~4MB each; bounded so a long session can't grow unbounded
 let g_paintActive = false;
-const g_undo: Uint8Array[] = [];
-const g_redo: Uint8Array[] = [];
+// Each snapshot remembers WHICH layer it captured, so undo restores the right layer
+// even if the active layer changed since (req_1729).
+type PaintSnap = { layerId: string; rgba: Uint8Array };
+const g_undo: PaintSnap[] = [];
+const g_redo: PaintSnap[] = [];
 
 /** Paint mode on/off — gates whether Ctrl-Z routes to paint undo vs model undo. */
 export function setPaintActive(on: boolean): void { g_paintActive = on; }
@@ -166,33 +250,43 @@ export function canPaintRedo(): boolean { return g_redo.length > 0; }
  *  Pushes the pre-stroke state so undo can return to it; a fresh stroke clears
  *  the redo branch. Readback blocks on the GPU — once per stroke, never per dab. */
 export function paintSnapshotBegin(): void {
-  const rgba = paintTex().readback();
+  const layerId = g_activeLayerId;
+  const rgba = paintableOps(layerKey(layerId)).readback();
   if (!rgba || rgba.length !== RGBA_LEN) return;
-  g_undo.push(rgba);
+  g_undo.push({ layerId, rgba });
   if (g_undo.length > UNDO_CAP) g_undo.shift();
   g_redo.length = 0;
 }
 
-/** Undo the last stroke: stash the current state for redo, restore the previous,
- *  and re-bake the restored state so it persists. Returns true if it ran. */
+/** Undo the last stroke: stash the current layer state for redo, restore the
+ *  previous, recomposite, and re-bake the flattened display so it persists. */
 export function paintUndo(emit: PaintBake): boolean {
-  if (g_undo.length === 0) return false;
-  const cur = paintTex().readback();
-  const prev = g_undo.pop()!;
-  if (cur && cur.length === RGBA_LEN) g_redo.push(cur);
-  paintTex().upload(prev);
-  bakeAndEmit(prev, emit);
-  return true;
+  const prev = g_undo.pop();
+  if (!prev) return false;
+  const ops = paintableOps(layerKey(prev.layerId));
+  const cur = ops.readback();
+  if (cur && cur.length === RGBA_LEN) g_redo.push({ layerId: prev.layerId, rgba: cur });
+  ops.upload(prev.rgba);
+  return finishHistoryStep(emit);
 }
 
 /** Redo: restore the state undone last, stashing the current for undo again. */
 export function paintRedo(emit: PaintBake): boolean {
-  if (g_redo.length === 0) return false;
-  const cur = paintTex().readback();
-  const next = g_redo.pop()!;
-  if (cur && cur.length === RGBA_LEN) g_undo.push(cur);
-  paintTex().upload(next);
-  bakeAndEmit(next, emit);
+  const next = g_redo.pop();
+  if (!next) return false;
+  const ops = paintableOps(layerKey(next.layerId));
+  const cur = ops.readback();
+  if (cur && cur.length === RGBA_LEN) g_undo.push({ layerId: next.layerId, rgba: cur });
+  ops.upload(next.rgba);
+  return finishHistoryStep(emit);
+}
+
+/** After an undo/redo restored a layer texture: recomposite + bake the flattened
+ *  display so the picture persists to the model's paintRef. */
+function finishHistoryStep(emit: PaintBake): boolean {
+  recompositeDisplay();
+  const rgba = displayOps().readback();
+  if (rgba && rgba.length === RGBA_LEN) bakeAndEmit(rgba, emit);
   return true;
 }
 

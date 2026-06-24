@@ -107,10 +107,11 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
 
   const stampDab = (dab: Dab) => {
     const o = ref.current;
+    const erase = o.tool === 'eraser';
     const rgb = brushDabRgb(o.brush, o.tool, o.eraseColor); // texture/shader inks → white until Phase B
     // one disc, scissored to a clip island — primary + each mirror image share this.
-    stampBrushDab(o.paint, o.brush, rgb, dab.x, dab.y, dab.radius, clipRef.current ?? o.clip ?? null);
-    if (o.mirror) for (const md of o.mirror(dab)) stampBrushDab(o.paint, o.brush, rgb, md.x, md.y, dab.radius, md.clip);
+    stampBrushDab(o.paint, o.brush, rgb, dab.x, dab.y, dab.radius, clipRef.current ?? o.clip ?? null, erase);
+    if (o.mirror) for (const md of o.mirror(dab)) stampBrushDab(o.paint, o.brush, rgb, md.x, md.y, dab.radius, md.clip, erase);
   };
 
   const stampMany = (dabs: Dab[]) => { for (const d of dabs) stampDab(d); };
