@@ -651,16 +651,60 @@ let g_flushCount = 0;
 const FLUSH_LOG_MIN_BYTES = 4096; // skip the tiny per-frame UPDATE batches
 const FLUSH_BREAKDOWN_MIN_BYTES = 65536; // only re-stringify for an op breakdown when it's fat
 
-function opByteBreakdown(cmds: Command[]): string {
+// [flush-report] on-demand boot transfer dump (req_1751). The running counters above
+// answer "how much crossed"; these answer "where did it go", so the / route's
+// "I MADE IT" button can dump the whole boot's JS→host transfer to a file. Per-op
+// attribution is computed ONLY for fat flushes (>=64KB — the mesh/instance/atlas
+// payloads that carry the weight); sub-threshold flushes are bucketed whole, so the
+// meter adds no cost beyond the breakdown the log already computed for big flushes.
+const g_flushByOp = new Map<string, { n: number; bytes: number }>();
+let g_smallFlushBytes = 0;   // bytes in sub-breakdown-threshold flushes (not op-attributed)
+let g_smallFlushCount = 0;
+const g_flushTimeline: { at: number; bytes: number; n: number }[] = [];
+const g_biggestCmds = new Map<string, { op: string; type: any; len: number; keys: string[] }>(); // by id, kept if bigger
+const g_flushT0 = (globalThis as any).performance?.now?.() ?? Date.now();
+const flushNow = (): number => ((globalThis as any).performance?.now?.() ?? Date.now()) - g_flushT0;
+
+// Per-command byte attribution for a fat flush. Also records the biggest single
+// commands (>=16KB) by id so the dump names the prop carrying mesh verts / instance
+// arrays / paint atlases.
+function opByteMap(cmds: Command[]): Map<string, { n: number; bytes: number }> {
   const by = new Map<string, { n: number; bytes: number }>();
   for (const c of cmds) {
     let len = 0;
     try { len = JSON.stringify(c).length; } catch { len = 0; }
     const e = by.get(c.op) ?? { n: 0, bytes: 0 };
     e.n += 1; e.bytes += len; by.set(c.op, e);
+    if (len >= 16384) {
+      const id = String((c as any).id ?? '?');
+      const prev = g_biggestCmds.get(id);
+      if (!prev || len > prev.len) {
+        const props = (c as any).props;
+        g_biggestCmds.set(id, { op: c.op, type: (c as any).type, len, keys: props && typeof props === 'object' ? Object.keys(props) : [] });
+      }
+    }
   }
+  return by;
+}
+
+function fmtOpMap(by: Map<string, { n: number; bytes: number }>): string {
   return [...by.entries()].sort((a, b) => b[1].bytes - a[1].bytes).map(([op, e]) => `${op}=${e.n}/${(e.bytes / 1024).toFixed(0)}KB`).join(' ');
 }
+
+(globalThis as any).__flushReport = () => ({
+  totalBytes: g_totalFlushBytes,
+  flushCount: g_flushCount,
+  elapsedMs: flushNow(),
+  byOp: [...g_flushByOp.entries()].map(([op, e]) => ({ op, n: e.n, bytes: e.bytes })).sort((a, b) => b.bytes - a.bytes),
+  smallFlushBytes: g_smallFlushBytes,
+  smallFlushCount: g_smallFlushCount,
+  timeline: g_flushTimeline.slice(),
+  biggestCommands: [...g_biggestCmds.values()].sort((a, b) => b.len - a.len).slice(0, 25),
+});
+(globalThis as any).__flushReset = () => {
+  g_totalFlushBytes = 0; g_flushCount = 0; g_smallFlushBytes = 0; g_smallFlushCount = 0;
+  g_flushByOp.clear(); g_flushTimeline.length = 0; g_biggestCmds.clear();
+};
 
 function flushCoalesced(cmds: Command[]): void {
   let payload: string | null = null;
@@ -674,11 +718,21 @@ function flushCoalesced(cmds: Command[]): void {
     }
     g_totalFlushBytes += payload.length;
     g_flushCount += 1;
+    g_flushTimeline.push({ at: flushNow(), bytes: payload.length, n: cmds.length });
+    const big = payload.length > FLUSH_BREAKDOWN_MIN_BYTES;
+    let opStr = '';
+    if (big) {
+      const by = opByteMap(cmds);
+      for (const [op, e] of by) { const a = g_flushByOp.get(op) ?? { n: 0, bytes: 0 }; a.n += e.n; a.bytes += e.bytes; g_flushByOp.set(op, a); }
+      opStr = fmtOpMap(by);
+    } else {
+      g_smallFlushBytes += payload.length;
+      g_smallFlushCount += 1;
+    }
     if (payload.length > FLUSH_LOG_MIN_BYTES) {
       const gh: any = globalThis as any;
       if (typeof gh.__hostLog === 'function') {
-        const big = payload.length > FLUSH_BREAKDOWN_MIN_BYTES;
-        try { gh.__hostLog(0, `[flush-bytes] +${(payload.length / 1024).toFixed(0)}KB → total ${(g_totalFlushBytes / 1024 / 1024).toFixed(1)}MB (#${g_flushCount}, ${cmds.length} cmd)${big ? ` :: ${opByteBreakdown(cmds)}` : ''}`); } catch {}
+        try { gh.__hostLog(0, `[flush-bytes] +${(payload.length / 1024).toFixed(0)}KB → total ${(g_totalFlushBytes / 1024 / 1024).toFixed(1)}MB (#${g_flushCount}, ${cmds.length} cmd)${big ? ` :: ${opStr}` : ''}`); } catch {}
       }
     }
     (transportFlush as unknown as (p: string) => void)(payload);

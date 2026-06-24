@@ -16,9 +16,30 @@
 
 import { callHost, callHostJson } from '../ffi';
 
+// [store-read] boot transfer meter (req_1751): the editor pulls big blobs out of the
+// localstore at boot — hmsc's 'game-state' alone is ~1.2MB of JSON. This counts the
+// host→JS read bytes per (namespace,key) so the / route's "I MADE IT" dump shows what
+// sqlite handed up before the route went live, beside the JS→host flush total. Reads
+// only (writes don't block reaching the route); array key-lists are negligible.
+const g_storeReads = new Map<string, { n: number; bytes: number }>();
+let g_storeReadTotal = 0;
+function meterRead(label: string, bytes: number): void {
+  if (bytes <= 0) return;
+  g_storeReadTotal += bytes;
+  const e = g_storeReads.get(label) ?? { n: 0, bytes: 0 };
+  e.n += 1; e.bytes += bytes; g_storeReads.set(label, e);
+}
+(globalThis as any).__storeReadReport = () => ({
+  totalBytes: g_storeReadTotal,
+  byKey: [...g_storeReads.entries()].map(([key, e]) => ({ key, n: e.n, bytes: e.bytes })).sort((a, b) => b.bytes - a.bytes),
+});
+(globalThis as any).__storeReadReset = () => { g_storeReads.clear(); g_storeReadTotal = 0; };
+
 /** Get a value by key. Returns null if missing. */
 export function get(key: string): string | null {
-  return callHost<string | null>('__store_get', null, key);
+  const v = callHost<string | null>('__store_get', null, key);
+  meterRead(`app:${key}`, v ? v.length : 0);
+  return v;
 }
 
 /** Set a key to a string value. */
@@ -45,7 +66,9 @@ export function keys(): string[] {
 
 /** Get a value from a namespace + key pair. Returns '' when missing. */
 export function nsGet(namespace: string, key: string): string {
-  return callHost<string>('__localstoreGet', '', namespace, key);
+  const v = callHost<string>('__localstoreGet', '', namespace, key);
+  meterRead(`${namespace}:${key}`, v ? v.length : 0);
+  return v;
 }
 
 /** Return true when namespace + key exists. */

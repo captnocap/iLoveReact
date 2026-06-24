@@ -1,6 +1,6 @@
 import { startupMark, startupWatchSettle, navStart, navReady } from './startupTimer';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text } from '@reactjit/primitives';
+import { Box, Text, Pressable } from '@reactjit/primitives';
 import { execAsync } from '@reactjit/runtime/hooks/process';
 import type { GameState } from './design';
 import { compileEditorWorld, emptyEditorWorld } from './editorWorld';
@@ -16,6 +16,7 @@ import { Chrome, MapsMenu, EventLog } from './shell/chrome';
 import { NotificationOverlayHost } from './shell/notifications';
 import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog';
 import { plog, ptime, useChurn } from './perfLog';
+import { startPerfHeartbeat } from './state/perfWatch';
 import { Router, Route, useNavigate, useRoute } from '@reactjit/router';
 import { Assist3DRoute } from './assist3d';
 import { PlayTestRoute } from './editors/play/PlayTestRoute';
@@ -110,6 +111,11 @@ function EditorShell() {
     // merely mounts. This is the ~3s the user actually waits for.
     startupWatchSettle();
   }
+
+  // PERF HEARTBEAT (req_1735): unconditional once-per-second frame breakdown to the
+  // dev terminal — names what the host spends a flat-slow frame on (paint/gpu/tick/
+  // other) when the spike recorder can't (no calm baseline at 1-3fps). TEMP probe.
+  useEffect(() => startPerfHeartbeat(), []);
 
   // The 3D preview world. baseWorld is the empty editor GameState (built once);
   // floors (the painted tile/height per chunk) are mirrored from PaintCanvas and
@@ -459,6 +465,49 @@ function EditorShell() {
     seedWorld, tool, tile, layer, tab, notes, showGrid, wasdQuad, brush, menuOpen, logOpen, maps: displayMaps,
   });
 
+  // [transfer dump] req_1751: the "I MADE IT" button on the / route. After sitting
+  // through the egregious boot, ONE click dumps every byte that crossed the host
+  // boundary up to this moment — the JS→host reconciler command stream (hostConfig
+  // flush meter, __flushReport) and the host→JS localstore reads (localstore meter,
+  // __storeReadReport) — to a log file. This is the HONEST number the settle-watcher
+  // could not give: whatever actually MOVED, not a guess at when frames went calm.
+  const [dumpMsg, setDumpMsg] = useState('');
+  const dumpTransfer = useCallback(() => {
+    const g: any = globalThis as any;
+    const flush = g.__flushReport?.() ?? { totalBytes: 0, flushCount: 0, elapsedMs: 0, byOp: [], smallFlushBytes: 0, smallFlushCount: 0, timeline: [], biggestCommands: [] };
+    const store = g.__storeReadReport?.() ?? { totalBytes: 0, byKey: [] };
+    const MB = (b: number) => (b / 1024 / 1024).toFixed(2) + 'MB';
+    const KB = (b: number) => (b / 1024).toFixed(1) + 'KB';
+    const grand = flush.totalBytes + store.totalBytes;
+    const L: string[] = [];
+    L.push('=== hmsc-int  /  route — STARTUP TRANSFER DUMP ===');
+    L.push(`clicked "I MADE IT" at: ${new Date().toISOString()}`);
+    L.push(`elapsed since first flush (~boot start): ${(flush.elapsedMs / 1000).toFixed(1)}s`);
+    L.push('');
+    L.push(`GRAND TOTAL across the host boundary to reach / : ${MB(grand)}`);
+    L.push(`  - JS -> host (reconciler command stream): ${MB(flush.totalBytes)} in ${flush.flushCount} flushes`);
+    L.push(`  - host -> JS (localstore reads):          ${MB(store.totalBytes)}`);
+    L.push('');
+    L.push('-- JS -> host: by op (fat flushes >=64KB attributed) --');
+    for (const o of flush.byOp) L.push(`    ${String(o.op).padEnd(8)} ${String(o.n).padStart(7)} cmd   ${MB(o.bytes)}`);
+    L.push(`    (sub-64KB batches: ${MB(flush.smallFlushBytes)} across ${flush.smallFlushCount} flushes, not op-attributed)`);
+    L.push('');
+    L.push('-- JS -> host: biggest single commands --');
+    for (const c of flush.biggestCommands) L.push(`    ${KB(c.len).padStart(9)}  ${String(c.op).padEnd(7)} ${String(c.type ?? '').padEnd(14)} keys=[${(c.keys || []).join(',')}]`);
+    L.push('');
+    L.push('-- host -> JS: localstore reads by key --');
+    for (const k of store.byKey) L.push(`    ${KB(k.bytes).padStart(9)}  ${k.n}x  ${k.key}`);
+    L.push('');
+    L.push(`-- JS -> host: full flush timeline (${flush.timeline.length} flushes, ms@size) --`);
+    for (const t of flush.timeline) L.push(`    +${t.at.toFixed(0).padStart(7)}ms  ${KB(t.bytes).padStart(9)}  (${t.n} cmd)`);
+    L.push('');
+    const path = '/tmp/rjit-startup-transfer.log';
+    let ok = false;
+    try { ok = diagWriteFile(path, L.join('\n')); } catch {}
+    setDumpMsg(ok ? `dumped ${MB(grand)} -> ${path}` : 'dump FAILED (no __fs_write host?)');
+    try { (g.__hostLog)?.(0, `[transfer-dump] ${MB(grand)} total (flush ${MB(flush.totalBytes)} + store ${MB(store.totalBytes)}) -> ${path}`); } catch {}
+  }, []);
+
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', position: 'relative', backgroundColor: '#080d16' }}>
       <Chrome
@@ -598,6 +647,21 @@ function EditorShell() {
       ) : null}
 
       <NotificationOverlayHost simulateRebuildNotice={route.path === '/__rebuild-notify'} />
+
+      {/* [transfer dump] req_1751: the "I MADE IT" probe button. Lives only on the
+          editor route, pinned top-center over everything, so the user can click it the
+          instant the boot finally yields and capture exactly what crossed the host
+          boundary to get there. Remove with the __flushReport / __storeReadReport
+          meters once the boot-cost hunt is done. */}
+      {atEditor ? (
+        <Pressable
+          onPress={dumpTransfer}
+          style={{ position: 'absolute', top: 44, left: '50%', marginLeft: -90, width: 180, paddingTop: 8, paddingBottom: 8, borderRadius: 8, borderWidth: 2, borderColor: '#ff5d73', backgroundColor: '#2a0f16', alignItems: 'center', zIndex: 99999 }}
+        >
+          <Text style={{ color: '#ff8b9c', fontSize: 14, fontWeight: 'bold' }}>I MADE IT</Text>
+          {dumpMsg ? <Text style={{ color: '#9fb2c8', fontSize: 10, marginTop: 3 }}>{dumpMsg}</Text> : null}
+        </Pressable>
+      ) : null}
     </Box>
   );
 }
