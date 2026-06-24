@@ -553,6 +553,58 @@ fn fsWriteBase64Atomic(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setBool(info, true);
 }
 
+/// __fs_write_bytes_atomic(path, Uint8Array) → bool. The atomic sibling of
+/// __fs_write_bytes (req_1799): writes the raw bytes to a temp file, fsyncs, then
+/// renames over `path` — so a write interrupted mid-flight (a kernel panic on this box)
+/// corrupts only the temp, never the live file. Raw bytes, no base64 (the bake's 5MB+
+/// game-file would balloon the JS heap through a base64 string, req_1586) — use this for
+/// the game-file write so a bad bake can't clobber the working one.
+fn fsWriteBytesAtomic(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path_buf = argStringAlloc(alloc, info, 0) orelse {
+        setBool(info, false);
+        return;
+    };
+    defer alloc.free(path_buf);
+    const bytes = argView(info, 1) orelse {
+        setBool(info, false);
+        return;
+    };
+
+    if (std.mem.lastIndexOfScalar(u8, path_buf, '/')) |idx| {
+        std.fs.cwd().makePath(path_buf[0..idx]) catch {};
+    }
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path_buf, std.time.nanoTimestamp() }) catch {
+        setBool(info, false);
+        return;
+    };
+    var file = std.fs.cwd().createFile(tmp_path, .{ .truncate = true }) catch {
+        setBool(info, false);
+        return;
+    };
+    file.writeAll(bytes) catch {
+        file.close();
+        std.fs.cwd().deleteFile(tmp_path) catch {};
+        setBool(info, false);
+        return;
+    };
+    file.sync() catch {
+        file.close();
+        std.fs.cwd().deleteFile(tmp_path) catch {};
+        setBool(info, false);
+        return;
+    };
+    file.close();
+    std.fs.cwd().rename(tmp_path, path_buf) catch {
+        std.fs.cwd().deleteFile(tmp_path) catch {};
+        setBool(info, false);
+        return;
+    };
+    setBool(info, true);
+}
+
 fn fsReadRjmpEntities(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const alloc = std.heap.page_allocator;
@@ -804,6 +856,7 @@ pub fn registerFs(vm: anytype) void {
     v8_runtime.registerHostFn("__fs_read_rjmp_entities", fsReadRjmpEntities);
     v8_runtime.registerHostFn("__fs_write", fsWrite);
     v8_runtime.registerHostFn("__fs_write_bytes", fsWriteBytes);
+    v8_runtime.registerHostFn("__fs_write_bytes_atomic", fsWriteBytesAtomic);
     v8_runtime.registerHostFn("__fs_write_base64_atomic", fsWriteBase64Atomic);
     v8_runtime.registerHostFn("__fs_scandir", fsScandir);
     v8_runtime.registerHostFn("__fs_deletefile", fsDeletefile);

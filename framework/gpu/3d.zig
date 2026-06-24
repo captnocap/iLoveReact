@@ -382,6 +382,10 @@ const Rt = struct {
 };
 var g_rt_pool: [MAX_RT_POOL]Rt = [_]Rt{.{}} ** MAX_RT_POOL;
 var g_rt_cursor: usize = 0;
+// [req_1752] one-shot diagnostics: which way acquireRt fails when a Scene3D view
+// gets no render target (→ render() returns false → drawScene never runs → blank).
+var g_rt_pool_warned: bool = false;
+var g_rt_alloc_warned: bool = false;
 
 // Scenes recorded by render() during the paint walk, drawn later by
 // flushPending() (after StaticSurface captures). One pending entry per
@@ -981,10 +985,21 @@ pub fn resetForReload() void {
 /// a tile's dimensions change.
 fn acquireRt(w: u32, h: u32) ?*Rt {
     if (w == 0 or h == 0) return null;
-    if (g_rt_cursor >= MAX_RT_POOL) return null;
+    if (g_rt_cursor >= MAX_RT_POOL) {
+        if (!g_rt_pool_warned) {
+            g_rt_pool_warned = true;
+            std.debug.print("[r3d-rt] RT POOL EXHAUSTED: >{d} Scene3D views in one frame — views past the cap (incl. the build pane if painted last) get no render target and stay blank.\n", .{MAX_RT_POOL});
+        }
+        return null;
+    }
     const slot = &g_rt_pool[g_rt_cursor];
     g_rt_cursor += 1;
-    return ensureRt(slot, w, h);
+    const rt = ensureRt(slot, w, h);
+    if (rt == null and !g_rt_alloc_warned) {
+        g_rt_alloc_warned = true;
+        std.debug.print("[r3d-rt] RT TEXTURE ALLOC FAILED at {d}x{d} — GPU could not create the render target (out of memory from this map's capture surfaces/geometry?). That view stays blank.\n", .{ w, h });
+    }
+    return rt;
 }
 
 /// (Re)build a render-target slot at the given size — shared by the per-frame

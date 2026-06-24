@@ -3886,9 +3886,11 @@ function LCStepper(props: { value: number; onChange: (n: number) => void; min: n
 
 function LCField(props: { label: string; children: any }) {
   return (
-    <Row style={{ gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+    <Row style={{ width: '100%', gap: 10, alignItems: 'center' }}>
       <Text fontSize={10} color={T.dim} style={{ width: 60, fontFamily: 'monospace' }}>{props.label}</Text>
-      {props.children}
+      <Box style={{ flexGrow: 1, flexBasis: 0, minWidth: 0 }}>
+        {props.children}
+      </Box>
     </Row>
   );
 }

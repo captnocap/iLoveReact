@@ -26,6 +26,7 @@ import {
   type PlacedBuildPiece,
 } from './placed';
 import { catalogEntry } from './catalog';
+import { wallEditDefinition } from './edits';
 import { decomposePrefab, prefabDefinition, validatePrefab } from './prefabs';
 import { legacyGlobalPieces, pieceMutationMapName, piecesForMap, worldStream, type WorldEvent, type WorldStreamState } from '../world/stream';
 
@@ -102,6 +103,19 @@ test('a garage door opens a vehicle-wide gap', () => {
   const garage = placedPieceColliders([placed('wall.metal.industrial', 0, 0, { edit: 'garageDoor', doorOpen: true })]);
   const [left, right] = [...garage.rects].sort((a, b) => a.minX - b.minX);
   assertClose(right.minX - left.maxX, PLACED_TUNING.vehicleOpeningWidthMeters, 1e-9, 'a car fits');
+});
+
+test('a sliding door opens a double-wide gap and its closed panel fills it (req_1725)', () => {
+  const opening = wallEditDefinition('slidingDoor').openingWidthMeters!;
+  assert(opening > PLACED_TUNING.walkOpeningWidthMeters, 'the sliding door is wider than a single walk door');
+  // OPEN: proximity has parted the leaves — a double-wide gap clears.
+  const open = placedPieceColliders([placed('wall.concrete.common', 0, 0, { edit: 'slidingDoor', doorOpen: true })]);
+  const [left, right] = [...open.rects].sort((a, b) => a.minX - b.minX);
+  assertClose(right.minX - left.maxX, opening, 1e-9, 'the double-wide opening clears when open');
+  // CLOSED: jambs + a shut panel that spans the full 2.4 m opening (not a narrow walk panel).
+  const closed = placedPieceColliders([placed('wall.concrete.common', 0, 0, { edit: 'slidingDoor' })]);
+  const panel = closed.rects.find((r) => Math.abs((r.maxX - r.minX) - opening) < 1e-9);
+  assert(panel !== undefined, 'the closed sliding panel fills the full opening, leaving no side gap');
 });
 
 test('a halfHeight wall collides waist-high, not full-height', () => {
@@ -188,23 +202,24 @@ test('REQ-0107: floor and wall pieces keep catalog extents; flushness is origin 
   assertEqual(vSolo.maxZ - vSolo.minZ, wallSize.widthMeters, 'standalone vertical collision keeps catalog run width');
 });
 
-test('REQ-0466: one-sided floor support puts the whole wall thickness on the floor top', () => {
+test('req_1714/1719: a wall is ALWAYS centered on its line, regardless of floors (Sims model)', () => {
+  // Reverts REQ-0466: a one-sided-floor wall no longer tucks ONTO the floor
+  // (that stepped runs + multi-storey stacks). It stays centered on its line;
+  // the FLOOR extends under it (floorWallExtensions) so centering never
+  // overhangs.
   const floor = placed('floor.concrete.common', 1.5, 1.5);
   const north = placed('wall.concrete.common', 1.5, 0, { y: 0.2, yawDegrees: 0 });
   const south = placed('wall.concrete.common', 1.5, 3, { y: 0.2, yawDegrees: 0 });
-  const northSpan = placedPieceDepthSpan(north, [floor, north]);
-  const southSpan = placedPieceDepthSpan(south, [floor, south]);
-  assertClose(northSpan.minV, 0, 1e-9, 'north edge wall starts at the floor edge line');
-  assertClose(northSpan.maxV, 0.25, 1e-9, 'north edge wall thickness sits onto the floor');
-  assertClose(southSpan.minV, -0.25, 1e-9, 'south edge wall thickness sits back onto the floor');
-  assertClose(southSpan.maxV, 0, 1e-9, 'south edge wall ends at the floor edge line');
-
-  const [floorRect, northRect, southRect] = placedPieceColliders([floor, north, south]).rects;
-  void floorRect;
-  assertClose(northRect.minZ, 0, 1e-9, 'north wall has no outside overhang');
-  assertClose(northRect.maxZ, 0.25, 1e-9, 'north wall sits inside the floor footprint');
-  assertClose(southRect.minZ, 2.75, 1e-9, 'south wall sits inside the floor footprint');
-  assertClose(southRect.maxZ, 3, 1e-9, 'south wall has no outside overhang');
+  for (const [w, label] of [[north, 'north'], [south, 'south']] as const) {
+    const span = placedPieceDepthSpan(w, [floor, w]);
+    assertClose(span.minV, -0.125, 1e-9, `${label} wall stays centered (back half) despite one-sided floor`);
+    assertClose(span.maxV, 0.125, 1e-9, `${label} wall stays centered (front half) despite one-sided floor`);
+  }
+  const [, northRect, southRect] = placedPieceColliders([floor, north, south]).rects;
+  assertClose(northRect.minZ, -0.125, 1e-9, 'north wall collider centered on its line');
+  assertClose(northRect.maxZ, 0.125, 1e-9, 'north wall collider centered on its line');
+  assertClose(southRect.minZ, 2.875, 1e-9, 'south wall collider centered on its line');
+  assertClose(southRect.maxZ, 3.125, 1e-9, 'south wall collider centered on its line');
 });
 
 test('REQ-0466: a wall between two floor plates splits its thickness across the seam', () => {

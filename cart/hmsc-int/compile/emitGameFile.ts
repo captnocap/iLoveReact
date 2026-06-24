@@ -13,7 +13,7 @@
 // only a tiny JSON MANIFEST on stdout: paths + hashes + sizes. The CLI reads the
 // manifest and the files are already in place. No megabyte strings ever exist.
 
-import { writeFileBytes } from '@reactjit/hooks/fs';
+import { writeFileBytes, writeFileBytesAtomic } from '@reactjit/hooks/fs';
 
 export type BakedAsset = { hash: string; bytes: Uint8Array };
 
@@ -48,7 +48,15 @@ export function emitBakedGameFile(file: Uint8Array, assets: BakedAsset[] = []): 
     throw new Error('emitBakedGameFile: missing --store <dir> argv but the bake ships content-addressed assets');
   }
 
-  if (!writeFileBytes(gamefilePath, file)) {
+  // ATOMIC (req_1799): the game-file is the named, in-place-overwritten artifact the
+  // loader reads — a write interrupted mid-flight (kernel panic) would leave a truncated
+  // file that REPLACED the working one, breaking the editor's loader view. temp+fsync+
+  // rename makes the live file always a complete, previously-good bake; a failed bake
+  // corrupts only the temp. Falls back to the in-place write if the atomic door is absent
+  // (a v8cli that predates it) so an un-refreshed host still bakes — just non-atomically.
+  // (Content-addressed asset blobs below stay writeFileBytes — a partial blob lands under
+  // a hash that won't match, and a re-bake rewrites it.)
+  if (!writeFileBytesAtomic(gamefilePath, file) && !writeFileBytes(gamefilePath, file)) {
     throw new Error(`emitBakedGameFile: could not write game-file bytes to ${gamefilePath}`);
   }
 

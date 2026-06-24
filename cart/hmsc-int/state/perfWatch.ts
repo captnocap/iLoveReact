@@ -518,6 +518,50 @@ export function startPerfWatch(): () => void {
   };
 }
 
+// ── Heartbeat (req_1735) ───────────────────────────────────────────────
+// The spike recorder above only fires when a frame is much SLOWER than a calm
+// baseline — useless when EVERY frame is already slow (a flat 1-3fps stall has
+// no calm baseline to spike against). This is the opposite tool: an
+// unconditional once-per-second dump of the current frame's phase breakdown +
+// the counters that name what the host is spending the whole frame on. It tells
+// you, plainly, whether 1-3fps is paint (CPU raster), gpu (draw/upload), tick
+// (JS reconcile), or other (GC/native) — and how big the scene/draw counts are.
+let heartbeatStarted = false;
+
+export function startPerfHeartbeat(): () => void {
+  if (heartbeatStarted) return () => {};
+  heartbeatStarted = true;
+  let stopped = false;
+  let handle: any = 0;
+
+  const tick = () => {
+    if (stopped) return;
+    const r = readFrameRecord();
+    const c = readCounters();
+    if (r) {
+      const known = r.tickUs + r.layoutUs + r.paintUs + r.gpuUs;
+      const other = Math.max(0, r.totalUs - known);
+      const phases: Array<[string, number]> = [
+        ['tick', r.tickUs], ['layout', r.layoutUs], ['paint', r.paintUs], ['gpu', r.gpuUs], ['other', other],
+      ];
+      const dominant = phases.slice().sort((a, b) => b[1] - a[1])[0][0];
+      emitLine(
+        `[hb] ~${r.fps ? Math.round(r.fps) : 0}fps  total ${us(r.totalUs)}  DOMINANT=${dominant}  ` +
+          `tick ${us(r.tickUs)} layout ${us(r.layoutUs)} paint ${us(r.paintUs)} gpu ${us(r.gpuUs)} other ${us(other)}  ` +
+          `| present ${us(r.presentUs)} bridge ${us(r.bridgeUs)} ${gcLabel(r.gcNs, r.gcCount, r.gcType)}  ` +
+          `| rects ${c.rect_count ?? '?'} glyphs ${c.glyph_count ?? '?'} atlas ${c.atlas_glyph_count ?? '?'} ` +
+          `nodes ${c.total ?? '?'} scene3d{inst ${c.scene3d_instances ?? '?'} draws ${c.scene3d_draw_calls ?? '?'} ` +
+          `meshes ${c.scene3d_meshes_collected ?? '?'} dropped ${c.scene3d_meshes_dropped ?? '?'} children ${c.scene3d_mesh_children ?? '?'}}`,
+      );
+    } else {
+      emitLine('[hb] no __tel_frame — telemetry host fn not registered on this build');
+    }
+    handle = setTimeout(tick, 1000);
+  };
+  handle = setTimeout(tick, 1000);
+  return () => { stopped = true; heartbeatStarted = false; clearTimeout(handle); };
+}
+
 // Live-tune the detector from the console without a rebuild.
 export function configurePerfWatch(patch: Partial<PerfWatchConfig>): PerfWatchConfig {
   config = { ...config, ...patch };

@@ -67,7 +67,15 @@ const HEX2 = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, '0
 // caches the GPU upload. A null is NOT cached (the blob may load async).
 type InlineTex = { width: number; height: number; hex: string };
 const TEX_CACHE = new Map<string, InlineTex>();
-const TEX_SIZE = 512;
+// req_1745: the inline hex crosses the BRIDGE per textured mesh, and a slotted prop
+// repeats it on every slot mesh — so a 12-slot painted window prop × N instances ships
+// 100 MB+ of hex per scene build, stalling the bridge ~13 s and leaving the editor's
+// 3D scene empty (the / route blank). 512² → 128² is a 16× cut (≈1 MB → ≈64 KB rgba
+// per texture) that unblocks the editor; props render small in-world so the detail
+// loss is minor. DURABLE follow-up: upload each cooked texture ONCE under a host key
+// (the StaticSurface/textureKey path street signs + building skins use) and reference
+// it from the meshes instead of shipping hex inline — then size can go back up.
+const TEX_SIZE = 128;
 
 function cookedInlineTexture(texRef: string | undefined): InlineTex | null {
   if (!texRef) return null;

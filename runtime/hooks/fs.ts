@@ -55,6 +55,14 @@ export function writeFileBytes(path: string, bytes: Uint8Array): boolean {
   return callHost<boolean>('__fs_write_bytes', false, path, bytes);
 }
 
+/** Atomically write a Uint8Array's raw bytes via temp file + fsync + rename (req_1799).
+ *  Same zero-copy binary path as writeFileBytes (no base64 heap balloon), but a write
+ *  interrupted mid-flight corrupts only the temp — never the live file. Use for critical
+ *  artifacts that must not be clobbered by a partial write (the baked game-file). */
+export function writeFileBytesAtomic(path: string, bytes: Uint8Array): boolean {
+  return callHost<boolean>('__fs_write_bytes_atomic', false, path, bytes);
+}
+
 /** True if a file or directory exists at `path`. */
 export function exists(path: string): boolean {
   return callHost<boolean>('__fs_exists', false, path);

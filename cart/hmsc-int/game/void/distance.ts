@@ -33,14 +33,28 @@ export type WorldCore = {
 // very rim of the hand-built city is still honest.
 const SAFE_MARGIN_METERS = 40;
 
-// Derive the core rectangle from the authored map's own bounds. The layout's
-// widthCells × depthCells × cellSizeMeters is the authored extent; cells start at
-// the world origin, so the rectangle is [0,width] × [0,depth].
+// Derive the core rectangle from the authored map's ACTUAL extent — the bounding
+// box of all surfaceRegions — not from the static layout dimensions (which are
+// the initial 2×2 chunk template and don't grow as the user paints new regions).
 export function worldCore(world: WorldState): WorldCore {
   const cell = world.cellSizeMeters;
-  const maxX = world.layout.widthCells * cell;
-  const maxZ = world.layout.depthCells * cell;
-  return { minX: 0, minZ: 0, maxX, maxZ, centerX: maxX / 2, centerZ: maxZ / 2 };
+  // Start with the layout's nominal bounds as a floor, then expand to cover all
+  // painted surfaceRegions.
+  let minX = 0;
+  let minZ = 0;
+  let maxX = world.layout.widthCells * cell;
+  let maxZ = world.layout.depthCells * cell;
+  for (const r of world.surfaceRegions ?? []) {
+    const rx = r.x * cell;
+    const rz = r.z * cell;
+    const rw = r.width * cell;
+    const rd = r.depth * cell;
+    minX = Math.min(minX, rx);
+    minZ = Math.min(minZ, rz);
+    maxX = Math.max(maxX, rx + rw);
+    maxZ = Math.max(maxZ, rz + rd);
+  }
+  return { minX, minZ, maxX, maxZ, centerX: (minX + maxX) / 2, centerZ: (minZ + maxZ) / 2 };
 }
 
 // Euclidean distance from a point to the authored rectangle, in meters. Zero

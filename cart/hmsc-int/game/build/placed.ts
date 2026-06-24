@@ -590,56 +590,19 @@ function isSupportPlate(kind: BuildPieceKind): boolean {
   return kind === 'floor' || kind === 'roof';
 }
 
-/** The wall line is the authored edge; the wall body may sit to either side of
- *  that line. If one floor/roof supports the wall, put the full thickness on
- *  that plate. If plates exist on both sides, split the thickness across the
- *  seam. With no support, keep freestanding walls centered on their line. */
+/** A wall is ALWAYS centered on its grid line (req_1714/1719, USER RULING — the
+ *  Sims/Fortnite model). The body is symmetric on the line regardless of which
+ *  floors exist, so every wall on a line aligns: horizontal runs that border
+ *  different rooms along their length, AND vertical multi-storey stacks with no
+ *  floor between storeys (a floorless upper wall used to read centered while the
+ *  floor-backed lower wall offset → the stack stepped). The floor extends UNDER
+ *  the wall to its outer face (floorWallExtensions, in the floor render) so a
+ *  centered wall never overhangs its floor — the "floor sacrifices, not the
+ *  wall" resolution. Reverts REQ-0466's offset-onto-floor, which stepped runs
+ *  and stacks. (`pieces` kept for signature stability; offset detection gone.) */
 export function placedPieceDepthSpan(piece: PlacedBuildPiece, pieces: readonly PlacedBuildPiece[] = [piece]): PlacedPieceDepthSpan {
-  const def = placedPieceDef(piece);
-  if (def.kind !== 'wall' || def.snap !== 'edge') return centeredDepthSpan(def.size);
-  const self = wallRunFrame(piece, def);
-  if (!self) return centeredDepthSpan(def.size);
-  const tolerance = PLACED_TUNING.wallJoinToleranceMeters;
-  const vAxis = localOffset(0, 1, piece.yawDegrees);
-  let positive = false;
-  let negative = false;
-  // Grid-local candidates (PLACEPERF-0610): a qualifying plate's edge sits ON
-  // the wall line with run overlap, so its bounds intersect this thin band.
-  const margin = 0.5;
-  const near = self.axis === 'x'
-    ? piecesNear(pieces, self.runMin - margin, self.runMax + margin, self.line - margin, self.line + margin)
-    : piecesNear(pieces, self.line - margin, self.line + margin, self.runMin - margin, self.runMax + margin);
-  for (const entry of near) {
-    const other = entry.piece;
-    if (other.id === piece.id) continue;
-    const otherDef = placedPieceDef(other);
-    if (!isSupportPlate(otherDef.kind)) continue;
-    const b = entry.bounds;
-    if (Math.abs(b.topY - piece.y) > tolerance) continue;
-    const onEdge = self.axis === 'x'
-      ? (Math.abs(self.line - b.minZ) <= tolerance || Math.abs(self.line - b.maxZ) <= tolerance)
-      : (Math.abs(self.line - b.minX) <= tolerance || Math.abs(self.line - b.maxX) <= tolerance);
-    if (!onEdge) continue;
-    // A plate supports this side only if it runs ALONG the wall — a REAL run
-    // overlap, not a plate that merely touches the wall's END (the floor of the
-    // perpendicular room next door shares just the end line). Tolerant overlap
-    // counted that end-touch as support, so a wall with a neighbor-room floor
-    // off one end read as supported-both-sides → centered, while its collinear
-    // run-mates (no end neighbor) offset onto their floor → the run stepped /
-    // misaligned (req_1713). Require the overlap LENGTH to exceed the touch tol.
-    const overlapLen = self.axis === 'x'
-      ? Math.min(self.runMax, b.maxX) - Math.max(self.runMin, b.minX)
-      : Math.min(self.runMax, b.maxZ) - Math.max(self.runMin, b.minZ);
-    if (overlapLen <= tolerance) continue;
-    const cx = (b.minX + b.maxX) / 2;
-    const cz = (b.minZ + b.maxZ) / 2;
-    const side = (cx - piece.x) * vAxis.dx + (cz - piece.z) * vAxis.dz;
-    if (side > tolerance) positive = true;
-    else if (side < -tolerance) negative = true;
-  }
-  if (positive && !negative) return { minV: 0, maxV: def.size.depthMeters };
-  if (negative && !positive) return { minV: -def.size.depthMeters, maxV: 0 };
-  return centeredDepthSpan(def.size);
+  void pieces;
+  return centeredDepthSpan(placedPieceDef(piece).size);
 }
 
 function rangesOverlap(a0: number, a1: number, b0: number, b1: number, tolerance: number): boolean {
@@ -782,9 +745,7 @@ export function placedPieceBands(piece: PlacedBuildPiece, pieces: readonly Place
     if (meaning.portalKind !== 'none') {
       // a doorway/garage/arch cutout: the opening ADMITS bodies — collision
       // splits into the two jamb segments around it (centered opening)
-      const opening = meaning.portalKind === 'vehicle'
-        ? PLACED_TUNING.vehicleOpeningWidthMeters
-        : PLACED_TUNING.walkOpeningWidthMeters;
+      const opening = doorOpeningWidth(meaning);
       const jamb = (size.widthMeters - opening) / 2;
       if (jamb <= 0) return []; // the cutout consumed the whole face
       return [
@@ -801,15 +762,24 @@ export function placedPieceBands(piece: PlacedBuildPiece, pieces: readonly Place
   return [{ u0: minU, u1: maxU, top: fullTop }];
 }
 
+/** A door/portal's opening width: the edit's own override (req_1725 — the
+ *  double-wide sliding door declares its own) or the portalKind default. One
+ *  source for the jamb split AND the closed-panel band so the cutout and the
+ *  collision always agree. */
+function doorOpeningWidth(meaning: ReturnType<typeof wallEditDefinition>): number {
+  if (meaning.openingWidthMeters !== undefined) return meaning.openingWidthMeters;
+  return meaning.portalKind === 'vehicle'
+    ? PLACED_TUNING.vehicleOpeningWidthMeters
+    : PLACED_TUNING.walkOpeningWidthMeters;
+}
+
 function placedClosedDoorBand(piece: PlacedBuildPiece, def: BuildPieceDef): PlacedPieceBand | null {
   if (piece.doorOpen === true) return null;
   const edit = piece.edit;
   if (edit === undefined || BUILD_KIND_CONTRACTS[def.kind].edits !== 'wall') return null;
   const meaning = wallEditDefinition(edit);
   if (!meaning.interaction || meaning.portalKind === 'none') return null;
-  const opening = meaning.portalKind === 'vehicle'
-    ? PLACED_TUNING.vehicleOpeningWidthMeters
-    : PLACED_TUNING.walkOpeningWidthMeters;
+  const opening = doorOpeningWidth(meaning);
   const panelHeight = meaning.portalKind === 'vehicle'
     ? PLACED_TUNING.garageDoorPanelHeightMeters
     : PLACED_TUNING.walkDoorPanelHeightMeters;
