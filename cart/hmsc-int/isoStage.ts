@@ -246,6 +246,15 @@ export class IsoStage {
     };
   }
 
+  // World point -> pane-local screen pixel (the exact inverse of pieceRay/groundPoint),
+  // for the 2D projected overlay the loader pane draws its ghost/selection with (no
+  // second React 3D surface — Approach B). Returns null when the point sits at/behind
+  // the eye plane. Pane-local because worldToScreen reads only rect.width/height.
+  project(wx: number, wy: number, wz: number, rect: Rect): { x: number; y: number } | null {
+    const s = GAME_CAMERA.worldToScreen([wx, wy, wz], rect, this.solve());
+    return s ? { x: s.x, y: s.y } : null;
+  }
+
   // Centre the view on a world tile (e.g. jump to a placement, or to the painted
   // centre on open) without disturbing facing/zoom/level.
   centerOn(tx: number, tz: number): void {

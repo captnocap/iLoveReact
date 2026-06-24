@@ -659,6 +659,14 @@ function EditorShell() {
                     centerX={buildCenterX}
                     centerZ={buildCenterZ}
                     reloadToken={compiledReloadKey}
+                    state={previewWorld}
+                    pieces={buildPieces}
+                    buildings={buildingInstances}
+                    prefabs={buildingPrefabs}
+                    onCommit={commitBuildEvent}
+                    onCommitMany={commitBuildEvents}
+                    onSelectionChange={onIsoSelectionChange}
+                    onPlaceWaterBody={placeWaterBodyAt}
                   />
                 ) : (
                   <IsoAuthor

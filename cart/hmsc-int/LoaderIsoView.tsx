@@ -1,5 +1,6 @@
 // LoaderIsoView — the iso authoring viewport rendered by the NATIVE world_loader
-// instead of a React Scene3D rebuild (LOADERVIEW req_1757/req_1769).
+// instead of a React Scene3D rebuild (LOADERVIEW req_1757/req_1769), now with native
+// MAP EDITING (req_1792/req_1793).
 //
 // Why this exists: booting the editor's iso pane through React's 3D path serialized
 // ~683MB of mesh/instance/texture data across the host bridge every time (measured —
@@ -11,22 +12,43 @@
 // Camera: JS owns the solve. We push IsoStage.solve()'s eye+look+fov to the loader via
 // __compiled_world_set_camera each frame; the host snaps to it (world_loader.zig
 // setExternalCamera). It's the SAME GAME_CAMERA.solve(Isometric) pose IsoAuthor uses, so
-// picking (when wired) matches the render by construction. Controls mirror IsoAuthor:
-// drag rotates (yaw from horizontal motion), WASD/arrows pan (stage.nudge), wheel zooms.
+// picking matches the render by construction. Controls mirror IsoAuthor: drag rotates,
+// WASD/arrows pan (stage.nudge), wheel zooms.
 //
-// NOTE (rule-of-two): the control logic here is intentionally the same shape as
-// IsoAuthor's. If a third consumer appears, extract a useIsoCameraControls(stage, …) hook.
+// EDITING (req_1792): the heavy lifting is renderer-agnostic and lives in GAME_BUILD
+// (raycast/placementFor/validatePlacement/connected) + IsoStage (pieceRay/groundPoint/
+// project) — the SAME primitives IsoAuthor authors with. This pane is a second thin
+// consumer: it arms a catalog piece via the SAME <CatalogRail>, resolves the cursor with
+// the SAME resolveSnapTarget, and commits the SAME piecePlaced/buildingMoved events to
+// the SAME world stream. The auto-compile (index.tsx) re-bakes ~2.5s after an edit and
+// the loader reloads in place, so a placed piece appears in the native render shortly
+// after. Visual feedback (ghost + selection) is a 2D PROJECTED HUD over the loader
+// (the meshSelect.tsx pattern: <Graph.Polyline> in an identity view, pointerEvents off)
+// — NOT a second React Scene3D surface. Re-introducing that surface is the 683MB path
+// this whole pane exists to kill; the line is host-side or 2D-projected only.
 
-import { createElement, useCallback, useEffect, useRef } from 'react';
-import { Box, Pressable } from '@reactjit/primitives';
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Graph, Pressable } from '@reactjit/primitives';
+import { useRerender } from '@reactjit/runtime/hooks';
 import { busOn } from '@reactjit/hooks/useIFTTT';
-import { IsoStage } from './isoStage';
+import { IsoStage, METERS_PER_LEVEL } from './isoStage';
 import { editorTypingFocused } from './editors/controls';
+import { GAME_BUILD, partitionBuildingSelection } from './game';
+import type { BuildEditEvent, BuildPrefabDef, BuildingInstance, PlacedBuildPiece, Rect, WorldGridState } from './game';
+import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
+import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
+import { groundColumnTop } from './Embodied';
+import type { GameState } from './design';
 
 const g: any = globalThis;
+const DEG = Math.PI / 180;
 
 const DEFAULT_GAME_FILE = 'zig-out/game/hmsc.gamefile';
 const DEFAULT_STORE_DIR = 'zig-out/game/contentstore';
+
+// The iso eye sits 90–257m out, far past F2's crosshair reach — the same reach the React
+// pane snaps with (IsoAuthor ISO_SNAP_TUNING) so a click lands identically in both panes.
+const ISO_SNAP_TUNING = { ...SNAP_TUNING_DEFAULTS, reachMeters: 600, groundMarchStepMeters: 0.5 };
 
 // key → pan axis. Arrows alias WASD, matching the iso-build legend.
 const PAN_KEYS: Record<string, string> = {
@@ -34,18 +56,122 @@ const PAN_KEYS: Record<string, string> = {
   arrowup: 'w', arrowleft: 'a', arrowdown: 's', arrowright: 'd',
 };
 
+// Project a world-space AABB / oriented box to pane pixels and emit its 12 wireframe
+// edges as Graph.Polyline `segments` pairs (x0,y0,x1,y1,…). Yaw rotates the footprint
+// about Y; a selection box passes yaw 0 (its bounds are already world-axis-aligned). A
+// corner behind the eye projects to null and its edges are dropped — the box still reads.
+function boxSegments(
+  stage: IsoStage, rect: Rect,
+  cx: number, baseY: number, cz: number, yawDeg: number,
+  w: number, h: number, d: number,
+): number[] {
+  const c = Math.cos(yawDeg * DEG), s = Math.sin(yawDeg * DEG);
+  const hw = w / 2, hd = d / 2;
+  const corners = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([lx, lz]) => ({
+    x: cx + lx * c - lz * s,
+    z: cz + lx * s + lz * c,
+  }));
+  const bot = corners.map((q) => stage.project(q.x, baseY, q.z, rect));
+  const top = corners.map((q) => stage.project(q.x, baseY + h, q.z, rect));
+  const segs: number[] = [];
+  const edge = (a: { x: number; y: number } | null, b: { x: number; y: number } | null) => {
+    if (a && b) segs.push(a.x, a.y, b.x, b.y);
+  };
+  for (let i = 0; i < 4; i += 1) {
+    edge(bot[i], bot[(i + 1) % 4]);
+    edge(top[i], top[(i + 1) % 4]);
+    edge(bot[i], top[i]);
+  }
+  return segs;
+}
+
 export function LoaderIsoView(props: {
   gameFile?: string;
   storeDir?: string;
   centerX?: number;
   centerZ?: number;
   reloadToken?: number; // bump to reload the gamefile in place (after a re-bake)
+  // ── editing (req_1792): the SAME inputs index.tsx feeds IsoAuthor ──────────────
+  state?: GameState;                                  // world under the pieces (terrain sampler)
+  pieces?: readonly PlacedBuildPiece[];               // the standing pieces (pick/select/move target)
+  buildings?: Readonly<Record<string, BuildingInstance>>; // instance refs (whole-building moves/deletes)
+  prefabs?: readonly BuildPrefabDef[];                // the rail's prefab list (built-in + stream)
+  onCommit?: (event: BuildEditEvent, label: string) => void;
+  onCommitMany?: (items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => void;
+  onSelectionChange?: (ids: ReadonlySet<string>) => void;
+  onPlaceWaterBody?: (presetKind: string, x: number, z: number) => void;
 }) {
   const gameFile = props.gameFile ?? DEFAULT_GAME_FILE;
   const storeDir = props.storeDir ?? DEFAULT_STORE_DIR;
+  const editable = !!props.onCommit; // no commit door → a pure viewer (no rail/editing)
 
   const loaderRef = useRef<any>(null);
-  const rectRef = useRef<{ x: number; y: number; width: number; height: number }>({ x: 0, y: 0, width: 1, height: 1 });
+  const rectRef = useRef<Rect>({ x: 0, y: 0, width: 1, height: 1 });
+  const rerender = useRerender();
+  const rerenderRef = useRef(rerender);
+  rerenderRef.current = rerender;
+
+  // ── live refs (the Pressable stale-closure discipline) ─────────────────────────
+  const piecesRef = useRef(props.pieces ?? []);
+  piecesRef.current = props.pieces ?? [];
+  const buildingsRef = useRef(props.buildings);
+  buildingsRef.current = props.buildings;
+  const onCommitRef = useRef(props.onCommit);
+  onCommitRef.current = props.onCommit;
+  const onCommitManyRef = useRef(props.onCommitMany);
+  onCommitManyRef.current = props.onCommitMany;
+  const commitMany = useCallback((items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => {
+    if (!items.length) return;
+    if (onCommitManyRef.current) onCommitManyRef.current(items);
+    else for (const it of items) onCommitRef.current?.(it.event, it.label);
+  }, []);
+
+  const prefabs = props.prefabs ?? GAME_BUILD.prefabs.ids.map((id) => GAME_BUILD.prefabs.get(id));
+  const prefabById = useMemo(() => new Map(prefabs.map((d) => [d.id, d])), [prefabs]);
+  const prefabByIdRef = useRef(prefabById);
+  prefabByIdRef.current = prefabById;
+
+  // ── terrain sampler: the SAME groundColumnTop F2/IsoAuthor snap against, so a
+  // level-0 placement drapes over painted hills identically. Keyed on the world
+  // FIELDS so a state-identity tick (physics/HUD) doesn't churn the sampler.
+  const worldGrid = useMemo<WorldGridState | null>(() => {
+    if (!props.state) return null;
+    const wld = props.state.world;
+    return {
+      cellSizeMeters: wld.cellSizeMeters,
+      surfaceRegions: wld.surfaceRegions as unknown as WorldGridState['surfaceRegions'],
+      placedCells: wld.placedCells as unknown as WorldGridState['placedCells'],
+      landforms: (wld.landforms ?? []) as unknown as WorldGridState['landforms'],
+    };
+  }, [props.state?.world.cellSizeMeters, props.state?.world.surfaceRegions, props.state?.world.placedCells, props.state?.world.landforms]);
+  const groundTopAt = useCallback((x: number, z: number): number => (
+    worldGrid ? groundColumnTop(worldGrid, x, z) : 0
+  ), [worldGrid]);
+
+  // ── editing state ──────────────────────────────────────────────────────────────
+  const [armed, setArmed] = useState<Armed>(null);
+  const armedRef = useRef<Armed>(armed);
+  armedRef.current = armed;
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const [ghostYaw, setGhostYaw] = useState(0);
+  const ghostYawRef = useRef(ghostYaw);
+  ghostYawRef.current = ghostYaw;
+  const [snap, setSnap] = useState<SnapTarget | null>(null);
+  const [moveDelta, setMoveDelta] = useState<{ dx: number; dz: number } | null>(null);
+  const moveDeltaRef = useRef(moveDelta);
+  moveDeltaRef.current = moveDelta;
+  const modRef = useRef({ shift: false, alt: false, ctrl: false });
+  // Last cursor in pane pixels — so R (rotate ghost) re-resolves the preview IN PLACE
+  // instead of waiting for the next mouse-move.
+  const lastCursorRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Mirror the selection up so the cart's PropertiesPanel/FacePainter light up — the
+  // SAME onSelectionChange contract IsoAuthor reports through.
+  const onSelectionChangeRef = useRef(props.onSelectionChange);
+  onSelectionChangeRef.current = props.onSelectionChange;
+  useEffect(() => { onSelectionChangeRef.current?.(selectedIds); }, [selectedIds]);
 
   const stageRef = useRef<IsoStage | null>(null);
   if (!stageRef.current) {
@@ -55,31 +181,146 @@ export function LoaderIsoView(props: {
     );
   }
   const stage = stageRef.current;
+  // Keep the stage's height sampler current as the painted world changes.
+  useEffect(() => { stage.setHeightSampler(groundTopAt); }, [stage, groundTopAt]);
 
-  // Push the JS-solved iso pose to the native loader's camera. Cheap (8 floats) — this
-  // is the ONLY per-frame bridge traffic, vs the ~683MB the React scene shipped.
+  // The Y a placement's base sits at on the active floor: terrain at level 0, a flat
+  // slab above — the SAME placeGroundAt rule IsoAuthor uses.
+  const placeGroundAt = useCallback((x: number, z: number): number => {
+    const lvl = stage.pose.level;
+    return lvl > 0 ? lvl * METERS_PER_LEVEL : groundTopAt(x, z);
+  }, [stage, groundTopAt]);
+
+  // Push the JS-solved iso pose to the native loader's camera. Cheap (8 floats) — the
+  // ONLY per-frame bridge traffic, vs the ~683MB the React scene shipped. While
+  // something is on the HUD (armed ghost / selection), also redraw the 2D overlay so it
+  // tracks the camera (the projection is JS, the loader can't move it for us).
   const pushCamera = useCallback(() => {
     const nodeId = Number(loaderRef.current?.id ?? 0);
-    if (!nodeId || typeof g.__compiled_world_set_camera !== 'function') return;
-    const s: any = stage.solve();
-    g.__compiled_world_set_camera(
-      nodeId,
-      s.pos[0], s.pos[1], s.pos[2],
-      s.target[0], s.target[1], s.target[2],
-      s.fov,
-    );
+    if (nodeId && typeof g.__compiled_world_set_camera === 'function') {
+      const s: any = stage.solve();
+      g.__compiled_world_set_camera(
+        nodeId,
+        s.pos[0], s.pos[1], s.pos[2],
+        s.target[0], s.target[1], s.target[2],
+        s.fov,
+      );
+    }
+    if (armedRef.current || selectedIdsRef.current.size) rerenderRef.current();
   }, [stage]);
 
-  // Keys: subscribe the key bus DIRECTLY (req_1777) rather than the editor control
-  // contract. The contract's active/scope arbitration was swallowing WASD here (it
-  // worked for IsoAuthor but not this pane); the raw bus is the same source the host
-  // feeds and removes every middle layer. Still honor the typing gate so WASD in a
-  // text field (the texture search, the tile box) types, not pans. Held WASD/arrows
-  // pan; Q/E orbit; F/Home recenter.
+  // ── snap resolution: the cursor → a placement, with the SAME inputs F2/IsoAuthor use.
+  const resolveAt = useCallback((sx: number, sy: number): SnapTarget | null => {
+    const a = armedRef.current;
+    if (!a || a.kind === 'tower') return null; // tower drag-shell tool deferred
+    const pieceDef = a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id) : null;
+    const armedPrefabDef = a.kind === 'prefab' ? prefabByIdRef.current.get(a.id) : undefined;
+    const prefabAnchor = armedPrefabDef ? GAME_BUILD.prefabs.gridAnchor(armedPrefabDef) : null;
+    const snapMode = pieceDef ? pieceDef.snap : 'grid';
+    const size = pieceDef
+      ? pieceDef.size
+      : prefabAnchor
+        ? prefabAnchor.size
+        : { widthMeters: 1, heightMeters: 3, depthMeters: 1 };
+    return resolveSnapTarget({
+      ray: stage.pieceRay(sx, sy, rectRef.current),
+      pieces: piecesRef.current,
+      groundTopAt: placeGroundAt,
+      snap: snapMode,
+      size,
+      yawDegrees: ghostYawRef.current,
+      freeform: modRef.current.alt,
+      ...(prefabAnchor ? { anchorLocal: { x: prefabAnchor.x, z: prefabAnchor.z } } : {}),
+      tuning: ISO_SNAP_TUNING,
+    });
+  }, [stage, placeGroundAt]);
+
+  // ── commit: place the armed thing at a resolved snap target ──────────────────────
+  const placeAt = useCallback((t: SnapTarget) => {
+    const a = armedRef.current;
+    if (!a) return;
+    if (selectedIdsRef.current.size) setSelectedIds(new Set());
+    const at = `${t.placement.x.toFixed(1)},${t.placement.z.toFixed(1)}`;
+    if (a.kind === 'tower') return; // deferred
+    if (a.kind === 'prefab') {
+      const def = prefabByIdRef.current.get(a.id);
+      if (!def) return;
+      onCommitRef.current?.({ kind: 'prefabStamped', prefabId: a.id, origin: { x: t.placement.x, y: t.placement.y, z: t.placement.z }, yawDegrees: t.placement.yawDegrees }, `stamped ${def.label} @ ${at}`);
+      return;
+    }
+    if (a.kind === 'water') {
+      props.onPlaceWaterBody?.(a.id, t.placement.x, t.placement.z);
+      return;
+    }
+    const def = GAME_BUILD.catalog.get(a.id);
+    const placement = GAME_BUILD.placed.placementFor(def, t.placement);
+    if (GAME_BUILD.placed.validatePlacement(placement).length > 0) return;
+    onCommitRef.current?.({ kind: 'piecePlaced', placement }, `placed ${def.label} @ ${at}`);
+  }, [props.onPlaceWaterBody]);
+
+  // ── select: raycast the standing pieces; whole building (shift) or one piece ─────
+  const selectPieceAt = useCallback((sx: number, sy: number, whole: boolean) => {
+    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), piecesRef.current, ISO_SNAP_TUNING.reachMeters);
+    if (!hit) { setSelectedIds(new Set()); return; }
+    setSelectedIds(whole ? GAME_BUILD.placed.connected(hit.piece.id, piecesRef.current) : new Set([hit.piece.id]));
+  }, [stage]);
+
+  // ── delete: pieceRemoved per loose piece, buildingRemoved per whole instance ─────
+  const deleteSelected = useCallback(() => {
+    const ids = selectedIdsRef.current;
+    if (!ids.size) return;
+    const { wholeInstances, partialInstances, loosePieceIds } = partitionBuildingSelection(ids, piecesRef.current);
+    if (partialInstances.length) console.warn(`[loader-iso] delete skipped ${partialInstances.length} partially-selected building(s) — shift-click the whole building`);
+    const events: Array<{ event: BuildEditEvent; label: string }> = [
+      ...wholeInstances.map((id) => ({ event: { kind: 'buildingRemoved', id } as BuildEditEvent, label: `removed building ${id}` })),
+      ...loosePieceIds.map((id) => ({ event: { kind: 'pieceRemoved', id } as BuildEditEvent, label: `removed ${id}` })),
+    ];
+    if (!events.length) return;
+    commitMany(events);
+    setSelectedIds(new Set());
+  }, [commitMany]);
+
+  // ── move: commit the snapped XZ delta — buildingMoved for whole instances, a
+  // remove+place per loose piece (the SAME shape IsoAuthor's commitMove uses).
+  const commitMove = useCallback(() => {
+    const delta = moveDeltaRef.current;
+    setMoveDelta(null);
+    if (!delta || (Math.abs(delta.dx) < 1e-3 && Math.abs(delta.dz) < 1e-3)) return;
+    const ids = selectedIdsRef.current;
+    const sel = piecesRef.current.filter((p) => ids.has(p.id));
+    if (!sel.length) return;
+    const { wholeInstances, partialInstances, loosePieceIds } = partitionBuildingSelection(ids, piecesRef.current);
+    if (partialInstances.length) { console.warn(`[loader-iso] move aborted — ${partialInstances.length} building(s) partially selected`); return; }
+    const events: Array<{ event: BuildEditEvent; label: string }> = [];
+    for (const instId of wholeInstances) {
+      const inst = buildingsRef.current?.[instId];
+      if (!inst) return; // instance vanished under us — abort the whole move
+      events.push({ event: { kind: 'buildingMoved', id: instId, x: inst.x + delta.dx, z: inst.z + delta.dz } as BuildEditEvent, label: `moved building ${instId}` });
+    }
+    const looseSet = new Set(loosePieceIds);
+    const moves = sel.filter((p) => looseSet.has(p.id)).map((p) => {
+      const { id, ...rest } = p;
+      return { id, placement: { ...rest, x: p.x + delta.dx, z: p.z + delta.dz } };
+    });
+    if (moves.some((m) => GAME_BUILD.placed.validatePlacement(m.placement).length > 0)) return;
+    commitMany([
+      ...events,
+      ...moves.map((m) => ({ event: { kind: 'pieceRemoved', id: m.id } as BuildEditEvent, label: `moved ${m.id}` })),
+      ...moves.map((m) => ({ event: { kind: 'piecePlaced', placement: m.placement } as BuildEditEvent, label: `moved ${m.placement.pieceId}` })),
+    ]);
+    setSelectedIds(new Set());
+  }, [commitMany]);
+
+  // ── keys: WASD/arrows pan, Q/E orbit, F recenter (camera) + R rotate ghost, Del
+  // delete, Esc disarm/clear (editing). Direct key-bus subscription (req_1777): the
+  // editor control contract swallowed WASD here; the raw bus is the host's own source.
   const heldPanRef = useRef<Record<string, boolean>>({});
   useEffect(() => {
     const onKey = (down: boolean) => (e: any) => {
       const k = String(e?.key ?? '').toLowerCase();
+      if (k === 'shift') modRef.current.shift = down;
+      else if (k === 'alt') modRef.current.alt = down;
+      else if (k === 'control') modRef.current.ctrl = down;
       const axis = PAN_KEYS[k];
       if (axis) {
         if (down && editorTypingFocused()) return; // let the focused field have the key
@@ -90,27 +331,35 @@ export function LoaderIsoView(props: {
       if (k === 'q') { stage.rotate(-1); pushCamera(); }
       else if (k === 'e') { stage.rotate(1); pushCamera(); }
       else if (k === 'f' || k === 'home') { stage.centerOn(props.centerX ?? 0, props.centerZ ?? 0); pushCamera(); }
+      else if (editable && k === 'r') { setGhostYaw((y) => (y + 90) % 360); }
+      else if (editable && (k === 'delete' || k === 'backspace')) { deleteSelected(); }
+      else if (editable && k === 'escape') {
+        if (armedRef.current) setArmed(null);
+        else setSelectedIds(new Set());
+      }
     };
     const offDown = busOn('__keydown', onKey(true));
     const offUp = busOn('__keyup', onKey(false));
-    return () => { offDown(); offUp(); heldPanRef.current = {}; };
-  }, [stage, pushCamera, props.centerX, props.centerZ]);
+    return () => { offDown(); offUp(); heldPanRef.current = {}; modRef.current = { shift: false, alt: false, ctrl: false }; };
+  }, [stage, pushCamera, props.centerX, props.centerZ, editable, deleteSelected]);
 
-  // The held-key pan loop. Scheduled via rAF OR a setTimeout FALLBACK — exactly like
-  // IsoAuthor (req_1777): this host doesn't always expose requestAnimationFrame as a
-  // global, so a bare rAF call silently never ran and WASD did nothing.
-  //
-  // PERF (req_1790/1791 "lags like shit"): push the camera to the host ONLY when the
-  // pose actually changes — while WASD is held. The host pending-camera table re-applies
-  // the last pose every frame on its own, so an idle per-frame push was 60 wasted bridge
-  // calls/sec. Drag/zoom push directly; the loop pushes only while panning.
+  // Re-resolve the hover ghost after R turns it, so the preview spins in place at the
+  // last known cursor instead of waiting for the next mouse-move.
+  useEffect(() => {
+    const lc = lastCursorRef.current;
+    if (armedRef.current && lc) setSnap(resolveAt(lc.x, lc.y));
+  }, [ghostYaw, resolveAt]);
+
+  // The held-key pan loop (rAF, or a setTimeout FALLBACK when rAF isn't a host global —
+  // req_1777). Push the camera ONLY when the pose actually moves (req_1790/1791: idle
+  // per-frame pushes "lag like shit"); the host re-applies the last pose itself.
   useEffect(() => {
     const sched: (fn: () => void) => any = g.requestAnimationFrame
       ? g.requestAnimationFrame.bind(g)
       : (fn: () => void) => setTimeout(fn, 16);
     let alive = true;
     let last = g.performance?.now?.() ?? 0;
-    pushCamera(); // once synchronously so the pose is set before the first paint
+    pushCamera();
     const tick = () => {
       if (!alive) return;
       const now = g.performance?.now?.() ?? last + 16;
@@ -120,9 +369,9 @@ export function LoaderIsoView(props: {
       const forward = (held.w ? 1 : 0) - (held.s ? 1 : 0);
       const strafe = (held.d ? 1 : 0) - (held.a ? 1 : 0);
       if (forward || strafe) {
-        const speed = Math.max(18, stage.distance() * 0.85); // m/s, scales with zoom
+        const speed = Math.max(18, stage.distance() * 0.85);
         stage.nudge(forward * speed * dt, strafe * speed * dt);
-        pushCamera(); // only when the pose moved this frame
+        pushCamera();
       }
       sched(tick);
     };
@@ -136,9 +385,7 @@ export function LoaderIsoView(props: {
 
   // Reload the gamefile IN PLACE after a re-bake (req_1760/1761). Unmount the host
   // runtime for this node; the next embedded render re-mounts from the fresh gamefile.
-  // The camera pose survives because the host pending-camera table is keyed by node id
-  // (NOT cleared on unmount) — so an auto-compile refresh never jolts the view. Skips
-  // the initial mount.
+  // The camera pose survives because the host pending-camera table is keyed by node id.
   const reloadSeenRef = useRef(props.reloadToken);
   useEffect(() => {
     if (reloadSeenRef.current === props.reloadToken) return;
@@ -147,22 +394,98 @@ export function LoaderIsoView(props: {
     if (nodeId && typeof g.__compiled_world_unmount === 'function') g.__compiled_world_unmount(nodeId);
   }, [props.reloadToken]);
 
-  // ── pointer: left-drag rotates the view (yaw from horizontal motion) ────────────
-  // Pane-relative cursor from the event itself (e.x − rect.x), exactly like IsoAuthor —
-  // the host fires move events with real coords; getMouseX() is for passive polling.
-  const dragRef = useRef<{ x: number } | null>(null);
+  // ── pointer: rotate (drag empty), move (drag a selected piece), click = place/select.
+  // gx0/gz0 hold the down point on the active plane so a move tracks the cursor's world
+  // delta, not pixels; turned tells a drag from a click (>4px travel).
+  const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean; mode: 'rotate' | 'move'; gx0: number; gz0: number } | null>(null);
   const local = useCallback((e: any) => {
     const r = rectRef.current;
     return { x: Number(e?.x ?? 0) - r.x, y: Number(e?.y ?? 0) - r.y };
   }, []);
-  const onDown = useCallback((e: any) => { dragRef.current = { x: local(e).x }; }, [local]);
-  const onMove = useCallback((e: any) => {
-    const d = dragRef.current;
-    if (!d) return;
+  const onDown = useCallback((e: any) => {
     const p = local(e);
-    if (p.x !== d.x) { stage.rotateBy((p.x - d.x) * 0.3); d.x = p.x; pushCamera(); }
-  }, [local, stage, pushCamera]);
-  const onUp = useCallback(() => { dragRef.current = null; }, []);
+    lastCursorRef.current = p;
+    let mode: 'rotate' | 'move' = 'rotate';
+    let gx0 = 0, gz0 = 0;
+    if (editable && !armedRef.current && selectedIdsRef.current.size) {
+      const hit = GAME_BUILD.placed.raycast(stage.pieceRay(p.x, p.y, rectRef.current), piecesRef.current, ISO_SNAP_TUNING.reachMeters);
+      if (hit && selectedIdsRef.current.has(hit.piece.id)) {
+        const gp = stage.groundPoint(p.x, p.y, rectRef.current);
+        if (gp) { mode = 'move'; gx0 = gp.x; gz0 = gp.z; }
+      }
+    }
+    dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false, mode, gx0, gz0 };
+    if (armedRef.current) setSnap(resolveAt(p.x, p.y));
+  }, [local, stage, editable, resolveAt]);
+  const onMove = useCallback((e: any) => {
+    const p = local(e);
+    lastCursorRef.current = p;
+    const d = dragRef.current;
+    if (d && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
+      d.turned = true;
+      if (d.mode === 'move') {
+        const gp = stage.groundPoint(p.x, p.y, rectRef.current);
+        if (gp) {
+          const cs = props.state?.world.cellSizeMeters || 1;
+          const dx = Math.round((gp.x - d.gx0) / cs) * cs;
+          const dz = Math.round((gp.z - d.gz0) / cs) * cs;
+          const cur = moveDeltaRef.current;
+          if (!cur || cur.dx !== dx || cur.dz !== dz) setMoveDelta({ dx, dz });
+        }
+      } else {
+        stage.rotateBy((p.x - d.x) * 0.3);
+        d.x = p.x;
+        pushCamera();
+      }
+      return;
+    }
+    if (armedRef.current) setSnap(resolveAt(p.x, p.y));
+  }, [local, stage, pushCamera, resolveAt, props.state]);
+  const onUp = useCallback(() => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    if (!d) return;
+    if (d.turned) {
+      if (d.mode === 'move') commitMove();
+      return;
+    }
+    if (!editable) return;
+    // A click (no travel): place the armed piece, or (re)select under the cursor.
+    if (armedRef.current) {
+      if (modRef.current.shift) { selectPieceAt(d.x0, d.y0, true); return; } // shift-click selects while armed
+      const t = resolveAt(d.x0, d.y0);
+      if (t) { setSnap(t); placeAt(t); }
+    } else {
+      selectPieceAt(d.x0, d.y0, modRef.current.shift || modRef.current.alt); // shift/alt = whole building
+    }
+  }, [editable, commitMove, resolveAt, placeAt, selectPieceAt]);
+
+  // ── 2D projected HUD (Approach B): the armed ghost box + selection outlines, drawn
+  // each render through the SAME iso solve the loader renders with. Computed in the body
+  // (not memoized) so it tracks the imperatively-driven camera; pushCamera() rerenders
+  // while something is on the HUD. NO React Scene3D — this is the meshSelect.tsx overlay.
+  const rect = rectRef.current;
+  const ghostSegs: number[] = [];
+  if (editable && armed && snap) {
+    if (armed.kind === 'piece') {
+      const sz = GAME_BUILD.catalog.get(armed.id).size;
+      ghostSegs.push(...boxSegments(stage, rect, snap.placement.x, snap.placement.y, snap.placement.z, snap.placement.yawDegrees, sz.widthMeters, sz.heightMeters, sz.depthMeters));
+    } else {
+      // prefab / water: a 2m footprint marker at the snapped point (no plan size here).
+      ghostSegs.push(...boxSegments(stage, rect, snap.placement.x, snap.placement.y, snap.placement.z, 0, 2, 0.3, 2));
+    }
+  }
+  const selSegs: number[] = [];
+  if (editable && selectedIds.size) {
+    const dx = moveDelta?.dx ?? 0, dz = moveDelta?.dz ?? 0;
+    for (const pc of piecesRef.current) {
+      if (!selectedIds.has(pc.id)) continue;
+      const b = GAME_BUILD.placed.bounds(pc);
+      const cx = (b.minX + b.maxX) / 2 + dx;
+      const cz = (b.minZ + b.maxZ) / 2 + dz;
+      selSegs.push(...boxSegments(stage, rect, cx, b.baseY, cz, 0, b.maxX - b.minX, b.topY - b.baseY, b.maxZ - b.minZ));
+    }
+  }
 
   return (
     <Box
@@ -177,22 +500,43 @@ export function LoaderIsoView(props: {
         style: { width: '100%', height: '100%' },
       })}
 
+      {/* 2D projected overlay — identity view so points are plain pane pixels; never
+          eats input (pointerEvents off). Selection under the ghost in paint order. */}
+      {editable && (selSegs.length || ghostSegs.length) ? (
+        <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
+          <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
+            {selSegs.length ? <Graph.Polyline segments points={selSegs} stroke="#7dd3fc" strokeWidth={2.4} /> : null}
+            {ghostSegs.length ? <Graph.Polyline segments points={ghostSegs} stroke="#34d399" strokeWidth={1.6} /> : null}
+          </Graph>
+        </Box>
+      ) : null}
+
       {/* pointer capture (near-transparent so it's hittable), same idiom as IsoAuthor */}
       <Pressable
         onMouseDown={onDown}
         onMouseMove={onMove}
         onMouseUp={onUp}
         onScroll={(e: any) => {
-          const d = Number(e?.deltaY ?? 0);
-          if (!d) return;
+          const dy = Number(e?.deltaY ?? 0);
+          if (!dy) return;
           const r = rectRef.current;
           const mx = Number(g.getMouseX?.() ?? (r.x + r.width / 2));
           const my = Number(g.getMouseY?.() ?? (r.y + r.height / 2));
-          stage.zoomToCursor(mx - r.x, my - r.y, d > 0 ? 1.15 : 1 / 1.15, r);
+          stage.zoomToCursor(mx - r.x, my - r.y, dy > 0 ? 1.15 : 1 / 1.15, r);
           pushCamera();
         }}
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
       />
+
+      {/* The build catalog rail — the SAME component IsoAuthor arms from (rule-of-two).
+          Rendered last so it paints over (and receives clicks above) the capture layer. */}
+      {editable ? (
+        <CatalogRail
+          armed={armed}
+          prefabs={prefabs}
+          onArm={(a) => { setArmed((cur) => (sameArmed(cur, a) ? null : a)); setSelectedIds(new Set()); }}
+        />
+      ) : null}
     </Box>
   );
 }

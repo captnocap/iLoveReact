@@ -126,7 +126,7 @@ function skinTextureIds(pieces: readonly PlacedBuildPiece[]): string[] {
 // What's armed to place: a single catalog PIECE, a PREFAB (a named composition that
 // stamps into many pieces), or the TOWER tool (req_0478: drag a footprint → a hollow
 // multi-storey shell). null = nothing armed (pan/select mode).
-type Armed = { kind: 'piece' | 'prefab'; id: string } | { kind: 'tower' } | { kind: 'water'; id: string } | null;
+export type Armed = { kind: 'piece' | 'prefab'; id: string } | { kind: 'tower' } | { kind: 'water'; id: string } | null;
 
 // ── Tower tool (req_0478): skyscrapers without laying every storey by hand ───
 // Drag a footprint rectangle → a HOLLOW shell: perimeter walls stacked N floors
@@ -145,7 +145,7 @@ const TOWER_MAX_FLOORS = 30;
 // pane only reports its selection up (onSelectionChange) so the map stays clear.
 
 /** the same tool armed twice = a toggle-off (rail chips re-click to disarm) */
-function sameArmed(cur: Armed, next: NonNullable<Armed>): boolean {
+export function sameArmed(cur: Armed, next: NonNullable<Armed>): boolean {
   if (!cur || cur.kind !== next.kind) return false;
   if (cur.kind === 'tower' || next.kind === 'tower') return true;
   return cur.id === next.id;
@@ -362,6 +362,21 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     };
   }, [stage]);
   const rerender = useRerender();
+  // [iso-diag req_1744] TEMP probe for the blank iso pane: names the cause the next
+  // time / loads — empty scene, a non-finite boot camera, or the native camera not
+  // engaging. Re-runs on world/piece change. Remove once the blank is fixed.
+  useEffect(() => {
+    const finite = (v: any): boolean => Array.isArray(v) && v.every((n) => Number.isFinite(n));
+    let texturedN = -1;
+    try { texturedN = texturedPropsFromPieces(pieces).length; } catch (e) { console.warn('[iso-diag] texturedPropsFromPieces THREW', String(e)); }
+    console.warn(
+      `[iso-diag] pieces=${pieces.length} display=${displayPieces.length} ` +
+      `props=${state.world.props.length} landforms=${(state.world.landforms ?? []).length} textured=${texturedN} ` +
+      `camPos=${finite(bootCam.pos) ? 'ok' : JSON.stringify(bootCam.pos)} ` +
+      `camTarget=${finite(bootCam.target) ? 'ok' : JSON.stringify(bootCam.target)} ` +
+      `fov=${Number.isFinite(bootCam.fov) ? bootCam.fov : 'NaN'} nativeCamId=${Number(cameraRef.current?.id ?? 0)}`,
+    );
+  }, [state.world, pieces]);
   const redraw = useCallback(() => {
     pushNativeCamera();
     rerender();
@@ -1652,7 +1667,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
 
   return (
     <Box
-      onLayout={(lr: any) => { rectRef.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
+      onLayout={(lr: any) => {
+        rectRef.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height };
+        // [iso-rect req_1747] TEMP: the build-pane 3D View only renders when its
+        // Box has real area — log the measured size so a 0/NaN/huge size (→ Scene3D
+        // never painted → drawScene never runs → blank) is visible. Remove once fixed.
+        console.warn(`[iso-rect] x=${lr.x} y=${lr.y} w=${lr.width} h=${lr.height}`);
+      }}
       style={{ width: '100%', height: '100%', position: 'relative' }}
     >
       {sceneCaptures}
@@ -1982,7 +2003,7 @@ const IsoGrid = memo(function IsoGrid(props: { centerX: number; centerZ: number;
 // SAME BUILD_CATALOG the F2 palette reads.
 type RailTab = BuildPieceKind | 'prefabs' | 'water';
 const RAIL_TABS: RailTab[] = [...PALETTE_KINDS, 'prefabs', 'water'];
-const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: readonly BuildPrefabDef[]; onArm: (a: NonNullable<Armed>) => void }) {
+export const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: readonly BuildPrefabDef[]; onArm: (a: NonNullable<Armed>) => void }) {
   // TWIGS (req_0643 "annoying have it reset"): the rail's tab + prop shelf are
   // route twig state, so a hot reload restores the menu where you left it —
   // the TWIGSWEEP-0610 rule, applied here.
