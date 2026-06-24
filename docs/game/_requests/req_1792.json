@@ -1,0 +1,36 @@
+{
+  "id": "req_1792",
+  "at": "2026-06-24T15:22:19.888Z",
+  "origin": "session:237d7d6a",
+  "text": "great. now add in the editor part, where i can edit the map again.",
+  "status": "review",
+  "sessionId": "237d7d6a-e4a2-4028-a47c-52ac36b343b2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T15:23:12.752Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T15:29:08.877Z",
+      "actor": "opus-startup-probe",
+      "kind": "note",
+      "text": "Editing-in-loader-pane handed off (this session is enormous; editing must be host-side, NOT React Scene3D). Brief: /tmp/handoff-20260624-152649-loader-iso-pane-native-editing-picking-placement-ghost.md"
+    },
+    {
+      "at": "2026-06-24T15:47:38.318Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Restored native map editing in the loader-rendered iso build pane WITHOUT reintroducing the React Scene3D world render (the measured ~683MB/boot path the loader pane was built to kill). LoaderIsoView is now a second thin consumer of the SAME renderer-agnostic primitives IsoAuthor uses: GAME_BUILD.placed raycast/placementFor/validatePlacement/connected/bounds + IsoStage pieceRay/groundPoint + resolveSnapTarget, committing the SAME piecePlaced/buildingMoved/pieceRemoved/buildingRemoved events on the SAME world stream. Functional: arm a catalog piece via the SAME CatalogRail (exported from IsoAuthor), click ground to place (piece/prefab/water), click to select (shift = whole building), drag to move (cell-snapped, building-aware), Del delete, R rotate ghost, Esc disarm. Visual feedback is a 2D projected HUD (ghost box + selection outlines via Graph.Polyline in an identity view, pointerEvents off) projected with a new IsoStage.project() wrapping GAME_CAMERA.worldToScreen — the proven meshSelect.tsx overlay, not a second React 3D surface. Verified: bundle resolves+parses clean, hooks unconditional. Live interaction (place/select/move/ghost) needs user test via hot-reload — headless shot can't drive a mouse and uses the stale embedded bundle.",
+  "shas": [
+    "a3485c3e0"
+  ],
+  "resolvedAt": "2026-06-24T15:47:38.318Z"
+}

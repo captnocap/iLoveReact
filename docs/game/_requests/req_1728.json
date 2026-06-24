@@ -1,0 +1,30 @@
+{
+  "id": "req_1728",
+  "at": "2026-06-24T05:58:56.724Z",
+  "origin": "session:a10e66a7",
+  "text": "fuck. nevermind u gotta fix it cuz it has the image set in local store so going to the editor just crashes D:",
+  "status": "review",
+  "sessionId": "a10e66a7-947a-4184-a067-79045ea27882",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T05:59:37.758Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T06:03:57.117Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the boot-loop crash: an <Image> source wider/taller than wgpu's maxTextureDimension2D (8192px) made wgpuDeviceCreateTexture raise an uncaptured error — a non-unwinding panic that SIGABRTed the whole app rather than returning null — so a 10240px trace reference dropped onto a paint surface killed the cart, and once that source was saved in localstore the editor crashed on every boot. framework/gpu/image_cache.zig load() now clamps to MAX_TEXTURE_DIM (8192) BEFORE any GPU work: if either axis exceeds the limit it bilinearly downscales the decoded RGBA to fit (aspect ratio preserved, a new resampleRgba helper, index math in usize so huge sources can't overflow u32, scratch buffer freed on return), then proceeds with the existing swizzle/flip/createTexture path on the smaller buffer. Images within the limit are untouched; the decode+resample runs once and is cached. Rebuilt ReleaseFast (SHIP_RUN_PACKAGE=0) green. The user must rebuild their dev host (framework change) to pick it up; the persisted oversized image will then load downscaled instead of aborting.",
+  "shas": [
+    "4d3616b05"
+  ],
+  "resolvedAt": "2026-06-24T06:03:57.117Z"
+}

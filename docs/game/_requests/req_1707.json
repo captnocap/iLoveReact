@@ -1,0 +1,10 @@
+{
+  "id": "req_1707",
+  "at": "2026-06-23T15:15:04.175Z",
+  "origin": "session:26faabd9",
+  "text": "bp_2883 connecting to bp_2882 was screenshot 1\nbp_2882 connecting to bp_2881 was screenshot 2\nbp_2998 connecting to bp_2997 was the last screenshot \n2966 to 2965 was one of the middle screenshots",
+  "status": "new",
+  "sessionId": "26faabd9-b2ed-46ff-8ba6-c09ee22bee5e",
+  "captureMode": "hook",
+  "events": []
+}

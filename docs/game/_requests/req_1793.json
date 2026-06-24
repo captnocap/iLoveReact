@@ -1,0 +1,36 @@
+{
+  "id": "req_1793",
+  "at": "2026-06-24T15:25:54.843Z",
+  "origin": "session:237d7d6a",
+  "text": "that sounds jank as hell. if u are going to be lazy and not do it properly then pass it off in a hand over. putting the same thing back in that we just removed is going to put us right back where we started, just now invisibly",
+  "status": "review",
+  "sessionId": "237d7d6a-e4a2-4028-a47c-52ac36b343b2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T15:26:35.226Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T15:29:08.886Z",
+      "actor": "opus-startup-probe",
+      "kind": "note",
+      "text": "User ruled: don't bolt React Scene3D back over the loader (jank + reintroduces 683MB invisibly). Proper path = host-side overlays or 2D projected HUD. See handoff brief."
+    },
+    {
+      "at": "2026-06-24T15:47:38.326Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Companion to req_1792: the loader iso pane's editing-feedback layer. Added IsoStage.project() (world->screen, the analytic inverse of pieceRay, reusing GAME_CAMERA.worldToScreen) and a 2D projected HUD overlay in LoaderIsoView that draws the armed placement ghost as a wireframe box and every selected piece's footprint outline, using the meshSelect.tsx pattern (Graph.Polyline segments in an identity-view Graph with pointerEvents off). The overlay is projected through the SAME iso solve the native loader renders with, so the ghost/selection track the camera on drag/pan/zoom (pushCamera triggers a rerender while something is on the HUD). No React Scene3D is reintroduced — the hard line the user drew. CatalogRail/sameArmed/Armed exported from IsoAuthor for reuse; index.tsx feeds LoaderIsoView the same editing props it gives IsoAuthor. Deferred to follow-ups: tower drag-shell, drag-paint walls/floors, rotate/clone of a placed selection, ctrl-vertical prop move.",
+  "shas": [
+    "a3485c3e0"
+  ],
+  "resolvedAt": "2026-06-24T15:47:38.326Z"
+}

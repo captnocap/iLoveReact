@@ -1,0 +1,18 @@
+{
+  "id": "req_1733",
+  "at": "2026-06-24T07:36:30.951Z",
+  "origin": "session:665e8e86",
+  "text": "Hm. So, i made this [Image #9] and i think it broke the entire app/game. The / route doesnt load properly anymore and the game is getting like 1-3 fps. idk...",
+  "status": "doing",
+  "sessionId": "665e8e86-9998-4efd-8f6c-5ebddc8cc031",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T07:37:41.941Z",
+      "actor": "665e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

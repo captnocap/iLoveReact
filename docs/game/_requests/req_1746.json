@@ -1,0 +1,18 @@
+{
+  "id": "req_1746",
+  "at": "2026-06-24T09:15:45.475Z",
+  "origin": "session:f0185e63",
+  "text": "still just blank [Image #3] [js.warn] [hb] ~45fps  total 21.22ms  DOMINANT=paint  tick 0us layout 480us paint 20.17ms gpu 436us other 139us  | present 39us bridge 28us V8 GC — (×0, never fired)  | rects 225 glyphs 2206 atlas 477 nodes 2069 scene3d{inst 0 draws 0 meshes 0 dropped 0 children 0}\n[js.warn] [hb] ~46fps  total 20.40ms  DOMINANT=paint  tick 0us layout 458us paint 19.39ms gpu 356us other 200us  | present 24us bridge 12us V8 GC — (×0, never fired)  | rects 225 glyphs 2206 atlas 477 nodes 2069 scene3d{inst 0 draws 0 meshes 0 dropped 0 children 0}\n[js.warn] [hb] ~45fps  total 21.10ms  DOMINANT=paint  tick 0us layout 463us paint 20.11ms gpu 403us other 125us  | present 26us bridge 11us V8 GC — (×0, never fired)  | rects 225 glyphs 2206 atlas 477 nodes 2069 scene3d{inst 0 draws 0 meshes 0 dropped 0 children 0}\n[js.warn] [hb] ~43fps  total 20.58ms  DOMINANT=paint  tick 0us layout 486us paint 19.55ms gpu 405us other 130us  | present 31us bridge 8us V8 GC — (×0, never fired)  | rects 225 glyphs 2206 atlas 477 nodes 2069 scene3d{inst 0 draws 0 meshes 0 dropped 0 children 0}\n[js.warn] [hb] ~46fps  total 34.13ms  DOMINANT=paint  tick 0us layout 464us paint 33.10ms gpu 442us other 119us  | present 35us bridge 9us V8 GC — (×0, never fired)  | rects 225 glyphs 2206 atlas 477 nodes 2069 scene3d{inst 0 draws 0 meshes 0 dropped 0 children 0}\n[js.warn] [hb] ~45fps  total 20.45ms  DOMINANT=paint  tick 0us layout 422us paint 19.40ms gpu 410us other 213us  | present 35us bridge 7us V8 GC — (×0, never fired)  | rects 225 glyphs 2206 atlas 477 nodes 2069 scene3d{inst 0 draws 0 meshes 0 dropped 0 children 0}\n[js.warn] [hb] ~46fps  total 21.10ms  DOMINANT=paint  tick 0us layout 474us paint 20.10ms gpu 406us other 124us  | present 33us bridge 9us V8 GC — (×0, never fired)  | rects 225 glyphs 2206 atlas 477 nodes 2069 scene3d{inst 0 draws 0 meshes 0 dropped 0 children 0}\n[js.warn] [hb] ~45fps  total 29.88ms  DOMINANT=paint  tick 0us layout 410us paint 28.80ms gpu 405us other 259us  | present 35us bridge 4us V8 GC — (×0, never fired)  | rects 225 glyphs 2206 atlas 477 nodes 2069 scene3d{inst 0 draws 0 meshes 0 dropped 0 children 0}\n^C",
+  "status": "doing",
+  "sessionId": "f0185e63-485e-4cda-a895-26d78d80f6f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T09:17:36.119Z",
+      "actor": "f018",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

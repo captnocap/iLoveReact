@@ -1,0 +1,10 @@
+{
+  "id": "req_1765",
+  "at": "2026-06-24T13:37:11.428Z",
+  "origin": "session:237d7d6a",
+  "text": "dev command is instant on any other app + if i change my map from 'main' to anything else, close the app, restart it. its instant",
+  "status": "new",
+  "sessionId": "237d7d6a-e4a2-4028-a47c-52ac36b343b2",
+  "captureMode": "hook",
+  "events": []
+}

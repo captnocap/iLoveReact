@@ -1,0 +1,35 @@
+{
+  "id": "req_1769",
+  "at": "2026-06-24T13:53:03.791Z",
+  "origin": "session:237d7d6a",
+  "text": "ok now i can at least see the world. camera is broken / doesnt move. it zooms. and the startup time just went from 30s to 3s so yes the whole time i was right",
+  "status": "review",
+  "sessionId": "237d7d6a-e4a2-4028-a47c-52ac36b343b2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T13:53:39.188Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T14:15:14.780Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The loader iso pane's camera was non-functional (only zoom worked) because the embedded world_loader ran its full game: it captured the mouse for in-world look and read SDL WASD to walk the player, shadowing the editor's JS camera controls — only the scroll wheel fell through (hence zoom-only). Fixed by making the loader a PASSIVE viewport in external-camera (editor) mode: world_loader.zig freezes player locomotion + exposes isExternalCamera(node_id); engine.zig skips pointer capture for an editor-driven loader so drag reaches the pane's JS overlay (rotates the iso camera); LoaderIsoView drives drag-rotate (e.x-relative, like IsoAuthor), wheel-zoom, and WASD/arrow pan + Q/E orbit + F recenter via a direct key-bus subscription (the editor control contract was swallowing WASD for this pane). User confirmed drag-rotate works and the player is frozen. WASD pan (req_1777) is the same commit, pending the user's confirmation.",
+  "shas": [
+    "022ead4f8",
+    "82325ce03",
+    "68dd233e3",
+    "034a4db06",
+    "cc06cb604",
+    "d09f9ef19"
+  ],
+  "resolvedAt": "2026-06-24T14:15:14.780Z"
+}

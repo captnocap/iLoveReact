@@ -1,0 +1,30 @@
+{
+  "id": "req_1798",
+  "at": "2026-06-24T15:59:42.925Z",
+  "origin": "session:edc880d0",
+  "text": "that takes too long. i cant wait 6 seconds for something to show up i placed il die before the game is every made",
+  "status": "review",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T16:06:21.747Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T16:19:48.314Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made placed pieces appear instantly in the loader iso pane with no rebake (the 6s wait is gone). Root cause: the pane renders the baked gamefile, and the only way to reflect an edit was a ~5s full-world rebake + reload. Fix is live host render: world_loader.zig now keeps a per-node live-pieces pending table (keyed by node id, mount-independent, mirroring the external-camera table) and applyPendingLive copies the editor-pushed instance rows into a reserved mutable box-instance node each renderEmbedded frame, so a placement draws as a real solid mesh that frame. New doors __compiled_world_set_live_pieces/_clear_live_pieces take a Float32Array. JS pieceInstanceRows() packs pieces into the same 12-float unit-box rows the bake emits; LoaderIsoView pushes the unbaked set on each commit and clears on reload; the 2D amber placeholder is removed. index.tsx no longer auto-bakes on a placement (the overlay shows it instantly). Verified: Zig compiles+links, headless loader-view shot PASSES (world renders, no crash). Live placement test is the user's (headless can't drive a mouse) — restart the dev host to pick up the new binary.",
+  "shas": [
+    "23a05c592"
+  ],
+  "resolvedAt": "2026-06-24T16:19:48.314Z"
+}

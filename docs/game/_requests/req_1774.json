@@ -1,0 +1,30 @@
+{
+  "id": "req_1774",
+  "at": "2026-06-24T14:00:51.992Z",
+  "origin": "session:7b669437",
+  "text": "ya so dont get too deep into it just find the most sane solution to it and lets get the ball rolling",
+  "status": "review",
+  "sessionId": "7b669437-e484-4e92-bd73-f65e1d02c679",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T14:03:34.441Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T14:09:33.895Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made hmsc-int image-texture uploads portable across machines. Root cause: uploadFaceTexture stored the picked file's RAW absolute path on the decal node, so a rename broke it and a move to the MacBook double-broke it (the file isn't in the repo, and /home/siah doesn't exist on macOS; the data/ store that holds the decal is gitignored too). Fix: new ingestImage.ts copies the picked bytes into a content-addressed, repo-TRACKED folder (cart/hmsc-int/assets/tex/<hash>.<ext>) and returns a repo-relative ref; uploadFaceTexture now stores that ref instead of the path, so the texture travels with git push and survives a rename (keyed by content). Added migrateImagesIntoRepo.ts + a one-click 'make portable' button in FacePainter that rescues EXISTING path-based decals (run on the box where the sources still live; vanished sources are reported for re-upload). Pure rewrite walk unit-tested 4/4 green; FacePainter/uploadFaceTexture bundle clean under the real cart aliases. NOTE: still requires copying the gitignored data/ store to the Mac, and clicking 'make portable' + committing assets BEFORE pushing.",
+  "shas": [
+    "448954484"
+  ],
+  "resolvedAt": "2026-06-24T14:09:33.894Z"
+}

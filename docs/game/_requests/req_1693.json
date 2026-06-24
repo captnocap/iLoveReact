@@ -1,0 +1,37 @@
+{
+  "id": "req_1693",
+  "at": "2026-06-23T03:36:21.069Z",
+  "origin": "session:103f47f2",
+  "text": "sorry so i was expecting to open up the studio, click on + add button, and see 'wall' as a type, click it, make some changes, and then export it out, how does this work the way you did it",
+  "status": "review",
+  "sessionId": "103f47f2-9b77-4e37-bcad-10dbde6fbd60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T03:36:40.084Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T03:42:28.477Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-23T04:04:41.534Z",
+      "actor": "103f",
+      "kind": "note",
+      "text": "ROOT CAUSE of 'I don't see it': the + Add row was added to editors/model/Studio.tsx, but the LIVE Studio is the req_1390 side-by-side rebuild under editors/model/studiokit/ (workbench mounts StudioEditor from studiokit/index). Ported the seed row to the live studiokit/dialogs/AddShapeDialog.tsx in e347ccd6b (req_1697)."
+    }
+  ],
+  "resolution": "Wired the user's expected flow into the Studio UI: open + Add, see real build pieces as types, click one, edit, export. The + Add dialog (AddShapeDialog) now has a 'From build piece' row — Wall, Half Wall, Window Wall, Floor, Stairs, Ramp — that seeds the chosen BUILD_CATALOG piece as a fully-editable mesh via seedMeshFromPiece (the shared pieceVisualShapes decomposition the world editor + compile bake use), hiding the parametric shape sliders since a catalog piece carries its own authored size; picking a parametric shape clears the seed. Then to close the loop, the Compile Asset dialog gained a Placement picker (Free/Railing/Wall panel/Trim) that maps to the prop descriptor's buildPlacement {snap,cover,blocksSight}, so the cooked model places like a built-in piece (a railing edge-snaps onto stairs) while staying on the uniform prop substrate. Shas: 3c0c0a3b3 (Add-seed UI), c405d6bfe (Compile placement picker). Both build/cook data layers were already committed (8addfde76 seed engine, 950cdb0d1 cookedAsset plumbing, 6f3652b91 props+catalog). Validated by bundling Studio.tsx through the cart esbuild alias set (exit 0, no errors); NOT launched live — the interactive dialog can't be exercised headless, so the actual click-through is a dev-host check for the user (rjit dev hmsc-int).",
+  "shas": [
+    "3c0c0a3b3",
+    "c405d6bfe"
+  ],
+  "resolvedAt": "2026-06-23T03:42:28.476Z"
+}

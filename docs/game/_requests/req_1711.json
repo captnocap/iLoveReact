@@ -1,0 +1,42 @@
+{
+  "id": "req_1711",
+  "at": "2026-06-23T16:06:42.520Z",
+  "origin": "session:8329ba11",
+  "text": "that solved a lot of the problems but i think it also introduced a new one. oh, well i cant tell you the debug wall number because you must have removed it but i can walk through one of the walls they are connected to",
+  "status": "review",
+  "sessionId": "8329ba11-5d0d-42f3-a979-0d320cc88e81",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T16:07:39.681Z",
+      "actor": "opus-8329",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T16:15:21.416Z",
+      "actor": "opus-8329",
+      "kind": "note",
+      "text": "Diagnosis in flight, awaiting user data. Verified the common cases are NOT regressed: closed-room + plain L-corner tile perfectly at the data level (corner triangles share the diagonal; each wall = core+2 miters continuous; colliders form a closed loop, no gap). The new problem is a specific config my tests don't cover. Re-added the editor DEBUG selected-piece readout (IsoAuthor, hot-reload) so the user can pin the walk-through wall + its partner (id/coords/yaw/edit). Asked: collision pass-through vs visual slit, plain vs door/window, 2-wall corner vs T/+ junction. Will reproduce from their coords before patching."
+    },
+    {
+      "at": "2026-06-23T16:32:26.043Z",
+      "actor": "opus-8329",
+      "kind": "note",
+      "text": "ROOT CAUSE FOUND (not the miter fix). bp_2967 walk-through = the adjacent STAIRS bp_2971 (130.5,286.5) ramp-trims bp_2967's wall collider to NOTHING. bp_2967 is depth-offset onto its floor → a thin x[129,129.25] strip that lies ENTIRELY inside the stairs footprint x[129,132], so trimBandRect (RAMPFOOT-0605) collapses the band below rampTrimMinBandMeters and returns null → fully passable. Verified: bp_2967 ALONE emits x[128.88,129.13]; with the stairs in full (offset) context the rect is nulled. My miter commit (ed5ad0cd9) touches squareU/miter placement only — bands/depthSpan/ramp-trim are all unchanged by it, so this is independent (stairs-work territory, req_1700/1701). Also found GHOST DUPLICATES: old bp_2881/2882/2883 still stacked on new bp_2965/2966/2967 on map=main. Fix is a stairs-vs-wall semantics call (a wall should never be fully nulled; side-walls along a ramp edge shouldn't be trimmed like risers across it) — awaiting user direction."
+    },
+    {
+      "at": "2026-06-23T21:23:42.447Z",
+      "actor": "opus-8329",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the bp_2967 walk-through. Root cause was NOT the corner-miter fix: the adjacent staircase bp_2971 ramp-trimmed bp_2967's wall collider to nothing. bp_2967 is depth-offset onto its floor, making a thin x[129,129.25] strip that sits entirely inside the stairs' x[129,132] plan footprint, so trimBandRect (RAMPFOOT-0605) collapsed the band below rampTrimMinBandMeters and returned null → a fully passable wall. Per the user's ruling ('wall always blocks'), trimBandRect now returns the wall band as-is instead of null when a trim would collapse it — partial ramp-foot trimming (flush to the ramp edge, keeping non-ramp mass) is unchanged; only the full-delete case is overridden. Verified bp_2967 now emits a blocking collider x[129,129.25] z[285,288] against the live world (was 0 rects); placed suite 57/57 green incl. the ramp-edge-trim and crest-wall-blocker tests; full game compile+bake+render GREEN. Sha d1c22583e. Also surfaced (separate, not fixed): GHOST DUPLICATES — old bp_2881/2882/2883 still stacked on bp_2965/2966/2967 on map=main.",
+  "shas": [
+    "d1c22583e"
+  ],
+  "resolvedAt": "2026-06-23T21:23:42.447Z"
+}

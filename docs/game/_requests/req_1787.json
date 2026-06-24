@@ -1,0 +1,28 @@
+{
+  "id": "req_1787",
+  "at": "2026-06-24T14:48:16.706Z",
+  "origin": "session:7b669437",
+  "text": "still dont believe it. is the array doing ranges of colors or is it listing every single pixel",
+  "status": "review",
+  "sessionId": "7b669437-e484-4e92-bd73-f65e1d02c679",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T14:49:17.943Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T14:51:01.203Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User did not believe the run count and asked whether the array does ranges or lists every pixel. Proved BOTH with raw data: (1) the encoder ranges — flat row 512 encodes 1024 pixels as just [[193,0],[433,593],[398,null]] (3 entries) and busy rows use [4,1]/[5,0] runs where adjacent pixels match; (2) the raw stored bytes genuinely alternate per-pixel — row 50 cols 500-539 interleave d97757/e7ae8d one pixel at a time. So 100k runs is real data, not a codec flaw. The discovery: the texture is the user's 3 colours STIPPLED at the pixel level in transition zones (brush edge_coverage feather in paintable.zig) rather than flat — which is both why it won't RLE and arguably a crispness regression. Hardening the brush to flat storage is the lever where the user's RLE instinct pays off. Awaiting decision.",
+  "shas": [],
+  "resolvedAt": "2026-06-24T14:51:01.202Z"
+}

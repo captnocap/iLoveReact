@@ -1,0 +1,31 @@
+{
+  "id": "req_1695",
+  "at": "2026-06-23T03:46:33.010Z",
+  "origin": "session:b6bb7c86",
+  "text": "right... im saying how it loads in the game data not how it skips the v8 runtime",
+  "status": "review",
+  "sessionId": "b6bb7c86-b673-43ec-bdf6-244664bd2507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T03:46:56.950Z",
+      "actor": "b6bb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T04:06:20.891Z",
+      "actor": "b6bb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cloned world_loader.zig's DATA-LOAD path into TypeScript and wired it behind /test. New cart/hmsc-int/editors/play/tsLoader/: decode.ts is the byte-exact twin of constructor.zig (decodes the RJMP map container's INSTANCES/MATERIALS/MATERIAL_REFS/COLLIDERS/PHYSICS_CONFIG/HEIGHTFIELDS/FLORA/ENVIRONMENT lumps into a flat LoadedScene); buildBuckets.ts groups decoded rows into Scene3D.Instances batches (the loader's buildShapeBatches); WorldLoaderView.tsx runs the full bake->decode->batch path in V8 and draws it with the host-side native FreeFly camera (no per-frame React) plus a load-cost HUD; PlayTestRoute wraps /test with an F3 toggle to A/B PlayRoute vs the TS loader. Verified: decode round-trip test 6/6, cart bundles clean, headless load bench = ~138ms/M instances (500k in 69ms). Remaining for the user: run rjit dev hmsc-int, /test, press F3, compare frame rate vs /compiled — that interactive A/B is the actual answer to whether it performs as well as native.",
+  "shas": [
+    "51a22c1b9",
+    "03507f2c3"
+  ],
+  "resolvedAt": "2026-06-23T04:06:20.890Z"
+}

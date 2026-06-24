@@ -1,0 +1,30 @@
+{
+  "id": "req_1690",
+  "at": "2026-06-23T03:26:01.200Z",
+  "origin": "session:f1efdf51",
+  "text": "So, ok, thats a problem though, because i have no ability to control all the layers at one time to be able to size the entire piece correctly so i have to merge every layer to do so",
+  "status": "review",
+  "sessionId": "f1efdf51-5d87-4faa-a7ee-5aadcc825e3b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T03:26:23.663Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T03:38:07.457Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Original ask behind req_1692: give the ability to control all layers of a model at once to size the whole piece without merging. Investigated and found the capability already exists end-to-end (the all-parts gizmo from req_1287 transforms every layer together about a shared centroid, with working uniform and per-axis resize), so the gap was purely that its toggle was hidden in a horrible toolbar location and reset every session. Resolved under req_1692 (commit e18a010d1): relocated the toggle next to the object-mode tab, made it prominent and self-describing ('size all N layers'), and persisted it as twig state. No default/behavior change. This pairs with req_1687 (props now place on each layer of a multi-shelf model), so the user no longer needs to merge layers for either sizing or prop placement.",
+  "shas": [
+    "e18a010d1"
+  ],
+  "resolvedAt": "2026-06-23T03:38:07.457Z"
+}

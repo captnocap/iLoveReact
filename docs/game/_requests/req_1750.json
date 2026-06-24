@@ -1,0 +1,32 @@
+{
+  "id": "req_1750",
+  "at": "2026-06-24T12:25:37.166Z",
+  "origin": "session:237d7d6a",
+  "text": "no it has to be hunreds of mb to gb. trust",
+  "status": "review",
+  "sessionId": "237d7d6a-e4a2-4028-a47c-52ac36b343b2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T12:26:00.926Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T12:42:10.349Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built an honest startup data-transfer probe for hmsc-int because the old startupTimer lies (its clock starts at JS module-eval, after V8 loads the window and parses the 5.8MB bundle, and it declares READY on calm RAF frames that fire before the window is even visible). Enriched the existing flush-bytes JS-to-host meter into an on-demand __flushReport (per-op attribution, biggest single commands by prop keys, full flush timeline) plus a host-to-JS localstore read meter __storeReadReport, and added an 'I MADE IT' pill in the chrome strip beside New map that dumps everything to /tmp/rjit-startup-transfer.log on click. RESULT: 683.59MB crosses to reach the / route, and 681.15MB of it is CREATE of 3D Scene3D mesh View nodes carrying scene3dInstanceData and scene3dTexData as inline JSON number arrays (two worst flushes 237MB and 303MB). localstore reads were 0.00MB; game-state is noise. Root cause is text-vs-binary at the JS-native boundary: the vertex path already uses the __hostUploadFloatBuffer binary-handle door, but instance data and texture pixels were never wired through it. Confirmed the hundreds-of-MB hypothesis. Also fixed an epoch-mixing bug that made the timeline timestamps negative.",
+  "shas": [
+    "451ebe5cc",
+    "7f77cdca3",
+    "56a7c82e9"
+  ],
+  "resolvedAt": "2026-06-24T12:42:10.349Z"
+}

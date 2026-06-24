@@ -1,0 +1,28 @@
+{
+  "id": "req_1795",
+  "at": "2026-06-24T15:41:07.869Z",
+  "origin": "codex:019ef9b0",
+  "text": "all being considered, get me the exact styles in place for things like container widths, column widths, text input widths, etc.",
+  "status": "review",
+  "sessionId": "019ef9b0-1230-7d40-8ce6-26ba2ad50ed7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T15:41:17.593Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T15:46:11.809Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an Exact Style Values section to cart/hmsc-int/editors/model/STUDIO_MESH_EDITOR_FEATURE_COVERAGE.md. It records the concrete style numbers currently in force across the shared workbench shell and the Studio mesh editor: gutter and column widths, text input widths/heights, viewport chrome offsets, context rail widths, outliner and paint layer row dimensions, modal card widths, backdrop panel measurements, offscreen texture sizes, and the Studio tunables that control visible grid/camera/editing scale. This makes the previous feature and ASCII layout coverage directly actionable when adjusting layout or comparing current behavior against future UI changes.",
+  "shas": [],
+  "resolvedAt": "2026-06-24T15:46:11.809Z"
+}

@@ -1,0 +1,32 @@
+{
+  "id": "req_1694",
+  "at": "2026-06-23T03:42:57.843Z",
+  "origin": "session:b6bb7c86",
+  "text": "create a clone of the @world_loader.zig in typescript and swap out the /test route in @cart/hmsc-int/ for it, maybe it will perform as good as the zig native loader does also. which would be a big win if so",
+  "status": "review",
+  "sessionId": "b6bb7c86-b673-43ec-bdf6-244664bd2507",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T03:43:07.610Z",
+      "actor": "b6bb",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T04:06:33.848Z",
+      "actor": "b6bb",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same deliverable as req_1695 (its clarification): the original ask was to clone world_loader.zig in TS and swap /test for it; req_1695 clarified the intent was the DATA-LOAD path (not the V8 skip). Delivered under req_1695 — see that entry. New cart/hmsc-int/editors/play/tsLoader/ (decode.ts constructor twin, buildBuckets.ts, WorldLoaderView.tsx) + PlayTestRoute F3 toggle on /test. Verified by a 6/6 decode round-trip test and a clean cart bundle; headless load bench ~138ms/M instances.",
+  "shas": [
+    "bde8902e9",
+    "03507f2c3",
+    "51a22c1b9"
+  ],
+  "resolvedAt": "2026-06-23T04:06:33.848Z"
+}

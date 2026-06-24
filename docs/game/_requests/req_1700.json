@@ -1,0 +1,30 @@
+{
+  "id": "req_1700",
+  "at": "2026-06-23T04:30:23.536Z",
+  "origin": "session:103f47f2",
+  "text": "ok, so i did that, but i cant walk up the steps",
+  "status": "review",
+  "sessionId": "103f47f2-9b77-4e37-bcad-10dbde6fbd60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T04:31:15.206Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T04:35:24.895Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User compiled a custom staircase, placed it, couldn't walk up. Root cause: a cooked piece is kind:'prop', so placedPieceColliders gave it SOLID collision boxes — the pieceKind:'stairs' tag (req_1698) only drove swap-pick grouping, not collision — whereas real ramps/stairs collide as a walkable heightfield slope via placedPieceRamps. Fix: new exported pieceSlopeKind(def) reports the slope family for real ramp/stairs by kind AND for cooked pieces whose buildPlacement.pieceKind is 'stairs'/'ramp'. placedPieceColliders now (a) adds such pieces to rampPlans and (b) skips the solid-box path for them; placedPieceRamps now bakes the walkable slope for them from their measured footprint (linear rise over depth). So a compiled staircase is walkable like a stock one. 7/7 cookedPiece (incl. a stairs-walkable-slope + wall-stays-solid assertion) and 57/57 placed (real ramps/stairs unregressed); both bundle clean. Sha 1cc982da0. SCOPE NOTE: this fixes the editor play view (placedPieceColliders/Ramps); the compiled no-V8 loader derives colliders from render instances and would need a separate pass. Also: a slope steeper than the walkable gate (~53deg) is still blocked by design.",
+  "shas": [
+    "1cc982da0"
+  ],
+  "resolvedAt": "2026-06-23T04:35:24.895Z"
+}

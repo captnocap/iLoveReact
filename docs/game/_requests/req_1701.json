@@ -1,0 +1,30 @@
+{
+  "id": "req_1701",
+  "at": "2026-06-23T05:02:14.377Z",
+  "origin": "session:103f47f2",
+  "text": "you need to do it for the compiled game loader also",
+  "status": "review",
+  "sessionId": "103f47f2-9b77-4e37-bcad-10dbde6fbd60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T05:02:36.883Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T05:08:07.889Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made cooked stairs/ramp pieces walkable in the COMPILED no-V8 game too (req_1700 fixed only the editor play view). Root cause: the compiled COLLIDERS lump already carried the walkable slope (buildBakedColliders calls placedPieceRamps, which req_1700 taught to include cooked stairs), but world_loader.zig ALSO derives a box collider per mesh-prop instance (islandOrientedFloats ~line 1735) layered on top — so the slope existed but a solid box re-blocked it. Fix is bake-side and minimal: compile/worldGeometry.ts cookedPropMesh now ships a stairs/ramp-typed cooked piece's MESH_PROPS mesh as solid:false; the loader's meshPropIslands already returns NO islands for a non-solid mesh, so no box is derived and collision falls to the COLLIDERS-lump walkable slope. Rendering is unaffected (the mesh still draws). Verified: meshProps 1/1, worldColliders 6/6, worldParity 15/15, plus the req_1700 cookedPiece 7/7 + placed 57/57 still green. The user must RE-BAKE (rjit game bake) for the new gamefile to take effect. Caveat: bakeMassiveGameFile drops the COLLIDERS lump (a scale-lab path), so there the slope wouldn't ship — separate follow-up if that path matters. Sha 381eb1b9b.",
+  "shas": [
+    "381eb1b9b"
+  ],
+  "resolvedAt": "2026-06-23T05:08:07.889Z"
+}

@@ -1,0 +1,36 @@
+{
+  "id": "req_1709",
+  "at": "2026-06-23T15:33:15.121Z",
+  "origin": "session:8329ba11",
+  "text": "[Image #1] [Image #2] [Image #3] [Image #4] [Image #5] [Image #6] [Image #7]",
+  "status": "review",
+  "sessionId": "8329ba11-5d0d-42f3-a979-0d320cc88e81",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T15:39:42.442Z",
+      "actor": "opus-8329",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T15:39:42.450Z",
+      "actor": "opus-8329",
+      "kind": "note",
+      "text": "Handoff diagnosis (join not detected) is FALSIFIED: unit test with the exact reported coords passes — bp_2883 trims to 128.75 and emits 1 miter. Real bug is corner-miter PRISM placement: addCornerMiter uses hardcoded joinV*0.125 / nominalEnd-0.125 offsets instead of the wall's actual depth band, so miters land off the true corner square → slivers stick out. Investigating."
+    },
+    {
+      "at": "2026-06-23T16:02:50.152Z",
+      "actor": "opus-8329",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed broken wall L-corner connection pieces (gaps + triangular slivers in the screenshots). The handoff's diagnosis (join not detected) was falsified — the join IS detected and the wall trims; the real bug was the corner-miter PLACEMENT. addCornerMiter hardcoded the corner square at a half-thickness offset that only lands right when both walls are floor-offset toward the corner. Real rooms use PAINTED-tile floors (no support plate), so walls stay centered and the miter was shoved half a thickness off its crossing — see-through gap on two sides, sliver overhang on the other two. Fix places the miter on the true crossing square = (this wall's depth band) × (partner's depth band): wallJoinRunLimits now carries squareU per joined end (partner band read as it renders, lifted onto its floor) and the mitered core-trim follows squareU so the core abuts the miter with no gap. Collision/run-extension unchanged. wallSlabs/placed/build suites green, full game compile+bake+render green.",
+  "shas": [
+    "ed5ad0cd9"
+  ],
+  "resolvedAt": "2026-06-23T16:02:50.152Z"
+}

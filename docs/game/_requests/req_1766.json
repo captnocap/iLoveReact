@@ -1,0 +1,10 @@
+{
+  "id": "req_1766",
+  "at": "2026-06-24T13:40:29.472Z",
+  "origin": "session:237d7d6a",
+  "text": "the loader view doesnt work. i still have the same problem i started with here and that is: startup times are insane, and this data isnt even loading in correctly [Image #12] i cant see anything",
+  "status": "new",
+  "sessionId": "237d7d6a-e4a2-4028-a47c-52ac36b343b2",
+  "captureMode": "hook",
+  "events": []
+}

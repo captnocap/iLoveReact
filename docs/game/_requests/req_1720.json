@@ -1,0 +1,30 @@
+{
+  "id": "req_1720",
+  "at": "2026-06-24T02:56:50.294Z",
+  "origin": "codex:019ef78d",
+  "text": "in hmsc-int when selecting a material/skin for a prop or building, you can upload images. they end up showing up under a my materials seen here [Image #1] but there is no way to remove or change the name of them can you give the remove so i can at least get rid of ones i end up not liking.",
+  "status": "review",
+  "sessionId": "019ef78d-d840-7b23-8e40-4fe13fe3fbd3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T02:57:01.598Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T03:00:03.294Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added delete support directly to the hmsc-int FacePainter material browser. Custom 'my materials' swatches now show a compact trash control with a two-step inline confirmation; confirming calls the existing removeCustomTexture path, updates subscribed material lists, clears an armed delete, removes the deleted id from recents, and resets the current brush if it pointed at the deleted material. Built-in materials stay non-deletable.",
+  "shas": [
+    "dbcfc9f5d"
+  ],
+  "resolvedAt": "2026-06-24T03:00:03.294Z"
+}

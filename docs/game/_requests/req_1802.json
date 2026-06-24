@@ -1,0 +1,18 @@
+{
+  "id": "req_1802",
+  "at": "2026-06-24T17:33:31.239Z",
+  "origin": "session:9be2276f",
+  "text": "hey will u make sure that everything (yes, everything (no, not everythying, but the necessary things)) are on git so i can resume from my macbook",
+  "status": "doing",
+  "sessionId": "9be2276f-3b15-40c9-9cbf-c9c5ce57d365",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T17:34:46.978Z",
+      "actor": "9be2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1696",
+  "at": "2026-06-23T03:47:30.382Z",
+  "origin": "session:103f47f2",
+  "text": "where am i looking exactly? [Image #2] here is where i am looking",
+  "status": "review",
+  "sessionId": "103f47f2-9b77-4e37-bcad-10dbde6fbd60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T03:47:59.261Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T03:48:41.629Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User opened the Studio '+ Add' (Add Shape) dialog and didn't see the new 'From build piece' row — only the original shapes (Cube..Icosphere). Diagnosed as a STALE BUILD, not a code defect: verified the feature is committed (3c0c0a3b3) and present on disk (Studio.tsx:3318 BUILD_SEEDS, :3369 'From build piece' row), working tree clean/unclobbered by parallel sessions. The running app simply predates the change. Told the user exactly where the row should appear (between the shape buttons and the Units line) and how to pick it up: restart tools/rjit dev hmsc-int (hot-reloads TSX) or rebuild a shipped binary with tools/rjit ship hmsc-int. Offered to run the ship build for them. No code change this turn.",
+  "shas": [],
+  "resolvedAt": "2026-06-23T03:48:41.629Z"
+}

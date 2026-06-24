@@ -1,0 +1,18 @@
+{
+  "id": "req_1801",
+  "at": "2026-06-24T17:24:03.399Z",
+  "origin": "session:edc880d0",
+  "text": "go for all 3 if you can, would be nice to get it back on track asap",
+  "status": "doing",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T17:26:28.179Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

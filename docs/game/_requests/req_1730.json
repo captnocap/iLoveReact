@@ -1,0 +1,18 @@
+{
+  "id": "req_1730",
+  "at": "2026-06-24T06:36:45.177Z",
+  "origin": "session:97075b22",
+  "text": "hey whatever route this is [Image #13] where i have all the text and rect decal capability with the textures and all of that, we want to fold that into the mesh studio painting, where i actually spend my time. this currently has better text and rect capabilities and full texture capabilities than the other does and that is silly. a proper fold would bring all the capabilities over without hurting performance which should be easy since this route has proper dragging capabilities",
+  "status": "doing",
+  "sessionId": "97075b22-60c1-40c5-b513-706d116f008f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T06:36:55.299Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

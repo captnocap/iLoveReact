@@ -1,0 +1,42 @@
+{
+  "id": "req_1789",
+  "at": "2026-06-24T14:55:11.873Z",
+  "origin": "session:7b669437",
+  "text": "i dont want to really get more into it, wasted more time than necessary already. just get it stored in a better approach than the 2mb per stroke bs",
+  "status": "review",
+  "sessionId": "7b669437-e484-4e92-bd73-f65e1d02c679",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T14:57:17.572Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T15:10:07.772Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-24T15:40:59.673Z",
+      "actor": "7b66",
+      "kind": "note",
+      "text": "RETENTION FIXED (snapshot-authoritative approach). Root cause was NOT the apply/GC (a key-level fold replay proves it correctly keeps all 23 live blobs) — it was a STALE on-disk snapshot holding only 2/23 paint blobs, which the editor boots from directly (guard passed). Fix: (1) rebuilt model.snapshot.json's paintBlobs by pulling all 23 live blobs from the event log (21 recovered + 2 existing), verified 23/23, swapped in (stale 2-blob snapshot kept as .stale-bak) — this ALSO fixes a latent data bug where 21 painted models would have booted blank. (2) With the snapshot now authoritative and the boot guard passing (COUNT(seq<=15613)=14839==snapshot.events), stripped blobB64 from 1937 superseded modelPaintBaked events (kept all rows so guard stays valid; kept the 33 live-ref blob events as belt+suspenders). modelPaintBaked 484MB->9.7MB, store 694MB->219MB. Verified: snapshot 23/23, guard PASS. Backups: full store at data/_precompact_backup/, old snapshot at .stale-bak. Remaining 219MB is partMeshUpdated history (162.8MB) — same retention pattern for MESH geometry, separate follow-up. This was a one-time reclaim; recurs slowly as painting appends new blob events."
+    },
+    {
+      "at": "2026-06-24T15:56:22.676Z",
+      "actor": "7b66",
+      "kind": "note",
+      "text": "Follow-through complete (both asks): (a) MESH + paint-layer history given the same safe treatment — stripped superseded partMeshUpdated.mesh (9366) + partPaintUpdated.paint (1787) keeping latest-per-part + every row → model store 219MB->27MB (whole domain 702MB->49MB, total data store 824MB->167MB). (b) Made it REPEATABLE + committed as 'rjit game compact-store' (commit 6a3d394a8): backs up store.db+snapshot, refuses while editor holds the store (lsof), rebuilds snapshot paintBlobs from log, strips superseded heavy fields keeping latest-per-key + all rows (guard stays valid), VACUUMs, asserts guard+snapshot completeness, restores on failure. Pure logic unit-tested 4/4 (under rjit game verify); end-to-end idempotent re-run verified (0 stripped, guard PASS, COMPACT OK). Net: 694MB->27MB, 23/23 painted models boot WITH paint. Backups kept (data/_precompact_backup/ + .stale-bak + _compact_backup/) — user deletes after confirming in editor."
+    }
+  ],
+  "resolution": "User asked to stop the per-stroke bloat and store paint better. Built a paint-store compaction (strip superseded modelPaintBaked blobs, keep latest per model, vacuum), unit-tested 4/4, backed up store.db, ran it: 694MB->219MB, stripped 1933/1970 blobs. BUT a full-replay integrity check FAILED — 21 of 23 painted models lost their blob. Root cause (pre-existing, not introduced): the model store boots from a snapshot+tail, and the snapshot's materialization GC over-drops — only 2/23 live blobs survive into model.snapshot.json; the other 21 exist ONLY as raw blobB64 in the event log (1970 events, 484MB). So the 'superseded' blobs compaction strips are the ONLY copies of 21 models' paint = permanent loss. Restored store byte-identical from backup (cmp verified); paint data confirmed intact on disk. Reverted the unsafe compaction module (commit 6cd82d1a4). Also concluded the format question: RLE/pixel_icon LOSES to PNG (158KB vs 433KB; ~100k runs from a dithered-gradient texture), so PNG is correct and the issue is purely retention. Net: no safe quick fix exists — proper fix is to correct paint-blob materialization/snapshot retention FIRST (snapshot must hold all 23 live blobs), THEN compact (delete events<=globalSeq + update fold-count guard). Nothing lost; store exactly as before. Saved finding to memory hmsc_paint_storage_rle_dead_end.",
+  "shas": [
+    "6cd82d1a4"
+  ],
+  "resolvedAt": "2026-06-24T15:10:07.771Z"
+}

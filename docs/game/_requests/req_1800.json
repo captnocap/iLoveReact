@@ -1,0 +1,30 @@
+{
+  "id": "req_1800",
+  "at": "2026-06-24T17:18:03.927Z",
+  "origin": "session:edc880d0",
+  "text": "ok. lets progress then. lets do the next slice",
+  "status": "review",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T17:20:42.351Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T17:23:21.913Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the loader-pane edit loop coherent and added the rotate verb. Problem: the live overlay (req_1798) can ADD meshes but can't ERASE a baked one, so deleting/moving/rotating a piece already in the baked gamefile left the old mesh lingering until an unrelated bake. Fix is a two-tier model: placements and edits to this-session (unbaked) pieces stay INSTANT via the overlay; when an edit drops a BAKED piece id (detected in LoaderIsoView's live-push effect — a previously-baked id is gone from the piece set), it calls a debounced requestSettleBake (~1.2s, wired in index.tsx) so the baked geometry folds the change in and the lingering mesh clears on reload. Pure placements keep every baked id present, so they never bake — the common path stays instant. Also added rotate: R turns the selection 90° (whole buildings as one buildingMoved+yaw, loose pieces via remove+place, the same shape IsoAuthor uses) or the placement ghost when nothing is selected. TSX-only, hot-reloads, bundle clean. Live test is the user's. Flagged future optimization: a host-side hide-baked-instances door would make baked-piece delete/move instant too.",
+  "shas": [
+    "7649580cc"
+  ],
+  "resolvedAt": "2026-06-24T17:23:21.913Z"
+}

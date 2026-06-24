@@ -1,0 +1,30 @@
+{
+  "id": "req_1797",
+  "at": "2026-06-24T15:52:45.019Z",
+  "origin": "session:edc880d0",
+  "text": "ok i see the ghost now, next i want to see live updates. currently i click and it apparently places the thing but i dont see it until reloading",
+  "status": "review",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T15:53:17.086Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T16:06:21.738Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made loader-pane placements visible without a manual reload, two parts. (1) The debounced auto-compile keyed only on worldRev/placements, but a build-piece commit bumps the build stream (mapBuildRev) not worldRev, so placements never re-armed the bake — added buildPieces to the effect deps. (2) Since a full bake is ~5s, the HUD now draws every piece committed-since-last-bake as an instant amber wireframe box (tracking the baked id set, refreshed each reload) so a placement shows the instant you click, replaced by the real mesh on reload. Superseded in direction by req_1798/1799 (the whole rebake-per-edit loop is too slow AND the in-place gamefile write is corruption-prone); these two changes still stand as improvements.",
+  "shas": [
+    "8622d00f8"
+  ],
+  "resolvedAt": "2026-06-24T16:06:21.738Z"
+}

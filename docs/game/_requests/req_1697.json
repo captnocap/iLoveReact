@@ -1,0 +1,30 @@
+{
+  "id": "req_1697",
+  "at": "2026-06-23T04:00:03.719Z",
+  "origin": "session:103f47f2",
+  "text": "weird. i restarted the program. it is the dev server, still dont see it",
+  "status": "review",
+  "sessionId": "103f47f2-9b77-4e37-bcad-10dbde6fbd60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T04:00:29.515Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T04:04:41.545Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed 'I restarted dev and still don't see the From-build-piece row'. Root cause was a DUPLICATE Studio: my req_1693/1684 UI edits landed in editors/model/Studio.tsx, but that monolith was superseded by the req_1390 side-by-side rebuild under editors/model/studiokit/, which is what the workbench actually mounts (source.tsx -> StudioEditor from studiokit/index). The live dialogs are studiokit/dialogs/AddShapeDialog.tsx + CompileAssetDialog.tsx (both 'lifted verbatim from Studio.tsx'). Ported both edits into the live copies: the 'From build piece' seed row (Wall/Half Wall/Window Wall/Floor/Stairs/Ramp via seedMeshFromPiece) and the Compile 'Placement' picker (Free/Railing/Wall panel/Trim -> buildPlacement). Verified by bundling studiokit/StudioViewport.tsx through the cart esbuild alias set (exit 0, clean). Also saved a memory (studiokit_is_live_studio) so this duplicate-copy trap doesn't recur, and noted Studio.tsx is now an inert demolition-candidate twin carrying the same change. Sha: e347ccd6b. User should hot-reload/restart dev hmsc-int to see it.",
+  "shas": [
+    "e347ccd6b"
+  ],
+  "resolvedAt": "2026-06-23T04:04:41.544Z"
+}

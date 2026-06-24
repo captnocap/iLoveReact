@@ -1,0 +1,30 @@
+{
+  "id": "req_1713",
+  "at": "2026-06-23T21:25:33.134Z",
+  "origin": "session:8329ba11",
+  "text": "still got wallls that are not aligned. those two i said and then again a floor above and below it [Image #10] [Image #11]",
+  "status": "review",
+  "sessionId": "8329ba11-5d0d-42f3-a979-0d320cc88e81",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T21:26:40.552Z",
+      "actor": "opus-8329",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T21:31:13.390Z",
+      "actor": "opus-8329",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the misaligned collinear walls (bp_2966 stepped off bp_2967/2968). Cause: placedPieceDepthSpan's support-side scan used a tolerant range overlap, so the perpendicular SOUTH room's floor (bp_2908, z[279,282]) that only TOUCHES bp_2966's z=282 end on the -x side counted as -x support → bp_2966 read supported-both-sides → centered (body x[128.875,129.125]), while bp_2967/2968 (no end-touching room) offset onto their +x floor (body x[129,129.25]). The faces stepped. Fix: a support plate counts only with a REAL run overlap (overlap length > touch tolerance), not an end-touch. Now all three collinear segments resolve depthSpan {0,0.25} = body x[129,129.25] (verified against the live world) — a flush aligned run; the same general fix applies on the storeys above/below. REQ-0466 split/center cases unchanged (opposite-side floors still overlap the full run). placed 58/58 (added req_1713 regression); full game compile+bake+render GREEN. Sha beec18fd6.",
+  "shas": [
+    "beec18fd6"
+  ],
+  "resolvedAt": "2026-06-23T21:31:13.390Z"
+}

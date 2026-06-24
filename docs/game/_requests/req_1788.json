@@ -1,0 +1,28 @@
+{
+  "id": "req_1788",
+  "at": "2026-06-24T14:51:32.889Z",
+  "origin": "session:7b669437",
+  "text": "so you are saying that this texture is interleaving ? [Image #1]",
+  "status": "review",
+  "sessionId": "7b669437-e484-4e92-bd73-f65e1d02c679",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T14:52:54.985Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T14:54:04.250Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User shared a screenshot of the actual texture (smooth orange gradient + flat brown band + gray sunburst) and asked, incredulously, whether THAT is interleaving. Sampled the raw stored bytes along the gradient: a vertical walk down col 512 jumps between the 3-4 exact palette colours (d97757/e7ae8d/f8f1cf/f7f0ce) rather than ramping smoothly, and contiguous adjacent pixels flip d97757<->e7ae8d. Conclusion: the smooth gradient is stored as a pixel-level DITHER/stipple of the user's 3 flat colours — the eye + display downscaling blend it into a gradient. This simultaneously confirms the user ('it is 3 colours') AND the measurement ('it interleaves'): the gradient look is ACHIEVED by interleaving the 3 colours per-pixel. That dithered gradient is the worst case for run-length (every pixel flips) and an easy case for PNG (2D filters), so for any gradient texture PNG is the correct per-image format and RLE bloats it; RLE/pixel_icon only fits FLAT textures. The 695MB bloat is therefore retention (4400 copies), not format — compaction is the fix, works for gradient or flat, no painter change. A future nicety: store gradient fills as a formula (2 colours + direction ~20 bytes) instead of a dithered 158KB raster. Awaiting user's go-ahead to build compaction.",
+  "shas": [],
+  "resolvedAt": "2026-06-24T14:54:04.249Z"
+}

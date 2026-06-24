@@ -1,0 +1,30 @@
+{
+  "id": "req_1799",
+  "at": "2026-06-24T16:01:48.664Z",
+  "origin": "session:edc880d0",
+  "text": "Also, one thing we have to consider here and i didnt say it before and im surprised u didnt either is if i make an edit, the game file bakes, it bakes corrupted, then the map is never going to reload in the editor again afaik",
+  "status": "review",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T16:06:21.756Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T16:19:48.322Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed and addressed the corruption-fragility concern. Verified facts: the editor's truth is the V20 store (store.db), not the gamefile — buildPieces/previewWorld are store-derived, so a corrupt bake can never lose map DATA, only break the loader VIEW (recovered by the next good bake or the React-view toggle, which reads the store). The real bug: the gamefile is written IN PLACE (emitGameFile writeFileBytes — no temp/rename), so a bake interrupted mid-write (this box panics often) leaves a truncated file that replaced the good one. The live-host-render work (req_1798) sharply reduces exposure: placements no longer auto-bake, so bakes are now rare and deliberate (terrain edits / manual Compile) instead of per-edit. NOT yet fully closed: the in-place write is still non-atomic. Recommended follow-up to finish it: a writeFileBytesAtomic door (temp+fsync+rename, raw bytes — mirror the existing writeFileBase64Atomic but no base64 GC bomb) used for the gamefile write, so a corrupt/interrupted bake can NEVER replace the working file. Flagging for the user to decide whether to take that now.",
+  "shas": [
+    "23a05c592"
+  ],
+  "resolvedAt": "2026-06-24T16:19:48.322Z"
+}

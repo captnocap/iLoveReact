@@ -3,7 +3,7 @@
   "at": "2026-06-23T02:39:27.662Z",
   "origin": "session:103f47f2",
   "text": "you can just commit everyone, no one is committing at all and soon its gonna bite us all in the ass",
-  "status": "doing",
+  "status": "review",
   "sessionId": "103f47f2-9b77-4e37-bcad-10dbde6fbd60",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,19 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-06-23T02:43:14.948Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Committed all parallel sessions' uncommitted work at the user's direction ('just commit everyone, no one is committing... gonna bite us'). Surveyed the 2140-entry dirty tree, separated real source from scratch, and landed two checkpoints staged by explicit paths (no git add -A): 6f3652b91 = 445 source files (the one-file-per-prop recipe batch + props/catalog registration, framework world/gpu/camera zig + tests, useRerender hook, new brush_shapes/polycss carts, cli/renderer/runtime/tools edits, world_loader.zig, and req_1684's props.ts/catalog.ts custom-piece wiring); 508f6a2c8 = 1686 ledger/docs files (docs/game/_requests/*.json + an asset-pipeline doc), split out to keep the code commit reviewable. Deliberately EXCLUDED scratch + binaries (car.obj/.mtl, Desk.glb, texture.png, model*.json, shot_boot.png), cart/hmsc-int/exports/, shots/, tmp/, deps/InstantMesh/, and _uncommitted_review.md — these 12 remain untracked and are .gitignore candidates. Frozen dirs (tsz/love2d/archive) untouched. FLAGGED known-red in the commit body: game/kinds/props.test.ts shelf coverage fails (a mid-flight prop batch has unshelved kinds) — committed as WIP, not represented as done.",
+  "shas": [
+    "6f3652b91",
+    "508f6a2c8"
+  ],
+  "resolvedAt": "2026-06-23T02:43:14.948Z"
 }

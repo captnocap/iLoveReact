@@ -3,7 +3,7 @@
   "at": "2026-06-23T02:38:36.310Z",
   "origin": "session:f1efdf51",
   "text": "hello. i made this shelf [Image #6] and i was hoping i could place props on each shelve layer but seems that i am shit out of luck, i thought it was prop size, but even the smallest prop i cant get it to place on another layer here so im wondering how we could solve it",
-  "status": "doing",
+  "status": "review",
   "sessionId": "f1efdf51-5d87-4faa-a7ee-5aadcc825e3b",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,18 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-06-23T02:58:45.679Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Root-caused the 'can only place props on the top of my shelf' report: warped_shelf is a cooked Studio model authored as ONE mesh (not separable parts), so build placement raycast a single AABB and gridFacePlacementY always returned the whole-box top — middle shelves were physically unreachable, and the model's anchor/mount system was never consumed by placement anyway. Fix is geometry-driven point-and-place: horizontalSurfacesFromMesh (new mountSurfaces.ts) reads the model's flat layers straight off the cooked mesh by clustering up-facing facets into surface levels; cookedPropSurfaceYs caches them per meshRef; snap.ts gains SnapInput.propSurfacesFor + a surface-aware onFacePlacementY that drops the prop on the LAYER under the crosshair (highest board at/just-below the hit, 0.2m slack) instead of the box top; IsoAuthor injects the resolver (local levels lifted by piece.y). Zero authoring, generalizes to any shelf/table/desk model, and single-top props keep box-top behavior unchanged. Verified: mountSurfaces 5/5 and build-snap 33/33 (4 new layer-pick cases), full hmsc-int cart bundles clean. Known follow-up: recipe props (storeShelf etc.) not yet wired to the same surface picker.",
+  "shas": [
+    "f634a6801"
+  ],
+  "resolvedAt": "2026-06-23T02:58:45.679Z"
 }

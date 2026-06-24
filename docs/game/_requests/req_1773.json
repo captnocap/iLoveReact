@@ -1,0 +1,10 @@
+{
+  "id": "req_1773",
+  "at": "2026-06-24T13:59:48.308Z",
+  "origin": "session:7b669437",
+  "text": "file path. i know because if i change the image name it goes 'missing' according to the current app",
+  "status": "new",
+  "sessionId": "7b669437-e484-4e92-bd73-f65e1d02c679",
+  "captureMode": "hook",
+  "events": []
+}

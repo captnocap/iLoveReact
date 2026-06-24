@@ -1,0 +1,30 @@
+{
+  "id": "req_1796",
+  "at": "2026-06-24T15:50:08.840Z",
+  "origin": "session:edc880d0",
+  "text": "i need to see the ghost before clicking not on click",
+  "status": "review",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T15:50:42.529Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T15:51:40.939Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The armed placement ghost in the loader iso pane only showed on click/drag, not on hover. Root cause: the host fires no passive mouse-move events (onMouseMove only during a drag), so the onMove-driven setSnap never ran while hovering — the ghost resolved only when a press generated events. Fixed by mirroring IsoAuthor's established approach: poll getMouseX/getMouseY every frame inside the pane's existing rAF/setTimeout loop, convert to pane-local pixels, and re-resolve+setSnap the ghost when the cursor is over the pane (skipping a live move-drag, and guarded by a cell-key so it only re-renders when the snapped target cell actually changes). The green ghost wireframe box now tracks the cursor before you click to place. TSX-only, hot-reloads; bundle resolves clean. Needs live confirmation in the dev host.",
+  "shas": [
+    "ff550b104"
+  ],
+  "resolvedAt": "2026-06-24T15:51:40.939Z"
+}

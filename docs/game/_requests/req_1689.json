@@ -1,0 +1,28 @@
+{
+  "id": "req_1689",
+  "at": "2026-06-23T03:24:40.663Z",
+  "origin": "codex:019ef182",
+  "text": "these are not doing a 45 degree end still",
+  "status": "review",
+  "sessionId": "019ef182-d012-70f2-8579-97076088563d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T03:25:02.177Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T03:29:56.858Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed the L-corner miter depth to a real 45-degree wall-end cut: corner-connected wall bodies now stop one full wall thickness back and their miter caps span one full wall thickness along the run. T-junctions still use the half-thickness butt cut. Updated wallSlabs coverage to assert full-depth L-corner miters and retained the painted-color checks. Verified wallSlabs 2/2, compile/world-parity 15/15, build-placed 57/57, build-snap 33/33, ReleaseFast world_loader build, and SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-int.",
+  "shas": [],
+  "resolvedAt": "2026-06-23T03:29:56.858Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1722",
+  "at": "2026-06-24T04:22:07.847Z",
+  "origin": "session:a10e66a7",
+  "text": "which ever one you think will let me do like a chainlink fence style would be good",
+  "status": "review",
+  "sessionId": "a10e66a7-947a-4184-a067-79045ea27882",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T04:22:46.358Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T04:32:00.267Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built a parametric Lattice/grille primitive so chainlink fences (and the fence-top slot band the user hand-cut for 20 min) come from one Add instead of cutting + re-facing every opening by hand. New latticePanel() in editMesh.ts generates a thin walled panel from crossed bars — each a correctly-wound cuboid rotated and merged, so the inner walls of every hole exist for free. Pattern 'diamond' lays ±45 deg wires (chainlink); 'grid' lays axis-aligned mullions (slot bands, vents, railing infill). cols/rows = opening density, bar = wire width, frame = optional border; diagonal wires are clipped to panel bounds so nothing pokes out, and it stays light (a 4x2m chainlink ~324 faces, one box per bar not a quad per cell). Wired into the Add Shape dialog as a new Lattice shape with a pattern toggle + openings/wire/frame/thickness fields. Added 4 editMesh.test.ts suites (101/101 green) covering topology, bounds-clipping, density scaling, and the non-empty fallback; cart bundles clean via tsc-check.",
+  "shas": [
+    "8db83398e"
+  ],
+  "resolvedAt": "2026-06-24T04:32:00.267Z"
+}

@@ -1,0 +1,33 @@
+{
+  "id": "req_1729",
+  "at": "2026-06-24T06:06:40.609Z",
+  "origin": "session:16e1f310",
+  "text": "inside of the mesh painting tools, can you add painting layers, so that i stop having to be so exact when trying to do basically anything lol its kinda a pain in the ass when its all one layer",
+  "status": "review",
+  "sessionId": "16e1f310-eae6-48d6-90f3-987646053603",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T06:06:47.612Z",
+      "actor": "16e1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T06:56:52.947Z",
+      "actor": "16e1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Mesh-painter improvements (Studio paint mode). DONE: (1) painting LAYERS — independent surfaces composited into the texture the mesh samples, with add/hide/reorder/duplicate/delete/rename/opacity and erase-through (new GPU composite + dest-out host ops in paintable.zig; layers are session-scoped, flattened to the durable paintRef so compile/load-from-prop are unchanged); (2) recents no longer flooded by the colour-wheel drag (ColorField onCommit vs onChange; record a recent only on a settled colour); (3) durable + cross-asset saved palettes in localstore (new paintPalettes.ts + a PALETTES panel); (4) rubber-band ghost preview for line/rect/ellipse. Everything builds: rjit ship hmsc-int fast-path exit 0, cart bundles clean. NOT fixed: the 'numbers wipe when placed in the map' report — digits 0-9 exist in both glyph fonts, layoutText emits digit cells, and the bake/compile path carries the texture wholesale with no digit-specific code, so I could not reproduce it statically and did not guess; needs a concrete repro. Painted output can't be self-shot headless (paintable capture limit), so live verification in rjit dev is needed.",
+  "shas": [
+    "9a520113e",
+    "e6abea329",
+    "1bfd22fe2",
+    "2994ea37c"
+  ],
+  "resolvedAt": "2026-06-24T06:56:52.947Z"
+}

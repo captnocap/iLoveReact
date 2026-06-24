@@ -1,0 +1,33 @@
+{
+  "id": "req_1763",
+  "at": "2026-06-24T13:32:17.654Z",
+  "origin": "session:237d7d6a",
+  "text": "im still getting the massive start up time, nothing has changed from my pov",
+  "status": "review",
+  "sessionId": "237d7d6a-e4a2-4028-a47c-52ac36b343b2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T13:33:09.277Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T13:57:26.994Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root cause (user's bisection nailed it): the hmsc-int editor opened to the React Scene3D iso view (IsoAuthor), which rebuilt the entire 'main' map (3594 pieces) every boot and shipped ~683MB across the JS->host bridge — measured via a new on-demand transfer probe ('I MADE IT' button + __flushReport/__storeReadReport meters). On the big 'main' map that meant ~30s startup with no window AND a blank/failed render (GPU instance overflow); small maps were instant. Fix: render the build pane with the NATIVE world_loader (the compiled game's loader — one gamefile read, no React Scene3D) via a new LoaderIsoView + an external-camera door in world_loader.zig (setExternalCamera + a pending-camera table applied every renderEmbedded frame) + V8 doors __compiled_world_set_camera/_clear_camera. Made it the DEFAULT boot (persisted toggle to opt back to React). USER CONFIRMED: startup 30s -> 3s and the world renders. Remaining (separate reqs): camera polish (req_1769), per-map gamefile + debounced auto-compile (req_1760/1761), picking/placement in the loader pane.",
+  "shas": [
+    "022ead4f8",
+    "82325ce03",
+    "68dd233e3",
+    "034a4db06"
+  ],
+  "resolvedAt": "2026-06-24T13:57:26.994Z"
+}

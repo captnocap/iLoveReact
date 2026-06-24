@@ -1,0 +1,33 @@
+{
+  "id": "req_1777",
+  "at": "2026-06-24T14:11:18.373Z",
+  "origin": "session:237d7d6a",
+  "text": "ok that is good one more thing is wasd panning",
+  "status": "review",
+  "sessionId": "237d7d6a-e4a2-4028-a47c-52ac36b343b2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T14:12:05.428Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T15:09:57.809Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Loader iso pane is now a fully navigable editor camera. WASD/arrow pan + Q/E orbit + F recenter via a direct key-bus subscription, drag-rotate, wheel-zoom — all driving the JS-solved iso pose pushed to world_loader's external camera. Two fixes made pan finally work + smooth: (1) the pan loop needed a setTimeout fallback when requestAnimationFrame isn't a host global (a bare rAF call silently never ran, so held keys were never read); (2) the loop pushed the camera across the host bridge every frame even idle ('lags like shit') — now it pushes ONLY when the pose moves (while panning), since the host pending-camera table re-applies the last pose each render. User confirmed: works, no longer lagging.",
+  "shas": [
+    "cc06cb604",
+    "d09f9ef19",
+    "9cf5f1800",
+    "81e9bf784"
+  ],
+  "resolvedAt": "2026-06-24T15:09:57.809Z"
+}

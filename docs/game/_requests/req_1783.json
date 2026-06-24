@@ -1,0 +1,30 @@
+{
+  "id": "req_1783",
+  "at": "2026-06-24T14:23:40.340Z",
+  "origin": "session:7b669437",
+  "text": "no i disagree its not the correct persistence strategy, the correct one would have been to follow exactly as @docs/game/_archive/pixel_icon_demo.md @docs/game/_archive/pixel_icon_gallery.md did for storing image data",
+  "status": "review",
+  "sessionId": "7b669437-e484-4e92-bd73-f65e1d02c679",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T14:26:16.638Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T14:51:01.184Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User proposed replacing the mesh painter's per-stroke PNG blob (the 695MB model-store bloat) with the pixel_icon palette-indexed RLE format. Built+tested the codec (paintMatrix.ts, 6/6 round-trip, commit f4c78b66f), then measured on REAL stored paint blobs decoded via ImageMagick. Verdict from the data: at 1024² the RLE is 2.4-2.7x LARGER than the existing 158KB PNG because the texture is spatially fragmented (~100k run-entries). Quantizing colours (628->7) and snapping to the 3 real colours did NOT reduce runs — the fragmentation is genuine pixel-level alternation, not colour noise. RLE only wins by dropping resolution (what pixel_icon does at 64²). So the format isn't the lever; retention is (4400 historical copies). Recommended fork: harden the brush to flat 3-colour storage (then RLE wins AND looks crisper) OR compaction (keep PNG, drop hoarded copies, 695MB->few MB). Awaiting user's choice.",
+  "shas": [
+    "f4c78b66f"
+  ],
+  "resolvedAt": "2026-06-24T14:51:01.184Z"
+}

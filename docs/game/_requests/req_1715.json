@@ -1,0 +1,10 @@
+{
+  "id": "req_1715",
+  "at": "2026-06-24T00:56:05.455Z",
+  "origin": "session:8329ba11",
+  "text": "yeah so this is an interesting problem because we do not want overhang and we do not want it to feel like one side is larger than the other. when i think about it, i think to the sims or fortnite, where a wall is on one grid axis, and it never over or underhangs. regardless of if there is a floor on both sides of it or not. how is that achieved",
+  "status": "new",
+  "sessionId": "8329ba11-5d0d-42f3-a979-0d320cc88e81",
+  "captureMode": "hook",
+  "events": []
+}

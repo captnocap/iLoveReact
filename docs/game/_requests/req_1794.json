@@ -1,0 +1,28 @@
+{
+  "id": "req_1794",
+  "at": "2026-06-24T15:38:14.308Z",
+  "origin": "codex:019ef9b0",
+  "text": "now go again and write up an ascii display of how all of these features/capabilities are layed out",
+  "status": "review",
+  "sessionId": "019ef9b0-1230-7d40-8ce6-26ba2ad50ed7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T15:38:26.581Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T15:39:39.802Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Expanded cart/hmsc-int/editors/model/STUDIO_MESH_EDITOR_FEATURE_COVERAGE.md with a new ASCII Layout Map section. It diagrams the full Studio workbench layout, StudioEditor stage, viewport chrome regions, mode-to-capability map, dialog map, paint panel, column-3 panels, data/compile flow, source tree, and one-screen capability index so the feature coverage is visually digestible as ASCII.",
+  "shas": [],
+  "resolvedAt": "2026-06-24T15:39:39.802Z"
+}

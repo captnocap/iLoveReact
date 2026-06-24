@@ -1,0 +1,10 @@
+{
+  "id": "req_1719",
+  "at": "2026-06-24T01:28:55.354Z",
+  "origin": "session:8329ba11",
+  "text": "Walls also, do not align on the same grid when doing multiple stories without floors (double tall walls)",
+  "status": "new",
+  "sessionId": "8329ba11-5d0d-42f3-a979-0d320cc88e81",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_1698",
+  "at": "2026-06-23T04:07:24.973Z",
+  "origin": "session:103f47f2",
+  "text": "ok i see it. so, when exporting it, you should export as a piece type not a prop type, and then, for wall, this is the area on the builder that when i place a wall, i can come back to it and switch it out, this is where these should go to [Image #3]",
+  "status": "review",
+  "sessionId": "103f47f2-9b77-4e37-bcad-10dbde6fbd60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T04:20:01.684Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T04:20:01.694Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two asks this turn. (1) DOOR WALLS + kill the black block: added 'Door Wall' + 'Garage Door' to the + Add 'From build piece' row; since the live door edit renders a SOLID wall behind a flat near-black panel (no real opening), seedMeshFromPiece now CARVES the doorway for door/garageDoor edits — two jambs + a header around a floor-to-Ho opening (walk 1.2x2.2m, garage 2.6x2.8m from PLACED_TUNING) + a thin editable door slab — so you model a real door instead of the black block (ff72de600, 8/8 v8cli). (2) EXPORT AS PIECE TYPE + custom walls in the swap bar: Compile picker became 'Piece type' (Prop/Wall/Railing/Fence/Floor/Trim) tagging PropBuildPlacement.pieceKind; catalogPickOptions (the placed-piece swap pick in the buildings panel the user pointed at) now includes cooked pieces grouped by that family via new catalog.cookedCatalogPickEntries, so a Wall-typed custom piece lists UNDER walls and a placed wall can be swapped to it. Stays kind:'prop' (uniform mesh substrate; renders placed via PlacedPieceMeshes + bakes via MESH_PROPS), pieceKind is grouping-only so zero churn to the ~20 prop branches/validator. 5/5 v8cli; panel+Compile+StudioViewport bundle clean. Ported to both live studiokit dialogs AND the Studio.tsx twin. Needs a dev reload; a custom wall can't take cutout edits (fixed mesh) by design. Shas ff72de600,341947399.",
+  "shas": [
+    "ff72de600",
+    "341947399"
+  ],
+  "resolvedAt": "2026-06-23T04:20:01.694Z"
+}

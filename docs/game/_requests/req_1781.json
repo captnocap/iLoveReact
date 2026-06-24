@@ -1,0 +1,10 @@
+{
+  "id": "req_1781",
+  "at": "2026-06-24T14:17:14.108Z",
+  "origin": "session:7b669437",
+  "text": "so are you saying, when i make a change, it doesnt store the change. it stores the change + everything leading up to it as a snapshot, and then does that every single time over?",
+  "status": "new",
+  "sessionId": "7b669437-e484-4e92-bd73-f65e1d02c679",
+  "captureMode": "hook",
+  "events": []
+}

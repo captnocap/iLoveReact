@@ -1,0 +1,30 @@
+{
+  "id": "req_1761",
+  "at": "2026-06-24T13:04:38.009Z",
+  "origin": "session:237d7d6a",
+  "text": "no it doesnt, and further more ok so dont bake it every single edit but you still need to retain edit history and you need to then compile it regularly",
+  "status": "review",
+  "sessionId": "237d7d6a-e4a2-4028-a47c-52ac36b343b2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T13:06:06.645Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T15:14:23.868Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The loader pane renders the BAKED gamefile, so it only reflected edits after a manual Compile — the 'always up to date' gap. Per the user's ruling (don't bake every edit; retain edit history; compile regularly): added a DEBOUNCED auto-compile that bakes ~2.5s after edits settle (keyed on worldRev/placements/map-switch), gated to when the loader view is active, never overlapping a bake (compilingRef + re-arm so the latest edits still land). On bake success the existing compiledReloadKey bumps and LoaderIsoView reloads the gamefile IN PLACE by unmounting its host node (the next embedded render re-mounts from the fresh gamefile) — the camera pose survives because world_loader's pending-camera table is keyed by node id and not cleared on unmount, so a refresh never jolts the view. Edit history (V20 streams) untouched; this only refreshes the rendered bake. Caveat: updates lag ~5-7s behind an edit (debounce + ~5s bake), matching the 'regular' cadence ruling. Still open: picking/placement in the loader pane.",
+  "shas": [
+    "2aca03919"
+  ],
+  "resolvedAt": "2026-06-24T15:14:23.867Z"
+}

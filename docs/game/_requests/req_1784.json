@@ -1,0 +1,28 @@
+{
+  "id": "req_1784",
+  "at": "2026-06-24T14:40:43.654Z",
+  "origin": "session:7b669437",
+  "text": "you arnt doing the rle format the same then i have to assume. what does the data format look like in your storage",
+  "status": "review",
+  "sessionId": "7b669437-e484-4e92-bd73-f65e1d02c679",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T14:41:39.144Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T14:51:01.193Z",
+      "actor": "7b66",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User challenged whether the RLE was encoded the same as pixel_icon. Dumped the literal stored format: {size, palette:[hex x628 = 6.1KB stored once], rows:[1024 rows of integer-index runs = 444KB]}. Confirmed it is NOT hex-per-pixel (that would be 8MB) — it's palette + integer-index run-length, exactly pixel_icon's shape. The 444KB bulk is 100,823 run-entries at 4.5 bytes each in JSON; even a tight binary encoding (~2.5 bytes/run) stays ~250KB, still above the 158KB PNG. Root cause is the run COUNT (spatial detail), proven independent of the encoding. Format is correct; it simply loses to PNG's 2D entropy coding at full resolution.",
+  "shas": [],
+  "resolvedAt": "2026-06-24T14:51:01.193Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1731",
+  "at": "2026-06-24T07:08:34.732Z",
+  "origin": "session:16e1f310",
+  "text": "when i press move layer down it duplicates it and moves one down and keeps one at the top. that or it doesnt clean up the stale placement or something",
+  "status": "review",
+  "sessionId": "16e1f310-eae6-48d6-90f3-987646053603",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T07:09:49.235Z",
+      "actor": "16e1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T07:24:17.098Z",
+      "actor": "16e1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed paint-layer reorder duplicating content and delete leaving paint visible. Root cause was shared: the restore-from-paintRef effect (fires on model switch, async blob arrival, or after a dev hot reload that reset the in-memory load guard) uploaded the FLATTENED composite image onto the base layer while the other layers were still alive, so base held every layer's pixels — a reorder then drew it twice and a delete left it showing. Fix: a restore now collapses the layer stack to a single base layer and loads the flattened image there (the paintRef is one flattened image; in-session the load guard holds so your layers are untouched while working — a hot reload/reopen collapses to one, painting preserved). Hardening added: recompositeDisplay composites each unique layer id once, the stack is deduped on every change, and per-layer Paintables mount in a stable id order so reorder never churns host nodes. Builds clean (rjit ship hmsc-int exit 0); self-heals an already-corrupted stack on next reload. TS-only, so rjit dev hot-reloads it.",
+  "shas": [
+    "bd4bf857e"
+  ],
+  "resolvedAt": "2026-06-24T07:24:17.098Z"
+}

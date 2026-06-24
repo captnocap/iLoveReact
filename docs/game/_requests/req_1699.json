@@ -1,0 +1,30 @@
+{
+  "id": "req_1699",
+  "at": "2026-06-23T04:20:19.806Z",
+  "origin": "session:103f47f2",
+  "text": "so i started with a staircase, and i have edited it to here, but how do i export this ? [Image #5]",
+  "status": "review",
+  "sessionId": "103f47f2-9b77-4e37-bcad-10dbde6fbd60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T04:20:38.469Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T04:22:24.723Z",
+      "actor": "103f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User seeded a staircase, added a curved railing, and asked how to export it. Answered the how-to (the gold Package/Compile icon in the Studio toolbar → Compile Asset dialog → Label + Nature + Piece type → Cook + Install; the whole visible model flattens into one cooked piece with a mesh-measured footprint). Noticed the Piece type picker (req_1698) lacked a Stairs option even though the user built a staircase, so added 'Stairs' (pieceKind:'stairs', grid snap) to COMPILE_PLACEMENTS in both the live studiokit CompileAssetDialog and the Studio.tsx twin — so a cooked staircase lists under stairs in the placed-piece swap pick and can replace a stock staircase. StudioViewport bundles clean. Needs a dev re-bundle for the new Stairs option to appear; the user can export now with the existing types (Railing fits too). Asked whether they want the whole thing as Stairs or the railing as a separate swappable piece. Sha ef0bd1e3b.",
+  "shas": [
+    "ef0bd1e3b"
+  ],
+  "resolvedAt": "2026-06-23T04:22:24.723Z"
+}

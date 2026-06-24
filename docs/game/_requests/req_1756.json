@@ -1,0 +1,10 @@
+{
+  "id": "req_1756",
+  "at": "2026-06-24T12:44:09.744Z",
+  "origin": "session:237d7d6a",
+  "text": "right but i guess it doesnt make sense. the game data is tiny. very small. so the fact react gets that large is absurd when it should be a single read of the gamefile and done",
+  "status": "new",
+  "sessionId": "237d7d6a-e4a2-4028-a47c-52ac36b343b2",
+  "captureMode": "hook",
+  "events": []
+}

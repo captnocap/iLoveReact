@@ -1,0 +1,31 @@
+{
+  "id": "req_1725",
+  "at": "2026-06-24T05:17:15.368Z",
+  "origin": "session:a10e66a7",
+  "text": "just showing. but what i want to do u can help me with is i want to make a double wide door that slides open you know like from a grocery store or something. i know how to frame the door up myself but idk how to do anything else lol but would be cool if it had detection to open when player/npc is near",
+  "status": "review",
+  "sessionId": "a10e66a7-947a-4184-a067-79045ea27882",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T05:17:40.334Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T05:34:46.294Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built Phase 1 of the grocery-store automatic double-wide sliding door, extending the EXISTING table-driven wall-edit door system (portal cutout + doorOpen state + closed-panel band + DOORS lump) rather than a parallel mechanism. New 'slidingDoor' WallEdit (edits.ts, committed be3c02627): double-wide 2.4m glass walk portal with an action:'auto' interaction (new autoOpenRadiusMeters field) + panelStyle/panelCount/openingWidthMeters added to WallEditDefinition (all optional, backward compatible). PlayRoute (committed 39f79ad6f) runs a per-frame autoDoorFrame: any auto-door wall opens when the player is within radius and closes past a hysteresis margin; open state is route-local + transient (per-id overlay onto liftedPieces, bumping autoDoorRev to recompute colliders+render) — never a world commit, mirroring the elevator car's transient height so the persisted stream stays clean. pieceShapes sizes the closed leaf to the edit's openingWidthMeters. RESULT: place a wall, cycle its edit to Sliding Door, and in /play it auto-opens on approach with collision in sync. NOTE: placed.ts (the opening-width override for the jamb-split + closed-band) and placed.test.ts (a green double-wide test) are CORRECT and tested but HELD BACK uncommitted because a parallel worker's in-progress wall-centering refactor (req_1714/1719) is entangled in those same two files and currently fails 2 unrelated tests (req_1713, REQ-0472) — I will not bundle their broken WIP under my commit or revert their work. FOLLOW-UPS: the visible two-leaf SLIDE motion (continuous open fraction), NPC proximity (no NPCs in the play view yet), and the compiled /compiled DOORS auto-step parity.",
+  "shas": [
+    "be3c02627",
+    "39f79ad6f"
+  ],
+  "resolvedAt": "2026-06-24T05:34:46.294Z"
+}

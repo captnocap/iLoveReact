@@ -1,0 +1,30 @@
+{
+  "id": "req_1732",
+  "at": "2026-06-24T07:31:30.076Z",
+  "origin": "session:f0185e63",
+  "text": "in the studio mesh editor can you make it easier to save a copy of something this is kinda a pain in the ass right now i am trying to make variations of things and i keep just overwriting the same shit",
+  "status": "review",
+  "sessionId": "f0185e63-485e-4cda-a895-26d78d80f6f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T07:31:35.398Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T07:36:27.344Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a 'Save a Copy' verb to the Studio mesh editor so making variations no longer overwrites the original. The Studio auto-persists every edit to the open model's branch, so there was no fork affordance — editing always wrote back into the same model. New duplicateModel() in editors/model/studioModel.ts forks a model (default: the open one) into a brand-new library model: fresh model id + fresh part ids, preserving part order, palette, and the painted texture, then opens the copy so further edits land on it. The content-addressed pixel-paint blob is shared by reference (paintRef), so nothing is re-stored. Names auto-increment ('X copy', 'X copy 2', no 'copy copy' stacking). Exposed as a hero-bar pill 'Save a Copy' (Copy icon) in the model workbench source, shown only when a model is open. Verified via SHIP_RUN_PACKAGE=0 rjit ship hmsc-int (bundle + native compile clean).",
+  "shas": [
+    "e0756ba5f"
+  ],
+  "resolvedAt": "2026-06-24T07:36:27.344Z"
+}

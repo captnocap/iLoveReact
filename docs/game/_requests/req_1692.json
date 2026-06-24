@@ -1,0 +1,30 @@
+{
+  "id": "req_1692",
+  "at": "2026-06-23T03:34:47.693Z",
+  "origin": "session:f1efdf51",
+  "text": "i didnt even see the all parts toggle because its in a horrible location",
+  "status": "review",
+  "sessionId": "f1efdf51-5d87-4faa-a7ee-5aadcc825e3b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-23T03:35:14.020Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-23T03:38:07.449Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user couldn't size a whole multi-layer model without merging every layer into one part — and the merge is exactly what turned the shelf into a single-AABB prop (req_1687). Root cause: the group-transform capability ALREADY existed (the all-parts gizmo, req_1287, which move/resize/rotates every layer together about the model's shared center and correctly supports uniform + per-axis scale), but its toggle was a dim monospace chip buried at the far end of a wrapping toolbar row, and it disappeared entirely once a model was down to 1 part — so the user said 'i didnt even see the all parts toggle because its in a horrible location.' Fix is pure discoverability, no behavior change: relocated the toggle to sit immediately next to the object-mode tab (the most prominent control in the editor), relabeled it self-describingly ('▢ size all N layers' → '▣ all N layers') with a clear tooltip stating you never need to merge to resize the whole thing, and persisted it as twig state (studio:allParts) so the choice sticks across hot reloads instead of resetting each session. Still OFF by default and still gated to object mode with 2+ layers. Verified the hmsc-int cart bundles clean (tools/tsc-check). UI relocation only; live-verify via tools/rjit dev hmsc-int (Studio editor can't be headless-shot here). Commit e18a010d1.",
+  "shas": [
+    "e18a010d1"
+  ],
+  "resolvedAt": "2026-06-23T03:38:07.449Z"
+}

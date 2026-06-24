@@ -1,0 +1,31 @@
+{
+  "id": "req_1790",
+  "at": "2026-06-24T15:06:17.932Z",
+  "origin": "session:237d7d6a",
+  "text": "its incredibly laggy. needs better approach before moving forward. it works. lags like shit",
+  "status": "review",
+  "sessionId": "237d7d6a-e4a2-4028-a47c-52ac36b343b2",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T15:10:11.300Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T15:10:11.308Z",
+      "actor": "opus-startup-probe",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Loader iso pane is now a fully navigable, smooth editor camera. WASD/arrow pan + Q/E orbit + F recenter (direct key-bus subscription), drag-rotate, wheel-zoom. Pan needed a setTimeout fallback when requestAnimationFrame isn't a host global (a bare rAF call silently never ran). Lag fixed: the loop pushed the camera across the host bridge ~60x/sec even idle — now it pushes ONLY when the pose moves (while panning), since world_loader's pending-camera table re-applies the last pose each render. User confirmed works + no longer lagging.",
+  "shas": [
+    "9cf5f1800",
+    "81e9bf784"
+  ],
+  "resolvedAt": "2026-06-24T15:10:11.308Z"
+}

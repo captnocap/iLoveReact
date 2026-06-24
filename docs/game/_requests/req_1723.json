@@ -1,0 +1,28 @@
+{
+  "id": "req_1723",
+  "at": "2026-06-24T04:54:11.577Z",
+  "origin": "codex:019ef7fa",
+  "text": "fix all these label with strings in the hmsc-int editor only [Image #1] i cant even see the full string even when im typing",
+  "status": "review",
+  "sessionId": "019ef7fa-0f37-7130-9beb-dabc817f7240",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T04:54:17.162Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T04:55:42.975Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the hmsc-int model editor dialog field layout so LCField rows claim the full dialog width and put controls in a growing value lane. This makes string inputs like Compile Asset > Label show the full available width while typing, and applies to both the current studiokit controls and the legacy inline Studio.tsx copy.",
+  "shas": [],
+  "resolvedAt": "2026-06-24T04:55:42.975Z"
+}

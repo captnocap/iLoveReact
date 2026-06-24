@@ -1,0 +1,28 @@
+{
+  "id": "req_1758",
+  "at": "2026-06-24T12:54:02.558Z",
+  "origin": "codex:019ef9b0",
+  "text": "in hmsc-int the studio mesh editor is maturing fast. i need you to get me full coverage of features and how it behaves in a md file i can digest. keep things bulleted and detail how things work lightly, but get full named coverage of features and capabilities",
+  "status": "review",
+  "sessionId": "019ef9b0-1230-7d40-8ce6-26ba2ad50ed7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T12:54:12.884Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T12:57:28.526Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Created a digestible full feature-coverage map for the hmsc-int Studio mesh editor at cart/hmsc-int/editors/model/STUDIO_MESH_EDITOR_FEATURE_COVERAGE.md. It surveys the active studiokit editor and documents the current named capabilities across entry points, persistence, viewport/camera, outliner/library, add/import, selection modes, transforms, symmetry, mesh ops, rig/anchors, UV/texture, paint, backdrops, compile/cooked assets, diagnostics, shortcuts, and source files so the maturing editor can be understood without spelunking the implementation.",
+  "shas": [],
+  "resolvedAt": "2026-06-24T12:57:28.526Z"
+}
