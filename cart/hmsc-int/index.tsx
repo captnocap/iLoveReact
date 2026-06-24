@@ -162,18 +162,19 @@ function EditorShell() {
   // ── Chrome popovers + compile feedback ────────────────────────────────────────
   const [menuOpen, setMenuOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
-  // [LOADERVIEW req_1757] side-by-side toggle: render the bottom-right build pane via
-  // the native world_loader (one gamefile read) instead of the React Scene3D rebuild
-  // (~683MB/boot). OFF by default — the user flips it to compare, then we make it the
-  // default once it's proven. The React IsoAuthor path is untouched while this is off.
-  // Durable so flipping it sticks across cold restarts — the whole point is that once
-  // you opt in, EVERY boot uses the loader pane (no React Scene3D build) and startup
-  // stays fast. Default off (safe side-by-side); env RJIT_LOADER_VIEW=1 forces on.
+  // [LOADERVIEW req_1768] render the bottom-right build pane via the native world_loader
+  // (one gamefile read) instead of the React Scene3D rebuild (~683MB/boot that chokes the
+  // big 'main' map → slow boot + blank viewport). NOW DEFAULT ON: the app opens into the
+  // loader pane so startup is fast and the world actually renders. The pane toggle flips
+  // back to the React view and PERSISTS '0' so that choice sticks. env RJIT_LOADER_VIEW
+  // forces '1'/'0'.
   const [loaderView, setLoaderViewState] = useState(() => {
     try {
-      if (envGet('RJIT_LOADER_VIEW') === '1') return true;
-      return nsGet('hmsc', 'editor.loaderView') === '1';
-    } catch { return false; }
+      const env = envGet('RJIT_LOADER_VIEW');
+      if (env === '1') return true;
+      if (env === '0') return false;
+      return nsGet('hmsc', 'editor.loaderView') !== '0'; // default ON unless turned off
+    } catch { return true; }
   });
   const setLoaderView = useCallback((next: boolean | ((v: boolean) => boolean)) => {
     setLoaderViewState((v) => {
