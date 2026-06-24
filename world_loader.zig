@@ -308,6 +308,16 @@ const CameraState = struct {
     initialized: bool = false,
     aiming: bool = false,
     far: f32,
+    // External-orbit override (LOADERVIEW req_1757): the editor drives the iso
+    // authoring camera from JS (cart/hmsc-int IsoAuthor's IsoStage). When set, the
+    // camera orbits an EXPLICIT world target with JS-supplied yaw/pitch/distance
+    // instead of trailing the player — and it SNAPS (no smoothing, no spring-arm)
+    // so it tracks the user's orbit/zoom input frame-exact. setExternalOrbit() flips
+    // it on; the player-trailing game camera is untouched when off.
+    external: bool = false,
+    ext_target: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
+    ext_distance: f32 = CAMERA_DISTANCE_METERS,
+    ext_fov: f32 = CAMERA_FOV_DEGREES,
 };
 
 const PhysicsColliders = struct {
@@ -2275,6 +2285,16 @@ fn solveAimCamera(player: PlayerState, yaw_degrees: f32, orbit_pitch_degrees: f3
 }
 
 fn desiredCamera(cam: CameraState, player: PlayerState) CameraSolve {
+    // External-orbit (editor iso view): orbit the JS-supplied world target, no player
+    // trailing, no aim mode. yaw/pitch live in the shared fields (set by setExternalOrbit).
+    if (cam.external) {
+        return .{
+            .pos = orbitEye(cam.ext_target, cam.yaw_degrees, cam.pitch_degrees, cam.ext_distance),
+            .target = cam.ext_target,
+            .fov = cam.ext_fov,
+            .pivot = cam.ext_target,
+        };
+    }
     if (cam.aiming) return solveAimCamera(player, cam.yaw_degrees, cam.pitch_degrees);
     const target = Vec3{ .x = player.x, .y = player.y + CAMERA_TARGET_HEIGHT_METERS, .z = player.z };
     return .{
@@ -2337,6 +2357,24 @@ fn springArmEye(want: CameraSolve, maybe_colliders: ?PhysicsColliders) Vec3 {
 
 fn updateCameraNode(camera_node: *Node, cam: *CameraState, player: PlayerState, colliders: ?PhysicsColliders, dt: f32) void {
     var want = desiredCamera(cam.*, player);
+    // External-orbit (editor iso view): no spring-arm (the iso eye must stay at its
+    // full authoring distance, never pulled in through a roof) and no smoothing (it
+    // tracks the user's orbit/zoom drag frame-exact).
+    if (cam.external) {
+        cam.current_pos = want.pos;
+        cam.current_target = want.target;
+        cam.current_fov = want.fov;
+        cam.initialized = true;
+        camera_node.scene3d_pos_x = cam.current_pos.x;
+        camera_node.scene3d_pos_y = cam.current_pos.y;
+        camera_node.scene3d_pos_z = cam.current_pos.z;
+        camera_node.scene3d_look_x = cam.current_target.x;
+        camera_node.scene3d_look_y = cam.current_target.y;
+        camera_node.scene3d_look_z = cam.current_target.z;
+        camera_node.scene3d_fov = cam.current_fov;
+        camera_node.scene3d_far = cam.far;
+        return;
+    }
     want.pos = springArmEye(want, colliders);
     if (!cam.initialized or dt <= 0 or CAMERA_SMOOTHING_PER_SECOND <= 0) {
         cam.current_pos = want.pos;
@@ -4725,6 +4763,30 @@ pub fn mouseLook(node_id: u32, dx: f32, dy: f32) void {
     const entry = findMounted(node_id) orelse return;
     const runtime = entry.runtime orelse return;
     runtime.mouseLook(dx, dy);
+}
+
+/// LOADERVIEW req_1757: drive the camera as an external iso orbit (the editor's
+/// IsoStage pose) instead of trailing the player. target = the world point to orbit;
+/// yaw/pitch in degrees; distance = eye pull-back (metres); fov in degrees. The pose
+/// SNAPS each frame (no smoothing/spring-arm). Idempotent; mounts the runtime lazily
+/// so the editor can push a pose before the first render.
+pub fn setExternalOrbit(node_id: u32, tx: f32, ty: f32, tz: f32, yaw_degrees: f32, pitch_degrees: f32, distance: f32, fov_degrees: f32) void {
+    const entry = findMounted(node_id) orelse return;
+    const runtime = entry.runtime orelse return;
+    runtime.camera.external = true;
+    runtime.camera.ext_target = .{ .x = tx, .y = ty, .z = tz };
+    runtime.camera.yaw_degrees = yaw_degrees;
+    runtime.camera.pitch_degrees = pitch_degrees;
+    runtime.camera.ext_distance = distance;
+    runtime.camera.ext_fov = fov_degrees;
+}
+
+/// Return the camera to the player-trailing game camera (LOADERVIEW req_1757).
+pub fn clearExternalOrbit(node_id: u32) void {
+    const entry = findMounted(node_id) orelse return;
+    const runtime = entry.runtime orelse return;
+    runtime.camera.external = false;
+    runtime.camera.initialized = false; // re-seed the trailing camera cleanly
 }
 
 pub fn setAiming(node_id: u32, aiming: bool) void {

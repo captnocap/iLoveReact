@@ -87,6 +87,40 @@ fn hostStatus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnString(info, status);
 }
 
+// ── external iso-orbit camera (LOADERVIEW req_1757) ─────────────────────────
+// __compiled_world_set_orbit(nodeId, tx,ty,tz, yawDeg, pitchDeg, distance, fovDeg)
+// drives the embedded loader's camera from the editor's IsoStage pose; _clear_orbit
+// returns it to the player-trailing game camera.
+
+fn argF32(info: v8.FunctionCallbackInfo, idx: u32, fallback: f32) f32 {
+    return if (argToF64(info, idx)) |v| @floatCast(v) else fallback;
+}
+
+fn hostSetOrbit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    world_loader.setExternalOrbit(
+        node_id,
+        argF32(info, 1, 0),
+        argF32(info, 2, 0),
+        argF32(info, 3, 0),
+        argF32(info, 4, 0),
+        argF32(info, 5, 0),
+        argF32(info, 6, 120),
+        argF32(info, 7, 45),
+    );
+    setReturnString(info, "ok");
+}
+
+fn hostClearOrbit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (argToNodeId(info, 0)) |node_id| world_loader.clearExternalOrbit(node_id);
+    setReturnString(info, "ok");
+}
+
 // ── the pop-out window (WORLDWIN-0611) ──────────────────────────────────────
 // __compiled_world_window(gameFile, storeDir, width, height) opens the
 // second OS window (or reloads its gamefile when already open — the Compile
@@ -143,6 +177,8 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_mount", hostMount);
     v8_runtime.registerHostFn("__compiled_world_unmount", hostUnmount);
     v8_runtime.registerHostFn("__compiled_world_status", hostStatus);
+    v8_runtime.registerHostFn("__compiled_world_set_orbit", hostSetOrbit);
+    v8_runtime.registerHostFn("__compiled_world_clear_orbit", hostClearOrbit);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
     v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);
     v8_runtime.registerHostFn("__compiled_world_window_status", hostWindowStatus);
