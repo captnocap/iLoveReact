@@ -112,6 +112,9 @@ export type StudioModel = {
   /** delete a saved model from the library (req_1060). If it was open, fall back
    *  to the blank 'new' scene. This is a BRANCH event — not undoable here. */
   deleteModel(id: string): void;
+  /** save a COPY of a model (default: the open one) as a new library model and
+   *  open it, so variations don't overwrite the original (req_1732). */
+  duplicateModel(id?: string): void;
 };
 
 // ── The live stream wiring ──────────────────────────────────────────────────────
@@ -466,6 +469,49 @@ function deleteModel(id: string): void {
   else notify();
 }
 
+// Pick a non-colliding "copy" name for a forked model: "<base> copy", then
+// "<base> copy 2", … (and re-copying a copy doesn't stack "copy copy").
+function copyName(base: string, existing: Set<string>): string {
+  const root = base.replace(/ copy( \d+)?$/, '');
+  let candidate = `${root} copy`;
+  for (let n = 2; existing.has(candidate); n++) candidate = `${root} copy ${n}`;
+  return candidate;
+}
+
+// Save a COPY of a model (req_1732). The Studio auto-persists every edit to the
+// open model's branch, so making a variation meant overwriting the original. This
+// forks `id` (default: the open model) into a brand-new library model — fresh model
+// id + fresh part ids, preserving part order, palette, and the painted texture —
+// then OPENS the copy so further edits land on it, leaving the original untouched.
+// Emitted as plain BRANCH events (like newModel/deleteModel), not the per-model
+// undo chain. The pixel-paint blob is content-addressed, so the copy SHARES the
+// original's bytes by reference (paintRef) — nothing is re-stored.
+function duplicateModel(id?: string): void {
+  ensureInit();
+  const srcId = id ?? store.openModelId;
+  if (!srcId) return;
+  const src = streamState().models?.[srcId];
+  if (!src) return;
+  const newId = mintId('mdl');
+  const existing = new Set(libraryModels(streamState()).map((m) => m.name));
+  const name = copyName(src.name, existing);
+  pushEvent({ kind: 'modelCreated', model: newId, name }, `copy ${src.name}`);
+  // copy parts top-to-bottom, minting fresh ids; chaining afterId preserves order.
+  // (paint cells are keyed by face/UV, not part id, so the layer copies verbatim.)
+  let afterId: string | undefined;
+  for (const partId of src.order) {
+    const sp = src.parts[partId];
+    if (!sp) continue;
+    const copyId = mintId('pt');
+    const part: StoredPart = { ...sp, id: copyId, version: 0, paint: sp.paint ? { ...sp.paint } : undefined };
+    pushEvent({ kind: 'partAdded', model: newId, part, afterId }, `add ${part.name}`);
+    afterId = copyId;
+  }
+  if (src.palette) pushEvent({ kind: 'modelPaletteSet', model: newId, palette: src.palette }, 'recolour');
+  if (src.paintRef) pushEvent({ kind: 'modelPaintBaked', model: newId, paintRef: src.paintRef }, 'paint');
+  setOpen(newId);
+}
+
 /** Subscribe a non-React consumer (the workbench source) to store changes. */
 export function subscribeStudio(fn: () => void): () => void {
   listeners.add(fn);
@@ -485,8 +531,9 @@ export function studioModelName(): string | null {
 }
 export function studioRenameModel(name: string): void { renameModel(name); }
 export function studioDeleteModel(id: string): void { deleteModel(id); }
+export function studioDuplicateModel(id?: string): void { duplicateModel(id); }
 
-const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, editPaint, setPalette, bakePaint, mergeActive, runAction, undo, redo, newModel, openModel, renameModel, deleteModel } as const;
+const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, editPaint, setPalette, bakePaint, mergeActive, runAction, undo, redo, newModel, openModel, renameModel, deleteModel, duplicateModel } as const;
 
 export function useStudioModel(): StudioModel {
   ensureInit();

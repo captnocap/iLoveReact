@@ -15,7 +15,7 @@ import { StudioRigPanel } from '../../model/RigMetaPanel';
 import { StudioShapePanel } from '../../model/ShapePanel';
 import {
   subscribeStudio, studioModelsList, studioOpenModelId, studioNewModel, studioOpenModel,
-  studioModelName, studioRenameModel, studioDeleteModel,
+  studioModelName, studioRenameModel, studioDeleteModel, studioDuplicateModel,
 } from '../../model/studioModel';
 
 const NEW_ROW = 'new';
@@ -55,6 +55,15 @@ export function modelSource(): WorkbenchSource<null> {
 
     subscribe: (fn) => subscribeStudio(fn),
     select: (): null => null,
+
+    // hero-bar verb (req_1732): "Save a Copy" forks the open model into a new
+    // library model and opens it, so making variations never overwrites the
+    // original. Only meaningful once a model is open (the 'new' blank scene has
+    // nothing to copy yet — it becomes a real model on the first edit).
+    actions: () =>
+      studioOpenModelId()
+        ? [{ id: 'duplicate', label: 'Save a Copy', icon: 'Copy', run: () => studioDuplicateModel() }]
+        : [],
 
     // Column 3 (req_0981): the open model (rename), the STUDIO facts, and the
     // LIVE UV preview formed from the active part's mesh.
