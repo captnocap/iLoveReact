@@ -30,6 +30,7 @@ import { materialFamily } from '../workbench/materials/chooser';
 import { propParts } from '../../render3d/propParts';
 import { isTextureable, type Part } from '../../render3d/parts';
 import { uploadFaceTexture } from './uploadFaceTexture';
+import { migrateImagesIntoRepo, summarizeMigration } from './migrateImagesIntoRepo';
 
 // PROPSKIN-0766: a placed PROP piece (pieceId 'prop.<kind>') skins by NAMED PART,
 // not by front/back/sides. Its texturable parts come from the SAME propParts the
@@ -371,6 +372,21 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
       .finally(() => setUploading(false));
   };
 
+  // PORTABILITY (req_1774): older uploads stored this machine's absolute file
+  // path, which breaks on rename and on another computer. This pulls every such
+  // image's bytes into the repo (content-addressed) and rewrites the refs, so
+  // after a commit + push the textures travel. Run it here, where the source
+  // files still exist; a moved/deleted source can't be recovered (reported).
+  const [migrateMsg, setMigrateMsg] = useState('');
+  const onMakePortable = () => {
+    try {
+      const r = migrateImagesIntoRepo();
+      setMigrateMsg(summarizeMigration(r));
+    } catch (e) {
+      setMigrateMsg(`migration failed: ${String(e)}`);
+    }
+  };
+
   const brushLabel = brush.kind === 'color' ? brush.value : (materialById.get(brush.id)?.label ?? brush.id);
 
   return (
@@ -569,6 +585,12 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
             </Box>
           </Pressable>
         ) : null}
+        <Pressable onPress={onMakePortable} hoverable tooltip="copy your uploaded images into the repo so they travel with git/another machine (run before committing). Renamed/moved sources can't be recovered — re-upload those.">
+          <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: 1, borderColor: '#3a4f6b', backgroundColor: '#16233a' }}>
+            <Text fontSize={9} color="#a8b6c8" style={{ fontFamily: 'monospace' }}>make portable</Text>
+          </Box>
+        </Pressable>
+        {migrateMsg ? <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace', flexBasis: '100%' }}>{migrateMsg}</Text> : null}
       </Box>
 
       {/* materials: the ENTIRE textures menu, in the workspace (req_0711). A live
