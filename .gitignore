@@ -327,6 +327,11 @@ cart/hmsc-int/data/streams/
 cart/hmsc-int/data/snapshots/
 cart/hmsc-int/data/domains/*/streams/
 cart/hmsc-int/data/domains/*/snapshots/
+# Compact-store safety backups (rjit game compact-store, req_1789) — the stale
+# pre-compaction copies (e.g. _precompact_backup/model.store.db.bak, ~700MB);
+# kept on disk as a recovery net, never git's. Matches at any depth under data/.
+cart/hmsc-int/data/**/_precompact_backup/
+cart/hmsc-int/data/**/_compact_backup/
 # Editor-baked decal pixel files (DECALPIXFILE-0610) — derived cache the
 # DecalPixelBaker regenerates from the stored DecalDocs; never git's.
 cart/hmsc-int/data/decal-pixels/
