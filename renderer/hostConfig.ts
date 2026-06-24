@@ -662,8 +662,21 @@ let g_smallFlushBytes = 0;   // bytes in sub-breakdown-threshold flushes (not op
 let g_smallFlushCount = 0;
 const g_flushTimeline: { at: number; bytes: number; n: number }[] = [];
 const g_biggestCmds = new Map<string, { op: string; type: any; len: number; keys: string[] }>(); // by id, kept if bigger
-const g_flushT0 = (globalThis as any).performance?.now?.() ?? Date.now();
-const flushNow = (): number => ((globalThis as any).performance?.now?.() ?? Date.now()) - g_flushT0;
+// ONE frozen clock, resolved LAZILY on the first flush (req_1633's trap, hit again in
+// req_1751): performance.now may not be installed at module-eval, so capturing t0 here
+// with Date.now() (epoch ~1.78e12) and later reading performance.now (monotonic ms)
+// mixed the two epochs → hugely negative timestamps. Pick the source ONCE, on first
+// use, and base t0 on that same source — monotonic and correct.
+let g_flushClock: (() => number) | null = null;
+let g_flushT0 = 0;
+function flushNow(): number {
+  if (!g_flushClock) {
+    const perf = (globalThis as any).performance?.now;
+    g_flushClock = typeof perf === 'function' ? () => perf.call((globalThis as any).performance) : () => Date.now();
+    g_flushT0 = g_flushClock();
+  }
+  return g_flushClock() - g_flushT0;
+}
 
 // Per-command byte attribution for a fat flush. Also records the biggest single
 // commands (>=16KB) by id so the dump names the prop carrying mesh verts / instance
