@@ -969,6 +969,11 @@ pub fn resetForReload() void {
     g_dyn_bump_verts = 0;
     g_dyn_warned = false;
     for (&g_dyn_slots) |*s| s.* = .{};
+    // The texture hash memo keys on buffer POINTERS; a reload frees + recycles
+    // those addresses, so a stale (ptr,len) could collide with a new buffer. Clear
+    // it (the fingerprint guards the rare same-address+len case, but a clean memo
+    // is free and removes all doubt — every texture just re-walks once).
+    for (&g_tex_hash_memo) |*e| e.* = .{};
 }
 
 /// Acquire the next RT slot for this frame. Returns null on pool exhaustion
@@ -1071,16 +1076,23 @@ fn estimateMeshRadius(node: *const Node) f32 {
 // only a handful of distinct face textures live at once.
 // ════════════════════════════════════════════════════════════════════════
 
-const TEX_CACHE_SIZE = 16;
+// Was 16 with FIFO eviction (req_1739): a detailed painted world (CookedProp ships
+// each painted mesh a 512² = 1 MB inline atlas) has far more than 16 distinct
+// textures in view at once, so the FIFO thrashed — every frame it evicted, then
+// re-created + re-uploaded 1 MB textures for the ones it had just dropped. 256 slots
+// with LRU (touch-on-hit) keeps a cityful of cooked-prop atlases resident.
+const TEX_CACHE_SIZE = 256;
 const TexEntry = struct {
     hash: u64 = 0,
     w: u32 = 0,
     h: u32 = 0,
+    lru: u64 = 0, // last g_tex_lru_clock tick this entry was used (LRU eviction)
     tex: ?*wgpu.Texture = null,
     view: ?*wgpu.TextureView = null,
     bind_group: ?*wgpu.BindGroup = null,
 };
 var g_tex_cache: [TEX_CACHE_SIZE]TexEntry = [_]TexEntry{.{}} ** TEX_CACHE_SIZE;
+var g_tex_lru_clock: u64 = 0;
 
 fn hashTex(w: u32, h: u32, data: []const u8) u64 {
     var h64: u64 = 0xcbf29ce484222325;
@@ -1095,6 +1107,49 @@ fn hashTex(w: u32, h: u32, data: []const u8) u64 {
     return h64;
 }
 
+// Cheap O(1) content fingerprint: w, h, len + a sparse strided byte sample. Used to
+// detect when a recycled buffer POINTER secretly carries new content, so the hash
+// memo below never returns a stale hash for it.
+fn texFingerprint(w: u32, h: u32, data: []const u8) u64 {
+    var f: u64 = 0xcbf29ce484222325;
+    f ^= @as(u64, w);
+    f *%= 0x100000001b3;
+    f ^= @as(u64, h);
+    f *%= 0x100000001b3;
+    f ^= @as(u64, data.len);
+    f *%= 0x100000001b3;
+    const step: usize = @max(1, data.len / 32);
+    var i: usize = 0;
+    while (i < data.len) : (i += step) {
+        f ^= data[i];
+        f *%= 0x100000001b3;
+    }
+    return f;
+}
+
+// Per-frame hash memo (req_1739) — THE 4 fps fix. The texture cache is content-hash
+// keyed, but hashTex walks the WHOLE atlas (1 MB+ for a 512² CookedProp) every call.
+// drawScene calls getOrCreateTexBindGroup once per textured mesh PER FRAME, so a
+// detailed painted storefront re-hashed tens of MB every frame on the CPU inside
+// gpu.frame() — flat 4 fps with the GPU idle (present ~30 µs). This direct-mapped
+// memo returns the already-computed FNV hash for a (ptr,len,fingerprint) we've walked
+// before, so a stable buffer is hashed ONCE, not once per frame. A pointer reused for
+// new content has a different fingerprint → miss → re-walk (correct). A buffer that
+// genuinely changes every frame degrades to the old behaviour, never worse.
+const TEX_HASH_MEMO_LEN = 1024;
+const TexHashMemo = struct { ptr: usize = 0, len: usize = 0, fp: u64 = 0, hash: u64 = 0, used: bool = false };
+var g_tex_hash_memo: [TEX_HASH_MEMO_LEN]TexHashMemo = [_]TexHashMemo{.{}} ** TEX_HASH_MEMO_LEN;
+
+fn memoHashTex(w: u32, h: u32, data: []const u8, fp: u64) u64 {
+    const ptr = @intFromPtr(data.ptr);
+    const idx: usize = @intCast((ptr ^ (data.len *% 0x9e3779b97f4a7c15)) % TEX_HASH_MEMO_LEN);
+    const e = &g_tex_hash_memo[idx];
+    if (e.used and e.ptr == ptr and e.len == data.len and e.fp == fp) return e.hash;
+    const hash = hashTex(w, h, data); // the full walk — only on a memo miss
+    e.* = .{ .ptr = ptr, .len = data.len, .fp = fp, .hash = hash, .used = true };
+    return hash;
+}
+
 fn dropTexEntry(e: *TexEntry) void {
     if (e.bind_group) |bg| bg.release();
     if (e.view) |v| v.release();
@@ -1105,30 +1160,36 @@ fn dropTexEntry(e: *TexEntry) void {
 fn getOrCreateTexBindGroup(rgba: []const u8, w: u32, h: u32) ?*wgpu.BindGroup {
     if (w == 0 or h == 0) return null;
     if (rgba.len != @as(usize, w) * @as(usize, h) * 4) return null;
-    const hash = hashTex(w, h, rgba);
+    const fp = texFingerprint(w, h, rgba);
+    const hash = memoHashTex(w, h, rgba, fp);
 
+    g_tex_lru_clock +%= 1;
     for (&g_tex_cache) |*e| {
         if (e.bind_group != null and e.hash == hash and e.w == w and e.h == h) {
+            e.lru = g_tex_lru_clock;
             return e.bind_group;
         }
     }
 
-    var slot: ?*TexEntry = null;
+    // Miss: take a free slot, else evict the least-recently-used entry.
+    var slot: *TexEntry = &g_tex_cache[0];
+    var found: bool = false;
     for (&g_tex_cache) |*e| {
         if (e.bind_group == null) {
             slot = e;
+            found = true;
             break;
         }
     }
-    if (slot == null) {
-        // FIFO: drop slot 0, shift left, reuse last.
-        dropTexEntry(&g_tex_cache[0]);
-        var i: usize = 1;
-        while (i < TEX_CACHE_SIZE) : (i += 1) {
-            g_tex_cache[i - 1] = g_tex_cache[i];
+    if (!found) {
+        var oldest: u64 = std.math.maxInt(u64);
+        for (&g_tex_cache) |*e| {
+            if (e.lru < oldest) {
+                oldest = e.lru;
+                slot = e;
+            }
         }
-        g_tex_cache[TEX_CACHE_SIZE - 1] = .{};
-        slot = &g_tex_cache[TEX_CACHE_SIZE - 1];
+        dropTexEntry(slot);
     }
 
     const device = core.getDevice() orelse return null;
@@ -1184,7 +1245,7 @@ fn getOrCreateTexBindGroup(rgba: []const u8, w: u32, h: u32) ?*wgpu.BindGroup {
         tex.destroy();
         return null;
     };
-    slot.?.* = .{ .hash = hash, .w = w, .h = h, .tex = tex, .view = view, .bind_group = bg };
+    slot.* = .{ .hash = hash, .w = w, .h = h, .lru = g_tex_lru_clock, .tex = tex, .view = view, .bind_group = bg };
     return bg;
 }
 
