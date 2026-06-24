@@ -1,30 +1,33 @@
 // LoaderIsoView — the iso authoring viewport rendered by the NATIVE world_loader
-// instead of a React Scene3D rebuild (LOADERVIEW req_1757).
+// instead of a React Scene3D rebuild (LOADERVIEW req_1757/req_1769).
 //
 // Why this exists: booting the editor's iso pane through React's 3D path serialized
 // ~683MB of mesh/instance/texture data across the host bridge every time (measured —
-// the "I MADE IT" probe). The compiled game loads the SAME static world from a gamefile
-// in one native read with zero of that traffic. This pane mounts that loader inline
-// (<WorldLoader>) and drives its camera from the editor's IsoStage, so the static world
-// costs a single read — React keeps only the editing affordances on top.
+// the "I MADE IT" probe), which made the big 'main' map take ~30s and render blank. The
+// compiled game loads the SAME static world from a gamefile in one native read. This
+// pane mounts that loader inline (<WorldLoader>) and drives its camera from the editor's
+// IsoStage — boot dropped to ~3s and the world renders.
 //
 // Camera: JS owns the solve. We push IsoStage.solve()'s eye+look+fov to the loader via
 // __compiled_world_set_camera each frame; the host snaps to it (world_loader.zig
-// setExternalCamera). Because it's the SAME GAME_CAMERA.solve(Isometric) pose the
-// picking math uses, the rendered view matches the cursor ray by construction.
+// setExternalCamera). It's the SAME GAME_CAMERA.solve(Isometric) pose IsoAuthor uses, so
+// picking (when wired) matches the render by construction. Controls mirror IsoAuthor:
+// drag rotates (yaw from horizontal motion), WASD/arrows pan (stage.nudge), wheel zooms.
 //
-// SIDE-BY-SIDE (req_1757, swap-safety): this is an OPT-IN alternate to <IsoAuthor>,
-// off by default. It renders + camera-controls the world; picking/placement overlay is
-// a later step. The React IsoAuthor path is untouched until the user flips the default.
+// NOTE (rule-of-two): the control logic here is intentionally the same shape as
+// IsoAuthor's. If a third consumer appears, extract a useIsoCameraControls(stage, …) hook.
 
 import { createElement, useCallback, useEffect, useRef } from 'react';
 import { Box, Pressable } from '@reactjit/primitives';
 import { IsoStage } from './isoStage';
+import { useEditorControls } from './editors/useEditorControls';
 
 const g: any = globalThis;
 
 const DEFAULT_GAME_FILE = 'zig-out/game/hmsc.gamefile';
 const DEFAULT_STORE_DIR = 'zig-out/game/contentstore';
+
+const ARROW_TO_WASD: Record<string, string> = { arrowup: 'w', arrowdown: 's', arrowleft: 'a', arrowright: 'd' };
 
 export function LoaderIsoView(props: {
   gameFile?: string;
@@ -61,15 +64,41 @@ export function LoaderIsoView(props: {
     );
   }, [stage]);
 
-  // The loader mounts lazily on its first embedded render and re-mounts when the gamefile
-  // changes (a Compile). A per-frame push keeps the external camera applied across both,
-  // with no flash of the player-trailing camera.
+  // WASD/arrow pan: keys ride the editor control contract (same 'iso-build' scope as
+  // IsoAuthor); held state lives here and the rAF loop below slides the view.
+  const heldPanRef = useRef<Record<string, boolean>>({});
+  useEditorControls('iso-build', {
+    active: true,
+    handlers: {
+      'camera.orbit-ccw': () => { stage.rotate(-1); pushCamera(); },
+      'camera.orbit-cw': () => { stage.rotate(1); pushCamera(); },
+      'view.recenter': () => { stage.centerOn(props.centerX ?? 0, props.centerZ ?? 0); pushCamera(); },
+      'view.pan': ({ phase, key }: { phase: string; key: string }) => {
+        const k = ARROW_TO_WASD[key] ?? key;
+        heldPanRef.current[k] = phase === 'down';
+      },
+    },
+  });
+
+  // One rAF loop: apply held-key pan (stage.nudge) then push the camera every frame.
+  // The host pending table also holds the last pose across the lazy mount / Compile
+  // remounts, so the pose survives even where rAF is absent (headless).
   useEffect(() => {
     let alive = true;
-    pushCamera(); // once synchronously — the host pending table holds it across the lazy
-                  // mount, so a frame loop isn't required (and headless has no rAF).
+    let last = g.performance?.now?.() ?? 0;
+    pushCamera(); // once synchronously so the pose is set before the first paint
     const tick = () => {
       if (!alive) return;
+      const now = g.performance?.now?.() ?? last + 16;
+      const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
+      last = now;
+      const held = heldPanRef.current;
+      const forward = (held.w ? 1 : 0) - (held.s ? 1 : 0);
+      const strafe = (held.d ? 1 : 0) - (held.a ? 1 : 0);
+      if (forward || strafe) {
+        const speed = Math.max(18, stage.distance() * 0.85); // m/s, scales with zoom
+        stage.nudge(forward * speed * dt, strafe * speed * dt);
+      }
       pushCamera();
       g.requestAnimationFrame?.(tick);
     };
@@ -79,33 +108,29 @@ export function LoaderIsoView(props: {
       const nodeId = Number(loaderRef.current?.id ?? 0);
       if (nodeId && typeof g.__compiled_world_clear_camera === 'function') g.__compiled_world_clear_camera(nodeId);
     };
-  }, [pushCamera]);
+  }, [pushCamera, stage]);
 
-  // ── pointer: left-drag rotates the view, wheel zooms toward the cursor ──────────
-  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  // ── pointer: left-drag rotates the view (yaw from horizontal motion) ────────────
+  // Pane-relative cursor from the event itself (e.x − rect.x), exactly like IsoAuthor —
+  // the host fires move events with real coords; getMouseX() is for passive polling.
+  const dragRef = useRef<{ x: number } | null>(null);
   const local = useCallback((e: any) => {
     const r = rectRef.current;
-    const mx = Number(g.getMouseX?.() ?? (e?.x ?? r.x + r.width / 2));
-    const my = Number(g.getMouseY?.() ?? (e?.y ?? r.y + r.height / 2));
-    return { mx, my };
+    return { x: Number(e?.x ?? 0) - r.x, y: Number(e?.y ?? 0) - r.y };
   }, []);
-  const onDown = useCallback((e: any) => { const { mx, my } = local(e); dragRef.current = { x: mx, y: my }; }, [local]);
+  const onDown = useCallback((e: any) => { dragRef.current = { x: local(e).x }; }, [local]);
   const onMove = useCallback((e: any) => {
-    if (!dragRef.current) return;
-    const { mx } = local(e);
-    const dx = mx - dragRef.current.x;
-    dragRef.current.x = mx;
-    if (dx) { stage.rotateBy(dx * 0.4); pushCamera(); }
+    const d = dragRef.current;
+    if (!d) return;
+    const p = local(e);
+    if (p.x !== d.x) { stage.rotateBy((p.x - d.x) * 0.3); d.x = p.x; pushCamera(); }
   }, [local, stage, pushCamera]);
   const onUp = useCallback(() => { dragRef.current = null; }, []);
 
   return (
     <Box
       style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#0d141f' }}
-      onLayout={(e: any) => {
-        const l = e?.layout ?? e;
-        if (l && Number.isFinite(l.width)) rectRef.current = { x: l.x ?? 0, y: l.y ?? 0, width: l.width, height: l.height };
-      }}
+      onLayout={(lr: any) => { rectRef.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
     >
       {createElement('WorldLoader', {
         ref: loaderRef,
