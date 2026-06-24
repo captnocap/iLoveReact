@@ -184,6 +184,7 @@ function EditorShell() {
     });
   }, []);
   const [compiledReloadKey, setCompiledReloadKey] = useState(0);
+  const compilingRef = useRef(false); // a bake is in flight (auto + manual share it)
   const [compiledStatus, setCompiledStatus] = useState('native world_loader primitive');
   // Compile-button feedback (the bake shells out, no instant result): the state
   // drives the pill icon, the status is a readable one-liner in the chrome.
@@ -417,6 +418,8 @@ function EditorShell() {
   // map — what you see in the preview is what the game runs. Deliberate (a button),
   // not on every keystroke, so authoring doesn't clobber the booted world midway.
   const compileToGame = useCallback(async () => {
+    if (compilingRef.current) return; // never overlap bakes (auto + manual share this)
+    compilingRef.current = true;
     setCompiledStatus('compiling game-file...');
     setCompileState('compiling');
     setCompileStatus('baking…');
@@ -462,8 +465,30 @@ function EditorShell() {
       setCompileState('error');
       setCompileStatus(`✗ ${message.slice(0, 80)}`);
       logEvent({ cat: 'map', text: `compile failed: ${message}` });
+    } finally {
+      compilingRef.current = false;
     }
   }, [previewWorld, logEvent, ws.stem]);
+
+  // [LOADERVIEW req_1760/1761] "always up to date": the loader pane renders the BAKED
+  // gamefile, so it only reflects edits after a compile. Auto-compile on a DEBOUNCED
+  // cadence — bake ~2.5s after edits settle (never per-edit; the user's ruling), and
+  // skip while a bake is in flight (re-arm so the latest edits still land). Only while
+  // the loader view is on (the React view shows live state directly, no bake needed).
+  // Edit history is untouched (V20 streams); this just refreshes the rendered bake.
+  const autoCompileTimer = useRef<any>(null);
+  useEffect(() => {
+    if (!loaderView) return;
+    if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
+    const arm = () => {
+      autoCompileTimer.current = setTimeout(() => {
+        if (compilingRef.current) { arm(); return; } // a bake is running — wait, then retry
+        compileToGame();
+      }, compilingRef.current ? 1500 : 2500);
+    };
+    arm();
+    return () => { if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current); };
+  }, [loaderView, worldRev, placements, ws.stem, compileToGame]);
 
   // The /workbench source registry (WORKBENCH.md §6) — built once per mount.
   const wbSources = useMemo(workbenchSources, []);
@@ -626,10 +651,14 @@ function EditorShell() {
               // on the /test route (F1/F2).
               <Pane label="build">
                 {loaderView ? (
+                  // Key on the MAP only (not worldEpoch): switching maps remounts +
+                  // re-centers, but an edit must NOT remount — the loader reloads its
+                  // gamefile in place via reloadToken so the camera pose is preserved.
                   <LoaderIsoView
-                    key={`loader#${ws.stem}#${worldEpoch}`}
+                    key={`loader#${ws.stem}`}
                     centerX={buildCenterX}
                     centerZ={buildCenterZ}
+                    reloadToken={compiledReloadKey}
                   />
                 ) : (
                   <IsoAuthor

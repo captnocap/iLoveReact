@@ -39,6 +39,7 @@ export function LoaderIsoView(props: {
   storeDir?: string;
   centerX?: number;
   centerZ?: number;
+  reloadToken?: number; // bump to reload the gamefile in place (after a re-bake)
 }) {
   const gameFile = props.gameFile ?? DEFAULT_GAME_FILE;
   const storeDir = props.storeDir ?? DEFAULT_STORE_DIR;
@@ -132,6 +133,19 @@ export function LoaderIsoView(props: {
       if (nodeId && typeof g.__compiled_world_clear_camera === 'function') g.__compiled_world_clear_camera(nodeId);
     };
   }, [pushCamera, stage]);
+
+  // Reload the gamefile IN PLACE after a re-bake (req_1760/1761). Unmount the host
+  // runtime for this node; the next embedded render re-mounts from the fresh gamefile.
+  // The camera pose survives because the host pending-camera table is keyed by node id
+  // (NOT cleared on unmount) — so an auto-compile refresh never jolts the view. Skips
+  // the initial mount.
+  const reloadSeenRef = useRef(props.reloadToken);
+  useEffect(() => {
+    if (reloadSeenRef.current === props.reloadToken) return;
+    reloadSeenRef.current = props.reloadToken;
+    const nodeId = Number(loaderRef.current?.id ?? 0);
+    if (nodeId && typeof g.__compiled_world_unmount === 'function') g.__compiled_world_unmount(nodeId);
+  }, [props.reloadToken]);
 
   // ── pointer: left-drag rotates the view (yaw from horizontal motion) ────────────
   // Pane-relative cursor from the event itself (e.x − rect.x), exactly like IsoAuthor —
