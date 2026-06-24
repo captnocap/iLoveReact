@@ -488,7 +488,11 @@ function EditorShell() {
     };
     arm();
     return () => { if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current); };
-  }, [loaderView, worldRev, placements, ws.stem, compileToGame]);
+    // buildPieces is in the deps so a PLACEMENT in the loader iso pane (commitBuildEvent
+    // bumps the build stream, NOT worldRev) re-arms the debounce — without it the loader
+    // only refreshed on a 2D-canvas edit (worldRev) and a placed piece stayed invisible
+    // until a manual reload (req_1797).
+  }, [loaderView, worldRev, placements, buildPieces, ws.stem, compileToGame]);
 
   // The /workbench source registry (WORKBENCH.md §6) — built once per mount.
   const wbSources = useMemo(workbenchSources, []);

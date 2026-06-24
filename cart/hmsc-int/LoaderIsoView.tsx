@@ -169,6 +169,12 @@ export function LoaderIsoView(props: {
   // The hover-ghost cell key — the per-frame poll only re-snaps when the target CELL
   // changes, so the ghost doesn't thrash a re-render every frame.
   const ghostKeyRef = useRef('');
+  // The piece ids the NATIVE loader is currently showing (the last baked set). The loader
+  // renders the baked gamefile, which lags edits by a bake, so any piece committed since
+  // then is "pending" — drawn as an instant 2D box (req_1797) until the next reload swaps
+  // in the real mesh. Seeded with the boot set; refreshed each reload.
+  const bakedIdsRef = useRef<Set<string> | null>(null);
+  if (bakedIdsRef.current === null) bakedIdsRef.current = new Set((props.pieces ?? []).map((p) => p.id));
 
   // Mirror the selection up so the cart's PropertiesPanel/FacePainter light up — the
   // SAME onSelectionChange contract IsoAuthor reports through.
@@ -209,7 +215,10 @@ export function LoaderIsoView(props: {
         s.fov,
       );
     }
-    if (armedRef.current || selectedIdsRef.current.size) rerenderRef.current();
+    // Redraw the 2D HUD (ghost / selection / just-placed boxes) to track the camera.
+    // pushCamera is only ever called on actual camera movement (drag/zoom/pan-key), never
+    // idle, so this never storms re-renders while the view sits still.
+    rerenderRef.current();
   }, [stage]);
 
   // ── snap resolution: the cursor → a placement, with the SAME inputs F2/IsoAuthor use.
@@ -415,6 +424,9 @@ export function LoaderIsoView(props: {
     reloadSeenRef.current = props.reloadToken;
     const nodeId = Number(loaderRef.current?.id ?? 0);
     if (nodeId && typeof g.__compiled_world_unmount === 'function') g.__compiled_world_unmount(nodeId);
+    // The reload follows a fresh bake, so the loader is about to render the current piece
+    // set — those are no longer "pending". Clear the just-placed boxes.
+    bakedIdsRef.current = new Set(piecesRef.current.map((p) => p.id));
   }, [props.reloadToken]);
 
   // ── pointer: rotate (drag empty), move (drag a selected piece), click = place/select.
@@ -499,14 +511,23 @@ export function LoaderIsoView(props: {
     }
   }
   const selSegs: number[] = [];
-  if (editable && selectedIds.size) {
+  const pendingSegs: number[] = [];
+  if (editable) {
     const dx = moveDelta?.dx ?? 0, dz = moveDelta?.dz ?? 0;
+    const baked = bakedIdsRef.current!;
     for (const pc of piecesRef.current) {
-      if (!selectedIds.has(pc.id)) continue;
+      const isSel = selectedIds.has(pc.id);
+      // A piece committed since the last bake isn't in the native render yet — draw it as
+      // an instant amber box so a placement shows the moment you click (req_1797), until
+      // the bake reload swaps in the real mesh. Selected pieces use the selection box.
+      const isPending = !isSel && !baked.has(pc.id);
+      if (!isSel && !isPending) continue;
       const b = GAME_BUILD.placed.bounds(pc);
-      const cx = (b.minX + b.maxX) / 2 + dx;
-      const cz = (b.minZ + b.maxZ) / 2 + dz;
-      selSegs.push(...boxSegments(stage, rect, cx, b.baseY, cz, 0, b.maxX - b.minX, b.topY - b.baseY, b.maxZ - b.minZ));
+      const cx = (b.minX + b.maxX) / 2 + (isSel ? dx : 0);
+      const cz = (b.minZ + b.maxZ) / 2 + (isSel ? dz : 0);
+      (isSel ? selSegs : pendingSegs).push(
+        ...boxSegments(stage, rect, cx, b.baseY, cz, 0, b.maxX - b.minX, b.topY - b.baseY, b.maxZ - b.minZ),
+      );
     }
   }
 
@@ -525,9 +546,10 @@ export function LoaderIsoView(props: {
 
       {/* 2D projected overlay — identity view so points are plain pane pixels; never
           eats input (pointerEvents off). Selection under the ghost in paint order. */}
-      {editable && (selSegs.length || ghostSegs.length) ? (
+      {editable && (selSegs.length || ghostSegs.length || pendingSegs.length) ? (
         <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
           <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
+            {pendingSegs.length ? <Graph.Polyline segments points={pendingSegs} stroke="#fbbf24" strokeWidth={1.8} /> : null}
             {selSegs.length ? <Graph.Polyline segments points={selSegs} stroke="#7dd3fc" strokeWidth={2.4} /> : null}
             {ghostSegs.length ? <Graph.Polyline segments points={ghostSegs} stroke="#34d399" strokeWidth={1.6} /> : null}
           </Graph>
