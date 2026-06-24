@@ -1,11 +1,12 @@
 import { startupMark, startupWatchSettle, navStart, navReady } from './startupTimer';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text } from '@reactjit/primitives';
-import { execAsync } from '@reactjit/runtime/hooks/process';
+import { Box, Text, Pressable } from '@reactjit/primitives';
+import { execAsync, envGet } from '@reactjit/runtime/hooks/process';
 import type { GameState } from './design';
 import { compileEditorWorld, emptyEditorWorld } from './editorWorld';
 import { floorsToLandforms, floorsToWaterBodies, type ChunkFloor } from './chunkFloor';
 import { IsoAuthor } from './IsoAuthor';
+import { LoaderIsoView } from './LoaderIsoView';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas } from './PaintCanvas';
 import { PropertiesPanel, type Focus } from './PropertiesPanel';
@@ -160,6 +161,11 @@ function EditorShell() {
   // ── Chrome popovers + compile feedback ────────────────────────────────────────
   const [menuOpen, setMenuOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  // [LOADERVIEW req_1757] side-by-side toggle: render the bottom-right build pane via
+  // the native world_loader (one gamefile read) instead of the React Scene3D rebuild
+  // (~683MB/boot). OFF by default — the user flips it to compare, then we make it the
+  // default once it's proven. The React IsoAuthor path is untouched while this is off.
+  const [loaderView, setLoaderView] = useState(() => { try { return envGet('RJIT_LOADER_VIEW') === '1'; } catch { return false; } });
   const [compiledReloadKey, setCompiledReloadKey] = useState(0);
   const [compiledStatus, setCompiledStatus] = useState('native world_loader primitive');
   // Compile-button feedback (the bake shells out, no instant result): the state
@@ -284,6 +290,15 @@ function EditorShell() {
     buildPiecesRef, reconcileBuildUndoRef,
   });
   const { buildingPrefabs, buildPieces, buildingInstances, buildFootprints, commitBuildEvent, commitBuildEvents } = build;
+
+  // [LOADERVIEW req_1757] content centroid to seed the loader pane's iso camera so it
+  // opens looking at what's built (the loader can't read the gamefile's center from JS).
+  const [buildCenterX, buildCenterZ] = useMemo(() => {
+    if (!buildPieces.length) return [0, 0];
+    let sx = 0, sz = 0;
+    for (const p of buildPieces) { sx += p.x; sz += p.z; }
+    return [sx / buildPieces.length, sz / buildPieces.length];
+  }, [buildPieces]);
 
   // ── Placement verbs + the canvas `place` API (editors/world/usePlacements) ────
   const placementsApi = usePlacements({
@@ -593,19 +608,36 @@ function EditorShell() {
               // iso authoring view is the bottom-right pane (USER req_0424). On-foot lives
               // on the /test route (F1/F2).
               <Pane label="build">
-                <IsoAuthor
-                  key={`${ws.stem}#${worldEpoch}`}
-                  state={previewWorld}
-                  pieces={buildPieces}
-                  buildings={buildingInstances}
-                  prefabs={buildingPrefabs}
-                  onCommit={commitBuildEvent}
-                  onCommitMany={commitBuildEvents}
-                  focused={atEditor && wasdQuad === 'preview'}
-                  onFocus={focusPreview}
-                  onSelectionChange={onIsoSelectionChange}
-                  onPlaceWaterBody={placeWaterBodyAt}
-                />
+                {loaderView ? (
+                  <LoaderIsoView
+                    key={`loader#${ws.stem}#${worldEpoch}`}
+                    centerX={buildCenterX}
+                    centerZ={buildCenterZ}
+                  />
+                ) : (
+                  <IsoAuthor
+                    key={`${ws.stem}#${worldEpoch}`}
+                    state={previewWorld}
+                    pieces={buildPieces}
+                    buildings={buildingInstances}
+                    prefabs={buildingPrefabs}
+                    onCommit={commitBuildEvent}
+                    onCommitMany={commitBuildEvents}
+                    focused={atEditor && wasdQuad === 'preview'}
+                    onFocus={focusPreview}
+                    onSelectionChange={onIsoSelectionChange}
+                    onPlaceWaterBody={placeWaterBodyAt}
+                  />
+                )}
+                {/* [LOADERVIEW req_1757] side-by-side toggle pinned in the pane corner */}
+                <Pressable
+                  onPress={() => setLoaderView((v) => !v)}
+                  style={{ position: 'absolute', left: 8, bottom: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, borderColor: loaderView ? '#34d399' : '#3a4a5f', backgroundColor: loaderView ? '#0c2a20' : '#0b1220ee', zIndex: 50 }}
+                >
+                  <Text fontSize={9} color={loaderView ? '#6ee7b7' : '#94a3b8'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                    {loaderView ? '● LOADER VIEW' : '○ react view'}
+                  </Text>
+                </Pressable>
               </Pane>
             }
           />

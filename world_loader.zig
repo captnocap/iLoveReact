@@ -308,15 +308,16 @@ const CameraState = struct {
     initialized: bool = false,
     aiming: bool = false,
     far: f32,
-    // External-orbit override (LOADERVIEW req_1757): the editor drives the iso
-    // authoring camera from JS (cart/hmsc-int IsoAuthor's IsoStage). When set, the
-    // camera orbits an EXPLICIT world target with JS-supplied yaw/pitch/distance
-    // instead of trailing the player — and it SNAPS (no smoothing, no spring-arm)
-    // so it tracks the user's orbit/zoom input frame-exact. setExternalOrbit() flips
-    // it on; the player-trailing game camera is untouched when off.
+    // External-camera override (LOADERVIEW req_1757): the editor drives the iso
+    // authoring camera from JS (cart/hmsc-int IsoAuthor's IsoStage). JS pushes the
+    // ALREADY-SOLVED eye + look + fov — the exact same GAME_CAMERA.solve(Isometric)
+    // pose its picking math assumes — so the rendered view matches the cursor ray by
+    // construction (no second orbit convention to keep in parity). When set the camera
+    // SNAPS to it (no smoothing, no spring-arm) and ignores the player. setExternalCamera()
+    // flips it on; the player-trailing game camera is untouched when off.
     external: bool = false,
-    ext_target: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
-    ext_distance: f32 = CAMERA_DISTANCE_METERS,
+    ext_pos: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
+    ext_look: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
     ext_fov: f32 = CAMERA_FOV_DEGREES,
 };
 
@@ -2285,14 +2286,14 @@ fn solveAimCamera(player: PlayerState, yaw_degrees: f32, orbit_pitch_degrees: f3
 }
 
 fn desiredCamera(cam: CameraState, player: PlayerState) CameraSolve {
-    // External-orbit (editor iso view): orbit the JS-supplied world target, no player
-    // trailing, no aim mode. yaw/pitch live in the shared fields (set by setExternalOrbit).
+    // External-camera (editor iso view): the JS-solved eye + look verbatim, no player
+    // trailing, no aim mode.
     if (cam.external) {
         return .{
-            .pos = orbitEye(cam.ext_target, cam.yaw_degrees, cam.pitch_degrees, cam.ext_distance),
-            .target = cam.ext_target,
+            .pos = cam.ext_pos,
+            .target = cam.ext_look,
             .fov = cam.ext_fov,
-            .pivot = cam.ext_target,
+            .pivot = cam.ext_look,
         };
     }
     if (cam.aiming) return solveAimCamera(player, cam.yaw_degrees, cam.pitch_degrees);
@@ -4679,6 +4680,53 @@ const MountedLoader = struct {
 
 var g_mounted_loaders: [MAX_EMBEDDED_LOADERS]MountedLoader = [_]MountedLoader{.{}} ** MAX_EMBEDDED_LOADERS;
 
+// External-camera pending table (LOADERVIEW req_1757): keyed by node id, INDEPENDENT of
+// mount state (findMounted needs a live runtime, but the editor pushes a pose before the
+// lazy first-render mount). applyPendingCam runs every renderEmbedded frame, so the iso
+// pose survives the mount and Compile remounts with no JS frame loop (headless has no rAF).
+const PendingCam = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    pos: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
+    look: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
+    fov: f32 = CAMERA_FOV_DEGREES,
+};
+var g_pending_cams: [MAX_EMBEDDED_LOADERS]PendingCam = [_]PendingCam{.{}} ** MAX_EMBEDDED_LOADERS;
+
+fn pendingCamFor(node_id: u32) ?*PendingCam {
+    for (&g_pending_cams) |*p| {
+        if (p.set and p.node_id == node_id) return p;
+    }
+    return null;
+}
+
+fn setPendingCam(node_id: u32, pos: Vec3, look: Vec3, fov: f32) void {
+    var slot: ?*PendingCam = pendingCamFor(node_id);
+    if (slot == null) {
+        for (&g_pending_cams) |*p| {
+            if (!p.set) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    if (slot) |p| {
+        p.node_id = node_id;
+        p.set = true;
+        p.pos = pos;
+        p.look = look;
+        p.fov = fov;
+    }
+}
+
+fn applyPendingCam(runtime: *Runtime) void {
+    const p = pendingCamFor(runtime.node_id) orelse return;
+    runtime.camera.external = true;
+    runtime.camera.ext_pos = p.pos;
+    runtime.camera.ext_look = p.look;
+    runtime.camera.ext_fov = p.fov;
+}
+
 fn findMounted(node_id: u32) ?*MountedLoader {
     for (&g_mounted_loaders) |*entry| {
         const runtime = entry.runtime orelse continue;
@@ -4728,6 +4776,7 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
         return false;
     };
     runtime.last_aspect = w / @max(h, 1); // streaming's sight culling needs the real pane shape
+    applyPendingCam(runtime); // LOADERVIEW req_1757: editor iso pose, re-applied each frame
     runtime.stepNow();
     runtime.ensureMaterials();
     const ok = scene3d.render(&runtime.root, x, y, w, h, opacity);
@@ -4765,28 +4814,35 @@ pub fn mouseLook(node_id: u32, dx: f32, dy: f32) void {
     runtime.mouseLook(dx, dy);
 }
 
-/// LOADERVIEW req_1757: drive the camera as an external iso orbit (the editor's
-/// IsoStage pose) instead of trailing the player. target = the world point to orbit;
-/// yaw/pitch in degrees; distance = eye pull-back (metres); fov in degrees. The pose
-/// SNAPS each frame (no smoothing/spring-arm). Idempotent; mounts the runtime lazily
-/// so the editor can push a pose before the first render.
-pub fn setExternalOrbit(node_id: u32, tx: f32, ty: f32, tz: f32, yaw_degrees: f32, pitch_degrees: f32, distance: f32, fov_degrees: f32) void {
-    const entry = findMounted(node_id) orelse return;
-    const runtime = entry.runtime orelse return;
-    runtime.camera.external = true;
-    runtime.camera.ext_target = .{ .x = tx, .y = ty, .z = tz };
-    runtime.camera.yaw_degrees = yaw_degrees;
-    runtime.camera.pitch_degrees = pitch_degrees;
-    runtime.camera.ext_distance = distance;
-    runtime.camera.ext_fov = fov_degrees;
+/// LOADERVIEW req_1757: drive the camera from the editor's already-solved iso pose
+/// (eye position + look target + fov degrees) instead of trailing the player. The pose
+/// SNAPS each frame (no smoothing/spring-arm) so it tracks orbit/zoom drag frame-exact.
+/// JS owns the solve (GAME_CAMERA.solve), so the render matches its picking ray.
+pub fn setExternalCamera(node_id: u32, px: f32, py: f32, pz: f32, lx: f32, ly: f32, lz: f32, fov_degrees: f32) void {
+    const pos = Vec3{ .x = px, .y = py, .z = pz };
+    const look = Vec3{ .x = lx, .y = ly, .z = lz };
+    // Pending table = source of truth (re-applied each renderEmbedded frame, survives the
+    // lazy mount); also poke a live runtime so a mounted view turns this frame.
+    setPendingCam(node_id, pos, look, fov_degrees);
+    if (findMounted(node_id)) |entry| {
+        if (entry.runtime) |runtime| {
+            runtime.camera.external = true;
+            runtime.camera.ext_pos = pos;
+            runtime.camera.ext_look = look;
+            runtime.camera.ext_fov = fov_degrees;
+        }
+    }
 }
 
 /// Return the camera to the player-trailing game camera (LOADERVIEW req_1757).
-pub fn clearExternalOrbit(node_id: u32) void {
-    const entry = findMounted(node_id) orelse return;
-    const runtime = entry.runtime orelse return;
-    runtime.camera.external = false;
-    runtime.camera.initialized = false; // re-seed the trailing camera cleanly
+pub fn clearExternalCamera(node_id: u32) void {
+    if (pendingCamFor(node_id)) |p| p.set = false;
+    if (findMounted(node_id)) |entry| {
+        if (entry.runtime) |runtime| {
+            runtime.camera.external = false;
+            runtime.camera.initialized = false; // re-seed the trailing camera cleanly
+        }
+    }
 }
 
 pub fn setAiming(node_id: u32, aiming: bool) void {
