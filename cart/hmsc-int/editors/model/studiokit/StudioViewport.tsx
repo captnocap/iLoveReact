@@ -60,7 +60,7 @@ import {
   type SelMode, type Selection, type CameraSnap,
 } from '../meshSelect';
 import { pickFaceUV, paintUVsNeedRepack, mirrorPaintDabs, faceUvPerWorld, surfaceBrushDabs, type PaintCells, type PaintTarget, type FaceHit, type TexelRect } from '../meshPaint';
-import { STUDIO_PAINT_KEY, PAINT_TEX, paintTex, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintDropUndoSnapshot, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited, layerKey, activeLayerOps, recompositeDisplay, setLayers as syncPaintLayers, setActiveLayerId as syncActiveLayer, clearLayerTransparent, BASE_LAYER_ID, type PaintLayerMeta } from '../meshPaintTexture';
+import { STUDIO_PAINT_KEY, PAINT_TEX, paintTex, baseCoat, stampUV, faceIslandPx, savePaint, restorePaint, setPaintActive, paintActive, canPaintUndo, canPaintRedo, paintSnapshotBegin, paintDropUndoSnapshot, paintUndo, paintRedo, clearPaintHistory, paintInited, markPaintInited, layerKey, activeLayerOps, recompositeDisplay, setLayers as syncPaintLayers, setActiveLayerId as syncActiveLayer, clearLayerTransparent, dedupeLayers, BASE_LAYER_ID, type PaintLayerMeta } from '../meshPaintTexture';
 import { Paintable } from '@reactjit/runtime/primitives';
 import { paintableOps } from '@reactjit/runtime/hooks/usePaintable';
 import { LayerStackStrip, type LayerStripAction, type LayerStripRowModel } from '../../paint/LayerStrip';
@@ -1335,6 +1335,15 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     const blob = props.paintRef ? props.paintBlob(props.paintRef) : null;
     const id = setTimeout(() => {
       if (paintingRef.current) return; // a stroke started while we waited — don't clobber it
+      // The saved paintRef is a FLATTENED image (one layer's worth of data), so a
+      // restore (model switch / blob arrival / post-hot-reload) COLLAPSES the stack to
+      // a single base layer and loads the flattened image there (req_1731). Otherwise
+      // base would hold every layer's pixels while the other layers still existed —
+      // making a reorder look duplicated and a delete leave its paint showing. In-session
+      // (the guard above) the stack is untouched, so you keep your layers while working.
+      const baseStack = [{ id: BASE_LAYER_ID, name: 'Base', visible: true, opacity: 1 }];
+      setPaintLayers(baseStack); setActiveLayer(BASE_LAYER_ID);
+      syncPaintLayers(baseStack); syncActiveLayer(BASE_LAYER_ID);
       const loaded = !!(blob && restorePaint(blob));
       // Only lay the base coat for an ACTIVE paint session; never clobber a reopened
       // view to grey when its blob simply hasn't resolved.
@@ -1421,7 +1430,8 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     while (ids.has(`L${n}`)) n += 1;
     return `L${n}`;
   };
-  const applyLayers = (next: PaintLayerMeta[], active?: string) => {
+  const applyLayers = (raw: PaintLayerMeta[], active?: string) => {
+    const next = dedupeLayers(raw); // a layer id must be unique — never list/composite twice (req_1731)
     const act = active ?? (next.some((l) => l.id === activeLayer) ? activeLayer : (next[next.length - 1]?.id ?? BASE_LAYER_ID));
     setPaintLayers(next);
     setActiveLayer(act);
@@ -1452,7 +1462,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     if (action === 'duplicate') {
       const src = paintableOps(layerKey(id)).readback();
       const nid = nextLayerId();
-      const next = [...paintLayers.slice(0, i + 1), { id: nid, name: `${L.name} copy`, visible: true, opacity: L.opacity }, ...paintLayers.slice(i + 1)];
+      const next = dedupeLayers([...paintLayers.slice(0, i + 1), { id: nid, name: `${L.name} copy`, visible: true, opacity: L.opacity }, ...paintLayers.slice(i + 1)]);
       setPaintLayers(next); setActiveLayer(nid); syncPaintLayers(next); syncActiveLayer(nid);
       if (src) paintableOps(layerKey(nid)).upload(src); // parks until the new <Paintable> mounts
       recompositeDisplay(); paintDirtyRef.current = true; commitPaint();
@@ -2484,7 +2494,11 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
           visible layers. Brush dabs fan to the active layer + the display for instant
           feedback — no boxes, no StaticSurface capture. */}
       {tex || havePaintBlob ? <Paintable id={STUDIO_PAINT_KEY} w={PAINT_TEX} h={PAINT_TEX} rgba /> : null}
-      {tex || havePaintBlob ? paintLayers.map((L) => <Paintable key={L.id} id={layerKey(L.id)} w={PAINT_TEX} h={PAINT_TEX} rgba />) : null}
+      {/* Mount the per-layer textures in a STABLE order (by id), NOT stack order — the
+          composite order comes from g_layers (recompositeDisplay), so reordering the
+          stack never reshuffles these host nodes (which churned the reconciler and made
+          a moved layer look duplicated, req_1731). */}
+      {tex || havePaintBlob ? [...paintLayers].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((L) => <Paintable key={L.id} id={layerKey(L.id)} w={PAINT_TEX} h={PAINT_TEX} rgba />) : null}
 
       {/* TEXTURE (req_1068): the offscreen scene SPRITE-MAP atlas every part samples
           via textureKey. Mounted while texture view is on (and NOT painting — the

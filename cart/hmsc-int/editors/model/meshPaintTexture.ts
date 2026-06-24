@@ -59,11 +59,25 @@ export function displayOps(): PaintableOps { return paintableOps(STUDIO_PAINT_KE
  *  and on any layer-stack change, not per dab (live dabs fan to the display). */
 export function recompositeDisplay(): void {
   const d = displayOps();
-  const vis = g_layers.filter((L) => L.visible && L.opacity > 0);
+  // Composite each UNIQUE layer id at most ONCE — a stray duplicate id in the stack
+  // would otherwise draw a layer's content twice (req_1731). Skip hidden/zero-opacity.
+  const seen = new Set<string>();
+  const vis = g_layers.filter((L) => {
+    if (!L.visible || L.opacity <= 0 || seen.has(L.id)) return false;
+    seen.add(L.id);
+    return true;
+  });
   if (vis.length === 0) { d.composite('', 0, true); return; } // pure clear (nothing visible)
   // clearFirst on the first layer folds the clear INTO the composite sequence, so
   // calling this twice in a frame stays idempotent (the second clear wipes the first).
   vis.forEach((L, i) => d.composite(layerKey(L.id), L.opacity, i === 0));
+}
+
+/** Drop any duplicate-id entries from a layer stack (keep first), preserving order.
+ *  A layer id must be unique — two entries sharing one would composite + list twice. */
+export function dedupeLayers(layers: PaintLayerMeta[]): PaintLayerMeta[] {
+  const seen = new Set<string>();
+  return layers.filter((L) => (seen.has(L.id) ? false : (seen.add(L.id), true)));
 }
 
 // paintTex() fans a STAMP to BOTH the active layer (the durable, isolated source)
