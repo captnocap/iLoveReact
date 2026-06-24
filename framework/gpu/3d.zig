@@ -1133,7 +1133,11 @@ fn texFingerprint(w: u32, h: u32, data: []const u8) u64 {
     f *%= 0x100000001b3;
     f ^= @as(u64, data.len);
     f *%= 0x100000001b3;
-    const step: usize = @max(1, data.len / 32);
+    // 512 spread samples (was 32): the fingerprint is now strong enough to serve
+    // as the memo's content identity (see memoHashTex) — two distinct painted
+    // atlases aliasing on 512 spread bytes + w + h + len is negligible, while the
+    // walk stays ~512 iters regardless of atlas size (cheap for a 4 MB texture).
+    const step: usize = @max(1, data.len / 512);
     var i: usize = 0;
     while (i < data.len) : (i += step) {
         f ^= data[i];
@@ -1156,12 +1160,19 @@ const TexHashMemo = struct { ptr: usize = 0, len: usize = 0, fp: u64 = 0, hash: 
 var g_tex_hash_memo: [TEX_HASH_MEMO_LEN]TexHashMemo = [_]TexHashMemo{.{}} ** TEX_HASH_MEMO_LEN;
 
 fn memoHashTex(w: u32, h: u32, data: []const u8, fp: u64) u64 {
-    const ptr = @intFromPtr(data.ptr);
-    const idx: usize = @intCast((ptr ^ (data.len *% 0x9e3779b97f4a7c15)) % TEX_HASH_MEMO_LEN);
+    // Key the memo by CONTENT (fingerprint), not by buffer pointer (req_1840).
+    // The V8 bridge can hand back a NEW pointer every frame for an unchanged
+    // texture (observed on macOS: ~29 stable 1024² atlases re-marshaled per
+    // frame), which made the old (ptr,len,fp) memo miss every frame and re-walk
+    // ~116 MB of FNV — a flat ~88 ms inside gpu.frame(). Fingerprint keying hits
+    // whenever the content matches, regardless of pointer churn. The memo only
+    // ever holds the handful of inline-RGBA (key-less) atlases, so the
+    // direct-mapped table doesn't collide in practice.
+    const idx: usize = @intCast(fp % TEX_HASH_MEMO_LEN);
     const e = &g_tex_hash_memo[idx];
-    if (e.used and e.ptr == ptr and e.len == data.len and e.fp == fp) return e.hash;
+    if (e.used and e.fp == fp and e.len == data.len) return e.hash;
     const hash = hashTex(w, h, data); // the full walk — only on a memo miss
-    e.* = .{ .ptr = ptr, .len = data.len, .fp = fp, .hash = hash, .used = true };
+    e.* = .{ .ptr = @intFromPtr(data.ptr), .len = data.len, .fp = fp, .hash = hash, .used = true };
     return hash;
 }
 
