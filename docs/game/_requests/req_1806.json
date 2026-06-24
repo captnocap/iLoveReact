@@ -1,0 +1,30 @@
+{
+  "id": "req_1806",
+  "at": "2026-06-24T18:24:50.809Z",
+  "origin": "session:edc880d0",
+  "text": "ok so from my understanding, the streaming is much faster, but its not all built. thats good. can i ask why the camera is so choppy ? i mean when i go into the actual loaded game i get butter smooth camera but here in this editor its kinda trash",
+  "status": "review",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T18:26:52.416Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T18:27:33.483Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained and partly fixed the choppy editor camera. Root cause is structural: the loader pane renders EMBEDDED in the editor's React frame loop (it only gets a frame when the heavy editor yields one) and snaps raw to the JS-solved pose with no smoothing, whereas the standalone game runs the loader's own native loop at full fps WITH camera smoothing (the spring toward target). On top of that I had regressed it in req_1798: pushCamera fired an unconditional React re-render every camera frame to keep the 2D HUD tracking, so every drag/pan/zoom tick reconciled the whole pane and throttled the loop the loader draws in. Fix (595e80a77, TSX hot-reload): pushCamera still pushes the cheap 8-float pose each frame (the host re-applies it via the pending-cam table every renderEmbedded), but only re-renders React when the HUD actually has content to track (armed ghost / selection / paint preview) — so plain navigation is React-free again. Remaining for true game-parity butter: host-side smoothing of the external camera (interpolate toward the JS target each render frame, like the game camera) so motion stays smooth even when the editor frame loop drops frames — that's a world_loader.zig change + rebuild, offered as a follow-up.",
+  "shas": [
+    "595e80a77"
+  ],
+  "resolvedAt": "2026-06-24T18:27:33.483Z"
+}

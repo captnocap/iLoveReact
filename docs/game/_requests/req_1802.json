@@ -3,7 +3,7 @@
   "at": "2026-06-24T17:33:31.239Z",
   "origin": "session:9be2276f",
   "text": "hey will u make sure that everything (yes, everything (no, not everythying, but the necessary things)) are on git so i can resume from my macbook",
-  "status": "doing",
+  "status": "review",
   "sessionId": "9be2276f-3b15-40c9-9cbf-c9c5ce57d365",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,19 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-06-24T17:35:39.935Z",
+      "actor": "9be2",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Made everything necessary resumable on GitHub for a cross-machine (MacBook) resume. Split the working tree into source-to-commit vs regenerable/local junk: committed the 11 modified source files (emitGameFile, Studio + studiokit dialogControls, game/build/placed +test, void/distance, CookedProp, perfWatch, framework 3d.zig + v8_bindings_fs, runtime hooks/fs), the new STUDIO_MESH_EDITOR_FEATURE_COVERAGE.md doc, and the synced request board (req_1684..req_1802). Deliberately skipped deps/InstantMesh (62M), data/_precompact_backup (695M), data/domains (199M), exports/ (90M), shots/, tmp/, shot_boot.png, loose genmesh artifacts (Desk.glb, car.*, model*.json, texture.png), assets/tex/* and _uncommitted_review.md — all regenerable or local state. Pushed all 5 unpushed commits; local main == origin/main. Verified framework/ is fully clean (337 tracked, 0 uncommitted/untracked/ignored).",
+  "shas": [
+    "93bacaacb",
+    "c004e1faf"
+  ],
+  "resolvedAt": "2026-06-24T17:35:39.935Z"
 }

@@ -1,0 +1,28 @@
+{
+  "id": "req_1808",
+  "at": "2026-06-24T19:00:46.486Z",
+  "origin": "session:edc880d0",
+  "text": "so, i am still not getting the place item -> instant update. should i be?",
+  "status": "review",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T19:01:30.822Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T19:04:25.593Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed 'place item is not instant'. The req_1798 live overlay (placed pieces draw immediately as host-side box meshes, no rebake) lives in world_loader.zig — a framework/Zig change, so it only exists in the rebuilt binary, NOT via TSX hot-reload. The user's running dev host binary predates the 09:18 world_loader.zig changes, so the __compiled_world_set_live_pieces door is absent and the JS push silently no-ops (it's guarded by typeof===function) → no instant box. Verified by inspection that the rest is sound: the door IS in zig-out/bin/hmsc-int (3 string refs), the live node is appended in build() in the stable prefix below stream_tail_start (so refreshStreamNodes' per-frame shrinkRetainingCapacity won't wipe it), applyPendingLive runs in renderEmbedded, and the JS push effect computes pending = pieces not in bakedIds and pushes on every props.pieces change. Resolution: restart rjit dev (its startup needsBuild check hashes world_loader.zig and rebuilds the dev binary), then placement shows the instant box. Caveat flagged to user: the overlay path was never verified LIVE (headless can't click); offered a headless door-driving probe if a rebuild doesn't fix it. Also reminded: the instant piece is a flat box (real per-shape geometry is the in-progress Full/Part-2 work). No code change.",
+  "shas": [],
+  "resolvedAt": "2026-06-24T19:04:25.593Z"
+}

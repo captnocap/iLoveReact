@@ -1,0 +1,30 @@
+{
+  "id": "req_1811",
+  "at": "2026-06-24T19:07:25.197Z",
+  "origin": "session:9be2276f",
+  "text": "no dont delete it just untrack it i dont need to track the backup",
+  "status": "review",
+  "sessionId": "9be2276f-3b15-40c9-9cbf-c9c5ce57d365",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T19:09:18.184Z",
+      "actor": "9be2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T19:09:18.193Z",
+      "actor": "9be2",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked to untrack (not delete) the compact-store backups under cart/hmsc-int/data. The backups were never actually tracked, but were showing up in git status and at risk of accidental commit. Added two .gitignore patterns (cart/hmsc-int/data/**/_precompact_backup/ and _compact_backup/) in the existing hmsc-int persistence section, matching at any depth — this covers the top-level ~727MB _precompact_backup/model.store.db.bak and the nested domains/model/_compact_backup. Verified via git check-ignore (all backup paths now matched) and git status (no backups appear). The backup files remain on disk as a recovery net. Committed and pushed; local main == origin/main. Also reconciled the user's 27MB-vs-800MB confusion: live model store.db is 27M, the 800M was the stale pre-compaction .bak now ignored. Noted the pre-existing tracked tools/v8cli (55MB, GH001 soft warning, intentional).",
+  "shas": [
+    "7ad60bea8"
+  ],
+  "resolvedAt": "2026-06-24T19:09:18.193Z"
+}

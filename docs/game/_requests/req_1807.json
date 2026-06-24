@@ -1,0 +1,30 @@
+{
+  "id": "req_1807",
+  "at": "2026-06-24T18:30:07.587Z",
+  "origin": "session:edc880d0",
+  "text": "oh yeah that react rerender was it. always is lol",
+  "status": "review",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T18:31:47.922Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T18:31:47.931Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User confirmation that req_1806 resolved the choppy editor camera: 'oh yeah that react rerender was it. always is lol.' The unconditional per-frame React re-render in pushCamera (added in req_1798 for HUD tracking) was throttling the editor frame loop the loader renders embedded in; guarding it to only re-render when the 2D HUD has content (armed ghost / selection / paint) restored smooth navigation. No further code for this item — it's the user's verification of the fix. Lesson saved to memory (loader_pane_camera_react_free): keep per-frame host-driven paths out of React's render cycle in the embedded loader pane.",
+  "shas": [
+    "595e80a77"
+  ],
+  "resolvedAt": "2026-06-24T18:31:47.931Z"
+}

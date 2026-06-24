@@ -1,0 +1,10 @@
+{
+  "id": "req_1812",
+  "at": "2026-06-24T19:08:42.761Z",
+  "origin": "session:edc880d0",
+  "text": "right, im well aware of the zig changes and rebuild needed. it notifies me every time in app to rebuild. so im always up todate. i still do not see the item place though. but i know the item placed bercause i can click its invisible box after placing it",
+  "status": "new",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": []
+}

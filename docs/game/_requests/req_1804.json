@@ -1,0 +1,24 @@
+{
+  "id": "req_1804",
+  "at": "2026-06-24T17:43:40.763Z",
+  "origin": "session:edc880d0",
+  "text": "so i was thinking. why cant we utilize @framework/world/streaming.zig for the pieces being placed without needing to recompile, is that even a potential option nfor the steps between authoring and then going to compile and test it ?",
+  "status": "doing",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T17:44:34.247Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T17:56:17.028Z",
+      "actor": "edc8",
+      "kind": "note",
+      "text": "Part 1 landed (5b... see log): piece-free editor bake verified. Premise measured (streaming.build 3-31ms). Next: loader live per-shape streaming render (Zig+rebuild) + editor rewiring."
+    }
+  ]
+}

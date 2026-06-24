@@ -3,7 +3,7 @@
   "at": "2026-06-24T17:24:03.399Z",
   "origin": "session:edc880d0",
   "text": "go for all 3 if you can, would be nice to get it back on track asap",
-  "status": "doing",
+  "status": "review",
   "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,19 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-06-24T17:37:09.543Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Batch of the 'all 3' follow-ups; delivered 2 of 3 fully, deferred 1 with reasoning. (2) Editing verbs: clone (C — duplicate selection shifted by its width, whole buildings as one buildingPlaced, loose pieces re-emit under a fresh stampId; a pure add so the live overlay shows it instantly) and drag-paint (armed wall drags a straight run along the dominant axis, armed floor fills the dragged rect; world-lattice cells at module pitch, green ghost preview during drag, one batch commit on release). The simplified core of IsoAuthor's computePaint (existing-geometry anchoring is a later refinement). TSX-only, commit 6c4495c49. (3) Atomic game-file write (closes req_1799): new __fs_write_bytes_atomic door (temp+fsync+rename, raw bytes — no base64 GC) in v8_bindings_fs.zig, emitGameFile writes the game-file through it with an in-place fallback if the door is absent; rebuilt+committed tools/v8cli (5b5409762). Verified end-to-end: door registered, a real bake writes the 74MB file atomically with no leftover temp. (1) Host-side hide-baked-instances (make baked-piece delete/move INSTANT, no settle bake): DEFERRED — it needs a streaming-aware mutation/skip of the static baked instance batch (real render-path risk), and the req_1800 settle-bake already makes baked-piece delete/move WORK (just ~1-6s, not instant). Worth a focused dedicated slice rather than rushing it. Also still open from verbs: tower drag-shell, prop vertical move.",
+  "shas": [
+    "6c4495c49",
+    "5b5409762"
+  ],
+  "resolvedAt": "2026-06-24T17:37:09.543Z"
 }

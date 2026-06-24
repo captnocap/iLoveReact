@@ -1,0 +1,10 @@
+{
+  "id": "req_1805",
+  "at": "2026-06-24T18:23:28.733Z",
+  "origin": "session:edc880d0",
+  "text": "ok so from my understanding, the streaming is much faster, but its not all built. thats good. lets build it",
+  "status": "new",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": []
+}
