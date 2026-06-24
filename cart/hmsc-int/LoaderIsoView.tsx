@@ -95,11 +95,14 @@ export function LoaderIsoView(props: {
     return () => { offDown(); offUp(); heldPanRef.current = {}; };
   }, [stage, pushCamera, props.centerX, props.centerZ]);
 
-  // The per-frame loop: apply held-key pan (stage.nudge) then push the camera. CRITICAL
-  // (req_1777): schedule via requestAnimationFrame OR a setTimeout FALLBACK — exactly
-  // like IsoAuthor. This host doesn't always expose requestAnimationFrame as a global,
-  // so a bare rAF call silently never ran and WASD did nothing (drag/zoom worked because
-  // they push the camera directly, not through this loop).
+  // The held-key pan loop. Scheduled via rAF OR a setTimeout FALLBACK — exactly like
+  // IsoAuthor (req_1777): this host doesn't always expose requestAnimationFrame as a
+  // global, so a bare rAF call silently never ran and WASD did nothing.
+  //
+  // PERF (req_1790/1791 "lags like shit"): push the camera to the host ONLY when the
+  // pose actually changes — while WASD is held. The host pending-camera table re-applies
+  // the last pose every frame on its own, so an idle per-frame push was 60 wasted bridge
+  // calls/sec. Drag/zoom push directly; the loop pushes only while panning.
   useEffect(() => {
     const sched: (fn: () => void) => any = g.requestAnimationFrame
       ? g.requestAnimationFrame.bind(g)
@@ -118,8 +121,8 @@ export function LoaderIsoView(props: {
       if (forward || strafe) {
         const speed = Math.max(18, stage.distance() * 0.85); // m/s, scales with zoom
         stage.nudge(forward * speed * dt, strafe * speed * dt);
+        pushCamera(); // only when the pose moved this frame
       }
-      pushCamera();
       sched(tick);
     };
     sched(tick);
