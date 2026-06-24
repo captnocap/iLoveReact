@@ -2,6 +2,7 @@ import { startupMark, startupWatchSettle, navStart, navReady } from './startupTi
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, Pressable } from '@reactjit/primitives';
 import { execAsync, envGet } from '@reactjit/runtime/hooks/process';
+import { nsGet, nsSet } from '@reactjit/hooks/localstore';
 import type { GameState } from './design';
 import { compileEditorWorld, emptyEditorWorld } from './editorWorld';
 import { floorsToLandforms, floorsToWaterBodies, type ChunkFloor } from './chunkFloor';
@@ -165,7 +166,22 @@ function EditorShell() {
   // the native world_loader (one gamefile read) instead of the React Scene3D rebuild
   // (~683MB/boot). OFF by default — the user flips it to compare, then we make it the
   // default once it's proven. The React IsoAuthor path is untouched while this is off.
-  const [loaderView, setLoaderView] = useState(() => { try { return envGet('RJIT_LOADER_VIEW') === '1'; } catch { return false; } });
+  // Durable so flipping it sticks across cold restarts — the whole point is that once
+  // you opt in, EVERY boot uses the loader pane (no React Scene3D build) and startup
+  // stays fast. Default off (safe side-by-side); env RJIT_LOADER_VIEW=1 forces on.
+  const [loaderView, setLoaderViewState] = useState(() => {
+    try {
+      if (envGet('RJIT_LOADER_VIEW') === '1') return true;
+      return nsGet('hmsc', 'editor.loaderView') === '1';
+    } catch { return false; }
+  });
+  const setLoaderView = useCallback((next: boolean | ((v: boolean) => boolean)) => {
+    setLoaderViewState((v) => {
+      const n = typeof next === 'function' ? next(v) : next;
+      try { nsSet('hmsc', 'editor.loaderView', n ? '1' : '0'); } catch { /* headless / no store */ }
+      return n;
+    });
+  }, []);
   const [compiledReloadKey, setCompiledReloadKey] = useState(0);
   const [compiledStatus, setCompiledStatus] = useState('native world_loader primitive');
   // Compile-button feedback (the bake shells out, no instant result): the state
