@@ -19,15 +19,20 @@
 
 import { createElement, useCallback, useEffect, useRef } from 'react';
 import { Box, Pressable } from '@reactjit/primitives';
+import { busOn } from '@reactjit/hooks/useIFTTT';
 import { IsoStage } from './isoStage';
-import { useEditorControls } from './editors/useEditorControls';
+import { editorTypingFocused } from './editors/controls';
 
 const g: any = globalThis;
 
 const DEFAULT_GAME_FILE = 'zig-out/game/hmsc.gamefile';
 const DEFAULT_STORE_DIR = 'zig-out/game/contentstore';
 
-const ARROW_TO_WASD: Record<string, string> = { arrowup: 'w', arrowdown: 's', arrowleft: 'a', arrowright: 'd' };
+// key → pan axis. Arrows alias WASD, matching the iso-build legend.
+const PAN_KEYS: Record<string, string> = {
+  w: 'w', a: 'a', s: 's', d: 'd',
+  arrowup: 'w', arrowleft: 'a', arrowdown: 's', arrowright: 'd',
+};
 
 export function LoaderIsoView(props: {
   gameFile?: string;
@@ -64,21 +69,31 @@ export function LoaderIsoView(props: {
     );
   }, [stage]);
 
-  // WASD/arrow pan: keys ride the editor control contract (same 'iso-build' scope as
-  // IsoAuthor); held state lives here and the rAF loop below slides the view.
+  // Keys: subscribe the key bus DIRECTLY (req_1777) rather than the editor control
+  // contract. The contract's active/scope arbitration was swallowing WASD here (it
+  // worked for IsoAuthor but not this pane); the raw bus is the same source the host
+  // feeds and removes every middle layer. Still honor the typing gate so WASD in a
+  // text field (the texture search, the tile box) types, not pans. Held WASD/arrows
+  // pan; Q/E orbit; F/Home recenter.
   const heldPanRef = useRef<Record<string, boolean>>({});
-  useEditorControls('iso-build', {
-    active: true,
-    handlers: {
-      'camera.orbit-ccw': () => { stage.rotate(-1); pushCamera(); },
-      'camera.orbit-cw': () => { stage.rotate(1); pushCamera(); },
-      'view.recenter': () => { stage.centerOn(props.centerX ?? 0, props.centerZ ?? 0); pushCamera(); },
-      'view.pan': ({ phase, key }: { phase: string; key: string }) => {
-        const k = ARROW_TO_WASD[key] ?? key;
-        heldPanRef.current[k] = phase === 'down';
-      },
-    },
-  });
+  useEffect(() => {
+    const onKey = (down: boolean) => (e: any) => {
+      const k = String(e?.key ?? '').toLowerCase();
+      const axis = PAN_KEYS[k];
+      if (axis) {
+        if (down && editorTypingFocused()) return; // let the focused field have the key
+        heldPanRef.current[axis] = down;
+        return;
+      }
+      if (!down || editorTypingFocused()) return;
+      if (k === 'q') { stage.rotate(-1); pushCamera(); }
+      else if (k === 'e') { stage.rotate(1); pushCamera(); }
+      else if (k === 'f' || k === 'home') { stage.centerOn(props.centerX ?? 0, props.centerZ ?? 0); pushCamera(); }
+    };
+    const offDown = busOn('__keydown', onKey(true));
+    const offUp = busOn('__keyup', onKey(false));
+    return () => { offDown(); offUp(); heldPanRef.current = {}; };
+  }, [stage, pushCamera, props.centerX, props.centerZ]);
 
   // One rAF loop: apply held-key pan (stage.nudge) then push the camera every frame.
   // The host pending table also holds the last pose across the lazy mount / Compile

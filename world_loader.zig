@@ -4193,10 +4193,15 @@ pub const Runtime = struct {
 
         var forward: f32 = 0;
         var strafe: f32 = 0;
-        if (keyDown(SCAN_W)) forward += 1;
-        if (keyDown(SCAN_S)) forward -= 1;
-        if (keyDown(SCAN_A)) strafe -= 1;
-        if (keyDown(SCAN_D)) strafe += 1;
+        // LOADERVIEW req_1775/1776: in editor (external-camera) mode the loader is a
+        // PASSIVE viewport — freeze player locomotion so WASD pans the editor camera (JS
+        // side) instead of walking an avatar, and the keys aren't eaten by game movement.
+        if (!self.camera.external) {
+            if (keyDown(SCAN_W)) forward += 1;
+            if (keyDown(SCAN_S)) forward -= 1;
+            if (keyDown(SCAN_A)) strafe -= 1;
+            if (keyDown(SCAN_D)) strafe += 1;
+        }
         const intent = game_physics.movement.wasdDirection(forward, strafe, self.camera.yaw_degrees * std.math.pi / 180.0);
         const run_down = keyDown(SCAN_LSHIFT);
         // Locomotion speed from the baked PHYSICS_CONFIG (the editor's walk/run),
@@ -4215,7 +4220,7 @@ pub const Runtime = struct {
             // Refresh the near-field collider window around the player (huge maps only).
             // Cheap — it touches only the spanning list + the cells around the player.
             if (self.windowed) self.rebuildWindow(self.player.x, self.player.z);
-            runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE), cfg, self.bodies);
+            runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE) and !self.camera.external, cfg, self.bodies);
         } else if (self.bodies.len > 0) {
             // Seated: the world keeps stepping — an intent-less step whose
             // player result is discarded, so kicked balls roll past you
@@ -4843,6 +4848,17 @@ pub fn clearExternalCamera(node_id: u32) void {
             runtime.camera.initialized = false; // re-seed the trailing camera cleanly
         }
     }
+}
+
+/// True when this loader node is editor-driven (external camera set). The engine uses
+/// it to NOT capture the pointer for in-world look (LOADERVIEW req_1776) — so the
+/// editor's own drag/keys reach its JS overlay instead of walking the game player.
+pub fn isExternalCamera(node_id: u32) bool {
+    if (pendingCamFor(node_id) != null) return true;
+    if (findMounted(node_id)) |entry| {
+        if (entry.runtime) |runtime| return runtime.camera.external;
+    }
+    return false;
 }
 
 pub fn setAiming(node_id: u32, aiming: bool) void {

@@ -3927,12 +3927,18 @@ pub fn run(config_in: AppConfig) !void {
                         const mx: f32 = event.button.x;
                         const my: f32 = event.button.y;
                         if (hitTestWorldLoader(config.root, mx, my)) |loader_node| {
-                            captureWorldLoaderPointer(loader_node);
-                            if (event.button.button == c.SDL_BUTTON_RIGHT) {
-                                world_loader.setAiming(loader_node.id, true);
-                                world_loader_mouse_aiming = true;
+                            // LOADERVIEW req_1776: an editor-driven loader (external camera)
+                            // is a passive viewport — DON'T capture the pointer for in-world
+                            // look; fall through so the event reaches the editor's JS overlay
+                            // (its drag rotates the iso camera). Only a playable loader grabs it.
+                            if (!world_loader.isExternalCamera(loader_node.id)) {
+                                captureWorldLoaderPointer(loader_node);
+                                if (event.button.button == c.SDL_BUTTON_RIGHT) {
+                                    world_loader.setAiming(loader_node.id, true);
+                                    world_loader_mouse_aiming = true;
+                                }
+                                continue;
                             }
-                            continue;
                         }
                     }
                     // Physics drag — try to grab a dynamic body
