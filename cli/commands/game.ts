@@ -111,14 +111,58 @@ export async function run(argv: string[]): Promise<number> {
   if (subcommand === 'verify') return verify(__cwd());
   if (subcommand === 'shot') return shot(__cwd(), argv.slice(1));
   if (subcommand === 'play') return play(__cwd(), argv.slice(1));
-  err('Usage: rjit game <compile|bake|verify|shot|play>');
+  if (subcommand === 'compact-store') return compactStore(__cwd());
+  err('Usage: rjit game <compile|bake|verify|shot|play|compact-store>');
   err('  compile  bundle the headless game output');
   err('  bake     write the authored world to zig-out/game/hmsc.gamefile + contentstore');
   err('  verify   compile, boot headless, replay verify scripts + behavior suites, exit with a verdict');
   err('  shot     build the no-V8 loader, render the baked game-file, capture a PNG (--out path)');
   err('  play     build the no-V8 loader and open a live window (close it or press ESC to exit)');
+  err('  compact-store  reclaim the model store: rebuild the snapshot + strip superseded stroke/mesh history (close the editor first)');
   err('  play/shot flags: --fixture (codec fixture) | --massive [--blocks N] (procedural scale lab)');
   return 2;
+}
+
+// rjit game compact-store (req_1789): reclaim the model store. The event log
+// keeps a full ~158KB PNG per paint stroke and the whole mesh per geometry edit
+// forever; the editor boots from a snapshot+tail, so once the snapshot holds the
+// current state that pre-seam history is redundant. This backs up store.db + the
+// snapshot, then runs the v8cli compaction (rebuild snapshot paintBlobs from the
+// log, strip superseded stroke/mesh/paint-layer payloads keeping latest-per-key
+// and every row so the boot guard stays valid), VACUUMs, and verifies. On any
+// failure it restores from the backup. Took a real store 694MB -> 27MB.
+const MODEL_DOMAIN = 'cart/hmsc-int/data/domains/model';
+function compactStore(root: string): number {
+  const db = `${root}/${MODEL_DOMAIN}/store.db`;
+  const snap = `${root}/${MODEL_DOMAIN}/snapshots/model.snapshot.json`;
+  if (!fsExists(db)) { err(`[compact] no model store at ${db}`); return 1; }
+  // VACUUM needs exclusive access — refuse while the editor holds the store.
+  const lsof = spawnSync('lsof', [db]);
+  if ((lsof.stdout || '').includes('reactjit')) {
+    err('[compact] the editor is running and holds the model store — close it first (VACUUM needs exclusive access)');
+    return 1;
+  }
+  const bakDir = `${root}/${MODEL_DOMAIN}/_compact_backup`;
+  fsMkdir(bakDir);
+  spawnSync('cp', [db, `${bakDir}/store.db`]);
+  if (fsExists(snap)) spawnSync('cp', [snap, `${bakDir}/model.snapshot.json`]);
+  out('[compact] backed up store.db + snapshot');
+  fsMkdir(`${root}/${OUT_DIR}`);
+  const bundleOut = `${OUT_DIR}/compact-store.js`;
+  if (!bundle(root, 'cart/hmsc-int/editors/model/compactModelStore.run.ts', bundleOut)) {
+    err('[compact] bundle failed'); return 1;
+  }
+  const res = spawnSync(`${root}/tools/v8cli`, [`${root}/${bundleOut}`]);
+  if (res.stdout.trim()) out(res.stdout.trim());
+  if (res.stderr.trim()) err(res.stderr.trim());
+  if (!(res.stdout || '').includes('COMPACT OK')) {
+    err('[compact] FAILED — restoring store + snapshot from backup');
+    spawnSync('cp', [`${bakDir}/store.db`, db]);
+    if (fsExists(`${bakDir}/model.snapshot.json`)) spawnSync('cp', [`${bakDir}/model.snapshot.json`, snap]);
+    return 1;
+  }
+  out(`[compact] done — model store reclaimed; backup kept at ${bakDir} (delete once you've reopened the editor and confirmed)`);
+  return 0;
 }
 
 function bundle(root: string, entry: string, outFile: string): boolean {
