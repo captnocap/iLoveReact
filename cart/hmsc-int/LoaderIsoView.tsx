@@ -166,6 +166,9 @@ export function LoaderIsoView(props: {
   // Last cursor in pane pixels — so R (rotate ghost) re-resolves the preview IN PLACE
   // instead of waiting for the next mouse-move.
   const lastCursorRef = useRef<{ x: number; y: number } | null>(null);
+  // The hover-ghost cell key — the per-frame poll only re-snaps when the target CELL
+  // changes, so the ghost doesn't thrash a re-render every frame.
+  const ghostKeyRef = useRef('');
 
   // Mirror the selection up so the cart's PropertiesPanel/FacePainter light up — the
   // SAME onSelectionChange contract IsoAuthor reports through.
@@ -234,6 +237,10 @@ export function LoaderIsoView(props: {
       tuning: ISO_SNAP_TUNING,
     });
   }, [stage, placeGroundAt]);
+  // The per-frame hover poll reads the latest resolveAt through a ref, so the pan loop
+  // (which subscribes once) never snaps against a stale terrain/world.
+  const resolveAtRef = useRef(resolveAt);
+  resolveAtRef.current = resolveAt;
 
   // ── commit: place the armed thing at a resolved snap target ──────────────────────
   const placeAt = useCallback((t: SnapTarget) => {
@@ -372,6 +379,22 @@ export function LoaderIsoView(props: {
         const speed = Math.max(18, stage.distance() * 0.85);
         stage.nudge(forward * speed * dt, strafe * speed * dt);
         pushCamera();
+      }
+      // Hover ghost (req_1796): the host fires NO passive move events — onMouseMove only
+      // arrives during a drag — so the armed preview must follow the cursor by polling
+      // getMouseX/Y here, the SAME way IsoAuthor's loop does. Only when the cursor is over
+      // this pane, not during a move-drag, and only re-snap when the target CELL changes.
+      if (armedRef.current && dragRef.current?.mode !== 'move') {
+        const mx = Number(g.getMouseX?.() ?? -1);
+        const my = Number(g.getMouseY?.() ?? -1);
+        const r = rectRef.current;
+        const lx = mx - r.x, ly = my - r.y;
+        if (lx >= 0 && ly >= 0 && lx <= r.width && ly <= r.height) {
+          lastCursorRef.current = { x: lx, y: ly };
+          const t = resolveAtRef.current(lx, ly);
+          const k = t ? `${t.placement.x.toFixed(2)},${t.placement.y.toFixed(2)},${t.placement.z.toFixed(2)},${t.placement.yawDegrees}` : '';
+          if (k !== ghostKeyRef.current) { ghostKeyRef.current = k; setSnap(t); }
+        }
       }
       sched(tick);
     };
