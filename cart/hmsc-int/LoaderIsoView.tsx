@@ -101,6 +101,11 @@ export function LoaderIsoView(props: {
   onCommitMany?: (items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => void;
   onSelectionChange?: (ids: ReadonlySet<string>) => void;
   onPlaceWaterBody?: (presetKind: string, x: number, z: number) => void;
+  // LIVEHOST tier-2 (req_1800): a debounced "settle" bake the pane requests ONLY when an
+  // edit removed/relocated a BAKED piece — the live overlay can add meshes but can't erase
+  // a baked one, so a delete/move/rotate of pre-baked geometry needs a bake to reflect.
+  // Pure placements never call this (the overlay shows them instantly).
+  requestSettleBake?: () => void;
 }) {
   const gameFile = props.gameFile ?? DEFAULT_GAME_FILE;
   const storeDir = props.storeDir ?? DEFAULT_STORE_DIR;
@@ -328,6 +333,39 @@ export function LoaderIsoView(props: {
     setSelectedIds(new Set());
   }, [commitMany]);
 
+  // ── rotate the selection 90° (R with a selection) — whole buildings as ONE
+  // buildingMoved+yaw, loose pieces via remove+place (the SAME shape IsoAuthor's
+  // rotateSelected uses). Selection clears after (no reselect-by-signature here);
+  // R with nothing selected turns the placement ghost instead (handled in the key bus).
+  const rotateSelected = useCallback(() => {
+    const ids = selectedIdsRef.current;
+    if (!ids.size) return;
+    const sel = piecesRef.current.filter((p) => ids.has(p.id));
+    if (!sel.length) return;
+    const { wholeInstances, partialInstances, loosePieceIds } = partitionBuildingSelection(ids, piecesRef.current);
+    if (partialInstances.length) { console.warn(`[loader-iso] rotate skipped ${partialInstances.length} partially-selected building(s)`); return; }
+    const norm = (y: number) => ((y % 360) + 360) % 360;
+    const events: Array<{ event: BuildEditEvent; label: string }> = [];
+    for (const instId of wholeInstances) {
+      const inst = buildingsRef.current?.[instId];
+      if (!inst) continue;
+      events.push({ event: { kind: 'buildingMoved', id: instId, x: inst.x, z: inst.z, yawDegrees: norm(inst.yawDegrees + 90) } as BuildEditEvent, label: `rotated building ${instId}` });
+    }
+    const looseSet = new Set(loosePieceIds);
+    const rotations = sel.filter((p) => looseSet.has(p.id)).map((p) => {
+      const { id, ...rest } = p;
+      return { id, placement: { ...rest, yawDegrees: norm(p.yawDegrees + 90) } };
+    });
+    if (rotations.some((r) => GAME_BUILD.placed.validatePlacement(r.placement).length > 0)) return;
+    events.push(
+      ...rotations.map((r) => ({ event: { kind: 'pieceRemoved', id: r.id } as BuildEditEvent, label: `rotated ${r.id}` })),
+      ...rotations.map((r) => ({ event: { kind: 'piecePlaced', placement: r.placement } as BuildEditEvent, label: `rotated ${r.placement.pieceId}` })),
+    );
+    if (!events.length) return;
+    commitMany(events);
+    setSelectedIds(new Set());
+  }, [commitMany]);
+
   // ── keys: WASD/arrows pan, Q/E orbit, F recenter (camera) + R rotate ghost, Del
   // delete, Esc disarm/clear (editing). Direct key-bus subscription (req_1777): the
   // editor control contract swallowed WASD here; the raw bus is the host's own source.
@@ -348,7 +386,11 @@ export function LoaderIsoView(props: {
       if (k === 'q') { stage.rotate(-1); pushCamera(); }
       else if (k === 'e') { stage.rotate(1); pushCamera(); }
       else if (k === 'f' || k === 'home') { stage.centerOn(props.centerX ?? 0, props.centerZ ?? 0); pushCamera(); }
-      else if (editable && k === 'r') { setGhostYaw((y) => (y + 90) % 360); }
+      else if (editable && k === 'r') {
+        // R turns the SELECTION if one exists, else the placement ghost (the IsoAuthor rule).
+        if (selectedIdsRef.current.size) rotateSelected();
+        else setGhostYaw((y) => (y + 90) % 360);
+      }
       else if (editable && (k === 'delete' || k === 'backspace')) { deleteSelected(); }
       else if (editable && k === 'escape') {
         if (armedRef.current) setArmed(null);
@@ -358,7 +400,7 @@ export function LoaderIsoView(props: {
     const offDown = busOn('__keydown', onKey(true));
     const offUp = busOn('__keyup', onKey(false));
     return () => { offDown(); offUp(); heldPanRef.current = {}; modRef.current = { shift: false, alt: false, ctrl: false }; };
-  }, [stage, pushCamera, props.centerX, props.centerZ, editable, deleteSelected]);
+  }, [stage, pushCamera, props.centerX, props.centerZ, editable, deleteSelected, rotateSelected]);
 
   // Re-resolve the hover ghost after R turns it, so the preview spins in place at the
   // last known cursor instead of waiting for the next mouse-move.
@@ -442,7 +484,16 @@ export function LoaderIsoView(props: {
     const nodeId = Number(loaderRef.current?.id ?? 0);
     if (!nodeId) return;
     const baked = bakedIdsRef.current!;
-    const pending = (props.pieces ?? []).filter((p) => !baked.has(p.id));
+    const current = props.pieces ?? [];
+    const currentIds = new Set(current.map((p) => p.id));
+    // tier-2 (req_1800): if a piece that WAS baked is no longer present, the user
+    // deleted/moved/rotated pre-baked geometry. The overlay can't erase the baked mesh,
+    // so request a settle bake to fold the change in. Pure placements keep every baked id
+    // present → no bake, the overlay alone shows the new piece.
+    for (const id of baked) {
+      if (!currentIds.has(id)) { props.requestSettleBake?.(); break; }
+    }
+    const pending = current.filter((p) => !baked.has(p.id));
     if (!pending.length) {
       if (typeof g.__compiled_world_clear_live_pieces === 'function') g.__compiled_world_clear_live_pieces(nodeId);
       return;

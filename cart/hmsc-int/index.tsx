@@ -470,6 +470,22 @@ function EditorShell() {
     }
   }, [previewWorld, logEvent, ws.stem]);
 
+  // [LIVEHOST tier-2 req_1800] a DEBOUNCED settle bake the loader pane requests only when
+  // an edit touched BAKED geometry (delete/move/rotate of a pre-baked piece) — the live
+  // overlay can add meshes but not erase a baked one, so those need a bake to reflect.
+  // Placements never call this (instant via the overlay). Re-arms while a bake is running.
+  const settleBakeTimer = useRef<any>(null);
+  const requestSettleBake = useCallback(() => {
+    if (settleBakeTimer.current) clearTimeout(settleBakeTimer.current);
+    const arm = () => {
+      settleBakeTimer.current = setTimeout(() => {
+        if (compilingRef.current) { arm(); return; } // a bake is running — wait, then retry
+        compileToGame();
+      }, 1200);
+    };
+    arm();
+  }, [compileToGame]);
+
   // [LOADERVIEW req_1760/1761] "always up to date": the loader pane renders the BAKED
   // gamefile, so it only reflects edits after a compile. Auto-compile on a DEBOUNCED
   // cadence — bake ~2.5s after edits settle (never per-edit; the user's ruling), and
@@ -671,6 +687,7 @@ function EditorShell() {
                     onCommitMany={commitBuildEvents}
                     onSelectionChange={onIsoSelectionChange}
                     onPlaceWaterBody={placeWaterBodyAt}
+                    requestSettleBake={requestSettleBake}
                   />
                 ) : (
                   <IsoAuthor
