@@ -595,7 +595,14 @@ export function LoaderIsoView(props: {
       return;
     }
     if (typeof g.__compiled_world_set_live_pieces === 'function') {
-      g.__compiled_world_set_live_pieces(nodeId, pieceInstanceRows(pending));
+      const rows = pieceInstanceRows(pending);
+      // [live-diag req_1812] TEMP: why a placed item is invisible. Tells props (skipped →
+      // 0 rows) from a real render bug (rows>0 but nothing drawn). Remove once fixed.
+      const kinds = pending.map((p) => { try { return GAME_BUILD.catalog.get(p.pieceId).kind; } catch { return '?'; } });
+      console.warn(`[live-push] node=${nodeId} pending=${pending.length} kinds=[${kinds.join(',')}] rows=${rows.length / 12} door=ok`);
+      g.__compiled_world_set_live_pieces(nodeId, rows);
+    } else {
+      console.warn(`[live-push] node=${nodeId} pending=${pending.length} — DOOR MISSING (__compiled_world_set_live_pieces); rebuild the dev host`);
     }
   }, [editable, props.pieces, props.reloadToken]);
 

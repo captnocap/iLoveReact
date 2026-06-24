@@ -4836,6 +4836,17 @@ fn applyPendingLive(runtime: *Runtime) void {
     node.scene3d_instance_count = @intCast(p.count);
     node.scene3d_mesh = p.count > 0;
     runtime.live_gen = p.gen;
+    // [live-diag req_1812] RJIT_LIVELOG=1: prove the overlay applies + dump the first row,
+    // so an invisible placed piece is diagnosed (0 rows? off-screen? zero scale?).
+    if (std.posix.getenv("RJIT_LIVELOG") != null) {
+        if (p.count > 0) {
+            log.print("[live] kid={d} count={d} gen={d} row0 pos=({d:.1},{d:.1},{d:.1}) scale=({d:.1},{d:.1},{d:.1}) col=({d:.2},{d:.2},{d:.2})\n", .{
+                kid, p.count, p.gen, p.rows[0], p.rows[1], p.rows[2], p.rows[6], p.rows[7], p.rows[8], p.rows[9], p.rows[10], p.rows[11],
+            });
+        } else {
+            log.print("[live] kid={d} count=0 gen={d} (overlay cleared)\n", .{ kid, p.gen });
+        }
+    }
 }
 
 fn findMounted(node_id: u32) ?*MountedLoader {
@@ -4888,6 +4899,18 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
     };
     runtime.last_aspect = w / @max(h, 1); // streaming's sight culling needs the real pane shape
     applyPendingCam(runtime); // LOADERVIEW req_1757: editor iso pose, re-applied each frame
+    // [live-diag req_1812] RJIT_LIVE_PROBE=1: inject ONE bright box at the camera's look
+    // target so a headless shot proves whether the live overlay RENDERS at all (isolates
+    // the Zig draw path from the JS push). Only when nothing real is set for this node.
+    if (std.posix.getenv("RJIT_LIVE_PROBE") != null) {
+        const cur = pendingLiveFor(node.id);
+        if (cur == null or cur.?.count == 0) {
+            const lk = runtime.camera.ext_look;
+            var row = [_]f32{ lk.x, lk.y + 2, lk.z, 0, 0, 0, 6, 6, 6, 1, 0, 0 }; // red 6m cube
+            setLivePieces(node.id, std.mem.sliceAsBytes(row[0..]));
+            log.print("[live-probe] injected red box at ({d:.1},{d:.1},{d:.1})\n", .{ lk.x, lk.y + 2, lk.z });
+        }
+    }
     applyPendingLive(runtime); // LIVEHOST req_1798: just-placed pieces, drawn without a rebake
     runtime.stepNow();
     runtime.ensureMaterials();
