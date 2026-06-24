@@ -170,7 +170,14 @@ try {
     roadNames: ((state as any).world?.roads ?? []).map((r: any) => r.name).filter(Boolean),
   }, null, 2));
 } catch { /* diag best-effort */ }
-const pieces = readPlacedPieces(stem);
+// --no-pieces (LIVEHOST/bake-free editing, req_1804): the editor's loader pane bakes a
+// PIECE-FREE world (terrain/props/scenery only) and renders all build pieces from a LIVE
+// streaming overlay the editor pushes, so place/delete/move/rotate are instant with no
+// rebake. The /compiled bake omits this flag → pieces baked as before. Reading the flag
+// here (not deeper) keeps the whole geometry/collider pipeline naturally piece-free.
+const noPieces = ((globalThis as any).process?.argv ?? []).includes('--no-pieces');
+const pieces = noPieces ? [] : readPlacedPieces(stem);
+if (noPieces) warn('[bake] --no-pieces: baking terrain/props only; build pieces render live in the editor');
 const floors = readPaintedFloors(stem);
 memStage('after world load (state/pieces/floors)');
 // The render environment IS /test's: build it from the SAME buildHmscSky the

@@ -107,7 +107,7 @@ const ORACLE_SMOKE_QUERIES = [
 export async function run(argv: string[]): Promise<number> {
   const subcommand = argv[0];
   if (subcommand === 'compile') return compile(__cwd());
-  if (subcommand === 'bake') return bake(__cwd());
+  if (subcommand === 'bake') return bake(__cwd(), argv.slice(1));
   if (subcommand === 'verify') return verify(__cwd());
   if (subcommand === 'shot') return shot(__cwd(), argv.slice(1));
   if (subcommand === 'play') return play(__cwd(), argv.slice(1));
@@ -191,10 +191,16 @@ function compile(root: string): number {
   return 0;
 }
 
-function bake(root: string): number {
+function bake(root: string, args: string[] = []): number {
   fsMkdir(`${root}/${OUT_DIR}`);
-  if (!bakeRealGameFile(root)) return 1;
-  out(`[game] bake PASS — ${BAKED_GAMEFILE}`);
+  // --no-pieces + --gamefile <path> (req_1804): the editor pane bakes a PIECE-FREE world
+  // to its OWN game-file (hmsc-editor.gamefile) and renders pieces live; /compiled keeps
+  // baking the full hmsc.gamefile. Default (no flags) = the original full bake.
+  const noPieces = args.includes('--no-pieces');
+  const gfIdx = args.indexOf('--gamefile');
+  const gamefile = gfIdx >= 0 && args[gfIdx + 1] ? args[gfIdx + 1]! : BAKED_GAMEFILE;
+  if (!bakeRealGameFile(root, { noPieces, gamefile })) return 1;
+  out(`[game] bake PASS — ${gamefile}${noPieces ? ' (piece-free)' : ''}`);
   return 0;
 }
 
@@ -525,18 +531,20 @@ function installGameFileManifest(root: string, tapeTransport: string, gamefilePa
 
 /** Bake the AUTHORED hmsc world (loadEditorWorld) into a game-file the loader
  *  renders. Returns false if the bake doesn't produce a tape. */
-function bakeRealGameFile(root: string): boolean {
+function bakeRealGameFile(root: string, opts: { noPieces?: boolean; gamefile?: string } = {}): boolean {
   if (!bundle(root, BAKE_ENTRY, BAKE_BUNDLE)) {
     err('[game] bake FAILED: bakeGameFile does not bundle');
     return false;
   }
+  const gamefile = opts.gamefile ?? BAKED_GAMEFILE;
   // The bake writes the packed binary game-file + asset blobs STRAIGHT TO these
   // paths (GL: pack binary, not base64 — emitGameFile.ts) and prints only a
   // manifest. We pass the destinations so it never holds a megabyte-string copy.
   const gen = spawnSync(`${root}/tools/v8cli`, [
     `${root}/${BAKE_BUNDLE}`,
-    '--gamefile', `${root}/${BAKED_GAMEFILE}`,
+    '--gamefile', `${root}/${gamefile}`,
     '--store', `${root}/${CONTENT_STORE_DIR}`,
+    ...(opts.noPieces ? ['--no-pieces'] : []),
   ]);
   if (gen.stderr.trim()) err(gen.stderr.trim());
   const tapeTransport = gen.stdout.trim();
@@ -544,7 +552,7 @@ function bakeRealGameFile(root: string): boolean {
     err('[game] bake FAILED: no game-file produced from the authored world');
     return false;
   }
-  return installGameFileManifest(root, tapeTransport, BAKED_GAMEFILE);
+  return installGameFileManifest(root, tapeTransport, gamefile);
 }
 
 /** Bake a procedurally-generated HUGE city (the scale lab) into a game-file. The

@@ -5896,7 +5896,7 @@ done
   async function run11(argv) {
     const subcommand = argv[0];
     if (subcommand === "compile") return compile(__cwd());
-    if (subcommand === "bake") return bake(__cwd());
+    if (subcommand === "bake") return bake(__cwd(), argv.slice(1));
     if (subcommand === "verify") return verify(__cwd());
     if (subcommand === "shot") return shot(__cwd(), argv.slice(1));
     if (subcommand === "play") return play(__cwd(), argv.slice(1));
@@ -5971,10 +5971,13 @@ done
     out(`[game] compiled ${COMPILE_ENTRY} -> ${HEADLESS_BUNDLE}`);
     return 0;
   }
-  function bake(root) {
+  function bake(root, args = []) {
     fsMkdir(`${root}/${OUT_DIR}`);
-    if (!bakeRealGameFile(root)) return 1;
-    out(`[game] bake PASS \u2014 ${BAKED_GAMEFILE}`);
+    const noPieces = args.includes("--no-pieces");
+    const gfIdx = args.indexOf("--gamefile");
+    const gamefile = gfIdx >= 0 && args[gfIdx + 1] ? args[gfIdx + 1] : BAKED_GAMEFILE;
+    if (!bakeRealGameFile(root, { noPieces, gamefile })) return 1;
+    out(`[game] bake PASS \u2014 ${gamefile}${noPieces ? " (piece-free)" : ""}`);
     return 0;
   }
   function posixJoin(...parts) {
@@ -6276,17 +6279,19 @@ if (failures.length > 0) {
     out(`[game] wrote raw game-file ${gamefilePath} (${stat.size} bytes, binary; installed ${assets.length} asset(s), ${assetBytes} bytes)`);
     return true;
   }
-  function bakeRealGameFile(root) {
+  function bakeRealGameFile(root, opts = {}) {
     if (!bundle(root, BAKE_ENTRY, BAKE_BUNDLE)) {
       err("[game] bake FAILED: bakeGameFile does not bundle");
       return false;
     }
+    const gamefile = opts.gamefile ?? BAKED_GAMEFILE;
     const gen = spawnSync(`${root}/tools/v8cli`, [
       `${root}/${BAKE_BUNDLE}`,
       "--gamefile",
-      `${root}/${BAKED_GAMEFILE}`,
+      `${root}/${gamefile}`,
       "--store",
-      `${root}/${CONTENT_STORE_DIR}`
+      `${root}/${CONTENT_STORE_DIR}`,
+      ...opts.noPieces ? ["--no-pieces"] : []
     ]);
     if (gen.stderr.trim()) err(gen.stderr.trim());
     const tapeTransport = gen.stdout.trim();
@@ -6294,7 +6299,7 @@ if (failures.length > 0) {
       err("[game] bake FAILED: no game-file produced from the authored world");
       return false;
     }
-    return installGameFileManifest(root, tapeTransport, BAKED_GAMEFILE);
+    return installGameFileManifest(root, tapeTransport, gamefile);
   }
   function bakeMassiveGameFile(root, blocks) {
     if (!bundle(root, MASSIVE_BAKE_ENTRY, MASSIVE_BAKE_BUNDLE)) {
