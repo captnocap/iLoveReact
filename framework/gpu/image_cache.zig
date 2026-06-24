@@ -21,6 +21,13 @@ const c = @import("../c.zig").imports;
 
 const MAX_ENTRIES: u32 = 256;
 
+// wgpu's default `maxTextureDimension2D`. A source bigger than this on EITHER
+// axis makes `wgpuDeviceCreateTexture` ABORT the process (an uncaptured-error
+// panic that cannot unwind — not a recoverable null), so an oversized image
+// dropped into a paint trace took the whole app down and, once persisted, made
+// the editor crash on every boot (req_1728). We downscale to fit instead.
+const MAX_TEXTURE_DIM: u32 = 8192;
+
 const Entry = struct {
     key_hash: u64 = 0, // wyhash of source bytes — pointer-stable across FFI calls
     key_len: usize = 0,
@@ -98,6 +105,44 @@ fn readFile(path: []const u8, alloc: std.mem.Allocator) ?[]u8 {
     return std.fs.cwd().readFileAlloc(alloc, path, 64 * 1024 * 1024) catch null;
 }
 
+/// Bilinear box-downscale of an RGBA8 buffer into `dst` (dw×dh). Source-edge
+/// clamped; sample at pixel centers so the image isn't shifted. Used only when a
+/// decoded image exceeds the GPU texture limit (req_1728) — quality over a
+/// nearest-neighbor drop, and it runs once per source (the result is cached).
+fn resampleRgba(src: []const u8, sw: u32, sh: u32, dst: []u8, dw: u32, dh: u32) void {
+    const fsw: f32 = @floatFromInt(sw);
+    const fsh: f32 = @floatFromInt(sh);
+    var dy: u32 = 0;
+    while (dy < dh) : (dy += 1) {
+        const sy = (@as(f32, @floatFromInt(dy)) + 0.5) * fsh / @as(f32, @floatFromInt(dh)) - 0.5;
+        const sy0f = @floor(sy);
+        const wy = sy - sy0f;
+        const y0: u32 = @intFromFloat(@max(0.0, @min(fsh - 1.0, sy0f)));
+        const y1: u32 = @intFromFloat(@max(0.0, @min(fsh - 1.0, sy0f + 1.0)));
+        var dx: u32 = 0;
+        while (dx < dw) : (dx += 1) {
+            const sx = (@as(f32, @floatFromInt(dx)) + 0.5) * fsw / @as(f32, @floatFromInt(dw)) - 0.5;
+            const sx0f = @floor(sx);
+            const wx = sx - sx0f;
+            const x0: u32 = @intFromFloat(@max(0.0, @min(fsw - 1.0, sx0f)));
+            const x1: u32 = @intFromFloat(@max(0.0, @min(fsw - 1.0, sx0f + 1.0)));
+            // index math in usize — a big source (sw*sh*4) overflows u32.
+            const swz: usize = sw;
+            const p00 = (@as(usize, y0) * swz + x0) * 4;
+            const p10 = (@as(usize, y0) * swz + x1) * 4;
+            const p01 = (@as(usize, y1) * swz + x0) * 4;
+            const p11 = (@as(usize, y1) * swz + x1) * 4;
+            const di = (@as(usize, dy) * @as(usize, dw) + dx) * 4;
+            var ch: u32 = 0;
+            while (ch < 4) : (ch += 1) {
+                const top = @as(f32, @floatFromInt(src[p00 + ch])) * (1.0 - wx) + @as(f32, @floatFromInt(src[p10 + ch])) * wx;
+                const bot = @as(f32, @floatFromInt(src[p01 + ch])) * (1.0 - wx) + @as(f32, @floatFromInt(src[p11 + ch])) * wx;
+                dst[di + ch] = @intFromFloat(@max(0.0, @min(255.0, top * (1.0 - wy) + bot * wy)));
+            }
+        }
+    }
+}
+
 fn load(src: []const u8) ?*Entry {
     if (g_count >= MAX_ENTRIES) return null;
     const device = gpu.getDevice() orelse return null;
@@ -126,15 +171,35 @@ fn load(src: []const u8) ?*Entry {
     );
     if (pixels_ptr == null or w <= 0 or h <= 0) return null;
     defer c.stbi_image_free(pixels_ptr);
-    const pw: u32 = @intCast(w);
-    const ph: u32 = @intCast(h);
+    var pw: u32 = @intCast(w);
+    var ph: u32 = @intCast(h);
+    var pixels_slice: []u8 = pixels_ptr[0 .. @as(usize, pw) * @as(usize, ph) * 4];
+
+    // Clamp to the GPU texture limit FIRST — wgpu aborts the process (an
+    // uncaptured-error panic, not a recoverable null) on an oversized texture,
+    // so an over-8192px image must be shrunk before it ever reaches the device
+    // (req_1728). Aspect ratio preserved; the smaller buffer is freed on return.
+    var scaled_buf: ?[]u8 = null;
+    defer if (scaled_buf) |b| alloc.free(b);
+    if (pw > MAX_TEXTURE_DIM or ph > MAX_TEXTURE_DIM) {
+        const limit_f: f32 = @floatFromInt(MAX_TEXTURE_DIM);
+        const scale = @min(limit_f / @as(f32, @floatFromInt(pw)), limit_f / @as(f32, @floatFromInt(ph)));
+        const nw: u32 = @max(1, @as(u32, @intFromFloat(@as(f32, @floatFromInt(pw)) * scale)));
+        const nh: u32 = @max(1, @as(u32, @intFromFloat(@as(f32, @floatFromInt(ph)) * scale)));
+        const nbuf = alloc.alloc(u8, @as(usize, nw) * @as(usize, nh) * 4) catch return null;
+        resampleRgba(pixels_slice, pw, ph, nbuf, nw, nh);
+        log.print("[image_cache] downscaled oversized image {d}x{d} -> {d}x{d} (GPU limit {d})\n", .{ pw, ph, nw, nh, MAX_TEXTURE_DIM });
+        scaled_buf = nbuf;
+        pixels_slice = nbuf;
+        pw = nw;
+        ph = nh;
+    }
 
     // Swizzle RGBA → BGRA when the swapchain needs BGRA8Unorm. stb returns
     // R,G,B,A byte order; textureSample in images.wgsl reads .rgba from
     // whatever the texture format promises, so we pre-swap when the format
     // is BGRA.
     const total_bytes: usize = @as(usize, pw) * @as(usize, ph) * 4;
-    const pixels_slice: []u8 = pixels_ptr[0..total_bytes];
     if (gpu.getFormat() == .bgra8_unorm) {
         var i: usize = 0;
         while (i < total_bytes) : (i += 4) {
