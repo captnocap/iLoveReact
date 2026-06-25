@@ -2737,6 +2737,10 @@ pub const Runtime = struct {
     // the frame. hidden_baked tracks what we hid so the next frame restores it first.
     baked_by_pos: std.AutoHashMapUnmanaged(u64, BakedRange) = .{},
     hidden_baked: std.ArrayListUnmanaged(BakedRange) = .{},
+    // LIVEBLDSKIN req_1849: per-frame instance rows for live procedurally-skinned building-
+    // piece faces (textured cubes outset to cover the baked face-slab). Pre-sized each frame
+    // so the node slices into it stay stable while kid_list grows.
+    skin_box_buf: std.ArrayListUnmanaged(f32) = .{},
     // Node count of the permanent (non-streaming, non-live-mesh) prefix — captured in
     // build(). The non-streaming path truncates back to here before re-appending the live
     // mesh nodes each frame (streaming truncates to stream_tail_start in refreshStreamNodes).
@@ -2854,6 +2858,7 @@ pub const Runtime = struct {
         self.mesh_by_hash.deinit(self.allocator);
         self.baked_by_pos.deinit(self.allocator);
         self.hidden_baked.deinit(self.allocator);
+        self.skin_box_buf.deinit(self.allocator);
         {
             var it = self.live_mat_keys.valueIterator();
             while (it.next()) |v| self.allocator.free(v.*);
@@ -3009,36 +3014,68 @@ pub const Runtime = struct {
         }
     }
 
+    // LIVEBLDSKIN req_1849: append a textured cube per procedurally-skinned building-piece
+    // face, OUTSET a hair so it covers the baked face-slab (building-piece boxes are batched
+    // instanced draws — can't hide one — so we cover instead of hide). One-instance box nodes
+    // into a pre-sized per-frame buffer (stable slices while kid_list grows).
+    fn appendLiveSkinBoxes(self: *Runtime) void {
+        const sb = pendingSkinBoxesFor(self.node_id) orelse return;
+        if (sb.boxes.len == 0) return;
+        self.skin_box_buf.clearRetainingCapacity();
+        self.skin_box_buf.ensureTotalCapacity(self.allocator, sb.boxes.len * INSTANCE_STRIDE) catch return;
+        const out = SKIN_BOX_OUTSET;
+        for (sb.boxes) |b| {
+            const key = self.live_mat_keys.get(b.mat_hash) orelse continue; // material not materialized yet
+            const start = self.skin_box_buf.items.len;
+            self.skin_box_buf.appendSliceAssumeCapacity(&[_]f32{ b.cx, b.cy, b.cz, 0, b.yaw, 0, b.sx + out, b.sy + out, b.sz + out, 1, 1, 1 });
+            const row = self.skin_box_buf.items[start .. start + INSTANCE_STRIDE];
+            self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = true,
+                .scene3d_geom_key = "box",
+                .scene3d_vertices = self.cube[0..],
+                .scene3d_vert_count = 36,
+                .scene3d_instance_data = row,
+                .scene3d_instance_count = 1,
+                .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
+                .scene3d_instance_static = false,
+                .scene3d_tex_key = key,
+            }) catch {};
+        }
+    }
+
     fn applyLiveMeshProps(self: *Runtime) void {
         if (self.stream == null) self.kid_list.shrinkRetainingCapacity(self.perm_node_count);
         defer self.root.children = self.kid_list.items; // append may realloc; re-point the root
-        const mp = self.scene.mesh_props orelse return;
-        self.ensureMeshHashMap();
         self.ensureLiveMaterials();
         // RESKIN req_1845: un-hide whatever we hid last frame before re-evaluating, so a
         // reverted/reloaded prop shows its baked render again.
         for (self.hidden_baked.items) |rng| self.setBakedRangeVisible(rng, true);
         self.hidden_baked.clearRetainingCapacity();
-        if (pendingLiveMeshFor(self.node_id)) |p| {
-            for (p.refs) |r| {
-                self.appendLiveMeshRef(mp, r, null);
-                // A live ref coincident with a baked instance is a RE-SKIN of an existing
-                // prop (the editor only pushes those + brand-new placements, which sit at
-                // fresh positions) — hide the stale baked draw so the two don't z-fight.
-                if (self.baked_by_pos.count() > 0) {
-                    if (self.mesh_by_hash.get(r.hash)) |idx| {
-                        if (self.baked_by_pos.get(meshPosKey(idx, r.x, r.z, r.yaw))) |rng| {
-                            self.setBakedRangeVisible(rng, false);
-                            self.hidden_baked.append(self.allocator, rng) catch {};
+        // Mesh props (need the mesh table loaded). Building-piece skin boxes below do not.
+        if (self.scene.mesh_props) |mp| {
+            self.ensureMeshHashMap();
+            if (pendingLiveMeshFor(self.node_id)) |p| {
+                for (p.refs) |r| {
+                    self.appendLiveMeshRef(mp, r, null);
+                    // A live ref coincident with a baked instance is a RE-SKIN of an existing
+                    // prop (the editor only pushes those + brand-new placements, which sit at
+                    // fresh positions) — hide the stale baked draw so the two don't z-fight.
+                    if (self.baked_by_pos.count() > 0) {
+                        if (self.mesh_by_hash.get(r.hash)) |idx| {
+                            if (self.baked_by_pos.get(meshPosKey(idx, r.x, r.z, r.yaw))) |rng| {
+                                self.setBakedRangeVisible(rng, false);
+                                self.hidden_baked.append(self.allocator, rng) catch {};
+                            }
                         }
                     }
                 }
             }
+            // The placement ghost: the armed mesh prop, translucent, tracking the snap target.
+            if (pendingMeshGhostFor(self.node_id)) |gh| {
+                if (gh.has) self.appendLiveMeshRef(mp, gh.ref, LIVE_MESH_GHOST_ALPHA);
+            }
         }
-        // The placement ghost: the armed mesh prop, translucent, tracking the snap target.
-        if (pendingMeshGhostFor(self.node_id)) |gh| {
-            if (gh.has) self.appendLiveMeshRef(mp, gh.ref, LIVE_MESH_GHOST_ALPHA);
-        }
+        self.appendLiveSkinBoxes();
     }
 
     fn build(self: *Runtime) !void {
@@ -5055,6 +5092,63 @@ pub fn setLiveMaterial(node_id: u32, hash: u32, kind: u32, wgsl: []const u8, dat
         alloc.free(wgsl_copy);
         alloc.free(data_copy);
     };
+}
+
+// ── live BUILDING-PIECE skin boxes (LIVEBLDSKIN req_1849) ────────────────────
+// A procedurally-skinned building-piece face, drawn as a textured cube outset over the
+// baked face-slab. 32 bytes/box: cx,cy,cz, sx,sy,sz, yawDeg (f32), matHash (u32).
+const SKIN_BOX_OUTSET: f32 = 0.008; // grow each dim so the live face protrudes past the baked
+const SkinBox = struct { cx: f32, cy: f32, cz: f32, sx: f32, sy: f32, sz: f32, yaw: f32, mat_hash: u32 };
+const SKIN_BOX_STRIDE_BYTES: usize = 32;
+const PendingSkinBoxes = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    boxes: []SkinBox = &.{},
+    gen: u64 = 0,
+};
+var g_pending_skin_boxes: [MAX_EMBEDDED_LOADERS]PendingSkinBoxes = [_]PendingSkinBoxes{.{}} ** MAX_EMBEDDED_LOADERS;
+
+fn pendingSkinBoxesFor(node_id: u32) ?*PendingSkinBoxes {
+    for (&g_pending_skin_boxes) |*p| {
+        if (p.set and p.node_id == node_id) return p;
+    }
+    return null;
+}
+
+/// Replace the live building-piece skin boxes for a node (LIVEBLDSKIN req_1849).
+pub fn setLiveSkinBoxes(node_id: u32, bytes: []const u8) void {
+    const alloc = std.heap.page_allocator;
+    var slot: ?*PendingSkinBoxes = pendingSkinBoxesFor(node_id);
+    if (slot == null) {
+        for (&g_pending_skin_boxes) |*p| {
+            if (!p.set) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    const p = slot orelse return;
+    const n = bytes.len / SKIN_BOX_STRIDE_BYTES;
+    const boxes = alloc.alloc(SkinBox, n) catch return;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const o = i * SKIN_BOX_STRIDE_BYTES;
+        boxes[i] = .{
+            .cx = std.mem.bytesToValue(f32, bytes[o..][0..4]),
+            .cy = std.mem.bytesToValue(f32, bytes[o + 4 ..][0..4]),
+            .cz = std.mem.bytesToValue(f32, bytes[o + 8 ..][0..4]),
+            .sx = std.mem.bytesToValue(f32, bytes[o + 12 ..][0..4]),
+            .sy = std.mem.bytesToValue(f32, bytes[o + 16 ..][0..4]),
+            .sz = std.mem.bytesToValue(f32, bytes[o + 20 ..][0..4]),
+            .yaw = std.mem.bytesToValue(f32, bytes[o + 24 ..][0..4]),
+            .mat_hash = std.mem.bytesToValue(u32, bytes[o + 28 ..][0..4]),
+        };
+    }
+    if (p.boxes.len > 0) alloc.free(p.boxes);
+    p.node_id = node_id;
+    p.set = true;
+    p.boxes = boxes;
+    p.gen +%= 1;
 }
 
 // ── live placement GHOST (LIVEMESH req_1841) ────────────────────────────────

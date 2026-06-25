@@ -625,6 +625,52 @@ export function meshPropLivePush(pieces: readonly PlacedBuildPiece[], bakedSig: 
   return { refs: new Uint8Array(buf), materials: [...materials.values()] };
 }
 
+// ── BUILDING-PIECE live skins (LIVEBLDSKIN req_1849) ────────────────────────
+// A material skin on a building-piece face becomes a face-slab VisualBox carrying
+// textureKey 'bldskin:<id>' (pieceShapes.visualLook). Unlike props (one mesh node each),
+// building pieces are BATCHED instanced draws — you can't toggle one baked instance off.
+// So a procedurally-skinned face renders as a live textured box OUTSET a hair to cover the
+// baked face-slab cleanly (no z-fight, no batch surgery). Baseline-free like the prop skin
+// path, so it survives hot reloads and covers existing pieces. 32 bytes/box: cx,cy,cz,
+// sx,sy,sz, yawDeg (f32), matHash (u32) — the loader scales the cube + outsets it.
+const SKIN_BOX_BYTES = 32;
+const BLDSKIN_PREFIX = 'bldskin:';
+export interface LiveSkinPush { boxes: Uint8Array; materials: LiveMaterial[] }
+export function buildingSkinBoxes(pieces: readonly PlacedBuildPiece[]): LiveSkinPush {
+  const out: { cx: number; cy: number; cz: number; sx: number; sy: number; sz: number; yaw: number; matHash: number }[] = [];
+  const materials = new Map<number, LiveMaterial>();
+  for (const piece of pieces) {
+    if (propFromPiece(piece)) continue; // props ride meshPropLivePush
+    const sig = wallJoinSignature(piece, pieces) ?? '';
+    for (const shape of pieceVisualShapes(piece, sig, pieces)) {
+      if (shape.kind !== 'box') continue; // skinned ramps deferred
+      const tk = shape.box.textureKey;
+      if (!tk || !tk.startsWith(BLDSKIN_PREFIX)) continue;
+      const shader = resolveMaterialShader(tk.slice(BLDSKIN_PREFIX.length));
+      if (!shader) continue; // non-procedural (decal/flat) skin — leave to baked/Compile
+      const matHash = fnv1aHash(`${tk}:${shader.data.join(',')}`);
+      if (!materials.has(matHash)) materials.set(matHash, { hash: matHash, wgsl: shader.wgsl, data: shader.data, opacity: shader.opacity });
+      const b = shape.box;
+      out.push({ cx: b.cx, cy: b.cy, cz: b.cz, sx: b.sx, sy: b.sy, sz: b.sz, yaw: b.yawDegrees, matHash });
+    }
+  }
+  const buf = new ArrayBuffer(out.length * SKIN_BOX_BYTES);
+  const f = new Float32Array(buf);
+  const u = new Uint32Array(buf);
+  out.forEach((b, i) => {
+    const o = i * 8;
+    f[o] = b.cx;
+    f[o + 1] = b.cy;
+    f[o + 2] = b.cz;
+    f[o + 3] = b.sx;
+    f[o + 4] = b.sy;
+    f[o + 5] = b.sz;
+    f[o + 6] = b.yaw;
+    u[o + 7] = b.matHash;
+  });
+  return { boxes: new Uint8Array(buf), materials: [...materials.values()] };
+}
+
 // The join-signature pass over the whole piece array, cached on the ARRAY
 // IDENTITY (PLACEPERF-0610): every render of PlacedPieceMeshes used to redo it
 // (43ms at ~4.8k pieces), and a single commit re-renders several times
