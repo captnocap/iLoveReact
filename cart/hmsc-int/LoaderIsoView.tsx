@@ -39,6 +39,7 @@ import { modulePitch, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget }
 import { useHeldModifiers } from './editors/useEditorControls';
 import { buildResidentMeshCatalogLump } from './compile/worldGeometry';
 import { subscribeCookedAssets } from './editors/model/cookedAssets';
+import { stampEdit, takeEditStamp, nowMs } from './editors/build/editLatency';
 import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
 import { pieceInstanceRows, meshPropLivePush, meshGhostRef, pieceSkinSig, buildingSkinBoxes } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
@@ -149,8 +150,12 @@ export function LoaderIsoView(props: {
   onCommitRef.current = props.onCommit;
   const onCommitManyRef = useRef(props.onCommitMany);
   onCommitManyRef.current = props.onCommitMany;
+  // EDITLATENCY req_1924: stamp the gesture (keystroke/click) that starts an edit; the live-push
+  // effect reads it after pushing to log keystroke→push (the React+push cost) and keystroke→
+  // rendered (≈ one frame later). A baseline to beat as we drive the edit loop toward gameplay rate.
   const commitMany = useCallback((items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => {
     if (!items.length) return;
+    stampEdit(items[0].label.split(' ')[0] || 'edit'); // verb from the first label: removed|moved|rotated|cloned
     if (onCommitManyRef.current) onCommitManyRef.current(items);
     else for (const it of items) onCommitRef.current?.(it.event, it.label);
   }, []);
@@ -339,6 +344,7 @@ export function LoaderIsoView(props: {
     if (a.kind === 'prefab') {
       const def = prefabByIdRef.current.get(a.id);
       if (!def) return;
+      stampEdit('place·prefab');
       onCommitRef.current?.({ kind: 'prefabStamped', prefabId: a.id, origin: { x: t.placement.x, y: t.placement.y, z: t.placement.z }, yawDegrees: t.placement.yawDegrees }, `stamped ${def.label} @ ${at}`);
       return;
     }
@@ -349,6 +355,7 @@ export function LoaderIsoView(props: {
     const def = GAME_BUILD.catalog.get(a.id);
     const placement = GAME_BUILD.placed.placementFor(def, t.placement);
     if (GAME_BUILD.placed.validatePlacement(placement).length > 0) return;
+    stampEdit('place');
     onCommitRef.current?.({ kind: 'piecePlaced', placement }, `placed ${def.label} @ ${at}`);
   }, [props.onPlaceWaterBody]);
 
@@ -743,6 +750,21 @@ export function LoaderIsoView(props: {
     if (typeof g.__compiled_world_set_live_pieces === 'function') g.__compiled_world_set_live_pieces(nodeId, rows);
     if (typeof g.__compiled_world_set_live_mesh_props === 'function') g.__compiled_world_set_live_mesh_props(nodeId, meshPush.refs);
     if (typeof g.__compiled_world_set_live_skin_boxes === 'function') g.__compiled_world_set_live_skin_boxes(nodeId, skinPush.boxes);
+    // EDITLATENCY req_1924/req_1928: this push is the edit's — take the gesture stamp and log the
+    // matrix line. gesture→push is the React reconcile + push cost (the optimizable part); one rAF
+    // later ≈ the host has drawn it, so gesture→rendered is the felt keystroke→on-screen latency.
+    // The last sample is stashed on g.__hmscEditLatency for a HUD / external reader.
+    const stamp = takeEditStamp();
+    if (stamp) {
+      const pushMs = nowMs() - stamp.t;
+      const { t, label } = stamp;
+      const after = g.requestAnimationFrame ? g.requestAnimationFrame.bind(g) : (fn: () => void) => setTimeout(fn, 16);
+      after(() => {
+        const renderedMs = nowMs() - t;
+        g.__hmscEditLatency = { label, pushMs, renderedMs, at: Date.now() };
+        console.log(`[edit-latency] ${label.padEnd(7)} gesture→push ${pushMs.toFixed(1).padStart(6)}ms · gesture→rendered ~${renderedMs.toFixed(1).padStart(6)}ms`);
+      });
+    }
   }, [editable, props.pieces, props.reloadToken]);
 
   // LIVEMESH req_1841: the placement GHOST for a mesh prop is the REAL mesh, translucent,

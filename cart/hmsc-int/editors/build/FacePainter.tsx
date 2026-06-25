@@ -11,8 +11,8 @@
 //
 // Extracted from IsoAuthor (the "extend = modularize preemptively" ruling) and
 // rebuilt around material NAVIGATION: the v1 blind ◀ ▶ cycler becomes grouped,
-// previewed material swatches (groups follow the workbench chooser's
-// materialFamily contract, with the user's Materialized customs first), plus a
+// previewed material swatches (groups follow the workbench material catalog,
+// with the user's Materialized customs first), plus a
 // custom #rrggbb brush, a recently-used row, a visible current-brush readout,
 // and a per-face readout of what the selection currently wears.
 
@@ -30,6 +30,7 @@ import { materialFamily } from '../workbench/materials/chooser';
 import { propParts } from '../../render3d/propParts';
 import { isTextureable, type Part } from '../../render3d/parts';
 import { uploadFaceTexture } from './uploadFaceTexture';
+import { stampEdit } from './editLatency';
 import { migrateImagesIntoRepo, summarizeMigration } from './migrateImagesIntoRepo';
 
 // PROPSKIN-0766: a placed PROP piece (pieceId 'prop.<kind>') skins by NAMED PART,
@@ -74,7 +75,7 @@ function slotWear(pieces: readonly PlacedBuildPiece[], slot: BuildFaceSlot): Bui
   return seen ?? null;
 }
 
-// ── Material groups: the workbench chooser's family contract, customs first ──
+// ── Material groups: catalog shelves, customs first ─────────────────────────
 
 type MatGroup = { name: string; items: TextureDef[] };
 
@@ -315,6 +316,7 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
     const slot = selectedSlotRef.current;
     const patch: BuildSkinSet = slot ? { [slot]: b } : { front: b, back: b, sides: b };
     const label = slot ? `painted ${slot}` : 'painted piece';
+    stampEdit('skin'); // EDITLATENCY req_1928: the texture/skin gesture — measured in the loader push
     commitRef.current(sel.map((p) => ({ event: { kind: 'pieceSkinSet', id: p.id, skin: patch } as WorldEvent, label })));
     pushRecent(b);
   };
@@ -333,7 +335,7 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
         items.push({ event: { kind: 'piecePartTextureSet', id: p.id, partId, textureId } as WorldEvent, label: target ? `skinned ${target}` : 'skinned prop' });
       }
     }
-    if (items.length) { commitRef.current(items); pushRecent({ kind: 'material', id: textureId }); }
+    if (items.length) { stampEdit('skin'); commitRef.current(items); pushRecent({ kind: 'material', id: textureId }); }
   };
 
   // A texture pick routes by mode: a prop's PART, or a build piece's face slot.
