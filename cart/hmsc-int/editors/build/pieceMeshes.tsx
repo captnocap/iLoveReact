@@ -582,12 +582,15 @@ export function pieceSkinSig(piece: PlacedBuildPiece): string {
 }
 
 // Live MESH-prop references + the skin materials they need (LIVEMESH req_1812 + LIVESKIN
-// req_1843 + RESKIN req_1845). Pass the FULL current piece set + a snapshot of each baked
-// piece's skin signature (absent id ⇒ not baked yet = a brand-new placement). A mesh prop is
-// pushed live when it is brand-new (geometry overlay) OR an EXISTING prop whose skin changed
-// since the bake AND that skin is a procedural shader we can materialize live — the loader
-// then hides the stale baked copy. A baked prop still wearing its baked skin is left to the
-// baked render; a re-skin we can't do live yet (decal/image/flat) is left until Compile.
+// req_1843 + RESKIN req_1845 + HOTSURVIVE req_1851). Pass the FULL current piece set + a
+// snapshot of each baked piece's skin signature (absent id ⇒ a brand-new placement). A mesh
+// prop is pushed live when it is brand-new (geometry overlay) OR it WEARS A PROCEDURAL SKIN we
+// can materialize live — the loader then hides the stale baked copy. The skin case is
+// deliberately BASELINE-FREE: a procedurally-skinned prop always renders its current skin live,
+// so the preview reconstructs from the SAVED edit and survives a hot re-mount (the prior diff
+// against a mount-seeded "what's baked" baseline silently dropped the skin after any hot reload,
+// because the re-mount re-seeded that baseline to the already-skinned state). A baked prop with
+// no live-renderable skin is left to the baked render; decal/image/flat skins wait for Compile.
 export function meshPropLivePush(pieces: readonly PlacedBuildPiece[], bakedSig: ReadonlyMap<string, string>): LiveMeshPush {
   const refs: { hash: number; x: number; y: number; z: number; yaw: number; matHash: number }[] = [];
   const materials = new Map<number, LiveMaterial>();
@@ -596,20 +599,15 @@ export function meshPropLivePush(pieces: readonly PlacedBuildPiece[], bakedSig: 
     if (!prop) continue;
     const key = meshPropKeyForKind(prop.kind);
     if (!key) continue;
-    const baked = bakedSig.get(piece.id);
-    const isPending = baked === undefined;
-    const reskinned = !isPending && baked !== pieceSkinSig(piece);
-    if (!isPending && !reskinned) continue; // baked + unchanged → the baked render is correct
-    let matHash = 0;
+    const isPending = !bakedSig.has(piece.id); // a brand-new placement (geometry overlay)
     const matId = wholePropMaterialId(prop);
-    if (matId) {
-      const shader = resolveMaterialShader(matId);
-      if (shader) {
-        matHash = fnv1aHash(`${matId}:${shader.data.join(',')}`);
-        if (!materials.has(matHash)) materials.set(matHash, { hash: matHash, wgsl: shader.wgsl, data: shader.data, opacity: shader.opacity });
-      }
+    const shader = matId ? resolveMaterialShader(matId) : null; // a procedural skin we can do live
+    if (!isPending && !shader) continue; // existing prop, no live-renderable skin → baked render is correct
+    let matHash = 0;
+    if (matId && shader) {
+      matHash = fnv1aHash(`${matId}:${shader.data.join(',')}`);
+      if (!materials.has(matHash)) materials.set(matHash, { hash: matHash, wgsl: shader.wgsl, data: shader.data, opacity: shader.opacity });
     }
-    if (reskinned && matHash === 0) continue; // a non-procedural re-skin — leave baked until Compile
     refs.push({ hash: fnv1aHash(key), x: prop.x, y: prop.y ?? 0, z: prop.z, yaw: prop.yawDegrees ?? 0, matHash });
   }
   const buf = new ArrayBuffer(refs.length * MESH_REF_BYTES);
