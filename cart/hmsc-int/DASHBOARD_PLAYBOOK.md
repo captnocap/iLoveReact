@@ -185,15 +185,26 @@ which is large, so a focus flip is instant, never a reload stall.
 
 ---
 
-## Sequencing (proposed)
+## Sequencing
 
-1. **Route split** — `/` → `DashboardRoute` (skeleton, instant); editor → 
-   `/editor`. Kills the boot freeze on `/`. Verify via `startupTimer` + `rjit
-   dev`. ← biggest felt win, smallest blast radius.
-2. **Dashboard stats** — async, cached, never-freezing (needs [OPEN 1c]).
-3. **Editor layout redo** — the committed shape (rail + big swappable map + PiP
+1. ✅ **Cut /test** (req_1878, `157c8c003`) — the only sibling reading the live
+   world; removing it freed the workspace from being root-bound.
+2. ✅ **Route split + dashboard** (req_1872, `54165d5ce`) — `/` → light
+   `DashboardRoute` (geometry + footprint reports, deferred so it never blocks);
+   editor → `/editor`; Chrome brand + Home button → `/`. Verified `rjit shot
+   --route /` PASS, boots without the world load.
+3. ⏳ **Deeper (b): scope the workspace to the route** — TODAY the EditorShell
+   (workspace hooks) still mounts at the Router root, so `/` paints instantly but
+   the map still *warms* in the background (the "hot pizza", which is desirable).
+   The honest finish is to move the workspace into a component that mounts only
+   for `/editor` (+ `/compiled`'s tiny compile signal), so `/` mounts literally
+   nothing heavy. Bigger refactor (Chrome is editor-coupled); do it deliberately.
+4. ⏳ **Editor layout redo** — the committed shape (rail + big swappable map + PiP
    switcharoo). Build against the now-isolated `/editor` route.
-4. **(Optional)** idle warm-up / off-thread spike — later, gated on a host check.
+5. **Cleanup** — `editors/play/` is dead (8 files, reachable only via the removed
+   `/test` import). Delete it (carries `/test`-keyed camera-tuning registrations
+   that go with it). Held for the user's ok.
+6. **(Optional)** idle warm-up / off-thread spike — later, gated on a host check.
 
 ## Verification
 
@@ -205,15 +216,15 @@ which is large, so a focus flip is instant, never a reload stall.
 
 ## Open decisions still needed
 
-- **[OPEN 1c]** dashboard stats data source — read existing cooked/model metadata
-  vs. add a triangle/vertex/edge count at cook/import time (preferred). Also: the
-  real-world landmark comparison list/units. *(mine to settle via recon)*
 - **[OPEN 2b]** where NOTES/CHAT go (today RightPanel tabs) once the rail is the
   three build slots — rail overflow, chrome popover, or dropped from the editor.
 - **[OPEN 2c]** the rail's slot-1 (selected piece) when the 2D map is focused —
   stay as piece inspector, or swap to a tile inspector. Minor; decide in build.
 
 ## Resolved
+- **[1c]** dashboard stats data source — counts are already cheap to read (cooked
+  MeshBlob stores vertex count; EditMesh is verts[]+faces[]), so NO cook-time
+  field needed. `reportAssetGeometry()` + `reportMapFootprint()` shipped + tested.
 - **[2a]** layout direction — committed from the req_1873 sketch (see Thread 2).
 - **90% pane** — iso-3D build view.
 - **freeze law** — never block the paint thread; spinner + async, UI stays live.
