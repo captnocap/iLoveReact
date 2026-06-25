@@ -10,7 +10,7 @@
 // a ramp seeds a wedge whose top actually slopes.
 
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
-import { seedMeshFromPiece, seedNameFromPiece } from './seedFromPiece';
+import { seedMeshFromPiece, seedNameFromPiece, seedPartsFromPiece, isDoorLeafPartName } from './seedFromPiece';
 import type { EditMesh, V3 } from './editMesh';
 
 function bounds(m: EditMesh): { min: V3; max: V3; size: V3 } {
@@ -100,6 +100,28 @@ test('a garage door seeds a wider opening than a walk door', () => {
     return Math.max(...xs) - Math.min(...xs); // span of the left-side verts ≈ jamb width
   };
   assert(jambW(garage) < jambW(walk), 'a garage opening is wider → narrower jambs');
+});
+
+test('a door seed splits into a named Door Frame + Door Leaf part (req_1864)', () => {
+  const parts = seedPartsFromPiece('wall.concrete.doorway');
+  assertEqual(parts.length, 2, 'door seed = two parts');
+  assertEqual(parts[0].name, 'Door Frame', 'first part is the frame');
+  assertEqual(parts[1].name, 'Door Leaf', 'second part is the leaf');
+  assert(isDoorLeafPartName(parts[1].name), 'the leaf part name reads as a door leaf');
+  // frame = jambs + header (3 boxes); leaf = the slab (1 box).
+  assertEqual(parts[0].mesh.verts.length, 8 * 3, 'frame: two jambs + header');
+  assertEqual(parts[1].mesh.verts.length, 8, 'leaf: one slab box');
+  // the merged single-mesh path equals frame + leaf (parity with the two-part split).
+  assertEqual(seedMeshFromPiece('wall.concrete.doorway').verts.length, 8 * 4, 'merged = frame + leaf');
+});
+
+test('a garage seed also splits frame + leaf; a non-door seed is one part', () => {
+  const garage = seedPartsFromPiece('wall.metal.garageDoor');
+  assertEqual(garage.length, 2, 'garage door splits too');
+  assertEqual(garage[1].name, 'Door Leaf', 'garage leaf part');
+  const wall = seedPartsFromPiece('wall.concrete.common');
+  assertEqual(wall.length, 1, 'a plain wall is a single part');
+  assertEqual(wall[0].name, 'Concrete Wall', 'single part carries the catalog label');
 });
 
 test('seedNameFromPiece reads the catalog label, falls back to the id', () => {

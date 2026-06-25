@@ -102,30 +102,61 @@ function seedableShapes(shapes: readonly VisualShape[]): VisualShape[] {
   });
 }
 
-/** A wall with a REAL doorway carved out + an editable door slab — the seed for a
- *  Door/Garage Wall (req_1698). The live door edit renders a SOLID wall plus a flat
- *  near-black panel (the "black block" with no actual opening); pieceVisualShapes
- *  never carves it. So we build the doorway ourselves: two jambs + a header around a
- *  floor-to-`Ho` opening, plus a thin door slab IN the opening as a normal editable
- *  box (not the black panel) — a wall-with-a-door the user details into a real door. */
-function carveDoorWall(def: { size: { widthMeters: number; heightMeters: number; depthMeters: number } }, edit: string): EditMesh {
+type DoorDef = { size: { widthMeters: number; heightMeters: number; depthMeters: number } };
+
+/** The doorway dimensions a door/garage seed carves — the opening width `Wo`
+ *  and height `Ho` (from PLACED_TUNING, the same source the live edit + bake use),
+ *  clamped under the piece's own W/H so a narrow wall still leaves jambs. */
+function doorOpening(def: DoorDef, edit: string): { W: number; H: number; D: number; Wo: number; Ho: number } {
   const W = def.size.widthMeters, H = def.size.heightMeters, D = def.size.depthMeters;
   const t = GAME_BUILD.placed.tuning;
   const vehicle = edit === 'garageDoor';
   const Wo = Math.min(W * 0.9, vehicle ? t.vehicleOpeningWidthMeters : t.walkOpeningWidthMeters);
   const Ho = Math.min(H * 0.95, vehicle ? t.garageDoorPanelHeightMeters : t.walkDoorPanelHeightMeters);
+  return { W, H, D, Wo, Ho };
+}
+
+/** Append an axis-aligned span box [x0,x1]×[y0,y1]×depth (centered at cz) onto
+ *  growing vert/face arrays — the unit the door frame + leaf are built from. */
+function spanBox(verts: V3[], faces: EditMeshFace[], x0: number, x1: number, y0: number, y1: number, depth: number, cz = 0): void {
+  const sx = x1 - x0, sy = y1 - y0;
+  if (sx <= 1e-4 || sy <= 1e-4) return;
+  mergeInto(verts, faces, cuboid(sx, sy, depth), (v) => [v[0] + (x0 + x1) / 2, v[1] + (y0 + y1) / 2, v[2] + cz]);
+}
+
+/** The door FRAME — two jambs + a header around a floor-to-`Ho` opening (no leaf).
+ *  This is the structural wall-with-a-hole; the leaf is a separate part so the
+ *  cook can turn it into a toggleable door panel (req_1864). */
+function carveDoorFrame(def: DoorDef, edit: string): EditMesh {
+  const { W, H, D, Wo, Ho } = doorOpening(def, edit);
   const verts: V3[] = [];
   const faces: EditMeshFace[] = [];
-  const spanX = (x0: number, x1: number, y0: number, y1: number, depth: number, cz = 0): void => {
-    const sx = x1 - x0, sy = y1 - y0;
-    if (sx <= 1e-4 || sy <= 1e-4) return;
-    mergeInto(verts, faces, cuboid(sx, sy, depth), (v) => [v[0] + (x0 + x1) / 2, v[1] + (y0 + y1) / 2, v[2] + cz]);
-  };
-  spanX(-W / 2, -Wo / 2, 0, H, D);        // left jamb
-  spanX(Wo / 2, W / 2, 0, H, D);          // right jamb
-  spanX(-Wo / 2, Wo / 2, Ho, H, D);       // header above the opening
-  // the door leaf — a real, editable, slightly-inset slab (replaces the black block)
-  spanX(-Wo / 2 + 0.03, Wo / 2 - 0.03, 0, Ho - 0.02, Math.min(D * 0.6, 0.08));
+  spanBox(verts, faces, -W / 2, -Wo / 2, 0, H, D);  // left jamb
+  spanBox(verts, faces, Wo / 2, W / 2, 0, H, D);    // right jamb
+  spanBox(verts, faces, -Wo / 2, Wo / 2, Ho, H, D); // header above the opening
+  return { verts, faces };
+}
+
+/** The door LEAF — a real, editable, slightly-inset slab filling the opening
+ *  (replaces the live edit's flat near-black panel). The "Door" cook (req_1864)
+ *  records this part as the toggleable two-state door panel; the user details it
+ *  into a real door. */
+function carveDoorLeaf(def: DoorDef, edit: string): EditMesh {
+  const { D, Wo, Ho } = doorOpening(def, edit);
+  const verts: V3[] = [];
+  const faces: EditMeshFace[] = [];
+  spanBox(verts, faces, -Wo / 2 + 0.03, Wo / 2 - 0.03, 0, Ho - 0.02, Math.min(D * 0.6, 0.08));
+  return { verts, faces };
+}
+
+/** A wall with a REAL doorway carved out + an editable door slab — the seed for a
+ *  Door/Garage Wall (req_1698), as ONE merged mesh (frame + leaf). Kept for the
+ *  single-mesh seed path; the two-part path is `seedPartsFromPiece` (req_1864). */
+function carveDoorWall(def: DoorDef, edit: string): EditMesh {
+  const frame = carveDoorFrame(def, edit);
+  const verts: V3[] = [...frame.verts];
+  const faces: EditMeshFace[] = [...frame.faces];
+  mergeInto(verts, faces, carveDoorLeaf(def, edit), (v) => v);
   return { verts, faces };
 }
 
@@ -155,4 +186,32 @@ export function seedMeshFromPiece(pieceId: string, edit?: string): EditMesh {
  *  Studio outliner reads "Concrete Wall", not a raw id. */
 export function seedNameFromPiece(pieceId: string): string {
   return GAME_BUILD.catalog.is(pieceId) ? GAME_BUILD.catalog.get(pieceId).label : pieceId;
+}
+
+/** One named part of a seed (req_1864). */
+export type SeedPart = { name: string; mesh: EditMesh };
+
+/** Lower a BUILD_CATALOG piece into the editable PARTS the Studio opens it as.
+ *  Door/garage seeds split into a `Door Frame` part (jambs + header) and a
+ *  `Door Leaf` part (the slab) so the user details the leaf on its own and the
+ *  "Door" cook (req_1864) can turn that named part into a toggleable two-state
+ *  door panel. Every other piece is a single part — the merged seed mesh. */
+export function seedPartsFromPiece(pieceId: string, edit?: string): SeedPart[] {
+  const def = GAME_BUILD.catalog.is(pieceId) ? GAME_BUILD.catalog.get(pieceId) : null;
+  const seedEdit = edit ?? (def as { defaultEdit?: string } | null)?.defaultEdit;
+  if (def && (seedEdit === 'door' || seedEdit === 'garageDoor')) {
+    return [
+      { name: 'Door Frame', mesh: carveDoorFrame(def, seedEdit) },
+      { name: 'Door Leaf', mesh: carveDoorLeaf(def, seedEdit) },
+    ];
+  }
+  return [{ name: seedNameFromPiece(pieceId), mesh: seedMeshFromPiece(pieceId, edit) }];
+}
+
+/** The conventional part name the "Door" cook treats as the toggleable leaf
+ *  (req_1864) — matched case-insensitively so a renamed/detailed part still
+ *  reads as the door if it keeps "door" + "leaf" in the name. */
+export const DOOR_LEAF_PART_NAME = 'Door Leaf';
+export function isDoorLeafPartName(name: string | undefined): boolean {
+  return name !== undefined && /door.*leaf/i.test(name);
 }

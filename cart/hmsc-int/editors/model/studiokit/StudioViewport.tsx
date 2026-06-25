@@ -3977,7 +3977,7 @@ export function StudioEditor() {
       {addOpen ? (
         <AddShapeDialog
           onCancel={() => setAddOpen(false)}
-          onConfirm={(mesh, name) => { model.addPart(mesh, name); setAddOpen(false); }}
+          onConfirm={(parts) => { for (const p of parts) model.addPart(p.mesh, p.name); setAddOpen(false); }}
         />
       ) : null}
       {importOpen ? (

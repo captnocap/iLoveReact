@@ -6,7 +6,7 @@ import { Z } from '../chrome/zlayers';
 import { unitsToMeters } from '../helpers';
 import { NumberField } from '../panels/NumberField';
 import { clampSides, cone, cuboid, cylinder, icosphere, ICOSPHERE_SUBDIV_MAX, latticePanel, LATTICE_COUNT_MAX, plane, pyramid, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, sphere, type EditMesh, type LatticePattern } from '../../editMesh';
-import { seedMeshFromPiece, seedNameFromPiece } from '../../seedFromPiece';
+import { seedMeshFromPiece, seedNameFromPiece, seedPartsFromPiece, type SeedPart } from '../../seedFromPiece';
 
 // ── Add-mesh dialog (req_0972/0973) ───────────────────────────────────────────
 // The first shape is a cube; pick its diameter (= width = depth) and height in
@@ -48,7 +48,7 @@ const BUILD_SEEDS: { key: string; pieceId: string; edit?: string; label: string 
   { key: 'ramp', pieceId: 'ramp.concrete.common', label: 'Ramp' },
 ];
 
-export function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: EditMesh, name: string) => void }) {
+export function AddShapeDialog(props: { onCancel: () => void; onConfirm: (parts: SeedPart[]) => void }) {
   const u = STUDIO.unitsPerTile;
   const [shape, setShape] = useState<ShapeKind>('cube');
   // When set, the part is SEEDED from a build piece instead of a parametric shape —
@@ -139,7 +139,7 @@ export function AddShapeDialog(props: { onCancel: () => void; onConfirm: (mesh: 
         </Text>
         <Row style={{ gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
           <Pressable onPress={props.onCancel} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}><Text fontSize={11} color={T.dim}>Cancel</Text></Pressable>
-          <Pressable onPress={() => props.onConfirm(build(), confirmName)} style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}><Text fontSize={11} color="#7fd6a0" style={{ fontWeight: '800' }}>Add</Text></Pressable>
+          <Pressable onPress={() => props.onConfirm(seed ? seedPartsFromPiece(seed.pieceId, seed.edit) : [{ name: confirmName, mesh: build() }])} style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}><Text fontSize={11} color="#7fd6a0" style={{ fontWeight: '800' }}>Add</Text></Pressable>
         </Row>
       </Col>
     </Box>
