@@ -33,7 +33,7 @@ import { CAT_COLOR, CAT_TAG, relTime, type EditEvent } from '../editLog';
 
 interface ChromeProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'test' | 'labs' | 'workbench-assets' | 'workbench-settings' | 'compiled';
+  activeRoute?: 'editor' | 'assist3d' | 'labs' | 'workbench-assets' | 'workbench-settings' | 'compiled';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -64,9 +64,6 @@ interface ChromeProps {
   onAssist: () => void;
   // Navigate to the native compiled-world viewport.
   onCompiled: () => void;
-  // Navigate to the /test route — the embodied game surface (PLAYFOLD-0605:
-  // test + Creative Build folded; F1 test / F2 build flip the mode in-route).
-  onTest: () => void;
   // Navigate to the /labs route — every lab, instantly loadable (V13).
   onLabs: () => void;
   // The ASSETS door — /workbench as-is, last-used source preserved
@@ -151,7 +148,6 @@ export function Chrome(props: ChromeProps) {
           lights the right one. */}
       <C.ChromeGroup>
         <NavBtn icon="LayoutGrid" on={props.activeRoute === 'editor'} onPress={props.onEditor} title="editor" />
-        <NavBtn icon="Play" on={props.activeRoute === 'test'} onPress={props.onTest} title="play (F1 test / F2 build)" />
         <NavBtn icon="FlaskConical" on={props.activeRoute === 'labs'} onPress={props.onLabs} title="labs" />
         <NavBtn icon="Shapes" on={props.activeRoute === 'workbench-assets'} onPress={props.onWorkbench} title="assets (workbench)" />
         <NavBtn icon="Settings" on={props.activeRoute === 'workbench-settings'} onPress={props.onSettings} title="settings (workbench)" />

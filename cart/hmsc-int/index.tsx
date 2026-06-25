@@ -21,7 +21,6 @@ import { plog, ptime, useChurn } from './perfLog';
 import { startPerfHeartbeat } from './state/perfWatch';
 import { Router, Route, useNavigate, useRoute } from '@reactjit/router';
 import { Assist3DRoute } from './assist3d';
-import { PlayTestRoute } from './editors/play/PlayTestRoute';
 import { LabsRoute } from './shell/LabsRoute';
 import { WorkbenchRoute } from './shell/WorkbenchRoute';
 import { currentWorkbenchFamily, requestWorkbenchSource, subscribeWorkbenchFamily, type WorkbenchFamily } from './shell/workbenchDoor';
@@ -551,7 +550,7 @@ function EditorShell() {
   // reports its source FAMILY so the chrome lights the right door truthfully.
   const [wbFamily, setWbFamily] = useState<WorkbenchFamily>(currentWorkbenchFamily());
   useEffect(() => subscribeWorkbenchFamily(setWbFamily), []);
-  const activeRoute = route.path === '/workbench' ? (wbFamily === 'settings' ? 'workbench-settings' : 'workbench-assets') : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : route.path === '/compiled' ? 'compiled' : 'editor';
+  const activeRoute = route.path === '/workbench' ? (wbFamily === 'settings' ? 'workbench-settings' : 'workbench-assets') : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : route.path === '/compiled' ? 'compiled' : 'editor';
   const atEditor = activeRoute === 'editor';
   // Route nav timing (req_1637): a route button calls navStart(path) on click; this
   // effect fires after the new route's surface first renders, logging click→first-
@@ -632,7 +631,6 @@ function EditorShell() {
         onProbeDump={dumpTransfer}
         probeMsg={dumpMsg}
         onEditor={() => { navStart('/'); nav.push('/'); }}
-        onTest={() => { navStart('/test'); nav.push('/test'); }}
         onLabs={() => { navStart('/labs'); nav.push('/labs'); }}
         onWorkbench={() => { navStart('/workbench'); nav.push('/workbench'); }}
         onSettings={() => { navStart('/workbench'); requestWorkbenchSource('settings'); nav.push('/workbench'); }}
@@ -766,12 +764,10 @@ function EditorShell() {
             one navigation shell. The editor panes unmount off-route; the
             workspace/session layer owns durable world and view state. */}
         <Route path="/assist3d">{() => <Assist3DRoute />}</Route>
-        {/* The embodied game surface (editors/play/, PLAYFOLD-0605): /test +
-            /build folded into ONE route — mode is PlayRoute's own state,
-            F1 test / F2 build flip it WITHOUT remounting, so the pose,
-            camera, console, and placed pieces carry across the toggle.
-            (The /build URL retired as a dupe of this surface.) */}
-        <Route path="/test">{() => <PlayTestRoute state={previewWorld} mapName={ws.stem} legacyPieceMapName={legacyPieceMapName} floors={floors} onExit={() => nav.push('/')} />}</Route>
+        {/* /test (the React embodied play view) was CUT (req_1878): it was the only
+            sibling route that read the live editor world, and /compiled (the native
+            baked view) is the real play target every feature ships to anyway — the
+            React twin was double-work. Cutting it frees the workspace from the root. */}
         {/* Labs cross into shell as plain data here — shell/ imports nothing
             game-specific; labs/index.ts is the registry rjit lab new maintains. */}
         <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>
