@@ -40,6 +40,7 @@ import { useHeldModifiers } from './editors/useEditorControls';
 import { buildResidentMeshCatalogLump } from './compile/worldGeometry';
 import { subscribeCookedAssets } from './editors/model/cookedAssets';
 import { stampEdit, takeEditStamp, nowMs } from './editors/build/editLatency';
+import { readFrameRecord, readCounters } from './state/perfWatch';
 import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
 import { pieceInstanceRows, meshPropLivePush, meshGhostRef, pieceSkinSig, buildingSkinBoxes } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
@@ -772,9 +773,23 @@ export function LoaderIsoView(props: {
       after(() => {
         const renderedMs = nowMs() - t;
         const host = renderedMs - pushMs;
-        g.__hmscEditLatency = { label, pushMs, renderedMs, pre, scans, push, host, at: Date.now() };
+        // HOST GROUND TRUTH (req_1938): the rAF batches under saturation, so host-block is backlog,
+        // not a clean per-edit number. Name what the host actually burned the frame on (V8 runs on
+        // the host thread, so a long JS block shows as huge tickUs) + the scene counts — if nodes /
+        // scene3d instances CLIMB per edit, the compounding is a leak, not a fixed cost.
+        const fr = readFrameRecord();
+        const c = readCounters();
+        let hostLine = '';
+        if (fr) {
+          const known = fr.tickUs + fr.layoutUs + fr.paintUs + fr.gpuUs;
+          const phases: Array<[string, number]> = [['tick', fr.tickUs], ['layout', fr.layoutUs], ['paint', fr.paintUs], ['gpu', fr.gpuUs], ['other', Math.max(0, fr.totalUs - known)]];
+          const dom = phases.slice().sort((a, b) => b[1] - a[1])[0][0];
+          const ms = (us: number) => (us / 1000).toFixed(1);
+          hostLine = `  | host DOMINANT=${dom} tick ${ms(fr.tickUs)} paint ${ms(fr.paintUs)} gpu ${ms(fr.gpuUs)} | nodes ${c.total ?? '?'} inst ${c.scene3d_instances ?? '?'} draws ${c.scene3d_draw_calls ?? '?'} meshes ${c.scene3d_meshes_collected ?? '?'}`;
+        }
+        g.__hmscEditLatency = { label, pushMs, renderedMs, pre, scans, push, host, frame: fr, counters: c, at: Date.now() };
         const f = (n: number) => n.toFixed(0).padStart(4);
-        console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}`);
+        console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}${hostLine}`);
       });
     }
   }, [editable, props.pieces, props.reloadToken]);

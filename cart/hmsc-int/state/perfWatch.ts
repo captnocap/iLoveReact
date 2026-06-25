@@ -117,7 +117,7 @@ function frameRecordFrom(f: any): FrameRecord {
   };
 }
 
-function readFrameRecord(): FrameRecord | null {
+export function readFrameRecord(): FrameRecord | null {
   const fn = hostFn('__tel_frame');
   if (!fn) return null;
   try {
@@ -170,7 +170,7 @@ function findSpikeFrameRecord(worstUs: number, depth: number): FrameRecord | nul
 // candidate cause.
 type Counters = Record<string, number>;
 
-function readCounters(): Counters {
+export function readCounters(): Counters {
   const out: Counters = {};
   const pull = (name: string, keys: string[]) => {
     const fn = hostFn(name);
