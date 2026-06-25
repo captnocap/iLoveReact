@@ -61,7 +61,7 @@ import { voidHash } from '../game/void/distortion';
 import { forEachShellRingBox, VOID_SHELL_RING_CHUNKS } from '../game/void/shell';
 import { importedPropMesh, isImportedPropKind, type ImportedPropMesh } from '../game/kinds/importedProps';
 import { isCookedPropKind } from '../game/kinds/props';
-import { cookedAssetById, cookedMeshBlob, cookedTextureBlob } from '../editors/model/cookedAssets';
+import { cookedAssetById, cookedMeshBlob, cookedTextureBlob, cookedAssetCatalog } from '../editors/model/cookedAssets';
 import type { CookedAsset } from '../editors/model/cookedAsset';
 import { image } from '@reactjit/image';
 import { base64ToBytes } from '@reactjit/workspace';
@@ -1390,6 +1390,21 @@ export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
     }
   }
   return out;
+}
+
+/** FULLRES (req_1909/1911/1912): a MESH_PROPS lump of the WHOLE cooked-asset catalog —
+ *  every compiled prop's mesh, ZERO instances. The editor pushes this to the loader on
+ *  /editor entry (__compiled_world_set_resident_meshes) so every Studio-compiled asset is
+ *  resident the instant you arrive — placing/moving/skinning one made seconds ago needs no
+ *  world rebake. Same encoder + same loader decoder as the baked path, so a resident mesh
+ *  renders identically (textures, slots, doors all come through). Empty catalog → empty lump. */
+export function buildResidentMeshCatalogLump(): Uint8Array {
+  const sink = createImportedMeshPropSink();
+  for (const asset of cookedAssetCatalog()) {
+    const mesh = cookedPropMesh(asset.id);
+    if (mesh && !sink.meshes.some((m) => m.key === mesh.key)) sink.meshes.push(mesh);
+  }
+  return encodeMeshProps(sink);
 }
 
 /** Encode the material-reference lump: u32 count | u32[count] (one 1-based

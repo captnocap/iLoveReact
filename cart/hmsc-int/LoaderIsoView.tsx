@@ -37,6 +37,8 @@ import { GAME_BUILD, buildingPieceInstanceId, partitionBuildingSelection } from 
 import type { BuildEditEvent, BuildPrefabDef, BuildingInstance, PlacedBuildPiece, Rect, WorldGridState } from './game';
 import { modulePitch, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { useHeldModifiers } from './editors/useEditorControls';
+import { buildResidentMeshCatalogLump } from './compile/worldGeometry';
+import { subscribeCookedAssets } from './editors/model/cookedAssets';
 import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
 import { pieceInstanceRows, meshPropLivePush, meshGhostRef, pieceSkinSig, buildingSkinBoxes } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
@@ -656,6 +658,23 @@ export function LoaderIsoView(props: {
     lastEraseSigRef.current = '';
     if (nodeId && typeof g.__compiled_world_set_dirty_erase === 'function') g.__compiled_world_set_dirty_erase(nodeId, new Float32Array(0));
   }, [props.reloadToken]);
+
+  // FULLRES req_1909/1911/1912: the "fat & loaded" editor. On /editor entry — and whenever the
+  // cooked-asset catalog changes (a new Studio compile→install lands while we're mounted) — push
+  // the WHOLE cooked catalog to the loader as resident meshes. Every compiled asset is then
+  // placeable/movable/skinnable INSTANTLY off residency, with zero world rebake. The push is the
+  // one-time "build" moment (a lump encode); after it, the edit loop is gameplay-rate.
+  useEffect(() => {
+    if (!editable) return;
+    const push = () => {
+      const nodeId = Number(loaderRef.current?.id ?? 0);
+      if (!nodeId || typeof g.__compiled_world_set_resident_meshes !== 'function') return;
+      try { g.__compiled_world_set_resident_meshes(nodeId, buildResidentMeshCatalogLump()); }
+      catch (e) { console.warn('[fullres] resident catalog push failed', e); }
+    };
+    push();
+    return subscribeCookedAssets(push);
+  }, [editable]);
 
   // LIVEHOST req_1798: push the just-placed-but-unbaked pieces to the native loader as a
   // LIVE box overlay, so a placement/move shows as a real solid mesh the instant you

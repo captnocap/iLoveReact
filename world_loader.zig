@@ -2928,6 +2928,15 @@ pub const Runtime = struct {
     // mesh-prop draw node per ref each frame, resolving the hash to a loaded mesh. No bake.
     mesh_by_hash: std.AutoHashMapUnmanaged(u32, usize) = .{},
     mesh_hash_built: bool = false,
+    // FULLRES req_1909/1911/1912: the editor's "fat & loaded" residency. The /editor route
+    // pushes the WHOLE cooked-asset catalog (a MESH_PROPS lump, meshes only) so every compiled
+    // asset is resident the instant you enter the route — placing/moving/skinning a prop made
+    // seconds ago in Studio needs NO world rebake. These live alongside the baked scene meshes;
+    // meshForHash resolves a live ref against baked first, then this resident set. Decoded once
+    // per pushed generation (applyResidentMeshes), owned, freed on replace/unmount.
+    resident: ?constructor.MeshProps = null,
+    resident_by_hash: std.AutoHashMapUnmanaged(u32, usize) = .{},
+    applied_resident_gen: u64 = 0,
     // Live editor face-skins (LIVESKIN req_1843): a procedural skin the editor pushes is
     // materialized once into a "live-mat:<hash>" tile; this maps its hash → that owned key
     // string (presence = already materialized). A live mesh ref carrying mat_hash wears it.
@@ -3070,6 +3079,8 @@ pub const Runtime = struct {
 
     pub fn deinit(self: *Runtime) void {
         self.mesh_by_hash.deinit(self.allocator);
+        if (self.resident) |*res| res.deinit(self.allocator);
+        self.resident_by_hash.deinit(self.allocator);
         self.baked_by_pos.deinit(self.allocator);
         self.hidden_baked.deinit(self.allocator);
         self.baked_mesh_list.deinit(self.allocator);
@@ -3190,18 +3201,57 @@ pub const Runtime = struct {
         }
     }
 
+    // FULLRES: resolve a live ref's key-hash to a loaded mesh — the BAKED scene meshes first
+    // (those carry their lump-loaded textures), then the editor's pushed resident catalog. Null
+    // when neither holds it (asset not installed). The two sets share the FNV-1a key-hash space,
+    // so a placement ref resolves whether the prop was baked into the gamefile or just compiled.
+    fn meshForHash(self: *Runtime, hash: u32) ?constructor.MeshPropMesh {
+        if (self.scene.mesh_props) |mp| {
+            if (self.mesh_by_hash.get(hash)) |idx| {
+                if (idx < mp.meshes.len) return mp.meshes[idx];
+            }
+        }
+        if (self.resident) |res| {
+            if (self.resident_by_hash.get(hash)) |idx| {
+                if (idx < res.meshes.len) return res.meshes[idx];
+            }
+        }
+        return null;
+    }
+
     // LIVEMESH req_1812: append a draw node for each live-placed mesh prop, referencing an
     // already-resident mesh (material_ref 0 → the mesh's own baked texture/color, NO
     // per-frame allocation; see meshPropTexKey). Called at the END of stepNow, after
     // refreshStreamNodes rebuilt the stream tail — so the streaming path truncated last
     // frame's live nodes for us; the monolithic path truncates them here to perm_node_count.
     // The hover GHOST (req_1841) rides the same path with a forced translucent alpha.
-    fn appendLiveMeshRef(self: *Runtime, mp: constructor.MeshProps, r: LiveMeshRef, alpha: ?f32) void {
-        const idx = self.mesh_by_hash.get(r.hash) orelse return;
-        if (idx >= mp.meshes.len) return;
-        const mesh = mp.meshes[idx];
+    fn appendLiveMeshRef(self: *Runtime, r: LiveMeshRef, alpha: ?f32) void {
+        const mesh = self.meshForHash(r.hash) orelse return;
         const tex_override: ?[]const u8 = if (r.mat_hash != 0) self.live_mat_keys.get(r.mat_hash) else null;
-        self.appendMeshPropNode(mesh, .{ .mesh = @intCast(idx), .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw }, mesh.key, 0, mesh.vertex_count, 0, alpha, tex_override) catch {};
+        self.appendMeshPropNode(mesh, .{ .mesh = 0, .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw }, mesh.key, 0, mesh.vertex_count, 0, alpha, tex_override) catch {};
+    }
+
+    // FULLRES: decode + install the pushed resident catalog once per generation. The lump is a
+    // standard MESH_PROPS buffer (meshes only) — the SAME decode the gamefile uses, so textures
+    // (tex_rgba) and slots come through identically and a resident mesh renders exactly as a
+    // baked one would.
+    fn applyResidentMeshes(self: *Runtime) void {
+        const pend = pendingResidentFor(self.node_id) orelse return;
+        if (pend.gen == self.applied_resident_gen) return;
+        self.applied_resident_gen = pend.gen;
+        if (self.resident) |*old| old.deinit(self.allocator);
+        self.resident = null;
+        self.resident_by_hash.clearRetainingCapacity();
+        if (pend.bytes.len == 0) return;
+        const decoded = constructor.decodeMeshProps(self.allocator, pend.bytes) catch |e| {
+            log.print("[loader] resident catalog decode failed: {any}\n", .{e});
+            return;
+        };
+        self.resident = decoded;
+        for (decoded.meshes, 0..) |mesh, i| {
+            self.resident_by_hash.put(self.allocator, liveMeshHash(mesh.key), i) catch {};
+        }
+        log.print("[loader] resident catalog: {d} cooked mesh(es) ready (no rebake to place)\n", .{decoded.meshes.len});
     }
 
     // LIVESKIN req_1843: materialize the editor's queued face-skin recipes (GPU is up by
@@ -3364,33 +3414,35 @@ pub const Runtime = struct {
         if (self.stream == null) self.kid_list.shrinkRetainingCapacity(self.perm_node_count);
         defer self.root.children = self.kid_list.items; // append may realloc; re-point the root
         self.ensureLiveMaterials();
+        self.applyResidentMeshes(); // FULLRES: install the editor's pushed cooked-asset catalog (once per gen)
         // RESKIN req_1845: un-hide whatever we hid last frame before re-evaluating, so a
         // reverted/reloaded prop shows its baked render again.
         for (self.hidden_baked.items) |rng| self.setBakedRangeVisible(rng, true);
         self.hidden_baked.clearRetainingCapacity();
-        // Mesh props (need the mesh table loaded). Building-piece skin boxes below do not.
-        if (self.scene.mesh_props) |mp| {
-            self.ensureMeshHashMap();
-            if (pendingLiveMeshFor(self.node_id)) |p| {
-                for (p.refs) |r| {
-                    self.appendLiveMeshRef(mp, r, null);
-                    // A live ref coincident with a baked instance is a RE-SKIN of an existing
-                    // prop (the editor only pushes those + brand-new placements, which sit at
-                    // fresh positions) — hide the stale baked draw so the two don't z-fight.
-                    if (self.baked_by_pos.count() > 0) {
-                        if (self.mesh_by_hash.get(r.hash)) |idx| {
-                            if (self.baked_by_pos.get(meshPosKey(idx, r.x, r.z, r.yaw))) |rng| {
-                                self.setBakedRangeVisible(rng, false);
-                                self.hidden_baked.append(self.allocator, rng) catch {};
-                            }
+        // Live mesh-prop refs resolve against the baked scene meshes AND the resident catalog
+        // (meshForHash), so they draw even on a map with no baked mesh props — a just-compiled
+        // asset places instantly off residency, no rebake.
+        self.ensureMeshHashMap(); // baked hash map (no-op when the map baked no mesh props)
+        if (pendingLiveMeshFor(self.node_id)) |p| {
+            for (p.refs) |r| {
+                self.appendLiveMeshRef(r, null);
+                // A live ref coincident with a BAKED instance is a RE-SKIN of an existing prop
+                // (the editor pushes those + brand-new placements at fresh positions) — hide the
+                // stale baked draw so the two don't z-fight. Resident-only meshes have no baked
+                // twin, so this is gated on the baked table.
+                if (self.scene.mesh_props != null and self.baked_by_pos.count() > 0) {
+                    if (self.mesh_by_hash.get(r.hash)) |idx| {
+                        if (self.baked_by_pos.get(meshPosKey(idx, r.x, r.z, r.yaw))) |rng| {
+                            self.setBakedRangeVisible(rng, false);
+                            self.hidden_baked.append(self.allocator, rng) catch {};
                         }
                     }
                 }
             }
-            // The placement ghost: the armed mesh prop, translucent, tracking the snap target.
-            if (pendingMeshGhostFor(self.node_id)) |gh| {
-                if (gh.has) self.appendLiveMeshRef(mp, gh.ref, LIVE_MESH_GHOST_ALPHA);
-            }
+        }
+        // The placement ghost: the armed mesh prop, translucent, tracking the snap target.
+        if (pendingMeshGhostFor(self.node_id)) |gh| {
+            if (gh.has) self.appendLiveMeshRef(gh.ref, LIVE_MESH_GHOST_ALPHA);
         }
         // DIRTYRECT req_1891/1892: hide every baked mesh prop whose old position sits inside
         // an active erase rect — the MOVED-prop case the coincident-hide above misses (the
@@ -5673,6 +5725,48 @@ pub fn setDirtyErase(node_id: u32, bytes: []const u8) void {
     p.node_id = node_id;
     p.set = true;
     p.rects = rects;
+    p.gen +%= 1;
+}
+
+// ── FULLRES resident-mesh catalog (req_1909/1911/1912) ──────────────────────
+// The editor pushes the WHOLE cooked-asset catalog as a MESH_PROPS lump (meshes only) so
+// every compiled asset is resident in the /editor route — no rebake to place one. We hold the
+// raw lump bytes here; the Runtime decodes them once per generation (applyResidentMeshes).
+const PendingResident = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    bytes: []u8 = &.{},
+    gen: u64 = 0,
+};
+var g_pending_resident: [MAX_EMBEDDED_LOADERS]PendingResident = [_]PendingResident{.{}} ** MAX_EMBEDDED_LOADERS;
+
+fn pendingResidentFor(node_id: u32) ?*PendingResident {
+    for (&g_pending_resident) |*p| {
+        if (p.set and p.node_id == node_id) return p;
+    }
+    return null;
+}
+
+/// Replace the resident cooked-asset catalog for a node (FULLRES). `bytes` is a MESH_PROPS
+/// lump (meshes only); empty clears residency. A copy is held until the Runtime decodes it.
+pub fn setResidentMeshes(node_id: u32, bytes: []const u8) void {
+    const alloc = std.heap.page_allocator;
+    var slot: ?*PendingResident = pendingResidentFor(node_id);
+    if (slot == null) {
+        for (&g_pending_resident) |*p| {
+            if (!p.set) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    const p = slot orelse return;
+    const copy = alloc.alloc(u8, bytes.len) catch return;
+    @memcpy(copy, bytes);
+    if (p.bytes.len > 0) alloc.free(p.bytes);
+    p.node_id = node_id;
+    p.set = true;
+    p.bytes = copy;
     p.gen +%= 1;
 }
 

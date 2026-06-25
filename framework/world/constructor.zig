@@ -983,7 +983,7 @@ fn decodeNpcSpawns(allocator: std.mem.Allocator, data: []const u8) Error![]NpcSp
     return spawns;
 }
 
-fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshProps {
+pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshProps {
     if (data.len < 12) return Error.BadMeshProps;
     const version = std.mem.readInt(u32, data[0..4], .little);
     if (version < 1 or version > MESH_PROPS_VERSION) return Error.BadMeshProps;
