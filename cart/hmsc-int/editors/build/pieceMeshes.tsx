@@ -520,13 +520,36 @@ function fnv1aHash(s: string): number {
   return h >>> 0;
 }
 
-// The resident-mesh KEY for a mesh prop, identical to what the bake assigns the gamefile
-// mesh: imported genmesh props key by their generated mesh key; Studio-cooked props by the
-// cooked asset's meshRef (worldGeometry.cookedPropMesh ships `key: asset.meshRef`).
-function meshPropKey(prop: WorldProp): string | null {
-  if (isImportedPropKind(prop.kind)) return importedPropMesh(prop.kind)?.key ?? null;
-  if (isCookedPropKind(prop.kind)) return cookedAssetById(prop.kind)?.meshRef ?? null;
+// The resident-mesh KEY for a mesh-prop kind, identical to what the bake assigns the
+// gamefile mesh: imported genmesh props key by their generated mesh key; Studio-cooked
+// props by the cooked asset's meshRef (worldGeometry.cookedPropMesh ships `key: asset.meshRef`).
+// Null ⇒ not a mesh prop (a parts/recipe prop, or unknown kind).
+export function meshPropKeyForKind(kind: string): string | null {
+  if (isImportedPropKind(kind)) return importedPropMesh(kind)?.key ?? null;
+  if (isCookedPropKind(kind)) return cookedAssetById(kind)?.meshRef ?? null;
   return null;
+}
+
+// Pack ONE live mesh ref: 20 bytes (u32 keyHash, f32 x,y,z,yaw) — the layout both
+// world_loader.setLiveMeshProps and setLiveMeshGhost decode.
+function packMeshRef(hash: number, x: number, y: number, z: number, yaw: number): Uint8Array {
+  const buf = new ArrayBuffer(20);
+  new Uint32Array(buf)[0] = hash;
+  const f = new Float32Array(buf);
+  f[1] = x;
+  f[2] = y;
+  f[3] = z;
+  f[4] = yaw;
+  return new Uint8Array(buf);
+}
+
+// The placement-GHOST ref for an armed mesh-prop kind at a snap target (LIVEMESH req_1841):
+// 20 bytes, or null when the kind has no resident mesh (parts prop / unknown) — the caller
+// then clears the ghost and the projected wireframe stands alone.
+export function meshGhostRef(propKind: string, x: number, y: number, z: number, yaw: number): Uint8Array | null {
+  const key = meshPropKeyForKind(propKind);
+  if (!key) return null;
+  return packMeshRef(fnv1aHash(key), x, y, z, yaw);
 }
 
 // Live MESH-prop references for the loader overlay (LIVEMESH req_1812). Packs, per
@@ -540,7 +563,7 @@ export function meshPropLiveRefs(pieces: readonly PlacedBuildPiece[]): Uint8Arra
   for (const piece of pieces) {
     const prop = propFromPiece(piece);
     if (!prop) continue;
-    const key = meshPropKey(prop);
+    const key = meshPropKeyForKind(prop.kind);
     if (!key) continue;
     refs.push({ hash: fnv1aHash(key), x: prop.x, y: prop.y ?? 0, z: prop.z, yaw: prop.yawDegrees ?? 0 });
   }

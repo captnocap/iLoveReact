@@ -37,7 +37,7 @@ import { GAME_BUILD, buildingPieceInstanceId, partitionBuildingSelection } from 
 import type { BuildEditEvent, BuildPrefabDef, BuildingInstance, PlacedBuildPiece, Rect, WorldGridState } from './game';
 import { modulePitch, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
-import { pieceInstanceRows, meshPropLiveRefs } from './editors/build/pieceMeshes';
+import { pieceInstanceRows, meshPropLiveRefs, meshGhostRef } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
 import type { GameState } from './design';
 
@@ -601,12 +601,33 @@ export function LoaderIsoView(props: {
     // whichever it is, so push both — the unused one is just empty.
     const rows = pieceInstanceRows(pending);
     const meshRefs = meshPropLiveRefs(pending);
-    // [live-diag req_1812] TEMP: confirms each placement produces draws + which door exists.
-    // `mesh=MISSING` ⇒ the dev host predates the live-mesh door, rebuild it. Remove once happy.
-    console.warn(`[live-push] node=${nodeId} pending=${pending.length} boxRows=${rows.length / 12} meshRefs=${meshRefs.length / 20} pieces=${typeof g.__compiled_world_set_live_pieces === 'function' ? 'ok' : 'MISSING'} mesh=${typeof g.__compiled_world_set_live_mesh_props === 'function' ? 'ok' : 'MISSING'}`);
+    // Only the failure mode is worth a console line now (a host predating the live doors):
+    // a successful push is the silent common case.
+    if (typeof g.__compiled_world_set_live_pieces !== 'function' || typeof g.__compiled_world_set_live_mesh_props !== 'function') {
+      console.warn(`[live-push] node=${nodeId} live doors MISSING (pieces=${typeof g.__compiled_world_set_live_pieces === 'function'} mesh=${typeof g.__compiled_world_set_live_mesh_props === 'function'}) — rebuild the dev host`);
+    }
     if (typeof g.__compiled_world_set_live_pieces === 'function') g.__compiled_world_set_live_pieces(nodeId, rows);
     if (typeof g.__compiled_world_set_live_mesh_props === 'function') g.__compiled_world_set_live_mesh_props(nodeId, meshRefs);
   }, [editable, props.pieces, props.reloadToken]);
+
+  // LIVEMESH req_1841: the placement GHOST for a mesh prop is the REAL mesh, translucent,
+  // tracking the snap target — far clearer than the faint projected wireframe (which stays
+  // for parts props + as the footprint guide). Pushed on each snap/arm change; the host
+  // owns one ghost ref per node and draws it with a forced alpha. Cleared when disarmed or
+  // armed on a non-mesh kind so the wireframe stands alone.
+  useEffect(() => {
+    if (!editable) return;
+    const nodeId = Number(loaderRef.current?.id ?? 0);
+    if (!nodeId) return;
+    let ref: Uint8Array | null = null;
+    if (armed && armed.kind === 'piece' && snap) {
+      let propKind: string | null = null;
+      try { const def = GAME_BUILD.catalog.get(armed.id); if (def.kind === 'prop' && def.propKind) propKind = def.propKind; } catch { propKind = null; }
+      if (propKind) ref = meshGhostRef(propKind, snap.placement.x, snap.placement.y, snap.placement.z, snap.placement.yawDegrees);
+    }
+    if (ref && typeof g.__compiled_world_set_live_mesh_ghost === 'function') g.__compiled_world_set_live_mesh_ghost(nodeId, ref);
+    else if (typeof g.__compiled_world_clear_live_mesh_ghost === 'function') g.__compiled_world_clear_live_mesh_ghost(nodeId);
+  }, [editable, armed, snap]);
 
   // ── pointer: rotate (drag empty), move (drag a selected piece), click = place/select.
   // gx0/gz0 hold the down point on the active plane so a move tracks the cursor's world

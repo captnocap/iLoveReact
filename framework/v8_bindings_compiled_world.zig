@@ -189,6 +189,29 @@ fn hostClearLiveMeshProps(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     setReturnString(info, "ok");
 }
 
+// __compiled_world_set_live_mesh_ghost(nodeId, Uint8Array ref) draws the armed mesh prop
+// as the REAL mesh, translucent, at the snap target — a clearer ghost than the projected
+// wireframe (LIVEMESH req_1841). One ref: u32 keyHash, then f32 x,y,z,yaw.
+fn hostSetLiveMeshGhost(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const bytes = argView(info, 1) orelse {
+        setReturnString(info, "error:BadRef");
+        return;
+    };
+    world_loader.setLiveMeshGhost(node_id, bytes);
+    setReturnString(info, "ok");
+}
+
+fn hostClearLiveMeshGhost(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (argToNodeId(info, 0)) |node_id| world_loader.clearLiveMeshGhost(node_id);
+    setReturnString(info, "ok");
+}
+
 // ── the pop-out window (WORLDWIN-0611) ──────────────────────────────────────
 // __compiled_world_window(gameFile, storeDir, width, height) opens the
 // second OS window (or reloads its gamefile when already open — the Compile
@@ -251,6 +274,8 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_clear_live_pieces", hostClearLivePieces);
     v8_runtime.registerHostFn("__compiled_world_set_live_mesh_props", hostSetLiveMeshProps);
     v8_runtime.registerHostFn("__compiled_world_clear_live_mesh_props", hostClearLiveMeshProps);
+    v8_runtime.registerHostFn("__compiled_world_set_live_mesh_ghost", hostSetLiveMeshGhost);
+    v8_runtime.registerHostFn("__compiled_world_clear_live_mesh_ghost", hostClearLiveMeshGhost);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
     v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);
     v8_runtime.registerHostFn("__compiled_world_window_status", hostWindowStatus);

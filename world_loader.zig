@@ -2887,6 +2887,7 @@ pub const Runtime = struct {
         start: u32,
         count: u32,
         material_ref: u32,
+        alpha_override: ?f32,
     ) !void {
         if (count == 0) return;
         const float_start: usize = @as(usize, @intCast(start)) * 8;
@@ -2904,6 +2905,9 @@ pub const Runtime = struct {
         } else mesh.vertices[float_start .. float_start + float_count];
         const material_index: usize = if (material_ref > 0) @intCast(material_ref - 1) else self.scene.materials.len;
         const opacity = if (material_index < self.scene.materials.len) self.scene.materials[material_index].opacity else 1;
+        // alpha_override (LIVEMESH ghost req_1841): the hover preview forces a translucent
+        // alpha so it reads as a not-yet-placed ghost; a<1 routes it to the transparent pass.
+        const final_alpha = alpha_override orelse opacity;
         const textured = tex_key != null or mesh.tex_rgba != null;
         try self.kid_list.append(self.allocator, .{
             .scene3d_mesh = count > 0,
@@ -2918,7 +2922,7 @@ pub const Runtime = struct {
             .scene3d_color_r = if (textured) 1 else mesh.color[0],
             .scene3d_color_g = if (textured) 1 else mesh.color[1],
             .scene3d_color_b = if (textured) 1 else mesh.color[2],
-            .scene3d_color_a = opacity,
+            .scene3d_color_a = final_alpha,
             .scene3d_tex_w = if (tex_key == null) mesh.tex_w else 0,
             .scene3d_tex_h = if (tex_key == null) mesh.tex_h else 0,
             .scene3d_tex_rgba = if (tex_key == null) mesh.tex_rgba else null,
@@ -2943,18 +2947,25 @@ pub const Runtime = struct {
     // per-frame allocation; see meshPropTexKey). Called at the END of stepNow, after
     // refreshStreamNodes rebuilt the stream tail — so the streaming path truncated last
     // frame's live nodes for us; the monolithic path truncates them here to perm_node_count.
+    // The hover GHOST (req_1841) rides the same path with a forced translucent alpha.
+    fn appendLiveMeshRef(self: *Runtime, mp: constructor.MeshProps, r: LiveMeshRef, alpha: ?f32) void {
+        const idx = self.mesh_by_hash.get(r.hash) orelse return;
+        if (idx >= mp.meshes.len) return;
+        const mesh = mp.meshes[idx];
+        self.appendMeshPropNode(mesh, .{ .mesh = @intCast(idx), .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw }, mesh.key, 0, mesh.vertex_count, 0, alpha) catch {};
+    }
+
     fn applyLiveMeshProps(self: *Runtime) void {
         if (self.stream == null) self.kid_list.shrinkRetainingCapacity(self.perm_node_count);
         defer self.root.children = self.kid_list.items; // append may realloc; re-point the root
         const mp = self.scene.mesh_props orelse return;
-        const p = pendingLiveMeshFor(self.node_id) orelse return;
-        if (p.refs.len == 0) return;
         self.ensureMeshHashMap();
-        for (p.refs) |r| {
-            const idx = self.mesh_by_hash.get(r.hash) orelse continue;
-            if (idx >= mp.meshes.len) continue;
-            const mesh = mp.meshes[idx];
-            self.appendMeshPropNode(mesh, .{ .mesh = @intCast(idx), .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw }, mesh.key, 0, mesh.vertex_count, 0) catch {};
+        if (pendingLiveMeshFor(self.node_id)) |p| {
+            for (p.refs) |r| self.appendLiveMeshRef(mp, r, null);
+        }
+        // The placement ghost: the armed mesh prop, translucent, tracking the snap target.
+        if (pendingMeshGhostFor(self.node_id)) |gh| {
+            if (gh.has) self.appendLiveMeshRef(mp, gh.ref, LIVE_MESH_GHOST_ALPHA);
         }
     }
 
@@ -3318,7 +3329,7 @@ pub const Runtime = struct {
                     // A painted cooked prop (req_1496) carries its atlas as tex_rgba —
                     // wear it via scene3d_tex_rgba and whiten the tint so it doesn't
                     // dim the texture. Untextured imports stay tinted.
-                    try self.appendMeshPropNode(mesh, inst, mesh.key, 0, mesh.vertex_count, 0);
+                    try self.appendMeshPropNode(mesh, inst, mesh.key, 0, mesh.vertex_count, 0, null);
                     continue;
                 }
 
@@ -3329,7 +3340,7 @@ pub const Runtime = struct {
                         self.allocator.free(key);
                         return err;
                     };
-                    try self.appendMeshPropNode(mesh, inst, key, 0, first_slot_start, 0);
+                    try self.appendMeshPropNode(mesh, inst, key, 0, first_slot_start, 0, null);
                 }
                 for (mesh.slots, 0..) |slot, si| {
                     const key = try std.fmt.allocPrint(self.allocator, "{s}:slot-{d}", .{ mesh.key, si });
@@ -3338,7 +3349,7 @@ pub const Runtime = struct {
                         return err;
                     };
                     const material_ref = if (si < inst.slot_materials.len) inst.slot_materials[si] else 0;
-                    try self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, material_ref);
+                    try self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, material_ref, null);
                 }
             }
             if (mp.instances.len > 0) {
@@ -4899,6 +4910,60 @@ pub fn clearLiveMeshProps(node_id: u32) void {
     if (p.refs.len > 0) std.heap.page_allocator.free(p.refs);
     p.refs = &.{};
     p.gen +%= 1;
+}
+
+// ── live placement GHOST (LIVEMESH req_1841) ────────────────────────────────
+// The armed mesh prop, drawn as the REAL mesh translucent at the snap target — a far
+// clearer preview than the faint projected wireframe. ONE ref per node, no allocation.
+const LIVE_MESH_GHOST_ALPHA: f32 = 0.5;
+const PendingMeshGhost = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    has: bool = false, // a ref is currently armed (vs cleared but slot retained)
+    ref: LiveMeshRef = .{ .hash = 0, .x = 0, .y = 0, .z = 0, .yaw = 0 },
+};
+var g_pending_mesh_ghost: [MAX_EMBEDDED_LOADERS]PendingMeshGhost = [_]PendingMeshGhost{.{}} ** MAX_EMBEDDED_LOADERS;
+
+fn pendingMeshGhostFor(node_id: u32) ?*PendingMeshGhost {
+    for (&g_pending_mesh_ghost) |*p| {
+        if (p.set and p.node_id == node_id) return p;
+    }
+    return null;
+}
+
+/// Set the placement-ghost mesh ref for a node (LIVEMESH req_1841). `bytes` is ONE ref:
+/// u32 keyHash, f32 x,y,z,yaw — the same layout as a live mesh-prop ref.
+pub fn setLiveMeshGhost(node_id: u32, bytes: []const u8) void {
+    if (bytes.len < LIVE_MESH_STRIDE_BYTES) {
+        clearLiveMeshGhost(node_id);
+        return;
+    }
+    var slot: ?*PendingMeshGhost = pendingMeshGhostFor(node_id);
+    if (slot == null) {
+        for (&g_pending_mesh_ghost) |*p| {
+            if (!p.set) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    const p = slot orelse return;
+    p.node_id = node_id;
+    p.set = true;
+    p.has = true;
+    p.ref = .{
+        .hash = std.mem.bytesToValue(u32, bytes[0..4]),
+        .x = std.mem.bytesToValue(f32, bytes[4..8]),
+        .y = std.mem.bytesToValue(f32, bytes[8..12]),
+        .z = std.mem.bytesToValue(f32, bytes[12..16]),
+        .yaw = std.mem.bytesToValue(f32, bytes[16..20]),
+    };
+}
+
+/// Drop the placement ghost for a node (disarmed, or hovering a non-mesh prop).
+pub fn clearLiveMeshGhost(node_id: u32) void {
+    const p = pendingMeshGhostFor(node_id) orelse return;
+    p.has = false;
 }
 
 fn pendingCamFor(node_id: u32) ?*PendingCam {
