@@ -68,6 +68,9 @@ import { writeFile as diagWriteFile } from '@reactjit/hooks/fs';
 startupMark('index.tsx module graph evaluated');
 
 const GAME_BAKE_CMD = 'tools/rjit game bake 2>&1';
+// AUTOCOMPILE req_1867: how long after a (re)mount to suppress the loader pane's auto-bake,
+// so boot/hot-reload world-data settling never auto-compiles — only genuine edits after it do.
+const AUTO_COMPILE_GRACE_MS = 4000;
 
 function lastMeaningfulLine(text: string): string {
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
@@ -508,15 +511,21 @@ function EditorShell() {
   // the loader view is on (the React view shows live state directly, no bake needed).
   // Edit history is untouched (V20 streams); this just refreshes the rendered bake.
   const autoCompileTimer = useRef<any>(null);
-  const autoCompileArmedRef = useRef(false);
+  // AUTOCOMPILE req_1866/1867: a GRACE WINDOW after each (re)mount. The cart re-mounts on every
+  // hot reload AND on boot the world DATA loads (worldRev/placements/previewWorld go empty →
+  // populated) — both re-run the auto-compile effect with no USER edit, and arming a bake each
+  // time was the compile→5-6s-lock storm (frozen on startup, frozen during agent edits). Suppress
+  // auto-compile until the settling window passes; only genuine edits AFTER it bake. Reset on map
+  // switch. Manual Compile is always available; the persisted toggle (req_1865) is the off switch.
+  const autoCompileReadyRef = useRef(false);
   useEffect(() => {
-    if (!loaderView || !autoCompile) return; // AUTOCOMPILE req_1865: toggle off → manual bake only
-    // AUTOCOMPILE req_1866: skip the FIRST run after a (re)mount. A hot reload re-mounts the
-    // cart and re-runs this effect with UNCHANGED world data — arming a bake every single hot
-    // reload was the compile→5-6s-lock STORM (an agent's edits = dozens of hot reloads = the
-    // editor frozen). Only arm on SUBSEQUENT runs, i.e. a real worldRev/placements/previewWorld
-    // edit THIS session. Manual Compile is unaffected.
-    if (!autoCompileArmedRef.current) { autoCompileArmedRef.current = true; return; }
+    autoCompileReadyRef.current = false;
+    const t = setTimeout(() => { autoCompileReadyRef.current = true; }, AUTO_COMPILE_GRACE_MS);
+    return () => clearTimeout(t);
+  }, [ws.stem]);
+  useEffect(() => {
+    if (!loaderView || !autoCompile) return; // toggle off → manual bake only
+    if (!autoCompileReadyRef.current) return; // still in the post-(re)mount settling window
     if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
     const arm = () => {
       autoCompileTimer.current = setTimeout(() => {
