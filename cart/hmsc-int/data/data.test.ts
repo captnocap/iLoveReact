@@ -166,6 +166,26 @@ test('a snapshot is the replayed state, stamped with its chain position', () => 
   assertEqual(JSON.stringify(store.loadSnapshot('tuning')!.state), JSON.stringify(tuning.state()), 'every concern snapshots');
 });
 
+test('DIRTYSNAP req_1940: re-materialize skips unchanged streams, and a skipped stream reopens correct', () => {
+  wipeScratch();
+  const store = openStore(ROOT);
+  const world = store.defineStream(WORLD);
+  const tuning = store.defineStream(TUNING);
+  world.append({ place: 'road' });
+  tuning.append({ key: 'gravity', value: 9 });
+  assertEqual(store.materializeSnapshots().length, 2, 'first flush writes both (no prior snapshot)');
+  // Touch ONLY world; the flush must skip the unchanged tuning — the win (one commit, one write).
+  world.append({ place: 'tower' });
+  const second = store.materializeSnapshots();
+  assertEqual(second.length, 1, 'only the changed stream is re-snapshotted');
+  assert(second[0].includes('world'), 'and it is the world stream that was written');
+  assertEqual(store.materializeSnapshots().length, 0, 'a flush with no change writes nothing');
+  // Reopen: BOTH must be correct — world from its 2nd snapshot, tuning from its UNCHANGED 1st one.
+  const re = openStore(ROOT);
+  assertEqual(re.defineStream(WORLD).state().placed.join(','), 'road,tower', 'world reopens from its latest snapshot');
+  assertEqual((re.defineStream(TUNING).state() as any).gravity, 9, 'the SKIPPED tuning reopens correct — no data lost');
+});
+
 test('schema evolution by addition: a NEW stream leaves old streams untouched', () => {
   const store = openStore(ROOT);
   const world = store.defineStream(WORLD);

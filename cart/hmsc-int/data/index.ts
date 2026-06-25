@@ -626,6 +626,13 @@ export function openStore(rootDir: string): Store {
     current: any;
   };
   const streams = new Map<string, OpenStream>();
+  // DIRTYSNAP req_1940: the last event count we materialized a snapshot at, per stream. A
+  // snapshot flush rewrote ALL streams every commit (~120ms for 13 streams) even though one
+  // commit touches one stream — the recurring editor jank. We now skip a stream whose count is
+  // unchanged: its on-disk snapshot is still valid (all its events are ≤ its old globalSeq, so
+  // SNAPBOOT's count-vs-seq guard still agrees and the tail is empty). Worst case if ever wrong:
+  // a slower boot via full replay, never lost work (the DB events are the source of truth).
+  const materializedCount = new Map<string, number>();
   let globalSeq = 0;
   {
     const maxSeqT0 = perfMs();
@@ -756,6 +763,10 @@ export function openStore(rootDir: string): Store {
     const foldMs = perfMs() - foldT0;
     const open: OpenStream = { def, count: (base ? base.events : 0) + tail, current };
     streams.set(def.name, open);
+    // DIRTYSNAP: seed to what the on-disk snapshot FOLDED (base.events), not open.count — if a
+    // tail was replayed (open.count > base.events) the on-disk snapshot is stale, so the next
+    // materialize rewrites it; a rejected/absent base seeds -1 to force the first write.
+    materializedCount.set(def.name, base ? base.events : -1);
     GAME_TELEMETRY.recordDiagnostic('worldStream', 'defineStream.load', {
       stream: def.name,
       events: open.count,
@@ -827,6 +838,10 @@ export function openStore(rootDir: string): Store {
       const written: string[] = [];
       let totalBytes = 0;
       for (const [name, open] of streams) {
+        // DIRTYSNAP req_1940: skip a stream whose state hasn't changed since its last snapshot —
+        // its on-disk file is still valid (boot's count-vs-seq guard agrees, empty tail). This is
+        // the win: one commit touches one stream, so 12 of 13 snapshots are skipped per flush.
+        if (materializedCount.get(name) === open.count) continue;
         const path = `${snapshotsDir}/${name}.snapshot.json`;
         const stringifyT0 = perfMs();
         // `events` is the SNAPBOOT seam guard: how many of this stream's
@@ -847,6 +862,7 @@ export function openStore(rootDir: string): Store {
           writeMs,
           totalMs: stringifyMs + writeMs,
         });
+        materializedCount.set(name, open.count); // DIRTYSNAP: this stream is now snapshotted at open.count
         written.push(path);
       }
       GAME_TELEMETRY.recordDiagnostic('worldStream', 'snapshot.batch', {
