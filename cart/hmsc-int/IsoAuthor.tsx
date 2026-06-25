@@ -40,6 +40,7 @@ import { TILE_KINDS } from './world/tileKinds';
 import { cookedPropSurfaceYs } from './editors/model/cookedAssets';
 import { WATER_BODY_PRESETS, WATER_BODY_PRESET_IDS } from './game/kinds/waterBodies';
 import { PropBrowser } from './PropBrowser';
+import { PieceBrowser } from './PieceBrowser';
 
 const FAR_CLIP = 4000;
 // The iso eye sits BASE_DIST/zoom (~90–257m) from the ground, far past F2's 14m
@@ -2082,17 +2083,17 @@ export const CatalogRail = memo(function CatalogRail(props: { armed: Armed; pref
               </Box>
             </Pressable>
           </Box>
-          <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
-            <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
-              {entries.map((def) => (
-                <Pressable key={def.id} onPress={() => props.onArm({ kind: armKind, id: def.id })}>
-                  <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: armedId === def.id ? '#7dd3fc' : '#3a4f6b', backgroundColor: armedId === def.id ? '#1d4ed8' : '#16233a' }}>
-                    <Text fontSize={11} color={armedId === def.id ? '#ffffff' : '#dbe6f3'} style={{ fontFamily: 'monospace' }}>{def.label}</Text>
-                  </Box>
-                </Pressable>
-              ))}
-            </Box>
-          </ScrollView>
+          {/* The build entries as a FRAMED PICTURE GRID (req_1918) — the same
+              treatment props got, no more text pills. PieceBrowser pages to fill
+              the rail (no scroll) and renders each piece/prefab/water entry as a
+              real thumbnail via the shared railThumbGrid vocabulary. */}
+          <PieceBrowser
+            entries={entries}
+            armKind={armKind}
+            armedId={armedId}
+            prefabs={props.prefabs}
+            onArm={(id) => props.onArm({ kind: armKind, id })}
+          />
         </>
       )}
     </Box>
