@@ -691,32 +691,40 @@ function EditorShell() {
             onSwapFocus={() => setMapFocus((f) => (f === '3d' ? '2d' : '3d'))}
             rail={
               <>
-                {/* selected piece */}
-                <Box style={{ flexBasis: '20%', minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+                {/* selected piece — fills the rail in 2D mode (the build tools below hide,
+                    and the tile-paint tools live in the 2D map's own left rail). */}
+                <Box style={{ flexBasis: mapFocus === '3d' ? '20%' : 'auto', flexGrow: mapFocus === '3d' ? 0 : 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
                   <PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />
                 </Box>
-                {/* paint / skins */}
-                <Box style={{ flexBasis: '34%', minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
-                  <RightPanel
-                tab={tab}
-                onTab={setTab}
-                notes={notes}
-                onNotes={setNotes}
-                buildingPrefabs={buildingPrefabs}
-                onPlace={placeObject}
-                activePlaceable={activePlaceable}
-                onArmPlaceable={armPlaceable}
-                onArmScatter={armScatter}
-                paintPieces={buildPieces}
-                paintSelectedIds={isoSelectedIds}
-                onPaintCommit={commitBuildEvents}
-                onOpenPainter={() => { requestWorkbenchSource('paint'); nav.push('/workbench'); }}
-              />
-                </Box>
-                {/* prop / piece menu — OFF the map, in the rail (req_1888) */}
-                <Box style={{ flexGrow: 1, minHeight: 0 }}>
-                  <CatalogRail armed={armed} onArm={armCatalog} prefabs={buildingPrefabs} />
-                </Box>
+                {/* CONTEXTUAL (req_1890): the build tools (paint/skins + prop/piece) show only
+                    when the 3D build map is up. When the 2D tile map is pulled up they give way
+                    to the tile-paint tools, which currently ride the 2D map's own left rail. */}
+                {mapFocus === '3d' ? (
+                  <>
+                    {/* paint / skins */}
+                    <Box style={{ flexBasis: '34%', minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+                      <RightPanel
+                        tab={tab}
+                        onTab={setTab}
+                        notes={notes}
+                        onNotes={setNotes}
+                        buildingPrefabs={buildingPrefabs}
+                        onPlace={placeObject}
+                        activePlaceable={activePlaceable}
+                        onArmPlaceable={armPlaceable}
+                        onArmScatter={armScatter}
+                        paintPieces={buildPieces}
+                        paintSelectedIds={isoSelectedIds}
+                        onPaintCommit={commitBuildEvents}
+                        onOpenPainter={() => { requestWorkbenchSource('paint'); nav.push('/workbench'); }}
+                      />
+                    </Box>
+                    {/* prop / piece menu — OFF the map, in the rail (req_1888) */}
+                    <Box style={{ flexGrow: 1, minHeight: 0 }}>
+                      <CatalogRail armed={armed} onArm={armCatalog} prefabs={buildingPrefabs} />
+                    </Box>
+                  </>
+                ) : null}
               </>
             }
             map2d={
