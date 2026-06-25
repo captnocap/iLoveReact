@@ -345,6 +345,12 @@ const PhysicsColliders = struct {
     /// without doors (and on the camera set).
     door_rect_start: usize = 0,
     door_count: usize = 0,
+    /// LIVE cooked-door panel rects (req_1864): `cooked_door_count` rects starting
+    /// at rect index `cooked_door_rect_start`, one per cooked-door mesh-prop
+    /// instance in mp.instances order — the E toggle parks/unparks them in place,
+    /// the same machinery as the DOORS-lump doors but sourced from a custom mesh.
+    cooked_door_rect_start: usize = 0,
+    cooked_door_count: usize = 0,
 
     pub fn deinit(self: PhysicsColliders, allocator: std.mem.Allocator) void {
         allocator.free(self.values);
@@ -384,6 +390,84 @@ const ElevatorCar = struct {
 const DoorState = struct {
     open: bool,
 };
+
+/// One cooked door's live two-state machine (req_1864) — the toggleable leaf is
+/// a mesh-prop slot NODE (the user's custom art) plus a parked-when-open rect.
+/// Sourced from MeshPropDoor (MESH_PROPS v6), not the DOORS lump; runs the same
+/// E-toggle as a built-in door but drops a mesh node instead of a box.
+const CookedDoor = struct {
+    open: bool,
+    /// kid index of the leaf slot node (set during the mesh-prop node pass)
+    node_child: usize = 0,
+    /// the leaf node's resting Y (inst.y) — restore point when closed
+    node_base_y: f32 = 0,
+    /// rect index in physics_colliders (parked out of the world when open)
+    rect_index: usize = 0,
+    /// world panel box: center + half extents (yawed AABB) + base/height
+    cx: f32,
+    cz: f32,
+    base_y: f32,
+    panel_h: f32,
+    half_x: f32,
+    half_z: f32,
+    reach: f32,
+    vehicle: bool,
+};
+
+/// The world AABB of a cooked door's leaf panel (req_1864) — the leaf slot's
+/// local bounds, yawed + offset by the placed instance. Shared by the rect
+/// builder and the reach scan so collision and interaction agree. null when the
+/// mesh carries no door or the leaf slot is empty/out of range.
+fn cookedDoorWorldBox(mesh: constructor.MeshPropMesh, inst: constructor.MeshPropInstance) ?CookedDoor {
+    const door = mesh.door orelse return null;
+    if (door.leaf_slot >= mesh.slots.len) return null;
+    const slot = mesh.slots[door.leaf_slot];
+    if (slot.count == 0) return null;
+    var lo = [3]f32{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) };
+    var hi = [3]f32{ -std.math.floatMax(f32), -std.math.floatMax(f32), -std.math.floatMax(f32) };
+    var i: usize = slot.start;
+    const end: usize = @min(slot.start + slot.count, mesh.vertex_count);
+    while (i < end) : (i += 1) {
+        const b = i * 8;
+        if (b + 3 > mesh.vertices.len) break;
+        var k: usize = 0;
+        while (k < 3) : (k += 1) {
+            const v = mesh.vertices[b + k];
+            if (v < lo[k]) lo[k] = v;
+            if (v > hi[k]) hi[k] = v;
+        }
+    }
+    if (lo[0] > hi[0]) return null;
+    const lcx = (lo[0] + hi[0]) / 2;
+    const lcz = (lo[2] + hi[2]) / 2;
+    const hx = (hi[0] - lo[0]) / 2;
+    const hz = (hi[2] - lo[2]) / 2;
+    const rad = inst.yaw_degrees * std.math.pi / 180.0;
+    const cc = @cos(rad);
+    const ss = @sin(rad);
+    return .{
+        .open = door.start_open,
+        .cx = inst.x + (lcx * cc - lcz * ss),
+        .cz = inst.z + (lcx * ss + lcz * cc),
+        .base_y = inst.y + lo[1],
+        .panel_h = hi[1] - lo[1],
+        .half_x = @abs(cc) * hx + @abs(ss) * hz,
+        .half_z = @abs(ss) * hx + @abs(cc) * hz,
+        .node_base_y = inst.y,
+        .reach = door.reach,
+        .vehicle = door.vehicle,
+    };
+}
+
+/// The vertex count of a mesh's SOLID body — everything before the door leaf
+/// slot (req_1864), so meshPropIslands never colliders the toggleable leaf. The
+/// full vertex_count for a non-door mesh.
+fn solidVertexCount(mesh: constructor.MeshPropMesh) usize {
+    if (mesh.door) |door| {
+        if (door.leaf_slot < mesh.slots.len) return mesh.slots[door.leaf_slot].start;
+    }
+    return mesh.vertex_count;
+}
 
 fn clamp(v: f32, lo: f32, hi: f32) f32 {
     return @max(lo, @min(hi, v));
@@ -1540,7 +1624,9 @@ fn meshPropIslands(allocator: std.mem.Allocator, mesh: constructor.MeshPropMesh)
     if (!mesh.solid or mesh.footprint_width <= 0 or mesh.footprint_depth <= 0) {
         return allocator.alloc(MeshIsland, 0);
     }
-    const vc: usize = mesh.vertex_count;
+    // req_1864: a cooked door's leaf is the LIVE two-state panel (its own rect),
+    // never a static island — so the body islands stop before the leaf slot.
+    const vc: usize = solidVertexCount(mesh);
     const oneBox = struct {
         fn make(a: std.mem.Allocator, m: constructor.MeshPropMesh) ![]MeshIsland {
             const out = try a.alloc(MeshIsland, 1);
@@ -1847,6 +1933,39 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
             }
         }
 
+        // LIVE cooked-door panel rects (req_1864): one toggleable rect per cooked
+        // door mesh-prop instance, in mp.instances order (so collectCookedDoors
+        // aligns rect_index = start + i). Same park/blocksPlayer machinery as the
+        // DOORS-lump doors, but the world box comes from the custom leaf slot.
+        var cooked_door_rect_start: usize = 0;
+        var cooked_door_count: usize = 0;
+        if (scene.mesh_props) |mp| {
+            cooked_door_rect_start = rect_count;
+            cooked: for (mp.instances) |inst| {
+                const mi: usize = @intCast(inst.mesh);
+                if (mi >= mp.meshes.len) continue;
+                const box = cookedDoorWorldBox(mp.meshes[mi], inst) orelse continue;
+                if (rect_count >= game_physics.MAX_RECTS) {
+                    clipped_rows += 1;
+                    break :cooked;
+                }
+                const park: f32 = if (box.open) DOOR_OPEN_PARK_METERS else 0;
+                try rects.appendSlice(allocator, &[_]f32{
+                    box.cx - box.half_x + park, // minX
+                    box.cz - box.half_z + park, // minZ
+                    box.cx + box.half_x + park, // maxX
+                    box.cz + box.half_z + park, // maxZ
+                    box.base_y + box.panel_h, // top
+                    if (box.open) 0 else 1, // blocksPlayer
+                    DOOR_PANEL_FRICTION,
+                    DOOR_PANEL_RESTITUTION,
+                    box.base_y, // floor (banded with the door's storey)
+                });
+                rect_count += 1;
+                cooked_door_count += 1;
+            }
+        }
+
         // We DON'T derive any colliders from the render instances here — exactly
         // like /test, the pieces collide ONLY through the baked colliders above
         // and the painted ground through the heightfields. The instance fallback
@@ -1881,6 +2000,8 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
             .car_count = car_count,
             .door_rect_start = door_rect_start,
             .door_count = door_count,
+            .cooked_door_rect_start = cooked_door_rect_start,
+            .cooked_door_count = cooked_door_count,
         };
     }
 
@@ -2734,6 +2855,10 @@ pub const Runtime = struct {
     doors_state: []DoorState = &.{},
     /// First kid index of the door panel nodes (one box per door).
     door_first_child: usize = 0,
+    /// Live cooked doors (req_1864): parallel to physics_colliders.cooked_door
+    /// rects; the leaf is a mesh-prop slot node (custom art), not a box. The E
+    /// toggle parks the rect + drops the node together. Owned slice.
+    cooked_doors: []CookedDoor = &.{},
     /// Live LED tickers (req_0893 #3): one MUTABLE instances node per ticker,
     /// whose lit-LED instance data we rebuild each frame as the scroll offset
     /// advances (the elevator-car live-node pattern, instanced). Buffers are
@@ -3188,6 +3313,26 @@ pub const Runtime = struct {
         } else if (self.scene.doors) |doors| {
             if (doors.records.len > 0) log.print("[loader] door layer: {d} door(s) but no live rects (collider cap / no baked colliders)\n", .{doors.records.len});
         }
+        // Cooked doors (req_1864): one live two-state machine per cooked-door
+        // mesh-prop instance that got a rect, in the SAME mp.instances order the
+        // rect builder used, so rect_index = cooked_door_rect_start + i. node_child
+        // is filled later, when the mesh-prop node pass emits the leaf slot node.
+        if (self.physics_colliders.cooked_door_count > 0) {
+            if (self.scene.mesh_props) |mp| {
+                self.cooked_doors = try self.allocator.alloc(CookedDoor, self.physics_colliders.cooked_door_count);
+                var ci: usize = 0;
+                for (mp.instances) |inst| {
+                    if (ci >= self.cooked_doors.len) break;
+                    const mi: usize = @intCast(inst.mesh);
+                    if (mi >= mp.meshes.len) continue;
+                    const box = cookedDoorWorldBox(mp.meshes[mi], inst) orelse continue;
+                    self.cooked_doors[ci] = box;
+                    self.cooked_doors[ci].rect_index = self.physics_colliders.cooked_door_rect_start + ci;
+                    ci += 1;
+                }
+                log.print("[loader] cooked-door layer: {d} live custom door(s)\n", .{self.cooked_doors.len});
+            }
+        }
         // The camera's own collider set: the FULL baked authored rects/oriented,
         // unclamped, packed in cameraOcclusionStepColliders wire order. Built once
         // and queried every frame by springArmEye regardless of physics windowing,
@@ -3458,9 +3603,18 @@ pub const Runtime = struct {
         if (self.npcs.items.len > 0) log.print("[loader] built {d} NPC figure(s) from {d} model(s)\n", .{ self.npcs.items.len, self.scene.npc_models.len });
 
         if (self.scene.mesh_props) |mp| {
+            // req_1864: cooked-door instances, in mp.instances order, align 1:1 with
+            // self.cooked_doors (the bake only flags a door mesh when its leaf slot has
+            // content). cd_idx walks them so the leaf slot node binds to its door.
+            var cd_idx: usize = 0;
             for (mp.instances) |inst| {
                 const mesh_index: usize = @intCast(inst.mesh);
                 const mesh = mp.meshes[mesh_index];
+                var this_cooked_door: ?usize = null;
+                if (mesh.door != null and cd_idx < self.cooked_doors.len) {
+                    this_cooked_door = cd_idx;
+                    cd_idx += 1;
+                }
                 // RESKIN req_1845: remember the node range this instance occupies, keyed by
                 // its world position, so a live re-skin of the same prop can hide it.
                 const inst_first = self.kid_list.items.len;
@@ -3492,7 +3646,20 @@ pub const Runtime = struct {
                         return err;
                     };
                     const material_ref = if (si < inst.slot_materials.len) inst.slot_materials[si] else 0;
+                    const leaf_node_index = self.kid_list.items.len;
                     try self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, material_ref, null, null);
+                    // req_1864: bind the door's leaf slot node to its live two-state
+                    // machine, and drop it now if the door boots open.
+                    if (this_cooked_door) |di| {
+                        if (mesh.door) |door| {
+                            if (si == door.leaf_slot and leaf_node_index < self.kid_list.items.len) {
+                                self.cooked_doors[di].node_child = leaf_node_index;
+                                if (self.cooked_doors[di].open) {
+                                    self.kid_list.items[leaf_node_index].scene3d_pos_y = self.cooked_doors[di].node_base_y - DOOR_OPEN_HIDE_DROP_METERS;
+                                }
+                            }
+                        }
+                    }
                 }
             }
             if (mp.instances.len > 0) {
@@ -4614,6 +4781,29 @@ pub const Runtime = struct {
         node.scene3d_pos_y = record.base_y + record.panel_h / 2 - hide;
     }
 
+    /// req_1864 — flip a cooked door: park/unpark its rect (the doorway clears
+    /// when open) and drop/raise its custom leaf NODE (the user's art), the same
+    /// two-state machine as toggleDoor but the leaf is a mesh-prop slot node.
+    fn toggleCookedDoor(self: *Runtime, index: usize) void {
+        if (index >= self.cooked_doors.len) return;
+        const cd = &self.cooked_doors[index];
+        const open = !cd.open;
+        cd.open = open;
+        const at = self.physics_colliders.rectBase() + cd.rect_index * game_physics.RECT_FLOATS;
+        if (at + game_physics.RECT_FLOATS <= self.physics_colliders.values.len and cd.rect_index < self.physics_colliders.rect_count) {
+            const park: f32 = if (open) DOOR_OPEN_PARK_METERS else 0;
+            self.physics_colliders.values[at + 0] = cd.cx - cd.half_x + park; // minX
+            self.physics_colliders.values[at + 1] = cd.cz - cd.half_z + park; // minZ
+            self.physics_colliders.values[at + 2] = cd.cx + cd.half_x + park; // maxX
+            self.physics_colliders.values[at + 3] = cd.cz + cd.half_z + park; // maxZ
+            self.physics_colliders.values[at + 5] = if (open) 0 else 1; // blocksPlayer
+        }
+        if (cd.node_child < self.kid_list.items.len) {
+            const hide: f32 = if (open) DOOR_OPEN_HIDE_DROP_METERS else 0;
+            self.kid_list.items[cd.node_child].scene3d_pos_y = cd.node_base_y - hide;
+        }
+    }
+
     /// req_0674 — true when a thin solid collider (wall slab, closed door
     /// panel, window strip) crosses the segment from the player's chest line
     /// to the candidate. Open doors dropped their solid flag in setDoorOpen,
@@ -4653,7 +4843,7 @@ pub const Runtime = struct {
         // (the ELEVATORS lump) — either alone keeps the frame alive (req_0652).
         const ia_opt = self.scene.interactables;
         const has_props = if (ia_opt) |ia| ia.instances.len > 0 else false;
-        if (!has_props and self.cars.len == 0 and self.doors_state.len == 0) return;
+        if (!has_props and self.cars.len == 0 and self.doors_state.len == 0 and self.cooked_doors.len == 0) return;
 
         // 1. advance / cancel / finish an active search (props only)
         if (st.search_active) {
@@ -4746,6 +4936,33 @@ pub const Runtime = struct {
             }
         }
 
+        // 2a-cooked (req_1864) — custom doors compiled from a Studio model. Same
+        // nearest-in-reach rule + prompt grammar as the built-in doors; only when
+        // a built-in door hasn't already claimed the prompt.
+        var cooked_door_target: ?usize = null;
+        if (self.player.posture == .none and !st.search_active and st.prompt_len == 0 and self.cooked_doors.len > 0) {
+            var best_distance: f32 = std.math.floatMax(f32);
+            for (self.cooked_doors, 0..) |cd, i| {
+                if (@abs(cd.base_y - self.player.y) > DOOR_Y_WINDOW_METERS) continue;
+                const dx = cd.cx - self.player.x;
+                const dz = cd.cz - self.player.z;
+                const distance = @sqrt(dx * dx + dz * dz);
+                if (distance > cd.reach or distance > best_distance) continue;
+                if (self.interactReachBlocked(cd.cx, cd.base_y + cd.panel_h / 2, cd.cz)) continue;
+                best_distance = distance;
+                cooked_door_target = i;
+            }
+            if (cooked_door_target) |i| {
+                const cd = self.cooked_doors[i];
+                const label: []const u8 = if (cd.vehicle) "garage door" else "door";
+                if (cd.open) {
+                    st.setPrompt("E — close the {s}", .{label});
+                } else {
+                    st.setPrompt("E — open the {s}", .{label});
+                }
+            }
+        }
+
         // 2b. the elevator (req_0652) — only when no prop claimed the prompt
         // (/test's priority: doors/props in reach win the E first).
         var elevator_ride: ?struct { index: usize, to_y: f32 } = null;
@@ -4795,6 +5012,10 @@ pub const Runtime = struct {
         if (!pressed or st.search_active or self.player.posture != .none) return;
         if (door_target) |i| {
             self.toggleDoor(i);
+            return;
+        }
+        if (cooked_door_target) |i| {
+            self.toggleCookedDoor(i);
             return;
         }
         if (elevator_ride) |ride| {
