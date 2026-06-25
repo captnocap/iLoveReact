@@ -701,10 +701,12 @@ function EditorShell() {
                     to the tile-paint tools, which currently ride the 2D map's own left rail. */}
                 {mapFocus === '3d' ? (
                   <>
-                    {/* paint / skins — the FacePainter is tall (faces + brush + neon + the
-                        texture grid), so it gets the lion's share of the rail; otherwise the
-                        texture swatches collapse to nothing (req_1890). */}
-                    <Box style={{ flexBasis: '54%', flexShrink: 0, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+                    {/* paint / skins above, prop / piece below — roughly equal halves so
+                        neither menu is cramped (req_1929: "equally spaced, no dead space").
+                        The skin grid is a FITTED paged grid now, so it adapts to whatever
+                        height it gets instead of collapsing — the old 54% lion's share is
+                        no longer needed. */}
+                    <Box style={{ flexBasis: '45%', flexShrink: 0, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
                       <RightPanel
                         tab={tab}
                         onTab={setTab}
