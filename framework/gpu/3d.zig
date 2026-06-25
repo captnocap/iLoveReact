@@ -266,7 +266,7 @@ var g_inst_scratch: [MAX_INSTANCES]InstanceData = undefined;
 // reserve nothing.
 pub const MAX_STATIC_INSTANCES: u32 = 1048576; // pub: the world loader budgets its LOD shell against this
 const STATIC_INST_CACHE_LEN: usize = 64;
-const StaticInstEntry = struct { key: usize = 0, count: u32 = 0, offset: u64 = 0, used: bool = false };
+const StaticInstEntry = struct { key: usize = 0, count: u32 = 0, offset: u64 = 0, used: bool = false, version: u32 = 0 };
 var g_static_inst_buf: ?*wgpu.Buffer = null;
 var g_static_inst_top: u64 = 0; // bump cursor (bytes) into g_static_inst_buf
 var g_static_inst_cache: [STATIC_INST_CACHE_LEN]StaticInstEntry = [_]StaticInstEntry{.{}} ** STATIC_INST_CACHE_LEN;
@@ -1774,36 +1774,11 @@ const StaticInstDraw = struct { offset: u64, count: u32 };
 /// The WHOLE array uploads (count = idata.len / stride), not the node's draw
 /// count: many nodes may draw sub-ranges of one shared upload (world streaming's
 /// per-chunk draws via scene3d_instance_first) and all resolve to this one entry.
-fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, stride: u32) ?StaticInstDraw {
-    if (stride < 9 or idata.len < stride) return null;
-    const icount: u32 = @intCast(idata.len / @as(usize, stride));
-    const key = @intFromPtr(idata.ptr);
-    var i: usize = 0;
-    while (i < g_static_inst_cache_len) : (i += 1) {
-        const e = g_static_inst_cache[i];
-        if (e.used and e.key == key and e.count == icount) return .{ .offset = e.offset, .count = e.count };
-    }
-    if (icount == 0) return null;
-    if (g_static_inst_cache_len >= STATIC_INST_CACHE_LEN) return null;
-    if (g_static_inst_buf == null) {
-        g_static_inst_buf = device.createBuffer(&.{
-            .label = wgpu.StringView.fromSlice("render3d_static_instances"),
-            .size = @as(u64, MAX_STATIC_INSTANCES) * @sizeOf(InstanceData),
-            .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
-            .mapped_at_creation = 0,
-        });
-        if (g_static_inst_buf == null) return null;
-        g_static_inst_top = 0;
-    }
-    const used_count: u32 = @intCast(g_static_inst_top / @sizeOf(InstanceData));
-    // Retained static uploads must be whole-array because streamed draw nodes
-    // address sub-ranges by scene3d_instance_first. A partial upload makes any
-    // later range clamp to count=0, so turning the camera can drop whole chunks.
-    // Oversized batches fall back to the dynamic sub-range path below instead.
-    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, MAX_STATIC_INSTANCES)) return null;
-    const n: u32 = icount;
-    if (n == 0) return null;
-    const base_offset = g_static_inst_top;
+/// Stage `n` instance rows from `idata` into g_static_inst_buf starting at byte
+/// `dst_offset`, streaming through g_inst_scratch in MAX_INSTANCES chunks. Used
+/// for the first upload AND the in-place re-upload when a static batch's bytes
+/// change (DIRTYRECT) — same offset, so retained/streamed sub-ranges stay valid.
+fn stageStaticInstanceBytes(queue: *wgpu.Queue, idata: []const f32, stride: u32, n: u32, dst_offset: u64) void {
     const scale_base: usize = if (stride >= 12) 6 else 3;
     const color_base: usize = if (stride >= 12) 9 else 6;
     var done: u32 = 0;
@@ -1828,11 +1803,53 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
                 1.0,
             );
         }
-        bu.writeTypedBuffer(queue, g_static_inst_buf.?, g_static_inst_top, InstanceData, g_inst_scratch[0..chunk]);
-        g_static_inst_top += @as(u64, chunk) * @sizeOf(InstanceData);
+        bu.writeTypedBuffer(queue, g_static_inst_buf.?, dst_offset + @as(u64, done) * @sizeOf(InstanceData), InstanceData, g_inst_scratch[0..chunk]);
         done += chunk;
     }
-    g_static_inst_cache[g_static_inst_cache_len] = .{ .key = key, .count = n, .offset = base_offset, .used = true };
+}
+
+fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, stride: u32, version: u32) ?StaticInstDraw {
+    if (stride < 9 or idata.len < stride) return null;
+    const icount: u32 = @intCast(idata.len / @as(usize, stride));
+    const key = @intFromPtr(idata.ptr);
+    var i: usize = 0;
+    while (i < g_static_inst_cache_len) : (i += 1) {
+        const e = &g_static_inst_cache[i];
+        if (e.used and e.key == key and e.count == icount) {
+            // DIRTYRECT: the loader edited the bytes in place and bumped the
+            // node version — re-upload the whole batch at its retained offset
+            // (offsets stay stable, so streamed sub-ranges remain valid).
+            if (e.version != version) {
+                stageStaticInstanceBytes(queue, idata, stride, icount, e.offset);
+                e.version = version;
+            }
+            return .{ .offset = e.offset, .count = e.count };
+        }
+    }
+    if (icount == 0) return null;
+    if (g_static_inst_cache_len >= STATIC_INST_CACHE_LEN) return null;
+    if (g_static_inst_buf == null) {
+        g_static_inst_buf = device.createBuffer(&.{
+            .label = wgpu.StringView.fromSlice("render3d_static_instances"),
+            .size = @as(u64, MAX_STATIC_INSTANCES) * @sizeOf(InstanceData),
+            .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+            .mapped_at_creation = 0,
+        });
+        if (g_static_inst_buf == null) return null;
+        g_static_inst_top = 0;
+    }
+    const used_count: u32 = @intCast(g_static_inst_top / @sizeOf(InstanceData));
+    // Retained static uploads must be whole-array because streamed draw nodes
+    // address sub-ranges by scene3d_instance_first. A partial upload makes any
+    // later range clamp to count=0, so turning the camera can drop whole chunks.
+    // Oversized batches fall back to the dynamic sub-range path below instead.
+    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, MAX_STATIC_INSTANCES)) return null;
+    const n: u32 = icount;
+    if (n == 0) return null;
+    const base_offset = g_static_inst_top;
+    stageStaticInstanceBytes(queue, idata, stride, n, base_offset);
+    g_static_inst_top += @as(u64, n) * @sizeOf(InstanceData);
+    g_static_inst_cache[g_static_inst_cache_len] = .{ .key = key, .count = n, .offset = base_offset, .used = true, .version = version };
     g_static_inst_cache_len += 1;
     return .{ .offset = base_offset, .count = n };
 }
@@ -2277,7 +2294,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         }
         if (leader.scene3d_instance_static) {
             if (leader.scene3d_instance_data) |idata| {
-                if (resolveStaticInstances(device, queue, idata, leader.scene3d_instance_stride)) |sd| {
+                if (resolveStaticInstances(device, queue, idata, leader.scene3d_instance_stride, leader.scene3d_instance_version)) |sd| {
                     mvisited[gi] = true;
                     const first: u32 = @min(leader.scene3d_instance_first, sd.count);
                     const count: u32 = @min(leader.scene3d_instance_count, sd.count - first);

@@ -2774,6 +2774,15 @@ const StreamProto = struct {
 // RESKIN req_1845: the kid_list node range a baked mesh-prop instance occupies, so a live
 // re-skin of that prop can hide the stale baked draw for the frame.
 const BakedRange = struct { first: u32, count: u32 };
+// DIRTYRECT: a baked mesh-prop's world center + the node range it occupies, so an
+// erase rect can hide the ones inside it (the move case the position-keyed RESKIN
+// coincident-hide misses, because the live ref has moved off the baked spot).
+const BakedMeshPos = struct { x: f32, y: f32, z: f32, range: BakedRange };
+// DIRTYRECT: a collapsed BOX instance row — its buffer + row + the original scale,
+// so a changed erase-rect set can un-collapse it before re-evaluating.
+const ErasedRow = struct { buf: []f32, row: usize, sx: f32, sy: f32, sz: f32 };
+// Erase rect = an AABB the editor marks dirty (a moved/deleted piece's old footprint).
+const EraseRect = struct { min_x: f32, min_y: f32, min_z: f32, max_x: f32, max_y: f32, max_z: f32 };
 
 pub const Runtime = struct {
     allocator: std.mem.Allocator,
@@ -2889,6 +2898,19 @@ pub const Runtime = struct {
     // the frame. hidden_baked tracks what we hid so the next frame restores it first.
     baked_by_pos: std.AutoHashMapUnmanaged(u64, BakedRange) = .{},
     hidden_baked: std.ArrayListUnmanaged(BakedRange) = .{},
+    // DIRTYRECT req_1891/1892: erase the baked geometry a moved/deleted piece left
+    // behind WITHOUT a rebake (the editor pushes the old-footprint rects). baked_mesh_list
+    // is every baked mesh-prop's world pos + node range (so a rect can hide the ones inside
+    // it — the move twin of the position-keyed RESKIN hide). erased_rows remembers each
+    // collapsed BOX row's original scale so a changed rect set restores it first; the box
+    // batches re-upload in place via the node version. applied_erase_gen tracks the last
+    // pushed rect generation so the GPU re-upload happens once per edit, not per frame.
+    baked_mesh_list: std.ArrayListUnmanaged(BakedMeshPos) = .{},
+    erased_rows: std.ArrayListUnmanaged(ErasedRow) = .{},
+    applied_erase_gen: u64 = 0,
+    // DIRTYRECT (streaming): bumped when a stream family's rows are collapsed; refreshStreamNodes
+    // stamps it as each streamed static node's instance version so the edited families re-upload.
+    stream_erase_gen: u32 = 0,
     // LIVEBLDSKIN req_1849: per-frame instance rows for live procedurally-skinned building-
     // piece faces (textured cubes outset to cover the baked face-slab). Pre-sized each frame
     // so the node slices into it stay stable while kid_list grows.
@@ -3010,6 +3032,8 @@ pub const Runtime = struct {
         self.mesh_by_hash.deinit(self.allocator);
         self.baked_by_pos.deinit(self.allocator);
         self.hidden_baked.deinit(self.allocator);
+        self.baked_mesh_list.deinit(self.allocator);
+        self.erased_rows.deinit(self.allocator);
         self.skin_box_buf.deinit(self.allocator);
         {
             var it = self.live_mat_keys.valueIterator();
@@ -3166,6 +3190,107 @@ pub const Runtime = struct {
         }
     }
 
+    // DIRTYRECT — the scale floats of a stride-N instance row (collapse target).
+    fn rowScaleBase(stride: usize) usize {
+        return if (stride >= 12) 6 else 3;
+    }
+
+    fn pointInAnyEraseRect(rects: []const EraseRect, x: f32, y: f32, z: f32, test_y: bool) bool {
+        for (rects) |r| {
+            if (x >= r.min_x and x <= r.max_x and z >= r.min_z and z <= r.max_z) {
+                if (!test_y or (y >= r.min_y and y <= r.max_y)) return true;
+            }
+        }
+        return false;
+    }
+
+    // Collapse (scale→0) every row of a static instance buffer whose center sits inside
+    // an erase rect, recording the originals so a changed rect set restores them first.
+    // Returns whether anything changed (the owning node then re-uploads via its version).
+    fn collapseRowsInRects(self: *Runtime, buf: []f32, count: u32, stride: usize, rects: []const EraseRect) bool {
+        if (count == 0 or buf.len < stride or rects.len == 0) return false;
+        const sb = rowScaleBase(stride);
+        var any = false;
+        var row: usize = 0;
+        while (row < count) : (row += 1) {
+            const o = row * stride;
+            if (o + sb + 3 > buf.len) break;
+            if (buf[o + sb] == 0 and buf[o + sb + 1] == 0 and buf[o + sb + 2] == 0) continue; // already gone
+            if (!pointInAnyEraseRect(rects, buf[o + 0], buf[o + 1], buf[o + 2], true)) continue;
+            self.erased_rows.append(self.allocator, .{ .buf = buf, .row = row, .sx = buf[o + sb], .sy = buf[o + sb + 1], .sz = buf[o + sb + 2] }) catch {};
+            buf[o + sb] = 0;
+            buf[o + sb + 1] = 0;
+            buf[o + sb + 2] = 0;
+            any = true;
+        }
+        return any;
+    }
+
+    // DIRTYRECT req_1891/1892: erase the baked geometry a moved/deleted piece left at its
+    // old footprint, WITHOUT a rebake. Runs once per pushed rect generation (the GPU
+    // re-upload is the cost): un-collapse last round's box rows, collapse the rows inside
+    // the current rects, and bump every static node's version so the edited batches
+    // re-stage in place. Mesh-prop hides are recomputed per frame in applyLiveMeshProps
+    // (cheap bool toggles) so they need no generation gate here.
+    fn applyDirtyErase(self: *Runtime) void {
+        const pend = pendingDirtyEraseFor(self.node_id) orelse return;
+        if (pend.gen == self.applied_erase_gen) return;
+        self.applied_erase_gen = pend.gen;
+        const sb = rowScaleBase(self.stride);
+        // 1. restore every row we collapsed last round (scale back to original).
+        for (self.erased_rows.items) |er| {
+            const o = er.row * self.stride + sb;
+            if (o + 3 <= er.buf.len) {
+                er.buf[o] = er.sx;
+                er.buf[o + 1] = er.sy;
+                er.buf[o + 2] = er.sz;
+            }
+        }
+        self.erased_rows.clearRetainingCapacity();
+        // 2. collapse the SOLID instance rows inside the current rects (flora is left
+        // alone — a piece move never erases grass/flowers/fronds/palms). Streaming draws
+        // its OWN spatially-sorted copies (w.families), so collapse THOSE; the monolithic
+        // path collapses the shape/material batches directly.
+        const rects = pend.rects;
+        if (rects.len > 0) {
+            if (self.stream) |*w| {
+                for (w.families) |*fam| {
+                    if (fam.draw_radius > 0) continue; // flora family (req_1665 half-radius) — skip
+                    if (fam.rows.len >= fam.stride) _ = self.collapseRowsInRects(fam.rows, @intCast(fam.rows.len / fam.stride), fam.stride, rects);
+                }
+            } else {
+                if (self.has_shape_batches) {
+                    const s = self.shape_batches;
+                    _ = self.collapseRowsInRects(s.boxes, s.box_count, self.stride, rects);
+                    _ = self.collapseRowsInRects(s.boxes_open_run_min, s.box_open_run_min_count, self.stride, rects);
+                    _ = self.collapseRowsInRects(s.boxes_open_run_max, s.box_open_run_max_count, self.stride, rects);
+                    _ = self.collapseRowsInRects(s.boxes_open_run_both, s.box_open_run_both_count, self.stride, rects);
+                    _ = self.collapseRowsInRects(s.ramps, s.ramp_count, self.stride, rects);
+                    _ = self.collapseRowsInRects(s.cylinder8s, s.cylinder8_count, self.stride, rects);
+                    _ = self.collapseRowsInRects(s.cylinder16s, s.cylinder16_count, self.stride, rects);
+                    _ = self.collapseRowsInRects(s.spheres, s.sphere_count, self.stride, rects);
+                    _ = self.collapseRowsInRects(s.gables, s.gable_count, self.stride, rects);
+                    _ = self.collapseRowsInRects(s.corner_miters, s.corner_miter_count, self.stride, rects);
+                    _ = self.collapseRowsInRects(s.corner_miter_mirrors, s.corner_miter_mirror_count, self.stride, rects);
+                }
+                for (self.material_batches) |mb| _ = self.collapseRowsInRects(mb.boxes, mb.count, self.stride, rects);
+            }
+        }
+        // 3. re-upload the edited static batches in place. Both paths bump a version the
+        // static cache keys re-staging off (once per edit, vs a per-frame restage); the
+        // touched-only refinement is a later optimization for huge maps. Streaming nodes are
+        // rebuilt every frame, so they read the version from stream_erase_gen in refreshStreamNodes.
+        if (self.stream != null) {
+            self.stream_erase_gen +%= 1;
+        } else {
+            var ni: usize = 0;
+            const limit = @min(self.perm_node_count, self.kid_list.items.len);
+            while (ni < limit) : (ni += 1) {
+                if (self.kid_list.items[ni].scene3d_instance_static) self.kid_list.items[ni].scene3d_instance_version +%= 1;
+            }
+        }
+    }
+
     // LIVEBLDSKIN req_1849: append a textured cube per procedurally-skinned building-piece
     // face, OUTSET a hair so it covers the baked face-slab (building-piece boxes are batched
     // instanced draws — can't hide one — so we cover instead of hide). One-instance box nodes
@@ -3225,6 +3350,20 @@ pub const Runtime = struct {
             // The placement ghost: the armed mesh prop, translucent, tracking the snap target.
             if (pendingMeshGhostFor(self.node_id)) |gh| {
                 if (gh.has) self.appendLiveMeshRef(mp, gh.ref, LIVE_MESH_GHOST_ALPHA);
+            }
+        }
+        // DIRTYRECT req_1891/1892: hide every baked mesh prop whose old position sits inside
+        // an active erase rect — the MOVED-prop case the coincident-hide above misses (the
+        // live ref has moved to the new spot). Cheap bool toggles, recomputed each frame and
+        // restored by the hidden_baked un-hide above; the live overlay draws the new position.
+        if (pendingDirtyEraseFor(self.node_id)) |pend| {
+            if (pend.rects.len > 0 and self.baked_mesh_list.items.len > 0) {
+                for (self.baked_mesh_list.items) |bm| {
+                    if (pointInAnyEraseRect(pend.rects, bm.x, bm.y, bm.z, false)) {
+                        self.setBakedRangeVisible(bm.range, false);
+                        self.hidden_baked.append(self.allocator, bm.range) catch {};
+                    }
+                }
             }
         }
         self.appendLiveSkinBoxes();
@@ -3620,7 +3759,12 @@ pub const Runtime = struct {
                 const inst_first = self.kid_list.items.len;
                 defer {
                     const cnt = self.kid_list.items.len - inst_first;
-                    if (cnt > 0) self.baked_by_pos.put(self.allocator, meshPosKey(mesh_index, inst.x, inst.z, inst.yaw_degrees), .{ .first = @intCast(inst_first), .count = @intCast(cnt) }) catch {};
+                    if (cnt > 0) {
+                        const rng: BakedRange = .{ .first = @intCast(inst_first), .count = @intCast(cnt) };
+                        self.baked_by_pos.put(self.allocator, meshPosKey(mesh_index, inst.x, inst.z, inst.yaw_degrees), rng) catch {};
+                        // DIRTYRECT: also index by raw position so an erase rect can hide a MOVED prop.
+                        self.baked_mesh_list.append(self.allocator, .{ .x = inst.x, .y = inst.y, .z = inst.z, .range = rng }) catch {};
+                    }
                 }
                 if (mesh.slots.len == 0) {
                     // A painted cooked prop (req_1496) carries its atlas as tex_rgba —
@@ -4376,6 +4520,9 @@ pub const Runtime = struct {
                 .scene3d_instance_first = d.range.first,
                 .scene3d_instance_stride = fam.stride,
                 .scene3d_instance_static = true,
+                // DIRTYRECT: detail families re-upload in place when a piece edit collapses
+                // their rows (the LOD shell isn't collapsed, so it keeps version 0).
+                .scene3d_instance_version = if (d.lod) 0 else self.stream_erase_gen,
                 .scene3d_tex_key = proto.tex_key,
             });
         }
@@ -4635,6 +4782,10 @@ pub const Runtime = struct {
         self.refreshNpcNodes();
         self.updateDynamicPropNodes();
         self.stepTickers(dt);
+        // DIRTYRECT: collapse the baked rows inside dirty footprints (once per edit) BEFORE
+        // streaming rebuilds its nodes — so the bumped stream_erase_gen reaches THIS frame's
+        // streamed static nodes and they re-upload the same frame (no one-frame stale flash).
+        self.applyDirtyErase();
         // Re-stream the world around wherever the player ended up this step
         // (uses the camera solved just above for sight culling).
         self.refreshStreamNodes();
@@ -5401,6 +5552,62 @@ pub fn setLiveSkinBoxes(node_id: u32, bytes: []const u8) void {
     p.node_id = node_id;
     p.set = true;
     p.boxes = boxes;
+    p.gen +%= 1;
+}
+
+// ── DIRTYRECT erase (req_1891/1892) ─────────────────────────────────────────
+// The editor marks a moved/deleted piece's OLD footprint dirty; the loader collapses
+// the baked rows + hides the baked mesh-prop nodes inside it (see applyDirtyErase /
+// applyLiveMeshProps) so the stale geometry vanishes with no rebake. 24 bytes/rect:
+// minX,minY,minZ, maxX,maxY,maxZ (all f32).
+const ERASE_RECT_STRIDE_BYTES: usize = 24;
+const PendingDirtyErase = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    rects: []EraseRect = &.{},
+    gen: u64 = 0,
+};
+var g_pending_dirty_erase: [MAX_EMBEDDED_LOADERS]PendingDirtyErase = [_]PendingDirtyErase{.{}} ** MAX_EMBEDDED_LOADERS;
+
+fn pendingDirtyEraseFor(node_id: u32) ?*PendingDirtyErase {
+    for (&g_pending_dirty_erase) |*p| {
+        if (p.set and p.node_id == node_id) return p;
+    }
+    return null;
+}
+
+/// Replace the dirty-erase rect set for a node (DIRTYRECT req_1891/1892). Each rect is
+/// an old-footprint AABB; an empty `bytes` clears them (everything un-erases next frame).
+pub fn setDirtyErase(node_id: u32, bytes: []const u8) void {
+    const alloc = std.heap.page_allocator;
+    var slot: ?*PendingDirtyErase = pendingDirtyEraseFor(node_id);
+    if (slot == null) {
+        for (&g_pending_dirty_erase) |*p| {
+            if (!p.set) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    const p = slot orelse return;
+    const n = bytes.len / ERASE_RECT_STRIDE_BYTES;
+    const rects = alloc.alloc(EraseRect, n) catch return;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const o = i * ERASE_RECT_STRIDE_BYTES;
+        rects[i] = .{
+            .min_x = std.mem.bytesToValue(f32, bytes[o..][0..4]),
+            .min_y = std.mem.bytesToValue(f32, bytes[o + 4 ..][0..4]),
+            .min_z = std.mem.bytesToValue(f32, bytes[o + 8 ..][0..4]),
+            .max_x = std.mem.bytesToValue(f32, bytes[o + 12 ..][0..4]),
+            .max_y = std.mem.bytesToValue(f32, bytes[o + 16 ..][0..4]),
+            .max_z = std.mem.bytesToValue(f32, bytes[o + 20 ..][0..4]),
+        };
+    }
+    if (p.rects.len > 0) alloc.free(p.rects);
+    p.node_id = node_id;
+    p.set = true;
+    p.rects = rects;
     p.gen +%= 1;
 }
 

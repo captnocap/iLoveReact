@@ -251,6 +251,23 @@ fn hostSetLiveSkinBoxes(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     setReturnString(info, "ok");
 }
 
+// __compiled_world_set_dirty_erase(nodeId, Uint8Array rects) erases the baked geometry a
+// moved/deleted piece left at its old footprint, with no rebake (DIRTYRECT req_1891/1892).
+// 24 bytes/rect: minX,minY,minZ, maxX,maxY,maxZ (f32). Empty clears all erases.
+fn hostSetDirtyErase(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const bytes = argView(info, 1) orelse {
+        setReturnString(info, "error:BadRects");
+        return;
+    };
+    world_loader.setDirtyErase(node_id, bytes);
+    setReturnString(info, "ok");
+}
+
 // ── the pop-out window (WORLDWIN-0611) ──────────────────────────────────────
 // __compiled_world_window(gameFile, storeDir, width, height) opens the
 // second OS window (or reloads its gamefile when already open — the Compile
@@ -317,6 +334,7 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_clear_live_mesh_ghost", hostClearLiveMeshGhost);
     v8_runtime.registerHostFn("__compiled_world_set_live_material", hostSetLiveMaterial);
     v8_runtime.registerHostFn("__compiled_world_set_live_skin_boxes", hostSetLiveSkinBoxes);
+    v8_runtime.registerHostFn("__compiled_world_set_dirty_erase", hostSetDirtyErase);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
     v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);
     v8_runtime.registerHostFn("__compiled_world_window_status", hostWindowStatus);

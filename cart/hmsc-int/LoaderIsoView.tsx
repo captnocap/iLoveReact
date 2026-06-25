@@ -52,6 +52,21 @@ const DEFAULT_STORE_DIR = 'zig-out/game/contentstore';
 // pane snaps with (IsoAuthor ISO_SNAP_TUNING) so a click lands identically in both panes.
 const ISO_SNAP_TUNING = { ...SNAP_TUNING_DEFAULTS, reachMeters: 600, groundMarchStepMeters: 0.5 };
 
+// DIRTYRECT req_1891/1892: a baked piece's transform fingerprint (moved ⇒ changed) and its
+// old-footprint AABB. When a piece moves/deletes, the loader erases the baked geometry at
+// its old rect with no rebake; the live overlay draws the new spot. ERASE_MARGIN pads the
+// rect a hair so float-rounded baked box centers land inside it, while staying well clear of
+// any grid-neighbour's center (≥0.5m away) so a move never erases the tile next door.
+const ERASE_MARGIN_METERS = 0.06;
+function pieceXformSig(p: PlacedBuildPiece): string {
+  return `${p.x}|${p.y}|${p.z}|${p.yawDegrees}`;
+}
+function pieceEraseRect(p: PlacedBuildPiece): [number, number, number, number, number, number] {
+  const b = GAME_BUILD.placed.bounds(p);
+  const m = ERASE_MARGIN_METERS;
+  return [b.minX - m, b.baseY - m, b.minZ - m, b.maxX + m, b.topY + m, b.maxZ + m];
+}
+
 // key → pan axis. Arrows alias WASD, matching the iso-build legend.
 const PAN_KEYS: Record<string, string> = {
   w: 'w', a: 'a', s: 's', d: 'd',
@@ -210,6 +225,14 @@ export function LoaderIsoView(props: {
   // is detected and rendered live (with its new skin) while its stale baked copy is hidden.
   const bakedSigRef = useRef<Map<string, string> | null>(null);
   if (bakedSigRef.current === null) bakedSigRef.current = new Map((props.pieces ?? []).map((p) => [p.id, pieceSkinSig(p)] as const));
+  // DIRTYRECT req_1891/1892: each baked piece's transform sig + old-footprint rect, so a
+  // MOVED or DELETED baked piece's stale geometry is erased live (no rebake). Re-baselined
+  // on every reload (the fresh bake IS the new truth).
+  const bakedRectRef = useRef<Map<string, { sig: string; rect: [number, number, number, number, number, number] }> | null>(null);
+  if (bakedRectRef.current === null) bakedRectRef.current = new Map((props.pieces ?? []).map((p) => [p.id, { sig: pieceXformSig(p), rect: pieceEraseRect(p) }] as const));
+  // The last erase-rect signature pushed to the host — so an unchanged set never re-bumps the
+  // host generation (which re-stages the static world). Reset on reload to force the clear-push.
+  const lastEraseSigRef = useRef<string>('');
 
   // Mirror the selection up so the cart's PropertiesPanel/FacePainter light up — the
   // SAME onSelectionChange contract IsoAuthor reports through.
@@ -627,6 +650,11 @@ export function LoaderIsoView(props: {
     // set — those are no longer "pending", and each prop's current skin is now its baked skin.
     bakedIdsRef.current = new Set(piecesRef.current.map((p) => p.id));
     bakedSigRef.current = new Map(piecesRef.current.map((p) => [p.id, pieceSkinSig(p)] as const));
+    // DIRTYRECT: the fresh bake placed every piece correctly — drop all erase rects (stale
+    // ones would now eat the NEW baked geometry) and re-baseline transforms from the reload.
+    bakedRectRef.current = new Map(piecesRef.current.map((p) => [p.id, { sig: pieceXformSig(p), rect: pieceEraseRect(p) }] as const));
+    lastEraseSigRef.current = '';
+    if (nodeId && typeof g.__compiled_world_set_dirty_erase === 'function') g.__compiled_world_set_dirty_erase(nodeId, new Float32Array(0));
   }, [props.reloadToken]);
 
   // LIVEHOST req_1798: push the just-placed-but-unbaked pieces to the native loader as a
@@ -641,16 +669,34 @@ export function LoaderIsoView(props: {
     const nodeId = Number(loaderRef.current?.id ?? 0);
     if (!nodeId) return;
     const baked = bakedIdsRef.current!;
+    const bakedRects = bakedRectRef.current!;
     const current = props.pieces ?? [];
-    const currentIds = new Set(current.map((p) => p.id));
-    // tier-2 (req_1800): if a piece that WAS baked is no longer present, the user
-    // deleted/moved/rotated pre-baked geometry. The overlay can't erase the baked mesh,
-    // so request a settle bake to fold the change in. Pure placements keep every baked id
-    // present → no bake, the overlay alone shows the new piece.
-    for (const id of baked) {
-      if (!currentIds.has(id)) { props.requestSettleBake?.(); break; }
+    const currentById = new Map(current.map((p) => [p.id, p] as const));
+    // DIRTYRECT req_1891/1892: a baked piece is "dirty" when it's gone (deleted, or a loose
+    // move that minted a new id) or its transform changed (a whole-building move keeps its id).
+    // Push each dirty piece's OLD footprint as an erase rect — the loader collapses the baked
+    // box rows + hides the baked mesh nodes inside it, so the stale geometry vanishes with no
+    // rebake. The settle bake still trails behind (debounced) to fold colliders into /compiled,
+    // but it no longer gates the visual.
+    const eraseRects: number[] = [];
+    let anyGone = false;
+    for (const [id, info] of bakedRects) {
+      const cur = currentById.get(id);
+      if (!cur) { eraseRects.push(...info.rect); anyGone = true; continue; }
+      if (pieceXformSig(cur) !== info.sig) eraseRects.push(...info.rect);
     }
-    const pending = current.filter((p) => !baked.has(p.id));
+    if (anyGone) props.requestSettleBake?.(); // colliders fold in lazily; the visual is already live
+    // Only push when the erase set actually CHANGES — setDirtyErase bumps the host generation,
+    // which re-stages the static world once; a plain placement (no dirty piece) must not trigger
+    // that. The signature is the rounded rect list; identical → skip the push entirely.
+    const eraseSig = eraseRects.map((v) => Math.round(v * 100)).join(',');
+    if (eraseSig !== lastEraseSigRef.current && typeof g.__compiled_world_set_dirty_erase === 'function') {
+      lastEraseSigRef.current = eraseSig;
+      g.__compiled_world_set_dirty_erase(nodeId, new Float32Array(eraseRects));
+    }
+    // A baked piece that MOVED must also live-draw at its new spot (its baked copy is now
+    // erased) — include it alongside the never-baked placements in the box/shape overlay.
+    const pending = current.filter((p) => !baked.has(p.id) || pieceXformSig(p) !== bakedRects.get(p.id)?.sig);
     // Two overlays, one per geometry kind: parts pieces/props → the box/shape instance overlay
     // (pieceInstanceRows, just-placed only); MESH props → the resident-mesh reference overlay
     // (meshPropLivePush, LIVEMESH req_1812). The mesh push gets the FULL set + baked skins so it

@@ -564,6 +564,13 @@ pub const Node = struct {
     // restage/upload. For world geometry that never moves (the no-V8 loader's
     // baked city). Only set this when scene3d_instance_data is stable + immutable.
     scene3d_instance_static: bool = false,
+    // Re-stage hint for a STATIC batch (DIRTYRECT req_1891/1892): when the loader
+    // edits the instance bytes IN PLACE (a dirty-rectangle erase — collapsing the
+    // baked rows a moved/deleted piece left behind), it bumps this. The static
+    // cache re-uploads the batch at its existing offset on a version change, so the
+    // edit shows without a rebake and the retained offset (and any streamed
+    // sub-ranges over it) stay valid. 0 = never edited (pure upload-once path).
+    scene3d_instance_version: u32 = 0,
     // First row of the sub-range a STATIC node draws from its (shared) upload.
     // Streaming emits many nodes over one instance_data array, each drawing
     // [first, first+count) — the whole array uploads once regardless.
