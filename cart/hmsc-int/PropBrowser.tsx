@@ -122,11 +122,13 @@ export function PropBrowser(props: { armedId: string | null; onArm: (id: string)
         onChangeText={(t: string) => { setQuery(t); grid.setPage(0); }}
         style={{ backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: q ? '#38bdf8' : '#27364a', borderRadius: 3, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
       />
-      <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>
-        {q
-          ? `${matches.length} match${matches.length === 1 ? '' : 'es'}${related.length ? ` · ${related.length} related` : ''}`
-          : `${allProps.length} props · type a name or tag (seating, neon, plant…)`}
-      </Text>
+      {/* count only while searching — the placeholder already says what to type,
+          so no idle hint string (req_1929: it was noise + wasted render). */}
+      {q ? (
+        <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>
+          {`${matches.length} match${matches.length === 1 ? '' : 'es'}${related.length ? ` · ${related.length} related` : ''}`}
+        </Text>
+      ) : null}
       <Box style={grid.containerStyle} onLayout={(rect: any) => grid.onLayout(rect)}>
         <Box style={grid.rowStyle}>
           {pageItems.map((it, i) => (
