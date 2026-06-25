@@ -42,10 +42,11 @@ const COMPILE_NATURES: { nature: PropNature; label: string; hint: string }[] = [
 // family in a placed piece's "swap it out" pick (catalogPickOptions) — so you can
 // replace a placed Wall with your custom wall — and carry that family's snap + cover.
 // The asset stays kind:'prop' (the uniform mesh substrate); this is its presentation.
-type PiecePlacement = 'free' | 'wall' | 'railing' | 'fence' | 'floor' | 'stairs' | 'trim';
+type PiecePlacement = 'free' | 'wall' | 'door' | 'railing' | 'fence' | 'floor' | 'stairs' | 'trim';
 const COMPILE_PLACEMENTS: { placement: PiecePlacement; label: string; hint: string; build?: PropDescriptorInput['buildPlacement'] }[] = [
   { placement: 'free', label: 'Prop', hint: 'free scenery — place anywhere' },
   { placement: 'wall', label: 'Wall', hint: 'lists under walls — swap a placed wall to this · full cover, blocks sight', build: { pieceKind: 'wall', snap: 'edge', cover: 'full', blocksSight: true } },
+  { placement: 'door', label: 'Door', hint: 'a functional two-state door — the "Door Leaf" part opens/closes (E); connects rooms · lists under walls', build: { pieceKind: 'wall', snap: 'edge', cover: 'full', blocksSight: true, portal: true } },
   { placement: 'railing', label: 'Railing', hint: 'edge-snaps onto stairs/balcony · low cover', build: { pieceKind: 'railing', snap: 'edge', cover: 'low', blocksSight: false } },
   { placement: 'fence', label: 'Fence', hint: 'edge-snaps · low cover', build: { pieceKind: 'fence', snap: 'edge', cover: 'low', blocksSight: false } },
   { placement: 'floor', label: 'Floor', hint: 'lists under floors — swap a placed floor to this', build: { pieceKind: 'floor', snap: 'grid', cover: 'none', blocksSight: false } },
@@ -53,9 +54,12 @@ const COMPILE_PLACEMENTS: { placement: PiecePlacement; label: string; hint: stri
   { placement: 'trim', label: 'Trim', hint: 'sticks onto a face (posters, moldings)', build: { pieceKind: 'trim', snap: 'surface', cover: 'none', blocksSight: false } },
 ];
 
-/** Map a nature + bounce + placement → the granular PropDescriptorInput the cook fills. */
-function natureToDescriptor(nature: PropNature, label: string, bounce: number, placement?: PropDescriptorInput['buildPlacement']): PropDescriptorInput {
+/** Map a nature + bounce + placement → the granular PropDescriptorInput the cook fills.
+ *  A DOOR (req_1864) is always a static wall carrying a `door` request — the cook turns
+ *  its "Door Leaf" part into a toggleable two-state panel — so it ignores the nature pick. */
+function natureToDescriptor(nature: PropNature, label: string, bounce: number, placement?: PropDescriptorInput['buildPlacement'], door?: { vehicle: boolean }): PropDescriptorInput {
   const place = placement ? { buildPlacement: placement } : {};
+  if (door) return { label, solid: true, tileKind: 'wall', ...place, door };
   if (nature === 'foliage') return { label, solid: false, tileKind: 'bush', ...place };
   if (nature === 'physics') return { label, solid: true, tileKind: 'wall', physics: { restitution: bounce }, ...place };
   return { label, solid: true, tileKind: 'wall', ...place };
@@ -69,6 +73,8 @@ export function CompileAssetDialog(props: { sceneName: string | null; onCancel: 
   const [bounce, setBounce] = useState(0.3);
   // how the cooked piece SNAPS when placed (req_1684) — free scenery vs railing/wall/trim.
   const [placement, setPlacement] = useState<PiecePlacement>('free');
+  // a DOOR (req_1864) is a walk portal by default, or a vehicle-sized garage portal.
+  const [doorVehicle, setDoorVehicle] = useState(false);
   const ready = COMPILE_KINDS.find((k) => k.kind === kind)?.ready ?? false;
   const natureHint = COMPILE_NATURES.find((n) => n.nature === nature)?.hint ?? '';
   const placeDef = COMPILE_PLACEMENTS.find((p) => p.placement === placement) ?? COMPILE_PLACEMENTS[0];
@@ -126,6 +132,21 @@ export function CompileAssetDialog(props: { sceneName: string | null; onCancel: 
               </Row>
             </LCField>
             <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace', marginTop: -3 }}>{placeDef.hint}</Text>
+            {/* DOOR (req_1864): walk vs vehicle (garage) portal — sets the opening size +
+                interaction reach the cook records onto the door panel. */}
+            {placement === 'door' ? (
+              <LCField label="Door size">
+                <Row style={{ gap: 5, flexWrap: 'wrap' }}>
+                  {[{ vehicle: false, label: 'Walk' }, { vehicle: true, label: 'Vehicle (garage)' }].map((d) => {
+                    const on = doorVehicle === d.vehicle;
+                    return <Pressable key={d.label} onPress={() => setDoorVehicle(d.vehicle)} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: on ? '#3a2f5e' : '#13233aee', borderWidth: 1, borderColor: on ? '#9b7fd6' : '#2c4a6a' }}><Text fontSize={10} color={on ? '#e2cfff' : T.dim} style={{ fontFamily: 'monospace' }}>{d.label}</Text></Pressable>;
+                  })}
+                </Row>
+              </LCField>
+            ) : null}
+            {placement === 'door' ? (
+              <Text fontSize={9} color="#c79a3a" style={{ fontFamily: 'monospace', marginTop: -3 }}>needs a part named "Door Leaf" (the seeded Door Wall makes one) — that part becomes the toggleable leaf.</Text>
+            ) : null}
           </>
         ) : (
           <Text fontSize={11} color={T.dim} style={{ fontFamily: 'monospace', paddingTop: 6, paddingBottom: 6 }}>This kind's cook lands in a later slice. Prop is ready now.</Text>
@@ -134,7 +155,7 @@ export function CompileAssetDialog(props: { sceneName: string | null; onCancel: 
         <Row style={{ gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
           <Pressable onPress={props.onCancel} style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#13233aee', borderWidth: 1, borderColor: '#2c4a6a' }}><Text fontSize={11} color={T.dim}>Cancel</Text></Pressable>
           <Pressable
-            onPress={() => { if (ready) props.onCook(natureToDescriptor(nature, label, bounce, placeDef.build)); }}
+            onPress={() => { if (ready) props.onCook(natureToDescriptor(nature, label, bounce, placeDef.build, placement === 'door' ? { vehicle: doorVehicle } : undefined)); }}
             style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: ready ? '#3a2f16' : '#1a2436', borderWidth: 1, borderColor: ready ? '#c79a3a' : '#2c4a6a', opacity: ready ? 1 : 0.5 }}
           >
             <Text fontSize={11} color={ready ? '#e9c77f' : T.dim} style={{ fontWeight: '800' }}>Cook + Install</Text>
