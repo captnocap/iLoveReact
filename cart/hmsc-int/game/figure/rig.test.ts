@@ -47,7 +47,7 @@ test('a rig frame carries every layer of the dressed figure', () => {
   assert(frame.anatomy.length >= 8, 'the joint-socket set must be present');
   assert(frame.clothing.length > 0, 'a dressed figure has garments');
   assertEqual(frame.hitboxes.length, 25, 'one oriented-box hit volume per bone');
-  assertEqual(frame.anchors.length, 10, 'the semantic anchor set');
+  assertEqual(frame.anchors.length, 15, 'the semantic anchor set (10 interaction + 5 contact, req_1930)');
 });
 
 test('every bone resolves to one ruled damage zone (lArm/rArm/lLeg/rLeg spelling)', () => {

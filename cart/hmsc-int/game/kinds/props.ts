@@ -1095,7 +1095,18 @@ export type PropSeat = {
   seatHeightMeters: number;
   /** how many figures fit (chair 1, couch/bench 3, double bed 2) */
   capacity: number;
+  /** SEAT PIN (req_1930) — where on the prop (in prop-local meters, ground
+   *  anchor = origin) the figure's `seat` contact anchor lands, and which way it
+   *  faces. Y comes from `seatHeightMeters`, so the pin only carries the X/Z
+   *  offset off-center and the facing. ABSENT ⇒ centered, facing +Z (the prop's
+   *  forward), so every existing seat seats with zero authoring; Studio pin-drop
+   *  authoring overrides it later. `faceDeg` is added to the placed prop's yaw. */
+  pin?: { x: number; z: number; faceDeg: number };
 };
+
+/** The default seat pin (req_1930): centered on the prop, facing its forward.
+ *  Resolves the optional `seat.pin` so a v1 seat needs no authoring. */
+export const DEFAULT_SEAT_PIN: { x: number; z: number; faceDeg: number } = { x: 0, z: 0, faceDeg: 0 };
 
 /** The loot slot a container fills when the item system lands (next in line). */
 export type PropLootCategory = 'junk' | 'kitchen' | 'bathroom' | 'clothing' | 'office' | 'valuables' | 'tools';
@@ -1126,6 +1137,13 @@ export function propMount(kind: PropKind): PropMount {
 
 export function propSeat(kind: PropKind): PropSeat | null {
   return propKindDefinition(kind).seat ?? null;
+}
+
+/** The resolved seat pin for a seatable kind (req_1930) — the authored
+ *  `seat.pin` or the centered/forward default. Null if the kind has no seat. */
+export function propSeatPin(kind: PropKind): { x: number; z: number; faceDeg: number } | null {
+  const seat = propSeat(kind);
+  return seat ? seat.pin ?? DEFAULT_SEAT_PIN : null;
 }
 
 export function propContainer(kind: PropKind): PropContainer | null {

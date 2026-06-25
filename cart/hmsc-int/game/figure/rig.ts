@@ -68,12 +68,18 @@ export function buildHitboxes(shapeId: BodyShapeId = 'neutral', pose: BodyPoseId
 
 export type BodyAnchorId =
   | 'head' | 'face' | 'face_grab' | 'eyes' | 'mouth' | 'neck'
-  | 'left_palm' | 'right_palm' | 'left_grab_origin' | 'right_grab_origin';
+  | 'left_palm' | 'right_palm' | 'left_grab_origin' | 'right_grab_origin'
+  // CONTACT anchors (req_1930) — where the body TOUCHES the world when posed
+  // against a prop: the seat (ass), heels, head-back, shoulder-blades. They ride
+  // existing bones so they have a world position in any pose. The seating solver
+  // lands `seat` on a prop's seat pin ("ass to brass"); the rest are the defined
+  // contact set the multi-pin recline solve consumes later (data, not new code).
+  | 'seat' | 'left_heel' | 'right_heel' | 'head_back' | 'spine_back';
 
 export type BodyAnchor = {
   id: BodyAnchorId;
   bone: BoneId;
-  role: 'target' | 'origin' | 'look' | 'socket';
+  role: 'target' | 'origin' | 'look' | 'socket' | 'contact';
   position: V3;
   rotation: V3;
   radius: number;
@@ -104,6 +110,15 @@ export function anchorsFromSkeleton(s: typeof BODY_SHAPES.neutral, bones: Bones)
     anchor('right_palm', 'rHand', 'socket', offsetBone(bones.rHand, 0, -0.02 * s.height, -0.055), 0.065 * s.hand, 70, ['hold', 'touch', 'grab']),
     anchor('left_grab_origin', 'lHand', 'origin', offsetBone(bones.lHand, 0, -0.02 * s.height, -0.09), 0.08 * s.hand, 85, ['grab_face', 'grab_item', 'punch']),
     anchor('right_grab_origin', 'rHand', 'origin', offsetBone(bones.rHand, 0, -0.02 * s.height, -0.09), 0.08 * s.hand, 85, ['grab_face', 'grab_item', 'punch']),
+    // CONTACT set (req_1930) — `seat` is the pelvis underside (the ass) pulled
+    // slightly back; the seating solver lands it on a prop's seat pin. Heels,
+    // head-back and shoulder-blades complete the defined contact set the
+    // later multi-pin recline solve will reach for (unconsumed in v1).
+    anchor('seat', 'pelvis', 'contact', offsetBone(bones.pelvis, 0, -0.07 * s.height, 0.03), 0.16 * s.hip, 90, ['sit', 'perch']),
+    anchor('left_heel', 'lFoot', 'contact', offsetBone(bones.lFoot, 0, -0.03 * s.height, 0.04), 0.05 * s.height, 60, ['plant', 'stand']),
+    anchor('right_heel', 'rFoot', 'contact', offsetBone(bones.rFoot, 0, -0.03 * s.height, 0.04), 0.05 * s.height, 60, ['plant', 'stand']),
+    anchor('head_back', 'head', 'contact', offsetBone(bones.head, 0, 0.02 * s.height, 0.2 * s.head), 0.1 * s.head, 65, ['rest']),
+    anchor('spine_back', 'torso', 'contact', offsetBone(bones.torso, 0, 0.15 * s.torsoLong, 0.12), 0.12 * s.head, 70, ['lean', 'rest']),
   ];
 }
 
