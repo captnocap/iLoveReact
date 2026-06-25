@@ -396,13 +396,23 @@ const DoorState = struct {
 /// Sourced from MeshPropDoor (MESH_PROPS v6), not the DOORS lump; runs the same
 /// E-toggle as a built-in door but drops a mesh node instead of a box.
 const CookedDoor = struct {
+    /// the TARGET state — E / proximity flips it; `progress` animates toward it.
     open: bool,
     /// kid index of the leaf slot node (set during the mesh-prop node pass)
     node_child: usize = 0,
-    /// the leaf node's resting Y (inst.y) — restore point when closed
+    /// the leaf node's resting pose (the closed mesh-prop instance transform)
     node_base_y: f32 = 0,
+    node_x: f32 = 0,
+    node_z: f32 = 0,
+    yaw_degrees: f32 = 0,
     /// rect index in physics_colliders (parked out of the world when open)
     rect_index: usize = 0,
+    /// SWING (req_1908): the leaf rotates about this WORLD hinge line (one vertical
+    /// edge of the leaf) by `progress * arc`. progress 0=closed .. 1=open, animated
+    /// over COOKED_DOOR_OPEN_SECONDS so the door visibly swings instead of teleporting.
+    hinge_x: f32 = 0,
+    hinge_z: f32 = 0,
+    progress: f32 = 0,
     /// world panel box: center + half extents (yawed AABB) + base/height
     cx: f32,
     cz: f32,
@@ -413,6 +423,13 @@ const CookedDoor = struct {
     reach: f32,
     vehicle: bool,
 };
+
+/// SWING tuning (req_1908) — until per-door authoring lands, every cooked door
+/// swings 90° about its hinge edge over this many seconds; its rect clears once
+/// the leaf is past half-open so you can walk through the swinging door.
+const COOKED_DOOR_SWING_ARC_DEGREES: f32 = 90.0;
+const COOKED_DOOR_OPEN_SECONDS: f32 = 0.4;
+const COOKED_DOOR_PASSABLE_PROGRESS: f32 = 0.5;
 
 /// The world AABB of a cooked door's leaf panel (req_1864) — the leaf slot's
 /// local bounds, yawed + offset by the placed instance. Shared by the rect
@@ -445,8 +462,12 @@ fn cookedDoorWorldBox(mesh: constructor.MeshPropMesh, inst: constructor.MeshProp
     const rad = inst.yaw_degrees * std.math.pi / 180.0;
     const cc = @cos(rad);
     const ss = @sin(rad);
+    // The hinge is the leaf's minimum-X local edge (a door leaf spans X, thin in Z),
+    // at the panel's Z center — taken to WORLD via the instance transform.
+    const hinge_lx = lo[0];
     return .{
         .open = door.start_open,
+        .progress = if (door.start_open) 1.0 else 0.0,
         .cx = inst.x + (lcx * cc - lcz * ss),
         .cz = inst.z + (lcx * ss + lcz * cc),
         .base_y = inst.y + lo[1],
@@ -454,6 +475,11 @@ fn cookedDoorWorldBox(mesh: constructor.MeshPropMesh, inst: constructor.MeshProp
         .half_x = @abs(cc) * hx + @abs(ss) * hz,
         .half_z = @abs(ss) * hx + @abs(cc) * hz,
         .node_base_y = inst.y,
+        .node_x = inst.x,
+        .node_z = inst.z,
+        .yaw_degrees = inst.yaw_degrees,
+        .hinge_x = inst.x + (hinge_lx * cc - lcz * ss),
+        .hinge_z = inst.z + (hinge_lx * ss + lcz * cc),
         .reach = door.reach,
         .vehicle = door.vehicle,
     };
@@ -3806,15 +3832,13 @@ pub const Runtime = struct {
                     const material_ref = if (si < inst.slot_materials.len) inst.slot_materials[si] else 0;
                     const leaf_node_index = self.kid_list.items.len;
                     try self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, material_ref, null, null);
-                    // req_1864: bind the door's leaf slot node to its live two-state
-                    // machine, and drop it now if the door boots open.
+                    // req_1864/req_1908: bind the door's leaf slot node to its live
+                    // machine; stepCookedDoors owns the leaf transform every frame
+                    // (swings it about the hinge), so no instant drop here.
                     if (this_cooked_door) |di| {
                         if (mesh.door) |door| {
                             if (si == door.leaf_slot and leaf_node_index < self.kid_list.items.len) {
                                 self.cooked_doors[di].node_child = leaf_node_index;
-                                if (self.cooked_doors[di].open) {
-                                    self.kid_list.items[leaf_node_index].scene3d_pos_y = self.cooked_doors[di].node_base_y - DOOR_OPEN_HIDE_DROP_METERS;
-                                }
                             }
                         }
                     }
@@ -4790,6 +4814,7 @@ pub const Runtime = struct {
         const airborne = !seated and (!self.player.grounded or @abs(self.player.vy) > 0.05);
         updatePlayerAnimationClock(&self.player, dt, moving, run_down, airborne);
         self.stepInteract(dt);
+        self.stepCookedDoors(dt); // req_1908: swing custom doors toward their target
 
         updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, self.cameraColliderSet(), dt);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
@@ -4951,26 +4976,52 @@ pub const Runtime = struct {
         node.scene3d_pos_y = record.base_y + record.panel_h / 2 - hide;
     }
 
-    /// req_1864 — flip a cooked door: park/unpark its rect (the doorway clears
-    /// when open) and drop/raise its custom leaf NODE (the user's art), the same
-    /// two-state machine as toggleDoor but the leaf is a mesh-prop slot node.
+    /// req_1864/req_1908 — flip a cooked door's TARGET; stepCookedDoors swings the
+    /// leaf about its hinge toward the new target (open/closed) over openSeconds.
     fn toggleCookedDoor(self: *Runtime, index: usize) void {
         if (index >= self.cooked_doors.len) return;
-        const cd = &self.cooked_doors[index];
-        const open = !cd.open;
-        cd.open = open;
-        const at = self.physics_colliders.rectBase() + cd.rect_index * game_physics.RECT_FLOATS;
-        if (at + game_physics.RECT_FLOATS <= self.physics_colliders.values.len and cd.rect_index < self.physics_colliders.rect_count) {
-            const park: f32 = if (open) DOOR_OPEN_PARK_METERS else 0;
-            self.physics_colliders.values[at + 0] = cd.cx - cd.half_x + park; // minX
-            self.physics_colliders.values[at + 1] = cd.cz - cd.half_z + park; // minZ
-            self.physics_colliders.values[at + 2] = cd.cx + cd.half_x + park; // maxX
-            self.physics_colliders.values[at + 3] = cd.cz + cd.half_z + park; // maxZ
-            self.physics_colliders.values[at + 5] = if (open) 0 else 1; // blocksPlayer
-        }
-        if (cd.node_child < self.kid_list.items.len) {
-            const hide: f32 = if (open) DOOR_OPEN_HIDE_DROP_METERS else 0;
-            self.kid_list.items[cd.node_child].scene3d_pos_y = cd.node_base_y - hide;
+        self.cooked_doors[index].open = !self.cooked_doors[index].open;
+    }
+
+    /// req_1908 — advance every cooked door's swing: ease `progress` toward the
+    /// target, rotate the leaf NODE about its world hinge by `progress * arc`, and
+    /// clear/raise its collision rect once it's past half-open (walk through the
+    /// swinging door). The pivot keeps the hinge edge fixed: a leaf vert at world
+    /// closed-pos rotates about the hinge, so node_pos = hinge + Ry(theta)*(inst-hinge)
+    /// and node_rot_y = inst_yaw + theta.
+    fn stepCookedDoors(self: *Runtime, dt: f32) void {
+        if (self.cooked_doors.len == 0) return;
+        const rate = dt / COOKED_DOOR_OPEN_SECONDS;
+        for (self.cooked_doors) |*cd| {
+            const target: f32 = if (cd.open) 1.0 else 0.0;
+            if (cd.progress < target) {
+                cd.progress = @min(target, cd.progress + rate);
+            } else if (cd.progress > target) {
+                cd.progress = @max(target, cd.progress - rate);
+            }
+            const theta_deg = cd.progress * COOKED_DOOR_SWING_ARC_DEGREES;
+            const theta = theta_deg * std.math.pi / 180.0;
+            const ct = @cos(theta);
+            const st = @sin(theta);
+            const dx = cd.node_x - cd.hinge_x;
+            const dz = cd.node_z - cd.hinge_z;
+            if (cd.node_child < self.kid_list.items.len) {
+                const node = &self.kid_list.items[cd.node_child];
+                node.scene3d_pos_x = cd.hinge_x + (dx * ct - dz * st);
+                node.scene3d_pos_z = cd.hinge_z + (dx * st + dz * ct);
+                node.scene3d_pos_y = cd.node_base_y;
+                node.scene3d_rot_y = cd.yaw_degrees + theta_deg;
+            }
+            const passable = cd.progress >= COOKED_DOOR_PASSABLE_PROGRESS;
+            const at = self.physics_colliders.rectBase() + cd.rect_index * game_physics.RECT_FLOATS;
+            if (at + game_physics.RECT_FLOATS <= self.physics_colliders.values.len and cd.rect_index < self.physics_colliders.rect_count) {
+                const park: f32 = if (passable) DOOR_OPEN_PARK_METERS else 0;
+                self.physics_colliders.values[at + 0] = cd.cx - cd.half_x + park;
+                self.physics_colliders.values[at + 1] = cd.cz - cd.half_z + park;
+                self.physics_colliders.values[at + 2] = cd.cx + cd.half_x + park;
+                self.physics_colliders.values[at + 3] = cd.cz + cd.half_z + park;
+                self.physics_colliders.values[at + 5] = if (passable) 0 else 1;
+            }
         }
     }
 
