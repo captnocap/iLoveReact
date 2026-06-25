@@ -183,6 +183,21 @@ function EditorShell() {
       return n;
     });
   }, []);
+  // AUTOCOMPILE req_1865: gate for the loader pane's debounced auto-bake. PERSISTED in
+  // localstore (not plain state) because a hot reload re-mounts the cart and would otherwise
+  // reset it to ON every time — which is the whole problem: while an agent edits, each hot
+  // reload re-armed a compile that locked the editor 5-6s, back-to-back. Off → only the
+  // manual Compile button bakes; the live overlay still shows placements/skins instantly.
+  const [autoCompile, setAutoCompileState] = useState(() => {
+    try { return nsGet('hmsc', 'editor.autoCompile') !== '0'; } catch { return true; } // default ON
+  });
+  const setAutoCompile = useCallback((next: boolean | ((v: boolean) => boolean)) => {
+    setAutoCompileState((v) => {
+      const n = typeof next === 'function' ? next(v) : next;
+      try { nsSet('hmsc', 'editor.autoCompile', n ? '1' : '0'); } catch { /* headless / no store */ }
+      return n;
+    });
+  }, []);
   const [compiledReloadKey, setCompiledReloadKey] = useState(0);
   const compilingRef = useRef(false); // a bake is in flight (auto + manual share it)
   const [compiledStatus, setCompiledStatus] = useState('native world_loader primitive');
@@ -494,7 +509,7 @@ function EditorShell() {
   // Edit history is untouched (V20 streams); this just refreshes the rendered bake.
   const autoCompileTimer = useRef<any>(null);
   useEffect(() => {
-    if (!loaderView) return;
+    if (!loaderView || !autoCompile) return; // AUTOCOMPILE req_1865: toggle off → manual bake only
     if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
     const arm = () => {
       autoCompileTimer.current = setTimeout(() => {
@@ -508,7 +523,7 @@ function EditorShell() {
     // the loader's live overlay (LoaderIsoView pushes __compiled_world_set_live_pieces), so
     // it must NOT trigger the ~5s whole-world rebake+reload flash. Placements fold into the
     // gamefile on the next bake (a 2D-canvas/terrain edit via worldRev, or manual Compile).
-  }, [loaderView, worldRev, placements, ws.stem, compileToGame]);
+  }, [loaderView, autoCompile, worldRev, placements, ws.stem, compileToGame]);
 
   // The /workbench source registry (WORKBENCH.md §6) — built once per mount.
   const wbSources = useMemo(workbenchSources, []);
@@ -713,6 +728,19 @@ function EditorShell() {
                     {loaderView ? '● LOADER VIEW' : '○ react view'}
                   </Text>
                 </Pressable>
+                {/* [AUTOCOMPILE req_1865] toggle the loader pane's auto-bake. OFF stops the
+                    hot-reload→compile→5-6s-lock storm while an agent edits; live overlay still
+                    shows placements/skins instantly, manual Compile still bakes. Persisted. */}
+                {loaderView ? (
+                  <Pressable
+                    onPress={() => setAutoCompile((v) => !v)}
+                    style={{ position: 'absolute', left: 8, bottom: 36, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, borderColor: autoCompile ? '#34d399' : '#a16207', backgroundColor: autoCompile ? '#0c2a20' : '#241a06ee', zIndex: 50 }}
+                  >
+                    <Text fontSize={9} color={autoCompile ? '#6ee7b7' : '#fbbf24'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                      {autoCompile ? '● AUTO-COMPILE' : '○ AUTO-COMPILE OFF'}
+                    </Text>
+                  </Pressable>
+                ) : null}
               </Pane>
             }
           />
