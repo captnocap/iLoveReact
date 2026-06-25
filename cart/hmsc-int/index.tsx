@@ -508,8 +508,15 @@ function EditorShell() {
   // the loader view is on (the React view shows live state directly, no bake needed).
   // Edit history is untouched (V20 streams); this just refreshes the rendered bake.
   const autoCompileTimer = useRef<any>(null);
+  const autoCompileArmedRef = useRef(false);
   useEffect(() => {
     if (!loaderView || !autoCompile) return; // AUTOCOMPILE req_1865: toggle off → manual bake only
+    // AUTOCOMPILE req_1866: skip the FIRST run after a (re)mount. A hot reload re-mounts the
+    // cart and re-runs this effect with UNCHANGED world data — arming a bake every single hot
+    // reload was the compile→5-6s-lock STORM (an agent's edits = dozens of hot reloads = the
+    // editor frozen). Only arm on SUBSEQUENT runs, i.e. a real worldRev/placements/previewWorld
+    // edit THIS session. Manual Compile is unaffected.
+    if (!autoCompileArmedRef.current) { autoCompileArmedRef.current = true; return; }
     if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
     const arm = () => {
       autoCompileTimer.current = setTimeout(() => {
