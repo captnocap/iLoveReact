@@ -36,6 +36,7 @@ import { editorTypingFocused } from './editors/controls';
 import { GAME_BUILD, buildingPieceInstanceId, partitionBuildingSelection } from './game';
 import type { BuildEditEvent, BuildPrefabDef, BuildingInstance, PlacedBuildPiece, Rect, WorldGridState } from './game';
 import { modulePitch, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
+import { useHeldModifiers } from './editors/useEditorControls';
 import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
 import { pieceInstanceRows, meshPropLivePush, meshGhostRef, pieceSkinSig, buildingSkinBoxes } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
@@ -178,7 +179,11 @@ export function LoaderIsoView(props: {
   const [paintCells, setPaintCells] = useState<PaintCell[] | null>(null);
   const paintCellsRef = useRef(paintCells);
   paintCellsRef.current = paintCells;
-  const modRef = useRef({ shift: false, alt: false, ctrl: false });
+  // Modifier state via the shared hook: it reads the SDL mod-mask FLAGS
+  // (e.shiftKey/altKey/ctrlKey) off every key event. A modifier-only press has
+  // no SDL_KEY_NAMES entry (it arrives as `sdl:NNN`, not `shift`), so matching
+  // e.key by string never catches a held shift/alt — the flags are the truth.
+  const modRef = useHeldModifiers();
   // Last cursor in pane pixels — so R (rotate ghost) re-resolves the preview IN PLACE
   // instead of waiting for the next mouse-move.
   const lastCursorRef = useRef<{ x: number; y: number } | null>(null);
@@ -505,10 +510,7 @@ export function LoaderIsoView(props: {
   const heldPanRef = useRef<Record<string, boolean>>({});
   useEffect(() => {
     const onKey = (down: boolean) => (e: any) => {
-      const k = String(e?.key ?? '').toLowerCase();
-      if (k === 'shift') modRef.current.shift = down;
-      else if (k === 'alt') modRef.current.alt = down;
-      else if (k === 'control') modRef.current.ctrl = down;
+      const k = String(e?.key ?? '').toLowerCase(); // modifiers tracked by useHeldModifiers (flags, not key string)
       const axis = PAN_KEYS[k];
       if (axis) {
         if (down && editorTypingFocused()) return; // let the focused field have the key
@@ -536,7 +538,7 @@ export function LoaderIsoView(props: {
     };
     const offDown = busOn('__keydown', onKey(true));
     const offUp = busOn('__keyup', onKey(false));
-    return () => { offDown(); offUp(); heldPanRef.current = {}; modRef.current = { shift: false, alt: false, ctrl: false }; };
+    return () => { offDown(); offUp(); heldPanRef.current = {}; }; // modRef owned by useHeldModifiers
   }, [stage, pushCamera, props.centerX, props.centerZ, editable, deleteSelected, rotateSelected, cloneSelected, changeLevel]);
 
   // Re-resolve the hover ghost after R turns it, so the preview spins in place at the
