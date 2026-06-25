@@ -156,6 +156,94 @@ pub fn flowerRow(cfg: *const FlowerConfig, wx: f64, wz: f64, top: f64, c: f64, c
     };
 }
 
+/// Palm crown population (PALM_CONFIG in palmPopulation.ts). A spawned palm's frond
+/// crown — two rings (drooping outer + steeper inner) radiating from the trunk top.
+/// Trunks stay baked as distinct meshes (req_1861); only the fronds recipe-ize here.
+pub const PalmConfig = struct {
+    trunk_h_min: f64,
+    trunk_h_max: f64,
+    fronds_min: f64,
+    fronds_max: f64,
+    frond_len_min: f64,
+    frond_len_max: f64,
+    root_lo: [3]f64,
+    root_hi: [3]f64,
+};
+
+pub const PALM = PalmConfig{
+    .trunk_h_min = 4.2,
+    .trunk_h_max = 7.0,
+    .fronds_min = 12,
+    .fronds_max = 18,
+    .frond_len_min = 3.0,
+    .frond_len_max = 4.2,
+    .root_lo = rgb(0.1, 0.3, 0.15),
+    .root_hi = rgb(0.16, 0.4, 0.18),
+};
+
+/// The per-palm crown shape, derived once per spawned cell (twin of buildPalmInstances'
+/// per-cell body — minus the density gate, which the bake applies before shipping the cell).
+pub const PalmCrown = struct {
+    px: f64,
+    pz: f64,
+    top_y: f64,
+    frond_len: f64,
+    root: [3]f64,
+    outer: u32, // drooping ring frond count
+    inner: u32, // steeper inner ring count = max(5, round(outer*0.6))
+    pub fn total(self: *const PalmCrown) u32 {
+        return self.outer + self.inner;
+    }
+};
+
+pub fn palmCrown(cfg: *const PalmConfig, wx: f64, wz: f64, top: f64, c: f64, cell_key: u32) PalmCrown {
+    const seed = mix(cell_key ^ 0x9d2c5680);
+    const h0 = mix(seed ^ 0x1b56c4e9);
+    const h1 = mix(h0 ^ 0x68bc21eb);
+    const h2 = mix(h1 ^ 0x7feb352d);
+    const h3 = mix(h2 ^ 0x846ca68b);
+    const trunk_h = lerp(cfg.trunk_h_min, cfg.trunk_h_max, unit(h0));
+    const outer: u32 = @intFromFloat(@round(lerp(cfg.fronds_min, cfg.fronds_max, unit(h2))));
+    const frond_len = lerp(cfg.frond_len_min, cfg.frond_len_max, unit(h3));
+    const px = wx + (unit(mix(h0 ^ 0xa5)) - 0.5) * c * 0.7;
+    const pz = wz + (unit(mix(h1 ^ 0xa5)) - 0.5) * c * 0.7;
+    const inner_raw: i64 = @intFromFloat(@round(@as(f64, @floatFromInt(outer)) * 0.6));
+    return .{
+        .px = px,
+        .pz = pz,
+        .top_y = top + trunk_h,
+        .frond_len = frond_len,
+        .root = .{
+            lerp(cfg.root_lo[0], cfg.root_hi[0], unit(mix(h3 ^ 0x9b))),
+            lerp(cfg.root_lo[1], cfg.root_hi[1], unit(mix(h3 ^ 0x9c))),
+            lerp(cfg.root_lo[2], cfg.root_hi[2], unit(mix(h3 ^ 0x9d))),
+        },
+        .outer = outer,
+        .inner = @intCast(@max(@as(i64, 5), inner_raw)),
+    };
+}
+
+/// Frond `k` (0..crown.total()) — outer ring then inner ring. Twin of crownRing's body
+/// for whichever ring k falls in (yaw/pitch/length jitter by index). Stride-12 row.
+pub fn palmFrondRow(crown: *const PalmCrown, k: u32) [STRIDE]f32 {
+    const outer = k < crown.outer;
+    const ring_count: u32 = if (outer) crown.outer else crown.inner;
+    const ring_top_y: f64 = if (outer) crown.top_y else crown.top_y + crown.frond_len * 0.12;
+    const ring_len: f64 = if (outer) crown.frond_len else crown.frond_len * 0.62;
+    const pitch_base: f64 = if (outer) 40 else 18;
+    const i: u32 = if (outer) k else k - crown.outer;
+    const yaw = (@as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(ring_count))) * 360.0 + @as(f64, @floatFromInt(i % 2)) * 14.0;
+    const pitch = pitch_base + @as(f64, @floatFromInt(i % 3)) * 12.0;
+    const len = ring_len * (0.8 + 0.2 * (@as(f64, @floatFromInt((i * 7) % 5)) / 4.0));
+    const wide = len * 0.55;
+    return .{
+        @floatCast(crown.px),     @floatCast(ring_top_y),   @floatCast(crown.pz),
+        @floatCast(pitch),        @floatCast(yaw),          0,
+        @floatCast(wide),         @floatCast(len),          @floatCast(wide),
+        @floatCast(crown.root[0]), @floatCast(crown.root[1]), @floatCast(crown.root[2]),
+    };
+}
+
 // ── parity against the TS source (golden values from /tmp/foliage_golden.js) ──
 test "mix matches scatter.ts mix" {
     try std.testing.expectEqual(@as(u32, 0), mix(0));
@@ -192,5 +280,21 @@ test "flowerRow matches grassPopulation.ts buildFlowerInstances emitHead (cell 1
         for (row, golden[k]) |got, want| {
             try std.testing.expectEqual(want, got);
         }
+    }
+}
+
+test "palmFrondRow matches palmPopulation.ts crown (cell 12345)" {
+    const crown = palmCrown(&PALM, 10.5, 20.5, 2.0, 1.0, 12345);
+    try std.testing.expectEqual(@as(u32, 22), crown.total()); // 14 outer + 8 inner
+    // golden: frond 0, 1, and the last (21)
+    const want = [3][STRIDE]f32{
+        .{ 10.291945457458496, 7.441481113433838, 20.42505645751953, 40, 0, 0, 1.3557775020599365, 2.465049982070923, 1.3557775020599365, 0.13072878122329712, 0.3507298231124878, 0.15855048596858978 },
+        .{ 10.291945457458496, 7.441481113433838, 20.42505645751953, 52, 39.71428680419922, 0, 1.525249719619751, 2.773181200027466, 1.525249719619751, 0.13072878122329712, 0.3507298231124878, 0.15855048596858978 },
+        .{ 10.291945457458496, 7.811238765716553, 20.42505645751953, 30, 329, 0, 1.0507276058197021, 1.9104137420654297, 1.0507276058197021, 0.13072878122329712, 0.3507298231124878, 0.15855048596858978 },
+    };
+    const ks = [3]u32{ 0, 1, 21 };
+    for (ks, want) |kk, golden_row| {
+        const row = palmFrondRow(&crown, kk);
+        for (row, golden_row) |got, w| try std.testing.expectEqual(w, got);
     }
 }

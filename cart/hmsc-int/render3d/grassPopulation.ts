@@ -450,6 +450,7 @@ export function buildBushInstances(world: GameState['world']): GrassInstances {
 export const FOLIAGE_SPEC_GRASS = 0;
 export const FOLIAGE_SPEC_BUSH = 1;
 export const FOLIAGE_SPEC_FLOWER = 2;
+export const FOLIAGE_SPEC_PALM = 3;
 
 /** One painted foliage cell — the FACTORS the loader expands blades from
  *  (FOLIAGEFORMULA): the same (cellKey, wx, wz, top, blades) `populateFoliage`

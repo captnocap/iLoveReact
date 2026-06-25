@@ -1174,6 +1174,21 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
                 }
                 continue;
             }
+            // PALM CROWNS (spec 3, req_1861): the trunk is a baked mesh; the frond crown is
+            // regenerated here from the cell key — two rings via palmCrown/palmFrondRow into
+            // the frond batch (the ~frond~ pipeline), never the ~614k enumerated rows.
+            if (cell.spec_id == 3) {
+                const crown = foliage.palmCrown(&foliage.PALM, @as(f64, cell.wx), @as(f64, cell.wz), @as(f64, cell.top), c_size, cell.cell_key);
+                const fc = crown.total();
+                var k: u32 = 0;
+                while (k < fc) : (k += 1) {
+                    const r = foliage.palmFrondRow(&crown, k);
+                    try frond.appendSlice(allocator, &r);
+                    try frond.append(allocator, SHAPE_FROND);
+                    frond_count += 1;
+                }
+                continue;
+            }
             const is_grass = cell.spec_id == 0;
             const cfg: *const foliage.FoliageConfig = if (is_grass) &foliage.GRASS else &foliage.BUSH;
             const shape: f32 = if (is_grass) SHAPE_GRASS else SHAPE_BUSH;

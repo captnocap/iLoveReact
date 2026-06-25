@@ -9,7 +9,7 @@
 // pipeline, so the bake pushes them as two instance shapes.
 import type { GameState } from '../design';
 import { mix, unit } from '../game/kinds/scatter';
-import { eachPaintedCell, type GrassInstances } from './grassPopulation';
+import { eachPaintedCell, FOLIAGE_SPEC_PALM, type GrassInstances, type FoliageCell } from './grassPopulation';
 import { editorTunables } from '../editors/tunables';
 
 const STRIDE = 12; // pos3 | rot3 (pitch,yaw,roll) | scale3 | rootColor3 — the foliage row
@@ -96,20 +96,17 @@ function crownRing(
 
 export type PalmField = { fronds: GrassInstances; trunks: GrassInstances };
 
-/** Roll the palm grove for a world. Pure in (world): same world → identical field.
- *  Returns the frond crown cards and the trunk meshes as two separate batches. */
-export function buildPalmInstances(world: GameState['world']): PalmField {
-  const fronds: number[] = [];
-  const trunks: number[] = [];
-  const fb = new Bounds();
-  const tb = new Bounds();
+/** One spawned palm's rolled parameters — the SHARED per-cell derivation that the
+ *  full field (fronds + trunks), the trunk-only / cell-only recipe paths, and the
+ *  loader's foliage.zig palmCrown all read, so they never drift. */
+type PalmRoll = { cellKey: number; wx: number; wz: number; top: number; px: number; pz: number; trunkH: number; radius: number; outer: number; frondLen: number; leanYaw: number; root: [number, number, number] };
 
+function eachPalm(world: GameState['world'], cb: (p: PalmRoll) => void): void {
   eachPaintedCell(world, (kind, wx, wz, top, cellKey) => {
     const level = PALM_KIND_DENSITY[kind];
     if (!level) return; // not a palm tile
     const seed = mix(cellKey ^ 0x9d2c5680);
     if (unit(seed) > PALM_CONFIG.density[level]) return; // density-gated: most cells stay bare
-
     const h0 = mix(seed ^ 0x1b56c4e9);
     const h1 = mix(h0 ^ 0x68bc21eb);
     const h2 = mix(h1 ^ 0x7feb352d);
@@ -127,35 +124,64 @@ export function buildPalmInstances(world: GameState['world']): PalmField {
       lerp(PALM_CONFIG.rootLo.g, PALM_CONFIG.rootHi.g, unit(mix(h3 ^ 0x9c))),
       lerp(PALM_CONFIG.rootLo.b, PALM_CONFIG.rootHi.b, unit(mix(h3 ^ 0x9d))),
     ];
-
-    // Trunk: the PalmTrunk mesh (BASE-origin, 1 unit tall y∈[0,1]) so position y is
-    // the cell surface `top` (base on the ground). Scale x/z by span = radius/unit so
-    // the baked taper/bulge/curve/scar-rings keep their shape; yaw aims the lean.
-    const span = radius / PALM_TRUNK_UNIT_RADIUS;
-    trunks.push(px, top, pz, 0, leanYaw, 0, span, trunkH, span, PALM_CONFIG.trunkColor.r, PALM_CONFIG.trunkColor.g, PALM_CONFIG.trunkColor.b);
-    tb.add(px, top, pz);
-    tb.add(px, top + trunkH, pz);
-
-    // Crown: drooping outer ring + steeper, shorter inner ring at the trunk top.
-    const topY = top + trunkH;
-    crownRing(fronds, px, topY, pz, outer, frondLen, root, 40);
-    crownRing(fronds, px, topY + frondLen * 0.12, pz, Math.max(5, Math.round(outer * 0.6)), frondLen * 0.62, root, 18);
-    const r = frondLen * 1.1;
-    fb.add(px - r, topY - r, pz - r);
-    fb.add(px + r, topY + r, pz + r);
+    cb({ cellKey, wx, wz, top, px, pz, trunkH, radius, outer, frondLen, leanYaw, root });
   });
+}
 
+function pushTrunk(trunks: number[], tb: Bounds, p: PalmRoll): void {
+  // Trunk: the PalmTrunk mesh (BASE-origin, 1 unit tall y∈[0,1]); position y is the cell
+  // surface `top`. Scale x/z by span = radius/unit so the baked taper keeps shape; yaw leans.
+  const span = p.radius / PALM_TRUNK_UNIT_RADIUS;
+  trunks.push(p.px, p.top, p.pz, 0, p.leanYaw, 0, span, p.trunkH, span, PALM_CONFIG.trunkColor.r, PALM_CONFIG.trunkColor.g, PALM_CONFIG.trunkColor.b);
+  tb.add(p.px, p.top, p.pz);
+  tb.add(p.px, p.top + p.trunkH, p.pz);
+}
+
+/** Roll the palm grove for a world. Pure in (world): same world → identical field.
+ *  Returns the frond crown cards and the trunk meshes as two separate batches. Used by
+ *  the React preview; the BAKE recipe-izes the fronds (palmCells + loader foliage.zig). */
+export function buildPalmInstances(world: GameState['world']): PalmField {
+  const fronds: number[] = [];
+  const trunks: number[] = [];
+  const fb = new Bounds();
+  const tb = new Bounds();
+  eachPalm(world, (p) => {
+    pushTrunk(trunks, tb, p);
+    // Crown: drooping outer ring + steeper, shorter inner ring at the trunk top.
+    const topY = p.top + p.trunkH;
+    crownRing(fronds, p.px, topY, p.pz, p.outer, p.frondLen, p.root, 40);
+    crownRing(fronds, p.px, topY + p.frondLen * 0.12, p.pz, Math.max(5, Math.round(p.outer * 0.6)), p.frondLen * 0.62, p.root, 18);
+    const r = p.frondLen * 1.1;
+    fb.add(p.px - r, topY - r, p.pz - r);
+    fb.add(p.px + r, topY + r, p.pz + r);
+  });
   return { fronds: toInstances(fronds, fb), trunks: toInstances(trunks, tb) };
 }
 
-/** Crown cards alone — the ~frond~ batch. */
+/** Crown cards alone — the ~frond~ batch (React preview only; the bake recipe-izes these). */
 export function buildPalmFrondInstances(world: GameState['world']): GrassInstances {
   return buildPalmInstances(world).fronds;
 }
 
-/** Trunk meshes alone — the ordinary-mesh batch. */
+/** Trunk meshes alone — built WITHOUT the fronds (the bake bakes trunks as distinct
+ *  objects but recipe-izes the crown, so it must not allocate the ~614k frond rows). */
 export function buildPalmTrunkInstances(world: GameState['world']): GrassInstances {
-  return buildPalmInstances(world).trunks;
+  const trunks: number[] = [];
+  const tb = new Bounds();
+  eachPalm(world, (p) => pushTrunk(trunks, tb, p));
+  return toInstances(trunks, tb);
+}
+
+/** The palm CROWN recipe (req_1861): one FLORA cell per spawned palm. The loader
+ *  regenerates the frond crown from the cell key via foliage.zig palmCrown/palmFrondRow,
+ *  so the bake never enumerates the ~614k frond rows into the V8 heap. */
+export function palmCells(world: GameState['world']): FoliageCell[] {
+  const cells: FoliageCell[] = [];
+  eachPalm(world, (p) => {
+    const inner = Math.max(5, Math.round(p.outer * 0.6));
+    cells.push({ cellKey: p.cellKey >>> 0, wx: p.wx, wz: p.wz, top: p.top, specId: FOLIAGE_SPEC_PALM, count: p.outer + inner });
+  });
+  return cells;
 }
 
 class Bounds {
