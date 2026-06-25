@@ -33,7 +33,7 @@ import { CAT_COLOR, CAT_TAG, relTime, type EditEvent } from '../editLog';
 
 interface ChromeProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'labs' | 'workbench-assets' | 'workbench-settings' | 'compiled';
+  activeRoute?: 'dashboard' | 'editor' | 'assist3d' | 'labs' | 'workbench-assets' | 'workbench-settings' | 'compiled';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -48,6 +48,9 @@ interface ChromeProps {
   // is the post-click result line. Remove with the __flushReport/__storeReadReport meters.
   onProbeDump: () => void;
   probeMsg?: string;
+  // Navigate to / — the light dashboard landing (req_1872). The brand IS the
+  // home button; the editor moved off / to /editor.
+  onHome: () => void;
   onEditor: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -110,10 +113,13 @@ export function Chrome(props: ChromeProps) {
   const SavePill = props.logOpen ? C.ChromePillOn : C.ChromePill;
   return (
     <C.ChromeBar>
-      <C.ChromeBrand>
-        <Icon name="Map" size={14} color={accentFor('textDim')} />
-        <C.ChromeKicker>WORLD EDITOR</C.ChromeKicker>
-      </C.ChromeBrand>
+      {/* The brand IS the home button → / (the dashboard). */}
+      <Pressable onPress={props.onHome}>
+        <C.ChromeBrand>
+          <Icon name="Map" size={14} color={accentFor(props.activeRoute === 'dashboard' ? 'text' : 'textDim')} />
+          <C.ChromeKicker>WORLD EDITOR</C.ChromeKicker>
+        </C.ChromeBrand>
+      </Pressable>
 
       <C.ChromeRule />
 
@@ -147,6 +153,7 @@ export function Chrome(props: ChromeProps) {
           SETTINGS are two doors into /workbench; the bench's family report
           lights the right one. */}
       <C.ChromeGroup>
+        <NavBtn icon="Home" on={props.activeRoute === 'dashboard'} onPress={props.onHome} title="dashboard" />
         <NavBtn icon="LayoutGrid" on={props.activeRoute === 'editor'} onPress={props.onEditor} title="editor" />
         <NavBtn icon="FlaskConical" on={props.activeRoute === 'labs'} onPress={props.onLabs} title="labs" />
         <NavBtn icon="Shapes" on={props.activeRoute === 'workbench-assets'} onPress={props.onWorkbench} title="assets (workbench)" />

@@ -15,6 +15,7 @@ import { RightPanel } from './RightPanel';
 import { buildObjectWorld } from './objectPreview';
 import { useKindTextures, kindTexturesFor } from './kindTextures';
 import { Chrome, MapsMenu, EventLog } from './shell/chrome';
+import { DashboardRoute } from './shell/DashboardRoute';
 import { NotificationOverlayHost } from './shell/notifications';
 import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog';
 import { plog, ptime, useChurn } from './perfLog';
@@ -326,6 +327,13 @@ function EditorShell() {
   });
   const { buildingPrefabs, buildPieces, buildingInstances, buildFootprints, commitBuildEvent, commitBuildEvents } = build;
 
+  // The / dashboard's footprint census reads every placement + building footprint
+  // (both carry footW/footD). Cheap; rebuilt only when either set changes.
+  const dashFootprints = useMemo(
+    () => [...placements, ...buildFootprints],
+    [placements, buildFootprints],
+  );
+
   // [LOADERVIEW req_1757] content centroid to seed the loader pane's iso camera so it
   // opens looking at what's built (the loader can't read the gamefile's center from JS).
   const [buildCenterX, buildCenterZ] = useMemo(() => {
@@ -550,8 +558,11 @@ function EditorShell() {
   // reports its source FAMILY so the chrome lights the right door truthfully.
   const [wbFamily, setWbFamily] = useState<WorkbenchFamily>(currentWorkbenchFamily());
   useEffect(() => subscribeWorkbenchFamily(setWbFamily), []);
-  const activeRoute = route.path === '/workbench' ? (wbFamily === 'settings' ? 'workbench-settings' : 'workbench-assets') : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : route.path === '/compiled' ? 'compiled' : 'editor';
+  // / is now the light DASHBOARD (req_1872); the editor moved to /editor so boot
+  // lands on a screen that paints in one frame instead of the full world load.
+  const activeRoute = route.path === '/workbench' ? (wbFamily === 'settings' ? 'workbench-settings' : 'workbench-assets') : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : route.path === '/compiled' ? 'compiled' : route.path === '/editor' ? 'editor' : 'dashboard';
   const atEditor = activeRoute === 'editor';
+  const atDashboard = route.path === '/';
   // Route nav timing (req_1637): a route button calls navStart(path) on click; this
   // effect fires after the new route's surface first renders, logging click→first-
   // render and arming a settle watch for the fully-loaded number.
@@ -630,7 +641,8 @@ function EditorShell() {
         onNew={() => { setMenuOpen(false); newMap(); }}
         onProbeDump={dumpTransfer}
         probeMsg={dumpMsg}
-        onEditor={() => { navStart('/'); nav.push('/'); }}
+        onHome={() => { navStart('/'); nav.push('/'); }}
+        onEditor={() => { navStart('/editor'); nav.push('/editor'); }}
         onLabs={() => { navStart('/labs'); nav.push('/labs'); }}
         onWorkbench={() => { navStart('/workbench'); nav.push('/workbench'); }}
         onSettings={() => { navStart('/workbench'); requestWorkbenchSource('settings'); nav.push('/workbench'); }}
@@ -643,6 +655,18 @@ function EditorShell() {
         compileStatus={compileStatus}
       />
       <Box style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}>
+        {/* / = the light dashboard (req_1872): paints instantly, no 3D/world load.
+            The editor's heavy panes are gated to /editor below, so boot lands
+            here while the workspace warms the map in the background. */}
+        {atDashboard ? (
+          <DashboardRoute
+            mapName={ws.stem}
+            floors={floors}
+            footprints={dashFootprints}
+            onOpenEditor={() => { navStart('/editor'); nav.push('/editor'); }}
+            onCompiled={() => { navStart('/compiled'); nav.push('/compiled'); }}
+          />
+        ) : null}
         {atEditor ? (
           <QuadSplit
             fx={fx}
