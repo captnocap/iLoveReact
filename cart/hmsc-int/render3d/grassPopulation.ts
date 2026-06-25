@@ -449,6 +449,7 @@ export function buildBushInstances(world: GameState['world']): GrassInstances {
  *  GRASS/BUSH configs in framework/world/foliage.zig). Keep in lockstep. */
 export const FOLIAGE_SPEC_GRASS = 0;
 export const FOLIAGE_SPEC_BUSH = 1;
+export const FOLIAGE_SPEC_FLOWER = 2;
 
 /** One painted foliage cell — the FACTORS the loader expands blades from
  *  (FOLIAGEFORMULA): the same (cellKey, wx, wz, top, blades) `populateFoliage`
@@ -468,6 +469,13 @@ export function foliageCells(world: GameState['world']): FoliageCell[] {
     if (gLevel) {
       const count = bladesForLevel(GRASS_CONFIG, gLevel);
       if (count > 0) cells.push({ cellKey: cellKey >>> 0, wx, wz, top, specId: FOLIAGE_SPEC_GRASS, count });
+      // A 'grassFlowers' cell ALSO grows flower heads (FLOWER_CONFIG.density) — recipe'd
+      // alongside the blades instead of baking buildFlowerInstances' enumerated cards
+      // (req_1861: the loader regenerates them via foliage.zig flowerRow).
+      if (FLOWER_TILE_KINDS.has(kind)) {
+        const fcount = Math.max(0, Math.round(FLOWER_CONFIG.density));
+        if (fcount > 0) cells.push({ cellKey: cellKey >>> 0, wx, wz, top, specId: FOLIAGE_SPEC_FLOWER, count: fcount });
+      }
       return;
     }
     const bLevel = BUSH_SPEC.kindLevel[kind];

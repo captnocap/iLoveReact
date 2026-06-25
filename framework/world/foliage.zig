@@ -103,6 +103,59 @@ pub fn bladeRow(cfg: *const FoliageConfig, wx: f64, wz: f64, top: f64, c: f64, c
     };
 }
 
+/// Flower head population (FLOWER_CONFIG in grassPopulation.ts). A 'grassFlowers'
+/// cell rolls a few colored blossom cards at blade-tip height — its own roll seed
+/// + palette, so flowers don't collapse onto the grass-blade positions.
+pub const FlowerConfig = struct {
+    density: u32,
+    height_min: f64,
+    height_max: f64,
+    radius_min: f64,
+    radius_max: f64,
+    tip_tuck: f64,
+    grass_height_min: f64,
+    grass_height_max: f64,
+    palette: [4][3]f64,
+};
+
+pub const FLOWER = FlowerConfig{
+    .density = 4,
+    .height_min = 0.32,
+    .height_max = 0.52,
+    .radius_min = 0.035,
+    .radius_max = 0.075,
+    .tip_tuck = 0.5,
+    .grass_height_min = 0.26, // GRASS_CONFIG.height.min/max — flowers clamp to the canopy
+    .grass_height_max = 0.55,
+    .palette = .{ rgb(0.95, 0.35, 0.68), rgb(1.0, 0.82, 0.24), rgb(0.92, 0.88, 0.76), rgb(0.55, 0.36, 0.9) },
+};
+
+/// Emit flower head `k` of the clump at (wx,wz,top). Bit-exact twin of
+/// grassPopulation.ts buildFlowerInstances `emitHead` (own cellSeed ^ 0x54f4c5a7,
+/// 0.9·c jitter, blossom radius as uniform scale, palette pick). Stride-12 row.
+pub fn flowerRow(cfg: *const FlowerConfig, wx: f64, wz: f64, top: f64, c: f64, cell_key: u32, k: u32) [STRIDE]f32 {
+    const cell_seed = mix(cell_key ^ 0x54f4c5a7);
+    const h0 = mix(cell_seed ^ ((k +% 1) *% 0x9e3779b9));
+    const h1 = mix(h0 ^ 0x68bc21eb);
+    const h2 = mix(h1 ^ 0x7feb352d);
+    const h3 = mix(h2 ^ 0x846ca68b);
+    const px = wx + (unit(h0) - 0.5) * c * 0.9;
+    const pz = wz + (unit(h1) - 0.5) * c * 0.9;
+    const radius = lerp(cfg.radius_min, cfg.radius_max, unit(h2));
+    const stem_height = lerp(cfg.height_min, cfg.height_max, unit(h3));
+    const canopy_height = cfg.grass_height_max - radius * cfg.tip_tuck;
+    const py = top + @max(cfg.grass_height_min, @min(stem_height, canopy_height));
+    const ci: usize = @intFromFloat(@floor(unit(mix(h3 ^ 0x91)) * 4.0));
+    const color = cfg.palette[@min(ci, 3)];
+    const yaw = unit(mix(h2 ^ 0x51)) * 360.0;
+    return .{
+        @floatCast(px),       @floatCast(py),       @floatCast(pz),
+        0,                    @floatCast(yaw),      0,
+        @floatCast(radius),   @floatCast(radius),   @floatCast(radius),
+        @floatCast(color[0]), @floatCast(color[1]), @floatCast(color[2]),
+    };
+}
+
 // ── parity against the TS source (golden values from /tmp/foliage_golden.js) ──
 test "mix matches scatter.ts mix" {
     try std.testing.expectEqual(@as(u32, 0), mix(0));
@@ -121,6 +174,21 @@ test "bladeRow matches grassPopulation.ts emitClump (grass, cell 12345)" {
     var k: u32 = 0;
     while (k < 3) : (k += 1) {
         const row = bladeRow(&GRASS, 10.5, 20.5, 2.0, 1.0, 12345, k);
+        for (row, golden[k]) |got, want| {
+            try std.testing.expectEqual(want, got);
+        }
+    }
+}
+
+test "flowerRow matches grassPopulation.ts buildFlowerInstances emitHead (cell 12345)" {
+    const golden = [3][STRIDE]f32{
+        .{ 10.725759506225586, 2.4573845863342285, 20.808073043823242, 0, 243.3610076904297, 0, 0.03575613349676132, 0.03575613349676132, 0.03575613349676132, 1, 0.8199999928474426, 0.23999999463558197 },
+        .{ 10.339483261108398, 2.3936259746551514, 20.560565948486328, 0, 239.36659240722656, 0, 0.06389902532100677, 0.06389902532100677, 0.06389902532100677, 1, 0.8199999928474426, 0.23999999463558197 },
+        .{ 10.368546485900879, 2.4676008224487305, 20.092653274536133, 0, 211.04710388183594, 0, 0.06995167583227158, 0.06995167583227158, 0.06995167583227158, 0.9200000166893005, 0.8799999952316284, 0.7599999904632568 },
+    };
+    var k: u32 = 0;
+    while (k < 3) : (k += 1) {
+        const row = flowerRow(&FLOWER, 10.5, 20.5, 2.0, 1.0, 12345, k);
         for (row, golden[k]) |got, want| {
             try std.testing.expectEqual(want, got);
         }

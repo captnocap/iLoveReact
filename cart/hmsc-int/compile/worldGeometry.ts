@@ -42,7 +42,7 @@ import type { BuildFaceSkin, BuildMaterial, PlacedBuildPiece } from '@game';
 // the SAME pieceVisualShapes the editor and /test render — never a private
 // re-derivation. compile/worldParity.test.ts holds the two views identical.
 import { MATERIAL_LOOK, pieceVisualShapes, type VisualShape } from '../editors/build/pieceShapes';
-import { shaderSpec, defaultShaderData } from '@game/textures/shaders';
+import { shaderSpec, shaderTexturePreset, defaultShaderData } from '@game/textures/shaders';
 import { loadCustomTextures, type CustomTexture } from '@game/textures/materials';
 import { BUILTIN_DECALS } from '@game/textures/builtinDecals';
 import { packDecalDoc } from './decalPack';
@@ -171,6 +171,10 @@ export function resolveMaterialShader(id: string): { wgsl: string; data: number[
   if (builtin) {
     const data = defaultShaderData(builtin);
     return { wgsl: builtin.shader, data, opacity: shaderMaterialOpacity(builtin.id, data) };
+  }
+  const preset = shaderTexturePreset(id);
+  if (preset) {
+    return { wgsl: preset.shader, data: [...preset.data], opacity: shaderMaterialOpacity(preset.shaderId, preset.data) };
   }
   const custom = customById(id);
   if (custom?.shaderId !== undefined && custom.data !== undefined) {
@@ -1176,12 +1180,11 @@ export function buildWorldInstances(
   if (opts.includeGroundLayers) pushWorldLayers(b, state);
   pushVoidShell(b, state, opts.voidGroundY ?? 0);
   if (state?.world) {
-    // GRASS + BUSH are NOT baked as instance rows anymore (FOLIAGEFORMULA,
-    // req_1591): they ship as the FLORA recipe lump (encodeFlora) and the loader
-    // expands blades via framework/world/foliage.zig. That's ~99% of the foliage
-    // and was 56MB of the file. Flowers + palms still bake their rows for now (the
-    // next slice ports their formulas too).
-    pushFoliage(b, state, floors, buildFlowerInstances, INSTANCE_SHAPE_FLOWER, 'flowers');
+    // GRASS + BUSH + FLOWERS are NOT baked as instance rows (FOLIAGEFORMULA req_1591 +
+    // req_1861): they ship as the FLORA recipe lump (encodeFlora) and the loader regenerates
+    // them via framework/world/foliage.zig (bladeRow / flowerRow). That's ~99% of the foliage
+    // and was the bulk of the V8 bake heap. Palm fronds + trunks still bake their rows for
+    // now (the next slice recipe-izes the fronds too; trunks stay distinct objects).
     pushPalms(b, state, floors);
   }
   // Bodies of water ship in their own WATER lump (encodeWaterBodies) as animated
