@@ -6,7 +6,7 @@ import { nsGet, nsSet } from '@reactjit/hooks/localstore';
 import type { GameState } from './design';
 import { compileEditorWorld, emptyEditorWorld } from './editorWorld';
 import { floorsToLandforms, floorsToWaterBodies, type ChunkFloor } from './chunkFloor';
-import { IsoAuthor } from './IsoAuthor';
+import { IsoAuthor, CatalogRail, sameArmed, type Armed } from './IsoAuthor';
 import { LoaderIsoView } from './LoaderIsoView';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas } from './PaintCanvas';
@@ -170,6 +170,11 @@ function EditorShell() {
   // build pane (the ~90% surface, default), '2d' = the tile canvas. The other rides a
   // corner PiP; clicking it swaps. Both stay mounted (no remount/reload on swap).
   const [mapFocus, setMapFocus] = useState<'3d' | '2d'>('3d');
+  // RAILHOIST req_1888: the prop/piece menu (CatalogRail) lives in the editor RAIL now,
+  // OFF the map — so the editor owns the armed piece and feeds it to whichever map pane
+  // is mounted (loader or react). One source of truth, shared.
+  const [armed, setArmed] = useState<Armed>(null);
+  const armCatalog = useCallback((a: NonNullable<Armed>) => setArmed((cur) => (sameArmed(cur, a) ? null : a)), []);
   // [LOADERVIEW req_1768] render the bottom-right build pane via the native world_loader
   // (one gamefile read) instead of the React Scene3D rebuild (~683MB/boot that chokes the
   // big 'main' map → slow boot + blank viewport). NOW DEFAULT ON: the app opens into the
@@ -686,10 +691,12 @@ function EditorShell() {
             onSwapFocus={() => setMapFocus((f) => (f === '3d' ? '2d' : '3d'))}
             rail={
               <>
-                <Box style={{ flexBasis: '42%', minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+                {/* selected piece */}
+                <Box style={{ flexBasis: '20%', minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
                   <PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />
                 </Box>
-                <Box style={{ flexGrow: 1, minHeight: 0 }}>
+                {/* paint / skins */}
+                <Box style={{ flexBasis: '34%', minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
                   <RightPanel
                 tab={tab}
                 onTab={setTab}
@@ -705,6 +712,10 @@ function EditorShell() {
                 onPaintCommit={commitBuildEvents}
                 onOpenPainter={() => { requestWorkbenchSource('paint'); nav.push('/workbench'); }}
               />
+                </Box>
+                {/* prop / piece menu — OFF the map, in the rail (req_1888) */}
+                <Box style={{ flexGrow: 1, minHeight: 0 }}>
+                  <CatalogRail armed={armed} onArm={armCatalog} prefabs={buildingPrefabs} />
                 </Box>
               </>
             }
@@ -758,6 +769,8 @@ function EditorShell() {
                     onSelectionChange={onIsoSelectionChange}
                     onPlaceWaterBody={placeWaterBodyAt}
                     requestSettleBake={requestSettleBake}
+                    armed={armed}
+                    onArm={setArmed}
                   />
                 ) : (
                   <IsoAuthor
@@ -772,6 +785,8 @@ function EditorShell() {
                     onFocus={() => setMapFocus('3d')}
                     onSelectionChange={onIsoSelectionChange}
                     onPlaceWaterBody={placeWaterBodyAt}
+                    armed={armed}
+                    onArm={setArmed}
                   />
                 )}
                 {/* [LOADERVIEW req_1757] side-by-side toggle pinned in the pane corner */}

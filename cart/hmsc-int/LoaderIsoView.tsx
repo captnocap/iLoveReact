@@ -107,6 +107,11 @@ export function LoaderIsoView(props: {
   // a baked one, so a delete/move/rotate of pre-baked geometry needs a bake to reflect.
   // Pure placements never call this (the overlay shows them instantly).
   requestSettleBake?: () => void;
+  // RAILHOIST req_1888: the catalog rail moved OFF the map into the editor rail, so the
+  // armed piece is now owned by the editor (index.tsx) and passed in. The map just reads
+  // it (place/ghost) and clears it on cancel.
+  armed?: Armed;
+  onArm?: (next: Armed | ((cur: Armed) => Armed)) => void;
 }) {
   const gameFile = props.gameFile ?? DEFAULT_GAME_FILE;
   const storeDir = props.storeDir ?? DEFAULT_STORE_DIR;
@@ -156,12 +161,17 @@ export function LoaderIsoView(props: {
   ), [worldGrid]);
 
   // ── editing state ──────────────────────────────────────────────────────────────
-  const [armed, setArmed] = useState<Armed>(null);
+  // armed is hoisted to the editor (req_1888) — read from props; set via props.onArm.
+  const armed = props.armed ?? null;
+  const setArmed = props.onArm ?? (() => {});
   const armedRef = useRef<Armed>(armed);
   armedRef.current = armed;
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
+  // Arming a piece (from the editor-rail catalog now, req_1888) clears any selection —
+  // the behaviour the rail's onArm used to do inline before it moved off the map.
+  useEffect(() => { if (armed && selectedIdsRef.current.size) setSelectedIds(new Set()); }, [armed]);
   const [ghostYaw, setGhostYaw] = useState(0);
   const ghostYawRef = useRef(ghostYaw);
   ghostYawRef.current = ghostYaw;
@@ -873,15 +883,8 @@ export function LoaderIsoView(props: {
         </Box>
       ) : null}
 
-      {/* The build catalog rail — the SAME component IsoAuthor arms from (rule-of-two).
-          Rendered last so it paints over (and receives clicks above) the capture layer. */}
-      {editable ? (
-        <CatalogRail
-          armed={armed}
-          prefabs={prefabs}
-          onArm={(a) => { setArmed((cur) => (sameArmed(cur, a) ? null : a)); setSelectedIds(new Set()); }}
-        />
-      ) : null}
+      {/* The build catalog rail lives in the EDITOR rail now (req_1888) — OFF the map.
+          The map just renders clean; the editor owns `armed` and feeds it in. */}
     </Box>
   );
 }

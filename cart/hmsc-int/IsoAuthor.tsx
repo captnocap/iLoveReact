@@ -186,6 +186,10 @@ export interface IsoAuthorProps {
   // (x,z). The cart turns it into a water placement (cat 'water') — reusing the
   // placement system, so it persists/positions/bakes like any placement.
   onPlaceWaterBody?: (presetKind: string, x: number, z: number) => void;
+  // RAILHOIST req_1888: the catalog rail moved to the editor rail, so `armed` is owned
+  // by the editor (index.tsx) and passed in. Absent → local state (standalone use).
+  armed?: Armed;
+  onArm?: (next: Armed | ((cur: Armed) => Armed)) => void;
 }
 
 // A placement's identity-free fingerprint (kind + pose). The rotate flow uses
@@ -386,7 +390,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const saveCamera = useCallback(() => { writeRouteTwigState(ISO_ROUTE, ISO_CAM_TWIG, { ...stage.pose }); }, [stage]);
   const recenter = useCallback(() => { const [cx, cz] = contentCenter(piecesRef.current); stage.centerOn(cx, cz); redraw(); saveCamera(); }, [stage, redraw, saveCamera]);
 
-  const [armed, setArmed] = useState<Armed>(null);
+  // armed is editor-owned when passed (req_1888), else local (standalone fallback).
+  const [localArmed, setLocalArmed] = useState<Armed>(null);
+  const armed = props.armed ?? localArmed;
+  const setArmed = props.onArm ?? setLocalArmed;
   const armedRef = useRef<Armed>(armed);
   armedRef.current = armed;
   const [ghostYaw, setGhostYaw] = useState(0);
@@ -399,6 +406,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
+  // Arming a piece (from the editor-rail catalog now, req_1888) clears any selection.
+  useEffect(() => { if (armed && selectedIdsRef.current.size) setSelectedIds(new Set()); }, [armed]);
   // Mirror the selection up to the cart (req_0702) — the top-right PAINT tab
   // paints whatever is selected here. Ref'd callback: a parent re-render must
   // not re-fire the effect with an unchanged selection.
@@ -1846,8 +1855,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       {/* face painter: NOT here anymore (req_0702) — it fills the cart's top-right
           PAINT tab, fed by the onSelectionChange mirror above. The map stays clear. */}
 
-      {/* ── catalog rail (bottom): pick a piece to place ───────────────────── */}
-      <CatalogRail prefabs={prefabs} armed={armed} onArm={(a) => { setArmed((cur) => (sameArmed(cur, a) ? null : a)); setSelectedIds(new Set()); }} />
+      {/* The catalog rail lives in the EDITOR rail now (req_1888) — OFF the map. */}
 
       <Text fontSize={9} color={props.focused ? '#7dd3fc' : '#475569'} style={{ fontFamily: 'monospace', position: 'absolute', left: 8, top: 34 }}>
         {armed
@@ -2037,7 +2045,7 @@ export const CatalogRail = memo(function CatalogRail(props: { armed: Armed; pref
   const armedId = props.armed && props.armed.kind !== 'tower' ? props.armed.id : null;
   const towerArmed = props.armed?.kind === 'tower';
   return (
-    <Box style={{ position: 'absolute', left: 8, top: 8, bottom: 8, width: 214, flexDirection: 'column', backgroundColor: '#0b1220fa', borderRadius: 6, borderWidth: 1, borderColor: '#1e3a5f', padding: 8, gap: 6 }}>
+    <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: '#0b1220fa', borderRadius: 6, borderWidth: 1, borderColor: '#1e3a5f', padding: 8, gap: 6 }}>
       <Text fontSize={10} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
         {`${tab === 'prefabs' ? 'PREFABS' : tab === 'water' ? 'WATER' : 'PIECES'} · ${tab} (${entries.length})`}
       </Text>
