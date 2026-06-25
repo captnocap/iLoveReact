@@ -1,0 +1,30 @@
+{
+  "id": "req_1814",
+  "at": "2026-06-24T19:19:13.170Z",
+  "origin": "session:edc880d0",
+  "text": "can u, do a /hand-over and then with the handover write it into a commit with this work, i am going to resume from my macbook",
+  "status": "review",
+  "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-24T19:19:37.233Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-24T19:22:54.318Z",
+      "actor": "edc8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Produced a cross-session continuation brief (hand-over skill) and committed it into the repo for a MacBook resume, alongside the in-flight diagnostic work. The brief (docs/handoffs/handoff-20260624-192001-loader-iso-invisible-item-and-full-streaming.md) preserves the session chain (original_conversation_id 237d7d6a → edc880d0) and carries both open threads: req_1812 (placed item invisible — HOST render path PROVEN via RJIT_LIVE_PROBE, bug is JS-side, prime suspect pieceInstanceRows skipping props; temp [live-push] log armed to confirm props-skip vs the Float32Array bridge) and req_1804 (Full bake-free editing via streaming.zig — Part 1 piece-free bake done at 39f9e359a, Parts 2/3 + camera-smoothing remain; premise measured at 3-31ms). Committed env-gated diagnostics (world_loader.zig RJIT_LIVE_PROBE/RJIT_LIVELOG; LoaderIsoView temp [live-push] console.warn to remove after the fix). Flagged the macOS gotcha (tracked tools/v8cli is a Linux binary, rebuild on the Mac). Pushed to main (d84350590) so the Mac can pull and resume.",
+  "shas": [
+    "d84350590"
+  ],
+  "resolvedAt": "2026-06-24T19:22:54.318Z"
+}

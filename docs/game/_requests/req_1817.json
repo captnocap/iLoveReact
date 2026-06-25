@@ -1,0 +1,10 @@
+{
+  "id": "req_1817",
+  "at": "2026-06-24T19:31:56.120Z",
+  "origin": "session:9be2276f",
+  "text": "lcaude on the mac says the per map sessionsn files never made it thithout these the app wont list or open the map. need main.session.json _last.txt and eventlog.json and _route-twigs.json",
+  "status": "new",
+  "sessionId": "9be2276f-3b15-40c9-9cbf-c9c5ce57d365",
+  "captureMode": "hook",
+  "events": []
+}
