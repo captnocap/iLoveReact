@@ -1152,19 +1152,26 @@ pub const water_wgsl =
     \\    // wave lightening keeps crests alive over the gradient.
     \\    var colour = mix(SHALLOW_COL, DEEP_COL, smoothstep(0.0, 6.0, depth_m));
     \\    colour = mix(colour, SHALLOW_COL, smoothstep(0.6, 1.0, waves) * 0.25);
-    \\    // Foam = wave crests + a SHORELINE run-up band hugging the real waterline
-    \\    // (depth→0). Its reach is varied along the coast by large-scale noise and
-    \\    // washed in/out over time, so the beach edge ranges ~1 m to ~15 m on a gentle
-    \\    // slope instead of a ruler-straight line. (The old band keyed the mesh UV
-    \\    // rectangle edge = chunk border, not the water's edge.)
+    \\    // Foam = subtle wave crests + a SHORELINE band measured in real HORIZONTAL
+    \\    // metres, NOT depth. Converting depth→distance via the world-space depth
+    \\    // gradient (screen derivatives) keeps the run-up a fixed ground width no
+    \\    // matter how gentle the slope — a shallow grade no longer smears foam across
+    \\    // the whole body. Reach varies ~2–14 m along the coast (noise) + washes in/out.
     \\    let foam_noise = hash21(floor(map_pos * 8.0) + floor(vec2f(S.time * 2.0)));
-    \\    let crest = smoothstep(0.72, 0.94, waves);
+    \\    let crest = smoothstep(0.86, 0.98, waves) * 0.6; // calmer open-water whitecaps
     \\    let shore_noise = get_waves(in.world_pos.xz * 0.04, S.time * 0.18);
     \\    let wash = sin(S.time * 0.6 + shore_noise * 6.2831) * 0.5 + 0.5;
-    \\    let reach_m = mix(0.07, 1.0, shore_noise) * mix(0.45, 1.0, wash);
-    \\    let shore = 1.0 - smoothstep(0.0, reach_m, depth_m);
+    \\    // World metres per screen pixel (max of the two screen axes) and depth change
+    \\    // per pixel → slope (depth m per world m) → horizontal distance to the waterline.
+    \\    let wp_ddx = vec2f(dpdx(in.world_pos.x), dpdx(in.world_pos.z));
+    \\    let wp_ddy = vec2f(dpdy(in.world_pos.x), dpdy(in.world_pos.z));
+    \\    let world_per_px = max(max(length(wp_ddx), length(wp_ddy)), 1e-4);
+    \\    let depth_grad = length(vec2f(dpdx(depth_m), dpdy(depth_m))) / world_per_px;
+    \\    let shore_dist_m = depth_m / max(depth_grad, 1e-3);
+    \\    let reach_m = mix(2.0, 14.0, shore_noise) * mix(0.5, 1.0, wash);
+    \\    let shore = 1.0 - smoothstep(0.0, reach_m, shore_dist_m);
     \\    var foam = clamp(max(crest, shore), 0.0, 1.0);
-    \\    foam = smoothstep(0.30, 0.85, foam + (foam_noise - 0.5) * 0.35);
+    \\    foam = smoothstep(0.35, 0.85, foam + (foam_noise - 0.5) * 0.3);
     \\    colour = mix(colour, FOAM_COL, foam);
     \\    // Soft half-lambert so a wave back-face isn't flat.
     \\    let N = normalize(in.world_normal);
