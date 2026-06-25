@@ -27,7 +27,9 @@
 
 import { editMeshToGeometry, type EditMesh, type MountPoint, type V3 } from './editMesh';
 import { sha256Hex } from '@reactjit/workspace/sha256';
-import type { PropBuildPlacement, PropCollisionBox, PropContainer, PropKindDefinition, PropMount, PropSeat, PropTrafficControl, PropCoverClass } from '../../game/kinds/props';
+import { isDoorLeafPartName } from './seedFromPiece';
+import { WALL_EDIT_DEFINITIONS } from '../../game/build/edits';
+import type { PropBuildPlacement, PropCollisionBox, PropContainer, PropDoorPanel, PropKindDefinition, PropMount, PropSeat, PropTrafficControl, PropCoverClass } from '../../game/kinds/props';
 import type { TileKind } from '../../game/kinds/tiles';
 
 /** The descriptor schema version — bumped when a descriptor's required-field set
@@ -68,9 +70,14 @@ export type MeshBlob = {
    *  of the opaque soup so the editor + compiled loader render them translucent
    *  (the transparent pass) instead of the solid prop tint. Absent = no glass. */
   glass?: MeshGlassRange;
+  /** Trailing sub-range of the DOOR LEAF (req_1864) — the "Door Leaf" part, split
+   *  out so the editor + compiled loader render it as a separate toggleable node
+   *  (hidden when the door opens) the same way glass rides its own sub-range.
+   *  Absent = the model has no door leaf. */
+  leaf?: MeshGlassRange;
 };
 
-/** A vertex sub-range (vertex units) carrying the model's see-through faces. */
+/** A vertex sub-range (vertex units) carrying a split-out face group (glass / leaf). */
 export type MeshGlassRange = { start: number; count: number };
 
 export const COOKED_SLOT_DEFAULT_MATERIAL = '#c2c6cf';
@@ -123,6 +130,12 @@ export type PropDescriptorInput = {
    *  edge-snaps + gives cover, a wall-trim surface-snaps. Absent = free-snap scenery.
    *  The asset stays kind:'prop'; only its catalog placement row changes. */
   buildPlacement?: PropBuildPlacement;
+  /** DOOR COOK (req_1864): present = cook this wall-family model into a functional
+   *  two-state door. The cook finds the "Door Leaf" part, measures it into the
+   *  descriptor's `doorPanel`, excludes it from the static collider (the opening
+   *  is walkable when open) + ships it as a toggleable mesh sub-range. `vehicle` =
+   *  a garage-sized portal (garage interaction reach). */
+  door?: { vehicle: boolean };
 };
 
 /** The cooked asset: a thin record of REFERENCES (the heavy factors live in the
@@ -145,6 +158,10 @@ export type CookedAsset = {
   /** Trailing glass sub-range (req_1673) — copied from the blob so render paths
    *  read it without re-deriving. Absent = the model has no glass-tagged faces. */
   glass?: MeshGlassRange;
+  /** Trailing door-leaf sub-range (req_1864) — copied from the blob so render
+   *  paths split the toggleable leaf node without re-deriving. The same range is
+   *  on `descriptor.doorPanel` (meshStart/meshCount). Absent = no door leaf. */
+  leaf?: MeshGlassRange;
   descriptor: PropKindDefinition;
 };
 
@@ -224,8 +241,14 @@ function boundsOfSoup(verts: Float32Array): CookBounds {
  *  into the solid prop tint. Glass skips texturing (it never belongs to a slot), so
  *  the opaque/slot layout is unchanged for glass-free models — the meshRef of an
  *  existing model only moves when it actually carries glass. */
-export function flattenModel(parts: readonly CookPart[]): MeshBlob {
-  const hasSlottedFaces = parts.some((p) => p.visible && (p.mesh.slots?.length ?? 0) > 0
+export function flattenModel(parts: readonly CookPart[], opts?: { leafPart?: (p: CookPart) => boolean }): MeshBlob {
+  // DOOR COOK (req_1864): the "Door Leaf" part ships as a trailing toggleable
+  // sub-range (like glass), excluded from the body passes so the loader/editor
+  // can hide it when the door opens. bodyParts = everything else.
+  const leafPredicate = opts?.leafPart;
+  const bodyParts = leafPredicate ? parts.filter((p) => !leafPredicate(p)) : parts;
+  const leafParts = leafPredicate ? parts.filter((p) => leafPredicate(p)) : [];
+  const hasSlottedFaces = bodyParts.some((p) => p.visible && (p.mesh.slots?.length ?? 0) > 0
     && p.mesh.faces.some((f) => faceSlotIndex(p.mesh, f) >= 0));
 
   const chunks: Float32Array[] = [];
@@ -233,7 +256,7 @@ export function flattenModel(parts: readonly CookPart[]): MeshBlob {
   let slots: CookedTextureSlot[] | undefined;
 
   if (!hasSlottedFaces) {
-    for (const p of parts) {
+    for (const p of bodyParts) {
       if (!p.visible) continue;
       const g = editMeshToGeometry(liftedMesh(p), (f) => !f.glass);
       if (g.positions.length === 0) continue;
@@ -245,8 +268,8 @@ export function flattenModel(parts: readonly CookPart[]): MeshBlob {
     const slotSources: SlotSource[] = [];
     const used = new Set<string>();
 
-    for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-      const p = parts[partIndex];
+    for (let partIndex = 0; partIndex < bodyParts.length; partIndex += 1) {
+      const p = bodyParts[partIndex];
       if (!p.visible) continue;
       const mesh = liftedMesh(p);
       // Unslotted opaque = no texture slot AND not glass (glass skips texturing).
@@ -300,7 +323,7 @@ export function flattenModel(parts: readonly CookPart[]): MeshBlob {
   // glass-free model pays nothing and keeps its old meshRef.
   const glassChunks: Float32Array[] = [];
   let glassFloats = 0;
-  for (const p of parts) {
+  for (const p of bodyParts) {
     if (!p.visible) continue;
     const g = editMeshToGeometry(liftedMesh(p), (f) => !!f.glass);
     if (g.positions.length === 0) continue;
@@ -309,10 +332,24 @@ export function flattenModel(parts: readonly CookPart[]): MeshBlob {
   }
   const glassStart = total / 8;
 
-  const verts = new Float32Array(total + glassFloats);
+  // Door-leaf pass (req_1864) — the leaf part's every face, appended after glass
+  // as its own trailing sub-range so the loader/editor toggle it independently.
+  const leafChunks: Float32Array[] = [];
+  let leafFloats = 0;
+  for (const p of leafParts) {
+    if (!p.visible) continue;
+    const g = editMeshToGeometry(liftedMesh(p), () => true);
+    if (g.positions.length === 0) continue;
+    leafChunks.push(g.positions);
+    leafFloats += g.positions.length;
+  }
+  const leafStart = (total + glassFloats) / 8;
+
+  const verts = new Float32Array(total + glassFloats + leafFloats);
   let off = 0;
   for (const c of chunks) { verts.set(c, off); off += c.length; }
   for (const c of glassChunks) { verts.set(c, off); off += c.length; }
+  for (const c of leafChunks) { verts.set(c, off); off += c.length; }
 
   return {
     hash: hashBytes(verts),
@@ -321,6 +358,7 @@ export function flattenModel(parts: readonly CookPart[]): MeshBlob {
     bounds: boundsOfSoup(verts),
     ...(slots ? { slots } : {}),
     ...(glassFloats ? { glass: { start: glassStart, count: glassFloats / 8 } } : {}),
+    ...(leafFloats ? { leaf: { start: leafStart, count: leafFloats / 8 } } : {}),
   };
 }
 
@@ -436,7 +474,7 @@ export const cookValidators: Record<CookKind, (d: any) => string[]> = {
 
 // ── the cook (prop, Phase 7a) ────────────────────────────────────────────────
 
-function fillPropDescriptor(input: PropDescriptorInput, c: CookCollision, id: string, name: string): PropKindDefinition {
+function fillPropDescriptor(input: PropDescriptorInput, c: CookCollision, id: string, name: string, doorPanel?: PropDoorPanel): PropKindDefinition {
   return {
     // `kind` IS the asset id (the catalog/placement key) — a placed WorldProp's
     // `kind` is this id, and the registry overlay keys the descriptor under it, so
@@ -465,6 +503,32 @@ function fillPropDescriptor(input: PropDescriptorInput, c: CookCollision, id: st
     // PIECE-COOK (req_1684): carry the build-piece placement so the catalog row
     // edge/surface-snaps; part of the descriptor, so it rides the asset identity hash.
     ...(input.buildPlacement ? { buildPlacement: input.buildPlacement } : {}),
+    // DOOR COOK (req_1864): the MEASURED two-state door panel — the leaf part's
+    // box + reach + mesh sub-range. Rides the descriptor so the bake + editor read it.
+    ...(doorPanel ? { doorPanel } : {}),
+  };
+}
+
+/** Measure the door panel (req_1864) from the leaf part(s): the union box of
+ *  their connected components (in the ground-lifted model frame), plus the reach
+ *  from the walk/vehicle edit vocabulary and the shipped leaf mesh sub-range. */
+function doorPanelFromParts(leafParts: readonly CookPart[], vehicle: boolean, range: { start: number; count: number }): PropDoorPanel | undefined {
+  let lox = Infinity, loy = Infinity, loz = Infinity, hix = -Infinity, hiy = -Infinity, hiz = -Infinity;
+  for (const p of leafParts) {
+    if (!p.visible) continue;
+    for (const b of partCollisionBoxes(liftedMesh(p))) {
+      if (b.minX < lox) lox = b.minX; if (b.maxX > hix) hix = b.maxX;
+      if (b.minY < loy) loy = b.minY; if (b.maxY > hiy) hiy = b.maxY;
+      if (b.minZ < loz) loz = b.minZ; if (b.maxZ > hiz) hiz = b.maxZ;
+    }
+  }
+  if (!Number.isFinite(lox)) return undefined;
+  const reachMeters = WALL_EDIT_DEFINITIONS[vehicle ? 'garageDoor' : 'door'].interaction?.reachMeters ?? 2.2;
+  return {
+    centerX: (lox + hix) / 2, centerY: (loy + hiy) / 2, centerZ: (loz + hiz) / 2,
+    width: hix - lox, height: hiy - loy, depth: hiz - loz,
+    reachMeters, vehicle,
+    meshStart: range.start, meshCount: range.count,
   };
 }
 
@@ -483,9 +547,22 @@ export type CookPropInput = {
  *  geometry factor to intern + any validation errors. The caller installs the
  *  blob + the asset only when `errors` is empty. */
 export function cookProp(input: CookPropInput): CookResult {
-  const blob = flattenModel(input.parts);
-  const collision = collisionFromBounds(blob.bounds, input.parts);
-  const descriptor = fillPropDescriptor(input.descriptor, collision, input.id, input.name);
+  // DOOR COOK (req_1864): a wall-family model with a door request cooks its
+  // "Door Leaf" part into a toggleable two-state door — split out of the body
+  // mesh + colliders, measured into descriptor.doorPanel. Only fires when a
+  // visible leaf part actually exists (else it cooks as a plain wall).
+  const wantDoor = !!input.descriptor.door && input.descriptor.buildPlacement?.pieceKind === 'wall';
+  const leafPart = wantDoor ? (p: CookPart) => isDoorLeafPartName(p.name) : undefined;
+  const hasLeaf = !!leafPart && input.parts.some((p) => p.visible && leafPart(p));
+  const blob = flattenModel(input.parts, hasLeaf ? { leafPart } : undefined);
+  // Colliders exclude the leaf so the doorway is walkable when the door opens
+  // (the leaf becomes the live two-state panel, collided separately by the loader).
+  const colliderParts = hasLeaf ? input.parts.filter((p) => !leafPart!(p)) : input.parts;
+  const collision = collisionFromBounds(blob.bounds, colliderParts);
+  const doorPanel = hasLeaf && blob.leaf
+    ? doorPanelFromParts(input.parts.filter((p) => leafPart!(p)), !!input.descriptor.door?.vehicle, blob.leaf)
+    : undefined;
+  const descriptor = fillPropDescriptor(input.descriptor, collision, input.id, input.name, doorPanel);
   const mounts = gatherMounts(input.parts);
   const errors = validateProp(descriptor);
   // The asset IDENTITY hashes its factors by reference (mesh + texture by their
@@ -499,6 +576,7 @@ export function cookProp(input: CookPropInput): CookResult {
     mounts,
     slots: blob.slots ?? [],
     glass: blob.glass ?? null,
+    leaf: blob.leaf ?? null,
   });
   const asset: CookedAsset = {
     id: input.id,
@@ -512,6 +590,7 @@ export function cookProp(input: CookPropInput): CookResult {
     mounts,
     ...(blob.slots ? { slots: blob.slots } : {}),
     ...(blob.glass ? { glass: blob.glass } : {}),
+    ...(blob.leaf ? { leaf: blob.leaf } : {}),
     descriptor,
   };
   return { asset, blob, errors };

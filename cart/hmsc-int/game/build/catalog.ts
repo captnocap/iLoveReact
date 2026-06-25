@@ -252,7 +252,9 @@ function propCatalogEntry(kind: PropKind): BuildPieceDef {
       durability: null,
       climbable: kind === 'dumpster' || kind === 'rockLarge',
       vaultable: def.solid && def.heightMeters <= 1.5,
-      portal: false,
+      // DOOR COOK (req_1864): a cooked door declares `portal` so it connects rooms
+      // (the bake reads it for the nav portal / room seam). Other props: no portal.
+      portal: place?.portal ?? false,
     },
   };
 }

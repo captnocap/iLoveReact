@@ -9,7 +9,7 @@
 //     --alias:@reactjit=./runtime --alias:@game=./cart/hmsc-int/game
 //   tools/v8cli <out>.js
 
-import { assert, assertEqual, finish, test } from '../../game/_testkit';
+import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 import { cuboid, type EditMesh } from './editMesh';
 import { cookProp, type CookPart, type PropDescriptorInput } from './cookedAsset';
 import { registerCookedProps } from '../../game/kinds/props';
@@ -93,6 +93,53 @@ test('a cooked WALL piece still collides as a solid box, never a slope', () => {
   const { rects, orientedRects } = placedPieceColliders([piece]);
   assert(rects.length + orientedRects.length > 0, 'a custom wall is solid');
   assertEqual(placedPieceRamps([piece], 0).length, 0, 'a wall is not a walkable slope');
+});
+
+test('a cooked DOOR records a measured panel, excludes the leaf from colliders, opens a portal (req_1864)', () => {
+  // a 3m wall frame + a named "Door Leaf" slab in the opening — the two-part door seed.
+  const frame = part(cuboid(3, 3, 0.3));
+  const leaf: CookPart = { name: 'Door Leaf', mesh: cuboid(1.0, 2.1, 0.08), lift: 0, visible: true };
+  const result = cookProp({
+    id: 'studio.test_door', name: 'Custom Door', parts: [frame, leaf],
+    descriptor: {
+      label: 'Custom Door', solid: true, tileKind: 'wall',
+      buildPlacement: { pieceKind: 'wall', snap: 'edge', cover: 'full', blocksSight: true, portal: true },
+      door: { vehicle: false },
+    },
+  });
+  assertEqual(result.errors.length, 0, `cook clean: ${result.errors.join(', ')}`);
+  const d = result.asset.descriptor;
+  assert(!!d.doorPanel, 'the cook recorded a door panel measured from the leaf');
+  assertClose(d.doorPanel!.height, 2.1, 1e-5, 'panel height = the leaf height');
+  assertClose(d.doorPanel!.width, 1.0, 1e-5, 'panel width = the leaf width');
+  assertEqual(d.doorPanel!.vehicle, false, 'a walk door');
+  assert(d.doorPanel!.reachMeters > 0, 'carries an interaction reach from the edit vocabulary');
+  // the leaf ships as a trailing sub-range; the panel references exactly that range.
+  assert(!!result.asset.leaf, 'a trailing leaf sub-range is shipped');
+  assertEqual(d.doorPanel!.meshStart, result.asset.leaf!.start, 'doorPanel range == the leaf sub-range start');
+  assertEqual(d.doorPanel!.meshCount, result.asset.leaf!.count, 'doorPanel range == the leaf sub-range count');
+  // the static collider is the FRAME only — the leaf is the live panel, so the
+  // doorway is walkable when open (the frame cuboid is one connected box).
+  assertEqual((d.collisionBoxes ?? []).length, 1, 'only the frame box collides; the leaf is excluded');
+  // registers + lists under walls + opens a portal (catalog honors place.portal).
+  registerCookedProps([d]);
+  registerCookedCatalog([d.kind]);
+  const entry = catalogEntry('prop.studio.test_door');
+  assertEqual(entry.kind, 'prop', 'stays kind:prop (the uniform substrate)');
+  assertEqual(entry.tags.portal, true, 'a door connects rooms (portal)');
+  const row = cookedCatalogPickEntries().find((e) => e.id === 'prop.studio.test_door');
+  assertEqual(row!.kind, 'wall', 'lists under walls — swap a placed wall to your door');
+});
+
+test('a wall cook WITHOUT a door request keeps the leaf-named part as a normal solid (no panel)', () => {
+  // same parts, but no `door` in the descriptor → the "Door Leaf" part is just geometry.
+  const result = cookProp({
+    id: 'studio.test_nodoor', name: 'Plain Wall', parts: [part(cuboid(3, 3, 0.3)), { name: 'Door Leaf', mesh: cuboid(1, 2.1, 0.08), lift: 0, visible: true }],
+    descriptor: { label: 'Plain Wall', solid: true, tileKind: 'wall', buildPlacement: { pieceKind: 'wall', cover: 'full', blocksSight: true } },
+  });
+  assertEqual(result.asset.descriptor.doorPanel, undefined, 'no door request → no panel');
+  assert(!result.asset.leaf, 'no leaf sub-range split out');
+  assertEqual((result.asset.descriptor.collisionBoxes ?? []).length, 2, 'both boxes collide (frame + the slab)');
 });
 
 test('a plain cook (no buildPlacement) stays free-snap scenery — legacy default intact', () => {

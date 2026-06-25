@@ -1001,6 +1001,13 @@ export type PropKindDefinition = {
   // wall-decal trim `snap:'surface'`. Absent = free-snap scenery (the legacy
   // default propCatalogEntry already produced). Read by propCatalogEntry only.
   buildPlacement?: PropBuildPlacement;
+  /** DOOR COOK (req_1864): a wall-family cooked piece can carry a functional
+   *  two-state door — the "Door Leaf" part becomes this toggleable panel. The
+   *  compiled bake emits it into the DOORS lump (the SAME two-state machine as a
+   *  built-in WallEdit door) and the editor play view toggles it. The panel
+   *  geometry is MEASURED from the leaf part at cook time (derive, don't store
+   *  twice). Absent = a plain piece (no door). */
+  doorPanel?: PropDoorPanel;
 };
 
 /** How a cooked prop SNAPS + reads as cover when placed as a build piece (req_1684).
@@ -1022,6 +1029,35 @@ export type PropBuildPlacement = {
    *  (the uniform mesh substrate); this is presentation/grouping only. Absent → it
    *  lists under its raw kind ('props'). */
   pieceKind?: BuildPieceKind;
+  /** doorway — the placed piece is a body/vehicle PORTAL that connects rooms
+   *  (req_1864). Drives `tags.portal` (a door cook sets it true). */
+  portal?: boolean;
+};
+
+/** A cooked door's toggleable LEAF panel (req_1864) — measured from the model's
+ *  "Door Leaf" part at cook time. Mirrors the built-in DOORS-0611 door (a closed
+ *  leaf blocks body + sight; E within `reachMeters` toggles it; open clears the
+ *  doorway) but sourced from a custom mesh part rather than a WallEdit. Geometry
+ *  is in the asset's local (ground-lifted) frame; the bake transforms it by the
+ *  placed instance. */
+export type PropDoorPanel = {
+  /** leaf box center in the asset's local frame, meters */
+  centerX: number;
+  centerY: number;
+  centerZ: number;
+  /** leaf box extents, meters */
+  width: number;
+  height: number;
+  depth: number;
+  /** E reach (from edits.ts walk/vehicle interaction default) */
+  reachMeters: number;
+  /** vehicle-sized portal (garage) vs a walk door */
+  vehicle: boolean;
+  /** the leaf's vertex sub-range in the cooked mesh blob (start vertex + count)
+   *  — the loader/editor render it as a separate toggleable node and hide it
+   *  when the door opens, the same way glass rides a trailing sub-range. */
+  meshStart: number;
+  meshCount: number;
 };
 
 /** The dynamic-body recipe for a kickable prop (host sphere body). */
