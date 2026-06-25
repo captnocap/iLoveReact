@@ -265,6 +265,7 @@ export function LoaderIsoView(props: {
       size,
       yawDegrees: ghostYawRef.current,
       freeform: modRef.current.alt,
+      subgrid: modRef.current.shift,
       ...(prefabAnchor ? { anchorLocal: { x: prefabAnchor.x, z: prefabAnchor.z } } : {}),
       tuning: ISO_SNAP_TUNING,
     });
@@ -309,11 +310,26 @@ export function LoaderIsoView(props: {
     onCommitRef.current?.({ kind: 'piecePlaced', placement }, `placed ${def.label} @ ${at}`);
   }, [props.onPlaceWaterBody]);
 
-  // ── select: raycast the standing pieces; whole building (shift) or one piece ─────
+  // ── select: raycast the standing pieces. `whole` (double-click) selects the
+  // connected object; otherwise the single hit piece. Empty space clears.
   const selectPieceAt = useCallback((sx: number, sy: number, whole: boolean) => {
     const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), piecesRef.current, ISO_SNAP_TUNING.reachMeters);
     if (!hit) { setSelectedIds(new Set()); return; }
     setSelectedIds(whole ? GAME_BUILD.placed.connected(hit.piece.id, piecesRef.current) : new Set([hit.piece.id]));
+  }, [stage]);
+
+  // ── multi-select (Ctrl-click): toggle the hit piece in/out of the running
+  // selection instead of replacing it. Ctrl-click on empty space keeps the
+  // selection (a missed click shouldn't wipe a multi-select in progress).
+  const togglePieceAt = useCallback((sx: number, sy: number) => {
+    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), piecesRef.current, ISO_SNAP_TUNING.reachMeters);
+    if (!hit) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(hit.piece.id)) next.delete(hit.piece.id);
+      else next.add(hit.piece.id);
+      return next;
+    });
   }, [stage]);
 
   // ── delete: pieceRemoved per loose piece, buildingRemoved per whole instance ─────
@@ -666,6 +682,9 @@ export function LoaderIsoView(props: {
   // gx0/gz0 hold the down point on the active plane so a move tracks the cursor's world
   // delta, not pixels; turned tells a drag from a click (>4px travel).
   const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean; mode: 'rotate' | 'move' | 'paint'; gx0: number; gz0: number } | null>(null);
+  // double-click whole-object select: the host has no dblclick event, so track
+  // the last click's time + screen point (the QuadSplit double-press idiom).
+  const lastClickRef = useRef({ t: 0, x: 0, y: 0 });
   const local = useCallback((e: any) => {
     const r = rectRef.current;
     return { x: Number(e?.x ?? 0) - r.x, y: Number(e?.y ?? 0) - r.y };
@@ -730,15 +749,23 @@ export function LoaderIsoView(props: {
     }
     if (paintCellsRef.current) setPaintCells(null); // a click, not a drag — drop any preview
     if (!editable) return;
-    // A click (no travel): place the armed piece, or (re)select under the cursor.
+    // A click (no travel). While ARMED, shift/alt are placement modifiers
+    // (shift=sub-grid, alt=freeform) — a click always places. While NOT armed,
+    // the click selects: plain = single piece, Ctrl = toggle into a multi-select,
+    // double-click = the whole connected object.
     if (armedRef.current) {
-      if (modRef.current.shift) { selectPieceAt(d.x0, d.y0, true); return; } // shift-click selects while armed
       const t = resolveAt(d.x0, d.y0);
       if (t) { setSnap(t); placeAt(t); }
     } else {
-      selectPieceAt(d.x0, d.y0, modRef.current.shift || modRef.current.alt); // shift/alt = whole building
+      const now = Date.now();
+      const lc = lastClickRef.current;
+      const dbl = now - lc.t < 350 && Math.abs(d.x0 - lc.x) < 6 && Math.abs(d.y0 - lc.y) < 6;
+      lastClickRef.current = { t: now, x: d.x0, y: d.y0 };
+      if (dbl) selectPieceAt(d.x0, d.y0, true);            // double-click = whole object
+      else if (modRef.current.ctrl) togglePieceAt(d.x0, d.y0); // Ctrl-click = add/remove
+      else selectPieceAt(d.x0, d.y0, false);               // single piece (replace)
     }
-  }, [editable, commitMove, commitPaint, resolveAt, placeAt, selectPieceAt]);
+  }, [editable, commitMove, commitPaint, resolveAt, placeAt, selectPieceAt, togglePieceAt]);
 
   // ── 2D projected HUD (Approach B): the armed ghost box + selection outlines, drawn
   // each render through the SAME iso solve the loader renders with. Computed in the body
