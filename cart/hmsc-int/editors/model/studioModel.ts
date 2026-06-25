@@ -350,10 +350,15 @@ function mergeDown(id: string): void {
   if (i <= 0) return; // first part / none → nothing above to merge into
   const target = store.parts[i - 1];
   const src = store.parts[i];
-  // both meshes live in the SAME model frame (detach preserved positions), so a
-  // zero delta re-seats the panel exactly where it came from; the merged part keeps
-  // the target's lift, so the re-attached geometry lands back in place.
-  commit({ kind: 'partMeshUpdated', model, id: target.id, mesh: mergeMesh(target.mesh, src.mesh, [0, 0, 0]) }, 'mesh', 'record');
+  // Each part renders at its OWN `lift` (a Y offset that seats its lowest vert on
+  // the ground — studioModel position: [0, part.lift, 0]). The merged mesh keeps the
+  // TARGET's lift, so the source verts must shift by (src.lift - target.lift) to land
+  // at the same world Y they rendered at before the weld. A zero delta only works
+  // when both parts already share a lift (a detached panel inherits the body's), and
+  // dumping independently-seated parts together (e.g. a floating pipe + a grounded
+  // door leaf) at zero delta is what stretched/displaced the geometry (req_1899).
+  const dy = src.lift - target.lift;
+  commit({ kind: 'partMeshUpdated', model, id: target.id, mesh: mergeMesh(target.mesh, src.mesh, [0, dy, 0]) }, 'mesh', 'record');
   commit({ kind: 'partRemoved', model, id: src.id }, 'structure', 'record');
   setActive(target.id);
 }
