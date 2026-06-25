@@ -719,6 +719,7 @@ function EditorShell() {
                         onArmScatter={armScatter}
                         paintPieces={buildPieces}
                         paintSelectedIds={isoSelectedIds}
+                        armed={armed}
                         onPaintCommit={commitBuildEvents}
                         onOpenPainter={() => { requestWorkbenchSource('paint'); nav.push('/workbench'); }}
                       />

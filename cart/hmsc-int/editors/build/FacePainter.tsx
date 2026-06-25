@@ -115,9 +115,16 @@ const MatSwatch = memo(function MatSwatch(props: {
   );
 });
 
+// The HELD item before placement (req_1937). A subset of IsoAuthor's Armed —
+// duplicated here as a narrow shape so this panel doesn't import the iso module.
+export type HeldItem = { kind: 'piece' | 'prefab'; id: string } | { kind: 'tower' } | { kind: 'water'; id: string } | null;
+
 export interface FacePainterProps {
   pieces: readonly PlacedBuildPiece[];
   selectedIds: ReadonlySet<string>;
+  // The held/armed item — holding IS a selection, so the top header shows it when
+  // nothing placed is selected (req_1937).
+  armed?: HeldItem;
   commitBatch: (items: ReadonlyArray<{ event: WorldEvent; label: string }>) => void;
   onOpenPainter?: () => void;
 }
@@ -263,16 +270,30 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
 
   const brushLabel = brush.kind === 'color' ? brush.value : (materialById.get(brush.id)?.label ?? brush.id);
 
+  // The HELD item (armed, pre-placement) resolved to a name + sub-line — holding
+  // IS a selection (req_1937), so the header shows it when nothing placed is
+  // selected. No location yet (it isn't in the world); the sub says how to place.
+  const heldInfo = useMemo(() => {
+    const a = props.armed;
+    if (!a) return null;
+    if (a.kind === 'tower') return { label: 'Tower', sub: 'holding · drag in the build pane to place' };
+    if (a.kind === 'water') return { label: 'Water', sub: 'holding · place it in the build pane' };
+    try {
+      const def = GAME_BUILD.catalog.get(a.id);
+      return { label: def.label, sub: `${def.kind} · holding — click in the build pane to place` };
+    } catch { return { label: a.id, sub: 'holding — click in the build pane to place' }; }
+  }, [props.armed]);
+
   // The paged skin grid — sized to fill its measured area, paged by whole rows.
   const grid = useFittedGrid({ total: texList.length, tileW: TEX_TILE_W, cellH: thumbCellH(TEX_TILE_H) });
   const pageItems = texList.slice(grid.start, grid.end);
 
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b1220', padding: 10, gap: 7, flexDirection: 'column', minHeight: 0 }}>
-      {/* 1 — THE SELECTED ITEM: name + location, first (req_1929). */}
-      {selPieces.length === 0 ? (
-        <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>no selection — click pieces in the build pane</Text>
-      ) : selPieces.length === 1 ? (
+      {/* 1 — THE SELECTION, first (req_1929/req_1937). A placed-and-selected piece
+          shows its name + location; with nothing placed selected, the HELD item
+          (armed before placement) shows instead — holding is a selection too. */}
+      {selPieces.length === 1 ? (
         (() => {
           const p = selPieces[0];
           const def = GAME_BUILD.catalog.get(p.pieceId);
@@ -283,8 +304,15 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
             </Box>
           );
         })()
-      ) : (
+      ) : selPieces.length > 1 ? (
         <Text fontSize={11} color="#eaf4ff" style={{ fontFamily: 'monospace', fontWeight: 700 }}>{`${selPieces.length} pieces selected`}</Text>
+      ) : heldInfo ? (
+        <Box style={{ gap: 2 }}>
+          <Text fontSize={11} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>{heldInfo.label}</Text>
+          <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>{heldInfo.sub}</Text>
+        </Box>
+      ) : (
+        <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>no selection — hold a piece or prop, or click a placed one</Text>
       )}
 
       {/* PARAMETRIC props: the sign's text (type, then Apply). */}
