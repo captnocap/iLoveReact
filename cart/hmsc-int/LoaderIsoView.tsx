@@ -224,9 +224,10 @@ export function LoaderIsoView(props: {
   // ONLY per-frame bridge traffic, vs the ~683MB the React scene shipped. While
   // something is on the HUD (armed ghost / selection), also redraw the 2D overlay so it
   // tracks the camera (the projection is JS, the loader can't move it for us).
-  const pushCamera = useCallback(() => {
+  const pushCamera = useCallback((): boolean => {
     const nodeId = Number(loaderRef.current?.id ?? 0);
-    if (nodeId && typeof g.__compiled_world_set_camera === 'function') {
+    const ok = nodeId > 0 && typeof g.__compiled_world_set_camera === 'function';
+    if (ok) {
       const s: any = stage.solve();
       g.__compiled_world_set_camera(
         nodeId,
@@ -242,6 +243,7 @@ export function LoaderIsoView(props: {
     // loader is butter-smooth in the standalone game. Pure navigation now just pushes the
     // 8-float pose (cheap, no React); the host re-applies it each renderEmbedded frame.
     if (armedRef.current || selectedIdsRef.current.size || paintCellsRef.current) rerenderRef.current();
+    return ok;
   }, [stage]);
 
   // ── snap resolution: the cursor → a placement, with the SAME inputs F2/IsoAuthor use.
@@ -553,9 +555,16 @@ export function LoaderIsoView(props: {
       : (fn: () => void) => setTimeout(fn, 16);
     let alive = true;
     let last = g.performance?.now?.() ?? 0;
-    pushCamera();
+    // REMOUNT FIX (req_1879): the loader node id may not be ready the instant this effect
+    // runs (the host mounts lazily), and on a SETTLED remount — e.g. dashboard → /editor,
+    // where pieces/stage don't change — nothing else re-triggers a push. So a single
+    // mount-time push can miss and the loader falls back to its default player-trailing
+    // GAME camera. Keep pushing each frame until the iso pose actually lands, THEN stop
+    // (req_1790: no idle per-frame pushes once established).
+    let camEstablished = pushCamera();
     const tick = () => {
       if (!alive) return;
+      if (!camEstablished) camEstablished = pushCamera();
       const now = g.performance?.now?.() ?? last + 16;
       const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
       last = now;
