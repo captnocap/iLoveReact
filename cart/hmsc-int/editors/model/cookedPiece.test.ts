@@ -13,7 +13,7 @@ import { assert, assertClose, assertEqual, finish, test } from '../../game/_test
 import { cuboid, type EditMesh } from './editMesh';
 import { cookProp, type CookPart, type PropDescriptorInput } from './cookedAsset';
 import { registerCookedProps } from '../../game/kinds/props';
-import { registerCookedCatalog, catalogEntry, isCatalogId, cookedCatalogPickEntries } from '../../game/build/catalog';
+import { registerCookedCatalog, catalogEntry, isCatalogId, cookedCatalogPickEntries, catalogEntriesByKind } from '../../game/build/catalog';
 import { placedPieceColliders, placedPieceRamps } from '../../game/build/placed';
 
 function part(mesh: EditMesh, lift = 0, visible = true): CookPart {
@@ -146,6 +146,33 @@ test('a plain cook (no buildPlacement) stays free-snap scenery — legacy defaul
   cookAndRegister('studio.test_scenery', { label: 'Test Scenery', solid: true, tileKind: 'wall' });
   const entry = catalogEntry('prop.studio.test_scenery');
   assertEqual(entry.snap, 'free', 'no placement → free-snap, exactly as before');
+});
+
+// req_1941: cooking a model AS a wall/floor must list it under the WALL/FLOOR
+// browser TAB (catalogEntriesByKind, what the rail tabs read) — not just in the
+// swap pick. It was lying: saved as a wall, shown only among props.
+test('a cooked WALL lists under the WALL browser tab and leaves the props tab (req_1941)', () => {
+  cookAndRegister('studio.test_browserwall', {
+    label: 'Browser Wall', solid: true, tileKind: 'wall',
+    buildPlacement: { pieceKind: 'wall', snap: 'edge', cover: 'full', blocksSight: true },
+  });
+  assert(catalogEntriesByKind('wall').some((e) => e.id === 'prop.studio.test_browserwall'), 'shows under the wall tab');
+  assert(!catalogEntriesByKind('prop').some((e) => e.id === 'prop.studio.test_browserwall'), 'no longer hiding among props');
+});
+
+test('a cooked FLOOR lists under floors; a no-tab family (railing) stays in props (req_1941)', () => {
+  cookAndRegister('studio.test_browserfloor', {
+    label: 'Browser Floor', solid: true, tileKind: 'wall',
+    buildPlacement: { pieceKind: 'floor', snap: 'grid' },
+  });
+  cookAndRegister('studio.test_browserrail', {
+    label: 'Browser Rail', solid: true, tileKind: 'wall',
+    buildPlacement: { pieceKind: 'railing', snap: 'edge' },
+  });
+  assert(catalogEntriesByKind('floor').some((e) => e.id === 'prop.studio.test_browserfloor'), 'floor → floor tab');
+  // railing has no browser tab — keep it in props so it never vanishes from every browser.
+  assert(catalogEntriesByKind('prop').some((e) => e.id === 'prop.studio.test_browserrail'), 'railing (no tab) stays in props');
+  assert(!catalogEntriesByKind('floor').some((e) => e.id === 'prop.studio.test_browserrail'), 'railing is not a floor');
 });
 
 finish();

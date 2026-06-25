@@ -762,6 +762,27 @@ export function registerCookedCatalog(kinds: readonly PropKind[]): void {
   for (const kind of kinds) COOKED_CATALOG[`prop.${kind}`] = propCatalogEntry(kind);
 }
 
+// The build-piece FAMILY a cooked entry declares (a wall-seeded cook → 'wall'),
+// else its raw kind ('prop'). The swap picker groups by this.
+function cookedEntryFamily(entry: BuildPieceDef): BuildPieceKind {
+  const family = entry.propKind ? propKindDefinition(entry.propKind).buildPlacement?.pieceKind : undefined;
+  return family ?? entry.kind;
+}
+
+// Piece kinds that have their OWN tab in the build browser (PALETTE_KINDS minus
+// 'prop'). A cooked asset whose family is one of these lists UNDER that tab; a
+// family with no tab (railing/fence/trim/…) stays with the props so it never
+// vanishes from every browser.
+const TABBED_PIECE_KINDS: readonly BuildPieceKind[] = ['wall', 'floor', 'ramp', 'roof', 'stairs', 'elevator', 'pillar'];
+
+// Which build-browser tab a cooked entry lists under (req_1941: "i save something
+// as a wall … it doesnt show up in the walls … they are in the props"). Its family
+// when that family owns a tab, else 'prop'.
+function cookedBrowserKind(entry: BuildPieceDef): BuildPieceKind {
+  const family = cookedEntryFamily(entry);
+  return TABBED_PIECE_KINDS.includes(family) ? family : 'prop';
+}
+
 /** The runtime-cooked pieces as swap-pick rows, grouped by the build-piece FAMILY
  *  each declares (req_1698): a wall-seeded custom piece reports `kind:'wall'` so a
  *  placed wall's "swap it out" pick lists it under walls. Falls back to the entry's
@@ -769,8 +790,7 @@ export function registerCookedCatalog(kinds: readonly PropKind[]): void {
 export function cookedCatalogPickEntries(): { id: string; label: string; kind: BuildPieceKind }[] {
   return Object.keys(COOKED_CATALOG).map((id) => {
     const entry = COOKED_CATALOG[id];
-    const family = entry.propKind ? propKindDefinition(entry.propKind).buildPlacement?.pieceKind : undefined;
-    return { id, label: entry.label, kind: family ?? entry.kind };
+    return { id, label: entry.label, kind: cookedEntryFamily(entry) };
   });
 }
 
@@ -798,8 +818,10 @@ export function effectiveTags(entry: BuildPieceDef, edit?: WallEdit): BuildGamep
 
 export function catalogEntriesByKind(kind: BuildPieceKind): BuildPieceDef[] {
   const builtin = BUILD_CATALOG_IDS.map((id) => BUILD_CATALOG[id]).filter((entry) => entry.kind === kind);
-  // include runtime-registered cooked props (kind === 'prop') so the palette lists them.
-  const cooked = Object.keys(COOKED_CATALOG).map((id) => COOKED_CATALOG[id]).filter((entry) => entry.kind === kind);
+  // Runtime-cooked assets are all kind:'prop', but one cooked AS a wall/floor/etc.
+  // lists under THAT tab (req_1941) — route by its declared family, not its raw
+  // 'prop' kind. A family with no tab falls back to 'prop' so it's never hidden.
+  const cooked = Object.keys(COOKED_CATALOG).map((id) => COOKED_CATALOG[id]).filter((entry) => cookedBrowserKind(entry) === kind);
   return cooked.length ? [...builtin, ...cooked] : builtin;
 }
 
