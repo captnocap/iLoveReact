@@ -21,7 +21,9 @@
 import { useMemo, useState } from 'react';
 import { Box, Pressable, Scene3D, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { GAME_BUILD, GAME_CAMERA } from './game';
-import { PROP_CATEGORY_NAMES, isPropKind, propCategory, propKindDefinition, type PropCategory, type PropKind } from './game/kinds/props';
+import { isPropKind, propKindDefinition, type PropKind } from './game/kinds/props';
+import { searchProps, type PropEntry } from './game/kinds/propTags';
+import { useFavorites, toggleFavorite } from './game/kinds/propFavorites';
 import { propVisualBounds } from './compile/propRecipes/footprint';
 import { buildObjectWorld } from './objectPreview';
 import { ModelScene } from './ModelViewer';
@@ -81,7 +83,7 @@ function solveThumbCamera(kind: string) {
 // build + camera solve are memoized per kind, so re-showing the same prop (paging
 // back, re-search) is free. A STATIC (non-native) camera — twelve native cameras
 // would each fight for the one host orbit controller; these are still product shots.
-function PropThumb(props: { id: string; label: string; active: boolean; onPick: () => void }) {
+function PropThumb(props: { id: string; label: string; active: boolean; fav: boolean; onPick: () => void; onToggleFav: () => void }) {
   const kind = propKindOf(props.id);
   const view = useMemo(() => {
     try {
@@ -89,9 +91,11 @@ function PropThumb(props: { id: string; label: string; active: boolean; onPick: 
       return prop ? { prop, cam: solveThumbCamera(kind) } : null;
     } catch { return null; }
   }, [kind]);
+  // Sibling Pressables (image picks, star toggles) — NOT nested, so the star never
+  // arms the prop and vice-versa.
   return (
-    <Pressable onPress={props.onPick} hoverable tooltip={props.label}>
-      <Box style={{ width: TILE_W, gap: 2, alignItems: 'center' }}>
+    <Box style={{ width: TILE_W, gap: 2, alignItems: 'center' }}>
+      <Pressable onPress={props.onPick} hoverable tooltip={props.label}>
         <Box style={{ width: TILE_W, height: TILE_H, borderRadius: 5, borderWidth: props.active ? 2 : 1, borderColor: props.active ? '#7dd3fc' : '#3a4f6b', backgroundColor: '#0e1622', overflow: 'hidden' }}>
           {view ? (
             // Live Scene3D per tile (StaticSurface is a 2D-paint cache and bakes a 3D
@@ -103,9 +107,14 @@ function PropThumb(props: { id: string; label: string; active: boolean; onPick: 
             </Scene3D>
           ) : null}
         </Box>
-        <Text fontSize={8} color={props.active ? '#7dd3fc' : '#a8b6c8'} numberOfLines={1} style={{ fontFamily: 'monospace', width: TILE_W, textAlign: 'center' }}>{props.label}</Text>
+      </Pressable>
+      <Box style={{ width: TILE_W, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+        <Pressable onPress={props.onToggleFav} hoverable tooltip={props.fav ? 'unfavorite' : 'favorite'}>
+          <Text fontSize={10} color={props.fav ? '#fbbf24' : '#48566b'} style={{ fontFamily: 'monospace' }}>{props.fav ? '★' : '☆'}</Text>
+        </Pressable>
+        <Text fontSize={8} color={props.active ? '#7dd3fc' : '#a8b6c8'} numberOfLines={1} style={{ fontFamily: 'monospace', flexShrink: 1, textAlign: 'center' }}>{props.label}</Text>
       </Box>
-    </Pressable>
+    </Box>
   );
 }
 
@@ -113,61 +122,72 @@ function chipStyle(on: boolean) {
   return { paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: on ? '#0e7490' : '#142031' };
 }
 
+type StreamItem = { e: PropEntry } | { divider: true };
+
 export function PropBrowser(props: { armedId: string | null; onArm: (id: string) => void }) {
   // re-render when a cooked ('studio') prop is installed.
   useCookedAssets();
   const [query, setQuery] = useState('');
-  const [shelf, setShelf] = useState<PropCategory>(() => PROP_CATEGORY_NAMES[0] ?? 'street');
   const [page, setPage] = useState(0);
 
-  // Every prop in the catalog (cooked included) — the flat set search narrows.
-  const allProps = useMemo(
+  // Every prop in the catalog (cooked included). NO categories — props carry TAGS
+  // now (req_1913) and search IS the navigation: type a name or a tag and the
+  // tag-aware ranker surfaces direct hits plus tag-related items.
+  const allProps = useMemo<PropEntry[]>(
     () => GAME_BUILD.catalog.byKind('prop').filter((e) => isPropKind(propKindOf(e.id))),
     // cooked props join the catalog on install; useCookedAssets() above re-runs us.
     [],
   );
 
-  const q = query.trim().toLowerCase();
-  const entries = useMemo(() => {
-    if (q) return allProps.filter((e) => e.label.toLowerCase().includes(q) || e.id.toLowerCase().includes(q));
-    return allProps.filter((e) => propCategory(propKindOf(e.id)) === shelf);
-  }, [q, shelf, allProps]);
+  const favorites = useFavorites();
+  const q = query.trim();
+  const { matches, related } = useMemo(() => searchProps(q, allProps, favorites), [q, allProps, favorites]);
 
-  const pageCount = Math.max(1, Math.ceil(entries.length / PROP_PAGE));
+  // One paged stream: direct matches, then (when searching) a 'related' divider
+  // and the tag-related items. Empty query = the whole catalog, still paged. The
+  // divider occupies one full-width slot so it breaks the thumbnail row cleanly.
+  const stream = useMemo<StreamItem[]>(() => {
+    if (!q) return allProps.map((e) => ({ e }));
+    const out: StreamItem[] = matches.map((e) => ({ e }));
+    if (related.length) { out.push({ divider: true }); for (const e of related) out.push({ e }); }
+    return out;
+  }, [q, allProps, matches, related]);
+
+  const pageCount = Math.max(1, Math.ceil(stream.length / PROP_PAGE));
   const cur = Math.min(page, pageCount - 1);
-  const pageItems = entries.slice(cur * PROP_PAGE, cur * PROP_PAGE + PROP_PAGE);
+  const pageItems = stream.slice(cur * PROP_PAGE, cur * PROP_PAGE + PROP_PAGE);
 
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', gap: 6, minHeight: 0 }}>
       <TextInput
         text={query}
-        placeholder="search every prop…"
+        placeholder="search props or a tag…"
         onChangeText={(t: string) => { setQuery(t); setPage(0); }}
         style={{ backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: q ? '#38bdf8' : '#27364a', borderRadius: 3, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, color: '#e2e8f0', fontSize: 9, fontFamily: 'monospace' }}
       />
-      {q ? (
-        <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>{`${entries.length} match${entries.length === 1 ? '' : 'es'} across every category`}</Text>
-      ) : (
-        <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3 }}>
-          {PROP_CATEGORY_NAMES.map((cat) => (
-            <Pressable key={cat} onPress={() => { setShelf(cat); setPage(0); }}>
-              <Box style={chipStyle(cat === shelf)}>
-                <Text fontSize={9} color={cat === shelf ? '#ecfeff' : '#8aa0b8'} style={{ fontFamily: 'monospace' }}>{cat}</Text>
-              </Box>
-            </Pressable>
-          ))}
-        </Box>
-      )}
+      <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>
+        {q
+          ? `${matches.length} match${matches.length === 1 ? '' : 'es'}${related.length ? ` · ${related.length} related` : ''}`
+          : `${allProps.length} props · type a name or tag (seating, neon, plant…)`}
+      </Text>
       {/* the bounded page of picture tiles — scrolls WITHIN its area so the pager
           below stays pinned (req_1896: it was floating mid-grid when the rows
           overflowed a plain flexGrow box). */}
       <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
         <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignContent: 'flex-start' }}>
-          {pageItems.map((e) => (
-            <PropThumb key={e.id} id={e.id} label={e.label} active={props.armedId === e.id} onPick={() => props.onArm(e.id)} />
+          {pageItems.map((it, i) => (
+            'divider' in it ? (
+              <Box key={`div-${cur}-${i}`} style={{ width: '100%', flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 2, paddingBottom: 2 }}>
+                <Box style={{ flexGrow: 1, height: 1, backgroundColor: '#23354f' }} />
+                <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>related</Text>
+                <Box style={{ flexGrow: 1, height: 1, backgroundColor: '#23354f' }} />
+              </Box>
+            ) : (
+              <PropThumb key={it.e.id} id={it.e.id} label={it.e.label} active={props.armedId === it.e.id} fav={favorites.has(it.e.id)} onPick={() => props.onArm(it.e.id)} onToggleFav={() => toggleFavorite(it.e.id)} />
+            )
           ))}
-          {pageItems.length === 0 ? (
-            <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace', paddingTop: 6 }}>{q ? 'no prop by that name' : 'nothing in this category'}</Text>
+          {stream.length === 0 ? (
+            <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace', paddingTop: 6 }}>{`no prop or tag matches “${q}”`}</Text>
           ) : null}
         </Box>
       </ScrollView>
