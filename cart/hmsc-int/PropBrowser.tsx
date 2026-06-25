@@ -19,7 +19,7 @@
 // step if the in-process StaticSurface cache proves it out.
 
 import { useMemo, useState } from 'react';
-import { Box, Pressable, Scene3D, StaticSurface, Text, TextInput } from '@reactjit/primitives';
+import { Box, Pressable, Scene3D, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { GAME_BUILD } from './game';
 import { PROP_CATEGORY_NAMES, isPropKind, propCategory, type PropCategory } from './game/kinds/props';
 import { buildObjectWorld } from './objectPreview';
@@ -48,12 +48,13 @@ function PropThumb(props: { id: string; label: string; active: boolean; onPick: 
       <Box style={{ width: TILE_W, gap: 2, alignItems: 'center' }}>
         <Box style={{ width: TILE_W, height: TILE_H, borderRadius: 5, borderWidth: props.active ? 2 : 1, borderColor: props.active ? '#7dd3fc' : '#3a4f6b', backgroundColor: '#0e1622', overflow: 'hidden' }}>
           {prop ? (
-            <StaticSurface staticKey={`propthumb:${kind}`} style={{ width: '100%', height: '100%' }}>
-              <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0e1622" showAxes={false}>
-                <Scene3D.Camera nativeCamera position={[3.6, 3.0, 3.6]} target={[0, 0.7, 0]} fov={30} />
-                <ModelScene prop={prop} />
-              </Scene3D>
-            </StaticSurface>
+            // Live Scene3D per tile (StaticSurface is a 2D-paint cache and bakes a 3D
+            // scene BLANK — req_1896). Bounded to a page so the live-render count stays
+            // small; if even a bounded page janks, the next step is offline-baked PNGs.
+            <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0e1622" showGrid={false} showAxes={false}>
+              <Scene3D.Camera nativeCamera position={[3.6, 3.0, 3.6]} target={[0, 0.7, 0]} fov={30} />
+              <ModelScene prop={prop} />
+            </Scene3D>
           ) : null}
         </Box>
         <Text fontSize={8} color={props.active ? '#7dd3fc' : '#a8b6c8'} numberOfLines={1} style={{ fontFamily: 'monospace', width: TILE_W, textAlign: 'center' }}>{props.label}</Text>
@@ -111,15 +112,19 @@ export function PropBrowser(props: { armedId: string | null; onArm: (id: string)
           ))}
         </Box>
       )}
-      {/* the bounded page of picture tiles */}
-      <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignContent: 'flex-start' }}>
-        {pageItems.map((e) => (
-          <PropThumb key={e.id} id={e.id} label={e.label} active={props.armedId === e.id} onPick={() => props.onArm(e.id)} />
-        ))}
-        {pageItems.length === 0 ? (
-          <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace', paddingTop: 6 }}>{q ? 'no prop by that name' : 'nothing in this category'}</Text>
-        ) : null}
-      </Box>
+      {/* the bounded page of picture tiles — scrolls WITHIN its area so the pager
+          below stays pinned (req_1896: it was floating mid-grid when the rows
+          overflowed a plain flexGrow box). */}
+      <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
+        <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignContent: 'flex-start' }}>
+          {pageItems.map((e) => (
+            <PropThumb key={e.id} id={e.id} label={e.label} active={props.armedId === e.id} onPick={() => props.onArm(e.id)} />
+          ))}
+          {pageItems.length === 0 ? (
+            <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace', paddingTop: 6 }}>{q ? 'no prop by that name' : 'nothing in this category'}</Text>
+          ) : null}
+        </Box>
+      </ScrollView>
       {pageCount > 1 ? (
         <Box style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 2 }}>
           <Pressable onPress={() => setPage((p) => Math.max(0, p - 1))}>
