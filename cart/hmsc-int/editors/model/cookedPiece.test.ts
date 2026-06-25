@@ -13,7 +13,7 @@ import { assert, assertClose, assertEqual, finish, test } from '../../game/_test
 import { cuboid, type EditMesh } from './editMesh';
 import { cookProp, type CookPart, type PropDescriptorInput } from './cookedAsset';
 import { registerCookedProps } from '../../game/kinds/props';
-import { registerCookedCatalog, catalogEntry, isCatalogId, cookedCatalogPickEntries, catalogEntriesByKind } from '../../game/build/catalog';
+import { registerCookedCatalog, catalogEntry, isCatalogId, cookedCatalogPickEntries, catalogEntriesByKind, catalogPieceFamily } from '../../game/build/catalog';
 import { placedPieceColliders, placedPieceRamps } from '../../game/build/placed';
 
 function part(mesh: EditMesh, lift = 0, visible = true): CookPart {
@@ -173,6 +173,20 @@ test('a cooked FLOOR lists under floors; a no-tab family (railing) stays in prop
   // railing has no browser tab — keep it in props so it never vanishes from every browser.
   assert(catalogEntriesByKind('prop').some((e) => e.id === 'prop.studio.test_browserrail'), 'railing (no tab) stays in props');
   assert(!catalogEntriesByKind('floor').some((e) => e.id === 'prop.studio.test_browserrail'), 'railing is not a floor');
+});
+
+// req_1944: a custom floor must PLACE like a floor (grid drag-paint), which the
+// editor gates on the piece's family — catalogPieceFamily resolves a cooked
+// floor to 'floor', not the 'prop' substrate, so it earns the same capability.
+test('catalogPieceFamily resolves a cooked floor to its placement family, a free prop to prop (req_1944)', () => {
+  cookAndRegister('studio.test_famfloor', {
+    label: 'Fam Floor', solid: true, tileKind: 'wall',
+    buildPlacement: { pieceKind: 'floor', snap: 'grid' },
+  });
+  cookAndRegister('studio.test_famprop', { label: 'Fam Prop', solid: true, tileKind: 'wall' });
+  assertEqual(catalogPieceFamily('prop.studio.test_famfloor'), 'floor', 'a cooked floor PLACES as a floor (grid drag-paint)');
+  assertEqual(catalogPieceFamily('prop.studio.test_famprop'), 'prop', 'a free cooked prop places as a prop');
+  assertEqual(catalogPieceFamily('floor.concrete.common'), 'floor', 'a built-in floor is its own family');
 });
 
 finish();

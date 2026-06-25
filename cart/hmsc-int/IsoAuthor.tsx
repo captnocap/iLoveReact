@@ -648,7 +648,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (!a) return null;
     if (a.kind === 'tower') return 'tower';
     if (a.kind !== 'piece') return null;
-    const k = GAME_BUILD.catalog.get(a.id).kind;
+    // The piece's FAMILY, not its raw kind — a cooked floor is kind:'prop' but
+    // places AS a floor, so it earns the floor's grid drag-paint (req_1944).
+    const k = GAME_BUILD.catalog.family(a.id);
     return k === 'wall' || k === 'floor' || k === 'roof' ? k : null;
   };
   // The top of the standing pieces under a dragged roof footprint — so a roof

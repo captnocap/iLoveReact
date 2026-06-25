@@ -762,11 +762,21 @@ export function registerCookedCatalog(kinds: readonly PropKind[]): void {
   for (const kind of kinds) COOKED_CATALOG[`prop.${kind}`] = propCatalogEntry(kind);
 }
 
-// The build-piece FAMILY a cooked entry declares (a wall-seeded cook → 'wall'),
-// else its raw kind ('prop'). The swap picker groups by this.
+// The build-piece FAMILY an entry declares (a wall-seeded cook → 'wall'), else its
+// raw kind. A built-in piece IS its kind; a cooked mesh (kind:'prop') reports the
+// pieceKind it was cooked as. The swap picker, the browser tabs, AND every
+// placement-capability gate (drag-paint, snap) read this so a custom floor places
+// exactly like a floor (req_1941/1944) — not its raw 'prop' substrate.
 function cookedEntryFamily(entry: BuildPieceDef): BuildPieceKind {
   const family = entry.propKind ? propKindDefinition(entry.propKind).buildPlacement?.pieceKind : undefined;
   return family ?? entry.kind;
+}
+
+/** The effective build family of a catalog id — what it PLACES as (req_1944). For
+ *  a cooked wall/floor this is 'wall'/'floor', not the 'prop' substrate, so the
+ *  editor grants it the same drag-paint/snap behaviour as the built-in piece. */
+export function catalogPieceFamily(id: string): BuildPieceKind {
+  return cookedEntryFamily(catalogEntry(id));
 }
 
 // Piece kinds that have their OWN tab in the build browser (PALETTE_KINDS minus

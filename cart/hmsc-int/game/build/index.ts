@@ -46,6 +46,7 @@ export {
   effectiveTags,
   catalogEntriesByKind,
   catalogEntriesByTheme,
+  catalogPieceFamily,
   cookedCatalogPickEntries,
   validateCatalogEntry,
   validateCatalog,
@@ -188,6 +189,7 @@ import {
   effectiveTags,
   catalogEntriesByKind,
   catalogEntriesByTheme,
+  catalogPieceFamily,
   validateCatalog,
 } from './catalog';
 import {
@@ -275,6 +277,7 @@ export const GAME_BUILD = {
     ids: BUILD_CATALOG_IDS,
     is: isCatalogId,
     get: catalogEntry,
+    family: catalogPieceFamily,
     effectiveTags,
     byKind: catalogEntriesByKind,
     byTheme: catalogEntriesByTheme,
