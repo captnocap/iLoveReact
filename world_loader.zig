@@ -2623,6 +2623,10 @@ const StreamProto = struct {
     tex_key: ?[]const u8,
 };
 
+// RESKIN req_1845: the kid_list node range a baked mesh-prop instance occupies, so a live
+// re-skin of that prop can hide the stale baked draw for the frame.
+const BakedRange = struct { first: u32, count: u32 };
+
 pub const Runtime = struct {
     allocator: std.mem.Allocator,
     node_id: u32 = 0,
@@ -2727,6 +2731,12 @@ pub const Runtime = struct {
     // materialized once into a "live-mat:<hash>" tile; this maps its hash → that owned key
     // string (presence = already materialized). A live mesh ref carrying mat_hash wears it.
     live_mat_keys: std.AutoHashMapUnmanaged(u32, []u8) = .{},
+    // RESKIN req_1845: a re-skinned EXISTING prop renders live with its new skin, but its
+    // STALE baked copy must hide or the two z-fight. Each baked mesh-prop instance's node
+    // range is keyed by world position; a live ref coincident with it hides that range for
+    // the frame. hidden_baked tracks what we hid so the next frame restores it first.
+    baked_by_pos: std.AutoHashMapUnmanaged(u64, BakedRange) = .{},
+    hidden_baked: std.ArrayListUnmanaged(BakedRange) = .{},
     // Node count of the permanent (non-streaming, non-live-mesh) prefix — captured in
     // build(). The non-streaming path truncates back to here before re-appending the live
     // mesh nodes each frame (streaming truncates to stream_tail_start in refreshStreamNodes).
@@ -2842,6 +2852,8 @@ pub const Runtime = struct {
 
     pub fn deinit(self: *Runtime) void {
         self.mesh_by_hash.deinit(self.allocator);
+        self.baked_by_pos.deinit(self.allocator);
+        self.hidden_baked.deinit(self.allocator);
         {
             var it = self.live_mat_keys.valueIterator();
             while (it.next()) |v| self.allocator.free(v.*);
@@ -2988,14 +3000,40 @@ pub const Runtime = struct {
         }
     }
 
+    // RESKIN req_1845: a baked mesh-prop instance's nodes shown/hidden as a block.
+    fn setBakedRangeVisible(self: *Runtime, rng: BakedRange, visible: bool) void {
+        var k: u32 = 0;
+        while (k < rng.count) : (k += 1) {
+            const ni: usize = @as(usize, rng.first) + k;
+            if (ni < self.kid_list.items.len) self.kid_list.items[ni].scene3d_mesh = visible;
+        }
+    }
+
     fn applyLiveMeshProps(self: *Runtime) void {
         if (self.stream == null) self.kid_list.shrinkRetainingCapacity(self.perm_node_count);
         defer self.root.children = self.kid_list.items; // append may realloc; re-point the root
         const mp = self.scene.mesh_props orelse return;
         self.ensureMeshHashMap();
         self.ensureLiveMaterials();
+        // RESKIN req_1845: un-hide whatever we hid last frame before re-evaluating, so a
+        // reverted/reloaded prop shows its baked render again.
+        for (self.hidden_baked.items) |rng| self.setBakedRangeVisible(rng, true);
+        self.hidden_baked.clearRetainingCapacity();
         if (pendingLiveMeshFor(self.node_id)) |p| {
-            for (p.refs) |r| self.appendLiveMeshRef(mp, r, null);
+            for (p.refs) |r| {
+                self.appendLiveMeshRef(mp, r, null);
+                // A live ref coincident with a baked instance is a RE-SKIN of an existing
+                // prop (the editor only pushes those + brand-new placements, which sit at
+                // fresh positions) — hide the stale baked draw so the two don't z-fight.
+                if (self.baked_by_pos.count() > 0) {
+                    if (self.mesh_by_hash.get(r.hash)) |idx| {
+                        if (self.baked_by_pos.get(meshPosKey(idx, r.x, r.z, r.yaw))) |rng| {
+                            self.setBakedRangeVisible(rng, false);
+                            self.hidden_baked.append(self.allocator, rng) catch {};
+                        }
+                    }
+                }
+            }
         }
         // The placement ghost: the armed mesh prop, translucent, tracking the snap target.
         if (pendingMeshGhostFor(self.node_id)) |gh| {
@@ -3359,6 +3397,13 @@ pub const Runtime = struct {
             for (mp.instances) |inst| {
                 const mesh_index: usize = @intCast(inst.mesh);
                 const mesh = mp.meshes[mesh_index];
+                // RESKIN req_1845: remember the node range this instance occupies, keyed by
+                // its world position, so a live re-skin of the same prop can hide it.
+                const inst_first = self.kid_list.items.len;
+                defer {
+                    const cnt = self.kid_list.items.len - inst_first;
+                    if (cnt > 0) self.baked_by_pos.put(self.allocator, meshPosKey(mesh_index, inst.x, inst.z, inst.yaw_degrees), .{ .first = @intCast(inst_first), .count = @intCast(cnt) }) catch {};
+                }
                 if (mesh.slots.len == 0) {
                     // A painted cooked prop (req_1496) carries its atlas as tex_rgba —
                     // wear it via scene3d_tex_rgba and whiten the tint so it doesn't
@@ -4883,6 +4928,21 @@ fn liveMeshHash(key: []const u8) u32 {
         h ^= b;
         h *%= 16777619;
     }
+    return h;
+}
+
+// RESKIN req_1845: a position+mesh identity for matching a live re-skin ref to the baked
+// instance it replaces. The live ref and the baked instance carry the SAME authored x/z/yaw
+// (a re-skin doesn't move the prop), so quantizing to mm / 0.01° matches them exactly.
+fn meshPosKey(mesh_index: usize, x: f32, z: f32, yaw: f32) u64 {
+    const xi: i64 = @intFromFloat(@round(x * 1000.0));
+    const zi: i64 = @intFromFloat(@round(z * 1000.0));
+    const yi: i64 = @intFromFloat(@round(yaw * 100.0));
+    var h: u64 = 1469598103934665603;
+    h = (h ^ @as(u64, @intCast(mesh_index & 0xffff))) *% 1099511628211;
+    h = (h ^ @as(u64, @bitCast(xi))) *% 1099511628211;
+    h = (h ^ @as(u64, @bitCast(zi))) *% 1099511628211;
+    h = (h ^ @as(u64, @bitCast(yi))) *% 1099511628211;
     return h;
 }
 

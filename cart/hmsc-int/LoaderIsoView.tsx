@@ -37,7 +37,7 @@ import { GAME_BUILD, buildingPieceInstanceId, partitionBuildingSelection } from 
 import type { BuildEditEvent, BuildPrefabDef, BuildingInstance, PlacedBuildPiece, Rect, WorldGridState } from './game';
 import { modulePitch, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
-import { pieceInstanceRows, meshPropLivePush, meshGhostRef } from './editors/build/pieceMeshes';
+import { pieceInstanceRows, meshPropLivePush, meshGhostRef, pieceSkinSig } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
 import type { GameState } from './design';
 
@@ -187,6 +187,10 @@ export function LoaderIsoView(props: {
   // in the real mesh. Seeded with the boot set; refreshed each reload.
   const bakedIdsRef = useRef<Set<string> | null>(null);
   if (bakedIdsRef.current === null) bakedIdsRef.current = new Set((props.pieces ?? []).map((p) => p.id));
+  // RESKIN req_1845: the SKIN each baked prop wore at bake time, so a prop re-skinned since
+  // is detected and rendered live (with its new skin) while its stale baked copy is hidden.
+  const bakedSigRef = useRef<Map<string, string> | null>(null);
+  if (bakedSigRef.current === null) bakedSigRef.current = new Map((props.pieces ?? []).map((p) => [p.id, pieceSkinSig(p)] as const));
 
   // Mirror the selection up so the cart's PropertiesPanel/FacePainter light up — the
   // SAME onSelectionChange contract IsoAuthor reports through.
@@ -564,8 +568,9 @@ export function LoaderIsoView(props: {
     const nodeId = Number(loaderRef.current?.id ?? 0);
     if (nodeId && typeof g.__compiled_world_unmount === 'function') g.__compiled_world_unmount(nodeId);
     // The reload follows a fresh bake, so the loader is about to render the current piece
-    // set — those are no longer "pending". Clear the just-placed boxes.
+    // set — those are no longer "pending", and each prop's current skin is now its baked skin.
     bakedIdsRef.current = new Set(piecesRef.current.map((p) => p.id));
+    bakedSigRef.current = new Map(piecesRef.current.map((p) => [p.id, pieceSkinSig(p)] as const));
   }, [props.reloadToken]);
 
   // LIVEHOST req_1798: push the just-placed-but-unbaked pieces to the native loader as a
@@ -590,19 +595,15 @@ export function LoaderIsoView(props: {
       if (!currentIds.has(id)) { props.requestSettleBake?.(); break; }
     }
     const pending = current.filter((p) => !baked.has(p.id));
-    if (!pending.length) {
-      if (typeof g.__compiled_world_clear_live_pieces === 'function') g.__compiled_world_clear_live_pieces(nodeId);
-      if (typeof g.__compiled_world_clear_live_mesh_props === 'function') g.__compiled_world_clear_live_mesh_props(nodeId);
-      return;
-    }
-    // Two overlays, one per geometry kind: parts pieces/props → the box/shape instance
-    // overlay (pieceInstanceRows); MESH props (imported genmesh / Studio-cooked) → the
-    // resident-mesh reference overlay (meshPropLivePush, LIVEMESH req_1812). A placement is
-    // whichever it is, so push both — the unused one is just empty. The mesh push also hands
-    // back any procedural face-skin materials the props wear (LIVESKIN req_1843) — materialize
-    // those FIRST so the mesh refs that reference them by hash already resolve this frame.
+    // Two overlays, one per geometry kind: parts pieces/props → the box/shape instance overlay
+    // (pieceInstanceRows, just-placed only); MESH props → the resident-mesh reference overlay
+    // (meshPropLivePush, LIVEMESH req_1812). The mesh push gets the FULL set + baked skins so it
+    // also catches EXISTING props re-skinned since the bake (RESKIN req_1845), not just new
+    // placements. Empty arrays clear the host overlay, so we always push (no early return). The
+    // mesh push also hands back the procedural skin materials the props wear (LIVESKIN req_1843)
+    // — materialize those FIRST so refs that reference them by hash resolve this same frame.
     const rows = pieceInstanceRows(pending);
-    const meshPush = meshPropLivePush(pending);
+    const meshPush = meshPropLivePush(current, bakedSigRef.current!);
     // Only the failure mode is worth a console line now (a host predating the live doors):
     // a successful push is the silent common case.
     if (typeof g.__compiled_world_set_live_pieces !== 'function' || typeof g.__compiled_world_set_live_mesh_props !== 'function') {

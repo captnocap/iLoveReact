@@ -575,12 +575,20 @@ function wholePropMaterialId(prop: WorldProp): string | null {
   return null;
 }
 
+// A stable signature of a piece's applied face-skins (RESKIN req_1845) — so the loader pane
+// can tell a prop re-skinned since the bake from one still wearing its baked look.
+export function pieceSkinSig(piece: PlacedBuildPiece): string {
+  return JSON.stringify(piece.partTextures ?? {});
+}
+
 // Live MESH-prop references + the skin materials they need (LIVEMESH req_1812 + LIVESKIN
-// req_1843). Each placed imported/cooked mesh prop renders INSTANTLY by referencing its
-// already-resident mesh; if it wears a PROCEDURAL skin we also hand back the material recipe
-// so the loader materializes it and the mesh wears it live. Decal/image and per-face skins
-// are follow-ups — those refs fall back to matHash 0 (the mesh's baked texture).
-export function meshPropLivePush(pieces: readonly PlacedBuildPiece[]): LiveMeshPush {
+// req_1843 + RESKIN req_1845). Pass the FULL current piece set + a snapshot of each baked
+// piece's skin signature (absent id ⇒ not baked yet = a brand-new placement). A mesh prop is
+// pushed live when it is brand-new (geometry overlay) OR an EXISTING prop whose skin changed
+// since the bake AND that skin is a procedural shader we can materialize live — the loader
+// then hides the stale baked copy. A baked prop still wearing its baked skin is left to the
+// baked render; a re-skin we can't do live yet (decal/image/flat) is left until Compile.
+export function meshPropLivePush(pieces: readonly PlacedBuildPiece[], bakedSig: ReadonlyMap<string, string>): LiveMeshPush {
   const refs: { hash: number; x: number; y: number; z: number; yaw: number; matHash: number }[] = [];
   const materials = new Map<number, LiveMaterial>();
   for (const piece of pieces) {
@@ -588,6 +596,10 @@ export function meshPropLivePush(pieces: readonly PlacedBuildPiece[]): LiveMeshP
     if (!prop) continue;
     const key = meshPropKeyForKind(prop.kind);
     if (!key) continue;
+    const baked = bakedSig.get(piece.id);
+    const isPending = baked === undefined;
+    const reskinned = !isPending && baked !== pieceSkinSig(piece);
+    if (!isPending && !reskinned) continue; // baked + unchanged → the baked render is correct
     let matHash = 0;
     const matId = wholePropMaterialId(prop);
     if (matId) {
@@ -597,6 +609,7 @@ export function meshPropLivePush(pieces: readonly PlacedBuildPiece[]): LiveMeshP
         if (!materials.has(matHash)) materials.set(matHash, { hash: matHash, wgsl: shader.wgsl, data: shader.data, opacity: shader.opacity });
       }
     }
+    if (reskinned && matHash === 0) continue; // a non-procedural re-skin — leave baked until Compile
     refs.push({ hash: fnv1aHash(key), x: prop.x, y: prop.y ?? 0, z: prop.z, yaw: prop.yawDegrees ?? 0, matHash });
   }
   const buf = new ArrayBuffer(refs.length * MESH_REF_BYTES);
