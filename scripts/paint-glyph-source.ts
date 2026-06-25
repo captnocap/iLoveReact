@@ -17,6 +17,7 @@
 import { BRUSH_SHAPES } from '../runtime/paint/model';
 import { BRUSH_TOOLS } from '../runtime/paint/model';
 import { brushIconLayers, toolIconLayers, type IconLayer } from '../runtime/paint/icons';
+import { BUILD_CATEGORY_ICONS, categoryIconLayers } from '../runtime/paint/category-icons';
 
 /** One baked glyph: closed polygons to fill + polylines to stroke, in 0..24. */
 export interface PaintGlyph {
@@ -120,6 +121,9 @@ function glyphFromLayers(name: string, layers: IconLayer[]): PaintGlyph {
 const glyphs: PaintGlyph[] = [
   ...BRUSH_SHAPES.map((s) => glyphFromLayers(`brush.${s}`, brushIconLayers(s))),
   ...BRUSH_TOOLS.map((t) => glyphFromLayers(`tool.${t}`, toolIconLayers(t))),
+  // Build-piece category glyphs (req_1925): `cat.<id>` wireframe icons that
+  // replace the floor/wall/ramp/… text pills in the editor rail.
+  ...BUILD_CATEGORY_ICONS.map((c) => glyphFromLayers(`cat.${c}`, categoryIconLayers(c))),
 ];
 
 export default glyphs;

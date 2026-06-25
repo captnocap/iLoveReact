@@ -41,6 +41,7 @@ import { cookedPropSurfaceYs } from './editors/model/cookedAssets';
 import { WATER_BODY_PRESETS, WATER_BODY_PRESET_IDS } from './game/kinds/waterBodies';
 import { PropBrowser } from './PropBrowser';
 import { PieceBrowser } from './PieceBrowser';
+import { CategoryIcon } from './CategoryIcon';
 
 const FAR_CLIP = 4000;
 // The iso eye sits BASE_DIST/zoom (~90–257m) from the ground, far past F2's 14m
@@ -2065,21 +2066,23 @@ export const CatalogRail = memo(function CatalogRail(props: { armed: Armed; pref
           <Text fontSize={10} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
             {`${tab === 'prefabs' ? 'PREFABS' : tab === 'water' ? 'WATER' : 'PIECES'} · ${tab} (${entries.length})`}
           </Text>
+          {/* The category choices as baked-SDF wireframe ICONS, not text pills
+              (req_1925: "a floor picture … but we know its a floor and we arnt
+              saying the word floor"). The word rides the hover tooltip so the
+              glyphs stay learnable without being labelled. */}
           <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
             {BUILD_TABS.map((k) => (
-              <Pressable key={k} onPress={() => setTab(k)}>
-                <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, backgroundColor: k === tab ? '#2563eb' : (k === 'prefabs' ? '#3b2a5e' : '#1e293b') }}>
-                  <Text fontSize={11} color={k === tab ? '#eaf4ff' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{k}</Text>
+              <Pressable key={k} onPress={() => setTab(k)} hoverable tooltip={k}>
+                <Box style={{ width: 34, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: k === tab ? '#2563eb' : (k === 'prefabs' ? '#3b2a5e' : '#1e293b') }}>
+                  <CategoryIcon cat={k} size={22} color={k === tab ? '#eaf4ff' : '#9fb2c8'} />
                 </Box>
               </Pressable>
             ))}
-            {/* the TOWER tool (req_0478) — not a catalog kind, a whole-shell drag tool.
-                Box metrics match the kind tabs exactly (no border, same padding) — the
-                extra border + the emoji glyph's leading advance read as a weird left
-                padding (req_0483); the gold background alone marks it special. */}
-            <Pressable onPress={() => props.onArm({ kind: 'tower' })}>
-              <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, backgroundColor: towerArmed ? '#1d4ed8' : '#4a3a12' }}>
-                <Text fontSize={11} color={towerArmed ? '#ffffff' : '#f0d9a8'} style={{ fontFamily: 'monospace' }}>tower</Text>
+            {/* the TOWER tool (req_0478) — not a catalog kind, a whole-shell drag
+                tool. Same icon treatment; the gold background marks it special. */}
+            <Pressable onPress={() => props.onArm({ kind: 'tower' })} hoverable tooltip="tower">
+              <Box style={{ width: 34, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: towerArmed ? '#1d4ed8' : '#4a3a12' }}>
+                <CategoryIcon cat="tower" size={22} color={towerArmed ? '#ffffff' : '#f0d9a8'} />
               </Box>
             </Pressable>
           </Box>
