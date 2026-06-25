@@ -14,7 +14,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRerender } from '@reactjit/runtime/hooks';
-import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
+import { Box, Pressable, Scene3D, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { GAME_BUILD, GAME_NATIVE_CAMERA, buildingDefFromPieces, buildingPieceInstanceId, partitionBuildingSelection } from './game';
 import type { BuildEditEvent, BuildFaceSlot, BuildPieceKind, BuildPrefabDef, BuildSkinSet, BuildingInstance, PlacedBuildPiece, Rect, WallEdit, WorldEvent, WorldGridState } from './game';
@@ -2037,9 +2037,9 @@ export const CatalogRail = memo(function CatalogRail(props: { armed: Armed; pref
   const armedId = props.armed && props.armed.kind !== 'tower' ? props.armed.id : null;
   const towerArmed = props.armed?.kind === 'tower';
   return (
-    <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 8, backgroundColor: '#0b1220fa', borderRadius: 6, borderWidth: 1, borderColor: '#1e3a5f', padding: 8, gap: 6 }}>
+    <Box style={{ position: 'absolute', left: 8, top: 8, bottom: 8, width: 214, flexDirection: 'column', backgroundColor: '#0b1220fa', borderRadius: 6, borderWidth: 1, borderColor: '#1e3a5f', padding: 8, gap: 6 }}>
       <Text fontSize={10} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-        {`${tab === 'prefabs' ? 'PREFABS' : tab === 'water' ? 'WATER' : 'PIECES'} — ${tab} (${entries.length}) · click one, then click the ground`}
+        {`${tab === 'prefabs' ? 'PREFABS' : tab === 'water' ? 'WATER' : 'PIECES'} · ${tab} (${entries.length})`}
       </Text>
       <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
         {RAIL_TABS.map((k) => (
@@ -2070,15 +2070,18 @@ export const CatalogRail = memo(function CatalogRail(props: { armed: Armed; pref
           ))}
         </Box>
       )}
-      <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
-        {entries.map((def) => (
-          <Pressable key={def.id} onPress={() => props.onArm({ kind: armKind, id: def.id })}>
-            <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: armedId === def.id ? '#7dd3fc' : '#3a4f6b', backgroundColor: armedId === def.id ? '#1d4ed8' : '#16233a' }}>
-              <Text fontSize={11} color={armedId === def.id ? '#ffffff' : '#dbe6f3'} style={{ fontFamily: 'monospace' }}>{def.label}</Text>
-            </Box>
-          </Pressable>
-        ))}
-      </Box>
+      {/* vertical rail: the ~100-item catalog scrolls in the narrow column (req_1886). */}
+      <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
+        <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
+          {entries.map((def) => (
+            <Pressable key={def.id} onPress={() => props.onArm({ kind: armKind, id: def.id })}>
+              <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: armedId === def.id ? '#7dd3fc' : '#3a4f6b', backgroundColor: armedId === def.id ? '#1d4ed8' : '#16233a' }}>
+                <Text fontSize={11} color={armedId === def.id ? '#ffffff' : '#dbe6f3'} style={{ fontFamily: 'monospace' }}>{def.label}</Text>
+              </Box>
+            </Pressable>
+          ))}
+        </Box>
+      </ScrollView>
     </Box>
   );
 });

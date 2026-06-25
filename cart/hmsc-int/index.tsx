@@ -16,6 +16,7 @@ import { buildObjectWorld } from './objectPreview';
 import { useKindTextures, kindTexturesFor } from './kindTextures';
 import { Chrome, MapsMenu, EventLog } from './shell/chrome';
 import { DashboardRoute } from './shell/DashboardRoute';
+import { EditorLayout } from './shell/EditorLayout';
 import { NotificationOverlayHost } from './shell/notifications';
 import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog';
 import { plog, ptime, useChurn } from './perfLog';
@@ -165,6 +166,10 @@ function EditorShell() {
   // ── Chrome popovers + compile feedback ────────────────────────────────────────
   const [menuOpen, setMenuOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  // EDITORLAYOUT req_1882: which map fills the reworked editor stage — '3d' = the iso
+  // build pane (the ~90% surface, default), '2d' = the tile canvas. The other rides a
+  // corner PiP; clicking it swaps. Both stay mounted (no remount/reload on swap).
+  const [mapFocus, setMapFocus] = useState<'3d' | '2d'>('3d');
   // [LOADERVIEW req_1768] render the bottom-right build pane via the native world_loader
   // (one gamefile read) instead of the React Scene3D rebuild (~683MB/boot that chokes the
   // big 'main' map → slow boot + blank viewport). NOW DEFAULT ON: the app opens into the
@@ -676,14 +681,16 @@ function EditorShell() {
           />
         ) : null}
         {atEditor ? (
-          <QuadSplit
-            fx={fx}
-            fy={fy}
-            onResize={onResize}
-            onReset={resetLayout}
-            topLeft={<PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />}
-            topRight={
-              <RightPanel
+          <EditorLayout
+            focus={mapFocus}
+            onSwapFocus={() => setMapFocus((f) => (f === '3d' ? '2d' : '3d'))}
+            rail={
+              <>
+                <Box style={{ flexBasis: '42%', minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+                  <PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />
+                </Box>
+                <Box style={{ flexGrow: 1, minHeight: 0 }}>
+                  <RightPanel
                 tab={tab}
                 onTab={setTab}
                 notes={notes}
@@ -698,8 +705,10 @@ function EditorShell() {
                 onPaintCommit={commitBuildEvents}
                 onOpenPainter={() => { requestWorkbenchSource('paint'); nav.push('/workbench'); }}
               />
+                </Box>
+              </>
             }
-            bottomLeft={
+            map2d={
               <MemoPaintCanvas
                 key={`${ws.stem}#${worldEpoch}`}
                 initialWorld={seedWorld}
@@ -721,12 +730,12 @@ function EditorShell() {
                 onShowGrid={setShowGrid}
                 onFloors={onFloors}
                 onEditBegin={snapshotForUndo}
-                wasdFocused={atEditor && wasdQuad === 'canvas'}
-                onWasdFocus={focusCanvas}
+                wasdFocused={atEditor && mapFocus === '2d'}
+                onWasdFocus={() => setMapFocus('2d')}
                 select={tileSelect}
               />
             }
-            bottomRight={
+            map3d={
               // Build-only: the on-foot 'inspect' (FreeFly) view is retired here — the
               // iso authoring view is the bottom-right pane (USER req_0424). On-foot lives
               // on the /test route (F1/F2).
@@ -759,8 +768,8 @@ function EditorShell() {
                     prefabs={buildingPrefabs}
                     onCommit={commitBuildEvent}
                     onCommitMany={commitBuildEvents}
-                    focused={atEditor && wasdQuad === 'preview'}
-                    onFocus={focusPreview}
+                    focused={atEditor && mapFocus === '3d'}
+                    onFocus={() => setMapFocus('3d')}
                     onSelectionChange={onIsoSelectionChange}
                     onPlaceWaterBody={placeWaterBodyAt}
                   />
