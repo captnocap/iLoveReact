@@ -108,6 +108,7 @@ export {
   placedPieceDepthSpan,
   placedPieceWallEnds,
   pieceBounds,
+  pieceVisualBounds,
   liftedWallBaseY,
   liftWallsOntoFloors,
   connectedPieceIds,
@@ -238,6 +239,7 @@ import {
   placedPieceDepthSpan,
   placedPieceWallEnds,
   pieceBounds,
+  pieceVisualBounds,
   liftedWallBaseY,
   liftWallsOntoFloors,
   connectedPieceIds,
@@ -341,6 +343,9 @@ export const GAME_BUILD = {
     /** CORNERSEAM-0610: per-end corner joins (renderer slab-miter input) */
     wallEnds: placedPieceWallEnds,
     bounds: pieceBounds,
+    /** req_1902: VISUAL envelope for selection — a prop exported off the ground is
+     *  lifted to its real mesh band, not anchored to a ground-level box. */
+    visualBounds: pieceVisualBounds,
     /** WALLTOP (req_0099/1477): the Y a wall RESTS at — on the floor at its cell
      *  (read-time projection; geometry/collision use it, stored data stays raw) */
     liftedWallBaseY,

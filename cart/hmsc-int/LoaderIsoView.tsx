@@ -866,7 +866,9 @@ export function LoaderIsoView(props: {
     const dx = moveDelta?.dx ?? 0, dz = moveDelta?.dz ?? 0;
     for (const pc of piecesRef.current) {
       if (!selectedIds.has(pc.id)) continue;
-      const b = GAME_BUILD.placed.bounds(pc);
+      // req_1902: VISUAL bounds — a prop exported off the ground (a walk-under shape) has
+      // its mesh band lifted, so the outline wraps the real mesh instead of a ground box.
+      const b = GAME_BUILD.placed.visualBounds(pc);
       const cx = (b.minX + b.maxX) / 2 + dx;
       const cz = (b.minZ + b.maxZ) / 2 + dz;
       selSegs.push(...boxSegments(stage, rect, cx, b.baseY, cz, 0, b.maxX - b.minX, b.topY - b.baseY, b.maxZ - b.minZ));

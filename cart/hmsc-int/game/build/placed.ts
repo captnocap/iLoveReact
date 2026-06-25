@@ -39,6 +39,7 @@ import {
 } from './catalog';
 import { BUILD_KIND_CONTRACTS, type BuildGameplayTags, type BuildPieceKind } from './pieces';
 import { propDynamics, propKindDefinition } from '../kinds';
+import type { PropKind } from '../kinds/props';
 import { propCollisionBoxes, propModelFootprintMeters, propVerticalBand } from '../../compile/propRecipes/footprint';
 import { wallEditDefinition, type WallEdit } from './edits';
 import type { BuildPrefabDef, PrefabPiece } from './prefabs';
@@ -326,6 +327,41 @@ export function pieceBounds(piece: PlacedBuildPiece): PieceBounds {
     // A pitched roof's envelope tops out at the ridge/apex, not its eave plate.
     topY: piece.y + Math.max(size.heightMeters, roofRiseMeters(piece)),
   };
+}
+
+/** The prop-LOCAL vertical band [minY,maxY] of a prop's actual mesh (anchor at 0,
+ *  Y up from the ground it rests on) — the SAME lifted local coords the mesh renders
+ *  and the colliders use (placedPieceColliders ~1057). Cooked Studio props author it as
+ *  `collisionBoxes`; data-recipe props derive it from their parts. null ⇒ no off-ground
+ *  geometry, so the legacy ground-to-top band applies. */
+function propLocalYBand(kind: PropKind): { minY: number; maxY: number } | null {
+  const boxes = propKindDefinition(kind).collisionBoxes ?? propCollisionBoxes(kind);
+  if (boxes && boxes.length) {
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const b of boxes) {
+      if (b.minY < minY) minY = b.minY;
+      if (b.maxY > maxY) maxY = b.maxY;
+    }
+    if (Number.isFinite(minY) && maxY > minY) return { minY, maxY };
+  }
+  const band = propVerticalBand(kind);
+  return band ? { minY: band.baseY, maxY: band.baseY + band.height } : null;
+}
+
+/** The VISUAL world envelope used for selection/highlight. Identical to pieceBounds
+ *  EXCEPT a prop whose mesh sits OFF the ground (a Studio prop exported elevated, or a
+ *  walk-under shape) is lifted to its real vertical band, so the selection outline wraps
+ *  where the mesh actually renders instead of a ground-anchored box one storey too low
+ *  (req_1902). X/Z stay the footprint envelope; only the Y band moves. */
+export function pieceVisualBounds(piece: PlacedBuildPiece): PieceBounds {
+  const base = pieceBounds(piece);
+  const def = placedPieceDef(piece);
+  if (def.kind === 'prop' && def.propKind) {
+    const band = propLocalYBand(def.propKind);
+    if (band) return { ...base, baseY: piece.y + band.minY, topY: piece.y + band.maxY };
+  }
+  return base;
 }
 
 // ── SMARTSEL-0605: the connected shape under one click ───────────────────────
