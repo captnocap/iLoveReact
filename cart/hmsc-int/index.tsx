@@ -333,6 +333,13 @@ function EditorShell() {
     () => [...placements, ...buildFootprints],
     [placements, buildFootprints],
   );
+  // The dashboard's "most placed" census: every placed prop/building's display
+  // label (buildings via their footprint group label). Cheap; recomputed only
+  // when either set changes.
+  const dashPlacedLabels = useMemo(
+    () => [...placements.map((p) => p.label), ...buildFootprints.map((f) => f.label)],
+    [placements, buildFootprints],
+  );
 
   // [LOADERVIEW req_1757] content centroid to seed the loader pane's iso camera so it
   // opens looking at what's built (the loader can't read the gamefile's center from JS).
@@ -663,6 +670,7 @@ function EditorShell() {
             mapName={ws.stem}
             floors={floors}
             footprints={dashFootprints}
+            placedLabels={dashPlacedLabels}
             onOpenEditor={() => { navStart('/editor'); nav.push('/editor'); }}
             onCompiled={() => { navStart('/compiled'); nav.push('/compiled'); }}
           />

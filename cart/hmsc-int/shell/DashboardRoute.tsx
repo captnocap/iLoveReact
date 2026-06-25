@@ -14,6 +14,8 @@ import { Box, Text, Pressable } from '@reactjit/primitives';
 import { accentFor } from '../studio.cls';
 import { reportAssetGeometry, type GeometryReport } from '../editors/model/geometryReport';
 import { reportMapFootprint, type FootprintLike } from '../mapReport';
+import { reportPlacementCensus } from '../placementStats';
+import { reportTextureCensus, type TextureCensus } from '../editors/model/textureStats';
 import type { ChunkFloor } from '../chunkFloor';
 
 // ── tiny formatters (no ICU — the embedded V8 may lack toLocaleString) ──────────
@@ -69,23 +71,29 @@ export function DashboardRoute(props: {
   mapName: string;
   floors: ChunkFloor[];
   footprints: FootprintLike[];
+  placedLabels: string[];
   onOpenEditor: () => void;
   onCompiled: () => void;
 }) {
-  // Geometry census — deferred so the screen paints first (freeze law).
+  // The store-reading censuses (geometry + textures) are DEFERRED so the screen
+  // paints first (freeze law) — a skeleton shows, then the numbers stream in.
   const [geo, setGeo] = useState<GeometryReport | null>(null);
+  const [tex, setTex] = useState<TextureCensus | null>(null);
   useEffect(() => {
     const t = setTimeout(() => {
       try { setGeo(reportAssetGeometry()); } catch { /* headless / no store */ }
+      try { setTex(reportTextureCensus()); } catch { /* headless / no store */ }
     }, 0);
     return () => clearTimeout(t);
   }, []);
 
-  // Map footprint — cheap + reactive to the floors/placements streaming in.
+  // Map footprint + most-placed — cheap, reactive to what streams in as the
+  // workspace restores.
   const map = useMemo(
     () => reportMapFootprint({ chunks: props.floors, footprints: props.footprints }),
     [props.floors, props.footprints],
   );
+  const placed = useMemo(() => reportPlacementCensus(props.placedLabels), [props.placedLabels]);
 
   const counting = geo === null;
   const g = geo ?? { total: { triangles: 0, vertices: 0, edges: 0 }, cookedAssetCount: 0, studioModelCount: 0 } as GeometryReport;
@@ -150,6 +158,38 @@ export function DashboardRoute(props: {
                 paint some ground and your world will grow here.
               </Text>
             )}
+          </Panel>
+
+          <Panel title="MOST PLACED">
+            {placed.total > 0 ? (
+              <Box style={{ flexDirection: 'column', gap: 8 }}>
+                {placed.top.map((r, i) => (
+                  <Box key={r.label} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <Text fontSize={13} color={accentFor(i === 0 ? 'text' : 'textSecondary')} style={{ fontFamily: 'monospace', fontWeight: i === 0 ? 700 : 400 }}>
+                      {i + 1}. {r.label}
+                    </Text>
+                    <Text fontSize={13} color="#34d399" style={{ fontFamily: 'monospace', fontWeight: 700 }}>×{commas(r.count)}</Text>
+                  </Box>
+                ))}
+                <Text fontSize={11} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
+                  {commas(placed.total)} placed · {commas(placed.unique)} kinds
+                </Text>
+              </Box>
+            ) : (
+              <Text fontSize={12} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
+                place props and buildings to see your favourites.
+              </Text>
+            )}
+          </Panel>
+
+          <Panel title={tex === null ? 'TEXTURES · counting…' : 'TEXTURES'}>
+            <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 24 }}>
+              <Figure value={tex === null ? '—' : commas(tex.textures)} label="TEXTURES" accent="#f0abfc" />
+              <Figure value={tex === null ? '—' : (tex.pixels >= 1_000_000 ? `${(tex.pixels / 1_000_000).toFixed(1)}M` : commas(tex.pixels))} label="PIXELS" accent="#67e8f9" />
+            </Box>
+            <Text fontSize={11} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
+              {tex === null ? 'reading texture headers…' : tex.unsized > 0 ? `${commas(tex.unsized)} unsized (header unread)` : 'every texture measured'}
+            </Text>
           </Panel>
         </Box>
 
