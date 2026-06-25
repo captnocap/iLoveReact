@@ -157,8 +157,10 @@ export function LoaderIsoView(props: {
   const commitMany = useCallback((items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => {
     if (!items.length) return;
     stampEdit(items[0].label.split(' ')[0] || 'edit'); // verb from the first label: removed|moved|rotated|cloned
+    const _c0 = nowMs(); // req_1942: split `pre` — the SYNCHRONOUS commit (apply + undo snapshot) vs the re-render
     if (onCommitManyRef.current) onCommitManyRef.current(items);
     else for (const it of items) onCommitRef.current?.(it.event, it.label);
+    g.__lastCommitSyncMs = nowMs() - _c0;
   }, []);
 
   const prefabs = props.prefabs ?? GAME_BUILD.prefabs.ids.map((id) => GAME_BUILD.prefabs.get(id));
@@ -357,7 +359,9 @@ export function LoaderIsoView(props: {
     const placement = GAME_BUILD.placed.placementFor(def, t.placement);
     if (GAME_BUILD.placed.validatePlacement(placement).length > 0) return;
     stampEdit('place');
+    const _c0 = nowMs(); // req_1942: split `pre` — SYNCHRONOUS commit (apply + undo snapshot) vs the re-render
     onCommitRef.current?.({ kind: 'piecePlaced', placement }, `placed ${def.label} @ ${at}`);
+    g.__lastCommitSyncMs = nowMs() - _c0;
   }, [props.onPlaceWaterBody]);
 
   // ── select: raycast the standing pieces. `whole` (double-click) selects the
@@ -789,10 +793,13 @@ export function LoaderIsoView(props: {
         }
         g.__hmscEditLatency = { label, pushMs, renderedMs, pre, scans, push, host, frame: fr, counters: c, at: Date.now() };
         const f = (n: number) => n.toFixed(0).padStart(4);
-        // req_1939: how much of `pre` is the O(placements) GameState reassembler (index.tsx placementWorld)?
+        // req_1939/1942: split `pre` — the SYNCHRONOUS commit (stream apply + undo snapshot) vs the
+        // re-render (everything React does before the loader effect). placementWorld is shown if it recomputed.
         const pwMs = Number(g.__lastPlacementWorldMs ?? 0);
-        const pw = pwMs > 0 ? ` (incl. placementWorld ${pwMs.toFixed(0)}ms)` : '';
-        console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)}${pw} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}${hostLine}`);
+        const csMs = Number(g.__lastCommitSyncMs ?? 0);
+        const pw = pwMs > 0 ? `,pw ${pwMs.toFixed(0)}` : '';
+        const preSplit = ` [commit ${csMs.toFixed(0)} + rerender ${Math.max(0, pre - csMs).toFixed(0)}${pw}]`;
+        console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)}${preSplit} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}${hostLine}`);
       });
     }
   }, [editable, props.pieces, props.reloadToken]);
