@@ -37,8 +37,7 @@ import { groundColumnTop } from './Embodied';
 import { CHUNK_TILES } from './chunks';
 import { parseAddress, cellAddress } from './address';
 import { TILE_KINDS } from './world/tileKinds';
-import { PROP_CATEGORIES, PROP_CATEGORY_NAMES, isPropKind, propCategory, type PropCategory } from './game/kinds/props';
-import { useCookedAssets, cookedPropSurfaceYs } from './editors/model/cookedAssets';
+import { cookedPropSurfaceYs } from './editors/model/cookedAssets';
 import { WATER_BODY_PRESETS, WATER_BODY_PRESET_IDS } from './game/kinds/waterBodies';
 import { PropBrowser } from './PropBrowser';
 
@@ -2007,25 +2006,28 @@ const IsoGrid = memo(function IsoGrid(props: { centerX: number; centerZ: number;
     && p.level === n.level;
 });
 
-// The bottom build palette. A row of kind tabs (floor/wall/ramp/...) and, under the
-// active tab, that kind's catalog entries as chips — the Sims bottom bar, fed by the
-// SAME BUILD_CATALOG the F2 palette reads.
+// The catalog rail. DECOUPLED (req_1906) into two top-level SECTIONS — BUILD and
+// PROPS — because they are different activities that happen to sit side by side:
+// BUILD is the structural toolbar (floor/wall/ramp/roof/stairs/elevator/pillar +
+// prefabs + tower + water), PROPS is the picture browser. The old design jammed
+// `prop` in as one more tab in the building row, so you navigated a building
+// toolbar to reach the prop catalog. Now the section toggle is the FIRST choice;
+// the inner breakdown of each section is left as-is for the next pass.
 type RailTab = BuildPieceKind | 'prefabs' | 'water';
-const RAIL_TABS: RailTab[] = [...PALETTE_KINDS, 'prefabs', 'water'];
+type RailSection = 'build' | 'props';
+// Build tools only — `prop` is no longer a tab here; it's the other SECTION. Water
+// rides with BUILD for now (environmental world-building, not a prop — flagged for
+// the next pass on where terrain/water finally lives).
+const BUILD_TABS: RailTab[] = [...PALETTE_KINDS.filter((k) => k !== 'prop'), 'prefabs', 'water'];
 export const CatalogRail = memo(function CatalogRail(props: { armed: Armed; prefabs: readonly BuildPrefabDef[]; onArm: (a: NonNullable<Armed>) => void }) {
-  // TWIGS (req_0643 "annoying have it reset"): the rail's tab + prop shelf are
+  // TWIGS (req_0643 "annoying have it reset"): the rail's section + build tab are
   // route twig state, so a hot reload restores the menu where you left it —
   // the TWIGSWEEP-0610 rule, applied here.
-  const [tab, setTab] = useRouteTwigState<RailTab>(ISO_ROUTE, 'railTab', 'wall');
-  // The prop tab is SHELVED (PROPSHELF-0611, req_0636): ~100 kinds as one flat
-  // button wall was unusable, so a second chip row picks a registry category
-  // (game/kinds/props PROP_CATEGORIES) and only that shelf's pieces list.
-  const [propShelf, setPropShelf] = useRouteTwigState<PropCategory>(ISO_ROUTE, 'railShelf', 'street');
-  // Studio-cooked props (req_1134): subscribing here boot-syncs the cooked-prop
-  // overlay (so a cold-loaded editor lists them) AND re-renders the rail when a
-  // new asset is cooked. The cooked props live on the 'studio' shelf.
-  const cooked = useCookedAssets();
-  const cookedPropCount = cooked.byKind('prop').length;
+  const [section, setSection] = useRouteTwigState<RailSection>(ISO_ROUTE, 'railSection', 'build');
+  const [tabRaw, setTab] = useRouteTwigState<RailTab>(ISO_ROUTE, 'railTab', 'wall');
+  // Coerce a stale 'prop' tab (saved before the decouple) onto a real build tab so
+  // the old twig can't leave the build section with nothing selected.
+  const tab: RailTab = tabRaw === 'prop' ? 'wall' : tabRaw;
   // 'prefabs' lists the named compositions (stamp → many pieces) — the FULL list the cart
   // passes (built-in + user-captured stream prefabs); every other tab lists that kind's
   // catalog pieces. Both feed the SAME rail, fed by the SAME GAME_BUILD.
@@ -2033,57 +2035,65 @@ export const CatalogRail = memo(function CatalogRail(props: { armed: Armed; pref
     () => {
       if (tab === 'prefabs') return props.prefabs.map((d) => ({ id: d.id, label: d.label }));
       if (tab === 'water') return WATER_BODY_PRESET_IDS.map((id) => ({ id, label: WATER_BODY_PRESETS[id].label }));
-      const all = GAME_BUILD.catalog.byKind(tab);
-      if (tab !== 'prop') return all;
-      return all.filter((e) => {
-        const kind = e.id.startsWith('prop.') ? e.id.slice('prop.'.length) : e.id;
-        return isPropKind(kind) && propCategory(kind) === propShelf;
-      });
+      return GAME_BUILD.catalog.byKind(tab);
     },
-    [tab, propShelf, props.prefabs, cookedPropCount],
+    [tab, props.prefabs],
   );
   const armKind: 'piece' | 'prefab' | 'water' = tab === 'prefabs' ? 'prefab' : tab === 'water' ? 'water' : 'piece';
   const armedId = props.armed && props.armed.kind !== 'tower' ? props.armed.id : null;
   const towerArmed = props.armed?.kind === 'tower';
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: '#0b1220fa', borderRadius: 6, borderWidth: 1, borderColor: '#1e3a5f', padding: 8, gap: 6 }}>
-      <Text fontSize={10} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-        {`${tab === 'prefabs' ? 'PREFABS' : tab === 'water' ? 'WATER' : 'PIECES'} · ${tab} (${entries.length})`}
-      </Text>
-      <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
-        {RAIL_TABS.map((k) => (
-          <Pressable key={k} onPress={() => setTab(k)}>
-            <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, backgroundColor: k === tab ? '#2563eb' : (k === 'prefabs' ? '#3b2a5e' : '#1e293b') }}>
-              <Text fontSize={11} color={k === tab ? '#eaf4ff' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{k}</Text>
+      {/* SECTION toggle — the first, top-level choice (req_1906 decouple). Two
+          distinct activities, not two more pills in a shared row. */}
+      <Box style={{ flexDirection: 'row', gap: 4 }}>
+        {(['build', 'props'] as RailSection[]).map((s) => (
+          <Pressable key={s} onPress={() => setSection(s)} style={{ flexGrow: 1 }}>
+            <Box style={{ flexGrow: 1, alignItems: 'center', paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: s === section ? '#7dd3fc' : '#23354f', backgroundColor: s === section ? '#13315c' : '#0f1a2c' }}>
+              <Text fontSize={11} color={s === section ? '#eaf4ff' : '#7e93ab'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>{s === 'build' ? 'BUILD' : 'PROPS'}</Text>
             </Box>
           </Pressable>
         ))}
-        {/* the TOWER tool (req_0478) — not a catalog kind, a whole-shell drag tool.
-            Box metrics match the kind tabs exactly (no border, same padding) — the
-            extra border + the emoji glyph's leading advance read as a weird left
-            padding (req_0483); the gold background alone marks it special. */}
-        <Pressable onPress={() => props.onArm({ kind: 'tower' })}>
-          <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, backgroundColor: towerArmed ? '#1d4ed8' : '#4a3a12' }}>
-            <Text fontSize={11} color={towerArmed ? '#ffffff' : '#f0d9a8'} style={{ fontFamily: 'monospace' }}>tower</Text>
-          </Box>
-        </Pressable>
       </Box>
-      {/* PROPS get the PICTURE browser (req_1895): search across every category +
-          paged thumbnails, off the pill wall. Other tabs keep the compact pill list. */}
-      {tab === 'prop' ? (
+      {section === 'props' ? (
+        // PROPS section: the PICTURE browser (req_1895) — search across every
+        // category + paged thumbnails. Its own internal breakdown is untouched here.
         <PropBrowser armedId={armedId} onArm={(id) => props.onArm({ kind: 'piece', id })} />
       ) : (
-        <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
-          <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
-            {entries.map((def) => (
-              <Pressable key={def.id} onPress={() => props.onArm({ kind: armKind, id: def.id })}>
-                <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: armedId === def.id ? '#7dd3fc' : '#3a4f6b', backgroundColor: armedId === def.id ? '#1d4ed8' : '#16233a' }}>
-                  <Text fontSize={11} color={armedId === def.id ? '#ffffff' : '#dbe6f3'} style={{ fontFamily: 'monospace' }}>{def.label}</Text>
+        <>
+          <Text fontSize={10} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+            {`${tab === 'prefabs' ? 'PREFABS' : tab === 'water' ? 'WATER' : 'PIECES'} · ${tab} (${entries.length})`}
+          </Text>
+          <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
+            {BUILD_TABS.map((k) => (
+              <Pressable key={k} onPress={() => setTab(k)}>
+                <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, backgroundColor: k === tab ? '#2563eb' : (k === 'prefabs' ? '#3b2a5e' : '#1e293b') }}>
+                  <Text fontSize={11} color={k === tab ? '#eaf4ff' : '#a8b6c8'} style={{ fontFamily: 'monospace' }}>{k}</Text>
                 </Box>
               </Pressable>
             ))}
+            {/* the TOWER tool (req_0478) — not a catalog kind, a whole-shell drag tool.
+                Box metrics match the kind tabs exactly (no border, same padding) — the
+                extra border + the emoji glyph's leading advance read as a weird left
+                padding (req_0483); the gold background alone marks it special. */}
+            <Pressable onPress={() => props.onArm({ kind: 'tower' })}>
+              <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 4, backgroundColor: towerArmed ? '#1d4ed8' : '#4a3a12' }}>
+                <Text fontSize={11} color={towerArmed ? '#ffffff' : '#f0d9a8'} style={{ fontFamily: 'monospace' }}>tower</Text>
+              </Box>
+            </Pressable>
           </Box>
-        </ScrollView>
+          <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
+            <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
+              {entries.map((def) => (
+                <Pressable key={def.id} onPress={() => props.onArm({ kind: armKind, id: def.id })}>
+                  <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: armedId === def.id ? '#7dd3fc' : '#3a4f6b', backgroundColor: armedId === def.id ? '#1d4ed8' : '#16233a' }}>
+                    <Text fontSize={11} color={armedId === def.id ? '#ffffff' : '#dbe6f3'} style={{ fontFamily: 'monospace' }}>{def.label}</Text>
+                  </Box>
+                </Pressable>
+              ))}
+            </Box>
+          </ScrollView>
+        </>
       )}
     </Box>
   );
