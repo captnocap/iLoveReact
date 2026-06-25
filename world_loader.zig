@@ -3739,6 +3739,11 @@ pub const Runtime = struct {
                     .scene3d_geom_key = key,
                     .scene3d_tex_key = "~water~",
                     .scene3d_heights = body.heights,
+                    // Per-cell water depth (WATER lump v2) → hfGen bakes it into UV.x
+                    // for the water shader (deep/shallow + shoreline run-up). Empty on
+                    // v1 gamefiles (recompile to get the beach); hfGen falls back to
+                    // grid UV then.
+                    .scene3d_hf_depths = if (body.depths.len == body.heights.len) body.depths else null,
                     .scene3d_hf_cols = body.cols,
                     .scene3d_hf_rows = body.rows,
                     .scene3d_hf_width = body.width,

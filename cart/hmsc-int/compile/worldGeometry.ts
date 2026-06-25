@@ -782,7 +782,13 @@ function pushWorldLayers(b: Build, state: GameState): void {
   }
 }
 
-export const WATER_LUMP_VERSION = 1;
+// v2 (req_1840): each body also ships a per-cell DEPTH grid (water column, m) after
+// its heights, so the no-V8 loader feeds it to gpu/3d.zig hfGen → water-shader UV.x
+// (deep/shallow gradient + shoreline run-up), matching the editor. v1 = no depths.
+export const WATER_LUMP_VERSION = 2;
+// Uniform "deep" column for a body with no authored per-cell depth (parametric
+// ponds/lakes) — mirrors render3d/WaterBody.tsx DEEP_COLUMN_M so /test == /compiled.
+const WATER_DEEP_COLUMN_M = 6.0;
 
 /** Bodies of water (world/water) → the WATER lump. Each body ships its FLAT
  *  surface-level height grid (waterFlatHeights — surfaceY inside the footprint,
@@ -793,17 +799,25 @@ export const WATER_LUMP_VERSION = 1;
  *
  *  Layout: u32 version | u32 count |
  *          f32 colorR,colorG,colorB,alpha | f32 waveAmp,waveLen,waveSpeed,waveDirX,waveDirZ |
- *          per body: u32 cols,rows | f32 centerX,centerZ,base,width,depth | f32[cols*rows] heights */
+ *          per body: u32 cols,rows | f32 centerX,centerZ,base,width,depth |
+ *                    f32[cols*rows] heights | f32[cols*rows] depths (v2+) */
 export function encodeWaterBodies(bodies: GameState['world']['waterBodies'] | undefined): Uint8Array {
   const list = bodies ?? [];
   // A painted body ships its authored per-cell grid; a parametric body builds a
-  // still grid from its footprint. The host applies the wave either way.
-  const grids = list.map((b) =>
-    b.field
-      ? { cols: b.field.cols, rows: b.field.rows, base: b.field.base, heights: b.field.heights }
-      : waterFlatHeights(b.shape, b.width, b.depth, b.surfaceY));
+  // still grid from its footprint. Each also ships a depth grid (water column, m):
+  // authored for painted bodies, else a uniform deep column inside the footprint.
+  const grids = list.map((b) => {
+    if (b.field) {
+      const base = b.field.base;
+      const depths = b.field.depths ?? b.field.heights.map((hy) => (hy > base + 1e-3 ? WATER_DEEP_COLUMN_M : 0));
+      return { cols: b.field.cols, rows: b.field.rows, base, heights: b.field.heights, depths };
+    }
+    const f = waterFlatHeights(b.shape, b.width, b.depth, b.surfaceY);
+    const depths = f.heights.map((hy) => (hy > f.base + 1e-3 ? WATER_DEEP_COLUMN_M : 0));
+    return { cols: f.cols, rows: f.rows, base: f.base, heights: f.heights, depths };
+  });
   let bytes = 8 + 16 + 20;
-  for (const g of grids) bytes += 8 + 20 + g.cols * g.rows * 4;
+  for (const g of grids) bytes += 8 + 20 + g.cols * g.rows * 4 * 2; // heights + depths
   const dv = new DataView(new ArrayBuffer(bytes));
   let o = 0;
   const u32 = (v: number) => { dv.setUint32(o, v >>> 0, true); o += 4; };
@@ -819,6 +833,7 @@ export function encodeWaterBodies(bodies: GameState['world']['waterBodies'] | un
     u32(g.cols); u32(g.rows);
     f32(b.x + b.width / 2); f32(b.z + b.depth / 2); f32(g.base); f32(b.width); f32(b.depth);
     for (let m = 0; m < g.heights.length; m += 1) f32(g.heights[m]!);
+    for (let m = 0; m < g.depths.length; m += 1) f32(g.depths[m]!);
   }
   return new Uint8Array(dv.buffer);
 }

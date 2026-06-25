@@ -45,7 +45,7 @@ const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
 const MESH_PROPS_VERSION: u32 = 6;
-const WATER_VERSION: u32 = 1;
+const WATER_VERSION: u32 = 2;
 const TICKER_VERSION: u32 = 1;
 /// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
 /// corrupt lump can't allocate wild. (req_0893 #3)
@@ -280,9 +280,14 @@ pub const WaterField = struct {
     width: f32,
     depth: f32,
     heights: []f32,
+    /// Per-cell water column depth (surface − bed, metres), same cols×rows as
+    /// heights — WATER lump v2+. The loader feeds it to gpu/3d.zig hfGen → water
+    /// shader UV.x (deep/shallow gradient + shoreline run-up). Empty on v1 lumps.
+    depths: []f32,
 
     pub fn deinit(self: WaterField, allocator: std.mem.Allocator) void {
         allocator.free(self.heights);
+        allocator.free(self.depths);
     }
 };
 
@@ -1216,7 +1221,9 @@ fn decodeWater(allocator: std.mem.Allocator, data: []const u8) Error!WaterBodies
     const header: usize = 8 + 16 + 20;
     if (data.len < header) return Error.BadWater;
     const version = std.mem.readInt(u32, data[0..4], .little);
-    if (version != WATER_VERSION) return Error.BadWater;
+    // v1 ships heights only; v2+ appends a per-cell depth grid. Accept both so
+    // older maps still load (their bodies just get an empty depth grid = flat look).
+    if (version < 1 or version > WATER_VERSION) return Error.BadWater;
     const count = std.mem.readInt(u32, data[4..8], .little);
     const color = [3]f32{ readF32(data, 8), readF32(data, 12), readF32(data, 16) };
     const alpha = readF32(data, 20);
@@ -1249,7 +1256,17 @@ fn decodeWater(allocator: std.mem.Allocator, data: []const u8) Error!WaterBodies
         var m: usize = 0;
         while (m < samples) : (m += 1) heights[m] = readF32(data, at + m * 4);
         at += samples * 4;
-        bodies[built] = .{ .cols = cols, .rows = rows, .center_x = center_x, .center_z = center_z, .base = base, .width = width, .depth = depth, .heights = heights };
+        // v2+: per-cell depth grid follows the heights. v1 → a real 0-len alloc
+        // (so deinit's free is always valid), which the loader reads as "flat".
+        const depths: []f32 = if (version >= 2) blk: {
+            if (at + samples * 4 > data.len) return Error.BadWater;
+            const d = try allocator.alloc(f32, samples);
+            var di: usize = 0;
+            while (di < samples) : (di += 1) d[di] = readF32(data, at + di * 4);
+            at += samples * 4;
+            break :blk d;
+        } else try allocator.alloc(f32, 0);
+        bodies[built] = .{ .cols = cols, .rows = rows, .center_x = center_x, .center_z = center_z, .base = base, .width = width, .depth = depth, .heights = heights, .depths = depths };
     }
     return .{ .color = color, .alpha = alpha, .wave_amp = wave_amp, .wave_len = wave_len, .wave_speed = wave_speed, .wave_dx = wave_dx, .wave_dz = wave_dz, .bodies = bodies };
 }
