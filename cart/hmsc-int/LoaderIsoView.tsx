@@ -750,10 +750,11 @@ export function LoaderIsoView(props: {
     if (typeof g.__compiled_world_set_live_pieces === 'function') g.__compiled_world_set_live_pieces(nodeId, rows);
     if (typeof g.__compiled_world_set_live_mesh_props === 'function') g.__compiled_world_set_live_mesh_props(nodeId, meshPush.refs);
     if (typeof g.__compiled_world_set_live_skin_boxes === 'function') g.__compiled_world_set_live_skin_boxes(nodeId, skinPush.boxes);
-    // EDITLATENCY req_1924/req_1928: this push is the edit's — take the gesture stamp and log the
-    // matrix line. gesture→push is the React reconcile + push cost (the optimizable part); one rAF
-    // later ≈ the host has drawn it, so gesture→rendered is the felt keystroke→on-screen latency.
-    // The last sample is stashed on g.__hmscEditLatency for a HUD / external reader.
+    // EDITLATENCY req_1924/req_1928/req_1934: this push is the edit's — take the gesture stamp and
+    // log the matrix line. gesture→push is the React reconcile + push cost (the optimizable part);
+    // one rAF later ≈ the host has drawn it, so gesture→rendered is the felt keystroke→on-screen
+    // latency. console.WARN, not log — only warn+ severities reach the dev terminal (the same path
+    // PLACEFREEZE uses); a console.log here was invisible (req_1934). Last sample on g.__hmscEditLatency.
     const stamp = takeEditStamp();
     if (stamp) {
       const pushMs = nowMs() - stamp.t;
@@ -762,7 +763,7 @@ export function LoaderIsoView(props: {
       after(() => {
         const renderedMs = nowMs() - t;
         g.__hmscEditLatency = { label, pushMs, renderedMs, at: Date.now() };
-        console.log(`[edit-latency] ${label.padEnd(7)} gesture→push ${pushMs.toFixed(1).padStart(6)}ms · gesture→rendered ~${renderedMs.toFixed(1).padStart(6)}ms`);
+        console.warn(`[edit-latency] ${label.padEnd(7)} gesture→push ${pushMs.toFixed(1).padStart(6)}ms · gesture→rendered ~${renderedMs.toFixed(1).padStart(6)}ms`);
       });
     }
   }, [editable, props.pieces, props.reloadToken]);
