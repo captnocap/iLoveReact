@@ -21,6 +21,7 @@ import { propDynamics, isCookedPropKind } from '../../game/kinds/props';
 import { isImportedPropKind, importedPropMesh } from '../../game/kinds/importedProps';
 import { cookedAssetById } from '../model/cookedAssets';
 import { resolvePropParts } from '../../compile/propRecipes/resolve';
+import { resolveMaterialShader } from '../../compile/worldGeometry';
 import { propModelFootprintMeters, propVerticalBand } from '../../compile/propRecipes/footprint';
 import { BUILD_UI, pieceVisualShapes, wallJoinSignature } from './pieceShapes';
 import type { VisualBox, VisualShape } from './pieceShapes';
@@ -530,54 +531,87 @@ export function meshPropKeyForKind(kind: string): string | null {
   return null;
 }
 
-// Pack ONE live mesh ref: 20 bytes (u32 keyHash, f32 x,y,z,yaw) — the layout both
-// world_loader.setLiveMeshProps and setLiveMeshGhost decode.
-function packMeshRef(hash: number, x: number, y: number, z: number, yaw: number): Uint8Array {
-  const buf = new ArrayBuffer(20);
-  new Uint32Array(buf)[0] = hash;
+// LIVEMESH ref stride: u32 keyHash, f32 x,y,z,yaw, u32 matHash (0 = the mesh's own baked
+// texture). matHash references a live material pushed via __compiled_world_set_live_material
+// (LIVESKIN req_1843) so an editor face-skin shows without a rebake.
+const MESH_REF_BYTES = 24;
+
+// Pack ONE live mesh ref — the layout world_loader.setLiveMeshProps / setLiveMeshGhost decode.
+function packMeshRef(hash: number, x: number, y: number, z: number, yaw: number, matHash: number): Uint8Array {
+  const buf = new ArrayBuffer(MESH_REF_BYTES);
+  const u = new Uint32Array(buf);
   const f = new Float32Array(buf);
+  u[0] = hash;
   f[1] = x;
   f[2] = y;
   f[3] = z;
   f[4] = yaw;
+  u[5] = matHash;
   return new Uint8Array(buf);
 }
 
 // The placement-GHOST ref for an armed mesh-prop kind at a snap target (LIVEMESH req_1841):
-// 20 bytes, or null when the kind has no resident mesh (parts prop / unknown) — the caller
-// then clears the ghost and the projected wireframe stands alone.
+// null when the kind has no resident mesh (parts prop / unknown) — the caller then clears
+// the ghost and the projected wireframe stands alone. An unplaced prop wears no skin yet,
+// so the ghost always references the baked texture (matHash 0).
 export function meshGhostRef(propKind: string, x: number, y: number, z: number, yaw: number): Uint8Array | null {
   const key = meshPropKeyForKind(propKind);
   if (!key) return null;
-  return packMeshRef(fnv1aHash(key), x, y, z, yaw);
+  return packMeshRef(fnv1aHash(key), x, y, z, yaw, 0);
 }
 
-// Live MESH-prop references for the loader overlay (LIVEMESH req_1812). Packs, per
-// just-placed imported/cooked mesh prop, 20 bytes — u32 keyHash, then f32 x,y,z,yaw —
-// the exact layout world_loader.setLiveMeshProps decodes. The prop renders INSTANTLY by
-// referencing its already-resident mesh (you have many pepes → its mesh is loaded), with
-// NO rebake. A never-before-placed kind's mesh isn't resident yet, so its ref simply won't
-// resolve until a bake (or the mesh-zoo dev room) makes it resident.
-export function meshPropLiveRefs(pieces: readonly PlacedBuildPiece[]): Uint8Array {
-  const refs: { hash: number; x: number; y: number; z: number; yaw: number }[] = [];
+// A procedural-shader skin to materialize live on the loader (LIVESKIN req_1843): keyed by
+// hash, carries the WGSL recipe + tuned data the loader compiles into a 1-tile texture.
+export interface LiveMaterial { hash: number; wgsl: string; data: number[]; opacity: number }
+export interface LiveMeshPush { refs: Uint8Array; materials: LiveMaterial[] }
+
+// The whole-prop skin (LIVESKIN req_1843, slice 1): the FacePainter default paints every
+// slot the same, so the first applied part texture stands for the prop. Per-face skins are a
+// follow-up (they need per-slot live mesh ranges).
+function wholePropMaterialId(prop: WorldProp): string | null {
+  const pt = prop.partTextures;
+  if (!pt) return null;
+  for (const k of Object.keys(pt)) if (pt[k]) return pt[k];
+  return null;
+}
+
+// Live MESH-prop references + the skin materials they need (LIVEMESH req_1812 + LIVESKIN
+// req_1843). Each placed imported/cooked mesh prop renders INSTANTLY by referencing its
+// already-resident mesh; if it wears a PROCEDURAL skin we also hand back the material recipe
+// so the loader materializes it and the mesh wears it live. Decal/image and per-face skins
+// are follow-ups — those refs fall back to matHash 0 (the mesh's baked texture).
+export function meshPropLivePush(pieces: readonly PlacedBuildPiece[]): LiveMeshPush {
+  const refs: { hash: number; x: number; y: number; z: number; yaw: number; matHash: number }[] = [];
+  const materials = new Map<number, LiveMaterial>();
   for (const piece of pieces) {
     const prop = propFromPiece(piece);
     if (!prop) continue;
     const key = meshPropKeyForKind(prop.kind);
     if (!key) continue;
-    refs.push({ hash: fnv1aHash(key), x: prop.x, y: prop.y ?? 0, z: prop.z, yaw: prop.yawDegrees ?? 0 });
+    let matHash = 0;
+    const matId = wholePropMaterialId(prop);
+    if (matId) {
+      const shader = resolveMaterialShader(matId);
+      if (shader) {
+        matHash = fnv1aHash(`${matId}:${shader.data.join(',')}`);
+        if (!materials.has(matHash)) materials.set(matHash, { hash: matHash, wgsl: shader.wgsl, data: shader.data, opacity: shader.opacity });
+      }
+    }
+    refs.push({ hash: fnv1aHash(key), x: prop.x, y: prop.y ?? 0, z: prop.z, yaw: prop.yawDegrees ?? 0, matHash });
   }
-  const buf = new ArrayBuffer(refs.length * 20);
+  const buf = new ArrayBuffer(refs.length * MESH_REF_BYTES);
   const u = new Uint32Array(buf);
   const f = new Float32Array(buf);
   refs.forEach((r, i) => {
-    u[i * 5] = r.hash;
-    f[i * 5 + 1] = r.x;
-    f[i * 5 + 2] = r.y;
-    f[i * 5 + 3] = r.z;
-    f[i * 5 + 4] = r.yaw;
+    const o = i * 6;
+    u[o] = r.hash;
+    f[o + 1] = r.x;
+    f[o + 2] = r.y;
+    f[o + 3] = r.z;
+    f[o + 4] = r.yaw;
+    u[o + 5] = r.matHash;
   });
-  return new Uint8Array(buf);
+  return { refs: new Uint8Array(buf), materials: [...materials.values()] };
 }
 
 // The join-signature pass over the whole piece array, cached on the ARRAY

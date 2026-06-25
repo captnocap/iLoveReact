@@ -2723,6 +2723,10 @@ pub const Runtime = struct {
     // mesh-prop draw node per ref each frame, resolving the hash to a loaded mesh. No bake.
     mesh_by_hash: std.AutoHashMapUnmanaged(u32, usize) = .{},
     mesh_hash_built: bool = false,
+    // Live editor face-skins (LIVESKIN req_1843): a procedural skin the editor pushes is
+    // materialized once into a "live-mat:<hash>" tile; this maps its hash → that owned key
+    // string (presence = already materialized). A live mesh ref carrying mat_hash wears it.
+    live_mat_keys: std.AutoHashMapUnmanaged(u32, []u8) = .{},
     // Node count of the permanent (non-streaming, non-live-mesh) prefix — captured in
     // build(). The non-streaming path truncates back to here before re-appending the live
     // mesh nodes each frame (streaming truncates to stream_tail_start in refreshStreamNodes).
@@ -2838,6 +2842,11 @@ pub const Runtime = struct {
 
     pub fn deinit(self: *Runtime) void {
         self.mesh_by_hash.deinit(self.allocator);
+        {
+            var it = self.live_mat_keys.valueIterator();
+            while (it.next()) |v| self.allocator.free(v.*);
+            self.live_mat_keys.deinit(self.allocator);
+        }
         for (self.mesh_prop_vertex_buffers.items) |verts| self.allocator.free(verts);
         self.mesh_prop_vertex_buffers.deinit(self.allocator);
         for (self.mesh_prop_islands) |isls| self.allocator.free(isls);
@@ -2888,12 +2897,18 @@ pub const Runtime = struct {
         count: u32,
         material_ref: u32,
         alpha_override: ?f32,
+        tex_key_override: ?[]const u8,
     ) !void {
         if (count == 0) return;
         const float_start: usize = @as(usize, @intCast(start)) * 8;
         const float_count: usize = @as(usize, @intCast(count)) * 8;
         if (float_start + float_count > mesh.vertices.len) return;
         const tex_key = try self.meshPropTexKey(material_ref);
+        // tex_key_override (LIVESKIN req_1843): a live face-skin materialized into its own
+        // "live-mat:<hash>" tile wins over the mesh's baked texture. It rides the mesh's OWN
+        // UVs with no per-frame flip-copy (the live path runs every frame — a copy would leak);
+        // the exact V-orientation lands on Compile.
+        const eff_tex_key = tex_key_override orelse tex_key;
         const vertices = if (tex_key != null) blk: {
             const copy = try self.allocator.alloc(f32, float_count);
             errdefer self.allocator.free(copy);
@@ -2908,7 +2923,7 @@ pub const Runtime = struct {
         // alpha_override (LIVEMESH ghost req_1841): the hover preview forces a translucent
         // alpha so it reads as a not-yet-placed ghost; a<1 routes it to the transparent pass.
         const final_alpha = alpha_override orelse opacity;
-        const textured = tex_key != null or mesh.tex_rgba != null;
+        const textured = eff_tex_key != null or mesh.tex_rgba != null;
         try self.kid_list.append(self.allocator, .{
             .scene3d_mesh = count > 0,
             .scene3d_geom_key = key,
@@ -2923,10 +2938,10 @@ pub const Runtime = struct {
             .scene3d_color_g = if (textured) 1 else mesh.color[1],
             .scene3d_color_b = if (textured) 1 else mesh.color[2],
             .scene3d_color_a = final_alpha,
-            .scene3d_tex_w = if (tex_key == null) mesh.tex_w else 0,
-            .scene3d_tex_h = if (tex_key == null) mesh.tex_h else 0,
-            .scene3d_tex_rgba = if (tex_key == null) mesh.tex_rgba else null,
-            .scene3d_tex_key = tex_key,
+            .scene3d_tex_w = if (eff_tex_key == null) mesh.tex_w else 0,
+            .scene3d_tex_h = if (eff_tex_key == null) mesh.tex_h else 0,
+            .scene3d_tex_rgba = if (eff_tex_key == null) mesh.tex_rgba else null,
+            .scene3d_tex_key = eff_tex_key,
         });
     }
 
@@ -2952,7 +2967,25 @@ pub const Runtime = struct {
         const idx = self.mesh_by_hash.get(r.hash) orelse return;
         if (idx >= mp.meshes.len) return;
         const mesh = mp.meshes[idx];
-        self.appendMeshPropNode(mesh, .{ .mesh = @intCast(idx), .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw }, mesh.key, 0, mesh.vertex_count, 0, alpha) catch {};
+        const tex_override: ?[]const u8 = if (r.mat_hash != 0) self.live_mat_keys.get(r.mat_hash) else null;
+        self.appendMeshPropNode(mesh, .{ .mesh = @intCast(idx), .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw }, mesh.key, 0, mesh.vertex_count, 0, alpha, tex_override) catch {};
+    }
+
+    // LIVESKIN req_1843: materialize the editor's queued face-skin recipes (GPU is up by
+    // render time), once per hash, into "live-mat:<hash>" tiles a live mesh ref then samples.
+    fn ensureLiveMaterials(self: *Runtime) void {
+        const pm = pendingLiveMatsFor(self.node_id) orelse return;
+        for (pm.mats.items) |m| {
+            if (self.live_mat_keys.contains(m.hash)) continue;
+            const key = std.fmt.allocPrint(self.allocator, "live-mat:{x}", .{m.hash}) catch continue;
+            const data: ?[]const f32 = if (m.data.len > 0) m.data else null;
+            const ok = if (m.kind == 0) material_tex.materialize(key, m.wgsl, data, MATERIAL_TILE_PX) else false;
+            if (!ok) {
+                self.allocator.free(key);
+                continue;
+            }
+            self.live_mat_keys.put(self.allocator, m.hash, key) catch self.allocator.free(key);
+        }
     }
 
     fn applyLiveMeshProps(self: *Runtime) void {
@@ -2960,6 +2993,7 @@ pub const Runtime = struct {
         defer self.root.children = self.kid_list.items; // append may realloc; re-point the root
         const mp = self.scene.mesh_props orelse return;
         self.ensureMeshHashMap();
+        self.ensureLiveMaterials();
         if (pendingLiveMeshFor(self.node_id)) |p| {
             for (p.refs) |r| self.appendLiveMeshRef(mp, r, null);
         }
@@ -3329,7 +3363,7 @@ pub const Runtime = struct {
                     // A painted cooked prop (req_1496) carries its atlas as tex_rgba —
                     // wear it via scene3d_tex_rgba and whiten the tint so it doesn't
                     // dim the texture. Untextured imports stay tinted.
-                    try self.appendMeshPropNode(mesh, inst, mesh.key, 0, mesh.vertex_count, 0, null);
+                    try self.appendMeshPropNode(mesh, inst, mesh.key, 0, mesh.vertex_count, 0, null, null);
                     continue;
                 }
 
@@ -3340,7 +3374,7 @@ pub const Runtime = struct {
                         self.allocator.free(key);
                         return err;
                     };
-                    try self.appendMeshPropNode(mesh, inst, key, 0, first_slot_start, 0, null);
+                    try self.appendMeshPropNode(mesh, inst, key, 0, first_slot_start, 0, null, null);
                 }
                 for (mesh.slots, 0..) |slot, si| {
                     const key = try std.fmt.allocPrint(self.allocator, "{s}:slot-{d}", .{ mesh.key, si });
@@ -3349,7 +3383,7 @@ pub const Runtime = struct {
                         return err;
                     };
                     const material_ref = if (si < inst.slot_materials.len) inst.slot_materials[si] else 0;
-                    try self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, material_ref, null);
+                    try self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, material_ref, null, null);
                 }
             }
             if (mp.instances.len > 0) {
@@ -4852,8 +4886,8 @@ fn liveMeshHash(key: []const u8) u32 {
     return h;
 }
 
-const LiveMeshRef = struct { hash: u32, x: f32, y: f32, z: f32, yaw: f32 };
-const LIVE_MESH_STRIDE_BYTES: usize = 20; // u32 hash + 4×f32
+const LiveMeshRef = struct { hash: u32, x: f32, y: f32, z: f32, yaw: f32, mat_hash: u32 = 0 };
+const LIVE_MESH_STRIDE_BYTES: usize = 24; // u32 keyHash + 4×f32 + u32 matHash (0 = baked tex)
 const PendingLiveMesh = struct {
     node_id: u32 = 0,
     set: bool = false,
@@ -4895,6 +4929,7 @@ pub fn setLiveMeshProps(node_id: u32, bytes: []const u8) void {
             .y = std.mem.bytesToValue(f32, bytes[off + 8 ..][0..4]),
             .z = std.mem.bytesToValue(f32, bytes[off + 12 ..][0..4]),
             .yaw = std.mem.bytesToValue(f32, bytes[off + 16 ..][0..4]),
+            .mat_hash = std.mem.bytesToValue(u32, bytes[off + 20 ..][0..4]),
         };
     }
     if (p.refs.len > 0) alloc.free(p.refs);
@@ -4910,6 +4945,56 @@ pub fn clearLiveMeshProps(node_id: u32) void {
     if (p.refs.len > 0) std.heap.page_allocator.free(p.refs);
     p.refs = &.{};
     p.gen +%= 1;
+}
+
+// ── live editor face-skin MATERIALS (LIVESKIN req_1843) ─────────────────────
+// A procedural skin pushed by the editor — its WGSL recipe + tuned data — queued per node
+// until applyLiveMeshProps materializes it (the GPU is up by render time). Materialized once
+// per hash into "live-mat:<hash>"; a live mesh ref bearing that mat_hash then wears it.
+const LiveMat = struct { hash: u32, kind: u32, wgsl: []u8, data: []f32, opacity: f32 };
+const PendingLiveMats = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    mats: std.ArrayListUnmanaged(LiveMat) = .{},
+};
+var g_pending_live_mats: [MAX_EMBEDDED_LOADERS]PendingLiveMats = [_]PendingLiveMats{.{}} ** MAX_EMBEDDED_LOADERS;
+
+fn pendingLiveMatsFor(node_id: u32) ?*PendingLiveMats {
+    for (&g_pending_live_mats) |*p| {
+        if (p.set and p.node_id == node_id) return p;
+    }
+    return null;
+}
+
+/// Queue a live face-skin material for a node (LIVESKIN req_1843). kind 0 = shader (wgsl +
+/// data). Owns copies of wgsl/data. Deduped by hash — the loader materializes each once.
+pub fn setLiveMaterial(node_id: u32, hash: u32, kind: u32, wgsl: []const u8, data_bytes: []const u8, opacity: f32) void {
+    const alloc = std.heap.page_allocator;
+    var slot: ?*PendingLiveMats = pendingLiveMatsFor(node_id);
+    if (slot == null) {
+        for (&g_pending_live_mats) |*p| {
+            if (!p.set) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    const p = slot orelse return;
+    p.node_id = node_id;
+    p.set = true;
+    for (p.mats.items) |m| if (m.hash == hash) return; // already queued — materialized once
+    const wgsl_copy = alloc.dupe(u8, wgsl) catch return;
+    const n = data_bytes.len / 4;
+    const data_copy = alloc.alloc(f32, n) catch {
+        alloc.free(wgsl_copy);
+        return;
+    };
+    var i: usize = 0;
+    while (i < n) : (i += 1) data_copy[i] = std.mem.bytesToValue(f32, data_bytes[i * 4 ..][0..4]);
+    p.mats.append(alloc, .{ .hash = hash, .kind = kind, .wgsl = wgsl_copy, .data = data_copy, .opacity = opacity }) catch {
+        alloc.free(wgsl_copy);
+        alloc.free(data_copy);
+    };
 }
 
 // ── live placement GHOST (LIVEMESH req_1841) ────────────────────────────────

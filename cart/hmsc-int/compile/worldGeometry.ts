@@ -166,7 +166,7 @@ function shaderMaterialOpacity(shaderId: string, data: readonly number[]): numbe
   return 1;
 }
 
-function resolveMaterialShader(id: string): { wgsl: string; data: number[]; opacity: number } | null {
+export function resolveMaterialShader(id: string): { wgsl: string; data: number[]; opacity: number } | null {
   const builtin = shaderSpec(id);
   if (builtin) {
     const data = defaultShaderData(builtin);

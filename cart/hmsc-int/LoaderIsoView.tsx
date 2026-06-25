@@ -37,7 +37,7 @@ import { GAME_BUILD, buildingPieceInstanceId, partitionBuildingSelection } from 
 import type { BuildEditEvent, BuildPrefabDef, BuildingInstance, PlacedBuildPiece, Rect, WorldGridState } from './game';
 import { modulePitch, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
-import { pieceInstanceRows, meshPropLiveRefs, meshGhostRef } from './editors/build/pieceMeshes';
+import { pieceInstanceRows, meshPropLivePush, meshGhostRef } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
 import type { GameState } from './design';
 
@@ -597,17 +597,22 @@ export function LoaderIsoView(props: {
     }
     // Two overlays, one per geometry kind: parts pieces/props → the box/shape instance
     // overlay (pieceInstanceRows); MESH props (imported genmesh / Studio-cooked) → the
-    // resident-mesh reference overlay (meshPropLiveRefs, LIVEMESH req_1812). A placement is
-    // whichever it is, so push both — the unused one is just empty.
+    // resident-mesh reference overlay (meshPropLivePush, LIVEMESH req_1812). A placement is
+    // whichever it is, so push both — the unused one is just empty. The mesh push also hands
+    // back any procedural face-skin materials the props wear (LIVESKIN req_1843) — materialize
+    // those FIRST so the mesh refs that reference them by hash already resolve this frame.
     const rows = pieceInstanceRows(pending);
-    const meshRefs = meshPropLiveRefs(pending);
+    const meshPush = meshPropLivePush(pending);
     // Only the failure mode is worth a console line now (a host predating the live doors):
     // a successful push is the silent common case.
     if (typeof g.__compiled_world_set_live_pieces !== 'function' || typeof g.__compiled_world_set_live_mesh_props !== 'function') {
       console.warn(`[live-push] node=${nodeId} live doors MISSING (pieces=${typeof g.__compiled_world_set_live_pieces === 'function'} mesh=${typeof g.__compiled_world_set_live_mesh_props === 'function'}) — rebuild the dev host`);
     }
+    if (typeof g.__compiled_world_set_live_material === 'function') {
+      for (const m of meshPush.materials) g.__compiled_world_set_live_material(nodeId, m.hash, 0, m.wgsl, new Float32Array(m.data), m.opacity);
+    }
     if (typeof g.__compiled_world_set_live_pieces === 'function') g.__compiled_world_set_live_pieces(nodeId, rows);
-    if (typeof g.__compiled_world_set_live_mesh_props === 'function') g.__compiled_world_set_live_mesh_props(nodeId, meshRefs);
+    if (typeof g.__compiled_world_set_live_mesh_props === 'function') g.__compiled_world_set_live_mesh_props(nodeId, meshPush.refs);
   }, [editable, props.pieces, props.reloadToken]);
 
   // LIVEMESH req_1841: the placement GHOST for a mesh prop is the REAL mesh, translucent,
