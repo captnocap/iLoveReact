@@ -18,7 +18,8 @@ import type { PlacedBuildPiece } from '@game';
 import type { WorldProp } from '../../design';
 import { Prop } from '../../render3d/Prop';
 import { propDynamics, isCookedPropKind } from '../../game/kinds/props';
-import { isImportedPropKind } from '../../game/kinds/importedProps';
+import { isImportedPropKind, importedPropMesh } from '../../game/kinds/importedProps';
+import { cookedAssetById } from '../model/cookedAssets';
 import { resolvePropParts } from '../../compile/propRecipes/resolve';
 import { propModelFootprintMeters, propVerticalBand } from '../../compile/propRecipes/footprint';
 import { BUILD_UI, pieceVisualShapes, wallJoinSignature } from './pieceShapes';
@@ -505,6 +506,55 @@ export function pieceInstanceRows(pieces: readonly PlacedBuildPiece[]): Float32A
     }
   }
   return new Float32Array(rows);
+}
+
+// FNV-1a 32-bit — MUST match world_loader.liveMeshHash so a mesh kind's key hashes the
+// same on both sides of the door. charCodeAt == byte for the ASCII keys we hash (content
+// hashes / asset ids). Math.imul keeps it 32-bit like the Zig u32 wrap.
+function fnv1aHash(s: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
+// The resident-mesh KEY for a mesh prop, identical to what the bake assigns the gamefile
+// mesh: imported genmesh props key by their generated mesh key; Studio-cooked props by the
+// cooked asset's meshRef (worldGeometry.cookedPropMesh ships `key: asset.meshRef`).
+function meshPropKey(prop: WorldProp): string | null {
+  if (isImportedPropKind(prop.kind)) return importedPropMesh(prop.kind)?.key ?? null;
+  if (isCookedPropKind(prop.kind)) return cookedAssetById(prop.kind)?.meshRef ?? null;
+  return null;
+}
+
+// Live MESH-prop references for the loader overlay (LIVEMESH req_1812). Packs, per
+// just-placed imported/cooked mesh prop, 20 bytes — u32 keyHash, then f32 x,y,z,yaw —
+// the exact layout world_loader.setLiveMeshProps decodes. The prop renders INSTANTLY by
+// referencing its already-resident mesh (you have many pepes → its mesh is loaded), with
+// NO rebake. A never-before-placed kind's mesh isn't resident yet, so its ref simply won't
+// resolve until a bake (or the mesh-zoo dev room) makes it resident.
+export function meshPropLiveRefs(pieces: readonly PlacedBuildPiece[]): Uint8Array {
+  const refs: { hash: number; x: number; y: number; z: number; yaw: number }[] = [];
+  for (const piece of pieces) {
+    const prop = propFromPiece(piece);
+    if (!prop) continue;
+    const key = meshPropKey(prop);
+    if (!key) continue;
+    refs.push({ hash: fnv1aHash(key), x: prop.x, y: prop.y ?? 0, z: prop.z, yaw: prop.yawDegrees ?? 0 });
+  }
+  const buf = new ArrayBuffer(refs.length * 20);
+  const u = new Uint32Array(buf);
+  const f = new Float32Array(buf);
+  refs.forEach((r, i) => {
+    u[i * 5] = r.hash;
+    f[i * 5 + 1] = r.x;
+    f[i * 5 + 2] = r.y;
+    f[i * 5 + 3] = r.z;
+    f[i * 5 + 4] = r.yaw;
+  });
+  return new Uint8Array(buf);
 }
 
 // The join-signature pass over the whole piece array, cached on the ARRAY

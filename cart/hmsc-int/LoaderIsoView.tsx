@@ -37,7 +37,7 @@ import { GAME_BUILD, buildingPieceInstanceId, partitionBuildingSelection } from 
 import type { BuildEditEvent, BuildPrefabDef, BuildingInstance, PlacedBuildPiece, Rect, WorldGridState } from './game';
 import { modulePitch, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
-import { pieceInstanceRows } from './editors/build/pieceMeshes';
+import { pieceInstanceRows, meshPropLiveRefs } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
 import type { GameState } from './design';
 
@@ -592,18 +592,20 @@ export function LoaderIsoView(props: {
     const pending = current.filter((p) => !baked.has(p.id));
     if (!pending.length) {
       if (typeof g.__compiled_world_clear_live_pieces === 'function') g.__compiled_world_clear_live_pieces(nodeId);
+      if (typeof g.__compiled_world_clear_live_mesh_props === 'function') g.__compiled_world_clear_live_mesh_props(nodeId);
       return;
     }
-    if (typeof g.__compiled_world_set_live_pieces === 'function') {
-      const rows = pieceInstanceRows(pending);
-      // [live-diag req_1812] TEMP: why a placed item is invisible. Tells props (skipped →
-      // 0 rows) from a real render bug (rows>0 but nothing drawn). Remove once fixed.
-      const kinds = pending.map((p) => { try { return GAME_BUILD.catalog.get(p.pieceId).kind; } catch { return '?'; } });
-      console.warn(`[live-push] node=${nodeId} pending=${pending.length} kinds=[${kinds.join(',')}] rows=${rows.length / 12} door=ok`);
-      g.__compiled_world_set_live_pieces(nodeId, rows);
-    } else {
-      console.warn(`[live-push] node=${nodeId} pending=${pending.length} — DOOR MISSING (__compiled_world_set_live_pieces); rebuild the dev host`);
-    }
+    // Two overlays, one per geometry kind: parts pieces/props → the box/shape instance
+    // overlay (pieceInstanceRows); MESH props (imported genmesh / Studio-cooked) → the
+    // resident-mesh reference overlay (meshPropLiveRefs, LIVEMESH req_1812). A placement is
+    // whichever it is, so push both — the unused one is just empty.
+    const rows = pieceInstanceRows(pending);
+    const meshRefs = meshPropLiveRefs(pending);
+    // [live-diag req_1812] TEMP: confirms each placement produces draws + which door exists.
+    // `mesh=MISSING` ⇒ the dev host predates the live-mesh door, rebuild it. Remove once happy.
+    console.warn(`[live-push] node=${nodeId} pending=${pending.length} boxRows=${rows.length / 12} meshRefs=${meshRefs.length / 20} pieces=${typeof g.__compiled_world_set_live_pieces === 'function' ? 'ok' : 'MISSING'} mesh=${typeof g.__compiled_world_set_live_mesh_props === 'function' ? 'ok' : 'MISSING'}`);
+    if (typeof g.__compiled_world_set_live_pieces === 'function') g.__compiled_world_set_live_pieces(nodeId, rows);
+    if (typeof g.__compiled_world_set_live_mesh_props === 'function') g.__compiled_world_set_live_mesh_props(nodeId, meshRefs);
   }, [editable, props.pieces, props.reloadToken]);
 
   // ── pointer: rotate (drag empty), move (drag a selected piece), click = place/select.

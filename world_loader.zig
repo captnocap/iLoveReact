@@ -2716,6 +2716,17 @@ pub const Runtime = struct {
     live_kid: ?usize = null,
     live_buf: []f32 = &.{},
     live_gen: u64 = 0,
+    // Live editor-placed MESH props (LIVEMESH req_1812): a just-placed imported/cooked
+    // mesh prop renders instantly by REFERENCING an already-resident mesh (the user's
+    // "once one X exists, the next is a reference to it" — instanced rendering). The
+    // editor pushes (meshKeyHash, x,y,z,yaw) per placement; applyLiveMeshProps appends a
+    // mesh-prop draw node per ref each frame, resolving the hash to a loaded mesh. No bake.
+    mesh_by_hash: std.AutoHashMapUnmanaged(u32, usize) = .{},
+    mesh_hash_built: bool = false,
+    // Node count of the permanent (non-streaming, non-live-mesh) prefix — captured in
+    // build(). The non-streaming path truncates back to here before re-appending the live
+    // mesh nodes each frame (streaming truncates to stream_tail_start in refreshStreamNodes).
+    perm_node_count: usize = 0,
     ticker_seconds: f32 = 0,
     last_ns: i64 = 0,
     frame: u32 = 0,
@@ -2826,6 +2837,7 @@ pub const Runtime = struct {
     }
 
     pub fn deinit(self: *Runtime) void {
+        self.mesh_by_hash.deinit(self.allocator);
         for (self.mesh_prop_vertex_buffers.items) |verts| self.allocator.free(verts);
         self.mesh_prop_vertex_buffers.deinit(self.allocator);
         for (self.mesh_prop_islands) |isls| self.allocator.free(isls);
@@ -2912,6 +2924,38 @@ pub const Runtime = struct {
             .scene3d_tex_rgba = if (tex_key == null) mesh.tex_rgba else null,
             .scene3d_tex_key = tex_key,
         });
+    }
+
+    // LIVEMESH req_1812: map every resident mesh-prop's key-hash → its mesh index, once.
+    // The editor pushes the SAME hash (FNV-1a of the mesh key the bake assigned), so a
+    // live placement resolves to the loaded mesh with no string marshalling across V8.
+    fn ensureMeshHashMap(self: *Runtime) void {
+        if (self.mesh_hash_built) return;
+        self.mesh_hash_built = true;
+        const mp = self.scene.mesh_props orelse return;
+        for (mp.meshes, 0..) |mesh, i| {
+            self.mesh_by_hash.put(self.allocator, liveMeshHash(mesh.key), i) catch {};
+        }
+    }
+
+    // LIVEMESH req_1812: append a draw node for each live-placed mesh prop, referencing an
+    // already-resident mesh (material_ref 0 → the mesh's own baked texture/color, NO
+    // per-frame allocation; see meshPropTexKey). Called at the END of stepNow, after
+    // refreshStreamNodes rebuilt the stream tail — so the streaming path truncated last
+    // frame's live nodes for us; the monolithic path truncates them here to perm_node_count.
+    fn applyLiveMeshProps(self: *Runtime) void {
+        if (self.stream == null) self.kid_list.shrinkRetainingCapacity(self.perm_node_count);
+        defer self.root.children = self.kid_list.items; // append may realloc; re-point the root
+        const mp = self.scene.mesh_props orelse return;
+        const p = pendingLiveMeshFor(self.node_id) orelse return;
+        if (p.refs.len == 0) return;
+        self.ensureMeshHashMap();
+        for (p.refs) |r| {
+            const idx = self.mesh_by_hash.get(r.hash) orelse continue;
+            if (idx >= mp.meshes.len) continue;
+            const mesh = mp.meshes[idx];
+            self.appendMeshPropNode(mesh, .{ .mesh = @intCast(idx), .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw }, mesh.key, 0, mesh.vertex_count, 0) catch {};
+        }
     }
 
     fn build(self: *Runtime) !void {
@@ -3863,6 +3907,7 @@ pub const Runtime = struct {
             try self.kid_list.ensureUnusedCapacity(self.allocator, w.draws.len);
         }
 
+        self.perm_node_count = self.kid_list.items.len; // before any streamed tail / live-mesh nodes
         self.root = .{ .children = self.kid_list.items };
         updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, self.cameraColliderSet(), 0);
         updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, false, false, false);
@@ -4267,6 +4312,10 @@ pub const Runtime = struct {
         // Re-stream the world around wherever the player ended up this step
         // (uses the camera solved just above for sight culling).
         self.refreshStreamNodes();
+        // LIVEMESH req_1812: re-append the live mesh-prop draws AFTER the stream tail
+        // (refreshStreamNodes truncated to stream_tail_start, dropping last frame's), so a
+        // just-placed pepes/genmesh prop shows instantly by referencing its resident mesh.
+        self.applyLiveMeshProps();
         self.frame += 1;
     }
 
@@ -4777,6 +4826,78 @@ pub fn clearLivePieces(node_id: u32) void {
     if (p.rows.len > 0) std.heap.page_allocator.free(p.rows);
     p.rows = &.{};
     p.count = 0;
+    p.gen +%= 1;
+}
+
+// ── live editor MESH-prop overlay (LIVEMESH req_1812) ───────────────────────
+// FNV-1a 32-bit over the mesh key's bytes — MUST match the JS fnv1a in pieceMeshes.tsx
+// so a kind's key hashes the same on both sides (keys are ASCII content hashes / ids).
+fn liveMeshHash(key: []const u8) u32 {
+    var h: u32 = 2166136261;
+    for (key) |b| {
+        h ^= b;
+        h *%= 16777619;
+    }
+    return h;
+}
+
+const LiveMeshRef = struct { hash: u32, x: f32, y: f32, z: f32, yaw: f32 };
+const LIVE_MESH_STRIDE_BYTES: usize = 20; // u32 hash + 4×f32
+const PendingLiveMesh = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    refs: []LiveMeshRef = &.{},
+    gen: u64 = 0,
+};
+var g_pending_live_mesh: [MAX_EMBEDDED_LOADERS]PendingLiveMesh = [_]PendingLiveMesh{.{}} ** MAX_EMBEDDED_LOADERS;
+
+fn pendingLiveMeshFor(node_id: u32) ?*PendingLiveMesh {
+    for (&g_pending_live_mesh) |*p| {
+        if (p.set and p.node_id == node_id) return p;
+    }
+    return null;
+}
+
+/// Replace the live MESH-prop refs for a node (LIVEMESH req_1812). `bytes` packs
+/// LIVE_MESH_STRIDE_BYTES per ref: u32 keyHash, then f32 x,y,z,yaw (little-endian, the
+/// layout pieceMeshes.tsx writes). We own a copy so the JS buffer can be freed.
+pub fn setLiveMeshProps(node_id: u32, bytes: []const u8) void {
+    const alloc = std.heap.page_allocator;
+    var slot: ?*PendingLiveMesh = pendingLiveMeshFor(node_id);
+    if (slot == null) {
+        for (&g_pending_live_mesh) |*p| {
+            if (!p.set) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    const p = slot orelse return;
+    const n = bytes.len / LIVE_MESH_STRIDE_BYTES;
+    const refs = alloc.alloc(LiveMeshRef, n) catch return;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const off = i * LIVE_MESH_STRIDE_BYTES;
+        refs[i] = .{
+            .hash = std.mem.bytesToValue(u32, bytes[off..][0..4]),
+            .x = std.mem.bytesToValue(f32, bytes[off + 4 ..][0..4]),
+            .y = std.mem.bytesToValue(f32, bytes[off + 8 ..][0..4]),
+            .z = std.mem.bytesToValue(f32, bytes[off + 12 ..][0..4]),
+            .yaw = std.mem.bytesToValue(f32, bytes[off + 16 ..][0..4]),
+        };
+    }
+    if (p.refs.len > 0) alloc.free(p.refs);
+    p.node_id = node_id;
+    p.set = true;
+    p.refs = refs;
+    p.gen +%= 1;
+}
+
+/// Drop the live mesh-prop refs for a node (after a bake reload folds them in).
+pub fn clearLiveMeshProps(node_id: u32) void {
+    const p = pendingLiveMeshFor(node_id) orelse return;
+    if (p.refs.len > 0) std.heap.page_allocator.free(p.refs);
+    p.refs = &.{};
     p.gen +%= 1;
 }
 
