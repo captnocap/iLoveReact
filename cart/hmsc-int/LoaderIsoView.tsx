@@ -28,7 +28,7 @@
 // this whole pane exists to kill; the line is host-side or 2D-projected only.
 
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Graph, Pressable } from '@reactjit/primitives';
+import { Box, Graph, Pressable, Text } from '@reactjit/primitives';
 import { useRerender } from '@reactjit/runtime/hooks';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { IsoStage, METERS_PER_LEVEL } from './isoStage';
@@ -164,6 +164,10 @@ export function LoaderIsoView(props: {
   const [ghostYaw, setGhostYaw] = useState(0);
   const ghostYawRef = useRef(ghostYaw);
   ghostYawRef.current = ghostYaw;
+  // FLOORLEVELS req_1857: the active build storey. The stage owns the level offset (its
+  // camera target + pick plane rise with it, placeGroundAt lands pieces on the slab); this
+  // mirror drives the HUD indicator + re-renders when you change floors.
+  const [level, setLevelState] = useState(0);
   const [snap, setSnap] = useState<SnapTarget | null>(null);
   const [moveDelta, setMoveDelta] = useState<{ dx: number; dz: number } | null>(null);
   const moveDeltaRef = useRef(moveDelta);
@@ -269,6 +273,18 @@ export function LoaderIsoView(props: {
   // (which subscribes once) never snaps against a stale terrain/world.
   const resolveAtRef = useRef(resolveAt);
   resolveAtRef.current = resolveAt;
+
+  // FLOORLEVELS req_1857: go up/down a storey. The stage clamps at the ground (level 0);
+  // raising lifts the camera target + the pick plane so placements land ON that floor's slab
+  // (placeGroundAt). Mirror the level into state (HUD), push the new camera, and re-resolve
+  // the armed ghost in place so the preview jumps to the new floor immediately.
+  const changeLevel = useCallback((delta: number) => {
+    stage.setLevel(stage.pose.level + delta);
+    setLevelState(stage.pose.level);
+    pushCamera();
+    const c = lastCursorRef.current;
+    if (armedRef.current && c) setSnap(resolveAtRef.current(c.x, c.y));
+  }, [stage, pushCamera]);
 
   // ── commit: place the armed thing at a resolved snap target ──────────────────────
   const placeAt = useCallback((t: SnapTarget) => {
@@ -492,6 +508,9 @@ export function LoaderIsoView(props: {
       }
       else if (editable && (k === 'delete' || k === 'backspace')) { deleteSelected(); }
       else if (editable && k === 'c' && selectedIdsRef.current.size) { cloneSelected(); }
+      // FLOORLEVELS req_1857: ] / PageUp go up a storey, [ / PageDown go down.
+      else if (editable && (k === ']' || k === 'pageup')) { changeLevel(1); }
+      else if (editable && (k === '[' || k === 'pagedown')) { changeLevel(-1); }
       else if (editable && k === 'escape') {
         if (armedRef.current) setArmed(null);
         else setSelectedIds(new Set());
@@ -500,7 +519,7 @@ export function LoaderIsoView(props: {
     const offDown = busOn('__keydown', onKey(true));
     const offUp = busOn('__keyup', onKey(false));
     return () => { offDown(); offUp(); heldPanRef.current = {}; modRef.current = { shift: false, alt: false, ctrl: false }; };
-  }, [stage, pushCamera, props.centerX, props.centerZ, editable, deleteSelected, rotateSelected, cloneSelected]);
+  }, [stage, pushCamera, props.centerX, props.centerZ, editable, deleteSelected, rotateSelected, cloneSelected, changeLevel]);
 
   // Re-resolve the hover ghost after R turns it, so the preview spins in place at the
   // last known cursor instead of waiting for the next mouse-move.
@@ -801,6 +820,20 @@ export function LoaderIsoView(props: {
         }}
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
       />
+
+      {/* FLOORLEVELS req_1857: the active-storey control — go up/down a floor and build on it.
+          Above the capture layer so the buttons receive clicks ([ / ] also work). */}
+      {editable ? (
+        <Box style={{ position: 'absolute', left: 8, top: 8, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#0d141fdd', borderRadius: 6, padding: 4 }}>
+          <Pressable onPress={() => changeLevel(-1)} style={{ width: 24, height: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1e293b', borderRadius: 4 }}>
+            <Text style={{ color: '#cbd5e1', fontSize: 14 }}>▼</Text>
+          </Pressable>
+          <Text style={{ color: '#e2e8f0', fontSize: 12, minWidth: 52, textAlign: 'center' }}>{level === 0 ? 'Ground' : `Floor ${level}`}</Text>
+          <Pressable onPress={() => changeLevel(1)} style={{ width: 24, height: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1e293b', borderRadius: 4 }}>
+            <Text style={{ color: '#cbd5e1', fontSize: 14 }}>▲</Text>
+          </Pressable>
+        </Box>
+      ) : null}
 
       {/* The build catalog rail — the SAME component IsoAuthor arms from (rule-of-two).
           Rendered last so it paints over (and receives clicks above) the capture layer. */}
