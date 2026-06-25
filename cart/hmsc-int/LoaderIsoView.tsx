@@ -694,6 +694,7 @@ export function LoaderIsoView(props: {
     if (!editable) return;
     const nodeId = Number(loaderRef.current?.id ?? 0);
     if (!nodeId) return;
+    const tEffect = nowMs(); // EDITLATENCY phase breakdown (req_1935)
     const baked = bakedIdsRef.current!;
     const bakedRects = bakedRectRef.current!;
     const current = props.pieces ?? [];
@@ -730,12 +731,14 @@ export function LoaderIsoView(props: {
     // placements. Empty arrays clear the host overlay, so we always push (no early return). The
     // mesh push also hands back the procedural skin materials the props wear (LIVESKIN req_1843)
     // — materialize those FIRST so refs that reference them by hash resolve this same frame.
+    const tScans = nowMs(); // EDITLATENCY: start of the O(N) overlay scans (req_1935)
     const rows = pieceInstanceRows(pending);
     const meshPush = meshPropLivePush(current, bakedSigRef.current!);
     // BUILDING-PIECE skins (LIVEBLDSKIN req_1849): a procedurally-skinned wall/floor face
     // renders as a live textured box outset over the baked face-slab — props can't cover this
     // (props are mesh refs), and building boxes are batched so they can't be hidden per-instance.
     const skinPush = buildingSkinBoxes(current);
+    const tScansEnd = nowMs(); // EDITLATENCY: O(N) overlay scans done (req_1935)
     // Only the failure mode is worth a console line now (a host predating the live doors):
     // a successful push is the silent common case.
     if (typeof g.__compiled_world_set_live_pieces !== 'function' || typeof g.__compiled_world_set_live_mesh_props !== 'function') {
@@ -757,13 +760,21 @@ export function LoaderIsoView(props: {
     // PLACEFREEZE uses); a console.log here was invisible (req_1934). Last sample on g.__hmscEditLatency.
     const stamp = takeEditStamp();
     if (stamp) {
-      const pushMs = nowMs() - stamp.t;
+      const tPush = nowMs();
       const { t, label } = stamp;
+      // Phase breakdown (req_1935) so we kill the right thing, not guess:
+      //   pre   = gesture → this effect runs (onCommit + parent stream apply + React reconcile)
+      //   scans = the loader's O(N) overlay rebuild (pieceInstanceRows + meshPropLivePush + skins)
+      //   push  = the host door calls themselves
+      //   host  = push → the next frame can run (main thread blocked: snapshot/re-render/GPU upload)
+      const pre = tEffect - t, scans = tScansEnd - tScans, push = tPush - tScansEnd, pushMs = tPush - t;
       const after = g.requestAnimationFrame ? g.requestAnimationFrame.bind(g) : (fn: () => void) => setTimeout(fn, 16);
       after(() => {
         const renderedMs = nowMs() - t;
-        g.__hmscEditLatency = { label, pushMs, renderedMs, at: Date.now() };
-        console.warn(`[edit-latency] ${label.padEnd(7)} gesture→push ${pushMs.toFixed(1).padStart(6)}ms · gesture→rendered ~${renderedMs.toFixed(1).padStart(6)}ms`);
+        const host = renderedMs - pushMs;
+        g.__hmscEditLatency = { label, pushMs, renderedMs, pre, scans, push, host, at: Date.now() };
+        const f = (n: number) => n.toFixed(0).padStart(4);
+        console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}`);
       });
     }
   }, [editable, props.pieces, props.reloadToken]);
