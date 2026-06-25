@@ -635,12 +635,29 @@ export function meshPropLivePush(pieces: readonly PlacedBuildPiece[], bakedSig: 
 // sx,sy,sz, yawDeg (f32), matHash (u32) — the loader scales the cube + outsets it.
 const SKIN_BOX_BYTES = 32;
 const BLDSKIN_PREFIX = 'bldskin:';
+
+// PERF req_1870: a piece can only produce a 'bldskin:' face-slab if one of its faces wears a
+// MATERIAL skin (a flat-colour or unskinned face never does). Checking piece.skin is O(1) and
+// lets us skip the expensive wallJoinSignature + pieceVisualShapes decomposition for the vast
+// majority of pieces — without it, EVERY placement re-decomposed every wall/floor on the map
+// (~O(N²) via the neighbour join scan), which made each placement take 5-6s.
+function pieceHasMaterialSkin(piece: PlacedBuildPiece): boolean {
+  const skin = piece.skin;
+  if (!skin) return false;
+  for (const slot of Object.keys(skin)) {
+    const face = (skin as Record<string, { kind?: string } | undefined>)[slot];
+    if (face && face.kind === 'material') return true;
+  }
+  return false;
+}
+
 export interface LiveSkinPush { boxes: Uint8Array; materials: LiveMaterial[] }
 export function buildingSkinBoxes(pieces: readonly PlacedBuildPiece[]): LiveSkinPush {
   const out: { cx: number; cy: number; cz: number; sx: number; sy: number; sz: number; yaw: number; matHash: number }[] = [];
   const materials = new Map<number, LiveMaterial>();
   for (const piece of pieces) {
     if (propFromPiece(piece)) continue; // props ride meshPropLivePush
+    if (!pieceHasMaterialSkin(piece)) continue; // cheap skip — no material face → no live skin box
     const sig = wallJoinSignature(piece, pieces) ?? '';
     for (const shape of pieceVisualShapes(piece, sig, pieces)) {
       if (shape.kind !== 'box') continue; // skinned ramps deferred
