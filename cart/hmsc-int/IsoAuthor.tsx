@@ -40,6 +40,7 @@ import { TILE_KINDS } from './world/tileKinds';
 import { PROP_CATEGORIES, PROP_CATEGORY_NAMES, isPropKind, propCategory, type PropCategory } from './game/kinds/props';
 import { useCookedAssets, cookedPropSurfaceYs } from './editors/model/cookedAssets';
 import { WATER_BODY_PRESETS, WATER_BODY_PRESET_IDS } from './game/kinds/waterBodies';
+import { PropBrowser } from './PropBrowser';
 
 const FAR_CLIP = 4000;
 // The iso eye sits BASE_DIST/zoom (~90–257m) from the ground, far past F2's 14m
@@ -2067,29 +2068,23 @@ export const CatalogRail = memo(function CatalogRail(props: { armed: Armed; pref
           </Box>
         </Pressable>
       </Box>
-      {tab === 'prop' && (
-        <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
-          {PROP_CATEGORY_NAMES.map((cat) => (
-            <Pressable key={cat} onPress={() => setPropShelf(cat)}>
-              <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: cat === propShelf ? '#0e7490' : '#142031' }}>
-                <Text fontSize={10} color={cat === propShelf ? '#ecfeff' : '#8aa0b8'} style={{ fontFamily: 'monospace' }}>{`${cat} ${cat === 'studio' ? cookedPropCount : PROP_CATEGORIES[cat].length}`}</Text>
-              </Box>
-            </Pressable>
-          ))}
-        </Box>
+      {/* PROPS get the PICTURE browser (req_1895): search across every category +
+          paged thumbnails, off the pill wall. Other tabs keep the compact pill list. */}
+      {tab === 'prop' ? (
+        <PropBrowser armedId={armedId} onArm={(id) => props.onArm({ kind: 'piece', id })} />
+      ) : (
+        <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
+          <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
+            {entries.map((def) => (
+              <Pressable key={def.id} onPress={() => props.onArm({ kind: armKind, id: def.id })}>
+                <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: armedId === def.id ? '#7dd3fc' : '#3a4f6b', backgroundColor: armedId === def.id ? '#1d4ed8' : '#16233a' }}>
+                  <Text fontSize={11} color={armedId === def.id ? '#ffffff' : '#dbe6f3'} style={{ fontFamily: 'monospace' }}>{def.label}</Text>
+                </Box>
+              </Pressable>
+            ))}
+          </Box>
+        </ScrollView>
       )}
-      {/* vertical rail: the ~100-item catalog scrolls in the narrow column (req_1886). */}
-      <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
-        <Box style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
-          {entries.map((def) => (
-            <Pressable key={def.id} onPress={() => props.onArm({ kind: armKind, id: def.id })}>
-              <Box style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: armedId === def.id ? '#7dd3fc' : '#3a4f6b', backgroundColor: armedId === def.id ? '#1d4ed8' : '#16233a' }}>
-                <Text fontSize={11} color={armedId === def.id ? '#ffffff' : '#dbe6f3'} style={{ fontFamily: 'monospace' }}>{def.label}</Text>
-              </Box>
-            </Pressable>
-          ))}
-        </Box>
-      </ScrollView>
     </Box>
   );
 });
