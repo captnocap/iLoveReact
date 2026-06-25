@@ -380,6 +380,9 @@ const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("../world_loader
     }
     pub fn mouseLook(_: u32, _: f32, _: f32) void {}
     pub fn setAiming(_: u32, _: bool) void {}
+    pub fn isExternalCamera(_: u32) bool {
+        return false;
+    }
 };
 // WORLDWIN-0611: the compiled-world pop-out window — same gate as the loader
 // it hosts. The stub keeps the loop call-sites unconditional.
