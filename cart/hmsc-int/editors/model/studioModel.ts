@@ -88,8 +88,9 @@ export type StudioModel = {
   setPalette(palette: Palette): void;
   /** the open model's surface decals (the composer fold, req_1730), or []. */
   decals: ModelDecal[];
-  /** set the model's surface decals (whole list) — branch + undoable. */
-  setDecals(decals: ModelDecal[]): void;
+  /** set the model's surface decals (whole list) — branch + undoable. `coalesce`
+   *  folds a continuous gesture (drag / slider sweep) into ONE undo entry. */
+  setDecals(decals: ModelDecal[], coalesce?: boolean): void;
   /** the open model's pixel-paint texture content hash (req_1382), or null. */
   paintRef: string | null;
   /** the base64 PNG for a paintRef (content-addressed blob), or null. */
@@ -410,10 +411,20 @@ function bakePaint(paintRef: string, blobB64: string): void {
 
 // Set the model's surface decals (whole list) — BRANCH + undoable. 'structure'
 // tick: model-level, no geometry change. The docs are tiny vector JSON, so a
-// whole-list replace per edit is cheap (req_1730).
-function setDecals(decals: ModelDecal[]): void {
+// whole-list replace per edit is cheap (req_1730). `coalesce` folds a CONTINUOUS
+// gesture (a surface drag, a slider sweep) into ONE undo entry: when the top of the
+// undo stack is already a decals inverse for this model, append the event but keep
+// that pre-gesture inverse, so a single undo reverts the whole gesture (instead of
+// the stack flooding with one entry per frame).
+function setDecals(decals: ModelDecal[], coalesce = false): void {
   ensureInit();
   const model = store.openModelId; if (!model) return;
+  const top = undoStack[undoStack.length - 1];
+  if (coalesce && top && top.event.kind === 'modelDecalsSet' && top.event.model === model) {
+    pushEvent({ kind: 'modelDecalsSet', model, decals }, 'decals');
+    reproject('structure');
+    return;
+  }
   commit({ kind: 'modelDecalsSet', model, decals }, 'structure', 'record');
 }
 

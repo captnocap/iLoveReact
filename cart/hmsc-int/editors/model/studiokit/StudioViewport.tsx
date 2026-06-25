@@ -143,7 +143,7 @@ const STUDIO_PAINT_TOOLS: BrushTool[] = ['brush', 'eraser', 'line', 'rect', 'ell
 let g_loadedPaintModel: string | null = null;
 let g_loadedHadBlob = false;
 
-export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; sceneId: string | null; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; decals: ModelDecal[]; onSetDecals: (decals: ModelDecal[]) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
+export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; sceneId: string | null; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; decals: ModelDecal[]; onSetDecals: (decals: ModelDecal[], coalesce?: boolean) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
   const { parts, revision, activePart, onSelectFaces } = props;
 
   // Lower each visible part once per structural revision (camera drags + fov
@@ -1549,14 +1549,16 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   }, 60);
 
   // Author the active decal's doc — persist (lossless re-edit) + schedule a bake.
-  const setActiveDecalDoc = (nextDoc: DecalDoc) => {
+  // `coalesce` folds a continuous gesture (node drag/resize, slider sweep) into one
+  // undo entry; discrete edits (add node) pass false for their own entry.
+  const setActiveDecalDoc = (nextDoc: DecalDoc, coalesce = true) => {
     if (!activeDecal) return;
-    props.onSetDecals(props.decals.map((d) => (d.id === activeDecal.id ? { ...d, doc: nextDoc } : d)));
+    props.onSetDecals(props.decals.map((d) => (d.id === activeDecal.id ? { ...d, doc: nextDoc } : d)), coalesce);
     markDecalBake(activeDecal.id);
   };
   const decalPatchNode = (id: string, patch: Partial<DecalNode>) => { if (activeDecal) setActiveDecalDoc(decalEdit.patchNode(activeDecal.doc, id, patch)); };
   const decalPatchDoc = (patch: Partial<DecalDoc>) => { if (activeDecal) setActiveDecalDoc({ ...activeDecal.doc, ...patch }); };
-  const decalAddNode = (node: DecalNode) => { if (activeDecal) { setActiveDecalDoc(decalEdit.addNode(activeDecal.doc, node)); setActiveDecalNode(node.id); } };
+  const decalAddNode = (node: DecalNode) => { if (activeDecal) { setActiveDecalDoc(decalEdit.addNode(activeDecal.doc, node), false); setActiveDecalNode(node.id); } };
   const decalPickImage = (id: string) => {
     const apply = (raw: string | null) => { if (raw) decalPatchNode(id, { src: decalEdit.cleanPickedPath(raw) } as Partial<DecalNode>); };
     const picked = pickImageFile('Pick decal image');
@@ -1578,17 +1580,18 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   // Anchor the active decal onto a face (raycast → UV). Returns true on a model hit so
   // the caller can begin a move-drag.
   const decalDragRef = useRef(false);
-  const decalPlaceAt = (sx: number, sy: number): boolean => {
+  const decalPlaceAt = (sx: number, sy: number, coalesce = false): boolean => {
     if (!activeDecal) return false;
     const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
     if (!hit) return false;
     const tgt = paintTargets()[hit.partIndex];
     if (!tgt) return false;
-    props.onSetDecals(props.decals.map((d) => (d.id === activeDecal.id ? { ...d, partId: tgt.partId, faceIndex: hit.faceIndex, u: hit.u, v: hit.v } : d)));
+    props.onSetDecals(props.decals.map((d) => (d.id === activeDecal.id ? { ...d, partId: tgt.partId, faceIndex: hit.faceIndex, u: hit.u, v: hit.v } : d)), coalesce);
     markDecalBake(activeDecal.id);
     return true;
   };
-  const decalMoveTo = (sx: number, sy: number): void => { decalPlaceAt(sx, sy); };
+  // the press placed it (its own undo entry); the drag re-anchors COALESCED into it.
+  const decalMoveTo = (sx: number, sy: number): void => { decalPlaceAt(sx, sy, true); };
   // resolve paint against the model palette, falling back to the default so a stroke
   // shows live BEFORE the first commit mints the real (persisted) palette.
   const livePalette: Palette = props.palette ?? defaultPalette();
