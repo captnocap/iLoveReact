@@ -693,7 +693,7 @@ function EditorShell() {
               <>
                 {/* selected piece — fills the rail in 2D mode (the build tools below hide,
                     and the tile-paint tools live in the 2D map's own left rail). */}
-                <Box style={{ flexBasis: mapFocus === '3d' ? '13%' : 'auto', flexGrow: mapFocus === '3d' ? 0 : 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+                <Box style={{ flexBasis: mapFocus === '3d' ? '13%' : 'auto', flexGrow: mapFocus === '3d' ? 0 : 1, flexShrink: 0, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
                   <PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />
                 </Box>
                 {/* CONTEXTUAL (req_1890): the build tools (paint/skins + prop/piece) show only
@@ -704,7 +704,7 @@ function EditorShell() {
                     {/* paint / skins — the FacePainter is tall (faces + brush + neon + the
                         texture grid), so it gets the lion's share of the rail; otherwise the
                         texture swatches collapse to nothing (req_1890). */}
-                    <Box style={{ flexBasis: '54%', minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+                    <Box style={{ flexBasis: '54%', flexShrink: 0, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
                       <RightPanel
                         tab={tab}
                         onTab={setTab}
