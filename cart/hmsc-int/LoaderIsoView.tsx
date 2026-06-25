@@ -789,7 +789,10 @@ export function LoaderIsoView(props: {
         }
         g.__hmscEditLatency = { label, pushMs, renderedMs, pre, scans, push, host, frame: fr, counters: c, at: Date.now() };
         const f = (n: number) => n.toFixed(0).padStart(4);
-        console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}${hostLine}`);
+        // req_1939: how much of `pre` is the O(placements) GameState reassembler (index.tsx placementWorld)?
+        const pwMs = Number(g.__lastPlacementWorldMs ?? 0);
+        const pw = pwMs > 0 ? ` (incl. placementWorld ${pwMs.toFixed(0)}ms)` : '';
+        console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)}${pw} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}${hostLine}`);
       });
     }
   }, [editable, props.pieces, props.reloadToken]);

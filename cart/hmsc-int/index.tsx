@@ -445,10 +445,15 @@ function EditorShell() {
   // the overlay can refresh painted floors-water without re-running it AND without
   // dropping placed water. landforms are baked for prop Y (height) but intentionally
   // not a memo dep — keyed on heightSig so colour-only paint reuses this result.
-  const placementWorld = useMemo<GameState>(() => ptime('placementWorld', `rebuild placements=${placements.length} heightSig=${heightSig.length}b`, () =>
-    assemblePreviewWorld({ baseWorld, landforms, waterBodies: [], placements, mergeKindTextures })
+  const placementWorld = useMemo<GameState>(() => ptime('placementWorld', `rebuild placements=${placements.length} heightSig=${heightSig.length}b`, () => {
+    // EDITLATENCY req_1939: time the O(placements) GameState reassembler and stash it so the
+    // loader pane's edit-latency line can show how much of the ~500ms reconcile this one memo is.
+    const _t0 = (globalThis as any).performance?.now?.() ?? Date.now();
+    const w = assemblePreviewWorld({ baseWorld, landforms, waterBodies: [], placements, mergeKindTextures });
+    (globalThis as any).__lastPlacementWorldMs = ((globalThis as any).performance?.now?.() ?? Date.now()) - _t0;
+    return w;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [baseWorld, placements, mergeKindTextures, heightSig]);
+  }), [baseWorld, placements, mergeKindTextures, heightSig]);
   const previewWorld = useMemo<GameState>(() => (
     { ...placementWorld, world: { ...placementWorld.world, landforms, waterBodies: [...floorsWater, ...(placementWorld.world.waterBodies ?? [])] } }
   ), [placementWorld, landforms, floorsWater]);
