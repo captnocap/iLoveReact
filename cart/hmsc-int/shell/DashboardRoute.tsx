@@ -16,6 +16,7 @@ import { reportAssetGeometry, type GeometryReport } from '../editors/model/geome
 import { reportMapFootprint, type FootprintLike } from '../mapReport';
 import { reportPlacementCensus } from '../placementStats';
 import { reportTextureCensus, type TextureCensus } from '../editors/model/textureStats';
+import { reportMaterialCensus, type MaterialCensus } from '../editors/materials/materialStats';
 import type { ChunkFloor } from '../chunkFloor';
 
 // ── tiny formatters (no ICU — the embedded V8 may lack toLocaleString) ──────────
@@ -79,10 +80,12 @@ export function DashboardRoute(props: {
   // paints first (freeze law) — a skeleton shows, then the numbers stream in.
   const [geo, setGeo] = useState<GeometryReport | null>(null);
   const [tex, setTex] = useState<TextureCensus | null>(null);
+  const [mat, setMat] = useState<MaterialCensus | null>(null);
   useEffect(() => {
     const t = setTimeout(() => {
       try { setGeo(reportAssetGeometry()); } catch { /* headless / no store */ }
       try { setTex(reportTextureCensus()); } catch { /* headless / no store */ }
+      try { setMat(reportMaterialCensus()); } catch { /* headless / no store */ }
     }, 0);
     return () => clearTimeout(t);
   }, []);
@@ -189,6 +192,16 @@ export function DashboardRoute(props: {
             </Box>
             <Text fontSize={11} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
               {tex === null ? 'reading texture headers…' : tex.unsized > 0 ? `${commas(tex.unsized)} unsized (header unread)` : 'every texture measured'}
+            </Text>
+          </Panel>
+
+          <Panel title={mat === null ? 'MATERIALS · counting…' : 'MATERIALS · SHADERS'}>
+            <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 24 }}>
+              <Figure value={mat === null ? '—' : commas(mat.authored)} label="MATERIALIZED" accent="#fda4af" />
+              <Figure value={mat === null ? '—' : commas(mat.builtinShaders)} label="SHADER RECIPES" accent="#fbbf24" />
+            </Box>
+            <Text fontSize={11} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
+              {mat === null ? 'reading the material catalog…' : `${commas(mat.shaderBased)} shader · ${commas(mat.decalBased)} decal authored`}
             </Text>
           </Panel>
         </Box>
