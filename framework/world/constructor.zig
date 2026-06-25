@@ -44,7 +44,7 @@ const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
-const MESH_PROPS_VERSION: u32 = 5;
+const MESH_PROPS_VERSION: u32 = 6;
 const WATER_VERSION: u32 = 1;
 const TICKER_VERSION: u32 = 1;
 /// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
@@ -148,6 +148,9 @@ pub const MeshPropMesh = struct {
     tex_h: u32 = 0,
     tex_rgba: ?[]u8 = null,
     slots: []MeshPropSlot = &.{},
+    // DOOR (req_1864, MESH_PROPS v6) — a cooked door names which slot is its
+    // toggleable leaf + the two-state interaction contract. null = not a door.
+    door: ?MeshPropDoor = null,
 
     pub fn deinit(self: MeshPropMesh, allocator: std.mem.Allocator) void {
         allocator.free(self.key);
@@ -160,6 +163,15 @@ pub const MeshPropMesh = struct {
 pub const MeshPropSlot = struct {
     start: u32,
     count: u32,
+};
+
+/// DOOR meta on a cooked-door mesh (req_1864) — wire twin of
+/// worldGeometry.ts MeshPropDoorMeta.
+pub const MeshPropDoor = struct {
+    leaf_slot: u32,
+    reach: f32,
+    vehicle: bool,
+    start_open: bool,
 };
 
 pub const MeshPropInstance = struct {
@@ -1059,6 +1071,24 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
                 at += 8;
             }
         }
+        // DOOR block (req_1864, v6) — u32 hasDoor, then if set: leaf_slot, reach,
+        // vehicle, start_open. The leaf slot must index a real slot.
+        var door: ?MeshPropDoor = null;
+        if (version >= 6) {
+            if (at + 4 > data.len) return Error.BadMeshProps;
+            const has_door = std.mem.readInt(u32, data[at..][0..4], .little);
+            at += 4;
+            if (has_door != 0) {
+                if (at + 16 > data.len) return Error.BadMeshProps;
+                const leaf_slot = std.mem.readInt(u32, data[at..][0..4], .little);
+                const reach = readF32(data, at + 4);
+                const vehicle = std.mem.readInt(u32, data[at + 8 ..][0..4], .little) != 0;
+                const start_open = std.mem.readInt(u32, data[at + 12 ..][0..4], .little) != 0;
+                at += 16;
+                if (leaf_slot >= slots.len) return Error.BadMeshProps;
+                door = .{ .leaf_slot = leaf_slot, .reach = reach, .vehicle = vehicle, .start_open = start_open };
+            }
+        }
         meshes[mi] = .{
             .key = key,
             .color = color,
@@ -1073,6 +1103,7 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
             .tex_h = tex_h,
             .tex_rgba = tex_rgba,
             .slots = slots,
+            .door = door,
         };
         initialized_meshes += 1;
     }

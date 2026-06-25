@@ -237,7 +237,11 @@ export type ImportedMeshPropInstance = {
 };
 
 export type MeshPropSlotRange = { start: number; count: number };
-export type ImportedMeshPropMesh = ImportedPropMesh & Partial<MeshTex> & { slots?: MeshPropSlotRange[] };
+/** DOOR meta (req_1864) on a cooked-door mesh — names which slot is the toggleable
+ *  leaf + the two-state interaction contract. The loader makes that slot's node a
+ *  live two-state door (drop on open, door rect, E toggle). */
+export type MeshPropDoorMeta = { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean };
+export type ImportedMeshPropMesh = ImportedPropMesh & Partial<MeshTex> & { slots?: MeshPropSlotRange[]; door?: MeshPropDoorMeta };
 
 export type ImportedMeshPropSink = {
   meshes: ImportedMeshPropMesh[];
@@ -489,6 +493,14 @@ function cookedPropMesh(kind: string): ImportedMeshPropMesh | null {
   // box would re-block the slope you just made walkable. Render is unaffected.
   const pk = asset.descriptor.buildPlacement?.pieceKind;
   const collidesAsSlope = pk === 'stairs' || pk === 'ramp';
+  // DOOR (req_1864): the leaf rides as the LAST slot (cookedMeshSlotRanges appends
+  // it after glass), so its slot index is the final one. The loader makes that
+  // node a live two-state door — toggle on E, drop when open, door rect, no static
+  // leaf island. A door panel with no leaf range shipped means no door (fail soft).
+  const panel = asset.descriptor.doorPanel;
+  const door: MeshPropDoorMeta | undefined = panel && asset.leaf && asset.leaf.count > 0
+    ? { leafSlot: slotsWithGlass.length - 1, reachMeters: panel.reachMeters, vehicle: panel.vehicle, startOpen: false }
+    : undefined;
   return {
     key: asset.meshRef,
     source: `cooked:${asset.id}`,
@@ -506,6 +518,7 @@ function cookedPropMesh(kind: string): ImportedMeshPropMesh | null {
     // material ref so the loader draws it see-through (appendMeshPropNode applies
     // the ref's opacity as scene3d_color_a).
     ...(slotsWithGlass.length ? { slots: slotsWithGlass } : {}),
+    ...(door ? { door } : {}),
   };
 }
 
@@ -1253,7 +1266,7 @@ export function encodeFlora(state: GameState, floors: readonly ChunkFloor[]): Ui
 // v8cli bake never needs an image-codec door (it just passes the bytes through). v3
 // shipped raw RGBA decoded at BAKE time, which silently failed in v8cli → grey props.
 // The loader still reads v1/v2 (legacy) + v3 (raw RGBA) + v4 (PNG) + v5 slots.
-export const MESH_PROPS_LUMP_VERSION = 5;
+export const MESH_PROPS_LUMP_VERSION = 6;
 
 /** Encode imported / cooked prop meshes:
  *  u32 version | u32 meshCount | u32 instanceCount
@@ -1261,7 +1274,8 @@ export const MESH_PROPS_LUMP_VERSION = 5;
  *          f32 footprintWidth | f32 footprintDepth | f32 height |
  *          u32 solid | u32 vertexCount | f32[vertexCount*8] |
  *          u32 pngLen | u8[pngLen]   (v4 — the paint atlas as PNG, loader-decoded) |
- *          u32 slotCount | { u32 startVertex | u32 vertexCount }[slotCount] (v5)
+ *          u32 slotCount | { u32 startVertex | u32 vertexCount }[slotCount] (v5) |
+ *          u32 hasDoor | if door: u32 leafSlot | f32 reach | u32 vehicle | u32 startOpen (v6, req_1864)
  *  instance[]: u32 meshIndex | f32 x,y,z,yawDegrees | u32 slotMaterial[mesh.slotCount] (v5)
  */
 export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
@@ -1273,7 +1287,7 @@ export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
   for (let i = 0; i < meshes.length; i += 1) {
     const mesh = meshes[i]!;
     const png = pngOf(mesh);
-    bytes += 4 + keyBytes[i]!.byteLength + 36 + mesh.vertices.byteLength + 4 + (png ? png.byteLength : 0) + 4 + (mesh.slots?.length ?? 0) * 8;
+    bytes += 4 + keyBytes[i]!.byteLength + 36 + mesh.vertices.byteLength + 4 + (png ? png.byteLength : 0) + 4 + (mesh.slots?.length ?? 0) * 8 + 4 + (mesh.door ? 16 : 0);
   }
   for (const inst of sink.instances) {
     bytes += 20 + (meshes[inst.mesh]?.slots?.length ?? 0) * 4;
@@ -1310,6 +1324,17 @@ export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
       view.setUint32(at + 0, slot.start, true);
       view.setUint32(at + 4, slot.count, true);
       at += 8;
+    }
+    // v6 (req_1864): the door block — the toggleable leaf slot + interaction contract.
+    if (mesh.door) {
+      view.setUint32(at, 1, true); at += 4;
+      view.setUint32(at + 0, mesh.door.leafSlot, true);
+      view.setFloat32(at + 4, mesh.door.reachMeters, true);
+      view.setUint32(at + 8, mesh.door.vehicle ? 1 : 0, true);
+      view.setUint32(at + 12, mesh.door.startOpen ? 1 : 0, true);
+      at += 16;
+    } else {
+      view.setUint32(at, 0, true); at += 4;
     }
   }
   for (const inst of sink.instances) {
