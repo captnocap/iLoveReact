@@ -221,6 +221,52 @@ which is large, so a focus flip is instant, never a reload stall.
 - **[OPEN 2c]** the rail's slot-1 (selected piece) when the 2D map is focused —
   stay as piece inspector, or swap to a tile inspector. Minor; decide in build.
 
+## Prop thumbnails — model→image pipeline (req_1897 → req_1898)
+
+The prop browser's tiles were unrecognizable: ONE fixed camera framed every
+prop the same, so a phone booth and a bus both rendered as a tiny speck in a
+black box ("tiny little shits in them i can barely see").
+
+- ✅ **Phase 1 — auto-frame (LANDED, 58da948b9, hot-reloads).** `solveThumbCamera`
+  in `PropBrowser.tsx` sizes a bounding sphere from each kind's own
+  `propKindDefinition` (height + footprint) and backs an orbit camera off by
+  `radius / tan(fov/2)` so the model FILLS its tile regardless of size. Switched
+  the 12 tiles from a native camera (they'd each fight for the one host orbit
+  controller) to static product-shot cameras; tiles 82×66 → 92×84. This is the
+  direct fix for the recognizability complaint and is live now.
+
+- ⏳ **Phase 2 — bake to a cached image (DESIGNED, NEEDS A FRAMEWORK PRIMITIVE +
+  ZIG REBUILD — awaiting go-ahead).** Render each prop ONCE to a real PNG, cache
+  it content-addressed, and the tiles become a cheap `<Image>` (paging dozens is
+  then trivial). The whole downstream half ALREADY exists — `runtime/image.ts`
+  `encode(rgba,w,h)` → PNG, and the blob-cache pattern in
+  `editors/model/cookedAssetStream.ts` / `modelStream.ts`. The ONE missing piece
+  is getting RGBA out of a 3D scene. Plan:
+  - **Why StaticSurface can't do it (root cause, confirmed):** `Scene3D.render`
+    only RECORDS the scene during the paint walk; the real `drawScene` is deferred
+    to `r3d.flushPending()`, which runs AFTER `renderStaticSurfaceCaptures()`. So a
+    StaticSurface bakes the 3D quad before its texture is filled → blank. Not
+    fixable in the StaticSurface path; that's why the in-process 3D cache was a
+    dead end.
+  - **The right primitive:** `framework/gpu/3d.zig` already has `renderDetached`
+    (renders one scene into a caller-owned target IMMEDIATELY, own command buffer).
+    Add a `copy_src` bake target + a readback (mirror `gpu.readbackStaticSurface`,
+    which already does the 256-aligned copyTextureToBuffer + map + RGBA swizzle).
+    Drive it at the paint site (the node pointer is right there at
+    `engine.zig:2989`) via a one-shot `scene3d_bake_key` node flag → stash bytes in
+    a string-keyed map → a `__take_baked_scene(key)` host fn hands them to JS
+    (zero-copy, same backing-store deleter pattern as `surfaceReadback`).
+  - **JS side:** a hidden `<PropBaker>` renders one prop at a time at ~256², polls
+    `takeBakedScene`, `encode()`s to PNG, caches by kind (persist via the blob
+    store), then advances — a queue that never blocks the paint thread (freeze
+    law). `PropThumb` prefers the cached `<Image>`, falls back to the Phase-1 live
+    render until baked.
+  - **Decision point:** this adds a real framework host primitive and a global Zig
+    rebuild (the handoff flags rebuilds racing with parallel lanes). Phase 1 may
+    already make a bounded page of 12 page smoothly. So: land Phase 1, let the user
+    eyeball it in `rjit dev`, and green-light Phase 2 only if paging janks or the
+    user wants the cached-PNG architecture regardless.
+
 ## Resolved
 - **[1c]** dashboard stats data source — counts are already cheap to read (cooked
   MeshBlob stores vertex count; EditMesh is verts[]+faces[]), so NO cook-time
