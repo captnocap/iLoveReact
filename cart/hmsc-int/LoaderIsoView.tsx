@@ -132,6 +132,10 @@ export function LoaderIsoView(props: {
   armed?: Armed;
   onArm?: (next: Armed | ((cur: Armed) => Armed)) => void;
 }) {
+  // req_1945: stamp when THIS pane starts rendering. The edit-latency line then splits the
+  // `pre` re-render into [before-loader] (the shell + earlier panels) vs [loader-onward] (this
+  // big pane's own render + its effects) — so the next cut targets the right one.
+  g.__loaderRenderStart = nowMs();
   const gameFile = props.gameFile ?? DEFAULT_GAME_FILE;
   const storeDir = props.storeDir ?? DEFAULT_STORE_DIR;
   const editable = !!props.onCommit; // no commit door → a pure viewer (no rail/editing)
@@ -798,7 +802,12 @@ export function LoaderIsoView(props: {
         const pwMs = Number(g.__lastPlacementWorldMs ?? 0);
         const csMs = Number(g.__lastCommitSyncMs ?? 0);
         const pw = pwMs > 0 ? `,pw ${pwMs.toFixed(0)}` : '';
-        const preSplit = ` [commit ${csMs.toFixed(0)} + rerender ${Math.max(0, pre - csMs).toFixed(0)}${pw}]`;
+        // req_1945: split the rerender — shell+earlier panels (before this pane rendered) vs this
+        // pane onward. Uses the render-start stamp at the top of LoaderIsoView.
+        const rStart = Number(g.__loaderRenderStart ?? 0);
+        const beforeLoader = rStart > 0 ? Math.max(0, rStart - t) : 0;
+        const loaderOnward = rStart > 0 ? Math.max(0, tEffect - rStart) : 0;
+        const preSplit = ` [commit ${csMs.toFixed(0)} + rerender ${Math.max(0, pre - csMs).toFixed(0)} (shell ${beforeLoader.toFixed(0)} + loaderPane ${loaderOnward.toFixed(0)})${pw}]`;
         console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)}${preSplit} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}${hostLine}`);
       });
     }
