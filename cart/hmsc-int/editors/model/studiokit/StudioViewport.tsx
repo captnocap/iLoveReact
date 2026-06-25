@@ -24,7 +24,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { callHost } from '@reactjit/runtime/ffi';
 import { useHotState, getHotState, setHotState, useInterval, useRerender } from '@reactjit/hooks';
-import { Box, Col, patchDynSlot, Pressable, Row, Scene3D, ScrollView, Text, TextInput } from '@reactjit/primitives';
+import { Box, Col, patchDynSlot, Pressable, Row, Scene3D, ScrollView, StaticSurface, Text, TextInput } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { GAME_CAMERA, GAME_CHROME, GAME_FIGURE, GAME_NATIVE_CAMERA } from '../../../game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '../../../game/figure/render';
@@ -64,6 +64,20 @@ import { STUDIO_PAINT_KEY, PAINT_TEX, paintTex, baseCoat, stampUV, faceIslandPx,
 import { Paintable } from '@reactjit/runtime/primitives';
 import { paintableOps } from '@reactjit/runtime/hooks/usePaintable';
 import { LayerStackStrip, type LayerStripAction, type LayerStripRowModel } from '../../paint/LayerStrip';
+// The DECAL fold (req_1730): the materials composer's rich authoring (real-font
+// text / rect with shader+image fills / image / neon) folded into the painter as a
+// paint-layer KIND, placed on the mesh surface. The shared editors/decal vocabulary
+// + the StaticSurface→readback→layer bridge.
+import * as decalEdit from '../../decal/decalEdit';
+import { DecalStage } from '../../decal/DecalStage';
+import { decalAddFields, decalCanvasFields, decalNodeFields } from '../../decal/DecalNodeFields';
+import { bakeDecalLayer, decalPlacement, decalSurfaceKey, newSurfaceDecalDoc } from '../decalLayer';
+import { DecalSurface } from '../../../game/textures/decalRender';
+import { HMSC_SHADERS } from '../../../game/textures/shaders';
+import { pickImageFile } from '../../cutout/sources';
+import { PanelGroups } from '../../../shell/fields';
+import type { ModelDecal } from '../modelStream';
+import type { DecalDoc, DecalNode } from '../../../game/textures/decal';
 // The PAINT panel + stamping are now the UNIVERSAL kit (runtime/paint) — the same
 // brush/tool/colour vocabulary every cart shares, instead of a Studio one-off
 // (USER ASK req_1487). BrushKit is the control surface; useBrushStroke is the
@@ -129,7 +143,7 @@ const STUDIO_PAINT_TOOLS: BrushTool[] = ['brush', 'eraser', 'line', 'rect', 'ell
 let g_loadedPaintModel: string | null = null;
 let g_loadedHadBlob = false;
 
-export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; sceneId: string | null; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
+export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; sceneId: string | null; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; decals: ModelDecal[]; onSetDecals: (decals: ModelDecal[]) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
   const { parts, revision, activePart, onSelectFaces } = props;
 
   // Lower each visible part once per structural revision (camera drags + fov
@@ -1454,11 +1468,16 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     const L = paintLayers[i];
     if (action === 'visibility') { applyLayers(paintLayers.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l))); return; }
     if (action === 'delete') {
+      // a decal layer also drops its persisted decal (req_1730).
+      if (L.kind === 'decal' && props.decals.some((d) => d.id === id)) props.onSetDecals(props.decals.filter((d) => d.id !== id));
       if (paintLayers.length <= 1) { clearLayerTransparent(id); recompositeDisplay(); paintDirtyRef.current = true; commitPaint(); return; } // last layer → just empty it
       const next = paintLayers.filter((l) => l.id !== id);
       applyLayers(next, id === activeLayer ? next[Math.min(i, next.length - 1)].id : activeLayer);
       return;
     }
+    // duplicating a DECAL layer would copy pixels but leave no editable doc — block it
+    // (the decal authoring panel adds decals); paint layers duplicate as before.
+    if (action === 'duplicate' && L.kind === 'decal') return;
     if (action === 'duplicate') {
       const src = paintableOps(layerKey(id)).readback();
       const nid = nextLayerId();
@@ -1475,12 +1494,101 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   const layerRows: LayerStripRowModel[] = paintLayers.map((_, idx) => paintLayers[paintLayers.length - 1 - idx]).map((L) => {
     const di = paintLayers.findIndex((l) => l.id === L.id);
     return {
-      id: L.id, name: L.name, meta: `${Math.round(L.opacity * 100)}%`,
+      id: L.id, name: L.name, meta: L.kind === 'decal' ? 'decal' : `${Math.round(L.opacity * 100)}%`,
       active: L.id === activeLayer, muted: !L.visible,
       preview: <Box style={{ width: '100%', height: '100%', backgroundColor: '#0e1726' }} />,
       canMoveUp: di < paintLayers.length - 1, canMoveDown: di > 0,
     };
   });
+
+  // ── DECAL layers (the composer fold, req_1730/req_1831) ─────────────────────
+  // A decal is a paint-layer KIND whose pixels come from a DecalDoc (real-font text /
+  // rect with shader+image fills / image / neon), placed on the mesh surface. The doc
+  // + its UV anchor persist on the model (props.decals); the layer META rides the hot
+  // stack like any layer. Editing the doc re-renders the hidden per-decal StaticSurface,
+  // which we read back into the layer's paintable — composited + baked by the existing
+  // machinery, so there is no extra runtime texture.
+  const [activeDecalNode, setActiveDecalNode] = useHotState<string | null>('studio:decalNode', null);
+  // id → remaining bake attempts (the StaticSurface needs a frame or two to render, so
+  // we retry a few ticks after an edit until the readback lands).
+  const decalBakeRef = useRef<Map<string, number>>(new Map());
+  const markDecalBake = (id: string) => { decalBakeRef.current.set(id, 5); };
+  const activeDecalLayer = layerById(activeLayer);
+  const decalLayerActive = activeDecalLayer?.kind === 'decal';
+  const activeDecal: ModelDecal | null = props.decals.find((d) => d.id === activeLayer) ?? null;
+
+  // Reconcile the hot paint-layer stack with the persisted decals: every decal needs a
+  // 'decal' layer entry (so its <Paintable> mounts + it composites) and a removed decal
+  // leaves none behind. Re-mark every decal for bake so a reopen / hot reload re-renders
+  // its surface into the layer.
+  useEffect(() => {
+    const decalIds = new Set(props.decals.map((d) => d.id));
+    const present = new Set(paintLayers.filter((l) => l.kind === 'decal').map((l) => l.id));
+    const pruned = paintLayers.filter((l) => l.kind !== 'decal' || decalIds.has(l.id));
+    const missing = props.decals.filter((d) => !present.has(d.id));
+    if (missing.length || pruned.length !== paintLayers.length) {
+      const next = dedupeLayers([...pruned, ...missing.map((d, i) => ({ id: d.id, name: `Decal ${i + 1}`, visible: true, opacity: 1, kind: 'decal' as const }))]);
+      setPaintLayers(next); syncPaintLayers(next);
+    }
+    for (const d of props.decals) markDecalBake(d.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.decals]);
+
+  // Bake pending decals: poll until each decal's StaticSurface has rendered, then read
+  // it back into the layer + recomposite. The readback door blocks on the GPU, so this
+  // runs only while there is pending work (right after an edit / place / reopen).
+  useInterval(() => {
+    const pending = decalBakeRef.current;
+    if (!pending.size) return;
+    for (const [id, n] of [...pending]) {
+      const d = props.decals.find((x) => x.id === id);
+      if (!d) { pending.delete(id); continue; }
+      bakeDecalLayer(d);
+      if (n <= 1) pending.delete(id); else pending.set(id, n - 1);
+    }
+  }, 60);
+
+  // Author the active decal's doc — persist (lossless re-edit) + schedule a bake.
+  const setActiveDecalDoc = (nextDoc: DecalDoc) => {
+    if (!activeDecal) return;
+    props.onSetDecals(props.decals.map((d) => (d.id === activeDecal.id ? { ...d, doc: nextDoc } : d)));
+    markDecalBake(activeDecal.id);
+  };
+  const decalPatchNode = (id: string, patch: Partial<DecalNode>) => { if (activeDecal) setActiveDecalDoc(decalEdit.patchNode(activeDecal.doc, id, patch)); };
+  const decalPatchDoc = (patch: Partial<DecalDoc>) => { if (activeDecal) setActiveDecalDoc({ ...activeDecal.doc, ...patch }); };
+  const decalAddNode = (node: DecalNode) => { if (activeDecal) { setActiveDecalDoc(decalEdit.addNode(activeDecal.doc, node)); setActiveDecalNode(node.id); } };
+  const decalPickImage = (id: string) => {
+    const apply = (raw: string | null) => { if (raw) decalPatchNode(id, { src: decalEdit.cleanPickedPath(raw) } as Partial<DecalNode>); };
+    const picked = pickImageFile('Pick decal image');
+    if (picked && typeof (picked as Promise<string | null>).then === 'function') void (picked as Promise<string | null>).then(apply);
+    else apply(picked as string | null);
+  };
+
+  // Add a NEW decal: a 'decal' paint layer + a persisted ModelDecal anchored at the
+  // model centre (the next surface click re-anchors it where you aim).
+  const addDecalLayer = () => {
+    const id = nextLayerId();
+    const decal: ModelDecal = { id, partId: props.parts[0]?.id ?? '', faceIndex: 0, u: 0.5, v: 0.5, scale: 1, doc: newSurfaceDecalDoc() };
+    applyLayers([...paintLayers, { id, name: `Decal ${props.decals.length + 1}`, visible: true, opacity: 1, kind: 'decal' }], id);
+    props.onSetDecals([...props.decals, decal]);
+    setActiveDecalNode(null);
+    markDecalBake(id);
+  };
+
+  // Anchor the active decal onto a face (raycast → UV). Returns true on a model hit so
+  // the caller can begin a move-drag.
+  const decalDragRef = useRef(false);
+  const decalPlaceAt = (sx: number, sy: number): boolean => {
+    if (!activeDecal) return false;
+    const hit = pickFaceUV(paintTargets(), camSnap(), sx, sy);
+    if (!hit) return false;
+    const tgt = paintTargets()[hit.partIndex];
+    if (!tgt) return false;
+    props.onSetDecals(props.decals.map((d) => (d.id === activeDecal.id ? { ...d, partId: tgt.partId, faceIndex: hit.faceIndex, u: hit.u, v: hit.v } : d)));
+    markDecalBake(activeDecal.id);
+    return true;
+  };
+  const decalMoveTo = (sx: number, sy: number): void => { decalPlaceAt(sx, sy); };
   // resolve paint against the model palette, falling back to the default so a stroke
   // shows live BEFORE the first commit mints the real (persisted) palette.
   const livePalette: Palette = props.palette ?? defaultPalette();
@@ -1702,6 +1810,13 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
         dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs();
         return;
       }
+      // A DECAL layer is active (the composer fold, req_1730): a press anchors the
+      // decal on the face you clicked and begins a move-drag, so you place the rich
+      // decal ON the surface. No brush stroke; the doc is authored in the panel.
+      if (decalLayerActive) {
+        if (decalPlaceAt(sx, sy)) decalDragRef.current = true;
+        return;
+      }
       // faceFill is Studio's one-click whole-face flat-fill (snapshot → fill → persist).
       if (faceFill) {
         paintSnapshotBegin();
@@ -1913,6 +2028,8 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
       // TEXT tool: drag the live layer — re-raycast and re-composite so the text glides
       // over the surface. A miss keeps the last position (no jump off the model).
       if (tool === 'text' && textDragRef.current) { textMoveTo(sx, sy); return; }
+      // DECAL layer: drag re-anchors the decal across the surface (req_1730).
+      if (decalLayerActive && decalDragRef.current) { decalMoveTo(sx, sy); return; }
       if (paintingRef.current) {
         if (surfaceStrokeActiveRef.current) surfaceStrokeMove(sx, sy, pressureOf(e)); // 3D-surface freehand
         else {
@@ -2135,6 +2252,9 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     // explicit panel actions). Force a final composite so the resting position is exact
     // (the drag throttles intermediate frames). A single click placed it; drag moved it.
     if (textDragRef.current) { textDragRef.current = false; composeTextLayer(); return; }
+    // end a DECAL drag: drop the drag; the doc + anchor are already persisted, and the
+    // pending-bake interval reads the resting position into the layer (req_1730).
+    if (decalDragRef.current) { decalDragRef.current = false; if (activeDecal) markDecalBake(activeDecal.id); return; }
     // end a paint stroke. Surface path: commit directly; kit path: it stamps the final
     // dab + fires onStrokeEnd → commitPaint.
     if (paintingRef.current) {
@@ -2499,6 +2619,21 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
           stack never reshuffles these host nodes (which churned the reconciler and made
           a moved layer look duplicated, req_1731). */}
       {tex || havePaintBlob ? [...paintLayers].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((L) => <Paintable key={L.id} id={layerKey(L.id)} w={PAINT_TEX} h={PAINT_TEX} rgba />) : null}
+      {/* DECAL surfaces (req_1730): each decal's DecalDoc rendered OFFSCREEN into a
+          full-atlas StaticSurface at its UV anchor (the composer's exact renderer —
+          real fonts / shader+image fills / image / neon). The pending-bake interval
+          reads each back into its decal paint layer, which composites + bakes like any
+          layer (no extra runtime texture). */}
+      {props.decals.map((d) => {
+        const pl = decalPlacement(d);
+        return (
+          <StaticSurface key={d.id} staticKey={decalSurfaceKey(d.id)} style={{ position: 'absolute', left: -99999, top: 0, width: PAINT_TEX, height: PAINT_TEX }}>
+            <Box style={{ position: 'absolute', left: pl.left, top: pl.top, width: pl.width, height: pl.height }}>
+              <DecalSurface doc={d.doc} width={pl.width} height={pl.height} />
+            </Box>
+          </StaticSurface>
+        );
+      })}
 
       {/* TEXTURE (req_1068): the offscreen scene SPRITE-MAP atlas every part samples
           via textureKey. Mounted while texture view is on (and NOT painting — the
@@ -2682,7 +2817,48 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
                   );
                 })}
               </Row>
+              {/* + Decal (req_1730): a layer whose pixels come from a DecalDoc — the
+                  composer's rich text / shapes / images / neon, placed on the surface. */}
+              <Pressable tooltip="Add a DECAL layer — author rich text / shapes / images / neon, then click the model to place it on the surface" onPress={addDecalLayer} style={{ height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: PAINT_THEME.control, borderWidth: 1, borderColor: PAINT_THEME.frame }}>
+                <Text fontSize={10} color={PAINT_THEME.ink} style={{ fontFamily: 'monospace', fontWeight: '800' }}>+ decal layer</Text>
+              </Pressable>
             </Col>
+            {/* DECAL authoring (req_1730): when a decal layer is active, author its doc on
+                a flat stage (real fonts / shader+image fills / image / neon) and click the
+                model to place it on the surface; size scales it on the mesh. */}
+            {decalLayerActive && activeDecal ? (
+              <Col style={{ gap: 6, padding: 10, backgroundColor: PAINT_THEME.panel, borderWidth: 1, borderColor: PAINT_THEME.frame, borderRadius: 8 }}>
+                <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace', letterSpacing: 1 }}>DECAL · click the model to place</Text>
+                <Box style={{ height: 190 }}>
+                  <DecalStage
+                    doc={activeDecal.doc}
+                    selectedId={activeDecalNode}
+                    onSelect={setActiveDecalNode}
+                    onMove={(id, dx, dy) => setActiveDecalDoc(decalEdit.moveNode(activeDecal.doc, id, dx, dy))}
+                    onResize={(id, handle, dx, dy) => setActiveDecalDoc(decalEdit.resizeNode(activeDecal.doc, id, handle, dx, dy))}
+                  />
+                </Box>
+                <Row style={{ gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Text fontSize={9} color={PAINT_THEME.dim} style={{ fontFamily: 'monospace' }}>size</Text>
+                  {[0.5, 1, 2, 3].map((sc) => {
+                    const on = Math.abs((activeDecal.scale ?? 1) - sc) < 0.01;
+                    return (
+                      <Pressable key={sc} tooltip={`Decal ${sc}× on the surface`} onPress={() => { props.onSetDecals(props.decals.map((d) => (d.id === activeDecal.id ? { ...d, scale: sc } : d))); markDecalBake(activeDecal.id); }} style={{ paddingLeft: 7, paddingRight: 7, height: 22, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? PAINT_THEME.accent : PAINT_THEME.control, borderWidth: 1, borderColor: on ? PAINT_THEME.accent : PAINT_THEME.frame }}>
+                        <Text fontSize={10} color={on ? PAINT_THEME.page : PAINT_THEME.dim} style={{ fontFamily: 'monospace', fontWeight: '800' }}>{`${sc}x`}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </Row>
+                <PanelGroups
+                  spec={{ groups: [
+                    { title: 'ADD', fields: decalAddFields({ doc: activeDecal.doc, addNode: decalAddNode, pickImageForNode: decalPickImage }) },
+                    { title: 'CANVAS', fields: decalCanvasFields(activeDecal.doc, decalPatchDoc) },
+                    { title: activeDecalNode ? 'NODE' : 'DECAL', layout: 'rows', fields: decalNodeFields({ doc: activeDecal.doc, selectedId: activeDecalNode, recipes: HMSC_SHADERS, patchNode: decalPatchNode, patchDoc: decalPatchDoc, pickImageForNode: decalPickImage }) },
+                  ] }}
+                  onEdit={() => { if (activeDecal) markDecalBake(activeDecal.id); }}
+                />
+              </Col>
+            ) : null}
             {/* SAVED PALETTES (req_1729): named colour sets in the shared localstore,
                 so a set of colours you like is reusable across every model — not lost
                 when the ephemeral recents ring wipes or you switch assets. */}
@@ -3787,7 +3963,7 @@ export function StudioEditor() {
   }, []);
   return (
     <Row style={{ flexGrow: 1, height: '100%', minHeight: 0, position: 'relative' }}>
-      <StudioViewport parts={model.visibleParts} allParts={model.parts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} sceneId={model.openModelId} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} canUndo={model.canUndo} onUndo={() => model.undo()} canRedo={model.canRedo} onRedo={() => model.redo()} onImportModel={() => setImportOpen(true)} />
+      <StudioViewport parts={model.visibleParts} allParts={model.parts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} sceneId={model.openModelId} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} decals={model.decals} onSetDecals={model.setDecals} canUndo={model.canUndo} onUndo={() => model.undo()} canRedo={model.canRedo} onRedo={() => model.redo()} onImportModel={() => setImportOpen(true)} />
       {/* Branch-history verbs + import now live INSIDE the viewport's top bar
           (req_1430) — they used to be a separate absolute row colliding with the
           STUDIO info strip at the same corner. */}
