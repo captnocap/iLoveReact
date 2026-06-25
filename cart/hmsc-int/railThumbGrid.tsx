@@ -48,7 +48,8 @@ export function solveThumbOrbitForBounds(b: GridBounds) {
 export type FittedGrid = {
   /** spread onto the grid container <Box> — measures it + clips the stray row. */
   containerStyle: { flexGrow: number; minHeight: number; overflow: 'hidden' };
-  onLayout: (rect: { w: number; h: number }) => void;
+  /** pass the raw onLayout rect ({x,y,width,height}); the hook reads width/height. */
+  onLayout: (rect: any) => void;
   /** the grid row <Box>'s flex props (gap matches the cell math). */
   rowStyle: { flexDirection: 'row'; flexWrap: 'wrap'; gap: number; alignContent: 'flex-start' };
   page: number;
@@ -74,7 +75,13 @@ export function useFittedGrid(opts: { total: number; tileW: number; cellH: numbe
   const cur = Math.min(page, pageCount - 1);
   return {
     containerStyle: { flexGrow: 1, minHeight: 0, overflow: 'hidden' },
-    onLayout: (rect) => setGrid((g) => (g.w === rect.w && g.h === rect.h ? g : { w: rect.w, h: rect.h })),
+    // onLayout rects carry width/height (x/y too) — NOT w/h. Reading w/h gave
+    // undefined → NaN perPage → an empty grid + a "NaN / NaN" pager.
+    onLayout: (rect: any) => setGrid((g) => {
+      const w = Number(rect?.width ?? 0);
+      const h = Number(rect?.height ?? 0);
+      return g.w === w && g.h === h ? g : { w, h };
+    }),
     rowStyle: { flexDirection: 'row', flexWrap: 'wrap', gap, alignContent: 'flex-start' },
     page, setPage, pageCount, cur, start: cur * perPage, end: cur * perPage + perPage,
   };
