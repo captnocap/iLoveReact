@@ -16,6 +16,7 @@
 
 import type { StreamDef } from '../../data';
 import type { EditMesh } from './editMesh';
+import type { DecalDoc } from '../../game/textures/decal';
 
 // ── PAINT (the corrected painter, req_1288/req_1289) ─────────────────────────────
 // Paint is a LAYER over the read-only atlas, keyed in uniform model-SURFACE cells
@@ -59,6 +60,29 @@ export type StoredPart = {
   paint?: PaintLayer;
 };
 
+// ── DECALS (the composer fold, req_1730) ─────────────────────────────────────
+// A decal placed on the model's surface: the SAME DecalDoc the materials composer
+// authors (real-font text / rect with shader+image fills / image / neon), but
+// anchored to a face's UV at a scale, and editable forever. It composites into the
+// model's pixel paint texture (a paint LAYER sourced from DecalSurface, not brush
+// dabs) and flattens into the same paintRef at bake — so there is NO extra runtime
+// texture. The doc is tiny vector JSON, so persisting it is far cheaper than the
+// flattened PNG and makes re-edit lossless. The decal's id IS its paint-layer id.
+export type ModelDecal = {
+  id: string;
+  /** the part whose face the decal is anchored to. */
+  partId: string;
+  /** the hit face on that part (UV-island anchor). */
+  faceIndex: number;
+  /** normalized UV anchor on the atlas the decal centres on. */
+  u: number;
+  v: number;
+  /** atlas pixels per doc pixel — the on-surface size of the doc canvas. */
+  scale: number;
+  /** the editable decal document (composer-identical). */
+  doc: DecalDoc;
+};
+
 /** One saved model = a named scene and its ordered parts. */
 export type StoredModel = {
   id: string;
@@ -73,6 +97,9 @@ export type StoredModel = {
    *  GUIDING_LIGHT content-address law, and the same form the in-game bake reads.
    *  Absent until the model is pixel-painted. */
   paintRef?: string;
+  /** surface decals (the composer fold, req_1730). Absent until the first decal.
+   *  Editable forever; composited into the paint texture for the look. */
+  decals?: ModelDecal[];
 };
 
 export type ModelEvent =
@@ -94,6 +121,10 @@ export type ModelEvent =
   // picture stores nothing). The durable, restart-safe replacement for the localstore
   // base64 hack that blew the 4MB cap.
   | { kind: 'modelPaintBaked'; model: string; paintRef: string; blobB64?: string }
+  // set the model's surface decals (whole-list replace — branch + undoable). The
+  // list is tiny vector docs, so replacing it wholesale on each edit is cheap and
+  // keeps the reducer a dumb upsert (req_1730).
+  | { kind: 'modelDecalsSet'; model: string; decals: ModelDecal[] }
   | { kind: 'partRenamed'; model: string; id: string; name: string }
   | { kind: 'partVisibilitySet'; model: string; id: string; visible: boolean }
   | { kind: 'partReordered'; model: string; id: string; dir: 'up' | 'down' }
@@ -191,6 +222,13 @@ export const modelStream: StreamDef<ModelStreamState, ModelEvent> = Object.freez
         const m = state.models[event.model];
         return m ? { ...state, models: { ...state.models, [event.model]: { ...m, palette: event.palette } } } : state;
       }
+      case 'modelDecalsSet': {
+        const m = state.models[event.model];
+        if (!m) return state;
+        // an empty list clears decals back to absent (keeps snapshots tidy).
+        const decals = event.decals.length ? event.decals : undefined;
+        return { ...state, models: { ...state.models, [event.model]: { ...m, decals } } };
+      }
       case 'modelPaintBaked': {
         const m = state.models[event.model];
         if (!m) return state;
@@ -250,6 +288,12 @@ export function modelParts(state: ModelStreamState, modelId: string | null): Sto
   if (!modelId) return [];
   const m = state?.models?.[modelId];
   return m ? m.order.map((id) => m.parts[id]).filter(Boolean) : [];
+}
+
+/** One model's surface decals (empty if none / unknown model). */
+export function modelDecals(state: ModelStreamState, modelId: string | null): ModelDecal[] {
+  if (!modelId) return [];
+  return state?.models?.[modelId]?.decals ?? [];
 }
 
 // ── palette helpers (slot → appearance) ──────────────────────────────────────────

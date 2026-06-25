@@ -220,4 +220,25 @@ test('paint-blob GC: a re-bake drops the model superseded blob, keeps shared one
   assertEqual(Object.keys(s2.paintBlobs ?? {}).sort().join(','), 'anew,shared', 'shared blob survives because b still references it');
 });
 
+test('surface decals persist on the model, replace wholesale, and clear when emptied (req_1730)', () => {
+  const doc = { version: 1 as const, width: 256, height: 128, bg: '', nodes: [] };
+  const decalA = { id: 'L1', partId: 'pt-1', faceIndex: 3, u: 0.5, v: 0.5, scale: 1, doc };
+  const decalB = { id: 'L2', partId: 'pt-1', faceIndex: 7, u: 0.25, v: 0.75, scale: 2, doc };
+  const s1 = fold([
+    { kind: 'modelCreated', model: 'a', name: 'A' },
+    { kind: 'modelDecalsSet', model: 'a', decals: [decalA] },
+  ] as ModelEvent[]);
+  assertEqual(s1.models['a'].decals?.length, 1, 'a decal persists on the model');
+  assertEqual(s1.models['a'].decals?.[0].faceIndex, 3, 'the decal carries its face anchor');
+  // a whole-list replace swaps the set (the branch-save shape).
+  const s2 = modelStream.apply(s1, { kind: 'modelDecalsSet', model: 'a', decals: [decalA, decalB] });
+  assertEqual(s2.models['a'].decals?.length, 2, 'a later set replaces the whole list');
+  // an empty list clears decals back to absent (snapshot stays tidy).
+  const s3 = modelStream.apply(s2, { kind: 'modelDecalsSet', model: 'a', decals: [] });
+  assertEqual(s3.models['a'].decals, undefined, 'an empty set clears decals to absent');
+  // a decal set for an unknown model is future noise, not a crash.
+  const s4 = modelStream.apply(s3, { kind: 'modelDecalsSet', model: 'ghost', decals: [decalA] });
+  assertEqual(s4, s3, 'a decal set for an unknown model is a no-op');
+});
+
 finish('modelStream');

@@ -21,7 +21,7 @@ import { getHotState, setHotState, useRerender } from '@reactjit/hooks';
 import type { GeometryData } from '@reactjit/geometries';
 import { cuboid, editMeshToGeometry, mergeMesh, type EditMesh } from './editMesh';
 import type { LayerStripAction } from '../paint/LayerStrip';
-import { libraryModels, modelParts, modelStream, paintBlobFor, type ModelEvent, type ModelStreamState, type Palette, type PaintLayer, type StoredModel, type StoredPart } from './modelStream';
+import { libraryModels, modelDecals, modelParts, modelStream, paintBlobFor, type ModelDecal, type ModelEvent, type ModelStreamState, type Palette, type PaintLayer, type StoredModel, type StoredPart } from './modelStream';
 import type { StreamHandle } from '../../data';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
@@ -86,6 +86,10 @@ export type StudioModel = {
   editPaint(id: string, paint: PaintLayer): void;
   /** set the model's paint palette — recolour / slot edits, undoable. */
   setPalette(palette: Palette): void;
+  /** the open model's surface decals (the composer fold, req_1730), or []. */
+  decals: ModelDecal[];
+  /** set the model's surface decals (whole list) — branch + undoable. */
+  setDecals(decals: ModelDecal[]): void;
   /** the open model's pixel-paint texture content hash (req_1382), or null. */
   paintRef: string | null;
   /** the base64 PNG for a paintRef (content-addressed blob), or null. */
@@ -157,6 +161,7 @@ function labelFor(event: ModelEvent): string {
     case 'partMeshUpdated': return 'edit mesh';
     case 'partPaintUpdated': return 'paint';
     case 'modelPaletteSet': return 'recolour';
+    case 'modelDecalsSet': return 'decals';
     case 'partRenamed': return `rename → ${event.name}`;
     case 'partVisibilitySet': return event.visible ? 'show part' : 'hide part';
     case 'partReordered': return `reorder ${event.dir}`;
@@ -191,6 +196,9 @@ function inverseOf(event: ModelEvent, before: StoredModel): ModelEvent | null {
     case 'modelPaletteSet':
       // restore the prior palette (empty = no slots, identical to absent).
       return { kind: 'modelPaletteSet', model, palette: before.palette ?? { slots: [], variant: 0 } };
+    case 'modelDecalsSet':
+      // restore the prior decals (empty list = back to no decals).
+      return { kind: 'modelDecalsSet', model, decals: before.decals ?? [] };
     case 'partRenamed': {
       const p = before.parts[event.id];
       return p ? { kind: 'partRenamed', model, id: event.id, name: p.name } : null;
@@ -400,6 +408,15 @@ function bakePaint(paintRef: string, blobB64: string): void {
   pushEvent({ kind: 'modelPaintBaked', model, paintRef, blobB64 }, 'paint baked');
 }
 
+// Set the model's surface decals (whole list) — BRANCH + undoable. 'structure'
+// tick: model-level, no geometry change. The docs are tiny vector JSON, so a
+// whole-list replace per edit is cheap (req_1730).
+function setDecals(decals: ModelDecal[]): void {
+  ensureInit();
+  const model = store.openModelId; if (!model) return;
+  commit({ kind: 'modelDecalsSet', model, decals }, 'structure', 'record');
+}
+
 function runAction(id: string, action: LayerStripAction): void {
   ensureInit();
   const model = store.openModelId; if (!model) return;
@@ -509,6 +526,7 @@ function duplicateModel(id?: string): void {
   }
   if (src.palette) pushEvent({ kind: 'modelPaletteSet', model: newId, palette: src.palette }, 'recolour');
   if (src.paintRef) pushEvent({ kind: 'modelPaintBaked', model: newId, paintRef: src.paintRef }, 'paint');
+  if (src.decals?.length) pushEvent({ kind: 'modelDecalsSet', model: newId, decals: src.decals }, 'decals');
   setOpen(newId);
 }
 
@@ -533,7 +551,7 @@ export function studioRenameModel(name: string): void { renameModel(name); }
 export function studioDeleteModel(id: string): void { deleteModel(id); }
 export function studioDuplicateModel(id?: string): void { duplicateModel(id); }
 
-const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, editPaint, setPalette, bakePaint, mergeActive, runAction, undo, redo, newModel, openModel, renameModel, deleteModel, duplicateModel } as const;
+const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, editPaint, setPalette, setDecals, bakePaint, mergeActive, runAction, undo, redo, newModel, openModel, renameModel, deleteModel, duplicateModel } as const;
 
 export function useStudioModel(): StudioModel {
   ensureInit();
@@ -547,6 +565,7 @@ export function useStudioModel(): StudioModel {
     openModelId: store.openModelId,
     modelName: store.openModelId ? (st.models?.[store.openModelId]?.name ?? null) : null,
     palette: store.openModelId ? (st.models?.[store.openModelId]?.palette ?? null) : null,
+    decals: modelDecals(st, store.openModelId),
     paintRef: store.openModelId ? (st.models?.[store.openModelId]?.paintRef ?? null) : null,
     paintBlob: (ref: string | null) => paintBlobFor(streamState(), ref),
     models: libraryModels(st),

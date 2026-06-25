@@ -36,7 +36,10 @@ export const PAINT_TEX = 1024;
 // reveal the one below. The layer stack is owned by the editor (StudioViewport) and
 // mirrored here via setLayers/setActiveLayerId so the GPU plumbing has one source.
 
-export type PaintLayerMeta = { id: string; name: string; visible: boolean; opacity: number };
+// `kind` (req_1730): a 'paint' layer accumulates brush dabs; a 'decal' layer is
+// sourced from a DecalDoc (DecalSurface → readback → upload) instead — its pixels
+// are re-generated from the doc, never brushed. Absent = 'paint' (back-compat).
+export type PaintLayerMeta = { id: string; name: string; visible: boolean; opacity: number; kind?: 'paint' | 'decal' };
 export const BASE_LAYER_ID = 'base';
 
 let g_layers: PaintLayerMeta[] = [{ id: BASE_LAYER_ID, name: 'Base', visible: true, opacity: 1 }];
