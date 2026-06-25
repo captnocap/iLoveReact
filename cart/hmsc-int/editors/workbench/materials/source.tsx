@@ -2,10 +2,8 @@
 // (WBSTEP7-0606). The source fronts the existing texture pipeline and decal
 // composer without touching the legacy /textures or /compose routes.
 
-import { useEffect, useRef, useState } from 'react';
-import { Box, Col, Effect, Pressable, Row, Scene3D, ScrollView, StaticSurface, Text } from '@reactjit/primitives';
+import { Box, Col, Effect, Row, Scene3D, ScrollView, StaticSurface, Text } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
-import { busOn } from '@reactjit/hooks/useIFTTT';
 import type { WorkbenchSource } from '../../../shell/Workbench';
 import { TexturePreview } from '../../../TexturePreview';
 import { DecalSurface } from '../../../game/textures/decalRender';
@@ -20,9 +18,9 @@ import { materialsStream, type MaterialsEvent } from '../../materials/stream';
 import { readRouteTwigState, writeRouteTwigState } from '../../twigs';
 import { pickImageFile } from '../../cutout/sources';
 import { LayerStackStrip, type LayerStripAction } from '../../paint/LayerStrip';
+import { DecalStage } from '../../decal/DecalStage';
 import {
   createMaterialStore,
-  type ComposeResizeHandle,
   type MaterialLens,
   type MaterialStore,
   type MaterialSubject,
@@ -34,21 +32,6 @@ const COMPOSE_STAGE = {
   maxScale: 1.6,
   billboardMeters: 5,
 } as const;
-
-type ComposeDrag =
-  | { kind: 'move'; id: string }
-  | { kind: 'resize'; id: string; handle: ComposeResizeHandle };
-
-const COMPOSE_RESIZE_HANDLES: { id: ComposeResizeHandle; x: 0 | 0.5 | 1; y: 0 | 0.5 | 1 }[] = [
-  { id: 'nw', x: 0, y: 0 },
-  { id: 'n', x: 0.5, y: 0 },
-  { id: 'ne', x: 1, y: 0 },
-  { id: 'e', x: 1, y: 0.5 },
-  { id: 'se', x: 1, y: 1 },
-  { id: 's', x: 0.5, y: 1 },
-  { id: 'sw', x: 0, y: 1 },
-  { id: 'w', x: 0, y: 0.5 },
-];
 
 function composeLayerName(node: DecalNode, index: number): string {
   return node.name ?? `${node.kind} ${index + 1}`;
@@ -201,20 +184,7 @@ function ComposeStage(props: { store: MaterialStore }) {
   const s = props.store;
   const doc = s.composeDoc;
   const selectedId = s.composeSelectedId;
-  const selectedNode = selectedId ? doc.nodes.find((n) => n.id === selectedId) ?? null : null;
-  const dragRef = useRef<ComposeDrag | null>(null);
-  const scaleRef = useRef(1);
-  const [stageBox, setStageBox] = useState({ w: 1, h: 1 });
-  const scale = Math.min(
-    COMPOSE_STAGE.maxScale,
-    (stageBox.w - COMPOSE_STAGE.pad * 2) / doc.width,
-    (stageBox.h - COMPOSE_STAGE.pad * 2) / doc.height,
-  );
-  scaleRef.current = Number.isFinite(scale) && scale > 0 ? scale : 1;
-  const stageW = doc.width * scaleRef.current;
-  const stageH = doc.height * scaleRef.current;
   const billboardH = (COMPOSE_STAGE.billboardMeters * doc.height) / doc.width;
-  const endDrag = () => { dragRef.current = null; };
   const layerRows = doc.nodes.map((n, i) => ({ node: n, index: i })).reverse().map(({ node, index }) => ({
     id: node.id,
     name: composeLayerName(node, index),
@@ -233,77 +203,19 @@ function ComposeStage(props: { store: MaterialStore }) {
     else if (action === 'delete') s.removeComposeNode(id);
   };
 
-  useEffect(() => busOn('system:cursor:move', (e: any) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const scaleNow = scaleRef.current || 1;
-    const dx = Number(e?.dx ?? 0) / scaleNow;
-    const dy = Number(e?.dy ?? 0) / scaleNow;
-    if (dx === 0 && dy === 0) return;
-    if (drag.kind === 'move') s.moveComposeNode(drag.id, dx, dy);
-    else s.resizeComposeNode(drag.id, drag.handle, dx, dy);
-  }), [s]);
-
   return (
-    <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: accentFor('bg') }} onMouseUp={endDrag}>
+    <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: accentFor('bg') }}>
       <Row style={{ flexGrow: 1, minHeight: 0 }}>
-        <Box
-          onLayout={(lr: any) => {
-            const w = Math.max(1, Number(lr?.width ?? 1));
-            const h = Math.max(1, Number(lr?.height ?? 1));
-            setStageBox((p) => (p.w === w && p.h === h ? p : { w, h }));
-          }}
-          style={{ flexGrow: 1, minWidth: 0, minHeight: 0, alignItems: 'center', justifyContent: 'center', position: 'relative' }}
-        >
-          <Pressable onPress={() => s.selectComposeNode(null)} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }} />
-          <Box style={{ width: stageW, height: stageH, borderWidth: 1, borderColor: accentFor('border') }}>
-            <DecalSurface doc={doc} width={stageW} height={stageH} />
-            <Box style={{ position: 'absolute', left: 0, top: 0, width: stageW, height: stageH }}>
-              {doc.nodes.map((n) => (
-                <Pressable
-                  key={n.id}
-                  onMouseDown={() => { s.selectComposeNode(n.id); dragRef.current = { kind: 'move', id: n.id }; }}
-                  onMouseUp={endDrag}
-                  style={{
-                    position: 'absolute',
-                    left: n.x * scaleRef.current,
-                    top: n.y * scaleRef.current,
-                    width: Math.max(6, n.w * scaleRef.current),
-                    height: Math.max(6, n.h * scaleRef.current),
-                    backgroundColor: '#00000001',
-                    borderWidth: selectedId === n.id ? 1 : 0,
-                    borderColor: accentFor('primary'),
-                  }}
-                />
-              ))}
-              {selectedNode ? COMPOSE_RESIZE_HANDLES.map((h) => {
-                const handleSize = 10;
-                const left = (selectedNode.x + selectedNode.w * h.x) * scaleRef.current - handleSize / 2;
-                const top = (selectedNode.y + selectedNode.h * h.y) * scaleRef.current - handleSize / 2;
-                return (
-                  <Pressable
-                    key={`resize-${h.id}`}
-                    onMouseDown={() => {
-                      s.selectComposeNode(selectedNode.id);
-                      dragRef.current = { kind: 'resize', id: selectedNode.id, handle: h.id };
-                    }}
-                    onMouseUp={endDrag}
-                    style={{
-                      position: 'absolute',
-                      left,
-                      top,
-                      width: handleSize,
-                      height: handleSize,
-                      borderRadius: 2,
-                      borderWidth: 1,
-                      borderColor: '#f8fafc',
-                      backgroundColor: accentFor('primary'),
-                    }}
-                  />
-                );
-              }) : null}
-            </Box>
-          </Box>
+        <Box style={{ flexGrow: 1, minWidth: 0, minHeight: 0, alignItems: 'center', justifyContent: 'center' }}>
+          <DecalStage
+            doc={doc}
+            selectedId={selectedId}
+            onSelect={(id) => s.selectComposeNode(id)}
+            onMove={(id, dx, dy) => s.moveComposeNode(id, dx, dy)}
+            onResize={(id, handle, dx, dy) => s.resizeComposeNode(id, handle, dx, dy)}
+            maxScale={COMPOSE_STAGE.maxScale}
+            pad={COMPOSE_STAGE.pad}
+          />
           <Text fontSize={9} color={accentFor('textFaint')} style={{ fontFamily: 'monospace', marginTop: 6 }}>
             {`${doc.width}x${doc.height} · drag to move · handles resize`}
           </Text>

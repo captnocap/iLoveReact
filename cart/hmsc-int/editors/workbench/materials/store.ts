@@ -4,17 +4,18 @@
 // action all read/write through this boundary.
 
 import type { ActionSpec, RosterRow } from '../../../shell/Workbench';
-import type { FieldSpec, PanelSpec, PickOption } from '../../../shell/fields';
+import type { FieldSpec, PanelSpec } from '../../../shell/fields';
 import type { LensSpec } from '../../../shell/stage';
 import {
-  DECAL_SIZE_PRESETS,
   emptyDecalDoc,
   validateDecalDoc,
-  type DecalAlign,
   type DecalDoc,
   type DecalNode,
 } from '../../../game/textures/decal';
-import { defaultShaderData, paramDefaults, type ShaderParam, type ShaderSpec } from '../../../game/textures/shaders';
+import { paramDefaults, type ShaderParam, type ShaderSpec } from '../../../game/textures/shaders';
+import * as decalEdit from '../../decal/decalEdit';
+import { type DecalResizeHandle } from '../../decal/decalEdit';
+import { decalAddFields, decalCanvasFields, decalNodeFields } from '../../decal/DecalNodeFields';
 import { missionCodePresets } from '../../../game/missions/codes';
 import type { MaterialsEvent } from '../../materials/stream';
 
@@ -70,18 +71,13 @@ export type MaterialSubject = {
 };
 
 type BankedMaterial = { name: string; shaderId: string; data: number[] };
-export type ComposeResizeHandle = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw';
+// The decal node-editing vocabulary now lives in editors/decal/decalEdit (shared
+// with the studio painter, req_1730); ComposeResizeHandle stays as an alias so
+// existing consumers (source.tsx) keep importing it from here.
+export type ComposeResizeHandle = DecalResizeHandle;
 
 const TEXTURE_ROUTE = '/textures';
 const COMPOSE_ROUTE = '/compose';
-const FONT_FAMILIES = ['default', 'sans-serif', 'serif', 'monospace', 'noto', 'arial', 'inter', 'roboto'];
-const FONT_WEIGHTS = ['400', '600', '700', '800', '900'];
-const ALIGN_OPTS: DecalAlign[] = ['left', 'center', 'right'];
-const MIN_NODE_SIZE = 1;
-
-function isEffectFillSpec(spec: ShaderSpec): boolean {
-  return /^[a-j]-/.test(spec.id);
-}
 
 function snapParam(p: ShaderParam, v: number): number {
   const stepped = Math.round(v / p.step) * p.step;
@@ -92,57 +88,6 @@ function snapParam(p: ShaderParam, v: number): number {
 function showParam(p: ShaderParam, v: number): string {
   const n = p.integer ? String(Math.round(v)) : v.toFixed(p.step < 0.05 ? 3 : 2);
   return p.unit ? `${n}${p.unit}` : n;
-}
-
-function cloneDoc(doc: DecalDoc): DecalDoc {
-  return JSON.parse(JSON.stringify(doc)) as DecalDoc;
-}
-
-function mintNodeId(doc: DecalDoc, kind: DecalNode['kind']): string {
-  let n = doc.nodes.length + 1;
-  while (doc.nodes.some((node) => node.id === `${kind}-${n}`)) n += 1;
-  return `${kind}-${n}`;
-}
-
-function labelForPreset(doc: DecalDoc): string {
-  return DECAL_SIZE_PRESETS.find((p) => p.width === doc.width && p.height === doc.height)?.label ?? 'custom';
-}
-
-function parseWeight(v: string): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 400;
-}
-
-function cleanPickedPath(raw: string): string {
-  let p = raw.trim().replace(/^['"]+|['"]+$/g, '').trim();
-  if (p.startsWith('file://')) p = decodeURIComponent(p.slice('file://'.length));
-  return p;
-}
-
-function resizeNodePatch(node: DecalNode, handle: ComposeResizeHandle, dx: number, dy: number): Pick<DecalNode, 'x' | 'y' | 'w' | 'h'> {
-  let x = node.x;
-  let y = node.y;
-  let w = node.w;
-  let h = node.h;
-  if (handle.includes('e')) w += dx;
-  if (handle.includes('s')) h += dy;
-  if (handle.includes('w')) {
-    x += dx;
-    w -= dx;
-  }
-  if (handle.includes('n')) {
-    y += dy;
-    h -= dy;
-  }
-  if (w < MIN_NODE_SIZE) {
-    if (handle.includes('w')) x = node.x + node.w - MIN_NODE_SIZE;
-    w = MIN_NODE_SIZE;
-  }
-  if (h < MIN_NODE_SIZE) {
-    if (handle.includes('n')) y = node.y + node.h - MIN_NODE_SIZE;
-    h = MIN_NODE_SIZE;
-  }
-  return { x, y, w, h };
 }
 
 export interface MaterialStore {
@@ -248,10 +193,6 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
   };
 
   const customRows = () => deps.stored();
-  const effectFillOptions = (): PickOption[] => recipes()
-    .filter(isEffectFillSpec)
-    .map((spec) => ({ id: spec.id, label: spec.label, group: spec.group }));
-  const effectFillLabel = (id: string): string => recipes().find((spec) => spec.id === id)?.label ?? id;
   const resolveRow = (rowId: string): MaterialRow | null => {
     if (rowId.startsWith('recipe:')) {
       const id = rowId.slice('recipe:'.length);
@@ -299,7 +240,7 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
       writeCompose();
       return;
     }
-    const opened = validateDecalDoc(cloneDoc(material.decal));
+    const opened = validateDecalDoc(decalEdit.cloneDoc(material.decal));
     if (!opened) return;
     composeDoc = opened;
     composeName = material.label;
@@ -313,7 +254,7 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
   // decal. composeEditingId stays null so saving mints a new material, never
   // clobbers a stored one.
   const openComposeDoc = (doc: DecalDoc, name: string) => {
-    const opened = validateDecalDoc(cloneDoc(doc));
+    const opened = validateDecalDoc(decalEdit.cloneDoc(doc));
     if (!opened) return;
     composeDoc = opened;
     composeName = name;
@@ -327,45 +268,35 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
     writeCompose();
     emit();
   };
-  const patchNode = (id: string, patch: Partial<DecalNode>) => {
-    composeDoc = {
-      ...composeDoc,
-      nodes: composeDoc.nodes.map((n) => (n.id === id ? ({ ...n, ...patch } as DecalNode) : n)),
-    };
-    writeCompose();
-    emit();
-  };
+  // All node mutations route through the shared pure ops (editors/decal/decalEdit);
+  // these closures own only the side-effects (twig write + emit + selection).
+  const patchDocNodes = (next: DecalDoc) => { composeDoc = next; writeCompose(); emit(); };
+  const patchNode = (id: string, patch: Partial<DecalNode>) => patchDocNodes(decalEdit.patchNode(composeDoc, id, patch));
   const addNode = (node: DecalNode) => {
-    composeDoc = { ...composeDoc, nodes: [...composeDoc.nodes, node] };
+    composeDoc = decalEdit.addNode(composeDoc, node);
     selectedNodeId = node.id;
     writeCompose();
     emit();
   };
   const removeNode = (id: string) => {
-    composeDoc = { ...composeDoc, nodes: composeDoc.nodes.filter((n) => n.id !== id) };
+    composeDoc = decalEdit.removeNode(composeDoc, id);
     if (selectedNodeId === id) selectedNodeId = null;
     writeCompose();
     emit();
   };
   const duplicateNode = (id: string) => {
-    const src = composeDoc.nodes.find((n) => n.id === id);
-    if (!src) return;
-    addNode({ ...src, id: mintNodeId(composeDoc, src.kind), x: src.x + 16, y: src.y + 16 } as DecalNode);
-  };
-  const reorderNode = (id: string, dir: 1 | -1) => {
-    const i = composeDoc.nodes.findIndex((n) => n.id === id);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= composeDoc.nodes.length) return;
-    const nodes = [...composeDoc.nodes];
-    [nodes[i], nodes[j]] = [nodes[j], nodes[i]];
-    composeDoc = { ...composeDoc, nodes };
+    const next = decalEdit.duplicateNode(composeDoc, id);
+    if (next === composeDoc) return;
+    composeDoc = next;
+    selectedNodeId = next.nodes[next.nodes.length - 1]?.id ?? selectedNodeId;
     writeCompose();
     emit();
   };
+  const reorderNode = (id: string, dir: 1 | -1) => patchDocNodes(decalEdit.reorderNode(composeDoc, id, dir));
   const pickImageForNode = (id: string) => {
     const apply = (raw: string | null) => {
       if (!raw) return;
-      patchNode(id, { src: cleanPickedPath(raw) } as Partial<DecalNode>);
+      patchNode(id, { src: decalEdit.cleanPickedPath(raw) } as Partial<DecalNode>);
     };
     const picked = deps.pickImage?.();
     if (!picked) return;
@@ -376,7 +307,7 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
     }
   };
   const addImageNode = () => {
-    const node: DecalNode = { id: mintNodeId(composeDoc, 'image'), kind: 'image', x: composeDoc.width / 4, y: composeDoc.height / 4, w: composeDoc.width / 2, h: composeDoc.height / 2, src: '' };
+    const node = decalEdit.newImage(composeDoc);
     addNode(node);
     pickImageForNode(node.id);
   };
@@ -456,70 +387,14 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
   const composeFields = (): FieldSpec[] => [
     { k: 'name', t: 'text', width: 150, get: () => composeName, set: (v) => { composeName = v; writeCompose(); } },
     { k: 'editing', t: 'val', get: () => composeEditingId ?? 'new' },
-    { k: 'size', t: 'enum', opts: DECAL_SIZE_PRESETS.map((p) => p.label), get: () => labelForPreset(composeDoc), set: (label) => {
-      const p = DECAL_SIZE_PRESETS.find((x) => x.label === label);
-      if (p) patchDoc({ width: p.width, height: p.height });
-    } },
+    ...decalCanvasFields(composeDoc, patchDoc),
     { k: '3D billboard', t: 'bool', get: () => show3d, set: (v) => { show3d = v; writeCompose(); } },
     { k: 'new decal', t: 'act', tone: 'success', run: () => { openDecal(null); emit(); } },
-    { k: '+ rect', t: 'act', run: () => addNode({ id: mintNodeId(composeDoc, 'rect'), kind: 'rect', x: composeDoc.width / 4, y: composeDoc.height / 4, w: composeDoc.width / 2, h: composeDoc.height / 2, bg: '#2563eb', borderRadius: 8 }) },
-    { k: '+ text', t: 'act', run: () => addNode({ id: mintNodeId(composeDoc, 'text'), kind: 'text', x: composeDoc.width / 8, y: composeDoc.height / 3, w: (composeDoc.width * 3) / 4, h: composeDoc.height / 3, text: 'BILLBOARD', color: '#f8fafc', fontSize: Math.round(composeDoc.height / 4), fontWeight: 800, align: 'center' }) },
-    { k: '+ image', t: 'act', run: addImageNode },
+    ...decalAddFields({ doc: composeDoc, addNode, pickImageForNode }),
   ];
 
-  const canvasOrNodeFields = (): FieldSpec[] => {
-    const selected = selectedNodeId ? composeDoc.nodes.find((n) => n.id === selectedNodeId) ?? null : null;
-    if (!selected) {
-      return [
-        { k: 'width', t: 'num', min: 8, max: 4096, step: 8, precision: 0, get: () => composeDoc.width, set: (v) => patchDoc({ width: Math.max(8, Math.round(v)) }) },
-        { k: 'height', t: 'num', min: 8, max: 4096, step: 8, precision: 0, get: () => composeDoc.height, set: (v) => patchDoc({ height: Math.max(8, Math.round(v)) }) },
-        { k: 'bg', t: 'color', wheel: true, get: () => composeDoc.bg, set: (v) => patchDoc({ bg: v }) },
-      ];
-    }
-    const baseFields: FieldSpec[] = [
-      { k: 'x', t: 'num', min: -4096, max: 4096, step: 1, precision: 0, get: () => selected.x, set: (v) => patchNode(selected.id, { x: v }) },
-      { k: 'y', t: 'num', min: -4096, max: 4096, step: 1, precision: 0, get: () => selected.y, set: (v) => patchNode(selected.id, { y: v }) },
-      { k: 'w', t: 'num', min: 1, max: 4096, step: 1, precision: 0, get: () => selected.w, set: (v) => patchNode(selected.id, { w: Math.max(1, v) }) },
-      { k: 'h', t: 'num', min: 1, max: 4096, step: 1, precision: 0, get: () => selected.h, set: (v) => patchNode(selected.id, { h: Math.max(1, v) }) },
-      { k: 'opacity', t: 'slider', min: 0.05, max: 1, show: (v) => v.toFixed(2), get: () => selected.opacity ?? 1, set: (v) => patchNode(selected.id, { opacity: v }) },
-    ];
-    if (selected.kind === 'rect') {
-      baseFields.push(
-        { k: 'flat fill', t: 'color', wheel: true, get: () => selected.bg, set: (v) => patchNode(selected.id, { bg: v }) },
-        {
-          k: 'effect fill', t: 'pick',
-          get: () => selected.fillShaderId ?? null,
-          opts: effectFillOptions,
-          show: effectFillLabel,
-          clearLabel: 'flat color',
-          set: (id) => {
-            const spec = id ? recipes().find((s) => s.id === id) : null;
-            patchNode(selected.id, spec ? { fillShaderId: spec.id, fillData: defaultShaderData(spec) } : { fillShaderId: undefined, fillData: undefined });
-          },
-        },
-        { k: 'radius', t: 'num', min: 0, max: 128, step: 1, precision: 0, get: () => selected.borderRadius ?? 0, set: (v) => patchNode(selected.id, { borderRadius: v }) },
-        { k: 'border', t: 'num', min: 0, max: 32, step: 1, precision: 0, get: () => selected.borderWidth ?? 0, set: (v) => patchNode(selected.id, { borderWidth: v }) },
-        { k: 'b.color', t: 'color', wheel: true, get: () => selected.borderColor ?? '#000000', set: (v) => patchNode(selected.id, { borderColor: v }) },
-      );
-    } else if (selected.kind === 'text') {
-      baseFields.push(
-        { k: 'text', t: 'text', width: 166, get: () => selected.text, set: (v) => patchNode(selected.id, { text: v }) },
-        { k: 'color', t: 'color', wheel: true, get: () => selected.color, set: (v) => patchNode(selected.id, { color: v }) },
-        { k: 'size', t: 'num', min: 6, max: 320, step: 1, precision: 0, get: () => selected.fontSize, set: (v) => patchNode(selected.id, { fontSize: v }) },
-        { k: 'tracking', t: 'num', min: -4, max: 32, step: 0.5, precision: 1, get: () => selected.letterSpacing ?? 0, set: (v) => patchNode(selected.id, { letterSpacing: v }) },
-        { k: 'weight', t: 'enum', opts: FONT_WEIGHTS, get: () => String(selected.fontWeight ?? 400), set: (v) => patchNode(selected.id, { fontWeight: parseWeight(v) }) },
-        { k: 'family', t: 'enum', opts: FONT_FAMILIES, get: () => selected.fontFamily ?? 'default', set: (v) => patchNode(selected.id, { fontFamily: v === 'default' ? undefined : v }) },
-        { k: 'align', t: 'enum', opts: ALIGN_OPTS, get: () => selected.align ?? 'left', set: (v) => patchNode(selected.id, { align: v as DecalAlign }) },
-      );
-    } else {
-      baseFields.push(
-        { k: 'pick file…', t: 'act', run: () => pickImageForNode(selected.id) },
-        { k: 'src', t: 'text', width: 174, get: () => selected.src, set: (v) => patchNode(selected.id, { src: v }) },
-        { k: 'radius', t: 'num', min: 0, max: 128, step: 1, precision: 0, get: () => selected.borderRadius ?? 0, set: (v) => patchNode(selected.id, { borderRadius: v }) },
-      );
-    }
-    return baseFields;
-  };
+  const canvasOrNodeFields = (): FieldSpec[] =>
+    decalNodeFields({ doc: composeDoc, selectedId: selectedNodeId, recipes: recipes(), patchNode, patchDoc, pickImageForNode });
 
   api = {
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
@@ -647,25 +522,10 @@ export function createMaterialStore(deps: MaterialWorkbenchDeps): MaterialStore 
     currentShader: currentSpec,
     currentShaderData: currentData,
     selectComposeNode(id) { selectedNodeId = id; emit(); },
-    moveComposeNode(id, dx, dy) {
-      const node = composeDoc.nodes.find((n) => n.id === id);
-      if (!node) return;
-      patchNode(id, { x: node.x + dx, y: node.y + dy });
-    },
-    resizeComposeNode(id, handle, dx, dy) {
-      const node = composeDoc.nodes.find((n) => n.id === id);
-      if (!node) return;
-      patchNode(id, resizeNodePatch(node, handle, dx, dy));
-    },
-    renameComposeNode(id, name) {
-      const clean = name.trim();
-      patchNode(id, { name: clean || undefined } as Partial<DecalNode>);
-    },
-    toggleComposeNodeHidden(id) {
-      const node = composeDoc.nodes.find((n) => n.id === id);
-      if (!node) return;
-      patchNode(id, { hidden: node.hidden ? undefined : true } as Partial<DecalNode>);
-    },
+    moveComposeNode(id, dx, dy) { patchDocNodes(decalEdit.moveNode(composeDoc, id, dx, dy)); },
+    resizeComposeNode(id, handle, dx, dy) { patchDocNodes(decalEdit.resizeNode(composeDoc, id, handle, dx, dy)); },
+    renameComposeNode(id, name) { patchDocNodes(decalEdit.renameNode(composeDoc, id, name)); },
+    toggleComposeNodeHidden(id) { patchDocNodes(decalEdit.toggleHidden(composeDoc, id)); },
     duplicateComposeNode: duplicateNode,
     removeComposeNode: removeNode,
     moveComposeNodeLayer: reorderNode,
