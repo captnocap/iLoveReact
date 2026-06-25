@@ -20,40 +20,70 @@
 
 import { useMemo, useState } from 'react';
 import { Box, Pressable, Scene3D, ScrollView, Text, TextInput } from '@reactjit/primitives';
-import { GAME_BUILD } from './game';
-import { PROP_CATEGORY_NAMES, isPropKind, propCategory, type PropCategory } from './game/kinds/props';
+import { GAME_BUILD, GAME_CAMERA } from './game';
+import { PROP_CATEGORY_NAMES, isPropKind, propCategory, propKindDefinition, type PropCategory } from './game/kinds/props';
 import { buildObjectWorld } from './objectPreview';
 import { ModelScene } from './ModelViewer';
 import { useCookedAssets } from './editors/model/cookedAssets';
 
 const PROP_PAGE = 12;
-const TILE_W = 82;
-const TILE_H = 66;
+const TILE_W = 92;
+const TILE_H = 84;
+
+// Thumbnail framing constants. A snug 3/4 orbit at a narrow FOV reads a model
+// like a product shot — the prop fills the tile instead of floating tiny in it.
+const THUMB_FOV = 30;
+const THUMB_YAW = 35;
+const THUMB_PITCH = 24;
+const THUMB_MARGIN = 1.18; // pull back ~18% past the exact fit so nothing crops.
 
 /** catalog id ('prop.foo' or 'foo') → the bare prop kind buildObjectWorld wants. */
 function propKindOf(id: string): string {
   return id.startsWith('prop.') ? id.slice('prop.'.length) : id;
 }
 
-// One picture tile: a one-prop Scene3D baked to a cached quad by kind. The world
-// build is memoized per kind, and StaticSurface caches the render — so re-showing
-// the same prop (paging back, re-search) costs nothing.
+// Auto-frame the camera from the prop's OWN measured extent (the whole reason the
+// old tiles were unrecognizable: a single fixed camera framed a phone booth and a
+// bus the same, so most props were a speck). We size a bounding sphere from the
+// kind's height + footprint, then back the camera off by radius / tan(fov/2) so the
+// model fills the tile no matter how tall or wide it is. Pure + memoizable per kind.
+function solveThumbCamera(kind: string) {
+  const def = propKindDefinition(kind as Parameters<typeof propKindDefinition>[0]);
+  const h = Math.max(0.3, def.heightMeters);
+  const w = Math.max(0.3, def.footprintWidthMeters ?? def.footprintRadiusMeters * 2);
+  const d = Math.max(0.3, def.footprintDepthMeters ?? def.footprintRadiusMeters * 2);
+  // Bounding-sphere radius around the model's centre (corner-aware, so a long car
+  // viewed at 3/4 doesn't poke out of frame).
+  const radius = 0.5 * Math.sqrt(w * w + d * d + h * h);
+  const dist = (radius / Math.tan((THUMB_FOV / 2) * (Math.PI / 180))) * THUMB_MARGIN;
+  return GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
+    target: [0, h * 0.5, 0], yaw: THUMB_YAW, pitch: THUMB_PITCH, dist, zoom: 1, fov: THUMB_FOV,
+  });
+}
+
+// One picture tile: a one-prop Scene3D framed by the prop's own bounds. The world
+// build + camera solve are memoized per kind, so re-showing the same prop (paging
+// back, re-search) is free. A STATIC (non-native) camera — twelve native cameras
+// would each fight for the one host orbit controller; these are still product shots.
 function PropThumb(props: { id: string; label: string; active: boolean; onPick: () => void }) {
   const kind = propKindOf(props.id);
-  const prop = useMemo(() => {
-    try { return buildObjectWorld('prop', kind).prop ?? null; } catch { return null; }
+  const view = useMemo(() => {
+    try {
+      const prop = buildObjectWorld('prop', kind).prop ?? null;
+      return prop ? { prop, cam: solveThumbCamera(kind) } : null;
+    } catch { return null; }
   }, [kind]);
   return (
     <Pressable onPress={props.onPick} hoverable tooltip={props.label}>
       <Box style={{ width: TILE_W, gap: 2, alignItems: 'center' }}>
         <Box style={{ width: TILE_W, height: TILE_H, borderRadius: 5, borderWidth: props.active ? 2 : 1, borderColor: props.active ? '#7dd3fc' : '#3a4f6b', backgroundColor: '#0e1622', overflow: 'hidden' }}>
-          {prop ? (
+          {view ? (
             // Live Scene3D per tile (StaticSurface is a 2D-paint cache and bakes a 3D
             // scene BLANK — req_1896). Bounded to a page so the live-render count stays
             // small; if even a bounded page janks, the next step is offline-baked PNGs.
             <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0e1622" showGrid={false} showAxes={false}>
-              <Scene3D.Camera nativeCamera position={[3.6, 3.0, 3.6]} target={[0, 0.7, 0]} fov={30} />
-              <ModelScene prop={prop} />
+              <Scene3D.Camera position={view.cam.pos} target={view.cam.target} fov={view.cam.fov} />
+              <ModelScene prop={view.prop} />
             </Scene3D>
           ) : null}
         </Box>
