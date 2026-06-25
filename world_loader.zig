@@ -1624,6 +1624,20 @@ fn meshPropIslands(allocator: std.mem.Allocator, mesh: constructor.MeshPropMesh)
     if (!mesh.solid or mesh.footprint_width <= 0 or mesh.footprint_depth <= 0) {
         return allocator.alloc(MeshIsland, 0);
     }
+    // req_1900: a cooked prop ships the cook's AUTHORED collider boxes (one per
+    // connected component, the door leaf already excluded). Use them verbatim so a
+    // doorway / archway keeps its real gap — welding a bridged frame collapses it
+    // into one solid full-bounds box that seals the opening. Local-frame AABBs,
+    // banded by their own Y (a header bands high → walk under it).
+    if (mesh.collision_boxes.len > 0) {
+        const n = @min(mesh.collision_boxes.len, MAX_MESH_ISLANDS);
+        const out = try allocator.alloc(MeshIsland, n);
+        for (out, 0..) |*isl, i| {
+            const b = mesh.collision_boxes[i];
+            isl.* = .{ .lo = .{ b.min_x, b.min_y, b.min_z }, .hi = .{ b.max_x, b.max_y, b.max_z } };
+        }
+        return out;
+    }
     // req_1864: a cooked door's leaf is the LIVE two-state panel (its own rect),
     // never a static island — so the body islands stop before the leaf slot.
     const vc: usize = solidVertexCount(mesh);

@@ -241,7 +241,12 @@ export type MeshPropSlotRange = { start: number; count: number };
  *  leaf + the two-state interaction contract. The loader makes that slot's node a
  *  live two-state door (drop on open, door rect, E toggle). */
 export type MeshPropDoorMeta = { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean };
-export type ImportedMeshPropMesh = ImportedPropMesh & Partial<MeshTex> & { slots?: MeshPropSlotRange[]; door?: MeshPropDoorMeta };
+/** AUTHORED collider boxes (req_1900) measured by the cook (one per connected
+ *  component, leaf excluded for doors) — shipped so the loader collides a cooked
+ *  prop with its REAL gaps (a doorway, an archway) instead of welding the render
+ *  mesh into one full-bounds box (a bridged frame welds solid, sealing the door). */
+export type MeshPropCollisionBox = { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number };
+export type ImportedMeshPropMesh = ImportedPropMesh & Partial<MeshTex> & { slots?: MeshPropSlotRange[]; door?: MeshPropDoorMeta; collisionBoxes?: MeshPropCollisionBox[] };
 
 export type ImportedMeshPropSink = {
   meshes: ImportedMeshPropMesh[];
@@ -519,6 +524,11 @@ function cookedPropMesh(kind: string): ImportedMeshPropMesh | null {
     // the ref's opacity as scene3d_color_a).
     ...(slotsWithGlass.length ? { slots: slotsWithGlass } : {}),
     ...(door ? { door } : {}),
+    // AUTHORED colliders (req_1900): the cook's measured per-component boxes (leaf
+    // excluded for doors) so the loader keeps the doorway/arch gap walkable instead
+    // of welding the bridged frame into one solid full-bounds box. Optional on older
+    // stored assets (pre-req_1587) — they fall back to the welded path.
+    ...(asset.collision.boxes?.length ? { collisionBoxes: asset.collision.boxes } : {}),
   };
 }
 
@@ -1281,7 +1291,7 @@ export function encodeFlora(state: GameState, floors: readonly ChunkFloor[]): Ui
 // v8cli bake never needs an image-codec door (it just passes the bytes through). v3
 // shipped raw RGBA decoded at BAKE time, which silently failed in v8cli → grey props.
 // The loader still reads v1/v2 (legacy) + v3 (raw RGBA) + v4 (PNG) + v5 slots.
-export const MESH_PROPS_LUMP_VERSION = 6;
+export const MESH_PROPS_LUMP_VERSION = 7;
 
 /** Encode imported / cooked prop meshes:
  *  u32 version | u32 meshCount | u32 instanceCount
@@ -1290,7 +1300,8 @@ export const MESH_PROPS_LUMP_VERSION = 6;
  *          u32 solid | u32 vertexCount | f32[vertexCount*8] |
  *          u32 pngLen | u8[pngLen]   (v4 — the paint atlas as PNG, loader-decoded) |
  *          u32 slotCount | { u32 startVertex | u32 vertexCount }[slotCount] (v5) |
- *          u32 hasDoor | if door: u32 leafSlot | f32 reach | u32 vehicle | u32 startOpen (v6, req_1864)
+ *          u32 hasDoor | if door: u32 leafSlot | f32 reach | u32 vehicle | u32 startOpen (v6, req_1864) |
+ *          u32 colliderBoxCount | { f32 minX,minY,minZ,maxX,maxY,maxZ }[count] (v7, req_1900)
  *  instance[]: u32 meshIndex | f32 x,y,z,yawDegrees | u32 slotMaterial[mesh.slotCount] (v5)
  */
 export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
@@ -1302,7 +1313,7 @@ export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
   for (let i = 0; i < meshes.length; i += 1) {
     const mesh = meshes[i]!;
     const png = pngOf(mesh);
-    bytes += 4 + keyBytes[i]!.byteLength + 36 + mesh.vertices.byteLength + 4 + (png ? png.byteLength : 0) + 4 + (mesh.slots?.length ?? 0) * 8 + 4 + (mesh.door ? 16 : 0);
+    bytes += 4 + keyBytes[i]!.byteLength + 36 + mesh.vertices.byteLength + 4 + (png ? png.byteLength : 0) + 4 + (mesh.slots?.length ?? 0) * 8 + 4 + (mesh.door ? 16 : 0) + 4 + (mesh.collisionBoxes?.length ?? 0) * 24;
   }
   for (const inst of sink.instances) {
     bytes += 20 + (meshes[inst.mesh]?.slots?.length ?? 0) * 4;
@@ -1350,6 +1361,19 @@ export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
       at += 16;
     } else {
       view.setUint32(at, 0, true); at += 4;
+    }
+    // v7 (req_1900): authored collider boxes — the loader collides cooked props
+    // with their real gaps (doorway/arch) instead of welding the mesh solid.
+    const boxes = mesh.collisionBoxes ?? [];
+    view.setUint32(at, boxes.length, true); at += 4;
+    for (const b of boxes) {
+      view.setFloat32(at + 0, b.minX, true);
+      view.setFloat32(at + 4, b.minY, true);
+      view.setFloat32(at + 8, b.minZ, true);
+      view.setFloat32(at + 12, b.maxX, true);
+      view.setFloat32(at + 16, b.maxY, true);
+      view.setFloat32(at + 20, b.maxZ, true);
+      at += 24;
     }
   }
   for (const inst of sink.instances) {

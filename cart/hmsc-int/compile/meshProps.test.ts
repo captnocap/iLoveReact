@@ -15,7 +15,7 @@ import { encodeMeshProps, MESH_PROPS_LUMP_VERSION, type ImportedMeshPropSink } f
 
 // A minimal mesh row; `png` is optional (the cooked-paint atlas). Cast through the
 // sink type — the encoder only reads these fields + the optional `png`.
-function meshRow(key: string, png?: Uint8Array, slots?: { start: number; count: number }[], door?: { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean }): any {
+function meshRow(key: string, png?: Uint8Array, slots?: { start: number; count: number }[], door?: { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean }, collisionBoxes?: { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }[]): any {
   return {
     key, source: `t:${key}`,
     color: [0.5, 0.5, 0.5] as [number, number, number],
@@ -26,18 +26,20 @@ function meshRow(key: string, png?: Uint8Array, slots?: { start: number; count: 
     ...(png ? { png } : {}),
     ...(slots ? { slots } : {}),
     ...(door ? { door } : {}),
+    ...(collisionBoxes ? { collisionBoxes } : {}),
   };
 }
 
 // Mirror of constructor.zig decodeMeshProps (v5) — the contract under test.
 type DecodedDoor = { leafSlot: number; reach: number; vehicle: boolean; startOpen: boolean } | null;
-function decode(bytes: Uint8Array): { version: number; meshes: { key: string; pngLen: number; png: Uint8Array | null; slots: { start: number; count: number }[]; door: DecodedDoor }[]; instances: { mesh: number; slotMaterials: number[] }[] } {
+type DecodedMesh = { key: string; pngLen: number; png: Uint8Array | null; slots: { start: number; count: number }[]; door: DecodedDoor; boxes: { minX: number; maxX: number }[] };
+function decode(bytes: Uint8Array): { version: number; meshes: DecodedMesh[]; instances: { mesh: number; slotMaterials: number[] }[] } {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const version = view.getUint32(0, true);
   const meshCount = view.getUint32(4, true);
   const instanceCount = view.getUint32(8, true);
   let at = 12;
-  const meshes: { key: string; pngLen: number; png: Uint8Array | null; slots: { start: number; count: number }[]; door: DecodedDoor }[] = [];
+  const meshes: DecodedMesh[] = [];
   for (let m = 0; m < meshCount; m += 1) {
     const keyLen = view.getUint32(at, true); at += 4;
     let key = '';
@@ -62,7 +64,14 @@ function decode(bytes: Uint8Array): { version: number; meshes: { key: string; pn
       door = { leafSlot: view.getUint32(at, true), reach: view.getFloat32(at + 4, true), vehicle: view.getUint32(at + 8, true) !== 0, startOpen: view.getUint32(at + 12, true) !== 0 };
       at += 16;
     }
-    meshes.push({ key, pngLen, png, slots, door });
+    // v7 collider boxes: u32 count, then 6×f32 per box (we read minX/maxX for the assertion).
+    const boxCount = view.getUint32(at, true); at += 4;
+    const boxes: { minX: number; maxX: number }[] = [];
+    for (let bx = 0; bx < boxCount; bx += 1) {
+      boxes.push({ minX: view.getFloat32(at, true), maxX: view.getFloat32(at + 12, true) });
+      at += 24;
+    }
+    meshes.push({ key, pngLen, png, slots, door, boxes });
   }
   const instances: { mesh: number; slotMaterials: number[] }[] = [];
   for (let i = 0; i < instanceCount; i += 1) {
@@ -78,20 +87,23 @@ function decode(bytes: Uint8Array): { version: number; meshes: { key: string; pn
   return { version, meshes, instances };
 }
 
-test('MESH_PROPS v6: a cooked prop ships paint PNG bytes, slot material refs, and door meta (req_1544/req_1573/req_1864)', () => {
+test('MESH_PROPS v7: a cooked prop ships paint PNG bytes, slot material refs, door meta, and authored collider boxes (req_1544/req_1573/req_1864/req_1900)', () => {
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 250, 251]); // PNG sig + payload
   const sink: ImportedMeshPropSink = {
     meshes: [
       meshRow('painted', png, [{ start: 6, count: 6 }]),
       meshRow('bare'),
-      // a cooked DOOR (req_1864): its leaf is the last slot, with door meta.
-      meshRow('cdoor', undefined, [{ start: 0, count: 3 }, { start: 3, count: 3 }], { leafSlot: 1, reachMeters: 2.2, vehicle: false, startOpen: false }),
+      // a cooked DOOR (req_1864/req_1900): leaf slot + door meta + frame collider boxes (two jambs).
+      meshRow('cdoor', undefined, [{ start: 0, count: 3 }, { start: 3, count: 3 }], { leafSlot: 1, reachMeters: 2.2, vehicle: false, startOpen: false }, [
+        { minX: -1.5, minY: 0, minZ: -0.15, maxX: -0.6, maxY: 3, maxZ: 0.15 },
+        { minX: 0.6, minY: 0, minZ: -0.15, maxX: 1.5, maxY: 3, maxZ: 0.15 },
+      ]),
     ] as any,
     instances: [{ mesh: 0, x: 1, y: 2, z: 3, yawDegrees: 90, slotMaterials: [7] }, { mesh: 1, x: 0, y: 0, z: 0, yawDegrees: 0 }],
   };
   const out = decode(encodeMeshProps(sink));
-  assertEqual(out.version, 6, 'lump is v6');
-  assertEqual(MESH_PROPS_LUMP_VERSION, 6, 'the exported version constant is 6');
+  assertEqual(out.version, 7, 'lump is v7');
+  assertEqual(MESH_PROPS_LUMP_VERSION, 7, 'the exported version constant is 7');
   assertEqual(out.meshes.length, 3, 'all meshes encoded');
   // the painted mesh carries the EXACT PNG bytes (no decode, no resize — passthrough).
   assertEqual(out.meshes[0].pngLen, png.length, 'painted mesh png length matches');
@@ -110,6 +122,11 @@ test('MESH_PROPS v6: a cooked prop ships paint PNG bytes, slot material refs, an
   assertClose(out.meshes[2].door!.reach, 2.2, 1e-5, 'interaction reach carried');
   assertEqual(out.meshes[2].door!.vehicle, false, 'walk door carried');
   assertEqual(out.meshes[2].door!.startOpen, false, 'start-closed carried');
+  // the door ships its authored frame collider boxes (req_1900) — two jambs, a gap between.
+  assertEqual(out.meshes[2].boxes.length, 2, 'two frame collider boxes carried');
+  assertClose(out.meshes[2].boxes[0].maxX, -0.6, 1e-5, 'left jamb inner edge');
+  assertClose(out.meshes[2].boxes[1].minX, 0.6, 1e-5, 'right jamb inner edge — the doorway gap between them');
+  assertEqual(out.meshes[0].boxes.length, 0, 'a mesh with no authored boxes ships count 0');
 });
 
 finish('meshProps');

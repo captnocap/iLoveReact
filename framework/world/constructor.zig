@@ -44,7 +44,7 @@ const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
-const MESH_PROPS_VERSION: u32 = 6;
+const MESH_PROPS_VERSION: u32 = 7;
 const WATER_VERSION: u32 = 2;
 const TICKER_VERSION: u32 = 1;
 /// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
@@ -151,18 +151,34 @@ pub const MeshPropMesh = struct {
     // DOOR (req_1864, MESH_PROPS v6) — a cooked door names which slot is its
     // toggleable leaf + the two-state interaction contract. null = not a door.
     door: ?MeshPropDoor = null,
+    // AUTHORED colliders (req_1900, MESH_PROPS v7) — the cook's measured per-
+    // component boxes (leaf excluded for doors). When present the loader collides
+    // the prop with these (real doorway/arch gap) instead of welding it solid.
+    collision_boxes: []MeshPropBox = &.{},
 
     pub fn deinit(self: MeshPropMesh, allocator: std.mem.Allocator) void {
         allocator.free(self.key);
         allocator.free(self.vertices);
         if (self.tex_rgba) |rgba| allocator.free(rgba);
         if (self.slots.len > 0) allocator.free(self.slots);
+        if (self.collision_boxes.len > 0) allocator.free(self.collision_boxes);
     }
 };
 
 pub const MeshPropSlot = struct {
     start: u32,
     count: u32,
+};
+
+/// One authored collider box (req_1900) — local-frame AABB, wire twin of
+/// worldGeometry.ts MeshPropCollisionBox.
+pub const MeshPropBox = struct {
+    min_x: f32,
+    min_y: f32,
+    min_z: f32,
+    max_x: f32,
+    max_y: f32,
+    max_z: f32,
 };
 
 /// DOOR meta on a cooked-door mesh (req_1864) — wire twin of
@@ -1094,6 +1110,28 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
                 door = .{ .leaf_slot = leaf_slot, .reach = reach, .vehicle = vehicle, .start_open = start_open };
             }
         }
+        // AUTHORED collider boxes (req_1900, v7) — u32 count, then 6×f32 per box.
+        var collision_boxes = try allocator.alloc(MeshPropBox, 0);
+        errdefer if (collision_boxes.len > 0) allocator.free(collision_boxes);
+        if (version >= 7) {
+            if (at + 4 > data.len) return Error.BadMeshProps;
+            const box_count: usize = @intCast(std.mem.readInt(u32, data[at..][0..4], .little));
+            at += 4;
+            if (box_count > 0 and at + box_count * 24 > data.len) return Error.BadMeshProps;
+            collision_boxes = try allocator.alloc(MeshPropBox, box_count);
+            var bi: usize = 0;
+            while (bi < box_count) : (bi += 1) {
+                collision_boxes[bi] = .{
+                    .min_x = readF32(data, at + 0),
+                    .min_y = readF32(data, at + 4),
+                    .min_z = readF32(data, at + 8),
+                    .max_x = readF32(data, at + 12),
+                    .max_y = readF32(data, at + 16),
+                    .max_z = readF32(data, at + 20),
+                };
+                at += 24;
+            }
+        }
         meshes[mi] = .{
             .key = key,
             .color = color,
@@ -1109,6 +1147,7 @@ fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshPro
             .tex_rgba = tex_rgba,
             .slots = slots,
             .door = door,
+            .collision_boxes = collision_boxes,
         };
         initialized_meshes += 1;
     }
