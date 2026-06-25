@@ -32,6 +32,11 @@ export type SnapTuning = {
   surfaceSnapMeters: number;
   /** intentional freeform prop placement quantization, meters */
   freeformSnapMeters: number;
+  /** held SHIFT sub-grid placement: how many finer cells one substrate cell
+   *  splits into (2 → half-cell 0.5m steps). The default snap stays module-pitch
+   *  flush (GRIDSNAP-0605: loose sub-tile offsets are a bug); SHIFT is the held
+   *  opt-in to a finer-than-grid lattice, the snapped sibling of Alt freeform. */
+  subgridDivisions: number;
   /** how close an edge line must be to a floor/roof perimeter to inherit its top Y */
   edgeAnchorToleranceMeters: number;
   /** wall-face edge snap: how close to a wall endpoint a side-face hit turns the corner */
@@ -55,6 +60,7 @@ export const SNAP_TUNING_DEFAULTS: SnapTuning = {
   gridMeters: 1,
   surfaceSnapMeters: 0.5,
   freeformSnapMeters: 0.01,
+  subgridDivisions: 2,
   edgeAnchorToleranceMeters: 0.02,
   wallEndpointSnapMeters: 0.5,
   wallAnchorMagnetMeters: 1,
@@ -91,6 +97,12 @@ export type SnapInput = {
    *  module pitch, edges still on tile lines (REQ-0650: module pitch made an
    *  even road setback on both sides of a street unreachable) */
   freeform?: boolean;
+  /** held SHIFT sub-grid placement: snap to a finer-than-substrate lattice
+   *  (tuning.subgridDivisions cells per 1m, default half-cell 0.5m) instead of
+   *  the module pitch. The snapped sibling of `freeform` — still on a clean
+   *  lattice (no off-grid drift), just finer. Opts out of module/plate/wall
+   *  anchoring (it's an explicit "place between the tiles" gesture). */
+  subgrid?: boolean;
   /** lattice anchor (req_0668): a local-frame point (relative to the armed
    *  thing's origin, pre-rotation) that must land on the module lattice
    *  INSTEAD of the origin — a prefab's floor-plate center. A captured
@@ -435,6 +447,11 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
   // (REQ-0650) trades the one-lattice guarantee for 1-tile stepping, edges
   // still tile-aligned.
   const fine = !!input.freeform;
+  const subgrid = !!input.subgrid;
+  // SHIFT sub-grid pitch: the substrate split into N finer cells (default
+  // half-cell). Quantize to the line (a multiple), not the cell center, so the
+  // finer lattice still tiles cleanly with the coarse one.
+  const subPitch = grid / Math.max(1, Math.round(tuning.subgridDivisions));
   const turned = Math.round(yaw / 90) % 2 === 1;
   const spanX = turned ? input.size.depthMeters : input.size.widthMeters;
   const spanZ = turned ? input.size.widthMeters : input.size.depthMeters;
@@ -453,13 +470,14 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
   // it sits); on the ground, the nearest plate within the magnet. Alt (fine)
   // opts out, same as edge snap: fine means "exactly the tile I point at".
   const isModule = pitchX > grid || pitchZ > grid;
-  const plateAnchor = !fine && isModule
+  const plateAnchor = !fine && !subgrid && isModule
     ? (onFace
       ? (isTopAnchorPlate(pieceHit!.piece) ? { x: pieceHit!.piece.x, z: pieceHit!.piece.z } : nearestPlateLatticeAnchor(input.pieces, hit.x, hit.z, tuning.plateAnchorMagnetMeters))
       : nearestPlateLatticeAnchor(input.pieces, hit.x, hit.z, tuning.plateAnchorMagnetMeters))
     : null;
   const snapAxis = (hitV: number, a: number, span: number, pitch: number, originV: number | null) => {
     if (fine) return fineModuleCenter(hitV + a, span, grid) - a;
+    if (subgrid) return quantize(hitV + a, subPitch) - a; // SHIFT: finer lattice line
     if (originV !== null && pitch > grid) return originV + Math.round((hitV + a - originV) / pitch) * pitch - a;
     return snapToCellCenter(hitV + a, pitch) - a;
   };
@@ -526,7 +544,7 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
         );
         if (wallFacePlacement) return { ...common, placement: wallFacePlacement };
       }
-      const lineStep = fine ? grid : linePitch;
+      const lineStep = fine ? grid : subgrid ? subPitch : linePitch;
       // REQ-0653: anchor to real geometry before the lattice. On a top face,
       // the anchor set is the HIT piece alone (the plate you stand a wall on /
       // the wall you stack a storey on) with an unbounded magnet — a plate-top
@@ -537,13 +555,15 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
       const candidate = (axis: 'x' | 'z') => {
         const lineAt = axis === 'x' ? hit.x : hit.z;
         const runAt = axis === 'x' ? hit.z : hit.x;
-        const anchor = fine ? null : onFace
+        const anchor = (fine || subgrid) ? null : onFace
           ? nearestWallLineAnchor([pieceHit!.piece], axis, lineAt, runAt, linePitch, Number.POSITIVE_INFINITY)
           : nearestWallLineAnchor(input.pieces, axis, lineAt, runAt, linePitch, tuning.wallAnchorMagnetMeters);
         const line = anchor ? anchor.line : Math.round(lineAt / lineStep) * lineStep;
         const run = anchor
           ? anchoredRunCenter(anchor, runAt, linePitch)
-          : fine ? fineModuleCenter(runAt, input.size.widthMeters, grid) : snapToCellCenter(runAt, linePitch);
+          : fine ? fineModuleCenter(runAt, input.size.widthMeters, grid)
+          : subgrid ? Math.round(runAt / subPitch) * subPitch
+          : snapToCellCenter(runAt, linePitch);
         return { line, run, distance: Math.abs(lineAt - line), anchored: anchor !== null };
       };
       const cx = candidate('x');

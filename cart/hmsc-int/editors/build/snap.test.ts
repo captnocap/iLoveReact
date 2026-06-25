@@ -374,6 +374,33 @@ test('REQ-0650: fine edge placement reaches 1m wall lines off the module lattice
   assertEqual(fine!.placement.yawDegrees, 90, 'run direction follows the chosen line');
 });
 
+// ── SHIFT sub-grid: a finer-than-substrate lattice, still snapped ──
+
+test('SHIFT sub-grid snaps a module to the half-cell lattice between the module and freeform tiers', () => {
+  const ray = { origin: { x: 5.2, y: 2, z: 0.3 }, dir: norm(0, -0.5, 1) };
+  const coarse = resolveSnapTarget(snapInput({ ray, snap: 'grid', size: FLOOR_SIZE }));
+  assertClose(coarse!.placement.x, 4.5, 1e-9, 'module pitch is the default (3m lattice: 1.5/4.5/7.5)');
+  const sub = resolveSnapTarget(snapInput({ ray, snap: 'grid', size: FLOOR_SIZE, subgrid: true }));
+  assert(!!sub, 'sub-grid resolves');
+  // subgridDivisions=2 → 0.5m lattice lines: hit x≈5.2 → 5.0, a position neither
+  // the 3m module lattice (4.5) nor the 1m fine lattice (5.5) can reach
+  assertClose(sub!.placement.x, 5.0, 1e-9, 'sub-grid x lands on the 0.5m line');
+  // edges fall on 0.5m lines too (the finer lattice tiles cleanly with the coarse)
+  assertClose(sub!.placement.x - FLOOR_SIZE.widthMeters / 2, 3.5, 1e-9, 'min edge on a half-cell line');
+  assertClose(sub!.placement.x + FLOOR_SIZE.widthMeters / 2, 6.5, 1e-9, 'max edge on a half-cell line');
+});
+
+test('SHIFT sub-grid frees an edge-snapped wall onto the 0.5m line lattice', () => {
+  // hit lands on x=1.5 (a 0.5m line, decisively the nearer line) with z off any
+  // 0.5m line, so the x line owns the wall. 1.5 is reachable by NEITHER the 3m
+  // module lattice (→3) NOR the 1m fine lattice (→2) — a sub-grid-only position.
+  const ray = { origin: { x: 1.5, y: 2, z: 0.25 }, dir: norm(0, -0.5, 1) };
+  const sub = resolveSnapTarget(snapInput({ ray, snap: 'edge', size: WALL_SIZE, subgrid: true }));
+  assert(!!sub, 'sub-grid resolves');
+  assertEqual(sub!.placement.yawDegrees, 90, 'the x line owns the run');
+  assertClose(sub!.placement.x, 1.5, 1e-9, 'the wall line lands on the 0.5m sub-grid line');
+});
+
 // ── REQ-0653: wall lines anchor to REAL geometry before the world lattice ──
 
 test('REQ-0653: a plate-top wall hugs the plate edge even when the plate is off the world lattice', () => {
