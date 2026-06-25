@@ -19,7 +19,7 @@
 // step if the in-process StaticSurface cache proves it out.
 
 import { useMemo, useState } from 'react';
-import { Box, Pressable, Scene3D, ScrollView, Text, TextInput } from '@reactjit/primitives';
+import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import { GAME_BUILD, GAME_CAMERA } from './game';
 import { isPropKind, propKindDefinition, type PropKind } from './game/kinds/props';
 import { searchProps, type PropEntry } from './game/kinds/propTags';
@@ -29,9 +29,15 @@ import { buildObjectWorld } from './objectPreview';
 import { ModelScene } from './ModelViewer';
 import { useCookedAssets } from './editors/model/cookedAssets';
 
-const PROP_PAGE = 12;
 const TILE_W = 92;
 const TILE_H = 84;
+// A page is sized to EXACTLY fill the grid area — never a scroll container (the
+// user: "i dont want to have to scroll down just to see one more row"). We measure
+// the grid, fit whole columns/rows of these cells, and page by what fits. GRID_GAP
+// matches the row/column gap; CELL_H is the tile + its 2px gap + the label line, so
+// floor()'d rows never spill past the pager.
+const GRID_GAP = 6;
+const CELL_H = TILE_H + 2 + 12;
 
 // Thumbnail framing constants. A snug 3/4 orbit at a narrow FOV reads a model
 // like a product shot — the prop fills the tile instead of floating tiny in it.
@@ -153,9 +159,16 @@ export function PropBrowser(props: { armedId: string | null; onArm: (id: string)
     return out;
   }, [q, allProps, matches, related]);
 
-  const pageCount = Math.max(1, Math.ceil(stream.length / PROP_PAGE));
+  // Measure the grid and size a page to the whole columns × rows that fit — so
+  // every page shows in full, no scrolling for a stray last row.
+  const [grid, setGrid] = useState({ w: 0, h: 0 });
+  const cols = Math.max(1, Math.floor((grid.w + GRID_GAP) / (TILE_W + GRID_GAP)));
+  const rows = Math.max(1, Math.floor((grid.h + GRID_GAP) / (CELL_H + GRID_GAP)));
+  const perPage = Math.max(1, cols * rows);
+
+  const pageCount = Math.max(1, Math.ceil(stream.length / perPage));
   const cur = Math.min(page, pageCount - 1);
-  const pageItems = stream.slice(cur * PROP_PAGE, cur * PROP_PAGE + PROP_PAGE);
+  const pageItems = stream.slice(cur * perPage, cur * perPage + perPage);
 
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', gap: 6, minHeight: 0 }}>
@@ -170,11 +183,15 @@ export function PropBrowser(props: { armedId: string | null; onArm: (id: string)
           ? `${matches.length} match${matches.length === 1 ? '' : 'es'}${related.length ? ` · ${related.length} related` : ''}`
           : `${allProps.length} props · type a name or tag (seating, neon, plant…)`}
       </Text>
-      {/* the bounded page of picture tiles — scrolls WITHIN its area so the pager
-          below stays pinned (req_1896: it was floating mid-grid when the rows
-          overflowed a plain flexGrow box). */}
-      <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
-        <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignContent: 'flex-start' }}>
+      {/* The whole page at once — NO scroll container (req_1917). perPage is sized
+          to the measured area, so every page fills the grid and the pager below
+          stays pinned without anything spilling. overflow hidden is a safety net
+          for the rare divider row. */}
+      <Box
+        onLayout={(rect: any) => setGrid((g) => (g.w === rect.w && g.h === rect.h ? g : { w: rect.w, h: rect.h }))}
+        style={{ flexGrow: 1, minHeight: 0, overflow: 'hidden' }}
+      >
+        <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: GRID_GAP, alignContent: 'flex-start' }}>
           {pageItems.map((it, i) => (
             'divider' in it ? (
               <Box key={`div-${cur}-${i}`} style={{ width: '100%', flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 2, paddingBottom: 2 }}>
@@ -190,7 +207,7 @@ export function PropBrowser(props: { armedId: string | null; onArm: (id: string)
             <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace', paddingTop: 6 }}>{`no prop or tag matches “${q}”`}</Text>
           ) : null}
         </Box>
-      </ScrollView>
+      </Box>
       {pageCount > 1 ? (
         <Box style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 2 }}>
           <Pressable onPress={() => setPage((p) => Math.max(0, p - 1))}>
