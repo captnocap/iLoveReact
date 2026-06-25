@@ -17,7 +17,9 @@ import { GAME_BUILD, GAME_TELEMETRY } from '@game';
 import type { PlacedBuildPiece } from '@game';
 import type { WorldProp } from '../../design';
 import { Prop } from '../../render3d/Prop';
-import { propDynamics } from '../../game/kinds/props';
+import { propDynamics, isCookedPropKind } from '../../game/kinds/props';
+import { isImportedPropKind } from '../../game/kinds/importedProps';
+import { resolvePropParts } from '../../compile/propRecipes/resolve';
 import { propModelFootprintMeters, propVerticalBand } from '../../compile/propRecipes/footprint';
 import { BUILD_UI, pieceVisualShapes, wallJoinSignature } from './pieceShapes';
 import type { VisualBox, VisualShape } from './pieceShapes';
@@ -446,17 +448,49 @@ function pushBoxInstance(bucket: InstanceBucket, b: VisualBox, rgb: readonly [nu
   if (half > bucket.maxHalf) bucket.maxHalf = half;
 }
 
+const PROP_DEG = Math.PI / 180;
+// Live instance rows for a PARTS prop (street furniture, signage, fences — the
+// majority of props, which bake to primitive parts not mesh assets). Mirrors
+// worldGeometry.propAt/propRotation — the bake's local→world transform — so the
+// live overlay draws each part exactly where the bake will. Non-box parts
+// (cylinders/spheres) ride as their bounding box in the stride-12 box overlay;
+// the per-shape live path (Layer 2) restores their true geometry. This is what
+// makes a prop placement instant with NO rebake, the same as a build piece.
+function pushPropPartRows(rows: number[], prop: WorldProp): void {
+  const yaw = (prop.yawDegrees ?? 0) * PROP_DEG;
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  for (const part of resolvePropParts(prop)) {
+    const lx = part.local[0], ly = part.local[1], lz = part.local[2];
+    const rx = part.rotation?.[0] ?? 0;
+    const ry = (prop.yawDegrees ?? 0) + (part.rotation?.[1] ?? 0);
+    const rz = part.rotation?.[2] ?? 0;
+    rows.push(
+      prop.x + lx * c + lz * s, (prop.y ?? 0) + ly, prop.z - lx * s + lz * c,
+      rx, ry, rz,
+      part.size[0], part.size[1], part.size[2],
+      part.color[0], part.color[1], part.color[2],
+    );
+  }
+}
+
 // Pack placed pieces into a flat Float32Array of unit-box instance rows — 12 floats
 // each (cx,cy,cz, 0,yaw,0, sx,sy,sz, r,g,b), the SAME layout pushBoxInstance batches
 // and the bake's worldGeometry emits. The loader iso pane (LIVEHOST req_1798) pushes
 // these to world_loader as a LIVE render overlay, so a just-placed piece appears as a
 // real solid mesh instantly with no full rebake. Ramps/gables approximate as their box
-// (the exact keyed geometry lands on the next Compile); props are skipped here — they
-// need baked mesh assets, not a unit box, so they show on Compile.
+// (the exact keyed geometry lands on the next Compile). PARTS props decompose to the
+// same primitive parts the bake lowers, so they too show instantly; only MESH props
+// (imported genmesh / Studio-cooked) are skipped here — they carry real mesh assets and
+// render through the resident-mesh reference path (Layer 2), not a placeholder box.
 export function pieceInstanceRows(pieces: readonly PlacedBuildPiece[]): Float32Array {
   const rows: number[] = [];
   for (const piece of pieces) {
-    if (propFromPiece(piece)) continue;
+    const prop = propFromPiece(piece);
+    if (prop) {
+      if (isImportedPropKind(prop.kind) || isCookedPropKind(prop.kind)) continue;
+      pushPropPartRows(rows, prop);
+      continue;
+    }
     const sig = wallJoinSignature(piece, pieces) ?? '';
     for (const shape of pieceVisualShapes(piece, sig, pieces)) {
       if (shape.kind === 'ramp') {
