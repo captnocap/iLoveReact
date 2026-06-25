@@ -530,6 +530,11 @@ let heartbeatStarted = false;
 
 export function startPerfHeartbeat(): () => void {
   if (heartbeatStarted) return () => {};
+  // req_1933: OPT-IN only. This once-per-second [hb] dump (a req_1735 TEMP probe) spammed the
+  // dev terminal every second and drowned everything — including the edit-latency lines the user
+  // is trying to read. Off by default; set globalThis.__perfHeartbeat = 1 (or via gv_perflog) to
+  // re-enable when you actually want the frame breakdown.
+  if (!(globalThis as any).__perfHeartbeat) return () => {};
   heartbeatStarted = true;
   let stopped = false;
   let handle: any = 0;

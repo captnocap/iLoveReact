@@ -422,6 +422,17 @@ fn perfLogOn() bool {
     return on;
 }
 
+// req_1933: the [r3d-census] / [ground-pass] diagnostics (req_0727) printed every 120 frames
+// UNCONDITIONALLY and spammed the dev terminal. Opt-in now — set RJIT_R3D_CENSUS=1 to bring them
+// back when debugging the instanced-mesh / ground pass.
+var g_census_on: ?bool = null;
+fn censusOn() bool {
+    if (g_census_on) |v| return v;
+    const on = std.posix.getenv("RJIT_R3D_CENSUS") != null;
+    g_census_on = on;
+    return on;
+}
+
 // On-screen fps HUD (RJIT_FPS=1, or RJIT_PERFLOG=1). Queued from render() — which
 // runs in the paint WALK, BEFORE gpu.frame() does its text.upload — so the glyphs
 // make it into this frame's 2D pass (queuing from flushPending is too late: the text
@@ -2248,7 +2259,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     // dropping the building buckets (geometry key never cached / no verts);
     // if seen==collected, they pass collection and the DRAW is the suspect.
     g_dbg_frame += 1;
-    if (g_dbg_frame % 120 == 1) {
+    if (censusOn() and g_dbg_frame % 120 == 1) {
         const retained_kverts = g_retained_top / @sizeOf(Vertex) / 1000;
         std.debug.print("[r3d-census] children={d} inst_seen={d} inst_collected={d} mcount={d} tcount={d} geo_cache_len={d} retained={d}k/{d}k verts\n", .{ scene_node.children.len, dbg_inst_seen, dbg_inst_collected, mcount, tcount, g_geo_cache_len, retained_kverts, MAX_RETAINED_VERTS / 1000 });
     }
@@ -2458,7 +2469,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
             }
         }
     }
-    if (g_dbg_frame % 120 == 1) {
+    if (censusOn() and g_dbg_frame % 120 == 1) {
         std.debug.print("[ground-pass] seen={d} collected(gcount)={d} drawn={d} pool_cap={d} (dedicated inst buffer — foliage can't starve it)\n", .{ dbg_ground_seen, gcount, dbg_ground_drawn, GROUND_POOL });
     }
 
