@@ -21,7 +21,8 @@
 import { useMemo, useState } from 'react';
 import { Box, Pressable, Scene3D, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { GAME_BUILD, GAME_CAMERA } from './game';
-import { PROP_CATEGORY_NAMES, isPropKind, propCategory, propKindDefinition, type PropCategory } from './game/kinds/props';
+import { PROP_CATEGORY_NAMES, isPropKind, propCategory, propKindDefinition, type PropCategory, type PropKind } from './game/kinds/props';
+import { propVisualBounds } from './compile/propRecipes/footprint';
 import { buildObjectWorld } from './objectPreview';
 import { ModelScene } from './ModelViewer';
 import { useCookedAssets } from './editors/model/cookedAssets';
@@ -44,20 +45,35 @@ function propKindOf(id: string): string {
 
 // Auto-frame the camera from the prop's OWN measured extent (the whole reason the
 // old tiles were unrecognizable: a single fixed camera framed a phone booth and a
-// bus the same, so most props were a speck). We size a bounding sphere from the
-// kind's height + footprint, then back the camera off by radius / tan(fov/2) so the
-// model fills the tile no matter how tall or wide it is. Pure + memoizable per kind.
+// bus the same, so most props were a speck). We take the prop's REAL visual AABB
+// (propVisualBounds — every part, rotation baked in), centre on its true middle,
+// and back off by radius / tan(fov/2) so the model fills the tile no matter how
+// tall, wide, or off-anchor it is. Declared kind dims are the fallback ONLY for
+// imported/cooked meshes that have no recipe parts to measure (req_1901: small
+// props read worst when framed from declared dims that miss the real geometry).
+// Pure + memoizable per kind.
 function solveThumbCamera(kind: string) {
-  const def = propKindDefinition(kind as Parameters<typeof propKindDefinition>[0]);
-  const h = Math.max(0.3, def.heightMeters);
-  const w = Math.max(0.3, def.footprintWidthMeters ?? def.footprintRadiusMeters * 2);
-  const d = Math.max(0.3, def.footprintDepthMeters ?? def.footprintRadiusMeters * 2);
-  // Bounding-sphere radius around the model's centre (corner-aware, so a long car
-  // viewed at 3/4 doesn't poke out of frame).
-  const radius = 0.5 * Math.sqrt(w * w + d * d + h * h);
+  const aabb = propVisualBounds(kind as PropKind);
+  let cx = 0, cy: number, cz = 0, radius: number;
+  if (aabb) {
+    cx = (aabb.minX + aabb.maxX) / 2;
+    cy = (aabb.minY + aabb.maxY) / 2;
+    cz = (aabb.minZ + aabb.maxZ) / 2;
+    const w = Math.max(0.3, aabb.maxX - aabb.minX);
+    const h = Math.max(0.3, aabb.maxY - aabb.minY);
+    const d = Math.max(0.3, aabb.maxZ - aabb.minZ);
+    radius = 0.5 * Math.sqrt(w * w + d * d + h * h);
+  } else {
+    const def = propKindDefinition(kind as Parameters<typeof propKindDefinition>[0]);
+    const h = Math.max(0.3, def.heightMeters);
+    const w = Math.max(0.3, def.footprintWidthMeters ?? def.footprintRadiusMeters * 2);
+    const d = Math.max(0.3, def.footprintDepthMeters ?? def.footprintRadiusMeters * 2);
+    cy = h * 0.5;
+    radius = 0.5 * Math.sqrt(w * w + d * d + h * h);
+  }
   const dist = (radius / Math.tan((THUMB_FOV / 2) * (Math.PI / 180))) * THUMB_MARGIN;
   return GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
-    target: [0, h * 0.5, 0], yaw: THUMB_YAW, pitch: THUMB_PITCH, dist, zoom: 1, fov: THUMB_FOV,
+    target: [cx, cy, cz], yaw: THUMB_YAW, pitch: THUMB_PITCH, dist, zoom: 1, fov: THUMB_FOV,
   });
 }
 

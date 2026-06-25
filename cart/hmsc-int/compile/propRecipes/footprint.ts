@@ -152,6 +152,20 @@ export function propVerticalBand(kind: PropKind): { baseY: number; height: numbe
   return { baseY: minY, height: maxY - minY };
 }
 
+/** The prop's FULL visual AABB over EVERY part (rotation baked in) — the real
+ *  measured bounds, not the in-band footprint (which drops overhead/canopy mass)
+ *  nor the declared kind dims (which a small or off-anchor model misses by a wide
+ *  proportional margin). The thumbnail / inspector camera frames from THIS so a
+ *  prop fills its tile regardless of size or where its mass sits (req_1901: tiny
+ *  props read worst when framed from declared dims). Null with no recipe parts
+ *  (imported/cooked meshes) — the caller falls back to declared dims there. */
+export function propVisualBounds(kind: PropKind): PropCollisionBox | null {
+  const parts = resolvePartsForKind(kind);
+  if (!parts || parts.length === 0) return null;
+  const span = boxSpan(parts.map(partLocalBox));
+  return Number.isFinite(span.minX) && span.maxX > span.minX ? span : null;
+}
+
 /** Do two boxes overlap in plan (XZ), padded by eps so abutting parts count as
  *  connected? Used to cluster the in-band parts a body actually runs into. */
 function xzOverlap(a: PropCollisionBox, b: PropCollisionBox, eps: number): boolean {
