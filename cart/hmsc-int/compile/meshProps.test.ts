@@ -10,12 +10,12 @@
 //     --format=iife --platform=neutral --target=es2022 \
 //     --alias:@reactjit=runtime --alias:@game=cart/hmsc-int/game | tools/v8cli /dev/stdin
 
-import { assert, assertEqual, finish, test } from '../game/_testkit';
+import { assert, assertClose, assertEqual, finish, test } from '../game/_testkit';
 import { encodeMeshProps, MESH_PROPS_LUMP_VERSION, type ImportedMeshPropSink } from './worldGeometry';
 
 // A minimal mesh row; `png` is optional (the cooked-paint atlas). Cast through the
 // sink type — the encoder only reads these fields + the optional `png`.
-function meshRow(key: string, png?: Uint8Array, slots?: { start: number; count: number }[]): any {
+function meshRow(key: string, png?: Uint8Array, slots?: { start: number; count: number }[], door?: { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean }): any {
   return {
     key, source: `t:${key}`,
     color: [0.5, 0.5, 0.5] as [number, number, number],
@@ -25,17 +25,19 @@ function meshRow(key: string, png?: Uint8Array, slots?: { start: number; count: 
     vertices: new Float32Array(8), // one vertex (pos3 nrm3 uv2)
     ...(png ? { png } : {}),
     ...(slots ? { slots } : {}),
+    ...(door ? { door } : {}),
   };
 }
 
 // Mirror of constructor.zig decodeMeshProps (v5) — the contract under test.
-function decode(bytes: Uint8Array): { version: number; meshes: { key: string; pngLen: number; png: Uint8Array | null; slots: { start: number; count: number }[] }[]; instances: { mesh: number; slotMaterials: number[] }[] } {
+type DecodedDoor = { leafSlot: number; reach: number; vehicle: boolean; startOpen: boolean } | null;
+function decode(bytes: Uint8Array): { version: number; meshes: { key: string; pngLen: number; png: Uint8Array | null; slots: { start: number; count: number }[]; door: DecodedDoor }[]; instances: { mesh: number; slotMaterials: number[] }[] } {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const version = view.getUint32(0, true);
   const meshCount = view.getUint32(4, true);
   const instanceCount = view.getUint32(8, true);
   let at = 12;
-  const meshes: { key: string; pngLen: number; png: Uint8Array | null; slots: { start: number; count: number }[] }[] = [];
+  const meshes: { key: string; pngLen: number; png: Uint8Array | null; slots: { start: number; count: number }[]; door: DecodedDoor }[] = [];
   for (let m = 0; m < meshCount; m += 1) {
     const keyLen = view.getUint32(at, true); at += 4;
     let key = '';
@@ -53,7 +55,14 @@ function decode(bytes: Uint8Array): { version: number; meshes: { key: string; pn
       slots.push({ start: view.getUint32(at, true), count: view.getUint32(at + 4, true) });
       at += 8;
     }
-    meshes.push({ key, pngLen, png, slots });
+    // v6 door block: u32 hasDoor, then if set: u32 leafSlot | f32 reach | u32 vehicle | u32 startOpen.
+    let door: DecodedDoor = null;
+    const hasDoor = view.getUint32(at, true); at += 4;
+    if (hasDoor) {
+      door = { leafSlot: view.getUint32(at, true), reach: view.getFloat32(at + 4, true), vehicle: view.getUint32(at + 8, true) !== 0, startOpen: view.getUint32(at + 12, true) !== 0 };
+      at += 16;
+    }
+    meshes.push({ key, pngLen, png, slots, door });
   }
   const instances: { mesh: number; slotMaterials: number[] }[] = [];
   for (let i = 0; i < instanceCount; i += 1) {
@@ -69,26 +78,38 @@ function decode(bytes: Uint8Array): { version: number; meshes: { key: string; pn
   return { version, meshes, instances };
 }
 
-test('MESH_PROPS v5: a cooked prop ships paint PNG bytes and slot material refs (req_1544/req_1573)', () => {
+test('MESH_PROPS v6: a cooked prop ships paint PNG bytes, slot material refs, and door meta (req_1544/req_1573/req_1864)', () => {
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 250, 251]); // PNG sig + payload
   const sink: ImportedMeshPropSink = {
-    meshes: [meshRow('painted', png, [{ start: 6, count: 6 }]), meshRow('bare')] as any,
+    meshes: [
+      meshRow('painted', png, [{ start: 6, count: 6 }]),
+      meshRow('bare'),
+      // a cooked DOOR (req_1864): its leaf is the last slot, with door meta.
+      meshRow('cdoor', undefined, [{ start: 0, count: 3 }, { start: 3, count: 3 }], { leafSlot: 1, reachMeters: 2.2, vehicle: false, startOpen: false }),
+    ] as any,
     instances: [{ mesh: 0, x: 1, y: 2, z: 3, yawDegrees: 90, slotMaterials: [7] }, { mesh: 1, x: 0, y: 0, z: 0, yawDegrees: 0 }],
   };
   const out = decode(encodeMeshProps(sink));
-  assertEqual(out.version, 5, 'lump is v5');
-  assertEqual(MESH_PROPS_LUMP_VERSION, 5, 'the exported version constant is 5');
-  assertEqual(out.instances.length, 2, 'both instances encoded');
-  assertEqual(out.meshes.length, 2, 'both meshes encoded');
+  assertEqual(out.version, 6, 'lump is v6');
+  assertEqual(MESH_PROPS_LUMP_VERSION, 6, 'the exported version constant is 6');
+  assertEqual(out.meshes.length, 3, 'all meshes encoded');
   // the painted mesh carries the EXACT PNG bytes (no decode, no resize — passthrough).
   assertEqual(out.meshes[0].pngLen, png.length, 'painted mesh png length matches');
   assert(out.meshes[0].png !== null && out.meshes[0].png!.every((b, i) => b === png[i]), 'png bytes are byte-identical (passthrough)');
   assertEqual(out.meshes[0].slots[0].start, 6, 'slot start carried');
   assertEqual(out.meshes[0].slots[0].count, 6, 'slot count carried');
   assertEqual(out.instances[0].slotMaterials[0], 7, 'slot material ref carried per instance');
-  // the bare mesh has no texture → pngLen 0 (an OBJ/GLB import or unpainted prop).
+  // non-door meshes carry NO door block.
+  assertEqual(out.meshes[0].door, null, 'painted mesh has no door');
   assertEqual(out.meshes[1].pngLen, 0, 'untextured mesh ships pngLen 0');
   assertEqual(out.meshes[1].slots.length, 0, 'un-slotted mesh ships slotCount 0');
+  assertEqual(out.meshes[1].door, null, 'bare mesh has no door');
+  // the cooked door round-trips its door meta (req_1864).
+  assert(out.meshes[2].door !== null, 'cooked-door mesh carries a door block');
+  assertEqual(out.meshes[2].door!.leafSlot, 1, 'leaf slot index carried');
+  assertClose(out.meshes[2].door!.reach, 2.2, 1e-5, 'interaction reach carried');
+  assertEqual(out.meshes[2].door!.vehicle, false, 'walk door carried');
+  assertEqual(out.meshes[2].door!.startOpen, false, 'start-closed carried');
 });
 
 finish('meshProps');
