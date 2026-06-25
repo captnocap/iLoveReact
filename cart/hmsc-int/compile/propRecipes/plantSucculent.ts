@@ -24,6 +24,7 @@ const COLORS = {
   soil: recipeColor('#3e3226'),
   leaf: recipeColor('#6b8a5a'),
   leafLight: recipeColor('#80a56c'),
+  leafDark: recipeColor('#516a43'),
 } satisfies Record<string, Color>;
 
 export function plantSucculentRecipe(): PropRecipe {

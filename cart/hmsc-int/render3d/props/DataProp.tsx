@@ -46,6 +46,12 @@ export function dataPropParts(prop: WorldProp): Part[] {
   return specs.map((spec, index): Part => {
     const g = partGeometry(spec);
     const image = spec.partId !== undefined;
+    // Name the culprit when a recipe part has no color — cssColor falls back to a
+    // neutral tan so the editor keeps rendering, but the recipe still wants fixing
+    // (req_1936). This pinpoints the kind+part instead of a bare crash.
+    if (!Array.isArray(spec.color) || spec.color.length < 3) {
+      dataGone(`MISSING COLOR kind=${prop.kind} part=${spec.partId ?? `#${index}`} → using fallback`);
+    }
     return {
       id: propPartId(spec, index),
       label: spec.partId ?? `Part ${index + 1}`,

@@ -92,9 +92,19 @@ export function hx(hex: string): Color {
   return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255];
 }
 
-export function cssColor(color: Color): string {
-  const channel = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255))).toString(16).padStart(2, '0');
-  return `#${channel(color[0])}${channel(color[1])}${channel(color[2])}`;
+// A neutral tan stand-in when a part spec arrives with no color (a recipe that
+// omitted it, or a palette entry that was undefined at module-init time — see the
+// COLORS import-cycle note in propRecipes/resolve.ts). Matches propColor's default.
+const CSS_COLOR_FALLBACK: Color = [0.7, 0.6, 0.4];
+
+// Robust against a missing/malformed color: a single prop part with no color must
+// never throw and take down the WHOLE editor (req_1936 — `color[0]` on undefined
+// crashed every thumbnail in the prop browser). dataPropParts logs WHICH kind is
+// missing one so the real recipe gets fixed; here we just keep rendering.
+export function cssColor(color: Color | undefined | null): string {
+  const c = Array.isArray(color) && color.length >= 3 ? color : CSS_COLOR_FALLBACK;
+  const channel = (v: number) => Math.max(0, Math.min(255, Math.round((Number(v) || 0) * 255))).toString(16).padStart(2, '0');
+  return `#${channel(c[0])}${channel(c[1])}${channel(c[2])}`;
 }
 
 // ── the shared palette (the kit's colours — props import these) ───────────────
