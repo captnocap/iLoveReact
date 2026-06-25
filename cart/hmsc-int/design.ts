@@ -580,7 +580,11 @@ export type WaterBodyShape = 'rect' | 'disc';
 // A painted water grid: a cols×rows grid of per-cell water SURFACE height
 // (dry cells sit at `base`), `cell` metres apart, centred on the body. When
 // present it overrides the parametric footprint.
-export type WaterField = { cols: number; rows: number; cell: number; heights: number[]; base: number };
+// `depths` (optional, same grid as heights) carries the per-cell water COLUMN
+// depth in metres (surface − bed). The water shader reads it (baked into the
+// mesh UV.x by gpu/3d.zig hfGen) to drive the deep/shallow gradient and the
+// shoreline foam/run-up — depth→0 IS the waterline. Absent ⇒ flat look.
+export type WaterField = { cols: number; rows: number; cell: number; heights: number[]; base: number; depths?: number[] };
 export type WaterBody = {
   id: string;
   label: string;

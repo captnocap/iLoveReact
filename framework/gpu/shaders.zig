@@ -1145,16 +1145,26 @@ pub const water_wgsl =
     \\    // Recompute waves per-fragment (sharper than interpolating the vertex value).
     \\    let map_pos = in.world_pos.xz * WAVE_FREQ;
     \\    let waves = get_waves(map_pos, S.time * 0.4);
-    \\    // Deep troughs → light shallow crests.
-    \\    var colour = mix(DEEP_COL, SHALLOW_COL, clamp(waves * 0.9 + 0.1, 0.0, 1.0));
-    \\    // Foam: bright wave crests + a shore band at the body's uv edge, broken
-    \\    // up by animated noise so it reads as churn not a hard ring.
+    \\    // Local water-column depth (metres) rides in UV.x — baked by gpu/3d.zig hfGen
+    \\    // from the painted depth grid: 0 at the waterline → 12 m (HF_DEPTH_NORM) deep.
+    \\    let depth_m = in.uv.x * 12.0;
+    \\    // Colour by DEPTH: light shallows near shore, darkening to ~6 m. A touch of
+    \\    // wave lightening keeps crests alive over the gradient.
+    \\    var colour = mix(SHALLOW_COL, DEEP_COL, smoothstep(0.0, 6.0, depth_m));
+    \\    colour = mix(colour, SHALLOW_COL, smoothstep(0.6, 1.0, waves) * 0.25);
+    \\    // Foam = wave crests + a SHORELINE run-up band hugging the real waterline
+    \\    // (depth→0). Its reach is varied along the coast by large-scale noise and
+    \\    // washed in/out over time, so the beach edge ranges ~1 m to ~15 m on a gentle
+    \\    // slope instead of a ruler-straight line. (The old band keyed the mesh UV
+    \\    // rectangle edge = chunk border, not the water's edge.)
     \\    let foam_noise = hash21(floor(map_pos * 8.0) + floor(vec2f(S.time * 2.0)));
-    \\    let crest = smoothstep(0.72, 0.92, waves);
-    \\    let edge = abs(in.uv - vec2f(0.5)) * 2.0;
-    \\    let shore = smoothstep(0.82, 1.0, max(edge.x, edge.y));
-    \\    var foam = clamp(crest + shore * 0.8, 0.0, 1.0);
-    \\    foam = smoothstep(0.35, 0.75, foam + (foam_noise - 0.5) * 0.4);
+    \\    let crest = smoothstep(0.72, 0.94, waves);
+    \\    let shore_noise = get_waves(in.world_pos.xz * 0.04, S.time * 0.18);
+    \\    let wash = sin(S.time * 0.6 + shore_noise * 6.2831) * 0.5 + 0.5;
+    \\    let reach_m = mix(0.07, 1.0, shore_noise) * mix(0.45, 1.0, wash);
+    \\    let shore = 1.0 - smoothstep(0.0, reach_m, depth_m);
+    \\    var foam = clamp(max(crest, shore), 0.0, 1.0);
+    \\    foam = smoothstep(0.30, 0.85, foam + (foam_noise - 0.5) * 0.35);
     \\    colour = mix(colour, FOAM_COL, foam);
     \\    // Soft half-lambert so a wave back-face isn't flat.
     \\    let N = normalize(in.world_normal);
@@ -1168,8 +1178,11 @@ pub const water_wgsl =
     \\    let fog_target = mix(S.fog_color, sky_grad, S.fog_sky);
     \\    colour = mix(colour, fog_target, fog_t);
     \\    // Ordered alpha-hash: the dithered holes ARE the water's transparency.
-    \\    // Foam is opaque (alpha 1); open water dithers at WATER_ALPHA.
-    \\    let alpha = mix(WATER_ALPHA, 1.0, foam);
+    \\    // Foam is opaque (alpha 1); open water dithers at WATER_ALPHA; the shallowest
+    \\    // film fades toward clear so the surface dissolves into wet sand at the
+    \\    // waterline instead of ending on a hard edge.
+    \\    let shallow_fade = smoothstep(0.0, 0.25, depth_m);
+    \\    let alpha = mix(WATER_ALPHA * shallow_fade, 1.0, foam);
     \\    if (alpha < bayer8(in.clip_pos.xy)) { discard; }
     \\    return vec4f(colour, 1.0);
     \\}

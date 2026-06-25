@@ -1479,19 +1479,34 @@ fn hfPush(n: *usize, p: [3]f32, nrm: [3]f32, u: f32, vv: f32) void {
     n.* += 1;
 }
 
-fn hfSkirt(n: *usize, a: [3]f32, b: [3]f32, c: [3]f32, d: [3]f32, nrm: [3]f32) void {
-    hfPush(n, a, nrm, 0, 0);
-    hfPush(n, b, nrm, 0, 0);
-    hfPush(n, c, nrm, 0, 0);
-    hfPush(n, a, nrm, 0, 0);
-    hfPush(n, c, nrm, 0, 0);
-    hfPush(n, d, nrm, 0, 0);
+fn hfSkirt(n: *usize, a: [3]f32, b: [3]f32, c: [3]f32, d: [3]f32, nrm: [3]f32, su: f32) void {
+    hfPush(n, a, nrm, su, 0);
+    hfPush(n, b, nrm, su, 0);
+    hfPush(n, c, nrm, su, 0);
+    hfPush(n, a, nrm, su, 0);
+    hfPush(n, c, nrm, su, 0);
+    hfPush(n, d, nrm, su, 0);
+}
+
+// Water-depth UV: when a water mesh ships a per-cell depth grid, the top-surface
+// UV.x carries the normalised water column depth (0 at the waterline → 1 at
+// HF_DEPTH_NORM metres deep) instead of grid coords, so the water shader can draw
+// the deep/shallow gradient + shoreline foam. Non-water fields pass null → grid u.
+const HF_DEPTH_NORM: f32 = 12.0;
+fn hfDepthU(depths: ?[]const f32, idx: usize, fallback: f32) f32 {
+    if (depths) |d| {
+        if (idx < d.len) return std.math.clamp(d[idx] / HF_DEPTH_NORM, 0.0, 1.0);
+    }
+    return fallback;
 }
 
 /// Build the heightfield mesh into g_hf_scratch; returns the vertex count (0 = bad
 /// input). Caller uploads g_hf_scratch[0..count] to the slot.
-fn hfGen(hs_in: []const f32, cols: usize, rows: usize, width: f32, depth: f32, base: f32, wave: HfWave, t: f32) u32 {
+fn hfGen(hs_in: []const f32, cols: usize, rows: usize, width: f32, depth: f32, base: f32, wave: HfWave, t: f32, depths: ?[]const f32) u32 {
     if (cols < 2 or rows < 2 or hs_in.len < cols * rows) return 0;
+    // Water meshes carry a depth grid → top-surface UV.x = normalised depth (so the
+    // water shader knows the waterline); skirt walls are "deep" (su=1, no foam).
+    const skirt_u: f32 = if (depths != null) 1.0 else 0.0;
     const cf: f32 = @floatFromInt(cols - 1);
     const rf: f32 = @floatFromInt(rows - 1);
     const dx = width / cf;
@@ -1531,16 +1546,23 @@ fn hfGen(hs_in: []const f32, cols: usize, rows: usize, width: f32, depth: f32, b
             const nb = hfNormalAt(hs, cols, rows, i + 1, j, dx, dz);
             const nc = hfNormalAt(hs, cols, rows, i + 1, j + 1, dx, dz);
             const nd = hfNormalAt(hs, cols, rows, i, j + 1, dx, dz);
-            const ua0 = @as(f32, @floatFromInt(i)) / cf;
-            const ub0 = @as(f32, @floatFromInt(i + 1)) / cf;
+            // UV.x: grid column by default, OR per-cell normalised water depth when a
+            // depth grid is present (water). Each corner keys its own cell, so depth
+            // u varies in both i and j (grid u only varied by column).
+            const gua = @as(f32, @floatFromInt(i)) / cf;
+            const gub = @as(f32, @floatFromInt(i + 1)) / cf;
+            const ua = hfDepthU(depths, j * cols + i, gua);
+            const ub = hfDepthU(depths, j * cols + (i + 1), gub);
+            const uc = hfDepthU(depths, (j + 1) * cols + (i + 1), gub);
+            const ud = hfDepthU(depths, (j + 1) * cols + i, gua);
             const va0 = @as(f32, @floatFromInt(j)) / rf;
             const vb0 = @as(f32, @floatFromInt(j + 1)) / rf;
-            hfPush(&n, pa, na, ua0, va0);
-            hfPush(&n, pc, nc, ub0, vb0);
-            hfPush(&n, pb, nb, ub0, va0);
-            hfPush(&n, pa, na, ua0, va0);
-            hfPush(&n, pd, nd, ua0, vb0);
-            hfPush(&n, pc, nc, ub0, vb0);
+            hfPush(&n, pa, na, ua, va0);
+            hfPush(&n, pc, nc, uc, vb0);
+            hfPush(&n, pb, nb, ub, va0);
+            hfPush(&n, pa, na, ua, va0);
+            hfPush(&n, pd, nd, ud, vb0);
+            hfPush(&n, pc, nc, uc, vb0);
         }
     }
 
@@ -1549,21 +1571,21 @@ fn hfGen(hs_in: []const f32, cols: usize, rows: usize, width: f32, depth: f32, b
     while (si + 1 < cols) : (si += 1) {
         const tn0 = hfPos(hs, cols, si, 0, x0, dx, z0, dz);
         const tn1 = hfPos(hs, cols, si + 1, 0, x0, dx, z0, dz);
-        if (tn0[1] > base or tn1[1] > base) hfSkirt(&n, .{ tn1[0], base, tn1[2] }, .{ tn0[0], base, tn0[2] }, tn0, tn1, .{ 0, 0, -1 });
+        if (tn0[1] > base or tn1[1] > base) hfSkirt(&n, .{ tn1[0], base, tn1[2] }, .{ tn0[0], base, tn0[2] }, tn0, tn1, .{ 0, 0, -1 }, skirt_u);
         const js = rows - 1;
         const ts0 = hfPos(hs, cols, si, js, x0, dx, z0, dz);
         const ts1 = hfPos(hs, cols, si + 1, js, x0, dx, z0, dz);
-        if (ts0[1] > base or ts1[1] > base) hfSkirt(&n, .{ ts0[0], base, ts0[2] }, .{ ts1[0], base, ts1[2] }, ts1, ts0, .{ 0, 0, 1 });
+        if (ts0[1] > base or ts1[1] > base) hfSkirt(&n, .{ ts0[0], base, ts0[2] }, .{ ts1[0], base, ts1[2] }, ts1, ts0, .{ 0, 0, 1 }, skirt_u);
     }
     var sj: usize = 0;
     while (sj + 1 < rows) : (sj += 1) {
         const tw0 = hfPos(hs, cols, 0, sj, x0, dx, z0, dz);
         const tw1 = hfPos(hs, cols, 0, sj + 1, x0, dx, z0, dz);
-        if (tw0[1] > base or tw1[1] > base) hfSkirt(&n, .{ tw0[0], base, tw0[2] }, .{ tw1[0], base, tw1[2] }, tw1, tw0, .{ -1, 0, 0 });
+        if (tw0[1] > base or tw1[1] > base) hfSkirt(&n, .{ tw0[0], base, tw0[2] }, .{ tw1[0], base, tw1[2] }, tw1, tw0, .{ -1, 0, 0 }, skirt_u);
         const ie = cols - 1;
         const te0 = hfPos(hs, cols, ie, sj, x0, dx, z0, dz);
         const te1 = hfPos(hs, cols, ie, sj + 1, x0, dx, z0, dz);
-        if (te0[1] > base or te1[1] > base) hfSkirt(&n, .{ te1[0], base, te1[2] }, .{ te0[0], base, te0[2] }, te0, te1, .{ 1, 0, 0 });
+        if (te0[1] > base or te1[1] > base) hfSkirt(&n, .{ te1[0], base, te1[2] }, .{ te0[0], base, te0[2] }, te0, te1, .{ 1, 0, 0 }, skirt_u);
     }
 
     return @intCast(n);
@@ -1572,7 +1594,7 @@ fn hfGen(hs_in: []const f32, cols: usize, rows: usize, width: f32, depth: f32, b
 /// Resolve a "~hf~<slotId>~<version>" key: generate the heightfield mesh from the
 /// streamed height grid into the reused slot, overwriting on version change. The
 /// grid is the same one the collider takes, so render == collide.
-fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]const f32, cols: u32, rows: u32, width: f32, depth: f32, base: f32, wave: HfWave) ?GeoSlice {
+fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]const f32, cols: u32, rows: u32, width: f32, depth: f32, base: f32, wave: HfWave, depths: ?[]const f32) ?GeoSlice {
     const loc = dynSlotLocate("~hf~".len, key) orelse return null;
     const s = &g_dyn_slots[loc.i];
     // A wave heightfield (bodies of water) re-bakes EVERY frame from the host
@@ -1581,7 +1603,7 @@ fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]co
     if (animated or s.version_hash != loc.ver_hash or s.count == 0) {
         const hs = heights orelse return existingDyn(s);
         const t: f32 = if (animated) @as(f32, @floatFromInt(@mod(std.time.milliTimestamp(), 1_000_000))) / 1000.0 else 0;
-        const cnt = hfGen(hs, @intCast(cols), @intCast(rows), width, depth, base, wave, t);
+        const cnt = hfGen(hs, @intCast(cols), @intCast(rows), width, depth, base, wave, t, depths);
         if (cnt == 0) return existingDyn(s);
         const buf = g_retained_vbuf orelse return null;
         // Bump-allocate by the mesh's REAL vert count: a flat chunk is ~30 verts, not a
@@ -2139,6 +2161,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                     .dx = child.scene3d_hf_wave_dx,
                     .dz = child.scene3d_hf_wave_dz,
                 },
+                child.scene3d_hf_depths,
             );
             if (maybe_slot == null) continue;
         } else if (std.mem.startsWith(u8, key, "~dyn~")) {

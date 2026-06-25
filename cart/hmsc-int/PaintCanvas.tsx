@@ -649,6 +649,9 @@ export function PaintCanvas(props: {
   const tileDirty = useRef<Set<ChunkKey>>(new Set());
   const heightDirty = useRef<Set<ChunkKey>>(new Set());
   const waterDirty = useRef<Set<ChunkKey>>(new Set());
+  // True after a water stroke that found NO sub-0 terrain to fill — drives a hint
+  // ("carve a basin first") so painting water on flat ground isn't a silent no-op.
+  const waterDryStrokeRef = useRef(false);
   const tileCache = useRef<Map<ChunkKey, number[]>>(new Map());
   const heightCache = useRef<Map<ChunkKey, number[]>>(new Map());
   const waterCache = useRef<Map<ChunkKey, number[] | null>>(new Map()); // downsampled water grid (null = dry, no body)
@@ -902,6 +905,7 @@ export function PaintCanvas(props: {
     const radiusM = Math.max(0.5, b.size);
     const rd = Math.max(1, Math.ceil(radiusM / DOT_M));
     const erase = b.mode === 'erase';
+    let anyBasin = false; // did the brush touch any sub-0 terrain it could fill?
     for (const ch of focusedChunks) {
       const cols = ch.water.cols, rows = ch.water.rows;
       const cix = Math.round((gx - ch.cx * PATCH + PATCH / 2) / PATCH * (cols - 1));
@@ -917,7 +921,9 @@ export function PaintCanvas(props: {
           const dm = footprintDistance(b.shape, dx, dy) * DOT_M;
           if (dm > radiusM) continue;
           const idx = jy * cols + jx;
-          const next = erase ? 0 : Math.max(0, -(ch.height.z[idx] ?? 0));
+          const bed = ch.height.z[idx] ?? 0;
+          if (bed < 0) anyBasin = true;
+          const next = erase ? 0 : Math.max(0, -bed);
           if (ch.water.z[idx] !== next) {
             ch.water.z[idx] = next;
             wrote = true;
@@ -929,6 +935,9 @@ export function PaintCanvas(props: {
       touched.add(k);
       waterDirty.current.add(k);
     }
+    // No basin under the brush ⇒ nothing to fill (water rides negative terrain).
+    // Flag it so the stroke note nudges the user to carve first, not silently no-op.
+    if (!erase) waterDryStrokeRef.current = !anyBasin;
   };
 
   const slopeStroke = useRef<{ points: { x: number; y: number }[] } | null>(null);
@@ -1483,7 +1492,7 @@ export function PaintCanvas(props: {
     },
     water: {
       sample: stampWaterAtGraph,
-      note: () => ({ cat: 'height', text: activeBrushMode === 'erase' ? 'cleared water' : 'painted water' }),
+      note: () => ({ cat: 'height', text: activeBrushMode === 'erase' ? 'cleared water' : (waterDryStrokeRef.current ? 'no basin here — lower terrain below 0 first (Terrain tool)' : 'painted water') }),
     },
     zone: {
       sample: stampZoneAtGraph,

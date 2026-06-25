@@ -535,6 +535,11 @@ pub const Node = struct {
     // "~hf~" key. ~47× less bridge traffic, and it's the SAME grid the heightfield
     // collider already takes (see-it==walk-it). heights len = hf_cols*hf_rows.
     scene3d_heights: ?[]const f32 = null,
+    // Optional per-cell water DEPTH grid (surface − bed, metres), same cols×rows
+    // as heights. Present only on water meshes; gpu/3d.zig hfGen bakes it into the
+    // top-surface UV.x so the water shader can draw the deep/shallow gradient and
+    // the shoreline foam (depth→0 = waterline). Null ⇒ UV stays grid coords.
+    scene3d_hf_depths: ?[]const f32 = null,
     scene3d_hf_cols: u32 = 0,
     scene3d_hf_rows: u32 = 0,
     scene3d_hf_width: f32 = 0,

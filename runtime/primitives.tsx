@@ -533,6 +533,10 @@ Scene3DBase.Fog = ({ near, far, color, enabled = true, ...rest }: any) =>
 // edit (see render3d/Landform), so a WeakMap entry lives exactly as long as its
 // version of the terrain and drops with it.
 const _hfShipCache = new WeakMap<object, { arr: number[]; maxAbsY: number }>();
+// Parallel cache for the optional water DEPTH grid (same identity contract as
+// heights): a new depths array per edit ⇒ a fresh shipment, else stable identity
+// so the prop diff sees "unchanged" and nothing re-crosses the bridge.
+const _hfDepthShipCache = new WeakMap<object, number[]>();
 // dyn verts CONTENT cache: keyed by the full dynamicKey string, which by contract
 // encodes a version that changes when the verts change — so equal key ⇒ equal verts.
 // This caches the generated VERTS (regen is the expensive part); it does NOT decide
@@ -672,11 +676,19 @@ Scene3DBase.Mesh = ({
         }
         const halfW = (m.width ?? 1) / 2, halfD = (m.depth ?? 1) / 2;
         const boundsRadius = Math.sqrt(halfW * halfW + halfD * halfD + ship.maxAbsY * ship.maxAbsY);
+        // Optional per-cell water depth grid (water meshes only): identity-stable
+        // like heights, baked into UV.x by gpu/3d.zig hfGen for the water shader.
+        let depthShip: number[] | undefined;
+        if (Array.isArray(m.depths) && m.depths.length === ship.arr.length) {
+          depthShip = _hfDepthShipCache.get(m.depths as object);
+          if (!depthShip) { depthShip = Array.from(m.depths as ArrayLike<number>); _hfDepthShipCache.set(m.depths as object, depthShip); }
+        }
         return h('View', {
           ...rest,
           scene3dMesh: true,
           scene3dGeomKey: '~hf~' + dyn,
           scene3dHeights: ship.arr,
+          ...(depthShip ? { scene3dHfDepths: depthShip } : {}),
           scene3dHfCols: m.cols, scene3dHfRows: m.rows,
           scene3dHfWidth: m.width ?? 1, scene3dHfDepth: m.depth ?? 1, scene3dHfBase: m.base ?? 0,
           scene3dBoundsRadius: boundsRadius,

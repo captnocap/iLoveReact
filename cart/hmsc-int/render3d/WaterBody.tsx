@@ -4,6 +4,10 @@ import * as Geometry from '@reactjit/geometries';
 import type { WaterBody as WaterBodyData } from '../design';
 import { waterFlatHeights } from '../game/kinds/waterBodies';
 
+// Depth (m) a body with no per-cell depth grid reports inside its footprint — past
+// the shader's deep cutoff, so authored volumes render as deep water, no shoreline.
+const DEEP_COLUMN_M = 6.0;
+
 // The renderer for an authored body of water (world/water). A body is FACTORS —
 // a footprint + one surface level — and renders as ONE STATIC heightfield mesh: a
 // flat top surface at surfaceY plus the heightfield's own perimeter skirt dropped
@@ -31,19 +35,38 @@ const WaterBodyMesh = memo(function WaterBodyMesh(props: { body: WaterBodyData }
   const field = useMemo(() => {
     if (b.field) {
       const { cols, rows, cell, heights, base } = b.field;
-      return { cols, rows, heights, base, width: (cols - 1) * cell, depth: (rows - 1) * cell };
+      // depths (surface − bed) drive the shader's gradient + shoreline foam. A
+      // painted body ships its authored per-cell grid; without one, mark the
+      // footprint uniformly DEEP (no false shoreline) and dry cells 0.
+      const depths = b.field.depths ?? heights.map((hy) => (hy > base + 1e-3 ? DEEP_COLUMN_M : 0));
+      return { cols, rows, heights, base, depths, width: (cols - 1) * cell, depth: (rows - 1) * cell };
     }
+    // Parametric catalog body (pond/lake): an authored volume, not a painted
+    // basin — render it uniformly deep so it doesn't read as endless shoreline.
     const f = waterFlatHeights(b.shape, b.width, b.depth, b.surfaceY);
-    return { ...f, width: b.width, depth: b.depth };
+    const depths = f.heights.map((hy) => (hy > f.base + 1e-3 ? DEEP_COLUMN_M : 0));
+    return { ...f, depths, width: b.width, depth: b.depth };
   }, [b.field, b.shape, b.width, b.depth, b.surfaceY]);
+  // Content version for the dyn slot key: a constant "~0" never re-bakes, so
+  // editing a chunk's water/terrain left the host mesh stale. Hash the field so
+  // any change to heights/depths bumps the version and gpu/3d.zig re-bakes.
+  const ver = useMemo(() => {
+    const h = field.heights, d = field.depths;
+    let x = 2166136261 >>> 0;
+    const mix = (n: number) => { x ^= ((n * 997) | 0) >>> 0; x = Math.imul(x, 16777619) >>> 0; };
+    mix(h.length);
+    const step = Math.max(1, (h.length / 48) | 0);
+    for (let i = 0; i < h.length; i += step) { mix(h[i] ?? 0); mix(d[i] ?? 0); }
+    return x >>> 0;
+  }, [field]);
   // Opaque (a < 1 would route to the transparent pass and skip the water pipeline).
   // inst_color is ignored by the water shader, which carries the ONE water look.
   const material = useMemo(() => ({ color: '#2f7fa8', opacity: 1 }), []);
   return (
     <Scene3D.Mesh
       geometry={Geometry.Heightfield}
-      params={{ heights: field.heights, cols: field.cols, rows: field.rows, width: field.width, depth: field.depth, base: field.base }}
-      dynamicKey={`water_${b.id}~0`}
+      params={{ heights: field.heights, cols: field.cols, rows: field.rows, width: field.width, depth: field.depth, base: field.base, depths: field.depths }}
+      dynamicKey={`water_${b.id}~${ver}`}
       material={material}
       textureKey="~water~"
       position={[centerX, 0, centerZ]}

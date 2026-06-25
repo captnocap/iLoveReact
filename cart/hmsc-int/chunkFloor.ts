@@ -209,10 +209,29 @@ export function floorToWaterBody(f: ChunkFloor): WaterBody {
   const beds = f.heights;
   // Basin floor: the deepest bed under any wet cell, minus a tuck so the skirt
   // closes cleanly under it (and dry cells sit here, below the terrain → hidden).
+  // Edge rule (req_1840): a shallow cell (depth < SHORE_KEEP_M) only stays wet
+  // when it's near GENUINELY deep water (a cell ≥ SHORE_DEEP_M within SHORE_R
+  // grid steps). This keeps the deep body + its shoreline margin but drops
+  // isolated barely-negative film, so the height-0 contour reads as clean beach.
+  const cols = f.hcols, rows = f.hrows;
+  const SHORE_DEEP_M = 0.5, SHORE_KEEP_M = 0.5, SHORE_R = 2;
+  const nearDeep = (i: number): boolean => {
+    const x = i % cols, y = (i / cols) | 0;
+    for (let dy = -SHORE_R; dy <= SHORE_R; dy++) {
+      const yy = y + dy; if (yy < 0 || yy >= rows) continue;
+      for (let dx = -SHORE_R; dx <= SHORE_R; dx++) {
+        const xx = x + dx; if (xx < 0 || xx >= cols) continue;
+        if ((water[yy * cols + xx] ?? 0) >= SHORE_DEEP_M) return true;
+      }
+    }
+    return false;
+  };
+  // Effective depth per cell: keep deep cells; keep shallow only if near deep.
+  const depths = water.map((d, i) => (d > 0 && (d >= SHORE_KEEP_M || nearDeep(i)) ? d : 0));
   let deepest = 0;
-  for (let i = 0; i < water.length; i++) if (water[i]! > 0) deepest = Math.min(deepest, beds[i] ?? 0);
+  for (let i = 0; i < depths.length; i++) if (depths[i]! > 0) deepest = Math.min(deepest, beds[i] ?? 0);
   const base = deepest - WATER_LOOK.floorTuckMeters;
-  const heights = water.map((d, i) => (d > 0 ? (beds[i] ?? 0) + d : base));
+  const heights = depths.map((d, i) => (d > 0 ? (beds[i] ?? 0) + d : base));
   const span = (f.hcols - 1) * cell; // = CHUNK_TILES
   const centerX = f.cx * CHUNK_TILES + CHUNK_TILES / 2;
   const centerZ = f.cz * CHUNK_TILES + CHUNK_TILES / 2;
@@ -225,7 +244,7 @@ export function floorToWaterBody(f: ChunkFloor): WaterBody {
     width: span,
     depth: span,
     surfaceY: 0, // unused — the field drives the per-cell surface
-    field: { cols: f.hcols, rows: f.hrows, cell, heights, base },
+    field: { cols: f.hcols, rows: f.hrows, cell, heights, base, depths },
     createdByCommand: 'hmsc-int:paint-water',
   };
 }

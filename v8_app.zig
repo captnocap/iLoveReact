@@ -2055,6 +2055,19 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                     }
                 }
             }
+        } else if (std.mem.eql(u8, k, "scene3dHfDepths")) {
+            // Per-cell water depth grid (water meshes); gpu/3d.zig hfGen bakes it
+            // into UV.x for the water shader. Same []f32 pattern as scene3dHeights.
+            if (v == .array) {
+                const items = v.array.items;
+                if (items.len > 0 and items.len <= (1 << 22)) {
+                    const buf = g_alloc.alloc(f32, items.len) catch null;
+                    if (buf) |out| {
+                        for (items, 0..) |fv, n| out[n] = jsonFloat(fv) orelse 0;
+                        node.scene3d_hf_depths = out;
+                    }
+                }
+            }
         } else if (std.mem.eql(u8, k, "scene3dHfCols")) {
             if (jsonInt(v)) |i| node.scene3d_hf_cols = if (i > 0 and i < (1 << 16)) @intCast(i) else 0;
         } else if (std.mem.eql(u8, k, "scene3dHfRows")) {
