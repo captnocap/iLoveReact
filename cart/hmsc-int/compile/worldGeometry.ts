@@ -517,6 +517,10 @@ function cookedMeshSlotRanges(asset: CookedAsset): MeshPropSlotRange[] {
     ? asset.slots.map((slot) => ({ start: slot.start, count: slot.count }))
     : [];
   if (asset.glass && asset.glass.count > 0) ranges.push({ start: asset.glass.start, count: asset.glass.count });
+  // DOOR LEAF (req_1864) rides as the LAST trailing slot so a painted door's leaf
+  // still renders (the slotted draw path only emits the base + each slot range).
+  // The loader treats this slot as the toggleable two-state panel (Phase 6).
+  if (asset.leaf && asset.leaf.count > 0) ranges.push({ start: asset.leaf.start, count: asset.leaf.count });
   return ranges;
 }
 
@@ -542,6 +546,9 @@ function pushPropGeometry(b: Build, prop: WorldProp): number {
         return textureId ? internMaterial(b, { kind: 'material', id: textureId }) : 0;
       });
       if (asset?.glass && asset.glass.count > 0) slotMaterials.push(internTranslucent(b, GLASS_OPACITY));
+      // The door leaf (req_1864) renders opaque via the prop's base atlas/tint
+      // (material ref 0) — aligned with the trailing leaf slot cookedMeshSlotRanges added.
+      if (asset?.leaf && asset.leaf.count > 0) slotMaterials.push(0);
       collectImportedMeshProp(b.meshProps, prop, mesh, slotMaterials.length ? slotMaterials : undefined);
     }
     return 0;
