@@ -150,6 +150,10 @@ export function useWorkspace<T>(args: WorkspaceArgs<T>): WorkspaceControls<T> {
   const autosaveSuppressedRef = useRef(true);
 
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // WORKSPACE-SWITCH GUARD (req_2008): the stem the autosave last captured FOR.
+  // When the stem changes (new/open/rename), the autosave must NOT serialize the
+  // outgoing workspace's still-mounted live state into the incoming file.
+  const lastSavedStemRef = useRef(stem);
 
   const history = useHistory<SessionEnvelope<T>>(workspaceHotHistoryKey(cartName, version));
 
@@ -210,7 +214,28 @@ export function useWorkspace<T>(args: WorkspaceArgs<T>): WorkspaceControls<T> {
   // a burst of edits only writes once after the user pauses.
   useEffect(() => {
     if (autosaveSuppressedRef.current) return;
+    // WORKSPACE-SWITCH GUARD (req_2008): on the run where the stem just changed
+    // (new / open / rename), the incoming workspace's content is still mounting,
+    // so snapshot() can read the OUTGOING workspace's live state (e.g. the paint
+    // canvas mid-remount) and serialize it into the INCOMING file — the "every new
+    // map is the same old map" bug (some new maps came out 420KB+ of the prior
+    // world). The switch path already wrote the correct file synchronously, so skip
+    // this capture (and drop any pending write); the next genuine edit, with the
+    // stem stable, autosaves cleanly.
+    if (lastSavedStemRef.current !== stem) {
+      lastSavedStemRef.current = stem;
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      return;
+    }
+    // HOTMIRROR-PROBE (req_1989, TEMP): this runs SYNCHRONOUSLY on every deps
+    // change (every edit), in the passive-effect flush (the host's appTick
+    // microtask drain). snapshot() → buildPayload() → serializeMap(whole map),
+    // then serializeEnvelope = JSON.stringify of the ENTIRE envelope incl every
+    // build piece. O(world) per edit. Time it to confirm it's the place-stall.
+    const _hm0 = (globalThis as any).performance?.now?.() ?? Date.now();
     writeHotEnvelope(cartName, version, snapshot());
+    const _hmMs = ((globalThis as any).performance?.now?.() ?? Date.now()) - _hm0;
+    if (_hmMs > 20) console.warn(`[hotmirror] ${cartName} per-edit full-state serialize+__hot_set took ${_hmMs.toFixed(1)}ms`);
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = setTimeout(() => {
       const env = snapshot();

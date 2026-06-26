@@ -617,6 +617,14 @@ function EditorShell() {
       compilingRef.current = false;
     }
   }, [previewWorld, logEvent, ws.stem]);
+  // NEWMAP-REBAKE (req_2010): the loader pane renders the baked hmsc.gamefile, which is
+  // map-independent — so a New Map (blank on disk, verified) still showed the OLD baked
+  // city until the next bake. New Map now re-bakes the now-empty world so the loader
+  // reloads blank, the same way the auto-compile keeps hmsc.gamefile == the current map.
+  // Via a ref so onNewMap (defined below) calls the LATEST closure (with the blank
+  // previewWorld) one tick later, after newMap()'s state has rendered.
+  const compileToGameRef = useRef(compileToGame);
+  compileToGameRef.current = compileToGame;
 
   // [LIVEHOST tier-2 req_1800] a DEBOUNCED settle bake the loader pane requests only when
   // an edit touched BAKED geometry (delete/move/rotate of a pre-baked piece) — the live
@@ -689,7 +697,14 @@ function EditorShell() {
   const goSettings = useCallback(() => { navStart('/workbench'); requestWorkbenchSource('settings'); nav.push('/workbench'); }, [nav]);
   const goAssist = useCallback(() => goRoute('/assist3d'), [goRoute]);
   const goCompiled = useCallback(() => goRoute('/compiled'), [goRoute]);
-  const onNewMap = useCallback(() => { setMenuOpen(false); newMap(); }, [newMap]);
+  const onNewMap = useCallback(() => {
+    setMenuOpen(false);
+    newMap();
+    // Re-bake the now-empty world so the loader pane drops the old baked city. Deferred
+    // so newMap()'s setState has rendered (previewWorld → blank) before compileToGameRef
+    // captures it. ~5s bake; the loader reloads blank when it lands (req_2010).
+    setTimeout(() => { void compileToGameRef.current(); }, 80);
+  }, [newMap]);
   // STEP10-COLLAPSE-0607: ASSETS and SETTINGS are both /workbench; the bench
   // reports its source FAMILY so the chrome lights the right door truthfully.
   const [wbFamily, setWbFamily] = useState<WorkbenchFamily>(currentWorkbenchFamily());
