@@ -410,6 +410,17 @@ function EditorShell() {
     if (gained) setTab('paint');
   }, [setTab]);
 
+  // PAINTSTABLE req_1949: the paint tools render ONLY the selected pieces, but they were fed the
+  // WHOLE buildPieces array — so every unrelated PLACE (a new array identity) re-rendered the
+  // memoized FacePainter (the skin grid), which was the bulk of the ~140ms per-edit shell render.
+  // Feed them a STABLE reference to the selected pieces instead: the sig is the selected pieces'
+  // content, so painting/moving a SELECTED piece still refreshes the panel, but placing elsewhere
+  // (selection unchanged or cleared) leaves the reference identical and the grid skips its render.
+  const paintTargetPieces = useMemo(() => buildPieces.filter((p) => isoSelectedIds.has(p.id)), [buildPieces, isoSelectedIds]);
+  const paintTargetSig = JSON.stringify(paintTargetPieces);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stablePaintPieces = useMemo(() => paintTargetPieces, [paintTargetSig]);
+
   // The iso build pane's WATER tab drops a body of water at a clicked ground
   // point: lower it to an ordinary water placement (cat 'water') at that world
   // position, so it persists, positions, renders, and bakes like everything else.
@@ -595,6 +606,9 @@ function EditorShell() {
 
   // Router nav lives in the persistent chrome shell.
   const nav = useNavigate();
+  // PAINTSTABLE req_1949: a stable callback so the memoized FacePainter isn't re-rendered by a
+  // fresh inline arrow on every place (requestWorkbenchSource is a module import — stable).
+  const openPainter = useCallback(() => { requestWorkbenchSource('paint'); nav.push('/workbench'); }, [nav]);
   const route = useRoute();
   // STEP10-COLLAPSE-0607: ASSETS and SETTINGS are both /workbench; the bench
   // reports its source FAMILY so the chrome lights the right door truthfully.
@@ -718,7 +732,7 @@ function EditorShell() {
               <>
                 {/* selected piece — fills the rail in 2D mode (the build tools below hide,
                     and the tile-paint tools live in the 2D map's own left rail). */}
-                <Box style={{ flexBasis: mapFocus === '3d' ? '13%' : 'auto', flexGrow: mapFocus === '3d' ? 0 : 1, flexShrink: 0, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+                <Box style={{ flexGrow: mapFocus === '3d' ? 2 : 1, flexBasis: 0, flexShrink: 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
                   <PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />
                 </Box>
                 {/* CONTEXTUAL (req_1890): the build tools (paint/skins + prop/piece) show only
@@ -726,12 +740,12 @@ function EditorShell() {
                     to the tile-paint tools, which currently ride the 2D map's own left rail. */}
                 {mapFocus === '3d' ? (
                   <>
-                    {/* paint / skins above, prop / piece below — roughly equal halves so
-                        neither menu is cramped (req_1929: "equally spaced, no dead space").
-                        The skin grid is a FITTED paged grid now, so it adapts to whatever
-                        height it gets instead of collapsing — the old 54% lion's share is
-                        no longer needed. */}
-                    <Box style={{ flexBasis: '45%', flexShrink: 0, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+                    {/* paint / skins above, prop / piece below — flexGrow WEIGHTS (not %
+                        flexBasis, which wasn't resolving → content-sized panes + a dead
+                        void at the bottom, req_1946). flexBasis:0 + weights divide the
+                        column so both fill it; the fitted grids then measure real height
+                        and show many tiles instead of three. */}
+                    <Box style={{ flexGrow: 5, flexBasis: 0, flexShrink: 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
                       <RightPanel
                         tab={tab}
                         onTab={setTab}
@@ -742,17 +756,18 @@ function EditorShell() {
                         activePlaceable={activePlaceable}
                         onArmPlaceable={armPlaceable}
                         onArmScatter={armScatter}
-                        paintPieces={buildPieces}
+                        paintPieces={stablePaintPieces}
                         paintSelectedIds={isoSelectedIds}
                         armed={armed}
                         armedDraft={armedDraft}
                         onArmedDraftChange={setArmedDraft}
                         onPaintCommit={commitBuildEvents}
-                        onOpenPainter={() => { requestWorkbenchSource('paint'); nav.push('/workbench'); }}
+                        onOpenPainter={openPainter}
                       />
                     </Box>
-                    {/* prop / piece menu — OFF the map, in the rail (req_1888) */}
-                    <Box style={{ flexGrow: 1, minHeight: 0 }}>
+                    {/* prop / piece menu — OFF the map, in the rail (req_1888). Heaviest
+                        weight so the prop/piece grid gets the most room (req_1946). */}
+                    <Box style={{ flexGrow: 6, flexBasis: 0, minHeight: 0 }}>
                       <CatalogRail armed={armed} onArm={armCatalog} prefabs={buildingPrefabs} />
                     </Box>
                   </>
