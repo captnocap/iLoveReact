@@ -94,6 +94,9 @@ function Pane(props: { label: string; children?: React.ReactNode }) {
 // the heavy canvas — its props are stable between strokes; it remounts only when
 // the map key changes (open / new).
 const MemoPaintCanvas = memo(PaintCanvas);
+// PLACEPERF req_2001: a single stable empty array the gated dashboard census memos
+// return while editing — so a skipped census doesn't even allocate a fresh [].
+const EMPTY_DASH: any[] = [];
 
 // PANELSKIP req_1958: the right rail's always-visible panels (selected-item details + the
 // paint/prop tools) don't depend on the piece you place — memoize them so a placement re-renders
@@ -101,6 +104,12 @@ const MemoPaintCanvas = memo(PaintCanvas);
 // callbacks from hooks, shownFocus/paintPieces memoized) so the shallow compare actually skips.
 const PropertiesPanel = memo(PropertiesPanelImpl);
 const RightPanel = memo(RightPanelImpl);
+// MINIMAL_REPRO (req_1980, TEMP): bisect the place latency. When true, gate off
+// every editor surface EXCEPT the catalog rail (to pick a floor) and the loader
+// map pane (to place it) — no Chrome, no PropertiesPanel, no RightPanel, no 2D
+// paint canvas. If a place's `appTick` clears with these gone, the ~262ms was a
+// panel re-render (React); if it stays, the cost is the loader/host data path.
+const MINIMAL_REPRO = false;
 // CHROMESTABLE req_1971: the shell bar re-rendered on every place (it isn't keyed to the pieces).
 // Memoize it; its callbacks are stabilized at the call site so a place leaves its props identical.
 const Chrome = memo(ChromeImpl);
@@ -342,6 +351,12 @@ function EditorShell() {
     buildPiecesRef, reconcileBuildUndoRef,
   });
   const { buildingPrefabs, buildPieces, buildingInstances, buildFootprints, commitBuildEvent, commitBuildEvents } = build;
+  // PLACEPERF req_2001: the dashboard census memos below are O(world) and recompute on
+  // every edit, but ONLY feed DashboardRoute (mounted at '/'). While editing (/editor)
+  // they're pure garbage — a full re-sort of the cabinet for a screen you can't see.
+  // Hoist the route here so they can gate on it. (atEditor/the later atDashboard reuse this.)
+  const route = useRoute();
+  const atDashboard = route.path === '/';
 
   // req_1943: inject the STAGED skin into a piecePlaced placement so a held item
   // dropped after being skinned lands already-dressed. ONE seam at the commit
@@ -359,18 +374,20 @@ function EditorShell() {
   // The / dashboard's footprint census reads every placement + building footprint
   // (both carry footW/footD). Cheap; rebuilt only when either set changes.
   const dashFootprints = useMemo(
-    () => [...placements, ...buildFootprints],
-    [placements, buildFootprints],
+    () => (atDashboard ? [...placements, ...buildFootprints] : EMPTY_DASH),
+    [placements, buildFootprints, atDashboard],
   );
   // The dashboard's "most placed" census: every placed prop/building's display
   // label (buildings via their footprint group label). Cheap; recomputed only
   // when either set changes.
   const dashPlacedLabels = useMemo(
-    () => [...placements.map((p) => p.label), ...buildFootprints.map((f) => f.label)],
-    [placements, buildFootprints],
+    () => (atDashboard ? [...placements.map((p) => p.label), ...buildFootprints.map((f) => f.label)] : EMPTY_DASH),
+    [placements, buildFootprints, atDashboard],
   );
   const dashBuildPeaks = useMemo(() => {
-    if (!buildPieces.length || !buildFootprints.length) return [];
+    // PLACEPERF req_2001: skip the O(world) Map + per-piece bounds() unless the dashboard
+    // is actually showing — the heaviest of the three census memos, and invisible while editing.
+    if (!atDashboard || !buildPieces.length || !buildFootprints.length) return EMPTY_DASH;
     const byId = new Map(buildPieces.map((piece) => [piece.id, piece]));
     return buildFootprints.map((fp) => {
       let minY = Infinity;
@@ -397,7 +414,7 @@ function EditorShell() {
         pieces: count,
       };
     }).filter((peak) => peak.pieces > 0);
-  }, [buildPieces, buildFootprints]);
+  }, [buildPieces, buildFootprints, atDashboard]);
 
   // [LOADERVIEW req_1757] content centroid to seed the loader pane's iso camera so it
   // opens looking at what's built (the loader can't read the gamefile's center from JS).
@@ -481,11 +498,17 @@ function EditorShell() {
     }
     return { focus: { kind: 'piece', id: a.id } };
   }, [armed, armedDraft]);
+  // The focus IS whatever you're working with, in priority order (req_1983: "why
+  // would the focus show not the item i have in focus"). A HELD item wins outright —
+  // you armed it, it's the active thing — over any lingering tile/place selection;
+  // then a tile selection, then a place-layer selection, then the tile brush as the
+  // tile-paint default. No held item ever falls through to showing an unrelated tile.
   // PANELSKIP req_1958: stable identity so a place (which changes none of these) doesn't hand
   // PropertiesPanel a fresh `focus` object and defeat its memo.
-  const shownFocus: Focus = useMemo(() => (selCells.length
-    ? { kind: 'tiles', cells: selCells }
-    : (placeFocus?.focus ?? armedFocus?.focus ?? { kind: 'tile', tile })), [selCells, placeFocus?.focus, armedFocus?.focus, tile]);
+  const shownFocus: Focus = useMemo(() => (
+    armedFocus?.focus
+    ?? (selCells.length ? { kind: 'tiles', cells: selCells } : (placeFocus?.focus ?? { kind: 'tile', tile }))
+  ), [armedFocus?.focus, selCells, placeFocus?.focus, tile]);
 
   // GLOBAL per-kind part textures (authored in the right-rail Objects inspector).
   // Subscribed so the preview rebuilds when a kind is re-skinned; folded into each
@@ -533,7 +556,9 @@ function EditorShell() {
   const previewWorld = useMemo<GameState>(() => (
     { ...placementWorld, world: { ...placementWorld.world, landforms, waterBodies: [...floorsWater, ...(placementWorld.world.waterBodies ?? [])] } }
   ), [placementWorld, landforms, floorsWater]);
-  const focusWorld = placeFocus?.world ?? armedFocus?.world ?? previewWorld;
+  // Match shownFocus precedence: the held item's preview world wins so its focus
+  // resolves against the right world (a held prop's dressed preview).
+  const focusWorld = armedFocus?.world ?? placeFocus?.world ?? previewWorld;
 
   // Compile = persist the authored world (the SAME GameState the preview shows:
   // painted terrain as heightfield landforms + placements) to the game's boot key
@@ -665,7 +690,6 @@ function EditorShell() {
   const goAssist = useCallback(() => goRoute('/assist3d'), [goRoute]);
   const goCompiled = useCallback(() => goRoute('/compiled'), [goRoute]);
   const onNewMap = useCallback(() => { setMenuOpen(false); newMap(); }, [newMap]);
-  const route = useRoute();
   // STEP10-COLLAPSE-0607: ASSETS and SETTINGS are both /workbench; the bench
   // reports its source FAMILY so the chrome lights the right door truthfully.
   const [wbFamily, setWbFamily] = useState<WorkbenchFamily>(currentWorkbenchFamily());
@@ -674,7 +698,6 @@ function EditorShell() {
   // lands on a screen that paints in one frame instead of the full world load.
   const activeRoute = route.path === '/workbench' ? (wbFamily === 'settings' ? 'workbench-settings' : 'workbench-assets') : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : route.path === '/compiled' ? 'compiled' : route.path === '/editor' ? 'editor' : 'dashboard';
   const atEditor = activeRoute === 'editor';
-  const atDashboard = route.path === '/';
   // Route nav timing (req_1637): a route button calls navStart(path) on click; this
   // effect fires after the new route's surface first renders, logging click→first-
   // render and arming a settle watch for the fully-loaded number.
@@ -742,7 +765,7 @@ function EditorShell() {
   (globalThis as any).__shellBodyEnd = (globalThis as any).performance?.now?.() ?? Date.now();
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', position: 'relative', backgroundColor: '#080d16' }}>
-      <Chrome
+      {MINIMAL_REPRO ? null : <Chrome
         mapName={ws.stem}
         activeRoute={activeRoute}
         menuOpen={menuOpen}
@@ -767,7 +790,7 @@ function EditorShell() {
         onCompile={compileToGame}
         compileState={compileState}
         compileStatus={compileStatus}
-      />
+      />}
       <Box style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}>
         {/* / = the light dashboard (req_1872): paints instantly, no 3D/world load.
             The editor's heavy panes are gated to /editor below, so boot lands
@@ -792,9 +815,9 @@ function EditorShell() {
               <>
                 {/* selected piece — fills the rail in 2D mode (the build tools below hide,
                     and the tile-paint tools live in the 2D map's own left rail). */}
-                <Box style={{ flexGrow: mapFocus === '3d' ? 2 : 1, flexBasis: 0, flexShrink: 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+                {MINIMAL_REPRO ? null : <Box style={{ flexGrow: mapFocus === '3d' ? 2 : 1, flexBasis: 0, flexShrink: 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
                   <PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />
-                </Box>
+                </Box>}
                 {/* CONTEXTUAL (req_1890): the build tools (paint/skins + prop/piece) show only
                     when the 3D build map is up. When the 2D tile map is pulled up they give way
                     to the tile-paint tools, which currently ride the 2D map's own left rail. */}
@@ -805,7 +828,7 @@ function EditorShell() {
                         void at the bottom, req_1946). flexBasis:0 + weights divide the
                         column so both fill it; the fitted grids then measure real height
                         and show many tiles instead of three. */}
-                    <Box style={{ flexGrow: 5, flexBasis: 0, flexShrink: 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+                    {MINIMAL_REPRO ? null : <Box style={{ flexGrow: 5, flexBasis: 0, flexShrink: 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
                       <RightPanel
                         paintPieces={stablePaintPieces}
                         paintSelectedIds={isoSelectedIds}
@@ -815,7 +838,7 @@ function EditorShell() {
                         onPaintCommit={commitBuildEvents}
                         onOpenPainter={openPainter}
                       />
-                    </Box>
+                    </Box>}
                     {/* prop / piece menu — OFF the map, in the rail (req_1888). Heaviest
                         weight so the prop/piece grid gets the most room (req_1946). */}
                     <Box style={{ flexGrow: 6, flexBasis: 0, minHeight: 0 }}>
@@ -826,7 +849,7 @@ function EditorShell() {
               </>
             }
             map2d={
-              <MemoPaintCanvas
+              MINIMAL_REPRO ? null : <MemoPaintCanvas
                 key={`${ws.stem}#${worldEpoch}`}
                 initialWorld={seedWorld}
                 initialView={seedView}
