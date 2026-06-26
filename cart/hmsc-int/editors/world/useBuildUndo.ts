@@ -9,8 +9,9 @@
 // to carry are gone: commitMany IS the RouteSession contract
 // (editors/sessions.ts:117) — call it like one.
 
-import { useCallback, useMemo, useState, type MutableRefObject } from 'react';
+import { useCallback, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { StreamHandle } from '../../data';
+import { appendProbe, resetAppendProbe } from '../../data';
 import type { RouteSession } from '../sessions';
 import {
   GAME_BUILD, pieceMutationMapName, piecesForMap,
@@ -20,6 +21,18 @@ import {
   type PlacedBuildPiece, type WorldEvent, type WorldStreamState,
 } from '../../game';
 import { mapBuildFootprints } from '../../mapBuildPlacements';
+
+// STOREPROBE (req_1984, TEMP): one line per place naming the SQLite store cost.
+//   undoSnap = snapshotForUndo() (reads/serializes pre-edit state for Ctrl+Z)
+//   commit   = worldSession.commit() wall time (append + any synchronous flush)
+//   append breakdown (appendProbe, ms): seq SELECT MAX, JSON.stringify, INSERT, in-memory fold
+function logStoreProbe(t0: number, tCommit: number, tEnd: number): void {
+  const f = (n: number) => n.toFixed(1);
+  console.warn(
+    `[store-probe] place total=${f(tEnd - t0)}ms = undoSnap ${f(tCommit - t0)} + commit ${f(tEnd - tCommit)} ` +
+      `| append(n=${appendProbe.count}): seq ${f(appendProbe.seqMs)} json ${f(appendProbe.jsonMs)} insert ${f(appendProbe.insertMs)} fold ${f(appendProbe.foldMs)}`,
+  );
+}
 
 // A build piece's VALUE identity (everything but its stream-minted id), so undo can
 // reconcile by value: replaying history mints fresh ids, so the snapshot's pieces never
@@ -89,6 +102,13 @@ export function useBuildUndo(opts: {
   /** filled each render so applyPayload (empty-dep, ref-driven) can revert
    *  build edits on Ctrl+Z without a circular dep */
   reconcileBuildUndoRef: MutableRefObject<(target: PlacedBuildPiece[] | undefined, reason?: 'restore' | 'history') => void>;
+  /** PLACEPERF req_2012: only the dashboard census and the 2D map canvas read
+   *  footprints; while you build in the 3D loader (its only consumer is the
+   *  frozen PiP) the grouping is pure O(world) garbage per place. false ⇒ skip
+   *  the census and return the last set, so the place memo it feeds also stays
+   *  identity-stable. Defaults to computing (callers that don't pass it keep the
+   *  old always-on behavior). */
+  needFootprints?: boolean;
 }): BuildUndoApi {
   const { worldChannel, buildingsChannel, worldSession, buildingsSession, stem, legacyPieceMapName, snapshotForUndo } = opts;
   // Revision tick: forces the consumer to re-read channel state after a commit.
@@ -127,7 +147,21 @@ export function useBuildUndo(opts: {
   );
   const buildingInstances = useMemo(() => instancesForMap(buildingsState, stem), [buildingsState, stem]);
   opts.buildPiecesRef.current = buildPieces; // feed the current pieces into buildPayload's snapshot
-  const buildFootprints = mapBuildFootprints(buildPieces);
+  // PLACEPERF req_2012: the footprint census walks connectivity over the whole
+  // world (O(world), ~30ms+ and climbing per place). Its only consumers are the
+  // dashboard and the 2D map canvas; while you build in the 3D loader neither is
+  // live (the canvas is the frozen PiP), so the grouping is pure waste per place.
+  // Compute it once on mount (so the PiP shows the loaded map's buildings on boot)
+  // and whenever a consumer actually needs it; otherwise hold the last set, which
+  // ALSO keeps the place memo it feeds identity-stable. The recompute on the swap-
+  // to-2D render makes the canvas current again.
+  const lastFootprintsRef = useRef<ReturnType<typeof mapBuildFootprints>>([]);
+  const footprintsSeededRef = useRef(false);
+  if (opts.needFootprints !== false || !footprintsSeededRef.current) {
+    footprintsSeededRef.current = true;
+    lastFootprintsRef.current = mapBuildFootprints(buildPieces);
+  }
+  const buildFootprints = lastFootprintsRef.current;
 
   // Tag a build event with the map it belongs to (places/stamps go to the active
   // stem; removes/edits resolve the owning map from the existing piece). Shared by the
@@ -167,14 +201,25 @@ export function useBuildUndo(opts: {
 
   const commitBuildEvent = useCallback((event: BuildEditEvent, label: string) => {
     const scoped = scopeBuildEvent(event);
+    // STOREPROBE (req_1984, TEMP): a straight log of the SQLite store read/write a
+    // single place actually pays — the undo snapshot (a store read/serialize), and
+    // the append's seq SELECT + JSON + INSERT + in-memory fold (appendProbe). Tells
+    // us, with NUMBERS, whether the per-place cost is the store, not a guess.
+    const _now = () => (globalThis as any).performance?.now?.() ?? Date.now();
+    const _t0 = _now();
+    resetAppendProbe();
     if (isBuildingsEvent(scoped)) {
       if (!buildingsSession) return false;
       snapshotForUndo();
+      const _tCommit = _now();
       buildingsSession.commit(scoped, label);
+      logStoreProbe(_t0, _tCommit, _now());
     } else {
       if (!worldSession) return false;
       snapshotForUndo(); // record the pre-edit state so Ctrl+Z reverts this build edit
+      const _tCommit = _now();
       worldSession.commit(scoped as WorldEvent, label);
+      logStoreProbe(_t0, _tCommit, _now());
     }
     setMapBuildRev((r) => r + 1);
     return true;

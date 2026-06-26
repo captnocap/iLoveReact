@@ -344,19 +344,24 @@ function EditorShell() {
     logEvent(note, now);
   }, [logEvent]);
 
+  // PLACEPERF req_2001/req_2012: the dashboard census memos below are O(world) and
+  // recompute on every edit, but ONLY feed DashboardRoute (mounted at '/'). While
+  // editing (/editor) they're pure garbage — a full re-sort of the cabinet for a
+  // screen you can't see. Hoist the route here so they (and the build hook's
+  // footprint census) can gate on it. (atEditor/the later atDashboard reuse this.)
+  const route = useRoute();
+  const atDashboard = route.path === '/';
+
   // ── Build streams: commits + the Ctrl+Z reconciler (editors/world/useBuildUndo) ──
   const build = useBuildUndo({
     worldChannel, buildingsChannel, worldSession, buildingsSession,
     stem: ws.stem, legacyPieceMapName, snapshotForUndo,
     buildPiecesRef, reconcileBuildUndoRef,
+    // The footprint census only feeds the dashboard + the 2D map canvas; skip it
+    // while you build in the 3D loader (the canvas is the frozen PiP then).
+    needFootprints: atDashboard || mapFocus === '2d',
   });
   const { buildingPrefabs, buildPieces, buildingInstances, buildFootprints, commitBuildEvent, commitBuildEvents } = build;
-  // PLACEPERF req_2001: the dashboard census memos below are O(world) and recompute on
-  // every edit, but ONLY feed DashboardRoute (mounted at '/'). While editing (/editor)
-  // they're pure garbage — a full re-sort of the cabinet for a screen you can't see.
-  // Hoist the route here so they can gate on it. (atEditor/the later atDashboard reuse this.)
-  const route = useRoute();
-  const atDashboard = route.path === '/';
 
   // req_1943: inject the STAGED skin into a piecePlaced placement so a held item
   // dropped after being skinned lands already-dressed. ONE seam at the commit
