@@ -97,6 +97,15 @@ export function useBuildUndo(opts: {
 
   const streamState: WorldStreamState | null = worldChannel ? worldChannel.state() : null;
   const buildingsState: BuildingsStreamState | null = buildingsChannel ? buildingsChannel.state() : null;
+  // MEMOSTABLE req_1971: scopeBuildEvent reads the CURRENT state via refs, not deps — so the commit
+  // callbacks keep a STABLE identity across commits. Their deps used to include streamState/
+  // buildingsState (which change every commit), giving onCommit/onPaintCommit a fresh identity each
+  // place and re-rendering every panel that takes them (RightPanel, etc.). A place doesn't change
+  // stem, so the callbacks are now stable.
+  const streamStateRef = useRef(streamState);
+  streamStateRef.current = streamState;
+  const buildingsStateRef = useRef(buildingsState);
+  buildingsStateRef.current = buildingsState;
 
   // PANELSKIP req_1965: MEMOIZE on the prefab-relevant state only. This was an IIFE producing a
   // NEW array every render — fed to BOTH RightPanel and CatalogRail, it silently defeated their
@@ -138,7 +147,7 @@ export function useBuildUndo(opts: {
       // like skin/part — it MUST carry the owning map's name or the reducer looks
       // in the wrong piece bucket and the edit silently no-ops (req_0898).
       case 'pieceTextSet': {
-        const mapName = pieceMutationMapName(streamState, stem, legacyPieceMapName, event.id);
+        const mapName = pieceMutationMapName(streamStateRef.current, stem, legacyPieceMapName, event.id);
         return mapName ? ({ ...event, mapName } as WorldEvent) : event;
       }
       // buildings (req_0513): instances are per-map; defs are shared globals
@@ -147,13 +156,14 @@ export function useBuildUndo(opts: {
         return { ...event, mapName: stem } as BuildingsEvent;
       case 'buildingMoved':
       case 'buildingRemoved': {
-        const mapName = buildingMutationMapName(buildingsState, stem, event.id);
+        const mapName = buildingMutationMapName(buildingsStateRef.current, stem, event.id);
         return mapName ? ({ ...event, mapName } as BuildingsEvent) : event;
       }
       default:
         return event;
     }
-  }, [stem, streamState, buildingsState, legacyPieceMapName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- state read via refs above (stable identity)
+  }, [stem, legacyPieceMapName]);
 
   const commitBuildEvent = useCallback((event: BuildEditEvent, label: string) => {
     const scoped = scopeBuildEvent(event);

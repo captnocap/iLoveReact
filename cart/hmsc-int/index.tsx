@@ -16,7 +16,7 @@ import { RightPanel as RightPanelImpl } from './RightPanel';
 import type { SkinDraft } from './editors/build/FacePainter';
 import { buildObjectWorld } from './objectPreview';
 import { useKindTextures, kindTexturesFor } from './kindTextures';
-import { Chrome, MapsMenu, EventLog } from './shell/chrome';
+import { Chrome as ChromeImpl, MapsMenu, EventLog } from './shell/chrome';
 import { DashboardRoute } from './shell/DashboardRoute';
 import { EditorLayout } from './shell/EditorLayout';
 import { NotificationOverlayHost } from './shell/notifications';
@@ -101,6 +101,9 @@ const MemoPaintCanvas = memo(PaintCanvas);
 // callbacks from hooks, shownFocus/paintPieces memoized) so the shallow compare actually skips.
 const PropertiesPanel = memo(PropertiesPanelImpl);
 const RightPanel = memo(RightPanelImpl);
+// CHROMESTABLE req_1971: the shell bar re-rendered on every place (it isn't keyed to the pieces).
+// Memoize it; its callbacks are stabilized at the call site so a place leaves its props identical.
+const Chrome = memo(ChromeImpl);
 
 // The cart's router: the editor at "/", the in-app churn-log viewer at "/log",
 // and the assistant-authored 3D route at "/assist3d". `hotKey` persists the
@@ -622,6 +625,17 @@ function EditorShell() {
   // PAINTSTABLE req_1949: a stable callback so the memoized FacePainter isn't re-rendered by a
   // fresh inline arrow on every place (requestWorkbenchSource is a module import — stable).
   const openPainter = useCallback(() => { requestWorkbenchSource('paint'); nav.push('/workbench'); }, [nav]);
+  // CHROMESTABLE req_1971: stable nav callbacks so the (memoized) shell bar isn't re-rendered by a
+  // fresh inline arrow on every place. navStart/requestWorkbenchSource are module imports (stable).
+  const goRoute = useCallback((path: string) => { navStart(path); nav.push(path); }, [nav]);
+  const goHome = useCallback(() => goRoute('/'), [goRoute]);
+  const goEditor = useCallback(() => goRoute('/editor'), [goRoute]);
+  const goLabs = useCallback(() => goRoute('/labs'), [goRoute]);
+  const goWorkbench = useCallback(() => goRoute('/workbench'), [goRoute]);
+  const goSettings = useCallback(() => { navStart('/workbench'); requestWorkbenchSource('settings'); nav.push('/workbench'); }, [nav]);
+  const goAssist = useCallback(() => goRoute('/assist3d'), [goRoute]);
+  const goCompiled = useCallback(() => goRoute('/compiled'), [goRoute]);
+  const onNewMap = useCallback(() => { setMenuOpen(false); newMap(); }, [newMap]);
   const route = useRoute();
   // STEP10-COLLAPSE-0607: ASSETS and SETTINGS are both /workbench; the bench
   // reports its source FAMILY so the chrome lights the right door truthfully.
@@ -709,16 +723,16 @@ function EditorShell() {
         canRedo={ws.canRedo}
         onToggleMenu={toggleMenu}
         onToggleLog={toggleLog}
-        onNew={() => { setMenuOpen(false); newMap(); }}
+        onNew={onNewMap}
         onProbeDump={dumpTransfer}
         probeMsg={dumpMsg}
-        onHome={() => { navStart('/'); nav.push('/'); }}
-        onEditor={() => { navStart('/editor'); nav.push('/editor'); }}
-        onLabs={() => { navStart('/labs'); nav.push('/labs'); }}
-        onWorkbench={() => { navStart('/workbench'); nav.push('/workbench'); }}
-        onSettings={() => { navStart('/workbench'); requestWorkbenchSource('settings'); nav.push('/workbench'); }}
-        onAssist={() => { navStart('/assist3d'); nav.push('/assist3d'); }}
-        onCompiled={() => { navStart('/compiled'); nav.push('/compiled'); }}
+        onHome={goHome}
+        onEditor={goEditor}
+        onLabs={goLabs}
+        onWorkbench={goWorkbench}
+        onSettings={goSettings}
+        onAssist={goAssist}
+        onCompiled={goCompiled}
         onUndo={ws.undo}
         onRedo={ws.redo}
         onCompile={compileToGame}
