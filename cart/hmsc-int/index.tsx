@@ -114,6 +114,10 @@ export default function HmscWorldEditorCart() {
 }
 
 function EditorShell() {
+  // req_1965 diag: stamp this render's start. The edit-latency line splits `shell` into the
+  // EditorShell BODY (this function's own hooks/derives + element creation) vs the CHILDREN
+  // rendered before the loader pane — so we know if the remaining cost is the panels or here.
+  (globalThis as any).__shellBodyStart = (globalThis as any).performance?.now?.() ?? Date.now();
   // Boot phase: React reached the cart's root component and is mounting (only the
   // first render — re-renders during boot don't re-stamp).
   const bootMarked = useRef(false);
@@ -706,6 +710,8 @@ function EditorShell() {
     try { (g.__hostLog)?.(0, `[transfer-dump] ${MB(grand)} total (flush ${MB(flush.totalBytes)} + store ${MB(store.totalBytes)}) -> ${path}`); } catch {}
   }, []);
 
+  // req_1965 diag: body done — the rest of `shell` is the children rendered before the loader pane.
+  (globalThis as any).__shellBodyEnd = (globalThis as any).performance?.now?.() ?? Date.now();
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', position: 'relative', backgroundColor: '#080d16' }}>
       <Chrome

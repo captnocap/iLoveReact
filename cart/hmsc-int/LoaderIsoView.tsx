@@ -809,7 +809,14 @@ export function LoaderIsoView(props: {
         const rStart = Number(g.__loaderRenderStart ?? 0);
         const beforeLoader = rStart > 0 ? Math.max(0, rStart - t) : 0;
         const loaderOnward = rStart > 0 ? Math.max(0, tEffect - rStart) : 0;
-        const preSplit = ` [commit ${csMs.toFixed(0)} + rerender ${Math.max(0, pre - csMs).toFixed(0)} (shell ${beforeLoader.toFixed(0)} + loaderPane ${loaderOnward.toFixed(0)})${pw}]`;
+        // req_1965: split `shell` further — EditorShell's own body (its hooks/derives + element
+        // creation) vs the CHILD panels rendered before the loader pane. Tells us whether the
+        // remaining cost is the panels (memoize/stabilize) or the parent body (trim its derives).
+        const bEnd = Number(g.__shellBodyEnd ?? 0), bStart = Number(g.__shellBodyStart ?? 0);
+        const shellBody = bEnd > 0 && bStart > 0 ? Math.max(0, bEnd - bStart) : 0;
+        const shellKids = bEnd > 0 && rStart > 0 ? Math.max(0, rStart - bEnd) : 0;
+        const shellSplit = bEnd > 0 ? ` {body ${shellBody.toFixed(0)} + kids ${shellKids.toFixed(0)}}` : '';
+        const preSplit = ` [commit ${csMs.toFixed(0)} + rerender ${Math.max(0, pre - csMs).toFixed(0)} (shell ${beforeLoader.toFixed(0)}${shellSplit} + loaderPane ${loaderOnward.toFixed(0)})${pw}]`;
         console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)}${preSplit} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}${hostLine}`);
       });
     }
