@@ -1,22 +1,17 @@
 // shell/DashboardRoute.tsx — the / landing surface (req_1872/1875). NOT the
-// editor: a light, encouraging "glad you opened it" readout that paints in one
-// frame while the map warms in the background. The heavy editor (the quad panes +
-// the native world load) lives on /editor now; this screen mounts nothing 3D.
+// editor: a light, selected-map readout that paints in one frame while the map
+// warms in the background. The heavy editor (the quad panes + the native world
+// load) lives on /editor now; this screen mounts nothing 3D.
 //
-// FREEZE LAW (req_1872): the asset geometry census walks the global asset stores,
-// so it runs in a deferred effect (a skeleton shows first, the numbers stream in)
-// — the window can never block on it, no matter how big the library grows. The map
-// footprint is cheap (array lengths) and reactive to the floors/placements that
-// stream in as the workspace restores, so it fills in live.
+// FREEZE LAW (req_1872): every number on this route is derived from the selected
+// map props already streamed into the shell. No global store walks here: those
+// belong on a library/workbench surface, not a page headed by a map name.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Box, Text, Pressable } from '@reactjit/primitives';
 import { accentFor } from '../studio.cls';
-import { reportAssetGeometry, type GeometryReport } from '../editors/model/geometryReport';
 import { reportMapFootprint, type FootprintLike } from '../mapReport';
 import { reportPlacementCensus } from '../placementStats';
-import { reportTextureCensus, type TextureCensus } from '../editors/model/textureStats';
-import { reportMaterialCensus, type MaterialCensus } from '../editors/materials/materialStats';
 import type { ChunkFloor } from '../chunkFloor';
 
 // ── tiny formatters (no ICU — the embedded V8 may lack toLocaleString) ──────────
@@ -76,20 +71,6 @@ export function DashboardRoute(props: {
   onOpenEditor: () => void;
   onCompiled: () => void;
 }) {
-  // The store-reading censuses (geometry + textures) are DEFERRED so the screen
-  // paints first (freeze law) — a skeleton shows, then the numbers stream in.
-  const [geo, setGeo] = useState<GeometryReport | null>(null);
-  const [tex, setTex] = useState<TextureCensus | null>(null);
-  const [mat, setMat] = useState<MaterialCensus | null>(null);
-  useEffect(() => {
-    const t = setTimeout(() => {
-      try { setGeo(reportAssetGeometry()); } catch { /* headless / no store */ }
-      try { setTex(reportTextureCensus()); } catch { /* headless / no store */ }
-      try { setMat(reportMaterialCensus()); } catch { /* headless / no store */ }
-    }, 0);
-    return () => clearTimeout(t);
-  }, []);
-
   // Map footprint + most-placed — cheap, reactive to what streams in as the
   // workspace restores.
   const map = useMemo(
@@ -98,9 +79,8 @@ export function DashboardRoute(props: {
   );
   const placed = useMemo(() => reportPlacementCensus(props.placedLabels), [props.placedLabels]);
 
-  const counting = geo === null;
-  const g = geo ?? { total: { triangles: 0, vertices: 0, edges: 0 }, cookedAssetCount: 0, studioModelCount: 0 } as GeometryReport;
   const hasWorld = map.chunks > 0;
+  const builtArea = Math.min(map.assetAreaM2, map.groundAreaM2);
 
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#070c14', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
@@ -123,14 +103,14 @@ export function DashboardRoute(props: {
         {/* The two readouts */}
         <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
 
-          <Panel title={counting ? 'GEOMETRY · counting…' : 'GEOMETRY · ALL ASSETS'}>
+          <Panel title="MAP · AUTHORED DATA">
             <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 24 }}>
-              <Figure value={counting ? '—' : commas(g.total.triangles)} label="TRIANGLES" accent="#7dd3fc" />
-              <Figure value={counting ? '—' : commas(g.total.vertices)} label="VERTICES" accent="#a5b4fc" />
-              <Figure value={counting ? '—' : commas(g.total.edges)} label="EDGES" accent="#c4b5fd" />
+              <Figure value={commas(map.chunks)} label="CHUNKS" accent="#7dd3fc" />
+              <Figure value={commas(placed.total)} label="PLACED" accent="#a5b4fc" />
+              <Figure value={commas(placed.unique)} label="KINDS" accent="#c4b5fd" />
             </Box>
             <Text fontSize={11} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
-              {counting ? 'measuring your library…' : `across ${commas(g.cookedAssetCount)} cooked asset${g.cookedAssetCount === 1 ? '' : 's'} · ${commas(g.studioModelCount)} studio model${g.studioModelCount === 1 ? '' : 's'}`}
+              selected map only · {hasWorld ? `${area(map.groundAreaM2)} painted ground` : 'no painted ground yet'}
             </Text>
           </Panel>
 
@@ -146,19 +126,36 @@ export function DashboardRoute(props: {
                     ≈ {map.landmark.ratio < 10 ? map.landmark.ratio.toFixed(2) : commas(map.landmark.ratio)}× {map.landmark.name}
                   </Text>
                 ) : null}
-                {/* built vs open */}
+                <Text fontSize={11} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
+                  {area(map.extentAreaM2)} bounding box · {(map.paintedFraction * 100).toFixed(1)}% painted
+                </Text>
+              </Box>
+            ) : (
+              <Text fontSize={12} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
+                paint some ground and your world will grow here.
+              </Text>
+            )}
+          </Panel>
+
+          <Panel title="GROUND · COVERAGE">
+            {hasWorld ? (
+              <Box style={{ flexDirection: 'column', gap: 14 }}>
+                <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 24 }}>
+                  <Figure value={area(builtArea)} label="BUILT FOOTPRINT" accent="#f0abfc" />
+                  <Figure value={area(map.openAreaM2)} label="OPEN GROUND" accent="#67e8f9" />
+                </Box>
                 <Box style={{ flexDirection: 'column', gap: 6 }}>
                   <Box style={{ height: 10, borderRadius: 5, backgroundColor: '#13203a', overflow: 'hidden', flexDirection: 'row' }}>
                     <Box style={{ width: `${Math.round(map.coverageFraction * 100)}%`, height: '100%', backgroundColor: '#34d399' }} />
                   </Box>
                   <Text fontSize={11} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
-                    {(map.coverageFraction * 100).toFixed(1)}% built · {area(map.openAreaM2)} open
+                    {(map.coverageFraction * 100).toFixed(1)}% built · {commas(map.assetCount)} footprint{map.assetCount === 1 ? '' : 's'} counted
                   </Text>
                 </Box>
               </Box>
             ) : (
               <Text fontSize={12} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
-                paint some ground and your world will grow here.
+                paint some ground before coverage has meaning.
               </Text>
             )}
           </Panel>
@@ -183,26 +180,6 @@ export function DashboardRoute(props: {
                 place props and buildings to see your favourites.
               </Text>
             )}
-          </Panel>
-
-          <Panel title={tex === null ? 'TEXTURES · counting…' : 'TEXTURES'}>
-            <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 24 }}>
-              <Figure value={tex === null ? '—' : commas(tex.textures)} label="TEXTURES" accent="#f0abfc" />
-              <Figure value={tex === null ? '—' : (tex.pixels >= 1_000_000 ? `${(tex.pixels / 1_000_000).toFixed(1)}M` : commas(tex.pixels))} label="PIXELS" accent="#67e8f9" />
-            </Box>
-            <Text fontSize={11} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
-              {tex === null ? 'reading texture headers…' : tex.unsized > 0 ? `${commas(tex.unsized)} unsized (header unread)` : 'every texture measured'}
-            </Text>
-          </Panel>
-
-          <Panel title={mat === null ? 'MATERIALS · counting…' : 'MATERIALS · SHADERS'}>
-            <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 24 }}>
-              <Figure value={mat === null ? '—' : commas(mat.authored)} label="MATERIALIZED" accent="#fda4af" />
-              <Figure value={mat === null ? '—' : commas(mat.builtinShaders)} label="SHADER RECIPES" accent="#fbbf24" />
-            </Box>
-            <Text fontSize={11} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>
-              {mat === null ? 'reading the material catalog…' : `${commas(mat.shaderBased)} shader · ${commas(mat.decalBased)} decal authored`}
-            </Text>
           </Panel>
         </Box>
 
