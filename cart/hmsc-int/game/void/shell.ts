@@ -13,6 +13,47 @@
 
 import { voidHash } from './distortion';
 import { distanceOutsideCore, pointInCore, type WorldCore } from './distance';
+import type { EdgeProfile, RoadExit } from './edges';
+import { EMPTY_EDGE_PROFILE } from './edges';
+
+// An axis-aligned water footprint the shell suppresses buildings inside (the
+// void-water generator owns the actual water render; the shell just steps aside).
+export type WaterRect = { minX: number; minZ: number; maxX: number; maxZ: number };
+
+// Margin (m) around a road corridor / water rect within which a building lot is
+// suppressed, so towers don't crowd the seam or sprout mid-river.
+const SEAM_CLEAR_METERS = 5;
+
+function pointInAnyRect(x: number, z: number, rects: readonly WaterRect[], margin: number): boolean {
+  for (const r of rects) {
+    if (x >= r.minX - margin && x <= r.maxX + margin && z >= r.minZ - margin && z <= r.maxZ + margin) return true;
+  }
+  return false;
+}
+
+// Where a road exit's outward corridor crosses one chunk: the road box to draw
+// (clipped to the chunk and to the outward side of the boundary crossing) and
+// the centerline a building lot must clear. Null when the corridor misses the
+// chunk. Corridors are axis-aligned (the exit normal is ±X or ±Z), so the road
+// runs straight out — clean against the axis grid.
+type RoadStrip = { cx: number; cz: number; sx: number; sz: number; lineX: number; lineZ: number; halfW: number; alongX: boolean };
+function roadStripInChunk(exit: RoadExit, ox: number, oz: number, span: number): RoadStrip | null {
+  const halfW = Math.max(SEAM_CLEAR_METERS, exit.width / 2);
+  const alongX = Math.abs(exit.nx) > 0.5;
+  if (alongX) {
+    // Corridor centerline z = exit.z; runs in x toward sign(nx) from exit.x.
+    if (exit.z < oz - halfW || exit.z > oz + span + halfW) return null;
+    const lo = exit.nx > 0 ? Math.max(ox, exit.x) : ox;
+    const hi = exit.nx > 0 ? ox + span : Math.min(ox + span, exit.x);
+    if (hi - lo <= 0) return null;
+    return { cx: (lo + hi) / 2, cz: exit.z, sx: hi - lo, sz: exit.width, lineX: 0, lineZ: exit.z, halfW, alongX };
+  }
+  if (exit.x < ox - halfW || exit.x > ox + span + halfW) return null;
+  const lo = exit.nz > 0 ? Math.max(oz, exit.z) : oz;
+  const hi = exit.nz > 0 ? oz + span : Math.min(oz + span, exit.z);
+  if (hi - lo <= 0) return null;
+  return { cx: exit.x, cz: (lo + hi) / 2, sx: exit.width, sz: hi - lo, lineX: exit.x, lineZ: 0, halfW, alongX };
+}
 
 // One procedural chunk is 160 m square — the lab's proven streaming grain.
 export const SHELL_CHUNK_METERS = 160;
@@ -102,13 +143,29 @@ function chunkProfile(cx: number, cz: number, distMeters: number): { density: nu
 // calling `emit` per box. Chunk origin is its min corner in world meters.
 // `groundY` is the world height the shell's ground sits at — flush with the
 // authored map's ground so the seam at the edge doesn't step (see-it == walk-it).
-function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: number, groundY: number, core: WorldCore): void {
+//
+// `edge` makes the chunk AWARE of the authored boundary (USER req_1970): a road
+// that exits the map seams straight through here (and buildings step aside);
+// `waterRects` are the void-water footprints the chunk keeps clear of towers (the
+// water itself renders through the real ~water~ path, not as a shell box).
+function generateChunk(
+  emit: ShellBoxEmit,
+  cx: number, cz: number,
+  distMeters: number,
+  groundY: number,
+  core: WorldCore,
+  edge: EdgeProfile = EMPTY_EDGE_PROFILE,
+  waterRects: readonly WaterRect[] = [],
+): void {
   const ox = cx * SHELL_CHUNK_METERS;
   const oz = cz * SHELL_CHUNK_METERS;
   const half = SHELL_CHUNK_METERS / 2;
   const profile = chunkProfile(cx, cz, distMeters);
+  const watered = waterRects.length > 0 && pointInAnyRect(ox + half, oz + half, waterRects, 0);
 
-  // Ground slab — one flat box per chunk, a muted asphalt grey.
+  // Ground slab — one flat box per chunk, a muted asphalt grey. Kept even under
+  // void water: it is the basin BED the translucent water sits over (authored
+  // water works the same way), so there's no see-through hole.
   emit(
     'ground',
     ox + half, groundY - GROUND_THICKNESS / 2, oz + half,
@@ -116,10 +173,30 @@ function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: n
     0.20, 0.21, 0.24,
   );
 
-  // A simple street cross through the chunk (sells "blocks" cheaply).
-  const roadW = 9;
-  emit('road', ox + half, groundY + 0.03, oz + half, SHELL_CHUNK_METERS, GROUND_THICKNESS, roadW, 0.13, 0.13, 0.15);
-  emit('road', ox + half, groundY + 0.03, oz + half, roadW, GROUND_THICKNESS, SHELL_CHUNK_METERS, 0.13, 0.13, 0.15);
+  // Authored roads that exit the map seam straight out THROUGH this chunk. Drawn
+  // a hair above the street-cross so the continuation reads as the same road.
+  const strips: RoadStrip[] = [];
+  for (const exit of edge.roadExits) {
+    const strip = roadStripInChunk(exit, ox, oz, SHELL_CHUNK_METERS);
+    if (strip) { strips.push(strip); emit('road', strip.cx, groundY + 0.04, strip.cz, strip.sx, GROUND_THICKNESS, strip.sz, 0.13, 0.13, 0.15); }
+  }
+
+  // A simple street cross sells "blocks" cheaply — but not over open water.
+  if (!watered) {
+    const roadW = 9;
+    emit('road', ox + half, groundY + 0.03, oz + half, SHELL_CHUNK_METERS, GROUND_THICKNESS, roadW, 0.13, 0.13, 0.15);
+    emit('road', ox + half, groundY + 0.03, oz + half, roadW, GROUND_THICKNESS, SHELL_CHUNK_METERS, 0.13, 0.13, 0.15);
+  }
+
+  // A lot is suppressed when it lands on a road corridor (the seam stays open) or
+  // inside void water (no tower mid-river).
+  const onSeam = (px: number, pz: number): boolean => {
+    if (pointInAnyRect(px, pz, waterRects, SEAM_CLEAR_METERS)) return true;
+    for (const s of strips) {
+      if (s.alongX ? Math.abs(pz - s.lineZ) < s.halfW + SEAM_CLEAR_METERS : Math.abs(px - s.lineX) < s.halfW + SEAM_CLEAR_METERS) return true;
+    }
+    return false;
+  };
 
   // Buildings: 2×2 blocks, up to MAX_LOTS_PER_BLOCK lots each, hash-gated by the
   // chunk's density so sprawl thins with distance.
@@ -143,6 +220,8 @@ function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: n
         // must not poke up inside the authored city — skip any lot landing in the
         // rectangle.
         if (pointInCore(px, pz, core)) continue;
+        // …nor on a road seam or in void water.
+        if (onSeam(px, pz)) continue;
         const [r, g, b] = colorForHeight(h, profile.tint);
         // Stack the building from FACADE_TILE_METERS-tall slabs instead of one
         // monolith, so the facade texture (windows/brick) REPEATS up the tower
@@ -165,7 +244,14 @@ function generateChunk(emit: ShellBoxEmit, cx: number, cz: number, distMeters: n
 // city). This is the COMPILE-side emitter: a finite baked ring (not the infinite
 // player-streamed window) the gamefile ships so the void shows in /compiled.
 // `groundY` lifts the whole ring to the authored map's ground height (default 0).
-export function forEachShellRingBox(core: WorldCore, ringChunks: number, emit: ShellBoxEmit, groundY = SHELL_GROUND_TOP_Y): void {
+export function forEachShellRingBox(
+  core: WorldCore,
+  ringChunks: number,
+  emit: ShellBoxEmit,
+  groundY = SHELL_GROUND_TOP_Y,
+  edge: EdgeProfile = EMPTY_EDGE_PROFILE,
+  waterRects: readonly WaterRect[] = [],
+): void {
   const ringMeters = ringChunks * SHELL_CHUNK_METERS;
   const minCX = Math.floor((core.minX - ringMeters) / SHELL_CHUNK_METERS);
   const maxCX = Math.floor((core.maxX + ringMeters) / SHELL_CHUNK_METERS);
@@ -180,7 +266,7 @@ export function forEachShellRingBox(core: WorldCore, ringChunks: number, emit: S
       // against the authored map, so there is no empty gap between them.
       if (pointInCore(centerX, centerZ, core)) continue;
       const dist = distanceOutsideCore(centerX, centerZ, core);
-      generateChunk(emit, cx, cz, dist, groundY, core);
+      generateChunk(emit, cx, cz, dist, groundY, core, edge, waterRects);
     }
   }
 }
@@ -195,6 +281,8 @@ export function buildShellBatch(
   focusZ: number,
   core: WorldCore,
   radiusChunks: number,
+  edge: EdgeProfile = EMPTY_EDGE_PROFILE,
+  waterRects: readonly WaterRect[] = [],
 ): ShellBatch {
   const out: number[] = [];
   const fcx = Math.floor(focusX / SHELL_CHUNK_METERS);
@@ -218,7 +306,7 @@ export function buildShellBatch(
       const centerZ = cz * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
       if (pointInCore(centerX, centerZ, core)) continue;
       const dist = distanceOutsideCore(centerX, centerZ, core);
-      generateChunk(emit, cx, cz, dist, GROUND_TOP_Y, core);
+      generateChunk(emit, cx, cz, dist, GROUND_TOP_Y, core, edge, waterRects);
     }
   }
   const count = (out.length / STRIDE) | 0;

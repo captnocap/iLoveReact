@@ -1,8 +1,9 @@
 import { memo, useMemo } from 'react';
 import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
-import { buildShellBatch, SHELL_CHUNK_METERS } from '../game/void/shell';
+import { buildShellBatch, SHELL_CHUNK_METERS, type WaterRect } from '../game/void/shell';
 import type { WorldCore } from '../game/void/distance';
+import { EMPTY_EDGE_PROFILE, type EdgeProfile } from '../game/void/edges';
 
 // VoidShell — the procedural shell rendered as ONE instanced batch around the
 // player. SKYBOX_PLAYBOOK §6: the endless hash-city wraps the authored core as
@@ -31,19 +32,26 @@ export const VoidShell = memo(function VoidShell(props: {
   playerZ: number;
   core: WorldCore;
   drawRadiusMeters: number;
+  // Edge-aware void (USER req_1970): roads that exit the map seam through the
+  // shell; void-water footprints keep towers out of rivers/seas. Optional so the
+  // labs that mount a bare shell still work.
+  edge?: EdgeProfile;
+  waterRects?: readonly WaterRect[];
 }) {
   const chunkX = Math.floor(props.playerX / SHELL_CHUNK_METERS);
   const chunkZ = Math.floor(props.playerZ / SHELL_CHUNK_METERS);
   const core = props.core;
+  const edge = props.edge ?? EMPTY_EDGE_PROFILE;
+  const waterRects = props.waterRects ?? [];
   const radiusChunks = shellRadiusChunks(props.drawRadiusMeters);
-  // Re-roll only on chunk crossing / core / draw-radius change. Build at the
-  // chunk CENTER so the streamed window is stable within a chunk (the batch
+  // Re-roll only on chunk crossing / core / draw-radius / edge change. Build at
+  // the chunk CENTER so the streamed window is stable within a chunk (the batch
   // doesn't shift with sub-chunk player motion — only the camera does).
   const batch = useMemo(() => {
     const focusX = chunkX * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
     const focusZ = chunkZ * SHELL_CHUNK_METERS + SHELL_CHUNK_METERS / 2;
-    return buildShellBatch(focusX, focusZ, core, radiusChunks);
-  }, [chunkX, chunkZ, radiusChunks, core.minX, core.minZ, core.maxX, core.maxZ]);
+    return buildShellBatch(focusX, focusZ, core, radiusChunks, edge, waterRects);
+  }, [chunkX, chunkZ, radiusChunks, core.minX, core.minZ, core.maxX, core.maxZ, edge, waterRects]);
 
   if (batch.count === 0) return null;
   // One unit box, scaled per-instance — every chunk's buildings/ground share ONE

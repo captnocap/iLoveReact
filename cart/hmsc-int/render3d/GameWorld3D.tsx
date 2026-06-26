@@ -19,6 +19,9 @@ import { driftSky } from './skyDrift';
 import { VoidShell } from './VoidShell';
 import { worldCore, escapeDepth } from '../game/void/distance';
 import { voidDistortion } from '../game/void/distortion';
+import { buildEdgeProfile } from '../game/void/edges';
+import { buildVoidWaterBodies, voidWaterFootprints } from '../game/void/voidWater';
+import { VOID_SHELL_RING_CHUNKS } from '../game/void/shell';
 
 // How far to keep the camera off a wall it pulls in to, so it never clips through.
 const CAMERA_WALL_MARGIN_METERS = 0.35;
@@ -221,6 +224,13 @@ export function GameWorld3D(props: {
   // for now (the treadmill, seam 2, swaps the source). Memoized on the layout +
   // player cell so it only recomputes when the map changes or the player moves.
   const core = useMemo(() => worldCore(props.state.world), [props.state.world]);
+  // Edge-aware void (USER req_1970): read what authored features touch the core
+  // boundary, then continue them outward — roads seam through the shell, water
+  // grows into rivers/seas — instead of generic filler. Derived from the world +
+  // core only (not the player), so it's stable as you drive.
+  const edge = useMemo(() => buildEdgeProfile(props.state.world, core), [props.state.world, core]);
+  const voidWater = useMemo(() => buildVoidWaterBodies(edge, VOID_SHELL_RING_CHUNKS), [edge]);
+  const voidWaterRects = useMemo(() => voidWaterFootprints(voidWater), [voidWater]);
   const depth = escapeDepth(player.x, player.z, core);
   const distortion = voidDistortion(depth);
   // Quantize the sky-drift weight so WorldStatics' sky memo only re-derives when
@@ -275,7 +285,11 @@ export function GameWorld3D(props: {
       {/* The procedural shell: the endless hash-city wrapping the authored core
           as the outer ring. Streams around the player; draws past the authored
           edge only (the seam skips core chunks). One instanced batch. */}
-      <VoidShell playerX={player.x} playerZ={player.z} core={core} drawRadiusMeters={view.drawRadiusMeters} />
+      <VoidShell playerX={player.x} playerZ={player.z} core={core} drawRadiusMeters={view.drawRadiusMeters} edge={edge} waterRects={voidWaterRects} />
+      {/* The void's continuation water (rivers/seas growing out of the authored
+          bodies at the edge) renders through the SAME ~water~ path as authored
+          water — real translucent water, not opaque shell boxes. */}
+      <WaterBodies bodies={voidWater} />
       <Player
         state={props.state}
         animationSeconds={props.animationSeconds}

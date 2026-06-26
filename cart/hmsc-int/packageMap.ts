@@ -23,6 +23,9 @@ import { buildWorldInstances, encodeFloorHeightfields, encodeFlora, encodeInstan
 import type { DecalAssetSink } from './compile/decalAssets';
 import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, paintedFloorTopAt, shellGroundHeightfield, type BakedPhysicsConfig } from './compile/worldColliders';
 import { worldCore } from './game/void/distance';
+import { buildEdgeProfile } from './game/void/edges';
+import { buildVoidWaterBodies } from './game/void/voidWater';
+import { VOID_SHELL_RING_CHUNKS } from './game/void/shell';
 import { encodeStatsConfigLump } from './compile/playerStats';
 import { encodeInteractables } from './compile/worldInteractables';
 import { encodeDynamicProps } from './compile/worldDynamicProps';
@@ -234,15 +237,21 @@ export function createHmscMapfile(
   // Painted chunks ride in `floors`, not state.world.surfaceRegions — merge them
   // in as landforms so the core (and the shell ground plane it sizes) covers the
   // whole painted map, not just the 2×2 template. See game/void/distance.ts.
-  const voidCore = worldCore(worldWithFloorLandforms(state, floors));
+  const voidWorld = worldWithFloorLandforms(state, floors);
+  const voidCore = worldCore(voidWorld);
   const SHELL_GROUND_SINK_METERS = 0.1;
   const voidGroundY = bakeTerrainTopAt(voidCore.centerX, voidCore.centerZ) - SHELL_GROUND_SINK_METERS;
+  // Edge-aware void (USER req_1970): the rivers/seas the void grows out of the
+  // authored water at the map edge. Built from the SAME merged world + core the
+  // shell uses (pushVoidShell), so the baked water sits exactly where the shell
+  // kept its towers clear. Rides the existing WATER lump — real ~water~, no new path.
+  const voidWater = buildVoidWaterBodies(buildEdgeProfile(voidWorld, voidCore), VOID_SHELL_RING_CHUNKS);
   const geometry = buildWorldInstances(state, liftedPieces, floors, { decalAssets: opts.decalAssets, voidGroundY });
   const instances = encodeInstanceLump(geometry.instances, geometry.pieces);
   const materials = encodeMaterials(geometry.materials);
   const materialRefs = encodeMaterialRefs(geometry.materialRefs);
   const heightfields = encodeFloorHeightfields(floors);
-  const waterBodies = [...state.world.waterBodies, ...floorsToWaterBodies([...floors])];
+  const waterBodies = [...state.world.waterBodies, ...floorsToWaterBodies([...floors]), ...voidWater];
 
   // The AUTHORED physics colliders — the same +-join-aware solids the editor's
   // play view steps against (placedPieceColliders / placedPieceRamps), so a "+"

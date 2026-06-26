@@ -59,6 +59,8 @@ import { resolvePropParts } from './propRecipes/resolve';
 import { worldCore } from '../game/void/distance';
 import { voidHash } from '../game/void/distortion';
 import { forEachShellRingBox, VOID_SHELL_RING_CHUNKS } from '../game/void/shell';
+import { buildEdgeProfile } from '../game/void/edges';
+import { buildVoidWaterBodies, voidWaterFootprints } from '../game/void/voidWater';
 import { importedPropMesh, isImportedPropKind, type ImportedPropMesh } from '../game/kinds/importedProps';
 import { isCookedPropKind } from '../game/kinds/props';
 import { cookedAssetById, cookedMeshBlob, cookedTextureBlob, cookedAssetCatalog } from '../editors/model/cookedAssets';
@@ -1198,6 +1200,12 @@ function pushVoidShell(b: Build, world: GameState['world'], groundY: number): vo
   // ground (see game/void/distance.ts).
   if (!world?.layout || !(world.cellSizeMeters > 0)) return;
   const core = worldCore(world);
+  // Edge-aware void (USER req_1970): continue roads/water that hit the map edge.
+  // The water bodies themselves are baked into the WATER lump by packageMap (same
+  // buildEdgeProfile on the same merged world → identical footprints); here we
+  // only need the rects so the shell keeps towers off the rivers/seas + road seams.
+  const edge = buildEdgeProfile(world, core);
+  const waterRects = voidWaterFootprints(buildVoidWaterBodies(edge, VOID_SHELL_RING_CHUNKS));
   let n = 0;
   forEachShellRingBox(core, VOID_SHELL_RING_CHUNKS, (kind, cx, cy, cz, sx, sy, sz, r, g, bl) => {
     let material = 0;
@@ -1211,7 +1219,7 @@ function pushVoidShell(b: Build, world: GameState['world'], groundY: number): vo
     // is what you walk on). Keeps the thousands of shell boxes off the collider cap.
     pushShape(b, INSTANCE_SHAPE_SCENERY_BOX, cx, cy, cz, [0, 0, 0], sx, sy, sz, [r, g, bl], material);
     n += 1;
-  }, groundY);
+  }, groundY, edge, waterRects);
   console.warn(`[bake] void shell: ${n} procedural box(es) in the ${VOID_SHELL_RING_CHUNKS}-chunk ring around the authored map (groundY=${groundY.toFixed(2)}); ${VOID_SHELL_FACADES.length} facade looks`);
 }
 
