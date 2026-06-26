@@ -433,6 +433,19 @@ function EditorShell() {
     logEvent, logCoalesced, setLayer, setTool, setTab,
   });
   const { place, activePlaceable, armPlaceable, armScatter, placeObject, setFaceTexture } = placementsApi;
+  // PLACEPERF req_2012: the 2D tile canvas is ALWAYS mounted (EditorLayout never
+  // remounts it — req_1879), so while you build in the 3D loader it sits as a tiny
+  // corner PiP. Its `place` object changes identity every commit (buildFootprints
+  // is a memo dep), which re-renders the WHOLE O(world) 2D canvas — its building-
+  // footprint + prop markers — and that render lands INSIDE the loader-pane window
+  // (map3d renders before map2d), reading as a multi-second `loaderPane` cost on a
+  // full map. The unfocused PiP doesn't need live per-place updates: freeze the
+  // canvas's `place` to a stable snapshot while the 2D map is the PiP, and refresh
+  // it the instant it becomes the live map (a swap re-renders with current data).
+  // Live 2D editing (mapFocus==='2d') always gets the fresh object.
+  const frozenCanvasPlaceRef = useRef(place);
+  if (mapFocus === '2d') frozenCanvasPlaceRef.current = place;
+  const canvasPlace = mapFocus === '2d' ? place : frozenCanvasPlaceRef.current;
 
   // PaintCanvas reports each edit with a semantic note (or none for silent edits like
   // focus toggles): trip the autosave + log the note. Stable for the memoized canvas.
@@ -880,7 +893,7 @@ function EditorShell() {
                 onToggleChannel={toggleChannel}
                 brush={brush}
                 onBrushChange={updateBrush}
-                place={place}
+                place={canvasPlace}
                 showGrid={showGrid}
                 onShowGrid={setShowGrid}
                 onFloors={onFloors}
