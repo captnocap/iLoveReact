@@ -445,11 +445,22 @@ function EditorShell() {
     () => (layer === 'place' && selPlacement ? buildObjectWorld(selPlacement.cat, selPlacement.kind, selPlacement.skin) : null),
     [layer, selPlacement?.cat, selPlacement?.kind, selPlacement?.skin],
   );
+  // req_1959: while HOLDING an unplaced prop, the properties panel must show THAT
+  // prop — not the tile brush ('TILE Asphalt' when you're clearly holding a Fire
+  // Hydrant). A prop's armed id is 'prop.<kind>', so build the same one-object
+  // preview placeFocus uses, dressed with the staged part textures so it previews
+  // exactly what will drop. Non-prop held pieces fall through to the default.
+  const armedFocus = useMemo(() => {
+    const a = armed;
+    if (!a || a.kind !== 'piece' || !a.id.startsWith('prop.')) return null;
+    try { return buildObjectWorld('prop', a.id.slice('prop.'.length), undefined, armedDraft?.partTextures ?? undefined); }
+    catch { return null; }
+  }, [armed, armedDraft]);
   // PANELSKIP req_1958: stable identity so a place (which changes none of these) doesn't hand
   // PropertiesPanel a fresh `focus` object and defeat its memo.
   const shownFocus: Focus = useMemo(() => (selCells.length
     ? { kind: 'tiles', cells: selCells }
-    : (placeFocus?.focus ?? { kind: 'tile', tile })), [selCells, placeFocus?.focus, tile]);
+    : (placeFocus?.focus ?? armedFocus?.focus ?? { kind: 'tile', tile })), [selCells, placeFocus?.focus, armedFocus?.focus, tile]);
 
   // GLOBAL per-kind part textures (authored in the right-rail Objects inspector).
   // Subscribed so the preview rebuilds when a kind is re-skinned; folded into each
@@ -497,7 +508,7 @@ function EditorShell() {
   const previewWorld = useMemo<GameState>(() => (
     { ...placementWorld, world: { ...placementWorld.world, landforms, waterBodies: [...floorsWater, ...(placementWorld.world.waterBodies ?? [])] } }
   ), [placementWorld, landforms, floorsWater]);
-  const focusWorld = placeFocus?.world ?? previewWorld;
+  const focusWorld = placeFocus?.world ?? armedFocus?.world ?? previewWorld;
 
   // Compile = persist the authored world (the SAME GameState the preview shows:
   // painted terrain as heightfield landforms + placements) to the game's boot key
@@ -756,15 +767,6 @@ function EditorShell() {
                         and show many tiles instead of three. */}
                     <Box style={{ flexGrow: 5, flexBasis: 0, flexShrink: 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
                       <RightPanel
-                        tab={tab}
-                        onTab={setTab}
-                        notes={notes}
-                        onNotes={setNotes}
-                        buildingPrefabs={buildingPrefabs}
-                        onPlace={placeObject}
-                        activePlaceable={activePlaceable}
-                        onArmPlaceable={armPlaceable}
-                        onArmScatter={armScatter}
                         paintPieces={stablePaintPieces}
                         paintSelectedIds={isoSelectedIds}
                         armed={armed}

@@ -1,97 +1,40 @@
-// RightPanel — the top-right quadrant: a right nav rail of tabs over the active
-// tab's content.
-//
-//   ┌──────────────────────┬──┐
-//   │  active tab content   │ ▣│  ← right rail: Objects / Notes / Chat
-//   └──────────────────────┴──┘
-//
-// Tab content lives in ./tabs/*. The active tab is owned + persisted by the cart
-// (so it survives hot reload), so this shell is pure routing.
+// RightPanel — the top-right quadrant. The PAINT panel (FacePainter) is the ONLY
+// surface now (req_1959: the user removed the OBJ / NOTE / CHAT nav rail —
+// "i only use the one paint tab"). This is just the face painter, full width.
 
-import { Box, Pressable, Text } from '@reactjit/primitives';
-import { Icon } from '@reactjit/icons/Icon';
-import { ObjectsTab } from './tabs/ObjectsTab';
-import { NotesTab } from './tabs/NotesTab';
-import { ChatTab } from './tabs/ChatTab';
+import { Box } from '@reactjit/primitives';
 import { FacePainter, type SkinDraft } from './editors/build/FacePainter';
-import type { PlaceCat } from './placements';
-import type { ScatterBrushId } from './game/kinds/scatter';
 import type { Armed } from './IsoAuthor';
-import type { BuildEditEvent, BuildPrefabDef, PlacedBuildPiece } from '@game';
+import type { BuildEditEvent, PlacedBuildPiece } from '@game';
 
-// SET retired (SETFOLD-0610, review §5.1/L4): the chrome's SETTINGS door →
-// the workbench settings source is THE settings home. The tab's three
-// controls went to their task homes: grid toggle → the painter rail,
-// pane reset → double-press the QuadSplit knob, notepad clear → NotesTab.
-// PAINT added (req_0702): the iso build pane's face painter moved up here —
-// full skin-editing capability in the quadrant, off the crowded map. It
-// auto-opens when the build pane gets a selection (the cart owns that flip).
+// Tab ids retained for the session/placement layers (useMapSession / usePlacements
+// persist + auto-switch a `tab`), even though PAINT is the only rendered surface.
 export type TabId = 'paint' | 'objects' | 'notes' | 'chat';
 
-const TABS: { id: TabId; icon: string; label: string }[] = [
-  { id: 'paint', icon: 'Paintbrush', label: 'PAINT' },
-  { id: 'objects', icon: 'FolderTree', label: 'OBJ' },
-  { id: 'notes', icon: 'NotebookPen', label: 'NOTE' },
-  { id: 'chat', icon: 'MessageSquare', label: 'CHAT' },
-];
-
-function TabButton(props: { icon: string; label: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={props.onPress}
-      style={{
-        width: '100%', paddingTop: 8, paddingBottom: 8, gap: 3,
-        alignItems: 'center', justifyContent: 'center',
-        backgroundColor: props.active ? '#0b1320' : 'transparent',
-        borderLeftWidth: 2, borderLeftColor: props.active ? '#38bdf8' : 'transparent',
-      }}
-    >
-      <Icon name={props.icon} size={16} color={props.active ? '#f8fafc' : '#64748b'} />
-      <Text fontSize={7} color={props.active ? '#cbd5e1' : '#475569'} style={{ fontWeight: 700, letterSpacing: 1 }}>{props.label}</Text>
-    </Pressable>
-  );
-}
-
 export function RightPanel(props: {
-  tab: TabId;
-  onTab: (t: TabId) => void;
-  notes: string;
-  onNotes: (s: string) => void;
-  buildingPrefabs?: BuildPrefabDef[];
-  onPlace: (cat: 'building' | 'prop' | 'marker', kind: string) => void;
-  activePlaceable?: { cat: PlaceCat; kind: string } | null;
-  onArmPlaceable?: (cat: PlaceCat, kind: string) => void;
-  onArmScatter?: (id: ScatterBrushId) => void;
-  // PAINT tab (req_0702): the build pieces + the iso pane's mirrored selection +
-  // the cart's batched commit — the same trio the floating panel used to get.
+  // PAINT (req_0702): the build pieces + the iso pane's mirrored selection + the
+  // cart's batched commit — what the face painter edits.
   paintPieces: readonly PlacedBuildPiece[];
   paintSelectedIds: ReadonlySet<string>;
   onPaintCommit: (items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => void;
-  // req_1937: the HELD item (armed before placement) — holding IS a selection, so
-  // the paint panel's top header shows it even with nothing placed-and-selected.
+  // req_1937/1943: the HELD item before placement + its staged skin draft.
   armed?: Armed;
-  // req_1943: the staged skin for the held item + its setter — skin before placing.
   armedDraft?: SkinDraft | null;
   onArmedDraftChange?: (draft: SkinDraft) => void;
-  // req_0749: the PAINT tab's "paint a texture…" door → the /workbench painter.
+  // req_0749: the "paint a texture…" door → the /workbench painter.
   onOpenPainter?: () => void;
 }) {
   return (
-    <Box style={{ width: '100%', height: '100%', flexDirection: 'row', backgroundColor: '#0b1320' }}>
-      {/* Active tab content */}
-      <Box style={{ flexGrow: 1, minWidth: 0, height: '100%' }}>
-        {props.tab === 'paint' ? <FacePainter pieces={props.paintPieces} selectedIds={props.paintSelectedIds} armed={props.armed} armedDraft={props.armedDraft} onArmedDraftChange={props.onArmedDraftChange} commitBatch={props.onPaintCommit} onOpenPainter={props.onOpenPainter} /> : null}
-        {props.tab === 'objects' ? <ObjectsTab buildingPrefabs={props.buildingPrefabs} onPlace={props.onPlace} activePlaceable={props.activePlaceable} onArmPlaceable={props.onArmPlaceable} onArmScatter={props.onArmScatter} /> : null}
-        {props.tab === 'notes' ? <NotesTab notes={props.notes} onNotes={props.onNotes} /> : null}
-        {props.tab === 'chat' ? <ChatTab /> : null}
-      </Box>
-
-      {/* Right nav rail */}
-      <Box style={{ width: 46, height: '100%', borderLeftWidth: 1, borderLeftColor: '#16202f', backgroundColor: '#0a0f1a' }}>
-        {TABS.map((t) => (
-          <TabButton key={t.id} icon={t.icon} label={t.label} active={props.tab === t.id} onPress={() => props.onTab(t.id)} />
-        ))}
-      </Box>
+    <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b1320' }}>
+      <FacePainter
+        pieces={props.paintPieces}
+        selectedIds={props.paintSelectedIds}
+        armed={props.armed}
+        armedDraft={props.armedDraft}
+        onArmedDraftChange={props.onArmedDraftChange}
+        commitBatch={props.onPaintCommit}
+        onOpenPainter={props.onOpenPainter}
+      />
     </Box>
   );
 }
