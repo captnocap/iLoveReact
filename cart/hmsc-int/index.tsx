@@ -4,7 +4,7 @@ import { Box, Text, Pressable } from '@reactjit/primitives';
 import { execAsync, envGet } from '@reactjit/runtime/hooks/process';
 import { nsGet, nsSet } from '@reactjit/hooks/localstore';
 import type { GameState } from './design';
-import { compileEditorWorld, emptyEditorWorld } from './editorWorld';
+import { compileEditorWorld, compileEditorMap, emptyEditorWorld } from './editorWorld';
 import { floorsToLandforms, floorsToWaterBodies, type ChunkFloor } from './chunkFloor';
 import { CatalogRail } from './CatalogRail';
 import { sameArmed, type Armed } from './buildArmed';
@@ -41,7 +41,7 @@ import { useBuildUndo } from './editors/world/useBuildUndo';
 import { usePlacements } from './editors/world/usePlacements';
 import { assemblePreviewWorld } from './editors/world/previewWorld';
 import { worldToPlacementGraph } from './placements';
-import { writeFile as diagWriteFile } from '@reactjit/hooks/fs';
+import { writeFile as diagWriteFile, exists as fileExists } from '@reactjit/hooks/fs';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
 // one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
@@ -74,6 +74,14 @@ const GAME_BAKE_CMD = 'tools/rjit game bake 2>&1';
 // AUTOCOMPILE req_1867: how long after a (re)mount to suppress the loader pane's auto-bake,
 // so boot/hot-reload world-data settling never auto-compiles — only genuine edits after it do.
 const AUTO_COMPILE_GRACE_MS = 4000;
+// req_2013: the loader pane renders ONE gamefile PER MAP (isolated from /compiled's shared
+// hmsc.gamefile + the game's boot world). Each map's editor bake lands here; switching to a
+// map loads its own file, so another map's pieces can never bleed in. Stems are filename-safe
+// (sanitizeMapName), so the stem IS the file name.
+const EDITOR_GAMEFILE_DIR = 'zig-out/game/editor';
+function editorGamefilePath(stem: string): string {
+  return `${EDITOR_GAMEFILE_DIR}/${stem}.gamefile`;
+}
 
 function lastMeaningfulLine(text: string): string {
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
@@ -635,67 +643,126 @@ function EditorShell() {
       compilingRef.current = false;
     }
   }, [previewWorld, logEvent, ws.stem]);
-  // NEWMAP-REBAKE (req_2010): the loader pane renders the baked hmsc.gamefile, which is
-  // map-independent — so a New Map (blank on disk, verified) still showed the OLD baked
-  // city until the next bake. New Map now re-bakes the now-empty world so the loader
-  // reloads blank, the same way the auto-compile keeps hmsc.gamefile == the current map.
-  // Via a ref so onNewMap (defined below) calls the LATEST closure (with the blank
-  // previewWorld) one tick later, after newMap()'s state has rendered.
-  const compileToGameRef = useRef(compileToGame);
-  compileToGameRef.current = compileToGame;
+  // compileToGame is now the explicit PUBLISH path (req_2013): the Compile button writes the
+  // game's boot key + bakes the shared hmsc.gamefile for /compiled and the standalone game.
+  // The editor loader pane no longer uses it — it bakes per-map editor files (below).
+
+  // ── per-map ISOLATED editor bake (req_2013) ──────────────────────────────────
+  // The loader pane renders editor/<stem>.gamefile — ONE file per map, baked with
+  // --editor-stem so it carries ONLY that map's terrain+pieces, reading from the
+  // map's own state key (compileEditorMap), NEVER the game's boot key. So switching
+  // maps can never show another map's city, and editing/switching never republishes
+  // to /compiled or the standalone game (the user's "isolate the editor" verdict).
+  // A map whose file already exists and wasn't edited this session loads instantly on
+  // revisit; first visit / boot / post-edit bakes it.
+  const bakedStemsRef = useRef<Set<string>>(new Set());
+  const dirtyStemsRef = useRef<Set<string>>(new Set());
+  const compileEditorPreview = useCallback(async (stem: string) => {
+    if (compilingRef.current) return; // never overlap bakes (switch/edit/settle share this)
+    compilingRef.current = true;
+    setCompileState('compiling');
+    setCompileStatus('baking map…');
+    try {
+      compileEditorMap(stem, previewWorld); // per-map key — isolated from the boot key
+      const file = editorGamefilePath(stem);
+      const bake = await execAsync(`tools/rjit game bake --editor-stem ${stem} --gamefile ${file} 2>&1`);
+      const summary = lastMeaningfulLine(bake.stdout);
+      if (bake.code !== 0 || /\[game\].*FAILED/i.test(bake.stdout)) {
+        throw new Error(summary || `tools/rjit game bake exited ${bake.code}`);
+      }
+      bakedStemsRef.current.add(stem);
+      dirtyStemsRef.current.delete(stem);
+      setCompiledReloadKey((key) => key + 1); // the keyed loader reloads the fresh per-map file
+      setCompileState('done');
+      setCompileStatus('✓ map ready');
+    } catch (error: any) {
+      setCompileState('error');
+      setCompileStatus(`✗ ${String(error?.message ?? error).slice(0, 80)}`);
+    } finally {
+      compilingRef.current = false;
+    }
+  }, [previewWorld]);
+  const compileEditorPreviewRef = useRef(compileEditorPreview);
+  compileEditorPreviewRef.current = compileEditorPreview;
 
   // [LIVEHOST tier-2 req_1800] a DEBOUNCED settle bake the loader pane requests only when
   // an edit touched BAKED geometry (delete/move/rotate of a pre-baked piece) — the live
   // overlay can add meshes but not erase a baked one, so those need a bake to reflect.
-  // Placements never call this (instant via the overlay). Re-arms while a bake is running.
+  // Re-bakes THIS map's own editor file (req_2013), not the published game-file.
   const settleBakeTimer = useRef<any>(null);
   const requestSettleBake = useCallback(() => {
+    dirtyStemsRef.current.add(ws.stem);
     if (settleBakeTimer.current) clearTimeout(settleBakeTimer.current);
     const arm = () => {
       settleBakeTimer.current = setTimeout(() => {
         if (compilingRef.current) { arm(); return; } // a bake is running — wait, then retry
-        compileToGame();
+        void compileEditorPreviewRef.current(ws.stem);
       }, 1200);
     };
     arm();
-  }, [compileToGame]);
+  }, [ws.stem]);
 
-  // [LOADERVIEW req_1760/1761] "always up to date": the loader pane renders the BAKED
-  // gamefile, so it only reflects edits after a compile. Auto-compile on a DEBOUNCED
-  // cadence — bake ~2.5s after edits settle (never per-edit; the user's ruling), and
-  // skip while a bake is in flight (re-arm so the latest edits still land). Only while
-  // the loader view is on (the React view shows live state directly, no bake needed).
-  // Edit history is untouched (V20 streams); this just refreshes the rendered bake.
+  // AUTOCOMPILE req_1866/1867: the GRACE WINDOW that gates EDIT bakes. The cart re-mounts on
+  // every hot reload AND on boot the world DATA loads (worldRev/placements go empty→populated)
+  // — without this, that churn armed a bake on empty data (the compile→lock storm). Edits only
+  // bake AFTER the window opens. Reset on map switch.
   const autoCompileTimer = useRef<any>(null);
-  // AUTOCOMPILE req_1866/1867: a GRACE WINDOW after each (re)mount. The cart re-mounts on every
-  // hot reload AND on boot the world DATA loads (worldRev/placements/previewWorld go empty →
-  // populated) — both re-run the auto-compile effect with no USER edit, and arming a bake each
-  // time was the compile→5-6s-lock storm (frozen on startup, frozen during agent edits). Suppress
-  // auto-compile until the settling window passes; only genuine edits AFTER it bake. Reset on map
-  // switch. Manual Compile is always available; the persisted toggle (req_1865) is the off switch.
   const autoCompileReadyRef = useRef(false);
   useEffect(() => {
     autoCompileReadyRef.current = false;
     const t = setTimeout(() => { autoCompileReadyRef.current = true; }, AUTO_COMPILE_GRACE_MS);
     return () => clearTimeout(t);
   }, [ws.stem]);
+  // SWITCH/BOOT per-map bake (req_2013): make the active map's editor gamefile current once its
+  // world has settled. Instant if its file already exists and it wasn't edited this session (the
+  // keyed loader already shows it); else bake it (first visit / boot / edited-then-revisited).
+  // THIS is what makes a restart show THIS map, not the last one. Boot waits the full grace (the
+  // world data loads async); a later SWITCH settles within a render or two, so it bakes quickly.
+  const establishedOnceRef = useRef(false);
+  useEffect(() => {
+    const stem = ws.stem;
+    const isBoot = !establishedOnceRef.current;
+    establishedOnceRef.current = true;
+    const t = setTimeout(() => {
+      if (!dirtyStemsRef.current.has(stem) && fileExists(editorGamefilePath(stem))) {
+        bakedStemsRef.current.add(stem);
+        return; // already current → the keyed loader already shows it
+      }
+      void compileEditorPreviewRef.current(stem);
+    }, isBoot ? AUTO_COMPILE_GRACE_MS : 700);
+    return () => clearTimeout(t);
+  }, [ws.stem]);
+  // A terrain/placement edit makes the active map's editor file stale → mark it dirty
+  // and DEBOUNCE-bake it (never per-edit; the user's ruling). Build-PIECE edits ride the
+  // live overlay this visit (LIVEHOST req_1798) and are flagged dirty by the effect below
+  // so a revisit re-bakes them — they do NOT trigger this heavy terrain re-bake.
   useEffect(() => {
     if (!autoCompile) return; // toggle off → manual bake only
     if (!autoCompileReadyRef.current) return; // still in the post-(re)mount settling window
+    dirtyStemsRef.current.add(ws.stem);
     if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
+    const stem = ws.stem;
     const arm = () => {
       autoCompileTimer.current = setTimeout(() => {
         if (compilingRef.current) { arm(); return; } // a bake is running — wait, then retry
-        compileToGame();
+        void compileEditorPreviewRef.current(stem);
       }, compilingRef.current ? 1500 : 2500);
     };
     arm();
     return () => { if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current); };
-    // NOT keyed on buildPieces (LIVEHOST req_1798): a piece PLACEMENT shows instantly via
-    // the loader's live overlay (LoaderIsoView pushes __compiled_world_set_live_pieces), so
-    // it must NOT trigger the ~5s whole-world rebake+reload flash. Placements fold into the
-    // gamefile on the next bake (a 2D-canvas/terrain edit via worldRev, or manual Compile).
-  }, [autoCompile, worldRev, placements, ws.stem, compileToGame]);
+  }, [autoCompile, worldRev, placements, ws.stem]);
+  // A build-PIECE edit (place/move/delete) makes this map's baked editor file stale too —
+  // flag it so a switch-away-and-back re-bakes the pieces in (this visit the live overlay
+  // already shows them, so no immediate re-bake). Guarded by the grace window so the boot/
+  // switch data-load churn (buildPieces []→populated) is NOT mistaken for an edit, and by
+  // the prev-stem check so a SWITCH never self-marks the incoming map dirty.
+  const dirtyPrevStemRef = useRef(ws.stem);
+  useEffect(() => {
+    if (autoCompileReadyRef.current && dirtyPrevStemRef.current === ws.stem) {
+      dirtyStemsRef.current.add(ws.stem);
+    }
+    dirtyPrevStemRef.current = ws.stem;
+  }, [buildPieces, ws.stem]);
 
   // The /workbench source registry (WORKBENCH.md §6) — built once per mount.
   const wbSources = useMemo(workbenchSources, []);
@@ -718,10 +785,9 @@ function EditorShell() {
   const onNewMap = useCallback(() => {
     setMenuOpen(false);
     newMap();
-    // Re-bake the now-empty world so the loader pane drops the old baked city. Deferred
-    // so newMap()'s setState has rendered (previewWorld → blank) before compileToGameRef
-    // captures it. ~5s bake; the loader reloads blank when it lands (req_2010).
-    setTimeout(() => { void compileToGameRef.current(); }, 80);
+    // req_2013: no manual re-bake here. newMap() changes ws.stem → the switch/boot effect
+    // bakes the new (empty) map's OWN editor gamefile once its blank previewWorld settles,
+    // and the loader (keyed on stem) reloads it. The old map's file is untouched.
   }, [newMap]);
   // STEP10-COLLAPSE-0607: ASSETS and SETTINGS are both /workbench; the bench
   // reports its source FAMILY so the chrome lights the right door truthfully.
@@ -920,6 +986,7 @@ function EditorShell() {
                     build pane, so its placement gate can't drift from a sibling's. */}
                 <LoaderIsoView
                   key={`loader#${ws.stem}`}
+                  gameFile={editorGamefilePath(ws.stem)}
                   centerX={buildCenterX}
                   centerZ={buildCenterZ}
                   reloadToken={compiledReloadKey}

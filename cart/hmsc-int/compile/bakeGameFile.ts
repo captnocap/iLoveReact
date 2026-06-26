@@ -18,7 +18,8 @@
 // Emits the game-file as base64 on stdout (same shape the round-trip fixtures
 // use) so `rjit game play/shot` can capture it.
 
-import { loadEditorWorld } from '../editorWorld';
+import { loadEditorWorld, editorMapStateKey } from '../editorWorld';
+import { readStoredGameStateForKey, createInitialGameState } from '../state/gameState';
 import { createHmscMapfile } from '../packageMap';
 import { sceneEnvironmentFromSky } from './sceneEnv';
 import { buildHmscSky } from '../render3d/sky';
@@ -151,8 +152,20 @@ try {
   warn(`[bake] could not register cooked props (ok on older/empty stores): ${String(error?.message ?? error)}`);
 }
 
-const stem = activeStem();
-const state = loadEditorWorld();
+// --editor-stem <stem> (req_2013): bake ONE map's isolated editor preview — its
+// pieces/floors come from that stem (as always) and its terrain/props/roads come
+// from the PER-MAP editor key (editorMapStateKey), NOT the global boot key. So the
+// editor loader can bake just the active map to its own gamefile without reading
+// or writing the game's booted world. No flag → the original /compiled behavior
+// (active stem from _last.txt + the global boot key via loadEditorWorld).
+const bakeArgv = ((globalThis as any).process?.argv ?? []) as string[];
+const editorStemIdx = bakeArgv.indexOf('--editor-stem');
+const editorStem = editorStemIdx >= 0 && bakeArgv[editorStemIdx + 1] ? String(bakeArgv[editorStemIdx + 1]) : null;
+const stem = editorStem ?? activeStem();
+const state = editorStem
+  ? (readStoredGameStateForKey(editorMapStateKey(editorStem)) ?? createInitialGameState())
+  : loadEditorWorld();
+if (editorStem) warn(`[bake] --editor-stem '${editorStem}': isolated per-map editor bake (state from ${editorMapStateKey(editorStem)}, not the boot key)`);
 // TEMP DIAG (req_1505): record what the BOOT KEY actually carries when the bake
 // reads it — compared with the live-previewWorld diag, this localizes whether the
 // auto-generated signs are lost in the write/read (clobber) or never present.

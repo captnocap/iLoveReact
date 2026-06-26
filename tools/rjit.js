@@ -5976,8 +5976,12 @@ done
     const noPieces = args.includes("--no-pieces");
     const gfIdx = args.indexOf("--gamefile");
     const gamefile = gfIdx >= 0 && args[gfIdx + 1] ? args[gfIdx + 1] : BAKED_GAMEFILE;
-    if (!bakeRealGameFile(root, { noPieces, gamefile })) return 1;
-    out(`[game] bake PASS \u2014 ${gamefile}${noPieces ? " (piece-free)" : ""}`);
+    const esIdx = args.indexOf("--editor-stem");
+    const editorStem = esIdx >= 0 && args[esIdx + 1] ? args[esIdx + 1] : void 0;
+    const slash = gamefile.lastIndexOf("/");
+    if (slash > 0) fsMkdir(`${root}/${gamefile.slice(0, slash)}`);
+    if (!bakeRealGameFile(root, { noPieces, gamefile, editorStem })) return 1;
+    out(`[game] bake PASS \u2014 ${gamefile}${noPieces ? " (piece-free)" : ""}${editorStem ? ` (editor map '${editorStem}')` : ""}`);
     return 0;
   }
   function posixJoin(...parts) {
@@ -6291,7 +6295,8 @@ if (failures.length > 0) {
       `${root}/${gamefile}`,
       "--store",
       `${root}/${CONTENT_STORE_DIR}`,
-      ...opts.noPieces ? ["--no-pieces"] : []
+      ...opts.noPieces ? ["--no-pieces"] : [],
+      ...opts.editorStem ? ["--editor-stem", opts.editorStem] : []
     ]);
     if (gen.stderr.trim()) err(gen.stderr.trim());
     const tapeTransport = gen.stdout.trim();

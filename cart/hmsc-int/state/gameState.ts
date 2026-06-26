@@ -664,6 +664,25 @@ export function publishLiveGameState(state: GameState): void {
   } catch {}
 }
 
+// ── per-map editor bake source (req_2013) ────────────────────────────────────
+// The editor loader bakes each map to its OWN gamefile from a PER-MAP state key,
+// isolated from the game's boot key (HMSC_STORE_KEY) so previewing/switching maps
+// never republishes to /compiled or the standalone game. readStoredGameStateForKey
+// is the bake-process reader (a fresh v8cli reads it off disk, the same way the
+// global-key bake does); saveGameStateForKey writes it WITHOUT the live-player
+// snapshot / hot mirror / boot-key clobber.
+export function readStoredGameStateForKey(key: string): GameState | null {
+  return reviveGameState(localStoreGet(key));
+}
+
+export function saveGameStateForKey(key: string, state: GameState): GameState {
+  const savedState = { ...state, savedAt: nowIso(), updatedAt: nowIso() };
+  try {
+    localStoreSet(key, JSON.stringify(savedState));
+  } catch {}
+  return savedState;
+}
+
 export function saveGameState(state: GameState): GameState {
   const savedState = { ...state, savedAt: nowIso(), updatedAt: nowIso() };
   try {

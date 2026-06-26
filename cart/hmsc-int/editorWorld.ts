@@ -24,6 +24,7 @@ import {
   createInitialGameState,
   readStoredGameState,
   saveGameState,
+  saveGameStateForKey,
 } from './state/gameState';
 import { landformGroundTopAt } from './world/landforms';
 import { placeProp, removeProp, propFootprint } from './world/props';
@@ -42,11 +43,28 @@ export function loadEditorWorld(): GameState {
 
 // Compile = write the authored world to the boot key. saveGameState persists to
 // 'hmsc'/'game-state' (the exact key cart/hmsc/index.tsx reads at boot) and
-// mirrors the hot-reload snapshot, so a running dev game picks it up too.
+// mirrors the hot-reload snapshot, so a running dev game picks it up too. This is
+// the PUBLISH path (req_2013): it republishes the active map to /compiled + the
+// standalone game. The editor's per-map loader bake uses compileEditorMap instead.
 export function compileEditorWorld(state: GameState): GameState {
   const saved = saveGameState(state);
   writeHmscPackageFromState(saved);
   return saved;
+}
+
+// The per-map editor bake source key (req_2013). One key per map stem; the bake
+// CLI reads it via --editor-stem so the editor loader can bake JUST that map.
+export function editorMapStateKey(stem: string): string {
+  return `editor-state:${stem}`;
+}
+
+// Persist a map's authored world under its OWN per-map key — the source the
+// editor loader's isolated per-map bake reads (req_2013). Unlike compileEditorWorld
+// this does NOT touch the game's boot key or write the hmsc package, so previewing
+// or switching maps in the editor never clobbers what /compiled and the standalone
+// game boot from. The user's verdict: "isolate the editor."
+export function compileEditorMap(stem: string, state: GameState): GameState {
+  return saveGameStateForKey(editorMapStateKey(stem), state);
 }
 
 // Reset the authored world to the fresh demo city. Returns the new state; the

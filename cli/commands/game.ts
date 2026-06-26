@@ -199,8 +199,18 @@ function bake(root: string, args: string[] = []): number {
   const noPieces = args.includes('--no-pieces');
   const gfIdx = args.indexOf('--gamefile');
   const gamefile = gfIdx >= 0 && args[gfIdx + 1] ? args[gfIdx + 1]! : BAKED_GAMEFILE;
-  if (!bakeRealGameFile(root, { noPieces, gamefile })) return 1;
-  out(`[game] bake PASS — ${gamefile}${noPieces ? ' (piece-free)' : ''}`);
+  // --editor-stem <stem> (req_2013): the per-map ISOLATED editor bake — bake just
+  // that map (pieces/floors scoped to it, terrain from its per-map editor key) to
+  // its own gamefile, never touching the boot key. The editor loader uses one file
+  // per map so switching is instant on revisit; /compiled keeps the unflagged bake.
+  const esIdx = args.indexOf('--editor-stem');
+  const editorStem = esIdx >= 0 && args[esIdx + 1] ? args[esIdx + 1]! : undefined;
+  // The per-map files live under zig-out/game/editor/<stem>.gamefile — ensure the
+  // parent dir exists so an arbitrary --gamefile path lands.
+  const slash = gamefile.lastIndexOf('/');
+  if (slash > 0) fsMkdir(`${root}/${gamefile.slice(0, slash)}`);
+  if (!bakeRealGameFile(root, { noPieces, gamefile, editorStem })) return 1;
+  out(`[game] bake PASS — ${gamefile}${noPieces ? ' (piece-free)' : ''}${editorStem ? ` (editor map '${editorStem}')` : ''}`);
   return 0;
 }
 
@@ -531,7 +541,7 @@ function installGameFileManifest(root: string, tapeTransport: string, gamefilePa
 
 /** Bake the AUTHORED hmsc world (loadEditorWorld) into a game-file the loader
  *  renders. Returns false if the bake doesn't produce a tape. */
-function bakeRealGameFile(root: string, opts: { noPieces?: boolean; gamefile?: string } = {}): boolean {
+function bakeRealGameFile(root: string, opts: { noPieces?: boolean; gamefile?: string; editorStem?: string } = {}): boolean {
   if (!bundle(root, BAKE_ENTRY, BAKE_BUNDLE)) {
     err('[game] bake FAILED: bakeGameFile does not bundle');
     return false;
@@ -545,6 +555,7 @@ function bakeRealGameFile(root: string, opts: { noPieces?: boolean; gamefile?: s
     '--gamefile', `${root}/${gamefile}`,
     '--store', `${root}/${CONTENT_STORE_DIR}`,
     ...(opts.noPieces ? ['--no-pieces'] : []),
+    ...(opts.editorStem ? ['--editor-stem', opts.editorStem] : []),
   ]);
   if (gen.stderr.trim()) err(gen.stderr.trim());
   const tapeTransport = gen.stdout.trim();
