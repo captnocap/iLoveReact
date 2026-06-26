@@ -41,7 +41,6 @@ export type ScalarKind =
   | 'fps'         // getFps()         frames per second
   | 'layoutUs'    // getLayoutUs()    layout pass time, microseconds
   | 'paintUs'     // getPaintUs()     paint pass time, microseconds
-  | 'tickUs'      // getTickUs()      total tick time, microseconds
   | 'nodeCount';  // __tel_node_count() total Node count in tree
 
 export interface ScalarTelemetrySpec extends BaseSpec {
@@ -103,7 +102,6 @@ const SCALAR_HOST_FN: Record<ScalarKind, string> = {
   fps: 'getFps',
   layoutUs: 'getLayoutUs',
   paintUs: 'getPaintUs',
-  tickUs: 'getTickUs',
   nodeCount: '__tel_node_count',
 };
 

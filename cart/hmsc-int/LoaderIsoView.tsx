@@ -40,7 +40,7 @@ import { useHeldModifiers } from './editors/useEditorControls';
 import { buildResidentMeshCatalogLump } from './compile/worldGeometry';
 import { subscribeCookedAssets } from './editors/model/cookedAssets';
 import { stampEdit, takeEditStamp, nowMs, snapRenderTicks } from './editors/build/editLatency';
-import { readFrameRecord, readCounters } from './state/perfWatch';
+import { readFrameRecord, readCounters, framePhaseResidual } from './state/perfWatch';
 import type { Armed } from './buildArmed';
 import { pieceInstanceRows, meshPropLivePush, meshGhostRef, pieceSkinSig, buildingSkinBoxes } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
@@ -784,18 +784,23 @@ export function LoaderIsoView(props: {
         const renderedMs = nowMs() - t;
         const host = renderedMs - pushMs;
         // HOST GROUND TRUTH (req_1938): the rAF batches under saturation, so host-block is backlog,
-        // not a clean per-edit number. Name what the host actually burned the frame on (V8 runs on
-        // the host thread, so a long JS block shows as huge tickUs) + the scene counts — if nodes /
-        // scene3d instances CLIMB per edit, the compounding is a leak, not a fixed cost.
+        // not a clean per-edit number. CONTIGUOUS PARTITION (req_1974/1975): name the host frame by
+        // the EIGHT phases that tile it — no "other" to hide the answer in. The V8 app tick lands in
+        // appTick; the per-frame 3D/subsystem step in prePaint; event-dispatch reconcile in events
+        // (bridge is the measured Zig→JS time nested there). If nodes / scene3d instances CLIMB per
+        // edit, the compounding is a leak, not a fixed cost.
         const fr = readFrameRecord();
         const c = readCounters();
         let hostLine = '';
         if (fr) {
-          const known = fr.tickUs + fr.layoutUs + fr.paintUs + fr.gpuUs;
-          const phases: Array<[string, number]> = [['tick', fr.tickUs], ['layout', fr.layoutUs], ['paint', fr.paintUs], ['gpu', fr.gpuUs], ['other', Math.max(0, fr.totalUs - known)]];
+          const phases: Array<[string, number]> = [
+            ['events', fr.eventUs], ['appTick', fr.appTickUs], ['preLayout', fr.preLayoutUs], ['layout', fr.layoutUs],
+            ['prePaint', fr.prePaintUs], ['paint', fr.paintUs], ['gpu', fr.gpuUs], ['post', fr.postFrameUs],
+          ];
           const dom = phases.slice().sort((a, b) => b[1] - a[1])[0][0];
           const ms = (us: number) => (us / 1000).toFixed(1);
-          hostLine = `  | host DOMINANT=${dom} tick ${ms(fr.tickUs)} paint ${ms(fr.paintUs)} gpu ${ms(fr.gpuUs)} | nodes ${c.total ?? '?'} inst ${c.scene3d_instances ?? '?'} draws ${c.scene3d_draw_calls ?? '?'} meshes ${c.scene3d_meshes_collected ?? '?'}`;
+          const resid = framePhaseResidual(fr);
+          hostLine = `  | host DOMINANT=${dom} events ${ms(fr.eventUs)} appTick ${ms(fr.appTickUs)} preLayout ${ms(fr.preLayoutUs)} layout ${ms(fr.layoutUs)} prePaint ${ms(fr.prePaintUs)} paint ${ms(fr.paintUs)} gpu ${ms(fr.gpuUs)} post ${ms(fr.postFrameUs)} resid ${ms(resid)} | bridge ${ms(fr.bridgeUs)} | nodes ${c.total ?? '?'} inst ${c.scene3d_instances ?? '?'} draws ${c.scene3d_draw_calls ?? '?'} meshes ${c.scene3d_meshes_collected ?? '?'}`;
         }
         g.__hmscEditLatency = { label, pushMs, renderedMs, pre, scans, push, host, frame: fr, counters: c, at: Date.now() };
         const f = (n: number) => n.toFixed(0).padStart(4);

@@ -58,7 +58,6 @@ pub const PerfData = struct {
     layout_us: i32 = 0,
     paint_us: i32 = 0,
     gpu_us: i32 = 0,
-    tick_us: i32 = 0,
     frame_total_us: i32 = 0,
     rects: i32 = 0,
     glyphs: i32 = 0,
@@ -385,7 +384,6 @@ fn parsePerf(data: []const u8) void {
     if (jsonInt(data, "layout_us")) |v| perf_cache.layout_us = v;
     if (jsonInt(data, "paint_us")) |v| perf_cache.paint_us = v;
     if (jsonInt(data, "gpu_us")) |v| perf_cache.gpu_us = v;
-    if (jsonInt(data, "tick_us")) |v| perf_cache.tick_us = v;
     if (jsonInt(data, "frame_total_us")) |v| perf_cache.frame_total_us = v;
     if (jsonInt(data, "rects")) |v| perf_cache.rects = v;
     if (jsonInt(data, "glyphs")) |v| perf_cache.glyphs = v;

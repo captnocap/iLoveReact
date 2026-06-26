@@ -49,7 +49,9 @@ var g_bridge_us_accum: i64 = 0;
 
 /// Bridge microseconds accumulated since the last call (resets). Call once per
 /// frame. Covers callGlobal* crossings (Zig→JS), which is where the V8 dev-host
-/// spends its per-frame JS time (js_vm.tick() is a no-op under V8).
+/// spends its per-frame JS time — V8 runs synchronously inside event callbacks,
+/// not on a per-frame VM pump (QuickJS needed one; V8 doesn't, which is why the
+/// old `tick()` no-op was deleted along with its bogus `tick_us` metric).
 pub fn bridgeTakeUs() u64 {
     const v = g_bridge_us_accum;
     g_bridge_us_accum = 0;
@@ -125,7 +127,9 @@ pub fn initVM() void {
 }
 
 pub const deinit = teardownVM;
-pub fn tick() void {}
+// (Removed `pub fn tick() void {}` 2026-06-25 — a vestigial QuickJS-era frame
+// pump. V8 has no per-frame VM tick; its work runs synchronously inside event
+// callbacks. The engine no longer calls it.)
 
 /// Dev-mode hot reload. V8's platform lifecycle is ONE-SHOT per process —
 /// `DisposePlatform` is terminal and `InitializePlatform` cannot be called a

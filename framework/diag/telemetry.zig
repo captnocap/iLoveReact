@@ -28,7 +28,6 @@ pub const Snapshot = struct {
     // ── Frame timing ──
     frame_number: u64 = 0,
     fps: u32 = 0,
-    tick_us: u64 = 0,
     layout_us: u64 = 0,
     paint_us: u64 = 0,
     // GPU encode + submit + present (the gpu.frame() call). Distinct from
@@ -37,8 +36,14 @@ pub const Snapshot = struct {
     // overhead?"; gpu_us answers "how much actual GPU rasterization?".
     gpu_us: u64 = 0,
     frame_total_us: u64 = 0,
+    // ── Contiguous frame partition (req_1974/1975) ──
+    // events → app_tick → pre_layout → layout → pre_paint → paint → gpu →
+    // post_frame, in execution order. These EIGHT sum to frame_total_us exactly;
+    // there is no "other". (layout_us/paint_us/gpu_us above are partition members
+    // too — listed first only because they predate the others.)
     event_us: u64 = 0,
     app_tick_us: u64 = 0,
+    pre_layout_us: u64 = 0,
     pre_paint_us: u64 = 0,
     post_frame_us: u64 = 0,
 
@@ -265,13 +270,13 @@ pub fn getNodeDepth(index: usize) u16 {
 // ════════════════════════════════════════════════════════════════════════
 
 pub const CollectArgs = struct {
-    tick_us: u64,
     layout_us: u64,
     paint_us: u64,
     gpu_us: u64,
     frame_total_us: u64,
     event_us: u64 = 0,
     app_tick_us: u64 = 0,
+    pre_layout_us: u64 = 0,
     pre_paint_us: u64 = 0,
     post_frame_us: u64 = 0,
     gc_ns: u64 = 0,
@@ -293,13 +298,13 @@ pub fn collect(args: CollectArgs) void {
     var snap = Snapshot{};
 
     // ── Frame timing ──
-    snap.tick_us = args.tick_us;
     snap.layout_us = args.layout_us;
     snap.paint_us = args.paint_us;
     snap.gpu_us = args.gpu_us;
     snap.frame_total_us = args.frame_total_us;
     snap.event_us = args.event_us;
     snap.app_tick_us = args.app_tick_us;
+    snap.pre_layout_us = args.pre_layout_us;
     snap.pre_paint_us = args.pre_paint_us;
     snap.post_frame_us = args.post_frame_us;
     snap.gc_ns = args.gc_ns;

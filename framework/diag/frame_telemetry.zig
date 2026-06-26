@@ -8,7 +8,6 @@
 pub var telemetry_fps: u32 = 0;
 pub var telemetry_layout_us: i64 = 0;
 pub var telemetry_paint_us: i64 = 0;
-pub var telemetry_tick_us: i64 = 0;
 pub var telemetry_gpu_us: i64 = 0;
 pub var telemetry_bridge_calls: u32 = 0;
 pub var bridge_calls_this_second: u32 = 0;

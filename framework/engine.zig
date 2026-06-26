@@ -4840,17 +4840,23 @@ pub fn run(config_in: AppConfig) !void {
 
         const dt_evt_end = std.time.microTimestamp();
 
-        // QuickJS tick
-        const t0 = std.time.microTimestamp();
-        js_vm.tick();
-        const t1 = std.time.microTimestamp();
-        frame_telemetry.telemetry_tick_us = @intCast(@max(0, t1 - t0));
+        // The `app` phase begins exactly where event processing ended — phases
+        // are a contiguous partition of the frame, so the next boundary is the
+        // previous one. No gap, no "other".
+        const phase_t0 = dt_evt_end;
 
-        // LuaJIT tick
+        // NOTE: the per-frame `js_vm.tick()` QuickJS frame-pump was removed
+        // 2026-06-25. Under V8 it was `pub fn tick() void {}` — a no-op — because
+        // V8 runs its work synchronously inside event callbacks (the React
+        // reconcile on a click happens during event dispatch, timed via the
+        // bridge accumulator), not on a per-frame VM pump like QuickJS needed.
+        // Its `tick_us` telemetry therefore measured an empty function and read
+        // 0.0 forever, poisoning every diagnostic that trusted it. Gone now.
+
+        // LuaJIT tick (legacy; ~0 under V8). Folded into the `app` phase below.
         luajit_runtime.tick();
 
         // App tick (FFI polling, state updates, dynamic texts)
-        const phase_t0 = std.time.microTimestamp();
         if (config.tick) |tickFn| {
             // tick may rebuild the arena that hovered_node points into, so the
             // pre-tick pointer becomes stale. The old recovery path used
@@ -5113,7 +5119,7 @@ pub fn run(config_in: AppConfig) !void {
         if (g_input_latency_ts_us != 0) {
             const since_click = phase_t_postframe - g_input_latency_ts_us;
             if (since_click > 50000) {
-                log.print("[frame-timing] since_click={d}ms  tick={d}us  layout={d}us  paint={d}us  gpu.frame={d}us\n", .{
+                log.print("[frame-timing] since_click={d}ms  app={d}us  layout={d}us  paint={d}us  gpu.frame={d}us\n", .{
                     @divTrunc(since_click, 1000),
                     phase_t1 - phase_t0,
                     frame_telemetry.telemetry_layout_us,
@@ -5165,16 +5171,33 @@ pub fn run(config_in: AppConfig) !void {
         const bridge_us_frame = js_vm.bridgeTakeUs();
         const present_us_frame = gpu.presentWaitUs();
 
-        // Unified telemetry snapshot
+        // Unified telemetry snapshot.
+        //
+        // CONTIGUOUS PARTITION (req_1974/1975): the eight phase buckets below are
+        // defined as differences of ADJACENT frame boundaries, in execution order
+        // from dt_evt_start to t6. By construction they sum to frame_total_us
+        // exactly — so a consumer that adds them all and subtracts from the total
+        // gets 0. There is no "other": every microsecond of the frame lands in a
+        // named bucket. The boundary order is:
+        //   dt_evt_start → dt_evt_end : events     (SDL pump + input dispatch)
+        //   dt_evt_end   → phase_t1   : app_tick   (luajit + V8 config.tick)
+        //   phase_t1     → t2         : pre_layout (transitions, pty, terminal, drag hit-test)
+        //   t2           → t3         : layout
+        //   t3           → t4         : pre_paint  (physics2d, windows, effects, r3d.update, the .tick pile)
+        //   t4           → t5         : paint
+        //   t5           → t_postframe: gpu        (gpu.frame; present_us is the vsync subset)
+        //   t_postframe  → t6         : post_frame (world_window.frame, capture/test/witness)
+        // bridge_us / present_us / gc_ns are CROSS-CUTTING overlays (they nest
+        // inside the phases above), not partition members — kept as annotations.
         const t6 = std.time.microTimestamp();
         telemetry.collect(.{
-            .tick_us = @intCast(@max(0, t1 - t0)),
             .layout_us = @intCast(@max(0, t3 - t2)),
             .paint_us = @intCast(@max(0, t5 - t4)),
-            .gpu_us = @intCast(@max(0, phase_t_postframe - phase_t_preframe)),
-            .frame_total_us = @intCast(@max(0, t6 - t0)),
+            .gpu_us = @intCast(@max(0, phase_t_postframe - t5)),
+            .frame_total_us = @intCast(@max(0, t6 - dt_evt_start)),
             .event_us = @intCast(@max(0, dt_evt_end - dt_evt_start)),
             .app_tick_us = @intCast(@max(0, phase_t1 - phase_t0)),
+            .pre_layout_us = @intCast(@max(0, t2 - phase_t1)),
             .pre_paint_us = @intCast(@max(0, t4 - t3)),
             .post_frame_us = @intCast(@max(0, t6 - phase_t_postframe)),
             .gc_ns = gc_ns_frame,
@@ -5193,27 +5216,31 @@ pub fn run(config_in: AppConfig) !void {
         });
 
         // Host-side spike trace (gv_perflog 2). Ground-truth per-frame phases to
-        // cross-check the JS perfWatch report. Triggers on CPU work only —
-        // tick+layout+paint — NOT total: the gpu phase is the present/vsync
-        // wait (≈4ms at 240Hz, ≈16ms at 60Hz), so a frame merely capped at the
-        // display refresh is gpu-bound idle, not a stall. Real spikes (content
-        // swap / capture re-bake) live in paint. `other` = leftover (native /
-        // scheduling). gpu frame counter prefixes for JS-report alignment.
+        // cross-check the JS perfWatch report. CONTIGUOUS PARTITION (req_1974):
+        // the eight phases tile the whole frame, so cpu = total − gpu exactly and
+        // there is NO "other" — every phase is named. A non-zero `residual` would
+        // mean the boundaries drifted (a bug to fix), not a bucket to hide work in.
         if (g_host_spike_trace) {
-            const cpu_i: i64 = (t1 - t0) + (t3 - t2) + (t5 - t4);
+            const events_i: i64 = dt_evt_end - dt_evt_start;
+            const app_i: i64 = phase_t1 - phase_t0;
+            const prelayout_i: i64 = t2 - phase_t1;
+            const layout_i: i64 = t3 - t2;
+            const prepaint_i: i64 = t4 - t3;
+            const paint_i: i64 = t5 - t4;
+            const gpu_i: i64 = phase_t_postframe - t5;
+            const post_i: i64 = t6 - phase_t_postframe;
+            const cpu_i: i64 = events_i + app_i + prelayout_i + layout_i + prepaint_i + paint_i + post_i;
             if (cpu_i > HOST_SPIKE_TRACE_US) {
-                const frame_total_i: i64 = t6 - t0;
-                const gpu_i: i64 = phase_t_postframe - phase_t_preframe;
-                const other_i: i64 = @max(0, frame_total_i - cpu_i - gpu_i);
-                std.debug.print("[host-spike] frame={d} total={d}us cpu={d} tick={d} layout={d} paint={d} gpu={d} other={d}\n", .{
-                    gpu.frameCounter(), frame_total_i, cpu_i, t1 - t0, t3 - t2, t5 - t4, gpu_i, other_i,
+                const frame_total_i: i64 = t6 - dt_evt_start;
+                const residual_i: i64 = frame_total_i - (cpu_i + gpu_i); // ≈0 by construction
+                std.debug.print("[host-spike] frame={d} total={d}us | events={d} app={d} preLayout={d} layout={d} prePaint={d} paint={d} gpu={d} post={d} | residual={d}\n", .{
+                    gpu.frameCounter(), frame_total_i, events_i, app_i, prelayout_i, layout_i, prepaint_i, paint_i, gpu_i, post_i, residual_i,
                 });
-                // Outside-render attribution, measured (not inferred): GC is
-                // frame-wide; present is inside gpu; bridge lives in other; the
-                // remainder of other is genuinely native/unattributed.
-                const unattributed_i: i64 = @max(0, other_i - @as(i64, @intCast(bridge_us_frame)));
-                std.debug.print("[host-spike-attrib] frame={d} gc={d}ns(x{d},type={d}) present={d}us(in-gpu) bridge={d}us(in-other) unattributed={d}us(native)\n", .{
-                    gpu.frameCounter(), gc_ns_frame, gc_count_frame, gc_type_frame, present_us_frame, bridge_us_frame, unattributed_i,
+                // Cross-cutting overlays (measured at real boundaries, NOT partition
+                // members): GC fires frame-wide; present is the vsync subset of gpu;
+                // bridge is the Zig→JS time nested inside events+app+pre_layout.
+                std.debug.print("[host-spike-attrib] frame={d} gc={d}ns(x{d},type={d}) present={d}us(in-gpu) bridge={d}us(in-app/events)\n", .{
+                    gpu.frameCounter(), gc_ns_frame, gc_count_frame, gc_type_frame, present_us_frame, bridge_us_frame,
                 });
                 const gpu_stats = gpu.telemetryStats();
                 std.debug.print("[host-spike-gpu] frame={d} rects={d} glyphs={d} atlas={d} atlas_miss={d} static_caps={d} frame_hash={d} rect_hash={d} text_hash={d} drain={d}\n", .{
@@ -5286,14 +5313,14 @@ pub fn run(config_in: AppConfig) !void {
         if (g_chrome_dragging) {
             const dt_iter_end = std.time.microTimestamp();
             log.writeLine(
-                "[drag-trace] iter={d}us evt={d}us(n={d},mot={d}) jstick={d}us apptick={d}us layout={d}us paint={d}us gpufrm={d}us",
+                "[drag-trace] iter={d}us evt={d}us(n={d},mot={d}) apptick={d}us preLayout={d}us layout={d}us paint={d}us gpufrm={d}us",
                 .{
                     dt_iter_end - dt_iter_start,
                     dt_evt_end - dt_evt_start,
                     dt_evt_count,
                     dt_motion_count,
-                    t1 - t0,
                     phase_t1 - phase_t0,
+                    t2 - phase_t1,
                     t3 - t2,
                     t5 - t4,
                     phase_t_postframe - phase_t_preframe,

@@ -216,10 +216,9 @@ fn handleClient(client_fd: std.posix.socket_t) !void {
         var buf: [512]u8 = undefined;
         const json = std.fmt.bufPrint(
             &buf,
-            "{{\"fps\":{d},\"tick_us\":{d},\"layout_us\":{d},\"paint_us\":{d},\"gpu_us\":{d},\"frame_total_us\":{d},\"frame_number\":{d},\"node_count\":{d}}}\n",
+            "{{\"fps\":{d},\"layout_us\":{d},\"paint_us\":{d},\"gpu_us\":{d},\"frame_total_us\":{d},\"frame_number\":{d},\"node_count\":{d}}}\n",
             .{
                 frame_telemetry.telemetry_fps,
-                snap.tick_us,
                 frame_telemetry.telemetry_layout_us,
                 frame_telemetry.telemetry_paint_us,
                 frame_telemetry.telemetry_gpu_us,

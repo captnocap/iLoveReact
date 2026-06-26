@@ -84,29 +84,53 @@ function readFrameHistory(n: number): number[] {
 
 type FrameRecord = {
   fps: number;
-  tickUs: number;
+  // ── Contiguous frame partition (req_1974/1975) ──
+  // The host times the frame as eight adjacent phases in execution order; they
+  // sum to totalUs EXACTLY, so there is no "other". Anything that used to fall in
+  // "other" (the V8 app tick, the subsystem pile, world_window.frame) now has a
+  // named home below. `phaseResidual` is totalUs − Σphases: ≈0 always; a non-zero
+  // value is a host boundary bug to fix, never a bucket to hide work in.
+  eventUs: number; // SDL pump + input dispatch (React reconcile on a click lands here, via bridge)
+  appTickUs: number; // luajit + V8 config.tick (the per-frame JS app tick)
+  preLayoutUs: number; // transitions, pty poll, terminal classify, drag hit-test
   layoutUs: number;
+  prePaintUs: number; // physics2d, windows, effects, r3d.update, the .tick(dt) pile — the 3D/subsystem cost
   paintUs: number;
   gpuUs: number;
+  postFrameUs: number; // world_window.frame, capture/test/witness
   totalUs: number;
   frameNumber: number;
-  // Outside-render attribution, measured host-side at real boundaries (see
-  // framework/v8_gc_shim.cpp, gpu.zig present timing, v8_runtime bridge timing).
-  // These let the classifier name the ONE cause instead of guessing GC/native.
+  // Cross-cutting overlays — measured host-side at real boundaries, NESTED inside
+  // the phases above (not partition members). The classifier reads these to name
+  // the ONE cause instead of guessing GC/native.
   gcNs: number; // V8 GC wall-time this frame in NANOSECONDS (sub-µs honest)
   gcCount: number; // GC invocations this frame — 0 means the GC never fired (vs tiny)
   gcType: number; // GCType bitmask: 1 scavenge, 2 minor-ms, 4 mark-sweep, 8 incremental, 16 weak
   presentUs: number; // vsync/present wait — a subset of gpuUs
-  bridgeUs: number; // Zig→JS crossings (app tick + events) — lives in `other`
+  bridgeUs: number; // Zig→JS crossings (app tick + events) — nested in eventUs/appTickUs
 };
+
+/** Σ of the eight contiguous phase buckets — equals totalUs by construction. */
+export function framePhaseSum(r: FrameRecord): number {
+  return r.eventUs + r.appTickUs + r.preLayoutUs + r.layoutUs + r.prePaintUs + r.paintUs + r.gpuUs + r.postFrameUs;
+}
+
+/** totalUs − Σphases. ≈0 by construction; a real positive value flags a host boundary bug. */
+export function framePhaseResidual(r: FrameRecord): number {
+  return Math.max(0, r.totalUs - framePhaseSum(r));
+}
 
 function frameRecordFrom(f: any): FrameRecord {
   return {
     fps: Number(f.fps) || 0,
-    tickUs: Number(f.tick_us) || 0,
+    eventUs: Number(f.event_us) || 0,
+    appTickUs: Number(f.app_tick_us) || 0,
+    preLayoutUs: Number(f.pre_layout_us) || 0,
     layoutUs: Number(f.layout_us) || 0,
+    prePaintUs: Number(f.pre_paint_us) || 0,
     paintUs: Number(f.paint_us) || 0,
     gpuUs: Number(f.gpu_us) || 0,
+    postFrameUs: Number(f.post_frame_us) || 0,
     totalUs: Number(f.frame_total_us) || 0,
     frameNumber: Number(f.frame_number) || 0,
     gcNs: Number(f.gc_ns) || 0,
@@ -249,16 +273,18 @@ function gcLabel(gcNs: number, gcCount: number, gcType: number): string {
   return `V8 GC ${formatGcTime(gcNs)} (${gcTypeName(gcType)} ×${gcCount})`;
 }
 
-// Name the single largest measured contributor to the outside-render ("other")
-// time. No guessing: GC is measured at V8's callbacks, bridge at the Zig→JS
-// boundary, and whatever neither covers is reported as its own explicit
-// UNATTRIBUTED bucket (genuinely native: terminal/PTY/physics/scheduling).
-function attributeOutside(gcNs: number, gcCount: number, gcType: number, bridgeUs: number, unattributedUs: number): string {
+// Explain a frame via the cross-cutting OVERLAYS (GC / bridge) nested inside the
+// named phases. No guessing: GC is measured at V8's callbacks, bridge at the
+// Zig→JS boundary. `residualUs` is totalUs − Σphases (≈0 by construction) — a
+// non-zero value means a host boundary drifted and is reported as a BUG, never a
+// silent bucket. (There is no "other" phase anymore; this names what fired
+// *inside* whichever phase dominated.)
+function attributeOverlay(gcNs: number, gcCount: number, gcType: number, bridgeUs: number, residualUs: number): string {
   const gcUs = gcNs / 1000;
   const candidates: Array<[string, number]> = [
     [gcLabel(gcNs, gcCount, gcType), gcUs],
     [`NATIVE BRIDGE ${us(bridgeUs)} — Zig→JS app tick / event dispatch`, bridgeUs],
-    [`UNATTRIBUTED ${us(unattributedUs)} — native (terminal/PTY/physics/scheduling); not GC, not bridge, not present`, unattributedUs],
+    [`PARTITION RESIDUAL ${us(residualUs)} — totalUs − Σphases; should be ~0, a host boundary BUG if not`, residualUs],
   ];
   candidates.sort((a, b) => b[1] - a[1]);
   const [label, val] = candidates[0];
@@ -292,23 +318,23 @@ function classifySpike(record: FrameRecord | null, calm: Counters, spike: Counte
   // Phase dominance is only trustworthy when __tel_frame actually carries the
   // spike frame (not a recovered post-spike read).
   const caught = record != null && record.totalUs > baselineForCaught(record);
-  // Outside-render ("other") time and its MEASURED components. bridgeUs (Zig→JS)
-  // is the one measured timer that lives in `other`; GC is frame-wide; present
-  // is inside the gpu phase. unattributedUs is whatever the bridge timer doesn't
-  // cover — genuinely native (terminal/PTY/physics/scheduling).
-  const otherUs = record ? Math.max(0, record.totalUs - (record.tickUs + record.layoutUs + record.paintUs + record.gpuUs)) : 0;
+  // CONTIGUOUS PARTITION (req_1974/1975): the dominant phase is picked from the
+  // eight real buckets that tile the frame — no "other" to swallow the answer.
+  // bridgeUs/GC/present are overlays nested inside those phases (annotations, not
+  // a phase). phaseResidual is totalUs − Σphases: a host boundary bug if non-zero.
+  const residualUs = record ? framePhaseResidual(record) : 0;
   const gcNs = record?.gcNs ?? 0;
   const gcUs = gcNs / 1000;
   const gcCount = record?.gcCount ?? 0;
   const gcType = record?.gcType ?? 0;
   const presentUs = record?.presentUs ?? 0;
   const bridgeUs = record?.bridgeUs ?? 0;
-  const unattributedUs = Math.max(0, otherUs - bridgeUs);
   let dominant = 'unknown';
   if (record) {
     const phases: Array<[string, number]> = [
-      ['paint', record.paintUs], ['gpu', record.gpuUs], ['tick', record.tickUs],
-      ['layout', record.layoutUs], ['other', otherUs],
+      ['events', record.eventUs], ['appTick', record.appTickUs], ['preLayout', record.preLayoutUs],
+      ['layout', record.layoutUs], ['prePaint', record.prePaintUs], ['paint', record.paintUs],
+      ['gpu', record.gpuUs], ['post', record.postFrameUs],
     ];
     dominant = phases.sort((a, b) => b[1] - a[1])[0][0];
   }
@@ -328,8 +354,8 @@ function classifySpike(record: FrameRecord | null, calm: Counters, spike: Counte
       : 'WHAT FIRED: CAPTURE RE-BAKE — heavy CPU paint with NO tree/hash change → a StaticSurface re-rendered its shader (its captured subtree got re-stamped).';
   }
   // V8 GC is measured frame-wide at the isolate's prologue/epilogue callbacks,
-  // so it can inflate ANY phase (a GC during __jsTick lands in `other`; during a
-  // reconcile commit it lands in tick). If the measured pause is a big slice of
+  // so it can inflate ANY phase (a GC during the app tick lands in appTick; during
+  // event-dispatch reconcile it lands in events). If the measured pause is a big slice of
   // the frame, name it definitively with type — this is the headline the user
   // wanted ("V8 GC 11.3ms (mark-sweep)") instead of guessing.
   if (record && gcCount > 0 && gcUs > 1500 && gcUs >= record.totalUs * 0.4) {
@@ -348,20 +374,28 @@ function classifySpike(record: FrameRecord | null, calm: Counters, spike: Counte
     }
     return `WHAT FIRED: GPU DRAW/UPLOAD ${us(computeUs)} compute + ${us(presentUs)} present wait${drawSwing ? ` (draw calls ${delta('scene3d_draw_calls') >= 0 ? '+' : ''}${delta('scene3d_draw_calls')})` : ''}.`;
   }
-  if (caught && dominant === 'tick') {
-    return 'WHAT FIRED: TICK — JS reconcile / game logic dominated this frame, not rendering.';
+  if (caught && (dominant === 'appTick' || dominant === 'events')) {
+    // JS dominated — either the per-frame app tick or the event-dispatch reconcile.
+    // bridge is the measured Zig→JS time nested in these phases.
+    const where = dominant === 'events' ? 'EVENT DISPATCH — input → React reconcile' : 'APP TICK — config.tick (game logic / state)';
+    return `WHAT FIRED: ${where}; bridge ${us(bridgeUs)} Zig→JS. JS reconcile / logic dominated this frame, not rendering.`;
   }
-  if (caught && dominant === 'other') {
-    // No more "GC / native / vsync — could be one of three." Each is measured;
-    // name the largest, with an explicit UNATTRIBUTED bucket for what's left.
-    return attributeOutside(gcNs, gcCount, gcType, bridgeUs, unattributedUs);
+  if (caught && dominant === 'preLayout') {
+    return 'WHAT FIRED: PRE-LAYOUT — transitions / pty poll / terminal classify / drag hit-test (native, between app tick and layout).';
+  }
+  if (caught && dominant === 'prePaint') {
+    return 'WHAT FIRED: PRE-PAINT SUBSYSTEMS — physics2d / windows / effects / r3d.update / the per-frame .tick(dt) pile (native 3D + subsystem step, between layout and paint).';
+  }
+  if (caught && dominant === 'post') {
+    return 'WHAT FIRED: POST-FRAME — world_window.frame / capture / test / witness (after the main gpu submit).';
   }
   if (hashFlipped) {
     return 'WHAT FIRED: REPAINT — 2D draw data changed (hash flip) with no tree change → full 2D buffer re-upload from an inline-prop / animated-value churn.';
   }
   if (nodeSwing === 0 && glyphSwing === 0 && !hashFlipped) {
-    // Nothing in our draw counters moved — but we MEASURED where the time went.
-    return attributeOutside(gcNs, gcCount, gcType, bridgeUs, unattributedUs);
+    // Nothing in our draw counters moved — name the overlay that fired inside the
+    // dominant phase (GC / bridge), or the residual if a boundary drifted.
+    return attributeOverlay(gcNs, gcCount, gcType, bridgeUs, residualUs);
   }
   return 'WHAT FIRED: UNCLEAR — spike likely already recovered; trust the deltas below over the phase line.';
 }
@@ -392,30 +426,34 @@ function flush(history: number[], baselineUs: number, worstUs: number, calm: Cou
   );
 
   if (record) {
-    const known = record.tickUs + record.layoutUs + record.paintUs + record.gpuUs;
-    const other = Math.max(0, record.totalUs - known);
-    // With the latched frame we KNOW we have the spike frame (matched by total
-    // time in the host ring). Without it, we fell back to the recovered current
-    // frame and say so. Name the dominant phase either way.
-    const dominant = record.paintUs >= record.gpuUs ? 'paint (CPU raster / atlas)' : 'gpu (upload/draw)';
+    const residual = framePhaseResidual(record);
+    // The dominant phase is the largest of the EIGHT contiguous buckets — no
+    // "other" can win by default.
+    const phaseList: Array<[string, number]> = [
+      ['events', record.eventUs], ['appTick', record.appTickUs], ['preLayout', record.preLayoutUs],
+      ['layout', record.layoutUs], ['prePaint', record.prePaintUs], ['paint', record.paintUs],
+      ['gpu', record.gpuUs], ['post', record.postFrameUs],
+    ];
+    const dominant = phaseList.slice().sort((a, b) => b[1] - a[1])[0][0];
     lines.push(
       latched
         ? `SPIKE FRAME CAUGHT (latched from host ring) — dominant phase: ${dominant}`
         : 'spike already recovered; phases below are the post-spike current frame (host latch unavailable)',
     );
     lines.push(
-      `${latched ? 'spike' : 'current'} frame phases: tick ${us(record.tickUs)}  layout ${us(record.layoutUs)}  ` +
-        `paint ${us(record.paintUs)}  gpu ${us(record.gpuUs)}  other ${us(other)}  (total ${us(record.totalUs)})`,
+      `${latched ? 'spike' : 'current'} frame phases: events ${us(record.eventUs)}  appTick ${us(record.appTickUs)}  ` +
+        `preLayout ${us(record.preLayoutUs)}  layout ${us(record.layoutUs)}  prePaint ${us(record.prePaintUs)}  ` +
+        `paint ${us(record.paintUs)}  gpu ${us(record.gpuUs)}  post ${us(record.postFrameUs)}  ` +
+        `(Σ ${us(framePhaseSum(record))} = total ${us(record.totalUs)}, residual ${us(residual)})`,
     );
-    // Outside-render breakdown, each MEASURED at its real boundary (not inferred
-    // by subtraction). The buckets sum honestly: bridge + unattributed ≈ other
-    // (present is inside the gpu phase, GC is frame-wide and may overlap any).
-    const unattributed = Math.max(0, other - record.bridgeUs);
+    // Cross-cutting overlays, each MEASURED at its real boundary (not inferred by
+    // subtraction) and NESTED inside the phases above — present sits in gpu, GC is
+    // frame-wide, bridge sits in events+appTick. residual ≈0 (a host bug if not).
     lines.push(
-      `outside-render attribution: ${gcLabel(record.gcNs, record.gcCount, record.gcType)} (frame-wide)  |  ` +
+      `overlays: ${gcLabel(record.gcNs, record.gcCount, record.gcType)} (frame-wide)  |  ` +
         `present/vsync ${us(record.presentUs)} (within gpu)  |  ` +
-        `bridge ${us(record.bridgeUs)} (Zig→JS, within other)  |  ` +
-        `unattributed ${us(unattributed)} (native, within other)`,
+        `bridge ${us(record.bridgeUs)} (Zig→JS, within events+appTick)  |  ` +
+        `partition residual ${us(residual)} (should be ~0)`,
     );
   }
 
@@ -524,8 +562,9 @@ export function startPerfWatch(): () => void {
 // no calm baseline to spike against). This is the opposite tool: an
 // unconditional once-per-second dump of the current frame's phase breakdown +
 // the counters that name what the host is spending the whole frame on. It tells
-// you, plainly, whether 1-3fps is paint (CPU raster), gpu (draw/upload), tick
-// (JS reconcile), or other (GC/native) — and how big the scene/draw counts are.
+// you, plainly, which of the eight contiguous phases owns the frame (events /
+// appTick / preLayout / layout / prePaint / paint / gpu / post) — and how big the
+// scene/draw counts are. No "other": every microsecond lands in a named phase.
 let heartbeatStarted = false;
 
 export function startPerfHeartbeat(): () => void {
@@ -544,15 +583,16 @@ export function startPerfHeartbeat(): () => void {
     const r = readFrameRecord();
     const c = readCounters();
     if (r) {
-      const known = r.tickUs + r.layoutUs + r.paintUs + r.gpuUs;
-      const other = Math.max(0, r.totalUs - known);
+      const residual = framePhaseResidual(r);
       const phases: Array<[string, number]> = [
-        ['tick', r.tickUs], ['layout', r.layoutUs], ['paint', r.paintUs], ['gpu', r.gpuUs], ['other', other],
+        ['events', r.eventUs], ['appTick', r.appTickUs], ['preLayout', r.preLayoutUs], ['layout', r.layoutUs],
+        ['prePaint', r.prePaintUs], ['paint', r.paintUs], ['gpu', r.gpuUs], ['post', r.postFrameUs],
       ];
       const dominant = phases.slice().sort((a, b) => b[1] - a[1])[0][0];
       emitLine(
         `[hb] ~${r.fps ? Math.round(r.fps) : 0}fps  total ${us(r.totalUs)}  DOMINANT=${dominant}  ` +
-          `tick ${us(r.tickUs)} layout ${us(r.layoutUs)} paint ${us(r.paintUs)} gpu ${us(r.gpuUs)} other ${us(other)}  ` +
+          `events ${us(r.eventUs)} appTick ${us(r.appTickUs)} preLayout ${us(r.preLayoutUs)} layout ${us(r.layoutUs)} ` +
+          `prePaint ${us(r.prePaintUs)} paint ${us(r.paintUs)} gpu ${us(r.gpuUs)} post ${us(r.postFrameUs)} (residual ${us(residual)})  ` +
           `| present ${us(r.presentUs)} bridge ${us(r.bridgeUs)} ${gcLabel(r.gcNs, r.gcCount, r.gcType)}  ` +
           `| rects ${c.rect_count ?? '?'} glyphs ${c.glyph_count ?? '?'} atlas ${c.atlas_glyph_count ?? '?'} ` +
           `nodes ${c.total ?? '?'} scene3d{inst ${c.scene3d_instances ?? '?'} draws ${c.scene3d_draw_calls ?? '?'} ` +

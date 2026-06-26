@@ -154,10 +154,9 @@ fn getPaintUsCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setNumberReturn(info, @floatFromInt(frame_telemetry.telemetry_paint_us));
 }
 
-fn getTickUsCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setNumberReturn(info, @floatFromInt(frame_telemetry.telemetry_tick_us));
-}
+// NOTE: getTickUs was removed 2026-06-25 — it returned `telemetry_tick_us`, the
+// duration of the dead QuickJS frame-pump no-op (always 0 under V8). The honest
+// per-frame JS measure is `bridge_us` (Zig→JS app-tick + event-dispatch time).
 
 /// Build a JS frame object from a snapshot. Shared by __tel_frame (the latest
 /// frame) and __tel_frame_at (a historical frame), so the spikewatch can read
@@ -165,13 +164,13 @@ fn getTickUsCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn buildFrameObject(iso: v8.Isolate, ctx: v8.Context, s: telemetry.Snapshot) v8.Object {
     const obj = iso.initObject();
     setObjectNumber(ctx, obj, "fps", s.fps);
-    setObjectNumber(ctx, obj, "tick_us", s.tick_us);
     setObjectNumber(ctx, obj, "layout_us", s.layout_us);
     setObjectNumber(ctx, obj, "paint_us", s.paint_us);
     setObjectNumber(ctx, obj, "gpu_us", s.gpu_us);
     setObjectNumber(ctx, obj, "frame_total_us", s.frame_total_us);
     setObjectNumber(ctx, obj, "event_us", s.event_us);
     setObjectNumber(ctx, obj, "app_tick_us", s.app_tick_us);
+    setObjectNumber(ctx, obj, "pre_layout_us", s.pre_layout_us);
     setObjectNumber(ctx, obj, "pre_paint_us", s.pre_paint_us);
     setObjectNumber(ctx, obj, "post_frame_us", s.post_frame_us);
     // Outside-render attribution (measured at real boundaries) — the spikewatch
@@ -1027,7 +1026,6 @@ pub fn registerTelemetry(_: anytype) void {
     v8rt.registerHostFn("getFps", getFpsCb);
     v8rt.registerHostFn("getLayoutUs", getLayoutUsCb);
     v8rt.registerHostFn("getPaintUs", getPaintUsCb);
-    v8rt.registerHostFn("getTickUs", getTickUsCb);
 
     v8rt.registerHostFn("__tel_frame", telFrameCb);
     v8rt.registerHostFn("__tel_frame_at", telFrameAtCb);
