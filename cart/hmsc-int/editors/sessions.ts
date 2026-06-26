@@ -150,9 +150,13 @@ function perfMs(): number {
   return typeof perf?.now === 'function' ? perf.now() : Date.now();
 }
 
+// FLUSHDEBOUNCE req_1969: how long after a burst's FIRST commit to flush the boot snapshot. Was 0
+// (fired ~265ms later, once the thread freed — a ~50ms freeze per piece while placing rapidly).
+// Now the burst coalesces into one flush ~1.5s out, so rapid placement flushes at most every ~1.5s.
+const SNAPSHOT_FLUSH_DELAY_MS = 1500;
 function defaultSnapshotScheduler(fn: () => void): unknown {
   const timer = (globalThis as any).setTimeout;
-  return typeof timer === 'function' ? timer(fn, 0) : fn();
+  return typeof timer === 'function' ? timer(fn, SNAPSHOT_FLUSH_DELAY_MS) : fn();
 }
 
 /** Mint a session id: time-sortable, collision-safe at route-visit rate
@@ -188,11 +192,22 @@ export function createSessionLog(store: Store, options: SessionLogOptions = {}):
     }
   };
 
+  // FLUSHDEBOUNCE req_1969: the snapshot used to fire ~265ms after EVERY commit — a ~50ms
+  // main-thread freeze mid-stream while you place rapidly (the PLACEFREEZE the user kept seeing).
+  // The events are ALREADY durable in the DB on commit (channel.append); the snapshot is only a
+  // fast-boot optimization, so it can wait until you PAUSE. Each commit reschedules a single
+  // debounced flush, so a burst of placements flushes ONCE when editing settles. Worst case if the
+  // app dies inside the window: boot replays the DB tail (the events are there) — never lost work.
   const materializeAfterCommit = (reason: string): void => {
     if (snapshotMode === 'sync') {
       materializeNow(reason);
       return;
     }
+    // COALESCE: the first commit of a burst schedules ONE flush; every commit within the window
+    // folds into it (it snapshots the latest state when it fires). The window is now ~1.5s
+    // (defaultSnapshotScheduler), so rapid placement triggers a flush at most every ~1.5s instead
+    // of ~265ms per piece — the PLACEFREEZE the user was hitting. Events are durable in the DB the
+    // instant they commit; the snapshot is only a fast-boot optimization (FLUSHDEBOUNCE req_1969).
     if (snapshotPending) {
       GAME_TELEMETRY.recordDiagnostic('worldStream', 'session.snapshot.coalesced', { reason, mode: snapshotMode });
       return;
@@ -297,6 +312,9 @@ export function createSessionLog(store: Store, options: SessionLogOptions = {}):
         if (closed) return;
         closed = true;
         stream.append({ kind: 'closed', session });
+        // Force the final snapshot now (a pending coalesced flush is captured; close is rare so the
+        // cost is fine) so a navigate/close persists the latest state + the 'closed' event.
+        snapshotPending = true;
         materializeNow('close');
       },
     };
