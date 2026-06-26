@@ -506,7 +506,9 @@ export function LoaderIsoView(props: {
   const PAINT_MAX_SPAN = 64;
   const paintKindOf = useCallback((a: Armed): 'wall' | 'floor' | null => {
     if (!a || a.kind !== 'piece') return null;
-    const k = GAME_BUILD.catalog.get(a.id).kind;
+    // The piece's FAMILY, not its raw kind — a cooked floor is kind:'prop' but
+    // places AS a floor, so it earns the floor's grid drag-paint (req_1944/1964).
+    const k = GAME_BUILD.catalog.family(a.id);
     return k === 'wall' || k === 'floor' ? k : null;
   }, []);
   const computePaintCells = useCallback((a: Armed, start: { x: number; z: number }, end: { x: number; z: number }): PaintCell[] => {
