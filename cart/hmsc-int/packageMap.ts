@@ -246,7 +246,7 @@ export function createHmscMapfile(
   // shell uses (pushVoidShell), so the baked water sits exactly where the shell
   // kept its towers clear. Rides the existing WATER lump — real ~water~, no new path.
   const voidWater = buildVoidWaterBodies(buildEdgeProfile(voidWorld, voidCore), VOID_SHELL_RING_CHUNKS);
-  const geometry = buildWorldInstances(state, liftedPieces, floors, { decalAssets: opts.decalAssets, voidGroundY });
+  const geometry = buildWorldInstances(state, liftedPieces, floors, { includeGroundLayers: true, decalAssets: opts.decalAssets, voidGroundY });
   const instances = encodeInstanceLump(geometry.instances, geometry.pieces);
   const materials = encodeMaterials(geometry.materials);
   const materialRefs = encodeMaterialRefs(geometry.materialRefs);
