@@ -445,16 +445,20 @@ function EditorShell() {
     () => (layer === 'place' && selPlacement ? buildObjectWorld(selPlacement.cat, selPlacement.kind, selPlacement.skin) : null),
     [layer, selPlacement?.cat, selPlacement?.kind, selPlacement?.skin],
   );
-  // req_1959: while HOLDING an unplaced prop, the properties panel must show THAT
-  // prop — not the tile brush ('TILE Asphalt' when you're clearly holding a Fire
-  // Hydrant). A prop's armed id is 'prop.<kind>', so build the same one-object
-  // preview placeFocus uses, dressed with the staged part textures so it previews
-  // exactly what will drop. Non-prop held pieces fall through to the default.
-  const armedFocus = useMemo(() => {
+  // While HOLDING an unplaced piece, the properties panel must show THAT piece —
+  // not the tile brush ('TILE Asphalt' when you're holding a Fire Hydrant or a
+  // Concrete Floor). A prop's armed id is 'prop.<kind>' → the same one-object
+  // preview placeFocus uses, dressed with the staged part textures (req_1959). A
+  // BUILD piece (floor/wall/ramp/…) has no prop/tile focus, so it gets a compact
+  // 'piece' identity focus by catalog id (req_1962). Returns {focus, world?}.
+  const armedFocus = useMemo<{ focus: Focus; world?: GameState } | null>(() => {
     const a = armed;
-    if (!a || a.kind !== 'piece' || !a.id.startsWith('prop.')) return null;
-    try { return buildObjectWorld('prop', a.id.slice('prop.'.length), undefined, armedDraft?.partTextures ?? undefined); }
-    catch { return null; }
+    if (!a || a.kind !== 'piece') return null;
+    if (a.id.startsWith('prop.')) {
+      try { const ow = buildObjectWorld('prop', a.id.slice('prop.'.length), undefined, armedDraft?.partTextures ?? undefined); return ow.focus ? { focus: ow.focus, world: ow.world } : null; }
+      catch { return null; }
+    }
+    return { focus: { kind: 'piece', id: a.id } };
   }, [armed, armedDraft]);
   // PANELSKIP req_1958: stable identity so a place (which changes none of these) doesn't hand
   // PropertiesPanel a fresh `focus` object and defeat its memo.

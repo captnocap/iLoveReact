@@ -24,6 +24,7 @@ import { isTileKind, tileKindDefinition } from './world/tileKinds';
 import { tileAltitudeAtWorldPosition, type TileAltitudeSample } from './world/tileAltitude';
 import { buildingKindDefinition } from './world/buildingKinds';
 import { propKindDefinition } from './game/kinds/props';
+import { GAME_BUILD } from './game';
 import { buildingSkinFacade } from './render3d/buildingSkins';
 import { FACE_ROLES, SKIN_NAMES, currentFaceSkins } from './buildingEditor';
 import { cellAddress } from './address';
@@ -37,7 +38,10 @@ export type Focus =
   | { kind: 'tile'; tile: TileKind; cell?: { x: number; z: number } }
   | { kind: 'tiles'; cells: SelCell[] }
   | { kind: 'building'; id: string }
-  | { kind: 'prop'; id: string };
+  | { kind: 'prop'; id: string }
+  // a BUILD piece (floor/wall/ramp/…) by catalog id — held or selected (req_1962),
+  // so the panel identifies the piece you're holding instead of the tile brush.
+  | { kind: 'piece'; id: string };
 
 type Role = typeof FACE_ROLES[number];
 
@@ -595,6 +599,19 @@ function altitudeRange(summary: AltitudeSummary, key: 'baseMeters' | 'surfaceMet
   return Math.abs(lo - hi) < 0.005 ? `${fmt(lo)}m` : `${fmt(lo)}-${fmt(hi)}m`;
 }
 
+// A held/selected BUILD piece (floor/wall/ramp/…) by catalog id — names what
+// you're holding (label + kind + theme + footprint) instead of the tile brush
+// leaking through as 'asphalt' (req_1962). Build pieces have no tile/prop focus,
+// so this is a compact identity banner, not the full hero band.
+function PieceBody(props: { id: string }) {
+  let def: any = null;
+  try { def = GAME_BUILD.catalog.get(props.id); } catch { def = null; }
+  if (!def) return <HeaderBar kind="PIECE" title={props.id} sub="unknown piece" />;
+  const s = def.size;
+  const dims = s ? `${s.widthMeters}×${s.depthMeters}×${s.heightMeters}m` : '';
+  return <HeaderBar kind={String(def.kind).toUpperCase()} title={def.label} sub={`${def.theme}${dims ? ` · ${dims}` : ''}`} />;
+}
+
 // ── Panel ────────────────────────────────────────────────────────────────────
 
 export function PropertiesPanel(props: {
@@ -639,6 +656,8 @@ export function PropertiesPanel(props: {
     }
   } else if (focus.kind === 'building') {
     body = <HeaderBar kind="BUILDING" title="legacy layer removed" sub={focus.id} />;
+  } else if (focus.kind === 'piece') {
+    body = <PieceBody id={focus.id} />;
   } else {
     const p = world.world.props.find((x) => x.id === focus.id);
     body = p ? <PropBody prop={p} onEdit={onEdit} /> : <HeaderBar kind="OBJECT" title="missing" sub={focus.id} />;
