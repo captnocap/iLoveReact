@@ -823,6 +823,14 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     const p = local(e);
     let mode: 'rotate' | 'move' | 'paint' = 'rotate';
     let gx0 = 0, gz0 = 0;
+    // TEMP req_1955 — why a custom floor won't grid-paint. Logs the armed piece's
+    // resolved family + paintKind on every press; remove once diagnosed.
+    if (armedRef.current?.kind === 'piece') {
+      try {
+        const id = (armedRef.current as any).id;
+        console.warn(`[paintdbg] id=${id} entry.kind=${GAME_BUILD.catalog.get(id).kind} family=${GAME_BUILD.catalog.family(id)} paintKind=${paintKindOf(armedRef.current)}`);
+      } catch (err) { console.warn('[paintdbg] threw', String(err)); }
+    }
     if (armedRef.current && paintKindOf(armedRef.current)) {
       // armed with a wall/floor → a drag PAINTS a line/rect; record the start ground point
       const g = stage.groundPoint(p.x, p.y, rectRef.current);
