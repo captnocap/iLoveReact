@@ -463,13 +463,15 @@ fn cookedDoorWorldBox(mesh: constructor.MeshPropMesh, inst: constructor.MeshProp
     const cc = @cos(rad);
     const ss = @sin(rad);
     // The hinge is the leaf's minimum-X local edge (a door leaf spans X, thin in Z),
-    // at the panel's Z center — taken to WORLD via the instance transform.
+    // at the panel's Z center — taken to WORLD via the instance transform. The
+    // rotation MUST match the engine's m4rotateY (x'=x·c+z·s, z'=-x·s+z·c) or the
+    // swing pivot won't cancel and the leaf slides across instead (req_1953).
     const hinge_lx = lo[0];
     return .{
         .open = door.start_open,
         .progress = if (door.start_open) 1.0 else 0.0,
-        .cx = inst.x + (lcx * cc - lcz * ss),
-        .cz = inst.z + (lcx * ss + lcz * cc),
+        .cx = inst.x + (lcx * cc + lcz * ss),
+        .cz = inst.z + (-lcx * ss + lcz * cc),
         .base_y = inst.y + lo[1],
         .panel_h = hi[1] - lo[1],
         .half_x = @abs(cc) * hx + @abs(ss) * hz,
@@ -478,8 +480,8 @@ fn cookedDoorWorldBox(mesh: constructor.MeshPropMesh, inst: constructor.MeshProp
         .node_x = inst.x,
         .node_z = inst.z,
         .yaw_degrees = inst.yaw_degrees,
-        .hinge_x = inst.x + (hinge_lx * cc - lcz * ss),
-        .hinge_z = inst.z + (hinge_lx * ss + lcz * cc),
+        .hinge_x = inst.x + (hinge_lx * cc + lcz * ss),
+        .hinge_z = inst.z + (-hinge_lx * ss + lcz * cc),
         .reach = door.reach,
         .vehicle = door.vehicle,
     };
@@ -5059,8 +5061,10 @@ pub const Runtime = struct {
             const dz = cd.node_z - cd.hinge_z;
             if (cd.node_child < self.kid_list.items.len) {
                 const node = &self.kid_list.items[cd.node_child];
-                node.scene3d_pos_x = cd.hinge_x + (dx * ct - dz * st);
-                node.scene3d_pos_z = cd.hinge_z + (dx * st + dz * ct);
+                // node_pos = hinge + Ry(theta)*(inst-hinge), Ry matching the engine's
+                // m4rotateY (x'=x·c+z·s, z'=-x·s+z·c) so the hinge edge stays fixed.
+                node.scene3d_pos_x = cd.hinge_x + (dx * ct + dz * st);
+                node.scene3d_pos_z = cd.hinge_z + (-dx * st + dz * ct);
                 node.scene3d_pos_y = cd.node_base_y;
                 node.scene3d_rot_y = cd.yaw_degrees + theta_deg;
             }
