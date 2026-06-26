@@ -12,7 +12,9 @@ import { Box, Text, Pressable } from '@reactjit/primitives';
 import { accentFor } from '../studio.cls';
 import { reportMapFootprint, type FootprintLike } from '../mapReport';
 import { reportPlacementCensus } from '../placementStats';
+import { reportDashboardFunMetrics, type DashboardBuildPeak, type DashboardFootprint } from '../dashboardMetrics';
 import type { ChunkFloor } from '../chunkFloor';
+import type { EditCategory, EditEvent } from '../editLog';
 
 // ── tiny formatters (no ICU — the embedded V8 may lack toLocaleString) ──────────
 function commas(n: number): string {
@@ -28,9 +30,25 @@ function dur(seconds: number): string {
   const r = s % 60;
   return r ? `${m}m ${r}s` : `${m}m`;
 }
+function oneDecimal(n: number): string {
+  return n >= 10 ? Math.round(n).toString() : n.toFixed(1);
+}
+function coord(n: number): string {
+  return oneDecimal(n);
+}
 
 const PANEL_BG = '#0c1422';
 const PANEL_BORDER = '#1c2940';
+const CAT_LABEL: Record<EditCategory, string> = {
+  tile: 'tile paint',
+  height: 'terrain',
+  zone: 'zones',
+  chunk: 'chunks',
+  object: 'objects',
+  camera: 'camera',
+  map: 'maps',
+  road: 'roads',
+};
 
 function Kicker(props: { children: React.ReactNode }) {
   return (
@@ -63,11 +81,22 @@ function Panel(props: { title: string; children: React.ReactNode }) {
   );
 }
 
+function DispatchLine(props: { lead: string; children: React.ReactNode }) {
+  return (
+    <Box style={{ flexDirection: 'column', gap: 4 }}>
+      <Text fontSize={16} color={accentFor('text')} style={{ fontFamily: 'monospace', fontWeight: 800 }}>{props.lead}</Text>
+      <Text fontSize={12} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace', lineHeight: 18 }}>{props.children}</Text>
+    </Box>
+  );
+}
+
 export function DashboardRoute(props: {
   mapName: string;
   floors: ChunkFloor[];
-  footprints: FootprintLike[];
+  footprints: (FootprintLike & DashboardFootprint)[];
   placedLabels: string[];
+  buildPeaks: DashboardBuildPeak[];
+  events: EditEvent[];
   onOpenEditor: () => void;
   onCompiled: () => void;
 }) {
@@ -78,6 +107,10 @@ export function DashboardRoute(props: {
     [props.floors, props.footprints],
   );
   const placed = useMemo(() => reportPlacementCensus(props.placedLabels), [props.placedLabels]);
+  const fun = useMemo(
+    () => reportDashboardFunMetrics({ footprints: props.footprints, buildPeaks: props.buildPeaks, events: props.events }),
+    [props.footprints, props.buildPeaks, props.events],
+  );
 
   const hasWorld = map.chunks > 0;
   const builtArea = Math.min(map.assetAreaM2, map.groundAreaM2);
@@ -180,6 +213,42 @@ export function DashboardRoute(props: {
                 place props and buildings to see your favourites.
               </Text>
             )}
+          </Panel>
+
+          <Panel title="MAP GOSSIP">
+            <Box style={{ flexDirection: 'column', gap: 14 }}>
+              {fun.densest ? (
+                <DispatchLine lead={`Chunk ${fun.densest.cx},${fun.densest.cz} is busiest`}>
+                  {commas(fun.densest.count)} placed thing{fun.densest.count === 1 ? '' : 's'} · {commas(fun.densest.uniqueKinds)} kind{fun.densest.uniqueKinds === 1 ? '' : 's'} · mostly {fun.densest.topLabel}
+                </DispatchLine>
+              ) : (
+                <DispatchLine lead="No busy chunk yet">place a few things and the map will start naming its hotspots.</DispatchLine>
+              )}
+              {fun.largest ? (
+                <DispatchLine lead={`${fun.largest.label} owns the biggest footprint`}>
+                  {area(fun.largest.areaM2)} of authored ground.
+                </DispatchLine>
+              ) : null}
+            </Box>
+          </Panel>
+
+          <Panel title="SKYLINE">
+            <Box style={{ flexDirection: 'column', gap: 14 }}>
+              {fun.tallest && fun.tallest.heightMeters > 0 ? (
+                <DispatchLine lead={`${fun.tallest.label} reaches ${oneDecimal(fun.tallest.heightMeters)}m`}>
+                  top at y={oneDecimal(fun.tallest.topY)} · around x={coord(fun.tallest.x)}, z={coord(fun.tallest.z)} · {commas(fun.tallest.pieces)} piece{fun.tallest.pieces === 1 ? '' : 's'}
+                </DispatchLine>
+              ) : (
+                <DispatchLine lead="No skyline yet">stack build pieces and the tallest one gets called out here.</DispatchLine>
+              )}
+              {fun.tempo ? (
+                <DispatchLine lead={`${oneDecimal(fun.tempo.editsPerMinute)} edits/min recently`}>
+                  {commas(fun.tempo.eventCount)} logged edits over {oneDecimal(fun.tempo.minutes)} min · mostly {CAT_LABEL[fun.tempo.category]}
+                </DispatchLine>
+              ) : (
+                <DispatchLine lead="Warming up">two recent edits are enough to start a working rhythm.</DispatchLine>
+              )}
+            </Box>
           </Panel>
         </Box>
 

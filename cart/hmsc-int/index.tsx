@@ -35,7 +35,7 @@ import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
 import { editorTunables, tuningStream } from './editors/tunables';
 import { ensureCookedRegistry } from './editors/model/cookedAssets';
-import { worldStream, buildingsStream, type PlacedBuildPiece, type BuildEditEvent } from './game';
+import { GAME_BUILD, worldStream, buildingsStream, type PlacedBuildPiece, type BuildEditEvent } from './game';
 import { useMapSession } from './editors/world/useMapSession';
 import { useBuildUndo } from './editors/world/useBuildUndo';
 import { usePlacements } from './editors/world/usePlacements';
@@ -369,6 +369,35 @@ function EditorShell() {
     () => [...placements.map((p) => p.label), ...buildFootprints.map((f) => f.label)],
     [placements, buildFootprints],
   );
+  const dashBuildPeaks = useMemo(() => {
+    if (!buildPieces.length || !buildFootprints.length) return [];
+    const byId = new Map(buildPieces.map((piece) => [piece.id, piece]));
+    return buildFootprints.map((fp) => {
+      let minY = Infinity;
+      let topY = -Infinity;
+      let sx = 0;
+      let sz = 0;
+      let count = 0;
+      for (const id of fp.pieceIds) {
+        const piece = byId.get(id);
+        if (!piece) continue;
+        const b = GAME_BUILD.placed.bounds(piece);
+        minY = Math.min(minY, b.baseY);
+        topY = Math.max(topY, b.topY);
+        sx += piece.x;
+        sz += piece.z;
+        count += 1;
+      }
+      return {
+        label: fp.label,
+        x: count ? sx / count : 0,
+        z: count ? sz / count : 0,
+        heightMeters: Number.isFinite(topY - minY) ? Math.max(0, topY - minY) : 0,
+        topY: Number.isFinite(topY) ? topY : 0,
+        pieces: count,
+      };
+    }).filter((peak) => peak.pieces > 0);
+  }, [buildPieces, buildFootprints]);
 
   // [LOADERVIEW req_1757] content centroid to seed the loader pane's iso camera so it
   // opens looking at what's built (the loader can't read the gamefile's center from JS).
@@ -749,6 +778,8 @@ function EditorShell() {
             floors={floors}
             footprints={dashFootprints}
             placedLabels={dashPlacedLabels}
+            buildPeaks={dashBuildPeaks}
+            events={events}
             onOpenEditor={() => { navStart('/editor'); nav.push('/editor'); }}
             onCompiled={() => { navStart('/compiled'); nav.push('/compiled'); }}
           />
