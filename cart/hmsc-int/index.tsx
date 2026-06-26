@@ -10,8 +10,8 @@ import { IsoAuthor, CatalogRail, sameArmed, type Armed } from './IsoAuthor';
 import { LoaderIsoView } from './LoaderIsoView';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas } from './PaintCanvas';
-import { PropertiesPanel, type Focus } from './PropertiesPanel';
-import { RightPanel } from './RightPanel';
+import { PropertiesPanel as PropertiesPanelImpl, type Focus } from './PropertiesPanel';
+import { RightPanel as RightPanelImpl } from './RightPanel';
 import type { SkinDraft } from './editors/build/FacePainter';
 import { buildObjectWorld } from './objectPreview';
 import { useKindTextures, kindTexturesFor } from './kindTextures';
@@ -93,6 +93,13 @@ function Pane(props: { label: string; children?: React.ReactNode }) {
 // the heavy canvas — its props are stable between strokes; it remounts only when
 // the map key changes (open / new).
 const MemoPaintCanvas = memo(PaintCanvas);
+
+// PANELSKIP req_1958: the right rail's always-visible panels (selected-item details + the
+// paint/prop tools) don't depend on the piece you place — memoize them so a placement re-renders
+// ONLY the loader pane, not the whole rail. Their props are stabilized at the call site (stable
+// callbacks from hooks, shownFocus/paintPieces memoized) so the shallow compare actually skips.
+const PropertiesPanel = memo(PropertiesPanelImpl);
+const RightPanel = memo(RightPanelImpl);
 
 // The cart's router: the editor at "/", the in-app churn-log viewer at "/log",
 // and the assistant-authored 3D route at "/assist3d". `hotKey` persists the
@@ -438,9 +445,11 @@ function EditorShell() {
     () => (layer === 'place' && selPlacement ? buildObjectWorld(selPlacement.cat, selPlacement.kind, selPlacement.skin) : null),
     [layer, selPlacement?.cat, selPlacement?.kind, selPlacement?.skin],
   );
-  const shownFocus: Focus = selCells.length
+  // PANELSKIP req_1958: stable identity so a place (which changes none of these) doesn't hand
+  // PropertiesPanel a fresh `focus` object and defeat its memo.
+  const shownFocus: Focus = useMemo(() => (selCells.length
     ? { kind: 'tiles', cells: selCells }
-    : (placeFocus?.focus ?? { kind: 'tile', tile });
+    : (placeFocus?.focus ?? { kind: 'tile', tile })), [selCells, placeFocus?.focus, tile]);
 
   // GLOBAL per-kind part textures (authored in the right-rail Objects inspector).
   // Subscribed so the preview rebuilds when a kind is re-skinned; folded into each
