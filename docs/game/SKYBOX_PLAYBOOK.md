@@ -106,6 +106,19 @@ by geography + trigger overlay.
 crossing with a real achievement, so it can NEVER fold (see §4). The dream-logic
 is road-only.
 
+> **EDGE CONTINUITY — BUILT (req_1970).** The geometric foundation of both halves
+> is live: the shell is now **edge-AWARE**. `game/void/edges.ts` reads what
+> authored features touch the core boundary (road exits via `footingKindAtWorldPosition`;
+> water edges from `world.waterBodies`); the shared shell generator continues
+> them — **roads seam straight out** (buildings step aside for the corridor) and
+> **water grows outward** as real `~water~` bodies (`game/void/voidWater.ts`):
+> "size decides — small→river (seeded meander), big→sea" (USER, `SEA_SPAN_METERS`).
+> Live (GameWorld3D/VoidShell) + compiled (pushVoidShell + the WATER lump), one
+> profile, no opaque-box fake. What's STILL design-gated is the *play* over this
+> geography — the coast's notoriety/apache gauntlet + far-shore achievement, and
+> the road's treadmill/fold (§4). This slice makes the edge read as the city
+> continuing, not stopping at filler; it does not yet make the crossing a level.
+
 ---
 
 ## 2 — Void Distance: believability decay (req_1101)
