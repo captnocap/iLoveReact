@@ -1,95 +1,82 @@
-// edges.test.ts — the edge-aware void (USER req_1970): the boundary profile, the
-// river/sea split, and the shell continuing a road through the void. Pure modules.
+// edges.test.ts — the declared edge-aware void (USER req_2005): void-edge tiles
+// the author paints become the EdgeProfile exits the void continues. Pure modules.
 
 import { assert, assertEqual, finish, test } from '../_testkit';
-import type { WorldState } from '../../design';
+import type { WorldState, VoidEdgeDecl } from '../../design';
 import type { WorldCore } from './distance';
-import { buildEdgeProfile, SEA_SPAN_METERS, type EdgeProfile } from './edges';
-import { buildVoidWaterBodies, voidWaterFootprints } from './voidWater';
+import { buildEdgeProfile, type EdgeProfile } from './edges';
+import { buildVoidWaterBodies } from './voidWater';
 import { buildShellBatch } from './shell';
 
 const CORE: WorldCore = { minX: 0, minZ: 0, maxX: 240, maxZ: 240, centerX: 120, centerZ: 120 };
 
-// A world stub carrying only what the edge profile reads (no painted tiles, so no
-// road exits are sampled — the road path is exercised directly via the shell test).
-function waterWorld(bodies: WorldState['waterBodies']): WorldState {
-  return {
-    cellSizeMeters: 1,
-    surfaceRegions: [],
-    placedCells: {},
-    landforms: [],
-    waterBodies: bodies,
-  } as unknown as WorldState;
+// A world stub: cell size + void-edge declarations + (optional) water bodies for
+// surface-height matching. Declared cells sit at x=239 = the +X edge column.
+function declWorld(voidEdges: VoidEdgeDecl[], waterBodies: WorldState['waterBodies'] = []): WorldState {
+  return { cellSizeMeters: 1, waterBodies, voidEdges } as unknown as WorldState;
 }
 
-test('a small water body at the edge profiles as a RIVER; a wide one as a SEA', () => {
-  // Body spanning z 80..160 (span 80) reaching the +X edge → river.
-  const river = buildEdgeProfile(waterWorld([
-    { id: 'pond', label: 'p', shape: 'rect', x: 180, z: 80, width: 120, depth: 80, surfaceY: 0.5, createdByCommand: 't' },
+test('a painted run of void_road cells groups into ONE road exit at the edge', () => {
+  const p = buildEdgeProfile(declWorld([
+    { x: 239, z: 118, kind: 'road' }, { x: 239, z: 119, kind: 'road' },
+    { x: 239, z: 120, kind: 'road' }, { x: 239, z: 121, kind: 'road' },
   ]), CORE);
-  assertEqual(river.waterEdges.length, 1, 'one water edge detected at +X');
-  assertEqual(river.waterEdges[0]!.nx, 1, 'outward normal points +X');
-  assert(river.waterEdges[0]!.span < SEA_SPAN_METERS && !river.waterEdges[0]!.sea, 'span under threshold → river');
-
-  // Body spanning the whole z extent (span 240 ≥ threshold) → sea.
-  const sea = buildEdgeProfile(waterWorld([
-    { id: 'gulf', label: 'g', shape: 'rect', x: 180, z: 9, width: 120, depth: 222, surfaceY: 0.5, createdByCommand: 't' },
-  ]), CORE);
-  assert(sea.waterEdges[0]!.span >= SEA_SPAN_METERS && sea.waterEdges[0]!.sea, 'wide span → sea');
+  assertEqual(p.roadExits.length, 1, 'four adjacent cells → one exit');
+  assertEqual(p.roadExits[0]!.width, 4, 'width = run length in metres');
+  assertEqual(p.roadExits[0]!.nx, 1, 'outward normal points off the +X edge');
+  assert(Math.abs(p.roadExits[0]!.z - 120) < 1e-6, 'centred on the run');
+  assert(Math.abs(p.roadExits[0]!.x - 240) < 1e-6, 'sits on the boundary rim');
 });
 
-test('void water continues outward and stays seeded (river chain vs one sea rect)', () => {
-  const riverEdge = buildEdgeProfile(waterWorld([
-    { id: 'pond', label: 'p', shape: 'rect', x: 180, z: 80, width: 120, depth: 80, surfaceY: 0.5, createdByCommand: 't' },
+test('a gap splits a run into two exits; kinds route to their channels', () => {
+  const p = buildEdgeProfile(declWorld([
+    { x: 239, z: 10, kind: 'road' }, { x: 239, z: 11, kind: 'road' },
+    { x: 239, z: 40, kind: 'road' }, // gap → second exit
+    { x: 239, z: 80, kind: 'river' },
+    { x: 239, z: 120, kind: 'sea' }, { x: 239, z: 121, kind: 'sea' },
+    { x: 239, z: 200, kind: 'grass' },
   ]), CORE);
-  const riverA = buildVoidWaterBodies(riverEdge, 8);
-  const riverB = buildVoidWaterBodies(riverEdge, 8);
-  assert(riverA.length > 1, 'river is a chain of segments stepping outward');
-  assert(riverA.every((b) => b.x + b.width > CORE.maxX - 1), 'river segments sit outside the core');
-  assert(riverA.every((b, i) => b.x === riverB[i]!.x && b.z === riverB[i]!.z), 'seeded — identical on rebuild');
-  // Meander: not every segment shares the same lateral centre (a straight canal would).
-  const centres = new Set(riverA.map((b) => Math.round(b.z + b.depth / 2)));
-  assert(centres.size > 1, 'the channel wanders (seeded meander), not a straight canal');
-
-  const seaEdge = buildEdgeProfile(waterWorld([
-    { id: 'gulf', label: 'g', shape: 'rect', x: 180, z: 9, width: 120, depth: 222, surfaceY: 0.5, createdByCommand: 't' },
-  ]), CORE);
-  const sea = buildVoidWaterBodies(seaEdge, 8);
-  assertEqual(sea.length, 1, 'a sea is one wide opening, not a chain');
-  assert(sea[0]!.width >= 8 * 160, 'the sea reaches the horizon ring');
+  assertEqual(p.roadExits.length, 2, 'the gap breaks the road into two exits');
+  assertEqual(p.waterEdges.length, 2, 'one river + one sea');
+  assertEqual(p.waterEdges.filter((w) => !w.sea).length, 1, 'void_water → river (sea:false)');
+  assertEqual(p.waterEdges.filter((w) => w.sea).length, 1, 'void_sea → sea (sea:true)');
+  assertEqual(p.grassEdges.length, 1, 'void_grass → a grass edge');
 });
 
-// A road exit on the +X edge at z=120, ten metres wide.
-const ROAD_EDGE: EdgeProfile = { roadExits: [{ x: 240, z: 120, nx: 1, nz: 0, width: 10 }], waterEdges: [] };
+test('an undeclared world yields an empty profile (pure opt-in, no auto-detect)', () => {
+  const p = buildEdgeProfile(declWorld([]), CORE);
+  assertEqual(p.roadExits.length + p.waterEdges.length + p.grassEdges.length, 0, 'nothing continues without a declaration');
+});
+
+test('a void river continues at the nearby authored water level (no step at the seam)', () => {
+  const p = buildEdgeProfile(declWorld(
+    [{ x: 239, z: 120, kind: 'river' }],
+    [{ id: 'lake', label: 'l', shape: 'rect', x: 200, z: 100, width: 39, depth: 40, surfaceY: 1.7, createdByCommand: 't' }],
+  ), CORE);
+  assert(Math.abs(p.waterEdges[0]!.surfaceY - 1.7) < 1e-6, 'river surface matches the adjacent lake');
+  const bodies = buildVoidWaterBodies(p, 8);
+  assert(bodies.length > 1 && bodies.every((b) => Math.abs(b.surfaceY - 1.7) < 1e-6), 'continuation bodies inherit that level');
+});
+
+// Direct EdgeProfile drivers for the shell (no world needed).
 const ROAD_COLOR = [0.13, 0.13, 0.15];
+const GRASS_COLOR = [0.22, 0.42, 0.18];
 function rows(data: number[]): number[][] {
   return Array.from({ length: data.length / 9 }, (_, i) => data.slice(i * 9, i * 9 + 9));
 }
-const isRoad = (r: number[]) => Math.abs(r[6]! - ROAD_COLOR[0]!) < 1e-6 && Math.abs(r[7]! - ROAD_COLOR[1]!) < 1e-6 && Math.abs(r[8]! - ROAD_COLOR[2]!) < 1e-6;
-const isBuilding = (r: number[]) => r[6]! >= 0.3; // colorForHeight floor; road/ground are darker
+const colorIs = (r: number[], c: number[]) => Math.abs(r[6]! - c[0]!) < 1e-6 && Math.abs(r[7]! - c[1]!) < 1e-6 && Math.abs(r[8]! - c[2]!) < 1e-6;
+const isBuilding = (r: number[]) => r[6]! >= 0.3;
 
-test('a road exit seams straight out through the void shell', () => {
-  // Focus a couple hundred metres past the +X edge, on the road line.
-  const batch = buildShellBatch(440, 120, CORE, 2, ROAD_EDGE, []);
-  const corridor = rows(batch.data).filter((r) => isRoad(r) && r[0]! > 240 && Math.abs(r[2]! - 120) < 6);
-  assert(corridor.length > 0, 'road boxes continue outward along the corridor centerline');
+test('a declared road seams straight out; a declared grass field re-skins the ground', () => {
+  const roadEdge: EdgeProfile = { roadExits: [{ x: 240, z: 120, nx: 1, nz: 0, width: 10 }], waterEdges: [], grassEdges: [] };
+  const road = rows(buildShellBatch(440, 120, CORE, 2, roadEdge, []).data);
+  assert(road.some((r) => colorIs(r, ROAD_COLOR) && r[0]! > 240 && Math.abs(r[2]! - 120) < 6), 'road continues outward along the corridor');
+  assertEqual(road.filter((r) => isBuilding(r) && Math.abs(r[2]! - 120) < 10 && r[0]! > 240).length, 0, 'no towers on the road seam');
 
-  // No tower sprouts on the open road seam.
-  const onSeam = rows(batch.data).filter((r) => isBuilding(r) && Math.abs(r[2]! - 120) < 10 && r[0]! > 240);
-  assertEqual(onSeam.length, 0, 'buildings step aside for the road corridor');
-
-  // Without the edge profile the same window has no road continuation at z=120.
-  const blind = rows(buildShellBatch(440, 120, CORE, 2).data).filter((r) => isRoad(r) && Math.abs(r[2]! - 120) < 6 && r[0]! > 240);
-  assertEqual(blind.length, 0, 'edge-blind shell draws no corridor (proves the seam is edge-driven)');
+  const grassEdge: EdgeProfile = { roadExits: [], waterEdges: [], grassEdges: [{ x: 240, z: 120, nx: 1, nz: 0, span: 40 }] };
+  const grass = rows(buildShellBatch(440, 120, CORE, 2, grassEdge, []).data);
+  assert(grass.some((r) => colorIs(r, GRASS_COLOR) && r[0]! > 240 && Math.abs(r[2]! - 120) < 22), 'a green field re-skins the ground over the corridor');
+  assertEqual(grass.filter((r) => isBuilding(r) && Math.abs(r[2]! - 120) < 22 && r[0]! > 240).length, 0, 'no towers on the grass field');
 });
 
-test('void water suppresses shell buildings inside its footprint', () => {
-  // A water rect covering a chunk just past the +X edge.
-  const water = [{ minX: 240, minZ: 80, maxX: 560, maxZ: 160 }];
-  const batch = buildShellBatch(440, 120, CORE, 2, { roadExits: [], waterEdges: [] }, water);
-  const towersInWater = rows(batch.data).filter((r) => isBuilding(r) && r[0]! >= 240 && r[0]! <= 560 && r[2]! >= 80 && r[2]! <= 160);
-  assertEqual(towersInWater.length, 0, 'no buildings bake inside the void-water footprint');
-});
-
-void voidWaterFootprints; // re-exported helper, exercised via the shell wiring
-finish('void edges (req_1970)');
+finish('void edges — declared (req_2005)');

@@ -283,7 +283,26 @@ export type WorldState = {
   // Living actors in this space, keyed by npc id. A first-class world layer, so
   // an interior carries its own crowd through the active-world swap. See npc/.
   npcs: Record<string, NpcState>;
+  // Void-edge DECLARATIONS (USER req_2005): cells the author paints on the map's
+  // edge to say "from here into the skybox void, continue THIS". The cell itself
+  // stays a real tile (no gap); this is the metadata the void shell + void-water
+  // read to seam roads / rivers / seas / grass outward instead of generic filler.
+  // A first-class sparse layer, peer of waterBodies. Absent ⇒ the void is the
+  // generic procedural city everywhere (pure opt-in). See game/void/edges.ts.
+  voidEdges?: VoidEdgeDecl[];
 }
+
+// What the void continues past a declared edge cell. Each maps to a continuation
+// the shell/void-water already know how to draw (road corridor, river channel,
+// open sea, grass field). 1 cell = 1 declaration; a painted RUN of them becomes
+// one wide exit (game/void/edges.ts groups adjacent same-kind cells).
+export type VoidEdgeKind = 'road' | 'river' | 'sea' | 'grass';
+
+// One painted void-edge cell, in world CELL coordinates (the tile grid), plus the
+// real tile kind stamped under it (so it renders with no gap even before the
+// continuation begins). The outward direction is derived from which map edge the
+// cell sits on (game/void/edges.ts), not stored.
+export type VoidEdgeDecl = { x: number; z: number; kind: VoidEdgeKind };
 
 // A placed building. Like a road or a prop, a building is a first-class world
 // layer (not a field of tiles): each one owns a footprint and a sculpted mass.

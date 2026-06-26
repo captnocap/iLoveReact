@@ -13,7 +13,7 @@
 
 import { voidHash } from './distortion';
 import { distanceOutsideCore, pointInCore, type WorldCore } from './distance';
-import type { EdgeProfile, RoadExit } from './edges';
+import type { EdgeProfile } from './edges';
 import { EMPTY_EDGE_PROFILE } from './edges';
 
 // An axis-aligned water footprint the shell suppresses buildings inside (the
@@ -31,28 +31,32 @@ function pointInAnyRect(x: number, z: number, rects: readonly WaterRect[], margi
   return false;
 }
 
-// Where a road exit's outward corridor crosses one chunk: the road box to draw
-// (clipped to the chunk and to the outward side of the boundary crossing) and
-// the centerline a building lot must clear. Null when the corridor misses the
-// chunk. Corridors are axis-aligned (the exit normal is ±X or ±Z), so the road
-// runs straight out — clean against the axis grid.
+// An outward continuation corridor (road OR grass field): where it crosses the
+// map edge, its outward normal, and its width along the edge.
+type Corridor = { x: number; z: number; nx: number; nz: number; width: number };
+
+// Where a corridor crosses one chunk: the strip box to draw (clipped to the chunk
+// and to the outward side of the boundary crossing) and the centerline a building
+// lot must clear. Null when the corridor misses the chunk. Corridors are
+// axis-aligned (the normal is ±X or ±Z), so they run straight out — clean against
+// the axis grid.
 type RoadStrip = { cx: number; cz: number; sx: number; sz: number; lineX: number; lineZ: number; halfW: number; alongX: boolean };
-function roadStripInChunk(exit: RoadExit, ox: number, oz: number, span: number): RoadStrip | null {
-  const halfW = Math.max(SEAM_CLEAR_METERS, exit.width / 2);
-  const alongX = Math.abs(exit.nx) > 0.5;
+function corridorStripInChunk(c: Corridor, ox: number, oz: number, span: number): RoadStrip | null {
+  const halfW = Math.max(SEAM_CLEAR_METERS, c.width / 2);
+  const alongX = Math.abs(c.nx) > 0.5;
   if (alongX) {
-    // Corridor centerline z = exit.z; runs in x toward sign(nx) from exit.x.
-    if (exit.z < oz - halfW || exit.z > oz + span + halfW) return null;
-    const lo = exit.nx > 0 ? Math.max(ox, exit.x) : ox;
-    const hi = exit.nx > 0 ? ox + span : Math.min(ox + span, exit.x);
+    // Corridor centerline z = c.z; runs in x toward sign(nx) from c.x.
+    if (c.z < oz - halfW || c.z > oz + span + halfW) return null;
+    const lo = c.nx > 0 ? Math.max(ox, c.x) : ox;
+    const hi = c.nx > 0 ? ox + span : Math.min(ox + span, c.x);
     if (hi - lo <= 0) return null;
-    return { cx: (lo + hi) / 2, cz: exit.z, sx: hi - lo, sz: exit.width, lineX: 0, lineZ: exit.z, halfW, alongX };
+    return { cx: (lo + hi) / 2, cz: c.z, sx: hi - lo, sz: c.width, lineX: 0, lineZ: c.z, halfW, alongX };
   }
-  if (exit.x < ox - halfW || exit.x > ox + span + halfW) return null;
-  const lo = exit.nz > 0 ? Math.max(oz, exit.z) : oz;
-  const hi = exit.nz > 0 ? oz + span : Math.min(oz + span, exit.z);
+  if (c.x < ox - halfW || c.x > ox + span + halfW) return null;
+  const lo = c.nz > 0 ? Math.max(oz, c.z) : oz;
+  const hi = c.nz > 0 ? oz + span : Math.min(oz + span, c.z);
   if (hi - lo <= 0) return null;
-  return { cx: exit.x, cz: (lo + hi) / 2, sx: exit.width, sz: hi - lo, lineX: exit.x, lineZ: 0, halfW, alongX };
+  return { cx: c.x, cz: (lo + hi) / 2, sx: c.width, sz: hi - lo, lineX: c.x, lineZ: 0, halfW, alongX };
 }
 
 // One procedural chunk is 160 m square — the lab's proven streaming grain.
@@ -173,16 +177,25 @@ function generateChunk(
     0.20, 0.21, 0.24,
   );
 
-  // Authored roads that exit the map seam straight out THROUGH this chunk. Drawn
-  // a hair above the street-cross so the continuation reads as the same road.
+  // Declared continuations crossing THIS chunk. Each adds a strip (so buildings
+  // step aside); roads draw their carriageway, grass re-skins the ground green.
   const strips: RoadStrip[] = [];
   for (const exit of edge.roadExits) {
-    const strip = roadStripInChunk(exit, ox, oz, SHELL_CHUNK_METERS);
+    const strip = corridorStripInChunk(exit, ox, oz, SHELL_CHUNK_METERS);
+    // Drawn a hair above the street-cross so the continuation reads as the road.
     if (strip) { strips.push(strip); emit('road', strip.cx, groundY + 0.04, strip.cz, strip.sx, GROUND_THICKNESS, strip.sz, 0.13, 0.13, 0.15); }
   }
+  let grassy = false;
+  for (const g of edge.grassEdges) {
+    const strip = corridorStripInChunk({ x: g.x, z: g.z, nx: g.nx, nz: g.nz, width: g.span }, ox, oz, SHELL_CHUNK_METERS);
+    // A green field re-skins the ground over the strip (just above the grey bed),
+    // and like a road it keeps towers off — a meadow running out of the city.
+    if (strip) { strips.push(strip); grassy = true; emit('ground', strip.cx, groundY + 0.02, strip.cz, strip.sx, GROUND_THICKNESS, strip.sz, 0.22, 0.42, 0.18); }
+  }
 
-  // A simple street cross sells "blocks" cheaply — but not over open water.
-  if (!watered) {
+  // A simple street cross sells "blocks" cheaply — but not over open water or a
+  // grass field (both want clear ground, not a road grid).
+  if (!watered && !grassy) {
     const roadW = 9;
     emit('road', ox + half, groundY + 0.03, oz + half, SHELL_CHUNK_METERS, GROUND_THICKNESS, roadW, 0.13, 0.13, 0.15);
     emit('road', ox + half, groundY + 0.03, oz + half, roadW, GROUND_THICKNESS, SHELL_CHUNK_METERS, 0.13, 0.13, 0.15);

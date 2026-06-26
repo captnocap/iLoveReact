@@ -1,154 +1,127 @@
-// void/edges.ts — the EDGE PROFILE: what authored features touch the core's
-// perimeter, so the procedural shell can CONTINUE them outward instead of
-// dropping generic filler against them (USER req_1970, SKYBOX_PLAYBOOK §1: the
-// road seams contiguously into the void; the water opens to the coast).
+// void/edges.ts — the EDGE PROFILE: what the AUTHOR declared the skybox void
+// should become past each map edge, so the procedural shell continues it instead
+// of dropping generic filler (USER req_2005, supersedes the req_1970 auto-detect).
 //
-// Seam 1's shell was edge-BLIND — every void chunk got the same hash ground +
-// street-cross + buildings regardless of what it grew out of, which reads as
-// "filler slop" the moment a road or a lake hits the map edge and just stops.
-// This module reads the boundary once and answers: "a road exits here, headed
-// THIS way, THIS wide" and "water reaches the edge here, THIS wide". The shell
-// (game/void/shell.ts) and the void-water generator (game/void/voidWater.ts)
-// consume it; both the live editor batch and the compiled bake share the ONE
-// profile (rule of two — no second copy to drift).
+// The author paints void-edge tiles on the real edge of their map (the cell stays
+// a real road/water/grass tile — no gap — and ALSO records a VoidEdgeDecl). This
+// module turns those sparse per-cell declarations into the few EXITS the void
+// generators consume: "a road leaves here, THIS wide, headed THIS way", "a river
+// seams out here", "the coast opens here", "grass runs out here". Un-declared
+// edges get nothing — the void stays the generic hash-city there (pure opt-in).
 //
-// Everything is a pure function of the authored world + core rectangle, so it is
-// testable headless and deterministic (discipline #3).
+// Adjacent same-kind cells on the same edge are GROUPED into one wide exit, so a
+// painted 10-tile road run continues as one 10-tile road, not ten thin slivers.
+//
+// Pure function of the authored world + core rectangle — testable headless and
+// deterministic (discipline #3). Both the live editor batch and the compiled bake
+// share the ONE profile (rule of two — no second copy to drift).
 
-import type { WorldState } from '../../design';
-import { footingKindAtWorldPosition, type WorldGridState } from '../world';
+import type { WorldState, VoidEdgeDecl, VoidEdgeKind } from '../../design';
 import type { WorldCore } from './distance';
 
-// Tile kinds that read as "a road leaves the city here". The sidewalk ISN'T one
-// — a sidewalk butting the edge shouldn't sprout a highway — but the drivable
-// surfaces and their crossings/lots are. Matches game/kinds/tiles road family.
-const ROAD_TILES = new Set(['road', 'asphalt', 'junction', 'crosswalk', 'parking']);
-
-// Perimeter sampling step (m). Fine enough to catch a single-lane road (~9 m)
-// without missing it between samples, coarse enough that one profile build is a
-// few hundred footing lookups, done once and memoized on the world.
-const SAMPLE_STEP_METERS = 4;
-// Read the authored surface this far INSIDE the edge — the map's last honest
-// cell, never a point already outside the rectangle.
-const EDGE_INSET_METERS = 2;
-// A water body counts as "reaching" an edge when its far side comes within this
-// of the boundary (painted bodies rarely land exactly on it).
-const WATER_EDGE_EPS_METERS = 8;
-// A road run shorter than this along the edge is noise (a corner clip), not a
-// real exit.
-const MIN_ROAD_EXIT_METERS = 5;
-// Water touching the edge wider than this opens into the SEA / coast (the
-// playbook's forbidden crossing); narrower seams into a RIVER. The user's rule:
-// "size decides — small→river, big→sea". ~1.5 shell chunks.
-export const SEA_SPAN_METERS = 220;
-
 // The four core edges, each with its outward unit normal (axis-aligned — the
-// rectangle's sides). Continuations run straight out along these, which reads
-// clean against the axis road grid.
+// rectangle's sides). Continuations run straight out along these.
 export type EdgeSide = 'minX' | 'maxX' | 'minZ' | 'maxZ';
 const SIDE_NORMAL: Record<EdgeSide, [number, number]> = {
   minX: [-1, 0], maxX: [1, 0], minZ: [0, -1], maxZ: [0, 1],
 };
 
-// A road that leaves the authored map: where it crosses the boundary, the
-// outward direction it heads, and how wide it is along the edge.
-export type RoadExit = {
-  x: number; z: number;     // boundary-crossing midpoint (world metres)
-  nx: number; nz: number;   // outward unit normal (axis-aligned)
-  width: number;            // road width measured along the edge (m)
-};
+// A road that leaves the map: boundary-crossing midpoint, outward normal, width.
+export type RoadExit = { x: number; z: number; nx: number; nz: number; width: number };
+// Water leaving the map: + how wide along the edge, its surface height, and
+// whether it's the open coast (sea) or a river.
+export type WaterEdge = { x: number; z: number; nx: number; nz: number; span: number; surfaceY: number; sea: boolean };
+// Grass running out past the map: a field strip of this width heads outward.
+export type GrassEdge = { x: number; z: number; nx: number; nz: number; span: number };
 
-// Water that reaches the authored map's edge: the crossing midpoint, outward
-// direction, how wide it is along the edge, its surface height, and whether it's
-// big enough to open into a sea (vs seam into a river).
-export type WaterEdge = {
-  x: number; z: number;
-  nx: number; nz: number;
-  span: number;             // water width along the edge (m)
-  surfaceY: number;
-  sea: boolean;             // span ≥ SEA_SPAN_METERS → coast/sea, else river
-};
+export type EdgeProfile = { roadExits: RoadExit[]; waterEdges: WaterEdge[]; grassEdges: GrassEdge[] };
+export const EMPTY_EDGE_PROFILE: EdgeProfile = { roadExits: [], waterEdges: [], grassEdges: [] };
 
-export type EdgeProfile = { roadExits: RoadExit[]; waterEdges: WaterEdge[] };
+// Default void-water surface height when no authored body is nearby to match —
+// roughly ground level, so the river/sea reads as sitting in the world.
+const DEFAULT_VOID_WATER_Y = 0;
 
-export const EMPTY_EDGE_PROFILE: EdgeProfile = { roadExits: [], waterEdges: [] };
-
-// Walk one edge sampling the authored footing kind just inside it; emit a
-// RoadExit per contiguous run of road-family tiles. `along` returns the world
-// point at parameter t (metres) along that edge's inset line.
-function roadExitsOnEdge(
-  grid: WorldGridState,
-  side: EdgeSide,
-  length: number,
-  along: (t: number) => { x: number; z: number },
-): RoadExit[] {
-  const [nx, nz] = SIDE_NORMAL[side];
-  const exits: RoadExit[] = [];
-  let runStart = -1; // t where the current road run began, -1 = not in a run
-  let prevT = 0;
-  const close = (endT: number) => {
-    if (runStart < 0) return;
-    const width = endT - runStart;
-    if (width >= MIN_ROAD_EXIT_METERS) {
-      const mid = along((runStart + endT) / 2);
-      exits.push({ x: mid.x, z: mid.z, nx, nz, width });
-    }
-    runStart = -1;
+// Which map edge a declared cell sits on = the nearest core side. Edge cells land
+// within half a cell of their boundary, so the min distance is unambiguous.
+function sideOf(wx: number, wz: number, core: WorldCore): EdgeSide {
+  const d: Record<EdgeSide, number> = {
+    minX: wx - core.minX, maxX: core.maxX - wx, minZ: wz - core.minZ, maxZ: core.maxZ - wz,
   };
-  for (let t = 0; t <= length; t += SAMPLE_STEP_METERS) {
-    const p = along(t);
-    const kind = footingKindAtWorldPosition(grid, { x: p.x, y: 0, z: p.z });
-    const isRoad = kind != null && ROAD_TILES.has(kind);
-    if (isRoad && runStart < 0) runStart = t;
-    else if (!isRoad && runStart >= 0) close(prevT + SAMPLE_STEP_METERS / 2);
-    prevT = t;
-  }
-  close(length);
-  return exits;
+  let best: EdgeSide = 'minX';
+  for (const s of Object.keys(d) as EdgeSide[]) if (d[s] < d[best]) best = s;
+  return best;
 }
 
-// Every water body that reaches a given edge → one WaterEdge (a body in a corner
-// can reach two edges, emitting one each). The crossing span is the body's
-// overlap with the core's extent ALONG that edge.
-function waterEdgesFor(world: WorldState, core: WorldCore): WaterEdge[] {
-  const out: WaterEdge[] = [];
+// The boundary X (or Z) the exits sit on for a side — the rim of the authored map.
+function edgeAxisValue(side: EdgeSide, core: WorldCore): number {
+  return side === 'minX' ? core.minX : side === 'maxX' ? core.maxX : side === 'minZ' ? core.minZ : core.maxZ;
+}
+
+// Nearest authored water surface to a point, so a void river/sea continues at the
+// SAME level as the lake it grows from (no step at the seam). Falls back to a flat
+// default when the author declared water with no body nearby.
+function nearestWaterSurfaceY(world: WorldState, wx: number, wz: number): number {
+  let best = DEFAULT_VOID_WATER_Y;
+  let bestD = Infinity;
   for (const b of world.waterBodies ?? []) {
-    const bMinX = b.x, bMaxX = b.x + b.width;
-    const bMinZ = b.z, bMaxZ = b.z + b.depth;
-    // Overlap of the body with the core's span on each axis (clamped to the core
-    // so a body sticking far past the edge still reports the on-edge width).
-    const ozLo = Math.max(bMinZ, core.minZ), ozHi = Math.min(bMaxZ, core.maxZ);
-    const oxLo = Math.max(bMinX, core.minX), oxHi = Math.min(bMaxX, core.maxX);
-    const push = (side: EdgeSide, x: number, z: number, span: number) => {
-      if (span < MIN_ROAD_EXIT_METERS) return;
-      const [nx, nz] = SIDE_NORMAL[side];
-      out.push({ x, z, nx, nz, span, surfaceY: b.surfaceY, sea: span >= SEA_SPAN_METERS });
-    };
-    if (bMaxX >= core.maxX - WATER_EDGE_EPS_METERS && bMinX < core.maxX && ozHi > ozLo)
-      push('maxX', core.maxX, (ozLo + ozHi) / 2, ozHi - ozLo);
-    if (bMinX <= core.minX + WATER_EDGE_EPS_METERS && bMaxX > core.minX && ozHi > ozLo)
-      push('minX', core.minX, (ozLo + ozHi) / 2, ozHi - ozLo);
-    if (bMaxZ >= core.maxZ - WATER_EDGE_EPS_METERS && bMinZ < core.maxZ && oxHi > oxLo)
-      push('maxZ', (oxLo + oxHi) / 2, core.maxZ, oxHi - oxLo);
-    if (bMinZ <= core.minZ + WATER_EDGE_EPS_METERS && bMaxZ > core.minZ && oxHi > oxLo)
-      push('minZ', (oxLo + oxHi) / 2, core.minZ, oxHi - oxLo);
+    const cx = Math.max(b.x, Math.min(wx, b.x + b.width));
+    const cz = Math.max(b.z, Math.min(wz, b.z + b.depth));
+    const dist = Math.hypot(wx - cx, wz - cz);
+    if (dist < bestD) { bestD = dist; best = b.surfaceY; }
   }
-  return out;
+  return best;
 }
 
-// Read the authored boundary once → the edge profile the shell + void-water
-// generators continue outward. Pure; memoize on the world where it's called.
+// Read the authored declarations → the exits the void generators continue. Pure;
+// memoize on the world where it's called.
 export function buildEdgeProfile(world: WorldState, core: WorldCore): EdgeProfile {
-  if (!world || !(core.maxX > core.minX) || !(core.maxZ > core.minZ)) return EMPTY_EDGE_PROFILE;
-  const grid = world as unknown as WorldGridState;
-  const inset = EDGE_INSET_METERS;
-  const wSpan = core.maxX - core.minX;
-  const dSpan = core.maxZ - core.minZ;
-  const roadExits = [
-    ...roadExitsOnEdge(grid, 'minX', dSpan, (t) => ({ x: core.minX + inset, z: core.minZ + t })),
-    ...roadExitsOnEdge(grid, 'maxX', dSpan, (t) => ({ x: core.maxX - inset, z: core.minZ + t })),
-    ...roadExitsOnEdge(grid, 'minZ', wSpan, (t) => ({ x: core.minX + t, z: core.minZ + inset })),
-    ...roadExitsOnEdge(grid, 'maxZ', wSpan, (t) => ({ x: core.minX + t, z: core.maxZ - inset })),
-  ];
-  return { roadExits, waterEdges: waterEdgesFor(world, core) };
+  const out = EMPTY_EDGE_PROFILE;
+  if (!world || !(core.maxX > core.minX) || !(core.maxZ > core.minZ)) return out;
+  const cell = world.cellSizeMeters;
+  const decls = world.voidEdges ?? [];
+  if (decls.length === 0) return { roadExits: [], waterEdges: [], grassEdges: [] };
+
+  // Bucket by (side, kind); within a bucket sort by tangential cell index and
+  // merge adjacent cells into runs.
+  const buckets = new Map<string, { t: number; cellWx: number; cellWz: number }[]>();
+  for (const d of decls) {
+    const wx = (d.x + 0.5) * cell;
+    const wz = (d.z + 0.5) * cell;
+    const side = sideOf(wx, wz, core);
+    const tangential = side === 'minX' || side === 'maxX' ? d.z : d.x;
+    const key = `${side}|${d.kind}`;
+    const arr = buckets.get(key) ?? [];
+    arr.push({ t: tangential, cellWx: wx, cellWz: wz });
+    buckets.set(key, arr);
+  }
+
+  const roadExits: RoadExit[] = [];
+  const waterEdges: WaterEdge[] = [];
+  const grassEdges: GrassEdge[] = [];
+  for (const [key, cells] of buckets) {
+    const [sideStr, kindStr] = key.split('|');
+    const side = sideStr as EdgeSide;
+    const kind = kindStr as VoidEdgeKind;
+    const [nx, nz] = SIDE_NORMAL[side];
+    const alongX = side === 'minZ' || side === 'maxZ'; // edge runs along X
+    cells.sort((a, b) => a.t - b.t);
+    // Walk sorted cells, breaking a run wherever a gap > 1 cell appears.
+    let start = 0;
+    for (let i = 1; i <= cells.length; i += 1) {
+      const broken = i === cells.length || cells[i]!.t - cells[i - 1]!.t > 1;
+      if (!broken) continue;
+      const run = cells.slice(start, i);
+      start = i;
+      const span = run.length * cell;
+      // Exit sits on the boundary rim, centred on the run.
+      const midT = (run[0]!.t + run[run.length - 1]!.t) / 2;
+      const midMeters = (midT + 0.5) * cell;
+      const x = alongX ? midMeters : edgeAxisValue(side, core);
+      const z = alongX ? edgeAxisValue(side, core) : midMeters;
+      if (kind === 'road') roadExits.push({ x, z, nx, nz, width: span });
+      else if (kind === 'grass') grassEdges.push({ x, z, nx, nz, span });
+      else waterEdges.push({ x, z, nx, nz, span, surfaceY: nearestWaterSurfaceY(world, x, z), sea: kind === 'sea' });
+    }
+  }
+  return { roadExits, waterEdges, grassEdges };
 }
