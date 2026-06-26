@@ -16,6 +16,7 @@
 // (office glass / residential brick / plain wall). Pick a face, then a skin.
 
 import { useMemo, useState } from 'react';
+import { renderTick } from './editors/build/editLatency';
 import { useRerender } from '@reactjit/runtime/hooks';
 import { Box, ScrollView, Text, Graph, Pressable, StaticSurface } from '@reactjit/primitives';
 import { PanelGroups, type FieldSpec, type PanelSpec } from './shell/fields';
@@ -624,6 +625,7 @@ export function PropertiesPanel(props: {
   onOverride?: (path: string, value: OverrideValue) => void;
   onClearOverride?: (path: string) => void;
 }) {
+  renderTick('PropertiesPanel'); // req_1968 diag
   const { focus, world } = props;
   // PanelGroups' controls read through get()/set() closures; onEdit is the
   // re-render after a write (the Workbench's own idiom).

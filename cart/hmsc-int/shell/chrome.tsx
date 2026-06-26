@@ -22,6 +22,7 @@
 // hit-test catcher, not a palette colour.
 
 import { useState } from 'react';
+import { renderTick } from '../editors/build/editLatency';
 import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { callHost } from '@reactjit/ffi';
@@ -109,6 +110,7 @@ function WindowControls() {
 }
 
 export function Chrome(props: ChromeProps) {
+  renderTick('Chrome'); // req_1968 diag
   const MapPill = props.menuOpen ? C.ChromePillOn : C.ChromePill;
   const SavePill = props.logOpen ? C.ChromePillOn : C.ChromePill;
   return (

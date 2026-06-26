@@ -39,7 +39,7 @@ import { modulePitch, resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget }
 import { useHeldModifiers } from './editors/useEditorControls';
 import { buildResidentMeshCatalogLump } from './compile/worldGeometry';
 import { subscribeCookedAssets } from './editors/model/cookedAssets';
-import { stampEdit, takeEditStamp, nowMs } from './editors/build/editLatency';
+import { stampEdit, takeEditStamp, nowMs, snapRenderTicks } from './editors/build/editLatency';
 import { readFrameRecord, readCounters } from './state/perfWatch';
 import type { Armed } from './buildArmed';
 import { pieceInstanceRows, meshPropLivePush, meshGhostRef, pieceSkinSig, buildingSkinBoxes } from './editors/build/pieceMeshes';
@@ -817,7 +817,13 @@ export function LoaderIsoView(props: {
         const shellKids = bEnd > 0 && rStart > 0 ? Math.max(0, rStart - bEnd) : 0;
         const shellSplit = bEnd > 0 ? ` {body ${shellBody.toFixed(0)} + kids ${shellKids.toFixed(0)}}` : '';
         const preSplit = ` [commit ${csMs.toFixed(0)} + rerender ${Math.max(0, pre - csMs).toFixed(0)} (shell ${beforeLoader.toFixed(0)}${shellSplit} + loaderPane ${loaderOnward.toFixed(0)})${pw}]`;
-        console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)}${preSplit} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}${hostLine}`);
+        // req_1968: which child components actually re-rendered for THIS edit (the definitive answer)
+        const ticks = snapRenderTicks();
+        const prev = (g.__rtPrev ?? {}) as Record<string, number>;
+        const changed = Object.keys(ticks).filter((k) => (ticks[k] ?? 0) > (prev[k] ?? 0));
+        g.__rtPrev = ticks;
+        const rtLine = `  | re-rendered: ${changed.length ? changed.join(',') : 'none'}`;
+        console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)}${preSplit} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}${hostLine}${rtLine}`);
       });
     }
   }, [editable, props.pieces, props.reloadToken]);

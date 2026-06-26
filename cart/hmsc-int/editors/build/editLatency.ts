@@ -29,3 +29,14 @@ export function takeEditStamp(): EditStamp | null {
   pending = null;
   return p;
 }
+
+// RENDERTICK req_1968: a component calls renderTick('Name') at the top of its render; the
+// edit-latency line snapshots the counts and reports which components re-rendered for an edit —
+// the definitive answer to "which panel is still redrawing" instead of guessing prop-by-prop.
+export function renderTick(name: string): void {
+  const m = (g.__rt ??= {});
+  m[name] = (m[name] ?? 0) + 1;
+}
+export function snapRenderTicks(): Record<string, number> {
+  return { ...(g.__rt ?? {}) };
+}
