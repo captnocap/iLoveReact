@@ -412,6 +412,26 @@ function pieceGridOf(pieces: readonly PlacedBuildPiece[]): PieceGrid {
   return grid;
 }
 
+/** Pieces whose footprint sits within `radiusMeters` of (x,z) — the public,
+ *  point-shaped narrowing the snap anchors use (nearestPlateLatticeAnchor /
+ *  nearestWallLineAnchor) so a per-place anchor lookup is O(local) instead of
+ *  O(world). A SUPERSET (the grid envelope, plus the box slop); callers keep
+ *  their exact magnet/window predicates. The radius must cover each caller's
+ *  own reach window (plate: its magnet; wall: linePitch + magnet) so no real
+ *  anchor is dropped. */
+export function piecesNearPoint(
+  pieces: readonly PlacedBuildPiece[],
+  x: number,
+  z: number,
+  radiusMeters: number,
+): PlacedBuildPiece[] {
+  const out: PlacedBuildPiece[] = [];
+  for (const entry of piecesNear(pieces, x - radiusMeters, x + radiusMeters, z - radiusMeters, z + radiusMeters)) {
+    out.push(entry.piece);
+  }
+  return out;
+}
+
 /** Pieces whose footprint MAY overlap the world rect (superset — callers keep
  *  their exact predicates). Entries spanning cells are deduped via the Set. */
 function piecesNear(
@@ -489,14 +509,30 @@ export type PieceHit = {
 };
 
 /** Nearest piece under the ray within maxDistance — exact oriented-box test
- *  (the ray drops into each piece's local frame; any yaw works). */
+ *  (the ray drops into each piece's local frame; any yaw works).
+ *
+ *  PLACEPERF-0626: a crosshair raycast only reaches `maxDistance` (the build
+ *  reach, ~14m), so only pieces whose footprint sits inside the ray segment's
+ *  swept X/Z box can be hit. We narrow to those via the cached piece grid
+ *  (built once per pieces-array identity) instead of scanning the whole city —
+ *  the per-place `events` cost was O(pieces) here (~1.7s at inst 28k). The grid
+ *  envelope is a SUPERSET of each piece's oriented box, so no hit is missed;
+ *  the exact slab test below still runs per candidate. */
 export function raycastPieces(
   ray: PieceRay,
   pieces: readonly PlacedBuildPiece[],
   maxDistance: number,
 ): PieceHit | null {
   let best: PieceHit | null = null;
-  for (const piece of pieces) {
+  const endX = ray.origin.x + ray.dir.x * maxDistance;
+  const endZ = ray.origin.z + ray.dir.z * maxDistance;
+  const candidates = piecesNear(
+    pieces,
+    Math.min(ray.origin.x, endX), Math.max(ray.origin.x, endX),
+    Math.min(ray.origin.z, endZ), Math.max(ray.origin.z, endZ),
+  );
+  for (const entry of candidates) {
+    const piece = entry.piece;
     const def = placedPieceDef(piece);
     const size = def.size;
     const depthSpan = placedPieceDepthSpan(piece, pieces);

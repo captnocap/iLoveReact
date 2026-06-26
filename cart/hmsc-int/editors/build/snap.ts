@@ -121,6 +121,12 @@ export type SnapInput = {
 
 const DEG = Math.PI / 180;
 
+// PLACEPERF-0626: the local radius the edge-veto plate query reaches. A plate
+// can only veto an edge placement when its edge lies on the chosen line, which
+// means it covers the (line, run) point; this radius just needs to outrun the
+// grid's own cell size so a point on a cell boundary still finds its plate.
+const EDGE_VETO_QUERY_RADIUS_METERS = 4;
+
 function normalizeYaw(yawDegrees: number): number {
   return ((yawDegrees % 360) + 360) % 360;
 }
@@ -470,10 +476,16 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
   // it sits); on the ground, the nearest plate within the magnet. Alt (fine)
   // opts out, same as edge snap: fine means "exactly the tile I point at".
   const isModule = pitchX > grid || pitchZ > grid;
+  // PLACEPERF-0626: only plates whose bounds lie within the magnet of the hit
+  // can win — narrow to those (grid-local) before the scan so a per-place
+  // anchor lookup is O(local), not O(world). The radius = the magnet itself is
+  // a correct superset (a plate within `magnet` of the point occupies a cell
+  // within `magnet` of it).
+  const platesNearHit = () => GAME_BUILD.placed.piecesNearPoint(input.pieces, hit.x, hit.z, tuning.plateAnchorMagnetMeters);
   const plateAnchor = !fine && !subgrid && isModule
     ? (onFace
-      ? (isTopAnchorPlate(pieceHit!.piece) ? { x: pieceHit!.piece.x, z: pieceHit!.piece.z } : nearestPlateLatticeAnchor(input.pieces, hit.x, hit.z, tuning.plateAnchorMagnetMeters))
-      : nearestPlateLatticeAnchor(input.pieces, hit.x, hit.z, tuning.plateAnchorMagnetMeters))
+      ? (isTopAnchorPlate(pieceHit!.piece) ? { x: pieceHit!.piece.x, z: pieceHit!.piece.z } : nearestPlateLatticeAnchor(platesNearHit(), hit.x, hit.z, tuning.plateAnchorMagnetMeters))
+      : nearestPlateLatticeAnchor(platesNearHit(), hit.x, hit.z, tuning.plateAnchorMagnetMeters))
     : null;
   const snapAxis = (hitV: number, a: number, span: number, pitch: number, originV: number | null) => {
     if (fine) return fineModuleCenter(hitV + a, span, grid) - a;
@@ -552,12 +564,18 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
       // scan the standing world within the magnet so a click extending an
       // off-lattice run inherits its line. Alt (fine) opts out of anchoring:
       // fine mode means "exactly the tile line I point at".
+      // PLACEPERF-0626: the ground scan only cares about walls whose footprint
+      // passes within (linePitch + magnet) of the hit — its own run window —
+      // so narrow to those grid-local pieces once, not the whole world.
+      const groundWallPieces = (!fine && !subgrid && !onFace)
+        ? GAME_BUILD.placed.piecesNearPoint(input.pieces, hit.x, hit.z, linePitch + tuning.wallAnchorMagnetMeters)
+        : input.pieces;
       const candidate = (axis: 'x' | 'z') => {
         const lineAt = axis === 'x' ? hit.x : hit.z;
         const runAt = axis === 'x' ? hit.z : hit.x;
         const anchor = (fine || subgrid) ? null : onFace
           ? nearestWallLineAnchor([pieceHit!.piece], axis, lineAt, runAt, linePitch, Number.POSITIVE_INFINITY)
-          : nearestWallLineAnchor(input.pieces, axis, lineAt, runAt, linePitch, tuning.wallAnchorMagnetMeters);
+          : nearestWallLineAnchor(groundWallPieces, axis, lineAt, runAt, linePitch, tuning.wallAnchorMagnetMeters);
         const line = anchor ? anchor.line : Math.round(lineAt / lineStep) * lineStep;
         const run = anchor
           ? anchoredRunCenter(anchor, runAt, linePitch)
@@ -571,13 +589,18 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
       // an anchored line beats an unanchored lattice line outright (stacking on
       // a wall top must not lose a tie to a world lattice line crossing the run)
       const xWins = cx.anchored !== cz.anchored ? cx.anchored : cx.distance <= cz.distance;
+      // PLACEPERF-0626: only a plate whose edge lands on the chosen line can
+      // veto the placement — those plates cover the (line, run) point, so a
+      // grid-local query around it is a correct superset of the full scan.
+      const platesAtEdge = (px: number, pz: number) =>
+        GAME_BUILD.placed.piecesNearPoint(input.pieces, px, pz, EDGE_VETO_QUERY_RADIUS_METERS);
       if (xWins) {
         // plane at x = line, running along z (the turned frame)
-        if (common.surface === 'ground' && topAnchorYAtEdge(input.pieces, 'x', cx.line, cx.run, tuning.edgeAnchorToleranceMeters) !== null) return null;
+        if (common.surface === 'ground' && topAnchorYAtEdge(platesAtEdge(cx.line, cx.run), 'x', cx.line, cx.run, tuning.edgeAnchorToleranceMeters) !== null) return null;
         const y = common.surface === 'ground' ? input.groundTopAt(cx.line, cx.run) : baseY;
         return { ...common, placement: { x: cx.line, y, z: cx.run, yawDegrees: 90 } };
       }
-      if (common.surface === 'ground' && topAnchorYAtEdge(input.pieces, 'z', cz.line, cz.run, tuning.edgeAnchorToleranceMeters) !== null) return null;
+      if (common.surface === 'ground' && topAnchorYAtEdge(platesAtEdge(cz.run, cz.line), 'z', cz.line, cz.run, tuning.edgeAnchorToleranceMeters) !== null) return null;
       const y = common.surface === 'ground' ? input.groundTopAt(cz.run, cz.line) : baseY;
       return { ...common, placement: { x: cz.run, y, z: cz.line, yawDegrees: 0 } };
     }

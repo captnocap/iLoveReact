@@ -114,6 +114,7 @@ export {
   liftWallsOntoFloors,
   connectedPieceIds,
   raycastPieces,
+  piecesNearPoint,
   placedPieceCameraOccluders,
   placedPieceColliders,
   placedPieceRamps,
@@ -246,6 +247,7 @@ import {
   liftWallsOntoFloors,
   connectedPieceIds,
   raycastPieces,
+  piecesNearPoint,
   placedPieceCameraOccluders,
   placedPieceColliders,
   placedPieceRamps,
@@ -357,6 +359,10 @@ export const GAME_BUILD = {
     /** SMARTSEL-0605: the connected shape under one click */
     connected: connectedPieceIds,
     raycast: raycastPieces,
+    /** PLACEPERF-0626: pieces whose footprint sits within `radiusMeters` of a
+     *  point (grid-narrowed) — the snap anchors use it so a per-place lookup is
+     *  O(local), not O(world). */
+    piecesNearPoint,
     cameraOccluders: placedPieceCameraOccluders,
     colliders: placedPieceColliders,
     ramps: placedPieceRamps,
