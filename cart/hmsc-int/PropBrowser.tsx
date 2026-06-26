@@ -115,7 +115,7 @@ export function PropBrowser(props: { armedId: string | null; onArm: (id: string)
   const pageItems = stream.slice(grid.start, grid.end);
 
   return (
-    <Box style={{ width: '100%', height: '100%', flexDirection: 'column', gap: 6, minHeight: 0 }}>
+    <Box style={{ width: '100%', flexGrow: 1, flexDirection: 'column', gap: 6, minHeight: 0 }}>
       <TextInput
         text={query}
         placeholder="search props or a tag…"
