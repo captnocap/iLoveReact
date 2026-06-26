@@ -1116,7 +1116,7 @@ export type WorldInstanceResult = {
 /** The painter writes foliage tiles into painted FLOOR chunks, so the bake gets
  *  them as `floors`; merge each as its landform twin so the populate fns read the
  *  SAME tile grids the editor does — identical field in /test and /compiled. */
-function worldWithFloorLandforms(state: GameState, floors: readonly ChunkFloor[]): GameState['world'] {
+export function worldWithFloorLandforms(state: GameState, floors: readonly ChunkFloor[]): GameState['world'] {
   const floorLandforms = floors.map(floorToLandform);
   return floorLandforms.length
     ? ({ ...state.world, landforms: [...(state.world.landforms ?? []), ...floorLandforms] } as GameState['world'])
@@ -1190,11 +1190,14 @@ const VOID_SHELL_FACADES = [
 // (shapeId BOX), and each BUILDING gets a hash-picked facade material so the
 // skyline has real brick/window/shopfront variety. The matching walkable ground
 // is a single flat collider baked in worldColliders.shellGroundHeightfield.
-function pushVoidShell(b: Build, state: GameState, groundY: number): void {
+function pushVoidShell(b: Build, world: GameState['world'], groundY: number): void {
   // Needs the authored map's bounds to know where the void begins; prop-recipe
-  // unit tests build instances from a layout-less stub, so bail there.
-  if (!state?.world?.layout || !(state.world.cellSizeMeters > 0)) return;
-  const core = worldCore(state.world);
+  // unit tests build instances from a layout-less stub, so bail there. `world`
+  // must already carry the painted chunks AS LANDFORMS (worldWithFloorLandforms),
+  // or worldCore stays stuck at the 2×2 template and the shell overdraws painted
+  // ground (see game/void/distance.ts).
+  if (!world?.layout || !(world.cellSizeMeters > 0)) return;
+  const core = worldCore(world);
   let n = 0;
   forEachShellRingBox(core, VOID_SHELL_RING_CHUNKS, (kind, cx, cy, cz, sx, sy, sz, r, g, bl) => {
     let material = 0;
@@ -1223,7 +1226,9 @@ export function buildWorldInstances(
   const pieceCount = pushPlacedPieces(b, pieces);
   pushPaintedFloors(b, floors);
   if (opts.includeGroundLayers) pushWorldLayers(b, state);
-  pushVoidShell(b, state, opts.voidGroundY ?? 0);
+  // The void core must count the painted chunks (which travel as the `floors`
+  // param, not as state.world.surfaceRegions) — merge them in AS LANDFORMS first.
+  pushVoidShell(b, worldWithFloorLandforms(state, floors), opts.voidGroundY ?? 0);
   if (state?.world) {
     // GRASS + BUSH + FLOWERS are NOT baked as instance rows (FOLIAGEFORMULA req_1591 +
     // req_1861): they ship as the FLORA recipe lump (encodeFlora) and the loader regenerates

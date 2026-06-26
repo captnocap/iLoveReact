@@ -15,6 +15,49 @@ function aWorld(widthCells: number, depthCells: number, cell = 1): WorldState {
   } as unknown as WorldState;
 }
 
+// A painted chunk is a `heightfield` landform centred on the chunk (chunkFloor.
+// floorToLandform): field cols=rows=tiles+1, cell so (cols-1)*cell = chunk metres,
+// footprintRadius = the inscribed half-extent = half a chunk.
+function aPaintedWorld(layoutCells: number, chunkCenters: [number, number][], chunkTiles = 120): WorldState {
+  const cell = 1;
+  return {
+    cellSizeMeters: cell,
+    layout: { key: 'k', label: 'l', widthCells: layoutCells, depthCells: layoutCells },
+    surfaceRegions: [],
+    landforms: chunkCenters.map(([cx, cz], i) => ({
+      id: `painted_${i}`,
+      kind: 'heightfield',
+      label: `painted ${i}`,
+      centerX: cx,
+      centerZ: cz,
+      baseY: 0,
+      params: {},
+      field: { cols: chunkTiles + 1, rows: chunkTiles + 1, cell: chunkTiles / chunkTiles, heights: [] },
+      createdByCommand: 'test',
+    })),
+  } as unknown as WorldState;
+}
+
+test('worldCore grows to cover painted chunks beyond the layout template', () => {
+  // Layout floor is a 2-chunk (240m) template, but the user painted a chunk far
+  // out at centre 540 (spanning 480..600). The core must reach it, or the void
+  // shell draws its procedural city over the painted ground (the reported bug).
+  const oneFarChunk = worldCore(aPaintedWorld(240, [[540, 60]]));
+  assert(oneFarChunk.maxX >= 600, `core reaches the painted chunk's far edge (got ${oneFarChunk.maxX})`);
+  assertEqual(escapeDepth(540, 60, oneFarChunk), 0, 'a point on the painted chunk is inside the core');
+
+  // Paint a 7×7 block of chunks (centres 60..780) well past the 240m template.
+  // A 2-chunk window around the block's centre is then fully inside the painted
+  // area, so the shell draws NOTHING over it — before the fix the core stayed at
+  // the template and the same window filled with procedural void boxes.
+  const block: [number, number][] = [];
+  for (let cx = 0; cx < 7; cx += 1) for (let cz = 0; cz < 7; cz += 1) block.push([cx * 120 + 60, cz * 120 + 60]);
+  const core = worldCore(aPaintedWorld(240, block));
+  assertEqual(escapeDepth(420, 420, core), 0, 'the block centre is inside the grown core');
+  const onPainted = buildShellBatch(420, 420, core, 2);
+  assertEqual(onPainted.count, 0, 'no shell instances over the painted block');
+});
+
 test('escape_depth is zero everywhere inside the authored rectangle', () => {
   const core = worldCore(aWorld(600, 400));
   // The center, an edge, and a corner of the authored rectangle are all honest.

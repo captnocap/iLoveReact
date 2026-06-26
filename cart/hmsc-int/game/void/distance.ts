@@ -17,6 +17,7 @@
 // / the core rectangle; nobody hardcodes a km threshold.
 
 import type { WorldState } from '../../design';
+import { landformKindDefinition } from '../kinds';
 
 // The believable core: the authored map's world-space rectangle (meters) plus
 // its center (used for the streaming focus / framing).
@@ -34,12 +35,21 @@ export type WorldCore = {
 const SAFE_MARGIN_METERS = 40;
 
 // Derive the core rectangle from the authored map's ACTUAL extent — the bounding
-// box of all surfaceRegions — not from the static layout dimensions (which are
-// the initial 2×2 chunk template and don't grow as the user paints new regions).
+// box of all surfaceRegions AND landforms — not from the static layout dimensions
+// (which are the initial 2×2 chunk template and don't grow as the user paints).
+//
+// The painted ground is the load-bearing case: a painted chunk is NOT a
+// surfaceRegion, it is a `heightfield` landform (chunkFloor.floorToLandform — one
+// per chunk, the editor's previewWorld.landforms and the compiled floor-merged
+// world both carry them). Reading only surfaceRegions left the core stuck at the
+// 2×2 template, so the void shell drew its procedural city right over chunks the
+// user had painted. Expanding over every landform's footprint (via the registry's
+// footprintRadius — the SAME extent the terrain/collider passes use) makes the
+// core grow with the painted map.
 export function worldCore(world: WorldState): WorldCore {
   const cell = world.cellSizeMeters;
   // Start with the layout's nominal bounds as a floor, then expand to cover all
-  // painted surfaceRegions.
+  // painted surfaceRegions and landforms.
   let minX = 0;
   let minZ = 0;
   let maxX = world.layout.widthCells * cell;
@@ -53,6 +63,19 @@ export function worldCore(world: WorldState): WorldCore {
     minZ = Math.min(minZ, rz);
     maxX = Math.max(maxX, rx + rw);
     maxZ = Math.max(maxZ, rz + rd);
+  }
+  // Painted chunks (and mountains/hills/estates) are landforms, not regions. Each
+  // covers a square of ±footprintRadius about its centre — for a painted chunk the
+  // inscribed half-extent is exactly half a chunk, so the union is the painted area.
+  for (const lf of world.landforms ?? []) {
+    const def = landformKindDefinition(lf.kind);
+    if (!def) continue;
+    const r = def.footprintRadius(lf.params, lf.field);
+    if (!(r > 0)) continue;
+    minX = Math.min(minX, lf.centerX - r);
+    minZ = Math.min(minZ, lf.centerZ - r);
+    maxX = Math.max(maxX, lf.centerX + r);
+    maxZ = Math.max(maxZ, lf.centerZ + r);
   }
   return { minX, minZ, maxX, maxZ, centerX: (minX + maxX) / 2, centerZ: (minZ + maxZ) / 2 };
 }

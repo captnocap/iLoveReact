@@ -19,7 +19,7 @@ import {
   writeLumpContainer,
 } from '@reactjit/workspace';
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
-import { buildWorldInstances, encodeFloorHeightfields, encodeFlora, encodeInstanceLump, encodeMaterialRefs, encodeMaterials, encodeMeshProps, encodeWaterBodies, INSTANCE_STRIDE } from './compile/worldGeometry';
+import { buildWorldInstances, encodeFloorHeightfields, encodeFlora, encodeInstanceLump, encodeMaterialRefs, encodeMaterials, encodeMeshProps, encodeWaterBodies, worldWithFloorLandforms, INSTANCE_STRIDE } from './compile/worldGeometry';
 import type { DecalAssetSink } from './compile/decalAssets';
 import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, paintedFloorTopAt, shellGroundHeightfield, type BakedPhysicsConfig } from './compile/worldColliders';
 import { worldCore } from './game/void/distance';
@@ -231,7 +231,10 @@ export function createHmscMapfile(
   // to butt against the authored floor — sinking the shell ~10cm lets the
   // authored floor win cleanly in that overlap (no z-fight) while the gap outside
   // still reads as continuous ground.
-  const voidCore = worldCore(state.world);
+  // Painted chunks ride in `floors`, not state.world.surfaceRegions — merge them
+  // in as landforms so the core (and the shell ground plane it sizes) covers the
+  // whole painted map, not just the 2×2 template. See game/void/distance.ts.
+  const voidCore = worldCore(worldWithFloorLandforms(state, floors));
   const SHELL_GROUND_SINK_METERS = 0.1;
   const voidGroundY = bakeTerrainTopAt(voidCore.centerX, voidCore.centerZ) - SHELL_GROUND_SINK_METERS;
   const geometry = buildWorldInstances(state, liftedPieces, floors, { decalAssets: opts.decalAssets, voidGroundY });
