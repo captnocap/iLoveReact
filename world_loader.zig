@@ -413,23 +413,26 @@ const CookedDoor = struct {
     hinge_x: f32 = 0,
     hinge_z: f32 = 0,
     progress: f32 = 0,
-    /// world panel box: center + half extents (yawed AABB) + base/height
+    /// world panel box (CLOSED): center + yawed-AABB half extents + base/height
     cx: f32,
     cz: f32,
     base_y: f32,
     panel_h: f32,
     half_x: f32,
     half_z: f32,
+    /// LOCAL leaf half extents (req_1960) — the leaf's own half-width (X) + half-depth
+    /// (Z) before any rotation, so stepCookedDoors recomputes the SWUNG world AABB each
+    /// frame and the moving rect shoves the player (a real physical door).
+    half_w_local: f32 = 0,
+    half_d_local: f32 = 0,
     reach: f32,
     vehicle: bool,
 };
 
 /// SWING tuning (req_1908) — until per-door authoring lands, every cooked door
-/// swings 90° about its hinge edge over this many seconds; its rect clears once
-/// the leaf is past half-open so you can walk through the swinging door.
+/// swings 90° about its hinge edge over this many seconds.
 const COOKED_DOOR_SWING_ARC_DEGREES: f32 = 90.0;
 const COOKED_DOOR_OPEN_SECONDS: f32 = 0.4;
-const COOKED_DOOR_PASSABLE_PROGRESS: f32 = 0.5;
 
 /// The world AABB of a cooked door's leaf panel (req_1864) — the leaf slot's
 /// local bounds, yawed + offset by the placed instance. Shared by the rect
@@ -476,6 +479,8 @@ fn cookedDoorWorldBox(mesh: constructor.MeshPropMesh, inst: constructor.MeshProp
         .panel_h = hi[1] - lo[1],
         .half_x = @abs(cc) * hx + @abs(ss) * hz,
         .half_z = @abs(ss) * hx + @abs(cc) * hz,
+        .half_w_local = hx,
+        .half_d_local = hz,
         .node_base_y = inst.y,
         .node_x = inst.x,
         .node_z = inst.z,
@@ -5068,15 +5073,28 @@ pub const Runtime = struct {
                 node.scene3d_pos_y = cd.node_base_y;
                 node.scene3d_rot_y = cd.yaw_degrees + theta_deg;
             }
-            const passable = cd.progress >= COOKED_DOOR_PASSABLE_PROGRESS;
+            // req_1960: the leaf is a PHYSICAL object — its rect TRACKS the swinging
+            // panel every frame (always solid), so the sweeping door shoves the player
+            // out of the way (like the elevator car carries a standing player) instead
+            // of passing through. The swung world AABB: center pivots about the hinge,
+            // half-extents fold by the leaf's TOTAL angle (yaw + swing). Fully open the
+            // panel lies along the jamb, leaving the doorway clear.
             const at = self.physics_colliders.rectBase() + cd.rect_index * game_physics.RECT_FLOATS;
             if (at + game_physics.RECT_FLOATS <= self.physics_colliders.values.len and cd.rect_index < self.physics_colliders.rect_count) {
-                const park: f32 = if (passable) DOOR_OPEN_PARK_METERS else 0;
-                self.physics_colliders.values[at + 0] = cd.cx - cd.half_x + park;
-                self.physics_colliders.values[at + 1] = cd.cz - cd.half_z + park;
-                self.physics_colliders.values[at + 2] = cd.cx + cd.half_x + park;
-                self.physics_colliders.values[at + 3] = cd.cz + cd.half_z + park;
-                self.physics_colliders.values[at + 5] = if (passable) 0 else 1;
+                const ddx = cd.cx - cd.hinge_x;
+                const ddz = cd.cz - cd.hinge_z;
+                const scx = cd.hinge_x + (ddx * ct + ddz * st);
+                const scz = cd.hinge_z + (-ddx * st + ddz * ct);
+                const total = cd.yaw_degrees * std.math.pi / 180.0 + theta;
+                const tc = @abs(@cos(total));
+                const ts = @abs(@sin(total));
+                const hxw = tc * cd.half_w_local + ts * cd.half_d_local;
+                const hzw = ts * cd.half_w_local + tc * cd.half_d_local;
+                self.physics_colliders.values[at + 0] = scx - hxw;
+                self.physics_colliders.values[at + 1] = scz - hzw;
+                self.physics_colliders.values[at + 2] = scx + hxw;
+                self.physics_colliders.values[at + 3] = scz + hzw;
+                self.physics_colliders.values[at + 5] = 1; // always solid — a real door
             }
         }
     }
