@@ -119,12 +119,29 @@ const MatSwatch = memo(function MatSwatch(props: {
 // duplicated here as a narrow shape so this panel doesn't import the iso module.
 export type HeldItem = { kind: 'piece' | 'prefab'; id: string } | { kind: 'tower' } | { kind: 'water'; id: string } | null;
 
+// A STAGED skin (req_1943): the look chosen for a held item BEFORE it's placed —
+// `skin` for a build piece's face slots, `partTextures` for a prop's named parts.
+// Carried in the cart so it rides into the piecePlaced event on drop.
+export interface SkinDraft { skin?: BuildSkinSet; partTextures?: Record<string, string> }
+
+function draftWithSlot(draft: SkinDraft | null | undefined, slot: BuildFaceSlot | null, skin: BuildFaceSkin): SkinDraft {
+  const base = (draft?.skin ?? {}) as BuildSkinSet;
+  return { ...draft, skin: slot ? { ...base, [slot]: skin } : { front: skin, back: skin, sides: skin } };
+}
+function draftWithParts(draft: SkinDraft | null | undefined, partIds: readonly string[], textureId: string): SkinDraft {
+  const pt = { ...(draft?.partTextures ?? {}) };
+  for (const id of partIds) pt[id] = textureId;
+  return { ...draft, partTextures: pt };
+}
+
 export interface FacePainterProps {
   pieces: readonly PlacedBuildPiece[];
   selectedIds: ReadonlySet<string>;
   // The held/armed item — holding IS a selection, so the top header shows it when
-  // nothing placed is selected (req_1937).
+  // nothing placed is selected (req_1937), and skinning it stages a draft (req_1943).
   armed?: HeldItem;
+  armedDraft?: SkinDraft | null;
+  onArmedDraftChange?: (draft: SkinDraft) => void;
   commitBatch: (items: ReadonlyArray<{ event: WorldEvent; label: string }>) => void;
   onOpenPainter?: () => void;
 }
@@ -136,6 +153,24 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   );
   const selRef = useRef(selPieces); selRef.current = selPieces;
   const commitRef = useRef(props.commitBatch); commitRef.current = props.commitBatch;
+
+  // HELD MODE (req_1943): nothing placed selected but an item ARMED → the panel
+  // edits a STAGED skin draft on the held item, so you dress it here and place it
+  // already-skinned (no place-then-come-back). A synthetic piece carrying the draft
+  // lets the faces/parts row + wear read EXACTLY as a placed piece would; the apply
+  // handlers route to onArmedDraftChange instead of committing to the (absent) world.
+  const heldMode = selPieces.length === 0 && props.armed?.kind === 'piece';
+  const heldPiece = useMemo<PlacedBuildPiece | null>(() => {
+    const a = props.armed;
+    if (!heldMode || !a || a.kind !== 'piece') return null;
+    return { id: '__held__', pieceId: a.id, x: 0, y: 0, z: 0, yawDegrees: 0, skin: props.armedDraft?.skin, partTextures: props.armedDraft?.partTextures } as PlacedBuildPiece;
+  }, [heldMode, props.armed, props.armedDraft]);
+  const displayPieces = heldMode && heldPiece ? [heldPiece] : selPieces;
+  // Live refs for the frozen press closures (same discipline as selRef).
+  const heldModeRef = useRef(heldMode); heldModeRef.current = heldMode;
+  const heldPieceRef = useRef(heldPiece); heldPieceRef.current = heldPiece;
+  const draftRef = useRef(props.armedDraft); draftRef.current = props.armedDraft;
+  const onDraftRef = useRef(props.onArmedDraftChange); onDraftRef.current = props.onArmedDraftChange;
 
   const [brush, setBrush] = useState<BuildFaceSkin>({ kind: 'color', value: '#d8cdb8' });
   const [recent, setRecent] = useState<BuildFaceSkin[]>([]);
@@ -162,25 +197,25 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
 
   const slots = GAME_BUILD.skins.slots;
   const slotLabels = useMemo(
-    () => GAME_BUILD.skins.slotLabels(selPieces[0] ? GAME_BUILD.catalog.get(selPieces[0].pieceId).kind : 'wall'),
-    [selPieces],
+    () => GAME_BUILD.skins.slotLabels(displayPieces[0] ? GAME_BUILD.catalog.get(displayPieces[0].pieceId).kind : 'wall'),
+    [displayPieces],
   );
   const slotWears = useMemo(
-    () => Object.fromEntries(slots.map((s) => [s, slotWear(selPieces, s)])) as Record<BuildFaceSlot, BuildFaceSkin | 'mixed' | null>,
-    [selPieces, slots],
+    () => Object.fromEntries(slots.map((s) => [s, slotWear(displayPieces, s)])) as Record<BuildFaceSlot, BuildFaceSkin | 'mixed' | null>,
+    [displayPieces, slots],
   );
 
-  // PROP MODE: a selection of ONLY prop pieces skins by named PART.
-  const propMode = selPieces.length > 0 && selPieces.every((p) => GAME_BUILD.catalog.get(p.pieceId).kind === 'prop');
+  // PROP MODE: a selection (or HELD item) of ONLY prop pieces skins by named PART.
+  const propMode = displayPieces.length > 0 && displayPieces.every((p) => GAME_BUILD.catalog.get(p.pieceId).kind === 'prop');
   const propModeRef = useRef(propMode); propModeRef.current = propMode;
-  const propPartList = useMemo(() => (propMode && selPieces[0] ? (propPieceParts(selPieces[0]) ?? []) : []), [propMode, selPieces]);
+  const propPartList = useMemo(() => (propMode && displayPieces[0] ? (propPieceParts(displayPieces[0]) ?? []) : []), [propMode, displayPieces]);
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
   const selectedPartRef = useRef(selectedPart); selectedPartRef.current = selectedPart;
   const partWears = useMemo(() => {
     const wear: Record<string, string | 'mixed' | null> = {};
     for (const part of propPartList) {
       let seen: string | null | undefined;
-      for (const p of selPieces) {
+      for (const p of displayPieces) {
         const t = p.partTextures?.[part.id] ?? null;
         if (seen === undefined) seen = t;
         else if (seen !== t) { seen = 'mixed'; break; }
@@ -188,11 +223,12 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
       wear[part.id] = seen ?? null;
     }
     return wear;
-  }, [propPartList, selPieces]);
+  }, [propPartList, displayPieces]);
 
   // PARAMETRIC props (req_0893): a text-driven prop (block letters, signs) gets a
-  // text field that retypes it; an explicit Apply commits (req_0898).
-  const textProp = propMode && selPieces.length > 0
+  // text field that retypes it; an explicit Apply commits (req_0898). Placed-only
+  // for now — held-item text staging is a separate follow-up.
+  const textProp = !heldMode && propMode && selPieces.length > 0
     && selPieces.every((p) => { const k = GAME_BUILD.catalog.get(p.pieceId).propKind; return !!k && propTakesText(k); });
   const [textDraft, setTextDraft] = useState('');
   const selSig = selPieces.map((p) => p.id).join(',');
@@ -211,6 +247,12 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
 
   const applyBrush = (b: BuildFaceSkin) => {
     setBrush(b);
+    // HELD MODE: stage the skin on the draft instead of committing to the world.
+    if (heldModeRef.current) {
+      onDraftRef.current?.(draftWithSlot(draftRef.current, selectedSlotRef.current, b));
+      pushRecent(b);
+      return;
+    }
     const sel = selRef.current;
     if (!sel.length) return;
     const slot = selectedSlotRef.current;
@@ -222,6 +264,14 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   };
 
   const applyPropTexture = (textureId: string) => {
+    // HELD MODE: stage the part texture(s) on the draft (targeted part or all).
+    if (heldModeRef.current) {
+      const target = selectedPartRef.current;
+      const hp = heldPieceRef.current;
+      const partIds = target ? [target] : (hp ? (propPieceParts(hp) ?? []).map((part) => part.id) : []);
+      if (partIds.length) { onDraftRef.current?.(draftWithParts(draftRef.current, partIds, textureId)); pushRecent({ kind: 'material', id: textureId }); }
+      return;
+    }
     const sel = selRef.current;
     if (!sel.length) return;
     const target = selectedPartRef.current;
@@ -280,8 +330,8 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
     if (a.kind === 'water') return { label: 'Water', sub: 'holding · place it in the build pane' };
     try {
       const def = GAME_BUILD.catalog.get(a.id);
-      return { label: def.label, sub: `${def.kind} · holding — click in the build pane to place` };
-    } catch { return { label: a.id, sub: 'holding — click in the build pane to place' }; }
+      return { label: def.label, sub: `${def.kind} · holding — skin it below, then place it dressed` };
+    } catch { return { label: a.id, sub: 'holding — skin it below, then place it dressed' }; }
   }, [props.armed]);
 
   // The paged skin grid — sized to fill its measured area, paged by whole rows.

@@ -13,7 +13,7 @@ import { Icon } from '@reactjit/icons/Icon';
 import { ObjectsTab } from './tabs/ObjectsTab';
 import { NotesTab } from './tabs/NotesTab';
 import { ChatTab } from './tabs/ChatTab';
-import { FacePainter } from './editors/build/FacePainter';
+import { FacePainter, type SkinDraft } from './editors/build/FacePainter';
 import type { PlaceCat } from './placements';
 import type { ScatterBrushId } from './game/kinds/scatter';
 import type { Armed } from './IsoAuthor';
@@ -70,6 +70,9 @@ export function RightPanel(props: {
   // req_1937: the HELD item (armed before placement) — holding IS a selection, so
   // the paint panel's top header shows it even with nothing placed-and-selected.
   armed?: Armed;
+  // req_1943: the staged skin for the held item + its setter — skin before placing.
+  armedDraft?: SkinDraft | null;
+  onArmedDraftChange?: (draft: SkinDraft) => void;
   // req_0749: the PAINT tab's "paint a texture…" door → the /workbench painter.
   onOpenPainter?: () => void;
 }) {
@@ -77,7 +80,7 @@ export function RightPanel(props: {
     <Box style={{ width: '100%', height: '100%', flexDirection: 'row', backgroundColor: '#0b1320' }}>
       {/* Active tab content */}
       <Box style={{ flexGrow: 1, minWidth: 0, height: '100%' }}>
-        {props.tab === 'paint' ? <FacePainter pieces={props.paintPieces} selectedIds={props.paintSelectedIds} armed={props.armed} commitBatch={props.onPaintCommit} onOpenPainter={props.onOpenPainter} /> : null}
+        {props.tab === 'paint' ? <FacePainter pieces={props.paintPieces} selectedIds={props.paintSelectedIds} armed={props.armed} armedDraft={props.armedDraft} onArmedDraftChange={props.onArmedDraftChange} commitBatch={props.onPaintCommit} onOpenPainter={props.onOpenPainter} /> : null}
         {props.tab === 'objects' ? <ObjectsTab buildingPrefabs={props.buildingPrefabs} onPlace={props.onPlace} activePlaceable={props.activePlaceable} onArmPlaceable={props.onArmPlaceable} onArmScatter={props.onArmScatter} /> : null}
         {props.tab === 'notes' ? <NotesTab notes={props.notes} onNotes={props.onNotes} /> : null}
         {props.tab === 'chat' ? <ChatTab /> : null}

@@ -12,6 +12,7 @@ import { QuadSplit } from './QuadSplit';
 import { PaintCanvas } from './PaintCanvas';
 import { PropertiesPanel, type Focus } from './PropertiesPanel';
 import { RightPanel } from './RightPanel';
+import type { SkinDraft } from './editors/build/FacePainter';
 import { buildObjectWorld } from './objectPreview';
 import { useKindTextures, kindTexturesFor } from './kindTextures';
 import { Chrome, MapsMenu, EventLog } from './shell/chrome';
@@ -33,7 +34,7 @@ import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
 import { editorTunables, tuningStream } from './editors/tunables';
 import { ensureCookedRegistry } from './editors/model/cookedAssets';
-import { worldStream, buildingsStream, type PlacedBuildPiece } from './game';
+import { worldStream, buildingsStream, type PlacedBuildPiece, type BuildEditEvent } from './game';
 import { useMapSession } from './editors/world/useMapSession';
 import { useBuildUndo } from './editors/world/useBuildUndo';
 import { usePlacements } from './editors/world/usePlacements';
@@ -175,6 +176,12 @@ function EditorShell() {
   // is mounted (loader or react). One source of truth, shared.
   const [armed, setArmed] = useState<Armed>(null);
   const armCatalog = useCallback((a: NonNullable<Armed>) => setArmed((cur) => (sameArmed(cur, a) ? null : a)), []);
+  // req_1943: a STAGED skin for the held item — skin it in the paint panel, then it
+  // rides into the piecePlaced event on drop. Persists across repeated placements of
+  // the SAME armed item (place many dressed copies); reset when the armed item changes.
+  const [armedDraft, setArmedDraft] = useState<SkinDraft | null>(null);
+  const armedKey = armed && 'id' in armed ? `${armed.kind}:${armed.id}` : (armed?.kind ?? null);
+  useEffect(() => { setArmedDraft(null); }, [armedKey]);
   // [LOADERVIEW req_1768] render the bottom-right build pane via the native world_loader
   // (one gamefile read) instead of the React Scene3D rebuild (~683MB/boot that chokes the
   // big 'main' map → slow boot + blank viewport). NOW DEFAULT ON: the app opens into the
@@ -336,6 +343,19 @@ function EditorShell() {
     buildPiecesRef, reconcileBuildUndoRef,
   });
   const { buildingPrefabs, buildPieces, buildingInstances, buildFootprints, commitBuildEvent, commitBuildEvents } = build;
+
+  // req_1943: inject the STAGED skin into a piecePlaced placement so a held item
+  // dropped after being skinned lands already-dressed. ONE seam at the commit
+  // boundary covers BOTH the loader pane and the react IsoAuthor (both place via
+  // these); other commits (paint on placed pieces, the place layer) pass through.
+  const armedDraftRef = useRef(armedDraft); armedDraftRef.current = armedDraft;
+  const injectDraft = useCallback((event: BuildEditEvent): BuildEditEvent => {
+    const d = armedDraftRef.current;
+    if (!d || event.kind !== 'piecePlaced' || (!d.skin && !d.partTextures)) return event;
+    return { ...event, placement: { ...event.placement, ...(d.skin ? { skin: d.skin } : {}), ...(d.partTextures ? { partTextures: d.partTextures } : {}) } };
+  }, []);
+  const commitPlacement = useCallback((event: BuildEditEvent, label: string) => commitBuildEvent(injectDraft(event), label), [commitBuildEvent, injectDraft]);
+  const commitPlacements = useCallback((items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => commitBuildEvents(items.map((it) => ({ ...it, event: injectDraft(it.event) }))), [commitBuildEvents, injectDraft]);
 
   // The / dashboard's footprint census reads every placement + building footprint
   // (both carry footW/footD). Cheap; rebuilt only when either set changes.
@@ -725,6 +745,8 @@ function EditorShell() {
                         paintPieces={buildPieces}
                         paintSelectedIds={isoSelectedIds}
                         armed={armed}
+                        armedDraft={armedDraft}
+                        onArmedDraftChange={setArmedDraft}
                         onPaintCommit={commitBuildEvents}
                         onOpenPainter={() => { requestWorkbenchSource('paint'); nav.push('/workbench'); }}
                       />
@@ -782,8 +804,8 @@ function EditorShell() {
                     pieces={buildPieces}
                     buildings={buildingInstances}
                     prefabs={buildingPrefabs}
-                    onCommit={commitBuildEvent}
-                    onCommitMany={commitBuildEvents}
+                    onCommit={commitPlacement}
+                    onCommitMany={commitPlacements}
                     onSelectionChange={onIsoSelectionChange}
                     onPlaceWaterBody={placeWaterBodyAt}
                     requestSettleBake={requestSettleBake}
@@ -797,8 +819,8 @@ function EditorShell() {
                     pieces={buildPieces}
                     buildings={buildingInstances}
                     prefabs={buildingPrefabs}
-                    onCommit={commitBuildEvent}
-                    onCommitMany={commitBuildEvents}
+                    onCommit={commitPlacement}
+                    onCommitMany={commitPlacements}
                     focused={atEditor && mapFocus === '3d'}
                     onFocus={() => setMapFocus('3d')}
                     onSelectionChange={onIsoSelectionChange}
