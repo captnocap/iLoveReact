@@ -98,13 +98,17 @@ export function useBuildUndo(opts: {
   const streamState: WorldStreamState | null = worldChannel ? worldChannel.state() : null;
   const buildingsState: BuildingsStreamState | null = buildingsChannel ? buildingsChannel.state() : null;
 
-  const buildingPrefabs: BuildPrefabDef[] = (() => {
+  // PANELSKIP req_1965: MEMOIZE on the prefab-relevant state only. This was an IIFE producing a
+  // NEW array every render — fed to BOTH RightPanel and CatalogRail, it silently defeated their
+  // memos so a piece place (which never touches prefabs) re-rendered the whole rail. A place
+  // doesn't change streamState.prefabs/removedPrefabs, so the array identity now stays stable.
+  const buildingPrefabs: BuildPrefabDef[] = useMemo(() => {
     const removed = new Set(streamState?.removedPrefabs ?? []);
     const merged: Record<string, BuildPrefabDef> = {};
     for (const id of GAME_BUILD.prefabs.ids) merged[id] = GAME_BUILD.prefabs.get(id);
     for (const def of Object.values(streamState?.prefabs ?? {})) merged[def.id] = def;
     return Object.values(merged).filter((def) => !removed.has(def.id)).sort((a, b) => a.label.localeCompare(b.label));
-  })();
+  }, [streamState?.prefabs, streamState?.removedPrefabs]);
 
   // Memoized so the merged array identity is stable between renders —
   // pieceGridOf/liftToTerrain/mapBuildFootprints all cache on array identity.
