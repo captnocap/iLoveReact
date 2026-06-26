@@ -69,7 +69,7 @@ export const EDITOR_BINDINGS: EditorBinding[] = [
   { action: 'road.commit', scope: 'canvas', keys: ['enter'], label: 'Stamp the road draft (road layer)', legend: null },
   { action: 'road.cancel', scope: 'canvas', keys: ['escape'], label: 'Drop the road draft (road layer)', legend: null },
 
-  // ── 'iso-build' — the iso 3D build pane (IsoAuthor) ────────────────────────
+  // ── 'iso-build' — the iso 3D build pane (LoaderIsoView) ────────────────────
   { action: 'view.pan', scope: 'iso-build', keys: ['w', 'a', 's', 'd', 'arrowup', 'arrowleft', 'arrowdown', 'arrowright'], label: 'Slide the view across the ground (hold)', legend: 'WASD pan', held: true },
   { action: 'camera.orbit-ccw', scope: 'iso-build', keys: ['q'], label: 'Orbit the iso camera left', legend: 'Q/E orbit' },
   { action: 'camera.orbit-cw', scope: 'iso-build', keys: ['e'], label: 'Orbit the iso camera right', legend: null },

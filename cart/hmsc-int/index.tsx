@@ -6,7 +6,8 @@ import { nsGet, nsSet } from '@reactjit/hooks/localstore';
 import type { GameState } from './design';
 import { compileEditorWorld, emptyEditorWorld } from './editorWorld';
 import { floorsToLandforms, floorsToWaterBodies, type ChunkFloor } from './chunkFloor';
-import { IsoAuthor, CatalogRail, sameArmed, type Armed } from './IsoAuthor';
+import { CatalogRail } from './CatalogRail';
+import { sameArmed, type Armed } from './buildArmed';
 import { LoaderIsoView } from './LoaderIsoView';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas } from './PaintCanvas';
@@ -193,27 +194,11 @@ function EditorShell() {
   const [armedDraft, setArmedDraft] = useState<SkinDraft | null>(null);
   const armedKey = armed && 'id' in armed ? `${armed.kind}:${armed.id}` : (armed?.kind ?? null);
   useEffect(() => { setArmedDraft(null); }, [armedKey]);
-  // [LOADERVIEW req_1768] render the bottom-right build pane via the native world_loader
-  // (one gamefile read) instead of the React Scene3D rebuild (~683MB/boot that chokes the
-  // big 'main' map → slow boot + blank viewport). NOW DEFAULT ON: the app opens into the
-  // loader pane so startup is fast and the world actually renders. The pane toggle flips
-  // back to the React view and PERSISTS '0' so that choice sticks. env RJIT_LOADER_VIEW
-  // forces '1'/'0'.
-  const [loaderView, setLoaderViewState] = useState(() => {
-    try {
-      const env = envGet('RJIT_LOADER_VIEW');
-      if (env === '1') return true;
-      if (env === '0') return false;
-      return nsGet('hmsc', 'editor.loaderView') !== '0'; // default ON unless turned off
-    } catch { return true; }
-  });
-  const setLoaderView = useCallback((next: boolean | ((v: boolean) => boolean)) => {
-    setLoaderViewState((v) => {
-      const n = typeof next === 'function' ? next(v) : next;
-      try { nsSet('hmsc', 'editor.loaderView', n ? '1' : '0'); } catch { /* headless / no store */ }
-      return n;
-    });
-  }, []);
+  // [LOADERVIEW req_1768/1967] the bottom-right build pane renders via the native
+  // world_loader (one gamefile read) — fast boot, the world actually renders. The
+  // old React Scene3D twin (IsoAuthor) and its loader/react toggle were DELETED
+  // (req_1967): a second build pane meant a second copy of the placement gate that
+  // silently drifted. There is one build pane now.
   // AUTOCOMPILE req_1865: gate for the loader pane's debounced auto-bake. PERSISTED in
   // localstore (not plain state) because a hot reload re-mounts the cart and would otherwise
   // reset it to ON every time — which is the whole problem: while an agent edits, each hot
@@ -357,8 +342,8 @@ function EditorShell() {
 
   // req_1943: inject the STAGED skin into a piecePlaced placement so a held item
   // dropped after being skinned lands already-dressed. ONE seam at the commit
-  // boundary covers BOTH the loader pane and the react IsoAuthor (both place via
-  // these); other commits (paint on placed pieces, the place layer) pass through.
+  // boundary covers the loader pane's placements; other commits (paint on placed
+  // pieces, the place layer) pass through.
   const armedDraftRef = useRef(armedDraft); armedDraftRef.current = armedDraft;
   const injectDraft = useCallback((event: BuildEditEvent): BuildEditEvent => {
     const d = armedDraftRef.current;
@@ -612,7 +597,7 @@ function EditorShell() {
     return () => clearTimeout(t);
   }, [ws.stem]);
   useEffect(() => {
-    if (!loaderView || !autoCompile) return; // toggle off → manual bake only
+    if (!autoCompile) return; // toggle off → manual bake only
     if (!autoCompileReadyRef.current) return; // still in the post-(re)mount settling window
     if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
     const arm = () => {
@@ -627,7 +612,7 @@ function EditorShell() {
     // the loader's live overlay (LoaderIsoView pushes __compiled_world_set_live_pieces), so
     // it must NOT trigger the ~5s whole-world rebake+reload flash. Placements fold into the
     // gamefile on the next bake (a 2D-canvas/terrain edit via worldRev, or manual Compile).
-  }, [loaderView, autoCompile, worldRev, placements, ws.stem, compileToGame]);
+  }, [autoCompile, worldRev, placements, ws.stem, compileToGame]);
 
   // The /workbench source registry (WORKBENCH.md §6) — built once per mount.
   const wbSources = useMemo(workbenchSources, []);
@@ -827,66 +812,39 @@ function EditorShell() {
               // iso authoring view is the bottom-right pane (USER req_0424). On-foot lives
               // on the /test route (F1/F2).
               <Pane label="build">
-                {loaderView ? (
-                  // Key on the MAP only (not worldEpoch): switching maps remounts +
-                  // re-centers, but an edit must NOT remount — the loader reloads its
-                  // gamefile in place via reloadToken so the camera pose is preserved.
-                  <LoaderIsoView
-                    key={`loader#${ws.stem}`}
-                    centerX={buildCenterX}
-                    centerZ={buildCenterZ}
-                    reloadToken={compiledReloadKey}
-                    state={previewWorld}
-                    pieces={buildPieces}
-                    buildings={buildingInstances}
-                    prefabs={buildingPrefabs}
-                    onCommit={commitPlacement}
-                    onCommitMany={commitPlacements}
-                    onSelectionChange={onIsoSelectionChange}
-                    onPlaceWaterBody={placeWaterBodyAt}
-                    requestSettleBake={requestSettleBake}
-                    armed={armed}
-                    onArm={setArmed}
-                  />
-                ) : (
-                  <IsoAuthor
-                    key={`${ws.stem}#${worldEpoch}`}
-                    state={previewWorld}
-                    pieces={buildPieces}
-                    buildings={buildingInstances}
-                    prefabs={buildingPrefabs}
-                    onCommit={commitPlacement}
-                    onCommitMany={commitPlacements}
-                    focused={atEditor && mapFocus === '3d'}
-                    onFocus={() => setMapFocus('3d')}
-                    onSelectionChange={onIsoSelectionChange}
-                    onPlaceWaterBody={placeWaterBodyAt}
-                    armed={armed}
-                    onArm={setArmed}
-                  />
-                )}
-                {/* [LOADERVIEW req_1757] side-by-side toggle pinned in the pane corner */}
-                <Pressable
-                  onPress={() => setLoaderView((v) => !v)}
-                  style={{ position: 'absolute', left: 8, bottom: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, borderColor: loaderView ? '#34d399' : '#3a4a5f', backgroundColor: loaderView ? '#0c2a20' : '#0b1220ee', zIndex: 50 }}
-                >
-                  <Text fontSize={9} color={loaderView ? '#6ee7b7' : '#94a3b8'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-                    {loaderView ? '● LOADER VIEW' : '○ react view'}
-                  </Text>
-                </Pressable>
+                {/* Key on the MAP only (not worldEpoch): switching maps remounts +
+                    re-centers, but an edit must NOT remount — the loader reloads its
+                    gamefile in place via reloadToken so the camera pose is preserved.
+                    The React IsoAuthor twin was deleted (req_1967) — this is the ONE
+                    build pane, so its placement gate can't drift from a sibling's. */}
+                <LoaderIsoView
+                  key={`loader#${ws.stem}`}
+                  centerX={buildCenterX}
+                  centerZ={buildCenterZ}
+                  reloadToken={compiledReloadKey}
+                  state={previewWorld}
+                  pieces={buildPieces}
+                  buildings={buildingInstances}
+                  prefabs={buildingPrefabs}
+                  onCommit={commitPlacement}
+                  onCommitMany={commitPlacements}
+                  onSelectionChange={onIsoSelectionChange}
+                  onPlaceWaterBody={placeWaterBodyAt}
+                  requestSettleBake={requestSettleBake}
+                  armed={armed}
+                  onArm={setArmed}
+                />
                 {/* [AUTOCOMPILE req_1865] toggle the loader pane's auto-bake. OFF stops the
                     hot-reload→compile→5-6s-lock storm while an agent edits; live overlay still
                     shows placements/skins instantly, manual Compile still bakes. Persisted. */}
-                {loaderView ? (
-                  <Pressable
-                    onPress={() => setAutoCompile((v) => !v)}
-                    style={{ position: 'absolute', left: 8, bottom: 36, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, borderColor: autoCompile ? '#34d399' : '#a16207', backgroundColor: autoCompile ? '#0c2a20' : '#241a06ee', zIndex: 50 }}
-                  >
-                    <Text fontSize={9} color={autoCompile ? '#6ee7b7' : '#fbbf24'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-                      {autoCompile ? '● AUTO-COMPILE' : '○ AUTO-COMPILE OFF'}
-                    </Text>
-                  </Pressable>
-                ) : null}
+                <Pressable
+                  onPress={() => setAutoCompile((v) => !v)}
+                  style={{ position: 'absolute', left: 8, bottom: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, borderColor: autoCompile ? '#34d399' : '#a16207', backgroundColor: autoCompile ? '#0c2a20' : '#241a06ee', zIndex: 50 }}
+                >
+                  <Text fontSize={9} color={autoCompile ? '#6ee7b7' : '#fbbf24'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                    {autoCompile ? '● AUTO-COMPILE' : '○ AUTO-COMPILE OFF'}
+                  </Text>
+                </Pressable>
               </Pane>
             }
           />

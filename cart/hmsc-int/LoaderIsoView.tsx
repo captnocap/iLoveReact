@@ -41,7 +41,7 @@ import { buildResidentMeshCatalogLump } from './compile/worldGeometry';
 import { subscribeCookedAssets } from './editors/model/cookedAssets';
 import { stampEdit, takeEditStamp, nowMs } from './editors/build/editLatency';
 import { readFrameRecord, readCounters } from './state/perfWatch';
-import { CatalogRail, sameArmed, type Armed } from './IsoAuthor';
+import type { Armed } from './buildArmed';
 import { pieceInstanceRows, meshPropLivePush, meshGhostRef, pieceSkinSig, buildingSkinBoxes } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
 import type { GameState } from './design';

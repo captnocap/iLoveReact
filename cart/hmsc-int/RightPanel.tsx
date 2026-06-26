@@ -3,8 +3,9 @@
 // "i only use the one paint tab"). This is just the face painter, full width.
 
 import { Box } from '@reactjit/primitives';
+import { renderTick } from './editors/build/editLatency';
 import { FacePainter, type SkinDraft } from './editors/build/FacePainter';
-import type { Armed } from './IsoAuthor';
+import type { Armed } from './buildArmed';
 import type { BuildEditEvent, PlacedBuildPiece } from '@game';
 
 // Tab ids retained for the session/placement layers (useMapSession / usePlacements
@@ -24,6 +25,7 @@ export function RightPanel(props: {
   // req_0749: the "paint a texture…" door → the /workbench painter.
   onOpenPainter?: () => void;
 }) {
+  renderTick('RightPanel'); // req_1968 diag
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b1320' }}>
       <FacePainter
