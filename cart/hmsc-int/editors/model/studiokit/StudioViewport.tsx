@@ -40,6 +40,7 @@ import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clea
 import { addAnchor, isAnchor, nextAnchorName } from '../anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from '../wheelMount';
 import { studioSeatRig, useStudioModel, type StudioModel, type StudioPart } from '../studioModel';
+import type { SeatRigFace, SeatBodyPart } from '../../../game/figure/seating';
 import { glbToEditMesh, base64ToBytes } from '../importMesh';
 import { cookProp, type PropDescriptorInput, type CookedAsset } from '../cookedAsset';
 import { useCookedAssets, cookedTextureBlob } from '../cookedAssets';
@@ -143,7 +144,7 @@ const STUDIO_PAINT_TOOLS: BrushTool[] = ['brush', 'eraser', 'line', 'rect', 'ell
 let g_loadedPaintModel: string | null = null;
 let g_loadedHadBlob = false;
 
-export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; sceneId: string | null; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; decals: ModelDecal[]; onSetDecals: (decals: ModelDecal[], coalesce?: boolean) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
+export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPart[]; revision: number; meshRev: number; activeName: string | null; sceneName: string | null; partCount: number; activePart: StudioPart | null; onEditMesh: (id: string, mesh: EditMesh) => void; onAddPart: (mesh: EditMesh, name: string, lift?: number) => string; onMergeActive: () => void; mergeTargetName: string | null; onSelectFaces: (ids: number[]) => void; palette: Palette | null; onEditPaint: (id: string, paint: PaintCells) => void; onSetPalette: (p: Palette) => void; sceneId: string | null; paintRef: string | null; paintBlob: (ref: string | null) => string | null; onBakePaint: (paintRef: string, blobB64: string) => void; decals: ModelDecal[]; onSetDecals: (decals: ModelDecal[], coalesce?: boolean) => void; seatRig: SeatRigFace[]; onSetSeatRig: (rig: SeatRigFace[]) => void; canUndo: boolean; onUndo: () => void; canRedo: boolean; onRedo: () => void; onImportModel: () => void }) {
   const { parts, revision, activePart, onSelectFaces } = props;
 
   // Lower each visible part once per structural revision (camera drags + fov
@@ -3306,6 +3307,43 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
                 </Pressable>
               </>
             ) : null}
+            {/* SEAT RIG (req_2028-2030): tag the selected face(s) by the body part that
+                touches them. The cook derives the whole seat from this — capacity from
+                the seat face's length, facing from back/head, sit-vs-lay from the head. */}
+            {selMode === 'face' && activePart && sel.faces.size >= 1 ? (() => {
+              const faceList = [...sel.faces];
+              const partId = activePart.id;
+              const setTag = (bodyPart: SeatBodyPart | null) => {
+                const picked = new Set(faceList);
+                const next = props.seatRig.filter((r) => !(r.part === partId && picked.has(r.face)));
+                if (bodyPart) for (const f of faceList) next.push({ part: partId, face: f, bodyPart });
+                props.onSetSeatRig(next);
+                toast(bodyPart ? `tagged ${faceList.length} face(s) → ${bodyPart}` : 'cleared seat tag');
+              };
+              const current = faceList.length === 1 ? props.seatRig.find((r) => r.part === partId && r.face === faceList[0])?.bodyPart : undefined;
+              const PARTS: { id: SeatBodyPart; color: string; tip: string }[] = [
+                { id: 'seat', color: '#3f9f5f', tip: 'Seat — where the ass rests. Required. Its length sets capacity (a long bench = a booth).' },
+                { id: 'back', color: '#3f7fbf', tip: 'Back — where the back/spine rests. Sets facing (you face away from it) + the recline.' },
+                { id: 'head', color: '#bf7f3f', tip: 'Head — where the head rests. Tagging this makes it a LAY (a bed); facing points head-ward.' },
+                { id: 'legs', color: '#9f5fbf', tip: 'Legs — back of the thighs (a backless stool/booth lip). Directional fallback when there is no back.' },
+              ];
+              return (
+                <>
+                  <Box style={{ height: 1, width: '100%', backgroundColor: '#2c4a6a', marginTop: 3, marginBottom: 3 }} />
+                  <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace', marginBottom: 2 }}>seat rig — what body part touches this face?</Text>
+                  {PARTS.map((p) => (
+                    <Pressable key={p.id} onPress={() => setTag(p.id)} tooltip={p.tip}
+                      style={{ ...STEP_BTN, backgroundColor: current === p.id ? p.color : '#13233aee', borderColor: p.color }}>
+                      <Text fontSize={10} color={current === p.id ? '#ffffff' : T.dim} style={{ fontFamily: 'monospace' }}>{p.id}</Text>
+                    </Pressable>
+                  ))}
+                  <Pressable onPress={() => setTag(null)} tooltip="Untag the selected face(s) from the seat rig"
+                    style={{ ...STEP_BTN, backgroundColor: '#13233aee', borderColor: '#2c4a6a' }}>
+                    <Text fontSize={10} color={T.dim} style={{ fontFamily: 'monospace' }}>untag</Text>
+                  </Pressable>
+                </>
+              );
+            })() : null}
             {/* face ops on ANY face selection: flip winding (req_1182) + glass toggle
                 (req_1181). Flip reverses the normal when Create Face guessed wrong;
                 glass marks the face(s) as a translucent, un-textured pane. */}
@@ -3966,7 +4004,7 @@ export function StudioEditor() {
   }, []);
   return (
     <Row style={{ flexGrow: 1, height: '100%', minHeight: 0, position: 'relative' }}>
-      <StudioViewport parts={model.visibleParts} allParts={model.parts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} sceneId={model.openModelId} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} decals={model.decals} onSetDecals={model.setDecals} canUndo={model.canUndo} onUndo={() => model.undo()} canRedo={model.canRedo} onRedo={() => model.redo()} onImportModel={() => setImportOpen(true)} />
+      <StudioViewport parts={model.visibleParts} allParts={model.parts} revision={model.revision} meshRev={model.meshRev} activeName={model.activePart?.name ?? null} sceneName={model.modelName} partCount={model.parts.length} activePart={model.activePart} onEditMesh={model.updatePartMesh} onAddPart={model.addPart} onMergeActive={model.mergeActive} mergeTargetName={model.mergeTargetName} onSelectFaces={model.setSelectedFaces} palette={model.palette} onEditPaint={model.editPaint} onSetPalette={model.setPalette} sceneId={model.openModelId} paintRef={model.paintRef} paintBlob={model.paintBlob} onBakePaint={model.bakePaint} decals={model.decals} onSetDecals={model.setDecals} seatRig={model.seatRig} onSetSeatRig={model.setSeatRig} canUndo={model.canUndo} onUndo={() => model.undo()} canRedo={model.canRedo} onRedo={() => model.redo()} onImportModel={() => setImportOpen(true)} />
       {/* Branch-history verbs + import now live INSIDE the viewport's top bar
           (req_1430) — they used to be a separate absolute row colliding with the
           STUDIO info strip at the same corner. */}
