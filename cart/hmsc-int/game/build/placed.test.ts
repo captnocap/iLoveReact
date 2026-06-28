@@ -207,38 +207,41 @@ test('req_1714/1719: a wall is ALWAYS centered on its line, regardless of floors
   // (that stepped runs + multi-storey stacks). It stays centered on its line;
   // the FLOOR extends under it (floorWallExtensions) so centering never
   // overhangs.
+  const halfDepth = catalogEntry('wall.concrete.common').size.depthMeters / 2;
   const floor = placed('floor.concrete.common', 1.5, 1.5);
   const north = placed('wall.concrete.common', 1.5, 0, { y: 0.2, yawDegrees: 0 });
   const south = placed('wall.concrete.common', 1.5, 3, { y: 0.2, yawDegrees: 0 });
   for (const [w, label] of [[north, 'north'], [south, 'south']] as const) {
     const span = placedPieceDepthSpan(w, [floor, w]);
-    assertClose(span.minV, -0.125, 1e-9, `${label} wall stays centered (back half) despite one-sided floor`);
-    assertClose(span.maxV, 0.125, 1e-9, `${label} wall stays centered (front half) despite one-sided floor`);
+    assertClose(span.minV, -halfDepth, 1e-9, `${label} wall stays centered (back half) despite one-sided floor`);
+    assertClose(span.maxV, halfDepth, 1e-9, `${label} wall stays centered (front half) despite one-sided floor`);
   }
   const [, northRect, southRect] = placedPieceColliders([floor, north, south]).rects;
-  assertClose(northRect.minZ, -0.125, 1e-9, 'north wall collider centered on its line');
-  assertClose(northRect.maxZ, 0.125, 1e-9, 'north wall collider centered on its line');
-  assertClose(southRect.minZ, 2.875, 1e-9, 'south wall collider centered on its line');
-  assertClose(southRect.maxZ, 3.125, 1e-9, 'south wall collider centered on its line');
+  assertClose(northRect.minZ, -halfDepth, 1e-9, 'north wall collider centered on its line');
+  assertClose(northRect.maxZ, halfDepth, 1e-9, 'north wall collider centered on its line');
+  assertClose(southRect.minZ, 3 - halfDepth, 1e-9, 'south wall collider centered on its line');
+  assertClose(southRect.maxZ, 3 + halfDepth, 1e-9, 'south wall collider centered on its line');
 });
 
 test('REQ-0466: a wall between two floor plates splits its thickness across the seam', () => {
+  const halfDepth = catalogEntry('wall.concrete.common').size.depthMeters / 2;
   const left = placed('floor.concrete.common', 1.5, 1.5);
   const right = placed('floor.concrete.common', 1.5, 4.5);
   const wall = placed('wall.concrete.common', 1.5, 3, { y: 0.2, yawDegrees: 0 });
   const span = placedPieceDepthSpan(wall, [left, right, wall]);
-  assertClose(span.minV, -0.125, 1e-9, 'one floor supports the back half');
-  assertClose(span.maxV, 0.125, 1e-9, 'the other floor supports the front half');
+  assertClose(span.minV, -halfDepth, 1e-9, 'one floor supports the back half');
+  assertClose(span.maxV, halfDepth, 1e-9, 'the other floor supports the front half');
   const rect = placedPieceColliders([left, right, wall]).rects[2];
-  assertClose(rect.minZ, 2.875, 1e-9, 'shared-seam wall keeps a half-depth on one side');
-  assertClose(rect.maxZ, 3.125, 1e-9, 'shared-seam wall keeps a half-depth on the other side');
+  assertClose(rect.minZ, 3 - halfDepth, 1e-9, 'shared-seam wall keeps a half-depth on one side');
+  assertClose(rect.maxZ, 3 + halfDepth, 1e-9, 'shared-seam wall keeps a half-depth on the other side');
 });
 
 test('REQ-0466: unsupported ground walls keep the old centered thickness', () => {
+  const halfDepth = catalogEntry('wall.concrete.common').size.depthMeters / 2;
   const wall = placed('wall.concrete.common', 1.5, 3, { yawDegrees: 0 });
   const span = placedPieceDepthSpan(wall, [wall]);
-  assertClose(span.minV, -0.125, 1e-9, 'freestanding wall keeps centered back half');
-  assertClose(span.maxV, 0.125, 1e-9, 'freestanding wall keeps centered front half');
+  assertClose(span.minV, -halfDepth, 1e-9, 'freestanding wall keeps centered back half');
+  assertClose(span.maxV, halfDepth, 1e-9, 'freestanding wall keeps centered front half');
 });
 
 test('req_1713: a neighbor-room floor touching a wall END does not center it — the run stays aligned', () => {
@@ -281,12 +284,15 @@ test('REQ-0109: L wall corners close the endpoint-to-side outer faces exactly', 
   const vBounds = pieceBounds(vertical);
   const [hRect, vRect] = placedPieceColliders([horizontal, vertical]).rects;
   console.log(`[REQ-0109] L-corner placed h=(${horizontal.x},${horizontal.y},${horizontal.z},yaw=${horizontal.yawDegrees}) bounds=x[${hBounds.minX},${hBounds.maxX}] z[${hBounds.minZ},${hBounds.maxZ}] v=(${vertical.x},${vertical.y},${vertical.z},yaw=${vertical.yawDegrees}) bounds=x[${vBounds.minX},${vBounds.maxX}] z[${vBounds.minZ},${vBounds.maxZ}] uncoveredX=${vBounds.maxX - hBounds.maxX} uncoveredZ=${vBounds.minZ - hBounds.minZ} joinedH=x[${hRect.minX},${hRect.maxX}] z[${hRect.minZ},${hRect.maxZ}] joinedV=x[${vRect.minX},${vRect.maxX}] z[${vRect.minZ},${vRect.maxZ}]`);
-  assertEqual(vBounds.maxX - hBounds.maxX, halfDepth, 'raw placed bounds show the old outside-corner x sliver');
-  assertEqual(vBounds.minZ - hBounds.minZ, halfDepth, 'raw placed bounds show the old outside-corner z sliver');
-  assertEqual(hRect.maxX, vRect.maxX, 'joined L corner closes the outer x face');
-  assertEqual(hRect.minZ, vRect.minZ, 'joined L corner closes the outer z face');
-  assertEqual(hRect.maxX - hBounds.maxX, halfDepth, 'horizontal wall extends only its joined endpoint');
-  assertEqual(vBounds.minZ - vRect.minZ, halfDepth, 'vertical wall extends only its joined endpoint');
+  // assertClose, not assertEqual: a paper-thin 0.005 wall is not a dyadic
+  // fraction, so halfDepth-scale arithmetic carries ~1e-17 representation noise
+  // (the 0.25 wall was exact). The geometry is right to float precision.
+  assertClose(vBounds.maxX - hBounds.maxX, halfDepth, 1e-9, 'raw placed bounds show the old outside-corner x sliver');
+  assertClose(vBounds.minZ - hBounds.minZ, halfDepth, 1e-9, 'raw placed bounds show the old outside-corner z sliver');
+  assertClose(hRect.maxX, vRect.maxX, 1e-9, 'joined L corner closes the outer x face');
+  assertClose(hRect.minZ, vRect.minZ, 1e-9, 'joined L corner closes the outer z face');
+  assertClose(hRect.maxX - hBounds.maxX, halfDepth, 1e-9, 'horizontal wall extends only its joined endpoint');
+  assertClose(vBounds.minZ - vRect.minZ, halfDepth, 1e-9, 'vertical wall extends only its joined endpoint');
 });
 
 test('REQ-0109: T wall junctions close the end-to-side face without resizing the crossing wall', () => {
@@ -298,10 +304,10 @@ test('REQ-0109: T wall junctions close the end-to-side face without resizing the
   const stemBounds = pieceBounds(stem);
   const [crossRect, stemRect] = placedPieceColliders([cross, stem]).rects;
   console.log(`[REQ-0109] T-junction crossBounds=x[${crossBounds.minX},${crossBounds.maxX}] z[${crossBounds.minZ},${crossBounds.maxZ}] stemBounds=x[${stemBounds.minX},${stemBounds.maxX}] z[${stemBounds.minZ},${stemBounds.maxZ}] uncoveredZ=${stemBounds.minZ - crossBounds.minZ} joinedCross=x[${crossRect.minX},${crossRect.maxX}] z[${crossRect.minZ},${crossRect.maxZ}] joinedStem=x[${stemRect.minX},${stemRect.maxX}] z[${stemRect.minZ},${stemRect.maxZ}]`);
-  assertEqual(stemBounds.minZ - crossBounds.minZ, halfDepth, 'raw placed bounds show the T-junction side sliver');
-  assertEqual(stemRect.minZ, crossRect.minZ, 'joined T closes the stem end to the crossing wall outer face');
-  assertEqual(crossRect.maxX - crossRect.minX, wallSize.widthMeters, 'the crossing wall keeps its catalog run width');
-  assertEqual(stemRect.maxZ - stemRect.minZ, wallSize.widthMeters + halfDepth, 'only the stem endpoint extends to cover wall thickness');
+  assertClose(stemBounds.minZ - crossBounds.minZ, halfDepth, 1e-9, 'raw placed bounds show the T-junction side sliver');
+  assertClose(stemRect.minZ, crossRect.minZ, 1e-9, 'joined T closes the stem end to the crossing wall outer face');
+  assertClose(crossRect.maxX - crossRect.minX, wallSize.widthMeters, 1e-9, 'the crossing wall keeps its catalog run width');
+  assertClose(stemRect.maxZ - stemRect.minZ, wallSize.widthMeters + halfDepth, 1e-9, 'only the stem endpoint extends to cover wall thickness');
 });
 
 test('a free-angled piece lands in the oriented frame', () => {
@@ -778,7 +784,11 @@ test('a wall beside a ramp never steals the slope: its band trims flush to the r
   const { rects } = placedPieceColliders([ramp, wall]);
   const wallRects = rects.slice(placedPieceColliders([ramp]).rects.length);
   assertEqual(wallRects.length, 1, 'the wall is still one band');
-  assertClose(wallRects[0].maxZ, 4.5, 1e-9, 'trimmed flush to the ramp edge — no overhang into the slope');
+  // THINWALL (req_2044): a paper-thin wall overhangs the ramp cell by only
+  // halfDepth (2.5mm) — below rampTrimMinBandMeters (0.01), so there is no
+  // step-onto ledge to trim and the band stays whole. (The fat 0.25 wall
+  // overhung 12.5cm, a real ledge that had to be trimmed flush to z=4.5.)
+  assert(wallRects[0].maxZ - 4.5 < PLACED_TUNING.rampTrimMinBandMeters, 'the slope-side overhang is below the trim threshold — no ledge');
   assert(wallRects[0].minZ < 4.5, 'the non-ramp side keeps its mass');
 });
 

@@ -27,6 +27,7 @@ import {
   INSTANCE_STRIDE,
   MATERIALS_DOC_TAIL_MAGIC,
   resetCustomTextureCache,
+  resolveMaterialShader,
 } from './worldGeometry';
 
 function row(values: Float32Array, index: number): number[] {
@@ -45,6 +46,13 @@ function rowHasColor(r: number[], color: readonly [number, number, number]): boo
     && Math.abs(r[10] - color[1]) < 1e-6
     && Math.abs(r[11] - color[2]) < 1e-6;
 }
+
+test('built-in shader preset ids resolve to frozen material data for compile', () => {
+  const resolved = resolveMaterialShader('n-floral-wallpaper--v2--max');
+  assert(resolved !== null, 'preset id resolves as a shader material');
+  assertEqual(JSON.stringify(resolved!.data), JSON.stringify([0, 2, 707, 4, 13]), 'compile uses the preset data, not the recipe default');
+  assert(resolved!.wgsl.includes('@fragment fn fs_main'), 'preset ships the fill shader WGSL');
+});
 
 function colorHex(hex: string): readonly [number, number, number] {
   const h = hex.replace('#', '');
@@ -68,12 +76,14 @@ test('compiled placed walls preserve front, back, and side face skins', () => {
   };
 
   const built = buildWorldInstances({} as any, [piece], []);
-  assertEqual(built.pieces, 3, 'the wall bakes as core plus two face slabs');
-  assertEqual(built.total, 3, 'no extra rows emitted');
-  assertColor(row(built.instances, 0), [0, 0, 1], 'side/core slab');
-  assertColor(row(built.instances, 1), [1, 0, 0], 'front slab');
-  assertColor(row(built.instances, 2), [0, 1, 0], 'back slab');
-  assertEqual(row(built.instances, 0)[12], INSTANCE_SHAPE_BOX, 'the core is a box instance');
+  // THINWALL (req_2044): a paper-thin wall is two HALF-DEPTH boxes meeting at the
+  // centerline (front + back), not the fat core + two proud face slabs — so the
+  // front/back paint survives but there is no separate side/core slab.
+  assertEqual(built.pieces, 2, 'the thin wall bakes as a front half and a back half');
+  assertEqual(built.total, 2, 'no extra rows emitted');
+  assertColor(row(built.instances, 0), [1, 0, 0], 'front half');
+  assertColor(row(built.instances, 1), [0, 1, 0], 'back half');
+  assertEqual(row(built.instances, 0)[12], INSTANCE_SHAPE_BOX, 'the front half is a box instance');
 });
 
 test('turned window and doorway walls put front/back skins on the same sides as the building workspace', () => {

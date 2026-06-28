@@ -4,8 +4,15 @@
 // fill it with paired triangular miter prisms.
 
 import { assertClose, finish, test } from '../../game/_testkit';
-import type { PlacedBuildPiece } from '@game';
+import { GAME_BUILD, type PlacedBuildPiece } from '@game';
 import { pieceVisualShapes, type VisualBox, type VisualShape } from './pieceShapes';
+
+// THINWALL (req_2044): walls are paper-thin now (paper_wall, 0.005m), rendered
+// as two HALF-DEPTH boxes (.front/.back) meeting at the centerline — no .core.
+// Corner squares / miters scale with the wall thickness, so these checks read
+// the catalog depth instead of the old hardcoded 0.25-era magnitudes.
+const WALL_DEPTH = GAME_BUILD.catalog.get('wall.concrete.common').size.depthMeters;
+const HALF_DEPTH = WALL_DEPTH / 2;
 
 let nextId = 0;
 function placed(pieceId: string, x: number, z: number, over: Partial<PlacedBuildPiece> = {}): PlacedBuildPiece {
@@ -87,17 +94,15 @@ test('an L-corner splits the endpoint square between both wall skins', () => {
   // miter triangle fills the square — landing the joint on the REAL crossing,
   // not a half-thickness off (the old 2.75 baked in the floor-offset geometry,
   // which on centered walls left a see-through gap + a sliver overhang).
-  assertClose(runRange(box(horizontal, pieces, '.core')).max, 2.875, 1e-9, 'horizontal rendered core stops at the corner-square near edge');
-  assertClose(runRange(box(horizontal, pieces, '.front')).max, 2.875, 1e-9, 'horizontal front skin stops at the corner-square near edge');
-  assertClose(runRange(box(horizontal, pieces, '.back')).max, 2.875, 1e-9, 'horizontal back skin stops at the corner-square near edge');
-  if (!box(horizontal, pieces, '.core').openRunMax || !box(horizontal, pieces, '.front').openRunMax || !box(horizontal, pieces, '.back').openRunMax) {
+  assertClose(runRange(box(horizontal, pieces, '.front')).max, 3 - HALF_DEPTH, 1e-9, 'horizontal front skin stops at the corner-square near edge');
+  assertClose(runRange(box(horizontal, pieces, '.back')).max, 3 - HALF_DEPTH, 1e-9, 'horizontal back skin stops at the corner-square near edge');
+  if (!box(horizontal, pieces, '.front').openRunMax || !box(horizontal, pieces, '.back').openRunMax) {
     throw new Error('horizontal wall boxes must omit the cut max-end cap at an L-corner');
   }
 
-  assertClose(runRange(box(vertical, pieces, '.core')).min, 0.125, 1e-9, 'perpendicular rendered core stops at the corner-square near edge');
-  assertClose(runRange(box(vertical, pieces, '.front')).min, 0.125, 1e-9, 'perpendicular front skin stops at the corner-square near edge');
-  assertClose(runRange(box(vertical, pieces, '.back')).min, 0.125, 1e-9, 'perpendicular back skin stops at the corner-square near edge');
-  if (!box(vertical, pieces, '.core').openRunMax || !box(vertical, pieces, '.front').openRunMax || !box(vertical, pieces, '.back').openRunMax) {
+  assertClose(runRange(box(vertical, pieces, '.front')).min, HALF_DEPTH, 1e-9, 'perpendicular front skin stops at the corner-square near edge');
+  assertClose(runRange(box(vertical, pieces, '.back')).min, HALF_DEPTH, 1e-9, 'perpendicular back skin stops at the corner-square near edge');
+  if (!box(vertical, pieces, '.front').openRunMax || !box(vertical, pieces, '.back').openRunMax) {
     throw new Error('vertical yaw-90 wall boxes must omit the local max cap at the world min end of an L-corner');
   }
 
@@ -106,15 +111,15 @@ test('an L-corner splits the endpoint square between both wall skins', () => {
   if (!horizontalMiter || !verticalMiter) throw new Error('L-corner must emit one miter triangle from each wall');
   assertClose(horizontalMiter.cx, verticalMiter.cx, 1e-9, 'paired miter triangles share the same corner-square center x');
   assertClose(horizontalMiter.cz, verticalMiter.cz, 1e-9, 'paired miter triangles share the same corner-square center z');
-  assertClose(Math.abs(horizontalMiter.sx), 0.25, 1e-9, 'horizontal miter cut spans one full wall thickness along the run');
-  assertClose(Math.abs(verticalMiter.sx), 0.25, 1e-9, 'vertical miter cut spans one full wall thickness along the run');
+  assertClose(Math.abs(horizontalMiter.sx), WALL_DEPTH, 1e-9, 'horizontal miter cut spans one full wall thickness along the run');
+  assertClose(Math.abs(verticalMiter.sx), WALL_DEPTH, 1e-9, 'vertical miter cut spans one full wall thickness along the run');
   if (horizontalMiter.slot === 'sides' || verticalMiter.slot === 'sides') {
     throw new Error('corner miter triangles must wear the painted wall face, not the dark side/end-cap material');
   }
   if (horizontalMiter.color !== '#cc3311' || verticalMiter.color !== '#1144cc') {
     throw new Error(`corner miter triangles should keep both painted wall colors, got ${horizontalMiter.color} and ${verticalMiter.color}`);
   }
-  assertNoPlanOverlap(box(horizontal, pieces, '.core'), box(vertical, pieces, '.core'), 'rendered wall cores must not overlap at an L-corner');
+  assertNoPlanOverlap(box(horizontal, pieces, '.front'), box(vertical, pieces, '.front'), 'rendered wall halves must not overlap at an L-corner');
 });
 
 test('a T-junction clamps both side skins at the stem endpoint', () => {
@@ -122,13 +127,12 @@ test('a T-junction clamps both side skins at the stem endpoint', () => {
   const stem = placed('wall.concrete.common', 1.5, 1.5, { yawDegrees: 90 });
   const pieces = [cross, stem];
 
-  assertClose(runRange(box(stem, pieces, '.core')).min, 0.125, 1e-9, 'rendered core/end cap butts into the crossing wall');
-  assertClose(runRange(box(stem, pieces, '.front')).min, 0.125, 1e-9, 'front skin butts into the crossing wall');
-  assertClose(runRange(box(stem, pieces, '.back')).min, 0.125, 1e-9, 'back skin also butts into the crossing wall');
-  if (!box(stem, pieces, '.core').openRunMax || !box(stem, pieces, '.front').openRunMax || !box(stem, pieces, '.back').openRunMax) {
+  assertClose(runRange(box(stem, pieces, '.front')).min, HALF_DEPTH, 1e-9, 'front skin butts into the crossing wall');
+  assertClose(runRange(box(stem, pieces, '.back')).min, HALF_DEPTH, 1e-9, 'back skin also butts into the crossing wall');
+  if (!box(stem, pieces, '.front').openRunMax || !box(stem, pieces, '.back').openRunMax) {
     throw new Error('yaw-90 T-junction stem boxes must omit the local max cap at the world min end');
   }
-  assertNoPlanOverlap(box(cross, pieces, '.core'), box(stem, pieces, '.core'), 'rendered wall cores must not overlap at a T-junction');
+  assertNoPlanOverlap(box(cross, pieces, '.front'), box(stem, pieces, '.front'), 'rendered wall halves must not overlap at a T-junction');
 });
 
 // Real-world L-corner from a live snapshot (req_1709): centered walls (painted
@@ -143,7 +147,7 @@ test('a real centered L-corner lands the miter on the wall crossing', () => {
   const bp_2881 = placed('wall.concrete.common', 129, 286.5, { id: 'bp_2881', yawDegrees: 90 });
   const pieces = [bp_2881, bp_2882, bp_2883];
 
-  assertClose(runRange(box(bp_2883, pieces, '.core')).max, 128.875, 1e-9, 'horizontal core stops at the corner-square near edge');
+  assertClose(runRange(box(bp_2883, pieces, '.front')).max, 129 - HALF_DEPTH, 1e-9, 'horizontal front skin stops at the corner-square near edge');
   const miter = wallCornerMiters(bp_2883, pieces)[0];
   if (!miter) throw new Error('the L-corner must emit a miter triangle');
   assertClose(miter.cx, 129, 1e-9, 'miter centers on the vertical wall crossing x');

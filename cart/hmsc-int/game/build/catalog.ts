@@ -124,7 +124,14 @@ const SOLID_PLATE_TAGS: BuildGameplayTags = {
 };
 
 // The standard piece module: one storey tall, one cell-run wide.
-const WALL_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 3, depthMeters: 0.25 };
+// THINWALL (req_2044, USER ASK "give walls the same thickness of paper_wall"): the
+// wall slab is paper-thin — the user's Studio `paper_wall` is 0.005m, and that is
+// the standard now. Walls are centered on their grid line (req_1714/1719), so the
+// thinner depth is symmetric about the line — no placement migration, existing
+// walls thin in place. The render path (pieceShapes addWallBox) renders a thin wall
+// as two half-depth boxes meeting at the centerline so each side keeps its own
+// paint; the old fat 0.25 slab kept the proud face-slab sandwich.
+const WALL_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 3, depthMeters: 0.005 };
 const PLATE_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 0.2, depthMeters: 3 };
 // THINFLOOR (req_2034, USER FINDING "when its thin it sits perfectly"): a floor is
 // a THIN plate. The user's Studio `thin_floor` (~2cm) sits flush on the ground with

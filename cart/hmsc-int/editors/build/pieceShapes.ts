@@ -356,9 +356,22 @@ export function pieceVisualShapes(
         }
         shapes.push(shape);
       };
-      pushWallRunBox(box(`${label}.core`, (vu0 + vu1) / 2, depthCenter, baseY, vu1 - vu0, h, depthSize, sides));
-      pushWallRunBox(box(`${label}.front`, (vu0 + vu1) / 2, frontV, baseY, vu1 - vu0, h, slab, wallFront));
-      pushWallRunBox(box(`${label}.back`, (vu0 + vu1) / 2, backV, baseY, vu1 - vu0, h, slab, wallBack));
+      const uMid = (vu0 + vu1) / 2;
+      const runW = vu1 - vu0;
+      if (depthSize <= slab * 3) {
+        // THINWALL (req_2044): a paper-thin wall (the user's paper_wall, 5mm). The
+        // proud face-slab sandwich would float its 0.02 plates OUTSIDE the 5mm wall
+        // with gaps between core and plate — it reads ~5cm thick and full of holes.
+        // A thin wall is instead two HALF-DEPTH boxes meeting at the centerline, so
+        // the wall stays exactly depthSize thick and each side keeps its own paint.
+        const half = depthSize / 2;
+        pushWallRunBox(box(`${label}.front`, uMid, depthCenter + half / 2, baseY, runW, h, half, wallFront));
+        pushWallRunBox(box(`${label}.back`, uMid, depthCenter - half / 2, baseY, runW, h, half, wallBack));
+      } else {
+        pushWallRunBox(box(`${label}.core`, uMid, depthCenter, baseY, runW, h, depthSize, sides));
+        pushWallRunBox(box(`${label}.front`, uMid, frontV, baseY, runW, h, slab, wallFront));
+        pushWallRunBox(box(`${label}.back`, uMid, backV, baseY, runW, h, slab, wallBack));
+      }
       if (u0 === wallMinU && wallMinU < nominalMinU && ends.minU !== null) addCornerMiter(label, ends.minU, -1, baseY, h);
       if (u1 === wallMaxU && wallMaxU > nominalMaxU && ends.maxU !== null) addCornerMiter(label, ends.maxU, 1, baseY, h);
     };
