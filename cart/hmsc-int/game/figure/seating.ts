@@ -137,32 +137,19 @@ function centroid(verts: V3[]): V3 {
 
 type FaceAxis = { dirX: number; dirZ: number; length: number };
 
-/** The two XZ edge axes of a (quad) seat face — `long` (bench length) and `short`
- *  (depth). Occupants pack along `long` when sitting, along `short` when laying
- *  (the body runs down the long axis). Degenerate loops fall back to the longest
- *  edge for both. */
-function seatAxes(verts: V3[]): { long: FaceAxis; short: FaceAxis } {
-  const edges: FaceAxis[] = [];
-  for (let i = 0; i < verts.length; i += 1) {
-    const a = verts[i], b = verts[(i + 1) % verts.length];
-    const dx = b[0] - a[0], dz = b[2] - a[2];
-    const len = Math.hypot(dx, dz);
-    if (len > 1e-6) edges.push({ dirX: dx / len, dirZ: dz / len, length: len });
+/** The X/Z bounding-box axes of the seat verts — `long` (the wider span = bench
+ *  length) and `short` (depth). Robust to a seat made of MANY faces (a sculpted,
+ *  curved seat), unlike per-edge axes which assume a single quad loop. Occupants
+ *  pack along `long` when sitting (a booth bench), along `short` when laying. */
+function seatBoxAxes(verts: V3[]): { long: FaceAxis; short: FaceAxis } {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const v of verts) {
+    if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
+    if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
   }
-  if (edges.length === 0) {
-    const flat: FaceAxis = { dirX: 1, dirZ: 0, length: 0 };
-    return { long: flat, short: flat };
-  }
-  edges.sort((a, b) => b.length - a.length);
-  const long = edges[0];
-  // the most-perpendicular edge to `long` is the depth axis (a quad's other side).
-  let short = edges[edges.length - 1];
-  let bestPerp = 1;
-  for (const e of edges) {
-    const dot = Math.abs(e.dirX * long.dirX + e.dirZ * long.dirZ);
-    if (dot < bestPerp) { bestPerp = dot; short = e; }
-  }
-  return { long, short };
+  const xAxis: FaceAxis = { dirX: 1, dirZ: 0, length: Math.max(0, maxX - minX) };
+  const zAxis: FaceAxis = { dirX: 0, dirZ: 1, length: Math.max(0, maxZ - minZ) };
+  return xAxis.length >= zAxis.length ? { long: xAxis, short: zAxis } : { long: zAxis, short: xAxis };
 }
 
 /** Figure faces -Z at yaw 0 (render.tsx). Convert a horizontal facing direction
@@ -175,31 +162,34 @@ function faceDegFromDir(dx: number, dz: number): number {
 /** Derive a seat from the rigged faces, or null if no seat face was tagged.
  *  Pure — the cook and any probe both call this (rule-of-two; no parallel logic). */
 export function deriveSeatFromFaces(faces: RiggedFace[]): DerivedSeat | null {
-  const seatFace = faces.find((f) => f.bodyPart === 'seat');
-  if (!seatFace) return null;
-
-  const seatC = centroid(seatFace.verts);
-  const backC = faces.find((f) => f.bodyPart === 'back')?.verts;
-  const headC = faces.find((f) => f.bodyPart === 'head')?.verts;
-  const legsC = faces.find((f) => f.bodyPart === 'legs')?.verts;
+  // Aggregate ALL faces of each tag — a sculpted seat/backrest is many faces, and
+  // reading just the FIRST one skews the centroid so the model sits crooked
+  // (req_2043). The combined centroid of every back face gives a centered facing.
+  const vertsOf = (bp: SeatBodyPart): V3[] => faces.filter((f) => f.bodyPart === bp).flatMap((f) => f.verts);
+  const seatVerts = vertsOf('seat');
+  if (!seatVerts.length) return null;
+  const seatC = centroid(seatVerts);
+  const partCentroid = (bp: SeatBodyPart): V3 | null => { const v = vertsOf(bp); return v.length ? centroid(v) : null; };
+  const backC = partCentroid('back');
+  const headC = partCentroid('head');
+  const legsC = partCentroid('legs');
 
   // Pose: a head contact means the head rests on a surface — that's laying down.
   const pose: SeatPose = headC ? 'lay' : 'sit';
 
-  // Facing: orient head→pillow when laying; else face AWAY from the back; else
-  // out over the leg edge. At least one directional contact is almost always
-  // rigged (the back), so direction is determined, not inferred.
+  // Facing: orient head→pillow when laying; else face AWAY from the back; else out
+  // over the leg edge. Uses the COMBINED centroid of every tagged face, so a wide
+  // or multi-face backrest yields a centered (un-crooked) direction.
   let dx = 0, dz = 0;
-  if (headC) { const h = centroid(headC); dx = h[0] - seatC[0]; dz = h[2] - seatC[2]; }
-  else if (backC) { const b = centroid(backC); dx = seatC[0] - b[0]; dz = seatC[2] - b[2]; }
-  else if (legsC) { const l = centroid(legsC); dx = l[0] - seatC[0]; dz = l[2] - seatC[2]; }
+  if (headC) { dx = headC[0] - seatC[0]; dz = headC[2] - seatC[2]; }
+  else if (backC) { dx = seatC[0] - backC[0]; dz = seatC[2] - backC[2]; }
+  else if (legsC) { dx = legsC[0] - seatC[0]; dz = legsC[2] - seatC[2]; }
   const faceDeg = faceDegFromDir(dx, dz);
 
-  // Capacity: occupants pack along the seat face. SITTING they sit side by side
-  // down the LONG axis (a booth bench); LAYING the body runs down the long axis,
-  // so multiple sleepers pack across the SHORT axis (a double bed). Slots are
-  // evenly distributed along the packing axis and centered on the face.
-  const { long, short } = seatAxes(seatFace.verts);
+  // Capacity: occupants pack along the seat. SITTING they sit side by side down the
+  // LONG axis (a booth bench); LAYING the body runs down the long axis, so sleepers
+  // pack across the SHORT axis (a bed). Slots are centered on the seat.
+  const { long, short } = seatBoxAxes(seatVerts);
   const slotAxis = pose === 'lay' ? short : long;
   const slotMeters = pose === 'lay' ? LAY_SLOT_METERS : SEAT_SLOT_METERS;
   const capacity = Math.max(1, Math.round(slotAxis.length / slotMeters));
