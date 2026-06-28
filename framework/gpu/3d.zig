@@ -67,12 +67,34 @@ const InstanceData = extern struct {
     color: [4]f32, // location 7
 };
 
+// Slim per-instance row for the FROND pipeline only (palm/tree crowns). A frond's
+// real degrees of freedom are tiny — position, a pitch+yaw (rz is always 0), one
+// width + one length (sx==sz), and a single crown tint — so storing the full 80-byte
+// model matrix is ~64 bytes of pure waste per card, and a palm crown is 19–29 cards.
+// We pack it to 24 bytes (3.33× smaller) and rebuild the matrix in frond_wgsl. The
+// frond family also gets its OWN instance buffer (g_frond_*), so tree crowns stop
+// competing for the shared 1.05M static pool — easing the in-view despawn directly.
+// Quantization (decode side lives in shaders.frond_wgsl, MUST stay in lockstep):
+//   angles: u16 = round(deg / 360 * 65536)      → deg = f32(u16) / 65536 * 360
+//   scale : unorm16 over [0, FROND_SCALE_MAX m]  → m = unorm * FROND_SCALE_MAX
+//   color : unorm8 per channel                   → c = u8 / 255
+const FROND_SCALE_MAX: f32 = 16.0; // metres the unorm16 width/length range spans
+const FrondInstance = extern struct {
+    pos: [3]f32, // location 3 (float32x3) — px, py, pz
+    angles: [2]u16, // location 4 (uint16x2)  — pitch, yaw (deg × 65536/360)
+    scale: [2]u16, // location 5 (unorm16x2) — wide, len (÷ FROND_SCALE_MAX)
+    color: [4]u8, // location 6 (unorm8x4)  — root rgb (+ a = 255, unused)
+};
+
 comptime {
     if (@sizeOf(SceneUniforms) != 192 or @alignOf(SceneUniforms) != 16) {
         @compileError("SceneUniforms must match scene3d_wgsl uniform layout (192 bytes, align 16)");
     }
     if (@sizeOf(InstanceData) != 80 or @alignOf(InstanceData) != 4) {
         @compileError("InstanceData must match scene3d_wgsl per-instance vertex layout (80 bytes)");
+    }
+    if (@sizeOf(FrondInstance) != 24 or @alignOf(FrondInstance) != 4) {
+        @compileError("FrondInstance must match frond_wgsl per-instance vertex layout (24 bytes)");
     }
 }
 
@@ -272,6 +294,19 @@ var g_static_inst_top: u64 = 0; // bump cursor (bytes) into g_static_inst_buf
 var g_static_inst_cache: [STATIC_INST_CACHE_LEN]StaticInstEntry = [_]StaticInstEntry{.{}} ** STATIC_INST_CACHE_LEN;
 var g_static_inst_cache_len: usize = 0;
 
+// FROND family's OWN retained instance pool — the slim 24-byte twin of g_static_inst_*.
+// Tree crowns are the heaviest foliage (19–29 cards/palm) so they get a separate buffer
+// in the slim FrondInstance format: 3.33× less per row AND off the shared static pool,
+// so a view full of palms no longer starves buildings/grass (the despawn lever). Same
+// MAX_STATIC_INSTANCES row budget → 24 MB here vs 80 MB shared. Lazily created.
+var g_frond_static_buf: ?*wgpu.Buffer = null;
+var g_frond_static_top: u64 = 0; // bump cursor (bytes) into g_frond_static_buf
+var g_frond_static_cache: [STATIC_INST_CACHE_LEN]StaticInstEntry = [_]StaticInstEntry{.{}} ** STATIC_INST_CACHE_LEN;
+var g_frond_static_cache_len: usize = 0;
+// Per-frame staging window for frond rows that overflow the retained pool (the
+// static→dynamic degrade path), the FrondInstance analogue of g_inst_scratch.
+var g_frond_inst_scratch: [MAX_INSTANCES]FrondInstance = undefined;
+
 // ════════════════════════════════════════════════════════════════════════
 // Pipeline state
 // ════════════════════════════════════════════════════════════════════════
@@ -329,6 +364,7 @@ var g_ground_wgsl_buf: [96 * 1024]u8 = undefined; // scratch for the one-time as
 var g_vertex_buffer: ?*wgpu.Buffer = null;
 var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned registry geometry
 var g_instance_buf: ?*wgpu.Buffer = null; // per-frame InstanceData buffer (step=instance, vbuf 1)
+var g_frond_inst_buf: ?*wgpu.Buffer = null; // per-frame slim FrondInstance buffer (frond pipeline only)
 var g_uniform_buffer: ?*wgpu.Buffer = null;
 var g_bind_group: ?*wgpu.BindGroup = null;
 var g_bind_group_layout: ?*wgpu.BindGroupLayout = null;
@@ -528,6 +564,13 @@ pub fn init() void {
         .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
         .mapped_at_creation = 0,
     });
+    // Per-frame slim buffer for frond overflow rows (24 B each → ~6.3 MB vs 21 MB).
+    g_frond_inst_buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("render3d_frond_instances"),
+        .size = MAX_INSTANCES * @sizeOf(FrondInstance),
+        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
     g_bind_group_layout = device.createBindGroupLayout(&.{
         .entry_count = 1,
         .entries = @ptrCast(&wgpu.BindGroupLayoutEntry{
@@ -699,6 +742,20 @@ pub fn init() void {
         .{ .step_mode = .vertex, .array_stride = @sizeOf(Vertex), .attribute_count = vert_attrs.len, .attributes = &vert_attrs },
         .{ .step_mode = .instance, .array_stride = @sizeOf(InstanceData), .attribute_count = inst_attrs.len, .attributes = &inst_attrs },
     };
+    // Slim per-instance attributes for the FROND pipeline ONLY — the 24-byte
+    // FrondInstance (pos f32x3 @3, pitch/yaw u16x2 @4, wide/len unorm16x2 @5, rgb
+    // unorm8x4 @6). frond_wgsl rebuilds the model matrix from these. Same per-vertex
+    // layout as everyone (vbuf 0), different instance buffer + stride (vbuf 1).
+    const frond_inst_attrs = [_]wgpu.VertexAttribute{
+        .{ .format = .float32x3, .offset = 0, .shader_location = 3 },
+        .{ .format = .uint16x2, .offset = 12, .shader_location = 4 },
+        .{ .format = .unorm16x2, .offset = 16, .shader_location = 5 },
+        .{ .format = .unorm8x4, .offset = 20, .shader_location = 6 },
+    };
+    const frond_vert_layouts = [_]wgpu.VertexBufferLayout{
+        .{ .step_mode = .vertex, .array_stride = @sizeOf(Vertex), .attribute_count = vert_attrs.len, .attributes = &vert_attrs },
+        .{ .step_mode = .instance, .array_stride = @sizeOf(FrondInstance), .attribute_count = frond_inst_attrs.len, .attributes = &frond_inst_attrs },
+    };
     const color_target = wgpu.ColorTargetState{
         .format = .rgba8_unorm,
         .blend = &wgpu.BlendState.premultiplied_alpha_blending,
@@ -808,7 +865,7 @@ pub fn init() void {
             };
             g_frond_pipeline = device.createRenderPipeline(&.{
                 .layout = pipeline_layout,
-                .vertex = .{ .module = frond_module, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = vert_layouts.len, .buffers = &vert_layouts },
+                .vertex = .{ .module = frond_module, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = frond_vert_layouts.len, .buffers = &frond_vert_layouts },
                 .primitive = .{ .topology = .triangle_list, .cull_mode = .none, .front_face = .ccw },
                 .depth_stencil = &depth_stencil,
                 .multisample = .{},
@@ -933,6 +990,8 @@ pub fn deinit() void {
     if (g_bind_group_layout) |l| l.release();
     if (g_uniform_buffer) |b| b.release();
     if (g_instance_buf) |b| b.release();
+    if (g_frond_inst_buf) |b| b.release();
+    if (g_frond_static_buf) |b| b.release();
     if (g_ground_inst_buf) |b| b.release();
     if (g_vertex_buffer) |b| b.release();
     if (g_pipeline) |p| p.release();
@@ -980,6 +1039,9 @@ pub fn resetForReload() void {
     g_static_inst_cache_len = 0;
     g_static_inst_top = 0;
     for (&g_static_inst_cache) |*e| e.* = .{};
+    g_frond_static_cache_len = 0;
+    g_frond_static_top = 0;
+    for (&g_frond_static_cache) |*e| e.* = .{};
     g_dyn_len = 0;
     g_dyn_bump_verts = 0;
     g_dyn_warned = false;
@@ -1772,6 +1834,40 @@ fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, s
     };
 }
 
+fn quantColor(c: f32) u8 {
+    return @intFromFloat(@round(std.math.clamp(c, 0.0, 1.0) * 255.0));
+}
+
+/// Pack a frond row into the 24-byte slim format. `rz` is dropped (always 0 for a
+/// frond), and width is one value (sx==sz). Decode lives in shaders.frond_wgsl —
+/// keep the two in lockstep with FROND_SCALE_MAX. Out-of-range scale clamps loudly
+/// to the unorm ceiling rather than wrapping (a frond longer than 16 m is a bug).
+fn makeFrondInstance(px: f32, py: f32, pz: f32, pitch: f32, yaw: f32, wide: f32, len: f32, cr: f32, cg: f32, cb: f32) FrondInstance {
+    const deg_to_u16 = 65536.0 / 360.0;
+    const wrap = struct {
+        fn q(deg: f32) u16 {
+            // map any degree onto [0,360) then onto the u16 ring. Round can land on
+            // 65536 for an angle a hair under 360° — mask through u32 so it wraps to
+            // 0 (the correct ring value) instead of overflowing the u16 cast.
+            const m = deg - @floor(deg / 360.0) * 360.0;
+            const v: u32 = @intFromFloat(@round(m * deg_to_u16));
+            return @intCast(v & 0xFFFF);
+        }
+    };
+    const scl = struct {
+        fn q(m: f32) u16 {
+            const u = std.math.clamp(m / FROND_SCALE_MAX, 0.0, 1.0);
+            return @intFromFloat(@round(u * 65535.0));
+        }
+    };
+    return FrondInstance{
+        .pos = .{ px, py, pz },
+        .angles = .{ wrap.q(pitch), wrap.q(yaw) },
+        .scale = .{ scl.q(wide), scl.q(len) },
+        .color = .{ quantColor(cr), quantColor(cg), quantColor(cb), 255 },
+    };
+}
+
 const StaticInstDraw = struct { offset: u64, count: u32 };
 
 /// Resolve a STATIC instanced batch (scene3d_instance_static) to a persistent
@@ -1863,6 +1959,67 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
     g_static_inst_cache[g_static_inst_cache_len] = .{ .key = key, .count = n, .offset = base_offset, .used = true, .version = version };
     g_static_inst_cache_len += 1;
     return .{ .offset = base_offset, .count = n };
+}
+
+// ── Frond family: the slim 24-byte twin of the static-instance staging above ──
+// Frond source rows are stride-13 (transform12 + shape) like every foliage family;
+// the transform is px,py,pz, pitch,yaw,0(rz), wide,len,wide, r,g,b. We drop rz and
+// the duplicate width and pack to FrondInstance. Same whole-array retained-upload
+// contract as stageStaticInstanceBytes so streamed sub-ranges stay addressable.
+fn stageStaticFrondBytes(queue: *wgpu.Queue, idata: []const f32, stride: u32, n: u32, dst_offset: u64) void {
+    var done: u32 = 0;
+    while (done < n) {
+        const chunk: u32 = @min(MAX_INSTANCES, n - done);
+        var k: u32 = 0;
+        while (k < chunk) : (k += 1) {
+            const src = @as(usize, done + k) * stride;
+            g_frond_inst_scratch[k] = makeFrondInstance(
+                idata[src + 0], idata[src + 1], idata[src + 2], // pos
+                idata[src + 3], idata[src + 4], // pitch, yaw (rz at +5 dropped)
+                idata[src + 6], idata[src + 7], // wide, len (sz at +8 == wide, dropped)
+                idata[src + 9], idata[src + 10], idata[src + 11], // root rgb
+            );
+        }
+        bu.writeTypedBuffer(queue, g_frond_static_buf.?, dst_offset + @as(u64, done) * @sizeOf(FrondInstance), FrondInstance, g_frond_inst_scratch[0..chunk]);
+        done += chunk;
+    }
+}
+
+fn resolveStaticFrondInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, stride: u32, version: u32) ?StaticInstDraw {
+    if (stride < 12 or idata.len < stride) return null;
+    const icount: u32 = @intCast(idata.len / @as(usize, stride));
+    const key = @intFromPtr(idata.ptr);
+    var i: usize = 0;
+    while (i < g_frond_static_cache_len) : (i += 1) {
+        const e = &g_frond_static_cache[i];
+        if (e.used and e.key == key and e.count == icount) {
+            if (e.version != version) {
+                stageStaticFrondBytes(queue, idata, stride, icount, e.offset);
+                e.version = version;
+            }
+            return .{ .offset = e.offset, .count = e.count };
+        }
+    }
+    if (icount == 0) return null;
+    if (g_frond_static_cache_len >= STATIC_INST_CACHE_LEN) return null;
+    if (g_frond_static_buf == null) {
+        g_frond_static_buf = device.createBuffer(&.{
+            .label = wgpu.StringView.fromSlice("render3d_frond_static_instances"),
+            .size = @as(u64, MAX_STATIC_INSTANCES) * @sizeOf(FrondInstance),
+            .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+            .mapped_at_creation = 0,
+        });
+        if (g_frond_static_buf == null) return null;
+        g_frond_static_top = 0;
+    }
+    const used_count: u32 = @intCast(g_frond_static_top / @sizeOf(FrondInstance));
+    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, MAX_STATIC_INSTANCES)) return null;
+    const base_offset = g_frond_static_top;
+    stageStaticFrondBytes(queue, idata, stride, icount, base_offset);
+    g_frond_static_top += @as(u64, icount) * @sizeOf(FrondInstance);
+    g_frond_static_cache[g_frond_static_cache_len] = .{ .key = key, .count = icount, .offset = base_offset, .used = true, .version = version };
+    g_frond_static_cache_len += 1;
+    return .{ .offset = base_offset, .count = icount };
 }
 
 // Build the ground-formula pipeline once, from the first chunk's formula. The
@@ -2270,6 +2427,11 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     const inst_cap_bytes: u64 = @as(u64, MAX_INSTANCES) * @sizeOf(InstanceData);
     const inst_scratch = &g_inst_scratch; // BSS-resident staging buffer (off the stack)
     var inst_top: u64 = 0;
+    // Frond overflow rows stage into their OWN slim buffer (separate format/stride),
+    // so they get their own per-frame cursor + cap, parallel to inst_top above.
+    const frond_inst_scratch = &g_frond_inst_scratch;
+    const frond_cap_bytes: u64 = @as(u64, MAX_INSTANCES) * @sizeOf(FrondInstance);
+    var frond_inst_top: u64 = 0;
     // g_pipeline is the bound pipeline coming in (set above). A sentinel-flagged
     // group ("~grass~"/"~water~" tex-key) swaps to its companion pipeline for the
     // draw and we swap back for the next plain group — all three share the exact
@@ -2303,16 +2465,27 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
             pass.setPipeline(want_special orelse g_pipeline.?);
             cur_special = want_special;
         }
+        // Fronds use the slim 24-byte FrondInstance buffer + format; everyone else
+        // the 80-byte InstanceData. Branch the staging/binding accordingly.
+        const is_frond = g_frond_pipeline != null and want_special == g_frond_pipeline;
         if (leader.scene3d_instance_static) {
             if (leader.scene3d_instance_data) |idata| {
-                if (resolveStaticInstances(device, queue, idata, leader.scene3d_instance_stride, leader.scene3d_instance_version)) |sd| {
+                const sd_opt = if (is_frond)
+                    resolveStaticFrondInstances(device, queue, idata, leader.scene3d_instance_stride, leader.scene3d_instance_version)
+                else
+                    resolveStaticInstances(device, queue, idata, leader.scene3d_instance_stride, leader.scene3d_instance_version);
+                if (sd_opt) |sd| {
                     mvisited[gi] = true;
                     const first: u32 = @min(leader.scene3d_instance_first, sd.count);
                     const count: u32 = @min(leader.scene3d_instance_count, sd.count - first);
                     if (count > 0) {
                         if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
                         pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, bu.bytesOfCount(Vertex, group_slot.count));
-                        pass.setVertexBuffer(1, g_static_inst_buf.?, sd.offset + bu.bytesOfCount(InstanceData, first), bu.bytesOfCount(InstanceData, count));
+                        if (is_frond) {
+                            pass.setVertexBuffer(1, g_frond_static_buf.?, sd.offset + bu.bytesOfCount(FrondInstance, first), bu.bytesOfCount(FrondInstance, count));
+                        } else {
+                            pass.setVertexBuffer(1, g_static_inst_buf.?, sd.offset + bu.bytesOfCount(InstanceData, first), bu.bytesOfCount(InstanceData, count));
+                        }
                         pass.draw(group_slot.count, count, 0, 0);
                         g_telemetry.draw_calls += 1;
                         g_telemetry.instances += count;
@@ -2320,6 +2493,56 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                     continue;
                 }
             }
+        }
+
+        // Per-frame frond overflow draws from g_frond_inst_buf (slim format); the
+        // standard families draw from g_instance_buf. One leader's group is wholly
+        // one or the other (same tex key → same pipeline), so this branch is total.
+        if (is_frond) {
+            const fstart = frond_inst_top;
+            var fcount: u32 = 0;
+            var hf: usize = gi;
+            while (hf < mcount) : (hf += 1) {
+                if (mvisited[hf]) continue;
+                if (mslot[hf].offset != group_slot.offset) continue;
+                if (mtex[hf] != group_tex) continue;
+                if (hf != gi and scene_node.children[midx[hf]].scene3d_instance_static) continue;
+                if (frond_inst_top + @sizeOf(FrondInstance) > frond_cap_bytes) break;
+                const child = &scene_node.children[midx[hf]];
+                if (child.scene3d_instance_data) |idata| {
+                    const stride = child.scene3d_instance_stride;
+                    if (stride >= 12) {
+                        const total_rows: u32 = @intCast(idata.len / stride);
+                        const ifirst: u32 = @min(child.scene3d_instance_first, total_rows);
+                        const icount: u32 = @min(child.scene3d_instance_count, total_rows - ifirst);
+                        var ii: u32 = 0;
+                        while (ii < icount and frond_inst_top + @sizeOf(FrondInstance) <= frond_cap_bytes) : (ii += 1) {
+                            const base = @as(usize, ifirst + ii) * stride;
+                            const fi: usize = @intCast(frond_inst_top / @sizeOf(FrondInstance));
+                            frond_inst_scratch[fi] = makeFrondInstance(
+                                idata[base + 0], idata[base + 1], idata[base + 2],
+                                idata[base + 3], idata[base + 4],
+                                idata[base + 6], idata[base + 7],
+                                idata[base + 9], idata[base + 10], idata[base + 11],
+                            );
+                            frond_inst_top += @sizeOf(FrondInstance);
+                            fcount += 1;
+                        }
+                    }
+                }
+                mvisited[hf] = true;
+            }
+            if (fcount == 0) continue;
+            const fstart_index: usize = @intCast(fstart / @sizeOf(FrondInstance));
+            bu.writeTypedBuffer(queue, g_frond_inst_buf.?, fstart, FrondInstance, frond_inst_scratch[fstart_index .. fstart_index + fcount]);
+            if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
+            pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, bu.bytesOfCount(Vertex, group_slot.count));
+            pass.setVertexBuffer(1, g_frond_inst_buf.?, fstart, bu.bytesOfCount(FrondInstance, fcount));
+            pass.draw(group_slot.count, fcount, 0, 0);
+            g_telemetry.draw_calls += 1;
+            g_telemetry.instances += fcount;
+            g_telemetry.staged_dynamic += fcount;
+            continue;
         }
 
         const inst_start = inst_top;
