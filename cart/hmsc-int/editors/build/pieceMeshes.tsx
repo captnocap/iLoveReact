@@ -531,22 +531,27 @@ export function meshPropKeyForKind(kind: string): string | null {
   return null;
 }
 
-// LIVEMESH ref stride: u32 keyHash, f32 x,y,z,yaw, u32 matHash (0 = the mesh's own baked
-// texture). matHash references a live material pushed via __compiled_world_set_live_material
-// (LIVESKIN req_1843) so an editor face-skin shows without a rebake.
-const MESH_REF_BYTES = 24;
+// LIVEMESH ref layout (variable stride): a 24-byte header — u32 keyHash, f32 x,y,z,yaw,
+// u32 matCount — then matCount × u32 matHash, ONE per loader texture slot (0 = that slot
+// wears the mesh's own baked atlas). matCount 0 = the whole mesh on its baked texture (the
+// ghost / a brand-new unskinned placement). Per-slot mats (req_2025) let a multi-slot cooked
+// prop wear each slot's own skin in the editor pane instead of the FIRST skin smeared over
+// every face — matching what the compiled bake's slotMaterials already does. Each matHash
+// references a live material pushed via __compiled_world_set_live_material (LIVESKIN req_1843).
+const MESH_REF_HEADER_BYTES = 24;
 
-// Pack ONE live mesh ref — the layout world_loader.setLiveMeshProps / setLiveMeshGhost decode.
-function packMeshRef(hash: number, x: number, y: number, z: number, yaw: number, matHash: number): Uint8Array {
-  const buf = new ArrayBuffer(MESH_REF_BYTES);
-  const u = new Uint32Array(buf);
-  const f = new Float32Array(buf);
-  u[0] = hash;
-  f[1] = x;
-  f[2] = y;
-  f[3] = z;
-  f[4] = yaw;
-  u[5] = matHash;
+// Pack ONE live mesh ref (header + per-slot mats) — the layout world_loader.setLiveMeshProps
+// decodes. `mats` is empty for the ghost / an unskinned placement (whole mesh, baked tex).
+function packMeshRef(hash: number, x: number, y: number, z: number, yaw: number, mats: readonly number[]): Uint8Array {
+  const buf = new ArrayBuffer(MESH_REF_HEADER_BYTES + mats.length * 4);
+  const dv = new DataView(buf);
+  dv.setUint32(0, hash, true);
+  dv.setFloat32(4, x, true);
+  dv.setFloat32(8, y, true);
+  dv.setFloat32(12, z, true);
+  dv.setFloat32(16, yaw, true);
+  dv.setUint32(20, mats.length, true);
+  for (let i = 0; i < mats.length; i += 1) dv.setUint32(MESH_REF_HEADER_BYTES + i * 4, mats[i], true);
   return new Uint8Array(buf);
 }
 
@@ -557,7 +562,7 @@ function packMeshRef(hash: number, x: number, y: number, z: number, yaw: number,
 export function meshGhostRef(propKind: string, x: number, y: number, z: number, yaw: number): Uint8Array | null {
   const key = meshPropKeyForKind(propKind);
   if (!key) return null;
-  return packMeshRef(fnv1aHash(key), x, y, z, yaw, 0);
+  return packMeshRef(fnv1aHash(key), x, y, z, yaw, []);
 }
 
 // A procedural-shader skin to materialize live on the loader (LIVESKIN req_1843): keyed by
@@ -565,9 +570,33 @@ export function meshGhostRef(propKind: string, x: number, y: number, z: number, 
 export interface LiveMaterial { hash: number; wgsl: string; data: number[]; opacity: number }
 export interface LiveMeshPush { refs: Uint8Array; materials: LiveMaterial[] }
 
-// The whole-prop skin (LIVESKIN req_1843, slice 1): the FacePainter default paints every
-// slot the same, so the first applied part texture stands for the prop. Per-face skins are a
-// follow-up (they need per-slot live mesh ranges).
+// Materialize ONE procedural skin id into a live material (interned by hash), returning the
+// hash a live mesh ref then wears (0 = not a live-renderable skin → that slot stays on its
+// baked atlas). Decal/image/flat skins aren't procedural, so they resolve to 0 and wait for
+// Compile — the SAME rule the whole-prop path used.
+function liveSkinHash(matId: string | undefined, materials: Map<number, LiveMaterial>): number {
+  const shader = matId ? resolveMaterialShader(matId) : null;
+  if (!matId || !shader) return 0;
+  const hash = fnv1aHash(`${matId}:${shader.data.join(',')}`);
+  if (!materials.has(hash)) materials.set(hash, { hash, wgsl: shader.wgsl, data: shader.data, opacity: shader.opacity });
+  return hash;
+}
+
+// PER-SLOT live skins (req_2025): a cooked prop's skin lives PER TEXTURE SLOT, not whole-prop.
+// Resolve each of the asset's texture slots (in the SAME order the loader's mesh.slots carries
+// them — texture slots first) to its live material hash, keyed by partTextures[slot.id] exactly
+// as the compiled bake's slotMaterials does. Returns null for a prop with no texture slots
+// (imported / single-surface cooked) — the caller falls back to the whole-prop single skin.
+function propSlotMaterials(prop: WorldProp, materials: Map<number, LiveMaterial>): number[] | null {
+  if (!isCookedPropKind(prop.kind)) return null;
+  const slots = cookedAssetById(prop.kind)?.slots;
+  if (!slots || slots.length === 0) return null;
+  const pt = prop.partTextures;
+  return slots.map((slot) => liveSkinHash(pt?.[slot.id], materials));
+}
+
+// The whole-prop skin fallback (LIVESKIN req_1843): a prop with no per-slot texture slots
+// (imported / single-surface) — the first applied part texture stands for the whole prop.
 function wholePropMaterialId(prop: WorldProp): string | null {
   const pt = prop.partTextures;
   if (!pt) return null;
@@ -592,7 +621,7 @@ export function pieceSkinSig(piece: PlacedBuildPiece): string {
 // because the re-mount re-seeded that baseline to the already-skinned state). A baked prop with
 // no live-renderable skin is left to the baked render; decal/image/flat skins wait for Compile.
 export function meshPropLivePush(pieces: readonly PlacedBuildPiece[], bakedSig: ReadonlyMap<string, string>): LiveMeshPush {
-  const refs: { hash: number; x: number; y: number; z: number; yaw: number; matHash: number }[] = [];
+  const refs: { hash: number; x: number; y: number; z: number; yaw: number; mats: number[] }[] = [];
   const materials = new Map<number, LiveMaterial>();
   for (const piece of pieces) {
     const prop = propFromPiece(piece);
@@ -600,28 +629,33 @@ export function meshPropLivePush(pieces: readonly PlacedBuildPiece[], bakedSig: 
     const key = meshPropKeyForKind(prop.kind);
     if (!key) continue;
     const isPending = !bakedSig.has(piece.id); // a brand-new placement (geometry overlay)
-    const matId = wholePropMaterialId(prop);
-    const shader = matId ? resolveMaterialShader(matId) : null; // a procedural skin we can do live
-    if (!isPending && !shader) continue; // existing prop, no live-renderable skin → baked render is correct
-    let matHash = 0;
-    if (matId && shader) {
-      matHash = fnv1aHash(`${matId}:${shader.data.join(',')}`);
-      if (!materials.has(matHash)) materials.set(matHash, { hash: matHash, wgsl: shader.wgsl, data: shader.data, opacity: shader.opacity });
-    }
-    refs.push({ hash: fnv1aHash(key), x: prop.x, y: prop.y ?? 0, z: prop.z, yaw: prop.yawDegrees ?? 0, matHash });
+    // PER-SLOT (req_2025): a cooked prop resolves one live skin per texture slot; a no-slot
+    // prop (imported / single-surface) falls back to the first applied skin smeared whole.
+    const slotMats = propSlotMaterials(prop, materials);
+    const wholeMat = slotMats ? 0 : liveSkinHash(wholePropMaterialId(prop) ?? undefined, materials);
+    const hasLiveSkin = slotMats ? slotMats.some((m) => m !== 0) : wholeMat !== 0;
+    if (!isPending && !hasLiveSkin) continue; // existing prop, no live-renderable skin → baked render is correct
+    // No live skin (a brand-new unskinned placement) ⇒ empty mats = whole mesh on its baked
+    // atlas (the cheap, per-face-correct path). A live skin ⇒ the per-slot array (or [wholeMat]
+    // for a no-slot prop) so each slot wears its own skin instead of one smeared over all faces.
+    const mats = hasLiveSkin ? (slotMats ?? [wholeMat]) : [];
+    refs.push({ hash: fnv1aHash(key), x: prop.x, y: prop.y ?? 0, z: prop.z, yaw: prop.yawDegrees ?? 0, mats });
   }
-  const buf = new ArrayBuffer(refs.length * MESH_REF_BYTES);
-  const u = new Uint32Array(buf);
-  const f = new Float32Array(buf);
-  refs.forEach((r, i) => {
-    const o = i * 6;
-    u[o] = r.hash;
-    f[o + 1] = r.x;
-    f[o + 2] = r.y;
-    f[o + 3] = r.z;
-    f[o + 4] = r.yaw;
-    u[o + 5] = r.matHash;
-  });
+  let total = 0;
+  for (const r of refs) total += MESH_REF_HEADER_BYTES + r.mats.length * 4;
+  const buf = new ArrayBuffer(total);
+  const dv = new DataView(buf);
+  let o = 0;
+  for (const r of refs) {
+    dv.setUint32(o, r.hash, true);
+    dv.setFloat32(o + 4, r.x, true);
+    dv.setFloat32(o + 8, r.y, true);
+    dv.setFloat32(o + 12, r.z, true);
+    dv.setFloat32(o + 16, r.yaw, true);
+    dv.setUint32(o + 20, r.mats.length, true);
+    o += MESH_REF_HEADER_BYTES;
+    for (const m of r.mats) { dv.setUint32(o, m, true); o += 4; }
+  }
   return { refs: new Uint8Array(buf), materials: [...materials.values()] };
 }
 

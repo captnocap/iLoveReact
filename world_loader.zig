@@ -2889,6 +2889,11 @@ pub const Runtime = struct {
     materials_ready: bool = false,
     player_geom_keys: std.ArrayList([]u8) = .{},
     mesh_prop_vertex_buffers: std.ArrayList([]f32) = .{},
+    // LIVESKIN per-slot (req_2025): the live mesh-ref draw runs EVERY frame, so its per-slot
+    // geom keys ("{meshKey}:base" / ":slot-N", the SAME keys the baked slotted draw interns)
+    // are built ONCE and cached here, keyed by (meshHash<<32 | slotCode), never re-allocPrinted
+    // per frame. Freed at teardown.
+    live_slot_keys: std.AutoHashMapUnmanaged(u64, []u8) = .{},
     // Per cooked/imported mesh: its connected-component collision islands (req_1624),
     // computed once and shared by the static + windowed collider builds.
     mesh_prop_islands: []const []MeshIsland = &.{},
@@ -3114,6 +3119,11 @@ pub const Runtime = struct {
         if (self.mesh_prop_islands.len > 0) self.allocator.free(self.mesh_prop_islands);
         for (self.player_geom_keys.items) |key| self.allocator.free(key);
         self.player_geom_keys.deinit(self.allocator);
+        {
+            var it = self.live_slot_keys.valueIterator();
+            while (it.next()) |key| self.allocator.free(key.*);
+            self.live_slot_keys.deinit(self.allocator);
+        }
         self.npcs.deinit(self.allocator);
         if (self.material_batches.len > 0) {
             for (self.material_batches) |batch| batch.deinit(self.allocator);
@@ -3246,16 +3256,57 @@ pub const Runtime = struct {
         return null;
     }
 
-    // LIVEMESH req_1812: append a draw node for each live-placed mesh prop, referencing an
-    // already-resident mesh (material_ref 0 → the mesh's own baked texture/color, NO
-    // per-frame allocation; see meshPropTexKey). Called at the END of stepNow, after
-    // refreshStreamNodes rebuilt the stream tail — so the streaming path truncated last
-    // frame's live nodes for us; the monolithic path truncates them here to perm_node_count.
-    // The hover GHOST (req_1841) rides the same path with a forced translucent alpha.
+    // The stable per-slot geom key for a live mesh ref — "{meshKey}:base" (code 0) or
+    // "{meshKey}:slot-N" (code N+1), the SAME strings the baked slotted draw interns, so the
+    // two share one interned geometry slice. Built once per (meshHash, code) and cached (the
+    // live draw runs every frame; an allocPrint per frame would leak). Null on OOM → the caller
+    // falls back to the whole-mesh key (a coarser but safe draw).
+    fn liveSlotKey(self: *Runtime, mesh: constructor.MeshPropMesh, hash: u32, code: u32) ?[]const u8 {
+        const packed_key: u64 = (@as(u64, hash) << 32) | @as(u64, code);
+        if (self.live_slot_keys.get(packed_key)) |k| return k;
+        const key = (if (code == 0)
+            std.fmt.allocPrint(self.allocator, "{s}:base", .{mesh.key})
+        else
+            std.fmt.allocPrint(self.allocator, "{s}:slot-{d}", .{ mesh.key, code - 1 })) catch return null;
+        self.live_slot_keys.put(self.allocator, packed_key, key) catch {
+            self.allocator.free(key);
+            return null;
+        };
+        return key;
+    }
+
+    // LIVEMESH req_1812: append draw node(s) for each live-placed mesh prop, referencing an
+    // already-resident mesh. Called at the END of stepNow, after refreshStreamNodes rebuilt the
+    // stream tail — so the streaming path truncated last frame's live nodes for us; the monolithic
+    // path truncates them here to perm_node_count. The hover GHOST (req_1841) rides the same path
+    // with a forced translucent alpha. req_2025: a multi-slot prop emits one node per texture slot
+    // so each slot wears its own skin (material_ref 0 throughout → no per-frame vertex allocation;
+    // the per-slot skin rides as a tex_key_override, the base/atlas slots ride mesh.tex_rgba).
     fn appendLiveMeshRef(self: *Runtime, r: LiveMeshRef, alpha: ?f32) void {
         const mesh = self.meshForHash(r.hash) orelse return;
-        const tex_override: ?[]const u8 = if (r.mat_hash != 0) self.live_mat_keys.get(r.mat_hash) else null;
-        self.appendMeshPropNode(mesh, .{ .mesh = 0, .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw }, mesh.key, 0, mesh.vertex_count, 0, alpha, tex_override) catch {};
+        const inst: constructor.MeshPropInstance = .{ .mesh = 0, .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw };
+        // No texture slots, or no per-slot mats (ghost / unskinned new placement) → the whole
+        // mesh on one optional override (back-compat: a single-surface prop's lone skin).
+        if (mesh.slots.len == 0 or r.mats.len == 0) {
+            const override: ?[]const u8 = if (r.mats.len > 0 and r.mats[0] != 0) self.live_mat_keys.get(r.mats[0]) else null;
+            self.appendMeshPropNode(mesh, inst, mesh.key, 0, mesh.vertex_count, 0, alpha, override) catch {};
+            return;
+        }
+        // PER-SLOT (req_2025): mirror the baked slotted draw so a multi-slot cooked prop wears
+        // each slot's own skin instead of the FIRST skin smeared over every face. The base
+        // range (faces before slot 0) and any trailing loader slot past mats.len (glass/leaf)
+        // get no override → the mesh's baked atlas, exactly as today's whole-mesh live draw.
+        const first_slot_start = mesh.slots[0].start;
+        if (first_slot_start > 0) {
+            const key = self.liveSlotKey(mesh, r.hash, 0) orelse mesh.key;
+            self.appendMeshPropNode(mesh, inst, key, 0, first_slot_start, 0, alpha, null) catch {};
+        }
+        for (mesh.slots, 0..) |slot, si| {
+            const key = self.liveSlotKey(mesh, r.hash, @as(u32, @intCast(si + 1))) orelse mesh.key;
+            const mat_hash: u32 = if (si < r.mats.len) r.mats[si] else 0;
+            const override: ?[]const u8 = if (mat_hash != 0) self.live_mat_keys.get(mat_hash) else null;
+            self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, 0, alpha, override) catch {};
+        }
     }
 
     // FULLRES: decode + install the pushed resident catalog once per generation. The lump is a
@@ -5560,8 +5611,12 @@ fn meshPosKey(mesh_index: usize, x: f32, z: f32, yaw: f32) u64 {
     return h;
 }
 
-const LiveMeshRef = struct { hash: u32, x: f32, y: f32, z: f32, yaw: f32, mat_hash: u32 = 0 };
-const LIVE_MESH_STRIDE_BYTES: usize = 24; // u32 keyHash + 4×f32 + u32 matHash (0 = baked tex)
+// A live mesh-prop ref: a resident-mesh key-hash + transform + per-slot material hashes
+// (req_2025). `mats[i]` is the live material for loader texture slot i (0 = that slot wears
+// the mesh's own baked atlas); an empty `mats` = the whole mesh on its baked texture (ghost /
+// brand-new unskinned placement). Trailing loader slots beyond mats.len (glass/leaf) read 0.
+const LiveMeshRef = struct { hash: u32, x: f32, y: f32, z: f32, yaw: f32, mats: []u32 = &.{} };
+const LIVE_MESH_HEADER_BYTES: usize = 24; // u32 keyHash + 4×f32 + u32 matCount, then matCount×u32
 const PendingLiveMesh = struct {
     node_id: u32 = 0,
     set: bool = false,
@@ -5577,9 +5632,10 @@ fn pendingLiveMeshFor(node_id: u32) ?*PendingLiveMesh {
     return null;
 }
 
-/// Replace the live MESH-prop refs for a node (LIVEMESH req_1812). `bytes` packs
-/// LIVE_MESH_STRIDE_BYTES per ref: u32 keyHash, then f32 x,y,z,yaw (little-endian, the
-/// layout pieceMeshes.tsx writes). We own a copy so the JS buffer can be freed.
+/// Replace the live MESH-prop refs for a node (LIVEMESH req_1812). `bytes` packs a variable
+/// stride per ref: a 24-byte header (u32 keyHash, f32 x,y,z,yaw, u32 matCount) then matCount×u32
+/// per-slot material hashes (little-endian, the layout pieceMeshes.tsx writes). We own a copy
+/// (refs + each ref's mats array) so the JS buffer can be freed.
 pub fn setLiveMeshProps(node_id: u32, bytes: []const u8) void {
     const alloc = std.heap.page_allocator;
     var slot: ?*PendingLiveMesh = pendingLiveMeshFor(node_id);
@@ -5592,31 +5648,53 @@ pub fn setLiveMeshProps(node_id: u32, bytes: []const u8) void {
         }
     }
     const p = slot orelse return;
-    const n = bytes.len / LIVE_MESH_STRIDE_BYTES;
-    const refs = alloc.alloc(LiveMeshRef, n) catch return;
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const off = i * LIVE_MESH_STRIDE_BYTES;
-        refs[i] = .{
+    // VARIABLE STRIDE (req_2025): each ref is a 24-byte header + matCount×u32, so walk the
+    // buffer with a cursor into an ArrayList instead of a fixed divide. A malformed tail
+    // (header runs past the buffer) just stops the walk — never reads out of bounds.
+    var built: std.ArrayListUnmanaged(LiveMeshRef) = .{};
+    var off: usize = 0;
+    while (off + LIVE_MESH_HEADER_BYTES <= bytes.len) {
+        const mat_count = std.mem.bytesToValue(u32, bytes[off + 20 ..][0..4]);
+        const mats_bytes = @as(usize, mat_count) * 4;
+        if (off + LIVE_MESH_HEADER_BYTES + mats_bytes > bytes.len) break; // truncated tail
+        var mats: []u32 = &.{};
+        if (mat_count > 0) {
+            mats = alloc.alloc(u32, mat_count) catch break;
+            var k: usize = 0;
+            while (k < mat_count) : (k += 1) {
+                mats[k] = std.mem.bytesToValue(u32, bytes[off + LIVE_MESH_HEADER_BYTES + k * 4 ..][0..4]);
+            }
+        }
+        built.append(alloc, .{
             .hash = std.mem.bytesToValue(u32, bytes[off..][0..4]),
             .x = std.mem.bytesToValue(f32, bytes[off + 4 ..][0..4]),
             .y = std.mem.bytesToValue(f32, bytes[off + 8 ..][0..4]),
             .z = std.mem.bytesToValue(f32, bytes[off + 12 ..][0..4]),
             .yaw = std.mem.bytesToValue(f32, bytes[off + 16 ..][0..4]),
-            .mat_hash = std.mem.bytesToValue(u32, bytes[off + 20 ..][0..4]),
+            .mats = mats,
+        }) catch {
+            if (mats.len > 0) alloc.free(mats);
+            break;
         };
+        off += LIVE_MESH_HEADER_BYTES + mats_bytes;
     }
-    if (p.refs.len > 0) alloc.free(p.refs);
+    freeLiveRefs(alloc, p.refs);
     p.node_id = node_id;
     p.set = true;
-    p.refs = refs;
+    p.refs = built.toOwnedSlice(alloc) catch &.{};
     p.gen +%= 1;
+}
+
+/// Free a live-mesh-ref slice plus each ref's owned per-slot mats array.
+fn freeLiveRefs(alloc: std.mem.Allocator, refs: []LiveMeshRef) void {
+    for (refs) |r| if (r.mats.len > 0) alloc.free(r.mats);
+    if (refs.len > 0) alloc.free(refs);
 }
 
 /// Drop the live mesh-prop refs for a node (after a bake reload folds them in).
 pub fn clearLiveMeshProps(node_id: u32) void {
     const p = pendingLiveMeshFor(node_id) orelse return;
-    if (p.refs.len > 0) std.heap.page_allocator.free(p.refs);
+    freeLiveRefs(std.heap.page_allocator, p.refs);
     p.refs = &.{};
     p.gen +%= 1;
 }
@@ -5848,7 +5926,7 @@ fn pendingMeshGhostFor(node_id: u32) ?*PendingMeshGhost {
 /// Set the placement-ghost mesh ref for a node (LIVEMESH req_1841). `bytes` is ONE ref:
 /// u32 keyHash, f32 x,y,z,yaw — the same layout as a live mesh-prop ref.
 pub fn setLiveMeshGhost(node_id: u32, bytes: []const u8) void {
-    if (bytes.len < LIVE_MESH_STRIDE_BYTES) {
+    if (bytes.len < LIVE_MESH_HEADER_BYTES) {
         clearLiveMeshGhost(node_id);
         return;
     }
