@@ -1,15 +1,12 @@
-// seating_probe — PROVES the contact-pin seating rig (req_1930, "ass to brass")
-// end-to-end and on screen: a real figure SITS on a real prop because the
-// solver landed its `seat` contact anchor on the prop's seat pin.
+// seating_probe — PROVES the face-rig seating engine (req_1930 / req_2028-2030)
+// on the cases that matter: a BOOTH (one rigged seat face → several figures side
+// by side, all facing out) and a BED (seat+head faces → figures LYING down).
 //
-// The path under proof is the production one: propSeat/propSeatPin (the prop's
-// seat height + pin) → seatTransformOnProp (game/figure/seating) → the exact
-// { yawDeg, lift, offset } handed to <FigureMeshes>, the same editor-preview
-// figure renderer the labs use. No bespoke posing — if the ass is on the chair,
-// the rig works.
+// Everything comes from deriveSeatFromFaces: capacity from the seat face length,
+// facing from the back/head faces, sit-vs-lay from whether a head is tagged. Each
+// occupant is placed by seatTransformForPin — the same solver the chair uses.
 //
-// Expect: a dressed figure seated on a dining chair, pelvis on the seat, facing
-// out. Verify:  ./tools/rjit shot seating_probe --out /tmp/seating.png --frames 24
+// Verify:  ./tools/rjit shot seating_probe --out /tmp/seating.png --frames 24
 
 import { useMemo } from 'react';
 import { Box, Scene3D } from '@reactjit/runtime/primitives';
@@ -17,67 +14,70 @@ import * as Geometry from '@reactjit/geometries';
 import { FigureMeshes, buildPartRender } from './hmsc-int/game/figure/render';
 import { buildRigFrame } from './hmsc-int/game/figure/rig';
 import { generateFace, hedDepthGrid } from './hmsc-int/game/figure/hed';
-import { seatTransformOnProp, SIT_ACTIONS } from './hmsc-int/game/figure/seating';
-import { propSeat, propSeatPin } from './hmsc-int/game/kinds/props';
-import { resolvePropParts } from './hmsc-int/compile/propRecipes/resolve';
-import { cssColor, type PropPartSpec } from './hmsc-int/game/kinds/propModels';
-import { at } from './hmsc-int/render3d/props/place';
-import type { WorldProp } from './hmsc-int/design';
+import {
+  deriveSeatFromFaces, seatTransformForPin, SIT_ACTIONS, LAY_ACTIONS,
+  type PlacedProp, type RiggedFace, type SeatBodyPart,
+} from './hmsc-int/game/figure/seating';
 
-const CHAIR_KIND = 'diningChair';
+type V3 = [number, number, number];
 const SEED = 7;
 const CART_KEY = 'seating_probe';
 
-// The placed prop the figure sits on — a dining chair at the origin, no yaw.
-const chair: WorldProp = { id: 'probe-chair', kind: CHAIR_KIND, x: 0, y: 0, z: 0, yawDegrees: 0, createdByCommand: 'probe' };
-
-// One PropPartSpec → one Scene3D mesh (the box/cylinder/sphere mapping DataProp
-// uses; the chair is boxes, but keep the full mapping so any seat prop works).
-function propMesh(spec: PropPartSpec, i: number) {
-  const position = at(chair, [spec.local[0], spec.local[1], spec.local[2]]);
-  const rotation: [number, number, number] = [spec.rotation?.[0] ?? 0, chair.yawDegrees + (spec.rotation?.[1] ?? 0), spec.rotation?.[2] ?? 0];
-  let geometry: any = Geometry.Box;
-  let params: any = { width: spec.size[0], height: spec.size[1], depth: spec.size[2] };
-  let scale: [number, number, number] | undefined;
-  if (spec.shape === 'cylinder8' || spec.shape === 'cylinder16') {
-    geometry = Geometry.Cylinder;
-    params = { radius: spec.size[0] / 2, height: spec.size[1], segments: spec.shape === 'cylinder8' ? 8 : 16 };
-  } else if (spec.shape === 'sphere') {
-    geometry = Geometry.Sphere;
-    params = { radius: 0.5, segments: 10, rings: 7 };
-    scale = [spec.size[0], spec.size[1], spec.size[2]];
-  }
-  return <Scene3D.Mesh key={`chair-${i}`} geometry={geometry} params={params} position={position} rotation={rotation} scale={scale} material={cssColor(spec.color)} opacity={spec.opacity} />;
+// face builders (same as the unit test): a horizontal seat/mattress face, and a
+// vertical backrest/headboard face — in PROP-LOCAL meters (ground anchor origin).
+function horizFace(bodyPart: SeatBodyPart, cx: number, cz: number, h: number, w: number, d: number): RiggedFace {
+  return { bodyPart, verts: [[cx - w / 2, h, cz - d / 2], [cx + w / 2, h, cz - d / 2], [cx + w / 2, h, cz + d / 2], [cx - w / 2, h, cz + d / 2]] };
+}
+function vertFace(bodyPart: SeatBodyPart, cx: number, cz: number, h: number, ht: number, w: number): RiggedFace {
+  return { bodyPart, verts: [[cx - w / 2, h, cz], [cx + w / 2, h, cz], [cx + w / 2, h + ht, cz], [cx - w / 2, h + ht, cz]] };
 }
 
+// a furniture box drawn in the prop's local frame, then world-placed by the prop.
+function localBox(prop: PlacedProp, cx: number, cy: number, cz: number, w: number, h: number, d: number, color: string, key: string) {
+  return <Scene3D.Mesh key={key} geometry={Geometry.Box} params={{ width: w, height: h, depth: d }}
+    position={[prop.position[0] + cx, prop.position[1] + cy, prop.position[2] + cz]} rotation={[0, prop.yawDegrees, 0]} material={color} />;
+}
+
+// BOOTH: a 2.2m bench (seat face on top) + a backrest behind → ~4 sit slots.
+const BOOTH: PlacedProp = { position: [-2.4, 0, 0], yawDegrees: 0 };
+const BOOTH_FACES: RiggedFace[] = [horizFace('seat', 0, 0, 0.45, 2.2, 0.5), vertFace('back', 0, 0.25, 0.45, 0.5, 2.2)];
+
+// BED: a 1.4×2.0 mattress (seat face) + a pillow/headboard (head face) → lay, 2 across.
+const BED: PlacedProp = { position: [2.8, 0, 0], yawDegrees: 0 };
+const BED_FACES: RiggedFace[] = [horizFace('seat', 0, 0, 0.5, 1.4, 2.0), horizFace('back', 0, 0, 0.5, 1.4, 2.0), vertFace('head', 0, -1.0, 0.5, 0.4, 1.4)];
+
 export default function SeatingProbe() {
-  const chairParts = useMemo(() => resolvePropParts(chair), []);
-  // The dressed figure (the editor-preview path: face → part render → rig).
   const doc = useMemo(() => generateFace(SEED), []);
   const parts = useMemo(() => buildPartRender(doc, hedDepthGrid(doc), CART_KEY, SEED), [doc]);
-  const rig = useMemo(() => buildRigFrame('neutral', 'stand', 0, [...SIT_ACTIONS]), []);
+  const sitRig = useMemo(() => buildRigFrame('neutral', 'stand', 0, [...SIT_ACTIONS]), []);
+  const layRig = useMemo(() => buildRigFrame('neutral', 'stand', 0, [...LAY_ACTIONS]), []);
 
-  // THE RIG: solve the transform that lands the figure's seat anchor on the pin.
-  const t = useMemo(() => {
-    const seat = propSeat(CHAIR_KIND)!;
-    const pin = propSeatPin(CHAIR_KIND)!;
-    return seatTransformOnProp({ seatHeightMeters: seat.seatHeightMeters, pin }, { position: [chair.x, chair.y, chair.z], yawDegrees: chair.yawDegrees }, 'neutral');
-  }, []);
+  const booth = useMemo(() => deriveSeatFromFaces(BOOTH_FACES)!, []);
+  const bed = useMemo(() => deriveSeatFromFaces(BED_FACES)!, []);
+
+  const occupant = (prop: PlacedProp, seat: ReturnType<typeof deriveSeatFromFaces>, key: string) =>
+    seat!.pins.map((pin, i) => {
+      const t = seatTransformForPin(pin, seat!.seatHeightMeters, seat!.pose, prop, 'neutral');
+      return <FigureMeshes key={`${key}-${i}`} rig={seat!.pose === 'lay' ? layRig : sitRig} parts={parts} yawDeg={t.yawDeg} lift={t.lift} offset={t.offset} intern />;
+    });
 
   return (
     <Box style={{ width: '100%', height: '100%' }}>
-      {/* CharacterCaptures (face/skin StaticSurface) is intentionally OMITTED:
-          in a headless `rjit shot` it forces a "WxH" placeholder chip over the
-          frame and adds nothing to a SEATING proof. The figure draws with plain
-          fallback materials — what we're verifying is the pose + placement. */}
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#1b2533" showAxes={false}>
-        {/* side-3/4 angle: the chair seat + legs read clearly under the seated figure */}
-        <Scene3D.Camera position={[2.9, 1.15, -1.7]} target={[0, 0.55, 0]} fov={44} far={400} />
-        <Scene3D.AmbientLight color="#ffffff" intensity={0.8} />
+        <Scene3D.Camera position={[0.4, 3.4, 7.2]} target={[0.2, 0.5, 0]} fov={52} far={400} />
+        <Scene3D.AmbientLight color="#ffffff" intensity={0.85} />
         <Scene3D.DirectionalLight direction={[-0.4, -1, -0.35]} color="#fff6e0" intensity={0.7} />
-        <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 8, height: 0.4, depth: 8 }} material="#2a3647" position={[0, -0.2, 0]} />
-        {chairParts.map(propMesh)}
-        <FigureMeshes rig={rig} parts={parts} yawDeg={t.yawDeg} lift={t.lift} offset={t.offset} intern />
+        <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 14, height: 0.4, depth: 10 }} material="#2a3647" position={[0, -0.2, 0]} />
+
+        {/* booth: bench seat block + backrest */}
+        {localBox(BOOTH, 0, 0.225, 0, 2.3, 0.45, 0.55, '#7a4a2e', 'booth-seat')}
+        {localBox(BOOTH, 0, 0.7, 0.28, 2.3, 0.55, 0.12, '#8a5a38', 'booth-back')}
+        {occupant(BOOTH, booth, 'booth')}
+
+        {/* bed: mattress + pillow */}
+        {localBox(BED, 0, 0.25, 0, 1.5, 0.5, 2.1, '#3a4a6a', 'bed-mattress')}
+        {localBox(BED, 0, 0.56, -0.9, 1.3, 0.16, 0.32, '#c8d0e0', 'bed-pillow')}
+        {occupant(BED, bed, 'bed')}
       </Scene3D>
     </Box>
   );
