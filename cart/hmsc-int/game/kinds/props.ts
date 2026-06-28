@@ -1102,6 +1102,12 @@ export type PropSeat = {
    *  forward), so every existing seat seats with zero authoring; Studio pin-drop
    *  authoring overrides it later. `faceDeg` is added to the placed prop's yaw. */
   pin?: { x: number; z: number; faceDeg: number };
+  /** MULTI-SEAT PINS (req_2028-2030) — the cooked output of a face-rig: one pin
+   *  per occupant, derived from the seat face's LENGTH (a booth bench seats
+   *  several). When present, `capacity === pins.length` and each pin carries its
+   *  own facing (from the rigged back/head/leg faces). Absent ⇒ the single `pin`
+   *  (or its centered default) is the only seat. */
+  pins?: { x: number; z: number; faceDeg: number }[];
 };
 
 /** The default seat pin (req_1930): centered on the prop, facing its forward.
@@ -1144,6 +1150,15 @@ export function propSeat(kind: PropKind): PropSeat | null {
 export function propSeatPin(kind: PropKind): { x: number; z: number; faceDeg: number } | null {
   const seat = propSeat(kind);
   return seat ? seat.pin ?? DEFAULT_SEAT_PIN : null;
+}
+
+/** ALL seat slots for a kind (req_2028-2030): the cooked multi-seat `pins` (a
+ *  booth bench), else the single pin/default as a one-element list. Null if the
+ *  kind has no seat. The length is the real capacity. */
+export function propSeatPins(kind: PropKind): { x: number; z: number; faceDeg: number }[] | null {
+  const seat = propSeat(kind);
+  if (!seat) return null;
+  return seat.pins && seat.pins.length ? seat.pins : [seat.pin ?? DEFAULT_SEAT_PIN];
 }
 
 export function propContainer(kind: PropKind): PropContainer | null {
