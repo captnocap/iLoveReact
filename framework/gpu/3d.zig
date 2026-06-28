@@ -41,7 +41,7 @@ const SceneUniforms = extern struct {
     light_dir: [3]f32, // 64
     specular_power: f32, // 76
     light_color: [3]f32, // 80
-    _pad1: f32 = 0, // 92
+    light_count: f32 = 0, // 92  number of placed lights in g_lights_buf this frame
     ambient_color: [3]f32, // 96
     _pad2: f32 = 0, // 108
     camera_pos: [3]f32, // 112
@@ -59,12 +59,24 @@ const SceneUniforms = extern struct {
     sky_zenith: @Vector(4, f32) = .{ 0, 0, 0, 0 }, // 176 → 192 total (multiple of 16)
 };
 
-// Per-instance vertex attributes (vertex buffer 1, step=instance) — packed as the
-// model matrix's 4 columns followed by the instance color. 80 bytes per instance,
-// matches WGSL VertexInput locations 3–7 (mat4 cols + vec4 color).
+// Per-instance vertex attributes (vertex buffer 1, step=instance) for the standard
+// 3D path — EVERY mesh that isn't a foliage card: floors, walls, buildings, props,
+// dynamic entities, water, ground. Was a baked 4×4 model matrix + rgba (80 bytes),
+// but the matrix is the PRODUCT of TRS the shaders can rebuild for free — and a floor
+// is the worst case (axis-aligned, so the 64-byte matrix encodes rotations it never
+// uses). We store the FACTORS instead and rebuild the matrix in the vertex shaders
+// (scene3d_wgsl / water_wgsl / scene3d_ground_prefix), 80 → 32 bytes (2.5×). Scale is
+// f16 (full float range, NOT a fixed-max unorm — a tower must not clip a low cap) and
+// rotation is a u16 degree ring (axis-aligned 0/90/180/270 quantize EXACTLY; arbitrary
+// angles get 0.0055° steps). Decode in those shaders MUST stay in lockstep:
+//   euler: u16 = round(deg / 360 * 65536)  → deg = f32(u16) / 65536 * 360
+//   scale: f16 metres (IEEE half)          → vec3f directly
+//   color: unorm8 per channel              → c = u8 / 255 (rgba; alpha = glass)
 const InstanceData = extern struct {
-    model: [16]f32, // 4 vec4 columns; locations 3,4,5,6
-    color: [4]f32, // location 7
+    pos: [3]f32, // location 3 (float32x3) — px, py, pz (map-scale, full f32)
+    euler: [4]u16, // location 4 (uint16x4)  — rx, ry, rz deg ring (+1 pad)
+    scale: [4]f16, // location 5 (float16x4) — sx, sy, sz metres (+1 pad)
+    color: [4]u8, // location 6 (unorm8x4)  — rgba
 };
 
 // Slim per-instance row shared by ALL foliage-card pipelines — grass/bush/flower
@@ -92,11 +104,42 @@ comptime {
     if (@sizeOf(SceneUniforms) != 192 or @alignOf(SceneUniforms) != 16) {
         @compileError("SceneUniforms must match scene3d_wgsl uniform layout (192 bytes, align 16)");
     }
-    if (@sizeOf(InstanceData) != 80 or @alignOf(InstanceData) != 4) {
-        @compileError("InstanceData must match scene3d_wgsl per-instance vertex layout (80 bytes)");
+    if (@sizeOf(InstanceData) != 32 or @alignOf(InstanceData) != 4) {
+        @compileError("InstanceData must match scene3d_wgsl per-instance vertex layout (32 bytes)");
     }
     if (@sizeOf(SlimInstance) != 24 or @alignOf(SlimInstance) != 4) {
         @compileError("SlimInstance must match frond_wgsl per-instance vertex layout (24 bytes)");
+    }
+}
+
+// One placed light, byte-identical to `struct Light` in shaders.scene3d_wgsl
+// (std430). The user authors a "pyramid": a tip at `pos`, aimed down `dir`,
+// opening to the cone [cos_outer..cos_inner] and carrying `range`. An omni bulb
+// sets cos_outer = -1 (cos 180°) so the cone term is a flat 1. Every vec3 lands
+// on a 16-aligned offset already (0/16/32), so this extern struct copies straight
+// to the GPU with no padding surprises — the comptime check below pins it to 64 B.
+const Light = extern struct {
+    pos: [3]f32, // 0
+    range: f32, // 12
+    dir: [3]f32, // 16
+    cos_outer: f32, // 28
+    color: [3]f32, // 32
+    intensity: f32, // 44
+    cos_inner: f32, // 48
+    kind: f32, // 52  (0 = point/omni, 1 = spot) — reserved for future use
+    _a: f32 = 0, // 56  (reserved: animation phase / strip param)
+    _b: f32 = 0, // 60
+};
+
+// How many placed lights one frame can carry. Sized generously per the
+// "juice limits, don't set low" rule — 256 lights is 16 KB of GPU storage, and a
+// view full of sign bulbs / lamps is well under that. Overflow is dropped LOUDLY
+// (see collectLights) rather than silently truncating the tail.
+const MAX_LIGHTS = 256;
+
+comptime {
+    if (@sizeOf(Light) != 64) {
+        @compileError("Light must match scene3d_wgsl std430 Light (64 bytes)");
     }
 }
 
@@ -369,6 +412,11 @@ var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned regi
 var g_instance_buf: ?*wgpu.Buffer = null; // per-frame InstanceData buffer (step=instance, vbuf 1)
 var g_slim_inst_buf: ?*wgpu.Buffer = null; // per-frame slim SlimInstance buffer (frond pipeline only)
 var g_uniform_buffer: ?*wgpu.Buffer = null;
+// Placed-light storage (group 0, binding 1) — MAX_LIGHTS Light rows, fragment
+// read-only. Bound on EVERY scene draw (it lives in g_bind_group); the count is
+// carried in SceneUniforms.light_count, so a frame with no placed lights binds
+// the same buffer and the shader loop simply runs zero times.
+var g_lights_buf: ?*wgpu.Buffer = null;
 var g_bind_group: ?*wgpu.BindGroup = null;
 var g_bind_group_layout: ?*wgpu.BindGroupLayout = null;
 var g_tex_bind_group_layout: ?*wgpu.BindGroupLayout = null;
@@ -574,23 +622,38 @@ pub fn init() void {
         .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
         .mapped_at_creation = 0,
     });
-    g_bind_group_layout = device.createBindGroupLayout(&.{
-        .entry_count = 1,
-        .entries = @ptrCast(&wgpu.BindGroupLayoutEntry{
+    // Placed-light storage buffer (group 0, binding 1). Allocated once at
+    // MAX_LIGHTS; collectLights writes the live prefix each frame.
+    g_lights_buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("render3d_lights"),
+        .size = MAX_LIGHTS * @sizeOf(Light),
+        .usage = wgpu.BufferUsages.storage | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
+    const scene_bgl_entries = [_]wgpu.BindGroupLayoutEntry{
+        .{
             .binding = 0,
             .visibility = wgpu.ShaderStages.vertex | wgpu.ShaderStages.fragment,
             .buffer = .{ .type = .uniform, .has_dynamic_offset = 0, .min_binding_size = @sizeOf(SceneUniforms) },
-        }),
+        },
+        .{
+            .binding = 1,
+            .visibility = wgpu.ShaderStages.fragment,
+            .buffer = .{ .type = .read_only_storage, .has_dynamic_offset = 0, .min_binding_size = 0 },
+        },
+    };
+    g_bind_group_layout = device.createBindGroupLayout(&.{
+        .entry_count = scene_bgl_entries.len,
+        .entries = &scene_bgl_entries,
     }) orelse return;
+    const scene_bg_entries = [_]wgpu.BindGroupEntry{
+        .{ .binding = 0, .buffer = g_uniform_buffer.?, .offset = 0, .size = @sizeOf(SceneUniforms) },
+        .{ .binding = 1, .buffer = g_lights_buf.?, .offset = 0, .size = MAX_LIGHTS * @sizeOf(Light) },
+    };
     g_bind_group = device.createBindGroup(&.{
         .layout = g_bind_group_layout.?,
-        .entry_count = 1,
-        .entries = @ptrCast(&wgpu.BindGroupEntry{
-            .binding = 0,
-            .buffer = g_uniform_buffer.?,
-            .offset = 0,
-            .size = @sizeOf(SceneUniforms),
-        }),
+        .entry_count = scene_bg_entries.len,
+        .entries = &scene_bg_entries,
     });
 
     // ── Texture bind group layout (group 1) ──
@@ -992,6 +1055,7 @@ pub fn deinit() void {
     if (g_bind_group) |bg| bg.release();
     if (g_bind_group_layout) |l| l.release();
     if (g_uniform_buffer) |b| b.release();
+    if (g_lights_buf) |b| b.release();
     if (g_instance_buf) |b| b.release();
     if (g_slim_inst_buf) |b| b.release();
     if (g_slim_static_buf) |b| b.release();
@@ -2111,6 +2175,10 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     var ambient_color: [3]f32 = .{ 0.15, 0.15, 0.2 };
     var light_dir: [3]f32 = .{ 0.577, 0.577, 0.577 };
     var light_color: [3]f32 = .{ 1.0, 0.95, 0.9 };
+    // Placed point/spot lights collected from <Scene3D.PointLight/SpotLight>
+    // children. Overflow past MAX_LIGHTS is dropped loudly (a one-shot warn).
+    var placed_lights: [MAX_LIGHTS]Light = undefined;
+    var n_placed: u32 = 0;
     var clear_color: [3]f32 = .{ 0.05, 0.05, 0.08 };
     if (scene_node.style.background_color) |bg| {
         clear_color = .{
@@ -2150,6 +2218,42 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                         light_dir = .{ dx / len, dy / len, dz / len };
                     }
                     light_color = .{ child.scene3d_color_r * i, child.scene3d_color_g * i, child.scene3d_color_b * i };
+                } else if (std.mem.eql(u8, lt, "point") or std.mem.eql(u8, lt, "spot")) {
+                    // The user's pyramid. point → omni (cos_outer = -1, a flat
+                    // cone term); spot → a cone of half-angle scene3d_spread.
+                    const is_spot = std.mem.eql(u8, lt, "spot");
+                    const range = if (child.scene3d_range > 0.001) child.scene3d_range else 12.0;
+                    var dir: [3]f32 = .{ child.scene3d_dir_x, child.scene3d_dir_y, child.scene3d_dir_z };
+                    const dlen = math.length3(dir[0], dir[1], dir[2]);
+                    if (dlen > 0.001) {
+                        dir = .{ dir[0] / dlen, dir[1] / dlen, dir[2] / dlen };
+                    } else {
+                        dir = .{ 0, -1, 0 };
+                    }
+                    // Cone edges as cosines of the half-angle. The inner edge sits
+                    // a touch tighter so the rim feathers instead of hard-cutting.
+                    var cos_outer: f32 = -1.0;
+                    var cos_inner: f32 = -1.0;
+                    if (is_spot) {
+                        const half = @min(@max(child.scene3d_spread, 1.0), 89.0) * std.math.pi / 180.0;
+                        cos_outer = @cos(half);
+                        cos_inner = @cos(half * 0.82);
+                    }
+                    if (n_placed < MAX_LIGHTS) {
+                        placed_lights[n_placed] = .{
+                            .pos = .{ child.scene3d_pos_x, child.scene3d_pos_y, child.scene3d_pos_z },
+                            .range = range,
+                            .dir = dir,
+                            .cos_outer = cos_outer,
+                            .color = .{ child.scene3d_color_r, child.scene3d_color_g, child.scene3d_color_b },
+                            .intensity = i,
+                            .cos_inner = cos_inner,
+                            .kind = if (is_spot) 1 else 0,
+                        };
+                        n_placed += 1;
+                    } else {
+                        std.debug.print("[r3d-light] placed-light overflow — MAX_LIGHTS ({d}) reached, dropping the rest. Raise MAX_LIGHTS in framework/gpu/3d.zig.\n", .{MAX_LIGHTS});
+                    }
                 }
             }
         }
@@ -2268,11 +2372,19 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     // Wrapped wall-clock (mod 1e6 s) so float32 keeps precision — the grass
     // pipeline's wind reads S.time. Same wrap drawSky uses for cloud drift.
     const scene_time: f32 = @as(f32, @floatFromInt(@mod(std.time.milliTimestamp(), 1_000_000))) / 1000.0;
+    // Upload the placed lights collected above. The shader loops light_count of
+    // them; an empty frame writes nothing and the loop runs zero times.
+    if (n_placed > 0) {
+        if (g_lights_buf) |lb| {
+            queue.writeBuffer(lb, 0, @ptrCast(&placed_lights), n_placed * @sizeOf(Light));
+        }
+    }
     const scene_u = SceneUniforms{
         .vp = math.m4transpose(vp),
         .light_dir = light_dir,
         .specular_power = 64.0,
         .light_color = light_color,
+        .light_count = @floatFromInt(n_placed),
         .ambient_color = ambient_color,
         .camera_pos = .{ cam_pos.x, cam_pos.y, cam_pos.z },
         .time = scene_time,

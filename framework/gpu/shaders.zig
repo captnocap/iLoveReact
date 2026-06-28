@@ -750,7 +750,7 @@ pub const scene3d_wgsl =
     \\    light_dir: vec3f,
     \\    specular_power: f32,
     \\    light_color: vec3f,
-    \\    _pad1: f32,
+    \\    light_count: f32,
     \\    ambient_color: vec3f,
     \\    _pad2: f32,
     \\    camera_pos: vec3f,
@@ -765,7 +765,25 @@ pub const scene3d_wgsl =
     \\    _pad5: f32,
     \\    sky_zenith: vec4f,
     \\};
+    \\// One placed light = the user's "pyramid": a tip (pos) that throws light down
+    \\// `dir`, opening to a cone (cos_outer..cos_inner) and carrying `range`. An omni
+    \\// bulb is the pyramid opened all the way — cos_outer = -1 (cos 180°). std430:
+    \\// every vec3 already lands 16-aligned, so the Zig `Light` struct copies byte-
+    \\// for-byte (3d.zig comptime-asserts 64 bytes).
+    \\struct Light {
+    \\    pos: vec3f,
+    \\    range: f32,
+    \\    dir: vec3f,
+    \\    cos_outer: f32,
+    \\    color: vec3f,
+    \\    intensity: f32,
+    \\    cos_inner: f32,
+    \\    kind: f32,
+    \\    _a: f32,
+    \\    _b: f32,
+    \\};
     \\@group(0) @binding(0) var<uniform> S: SceneUniforms;
+    \\@group(0) @binding(1) var<storage, read> lights: array<Light>;
     \\@group(1) @binding(0) var diffuse_tex: texture_2d<f32>;
     \\@group(1) @binding(1) var diffuse_smp: sampler;
     \\
@@ -828,7 +846,31 @@ pub const scene3d_wgsl =
     \\    let ambient = S.ambient_color * base;
     \\    let diffuse = S.light_color * base * diff;
     \\    let specular = S.light_color * spec * 0.4;
-    \\    let lit = ambient + diffuse + specular;
+    \\    // ── Placed lights (the pyramids) ──────────────────────────────
+    \\    // Each light adds a contribution that falls off with distance (smooth to
+    \\    // zero at `range`) and, for a spot, with the cone (cos_outer..cos_inner).
+    \\    // An omni bulb has cos_outer = -1, so the cone term collapses to a flat 1.
+    \\    var placed = vec3f(0.0, 0.0, 0.0);
+    \\    let n_lights = u32(S.light_count);
+    \\    for (var i: u32 = 0u; i < n_lights; i = i + 1u) {
+    \\        let lt = lights[i];
+    \\        let to_light = lt.pos - in.world_pos;
+    \\        let dist = length(to_light);
+    \\        if (dist >= lt.range) { continue; }
+    \\        let Ld = to_light / max(dist, 1e-4);
+    \\        let ndl = max(dot(N, Ld), 0.0);
+    \\        // Distance density: smooth quadratic falloff, exactly 0 at the reach.
+    \\        let dd = clamp(1.0 - dist / lt.range, 0.0, 1.0);
+    \\        let atten = dd * dd;
+    \\        // Cone density: 1 inside the inner angle, fading to 0 by the outer.
+    \\        let aim = dot(normalize(-to_light), normalize(lt.dir));
+    \\        let cone = clamp((aim - lt.cos_outer) / max(lt.cos_inner - lt.cos_outer, 1e-3), 0.0, 1.0);
+    \\        let falloff = atten * cone * lt.intensity;
+    \\        let Hl = normalize(Ld + V);
+    \\        let sp = pow(max(dot(N, Hl), 0.0), S.specular_power) * 0.4;
+    \\        placed = placed + lt.color * (base * ndl + sp) * falloff;
+    \\    }
+    \\    let lit = ambient + diffuse + specular + placed;
     \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
     \\    // Aerial perspective: fade toward the sky colour in this fragment's screen
     \\    // direction (the same vertical gradient drawSky paints), so geometry melts

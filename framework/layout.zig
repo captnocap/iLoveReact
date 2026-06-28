@@ -480,6 +480,12 @@ pub const Node = struct {
     scene3d_far: f32 = 0, // draw radius (world units); 0 = auto
     scene3d_near: f32 = 0, // near clip (world units); 0 = auto
     scene3d_intensity: f32 = 1.0, // Light intensity
+    // Placed (point/spot) light shape — the "pyramid" the user authors: a tip at
+    // scene3d_pos, aimed down scene3d_dir, opening to scene3d_spread, carrying
+    // scene3d_range. scene3d_spread == 0 → an omni bulb (full sphere); > 0 → a
+    // spot cone of that half-angle (degrees). scene3d_range == 0 → a default reach.
+    scene3d_range: f32 = 0, // point/spot reach (world units); 0 = default
+    scene3d_spread: f32 = 0, // spot cone half-angle (deg); 0 = omni point light
     // Skybox — a <Scene3D.Skybox> child flips this on. gpu/3d.zig draws an
     // analytic fullscreen sky (gradient + sun + haze + clouds + stars) before
     // the meshes and feeds `horizon` into the fog color so distant geometry

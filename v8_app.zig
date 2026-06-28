@@ -1942,6 +1942,10 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonFloat(v)) |f| node.scene3d_near = f;
         } else if (std.mem.eql(u8, k, "scene3dIntensity")) {
             if (jsonFloat(v)) |f| node.scene3d_intensity = f;
+        } else if (std.mem.eql(u8, k, "scene3dRange")) {
+            if (jsonFloat(v)) |f| node.scene3d_range = f;
+        } else if (std.mem.eql(u8, k, "scene3dSpread")) {
+            if (jsonFloat(v)) |f| node.scene3d_spread = f;
         }
         // ── Distance fog (one <Scene3D.Fog> child). near/far in world units,
         // color as [r,g,b] 0..1. 0 / sentinel = auto (anchor to camera far). ──
@@ -3669,11 +3673,20 @@ fn appTick(now: u32) void {
         return;
     }
 
+    // APPTICKSPLIT (req_1984, TEMP): the frame partition fingered `appTick` as the
+    // ~260ms place cost; appTick is opaque, so split it. __jsTick fires JS timers
+    // AND drains the V8 microtask queue (where React's deferred render + passive
+    // effects run) — bridge time lands here. Name which sub-step burns the frame.
+    const _at0 = std.time.microTimestamp();
+    _ = v8_runtime.gcTakeNs(); // GCPROBE (req_1995): reset, then read after __jsTick to get GC ns during the drain
     // Fire any JS timers whose due-time has arrived. setTimeout/setInterval
     // in the bundle are implemented against this — see runtime/index.tsx.
     // This may append new batches to g_pending_flush via React commits triggered
     // from handlers that ran inside timers. Drain after.
     v8_runtime.callGlobalInt("__jsTick", @intCast(now));
+    const _gc_ns_jstick = v8_runtime.gcTakeNs();
+    const _gc_count_jstick = v8_runtime.gcTakeCount();
+    const _at1 = std.time.microTimestamp();
 
     // Per-tick drains for every binding domain that defines tickDrain().
     // Required bindings (core, websocket) and opt-in bindings (httpsrv,
@@ -3686,10 +3699,12 @@ fn appTick(now: u32) void {
     // without polling latency; engine.run owns its own repaint cadence,
     // so the GPU shell discards it.
     _ = ingredients.tickDrain();
+    const _at2 = std.time.microTimestamp();
 
     // Apply any CMD batches that accumulated during press events since last tick.
     // Must happen BEFORE rebuildTree so the tree reflects the new g_node_by_id.
     drainPendingFlushes();
+    const _at3 = std.time.microTimestamp();
     // V23 native game camera: when a cart opts a Scene3D.Camera node into
     // native ownership, the host solves/smooths that node's camera before
     // layout/paint. Carts that never opt in stay on the declarative JS-props
@@ -3714,6 +3729,8 @@ fn appTick(now: u32) void {
     windows.tickIndependent();
     cleanupClosedHostWindows();
 
+    var _snap_us: i64 = 0;
+    var _rebuild_us: i64 = 0;
     if (g_dirty.*) {
         const t0 = std.time.microTimestamp();
         snapshotRuntimeState();
@@ -3723,15 +3740,30 @@ fn appTick(now: u32) void {
         layout.markLayoutDirty();
         g_dirty.* = false;
         g_scroll_prop_slots.clearRetainingCapacity();
-        const snap_us = t1 - t0;
-        const rebuild_us = t2 - t1;
+        _snap_us = t1 - t0;
+        _rebuild_us = t2 - t1;
         if (std.posix.getenv("REACTJIT_VERBOSE_BATCHES") != null) {
             // Count the tree size for context.
             var node_count: usize = 0;
             var kid_it = g_children_ids.valueIterator();
             while (kid_it.next()) |list| node_count += list.items.len;
-            std.debug.print("[rebuild-timing] snapshot={d}us rebuildTree={d}us nodes={d} (g_node_by_id={d})\n", .{ snap_us, rebuild_us, node_count, g_node_by_id.count() });
+            std.debug.print("[rebuild-timing] snapshot={d}us rebuildTree={d}us nodes={d} (g_node_by_id={d})\n", .{ _snap_us, _rebuild_us, node_count, g_node_by_id.count() });
         }
+    }
+
+    // APPTICKSPLIT (req_1984, TEMP): print the appTick breakdown whenever it ran
+    // slow (>40ms), so a place's ~260ms gets attributed to ONE sub-step instead of
+    // an opaque "appTick". jsTick includes the V8 microtask drain (React render +
+    // passive effects). dirty = snapshotRuntimeState + rebuildTree (the host tree
+    // rebuild). Units: ms.
+    const _at4 = std.time.microTimestamp();
+    const _jstick_ms = @as(f64, @floatFromInt(_at1 - _at0)) / 1000.0;
+    const _drain_ms = @as(f64, @floatFromInt(_at2 - _at1)) / 1000.0;
+    const _flush_ms = @as(f64, @floatFromInt(_at3 - _at2)) / 1000.0;
+    const _total_ms = @as(f64, @floatFromInt(_at4 - _at0)) / 1000.0;
+    const _gc_ms_jstick = @as(f64, @floatFromInt(_gc_ns_jstick)) / 1_000_000.0;
+    if (_total_ms > 40.0) {
+        std.debug.print("[apptick-split] total={d:.1}ms | jsTick(+microtasks)={d:.1} (of which GC={d:.1}ms x{d}) tickDrain={d:.1} drainFlush={d:.1} dirty(snap={d:.1}+rebuild={d:.1})\n", .{ _total_ms, _jstick_ms, _gc_ms_jstick, _gc_count_jstick, _drain_ms, _flush_ms, @as(f64, @floatFromInt(_snap_us)) / 1000.0, @as(f64, @floatFromInt(_rebuild_us)) / 1000.0 });
     }
 }
 

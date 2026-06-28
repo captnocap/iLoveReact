@@ -845,7 +845,10 @@ Scene3DBase.DirectionalLight = ({ direction, color, intensity, ...rest }: any) =
     scene3dIntensity: intensity ?? 1.0,
   });
 };
-Scene3DBase.PointLight = ({ position, color, intensity, ...rest }: any) => {
+// PointLight — an omni "bulb" (a sign-edge bulb, a lamp): a tip that throws
+// light in every direction, falling off over `range`. The host treats it as the
+// user's pyramid opened all the way (spread 0 → full sphere).
+Scene3DBase.PointLight = ({ position, color, intensity, range, ...rest }: any) => {
   const [px, py, pz] = _vec3(position, 0, 0, 0);
   const [r, g, b] = _hexToRgb(color, [1, 1, 1]);
   return h('View', {
@@ -855,6 +858,26 @@ Scene3DBase.PointLight = ({ position, color, intensity, ...rest }: any) => {
     scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
     scene3dColorR: r, scene3dColorG: g, scene3dColorB: b,
     scene3dIntensity: intensity ?? 1.0,
+    scene3dRange: range ?? 0,
+  });
+};
+// SpotLight — the user's pyramid: a tip at `position`, aimed down `direction`,
+// opening to a `cone` half-angle (degrees) and carrying `range`. Narrow cone =
+// a spotlight; wide cone approaches the omni bulb.
+Scene3DBase.SpotLight = ({ position, direction, color, intensity, cone, range, ...rest }: any) => {
+  const [px, py, pz] = _vec3(position, 0, 0, 0);
+  const [dx, dy, dz] = _vec3(direction, 0, -1, 0);
+  const [r, g, b] = _hexToRgb(color, [1, 1, 1]);
+  return h('View', {
+    ...rest,
+    scene3dLight: true,
+    scene3dLightType: 'spot',
+    scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
+    scene3dDirX: dx, scene3dDirY: dy, scene3dDirZ: dz,
+    scene3dColorR: r, scene3dColorG: g, scene3dColorB: b,
+    scene3dIntensity: intensity ?? 1.0,
+    scene3dSpread: cone ?? 30,
+    scene3dRange: range ?? 0,
   });
 };
 // OrbitControls — host has no flag for this today (no scene3d_orbit on
