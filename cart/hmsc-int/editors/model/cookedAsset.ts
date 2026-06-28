@@ -555,20 +555,29 @@ function doorPanelFromParts(leafParts: readonly CookPart[], vehicle: boolean, ra
  *  tagged face to its GROUND-LIFTED verts (the same frame the cooked mesh + pins
  *  live in) and run the shared deriveSeatFromFaces. Capacity, facing, and sit-vs-
  *  lay all fall out of the faces. Returns undefined when no seat face was tagged. */
-function seatFromRig(rig: readonly SeatRigFace[], parts: readonly CookPart[]): PropSeat | undefined {
+/** Resolve a face-rig to RiggedFaces in the GROUND-LIFTED frame (mesh verts +
+ *  part lift) — the one frame the cooked mesh + seat pins live in. Shared by the
+ *  cook AND the Studio live seat preview (rule of two: one resolver, no drift). */
+export function riggedFacesFor(rig: readonly SeatRigFace[], parts: readonly CookPart[]): RiggedFace[] {
   const faces: RiggedFace[] = [];
   for (const r of rig) {
     const part = parts.find((p) => p.id === r.part);
     if (!part || !part.visible) continue;
     const face = part.mesh.faces[r.face];
     if (!face) continue;
-    const verts = face.loop.map((vi): V3 => {
-      const v = part.mesh.verts[vi];
-      return [v[0], v[1] + part.lift, v[2]];
+    faces.push({
+      bodyPart: r.bodyPart,
+      verts: face.loop.map((vi): V3 => {
+        const v = part.mesh.verts[vi];
+        return [v[0], v[1] + part.lift, v[2]];
+      }),
     });
-    faces.push({ bodyPart: r.bodyPart, verts });
   }
-  const derived = deriveSeatFromFaces(faces);
+  return faces;
+}
+
+function seatFromRig(rig: readonly SeatRigFace[], parts: readonly CookPart[]): PropSeat | undefined {
+  const derived = deriveSeatFromFaces(riggedFacesFor(rig, parts));
   return derived ? { pose: derived.pose, seatHeightMeters: derived.seatHeightMeters, capacity: derived.capacity, pins: derived.pins } : undefined;
 }
 

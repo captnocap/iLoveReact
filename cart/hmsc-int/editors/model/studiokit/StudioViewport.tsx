@@ -40,9 +40,9 @@ import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clea
 import { addAnchor, isAnchor, nextAnchorName } from '../anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from '../wheelMount';
 import { studioSeatRig, useStudioModel, type StudioModel, type StudioPart } from '../studioModel';
-import type { SeatRigFace, SeatBodyPart } from '../../../game/figure/seating';
+import { deriveSeatFromFaces, seatTransformForPin, SIT_ACTIONS, LAY_ACTIONS, type SeatRigFace, type SeatBodyPart } from '../../../game/figure/seating';
 import { glbToEditMesh, base64ToBytes } from '../importMesh';
-import { cookProp, type PropDescriptorInput, type CookedAsset } from '../cookedAsset';
+import { cookProp, riggedFacesFor, type PropDescriptorInput, type CookedAsset } from '../cookedAsset';
 import { useCookedAssets, cookedTextureBlob } from '../cookedAssets';
 import { StudioOutliner } from '../Outliner';
 import { SceneTextureAtlas, STUDIO_TEXTURE_KEY } from '../TextureAtlas';
@@ -214,6 +214,9 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   // feet on the grid. Toggled by the 'scale' button; interned so the static figure
   // doesn't compete for the sculpt DYN slots. Twig state (survives hot reload).
   const [showScale, setShowScale] = useHotState('studio:showScale', false);
+  // SEAT PREVIEW (req_2042): show the player model sitting/laying on the mesh per
+  // the current seat rig — a twig toggle, like showScale.
+  const [seatPreview, setSeatPreview] = useHotState('studio:seatPreview', false);
   // BACKDROPS (req_1280): reference images you trace over while modeling. Persisted
   // to DISK-backed localstore (req_1283) — NOT useHotState, which currently wipes on
   // every hot reload (see Present memory), so a reload was blowing away the image +
@@ -275,6 +278,18 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   // x just past the model's bounding radius; faces -X toward the model (parts face
   // -Z at yaw 0, so +90° turns them toward −X).
   const scaleOffset = useMemo<Vec3>(() => [frame.radius + STUDIO.scaleFigureGapMeters, 0, 0], [frame.radius]);
+  // SEAT PREVIEW (req_2042): derive the seat from the live rig (same resolver the
+  // cook uses), and pre-build a sit + a lay rig to pose each occupant. The model
+  // sits at the origin in the viewport, so the pins are already world-correct.
+  const allRigParts = props.allParts ?? props.parts;
+  const previewSeat = useMemo(
+    () => (props.seatRig.length ? deriveSeatFromFaces(riggedFacesFor(props.seatRig, allRigParts)) : null),
+    [props.seatRig, allRigParts],
+  );
+  const seatPoseRigs = useMemo(() => ({
+    sit: GAME_FIGURE.buildRigFrame('neutral', 'stand', 0, [...SIT_ACTIONS]),
+    lay: GAME_FIGURE.buildRigFrame('neutral', 'stand', 0, [...LAY_ACTIONS]),
+  }), []);
 
   // WORKING-VIEW PERSISTENCE (req_1435/1437): the camera is twig state — it must
   // survive a hot reload so a code update never throws away where you were
@@ -2591,18 +2606,27 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
             position={[0, faceHi.lift, 0]}
           />
         ) : null}
-        {/* SCALE GHOST (req_1165): the reference player beside the model. */}
-        {showScale ? (
-          <>
-            <FigureMeshes rig={scaleFigure.rig} parts={scaleFigure.parts} intern yawDeg={90} offset={scaleOffset} />
-            <CharacterCaptures
-              headTexKey={scaleFigure.parts.head.texKey}
-              skinTexKey={scaleFigure.parts.torso.texKey}
-              skin={scaleFigure.doc.skin}
-              layers={scaleFigure.doc.layers}
-            />
-          </>
+        {/* SCALE GHOST (req_1165) + SEAT PREVIEW (req_2042) share ONE figure
+            appearance and its captures (parked whenever either is showing). */}
+        {(showScale || (seatPreview && previewSeat)) ? (
+          <CharacterCaptures
+            headTexKey={scaleFigure.parts.head.texKey}
+            skinTexKey={scaleFigure.parts.torso.texKey}
+            skin={scaleFigure.doc.skin}
+            layers={scaleFigure.doc.layers}
+          />
         ) : null}
+        {showScale ? (
+          <FigureMeshes rig={scaleFigure.rig} parts={scaleFigure.parts} intern yawDeg={90} offset={scaleOffset} />
+        ) : null}
+        {/* SEAT PREVIEW: one occupant per derived pin, posed sit/lay, seated on the
+            mesh exactly where the cook will place them. */}
+        {seatPreview && previewSeat ? previewSeat.pins.map((pin, i) => {
+          const t = seatTransformForPin(pin, previewSeat.seatHeightMeters, previewSeat.pose, { position: [0, 0, 0] as [number, number, number], yawDegrees: 0 }, 'neutral');
+          return (
+            <FigureMeshes key={`seatprev-${i}`} rig={previewSeat.pose === 'lay' ? seatPoseRigs.lay : seatPoseRigs.sit} parts={scaleFigure.parts} intern yawDeg={t.yawDeg} lift={t.lift} offset={t.offset} />
+          );
+        }) : null}
       </Scene3D>
 
       {/* BACKDROPS (req_1280): each visible backdrop's image baked into its own
@@ -2693,6 +2717,20 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
               {showScale ? <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>{`${HMSC_SCALE.playerCapsuleHeightMeters.toFixed(2)} m`}</Text> : null}
             </Row>
           </Pressable>
+          {/* SEAT PREVIEW (req_2042): show the player seated/laid on the mesh per the
+              seat rig. Only offered once at least one face is rigged. */}
+          {props.seatRig.length ? (
+            <Pressable
+              onPress={() => setSeatPreview((v) => !v)}
+              tooltip="Preview seats — place the player model on the mesh exactly where your seat rig puts it (booth = several side by side, bed = lying down). Updates live as you tag faces."
+              style={{ ...STEP_BTN, backgroundColor: seatPreview ? '#1c3a2a' : '#0b1320dd', borderColor: seatPreview ? '#2f7a4f' : '#27364a' }}
+            >
+              <Row style={{ gap: 4, alignItems: 'center' }}>
+                <Icon name="Armchair" size={13} color={seatPreview ? '#7fd6a0' : T.dim} />
+                {seatPreview && previewSeat ? <Text fontSize={10} color="#7fd6a0" style={{ fontFamily: 'monospace' }}>{`×${previewSeat.capacity}`}</Text> : null}
+              </Row>
+            </Pressable>
+          ) : null}
           {/* BACKDROPS (req_1280): reference images on the walls/floor to trace over. */}
           {(() => { const shown = backdrops.filter((b) => b.visible).length; return (
             <Pressable
