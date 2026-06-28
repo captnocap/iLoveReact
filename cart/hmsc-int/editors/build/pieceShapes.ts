@@ -422,14 +422,23 @@ export function pieceVisualShapes(
   // The flat plate decomposition (floors + flat roofs): a skinned core slab
   // with thin top/bottom face plates. Sized to w×d so a roof's dragged span
   // (ROOFSPAN) lowers the same way a single tile does.
+  //
+  // FLOORREST (req_2024): the slab is SOLID from piece.y up — its underside sits
+  // flush on whatever it rests on (the painted ground for a level-0 floor; the
+  // wall top for a roof), so it touches the ground instead of floating over it.
+  // Only the skinned TOP face floats a hair (`lift`) proud so its texture wins
+  // the depth test against the core. The earlier code inset the core by `lift`
+  // on BOTH ends and pushed the bottom plate DOWN below piece.y, which left the
+  // solid mass hanging ~`lift` above the ground with the painted floor showing
+  // through the gap (the "floors float a few inches" report).
   const plateShapes = (w: number, d: number, plateHeight: number): VisualShape[] => {
     const slab = BUILD_UI.faceSlabThicknessMeters;
     const lift = BUILD_UI.faceSlabLiftMeters;
-    const coreHeight = Math.max(0.01, plateHeight - lift * 2);
+    const coreHeight = Math.max(0.01, plateHeight - lift);
     return [
-      box('edges', 0, 0, piece.y + lift, w, coreHeight, d, sides),
-      box('top', 0, 0, piece.y + plateHeight + lift - slab / 2, w, slab, d, front),
-      box('bottom', 0, 0, piece.y - lift - slab / 2, w, slab, d, back),
+      box('edges', 0, 0, piece.y, w, coreHeight, d, sides),
+      box('top', 0, 0, piece.y + plateHeight - slab, w, slab, d, front),
+      box('bottom', 0, 0, piece.y, w, slab, d, back),
     ];
   };
 
