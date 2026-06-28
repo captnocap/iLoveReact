@@ -126,6 +126,16 @@ const SOLID_PLATE_TAGS: BuildGameplayTags = {
 // The standard piece module: one storey tall, one cell-run wide.
 const WALL_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 3, depthMeters: 0.25 };
 const PLATE_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 0.2, depthMeters: 3 };
+// THINFLOOR (req_2034, USER FINDING "when its thin it sits perfectly"): a floor is
+// a THIN plate. The user's Studio `thin_floor` (~2cm) sits flush on the ground with
+// none of the fat-slab edge artifacts — the long-running "edge piece" weird shit: a
+// 0.2m floor left a 20cm curb lip and a tall vertical side face at every border, and
+// walls resting on it perched a fifth of a metre proud of the ground. 0.05m keeps the
+// plate sandwich non-degenerate (top/bottom face plates stay separated → no z-fight,
+// per-face floor skins preserved) while the edge all but vanishes. Roofs keep
+// PLATE_SIZE — a flat roof's underside is a visible ceiling, so it stays fat until the
+// user rules the same fix for it.
+const FLOOR_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 0.05, depthMeters: 3 };
 const VERTICAL_LINK_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 3, depthMeters: 3 };
 
 // Roof pitch presets, rise:run (see RoofShape). The "variety of life" axis the
@@ -423,7 +433,7 @@ export const BUILD_CATALOG: Record<string, BuildPieceDef> = {
     label: 'Concrete Floor',
     theme: 'common',
     material: 'concrete',
-    size: PLATE_SIZE,
+    size: FLOOR_SIZE,
     snap: 'grid',
     tags: SOLID_PLATE_TAGS,
   },
@@ -433,7 +443,7 @@ export const BUILD_CATALOG: Record<string, BuildPieceDef> = {
     label: 'Wood Floor',
     theme: 'suburb',
     material: 'wood',
-    size: PLATE_SIZE,
+    size: FLOOR_SIZE,
     snap: 'grid',
     tags: { ...SOLID_PLATE_TAGS, durability: 180 },
   },
