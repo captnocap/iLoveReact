@@ -204,4 +204,26 @@ test('a single welded component cooks ONE collision box — no regression for so
   assert(b.minY < 0.01 && b.maxY > 1.9, 'box spans the full height, solid to the ground');
 });
 
+test('a door leaf with a window splits into an opaque frame then a trailing glass pane (req_2020)', () => {
+  // a wall body + a swinging leaf whose face 0 is glass (the window). The leaf is
+  // laid out opaque-frame faces (5 faces, 30 verts) then the glass pane (6 verts),
+  // so the compiled bake can render the window see-through and swing it with the frame.
+  const body = cuboid(2, 2, 0.2);
+  const leaf = setFaceGlass(cuboid(1, 2, 0.1), [0], true);
+  const blob = flattenModel([part(body), part(leaf)], { leafPart: (p) => p.mesh === leaf });
+  assert(blob.leaf != null, 'the leaf range is recorded');
+  assert(blob.leafGlass != null, 'the leaf carries a trailing glass sub-range');
+  assertEqual(blob.leafGlass!.count, 6, 'one window face = two triangles = six vertices');
+  assertEqual(blob.leafGlass!.start + blob.leafGlass!.count, blob.leaf!.start + blob.leaf!.count, 'leaf glass is the tail of the leaf');
+  assert(blob.leafGlass!.count < blob.leaf!.count, 'the leaf still has its opaque frame faces');
+});
+
+test('a glassless door leaf carries no leafGlass (no regression for solid doors)', () => {
+  const body = cuboid(2, 2, 0.2);
+  const leaf = cuboid(1, 2, 0.1);
+  const blob = flattenModel([part(body), part(leaf)], { leafPart: (p) => p.mesh === leaf });
+  assert(blob.leaf != null, 'the leaf range is recorded');
+  assert(blob.leafGlass == null, 'a solid leaf records no glass sub-range');
+});
+
 finish('cookedAsset');

@@ -500,13 +500,16 @@ function cookedPropMesh(kind: string): ImportedMeshPropMesh | null {
   // box would re-block the slope you just made walkable. Render is unaffected.
   const pk = asset.descriptor.buildPlacement?.pieceKind;
   const collidesAsSlope = pk === 'stairs' || pk === 'ramp';
-  // DOOR (req_1864): the leaf rides as the LAST slot (cookedMeshSlotRanges appends
-  // it after glass), so its slot index is the final one. The loader makes that
-  // node a live two-state door — toggle on E, drop when open, door rect, no static
-  // leaf island. A door panel with no leaf range shipped means no door (fail soft).
+  // DOOR (req_1864): the leaf rides as the LAST slot(s) (cookedMeshSlotRanges appends
+  // them after glass), so leafSlot points at the FIRST of them. The loader makes that
+  // slot range a live two-state door — toggle on E, drop when open, door rect, no
+  // static leaf island. req_2020: a glass door is two trailing slots (opaque frame +
+  // translucent pane); leafSlot is the frame's index so the loader swings both. A
+  // door panel with no leaf range shipped means no door (fail soft).
   const panel = asset.descriptor.doorPanel;
-  const door: MeshPropDoorMeta | undefined = panel && asset.leaf && asset.leaf.count > 0
-    ? { leafSlot: slotsWithGlass.length - 1, reachMeters: panel.reachMeters, vehicle: panel.vehicle, startOpen: false }
+  const leafSlotCount = cookedLeafSlots(asset).length;
+  const door: MeshPropDoorMeta | undefined = panel && asset.leaf && asset.leaf.count > 0 && leafSlotCount > 0
+    ? { leafSlot: slotsWithGlass.length - leafSlotCount, reachMeters: panel.reachMeters, vehicle: panel.vehicle, startOpen: false }
     : undefined;
   return {
     key: asset.meshRef,
@@ -534,18 +537,34 @@ function cookedPropMesh(kind: string): ImportedMeshPropMesh | null {
   };
 }
 
+/** The door leaf's trailing slot range(s) (req_1864, req_2020). A glassless leaf is
+ *  one opaque slot; a leaf with a window splits into an opaque-frame slot then a
+ *  translucent glass-pane slot (cook lays the leaf out opaque-then-glass, so the
+ *  pane is the tail of `leaf`). The loader binds ALL of these to the door so the
+ *  whole leaf — frame and window — swings together. Empty when there's no leaf. */
+function cookedLeafSlots(asset: CookedAsset): MeshPropSlotRange[] {
+  if (!asset.leaf || asset.leaf.count <= 0) return [];
+  const glass = asset.leafGlass && asset.leafGlass.count > 0 ? asset.leafGlass : null;
+  if (!glass) return [{ start: asset.leaf.start, count: asset.leaf.count }];
+  const out: MeshPropSlotRange[] = [];
+  const opaqueCount = asset.leaf.count - glass.count;
+  if (opaqueCount > 0) out.push({ start: asset.leaf.start, count: opaqueCount });
+  out.push({ start: glass.start, count: glass.count });
+  return out;
+}
+
 /** Mesh sub-ranges for a cooked prop: its texture slots, then (if present) the
- *  trailing glass range as one more slot. Aligned index-for-index with the
- *  slotMaterials pushPropGeometry builds. */
+ *  trailing glass range, then the door leaf's slot(s). Aligned index-for-index with
+ *  the slotMaterials pushPropGeometry builds. */
 function cookedMeshSlotRanges(asset: CookedAsset): MeshPropSlotRange[] {
   const ranges: MeshPropSlotRange[] = asset.slots?.length
     ? asset.slots.map((slot) => ({ start: slot.start, count: slot.count }))
     : [];
   if (asset.glass && asset.glass.count > 0) ranges.push({ start: asset.glass.start, count: asset.glass.count });
-  // DOOR LEAF (req_1864) rides as the LAST trailing slot so a painted door's leaf
-  // still renders (the slotted draw path only emits the base + each slot range).
-  // The loader treats this slot as the toggleable two-state panel (Phase 6).
-  if (asset.leaf && asset.leaf.count > 0) ranges.push({ start: asset.leaf.start, count: asset.leaf.count });
+  // DOOR LEAF (req_1864) rides as the LAST trailing slot(s) so a painted door's leaf
+  // still renders (the slotted draw path only emits the base + each slot range). The
+  // loader treats this slot range as the toggleable two-state panel (Phase 6).
+  ranges.push(...cookedLeafSlots(asset));
   return ranges;
 }
 
@@ -571,9 +590,16 @@ function pushPropGeometry(b: Build, prop: WorldProp): number {
         return textureId ? internMaterial(b, { kind: 'material', id: textureId }) : 0;
       });
       if (asset?.glass && asset.glass.count > 0) slotMaterials.push(internTranslucent(b, GLASS_OPACITY));
-      // The door leaf (req_1864) renders opaque via the prop's base atlas/tint
-      // (material ref 0) — aligned with the trailing leaf slot cookedMeshSlotRanges added.
-      if (asset?.leaf && asset.leaf.count > 0) slotMaterials.push(0);
+      // The door leaf (req_1864) — its opaque frame renders via the prop's base
+      // atlas/tint (material ref 0). req_2020: a leaf with a window splits into the
+      // frame slot then a translucent glass-pane slot, so the window swings see-
+      // through with the frame. Aligned with the trailing slot(s) cookedLeafSlots added.
+      if (asset?.leaf && asset.leaf.count > 0) {
+        const leafGlass = asset.leafGlass && asset.leafGlass.count > 0 ? asset.leafGlass : null;
+        const opaqueCount = leafGlass ? asset.leaf.count - leafGlass.count : asset.leaf.count;
+        if (opaqueCount > 0) slotMaterials.push(0);
+        if (leafGlass) slotMaterials.push(internTranslucent(b, GLASS_OPACITY));
+      }
       collectImportedMeshProp(b.meshProps, prop, mesh, slotMaterials.length ? slotMaterials : undefined);
     }
     return 0;

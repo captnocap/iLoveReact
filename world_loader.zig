@@ -398,8 +398,12 @@ const DoorState = struct {
 const CookedDoor = struct {
     /// the TARGET state — E / proximity flips it; `progress` animates toward it.
     open: bool,
-    /// kid index of the leaf slot node (set during the mesh-prop node pass)
-    node_child: usize = 0,
+    /// kid index of the FIRST leaf node (set during the mesh-prop node pass). The
+    /// leaf renders as `node_child_count` contiguous slot nodes — the opaque frame
+    /// plus, for a glass door (req_2020), its translucent window pane — all swung
+    /// together about the hinge by stepCookedDoors.
+    node_child_first: usize = 0,
+    node_child_count: usize = 0,
     /// the leaf node's resting pose (the closed mesh-prop instance transform)
     node_base_y: f32 = 0,
     node_x: f32 = 0,
@@ -433,6 +437,12 @@ const CookedDoor = struct {
 /// swings 90° about its hinge edge over this many seconds.
 const COOKED_DOOR_SWING_ARC_DEGREES: f32 = 90.0;
 const COOKED_DOOR_OPEN_SECONDS: f32 = 0.4;
+
+/// Cooked-prop glass tint (req_2020) — hand-mirrors materials.ts GLASS_TINT
+/// ('#a9c8d8', the editor's Glass()). A flat-translucent mesh-prop slot ships
+/// opacity only; appendMeshPropNode tints it this blue so /compiled glass panes
+/// match the React play view instead of falling back to the prop's gray.
+const GLASS_TINT = [3]f32{ 169.0 / 255.0, 200.0 / 255.0, 216.0 / 255.0 }; // #a9c8d8
 
 /// The world AABB of a cooked door's leaf panel (req_1864) — the leaf slot's
 /// local bounds, yawed + offset by the placed instance. Shared by the rect
@@ -3175,6 +3185,16 @@ pub const Runtime = struct {
         // alpha so it reads as a not-yet-placed ghost; a<1 routes it to the transparent pass.
         const final_alpha = alpha_override orelse opacity;
         const textured = eff_tex_key != null or mesh.tex_rgba != null;
+        // GLASS TINT (req_2020): a flat-translucent material (empty shader, no decal,
+        // alpha<1) is a cooked-prop glass pane. The lump ships opacity only — without
+        // this the node fell back to the prop's gray tint, so a window over bright sky
+        // read as hollow. Tint it the editor's Glass() blue (mirrors materials.ts
+        // GLASS_TINT '#a9c8d8') so /compiled glass matches the React play view.
+        const glass_tint: ?[3]f32 = if (!textured and alpha_override == null and material_index < self.scene.materials.len) blk: {
+            const m = self.scene.materials[material_index];
+            break :blk if (m.wgsl.len == 0 and m.decal_doc.len == 0 and m.opacity < 0.999) GLASS_TINT else null;
+        } else null;
+        const node_color: [3]f32 = if (textured) .{ 1, 1, 1 } else (glass_tint orelse mesh.color);
         try self.kid_list.append(self.allocator, .{
             .scene3d_mesh = count > 0,
             .scene3d_geom_key = key,
@@ -3185,9 +3205,9 @@ pub const Runtime = struct {
             .scene3d_pos_y = inst.y,
             .scene3d_pos_z = inst.z,
             .scene3d_rot_y = inst.yaw_degrees,
-            .scene3d_color_r = if (textured) 1 else mesh.color[0],
-            .scene3d_color_g = if (textured) 1 else mesh.color[1],
-            .scene3d_color_b = if (textured) 1 else mesh.color[2],
+            .scene3d_color_r = node_color[0],
+            .scene3d_color_g = node_color[1],
+            .scene3d_color_b = node_color[2],
             .scene3d_color_a = final_alpha,
             .scene3d_tex_w = if (eff_tex_key == null) mesh.tex_w else 0,
             .scene3d_tex_h = if (eff_tex_key == null) mesh.tex_h else 0,
@@ -3891,13 +3911,20 @@ pub const Runtime = struct {
                     const material_ref = if (si < inst.slot_materials.len) inst.slot_materials[si] else 0;
                     const leaf_node_index = self.kid_list.items.len;
                     try self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, material_ref, null, null);
-                    // req_1864/req_1908: bind the door's leaf slot node to its live
+                    // req_1864/req_1908: bind the door's leaf node range to its live
                     // machine; stepCookedDoors owns the leaf transform every frame
-                    // (swings it about the hinge), so no instant drop here.
+                    // (swings it about the hinge), so no instant drop here. req_2020:
+                    // the leaf is every slot from leaf_slot to the last (opaque frame
+                    // then, for a glass door, its translucent pane) — bind them all so
+                    // the window swings with the frame instead of staying behind.
                     if (this_cooked_door) |di| {
                         if (mesh.door) |door| {
-                            if (si == door.leaf_slot and leaf_node_index < self.kid_list.items.len) {
-                                self.cooked_doors[di].node_child = leaf_node_index;
+                            if (si >= door.leaf_slot) {
+                                if (self.cooked_doors[di].node_child_count == 0) {
+                                    self.cooked_doors[di].node_child_first = leaf_node_index;
+                                }
+                                self.cooked_doors[di].node_child_count =
+                                    self.kid_list.items.len - self.cooked_doors[di].node_child_first;
                             }
                         }
                     }
@@ -5064,12 +5091,19 @@ pub const Runtime = struct {
             const st = @sin(theta);
             const dx = cd.node_x - cd.hinge_x;
             const dz = cd.node_z - cd.hinge_z;
-            if (cd.node_child < self.kid_list.items.len) {
-                const node = &self.kid_list.items[cd.node_child];
-                // node_pos = hinge + Ry(theta)*(inst-hinge), Ry matching the engine's
-                // m4rotateY (x'=x·c+z·s, z'=-x·s+z·c) so the hinge edge stays fixed.
-                node.scene3d_pos_x = cd.hinge_x + (dx * ct + dz * st);
-                node.scene3d_pos_z = cd.hinge_z + (-dx * st + dz * ct);
+            // The leaf nodes (opaque frame + glass pane, req_2020) share one instance
+            // pose, so the SAME hinge swing applies to each: node_pos = hinge +
+            // Ry(theta)*(inst-hinge), Ry matching the engine's m4rotateY
+            // (x'=x·c+z·s, z'=-x·s+z·c) so the hinge edge stays fixed.
+            const swung_x = cd.hinge_x + (dx * ct + dz * st);
+            const swung_z = cd.hinge_z + (-dx * st + dz * ct);
+            var ni: usize = 0;
+            while (ni < cd.node_child_count) : (ni += 1) {
+                const idx = cd.node_child_first + ni;
+                if (idx >= self.kid_list.items.len) break;
+                const node = &self.kid_list.items[idx];
+                node.scene3d_pos_x = swung_x;
+                node.scene3d_pos_z = swung_z;
                 node.scene3d_pos_y = cd.node_base_y;
                 node.scene3d_rot_y = cd.yaw_degrees + theta_deg;
             }

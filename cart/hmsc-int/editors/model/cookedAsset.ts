@@ -75,6 +75,11 @@ export type MeshBlob = {
    *  (hidden when the door opens) the same way glass rides its own sub-range.
    *  Absent = the model has no door leaf. */
   leaf?: MeshGlassRange;
+  /** The glass-tagged SUB-range WITHIN `leaf` (req_2020) — a door whose window is
+   *  part of the swinging leaf. The leaf is laid out opaque-frame-then-glass-pane,
+   *  so this is the trailing slice of `leaf`; render paths split it into a
+   *  translucent slot that swings with the frame. Absent = the leaf has no glass. */
+  leafGlass?: MeshGlassRange;
 };
 
 /** A vertex sub-range (vertex units) carrying a split-out face group (glass / leaf). */
@@ -162,6 +167,10 @@ export type CookedAsset = {
    *  paths split the toggleable leaf node without re-deriving. The same range is
    *  on `descriptor.doorPanel` (meshStart/meshCount). Absent = no door leaf. */
   leaf?: MeshGlassRange;
+  /** Glass SUB-range within `leaf` (req_2020) — a door with a window in its
+   *  swinging leaf; copied from the blob so the compiled bake splits the pane into
+   *  a translucent slot that swings with the frame. Absent = the leaf has no glass. */
+  leafGlass?: MeshGlassRange;
   descriptor: PropKindDefinition;
 };
 
@@ -332,24 +341,32 @@ export function flattenModel(parts: readonly CookPart[], opts?: { leafPart?: (p:
   }
   const glassStart = total / 8;
 
-  // Door-leaf pass (req_1864) — the leaf part's every face, appended after glass
-  // as its own trailing sub-range so the loader/editor toggle it independently.
-  const leafChunks: Float32Array[] = [];
-  let leafFloats = 0;
+  // Door-leaf pass (req_1864) — the leaf part's faces, appended after glass as its
+  // own trailing sub-range so the loader/editor toggle it independently. req_2020:
+  // the leaf is laid out OPAQUE-frame faces first, then GLASS-pane faces, so a door
+  // whose window rides the swinging leaf can split the pane into its own translucent
+  // slot (rendered see-through, swung with the frame) instead of baking it solid.
+  const leafOpaqueChunks: Float32Array[] = [];
+  let leafOpaqueFloats = 0;
+  const leafGlassChunks: Float32Array[] = [];
+  let leafGlassFloats = 0;
   for (const p of leafParts) {
     if (!p.visible) continue;
-    const g = editMeshToGeometry(liftedMesh(p), () => true);
-    if (g.positions.length === 0) continue;
-    leafChunks.push(g.positions);
-    leafFloats += g.positions.length;
+    const op = editMeshToGeometry(liftedMesh(p), (f) => !f.glass);
+    if (op.positions.length > 0) { leafOpaqueChunks.push(op.positions); leafOpaqueFloats += op.positions.length; }
+    const gl = editMeshToGeometry(liftedMesh(p), (f) => !!f.glass);
+    if (gl.positions.length > 0) { leafGlassChunks.push(gl.positions); leafGlassFloats += gl.positions.length; }
   }
+  const leafFloats = leafOpaqueFloats + leafGlassFloats;
   const leafStart = (total + glassFloats) / 8;
+  const leafGlassStart = (total + glassFloats + leafOpaqueFloats) / 8;
 
   const verts = new Float32Array(total + glassFloats + leafFloats);
   let off = 0;
   for (const c of chunks) { verts.set(c, off); off += c.length; }
   for (const c of glassChunks) { verts.set(c, off); off += c.length; }
-  for (const c of leafChunks) { verts.set(c, off); off += c.length; }
+  for (const c of leafOpaqueChunks) { verts.set(c, off); off += c.length; }
+  for (const c of leafGlassChunks) { verts.set(c, off); off += c.length; }
 
   return {
     hash: hashBytes(verts),
@@ -359,6 +376,7 @@ export function flattenModel(parts: readonly CookPart[], opts?: { leafPart?: (p:
     ...(slots ? { slots } : {}),
     ...(glassFloats ? { glass: { start: glassStart, count: glassFloats / 8 } } : {}),
     ...(leafFloats ? { leaf: { start: leafStart, count: leafFloats / 8 } } : {}),
+    ...(leafGlassFloats ? { leafGlass: { start: leafGlassStart, count: leafGlassFloats / 8 } } : {}),
   };
 }
 
@@ -577,6 +595,7 @@ export function cookProp(input: CookPropInput): CookResult {
     slots: blob.slots ?? [],
     glass: blob.glass ?? null,
     leaf: blob.leaf ?? null,
+    leafGlass: blob.leafGlass ?? null,
   });
   const asset: CookedAsset = {
     id: input.id,
@@ -591,6 +610,7 @@ export function cookProp(input: CookPropInput): CookResult {
     ...(blob.slots ? { slots: blob.slots } : {}),
     ...(blob.glass ? { glass: blob.glass } : {}),
     ...(blob.leaf ? { leaf: blob.leaf } : {}),
+    ...(blob.leafGlass ? { leafGlass: blob.leafGlass } : {}),
     descriptor,
   };
   return { asset, blob, errors };
