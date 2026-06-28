@@ -798,11 +798,10 @@ pub const scene3d_wgsl =
     \\    @location(0) position: vec3f,
     \\    @location(1) normal: vec3f,
     \\    @location(2) uv: vec2f,
-    \\    @location(3) model_c0: vec4f,
-    \\    @location(4) model_c1: vec4f,
-    \\    @location(5) model_c2: vec4f,
-    \\    @location(6) model_c3: vec4f,
-    \\    @location(7) inst_color: vec4f,
+    \\    @location(3) inst_pos: vec3f,
+    \\    @location(4) inst_euler: vec4u,   // rx, ry, rz (u16 deg ring) + pad
+    \\    @location(5) inst_scale: vec4f,   // sx, sy, sz (f16 m) + pad
+    \\    @location(6) inst_color: vec4f,   // rgba (unorm8)
     \\};
     \\
     \\struct VertexOutput {
@@ -815,11 +814,29 @@ pub const scene3d_wgsl =
     \\    @location(4) @interpolate(linear) screen_y: f32,
     \\};
     \\
+    \\// Rebuild the model matrix from the packed instance (32-byte InstanceData):
+    \\// position f32x3, euler u16x4 (deg ring), scale f16x4, rgba u8x4. Column-major
+    \\// here = makeInstance's row-major T·Ry·Rx·Rz·S after its transpose. MUST match.
+    \\fn rebuild_model(inst_pos: vec3f, inst_euler: vec4u, inst_scale: vec4f) -> mat4x4f {
+    \\    let a = 360.0 / 65536.0 * 0.017453292;
+    \\    let rot = vec3f(f32(inst_euler.x), f32(inst_euler.y), f32(inst_euler.z)) * a;
+    \\    let s = inst_scale.xyz;
+    \\    let crx = cos(rot.x); let srx = sin(rot.x);
+    \\    let cry = cos(rot.y); let sry = sin(rot.y);
+    \\    let crz = cos(rot.z); let srz = sin(rot.z);
+    \\    let mS  = mat4x4f(vec4f(s.x,0,0,0), vec4f(0,s.y,0,0), vec4f(0,0,s.z,0), vec4f(0,0,0,1));
+    \\    let mRx = mat4x4f(vec4f(1,0,0,0), vec4f(0,crx,srx,0), vec4f(0,-srx,crx,0), vec4f(0,0,0,1));
+    \\    let mRy = mat4x4f(vec4f(cry,0,-sry,0), vec4f(0,1,0,0), vec4f(sry,0,cry,0), vec4f(0,0,0,1));
+    \\    let mRz = mat4x4f(vec4f(crz,srz,0,0), vec4f(-srz,crz,0,0), vec4f(0,0,1,0), vec4f(0,0,0,1));
+    \\    let mT  = mat4x4f(vec4f(1,0,0,0), vec4f(0,1,0,0), vec4f(0,0,1,0), vec4f(inst_pos,1));
+    \\    return mT * mRy * mRx * mRz * mS;
+    \\}
+    \\
     \\// ── Vertex shader ────────────────────────────────────────────
     \\@vertex
     \\fn vs_main(in: VertexInput) -> VertexOutput {
     \\    var out: VertexOutput;
-    \\    let model = mat4x4f(in.model_c0, in.model_c1, in.model_c2, in.model_c3);
+    \\    let model = rebuild_model(in.inst_pos, in.inst_euler, in.inst_scale);
     \\    let world = model * vec4f(in.position, 1.0);
     \\    out.clip_pos = S.vp * world;
     \\    out.world_pos = world.xyz;
@@ -1095,11 +1112,10 @@ pub const water_wgsl =
     \\    @location(0) position: vec3f,
     \\    @location(1) normal: vec3f,
     \\    @location(2) uv: vec2f,
-    \\    @location(3) model_c0: vec4f,
-    \\    @location(4) model_c1: vec4f,
-    \\    @location(5) model_c2: vec4f,
-    \\    @location(6) model_c3: vec4f,
-    \\    @location(7) inst_color: vec4f,
+    \\    @location(3) inst_pos: vec3f,
+    \\    @location(4) inst_euler: vec4u,
+    \\    @location(5) inst_scale: vec4f,
+    \\    @location(6) inst_color: vec4f,
     \\};
     \\struct VertexOutput {
     \\    @builtin(position) clip_pos: vec4f,
@@ -1160,10 +1176,26 @@ pub const water_wgsl =
     \\    return h / tot;
     \\}
     \\
+    \\// Rebuild the model matrix from the packed instance (32-byte InstanceData) —
+    \\// column-major twin of makeInstance's row-major T·Ry·Rx·Rz·S. MUST stay in sync.
+    \\fn rebuild_model(inst_pos: vec3f, inst_euler: vec4u, inst_scale: vec4f) -> mat4x4f {
+    \\    let a = 360.0 / 65536.0 * 0.017453292;
+    \\    let rot = vec3f(f32(inst_euler.x), f32(inst_euler.y), f32(inst_euler.z)) * a;
+    \\    let s = inst_scale.xyz;
+    \\    let crx = cos(rot.x); let srx = sin(rot.x);
+    \\    let cry = cos(rot.y); let sry = sin(rot.y);
+    \\    let crz = cos(rot.z); let srz = sin(rot.z);
+    \\    let mS  = mat4x4f(vec4f(s.x,0,0,0), vec4f(0,s.y,0,0), vec4f(0,0,s.z,0), vec4f(0,0,0,1));
+    \\    let mRx = mat4x4f(vec4f(1,0,0,0), vec4f(0,crx,srx,0), vec4f(0,-srx,crx,0), vec4f(0,0,0,1));
+    \\    let mRy = mat4x4f(vec4f(cry,0,-sry,0), vec4f(0,1,0,0), vec4f(sry,0,cry,0), vec4f(0,0,0,1));
+    \\    let mRz = mat4x4f(vec4f(crz,srz,0,0), vec4f(-srz,crz,0,0), vec4f(0,0,1,0), vec4f(0,0,0,1));
+    \\    let mT  = mat4x4f(vec4f(1,0,0,0), vec4f(0,1,0,0), vec4f(0,0,1,0), vec4f(inst_pos,1));
+    \\    return mT * mRy * mRx * mRz * mS;
+    \\}
     \\@vertex
     \\fn vs_main(in: VertexInput) -> VertexOutput {
     \\    var out: VertexOutput;
-    \\    let model = mat4x4f(in.model_c0, in.model_c1, in.model_c2, in.model_c3);
+    \\    let model = rebuild_model(in.inst_pos, in.inst_euler, in.inst_scale);
     \\    var world = model * vec4f(in.position, 1.0);
     \\    let wn = normalize((model * vec4f(in.normal, 0.0)).xyz);
     \\    // Only the up-facing top surface rides the waves; the skirt (horizontal
@@ -1455,11 +1487,10 @@ pub const scene3d_ground_prefix =
     \\    @location(0) position: vec3f,
     \\    @location(1) normal: vec3f,
     \\    @location(2) uv: vec2f,
-    \\    @location(3) model_c0: vec4f,
-    \\    @location(4) model_c1: vec4f,
-    \\    @location(5) model_c2: vec4f,
-    \\    @location(6) model_c3: vec4f,
-    \\    @location(7) inst_color: vec4f,
+    \\    @location(3) inst_pos: vec3f,
+    \\    @location(4) inst_euler: vec4u,
+    \\    @location(5) inst_scale: vec4f,
+    \\    @location(6) inst_color: vec4f,
     \\};
     \\struct VertexOutput {
     \\    @builtin(position) clip_pos: vec4f,
@@ -1469,10 +1500,26 @@ pub const scene3d_ground_prefix =
     \\    @location(3) inst_color: vec4f,
     \\    @location(4) @interpolate(linear) screen_y: f32,
     \\};
+    \\// Rebuild the model matrix from the packed instance (32-byte InstanceData) —
+    \\// column-major twin of makeInstance's row-major T·Ry·Rx·Rz·S. MUST stay in sync.
+    \\fn rebuild_model(inst_pos: vec3f, inst_euler: vec4u, inst_scale: vec4f) -> mat4x4f {
+    \\    let a = 360.0 / 65536.0 * 0.017453292;
+    \\    let rot = vec3f(f32(inst_euler.x), f32(inst_euler.y), f32(inst_euler.z)) * a;
+    \\    let s = inst_scale.xyz;
+    \\    let crx = cos(rot.x); let srx = sin(rot.x);
+    \\    let cry = cos(rot.y); let sry = sin(rot.y);
+    \\    let crz = cos(rot.z); let srz = sin(rot.z);
+    \\    let mS  = mat4x4f(vec4f(s.x,0,0,0), vec4f(0,s.y,0,0), vec4f(0,0,s.z,0), vec4f(0,0,0,1));
+    \\    let mRx = mat4x4f(vec4f(1,0,0,0), vec4f(0,crx,srx,0), vec4f(0,-srx,crx,0), vec4f(0,0,0,1));
+    \\    let mRy = mat4x4f(vec4f(cry,0,-sry,0), vec4f(0,1,0,0), vec4f(sry,0,cry,0), vec4f(0,0,0,1));
+    \\    let mRz = mat4x4f(vec4f(crz,srz,0,0), vec4f(-srz,crz,0,0), vec4f(0,0,1,0), vec4f(0,0,0,1));
+    \\    let mT  = mat4x4f(vec4f(1,0,0,0), vec4f(0,1,0,0), vec4f(0,0,1,0), vec4f(inst_pos,1));
+    \\    return mT * mRy * mRx * mRz * mS;
+    \\}
     \\@vertex
     \\fn vs_main(in: VertexInput) -> VertexOutput {
     \\    var out: VertexOutput;
-    \\    let model = mat4x4f(in.model_c0, in.model_c1, in.model_c2, in.model_c3);
+    \\    let model = rebuild_model(in.inst_pos, in.inst_euler, in.inst_scale);
     \\    let world = model * vec4f(in.position, 1.0);
     \\    out.clip_pos = S.vp * world;
     \\    out.world_pos = world.xyz;

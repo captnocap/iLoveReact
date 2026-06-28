@@ -795,14 +795,14 @@ pub fn init() void {
         .{ .format = .float32x3, .offset = 12, .shader_location = 1 },
         .{ .format = .float32x2, .offset = 24, .shader_location = 2 },
     };
-    // Per-instance attributes (vertex buffer 1, step=instance) — model matrix as
-    // 4 vec4 columns (locations 3–6) + instance color (location 7). 80 bytes / instance.
+    // Per-instance attributes (vertex buffer 1, step=instance) — packed TRS+rgba
+    // (32-byte InstanceData): pos f32x3 @3, euler u16x4 @4, scale f16x4 @5, rgba
+    // unorm8x4 @6. The shaders rebuild the model matrix from these.
     const inst_attrs = [_]wgpu.VertexAttribute{
-        .{ .format = .float32x4, .offset = 0, .shader_location = 3 },
-        .{ .format = .float32x4, .offset = 16, .shader_location = 4 },
-        .{ .format = .float32x4, .offset = 32, .shader_location = 5 },
-        .{ .format = .float32x4, .offset = 48, .shader_location = 6 },
-        .{ .format = .float32x4, .offset = 64, .shader_location = 7 },
+        .{ .format = .float32x3, .offset = 0, .shader_location = 3 },
+        .{ .format = .uint16x4, .offset = 12, .shader_location = 4 },
+        .{ .format = .float16x4, .offset = 20, .shader_location = 5 },
+        .{ .format = .unorm8x4, .offset = 28, .shader_location = 6 },
     };
     const vert_layouts = [_]wgpu.VertexBufferLayout{
         .{ .step_mode = .vertex, .array_stride = @sizeOf(Vertex), .attribute_count = vert_attrs.len, .attributes = &vert_attrs },
@@ -1887,22 +1887,31 @@ fn drawSky(pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.Mat4, cam_po
     pass.draw(3, 1, 0, 0);
 }
 
-fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, sy: f32, sz: f32, cr: f32, cg: f32, cb: f32, ca: f32) InstanceData {
-    const deg2rad = std.math.pi / 180.0;
-    var model = math.m4scale(math.m4identity(), .{ .x = sx, .y = sy, .z = sz });
-    model = math.m4multiply(math.m4rotateZ(math.m4identity(), rz * deg2rad), model);
-    model = math.m4multiply(math.m4rotateX(math.m4identity(), rx * deg2rad), model);
-    model = math.m4multiply(math.m4rotateY(math.m4identity(), ry * deg2rad), model);
-    model = math.m4multiply(math.m4translate(math.m4identity(), .{ .x = px, .y = py, .z = pz }), model);
-
-    return InstanceData{
-        .model = math.m4transpose(model),
-        .color = .{ cr, cg, cb, ca },
-    };
-}
-
 fn quantColor(c: f32) u8 {
     return @intFromFloat(@round(std.math.clamp(c, 0.0, 1.0) * 255.0));
+}
+
+/// Quantize a degree angle onto the u16 ring (0..65536 ≡ 0..360°). Axis-aligned
+/// 0/90/180/270 land on exact integers (a wall/floor's rotation is lossless). Round
+/// can hit 65536 for an angle a hair under 360° — mask through u32 so it wraps to 0
+/// instead of overflowing the u16 cast.
+fn quantAngleU16(deg: f32) u16 {
+    const m = deg - @floor(deg / 360.0) * 360.0;
+    const v: u32 = @intFromFloat(@round(m * (65536.0 / 360.0)));
+    return @intCast(v & 0xFFFF);
+}
+
+/// Pack the standard per-instance row (32-byte InstanceData): position f32, euler
+/// u16 ring, scale f16 (IEEE half — full float range, no fixed-max cap), rgba u8.
+/// The vertex shaders (scene3d_wgsl/water_wgsl/scene3d_ground_prefix) rebuild the
+/// model matrix from these — see InstanceData's note. Replaces baking a 4×4 here.
+fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, sy: f32, sz: f32, cr: f32, cg: f32, cb: f32, ca: f32) InstanceData {
+    return InstanceData{
+        .pos = .{ px, py, pz },
+        .euler = .{ quantAngleU16(rx), quantAngleU16(ry), quantAngleU16(rz), 0 },
+        .scale = .{ @floatCast(sx), @floatCast(sy), @floatCast(sz), 0 },
+        .color = .{ quantColor(cr), quantColor(cg), quantColor(cb), quantColor(ca) },
+    };
 }
 
 /// Pack a foliage-card row into the 24-byte slim format (grass/bush/flower/frond).
@@ -1911,17 +1920,6 @@ fn quantColor(c: f32) u8 {
 /// with SLIM_SCALE_MAX. Out-of-range scale clamps loudly to the unorm ceiling rather
 /// than wrapping (a card bigger than 16 m is a bug).
 fn makeSlimInstance(px: f32, py: f32, pz: f32, pitch: f32, yaw: f32, wide: f32, len: f32, cr: f32, cg: f32, cb: f32) SlimInstance {
-    const deg_to_u16 = 65536.0 / 360.0;
-    const wrap = struct {
-        fn q(deg: f32) u16 {
-            // map any degree onto [0,360) then onto the u16 ring. Round can land on
-            // 65536 for an angle a hair under 360° — mask through u32 so it wraps to
-            // 0 (the correct ring value) instead of overflowing the u16 cast.
-            const m = deg - @floor(deg / 360.0) * 360.0;
-            const v: u32 = @intFromFloat(@round(m * deg_to_u16));
-            return @intCast(v & 0xFFFF);
-        }
-    };
     const scl = struct {
         fn q(m: f32) u16 {
             const u = std.math.clamp(m / SLIM_SCALE_MAX, 0.0, 1.0);
@@ -1930,7 +1928,7 @@ fn makeSlimInstance(px: f32, py: f32, pz: f32, pitch: f32, yaw: f32, wide: f32, 
     };
     return SlimInstance{
         .pos = .{ px, py, pz },
-        .angles = .{ wrap.q(pitch), wrap.q(yaw) },
+        .angles = .{ quantAngleU16(pitch), quantAngleU16(yaw) },
         .scale = .{ scl.q(wide), scl.q(len) },
         .color = .{ quantColor(cr), quantColor(cg), quantColor(cb), 255 },
     };
@@ -2123,11 +2121,10 @@ fn ensureGroundPipeline(formula: []const u8) void {
         .{ .format = .float32x2, .offset = 24, .shader_location = 2 },
     };
     const inst_attrs = [_]wgpu.VertexAttribute{
-        .{ .format = .float32x4, .offset = 0, .shader_location = 3 },
-        .{ .format = .float32x4, .offset = 16, .shader_location = 4 },
-        .{ .format = .float32x4, .offset = 32, .shader_location = 5 },
-        .{ .format = .float32x4, .offset = 48, .shader_location = 6 },
-        .{ .format = .float32x4, .offset = 64, .shader_location = 7 },
+        .{ .format = .float32x3, .offset = 0, .shader_location = 3 },
+        .{ .format = .uint16x4, .offset = 12, .shader_location = 4 },
+        .{ .format = .float16x4, .offset = 20, .shader_location = 5 },
+        .{ .format = .unorm8x4, .offset = 28, .shader_location = 6 },
     };
     const vert_layouts = [_]wgpu.VertexBufferLayout{
         .{ .step_mode = .vertex, .array_stride = @sizeOf(Vertex), .attribute_count = vert_attrs.len, .attributes = &vert_attrs },
