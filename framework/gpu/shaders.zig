@@ -892,15 +892,18 @@ pub const grass_wgsl =
     \\@group(1) @binding(0) var diffuse_tex: texture_2d<f32>;
     \\@group(1) @binding(1) var diffuse_smp: sampler;
     \\
+    \\// Slim per-instance input (the 24-byte SlimInstance, 3d.zig) — grass/bush/flower
+    \\// cards. The model matrix is REBUILT from TRS instead of shipped as 64 bytes;
+    \\// these cards are yaw-only (pitch 0). Decode MUST match makeSlimInstance: angle
+    \\// deg = u16/65536*360, scale m = unorm*16.
     \\struct VertexInput {
     \\    @location(0) position: vec3f,
     \\    @location(1) normal: vec3f,
     \\    @location(2) uv: vec2f,
-    \\    @location(3) model_c0: vec4f,
-    \\    @location(4) model_c1: vec4f,
-    \\    @location(5) model_c2: vec4f,
-    \\    @location(6) model_c3: vec4f,
-    \\    @location(7) inst_color: vec4f,
+    \\    @location(3) inst_pos: vec3f,
+    \\    @location(4) inst_angles: vec2u,   // pitch, yaw (u16 ring)
+    \\    @location(5) inst_scale: vec2f,    // wide, len (unorm × 16 m)
+    \\    @location(6) inst_color: vec4f,
     \\};
     \\struct VertexOutput {
     \\    @builtin(position) clip_pos: vec4f,
@@ -918,7 +921,20 @@ pub const grass_wgsl =
     \\@vertex
     \\fn vs_main(in: VertexInput) -> VertexOutput {
     \\    var out: VertexOutput;
-    \\    let model = mat4x4f(in.model_c0, in.model_c1, in.model_c2, in.model_c3);
+    \\    // Rebuild model = T · Ry(yaw) · Rx(pitch) · S(wide,len,wide), column-major to
+    \\    // match makeInstance's row-major T·Ry·Rx·Rz·S (rz=0) after its transpose.
+    \\    let deg = 360.0 / 65536.0;
+    \\    let pitch = f32(in.inst_angles.x) * deg * 0.017453292;
+    \\    let yaw = f32(in.inst_angles.y) * deg * 0.017453292;
+    \\    let wide = in.inst_scale.x * 16.0;
+    \\    let len = in.inst_scale.y * 16.0;
+    \\    let cx = cos(pitch); let sx = sin(pitch);
+    \\    let cy = cos(yaw);   let sy = sin(yaw);
+    \\    let mS = mat4x4f(vec4f(wide,0,0,0), vec4f(0,len,0,0), vec4f(0,0,wide,0), vec4f(0,0,0,1));
+    \\    let mRx = mat4x4f(vec4f(1,0,0,0), vec4f(0,cx,sx,0), vec4f(0,-sx,cx,0), vec4f(0,0,0,1));
+    \\    let mRy = mat4x4f(vec4f(cy,0,-sy,0), vec4f(0,1,0,0), vec4f(sy,0,cy,0), vec4f(0,0,0,1));
+    \\    let mT = mat4x4f(vec4f(1,0,0,0), vec4f(0,1,0,0), vec4f(0,0,1,0), vec4f(in.inst_pos,1));
+    \\    let model = mT * mRy * mRx * mS;
     \\    var world = model * vec4f(in.position, 1.0);
     \\    let tipw = pow(clamp(in.uv.y, 0.0, 1.0), 1.5);
     \\    let phase = world.x * 0.18 + world.z * 0.22 + S.time * 1.5;
