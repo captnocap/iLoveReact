@@ -226,4 +226,38 @@ test('a glassless door leaf carries no leafGlass (no regression for solid doors)
   assert(blob.leafGlass == null, 'a solid leaf records no glass sub-range');
 });
 
+// ── seat cook from a face-rig (req_2028-2030) ────────────────────────────────
+
+test('a tagged seat face cooks into the prop seat (height + capacity + pose derived)', () => {
+  // a 0.5×0.5 seat top, lifted 0.45 → top face at y = 0.45 + 0.45 = 0.9.
+  const seatPart: CookPart = { id: 'p_seat', mesh: cuboid(0.5, 0.9, 0.5), lift: 0.45, visible: true };
+  const r = cookProp({
+    id: 'studio.chair', name: 'Chair', parts: [seatPart],
+    seatRig: [{ part: 'p_seat', face: 0, bodyPart: 'seat' }], // face 0 = +Y top
+    descriptor: PROP,
+  });
+  const seat = r.asset.descriptor.seat;
+  assert(!!seat, 'the cook derived a seat from the rigged face');
+  assertEqual(seat!.pose, 'sit', 'no head tagged → sit');
+  assertEqual(seat!.capacity, 1, '0.5m seat → one slot');
+  assert(Math.abs(seat!.seatHeightMeters - 0.9) < 1e-5, 'seat height = the top face Y (0.9)');
+});
+
+test('a long bench face cooks a multi-seat (booth) prop', () => {
+  const bench: CookPart = { id: 'p_bench', mesh: cuboid(2.2, 0.9, 0.5), lift: 0.45, visible: true };
+  const r = cookProp({
+    id: 'studio.booth', name: 'Booth', parts: [bench],
+    seatRig: [{ part: 'p_bench', face: 0, bodyPart: 'seat' }],
+    descriptor: PROP,
+  });
+  const seat = r.asset.descriptor.seat!;
+  assertEqual(seat.capacity, 4, '2.2m bench → 4 seats');
+  assertEqual(seat.pins?.length, 4, 'four pins cooked onto the descriptor');
+});
+
+test('no seat-rig → no cooked seat', () => {
+  const r = cookProp({ id: 'studio.plain', name: 'Plain', parts: [part(cuboid(1, 1, 1))], descriptor: PROP });
+  assertEqual(r.asset.descriptor.seat, undefined, 'a plain prop has no seat');
+});
+
 finish('cookedAsset');

@@ -21,7 +21,8 @@ import { getHotState, setHotState, useRerender } from '@reactjit/hooks';
 import type { GeometryData } from '@reactjit/geometries';
 import { cuboid, editMeshToGeometry, mergeMesh, type EditMesh } from './editMesh';
 import type { LayerStripAction } from '../paint/LayerStrip';
-import { libraryModels, modelDecals, modelParts, modelStream, paintBlobFor, type ModelDecal, type ModelEvent, type ModelStreamState, type Palette, type PaintLayer, type StoredModel, type StoredPart } from './modelStream';
+import { libraryModels, modelDecals, modelParts, modelSeatRig, modelStream, paintBlobFor, type ModelDecal, type ModelEvent, type ModelStreamState, type Palette, type PaintLayer, type StoredModel, type StoredPart } from './modelStream';
+import type { SeatRigFace } from '../../game/figure/seating';
 import type { StreamHandle } from '../../data';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
@@ -91,6 +92,10 @@ export type StudioModel = {
   /** set the model's surface decals (whole list) — branch + undoable. `coalesce`
    *  folds a continuous gesture (drag / slider sweep) into ONE undo entry. */
   setDecals(decals: ModelDecal[], coalesce?: boolean): void;
+  /** the open model's seat rig — faces tagged by body part (req_2028-2030), or []. */
+  seatRig: SeatRigFace[];
+  /** set the model's seat rig (whole list) — branch + undoable. */
+  setSeatRig(seatRig: SeatRigFace[]): void;
   /** the open model's pixel-paint texture content hash (req_1382), or null. */
   paintRef: string | null;
   /** the base64 PNG for a paintRef (content-addressed blob), or null. */
@@ -163,6 +168,7 @@ function labelFor(event: ModelEvent): string {
     case 'partPaintUpdated': return 'paint';
     case 'modelPaletteSet': return 'recolour';
     case 'modelDecalsSet': return 'decals';
+    case 'modelSeatRigSet': return 'seat rig';
     case 'partRenamed': return `rename → ${event.name}`;
     case 'partVisibilitySet': return event.visible ? 'show part' : 'hide part';
     case 'partReordered': return `reorder ${event.dir}`;
@@ -200,6 +206,9 @@ function inverseOf(event: ModelEvent, before: StoredModel): ModelEvent | null {
     case 'modelDecalsSet':
       // restore the prior decals (empty list = back to no decals).
       return { kind: 'modelDecalsSet', model, decals: before.decals ?? [] };
+    case 'modelSeatRigSet':
+      // restore the prior seat rig (empty list = back to no rig).
+      return { kind: 'modelSeatRigSet', model, seatRig: before.seatRig ?? [] };
     case 'partRenamed': {
       const p = before.parts[event.id];
       return p ? { kind: 'partRenamed', model, id: event.id, name: p.name } : null;
@@ -433,6 +442,15 @@ function setDecals(decals: ModelDecal[], coalesce = false): void {
   commit({ kind: 'modelDecalsSet', model, decals }, 'structure', 'record');
 }
 
+// Set the model's seat rig (whole list) — BRANCH + undoable, like setDecals. A
+// face-tag toggle is discrete, so no coalescing: each tag/untag is its own undo
+// entry. The cook derives the prop's seat (capacity/facing/pose) from this list.
+function setSeatRig(seatRig: SeatRigFace[]): void {
+  ensureInit();
+  const model = store.openModelId; if (!model) return;
+  commit({ kind: 'modelSeatRigSet', model, seatRig }, 'structure', 'record');
+}
+
 function runAction(id: string, action: LayerStripAction): void {
   ensureInit();
   const model = store.openModelId; if (!model) return;
@@ -543,6 +561,7 @@ function duplicateModel(id?: string): void {
   if (src.palette) pushEvent({ kind: 'modelPaletteSet', model: newId, palette: src.palette }, 'recolour');
   if (src.paintRef) pushEvent({ kind: 'modelPaintBaked', model: newId, paintRef: src.paintRef }, 'paint');
   if (src.decals?.length) pushEvent({ kind: 'modelDecalsSet', model: newId, decals: src.decals }, 'decals');
+  if (src.seatRig?.length) pushEvent({ kind: 'modelSeatRigSet', model: newId, seatRig: src.seatRig }, 'seat rig');
   setOpen(newId);
 }
 
@@ -555,6 +574,9 @@ export function subscribeStudio(fn: () => void): () => void {
 // Non-hook accessors for the workbench source (its list()/onPick()/selectedRow()
 // run outside React render). They share the one module store.
 export function studioOpenModelId(): string | null { ensureInit(); return store.openModelId; }
+/** The open model's seat rig (req_2028-2030) — for the cook caller, which runs in
+ *  a callback outside React render. */
+export function studioSeatRig(): SeatRigFace[] { ensureInit(); return modelSeatRig(streamState(), store.openModelId); }
 export function studioModelsList(): StoredModel[] { ensureInit(); return libraryModels(streamState()); }
 export function studioNewModel(): void { newModel(); }
 export function studioOpenModel(id: string): void { openModel(id); }
@@ -567,7 +589,7 @@ export function studioRenameModel(name: string): void { renameModel(name); }
 export function studioDeleteModel(id: string): void { deleteModel(id); }
 export function studioDuplicateModel(id?: string): void { duplicateModel(id); }
 
-const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, editPaint, setPalette, setDecals, bakePaint, mergeActive, runAction, undo, redo, newModel, openModel, renameModel, deleteModel, duplicateModel } as const;
+const MUTATORS = { select, setSelectedFaces, addPart, addCube, addCuboid, rename, updatePartMesh, editPaint, setPalette, setDecals, setSeatRig, bakePaint, mergeActive, runAction, undo, redo, newModel, openModel, renameModel, deleteModel, duplicateModel } as const;
 
 export function useStudioModel(): StudioModel {
   ensureInit();
@@ -582,6 +604,7 @@ export function useStudioModel(): StudioModel {
     modelName: store.openModelId ? (st.models?.[store.openModelId]?.name ?? null) : null,
     palette: store.openModelId ? (st.models?.[store.openModelId]?.palette ?? null) : null,
     decals: modelDecals(st, store.openModelId),
+    seatRig: modelSeatRig(st, store.openModelId),
     paintRef: store.openModelId ? (st.models?.[store.openModelId]?.paintRef ?? null) : null,
     paintBlob: (ref: string | null) => paintBlobFor(streamState(), ref),
     models: libraryModels(st),

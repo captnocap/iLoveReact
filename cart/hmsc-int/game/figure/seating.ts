@@ -108,6 +108,13 @@ export type SeatBodyPart = 'seat' | 'back' | 'head' | 'legs';
  *  by transforming each face's mesh loop into that frame. */
 export type RiggedFace = { bodyPart: SeatBodyPart; verts: V3[] };
 
+/** The AUTHORED seat-rig link (req_2028-2030): a face of a model part tagged by
+ *  the body part that touches it. The Studio "Rig" tool produces these and they
+ *  persist on the model; the cook resolves each to ground-lifted verts (a
+ *  RiggedFace) and runs deriveSeatFromFaces. `part` is the StoredPart id, `face`
+ *  the index into that part's mesh.faces. */
+export type SeatRigFace = { part: string; face: number; bodyPart: SeatBodyPart };
+
 /** A seat derived from rigged faces — exactly the fields a cooked PropSeat needs. */
 export type DerivedSeat = {
   pose: SeatPose;

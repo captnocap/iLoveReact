@@ -31,6 +31,7 @@ import { isDoorLeafPartName } from './seedFromPiece';
 import { WALL_EDIT_DEFINITIONS } from '../../game/build/edits';
 import type { PropBuildPlacement, PropCollisionBox, PropContainer, PropDoorPanel, PropKindDefinition, PropMount, PropSeat, PropTrafficControl, PropCoverClass } from '../../game/kinds/props';
 import type { TileKind } from '../../game/kinds/tiles';
+import { deriveSeatFromFaces, type RiggedFace, type SeatRigFace } from '../../game/figure/seating';
 
 /** The descriptor schema version — bumped when a descriptor's required-field set
  *  changes; the loader hard-validates it (no silent old-shape acceptance). */
@@ -550,11 +551,36 @@ function doorPanelFromParts(leafParts: readonly CookPart[], vehicle: boolean, ra
   };
 }
 
+/** Derive the prop's seat (req_2028-2030) from the model's face-rig: resolve each
+ *  tagged face to its GROUND-LIFTED verts (the same frame the cooked mesh + pins
+ *  live in) and run the shared deriveSeatFromFaces. Capacity, facing, and sit-vs-
+ *  lay all fall out of the faces. Returns undefined when no seat face was tagged. */
+function seatFromRig(rig: readonly SeatRigFace[], parts: readonly CookPart[]): PropSeat | undefined {
+  const faces: RiggedFace[] = [];
+  for (const r of rig) {
+    const part = parts.find((p) => p.id === r.part);
+    if (!part || !part.visible) continue;
+    const face = part.mesh.faces[r.face];
+    if (!face) continue;
+    const verts = face.loop.map((vi): V3 => {
+      const v = part.mesh.verts[vi];
+      return [v[0], v[1] + part.lift, v[2]];
+    });
+    faces.push({ bodyPart: r.bodyPart, verts });
+  }
+  const derived = deriveSeatFromFaces(faces);
+  return derived ? { pose: derived.pose, seatHeightMeters: derived.seatHeightMeters, capacity: derived.capacity, pins: derived.pins } : undefined;
+}
+
 export type CookPropInput = {
   /** stable asset id — the catalog key (e.g. 'studio.barrel_red'). */
   id: string;
   name: string;
   parts: readonly CookPart[];
+  /** the model's face-rig (req_2028-2030) — faces tagged by body part. When
+   *  present and a seat face is tagged, the cook DERIVES descriptor.seat from it
+   *  (overriding any hand-set descriptor.seat). Absent = no rig-derived seat. */
+  seatRig?: readonly SeatRigFace[];
   /** → the compressed texture blob's hash (the Studio side cooks it via
    *  @reactjit/image and passes the hash). Absent = untextured. */
   texRef?: string;
@@ -580,7 +606,12 @@ export function cookProp(input: CookPropInput): CookResult {
   const doorPanel = hasLeaf && blob.leaf
     ? doorPanelFromParts(input.parts.filter((p) => leafPart!(p)), !!input.descriptor.door?.vehicle, blob.leaf)
     : undefined;
-  const descriptor = fillPropDescriptor(input.descriptor, collision, input.id, input.name, doorPanel);
+  // SEAT COOK (req_2028-2030): a face-rig derives the prop's seat (capacity/
+  // facing/pose) and overrides any hand-set descriptor.seat. Rides the descriptor
+  // so the bake + editor read it and it factors into the asset identity hash.
+  const riggedSeat = input.seatRig?.length ? seatFromRig(input.seatRig, input.parts) : undefined;
+  const descriptorInput = riggedSeat ? { ...input.descriptor, seat: riggedSeat } : input.descriptor;
+  const descriptor = fillPropDescriptor(descriptorInput, collision, input.id, input.name, doorPanel);
   const mounts = gatherMounts(input.parts);
   const errors = validateProp(descriptor);
   // The asset IDENTITY hashes its factors by reference (mesh + texture by their

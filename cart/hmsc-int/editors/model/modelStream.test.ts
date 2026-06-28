@@ -241,4 +241,21 @@ test('surface decals persist on the model, replace wholesale, and clear when emp
   assertEqual(s4, s3, 'a decal set for an unknown model is a no-op');
 });
 
+test('a model carries its seat rig (whole-list replace, empty clears) — req_2028-2030', () => {
+  const seatFace = { part: 'pt-1', face: 0, bodyPart: 'seat' as const };
+  const backFace = { part: 'pt-1', face: 3, bodyPart: 'back' as const };
+  const s1 = fold([
+    { kind: 'modelCreated', model: 'a', name: 'A' },
+    { kind: 'modelSeatRigSet', model: 'a', seatRig: [seatFace] },
+  ] as ModelEvent[]);
+  assertEqual(s1.models['a'].seatRig?.length, 1, 'a rigged face persists on the model');
+  assertEqual(s1.models['a'].seatRig?.[0].bodyPart, 'seat', 'the face carries its body part');
+  const s2 = modelStream.apply(s1, { kind: 'modelSeatRigSet', model: 'a', seatRig: [seatFace, backFace] });
+  assertEqual(s2.models['a'].seatRig?.length, 2, 'a later set replaces the whole list');
+  const s3 = modelStream.apply(s2, { kind: 'modelSeatRigSet', model: 'a', seatRig: [] });
+  assertEqual(s3.models['a'].seatRig, undefined, 'an empty set clears the rig to absent');
+  const s4 = modelStream.apply(s3, { kind: 'modelSeatRigSet', model: 'ghost', seatRig: [seatFace] });
+  assertEqual(s4, s3, 'a rig set for an unknown model is a no-op');
+});
+
 finish('modelStream');

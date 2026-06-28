@@ -17,6 +17,7 @@
 import type { StreamDef } from '../../data';
 import type { EditMesh } from './editMesh';
 import type { DecalDoc } from '../../game/textures/decal';
+import type { SeatRigFace } from '../../game/figure/seating';
 
 // ── PAINT (the corrected painter, req_1288/req_1289) ─────────────────────────────
 // Paint is a LAYER over the read-only atlas, keyed in uniform model-SURFACE cells
@@ -100,6 +101,10 @@ export type StoredModel = {
   /** surface decals (the composer fold, req_1730). Absent until the first decal.
    *  Editable forever; composited into the paint texture for the look. */
   decals?: ModelDecal[];
+  /** SEAT RIG (req_2028-2030) — faces tagged by the body part that touches them
+   *  (seat/back/head/legs). The cook resolves these into the prop's seat (capacity,
+   *  facing, sit-vs-lay all derived). Absent until the first face is rigged. */
+  seatRig?: SeatRigFace[];
 };
 
 export type ModelEvent =
@@ -125,6 +130,8 @@ export type ModelEvent =
   // list is tiny vector docs, so replacing it wholesale on each edit is cheap and
   // keeps the reducer a dumb upsert (req_1730).
   | { kind: 'modelDecalsSet'; model: string; decals: ModelDecal[] }
+  // set the model's seat rig (whole-list replace — branch + undoable, like decals).
+  | { kind: 'modelSeatRigSet'; model: string; seatRig: SeatRigFace[] }
   | { kind: 'partRenamed'; model: string; id: string; name: string }
   | { kind: 'partVisibilitySet'; model: string; id: string; visible: boolean }
   | { kind: 'partReordered'; model: string; id: string; dir: 'up' | 'down' }
@@ -229,6 +236,13 @@ export const modelStream: StreamDef<ModelStreamState, ModelEvent> = Object.freez
         const decals = event.decals.length ? event.decals : undefined;
         return { ...state, models: { ...state.models, [event.model]: { ...m, decals } } };
       }
+      case 'modelSeatRigSet': {
+        const m = state.models[event.model];
+        if (!m) return state;
+        // an empty list clears the rig back to absent (keeps snapshots tidy).
+        const seatRig = event.seatRig.length ? event.seatRig : undefined;
+        return { ...state, models: { ...state.models, [event.model]: { ...m, seatRig } } };
+      }
       case 'modelPaintBaked': {
         const m = state.models[event.model];
         if (!m) return state;
@@ -294,6 +308,11 @@ export function modelParts(state: ModelStreamState, modelId: string | null): Sto
 export function modelDecals(state: ModelStreamState, modelId: string | null): ModelDecal[] {
   if (!modelId) return [];
   return state?.models?.[modelId]?.decals ?? [];
+}
+
+export function modelSeatRig(state: ModelStreamState, modelId: string | null): SeatRigFace[] {
+  if (!modelId) return [];
+  return state?.models?.[modelId]?.seatRig ?? [];
 }
 
 // ── palette helpers (slot → appearance) ──────────────────────────────────────────

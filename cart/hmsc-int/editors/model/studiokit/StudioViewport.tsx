@@ -39,7 +39,7 @@ import { HotkeysPanel } from './dialogs/HotkeysPanel';
 import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, centerMesh, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, newConcaveFaces, fitWheelCenter, addTextureSlot, assignFacesToSlot, clearFaceSlot, facesInSlot, slotOfFace, renameSlot, removeSlot, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from '../editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from '../anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from '../wheelMount';
-import { useStudioModel, type StudioModel, type StudioPart } from '../studioModel';
+import { studioSeatRig, useStudioModel, type StudioModel, type StudioPart } from '../studioModel';
 import { glbToEditMesh, base64ToBytes } from '../importMesh';
 import { cookProp, type PropDescriptorInput, type CookedAsset } from '../cookedAsset';
 import { useCookedAssets, cookedTextureBlob } from '../cookedAssets';
@@ -3844,7 +3844,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
             // are exactly the texture factor the render/bake sample. Unpainted → no tex.
             const texB64 = props.paintRef ? props.paintBlob(props.paintRef) : null;
             const texRef = texB64 ? props.paintRef ?? undefined : undefined;
-            const result = cookProp({ id: `studio.${base}`, name: props.sceneName || 'Asset', parts: props.parts, descriptor, texRef });
+            const result = cookProp({ id: `studio.${base}`, name: props.sceneName || 'Asset', parts: props.parts, descriptor, texRef, seatRig: studioSeatRig() });
             if (result.errors.length > 0) { toast(`can't compile: ${result.errors[0]}`); return; }
             cooked.install(result, texB64 ?? undefined);
             const d = result.asset.descriptor;

@@ -34,7 +34,7 @@ import { useHeldModifiers } from '../useEditorControls';
 import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, fitWheelCenter, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from './editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from './anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from './wheelMount';
-import { useStudioModel, type StudioModel, type StudioPart } from './studioModel';
+import { studioSeatRig, useStudioModel, type StudioModel, type StudioPart } from './studioModel';
 import { glbToEditMesh, objToEditMesh, base64ToBytes } from './importMesh';
 import { cookProp, type PropDescriptorInput } from './cookedAsset';
 import { seedMeshFromPiece, seedNameFromPiece } from './seedFromPiece';
@@ -3073,7 +3073,7 @@ export function StudioViewport(props: { parts: StudioPart[]; revision: number; m
           onCancel={() => setCompileOpen(false)}
           onCook={(descriptor) => {
             const base = (props.sceneName || 'asset').replace(/[^a-z0-9_-]+/gi, '_').toLowerCase();
-            const result = cookProp({ id: `studio.${base}`, name: props.sceneName || 'Asset', parts: props.parts, descriptor });
+            const result = cookProp({ id: `studio.${base}`, name: props.sceneName || 'Asset', parts: props.parts, descriptor, seatRig: studioSeatRig() });
             if (result.errors.length > 0) { toast(`can't compile: ${result.errors[0]}`); return; }
             cooked.install(result);
             const d = result.asset.descriptor;
