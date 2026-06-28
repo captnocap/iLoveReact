@@ -271,10 +271,18 @@ export function liftedWallBaseY(piece: PlacedBuildPiece, pieces: readonly Placed
   if (!WALL_REST_KINDS.has(placedPieceDef(piece).kind)) return piece.y;
   const wall = pieceBounds(piece);
   let restY = piece.y;
-  for (const other of pieces) {
+  // PLACEPERF-0610: a wall only rests on plates overlapping its own footprint —
+  // a LOCAL question. Query the shared spatial grid (built once per pieces array,
+  // entries carry precomputed bounds) instead of scanning every piece. This was the
+  // last un-indexed O(N²) neighbor scan: at ~4.6k pieces the compile ran it ~25k
+  // times for ~114M iterations (the bulk of both the render-geometry and collider
+  // bakes). The overlap/storey predicates below re-check exactly; the grid only
+  // shrinks the candidate set, so the result is identical.
+  for (const entry of piecesNear(pieces, wall.minX, wall.maxX, wall.minZ, wall.maxZ)) {
+    const other = entry.piece;
     if (other === piece || other.id === piece.id) continue;
     if (!isSupportPlate(placedPieceDef(other).kind)) continue;
-    const plate = pieceBounds(other);
+    const plate = entry.bounds;
     if (Math.min(wall.maxX, plate.maxX) <= Math.max(wall.minX, plate.minX)) continue; // no plan overlap (x)
     if (Math.min(wall.maxZ, plate.maxZ) <= Math.max(wall.minZ, plate.minZ)) continue; // no plan overlap (z)
     if (plate.topY < piece.y - WALL_REST_EPSILON_METERS) continue; // below the wall — not its floor
