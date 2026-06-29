@@ -52,6 +52,9 @@ const MAX_FRAMES: u32 = 600;
 // Instance row: pos3 + rot3 + scale3 + color3 + optional shape id. The first
 // 12 floats match gpu/3d.zig; shape id is loader metadata for keyed geometry.
 const INSTANCE_STRIDE: usize = 12;
+// A baked traffic prototype row (req_2056): the 12 instance floats + a shape id
+// at index 12. Mirrors compile/worldTraffic.ts TRAFFIC_ROW_STRIDE.
+const TRAFFIC_PROTO_STRIDE: usize = 13;
 const SHAPE_BOX: f32 = 0;
 const SHAPE_RAMP: f32 = 1;
 const SHAPE_CYLINDER8: f32 = 2;
@@ -546,6 +549,36 @@ fn rotateYLocal(local: [3]f32, yaw_degrees: f32) Vec3 {
         .y = local[1],
         .z = -local[0] * s + local[2] * c0,
     };
+}
+
+/// A pose along a baked traffic route (req_2056): world x,z + travel heading.
+const RoutePose = struct { x: f32, z: f32, heading_deg: f32 };
+
+/// Point + heading at arc-length `s` along a route polyline (x,z pairs). Heading
+/// uses the motion convention (forward = [sin h, cos h] → h = atan2(dx, dz)), so
+/// a +Z-forward vehicle prototype rotated by `heading_deg` faces travel.
+fn sampleRoute(route: []const f32, s_in: f32) RoutePose {
+    if (route.len < 4) {
+        return .{ .x = if (route.len >= 2) route[0] else 0, .z = if (route.len >= 2) route[1] else 0, .heading_deg = 0 };
+    }
+    var s = s_in;
+    var p: usize = 2;
+    while (p + 1 < route.len) : (p += 2) {
+        const ax = route[p - 2];
+        const az = route[p - 1];
+        const bx = route[p];
+        const bz = route[p + 1];
+        const dx = bx - ax;
+        const dz = bz - az;
+        const seg = @sqrt(dx * dx + dz * dz);
+        const last = p + 2 >= route.len;
+        if (s <= seg or last) {
+            const t = if (seg > 1.0e-5) @max(@as(f32, 0), @min(@as(f32, 1), s / seg)) else 0;
+            return .{ .x = ax + dx * t, .z = az + dz * t, .heading_deg = std.math.atan2(dx, dz) * 180.0 / std.math.pi };
+        }
+        s -= seg;
+    }
+    return .{ .x = route[route.len - 2], .z = route[route.len - 1], .heading_deg = 0 };
 }
 
 fn nowNs() i64 {
@@ -3029,6 +3062,14 @@ pub const Runtime = struct {
     // mesh nodes each frame (streaming truncates to stream_tail_start in refreshStreamNodes).
     perm_node_count: usize = 0,
     ticker_seconds: f32 = 0,
+    // Ambient road traffic (req_2056): three MUTABLE instance nodes (box / cyl16 /
+    // sphere — vehicle parts bucket by shape), their row buffers rebuilt each
+    // frame by stepTraffic as every vehicle advances along its baked route.
+    traffic_first_child: usize = 0,
+    traffic_box_buf: []f32 = &.{},
+    traffic_cyl_buf: []f32 = &.{},
+    traffic_sphere_buf: []f32 = &.{},
+    traffic_seconds: f32 = 0,
     last_ns: i64 = 0,
     frame: u32 = 0,
     // Content streaming (engaged when the world outgrows the detail radius):
@@ -3190,6 +3231,9 @@ pub const Runtime = struct {
         if (self.cars.len > 0) self.allocator.free(self.cars);
         for (self.ticker_buffers) |buf| self.allocator.free(buf);
         if (self.ticker_buffers.len > 0) self.allocator.free(self.ticker_buffers);
+        if (self.traffic_box_buf.len > 0) self.allocator.free(self.traffic_box_buf);
+        if (self.traffic_cyl_buf.len > 0) self.allocator.free(self.traffic_cyl_buf);
+        if (self.traffic_sphere_buf.len > 0) self.allocator.free(self.traffic_sphere_buf);
         if (self.live_buf.len > 0) self.allocator.free(self.live_buf); // LIVEHOST req_1798
         self.scene.deinit(self.allocator);
         self.* = undefined;
@@ -3822,6 +3866,23 @@ pub const Runtime = struct {
         const authored_dz = authored_eye.z - bounds.cz;
         const authored_yaw = std.math.atan2(authored_dx, authored_dz);
         var spawn = chooseSpawn(self.insts, self.inst_count, self.piece_count, self.stride, bounds);
+        // [traffic-diag req_2056] RJIT_TRAFFIC_SPAWN=1 drops the player onto the
+        // first baked vehicle's route so a headless shot frames moving traffic.
+        if (std.posix.getenv("RJIT_TRAFFIC_SPAWN") != null) {
+            if (self.scene.traffic) |tr| {
+                if (tr.vehicles.len > 0 and tr.vehicles[0].route.len >= 2) {
+                    const veh = tr.vehicles[0];
+                    const pose = sampleRoute(veh.route, @mod(veh.phase, @max(veh.length, 1)));
+                    spawn.x = pose.x;
+                    spawn.z = pose.z;
+                    // stand on the STREET (terrain) AT the car so the third-person
+                    // camera (behind + pitched down) frames it, not on whatever piece
+                    // chooseSpawn picked elsewhere.
+                    spawn.y = (sceneTerrainTopAt(self.scene.heightfields, spawn.x, spawn.z) orelse 0) + 1.0;
+                    log.print("[loader] RJIT_TRAFFIC_SPAWN: at vehicle 0 ({d:.1},{d:.1}) of {d}\n", .{ pose.x, pose.z, tr.vehicles.len });
+                }
+            }
+        }
         // Painted terrain is HEIGHTFIELDS, not instance rows — chooseSpawn's
         // flat-box top can sit UNDER a painted hill, burying the player below
         // the surface where no collider can catch a body (req_0523: "falling
@@ -4377,6 +4438,54 @@ pub const Runtime = struct {
                     .scene3d_instance_static = false,
                 });
             }
+        }
+        // Ambient road traffic (req_2056): three MUTABLE instance nodes — one per
+        // vehicle-part shape (box / cylinder16 / sphere). stepTraffic rebuilds their
+        // rows every frame as each vehicle advances along its baked route. Each buffer
+        // is sized to the TOTAL rows of that shape across all vehicles (every vehicle
+        // is drawn every frame). In the stable prefix like the tickers.
+        self.traffic_first_child = self.kid_list.items.len;
+        if (self.scene.traffic) |tr| {
+            var box_rows: usize = 0;
+            var cyl_rows: usize = 0;
+            var sph_rows: usize = 0;
+            for (tr.vehicles) |veh| {
+                var ri: usize = 0;
+                while (ri + TRAFFIC_PROTO_STRIDE <= veh.rows.len) : (ri += TRAFFIC_PROTO_STRIDE) {
+                    const shape = veh.rows[ri + 12];
+                    if (@abs(shape - SHAPE_CYLINDER16) < 0.5) {
+                        cyl_rows += 1;
+                    } else if (@abs(shape - SHAPE_SPHERE) < 0.5) {
+                        sph_rows += 1;
+                    } else {
+                        box_rows += 1;
+                    }
+                }
+            }
+            self.traffic_box_buf = try self.allocator.alloc(f32, box_rows * INSTANCE_STRIDE);
+            self.traffic_cyl_buf = try self.allocator.alloc(f32, cyl_rows * INSTANCE_STRIDE);
+            self.traffic_sphere_buf = try self.allocator.alloc(f32, sph_rows * INSTANCE_STRIDE);
+            @memset(self.traffic_box_buf, 0);
+            @memset(self.traffic_cyl_buf, 0);
+            @memset(self.traffic_sphere_buf, 0);
+            const buckets = [_]struct { buf: []f32, key: []const u8, verts: []const f32, vc: u32 }{
+                .{ .buf = self.traffic_box_buf, .key = "box", .verts = self.cube[0..], .vc = 36 },
+                .{ .buf = self.traffic_cyl_buf, .key = "cylinder16", .verts = self.cylinder16[0..], .vc = 16 * 12 },
+                .{ .buf = self.traffic_sphere_buf, .key = "sphere12x8", .verts = self.sphere[0..], .vc = 12 * 8 * 6 },
+            };
+            for (buckets) |bk| {
+                try self.kid_list.append(self.allocator, .{
+                    .scene3d_mesh = true,
+                    .scene3d_geom_key = bk.key,
+                    .scene3d_vertices = bk.verts,
+                    .scene3d_vert_count = bk.vc,
+                    .scene3d_instance_data = bk.buf,
+                    .scene3d_instance_count = 0,
+                    .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
+                    .scene3d_instance_static = false,
+                });
+            }
+            log.print("[loader] built {d} traffic vehicle(s) ({d} box + {d} cyl + {d} sphere part rows)\n", .{ tr.vehicles.len, box_rows, cyl_rows, sph_rows });
         }
         // LIVEHOST req_1798: reserve ONE mutable box-instance node for the editor's
         // live overlay (just-placed-but-unbaked pieces). Empty until applyPendingLive
@@ -5105,6 +5214,7 @@ pub const Runtime = struct {
         self.refreshNpcNodes();
         self.updateDynamicPropNodes();
         self.stepTickers(dt);
+        self.stepTraffic(dt); // req_2056: drive the ambient vehicles along their baked routes
         // DIRTYRECT: collapse the baked rows inside dirty footprints (once per edit) BEFORE
         // streaming rebuilds its nodes — so the bumped stream_erase_gen reaches THIS frame's
         // streamed static nodes and they re-upload the same frame (no one-frame stale flash).
@@ -5209,6 +5319,85 @@ pub const Runtime = struct {
                 }
             }
             self.kid_list.items[self.ticker_first_child + ti].scene3d_instance_count = count;
+        }
+    }
+
+    /// Ambient road traffic (req_2056): advance every vehicle along its baked
+    /// route (arc-length = speed*t + phase, wrapped to the loop length) and
+    /// rebuild the three mutable instance buffers at the sampled pose. Each part
+    /// prototype row is rotated about the agent by its heading and lifted onto the
+    /// terrain under it — the LED-ticker mutable-instance pattern, one bucket per
+    /// shape. No allocation in the hot path.
+    fn stepTraffic(self: *Runtime, dt: f32) void {
+        const tr = self.scene.traffic orelse return;
+        if (tr.vehicles.len == 0) return;
+        self.traffic_seconds += dt;
+        var box_n: u32 = 0;
+        var cyl_n: u32 = 0;
+        var sph_n: u32 = 0;
+        const box_cap: u32 = @intCast(self.traffic_box_buf.len / INSTANCE_STRIDE);
+        const cyl_cap: u32 = @intCast(self.traffic_cyl_buf.len / INSTANCE_STRIDE);
+        const sph_cap: u32 = @intCast(self.traffic_sphere_buf.len / INSTANCE_STRIDE);
+        for (tr.vehicles) |veh| {
+            if (veh.length <= 1.0e-4 or veh.route.len < 4) continue;
+            const s = @mod(self.traffic_seconds * veh.speed + veh.phase, veh.length);
+            const pose = sampleRoute(veh.route, s);
+            const ground = sceneTerrainTopAt(self.scene.heightfields, pose.x, pose.z) orelse 0;
+            var ri: usize = 0;
+            while (ri + TRAFFIC_PROTO_STRIDE <= veh.rows.len) : (ri += TRAFFIC_PROTO_STRIDE) {
+                const r = veh.rows[ri .. ri + TRAFFIC_PROTO_STRIDE];
+                const shape = r[12];
+                const local = rotateYLocal(.{ r[0], r[1], r[2] }, pose.heading_deg);
+                var buf: []f32 = undefined;
+                var slot: u32 = undefined;
+                if (@abs(shape - SHAPE_CYLINDER16) < 0.5) {
+                    if (cyl_n >= cyl_cap) continue;
+                    buf = self.traffic_cyl_buf;
+                    slot = cyl_n;
+                    cyl_n += 1;
+                } else if (@abs(shape - SHAPE_SPHERE) < 0.5) {
+                    if (sph_n >= sph_cap) continue;
+                    buf = self.traffic_sphere_buf;
+                    slot = sph_n;
+                    sph_n += 1;
+                } else {
+                    if (box_n >= box_cap) continue;
+                    buf = self.traffic_box_buf;
+                    slot = box_n;
+                    box_n += 1;
+                }
+                const o = @as(usize, slot) * INSTANCE_STRIDE;
+                buf[o + 0] = pose.x + local.x;
+                buf[o + 1] = ground + local.y;
+                buf[o + 2] = pose.z + local.z;
+                buf[o + 3] = r[3];
+                buf[o + 4] = r[4] + pose.heading_deg;
+                buf[o + 5] = r[5];
+                buf[o + 6] = r[6];
+                buf[o + 7] = r[7];
+                buf[o + 8] = r[8];
+                buf[o + 9] = r[9];
+                buf[o + 10] = r[10];
+                buf[o + 11] = r[11];
+            }
+        }
+        self.kid_list.items[self.traffic_first_child + 0].scene3d_instance_count = box_n;
+        self.kid_list.items[self.traffic_first_child + 1].scene3d_instance_count = cyl_n;
+        self.kid_list.items[self.traffic_first_child + 2].scene3d_instance_count = sph_n;
+        // [traffic-diag req_2056] RJIT_TRAFFICLOG=1 prints the emit counts + vehicle 0's
+        // first box row (world pos/scale/color) ONCE, mid-capture — proves the per-frame
+        // transform produces sane, colored, sized instances.
+        if (self.frame == 5 and std.posix.getenv("RJIT_TRAFFICLOG") != null) {
+            log.print("[traffic] frame5 emit box={d} cyl={d} sph={d}\n", .{ box_n, cyl_n, sph_n });
+            if (box_n > 0) {
+                const o: usize = 0;
+                log.print("[traffic] v0 box0 pos=({d:.1},{d:.1},{d:.1}) scale=({d:.2},{d:.2},{d:.2}) color=({d:.2},{d:.2},{d:.2}) ry={d:.0}\n", .{
+                    self.traffic_box_buf[o + 0], self.traffic_box_buf[o + 1], self.traffic_box_buf[o + 2],
+                    self.traffic_box_buf[o + 6], self.traffic_box_buf[o + 7], self.traffic_box_buf[o + 8],
+                    self.traffic_box_buf[o + 9], self.traffic_box_buf[o + 10], self.traffic_box_buf[o + 11],
+                    self.traffic_box_buf[o + 4],
+                });
+            }
         }
     }
 

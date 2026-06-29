@@ -33,6 +33,7 @@ pub const Error = gamefile.Error || error{
     BadWater,
     BadStatsConfig,
     BadTicker,
+    BadTraffic,
 };
 
 const COLLIDERS_VERSION: u32 = 1;
@@ -50,6 +51,10 @@ const TICKER_VERSION: u32 = 1;
 /// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
 /// corrupt lump can't allocate wild. (req_0893 #3)
 const MAX_TICKER_COLS: u32 = 1024;
+const TRAFFIC_VERSION: u32 = 1;
+/// 13 floats per prototype instance row: pos3, rot3, scale3, color3, shape.
+/// Mirrors compile/worldTraffic.ts TRAFFIC_ROW_STRIDE. (req_2056)
+const TRAFFIC_ROW_STRIDE: usize = 13;
 /// One local render part: px,py,pz, rx,ry,rz, sx,sy,sz, r,g,b, shapeId —
 /// the INSTANCES row field order, anchor-relative and yaw-unfolded.
 pub const DYNAMIC_PART_FLOATS: usize = 13;
@@ -656,6 +661,35 @@ pub const Tickers = struct {
     }
 };
 
+/// One ambient-traffic vehicle (req_2056) — wire-format twin of
+/// compile/worldTraffic.ts TrafficVehicleRecord. `rows` is the buildVehicle
+/// prototype as local-space instance rows (TRAFFIC_ROW_STRIDE each); the loader
+/// samples `route` at arc-length (speed*t + phase) mod `length` per frame and
+/// rebuilds the vehicle's instance rows at the pose.
+pub const TrafficVehicle = struct {
+    rows: []f32,
+    /// route corner points, x,z pairs (world space)
+    route: []f32,
+    speed: f32,
+    phase: f32,
+    /// total route arc length (m), precomputed at decode
+    length: f32,
+
+    pub fn deinit(self: TrafficVehicle, allocator: std.mem.Allocator) void {
+        allocator.free(self.rows);
+        allocator.free(self.route);
+    }
+};
+
+pub const Traffic = struct {
+    vehicles: []TrafficVehicle,
+
+    pub fn deinit(self: Traffic, allocator: std.mem.Allocator) void {
+        for (self.vehicles) |v| v.deinit(allocator);
+        allocator.free(self.vehicles);
+    }
+};
+
 pub const Scene = struct {
     width: u32,
     height: u32,
@@ -731,6 +765,9 @@ pub const Scene = struct {
     /// LED ticker boards (req_0893 #3) — the loader scrolls + draws the lit LEDs
     /// per frame. null in pre-lump bakes / maps with no tickers.
     tickers: ?Tickers,
+    /// Ambient road traffic (req_2056) — vehicles the loader drives on baked
+    /// looping routes. null in pre-lump bakes / maps with no traffic.
+    traffic: ?Traffic,
     /// Foliage RECIPE (FOLIAGEFORMULA, req_1591) — the painted grass/bush cells the
     /// loader expands blades from at load (framework/world/foliage.zig), instead of
     /// ~1M baked rows. null in pre-lump bakes / maps with no painted foliage.
@@ -764,6 +801,7 @@ pub const Scene = struct {
         if (self.mesh_props) |mp| mp.deinit(allocator);
         if (self.water) |w| w.deinit(allocator);
         if (self.tickers) |t| t.deinit(allocator);
+        if (self.traffic) |t| t.deinit(allocator);
         if (self.flora) |fl| fl.deinit(allocator);
     }
 };
@@ -1846,6 +1884,58 @@ fn decodeTickers(allocator: std.mem.Allocator, data: []const u8) Error!Tickers {
     return .{ .boards = try boards.toOwnedSlice(allocator) };
 }
 
+/// Decode the TRAFFIC lump (req_2056) — wire-format twin of
+/// compile/worldTraffic.ts encodeTraffic. Per vehicle: f32 speed, f32 phase,
+/// u32 pointCount + f32[pointCount*2] route, u32 rowCount + f32[rowCount*13]
+/// prototype rows. Route length is precomputed here so the per-frame sampler is
+/// allocation-free.
+fn decodeTraffic(allocator: std.mem.Allocator, data: []const u8) Error!Traffic {
+    if (data.len < 8) return Error.BadTraffic;
+    if (std.mem.readInt(u32, data[0..4], .little) != TRAFFIC_VERSION) return Error.BadTraffic;
+    const count = std.mem.readInt(u32, data[4..8], .little);
+    var at: usize = 8;
+
+    var vehicles = try std.ArrayList(TrafficVehicle).initCapacity(allocator, count);
+    errdefer {
+        for (vehicles.items) |v| v.deinit(allocator);
+        vehicles.deinit(allocator);
+    }
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        if (at + 4 * 4 > data.len) return Error.BadTraffic; // speed, phase, pointCount(+rowCount later)
+        const speed = readF32(data, at);
+        const phase = readF32(data, at + 4);
+        at += 8;
+        const point_count = std.mem.readInt(u32, data[at..][0..4], .little);
+        at += 4;
+        const route_floats: usize = @as(usize, point_count) * 2;
+        if (at + route_floats * 4 > data.len) return Error.BadTraffic;
+        const route = try allocator.alloc(f32, route_floats);
+        errdefer allocator.free(route);
+        for (route, 0..) |*r, k| r.* = readF32(data, at + k * 4);
+        at += route_floats * 4;
+        if (at + 4 > data.len) return Error.BadTraffic;
+        const row_count = std.mem.readInt(u32, data[at..][0..4], .little);
+        at += 4;
+        const row_floats: usize = @as(usize, row_count) * TRAFFIC_ROW_STRIDE;
+        if (at + row_floats * 4 > data.len) return Error.BadTraffic;
+        const rows = try allocator.alloc(f32, row_floats);
+        errdefer allocator.free(rows);
+        for (rows, 0..) |*r, k| r.* = readF32(data, at + k * 4);
+        at += row_floats * 4;
+        // arc length over the route polyline (x,z pairs)
+        var length: f32 = 0;
+        var p: usize = 2;
+        while (p + 1 < route.len) : (p += 2) {
+            const dx = route[p] - route[p - 2];
+            const dz = route[p + 1] - route[p - 1];
+            length += @sqrt(dx * dx + dz * dz);
+        }
+        try vehicles.append(allocator, .{ .rows = rows, .route = route, .speed = speed, .phase = phase, .length = length });
+    }
+    return .{ .vehicles = try vehicles.toOwnedSlice(allocator) };
+}
+
 /// Decode the DOORS lump (DOORS-0611) — wire-format twin of
 /// compile/worldDoors.ts encodeDoors.
 fn decodeDoors(allocator: std.mem.Allocator, data: []const u8) Error!Doors {
@@ -2168,6 +2258,12 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     else
         null;
     errdefer if (tickers) |t| t.deinit(allocator);
+    // Ambient road traffic (req_2056) — optional; absent means no moving vehicles.
+    const traffic: ?Traffic = if (mapfile.findLump(map_lumps, mapfile.LumpType.traffic)) |lump|
+        try decodeTraffic(allocator, lump.data)
+    else
+        null;
+    errdefer if (traffic) |t| t.deinit(allocator);
 
     // Decal image payloads (DECALIMG-0610, req_0592): every manifest asset
     // tagged decal-image is read from the content store once, here — the
@@ -2217,6 +2313,7 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .mesh_props = mesh_props,
         .water = water,
         .tickers = tickers,
+        .traffic = traffic,
         .flora = flora,
     };
 }
