@@ -2863,7 +2863,7 @@ const BakedRange = struct { first: u32, count: u32 };
 // DIRTYRECT: a baked mesh-prop's world center + the node range it occupies, so an
 // erase rect can hide the ones inside it (the move case the position-keyed RESKIN
 // coincident-hide misses, because the live ref has moved off the baked spot).
-const BakedMeshPos = struct { x: f32, y: f32, z: f32, range: BakedRange };
+const BakedMeshPos = struct { x: f32, y: f32, z: f32, range: BakedRange, wall: bool = false };
 // DIRTYRECT: a collapsed BOX instance row — its buffer + row + the original scale,
 // so a changed erase-rect set can un-collapse it before re-evaluating.
 const ErasedRow = struct { buf: []f32, row: usize, sx: f32, sy: f32, sz: f32 };
@@ -3539,6 +3539,9 @@ pub const Runtime = struct {
         const pend = pendingWallHideFor(self.node_id);
         const want = if (pend) |p| p.on else false;
         const gen = if (pend) |p| p.gen else 0;
+        // Mirror the state for applyLiveMeshProps (runs later this frame) so it hides the
+        // cooked-wall MESH PROPS too — those aren't instance rows, so they ride that path.
+        self.hide_walls = want;
         if (gen == self.applied_wall_gen and self.applied_erase_gen == self.wall_seen_erase_gen) return;
         self.applied_wall_gen = gen;
         self.wall_seen_erase_gen = self.applied_erase_gen;
@@ -3663,6 +3666,16 @@ pub const Runtime = struct {
                         self.hidden_baked.append(self.allocator, bm.range) catch {};
                     }
                 }
+            }
+        }
+        // WALLHIDE req_2058: hide every baked cooked-wall mesh prop while "disable walls" is on
+        // (the box walls collapse via applyWallHide; these are mesh-prop nodes, hidden by range).
+        // Recomputed each frame and restored by the hidden_baked un-hide above, exactly like erase.
+        if (self.hide_walls) {
+            for (self.baked_mesh_list.items) |bm| {
+                if (!bm.wall) continue;
+                self.setBakedRangeVisible(bm.range, false);
+                self.hidden_baked.append(self.allocator, bm.range) catch {};
             }
         }
         self.appendLiveSkinBoxes();
@@ -4062,7 +4075,8 @@ pub const Runtime = struct {
                         const rng: BakedRange = .{ .first = @intCast(inst_first), .count = @intCast(cnt) };
                         self.baked_by_pos.put(self.allocator, meshPosKey(mesh_index, inst.x, inst.z, inst.yaw_degrees), rng) catch {};
                         // DIRTYRECT: also index by raw position so an erase rect can hide a MOVED prop.
-                        self.baked_mesh_list.append(self.allocator, .{ .x = inst.x, .y = inst.y, .z = inst.z, .range = rng }) catch {};
+                        // WALLHIDE req_2058: carry the wall flag so hide-walls hides cooked-wall props too.
+                        self.baked_mesh_list.append(self.allocator, .{ .x = inst.x, .y = inst.y, .z = inst.z, .range = rng, .wall = inst.wall }) catch {};
                     }
                 }
                 if (mesh.slots.len == 0) {
@@ -4111,7 +4125,11 @@ pub const Runtime = struct {
                 }
             }
             if (mp.instances.len > 0) {
-                log.print("[loader] built {d} imported prop mesh instance(s) from {d} mesh asset(s)\n", .{ mp.instances.len, mp.meshes.len });
+                var wall_props: usize = 0;
+                for (mp.instances) |inst| {
+                    if (inst.wall) wall_props += 1;
+                }
+                log.print("[loader] built {d} imported prop mesh instance(s) from {d} mesh asset(s) ({d} wall, hide-walls aware)\n", .{ mp.instances.len, mp.meshes.len, wall_props });
             }
         }
 

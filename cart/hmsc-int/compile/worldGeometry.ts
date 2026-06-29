@@ -244,6 +244,10 @@ export type ImportedMeshPropInstance = {
   yawDegrees: number;
   /** Per-mesh-slot material refs, aligned to ImportedMeshPropMesh.slots. */
   slotMaterials?: number[];
+  /** WALLHIDE req_2058: this placement is a WALL (a Studio model cooked from a wall
+   *  seed — buildPlacement.pieceKind === 'wall'). The editor build pane's hide-walls
+   *  hides these mesh-prop nodes too, the same as the built-in box walls. */
+  wall?: boolean;
 };
 
 export type MeshPropSlotRange = { start: number; count: number };
@@ -267,7 +271,7 @@ function createImportedMeshPropSink(): ImportedMeshPropSink {
   return { meshes: [], instances: [] };
 }
 
-function collectImportedMeshProp(sink: ImportedMeshPropSink, prop: WorldProp, mesh: ImportedMeshPropMesh, slotMaterials?: number[]): void {
+function collectImportedMeshProp(sink: ImportedMeshPropSink, prop: WorldProp, mesh: ImportedMeshPropMesh, slotMaterials?: number[], wall?: boolean): void {
   let slot = sink.meshes.findIndex((m) => m.key === mesh.key);
   if (slot < 0) {
     slot = sink.meshes.length;
@@ -280,6 +284,7 @@ function collectImportedMeshProp(sink: ImportedMeshPropSink, prop: WorldProp, me
     z: prop.z,
     yawDegrees: prop.yawDegrees ?? 0,
     ...(slotMaterials?.length ? { slotMaterials } : {}),
+    ...(wall ? { wall: true } : {}),
   });
 }
 
@@ -577,11 +582,20 @@ function cookedMeshSlotRanges(asset: CookedAsset): MeshPropSlotRange[] {
   return ranges;
 }
 
+/** WALLHIDE req_2058: does this prop kind PLACE as a wall? A Studio model cooked
+ *  from a wall seed carries buildPlacement.pieceKind === 'wall' (it stays kind:'prop'
+ *  on the mesh substrate). Marks its MESH_PROPS instance so the editor's hide-walls
+ *  hides it too — the cooked-wall twin of pushPlacedPieces' `def.kind === 'wall'`. */
+function propPlacesAsWall(kind: string): boolean {
+  try { return propKindDefinition(kind as any).buildPlacement?.pieceKind === 'wall'; } catch { return false; }
+}
+
 function pushPropGeometry(b: Build, prop: WorldProp): number {
   b.interact.collect(prop);
+  const isWall = propPlacesAsWall(prop.kind);
   if (isImportedPropKind(prop.kind)) {
     const mesh = importedPropMesh(prop.kind);
-    if (mesh) collectImportedMeshProp(b.meshProps, prop, mesh);
+    if (mesh) collectImportedMeshProp(b.meshProps, prop, mesh, undefined, isWall);
     return 0;
   }
   // Studio-cooked props (req_1134): a real baked mesh living in the cooked-asset
@@ -609,7 +623,10 @@ function pushPropGeometry(b: Build, prop: WorldProp): number {
         if (opaqueCount > 0) slotMaterials.push(0);
         if (leafGlass) slotMaterials.push(internTranslucent(b, GLASS_OPACITY));
       }
-      collectImportedMeshProp(b.meshProps, prop, mesh, slotMaterials.length ? slotMaterials : undefined);
+      // WALLHIDE req_2058: prefer the asset's OWN descriptor (always loaded here via
+      // cookedAssetById) over the kind registry, which may not be populated in the bake.
+      const cookedWall = isWall || asset?.descriptor.buildPlacement?.pieceKind === 'wall';
+      collectImportedMeshProp(b.meshProps, prop, mesh, slotMaterials.length ? slotMaterials : undefined, cookedWall);
     }
     return 0;
   }
@@ -1349,7 +1366,10 @@ export function encodeFlora(state: GameState, floors: readonly ChunkFloor[]): Ui
 // v8cli bake never needs an image-codec door (it just passes the bytes through). v3
 // shipped raw RGBA decoded at BAKE time, which silently failed in v8cli → grey props.
 // The loader still reads v1/v2 (legacy) + v3 (raw RGBA) + v4 (PNG) + v5 slots.
-export const MESH_PROPS_LUMP_VERSION = 7;
+// v8 (req_2058): each instance carries a u32 WALL flag (after the 20-byte header,
+// before slotMaterials) so the editor build pane's hide-walls hides cooked-wall
+// mesh props too. Older versions decode with wall=false.
+export const MESH_PROPS_LUMP_VERSION = 8;
 
 /** Encode imported / cooked prop meshes:
  *  u32 version | u32 meshCount | u32 instanceCount
@@ -1360,7 +1380,8 @@ export const MESH_PROPS_LUMP_VERSION = 7;
  *          u32 slotCount | { u32 startVertex | u32 vertexCount }[slotCount] (v5) |
  *          u32 hasDoor | if door: u32 leafSlot | f32 reach | u32 vehicle | u32 startOpen (v6, req_1864) |
  *          u32 colliderBoxCount | { f32 minX,minY,minZ,maxX,maxY,maxZ }[count] (v7, req_1900)
- *  instance[]: u32 meshIndex | f32 x,y,z,yawDegrees | u32 slotMaterial[mesh.slotCount] (v5)
+ *  instance[]: u32 meshIndex | f32 x,y,z,yawDegrees | u32 wall (v8) |
+ *              u32 slotMaterial[mesh.slotCount] (v5)
  */
 export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
   const meshes = sink.meshes;
@@ -1374,7 +1395,7 @@ export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
     bytes += 4 + keyBytes[i]!.byteLength + 36 + mesh.vertices.byteLength + 4 + (png ? png.byteLength : 0) + 4 + (mesh.slots?.length ?? 0) * 8 + 4 + (mesh.door ? 16 : 0) + 4 + (mesh.collisionBoxes?.length ?? 0) * 24;
   }
   for (const inst of sink.instances) {
-    bytes += 20 + (meshes[inst.mesh]?.slots?.length ?? 0) * 4;
+    bytes += 24 + (meshes[inst.mesh]?.slots?.length ?? 0) * 4; // 20 header + 4 wall (v8)
   }
   const out = new Uint8Array(bytes);
   const view = new DataView(out.buffer);
@@ -1441,6 +1462,7 @@ export function encodeMeshProps(sink: ImportedMeshPropSink): Uint8Array {
     view.setFloat32(at + 12, inst.z, true);
     view.setFloat32(at + 16, inst.yawDegrees, true);
     at += 20;
+    view.setUint32(at, inst.wall ? 1 : 0, true); at += 4; // v8 (req_2058): wall flag
     const slotCount = meshes[inst.mesh]?.slots?.length ?? 0;
     for (let i = 0; i < slotCount; i += 1) {
       view.setUint32(at, inst.slotMaterials?.[i] ?? 0, true);

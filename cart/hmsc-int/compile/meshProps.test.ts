@@ -73,21 +73,23 @@ function decode(bytes: Uint8Array): { version: number; meshes: DecodedMesh[]; in
     }
     meshes.push({ key, pngLen, png, slots, door, boxes });
   }
-  const instances: { mesh: number; slotMaterials: number[] }[] = [];
+  const instances: { mesh: number; wall: boolean; slotMaterials: number[] }[] = [];
   for (let i = 0; i < instanceCount; i += 1) {
     const mesh = view.getUint32(at, true);
     at += 20;
+    // v8 (req_2058): per-instance wall flag, after the 20-byte header, before slotMaterials.
+    const wall = view.getUint32(at, true) !== 0; at += 4;
     const slotMaterials: number[] = [];
     for (let s = 0; s < (meshes[mesh]?.slots.length ?? 0); s += 1) {
       slotMaterials.push(view.getUint32(at, true));
       at += 4;
     }
-    instances.push({ mesh, slotMaterials });
+    instances.push({ mesh, wall, slotMaterials });
   }
   return { version, meshes, instances };
 }
 
-test('MESH_PROPS v7: a cooked prop ships paint PNG bytes, slot material refs, door meta, and authored collider boxes (req_1544/req_1573/req_1864/req_1900)', () => {
+test('MESH_PROPS v8: a cooked prop ships paint PNG bytes, slot material refs, door meta, authored collider boxes, and the per-instance wall flag (req_1544/req_1573/req_1864/req_1900/req_2058)', () => {
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 250, 251]); // PNG sig + payload
   const sink: ImportedMeshPropSink = {
     meshes: [
@@ -99,11 +101,12 @@ test('MESH_PROPS v7: a cooked prop ships paint PNG bytes, slot material refs, do
         { minX: 0.6, minY: 0, minZ: -0.15, maxX: 1.5, maxY: 3, maxZ: 0.15 },
       ]),
     ] as any,
-    instances: [{ mesh: 0, x: 1, y: 2, z: 3, yawDegrees: 90, slotMaterials: [7] }, { mesh: 1, x: 0, y: 0, z: 0, yawDegrees: 0 }],
+    // inst 0: a textured prop (not a wall); inst 1: a WALL (req_2058 — cooked from a wall seed).
+    instances: [{ mesh: 0, x: 1, y: 2, z: 3, yawDegrees: 90, slotMaterials: [7] }, { mesh: 1, x: 0, y: 0, z: 0, yawDegrees: 0, wall: true }],
   };
   const out = decode(encodeMeshProps(sink));
-  assertEqual(out.version, 7, 'lump is v7');
-  assertEqual(MESH_PROPS_LUMP_VERSION, 7, 'the exported version constant is 7');
+  assertEqual(out.version, 8, 'lump is v8');
+  assertEqual(MESH_PROPS_LUMP_VERSION, 8, 'the exported version constant is 8');
   assertEqual(out.meshes.length, 3, 'all meshes encoded');
   // the painted mesh carries the EXACT PNG bytes (no decode, no resize — passthrough).
   assertEqual(out.meshes[0].pngLen, png.length, 'painted mesh png length matches');
@@ -111,6 +114,9 @@ test('MESH_PROPS v7: a cooked prop ships paint PNG bytes, slot material refs, do
   assertEqual(out.meshes[0].slots[0].start, 6, 'slot start carried');
   assertEqual(out.meshes[0].slots[0].count, 6, 'slot count carried');
   assertEqual(out.instances[0].slotMaterials[0], 7, 'slot material ref carried per instance');
+  // WALLHIDE req_2058: the per-instance wall flag round-trips (drives the editor's hide-walls).
+  assertEqual(out.instances[0].wall, false, 'a non-wall instance carries wall=false');
+  assertEqual(out.instances[1].wall, true, 'a wall instance carries wall=true');
   // non-door meshes carry NO door block.
   assertEqual(out.meshes[0].door, null, 'painted mesh has no door');
   assertEqual(out.meshes[1].pngLen, 0, 'untextured mesh ships pngLen 0');

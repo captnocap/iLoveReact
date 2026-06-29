@@ -44,7 +44,7 @@ const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
-const MESH_PROPS_VERSION: u32 = 7;
+const MESH_PROPS_VERSION: u32 = 8;
 const WATER_VERSION: u32 = 2;
 const TICKER_VERSION: u32 = 1;
 /// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
@@ -197,6 +197,9 @@ pub const MeshPropInstance = struct {
     z: f32,
     yaw_degrees: f32,
     slot_materials: []u32 = &.{},
+    /// WALLHIDE req_2058: this placement is a wall (cooked from a wall seed). The
+    /// editor build pane's hide-walls hides its mesh-prop node. False in v<8 bakes.
+    wall: bool = false,
 
     pub fn deinit(self: MeshPropInstance, allocator: std.mem.Allocator) void {
         if (self.slot_materials.len > 0) allocator.free(self.slot_materials);
@@ -1177,6 +1180,13 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
             .slot_materials = slot_materials,
         };
         at += 20;
+        // WALLHIDE req_2058 (MESH_PROPS v8): a per-instance wall flag, after the
+        // 20-byte header, before slotMaterials. Older bakes have no flag (wall=false).
+        if (version >= 8) {
+            if (at + 4 > data.len) return Error.BadMeshProps;
+            instances[ii].wall = std.mem.readInt(u32, data[at..][0..4], .little) != 0;
+            at += 4;
+        }
         if (version >= 5) {
             if (at + slot_count * 4 > data.len) return Error.BadMeshProps;
             var si: usize = 0;

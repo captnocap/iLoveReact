@@ -164,9 +164,27 @@ export function LoaderIsoView(props: {
   const rerenderRef = useRef(rerender);
   rerenderRef.current = rerender;
 
+  const hideWallsRef = useRef(hideWalls);
+  hideWallsRef.current = hideWalls;
+
+  // WALLHIDE req_2058/2061: a piece is a wall if it PLACES as one — built-in wall pieces
+  // AND Studio models cooked from a wall seed (catalog.family resolves both: a cooked
+  // wall reports family 'wall' though its raw kind is 'prop').
+  const isWallPieceId = useCallback((pieceId: string): boolean => {
+    try { return GAME_BUILD.catalog.family(pieceId) === 'wall'; } catch { return false; }
+  }, []);
+
   // ── live refs (the Pressable stale-closure discipline) ─────────────────────────
   const piecesRef = useRef(props.pieces ?? []);
   piecesRef.current = props.pieces ?? [];
+  // WALLHIDE req_2061: the pieces a click/snap can HIT. While walls are hidden they must
+  // also be UN-pickable so a click passes through to the item inside (a hidden wall that
+  // still blocked selection was the whole complaint). Ref-based so the Pressable callbacks
+  // read the live set without re-subscribing.
+  const pickPieces = useCallback((): readonly PlacedBuildPiece[] => {
+    const all = piecesRef.current;
+    return hideWallsRef.current ? all.filter((p) => !isWallPieceId(p.pieceId)) : all;
+  }, [isWallPieceId]);
   const buildingsRef = useRef(props.buildings);
   buildingsRef.current = props.buildings;
   const onCommitRef = useRef(props.onCommit);
@@ -219,6 +237,22 @@ export function LoaderIsoView(props: {
   // Arming a piece (from the editor-rail catalog now, req_1888) clears any selection —
   // the behaviour the rail's onArm used to do inline before it moved off the map.
   useEffect(() => { if (armed && selectedIdsRef.current.size) setSelectedIds(new Set()); }, [armed]);
+  // WALLHIDE req_2061: when walls are hidden, drop any SELECTED wall — its render + outline
+  // are gone and it's now un-pickable, so it must leave the selection (no stranded blue
+  // outline of a wall you can't see, no accidental move/delete of it).
+  useEffect(() => {
+    if (!hideWalls) return;
+    setSelectedIds((prev) => {
+      if (!prev.size) return prev;
+      const next = new Set<string>();
+      for (const id of prev) {
+        const p = piecesRef.current.find((q) => q.id === id);
+        if (p && isWallPieceId(p.pieceId)) continue; // drop the hidden wall
+        next.add(id);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [hideWalls, isWallPieceId]);
   const [ghostYaw, setGhostYaw] = useState(0);
   const ghostYawRef = useRef(ghostYaw);
   ghostYawRef.current = ghostYaw;
@@ -345,7 +379,9 @@ export function LoaderIsoView(props: {
         : { widthMeters: 1, heightMeters: 3, depthMeters: 1 };
     return resolveSnapTarget({
       ray: stage.pieceRay(sx, sy, rectRef.current),
-      pieces: piecesRef.current,
+      // WALLHIDE req_2061: a hidden wall is non-pickable, so it must not catch the
+      // placement snap either — you snap to the interior surfaces you can see.
+      pieces: pickPieces(),
       groundTopAt: placeGroundAt,
       snap: snapMode,
       size,
@@ -355,7 +391,7 @@ export function LoaderIsoView(props: {
       ...(prefabAnchor ? { anchorLocal: { x: prefabAnchor.x, z: prefabAnchor.z } } : {}),
       tuning: ISO_SNAP_TUNING,
     });
-  }, [stage, placeGroundAt]);
+  }, [stage, placeGroundAt, pickPieces]);
   // The per-frame hover poll reads the latest resolveAt through a ref, so the pan loop
   // (which subscribes once) never snaps against a stale terrain/world.
   const resolveAtRef = useRef(resolveAt);
@@ -403,16 +439,16 @@ export function LoaderIsoView(props: {
   // ── select: raycast the standing pieces. `whole` (double-click) selects the
   // connected object; otherwise the single hit piece. Empty space clears.
   const selectPieceAt = useCallback((sx: number, sy: number, whole: boolean) => {
-    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), piecesRef.current, ISO_SNAP_TUNING.reachMeters);
+    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), pickPieces(), ISO_SNAP_TUNING.reachMeters);
     if (!hit) { setSelectedIds(new Set()); return; }
     setSelectedIds(whole ? GAME_BUILD.placed.connected(hit.piece.id, piecesRef.current) : new Set([hit.piece.id]));
-  }, [stage]);
+  }, [stage, pickPieces]);
 
   // ── multi-select (Ctrl-click): toggle the hit piece in/out of the running
   // selection instead of replacing it. Ctrl-click on empty space keeps the
   // selection (a missed click shouldn't wipe a multi-select in progress).
   const togglePieceAt = useCallback((sx: number, sy: number) => {
-    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), piecesRef.current, ISO_SNAP_TUNING.reachMeters);
+    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), pickPieces(), ISO_SNAP_TUNING.reachMeters);
     if (!hit) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -420,7 +456,7 @@ export function LoaderIsoView(props: {
       else next.add(hit.piece.id);
       return next;
     });
-  }, [stage]);
+  }, [stage, pickPieces]);
 
   // ── delete: pieceRemoved per loose piece, buildingRemoved per whole instance ─────
   const deleteSelected = useCallback(() => {
@@ -814,8 +850,11 @@ export function LoaderIsoView(props: {
     // WALLHIDE req_2053: while "disable walls" is on, drop wall-kind pieces from the LIVE overlay
     // too (the baked ones are collapsed by the loader door) so a just-placed/moved wall hides as
     // well — keeping the live and baked views consistent under the toggle.
+    // A piece is a wall if it PLACES as one — built-in wall pieces AND Studio models
+    // cooked from a wall seed (req_2058), which report family 'wall' though their raw
+    // kind is 'prop'. catalog.family resolves both (catalogPieceFamily).
     const isWallPiece = (p: PlacedBuildPiece): boolean => {
-      try { return GAME_BUILD.catalog.get(p.pieceId).kind === 'wall'; } catch { return false; }
+      try { return GAME_BUILD.catalog.family(p.pieceId) === 'wall'; } catch { return false; }
     };
     const livePending = hideWalls ? pending.filter((p) => !isWallPiece(p)) : pending;
     const liveCurrent = hideWalls ? current.filter((p) => !isWallPiece(p)) : current;
@@ -1049,6 +1088,7 @@ export function LoaderIsoView(props: {
     const dx = moveDelta?.dx ?? 0, dz = moveDelta?.dz ?? 0;
     for (const pc of piecesRef.current) {
       if (!selectedIds.has(pc.id)) continue;
+      if (hideWalls && isWallPieceId(pc.pieceId)) continue; // WALLHIDE req_2061: no outline for a hidden wall
       // req_1902: VISUAL bounds — a prop exported off the ground (a walk-under shape) has
       // its mesh band lifted, so the outline wraps the real mesh instead of a ground box.
       const b = GAME_BUILD.placed.visualBounds(pc);
