@@ -220,27 +220,50 @@ export function traceGoalTour(grid: NavGrid, start: [number, number], goals: rea
   const closed = homeLeg !== null;
   if (homeLeg) append(homeLeg);
 
-  // Collapse straight runs to corners; a closed tour already ends at the start
-  // cell (== points[0]), so the loop seam is exact.
-  const corners = collapseCollinear(cellPath);
-  const points: [number, number][] = corners.map(([x, z]) => [ox + (x + 0.5) * cellM, oz + (z + 0.5) * cellM]);
+  // Snap every cell onto its LANE CENTERLINE (perpendicular to flow) so the car
+  // drives down the center of the 3-wide trio, not wherever the BFS wandered
+  // across its width. Every tile of a trio shares the trio's flow, so they all
+  // snap to the same line; flow-neutral cells (junctions / crosswalks) keep their
+  // own center. Then simplify the world polyline to its corners — a closed tour
+  // ends at the start cell (== points[0]), so the loop seam stays exact.
+  const sameFlow = (x: number, z: number, f: Step): boolean => {
+    const k = at(x, z);
+    const g = k >= 0 ? flow[k] : null;
+    return !!g && g.dx === f.dx && g.dz === f.dz;
+  };
+  const laneCenter = (x: number, z: number): [number, number] => {
+    const k = at(x, z);
+    const f = k >= 0 ? flow[k] : null;
+    if (!f) return [ox + (x + 0.5) * cellM, oz + (z + 0.5) * cellM];
+    const px = -f.dz; // unit perpendicular to the flow direction
+    const pz = f.dx;
+    let lo = 0;
+    let hi = 0;
+    while (sameFlow(x + (lo - 1) * px, z + (lo - 1) * pz, f)) lo -= 1;
+    while (sameFlow(x + (hi + 1) * px, z + (hi + 1) * pz, f)) hi += 1;
+    const c = (lo + hi) / 2; // perpendicular offset to the trio's center, in cells
+    return [ox + (x + 0.5 + c * px) * cellM, oz + (z + 0.5 + c * pz) * cellM];
+  };
+  const points = simplifyPolyline(cellPath.map(([x, z]) => laneCenter(x, z)));
   let length = 0;
   for (let i = 1; i < points.length; i++) length += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
   return { points, closed, length };
 }
 
-/** Drop interior cells that lie on a straight run — keep only the turn corners. */
-function collapseCollinear(cells: readonly [number, number][]): [number, number][] {
-  if (cells.length <= 2) return cells.slice();
-  const out: [number, number][] = [cells[0]];
-  for (let i = 1; i < cells.length - 1; i++) {
+/** Collapse a world polyline to its corners — drop points collinear with their
+ *  kept neighbour (which also removes the duplicates lane-center snapping makes
+ *  out of a straight run). */
+function simplifyPolyline(pts: readonly [number, number][]): [number, number][] {
+  if (pts.length <= 2) return pts.slice();
+  const out: [number, number][] = [pts[0]];
+  for (let i = 1; i < pts.length - 1; i++) {
     const [ax, az] = out[out.length - 1];
-    const [bx, bz] = cells[i];
-    const [cx, cz] = cells[i + 1];
-    const turned = (bx - ax) * (cz - bz) - (bz - az) * (cx - bx);
-    if (turned !== 0) out.push(cells[i]);
+    const [bx, bz] = pts[i];
+    const [cx, cz] = pts[i + 1];
+    const cross = (bx - ax) * (cz - bz) - (bz - az) * (cx - bx);
+    if (Math.abs(cross) > 1e-4) out.push(pts[i]);
   }
-  out.push(cells[cells.length - 1]);
+  out.push(pts[pts.length - 1]);
   return out;
 }
 
