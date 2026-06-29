@@ -112,6 +112,12 @@ export function LoaderIsoView(props: {
   centerX?: number;
   centerZ?: number;
   reloadToken?: number; // bump to reload the gamefile in place (after a re-bake)
+  // EDITBASELINE (req_2049): false through the boot grace window while the world DATA loads
+  // (`pieces` goes []→populated), true once it has settled. The live-erase baseline tracks
+  // `pieces` while this is false (the loaded file IS the current state at boot), then FREEZES
+  // when it flips true — so a later delete diffs against a real baked set, not the empty mount
+  // snapshot. Without it the baseline stuck at the mount-time [] and deletes never erased.
+  baselineReady?: boolean;
   // ── editing (req_1792): the SAME inputs index.tsx feeds IsoAuthor ──────────────
   state?: GameState;                                  // world under the pieces (terrain sampler)
   pieces?: readonly PlacedBuildPiece[];               // the standing pieces (pick/select/move target)
@@ -242,6 +248,17 @@ export function LoaderIsoView(props: {
   // The last erase-rect signature pushed to the host — so an unchanged set never re-bumps the
   // host generation (which re-stages the static world). Reset on reload to force the clear-push.
   const lastEraseSigRef = useRef<string>('');
+
+  // Re-baseline the three "what the loaded file holds" refs to a piece set that IS the baked
+  // truth — called both after a reload (the fresh bake is the new truth) and through the boot
+  // grace window (the loaded file == current state until the first edit). Mirrors the lazy
+  // init above; the rule-of-two helper so the two callers never drift.
+  const rebaselineBaked = useCallback((pieces: readonly PlacedBuildPiece[]) => {
+    bakedIdsRef.current = new Set(pieces.map((p) => p.id));
+    bakedSigRef.current = new Map(pieces.map((p) => [p.id, pieceSkinSig(p)] as const));
+    bakedRectRef.current = new Map(pieces.map((p) => [p.id, { sig: pieceXformSig(p), rect: pieceEraseRect(p) }] as const));
+    lastEraseSigRef.current = '';
+  }, []);
 
   // Mirror the selection up so the cart's PropertiesPanel/FacePainter light up — the
   // SAME onSelectionChange contract IsoAuthor reports through.
@@ -672,16 +689,24 @@ export function LoaderIsoView(props: {
     reloadSeenRef.current = props.reloadToken;
     const nodeId = Number(loaderRef.current?.id ?? 0);
     if (nodeId && typeof g.__compiled_world_unmount === 'function') g.__compiled_world_unmount(nodeId);
-    // The reload follows a fresh bake, so the loader is about to render the current piece
-    // set — those are no longer "pending", and each prop's current skin is now its baked skin.
-    bakedIdsRef.current = new Set(piecesRef.current.map((p) => p.id));
-    bakedSigRef.current = new Map(piecesRef.current.map((p) => [p.id, pieceSkinSig(p)] as const));
-    // DIRTYRECT: the fresh bake placed every piece correctly — drop all erase rects (stale
-    // ones would now eat the NEW baked geometry) and re-baseline transforms from the reload.
-    bakedRectRef.current = new Map(piecesRef.current.map((p) => [p.id, { sig: pieceXformSig(p), rect: pieceEraseRect(p) }] as const));
-    lastEraseSigRef.current = '';
+    // The reload follows a fresh bake, so the loader is about to render the current piece set —
+    // those are no longer "pending", each prop's current skin is now its baked skin, and every
+    // piece sits correctly, so drop all erase rects (stale ones would now eat the NEW geometry).
+    rebaselineBaked(piecesRef.current);
     if (nodeId && typeof g.__compiled_world_set_dirty_erase === 'function') g.__compiled_world_set_dirty_erase(nodeId, new Float32Array(0));
-  }, [props.reloadToken]);
+  }, [props.reloadToken, rebaselineBaked]);
+
+  // EDITBASELINE (req_2049): the mount-time baseline is captured from `pieces` at first render,
+  // when the world DATA hasn't loaded yet (`pieces` is still []) — so the live-erase set started
+  // EMPTY and a later delete had nothing to erase (the baked piece stayed). Through the boot grace
+  // window (baselineReady false) keep the baseline tracking the settling `pieces`: the loaded file
+  // IS that state at boot, no edits have happened yet, so this never hides a real edit. The moment
+  // it flips true the baseline FREEZES on the settled set, and from there deletes/moves diff against
+  // a true baked footprint. A bake-driven reload (above) still re-baselines on its own afterwards.
+  useEffect(() => {
+    if (props.baselineReady) return; // settled — freeze; real edits now diff against the baseline
+    rebaselineBaked(props.pieces ?? []);
+  }, [props.baselineReady, props.pieces, rebaselineBaked]);
 
   // FULLRES req_1909/1911/1912: the "fat & loaded" editor. On /editor entry — and whenever the
   // cooked-asset catalog changes (a new Studio compile→install lands while we're mounted) — push

@@ -669,7 +669,22 @@ function EditorShell() {
   // A map whose file already exists and wasn't edited this session loads instantly on
   // revisit; first visit / boot / post-edit bakes it.
   const bakedStemsRef = useRef<Set<string>>(new Set());
+  // DIRTYSTEMS persisted (req_2049): which maps have edits not yet folded into their baked editor
+  // file. PERSISTED in localstore so it survives a host restart — with the per-edit settle bake
+  // gone, a map edited then quit without a switch/Compile would otherwise boot from a stale file
+  // and RESURRECT deleted pieces. Seeded once from the store; the boot/switch establish-bake reads
+  // it and re-syncs a dirty map before its baseline is trusted.
   const dirtyStemsRef = useRef<Set<string>>(new Set());
+  const dirtyStemsSeededRef = useRef(false);
+  if (!dirtyStemsSeededRef.current) {
+    dirtyStemsSeededRef.current = true;
+    try { for (const s of (nsGet('hmsc', 'editor.dirtyStems') || '').split(',').filter(Boolean)) dirtyStemsRef.current.add(s); } catch { /* headless / no store */ }
+  }
+  const persistDirtyStems = useCallback(() => {
+    try { nsSet('hmsc', 'editor.dirtyStems', [...dirtyStemsRef.current].join(',')); } catch { /* headless / no store */ }
+  }, []);
+  const markStemDirty = useCallback((stem: string) => { dirtyStemsRef.current.add(stem); persistDirtyStems(); }, [persistDirtyStems]);
+  const clearStemDirty = useCallback((stem: string) => { dirtyStemsRef.current.delete(stem); persistDirtyStems(); }, [persistDirtyStems]);
   const compileEditorPreview = useCallback(async (stem: string) => {
     if (compilingRef.current) return; // never overlap bakes (switch/edit/settle share this)
     compilingRef.current = true;
@@ -684,7 +699,7 @@ function EditorShell() {
         throw new Error(summary || `tools/rjit game bake exited ${bake.code}`);
       }
       bakedStemsRef.current.add(stem);
-      dirtyStemsRef.current.delete(stem);
+      clearStemDirty(stem); // fresh file now matches state — drop the persisted dirty flag
       setCompiledReloadKey((key) => key + 1); // the keyed loader reloads the fresh per-map file
       setCompileState('done');
       setCompileStatus('✓ map ready');
@@ -694,7 +709,7 @@ function EditorShell() {
     } finally {
       compilingRef.current = false;
     }
-  }, [previewWorld]);
+  }, [previewWorld, clearStemDirty]);
   const compileEditorPreviewRef = useRef(compileEditorPreview);
   compileEditorPreviewRef.current = compileEditorPreview;
 
@@ -711,9 +726,15 @@ function EditorShell() {
   // bake AFTER the window opens. Reset on map switch.
   const autoCompileTimer = useRef<any>(null);
   const autoCompileReadyRef = useRef(false);
+  // EDITBASELINE (req_2049): the same settling window, but as STATE the loader pane can read.
+  // While false the loader keeps its live-erase baseline tracking the loading piece set; when it
+  // flips true (data settled, no edits yet) the baseline freezes so deletes erase live. Reset to
+  // false on map switch so the incoming map re-baselines against ITS file.
+  const [bakeBaselineReady, setBakeBaselineReady] = useState(false);
   useEffect(() => {
     autoCompileReadyRef.current = false;
-    const t = setTimeout(() => { autoCompileReadyRef.current = true; }, AUTO_COMPILE_GRACE_MS);
+    setBakeBaselineReady(false);
+    const t = setTimeout(() => { autoCompileReadyRef.current = true; setBakeBaselineReady(true); }, AUTO_COMPILE_GRACE_MS);
     return () => clearTimeout(t);
   }, [ws.stem]);
   // SWITCH/BOOT per-map bake (req_2013): make the active map's editor gamefile current once its
@@ -742,7 +763,7 @@ function EditorShell() {
   useEffect(() => {
     if (!autoCompile) return; // toggle off → manual bake only
     if (!autoCompileReadyRef.current) return; // still in the post-(re)mount settling window
-    dirtyStemsRef.current.add(ws.stem);
+    markStemDirty(ws.stem);
     if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
     const stem = ws.stem;
     const arm = () => {
@@ -762,10 +783,10 @@ function EditorShell() {
   const dirtyPrevStemRef = useRef(ws.stem);
   useEffect(() => {
     if (autoCompileReadyRef.current && dirtyPrevStemRef.current === ws.stem) {
-      dirtyStemsRef.current.add(ws.stem);
+      markStemDirty(ws.stem); // persisted: a delete/move/place is unbaked until a switch/Compile folds it in
     }
     dirtyPrevStemRef.current = ws.stem;
-  }, [buildPieces, ws.stem]);
+  }, [buildPieces, ws.stem, markStemDirty]);
 
   // The /workbench source registry (WORKBENCH.md §6) — built once per mount.
   const wbSources = useMemo(workbenchSources, []);
@@ -1011,6 +1032,7 @@ function EditorShell() {
                   centerX={buildCenterX}
                   centerZ={buildCenterZ}
                   reloadToken={compiledReloadKey}
+                  baselineReady={bakeBaselineReady}
                   state={previewWorld}
                   pieces={buildPieces}
                   buildings={buildingInstances}
