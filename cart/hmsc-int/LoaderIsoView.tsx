@@ -458,6 +458,24 @@ export function LoaderIsoView(props: {
     });
   }, [stage, pickPieces]);
 
+  // ── select connected (G): grow the current selection to every piece that
+  // transitively touches it — the whole connected structure(s) under the
+  // selection, in one keystroke. Re-adds the smart-select reach the deleted
+  // IsoAuthor had (req_2073): a double-click grabs ONE structure from a bare
+  // click, but once you've multi-picked loose pieces, G floods each out to its
+  // whole connected shape. Unions GAME_BUILD.placed.connected per seed (the same
+  // walk double-click uses). No-op with nothing selected or nothing new to add.
+  const selectConnectedToSelection = useCallback(() => {
+    const ids = selectedIdsRef.current;
+    if (!ids.size) return;
+    const pieces = piecesRef.current;
+    const next = new Set(ids);
+    for (const seed of ids) {
+      for (const id of GAME_BUILD.placed.connected(seed, pieces)) next.add(id);
+    }
+    if (next.size !== ids.size) setSelectedIds(next);
+  }, []);
+
   // ── delete: pieceRemoved per loose piece, buildingRemoved per whole instance ─────
   const deleteSelected = useCallback(() => {
     const ids = selectedIdsRef.current;
@@ -649,6 +667,8 @@ export function LoaderIsoView(props: {
       }
       else if (editable && (k === 'delete' || k === 'backspace')) { deleteSelected(); }
       else if (editable && k === 'c' && selectedIdsRef.current.size) { cloneSelected(); }
+      // G floods the selection out to its whole connected structure(s) (req_2073).
+      else if (editable && k === 'g' && selectedIdsRef.current.size) { selectConnectedToSelection(); }
       // FLOORLEVELS req_1857: ] / PageUp go up a storey, [ / PageDown go down.
       else if (editable && (k === ']' || k === 'pageup')) { changeLevel(1); }
       else if (editable && (k === '[' || k === 'pagedown')) { changeLevel(-1); }
@@ -660,7 +680,7 @@ export function LoaderIsoView(props: {
     const offDown = busOn('__keydown', onKey(true));
     const offUp = busOn('__keyup', onKey(false));
     return () => { offDown(); offUp(); heldPanRef.current = {}; }; // modRef owned by useHeldModifiers
-  }, [stage, pushCamera, props.centerX, props.centerZ, editable, deleteSelected, rotateSelected, cloneSelected, changeLevel]);
+  }, [stage, pushCamera, props.centerX, props.centerZ, editable, deleteSelected, rotateSelected, cloneSelected, selectConnectedToSelection, changeLevel]);
 
   // Re-resolve the hover ghost after R turns it, so the preview spins in place at the
   // last known cursor instead of waiting for the next mouse-move.
