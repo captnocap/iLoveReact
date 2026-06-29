@@ -8,7 +8,7 @@ import type { GameState } from './design';
 import { compileEditorWorld, compileEditorMap, emptyEditorWorld } from './editorWorld';
 import { floorsToLandforms, floorsToWaterBodies, type ChunkFloor } from './chunkFloor';
 import { CatalogRail } from './CatalogRail';
-import { sameArmed, type Armed } from './buildArmed';
+import { sameArmed, type Armed, type PieceLook } from './buildArmed';
 import { LoaderIsoView } from './LoaderIsoView';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas } from './PaintCanvas';
@@ -209,6 +209,10 @@ function EditorShell() {
   // is mounted (loader or react). One source of truth, shared.
   const [armed, setArmed] = useState<Armed>(null);
   const armCatalog = useCallback((a: NonNullable<Armed>) => setArmed((cur) => (sameArmed(cur, a) ? null : a)), []);
+  // req_2077: arm the SKIN BRUSH from a look copied off a selected piece in the
+  // paint panel — then clicking pieces in the loader pane stamps that look. A fresh
+  // copy always replaces (sameArmed never toggles a skin brush off).
+  const armSkinBrush = useCallback((look: PieceLook | null) => setArmed(look ? { kind: 'skin', look } : null), []);
   // req_1943: a STAGED skin for the held item — skin it in the paint panel, then it
   // rides into the piecePlaced event on drop. Persists across repeated placements of
   // the SAME armed item (place many dressed copies); reset when the armed item changes.
@@ -931,6 +935,7 @@ function EditorShell() {
               armedDraft={armedDraft}
               onArmedDraftChange={setArmedDraft}
               onPaintCommit={commitBuildEvents}
+              onArmSkin={armSkinBrush}
               onOpenPainter={openPainter}
             />
           </Box>}

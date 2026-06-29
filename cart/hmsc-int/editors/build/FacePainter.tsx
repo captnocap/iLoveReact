@@ -19,31 +19,16 @@ import { Icon } from '@reactjit/icons/Icon';
 import { GAME_BUILD } from '@game';
 import { propTakesText } from '../../game/kinds';
 import type { BuildFaceSkin, BuildFaceSlot, BuildSkinSet, PlacedBuildPiece, WorldEvent } from '@game';
-import type { WorldProp } from '../../design';
 import { allTextures, type TextureDef } from '@game/textures/registry';
 import { useCustomTextures, removeCustomTexture } from '@game/textures/materials';
-import { propParts } from '../../render3d/propParts';
-import { isTextureable, type Part } from '../../render3d/parts';
 import { uploadFaceTexture } from './uploadFaceTexture';
 import { stampEdit } from './editLatency';
 import { migrateImagesIntoRepo } from './migrateImagesIntoRepo';
 import { useFittedGrid, RailPager, thumbCellH } from '../../railThumbGrid';
-
-// PROPSKIN-0766: a placed PROP piece (pieceId 'prop.<kind>') skins by NAMED PART.
-// Its texturable parts come from the SAME propParts the renderer + bake use.
-function propPieceParts(piece: PlacedBuildPiece): Part[] | null {
-  const def = GAME_BUILD.catalog.get(piece.pieceId);
-  if (def.kind !== 'prop' || !def.propKind) return null;
-  const prop: WorldProp = {
-    id: piece.id,
-    kind: def.propKind as WorldProp['kind'],
-    x: piece.x, y: piece.y, z: piece.z,
-    yawDegrees: piece.yawDegrees,
-    partTextures: piece.partTextures,
-    createdByCommand: 'hmsc-int:paint-parts',
-  };
-  return propParts(prop).filter(isTextureable);
-}
+// req_2077: the skin-brush kit — propPieceParts (shared with the loader pane's
+// stamp side, moved out of here) plus copy/label helpers for the eyedropper.
+import { propPieceParts, pieceLook, lookHasContent, lookLabel } from '../../skinBrush';
+import type { PieceLook } from '../../buildArmed';
 
 // The stored colour palette — the always-available swatches. "Used" colours come
 // from the recent row, custom ones from the hex field (req_1929).
@@ -117,7 +102,7 @@ const MatSwatch = memo(function MatSwatch(props: {
 
 // The HELD item before placement (req_1937). A subset of IsoAuthor's Armed —
 // duplicated here as a narrow shape so this panel doesn't import the iso module.
-export type HeldItem = { kind: 'piece' | 'prefab'; id: string } | { kind: 'tower' } | { kind: 'water'; id: string } | null;
+export type HeldItem = { kind: 'piece' | 'prefab'; id: string } | { kind: 'tower' } | { kind: 'water'; id: string } | { kind: 'skin'; look: PieceLook } | null;
 
 // A STAGED skin (req_1943): the look chosen for a held item BEFORE it's placed —
 // `skin` for a build piece's face slots, `partTextures` for a prop's named parts.
@@ -143,6 +128,9 @@ export interface FacePainterProps {
   armedDraft?: SkinDraft | null;
   onArmedDraftChange?: (draft: SkinDraft) => void;
   commitBatch: (items: ReadonlyArray<{ event: WorldEvent; label: string }>) => void;
+  // req_2077: copy the selected piece's whole look → arm the skin brush so clicks
+  // in the loader pane stamp it onto other pieces.
+  onArmSkin?: (look: PieceLook | null) => void;
   onOpenPainter?: () => void;
 }
 
@@ -325,7 +313,7 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   // selected. No location yet (it isn't in the world); the sub says how to place.
   const heldInfo = useMemo(() => {
     const a = props.armed;
-    if (!a) return null;
+    if (!a || a.kind === 'skin') return null; // skin brush shows its own banner, not a held-item header
     if (a.kind === 'tower') return { label: 'Tower', sub: 'holding · drag in the build pane to place' };
     if (a.kind === 'water') return { label: 'Water', sub: 'holding · place it in the build pane' };
     try {
@@ -338,8 +326,30 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
   const grid = useFittedGrid({ total: texList.length, tileW: TEX_TILE_W, cellH: thumbCellH(TEX_TILE_H) });
   const pageItems = texList.slice(grid.start, grid.end);
 
+  // req_2077: COPY a placed piece's whole look (face skins / part textures) and arm
+  // the skin brush so the next clicks in the loader pane stamp it onto other pieces
+  // — point at a wall, copy, then paint the block without re-picking each one. The
+  // source is the (first) selected placed piece; only offered when it has a look.
+  const copyLook = useMemo<PieceLook | null>(() => (selPieces[0] ? pieceLook(selPieces[0]) : null), [selPieces]);
+  const canCopySkin = !!props.onArmSkin && lookHasContent(copyLook);
+  const skinBrush = props.armed?.kind === 'skin' ? props.armed : null;
+
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b1220', padding: 10, gap: 7, flexDirection: 'column', minHeight: 0 }}>
+      {/* SKIN BRUSH active (req_2077): a look is held — clicks in the loader pane
+          paint it onto pieces. Shows what's loaded + a stop button (Esc also stops). */}
+      {skinBrush ? (
+        <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: '#38bdf8', backgroundColor: '#0e2233' }}>
+          <Text fontSize={9} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>skin brush</Text>
+          <Text fontSize={8} color="#9fc6e0" style={{ fontFamily: 'monospace', flexGrow: 1 }}>{`${lookLabel(skinBrush.look)} · click pieces to paint`}</Text>
+          <Pressable onPress={() => props.onArmSkin?.(null)} hoverable tooltip="stop the skin brush (Esc)">
+            <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: '#3a4f6b', backgroundColor: '#16233a' }}>
+              <Text fontSize={8} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>stop</Text>
+            </Box>
+          </Pressable>
+        </Box>
+      ) : null}
+
       {/* 1 — THE SELECTION, first (req_1929/req_1937). A placed-and-selected piece
           shows its name + location; with nothing placed selected, the HELD item
           (armed before placement) shows instead — holding is a selection too. */}
@@ -364,6 +374,16 @@ export const FacePainter = memo(function FacePainter(props: FacePainterProps) {
       ) : (
         <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>no selection — hold a piece or prop, or click a placed one</Text>
       )}
+
+      {/* COPY SKIN (req_2077): grab the selected piece's look into the skin brush,
+          then click other pieces in the loader pane to paint it on. */}
+      {canCopySkin && copyLook ? (
+        <Pressable onPress={() => props.onArmSkin?.(copyLook)} hoverable tooltip="copy this piece's look into the skin brush — then click pieces in the build pane to paint it on">
+          <Box style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 5, paddingBottom: 5, borderRadius: 4, borderWidth: 1, borderColor: skinBrush ? '#38bdf8' : '#3a4f6b', backgroundColor: '#13243a' }}>
+            <Text fontSize={9} color="#7dd3fc" style={{ fontFamily: 'monospace', fontWeight: 700 }}>⤧ copy skin → brush</Text>
+          </Box>
+        </Pressable>
+      ) : null}
 
       {/* PARAMETRIC props: the sign's text (type, then Apply). */}
       {textProp ? (

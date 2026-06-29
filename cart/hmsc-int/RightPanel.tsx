@@ -5,7 +5,7 @@
 import { Box } from '@reactjit/primitives';
 import { renderTick } from './editors/build/editLatency';
 import { FacePainter, type SkinDraft } from './editors/build/FacePainter';
-import type { Armed } from './buildArmed';
+import type { Armed, PieceLook } from './buildArmed';
 import type { BuildEditEvent, PlacedBuildPiece } from '@game';
 
 // Tab ids retained for the session/placement layers (useMapSession / usePlacements
@@ -22,6 +22,8 @@ export function RightPanel(props: {
   armed?: Armed;
   armedDraft?: SkinDraft | null;
   onArmedDraftChange?: (draft: SkinDraft) => void;
+  // req_2077: copy the selected piece's look → arm the skin brush (stamp on click).
+  onArmSkin?: (look: PieceLook | null) => void;
   // req_0749: the "paint a texture…" door → the /workbench painter.
   onOpenPainter?: () => void;
 }) {
@@ -35,6 +37,7 @@ export function RightPanel(props: {
         armedDraft={props.armedDraft}
         onArmedDraftChange={props.onArmedDraftChange}
         commitBatch={props.onPaintCommit}
+        onArmSkin={props.onArmSkin}
         onOpenPainter={props.onOpenPainter}
       />
     </Box>

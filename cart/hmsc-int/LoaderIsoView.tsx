@@ -42,6 +42,7 @@ import { subscribeCookedAssets } from './editors/model/cookedAssets';
 import { stampEdit, takeEditStamp, nowMs, snapRenderTicks } from './editors/build/editLatency';
 import { readFrameRecord, readCounters, framePhaseResidual } from './state/perfWatch';
 import type { Armed } from './buildArmed';
+import { skinStampEvents } from './skinBrush';
 import { pieceInstanceRows, meshPropLivePush, meshGhostRef, pieceSkinSig, buildingSkinBoxes } from './editors/build/pieceMeshes';
 import { groundColumnTop } from './Embodied';
 import type { GameState } from './design';
@@ -367,7 +368,7 @@ export function LoaderIsoView(props: {
   // ── snap resolution: the cursor → a placement, with the SAME inputs F2/IsoAuthor use.
   const resolveAt = useCallback((sx: number, sy: number): SnapTarget | null => {
     const a = armedRef.current;
-    if (!a || a.kind === 'tower') return null; // tower drag-shell tool deferred
+    if (!a || a.kind === 'tower' || a.kind === 'skin') return null; // tower deferred; skin brush stamps on click, no snap ghost
     const pieceDef = a.kind === 'piece' ? GAME_BUILD.catalog.get(a.id) : null;
     const armedPrefabDef = a.kind === 'prefab' ? prefabByIdRef.current.get(a.id) : undefined;
     const prefabAnchor = armedPrefabDef ? GAME_BUILD.prefabs.gridAnchor(armedPrefabDef) : null;
@@ -475,6 +476,20 @@ export function LoaderIsoView(props: {
     }
     if (next.size !== ids.size) setSelectedIds(next);
   }, []);
+
+  // ── skin brush (req_2077): with the skin brush armed (a look copied off some
+  // piece in the FacePainter), a CLICK stamps that look onto the piece under the
+  // cursor — paint the same wall skin across the block without the select-then-
+  // copy-paste dance. The brush stays armed so you keep clicking; Esc disarms.
+  // Selection is left untouched (this is a stamp, not a pick).
+  const stampSkinAt = useCallback((sx: number, sy: number) => {
+    const a = armedRef.current;
+    if (a?.kind !== 'skin') return;
+    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), pickPieces(), ISO_SNAP_TUNING.reachMeters);
+    if (!hit) return;
+    const events = skinStampEvents(hit.piece, a.look);
+    if (events.length) commitMany(events);
+  }, [stage, pickPieces, commitMany]);
 
   // ── delete: pieceRemoved per loose piece, buildingRemoved per whole instance ─────
   const deleteSelected = useCallback(() => {
@@ -1063,8 +1078,8 @@ export function LoaderIsoView(props: {
     // the click selects: plain = single piece, Ctrl = toggle into a multi-select,
     // double-click = the whole connected object.
     if (armedRef.current) {
-      const t = resolveAt(d.x0, d.y0);
-      if (t) { setSnap(t); placeAt(t); }
+      if (armedRef.current.kind === 'skin') stampSkinAt(d.x0, d.y0); // brush a copied look onto the clicked piece
+      else { const t = resolveAt(d.x0, d.y0); if (t) { setSnap(t); placeAt(t); } }
     } else {
       const now = Date.now();
       const lc = lastClickRef.current;
@@ -1074,7 +1089,7 @@ export function LoaderIsoView(props: {
       else if (modRef.current.ctrl) togglePieceAt(d.x0, d.y0); // Ctrl-click = add/remove
       else selectPieceAt(d.x0, d.y0, false);               // single piece (replace)
     }
-  }, [editable, commitMove, commitPaint, resolveAt, placeAt, selectPieceAt, togglePieceAt]);
+  }, [editable, commitMove, commitPaint, resolveAt, placeAt, selectPieceAt, togglePieceAt, stampSkinAt]);
 
   // ── 2D projected HUD (Approach B): the armed ghost box + selection outlines, drawn
   // each render through the SAME iso solve the loader renders with. Computed in the body

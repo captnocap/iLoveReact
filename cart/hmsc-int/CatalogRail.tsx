@@ -52,7 +52,7 @@ export const CatalogRail = memo(function CatalogRail(props: { armed: Armed; pref
     [tab, props.prefabs],
   );
   const armKind: 'piece' | 'prefab' | 'water' = tab === 'prefabs' ? 'prefab' : tab === 'water' ? 'water' : 'piece';
-  const armedId = props.armed && props.armed.kind !== 'tower' ? props.armed.id : null;
+  const armedId = props.armed && props.armed.kind !== 'tower' && props.armed.kind !== 'skin' ? props.armed.id : null;
   const towerArmed = props.armed?.kind === 'tower';
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: '#0b1220fa', borderRadius: 6, borderWidth: 1, borderColor: '#1e3a5f', padding: 8, gap: 6 }}>
