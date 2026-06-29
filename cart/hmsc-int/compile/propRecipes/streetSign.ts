@@ -87,10 +87,18 @@ export function streetSignParts(heightMeters: number, text?: string): PropPartSp
     const slotCenter = lines.length === 1
       ? panelY
       : panelY + (i === 0 ? (cap0 / 2 + LINE_GAP / 2) : -(cap0 / 2 + LINE_GAP / 2));
-    parts.push(...textLineParts(lines[i], {
+    // The compiled (no-V8) loader renders this panel's letters horizontally
+    // mirrored on its facing side (req_2046/2059/2067). The letters are laid out
+    // (and centred on x=0) by textLineParts; mirror their X so the baked sign
+    // reads correctly in the compiled game. The editor renders street signs via a
+    // separate texture-capture panel (render3d/props/StreetSign), so this only
+    // touches the baked/compiled stencil — exactly where the bug lives.
+    const lineParts = textLineParts(lines[i], {
       capHeightMeters: cap, color: COLORS.text, depthMeters: TEXT_DEPTH,
       baseY: slotCenter - cap / 2, frontZ: PANEL_FRONT_Z,
-    }));
+    });
+    for (const p of lineParts) p.local = [-p.local[0], p.local[1], p.local[2]];
+    parts.push(...lineParts);
   }
   return parts;
 }
