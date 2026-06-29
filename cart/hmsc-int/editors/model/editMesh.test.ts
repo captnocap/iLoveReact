@@ -87,6 +87,37 @@ test('splitQuad fixes a concave quad into two non-concave tris', () => {
   assertEqual(findConcaveFaces(fixed).length, 0, 'no concave faces after');
 });
 
+test('a non-planar quad and its mirror twin fold along corresponding diagonals (req_2057)', () => {
+  // A quad with one corner lifted in Y is non-planar: its two diagonals describe
+  // genuinely different 3D surfaces, so the triangulation diagonal is visible. A
+  // naive fan from loop[0] cuts loop[0]→loop[2]; the mirror twin's loop is reflected
+  // AND reversed, so the same rule cuts the OTHER diagonal → the twin buckles the
+  // opposite way (the reported convex-vs-concave mismatch). The fix picks the
+  // diagonal geometrically, so reflecting the twin's tris back lands on the original.
+  const quad: EditMesh = {
+    verts: [[1, 0, 0], [3, 0, 0], [3, 0, 2], [1, 2, 2]],
+    faces: [{ loop: [0, 1, 2, 3] }],
+  };
+  const reflX = (v: V3): V3 => [-v[0], v[1], v[2]];
+  // mirror across X: reflect every vert and reverse the loop so it stays outward-wound
+  const twin: EditMesh = {
+    verts: quad.verts.map(reflX),
+    faces: [{ loop: [3, 2, 1, 0] }],
+  };
+  // pull the triangle set out of the soup as sorted, rounded corner-position triples
+  const tris = (geo: { count: number; positions: Float32Array | number[] }, map: (v: V3) => V3): string[] => {
+    const out: string[] = [];
+    const at = (i: number): V3 => map([geo.positions[i * 8], geo.positions[i * 8 + 1], geo.positions[i * 8 + 2]]);
+    const r = (v: V3) => `${v[0].toFixed(3)},${v[1].toFixed(3)},${v[2].toFixed(3)}`;
+    for (let i = 0; i < geo.count; i += 3) out.push([r(at(i)), r(at(i + 1)), r(at(i + 2))].sort().join('|'));
+    return out.sort();
+  };
+  const base = tris(editMeshToGeometry(quad), (v) => v);
+  const mirrored = tris(editMeshToGeometry(twin), reflX); // reflect twin back onto the original
+  assertEqual(base.length, 2, 'quad → two tris');
+  assertEqual(mirrored.join(' ;; '), base.join(' ;; '), 'twin folds along the mirror of the original diagonal');
+});
+
 test('splitConcaveFaces clears every offender at once', () => {
   // two quads, one convex one concave
   const m: EditMesh = {

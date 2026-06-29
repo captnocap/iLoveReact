@@ -473,6 +473,35 @@ export function faceCentroid(m: EditMesh, face: EditMeshFace): V3 {
  *  creases, while a box's 90° corners stay crisp. req_1326. */
 export const SMOOTH_CREASE_DEG = 40;
 
+/** Pick a quad's triangulation diagonal in a way that does NOT depend on how the
+ *  loop happens to be rotated or wound — so a face and its mirror twin (whose loop
+ *  is reflected AND reversed) fold along *corresponding* diagonals and therefore
+ *  render identically. A naive fan from loop[0] always cuts loop[0]→loop[2]; under
+ *  a mirror that vertex pair swaps to the OTHER diagonal, so a non-planar quad buckles
+ *  one way on the left and the opposite way on the right (req_2057: one side reads
+ *  convex, the other concave, with mismatched shading).
+ *
+ *  Criterion (both branches are purely positional / outward-normal based, hence
+ *  reflection-invariant): prefer the diagonal whose two tris are BOTH wound with the
+ *  face normal — that removes a reflex/concave fold, the same rule Split Quads uses;
+ *  when both or neither diagonal stays convex, take the shorter diagonal as a stable
+ *  tiebreak. Returns the two tris as LOOP-position triples (index into face.loop). */
+function quadTriPositions(m: EditMesh, face: EditMeshFace): [[number, number, number], [number, number, number]] {
+  const L = face.loop;
+  const v = (li: number): V3 => m.verts[L[li]];
+  const normal = faceNormal(m, face);
+  const triOk = (i: number, j: number, k: number): boolean => dot(cross(sub(v(j), v(i)), sub(v(k), v(i))), normal) > 0;
+  const acConvex = triOk(0, 1, 2) && triOk(0, 2, 3); // diagonal 0–2
+  const bdConvex = triOk(1, 2, 3) && triOk(1, 3, 0); // diagonal 1–3
+  let useAC: boolean;
+  if (acConvex !== bdConvex) useAC = acConvex; // exactly one diagonal stays convex → take it
+  else {
+    const d2 = (i: number, j: number): number => { const e = sub(v(j), v(i)); return dot(e, e); };
+    useAC = d2(0, 2) <= d2(1, 3); // both/neither convex → shorter diagonal (mirror-invariant)
+  }
+  return useAC ? [[0, 1, 2], [0, 2, 3]] : [[1, 2, 3], [1, 3, 0]];
+}
+
 /** Lower to the framework's non-indexed triangle soup: fan-triangulate each face,
  *  SMOOTH-shade with a crease angle — a vertex's normal averages only the faces
  *  around it within SMOOTH_CREASE_DEG of this face, so curved low-poly surfaces
@@ -503,15 +532,20 @@ export function editMeshToGeometry(m: EditMesh, includeFace?: (f: EditMeshFace) 
     if (includeFace && !includeFace(face)) continue;
     if (face.loop.length < 3) continue;
     const uv = face.uv;
-    const i0 = face.loop[0];
-    const a = m.verts[i0] as Vec3;
-    const na = normalAt(i0, fi);
-    const ua = (uv?.[0] ?? flat) as [number, number];
-    for (let i = 1; i + 1 < face.loop.length; i += 1) {
-      const ib = face.loop[i], ic = face.loop[i + 1];
-      const b = m.verts[ib] as Vec3;
-      const c = m.verts[ic] as Vec3;
-      g.tri(a, na, ua, b, normalAt(ib, fi), (uv?.[i] ?? flat) as [number, number], c, normalAt(ic, fi), (uv?.[i + 1] ?? flat) as [number, number]);
+    const corner = (li: number): [Vec3, Vec3, [number, number]] => {
+      const vi = face.loop[li];
+      return [m.verts[vi] as Vec3, normalAt(vi, fi), (uv?.[li] ?? flat) as [number, number]];
+    };
+    // quads pick a mirror-invariant diagonal so a face and its twin fold the same
+    // way (req_2057); n-gons fan from loop[0] (rare here, a separate concern).
+    const tris: [number, number, number][] = face.loop.length === 4
+      ? quadTriPositions(m, face)
+      : Array.from({ length: face.loop.length - 2 }, (_, i) => [0, i + 1, i + 2] as [number, number, number]);
+    for (const [l0, l1, l2] of tris) {
+      const [pa, na, ua] = corner(l0);
+      const [pb, nb, ub] = corner(l1);
+      const [pc, nc, uc] = corner(l2);
+      g.tri(pa, na, ua, pb, nb, ub, pc, nc, uc);
     }
   }
   return g.build();
@@ -886,30 +920,21 @@ export function newConcaveFaces(before: EditMesh, after: EditMesh): number[] {
 }
 
 /** Split one quad into two triangles along the diagonal that yields two convex
- *  tris (the "Split Quads" fix). Non-quads are returned untouched. Pure: returns
- *  a new mesh, leaves the input alone. */
+ *  tris (the "Split Quads" fix) — the SAME mirror-invariant diagonal the renderer
+ *  folds along, so what you split matches what you saw. Non-quads are returned
+ *  untouched. Pure: returns a new mesh, leaves the input alone. */
 export function splitQuad(m: EditMesh, faceIdx: number): EditMesh {
   const face = m.faces[faceIdx];
   if (!face || face.loop.length !== 4) return m;
-  const [a, b, c, d] = face.loop;
-  // Prefer the diagonal whose two tris are both wound consistently with the
-  // quad's normal; default to a-c. Choosing the diagonal across the reflex
-  // corner is what removes the concavity.
-  const normal = faceNormal(m, face);
-  const triOk = (i: number, j: number, k: number): boolean => {
-    const t = cross(sub(m.verts[j], m.verts[i]), sub(m.verts[k], m.verts[i]));
-    return dot(t, normal) > 0;
-  };
-  const acGood = triOk(a, b, c) && triOk(a, c, d);
-  const [t1, t2]: [number[], number[]] = acGood
-    ? [[a, b, c], [a, c, d]]
-    : [[b, c, d], [b, d, a]];
-  // carry per-corner UVs onto each tri (the split uses original corners, so each
-  // output corner's UV is its parent corner's UV — no interpolation needed).
-  const uvAt = face.uv ? (vi: number) => face.uv![face.loop.indexOf(vi)] : null;
-  const uvFor = (tri: number[]): V2[] | undefined => (uvAt ? tri.map(uvAt) : undefined);
+  // tris are LOOP-position triples; map each back to its vertex index + parent UV
+  // (the split reuses original corners, so no UV interpolation is needed).
+  const tris = quadTriPositions(m, face).map((tri) => ({
+    ...face,
+    loop: tri.map((li) => face.loop[li]),
+    uv: face.uv ? tri.map((li) => face.uv![li]) : undefined,
+  }));
   const faces = m.faces.slice();
-  faces.splice(faceIdx, 1, { ...face, loop: t1, uv: uvFor(t1) }, { ...face, loop: t2, uv: uvFor(t2) });
+  faces.splice(faceIdx, 1, ...tris);
   return { verts: m.verts, faces };
 }
 
