@@ -95,7 +95,7 @@ import {
   TransformGizmo, NormalHandle, AXIS_DIR, axisScreen, dragWorldDistance, pickGizmoHandle, pickNormalHandle, rotationSign, selectionVertIndices, selectionFaceIndices,
   type GizmoTool, type GizmoHit,
 } from '../meshGizmo';
-import { RigOverlay, pickRigHandle, rigHandles, type RigSel } from '../meshRig';
+import { RigOverlay, pickRigHandle, rigHandles, lightHandles, AIM_LEN_M, type RigSel } from '../meshRig';
 import { T, STEP_BTN, SMOOTH_PRESETS, SCALE_FIGURE_SEED, SCALE_FIGURE_CART_KEY, STUDIO, type Vec3, type Rect } from './config';
 import { Z } from './chrome/zlayers';
 import './registerTunables';
@@ -710,9 +710,10 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   // SAME TransformGizmo + drag math — only the anchor + commit differ.
   const [rigSel, setRigSel] = useHotState<RigSel | null>('studio:rigSel', null);
   const [rigDraft, setRigDraft] = useState<{ sel: RigSel; localPos: MV3 } | null>(null);
-  // Which authored light (by id) is selected for editing in the rig panel (req_2062).
-  // Separate from rigSel so the pivot/joint overlay + pick path stay untouched.
-  const [selectedLightId, setSelectedLightId] = useHotState<string | null>('studio:lightSel', null);
+  // Which authored light is selected for editing — DERIVED from rigSel (req_2063):
+  // selecting a light handle (tip/aim) in the viewport drives the panel, and the
+  // panel's chip/+light set rigSel, so the gizmo + panel never disagree.
+  const selectedLightId: string | null = rigSel?.kind === 'lightTip' || rigSel?.kind === 'lightAim' ? rigSel.id : null;
   const [rigDragAxis, setRigDragAxis] = useState<GizmoHit | null>(null);
   const rigDragRef = useRef<null | { sel: RigSel; axis: { dx: number; dy: number; pxPerUnit: number }; unit: MV3; startCx: number; startCy: number; startLocal: MV3 }>(null);
   // A rig handle's LOCAL position, draft-aware: the live drag draft if it's the one
@@ -720,6 +721,17 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   const rigLocalPos = (mesh: EditMesh, sel: RigSel): MV3 | null => {
     if (rigDraft && sameRigSel(rigDraft.sel, sel)) return rigDraft.localPos;
     if (sel.kind === 'pivot') return hasPivot(mesh) ? pivotOf(mesh) as MV3 : null; // no phantom pivot
+    // Light handles (req_2063): the TIP is the light's local position; the AIM is a
+    // derived point a fixed length down the aim direction (only the direction is
+    // read back on commit). Both ride the pivot's drag machinery.
+    if (sel.kind === 'lightTip' || sel.kind === 'lightAim') {
+      const lt = (mesh.lights ?? []).find((l) => l.id === sel.id);
+      if (!lt) return null;
+      if (sel.kind === 'lightTip') return [lt.position[0], lt.position[1], lt.position[2]];
+      const d = lt.dir ?? [0, -1, 0];
+      const dl = Math.hypot(d[0], d[1], d[2]) || 1;
+      return [lt.position[0] + (d[0] / dl) * AIM_LEN_M, lt.position[1] + (d[1] / dl) * AIM_LEN_M, lt.position[2] + (d[2] / dl) * AIM_LEN_M];
+    }
     const mt = (mesh.mounts ?? []).find((m) => m.name === sel.name);
     return mt ? [mt.position[0], mt.position[1], mt.position[2]] : null;
   };
@@ -730,6 +742,17 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
     if (!activePart) return;
     const m = activePart.mesh;
     if (sel.kind === 'pivot') { props.onEditMesh(activePart.id, setPivot(m, local)); return; }
+    // Light handles (req_2063): the tip writes the light's position; the aim writes
+    // its DIRECTION (tip → dragged point, normalized). A degenerate drag keeps the dir.
+    if (sel.kind === 'lightTip') { props.onEditMesh(activePart.id, updateLight(m, sel.id, { position: [local[0], local[1], local[2]] })); return; }
+    if (sel.kind === 'lightAim') {
+      const lt = (m.lights ?? []).find((l) => l.id === sel.id);
+      if (!lt) return;
+      const dx = local[0] - lt.position[0], dy = local[1] - lt.position[1], dz = local[2] - lt.position[2];
+      const dl = Math.hypot(dx, dy, dz);
+      if (dl > 1e-4) props.onEditMesh(activePart.id, updateLight(m, sel.id, { dir: [dx / dl, dy / dl, dz / dl] }));
+      return;
+    }
     props.onEditMesh(activePart.id, mirrorAxes.length
       ? updateMountMirrored(m, sel.name, local, mirrorAxes)
       : updateMount(m, sel.name, { position: local }));
@@ -1043,6 +1066,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
           if (!activePart) return;
           if (rigSel?.kind === 'joint') { props.onEditMesh(activePart.id, removeMount(activePart.mesh, rigSel.name)); setRigSel(null); }
           else if (rigSel?.kind === 'pivot') { props.onEditMesh(activePart.id, clearPivot(activePart.mesh)); setRigSel(null); }
+          else if (rigSel?.kind === 'lightTip' || rigSel?.kind === 'lightAim') { props.onEditMesh(activePart.id, removeLight(activePart.mesh, rigSel.id)); setRigSel(null); }
           return;
         }
         if (selMode === 'object' || selMode === 'paint' || !activePart || lc || bv || autoFix) return;
@@ -1930,7 +1954,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
         }
       }
       const h = rigHandles(activePart.mesh, hasPivot(activePart.mesh) ? pivotOf(activePart.mesh) as MV3 : null, activePart.lift);
-      const picked = pickRigHandle(h.pivot, h.joints, proj, lx, ly);
+      const picked = pickRigHandle(h.pivot, h.joints, lightHandles(activePart.mesh, activePart.lift), proj, lx, ly);
       if (picked) { setRigSel(picked); return; } // selected → don't orbit
       dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; lastMoveRef.current = nowMs(); return;
     }
@@ -2480,6 +2504,28 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   if (rig && rigDraft && rigDraft.sel.kind === 'joint') {
     const j = rig.joints.find((x) => x.name === (rigDraft.sel as { kind: 'joint'; name: string }).name);
     if (j) j.pos = [rigDraft.localPos[0], rigDraft.localPos[1] + activePart!.lift, rigDraft.localPos[2]];
+  }
+  // Light handles for the overlay (req_2063), draft-aware: while dragging the tip,
+  // the aim rides along (keeps its direction); dragging the aim moves only the aim.
+  const rigLights = selMode === 'rig' && activePart ? lightHandles(activePart.mesh, activePart.lift) : [];
+  if (rigDraft && (rigDraft.sel.kind === 'lightTip' || rigDraft.sel.kind === 'lightAim') && activePart) {
+    const ds = rigDraft.sel;
+    const lh = rigLights.find((x) => x.id === ds.id);
+    const lt = (activePart.mesh.lights ?? []).find((x) => x.id === ds.id);
+    if (lh && lt) {
+      const L = activePart.lift;
+      const dl = rigDraft.localPos;
+      if (ds.kind === 'lightTip') {
+        lh.tip = [dl[0], dl[1] + L, dl[2]];
+        if (lh.aim) {
+          const d = lt.dir ?? [0, -1, 0];
+          const dn = Math.hypot(d[0], d[1], d[2]) || 1;
+          lh.aim = [dl[0] + (d[0] / dn) * AIM_LEN_M, dl[1] + L + (d[1] / dn) * AIM_LEN_M, dl[2] + (d[2] / dn) * AIM_LEN_M];
+        }
+      } else {
+        lh.aim = [dl[0], dl[1] + L, dl[2]];
+      }
+    }
   }
   let rigAnchorWorld: MV3 | null = null;
   if (selMode === 'rig' && activePart && rigSel) {
@@ -3087,7 +3133,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
       {/* Rig overlay (req_1025): the pivot ball + joint markers (axis arrow + the
           type·travel label). The selected handle gets the move gizmo, reused. */}
       {rig
-        ? <RigOverlay pivotW={rig.pivot} joints={rig.joints} sel={rigSel} camSnap={camSnap} />
+        ? <RigOverlay pivotW={rig.pivot} joints={rig.joints} lights={rigLights} sel={rigSel} camSnap={camSnap} />
         : null}
       {rigAnchorWorld
         ? <TransformGizmo anchorW={rigAnchorWorld} tool="move" camSnap={camSnap} activeAxis={rigDragAxis} />
@@ -3325,7 +3371,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
               );
             })() : null}
             <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#0b1320cc', borderWidth: 1, borderColor: '#27364a' }}>
-              <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{rigSel ? (rigSel.kind === 'pivot' ? 'pivot selected' : `${isAnchor((activePart.mesh.mounts ?? []).find((x) => x.name === rigSel.name) ?? { kind: 'socket' } as any) ? 'anchor' : 'joint'}: ${rigSel.name}`) : 'pick a handle, or + above'}</Text>
+              <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{rigSel ? (rigSel.kind === 'pivot' ? 'pivot selected' : rigSel.kind === 'lightTip' ? 'light tip — drag to move' : rigSel.kind === 'lightAim' ? 'light aim — drag to point' : `${isAnchor((activePart.mesh.mounts ?? []).find((x) => x.name === rigSel.name) ?? { kind: 'socket' } as any) ? 'anchor' : 'joint'}: ${rigSel.name}`) : 'pick a handle, or + above'}</Text>
             </Box>
             {/* LIGHTS (req_2062) — the emit rig. Make a pyramid light, pick it from the
                 row, tune it. A spot throws an aimed cone (+ shadow); a bulb is omni. */}
@@ -3335,7 +3381,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
                 const id = `L-${Math.random().toString(36).slice(2, 8)}`;
                 const c = pivotOf(activePart.mesh); // bounds centre; lift the tip above the part
                 props.onEditMesh(activePart.id, addLight(activePart.mesh, { id, kind: 'spot', position: [c[0], c[1] + 2, c[2]], dir: [0, -1, 0] }));
-                setSelectedLightId(id);
+                setRigSel({ kind: 'lightTip', id });
               }}
               tooltip="Add a light — the pyramid: a tip throwing coloured light down a cone. A spot casts a shadow; switch to a bulb for an omni glow. Tune it below."
               style={{ ...STEP_BTN, backgroundColor: '#1a1330ee', borderColor: '#a86b2c' }}
@@ -3347,7 +3393,7 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
                 {(activePart.mesh.lights ?? []).map((lt) => (
                   <Pressable
                     key={lt.id}
-                    onPress={() => setSelectedLightId(lt.id)}
+                    onPress={() => setRigSel({ kind: 'lightTip', id: lt.id })}
                     style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: lt.id === selectedLightId ? '#2a1f48' : '#13233aee', borderWidth: 1, borderColor: lt.id === selectedLightId ? '#caa6ff' : '#27364a' }}
                   >
                     <Row style={{ gap: 4, alignItems: 'center' }}>
@@ -3383,20 +3429,15 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
                   {selLight.kind === 'spot' ? (
                     <NumberField label="cone" value={selLight.spread ?? 32} onChange={(n) => edit({ spread: n })} min={5} max={85} step={2} snap={1} suffix="°" />
                   ) : null}
-                  <NumberField label="tip x" value={selLight.position[0]} onChange={(n) => edit({ position: [n, selLight.position[1], selLight.position[2]] })} min={-50} max={50} step={0.25} snap={0.05} />
-                  <NumberField label="tip y" value={selLight.position[1]} onChange={(n) => edit({ position: [selLight.position[0], n, selLight.position[2]] })} min={-50} max={50} step={0.25} snap={0.05} />
-                  <NumberField label="tip z" value={selLight.position[2]} onChange={(n) => edit({ position: [selLight.position[0], selLight.position[1], n] })} min={-50} max={50} step={0.25} snap={0.05} />
+                  {/* Position + aim are DRAGGED in the viewport like the pivot (req_2063):
+                      grab the tip ring to move the light, the aim ball to point it. */}
+                  <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{selLight.kind === 'spot' ? 'drag the tip to move · the aim ball to point' : 'drag the tip ring to move the bulb'}</Text>
                   {selLight.kind === 'spot' ? (
-                    <>
-                      <NumberField label="aim x" value={selLight.dir?.[0] ?? 0} onChange={(n) => edit({ dir: [n, selLight.dir?.[1] ?? -1, selLight.dir?.[2] ?? 0] })} min={-1} max={1} step={0.1} snap={0.05} />
-                      <NumberField label="aim y" value={selLight.dir?.[1] ?? -1} onChange={(n) => edit({ dir: [selLight.dir?.[0] ?? 0, n, selLight.dir?.[2] ?? 0] })} min={-1} max={1} step={0.1} snap={0.05} />
-                      <NumberField label="aim z" value={selLight.dir?.[2] ?? 0} onChange={(n) => edit({ dir: [selLight.dir?.[0] ?? 0, selLight.dir?.[1] ?? -1, n] })} min={-1} max={1} step={0.1} snap={0.05} />
-                      <Pressable onPress={() => edit({ castsShadow: !sh })} style={{ ...STEP_BTN, backgroundColor: sh ? '#1f3a2c' : '#13233aee', borderColor: sh ? '#5fd6a0' : '#27364a' }}>
-                        <Text fontSize={9} color={sh ? '#9fe9c4' : T.dim} style={{ fontFamily: 'monospace' }}>{sh ? '✓ casts shadow' : 'no shadow'}</Text>
-                      </Pressable>
-                    </>
+                    <Pressable onPress={() => edit({ castsShadow: !sh })} style={{ ...STEP_BTN, backgroundColor: sh ? '#1f3a2c' : '#13233aee', borderColor: sh ? '#5fd6a0' : '#27364a' }}>
+                      <Text fontSize={9} color={sh ? '#9fe9c4' : T.dim} style={{ fontFamily: 'monospace' }}>{sh ? '✓ casts shadow' : 'no shadow'}</Text>
+                    </Pressable>
                   ) : null}
-                  <Pressable onPress={() => { props.onEditMesh(activePart.id, removeLight(activePart.mesh, selLight.id)); setSelectedLightId(null); }} style={{ ...STEP_BTN, backgroundColor: '#3a1313ee', borderColor: '#a8412c' }}>
+                  <Pressable onPress={() => { props.onEditMesh(activePart.id, removeLight(activePart.mesh, selLight.id)); setRigSel(null); }} style={{ ...STEP_BTN, backgroundColor: '#3a1313ee', borderColor: '#a8412c' }}>
                     <Text fontSize={9} color="#ff9d8d" style={{ fontFamily: 'monospace' }}>✕ remove light</Text>
                   </Pressable>
                 </Box>

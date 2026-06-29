@@ -16,7 +16,9 @@ export function clamp(n: number, lo: number, hi: number): number {
 /** Same rig handle? (the pivot is singular; joints compare by name.) */
 export function sameRigSel(a: RigSel | null, b: RigSel | null): boolean {
   if (!a || !b || a.kind !== b.kind) return false;
-  return a.kind !== 'joint' || a.name === (b as { kind: 'joint'; name: string }).name;
+  if (a.kind === 'joint') return a.name === (b as { kind: 'joint'; name: string }).name;
+  if (a.kind === 'lightTip' || a.kind === 'lightAim') return a.id === (b as { kind: 'lightTip' | 'lightAim'; id: string }).id;
+  return true; // pivot — only one
 }
 
 /** A fresh joint name unique within the mesh: joint_1, joint_2, … (req_1025). */

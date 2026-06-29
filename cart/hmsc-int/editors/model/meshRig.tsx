@@ -8,23 +8,55 @@
 
 import { useInterval, useRerender } from '@reactjit/hooks';
 import { Box, Text } from '@reactjit/primitives';
-import { jointTravelDegrees, type EditMesh, type MountPoint, type V3 } from './editMesh';
+import { jointTravelDegrees, type EditMesh, type LightRig, type MountPoint, type V3 } from './editMesh';
 import { anchorFacing, anchorRole, isAnchor } from './anchors';
 import { makeProjector, type CameraSnap } from './meshSelect';
 
 const DEG = Math.PI / 180;
 
-/** which rig handle is selected: the part's one pivot, or a joint by name. */
-export type RigSel = { kind: 'pivot' } | { kind: 'joint'; name: string };
+/** which rig handle is selected: the part's one pivot, a joint by name, or — for an
+ *  authored light (req_2063) — its TIP (move the light) or its AIM (point a spot).
+ *  Lights ride the EXACT same handle machinery the pivot does: drag the tip to move
+ *  it, drag the aim ball to aim it, instead of typing x/y/z. */
+export type RigSel =
+  | { kind: 'pivot' }
+  | { kind: 'joint'; name: string }
+  | { kind: 'lightTip'; id: string }
+  | { kind: 'lightAim'; id: string };
+
+/** One light's draggable handles in WORLD space (lift baked in). `aim` is null for
+ *  an omni bulb (nothing to point). */
+export type LightHandle = { id: string; kind: 'point' | 'spot'; color: string; tip: V3; aim: V3 | null };
 
 const PIVOT_COLOR = '#ff8a3d';
 const JOINT_COLOR = '#4aa3ff';
 const ANCHOR_COLOR = '#3fd6c0'; // teal — a FIXED seat/anchor (req_1244), vs the blue rotating joint
+const LIGHT_COLOR = '#ffd27d'; // warm — an authored light handle (req_2063)
 const SEL_COLOR = '#ffd24a';
 const AXIS_M = 0.18;   // how far the spin-axis arrow reaches, in meters
+/** how far a spot's AIM handle floats from its tip, in world units (req_2063). The
+ *  distance is cosmetic — only the tip→aim DIRECTION is read back as the light dir. */
+export const AIM_LEN_M = 0.7;
 const GRAB_PX = 16;    // screen-space pick radius around a handle
 
 type Proj = (p: V3) => { x: number; y: number; depth: number; front: boolean };
+
+/** Unit-length copy of v (or +Y if degenerate). */
+function unit3(v: V3): V3 {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+}
+
+/** Every light's WORLD-space handles (tip + aim) for a part at `lift` (req_2063). */
+export function lightHandles(m: EditMesh, lift: number): LightHandle[] {
+  return (m.lights ?? []).map((l) => {
+    const tip: V3 = [l.position[0], l.position[1] + lift, l.position[2]];
+    const aim: V3 | null = l.kind === 'spot'
+      ? (() => { const d = unit3(l.dir ?? [0, -1, 0]); return [tip[0] + d[0] * AIM_LEN_M, tip[1] + d[1] * AIM_LEN_M, tip[2] + d[2] * AIM_LEN_M]; })()
+      : null;
+    return { id: l.id, kind: l.kind, color: l.color, tip, aim };
+  });
+}
 
 /** World positions of every rig handle (the part `lift` already baked in) — the
  *  pick + the overlay share this so a handle and its hit-box never drift. A part
@@ -39,7 +71,7 @@ export function rigHandles(m: EditMesh, pivotLocal: V3 | null, lift: number): { 
 /** Screen-space nearest rig handle under (cx,cy) — the pivot or a joint by name,
  *  or null (a miss → orbit). Nearest wins; the pivot (when present) is included
  *  like any handle. `pivotW` is null on a pivot-less part. */
-export function pickRigHandle(pivotW: V3 | null, joints: { name: string; pos: V3 }[], proj: Proj, cx: number, cy: number): RigSel | null {
+export function pickRigHandle(pivotW: V3 | null, joints: { name: string; pos: V3 }[], lights: LightHandle[], proj: Proj, cx: number, cy: number): RigSel | null {
   let best: RigSel | null = null;
   let bestD = GRAB_PX;
   if (pivotW) { const p = proj(pivotW); if (p.front) { const d = Math.hypot(cx - p.x, cy - p.y); if (d < bestD) { bestD = d; best = { kind: 'pivot' }; } } }
@@ -48,6 +80,16 @@ export function pickRigHandle(pivotW: V3 | null, joints: { name: string; pos: V3
     if (!q.front) continue;
     const d = Math.hypot(cx - q.x, cy - q.y);
     if (d < bestD) { bestD = d; best = { kind: 'joint', name: j.name }; }
+  }
+  // Light handles: the aim ball is checked first so it stays grabbable even when it
+  // overlaps the tip at a steep angle (the tip is the bigger target behind it).
+  for (const lt of lights) {
+    if (lt.aim) {
+      const a = proj(lt.aim);
+      if (a.front) { const d = Math.hypot(cx - a.x, cy - a.y); if (d < bestD) { bestD = d; best = { kind: 'lightAim', id: lt.id }; } }
+    }
+    const t = proj(lt.tip);
+    if (t.front) { const d = Math.hypot(cx - t.x, cy - t.y); if (d < bestD) { bestD = d; best = { kind: 'lightTip', id: lt.id }; } }
   }
   return best;
 }
@@ -83,11 +125,32 @@ function Tag(props: { x: number; y: number; text: string; color: string }) {
  *  type·travel label). Self-ticks so it tracks the orbit without re-rendering the
  *  Scene3D tree (the SelectionOverlay/TransformGizmo idiom). `pivotW`/`joints`
  *  carry the live (draft-aware) world positions; the parent re-renders on drag. */
-export function RigOverlay(props: { pivotW: V3 | null; joints: { name: string; pos: V3; mount: MountPoint }[]; sel: RigSel | null; camSnap: () => CameraSnap }) {
+export function RigOverlay(props: { pivotW: V3 | null; joints: { name: string; pos: V3; mount: MountPoint }[]; lights?: LightHandle[]; sel: RigSel | null; camSnap: () => CameraSnap }) {
   const repaint = useRerender();
   useInterval(repaint, 33);
   const proj = makeProjector(props.camSnap());
   const out: any[] = [];
+
+  // Authored lights (req_2063): a TIP handle (move the light) + for a spot an AIM
+  // arrow ending in a draggable ball (point it). Drawn first so the pivot/joints
+  // sit on top. The tip wears the light's own colour so you can tell them apart.
+  for (const lt of props.lights ?? []) {
+    const t = proj(lt.tip);
+    if (!t.front) continue;
+    const tipSel = props.sel?.kind === 'lightTip' && props.sel.id === lt.id;
+    const aimSel = props.sel?.kind === 'lightAim' && props.sel.id === lt.id;
+    if (lt.aim) {
+      const a = proj(lt.aim);
+      if (a.front) {
+        out.push(<Line key={`la${lt.id}`} ax={t.x} ay={t.y} bx={a.x} by={a.y} color={aimSel ? SEL_COLOR : LIGHT_COLOR} thick={2} />);
+        out.push(<Ball key={`lab${lt.id}`} x={a.x} y={a.y} r={aimSel ? 4 : 3} color={aimSel ? SEL_COLOR : LIGHT_COLOR} />);
+      }
+    }
+    // tip: a ring in the light's colour (selected → amber), with a small filled core.
+    out.push(<Ball key={`ltr${lt.id}`} x={t.x} y={t.y} r={6} color={tipSel ? SEL_COLOR : LIGHT_COLOR} hollow />);
+    out.push(<Ball key={`ltc${lt.id}`} x={t.x} y={t.y} r={2.5} color={lt.color} />);
+    if (tipSel || aimSel) out.push(<Tag key={`ll${lt.id}`} x={t.x} y={t.y} text={lt.kind === 'spot' ? 'light · drag tip / aim' : 'light'} color={SEL_COLOR} />);
+  }
 
   // mounts first (so the pivot draws on top — it's the primary handle). Each is
   // selected via the shared name-addressed handle path (RigSel.kind 'joint'),
