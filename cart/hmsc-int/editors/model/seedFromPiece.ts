@@ -94,12 +94,46 @@ function addRamp(verts: V3[], faces: EditMeshFace[], ramp: VisualRamp): void {
 
 /** Which visual shapes seed into the editable mesh — structural cores only. */
 function seedableShapes(shapes: readonly VisualShape[]): VisualShape[] {
+  // THINWALL (req_2044): a paper-thin wall has NO structural core — it renders as
+  // two `.front`/`.back` HALF-DEPTH boxes that ARE the solid, not render-only skin
+  // plates. Without this, isFacePlate would skip both and the seed came out empty
+  // (0v/0f). So keep face plates only when the piece has no other structural box;
+  // a fat wall still keeps its `.core` and skips its proud `.front`/`.back` plates.
+  const hasCore = shapes.some((s) =>
+    (s.kind === 'box' || s.kind === 'gable') && !isFacePlate(s.box) && !isNonSolid(s.box));
   return shapes.filter((s) => {
     if (s.kind === 'ramp') return true;
     // gable end / box / corner miter all carry a `box`; keep structural box cores.
     if (s.kind === 'cornerMiter' || s.kind === 'cornerMiterMirror') return false; // join-only, never on a lone piece
-    return !isFacePlate(s.box) && !isNonSolid(s.box);
+    if (isNonSolid(s.box)) return false;
+    if (isFacePlate(s.box)) return !hasCore;
+    return true;
   });
+}
+
+/** THINWALL (req_2044): a thin wall renders as two HALF-DEPTH `.front`/`.back`
+ *  boxes per band. For an editable seed we want ONE clean solid per band, not two
+ *  glued halves — so pair them back up. They are symmetric about the band
+ *  centerline, so the union is exactly the full-depth box: the midpoint of the two
+ *  centers, with the depths summed. Boxes with no `.front`/`.back` partner (a fat
+ *  wall's `.core`, a floor's edge core, a ramp) pass through untouched. */
+function coalesceWallHalves(shapes: readonly VisualShape[]): VisualShape[] {
+  const fronts = new Map<string, VisualBox>();
+  const backs = new Map<string, VisualBox>();
+  const out: VisualShape[] = [];
+  for (const s of shapes) {
+    if (s.kind === 'box' && s.box.key.endsWith('.front')) fronts.set(s.box.key.slice(0, -'.front'.length), s.box);
+    else if (s.kind === 'box' && s.box.key.endsWith('.back')) backs.set(s.box.key.slice(0, -'.back'.length), s.box);
+    else out.push(s);
+  }
+  for (const [prefix, f] of fronts) {
+    const b = backs.get(prefix);
+    if (!b) { out.push({ kind: 'box', box: f }); continue; }
+    backs.delete(prefix);
+    out.push({ kind: 'box', box: { ...f, key: `${prefix}.solid`, cx: (f.cx + b.cx) / 2, cy: (f.cy + b.cy) / 2, cz: (f.cz + b.cz) / 2, sz: f.sz + b.sz } });
+  }
+  for (const b of backs.values()) out.push({ kind: 'box', box: b });
+  return out;
 }
 
 type DoorDef = { size: { widthMeters: number; heightMeters: number; depthMeters: number } };
@@ -175,7 +209,7 @@ export function seedMeshFromPiece(pieceId: string, edit?: string): EditMesh {
   // behind a black panel) so the seed is a wall-with-a-door, not a flat block.
   if (def && (seedEdit === 'door' || seedEdit === 'garageDoor')) return carveDoorWall(def, seedEdit);
   const piece = { pieceId, x: 0, y: 0, z: 0, yawDegrees: 0, ...(seedEdit ? { edit: seedEdit as never } : {}) };
-  for (const shape of seedableShapes(pieceVisualShapes(piece, 'seed'))) {
+  for (const shape of coalesceWallHalves(seedableShapes(pieceVisualShapes(piece, 'seed')))) {
     if (shape.kind === 'ramp') addRamp(verts, faces, shape.ramp);
     else addBox(verts, faces, shape.box);
   }

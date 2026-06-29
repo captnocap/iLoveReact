@@ -10,6 +10,7 @@
 // a ramp seeds a wedge whose top actually slopes.
 
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
+import { GAME_BUILD } from '@game';
 import { seedMeshFromPiece, seedNameFromPiece, seedPartsFromPiece, isDoorLeafPartName } from './seedFromPiece';
 import type { EditMesh, V3 } from './editMesh';
 
@@ -28,7 +29,7 @@ test('a plain wall seeds one clean box at the catalog footprint, sitting on the 
   assertClose(b.size[0], 3, 1e-6, 'wall width 3m');
   assertClose(b.size[1], 3, 1e-6, 'wall height 3m');
   assertClose(b.min[1], 0, 1e-6, 'base rests on y=0 (no WALLTOP lift with no neighbours)');
-  assert(b.size[2] > 0.05 && b.size[2] < 0.6, 'wall thickness is the slab depth, not a slab plate');
+  assertClose(b.size[2], GAME_BUILD.catalog.get('wall.concrete.common').size.depthMeters, 1e-6, 'wall thickness is the full catalog slab depth (paper-thin now), not a render face plate');
 });
 
 test('a window-edit wall seeds the wall WITH the opening, dropping the glass + door leaf', () => {
