@@ -15,7 +15,7 @@ import { T } from '../config';
 import { Z } from '../chrome/zlayers';
 import {
   base64ToBytes, glbToSoup, objToSoup, decimateSoup, soupToEditMesh, soupTriCount,
-  gridForTargetTris, MAX_IMPORT_TRIS, type MeshSoup,
+  gridForTargetTris, normalizeStudioImport, MAX_IMPORT_TRIS, type MeshSoup,
 } from '../../importMesh';
 import { unwrap, type EditMesh } from '../../editMesh';
 import { readFile, readFileBase64 } from '@reactjit/hooks/fs';
@@ -83,7 +83,8 @@ export function ImportModelDialog(props: { defaultPath: string; onCancel: () => 
     const soup = soupRef.current;
     if (!soup || !path) return;
     try {
-      const mesh = unwrap(soupToEditMesh(decimateSoup(soup, grid))); // soupToEditMesh guards MAX_IMPORT_TRIS
+      // decimate → guard budget → sanitize+center+scale into the Studio frame → unwrap
+      const mesh = unwrap(normalizeStudioImport(soupToEditMesh(decimateSoup(soup, grid))));
       if (!mesh.faces.length) throw new Error('no triangles in mesh');
       const name = (path.split('/').pop() || 'imported').replace(/\.[^.]+$/, '');
       props.onConfirm(mesh, name);

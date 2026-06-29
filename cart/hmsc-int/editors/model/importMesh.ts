@@ -407,6 +407,55 @@ export function soupToEditMesh(s: MeshSoup): EditMesh {
   return { verts, faces };
 }
 
+// External models carry no notion of the Studio's "16 u = 1 m" scale, sit at
+// whatever world offset they were exported at, and can contain a stray non-finite
+// vertex (a malformed OBJ token / bad accessor). Any of those blanks the Studio
+// viewport to black — grid and all — because addPart does NO normalization, the
+// camera clamps its framing distance (maxDistance), and a NaN vertex poisons the
+// whole view matrix. This brings every import into a sane, visible state.
+const IMPORT_TARGET_EXTENT = 16; // longest bbox axis → 1 tile (1 m); always frames in the Studio camera
+
+/** Sanitize + place an imported EditMesh for the Studio: drop non-finite verts (and
+ *  the faces touching them), center the model on the XZ origin, seat its base at
+ *  Y=0, and uniformly scale so its longest axis spans one tile. Run BEFORE unwrap so
+ *  UV islands are built on the final geometry. Throws if nothing finite survives. */
+export function normalizeStudioImport(mesh: EditMesh): EditMesh {
+  const keep = new Int32Array(mesh.verts.length).fill(-1);
+  const verts: V3[] = [];
+  for (let i = 0; i < mesh.verts.length; i += 1) {
+    const v = mesh.verts[i];
+    if (Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])) {
+      keep[i] = verts.length;
+      verts.push([v[0], v[1], v[2]]);
+    }
+  }
+  if (!verts.length) throw new Error('mesh has no valid geometry (all vertices were non-finite)');
+
+  let minx = Infinity, miny = Infinity, minz = Infinity;
+  let maxx = -Infinity, maxy = -Infinity, maxz = -Infinity;
+  for (const v of verts) {
+    if (v[0] < minx) minx = v[0]; if (v[0] > maxx) maxx = v[0];
+    if (v[1] < miny) miny = v[1]; if (v[1] > maxy) maxy = v[1];
+    if (v[2] < minz) minz = v[2]; if (v[2] > maxz) maxz = v[2];
+  }
+  const longest = Math.max(maxx - minx, maxy - miny, maxz - minz) || 1;
+  const s = IMPORT_TARGET_EXTENT / longest;
+  const cx = (minx + maxx) / 2, cz = (minz + maxz) / 2;
+  for (const v of verts) {
+    v[0] = (v[0] - cx) * s;
+    v[1] = (v[1] - miny) * s; // base seated on the ground plane
+    v[2] = (v[2] - cz) * s;
+  }
+
+  const faces: EditMeshFace[] = [];
+  for (const f of mesh.faces) {
+    const loop = f.loop.map((j) => keep[j]);
+    if (loop.some((j) => j < 0)) continue; // touched a dropped vert
+    faces.push({ ...f, loop });
+  }
+  return { verts, faces };
+}
+
 /** Lift a triangle set into an EditMesh: weld coincident positions (so the mesh is
  *  connected — adjacency, mirror, and editing all key off shared verts) and make one
  *  3-corner face per non-degenerate triangle. `weld` is the position quantization
@@ -465,11 +514,11 @@ export function objToTriangles(text: string): RawTriangles {
  *  by MAX_IMPORT_TRIS. The Studio import dialog uses the soup + Detail-slider path
  *  instead so the user can dial big meshes down before this runs. */
 export function glbToEditMesh(bytes: Uint8Array): EditMesh {
-  return unwrap(soupToEditMesh(glbToSoup(bytes)));
+  return unwrap(normalizeStudioImport(soupToEditMesh(glbToSoup(bytes))));
 }
 
 /** Convenience: OBJ text → unwrapped EditMesh, full detail (no decimation), guarded
  *  by MAX_IMPORT_TRIS. */
 export function objToEditMesh(text: string): EditMesh {
-  return unwrap(soupToEditMesh(objToSoup(text)));
+  return unwrap(normalizeStudioImport(soupToEditMesh(objToSoup(text))));
 }

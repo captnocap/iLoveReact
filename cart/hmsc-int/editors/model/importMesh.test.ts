@@ -3,7 +3,7 @@
 // carries a uv (the pixel painter's hard requirement).
 
 import { assert, assertEqual, assertThrows, finish, test } from '../../game/_testkit';
-import { trianglesToEditMesh, glbToTriangles, objToTriangles, objToEditMesh, base64ToBytes, objToSoup, decimateSoup, soupToEditMesh, soupTriCount, gridForTargetTris, MAX_IMPORT_TRIS, type RawTriangles } from './importMesh';
+import { trianglesToEditMesh, glbToTriangles, objToTriangles, objToEditMesh, base64ToBytes, objToSoup, decimateSoup, soupToEditMesh, soupTriCount, gridForTargetTris, normalizeStudioImport, MAX_IMPORT_TRIS, type RawTriangles } from './importMesh';
 import { unwrap, type V3 } from './editMesh';
 
 test('welds coincident positions and makes one face per triangle', () => {
@@ -134,6 +134,38 @@ test('objToSoup matches the RawTriangles parse', () => {
   const soup = objToSoup(obj);
   assertEqual(soupTriCount(soup), 2, 'two triangles from the quad');
   assertEqual(soup.positions.length / 3, 4, 'four verts');
+});
+
+test('normalizeStudioImport centers, seats, and scales to one tile', () => {
+  // A 100-unit triangle parked far from the origin (world offset 1000) — the kind of
+  // export that lands outside the Studio camera and renders black.
+  const mesh = {
+    verts: [[1000, 50, 1000], [1100, 50, 1000], [1000, 50, 1100]] as V3[],
+    faces: [{ loop: [0, 1, 2] }],
+  };
+  const n = normalizeStudioImport(mesh);
+  let minx = Infinity, miny = Infinity, minz = Infinity, maxx = -Infinity, maxy = -Infinity, maxz = -Infinity;
+  for (const v of n.verts) {
+    minx = Math.min(minx, v[0]); maxx = Math.max(maxx, v[0]);
+    miny = Math.min(miny, v[1]); maxy = Math.max(maxy, v[1]);
+    minz = Math.min(minz, v[2]); maxz = Math.max(maxz, v[2]);
+  }
+  const longest = Math.max(maxx - minx, maxy - miny, maxz - minz);
+  assert(Math.abs(longest - 16) < 1e-3, 'longest axis scaled to one tile (16 u)');
+  assert(Math.abs((minx + maxx) / 2) < 1e-3, 'X centered on origin');
+  assert(Math.abs((minz + maxz) / 2) < 1e-3, 'Z centered on origin');
+  assert(Math.abs(miny) < 1e-3, 'base seated on the ground plane');
+});
+
+test('normalizeStudioImport drops non-finite verts (NaN would black the viewport)', () => {
+  const mesh = {
+    verts: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [NaN, 0, 0], [Infinity, 1, 1]] as V3[],
+    faces: [{ loop: [0, 1, 2] }, { loop: [0, 3, 1] }, { loop: [3, 4, 0] }],
+  };
+  const n = normalizeStudioImport(mesh);
+  assertEqual(n.verts.length, 3, 'the two non-finite verts are dropped');
+  assertEqual(n.faces.length, 1, 'only the face with all-finite verts survives');
+  for (const v of n.verts) for (const c of v) assert(Number.isFinite(c), 'no non-finite coordinate remains');
 });
 
 finish('importMesh');
