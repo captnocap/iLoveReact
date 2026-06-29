@@ -96,6 +96,26 @@ pub fn size() [2]u32 {
     return .{ g_width, g_height };
 }
 
+/// Reconcile the wgpu surface + render dims with the OS window's ACTUAL pixel
+/// size. Called every frame so resize/maximize self-heal even when the WM does
+/// not deliver SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED during a live drag (which
+/// otherwise leaves the swapchain at the old size → the WM tears/stretches the
+/// stale frame and the window appears stuck at its launch size).
+pub fn syncSize() void {
+    const w = g_window orelse return;
+    var pw: c_int = 0;
+    var ph: c_int = 0;
+    _ = c.SDL_GetWindowSizeInPixels(w, &pw, &ph);
+    const nw: u32 = @intCast(@max(1, pw));
+    const nh: u32 = @intCast(@max(1, ph));
+    if (nw == g_width and nh == g_height) return;
+    g_width = nw;
+    g_height = nh;
+    if (g_surface) |s| {
+        g_surface_format = gpu.configureExtraSurface(s, g_width, g_height) orelse g_surface_format;
+    }
+}
+
 /// Open the pop-out (or just raise it when already open). Width/height are the
 /// initial size; the user resizes from there.
 pub fn open(width: u32, height: u32) !void {

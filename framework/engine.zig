@@ -2156,6 +2156,9 @@ fn panelPaintCallback() void {
 /// size, paints it into a gpu RT, and blits that RT into the window's swapchain.
 fn renderPanelWindow() void {
     if (!panel_window.isOpen()) return;
+    // Reconcile surface + RT dims with the real window size every frame so
+    // resize/maximize follow even when the WM withholds PIXEL_SIZE_CHANGED.
+    panel_window.syncSize();
     const provider = g_panel_root_provider orelse return;
     const root = provider() orelse {
         g_panel_root_cached = null;
