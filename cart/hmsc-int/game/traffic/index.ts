@@ -1,211 +1,224 @@
-// game/traffic/ — GAME_TRAFFIC: ambient road traffic, slice 1 (vehicles).
+// game/traffic/ — GAME_TRAFFIC: ambient road traffic, baked for the no-V8
+// compiled world (req_2056, native re-home).
 //
-// The doctrine (V5): "pathing_lab's host A* + deterministic motion plans are
-// the START of the real traffic and civilian systems … ALL NPC pathing is
-// deterministic until a game-state change." This module is that seed. Each
-// vehicle agent is a DETERMINISTIC motion plan along a host-A* route: position
-// is a pure function of time (runtime/motion sampleMotion) until the plan ends
-// and the agent retargets. No per-frame integration, no allocation in the hot
-// path — the same plan-once/sample-exactly contract the player's locomotion and
-// the cutscene rails already ride.
+// The user checks the world through the compiled native loader, not React — so
+// traffic is BAKED, not a runtime React layer ([[compiled_world_animated_content]]).
+// At bake time we generate looping vehicle routes PURELY (the headless bake has
+// no host A*): build the nav grid from the painted map (GAME_WORLD.bakeNavGrid),
+// then FLOW-FOLLOW the directional lane tiles — a vehicle drives with the lane
+// flow, holds its side (never enters an opposing-flow cell), and turns at
+// junctions. Each baked vehicle is a closed route polyline + a cruise speed + a
+// phase offset; world_loader.zig samples it per frame (arc-length mod loop
+// length) and rebuilds the vehicle's instance rows — the LED-ticker pattern.
 //
-// THE PIPELINE the user named ("we already have road pathing, start there"):
-//   1. the live nav publish (NAVLIVE-0610) bakes the active map → host A* grid
-//      with the VEHICLE profile (right-hand lane discipline, wrong-way penalty);
-//   2. roadCellsFromNav reads that baked grid back for vehicle-road cells — the
-//      spawn/destination pool;
-//   3. createTrafficSim seeds N agents, routes each between road cells via
-//      GAME_PATHING.find, and drives it with GAME_PATHING.planMotion;
-//   4. the render layer samples each agent's pose per frame.
-//
-// The V21 ambient end-state (token-dictionary micro-paths, population
-// homeostasis) supersedes the per-agent A* here for the FROZEN world at scale —
-// this is the live, in-bubble traffic the deterministic seed buys first.
+// This is the V5/V21 doctrine made concrete: deterministic, precomputed routes
+// (closed-form until a game-state change), no per-frame pathfinding.
 
-import { TILE_KINDS, tileKindDefinition } from '../kinds';
+import { TILE_KINDS, tileFlowVector, tileKindDefinition, type TileKind } from '../kinds';
 import type { NavGrid } from '../world/navGrid';
-import { GAME_PATHING } from '../pathing';
-import type { MotionPlan, MotionProfile, Path, PathPoint } from '../pathing';
 import { makeVehicle, type VehicleDoc } from '../vehicle';
 import { seededRng } from '../chance';
 
 /** Gameplay knobs — P2 (no inline magic values; one registered table). */
 export const TRAFFIC_TUNING = {
-  /** the city driving feel — modest top speed, gentle throttle/brakes (m/s, m/s²). */
-  vehicleProfile: { maxSpeed: 9, accel: 3, decel: 5, minCornerSpeed: 2 } as MotionProfile,
-  /** cap on road cells scanned out of the baked grid (the spawn/dest pool). */
+  /** city cruise speed range (m/s) — each vehicle samples within. */
+  cruiseSpeedMin: 5,
+  cruiseSpeedMax: 9,
+  /** a baked circuit must be at least this long (m) to be worth driving. */
+  minCircuitMeters: 24,
+  /** trace ceiling — stop following flow after this many cells (loop or bust). */
+  maxCircuitCells: 4096,
+  /** how many start cells to try before giving up on populating a vehicle. */
+  seedAttempts: 24,
+  /** cap on road cells scanned out of the baked grid. */
   maxRoadPoints: 4096,
-  /** a retarget route shorter than this (m) is rejected — keep trips worth driving. */
-  minTripMeters: 12,
-  /** how many destinations to try before an agent gives up this tick. */
-  retargetAttempts: 6,
 } as const;
 
-/** A road cell center in world space, pulled from the baked nav grid. */
-export type RoadPoint = PathPoint;
+/** A grid step direction (cells). */
+type Step = { dx: number; dz: number };
+const STEPS: readonly Step[] = [{ dx: 1, dz: 0 }, { dx: -1, dz: 0 }, { dx: 0, dz: 1 }, { dx: 0, dz: -1 }];
 
-/**
- * Every vehicle-preferred road cell center in the baked nav grid, in world
- * space. "Road" = the kind's npc profile is `preferredByVehicles` (lanes,
- * junctions, plain road) — the same registry flag the A* cost table reads, so
- * the pool and the routing agree by construction. Strided to `maxRoadPoints`
- * when a window is dense, and the truncation is the caller's to notice (the
- * count is returned).
- */
-export function roadCellsFromNav(
-  grid: NavGrid,
-  maxPoints = TRAFFIC_TUNING.maxRoadPoints,
-): RoadPoint[] {
-  const isRoadKind = roadKindMask();
+/** A baked vehicle route: world-space corner points; `closed` = loops cleanly. */
+export type TrafficRoute = {
+  points: [number, number][];
+  closed: boolean;
+  /** total arc length (m). */
+  length: number;
+};
+
+/** One baked vehicle: a visual doc + its looping route + cruise speed + phase. */
+export type BakedVehicle = {
+  doc: VehicleDoc;
+  route: TrafficRoute;
+  /** constant cruise speed (m/s). */
+  speed: number;
+  /** arc-length head start (m) so cars don't stack at the route origin. */
+  phase: number;
+};
+
+// ── road / flow grid helpers (TILE_KINDS-indexed, computed once) ────────────
+
+/** Is this kind a vehicle road? (lanes, junctions, plain road.) */
+function roadKindMask(): boolean[] {
+  return TILE_KINDS.map((k) => tileKindDefinition(k as TileKind).npc.preferredByVehicles === true);
+}
+
+/** Per-kind flow step (null where flow-neutral — junctions, plain road). */
+function flowStepTable(): (Step | null)[] {
+  return TILE_KINDS.map((k) => {
+    const v = tileFlowVector(k as TileKind);
+    return v ? { dx: Math.sign(v.dx), dz: Math.sign(v.dz) } : null;
+  });
+}
+
+/** Every vehicle-road cell center in world space — the spawn/seed pool. */
+export function roadCellsFromNav(grid: NavGrid, maxPoints = TRAFFIC_TUNING.maxRoadPoints): [number, number][] {
+  const isRoad = roadKindMask();
   const [ox, oz] = grid.origin;
   const cell = grid.cellSize;
-  const points: RoadPoint[] = [];
+  const points: [number, number][] = [];
   for (let z = 0; z < grid.rows; z++) {
     for (let x = 0; x < grid.cols; x++) {
-      const idx = grid.kinds[z * grid.cols + x];
-      if (!isRoadKind[idx]) continue;
+      if (!isRoad[grid.kinds[z * grid.cols + x]]) continue;
       points.push([ox + (x + 0.5) * cell, oz + (z + 0.5) * cell]);
     }
   }
   if (points.length <= maxPoints) return points;
-  // Even stride keeps the pool spread across the window instead of clipping a corner.
   const stride = Math.ceil(points.length / maxPoints);
-  const strided: RoadPoint[] = [];
-  for (let i = 0; i < points.length; i += stride) strided.push(points[i]);
-  return strided;
+  return points.filter((_, i) => i % stride === 0);
 }
 
-/** TILE_KINDS-indexed boolean: is this kind a vehicle road? (computed once.) */
-function roadKindMask(): boolean[] {
-  const mask = new Array<boolean>(TILE_KINDS.length);
-  for (let i = 0; i < TILE_KINDS.length; i++) {
-    mask[i] = tileKindDefinition(TILE_KINDS[i]).npc.preferredByVehicles === true;
-  }
-  return mask;
-}
-
-/** One live traffic agent: a vehicle visual + its current motion plan. */
-export type TrafficAgent = {
-  id: string;
-  doc: VehicleDoc;
-  /** the live deterministic plan; null between retargets (stationary that tick). */
-  plan: MotionPlan | null;
-  /** where the next route starts from (last sampled position). */
-  at: PathPoint;
-  /** the grid generation the live plan's route was found at (disruption check). */
-  routeGeneration: number;
-};
-
-/** A pose read for one agent at a time t — what the render layer draws. */
-export type TrafficPose = {
-  id: string;
-  doc: VehicleDoc;
-  x: number;
-  z: number;
-  /** travel heading in degrees (atan2(dx,dz) — forward = [sin,cos]). */
-  headingDeg: number;
-  speed: number;
-};
-
-export type TrafficFindPath = (profileId: number, from: PathPoint, to: PathPoint) => Path | null;
-
-export type TrafficSimOptions = {
-  /** the baked nav grid (GAME_WORLD.publishNavGrid().grid). */
-  grid: NavGrid;
-  /** how many vehicles to populate. */
-  count: number;
-  /** reproducibility seed. */
-  seed: number;
-  /** the nav VEHICLE profile id (GAME_WORLD.navProfiles.vehicle). */
-  vehicleProfile: number;
-  /** authored garage docs to draw from, cycled; falls back to makeVehicle(seed). */
-  garage?: readonly VehicleDoc[];
-  /** host A* (injected for tests); defaults to GAME_PATHING.find. */
-  find?: TrafficFindPath;
-};
+// ── the flow-follow circuit tracer (pure, headless) ─────────────────────────
 
 /**
- * The live traffic sim. `advance(now)` keeps every agent on a route (retargets
- * the moment a plan finishes or its route is disrupted); `poses(now)` reads the
- * exact pose of each agent at time t. Deterministic for a given seed + grid.
+ * Follow lane flow from a start cell into a route polyline. The walk holds the
+ * lane discipline: it never steps into a cell whose flow OPPOSES travel (the
+ * oncoming lane), prefers going straight, and turns at junctions / lane ends.
+ * Returns a closed loop when the walk returns to its start, else the open path
+ * it managed (the loader wraps either way). null if the start can't move.
  */
-export type TrafficSim = {
-  agents: TrafficAgent[];
-  /** count of road cells the spawn/dest pool was drawn from. */
-  roadPointCount: number;
-  advance(now: number): void;
-  poses(now: number): TrafficPose[];
-};
+export function traceFlowCircuit(grid: NavGrid, start: [number, number]): TrafficRoute | null {
+  const isRoad = roadKindMask();
+  const flow = flowStepTable();
+  const { cols, rows, kinds } = grid;
+  const [ox, oz] = grid.origin;
+  const cellM = grid.cellSize;
 
-export function createTrafficSim(opts: TrafficSimOptions): TrafficSim {
-  const find = opts.find ?? GAME_PATHING.find;
-  const profile = TRAFFIC_TUNING.vehicleProfile;
-  const roadPoints = roadCellsFromNav(opts.grid);
-  const rng = seededRng(opts.seed);
-  const agents: TrafficAgent[] = [];
+  const at = (x: number, z: number): number => (x < 0 || z < 0 || x >= cols || z >= rows ? -1 : kinds[z * cols + x]);
+  const road = (x: number, z: number): boolean => { const k = at(x, z); return k >= 0 && isRoad[k]; };
+  const opposes = (x: number, z: number, dir: Step): boolean => {
+    const f = at(x, z) >= 0 ? flow[at(x, z)] : null;
+    return !!f && (f.dx * dir.dx + f.dz * dir.dz) < 0; // entering against the lane
+  };
 
-  const randomRoadPoint = (): RoadPoint | null =>
-    roadPoints.length ? roadPoints[Math.floor(rng() * roadPoints.length)] : null;
+  const [sx, sz] = start;
+  if (!road(sx, sz)) return null;
+  // initial heading: the start's own flow, else the first legal neighbor.
+  let dir = (at(sx, sz) >= 0 ? flow[at(sx, sz)] : null) ?? STEPS.find((s) => road(sx + s.dx, sz + s.dz) && !opposes(sx + s.dx, sz + s.dz, s)) ?? null;
+  if (!dir) return null;
 
-  for (let i = 0; i < opts.count; i++) {
-    const spawn = randomRoadPoint();
-    if (!spawn) break;
-    const doc = opts.garage && opts.garage.length
-      ? opts.garage[i % opts.garage.length]
-      : makeVehicle(opts.seed + i + 1);
-    agents.push({ id: `traffic.${i}`, doc, plan: null, at: spawn, routeGeneration: 0 });
+  const cellPath: [number, number][] = [[sx, sz]];
+  let cx = sx;
+  let cz = sz;
+  let closed = false;
+  for (let step = 0; step < TRAFFIC_TUNING.maxCircuitCells; step++) {
+    // Candidate steps, best-first: straight, then turns, never a U-turn.
+    const turns = STEPS.filter((s) => !(s.dx === -dir.dx && s.dz === -dir.dz));
+    turns.sort((a, b) => score(b) - score(a));
+    let moved = false;
+    for (const s of turns) {
+      const nx = cx + s.dx;
+      const nz = cz + s.dz;
+      if (!road(nx, nz) || opposes(nx, nz, s)) continue;
+      cx = nx; cz = nz;
+      // a flowed cell snaps the heading to its lane; a neutral cell keeps it.
+      const f = flow[at(nx, nz)];
+      dir = f ?? s;
+      moved = true;
+      break;
+    }
+    if (!moved) break; // dead end — keep the open path so far
+    if (cx === sx && cz === sz && step > 2) { closed = true; break; }
+    cellPath.push([cx, cz]);
   }
 
-  /** Route an agent to a fresh distant road cell and plan its drive. */
-  const retarget = (agent: TrafficAgent, now: number, startSpeed: number): void => {
-    for (let attempt = 0; attempt < TRAFFIC_TUNING.retargetAttempts; attempt++) {
-      const dest = randomRoadPoint();
-      if (!dest) return;
-      if (Math.hypot(dest[0] - agent.at[0], dest[1] - agent.at[1]) < TRAFFIC_TUNING.minTripMeters) continue;
-      const path = find(opts.vehicleProfile, agent.at, dest);
-      if (!path || path.points.length < 2) continue;
-      agent.plan = GAME_PATHING.planMotion(path.points, { startTime: now, profile, startSpeed });
-      agent.routeGeneration = path.generation;
-      return;
-    }
-  };
+  // straight-ahead alignment score: prefer continuing the current heading.
+  function score(s: Step): number {
+    return s.dx * dir.dx + s.dz * dir.dz;
+  }
 
-  return {
-    agents,
-    roadPointCount: roadPoints.length,
-    advance(now: number) {
-      for (const agent of agents) {
-        const plan = agent.plan;
-        if (plan && now - plan.t0 < plan.duration) {
-          // Mid-route: hold the plan unless the grid changed under it.
-          if (!GAME_PATHING.disrupted({ points: plan.points, generation: agent.routeGeneration }, 1)) continue;
-          const cut = GAME_PATHING.sampleMotion(plan, now);
-          agent.at = [cut.x, cut.z];
-          retarget(agent, now, cut.speed);
-          continue;
-        }
-        // No plan, or the plan just finished — settle at the end and drive on.
-        if (plan) {
-          const end = GAME_PATHING.sampleMotion(plan, now);
-          agent.at = [end.x, end.z];
-        }
-        retarget(agent, now, 0);
-      }
-    },
-    poses(now: number): TrafficPose[] {
-      const out: TrafficPose[] = [];
-      for (const agent of agents) {
-        if (!agent.plan) continue;
-        const m = GAME_PATHING.sampleMotion(agent.plan, now);
-        out.push({ id: agent.id, doc: agent.doc, x: m.x, z: m.z, headingDeg: m.headingDeg, speed: m.speed });
-      }
-      return out;
-    },
-  };
+  // Collapse collinear runs to corner points, then convert to world centers.
+  const corners = collapseCollinear(cellPath);
+  const points: [number, number][] = corners.map(([x, z]) => [ox + (x + 0.5) * cellM, oz + (z + 0.5) * cellM]);
+  if (closed && points.length > 1) points.push(points[0]); // close the loop exactly
+  let length = 0;
+  for (let i = 1; i < points.length; i++) length += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+  return { points, closed, length };
+}
+
+/** Drop interior cells that lie on a straight run — keep only the turn corners. */
+function collapseCollinear(cells: readonly [number, number][]): [number, number][] {
+  if (cells.length <= 2) return cells.slice();
+  const out: [number, number][] = [cells[0]];
+  for (let i = 1; i < cells.length - 1; i++) {
+    const [ax, az] = out[out.length - 1];
+    const [bx, bz] = cells[i];
+    const [cx, cz] = cells[i + 1];
+    const turned = (bx - ax) * (cz - bz) - (bz - az) * (cx - bx);
+    if (turned !== 0) out.push(cells[i]);
+  }
+  out.push(cells[cells.length - 1]);
+  return out;
+}
+
+// ── the bake: populate vehicles on flow circuits ────────────────────────────
+
+/**
+ * Generate `count` baked vehicles on looping flow circuits over the nav grid.
+ * Deterministic for a seed. Vehicles draw from the authored garage when given,
+ * else makeVehicle(seed). Returns fewer than `count` only if the map has too
+ * little road to seed them.
+ */
+export function bakeTrafficVehicles(opts: {
+  grid: NavGrid;
+  count: number;
+  seed: number;
+  garage?: readonly VehicleDoc[];
+}): BakedVehicle[] {
+  const rng = seededRng(opts.seed);
+  const isRoad = roadKindMask();
+  const { cols, rows, kinds } = opts.grid;
+  // seed cells = vehicle-road cells with at least one flowed (lane) cell, so the
+  // tracer has a heading to follow.
+  const seeds: [number, number][] = [];
+  const flow = flowStepTable();
+  for (let z = 0; z < rows; z++) {
+    for (let x = 0; x < cols; x++) {
+      const k = kinds[z * cols + x];
+      if (isRoad[k] && flow[k]) seeds.push([x, z]);
+    }
+  }
+  if (!seeds.length) return [];
+
+  const out: BakedVehicle[] = [];
+  for (let i = 0; i < opts.count; i++) {
+    let route: TrafficRoute | null = null;
+    for (let attempt = 0; attempt < TRAFFIC_TUNING.seedAttempts && !route; attempt++) {
+      const seed = seeds[Math.floor(rng() * seeds.length)];
+      const traced = traceFlowCircuit(opts.grid, seed);
+      if (traced && traced.length >= TRAFFIC_TUNING.minCircuitMeters) route = traced;
+    }
+    if (!route) continue;
+    const doc = opts.garage && opts.garage.length ? opts.garage[i % opts.garage.length] : makeVehicle(opts.seed + i + 1);
+    const speed = TRAFFIC_TUNING.cruiseSpeedMin + rng() * (TRAFFIC_TUNING.cruiseSpeedMax - TRAFFIC_TUNING.cruiseSpeedMin);
+    out.push({ doc, route, speed, phase: rng() * route.length });
+  }
+  return out;
 }
 
 export const GAME_TRAFFIC = Object.freeze({
   tuning: TRAFFIC_TUNING,
   roadCellsFromNav,
-  createTrafficSim,
+  traceFlowCircuit,
+  bakeTrafficVehicles,
 });
