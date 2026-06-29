@@ -206,6 +206,14 @@ function resolveMaterialDoc(id: string, assets: DecalAssetSink | undefined): Uin
 type Build = {
   inst: number[];
   mats: number[];
+  /** Per-instance-row WALL flag (req_2053), parallel to `inst` rows: 1 when the
+   *  emitting piece is catalog kind 'wall', else 0. Ships as the WALL_FLAGS lump
+   *  so the editor's build pane can hide walls and edit a building's interior. */
+  walls: number[];
+  /** Transient: set true while a wall piece's shapes are lowering, so the shared
+   *  pushShape stamps `walls` without threading a param through every emit path.
+   *  pushPlacedPieces is the only setter (reset to false between pieces). */
+  wallTag: boolean;
   vocab: MaterialAsset[];
   index: Map<string, number>; // material key → 1-based vocab slot (0 = none)
   /** the bake's content-addressed image collector (DECALIMG-0610) — absent on
@@ -225,7 +233,7 @@ type Build = {
 };
 
 function newBuild(assets?: DecalAssetSink): Build {
-  return { inst: [], mats: [], vocab: [], index: new Map(), assets, interact: createInteractableSink(), dyn: createDynamicPropSink(), meshProps: createImportedMeshPropSink() };
+  return { inst: [], mats: [], walls: [], wallTag: false, vocab: [], index: new Map(), assets, interact: createInteractableSink(), dyn: createDynamicPropSink(), meshProps: createImportedMeshPropSink() };
 }
 
 export type ImportedMeshPropInstance = {
@@ -355,6 +363,7 @@ function pushShape(
 ): void {
   b.inst.push(cx, cy, cz, rotation[0], rotation[1], rotation[2], sx, sy, sz, color[0], color[1], color[2], shapeId);
   b.mats.push(material);
+  b.walls.push(b.wallTag ? 1 : 0);
 }
 
 function pushBox(
@@ -958,9 +967,15 @@ function pushPlacedPieces(b: Build, pieces: readonly PlacedBuildPiece[]): number
       });
       continue;
     }
+    // WALLHIDE req_2053: flag every row this WALL piece lowers so the editor's
+    // build pane can hide walls (set_hide_walls) and edit a building's interior.
+    // Set around the shape loop, cleared after — every other emit (floors,
+    // stairs, painted world) leaves wallTag false, so only walls carry the flag.
+    b.wallTag = def.kind === 'wall';
     for (const shape of pieceVisualShapes(piece, piece.id, pieces)) {
       emitted += pushVisualShape(b, piece, def.material, shape);
     }
+    b.wallTag = false;
   }
   // The elevator CAR is deliberately NOT a static instance row (REQ-0652):
   // the ELEVATORS lump ships the shafts and the loader renders one LIVE car
@@ -1108,6 +1123,9 @@ export type WorldInstanceResult = {
   /** Per-instance-row material slot (1-based into `materials`; 0 = flat color).
    *  Length === total; parallel to the instance rows. */
   materialRefs: Uint32Array;
+  /** Per-instance-row WALL flag (req_2053; 1 = wall piece). Length === total;
+   *  parallel to the instance rows. Drives the editor build pane's hide-walls. */
+  wallFlags: Uint8Array;
   /** The content-addressed material vocab the host materializes at load: each a
    *  WGSL shader + its data[] params. Empty when nothing is material-skinned. */
   materials: MaterialAsset[];
@@ -1281,6 +1299,7 @@ export function buildWorldInstances(
     total: Math.floor(b.inst.length / INSTANCE_STRIDE),
     pieces: pieceCount,
     materialRefs: Uint32Array.from(b.mats),
+    wallFlags: Uint8Array.from(b.walls),
     materials: b.vocab,
     interactables: { archetypes: b.interact.archetypes, instances: b.interact.instances },
     dynamicProps: b.dyn.props,
@@ -1454,6 +1473,17 @@ export function encodeMaterialRefs(refs: Uint32Array): Uint8Array {
   const view = new DataView(out.buffer);
   view.setUint32(0, refs.length, true);
   for (let i = 0; i < refs.length; i += 1) view.setUint32(4 + i * 4, refs[i], true);
+  return out;
+}
+
+/** Encode the WALL_FLAGS lump (req_2053): u32 count | u8[count], one flag per
+ *  instance row (1 = wall piece). The editor build pane's hide-walls collapses
+ *  the flagged rows live in world_loader.zig — see encodeMaterialRefs (the same
+ *  parallel-to-INSTANCES shape, one byte per row instead of four). */
+export function encodeWallFlags(flags: Uint8Array): Uint8Array {
+  const out = new Uint8Array(4 + flags.length);
+  new DataView(out.buffer).setUint32(0, flags.length, true);
+  out.set(flags, 4);
   return out;
 }
 

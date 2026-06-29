@@ -86,6 +86,40 @@ test('compiled placed walls preserve front, back, and side face skins', () => {
   assertEqual(row(built.instances, 0)[12], INSTANCE_SHAPE_BOX, 'the front half is a box instance');
 });
 
+test('WALLHIDE req_2053: wall rows are flagged, floor rows are not, flags align with rows', () => {
+  const wall: PlacedBuildPiece = { id: 'w1', pieceId: 'wall.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0 };
+  const floor: PlacedBuildPiece = { id: 'f1', pieceId: 'floor.concrete.common', x: 4, y: 0, z: 0, yawDegrees: 0 };
+  const built = buildWorldInstances({} as any, [wall, floor], []);
+  // The flag array is parallel to the instance rows (the loader reads them in lockstep).
+  assertEqual(built.wallFlags.length, built.total, 'one wall flag per instance row');
+  assert(built.wallFlags.length > 0, 'something baked');
+  // Every wall row is flagged 1; every floor row 0. The wall lowers to its half-depth
+  // boxes (front+back), the floor to its slab — so we assert by which piece a row came from
+  // via its x position (wall at x=0, floor at x=4).
+  let wallFlagged = 0;
+  let floorRows = 0;
+  for (let i = 0; i < built.total; i += 1) {
+    const cx = row(built.instances, i)[0];
+    const flag = built.wallFlags[i];
+    if (Math.abs(cx) < 2) { // a wall row (near x=0)
+      assertEqual(flag, 1, `wall row ${i} is flagged`);
+      wallFlagged += 1;
+    } else if (Math.abs(cx - 4) < 2) { // a floor row (near x=4)
+      assertEqual(flag, 0, `floor row ${i} is NOT flagged`);
+      floorRows += 1;
+    }
+  }
+  assert(wallFlagged >= 1, 'at least one wall row was flagged');
+  assert(floorRows >= 1, 'at least one floor row was present and unflagged');
+});
+
+test('WALLHIDE req_2053: a wall-free map produces an all-zero wall-flag set', () => {
+  const floor: PlacedBuildPiece = { id: 'f1', pieceId: 'floor.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0 };
+  const built = buildWorldInstances({} as any, [floor], []);
+  assertEqual(built.wallFlags.length, built.total, 'flags parallel to rows');
+  assert(!built.wallFlags.some((f) => f !== 0), 'no row is a wall (packageMap then omits the lump)');
+});
+
 test('turned window and doorway walls put front/back skins on the same sides as the building workspace', () => {
   for (const [pieceId, edit] of [
     ['wall.stucco.window', 'window'],

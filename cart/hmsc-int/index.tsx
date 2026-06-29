@@ -235,6 +235,19 @@ function EditorShell() {
       return n;
     });
   }, []);
+  // WALLHIDE req_2053: the build pane's "disable walls" toggle — hide every wall piece so you
+  // can see + edit a building's interior (the JS editor had this; ported to the native loader).
+  // Persisted like autoCompile so it survives reloads/map switches.
+  const [hideWalls, setHideWallsState] = useState(() => {
+    try { return nsGet('hmsc', 'editor.hideWalls') === '1'; } catch { return false; } // default OFF
+  });
+  const setHideWalls = useCallback((next: boolean | ((v: boolean) => boolean)) => {
+    setHideWallsState((v) => {
+      const n = typeof next === 'function' ? next(v) : next;
+      try { nsSet('hmsc', 'editor.hideWalls', n ? '1' : '0'); } catch { /* headless / no store */ }
+      return n;
+    });
+  }, []);
   const [compiledReloadKey, setCompiledReloadKey] = useState(0);
   const compilingRef = useRef(false); // a bake is in flight (auto + manual share it)
   const [compiledStatus, setCompiledStatus] = useState('native world_loader primitive');
@@ -1043,6 +1056,7 @@ function EditorShell() {
                   onPlaceWaterBody={placeWaterBodyAt}
                   armed={armed}
                   onArm={setArmed}
+                  hideWalls={hideWalls}
                 />
                 {/* [AUTOCOMPILE req_1865] toggle the loader pane's auto-bake. OFF stops the
                     hot-reload→compile→5-6s-lock storm while an agent edits; live overlay still
@@ -1053,6 +1067,17 @@ function EditorShell() {
                 >
                   <Text fontSize={9} color={autoCompile ? '#6ee7b7' : '#fbbf24'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>
                     {autoCompile ? '● AUTO-COMPILE' : '○ AUTO-COMPILE OFF'}
+                  </Text>
+                </Pressable>
+                {/* [WALLHIDE req_2053] "disable walls" — hide every wall piece so you can see and
+                    edit a building's interior (baked walls collapse in the loader; live walls drop
+                    from the overlay). Sits beside AUTO-COMPILE. Persisted. */}
+                <Pressable
+                  onPress={() => setHideWalls((v) => !v)}
+                  style={{ position: 'absolute', left: 8, bottom: 34, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, borderWidth: 1, borderColor: hideWalls ? '#60a5fa' : '#334155', backgroundColor: hideWalls ? '#0c1f3a' : '#0b1320ee', zIndex: 50 }}
+                >
+                  <Text fontSize={9} color={hideWalls ? '#93c5fd' : '#94a3b8'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                    {hideWalls ? '● WALLS HIDDEN' : '○ WALLS'}
                   </Text>
                 </Pressable>
               </Pane>

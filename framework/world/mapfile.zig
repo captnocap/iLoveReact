@@ -97,6 +97,11 @@ pub const LumpType = struct {
     /// u32 cellCount | per cell: u32 cellKey | f32 wx | f32 wz | f32 top |
     /// u16 specId(0=grass,1=bush) | u16 count. runtime/workspace/lumps.ts FLORA.
     pub const flora: u32 = 26;
+    /// Per-instance-row WALL flag (req_2053): u32 count | u8[count], 1 = wall
+    /// piece. Parallel to the instance rows; the editor's build pane hides the
+    /// flagged rows live (set_hide_walls) so you can edit a building's interior.
+    /// runtime/workspace/lumps.ts WALL_FLAGS + worldGeometry.ts encodeWallFlags.
+    pub const wall_flags: u32 = 27;
 };
 
 pub const Lump = struct {

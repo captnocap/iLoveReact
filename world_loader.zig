@@ -74,6 +74,15 @@ const SHAPE_CORNER_MITER_MIRROR: f32 = 13; // reflected wall L-corner miter pris
 const SHAPE_BOX_OPEN_RUN_MIN: f32 = 14; // cube without local -x face
 const SHAPE_BOX_OPEN_RUN_MAX: f32 = 15; // cube without local +x face
 const SHAPE_BOX_OPEN_RUN_BOTH: f32 = 16; // cube without local +/-x faces
+// WALLHIDE req_2053: a marker stamped into the SHAPE slot (index 12) of a wall
+// row INSIDE a built batch/family buffer — never in self.insts. It's safe to
+// overwrite there because: (1) post-batching every shape/material batch and every
+// stream family is single-geometry (the draw picks geometry from the batch/proto,
+// not the per-row shape), and (2) makeInstance (gpu/3d.zig) reads only indices
+// 0..11, so index 12 is GPU-dead. collapseWallRows finds wall rows by this value
+// so hide-walls can scale them to 0 with no rebake. Value is far outside the real
+// shape id range so a non-stamped row's true shape never reads as a wall.
+const WALL_SENTINEL_SHAPE: f32 = 424242.0;
 const SCAN_A: usize = 4;
 const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
@@ -1171,11 +1180,23 @@ const MaterialBatch = struct {
     }
 };
 
+/// Append one instance row into a batch list and, for a WALL row (req_2053),
+/// stamp the WALL_SENTINEL into its SHAPE slot (index 12) — the marker
+/// collapseWallRows finds so hide-walls can scale it to 0. Safe because the
+/// batch is single-geometry and index 12 is GPU-dead (see WALL_SENTINEL_SHAPE).
+fn appendInstanceRow(list: *std.ArrayList(f32), allocator: std.mem.Allocator, src: []const f32, is_wall: bool, stride: usize) !void {
+    try list.appendSlice(allocator, src);
+    if (is_wall and stride >= 13 and list.items.len >= stride) list.items[list.items.len - stride + 12] = WALL_SENTINEL_SHAPE;
+}
+
 // Rows referencing a material (material_refs[row] != 0) are drawn TEXTURED in
 // their own per-material batch, so they're skipped here — the flat instanced
 // batch is the material-less remainder. `material_refs` may be empty (no
 // materials), in which case nothing is skipped.
-fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, material_refs: []const u32, flora: ?constructor.FloraCells) !ShapeBatches {
+// `wall_flags` (req_2053) is parallel to the instance rows (1 = wall piece); a
+// wall row gets the WALL_SENTINEL stamp via appendInstanceRow so the editor's
+// build pane can hide it. Empty → no row is a wall.
+fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, material_refs: []const u32, wall_flags: []const u8, flora: ?constructor.FloraCells) !ShapeBatches {
     var boxes: std.ArrayList(f32) = .{};
     errdefer boxes.deinit(allocator);
     var boxes_open_run_min: std.ArrayList(f32) = .{};
@@ -1230,35 +1251,39 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         const b = row * stride;
         const src = insts[b .. b + stride];
         const shape = instanceShapeId(insts, row, stride);
+        // WALLHIDE req_2053: stamp this row's wall flag so hide-walls can find it.
+        // Walls only ever land in box/open-run/gable/corner-miter (+ ramp) batches;
+        // foliage is never a wall, so its shape@12 is left intact.
+        const is_wall = row < wall_flags.len and wall_flags[row] != 0;
         if (@abs(shape - SHAPE_BOX_OPEN_RUN_MIN) < 0.5) {
-            try boxes_open_run_min.appendSlice(allocator, src);
+            try appendInstanceRow(&boxes_open_run_min, allocator, src, is_wall, stride);
             box_open_run_min_count += 1;
         } else if (@abs(shape - SHAPE_BOX_OPEN_RUN_MAX) < 0.5) {
-            try boxes_open_run_max.appendSlice(allocator, src);
+            try appendInstanceRow(&boxes_open_run_max, allocator, src, is_wall, stride);
             box_open_run_max_count += 1;
         } else if (@abs(shape - SHAPE_BOX_OPEN_RUN_BOTH) < 0.5) {
-            try boxes_open_run_both.appendSlice(allocator, src);
+            try appendInstanceRow(&boxes_open_run_both, allocator, src, is_wall, stride);
             box_open_run_both_count += 1;
         } else if (@abs(shape - SHAPE_RAMP) < 0.5) {
-            try ramps.appendSlice(allocator, src);
+            try appendInstanceRow(&ramps, allocator, src, is_wall, stride);
             ramp_count += 1;
         } else if (@abs(shape - SHAPE_CYLINDER8) < 0.5) {
-            try cylinder8s.appendSlice(allocator, src);
+            try appendInstanceRow(&cylinder8s, allocator, src, is_wall, stride);
             cylinder8_count += 1;
         } else if (@abs(shape - SHAPE_CYLINDER16) < 0.5) {
-            try cylinder16s.appendSlice(allocator, src);
+            try appendInstanceRow(&cylinder16s, allocator, src, is_wall, stride);
             cylinder16_count += 1;
         } else if (@abs(shape - SHAPE_SPHERE) < 0.5) {
-            try spheres.appendSlice(allocator, src);
+            try appendInstanceRow(&spheres, allocator, src, is_wall, stride);
             sphere_count += 1;
         } else if (@abs(shape - SHAPE_GABLE) < 0.5) {
-            try gables.appendSlice(allocator, src);
+            try appendInstanceRow(&gables, allocator, src, is_wall, stride);
             gable_count += 1;
         } else if (@abs(shape - SHAPE_CORNER_MITER) < 0.5) {
-            try corner_miters.appendSlice(allocator, src);
+            try appendInstanceRow(&corner_miters, allocator, src, is_wall, stride);
             corner_miter_count += 1;
         } else if (@abs(shape - SHAPE_CORNER_MITER_MIRROR) < 0.5) {
-            try corner_miter_mirrors.appendSlice(allocator, src);
+            try appendInstanceRow(&corner_miter_mirrors, allocator, src, is_wall, stride);
             corner_miter_mirror_count += 1;
         } else if (@abs(shape - SHAPE_GRASS) < 0.5) {
             try grass.appendSlice(allocator, src);
@@ -1276,7 +1301,7 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
             try palmtrunks.appendSlice(allocator, src);
             palmtrunk_count += 1;
         } else {
-            try boxes.appendSlice(allocator, src);
+            try appendInstanceRow(&boxes, allocator, src, is_wall, stride);
             box_count += 1;
         }
     }
@@ -1396,7 +1421,7 @@ fn whitenRows(rows: []f32, stride: usize) void {
 // (req_0939). Most rows are boxes, so a typical material still yields one batch.
 const MATERIAL_SHAPE_SLOTS: usize = 8;
 
-fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, materials: []const constructor.Material, material_refs: []const u32) ![]MaterialBatch {
+fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, materials: []const constructor.Material, material_refs: []const u32, wall_flags: []const u8) ![]MaterialBatch {
     const mat_count = materials.len;
     if (mat_count == 0 or material_refs.len == 0) return try allocator.alloc(MaterialBatch, 0);
     // One row list per (material, shape) — lists[mat * SLOTS + shape].
@@ -1415,7 +1440,11 @@ fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, inst_c
         const sid = instanceShapeId(insts, row, stride);
         var slot: usize = @intFromFloat(@max(0, @min(@as(f32, MATERIAL_SHAPE_SLOTS - 1), @round(sid))));
         if (slot >= MATERIAL_SHAPE_SLOTS) slot = 0;
-        try lists[(ref - 1) * MATERIAL_SHAPE_SLOTS + slot].appendSlice(allocator, insts[b .. b + stride]);
+        // WALLHIDE req_2053: a TEXTURED wall (skinned wall face) is still a wall —
+        // stamp it so hide-walls collapses it too. The batch shape comes from the
+        // slot, not index 12, so the sentinel stamp is invisible to the draw.
+        const is_wall = row < wall_flags.len and wall_flags[row] != 0;
+        try appendInstanceRow(&lists[(ref - 1) * MATERIAL_SHAPE_SLOTS + slot], allocator, insts[b .. b + stride], is_wall, stride);
     }
 
     var nonempty: usize = 0;
@@ -2982,6 +3011,15 @@ pub const Runtime = struct {
     // DIRTYRECT (streaming): bumped when a stream family's rows are collapsed; refreshStreamNodes
     // stamps it as each streamed static node's instance version so the edited families re-upload.
     stream_erase_gen: u32 = 0,
+    // WALLHIDE req_2053: the editor build pane's "disable walls" toggle. When ON, every WALL_SENTINEL
+    // row collapses (scale→0) so you can see/edit a building's interior; toggling OFF restores them.
+    // wall_collapsed_rows remembers each collapsed row's original scale (twin of erased_rows). The
+    // *_gen counters re-run the collapse only when the toggle flips OR an erase pass restored a row
+    // a wall pass had hidden (so the two never fight). The GPU cost (re-upload) is paid once per flip.
+    hide_walls: bool = false,
+    wall_collapsed_rows: std.ArrayListUnmanaged(ErasedRow) = .{},
+    applied_wall_gen: u64 = 0,
+    wall_seen_erase_gen: u64 = 0,
     // LIVEBLDSKIN req_1849: per-frame instance rows for live procedurally-skinned building-
     // piece faces (textured cubes outset to cover the baked face-slab). Pre-sized each frame
     // so the node slices into it stay stable while kid_list grows.
@@ -3041,6 +3079,15 @@ pub const Runtime = struct {
         };
         errdefer self.deinit();
         log.print("[loader] constructed map {d}x{d} from {s} (no JS)\n", .{ self.scene.width, self.scene.height, path });
+        // WALLHIDE req_2053: RJIT_HIDE_WALLS=1 seeds the editor's "disable walls" so a headless
+        // `rjit game shot` exercises the collapse (the door is otherwise only called from the
+        // editor build pane). Diagnostic knob in the RJIT_STREAM / RJIT_COLLIDERLOG family.
+        if (std.posix.getenv("RJIT_HIDE_WALLS")) |v| {
+            if (v.len > 0 and v[0] == '1') {
+                setHideWalls(node_id, true);
+                log.print("[loader] RJIT_HIDE_WALLS=1 — walls collapsed (interior-edit view)\n", .{});
+            }
+        }
         if (self.scene.stats_config) |sc| {
             log.print("[loader] player stats config: hp_max={d:.0} armor={d:.0}/{d:.0} energy={d:.0}/{d:.0} wanted_decay={d:.2} skill_max_lvl={d:.0} (carries end to end)\n", .{ sc.health_max, sc.armor_start, sc.armor_max, sc.energy_start, sc.energy_max, sc.wanted_decay, sc.max_level });
         } else {
@@ -3107,6 +3154,7 @@ pub const Runtime = struct {
         self.hidden_baked.deinit(self.allocator);
         self.baked_mesh_list.deinit(self.allocator);
         self.erased_rows.deinit(self.allocator);
+        self.wall_collapsed_rows.deinit(self.allocator);
         self.skin_box_buf.deinit(self.allocator);
         {
             var it = self.live_mat_keys.valueIterator();
@@ -3459,6 +3507,87 @@ pub const Runtime = struct {
         }
     }
 
+    // WALLHIDE req_2053: collapse (scale→0) every WALL row of a built batch/family buffer —
+    // the rows appendInstanceRow stamped with WALL_SENTINEL in their shape slot. Records each
+    // collapsed row's original scale (twin of collapseRowsInRects) so toggling OFF restores it.
+    // Skips rows already collapsed (an erase rect got there first) so the two never double up.
+    fn collapseWallRows(self: *Runtime, buf: []f32, count: u32, stride: usize) bool {
+        if (count == 0 or stride < 13 or buf.len < stride) return false;
+        const sb = rowScaleBase(stride);
+        var any = false;
+        var row: usize = 0;
+        while (row < count) : (row += 1) {
+            const o = row * stride;
+            if (o + sb + 3 > buf.len) break;
+            if (buf[o + 12] != WALL_SENTINEL_SHAPE) continue; // not a wall row
+            if (buf[o + sb] == 0 and buf[o + sb + 1] == 0 and buf[o + sb + 2] == 0) continue; // already gone (erased)
+            self.wall_collapsed_rows.append(self.allocator, .{ .buf = buf, .row = row, .sx = buf[o + sb], .sy = buf[o + sb + 1], .sz = buf[o + sb + 2] }) catch {};
+            buf[o + sb] = 0;
+            buf[o + sb + 1] = 0;
+            buf[o + sb + 2] = 0;
+            any = true;
+        }
+        return any;
+    }
+
+    // WALLHIDE req_2053: the editor build pane's "disable walls" toggle, with NO rebake — mirror
+    // of applyDirtyErase. Re-runs only when the toggle flipped (its gen) OR an erase pass advanced
+    // (it may have restored a wall row this pass hid; re-collapsing keeps them consistent). Restore
+    // last round's collapses, collapse every WALL row when ON, then bump the same node/stream
+    // version the erase path does so the edited batches re-upload once.
+    fn applyWallHide(self: *Runtime) void {
+        const pend = pendingWallHideFor(self.node_id);
+        const want = if (pend) |p| p.on else false;
+        const gen = if (pend) |p| p.gen else 0;
+        if (gen == self.applied_wall_gen and self.applied_erase_gen == self.wall_seen_erase_gen) return;
+        self.applied_wall_gen = gen;
+        self.wall_seen_erase_gen = self.applied_erase_gen;
+        const sb = rowScaleBase(self.stride);
+        // 1. restore every wall row we collapsed last round.
+        for (self.wall_collapsed_rows.items) |er| {
+            const o = er.row * self.stride + sb;
+            if (o + 3 <= er.buf.len) {
+                er.buf[o] = er.sx;
+                er.buf[o + 1] = er.sy;
+                er.buf[o + 2] = er.sz;
+            }
+        }
+        self.wall_collapsed_rows.clearRetainingCapacity();
+        // 2. collapse every wall row when the toggle is ON. Streaming draws its OWN sorted
+        // copies (w.families); the monolithic path collapses the shape/material batches.
+        if (want) {
+            if (self.stream) |*w| {
+                for (w.families) |*fam| {
+                    if (fam.draw_radius > 0) continue; // flora family — never a wall
+                    if (fam.rows.len >= fam.stride) _ = self.collapseWallRows(fam.rows, @intCast(fam.rows.len / fam.stride), fam.stride);
+                }
+            } else {
+                if (self.has_shape_batches) {
+                    const s = self.shape_batches;
+                    _ = self.collapseWallRows(s.boxes, s.box_count, self.stride);
+                    _ = self.collapseWallRows(s.boxes_open_run_min, s.box_open_run_min_count, self.stride);
+                    _ = self.collapseWallRows(s.boxes_open_run_max, s.box_open_run_max_count, self.stride);
+                    _ = self.collapseWallRows(s.boxes_open_run_both, s.box_open_run_both_count, self.stride);
+                    _ = self.collapseWallRows(s.ramps, s.ramp_count, self.stride);
+                    _ = self.collapseWallRows(s.gables, s.gable_count, self.stride);
+                    _ = self.collapseWallRows(s.corner_miters, s.corner_miter_count, self.stride);
+                    _ = self.collapseWallRows(s.corner_miter_mirrors, s.corner_miter_mirror_count, self.stride);
+                }
+                for (self.material_batches) |mb| _ = self.collapseWallRows(mb.boxes, mb.count, self.stride);
+            }
+        }
+        // 3. re-upload the edited static batches in place (same invalidation as applyDirtyErase).
+        if (self.stream != null) {
+            self.stream_erase_gen +%= 1;
+        } else {
+            var ni: usize = 0;
+            const limit = @min(self.perm_node_count, self.kid_list.items.len);
+            while (ni < limit) : (ni += 1) {
+                if (self.kid_list.items[ni].scene3d_instance_static) self.kid_list.items[ni].scene3d_instance_version +%= 1;
+            }
+        }
+    }
+
     // LIVEBLDSKIN req_1849: append a textured cube per procedurally-skinned building-piece
     // face, OUTSET a hair so it covers the baked face-slab (building-piece boxes are batched
     // instanced draws — can't hide one — so we cover instead of hide). One-instance box nodes
@@ -3774,12 +3903,12 @@ pub const Runtime = struct {
         // nodes still need the 13-wide stride. Real bakes always carry pieces, so
         // this only matters for a foliage-only map.
         if (self.scene.flora != null and self.stride < 13) self.stride = 13;
-        self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.material_refs, self.scene.flora);
+        self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.material_refs, self.scene.wall_flags, self.scene.flora);
         self.has_shape_batches = true;
         // The textured remainder: rows wearing a material, partitioned per slot.
         // The shaders run at first render (gpu isn't up yet); the nodes carry the
         // material key now so scene3d samples it once it's materialized.
-        self.material_batches = try buildMaterialBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.materials, self.scene.material_refs);
+        self.material_batches = try buildMaterialBatches(self.allocator, self.insts, self.inst_count, self.stride, self.scene.materials, self.scene.material_refs, self.scene.wall_flags);
 
         // ── content streaming gate (req_0524) ── engage when the world's extent
         // outgrows the detail radius (auto), or RJIT_STREAM=1 forces it; tiny
@@ -4962,6 +5091,10 @@ pub const Runtime = struct {
         // streaming rebuilds its nodes — so the bumped stream_erase_gen reaches THIS frame's
         // streamed static nodes and they re-upload the same frame (no one-frame stale flash).
         self.applyDirtyErase();
+        // WALLHIDE req_2053: the editor build pane's "disable walls" — runs AFTER erase (so it
+        // sees this frame's restored rows) and BEFORE refreshStreamNodes (so a bumped
+        // stream_erase_gen reaches this frame's streamed nodes, like the erase pass).
+        self.applyWallHide();
         // Re-stream the world around wherever the player ended up this step
         // (uses the camera solved just above for sight culling).
         self.refreshStreamNodes();
@@ -5859,6 +5992,45 @@ pub fn setDirtyErase(node_id: u32, bytes: []const u8) void {
     p.node_id = node_id;
     p.set = true;
     p.rects = rects;
+    p.gen +%= 1;
+}
+
+// ── WALLHIDE editor "disable walls" toggle (req_2053) ───────────────────────
+// The editor build pane flips this so you can see/edit a building's interior. The
+// Runtime's applyWallHide reads it (once per generation) and collapses/restores
+// the WALL_SENTINEL rows. Per node, the same slot pattern as the erase pending.
+const PendingWallHide = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    on: bool = false,
+    gen: u64 = 0,
+};
+var g_pending_wall_hide: [MAX_EMBEDDED_LOADERS]PendingWallHide = [_]PendingWallHide{.{}} ** MAX_EMBEDDED_LOADERS;
+
+fn pendingWallHideFor(node_id: u32) ?*PendingWallHide {
+    for (&g_pending_wall_hide) |*p| {
+        if (p.set and p.node_id == node_id) return p;
+    }
+    return null;
+}
+
+/// Toggle the editor's hide-walls for a node (req_2053). `on` true hides every wall
+/// piece (collapses its rows) so the interior is visible/editable; false restores them.
+pub fn setHideWalls(node_id: u32, on: bool) void {
+    var slot: ?*PendingWallHide = pendingWallHideFor(node_id);
+    if (slot == null) {
+        for (&g_pending_wall_hide) |*p| {
+            if (!p.set) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    const p = slot orelse return;
+    if (p.set and p.node_id == node_id and p.on == on) return; // unchanged — no needless re-collapse
+    p.node_id = node_id;
+    p.set = true;
+    p.on = on;
     p.gen +%= 1;
 }
 

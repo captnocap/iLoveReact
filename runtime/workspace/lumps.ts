@@ -150,6 +150,14 @@ export const MAP_LUMP = {
   // count(blades). Absent → no recipe foliage (legacy bakes still ship blades in
   // INSTANCES). See cart/hmsc-int/compile/worldGeometry.ts encodeFlora.
   FLORA: 26,
+  // Per-instance-row WALL flag (u32 count | u8[count]); 1 = the row is a wall
+  // piece (catalog kind 'wall'), 0 = anything else. Parallel to INSTANCES rows
+  // (req_2053). Lets the editor's build pane hide walls so you can edit a
+  // building's interior — world_loader.zig collapses the flagged rows live when
+  // the editor toggles __compiled_world_set_hide_walls (no rebake). Absent → no
+  // row is a wall (the toggle then hides nothing). See worldGeometry.ts
+  // encodeWallFlags.
+  WALL_FLAGS: 27,
 } as const;
 
 export type LumpInput = {

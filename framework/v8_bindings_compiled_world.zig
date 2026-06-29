@@ -268,6 +268,20 @@ fn hostSetDirtyErase(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnString(info, "ok");
 }
 
+// __compiled_world_set_hide_walls(nodeId, on) toggles the editor build pane's "disable walls"
+// (req_2053): on != 0 hides every wall piece (collapses its rows live, no rebake) so you can
+// see/edit a building's interior; 0 restores them.
+fn hostSetHideWalls(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const on = (argToF64(info, 1) orelse 0) != 0;
+    world_loader.setHideWalls(node_id, on);
+    setReturnString(info, "ok");
+}
+
 // __compiled_world_set_resident_meshes(nodeId, Uint8Array meshPropsLump) installs the editor's
 // full cooked-asset catalog (FULLRES req_1909/1911/1912) so every compiled asset is resident and
 // placeable with no rebake. `bytes` is a MESH_PROPS lump (meshes only); empty clears residency.
@@ -352,6 +366,7 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_set_live_material", hostSetLiveMaterial);
     v8_runtime.registerHostFn("__compiled_world_set_live_skin_boxes", hostSetLiveSkinBoxes);
     v8_runtime.registerHostFn("__compiled_world_set_dirty_erase", hostSetDirtyErase);
+    v8_runtime.registerHostFn("__compiled_world_set_hide_walls", hostSetHideWalls);
     v8_runtime.registerHostFn("__compiled_world_set_resident_meshes", hostSetResidentMeshes);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
     v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);

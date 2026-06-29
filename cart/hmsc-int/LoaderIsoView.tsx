@@ -145,6 +145,9 @@ export function LoaderIsoView(props: {
   // it (place/ghost) and clears it on cancel.
   armed?: Armed;
   onArm?: (next: Armed | ((cur: Armed) => Armed)) => void;
+  // WALLHIDE req_2053: when true, the native loader hides every wall piece (baked + live)
+  // so you can see and edit a building's interior. The editor (index.tsx) owns + persists it.
+  hideWalls?: boolean;
 }) {
   // req_1945: stamp when THIS pane starts rendering. The edit-latency line then splits the
   // `pre` re-render into [before-loader] (the shell + earlier panels) vs [loader-onward] (this
@@ -153,6 +156,7 @@ export function LoaderIsoView(props: {
   const gameFile = props.gameFile ?? DEFAULT_GAME_FILE;
   const storeDir = props.storeDir ?? DEFAULT_STORE_DIR;
   const editable = !!props.onCommit; // no commit door → a pure viewer (no rail/editing)
+  const hideWalls = props.hideWalls ?? false; // WALLHIDE req_2053: "disable walls" to edit interiors
 
   const loaderRef = useRef<any>(null);
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 1, height: 1 });
@@ -741,6 +745,16 @@ export function LoaderIsoView(props: {
     return subscribeCookedAssets(push);
   }, [editable]);
 
+  // WALLHIDE req_2053: push the "disable walls" toggle to the native loader so it hides every
+  // baked wall row (collapse, no rebake) — letting you see + edit a building's interior. The live
+  // overlay below additionally drops just-placed wall pieces while the toggle is on, so newly
+  // built walls hide too. Re-pushed on a reload (the door is node-keyed and survives remount).
+  useEffect(() => {
+    const nodeId = Number(loaderRef.current?.id ?? 0);
+    if (!nodeId || typeof g.__compiled_world_set_hide_walls !== 'function') return;
+    g.__compiled_world_set_hide_walls(nodeId, hideWalls ? 1 : 0);
+  }, [hideWalls, props.reloadToken]);
+
   // LIVEHOST req_1798: push the just-placed-but-unbaked pieces to the native loader as a
   // LIVE box overlay, so a placement/move shows as a real solid mesh the instant you
   // commit — no full ~5s rebake. Recomputed whenever the piece set changes (a commit
@@ -797,12 +811,20 @@ export function LoaderIsoView(props: {
     // mesh push also hands back the procedural skin materials the props wear (LIVESKIN req_1843)
     // — materialize those FIRST so refs that reference them by hash resolve this same frame.
     const tScans = nowMs(); // EDITLATENCY: start of the O(N) overlay scans (req_1935)
-    const rows = pieceInstanceRows(pending);
-    const meshPush = meshPropLivePush(current, bakedSigRef.current!);
+    // WALLHIDE req_2053: while "disable walls" is on, drop wall-kind pieces from the LIVE overlay
+    // too (the baked ones are collapsed by the loader door) so a just-placed/moved wall hides as
+    // well — keeping the live and baked views consistent under the toggle.
+    const isWallPiece = (p: PlacedBuildPiece): boolean => {
+      try { return GAME_BUILD.catalog.get(p.pieceId).kind === 'wall'; } catch { return false; }
+    };
+    const livePending = hideWalls ? pending.filter((p) => !isWallPiece(p)) : pending;
+    const liveCurrent = hideWalls ? current.filter((p) => !isWallPiece(p)) : current;
+    const rows = pieceInstanceRows(livePending);
+    const meshPush = meshPropLivePush(liveCurrent, bakedSigRef.current!);
     // BUILDING-PIECE skins (LIVEBLDSKIN req_1849): a procedurally-skinned wall/floor face
     // renders as a live textured box outset over the baked face-slab — props can't cover this
     // (props are mesh refs), and building boxes are batched so they can't be hidden per-instance.
-    const skinPush = buildingSkinBoxes(current);
+    const skinPush = buildingSkinBoxes(liveCurrent);
     const tScansEnd = nowMs(); // EDITLATENCY: O(N) overlay scans done (req_1935)
     // Only the failure mode is worth a console line now (a host predating the live doors):
     // a successful push is the silent common case.
@@ -885,7 +907,7 @@ export function LoaderIsoView(props: {
         console.warn(`[edit-latency] ${label.padEnd(7)} total ~${f(renderedMs)}ms = pre ${f(pre)}${preSplit} + scans ${f(scans)} + push ${f(push)} + host-block ${f(host)}${hostLine}${rtLine}`);
       });
     }
-  }, [editable, props.pieces, props.reloadToken]);
+  }, [editable, props.pieces, props.reloadToken, hideWalls]);
 
   // LIVEMESH req_1841: the placement GHOST for a mesh prop is the REAL mesh, translucent,
   // tracking the snap target — far clearer than the faint projected wireframe (which stays

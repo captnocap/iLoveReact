@@ -19,7 +19,7 @@ import {
   writeLumpContainer,
 } from '@reactjit/workspace';
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
-import { buildWorldInstances, encodeFloorHeightfields, encodeFlora, encodeInstanceLump, encodeMaterialRefs, encodeMaterials, encodeMeshProps, encodeWaterBodies, worldWithFloorLandforms, INSTANCE_STRIDE } from './compile/worldGeometry';
+import { buildWorldInstances, encodeFloorHeightfields, encodeFlora, encodeInstanceLump, encodeMaterialRefs, encodeMaterials, encodeMeshProps, encodeWallFlags, encodeWaterBodies, worldWithFloorLandforms, INSTANCE_STRIDE } from './compile/worldGeometry';
 import type { DecalAssetSink } from './compile/decalAssets';
 import { buildBakedColliders, encodeCollidersLump, encodePhysicsConfigLump, paintedFloorTopAt, shellGroundHeightfield, type BakedPhysicsConfig } from './compile/worldColliders';
 import { worldCore } from './game/void/distance';
@@ -250,6 +250,9 @@ export function createHmscMapfile(
   const instances = encodeInstanceLump(geometry.instances, geometry.pieces);
   const materials = encodeMaterials(geometry.materials);
   const materialRefs = encodeMaterialRefs(geometry.materialRefs);
+  // WALLHIDE req_2053: the per-row wall flags, shipped only when a wall exists
+  // (every other map carries no wall row, so the lump would be all-zero waste).
+  const wallFlags = geometry.wallFlags.some((f) => f !== 0) ? encodeWallFlags(geometry.wallFlags) : null;
   const heightfields = encodeFloorHeightfields(floors);
   const waterBodies = [...state.world.waterBodies, ...floorsToWaterBodies([...floors]), ...voidWater];
 
@@ -337,6 +340,9 @@ export function createHmscMapfile(
     // at load and samples it on the referencing faces (compile/worldGeometry.ts).
     { type: MAP_LUMP.MATERIALS, encoding: 'raw', data: materials },
     { type: MAP_LUMP.MATERIAL_REFS, encoding: 'raw', data: materialRefs },
+    // WALLHIDE req_2053: per-row wall flags so the editor build pane can hide
+    // walls and edit a building's interior. Omitted when the map has no wall.
+    ...(wallFlags ? [{ type: MAP_LUMP.WALL_FLAGS, encoding: 'raw' as const, data: wallFlags }] : []),
     // The scene render environment (lighting / sky / camera) as DATA — the
     // loader reads this instead of hardcoding the look (compile/sceneEnv.ts).
     { type: MAP_LUMP.ENVIRONMENT, encoding: 'raw', data: encodeEnvironmentLump(env) },

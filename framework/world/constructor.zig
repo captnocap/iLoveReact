@@ -667,6 +667,10 @@ pub const Scene = struct {
     /// Per-instance-row material reference: 1-based into `materials` (0 = flat
     /// color). Parallel to instance rows; empty when the lump is absent.
     material_refs: []u32,
+    /// Per-instance-row WALL flag (req_2053): 1 = the row is a wall piece, else
+    /// 0. Parallel to instance rows; empty when the WALL_FLAGS lump is absent.
+    /// The editor build pane hides the flagged rows live (set_hide_walls).
+    wall_flags: []u8,
     /// The first `piece_count` instance rows are the PLACED PIECES (the city's
     /// structures); the rest are the painted ground. Lets the loader frame the
     /// camera on the city, not the whole 240m ground plane.
@@ -746,6 +750,7 @@ pub const Scene = struct {
         for (self.materials) |material| material.deinit(allocator);
         allocator.free(self.materials);
         allocator.free(self.material_refs);
+        allocator.free(self.wall_flags);
         if (self.baked_colliders) |bc| bc.deinit(allocator);
         for (self.decal_assets) |asset| asset.deinit(allocator);
         allocator.free(self.decal_assets);
@@ -1950,6 +1955,16 @@ fn decodeMaterialRefs(allocator: std.mem.Allocator, data: []const u8) Error![]u3
     return out;
 }
 
+/// Decode the WALL_FLAGS lump (req_2053): u32 count | u8[count]. Empty when absent.
+fn decodeWallFlags(allocator: std.mem.Allocator, data: []const u8) Error![]u8 {
+    if (data.len < 4) return try allocator.alloc(u8, 0);
+    const count = std.mem.readInt(u32, data[0..4], .little);
+    if (4 + @as(usize, count) > data.len) return try allocator.alloc(u8, 0);
+    const out = try allocator.alloc(u8, count);
+    @memcpy(out, data[4 .. 4 + count]);
+    return out;
+}
+
 fn streamReferences(stream: gamefile.Stream, key: u32) bool {
     for (stream.refs) |ref| {
         if (ref == key) return true;
@@ -2064,6 +2079,14 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     else
         try allocator.alloc(u32, 0);
     errdefer allocator.free(material_refs);
+    // WALLHIDE req_2053: per-instance-row wall flags (1 = wall piece), parallel
+    // to the instance rows. Empty when the lump is absent (no wall on the map) —
+    // the editor's hide-walls then collapses nothing.
+    const wall_flags = if (mapfile.findLump(map_lumps, mapfile.LumpType.wall_flags)) |lump|
+        try decodeWallFlags(allocator, lump.data)
+    else
+        try allocator.alloc(u8, 0);
+    errdefer allocator.free(wall_flags);
     errdefer {
         for (heightfields) |field| field.deinit(allocator);
         allocator.free(heightfields);
@@ -2172,6 +2195,7 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .heightfields = heightfields,
         .materials = materials,
         .material_refs = material_refs,
+        .wall_flags = wall_flags,
         .baked_colliders = baked_colliders,
         .physics_config = physics_config,
         .stats_config = stats_config,
