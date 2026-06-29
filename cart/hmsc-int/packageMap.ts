@@ -32,6 +32,7 @@ import { encodeDynamicProps } from './compile/worldDynamicProps';
 import { elevatorShaftRecords, encodeElevators } from './compile/worldElevators';
 import { doorRecords, encodeDoors } from './compile/worldDoors';
 import { tickerRecords, encodeTickers } from './compile/worldTicker';
+import { trafficRecords, encodeTraffic } from './compile/worldTraffic';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './compile/playerModel';
 import { buildDefaultNpcPopulation, encodeNpcModelsLump, encodeNpcSpawnsLump } from './compile/npcModels';
@@ -371,6 +372,10 @@ export function createHmscMapfile(
     // LED ticker boards (req_0893 #3) — the loader scrolls the message + draws
     // the lit LEDs per frame, the elevator-car pattern (compile/worldTicker.ts).
     { type: MAP_LUMP.TICKER, encoding: 'raw', data: encodeTickers(tickerRecords(liftedPieces)) },
+    // Ambient road traffic (req_2056) — vehicles drive looping routes flow-traced
+    // off the painted lane tiles; the loader samples each route per frame and
+    // rebuilds the vehicle's instance rows (compile/worldTraffic.ts).
+    { type: MAP_LUMP.TRAFFIC, encoding: 'raw', data: encodeTraffic(trafficRecords({ landforms: state.world.landforms, pieces: liftedPieces })) },
     // Imported OBJ/GLB props — arbitrary baked vertex buffers as static prop
     // assets, referenced by transform rows so repeated desks share one mesh.
     { type: MAP_LUMP.MESH_PROPS, encoding: 'raw', data: encodeMeshProps(geometry.meshProps) },

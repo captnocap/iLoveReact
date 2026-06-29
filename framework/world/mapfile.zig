@@ -102,6 +102,13 @@ pub const LumpType = struct {
     /// flagged rows live (set_hide_walls) so you can edit a building's interior.
     /// runtime/workspace/lumps.ts WALL_FLAGS + worldGeometry.ts encodeWallFlags.
     pub const wall_flags: u32 = 27;
+    /// Ambient road traffic (req_2056): per vehicle — a buildVehicle prototype
+    /// (local instance rows pos3/rot3/scale3/color3/shape) + a looping route
+    /// polyline + cruise speed + phase. world_loader.zig samples each route per
+    /// frame and rebuilds the vehicle's instance rows at the pose (the ticker
+    /// mutable-instance pattern). runtime/workspace/lumps.ts TRAFFIC +
+    /// cart/hmsc-int/compile/worldTraffic.ts encodeTraffic.
+    pub const traffic: u32 = 28;
 };
 
 pub const Lump = struct {

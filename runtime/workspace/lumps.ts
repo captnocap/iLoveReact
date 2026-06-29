@@ -158,6 +158,14 @@ export const MAP_LUMP = {
   // row is a wall (the toggle then hides nothing). See worldGeometry.ts
   // encodeWallFlags.
   WALL_FLAGS: 27,
+  // Ambient road traffic (req_2056): per vehicle — a buildVehicle prototype
+  // (instance rows in local space: pos3/rot3/scale3/color3/shape) + a looping
+  // route polyline + cruise speed + phase. world_loader.zig samples each route
+  // per frame (arc-length mod loop length) and rebuilds the vehicle's instance
+  // rows at the pose — the LED-ticker mutable-instance pattern. Routes are baked
+  // by flow-following the lane tiles (no host A*). Layout:
+  // cart/hmsc-int/compile/worldTraffic.ts encodeTraffic. Absent → no traffic.
+  TRAFFIC: 28,
 } as const;
 
 export type LumpInput = {

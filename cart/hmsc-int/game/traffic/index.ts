@@ -32,6 +32,10 @@ export const TRAFFIC_TUNING = {
   seedAttempts: 24,
   /** cap on road cells scanned out of the baked grid. */
   maxRoadPoints: 4096,
+  /** how many vehicles the compiled-world bake populates. */
+  bakeCount: 14,
+  /** reproducibility seed for the bake. */
+  bakeSeed: 1337,
 } as const;
 
 /** A grid step direction (cells). */
