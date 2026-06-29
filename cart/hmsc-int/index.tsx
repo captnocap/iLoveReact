@@ -698,22 +698,12 @@ function EditorShell() {
   const compileEditorPreviewRef = useRef(compileEditorPreview);
   compileEditorPreviewRef.current = compileEditorPreview;
 
-  // [LIVEHOST tier-2 req_1800] a DEBOUNCED settle bake the loader pane requests only when
-  // an edit touched BAKED geometry (delete/move/rotate of a pre-baked piece) — the live
-  // overlay can add meshes but not erase a baked one, so those need a bake to reflect.
-  // Re-bakes THIS map's own editor file (req_2013), not the published game-file.
-  const settleBakeTimer = useRef<any>(null);
-  const requestSettleBake = useCallback(() => {
-    dirtyStemsRef.current.add(ws.stem);
-    if (settleBakeTimer.current) clearTimeout(settleBakeTimer.current);
-    const arm = () => {
-      settleBakeTimer.current = setTimeout(() => {
-        if (compilingRef.current) { arm(); return; } // a bake is running — wait, then retry
-        void compileEditorPreviewRef.current(ws.stem);
-      }, 1200);
-    };
-    arm();
-  }, [ws.stem]);
+  // NO-RECOMPILE-ON-DELETE (req_2048): the per-edit settle bake is GONE. Deleting/moving a
+  // baked piece used to fire a 1.2s-debounced `game bake` (~5s spinner + reload) — the felt
+  // "recompiles at every change". The loader's live dirty-erase already makes the visual
+  // correct with zero bake, the GameState DB holds the deletion durably, and the
+  // dirty-on-buildPieces effect below marks the stem dirty so a map-switch/revisit folds it
+  // into the baked file lazily — exactly the path a placement already takes.
 
   // AUTOCOMPILE req_1866/1867: the GRACE WINDOW that gates EDIT bakes. The cart re-mounts on
   // every hot reload AND on boot the world DATA loads (worldRev/placements go empty→populated)
@@ -1029,7 +1019,6 @@ function EditorShell() {
                   onCommitMany={commitPlacements}
                   onSelectionChange={onIsoSelectionChange}
                   onPlaceWaterBody={placeWaterBodyAt}
-                  requestSettleBake={requestSettleBake}
                   armed={armed}
                   onArm={setArmed}
                 />

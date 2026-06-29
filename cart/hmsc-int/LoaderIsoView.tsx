@@ -121,11 +121,6 @@ export function LoaderIsoView(props: {
   onCommitMany?: (items: ReadonlyArray<{ event: BuildEditEvent; label: string }>) => void;
   onSelectionChange?: (ids: ReadonlySet<string>) => void;
   onPlaceWaterBody?: (presetKind: string, x: number, z: number) => void;
-  // LIVEHOST tier-2 (req_1800): a debounced "settle" bake the pane requests ONLY when an
-  // edit removed/relocated a BAKED piece — the live overlay can add meshes but can't erase
-  // a baked one, so a delete/move/rotate of pre-baked geometry needs a bake to reflect.
-  // Pure placements never call this (the overlay shows them instantly).
-  requestSettleBake?: () => void;
   // RAILHOIST req_1888: the catalog rail moved OFF the map into the editor rail, so the
   // armed piece is now owned by the editor (index.tsx) and passed in. The map just reads
   // it (place/ghost) and clears it on cancel.
@@ -619,6 +614,13 @@ export function LoaderIsoView(props: {
     let camEstablished = pushCamera();
     const tick = () => {
       if (!alive) return;
+      // TICKPROBE2 (req_1991, TEMP): this per-frame loader tick runs via setTimeout
+      // (no host rAF) → inside __jsTick, which the partition fingered as the 260ms.
+      // Time the whole body + the resolveSnapTarget hover poll (O(pieces) while armed)
+      // separately, cart-side so it loads reliably. If THIS is ~260ms, the per-frame
+      // hover snap over 9696 pieces is the stall — not a microtask, not the store.
+      const _tk0 = g.performance?.now?.() ?? 0;
+      let _resolveMs = 0;
       if (!camEstablished) camEstablished = pushCamera();
       const now = g.performance?.now?.() ?? last + 16;
       const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
@@ -642,11 +644,15 @@ export function LoaderIsoView(props: {
         const lx = mx - r.x, ly = my - r.y;
         if (lx >= 0 && ly >= 0 && lx <= r.width && ly <= r.height) {
           lastCursorRef.current = { x: lx, y: ly };
+          const _r0 = g.performance?.now?.() ?? 0;
           const t = resolveAtRef.current(lx, ly);
+          _resolveMs = (g.performance?.now?.() ?? 0) - _r0;
           const k = t ? `${t.placement.x.toFixed(2)},${t.placement.y.toFixed(2)},${t.placement.z.toFixed(2)},${t.placement.yawDegrees}` : '';
           if (k !== ghostKeyRef.current) { ghostKeyRef.current = k; setSnap(t); }
         }
       }
+      const _tkMs = (g.performance?.now?.() ?? 0) - _tk0;
+      if (_tkMs > 20) console.warn(`[tickprobe2] loader per-frame tick took ${_tkMs.toFixed(1)}ms (resolveSnapTarget ${_resolveMs.toFixed(1)}ms over ${piecesRef.current.length} pieces, armed=${!!armedRef.current})`);
       sched(tick);
     };
     sched(tick);
@@ -714,16 +720,23 @@ export function LoaderIsoView(props: {
     // move that minted a new id) or its transform changed (a whole-building move keeps its id).
     // Push each dirty piece's OLD footprint as an erase rect — the loader collapses the baked
     // box rows + hides the baked mesh nodes inside it, so the stale geometry vanishes with no
-    // rebake. The settle bake still trails behind (debounced) to fold colliders into /compiled,
-    // but it no longer gates the visual.
+    // rebake.
+    //
+    // NO-RECOMPILE-ON-DELETE (req_2048): a delete/move of a baked piece used to also fire a
+    // 1.2s-debounced settle bake (~5s `game bake` + reload spinner) — the felt "recompiles at
+    // every change" the user called out. It's redundant now: the live erase below already makes
+    // the visual correct, the GameState DB already holds the deletion (source of truth), and the
+    // live overlay RE-DERIVES the erase against the stale baked file every session (a reload or a
+    // fresh restart re-baselines bakedRects from the file, then this very effect erases again).
+    // Durable fold-in still happens lazily — index.tsx's dirty-on-buildPieces effect marks the
+    // stem dirty so a map-switch/revisit re-bakes it in, exactly like a placement. So a delete is
+    // now as instant and bake-free as a placement.
     const eraseRects: number[] = [];
-    let anyGone = false;
     for (const [id, info] of bakedRects) {
       const cur = currentById.get(id);
-      if (!cur) { eraseRects.push(...info.rect); anyGone = true; continue; }
-      if (pieceXformSig(cur) !== info.sig) eraseRects.push(...info.rect);
+      if (!cur) { eraseRects.push(...info.rect); continue; }       // gone: deleted or loose-moved
+      if (pieceXformSig(cur) !== info.sig) eraseRects.push(...info.rect); // moved/rotated in place
     }
-    if (anyGone) props.requestSettleBake?.(); // colliders fold in lazily; the visual is already live
     // Only push when the erase set actually CHANGES — setDirtyErase bumps the host generation,
     // which re-stages the static world once; a plain placement (no dirty piece) must not trigger
     // that. The signature is the rounded rect list; identical → skip the push entirely.
