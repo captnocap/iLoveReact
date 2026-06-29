@@ -74,15 +74,15 @@ function roadKindMask(): boolean[] {
   return TILE_KINDS.map((k) => tileKindDefinition(k as TileKind).npc.preferredByVehicles === true);
 }
 
-/** Can a vehicle DRIVE on this kind? — the routing/passability mask. Broader than
- *  `roadKindMask`: it includes crosswalks (a car drives THROUGH them at an
- *  intersection — they're not "preferred" but are traversable), so the lanes and
- *  junctions actually connect. Mirrors navProfileCosts' vehicle-passable test. */
-function drivableKindMask(): boolean[] {
-  return TILE_KINDS.map((k) => {
-    const npc = tileKindDefinition(k as TileKind).npc;
-    return npc.traversable && Number.isFinite(npc.vehicleCost) && npc.vehicleCost > 0;
-  });
+/** The drivable ROAD NETWORK a car routes on: the PREFERRED road surfaces (lanes,
+ *  plain road, asphalt, junctions) PLUS crosswalks — the one non-preferred tile a
+ *  car crosses to get between lanes and junctions. Deliberately EXCLUDES merely
+ *  traversable terrain (sidewalk, grass, mud, sand, median, parking): those have a
+ *  finite vehicle cost but a car must not shortcut across them. Without crosswalks
+ *  the network is sealed (lanes can't reach junctions); with terrain the BFS cuts
+ *  corners off-road. This is exactly the road family. */
+function roadNetworkMask(): boolean[] {
+  return TILE_KINDS.map((k) => tileKindDefinition(k as TileKind).npc.preferredByVehicles === true || k === 'crosswalk');
 }
 
 /** Per-kind flow step (null where flow-neutral — junctions, plain road). */
@@ -135,7 +135,7 @@ export function junctionCells(grid: NavGrid): [number, number][] {
  * start can't move.
  */
 export function traceGoalTour(grid: NavGrid, start: [number, number], goals: readonly [number, number][], rng: () => number): TrafficRoute | null {
-  const isRoad = drivableKindMask(); // crosswalks included — lanes must connect to junctions
+  const isRoad = roadNetworkMask(); // road family only — never shortcut across terrain
   const flow = flowStepTable();
   const { cols, rows, kinds } = grid;
   const [ox, oz] = grid.origin;
