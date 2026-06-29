@@ -65,10 +65,23 @@ const ERASE_MARGIN_METERS = 0.06;
 function pieceXformSig(p: PlacedBuildPiece): string {
   return `${p.x}|${p.y}|${p.z}|${p.yawDegrees}`;
 }
-function pieceEraseRect(p: PlacedBuildPiece): [number, number, number, number, number, number] {
-  const b = GAME_BUILD.placed.bounds(p);
+// WALLTOP-ERASE (req_2051): walls RENDER/BAKE lifted onto the floor beneath them
+// (liftedWallBaseY, see pieceVisualShapes) — so the baked geometry sits at the LIFTED Y,
+// not the stored Y. An erase rect built from the raw stored bounds has its Y window BELOW
+// the baked rows, the host's center-in-rect Y-test misses them, and a deleted wall resting
+// on a floor never collapses (it lingers as un-selectable stale geometry). Lift the piece
+// the same way before taking its bounds so the rect's Y range straddles the real geometry.
+// Needs the neighbour set to know which floor a wall rests on; props/floors aren't lifted
+// (liftedWallBaseY returns piece.y for them), so this is a no-op for everything but walls.
+function pieceEraseRect(p: PlacedBuildPiece, pieces: readonly PlacedBuildPiece[]): [number, number, number, number, number, number] {
+  const restY = GAME_BUILD.placed.liftedWallBaseY(p, pieces);
+  const lifted = restY !== p.y ? ({ ...p, y: restY } as PlacedBuildPiece) : p;
+  const b = GAME_BUILD.placed.bounds(lifted);
   const m = ERASE_MARGIN_METERS;
-  return [b.minX - m, b.baseY - m, b.minZ - m, b.maxX + m, b.topY + m, b.maxZ + m];
+  // Straddle BOTH the stored and lifted base so a hair of float drift in the lift can't drop
+  // the floor of the window below the geometry; the top already covers the lifted height.
+  const floorY = Math.min(b.baseY, p.y);
+  return [b.minX - m, floorY - m, b.minZ - m, b.maxX + m, b.topY + m, b.maxZ + m];
 }
 
 // key → pan axis. Arrows alias WASD, matching the iso-build legend.
@@ -244,7 +257,10 @@ export function LoaderIsoView(props: {
   // MOVED or DELETED baked piece's stale geometry is erased live (no rebake). Re-baselined
   // on every reload (the fresh bake IS the new truth).
   const bakedRectRef = useRef<Map<string, { sig: string; rect: [number, number, number, number, number, number] }> | null>(null);
-  if (bakedRectRef.current === null) bakedRectRef.current = new Map((props.pieces ?? []).map((p) => [p.id, { sig: pieceXformSig(p), rect: pieceEraseRect(p) }] as const));
+  if (bakedRectRef.current === null) {
+    const seed = props.pieces ?? [];
+    bakedRectRef.current = new Map(seed.map((p) => [p.id, { sig: pieceXformSig(p), rect: pieceEraseRect(p, seed) }] as const));
+  }
   // The last erase-rect signature pushed to the host — so an unchanged set never re-bumps the
   // host generation (which re-stages the static world). Reset on reload to force the clear-push.
   const lastEraseSigRef = useRef<string>('');
@@ -256,7 +272,7 @@ export function LoaderIsoView(props: {
   const rebaselineBaked = useCallback((pieces: readonly PlacedBuildPiece[]) => {
     bakedIdsRef.current = new Set(pieces.map((p) => p.id));
     bakedSigRef.current = new Map(pieces.map((p) => [p.id, pieceSkinSig(p)] as const));
-    bakedRectRef.current = new Map(pieces.map((p) => [p.id, { sig: pieceXformSig(p), rect: pieceEraseRect(p) }] as const));
+    bakedRectRef.current = new Map(pieces.map((p) => [p.id, { sig: pieceXformSig(p), rect: pieceEraseRect(p, pieces) }] as const));
     lastEraseSigRef.current = '';
   }, []);
 
