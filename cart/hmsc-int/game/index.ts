@@ -143,7 +143,7 @@ export { GAME_FIGURE, charactersStream, bakeBodyDocument, applyBodyPaint } from 
 export type { BodyDocument, BakedFigure, CharactersEvent, CharactersStreamState } from './figure';
 export { GAME_VEHICLE, vehiclesStream, applyVehiclePaint, pickVehicleSpawn } from './vehicle';
 export type { VehicleDoc, VehiclePartId, VehicleStyleId, VehicleRoleId, VehiclePoseId, DamageLevel, VehicleBuild, VehicleMeshKind, VehiclesEvent, VehiclesStreamState } from './vehicle';
-export { GAME_TRAFFIC, roadCellsFromNav, junctionCells, traceGoalTour, bakeTrafficVehicles, TRAFFIC_TUNING } from './traffic';
+export { GAME_TRAFFIC, routeFromPath, bakeAuthoredTraffic, TRAFFIC_TUNING } from './traffic';
 export type { TrafficRoute, BakedVehicle } from './traffic';
 export { GAME_DRIVING, makeCarState, defaultTuning, stepCar, rightCar } from './driving';
 export type { CarState, CarTuning, CarInput, CarTelemetry } from './driving';

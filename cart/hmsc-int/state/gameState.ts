@@ -393,6 +393,7 @@ function createInitialWorld(): WorldState {
     zones: [],
     spawnedEntities: {},
     npcs: {},
+    trafficPaths: [],
   };
 }
 

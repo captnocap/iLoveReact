@@ -290,6 +290,11 @@ export type WorldState = {
   // A first-class sparse layer, peer of waterBodies. Absent ⇒ the void is the
   // generic procedural city everywhere (pure opt-in). See game/void/edges.ts.
   voidEdges?: VoidEdgeDecl[];
+  // Hand-authored ambient-traffic paths (USER req_2076): the author draws the
+  // routes by hand and cars drive them — what you draw IS the route, no tile-grid
+  // derivation. A first-class sparse layer, peer of waterBodies. Absent ⇒ no
+  // ambient traffic. See compile/worldTraffic.ts + game/traffic/.
+  trafficPaths?: TrafficPath[];
 }
 
 // What the void continues past a declared edge cell. Each maps to a continuation
@@ -614,6 +619,27 @@ export type WaterBody = {
   depth: number;
   surfaceY: number;
   field?: WaterField;
+  createdByCommand: string;
+};
+
+// A hand-authored ambient-traffic path (USER req_2076). The author lays an ordered
+// run of waypoints down a road; a car drives that polyline. `loop` closes it into a
+// circuit the car cycles forever (the common ambient case); otherwise the car
+// ping-pongs out-and-back. This is WHOLE-LOOP authoring — what's drawn IS the
+// literal route, no derivation off the tile grid (the old flow-trace generator was
+// ripped out). The compile bakes each path into the TRAFFIC lump
+// (compile/worldTraffic.ts); world_loader.zig samples the polyline per frame.
+export type TrafficPath = {
+  id: string;
+  label: string;
+  // ordered waypoints in world metres on the ground plane (x east, z south).
+  points: { x: number; z: number }[];
+  // close the polyline into a circuit (true) vs. drive out-and-back (false).
+  loop: boolean;
+  // cruise speed (m/s); omitted ⇒ the bake's default city speed.
+  speed?: number;
+  // how many cars ride this path, spread evenly by phase along it (default 1).
+  cars?: number;
   createdByCommand: string;
 };
 

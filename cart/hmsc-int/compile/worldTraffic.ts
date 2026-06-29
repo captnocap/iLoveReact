@@ -1,25 +1,24 @@
 // worldTraffic.ts — bake ambient road traffic into the TRAFFIC map lump so the
-// compiled no-V8 game drives vehicles around the city (req_2056, native re-home).
+// compiled no-V8 game drives vehicles around the city (req_2056; HAND-AUTHORED
+// paths since req_2076).
 //
-// THE PIPELINE: build the nav grid PURELY from the painted map (no host A* in the
-// headless bake — [[compiled_world_animated_content]]), flow-follow the lane
-// tiles into looping circuits (game/traffic GAME_TRAFFIC), and ship per vehicle:
+// THE PIPELINE: read the HAND-AUTHORED traffic paths off the world state (the
+// author drew them in the editor; no tile-grid derivation — the old flow-trace
+// generator was ripped out, req_2076), and ship per vehicle:
 //   • a PROTOTYPE — its buildVehicle meshes flattened to instance rows in LOCAL
 //     space (pos3/rot3/scale3/color3/shape — the 12-float gpu/3d.zig row + a
 //     shape id), with geometry params folded into scale against the loader's UNIT
 //     box/cylinder/sphere;
-//   • a ROUTE polyline (world x,z), cruise speed, and a phase head-start.
+//   • a ROUTE polyline (world x,z) = the authored path, cruise speed, and a phase
+//     head-start.
 // world_loader.zig's stepTraffic samples each route per frame (arc-length mod
 // loop length) and rebuilds the vehicle's instance rows at the sampled pose — the
 // LED-ticker mutable-instance pattern (compile/worldTicker.ts).
 
-import { paintedGridFromLandforms } from '../game/world/navPublish';
-import { bakeNavGrid } from '../game/world/navGrid';
-import { bakeTrafficVehicles, TRAFFIC_TUNING, type BakedVehicle } from '../game/traffic';
+import { bakeAuthoredTraffic, type BakedVehicle } from '../game/traffic';
 import { buildVehicle, type VehicleDoc, type VehicleMaterial } from '../game/vehicle';
 import { hx } from '../game/kinds/propModels';
-import type { LandformPlacement } from '../game/world/grid';
-import type { PlacedBuildPiece } from '../game';
+import type { TrafficPath } from '../design';
 
 export const TRAFFIC_LUMP_VERSION = 1;
 
@@ -84,29 +83,14 @@ export function vehiclePrototypeRows(doc: VehicleDoc): number[] {
   return rows;
 }
 
-/** Derive the TRAFFIC records from the painted map + placed pieces. Pure — the
- *  headless bake path. Empty when the map has too little road to seed traffic. */
+/** Build the TRAFFIC records from the HAND-AUTHORED paths on the world state.
+ *  Pure — the headless bake path. Empty when no paths are authored (no ambient
+ *  traffic until the author draws some). */
 export function trafficRecords(opts: {
-  landforms: readonly LandformPlacement[];
-  pieces?: readonly PlacedBuildPiece[];
-  count?: number;
+  paths: readonly TrafficPath[];
   seed?: number;
 }): TrafficVehicleRecord[] {
-  const painted = paintedGridFromLandforms(opts.landforms);
-  if (!painted) return [];
-  const grid = bakeNavGrid({
-    origin: painted.origin,
-    cols: painted.cols,
-    rows: painted.rows,
-    paintedKinds: painted.kinds,
-    emptyKind: 'mud',
-    pieces: opts.pieces,
-  });
-  const vehicles = bakeTrafficVehicles({
-    grid,
-    count: opts.count ?? TRAFFIC_TUNING.bakeCount,
-    seed: opts.seed ?? TRAFFIC_TUNING.bakeSeed,
-  });
+  const vehicles = bakeAuthoredTraffic({ paths: opts.paths, seed: opts.seed });
   return vehicles.map(vehicleRecord);
 }
 

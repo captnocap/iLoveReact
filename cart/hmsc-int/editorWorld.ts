@@ -15,6 +15,7 @@ import type {
   GameState,
   PropKind,
   TileKind,
+  TrafficPath,
   WorldProp,
   WorldSurfaceRegion,
   Zone,
@@ -95,6 +96,7 @@ export function emptyEditorWorld(): GameState {
       zones: [],
       spawnedEntities: {},
       npcs: {},
+      trafficPaths: [],
     },
   };
 }
@@ -124,6 +126,34 @@ export function placeWorldProp(
 
 export function removeWorldProp(state: GameState, id: string): GameState {
   return removeProp(state, id);
+}
+
+// ── Hand-authored traffic paths (req_2076) ──────────────────────────────────
+// The author draws an ordered run of waypoints down a road; the compile bakes
+// each path into the TRAFFIC lump and a car drives it. A first-class sparse
+// world layer (peer of props/waterBodies) — what's drawn IS the route.
+
+export function addTrafficPath(
+  state: GameState,
+  opts: { points: { x: number; z: number }[]; loop?: boolean; speed?: number; cars?: number; label?: string },
+): { state: GameState; path: TrafficPath } {
+  const existing = state.world.trafficPaths ?? [];
+  const path: TrafficPath = {
+    id: nextUniqueId('tpath_int_', existing.map((p) => p.id)),
+    label: opts.label ?? `traffic path ${existing.length + 1}`,
+    points: opts.points.map((p) => ({ x: p.x, z: p.z })),
+    loop: opts.loop ?? true,
+    ...(opts.speed !== undefined ? { speed: opts.speed } : {}),
+    ...(opts.cars !== undefined ? { cars: opts.cars } : {}),
+    createdByCommand: 'hmsc-int:traffic-path',
+  };
+  const next: GameState = { ...state, world: { ...state.world, trafficPaths: [...existing, path] } };
+  return { state: next, path };
+}
+
+export function removeTrafficPath(state: GameState, id: string): GameState {
+  const existing = state.world.trafficPaths ?? [];
+  return { ...state, world: { ...state.world, trafficPaths: existing.filter((p) => p.id !== id) } };
 }
 
 // The nearest solid prop to a world point within `radius` meters — for click-to-

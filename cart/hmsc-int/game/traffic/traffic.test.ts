@@ -1,115 +1,93 @@
-// traffic.test.ts — meaning-tests for the goal-oriented route generator (P4):
-// junctions are the goal nodes, a car drives a tour of distant intersections and
-// home (a closed loop, no teleport), holding lane discipline; the bake populates
-// deterministic vehicles. Pure CPU under tools/v8cli (the headless bake path).
+// traffic.test.ts — meaning-tests for HAND-AUTHORED ambient traffic (req_2076):
+// the author draws a TrafficPath (waypoints + loop flag) and the bake turns it
+// into a car that drives that polyline. Covers route construction (the loop-seam
+// contract world_loader.zig's sampleRoute needs), the bake (deterministic cars,
+// per-path car counts/speeds), and a full TRAFFIC-lump encode/decode round-trip.
+// Pure CPU under tools/v8cli (the headless bake path).
 
 import { assert, assertEqual, finish, test } from '../_testkit';
-import { TILE_KIND_INDEX } from '../kinds';
-import type { NavGrid } from '../world/navGrid';
-import { bakeTrafficVehicles, junctionCells, traceGoalTour } from './index';
-import { seededRng } from '../chance';
+import type { TrafficPath } from '../../design';
+import { bakeAuthoredTraffic, routeFromPath } from './index';
+import { trafficRecords } from '../../compile/worldTraffic';
+import { encodeTraffic, decodeTraffic } from '../../compile/worldTraffic';
 
-// A one-way ring whose lanes are `w` tiles WIDE (top→laneEast, right→laneSouth,
-// bottom→laneWest, left→laneNorth, corner blocks junction). For testing that cars
-// drive the CENTER of a multi-tile lane.
-function wideRing(side: number, w: number): NavGrid {
-  const k = TILE_KIND_INDEX;
-  const kinds = new Uint16Array(side * side).fill(k.mud);
-  for (let z = 0; z < side; z++) {
-    for (let x = 0; x < side; x++) {
-      const top = z < w, bottom = z >= side - w, left = x < w, right = x >= side - w;
-      let v = k.mud;
-      if ((top || bottom) && (left || right)) v = k.junction;
-      else if (top) v = k.laneEast;
-      else if (bottom) v = k.laneWest;
-      else if (right) v = k.laneSouth;
-      else if (left) v = k.laneNorth;
-      kinds[z * side + x] = v;
-    }
-  }
-  return { origin: [0, 0], cellSize: 1, cols: side, rows: side, kinds };
+function path(over: Partial<TrafficPath> & { points: { x: number; z: number }[] }): TrafficPath {
+  return { id: 'tp', label: 'p', loop: true, createdByCommand: 'test', ...over };
 }
 
-// A clockwise one-way ring on the border of a `side`×`side` grid (+X right, +Z
-// down): top→laneEast, right→laneSouth, bottom→laneWest, left→laneNorth, corners
-// junction (the intersections / goal nodes). Interior is mud.
-function ringGrid(side: number): NavGrid {
-  const k = TILE_KIND_INDEX;
-  const kinds = new Uint16Array(side * side).fill(k.mud);
-  const set = (x: number, z: number, v: number) => { kinds[z * side + x] = v; };
-  for (let i = 1; i < side - 1; i++) {
-    set(i, 0, k.laneEast);
-    set(side - 1, i, k.laneSouth);
-    set(i, side - 1, k.laneWest);
-    set(0, i, k.laneNorth);
-  }
-  set(0, 0, k.junction);
-  set(side - 1, 0, k.junction);
-  set(side - 1, side - 1, k.junction);
-  set(0, side - 1, k.junction);
-  return { origin: [0, 0], cellSize: 1, cols: side, rows: side, kinds };
-}
+// A square loop: (0,0)→(40,0)→(40,40)→(0,40).
+const SQUARE = [
+  { x: 0, z: 0 }, { x: 40, z: 0 }, { x: 40, z: 40 }, { x: 0, z: 40 },
+];
 
-test('junctionCells finds the intersections (the goal nodes)', () => {
-  const cells = junctionCells(ringGrid(8));
-  assertEqual(cells.length, 4, 'the ring has four corner junctions');
+test('a loop route is the authored points closed back onto the first (seam contract)', () => {
+  const r = routeFromPath(path({ points: SQUARE, loop: true }))!;
+  assert(r !== null, 'a 4-point loop produces a route');
+  assert(r.closed, 'the route is marked closed');
+  const first = r.points[0];
+  const last = r.points[r.points.length - 1];
+  assertEqual(last[0], first[0], 'last point x equals first (sampleRoute wraps with no teleport)');
+  assertEqual(last[1], first[1], 'last point z equals first');
+  // square perimeter = 4 * 40 = 160
+  assert(Math.abs(r.length - 160) < 1e-3, `loop length is the perimeter (${r.length.toFixed(1)}m)`);
 });
 
-test('a goal tour drives distant intersections and returns home (closed loop)', () => {
-  const grid = ringGrid(8);
-  const route = traceGoalTour(grid, [2, 0], junctionCells(grid), seededRng(3));
-  assert(route !== null, 'a lane start produces a route');
-  assert(route!.closed, 'the tour makes it home → a closed loop (no teleport wrap)');
-  assert(route!.length > 24, `the tour covers ground (${route!.length.toFixed(1)}m)`);
+test('an open path ping-pongs out-and-back and closes onto its start', () => {
+  const r = routeFromPath(path({ points: [{ x: 0, z: 0 }, { x: 30, z: 0 }, { x: 30, z: 20 }], loop: false }))!;
+  // A,B,C -> A,B,C,B,A : ends where it began, length = 2 * one-way
+  const first = r.points[0];
+  const last = r.points[r.points.length - 1];
+  assertEqual(last[0], first[0], 'ping-pong returns to the start x');
+  assertEqual(last[1], first[1], 'ping-pong returns to the start z');
+  assert(Math.abs(r.length - 2 * (30 + 20)) < 1e-3, `ping-pong length is twice the one-way (${r.length.toFixed(1)}m)`);
 });
 
-test('the tour holds lane discipline — every leg is axis-aligned with the flow', () => {
-  const grid = ringGrid(8);
-  const route = traceGoalTour(grid, [3, 0], junctionCells(grid), seededRng(1))!;
-  for (let i = 1; i < route.points.length; i++) {
-    const dx = route.points[i][0] - route.points[i - 1][0];
-    const dz = route.points[i][1] - route.points[i - 1][1];
-    assert((dx === 0) !== (dz === 0), `leg ${i} is axis-aligned (one of dx/dz is zero)`);
+test('consecutive duplicate waypoints are dropped; a degenerate path bakes nothing', () => {
+  const dupes = routeFromPath(path({ points: [{ x: 5, z: 5 }, { x: 5, z: 5 }], loop: true }));
+  assertEqual(dupes, null, 'two identical points collapse to one → too short to drive');
+  const single = routeFromPath(path({ points: [{ x: 1, z: 1 }], loop: true }));
+  assertEqual(single, null, 'a single waypoint is a dot, not a route');
+});
+
+test('the bake makes one car per path by default, more on request, spread by phase', () => {
+  const one = bakeAuthoredTraffic({ paths: [path({ points: SQUARE })] });
+  assertEqual(one.length, 1, 'default is one car per path');
+  const many = bakeAuthoredTraffic({ paths: [path({ points: SQUARE, cars: 3 })] });
+  assertEqual(many.length, 3, 'cars:3 → three cars on the one path');
+  const phases = many.map((v) => v.phase).sort((a, b) => a - b);
+  assert(phases[1] - phases[0] > 1 && phases[2] - phases[1] > 1, 'the three cars are spread along the loop, not stacked');
+  for (const v of many) {
+    assert(v.speed > 0, 'each car has a cruise speed');
+    assert(v.phase >= 0 && v.phase < v.route.length, 'phase is a head start within the loop');
   }
 });
 
-test('bake populates deterministic vehicles on goal tours', () => {
-  const grid = ringGrid(10);
-  const a = bakeTrafficVehicles({ grid, count: 4, seed: 9, garage: undefined });
-  assert(a.length >= 1, 'at least one vehicle routes on the ring');
-  for (const v of a) {
-    assert(v.route.length >= 24, 'each vehicle drives a worthwhile tour');
-    assert(v.speed > 0, 'each vehicle has a cruise speed');
-    assert(v.phase >= 0 && v.phase <= v.route.length, 'phase is a head start within the loop');
-  }
-  const b = bakeTrafficVehicles({ grid, count: 4, seed: 9 });
-  assertEqual(b.length, a.length, 'same seed → same vehicle count');
-  assertEqual(b[0].speed, a[0].speed, 'same seed → same cruise speed');
+test('a per-path speed overrides the default', () => {
+  const v = bakeAuthoredTraffic({ paths: [path({ points: SQUARE, speed: 12 })] })[0];
+  assertEqual(v.speed, 12, 'the authored speed is honoured');
+});
+
+test('the bake is deterministic for a seed', () => {
+  const a = bakeAuthoredTraffic({ paths: [path({ points: SQUARE, cars: 2 })], seed: 7 });
+  const b = bakeAuthoredTraffic({ paths: [path({ points: SQUARE, cars: 2 })], seed: 7 });
+  assertEqual(b.length, a.length, 'same seed → same car count');
   assertEqual(b[0].route.length, a[0].route.length, 'same seed → same route');
+  assertEqual(b[1].phase, a[1].phase, 'same seed → same phase spread');
 });
 
-test('cars drive the CENTER of a 3-wide lane, not its edge', () => {
-  const grid = wideRing(14, 3); // top band = rows 0,1,2 → centerline z = 1.5
-  const route = traceGoalTour(grid, [6, 1], junctionCells(grid), seededRng(2))!;
-  // The top band (rows 0,1,2) centers at z = 1.5. After string-pulling, its
-  // straight run is one segment — find a horizontal segment on the centerline
-  // (both endpoints z ≈ 1.5) that spans the mid-band, proving the car drives the
-  // center tile, not an edge (z = 0.5 / 2.5).
-  const centered = route.points.some((b, i) => {
-    if (i === 0) return false;
-    const a = route.points[i - 1];
-    return Math.abs(a[1] - 1.5) < 0.01 && Math.abs(b[1] - 1.5) < 0.01
-      && Math.min(a[0], b[0]) < 5 && Math.max(a[0], b[0]) > 9;
-  });
-  assert(centered, 'a centered horizontal run (z=1.5) spans the top band');
+test('no authored paths bakes no traffic (graceful)', () => {
+  assertEqual(trafficRecords({ paths: [] }).length, 0, 'empty paths → no vehicles, no crash');
 });
 
-test('a map with no lanes bakes no traffic (graceful)', () => {
-  const k = TILE_KIND_INDEX;
-  const kinds = new Uint16Array(36).fill(k.mud);
-  const grid: NavGrid = { origin: [0, 0], cellSize: 1, cols: 6, rows: 6, kinds };
-  assertEqual(bakeTrafficVehicles({ grid, count: 5, seed: 1 }).length, 0, 'no roads → no vehicles, no crash');
-  assertEqual(traceGoalTour(grid, [3, 3], [], seededRng(1)), null, 'a non-road start traces nothing');
+test('authored paths round-trip through the TRAFFIC lump', () => {
+  const records = trafficRecords({ paths: [path({ points: SQUARE, cars: 2, speed: 8 })] });
+  assertEqual(records.length, 2, 'two cars baked into records');
+  const decoded = decodeTraffic(encodeTraffic(records));
+  assertEqual(decoded.records.length, records.length, 'count survives the wire round-trip');
+  // route is the closed square (5 points: 4 corners + return) → 10 floats
+  assertEqual(decoded.records[0].route.length, records[0].route.length, 'route geometry survives');
+  assertEqual(decoded.records[0].speed, 8, 'speed survives');
+  assert(decoded.records[0].rows.length > 0, 'the vehicle prototype rows survive');
 });
 
 finish('traffic');
