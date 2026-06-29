@@ -12,11 +12,14 @@ const fs = @import("../fs/fs.zig");
 const sqlite = @import("sqlite.zig");
 
 pub const MAX_KEY = 256;
-// Values are heap-backed (write queue + read-back cache hold owned slices),
-// so this is a sanity ceiling, not a buffer size. It was 8192 when jobs held
-// fixed buffers — that cap silently ate the editor's custom-textures and
-// game-state writes (a painted 128×128 stencil material is ~33KB of JSON).
-pub const MAX_VALUE = 4 * 1024 * 1024;
+// Values are heap-backed end to end — the v8 binding allocs the exact UTF-8 length,
+// the write-queue job owns a heap []u8, and SQLite bindText handles up to ~1GB — so
+// this is a SANITY ceiling, not a buffer size. History: 8192 when jobs held fixed
+// buffers (silently ate custom-texture / game-state writes), then 4MB, which a
+// detailed imported mesh (Studio EditMesh JSON in editor-state) blew with
+// BufferTooSmall (req_2078/req_2079). Raised to 64MB so a high-poly model is never
+// localstore-bound; it still catches a genuinely runaway (multi-hundred-MB) value.
+pub const MAX_VALUE = 64 * 1024 * 1024;
 pub const MAX_KEYS = 256;
 
 const value_alloc = std.heap.c_allocator;

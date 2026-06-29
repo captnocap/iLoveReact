@@ -32,10 +32,12 @@ import { unwrap, type EditMesh, type EditMeshFace, type V3 } from './editMesh';
 
 // A welded, editable+paintable+unwrapped EditMesh is JSON'd into a 4MB localstore
 // value ALONGSIDE the rest of the editor state. At ~120 bytes/tri (face object +
-// shared vert + per-corner uv) a 25k-tri model is already ~3MB, so this is the hard
-// ceiling that keeps a single import from blowing the editor-state save (the
-// BufferTooSmall in req_2078); the dialog defaults well under it.
-export const MAX_IMPORT_TRIS = 25_000;
+// shared vert + per-corner uv) a 150k-tri model is ~18MB of JSON — comfortably under
+// the 64MB localstore ceiling (raised in req_2079), so localstore is no longer the
+// limiter. This cap now reflects editor RESPONSIVENESS (every face is a JS object the
+// Studio edits/paints/undoes); the dialog defaults far below it for a snappy import
+// and the Detail slider lets you push up toward it when you want the fidelity.
+export const MAX_IMPORT_TRIS = 150_000;
 
 // ── base64 → bytes ─────────────────────────────────────────────────────────────
 // Single-pass into a pre-sized Uint8Array. The old version pushed one element per

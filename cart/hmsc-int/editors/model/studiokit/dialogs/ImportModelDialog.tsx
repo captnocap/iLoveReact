@@ -22,10 +22,12 @@ import { readFile, readFileBase64 } from '@reactjit/hooks/fs';
 import { pickModelFile } from '../../pickModelFile';
 
 // Slider maps to the clustering grid resolution; these bound the UI travel. Low =
-// chunky/low-poly, high = fine. gridForTargetTris seeds the default near 20k tris.
+// chunky/low-poly, high = fine. GRID_MAX is high enough that the top of the slider
+// recovers most of a mesh's detail (up to MAX_IMPORT_TRIS); gridForTargetTris seeds
+// the default low so the FIRST import is snappy — drag right for more.
 const GRID_MIN = 6;
-const GRID_MAX = 200;
-const DEFAULT_TARGET_TRIS = 12_000;
+const GRID_MAX = 512;
+const DEFAULT_TARGET_TRIS = 25_000;
 const num = (n: number) => n.toLocaleString();
 
 export function ImportModelDialog(props: { defaultPath: string; onCancel: () => void; onConfirm: (mesh: EditMesh, name: string) => void }) {
