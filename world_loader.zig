@@ -149,6 +149,7 @@ const MAX_EMBEDDED_LOADERS: usize = 8;
 // (cart/hmsc-int/editors/play/PlayRoute.tsx): same reach, same cancel radius,
 // same prompt grammar, driven by the INTERACTABLES lump instead of a JS scan.
 const SCAN_E: usize = 8;
+const SCAN_P: usize = 19; // [traffic-paths req_2072] toggle the route-debug ribbon
 const INTERACT_REACH_METERS: f32 = 2.2;
 const INTERACT_Y_WINDOW_METERS: f32 = 2.5;
 const INTERACT_SEARCH_CANCEL_MOVE_METERS: f32 = 0.35;
@@ -3070,6 +3071,14 @@ pub const Runtime = struct {
     traffic_cyl_buf: []f32 = &.{},
     traffic_sphere_buf: []f32 = &.{},
     traffic_seconds: f32 = 0,
+    // [traffic-paths req_2072] a debug ribbon along every baked route centerline,
+    // toggled by the P key (or RJIT_TRAFFICPATHS=1 at boot) so the actual path over
+    // the road is visible. One static box node; toggling sets its instance_count.
+    traffic_path_node: usize = 0,
+    traffic_path_buf: []f32 = &.{},
+    traffic_path_count: u32 = 0,
+    traffic_paths_on: bool = false,
+    prev_paths_key_down: bool = false,
     last_ns: i64 = 0,
     frame: u32 = 0,
     // Content streaming (engaged when the world outgrows the detail radius):
@@ -3234,6 +3243,7 @@ pub const Runtime = struct {
         if (self.traffic_box_buf.len > 0) self.allocator.free(self.traffic_box_buf);
         if (self.traffic_cyl_buf.len > 0) self.allocator.free(self.traffic_cyl_buf);
         if (self.traffic_sphere_buf.len > 0) self.allocator.free(self.traffic_sphere_buf);
+        if (self.traffic_path_buf.len > 0) self.allocator.free(self.traffic_path_buf);
         if (self.live_buf.len > 0) self.allocator.free(self.live_buf); // LIVEHOST req_1798
         self.scene.deinit(self.allocator);
         self.* = undefined;
@@ -4486,6 +4496,61 @@ pub const Runtime = struct {
                 });
             }
             log.print("[loader] built {d} traffic vehicle(s) ({d} box + {d} cyl + {d} sphere part rows)\n", .{ tr.vehicles.len, box_rows, cyl_rows, sph_rows });
+
+            // [traffic-paths req_2072] a thin cyan ribbon tracing every route's
+            // centerline, just above the road — toggled by P (or RJIT_TRAFFICPATHS=1
+            // at boot). One box instance per route segment.
+            var seg_cap: usize = 0;
+            for (tr.vehicles) |veh| {
+                const np = veh.route.len / 2;
+                if (np >= 2) seg_cap += np - 1;
+            }
+            self.traffic_path_buf = try self.allocator.alloc(f32, seg_cap * INSTANCE_STRIDE);
+            @memset(self.traffic_path_buf, 0);
+            var pi: u32 = 0;
+            for (tr.vehicles) |veh| {
+                const np = veh.route.len / 2;
+                if (np < 2) continue;
+                var i: usize = 0;
+                while (i + 1 < np) : (i += 1) {
+                    const ax = veh.route[i * 2];
+                    const az = veh.route[i * 2 + 1];
+                    const bx = veh.route[(i + 1) * 2];
+                    const bz = veh.route[(i + 1) * 2 + 1];
+                    const dx = bx - ax;
+                    const dz = bz - az;
+                    const len = @sqrt(dx * dx + dz * dz);
+                    if (len < 1.0e-4) continue;
+                    const gy = sceneTerrainTopAt(self.scene.heightfields, (ax + bx) * 0.5, (az + bz) * 0.5) orelse 0;
+                    const o = @as(usize, pi) * INSTANCE_STRIDE;
+                    self.traffic_path_buf[o + 0] = (ax + bx) * 0.5;
+                    self.traffic_path_buf[o + 1] = gy + 0.12;
+                    self.traffic_path_buf[o + 2] = (az + bz) * 0.5;
+                    self.traffic_path_buf[o + 3] = 0;
+                    self.traffic_path_buf[o + 4] = std.math.atan2(dx, dz) * 180.0 / std.math.pi;
+                    self.traffic_path_buf[o + 5] = 0;
+                    self.traffic_path_buf[o + 6] = 0.3; // ribbon width
+                    self.traffic_path_buf[o + 7] = 0.06; // thin
+                    self.traffic_path_buf[o + 8] = len; // length along +Z
+                    self.traffic_path_buf[o + 9] = 0.15;
+                    self.traffic_path_buf[o + 10] = 0.95;
+                    self.traffic_path_buf[o + 11] = 1.0; // cyan
+                    pi += 1;
+                }
+            }
+            self.traffic_path_count = pi;
+            self.traffic_paths_on = std.posix.getenv("RJIT_TRAFFICPATHS") != null;
+            self.traffic_path_node = self.kid_list.items.len;
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = true,
+                .scene3d_geom_key = "box",
+                .scene3d_vertices = self.cube[0..],
+                .scene3d_vert_count = 36,
+                .scene3d_instance_data = self.traffic_path_buf,
+                .scene3d_instance_count = if (self.traffic_paths_on) self.traffic_path_count else 0,
+                .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
+                .scene3d_instance_static = false,
+            });
         }
         // LIVEHOST req_1798: reserve ONE mutable box-instance node for the editor's
         // live overlay (just-placed-but-unbaked pieces). Empty until applyPendingLive
@@ -5215,6 +5280,12 @@ pub const Runtime = struct {
         self.updateDynamicPropNodes();
         self.stepTickers(dt);
         self.stepTraffic(dt); // req_2056: drive the ambient vehicles along their baked routes
+        if (self.scene.traffic != null) { // [traffic-paths req_2072] P toggles the route ribbon
+            const pdown = keyDown(SCAN_P);
+            if (pdown and !self.prev_paths_key_down) self.traffic_paths_on = !self.traffic_paths_on;
+            self.prev_paths_key_down = pdown;
+            self.kid_list.items[self.traffic_path_node].scene3d_instance_count = if (self.traffic_paths_on) self.traffic_path_count else 0;
+        }
         // DIRTYRECT: collapse the baked rows inside dirty footprints (once per edit) BEFORE
         // streaming rebuilds its nodes — so the bumped stream_erase_gen reaches THIS frame's
         // streamed static nodes and they re-upload the same frame (no one-frame stale flash).
