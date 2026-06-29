@@ -244,7 +244,47 @@ export function traceGoalTour(grid: NavGrid, start: [number, number], goals: rea
     const c = (lo + hi) / 2; // perpendicular offset to the trio's center, in cells
     return [ox + (x + 0.5 + c * px) * cellM, oz + (z + 0.5 + c * pz) * cellM];
   };
-  const points = simplifyPolyline(cellPath.map(([x, z]) => laneCenter(x, z)));
+  // STRING-PULL the centered polyline to kill the BFS staircase. A run pulls taut
+  // to the longest straight shot that stays CLEAN: on the road network AND — where
+  // it crosses a flowed LANE — within half a tile of that lane's centerline. So a
+  // straight lane can't be diagonally cut (the car stays centered, req_2071), but a
+  // flow-neutral junction/crosswalk block (no centerline constraint) straightens
+  // freely — turning the boxy intersection tangle into clean crossings.
+  const onCleanLine = (a: [number, number], b: [number, number]): boolean => {
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / (cellM * 0.5)));
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      const wx = a[0] + dx * t;
+      const wz = a[1] + dz * t;
+      const cx = Math.floor((wx - ox) / cellM);
+      const cz = Math.floor((wz - oz) / cellM);
+      const k = at(cx, cz);
+      if (k < 0 || !isRoad[k]) return false;
+      const f = flow[k];
+      if (f) {
+        const [ccx, ccz] = laneCenter(cx, cz);
+        const perp = Math.abs((wx - ccx) * -f.dz + (wz - ccz) * f.dx);
+        if (perp > cellM * 0.6) return false; // would drift off the lane centerline
+      }
+    }
+    return true;
+  };
+  const stringPull = (pts: readonly [number, number][]): [number, number][] => {
+    if (pts.length <= 2) return pts.slice();
+    const out: [number, number][] = [pts[0]];
+    let anchor = 0;
+    for (let i = 2; i < pts.length; i++) {
+      if (!onCleanLine(pts[anchor], pts[i])) {
+        out.push(pts[i - 1]);
+        anchor = i - 1;
+      }
+    }
+    out.push(pts[pts.length - 1]);
+    return out;
+  };
+  const points = stringPull(simplifyPolyline(cellPath.map(([x, z]) => laneCenter(x, z))));
   let length = 0;
   for (let i = 1; i < points.length; i++) length += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
   return { points, closed, length };

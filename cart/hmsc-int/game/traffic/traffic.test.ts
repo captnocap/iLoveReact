@@ -3,7 +3,7 @@
 // home (a closed loop, no teleport), holding lane discipline; the bake populates
 // deterministic vehicles. Pure CPU under tools/v8cli (the headless bake path).
 
-import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
+import { assert, assertEqual, finish, test } from '../_testkit';
 import { TILE_KIND_INDEX } from '../kinds';
 import type { NavGrid } from '../world/navGrid';
 import { bakeTrafficVehicles, junctionCells, traceGoalTour } from './index';
@@ -91,12 +91,17 @@ test('bake populates deterministic vehicles on goal tours', () => {
 test('cars drive the CENTER of a 3-wide lane, not its edge', () => {
   const grid = wideRing(14, 3); // top band = rows 0,1,2 → centerline z = 1.5
   const route = traceGoalTour(grid, [6, 1], junctionCells(grid), seededRng(2))!;
-  // route points sitting in the top band (z < 3) and clear of the corners
-  // (x in [4,10)) must land exactly on the band's centerline tile (z = 1.5),
-  // never the edge tiles (z = 0.5 or 2.5).
-  const topMid = route.points.filter(([x, z]) => z < 3 && x >= 4 && x < 10);
-  assert(topMid.length > 0, 'the route runs along the top band');
-  for (const [, z] of topMid) assertClose(z, 1.5, 0.01, `top-band point is centered (z=${z})`);
+  // The top band (rows 0,1,2) centers at z = 1.5. After string-pulling, its
+  // straight run is one segment — find a horizontal segment on the centerline
+  // (both endpoints z ≈ 1.5) that spans the mid-band, proving the car drives the
+  // center tile, not an edge (z = 0.5 / 2.5).
+  const centered = route.points.some((b, i) => {
+    if (i === 0) return false;
+    const a = route.points[i - 1];
+    return Math.abs(a[1] - 1.5) < 0.01 && Math.abs(b[1] - 1.5) < 0.01
+      && Math.min(a[0], b[0]) < 5 && Math.max(a[0], b[0]) > 9;
+  });
+  assert(centered, 'a centered horizontal run (z=1.5) spans the top band');
 });
 
 test('a map with no lanes bakes no traffic (graceful)', () => {
