@@ -863,8 +863,10 @@ Scene3DBase.PointLight = ({ position, color, intensity, range, ...rest }: any) =
 };
 // SpotLight — the user's pyramid: a tip at `position`, aimed down `direction`,
 // opening to a `cone` half-angle (degrees) and carrying `range`. Narrow cone =
-// a spotlight; wide cone approaches the omni bulb.
-Scene3DBase.SpotLight = ({ position, direction, color, intensity, cone, range, ...rest }: any) => {
+// a spotlight; wide cone approaches the omni bulb. A spot CASTS A SHADOW by
+// default (shadows are part of a light) — the first shadow-casting spot in a
+// scene owns the shadow map today; pass castsShadow={false} to opt a spot out.
+Scene3DBase.SpotLight = ({ position, direction, color, intensity, cone, range, castsShadow, ...rest }: any) => {
   const [px, py, pz] = _vec3(position, 0, 0, 0);
   const [dx, dy, dz] = _vec3(direction, 0, -1, 0);
   const [r, g, b] = _hexToRgb(color, [1, 1, 1]);
@@ -878,6 +880,7 @@ Scene3DBase.SpotLight = ({ position, direction, color, intensity, cone, range, .
     scene3dIntensity: intensity ?? 1.0,
     scene3dSpread: cone ?? 30,
     scene3dRange: range ?? 0,
+    scene3dCastShadow: castsShadow ?? true,
   });
 };
 // OrbitControls — host has no flag for this today (no scene3d_orbit on

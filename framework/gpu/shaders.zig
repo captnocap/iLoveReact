@@ -782,8 +782,22 @@ pub const scene3d_wgsl =
     \\    _a: f32,
     \\    _b: f32,
     \\};
+    \\// Shadow of ONE caster (a spotlight): its light-space view-projection plus the
+    \\// knobs to sample its depth map. has_shadow == 0 → the map is a dummy and the
+    \\// visibility test short-circuits to 1 (fully lit). caster_index picks which
+    \\// placed light the map belongs to, so only that light is occluded.
+    \\struct ShadowUniforms {
+    \\    light_vp: mat4x4f,
+    \\    has_shadow: f32,
+    \\    caster_index: f32,
+    \\    bias: f32,
+    \\    texel: f32,
+    \\};
     \\@group(0) @binding(0) var<uniform> S: SceneUniforms;
     \\@group(0) @binding(1) var<storage, read> lights: array<Light>;
+    \\@group(0) @binding(2) var<uniform> SH: ShadowUniforms;
+    \\@group(0) @binding(3) var shadow_tex: texture_depth_2d;
+    \\@group(0) @binding(4) var shadow_smp: sampler_comparison;
     \\@group(1) @binding(0) var diffuse_tex: texture_2d<f32>;
     \\@group(1) @binding(1) var diffuse_smp: sampler;
     \\
@@ -832,6 +846,30 @@ pub const scene3d_wgsl =
     \\    return mT * mRy * mRx * mRz * mS;
     \\}
     \\
+    \\// Shadow visibility at a world point: 1 = lit, 0 = fully shadowed. Project into
+    \\// the caster's light space, sample its depth map with a 3×3 PCF kernel (soft
+    \\// rim). Outside the map / behind the far plane → lit (the cone falloff already
+    \\// bounds the lit region). Uses textureSampleCompareLevel (mip 0, no derivatives)
+    \\// so the non-uniform early-outs are legal. Applied to just the caster light below.
+    \\fn shadow_vis(world_pos: vec3f) -> f32 {
+    \\    if (SH.has_shadow < 0.5) { return 1.0; }
+    \\    let lp = SH.light_vp * vec4f(world_pos, 1.0);
+    \\    if (lp.w <= 0.0) { return 1.0; }
+    \\    let ndc = lp.xyz / lp.w;
+    \\    if (ndc.z > 1.0 || ndc.z < 0.0) { return 1.0; }
+    \\    let uv = ndc.xy * vec2f(0.5, -0.5) + vec2f(0.5, 0.5);
+    \\    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+    \\    let cmp = ndc.z - SH.bias;
+    \\    var sum = 0.0;
+    \\    for (var dy = -1; dy <= 1; dy = dy + 1) {
+    \\        for (var dx = -1; dx <= 1; dx = dx + 1) {
+    \\            let o = vec2f(f32(dx), f32(dy)) * SH.texel;
+    \\            sum = sum + textureSampleCompareLevel(shadow_tex, shadow_smp, uv + o, cmp);
+    \\        }
+    \\    }
+    \\    return sum / 9.0;
+    \\}
+    \\
     \\// ── Vertex shader ────────────────────────────────────────────
     \\@vertex
     \\fn vs_main(in: VertexInput) -> VertexOutput {
@@ -869,6 +907,9 @@ pub const scene3d_wgsl =
     \\    // An omni bulb has cos_outer = -1, so the cone term collapses to a flat 1.
     \\    var placed = vec3f(0.0, 0.0, 0.0);
     \\    let n_lights = u32(S.light_count);
+    \\    // One visibility sample (uniform control flow); applied only to the caster.
+    \\    let svis = shadow_vis(in.world_pos);
+    \\    let caster = u32(SH.caster_index);
     \\    for (var i: u32 = 0u; i < n_lights; i = i + 1u) {
     \\        let lt = lights[i];
     \\        let to_light = lt.pos - in.world_pos;
@@ -885,7 +926,9 @@ pub const scene3d_wgsl =
     \\        let falloff = atten * cone * lt.intensity;
     \\        let Hl = normalize(Ld + V);
     \\        let sp = pow(max(dot(N, Hl), 0.0), S.specular_power) * 0.4;
-    \\        placed = placed + lt.color * (base * ndl + sp) * falloff;
+    \\        // The shadow-casting light is occluded by the depth map; others are flat-lit.
+    \\        let vis = select(1.0, svis, SH.has_shadow > 0.5 && i == caster);
+    \\        placed = placed + lt.color * (base * ndl + sp) * falloff * vis;
     \\    }
     \\    let lit = ambient + diffuse + specular + placed;
     \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
@@ -909,6 +952,42 @@ pub const scene3d_wgsl =
     \\    // default (a == 1) and never hit this.
     \\    if (out_a <= 0.01) { discard; }
     \\    return vec4f(final_rgb * out_a, out_a);
+    \\}
+;
+
+/// Shadow depth pipeline — renders scene geometry from a light's POV into a depth
+/// map (no color). Same vertex buffers/layout as scene3d (vbuf0 verts, vbuf1 packed
+/// InstanceData), so the same staged instances replay here. rebuild_model MUST stay
+/// byte-identical to scene3d_wgsl's copy. Group0 binding0 = the light's VP.
+pub const shadow_depth_wgsl =
+    \\@group(0) @binding(0) var<uniform> LVP: mat4x4f;
+    \\struct VertexInput {
+    \\    @location(0) position: vec3f,
+    \\    @location(1) normal: vec3f,
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) inst_pos: vec3f,
+    \\    @location(4) inst_euler: vec4u,
+    \\    @location(5) inst_scale: vec4f,
+    \\    @location(6) inst_color: vec4f,
+    \\};
+    \\fn rebuild_model(inst_pos: vec3f, inst_euler: vec4u, inst_scale: vec4f) -> mat4x4f {
+    \\    let a = 360.0 / 65536.0 * 0.017453292;
+    \\    let rot = vec3f(f32(inst_euler.x), f32(inst_euler.y), f32(inst_euler.z)) * a;
+    \\    let s = inst_scale.xyz;
+    \\    let crx = cos(rot.x); let srx = sin(rot.x);
+    \\    let cry = cos(rot.y); let sry = sin(rot.y);
+    \\    let crz = cos(rot.z); let srz = sin(rot.z);
+    \\    let mS  = mat4x4f(vec4f(s.x,0,0,0), vec4f(0,s.y,0,0), vec4f(0,0,s.z,0), vec4f(0,0,0,1));
+    \\    let mRx = mat4x4f(vec4f(1,0,0,0), vec4f(0,crx,srx,0), vec4f(0,-srx,crx,0), vec4f(0,0,0,1));
+    \\    let mRy = mat4x4f(vec4f(cry,0,-sry,0), vec4f(0,1,0,0), vec4f(sry,0,cry,0), vec4f(0,0,0,1));
+    \\    let mRz = mat4x4f(vec4f(crz,srz,0,0), vec4f(-srz,crz,0,0), vec4f(0,0,1,0), vec4f(0,0,0,1));
+    \\    let mT  = mat4x4f(vec4f(1,0,0,0), vec4f(0,1,0,0), vec4f(0,0,1,0), vec4f(inst_pos,1));
+    \\    return mT * mRy * mRx * mRz * mS;
+    \\}
+    \\@vertex
+    \\fn vs_main(in: VertexInput) -> @builtin(position) vec4f {
+    \\    let model = rebuild_model(in.inst_pos, in.inst_euler, in.inst_scale);
+    \\    return LVP * model * vec4f(in.position, 1.0);
     \\}
 ;
 

@@ -486,6 +486,7 @@ pub const Node = struct {
     // spot cone of that half-angle (degrees). scene3d_range == 0 → a default reach.
     scene3d_range: f32 = 0, // point/spot reach (world units); 0 = default
     scene3d_spread: f32 = 0, // spot cone half-angle (deg); 0 = omni point light
+    scene3d_cast_shadow: bool = false, // spot: render a shadow map from its POV
     // Skybox — a <Scene3D.Skybox> child flips this on. gpu/3d.zig draws an
     // analytic fullscreen sky (gradient + sun + haze + clouds + stars) before
     // the meshes and feeds `horizon` into the fog color so distant geometry

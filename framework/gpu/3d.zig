@@ -143,6 +143,20 @@ comptime {
     }
 }
 
+// Shadow of ONE caster — matches ShadowUniforms in scene3d_wgsl. The light-space
+// view-projection plus the sample knobs; has_shadow gates the whole test off.
+const ShadowUniforms = extern struct {
+    light_vp: [16]f32, // 0   light-space VP (row-major, transposed for WGSL like S.vp)
+    has_shadow: f32 = 0, // 64
+    caster_index: f32 = 0, // 68  which placed light this map belongs to
+    bias: f32 = 0.0015, // 72  depth bias to kill acne
+    texel: f32 = 0, // 76  1/SHADOW_MAP_SIZE for the PCF kernel step
+};
+
+// One shadow map for now (the first shadow-casting spotlight). 2048² depth is a
+// crisp pool at lamp scale; this generalises to a depth-array atlas for N casters.
+const SHADOW_MAP_SIZE: u32 = 2048;
+
 // Skybox uniforms — must match SkyUniforms in shaders.skybox_wgsl. Each vec3 is
 // followed by a scalar so the std140 16-byte alignment holds with no padding.
 const SkyUniforms = extern struct {
@@ -417,6 +431,17 @@ var g_uniform_buffer: ?*wgpu.Buffer = null;
 // carried in SceneUniforms.light_count, so a frame with no placed lights binds
 // the same buffer and the shader loop simply runs zero times.
 var g_lights_buf: ?*wgpu.Buffer = null;
+// Shadow map for the first shadow-casting spotlight (group 0, bindings 2–4).
+// Always bound on every scene draw; `has_shadow` in g_shadow_uniform_buf gates the
+// test, so frames with no caster sample a cleared map but short-circuit to lit.
+var g_shadow_tex: ?*wgpu.Texture = null;
+var g_shadow_view: ?*wgpu.TextureView = null;
+var g_shadow_sampler: ?*wgpu.Sampler = null; // comparison sampler
+var g_shadow_uniform_buf: ?*wgpu.Buffer = null;
+var g_shadow_pipeline: ?*wgpu.RenderPipeline = null; // depth-only, light POV
+var g_shadow_inst_buf: ?*wgpu.Buffer = null; // caster geometry instances (own buffer)
+var g_shadow_vp_buf: ?*wgpu.Buffer = null; // light VP for the shadow pipeline's group0
+var g_shadow_pass_bind_group: ?*wgpu.BindGroup = null; // shadow pipeline group0 (just VP)
 var g_bind_group: ?*wgpu.BindGroup = null;
 var g_bind_group_layout: ?*wgpu.BindGroupLayout = null;
 var g_tex_bind_group_layout: ?*wgpu.BindGroupLayout = null;
@@ -630,6 +655,55 @@ pub fn init() void {
         .usage = wgpu.BufferUsages.storage | wgpu.BufferUsages.copy_dst,
         .mapped_at_creation = 0,
     });
+    // ── Shadow resources (group 0, bindings 2–4) ──
+    // The shadow map is a sampleable depth texture rendered from the caster's POV;
+    // the comparison sampler does hardware PCF; the uniform carries the light VP +
+    // gate. Bound on every scene draw so the layout stays uniform across pipelines.
+    g_shadow_tex = device.createTexture(&.{
+        .label = wgpu.StringView.fromSlice("render3d_shadow_map"),
+        .size = .{ .width = SHADOW_MAP_SIZE, .height = SHADOW_MAP_SIZE, .depth_or_array_layers = 1 },
+        .mip_level_count = 1,
+        .sample_count = 1,
+        .dimension = .@"2d",
+        .format = .depth32_float,
+        .usage = wgpu.TextureUsages.render_attachment | wgpu.TextureUsages.texture_binding,
+    });
+    if (g_shadow_tex) |st| {
+        g_shadow_view = st.createView(&.{
+            .format = .depth32_float,
+            .dimension = .@"2d",
+            .base_mip_level = 0,
+            .mip_level_count = 1,
+            .base_array_layer = 0,
+            .array_layer_count = 1,
+            .aspect = .all,
+        });
+    }
+    g_shadow_sampler = device.createSampler(&.{
+        .address_mode_u = .clamp_to_edge,
+        .address_mode_v = .clamp_to_edge,
+        .mag_filter = .linear,
+        .min_filter = .linear,
+        .compare = .less, // depth-comparison sampler: passes (1) when frag is closer
+    });
+    g_shadow_uniform_buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("render3d_shadow_uniform"),
+        .size = @sizeOf(ShadowUniforms),
+        .usage = wgpu.BufferUsages.uniform | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
+    g_shadow_vp_buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("render3d_shadow_vp"),
+        .size = 16 * @sizeOf(f32),
+        .usage = wgpu.BufferUsages.uniform | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
+    g_shadow_inst_buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("render3d_shadow_instances"),
+        .size = MAX_INSTANCES * @sizeOf(InstanceData),
+        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
     const scene_bgl_entries = [_]wgpu.BindGroupLayoutEntry{
         .{
             .binding = 0,
@@ -641,6 +715,21 @@ pub fn init() void {
             .visibility = wgpu.ShaderStages.fragment,
             .buffer = .{ .type = .read_only_storage, .has_dynamic_offset = 0, .min_binding_size = 0 },
         },
+        .{
+            .binding = 2,
+            .visibility = wgpu.ShaderStages.fragment,
+            .buffer = .{ .type = .uniform, .has_dynamic_offset = 0, .min_binding_size = @sizeOf(ShadowUniforms) },
+        },
+        .{
+            .binding = 3,
+            .visibility = wgpu.ShaderStages.fragment,
+            .texture = .{ .sample_type = .depth, .view_dimension = .@"2d", .multisampled = 0 },
+        },
+        .{
+            .binding = 4,
+            .visibility = wgpu.ShaderStages.fragment,
+            .sampler = .{ .type = .comparison },
+        },
     };
     g_bind_group_layout = device.createBindGroupLayout(&.{
         .entry_count = scene_bgl_entries.len,
@@ -649,6 +738,9 @@ pub fn init() void {
     const scene_bg_entries = [_]wgpu.BindGroupEntry{
         .{ .binding = 0, .buffer = g_uniform_buffer.?, .offset = 0, .size = @sizeOf(SceneUniforms) },
         .{ .binding = 1, .buffer = g_lights_buf.?, .offset = 0, .size = MAX_LIGHTS * @sizeOf(Light) },
+        .{ .binding = 2, .buffer = g_shadow_uniform_buf.?, .offset = 0, .size = @sizeOf(ShadowUniforms) },
+        .{ .binding = 3, .texture_view = g_shadow_view.? },
+        .{ .binding = 4, .sampler = g_shadow_sampler.? },
     };
     g_bind_group = device.createBindGroup(&.{
         .layout = g_bind_group_layout.?,
@@ -870,6 +962,53 @@ pub fn init() void {
         .multisample = .{},
         .fragment = &frag,
     });
+
+    // ── Shadow depth pipeline (renders geometry from a light's POV, depth only) ──
+    // Reuses vert_layouts (same vbuf0 verts + vbuf1 packed InstanceData), so the
+    // caster instances staged for shadows replay through the exact vertex path. Its
+    // own group0 = just the light VP. No fragment / no color target (depth-only).
+    const shadow_bgl_entry = wgpu.BindGroupLayoutEntry{
+        .binding = 0,
+        .visibility = wgpu.ShaderStages.vertex,
+        .buffer = .{ .type = .uniform, .has_dynamic_offset = 0, .min_binding_size = 16 * @sizeOf(f32) },
+    };
+    const shadow_bgl = device.createBindGroupLayout(&.{
+        .entry_count = 1,
+        .entries = @ptrCast(&shadow_bgl_entry),
+    });
+    if (shadow_bgl) |sbgl| {
+        g_shadow_pass_bind_group = device.createBindGroup(&.{
+            .layout = sbgl,
+            .entry_count = 1,
+            .entries = @ptrCast(&wgpu.BindGroupEntry{ .binding = 0, .buffer = g_shadow_vp_buf.?, .offset = 0, .size = 16 * @sizeOf(f32) }),
+        });
+        const shadow_layouts = [_]?*wgpu.BindGroupLayout{sbgl};
+        const shadow_pl = device.createPipelineLayout(&.{
+            .bind_group_layout_count = shadow_layouts.len,
+            .bind_group_layouts = @ptrCast(&shadow_layouts),
+        });
+        const shadow_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "shadow_depth_shader", .code = shaders.shadow_depth_wgsl });
+        const shadow_module = device.createShaderModule(&shadow_desc);
+        const shadow_depth_stencil = wgpu.DepthStencilState{
+            .format = .depth32_float,
+            .depth_write_enabled = .true,
+            .depth_compare = .less,
+            .stencil_front = .{},
+            .stencil_back = .{},
+        };
+        if (shadow_pl != null and shadow_module != null) {
+            g_shadow_pipeline = device.createRenderPipeline(&.{
+                .layout = shadow_pl.?,
+                .vertex = .{ .module = shadow_module.?, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = vert_layouts.len, .buffers = &vert_layouts },
+                .primitive = .{ .topology = .triangle_list, .cull_mode = .back, .front_face = .ccw },
+                .depth_stencil = &shadow_depth_stencil,
+                .multisample = .{},
+            });
+        }
+        if (shadow_module) |sm| sm.release();
+        if (shadow_pl) |spl| spl.release();
+        sbgl.release();
+    }
     // Grass companion: same layout/vertex/blend as g_pipeline, depth-write ON (the
     // blade is alpha-TESTED via discard in the shader, so it's opaque), only the
     // module differs — wind + procedural wisp cutout + root→tip gradient. The
@@ -1056,6 +1195,14 @@ pub fn deinit() void {
     if (g_bind_group_layout) |l| l.release();
     if (g_uniform_buffer) |b| b.release();
     if (g_lights_buf) |b| b.release();
+    if (g_shadow_view) |v| v.release();
+    if (g_shadow_tex) |t| t.release();
+    if (g_shadow_sampler) |s| s.release();
+    if (g_shadow_uniform_buf) |b| b.release();
+    if (g_shadow_vp_buf) |b| b.release();
+    if (g_shadow_inst_buf) |b| b.release();
+    if (g_shadow_pipeline) |p| p.release();
+    if (g_shadow_pass_bind_group) |bg| bg.release();
     if (g_instance_buf) |b| b.release();
     if (g_slim_inst_buf) |b| b.release();
     if (g_slim_static_buf) |b| b.release();
@@ -2176,6 +2323,13 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     // children. Overflow past MAX_LIGHTS is dropped loudly (a one-shot warn).
     var placed_lights: [MAX_LIGHTS]Light = undefined;
     var n_placed: u32 = 0;
+    // The first shadow-casting spot owns the single shadow map. Its index into
+    // placed_lights + the params needed to build its light-space VP.
+    var shadow_caster: i32 = -1;
+    var caster_pos: [3]f32 = .{ 0, 0, 0 };
+    var caster_dir: [3]f32 = .{ 0, -1, 0 };
+    var caster_range: f32 = 0;
+    var caster_half_deg: f32 = 30;
     var clear_color: [3]f32 = .{ 0.05, 0.05, 0.08 };
     if (scene_node.style.background_color) |bg| {
         clear_color = .{
@@ -2247,6 +2401,14 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                             .cos_inner = cos_inner,
                             .kind = if (is_spot) 1 else 0,
                         };
+                        // First shadow-casting spot claims the shadow map.
+                        if (is_spot and child.scene3d_cast_shadow and shadow_caster < 0) {
+                            shadow_caster = @intCast(n_placed);
+                            caster_pos = .{ child.scene3d_pos_x, child.scene3d_pos_y, child.scene3d_pos_z };
+                            caster_dir = dir;
+                            caster_range = range;
+                            caster_half_deg = @min(@max(child.scene3d_spread, 1.0), 89.0);
+                        }
                         n_placed += 1;
                     } else {
                         std.debug.print("[r3d-light] placed-light overflow — MAX_LIGHTS ({d}) reached, dropping the rest. Raise MAX_LIGHTS in framework/gpu/3d.zig.\n", .{MAX_LIGHTS});
@@ -2337,6 +2499,134 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     const color_view = slot.color_view orelse return;
     const depth_view = slot.depth_view orelse return;
     const encoder = device.createCommandEncoder(&.{ .label = wgpu.StringView.fromSlice("r3d") }) orelse return;
+
+    // ── Shadow depth pass ───────────────────────────────────────────────────
+    // Render opaque caster geometry from the shadow-casting spot's POV into the
+    // depth map, so the main fragment shader can test occlusion. Runs BEFORE the
+    // color pass (which samples the map). Deliberately covers the things that
+    // should cast — single meshes + instanced prop/building batches — and skips
+    // foliage/ground/dynamic/transparent (a grass blade or the floor self-shadow
+    // is noise, glass should not cast solid). `light_vp` matches S.vp's transpose.
+    var shadow_on: bool = false;
+    var caster_lvp_t: math.Mat4 = .{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+    if (shadow_caster >= 0 and g_shadow_pipeline != null and g_shadow_view != null and caster_range > 0.01) {
+        const cpos = math.Vec3{ .x = caster_pos[0], .y = caster_pos[1], .z = caster_pos[2] };
+        const ctgt = math.Vec3{ .x = caster_pos[0] + caster_dir[0], .y = caster_pos[1] + caster_dir[1], .z = caster_pos[2] + caster_dir[2] };
+        // Up vector that isn't parallel to the aim (a straight-down spot needs z-up).
+        const up = if (@abs(caster_dir[1]) > 0.99) math.Vec3{ .x = 0, .y = 0, .z = 1 } else math.Vec3{ .x = 0, .y = 1, .z = 0 };
+        const lview = math.m4lookAt(cpos, ctgt, up);
+        const lfov_deg: f32 = @min(2.0 * caster_half_deg + 8.0, 170.0);
+        const lfov = lfov_deg * std.math.pi / 180.0;
+        const lnear: f32 = @max(0.05, caster_range * 0.02);
+        const lfar: f32 = @max(lnear + 1.0, caster_range);
+        const lproj = math.m4perspective(lfov, 1.0, lnear, lfar);
+        const lvp = math.m4multiply(lproj, lview);
+        const lvp_t = math.m4transpose(lvp);
+        caster_lvp_t = lvp_t;
+        if (g_shadow_vp_buf) |vb| bu.writeValue(queue, vb, 0, &lvp_t);
+
+        // Stage caster instances into g_shadow_inst_buf, recording per-group draws.
+        const sh_scratch = &g_inst_scratch; // reused; pass 2 resets it afterward
+        const sh_cap: u64 = @as(u64, MAX_INSTANCES) * @sizeOf(InstanceData);
+        var sh_top: u64 = 0;
+        var sh_rec_off: [MAX_SCENE_MESHES]u64 = undefined;
+        var sh_rec_cnt: [MAX_SCENE_MESHES]u32 = undefined;
+        var sh_rec_slot: [MAX_SCENE_MESHES]GeoSlice = undefined;
+        var sh_nrec: usize = 0;
+        var sci: usize = 0;
+        while (sci < scene_node.children.len and sh_nrec < MAX_SCENE_MESHES) : (sci += 1) {
+            const c = &scene_node.children[sci];
+            if (!c.scene3d_mesh) continue;
+            if (c.scene3d_ground_formula != null) continue;
+            const key = c.scene3d_geom_key orelse continue;
+            // Skip foliage / dynamic / heightfield / water — only solid casters.
+            if (std.mem.startsWith(u8, key, "~grass~") or std.mem.startsWith(u8, key, "~frond~") or
+                std.mem.startsWith(u8, key, "~water~") or std.mem.startsWith(u8, key, "~hf~") or
+                std.mem.startsWith(u8, key, "~dyn~")) continue;
+            // Opaque only (a glass pane shouldn't throw a solid shadow).
+            if (c.scene3d_instance_count == 0 and c.scene3d_color_a < 0.999) continue;
+            const sl = lookupGeometry(key) orelse blk: {
+                const verts = c.scene3d_vertices orelse break :blk null;
+                if (c.scene3d_vert_count == 0) break :blk null;
+                if (verts.len < @as(usize, c.scene3d_vert_count) * 8) break :blk null;
+                break :blk internGeometry(queue, key, verts, c.scene3d_vert_count);
+            } orelse continue;
+            const grp_start = sh_top;
+            var grp_cnt: u32 = 0;
+            if (c.scene3d_instance_data) |idata| {
+                const stride = c.scene3d_instance_stride;
+                if (stride >= 9) {
+                    const total: u32 = @intCast(idata.len / @max(1, stride));
+                    const ifirst: u32 = @min(c.scene3d_instance_first, total);
+                    const icount: u32 = @min(c.scene3d_instance_count, total - ifirst);
+                    var ii: u32 = 0;
+                    while (ii < icount and sh_top + @sizeOf(InstanceData) <= sh_cap) : (ii += 1) {
+                        const base = @as(usize, ifirst + ii) * stride;
+                        const sb: usize = if (stride >= 12) 6 else 3;
+                        const cb: usize = if (stride >= 12) 9 else 6;
+                        const idx: usize = @intCast(sh_top / @sizeOf(InstanceData));
+                        sh_scratch[idx] = makeInstance(
+                            idata[base + 0], idata[base + 1], idata[base + 2],
+                            if (stride >= 12) idata[base + 3] else 0,
+                            if (stride >= 12) idata[base + 4] else 0,
+                            if (stride >= 12) idata[base + 5] else 0,
+                            idata[base + sb + 0], idata[base + sb + 1], idata[base + sb + 2],
+                            idata[base + cb + 0], idata[base + cb + 1], idata[base + cb + 2], 1.0,
+                        );
+                        sh_top += @sizeOf(InstanceData);
+                        grp_cnt += 1;
+                    }
+                }
+            } else if (sh_top + @sizeOf(InstanceData) <= sh_cap) {
+                const idx: usize = @intCast(sh_top / @sizeOf(InstanceData));
+                sh_scratch[idx] = makeInstance(
+                    c.scene3d_pos_x, c.scene3d_pos_y, c.scene3d_pos_z,
+                    c.scene3d_rot_x, c.scene3d_rot_y, c.scene3d_rot_z,
+                    c.scene3d_scale_x, c.scene3d_scale_y, c.scene3d_scale_z,
+                    c.scene3d_color_r, c.scene3d_color_g, c.scene3d_color_b, 1.0,
+                );
+                sh_top += @sizeOf(InstanceData);
+                grp_cnt += 1;
+            }
+            if (grp_cnt > 0) {
+                sh_rec_off[sh_nrec] = grp_start;
+                sh_rec_cnt[sh_nrec] = grp_cnt;
+                sh_rec_slot[sh_nrec] = sl;
+                sh_nrec += 1;
+            }
+        }
+        if (sh_nrec > 0 and g_shadow_inst_buf != null) {
+            const start_idx: usize = 0;
+            const total_inst: usize = @intCast(sh_top / @sizeOf(InstanceData));
+            bu.writeTypedBuffer(queue, g_shadow_inst_buf.?, 0, InstanceData, sh_scratch[start_idx .. start_idx + total_inst]);
+            const spass = encoder.beginRenderPass(&.{
+                .color_attachment_count = 0,
+                .color_attachments = &[_]wgpu.ColorAttachment{},
+                .depth_stencil_attachment = &wgpu.DepthStencilAttachment{
+                    .view = g_shadow_view.?,
+                    .depth_load_op = .clear,
+                    .depth_store_op = .store,
+                    .depth_clear_value = 1.0,
+                    .stencil_load_op = .clear,
+                    .stencil_store_op = .store,
+                    .stencil_clear_value = 0,
+                },
+            });
+            if (spass) |sp| {
+                sp.setPipeline(g_shadow_pipeline.?);
+                sp.setBindGroup(0, g_shadow_pass_bind_group.?, 0, null);
+                var ri: usize = 0;
+                while (ri < sh_nrec) : (ri += 1) {
+                    const sl = sh_rec_slot[ri];
+                    sp.setVertexBuffer(0, g_retained_vbuf.?, sl.offset, bu.bytesOfCount(Vertex, sl.count));
+                    sp.setVertexBuffer(1, g_shadow_inst_buf.?, sh_rec_off[ri], bu.bytesOfCount(InstanceData, sh_rec_cnt[ri]));
+                    sp.draw(sl.count, sh_rec_cnt[ri], 0, 0);
+                }
+                sp.end();
+                shadow_on = true;
+            }
+        }
+    }
     const pass = encoder.beginRenderPass(&.{
         .color_attachment_count = 1,
         .color_attachments = @ptrCast(&wgpu.ColorAttachment{
@@ -2393,6 +2683,15 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         .sky_zenith = .{ sky_zenith[0], sky_zenith[1], sky_zenith[2], 0 },
     };
     bu.writeValue(queue, g_uniform_buffer.?, 0, &scene_u);
+    // Shadow uniform for the main fragment shader: the caster's light VP + the gate.
+    // has_shadow is on only when the depth pass above actually populated the map.
+    const shadow_u = ShadowUniforms{
+        .light_vp = caster_lvp_t,
+        .has_shadow = if (shadow_on) 1 else 0,
+        .caster_index = if (shadow_caster >= 0) @floatFromInt(shadow_caster) else 0,
+        .texel = 1.0 / @as(f32, @floatFromInt(SHADOW_MAP_SIZE)),
+    };
+    if (g_shadow_uniform_buf) |sb| bu.writeValue(queue, sb, 0, &shadow_u);
     pass.setBindGroup(0, g_bind_group.?, 0, null);
 
     // ── Pass 1: resolve each mesh (geometry slot, texture bind group). Skips
