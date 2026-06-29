@@ -142,7 +142,9 @@ export type { PaintedOverlay, PaintedOverlayLayer, PaintedLayerLook } from './pa
 export { GAME_FIGURE, charactersStream, bakeBodyDocument, applyBodyPaint } from './figure';
 export type { BodyDocument, BakedFigure, CharactersEvent, CharactersStreamState } from './figure';
 export { GAME_VEHICLE, vehiclesStream, applyVehiclePaint, pickVehicleSpawn } from './vehicle';
-export type { VehicleDoc, VehiclePartId, VehicleStyleId, VehicleRoleId, VehiclePoseId, DamageLevel, VehicleBuild, VehiclesEvent, VehiclesStreamState } from './vehicle';
+export type { VehicleDoc, VehiclePartId, VehicleStyleId, VehicleRoleId, VehiclePoseId, DamageLevel, VehicleBuild, VehicleMeshKind, VehiclesEvent, VehiclesStreamState } from './vehicle';
+export { GAME_TRAFFIC, createTrafficSim, roadCellsFromNav, TRAFFIC_TUNING } from './traffic';
+export type { TrafficSim, TrafficAgent, TrafficPose, TrafficFindPath, RoadPoint } from './traffic';
 export { GAME_DRIVING, makeCarState, defaultTuning, stepCar, rightCar } from './driving';
 export type { CarState, CarTuning, CarInput, CarTelemetry } from './driving';
 export { VEHICLE_HANDLING, tuningForStyle, wheelBaseOf } from './driving/handling';

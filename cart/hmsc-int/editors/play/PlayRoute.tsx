@@ -73,6 +73,13 @@ import { logPiecePlaced, logPrefabStamped } from '../build/placeLog';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes, elevatorCarVisualShape, type VisualShape } from '../build/pieceMeshes';
 import { propContainer, propDynamics, propSeat } from '../../game/kinds/props';
 import { Prop } from '../../render3d/Prop';
+import { TrafficLayer } from '../../render3d/TrafficVehicles';
+
+// Ambient traffic seed (req_2056): how many vehicles to populate on the road
+// cells of the live nav window, and the reproducibility seed. Modest for the
+// first slice — the layer drives them on deterministic host-A* routes.
+const TRAFFIC_VEHICLE_COUNT = 8;
+const TRAFFIC_SEED = 1337;
 
 // ── KICKPROP-0610: a placed dynamic prop's live body state ──────────────────
 // The route-side record behind the EmbodiedWorldExtras.bodies door: the host
@@ -1125,6 +1132,10 @@ export function PlayRoute(props: {
   // central half of the window re-anchors it (full republish: the host cap
   // makes updateCells moot for a moving window).
   const navPublishRef = useRef<ReturnType<typeof GAME_WORLD.publishNavGrid> | null>(null);
+  // A republish bump so the ambient TrafficLayer rebuilds its sim when the nav
+  // window republishes (the result rides a ref; this is its render signal). Rare
+  // — mount + occasional window follows — so it never drives a per-frame storm.
+  const bumpNavRender = useRerender();
   const republishNav = useCallback(() => {
     if (!GAME_PATHING.hostReady()) return;
     const t0 = perfMs();
@@ -1135,6 +1146,7 @@ export function PlayRoute(props: {
       center: [p.x, p.z],
     });
     navPublishRef.current = result;
+    bumpNavRender();
     GAME_TELEMETRY.recordDiagnostic('physics', 'nav.publish', {
       generation: result.generation,
       cols: result.cols,
@@ -2122,6 +2134,16 @@ export function PlayRoute(props: {
             BOTH modes (solid in both; the toggle exists to walk what you built) */}
         <PlacedPieceMeshes pieces={liftedPieces} markedIds={markedIds} targetId={showSelectionOverlay ? snapTarget?.targetPieceId ?? null : null} occludedIds={occludedPieceIds} placeFreezeProbe={placeFreezeProbeRef.current} skipDynamicProps />
         <DynamicPropMeshes bodies={dynamicBodiesRef.current} rev={dynamicBodiesRev} />
+        {/* req_2056: ambient traffic — vehicles driving the road cells of the
+            live nav window on deterministic host-A* routes. Self-contained frame
+            loop (never re-renders the route); rebuilds on nav republish (navRev). */}
+        <TrafficLayer
+          nav={navPublishRef.current}
+          groundTop={(x, z) => groundColumnTop(placementWorldGrid, x, z)}
+          vehicleProfile={GAME_WORLD.navProfiles.vehicle}
+          count={TRAFFIC_VEHICLE_COUNT}
+          seed={TRAFFIC_SEED}
+        />
         {/* REQ-0647: the live elevator cars at their LIVE height (the ride's
             rerenderElevators re-renders the route while a car moves; the shaft
             frames render with the standing pieces above). */}
