@@ -29,6 +29,10 @@
 // Unifying the two parsers behind one shared module is a rule-of-two follow-up.
 
 import { unwrap, type EditMesh, type EditMeshFace, type V3 } from './editMesh';
+// Shared, in-cart bytes→string: TextDecoder is NOT a global in the cart runtime
+// (only the v8cli build host has it), so bytesText's decodeURIComponent(escape())
+// fallback is what actually decodes the glTF JSON chunk when the app runs.
+import { bytesText } from '@reactjit/workspace';
 
 // A welded, editable+paintable+unwrapped EditMesh is JSON'd into a 4MB localstore
 // value ALONGSIDE the rest of the editor state. At ~120 bytes/tri (face object +
@@ -105,9 +109,10 @@ function glbChunks(bytes: Uint8Array): { json: any; bin: Uint8Array } {
     const chunkLength = u32(bytes, at);
     const chunkType = u32(bytes, at + 4);
     const data = bytes.subarray(at + 8, at + 8 + chunkLength);
-    // TextDecoder over the JSON chunk in one shot — the old char-by-char ascii()
-    // string-built a multi-hundred-KB header one codepoint at a time.
-    if (chunkType === 0x4e4f534a) json = JSON.parse(new TextDecoder().decode(data));
+    // bytesText decodes the JSON chunk in one shot (TextDecoder when the build host
+    // has it, decodeURIComponent(escape()) in the cart). Do NOT use `new
+    // TextDecoder()` directly — it is undefined in the cart runtime and throws.
+    if (chunkType === 0x4e4f534a) json = JSON.parse(bytesText(data));
     if (chunkType === 0x004e4942) bin = data;
     at += 8 + chunkLength;
   }
