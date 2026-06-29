@@ -5342,12 +5342,15 @@ pub const Runtime = struct {
             if (veh.length <= 1.0e-4 or veh.route.len < 4) continue;
             const s = @mod(self.traffic_seconds * veh.speed + veh.phase, veh.length);
             const pose = sampleRoute(veh.route, s);
+            // The vehicle model's FRONT is -Z (hood/headlights at -halfLength), so face
+            // travel by rotating the whole body 180° past the raw heading.
+            const heading = pose.heading_deg + 180;
             const ground = sceneTerrainTopAt(self.scene.heightfields, pose.x, pose.z) orelse 0;
             var ri: usize = 0;
             while (ri + TRAFFIC_PROTO_STRIDE <= veh.rows.len) : (ri += TRAFFIC_PROTO_STRIDE) {
                 const r = veh.rows[ri .. ri + TRAFFIC_PROTO_STRIDE];
                 const shape = r[12];
-                const local = rotateYLocal(.{ r[0], r[1], r[2] }, pose.heading_deg);
+                const local = rotateYLocal(.{ r[0], r[1], r[2] }, heading);
                 var buf: []f32 = undefined;
                 var slot: u32 = undefined;
                 if (@abs(shape - SHAPE_CYLINDER16) < 0.5) {
@@ -5371,7 +5374,7 @@ pub const Runtime = struct {
                 buf[o + 1] = ground + local.y;
                 buf[o + 2] = pose.z + local.z;
                 buf[o + 3] = r[3];
-                buf[o + 4] = r[4] + pose.heading_deg;
+                buf[o + 4] = r[4] + heading;
                 buf[o + 5] = r[5];
                 buf[o + 6] = r[6];
                 buf[o + 7] = r[7];
