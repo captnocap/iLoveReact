@@ -10,6 +10,7 @@ import {
   flipFace, mergeFaces, mirrorEdit, mirrorEditAxes, mirrorPartners, setFaceGlass, symmetrize, symmetryReport, setPivot, splitConcaveFaces, splitQuad, tagOneFace, fitWheelCenter, wheelMesh, mergeMesh, translateVerts, unwrap, unwrapMesh, updateMount, storedUVLayout, vertsBounds,
   vertsCentroid, vertsHalfExtent, solidifyFaces, subMeshFromFaces, detachPanel, validateMesh, meshHealth,
   latticePanel,
+  addLight, updateLight, removeLight, nextLightName,
   type EditMesh, type MountPoint, type V3,
 } from './editMesh';
 
@@ -1339,6 +1340,48 @@ test('latticePanel diamond (chainlink): crossed ±45° wires, clipped to bounds'
 test('latticePanel never yields an empty mesh (degenerate params fall back to a slab)', () => {
   const m = latticePanel({ width: 1, height: 1, depth: 0.1, pattern: 'grid', cols: 1, rows: 1, bar: 0.05, frame: 0 });
   assert(m.faces.length >= 6, 'a single opening with no frame still produces a solid slab, not nothing');
+});
+
+// ── Emit-rig lights (req_2062) ───────────────────────────────────────────────
+test('addLight appends a light with pyramid defaults + a stable id', () => {
+  const box = cuboid(2, 2, 2);
+  assertEqual(box.lights, undefined, 'a fresh part has no lights');
+  const m = addLight(box, { id: 'L1' });
+  assertEqual((m.lights ?? []).length, 1, 'one light after add');
+  const l = m.lights![0];
+  assertEqual(l.id, 'L1', 'id kept');
+  assertEqual(l.kind, 'spot', 'defaults to a spot (the pyramid)');
+  assertEqual(l.castsShadow, true, 'a spot casts a shadow by default');
+  assert(l.dir![1] < 0, 'aims downward by default');
+  assert(l.intensity > 0 && l.range > 0, 'has a usable brightness + reach');
+  assertEqual(box.lights, undefined, 'addLight is immutable (source untouched)');
+});
+
+test('updateLight patches one light by id, leaving others alone', () => {
+  let m = addLight(addLight(cuboid(1, 1, 1), { id: 'A' }), { id: 'B', kind: 'point' });
+  m = updateLight(m, 'A', { color: '#ff0000', intensity: 9 });
+  const a = m.lights!.find((x) => x.id === 'A')!;
+  const b = m.lights!.find((x) => x.id === 'B')!;
+  assertEqual(a.color, '#ff0000', 'A recolored');
+  assertEqual(a.intensity, 9, 'A brightened');
+  assertEqual(b.kind, 'point', 'B untouched');
+});
+
+test('removeLight drops by id; nextLightName counts', () => {
+  let m = addLight(addLight(cuboid(1, 1, 1), { id: 'A' }), { id: 'B' });
+  assertEqual(nextLightName(m), 'light 3', 'next name follows the count');
+  m = removeLight(m, 'A');
+  assertEqual((m.lights ?? []).length, 1, 'one left');
+  assertEqual(m.lights![0].id, 'B', 'kept the right one');
+});
+
+test('cloneMesh deep-copies lights (no shared refs)', () => {
+  const src = addLight(cuboid(1, 1, 1), { id: 'L', position: [1, 2, 3], dir: [0, -1, 0] });
+  const cp = cloneMesh(src);
+  cp.lights![0].position[0] = 99;
+  cp.lights![0].color = '#abcdef';
+  assertEqual(src.lights![0].position[0], 1, 'source position untouched');
+  assert(src.lights![0].color !== '#abcdef', 'source color untouched');
 });
 
 finish('editMesh');

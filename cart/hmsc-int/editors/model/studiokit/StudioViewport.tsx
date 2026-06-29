@@ -36,7 +36,7 @@ import { chordHintFor } from '../../controls';
 import { KeyLegend } from '../../KeyLegend';
 import { loadKeybinds } from '../../keybinds';
 import { HotkeysPanel } from './dialogs/HotkeysPanel';
-import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, centerMesh, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, newConcaveFaces, fitWheelCenter, addTextureSlot, assignFacesToSlot, clearFaceSlot, facesInSlot, slotOfFace, renameSlot, removeSlot, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, type EditMesh, type V3 as MV3 } from '../editMesh';
+import { addMount, addMountReflections, bevelEdge, bevelVertex, clampSides, clearFaceTags, clearPivot, cone, connectVerts, createFaceFromEdges, createFaceFromVerts, cuboid, cylinder, deleteFaces, detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, faceCentroid, centerMesh, faceNormal, facesGeometry, facesWithTag, findConcaveFaces, newConcaveFaces, fitWheelCenter, addTextureSlot, assignFacesToSlot, clearFaceSlot, facesInSlot, slotOfFace, renameSlot, removeSlot, wheelMesh, icosphere, mergeFaces, mergeMesh, flipFace, hasPivot, loopCutPositions, loopCutRange, meshEdges, meshHealth, mirrorEditAxes, pivotOf, plane, pyramid, removeMount, rotateVerts, scaleVerts, setFaceGlass, setPivot, solidifyFaces, sphere, splitConcaveFaces, symmetrize, symmetryReport, tagOneFace, translateVerts, updateMount, updateMountMirrored, vertsBounds, vertsCentroid, vertsHalfExtent, ICOSPHERE_SUBDIV_MAX, SHAPE_SIDES_MAX, SHAPE_SIDES_MIN, addLight, updateLight, removeLight, nextLightName, type EditMesh, type LightRig, type V3 as MV3 } from '../editMesh';
 import { addAnchor, isAnchor, nextAnchorName } from '../anchors';
 import { axleSpinAxis, buildWheelPart, faceWheelFit, mirroredCenters } from '../wheelMount';
 import { studioSeatRig, useStudioModel, type StudioModel, type StudioPart } from '../studioModel';
@@ -710,6 +710,9 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
   // SAME TransformGizmo + drag math — only the anchor + commit differ.
   const [rigSel, setRigSel] = useHotState<RigSel | null>('studio:rigSel', null);
   const [rigDraft, setRigDraft] = useState<{ sel: RigSel; localPos: MV3 } | null>(null);
+  // Which authored light (by id) is selected for editing in the rig panel (req_2062).
+  // Separate from rigSel so the pivot/joint overlay + pick path stay untouched.
+  const [selectedLightId, setSelectedLightId] = useHotState<string | null>('studio:lightSel', null);
   const [rigDragAxis, setRigDragAxis] = useState<GizmoHit | null>(null);
   const rigDragRef = useRef<null | { sel: RigSel; axis: { dx: number; dy: number; pxPerUnit: number }; unit: MV3; startCx: number; startCy: number; startLocal: MV3 }>(null);
   // A rig handle's LOCAL position, draft-aware: the live drag draft if it's the one
@@ -2545,6 +2548,35 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
         <Scene3D.Fog enabled={false} />
         <Scene3D.AmbientLight color="#dfe7ff" intensity={0.55} />
         <Scene3D.DirectionalLight direction={[0.4, 0.92, 0.32]} color="#ffe9c2" intensity={0.85} />
+        {/* AUTHORED LIGHTS (req_2062): every part's emit-rig lights, part-local so
+            they ride the part's lift. A spot is the user's pyramid (cone + shadow);
+            a point is an omni bulb. This is what makes "place a light, see the model
+            lit" real in the editor; the cook carries the same rows to the prop. */}
+        {props.parts.flatMap((part) =>
+          (part.mesh.lights ?? []).map((lt) => {
+            const pos: Vec3 = [lt.position[0], lt.position[1] + part.lift, lt.position[2]];
+            return lt.kind === 'spot' ? (
+              <Scene3D.SpotLight
+                key={`L:${part.id}:${lt.id}`}
+                position={pos}
+                direction={lt.dir ?? [0, -1, 0]}
+                color={lt.color}
+                intensity={lt.intensity}
+                cone={lt.spread ?? 32}
+                range={lt.range}
+                castsShadow={lt.castsShadow ?? true}
+              />
+            ) : (
+              <Scene3D.PointLight
+                key={`L:${part.id}:${lt.id}`}
+                position={pos}
+                color={lt.color}
+                intensity={lt.intensity}
+                range={lt.range}
+              />
+            );
+          })
+        )}
         {staging}
         {/* BACKDROPS (req_1280/1285): the reference-image trace planes. Translucent +
             white-material so the picture (sampled via textureKey) reads through;
@@ -3295,6 +3327,81 @@ export function StudioViewport(props: { parts: StudioPart[]; allParts?: StudioPa
             <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 5, backgroundColor: '#0b1320cc', borderWidth: 1, borderColor: '#27364a' }}>
               <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{rigSel ? (rigSel.kind === 'pivot' ? 'pivot selected' : `${isAnchor((activePart.mesh.mounts ?? []).find((x) => x.name === rigSel.name) ?? { kind: 'socket' } as any) ? 'anchor' : 'joint'}: ${rigSel.name}`) : 'pick a handle, or + above'}</Text>
             </Box>
+            {/* LIGHTS (req_2062) — the emit rig. Make a pyramid light, pick it from the
+                row, tune it. A spot throws an aimed cone (+ shadow); a bulb is omni. */}
+            <Box style={{ height: 1, width: '100%', backgroundColor: '#3a2c4a', marginTop: 3, marginBottom: 3 }} />
+            <Pressable
+              onPress={() => {
+                const id = `L-${Math.random().toString(36).slice(2, 8)}`;
+                const c = pivotOf(activePart.mesh); // bounds centre; lift the tip above the part
+                props.onEditMesh(activePart.id, addLight(activePart.mesh, { id, kind: 'spot', position: [c[0], c[1] + 2, c[2]], dir: [0, -1, 0] }));
+                setSelectedLightId(id);
+              }}
+              tooltip="Add a light — the pyramid: a tip throwing coloured light down a cone. A spot casts a shadow; switch to a bulb for an omni glow. Tune it below."
+              style={{ ...STEP_BTN, backgroundColor: '#1a1330ee', borderColor: '#a86b2c' }}
+            >
+              <Text fontSize={10} color="#ffd27d" style={{ fontFamily: 'monospace' }}>+ light</Text>
+            </Pressable>
+            {(activePart.mesh.lights ?? []).length > 0 ? (
+              <Row style={{ gap: 4, flexWrap: 'wrap', width: '100%' }}>
+                {(activePart.mesh.lights ?? []).map((lt) => (
+                  <Pressable
+                    key={lt.id}
+                    onPress={() => setSelectedLightId(lt.id)}
+                    style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: lt.id === selectedLightId ? '#2a1f48' : '#13233aee', borderWidth: 1, borderColor: lt.id === selectedLightId ? '#caa6ff' : '#27364a' }}
+                  >
+                    <Row style={{ gap: 4, alignItems: 'center' }}>
+                      <Box style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: lt.color }} />
+                      <Text fontSize={9} color={T.dim} style={{ fontFamily: 'monospace' }}>{lt.kind === 'spot' ? '▽' : '○'}</Text>
+                    </Row>
+                  </Pressable>
+                ))}
+              </Row>
+            ) : null}
+            {(() => {
+              const selLight = (activePart.mesh.lights ?? []).find((l) => l.id === selectedLightId);
+              if (!selLight) return null;
+              const edit = (patch: Partial<LightRig>) => props.onEditMesh(activePart.id, updateLight(activePart.mesh, selLight.id, patch));
+              const SWATCHES = ['#ffffff', '#ffd27d', '#ffb55a', '#ff6a4a', '#5ab0ff', '#7dffb0', '#d27dff'];
+              const sh = selLight.castsShadow ?? true;
+              return (
+                <Box style={{ gap: 5, paddingLeft: 8, paddingRight: 8, paddingTop: 6, paddingBottom: 6, borderRadius: 5, backgroundColor: '#0b1320cc', borderWidth: 1, borderColor: '#3a2c4a' }}>
+                  <Row style={{ gap: 4 }}>
+                    {(['spot', 'point'] as const).map((k) => (
+                      <Pressable key={k} onPress={() => edit({ kind: k })} style={{ ...STEP_BTN, flexGrow: 1, backgroundColor: selLight.kind === k ? '#2a1f48' : '#13233aee', borderColor: selLight.kind === k ? '#caa6ff' : '#27364a' }}>
+                        <Text fontSize={9} color={selLight.kind === k ? '#e7d6ff' : T.dim} style={{ fontFamily: 'monospace' }}>{k === 'spot' ? '▽ spot' : '○ bulb'}</Text>
+                      </Pressable>
+                    ))}
+                  </Row>
+                  <Row style={{ gap: 4, flexWrap: 'wrap' }}>
+                    {SWATCHES.map((c) => (
+                      <Pressable key={c} onPress={() => edit({ color: c })} style={{ width: 18, height: 18, borderRadius: 4, backgroundColor: c, borderWidth: selLight.color === c ? 2 : 1, borderColor: selLight.color === c ? '#ffffff' : '#27364a' }} />
+                    ))}
+                  </Row>
+                  <NumberField label="bright" value={selLight.intensity} onChange={(n) => edit({ intensity: n })} min={0} max={20} step={0.5} snap={0.1} />
+                  <NumberField label="reach" value={selLight.range} onChange={(n) => edit({ range: n })} min={0} max={60} step={1} snap={0.5} suffix="m" />
+                  {selLight.kind === 'spot' ? (
+                    <NumberField label="cone" value={selLight.spread ?? 32} onChange={(n) => edit({ spread: n })} min={5} max={85} step={2} snap={1} suffix="°" />
+                  ) : null}
+                  <NumberField label="tip x" value={selLight.position[0]} onChange={(n) => edit({ position: [n, selLight.position[1], selLight.position[2]] })} min={-50} max={50} step={0.25} snap={0.05} />
+                  <NumberField label="tip y" value={selLight.position[1]} onChange={(n) => edit({ position: [selLight.position[0], n, selLight.position[2]] })} min={-50} max={50} step={0.25} snap={0.05} />
+                  <NumberField label="tip z" value={selLight.position[2]} onChange={(n) => edit({ position: [selLight.position[0], selLight.position[1], n] })} min={-50} max={50} step={0.25} snap={0.05} />
+                  {selLight.kind === 'spot' ? (
+                    <>
+                      <NumberField label="aim x" value={selLight.dir?.[0] ?? 0} onChange={(n) => edit({ dir: [n, selLight.dir?.[1] ?? -1, selLight.dir?.[2] ?? 0] })} min={-1} max={1} step={0.1} snap={0.05} />
+                      <NumberField label="aim y" value={selLight.dir?.[1] ?? -1} onChange={(n) => edit({ dir: [selLight.dir?.[0] ?? 0, n, selLight.dir?.[2] ?? 0] })} min={-1} max={1} step={0.1} snap={0.05} />
+                      <NumberField label="aim z" value={selLight.dir?.[2] ?? 0} onChange={(n) => edit({ dir: [selLight.dir?.[0] ?? 0, selLight.dir?.[1] ?? -1, n] })} min={-1} max={1} step={0.1} snap={0.05} />
+                      <Pressable onPress={() => edit({ castsShadow: !sh })} style={{ ...STEP_BTN, backgroundColor: sh ? '#1f3a2c' : '#13233aee', borderColor: sh ? '#5fd6a0' : '#27364a' }}>
+                        <Text fontSize={9} color={sh ? '#9fe9c4' : T.dim} style={{ fontFamily: 'monospace' }}>{sh ? '✓ casts shadow' : 'no shadow'}</Text>
+                      </Pressable>
+                    </>
+                  ) : null}
+                  <Pressable onPress={() => { props.onEditMesh(activePart.id, removeLight(activePart.mesh, selLight.id)); setSelectedLightId(null); }} style={{ ...STEP_BTN, backgroundColor: '#3a1313ee', borderColor: '#a8412c' }}>
+                    <Text fontSize={9} color="#ff9d8d" style={{ fontFamily: 'monospace' }}>✕ remove light</Text>
+                  </Pressable>
+                </Box>
+              );
+            })()}
           </>
         ) : null}
         {selMode !== 'rig' && selMode !== 'paint' ? (

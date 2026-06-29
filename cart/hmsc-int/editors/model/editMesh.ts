@@ -121,6 +121,34 @@ export type EditMesh = {
    *  exposes each slot as a texture target (the prop-part re-skin flow). Absent =
    *  the part has no declared slots (renders/behaves exactly as before). */
   slots?: TextureSlot[];
+  /** EMIT RIGGING (req_2062) — lights the part throws. Authored in the rig menu as
+   *  the user's "pyramid": a tip (`position`) aimed down `dir`, opening to `spread`,
+   *  carrying `range` + `color`. A `spot` casts a shadow; a `point` is an omni bulb.
+   *  Part-local, so the light rides the prop wherever it is placed. Absent = no light. */
+  lights?: LightRig[];
+};
+
+/** One authored light on a part (req_2062) — the pyramid the user described. Mirrors
+ *  the framework primitives (`Scene3D.PointLight`/`SpotLight`) the viewport emits. */
+export type LightRig = {
+  /** stable id within the part — the edit/cook key. */
+  id: string;
+  /** 'spot' = the aimed pyramid (cone + shadow); 'point' = an omni bulb (sign edge). */
+  kind: 'point' | 'spot';
+  /** the tip, in part-local space. */
+  position: V3;
+  /** aim direction for a spot (the pyramid axis). Default straight down. */
+  dir?: V3;
+  /** light colour, hex (e.g. '#ffb55a'). */
+  color: string;
+  /** brightness multiplier. */
+  intensity: number;
+  /** reach in world units; 0 = a sensible default. */
+  range: number;
+  /** spot cone half-angle in degrees (how wide the pyramid opens). */
+  spread?: number;
+  /** a spot renders a shadow map from its tip (defaults on for spots). */
+  castsShadow?: boolean;
 };
 
 /** One named re-skinnable surface on a part (req_1542). The face set is implicit:
@@ -158,7 +186,47 @@ export function cloneMesh(m: EditMesh): EditMesh {
   });
   if (m.pivot) out.pivot = [m.pivot[0], m.pivot[1], m.pivot[2]];
   if (m.slots) out.slots = m.slots.map((s) => ({ ...s }));
+  if (m.lights) out.lights = m.lights.map((l) => ({
+    ...l,
+    position: [l.position[0], l.position[1], l.position[2]] as V3,
+    ...(l.dir ? { dir: [l.dir[0], l.dir[1], l.dir[2]] as V3 } : {}),
+  }));
   return out;
+}
+
+/** Default name for the Nth light (req_2062). */
+export function nextLightName(m: EditMesh): string {
+  return `light ${(m.lights?.length ?? 0) + 1}`;
+}
+
+/** Append a light to a part (req_2062). Fills the pyramid defaults — a downward
+ *  white spot — for anything the caller leaves out, mints a stable id, and returns
+ *  a NEW mesh (immutable like addMount/addAnchor). */
+export function addLight(m: EditMesh, light: Partial<LightRig> & { id: string }): EditMesh {
+  const full: LightRig = {
+    id: light.id,
+    kind: light.kind ?? 'spot',
+    position: light.position ? [light.position[0], light.position[1], light.position[2]] : [0, 1, 0],
+    dir: light.dir ? [light.dir[0], light.dir[1], light.dir[2]] : [0, -1, 0],
+    color: light.color ?? '#ffffff',
+    intensity: light.intensity ?? 3,
+    range: light.range ?? 6,
+    spread: light.spread ?? 32,
+    castsShadow: light.castsShadow ?? true,
+  };
+  return { ...m, lights: [...(m.lights ?? []), full] };
+}
+
+/** Patch one light by id (req_2062), returning a new mesh. Unknown id → unchanged. */
+export function updateLight(m: EditMesh, id: string, patch: Partial<LightRig>): EditMesh {
+  if (!m.lights) return m;
+  return { ...m, lights: m.lights.map((l) => (l.id === id ? { ...l, ...patch } : l)) };
+}
+
+/** Remove a light by id (req_2062). */
+export function removeLight(m: EditMesh, id: string): EditMesh {
+  if (!m.lights) return m;
+  return { ...m, lights: m.lights.filter((l) => l.id !== id) };
 }
 
 /** Does a `plug` seat into a `socket`? Type must match; if both declare a size,
